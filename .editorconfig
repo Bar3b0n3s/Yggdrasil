@@ -1,0 +1,73 @@
+# EditorConfig: https://editorconfig.org
+# Basic whitespace rules for every editor. C++ layout is defined by .clang-format and
+# Docs/CodeStyle.md; line endings are additionally normalized by .gitattributes.
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = tab
+indent_size = 4
+tab_width = 4
+
+# C and C++ (formatted with clang-format 22.x). No max_line_length: Hazel style has no hard limit.
+[*.{h,hpp,inl,c,cpp,m,mm}]
+indent_style = tab
+indent_size = 4
+
+# Shaders follow the C++ layout rules.
+[*.{slang,slangh,hlsl,hlsli,glsl}]
+indent_style = tab
+indent_size = 4
+
+# premake scripts (Lua) and game scripts (Luau).
+[*.{lua,luau}]
+indent_style = tab
+indent_size = 4
+
+# Python developer scripts and tools follow PEP 8.
+[*.py]
+indent_style = space
+indent_size = 4
+
+# JSON: scene/project files, automation protocol samples, tool configuration.
+[*.{json,jsonc}]
+indent_style = tab
+indent_size = 4
+
+# YAML does not allow tabs; .clang-format and .clang-tidy are YAML.
+[{*.yml,*.yaml,.clang-format,.clang-tidy}]
+indent_style = space
+indent_size = 2
+
+# Markdown: code examples are indented with tabs like the code they show. Hard line breaks
+# via trailing spaces are not used, so trailing whitespace is trimmed here too.
+[*.md]
+indent_style = tab
+indent_size = 4
+
+# Windows command scripts keep CRLF (matches .gitattributes).
+[*.{bat,cmd,ps1}]
+end_of_line = crlf
+
+# Vendored third-party code keeps its upstream conventions...
+[Vendor/**]
+charset = unset
+end_of_line = unset
+indent_style = unset
+indent_size = unset
+tab_width = unset
+insert_final_newline = unset
+trim_trailing_whitespace = unset
+
+# ...except the premake scripts we write for each vendored library.
+[Vendor/*/premake5.lua]
+charset = utf-8
+end_of_line = lf
+indent_style = tab
+indent_size = 4
+tab_width = 4
+insert_final_newline = true
+trim_trailing_whitespace = true

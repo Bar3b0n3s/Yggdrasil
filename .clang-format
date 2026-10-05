@@ -1,0 +1,179 @@
+# clang-format configuration for the engine (Hazel code style).
+#
+# Canonical formatter: clang-format 22.x (ships with Visual Studio 2026:
+#   VC/Tools/Llvm/x64/bin/clang-format.exe; on Linux/macOS install the same major version,
+#   e.g. `pip install "clang-format==22.1.*"`). Other major versions may format differently
+#   or reject newer keys, so CI and Scripts/Format.py must use 22.x.
+#
+# Every option that defines the style is spelled out explicitly so the result does not depend
+# on the defaults of the base style. See Docs/CodeStyle.md for the rules behind these options
+# and for the conventions clang-format cannot enforce (naming, comments, includes order, ...).
+---
+Language: Cpp
+BasedOnStyle: Microsoft
+Standard: Latest
+
+# --- Indentation and whitespace -------------------------------------------------------------
+# Tabs for indentation and continuation, spaces only for alignment inside a line.
+UseTab: AlignWithSpaces
+IndentWidth: 4
+TabWidth: 4
+ContinuationIndentWidth: 4
+ConstructorInitializerIndentWidth: 4
+AccessModifierOffset: -4
+IndentAccessModifiers: false
+IndentCaseLabels: true
+IndentCaseBlocks: false
+IndentGotoLabels: true
+IndentPPDirectives: BeforeHash
+PPIndentWidth: -1
+IndentRequiresClause: true
+IndentWrappedFunctionNames: false
+IndentExternBlock: AfterExternBlock
+NamespaceIndentation: All
+LineEnding: LF
+InsertNewlineAtEOF: true
+
+# --- Line length ----------------------------------------------------------------------------
+# Hazel has no column limit: line breaks are the author's decision and clang-format keeps
+# them. Wrap long lines by hand (break after a comma or before a binary operator, continue with
+# one extra tab). Docs/CodeStyle.md defines the soft limit.
+ColumnLimit: 0
+ReflowComments: IndentOnly
+BreakStringLiterals: false
+
+# --- Braces ---------------------------------------------------------------------------------
+# Allman everywhere except namespaces, which open on the same line.
+BreakBeforeBraces: Custom
+BraceWrapping:
+  AfterCaseLabel: true
+  AfterClass: true
+  AfterControlStatement: Always
+  AfterEnum: true
+  AfterExternBlock: true
+  AfterFunction: true
+  AfterNamespace: false
+  AfterStruct: true
+  AfterUnion: true
+  BeforeCatch: true
+  BeforeElse: true
+  BeforeLambdaBody: true
+  BeforeWhile: false
+  IndentBraces: false
+  SplitEmptyFunction: true
+  SplitEmptyRecord: true
+  SplitEmptyNamespace: true
+InsertBraces: false
+RemoveBracesLLVM: false
+
+# --- Namespaces -----------------------------------------------------------------------------
+WrapNamespaceBodyWithEmptyLines: Always
+FixNamespaceComments: false
+CompactNamespaces: false
+AllowShortNamespacesOnASingleLine: false
+
+# --- Blank lines ----------------------------------------------------------------------------
+MaxEmptyLinesToKeep: 1
+KeepEmptyLines:
+  AtEndOfFile: false
+  AtStartOfBlock: false
+  AtStartOfFile: false
+EmptyLineBeforeAccessModifier: Never
+EmptyLineAfterAccessModifier: Never
+SeparateDefinitionBlocks: Leave
+
+# --- Single-line constructs -----------------------------------------------------------------
+# Short member functions defined inside a class body may stay on one line.
+AllowShortFunctionsOnASingleLine: InlineOnly
+# With ColumnLimit 0 clang-format always breaks before a non-empty lambda body, so every
+# non-empty lambda is written in Allman style; only `[]() {}` stays on one line.
+AllowShortLambdasOnASingleLine: Empty
+AllowShortCaseLabelsOnASingleLine: true
+AllowShortEnumsOnASingleLine: false
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+AllowShortBlocksOnASingleLine: Never
+AllowShortCompoundRequirementOnASingleLine: true
+
+# --- Line breaking --------------------------------------------------------------------------
+AlignAfterOpenBracket: false
+AlignOperands: DontAlign
+BinPackArguments: true
+BinPackParameters: BinPack
+AllowAllArgumentsOnNextLine: true
+AllowAllParametersOfDeclarationOnNextLine: true
+BreakBeforeBinaryOperators: NonAssignment
+BreakBeforeTernaryOperators: true
+BreakConstructorInitializers: BeforeColon
+PackConstructorInitializers: NextLineOnly
+BreakInheritanceList: BeforeColon
+BreakTemplateDeclarations: Yes
+BreakAfterReturnType: None
+BreakAfterAttributes: Leave
+BreakBeforeConceptDeclarations: Always
+RequiresClausePosition: OwnLine
+RequiresExpressionIndentation: OuterScope
+LambdaBodyIndentation: OuterScope
+
+# --- Alignment ------------------------------------------------------------------------------
+AlignConsecutiveAssignments:
+  Enabled: false
+AlignConsecutiveDeclarations:
+  Enabled: false
+AlignConsecutiveBitFields:
+  Enabled: false
+# Macro definitions are skipped entirely (see SkipMacroDefinitionBody), so macro alignment is
+# left to the author.
+AlignConsecutiveMacros:
+  Enabled: false
+AlignConsecutiveShortCaseStatements:
+  Enabled: true
+  AcrossEmptyLines: false
+  AcrossComments: false
+  AlignCaseColons: false
+# AlignArrayOfStructures is deliberately off: it mis-indents lists that lack a trailing comma.
+AlignArrayOfStructures: None
+AlignEscapedNewlines: DontAlign
+AlignTrailingComments:
+  Kind: Always
+  OverEmptyLines: 0
+
+# --- Spacing --------------------------------------------------------------------------------
+PointerAlignment: Left
+ReferenceAlignment: Pointer
+DerivePointerAlignment: false
+Cpp11BracedListStyle: Block
+SpaceBeforeCpp11BracedList: false
+SpaceAfterTemplateKeyword: false
+SpaceAfterCStyleCast: false
+SpaceAfterLogicalNot: false
+SpaceBeforeParens: ControlStatements
+SpaceBeforeRangeBasedForLoopColon: true
+SpaceBeforeCtorInitializerColon: true
+SpaceBeforeInheritanceColon: true
+SpaceBeforeAssignmentOperators: true
+SpaceBeforeSquareBrackets: false
+SpaceInEmptyBraces: Never
+SpacesInAngles: Never
+SpacesInParens: Never
+SpacesInSquareBrackets: false
+SpacesBeforeTrailingComments: 1
+SpacesInLineCommentPrefix:
+  Minimum: 1
+  Maximum: -1
+BitFieldColonSpacing: Both
+
+# --- Includes, macros and source rewriting --------------------------------------------------
+# Include order is defined by Docs/CodeStyle.md and kept exactly as written.
+SortIncludes:
+  Enabled: false
+IncludeBlocks: Preserve
+SortUsingDeclarations: Never
+# Macro definitions are laid out by hand. Formatting their bodies as code would split one-line
+# macros (asserts, event binders containing lambdas) into awkward backslash-continued blocks.
+SkipMacroDefinitionBody: true
+QualifierAlignment: Leave
+RemoveParentheses: Leave
+RemoveSemicolon: false
+InsertTrailingCommas: None
+...

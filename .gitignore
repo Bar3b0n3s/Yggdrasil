@@ -1,0 +1,38 @@
+# Build output
+bin/
+bin-int/
+Build/
+Intermediate/
+
+# Generated project files
+*.sln
+*.slnx
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+Makefile
+*.make
+*.ninja
+.ninja_*
+*.xcodeproj/
+*.xcworkspace/
+
+# IDE / OS
+.vs/
+.vscode/
+.idea/
+*.suo
+*.user
+.DS_Store
+Thumbs.db
+
+# Tools fetched by Scripts/Setup.py
+Vendor/premake/bin/
+
+# Python
+__pycache__/
+*.pyc
+
+# Logs / runtime artifacts
+*.log
+imgui.ini
