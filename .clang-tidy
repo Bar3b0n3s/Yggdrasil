@@ -43,6 +43,10 @@ CheckOptions:
   readability-identifier-naming.MethodCase: CamelCase
   # Standard protocols keep their required names (CodeStyle §2): range-for and container members, the tuple
   # protocol, ADL swap, std::formatter, nlohmann's ADL serializers, doctest's StringMaker::convert, and main.
+  # Overrides of third-party virtual functions keep the base's names (spdlog's base_sink::sink_it_, doctest's
+  # IReporter::test_case_start, ...) without being listed here: clang-tidy skips overrides, and the regex fallback
+  # skips member functions declared override or final. Such an override is therefore defined inside its class, where
+  # the regex fallback sees the virt-specifier.
   readability-identifier-naming.FunctionIgnoredRegexp: '^(main|begin|end|cbegin|cend|rbegin|rend|crbegin|crend|size|ssize|empty|data|swap|get|to_json|from_json)$'
   readability-identifier-naming.MethodIgnoredRegexp: '^(begin|end|cbegin|cend|rbegin|rend|crbegin|crend|size|empty|data|front|back|push_back|emplace_back|pop_back|clear|reserve|capacity|resize|insert|emplace|erase|find|contains|swap|get|parse|format|convert)$'
 

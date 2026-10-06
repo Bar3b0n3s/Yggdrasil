@@ -16,7 +16,7 @@ A production-grade C++23 3D game engine with an editor, a standalone runtime and
 | Path | Contents |
 |---|---|
 | `premake5.lua`, `Dependencies.lua` | Workspace, `ApplyFirstPartySettings()`, one `Use<Lib>()` per vendored library |
-| `Engine/` | `Engine` static library (`Source/Engine/<Module>/`, include root `Engine/Source`) and the `Shaders` utility project; `Config/` (EnTT configuration) lands with M1 (`Docs/Decisions/0002-m0-deviations.md`) |
+| `Engine/` | `Engine` static library (`Source/Engine/<Module>/`, include root `Engine/Source`) and the `Shaders` utility project; `Config/` (EnTT configuration: `entt/ext/config.h` routes `ENTT_ASSERT` to the engine's assert handler, `Docs/Decisions/0003-m1-contract-decisions.md` decision 9) |
 | `Editor/` | `EditorCore` (UI-free static library) and `Editor` (executable); include root `Editor/Source` |
 | `Runtime/` | The exported-game executable |
 | `Tests/` | doctest executable (`Source/` mirrors the include roots), fixtures in `Data/`, goldens, Python automation tests |

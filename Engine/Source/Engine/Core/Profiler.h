@@ -59,10 +59,13 @@ namespace Engine {
 		static void SetThreadName(std::string_view name);
 
 		// Records a completed CPU zone on the calling thread; ProfileScope calls it. `name` must have static storage
-		// duration (a string literal).
+		// duration (a string literal) and must not be null, and beginNs <= endNs (both asserted). A thread's ring
+		// outlives the thread: the zones of the 16 most recently exited threads stay collectable until Shutdown, and
+		// older ones are freed.
 		static void RecordZone(const char* name, uint64_t beginNs, uint64_t endNs, uint32_t depth);
 
-		// Merges GPU zones into the timeline (their names are copied and their ThreadIndex set to GpuThreadIndex).
+		// Merges GPU zones into the timeline (their names are copied and their ThreadIndex set to GpuThreadIndex). GPU
+		// timestamps are driver data, so a zone that ends before it begins is dropped, not asserted.
 		static void SubmitGpuZones(std::span<const ProfileZone> zones);
 
 		// Every zone that ended at or after `sinceNs` and is still held, sorted by BeginNs, then ThreadIndex, then Depth.
@@ -89,6 +92,9 @@ namespace Engine {
 		ProfileScope& operator=(const ProfileScope&) = delete;
 	private:
 		const char* m_Name = nullptr;
+		// The profiler initialization the zone began in (0: none). Declared, and so initialized, before m_BeginNs: the
+		// generation is read before the begin time is sampled.
+		uint64_t m_Generation = 0;
 		uint64_t m_BeginNs = 0;
 		uint32_t m_Depth = 0;
 	};

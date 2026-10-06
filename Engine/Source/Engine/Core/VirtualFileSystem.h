@@ -67,6 +67,9 @@ namespace Engine {
 	//         error and changes nothing, so no host silently overwrites the other spelling or creates a second file;
 	//       - the one exception is a case-only rename: Move whose destination differs from its source only in case
 	//         renames that entry in place, which is how a case mismatch is fixed;
+	//       - other host aliases (non-ASCII case folding, Unicode normalization, 8.3 short names) exist only behind a
+	//         NativeDirectoryMount, which rejects a new name its host resolves to an existing entry with Validation;
+	//         where the host does not alias the name (Linux, MemoryMount) it is a new entry;
 	//   - read-only mounts reject mutations with PermissionDenied;
 	//   - List returns entries sorted by path (byte-wise); recursive listings include directories and their contents;
 	//   - every member is thread-safe, and each call is atomic with respect to the others on the same mount.
@@ -101,7 +104,8 @@ namespace Engine {
 		[[nodiscard]] virtual Status Remove(const VfsPath& path) = 0;
 
 		// Renames within this mount. The destination's parent must exist and the destination must not, except for a
-		// case-only rename of the source itself (see the case policy). Errors: NotFound, AlreadyExists, Validation (case),
+		// case-only rename of the source itself (see the case policy). Errors: NotFound, AlreadyExists, InvalidArgument
+		// (the mount root as source or destination, or a destination inside the source), Validation (case),
 		// PermissionDenied, Io.
 		[[nodiscard]] virtual Status Move(const VfsPath& from, const VfsPath& to) = 0;
 

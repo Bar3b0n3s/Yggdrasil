@@ -10,6 +10,11 @@ namespace Engine {
 	// Fixed-step loop parameters (Architecture §4.1, §4.2; Project Simulation.FixedHz and MaxStepsPerFrame, §6.1).
 	struct FrameLoopConfig
 	{
+		// The highest accepted FixedHz. It keeps FixedDelta (1e-5 s at the bound) 10,000 times above
+		// FixedStepScheduler::StepTolerance, so the step comparison never runs a step for an empty accumulator. The
+		// project loader validates Simulation.FixedHz against [1, MaxFixedHz].
+		static constexpr uint32_t MaxFixedHz = 100000;
+
 		uint32_t FixedHz = 60;
 		uint32_t MaxStepsPerFrame = 5;
 		double MaxFrameDelta = 0.25; // seconds; longer frame deltas are clamped to this
@@ -47,8 +52,8 @@ namespace Engine {
 		// Absolute tolerance of the step comparison, in seconds.
 		static constexpr double StepTolerance = 1e-9;
 
-		// FixedHz and MaxStepsPerFrame must be > 0 and MaxFrameDelta finite and > 0 (asserted; the project loader
-		// validates the values it reads).
+		// FixedHz must be in [1, FrameLoopConfig::MaxFixedHz], MaxStepsPerFrame > 0 and MaxFrameDelta finite and > 0
+		// (asserted; the project loader validates the values it reads).
 		explicit FixedStepScheduler(const FrameLoopConfig& config);
 
 		// See the class comment. `realDeltaSeconds` and `timeScale` must be finite and >= 0 (asserted; clocks and
@@ -71,6 +76,7 @@ namespace Engine {
 	private:
 		FrameLoopConfig m_Config;
 		double m_FixedDelta = 0.0;
+		double m_Accumulator = 0.0; // simulation seconds not yet stepped
 		uint64_t m_Tick = 0;
 	};
 

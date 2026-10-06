@@ -47,6 +47,7 @@ namespace Engine {
 		mutable std::mutex m_Mutex; // guards m_Tasks
 		std::deque<Task> m_Tasks;
 		std::thread::id m_MainThread;
+		bool m_IsDraining = false; // main thread only: detects Drain from inside a task
 	};
 
 }

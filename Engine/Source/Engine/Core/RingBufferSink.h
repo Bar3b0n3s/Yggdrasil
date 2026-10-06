@@ -5,6 +5,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -64,7 +65,9 @@ namespace Engine {
 	// A read request. Entries with Seq >= Cursor are scanned in Seq order.
 	struct LogQuery
 	{
-		uint64_t Cursor = 0;                     // first Seq of interest; 0 = the oldest entry still held
+		// First Seq of interest; 0 = the oldest entry still held. A cursor past GetNextSeq() returns nothing, with
+		// NextCursor = GetNextSeq().
+		uint64_t Cursor = 0;
 		LogLevel MinimumLevel = LogLevel::Trace; // entries below this level are skipped
 		std::vector<LogChannel> Channels;        // empty = every channel
 		std::string Contains;                    // case-sensitive substring of Message; empty = any
@@ -110,8 +113,12 @@ namespace Engine {
 		// The number of entries currently held (at most the capacity).
 		[[nodiscard]] size_t GetSize() const;
 	private:
+		// The entry with sequence number s lives at index (s - 1) % m_Capacity. The vector grows up to the capacity and
+		// is then overwritten in place, so the oldest held entry has the sequence number m_NextSeq - m_Entries.size().
 		size_t m_Capacity = 0;
 		uint64_t m_NextSeq = 1;
+		std::vector<LogEntry> m_Entries;
+		mutable std::mutex m_Mutex; // guards m_NextSeq and m_Entries; mutable so the const readers can lock it
 	};
 
 }

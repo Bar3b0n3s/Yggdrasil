@@ -64,9 +64,58 @@ namespace Engine {
 			CHECK_FALSE(static_cast<bool>(empty));
 		}
 
-		TEST_CASE("UniqueFunction: calling an empty function is a programmer error" * doctest::skip(true))
+		TEST_CASE("UniqueFunction: moving transfers the callable and empties the source")
 		{
-			Test::CheckDeath("Core/EmptyUniqueFunctionCall", "Calling an empty UniqueFunction");
+			Ref<int> witness = CreateRef<int>(3);
+			UniqueFunction<int()> source = [witness]()
+			{
+				return *witness;
+			};
+			CHECK(witness.use_count() == 2);
+
+			UniqueFunction<int()> target;
+			target = std::move(source);
+			CHECK_FALSE(static_cast<bool>(source)); // a moved-from UniqueFunction is empty
+			CHECK(static_cast<bool>(target));
+			CHECK(target() == 3);
+			CHECK(witness.use_count() == 2); // moved, not copied
+		}
+
+		TEST_CASE("UniqueFunction: destruction and reassignment release the callable")
+		{
+			Ref<int> witness = CreateRef<int>(0);
+			{
+				const UniqueFunction<void()> holder = [witness]()
+				{
+					static_cast<void>(*witness);
+				};
+				CHECK(witness.use_count() == 2);
+			}
+			CHECK(witness.use_count() == 1);
+
+			UniqueFunction<void()> reassigned = [witness]()
+			{
+				static_cast<void>(*witness);
+			};
+			CHECK(witness.use_count() == 2);
+			reassigned = []() {};
+			CHECK(witness.use_count() == 1);
+		}
+
+		TEST_CASE("UniqueFunction: a mutable callable keeps its state between calls")
+		{
+			UniqueFunction<int()> counter = [count = 0]() mutable
+			{
+				return ++count;
+			};
+			CHECK(counter() == 1);
+			CHECK(counter() == 2);
+			CHECK(counter() == 3);
+		}
+
+		TEST_CASE("UniqueFunction: calling an empty function is a programmer error")
+		{
+			ENGINE_CHECK_DEATH("Core/EmptyUniqueFunctionCall", "Calling an empty UniqueFunction");
 		}
 	}
 

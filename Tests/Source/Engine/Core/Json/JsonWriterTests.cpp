@@ -83,7 +83,7 @@ namespace Engine {
 
 	TEST_SUITE("Core")
 	{
-		TEST_CASE("JsonWriter: floats use the shortest round-trip form" * doctest::skip(true))
+		TEST_CASE("JsonWriter: floats use the shortest round-trip form")
 		{
 			CHECK(WriteFloatAlone(0.1f) == "0.1");
 			CHECK(WriteFloatAlone(0.3f) == "0.3");
@@ -103,8 +103,10 @@ namespace Engine {
 			CHECK(WriteFloatAlone(std::numeric_limits<float>::denorm_min()) == "1e-45");
 		}
 
-		TEST_CASE("JsonWriter: load then save is byte-identical" * doctest::skip(true))
+		TEST_CASE("JsonWriter: load then save is byte-identical")
 		{
+			// The canonical document stands in for the authored files of §6, none of which exist yet; the test over every
+			// authored file under Projects/ and Tests/Data lands with M3's first fixtures (ADR 0003 decision 27).
 			Result<Json> document = JsonReader::Parse(CanonicalDocument);
 			REQUIRE(document.has_value());
 
@@ -119,7 +121,7 @@ namespace Engine {
 			CHECK(*rewritten == *written);
 		}
 
-		TEST_CASE("JsonWriter: the pretty layout follows the canonical rules" * doctest::skip(true))
+		TEST_CASE("JsonWriter: the pretty layout follows the canonical rules")
 		{
 			JsonWriter writer;
 			writer.BeginObject();
@@ -169,7 +171,7 @@ namespace Engine {
 				   "}\n");
 		}
 
-		TEST_CASE("JsonWriter: the minified layout has no whitespace and no final newline" * doctest::skip(true))
+		TEST_CASE("JsonWriter: the minified layout has no whitespace and no final newline")
 		{
 			Result<Json> document = JsonReader::Parse(CanonicalDocument);
 			REQUIRE(document.has_value());
@@ -182,7 +184,7 @@ namespace Engine {
 			CHECK_FALSE(minified->contains('\t'));
 		}
 
-		TEST_CASE("JsonWriter: strings escape quotes, backslashes and control characters" * doctest::skip(true))
+		TEST_CASE("JsonWriter: strings escape quotes, backslashes and control characters")
 		{
 			JsonWriter writer(JsonStyle::Minified);
 			writer.WriteString("\"\\\b\f\n\r\t\x01\x1f/\x7f\xc3\xa9");
@@ -191,7 +193,7 @@ namespace Engine {
 			CHECK(*text == "\"\\\"\\\\\\b\\f\\n\\r\\t\\u0001\\u001f/\x7f\xc3\xa9\"");
 		}
 
-		TEST_CASE("JsonWriter: Map fields are written in byte-wise key order" * doctest::skip(true))
+		TEST_CASE("JsonWriter: Map fields are written in byte-wise key order")
 		{
 			const std::map<std::string, int> actions = { { "b", 2 }, { "a", 1 }, { "B", 3 } };
 			JsonWriter writer(JsonStyle::Minified);
@@ -204,7 +206,7 @@ namespace Engine {
 			CHECK(*text == R"({"B":3,"a":1,"b":2})");
 		}
 
-		TEST_CASE("JsonWriter: integers keep full 64-bit precision" * doctest::skip(true))
+		TEST_CASE("JsonWriter: integers keep full 64-bit precision")
 		{
 			JsonWriter writer(JsonStyle::Minified);
 			writer.BeginArray();
@@ -217,7 +219,7 @@ namespace Engine {
 			CHECK(*text == "[-9223372036854775808,9223372036854775807,18446744073709551615]");
 		}
 
-		TEST_CASE("JsonWriter: non-finite floats, invalid UTF-8 and duplicate keys fail Finish with a pointer" * doctest::skip(true))
+		TEST_CASE("JsonWriter: non-finite floats, invalid UTF-8 and duplicate keys fail Finish with a pointer")
 		{
 			SUBCASE("NaN")
 			{
@@ -269,7 +271,7 @@ namespace Engine {
 			}
 		}
 
-		TEST_CASE("JsonWriter: WriteJson writes float numbers as float and integers exactly" * doctest::skip(true))
+		TEST_CASE("JsonWriter: WriteJson writes float numbers as float and integers exactly")
 		{
 			Result<Json> document = JsonReader::Parse(
 				R"({"Double": 0.1000000000000000055511151231257827, "Integer": 9007199254740993})");
@@ -279,13 +281,70 @@ namespace Engine {
 			CHECK(*text == R"({"Double":0.1,"Integer":9007199254740993})");
 		}
 
-		TEST_CASE("JsonWriter: WriteJson writes trees up to MaxJsonDepth and asserts beyond" * doctest::skip(true))
+		TEST_CASE("JsonWriter: WriteJson rejects numbers outside the float range")
+		{
+			Result<Json> document = JsonReader::Parse(R"({"Values": [1, 1e39], "Small": 1e-50})");
+			REQUIRE(document.has_value());
+			const Result<std::string> text = JsonWriter::Write(*document);
+			REQUIRE_FALSE(text.has_value());
+			CHECK(text.error().GetCode() == ErrorCode::Validation);
+			CHECK(text.error().GetLocation().JsonPointer == "/Values/1");
+
+			Result<Json> tiny = JsonReader::Parse(R"({"Small": 1e-50, "Max": 3.4028235e38})");
+			REQUIRE(tiny.has_value());
+			CHECK(JsonWriter::Write(*tiny, JsonStyle::Minified) == std::string(R"({"Small":0,"Max":3.4028235e+38})"));
+		}
+
+		TEST_CASE("JsonWriter: keys with invalid UTF-8 fail Finish with the object's pointer")
+		{
+			JsonWriter writer;
+			writer.BeginObject();
+			writer.WriteKey("Nested");
+			writer.BeginObject();
+			writer.WriteKey("Bad\xff");
+			writer.WriteInt(1);
+			writer.EndObject();
+			writer.EndObject();
+			const Result<std::string> text = writer.Finish();
+			REQUIRE_FALSE(text.has_value());
+			REQUIRE(text.error().GetLocation().JsonPointer.has_value());
+			CHECK(text.error().GetLocation().JsonPointer->starts_with("/Nested/Bad"));
+		}
+
+		TEST_CASE("JsonWriter: nested expanded arrays indent one tab per level")
+		{
+			Result<Json> document = JsonReader::Parse(R"([[1, [2]], {"Map": {}}, "x"])");
+			REQUIRE(document.has_value());
+			const Result<std::string> text = JsonWriter::Write(*document);
+			REQUIRE(text.has_value());
+			CHECK(*text
+				== "[\n"
+				   "\t[\n"
+				   "\t\t1,\n"
+				   "\t\t[2]\n"
+				   "\t],\n"
+				   "\t{\n"
+				   "\t\t\"Map\": {}\n"
+				   "\t},\n"
+				   "\t\"x\"\n"
+				   "]\n");
+			CHECK(JsonWriter::Write(*document, JsonStyle::Minified) == std::string(R"([[1,[2]],{"Map":{}},"x"])"));
+		}
+
+		TEST_CASE("JsonWriter: a scalar document is one value and a newline")
+		{
+			JsonWriter writer;
+			writer.WriteString("alone");
+			CHECK(writer.Finish() == std::string("\"alone\"\n"));
+		}
+
+		TEST_CASE("JsonWriter: WriteJson writes trees up to MaxJsonDepth and asserts beyond")
 		{
 			const Result<std::string> deepest = JsonWriter::Write(MakeNestedArray(MaxJsonDepth), JsonStyle::Minified);
 			REQUIRE(deepest.has_value());
 			CHECK(*deepest == std::string(MaxJsonDepth, '[') + std::string(MaxJsonDepth, ']'));
 
-			Test::CheckDeath("Core/JsonWriterTooDeep", "Assertion failed");
+			ENGINE_CHECK_DEATH("Core/JsonWriterTooDeep", "Assertion failed");
 		}
 	}
 

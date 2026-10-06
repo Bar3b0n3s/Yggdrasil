@@ -48,6 +48,7 @@ namespace Engine {
 		explicit UUIDGenerator(const Random::State& state);
 	private:
 		Random m_Random;
+		uint64_t m_SessionSeed = 0; // Deterministic mode only
 		uint64_t m_DrawCount = 0;
 		UUIDGeneratorMode m_Mode = UUIDGeneratorMode::Random;
 	};

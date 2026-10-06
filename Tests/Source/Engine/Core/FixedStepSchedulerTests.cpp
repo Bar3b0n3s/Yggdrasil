@@ -2,6 +2,10 @@
 
 #include "Engine/Core/FixedStepScheduler.h"
 
+#include "Support/DeathTest.h"
+
+#include <limits>
+
 namespace Engine {
 
 	namespace {
@@ -64,9 +68,38 @@ namespace Engine {
 	};
 	// clang-format on
 
+	ENGINE_DEATH_TEST("Core/SchedulerZeroFixedHz")
+	{
+		FrameLoopConfig config;
+		config.FixedHz = 0;
+		FixedStepScheduler scheduler(config);
+		static_cast<void>(scheduler.GetTick());
+	}
+
+	// At 2 GHz FixedDelta (5e-10 s) would be below StepTolerance, and an empty accumulator would run steps.
+	ENGINE_DEATH_TEST("Core/SchedulerFixedHzAboveMaximum")
+	{
+		FrameLoopConfig config;
+		config.FixedHz = 2000000000;
+		FixedStepScheduler scheduler(config);
+		static_cast<void>(scheduler.Advance(0.0, 0.0));
+	}
+
+	ENGINE_DEATH_TEST("Core/SchedulerNegativeFrameDelta")
+	{
+		FixedStepScheduler scheduler(FrameLoopConfig{});
+		static_cast<void>(scheduler.Advance(-0.01, 1.0));
+	}
+
+	ENGINE_DEATH_TEST("Core/SchedulerNotFiniteTimeScale")
+	{
+		FixedStepScheduler scheduler(FrameLoopConfig{});
+		static_cast<void>(scheduler.Advance(0.01, std::numeric_limits<double>::quiet_NaN()));
+	}
+
 	TEST_SUITE("Core")
 	{
-		TEST_CASE("FixedStepScheduler: table of frame deltas yields expected step counts and alpha" * doctest::skip(true))
+		TEST_CASE("FixedStepScheduler: table of frame deltas yields expected step counts and alpha")
 		{
 			static_assert(std::size(FrameTable) >= 30, "Roadmap M1 requires at least 30 rows");
 
@@ -86,7 +119,7 @@ namespace Engine {
 			CHECK(scheduler.GetTick() == 59);
 		}
 
-		TEST_CASE("FixedStepScheduler: StepExactly runs the requested steps with Alpha 1" * doctest::skip(true))
+		TEST_CASE("FixedStepScheduler: StepExactly runs the requested steps with Alpha 1")
 		{
 			FixedStepScheduler scheduler(FrameLoopConfig{});
 			const FrameSteps half = scheduler.Advance(Fixed / 2.0, 1.0);
@@ -109,7 +142,7 @@ namespace Engine {
 			CHECK(next.FirstTick == 8);
 		}
 
-		TEST_CASE("FixedStepScheduler: Reset returns to tick 0 with an empty accumulator" * doctest::skip(true))
+		TEST_CASE("FixedStepScheduler: Reset returns to tick 0 with an empty accumulator")
 		{
 			FixedStepScheduler scheduler(FrameLoopConfig{});
 			static_cast<void>(scheduler.Advance(2.5 * Fixed, 1.0));
@@ -123,7 +156,7 @@ namespace Engine {
 			CHECK(steps.FirstTick == 0);
 		}
 
-		TEST_CASE("FixedStepScheduler: honours the configured rate, step cap and frame clamp" * doctest::skip(true))
+		TEST_CASE("FixedStepScheduler: honours the configured rate, step cap and frame clamp")
 		{
 			FrameLoopConfig config;
 			config.FixedHz = 50;
@@ -142,7 +175,49 @@ namespace Engine {
 			CHECK(normal.Alpha == doctest::Approx(0.5));
 		}
 
-		TEST_CASE("FixedStepScheduler: GetSimStep time is tick times the fixed delta" * doctest::skip(true))
+		TEST_CASE("FixedStepScheduler: a paused frame keeps Alpha and StepExactly(0) runs nothing")
+		{
+			FixedStepScheduler scheduler(FrameLoopConfig{});
+			const FrameSteps half = scheduler.Advance(Fixed / 2.0, 1.0);
+			CHECK(half.Alpha == doctest::Approx(0.5));
+
+			// A paused hitch: nothing accumulates, nothing is dropped, the interpolation factor stays.
+			const FrameSteps paused = scheduler.Advance(1.0, 0.0);
+			CHECK(paused.StepCount == 0);
+			CHECK(paused.Alpha == doctest::Approx(0.5));
+			CHECK(paused.DroppedSeconds == 0.0);
+
+			const FrameSteps none = scheduler.StepExactly(0);
+			CHECK(none.StepCount == 0);
+			CHECK(none.Alpha == 1.0);
+			CHECK(none.FirstTick == 0);
+			CHECK(scheduler.GetTick() == 0);
+
+			const FrameSteps resumed = scheduler.Advance(Fixed / 2.0, 1.0);
+			CHECK(resumed.StepCount == 1);
+			CHECK(resumed.Alpha == doctest::Approx(0.0).epsilon(1e-9));
+		}
+
+		TEST_CASE("FixedStepScheduler: at MaxFixedHz an empty or paused frame runs no steps")
+		{
+			FrameLoopConfig config;
+			config.FixedHz = FrameLoopConfig::MaxFixedHz;
+			FixedStepScheduler scheduler(config);
+			CHECK(scheduler.GetFixedDelta() == 1.0 / 100000.0);
+
+			const FrameSteps empty = scheduler.Advance(0.0, 1.0);
+			CHECK(empty.StepCount == 0);
+			CHECK(empty.DroppedSeconds == 0.0);
+			const FrameSteps paused = scheduler.Advance(0.0, 0.0);
+			CHECK(paused.StepCount == 0);
+			CHECK(paused.DroppedSeconds == 0.0);
+
+			const FrameSteps three = scheduler.Advance(3.0 / 100000.0, 1.0);
+			CHECK(three.StepCount == 3);
+			CHECK(scheduler.GetTick() == 3);
+		}
+
+		TEST_CASE("FixedStepScheduler: GetSimStep time is tick times the fixed delta")
 		{
 			const FixedStepScheduler scheduler(FrameLoopConfig{});
 			const SimStep step = scheduler.GetSimStep(600);
@@ -158,6 +233,14 @@ namespace Engine {
 			static_assert(DefaultConfig.MaxStepsPerFrame == 5);
 			static_assert(DefaultConfig.MaxFrameDelta == 0.25);
 			CHECK(DefaultConfig.GetFixedDelta() == Fixed);
+		}
+
+		TEST_CASE("FixedStepScheduler: an invalid config or Advance argument is a programmer error")
+		{
+			ENGINE_CHECK_DEATH("Core/SchedulerZeroFixedHz", "FrameLoopConfig::FixedHz must be > 0");
+			ENGINE_CHECK_DEATH("Core/SchedulerFixedHzAboveMaximum", "FrameLoopConfig::FixedHz must be <= 100000, got 2000000000");
+			ENGINE_CHECK_DEATH("Core/SchedulerNegativeFrameDelta", "FixedStepScheduler::Advance needs a finite frame delta >= 0, got -0.01");
+			ENGINE_CHECK_DEATH("Core/SchedulerNotFiniteTimeScale", "FixedStepScheduler::Advance needs a finite time scale >= 0");
 		}
 	}
 

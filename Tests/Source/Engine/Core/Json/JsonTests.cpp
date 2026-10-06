@@ -10,7 +10,7 @@ namespace Engine {
 
 	TEST_SUITE("Core")
 	{
-		TEST_CASE("Json: JsonTypeToString uses JSON type names" * doctest::skip(true))
+		TEST_CASE("Json: JsonTypeToString uses JSON type names")
 		{
 			CHECK(JsonTypeToString(JsonType::Null) == "null");
 			CHECK(JsonTypeToString(JsonType::Bool) == "boolean");
@@ -21,7 +21,7 @@ namespace Engine {
 			CHECK(JsonTypeToString(JsonType::Object) == "object");
 		}
 
-		TEST_CASE("Json: GetJsonType classifies every kind of value" * doctest::skip(true))
+		TEST_CASE("Json: GetJsonType classifies every kind of value")
 		{
 			Result<Json> document = JsonReader::Parse(R"([null, true, 1, 1.5, "s", [], {}])");
 			REQUIRE(document.has_value());

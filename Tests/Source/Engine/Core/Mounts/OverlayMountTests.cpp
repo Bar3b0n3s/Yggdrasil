@@ -37,7 +37,7 @@ namespace Engine {
 
 	TEST_SUITE("Core")
 	{
-		TEST_CASE("OverlayMount: writes stay in memory and never reach the lower mount" * doctest::skip(true))
+		TEST_CASE("OverlayMount: writes stay in memory and never reach the lower mount")
 		{
 			Scope<MemoryMount> lowerOwner = MakeLower();
 			const MemoryMount* lower = lowerOwner.get();
@@ -70,7 +70,7 @@ namespace Engine {
 			CHECK(overlay.GetChangedPaths() == expectedChanges);
 		}
 
-		TEST_CASE("OverlayMount: removals hide lower files without touching them" * doctest::skip(true))
+		TEST_CASE("OverlayMount: removals hide lower files without touching them")
 		{
 			Scope<MemoryMount> lowerOwner = MakeLower();
 			const MemoryMount* lower = lowerOwner.get();
@@ -88,7 +88,7 @@ namespace Engine {
 			CHECK(overlay.GetChangedPaths().empty());
 		}
 
-		TEST_CASE("OverlayMount: List merges both layers in byte-wise order" * doctest::skip(true))
+		TEST_CASE("OverlayMount: List merges both layers in byte-wise order")
 		{
 			OverlayMount overlay(MakeLower());
 			REQUIRE(overlay.WriteFileAtomic(Path("project://Assets/A.scene"), AsBytes("a")).has_value());
@@ -102,7 +102,73 @@ namespace Engine {
 			CHECK(names == std::vector<std::string>{ "A.scene", "Level1.scene" });
 		}
 
-		TEST_CASE("OverlayMount: overlays a read-only mount" * doctest::skip(true))
+		TEST_CASE("OverlayMount: moving a lower directory carries its files into the overlay")
+		{
+			Scope<MemoryMount> lowerOwner = MakeLower();
+			const MemoryMount* lower = lowerOwner.get();
+			const uint64_t lowerMutations = lower->GetMutationCount();
+			OverlayMount overlay(std::move(lowerOwner));
+			REQUIRE(overlay.WriteFileAtomic(Path("project://Assets/Upper.scene"), AsBytes("upper")).has_value());
+
+			REQUIRE(overlay.Move(Path("project://Assets"), Path("project://Content")).has_value());
+			CHECK(ErrorCodeOf(overlay.GetInfo(Path("project://Assets"))) == ErrorCode::NotFound);
+			CHECK(ReadText(overlay, "project://Content/Level1.scene") == "lower level");
+			CHECK(ReadText(overlay, "project://Content/Old.scene") == "old");
+			CHECK(ReadText(overlay, "project://Content/Upper.scene") == "upper");
+			CHECK(lower->GetMutationCount() == lowerMutations);
+			CHECK(ReadText(*lower, "project://Assets/Level1.scene") == "lower level");
+
+			const Result<std::vector<VfsEntry>> listed = overlay.List(Path("project://"), true);
+			REQUIRE(listed.has_value());
+			std::vector<std::string> paths;
+			for (const VfsEntry& entry : *listed)
+				paths.push_back(std::string(entry.Path.GetPath()));
+			CHECK(paths == std::vector<std::string>{ "Content", "Content/Level1.scene", "Content/Old.scene", "Content/Upper.scene" });
+		}
+
+		TEST_CASE("OverlayMount: a removed directory hides everything below it, also after it is created again")
+		{
+			OverlayMount overlay(MakeLower());
+			REQUIRE(overlay.Remove(Path("project://Assets")).has_value());
+			CHECK(ErrorCodeOf(overlay.ReadFile(Path("project://Assets/Level1.scene"))) == ErrorCode::NotFound);
+
+			REQUIRE(overlay.CreateDirectories(Path("project://Assets")).has_value());
+			REQUIRE(overlay.WriteFileAtomic(Path("project://Assets/Fresh.scene"), AsBytes("fresh")).has_value());
+			const Result<std::vector<VfsEntry>> listed = overlay.List(Path("project://Assets"), false);
+			REQUIRE(listed.has_value());
+			REQUIRE(listed->size() == 1);
+			CHECK((*listed)[0].Path.GetFileName() == "Fresh.scene");
+			CHECK(ErrorCodeOf(overlay.ReadFile(Path("project://Assets/Level1.scene"))) == ErrorCode::NotFound);
+			CHECK(overlay.GetChangedPaths() == std::vector<std::string>{ "Assets", "Assets/Fresh.scene" });
+		}
+
+		TEST_CASE("OverlayMount: a case-only rename of a lower directory moves it within the overlay")
+		{
+			OverlayMount overlay(MakeLower());
+			REQUIRE(overlay.Move(Path("project://Assets"), Path("project://assets")).has_value());
+			CHECK(ReadText(overlay, "project://assets/Level1.scene") == "lower level");
+			CHECK(ErrorCodeOf(overlay.ReadFile(Path("project://Assets/Level1.scene"))) == ErrorCode::Validation);
+			CHECK(ErrorCodeOf(overlay.ReadFile(Path("project://assets/Missing.scene"))) == ErrorCode::NotFound);
+			CHECK(ReadText(overlay.GetLower(), "project://Assets/Level1.scene") == "lower level");
+		}
+
+		TEST_CASE("OverlayMount: Open streams a snapshot from either layer")
+		{
+			OverlayMount overlay(MakeLower());
+			Result<Scope<IFileStream>> lowerStream = overlay.Open(Path("project://Assets/Old.scene"));
+			REQUIRE(lowerStream.has_value());
+			REQUIRE(overlay.WriteFileAtomic(Path("project://Assets/Old.scene"), AsBytes("new")).has_value());
+			Result<Scope<IFileStream>> upperStream = overlay.Open(Path("project://Assets/Old.scene"));
+			REQUIRE(upperStream.has_value());
+
+			std::array<std::byte, 3> bytes{};
+			CHECK((*lowerStream)->Read(bytes) == size_t{ 3 });
+			CHECK(AsStringView(bytes) == "old");
+			CHECK((*upperStream)->Read(bytes) == size_t{ 3 });
+			CHECK(AsStringView(bytes) == "new");
+		}
+
+		TEST_CASE("OverlayMount: overlays a read-only mount")
 		{
 			Scope<MemoryMount> lowerOwner = MakeLower();
 			lowerOwner->SetAccess(MountAccess::ReadOnly);
@@ -114,7 +180,7 @@ namespace Engine {
 			CHECK(ReadText(overlay.GetLower(), "project://Assets/Level1.scene") == "lower level");
 		}
 
-		TEST_CASE("OverlayMount: ReleaseLower hands back the untouched lower mount" * doctest::skip(true))
+		TEST_CASE("OverlayMount: ReleaseLower hands back the untouched lower mount")
 		{
 			OverlayMount overlay(MakeLower());
 			REQUIRE(overlay.WriteFileAtomic(Path("project://Assets/Level1.scene"), AsBytes("dry run")).has_value());
@@ -124,7 +190,7 @@ namespace Engine {
 			CHECK(ReadText(*lower, "project://Assets/Level1.scene") == "lower level");
 		}
 
-		TEST_CASE("OverlayMount: the case policy applies to the merged view" * doctest::skip(true))
+		TEST_CASE("OverlayMount: the case policy applies to the merged view")
 		{
 			OverlayMount overlay(MakeLower());
 			REQUIRE(overlay.WriteFileAtomic(Path("project://Assets/Upper.scene"), AsBytes("upper")).has_value());
@@ -133,8 +199,7 @@ namespace Engine {
 			CHECK(ErrorCodeOf(overlay.ReadFile(Path("project://Assets/upper.scene"))) == ErrorCode::Validation);
 		}
 
-		TEST_CASE("OverlayMount: a new name that differs from an entry of either layer only in case is a validation error"
-			* doctest::skip(true))
+		TEST_CASE("OverlayMount: a new name that differs from an entry of either layer only in case is a validation error")
 		{
 			OverlayMount overlay(MakeLower());
 			REQUIRE(overlay.WriteFileAtomic(Path("project://Assets/Upper.scene"), AsBytes("upper")).has_value());

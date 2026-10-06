@@ -41,6 +41,9 @@ namespace Engine {
 
 		[[nodiscard]] double Delta() override;
 		[[nodiscard]] ClockKind GetKind() const override { return ClockKind::System; }
+	private:
+		int64_t m_PreviousNanoseconds = 0; // steady-clock time of the previous call
+		bool m_HasPrevious = false;
 	};
 
 	// Returns its fixed delta on every call, the first one included. With a ManualClock every frame runs exactly one

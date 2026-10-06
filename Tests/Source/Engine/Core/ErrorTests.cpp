@@ -113,7 +113,7 @@ namespace Engine {
 			CHECK(error.GetHint() == "did you mean 'Mass'?");
 		}
 
-		TEST_CASE("Error: ToString renders code, location, message, contexts and hint" * doctest::skip(true))
+		TEST_CASE("Error: ToString renders code, location, message, contexts and hint")
 		{
 			SUBCASE("message only")
 			{
@@ -168,9 +168,61 @@ namespace Engine {
 					   " | /components/RigidBody/Mas: unknown field 'Mas' on 'RigidBody' (hint: did you mean 'Mass'?)"
 					   " (suggestions: Mass, MassScale) | (root): missing required field 'entity'");
 			}
+
+			SUBCASE("hint before issues")
+			{
+				const Error error = Error(ErrorCode::InvalidArgument, "bad request")
+										.WithHint("see the schema")
+										.WithIssue(MakeIssue("/a", "too large", {}, { "1" }));
+				CHECK(error.ToString() == "InvalidArgument: bad request (hint: see the schema) | /a: too large (suggestions: 1)");
+			}
 		}
 
-		TEST_CASE("Error: ErrorCodeToString names every code" * doctest::skip(true))
+		TEST_CASE("Error: ToString keeps every set location field")
+		{
+			SUBCASE("file and line without a column")
+			{
+				const Error error = Error(ErrorCode::Parse, "unexpected end").WithLocation(MakeLocation("Level1.scene", 30, 0));
+				CHECK(error.ToString() == "Parse: Level1.scene:30: unexpected end");
+			}
+
+			SUBCASE("line and column without a file")
+			{
+				const Error error = Error(ErrorCode::Parse, "unexpected '}'").WithLocation(MakeLocation("", 2, 5));
+				CHECK(error.ToString() == "Parse: line 2:5: unexpected '}'");
+			}
+
+			SUBCASE("a column without a line")
+			{
+				CHECK(Error(ErrorCode::Parse, "bad byte").WithLocation(MakeLocation("Data.bin", 0, 17)).ToString()
+					== "Parse: Data.bin column 17: bad byte");
+				CHECK(Error(ErrorCode::Parse, "bad byte").WithLocation(MakeLocation("", 0, 17)).ToString() == "Parse: column 17: bad byte");
+			}
+
+			SUBCASE("entity only")
+			{
+				ErrorLocation location;
+				location.Entity = UUID(0x5d1c9a7e33b04f12);
+				const Error error = Error(ErrorCode::NotFound, "no component 'Camera'").WithLocation(location);
+				CHECK(error.ToString() == "NotFound: entity 5d1c9a7e33b04f12: no component 'Camera'");
+			}
+
+			SUBCASE("every field")
+			{
+				ErrorLocation location = MakeLocation("Level1.scene", 4, 2);
+				location.JsonPointer = "/Entities/0";
+				location.Entity = UUID(1);
+				const Error error = Error(ErrorCode::Validation, "duplicate ID").WithLocation(location);
+				CHECK(error.ToString() == "Validation: Level1.scene:4:2 /Entities/0 entity 0000000000000001: duplicate ID");
+			}
+
+			SUBCASE("an unknown code")
+			{
+				CHECK(Error(static_cast<ErrorCode>(0x7777), "from a newer peer").ToString() == "Unknown: from a newer peer");
+			}
+		}
+
+		TEST_CASE("Error: ErrorCodeToString names every code")
 		{
 			CHECK(ErrorCodeToString(ErrorCode::Unknown) == "Unknown");
 			CHECK(ErrorCodeToString(ErrorCode::InvalidArgument) == "InvalidArgument");
@@ -193,7 +245,7 @@ namespace Engine {
 			CHECK(ErrorCodeToString(static_cast<ErrorCode>(0xffff)) == "Unknown");
 		}
 
-		TEST_CASE("Error: std::format writes ToString and code names" * doctest::skip(true))
+		TEST_CASE("Error: std::format writes ToString and code names")
 		{
 			const Error error(ErrorCode::Conflict, "revision 7 is not 9");
 			CHECK(std::format("{}", error) == error.ToString());

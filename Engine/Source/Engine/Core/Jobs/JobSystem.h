@@ -217,7 +217,7 @@ namespace Engine {
 	public:
 		// `mainThreadQueue` receives ContinueOnMainThread continuations and must outlive the JobSystem (documented
 		// back-reference, Architecture §4.7). `workerCount` 0 selects inline mode; GetDefaultWorkerCount() is the
-		// production value.
+		// production value. A worker thread that cannot be started is FatalError(FatalErrorKind::InitFailed).
 		JobSystem(uint32_t workerCount, MainThreadQueue& mainThreadQueue);
 		~JobSystem();
 
@@ -261,7 +261,9 @@ namespace Engine {
 			});
 		}
 
-		// Blocks until every job submitted so far has completed. Not from inside a job.
+		// Blocks until every job submitted so far has completed, including jobs those jobs submit. Calling it (or
+		// destroying the JobSystem) from inside one of its own jobs would never return, so it is an ENGINE_CORE_VERIFY
+		// failure in every configuration.
 		void WaitIdle();
 
 		[[nodiscard]] uint32_t GetWorkerCount() const { return m_WorkerCount; }
@@ -270,15 +272,23 @@ namespace Engine {
 		// Inline mode runs the task now; otherwise it joins the FIFO queue. After destruction began, the task is
 		// cancelled instead.
 		void Enqueue(Scope<Detail::JobTask> task);
-		void WorkerMain();
+		// The body of worker thread `workerIndex` (0-based): runs queued tasks until destruction empties the queue.
+		void WorkerMain(uint32_t workerIndex);
+		// Removes the calling thread's entry from m_RunningThreads after its job and wakes WaitIdle when that made the
+		// system idle.
+		void FinishJob();
+		// True when the calling thread is running one of this system's jobs. Requires m_Mutex.
+		[[nodiscard]] bool IsRunningJobLocked() const;
 	private:
 		MainThreadQueue& m_MainThreadQueue;
 		uint32_t m_WorkerCount = 0;
-		std::mutex m_Mutex; // guards m_Queue and the workers' bookkeeping
+		std::mutex m_Mutex; // guards m_Queue, m_RunningThreads and m_IsStopping
 		std::condition_variable m_WorkAvailable;
-		std::condition_variable m_Idle;
+		std::condition_variable m_Idle; // notified with m_Mutex held, so the destructor never races a notifier
 		std::deque<Scope<Detail::JobTask>> m_Queue;
+		std::vector<std::thread::id> m_RunningThreads; // one entry per job running now, on a worker or inline
 		std::vector<std::thread> m_Workers;
+		bool m_IsStopping = false; // set by the destructor: new jobs are cancelled instead of queued
 	};
 
 }

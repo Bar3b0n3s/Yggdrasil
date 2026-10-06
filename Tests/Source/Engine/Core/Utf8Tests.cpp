@@ -6,7 +6,7 @@ namespace Engine {
 
 	TEST_SUITE("Core")
 	{
-		TEST_CASE("Utf8: accepts well-formed sequences of every length" * doctest::skip(true))
+		TEST_CASE("Utf8: accepts well-formed sequences of every length")
 		{
 			using namespace std::string_view_literals;
 			CHECK(IsValidUtf8(""));
@@ -21,7 +21,7 @@ namespace Engine {
 			CHECK(FindInvalidUtf8("\xe2\x82\xac") == 3);
 		}
 
-		TEST_CASE("Utf8: rejects overlong, surrogate, out-of-range and truncated sequences" * doctest::skip(true))
+		TEST_CASE("Utf8: rejects overlong, surrogate, out-of-range and truncated sequences")
 		{
 			CHECK_FALSE(IsValidUtf8("\xc0\xaf"));             // overlong '/'
 			CHECK_FALSE(IsValidUtf8("\xe0\x80\xaf"));         // overlong '/'
@@ -34,6 +34,22 @@ namespace Engine {
 
 			CHECK(FindInvalidUtf8("ok \xc3\x28") == 3);
 			CHECK(FindInvalidUtf8("abc\xe2\x82") == 3);
+		}
+
+		TEST_CASE("Utf8: the boundaries of every lead byte range are exact")
+		{
+			CHECK(IsValidUtf8("\xc2\x80"));               // U+0080, the first two-byte code point
+			CHECK(IsValidUtf8("\xed\x9f\xbf"));           // U+D7FF, just below the surrogates
+			CHECK(IsValidUtf8("\xee\x80\x80"));           // U+E000, just above the surrogates
+			CHECK(IsValidUtf8("\xef\xbf\xbf"));           // U+FFFF
+			CHECK(IsValidUtf8("\xf0\x90\x80\x80"));       // U+10000, the first four-byte code point
+			CHECK_FALSE(IsValidUtf8("\xc1\xbf"));         // overlong U+007F
+			CHECK_FALSE(IsValidUtf8("\xe0\x9f\xbf"));     // overlong U+07FF
+			CHECK_FALSE(IsValidUtf8("\xed\xbf\xbf"));     // U+DFFF surrogate
+			CHECK_FALSE(IsValidUtf8("\xf0\x8f\xbf\xbf")); // overlong U+FFFF
+			CHECK_FALSE(IsValidUtf8("\xf5\x80\x80\x80")); // lead byte above F4
+			CHECK_FALSE(IsValidUtf8("\xe2\x28\xac"));     // bad continuation byte
+			CHECK(FindInvalidUtf8("\xc3\xa9\xc3\xa9\xff") == 4);
 		}
 	}
 

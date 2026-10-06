@@ -4,6 +4,7 @@
 
 #include "Engine/Core/Hash.h"
 #include "Engine/Core/Random.h"
+#include "Support/DeathTest.h"
 
 namespace Engine {
 
@@ -15,9 +16,15 @@ namespace Engine {
 		return values;
 	}
 
+	ENGINE_DEATH_TEST("Core/UUIDGeneratorZeroState")
+	{
+		UUIDGenerator generator = UUIDGenerator::CreateRandom(Random::State{});
+		static_cast<void>(generator.Next());
+	}
+
 	TEST_SUITE("Core")
 	{
-		TEST_CASE("UUIDGenerator: seeded generator is reproducible" * doctest::skip(true))
+		TEST_CASE("UUIDGenerator: seeded generator is reproducible")
 		{
 			SUBCASE("random mode")
 			{
@@ -48,14 +55,14 @@ namespace Engine {
 			}
 		}
 
-		TEST_CASE("UUIDGenerator: deterministic mode is Hash64 of the session seed and the counter" * doctest::skip(true))
+		TEST_CASE("UUIDGenerator: deterministic mode is Hash64 of the session seed and the counter")
 		{
 			UUIDGenerator generator = UUIDGenerator::CreateDeterministic(0x5eed);
 			for (uint64_t counter = 0; counter < 16; ++counter)
 				CHECK(generator.Next().GetValue() == Hash64(0x5eed, counter));
 		}
 
-		TEST_CASE("UUIDGenerator: never yields zero or a reserved built-in value" * doctest::skip(true))
+		TEST_CASE("UUIDGenerator: never yields zero or a reserved built-in value")
 		{
 			UUIDGenerator deterministic = UUIDGenerator::CreateDeterministic(7);
 			UUIDGenerator random = UUIDGenerator::CreateRandom(7);
@@ -72,7 +79,7 @@ namespace Engine {
 			}
 		}
 
-		TEST_CASE("UUIDGenerator: a random-mode generator continues the xoshiro stream of its state" * doctest::skip(true))
+		TEST_CASE("UUIDGenerator: a random-mode generator continues the xoshiro stream of its state")
 		{
 			const Random::State state = { 0x0123456789abcdefull, 0xfedcba9876543210ull, 0x0f1e2d3c4b5a6978ull, 0x8796a5b4c3d2e1f0ull };
 			UUIDGenerator generator = UUIDGenerator::CreateRandom(state);
@@ -87,6 +94,41 @@ namespace Engine {
 					expected = reference.NextU64();
 				REQUIRE(generator.Next() == UUID(expected));
 			}
+		}
+
+		TEST_CASE("UUIDGenerator: a reserved output is skipped and still counted as a draw")
+		{
+			// The first xoshiro256** output is rotl(s1 * 5, 7) * 9. With s1 = rotr(5 * 9^-1, 7) * 5^-1 (mod 2^64) it is 5, a
+			// reserved built-in value.
+			const Random::State state = { 0x0123456789abcdefull, 0xd8b60b60b60b60b6ull, 0x0f1e2d3c4b5a6978ull, 0x8796a5b4c3d2e1f0ull };
+			Random reference(0);
+			reference.SetState(state);
+			REQUIRE(reference.NextU64() == 5);
+			const uint64_t second = reference.NextU64();
+
+			UUIDGenerator generator = UUIDGenerator::CreateRandom(state);
+			CHECK(generator.Next() == UUID(second));
+			CHECK(generator.GetDrawCount() == 2);
+			CHECK(generator.Next() == UUID(reference.NextU64()));
+			CHECK(generator.GetDrawCount() == 3);
+		}
+
+		TEST_CASE("UUIDGenerator: copies continue the same sequence")
+		{
+			UUIDGenerator original = UUIDGenerator::CreateDeterministic(99);
+			static_cast<void>(original.Next());
+			UUIDGenerator copy = original;
+			CHECK(copy.Next() == original.Next());
+			CHECK(copy.GetDrawCount() == original.GetDrawCount());
+
+			UUIDGenerator random = UUIDGenerator::CreateRandom(99);
+			UUIDGenerator randomCopy = random;
+			CHECK(randomCopy.Next() == random.Next());
+		}
+
+		TEST_CASE("UUIDGenerator: CreateRandom with an all-zero state is a programmer error")
+		{
+			ENGINE_CHECK_DEATH("Core/UUIDGeneratorZeroState", "Random::SetState needs a state that is not all zero");
 		}
 	}
 

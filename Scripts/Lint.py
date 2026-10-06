@@ -2782,6 +2782,8 @@ class RegexNamingChecker:
         name, position = function_name(text)
         if name is None:
             return
+        if scope.kind == "class" and declares_override(text, position):
+            return  # an override keeps the name of the function it overrides, as clang-tidy assumes too
         qualified = text[:position].rstrip().endswith("::")
         kind = "Method" if scope.kind == "class" or qualified else "Function"
         verify(kind, name, offset + position)
@@ -2799,6 +2801,17 @@ class RegexNamingChecker:
             kind = variable_kind(scope, access, specifiers, is_const)
             if kind is not None:
                 verify(kind, name, offset + position)
+
+
+def declares_override(text: str, name_position: int) -> bool:
+    """True when the member function whose name starts at name_position is declared override or final: the virt-specifier
+    follows its parameter list. Only an in-class declaration can carry it, so an override of a third-party interface
+    with a name outside the naming rules (spdlog's sink_it_, doctest's test_case_start) is defined in its class."""
+    open_index = text.find("(", name_position)
+    if open_index < 0:
+        return False
+    _, closing = balanced_arguments(text, open_index)
+    return re.search(r"\b(?:override|final)\b", text[closing + 1 :]) is not None
 
 
 def function_name(text: str) -> tuple[str | None, int]:

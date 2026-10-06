@@ -14,7 +14,7 @@ namespace Engine {
 
 	TEST_SUITE("Core")
 	{
-		TEST_CASE("BinaryWriter: values are written little-endian" * doctest::skip(true))
+		TEST_CASE("BinaryWriter: values are written little-endian")
 		{
 			BinaryWriter writer;
 			writer.WriteU16(0x1234);
@@ -26,7 +26,7 @@ namespace Engine {
 			CHECK(Bytes(writer.GetData()) == expected);
 		}
 
-		TEST_CASE("BinaryWriter: strings are a uint32 length followed by the bytes" * doctest::skip(true))
+		TEST_CASE("BinaryWriter: strings are a uint32 length followed by the bytes")
 		{
 			BinaryWriter writer;
 			writer.WriteString("ab");
@@ -34,7 +34,7 @@ namespace Engine {
 			CHECK(Bytes(writer.GetData()) == std::vector<uint8_t>{ 2, 0, 0, 0, 'a', 'b', 0, 0, 0, 0 });
 		}
 
-		TEST_CASE("BinaryWriter: Overwrite patches bytes that were already written" * doctest::skip(true))
+		TEST_CASE("BinaryWriter: Overwrite patches bytes that were already written")
 		{
 			BinaryWriter writer;
 			writer.WriteU32(0);
@@ -48,7 +48,7 @@ namespace Engine {
 				== std::vector<uint8_t>{ 0x04, 0x03, 0x02, 0x01, 0x18, 0x17, 0x16, 0x15, 0x14, 0x13, 0x12, 0x11, 0x09 });
 		}
 
-		TEST_CASE("BinaryWriter: AlignTo pads with zeros to the next multiple" * doctest::skip(true))
+		TEST_CASE("BinaryWriter: AlignTo pads with zeros to the next multiple")
 		{
 			BinaryWriter writer;
 			writer.WriteU8(0xaa);
@@ -61,7 +61,7 @@ namespace Engine {
 			CHECK(Bytes(writer.GetData()) == std::vector<uint8_t>{ 0xaa, 0, 0, 0, 0xbb, 0, 0, 0 });
 		}
 
-		TEST_CASE("BinaryWriter: WriteArray writes every element in order" * doctest::skip(true))
+		TEST_CASE("BinaryWriter: WriteArray writes every element in order")
 		{
 			BinaryWriter writer;
 			const std::array<uint16_t, 3> values = { 1, 0x0203, 0xffff };
@@ -69,7 +69,19 @@ namespace Engine {
 			CHECK(Bytes(writer.GetData()) == std::vector<uint8_t>{ 1, 0, 3, 2, 0xff, 0xff });
 		}
 
-		TEST_CASE("BinaryWriter: TakeBuffer moves the bytes out and empties the writer" * doctest::skip(true))
+		TEST_CASE("BinaryWriter: AlignTo(1) and empty writes add nothing")
+		{
+			BinaryWriter writer;
+			writer.AlignTo(1);
+			writer.WriteBytes({});
+			CHECK(writer.GetSize() == 0);
+			writer.WriteU8(1);
+			writer.AlignTo(1);
+			writer.AlignTo(2);
+			CHECK(Bytes(writer.GetData()) == std::vector<uint8_t>{ 1, 0 });
+		}
+
+		TEST_CASE("BinaryWriter: TakeBuffer moves the bytes out and empties the writer")
 		{
 			BinaryWriter writer;
 			writer.WriteU32(5);

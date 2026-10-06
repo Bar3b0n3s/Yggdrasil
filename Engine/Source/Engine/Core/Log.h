@@ -43,8 +43,10 @@ namespace Engine {
 		size_t RingBufferCapacity = RingBufferSink::DefaultCapacity;
 	};
 
-	// Receives every entry appended to the ring buffer, synchronously on the logging thread, after it was stored.
-	// It must not log (that would deadlock) and must not throw.
+	// Receives every entry appended to the ring buffer, synchronously on the logging thread, after it was stored, while
+	// the listener registry is locked shared. It must not throw, and must not call AddListener or RemoveListener
+	// (asserted). An entry logged from inside a listener (an assertion report, for example) is stored in the ring
+	// buffer and printed, but not passed to the listeners again, so a listener never recurses or deadlocks.
 	using LogListener = std::function<void(const LogEntry& entry)>;
 
 	// The logger registry: process-level state (Architecture §3 rule 5), initialized once by ProcessContext or the Tests

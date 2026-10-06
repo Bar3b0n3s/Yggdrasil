@@ -143,7 +143,8 @@ namespace Engine {
 		// One line for logs, the console and automation:
 		//     <Code>: [<where>: ]<message>[; <context 1>; <context 2> ...][ (hint: <hint>)][ | <issue 1> | <issue 2> ...]
 		// <where> joins the set location parts with spaces: "<File>[:<Line>[:<Column>]]", "<JsonPointer>" and
-		// "entity <uuid>". Each issue is written as
+		// "entity <uuid>". Without a File, a Line reads "line <Line>[:<Column>]" and a Column without a Line reads
+		// "column <Column>". Each issue is written as
 		//     <JsonPointer>: <Message>[ (hint: <Hint>)][ (suggestions: <Suggestion 1>, <Suggestion 2> ...)]
 		// In both places the root pointer "" is written as "(root)". Examples:
 		//     Validation: Assets/Scenes/Level1.scene /Entities/12/Components/RigidBody/Mass: expected number, got string;

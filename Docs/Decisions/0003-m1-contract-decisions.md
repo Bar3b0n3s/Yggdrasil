@@ -1,6 +1,6 @@
 # 0003 — M1 contract decisions
 
-- **Status:** proposed by the M1 contract task and revised after its two reviews (API design; style and build); the docs owner applies the amendments listed at the end.
+- **Status:** proposed by the M1 contract task and revised after its two reviews (API design; style and build). The M1 integration task resolved decision 10 and added decisions 21 to 26; the M1 review added decision 27 and revised decisions 8, 14, 21, 22, 24, 25 and 26. The docs owner applies the amendments listed at the end.
 - **Date:** 2026-10-05
 - **Context:** The M1 contract task (Roadmap rule 3) froze the public headers of every M1 deliverable in `Engine/Source/Engine/Core/` and `Tests/Source/Support/`. Writing complete headers exposed places where the Architecture and Roadmap are silent, contradict each other, or schedule a dependency after its first user. `AGENTS.md` ("Deviations") requires a record of each departure.
 
@@ -62,6 +62,7 @@ Architecture §4.10 describes the atomic write as "temp file → flush → `Repl
 - `FixedStepScheduler::Advance` is specified exactly in `FixedStepScheduler.h` (frame clamp, step cap, a 1e-9 s step tolerance, dropped time in simulation seconds), because the Roadmap table test needs exact expectations.
 - `FixedStepScheduler::StepExactly(n)` runs exactly `n` steps with `Alpha = 1`. It serves `ManualClock` ("every frame contains exactly one fixed step and Alpha is defined as 1", §4.2) and lockstep `play.step`.
 - `FrameSteps` gains `FirstTick`, the tick of the frame's first step.
+- `FrameLoopConfig::MaxFixedHz = 100000` bounds `FixedHz` (asserted by the scheduler). Above about 1 GHz, `FixedDelta` would fall below the step tolerance, and a frame with an empty accumulator would run steps. At the bound, `FixedDelta` (1e-5 s) is 10,000 times the tolerance. The M3 project loader validates `Simulation.FixedHz` against `[1, MaxFixedHz]`.
 
 ### 9. `Engine/Config` is an include root, not a C++ root, in `ModuleRules.json`
 
@@ -70,6 +71,8 @@ Decision 2 of `0002-m0-deviations.md` asks M1 for "its `ModuleRules.json` entry"
 ### 10. Values a contract cannot contain
 
 The committed DetMath output hash ("DetMath: output hash over 1,000,000 seeded inputs matches the committed value") can only be recorded from the first implementation. The skipped test fixes the input generation and leaves `CommittedHash` at 0; stream B records the value when it un-skips the test, and it never changes afterwards.
+
+**Resolved:** the committed hash is `0x1f03563cdf5ec2cf` (`Tests/Source/Engine/Core/DetMathTests.cpp`). The test passes with that value in Debug and Release, and in the clang-cl Release build of the `portability` stage.
 
 ### 11. `Error::GetMessageText` instead of `GetMessage`
 
@@ -98,6 +101,7 @@ The §4.10 case policy only covered reads and the existing directories of a writ
 
 - **New names:** every mount now rejects a write, `CreateDirectories` or `Move` destination whose final component matches an existing entry only when ASCII case is ignored. The error is Validation "case mismatch", it names the stored spelling and nothing changes. No directory ever holds two names that differ only in case.
 - **Case-only renames:** a `Move` whose destination differs from its source only in case renames the entry in place, on every host. That is how a case mismatch is fixed. `FileSystem::Move` documents the same rule.
+- **Other host aliases:** a host can resolve a name that no directory entry spells, even ignoring ASCII case, to an existing entry: NTFS and APFS fold the case of non-ASCII letters, APFS and HFS+ ignore Unicode normalization, and Windows resolves 8.3 short names. `NativeDirectoryMount` asks the host about every new name that the case policy found free. When the host resolves it to an existing entry, the write, `CreateDirectories` or `Move` is Validation naming that entry, and nothing changes. This cannot behave the same on every host: Linux and `MemoryMount` do not alias these names and create a new entry. What holds everywhere is that no mount silently replaces an entry spelled differently.
 
 ### 15. File streams read snapshots
 
@@ -129,10 +133,99 @@ The §4.10 case policy only covered reads and the existing directories of a writ
 - **`Random::RangeDouble`:** specified as an exact formula that cannot overflow (`half = 0.5 * max - 0.5 * min`, `r = (min + half * u) + half * u`), clamped below `max`. Every call consumes exactly one draw, `min == max` included. The naive `min + (max - min) * u` can round up to `max` and overflows to Inf or NaN for finite bounds such as ±1e308.
 - **`BinaryWriter::WriteArray`:** copies object representations, so its element types must have no padding. Each cooked struct pins its layout with a `static_assert` on its size.
 
+### 21. Implementation choices recorded at M1 integration
+
+The five M1 streams had to choose behaviour the contract left open. These choices are now documented in the frozen headers:
+
+- **Log file sink.** It is a custom spdlog sink built on the standard streams. spdlog's `rotating_file_sink` reports open and rename failures by throwing, and `Log.cpp` may not catch (§4.6). The rotated files are `<exe>.log`, then `<exe>.1.log` to `<exe>.4.log`, 5 files of 10 MB each.
+  - `Log::Initialize` creates the log directory and returns Io when it cannot open the file.
+  - Later write and rotation failures cannot be logged, because the sink holds its own lock. They are absorbed: the file is truncated to stay within its limit, and reopening is retried on the next entry. The entries are still in the ring buffer and on the console.
+- **Log listeners.** Listeners run while the listener registry is held shared, so `RemoveListener` waits for a listener that is still running. Calling `AddListener` or `RemoveListener` from a listener is asserted. An entry logged from inside a listener, such as an assertion report, is stored but not passed to the listeners again.
+- **Static destruction.** The objects the log creates lazily are never destroyed (`Core/Private/Immortal.h`): the fallback logger, the listener registry and the empty ring buffer of an uninitialized log. Neither is `FatalError`'s mutex, because libc++ cannot lock a destroyed `std::mutex`. The fallback logger writes to stderr through its own sink, because spdlog's stderr sinks lock spdlog's function-local console mutex. Logging, `Log::Flush` and `FatalError` therefore keep working in static destructors after `Log::Shutdown`. A process that exits without `Log::Shutdown` and logs from a static destructor still reaches spdlog's console sink, so `ProcessContext` (M2) shuts the log down before the process exits, as the Tests main does.
+- **Breaking into the debugger.** `DefaultAssertHandler` logs the assertion and exits with code 4 but does not break into an attached debugger. Core may not include OS headers, and C++26 `<debugging>` is in none of the M1 standard libraries.
+  - M2's `ProcessContext` adds the break with no header change: it installs a `FatalErrorHandler` that breaks for `FatalErrorKind::Assert` when Platform reports an attached debugger, and then writes the crash report.
+  - That handler runs after the assertion is logged and before exit 4, which is the order §4.5 gives.
+- **DetMath.** The implementation is not derived from Jolt's `Trigonometry.h`. It uses tables, short polynomials and double-double arithmetic, with Cody-Waite reduction and an exact integer Payne-Hanek reduction for huge arguments.
+  - It uses only IEEE-exact operations, plus exact integer arithmetic and integer/floating conversions.
+  - Measured against exact references, it is within 0.5005 ULP everywhere except exp results in the subnormal range, which are within 0.72 ULP. The contract still promises 2 ULP.
+  - No `LICENSES.md` attribution is needed.
+- **JSON.** `JsonReader::Parse` treats input as follows:
+  - An integer literal outside the int64 and uint64 range is a located Parse error. nlohmann would turn it into a float, which contradicts `Json.h`.
+  - A leading UTF-8 byte order mark is accepted (RFC 8259 allows it) and dropped, so loading and then saving removes it.
+  - A syntax error is located where nlohmann stopped reading, which can be one token after the actual problem.
+  - It uses `json::parse(first, last, nullptr, false)` plus `is_discarded()`, and no SAX handler.
+- **Move.** Moving the mount root, or moving a directory into its own subtree, is InvalidArgument in `FileSystem::Move` and in every mount.
+- **Jobs, events and the profiler.**
+  - `JobSystem::WaitIdle`, or destroying the `JobSystem`, from inside one of its own jobs would never return, so it is an `ENGINE_CORE_VERIFY` failure in every configuration.
+  - A worker thread that cannot start is `FatalError(InitFailed)`. The catch is in the allowlisted `JobSystem.cpp`.
+  - A ring buffer cursor past the end (for `RingBufferSink` and `EventLog`) returns nothing and resumes at `GetNextSeq()`.
+  - `Profiler::RecordZone` asserts its arguments. `SubmitGpuZones` drops inverted GPU zones, which are driver data.
+  - Each thread's profiler ring outlives the thread: the 16 most recently exited threads stay collectable until Shutdown.
+
+### 22. Members added to frozen headers
+
+Each stream added only private members (state and helpers); no public declaration changed:
+
+- `RingBufferSink.h`: the entry storage and its mutex.
+- `Hash.h`: the streaming state of `XXH64Hasher`.
+- `UUIDGenerator.h`: `m_SessionSeed`.
+- `Clock.h`: the previous sample of `SystemClock`.
+- `FixedStepScheduler.h`: `m_Accumulator`.
+- `EventLog.h`: the ring, the main-thread ID and two private helpers (`GetHeld`, `GetOldestSeq`).
+- `Jobs/JobSystem.h`: the running-thread list, the stop flag and two helpers, and `WorkerMain` takes the worker index.
+- `Jobs/MainThreadQueue.h`: `m_IsDraining`.
+- `Profiler.h`: `ProfileScope::m_Generation`.
+
+The integration task, as contract owner, reviewed and accepted them. The M1 review added one public declaration, `FrameLoopConfig::MaxFixedHz` (decision 8).
+
+### 23. `NativeDirectoryMount` holds a reader-writer lock
+
+`IMount` requires each call to be atomic with respect to the other calls on the same mount. The case check and the change in `NativeDirectoryMount` are separate host operations. Without a lock, two threads writing `level1.scene` and `Level1.scene` at the same time could both pass the case check.
+
+- The mount now has a private `mutable std::shared_mutex`. Reads hold it shared and mutations hold it exclusively.
+- A process-wide mutex would have broken §3 rule 5.
+- Other processes, and other mounts of the same directory, are not covered.
+- The test "NativeDirectoryMount: concurrent writes of two spellings of one name create exactly one file" covers it. It fails without the lock.
+
+### 24. Additional private files
+
+They extend decision 3 and are owned by the streams of their users:
+
+- `Core/Private/NativePath.h|.cpp`: UTF-8 to `std::filesystem::path` and back, without throwing.
+- `Core/Private/PathText.h|.cpp`: the case-policy text helpers for relative paths.
+- `Core/Private/AsciiText.h|.cpp`: `ToAsciiLower` and `EqualsIgnoreAsciiCase`, shared by the case policy and by the name parsers of `RingBufferSink` (log levels and channels) and `EventLog` (event types).
+- `Core/Private/Immortal.h`: storage whose destructor never runs, for the process-level state that `Log` and `FatalError` still use during static destruction (decision 21).
+- `Core/Mounts/Private/SnapshotFileStream.h|.cpp`: the snapshot stream of decision 15.
+- `Tests/Source/Support/TestCaseTracker.h|.cpp`: the doctest listener that tracks the running test case for other threads, and the shared listener base class of `ExpectLog` and `TestTimeout`.
+
+### 25. Tests main and meta-tests
+
+- **Log start-up.** The Tests main exits with code 3 (InitFailed) when `Log::Initialize` fails. Without the log, `ExpectLog` would see no entries, and undeclared errors would pass unnoticed.
+- **No log file yet.** The Tests main starts the log without a file sink. §4.4 gives the Tests a rotating `<UserData>/<AppName>/Logs/<exe>.log`, but `<UserData>` comes from Platform `Paths` (M2). The Tests binary's file sink arrives with it.
+- **ExpectLog meta-tests.** The meta-tests that prove an undeclared or missing entry fails a test case run their `ChildTargets` targets in a child process, rather than using `doctest::should_fail`. A `should_fail` case still writes `<failure>` elements into the JUnit report that `Test.py --junit` reads.
+- **Death tests.** Asserted preconditions are covered by death tests, among them `Random`, `ManualClock`, `FixedStepScheduler`, `UUIDGenerator`, `JobSystem`, `MainThreadQueue`, `EventLog`, `HandlePool`, `UniqueFunction` and `Profiler`. The only permanently skipped cases are the `ChildTargets` of decision 7.
+
+### 26. Third-party override names in the naming rules
+
+Two third-party virtual interfaces dictate snake_case names:
+
+- spdlog's `base_sink` (`sink_it_`, `flush_`), overridden by the log sinks;
+- doctest's `IReporter` (`report_query` to `test_case_skipped`), overridden by the Tests listeners that §4.4 requires.
+
+clang-tidy skips overrides. The regex fallback of `Scripts/Lint.py`, which runs wherever clang-tidy is missing, now skips a member function declared `override` or `final` too. It cannot see the base class, so it relies on the virt-specifier, which only an in-class declaration carries: an override with such a name is defined inside its class. The names are not listed in `.clang-tidy`'s `MethodIgnoredRegexp`, so a first-party function that overrides nothing and is named like them is still reported in both modes. The lint fixture `OverrideNaming` checks both halves in both modes.
+
+### 27. The directory-wide load-then-save test arrives with the first authored files
+
+§6 asserts load → save byte-identity "for every authored file under `Projects/` and `Tests/Data`". M1 has no such file: `Projects/` does not exist and `Tests/Data` holds only the lint and build-configuration fixtures. M1's "JsonWriter: load then save is byte-identical" round-trips an embedded canonical document.
+
+- **Deferred:** the test that enumerates `Projects/` and `Tests/Data`, skipping `.jsonl` files and project `Automation/` folders, lands with the first authored fixtures in M3. That milestone also decides how the Tests binary finds the repository's data directories.
+- **Why not now:** the Tests binary has no way yet to locate `Tests/Data`. Choosing one (a premake define, a path relative to the executable or a command-line option) belongs to the milestone that first reads fixtures.
+
 ## Requested amendments (docs owner)
 
 - **Architecture §3 rule 5:** add the profiler's per-thread buffers to the process-level state, with the `Log`-style ordering rule (decision 6).
 - **Architecture §4.2:** `StepExactly` and `FrameSteps::FirstTick` (decision 8).
+- **Architecture §4.4:** the rotated log files are `<exe>.1.log` to `<exe>.4.log`, written by a custom sink that never throws, and listeners follow the rules of decision 21.
 - **Architecture §4.5:**
   - Death-test children are spawned by `Test::RunChildProcess` (decision 1).
   - The console sink writes to stderr (decision 7).
@@ -145,15 +238,23 @@ The §4.10 case policy only covered reads and the existing directories of a writ
 - **Architecture §4.10:**
   - The atomic write uses `std::filesystem::rename` and makes no power-loss durability claim (decision 5).
   - The mount table is locked, and the dry-run swap requires idle `project://` jobs (decision 13).
-  - The case policy covers new names and case-only renames (decision 14).
+  - The case policy covers new names and case-only renames, and a new name that the host resolves to an existing entry is Validation (decision 14).
   - Streams read snapshots (decision 15).
   - Only `project://` keeps `.bak` files (decision 16).
-- **Architecture §4.12:** the DetMath list gains `Sinh`, `Cosh`, `Tanh` and `Log10` (decision 18).
+  - `NativeDirectoryMount` serializes its calls with a reader-writer lock (decision 23).
+  - Moving the mount root, or moving a directory into its own subtree, is InvalidArgument (decision 21).
+- **Architecture §4.12:**
+  - The DetMath list gains `Sinh`, `Cosh`, `Tanh` and `Log10` (decision 18).
+  - Drop the "style of Jolt's `Trigonometry.h` ... attributed in `LICENSES.md`" wording, and add exact integer arithmetic and integer/floating conversions to the allowed operations (decision 21).
 - **Architecture §6 or §4:**
   - `Engine::Json` is `nlohmann::ordered_json` (decision 4).
   - `MaxJsonDepth` and the minimum header version (decision 17).
+- **Architecture §6.1:** `Simulation.FixedHz` is in `[1, 100000]` (`FrameLoopConfig::MaxFixedHz`, decision 8).
 - **Architecture §13.4:** dry runs wait for `project://` jobs and submit none during the call (decision 13).
-- **Roadmap M1 deliverables:** the files of decision 3.
+- **Architecture §15.2:** the Tests main also parses `--test-timeout=<seconds>` (the per-case limit for cases without `doctest::timeout`, default 120 s, exit code 5). The `ChildTargets` suite holds the cases that only run as child processes, and a manual `--no-skip` run excludes it (decision 7). The Tests log file sink arrives with M2 (decision 25).
+- **Roadmap M1 deliverables:** the files of decisions 3 and 24.
+- **Roadmap M3 acceptance:** every authored file under `Projects/` and `Tests/Data` (`.jsonl` and `Automation/` exempt) is byte-identical after `JsonReader::Parse` and `JsonWriter::Write`, and the Tests binary has a way to locate those directories (decision 27).
 - **Roadmap M2:**
   - `Process` replaces the implementation of `Test::RunChildProcess` and `Test::GetCurrentExecutablePath`, and the `TestsChildProcess` lint rule goes away (decision 1).
   - `App/ExitCode.h` matches the Core exit-code constants (decision 2).
+  - `ProcessContext` breaks into an attached debugger from its `FatalErrorHandler` for `FatalErrorKind::Assert` (decision 21).

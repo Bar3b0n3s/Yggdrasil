@@ -201,6 +201,32 @@
 			]
 		},
 		{
+			"Name": "OverrideNaming",
+			"Description": "Snake_case virtual functions declared in a first-party base class are reported; the overrides that keep those names (override and final) are the allowed controls, in clang-tidy and in the regex fallback.",
+			"Steps": [
+				"includes",
+				"banned",
+				"naming",
+				"headers"
+			],
+			"Modes": [
+				"clang",
+				"regex"
+			],
+			"Expected": [
+				{
+					"Code": "naming",
+					"File": "Engine/Source/Engine/Core/SinkAdapter.h",
+					"Line": 11
+				},
+				{
+					"Code": "naming",
+					"File": "Engine/Source/Engine/Core/SinkAdapter.h",
+					"Line": 12
+				}
+			]
+		},
+		{
 			"Name": "JsonAtOutsideCoreJson",
 			"Description": "nlohmann json at() and get<>() in Scene instead of JsonReader: on json receivers, a receiver declared through a type alias, and (found by type, clang mode only) a value returned by a function held in auto and a call chain.",
 			"Steps": [

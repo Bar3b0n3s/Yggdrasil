@@ -44,6 +44,24 @@ namespace Engine {
 			bool LogUniform = false;
 		};
 
+		// An argument with the correctly rounded sine, cosine and tangent of its exact value.
+		template<typename T>
+		struct TrigRow
+		{
+			T X{};
+			T Sin{};
+			T Cos{};
+			T Tan{};
+		};
+
+		// A notable argument and the correctly rounded result.
+		struct NotableRow
+		{
+			UnaryFunction Function = UnaryFunction::Sin;
+			double X = 0.0;
+			double Expected = 0.0;
+		};
+
 	}
 
 	// Maps an IEEE value to an unsigned integer that grows monotonically from -Inf to +Inf.
@@ -126,7 +144,7 @@ namespace Engine {
 
 	TEST_SUITE("Core")
 	{
-		TEST_CASE("DetMath: within 2 ULP of std over seeded tables" * doctest::skip(true))
+		TEST_CASE("DetMath: within 2 ULP of std over seeded tables")
 		{
 			SUBCASE("float")
 			{
@@ -208,12 +226,13 @@ namespace Engine {
 			}
 		}
 
-		TEST_CASE("DetMath: output hash over 1,000,000 seeded inputs matches the committed value" * doctest::skip(true))
+		TEST_CASE("DetMath: output hash over 1,000,000 seeded inputs matches the committed value")
 		{
-			// Stream B records this value from its first passing implementation, in any configuration; afterwards it must
-			// never change, and the test must pass identically in Debug and Release (Roadmap M1). A changed hash means
-			// simulation results changed for every recorded replay.
-			constexpr uint64_t CommittedHash = 0;
+			// Recorded from the first passing implementation (M1 stream B); the same value is required in every
+			// configuration and on every platform (Roadmap M1, ADR 0003 decision 10). It must never change: a changed hash
+			// means simulation results changed for every recorded replay. A mismatch in one configuration only points at
+			// floating-point contraction or a fast-math flag in that build (Architecture §2.2).
+			constexpr uint64_t CommittedHash = 0x1f03563cdf5ec2cfull;
 
 			Random random(0xde7a7);
 			XXH64Hasher hasher(0);
@@ -274,7 +293,7 @@ namespace Engine {
 			CHECK(hasher.Digest() == CommittedHash);
 		}
 
-		TEST_CASE("DetMath: SinCos equals Sin and Cos bit for bit" * doctest::skip(true))
+		TEST_CASE("DetMath: SinCos equals Sin and Cos bit for bit")
 		{
 			Random random(41);
 			for (int index = 0; index < 10000; ++index)
@@ -291,7 +310,7 @@ namespace Engine {
 			}
 		}
 
-		TEST_CASE("DetMath: special values follow C Annex F" * doctest::skip(true))
+		TEST_CASE("DetMath: special values follow C Annex F")
 		{
 			constexpr double Infinity = std::numeric_limits<double>::infinity();
 			constexpr double NaN = std::numeric_limits<double>::quiet_NaN();
@@ -333,7 +352,7 @@ namespace Engine {
 			CHECK(DetMath::Log10(-0.0f) == -std::numeric_limits<float>::infinity());
 		}
 
-		TEST_CASE("DetMath: Log10 is exact at the representable powers of ten" * doctest::skip(true))
+		TEST_CASE("DetMath: Log10 is exact at the representable powers of ten")
 		{
 			double power = 1.0;
 			for (int exponent = 0; exponent <= 22; ++exponent)
@@ -354,6 +373,288 @@ namespace Engine {
 			// The digit-counting idiom of game scripts: floor(log10(n)) + 1 digits.
 			CHECK(std::floor(DetMath::Log10(1000.0)) == 3.0);
 			CHECK(std::floor(DetMath::Log10(999.0)) == 2.0);
+		}
+
+		TEST_CASE("DetMath: huge arguments of Sin, Cos and Tan are reduced exactly")
+		{
+			// Expected values are the exact results rounded to nearest, from 60-digit arithmetic with a 780-digit pi. The
+			// arguments cover both reductions (the Cody-Waite limit is 2^19) and the double that lies closest to a multiple of
+			// pi/2, 6381956970095103 * 2^797, whose cosine is about -4.7e-19.
+			// clang-format off
+			const std::array<TrigRow<double>, 8> rows = { {
+				{ 0x1p+19,               0x1.57481ec90fde3p-3,  0x1.f8c1986ca67fap-1,   0x1.5c354a31a846ep-3 },
+				{ 0x1.0000000000001p+19, 0x1.57481ecd01616p-3,  0x1.f8c1986c7b96ap-1,   0x1.5c354a35c5e0fp-3 },
+				{ 1e6,                   -0x1.6664b2568d867p-2, 0x1.df9df9906d32cp-1,   -0x1.7e9768ab734cp-2 },
+				{ 3e9,                   0x1.f958b458cc91bp-1,  -0x1.4917f746fa4fp-3,   -0x1.891b289d24f04p+2 },
+				{ 1e22,                  -0x1.b453ab76bf397p-1, 0x1.0be2cef01c8f4p-1,   -0x1.a0f79c1b6b257p+0 },
+				{ 1e100,                 -0x1.85c5e5b929359p-2, 0x1.d9757496841f5p-1,   -0x1.a5807d6f76f7dp-2 },
+				{ 0x1.6ac5b262ca1ffp+849, 0x1p+0,               -0x1.14ae72e6ba22fp-61, -0x1.d9ba9a7975636p+60 },
+				{ 0x1.fffffffffffffp+1023, 0x1.452fc98b34e97p-8, -0x1.fffe62ecfab75p-1, -0x1.4530cfe729484p-8 },
+			} };
+			const std::array<TrigRow<float>, 3> rowsF = { {
+				{ 1e10f,             -0x1.f334c8p-2f, 0x1.bf098ap-1f,  -0x1.1dep-1f },
+				{ 1e30f,             -0x1.95136p-1f,  -0x1.392444p-1f, 0x1.4b2876p+0f },
+				{ 0x1.fffffep+127f,  -0x1.0b3366p-1f, 0x1.b4bf2cp-1f,  -0x1.393d94p-1f },
+			} };
+			// clang-format on
+			for (const TrigRow<double>& row : rows)
+			{
+				INFO("x = ", row.X);
+				CHECK(UlpDistance(DetMath::Sin(row.X), row.Sin) <= 1);
+				CHECK(UlpDistance(DetMath::Cos(row.X), row.Cos) <= 1);
+				CHECK(UlpDistance(DetMath::Tan(row.X), row.Tan) <= 1);
+				// Sine and tangent are odd, cosine is even, bit for bit.
+				CHECK(DetMath::Sin(-row.X) == -DetMath::Sin(row.X));
+				CHECK(DetMath::Cos(-row.X) == DetMath::Cos(row.X));
+				CHECK(DetMath::Tan(-row.X) == -DetMath::Tan(row.X));
+			}
+			for (const TrigRow<float>& row : rowsF)
+			{
+				INFO("x = ", row.X, " (float)");
+				CHECK(UlpDistance(DetMath::Sin(row.X), row.Sin) <= 1);
+				CHECK(UlpDistance(DetMath::Cos(row.X), row.Cos) <= 1);
+				CHECK(UlpDistance(DetMath::Tan(row.X), row.Tan) <= 1);
+			}
+		}
+
+		TEST_CASE("DetMath: results are correctly rounded at notable arguments")
+		{
+			constexpr double Pi = 3.141592653589793; // RN(pi)
+			const std::array<NotableRow, 17> rows = { {
+				{ UnaryFunction::Sin, Pi, 1.2246467991473532e-16 },
+				{ UnaryFunction::Cos, Pi, -1.0 },
+				{ UnaryFunction::Sin, 0.5, 0.479425538604203 },
+				{ UnaryFunction::Cos, 0.5, 0.8775825618903728 },
+				{ UnaryFunction::Tan, Pi / 4.0, 0.9999999999999999 },
+				{ UnaryFunction::ATan, 1.0, 0.7853981633974483 },
+				{ UnaryFunction::ASin, 1.0, 1.5707963267948966 },
+				{ UnaryFunction::ACos, -1.0, Pi },
+				{ UnaryFunction::ACos, 0.0, 1.5707963267948966 },
+				{ UnaryFunction::Exp, 1.0, 2.718281828459045 },
+				{ UnaryFunction::Exp, -1.0, 0.36787944117144233 },
+				{ UnaryFunction::Log, 2.0, 0.6931471805599453 },
+				{ UnaryFunction::Log, 10.0, 2.302585092994046 },
+				{ UnaryFunction::Log10, 2.0, 0.3010299956639812 },
+				{ UnaryFunction::Sinh, 1.0, 1.1752011936438014 },
+				{ UnaryFunction::Cosh, 1.0, 1.5430806348152437 },
+				{ UnaryFunction::Tanh, 1.0, 0.7615941559557649 },
+			} };
+			for (const NotableRow& row : rows)
+			{
+				INFO("function ", static_cast<int>(row.Function), " at ", row.X);
+				CHECK(EvaluateEngine(row.Function, row.X) == row.Expected);
+			}
+			CHECK(DetMath::ATan2(1.0, -1.0) == 2.356194490192345);
+			CHECK(DetMath::Pow(2.0, 0.5) == 1.4142135623730951);
+		}
+
+		TEST_CASE("DetMath: Pow is exact when the result is representable")
+		{
+			double power = 1.0;
+			for (int exponent = 0; exponent <= 22; ++exponent)
+			{
+				INFO("10^", exponent);
+				CHECK(DetMath::Pow(10.0, static_cast<double>(exponent)) == power);
+				power *= 10.0;
+			}
+			for (int exponent = -1074; exponent <= 1023; ++exponent)
+			{
+				INFO("2^", exponent);
+				REQUIRE(DetMath::Pow(2.0, static_cast<double>(exponent)) == std::ldexp(1.0, exponent));
+			}
+			float powerF = 1.0f;
+			for (int exponent = 0; exponent <= 10; ++exponent)
+			{
+				INFO("10^", exponent, " (float)");
+				CHECK(DetMath::Pow(10.0f, static_cast<float>(exponent)) == powerF);
+				powerF *= 10.0f;
+			}
+			CHECK(DetMath::Pow(-3.0, 3.0) == -27.0);
+			CHECK(DetMath::Pow(-3.0, 4.0) == 81.0);
+			CHECK(DetMath::Pow(4.0, 0.5) == 2.0);
+			CHECK(DetMath::Pow(0.25, -1.5) == 8.0);
+			CHECK(DetMath::Pow(7.0, 1.0) == 7.0);
+			CHECK(DetMath::Pow(0.1, 1.0) == 0.1);
+		}
+
+		TEST_CASE("DetMath: overflow and underflow happen where the exact result leaves the format")
+		{
+			constexpr double Infinity = std::numeric_limits<double>::infinity();
+			constexpr double Smallest = std::numeric_limits<double>::denorm_min();
+
+			CHECK(DetMath::Exp(709.78) == doctest::Approx(1.7928227943945155e308));
+			CHECK(DetMath::Exp(709.79) == Infinity);
+			CHECK(DetMath::Exp(-745.0) == Smallest); // e^-745 is closer to 2^-1074 than to 0
+			CHECK(DetMath::Exp(-746.0) == 0.0);
+			CHECK(DetMath::Exp(-740.0) > 0.0);
+			CHECK(DetMath::Exp(-740.0) < std::numeric_limits<double>::min());
+			CHECK(DetMath::Exp(88.7f) == doctest::Approx(3.3259768e38).epsilon(1e-6));
+			CHECK(DetMath::Exp(88.8f) == std::numeric_limits<float>::infinity());
+
+			CHECK(std::isfinite(DetMath::Sinh(710.0)));
+			CHECK(DetMath::Sinh(711.0) == Infinity);
+			CHECK(DetMath::Sinh(-711.0) == -Infinity);
+			CHECK(std::isfinite(DetMath::Cosh(-710.0)));
+			CHECK(DetMath::Cosh(711.0) == Infinity);
+
+			CHECK(DetMath::Pow(10.0, 308.0) == doctest::Approx(1e308));
+			CHECK(DetMath::Pow(10.0, 309.0) == Infinity);
+			CHECK(DetMath::Pow(10.0, -320.0) > 0.0);
+			CHECK(DetMath::Pow(10.0, -330.0) == 0.0);
+			CHECK(DetMath::Pow(2.0, 1024.0) == Infinity);
+			CHECK(DetMath::Pow(2.0, -1075.5) == 0.0);
+			CHECK(DetMath::Pow(-2.0, 1025.0) == -Infinity);
+			CHECK(DetMath::Pow(1.0 + 0x1p-52, 0x1p62) == Infinity);
+			CHECK(DetMath::Pow(0.5, 0x1p950) == 0.0);
+		}
+
+		TEST_CASE("DetMath: Pow, ATan2 and the other edge cases follow C Annex F")
+		{
+			constexpr double Infinity = std::numeric_limits<double>::infinity();
+			constexpr double NaN = std::numeric_limits<double>::quiet_NaN();
+			constexpr double Pi = 3.141592653589793;
+			constexpr double PiOver2 = 1.5707963267948966;
+
+			SUBCASE("pow")
+			{
+				CHECK(DetMath::Pow(0.0, -3.0) == Infinity);
+				CHECK(DetMath::Pow(-0.0, -3.0) == -Infinity);
+				CHECK(DetMath::Pow(-0.0, -2.0) == Infinity);
+				CHECK(DetMath::Pow(-0.0, -0.5) == Infinity);
+				CHECK(DetMath::Pow(-0.0, -Infinity) == Infinity);
+				CHECK(DetMath::Pow(0.0, 3.0) == 0.0);
+				CHECK_FALSE(std::signbit(DetMath::Pow(0.0, 3.0)));
+				CHECK(std::signbit(DetMath::Pow(-0.0, 3.0)));
+				CHECK_FALSE(std::signbit(DetMath::Pow(-0.0, 2.0)));
+				CHECK_FALSE(std::signbit(DetMath::Pow(-0.0, Infinity)));
+				CHECK(DetMath::Pow(-1.0, Infinity) == 1.0);
+				CHECK(DetMath::Pow(-1.0, -Infinity) == 1.0);
+				CHECK(DetMath::Pow(1.0, Infinity) == 1.0);
+				CHECK(DetMath::Pow(Infinity, 0.0) == 1.0);
+				CHECK(DetMath::Pow(0.5, -Infinity) == Infinity);
+				CHECK(DetMath::Pow(-2.0, -Infinity) == 0.0);
+				CHECK(DetMath::Pow(-0.5, Infinity) == 0.0);
+				CHECK(DetMath::Pow(2.0, Infinity) == Infinity);
+				CHECK(DetMath::Pow(-Infinity, -3.0) == 0.0);
+				CHECK(std::signbit(DetMath::Pow(-Infinity, -3.0)));
+				CHECK_FALSE(std::signbit(DetMath::Pow(-Infinity, -2.0)));
+				CHECK(DetMath::Pow(-Infinity, 3.0) == -Infinity);
+				CHECK(DetMath::Pow(-Infinity, 2.5) == Infinity);
+				CHECK(DetMath::Pow(Infinity, -1.0) == 0.0);
+				CHECK(DetMath::Pow(Infinity, 0.5) == Infinity);
+				CHECK(std::isnan(DetMath::Pow(-8.0, 1.0 / 3.0)));
+				CHECK(std::isnan(DetMath::Pow(NaN, 1.0)));
+				CHECK(std::isnan(DetMath::Pow(2.0, NaN)));
+				CHECK(DetMath::Pow(-2.0, 0x1p60) == Infinity); // huge integers are even
+				CHECK(DetMath::Pow(-0.5f, 3.0f) == -0.125f);
+			}
+
+			SUBCASE("atan2")
+			{
+				CHECK(DetMath::ATan2(0.0, -0.0) == Pi);
+				CHECK(DetMath::ATan2(-0.0, -0.0) == -Pi);
+				CHECK(DetMath::ATan2(0.0, 0.0) == 0.0);
+				CHECK_FALSE(std::signbit(DetMath::ATan2(0.0, 0.0)));
+				CHECK(std::signbit(DetMath::ATan2(-0.0, 0.0)));
+				CHECK(DetMath::ATan2(-0.0, -1.0) == -Pi);
+				CHECK(DetMath::ATan2(-1.0, 0.0) == -PiOver2);
+				CHECK(DetMath::ATan2(1.0, -0.0) == PiOver2);
+				CHECK(DetMath::ATan2(1.0, -Infinity) == Pi);
+				CHECK(DetMath::ATan2(-1.0, -Infinity) == -Pi);
+				CHECK(std::signbit(DetMath::ATan2(-1.0, Infinity)));
+				CHECK(DetMath::ATan2(1.0, Infinity) == 0.0);
+				CHECK(DetMath::ATan2(-Infinity, 1.0) == -PiOver2);
+				CHECK(DetMath::ATan2(Infinity, -Infinity) == 2.356194490192345);
+				CHECK(DetMath::ATan2(-Infinity, Infinity) == -0.7853981633974483);
+				CHECK(std::isnan(DetMath::ATan2(NaN, 1.0)));
+				CHECK(std::isnan(DetMath::ATan2(1.0, NaN)));
+				// Extreme ratios: the quotient underflows or the angle rounds to +-pi/2.
+				CHECK(DetMath::ATan2(1e-300, 1e300) == 0.0);
+				CHECK(DetMath::ATan2(1e-300, -1e300) == Pi);
+				CHECK(DetMath::ATan2(1e300, 1e-300) == PiOver2);
+				CHECK(DetMath::ATan2(0x1p-1074, 0x1p-1073) == doctest::Approx(0.4636476090008061));
+				CHECK(DetMath::ATan2(3e300, 4e300) == doctest::Approx(0.6435011087932844));
+			}
+
+			SUBCASE("other functions")
+			{
+				CHECK(DetMath::Exp(-Infinity) == 0.0);
+				CHECK(DetMath::Exp(Infinity) == Infinity);
+				CHECK(std::isnan(DetMath::Exp(NaN)));
+				CHECK(DetMath::Log(Infinity) == Infinity);
+				CHECK(DetMath::Log10(Infinity) == Infinity);
+				CHECK(DetMath::Log(1.0) == 0.0);
+				CHECK_FALSE(std::signbit(DetMath::Log(1.0)));
+				CHECK(DetMath::Log(0x1p-1074) == doctest::Approx(-744.4400719213812));
+				CHECK(DetMath::ATan(Infinity) == PiOver2);
+				CHECK(DetMath::ATan(-Infinity) == -PiOver2);
+				CHECK(DetMath::ATan(1e300) == PiOver2);
+				CHECK(std::isnan(DetMath::Tan(Infinity)));
+				CHECK(std::isnan(DetMath::Cos(NaN)));
+				CHECK(std::isnan(DetMath::Cosh(NaN)));
+				CHECK(std::isnan(DetMath::Sinh(NaN)));
+				CHECK(std::isnan(DetMath::ACos(NaN)));
+				CHECK(std::signbit(DetMath::Tan(-0.0)));
+				CHECK(std::signbit(DetMath::ASin(-0.0)));
+				CHECK(std::signbit(DetMath::ATan(-0.0f)));
+				CHECK(DetMath::Cos(-0.0) == 1.0);
+				CHECK(DetMath::ACos(1.0) == 0.0);
+				CHECK(DetMath::ASin(-1.0) == -PiOver2);
+				CHECK(DetMath::Sin(1e-30) == 1e-30);
+				CHECK(DetMath::Tanh(0x1p-1074) == 0x1p-1074);
+
+				const SinCosResult<double> infinite = DetMath::SinCos(Infinity);
+				CHECK(std::isnan(infinite.Sin));
+				CHECK(std::isnan(infinite.Cos));
+				const SinCosResult<float> zero = DetMath::SinCos(-0.0f);
+				CHECK(std::signbit(zero.Sin));
+				CHECK(zero.Cos == 1.0f);
+			}
+		}
+
+		TEST_CASE("DetMath: odd functions are odd and even functions are even, bit for bit")
+		{
+			Random random(57);
+			for (int index = 0; index < 20000; ++index)
+			{
+				const double x = random.RangeDouble(-50.0, 50.0);
+				const double unit = random.RangeDouble(-1.0, 1.0);
+				INFO("x = ", x, ", unit = ", unit);
+				REQUIRE(DetMath::Sin(-x) == -DetMath::Sin(x));
+				REQUIRE(DetMath::Tan(-x) == -DetMath::Tan(x));
+				REQUIRE(DetMath::ATan(-x) == -DetMath::ATan(x));
+				REQUIRE(DetMath::Sinh(-x) == -DetMath::Sinh(x));
+				REQUIRE(DetMath::Tanh(-x) == -DetMath::Tanh(x));
+				REQUIRE(DetMath::ASin(-unit) == -DetMath::ASin(unit));
+				REQUIRE(DetMath::ATan2(-unit, x) == -DetMath::ATan2(unit, x));
+				REQUIRE(DetMath::Cos(-x) == DetMath::Cos(x));
+				REQUIRE(DetMath::Cosh(-x) == DetMath::Cosh(x));
+			}
+		}
+
+		TEST_CASE("DetMath: SinCos equals Sin and Cos for huge and special arguments")
+		{
+			const std::array<double, 9> arguments = {
+				0x1p19,
+				0x1.0000000000001p19,
+				1e22,
+				-1e300,
+				0x1.6ac5b262ca1ffp+849,
+				1e-30,
+				-0.0,
+				0x1p-1074,
+				std::numeric_limits<double>::max(),
+			};
+			for (const double x : arguments)
+			{
+				INFO("x = ", x);
+				const SinCosResult<double> both = DetMath::SinCos(x);
+				CHECK(std::bit_cast<uint64_t>(both.Sin) == std::bit_cast<uint64_t>(DetMath::Sin(x)));
+				CHECK(std::bit_cast<uint64_t>(both.Cos) == std::bit_cast<uint64_t>(DetMath::Cos(x)));
+			}
+			const SinCosResult<float> large = DetMath::SinCos(1e30f);
+			CHECK(std::bit_cast<uint32_t>(large.Sin) == std::bit_cast<uint32_t>(DetMath::Sin(1e30f)));
+			CHECK(std::bit_cast<uint32_t>(large.Cos) == std::bit_cast<uint32_t>(DetMath::Cos(1e30f)));
 		}
 	}
 

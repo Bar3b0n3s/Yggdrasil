@@ -9,6 +9,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 namespace Engine {
@@ -87,7 +88,8 @@ namespace Engine {
 		uint64_t Append(EngineEvent event);
 
 		// Events with Seq >= `cursor` (0 = the oldest held) whose type is in `types` (empty = every type), at most
-		// `limit` of them, in Seq order.
+		// `limit` of them, in Seq order. Cursor 0 reports DroppedCount 0; a cursor past GetNextSeq() returns nothing with
+		// NextCursor = GetNextSeq().
 		[[nodiscard]] EventReadResult Read(uint64_t cursor, std::span<const EngineEventType> types = {}, size_t limit = 100) const;
 
 		// The Seq the next event will receive.
@@ -95,8 +97,15 @@ namespace Engine {
 		[[nodiscard]] size_t GetCapacity() const;
 		[[nodiscard]] size_t GetSize() const;
 	private:
+		// The event with sequence number `seq`, which must be held.
+		[[nodiscard]] const EngineEvent& GetHeld(uint64_t seq) const;
+		// The Seq of the oldest held event (GetNextSeq() when the log is empty).
+		[[nodiscard]] uint64_t GetOldestSeq() const;
+	private:
 		size_t m_Capacity = 0;
 		uint64_t m_NextSeq = 1;
+		std::vector<EngineEvent> m_Events; // the ring: Seq s lives at index (s - 1) % m_Capacity
+		std::thread::id m_MainThread;
 	};
 
 }

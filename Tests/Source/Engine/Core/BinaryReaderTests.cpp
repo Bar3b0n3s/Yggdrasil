@@ -5,6 +5,9 @@
 #include "Engine/Core/BinaryWriter.h"
 #include "Engine/Core/Random.h"
 
+#include <cmath>
+#include <limits>
+
 namespace Engine {
 
 	namespace {
@@ -98,7 +101,7 @@ namespace Engine {
 
 	TEST_SUITE("Core")
 	{
-		TEST_CASE("BinaryReader: 10,000 seeded mutations never crash and always return Result" * doctest::skip(true))
+		TEST_CASE("BinaryReader: 10,000 seeded mutations never crash and always return Result")
 		{
 			const Buffer original = MakeCookedPayload();
 			REQUIRE(ParseCookedPayload(original).has_value());
@@ -156,7 +159,7 @@ namespace Engine {
 			CHECK(failures > 0);
 		}
 
-		TEST_CASE("BinaryReader: reads little-endian values written by BinaryWriter" * doctest::skip(true))
+		TEST_CASE("BinaryReader: reads little-endian values written by BinaryWriter")
 		{
 			BinaryWriter writer;
 			writer.WriteU8(0xab);
@@ -190,7 +193,7 @@ namespace Engine {
 			CHECK(ErrorCodeOf(reader.ReadU8()) == ErrorCode::Parse);
 		}
 
-		TEST_CASE("BinaryReader: a failed read leaves the position unchanged" * doctest::skip(true))
+		TEST_CASE("BinaryReader: a failed read leaves the position unchanged")
 		{
 			const std::array<std::byte, 3> bytes = { std::byte{ 1 }, std::byte{ 2 }, std::byte{ 3 } };
 			BinaryReader reader(bytes);
@@ -200,7 +203,7 @@ namespace Engine {
 			const Result<uint32_t> tooLong = reader.ReadU32();
 			REQUIRE_FALSE(tooLong.has_value());
 			CHECK(tooLong.error().GetCode() == ErrorCode::Parse);
-			CHECK(tooLong.error().GetMessageText().contains("1"));
+			CHECK(tooLong.error().GetMessageText().contains("4 bytes requested at offset 1,"));
 			CHECK(reader.GetPosition() == 1);
 			CHECK(reader.ReadU16() == uint16_t{ 0x0302 });
 
@@ -212,7 +215,7 @@ namespace Engine {
 			CHECK(reader.GetPosition() == 0);
 		}
 
-		TEST_CASE("BinaryReader: ReadArray rejects counts that overflow or exceed the data" * doctest::skip(true))
+		TEST_CASE("BinaryReader: ReadArray rejects counts that overflow or exceed the data")
 		{
 			const std::array<std::byte, 8> bytes{};
 			BinaryReader reader(bytes);
@@ -226,7 +229,41 @@ namespace Engine {
 			CHECK(reader.ReadArray<uint32_t>(0).has_value());
 		}
 
-		TEST_CASE("BinaryReader: ReadBool accepts only 0 and 1" * doctest::skip(true))
+		TEST_CASE("BinaryReader: ReadBytes and Skip view and advance within the data")
+		{
+			const std::array<std::byte, 6> bytes = { std::byte{ 1 }, std::byte{ 2 }, std::byte{ 3 }, std::byte{ 4 }, std::byte{ 5 }, std::byte{ 6 } };
+			BinaryReader reader(bytes);
+			const Result<std::span<const std::byte>> first = reader.ReadBytes(2);
+			REQUIRE(first.has_value());
+			CHECK(first->data() == bytes.data());
+			CHECK(first->size() == 2);
+			REQUIRE(reader.Skip(3).has_value());
+			CHECK(reader.GetRemaining() == 1);
+			CHECK(ErrorCodeOf(reader.ReadBytes(2)) == ErrorCode::Parse);
+			CHECK(reader.ReadBytes(0).has_value());
+			CHECK(reader.ReadU8() == uint8_t{ 6 });
+			CHECK(reader.IsAtEnd());
+		}
+
+		TEST_CASE("BinaryReader: floats keep their bit patterns, NaN and infinities included")
+		{
+			BinaryWriter writer;
+			writer.WriteF32(std::numeric_limits<float>::infinity());
+			writer.WriteF64(std::numeric_limits<double>::quiet_NaN());
+			writer.WriteF32(-0.0f);
+			const Buffer buffer = writer.TakeBuffer();
+
+			BinaryReader reader(buffer);
+			CHECK(reader.ReadF32() == std::numeric_limits<float>::infinity());
+			const Result<double> nan = reader.ReadF64();
+			REQUIRE(nan.has_value());
+			CHECK(std::isnan(*nan));
+			const Result<float> negativeZero = reader.ReadF32();
+			REQUIRE(negativeZero.has_value());
+			CHECK(std::signbit(*negativeZero));
+		}
+
+		TEST_CASE("BinaryReader: ReadBool accepts only 0 and 1")
 		{
 			const std::array<std::byte, 3> bytes = { std::byte{ 0 }, std::byte{ 1 }, std::byte{ 2 } };
 			BinaryReader reader(bytes);
@@ -235,7 +272,7 @@ namespace Engine {
 			CHECK(ErrorCodeOf(reader.ReadBool()) == ErrorCode::Parse);
 		}
 
-		TEST_CASE("BinaryReader: ReadString checks the length and the UTF-8" * doctest::skip(true))
+		TEST_CASE("BinaryReader: ReadString checks the length and the UTF-8")
 		{
 			BinaryWriter oversized;
 			oversized.WriteU32(1000);

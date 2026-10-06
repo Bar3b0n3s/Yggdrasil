@@ -85,6 +85,8 @@ bin/Debug-windows-x86_64/Tests/Tests.exe --reporters=junit --out=bin/TestResults
 
 - **Commas separate filters**, so a case name that contains a comma needs `\,`, or a `*` wildcard in place of the comma. For example, use `-tc="Physics: state hash identical with 0*"`.
 - **Engine-specific modes** are added to the Tests main as their milestones land (M1–M5, Architecture §15.2): `--death-test=<name>` runs one death-test body and `--windowed-child=<name>` runs a windowed child case; `--require-gpu` turns GPU-suite skips into failures. These are for tests that spawn child processes. Run the parent test case instead of calling them by hand.
+- **`--test-timeout=<seconds>`** is the per-case limit for test cases without a `doctest::timeout` decorator (default 120). A case that runs longer is reported on stderr and the run exits with code 5.
+- **`--no-skip`** also runs the `ChildTargets` suite: cases that exist only as child-process targets of other tests, which hang or end the process by design. Exclude them: `Tests.exe --no-skip --test-suite-exclude=ChildTargets`.
 - **Exit codes** (§4.1): 0 success, 1 test failure, 2 usage error, 3 init failed, 4 crash or assert (exit 4 is what the parent of a death test expects), 5 timeout.
 
 ## Reading failures

@@ -2,6 +2,8 @@
 
 #include "Engine/Core/VfsPath.h"
 
+#include "Engine/Core/Utf8.h"
+
 #include <unordered_set>
 
 namespace Engine {
@@ -15,7 +17,7 @@ namespace Engine {
 
 	TEST_SUITE("Core")
 	{
-		TEST_CASE("VfsPath: rejects parent escapes, absolute paths, NUL and reserved names" * doctest::skip(true))
+		TEST_CASE("VfsPath: rejects parent escapes, absolute paths, NUL and reserved names")
 		{
 			using namespace std::string_view_literals;
 			const std::array rejected = {
@@ -65,7 +67,7 @@ namespace Engine {
 			CHECK(VfsPath::ValidateRelativePath("Assets/.nul").has_value());
 		}
 
-		TEST_CASE("VfsPath: accepts project paths and keeps their spelling" * doctest::skip(true))
+		TEST_CASE("VfsPath: accepts project paths and keeps their spelling")
 		{
 			const VfsPath path = ParseOrFail("project://Assets/Scenes/Level1.scene");
 			CHECK(path.GetScheme() == "project");
@@ -86,7 +88,7 @@ namespace Engine {
 			CHECK(VfsPath().ToString().empty());
 		}
 
-		TEST_CASE("VfsPath: schemes are lowercase letters followed by ://" * doctest::skip(true))
+		TEST_CASE("VfsPath: schemes are lowercase letters followed by ://")
 		{
 			CHECK(VfsPath::ValidateScheme("enginecache").has_value());
 			CHECK_FALSE(VfsPath::ValidateScheme("").has_value());
@@ -102,7 +104,7 @@ namespace Engine {
 			CHECK_FALSE(VfsPath::Create("cache", "../x").has_value());
 		}
 
-		TEST_CASE("VfsPath: GetFileName, GetStem, GetExtension and GetParent split the path" * doctest::skip(true))
+		TEST_CASE("VfsPath: GetFileName, GetStem, GetExtension and GetParent split the path")
 		{
 			const VfsPath meta = ParseOrFail("project://Assets/Models/Track.glb.meta");
 			CHECK(meta.GetFileName() == "Track.glb.meta");
@@ -121,7 +123,7 @@ namespace Engine {
 			CHECK(noExtension.GetStem() == "README");
 		}
 
-		TEST_CASE("VfsPath: Join validates every segment" * doctest::skip(true))
+		TEST_CASE("VfsPath: Join validates every segment")
 		{
 			const VfsPath assets = ParseOrFail("project://Assets");
 			const Result<VfsPath> scene = assets.Join("Scenes/Level1.scene");
@@ -141,7 +143,7 @@ namespace Engine {
 			CHECK(fromEmpty.error().GetCode() == ErrorCode::InvalidArgument);
 		}
 
-		TEST_CASE("VfsPath: IsUnder compares whole segments" * doctest::skip(true))
+		TEST_CASE("VfsPath: IsUnder compares whole segments")
 		{
 			const VfsPath scenes = ParseOrFail("project://Assets/Scenes");
 			CHECK(ParseOrFail("project://Assets/Scenes/Level1.scene").IsUnder(scenes));
@@ -151,7 +153,33 @@ namespace Engine {
 			CHECK(scenes.IsUnder(ParseOrFail("project://")));
 		}
 
-		TEST_CASE("VfsPath: ordering is byte-wise on the scheme, then the path" * doctest::skip(true))
+		TEST_CASE("VfsPath: validation errors name the offending segment in printable UTF-8")
+		{
+			const Result<VfsPath> reserved = VfsPath::Parse("project://Assets/CON/Level1.scene");
+			REQUIRE_FALSE(reserved.has_value());
+			CHECK(reserved.error().GetMessageText().contains("'CON'"));
+
+			const Result<VfsPath> control = VfsPath::Parse("project://Assets/Tab\tName.scene");
+			REQUIRE_FALSE(control.has_value());
+			CHECK(control.error().GetMessageText().contains("Tab\\x09Name.scene"));
+
+			const Result<VfsPath> invalid = VfsPath::Parse("project://Assets/Invalid\xff.scene");
+			REQUIRE_FALSE(invalid.has_value());
+			CHECK(IsValidUtf8(invalid.error().GetMessageText()));
+			CHECK(invalid.error().GetMessageText().contains("offset 14"));
+		}
+
+		TEST_CASE("VfsPath: the empty path has an empty parent and lies under nothing")
+		{
+			const VfsPath empty;
+			CHECK(empty.GetParent().IsEmpty());
+			CHECK(empty.GetFileName().empty());
+			CHECK_FALSE(empty.IsUnder(ParseOrFail("project://")));
+			CHECK_FALSE(ParseOrFail("project://A").IsUnder(empty));
+			CHECK(ParseOrFail("project://A").GetParent() == ParseOrFail("project://"));
+		}
+
+		TEST_CASE("VfsPath: ordering is byte-wise on the scheme, then the path")
 		{
 			std::vector<VfsPath> paths = {
 				ParseOrFail("project://b.txt"),

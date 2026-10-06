@@ -22,7 +22,7 @@ namespace Engine {
 
 	TEST_SUITE("Core")
 	{
-		TEST_CASE("Hash: XXH64 matches reference test vectors" * doctest::skip(true))
+		TEST_CASE("Hash: XXH64 matches reference test vectors")
 		{
 			constexpr uint64_t Prime32 = 2654435761ull;
 			const std::vector<std::byte> buffer = MakeSanityBuffer(2367);
@@ -45,7 +45,7 @@ namespace Engine {
 			CHECK(XXH64(std::string_view("Hello, world!"), 0) == 0xF58336A78B6F9476ull);
 		}
 
-		TEST_CASE("Hash: streaming XXH64 equals one-shot XXH64 for every split" * doctest::skip(true))
+		TEST_CASE("Hash: streaming XXH64 equals one-shot XXH64 for every split")
 		{
 			const std::vector<std::byte> buffer = MakeSanityBuffer(222);
 			const std::span<const std::byte> bytes(buffer);
@@ -69,7 +69,48 @@ namespace Engine {
 			CHECK(byteByByte.Digest() == 0xEF46DB3751D8E999ull);
 		}
 
-		TEST_CASE("Hash: Hash64 hashes the little-endian value or the key bytes with the seed" * doctest::skip(true))
+		TEST_CASE("Hash: streamed text matches one-shot XXH64, empty updates change nothing and Reset restarts")
+		{
+			XXH64Hasher hasher(7);
+			hasher.Update(std::string_view("Hello, "));
+			hasher.Update(std::string_view("world!"));
+			CHECK(hasher.Digest() == XXH64(std::string_view("Hello, world!"), 7));
+
+			hasher.Update(std::span<const std::byte>());
+			hasher.Update(std::string_view());
+			CHECK(hasher.Digest() == XXH64(std::string_view("Hello, world!"), 7));
+
+			hasher.Reset(7);
+			CHECK(hasher.Digest() == XXH64(std::string_view(), 7));
+			hasher.Update(std::string_view("abc"));
+			CHECK(hasher.Digest() == XXH64(std::string_view("abc"), 7));
+
+			const XXH64Hasher defaultSeed;
+			CHECK(defaultSeed.Digest() == 0xEF46DB3751D8E999ull);
+		}
+
+		TEST_CASE("Hash: UpdateU64 interleaved with byte updates equals one-shot XXH64 of the same bytes")
+		{
+			const std::vector<std::byte> buffer = MakeSanityBuffer(64);
+			XXH64Hasher hasher(3);
+			std::vector<std::byte> expected;
+			for (uint64_t round = 0; round < 40; ++round)
+			{
+				// 0 to 4 bytes put every later UpdateU64 at a different offset inside the 32-byte stripe.
+				const std::span<const std::byte> bytes = std::span<const std::byte>(buffer).first(round % 5);
+				hasher.Update(bytes);
+				expected.insert(expected.end(), bytes.begin(), bytes.end());
+
+				const uint64_t value = round * 0x9E3779B97F4A7C15ull;
+				hasher.UpdateU64(value);
+				for (size_t index = 0; index < 8; ++index)
+					expected.push_back(static_cast<std::byte>(value >> (8 * index)));
+
+				REQUIRE(hasher.Digest() == XXH64(expected, 3));
+			}
+		}
+
+		TEST_CASE("Hash: Hash64 hashes the little-endian value or the key bytes with the seed")
 		{
 			CHECK(Hash64(1, 2) == 0x2EFA9E5D4E7FC483ull);
 			CHECK(Hash64(0x1111, 0x2222) == 0x26BFDF9F2EA69EC9ull);

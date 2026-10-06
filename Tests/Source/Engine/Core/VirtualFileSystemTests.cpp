@@ -65,7 +65,7 @@ namespace Engine {
 
 	TEST_SUITE("Core")
 	{
-		TEST_CASE("VirtualFileSystem: case mismatch is a validation error" * doctest::skip(true))
+		TEST_CASE("VirtualFileSystem: case mismatch is a validation error")
 		{
 			Test::TempDirectory directory("VfsCase");
 			REQUIRE(FileSystem::CreateDirectories(directory / "Assets/Scenes").has_value());
@@ -89,7 +89,7 @@ namespace Engine {
 			CHECK(ErrorCodeOf(vfs.ReadFile(Path("project://Assets/Scenes/Level2.scene"))) == ErrorCode::NotFound);
 		}
 
-		TEST_CASE("VirtualFileSystem: reads concurrent with Unmount and Mount see a whole mount or NotFound" * doctest::skip(true))
+		TEST_CASE("VirtualFileSystem: reads concurrent with Unmount and Mount see a whole mount or NotFound")
 		{
 			const VfsPath level = Path("project://Level.scene");
 			VirtualFileSystem vfs;
@@ -129,7 +129,7 @@ namespace Engine {
 			CHECK(vfs.ReadText(level) == std::string("disk"));
 		}
 
-		TEST_CASE("VirtualFileSystem: routes each scheme to its mount" * doctest::skip(true))
+		TEST_CASE("VirtualFileSystem: routes each scheme to its mount")
 		{
 			VirtualFileSystem vfs;
 			Scope<MemoryMount> engine = CreateScope<MemoryMount>();
@@ -155,15 +155,37 @@ namespace Engine {
 			CHECK((*listed)[1].Info.Size == 7);
 		}
 
-		TEST_CASE("VirtualFileSystem: unmounted schemes and the empty path are NotFound" * doctest::skip(true))
+		TEST_CASE("VirtualFileSystem: unmounted schemes and the empty path are NotFound")
 		{
 			VirtualFileSystem vfs;
 			CHECK(ErrorCodeOf(vfs.ReadFile(Path("user://Settings.json"))) == ErrorCode::NotFound);
 			CHECK(ErrorCodeOf(vfs.ReadFile(VfsPath())) == ErrorCode::NotFound);
 			CHECK_FALSE(vfs.Exists(Path("user://Settings.json")));
+			CHECK(ErrorCodeOf(vfs.ReadText(Path("user://Settings.json"))) == ErrorCode::NotFound);
+			CHECK(ErrorCodeOf(vfs.Open(Path("user://Settings.json"))) == ErrorCode::NotFound);
+			CHECK(ErrorCodeOf(vfs.WriteFileAtomic(Path("user://Settings.json"), AsBytes("{}"))) == ErrorCode::NotFound);
+			CHECK(ErrorCodeOf(vfs.List(Path("user://"))) == ErrorCode::NotFound);
+			CHECK(ErrorCodeOf(vfs.CreateDirectories(Path("user://Logs"))) == ErrorCode::NotFound);
+			CHECK(ErrorCodeOf(vfs.Remove(Path("user://Logs"))) == ErrorCode::NotFound);
+			CHECK(ErrorCodeOf(vfs.Move(Path("user://A"), Path("user://B"))) == ErrorCode::NotFound);
 		}
 
-		TEST_CASE("VirtualFileSystem: Mount rejects a duplicate scheme and Unmount returns the mount" * doctest::skip(true))
+		TEST_CASE("VirtualFileSystem: forwards directory operations to the mount")
+		{
+			VirtualFileSystem vfs;
+			REQUIRE(vfs.Mount("user", CreateScope<MemoryMount>()).has_value());
+			REQUIRE(vfs.CreateDirectories(Path("user://Logs/Old")).has_value());
+			CHECK(vfs.Exists(Path("user://Logs/Old")));
+			const Result<FileInfo> info = vfs.GetInfo(Path("user://Logs"));
+			REQUIRE(info.has_value());
+			CHECK(info->IsDirectory);
+
+			REQUIRE(vfs.Remove(Path("user://Logs")).has_value());
+			CHECK_FALSE(vfs.Exists(Path("user://Logs/Old")));
+			CHECK(ErrorCodeOf(vfs.Remove(Path("user://"))) == ErrorCode::InvalidArgument);
+		}
+
+		TEST_CASE("VirtualFileSystem: Mount rejects a duplicate scheme and Unmount returns the mount")
 		{
 			VirtualFileSystem vfs;
 			REQUIRE(vfs.Mount("cache", CreateScope<MemoryMount>()).has_value());
@@ -180,7 +202,7 @@ namespace Engine {
 			CHECK(vfs.IsMounted("cache"));
 		}
 
-		TEST_CASE("VirtualFileSystem: ReadText validates UTF-8" * doctest::skip(true))
+		TEST_CASE("VirtualFileSystem: ReadText validates UTF-8")
 		{
 			VirtualFileSystem vfs;
 			REQUIRE(vfs.Mount("project", CreateScope<MemoryMount>()).has_value());
@@ -191,7 +213,7 @@ namespace Engine {
 			CHECK(ErrorCodeOf(vfs.ReadText(Path("project://Bad.txt"))) == ErrorCode::Validation);
 		}
 
-		TEST_CASE("VirtualFileSystem: Move within a scheme succeeds and across schemes is InvalidArgument" * doctest::skip(true))
+		TEST_CASE("VirtualFileSystem: Move within a scheme succeeds and across schemes is InvalidArgument")
 		{
 			VirtualFileSystem vfs;
 			REQUIRE(vfs.Mount("project", CreateScope<MemoryMount>()).has_value());
@@ -204,7 +226,7 @@ namespace Engine {
 			CHECK(vfs.ReadText(Path("project://B.txt")) == std::string("a"));
 		}
 
-		TEST_CASE("VirtualFileSystem: Open streams a file in chunks" * doctest::skip(true))
+		TEST_CASE("VirtualFileSystem: Open streams a file in chunks")
 		{
 			VirtualFileSystem vfs;
 			REQUIRE(vfs.Mount("project", CreateScope<MemoryMount>()).has_value());

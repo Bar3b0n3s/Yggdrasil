@@ -7,10 +7,11 @@
 // these instead; Lint.py bans std::sin and friends there.
 //
 // Contract for every function, for float and double:
-//   - In-house polynomial implementations, written in the style of Jolt's Trigonometry.h (MIT, attributed in
-//     LICENSES.md), built only from IEEE-exact operations: + - * /, sqrt, floor, frexp/ldexp and bit manipulation (no fused
-//     multiply-add). The project compiles with precise floating point and no contraction (§2.2), so a given input gives
-//     bit-identical output on every platform, compiler and configuration (Debug, Release, Dist).
+//   - In-house implementations (tables, short polynomials and double-double arithmetic, with Cody-Waite and exact
+//     integer Payne-Hanek argument reduction), built only from IEEE-exact operations: + - * /, sqrt, floor,
+//     frexp/ldexp, exact integer arithmetic, integer/floating conversions and bit manipulation (no fused multiply-add).
+//     The project compiles with precise floating point and no contraction (§2.2), so a given input gives bit-identical
+//     output on every platform, compiler and configuration (Debug, Release, Dist).
 //   - Accuracy: within 2 ULP of the C++ standard library result over the domains the DetMath tests sample
 //     (Tests/Source/Engine/Core/DetMathTests.cpp).
 //   - Special values follow the C standard (Annex F): NaN in gives NaN out; Sin/Cos/Tan of +-Inf, ASin/ACos outside

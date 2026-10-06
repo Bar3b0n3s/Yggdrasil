@@ -2,6 +2,7 @@
 
 #include "Engine/Core/Base.h"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -39,6 +40,12 @@ namespace Engine {
 		// The digest of everything hashed since construction or Reset. Does not change the state: more Update calls may
 		// follow.
 		[[nodiscard]] uint64_t Digest() const;
+	private:
+		std::array<uint64_t, 4> m_Accumulators{};
+		std::array<std::byte, 32> m_Buffer{}; // the bytes of an incomplete 32-byte stripe
+		uint64_t m_Seed = 0;
+		uint64_t m_TotalLength = 0;
+		size_t m_BufferSize = 0;
 	};
 
 	// Hash64(seed, value) = XXH64(8 little-endian bytes of value, seed). Combines two 64-bit identities: runtime UUIDs

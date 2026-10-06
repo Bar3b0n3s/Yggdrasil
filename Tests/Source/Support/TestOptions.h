@@ -8,10 +8,12 @@
 // The Tests binary's own command-line options (Architecture §15.2), next to doctest's. The Tests main
 // (Tests/Source/TestMain.cpp) does, in order:
 //   1. ParseTestOptions; a malformed option exits with code 2 (UsageError).
-//   2. Log::Initialize with the console sink (stderr) and Profiler::Initialize; InstallRecordingAssertHandler.
-//   3. With --death-test=<name>: return RunDeathTestBody(name) (DeathTest.h); doctest does not run.
+//   2. Log::Initialize with the console sink (stderr); a failure exits with code 3 (InitFailed), because without the
+//      log ExpectLog would see no entries. Then Profiler::Initialize and InstallRecordingAssertHandler.
+//   3. With --death-test=<name>: RunDeathTestBody(name) (DeathTest.h) instead of doctest, then shut down the profiler and
+//      the log and return its exit code.
 //   4. Otherwise: InstallExpectLogListener, StartTestTimeoutWatchdog, run doctest with the remaining arguments, stop the
-//      watchdog, shut down the profiler and the log, and return doctest's result.
+//      watchdog, UninstallExpectLogListener, shut down the profiler and the log, and return doctest's result.
 // M2 adds --windowed-child=<name>, M5 --require-gpu and the golden-image options, each with its own field here.
 
 namespace Engine {

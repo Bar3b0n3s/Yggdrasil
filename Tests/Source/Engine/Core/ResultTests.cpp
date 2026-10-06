@@ -46,6 +46,32 @@ namespace Engine {
 		return std::format("{} is fine", value);
 	}
 
+	static Result<Scope<int>> MakeBoxed(int value)
+	{
+		if (value < 0)
+			return MakeError(ErrorCode::InvalidArgument, "{} is negative", value);
+		return CreateScope<int>(value);
+	}
+
+	// A move-only value passes through ENGINE_TRY_ASSIGN, twice in one function.
+	static Result<int> SumBoxed(int first, int second)
+	{
+		ENGINE_TRY_ASSIGN(Scope<int> firstBox, MakeBoxed(first));
+		ENGINE_TRY_ASSIGN(const Scope<int> secondBox, MakeBoxed(second));
+		return *firstBox + *secondBox;
+	}
+
+	// ENGINE_TRY on a named Result propagates its error without consuming the caller's other state.
+	static Status CheckAll(const std::vector<int>& values)
+	{
+		for (const int value : values)
+		{
+			const Result<int> parsed = ParsePositive(value);
+			ENGINE_TRY(parsed);
+		}
+		return {};
+	}
+
 	TEST_SUITE("Core")
 	{
 		TEST_CASE("Result: ENGINE_TRY propagates the error with context")
@@ -115,6 +141,40 @@ namespace Engine {
 			CHECK(status.error().GetMessageText() == "waited 250 ms for 'Editor.lock'");
 			CHECK(status.error().GetContexts().empty());
 			CHECK_FALSE(status.error().GetLocation().IsSet());
+		}
+
+		TEST_CASE("Result: ENGINE_TRY_ASSIGN moves a move-only value out of the result")
+		{
+			const Result<int> sum = SumBoxed(20, 22);
+			REQUIRE(sum.has_value());
+			CHECK(*sum == 42);
+
+			const Result<int> failedFirst = SumBoxed(-1, 2);
+			REQUIRE_FALSE(failedFirst.has_value());
+			CHECK(failedFirst.error().GetMessageText() == "-1 is negative");
+
+			const Result<int> failedSecond = SumBoxed(1, -2);
+			REQUIRE_FALSE(failedSecond.has_value());
+			CHECK(failedSecond.error().GetMessageText() == "-2 is negative");
+		}
+
+		TEST_CASE("Result: ENGINE_TRY accepts a named result and returns its error")
+		{
+			CHECK(CheckAll({ 1, 2, 3 }).has_value());
+
+			const Status failed = CheckAll({ 1, -5, 3 });
+			REQUIRE_FALSE(failed.has_value());
+			CHECK(failed.error().GetCode() == ErrorCode::InvalidArgument);
+			CHECK(failed.error().GetMessageText() == "-5 is not positive");
+		}
+
+		TEST_CASE("Result: WithContext appends to a failed result of any value type")
+		{
+			const Result<Scope<int>> boxed = WithContext(MakeBoxed(-3), "while boxing");
+			REQUIRE_FALSE(boxed.has_value());
+			REQUIRE(boxed.error().GetContexts().size() == 1);
+			CHECK(boxed.error().GetContexts()[0] == "while boxing");
+			CHECK(boxed.error().ToString() == "InvalidArgument: -3 is negative; while boxing");
 		}
 
 		TEST_CASE("Result: WithContext leaves a success untouched")

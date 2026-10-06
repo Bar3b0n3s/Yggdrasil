@@ -6,6 +6,7 @@
 #include "Engine/Core/VirtualFileSystem.h"
 
 #include <filesystem>
+#include <shared_mutex>
 #include <span>
 #include <vector>
 
@@ -19,9 +20,15 @@ namespace Engine {
 	//     default KeepBackup = true; cache://, enginecache:// and user:// pass KeepBackup = false.
 	//   - Every access applies the IMount case policy through FileSystem::VerifyCase, including the final component of
 	//     a write, a CreateDirectories or a Move destination, so a reference that would break on Linux breaks
-	//     identically on Windows and macOS, and no host silently overwrites a file spelled differently.
+	//     identically on Windows and macOS. A new name that no directory entry spells, even ignoring ASCII case, is
+	//     also checked on the host: when the host resolves it to an existing entry (non-ASCII case folding on NTFS
+	//     and APFS, Unicode normalization on APFS and HFS+, 8.3 short names on Windows), it is a Validation error
+	//     naming that entry. No host silently overwrites a file spelled differently; hosts that do not alias the name
+	//     create a new entry.
 	//   - Open reads the whole file and streams that snapshot (IFileStream), so no host file stays open behind a stream.
-	// Thread-safe.
+	// Thread-safe: reads hold the mount's lock shared and mutations hold it exclusively, so the case checks and the
+	// change of one call are atomic with respect to the other calls on this mount (IMount). Other processes, and other
+	// mounts of the same directory, are not covered.
 	class NativeDirectoryMount final : public IMount
 	{
 	public:
@@ -51,6 +58,7 @@ namespace Engine {
 		std::filesystem::path m_Root;
 		MountAccess m_Access = MountAccess::ReadWrite;
 		AtomicWriteOptions m_WriteOptions;
+		mutable std::shared_mutex m_Mutex; // shared by reads, exclusive for mutations; mutable so the const reads can lock it
 	};
 
 }

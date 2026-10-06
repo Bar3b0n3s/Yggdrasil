@@ -14,8 +14,9 @@
 // Host file system access (Architecture §4.10). Engine code normally goes through the VirtualFileSystem; FileSystem is
 // what NativeDirectoryMount, the log file, crash reports and tools build on. Every std::filesystem call uses its
 // std::error_code overload (lint-enforced); OS errors become Io, NotFound, AlreadyExists or PermissionDenied errors
-// whose message names the path and the OS reason. Paths are UTF-8. All functions are safe to call from any thread;
-// concurrent writes to the same file are not coordinated.
+// whose message names the path and the OS reason. A path below a file names nothing on every host (NotFound; for
+// CreateDirectories, AlreadyExists naming the file in the way). Paths are UTF-8. All functions are safe to call from any
+// thread; concurrent writes to the same file are not coordinated.
 
 namespace Engine {
 
@@ -86,7 +87,8 @@ namespace Engine {
 
 		// Renames a file or directory. A destination that differs from `from` only in letter case names the source
 		// itself on a case-insensitive host; it is renamed in place on every host (a case-only rename), never reported
-		// as existing. Errors: NotFound (source), AlreadyExists (destination exists), PermissionDenied, Io.
+		// as existing. Errors: NotFound (source), AlreadyExists (destination exists), InvalidArgument (moving a directory
+		// into its own subtree), PermissionDenied, Io.
 		[[nodiscard]] static Status Move(const std::filesystem::path& from, const std::filesystem::path& to);
 
 		// The entries directly in `directory` (recursive: everything below it), as paths that start with `directory`,
@@ -99,8 +101,10 @@ namespace Engine {
 		// this spelling, comparing every component with the directory entries on disk. Errors: NotFound when no entry
 		// matches even ignoring case; Validation "case mismatch: '<given>' is '<on disk>' on disk" when a component
 		// matches only ignoring case (ASCII case folding). Behaves the same on case-sensitive and case-insensitive hosts.
-		// NativeDirectoryMount also checks the target of every write, directory creation and move with it: NotFound for
-		// the final component means the name is free, Validation means another spelling of it exists.
+		// NativeDirectoryMount also checks the target of every write, directory creation and move with it: Validation
+		// means another spelling of it exists; NotFound for the final component means that no entry spells it, and the
+		// mount then asks the host whether it still resolves the name to an existing entry (non-ASCII case folding,
+		// Unicode normalization, 8.3 short names), which this function does not detect.
 		[[nodiscard]] static Status VerifyCase(const std::filesystem::path& root, std::string_view relativePath);
 	};
 

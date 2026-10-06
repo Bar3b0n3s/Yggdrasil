@@ -50,3 +50,6 @@ __pycache__/
 # Logs / runtime artifacts
 *.log
 imgui.ini
+
+# Agent worktrees (parallel milestone streams)
+/.claude/worktrees/

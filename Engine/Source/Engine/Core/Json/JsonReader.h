@@ -31,12 +31,14 @@ namespace Engine {
 	class JsonReader
 	{
 	public:
-		// Parses `text` as strict RFC 8259 JSON: exactly one value (surrounding whitespace allowed), no comments, no
-		// trailing commas, no NaN or Infinity literals, valid UTF-8 throughout, no duplicate key within an object, and
-		// arrays and objects nested at most MaxJsonDepth deep. Errors: Parse, located at the Line and Column (1-based;
-		// columns count bytes) of the first problem (for too deep input, the bracket that opens level MaxJsonDepth + 1);
-		// a duplicate key is also located at the member's JSON pointer. Never throws (nlohmann's non-throwing SAX path)
-		// and never recurses per nesting level while parsing.
+		// Parses `text` as strict RFC 8259 JSON: exactly one value (surrounding whitespace and a leading UTF-8 byte order
+		// mark allowed; the mark is not kept), no comments, no trailing commas, no NaN or Infinity literals, valid UTF-8
+		// throughout, no duplicate key within an object, integer literals (no fraction or exponent) within the int64 or
+		// uint64 range, and arrays and objects nested at most MaxJsonDepth deep. Errors: Parse, located at the Line and
+		// Column (1-based; columns count bytes) of the first problem (for too deep input, the bracket that opens level
+		// MaxJsonDepth + 1; for a syntax error, where the parser stopped, which can be one token after the problem); a
+		// duplicate key or an out-of-range integer is also located at the value's JSON pointer. Never throws (nlohmann's
+		// non-throwing parse plus is_discarded()) and never recurses per nesting level while parsing.
 		[[nodiscard]] static Result<Json> Parse(std::string_view text);
 
 		// A reader of `value`, whose JSON pointer is `pointer` ("" for a document root).

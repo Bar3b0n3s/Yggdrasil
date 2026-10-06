@@ -57,8 +57,9 @@ namespace Engine {
 
 	// Installs `handler` as the process-wide assert handler (process-level state, Architecture §3 rule 5) and returns
 	// the previous one. nullptr restores DefaultAssertHandler. Thread-safe; the handler in effect when an assertion
-	// fails is the one that runs. ProcessContext (M2) installs the handler that also breaks into an attached debugger
-	// and writes a crash report (§4.13); the Tests main installs the recording handler (Tests/Source/Support).
+	// fails is the one that runs. ProcessContext (M2) keeps DefaultAssertHandler and adds the debugger break and the
+	// crash report (§4.13) through its FatalErrorHandler (FatalError.h; ADR 0003 decision 21), so they also run in
+	// binaries that replace this handler; the Tests main installs the recording handler (Tests/Source/Support).
 	AssertHandler SetAssertHandler(AssertHandler handler);
 
 	// The handler currently installed (DefaultAssertHandler when none was set).
@@ -72,7 +73,7 @@ namespace Engine {
 	//     "Assertion failed: <expression>: <message> (<file>:<line>, <function>)"
 	//     "Verify failed: <expression>: <message> (<file>:<line>, <function>)"
 	//     "Unreachable code reached: <message> (<file>:<line>, <function>)"
-	// An empty message drops ": <message>".
+	// An empty message drops ": <message>", and an empty function name gives "(<file>:<line>)".
 	[[nodiscard]] std::string FormatAssertInfo(const AssertInfo& info);
 
 	// "Assert", "Verify" or "Unreachable".

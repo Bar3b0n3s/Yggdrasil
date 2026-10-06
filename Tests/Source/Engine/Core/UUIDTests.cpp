@@ -9,7 +9,7 @@ namespace Engine {
 
 	TEST_SUITE("Core")
 	{
-		TEST_CASE("UUID: hex round trip and 6-digit prefix matching" * doctest::skip(true))
+		TEST_CASE("UUID: hex round trip and 6-digit prefix matching")
 		{
 			const UUID uuid(0x5d1c9a7e33b04f12);
 			CHECK(uuid.ToString() == "5d1c9a7e33b04f12");
@@ -32,7 +32,7 @@ namespace Engine {
 			CHECK_FALSE(uuid.MatchesPrefix("d1c9a7"));
 		}
 
-		TEST_CASE("UUID: the invalid UUID is zero and formats as sixteen zeros" * doctest::skip(true))
+		TEST_CASE("UUID: the invalid UUID is zero and formats as sixteen zeros")
 		{
 			constexpr UUID Invalid;
 			static_assert(!Invalid.IsValid());
@@ -45,7 +45,7 @@ namespace Engine {
 			CHECK_FALSE(parsed->IsValid());
 		}
 
-		TEST_CASE("UUID: FromString accepts exactly sixteen hex digits" * doctest::skip(true))
+		TEST_CASE("UUID: FromString accepts exactly sixteen hex digits")
 		{
 			CHECK_FALSE(UUID::FromString("").has_value());
 			CHECK_FALSE(UUID::FromString("5d1c9a7e33b04f1").has_value());   // 15 digits
@@ -54,10 +54,18 @@ namespace Engine {
 			CHECK_FALSE(UUID::FromString(" 5d1c9a7e33b04f1").has_value());
 			CHECK_FALSE(UUID::FromString("5d1c9a7e33b04f1z").has_value());
 			CHECK_FALSE(UUID::FromString("-d1c9a7e33b04f12").has_value());
+			CHECK_FALSE(UUID::FromString("5d1c9a7e33b04f\xc3\xa9").has_value()); // 16 bytes, the last two a UTF-8 letter
+			std::string withNul = "5d1c9a7e33b04f12";
+			withNul[8] = '\0';
+			CHECK_FALSE(UUID::FromString(withNul).has_value());
 			CHECK(UUID::FromString("ffffffffffffffff") == UUID(0xffffffffffffffff));
+			CHECK(UUID::FromString("0123456789ABCdef") == UUID(0x0123456789abcdef));
+			CHECK_FALSE(UUID::IsValidPrefix("5d1c9\xc3\xa9"));
+			CHECK_FALSE(UUID::IsValidPrefix(""));
+			CHECK_FALSE(UUID(0x5d1c9a7e33b04f12).MatchesPrefix("5d1c9 "));
 		}
 
-		TEST_CASE("UUID: ordering and hashing follow the numeric value" * doctest::skip(true))
+		TEST_CASE("UUID: ordering and hashing follow the numeric value")
 		{
 			const std::set<UUID> sorted = { UUID(0x30), UUID(0x10), UUID(0x20) };
 			std::vector<uint64_t> values;
@@ -70,7 +78,7 @@ namespace Engine {
 			CHECK(std::hash<UUID>()(UUID(99)) == std::hash<UUID>()(UUID(99)));
 		}
 
-		TEST_CASE("UUID: std::format writes the sixteen-digit text form" * doctest::skip(true))
+		TEST_CASE("UUID: std::format writes the sixteen-digit text form")
 		{
 			CHECK(std::format("{}", UUID(0xabc)) == "0000000000000abc");
 			CHECK(std::format("entity {}", UUID(0x5d1c9a7e33b04f12)) == "entity 5d1c9a7e33b04f12");
