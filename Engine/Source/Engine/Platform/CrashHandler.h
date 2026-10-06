@@ -19,7 +19,9 @@
 // report written"), and ends the process with exit code 4 (ExitCode::Crash), like every other fatal path. On Windows the
 // report is written by a reporter thread that the crash waits for only a bounded time, because the crash may have left
 // the heap or loader lock held; when that time runs out the line says "...; incomplete report written to <path>" (or
-// "...; no report written") and the process still exits with code 4.
+// "...; no report written") and the process still exits with code 4. A crash inside the Windows handler itself adds
+// "; crash handler fault on the crashing thread: <fault>" (or "...on the reporter thread...") after the reason, in the
+// line and in the report's Reason; a crash inside WriteFatalErrorReport keeps the fatal error as the reason.
 // FatalError (asserts, device loss, ...) does not crash: ProcessContext's fatal-error handler calls WriteFatalErrorReport
 // instead. The OS code lives in Platform/Windows/CrashHandlerWindows.cpp and Platform/Posix/CrashHandlerPosix.cpp.
 //
@@ -75,8 +77,11 @@ namespace Engine {
 		CrashHandler() = delete;
 
 		// Installs the OS handlers, preallocates the buffers, registers the log listener and creates the report directory.
-		// Installing twice without Uninstall in between is a programmer error (asserted). Main thread. Errors: Io when the
-		// report directory cannot be created or a handler cannot be installed; nothing stays installed on failure.
+		// On Windows it also starts the reporter thread and gives the calling thread and every thread started until
+		// Uninstall a 64 KiB stack guarantee for their own stack overflow, but at most a sixteenth of the thread's stack
+		// (those threads keep it after Uninstall). Installing twice without Uninstall in between is a programmer error
+		// (asserted). Main thread. Errors: Io when the report directory cannot be created or a handler cannot be installed;
+		// nothing stays installed on failure.
 		[[nodiscard]] static Status Install(const CrashHandlerSpecification& specification);
 
 		// Restores the previous OS handlers and removes the log listener. Idempotent. Main thread.

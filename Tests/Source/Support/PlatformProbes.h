@@ -3,9 +3,13 @@
 #include "Engine/Core/Base.h"
 #include "Engine/Core/Result.h"
 
+#include <cstddef>
+#include <cstdint>
 #include <filesystem>
+#include <memory>
 #include <span>
 #include <string>
+#include <string_view>
 
 // OS facilities that platform tests need and the engine deliberately does not offer: they reproduce a fault, or an
 // observer, that engine code must cope with. PlatformProbes.cpp is the only Tests file with OS headers (its own rule in
@@ -32,6 +36,33 @@ namespace Engine {
 		// and _wfsopen with _SH_DENYWR do, so opening it fails while any other handle to the file has write access.
 		// Errors: Io.
 		[[nodiscard]] Result<std::string> ReadFileDenyingWriters(const std::filesystem::path& file);
+
+		// The bytes of stack the calling thread keeps for its own stack overflow (SetThreadStackGuarantee's current
+		// value); 0 when the thread keeps only the system's guard region. Errors: Io when the query fails.
+		[[nodiscard]] Result<uint32_t> GetThreadStackGuarantee();
+
+		// GetThreadStackGuarantee() on a new thread (CreateThread) whose stack reserves `stackBytes`, read as soon as the
+		// thread runs. Errors: Io when the thread cannot be started, and the errors of GetThreadStackGuarantee.
+		[[nodiscard]] Result<uint32_t> GetNewThreadStackGuarantee(size_t stackBytes);
+
+		// Releases pages that VirtualAlloc reserved and committed.
+		struct PageReleaser
+		{
+			void operator()(char* pages) const;
+		};
+
+		// Text whose last bytes fault when read, and the pages that hold it (released with the object).
+		struct UnreadableText
+		{
+			std::unique_ptr<char, PageReleaser> Pages{};
+			std::string_view Text{};
+		};
+
+		// Text of `readableBytes` 'x' characters followed by `unreadableBytes` (at most one page) that fault when read: the
+		// pages are committed and filled, then the page after the readable bytes is made inaccessible (VirtualProtect with
+		// PAGE_NOACCESS), so only the OS's access check sets them apart from ordinary memory. For a crash child that hands
+		// the text to code that reads it. Errors: InvalidArgument when `unreadableBytes` is 0 or more than a page; Io.
+		[[nodiscard]] Result<UnreadableText> AllocateTextEndingInUnreadableBytes(size_t readableBytes, size_t unreadableBytes);
 #else
 		// Opens `file` for reading without close-on-exec, as a library that calls fopen does, and returns the descriptor:
 		// `minimum` or the lowest free one above it, so that a child process is unlikely to reuse the number for a

@@ -10,7 +10,10 @@
 
 // The probes that reproduce a fault are exercised by the tests that need them: LockProcessHeap by "CrashHandler: a crash
 // that leaves the heap locked still exits with code 4", StartProcessInheritingOutput by "Process: Run reports output that
-// a process the child started keeps open, without killing anything".
+// a process the child started keeps open, without killing anything", GetThreadStackGuarantee and
+// GetNewThreadStackGuarantee by "CrashHandler: threads started while the handler is installed keep 64 KiB of stack for
+// their own overflow on Windows", and the bytes of AllocateTextEndingInUnreadableBytes that fault by "CrashHandler: a
+// fault inside the crash handler still prints the line and exits with code 4 on Windows".
 
 namespace Engine {
 
@@ -46,6 +49,22 @@ namespace Engine {
 			const Result<std::string> refused = Test::ReadFileDenyingWriters(file);
 			REQUIRE_FALSE(refused.has_value());
 			CHECK(refused.error().GetCode() == ErrorCode::Io);
+		}
+
+		TEST_CASE("PlatformProbes: AllocateTextEndingInUnreadableBytes gives text of the requested length that starts readable")
+		{
+			const Result<Test::UnreadableText> text = Test::AllocateTextEndingInUnreadableBytes(100, 16);
+			REQUIRE_MESSAGE(text.has_value(), text.error().ToString());
+			CHECK(text->Text.size() == 116);
+			// Only the readable start is read here; the rest would crash this process.
+			CHECK(text->Text.substr(0, 100) == std::string(100, 'x'));
+
+			const Result<Test::UnreadableText> none = Test::AllocateTextEndingInUnreadableBytes(100, 0);
+			REQUIRE_FALSE(none.has_value());
+			CHECK(none.error().GetCode() == ErrorCode::InvalidArgument);
+			const Result<Test::UnreadableText> tooMany = Test::AllocateTextEndingInUnreadableBytes(0, 1024 * 1024);
+			REQUIRE_FALSE(tooMany.has_value());
+			CHECK(tooMany.error().GetCode() == ErrorCode::InvalidArgument);
 		}
 #else
 		TEST_CASE("PlatformProbes: OpenInheritableDescriptor opens at or above its minimum until closed")

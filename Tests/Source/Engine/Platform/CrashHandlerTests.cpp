@@ -13,6 +13,7 @@
 #include "Support/TestOptions.h"
 #include "Support/Utf8Path.h"
 
+#include <atomic>
 #include <cstdio>
 #include <cstdlib>
 #include <limits>
@@ -114,6 +115,16 @@ namespace Engine {
 	}
 
 #if defined(ENGINE_PLATFORM_WINDOWS)
+	// The readable start of the faulting message of Platform/FaultsWhileWritingAFatalErrorReport: far more than the reason
+	// a crash inside WriteFatalErrorReport keeps, so copying that reason never reaches the bytes that fault.
+	static constexpr size_t FaultingMessageReadableBytes = 16 * 1024;
+
+	// The guarantee in bytes, or the error.
+	static std::string DescribeStackGuarantee(const Result<uint32_t>& guarantee)
+	{
+		return guarantee.has_value() ? std::to_string(*guarantee) : guarantee.error().ToString();
+	}
+
 	// Overflows the stack of a thread other than the one that installed the handler (POSIX covers only the installing
 	// thread with its alternate stack, ADR 0005 decision 22).
 	ENGINE_DEATH_TEST("Platform/OverflowsAnotherThreadsStack")
@@ -125,6 +136,83 @@ namespace Engine {
 			ENGINE_CORE_ERROR("The recursion ended: {}", RecurseUntilTheStackOverflows(0, std::numeric_limits<uint64_t>::max()));
 		});
 		overflowing.join();
+	}
+
+	// Overflows the stack of a thread that was started before the handler was installed, so it keeps only the system's
+	// guard region (ADR 0005 decision 25): the hand-off to the reporter must fit in what the exception dispatch leaves.
+	ENGINE_DEATH_TEST("Platform/OverflowsAThreadStartedBeforeInstall")
+	{
+		CrashHandler::Uninstall();
+		std::atomic<bool> released{ false };
+		bool isInstalled = false; // written before `released`
+		std::thread overflowing([&released, &isInstalled]()
+		{
+			const Result<uint32_t> guarantee = Test::GetThreadStackGuarantee();
+			released.wait(false);
+			ENGINE_CORE_WARN("Guarantee of the overflowing thread: [{}]", DescribeStackGuarantee(guarantee));
+			if (isInstalled)
+				ENGINE_CORE_ERROR("The recursion ended: {}", RecurseUntilTheStackOverflows(0, std::numeric_limits<uint64_t>::max()));
+		});
+		isInstalled = InstallTestCrashHandler();
+		released.store(true);
+		released.notify_one();
+		overflowing.join();
+	}
+
+	// Logs the stack that the installing thread, threads started while the handler is installed (one with a 256 KiB
+	// stack, one with a 4 MiB stack) and one started after Uninstall keep for their own stack overflow, then returns.
+	ENGINE_DEATH_TEST("Platform/ReportsStackGuarantees")
+	{
+		if (!InstallTestCrashHandler())
+			return;
+		const auto getNewThreadsGuarantee = []()
+		{
+			Result<uint32_t> guarantee = 0u;
+			std::thread thread([&guarantee]()
+			{
+				guarantee = Test::GetThreadStackGuarantee();
+			});
+			thread.join();
+			return guarantee;
+		};
+		ENGINE_CORE_WARN("Installing thread: [{}]", DescribeStackGuarantee(Test::GetThreadStackGuarantee()));
+		ENGINE_CORE_WARN("Started while installed: [{}]", DescribeStackGuarantee(getNewThreadsGuarantee()));
+		ENGINE_CORE_WARN("Started with a small stack: [{}]", DescribeStackGuarantee(Test::GetNewThreadStackGuarantee(256 * 1024)));
+		ENGINE_CORE_WARN("Started with a large stack: [{}]", DescribeStackGuarantee(Test::GetNewThreadStackGuarantee(4 * 1024 * 1024)));
+		CrashHandler::Uninstall();
+		ENGINE_CORE_WARN("Started after Uninstall: [{}]", DescribeStackGuarantee(getNewThreadsGuarantee()));
+	}
+
+	// Hands WriteFatalErrorReport a message that faults when read: the crash handler itself crashes before it holds a copy
+	// of the fatal error's reason.
+	ENGINE_DEATH_TEST("Platform/FaultsReadingAFatalErrorMessage")
+	{
+		if (!InstallTestCrashHandler())
+			return;
+		const Result<Test::UnreadableText> message = Test::AllocateTextEndingInUnreadableBytes(0, 16);
+		if (!message.has_value())
+		{
+			ENGINE_CORE_ERROR("The crash child cannot allocate the message: {}", message.error());
+			return;
+		}
+		const Result<std::filesystem::path> report = CrashHandler::WriteFatalErrorReport(FatalErrorKind::Assert, message->Text);
+		ENGINE_CORE_ERROR("The fatal error report returned: [{}]", DescribeReportResult(report));
+	}
+
+	// Hands WriteFatalErrorReport a message of FaultingMessageReadableBytes readable bytes followed by bytes that fault when
+	// read: the crash handler copies the start of the reason, then crashes while it writes the report.
+	ENGINE_DEATH_TEST("Platform/FaultsWhileWritingAFatalErrorReport")
+	{
+		if (!InstallTestCrashHandler())
+			return;
+		const Result<Test::UnreadableText> message = Test::AllocateTextEndingInUnreadableBytes(FaultingMessageReadableBytes, 16);
+		if (!message.has_value())
+		{
+			ENGINE_CORE_ERROR("The crash child cannot allocate the message: {}", message.error());
+			return;
+		}
+		const Result<std::filesystem::path> report = CrashHandler::WriteFatalErrorReport(FatalErrorKind::Assert, message->Text);
+		ENGINE_CORE_ERROR("The fatal error report returned: [{}]", DescribeReportResult(report));
 	}
 
 	// Crashes while this thread holds the process heap's lock, as an access violation inside HeapAlloc on a corrupt heap
@@ -419,6 +507,8 @@ namespace Engine {
 			INFO("child stderr: ", standardError);
 			CHECK(child->Result.ExitCode == ExitCode::Crash);
 			CHECK_FALSE(standardError.contains("The recursion ended"));
+			// The handler finished on its normal path: nothing faulted inside it.
+			CHECK_FALSE(standardError.contains("crash handler fault"));
 #if defined(ENGINE_PLATFORM_WINDOWS)
 			CHECK(standardError.contains(std::format("Crash: {}", StackOverflowReason)));
 #else
@@ -440,9 +530,103 @@ namespace Engine {
 			INFO("child stderr: ", child->Result.StandardError);
 			CHECK(child->Result.ExitCode == ExitCode::Crash);
 			CHECK(child->Result.StandardError.contains(std::format("Crash: {}", StackOverflowReason)));
+			// The overflowed thread kept enough stack to hand the crash over: nothing faulted inside the handler.
+			CHECK_FALSE(child->Result.StandardError.contains("crash handler fault"));
 			const Result<std::string> report = ReadHandlerChildReport(*child, reports);
 			REQUIRE_MESSAGE(report.has_value(), report.error().ToString());
 			CHECK(report->contains(std::format("\nReason: {}", StackOverflowReason)));
+		}
+
+		TEST_CASE("CrashHandler: a stack overflow on a thread started before Install is reported on Windows")
+		{
+			// The thread keeps only the system's guard region, which the exception dispatch shares with the crash path up to
+			// the hand-off to the reporter.
+			Test::TempDirectory directory("CrashOverflowEarlyThread");
+			const std::filesystem::path reports = directory / "Crashes";
+			const Result<HandlerChildResult> child =
+				RunHandlerChild("Platform/OverflowsAThreadStartedBeforeInstall", Test::PathToUtf8(reports));
+			REQUIRE_MESSAGE(child.has_value(), child.error().ToString());
+			const std::string& standardError = child->Result.StandardError;
+			INFO("child stderr: ", standardError);
+			CHECK(Test::FindBracketedValue(standardError, "Guarantee of the overflowing thread: ") == "0");
+			CHECK(child->Result.ExitCode == ExitCode::Crash);
+			CHECK_FALSE(standardError.contains("The recursion ended"));
+			CHECK(standardError.contains(std::format("Crash: {}", StackOverflowReason)));
+			CHECK_FALSE(standardError.contains("crash handler fault"));
+			const Result<std::string> report = ReadHandlerChildReport(*child, reports);
+			REQUIRE_MESSAGE(report.has_value(), report.error().ToString());
+			CHECK(report->contains(std::format("\nReason: {}", StackOverflowReason)));
+		}
+
+		TEST_CASE("CrashHandler: threads started while the handler is installed keep 64 KiB of stack for their own overflow on Windows")
+		{
+			// Without it a thread keeps only the system's guard region (12 KiB), which the exception dispatch and the crash
+			// path share after an overflow; the dispatch alone takes more of it on CPUs with larger processor state.
+			const Result<HandlerChildResult> child = RunHandlerChild("Platform/ReportsStackGuarantees", "");
+			REQUIRE_MESSAGE(child.has_value(), child.error().ToString());
+			const std::string& standardError = child->Result.StandardError;
+			INFO("child stderr: ", standardError);
+			CHECK(child->Result.ExitCode == ExitCode::Failed); // the body returns: "returned without dying"
+			CHECK(Test::FindBracketedValue(standardError, "Installing thread: ") == "65536");
+			CHECK(Test::FindBracketedValue(standardError, "Started while installed: ") == "65536");
+			// A thread gives at most a sixteenth of its stack, and never more than 64 KiB (a sixteenth of 4 MiB is 256 KiB).
+			CHECK(Test::FindBracketedValue(standardError, "Started with a small stack: ") == "16384");
+			CHECK(Test::FindBracketedValue(standardError, "Started with a large stack: ") == "65536");
+			CHECK(Test::FindBracketedValue(standardError, "Started after Uninstall: ") == "0");
+		}
+
+		TEST_CASE("CrashHandler: a fault inside the crash handler still prints the line and exits with code 4 on Windows")
+		{
+			// Before, the second fault on the thread that held the crash report ended the process at once with code 4,
+			// without the line or a report.
+			Test::TempDirectory directory("CrashHandlerFault");
+			const std::filesystem::path reports = directory / "Crashes";
+			const Result<HandlerChildResult> child = RunHandlerChild("Platform/FaultsReadingAFatalErrorMessage", Test::PathToUtf8(reports));
+			REQUIRE_MESSAGE(child.has_value(), child.error().ToString());
+			const std::string& standardError = child->Result.StandardError;
+			INFO("child stderr: ", standardError);
+			CHECK(child->Result.ExitCode == ExitCode::Crash);
+			CHECK_FALSE(standardError.contains("The fatal error report returned"));
+			// The handler faulted before it held the fatal error's reason, so the fault is the reason too.
+			constexpr std::string_view Fault = "Access violation (0xc0000005)";
+			const std::string handlerFault = std::format("; crash handler fault on the crashing thread: {} at 0x", Fault);
+			CHECK(standardError.contains(std::format("Crash: {} reading address 0x", Fault)));
+			CHECK(standardError.contains(handlerFault));
+			const Result<std::string> report = ReadHandlerChildReport(*child, reports);
+			REQUIRE_MESSAGE(report.has_value(), report.error().ToString());
+			CHECK(report->starts_with(std::format("Crash report\nReason: {} reading address 0x", Fault)));
+			CHECK(FindLineValue(*report, "\nReason: ").contains(handlerFault));
+			CHECK(report->contains("\nLast log lines:\n"));
+		}
+
+		TEST_CASE("CrashHandler: a fault while a fatal-error report is written keeps the fatal error as the reason on Windows")
+		{
+			Test::TempDirectory directory("CrashFatalFault");
+			const std::filesystem::path reports = directory / "Crashes";
+			const Result<HandlerChildResult> child =
+				RunHandlerChild("Platform/FaultsWhileWritingAFatalErrorReport", Test::PathToUtf8(reports));
+			REQUIRE_MESSAGE(child.has_value(), child.error().ToString());
+			const std::string& standardError = child->Result.StandardError;
+			INFO("child stderr: ", standardError);
+			CHECK(child->Result.ExitCode == ExitCode::Crash);
+			CHECK_FALSE(standardError.contains("The fatal error report returned"));
+			// The reason keeps the start of the message; the fault that interrupted the report follows it.
+			const std::string reason = "Fatal error (Assert): " + std::string(64, 'x');
+			const std::string handlerFault = "; crash handler fault on the crashing thread: Access violation (0xc0000005) at 0x";
+			const std::string line = FindLineValue(standardError, "Crash: ");
+			CHECK(line.starts_with(reason));
+			CHECK(line.contains(handlerFault));
+			CHECK(line.size() < FaultingMessageReadableBytes);
+
+			// The interrupted report was written again under its own name: one complete report and one minidump.
+			const Result<std::string> report = ReadHandlerChildReport(*child, reports);
+			REQUIRE_MESSAGE(report.has_value(), report.error().ToString());
+			INFO("report: ", report->substr(0, 4096));
+			CHECK(report->starts_with("Crash report\nReason: " + reason));
+			CHECK(FindLineValue(*report, "\nReason: ").contains(handlerFault));
+			CHECK(report->contains("\nStack trace:\n  #0 0x"));
+			CHECK(report->contains("\nLast log lines:\n"));
+			CHECK(Test::ListCrashFiles(reports, ".dmp").size() == 1);
 		}
 
 		TEST_CASE("CrashHandler: a crash that leaves the heap locked still exits with code 4")

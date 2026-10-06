@@ -117,10 +117,11 @@ namespace Engine {
 		// FormatCrashReportStem, so "-2" to "-16" for reports written in the same second by the same process.
 		inline constexpr uint32_t MaxCrashReportAttempts = 16;
 
-		// One crash path at a time: the first thread to enter writes the report and ends the process.
+		// One crash path at a time: the first thread to enter owns the report, and a crash ends the process once its report
+		// is done (on Windows the reporter thread writes it and ends the process for the thread that entered).
 		enum class CrashReportEntry : uint8_t
 		{
-			Entered,   // this thread writes the report; LeaveCrashReport when done (WriteFatalErrorReport returns)
+			Entered,   // this thread owns the report; LeaveCrashReport when done (WriteFatalErrorReport returns)
 			Recursive, // this thread is already writing one: the report path itself crashed
 			Busy       // another thread is writing one and will end the process
 		};

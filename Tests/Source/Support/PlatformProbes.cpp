@@ -1,6 +1,8 @@
 #include "TestsPCH.h"
 #include "Support/PlatformProbes.h"
 
+#include "Engine/Core/Assert.h"
+#include "Engine/Core/Log.h"
 #include "Support/Utf8Path.h"
 
 #if defined(ENGINE_PLATFORM_WINDOWS)
@@ -14,6 +16,7 @@
 	#endif
 #endif
 
+#include <algorithm>
 #include <cerrno>
 #include <system_error>
 #include <vector>
@@ -109,6 +112,61 @@ namespace Engine {
 				text.append(buffer.data(), read);
 			}
 			CloseHandle(handle);
+			return text;
+		}
+
+		Result<uint32_t> GetThreadStackGuarantee()
+		{
+			ULONG size = 0; // 0 asks for the current value
+			if (SetThreadStackGuarantee(&size) == FALSE)
+				return MakeError(ErrorCode::Io, "cannot query the thread's stack guarantee: {}", Utils::DescribeLastError());
+			return size;
+		}
+
+		Result<uint32_t> GetNewThreadStackGuarantee(size_t stackBytes)
+		{
+			Result<uint32_t> guarantee = 0u;
+			const HANDLE thread = CreateThread(nullptr, stackBytes, [](LPVOID parameter) -> DWORD
+			{
+				*static_cast<Result<uint32_t>*>(parameter) = GetThreadStackGuarantee();
+				return 0;
+			}, &guarantee, STACK_SIZE_PARAM_IS_A_RESERVATION, nullptr);
+			if (thread == nullptr)
+				return MakeError(ErrorCode::Io, "cannot start a thread: {}", Utils::DescribeLastError());
+			// The thread writes `guarantee` until it ends, so this frame must not end first. A wait on the handle of a thread
+			// that was just started fails only when memory is corrupt.
+			const DWORD wait = WaitForSingleObject(thread, INFINITE);
+			ENGINE_CORE_VERIFY(wait == WAIT_OBJECT_0, "Waiting for a thread failed: {}", Utils::DescribeLastError());
+			CloseHandle(thread);
+			return guarantee;
+		}
+
+		void PageReleaser::operator()(char* pages) const
+		{
+			if (VirtualFree(pages, 0, MEM_RELEASE) == FALSE)
+				ENGINE_CORE_ERROR("Releasing test pages failed: {}", Utils::DescribeLastError());
+		}
+
+		Result<UnreadableText> AllocateTextEndingInUnreadableBytes(size_t readableBytes, size_t unreadableBytes)
+		{
+			SYSTEM_INFO system{};
+			GetSystemInfo(&system);
+			const size_t pageSize = system.dwPageSize;
+			if (unreadableBytes == 0 || unreadableBytes > pageSize)
+				return MakeError(ErrorCode::InvalidArgument, "{} unreadable bytes do not fit in one page of {} bytes", unreadableBytes, pageSize);
+
+			const size_t readablePages = (readableBytes + pageSize - 1) / pageSize;
+			const size_t size = (readablePages + 1) * pageSize;
+			UnreadableText text;
+			text.Pages.reset(static_cast<char*>(VirtualAlloc(nullptr, size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE)));
+			if (text.Pages == nullptr)
+				return MakeError(ErrorCode::Io, "cannot allocate {} bytes: {}", size, Utils::DescribeLastError());
+			std::fill_n(text.Pages.get(), size, 'x');
+			char* const unreadable = text.Pages.get() + readablePages * pageSize;
+			DWORD previousProtection = 0;
+			if (VirtualProtect(unreadable, pageSize, PAGE_NOACCESS, &previousProtection) == FALSE)
+				return MakeError(ErrorCode::Io, "cannot make a page inaccessible: {}", Utils::DescribeLastError());
+			text.Text = std::string_view(unreadable - readableBytes, readableBytes + unreadableBytes);
 			return text;
 		}
 #elif defined(ENGINE_PLATFORM_LINUX) || defined(ENGINE_PLATFORM_MACOS)
