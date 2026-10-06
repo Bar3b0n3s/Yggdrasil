@@ -73,7 +73,7 @@ namespace Engine {
 			{
 				const std::array<const char*, 2> argv = { "Tests", bad };
 				const Result<Test::TestOptions> options = Test::ParseTestOptions(static_cast<int>(argv.size()), argv.data());
-				INFO("argument: ", bad);
+				INFO("argument: ", std::string(bad));
 				REQUIRE_FALSE(options.has_value());
 				CHECK(options.error().GetCode() == ErrorCode::InvalidArgument);
 				CHECK(options.error().GetMessageText().contains(std::string_view(bad).substr(0, std::string_view(bad).find('='))));
