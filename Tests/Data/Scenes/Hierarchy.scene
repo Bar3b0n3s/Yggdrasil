@@ -1,0 +1,95 @@
+{
+	"Format": "Scene",
+	"Version": 1,
+	"Name": "Hierarchy",
+	"Seed": 7,
+	"ComponentVersions": {
+		"Transform": 1
+	},
+	"Entities": [
+		{
+			"ID": "1a00000000000001",
+			"Name": "Game",
+			"Parent": null,
+			"Active": true,
+			"Tags": ["Root"],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				}
+			}
+		},
+		{
+			"ID": "1a00000000000002",
+			"Name": "Board",
+			"Parent": "1a00000000000001",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 1, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				}
+			}
+		},
+		{
+			"ID": "1a00000000000003",
+			"Name": "Cell",
+			"Parent": "1a00000000000002",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-4.5, 0, 0.25],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.5, 0.5, 0.5]
+				}
+			}
+		},
+		{
+			"ID": "1a00000000000004",
+			"Name": "Cell",
+			"Parent": "1a00000000000002",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-3.5, 0, 0.25],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.5, 0.5, 0.5]
+				}
+			}
+		},
+		{
+			"ID": "1a00000000000005",
+			"Name": "Hud",
+			"Parent": "1a00000000000001",
+			"Active": false,
+			"Tags": ["UI", "Overlay"],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				}
+			}
+		},
+		{
+			"ID": "1a00000000000006",
+			"Name": "Pivot",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [2, 0, -3],
+					"Rotation": [0, 0.6, 0, 0.8],
+					"Scale": [2, 2, 2]
+				}
+			}
+		}
+	]
+}

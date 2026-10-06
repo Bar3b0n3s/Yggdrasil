@@ -1,0 +1,399 @@
+{
+	"Format": "Scene",
+	"Version": 1,
+	"Name": "AllComponents",
+	"Seed": 42,
+	"ComponentVersions": {
+		"Transform": 1,
+		"Prefab": 1,
+		"PrefabLink": 1,
+		"MeshRenderer": 1,
+		"Camera": 1,
+		"DirectionalLight": 1,
+		"PointLight": 1,
+		"SpotLight": 1,
+		"Environment": 1,
+		"PostProcess": 1,
+		"Text": 1,
+		"RigidBody": 1,
+		"BoxCollider": 1,
+		"SphereCollider": 1,
+		"CapsuleCollider": 1,
+		"MeshCollider": 1,
+		"CharacterController": 1,
+		"AudioSource": 1,
+		"AudioListener": 1,
+		"Script": 1
+	},
+	"Entities": [
+		{
+			"ID": "2b00000000000001",
+			"Name": "World",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Environment": {
+					"Environment": "0000000000000201",
+					"Intensity": 1.5,
+					"Rotation": 90,
+					"ShowSkybox": false,
+					"SkyboxBlur": 0.25,
+					"FallbackColor": [0.1, 0.12, 0.15]
+				},
+				"PostProcess": {
+					"ExposureEV": -0.5,
+					"Tonemap": "ACES",
+					"SsaoEnabled": false,
+					"SsaoRadius": 0.75,
+					"SsaoIntensity": 1.25,
+					"SsaoQuality": "High",
+					"BloomEnabled": false,
+					"BloomIntensity": 0.08,
+					"FxaaEnabled": false
+				}
+			}
+		},
+		{
+			"ID": "2b00000000000002",
+			"Name": "MainCamera",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 5, 10],
+					"Rotation": [-0.28, 0, 0, 0.96],
+					"Scale": [1, 1, 1]
+				},
+				"Camera": {
+					"Projection": "Orthographic",
+					"VerticalFov": 45,
+					"OrthographicSize": 12.5,
+					"NearClip": 0.5,
+					"FarClip": 250,
+					"Primary": true,
+					"Clear": "Color",
+					"ClearColor": [0.2, 0.3, 0.4]
+				},
+				"AudioListener": {
+					"Primary": false
+				}
+			}
+		},
+		{
+			"ID": "2b00000000000003",
+			"Name": "Sun",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"DirectionalLight": {
+					"Color": [1, 0.95, 0.9],
+					"Intensity": 4,
+					"CastShadows": false,
+					"ShadowDistance": 80,
+					"CascadeCount": 2,
+					"CascadeSplitLambda": 0.5,
+					"LightAngle": 2,
+					"DepthBias": 1.5,
+					"NormalBias": 0.5
+				}
+			}
+		},
+		{
+			"ID": "2b00000000000004",
+			"Name": "Lamp",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"PointLight": {
+					"Color": [1, 0.5, 0.25],
+					"Intensity": 20,
+					"Range": 12,
+					"SourceRadius": 0.1
+				},
+				"SpotLight": {
+					"Color": [0.5, 0.5, 1],
+					"Intensity": 15,
+					"Range": 20,
+					"InnerConeAngle": 15,
+					"OuterConeAngle": 25,
+					"CastShadows": true,
+					"SourceRadius": 0.2
+				}
+			}
+		},
+		{
+			"ID": "2b00000000000005",
+			"Name": "Ball",
+			"Parent": null,
+			"Active": true,
+			"Tags": ["Player"],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 2, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000102",
+					"Materials": [null, "a41f0c2290b1d3e4"],
+					"CastShadows": false,
+					"ReceiveShadows": false,
+					"Visible": false
+				},
+				"RigidBody": {
+					"Type": "Kinematic",
+					"Mass": 2.5,
+					"Friction": 0.8,
+					"Restitution": 0.25,
+					"LinearDamping": 0.1,
+					"AngularDamping": 0.2,
+					"GravityFactor": 0.5,
+					"MotionQuality": "LinearCast",
+					"AllowSleeping": false,
+					"LockTranslation": [true, false, false],
+					"LockRotation": [false, true, false],
+					"Layer": "Ball",
+					"MaxLinearVelocity": 250,
+					"MaxAngularVelocity": 120,
+					"EnhancedInternalEdgeRemoval": true,
+					"InitialLinearVelocity": [1, 0, 0],
+					"InitialAngularVelocity": [0, 0, -2]
+				},
+				"SphereCollider": {
+					"Radius": 0.5,
+					"Offset": [0, 0.1, 0],
+					"IsTrigger": false
+				},
+				"AudioSource": {
+					"Clip": "0000000000000301",
+					"Volume": 0.75,
+					"Pitch": 1.25,
+					"Loop": true,
+					"PlayOnStart": true,
+					"Spatial": false,
+					"MinDistance": 2,
+					"MaxDistance": 40,
+					"Attenuation": "Exponential",
+					"Rolloff": 1.5,
+					"DopplerFactor": 0,
+					"Group": "Music"
+				},
+				"Script": {
+					"Script": "c0ffee0000000001",
+					"Fields": {
+						"Goal": "2b00000000000007",
+						"Torque": 30
+					},
+					"ExecutionOrder": -5
+				}
+			}
+		},
+		{
+			"ID": "2b00000000000006",
+			"Name": "Track",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"RigidBody": {
+					"Type": "Static",
+					"Mass": 1,
+					"Friction": 0.6,
+					"Restitution": 0,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Track",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				}
+			}
+		},
+		{
+			"ID": "2b00000000000008",
+			"Name": "Piece",
+			"Parent": "2b00000000000006",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"BoxCollider": {
+					"HalfExtents": [2, 0.25, 1],
+					"Offset": [0, -0.25, 0],
+					"Rotation": [0, 0, 0.6, 0.8],
+					"IsTrigger": false
+				},
+				"CapsuleCollider": {
+					"Radius": 0.25,
+					"HalfHeight": 1,
+					"Offset": [1, 0, 0],
+					"Rotation": [0.6, 0, 0, 0.8],
+					"IsTrigger": false
+				},
+				"MeshCollider": {
+					"Mesh": "0000000000000103",
+					"Convex": true,
+					"IsTrigger": false
+				}
+			}
+		},
+		{
+			"ID": "2b00000000000007",
+			"Name": "Goal",
+			"Parent": "2b00000000000006",
+			"Active": true,
+			"Tags": ["Goal"],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"SphereCollider": {
+					"Radius": 1.5,
+					"Offset": [0, 0, 0],
+					"IsTrigger": true
+				}
+			}
+		},
+		{
+			"ID": "2b00000000000009",
+			"Name": "Walker",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"CharacterController": {
+					"Height": 1.6,
+					"Radius": 0.4,
+					"MaxSlopeAngle": 30,
+					"StepHeight": 0.25,
+					"Mass": 80,
+					"GravityFactor": 1.5,
+					"Layer": "Ball"
+				}
+			}
+		},
+		{
+			"ID": "2b0000000000000a",
+			"Name": "Score",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Text": {
+					"Text": "Score: 0\nLevel 1",
+					"Font": "0000000000000401",
+					"Size": 48,
+					"Color": [1, 0.8, 0.2, 0.5],
+					"Space": "World",
+					"Anchor": [0, 1],
+					"Pivot": [0, 1],
+					"Offset": [16, -16],
+					"Alignment": "Left",
+					"Billboard": true
+				}
+			}
+		},
+		{
+			"ID": "6b2d4f8a10c3e507",
+			"Name": "Block",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [3, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Prefab": {
+					"Prefab": "3c9f2e7a11d04b88",
+					"Overrides": [
+						{
+							"PrefabEntityID": "00000000000b0002",
+							"Kind": "Field",
+							"Component": "Transform",
+							"Field": "Scale",
+							"Value": [1, 2, 1]
+						}
+					]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "00000000000b0001",
+					"InstanceRoot": "6b2d4f8a10c3e507"
+				}
+			}
+		},
+		{
+			"ID": "ec685b183765f2e5",
+			"Name": "Visual",
+			"Parent": "6b2d4f8a10c3e507",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 2, 1]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "00000000000b0002",
+					"InstanceRoot": "6b2d4f8a10c3e507"
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": [],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		}
+	]
+}

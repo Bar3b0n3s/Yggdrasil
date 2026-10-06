@@ -1,0 +1,33 @@
+{
+	"Format": "Scene",
+	"Version": 1,
+	"Name": "UnknownComponent",
+	"Seed": 0,
+	"ComponentVersions": {
+		"Transform": 1,
+		"FutureThing": 3
+	},
+	"Entities": [
+		{
+			"ID": "3c00000000000001",
+			"Name": "Gadget",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"FutureThing": {
+					"Speed": 3,
+					"Mode": "Fast",
+					"Nested": {
+						"List": [1, 2]
+					}
+				}
+			}
+		}
+	]
+}

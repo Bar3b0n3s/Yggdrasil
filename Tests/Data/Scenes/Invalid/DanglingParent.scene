@@ -1,0 +1,39 @@
+{
+	"Format": "Scene",
+	"Version": 1,
+	"Name": "DanglingParent",
+	"Seed": 0,
+	"ComponentVersions": {
+		"Transform": 1
+	},
+	"Entities": [
+		{
+			"ID": "4d00000000000001",
+			"Name": "Root",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				}
+			}
+		},
+		{
+			"ID": "4d00000000000002",
+			"Name": "Orphan",
+			"Parent": "4d000000000000ff",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				}
+			}
+		}
+	]
+}

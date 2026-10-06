@@ -238,6 +238,16 @@
 			]
 		},
 		{
+			"Name": "Project",
+			"Layer": 2,
+			"Includes": [
+				"Core",
+				"Reflection",
+				"Platform"
+			],
+			"Notes": "Project settings and the .eproj serializer (Roadmap M3; Docs/Decisions/0006-m3-decisions.md decision 4): reflected settings structs consumed by every layer above, so it sits beside Asset at layer 2 and may later validate input control names against Platform."
+		},
+		{
 			"Name": "Renderer",
 			"Layer": 3,
 			"Includes": [

@@ -1,0 +1,56 @@
+{
+	"Format": "Scene",
+	"Version": 1,
+	"Name": "DuplicateUniqueComponent",
+	"Seed": 0,
+	"ComponentVersions": {
+		"Transform": 1,
+		"Environment": 1
+	},
+	"Entities": [
+		{
+			"ID": "4d00000000000001",
+			"Name": "Sky",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Environment": {
+					"Environment": null,
+					"Intensity": 1,
+					"Rotation": 0,
+					"ShowSkybox": true,
+					"SkyboxBlur": 0,
+					"FallbackColor": [0.2, 0.22, 0.25]
+				}
+			}
+		},
+		{
+			"ID": "4d00000000000002",
+			"Name": "SecondSky",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Environment": {
+					"Environment": null,
+					"Intensity": 1,
+					"Rotation": 0,
+					"ShowSkybox": true,
+					"SkyboxBlur": 0,
+					"FallbackColor": [0.2, 0.22, 0.25]
+				}
+			}
+		}
+	]
+}
