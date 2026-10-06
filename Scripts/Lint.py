@@ -2941,6 +2941,9 @@ class RegexNamingChecker:
         if name is not None and not re.match(r"[smg]_", name) and not has_top_level_assignment(text[:position]):
             self.check_function(text, offset, scope, verify)
             return
+        special = re.search(r"(?:~\s*[A-Za-z_]\w*|\boperator\b[^(]*)\s*\(", text)
+        if name is None and special is not None and not has_top_level_assignment(text[: special.start()]):
+            return  # a destructor or operator declares no checked name (`~Application() override;` is no variable)
         self.check_variables(text, offset, scope, statement.access, verify)
 
     def check_function(self, text: str, offset: int, scope: Scope, verify: Callable[[str, str, int], None]) -> None:

@@ -75,8 +75,9 @@ namespace Engine {
 			return glm::dquat(rotation.w, rotation.x, rotation.y, rotation.z);
 		}
 
-		// The length of `rotation` in double precision, as the Quat field rule measures it (UnitQuaternionTolerance).
-		static double GetQuaternionLength(const glm::quat& rotation)
+		// The length of `rotation` in double precision, as the Quat field rule measures it (UnitQuaternionTolerance). Only
+		// asserts call it, so it is unused where they compile out (Dist).
+		[[maybe_unused]] static double GetQuaternionLength(const glm::quat& rotation)
 		{
 			const glm::dquat value = ToDouble(rotation);
 			return std::sqrt(glm::dot(value, value));

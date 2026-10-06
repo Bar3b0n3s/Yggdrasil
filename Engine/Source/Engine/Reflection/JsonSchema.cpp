@@ -135,12 +135,16 @@ namespace Engine {
 				};
 				Json schema = Json::object();
 				schema["type"] = integer ? "integer" : "number";
-				const std::optional<double> minimum = meta != nullptr ? meta->Min : std::nullopt;
-				const std::optional<double> maximum = meta != nullptr ? meta->Max : std::nullopt;
-				if (integer || minimum.has_value())
-					schema["minimum"] = bound(std::max(minimum.value_or(typeMin), typeMin));
-				if (integer || maximum.has_value())
-					schema["maximum"] = bound(std::min(maximum.value_or(typeMax), typeMax));
+				// Plain doubles instead of copied optionals: GCC 14 -O2 reports a copied std::optional<double> as maybe
+				// uninitialized here (-Wmaybe-uninitialized false positive).
+				const bool hasMinimum = meta != nullptr && meta->Min.has_value();
+				const bool hasMaximum = meta != nullptr && meta->Max.has_value();
+				const double minimum = hasMinimum ? std::max(*meta->Min, typeMin) : typeMin;
+				const double maximum = hasMaximum ? std::min(*meta->Max, typeMax) : typeMax;
+				if (integer || hasMinimum)
+					schema["minimum"] = bound(minimum);
+				if (integer || hasMaximum)
+					schema["maximum"] = bound(maximum);
 				if (meta != nullptr && meta->MinMagnitude.has_value())
 				{
 					Json excluded = Json::object();

@@ -16,6 +16,7 @@ namespace Engine {
 	class SinkAdapter final : public SinkBase
 	{
 	public:
+		~SinkAdapter() override;
 		void flush_() override {}
 		void sink_it_(int value) final { m_Total += value; }
 	private:
