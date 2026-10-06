@@ -2223,7 +2223,7 @@ def semantic_json_access(
     options = context.options
     if options.mode == "regex":
         return None, [], "json access: regex checker (--mode regex)"
-    clang_query = find_llvm_tool("clang-query", options.clang_query, "CLANG_QUERY")
+    clang_query = find_llvm_tool("clang-query", options.clang_query, "CLANG_QUERY", MINIMUM_CLANG_TIDY_MAJOR)
     if clang_query is None:
         if options.mode == "clang":
             raise ToolMissing("--mode clang: clang-query not found (it ships with clang-tidy in the LLVM tools)")
@@ -2631,8 +2631,11 @@ def visual_studio_llvm_directories() -> list[Path]:
     return _LLVM_DIRECTORIES
 
 
-def find_llvm_tool(name: str, override: str | None, environment: str | None) -> Path | None:
-    """An LLVM tool: the override, the environment variable, Visual Studio's bundled LLVM, then PATH (also name-NN)."""
+def find_llvm_tool(name: str, override: str | None, environment: str | None,
+                   minimum_major: int | None = None) -> Path | None:
+    """An LLVM tool: the override, the environment variable, Visual Studio's bundled LLVM, then PATH. On PATH the
+    unversioned name is preferred when it is at least `minimum_major`, else the newest name-NN that is: Ubuntu 24.04's
+    default clang++ is Clang 18 even when clang++-19 is installed, and Clang 18 cannot parse libstdc++'s <expected>."""
     for candidate in (override, os.environ.get(environment) if environment else None):
         if candidate:
             path = Path(candidate)
@@ -2643,11 +2646,18 @@ def find_llvm_tool(name: str, override: str | None, environment: str | None) -> 
     for directory in visual_studio_llvm_directories():
         if (directory / executable).is_file():
             return directory / executable
-    for candidate in [name] + [f"{name}-{major}" for major in LLVM_MAJOR_VERSIONS]:
-        found = shutil.which(candidate)
+    unversioned = shutil.which(name)
+    if unversioned and (minimum_major is None or tool_major_version(Path(unversioned))[0] >= minimum_major):
+        return Path(unversioned)
+    for major in LLVM_MAJOR_VERSIONS:
+        if minimum_major is not None and major < minimum_major:
+            break
+        found = shutil.which(f"{name}-{major}")
         if found:
             return Path(found)
-    return None
+    # Last resort: the unversioned tool even when older, so the caller can name its version (Apple's clang++ reports
+    # Apple's own version numbers, which are not LLVM majors).
+    return Path(unversioned) if unversioned else None
 
 
 def tool_major_version(tool: Path) -> tuple[int, str]:
@@ -2679,7 +2689,7 @@ def find_compiler(flags: list[str], override: str | None) -> Path:
     name = Path(flags[0]).name if flags else "clang++"
     name = re.sub(r"\.exe$", "", name)
     if name.startswith("clang"):
-        found = find_llvm_tool(name, None, None)
+        found = find_llvm_tool(name, None, None, toolchain.MINIMUM_CLANG)
         if found is not None:
             return found
     found_path = shutil.which(name)
@@ -3164,7 +3174,7 @@ def run_naming(context: LintContext, report: StepReport) -> None:
     clang_tidy: Path | None = None
     reason = ""
     if options.mode != "regex":
-        clang_tidy = find_llvm_tool("clang-tidy", options.clang_tidy, "CLANG_TIDY")
+        clang_tidy = find_llvm_tool("clang-tidy", options.clang_tidy, "CLANG_TIDY", MINIMUM_CLANG_TIDY_MAJOR)
         if clang_tidy is None:
             reason = "clang-tidy not found"
         else:
@@ -3827,13 +3837,13 @@ def clang_tools_missing(options: LintOptions) -> str:
     """Why --mode clang cannot run here (empty when clang-tidy and clang-query are both available)."""
     if options.mode == "regex":
         return "--mode regex"
-    clang_tidy = find_llvm_tool("clang-tidy", options.clang_tidy, "CLANG_TIDY")
+    clang_tidy = find_llvm_tool("clang-tidy", options.clang_tidy, "CLANG_TIDY", MINIMUM_CLANG_TIDY_MAJOR)
     if clang_tidy is None:
         return "clang-tidy not available"
     major, version = tool_major_version(clang_tidy)
     if major < MINIMUM_CLANG_TIDY_MAJOR:
         return f"clang-tidy {version} is older than {MINIMUM_CLANG_TIDY_MAJOR}"
-    if find_llvm_tool("clang-query", options.clang_query, "CLANG_QUERY") is None:
+    if find_llvm_tool("clang-query", options.clang_query, "CLANG_QUERY", MINIMUM_CLANG_TIDY_MAJOR) is None:
         return "clang-query not available"
     return ""
 
