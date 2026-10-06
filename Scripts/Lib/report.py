@@ -13,6 +13,8 @@ import dataclasses
 import datetime
 import enum
 import json
+import os
+import re
 import sys
 import xml.etree.ElementTree as ElementTree
 from pathlib import Path
@@ -110,6 +112,12 @@ class Console:
     def result(self, step: Step) -> None:
         detail = f": {step.detail}" if step.detail else ""
         self.print(f"[{label(step.status)}] {step.name}{detail}")
+        annotation = github_error_annotation(step)
+        if annotation:
+            # Workflow commands are read from stdout. Annotations are public through the check-runs API, unlike job
+            # logs, which need a signed-in user, so a CI failure stays diagnosable for everyone.
+            sys.stdout.write(annotation + "\n")
+            sys.stdout.flush()
 
     def summary(self, title: str, steps: list[Step]) -> None:
         if not steps:
@@ -123,6 +131,64 @@ class Console:
             detail = step.detail.splitlines()[0] if step.detail else ""
             status = label(step.status)
             self.print(f"  {status:<{label_width}}  {step.name:<{name_width}}  {duration}  {detail}".rstrip())
+
+
+_ANNOTATION_MESSAGE_LIMIT = 4000  # characters; GitHub keeps only the first 4096 of an annotation message
+_ANNOTATION_LINE_LIMIT = 300  # characters per output line in an annotation
+# Compiler, linker, build-tool and test-runner failure lines: "file:1:2: error: ...", "error C2065: ...", "fatal error",
+# MSBuild "error MSB...", doctest "ERROR:", xcodebuild's failure summary and failed-command lines.
+_DIAGNOSTIC_PATTERN = re.compile(
+    r"(^|[\s:(])(fatal )?error( [A-Z]+\d+)?:|^ERROR:|\*\* BUILD FAILED \*\*|The following build commands failed|\bFAILED\b"
+)
+
+
+def _escape_workflow_data(text: str) -> str:
+    return text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+
+
+def _escape_workflow_property(text: str) -> str:
+    return _escape_workflow_data(text).replace(":", "%3A").replace(",", "%2C")
+
+
+def github_error_annotation(step: Step) -> str | None:
+    """The `::error` workflow command for a failing step when running under GitHub Actions, else None. The message holds
+    the step detail and the tail of the step's output, so a failure is diagnosable from the run's annotations alone."""
+    if os.environ.get("GITHUB_ACTIONS") != "true" or not step.failed:
+        return None
+    message = _annotation_message(step.detail, str(step.data.get("outputTail", "")))
+    return f"::error title={_escape_workflow_property(step.name)}::{_escape_workflow_data(message)}"
+
+
+def _annotation_message(detail: str, tail: str) -> str:
+    """Fit the step detail and the most useful output lines into GitHub's annotation limit: diagnostic lines first (they
+    explain the failure), then the end of the output. Over-long lines (compile command lines) are shortened, because
+    GitHub keeps only the first 4096 characters of a message."""
+    lines = [_shorten(line) for line in tail.strip().splitlines() if line.strip()]
+    diagnostics = [line for line in lines if _DIAGNOSTIC_PATTERN.search(line)]
+    budget = _ANNOTATION_MESSAGE_LIMIT - len(detail) - 2
+    chosen: list[str] = []
+    for line in diagnostics:
+        if len(line) + 1 > budget:
+            break
+        chosen.append(line)
+        budget -= len(line) + 1
+    ending: list[str] = []
+    for line in reversed([line for line in lines if line not in chosen]):
+        if len(line) + 1 > budget:
+            break
+        ending.insert(0, line)
+        budget -= len(line) + 1
+    sections = [detail]
+    if chosen:
+        sections.append("\n".join(chosen))
+    if ending:
+        sections.append("\n".join(ending))
+    return "\n\n".join(sections)[:_ANNOTATION_MESSAGE_LIMIT]
+
+
+def _shorten(line: str) -> str:
+    line = line.rstrip()
+    return line if len(line) <= _ANNOTATION_LINE_LIMIT else line[:_ANNOTATION_LINE_LIMIT] + " [...]"
 
 
 def overall_exit_code(steps: list[Step]) -> int:

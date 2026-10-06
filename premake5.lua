@@ -7,6 +7,16 @@
 
 -- The custom compile-commands action (Docs/Architecture.md §2.2). Actions must be registered before the workspace.
 include "Scripts/Premake/CompileCommands.lua"
+-- xcode4 only: `includedirs` become -I as on every other generator (angle-bracket includes in vendored libraries).
+include "Scripts/Premake/XcodeHeaderSearchPaths.lua"
+
+newoption
+{
+	trigger = "python",
+	value = "path",
+	-- Scripts/Generate.py passes its own interpreter; without the option: python on Windows, python3 elsewhere.
+	description = "Python 3.10+ interpreter that build steps run"
+}
 
 newoption
 {

@@ -93,6 +93,21 @@ function CompileCommands.AppendAll(arguments, values)
 	end
 end
 
+-- Toolset flags and buildoptions as separate arguments. premake returns some multi-word flags as one string (the clang
+-- toolset's "-arch arm64" on macOS), which the gmake generator joins into a shell command line where the shell splits
+-- it; an "arguments" array must split it the same way. Values containing quotes are kept whole.
+function CompileCommands.AppendFlags(arguments, flags)
+	for _, flag in ipairs(flags or {}) do
+		if flag:find("%s") and not flag:find("[\"']") then
+			for word in flag:gmatch("%S+") do
+				table.insert(arguments, word)
+			end
+		else
+			table.insert(arguments, flag)
+		end
+	end
+end
+
 function CompileCommands.AppendDirectories(arguments, flag, directories)
 	for _, directory in ipairs(directories or {}) do
 		table.insert(arguments, flag)
@@ -113,22 +128,24 @@ end
 function CompileCommands.GetArguments(cfg, toolset, file, fcfg, tool, object)
 	local arguments = { toolset.gettoolname(cfg, tool) }
 
+	local cppflags = {}
 	for _, flag in ipairs(toolset.getcppflags(cfg)) do
 		if not flag:startswith("-M") then
-			table.insert(arguments, flag)
+			table.insert(cppflags, flag)
 		end
 	end
+	CompileCommands.AppendFlags(arguments, cppflags)
 
 	CompileCommands.AppendPreprocessor(arguments, toolset, cfg, cfg)
 
 	local getflags = iif(tool == "cc", toolset.getcflags, toolset.getcxxflags)
-	CompileCommands.AppendAll(arguments, getflags(cfg))
-	CompileCommands.AppendAll(arguments, cfg.buildoptions)
+	CompileCommands.AppendFlags(arguments, getflags(cfg))
+	CompileCommands.AppendFlags(arguments, cfg.buildoptions)
 
 	-- Per-file settings (premake filters on "files:..."), appended after the configuration's like the gmake generator.
 	if p.fileconfig.hasFileSettings(fcfg) then
-		CompileCommands.AppendAll(arguments, getflags(fcfg))
-		CompileCommands.AppendAll(arguments, fcfg.buildoptions)
+		CompileCommands.AppendFlags(arguments, getflags(fcfg))
+		CompileCommands.AppendFlags(arguments, fcfg.buildoptions)
 		CompileCommands.AppendPreprocessor(arguments, toolset, cfg, fcfg)
 	end
 

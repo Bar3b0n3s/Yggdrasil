@@ -21,6 +21,13 @@ slangc does not have the pinned version.
 
 from __future__ import annotations
 
+import platform
+import sys
+
+if sys.version_info < (3, 10):
+    sys.exit(f"CompileShaders.py requires Python 3.10 or newer (this is Python {platform.python_version()} at "
+             f"{sys.executable}); regenerate with Scripts/Generate.py so build steps use its interpreter")
+
 import argparse
 import concurrent.futures
 import dataclasses
@@ -31,7 +38,6 @@ import os
 import re
 import shutil
 import subprocess
-import sys
 import time
 from pathlib import Path
 from typing import Any
