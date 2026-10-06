@@ -1,6 +1,8 @@
 #include "TestsPCH.h"
 #include "Support/ChildProcess.h"
 
+#include "Support/TestOptions.h"
+
 #if defined(ENGINE_PLATFORM_WINDOWS)
 	#include <windows.h>
 #elif defined(ENGINE_PLATFORM_LINUX) || defined(ENGINE_PLATFORM_MACOS)
@@ -206,8 +208,11 @@ namespace Engine {
 		{
 			ENGINE_TRY(Utils::CheckExecutableExists(executable));
 
+			std::vector<std::string> childArguments(arguments.begin(), arguments.end());
+			childArguments.emplace_back(ChildProcessOption);
+
 			std::wstring commandLine = L"\"" + executable.native() + L"\""; // argv[0]: quotes delimit, no escapes
-			for (const std::string& argument : arguments)
+			for (const std::string& argument : childArguments)
 			{
 				ENGINE_TRY_ASSIGN(const std::wstring wide, Utils::WideFromUtf8(argument));
 				commandLine += L' ';
@@ -500,6 +505,7 @@ namespace Engine {
 
 			std::string executableText = executable.native();
 			std::vector<std::string> argumentStorage(arguments.begin(), arguments.end());
+			argumentStorage.emplace_back(ChildProcessOption);
 			std::vector<char*> argv;
 			argv.reserve(argumentStorage.size() + 2);
 			argv.push_back(executableText.data());

@@ -128,6 +128,19 @@ function ApplyFirstPartySettings()
 	filter { "system:windows", "kind:ConsoleApp or WindowedApp" }
 		files { RepositoryRoot .. "/Engine/Source/Engine/Platform/Windows/App.manifest" }
 
+	-- The display name for the executables (Architecture: it appears only in the workspace name, ENGINE_PRODUCT_NAME and
+	-- the docs): the Editor's window title and the user-data folder of the Editor and Tests (§4.4). The Engine and
+	-- EditorCore libraries never see it, so engine code cannot put an exported game's files into the engine's folder
+	-- (Docs/Decisions/0005-m2-decisions.md).
+	filter "kind:ConsoleApp or WindowedApp"
+		defines { "ENGINE_PRODUCT_NAME=\"" .. WorkspaceName .. "\"" }
+
+	-- The Windows system libraries behind Engine/Source/Engine/Platform/Windows: dbghelp (MiniDumpWriteDump and stack
+	-- symbols for crash reports), ws2_32 (sockets), bcrypt (BCryptGenRandom), shell32 and ole32 (SHGetKnownFolderPath and
+	-- CoTaskMemFree). Every executable links Engine, so every executable links them.
+	filter { "system:windows", "kind:ConsoleApp or WindowedApp" }
+		links { "dbghelp", "ws2_32", "bcrypt", "shell32", "ole32" }
+
 	-- Luau analysis recursion needs more than the default 1 MB stack with unoptimized MSVC frames.
 	filter { "system:windows", "configurations:Debug", "kind:ConsoleApp or WindowedApp" }
 		linkoptions { "/STACK:2097152" }

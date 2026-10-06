@@ -149,10 +149,17 @@
 				"MacOS",
 				"Posix"
 			],
+			"Notes": "GlfwLibrary.cpp alone may include the Vulkan headers: glfw3.h declares glfwInitVulkanLoader only after them, and GLFW must be handed the engine's loader before glfwInit (section 4.1; Docs/Decisions/0005-m2-decisions.md).",
 			"ThirdParty": {
 				"Public": [],
 				"Private": [
-					"GLFW"
+					"GLFW",
+					"Vulkan"
+				]
+			},
+			"RestrictedThirdParty": {
+				"Vulkan": [
+					"Engine/Source/Engine/Platform/GlfwLibrary.cpp"
 				]
 			},
 			"SystemHeaders": [

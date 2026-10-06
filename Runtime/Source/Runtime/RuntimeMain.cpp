@@ -1,7 +1,7 @@
-#include "Engine/Core/Base.h"
+#include "Engine/App/EntryPoint.h"
+#include "Runtime/RuntimeApp.h"
 
-// Bootstrap entry point (Roadmap M0). M2 replaces the body with RunApplication() and the runtime application.
-int main()
+int main(int argc, char** argv)
 {
-	return 0;
+	return Engine::RunApplication(argc, argv, &Engine::CreateRuntimeApp);
 }

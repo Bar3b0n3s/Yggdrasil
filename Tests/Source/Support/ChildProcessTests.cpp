@@ -36,6 +36,12 @@ namespace Engine {
 			ENGINE_CORE_WARN("Flooding standard error with line {} of 2000 to fill the pipe buffer", line);
 	}
 
+	// Reports whether the parent marked this process with --child-process (TestOptions::ChildProcess), then returns.
+	ENGINE_DEATH_TEST("Support/ReportsChildProcessFlag")
+	{
+		ENGINE_CORE_WARN("Child process flag: {}", Test::GetTestOptions().ChildProcess);
+	}
+
 	TEST_SUITE("Support")
 	{
 		// Permanently skipped by design, not a contract stub: listed (never run) by the quoting test below, whose
@@ -111,6 +117,15 @@ namespace Engine {
 			INFO("child stdout: ", result->StandardOutput);
 			CHECK(result->ExitCode == 0);
 			CHECK(result->StandardOutput.contains(QuotingTargetName));
+		}
+
+		TEST_CASE("ChildProcess: the child is marked with --child-process")
+		{
+			const std::vector<std::string> arguments = { "--death-test=Support/ReportsChildProcessFlag" };
+			const Result<Test::ChildProcessResult> result = Test::RunChildProcess(Test::GetTestOptions().ExecutablePath,
+				arguments, std::chrono::seconds(60));
+			REQUIRE(result.has_value());
+			CHECK(result->StandardError.contains("Child process flag: true"));
 		}
 
 		TEST_CASE("ChildProcess: a missing executable is NotFound")

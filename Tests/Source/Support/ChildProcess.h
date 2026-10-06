@@ -23,11 +23,12 @@ namespace Engine {
 			std::string StandardError;
 		};
 
-		// Runs `executable` with `arguments` passed verbatim (no shell, no quoting rules apply), in the current working
-		// directory, with an empty standard input, capturing standard output and standard error completely (read
-		// concurrently, so a chatty child cannot block). Waits at most `timeout`; on expiry the child is killed and the call
-		// fails with Timeout. Errors: NotFound when `executable` does not exist, Io when it cannot be started, Timeout.
-		// Thread-safe.
+		// Runs `executable`, a Tests executable, with `arguments` passed verbatim (no shell, no quoting rules apply) followed
+		// by ChildProcessOption ("--child-process", TestOptions.h), which marks the child so that it writes neither the
+		// parent's Tests.log nor crash reports into the user's folder. Runs in the current working directory, with an empty
+		// standard input, capturing standard output and standard error completely (read concurrently, so a chatty child
+		// cannot block). Waits at most `timeout`; on expiry the child is killed and the call fails with Timeout. Errors:
+		// NotFound when `executable` does not exist, Io when it cannot be started, Timeout. Thread-safe.
 		[[nodiscard]] Result<ChildProcessResult> RunChildProcess(const std::filesystem::path& executable,
 			std::span<const std::string> arguments, std::chrono::milliseconds timeout);
 

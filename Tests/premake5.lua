@@ -41,6 +41,14 @@ project "Tests"
 		"Engine"
 	}
 
+	-- Tests spawn the Editor and Runtime executables of the same configuration (Test::GetBuiltExecutablePath), so building
+	-- Tests builds them too.
+	dependson
+	{
+		"Editor",
+		"Runtime"
+	}
+
 	UseImGui()
 	UseGLFW()
 	UseNVRHI()

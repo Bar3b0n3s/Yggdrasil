@@ -1,7 +1,9 @@
 #include "EditorPCH.h"
 
-// Bootstrap entry point (Roadmap M0). M2 replaces the body with RunApplication() and the editor application.
-int main()
+#include "Editor/EditorApp.h"
+#include "Engine/App/EntryPoint.h"
+
+int main(int argc, char** argv)
 {
-	return 0;
+	return Engine::RunApplication(argc, argv, &Engine::CreateEditorApp);
 }
