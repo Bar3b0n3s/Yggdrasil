@@ -1,8 +1,8 @@
-# Build output
-bin/
-bin-int/
-Build/
-Intermediate/
+# Build output (generated at the workspace root only)
+/bin/
+/bin-int/
+/Build/
+/Intermediate/
 
 # Generated project files
 *.sln
@@ -16,6 +16,9 @@ Makefile
 .ninja_*
 *.xcodeproj/
 *.xcworkspace/
+# premake5 compile-commands (clang-tidy input) and the clangd index built from it
+compile_commands.json
+.cache/
 
 # IDE / OS
 .vs/
@@ -29,9 +32,20 @@ Thumbs.db
 # Tools fetched by Scripts/Setup.py
 Vendor/premake/bin/
 
+# MCP bridge: virtual environment and the machine-specific config written by Scripts/Setup.py (Architecture §13.8)
+Tools/MCP/.venv/
+.mcp.json
+
+# Per-project cache, autosave, Editor.lock and offloaded automation results (Architecture §2.1): game projects and
+# the dry-run project under Tests/Projects. Anchored, like the build outputs above, so that no first-party source
+# directory that happens to share one of these names is ignored (and silently left out of format, lint and commits).
+/Projects/*/Library/
+/Tests/Projects/*/Library/
+
 # Python
 __pycache__/
 *.pyc
+.pytest_cache/
 
 # Logs / runtime artifacts
 *.log

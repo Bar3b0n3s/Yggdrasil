@@ -1,0 +1,20 @@
+{
+	"Programs": [
+		{
+			"Name": "Smoke",
+			"File": "Passes/Smoke.slang",
+			"Entries": [
+				{
+					"Name": "CSMain",
+					"Stage": "compute"
+				}
+			],
+			"Permutations": {
+				"SMOKE_SATURATE": [
+					"0",
+					"1"
+				]
+			}
+		}
+	]
+}

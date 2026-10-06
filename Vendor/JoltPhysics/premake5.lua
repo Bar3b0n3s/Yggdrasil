@@ -1,7 +1,12 @@
 -- JoltPhysics v5.6.0 (https://github.com/jrouwe/JoltPhysics) - see VENDOR.md
 -- File lists, defines and compiler flags mirror upstream Jolt/Jolt.cmake + Build/CMakeLists.txt for a static,
--- single precision, non cross-platform-deterministic build with ObjectStream enabled and all compute backends
--- (DX12 / Vulkan / Metal / CPU, only used by the hair simulation) disabled.
+-- single precision, cross-platform-deterministic build (upstream CROSS_PLATFORM_DETERMINISTIC=ON) with ObjectStream
+-- enabled and all compute backends (DX12 / Vulkan / Metal / CPU, only used by the hair simulation) disabled.
+--
+-- Determinism (Docs/Architecture.md §2.2, §9.1): JPH_CROSS_PLATFORM_DETERMINISTIC in every configuration and the
+-- precise floating-point model without FMA contraction on every compiler and architecture, as upstream does with
+-- CROSS_PLATFORM_DETERMINISTIC=ON (MSVC /fp:precise, GCC/Clang -ffp-contract=off). This replaces upstream's
+-- non-deterministic MSVC /fp:fast and ARM64 -ffp-contract=on. The Jolt sources are unmodified.
 --
 -- IMPORTANT: every public define below (JPH_*) changes the library ABI and is checked at runtime by
 -- JPH::VerifyJoltVersionID(). Every project that includes Jolt headers MUST use exactly the same defines with the
@@ -492,12 +497,14 @@ project "JoltPhysics"
 	-- Public defines (all configurations)
 	defines
 	{
-		"JPH_OBJECT_STREAM",          -- upstream ENABLE_OBJECT_STREAM=ON (default)
-		"JPH_OBJECT_LAYER_BITS=16"    -- upstream OBJECT_LAYER_BITS=16 (default)
+		"JPH_OBJECT_STREAM",                -- upstream ENABLE_OBJECT_STREAM=ON (default)
+		"JPH_OBJECT_LAYER_BITS=16",         -- upstream OBJECT_LAYER_BITS=16 (default)
+		"JPH_CROSS_PLATFORM_DETERMINISTIC"  -- upstream CROSS_PLATFORM_DETERMINISTIC=ON (default OFF)
 	}
 
 	-- x86_64 instruction sets: x86-64-v2 baseline (SSE4.1, SSE4.2, POPCNT). AVX/AVX2/AVX-512, LZCNT, TZCNT, F16C and
-	-- FMA are deliberately NOT enabled for CPU compatibility (see VENDOR.md). ARM64 uses NEON (+FMA) automatically.
+	-- FMA are deliberately NOT enabled for CPU compatibility (see VENDOR.md). ARM64 uses NEON automatically; Jolt
+	-- does not use FMA there when JPH_CROSS_PLATFORM_DETERMINISTIC is defined.
 	filter "architecture:x86_64"
 		defines { "JPH_USE_SSE4_1", "JPH_USE_SSE4_2" }
 
@@ -505,11 +512,12 @@ project "JoltPhysics"
 		systemversion "latest"
 		files { "Jolt/Jolt.natvis" }
 
-	-- MSVC: upstream uses Jolt.h as precompiled header and /fp:fast (non-deterministic mode)
+	-- MSVC: upstream uses Jolt.h as precompiled header. Floating point is /fp:precise (premake "Default"), as upstream
+	-- does with CROSS_PLATFORM_DETERMINISTIC=ON, instead of upstream's non-deterministic /fp:fast.
 	filter "toolset:msc*"
 		pchheader "Jolt/Jolt.h"
 		pchsource "Jolt/RegisterTypes.cpp"
-		floatingpoint "Fast"
+		floatingpoint "Default"
 		multiprocessorcompile "On"
 
 	filter { "toolset:msc*", "architecture:x86_64" }
@@ -520,16 +528,24 @@ project "JoltPhysics"
 
 	-- GCC / Clang (Linux, macOS): upstream adds -pthread and never uses -ffast-math. premake's xcode4 generator
 	-- injects -ffast-math for optimize "Full" (Dist); -fno-fast-math comes after it and turns it back off.
+	-- -ffp-contract=off on every architecture, as upstream does with CROSS_PLATFORM_DETERMINISTIC=ON (instead of
+	-- upstream's non-deterministic ARM64 -ffp-contract=on). With Clang's default precise model this is
+	-- -ffp-model=precise without contraction; the spelling "-ffp-model=precise -ffp-contract=off" is avoided because
+	-- current Clang (verified: 22.1.3) reports it as -Woverriding-option.
 	filter "system:linux or macosx"
-		buildoptions { "-fno-fast-math", "-pthread" }
+		buildoptions { "-fno-fast-math", "-ffp-contract=off", "-pthread" }
 
-	-- No FMA on x86_64, so upstream uses -ffp-contract=off; -mpopcnt accompanies -msse4.2 upstream
+	-- -mpopcnt accompanies -msse4.2 upstream. clang-cl (below) accepts both options as they are.
+	filter { "toolset:gcc or clang", "architecture:x86_64" }
+		buildoptions { "-msse4.2", "-mpopcnt" }
+
 	filter { "system:linux or macosx", "architecture:x86_64" }
-		buildoptions { "-msse4.2", "-mpopcnt", "-mfpmath=sse", "-ffp-contract=off" }
+		buildoptions { "-mfpmath=sse" }
 
-	-- ARM64: upstream uses -ffp-contract=on ('fast' can replace FMA intrinsics with mul + add)
-	filter { "system:linux or macosx", "architecture:ARM64" }
-		buildoptions { "-ffp-contract=on" }
+	-- clang-cl (vs2026 with toolset "clang", the portability build of Docs/Architecture.md §15.8): the same precise
+	-- floating-point model as GCC/Clang above. clang-cl takes these GCC-style options only through /clang:.
+	filter { "action:vs*", "toolset:clang" }
+		buildoptions { "/clang:-fno-fast-math", "/clang:-ffp-contract=off" }
 
 	filter "system:macosx"
 		buildoptions { "-faligned-allocation" }

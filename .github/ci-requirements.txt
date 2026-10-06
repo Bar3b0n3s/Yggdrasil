@@ -1,0 +1,8 @@
+# Python tools the Linux and macOS jobs of .github/workflows/ci.yml install with
+#   python3 -m pip install --require-hashes --no-deps --requirement .github/ci-requirements.txt
+# clang-format for Scripts/Format.py (Docs/CodeStyle.md §1 requires 22.x): 22.1.3, the version Visual Studio 2026
+# ships, so every platform formats identically. The digests are PyPI's SHA-256 of the manylinux x86_64 and the macOS
+# arm64 wheels (https://pypi.org/project/clang-format/22.1.3/#files).
+clang-format==22.1.3 \
+    --hash=sha256:c392ff9936446d81c625c8dc774c71be259f5b47fccf96dd307cefa8deb7a1ef \
+    --hash=sha256:817013a40b24493361db8cec236d63ce776bc64f6e9ff613ec329292f9e8c411

@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+	Application manifest embedded in every Windows executable (Editor, Runtime, Tests; Architecture §2.2).
+	The linker merges it with its generated manifest (UAC execution level) and embeds the result.
+	- Per-monitor DPI awareness v2: GLFW receives real pixel sizes and WM_DPICHANGED on every monitor.
+	- UTF-8 active code page: narrow (char) Win32 and CRT APIs take UTF-8, matching the engine's UTF-8 paths.
+	- Long path awareness: paths beyond MAX_PATH work where the system policy allows them.
+	- supportedOS Windows 10/11: the OS applies current behaviour instead of compatibility shims.
+-->
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+	<compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
+		<application>
+			<supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}" />
+		</application>
+	</compatibility>
+	<application xmlns="urn:schemas-microsoft-com:asm.v3">
+		<windowsSettings>
+			<dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware>
+			<dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness>
+			<activeCodePage xmlns="http://schemas.microsoft.com/SMI/2019/WindowsSettings">UTF-8</activeCodePage>
+			<longPathAware xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">true</longPathAware>
+		</windowsSettings>
+	</application>
+</assembly>

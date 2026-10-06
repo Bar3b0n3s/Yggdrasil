@@ -1,0 +1,78 @@
+# clang-tidy configuration: identifier naming (Docs/CodeStyle.md §2, Docs/Architecture.md Appendix A).
+#
+# Scripts/Lint.py runs it (step "naming") on every first-party source and header with the flags from
+# compile_commands.json (premake5 compile-commands). When clang-tidy is not installed, Lint.py falls back to its
+# regex checker, which reads the prefixes and *IgnoredRegexp options below so that both modes share one rule set.
+#
+# Naming summary: types, functions, namespaces, enumerators, template parameters, compile-time constants and public
+# data members are PascalCase ("CamelCase" here; acronyms such as UUID stay upper case). Private and protected data
+# members take m_, mutable statics s_, external-linkage globals g_. Locals and parameters are camelCase ("camelBack").
+# Macros are ENGINE_ + UPPER_SNAKE_CASE.
+#
+# clang-tidy has no separate kind for file-scope statics: they are "global variables". GlobalVariablePrefix is g_ and
+# GlobalVariableIgnoredRegexp accepts s_ names, so file-scope statics and thread_locals keep the s_ prefix CodeStyle
+# gives them.
+---
+Checks: '-*,readability-identifier-naming'
+WarningsAsErrors: '*'
+# First-party headers only (vendored headers never match). Lint.py passes an equivalent filter, anchored at the tree
+# it lints, on the command line. Only keys that clang-tidy 18 (Ubuntu 24.04) already understands are used.
+HeaderFilterRegex: '.*[\\/](Engine|Editor|Runtime|Tests)[\\/]Source[\\/].*|.*[\\/]Resources[\\/]Shaders[\\/]Shared[\\/].*'
+FormatStyle: none
+CheckOptions:
+  readability-identifier-naming.IgnoreMainLikeFunctions: true
+
+  readability-identifier-naming.NamespaceCase: CamelCase
+  readability-identifier-naming.ClassCase: CamelCase
+  readability-identifier-naming.StructCase: CamelCase
+  readability-identifier-naming.UnionCase: CamelCase
+  readability-identifier-naming.EnumCase: CamelCase
+  readability-identifier-naming.EnumConstantCase: CamelCase
+  readability-identifier-naming.ScopedEnumConstantCase: CamelCase
+  readability-identifier-naming.ConceptCase: CamelCase
+  readability-identifier-naming.TypedefCase: CamelCase
+  readability-identifier-naming.TypeAliasCase: CamelCase
+  # Member type names required by standard protocols (iterators, allocators, transparent comparators, tuple-like).
+  readability-identifier-naming.TypeAliasIgnoredRegexp: '^(value_type|element_type|size_type|difference_type|pointer|const_pointer|reference|const_reference|iterator|const_iterator|reverse_iterator|const_reverse_iterator|iterator_category|iterator_concept|key_type|mapped_type|allocator_type|is_transparent|type)$'
+  readability-identifier-naming.TemplateParameterCase: CamelCase
+  readability-identifier-naming.TypeTemplateParameterCase: CamelCase
+  readability-identifier-naming.ValueTemplateParameterCase: CamelCase
+  readability-identifier-naming.TemplateTemplateParameterCase: CamelCase
+
+  readability-identifier-naming.FunctionCase: CamelCase
+  readability-identifier-naming.MethodCase: CamelCase
+  # Standard protocols keep their required names (CodeStyle §2): range-for and container members, the tuple
+  # protocol, ADL swap, std::formatter, nlohmann's ADL serializers, and main.
+  readability-identifier-naming.FunctionIgnoredRegexp: '^(main|begin|end|cbegin|cend|rbegin|rend|crbegin|crend|size|ssize|empty|data|swap|get|to_json|from_json)$'
+  readability-identifier-naming.MethodIgnoredRegexp: '^(begin|end|cbegin|cend|rbegin|rend|crbegin|crend|size|empty|data|front|back|push_back|emplace_back|pop_back|clear|reserve|capacity|resize|insert|emplace|erase|find|contains|swap|get|parse|format)$'
+
+  readability-identifier-naming.ConstexprVariableCase: CamelCase
+  readability-identifier-naming.GlobalConstantCase: CamelCase
+  readability-identifier-naming.ClassConstantCase: CamelCase
+  readability-identifier-naming.StaticConstantCase: CamelCase
+
+  readability-identifier-naming.PublicMemberCase: CamelCase
+  readability-identifier-naming.ProtectedMemberPrefix: m_
+  readability-identifier-naming.ProtectedMemberCase: CamelCase
+  readability-identifier-naming.PrivateMemberPrefix: m_
+  readability-identifier-naming.PrivateMemberCase: CamelCase
+  readability-identifier-naming.ClassMemberPrefix: s_
+  readability-identifier-naming.ClassMemberCase: CamelCase
+  readability-identifier-naming.StaticVariablePrefix: s_
+  readability-identifier-naming.StaticVariableCase: CamelCase
+  readability-identifier-naming.GlobalVariablePrefix: g_
+  readability-identifier-naming.GlobalVariableCase: CamelCase
+  readability-identifier-naming.GlobalVariableIgnoredRegexp: '^s_[A-Z][a-zA-Z0-9]*$'
+
+  readability-identifier-naming.LocalVariableCase: camelBack
+  readability-identifier-naming.ParameterCase: camelBack
+  readability-identifier-naming.ParameterPackCase: camelBack
+
+  readability-identifier-naming.MacroDefinitionPrefix: ENGINE_
+  readability-identifier-naming.MacroDefinitionCase: UPPER_CASE
+  # Per-translation-unit switches that third-party headers read and that are meant to be defined in source, right
+  # before the include: doctest's runner, the stb and cgltf implementation translation units, GLFW's native-handle
+  # declarations and Dear ImGui's vector operators. ABI-relevant configuration macros (JPH_*, SPDLOG_*, VULKAN_HPP_*,
+  # NDEBUG, GLM_*, JSON_*, ...) are not listed: they are set in premake only, and Scripts/Lint.py bans defining them
+  # in source (banned-abi-macro, Architecture section 2.2).
+  readability-identifier-naming.MacroDefinitionIgnoredRegexp: '^(DOCTEST_CONFIG_[A-Z0-9_]+|STB_[A-Z0-9_]+_IMPLEMENTATION|CGLTF_IMPLEMENTATION|CGLTF_WRITE_IMPLEMENTATION|GLFW_EXPOSE_NATIVE_[A-Z0-9_]+|IMGUI_DEFINE_MATH_OPERATORS)$'

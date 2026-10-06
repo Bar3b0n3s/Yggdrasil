@@ -1,0 +1,457 @@
+# Continuous integration on GitHub-hosted runners (Docs/Architecture.md §15.8; Docs/Decisions/0001-approvals.md,
+# "Repository remote and CI"). A platform counts as verified once its job here is green.
+#
+# Every job runs Scripts/CI.py, the single CI entry point (Architecture §15.8), with every stage a GPU-less hosted
+# runner can run: setup, generate, lint, build, unit and portability.
+# - windows: one CI.py run over all of them (the local gate is the full CI.py).
+# - linux:   gmake, once with GCC 14 and once with Clang 18 (Architecture §15.8).
+# - macos:   arm64 with the xcode4 generator and xcodebuild.
+# On linux and macos, CI.py runs once per step below: setup + generate, then the static checks, then build + unit per
+# configuration, then portability. Each later step runs whenever generation succeeded, even when an earlier step
+# failed, so one run reports every configuration (CI.py itself stops at the first failing stage). Each run writes its
+# own JUnit summary (--summary-junit) next to the unit test results.
+#
+# Fail-fast is off. The jobs are independent (no `needs:`), so a failure on one platform or compiler never cancels the
+# others.
+#
+# Toolchain decisions, checked against https://github.com/actions/runner-images on 2026-10-05:
+# - Windows: the `windows-2025-vs2026` image ships Visual Studio 2026 Enterprise 18.10, whose default C++ tools are
+#   platform toolset v145 / MSVC 14.51, the toolchain Architecture §16 specifies. The job pins that label instead of
+#   the moving `windows-latest`, and its first step fails if VS 2026, toolset v145, MSVC >= 14.51 or clang-format 22.x
+#   is missing. No other toolset is ever substituted silently; premake's vs2026 projects request v145 explicitly.
+# - Linux: `ubuntu-24.04` ships GCC 14.2 and Clang 18.1. The job still installs the compiler of each matrix entry
+#   explicitly, so an image change cannot swap it.
+# - macOS: `macos-26` is the arm64 image with Xcode 26.x. Architecture §16 requires Xcode 26 as the minimum, so the
+#   older `macos-15` image does not qualify. The job prints the Xcode version and fails below 26.
+#
+# Caching: only the Vulkan SDK download is cached, keyed by version and SHA-256 and re-verified after every restore.
+# Build outputs are never cached, so a runner-image or toolchain update can never mix objects from two compilers.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  # Superseded pull-request runs are cancelled; every push to main keeps its own result.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # Must equal "VulkanSdk.Version" in Scripts/Lib/Toolchain.json; every job checks this. The SDK provides slangc (its
+  # version is pinned in Toolchain.json too) and spirv-val for the Shaders project. Change the version and the three
+  # checksums together.
+  VULKAN_SDK_VERSION: "1.4.350.0"
+  # SHA-256 of the official LunarG downloads, from https://sdk.lunarg.com/sdk/sha/<version>/<platform>/<file>.txt
+  VULKAN_SDK_SHA256_WINDOWS: "855b27ba05d2d8119c5114c5d4ff870ca38f2c632b11e1bb9923b9b7e6ecfe7b"
+  VULKAN_SDK_SHA256_LINUX: "b65f068ab36263559da49d7cacd7e7b9df23824ca8b68ccc522a2b06f5725df2"
+  VULKAN_SDK_SHA256_MACOS: "7acc181b8fd9b4781bf51ed086222ec95d22004b85b3d0a6683a7e48ca5a1679"
+
+jobs:
+  windows:
+    name: Windows x64 (VS 2026, v145)
+    runs-on: windows-2025-vs2026
+    timeout-minutes: 150
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Check the Vulkan SDK pin against Scripts/Lib/Toolchain.json
+        shell: python
+        run: |
+          import json
+          import os
+          import sys
+
+          with open("Scripts/Lib/Toolchain.json", encoding="utf-8") as file:
+              pinned = json.load(file)["VulkanSdk"]["Version"]
+          installed = os.environ["VULKAN_SDK_VERSION"]
+          if pinned != installed:
+              sys.exit(f"ci.yml installs Vulkan SDK {installed} but Scripts/Lib/Toolchain.json pins {pinned}; change both, and the SHA-256 values, together")
+          print(f"Vulkan SDK {installed} matches Scripts/Lib/Toolchain.json")
+
+      - name: Verify Visual Studio 2026, toolset v145 and clang-format 22
+        run: |
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          $query = @('-products', '*', '-version', '[18.0,19.0)', '-requires', 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64', '-latest')
+          $vs = & $vswhere @query -property installationPath | Select-Object -First 1
+          if (-not $vs) { throw 'Visual Studio 2026 (18.x) with the x64 C++ tools is not installed on this runner image' }
+          $vsVersion = & $vswhere @query -property catalog_productDisplayVersion | Select-Object -First 1
+          $toolsFile = Join-Path $vs 'VC\Auxiliary\Build\Microsoft.VCToolsVersion.v145.default.txt'
+          $toolsetDir = Join-Path $vs 'MSBuild\Microsoft\VC\v180\Platforms\x64\PlatformToolsets\v145'
+          if (-not (Test-Path $toolsFile) -or -not (Test-Path $toolsetDir)) { throw "Platform toolset v145 is not installed under '$vs'" }
+          $msvc = (Get-Content -Raw $toolsFile).Trim()
+          if ([version]$msvc -lt [version]'14.51') { throw "MSVC $msvc is older than the 14.51 the architecture specifies" }
+          $clangFormat = Join-Path $vs 'VC\Tools\Llvm\x64\bin\clang-format.exe'
+          $clangFormatVersion = if (Test-Path $clangFormat) { (& $clangFormat --version) -join ' ' } else { 'not installed' }
+          if ($clangFormatVersion -notmatch 'clang-format version 22\.') { throw "clang-format 22.x is required by Docs/CodeStyle.md, found: $clangFormatVersion" }
+          $summary = "Visual Studio $vsVersion at $vs; toolset v145, MSVC $msvc; $clangFormatVersion"
+          Write-Host $summary
+          "**Windows toolchain:** $summary" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+
+      - name: Restore the Vulkan SDK installer from the cache
+        id: vulkan-sdk-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/vulkan-sdk-download
+          key: vulkan-sdk-windows-${{ env.VULKAN_SDK_VERSION }}-${{ env.VULKAN_SDK_SHA256_WINDOWS }}
+
+      - name: Download and verify the Vulkan SDK installer
+        run: |
+          $directory = Join-Path $env:RUNNER_TEMP 'vulkan-sdk-download'
+          $name = "vulkansdk-windows-X64-$env:VULKAN_SDK_VERSION.exe"
+          $file = Join-Path $directory $name
+          New-Item -ItemType Directory -Force -Path $directory | Out-Null
+          function Test-Installer { (Test-Path $file) -and ((Get-FileHash -Algorithm SHA256 -Path $file).Hash -eq $env:VULKAN_SDK_SHA256_WINDOWS) }
+          if (Test-Installer) { Write-Host "Using the cached $name (SHA-256 verified)"; exit 0 }
+          curl.exe --fail --location --silent --show-error --retry 5 --retry-all-errors --proto '=https' --tlsv1.2 --output $file "https://sdk.lunarg.com/sdk/download/$env:VULKAN_SDK_VERSION/windows/$name"
+          if ($LASTEXITCODE -ne 0) { throw "Downloading $name failed (curl exit code $LASTEXITCODE)" }
+          if (-not (Test-Installer)) { throw "SHA-256 mismatch for $name; expected $env:VULKAN_SDK_SHA256_WINDOWS" }
+          Write-Host "Downloaded $name (SHA-256 verified)"
+
+      - name: Save the Vulkan SDK installer to the cache
+        if: steps.vulkan-sdk-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/vulkan-sdk-download
+          key: vulkan-sdk-windows-${{ env.VULKAN_SDK_VERSION }}-${{ env.VULKAN_SDK_SHA256_WINDOWS }}
+
+      - name: Install the Vulkan SDK
+        run: |
+          $installer = Join-Path $env:RUNNER_TEMP "vulkan-sdk-download\vulkansdk-windows-X64-$env:VULKAN_SDK_VERSION.exe"
+          $root = "C:\VulkanSDK\$env:VULKAN_SDK_VERSION"
+          $process = Start-Process -FilePath $installer -ArgumentList @('--root', $root, '--accept-licenses', '--default-answer', '--confirm-command', 'install') -Wait -PassThru -NoNewWindow
+          if ($process.ExitCode -ne 0) { throw "The Vulkan SDK installer exited with code $($process.ExitCode)" }
+          # slangc only accepts the single-dash -version; spirv-val takes --version.
+          $versionFlags = [ordered]@{ 'slangc' = '-version'; 'spirv-val' = '--version' }
+          foreach ($tool in $versionFlags.GetEnumerator()) {
+            $path = Join-Path $root "Bin\$($tool.Key).exe"
+            if (-not (Test-Path $path)) { throw "$($tool.Key).exe is missing from $root\Bin" }
+            & $path $tool.Value
+            if ($LASTEXITCODE -ne 0) { throw "$($tool.Key) $($tool.Value) failed with exit code $LASTEXITCODE" }
+          }
+          "VULKAN_SDK=$root" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "$root\Bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      # Stages a hosted runner can run: it has no GPU. These are all the M0 stages: setup, generate, lint (which
+      # includes CheckBuildConfig.py on the workspace and its fixtures, Lint.py, Lint.py --self-test and the format
+      # check), build, unit and portability (which includes the clang-cl Release build; this image has the VS C++
+      # Clang component, so --require-clang-cl turns a missing component into a failure instead of a skip). Add each
+      # later CPU-only stage here when it lands. The GPU stages (bake, gpu, golden, feature, automation, export,
+      # determinism, games) stay with the local gate on a machine with a Vulkan device.
+      - name: Run CI.py
+        run: python Scripts/CI.py --stages setup,generate,lint,build,unit,portability --require-clang-cl
+
+      - name: Upload test results
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: test-results-windows
+          path: bin/TestResults/
+          if-no-files-found: warn
+          retention-days: 14
+
+  # Architecture §15.8: ubuntu-24.04 with GCC 14 and with Clang 18. Build.py passes CC, CXX and AR to make.
+  # - GCC: gcc-ar passes GCC's LTO plugin, so the Dist (-flto) static libraries get a valid symbol index. Plain `ar`
+  #   would load the system default GCC's plugin.
+  # - Clang: llvm-ar writes the LTO symbol index, and lld (-fuse-ld=lld, set by Dependencies.lua for Clang on Linux)
+  #   links the Dist LTO bitcode natively; the system linker would need the LLVM gold plugin. libstdc++ comes from
+  #   g++-14, the newest GCC on the image.
+  # - Both: the lint stage needs clang-format 22 (pip, .github/ci-requirements.txt), clang-tidy and clang-query (the
+  #   naming and json-access checkers) and clang++ (header self-containment), all from the Clang 18 packages.
+  linux:
+    name: Linux x64 (${{ matrix.name }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: GCC 14
+            toolset: gcc
+            packages: gcc-14 g++-14
+            cc: gcc-14
+            cxx: g++-14
+            ar: gcc-ar-14
+          - name: Clang 18
+            toolset: clang
+            packages: llvm-18 lld-18 g++-14
+            cc: clang-18
+            cxx: clang++-18
+            ar: llvm-ar-18
+    defaults:
+      run:
+        shell: bash
+    env:
+      CC: ${{ matrix.cc }}
+      CXX: ${{ matrix.cxx }}
+      AR: ${{ matrix.ar }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The oldest supported Python (Architecture §2.3: Python 3.10+). This job, the shader build rule (python3)
+      # included, proves the scripts run on it. Windows and macOS use 3.12.
+      - name: Set up Python 3.10
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.10"
+
+      - name: Check the Vulkan SDK pin against Scripts/Lib/Toolchain.json
+        shell: python
+        run: |
+          import json
+          import os
+          import sys
+
+          with open("Scripts/Lib/Toolchain.json", encoding="utf-8") as file:
+              pinned = json.load(file)["VulkanSdk"]["Version"]
+          installed = os.environ["VULKAN_SDK_VERSION"]
+          if pinned != installed:
+              sys.exit(f"ci.yml installs Vulkan SDK {installed} but Scripts/Lib/Toolchain.json pins {pinned}; change both, and the SHA-256 values, together")
+          print(f"Vulkan SDK {installed} matches Scripts/Lib/Toolchain.json")
+
+      - name: Install ${{ matrix.name }}, the lint tools and the X11 development packages
+        env:
+          PACKAGES: ${{ matrix.packages }}
+        run: |
+          sudo apt-get update
+          # xorg-dev covers GLFW's X11 build (Vendor/GLFW/VENDOR.md) and is the package Setup.py checks for.
+          # clang-18, clang-tidy-18 and clang-tools-18 (clang-query) serve the lint stage in both matrix entries.
+          # PACKAGES is a fixed list from the matrix above; it is split into words on purpose.
+          # shellcheck disable=SC2086
+          sudo apt-get install --yes --no-install-recommends $PACKAGES clang-18 clang-tidy-18 clang-tools-18 xorg-dev
+          python3 -m pip install --disable-pip-version-check --require-hashes --no-deps --requirement .github/ci-requirements.txt
+          versions="$("$CXX" --version | head -n 1); $("$AR" --version | head -n 1); $(make --version | head -n 1); $(clang-format --version); Python $(python3 -c 'import platform; print(platform.python_version())')"
+          echo "$versions"
+          echo "**Linux toolchain:** $versions" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Restore the Vulkan SDK archive from the cache
+        id: vulkan-sdk-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/vulkan-sdk-download
+          key: vulkan-sdk-linux-${{ env.VULKAN_SDK_VERSION }}-${{ env.VULKAN_SDK_SHA256_LINUX }}
+
+      - name: Download and verify the Vulkan SDK archive
+        run: |
+          set -u
+          name="vulkansdk-linux-x86_64-${VULKAN_SDK_VERSION}.tar.xz"
+          file="$RUNNER_TEMP/vulkan-sdk-download/$name"
+          mkdir -p "$(dirname "$file")"
+          verify() { [ -f "$file" ] && echo "${VULKAN_SDK_SHA256_LINUX}  $file" | sha256sum --check --status; }
+          if verify; then echo "Using the cached $name (SHA-256 verified)"; exit 0; fi
+          curl --fail --location --silent --show-error --retry 5 --retry-all-errors --proto '=https' --tlsv1.2 \
+            --output "$file" "https://sdk.lunarg.com/sdk/download/${VULKAN_SDK_VERSION}/linux/$name"
+          verify || { echo "::error::SHA-256 mismatch for $name; expected ${VULKAN_SDK_SHA256_LINUX}"; exit 1; }
+          echo "Downloaded $name (SHA-256 verified)"
+
+      - name: Save the Vulkan SDK archive to the cache
+        if: steps.vulkan-sdk-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/vulkan-sdk-download
+          key: vulkan-sdk-linux-${{ env.VULKAN_SDK_VERSION }}-${{ env.VULKAN_SDK_SHA256_LINUX }}
+
+      # LunarG's Linux SDK is a tarball; the environment matches its documented setup (VULKAN_SDK, PATH, LD_LIBRARY_PATH).
+      - name: Install the Vulkan SDK
+        run: |
+          set -u
+          root="$RUNNER_TEMP/VulkanSDK"
+          rm -rf "$root"
+          mkdir -p "$root"
+          tar -xJf "$RUNNER_TEMP/vulkan-sdk-download/vulkansdk-linux-x86_64-${VULKAN_SDK_VERSION}.tar.xz" -C "$root"
+          sdk="$root/${VULKAN_SDK_VERSION}/x86_64"
+          for tool in slangc spirv-val; do
+            [ -x "$sdk/bin/$tool" ] || { echo "::error::$tool is missing from $sdk/bin"; ls "$root"; exit 1; }
+          done
+          # slangc only accepts the single-dash -version; spirv-val takes --version.
+          LD_LIBRARY_PATH="$sdk/lib" "$sdk/bin/slangc" -version
+          LD_LIBRARY_PATH="$sdk/lib" "$sdk/bin/spirv-val" --version
+          echo "VULKAN_SDK=$sdk" >> "$GITHUB_ENV"
+          echo "LD_LIBRARY_PATH=$sdk/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" >> "$GITHUB_ENV"
+          echo "$sdk/bin" >> "$GITHUB_PATH"
+
+      - name: Setup and generate (gmake, ${{ matrix.toolset }})
+        id: generate
+        run: python3 Scripts/CI.py --stages setup,generate --toolset "${{ matrix.toolset }}" --summary-junit bin/TestResults/CI-generate.xml
+
+      - name: Static checks (lint stage)
+        if: ${{ !cancelled() && steps.generate.outcome == 'success' }}
+        run: python3 Scripts/CI.py --stages lint --summary-junit bin/TestResults/CI-lint.xml
+
+      - name: Debug (build, shader up-to-date check, unit tests)
+        if: ${{ !cancelled() && steps.generate.outcome == 'success' }}
+        run: python3 Scripts/CI.py --stages build,unit --configs Debug --summary-junit bin/TestResults/CI-Debug.xml
+
+      - name: Release (build, unit tests)
+        if: ${{ !cancelled() && steps.generate.outcome == 'success' }}
+        run: python3 Scripts/CI.py --stages build,unit --configs Release --summary-junit bin/TestResults/CI-Release.xml
+
+      - name: Dist (build)
+        if: ${{ !cancelled() && steps.generate.outcome == 'success' }}
+        run: python3 Scripts/CI.py --stages build --configs Dist --summary-junit bin/TestResults/CI-Dist.xml
+
+      - name: Portability
+        if: ${{ !cancelled() && steps.generate.outcome == 'success' }}
+        run: python3 Scripts/CI.py --stages portability --summary-junit bin/TestResults/CI-portability.xml
+
+      - name: Upload test results
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: test-results-linux-${{ matrix.toolset }}
+          path: bin/TestResults/
+          if-no-files-found: warn
+          retention-days: 14
+
+  macos:
+    name: macOS arm64 (Xcode 26)
+    runs-on: macos-26
+    timeout-minutes: 150
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Check the Vulkan SDK pin against Scripts/Lib/Toolchain.json
+        shell: python
+        run: |
+          import json
+          import os
+          import sys
+
+          with open("Scripts/Lib/Toolchain.json", encoding="utf-8") as file:
+              pinned = json.load(file)["VulkanSdk"]["Version"]
+          installed = os.environ["VULKAN_SDK_VERSION"]
+          if pinned != installed:
+              sys.exit(f"ci.yml installs Vulkan SDK {installed} but Scripts/Lib/Toolchain.json pins {pinned}; change both, and the SHA-256 values, together")
+          print(f"Vulkan SDK {installed} matches Scripts/Lib/Toolchain.json")
+
+      - name: Verify arm64 and Xcode 26
+        run: |
+          machine="$(uname -m)"
+          [ "$machine" = "arm64" ] || { echo "::error::expected an arm64 runner, got $machine"; exit 1; }
+          xcode="$(xcodebuild -version | head -n 1)"
+          major="$(echo "$xcode" | sed -n 's/^Xcode \([0-9][0-9]*\).*/\1/p')"
+          [ "${major:-0}" -ge 26 ] || { echo "::error::Xcode 26 or later is required (Architecture §16), found: $xcode"; exit 1; }
+          # clang-format 22 for the lint stage (hash-pinned). clang-tidy and clang-query are not part of Xcode, so the
+          # naming and json-access checkers run their regex fallbacks here, which Lint.py reports.
+          python3 -m pip install --disable-pip-version-check --require-hashes --no-deps --requirement .github/ci-requirements.txt
+          versions="$xcode; $(clang --version | head -n 1); $(clang-format --version); macOS $(sw_vers -productVersion) $machine"
+          echo "$versions"
+          echo "**macOS toolchain:** $versions" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Restore the Vulkan SDK archive from the cache
+        id: vulkan-sdk-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/vulkan-sdk-download
+          key: vulkan-sdk-macos-${{ env.VULKAN_SDK_VERSION }}-${{ env.VULKAN_SDK_SHA256_MACOS }}
+
+      - name: Download and verify the Vulkan SDK archive
+        run: |
+          set -u
+          name="vulkansdk-macos-${VULKAN_SDK_VERSION}.zip"
+          file="$RUNNER_TEMP/vulkan-sdk-download/$name"
+          mkdir -p "$(dirname "$file")"
+          verify() { [ -f "$file" ] && echo "${VULKAN_SDK_SHA256_MACOS}  $file" | shasum -a 256 --check --status; }
+          if verify; then echo "Using the cached $name (SHA-256 verified)"; exit 0; fi
+          curl --fail --location --silent --show-error --retry 5 --retry-all-errors --proto '=https' --tlsv1.2 \
+            --output "$file" "https://sdk.lunarg.com/sdk/download/${VULKAN_SDK_VERSION}/mac/$name"
+          verify || { echo "::error::SHA-256 mismatch for $name; expected ${VULKAN_SDK_SHA256_MACOS}"; exit 1; }
+          echo "Downloaded $name (SHA-256 verified)"
+
+      - name: Save the Vulkan SDK archive to the cache
+        if: steps.vulkan-sdk-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/vulkan-sdk-download
+          key: vulkan-sdk-macos-${{ env.VULKAN_SDK_VERSION }}-${{ env.VULKAN_SDK_SHA256_MACOS }}
+
+      # LunarG's documented unattended install. The core component includes the loader, MoltenVK, slangc and
+      # spirv-val. copy_only=1 skips the system-wide copy into /usr/local, so the install needs no sudo.
+      - name: Install the Vulkan SDK
+        run: |
+          set -u
+          work="$RUNNER_TEMP/vulkan-sdk-installer"
+          root="$RUNNER_TEMP/VulkanSDK/${VULKAN_SDK_VERSION}"
+          rm -rf "$work" "$root"
+          mkdir -p "$work"
+          ditto -x -k "$RUNNER_TEMP/vulkan-sdk-download/vulkansdk-macos-${VULKAN_SDK_VERSION}.zip" "$work"
+          installer="$work/vulkansdk-macOS-${VULKAN_SDK_VERSION}.app/Contents/MacOS/vulkansdk-macOS-${VULKAN_SDK_VERSION}"
+          [ -x "$installer" ] || { echo "::error::installer not found in the SDK archive"; ls -la "$work"; exit 1; }
+          "$installer" --root "$root" --accept-licenses --default-answer --confirm-command install copy_only=1
+          sdk="$root/macOS"
+          # xcodebuild is a SIP-protected /usr/bin shim, which strips DYLD_* variables from everything it starts,
+          # the shader build rule included. So the tools must run without DYLD_LIBRARY_PATH; verify exactly that.
+          for tool in slangc spirv-val; do
+            [ -x "$sdk/bin/$tool" ] || { echo "::error::$tool is missing from $sdk/bin"; exit 1; }
+          done
+          # slangc only accepts the single-dash -version; spirv-val takes --version.
+          env -u DYLD_LIBRARY_PATH "$sdk/bin/slangc" -version
+          env -u DYLD_LIBRARY_PATH "$sdk/bin/spirv-val" --version
+          [ -f "$sdk/share/vulkan/icd.d/MoltenVK_icd.json" ] || { echo "::error::MoltenVK ICD is missing from the SDK"; exit 1; }
+          echo "VULKAN_SDK=$sdk" >> "$GITHUB_ENV"
+          echo "$sdk/bin" >> "$GITHUB_PATH"
+
+      - name: Setup and generate (xcode4)
+        id: generate
+        run: python3 Scripts/CI.py --stages setup,generate --summary-junit bin/TestResults/CI-generate.xml
+
+      - name: Static checks (lint stage)
+        if: ${{ !cancelled() && steps.generate.outcome == 'success' }}
+        run: python3 Scripts/CI.py --stages lint --summary-junit bin/TestResults/CI-lint.xml
+
+      - name: Debug (build, shader check, unit tests)
+        if: ${{ !cancelled() && steps.generate.outcome == 'success' }}
+        run: python3 Scripts/CI.py --stages build,unit --configs Debug --summary-junit bin/TestResults/CI-Debug.xml
+
+      - name: Release (build, unit tests)
+        if: ${{ !cancelled() && steps.generate.outcome == 'success' }}
+        run: python3 Scripts/CI.py --stages build,unit --configs Release --summary-junit bin/TestResults/CI-Release.xml
+
+      - name: Dist (build)
+        if: ${{ !cancelled() && steps.generate.outcome == 'success' }}
+        run: python3 Scripts/CI.py --stages build --configs Dist --summary-junit bin/TestResults/CI-Dist.xml
+
+      - name: Portability
+        if: ${{ !cancelled() && steps.generate.outcome == 'success' }}
+        run: python3 Scripts/CI.py --stages portability --summary-junit bin/TestResults/CI-portability.xml
+
+      - name: Upload test results
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: test-results-macos
+          path: bin/TestResults/
+          if-no-files-found: warn
+          retention-days: 14

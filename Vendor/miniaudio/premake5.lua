@@ -40,6 +40,12 @@ project "miniaudio"
 		systemversion "latest"
 		-- Backends (WASAPI, DirectSound, WinMM) load their system DLLs at runtime; nothing to link.
 
+	-- Upstream's implementation has exactly one MSVC warning at the default level: C4244 (64-to-32-bit conversion)
+	-- in the dr_wav "smpl" chunk parser, ma_dr_wav__read_smpl_to_metadata_obj. It is harmless (see VENDOR.md) and
+	-- the source stays unmodified, so it is disabled for this vendored translation unit only.
+	filter { "toolset:msc*", "files:miniaudio.c" }
+		disablewarnings { "4244" }
+
 	filter "system:linux"
 		pic "On"
 		-- Backends (PulseAudio/PipeWire, ALSA, JACK) are loaded at runtime with dlopen(); no -dev packages

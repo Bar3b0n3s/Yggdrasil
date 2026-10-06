@@ -1,0 +1,423 @@
+{
+	"Format": "LintFixtures",
+	"Version": 1,
+	"Notes": [
+		"Each directory next to this file is a tree with the repository layout that Scripts/Lint.py --self-test lints with --root and the listed Steps. It must report exactly the Expected findings (code, file, line): the seeded defect, and nothing else.",
+		"Modes runs the fixture once per checker mode of Scripts/Lint.py --mode: clang (clang-tidy naming, clang-query json access) and regex (the fallbacks). A clang run is skipped, and reported, when those tools are not installed. An Expected entry with its own Modes is expected only in those modes: what only a clang tool can find.",
+		"No premake script includes these trees, so they are never compiled by the build, and Lint.py on the repository never reads them: its C++ roots are the Source directories, and its Python and JSON steps exclude Tests/Data."
+	],
+	"Fixtures": [
+		{
+			"Name": "UpwardInclude",
+			"Description": "Core (layer 0) includes a Scene header (layer 3).",
+			"Steps": [
+				"includes",
+				"banned",
+				"naming",
+				"headers"
+			],
+			"Modes": [
+				"clang",
+				"regex"
+			],
+			"Expected": [
+				{
+					"Code": "include-layer",
+					"File": "Engine/Source/Engine/Core/Clock.h",
+					"Line": 3
+				}
+			]
+		},
+		{
+			"Name": "ForbiddenLayer5Edge",
+			"Description": "Session includes Testing: the reverse of the allowed layer-5 edge Session -> Testing.",
+			"Steps": [
+				"includes",
+				"banned",
+				"naming",
+				"headers"
+			],
+			"Modes": [
+				"clang",
+				"regex"
+			],
+			"Expected": [
+				{
+					"Code": "include-layer5-edge",
+					"File": "Engine/Source/Engine/Session/PlaySession.h",
+					"Line": 3
+				}
+			]
+		},
+		{
+			"Name": "SnapshotHeaderNvrhi",
+			"Description": "Renderer/RenderSnapshot.h includes NVRHI directly.",
+			"Steps": [
+				"includes",
+				"banned",
+				"naming",
+				"headers"
+			],
+			"Modes": [
+				"clang",
+				"regex"
+			],
+			"Expected": [
+				{
+					"Code": "include-snapshot-header",
+					"File": "Engine/Source/Engine/Renderer/RenderSnapshot.h",
+					"Line": 3
+				}
+			]
+		},
+		{
+			"Name": "SnapshotHeaderNvrhiTransitive",
+			"Description": "Renderer/DebugDrawList.h reaches NVRHI through an Asset header, which also breaks the Asset rules itself.",
+			"Steps": [
+				"includes",
+				"banned",
+				"naming",
+				"headers"
+			],
+			"Modes": [
+				"clang",
+				"regex"
+			],
+			"Expected": [
+				{
+					"Code": "include-third-party",
+					"File": "Engine/Source/Engine/Asset/TextureData.h",
+					"Line": 3
+				},
+				{
+					"Code": "include-snapshot-header",
+					"File": "Engine/Source/Engine/Renderer/DebugDrawList.h",
+					"Line": 3
+				}
+			]
+		},
+		{
+			"Name": "ThrowInFirstParty",
+			"Description": "throw, and std::rethrow_exception, in an Engine source file.",
+			"Steps": [
+				"includes",
+				"banned",
+				"naming",
+				"headers"
+			],
+			"Modes": [
+				"clang",
+				"regex"
+			],
+			"Expected": [
+				{
+					"Code": "banned-throw",
+					"File": "Engine/Source/Engine/Core/Parser.cpp",
+					"Line": 10
+				},
+				{
+					"Code": "banned-throw",
+					"File": "Engine/Source/Engine/Core/Parser.cpp",
+					"Line": 16
+				}
+			]
+		},
+		{
+			"Name": "StdRand",
+			"Description": "std::rand in Audio (not on the simulation path, so only the rand rule applies).",
+			"Steps": [
+				"includes",
+				"banned",
+				"naming",
+				"headers"
+			],
+			"Modes": [
+				"clang",
+				"regex"
+			],
+			"Expected": [
+				{
+					"Code": "banned-rand",
+					"File": "Engine/Source/Engine/Audio/PitchJitter.cpp",
+					"Line": 10
+				}
+			]
+		},
+		{
+			"Name": "StdSinInScene",
+			"Description": "In Scene (simulation path): std::sin, a CRT call through a namespace alias of std, an Euler-angle glm::quat construction and glm::mix of quaternions; the std::sin in Renderer/Wave.cpp is allowed and must not be reported.",
+			"Steps": [
+				"includes",
+				"banned",
+				"naming",
+				"headers"
+			],
+			"Modes": [
+				"clang",
+				"regex"
+			],
+			"Expected": [
+				{
+					"Code": "banned-crt-math",
+					"File": "Engine/Source/Engine/Scene/Oscillator.cpp",
+					"Line": 10
+				},
+				{
+					"Code": "banned-crt-math",
+					"File": "Engine/Source/Engine/Scene/Oscillator.cpp",
+					"Line": 18
+				},
+				{
+					"Code": "banned-crt-math",
+					"File": "Engine/Source/Engine/Scene/Oscillator.cpp",
+					"Line": 24
+				},
+				{
+					"Code": "banned-crt-math",
+					"File": "Engine/Source/Engine/Scene/Oscillator.cpp",
+					"Line": 25
+				}
+			]
+		},
+		{
+			"Name": "MemberWithoutPrefix",
+			"Description": "A private data member without m_, caught by clang-tidy and by the regex fallback.",
+			"Steps": [
+				"includes",
+				"banned",
+				"naming",
+				"headers"
+			],
+			"Modes": [
+				"clang",
+				"regex"
+			],
+			"Expected": [
+				{
+					"Code": "naming",
+					"File": "Engine/Source/Engine/Core/Counter.h",
+					"Line": 13
+				}
+			]
+		},
+		{
+			"Name": "JsonAtOutsideCoreJson",
+			"Description": "nlohmann json at() and get<>() in Scene instead of JsonReader: on json receivers, a receiver declared through a type alias, and (found by type, clang mode only) a value returned by a function held in auto and a call chain.",
+			"Steps": [
+				"includes",
+				"banned",
+				"naming",
+				"headers"
+			],
+			"Modes": [
+				"clang",
+				"regex"
+			],
+			"Expected": [
+				{
+					"Code": "banned-json-access",
+					"File": "Engine/Source/Engine/Scene/BodyLoader.cpp",
+					"Line": 11
+				},
+				{
+					"Code": "banned-json-access",
+					"File": "Engine/Source/Engine/Scene/BodyLoader.cpp",
+					"Line": 12
+				},
+				{
+					"Code": "banned-json-access",
+					"File": "Engine/Source/Engine/Scene/BodyLoader.cpp",
+					"Line": 29
+				},
+				{
+					"Code": "banned-json-access",
+					"File": "Engine/Source/Engine/Scene/BodyLoader.cpp",
+					"Line": 30,
+					"Modes": [
+						"clang"
+					]
+				},
+				{
+					"Code": "banned-json-access",
+					"File": "Engine/Source/Engine/Scene/BodyLoader.cpp",
+					"Line": 31,
+					"Modes": [
+						"clang"
+					]
+				}
+			]
+		},
+		{
+			"Name": "FilesystemWithoutErrorCode",
+			"Description": "std::filesystem::exists without an std::error_code; the is_directory call with one is fine.",
+			"Steps": [
+				"includes",
+				"banned",
+				"naming",
+				"headers"
+			],
+			"Modes": [
+				"clang",
+				"regex"
+			],
+			"Expected": [
+				{
+					"Code": "banned-filesystem",
+					"File": "Engine/Source/Engine/Core/ProjectProbe.cpp",
+					"Line": 12
+				}
+			]
+		},
+		{
+			"Name": "HeaderNotSelfContained",
+			"Description": "A header that needs an include it does not have, and a header without #pragma once.",
+			"Steps": [
+				"includes",
+				"banned",
+				"headers"
+			],
+			"Expected": [
+				{
+					"Code": "header-self-contained",
+					"File": "Engine/Source/Engine/Core/ByteBuffer.h",
+					"Line": 8
+				},
+				{
+					"Code": "header-pragma-once",
+					"File": "Engine/Source/Engine/Core/Version.h",
+					"Line": 1
+				}
+			]
+		},
+		{
+			"Name": "PythonStyle",
+			"Description": "An entry-point script without main(), type hints or an argument list, with a bare except.",
+			"Steps": [
+				"python"
+			],
+			"Expected": [
+				{
+					"Code": "python-entry-point",
+					"File": "Scripts/RunCommand.py",
+					"Line": 1
+				},
+				{
+					"Code": "python-annotations",
+					"File": "Scripts/RunCommand.py",
+					"Line": 8
+				},
+				{
+					"Code": "python-shell",
+					"File": "Scripts/RunCommand.py",
+					"Line": 10
+				},
+				{
+					"Code": "python-bare-except",
+					"File": "Scripts/RunCommand.py",
+					"Line": 11
+				},
+				{
+					"Code": "python-entry-point",
+					"File": "Scripts/RunCommand.py",
+					"Line": 15
+				}
+			]
+		},
+		{
+			"Name": "InvalidJson",
+			"Description": "A duplicate key and a trailing comma.",
+			"Steps": [
+				"json"
+			],
+			"Expected": [
+				{
+					"Code": "json-duplicate-key",
+					"File": "Resources/DuplicateKey.json",
+					"Line": 1
+				},
+				{
+					"Code": "json-invalid",
+					"File": "Resources/TrailingComma.json",
+					"Line": 3
+				}
+			]
+		},
+		{
+			"Name": "AbiMacroInSource",
+			"Description": "#define and #undef of ABI-relevant configuration macros (Jolt, vulkan.hpp, glm) in a source file; IMGUI_DEFINE_MATH_OPERATORS is the allowed control.",
+			"Steps": [
+				"includes",
+				"banned"
+			],
+			"Expected": [
+				{
+					"Code": "banned-abi-macro",
+					"File": "Engine/Source/Engine/Physics/Private/JoltBody.cpp",
+					"Line": 3
+				},
+				{
+					"Code": "banned-abi-macro",
+					"File": "Engine/Source/Engine/Physics/Private/JoltBody.cpp",
+					"Line": 4
+				},
+				{
+					"Code": "banned-abi-macro",
+					"File": "Engine/Source/Engine/Physics/Private/JoltBody.cpp",
+					"Line": 5
+				},
+				{
+					"Code": "banned-abi-macro",
+					"File": "Engine/Source/Engine/Physics/Private/JoltBody.cpp",
+					"Line": 6
+				}
+			]
+		},
+		{
+			"Name": "EditorCoreThirdParty",
+			"Description": "EditorCore includes GLFW; the script type checker including LuauAnalysis is the allowed control.",
+			"Steps": [
+				"includes"
+			],
+			"Expected": [
+				{
+					"Code": "include-third-party",
+					"File": "Editor/Source/EditorCore/Viewport/ViewportInput.cpp",
+					"Line": 3
+				}
+			]
+		},
+		{
+			"Name": "SpdlogOutsideLogHeader",
+			"Description": "A public Core header other than Log.h includes spdlog; Log.h and Log.cpp are the allowed controls.",
+			"Steps": [
+				"includes"
+			],
+			"Expected": [
+				{
+					"Code": "include-third-party",
+					"File": "Engine/Source/Engine/Core/Timer.h",
+					"Line": 4
+				}
+			]
+		},
+		{
+			"Name": "ProductNameInScript",
+			"Description": "The product name in a Python string and a premake string; comments naming it are the allowed controls.",
+			"Steps": [
+				"banned"
+			],
+			"Expected": [
+				{
+					"Code": "banned-product-name",
+					"File": "Scripts/Release.py",
+					"Line": 7
+				},
+				{
+					"Code": "banned-product-name",
+					"File": "Engine/premake5.lua",
+					"Line": 4
+				}
+			]
+		}
+	]
+}

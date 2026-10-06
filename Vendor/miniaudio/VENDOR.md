@@ -47,6 +47,7 @@ Mirrors upstream `add_library(miniaudio miniaudio.c miniaudio.h)`:
   (`ma_waveform`, `ma_noise`), threading, and SSE2/AVX2/NEON paths (chosen at runtime on MSVC; GCC and
   Clang use what the target enables by default, so do not add `-mavx2`).
 - Linux: `pic "On"`.
+- MSVC: warning C4244 is disabled for `miniaudio.c` only (one harmless upstream conversion; see Notes).
 
 Backends compiled in: Windows uses WASAPI, then DirectSound, then WinMM. Linux uses PulseAudio
 (PipeWire's pulse server), then ALSA, then JACK. macOS uses CoreAudio. Every platform also gets the
@@ -90,9 +91,15 @@ Notes:
   `extras/stb_vorbis.c` (public domain), included before the implementation in a custom
   implementation `.c` file. miniaudio then registers a Vorbis decoding backend automatically
   (`STB_VORBIS_INCLUDE_STB_VORBIS_H`).
-- Upstream's `miniaudio.c` has one MSVC level-3 warning (C4244, a 64-to-32-bit conversion in the
-  dr_wav `smpl` chunk parser). It is harmless and left untouched. Consumer translation units that
-  include `miniaudio.h` compile cleanly at `/W4`.
+- Upstream's `miniaudio.c` has one MSVC level-3 warning: C4244 in `ma_dr_wav__read_smpl_to_metadata_obj`
+  (the dr_wav `smpl` chunk parser), where `(pChunkHeader->sizeInBytes - MA_DR_WAV_SMPL_BYTES) /
+  MA_DR_WAV_SMPL_LOOP_BYTES` (64-bit) is assigned to the 32-bit `calculatedLoopCount`. It is harmless: the
+  value is only compared with the chunk's own 32-bit loop count, and a mismatch makes the parser skip the
+  chunk. The source stays unmodified, so `premake5.lua` disables C4244 for `miniaudio.c` only
+  (`filter { "toolset:msc*", "files:miniaudio.c" } disablewarnings { "4244" }`), which keeps the
+  workspace build free of warnings. No other warning is disabled, and consumer translation units that
+  include `miniaudio.h` compile cleanly at `/W4 /WX`. Re-check after every update: remove the
+  suppression if upstream fixes the conversion, and never widen it to other warnings or files.
 
 Verified on Windows (MSVC 14.51 / v145, Debug/Release/Dist, C++23 consumer) by a smoke test:
 

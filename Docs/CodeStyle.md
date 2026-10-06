@@ -817,7 +817,7 @@ namespace Engine {
 These rules cover the basics. Tooling for these languages (formatters, linters) is **[Architecture]**.
 
 - **Python** (`Scripts/`, `Tools/`, Python 3.10 or later):
-  - Follow PEP 8: 4-space indentation, `snake_case` functions and variables, `PascalCase` classes, `UPPER_SNAKE_CASE` constants.
+  - Follow PEP 8 with a 120-column limit (the width the C++ comments and premake scripts are wrapped at; `Docs/Decisions/0002-m0-deviations.md`): 4-space indentation, `snake_case` functions and variables, `PascalCase` classes, `UPPER_SNAKE_CASE` constants.
   - Entry-point scripts use PascalCase file names (`Setup.py`, `Build.py`, `Test.py`, `Format.py`) and end with `if __name__ == "__main__": sys.exit(main())`.
   - Use type hints, `pathlib`, and `subprocess` with argument lists (never `shell=True`).
   - Exit with a non-zero code on failure.
