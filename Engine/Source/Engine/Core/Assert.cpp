@@ -51,7 +51,7 @@ namespace Engine {
 		const std::string file(info.File);
 		const std::string function(info.Function);
 		const spdlog::source_loc location{ file.c_str(), static_cast<int>(info.Line), function.c_str() };
-		Log::GetLogger(info.IsClient ? LogChannel::App : LogChannel::Engine).log(location, spdlog::level::critical, "{}", description);
+		Log::GetLogger(info.IsClient ? LogChannel::App : LogChannel::Engine).log(location, spdlog::level::critical, std::string_view(description));
 
 		FatalError(FatalErrorKind::Assert, description);
 	}

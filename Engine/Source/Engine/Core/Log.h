@@ -12,6 +12,8 @@
 #include <filesystem>
 #include <format>
 #include <functional>
+#include <string>
+#include <string_view>
 #include <utility>
 
 // Logging (Architecture §4.4, CodeStyle §11). This is the only public header that includes spdlog (§3 rule 3).
@@ -113,12 +115,20 @@ namespace Engine {
 			return spdlog::level::critical;
 		}
 
+		// The message is formatted here, and spdlog receives the finished text. spdlog takes std::format_string only when
+		// the library defines __cpp_lib_format >= 202207L; Apple's libc++ does not, so spdlog's formatting overloads
+		// expect a runtime std::string_view there. The level check keeps disabled entries from being formatted.
 		template<typename... Args>
 		void LogWrite(LogChannel channel, LogLevel level, const char* file, int line, const char* function,
 			std::format_string<Args...> format, Args&&... args)
 		{
-			Log::GetLogger(channel).log(spdlog::source_loc{ file, line, function }, ToSpdlogLevel(level), format,
-				std::forward<Args>(args)...);
+			spdlog::logger& logger = Log::GetLogger(channel);
+			const spdlog::level::level_enum spdlogLevel = ToSpdlogLevel(level);
+			if (!logger.should_log(spdlogLevel))
+				return;
+
+			const std::string message = std::format(format, std::forward<Args>(args)...);
+			logger.log(spdlog::source_loc{ file, line, function }, spdlogLevel, std::string_view(message));
 		}
 
 	}
