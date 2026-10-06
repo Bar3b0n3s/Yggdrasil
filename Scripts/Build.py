@@ -336,6 +336,9 @@ def build_xcode(xcode: workspace.XcodeWorkspace, config: str, project: str | Non
             "-jobs", str(arguments.jobs),
             "-parallelizeTargets",
             "-hideShellScriptEnvironment",
+            # Only warnings, errors and the failure summary: without it, multi-kilobyte compile command lines bury the
+            # diagnostics in logs and push them out of the output tail that CI annotations report.
+            "-quiet",
             *(["clean"] if arguments.rebuild else []),
             "build",
             # Local and CI builds are not signed (Architecture §1.2); the arm64 linker still signs ad hoc.
