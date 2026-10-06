@@ -4,7 +4,9 @@
 #include "Engine/Core/Assert.h"
 #include "Engine/Core/Log.h"
 #include "Engine/Core/Profiler.h"
+#include "Engine/Graphics/VulkanDispatch.h"
 #include "Engine/Platform/CrashHandler.h"
+#include "Engine/Platform/ErrorDialog.h"
 #include "Engine/Platform/Process.h"
 
 #include <array>
@@ -19,10 +21,11 @@ namespace Engine {
 		// The live context, read by the fatal-error handler on whichever thread fails (process-level state, §3 rule 5).
 		static std::atomic<ProcessContext*> s_CurrentProcessContext{ nullptr };
 
-		constexpr std::array<ProcessContextStep, 4> ProcessContextSteps = {
+		constexpr std::array<ProcessContextStep, 5> ProcessContextSteps = {
 			ProcessContextStep::Log,
 			ProcessContextStep::Profiler,
 			ProcessContextStep::CrashHandler,
+			ProcessContextStep::VulkanLoader,
 			ProcessContextStep::Glfw,
 		};
 
@@ -76,6 +79,9 @@ namespace Engine {
 		Utils::s_CurrentProcessContext.store(context.get());
 		for (const ProcessContextStep step : Utils::ProcessContextSteps)
 		{
+			// The loader is a step only when the process renders, or may (§4.1).
+			if (step == ProcessContextStep::VulkanLoader && specification.VulkanLoader == VulkanLoaderPolicy::None)
+				continue;
 			Status initialized = context->InitializeStep(step);
 			if (!initialized.has_value())
 			{
@@ -142,11 +148,22 @@ namespace Engine {
 				m_PreviousFatalErrorHandler = SetFatalErrorHandler(&ProcessContext::HandleFatalError);
 				break;
 			}
+			case ProcessContextStep::VulkanLoader:
+			{
+				Status loaded = VulkanDispatch::Initialize();
+				if (!loaded.has_value())
+				{
+					if (m_Specification.VulkanLoader == VulkanLoaderPolicy::Required)
+						return loaded;
+					ENGINE_CORE_WARN("No Vulkan loader for this process, GPU work is unavailable: {}", loaded.error());
+				}
+				m_IsVulkanLoaderAvailable = loaded.has_value();
+				break;
+			}
 			case ProcessContextStep::Glfw:
 			{
-				// The Vulkan loader step of the Graphics milestone runs before this one and hands GLFW its
-				// vkGetInstanceProcAddr through VulkanLoader (§4.1); until then GLFW is told about no loader.
-				ENGINE_TRY(GlfwLibrary::Initialize({ .Mode = m_Specification.Window, .VulkanLoader = nullptr }));
+				// GLFW shares the engine's loader (§4.1, §8.1); without one it is told about none.
+				ENGINE_TRY(GlfwLibrary::Initialize({ .Mode = m_Specification.Window, .VulkanLoader = VulkanDispatch::GetInstanceProcAddr() }));
 				break;
 			}
 		}
@@ -176,6 +193,10 @@ namespace Engine {
 				CrashHandler::Uninstall();
 				break;
 			}
+			case ProcessContextStep::VulkanLoader:
+				VulkanDispatch::Shutdown();
+				m_IsVulkanLoaderAvailable = false;
+				break;
 			case ProcessContextStep::Glfw:
 				GlfwLibrary::Shutdown();
 				break;
@@ -209,8 +230,12 @@ namespace Engine {
 				ENGINE_CORE_ERROR("Cannot write the crash report: {}", report.error());
 		}
 
-		// 4. The message box of a windowed process joins here with the Graphics milestone, which brings the Platform call
-		//    that shows it (§4.6, §8.1, §14.3; ADR 0005 decision 9).
+		// 4. The error dialog of a windowed process (§4.6, §8.1, §14.3); tests never enable it, because it blocks.
+		if (context->m_Specification.ShowErrorDialogs && context->m_Specification.Window == WindowMode::Windowed)
+		{
+			ShowErrorDialog(context->m_Specification.AppName,
+				std::format("Fatal error ({}): {}", FatalErrorKindToString(kind), message));
+		}
 	}
 
 	std::string_view ProcessContextStepToString(ProcessContextStep step)
@@ -220,6 +245,7 @@ namespace Engine {
 			case ProcessContextStep::Log:          return "Log";
 			case ProcessContextStep::Profiler:     return "Profiler";
 			case ProcessContextStep::CrashHandler: return "CrashHandler";
+			case ProcessContextStep::VulkanLoader: return "VulkanLoader";
 			case ProcessContextStep::Glfw:         return "Glfw";
 		}
 

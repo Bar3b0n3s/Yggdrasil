@@ -16,20 +16,29 @@
 #include <vector>
 
 // Process-level initialization (Architecture §4.1 level 1, §3 rule 5). GLFW, the logger registry, the profiler, the
-// crash handler and later the Vulkan loader, Jolt's factory and Luau's flags are process-global, so exactly one
+// crash handler, the Vulkan loader and later Jolt's factory and Luau's flags are process-global, so exactly one
 // ProcessContext initializes them, created first by RunApplication or the Tests main and destroyed last, after every
 // EngineContext.
 
 namespace Engine {
 
 	// The process-level steps, in initialization order. Teardown runs them in reverse. Later milestones insert theirs at
-	// the places §4.1 gives: Luau fast flags and PhysicsEngine::Initialize after CrashHandler, the Vulkan loader before Glfw.
+	// the places §4.1 gives: Luau fast flags and PhysicsEngine::Initialize after CrashHandler, before VulkanLoader.
 	enum class ProcessContextStep : uint8_t
 	{
 		Log,          // Log::Initialize: console sink and the rotating file <UserData>/<AppName>/Logs/<exe>.log (§4.4)
 		Profiler,     // Profiler::Initialize (ADR 0003 decision 6)
 		CrashHandler, // CrashHandler::Install with <UserData>/<AppName>/Crashes, and the fatal-error handler (below)
-		Glfw          // GlfwLibrary::Initialize with the platform chosen once by WindowMode
+		VulkanLoader, // VulkanDispatch::Initialize (§8.1); only when VulkanLoaderPolicy is not None
+		Glfw          // GlfwLibrary::Initialize with the chosen platform, handing GLFW the loader (glfwInitVulkanLoader)
+	};
+
+	// Whether the process loads the Vulkan loader (§4.1: "if rendering, the Vulkan loader").
+	enum class VulkanLoaderPolicy : uint8_t
+	{
+		None,       // no loader: RendererMode::None (logic-only processes)
+		Required,   // a missing loader fails Create with Unsupported and NoVulkanLoaderMessage (exit code 3, §8.1)
+		IfAvailable // a missing loader is a warning, and the step completes without one (Tests: GPU tests skip)
 	};
 
 	struct ProcessContextSpecification
@@ -53,6 +62,13 @@ namespace Engine {
 		// their own (death tests, recording-assert-handler targets), whose deaths are expected: crashes still end the process
 		// with exit code 4, but no report is written into the user's folder.
 		bool WriteCrashReports = true;
+		// The Vulkan loader step: RunApplication passes Required for RendererMode::Vulkan and None for RendererMode::None;
+		// the Tests main passes IfAvailable.
+		VulkanLoaderPolicy VulkanLoader = VulkanLoaderPolicy::None;
+		// Error dialogs (Platform/ErrorDialog.h) in a windowed process: step 4 of the fatal-error handler, and the
+		// initialization failures RunApplication and Application::Run report. RunApplication sets it for Windowed
+		// applications; tests never do, because a dialog blocks until a user dismisses it. Ignored when Window is Headless.
+		bool ShowErrorDialogs = false;
 	};
 
 	// An application's step in the fatal-error path (§4.6): the editor's autosave of the open scene and dirty native assets
@@ -83,9 +99,8 @@ namespace Engine {
 	//      Process::BreakIntoDebugger; ADR 0003 decision 21);
 	//   2. the application's hook (SetFatalErrorHook) when one is set: the editor's autosave;
 	//   3. the crash report (CrashHandler::WriteFatalErrorReport) when WriteCrashReports is on;
-	//   4. in a windowed process, a message box naming the error (§4.6, §8.1, §14.3). The Platform call that shows it
-	//      arrives with the Graphics milestone, which first needs it (no Vulkan loader or device); until then the step
-	//      does nothing, but its place in the order is fixed.
+	//   4. in a windowed process with ShowErrorDialogs, an error dialog (ShowErrorDialog) titled AppName with
+	//      "Fatal error (<kind>): <message>" (§4.6, §8.1, §14.3).
 	// The assert handler itself stays Core's DefaultAssertHandler, or whatever the Tests main installs.
 	//
 	// Main thread only, except SetFatalErrorHook (thread-safe): create and destroy the context on the process's main thread
@@ -111,7 +126,8 @@ namespace Engine {
 		// Initializes the process (see the class comment). Creating a second context while one exists is a programmer
 		// error (asserted with the message "a ProcessContext already exists"). Errors: those of the failed step, with the
 		// step as context: Validation for a bad AppName, NotFound or Io for the user-data folders, Io for the log file,
-		// Unsupported when GLFW cannot use the windowed platform.
+		// Unsupported with NoVulkanLoaderMessage for a missing loader under VulkanLoaderPolicy::Required (InvalidArgument for
+		// a bad ENGINE_VULKAN_LOADER value), Unsupported when GLFW cannot use the windowed platform.
 		[[nodiscard]] static Result<Scope<ProcessContext>> Create(const ProcessContextSpecification& specification);
 
 		// The live context; nullptr when none exists. Only the App module (RunApplication, Application::Run, which hands it
@@ -128,8 +144,13 @@ namespace Engine {
 
 		[[nodiscard]] const ProcessContextSpecification& GetSpecification() const { return m_Specification; }
 
-		// The completed steps, in initialization order (all four once Create succeeded).
+		// The completed steps, in initialization order (every step once Create succeeded; VulkanLoader only when the
+		// policy is not None).
 		[[nodiscard]] std::span<const ProcessContextStep> GetSteps() const { return m_Steps; }
+
+		// Whether the VulkanLoader step loaded the loader (VulkanDispatch::IsInitialized): false with VulkanLoaderPolicy::None
+		// and when an IfAvailable loader was missing.
+		[[nodiscard]] bool IsVulkanLoaderAvailable() const { return m_IsVulkanLoaderAvailable; }
 
 		// <UserData>/<AppName> and its Logs and Crashes folders (created by Create).
 		[[nodiscard]] const UserDataPaths& GetUserDataPaths() const { return m_UserDataPaths; }
@@ -154,9 +175,10 @@ namespace Engine {
 		FatalErrorHandler m_PreviousFatalErrorHandler = nullptr; // restored when the CrashHandler step is undone
 		std::mutex m_FatalErrorHookMutex;                        // guards m_FatalErrorHook
 		FatalErrorHook m_FatalErrorHook;
+		bool m_IsVulkanLoaderAvailable = false;
 	};
 
-	// "Log", "Profiler", "CrashHandler" or "Glfw".
+	// "Log", "Profiler", "CrashHandler", "VulkanLoader" or "Glfw".
 	[[nodiscard]] std::string_view ProcessContextStepToString(ProcessContextStep step);
 
 	// The build description written into crash reports and the startup log line: "<Debug|Release|Dist>

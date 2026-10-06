@@ -44,6 +44,26 @@ namespace Engine {
 			CHECK_FALSE(options->IsChildMode());
 			CHECK_FALSE(options->IsChildProcess());
 			CHECK(options->DefaultTimeoutSeconds == 120.0);
+			CHECK_FALSE(options->RequireGpu);
+			CHECK(options->VulkanApi == VulkanApiVersion::Vulkan14);
+			CHECK_FALSE(options->UpdateGolden);
+		}
+
+		TEST_CASE("TestOptions: parses the GPU and golden options")
+		{
+			const std::array<const char*, 4> argv = { "Tests", "--require-gpu", "--vulkan-api=1.3", "--update-golden" };
+			const Result<Test::TestOptions> options = Test::ParseTestOptions(static_cast<int>(argv.size()), argv.data());
+			REQUIRE(options.has_value());
+			CHECK(options->RequireGpu);
+			CHECK(options->VulkanApi == VulkanApiVersion::Vulkan13);
+			CHECK(options->UpdateGolden);
+			CHECK_FALSE(options->IsChildMode());
+
+			const std::array<const char*, 2> api14 = { "Tests", "--vulkan-api=1.4" };
+			const Result<Test::TestOptions> latest = Test::ParseTestOptions(static_cast<int>(api14.size()), api14.data());
+			REQUIRE(latest.has_value());
+			CHECK(latest->VulkanApi == VulkanApiVersion::Vulkan14);
+			CHECK_FALSE(latest->RequireGpu);
 		}
 
 		TEST_CASE("TestOptions: parses the windowed and crash child modes, the user-data root and the child argument")
@@ -149,7 +169,7 @@ namespace Engine {
 
 		TEST_CASE("TestOptions: malformed values are InvalidArgument")
 		{
-			const std::array<const char*, 17> malformed = {
+			const std::array<const char*, 23> malformed = {
 				"--death-test=",
 				"--death-test",
 				"--windowed-child=",
@@ -167,6 +187,12 @@ namespace Engine {
 				"--test-timeout= 1",
 				"--test-timeout=1s",
 				"--test-timeout=0x10",
+				"--require-gpu=1",
+				"--update-golden=x",
+				"--vulkan-api=1.2",
+				"--vulkan-api=",
+				"--vulkan-api",
+				"--vulkan-api=14",
 			};
 			for (const char* bad : malformed)
 			{

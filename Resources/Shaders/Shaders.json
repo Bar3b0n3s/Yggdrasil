@@ -1,6 +1,30 @@
 {
 	"Programs": [
 		{
+			"Name": "ImGui",
+			"File": "Passes/ImGui.slang",
+			"Entries": [
+				{
+					"Name": "VSMain",
+					"Stage": "vertex"
+				},
+				{
+					"Name": "PSMain",
+					"Stage": "fragment"
+				}
+			]
+		},
+		{
+			"Name": "MatrixConvention",
+			"File": "Passes/MatrixConvention.slang",
+			"Entries": [
+				{
+					"Name": "CSMain",
+					"Stage": "compute"
+				}
+			]
+		},
+		{
 			"Name": "Smoke",
 			"File": "Passes/Smoke.slang",
 			"Entries": [
@@ -15,6 +39,20 @@
 					"1"
 				]
 			}
+		},
+		{
+			"Name": "Triangle",
+			"File": "Passes/Triangle.slang",
+			"Entries": [
+				{
+					"Name": "VSMain",
+					"Stage": "vertex"
+				},
+				{
+					"Name": "PSMain",
+					"Stage": "fragment"
+				}
+			]
 		}
 	]
 }

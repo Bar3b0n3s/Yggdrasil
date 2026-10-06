@@ -22,6 +22,9 @@ namespace Engine {
 			constexpr std::string_view UserDataOption = "--user-data-dir";
 			constexpr std::string_view ChildArgumentOption = "--child-argument";
 			constexpr std::string_view TimeoutOption = "--test-timeout";
+			constexpr std::string_view RequireGpuOption = "--require-gpu";
+			constexpr std::string_view VulkanApiOption = "--vulkan-api";
+			constexpr std::string_view UpdateGoldenOption = "--update-golden";
 
 			// The value of `--<name>=<value>` when `argument` is that option (an empty value when the '=' is missing), or
 			// nullopt when it is another argument.
@@ -157,6 +160,25 @@ namespace Engine {
 							Utils::TimeoutOption, *seconds);
 					}
 					options.DefaultTimeoutSeconds = *parsed;
+				}
+				else if (const std::optional<std::string_view> requireValue = Utils::MatchOption(argument, Utils::RequireGpuOption))
+				{
+					if (argument != Utils::RequireGpuOption)
+						return MakeError(ErrorCode::InvalidArgument, "{} takes no value, got '{}'", Utils::RequireGpuOption, *requireValue);
+					options.RequireGpu = true;
+				}
+				else if (const std::optional<std::string_view> api = Utils::MatchOption(argument, Utils::VulkanApiOption))
+				{
+					const std::optional<VulkanApiVersion> version = VulkanApiVersionFromString(*api);
+					if (!version.has_value())
+						return MakeError(ErrorCode::InvalidArgument, "{} takes 1.3 or 1.4, got '{}'", Utils::VulkanApiOption, *api);
+					options.VulkanApi = *version;
+				}
+				else if (const std::optional<std::string_view> updateValue = Utils::MatchOption(argument, Utils::UpdateGoldenOption))
+				{
+					if (argument != Utils::UpdateGoldenOption)
+						return MakeError(ErrorCode::InvalidArgument, "{} takes no value, got '{}'", Utils::UpdateGoldenOption, *updateValue);
+					options.UpdateGolden = true;
 				}
 			}
 

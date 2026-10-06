@@ -103,11 +103,22 @@ namespace Engine {
 			CHECK_FALSE((*second)->GetInputState().IsKeyDown(InputPhase::Frame, Key::F));
 		}
 
+		TEST_CASE("EngineContext: a failed Graphics step fails Create with the step as context")
+		{
+			// FramesInFlight 0 is rejected before any Vulkan call (GraphicsDevice::Create), so the step fails the same way on
+			// every machine, with or without a GPU or a Vulkan loader.
+			const Result<Scope<EngineContext>> created =
+				EngineContext::Create({ .WorkerCount = 0, .Graphics = GraphicsSpecification{ .FramesInFlight = 0 } });
+			REQUIRE_FALSE(created.has_value());
+			CHECK(created.error().ToString().contains("while creating the engine context (Graphics)"));
+		}
+
 		TEST_CASE("EngineContext: EngineContextStepToString names every step")
 		{
 			CHECK(EngineContextStepToString(EngineContextStep::Services) == "Services");
 			CHECK(EngineContextStepToString(EngineContextStep::UserData) == "UserData");
 			CHECK(EngineContextStepToString(EngineContextStep::Window) == "Window");
+			CHECK(EngineContextStepToString(EngineContextStep::Graphics) == "Graphics");
 		}
 	}
 

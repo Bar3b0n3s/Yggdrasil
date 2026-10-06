@@ -17,8 +17,10 @@ namespace Engine {
 	//   2. `factory` builds the application. An error is printed to stderr through the fallback logger and returns
 	//      ExitCode::UsageError (2) for InvalidArgument (a bad command line) or ExitCode::InitFailed (3) for any other code
 	//      (a required file missing or invalid, see ApplicationFactory).
-	//   3. ProcessContext::Create with the application's Name, WindowMode and UserDataRoot; a failure is printed and
-	//      returns ExitCode::InitFailed (3).
+	//   3. ProcessContext::Create with the application's Name, WindowMode and UserDataRoot, VulkanLoaderPolicy::Required
+	//      for RendererMode::Vulkan (None otherwise) and ShowErrorDialogs for a windowed application; a failure is printed
+	//      (in a windowed process also shown in an error dialog) and returns ExitCode::InitFailed (3). A missing Vulkan
+	//      loader ends here, with NoVulkanLoaderMessage (§8.1).
 	//   4. Application::Run.
 	//   5. The application is destroyed, then the ProcessContext; the Run result is returned.
 	// Steps 2 to 5 run inside the last-resort boundary (the allowlisted try/catch of §4.6 item 6), so an exception from

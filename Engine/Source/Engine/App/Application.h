@@ -8,6 +8,7 @@
 #include "Engine/Core/FixedStepScheduler.h"
 #include "Engine/Core/Result.h"
 #include "Engine/Core/Time.h"
+#include "Engine/Graphics/GraphicsSpecification.h"
 #include "Engine/Platform/Events.h"
 #include "Engine/Platform/GlfwLibrary.h"
 #include "Engine/Platform/Window.h"
@@ -24,7 +25,9 @@
 namespace Engine {
 
 	class EngineContext;
+	class ImGuiLayer;
 	class ProcessContext;
+	struct RenderContext;
 
 	struct ApplicationSpecification
 	{
@@ -54,37 +57,76 @@ namespace Engine {
 		bool ThrottleHeadless = true;
 		// JobSystem workers; nullopt: JobSystem::GetDefaultWorkerCount().
 		std::optional<uint32_t> WorkerCount{};
+		// Vulkan (a GraphicsDevice on the process's Vulkan loader, which RunApplication then requires) or None (logic only:
+		// no loader, no device, screenshot capabilities Unsupported, §13.9). --renderer.
+		RendererMode Renderer = RendererMode::Vulkan;
+		// The device's settings (§4.1: validation, GPU override, frames in flight, API cap): --gpu-validation, --gpu,
+		// --vulkan-api and --gpu-inject-fault. Ignored with RendererMode::None.
+		GraphicsSpecification Graphics{};
+		// --expect-no-gpu-errors: a run whose device reported any error (GpuDiagnostics::GetErrorCount: validation and
+		// synchronization-validation errors, NVRHI errors) up to the end of the rendering teardown returns ExitCode::Failed
+		// instead of Success, logging the count at Error level; an exit code other than Success is kept. Messages reported
+		// while the device itself is destroyed come after the check; they are still logged at Error level. The GPU tests pass
+		// it to every Editor and Runtime process they start, so a validation error inside such a process fails the test
+		// (§15.3). Ignored with RendererMode::None.
+		bool ExpectNoGpuErrors = false;
+		// Dear ImGui for the application's own UI (OnImGuiRender, §8.11): the editor turns it on. Needs RendererMode::Vulkan;
+		// ignored otherwise.
+		bool EnableImGui = false;
+		// imgui.ini while no project is open, relative to the user-data folder (user://, §8.11): the editor's
+		// "Editor/imgui.ini". Run resolves it to the native path under ProcessContext's user-data root. Empty: no ini file.
+		std::string ImGuiIniPath{};
 	};
 
 	// The options every application accepts, handled by ApplyEngineCommandLine:
 	//   --headless              Window = Headless, Clock = Manual (all headless runs use ManualClock, §13.9)
 	//   --frames N              MaxFrames = N, N >= 1 (stub runs and smoke tests, §13.9, §14.2)
-	//   --user-data-dir <path>  UserDataRoot = path, absolute (process tests); not in Dist, where it is an unknown option
-	//                           (§13.9 lists the options Dist honours)
+	//   --user-data-dir <path>  UserDataRoot = path, absolute (process tests)
+	//   --renderer <mode>       Renderer = Vulkan for "vulkan", None for "none" (§12.1, §13.9)
+	//   --gpu-validation[=sync] Graphics.Validation = true (§2.2: on by default in Debug, never in Dist); with "=sync" also
+	//                           Graphics.SynchronizationValidation = true (§15.3)
+	//   --expect-no-gpu-errors  ExpectNoGpuErrors = true
+	//   --vulkan-api <version>  Graphics.MaxApiVersion: "1.3" or "1.4" (§8.1)
+	//   --gpu <index|name>      Graphics.GpuOverride (§8.1; ENGINE_GPU when absent)
+	//   --gpu-inject-fault <f>  Graphics.InjectFault: "device-lost", "oom-texture" or "hang" (§8.14 item 8)
+	// Every option except --headless and --frames is absent from Dist builds, where it is an unknown option (§13.9 lists
+	// the options Dist honours).
 	// An application parses its command line with these plus its own options (CommandLine::Parse). The returned options
 	// refer to static storage.
 	[[nodiscard]] std::span<const CommandLineOption> GetEngineCommandLineOptions();
 
 	// Applies the engine options of `commandLine` to `specification` (see GetEngineCommandLineOptions) and stores the
 	// command line in specification.Args. Errors: InvalidArgument naming the option for a --frames value that is not an
-	// integer >= 1 or a --user-data-dir value that is not an absolute path in valid UTF-8.
+	// integer >= 1, a --user-data-dir value that is not an absolute path in valid UTF-8, or a --renderer, --gpu-validation,
+	// --vulkan-api or --gpu-inject-fault value other than the spellings listed above (the message lists them).
 	[[nodiscard]] Status ApplyEngineCommandLine(const CommandLine& commandLine, ApplicationSpecification& specification);
 
 	// The base of the editor and runtime applications. Not copyable or movable.
 	//
 	// Run, on the main thread, with the ProcessContext alive (asserted):
-	//   1. Per-context initialization (§4.1 level 2): EngineContext::Create with the main window, the worker count and
-	//      the ProcessContext's user-data folder as user://; a clock from the specification (SystemClock, or ManualClock
-	//      with the loop's FixedDelta); then OnInitialize. A failure is logged at Error level, whatever was built is torn
-	//      down in reverse, and Run returns ExitCode::InitFailed.
+	//   1. Per-context initialization (§4.1 level 2): EngineContext::Create with the main window, the worker count, the
+	//      ProcessContext's user-data folder as user:// and, with RendererMode::Vulkan, the GraphicsSpecification; then the
+	//      frame's rendering objects (a Swapchain on the window in a windowed process, an OffscreenTarget of the window's
+	//      framebuffer size in a headless one, the FramePacer, the GpuProfiler, and the ImGuiLayer when EnableImGui is set,
+	//      with ImGuiIniPath under the user-data folder); a clock from the specification (SystemClock, or ManualClock with
+	//      the loop's FixedDelta); then OnInitialize. A failure is logged at Error level (and shown in an error dialog when
+	//      the ProcessContext has ShowErrorDialogs), whatever was built is torn down in reverse, and Run returns
+	//      ExitCode::InitFailed, with one exception (§8.14 item 7): a Gpu error creating a render target, a framebuffer or a
+	//      pipeline of the rendering objects (the device is out of memory at startup) ends the process through
+	//      FatalError(OutOfMemory), exit code 4. Unsupported (no surface format the swapchain accepts) stays InitFailed.
 	//   2. The frame loop (FrameLoop; FrameLoopSpecification::ThrottleToFixedHz for headless runs with ThrottleHeadless),
 	//      until RequestExit, an unhandled window close (ExitCode::Success) or MaxFrames (ExitCode::Success). The hooks
-	//      below run inside it.
-	//   3. OnShutdown, then the context is destroyed (reverse order). Run returns the exit code.
+	//      below run inside it. With a device, each frame renders (§8.2): FramePacer::BeginFrame and
+	//      GpuProfiler::BeginFrame, the swapchain image or the offscreen target, a command list cleared to FrameClearColor
+	//      (Graphics/RenderContext.h), OnRender, then with ImGui ImGuiLayer::BeginFrame (with the time since the last UI
+	//      frame), OnImGuiRender, EndFrame and Render into the same target; the submission (the swapchain's semaphores
+	//      queued before it), Present, FramePacer::EndFrame and GraphicsDevice::RunGarbageCollection. A frame the swapchain
+	//      skips (minimized or just recreated) records and submits nothing, calls neither OnRender nor OnImGuiRender, and
+	//      passes GraphicsDevice::GetLastSubmissionID to FramePacer::EndFrame.
+	//   3. OnShutdown, GraphicsDevice::WaitForIdle, the rendering objects (ImGuiLayer, GpuProfiler, swapchain or offscreen
+	//      target, pacer); with ExpectNoGpuErrors the device's error count (see the field); then the context is destroyed
+	//      (reverse order). Run returns the exit code.
 	// Run may be called once per Application.
-	//
-	// Rendering hooks (OnRender with the renderer's RenderContext, OnImGuiRender) arrive with the Graphics milestone, which
-	// adds the renderer to the frame.
 	class Application : private IFrameLoopClient
 	{
 	public:
@@ -120,10 +162,30 @@ namespace Engine {
 		virtual void OnFixedStep(const SimStep& /*step*/) {}
 		// Once per frame after the steps; frame.Alpha is this frame's interpolation factor (§5.2).
 		virtual void OnUpdate(const FrameTime& /*frame*/) {}
+		// Once per rendered frame with a device, after OnUpdate: record the frame's scene work into context.CommandList
+		// (§4.1, §8.2). Not called with RendererMode::None or for a frame the swapchain skips.
+		virtual void OnRender(RenderContext& /*context*/) {}
+		// Once per rendered frame with ImGui (EnableImGui), after OnRender, between ImGui::NewFrame and ImGui::Render:
+		// submit the frame's widgets. Not called for a frame the swapchain skips; the next UI frame's io.DeltaTime then
+		// covers the skipped frames' time too.
+		virtual void OnImGuiRender() {}
+
+		// The application's ImGuiLayer (editor screenshots re-render its last frame, §8.13); nullptr without ImGui, and
+		// outside the span from rendering initialization to the end of OnShutdown.
+		[[nodiscard]] ImGuiLayer* GetImGuiLayer() { return m_ImGuiLayer.get(); }
 	private:
 		void OnFrameEvent(Event& event) override;
 		void OnFrameFixedStep(const SimStep& step) override;
 		void OnFrameUpdate(const FrameTime& frame) override;
+		void OnFrameRender(const FrameTime& frame) override;
+
+		// Step 1's rendering objects (see the class comment); does nothing with RendererMode::None.
+		[[nodiscard]] Status InitializeRendering();
+		// Step 3's teardown of what InitializeRendering built, after GraphicsDevice::WaitForIdle.
+		void ShutdownRendering();
+		// Logs an initialization failure at Error level, and shows it in an error dialog when `process` has
+		// ShowErrorDialogs and the application is windowed.
+		void ReportInitializationFailure(const ProcessContext& process, const Error& error) const;
 
 		// The frame clock of the specification (ClockKind::Scripted is rejected before this is called).
 		[[nodiscard]] Scope<Clock> CreateClock() const;
@@ -131,6 +193,7 @@ namespace Engine {
 		ApplicationSpecification m_Specification;
 		Scope<EngineContext> m_Context;       // between the start of initialization and the end of OnShutdown
 		Scope<FrameLoop> m_FrameLoop;         // while the frame loop runs
+		Scope<ImGuiLayer> m_ImGuiLayer;       // with EnableImGui, from InitializeRendering to ShutdownRendering
 		std::optional<int> m_PendingExitCode; // an exit requested before the frame loop exists (during OnInitialize)
 		bool m_HasRun = false;
 	};

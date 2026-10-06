@@ -55,6 +55,14 @@ namespace Engine {
 
 	void FrameLoop::RunFrame()
 	{
+		// M5 contract stub (Roadmap rule 3): stream B (swapchain, present, frame pacing, fault handling) wraps the steps in
+		// the allowlisted frame-boundary catch of vk::SystemError (§4.6 item 2, §8.14; see FrameLoop.h).
+		ENGINE_CONTRACT_STUB();
+		RunFrameSteps();
+	}
+
+	void FrameLoop::RunFrameSteps()
+	{
 		ENGINE_PROFILE_SCOPE("FrameLoop::RunFrame");
 		const std::chrono::steady_clock::time_point frameStart =
 			m_Specification.ThrottleToFixedHz ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point();
@@ -100,9 +108,12 @@ namespace Engine {
 			m_Client->OnFrameUpdate(frame);
 		}
 
-		// Step 7 of §4.2, rendering (OnRender, ImGui, present), joins here with the renderer, which also wraps the whole
-		// frame in the allowlisted frame-boundary catch of vk::SystemError (§4.6 item 2, §8.14). Until then nothing in the
-		// frame calls Vulkan, so there is nothing for that catch to handle.
+		// 7. Rendering: OnRender, ImGui, present.
+		CrashHandler::SetBreadcrumb(CrashBreadcrumb::FramePhase, "Render");
+		{
+			ENGINE_PROFILE_SCOPE("FrameLoop::Render");
+			m_Client->OnFrameRender(frame);
+		}
 
 		m_LastFrameTime = frame;
 		++m_FrameCount;

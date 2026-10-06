@@ -4,7 +4,10 @@
 
 #include "Engine/App/EngineContext.h"
 #include "Engine/App/ProcessContext.h"
+#include "Engine/Graphics/GraphicsDevice.h"
 #include "Support/ExpectLog.h"
+#include "Support/HeadlessGpuFixture.h"
+#include "Support/TestOptions.h"
 #include "Support/Utf8Path.h"
 
 namespace Engine {
@@ -61,6 +64,23 @@ namespace Engine {
 			}
 		};
 
+		// Reports one GPU error through its device's diagnostics during its first update, as a validation message would.
+		class GpuErrorApplication final : public Application
+		{
+		public:
+			explicit GpuErrorApplication(ApplicationSpecification specification)
+				: Application(std::move(specification))
+			{
+			}
+		protected:
+			void OnUpdate(const FrameTime& frame) override
+			{
+				GraphicsDevice* device = GetContext().GetGraphicsDevice();
+				if (frame.FrameIndex == 0 && device != nullptr)
+					device->GetDiagnostics().ReportMessage(GpuMessageSeverity::Error, "ApplicationTests", "a provoked GPU error");
+			}
+		};
+
 	}
 
 	// A headless application, which the headless Tests process can run in place.
@@ -73,7 +93,8 @@ namespace Engine {
 		specification.Clock = ClockKind::Manual;
 		specification.MaxFrames = maxFrames;
 		specification.WorkerCount = 0;
-		specification.ThrottleHeadless = false; // test runs are unthrottled (§4.2)
+		specification.ThrottleHeadless = false;      // test runs are unthrottled (§4.2)
+		specification.Renderer = RendererMode::None; // in place, without the GPU (the GPU suite covers rendering)
 		return specification;
 	}
 
@@ -134,6 +155,33 @@ namespace Engine {
 			CHECK(application.Calls == expected);
 		}
 
+		TEST_CASE("Application: --expect-no-gpu-errors fails a run whose device reported an error"
+			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+		{
+			{
+				Test::HeadlessGpuFixture gpu; // probes for a device; destroyed before the applications create theirs
+				ENGINE_REQUIRE_GPU(gpu);
+			}
+			ApplicationSpecification specification = MakeHeadlessSpecification(3);
+			specification.Renderer = RendererMode::Vulkan;
+			specification.Graphics.Validation = true;
+			specification.Graphics.MaxApiVersion = Test::GetTestOptions().VulkanApi;
+
+			// Without the option the error is only logged, and the run succeeds.
+			{
+				GpuErrorApplication application(specification);
+				Test::ExpectLog reported(LogLevel::Error, "a provoked GPU error");
+				CHECK(application.Run() == ExitCode::Success);
+			}
+
+			// With it the run fails, naming the count.
+			specification.ExpectNoGpuErrors = true;
+			GpuErrorApplication application(std::move(specification));
+			Test::ExpectLog reported(LogLevel::Error, "a provoked GPU error");
+			Test::ExpectLog failed(LogLevel::Error, "reported 1 error(s) during the run (--expect-no-gpu-errors)");
+			CHECK(application.Run() == ExitCode::Failed);
+		}
+
 		TEST_CASE("Application: a scripted clock cannot be chosen through the specification")
 		{
 			ApplicationSpecification specification = MakeHeadlessSpecification(1);
@@ -178,6 +226,80 @@ namespace Engine {
 			CHECK_FALSE(defaults.MaxFrames.has_value());
 			CHECK(defaults.UserDataRoot.empty());
 			CHECK(defaults.ThrottleHeadless);
+		}
+
+		TEST_CASE("ApplyEngineCommandLine: the graphics options set the renderer and the graphics specification")
+		{
+			const std::vector<std::string> arguments = {
+				"--renderer",
+				"none",
+				"--gpu-validation",
+				"--vulkan-api=1.3",
+				"--gpu",
+				"RTX",
+				"--gpu-inject-fault=hang",
+				"--expect-no-gpu-errors",
+			};
+			const Result<CommandLine> commandLine = CommandLine::Parse(arguments, GetEngineCommandLineOptions());
+			REQUIRE_MESSAGE(commandLine.has_value(), commandLine.error().ToString());
+			ApplicationSpecification specification;
+			REQUIRE(ApplyEngineCommandLine(*commandLine, specification).has_value());
+			CHECK(specification.Renderer == RendererMode::None);
+			CHECK(specification.Graphics.Validation);
+			CHECK_FALSE(specification.Graphics.SynchronizationValidation);
+			CHECK(specification.Graphics.MaxApiVersion == VulkanApiVersion::Vulkan13);
+			CHECK(specification.Graphics.GpuOverride == "RTX");
+			CHECK(specification.Graphics.InjectFault == GpuFault::Hang);
+			CHECK(specification.ExpectNoGpuErrors);
+
+			// --gpu-validation=sync adds synchronization validation (§15.3).
+			const std::vector<std::string> syncArguments = { "--gpu-validation=sync" };
+			const Result<CommandLine> sync = CommandLine::Parse(syncArguments, GetEngineCommandLineOptions());
+			REQUIRE_MESSAGE(sync.has_value(), sync.error().ToString());
+			ApplicationSpecification synchronized;
+			REQUIRE(ApplyEngineCommandLine(*sync, synchronized).has_value());
+			CHECK(synchronized.Graphics.Validation);
+			CHECK(synchronized.Graphics.SynchronizationValidation);
+			CHECK_FALSE(synchronized.ExpectNoGpuErrors);
+
+			// Without them: the Vulkan renderer, the configuration's validation default, API 1.4, no override, no fault.
+			const Result<CommandLine> none = CommandLine::Parse({}, GetEngineCommandLineOptions());
+			REQUIRE(none.has_value());
+			ApplicationSpecification defaults;
+			REQUIRE(ApplyEngineCommandLine(*none, defaults).has_value());
+			CHECK(defaults.Renderer == RendererMode::Vulkan);
+			CHECK(defaults.Graphics.Validation == DefaultGpuValidation);
+			CHECK_FALSE(defaults.Graphics.SynchronizationValidation);
+			CHECK_FALSE(defaults.ExpectNoGpuErrors);
+			CHECK(defaults.Graphics.MaxApiVersion == VulkanApiVersion::Vulkan14);
+			CHECK(defaults.Graphics.GpuOverride.empty());
+			CHECK(defaults.Graphics.InjectFault == GpuFault::None);
+			CHECK(defaults.Graphics.FramesInFlight == 2);
+		}
+
+		TEST_CASE("ApplyEngineCommandLine: malformed graphics option values are InvalidArgument naming the option")
+		{
+			const std::array<std::vector<std::string>, 6> invalid = { {
+				{ "--renderer", "Vulkan" },
+				{ "--renderer", "opengl" },
+				{ "--vulkan-api", "1.2" },
+				{ "--gpu-inject-fault", "none" },
+				{ "--gpu-inject-fault", "crash" },
+				{ "--gpu-validation=full" },
+			} };
+			for (const std::vector<std::string>& arguments : invalid)
+			{
+				const std::string spelled = arguments.front();
+				CAPTURE(spelled);
+				const Result<CommandLine> commandLine = CommandLine::Parse(arguments, GetEngineCommandLineOptions());
+				REQUIRE_MESSAGE(commandLine.has_value(), commandLine.error().ToString());
+				ApplicationSpecification specification;
+				const Status applied = ApplyEngineCommandLine(*commandLine, specification);
+				REQUIRE_FALSE(applied.has_value());
+				CHECK(applied.error().GetCode() == ErrorCode::InvalidArgument);
+				const std::string optionName = spelled.substr(0, spelled.find('='));
+				CHECK(applied.error().GetMessageText().contains(optionName));
+			}
 		}
 
 		TEST_CASE("ApplyEngineCommandLine: --user-data-dir sets an absolute user-data root")

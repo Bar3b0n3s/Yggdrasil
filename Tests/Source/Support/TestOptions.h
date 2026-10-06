@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Engine/Core/Result.h"
+#include "Engine/Graphics/GraphicsSpecification.h"
 #include "Engine/Platform/Process.h"
 
 #include <filesystem>
@@ -11,10 +12,11 @@
 // The Tests binary's own command-line options (Architecture §15.2), next to doctest's. The Tests main
 // (Tests/Source/TestMain.cpp) does, in order:
 //   1. ParseTestOptions; a malformed option exits with code 2 (UsageError).
-//   2. ProcessContext::Create (App/ProcessContext.h) with ENGINE_PRODUCT_NAME, UserDataDirectory as the user-data root
-//      and the file rules below. It is headless (GLFW's null platform), except with --windowed-child, where it uses
-//      GLFW's native platform. A failure exits with code 3 (InitFailed), because without the log ExpectLog would see no
-//      entries. Then InstallRecordingAssertHandler.
+//   2. ProcessContext::Create (App/ProcessContext.h) with ENGINE_PRODUCT_NAME, UserDataDirectory as the user-data root,
+//      the file rules below and VulkanLoaderPolicy::IfAvailable (a missing loader makes the GPU tests skip, or fail with
+//      --require-gpu, HeadlessGpuFixture.h). It is headless (GLFW's null platform), except with --windowed-child, where it
+//      uses GLFW's native platform. A failure exits with code 3 (InitFailed), because without the log ExpectLog would see
+//      no entries. Then InstallRecordingAssertHandler.
 //   3. With --death-test=<name>: RunDeathTestBody(name) (DeathTest.h) instead of doctest. With --crash-child: the crash
 //      child (CrashChild below) instead of doctest.
 //   4. Otherwise: InstallExpectLogListener, StartTestTimeoutWatchdog, run doctest (with --windowed-child=<case>
@@ -27,7 +29,7 @@
 //   - crash reports when !IsChildProcess() or UserDataDirectory is set (WriteCrashReports): a child writes them only into
 //     the directory its parent gave it (the crash-child tests), never into the user's real folder, so the expected deaths
 //     of death tests and recording-assert-handler targets leave no report behind.
-// M5 adds --require-gpu and the golden-image options, each with its own field here.
+// GPU and golden tests (M5) read RequireGpu, VulkanApi and UpdateGolden.
 
 namespace Engine {
 
@@ -71,6 +73,15 @@ namespace Engine {
 			std::string ChildArgument{};
 			// --test-timeout=<seconds>: the per-test-case limit for cases without a doctest::timeout decorator (> 0).
 			double DefaultTimeoutSeconds = 120.0;
+			// --require-gpu: a GPU test whose device cannot be created fails naming the reason, instead of passing with a
+			// "GPU test skipped" message (HeadlessGpuFixture.h). CI.py's gpu and golden stages always pass it (§15.2).
+			bool RequireGpu = false;
+			// --vulkan-api=<1.3|1.4>: the API cap of GPU test devices and of the GPU processes tests start
+			// (GraphicsSpecification::MaxApiVersion). Test.py's gpu suite runs once with each (§8.1, §15.3).
+			VulkanApiVersion VulkanApi = VulkanApiVersion::Vulkan14;
+			// --update-golden: golden tests write their image as the new golden candidate instead of comparing (§15.4,
+			// GoldenImage.h).
+			bool UpdateGolden = false;
 
 			// True for --death-test, --windowed-child and --crash-child.
 			[[nodiscard]] bool IsChildMode() const { return !DeathTest.empty() || !WindowedChild.empty() || CrashChild; }
@@ -83,9 +94,9 @@ namespace Engine {
 		// Parses the engine options in argv[1..argc) and sets ExecutablePath from GetCurrentExecutablePath(), falling back
 		// to argv[0] made absolute only when the OS query fails; arguments that are not engine options (doctest's) are
 		// ignored. Errors: InvalidArgument naming the malformed option (an empty --death-test, --windowed-child or
-		// --user-data-dir value, a relative --user-data-dir, a value given to --crash-child or --child-process, more than
-		// one child mode, a non-positive or non-numeric --test-timeout), Io when neither the OS nor argv[0] yields an
-		// absolute path.
+		// --user-data-dir value, a relative --user-data-dir, a value given to --crash-child, --child-process,
+		// --require-gpu or --update-golden, more than one child mode, a non-positive or non-numeric --test-timeout, a
+		// --vulkan-api other than 1.3 or 1.4), Io when neither the OS nor argv[0] yields an absolute path.
 		[[nodiscard]] Result<TestOptions> ParseTestOptions(int argc, const char* const* argv);
 
 		// The options of this run: set once by the main before any test runs (process-level state of the Tests binary), then

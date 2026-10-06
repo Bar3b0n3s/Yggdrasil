@@ -82,6 +82,7 @@ namespace Engine {
 				.UserDataRoot = options->UserDataDirectory,
 				.LogToFile = !options->IsChildProcess(),
 				.WriteCrashReports = !options->IsChildProcess() || !options->UserDataDirectory.empty(),
+				.VulkanLoader = VulkanLoaderPolicy::IfAvailable,
 			});
 			if (!created.has_value())
 			{

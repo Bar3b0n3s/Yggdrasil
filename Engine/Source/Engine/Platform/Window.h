@@ -91,6 +91,11 @@ namespace Engine {
 		void Minimize();
 		void Restore();
 
+		// Requests a new window size in screen units (glfwSetWindowSize; `width` and `height` > 0, asserted). The change is
+		// asynchronous on X11 and macOS: the WindowResizeEvent arrives with a later PollEvents, and the framebuffer size
+		// follows the platform's content scale. Ignored for a full-screen window. Used by the swapchain resize test (M5).
+		void SetSize(uint32_t width, uint32_t height);
+
 		void SetTitle(std::string_view title);
 		[[nodiscard]] const std::string& GetTitle() const;
 

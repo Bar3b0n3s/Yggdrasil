@@ -170,8 +170,14 @@ function ApplyFirstPartySettings()
 		xcodebuildsettings { ["LLVM_LTO"] = "YES" }
 
 	-- Development builds mount engine:// at <repo>/Resources (§2.2). Dist builds read Engine.pak instead.
+	-- ENGINE_SHADER_DIRECTORY is the compiled SPIR-V of the configuration being built, ShaderOutputDirectory (premake5.lua),
+	-- the Shaders project's output, which development builds mount as shaders:// (Docs/Decisions/0009-m5-decisions.md).
 	filter "configurations:not Dist"
-		defines { "ENGINE_REPO_ROOT=\"" .. RepositoryRoot .. "\"" }
+		defines
+		{
+			"ENGINE_REPO_ROOT=\"" .. RepositoryRoot .. "\"",
+			"ENGINE_SHADER_DIRECTORY=\"" .. ShaderOutputDirectory .. "\""
+		}
 
 	filter {}
 end

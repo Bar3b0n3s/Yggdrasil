@@ -17,7 +17,8 @@ namespace Engine {
 	class EngineContext;
 
 	// What one frame calls, in the order the frame calls it. Application is the production client; tests use a recording
-	// client to check the order.
+	// client to check the order. Every call runs inside the frame-boundary catch of vk::SystemError (see FrameLoop), so a
+	// GPU error thrown out of NVRHI in any of them ends the process the same way.
 	class IFrameLoopClient
 	{
 	public:
@@ -30,6 +31,8 @@ namespace Engine {
 		virtual void OnFrameFixedStep(const SimStep& step) = 0;
 		// Once per frame, after the frame's steps.
 		virtual void OnFrameUpdate(const FrameTime& frame) = 0;
+		// Once per frame, after the update: render, ImGui, present (§4.2 step 7, §8.2). `frame` is the update's FrameTime.
+		virtual void OnFrameRender(const FrameTime& frame) = 0;
 	};
 
 	struct FrameLoopSpecification
@@ -44,7 +47,14 @@ namespace Engine {
 
 	// Runs frames over an EngineContext for one client (§4.2). Not copyable or movable; main thread only.
 	//
-	// One frame (RunFrame), in order:
+	// One frame (RunFrame), in order, all of it inside the single allowlisted frame-boundary catch of vk::SystemError (§4.2
+	// step 7, §4.6 item 2, §8.14). vulkan.hpp's enhanced mode throws from calls NVRHI makes internally (vk::DeviceLostError
+	// from its semaphore waits, vk::OutOfDeviceMemoryError), and NVRHI work happens in more than the render step: asset
+	// swaps drained in step 2 upload textures, the automation pump (§4.2 step 3, M4) runs screenshot handlers, and an
+	// update may read a screenshot back. The catch maps the error's result with GetFatalErrorKind (Graphics/GpuDiagnostics.h): device loss goes
+	// through GraphicsDevice::RaiseDeviceLost when the context has a device (so the report carries the VK_EXT_device_fault
+	// description), out-of-memory codes become FatalError(OutOfMemory) and everything else FatalError(Gpu); the crash
+	// report's FramePhase breadcrumb names the step that threw. The frame never resumes.
 	//   1. Events: when the context has a window, Window::PollEvents, or Window::WaitEventsTimeout(FixedDelta) while it
 	//      is minimized (§4.2: the loop idles instead of spinning). Each delivered event goes to OnFrameEvent; an unhandled
 	//      WindowCloseEvent requests exit with ExitCode::Success; every unhandled event is then injected into the
@@ -56,11 +66,11 @@ namespace Engine {
 	//      order.
 	//   4. OnFrameUpdate with this frame's FrameTime: the clock's delta (DeltaTime equals UnscaledDeltaTime until time
 	//      scaling arrives with play sessions), the scheduler's Alpha, and the frame index from 0.
-	//   5. The frame count grows by one; when it reaches MaxFrames the loop requests exit with ExitCode::Success (an
+	//   5. OnFrameRender with the same FrameTime (§4.2 step 7).
+	//   6. The frame count grows by one; when it reaches MaxFrames the loop requests exit with ExitCode::Success (an
 	//      earlier request keeps its code). With ThrottleToFixedHz the loop then sleeps until the frame's wall-clock slot
 	//      ends.
-	// Automation pumping (M4) and rendering with the frame-boundary vk::SystemError catch (M5) join the frame at the
-	// places §4.2 gives.
+	// Automation pumping (M4) joins the frame at the place §4.2 gives.
 	//
 	// Run logs one Info line before the first frame, "Frame loop started: <ClockKind> clock, <FixedHz> Hz" with the
 	// ClockKind enumerator name, so a process's output shows which clock it runs on.
@@ -75,7 +85,7 @@ namespace Engine {
 		FrameLoop(const FrameLoop&) = delete;
 		FrameLoop& operator=(const FrameLoop&) = delete;
 
-		// Runs one frame (see the class comment), also after an exit request.
+		// Runs one frame (see the class comment) inside the frame-boundary catch, also after an exit request.
 		void RunFrame();
 
 		// Runs frames until exit is requested and returns the requested exit code. An exit requested before Run (by the
@@ -95,9 +105,11 @@ namespace Engine {
 		// The FrameTime of the last completed frame (all zero before the first).
 		[[nodiscard]] const FrameTime& GetLastFrameTime() const;
 	private:
+		// Steps 1 to 6 of one frame; RunFrame calls it inside the frame-boundary catch of vk::SystemError.
+		void RunFrameSteps();
 		// Step 1 for one delivered event: the client, then the exit request of an unhandled close, then InputState.
 		void DispatchEvent(Event& event);
-		// Step 5's pacing: sleeps until the wall-clock slot of the frame that started at `frameStart` ends.
+		// Step 6's pacing: sleeps until the wall-clock slot of the frame that started at `frameStart` ends.
 		void WaitForFrameSlot(std::chrono::steady_clock::time_point frameStart);
 	private:
 		EngineContext* m_Context = nullptr;   // documented back-reference: outlives the loop
