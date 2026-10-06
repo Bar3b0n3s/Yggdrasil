@@ -83,7 +83,7 @@ Tests support (`Tests/Source/Support/`): recording assert handler, death-test re
 - `"Result: ENGINE_TRY propagates the error with context"`, `"Error: hint and location survive WithContext"`.
 - `"Hash: XXH64 matches reference test vectors"`; `"UUID: hex round trip and 6-digit prefix matching"`; `"UUIDGenerator: seeded generator is reproducible"`.
 - `"FixedStepScheduler: table of frame deltas yields expected step counts and alpha"` (≥ 30 rows incl. clamping and dropped time); `"ScriptedClock: cycles its delta table"`.
-- `"DetMath: within 2 ULP of std over seeded tables"`; `"DetMath: output hash over 1,000,000 seeded inputs matches the committed value"` (passes identically in Debug and Release).
+- `"DetMath: within 1 ULP of correctly rounded references over seeded tables"` (references from `Scripts/GenerateDetMathReference.py`, `Docs/Decisions/0007-detmath-reference-oracle.md`); `"DetMath: output hash over 1,000,000 seeded inputs matches the committed value"` (passes identically in Debug and Release).
 - `"OverlayMount: writes stay in memory and never reach the lower mount"`.
 - `"VfsPath: rejects parent escapes, absolute paths, NUL and reserved names"`; `"VirtualFileSystem: case mismatch is a validation error"`; `"FileSystem: atomic write survives an injected failure"`.
 - `"JsonWriter: floats use the shortest round-trip form"`; `"JsonReader: errors carry JSON pointers"`; `"JsonWriter: load then save is byte-identical"`.
