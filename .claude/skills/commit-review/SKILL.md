@@ -33,6 +33,7 @@ python Scripts/PreCommit.py
 ```
 
 - PreCommit runs generate, the static checks (`CheckBuildConfig.py` on the workspace and on its fixtures, `Lint.py`, `Lint.py --self-test` and the format check, the same list as `CI.py`'s lint stage), the Debug build, and the unit and feature suites. Record the result of each step; `--json` adds a machine-readable summary.
+- **Mode.** PreCommit is strict by default. Run `python Scripts/PreCommit.py --contract` only when the task statement says the change is a milestone's contract commit (Roadmap rule 3, `Docs/Decisions/0004-contract-stub-gate.md`); the summary prints the mode it ran in. A strict run fails on any `ENGINE_CONTRACT_STUB` (Lint `contract-stub`) and on any test case skipped outside the child-process targets (Lint `test-skip`, and Test.py's `UNEXPECTED SKIP` lines). Contract mode on any other commit is a blocking finding.
 - A red PreCommit is a blocking finding on its own. Report the first failing step and its error output, and do not continue to sign-off.
 - For a build or test failure, use the `build-and-test` skill to diagnose it.
 - A milestone commit additionally needs `python Scripts/CI.py` green.
@@ -92,5 +93,7 @@ Rank findings most severe first. Use the host's findings-reporting tool if the h
   ```
   Reviewed: approved; 3 findings (3 fixed); PreCommit green (generate, checkbuildconfig, lint, lint self-test, format, Debug build, unit 42/42)
   ```
+
+  A contract commit names its mode: `PreCommit green, contract mode (...)`.
 
 - **Commit and push** only when the task includes committing. Push only after the gate has passed (`AGENTS.md`, Commit gate).

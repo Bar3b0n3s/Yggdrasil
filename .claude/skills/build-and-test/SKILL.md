@@ -25,19 +25,19 @@ This skill gives the commands, configurations, output locations and failure diag
 python Scripts/Setup.py                                    # toolchain checks, premake download
 python Scripts/Generate.py                                 # vs2026 | gmake | xcode4 (+ compile-commands); --action to override
 python Scripts/Build.py --config Debug                     # Release, Dist; --project Tests builds one project
-python Scripts/Test.py --suite unit --config Debug --junit # Release too; Dist has no Tests project
+python Scripts/Test.py --suite unit --config Debug --junit # Release too; Dist has no Tests project; --allow-skips: contract mode
 python Scripts/CompileShaders.py --config Debug            # --program P, --force, --verbose
 python Scripts/CheckBuildConfig.py                         # ABI defines, JPH_CROSS_PLATFORM_DETERMINISTIC, Jolt ISA, FP model, Dist solution
 python Scripts/Format.py --check                           # without --check it rewrites files
-python Scripts/Lint.py                                     # --self-test: every seeded Tests/Data/Lint fixture fails as expected; --mode clang|regex
-python Scripts/PreCommit.py                                # the commit gate
-python Scripts/CI.py                                       # all stages; --stages build,unit for a subset
+python Scripts/Lint.py                                     # --self-test: every seeded Tests/Data/Lint fixture fails as expected; --mode clang|regex; --allow-contract-stubs: contract mode
+python Scripts/PreCommit.py                                # the commit gate, strict; --contract only for a milestone's contract commit
+python Scripts/CI.py                                       # all stages; --stages build,unit for a subset; --contract as for PreCommit
 ```
 
 **CI stages** run in order and fail fast: `setup → generate → lint → build → unit → portability`. Later milestones add bake, gpu, golden, feature, automation, export, determinism and games. The configurations follow the §15.8 matrix:
-- lint: `CheckBuildConfig.py` on the workspace and on each fixture workspace under `Tests/Data/BuildConfig/` (each must fail with its own defect), `Lint.py`, `Lint.py --self-test` and `Format.py --check`. `PreCommit.py` runs exactly this list too (`Scripts/Lib/scripts.py`);
+- lint: `CheckBuildConfig.py` on the workspace and on each fixture workspace under `Tests/Data/BuildConfig/` (each must fail with its own defect), `Lint.py` (its `contract` step included), `Lint.py --self-test` and `Format.py --check`. `PreCommit.py` runs exactly this list too (`Scripts/Lib/scripts.py`);
 - build: Debug, Release and Dist, plus, after Debug, `"Shaders: slang-only change is not skipped by the up-to-date check"` (touching only a `.slang` file re-runs the shader rule; the next build skips it);
-- unit: Debug and Release;
+- unit: Debug and Release, each failing on a test case skipped outside the child-process targets;
 - portability: generates Linux gmake/ninja and macOS xcode4 projects (checked against the vs2026 reference; the xcode4 and gmake precompiled-header paths must resolve and the xcode4 Dist projects must enable LTO), then builds Tests with clang-cl in Release when the VS Clang component is installed (`--no-clang-cl` leaves it out, `--require-clang-cl` makes a missing component a failure). Only warnings located under `Vendor/` are tolerated in that build.
 
 **GitHub Actions** (`.github/workflows/ci.yml`) runs `CI.py` everywhere, with the stages a GPU-less hosted runner supports (setup, generate, lint, build, unit, portability):
@@ -87,6 +87,7 @@ bin/Debug-windows-x86_64/Tests/Tests.exe --reporters=junit --out=bin/TestResults
 - **Engine-specific modes** are added to the Tests main as their milestones land (M1–M5, Architecture §15.2): `--death-test=<name>` runs one death-test body and `--windowed-child=<name>` runs a windowed child case; `--require-gpu` turns GPU-suite skips into failures. These are for tests that spawn child processes. Run the parent test case instead of calling them by hand.
 - **`--test-timeout=<seconds>`** is the per-case limit for test cases without a `doctest::timeout` decorator (default 120). A case that runs longer is reported on stderr and the run exits with code 5.
 - **`--no-skip`** also runs the `ChildTargets` suite: cases that exist only as child-process targets of other tests, which hang or end the process by design. Exclude them: `Tests.exe --no-skip --test-suite-exclude=ChildTargets`.
+- **Skipped cases.** `--list-test-cases` omits skipped cases. `Tests.exe --no-skip --list-test-cases --reporters=xml --out=<file>` lists every case with its `testsuite` and `skipped` attributes; this is how `Test.py` finds skipped cases outside the `ChildTargets` suite.
 - **Exit codes** (§4.1): 0 success, 1 test failure, 2 usage error, 3 init failed, 4 crash or assert (exit 4 is what the parent of a death test expects), 5 timeout.
 
 ## Reading failures
@@ -101,6 +102,7 @@ bin/Debug-windows-x86_64/Tests/Tests.exe --reporters=junit --out=bin/TestResults
 - **CheckBuildConfig findings** look like `[windows] Debug: Tests includes JoltPhysics headers but lacks JPH_PROFILE_ENABLED ...`; the bracket names the target (`windows`, `windows-clang`, `linux`, `linux-clang`, `macosx`). The exit codes are 0 clean, 1 findings or a generation failure, 2 usage error, 3 premake missing or not the pinned 5.0.0, 5 timeout. `--keep` keeps the generated projects so you can inspect them.
 - **Exit code 3 from any script** means a required tool or file is missing or has the wrong version (premake, clang-format, clang-tidy or clang-query in `--mode clang`, slangc, a compiler, an archiver or lld). Run `python Scripts/Setup.py`, which names what to install.
 - **CI.py** prints a summary table with one row per stage and configuration. Fix the first failing stage; later stages did not run.
+- **Contract stubs and skips** (Roadmap rule 3, `Docs/Decisions/0004-contract-stub-gate.md`). Lint `contract-stub` means an `ENGINE_CONTRACT_STUB();` stub is still in the tree: implement the function, replacing the whole stub body. Lint `test-skip` or a Test.py `UNEXPECTED SKIP: <case>` line means a test case is still marked `doctest::skip`: remove the decorator once its implementation has landed. Only child-process targets stay skipped, with `doctest::test_suite(Test::ChildTargetSuite)` in the same decorator expression. Only a milestone's contract commit may run `PreCommit.py --contract` (the summary prints "contract mode: stubs and skipped tests allowed").
 
 ## Pitfalls
 

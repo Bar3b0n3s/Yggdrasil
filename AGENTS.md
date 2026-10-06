@@ -54,13 +54,13 @@ Run every command from the repository root. Windows uses `python`; Linux and mac
 | Set up and check the toolchain | `python Scripts/Setup.py` |
 | Generate project files (again after adding or removing files) | `python Scripts/Generate.py` (vs2026, gmake or xcode4; `--action` overrides) |
 | Build | `python Scripts/Build.py --config Debug` (also `Release`, `Dist`; `--project Tests` for one project) |
-| Unit tests | `python Scripts/Test.py --suite unit --config Debug --junit` |
+| Unit tests | `python Scripts/Test.py --suite unit --config Debug --junit` (fails on a test case skipped outside the child-process targets; `--allow-skips` is contract mode) |
 | Format C++ | `python Scripts/Format.py` (rewrites files); `--check` only reports |
-| Lint | `python Scripts/Lint.py` (`--self-test` proves every seeded fixture in `Tests/Data/Lint/` still fails; `--mode regex` forces the checkers that do not need clang-tidy and clang-query) |
+| Lint | `python Scripts/Lint.py` (`--self-test` proves every seeded fixture in `Tests/Data/Lint/` still fails; `--mode regex` forces the checkers that do not need clang-tidy and clang-query; `--allow-contract-stubs` is contract mode) |
 | Check build configuration (ABI defines, Jolt instruction set, FP model) | `python Scripts/CheckBuildConfig.py` |
 | Compile shaders only | `python Scripts/CompileShaders.py --config Debug` |
-| Commit gate | `python Scripts/PreCommit.py` |
-| Full CI | `python Scripts/CI.py` (`--stages build,unit` for a subset) |
+| Commit gate | `python Scripts/PreCommit.py` (`--contract` only for a milestone's contract commit) |
+| Full CI | `python Scripts/CI.py` (`--stages build,unit` for a subset; `--contract` as for PreCommit) |
 
 - **Toolchain:**
   - Windows: Visual Studio 2026 (toolset v145, MSVC 14.51).
@@ -81,10 +81,10 @@ Run every command from the repository root. Windows uses `python`; Linux and mac
 2. **Session-sized tasks.** Each task fits in one session and has its own tests. A task never leaves the tree red.
 3. **Contract task first.** The first task of a milestone freezes the public headers:
    - documented signatures;
-   - stubs that return `Unsupported`;
+   - stubs that return `Unsupported` and start with the marker `ENGINE_CONTRACT_STUB();` (`Core/Base.h`);
    - tests marked `doctest::skip`.
 
-   Changing a frozen header needs the contract owner's review.
+   Changing a frozen header needs the contract owner's review. The contract commit is the only commit made in contract mode (`python Scripts/PreCommit.py --contract`). Every other commit runs the strict gate, which fails on any `ENGINE_CONTRACT_STUB` and on any test case skipped outside the child-process targets, so no stub or skip survives into a milestone commit (`Docs/Decisions/0004-contract-stub-gate.md`).
 4. **File ownership.** Touch only the files your task owns.
    - Shared integration files have one owner per milestone: the premake files, `Scripts/ModuleRules.json`, `BuiltinComponents.h`, `RegisterBindings.cpp`, `RegisterMethods.cpp` and `Docs/Reference/*`.
    - Route changes to those files through their owner, and list what you need in your result.
@@ -94,6 +94,8 @@ Run every command from the repository root. Windows uses `python`; Linux and mac
 ## Commit gate (Architecture §15.9)
 
 1. `python Scripts/PreCommit.py` is green: generate, the static checks (`CheckBuildConfig.py` on the workspace and its fixtures, `Lint.py`, `Lint.py --self-test`, the format check; the same list as `CI.py`'s lint stage), Debug build, and the unit and feature suites.
+   - **Strict by default.** Lint rejects `ENGINE_CONTRACT_STUB` and any `doctest::skip` outside the child-process targets (`Test::ChildTargetSuite`), and the unit suite fails on, and names, any other skipped test case.
+   - **Contract mode.** Only the commit of a milestone's contract task runs `python Scripts/PreCommit.py --contract`, which allows both and says so in its summary. Every other commit is strict.
 2. **Recorded review.** Run the `commit-review` skill on the staged diff against `Docs/ReviewChecklist.md`. Any of these blocks the commit:
    - a failing check;
    - an unresolved checklist item;
@@ -175,6 +177,7 @@ The same inputs and seed must give the same state hash in Debug, Release and Dis
   - Case names have the form `TEST_CASE("<Unit>: <present-tense behaviour>")`. Roadmap acceptance names are used verbatim.
 - **Deterministic:** no sleeps or wall-clock timing, fixed seeds, no network, files only in a per-test temporary directory, and no dependence on test order.
 - **Public API only.** Expected error logs are declared with `Test::ExpectLog`. Expected asserts are death tests (`ENGINE_DEATH_TEST`). GPU tests skip with a reason unless `--require-gpu` is passed.
+- **No permanent `doctest::skip`.** It marks a contract task's tests until their implementation lands. The only permanent skips are child-process targets, which carry `doctest::test_suite(Test::ChildTargetSuite)` in the same decorator expression (Lint `test-skip`, Test.py's skip check).
 - **Fixtures** live in `Tests/Data/`, with licenses in `Tests/Data/LICENSES.md`. Generated fixtures come from committed generators.
 
 ## Vendored code (`Vendor/`)

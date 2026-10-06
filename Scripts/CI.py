@@ -7,13 +7,14 @@ Stages that exist in milestone M0, with the configurations of the §15.8 matrix:
   lint         n/a                   static checks, shared with PreCommit.py (Scripts/Lib/scripts.py):
                                      Scripts/CheckBuildConfig.py passes on the workspace and fails, with the fixture's
                                      own defect, on every fixture workspace under Tests/Data/BuildConfig/;
-                                     Scripts/Lint.py (header self-containment included) and Lint.py --self-test (every
-                                     seeded fixture under Tests/Data/Lint/ fails with exactly its expected findings);
-                                     Scripts/Format.py --check
+                                     Scripts/Lint.py (header self-containment and the contract stubs and skipped tests
+                                     included) and Lint.py --self-test (every seeded fixture under Tests/Data/Lint/
+                                     fails with exactly its expected findings); Scripts/Format.py --check
   build        Debug, Release, Dist  Scripts/Build.py per configuration, plus, after Debug, the Roadmap M0 acceptance
                                      check "Shaders: slang-only change is not skipped by the up-to-date check":
                                      touching only a .slang file re-runs the shader rule, the next build does not
-  unit         Debug, Release        Scripts/Test.py --suite unit --junit
+  unit         Debug, Release        Scripts/Test.py --suite unit --junit, which also fails on a skipped test case
+                                     outside the child-process targets
   portability  n/a                   premake --os=linux gmake, --os=linux ninja, --os=macosx xcode4 (and the vs2026
                                      reference) into bin-int/Portability/, each checked against the expected file list
                                      and project/configuration set; the xcode4 projects' precompiled headers
@@ -24,6 +25,11 @@ Stages that exist in milestone M0, with the configurations of the §15.8 matrix:
                                      is installed, otherwise reported as skipped (a failure with --require-clang-cl)
 Later stages of §15.8 (bake, gpu, golden, feature, automation, export, determinism, games, hardening) are accepted by
 --stages and reported as "not-available" until their milestone.
+
+Modes (Roadmap rule 3, Docs/Decisions/0004-contract-stub-gate.md): strict by default, so a milestone cannot end with a
+contract stub (ENGINE_CONTRACT_STUB) or a skipped test case outside the child-process targets. --contract passes
+--allow-contract-stubs to Lint.py (lint) and --allow-skips to Test.py (unit), exactly like PreCommit.py --contract
+(Scripts/Lib/scripts.py); the run prints which mode it is in at the start and in the summary.
 
 Results: each stage's own output, a summary table, bin/TestResults/CI.xml (JUnit, one test case per step; another
 path with --summary-junit, so separate runs of one CI job keep separate summaries) and the unit JUnit files in
@@ -65,7 +71,7 @@ from Lib.report import (
     overall_exit_code,
     write_junit,
 )
-from Lib.scripts import run_script, run_static_checks
+from Lib.scripts import CONTRACT_FLAG_HELP, mode_note, run_script, run_static_checks, test_mode_arguments
 
 SHADER_MANIFEST = paths.REPOSITORY_ROOT / "Resources" / "Shaders" / "Shaders.json"
 # The Roadmap M0 acceptance name of the shader up-to-date check, used verbatim as its step name (ReviewChecklist §8).
@@ -151,7 +157,7 @@ class Runner:
 
     def lint(self) -> list[Step]:
         """The static checks of §15.8, shared with PreCommit.py. Each runs even after an earlier one failed."""
-        return run_static_checks(self.console, self.done)
+        return run_static_checks(self.console, self.done, self.arguments.contract)
 
     def build(self, configs: list[str]) -> list[Step]:
         steps: list[Step] = []
@@ -216,7 +222,8 @@ class Runner:
                     time.monotonic() - started)
 
     def unit(self, configs: list[str]) -> list[Step]:
-        return [self.script(f"unit {config}", "Test.py", ["--suite", "unit", "--config", config, "--junit"],
+        mode = test_mode_arguments(self.arguments.contract)
+        return [self.script(f"unit {config}", "Test.py", ["--suite", "unit", "--config", config, "--junit", *mode],
                             TIMEOUTS["unit"]) for config in configs]
 
     # ----------------------------------------------------------------------------------------------------------------
@@ -410,6 +417,7 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--require-clang-cl", action="store_true",
                         help="portability: fail (exit code 3) instead of skipping the clang-cl build when Visual "
                              "Studio's C++ Clang component is missing (CI runners that must have it)")
+    parser.add_argument("--contract", action="store_true", help=CONTRACT_FLAG_HELP)
     parser.add_argument("--summary-junit", type=Path, default=SUMMARY_JUNIT,
                         help=f"JUnit summary of this run (default: {paths.display_path(SUMMARY_JUNIT)})")
     parser.add_argument("--json", action="store_true", help="print a machine-readable result on stdout")
@@ -460,7 +468,8 @@ def main(argv: list[str] | None = None) -> int:
         console.print(f"CI.py: error: {error}")
         return EXIT_USAGE
     console.heading(f"CI on {host.system} ({host.machine}), Python {platform.python_version()}: stages "
-                    f"{', '.join(arguments.selected)}; configurations {', '.join(arguments.configs)}")
+                    f"{', '.join(arguments.selected)}; configurations {', '.join(arguments.configs)}; "
+                    f"{mode_note(arguments.contract)}")
 
     runner = Runner(arguments, console)
     results: list[tuple[str, list[Step]]] = []
@@ -487,6 +496,7 @@ def main(argv: list[str] | None = None) -> int:
     write_junit(arguments.summary_junit, "CI", steps)
     console.summary(f"CI summary ({time.monotonic() - started:.0f} s; JUnit: "
                     f"{paths.display_path(arguments.summary_junit)})", steps)
+    console.print(f"  {mode_note(arguments.contract)}")
     verdict = "passed" if exit_code == EXIT_SUCCESS else f"FAILED in stage {failed_stage or 'selection'}"
     console.print(f"\nCI {verdict} (exit code {exit_code})")
     if arguments.json:
@@ -495,6 +505,7 @@ def main(argv: list[str] | None = None) -> int:
             "exitCode": exit_code,
             "host": {"system": host.system, "machine": host.machine},
             "configurations": arguments.configs,
+            "contract": arguments.contract,
             "stages": [{"stage": name, "steps": [step.to_json() for step in stage_steps]}
                        for name, stage_steps in results],
             "junit": paths.display_path(arguments.summary_junit),

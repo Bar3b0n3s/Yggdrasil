@@ -28,6 +28,13 @@
 #define ENGINE_CONCAT_IMPL(first, second) first##second
 #define ENGINE_CONCAT(first, second) ENGINE_CONCAT_IMPL(first, second)
 
+// The contract-stub marker (Roadmap rule 3): the first statement of every stub body written by a milestone contract
+// task, in Engine, Editor, Runtime and Tests code alike. Lint rejects it outside contract mode (Lint.py rule
+// contract-stub, lifted only by --allow-contract-stubs, which PreCommit.py --contract and CI.py --contract pass), so a
+// stub cannot survive into a milestone commit: the implementation replaces the whole body, marker included. It expands
+// to a statement that does nothing.
+#define ENGINE_CONTRACT_STUB() static_cast<void>(0)
+
 namespace Engine {
 
 	// Unique ownership, the default (Architecture §4.7).
