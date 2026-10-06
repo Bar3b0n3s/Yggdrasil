@@ -444,6 +444,74 @@
 					"Line": 4
 				}
 			]
+		},
+		{
+			"Name": "ContractStub",
+			"Description": "ENGINE_CONTRACT_STUB left in an Engine source, a Tests support source and an inline function of Base.h, and redefined in a Runtime header; the definition in Base.h, a comment and a string literal that spell the marker are the allowed controls.",
+			"Steps": [
+				"contract"
+			],
+			"Expected": [
+				{
+					"Code": "contract-stub",
+					"File": "Engine/Source/Engine/Core/Base.h",
+					"Line": 10
+				},
+				{
+					"Code": "contract-stub",
+					"File": "Engine/Source/Engine/Core/Version.cpp",
+					"Line": 9
+				},
+				{
+					"Code": "contract-stub",
+					"File": "Tests/Source/Support/FakeClock.cpp",
+					"Line": 11
+				},
+				{
+					"Code": "contract-stub",
+					"File": "Runtime/Source/Runtime/RuntimeStubs.h",
+					"Line": 4
+				}
+			]
+		},
+		{
+			"Name": "UnexpectedTestSkip",
+			"Description": "doctest::skip on ordinary test cases: plain, with the child-target suite only in a comment or in the name string, through a namespace alias in a TEST_CASE_FIXTURE, unqualified after using namespace doctest, and in a shared decorator outside any test macro. The child-process targets (decorator expressions over several lines, with a comment between the decorators, qualified and unqualified), a string and a comment that spell a skip, and a member named skip are the allowed controls.",
+			"Steps": [
+				"contract"
+			],
+			"Expected": [
+				{
+					"Code": "test-skip",
+					"File": "Tests/Source/Engine/Core/ClockTests.cpp",
+					"Line": 16
+				},
+				{
+					"Code": "test-skip",
+					"File": "Tests/Source/Engine/Core/ClockTests.cpp",
+					"Line": 33
+				},
+				{
+					"Code": "test-skip",
+					"File": "Tests/Source/Engine/Core/ClockTests.cpp",
+					"Line": 39
+				},
+				{
+					"Code": "test-skip",
+					"File": "Tests/Source/Engine/Core/ClockTests.cpp",
+					"Line": 44
+				},
+				{
+					"Code": "test-skip",
+					"File": "Tests/Source/Engine/Core/ClockTests.cpp",
+					"Line": 49
+				},
+				{
+					"Code": "test-skip",
+					"File": "Tests/Source/Engine/Core/TimerTests.cpp",
+					"Line": 16
+				}
+			]
 		}
 	]
 }

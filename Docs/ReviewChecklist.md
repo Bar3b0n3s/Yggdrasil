@@ -17,12 +17,14 @@ This is the pre-commit code review checklist from Architecture §15.9. The `comm
 - **Recording:** the commit message ends with the trailer
   `Reviewed: <outcome>; <n> findings (<n> fixed); PreCommit <green|red> (<stages>)`, for example
   `Reviewed: approved; 3 findings (3 fixed); PreCommit green (generate, checkbuildconfig, lint, lint self-test, format, Debug build, unit 42/42)`.
+  A milestone's contract commit records its mode: `PreCommit green, contract mode (...)`.
 
 Section references (§) point to `Docs/Architecture.md` unless marked CodeStyle (`Docs/CodeStyle.md`) or Roadmap (`Docs/Roadmap.md`).
 
 ## 0. Gate and scope
 
 - [ ] `python Scripts/PreCommit.py` passed on the final tree, after the last edit. A run that predates a fix does not count.
+- [ ] The gate ran in the right mode (Roadmap rule 3, `Docs/Decisions/0004-contract-stub-gate.md`). Only a milestone's contract commit runs `PreCommit.py --contract`. Every other commit ran strict, so no `ENGINE_CONTRACT_STUB` remains and no test case is skipped outside the child-process targets (`Test::ChildTargetSuite`).
 - [ ] The diff does what the task asks and nothing else. There are no unrelated edits, drive-by reformatting or stray files.
 - [ ] Only files the task owns are changed. Changes to shared integration files (premake files, `Scripts/ModuleRules.json`, `BuiltinComponents.h`, `RegisterBindings.cpp`, `RegisterMethods.cpp`, `Docs/Reference/*`) come from, or are approved by, their owner (Roadmap rule 4).
 - [ ] Frozen contract headers are unchanged, or the change carries the contract owner's review (Roadmap rule 3).
@@ -108,7 +110,7 @@ Section references (§) point to `Docs/Architecture.md` unless marked CodeStyle 
 ## 8. Tests (CodeStyle §14, §15)
 
 - [ ] Every new or changed behaviour has a test, and every bug fix has a regression test that fails without the fix.
-- [ ] Tests are meaningful: they assert outcomes rather than mere execution, cover failure paths, and would catch a plausible regression. No test was weakened, skipped or deleted to get green.
+- [ ] Tests are meaningful: they assert outcomes rather than mere execution, cover failure paths, and would catch a plausible regression. No test was weakened, skipped or deleted to get green. A permanent `doctest::skip` exists only on a child-process target, with `doctest::test_suite(Test::ChildTargetSuite)` in the same decorator expression.
 - [ ] Naming and location follow the conventions: `Tests/Source/<path>Tests.cpp`, `TEST_SUITE("<Module>")`, and `TEST_CASE("<Unit>: <behaviour>")`. Roadmap acceptance names are used verbatim.
 - [ ] Tests are deterministic: no sleeps or wall-clock time, fixed seeds, no network, temporary directories only, and no dependence on order.
 - [ ] Expected error logs use `Test::ExpectLog`, and expected asserts are death tests. GPU tests skip with a reason unless `--require-gpu`.
@@ -124,7 +126,7 @@ Section references (§) point to `Docs/Architecture.md` unless marked CodeStyle 
 
 ## 10. No debug leftovers
 
-- [ ] No temporary logging, `printf` debugging, hard-coded local paths, disabled tests, `#if 0`, commented-out code or forced flags.
+- [ ] No temporary logging, `printf` debugging, hard-coded local paths, disabled tests, `#if 0`, commented-out code or forced flags. Outside a contract commit, no `ENGINE_CONTRACT_STUB` stub remains.
 - [ ] No warning suppressed to get green. A suppression is acceptable only when it is file-scoped in a vendor premake file, with the reason recorded in its `VENDOR.md`.
 - [ ] No generated, build or machine-specific files are committed: `bin/`, project files, `.mcp.json`, `Library/`, `compile_commands.json`.
 - [ ] No secrets, tokens or personal data appear in code, fixtures, logs or test output.

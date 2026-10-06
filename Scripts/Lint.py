@@ -19,6 +19,13 @@ Steps, selected with --steps (default: all, in this order):
             by type with clang-query on the flags from compile_commands.json when it is available (aliases, values
             returned by functions and call chains included); otherwise a regex checker recognises receivers declared
             with a json type (or an alias of one) in the file or the header it implements.
+  contract  milestone completeness (Roadmap rule 3, Docs/Decisions/0004-contract-stub-gate.md): ENGINE_CONTRACT_STUB
+            anywhere in first-party C++ but its definition (contract-stub), and doctest::skip in Tests/Source unless
+            the same TEST_CASE/TEST_CASE_FIXTURE/SUBCASE decorator expression also carries
+            doctest::test_suite(Test::ChildTargetSuite), the child-process targets that are the only permanent skips
+            (test-skip). Comments and string literals are ignored, decorators may span lines, and doctest may be named
+            through a namespace alias or a using-directive. --allow-contract-stubs (contract mode, the commit of a
+            milestone's contract task) reports what it found as allowed instead of as findings.
   naming    identifier naming. clang-tidy runs with .clang-tidy on the flags from compile_commands.json when it is
             available; otherwise a regex checker applies the same prefixes (m_, s_, g_) and PascalCase rules to types,
             functions, data members, statics, globals and macros. The mode that ran is reported. C++ file and
@@ -78,10 +85,11 @@ DEFAULT_RULES_PATH = REPOSITORY_ROOT / "Scripts" / "ModuleRules.json"
 CLANG_TIDY_CONFIG_PATH = REPOSITORY_ROOT / ".clang-tidy"
 FIXTURE_MANIFEST_PATH = REPOSITORY_ROOT / "Tests" / "Data" / "Lint" / "Fixtures.json"
 
-STEPS = ("includes", "banned", "naming", "headers", "python", "json")
+STEPS = ("includes", "banned", "contract", "naming", "headers", "python", "json")
 STEP_TITLES = {
     "includes": "CheckIncludes",
     "banned": "Banned APIs",
+    "contract": "Contract stubs and skipped tests",
     "naming": "Naming",
     "headers": "Header self-containment",
     "python": "Python",
@@ -316,6 +324,8 @@ class Rules:
     abi_macro_files: GlobSet
     new_delete_files: GlobSet
     output_files: GlobSet
+    contract_stub_definition_files: GlobSet
+    contract_test_files: GlobSet
     python_roots: tuple[str, ...]
     python_exclude: GlobSet
     python_entry_points: GlobSet
@@ -437,6 +447,7 @@ def parse_rules(document: dict[str, Any], path: Path) -> Rules:
     }
     snapshot = _object(document["SnapshotHeaders"], "SnapshotHeaders")
     banned = _object(document["Banned"], "Banned")
+    contract = _object(document["Contract"], "Contract")
     python = _object(document["Python"], "Python")
     json_rules = _object(document["Json"], "Json")
     edges: set[tuple[str, str]] = set()
@@ -477,6 +488,10 @@ def parse_rules(document: dict[str, Any], path: Path) -> Rules:
         abi_macro_files=GlobSet(_strings(banned.get("AbiMacroFiles", []), "Banned.AbiMacroFiles")),
         new_delete_files=GlobSet(_strings(banned.get("NewDeleteFiles", []), "Banned.NewDeleteFiles")),
         output_files=GlobSet(_strings(banned.get("OutputFiles", []), "Banned.OutputFiles")),
+        contract_stub_definition_files=GlobSet(
+            _strings(contract["StubDefinitionFiles"], "Contract.StubDefinitionFiles")
+        ),
+        contract_test_files=GlobSet(_strings(contract["TestFiles"], "Contract.TestFiles")),
         python_roots=_strings(python["Roots"], "Python.Roots"),
         python_exclude=GlobSet(_strings(python.get("Exclude", []), "Python.Exclude")),
         python_entry_points=GlobSet(_strings(python.get("EntryPoints", []), "Python.EntryPoints")),
@@ -2308,6 +2323,146 @@ def run_banned(context: LintContext, report: StepReport) -> None:
 
 
 # --------------------------------------------------------------------------------------------------------------------
+# Step: contract (contract stubs and skipped test cases left at the end of a milestone)
+# --------------------------------------------------------------------------------------------------------------------
+
+# The contract-stub marker of Engine/Source/Engine/Core/Base.h: the first statement of every stub body a milestone's
+# contract task writes (Roadmap rule 3).
+CONTRACT_STUB_PATTERN = re.compile(r"\bENGINE_CONTRACT_STUB\b")
+CONTRACT_STUB_DEFINITION_PATTERN = re.compile(r"[ \t]*#[ \t]*define[ \t]+(ENGINE_CONTRACT_STUB)\b")
+CONTRACT_STUB_MESSAGE = (
+    "ENGINE_CONTRACT_STUB marks a stub written by a milestone contract task (Roadmap rule 3): implement the function, "
+    "replacing the whole stub body, before the milestone ends. Outside contract mode (Lint.py --allow-contract-stubs, "
+    "PreCommit.py --contract) the marker appears only in its definition (ModuleRules.json Contract.StubDefinitionFiles)"
+)
+# doctest's macros that take a decorator expression ("name" * doctest::skip() * ...), with or without DOCTEST_.
+DOCTEST_DECORATED_MACRO_PATTERN = re.compile(
+    r"(?<![\w])(?:DOCTEST_)?(?:TEST_CASE(?:_FIXTURE|_CLASS|_TEMPLATE(?:_DEFINE)?)?|SUBCASE|TEST_SUITE(?:_BEGIN)?|"
+    r"SCENARIO(?:_CLASS|_TEMPLATE(?:_DEFINE)?)?)\s*\("
+)
+DOCTEST_ALIAS_PATTERN = re.compile(r"\bnamespace\s+([A-Za-z_]\w*)\s*=\s*(?:::)?doctest\s*;")
+DOCTEST_USING_DIRECTIVE_PATTERN = re.compile(r"\busing\s+namespace\s+(?:::)?doctest\s*;")
+# The suite of the test cases that only run in a child process spawned by another test (Test::ChildTargetSuite,
+# Tests/Source/Support/TestOptions.h): the only test cases that stay skipped
+# (Docs/Decisions/0003-m1-contract-decisions.md decision 7).
+CHILD_TARGET_SUITE = r"(?:(?:::)?Engine\s*::\s*)?Test\s*::\s*ChildTargetSuite"
+TEST_SKIP_MESSAGE = (
+    "leaves a test case unrun: the only permanent skips are the child-process targets, whose decorator expression "
+    "also carries doctest::test_suite(Test::ChildTargetSuite) (Docs/Decisions/0003-m1-contract-decisions.md decision "
+    "7). A contract task's skipped tests are un-skipped when their implementation lands (Roadmap rule 3); outside "
+    "contract mode (Lint.py --allow-contract-stubs, PreCommit.py --contract) none may remain"
+)
+
+
+@dataclasses.dataclass(frozen=True)
+class DoctestPatterns:
+    """doctest::skip and the child-target suite decorator of one file, qualified by doctest or a namespace alias of it,
+    or unqualified after `using namespace doctest;`."""
+
+    skip: re.Pattern[str]
+    child_target: re.Pattern[str]
+
+
+def doctest_patterns(code: str) -> DoctestPatterns:
+    names = [r"(?:::)?doctest"] + [re.escape(alias) for alias in sorted(set(DOCTEST_ALIAS_PATTERN.findall(code)))]
+    qualified = r"(?<![\w:.>])(?:" + "|".join(names) + r")\s*::\s*"
+    skip = qualified + r"skip\b"
+    child_target = qualified + rf"test_suite\s*\(\s*{CHILD_TARGET_SUITE}\s*\)"
+    if DOCTEST_USING_DIRECTIVE_PATTERN.search(code):
+        skip += r"|(?<![\w:.>])skip\s*[({]"
+        child_target += rf"|(?<![\w:.>])test_suite\s*\(\s*{CHILD_TARGET_SUITE}\s*\)"
+    return DoctestPatterns(re.compile(skip), re.compile(child_target))
+
+
+class ContractChecker:
+    """What a milestone's contract task leaves for its implementation streams (Roadmap rule 3): stub bodies marked
+    with ENGINE_CONTRACT_STUB and test cases marked doctest::skip. At the end of a milestone none may remain, except the
+    skipped child-process targets."""
+
+    def __init__(self, tree: Tree) -> None:
+        self.rules = tree.rules
+
+    def check(self, source: SourceFile) -> tuple[list[Finding], int]:
+        """The findings of one C++ file, and how many of its skips are allowed child-target skips."""
+        findings = self.contract_stubs(source)
+        if not self.rules.contract_test_files.matches(source.relative):
+            return findings, 0
+        skip_findings, child_targets = self.test_skips(source)
+        return findings + skip_findings, child_targets
+
+    def contract_stubs(self, source: SourceFile) -> list[Finding]:
+        """Every use of the marker in code (comments and string literals do not count), except the name in its
+        `#define` in a Contract.StubDefinitionFiles file."""
+        definitions: set[int] = set()
+        if self.rules.contract_stub_definition_files.matches(source.relative):
+            for directive in source.directives:
+                match = (
+                    CONTRACT_STUB_DEFINITION_PATTERN.match(source.code, directive.offset)
+                    if directive.name == "define"
+                    else None
+                )
+                if match:
+                    definitions.add(match.start(1))
+        lines = sorted(
+            {
+                source.line_of(match.start())
+                for match in CONTRACT_STUB_PATTERN.finditer(source.code)
+                if match.start() not in definitions
+            }
+        )
+        return [Finding(source.relative, line, "contract-stub", CONTRACT_STUB_MESSAGE) for line in lines]
+
+    @staticmethod
+    def test_skips(source: SourceFile) -> tuple[list[Finding], int]:
+        """Each doctest::skip must lie in the decorator expression of a doctest test macro (up to the macro's closing
+        parenthesis, across lines) that also carries doctest::test_suite(Test::ChildTargetSuite)."""
+        code = source.code
+        patterns = doctest_patterns(code)
+        decorators: list[tuple[int, int]] = []
+        for match in DOCTEST_DECORATED_MACRO_PATTERN.finditer(code):
+            _, close = balanced_arguments(code, match.end() - 1)
+            decorators.append((match.end() - 1, close))
+        findings: dict[int, Finding] = {}
+        child_targets = 0
+        for match in patterns.skip.finditer(code):
+            enclosing = [span for span in decorators if span[0] < match.start() < span[1]]
+            if enclosing and patterns.child_target.search(code, *max(enclosing)):
+                child_targets += 1
+                continue
+            line = source.line_of(match.start())
+            spelling = re.sub(r"\s+", "", match.group(0)).rstrip("({")
+            where = (
+                "" if enclosing else " outside the decorator expression of a TEST_CASE, TEST_CASE_FIXTURE or SUBCASE"
+            )
+            findings.setdefault(
+                line, Finding(source.relative, line, "test-skip", f"'{spelling}'{where} {TEST_SKIP_MESSAGE}")
+            )
+        return list(findings.values()), child_targets
+
+
+def run_contract(context: LintContext, report: StepReport) -> None:
+    tree = context.tree
+    checker = ContractChecker(tree)
+    files = [relative for relative in tree.cxx_files() if tree.in_scope(relative)]
+    report.files = len(files)
+    findings: list[Finding] = []
+    child_targets = 0
+    for relative in files:
+        file_findings, file_child_targets = checker.check(tree.source(relative))
+        findings += file_findings
+        child_targets += file_child_targets
+    stubs = sum(1 for finding in findings if finding.code == "contract-stub")
+    if context.options.allow_contract_stubs:
+        report.detail = (
+            f"contract mode (--allow-contract-stubs): {stubs} contract stub(s) and {len(findings) - stubs} test "
+            f"skip(s) allowed; {child_targets} child-target skip(s)"
+        )
+    else:
+        report.findings += findings
+        report.detail = f"{child_targets} child-target skip(s) (Test::ChildTargetSuite)"
+
+
+# --------------------------------------------------------------------------------------------------------------------
 # Compilation database (compile_commands.json from premake5 compile-commands)
 # --------------------------------------------------------------------------------------------------------------------
 
@@ -2973,6 +3128,7 @@ class LintOptions:
     cxx: str | None
     premake: str | None
     compile_commands: str | None
+    allow_contract_stubs: bool = False  # contract mode: the contract step reports what it finds as allowed
 
 
 class LintContext:
@@ -3652,6 +3808,8 @@ def run_lint(options: LintOptions) -> tuple[list[StepReport], LintContext]:
             run_includes(context.tree, report)
         elif step == "banned":
             run_banned(context, report)
+        elif step == "contract":
+            run_contract(context, report)
         elif step == "naming":
             run_naming(context, report)
         elif step == "headers":
@@ -3727,12 +3885,14 @@ def run_self_test(options: LintOptions) -> dict[str, Any]:
                 for code, file, line, item_modes in expectations
                 if not item_modes or mode in item_modes
             }
+            # Fixtures always run strict: they prove that every rule still finds its seeded defect.
             fixture_options = dataclasses.replace(
                 options,
                 root=root,
                 steps=steps,
                 paths=None,
                 mode=mode if mode != "auto" else options.mode,
+                allow_contract_stubs=False,
             )
             reports, _ = run_lint(fixture_options)
             findings = [finding for report in reports for finding in report.findings]
@@ -3758,9 +3918,9 @@ def run_self_test(options: LintOptions) -> dict[str, Any]:
 
 def parse_arguments(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Static checks for first-party code: include rules (Scripts/ModuleRules.json), banned APIs, naming "
-        "(clang-tidy or regex fallback), header self-containment, Python style and JSON validity "
-        "(Docs/Architecture.md section 2.3).",
+        description="Static checks for first-party code: include rules (Scripts/ModuleRules.json), banned APIs, "
+        "contract stubs and skipped tests, naming (clang-tidy or regex fallback), header self-containment, Python "
+        "style and JSON validity (Docs/Architecture.md section 2.3).",
         epilog="Steps: "
         + ", ".join(f"{step} ({STEP_TITLES[step]})" for step in STEPS)
         + ". Exit codes: 0 no findings, 1 findings, a failed self-test or a failed tool, 2 usage error or invalid "
@@ -3808,6 +3968,13 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
         "--jobs", type=int, default=os.cpu_count() or 1, help="parallel tool processes (default: CPU count)"
     )
     parser.add_argument(
+        "--allow-contract-stubs",
+        action="store_true",
+        help="contract mode, only for the commit of a milestone's contract task (Roadmap rule 3; PreCommit.py "
+        "--contract): the contract step counts ENGINE_CONTRACT_STUB and skipped test cases as allowed instead of "
+        "reporting them. The self-test always runs strict",
+    )
+    parser.add_argument(
         "--self-test",
         action="store_true",
         help="run the fixtures of Tests/Data/Lint/Fixtures.json and check their expected findings",
@@ -3850,6 +4017,7 @@ def build_options(arguments: argparse.Namespace) -> LintOptions:
         cxx=arguments.cxx,
         premake=arguments.premake,
         compile_commands=arguments.compile_commands,
+        allow_contract_stubs=arguments.allow_contract_stubs,
     )
 
 
@@ -3906,6 +4074,7 @@ def main(argv: list[str] | None = None) -> int:
                     "success": success,
                     "root": options.root.as_posix(),
                     "rules": options.rules_path.as_posix(),
+                    "allowContractStubs": options.allow_contract_stubs,
                     "steps": [report.as_dict() for report in reports],
                     "findings": [finding.as_dict() for finding in findings],
                 },

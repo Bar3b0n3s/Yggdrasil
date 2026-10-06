@@ -12,6 +12,14 @@ Suites and the configurations the §15.8 matrix runs them in when --config is no
   games        Release          not available yet (M16-M18)
 A suite that does not exist yet is reported with the distinct status "not-available"; it neither passes nor fails.
 
+Skipped test cases (Roadmap rule 3, Docs/Decisions/0004-contract-stub-gate.md): after a unit run, the Tests binary lists
+the test cases the run's filters select, skipped ones included (doctest --no-skip --list-test-cases --reporters=xml
+--out=<file>; each test case carries its suite and its doctest::skip flag). The only test cases that may stay skipped
+are the child-process targets of the ChildTargets suite (Test::ChildTargetSuite): a skipped test case in any other
+suite, such as a contract task's not yet implemented test, fails the run and is named. --allow-skips (contract mode,
+only for the commit of a milestone's contract task: PreCommit.py --contract) reports them without failing. The counts
+are in the step detail and, with --json, in the step's "skipCheck" object.
+
 --junit writes bin/TestResults/<Suite>-<Config>.xml (JUnit; test suite named "<Suite>.<Config>"). The console then
 shows a summary and every failure parsed from that file instead of doctest's console reporter. If the test process
 dies before writing it, a JUnit file with one error test case records the crash.
@@ -32,11 +40,20 @@ import argparse
 import dataclasses
 import datetime
 import re
+import tempfile
 import xml.etree.ElementTree as ElementTree
 from pathlib import Path
+from typing import Any
 
 from Lib import paths
-from Lib.process import ToolNotFoundError, child_environment, describe_exit_code, run_streamed
+from Lib.process import (
+    ToolNotFoundError,
+    child_environment,
+    describe_exit_code,
+    format_command,
+    run_captured,
+    run_streamed,
+)
 from Lib.report import (
     EXIT_FAILED,
     EXIT_INIT_FAILED,
@@ -56,6 +73,12 @@ UNIT_EXCLUDED_TEST_SUITES = "GPU,Golden"
 DOCTEST_SUMMARY_PATTERN = re.compile(
     r"\[doctest\] test cases:\s*(\d+)\s*\|\s*(\d+) passed\s*\|\s*(\d+) failed\s*\|\s*(\d+) skipped"
 )
+# The doctest suite of the test cases that only run in a child process spawned by another test: Test::ChildTargetSuite
+# (Tests/Source/Support/TestOptions.h). They are the only test cases that stay skipped (Docs/Decisions/
+# 0003-m1-contract-decisions.md decision 7).
+CHILD_TARGET_SUITE = "ChildTargets"
+LISTING_TIMEOUT_SECONDS = 120.0
+UNEXPECTED_SKIPS_IN_DETAIL = 3
 
 
 @dataclasses.dataclass(frozen=True)
@@ -87,6 +110,54 @@ class TestCounts:
     failed: int = 0
     skipped: int = 0
     failures: list[str] = dataclasses.field(default_factory=list)
+
+
+class SkipCheckError(Exception):
+    """The Tests binary could not list its test cases."""
+
+
+@dataclasses.dataclass
+class SkipCheck:
+    """The test cases a run's filters select that doctest::skip leaves out, by name."""
+
+    skipped: list[str]
+    child_targets: list[str]  # the selected test cases of the ChildTargets suite, skipped or not
+    unexpected: list[str]  # skipped test cases outside the ChildTargets suite
+
+    def to_json(self, allowed: bool) -> dict[str, Any]:
+        return {"skipped": len(self.skipped), "childTargets": len(self.child_targets),
+                "unexpected": self.unexpected, "allowed": allowed}
+
+
+def list_skipped_test_cases(executable: Path, filters: list[str]) -> SkipCheck:
+    """Ask the Tests binary which test cases `filters` select, skipped ones included (--no-skip). doctest's XML
+    reporter gives each <TestCase> its suite and its doctest::skip flag; the listing goes to a file (--out), so the log
+    on stderr never interleaves with it."""
+    with tempfile.TemporaryDirectory(prefix="Test-SkipCheck-") as directory:
+        listing = Path(directory) / "TestCases.xml"
+        command = [str(executable), *filters, "--no-skip", "--list-test-cases", "--reporters=xml", f"--out={listing}"]
+        try:
+            result = run_captured(command, cwd=paths.REPOSITORY_ROOT, env=child_environment(),
+                                  timeout=LISTING_TIMEOUT_SECONDS)
+        except ToolNotFoundError as error:
+            raise SkipCheckError(str(error)) from error
+        if not result.succeeded:
+            raise SkipCheckError(f"{format_command(command)} {result.describe_exit()}: {result.tail(5)}")
+        try:
+            cases = list(ElementTree.parse(listing).getroot().iter("TestCase"))
+        except (OSError, ElementTree.ParseError) as error:
+            raise SkipCheckError(f"cannot read the test case listing of {format_command(command)}: {error}") from error
+    skipped = sorted(case.get("name", "") for case in cases if case.get("skipped") == "true")
+    child_targets = sorted(case.get("name", "") for case in cases if case.get("testsuite") == CHILD_TARGET_SUITE)
+    unexpected = sorted(case.get("name", "") for case in cases
+                        if case.get("skipped") == "true" and case.get("testsuite") != CHILD_TARGET_SUITE)
+    return SkipCheck(skipped, child_targets, unexpected)
+
+
+def describe_unexpected_skips(skips: SkipCheck) -> str:
+    names = ", ".join(f"'{name}'" for name in skips.unexpected[:UNEXPECTED_SKIPS_IN_DETAIL])
+    more = len(skips.unexpected) - UNEXPECTED_SKIPS_IN_DETAIL
+    return names + (f" and {more} more" if more > 0 else "")
 
 
 def tests_executable(config: str) -> Path:
@@ -143,9 +214,10 @@ def run_unit(config: str, arguments: argparse.Namespace, console: Console) -> St
     if not executable.is_file():
         return Step(name, Status.FAILED, f"{paths.display_path(executable)} not found: run python Scripts/Build.py "
                                          f"--config {config} --project Tests", exit_code=EXIT_INIT_FAILED)
-    command = [str(executable), f"--test-suite-exclude={UNIT_EXCLUDED_TEST_SUITES}"]
+    filters = [f"--test-suite-exclude={UNIT_EXCLUDED_TEST_SUITES}"]
     if arguments.filter:
-        command.append(f"--test-case={arguments.filter}")
+        filters.append(f"--test-case={arguments.filter}")
+    command = [str(executable), *filters]
     report = junit_path("unit", config) if arguments.junit else None
     if report is not None:
         report.parent.mkdir(parents=True, exist_ok=True)
@@ -187,6 +259,20 @@ def run_unit(config: str, arguments: argparse.Namespace, console: Console) -> St
         if report is not None:
             write_crash_junit(report, f"Unit.{config}", f"Tests {result.describe_exit()}", result.tail(60))
         return Step(name, Status.TIMEOUT, f"Tests {result.describe_exit()}", result.duration, data=data)
+
+    skips: SkipCheck | None = None
+    skip_error = ""
+    try:
+        skips = list_skipped_test_cases(executable, filters)
+        data["skipCheck"] = skips.to_json(arguments.allow_skips)
+        if not arguments.allow_skips:
+            for skipped_case in skips.unexpected:
+                console.print(f"UNEXPECTED SKIP: {skipped_case}")
+    except SkipCheckError as error:
+        skip_error = f"cannot list the skipped test cases: {error}"
+        data["skipCheck"] = {"error": skip_error, "allowed": arguments.allow_skips}
+        console.print(skip_error)
+
     if result.exit_code != 0:
         if counts is not None and counts.failed:
             detail = f"{counts.failed} of {counts.executed} test case(s) failed"
@@ -199,8 +285,25 @@ def run_unit(config: str, arguments: argparse.Namespace, console: Console) -> St
     if counts.executed == 0:
         return Step(name, Status.FAILED, "no test case ran" + (" (check --filter)" if arguments.filter else ""),
                     result.duration, data=data)
-    skipped = f", {counts.skipped} skipped" if counts.skipped else ""
-    return Step(name, Status.PASSED, f"{counts.passed} test case(s) passed{skipped}", result.duration, data=data)
+    passed = f"{counts.passed} test case(s) passed"
+    if skips is None:
+        if arguments.allow_skips:
+            return Step(name, Status.PASSED, f"{passed}; {skip_error} (--allow-skips)", result.duration, data=data)
+        return Step(name, Status.FAILED, skip_error, result.duration, data=data)
+    child_targets = f"{len(skips.child_targets)} child-process target(s) in the {CHILD_TARGET_SUITE} suite"
+    if skips.unexpected and not arguments.allow_skips:
+        return Step(name, Status.FAILED, f"{len(skips.unexpected)} skipped test case(s) outside the "
+                                         f"{CHILD_TARGET_SUITE} suite: {describe_unexpected_skips(skips)}; only the "
+                                         f"{child_targets} may stay skipped (Roadmap rule 3; --allow-skips is for a "
+                                         f"contract task's commit)", result.duration, data=data)
+    if arguments.allow_skips:
+        detail = (f"{passed}; contract mode (--allow-skips): {len(skips.skipped)} skipped, {len(skips.unexpected)} "
+                  f"of them outside the {CHILD_TARGET_SUITE} suite; {child_targets}")
+    elif skips.skipped:
+        detail = f"{passed}; {len(skips.skipped)} skipped, all of them among the {child_targets}"
+    else:
+        detail = f"{passed}; none skipped"
+    return Step(name, Status.PASSED, detail, result.duration, data=data)
 
 
 def parse_arguments(argv: list[str]) -> argparse.Namespace:
@@ -216,6 +319,10 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--junit", action="store_true", help="write JUnit XML into bin/TestResults/")
     parser.add_argument("--update-golden", action="store_true", help="write golden image candidates (golden suite)")
     parser.add_argument("--filter", help="run only test cases matching this doctest wildcard pattern")
+    parser.add_argument("--allow-skips", action="store_true",
+                        help="contract mode, only for the commit of a milestone's contract task (Roadmap rule 3; "
+                             "PreCommit.py --contract): report test cases skipped outside the "
+                             f"{CHILD_TARGET_SUITE} suite instead of failing the unit suite")
     parser.add_argument("--timeout", type=float, default=UNIT_TIMEOUT_SECONDS,
                         help=f"seconds per suite run (default: {UNIT_TIMEOUT_SECONDS:.0f})")
     parser.add_argument("--json", action="store_true", help="print a machine-readable result on stdout")
