@@ -42,9 +42,9 @@ CheckOptions:
   readability-identifier-naming.FunctionCase: CamelCase
   readability-identifier-naming.MethodCase: CamelCase
   # Standard protocols keep their required names (CodeStyle §2): range-for and container members, the tuple
-  # protocol, ADL swap, std::formatter, nlohmann's ADL serializers, and main.
+  # protocol, ADL swap, std::formatter, nlohmann's ADL serializers, doctest's StringMaker::convert, and main.
   readability-identifier-naming.FunctionIgnoredRegexp: '^(main|begin|end|cbegin|cend|rbegin|rend|crbegin|crend|size|ssize|empty|data|swap|get|to_json|from_json)$'
-  readability-identifier-naming.MethodIgnoredRegexp: '^(begin|end|cbegin|cend|rbegin|rend|crbegin|crend|size|empty|data|front|back|push_back|emplace_back|pop_back|clear|reserve|capacity|resize|insert|emplace|erase|find|contains|swap|get|parse|format)$'
+  readability-identifier-naming.MethodIgnoredRegexp: '^(begin|end|cbegin|cend|rbegin|rend|crbegin|crend|size|empty|data|front|back|push_back|emplace_back|pop_back|clear|reserve|capacity|resize|insert|emplace|erase|find|contains|swap|get|parse|format|convert)$'
 
   readability-identifier-naming.ConstexprVariableCase: CamelCase
   readability-identifier-naming.GlobalConstantCase: CamelCase

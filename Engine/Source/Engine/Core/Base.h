@@ -23,6 +23,11 @@
 	#error "Exactly one of ENGINE_DEBUG, ENGINE_RELEASE and ENGINE_DIST must be defined (see Dependencies.lua)."
 #endif
 
+// Token pasting after macro expansion, for identifiers that must be unique per line (ENGINE_TRY_ASSIGN,
+// ENGINE_PROFILE_SCOPE, ENGINE_DEATH_TEST): ENGINE_CONCAT(name, __LINE__).
+#define ENGINE_CONCAT_IMPL(first, second) first##second
+#define ENGINE_CONCAT(first, second) ENGINE_CONCAT_IMPL(first, second)
+
 namespace Engine {
 
 	// Unique ownership, the default (Architecture §4.7).

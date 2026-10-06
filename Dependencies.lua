@@ -63,9 +63,13 @@ function ApplyFirstPartySettings()
 	targetdir ("%{wks.location}/bin/" .. OutputDir .. "/%{prj.name}")
 	objdir ("%{wks.location}/bin-int/" .. OutputDir .. "/%{prj.name}")
 
+	-- Engine/Config holds EnTT's user configuration header <entt/ext/config.h>, which routes ENTT_ASSERT to
+	-- ENGINE_CORE_ASSERT (Architecture §4.5). EnTT finds it through __has_include, so it must be on the include path of
+	-- every project that may include EnTT.
 	includedirs
 	{
 		RepositoryRoot .. "/Engine/Source",
+		RepositoryRoot .. "/Engine/Config",
 		RepositoryRoot .. "/Resources/Shaders"
 	}
 

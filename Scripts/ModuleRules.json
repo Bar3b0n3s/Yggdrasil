@@ -5,10 +5,12 @@
 		"Module dependency rules checked by the CheckIncludes step of Scripts/Lint.py (Docs/Architecture.md section 3), and the path scopes of its banned-API, Python and JSON steps.",
 		"Modules: Layer and Includes encode the may-include column of the section 3 table. MaxLayer N allows every module of layer N or lower (the table's '<=N'). Layer-5 modules never list each other in Includes: same-layer edges between them exist only in Layer5Edges, where [X, Y] means Y may include X. Headers lists single headers of other modules a module may include. Project names in Includes (ShaderShared) allow that project's headers.",
 		"ThirdParty lists library names from the ThirdParty section, or Library:header for one header of a library. Public applies to public headers, Private to .cpp files and to headers in PrivateDirectories (which also includes everything in Public). GlobalThirdParty applies to every first-party file. 'System' is any header that is neither standard library, vendored nor first-party (OS and compiler headers); SystemHeaders is 'Private' (any private file of the module) or a list of module subdirectories.",
-		"Projects map paths to rules and are matched in order. Kind Engine files take the rules of their module (Engine/Source/Engine/<Module>/); FilesOutsideModules gives files at the project root the rules of a module. FlagsFrom names the project whose compile flags compile a file alone (header self-containment, clang-tidy)."
+		"Projects map paths to rules and are matched in order. Kind Engine files take the rules of their module (Engine/Source/Engine/<Module>/); FilesOutsideModules gives files at the project root the rules of a module. FlagsFrom names the project whose compile flags compile a file alone (header self-containment, clang-tidy).",
+		"Engine/Config is an include root (ApplyFirstPartySettings puts it on every first-party include path) but not a C++ root: it holds only EnTT's user configuration header entt/ext/config.h, whose path EnTT dictates (Architecture section 4.5), so a first-party file that includes <entt/ext/config.h> directly is reported as a repository header spelled with angle brackets."
 	],
 	"IncludeRoots": [
 		"Engine/Source",
+		"Engine/Config",
 		"Editor/Source",
 		"Runtime/Source",
 		"Tests/Source",
@@ -497,6 +499,34 @@
 			}
 		},
 		{
+			"Name": "TestsChildProcess",
+			"Kind": "Project",
+			"Paths": [
+				"Tests/Source/Support/ChildProcess.cpp"
+			],
+			"Notes": "The M1 stand-in for Platform::Process (Docs/Decisions/0003-m1-contract-decisions.md, decision 1): the only Tests file with OS headers, for spawning death-test children. M2 re-implements it on Platform::Process and removes this rule. Otherwise the Tests rules apply.",
+			"FlagsFrom": "Tests",
+			"Modules": {
+				"Allow": [
+					"*"
+				],
+				"Deny": []
+			},
+			"Projects": [
+				"EditorCore",
+				"Editor",
+				"Tests",
+				"ShaderShared"
+			],
+			"ThirdParty": {
+				"Allow": [
+					"*"
+				],
+				"Deny": []
+			},
+			"SystemHeaders": true
+		},
+		{
 			"Name": "Tests",
 			"Kind": "Project",
 			"Paths": [
@@ -551,7 +581,8 @@
 			"Editor"
 		],
 		"TestsPCH.h": [
-			"Tests"
+			"Tests",
+			"TestsChildProcess"
 		]
 	},
 	"Banned": {
