@@ -1,0 +1,90 @@
+{
+	"Format": "Project",
+	"Version": 1,
+	"Name": "AllSettings",
+	"StartScene": "Assets/Scenes/Main.scene",
+	"Window": {
+		"Title": "All Settings",
+		"Width": 1280,
+		"Height": 720,
+		"VSync": false,
+		"Fullscreen": true,
+		"Resizable": false
+	},
+	"Simulation": {
+		"FixedHz": 120,
+		"MaxStepsPerFrame": 8,
+		"Seed": 1337,
+		"MaxEntities": 4096
+	},
+	"Physics": {
+		"Gravity": [0, -20, 0.5],
+		"Layers": ["Default", "Ball", "Track", "Trigger"],
+		"Collisions": [
+			["Default", "Ball"],
+			["Ball", "Track"],
+			["Ball", "Trigger"]
+		]
+	},
+	"Input": {
+		"Actions": {
+			"Jump": {
+				"Type": "Button",
+				"Bindings": ["Key.Space", "Gamepad.South"],
+				"Positive": [],
+				"Negative": [],
+				"Gamepad": "",
+				"Invert": false
+			},
+			"MoveX": {
+				"Type": "Axis",
+				"Bindings": [],
+				"Positive": ["Key.D", "Key.Right"],
+				"Negative": ["Key.A", "Key.Left"],
+				"Gamepad": "Gamepad.LeftX",
+				"Invert": true
+			}
+		}
+	},
+	"Rendering": {
+		"ShadowMapSize": 4096,
+		"SsaoHalfResolution": true
+	},
+	"Scripting": {
+		"MemoryLimitMB": 128,
+		"CallbackBudgetMs": 250,
+		"PauseOnError": false,
+		"BlockPlayOnTypeErrors": true
+	},
+	"Export": {
+		"BuildScenes": ["Assets/Scenes/Main.scene", "Assets/Scenes/Level2.scene"],
+		"Exclude": ["Assets/Tests/**", "Assets/Drafts/**"],
+		"Icon": "Assets/Icon.png",
+		"Version": "2.3.4",
+		"Company": "Fixture Studio"
+	},
+	"Testing": {
+		"Suites": [
+			{
+				"Script": "Assets/Tests/Main.test.luau",
+				"Scene": "Assets/Scenes/Main.scene",
+				"Parameters": {
+					"Level": 2,
+					"Time": 61.25
+				},
+				"Isolation": "Case",
+				"Clock": [0.004, 0.016, 0.5],
+				"Overrides": {
+					"CallbackBudgetMs": 50,
+					"MemoryLimitMB": 16,
+					"PauseOnError": "Continue"
+				},
+				"ExpectQuit": 3,
+				"Modes": ["Editor", "Release"]
+			}
+		],
+		"Replays": ["Assets/Tests/Replays/*.replay"],
+		"CaseTimeoutTicks": 1200,
+		"SuiteTickLimit": 72000
+	}
+}

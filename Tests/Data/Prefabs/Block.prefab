@@ -1,0 +1,47 @@
+{
+	"Format": "Prefab",
+	"Version": 1,
+	"Name": "Block",
+	"Root": "00000000000b0001",
+	"ComponentVersions": {
+		"Transform": 1,
+		"MeshRenderer": 1
+	},
+	"Entities": [
+		{
+			"ID": "00000000000b0001",
+			"Name": "Block",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				}
+			}
+		},
+		{
+			"ID": "00000000000b0002",
+			"Name": "Visual",
+			"Parent": "00000000000b0001",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": [],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		}
+	]
+}

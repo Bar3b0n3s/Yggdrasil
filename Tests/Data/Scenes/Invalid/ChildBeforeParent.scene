@@ -1,0 +1,39 @@
+{
+	"Format": "Scene",
+	"Version": 1,
+	"Name": "ChildBeforeParent",
+	"Seed": 0,
+	"ComponentVersions": {
+		"Transform": 1
+	},
+	"Entities": [
+		{
+			"ID": "4d00000000000002",
+			"Name": "Child",
+			"Parent": "4d00000000000001",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				}
+			}
+		},
+		{
+			"ID": "4d00000000000001",
+			"Name": "Parent",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				}
+			}
+		}
+	]
+}

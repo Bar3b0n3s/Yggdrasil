@@ -1,0 +1,44 @@
+{
+	"Format": "Scene",
+	"Version": 1,
+	"Name": "PrefabLinkRootNotInstance",
+	"Seed": 0,
+	"ComponentVersions": {
+		"Transform": 1,
+		"PrefabLink": 1
+	},
+	"Entities": [
+		{
+			"ID": "4d00000000000001",
+			"Name": "NotAnInstance",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				}
+			}
+		},
+		{
+			"ID": "4d00000000000002",
+			"Name": "Member",
+			"Parent": "4d00000000000001",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "00000000000b0002",
+					"InstanceRoot": "4d00000000000001"
+				}
+			}
+		}
+	]
+}

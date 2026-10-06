@@ -1,0 +1,44 @@
+{
+	"Format": "Scene",
+	"Version": 0,
+	"Name": "Legacy",
+	"Seed": 3,
+	"Entities": [
+		{
+			"ID": "5e00000000000001",
+			"Name": "Ball",
+			"Parent": null,
+			"Enabled": true,
+			"Tags": ["Player"],
+			"Components": [
+				{
+					"Type": "Transform",
+					"Translation": [0, 2, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				{
+					"Type": "SphereCollider",
+					"Radius": 0.5,
+					"Offset": [0, 0, 0],
+					"IsTrigger": false
+				}
+			]
+		},
+		{
+			"ID": "5e00000000000002",
+			"Name": "Hidden",
+			"Parent": "5e00000000000001",
+			"Enabled": false,
+			"Tags": [],
+			"Components": [
+				{
+					"Type": "Transform",
+					"Translation": [1, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				}
+			]
+		}
+	]
+}
