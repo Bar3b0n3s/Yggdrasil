@@ -13,6 +13,7 @@ import dataclasses
 import datetime
 import enum
 import json
+import os
 import sys
 import xml.etree.ElementTree as ElementTree
 from pathlib import Path
@@ -110,6 +111,12 @@ class Console:
     def result(self, step: Step) -> None:
         detail = f": {step.detail}" if step.detail else ""
         self.print(f"[{label(step.status)}] {step.name}{detail}")
+        annotation = github_error_annotation(step)
+        if annotation:
+            # Workflow commands are read from stdout. Annotations are public through the check-runs API, unlike job
+            # logs, which need a signed-in user, so a CI failure stays diagnosable for everyone.
+            sys.stdout.write(annotation + "\n")
+            sys.stdout.flush()
 
     def summary(self, title: str, steps: list[Step]) -> None:
         if not steps:
@@ -123,6 +130,29 @@ class Console:
             detail = step.detail.splitlines()[0] if step.detail else ""
             status = label(step.status)
             self.print(f"  {status:<{label_width}}  {step.name:<{name_width}}  {duration}  {detail}".rstrip())
+
+
+_ANNOTATION_MESSAGE_LIMIT = 8000  # characters; the tail is kept, GitHub truncates longer messages anyway
+
+
+def _escape_workflow_data(text: str) -> str:
+    return text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+
+
+def _escape_workflow_property(text: str) -> str:
+    return _escape_workflow_data(text).replace(":", "%3A").replace(",", "%2C")
+
+
+def github_error_annotation(step: Step) -> str | None:
+    """The `::error` workflow command for a failing step when running under GitHub Actions, else None. The message holds
+    the step detail and the tail of the step's output, so a failure is diagnosable from the run's annotations alone."""
+    if os.environ.get("GITHUB_ACTIONS") != "true" or not step.failed:
+        return None
+    tail = str(step.data.get("outputTail", "")).strip()
+    message = f"{step.detail}\n\n{tail}" if tail else step.detail
+    if len(message) > _ANNOTATION_MESSAGE_LIMIT:
+        message = "...\n" + message[-_ANNOTATION_MESSAGE_LIMIT:]
+    return f"::error title={_escape_workflow_property(step.name)}::{_escape_workflow_data(message)}"
 
 
 def overall_exit_code(steps: list[Step]) -> int:

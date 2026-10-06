@@ -31,7 +31,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    # ci/** branches run CI before their changes reach main (fixes that only CI can verify, such as Linux and macOS
+    # toolchain issues); main itself only receives reviewed commits.
+    branches: [main, "ci/**"]
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -234,6 +236,9 @@ jobs:
         env:
           PACKAGES: ${{ matrix.packages }}
         run: |
+          # First line of a command's output, without piping into head: under the default `bash -eo pipefail`, a
+          # producer that writes after head exits fails the step (xcodebuild aborts with exit code 134 on EPIPE).
+          first_line() { local output; output="$("$@")"; printf '%s\n' "${output%%$'\n'*}"; }
           sudo apt-get update
           # xorg-dev covers GLFW's X11 build (Vendor/GLFW/VENDOR.md) and is the package Setup.py checks for.
           # clang-18, clang-tidy-18 and clang-tools-18 (clang-query) serve the lint stage in both matrix entries.
@@ -241,7 +246,7 @@ jobs:
           # shellcheck disable=SC2086
           sudo apt-get install --yes --no-install-recommends $PACKAGES clang-18 clang-tidy-18 clang-tools-18 xorg-dev
           python3 -m pip install --disable-pip-version-check --require-hashes --no-deps --requirement .github/ci-requirements.txt
-          versions="$("$CXX" --version | head -n 1); $("$AR" --version | head -n 1); $(make --version | head -n 1); $(clang-format --version); Python $(python3 -c 'import platform; print(platform.python_version())')"
+          versions="$(first_line "$CXX" --version); $(first_line "$AR" --version); $(first_line make --version); $(clang-format --version); Python $(python3 -c 'import platform; print(platform.python_version())')"
           echo "$versions"
           echo "**Linux toolchain:** $versions" >> "$GITHUB_STEP_SUMMARY"
 
@@ -358,15 +363,18 @@ jobs:
 
       - name: Verify arm64 and Xcode 26
         run: |
+          # First line of a command's output, without piping into head: under the default `bash -eo pipefail`, a
+          # producer that writes after head exits fails the step (xcodebuild aborts with exit code 134 on EPIPE).
+          first_line() { local output; output="$("$@")"; printf '%s\n' "${output%%$'\n'*}"; }
           machine="$(uname -m)"
           [ "$machine" = "arm64" ] || { echo "::error::expected an arm64 runner, got $machine"; exit 1; }
-          xcode="$(xcodebuild -version | head -n 1)"
+          xcode="$(first_line xcodebuild -version)"
           major="$(echo "$xcode" | sed -n 's/^Xcode \([0-9][0-9]*\).*/\1/p')"
           [ "${major:-0}" -ge 26 ] || { echo "::error::Xcode 26 or later is required (Architecture §16), found: $xcode"; exit 1; }
           # clang-format 22 for the lint stage (hash-pinned). clang-tidy and clang-query are not part of Xcode, so the
           # naming and json-access checkers run their regex fallbacks here, which Lint.py reports.
           python3 -m pip install --disable-pip-version-check --require-hashes --no-deps --requirement .github/ci-requirements.txt
-          versions="$xcode; $(clang --version | head -n 1); $(clang-format --version); macOS $(sw_vers -productVersion) $machine"
+          versions="$xcode; $(first_line clang --version); $(clang-format --version); macOS $(sw_vers -productVersion) $machine"
           echo "$versions"
           echo "**macOS toolchain:** $versions" >> "$GITHUB_STEP_SUMMARY"
 
