@@ -12,8 +12,9 @@
 //     frexp/ldexp, exact integer arithmetic, integer/floating conversions and bit manipulation (no fused multiply-add).
 //     The project compiles with precise floating point and no contraction (§2.2), so a given input gives bit-identical
 //     output on every platform, compiler and configuration (Debug, Release, Dist).
-//   - Accuracy: within 2 ULP of the C++ standard library result over the domains the DetMath tests sample
-//     (Tests/Source/Engine/Core/DetMathTests.cpp).
+//   - Accuracy: within 1 ULP of the correctly rounded result (the exact value rounded to nearest) over the domains the
+//     committed reference tables sample (Tests/Source/Engine/Core/DetMathReferenceData.h, generated with exact
+//     arithmetic by Scripts/GenerateDetMathReference.py; Docs/Decisions/0007-detmath-reference-oracle.md).
 //   - Special values follow the C standard (Annex F): NaN in gives NaN out; Sin/Cos/Tan of +-Inf, ASin/ACos outside
 //     [-1, 1] and Log/Log10 of a negative number give NaN; Log(+-0) = Log10(+-0) = -Inf; Exp, Sinh and Cosh overflow to
 //     +-Inf and Exp underflows to +0; Sinh(+-Inf) = +-Inf, Cosh(+-Inf) = +Inf, Tanh(+-Inf) = +-1; Sin, Tan, ASin, ATan,

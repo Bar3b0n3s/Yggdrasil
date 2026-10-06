@@ -2,6 +2,7 @@
 
 #include "Engine/Core/DetMath.h"
 
+#include "Engine/Core/DetMathReferenceData.h"
 #include "Engine/Core/Hash.h"
 #include "Engine/Core/Random.h"
 
@@ -9,9 +10,10 @@
 #include <cmath>
 #include <limits>
 
-// The accuracy domains below are the contract of DetMath.h ("within 2 ULP of the C++ standard library over the domains
-// the DetMath tests sample"). The standard library is the reference only here, in a test: engine code on the simulation
-// path never calls it (Architecture §4.12).
+// Accuracy is measured against correctly rounded references: the exact results rounded to nearest, which
+// Scripts/GenerateDetMathReference.py computes with exact arithmetic into DetMathReferenceData.h. The platform's math
+// library is no oracle. Its accuracy differs between C runtimes, so a bound against it fails on whichever platform has
+// the least accurate library (Docs/Decisions/0007-detmath-reference-oracle.md).
 
 namespace Engine {
 
@@ -33,17 +35,6 @@ namespace Engine {
 			Log10
 		};
 
-		// Samples are drawn uniformly from [Min, Max), or log-uniformly (10^uniform(Min, Max)) for logarithms, so every
-		// magnitude is covered.
-		struct UnaryCase
-		{
-			UnaryFunction Function = UnaryFunction::Sin;
-			const char* Name = "";
-			double Min = 0.0;
-			double Max = 0.0;
-			bool LogUniform = false;
-		};
-
 		// An argument with the correctly rounded sine, cosine and tangent of its exact value.
 		template<typename T>
 		struct TrigRow
@@ -62,16 +53,19 @@ namespace Engine {
 			double Expected = 0.0;
 		};
 
+		// The unsigned integer type with the size of the floating-point type T.
+		template<typename T>
+		using BitsOf = std::conditional_t<sizeof(T) == 4, uint32_t, uint64_t>;
+
 	}
 
 	// Maps an IEEE value to an unsigned integer that grows monotonically from -Inf to +Inf.
 	template<typename T>
 	static uint64_t MonotonicBits(T value)
 	{
-		using Bits = std::conditional_t<sizeof(T) == 4, uint32_t, uint64_t>;
-		constexpr Bits SignBit = Bits{ 1 } << (sizeof(T) * 8 - 1);
-		const Bits bits = std::bit_cast<Bits>(value);
-		return static_cast<uint64_t>((bits & SignBit) != 0 ? static_cast<Bits>(~bits) : static_cast<Bits>(bits | SignBit));
+		constexpr BitsOf<T> SignBit = BitsOf<T>{ 1 } << (sizeof(T) * 8 - 1);
+		const BitsOf<T> bits = std::bit_cast<BitsOf<T>>(value);
+		return static_cast<uint64_t>((bits & SignBit) != 0 ? static_cast<BitsOf<T>>(~bits) : static_cast<BitsOf<T>>(bits | SignBit));
 	}
 
 	// Distance in units in the last place; 0 when both are NaN, the maximum when only one is (+0 and -0 are 1 apart).
@@ -83,6 +77,26 @@ namespace Engine {
 		const uint64_t first = MonotonicBits(a);
 		const uint64_t second = MonotonicBits(b);
 		return first > second ? first - second : second - first;
+	}
+
+	static std::string UnaryFunctionName(UnaryFunction function)
+	{
+		switch (function)
+		{
+			case UnaryFunction::Sin:   return "Sin";
+			case UnaryFunction::Cos:   return "Cos";
+			case UnaryFunction::Tan:   return "Tan";
+			case UnaryFunction::ASin:  return "ASin";
+			case UnaryFunction::ACos:  return "ACos";
+			case UnaryFunction::ATan:  return "ATan";
+			case UnaryFunction::Sinh:  return "Sinh";
+			case UnaryFunction::Cosh:  return "Cosh";
+			case UnaryFunction::Tanh:  return "Tanh";
+			case UnaryFunction::Exp:   return "Exp";
+			case UnaryFunction::Log:   return "Log";
+			case UnaryFunction::Log10: return "Log10";
+		}
+		return "unknown";
 	}
 
 	template<typename T>
@@ -106,123 +120,148 @@ namespace Engine {
 		return std::numeric_limits<T>::quiet_NaN();
 	}
 
+	// "0x3ff8000000000000 (1.5)": the bit pattern, then the shortest decimal that round-trips the value.
 	template<typename T>
-	static T EvaluateReference(UnaryFunction function, T x)
+	static std::string DescribeValue(T value)
 	{
-		switch (function)
-		{
-			case UnaryFunction::Sin:   return std::sin(x);
-			case UnaryFunction::Cos:   return std::cos(x);
-			case UnaryFunction::Tan:   return std::tan(x);
-			case UnaryFunction::ASin:  return std::asin(x);
-			case UnaryFunction::ACos:  return std::acos(x);
-			case UnaryFunction::ATan:  return std::atan(x);
-			case UnaryFunction::Sinh:  return std::sinh(x);
-			case UnaryFunction::Cosh:  return std::cosh(x);
-			case UnaryFunction::Tanh:  return std::tanh(x);
-			case UnaryFunction::Exp:   return std::exp(x);
-			case UnaryFunction::Log:   return std::log(x);
-			case UnaryFunction::Log10: return std::log10(x);
-		}
-		return std::numeric_limits<T>::quiet_NaN();
+		return std::format("{:#0{}x} ({})", std::bit_cast<BitsOf<T>>(value), sizeof(T) * 2 + 2, value);
 	}
 
-	// The worst ULP distance over 100,000 seeded samples of `unaryCase`.
-	template<typename T>
-	static uint64_t WorstUlp(const UnaryCase& unaryCase, uint64_t seed)
+	template<typename T, typename Bits, typename Evaluate>
+	static T EvaluateReference(const Test::DetMathUnaryReference<Bits>& reference, Evaluate evaluate)
 	{
-		Random random(seed);
+		return evaluate(std::bit_cast<T>(reference.X));
+	}
+
+	template<typename T, typename Bits, typename Evaluate>
+	static T EvaluateReference(const Test::DetMathBinaryReference<Bits>& reference, Evaluate evaluate)
+	{
+		return evaluate(std::bit_cast<T>(reference.First), std::bit_cast<T>(reference.Second));
+	}
+
+	template<typename T, typename Bits>
+	static std::string DescribeArguments(const Test::DetMathUnaryReference<Bits>& reference)
+	{
+		return DescribeValue(std::bit_cast<T>(reference.X));
+	}
+
+	template<typename T, typename Bits>
+	static std::string DescribeArguments(const Test::DetMathBinaryReference<Bits>& reference)
+	{
+		return std::format("{}, {}", DescribeValue(std::bit_cast<T>(reference.First)), DescribeValue(std::bit_cast<T>(reference.Second)));
+	}
+
+	// Checks every case of one reference table: `evaluate` must be within 1 ULP of the correctly rounded result. A failure
+	// names the function and lists the first failing cases with the bit patterns of the arguments and of both results.
+	template<typename T, typename Reference, size_t N, typename Evaluate>
+	static void CheckReferences(const std::string& name, const std::array<Reference, N>& references, Evaluate evaluate)
+	{
+		constexpr size_t ListedFailures = 8;
+		size_t failures = 0;
 		uint64_t worst = 0;
-		for (int index = 0; index < 100000; ++index)
+		std::string listed;
+		for (const Reference& reference : references)
 		{
-			const double draw = random.RangeDouble(unaryCase.Min, unaryCase.Max);
-			const T x = static_cast<T>(unaryCase.LogUniform ? std::pow(10.0, draw) : draw);
-			worst = std::max(worst, UlpDistance(EvaluateEngine(unaryCase.Function, x), EvaluateReference(unaryCase.Function, x)));
+			const T actual = EvaluateReference<T>(reference, evaluate);
+			const T expected = std::bit_cast<T>(reference.Expected);
+			const uint64_t distance = UlpDistance(actual, expected);
+			worst = std::max(worst, distance);
+			if (distance <= 1)
+				continue;
+			if (failures < ListedFailures)
+			{
+				listed += std::format("\n  {}({}) = {}, correctly rounded {}: {} ULP apart", name, DescribeArguments<T>(reference),
+					DescribeValue(actual), DescribeValue(expected), distance);
+			}
+			++failures;
 		}
-		return worst;
+		const std::string summary = std::format("{}: {} of {} cases are more than 1 ULP from the correctly rounded result (worst {} ULP){}",
+			name, failures, N, worst, listed);
+		INFO(summary);
+		CHECK(failures == 0);
+	}
+
+	// Checks a unary table through EvaluateEngine, named like "Sin(float)".
+	template<typename T, typename Reference, size_t N>
+	static void CheckUnaryReferences(UnaryFunction function, const std::array<Reference, N>& references)
+	{
+		const std::string name = std::format("{}({})", UnaryFunctionName(function), sizeof(T) == 4 ? "float" : "double");
+		CheckReferences<T>(name, references, [function](T x)
+		{
+			return EvaluateEngine(function, x);
+		});
 	}
 
 	TEST_SUITE("Core")
 	{
-		TEST_CASE("DetMath: within 2 ULP of std over seeded tables")
+		TEST_CASE("DetMath: within 1 ULP of correctly rounded references over seeded tables")
 		{
+			// DetMath.h promises 1 ULP. Its double results are the correctly rounded value or, within 0.0005 ULP of a halfway
+			// point, its neighbour (Exp's subnormal results are within 0.72 ULP), and a float result rounds such a double
+			// result once more, which keeps it within 1 ULP of the correctly rounded float. SinCos is checked on the Sin and
+			// Cos tables.
 			SUBCASE("float")
 			{
-				const std::array<UnaryCase, 12> cases = {
-					UnaryCase{ UnaryFunction::Sin, "Sin", -100.0, 100.0, false },
-					UnaryCase{ UnaryFunction::Cos, "Cos", -100.0, 100.0, false },
-					UnaryCase{ UnaryFunction::Tan, "Tan", -100.0, 100.0, false },
-					UnaryCase{ UnaryFunction::ASin, "ASin", -1.0, 1.0, false },
-					UnaryCase{ UnaryFunction::ACos, "ACos", -1.0, 1.0, false },
-					UnaryCase{ UnaryFunction::ATan, "ATan", -1000.0, 1000.0, false },
-					UnaryCase{ UnaryFunction::Sinh, "Sinh", -88.0, 88.0, false },
-					UnaryCase{ UnaryFunction::Cosh, "Cosh", -88.0, 88.0, false },
-					UnaryCase{ UnaryFunction::Tanh, "Tanh", -20.0, 20.0, false },
-					UnaryCase{ UnaryFunction::Exp, "Exp", -87.0, 88.0, false },
-					UnaryCase{ UnaryFunction::Log, "Log", -37.0, 38.0, true },
-					UnaryCase{ UnaryFunction::Log10, "Log10", -37.0, 38.0, true },
-				};
-				for (size_t index = 0; index < cases.size(); ++index)
+				CheckUnaryReferences<float>(UnaryFunction::Sin, Test::DetMathSinFloat);
+				CheckUnaryReferences<float>(UnaryFunction::Cos, Test::DetMathCosFloat);
+				CheckUnaryReferences<float>(UnaryFunction::Tan, Test::DetMathTanFloat);
+				CheckUnaryReferences<float>(UnaryFunction::ASin, Test::DetMathASinFloat);
+				CheckUnaryReferences<float>(UnaryFunction::ACos, Test::DetMathACosFloat);
+				CheckUnaryReferences<float>(UnaryFunction::ATan, Test::DetMathATanFloat);
+				CheckUnaryReferences<float>(UnaryFunction::Sinh, Test::DetMathSinhFloat);
+				CheckUnaryReferences<float>(UnaryFunction::Cosh, Test::DetMathCoshFloat);
+				CheckUnaryReferences<float>(UnaryFunction::Tanh, Test::DetMathTanhFloat);
+				CheckUnaryReferences<float>(UnaryFunction::Exp, Test::DetMathExpFloat);
+				CheckUnaryReferences<float>(UnaryFunction::Log, Test::DetMathLogFloat);
+				CheckUnaryReferences<float>(UnaryFunction::Log10, Test::DetMathLog10Float);
+				CheckReferences<float>("SinCos(float).Sin", Test::DetMathSinFloat, [](float x)
 				{
-					const uint64_t worst = WorstUlp<float>(cases[index], index + 1);
-					INFO("float ", cases[index].Name, ": worst ", worst, " ULP");
-					CHECK(worst <= 2);
-				}
+					return DetMath::SinCos(x).Sin;
+				});
+				CheckReferences<float>("SinCos(float).Cos", Test::DetMathCosFloat, [](float x)
+				{
+					return DetMath::SinCos(x).Cos;
+				});
+				CheckReferences<float>("ATan2(float)", Test::DetMathATan2Float, [](float y, float x)
+				{
+					return DetMath::ATan2(y, x);
+				});
+				CheckReferences<float>("Pow(float)", Test::DetMathPowFloat, [](float base, float exponent)
+				{
+					return DetMath::Pow(base, exponent);
+				});
 			}
 
 			SUBCASE("double")
 			{
-				const std::array<UnaryCase, 12> cases = {
-					UnaryCase{ UnaryFunction::Sin, "Sin", -100.0, 100.0, false },
-					UnaryCase{ UnaryFunction::Cos, "Cos", -100.0, 100.0, false },
-					UnaryCase{ UnaryFunction::Tan, "Tan", -100.0, 100.0, false },
-					UnaryCase{ UnaryFunction::ASin, "ASin", -1.0, 1.0, false },
-					UnaryCase{ UnaryFunction::ACos, "ACos", -1.0, 1.0, false },
-					UnaryCase{ UnaryFunction::ATan, "ATan", -1000.0, 1000.0, false },
-					UnaryCase{ UnaryFunction::Sinh, "Sinh", -700.0, 700.0, false },
-					UnaryCase{ UnaryFunction::Cosh, "Cosh", -700.0, 700.0, false },
-					UnaryCase{ UnaryFunction::Tanh, "Tanh", -40.0, 40.0, false },
-					UnaryCase{ UnaryFunction::Exp, "Exp", -700.0, 700.0, false },
-					UnaryCase{ UnaryFunction::Log, "Log", -300.0, 300.0, true },
-					UnaryCase{ UnaryFunction::Log10, "Log10", -300.0, 300.0, true },
-				};
-				for (size_t index = 0; index < cases.size(); ++index)
+				CheckUnaryReferences<double>(UnaryFunction::Sin, Test::DetMathSinDouble);
+				CheckUnaryReferences<double>(UnaryFunction::Cos, Test::DetMathCosDouble);
+				CheckUnaryReferences<double>(UnaryFunction::Tan, Test::DetMathTanDouble);
+				CheckUnaryReferences<double>(UnaryFunction::ASin, Test::DetMathASinDouble);
+				CheckUnaryReferences<double>(UnaryFunction::ACos, Test::DetMathACosDouble);
+				CheckUnaryReferences<double>(UnaryFunction::ATan, Test::DetMathATanDouble);
+				CheckUnaryReferences<double>(UnaryFunction::Sinh, Test::DetMathSinhDouble);
+				CheckUnaryReferences<double>(UnaryFunction::Cosh, Test::DetMathCoshDouble);
+				CheckUnaryReferences<double>(UnaryFunction::Tanh, Test::DetMathTanhDouble);
+				CheckUnaryReferences<double>(UnaryFunction::Exp, Test::DetMathExpDouble);
+				CheckUnaryReferences<double>(UnaryFunction::Log, Test::DetMathLogDouble);
+				CheckUnaryReferences<double>(UnaryFunction::Log10, Test::DetMathLog10Double);
+				CheckReferences<double>("SinCos(double).Sin", Test::DetMathSinDouble, [](double x)
 				{
-					const uint64_t worst = WorstUlp<double>(cases[index], index + 101);
-					INFO("double ", cases[index].Name, ": worst ", worst, " ULP");
-					CHECK(worst <= 2);
-				}
-			}
-
-			SUBCASE("ATan2 and Pow")
-			{
-				Random random(201);
-				uint64_t worstATan2 = 0;
-				uint64_t worstPow = 0;
-				for (int index = 0; index < 100000; ++index)
+					return DetMath::SinCos(x).Sin;
+				});
+				CheckReferences<double>("SinCos(double).Cos", Test::DetMathCosDouble, [](double x)
 				{
-					const double y = random.RangeDouble(-100.0, 100.0);
-					const double x = random.RangeDouble(-100.0, 100.0);
-					const double base = random.RangeDouble(1e-3, 1e3);
-					const double exponent = random.RangeDouble(-8.0, 8.0);
-					const float yf = static_cast<float>(y);
-					const float xf = static_cast<float>(x);
-					const float basef = static_cast<float>(base);
-					const float exponentf = static_cast<float>(exponent);
-
-					worstATan2 = std::max({
-						worstATan2,
-						UlpDistance(DetMath::ATan2(y, x), std::atan2(y, x)),
-						UlpDistance(DetMath::ATan2(yf, xf), std::atan2(yf, xf)),
-					});
-					worstPow = std::max({
-						worstPow,
-						UlpDistance(DetMath::Pow(base, exponent), std::pow(base, exponent)),
-						UlpDistance(DetMath::Pow(basef, exponentf), std::pow(basef, exponentf)),
-					});
-				}
-				CHECK(worstATan2 <= 2);
-				CHECK(worstPow <= 2);
+					return DetMath::SinCos(x).Cos;
+				});
+				CheckReferences<double>("ATan2(double)", Test::DetMathATan2Double, [](double y, double x)
+				{
+					return DetMath::ATan2(y, x);
+				});
+				CheckReferences<double>("Pow(double)", Test::DetMathPowDouble, [](double base, double exponent)
+				{
+					return DetMath::Pow(base, exponent);
+				});
 			}
 		}
 
@@ -441,7 +480,7 @@ namespace Engine {
 			} };
 			for (const NotableRow& row : rows)
 			{
-				INFO("function ", static_cast<int>(row.Function), " at ", row.X);
+				INFO(UnaryFunctionName(row.Function), "(", row.X, ")");
 				CHECK(EvaluateEngine(row.Function, row.X) == row.Expected);
 			}
 			CHECK(DetMath::ATan2(1.0, -1.0) == 2.356194490192345);
