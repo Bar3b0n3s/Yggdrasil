@@ -7,6 +7,8 @@
 
 -- The custom compile-commands action (Docs/Architecture.md §2.2). Actions must be registered before the workspace.
 include "Scripts/Premake/CompileCommands.lua"
+-- xcode4 only: `includedirs` become -I as on every other generator (angle-bracket includes in vendored libraries).
+include "Scripts/Premake/XcodeHeaderSearchPaths.lua"
 
 newoption
 {

@@ -293,6 +293,13 @@ def split_msbuild_list(text: str | None) -> list[str]:
     return [item.strip() for item in text.split(";") if item.strip() and not item.strip().startswith(("%(", "$("))]
 
 
+def msbuild_path(base: Path, value: str) -> Path:
+    """A path from a .vcxproj (relative to `base`, backslash-separated) as a host path. On Linux and macOS a backslash
+    is an ordinary file-name character, so it must be converted before joining, or no vcxproj path would ever match a
+    directory such as Vendor/."""
+    return base / value.replace("\\", "/")
+
+
 def split_msvc_options(text: str | None) -> list[str]:
     if not text:
         return []
@@ -370,7 +377,7 @@ def parse_vcxproj(path: Path) -> Project:
         directories = project.include_dirs.setdefault(config, set())
         for tag in ("ExternalIncludePath", "IncludePath"):
             for element in group.findall(f"msb:{tag}", MSBUILD_NAMESPACE):
-                directories.update(normalize_path(base / item) for item in split_msbuild_list(element.text))
+                directories.update(normalize_path(msbuild_path(base, item)) for item in split_msbuild_list(element.text))
 
     for group in root.findall("msb:ItemDefinitionGroup", MSBUILD_NAMESPACE):
         config = condition_configuration(group)
@@ -382,7 +389,7 @@ def parse_vcxproj(path: Path) -> Project:
             element = compile_settings.find(f"msb:{tag}", MSBUILD_NAMESPACE)
             values[tag] = element.text or "" if element is not None else None
         project.include_dirs.setdefault(config, set()).update(
-            normalize_path(base / item) for item in split_msbuild_list(values["AdditionalIncludeDirectories"])
+            normalize_path(msbuild_path(base, item)) for item in split_msbuild_list(values["AdditionalIncludeDirectories"])
         )
         settings[config] = msbuild_settings(values, None)
         project.units.setdefault(config, []).insert(0, msbuild_unit(settings[config], None))
@@ -391,7 +398,7 @@ def parse_vcxproj(path: Path) -> Project:
         include = item.get("Include")
         if include is None:
             continue
-        project.sources.append((base / include).resolve())
+        project.sources.append(msbuild_path(base, include).resolve())
         overrides: dict[str, dict[str, str | None]] = {}
         for child in item:
             config = condition_configuration(child)
