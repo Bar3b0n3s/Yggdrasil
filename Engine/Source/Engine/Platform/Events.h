@@ -78,6 +78,7 @@ namespace Engine {
 	};
 
 	// Scroll wheel or touchpad scrolling: x is right-positive, y is up-positive (the wheel turned away from the user).
+	// GLFW reports scrolling left as a positive x offset on every platform, so the window negates its x offset.
 	struct MouseScrollEvent
 	{
 		glm::vec2 Offset{ 0.0f };

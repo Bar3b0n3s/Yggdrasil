@@ -11,11 +11,15 @@
 #include <string_view>
 
 // The crash handler (Architecture §4.13): process-level state (§3 rule 5) installed by ProcessContext right after the
-// log. It catches what ordinary code cannot: on Windows an unhandled SEH exception (SetUnhandledExceptionFilter) and the
-// C runtime's abort and invalid-parameter paths; on POSIX SIGSEGV, SIGBUS, SIGILL, SIGFPE and SIGABRT (sigaction on an
-// alternate signal stack, using only async-signal-safe calls such as write). It then writes a crash report, prints one
-// line to stderr, "Crash: <reason>; report written to <path>" (or "...; no report written"), and ends the process with
-// exit code 4 (ExitCode::Crash), like every other fatal path.
+// log. It catches what ordinary code cannot: on Windows an unhandled SEH exception (SetUnhandledExceptionFilter), the
+// C runtime's abort and invalid-parameter paths, and in Debug builds the debug C runtime's assertion and error reports
+// (failed parameter checks, MSVC STL checks), which would otherwise open a modal window; on POSIX SIGSEGV, SIGBUS,
+// SIGILL, SIGFPE and SIGABRT (sigaction on an alternate signal stack, using only async-signal-safe calls such as write).
+// It then writes a crash report, prints one line to stderr, "Crash: <reason>; report written to <path>" (or "...; no
+// report written"), and ends the process with exit code 4 (ExitCode::Crash), like every other fatal path. On Windows the
+// report is written by a reporter thread that the crash waits for only a bounded time, because the crash may have left
+// the heap or loader lock held; when that time runs out the line says "...; incomplete report written to <path>" (or
+// "...; no report written") and the process still exits with code 4.
 // FatalError (asserts, device loss, ...) does not crash: ProcessContext's fatal-error handler calls WriteFatalErrorReport
 // instead. The OS code lives in Platform/Windows/CrashHandlerWindows.cpp and Platform/Posix/CrashHandlerPosix.cpp.
 //

@@ -2,13 +2,17 @@
 
 #include "Engine/Platform/Paths.h"
 
+#include "Engine/Core/FileSystem.h"
 #include "Support/TempDirectory.h"
+#include "Support/Utf8Path.h"
+
+#include <system_error>
 
 namespace Engine {
 
 	TEST_SUITE("Platform")
 	{
-		TEST_CASE("Paths: ValidateAppName accepts portable folder names and rejects the rest" * doctest::skip(true))
+		TEST_CASE("Paths: ValidateAppName accepts portable folder names and rejects the rest")
 		{
 			const std::array<std::string_view, 6> valid = { "Tetris", "Rolling Ball 3D", "My-Game_2", "Café", "a", "Game.v2" };
 			for (const std::string_view name : valid)
@@ -50,7 +54,70 @@ namespace Engine {
 			CHECK(Paths::ValidateAppName(std::string(Paths::MaxAppNameLength, 'a')).has_value());
 		}
 
-		TEST_CASE("Paths: GetUserDataPaths lays out the folders under the root and creates nothing" * doctest::skip(true))
+		TEST_CASE("Paths: ValidateAppName rejects every name Windows reserves for a device")
+		{
+			const std::array<std::string_view, 12> reserved = {
+				"prn",
+				"Aux",
+				"NUL.txt",
+				"NUL .txt",
+				"AUX.tar.gz",
+				"COM0",
+				"lpt9",
+				"COM\xc2\xb9", // COM followed by a superscript one
+				"LPT\xc2\xb3", // LPT followed by a superscript three
+				"CONIN$",
+				"conout$.log",
+				"Del\x7f", // DEL, a control character
+			};
+			for (const std::string_view name : reserved)
+			{
+				CAPTURE(std::string(name));
+				const Status status = Paths::ValidateAppName(name);
+				REQUIRE_FALSE(status.has_value());
+				CHECK(status.error().GetCode() == ErrorCode::Validation);
+			}
+			CHECK_FALSE(Paths::ValidateAppName("Next\xc2\x85Line").has_value()); // U+0085, a C1 control character
+			CHECK_FALSE(Paths::ValidateAppName("Trailing ").has_value());
+
+			// Close to a device name is not a device name.
+			const std::array<std::string_view, 6> allowed = { "COM10", "CONSOLE", "LPT", "NULL", "AUXILIARY", "Comet" };
+			for (const std::string_view name : allowed)
+			{
+				CAPTURE(std::string(name));
+				CHECK(Paths::ValidateAppName(name).has_value());
+			}
+		}
+
+		TEST_CASE("Paths: folder names are UTF-8 on every host")
+		{
+			Test::TempDirectory root("UserDataRoot");
+			const Result<UserDataPaths> paths = Paths::GetUserDataPaths("Café", root.GetPath());
+			REQUIRE(paths.has_value());
+			CHECK(paths->Root == root.GetPath() / Test::PathFromUtf8("Café"));
+			CHECK(paths->GetLogFile("Spiel Ä") == paths->Logs / Test::PathFromUtf8("Spiel Ä.log"));
+
+			REQUIRE(Paths::CreateUserDataDirectories(*paths).has_value());
+			std::error_code error;
+			CHECK(std::filesystem::is_directory(root.GetPath() / Test::PathFromUtf8("Café") / "Crashes", error));
+		}
+
+		TEST_CASE("Paths: CreateUserDataDirectories reports a folder it cannot create")
+		{
+			Test::TempDirectory root("UserDataRoot");
+			const std::filesystem::path file = root / "File";
+			const std::string text = "in the way";
+			REQUIRE(FileSystem::WriteFileAtomic(file, AsBytes(text)).has_value());
+
+			const Result<UserDataPaths> paths = Paths::GetUserDataPaths("Tetris", file);
+			REQUIRE(paths.has_value());
+			const Status created = Paths::CreateUserDataDirectories(*paths);
+			REQUIRE_FALSE(created.has_value());
+			CHECK(created.error().GetCode() == ErrorCode::Io);
+			CHECK(created.error().GetMessageText().contains("Tetris"));
+		}
+
+		TEST_CASE("Paths: GetUserDataPaths lays out the folders under the root and creates nothing")
 		{
 			Test::TempDirectory root("UserDataRoot");
 			const Result<UserDataPaths> paths = Paths::GetUserDataPaths("Tetris", root.GetPath());
@@ -70,7 +137,7 @@ namespace Engine {
 			CHECK(Paths::CreateUserDataDirectories(*paths).has_value());
 		}
 
-		TEST_CASE("Paths: GetUserDataPaths rejects a bad name and a relative root" * doctest::skip(true))
+		TEST_CASE("Paths: GetUserDataPaths rejects a bad name and a relative root")
 		{
 			Test::TempDirectory root("UserDataRoot");
 			const Result<UserDataPaths> badName = Paths::GetUserDataPaths("CON", root.GetPath());
@@ -82,11 +149,14 @@ namespace Engine {
 			CHECK(relative.error().GetCode() == ErrorCode::InvalidArgument);
 		}
 
-		TEST_CASE("Paths: the OS user-data root is an absolute directory" * doctest::skip(true))
+		TEST_CASE("Paths: the OS user-data root is an absolute directory")
 		{
 			const Result<std::filesystem::path> root = Paths::GetUserDataRoot();
 			REQUIRE_MESSAGE(root.has_value(), root.error().ToString());
 			CHECK(root->is_absolute());
+			// Paths creates nothing, but the folder exists on every host the tests run on: Windows and macOS create theirs
+			// with the profile, and on Linux the Tests main's ProcessContext has created <root>/<ENGINE_PRODUCT_NAME>/Logs
+			// below it before any test runs.
 			std::error_code error;
 			CHECK(std::filesystem::is_directory(*root, error));
 

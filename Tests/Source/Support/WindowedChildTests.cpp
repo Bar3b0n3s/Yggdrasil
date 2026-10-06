@@ -26,12 +26,12 @@ namespace Engine {
 			CHECK_MESSAGE(false, "this windowed child fails by design");
 		}
 
-		TEST_CASE("Tests: windowed child process runs a windowed case" * doctest::skip(true))
+		TEST_CASE("Tests: windowed child process runs a windowed case")
 		{
 			ENGINE_CHECK_WINDOWED_CHILD("WindowedChild: the target runs in a windowed process");
 		}
 
-		TEST_CASE("WindowedChild: a failing case makes the child exit 1 with doctest's report" * doctest::skip(true))
+		TEST_CASE("WindowedChild: a failing case makes the child exit 1 with doctest's report")
 		{
 			const Result<Test::WindowedChildResult> child = Test::RunWindowedChild("WindowedChild: the failing target");
 			REQUIRE(child.has_value());
@@ -40,7 +40,7 @@ namespace Engine {
 			CHECK_FALSE(Test::DescribeWindowedChildFailure("WindowedChild: the failing target").empty());
 		}
 
-		TEST_CASE("WindowedChild: a name that selects no test case exits 2" * doctest::skip(true))
+		TEST_CASE("WindowedChild: a name that selects no test case exits 2")
 		{
 			const Result<Test::WindowedChildResult> child = Test::RunWindowedChild("WindowedChild: no such target");
 			REQUIRE(child.has_value());

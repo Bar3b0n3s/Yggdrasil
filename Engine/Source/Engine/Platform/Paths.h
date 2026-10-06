@@ -39,10 +39,11 @@ namespace Engine {
 		[[nodiscard]] static Result<std::filesystem::path> GetUserDataRoot();
 
 		// Checks that `appName` (a manifest Name is user input) is a single folder name that works on every host: 1 to
-		// MaxAppNameLength bytes of valid UTF-8; no control characters and none of < > : " / \ | ? *; not "." or "..";
-		// no leading or trailing space and no trailing dot; not a Windows device name (CON, PRN, AUX, NUL, COM1 to COM9,
-		// LPT1 to LPT9, in any case, with or without an extension). The same rules apply on every host, so a name that
-		// works on Linux also works on Windows. Errors: Validation naming the rule that failed.
+		// MaxAppNameLength bytes of valid UTF-8; no control characters (C0, DEL or C1) and none of < > : " / \ | ? *; not
+		// "." or ".."; no leading or trailing space and no trailing dot; not a Windows device name (CON, PRN, AUX, NUL,
+		// CONIN$, CONOUT$, COM and LPT followed by a digit 0 to 9 or a superscript digit U+00B9, U+00B2 or U+00B3, in any
+		// case, with or without an extension). The same rules apply on every host, so a name that works on Linux also
+		// works on Windows. Errors: Validation naming the rule that failed.
 		[[nodiscard]] static Status ValidateAppName(std::string_view appName);
 
 		// The folders of `appName` under `root`, or under GetUserDataRoot() when `root` is empty (tests pass a temporary

@@ -9,6 +9,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <mutex>
 #include <span>
 #include <string>
 #include <string_view>
@@ -139,10 +140,20 @@ namespace Engine {
 		// The platform GLFW runs on (GlfwLibrary::GetPlatform): Null for Headless, the native one for Windowed.
 		[[nodiscard]] GlfwPlatform GetGlfwPlatform() const { return GlfwLibrary::GetPlatform(); }
 	private:
+		// Runs one step; on success records it and logs "Process context: <Step> initialized".
+		[[nodiscard]] Status InitializeStep(ProcessContextStep step);
+		// Logs "Process context: shutting down <Step>" and undoes one completed step.
+		void ShutDownStep(ProcessContextStep step);
+		// The Core FatalErrorHandler of the process (see the class comment); reaches the context through GetCurrent.
+		static void HandleFatalError(FatalErrorKind kind, std::string_view message);
+	private:
 		ProcessContextSpecification m_Specification;
 		std::vector<ProcessContextStep> m_Steps; // completed, in order; teardown pops from the back
 		UserDataPaths m_UserDataPaths;
 		std::filesystem::path m_LogFilePath;
+		FatalErrorHandler m_PreviousFatalErrorHandler = nullptr; // restored when the CrashHandler step is undone
+		std::mutex m_FatalErrorHookMutex;                        // guards m_FatalErrorHook
+		FatalErrorHook m_FatalErrorHook;
 	};
 
 	// "Log", "Profiler", "CrashHandler" or "Glfw".

@@ -4,6 +4,7 @@
 #include "Engine/Core/Result.h"
 
 #include <cstdint>
+#include <string>
 #include <string_view>
 
 // GLFW's process-level state (Architecture §3 rule 5, §4.1, §4.3). GLFW is main-thread-only and runs one platform per
@@ -11,6 +12,8 @@
 // exists, and terminated after the last one is gone.
 
 namespace Engine {
+
+	class Window;
 
 	// How a process presents itself, chosen once per process (§4.1): a process is windowed or headless, never both.
 	enum class WindowMode : uint8_t
@@ -72,6 +75,18 @@ namespace Engine {
 
 		// The number of live Window objects (Window registers itself), checked by Shutdown.
 		[[nodiscard]] static uint32_t GetWindowCount();
+	private:
+		// Called by every Window when its GLFW window is created and destroyed.
+		static void RegisterWindow();
+		static void UnregisterWindow();
+
+		// True on the thread that called Initialize while GLFW is initialized.
+		[[nodiscard]] static bool IsMainThread();
+
+		// The calling thread's last GLFW error as text, which also clears it: "<description> (GLFW error 0x<code>)".
+		[[nodiscard]] static std::string TakeErrorDescription();
+	private:
+		friend class Window;
 	};
 
 	// "Windowed" or "Headless".

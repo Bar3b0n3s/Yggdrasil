@@ -34,7 +34,7 @@ namespace Engine {
 
 	TEST_SUITE("Platform")
 	{
-		TEST_CASE("Socket: loopback echo round trip" * doctest::skip(true))
+		TEST_CASE("Socket: loopback echo round trip")
 		{
 			Result<SocketListener> listener = SocketListener::Listen(0);
 			REQUIRE(listener.has_value());
@@ -93,7 +93,7 @@ namespace Engine {
 			CHECK(serverSawClose);
 		}
 
-		TEST_CASE("Socket: one thread sends while another receives on the same connection" * doctest::skip(true))
+		TEST_CASE("Socket: one thread sends while another receives on the same connection")
 		{
 			Result<SocketListener> listener = SocketListener::Listen(0);
 			REQUIRE(listener.has_value());
@@ -129,7 +129,7 @@ namespace Engine {
 			CHECK(*clientReceived == payload);
 		}
 
-		TEST_CASE("Socket: WaitAny reports a pending connection and the readable connections" * doctest::skip(true))
+		TEST_CASE("Socket: WaitAny reports a pending connection and the readable connections")
 		{
 			Result<SocketListener> listener = SocketListener::Listen(0);
 			REQUIRE(listener.has_value());
@@ -175,7 +175,7 @@ namespace Engine {
 			CHECK(*end == 0);
 		}
 
-		TEST_CASE("Socket: Accept and Receive time out when nothing arrives" * doctest::skip(true))
+		TEST_CASE("Socket: Accept and Receive time out when nothing arrives")
 		{
 			Result<SocketListener> listener = SocketListener::Listen(0);
 			REQUIRE(listener.has_value());
@@ -193,7 +193,7 @@ namespace Engine {
 			CHECK(silent.error().GetCode() == ErrorCode::Timeout);
 		}
 
-		TEST_CASE("Socket: a port in use, a closed port and port 0 are reported" * doctest::skip(true))
+		TEST_CASE("Socket: a port in use, a closed port and port 0 are reported")
 		{
 			Result<SocketListener> listener = SocketListener::Listen(0);
 			REQUIRE(listener.has_value());
@@ -213,7 +213,7 @@ namespace Engine {
 			CHECK(zero.error().GetCode() == ErrorCode::InvalidArgument);
 		}
 
-		TEST_CASE("Socket: sending to a closed peer fails with Io" * doctest::skip(true))
+		TEST_CASE("Socket: sending to a closed peer fails with Io")
 		{
 			Result<SocketListener> listener = SocketListener::Listen(0);
 			REQUIRE(listener.has_value());
@@ -231,6 +231,136 @@ namespace Engine {
 				sent = client->Send(payload, SocketTimeout);
 			REQUIRE_FALSE(sent.has_value());
 			CHECK(sent.error().GetCode() == ErrorCode::Io);
+		}
+
+		TEST_CASE("Socket: Send times out when the peer does not read")
+		{
+			Result<SocketListener> listener = SocketListener::Listen(0);
+			REQUIRE(listener.has_value());
+			Result<Socket> client = Socket::Connect(listener->GetPort(), SocketTimeout);
+			REQUIRE(client.has_value());
+			Result<Socket> accepted = listener->Accept(SocketTimeout);
+			REQUIRE(accepted.has_value());
+
+			// Sends until the connection's buffers are full, which takes far less than 256 MB on any host (the content is
+			// irrelevant). Several sends, because Windows accepts a whole send of any size while its send backlog is below
+			// SO_SNDBUF, so only a later send has to wait.
+			const std::vector<std::byte> chunk(1024 * 1024);
+			Status sent;
+			for (int attempt = 0; attempt < 256 && sent.has_value(); ++attempt)
+				sent = client->Send(chunk, std::chrono::milliseconds(100));
+			REQUIRE_FALSE(sent.has_value());
+			CHECK(sent.error().GetCode() == ErrorCode::Timeout);
+		}
+
+		TEST_CASE("Socket: sending nothing succeeds at once")
+		{
+			Result<SocketListener> listener = SocketListener::Listen(0);
+			REQUIRE(listener.has_value());
+			Result<Socket> client = Socket::Connect(listener->GetPort(), SocketTimeout);
+			REQUIRE(client.has_value());
+			CHECK(client->Send({}, std::chrono::milliseconds(0)).has_value());
+		}
+
+		TEST_CASE("Socket: Close is idempotent and closed objects report Io")
+		{
+			Result<SocketListener> listener = SocketListener::Listen(0);
+			REQUIRE(listener.has_value());
+			const uint16_t port = listener->GetPort();
+			Result<Socket> client = Socket::Connect(port, SocketTimeout);
+			REQUIRE(client.has_value());
+			Result<Socket> accepted = listener->Accept(SocketTimeout);
+			REQUIRE(accepted.has_value());
+
+			client->Close();
+			client->Close();
+			CHECK_FALSE(client->IsOpen());
+			const std::array<std::byte, 1> byte = { std::byte{ 42 } };
+			const Status sent = client->Send(byte, SocketTimeout);
+			REQUIRE_FALSE(sent.has_value());
+			CHECK(sent.error().GetCode() == ErrorCode::Io);
+			std::array<std::byte, 8> buffer{};
+			const Result<size_t> received = client->Receive(buffer, SocketTimeout);
+			REQUIRE_FALSE(received.has_value());
+			CHECK(received.error().GetCode() == ErrorCode::Io);
+
+			// The peer sees the end of the stream.
+			const Result<size_t> end = accepted->Receive(buffer, SocketTimeout);
+			REQUIRE(end.has_value());
+			CHECK(*end == 0);
+
+			listener->Close();
+			listener->Close();
+			CHECK(listener->GetPort() == 0);
+			const Result<Socket> none = listener->Accept(std::chrono::milliseconds(0));
+			REQUIRE_FALSE(none.has_value());
+			CHECK(none.error().GetCode() == ErrorCode::Io);
+		}
+
+		TEST_CASE("Socket: a moved connection keeps working and move assignment closes the replaced one")
+		{
+			Result<SocketListener> listener = SocketListener::Listen(0);
+			REQUIRE(listener.has_value());
+			Result<Socket> first = Socket::Connect(listener->GetPort(), SocketTimeout);
+			REQUIRE(first.has_value());
+			Result<Socket> firstServer = listener->Accept(SocketTimeout);
+			REQUIRE(firstServer.has_value());
+			Result<Socket> second = Socket::Connect(listener->GetPort(), SocketTimeout);
+			REQUIRE(second.has_value());
+			Result<Socket> secondServer = listener->Accept(SocketTimeout);
+			REQUIRE(secondServer.has_value());
+
+			Socket moved(std::move(*first));
+			CHECK(moved.IsOpen());
+			const std::array<std::byte, 2> message = { std::byte{ 7 }, std::byte{ 9 } };
+			REQUIRE(moved.Send(message, SocketTimeout).has_value());
+			std::array<std::byte, 8> buffer{};
+			const Result<size_t> received = firstServer->Receive(buffer, SocketTimeout);
+			REQUIRE(received.has_value());
+			CHECK(*received == message.size());
+
+			// Assigning the second connection closes the first: its peer sees the end of the stream.
+			moved = std::move(*second);
+			CHECK(moved.IsOpen());
+			const Result<size_t> end = firstServer->Receive(buffer, SocketTimeout);
+			REQUIRE(end.has_value());
+			CHECK(*end == 0);
+			REQUIRE(moved.Send(message, SocketTimeout).has_value());
+			const Result<size_t> again = secondServer->Receive(buffer, SocketTimeout);
+			REQUIRE(again.has_value());
+			CHECK(*again == message.size());
+
+			SocketListener movedListener(std::move(*listener));
+			CHECK(movedListener.GetPort() != 0);
+		}
+
+		TEST_CASE("Socket: WaitAny with a zero timeout only checks and reports unread data again")
+		{
+			Result<SocketListener> listener = SocketListener::Listen(0);
+			REQUIRE(listener.has_value());
+			Result<Socket> client = Socket::Connect(listener->GetPort(), SocketTimeout);
+			REQUIRE(client.has_value());
+			Result<Socket> accepted = listener->Accept(SocketTimeout);
+			REQUIRE(accepted.has_value());
+
+			const std::array<const Socket*, 1> sockets = { &*accepted };
+			const Result<SocketReadiness> idle = Socket::WaitAny(sockets, &*listener, std::chrono::milliseconds(0));
+			REQUIRE(idle.has_value());
+			CHECK(idle->IsEmpty());
+
+			const std::array<std::byte, 1> byte = { std::byte{ 1 } };
+			REQUIRE(client->Send(byte, SocketTimeout).has_value());
+			const Result<SocketReadiness> arrived = Socket::WaitAny(sockets, nullptr, SocketTimeout);
+			REQUIRE(arrived.has_value());
+			CHECK(arrived->ReadableSockets == std::vector<size_t>{ 0 });
+			const Result<SocketReadiness> stillThere = Socket::WaitAny(sockets, nullptr, std::chrono::milliseconds(0));
+			REQUIRE(stillThere.has_value());
+			CHECK(stillThere->ReadableSockets == std::vector<size_t>{ 0 });
+
+			// Nothing to wait on: the timeout simply expires.
+			const Result<SocketReadiness> nothing = Socket::WaitAny({}, nullptr, std::chrono::milliseconds(0));
+			REQUIRE(nothing.has_value());
+			CHECK(nothing->IsEmpty());
 		}
 	}
 

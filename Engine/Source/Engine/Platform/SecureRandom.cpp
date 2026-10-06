@@ -1,16 +1,20 @@
 #include "EnginePCH.h"
 #include "Engine/Platform/SecureRandom.h"
 
-// M2 contract stub (Roadmap rule 3): stream B (process, crash handler, paths, project lock) implements GenerateState on
-// top of Fill, whose OS-specific implementation lives in Platform/Windows/SecureRandomWindows.cpp and
-// Platform/Posix/SecureRandomPosix.cpp.
+// The host-independent part of SecureRandom: GenerateState on top of Fill, whose OS-specific implementation lives in
+// Platform/Windows/SecureRandomWindows.cpp and Platform/Posix/SecureRandomPosix.cpp.
 
 namespace Engine {
 
 	Result<Random::State> SecureRandom::GenerateState()
 	{
-		ENGINE_CONTRACT_STUB();
-		return MakeError(ErrorCode::Unsupported, "SecureRandom::GenerateState is not implemented yet");
+		const Random::State zero{};
+		Random::State state{};
+		do
+		{
+			ENGINE_TRY(Fill(std::as_writable_bytes(std::span(state))));
+		} while (state == zero);
+		return state;
 	}
 
 }

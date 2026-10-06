@@ -2,6 +2,7 @@
 
 #include "Engine/Core/Base.h"
 #include "Engine/Core/Result.h"
+#include "Engine/Platform/GlfwLibrary.h"
 
 #include <doctest/doctest.h>
 
@@ -41,6 +42,8 @@
 
 namespace Engine {
 
+	class Window;
+
 	namespace Test {
 
 		inline constexpr std::chrono::milliseconds DefaultWindowedChildTimeout{ 60000 };
@@ -67,6 +70,14 @@ namespace Engine {
 		// exited with code 0. Returns "" when that holds, otherwise a description quoting the exit code and the child's
 		// standard output and standard error.
 		[[nodiscard]] std::string DescribeWindowedChildFailure(std::string_view testCase);
+
+		// The platform GLFW runs on in a windowed process on this host: Win32, Cocoa or X11.
+		[[nodiscard]] GlfwPlatform GetNativeGlfwPlatform();
+
+		// In a windowed target: waits for OS events until window.IsMinimized() equals `minimized`, and returns whether it
+		// does. Minimizing and restoring are asynchronous on X11 (the window manager acts) and on macOS (an animation), so
+		// a target waits for them before it measures; the wait ends after 400 waits of 25 ms (10 s).
+		[[nodiscard]] bool WaitUntilMinimized(Window& window, bool minimized);
 
 	}
 

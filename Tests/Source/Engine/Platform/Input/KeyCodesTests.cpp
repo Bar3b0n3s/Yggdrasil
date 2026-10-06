@@ -27,7 +27,7 @@ namespace Engine {
 			CHECK_FALSE(HasFlag(modifiers, KeyModifiers::Alt));
 		}
 
-		TEST_CASE("KeyCodes: every key name round-trips and parsing ignores ASCII case" * doctest::skip(true))
+		TEST_CASE("KeyCodes: every key name round-trips and parsing ignores ASCII case")
 		{
 			size_t keyCount = 0;
 			for (size_t value = 1; value < KeyCodeCount; ++value)
@@ -56,7 +56,7 @@ namespace Engine {
 			CHECK_FALSE(KeyFromString("Spacebar").has_value());
 		}
 
-		TEST_CASE("KeyCodes: mouse buttons, gamepad buttons and gamepad axes round-trip by name" * doctest::skip(true))
+		TEST_CASE("KeyCodes: mouse buttons, gamepad buttons and gamepad axes round-trip by name")
 		{
 			for (size_t index = 0; index < MouseButtonCount; ++index)
 			{

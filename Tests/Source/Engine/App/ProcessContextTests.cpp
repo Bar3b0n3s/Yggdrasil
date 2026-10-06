@@ -3,10 +3,10 @@
 #include "Engine/App/ProcessContext.h"
 
 #include "Engine/App/ExitCode.h"
-#include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Log.h"
 #include "Engine/Platform/GlfwLibrary.h"
 #include "Engine/Platform/Process.h"
+#include "Support/ChildOutput.h"
 #include "Support/DeathTest.h"
 #include "Support/TempDirectory.h"
 #include "Support/TestOptions.h"
@@ -14,17 +14,6 @@
 #include "Support/WindowedChild.h"
 
 namespace Engine {
-
-	static GlfwPlatform GetNativePlatform()
-	{
-#if defined(ENGINE_PLATFORM_WINDOWS)
-		return GlfwPlatform::Win32;
-#elif defined(ENGINE_PLATFORM_MACOS)
-		return GlfwPlatform::Cocoa;
-#elif defined(ENGINE_PLATFORM_LINUX)
-		return GlfwPlatform::X11;
-#endif
-	}
 
 	// The Tests main already created this process's context, so a second one is API misuse.
 	ENGINE_DEATH_TEST("App/SecondProcessContext")
@@ -66,21 +55,23 @@ namespace Engine {
 		FatalError(FatalErrorKind::DeviceLost, "Simulated device loss for the hook");
 	}
 
-	// The text of the one crash report in <directory>/<ENGINE_PRODUCT_NAME>/Crashes.
-	static Result<std::string> ReadOnlyCrashReport(const Test::TempDirectory& directory)
+	// Sets a fatal-error hook, removes it again, then fails with FatalError: the removed hook must not run.
+	ENGINE_DEATH_TEST("App/RemovedFatalErrorHookDoesNotRun")
 	{
-		const std::filesystem::path crashes = directory.GetPath() / ENGINE_PRODUCT_NAME / "Crashes";
-		ENGINE_TRY_ASSIGN(const std::vector<std::filesystem::path> files, FileSystem::ListDirectory(crashes));
-		std::vector<std::filesystem::path> reports;
-		for (const std::filesystem::path& file : files)
+		ProcessContext* context = ProcessContext::GetCurrent();
+		if (context == nullptr)
 		{
-			const std::string name = Test::PathToUtf8(file.filename());
-			if (name.starts_with("crash-") && name.ends_with(".txt"))
-				reports.push_back(file);
+			ENGINE_CORE_ERROR("The child has no process context");
+			return;
 		}
-		if (reports.size() != 1)
-			return MakeError(ErrorCode::NotFound, "expected one crash report in '{}', found {}", Test::PathToUtf8(crashes), reports.size());
-		return FileSystem::ReadText(reports.front());
+		context->SetFatalErrorHook({
+			.Function = [](void* /*userData*/, FatalErrorKind /*kind*/, std::string_view /*message*/)
+		{
+			ENGINE_CORE_WARN("The removed fatal error hook ran");
+		},
+		});
+		context->SetFatalErrorHook({});
+		FatalError(FatalErrorKind::GpuHang, "Simulated GPU hang without a hook");
 	}
 
 	TEST_SUITE("App")
@@ -92,11 +83,11 @@ namespace Engine {
 			const ProcessContext* context = ProcessContext::GetCurrent();
 			REQUIRE(context != nullptr);
 			CHECK(context->GetSpecification().Window == WindowMode::Windowed);
-			CHECK(context->GetGlfwPlatform() == GetNativePlatform());
-			CHECK(GlfwLibrary::GetPlatform() == GetNativePlatform());
+			CHECK(context->GetGlfwPlatform() == Test::GetNativeGlfwPlatform());
+			CHECK(GlfwLibrary::GetPlatform() == Test::GetNativeGlfwPlatform());
 		}
 
-		TEST_CASE("ProcessContext: initializes GLFW once with the chosen platform and tears down in reverse" * doctest::skip(true))
+		TEST_CASE("ProcessContext: initializes GLFW once with the chosen platform and tears down in reverse")
 		{
 			// This process: headless, every step done in order, GLFW on the null platform.
 			const ProcessContext* context = ProcessContext::GetCurrent();
@@ -118,7 +109,7 @@ namespace Engine {
 			REQUIRE(child.has_value());
 			CHECK(child->ExitCode == 0);
 
-			const std::array<std::string_view, 8> lines = {
+			const std::array<std::string, 8> lines = {
 				"Process context: Log initialized",
 				"Process context: Profiler initialized",
 				"Process context: CrashHandler initialized",
@@ -128,22 +119,16 @@ namespace Engine {
 				"Process context: shutting down Profiler",
 				"Process context: shutting down Log",
 			};
-			size_t position = 0;
-			for (const std::string_view line : lines)
-			{
-				CAPTURE(std::string(line));
-				const size_t found = child->StandardError.find(line, position);
-				REQUIRE(found != std::string::npos);
-				position = found + line.size();
-			}
+			INFO("child stderr: ", child->StandardError);
+			CHECK(Test::ContainsInOrder(child->StandardError, lines));
 		}
 
-		TEST_CASE("ProcessContext: a second context in one process asserts" * doctest::skip(true))
+		TEST_CASE("ProcessContext: a second context in one process asserts")
 		{
 			ENGINE_CHECK_DEATH("App/SecondProcessContext", "a ProcessContext already exists");
 		}
 
-		TEST_CASE("ProcessContext: the user-data folders and the log file follow the app name" * doctest::skip(true))
+		TEST_CASE("ProcessContext: the user-data folders and the log file follow the app name")
 		{
 			const ProcessContext* context = ProcessContext::GetCurrent();
 			REQUIRE(context != nullptr);
@@ -163,8 +148,7 @@ namespace Engine {
 			CHECK(context->GetLogFilePath() == paths.GetLogFile("Tests"));
 		}
 
-		TEST_CASE("ProcessContext: a Tests child writes no log file and crash reports only under the root its parent gave it"
-			* doctest::skip(true))
+		TEST_CASE("ProcessContext: a Tests child writes no log file and crash reports only under the root its parent gave it")
 		{
 			const ProcessSpecification plain = Test::MakeTestsChildSpecification({ "--death-test=App/ReportsChildProcessFiles" });
 			const Result<ProcessResult> plainChild = Process::Run(plain, std::chrono::seconds(60));
@@ -181,7 +165,7 @@ namespace Engine {
 			CHECK(redirectedChild->StandardError.contains("Child files: log file false, crash reports true"));
 		}
 
-		TEST_CASE("ProcessContext: the fatal-error hook runs before the crash report is written" * doctest::skip(true))
+		TEST_CASE("ProcessContext: the fatal-error hook runs before the crash report is written")
 		{
 			Test::TempDirectory directory("FatalErrorHook");
 			const ProcessSpecification specification = Test::MakeTestsChildSpecification({
@@ -194,14 +178,22 @@ namespace Engine {
 			CHECK(child->StandardError.contains("Fatal error hook ran: DeviceLost (Simulated device loss for the hook) for the editor"));
 
 			// The report holds the hook's log line, so the hook ran first.
-			const Result<std::string> report = ReadOnlyCrashReport(directory);
+			const Result<std::string> report = Test::ReadOnlyCrashReport(directory.GetPath());
 			REQUIRE_MESSAGE(report.has_value(), report.error().ToString());
 			CHECK(report->contains("Reason: Fatal error (DeviceLost): Simulated device loss for the hook"));
 			CHECK(report->contains("Fatal error hook ran: DeviceLost"));
 		}
 
-		TEST_CASE("ProcessContext: ProcessContextStepToString names every step and GetBuildDescription names the build"
-			* doctest::skip(true))
+		TEST_CASE("ProcessContext: a removed fatal-error hook is not called")
+		{
+			const Result<Test::DeathTestResult> child = Test::RunDeathTest("App/RemovedFatalErrorHookDoesNotRun");
+			REQUIRE_MESSAGE(child.has_value(), child.error().ToString());
+			CHECK(child->ExitCode == ExitCode::Crash);
+			CHECK(child->StandardError.contains("Simulated GPU hang without a hook"));
+			CHECK_FALSE(child->StandardError.contains("The removed fatal error hook ran"));
+		}
+
+		TEST_CASE("ProcessContext: ProcessContextStepToString names every step and GetBuildDescription names the build")
 		{
 			CHECK(ProcessContextStepToString(ProcessContextStep::Log) == "Log");
 			CHECK(ProcessContextStepToString(ProcessContextStep::Profiler) == "Profiler");

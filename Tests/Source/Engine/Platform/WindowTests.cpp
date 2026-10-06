@@ -4,6 +4,7 @@
 
 #include "Engine/Platform/GlfwLibrary.h"
 #include "Engine/Platform/Input/InputState.h"
+#include "Support/DeathTest.h"
 #include "Support/TestOptions.h"
 #include "Support/WindowedChild.h"
 
@@ -15,9 +16,24 @@ namespace Engine {
 			|| std::holds_alternative<GamepadEvent>(event);
 	}
 
+	// GLFW forbids polling from inside its own callbacks, and a nested delivery would reorder the queue.
+	ENGINE_DEATH_TEST("Platform/WindowPollFromCallback")
+	{
+		Result<Window> created = Window::Create({ .Title = "Nested", .Width = 64, .Height = 48 });
+		if (!created.has_value())
+			return;
+		Window& window = *created;
+		window.SetEventCallback([&window](Event& /*event*/)
+		{
+			window.PollEvents();
+		});
+		window.InjectEvent(WindowCloseEvent{});
+		window.PollEvents();
+	}
+
 	TEST_SUITE("Platform")
 	{
-		TEST_CASE("Window: null platform creates a window and accepts injected events" * doctest::skip(true))
+		TEST_CASE("Window: null platform creates a window and accepts injected events")
 		{
 			// The Tests binary runs headless: GLFW's null platform (Architecture §4.1, §15.2).
 			REQUIRE(GlfwLibrary::GetPlatform() == GlfwPlatform::Null);
@@ -70,7 +86,7 @@ namespace Engine {
 			CHECK(GlfwLibrary::GetWindowCount() == windowsBefore);
 		}
 
-		TEST_CASE("Window: injected window events are delivered without changing the window's state" * doctest::skip(true))
+		TEST_CASE("Window: injected window events are delivered without changing the window's state")
 		{
 			Result<Window> created = Window::Create({ .Title = "Injected", .Width = 64, .Height = 48 });
 			REQUIRE(created.has_value());
@@ -99,7 +115,7 @@ namespace Engine {
 			CHECK(window.IsFocused() == focusedBefore);
 		}
 
-		TEST_CASE("Window: minimizing and restoring a null-platform window updates IsMinimized" * doctest::skip(true))
+		TEST_CASE("Window: minimizing and restoring a null-platform window updates IsMinimized")
 		{
 			Result<Window> created = Window::Create({ .Title = "Minimize", .Width = 64, .Height = 64 });
 			REQUIRE(created.has_value());
@@ -125,7 +141,7 @@ namespace Engine {
 			CHECK(delivered.size() == 1);
 		}
 
-		TEST_CASE("Window: the title, the cursor mode and moving keep their values" * doctest::skip(true))
+		TEST_CASE("Window: the title, the cursor mode and moving keep their values")
 		{
 			Result<Window> created = Window::Create({ .Title = "First", .Width = 64, .Height = 48 });
 			REQUIRE(created.has_value());
@@ -152,7 +168,7 @@ namespace Engine {
 			CHECK(CursorModeToString(CursorMode::Locked) == "Locked");
 		}
 
-		TEST_CASE("Window: a zero size is InvalidArgument" * doctest::skip(true))
+		TEST_CASE("Window: a zero size is InvalidArgument")
 		{
 			const Result<Window> zeroWidth = Window::Create({ .Title = "Zero", .Width = 0, .Height = 100 });
 			REQUIRE_FALSE(zeroWidth.has_value());
@@ -161,6 +177,124 @@ namespace Engine {
 			const Result<Window> zeroHeight = Window::Create({ .Title = "Zero", .Width = 100, .Height = 0 });
 			REQUIRE_FALSE(zeroHeight.has_value());
 			CHECK(zeroHeight.error().GetCode() == ErrorCode::InvalidArgument);
+		}
+
+		TEST_CASE("Window: the state already follows OS events when the callback sees them")
+		{
+			Result<Window> created = Window::Create({ .Title = "State", .Width = 64, .Height = 48 });
+			REQUIRE(created.has_value());
+			Window& window = *created;
+
+			// The injected key is a probe queued after the OS events of the minimize.
+			std::vector<bool> minimizedAtDelivery;
+			window.SetEventCallback([&window, &minimizedAtDelivery](Event& event)
+			{
+				if (std::holds_alternative<KeyEvent>(event))
+					minimizedAtDelivery.push_back(window.IsMinimized());
+			});
+			window.Minimize();
+			window.InjectEvent(KeyEvent{ .KeyCode = Key::M });
+			window.PollEvents();
+			window.Restore();
+			window.InjectEvent(KeyEvent{ .KeyCode = Key::R });
+			window.PollEvents();
+
+			REQUIRE(minimizedAtDelivery.size() == 2);
+			CHECK(minimizedAtDelivery[0]);
+			CHECK_FALSE(minimizedAtDelivery[1]);
+		}
+
+		TEST_CASE("Window: a callback set during delivery receives the events after the current one")
+		{
+			Result<Window> created = Window::Create({ .Title = "Callbacks", .Width = 64, .Height = 48 });
+			REQUIRE(created.has_value());
+			Window& window = *created;
+
+			std::vector<std::string> received;
+			window.SetEventCallback([&window, &received](Event& event)
+			{
+				if (!std::holds_alternative<KeyEvent>(event))
+					return;
+				received.push_back(std::format("first {}", KeyToString(std::get<KeyEvent>(event).KeyCode)));
+				window.SetEventCallback([&received](Event& later)
+				{
+					if (std::holds_alternative<KeyEvent>(later))
+						received.push_back(std::format("second {}", KeyToString(std::get<KeyEvent>(later).KeyCode)));
+				});
+			});
+			window.InjectEvent(KeyEvent{ .KeyCode = Key::A });
+			window.InjectEvent(KeyEvent{ .KeyCode = Key::B });
+			window.InjectEvent(KeyEvent{ .KeyCode = Key::C });
+			window.PollEvents();
+
+			const std::vector<std::string> expected = { "first A", "second B", "second C" };
+			CHECK(received == expected);
+		}
+
+		TEST_CASE("Window: events injected during delivery arrive with the next poll")
+		{
+			Result<Window> created = Window::Create({ .Title = "Reinjected", .Width = 64, .Height = 48 });
+			REQUIRE(created.has_value());
+			Window& window = *created;
+
+			std::vector<Key> received;
+			window.SetEventCallback([&window, &received](Event& event)
+			{
+				if (!std::holds_alternative<KeyEvent>(event))
+					return;
+				const Key key = std::get<KeyEvent>(event).KeyCode;
+				received.push_back(key);
+				if (key == Key::D1)
+					window.InjectEvent(KeyEvent{ .KeyCode = Key::D2 });
+			});
+			window.InjectEvent(KeyEvent{ .KeyCode = Key::D1 });
+			window.PollEvents();
+			REQUIRE(received.size() == 1);
+			CHECK(received[0] == Key::D1);
+
+			window.PollEvents();
+			REQUIRE(received.size() == 2);
+			CHECK(received[1] == Key::D2);
+		}
+
+		TEST_CASE("Window: events queued without a callback are dropped")
+		{
+			Result<Window> created = Window::Create({ .Title = "Dropped", .Width = 64, .Height = 48 });
+			REQUIRE(created.has_value());
+			Window& window = *created;
+
+			window.InjectEvent(KeyEvent{ .KeyCode = Key::Z });
+			window.PollEvents();
+
+			int deliveredCount = 0;
+			window.SetEventCallback([&deliveredCount](Event& event)
+			{
+				if (IsInputEvent(event))
+					++deliveredCount;
+			});
+			window.PollEvents();
+			CHECK(deliveredCount == 0);
+
+			// An empty callback removes the callback again.
+			window.SetEventCallback({});
+			window.InjectEvent(KeyEvent{ .KeyCode = Key::Z });
+			window.PollEvents();
+			CHECK(deliveredCount == 0);
+		}
+
+		TEST_CASE("Window: polling from inside the event callback asserts")
+		{
+			ENGINE_CHECK_DEATH("Platform/WindowPollFromCallback", "Window::PollEvents called from inside the event callback");
+		}
+
+		TEST_CASE("Window: a full-screen window takes the monitor's current video mode")
+		{
+			// GLFW's null platform has one monitor with a 1920x1080 mode.
+			Result<Window> created = Window::Create({ .Title = "Full screen", .Width = 320, .Height = 200, .Fullscreen = true });
+			REQUIRE(created.has_value());
+			CHECK(created->GetWidth() == 1920);
+			CHECK(created->GetHeight() == 1080);
+			CHECK_FALSE(created->IsMinimized());
 		}
 
 		// Runs only in a windowed child process (Support/WindowedChild.h): a native window on the host's platform.
@@ -180,9 +314,35 @@ namespace Engine {
 			created->PollEvents();
 		}
 
-		TEST_CASE("Window: a native window opens in a windowed child process" * doctest::skip(true))
+		TEST_CASE("Window: a native window opens in a windowed child process")
 		{
 			ENGINE_CHECK_WINDOWED_CHILD("Window: a native window opens with its requested size");
+		}
+
+		// Runs only in a windowed child process. Iconifying is asynchronous on X11 (the window manager reports it through
+		// WM_STATE, WindowedChild.h) and animated on macOS, so the target waits for each change, a bounded number of times.
+		TEST_CASE("Window: a native window minimizes and restores"
+			* doctest::test_suite(Test::ChildTargetSuite) * doctest::skip(true))
+		{
+			REQUIRE(GlfwLibrary::GetMode() == WindowMode::Windowed);
+
+			Result<Window> created = Window::Create({ .Title = "Native minimize", .Width = 320, .Height = 240 });
+			REQUIRE_MESSAGE(created.has_value(), created.error().ToString());
+			Window& window = *created;
+			window.PollEvents();
+			REQUIRE_FALSE(window.IsMinimized());
+
+			window.Minimize();
+			CHECK(Test::WaitUntilMinimized(window, true));
+			window.Restore();
+			CHECK(Test::WaitUntilMinimized(window, false));
+			CHECK(window.GetFramebufferWidth() > 0);
+			CHECK(window.GetFramebufferHeight() > 0);
+		}
+
+		TEST_CASE("Window: a native window minimizes and restores in a windowed child process")
+		{
+			ENGINE_CHECK_WINDOWED_CHILD("Window: a native window minimizes and restores");
 		}
 	}
 

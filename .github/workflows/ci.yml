@@ -11,6 +11,10 @@
 # failed, so one run reports every configuration (CI.py itself stops at the first failing stage). Each run writes its
 # own JUnit summary (--summary-junit) next to the unit test results.
 #
+# The unit tests start windowed child processes (Docs/Decisions/0005-m2-decisions.md, decision 13). The Windows and
+# macOS runners have a display; linux runs build + unit in an Xvfb display with the openbox window manager, without
+# which X11 never iconifies a window.
+#
 # Fail-fast is off. The jobs are independent (no `needs:`), so a failure on one platform or compiler never cancels the
 # others.
 #
@@ -242,9 +246,12 @@ jobs:
           sudo apt-get update
           # xorg-dev covers GLFW's X11 build (Vendor/GLFW/VENDOR.md) and is the package Setup.py checks for.
           # clang-18, clang-tidy-18 and clang-tools-18 (clang-query) serve the lint stage in both matrix entries.
+          # xvfb, openbox and x11-utils (xprop) give the unit tests' windowed children a display with a window manager
+          # (ADR 0005 decision 13).
           # PACKAGES is a fixed list from the matrix above; it is split into words on purpose.
           # shellcheck disable=SC2086
-          sudo apt-get install --yes --no-install-recommends $PACKAGES clang-18 clang-tidy-18 clang-tools-18 xorg-dev
+          sudo apt-get install --yes --no-install-recommends $PACKAGES clang-18 clang-tidy-18 clang-tools-18 xorg-dev \
+            xvfb openbox x11-utils
           python3 -m pip install --disable-pip-version-check --require-hashes --no-deps --requirement .github/ci-requirements.txt
           versions="$(first_line "$CXX" --version); $(first_line "$AR" --version); $(first_line make --version); $(clang-format --version); Python $(python3 -c 'import platform; print(platform.python_version())')"
           echo "$versions"
@@ -304,13 +311,37 @@ jobs:
         if: ${{ !cancelled() && steps.generate.outcome == 'success' }}
         run: python3 Scripts/CI.py --stages lint --summary-junit bin/TestResults/CI-lint.xml
 
+      # Windowed child processes need a display and, on X11, a window manager that iconifies windows (ADR 0005
+      # decision 13): openbox runs inside a 24-bit Xvfb display and is confirmed through _NET_SUPPORTING_WM_CHECK
+      # before CI.py starts.
       - name: Debug (build, shader up-to-date check, unit tests)
         if: ${{ !cancelled() && steps.generate.outcome == 'success' }}
-        run: python3 Scripts/CI.py --stages build,unit --configs Debug --summary-junit bin/TestResults/CI-Debug.xml
+        run: |
+          xvfb-run -a --server-args='-screen 0 1920x1080x24' sh -c '
+            openbox --sm-disable &
+            tries=0
+            until xprop -root _NET_SUPPORTING_WM_CHECK >/dev/null 2>&1; do
+              tries=$((tries + 1))
+              if [ "$tries" -gt 300 ]; then echo "openbox did not start within 30 seconds" >&2; exit 1; fi
+              sleep 0.1
+            done
+            exec python3 Scripts/CI.py --stages build,unit --configs Debug --summary-junit bin/TestResults/CI-Debug.xml'
 
+      # Windowed child processes need a display and, on X11, a window manager that iconifies windows (ADR 0005
+      # decision 13): openbox runs inside a 24-bit Xvfb display and is confirmed through _NET_SUPPORTING_WM_CHECK
+      # before CI.py starts.
       - name: Release (build, unit tests)
         if: ${{ !cancelled() && steps.generate.outcome == 'success' }}
-        run: python3 Scripts/CI.py --stages build,unit --configs Release --summary-junit bin/TestResults/CI-Release.xml
+        run: |
+          xvfb-run -a --server-args='-screen 0 1920x1080x24' sh -c '
+            openbox --sm-disable &
+            tries=0
+            until xprop -root _NET_SUPPORTING_WM_CHECK >/dev/null 2>&1; do
+              tries=$((tries + 1))
+              if [ "$tries" -gt 300 ]; then echo "openbox did not start within 30 seconds" >&2; exit 1; fi
+              sleep 0.1
+            done
+            exec python3 Scripts/CI.py --stages build,unit --configs Release --summary-junit bin/TestResults/CI-Release.xml'
 
       - name: Dist (build)
         if: ${{ !cancelled() && steps.generate.outcome == 'success' }}

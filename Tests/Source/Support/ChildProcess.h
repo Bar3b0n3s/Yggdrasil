@@ -7,9 +7,9 @@
 #include <span>
 #include <string>
 
-// Spawning a child process for death tests (Architecture §4.5). Platform::Process lands in M2; until then this Tests
-// helper is the one place in the Tests project with OS process code (Docs/Decisions/0003-m1-contract-decisions.md).
-// M2 re-implements RunChildProcess on Platform::Process behind the same declaration and removes the OS code.
+// Spawning a child process for death tests (Architecture §4.5). M1 declared it here, with its own OS code, before
+// Platform::Process existed (Docs/Decisions/0003-m1-contract-decisions.md, decision 1); since M2 both functions are thin
+// wrappers over Platform::Process, kept for the death-test runner and the tests written against them.
 
 namespace Engine {
 
@@ -32,11 +32,15 @@ namespace Engine {
 		[[nodiscard]] Result<ChildProcessResult> RunChildProcess(const std::filesystem::path& executable,
 			std::span<const std::string> arguments, std::chrono::milliseconds timeout);
 
-		// The absolute path of the running executable as the OS reports it (GetModuleFileNameW on Windows,
-		// /proc/self/exe on Linux, _NSGetExecutablePath on macOS, with symbolic links resolved), however the process was
-		// started: argv[0] may be a bare name found through PATH, lack ".exe" or be anything the parent chose. Errors: Io.
-		// M2 moves it onto Platform together with RunChildProcess.
+		// The absolute path of the running executable as the OS reports it (Process::GetCurrentExecutablePath:
+		// GetModuleFileNameW on Windows, /proc/self/exe on Linux, _NSGetExecutablePath on macOS, with symbolic links
+		// resolved), however the process was started: argv[0] may be a bare name found through PATH, lack ".exe" or be
+		// anything the parent chose. Errors: Io.
 		[[nodiscard]] Result<std::filesystem::path> GetCurrentExecutablePath();
+
+		// In a child body: blocks the calling thread until the process is killed; never returns. For children whose parent
+		// tests a timeout or kills them on purpose (a lock holder).
+		void BlockUntilKilled();
 
 	}
 

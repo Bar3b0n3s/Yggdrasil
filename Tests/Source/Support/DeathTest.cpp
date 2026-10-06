@@ -1,6 +1,7 @@
 #include "TestsPCH.h"
 #include "Support/DeathTest.h"
 
+#include "Engine/App/ExitCode.h"
 #include "Engine/Core/Assert.h"
 #include "Engine/Core/FatalError.h"
 #include "Engine/Core/Log.h"
@@ -14,10 +15,6 @@ namespace Engine {
 	namespace Test {
 
 		namespace {
-
-			// The exit codes of a death-test child whose body did not terminate the process (§4.1 table).
-			constexpr int DeathTestFailedExitCode = 1;
-			constexpr int DeathTestUsageErrorExitCode = 2;
 
 			struct DeathTestRegistration
 			{
@@ -108,17 +105,17 @@ namespace Engine {
 			if (registrations.empty())
 			{
 				ENGINE_CORE_ERROR("No death test is registered as '{}'", name);
-				return DeathTestUsageErrorExitCode;
+				return ExitCode::UsageError;
 			}
 			if (registrations.size() > 1)
 			{
 				ENGINE_CORE_ERROR("Death test '{}' is registered more than once, at {}", name, Utils::DescribeLocations(registrations));
-				return DeathTestUsageErrorExitCode;
+				return ExitCode::UsageError;
 			}
 
 			registrations.front().Body();
 			ENGINE_CORE_ERROR("Death test '{}' returned without dying", name);
-			return DeathTestFailedExitCode;
+			return ExitCode::Failed;
 		}
 
 		Result<DeathTestResult> RunDeathTest(std::string_view name, std::chrono::milliseconds timeout)

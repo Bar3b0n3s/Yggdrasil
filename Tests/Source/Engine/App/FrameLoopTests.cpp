@@ -4,8 +4,15 @@
 
 #include "Engine/App/EngineContext.h"
 #include "Engine/App/ExitCode.h"
+#include "Engine/Core/FileSystem.h"
+#include "Engine/Core/Log.h"
+#include "Engine/Platform/CrashHandler.h"
 #include "Engine/Platform/Process.h"
+#include "Support/ChildOutput.h"
+#include "Support/DeathTest.h"
+#include "Support/TempDirectory.h"
 #include "Support/TestOptions.h"
+#include "Support/Utf8Path.h"
 #include "Support/WindowedChild.h"
 
 namespace Engine {
@@ -19,6 +26,8 @@ namespace Engine {
 			void OnFrameEvent(Event& event) override
 			{
 				if (const KeyEvent* key = std::get_if<KeyEvent>(&event); key != nullptr && key->KeyCode == HandledKey)
+					SetHandled(event);
+				if (HandleClose && std::holds_alternative<WindowCloseEvent>(event))
 					SetHandled(event);
 				Calls.push_back(std::format("event {}", GetEventName(event)));
 			}
@@ -35,6 +44,24 @@ namespace Engine {
 		public:
 			std::vector<std::string> Calls;
 			Key HandledKey = Key::None;
+			bool HandleClose = false; // an editor that asks to save first
+		};
+
+		// Crashes in its fixed step once told to.
+		class CrashingClient final : public IFrameLoopClient
+		{
+		public:
+			void OnFrameEvent(Event& /*event*/) override {}
+
+			void OnFrameFixedStep(const SimStep& /*step*/) override
+			{
+				if (CrashInFixedStep)
+					CrashHandler::SimulateCrash();
+			}
+
+			void OnFrameUpdate(const FrameTime& /*frame*/) override {}
+		public:
+			bool CrashInFixedStep = false;
 		};
 
 	}
@@ -48,9 +75,28 @@ namespace Engine {
 		return std::move(*context);
 	}
 
+	// Runs a headless frame, writes a fatal-error report after it, then runs a frame whose fixed step crashes: the child of
+	// the frame-phase test, whose --user-data-dir puts both reports into the test's directory.
+	ENGINE_DEATH_TEST("App/FrameLoopCrashesInAFixedStep")
+	{
+		Result<Scope<EngineContext>> context = EngineContext::Create({ .WorkerCount = 0 });
+		if (!context.has_value())
+		{
+			ENGINE_CORE_ERROR("The frame-loop child cannot create its engine context: {}", context.error());
+			return;
+		}
+		CrashingClient client;
+		FrameLoop loop(**context, client, CreateScope<ManualClock>(FixedDelta), {});
+		loop.RunFrame();
+		const Result<std::filesystem::path> report = CrashHandler::WriteFatalErrorReport(FatalErrorKind::DeviceLost, "Between frames");
+		ENGINE_CORE_WARN("Report between frames: [{}]", report.has_value() ? Test::PathToUtf8(*report) : report.error().ToString());
+		client.CrashInFixedStep = true;
+		loop.RunFrame();
+	}
+
 	TEST_SUITE("App")
 	{
-		TEST_CASE("FrameLoop: a ManualClock frame runs exactly one step before its update" * doctest::skip(true))
+		TEST_CASE("FrameLoop: a ManualClock frame runs exactly one step before its update")
 		{
 			Scope<EngineContext> context = CreateContext();
 			RecordingClient client;
@@ -69,7 +115,7 @@ namespace Engine {
 			CHECK_FALSE(loop.IsExitRequested());
 		}
 
-		TEST_CASE("FrameLoop: other clocks run as many steps as the scheduler gives" * doctest::skip(true))
+		TEST_CASE("FrameLoop: other clocks run as many steps as the scheduler gives")
 		{
 			// 0, 1, 3 and 5 steps (0.5 s is clamped to 0.25 s, and the step cap is 5).
 			const std::array<double, 4> deltas = { 0.0, FixedDelta, 3.0 * FixedDelta, 0.5 };
@@ -94,7 +140,7 @@ namespace Engine {
 			CHECK(stepsPerFrame == expected);
 		}
 
-		TEST_CASE("FrameLoop: MaxFrames ends Run with Success after that many frames" * doctest::skip(true))
+		TEST_CASE("FrameLoop: MaxFrames ends Run with Success after that many frames")
 		{
 			Scope<EngineContext> context = CreateContext();
 			RecordingClient client;
@@ -104,7 +150,7 @@ namespace Engine {
 			CHECK(std::ranges::count(client.Calls, std::string("update 9")) == 1);
 		}
 
-		TEST_CASE("FrameLoop: the first exit request wins and an early request runs no frame" * doctest::skip(true))
+		TEST_CASE("FrameLoop: the first exit request wins and an early request runs no frame")
 		{
 			Scope<EngineContext> context = CreateContext();
 			RecordingClient client;
@@ -118,7 +164,7 @@ namespace Engine {
 			CHECK(client.Calls.empty());
 		}
 
-		TEST_CASE("FrameLoop: events reach the client first and only unhandled ones reach InputState" * doctest::skip(true))
+		TEST_CASE("FrameLoop: events reach the client first and only unhandled ones reach InputState")
 		{
 			Scope<EngineContext> context = CreateContext(WindowSpecification{ .Title = "Loop", .Width = 64, .Height = 64 });
 			RecordingClient client;
@@ -144,7 +190,49 @@ namespace Engine {
 			CHECK(loop.GetExitCode() == ExitCode::Success);
 		}
 
-		TEST_CASE("FrameLoop: queued main-thread tasks run in each frame" * doctest::skip(true))
+		TEST_CASE("FrameLoop: a handled WindowCloseEvent does not end the loop")
+		{
+			Scope<EngineContext> context = CreateContext(WindowSpecification{ .Title = "Close", .Width = 64, .Height = 64 });
+			RecordingClient client;
+			client.HandleClose = true;
+			FrameLoop loop(*context, client, CreateScope<ManualClock>(FixedDelta), {});
+			context->GetWindow()->InjectEvent(WindowCloseEvent{});
+			loop.RunFrame();
+			CHECK(std::ranges::count(client.Calls, std::string("event WindowCloseEvent")) == 1);
+			CHECK_FALSE(loop.IsExitRequested());
+			CHECK(loop.GetExitCode() == ExitCode::Success);
+		}
+
+		TEST_CASE("FrameLoop: crash reports name the frame phase, which is cleared after each frame")
+		{
+			Test::TempDirectory directory("FramePhase");
+			const ProcessSpecification specification = Test::MakeTestsChildSpecification({
+				"--death-test=App/FrameLoopCrashesInAFixedStep",
+				"--user-data-dir=" + Test::PathToUtf8(directory.GetPath()),
+			});
+			const Result<ProcessResult> child = Process::Run(specification, std::chrono::seconds(60));
+			REQUIRE_MESSAGE(child.has_value(), child.error().ToString());
+			INFO("child stderr: ", child->StandardError);
+			CHECK(child->ExitCode == ExitCode::Crash);
+
+			// Between two frames the phase is cleared.
+			const std::filesystem::path between = Test::PathFromUtf8(Test::FindBracketedValue(child->StandardError, "Report between frames: "));
+			const Result<std::string> betweenReport = FileSystem::ReadText(between);
+			REQUIRE_MESSAGE(betweenReport.has_value(), betweenReport.error().ToString());
+			CHECK(betweenReport->contains("\nReason: Fatal error (DeviceLost): Between frames\n"));
+			CHECK(betweenReport->contains("\n  FramePhase: (none)\n"));
+
+			// The crash in the fixed step names the step phase.
+			const std::vector<std::filesystem::path> reports =
+				Test::ListCrashFiles(directory / ENGINE_PRODUCT_NAME / "Crashes", ".txt");
+			REQUIRE(reports.size() == 2);
+			const std::filesystem::path& crash = reports[0] == between ? reports[1] : reports[0];
+			const Result<std::string> crashReport = FileSystem::ReadText(crash);
+			REQUIRE_MESSAGE(crashReport.has_value(), crashReport.error().ToString());
+			CHECK(crashReport->contains("\n  FramePhase: FixedStep\n"));
+		}
+
+		TEST_CASE("FrameLoop: queued main-thread tasks run in each frame")
 		{
 			Scope<EngineContext> context = CreateContext();
 			RecordingClient client;
@@ -172,9 +260,7 @@ namespace Engine {
 			Scope<EngineContext> context = CreateContext(WindowSpecification{ .Title = "Minimized", .Width = 320, .Height = 240 });
 			Window& window = *context->GetWindow();
 			window.Minimize();
-			for (int poll = 0; poll < 200 && !window.IsMinimized(); ++poll)
-				window.WaitEventsTimeout(0.01);
-			REQUIRE(window.IsMinimized());
+			REQUIRE(Test::WaitUntilMinimized(window, true));
 
 			RecordingClient client;
 			FrameLoop loop(*context, client, CreateScope<SystemClock>(), { .MaxFrames = 60 });
@@ -195,7 +281,7 @@ namespace Engine {
 			CHECK((*cpuEnd - *cpuStart) / wallSeconds < 0.25);
 		}
 
-		TEST_CASE("FrameLoop: a minimized window idles" * doctest::skip(true))
+		TEST_CASE("FrameLoop: a minimized window idles")
 		{
 			ENGINE_CHECK_WINDOWED_CHILD("FrameLoop: a minimized window uses little CPU time per second");
 		}

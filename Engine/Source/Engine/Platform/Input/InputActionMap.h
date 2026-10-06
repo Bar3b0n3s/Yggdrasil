@@ -106,6 +106,20 @@ namespace Engine {
 		// from 0 at the dead zone's edge to ±1 at ±1: sign(value) * (|value| - DeadZone) / (1 - DeadZone). `value` is
 		// clamped to [-1, 1] first.
 		[[nodiscard]] static float ApplyDeadZone(float value);
+	private:
+		// The parsed bindings of one action, in the order of its definition's lists.
+		struct ResolvedAction
+		{
+			std::vector<InputBinding::Control> Bindings{}; // Button action
+			std::vector<InputBinding::Control> Positive{}; // Axis action
+			std::vector<InputBinding::Control> Negative{}; // Axis action
+			std::optional<GamepadAxis> Gamepad{};          // Axis action
+		};
+
+		[[nodiscard]] bool IsValidAction(uint32_t action) const;
+	private:
+		std::vector<InputActionDefinition> m_Definitions; // in byte-wise name order
+		std::vector<ResolvedAction> m_Actions;            // parallel to m_Definitions
 	};
 
 }

@@ -2,6 +2,8 @@
 
 #include "Engine/Platform/Input/InputActionMap.h"
 
+#include "Support/DeathTest.h"
+
 namespace Engine {
 
 	static void Press(InputState& input, Key key)
@@ -39,9 +41,17 @@ namespace Engine {
 		};
 	}
 
+	ENGINE_DEATH_TEST("Platform/InputActionIndexOutOfRange")
+	{
+		const std::vector<InputActionDefinition> definitions = MakeDefinitions();
+		const Result<InputActionMap> actions = InputActionMap::Create(definitions);
+		if (actions.has_value())
+			static_cast<void>(actions->IsDown(InputState(), InputPhase::Step, 2));
+	}
+
 	TEST_SUITE("Platform")
 	{
-		TEST_CASE("InputActionMap: axis combines keys and gamepad with dead zone" * doctest::skip(true))
+		TEST_CASE("InputActionMap: axis combines keys and gamepad with dead zone")
 		{
 			struct Row
 			{
@@ -100,7 +110,7 @@ namespace Engine {
 			CHECK(InputActionMap::ApplyDeadZone(0.575f) == doctest::Approx(0.5f));
 		}
 
-		TEST_CASE("InputActionMap: a button action is down while any binding is down and reports their edges" * doctest::skip(true))
+		TEST_CASE("InputActionMap: a button action is down while any binding is down and reports their edges")
 		{
 			const std::vector<InputActionDefinition> definitions = MakeDefinitions();
 			const Result<InputActionMap> actions = InputActionMap::Create(definitions);
@@ -138,7 +148,7 @@ namespace Engine {
 			CHECK(actions->WasPressed(input, InputPhase::Step, *moveX));
 		}
 
-		TEST_CASE("InputActionMap: actions are indexed by name and found case-sensitively" * doctest::skip(true))
+		TEST_CASE("InputActionMap: actions are indexed by name and found case-sensitively")
 		{
 			const std::vector<InputActionDefinition> definitions = MakeDefinitions();
 			const Result<InputActionMap> actions = InputActionMap::Create(definitions);
@@ -157,7 +167,7 @@ namespace Engine {
 			CHECK_FALSE(empty.FindAction("Jump").has_value());
 		}
 
-		TEST_CASE("InputActionMap: invalid definitions are reported together with their pointers" * doctest::skip(true))
+		TEST_CASE("InputActionMap: invalid definitions are reported together with their pointers")
 		{
 			const std::vector<InputActionDefinition> definitions = {
 				{ .Name = "Jump", .Type = InputActionType::Button, .Bindings = { "Key.Spacebar" } },
@@ -187,7 +197,7 @@ namespace Engine {
 			CHECK(pointers.size() >= 7); // also the duplicated "Jump" and the empty name
 		}
 
-		TEST_CASE("InputBinding: names parse case-insensitively and print canonically" * doctest::skip(true))
+		TEST_CASE("InputBinding: names parse case-insensitively and print canonically")
 		{
 			const std::array<std::pair<std::string_view, std::string_view>, 6> names = { {
 				{ "Key.Space", "Key.Space" },
@@ -220,6 +230,58 @@ namespace Engine {
 				REQUIRE_FALSE(binding.has_value());
 				CHECK(binding.error().GetCode() == ErrorCode::Validation);
 			}
+		}
+
+		TEST_CASE("InputBinding: values outside the enumerations have no name")
+		{
+			CHECK(InputBinding{ .Target = Key::None }.ToString().empty());
+			CHECK(InputBinding{ .Target = static_cast<Key>(33) }.ToString().empty());
+			CHECK(InputBinding{ .Target = static_cast<MouseButton>(MouseButtonCount) }.ToString().empty());
+			CHECK(InputBinding{ .Target = static_cast<GamepadAxis>(GamepadAxisCount) }.ToString().empty());
+			CHECK(InputBinding{ .Target = GamepadAxis::RightTrigger }.ToString() == "Gamepad.RightTrigger");
+		}
+
+		TEST_CASE("InputActionMap: a gamepad that disconnects while a bound button is held releases the action")
+		{
+			const std::vector<InputActionDefinition> definitions = MakeDefinitions();
+			const Result<InputActionMap> actions = InputActionMap::Create(definitions);
+			REQUIRE(actions.has_value());
+			const std::optional<uint32_t> jump = actions->FindAction("Jump");
+			REQUIRE(jump.has_value());
+
+			// Gamepad buttons count on every connected gamepad, not only the first.
+			InputState input;
+			input.Inject(GamepadEvent{ .Gamepad = 3, .Kind = GamepadEventKind::Connected });
+			input.Inject(GamepadEvent{ .Gamepad = 3, .Kind = GamepadEventKind::Button, .Button = GamepadButton::South, .Pressed = true });
+			input.LatchStep();
+			CHECK(actions->IsDown(input, InputPhase::Step, *jump));
+			CHECK(actions->WasPressed(input, InputPhase::Step, *jump));
+
+			input.Inject(GamepadEvent{ .Gamepad = 3, .Kind = GamepadEventKind::Disconnected });
+			input.LatchStep();
+			CHECK_FALSE(actions->IsDown(input, InputPhase::Step, *jump));
+			CHECK(actions->WasReleased(input, InputPhase::Step, *jump));
+		}
+
+		TEST_CASE("InputActionMap: the button queries of an axis action ignore its gamepad axis")
+		{
+			const std::vector<InputActionDefinition> definitions = MakeDefinitions();
+			const Result<InputActionMap> actions = InputActionMap::Create(definitions);
+			REQUIRE(actions.has_value());
+			const std::optional<uint32_t> moveX = actions->FindAction("MoveX");
+			REQUIRE(moveX.has_value());
+
+			InputState input;
+			MoveStick(input, 0, GamepadAxis::LeftX, 1.0f);
+			input.LatchFrame();
+			CHECK(actions->GetAxis(input, InputPhase::Frame, *moveX) == 1.0f);
+			CHECK_FALSE(actions->IsDown(input, InputPhase::Frame, *moveX));
+			CHECK_FALSE(actions->WasPressed(input, InputPhase::Frame, *moveX));
+		}
+
+		TEST_CASE("InputActionMap: an action index out of range asserts")
+		{
+			ENGINE_CHECK_DEATH("Platform/InputActionIndexOutOfRange", "Input action index 2 is out of range (2 actions)");
 		}
 	}
 

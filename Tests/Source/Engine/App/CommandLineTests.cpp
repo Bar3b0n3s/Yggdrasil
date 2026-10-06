@@ -18,7 +18,7 @@ namespace Engine {
 
 	TEST_SUITE("App")
 	{
-		TEST_CASE("CommandLine: flags, values and positional arguments are parsed" * doctest::skip(true))
+		TEST_CASE("CommandLine: flags, values and positional arguments are parsed")
 		{
 			const Result<CommandLine> parsed =
 				Parse({ "--headless", "--frames", "10", "scene.json", "--automation=5000", "--", "--literal" });
@@ -44,7 +44,7 @@ namespace Engine {
 			CHECK(empty->GetPositional().empty());
 		}
 
-		TEST_CASE("CommandLine: unknown options, missing values, values on flags and repeats are InvalidArgument" * doctest::skip(true))
+		TEST_CASE("CommandLine: unknown options, missing values, values on flags and repeats are InvalidArgument")
 		{
 			const std::array<std::vector<std::string>, 7> invalid = { {
 				{ "--headles" },
@@ -80,7 +80,28 @@ namespace Engine {
 			CHECK(positional->GetPositional() == expected);
 		}
 
-		TEST_CASE("CommandLine: GetUnsigned parses plain decimal values within the maximum" * doctest::skip(true))
+		TEST_CASE("CommandLine: an empty value after '=' is missing and a far-off option name lists the declared ones")
+		{
+			const std::array<std::string, 2> empty = { "--frames=", "--automation=" };
+			for (const std::string& argument : empty)
+			{
+				CAPTURE(argument);
+				const Result<CommandLine> parsed = Parse({ argument });
+				REQUIRE_FALSE(parsed.has_value());
+				CHECK(parsed.error().GetCode() == ErrorCode::InvalidArgument);
+				CHECK(parsed.error().GetMessageText().contains("needs a value"));
+			}
+
+			const Result<CommandLine> unrelated = Parse({ "--completely-different" });
+			REQUIRE_FALSE(unrelated.has_value());
+			CHECK(unrelated.error().GetHint() == "the options are --headless, --frames, --automation, --project");
+
+			const Result<CommandLine> none = CommandLine::Parse(std::vector<std::string>{ "--headless" }, {});
+			REQUIRE_FALSE(none.has_value());
+			CHECK(none.error().GetHint() == "this program accepts no options");
+		}
+
+		TEST_CASE("CommandLine: GetUnsigned parses plain decimal values within the maximum")
 		{
 			const Result<CommandLine> parsed = Parse({ "--frames", "120" });
 			REQUIRE(parsed.has_value());
@@ -106,7 +127,7 @@ namespace Engine {
 			}
 		}
 
-		TEST_CASE("CommandLine: FormatUsage lists every option with its value name" * doctest::skip(true))
+		TEST_CASE("CommandLine: FormatUsage lists every option with its value name")
 		{
 			const std::string usage = CommandLine::FormatUsage("Editor", DeclaredOptions);
 			CHECK(usage.starts_with("Usage: Editor [options]"));

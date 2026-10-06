@@ -67,7 +67,7 @@ namespace Engine {
 
 	// Applies the engine options of `commandLine` to `specification` (see GetEngineCommandLineOptions) and stores the
 	// command line in specification.Args. Errors: InvalidArgument naming the option for a --frames value that is not an
-	// integer >= 1 or a --user-data-dir value that is not an absolute path.
+	// integer >= 1 or a --user-data-dir value that is not an absolute path in valid UTF-8.
 	[[nodiscard]] Status ApplyEngineCommandLine(const CommandLine& commandLine, ApplicationSpecification& specification);
 
 	// The base of the editor and runtime applications. Not copyable or movable.
@@ -124,9 +124,15 @@ namespace Engine {
 		void OnFrameEvent(Event& event) override;
 		void OnFrameFixedStep(const SimStep& step) override;
 		void OnFrameUpdate(const FrameTime& frame) override;
+
+		// The frame clock of the specification (ClockKind::Scripted is rejected before this is called).
+		[[nodiscard]] Scope<Clock> CreateClock() const;
 	private:
 		ApplicationSpecification m_Specification;
-		Scope<EngineContext> m_Context; // between the start of initialization and the end of OnShutdown
+		Scope<EngineContext> m_Context;       // between the start of initialization and the end of OnShutdown
+		Scope<FrameLoop> m_FrameLoop;         // while the frame loop runs
+		std::optional<int> m_PendingExitCode; // an exit requested before the frame loop exists (during OnInitialize)
+		bool m_HasRun = false;
 	};
 
 	// Builds an application from argv[1..] (UTF-8): parses the command line with GetEngineCommandLineOptions plus the

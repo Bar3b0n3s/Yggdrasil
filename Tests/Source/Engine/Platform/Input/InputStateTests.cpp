@@ -4,6 +4,9 @@
 
 #include "Engine/Platform/Input/InputActionMap.h"
 
+#include <cmath>
+#include <limits>
+
 namespace Engine {
 
 	static Event KeyDown(Key key)
@@ -28,7 +31,7 @@ namespace Engine {
 
 	TEST_SUITE("Platform")
 	{
-		TEST_CASE("InputState: a tap between two steps reports Pressed and Released on the next step" * doctest::skip(true))
+		TEST_CASE("InputState: a tap between two steps reports Pressed and Released on the next step")
 		{
 			InputState input;
 			input.LatchStep();
@@ -60,7 +63,7 @@ namespace Engine {
 			CHECK_FALSE(input.WasGamepadButtonReleased(InputPhase::Step, 0, GamepadButton::South));
 		}
 
-		TEST_CASE("InputState: zero-step frames keep step edges pending" * doctest::skip(true))
+		TEST_CASE("InputState: zero-step frames keep step edges pending")
 		{
 			InputState input;
 
@@ -86,7 +89,7 @@ namespace Engine {
 			CHECK_FALSE(input.WasKeyPressed(InputPhase::Frame, Key::W));
 		}
 
-		TEST_CASE("InputState: multi-step frames report an edge once" * doctest::skip(true))
+		TEST_CASE("InputState: multi-step frames report an edge once")
 		{
 			InputState input;
 			input.Inject(KeyDown(Key::A));
@@ -109,7 +112,7 @@ namespace Engine {
 			CHECK(input.GetScrollDelta(InputPhase::Frame) == glm::vec2(0.0f, 3.0f));
 		}
 
-		TEST_CASE("InputState: frame edges are independent of step edges" * doctest::skip(true))
+		TEST_CASE("InputState: frame edges are independent of step edges")
 		{
 			// The steps run per frame (0, 1, 2 and 5, as the Timing suite does) never change what the frame view reports.
 			const std::array<int, 4> stepsPerFrame = { 0, 1, 2, 5 };
@@ -139,7 +142,7 @@ namespace Engine {
 			}
 		}
 
-		TEST_CASE("InputState: stick Y is up-positive and Invert flips it" * doctest::skip(true))
+		TEST_CASE("InputState: stick Y is up-positive and Invert flips it")
 		{
 			// GLFW reports a stick pushed up as -1 on its Y axis.
 			struct Row
@@ -201,7 +204,7 @@ namespace Engine {
 			CHECK(GamepadAxisValueFromGlfw(GamepadAxis::RightTrigger, 1.5f) == 1.0f);
 		}
 
-		TEST_CASE("InputState: the cursor delta and scroll accumulate per phase" * doctest::skip(true))
+		TEST_CASE("InputState: the cursor delta and scroll accumulate per phase")
 		{
 			InputState input;
 			// The first move sets the position without a delta.
@@ -227,7 +230,7 @@ namespace Engine {
 			CHECK(input.GetScrollDelta(InputPhase::Frame) == glm::vec2(0.5f, -2.0f));
 		}
 
-		TEST_CASE("InputState: a disconnected gamepad releases its buttons and zeroes its axes" * doctest::skip(true))
+		TEST_CASE("InputState: a disconnected gamepad releases its buttons and zeroes its axes")
 		{
 			InputState input;
 			input.Inject(GamepadConnected(1));
@@ -247,7 +250,7 @@ namespace Engine {
 			CHECK(input.GetGamepadAxis(InputPhase::Frame, 1, GamepadAxis::RightTrigger) == 0.0f); // released
 		}
 
-		TEST_CASE("InputState: out-of-range codes are ignored and read as up" * doctest::skip(true))
+		TEST_CASE("InputState: out-of-range codes are ignored and read as up")
 		{
 			InputState input;
 			input.Inject(KeyDown(Key::None));
@@ -265,7 +268,7 @@ namespace Engine {
 			CHECK_FALSE(input.WasKeyPressed(InputPhase::Step, Key::B));
 		}
 
-		TEST_CASE("InputState: window, text and file-drop events leave the input state unchanged" * doctest::skip(true))
+		TEST_CASE("InputState: window, text and file-drop events leave the input state unchanged")
 		{
 			InputState input;
 			input.Inject(WindowFocusEvent{ .Focused = false });
@@ -278,6 +281,103 @@ namespace Engine {
 			CHECK(input.GetMousePosition(InputPhase::Frame) == glm::vec2(0.0f));
 			CHECK(input.GetScrollDelta(InputPhase::Frame) == glm::vec2(0.0f));
 			CHECK_FALSE(input.WasKeyPressed(InputPhase::Frame, Key::X));
+		}
+
+		TEST_CASE("InputState: a press of a held key and a release of a released key are not edges")
+		{
+			InputState input;
+			input.Inject(KeyDown(Key::G));
+			input.LatchStep();
+			REQUIRE(input.WasKeyPressed(InputPhase::Step, Key::G));
+
+			input.Inject(KeyDown(Key::G));
+			input.Inject(KeyUp(Key::H));
+			input.Inject(MouseButtonEvent{ .Button = MouseButton::Middle, .Action = ButtonAction::Released });
+			input.LatchStep();
+			CHECK(input.IsKeyDown(InputPhase::Step, Key::G));
+			CHECK_FALSE(input.WasKeyPressed(InputPhase::Step, Key::G));
+			CHECK_FALSE(input.WasKeyReleased(InputPhase::Step, Key::H));
+			CHECK_FALSE(input.WasMouseButtonReleased(InputPhase::Step, MouseButton::Middle));
+		}
+
+		TEST_CASE("InputState: a gamepad ignores button and axis events until it is connected")
+		{
+			InputState input;
+			input.Inject(GamepadEvent{ .Gamepad = 2, .Kind = GamepadEventKind::Button, .Button = GamepadButton::East, .Pressed = true });
+			input.Inject(GamepadAxisMoved(2, GamepadAxis::LeftX, 0.5f));
+			input.LatchFrame();
+			CHECK_FALSE(input.IsGamepadConnected(InputPhase::Frame, 2));
+			CHECK_FALSE(input.IsGamepadButtonDown(InputPhase::Frame, 2, GamepadButton::East));
+			CHECK_FALSE(input.WasGamepadButtonPressed(InputPhase::Frame, 2, GamepadButton::East));
+			CHECK(input.GetGamepadAxis(InputPhase::Frame, 2, GamepadAxis::LeftX) == 0.0f);
+
+			input.Inject(GamepadConnected(2));
+			input.Inject(GamepadEvent{ .Gamepad = 2, .Kind = GamepadEventKind::Button, .Button = GamepadButton::East, .Pressed = true });
+			input.Inject(GamepadAxisMoved(2, GamepadAxis::LeftX, 0.5f));
+			input.LatchFrame();
+			CHECK(input.IsGamepadConnected(InputPhase::Frame, 2));
+			CHECK(input.WasGamepadButtonPressed(InputPhase::Frame, 2, GamepadButton::East));
+			CHECK(input.GetGamepadAxis(InputPhase::Frame, 2, GamepadAxis::LeftX) == 0.5f);
+		}
+
+		TEST_CASE("InputState: axis values are clamped to their range and non-finite values are ignored")
+		{
+			constexpr float NotANumber = std::numeric_limits<float>::quiet_NaN();
+			constexpr float Infinity = std::numeric_limits<float>::infinity();
+
+			InputState input;
+			input.Inject(GamepadConnected(0));
+			input.Inject(GamepadAxisMoved(0, GamepadAxis::LeftX, 1.5f));
+			input.Inject(GamepadAxisMoved(0, GamepadAxis::RightY, -3.0f));
+			input.Inject(GamepadAxisMoved(0, GamepadAxis::LeftTrigger, -0.5f));
+			input.Inject(GamepadAxisMoved(0, GamepadAxis::RightTrigger, 0.25f));
+			input.Inject(GamepadAxisMoved(0, GamepadAxis::RightTrigger, NotANumber));
+			input.Inject(MouseMoveEvent{ .Position = glm::vec2(5.0f, 6.0f) });
+			input.Inject(MouseMoveEvent{ .Position = glm::vec2(Infinity, 6.0f) });
+			input.Inject(MouseScrollEvent{ .Offset = glm::vec2(0.0f, NotANumber) });
+			input.LatchFrame();
+
+			CHECK(input.GetGamepadAxis(InputPhase::Frame, 0, GamepadAxis::LeftX) == 1.0f);
+			CHECK(input.GetGamepadAxis(InputPhase::Frame, 0, GamepadAxis::RightY) == -1.0f);
+			CHECK(input.GetGamepadAxis(InputPhase::Frame, 0, GamepadAxis::LeftTrigger) == 0.0f);
+			CHECK(input.GetGamepadAxis(InputPhase::Frame, 0, GamepadAxis::RightTrigger) == 0.25f);
+			CHECK(input.GetMousePosition(InputPhase::Frame) == glm::vec2(5.0f, 6.0f));
+			CHECK(input.GetMouseDelta(InputPhase::Frame) == glm::vec2(0.0f));
+			CHECK(input.GetScrollDelta(InputPhase::Frame) == glm::vec2(0.0f));
+			CHECK(GamepadAxisValueFromGlfw(GamepadAxis::LeftX, NotANumber) == 0.0f);
+		}
+
+		TEST_CASE("InputState: finite input whose deltas would overflow a float never puts infinity or NaN in the views")
+		{
+			constexpr float Huge = 3e38f;
+			InputState input;
+			input.Inject(MouseMoveEvent{ .Position = glm::vec2(Huge, 0.0f) });  // the first position: no delta
+			input.Inject(MouseMoveEvent{ .Position = glm::vec2(-Huge, 0.0f) }); // a delta of -6e38: ignored
+			input.Inject(MouseMoveEvent{ .Position = glm::vec2(Huge, 1.0f) });  // a delta of (0, 1) from where the cursor is
+			input.Inject(MouseScrollEvent{ .Offset = glm::vec2(Huge, 0.0f) });
+			input.Inject(MouseScrollEvent{ .Offset = glm::vec2(Huge, 0.0f) }); // the sum would be 6e38: ignored
+			input.LatchStep();
+			input.LatchFrame();
+
+			for (const InputPhase phase : { InputPhase::Step, InputPhase::Frame })
+			{
+				const glm::vec2 delta = input.GetMouseDelta(phase);
+				const glm::vec2 scroll = input.GetScrollDelta(phase);
+				CHECK(std::isfinite(delta.x));
+				CHECK(std::isfinite(delta.y));
+				CHECK(std::isfinite(scroll.x));
+				CHECK(std::isfinite(scroll.y));
+				CHECK(input.GetMousePosition(phase) == glm::vec2(Huge, 1.0f));
+				CHECK(delta == glm::vec2(0.0f, 1.0f));
+				CHECK(scroll == glm::vec2(Huge, 0.0f));
+			}
+
+			// Ordinary motion after the ignored events still adds up.
+			input.Inject(MouseMoveEvent{ .Position = glm::vec2(Huge, 3.0f) });
+			input.Inject(MouseScrollEvent{ .Offset = glm::vec2(0.0f, 1.0f) });
+			input.LatchFrame();
+			CHECK(input.GetMouseDelta(InputPhase::Frame) == glm::vec2(0.0f, 2.0f));
+			CHECK(input.GetScrollDelta(InputPhase::Frame) == glm::vec2(0.0f, 1.0f));
 		}
 	}
 

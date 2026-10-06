@@ -23,6 +23,7 @@ namespace Engine {
 			std::vector<std::string> Calls;
 			bool FailInitialize = false;
 			std::optional<int> ExitDuringInitialize;
+			std::optional<uint64_t> ExitAtFrame; // RequestExit(ExitCode::Timeout) from the OnUpdate of this frame, twice
 			bool ProcessContextWasCurrent = false;
 		protected:
 			Status OnInitialize() override
@@ -52,6 +53,11 @@ namespace Engine {
 			void OnUpdate(const FrameTime& frame) override
 			{
 				Calls.push_back(std::format("update {}", frame.FrameIndex));
+				if (ExitAtFrame == frame.FrameIndex)
+				{
+					RequestExit(ExitCode::Timeout);
+					RequestExit(ExitCode::Failed); // the first request wins
+				}
 			}
 		};
 
@@ -73,7 +79,7 @@ namespace Engine {
 
 	TEST_SUITE("App")
 	{
-		TEST_CASE("Application: hooks run in order and --frames ends the run with Success" * doctest::skip(true))
+		TEST_CASE("Application: hooks run in order and --frames ends the run with Success")
 		{
 			RecordingApplication application(MakeHeadlessSpecification(3));
 			CHECK(application.Run() == ExitCode::Success);
@@ -92,7 +98,7 @@ namespace Engine {
 			CHECK(application.ProcessContextWasCurrent);
 		}
 
-		TEST_CASE("Application: a failing OnInitialize returns InitFailed and runs no frame" * doctest::skip(true))
+		TEST_CASE("Application: a failing OnInitialize returns InitFailed and runs no frame")
 		{
 			RecordingApplication application(MakeHeadlessSpecification(3));
 			application.FailInitialize = true;
@@ -102,7 +108,7 @@ namespace Engine {
 			CHECK(application.Calls == calls);
 		}
 
-		TEST_CASE("Application: RequestExit during OnInitialize skips the loop but not OnShutdown" * doctest::skip(true))
+		TEST_CASE("Application: RequestExit during OnInitialize skips the loop but not OnShutdown")
 		{
 			RecordingApplication application(MakeHeadlessSpecification(std::nullopt));
 			application.ExitDuringInitialize = ExitCode::Failed;
@@ -111,7 +117,24 @@ namespace Engine {
 			CHECK(application.Calls == calls);
 		}
 
-		TEST_CASE("Application: a scripted clock cannot be chosen through the specification" * doctest::skip(true))
+		TEST_CASE("Application: RequestExit from OnUpdate ends the run after that frame with the first code")
+		{
+			RecordingApplication application(MakeHeadlessSpecification(std::nullopt));
+			application.ExitAtFrame = 1;
+			CHECK(application.Run() == ExitCode::Timeout);
+			const std::vector<std::string> expected = {
+				"initialize",
+				"window",
+				"step 0",
+				"update 0",
+				"step 1",
+				"update 1",
+				"shutdown",
+			};
+			CHECK(application.Calls == expected);
+		}
+
+		TEST_CASE("Application: a scripted clock cannot be chosen through the specification")
 		{
 			ApplicationSpecification specification = MakeHeadlessSpecification(1);
 			specification.Clock = ClockKind::Scripted;
@@ -121,8 +144,7 @@ namespace Engine {
 			CHECK(application.Calls.empty());
 		}
 
-		TEST_CASE("ApplyEngineCommandLine: --headless selects the null platform and ManualClock and --frames sets MaxFrames"
-			* doctest::skip(true))
+		TEST_CASE("ApplyEngineCommandLine: --headless selects the null platform and ManualClock and --frames sets MaxFrames")
 		{
 			const std::span<const CommandLineOption> options = GetEngineCommandLineOptions();
 			const auto declares = [&options](std::string_view name)
@@ -158,7 +180,7 @@ namespace Engine {
 			CHECK(defaults.ThrottleHeadless);
 		}
 
-		TEST_CASE("ApplyEngineCommandLine: --user-data-dir sets an absolute user-data root" * doctest::skip(true))
+		TEST_CASE("ApplyEngineCommandLine: --user-data-dir sets an absolute user-data root")
 		{
 			std::error_code error;
 			const std::filesystem::path root = std::filesystem::temp_directory_path(error) / "EngineTests" / "UserData";
@@ -180,7 +202,25 @@ namespace Engine {
 			CHECK(applied.error().GetMessageText().contains("--user-data-dir"));
 		}
 
-		TEST_CASE("ApplyEngineCommandLine: --frames 0 is InvalidArgument" * doctest::skip(true))
+		TEST_CASE("ApplyEngineCommandLine: a --user-data-dir that is not valid UTF-8 is InvalidArgument")
+		{
+			// An absolute path on every host, except for the ill-formed byte 0xFF.
+			std::error_code error;
+			const std::filesystem::path temporary = std::filesystem::temp_directory_path(error);
+			REQUIRE_FALSE(error);
+			const std::string root = Test::PathToUtf8(temporary.root_path()) + "Data\xff";
+			const std::vector<std::string> arguments = { "--user-data-dir", root };
+			const Result<CommandLine> commandLine = CommandLine::Parse(arguments, GetEngineCommandLineOptions());
+			REQUIRE(commandLine.has_value());
+			ApplicationSpecification specification;
+			const Status applied = ApplyEngineCommandLine(*commandLine, specification);
+			REQUIRE_FALSE(applied.has_value());
+			CHECK(applied.error().GetCode() == ErrorCode::InvalidArgument);
+			CHECK(applied.error().GetMessageText().contains("--user-data-dir"));
+			CHECK(specification.UserDataRoot.empty());
+		}
+
+		TEST_CASE("ApplyEngineCommandLine: --frames 0 is InvalidArgument")
 		{
 			const std::vector<std::string> arguments = { "--frames", "0" };
 			const Result<CommandLine> commandLine = CommandLine::Parse(arguments, GetEngineCommandLineOptions());

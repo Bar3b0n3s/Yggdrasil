@@ -71,6 +71,19 @@ namespace Engine {
 		// spelling ("--headless", "--frames N" for a Required option, "--automation[=port]" for an Optional one), padded to
 		// a common width, then its description.
 		[[nodiscard]] static std::string FormatUsage(std::string_view programName, std::span<const CommandLineOption> options);
+	private:
+		// One option as given: its declared name and its value (nullopt for a flag or a valueless Optional option).
+		struct GivenOption
+		{
+			std::string Name{};
+			std::optional<std::string> Value{};
+		};
+
+		[[nodiscard]] const GivenOption* FindGiven(std::string_view name) const;
+	private:
+		std::vector<std::string> m_Arguments;
+		std::vector<std::string> m_Positional;
+		std::vector<GivenOption> m_Options; // in the order given
 	};
 
 }

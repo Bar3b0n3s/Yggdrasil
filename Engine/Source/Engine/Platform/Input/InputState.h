@@ -6,6 +6,9 @@
 
 #include <glm/vec2.hpp>
 
+#include <array>
+#include <bitset>
+#include <cstddef>
 #include <cstdint>
 
 // Input state (Architecture §4.3): keys, mouse buttons, cursor, scroll and up to 4 gamepads, with phase-aware edges.
@@ -56,8 +59,13 @@ namespace Engine {
 	// Cursor: the position of the last MouseMoveEvent; the first one sets the position without producing a delta. A
 	// view's mouse delta and scroll delta are the sums since that phase's previous latch. Gamepads: Connected and
 	// Disconnected events change the connection state; Disconnected also releases every button (with Released edges)
-	// and zeroes the axes, which is the rest value of every axis (sticks centred, triggers released). Axis values are the
-	// last injected value (the dead zone is applied by InputActionMap).
+	// and zeroes the axes, which is the rest value of every axis (sticks centred, triggers released). Button and Axis
+	// events for a gamepad that is not connected are ignored, so every source injects Connected before a gamepad's first
+	// control (the window always does). Axis values are the last injected value clamped to the axis range (-1 to 1 for
+	// sticks, 0 to 1 for triggers; the dead zone is applied by InputActionMap). Events with a NaN axis value or a
+	// non-finite cursor position or scroll offset are ignored, and so is a MouseMoveEvent or MouseScrollEvent whose
+	// motion, added to a phase's pending delta, would exceed the float range (about 3.4e38): the views never hold NaN or
+	// infinity, whatever finite values a caller injects.
 	//
 	// Not thread-safe: the main thread owns it. Deterministic: the views depend only on the sequence of Inject and latch
 	// calls.
@@ -96,6 +104,58 @@ namespace Engine {
 		[[nodiscard]] bool WasGamepadButtonReleased(InputPhase phase, uint32_t gamepad, GamepadButton button) const;
 		// The axis value at the phase's last latch, engine convention (up-positive sticks), without dead zone.
 		[[nodiscard]] float GetGamepadAxis(InputPhase phase, uint32_t gamepad, GamepadAxis axis) const;
+	private:
+		static constexpr size_t PhaseCount = 2;
+
+		// One gamepad. An unconnected gamepad is always at rest: no button down and every axis 0.
+		struct GamepadState
+		{
+			bool Connected = false;
+			std::bitset<GamepadButtonCount> ButtonsDown{};
+			std::array<float, GamepadAxisCount> Axes{};
+		};
+
+		// The level of every control.
+		struct DeviceState
+		{
+			std::bitset<KeyCodeCount> KeysDown{};
+			std::bitset<MouseButtonCount> MouseButtonsDown{};
+			glm::vec2 MousePosition{ 0.0f };
+			std::array<GamepadState, MaxGamepads> Gamepads{};
+		};
+
+		// What changed between two latches of one phase.
+		struct PhaseChanges
+		{
+			std::bitset<KeyCodeCount> KeysPressed{};
+			std::bitset<KeyCodeCount> KeysReleased{};
+			std::bitset<MouseButtonCount> MouseButtonsPressed{};
+			std::bitset<MouseButtonCount> MouseButtonsReleased{};
+			std::array<std::bitset<GamepadButtonCount>, MaxGamepads> GamepadButtonsPressed{};
+			std::array<std::bitset<GamepadButtonCount>, MaxGamepads> GamepadButtonsReleased{};
+			glm::vec2 MouseDelta{ 0.0f };
+			glm::vec2 ScrollDelta{ 0.0f };
+		};
+
+		// What the queries of one phase read: the live state and the pending changes at that phase's last latch.
+		struct LatchedView
+		{
+			DeviceState State{};
+			PhaseChanges Changes{};
+		};
+
+		void InjectKey(const KeyEvent& key);
+		void InjectMouseButton(const MouseButtonEvent& button);
+		void InjectMouseMove(const MouseMoveEvent& move);
+		void InjectMouseScroll(const MouseScrollEvent& scroll);
+		void InjectGamepad(const GamepadEvent& gamepad);
+		void Latch(InputPhase phase);
+		[[nodiscard]] const LatchedView& GetView(InputPhase phase) const;
+	private:
+		DeviceState m_Live;
+		std::array<PhaseChanges, PhaseCount> m_Pending{}; // indexed by InputPhase
+		std::array<LatchedView, PhaseCount> m_Views{};    // indexed by InputPhase
+		bool m_HasMousePosition = false;                  // false until the first MouseMoveEvent
 	};
 
 }

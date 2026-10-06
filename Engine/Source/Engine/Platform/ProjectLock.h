@@ -13,8 +13,10 @@
 //
 // File format: the holder's process ID in decimal ASCII followed by one LF, nothing else. Other processes can read it
 // while the lock is held (the MCP bridge reports EditorAlreadyOpen {pid} from it, §13.8): POSIX uses flock on the whole
-// file, which is advisory and leaves reads alone; Windows uses LockFileEx on one byte at offset 4096, past the text, so
-// the text itself stays readable.
+// file, which is advisory and leaves reads alone; Windows uses LockFileEx on one byte at offset 0x7FFFFFFF'FFFFFFFE,
+// because Windows checks every byte a read requests against locks, so even a reader that asks for far more than the
+// text in one read gets it, and the holder keeps only read access to the file, so even a reader that denies writers
+// (.NET's File.ReadAllText) can open it.
 
 namespace Engine {
 

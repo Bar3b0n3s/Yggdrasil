@@ -1,6 +1,7 @@
 #include "TestsPCH.h"
 #include "Support/TestOptions.h"
 
+#include "Engine/Core/Utf8.h"
 #include "Support/ChildProcess.h"
 #include "Support/Utf8Path.h"
 
@@ -132,6 +133,9 @@ namespace Engine {
 						return MakeError(ErrorCode::InvalidArgument, "{} needs an absolute directory: {}=<path>", Utils::UserDataOption,
 							Utils::UserDataOption);
 					}
+					// std::filesystem::path throws on ill-formed UTF-8 on Windows.
+					if (!IsValidUtf8(*directory))
+						return MakeError(ErrorCode::InvalidArgument, "{} needs a path in UTF-8", Utils::UserDataOption);
 					std::filesystem::path path = PathFromUtf8(*directory);
 					if (!path.is_absolute())
 					{

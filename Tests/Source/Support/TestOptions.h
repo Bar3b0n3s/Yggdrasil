@@ -11,16 +11,17 @@
 // The Tests binary's own command-line options (Architecture §15.2), next to doctest's. The Tests main
 // (Tests/Source/TestMain.cpp) does, in order:
 //   1. ParseTestOptions; a malformed option exits with code 2 (UsageError).
-//   2. Log::Initialize with the console sink (stderr); a failure exits with code 3 (InitFailed), because without the
-//      log ExpectLog would see no entries. Then Profiler::Initialize and InstallRecordingAssertHandler.
-//   3. With --death-test=<name>: RunDeathTestBody(name) (DeathTest.h) instead of doctest, then shut down the profiler and
-//      the log and return its exit code.
-//   4. Otherwise: InstallExpectLogListener, StartTestTimeoutWatchdog, run doctest with the remaining arguments, stop the
-//      watchdog, UninstallExpectLogListener, shut down the profiler and the log, and return doctest's result.
-// M2 replaces the log and profiler start of step 2 with a ProcessContext (App/ProcessContext.h: headless,
-// ENGINE_PRODUCT_NAME, UserDataDirectory as the user-data root) and adds two child modes: --windowed-child
-// (WindowedChild.h: a native-platform ProcessContext runs one ChildTargets test case) and --crash-child
-// (CrashHandler::SimulateCrash). Which process writes which file follows IsChildProcess(), never a guess from the mode:
+//   2. ProcessContext::Create (App/ProcessContext.h) with ENGINE_PRODUCT_NAME, UserDataDirectory as the user-data root
+//      and the file rules below. It is headless (GLFW's null platform), except with --windowed-child, where it uses
+//      GLFW's native platform. A failure exits with code 3 (InitFailed), because without the log ExpectLog would see no
+//      entries. Then InstallRecordingAssertHandler.
+//   3. With --death-test=<name>: RunDeathTestBody(name) (DeathTest.h) instead of doctest. With --crash-child: the crash
+//      child (CrashChild below) instead of doctest.
+//   4. Otherwise: InstallExpectLogListener, StartTestTimeoutWatchdog, run doctest (with --windowed-child=<case>
+//      RunWindowedChildTestCase, WindowedChild.h; otherwise with the remaining arguments), stop the watchdog and
+//      UninstallExpectLogListener.
+//   5. Destroy the ProcessContext (its steps are torn down in reverse) and return the exit code of step 3 or 4.
+// Which process writes which file follows IsChildProcess(), never a guess from the mode:
 //   - the log file <UserData>/<AppName>/Logs/Tests.log only when !IsChildProcess() (LogToFile), so two processes never
 //     write and rotate one Tests.log; a child logs to the console, which its parent captures;
 //   - crash reports when !IsChildProcess() or UserDataDirectory is set (WriteCrashReports): a child writes them only into
@@ -56,7 +57,8 @@ namespace Engine {
 			// --crash-child: after the ProcessContext installed the crash handler, set the FramePhase breadcrumb to
 			// "Crash child" and crash through CrashHandler::SimulateCrash (child mode; Roadmap M2 "Tests --crash-child writes a
 			// crash report and exits 4"). With --child-argument=fatal-error it calls FatalError(FatalErrorKind::DeviceLost,
-			// "Simulated device loss") instead, the fatal path that ProcessContext's fatal-error handler reports.
+			// "Simulated device loss") instead, the fatal path that ProcessContext's fatal-error handler reports. Any other
+			// --child-argument logs an error and exits with code 2 (UsageError).
 			bool CrashChild = false;
 			// --child-process (ChildProcessOption): another Tests process started this one, whatever it runs (a child mode,
 			// a ChildTargets case through --no-skip --test-case, a --list-test-cases run). See the file comment for the files

@@ -41,7 +41,8 @@ namespace Engine {
 	struct ProcessResult
 	{
 		// The child's exit code. On POSIX a child ended by a signal reports 128 + the signal number. On Windows a child
-		// ended by an unhandled exception reports the exception code (0xC0000005 for an access violation) as an int.
+		// ended by an unhandled exception reports the exception code (0xC0000005 for an access violation) as an int. A
+		// child ended by Kill, by Run's timeout or by destroying its Process reports 137 on every host (128 + SIGKILL).
 		int ExitCode = 0;
 		std::string StandardOutput{}; // everything the child wrote, in full
 		std::string StandardError{};
@@ -63,8 +64,9 @@ namespace Engine {
 		// or a name containing '='; Io when the OS cannot start it (the message names the executable and the OS error).
 		[[nodiscard]] static Result<Process> Spawn(const ProcessSpecification& specification);
 
-		// Spawn, then Wait(timeout); on Timeout the child is killed before the error is returned. Errors: those of Spawn
-		// and Wait. Thread-safe (each call has its own child).
+		// Spawn, then Wait(timeout); on Timeout a child that still runs is killed before the error is returned ("ran longer
+		// than <timeout> ms and was killed"), while a child that exited but left a process it started holding its output
+		// gets Wait's error, which says so. Errors: those of Spawn and Wait. Thread-safe (each call has its own child).
 		[[nodiscard]] static Result<ProcessResult> Run(const ProcessSpecification& specification, std::chrono::milliseconds timeout);
 
 		~Process();

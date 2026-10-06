@@ -187,6 +187,20 @@ namespace Engine {
 			CHECK(Test::GetTestOptions().DeathTest.empty());
 			CHECK(Test::GetTestOptions().DefaultTimeoutSeconds > 0.0);
 		}
+
+		TEST_CASE("TestOptions: a --user-data-dir that is not valid UTF-8 is InvalidArgument")
+		{
+			// An absolute path on every host, except for the ill-formed byte 0xFF.
+			std::error_code error;
+			const std::filesystem::path temporary = std::filesystem::temp_directory_path(error);
+			REQUIRE_FALSE(error);
+			const std::string option = "--user-data-dir=" + Test::PathToUtf8(temporary.root_path()) + "Data\xff";
+			const std::array<const char*, 2> argv = { "Tests", option.c_str() };
+			const Result<Test::TestOptions> options = Test::ParseTestOptions(static_cast<int>(argv.size()), argv.data());
+			REQUIRE_FALSE(options.has_value());
+			CHECK(options.error().GetCode() == ErrorCode::InvalidArgument);
+			CHECK(options.error().GetMessageText().contains("--user-data-dir"));
+		}
 	}
 
 }

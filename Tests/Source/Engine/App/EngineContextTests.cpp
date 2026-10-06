@@ -16,7 +16,7 @@ namespace Engine {
 
 	TEST_SUITE("App")
 	{
-		TEST_CASE("EngineContext: builds its services without a window or GLFW" * doctest::skip(true))
+		TEST_CASE("EngineContext: builds its services without a window or GLFW")
 		{
 			Result<Scope<EngineContext>> created = EngineContext::Create({ .WorkerCount = 0 });
 			REQUIRE(created.has_value());
@@ -43,7 +43,7 @@ namespace Engine {
 			CHECK(completions == 1);
 		}
 
-		TEST_CASE("EngineContext: mounts user:// on the given directory without backups" * doctest::skip(true))
+		TEST_CASE("EngineContext: mounts user:// on the given directory without backups")
 		{
 			Test::TempDirectory directory("EngineContextUserData");
 			Result<Scope<EngineContext>> created = EngineContext::Create({ .UserDataDirectory = directory.GetPath() });
@@ -63,7 +63,7 @@ namespace Engine {
 			CHECK_FALSE(std::filesystem::exists(directory / "Editor.json.bak", error));
 		}
 
-		TEST_CASE("EngineContext: a missing user-data directory fails with the step as context" * doctest::skip(true))
+		TEST_CASE("EngineContext: a missing user-data directory fails with the step as context")
 		{
 			Test::TempDirectory directory("EngineContextMissing");
 			const Result<Scope<EngineContext>> created = EngineContext::Create({ .UserDataDirectory = directory / "Missing" });
@@ -72,7 +72,7 @@ namespace Engine {
 			CHECK(created.error().ToString().contains("UserData"));
 		}
 
-		TEST_CASE("EngineContext: creates a null-platform window in the headless Tests process" * doctest::skip(true))
+		TEST_CASE("EngineContext: creates a null-platform window in the headless Tests process")
 		{
 			const WindowSpecification specification = { .Title = "Context", .Width = 128, .Height = 96 };
 			Result<Scope<EngineContext>> created = EngineContext::Create({ .Window = specification });
@@ -83,7 +83,7 @@ namespace Engine {
 			CHECK(window->GetTitle() == "Context");
 		}
 
-		TEST_CASE("EngineContext: several contexts live side by side" * doctest::skip(true))
+		TEST_CASE("EngineContext: several contexts live side by side")
 		{
 			const WindowSpecification firstWindow = { .Title = "First", .Width = 64, .Height = 64 };
 			const WindowSpecification secondWindow = { .Title = "Second", .Width = 32, .Height = 32 };
@@ -103,7 +103,7 @@ namespace Engine {
 			CHECK_FALSE((*second)->GetInputState().IsKeyDown(InputPhase::Frame, Key::F));
 		}
 
-		TEST_CASE("EngineContext: EngineContextStepToString names every step" * doctest::skip(true))
+		TEST_CASE("EngineContext: EngineContextStepToString names every step")
 		{
 			CHECK(EngineContextStepToString(EngineContextStep::Services) == "Services");
 			CHECK(EngineContextStepToString(EngineContextStep::UserData) == "UserData");

@@ -51,8 +51,8 @@ namespace Engine {
 	// gamepad order, then connection, buttons in GamepadButton order and axes in GamepadAxis order. Axis values are
 	// converted with GamepadAxisValueFromGlfw.
 	//
-	// Minimized: IsMinimized is true while the window is iconified or its framebuffer is 0x0. The frame loop then waits in
-	// WaitEventsTimeout instead of PollEvents, so the CPU idles (§4.2).
+	// Minimized: IsMinimized is true while the window is iconified or its framebuffer has a zero width or height. The
+	// frame loop then waits in WaitEventsTimeout instead of PollEvents, so the CPU idles (§4.2).
 	//
 	// Main thread only (GLFW's rule; asserted in Debug and Release builds). A movable value: the GLFW window, the queue and
 	// the callback live behind a stable private implementation, so moving a Window does not disturb GLFW's callbacks. A

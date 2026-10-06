@@ -27,7 +27,7 @@ namespace Engine {
 
 	TEST_SUITE("App")
 	{
-		TEST_CASE("RunApplication: an unknown option exits with UsageError and names it" * doctest::skip(true))
+		TEST_CASE("RunApplication: an unknown option exits with UsageError and names it")
 		{
 			Test::TempDirectory userData("UnknownOption");
 			const Result<ProcessResult> result = RunRuntime({ "--headless", "--no-such-option", UserDataOption(userData) });
@@ -47,7 +47,7 @@ namespace Engine {
 			}
 		}
 
-		TEST_CASE("RunApplication: a malformed --frames value exits with UsageError" * doctest::skip(true))
+		TEST_CASE("RunApplication: a malformed --frames value exits with UsageError")
 		{
 			const std::array<std::vector<std::string>, 3> invalid = { {
 				{ "--headless", "--frames" },
@@ -67,7 +67,7 @@ namespace Engine {
 			}
 		}
 
-		TEST_CASE("RunApplication: a user-data root that cannot be created exits with InitFailed" * doctest::skip(true))
+		TEST_CASE("RunApplication: a user-data root that cannot be created exits with InitFailed")
 		{
 			// The root is a regular file, so ProcessContext::Create cannot create <root>/<AppName>/Logs.
 			Test::TempDirectory directory("BlockedUserData");

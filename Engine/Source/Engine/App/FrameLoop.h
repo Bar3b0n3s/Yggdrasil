@@ -6,6 +6,7 @@
 #include "Engine/Core/Time.h"
 #include "Engine/Platform/Events.h"
 
+#include <chrono>
 #include <cstdint>
 #include <optional>
 
@@ -93,6 +94,23 @@ namespace Engine {
 		[[nodiscard]] const Clock& GetClock() const;
 		// The FrameTime of the last completed frame (all zero before the first).
 		[[nodiscard]] const FrameTime& GetLastFrameTime() const;
+	private:
+		// Step 1 for one delivered event: the client, then the exit request of an unhandled close, then InputState.
+		void DispatchEvent(Event& event);
+		// Step 5's pacing: sleeps until the wall-clock slot of the frame that started at `frameStart` ends.
+		void WaitForFrameSlot(std::chrono::steady_clock::time_point frameStart);
+	private:
+		EngineContext* m_Context = nullptr;   // documented back-reference: outlives the loop
+		IFrameLoopClient* m_Client = nullptr; // documented back-reference: outlives the loop
+		Scope<Clock> m_Clock;
+		FrameLoopSpecification m_Specification;
+		FixedStepScheduler m_Scheduler;
+		FrameTime m_LastFrameTime;
+		uint64_t m_FrameCount = 0;
+		int m_ExitCode = 0; // ExitCode::Success until a request
+		bool m_ExitRequested = false;
+		// The end of the current throttle slot (ThrottleToFixedHz); nullopt before the first throttled frame.
+		std::optional<std::chrono::steady_clock::time_point> m_FrameSlotEnd;
 	};
 
 }

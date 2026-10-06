@@ -506,12 +506,12 @@
 			}
 		},
 		{
-			"Name": "TestsChildProcess",
+			"Name": "TestsPlatformProbes",
 			"Kind": "Project",
 			"Paths": [
-				"Tests/Source/Support/ChildProcess.cpp"
+				"Tests/Source/Support/PlatformProbes.cpp"
 			],
-			"Notes": "The M1 stand-in for Platform::Process (Docs/Decisions/0003-m1-contract-decisions.md, decision 1): the only Tests file with OS headers, for spawning death-test children. M2 re-implements it on Platform::Process and removes this rule. Otherwise the Tests rules apply.",
+			"Notes": "The only Tests file with OS headers (Docs/Decisions/0005-m2-decisions.md, decision 25): the faults and observers platform tests reproduce and the engine deliberately does not offer (a locked process heap, a reader that denies writers, a descriptor without close-on-exec, a process that inherits the standard handles). Otherwise the Tests rules apply.",
 			"FlagsFrom": "Tests",
 			"Modules": {
 				"Allow": [
@@ -589,7 +589,7 @@
 		],
 		"TestsPCH.h": [
 			"Tests",
-			"TestsChildProcess"
+			"TestsPlatformProbes"
 		]
 	},
 	"Banned": {

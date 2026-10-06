@@ -7,8 +7,6 @@
 #include "Support/TempDirectory.h"
 #include "Support/TestOptions.h"
 
-#include <condition_variable>
-#include <mutex>
 #include <system_error>
 
 namespace Engine {
@@ -17,16 +15,10 @@ namespace Engine {
 	// characters a Windows command line must escape. No comma, '*' or '?', which doctest's --test-case filter interprets.
 	static constexpr const char* QuotingTargetName = "ChildProcess: the quoting target \"a b\" c\\d\\\"e\\";
 
-	// Blocks forever: the child of the timeout test. It never notifies, so the wait never ends.
+	// Blocks until killed: the child of the timeout test.
 	ENGINE_DEATH_TEST("Support/Hangs")
 	{
-		std::mutex mutex;
-		std::condition_variable never;
-		std::unique_lock lock(mutex);
-		never.wait(lock, []()
-		{
-			return false;
-		});
+		Test::BlockUntilKilled();
 	}
 
 	// Writes far more to stderr than a pipe holds (about 160 KB) before it exits, while nothing reaches stdout.

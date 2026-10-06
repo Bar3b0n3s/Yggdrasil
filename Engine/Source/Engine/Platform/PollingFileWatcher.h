@@ -6,6 +6,11 @@
 #include "Engine/Core/VirtualFileSystem.h"
 
 #include <cstdint>
+#include <map>
+#include <mutex>
+#include <optional>
+#include <set>
+#include <span>
 #include <string_view>
 #include <vector>
 
@@ -83,6 +88,60 @@ namespace Engine {
 		[[nodiscard]] Status MarkKnown(const VfsPath& path);
 
 		[[nodiscard]] const PollingFileWatcherSpecification& GetSpecification() const;
+	private:
+		// What a scan, or MarkKnown, saw of one file.
+		struct FileState
+		{
+			uint64_t Size = 0;
+			uint64_t ModificationTime = 0;
+			uint64_t ContentHash = 0; // XXH64
+		};
+
+		// One file the watcher knows about; erased once it is absent, reported and not pending.
+		struct TrackedFile
+		{
+			std::optional<uint64_t> KnownHash{};      // the last reported (or baseline, or MarkKnown) content; empty: absent
+			std::optional<FileState> Observed{};      // what the latest scan (or MarkKnown) saw; empty: absent
+			std::optional<double> ChangedAtSeconds{}; // pending: the time of the scan that last saw Observed change
+		};
+
+		// One file of a scan's listing, with its content hash once read (empty: not read, or unreadable).
+		struct ScannedFile
+		{
+			VfsPath Path{};
+			uint64_t Size = 0;
+			uint64_t ModificationTime = 0;
+			std::optional<uint64_t> ContentHash{};
+		};
+
+		// Opens and closes a scan, under m_StateMutex: while a scan is open, MarkKnown records the paths it touches.
+		void BeginScan();
+		void EndScan();
+
+		// Lists the files under the root, sorted by path. Errors: those of VirtualFileSystem::List.
+		[[nodiscard]] Result<std::vector<ScannedFile>> ListFiles() const;
+
+		// Folds one Poll's scan into m_Files and returns the changes whose debounce expired (under m_StateMutex).
+		[[nodiscard]] std::vector<FileChange> MergeScan(std::span<const ScannedFile> files, double nowSeconds);
+	private:
+		// Documented back-reference (§4.7): the VFS outlives the watcher.
+		const VirtualFileSystem* m_Vfs = nullptr;
+		PollingFileWatcherSpecification m_Specification;
+
+		// Serializes Start and Poll for their whole duration, including their VFS I/O; guards m_UnreadablePaths.
+		std::mutex m_ScanMutex;
+		std::set<VfsPath> m_UnreadablePaths; // files whose last read failed, so each failure is logged once
+
+		// Guards the members below. Held only between VFS calls, never across them, so MarkKnown on the main thread never
+		// waits for a scan's I/O: paths it records while a scan is open are left alone by that scan, whose listing of them
+		// may be older than MarkKnown's state.
+		std::mutex m_StateMutex;
+		std::map<VfsPath, TrackedFile> m_Files; // sorted by path, so changes come out in canonical order
+		std::set<VfsPath> m_MarkedDuringScan;
+		double m_LastPollSeconds = 0.0;
+		bool m_HasPolled = false;
+		bool m_IsStarted = false;
+		bool m_IsScanning = false;
 	};
 
 	// "Created", "Modified" or "Deleted".
