@@ -19,9 +19,10 @@ Stages that exist in milestone M0, with the configurations of the §15.8 matrix:
                                      reference) into bin-int/Portability/, each checked against the expected file list
                                      and project/configuration set; the xcode4 projects' precompiled headers
                                      (GCC_PREFIX_HEADER, resolved like Xcode does) and the gmake ones must exist, and
-                                     the first-party xcode4 projects must enable LTO (LLVM_LTO) in Dist; then a clang-cl
-                                     Release build of Tests (Engine, EditorCore and the vendored libraries included,
-                                     warnings tolerated only in vendored code) when Visual Studio's C++ Clang component
+                                     the first-party xcode4 projects must enable LTO (LLVM_LTO) in Dist; then clang-cl
+                                     builds of Tests in Release (Engine, EditorCore and the vendored libraries included)
+                                     and of every Dist project (asserts compiled out), warnings tolerated only in
+                                     vendored code, when Visual Studio's C++ Clang component
                                      is installed, otherwise reported as skipped (a failure with --require-clang-cl)
 Later stages of §15.8 (bake, gpu, golden, feature, automation, export, determinism, games, hardening) are accepted by
 --stages and reported as "not-available" until their milestone.
@@ -359,7 +360,7 @@ class Runner:
                                          f"{', '.join(XCODE_DIST_LTO_PROJECTS)} enable LTO in Dist (xcode4)")
 
     def clang_cl_build(self) -> Step:
-        name = "portability clang-cl build (Release)"
+        name = "portability clang-cl build (Release, Dist)"
         if self.arguments.no_clang_cl:
             return Step(name, Status.SKIPPED, "--no-clang-cl given")
         host = paths.host()
@@ -392,7 +393,15 @@ class Runner:
         built = self.script(name, "Build.py", ["--workspace-dir", str(location), "--config", "Release",
                                                "--project", "Tests", "--allow-vendor-warnings"], TIMEOUTS["clang-cl"])
         built.duration += generated.duration
-        return built
+        if built.failed:
+            return built
+        # Dist as well: asserts compile out there, so Clang's -Wunneeded-internal-declaration and -Wunused-variable
+        # catch helpers and values only asserts use, which MSVC never reports (the Linux and macOS jobs would).
+        dist = self.script(f"{name}: Dist", "Build.py", ["--workspace-dir", str(location), "--config", "Dist",
+                                                          "--allow-vendor-warnings"], TIMEOUTS["clang-cl"])
+        if dist.failed:
+            return Step(name, Status.FAILED, dist.detail, built.duration + dist.duration, exit_code=dist.exit_code)
+        return Step(name, Status.PASSED, f"{built.detail}; Dist: {dist.detail}", built.duration + dist.duration)
 
 
 def parse_arguments(argv: list[str]) -> argparse.Namespace:
@@ -412,8 +421,8 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--toolset", choices=("msc", "gcc", "clang"),
                         help="compiler toolset passed to Generate.py (Linux: gcc or clang)")
     parser.add_argument("--no-clang-cl", action="store_true",
-                        help="portability: leave out the clang-cl Release build of Tests (Windows; by default it runs "
-                             "when Visual Studio's C++ Clang component is installed)")
+                        help="portability: leave out the clang-cl builds (Release Tests and Dist; Windows; by default "
+                             "they run when Visual Studio's C++ Clang component is installed)")
     parser.add_argument("--require-clang-cl", action="store_true",
                         help="portability: fail (exit code 3) instead of skipping the clang-cl build when Visual "
                              "Studio's C++ Clang component is missing (CI runners that must have it)")

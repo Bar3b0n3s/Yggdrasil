@@ -31,7 +31,8 @@ namespace Engine {
 				return false;
 		}
 
-		static bool AreUniqueAndSorted(const std::vector<std::string>& keys)
+		// Only an assert calls it, so it is unused where asserts compile out (Dist).
+		[[maybe_unused]] static bool AreUniqueAndSorted(const std::vector<std::string>& keys)
 		{
 			for (size_t i = 1; i < keys.size(); ++i)
 			{

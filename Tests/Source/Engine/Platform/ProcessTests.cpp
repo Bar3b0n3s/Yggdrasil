@@ -163,11 +163,10 @@ namespace Engine {
 
 		TEST_CASE("Process: arguments reach the child verbatim")
 		{
-			const std::vector<std::string> arguments = {
-				"--no-skip",
-				"--list-test-cases",
-				std::string("--test-case=") + QuotingTargetName,
-			};
+			// Built before the list: GCC 14 -O2 reports `std::string(...) + name` inside the initializer list as an
+			// out-of-bounds memcpy (-Warray-bounds false positive).
+			const std::string testCaseArgument = std::format("--test-case={}", QuotingTargetName);
+			const std::vector<std::string> arguments = { "--no-skip", "--list-test-cases", testCaseArgument };
 			const Result<ProcessResult> listed = Process::Run(Test::MakeTestsChildSpecification(arguments), std::chrono::seconds(60));
 			REQUIRE(listed.has_value());
 			CHECK(listed->ExitCode == 0);
