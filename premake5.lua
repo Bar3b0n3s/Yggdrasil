@@ -12,6 +12,14 @@ include "Scripts/Premake/XcodeHeaderSearchPaths.lua"
 
 newoption
 {
+	trigger = "python",
+	value = "path",
+	-- Scripts/Generate.py passes its own interpreter; without the option: python on Windows, python3 elsewhere.
+	description = "Python 3.10+ interpreter that build steps run"
+}
+
+newoption
+{
 	trigger = "to",
 	value = "path",
 	description = "Write the generated workspace and project files to this directory"

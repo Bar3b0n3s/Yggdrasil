@@ -28,12 +28,19 @@ local function AddShaderCompileRule()
 		}
 		buildoutputs { ShaderOutputDirectory .. "/.stamp" }
 
-	filter { "files:**/Resources/Shaders/Shaders.json", "system:windows" }
-		buildcommands { "python " .. compile }
+	-- The interpreter Scripts/Generate.py runs under (--python), so build steps get the same verified Python 3.10+
+	-- everywhere. This matters in Xcode script phases, whose PATH finds Xcode's own older python3 first.
+	if _OPTIONS["python"] then
+		filter "files:**/Resources/Shaders/Shaders.json"
+			buildcommands { "\"" .. _OPTIONS["python"] .. "\" " .. compile }
+	else
+		filter { "files:**/Resources/Shaders/Shaders.json", "system:windows" }
+			buildcommands { "python " .. compile }
 
-	-- Linux and macOS ship python3 without a "python" alias.
-	filter { "files:**/Resources/Shaders/Shaders.json", "system:not windows" }
-		buildcommands { "python3 " .. compile }
+		-- Linux and macOS ship python3 without a "python" alias.
+		filter { "files:**/Resources/Shaders/Shaders.json", "system:not windows" }
+			buildcommands { "python3 " .. compile }
+	end
 
 	filter {}
 end

@@ -42,7 +42,8 @@ SYSTEMS = ("windows", "linux", "macosx")
 
 
 def premake_arguments(action: str, target_os: str, toolset: str | None, location: Path | None) -> list[str]:
-    arguments = ["--fatal", f"--os={target_os}"]
+    # Build steps (the shader rule) run this verified Python 3.10+ interpreter, not whatever the IDE's PATH finds.
+    arguments = ["--fatal", f"--os={target_os}", f"--python={Path(sys.executable).resolve().as_posix()}"]
     # "msc" is the vs2026 default (msc-v145); every other toolset is selected explicitly.
     if toolset and toolset != "msc":
         arguments.append(f"--cc={toolset}")
