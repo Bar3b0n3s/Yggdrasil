@@ -27,9 +27,98 @@ namespace Engine {
 		return *text;
 	}
 
+	namespace {
+
+		struct ReadOnlyHolder
+		{
+			float Locked = 7.0f;
+			float Free = 1.0f;
+		};
+
+	}
+
 	TEST_SUITE("Reflection")
 	{
-		TEST_CASE("RandomValueGenerator: the same seed gives the same values" * doctest::skip(true))
+		TEST_CASE("RandomValueGenerator: options bound array, map and string sizes and read-only fields are skipped")
+		{
+			Scope<TypeRegistry> registry = CreateScope<TypeRegistry>();
+			Test::RegisterReflectionTestTypes(*registry);
+			registry->Struct<ReadOnlyHolder>("ReadOnlyHolder", "A struct with a read-only field.")
+				.Field("Locked", &ReadOnlyHolder::Locked, "A read-only value.", { .ReadOnly = true })
+				.Field("Free", &ReadOnlyHolder::Free, "A writable value.", { .Min = 2.0, .Max = 3.0 });
+			registry->Freeze();
+			const StructInfo* allFields = registry->FindStruct<Test::TestAllFields>();
+			const StructInfo* holder = registry->FindStruct<ReadOnlyHolder>();
+			REQUIRE(allFields != nullptr);
+			REQUIRE(holder != nullptr);
+
+			RandomValueOptions options;
+			options.MaxArrayLength = 2;
+			options.MaxMapKeys = 3;
+			options.MaxStringLength = 4;
+			RandomValueGenerator generator(*registry, 11, options);
+			for (int i = 0; i < 100; ++i)
+			{
+				Test::TestAllFields object;
+				generator.Randomize(*allFields, &object);
+				CHECK(object.Labels.size() <= 2);
+				CHECK(object.Scores.size() <= 3);
+				CHECK(object.Name.size() <= 4);
+				for (const std::string& label : object.Labels)
+					CHECK(label.size() <= 4);
+				CHECK(object.Count >= -10);
+				CHECK(object.Count <= 10);
+				CHECK(object.Mass >= 0.001f);
+				for (glm::length_t component = 0; component < 3; ++component)
+					CHECK(glm::abs(object.Scale[component]) >= 1e-4f);
+
+				ReadOnlyHolder values;
+				generator.Randomize(*holder, &values);
+				CHECK(values.Locked == 7.0f);
+				CHECK(values.Free >= 2.0f);
+				CHECK(values.Free <= 3.0f);
+			}
+		}
+
+		TEST_CASE("RandomValueGenerator: RandomJson produces valid JSON for schema-only and struct fields")
+		{
+			Scope<TypeRegistry> registry = CreateScope<TypeRegistry>();
+			Test::RegisterReflectionTestTypes(*registry);
+			registry->Freeze();
+			const StructInfo* allFields = registry->FindStruct<Test::TestAllFields>();
+			REQUIRE(allFields != nullptr);
+			const Test::FixtureSchemaSource schemas = Test::FixtureSchemaSource::CreateStandard();
+			const Result<const FieldInfo*> torque = schemas.FindField(Test::FixtureSchemaSource::DefaultOwner, "Torque");
+			REQUIRE(torque.has_value());
+
+			RandomValueGenerator generator(*registry, 5);
+			const ResolveContext context;
+			for (int i = 0; i < 100; ++i)
+			{
+				const std::string_view names[] = { "Torque", "Count", "Enabled", "Goal", "Tint", "Label" };
+				for (const std::string_view name : names)
+				{
+					const Result<const FieldInfo*> field = schemas.FindField(Test::FixtureSchemaSource::DefaultOwner, name);
+					REQUIRE(field.has_value());
+					const Json json = generator.RandomJson(**field, context);
+					ValidationContext validation;
+					(*field)->ValidateJson(JsonReader(json), context, validation);
+					INFO(std::string(name));
+					CHECK_FALSE(validation.HasErrors());
+				}
+
+				const FieldInfo* inner = allFields->FindField("Inner");
+				REQUIRE(inner != nullptr);
+				const Json innerJson = generator.RandomJson(*inner, context);
+				CHECK(innerJson.contains("Weight"));
+				CHECK(innerJson.contains("Label"));
+				ValidationContext validation;
+				inner->ValidateJson(JsonReader(innerJson), context, validation);
+				CHECK_FALSE(validation.HasErrors());
+			}
+		}
+
+		TEST_CASE("RandomValueGenerator: the same seed gives the same values")
 		{
 			Scope<TypeRegistry> registry = CreateScope<TypeRegistry>();
 			Test::RegisterReflectionTestTypes(*registry);
@@ -39,7 +128,7 @@ namespace Engine {
 			CHECK(RandomizedText(*registry, 7) != RandomizedText(*registry, 8));
 		}
 
-		TEST_CASE("RandomValueGenerator: every generated value passes validation" * doctest::skip(true))
+		TEST_CASE("RandomValueGenerator: every generated value passes validation")
 		{
 			Scope<TypeRegistry> registry = CreateScope<TypeRegistry>();
 			Test::RegisterReflectionTestTypes(*registry);
@@ -62,7 +151,7 @@ namespace Engine {
 			}
 		}
 
-		TEST_CASE("RandomValueGenerator: Generate hooks make random objects pass the type-level validators" * doctest::skip(true))
+		TEST_CASE("RandomValueGenerator: Generate hooks make random objects pass the type-level validators")
 		{
 			Scope<TypeRegistry> registry = CreateScope<TypeRegistry>();
 			Test::RegisterReflectionTestTypes(*registry);
@@ -90,7 +179,7 @@ namespace Engine {
 			}
 		}
 
-		TEST_CASE("RandomValueGenerator: Variant maps draw their keys from the options and values from the resolved schema" * doctest::skip(true))
+		TEST_CASE("RandomValueGenerator: Variant maps draw their keys from the options and values from the resolved schema")
 		{
 			Scope<TypeRegistry> registry = CreateScope<TypeRegistry>();
 			Test::RegisterReflectionTestTypes(*registry);

@@ -62,7 +62,15 @@ namespace Engine {
 	// prefab entity's JSON is first remapped as instantiation would remap it, so a fresh instance has no overrides and an
 	// internal reference that still points at the same member is not an override. Override values and ApplyOverrides map
 	// instance IDs back to prefab-local IDs through the member table (PrefabLinkComponent), so neither overrides nor the
-	// prefab ever store derived IDs; a reference to an entity outside the instance is kept as it is.
+	// prefab ever store derived IDs; a reference to an entity outside the instance is kept as it is. An outside entity
+	// whose ID is also a prefab-local ID of the prefab (its source entity, when the prefab was created from entities that
+	// stayed in the scene) cannot be told apart from that prefab entity once stored, so ComputeOverrides, RefreshOverrides
+	// and ApplyOverrides reject a reference to it (InvalidState) instead of storing a value the next update would redirect
+	// to the instance's own member.
+	//
+	// A Map of Variants (Script.Fields) holds independently authored values (§11.2), so its Field override records only the
+	// keys that differ from the prefab, as an RFC 7386 patch (null for a key the instance removed), and applying it changes
+	// only those keys: the prefab's edits to the other keys still reach the instance.
 	//
 	// Static functions only; main thread, like the scene. Every mutating function is atomic: on error the scene is unchanged.
 	class PrefabInstantiator
@@ -74,20 +82,29 @@ namespace Engine {
 
 		// Deep-copies `prefab` into `scene` under instance.Parent: derived IDs, remapped internal references,
 		// PrefabInstanceComponent on the root (Prefab = instance.PrefabHandle, no overrides), PrefabLinkComponent on every
-		// member, instance.RootTransform applied. Recorded by the change tracker. Errors: InvalidArgument for an empty prefab
-		// or an invalid RootID; InvalidState when a derived ID is already used in the scene (astronomically unlikely, reported
-		// rather than re-hashed so IDs stay a pure function of the root); Validation for prefab data the registry rejects.
+		// member, instance.RootTransform applied; unknown components keep the prefab's data and "ComponentVersions" entries.
+		// Recorded by the change tracker; read diagnostics (unresolvable script field values) are appended to `report`.
+		// Errors: InvalidArgument for an empty prefab, an invalid RootID or a parent of another scene; AlreadyExists when
+		// RootID is already used in the scene; InvalidState when a derived ID is (astronomically unlikely, reported rather
+		// than re-hashed so IDs stay a pure function of the root); Validation for data the registry rejects (an invalid
+		// RootTransform, a unique-per-scene component the scene already has).
 		[[nodiscard]] static Result<Entity> Instantiate(Scene& scene, const Prefab& prefab, const PrefabInstantiateOptions& instance,
 			const PrefabOptions& options, LoadReport& report);
 
 		// Rebuilds the instance rooted at `instanceRoot` as `prefab` plus its recorded overrides after the prefab changed
 		// (§5.5 "Update"): members keep their derived IDs and internal references are remapped again; members whose prefab
 		// entity no longer exists disappear (their user children move to the nearest surviving ancestor); new prefab entities
-		// appear; Field, component and EntityKey overrides are applied (through ComponentAccess, so script field overrides
-		// resolve against the member's own ScriptComponent); overrides that no longer match a field, component or entity key
-		// are dropped with a warning in `report`; user children, the root's Name, Transform and Parent, and external
-		// references into the instance are preserved. Errors: InvalidArgument when `instanceRoot` is not an instance root;
-		// Validation.
+		// appear; Field, component and EntityKey overrides are applied, each validated against the registry on its own as
+		// ComponentAccess validates a write (relations, uniqueness, field metadata, type-level rules), with script field
+		// overrides resolved against the member's own ScriptComponent and, as in a file read, unresolvable Variant values
+		// kept; overrides that no longer match a field, component or entity key, or whose value is no longer valid there,
+		// are dropped with a PREFAB_STALE_OVERRIDE warning appended to `report`; user children (which keep their local
+		// transform when their member disappears), the root's Name, Transform and Parent, and external references into the
+		// instance are preserved. Member children follow the prefab's sibling order, user children keep their places among
+		// them; unknown components take the prefab's data and versions. Errors: InvalidArgument when `instanceRoot` is not an
+		// instance root, is an entity of another scene than `scene`, or `prefab` is empty; InvalidState when the derived ID of
+		// a new prefab entity is used outside the instance; Validation when a unique-per-scene component of the instance,
+		// after its overrides, collides with one elsewhere in the scene.
 		[[nodiscard]] static Status UpdateInstance(Scene& scene, Entity instanceRoot, const Prefab& prefab, const PrefabOptions& options,
 			LoadReport& report);
 
@@ -95,15 +112,19 @@ namespace Engine {
 		// comment): one Field override per serialized field whose JSON differs from the remapped prefab entity's,
 		// AddComponent for components the prefab entity lacks, RemoveComponent for prefab components the member lacks, and
 		// one EntityKey override per entity key (Name, Active, Tags) that differs; implicit root overrides excluded; sorted
-		// by (PrefabEntityID, Component, Kind, Field). Errors: InvalidArgument when `instanceRoot` is not an instance root.
+		// by (PrefabEntityID, Component, Kind, Field). Errors: InvalidArgument when `instanceRoot` is not an instance root or
+		// `prefab` is empty; InvalidState for a reference to an entity outside the instance whose ID is a prefab-local ID
+		// (see the class comment), located at the member.
 		[[nodiscard]] static Result<std::vector<PrefabOverride>> ComputeOverrides(Entity instanceRoot, const Prefab& prefab,
 			const PrefabOptions& options);
 
 		// Stores ComputeOverrides into the root's PrefabInstanceComponent (after a tracked edit touched instance members,
-		// §5.5 "When an edit commits on an instance member, the change tracker records field-level overrides").
+		// §5.5 "When an edit commits on an instance member, the change tracker records field-level overrides"); unchanged
+		// overrides are not written. Errors: as ComputeOverrides, with the stored overrides unchanged.
 		[[nodiscard]] static Status RefreshOverrides(Entity instanceRoot, const Prefab& prefab, const PrefabOptions& options);
 
-		// prefab.revert: clears the overrides and rebuilds the instance from `prefab` (user children kept).
+		// prefab.revert: clears the overrides and rebuilds the instance from `prefab` (user children kept). Errors: as
+		// UpdateInstance.
 		[[nodiscard]] static Status Revert(Scene& scene, Entity instanceRoot, const Prefab& prefab, const PrefabOptions& options,
 			LoadReport& report);
 
@@ -113,7 +134,10 @@ namespace Engine {
 
 		// prefab.apply: `prefab` with the instance's overrides written back (the instance's members become the prefab's
 		// entities, entity keys included; user children are not added), with internal references mapped back to
-		// prefab-local IDs. The caller writes the asset and then updates every instance.
+		// prefab-local IDs and unknown components at their recorded versions (the prefab's when the member records none).
+		// The caller writes the asset and then updates every instance. Errors: InvalidArgument when `instanceRoot` is not an
+		// instance root or `prefab` is empty; InvalidState for a reference that ComputeOverrides rejects; Validation when
+		// the written-back document fails to load as a prefab.
 		[[nodiscard]] static Result<Prefab> ApplyOverrides(Entity instanceRoot, const Prefab& prefab, const PrefabOptions& options);
 	};
 

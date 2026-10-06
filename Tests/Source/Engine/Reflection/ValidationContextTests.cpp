@@ -6,7 +6,7 @@ namespace Engine {
 
 	TEST_SUITE("Reflection")
 	{
-		TEST_CASE("ValidationContext: issues are located below the base pointer and pushed keys" * doctest::skip(true))
+		TEST_CASE("ValidationContext: issues are located below the base pointer and pushed keys")
 		{
 			ValidationContext context("/components/Transform");
 			context.Error("Scale", "must have a magnitude of at least 0.0001");
@@ -24,7 +24,7 @@ namespace Engine {
 			CHECK(context.GetPointer() == "/components/Transform");
 		}
 
-		TEST_CASE("ValidationContext: ToStatus fails only on errors and carries every error as an issue" * doctest::skip(true))
+		TEST_CASE("ValidationContext: ToStatus fails only on errors and carries every error as an issue")
 		{
 			ValidationContext clean;
 			clean.Warning("Mass", "unusual");
@@ -39,6 +39,47 @@ namespace Engine {
 			CHECK(status.error().GetMessageText() == "2 invalid fields in RigidBody");
 			REQUIRE(status.error().GetIssues().size() == 2);
 			CHECK(status.error().GetIssues()[1].JsonPointer == "/Friction");
+		}
+
+		TEST_CASE("ValidationContext: one error keeps its own message and the status is located at the base pointer")
+		{
+			ValidationContext context("/components/RigidBody");
+			context.PushKey("Inner");
+			ValidationIssue issue;
+			issue.JsonPointer = "/elsewhere";
+			issue.Message = "absolute";
+			issue.Hint = "did you mean 'Mass'?";
+			issue.Suggestions = { "Mass" };
+			context.AddIssue(issue);
+
+			const Status status = context.ToStatus("RigidBody");
+			context.PopKey();
+			REQUIRE_FALSE(status.has_value());
+			CHECK(status.error().GetMessageText() == "absolute");
+			CHECK(status.error().GetLocation().JsonPointer == "/components/RigidBody");
+			REQUIRE(status.error().GetIssues().size() == 1);
+			CHECK(status.error().GetIssues()[0].JsonPointer == "/elsewhere"); // AddIssue keeps an absolute pointer
+			CHECK(status.error().GetIssues()[0].Suggestions == std::vector<std::string>{ "Mass" });
+		}
+
+		TEST_CASE("ValidationContext: TakeIssues empties the context and nested keys unwind")
+		{
+			ValidationContext context;
+			context.PushKey("A");
+			context.PushKey("B");
+			CHECK(context.GetPointer() == "/A/B");
+			context.Warning("", "here");
+			context.PopKey();
+			CHECK(context.GetPointer() == "/A");
+			context.PopKey();
+			CHECK(context.GetPointer().empty());
+
+			CHECK_FALSE(context.HasErrors());
+			const std::vector<ValidationIssue> issues = context.TakeIssues();
+			REQUIRE(issues.size() == 1);
+			CHECK(issues[0].JsonPointer == "/A/B");
+			CHECK(context.GetIssues().empty());
+			CHECK(context.ToStatus("Nothing").has_value());
 		}
 	}
 

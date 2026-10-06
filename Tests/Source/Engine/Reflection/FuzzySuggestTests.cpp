@@ -6,7 +6,7 @@ namespace Engine {
 
 	TEST_SUITE("Reflection")
 	{
-		TEST_CASE("FuzzySuggest: Levenshtein distance ignores ASCII case" * doctest::skip(true))
+		TEST_CASE("FuzzySuggest: Levenshtein distance ignores ASCII case")
 		{
 			CHECK(LevenshteinDistance("", "") == 0);
 			CHECK(LevenshteinDistance("Mass", "mass") == 0);
@@ -16,7 +16,7 @@ namespace Engine {
 			CHECK(LevenshteinDistance("Friction", "Fricton") == 1);
 		}
 
-		TEST_CASE("FuzzySuggest: suggestions are close names ordered by distance then text" * doctest::skip(true))
+		TEST_CASE("FuzzySuggest: suggestions are close names ordered by distance then text")
 		{
 			const std::vector<std::string> candidates = { "Mass", "Max", "Layer", "Friction", "MaxLinearVelocity" };
 			CHECK(GetMaxSuggestionDistance("Mas") == 2);
@@ -30,7 +30,19 @@ namespace Engine {
 			CHECK(FuzzySuggest("Mas", candidates, 0).empty());
 		}
 
-		TEST_CASE("FuzzySuggest: the hint lists suggestions in natural language" * doctest::skip(true))
+		TEST_CASE("FuzzySuggest: duplicates are dropped and both candidate spellings give the same result")
+		{
+			const std::vector<std::string_view> views = { "Max", "Mass", "Max", "mass" };
+			const std::vector<std::string> strings = { "Max", "Mass", "Max", "mass" };
+			const std::vector<std::string> expected = { "Mass", "mass", "Max" }; // distance 0 first (in byte order), then distance 2
+			CHECK(FuzzySuggest("MASS", views) == expected);
+			CHECK(FuzzySuggest("MASS", strings) == expected);
+			CHECK(GetMaxSuggestionDistance("") == 2);
+			CHECK(LevenshteinDistance("abc", "") == 3);
+			CHECK(LevenshteinDistance("flaw", "lawn") == 2);
+		}
+
+		TEST_CASE("FuzzySuggest: the hint lists suggestions in natural language")
 		{
 			CHECK(MakeDidYouMeanHint({}).empty());
 			const std::vector<std::string> one = { "Mass" };

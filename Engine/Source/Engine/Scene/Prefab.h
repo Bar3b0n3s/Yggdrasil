@@ -27,8 +27,9 @@ namespace Engine {
 	// Prefabs never contain PrefabInstance or PrefabLink components: nested instances are flattened when a prefab is
 	// created (live nested prefabs are a non-goal, §1.2).
 	//
-	// A Prefab holds its validated canonical entity array; it is immutable after creation, cheap to copy (the array is
-	// shared, §4.7) and safe to read from any thread.
+	// A Prefab holds its validated canonical document (the entity array with its header and "ComponentVersions", so that
+	// unknown components keep their versions); it is immutable after creation, cheap to copy (the document is shared,
+	// §4.7) and safe to read from any thread.
 	class Prefab
 	{
 	public:
@@ -38,9 +39,11 @@ namespace Engine {
 		Prefab() = default;
 
 		// Reads a prefab document: header (Format "Prefab", Version 0..Migrations::CurrentVersion), migration, structural
-		// pre-validation as DocumentKind::Prefab (PREFAB_INVALID_ROOT included), and every component validated against the
-		// registry as the scene loader does (unknown components are preserved). Errors: Validation (located, with issues),
-		// UnsupportedVersion.
+		// pre-validation as DocumentKind::Prefab (PREFAB_INVALID_ROOT and PREFAB_NESTED_INSTANCE included), and every
+		// component validated against the registry as the scene loader does (unknown components are preserved). Resets
+		// `report`, as a scene load does. Errors: Validation (located, with issues), UnsupportedVersion; Parse for
+		// LoadFromString text that is not JSON; the VFS read errors for LoadFromFile (whose options.SourcePath defaults to
+		// the path's text).
 		[[nodiscard]] static Result<Prefab> FromJson(const Json& document, const TypeRegistry& registry, const LoadOptions& options,
 			LoadReport& report);
 		[[nodiscard]] static Result<Prefab> LoadFromString(std::string_view text, const TypeRegistry& registry, const LoadOptions& options,
@@ -53,7 +56,7 @@ namespace Engine {
 		// PrefabLink components dropped, their entities kept). Errors: as SceneSerializer::EntityToJson.
 		[[nodiscard]] static Result<Prefab> CreateFromEntity(ConstEntity root, std::string name);
 
-		// The canonical document. Errors: none for a prefab built by this class; Validation otherwise.
+		// The canonical document. Errors: InvalidArgument for an empty prefab, which has none.
 		[[nodiscard]] Result<Json> ToJson() const;
 		[[nodiscard]] Result<std::string> SaveToString(JsonStyle style = JsonStyle::Pretty) const;
 		[[nodiscard]] Status SaveToFile(VirtualFileSystem& vfs, const VfsPath& path) const;
@@ -69,9 +72,12 @@ namespace Engine {
 		// Every prefab-local ID in canonical order.
 		[[nodiscard]] std::vector<UUID> GetEntityIDs() const;
 	private:
+		// Takes a canonical prefab document (Utils::MakePrefabDocument) whose "Name" is `name` and "Root" is `root`.
+		Prefab(std::string name, UUID root, Ref<const Json> document);
+	private:
 		std::string m_Name;
 		UUID m_Root;
-		Ref<const Json> m_Entities; // shared immutable canonical array; null for an empty prefab
+		Ref<const Json> m_Document; // shared immutable canonical document; null for an empty prefab
 	};
 
 }

@@ -76,8 +76,9 @@ namespace Engine {
 		std::vector<LoadRepair> Repairs;
 	};
 
-	// Diagnostic codes of scene and prefab loading (LoadDiagnostic::Code, LoadRepair::Code). Stable identifiers: automation
-	// and the validator report them (§13.3).
+	// Diagnostic codes of scene and prefab loading (LoadDiagnostic::Code, LoadRepair::Code). Stable identifiers that scene
+	// loading reports through automation (§13.3). They name what the loader found and fixed in one file, more finely than
+	// the project validator's codes (§13.7), which the validator maps them to (ADR 0006 decision 35).
 
 	// Repair: the later duplicate gets a fresh ID.
 	inline constexpr std::string_view SceneDuplicateIdCode = "SCENE_DUPLICATE_ID";
@@ -89,7 +90,8 @@ namespace Engine {
 	inline constexpr std::string_view SceneParentCycleCode = "SCENE_PARENT_CYCLE";
 	// Warning in both modes: a child listed before its parent, normalized to canonical order.
 	inline constexpr std::string_view SceneNonCanonicalOrderCode = "SCENE_NONCANONICAL_ORDER";
-	// Repair: the member is unpacked (its PrefabLink removed).
+	// Repair: the member is unpacked (its PrefabLink removed), also when the instance root's Prefab component is dropped as
+	// invalid.
 	inline constexpr std::string_view SceneInconsistentPrefabLinkCode = "SCENE_INCONSISTENT_PREFAB_LINK";
 	// Repair: every extra after the first in canonical order is dropped.
 	inline constexpr std::string_view SceneDuplicateUniqueComponentCode = "SCENE_DUPLICATE_UNIQUE_COMPONENT";
@@ -105,5 +107,12 @@ namespace Engine {
 	inline constexpr std::string_view SceneUnknownKeyCode = "SCENE_UNKNOWN_KEY";
 	// "Root" missing, naming no entity, or not the only root. Not repairable.
 	inline constexpr std::string_view PrefabInvalidRootCode = "PREFAB_INVALID_ROOT";
+	// A "Prefab" or "PrefabLink" component in a prefab document: prefabs never contain nested instances (they are flattened
+	// when a prefab is created, §5.5). Repair: dropped, which flattens the nested instance.
+	inline constexpr std::string_view PrefabNestedInstanceCode = "PREFAB_NESTED_INSTANCE";
+	// Warning (PrefabInstantiator::UpdateInstance; Revert applies no overrides): an override that no longer matches the
+	// prefab (its prefab entity, component, field or entity key is gone, or its value is no longer valid there) was dropped
+	// (§5.5 "Update").
+	inline constexpr std::string_view PrefabStaleOverrideCode = "PREFAB_STALE_OVERRIDE";
 
 }

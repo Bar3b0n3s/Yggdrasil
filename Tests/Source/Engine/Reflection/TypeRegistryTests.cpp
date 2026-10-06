@@ -4,6 +4,7 @@
 
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Core/Json/JsonWriter.h"
+#include "Support/DeathTest.h"
 #include "Support/FixtureSchemaSource.h"
 #include "Support/ReflectionTestTypes.h"
 
@@ -26,9 +27,106 @@ namespace Engine {
 		return std::move(*json);
 	}
 
+	namespace {
+
+		struct RuleWithoutHook
+		{
+			float Value = 1.0f;
+		};
+
+		struct OtherInner
+		{
+			float Value = 1.0f;
+		};
+
+		struct LateStruct
+		{
+			float Value = 1.0f;
+		};
+
+		struct VersionTwo
+		{
+			float Value = 1.0f;
+		};
+
+		struct NestedVariant
+		{
+			VariantValue Child;
+		};
+
+	}
+
+	// Resolves NestedVariant.Child to the whole NestedVariant struct, so each value can hold another resolution.
+	static Result<const FieldInfo*> ResolveNestedVariant(const ResolveContext& context)
+	{
+		const StructInfo* type = context.Registry != nullptr ? context.Registry->FindStruct<NestedVariant>() : nullptr;
+		if (type == nullptr)
+			return MakeError(ErrorCode::NotFound, "NestedVariant is not registered");
+		return &type->GetSelfField();
+	}
+
+	// `levels` NestedVariant objects inside each other, the innermost without a Child.
+	static Json MakeNestedVariantJson(int levels)
+	{
+		Json value = Json::object();
+		for (int level = 0; level < levels; ++level)
+		{
+			Json outer = Json::object();
+			outer["Child"] = std::move(value);
+			value = std::move(outer);
+		}
+		return value;
+	}
+
+	static void ValidateRuleWithoutHook(const RuleWithoutHook& object, ValidationContext& context)
+	{
+		if (object.Value > 10.0f)
+			context.Error("Value", "must be <= 10");
+	}
+
+	ENGINE_DEATH_TEST("Reflection/FreezeRequiresGenerateHook")
+	{
+		TypeRegistry registry;
+		registry.Struct<RuleWithoutHook>("RuleWithoutHook", "A struct whose rule has no Generate hook.")
+			.Field("Value", &RuleWithoutHook::Value, "A value.")
+			.Validate(&ValidateRuleWithoutHook);
+		registry.Freeze();
+	}
+
+	ENGINE_DEATH_TEST("Reflection/DuplicateTypeName")
+	{
+		TypeRegistry registry;
+		registry.Struct<Test::TestInner>("Inner", "The first struct named Inner.").Field("Weight", &Test::TestInner::Weight, "A weight.");
+		registry.Struct<OtherInner>("Inner", "The second struct named Inner.").Field("Value", &OtherInner::Value, "A value.");
+	}
+
+	ENGINE_DEATH_TEST("Reflection/RegistrationAfterFreeze")
+	{
+		TypeRegistry registry;
+		Test::RegisterReflectionTestTypes(registry);
+		registry.Freeze();
+		registry.Struct<LateStruct>("LateStruct", "Registered too late.").Field("Value", &LateStruct::Value, "A value.");
+	}
+
+	ENGINE_DEATH_TEST("Reflection/MissingMigration")
+	{
+		TypeRegistry registry;
+		registry.Component<VersionTwo>("VersionTwo", "Version 2 without a migration from version 1.")
+			.Category("Test")
+			.Version(2)
+			.Field("Value", &VersionTwo::Value, "A value.");
+		registry.Freeze();
+	}
+
+	ENGINE_DEATH_TEST("Reflection/FieldWithoutDescription")
+	{
+		TypeRegistry registry;
+		registry.Struct<OtherInner>("OtherInner", "A struct with an undocumented field.").Field("Value", &OtherInner::Value, "");
+	}
+
 	TEST_SUITE("Reflection")
 	{
-		TEST_CASE("TypeRegistry: registered types are found by name and by C++ type" * doctest::skip(true))
+		TEST_CASE("TypeRegistry: registered types are found by name and by C++ type")
 		{
 			const Scope<TypeRegistry> registry = CreateTestRegistry();
 			CHECK(registry->IsFrozen());
@@ -54,7 +152,7 @@ namespace Engine {
 			CHECK(registry->FindStruct("Missing") == nullptr);
 		}
 
-		TEST_CASE("TypeRegistry: fields deduce their FieldType and keep registration order" * doctest::skip(true))
+		TEST_CASE("TypeRegistry: fields deduce their FieldType and keep registration order")
 		{
 			const Scope<TypeRegistry> registry = CreateTestRegistry();
 			const StructInfo* type = registry->FindStruct<Test::TestAllFields>();
@@ -107,7 +205,7 @@ namespace Engine {
 			CHECK(inner->GetType().GetStruct() == registry->FindStruct<Test::TestInner>());
 		}
 
-		TEST_CASE("TypeRegistry: unknown component names get fuzzy suggestions" * doctest::skip(true))
+		TEST_CASE("TypeRegistry: unknown component names get fuzzy suggestions")
 		{
 			const Scope<TypeRegistry> registry = CreateTestRegistry();
 			const std::vector<std::string> suggestions = registry->SuggestComponentNames("TestComponnt");
@@ -116,14 +214,14 @@ namespace Engine {
 			CHECK(registry->SuggestComponentNames("Zzzzzzzzzzzzzzzz").empty());
 		}
 
-		TEST_CASE("TypeRegistry: AreComponentsRegistered checks a whole type list" * doctest::skip(true))
+		TEST_CASE("TypeRegistry: AreComponentsRegistered checks a whole type list")
 		{
 			const Scope<TypeRegistry> registry = CreateTestRegistry();
 			CHECK(registry->AreComponentsRegistered(TypeList<Test::TestComponent>{}));
 			CHECK_FALSE(registry->AreComponentsRegistered(TypeList<Test::TestComponent, Test::TestInner>{}));
 		}
 
-		TEST_CASE("Map: keys serialize sorted and merge-patch deletes on null" * doctest::skip(true))
+		TEST_CASE("Map: keys serialize sorted and merge-patch deletes on null")
 		{
 			const Scope<TypeRegistry> registry = CreateTestRegistry();
 			const StructInfo* type = registry->FindStruct<Test::TestAllFields>();
@@ -152,7 +250,7 @@ namespace Engine {
 			CHECK(object.Count == 7);
 		}
 
-		TEST_CASE("Variant: value validated against the resolved schema; unresolvable values are preserved with a diagnostic" * doctest::skip(true))
+		TEST_CASE("Variant: value validated against the resolved schema; unresolvable values are preserved with a diagnostic")
 		{
 			const Scope<TypeRegistry> registry = CreateTestRegistry();
 			const ComponentInfo* type = registry->FindComponent<Test::TestComponent>();
@@ -230,7 +328,44 @@ namespace Engine {
 			CHECK_FALSE(type->FromJson(&strictObject, JsonReader(document), strict).has_value());
 		}
 
-		TEST_CASE("TypeRegistry: type-level validators run after field checks" * doctest::skip(true))
+		TEST_CASE("Variant: values nested too deeply inside each other are reported instead of exhausting the stack")
+		{
+			TypeRegistry registry;
+			registry.Struct<NestedVariant>("NestedVariant", "A Variant field that resolves to its own struct.")
+				.VariantField("Child", &NestedVariant::Child, "Another NestedVariant, or null.", &ResolveNestedVariant);
+			registry.Freeze();
+			const StructInfo* type = registry.FindStruct<NestedVariant>();
+			REQUIRE(type != nullptr);
+			std::vector<ValidationIssue> diagnostics;
+			ReadContext context;
+			context.Diagnostics = &diagnostics;
+
+			// A few levels resolve like any other value.
+			NestedVariant shallow;
+			REQUIRE(type->FromJson(&shallow, JsonReader(MakeNestedVariantJson(4)), context).has_value());
+			CHECK(diagnostics.empty());
+
+			// Far deeper nesting is kept as written with a warning on reads...
+			const Json deep = MakeNestedVariantJson(64);
+			NestedVariant kept;
+			REQUIRE(type->FromJson(&kept, JsonReader(deep), context).has_value());
+			REQUIRE(diagnostics.size() == 1);
+			CHECK(diagnostics[0].Code == VariantSchemaMismatchCode);
+			CHECK(diagnostics[0].JsonPointer.starts_with("/Child/Child"));
+			CHECK(kept.Child.Get() == deep["Child"]);
+
+			// ...and rejected on the write path.
+			const FieldInfo* child = type->FindField("Child");
+			REQUIRE(child != nullptr);
+			ResolveContext resolve;
+			resolve.Registry = &registry;
+			resolve.OwnerType = type;
+			ValidationContext validation;
+			child->ValidateJson(JsonReader(deep["Child"]), resolve, validation);
+			CHECK(validation.HasErrors());
+		}
+
+		TEST_CASE("TypeRegistry: type-level validators run after field checks")
 		{
 			const Scope<TypeRegistry> registry = CreateTestRegistry();
 			const ComponentInfo* type = registry->FindComponent<Test::TestComponent>();
@@ -247,6 +382,66 @@ namespace Engine {
 			REQUIRE(context.GetErrorCount() == 1);
 			CHECK(context.GetIssues()[0].JsonPointer == "/components/TestComponent/Mass");
 			CHECK(context.GetIssues()[0].Message == "must be > 0 for spheres");
+		}
+
+		TEST_CASE("TypeRegistry: lists keep registration order and every type has a TypeInfo under its key")
+		{
+			const Scope<TypeRegistry> registry = CreateTestRegistry();
+			REQUIRE(registry->GetStructs().size() == 2);
+			CHECK(registry->GetStructs()[0]->GetName() == "TestInner");
+			CHECK(registry->GetStructs()[1]->GetName() == "TestAllFields");
+			REQUIRE(registry->GetEnums().size() == 1);
+			CHECK(registry->GetEnums()[0]->GetName() == "TestShape");
+
+			// Components are not listed among the structs, and each kind is found only by its own lookups.
+			CHECK(registry->FindStruct("TestComponent") == nullptr);
+			CHECK(registry->FindComponent("TestInner") == nullptr);
+			CHECK(registry->FindStructByKey(TypeKeyOf<Test::TestInner>()) == registry->FindStruct<Test::TestInner>());
+			CHECK(registry->FindEnumByKey(TypeKeyOf<Test::TestShape>()) == registry->FindEnum("TestShape"));
+			CHECK(registry->FindComponentByKey(TypeKeyOf<Test::TestInner>()) == nullptr);
+
+			const TypeInfo* shape = registry->FindType(TypeKeyOf<Test::TestShape>());
+			REQUIRE(shape != nullptr);
+			CHECK(shape->GetKind() == FieldType::Enum);
+			CHECK(shape->GetEnum() == registry->FindEnum("TestShape"));
+			CHECK(shape->GetName() == "TestShape");
+
+			const TypeInfo* number = registry->FindType(TypeKeyOf<float>());
+			REQUIRE(number != nullptr);
+			CHECK(number->GetKind() == FieldType::Float);
+			CHECK(number->HasOps());
+
+			// Fields of one C++ type share its TypeInfo; a colour has its own.
+			const StructInfo* allFields = registry->FindStruct<Test::TestAllFields>();
+			REQUIRE(allFields != nullptr);
+			CHECK(&allFields->FindField("Position")->GetType() == &allFields->FindField("Scale")->GetType());
+			CHECK(&allFields->FindField("Position")->GetType() != &allFields->FindField("Tint")->GetType());
+			const TypeInfo* colour = registry->FindType(TypeKeyOf<Detail::ColorOf<glm::vec3>>());
+			REQUIRE(colour != nullptr);
+			CHECK(colour->GetKind() == FieldType::Color3);
+			CHECK(&allFields->FindField("Tint")->GetType() == colour);
+
+			const ComponentInfo* component = registry->FindComponent<Test::TestComponent>();
+			REQUIRE(component != nullptr);
+			CHECK(registry->FindType(TypeKeyOf<Test::TestComponent>()) == &component->GetType());
+			CHECK(component->GetType().GetStruct() == component);
+		}
+
+		TEST_CASE("TypeRegistry: Freeze is idempotent")
+		{
+			const Scope<TypeRegistry> registry = CreateTestRegistry();
+			registry->Freeze();
+			CHECK(registry->IsFrozen());
+			CHECK(registry->GetComponents().size() == 1);
+		}
+
+		TEST_CASE("TypeRegistry: registration mistakes are programmer errors that assert")
+		{
+			ENGINE_CHECK_DEATH("Reflection/FreezeRequiresGenerateHook", "has a Validate rule but no Generate hook");
+			ENGINE_CHECK_DEATH("Reflection/DuplicateTypeName", "The type name 'Inner' is already registered");
+			ENGINE_CHECK_DEATH("Reflection/RegistrationAfterFreeze", "after TypeRegistry::Freeze");
+			ENGINE_CHECK_DEATH("Reflection/MissingMigration", "has no migration from version 1");
+			ENGINE_CHECK_DEATH("Reflection/FieldWithoutDescription", "needs a description");
 		}
 	}
 

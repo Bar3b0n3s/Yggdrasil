@@ -15,6 +15,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <unordered_map>
 #include <vector>
 
@@ -92,10 +93,10 @@ namespace Engine {
 		[[nodiscard]] Entity CreateEntityWithID(UUID id, std::string_view name);
 		[[nodiscard]] Entity CreateEntityWithID(UUID id, std::string_view name, Entity parent);
 
-		// Destroys `entity` and its whole subtree, children first (deepest first, then reverse sibling order), and removes it
-		// from its parent's children. Edit scenes destroy immediately; runtime scenes add PendingDestroyTag to the subtree
-		// (Entity::IsValid becomes false at once) and destroy at the next FlushPendingDestroys (§5.7 step 8). Asserts a valid
-		// entity of this scene.
+		// Destroys `entity` and its whole subtree in reverse canonical order (every child before its parent, later siblings
+		// before earlier ones: R[A[A1, A2], B] destroys B, A2, A1, A, R), and removes it from its parent's children. Edit
+		// scenes destroy immediately; runtime scenes add PendingDestroyTag to the subtree (Entity::IsValid becomes false at
+		// once) and destroy at the next FlushPendingDestroys (§5.7 step 8). Asserts a valid entity of this scene.
 		void DestroyEntity(Entity entity);
 
 		// Destroys every entity marked by DestroyEntity in a runtime scene, children first. No-op for edit scenes.
@@ -193,8 +194,8 @@ namespace Engine {
 		// PrepareEntityChange runs before the entity's data changes: it increments the revision and, while tracking,
 		// records the entity's snapshot on its first touch (CaptureEntitySnapshot) and, before a hierarchy change, the
 		// child order of each parent whose child list changes (ChangeTracker::RecordChildOrder). CommitComponentChange runs
-		// after: it records the component's registry name (DisabledTag as the entity key "Active") and invalidates the
-		// canonical order when the hierarchy changed.
+		// after: it records the component's registry name (DisabledTag as the entity key "Active"), invalidates the
+		// canonical order when the hierarchy changed and, for DisabledTag, refreshes the subtree's HierarchyDisabledTag.
 		void PrepareEntityChange(entt::entity entity, TypeKey component);
 		void CommitComponentChange(entt::entity entity, TypeKey component, ComponentChangeKind kind);
 
@@ -203,6 +204,32 @@ namespace Engine {
 		// depends on serializer internals. Returns null only if the entity cannot be serialized (a non-finite value written
 		// directly by a runtime system), which also logs an error.
 		[[nodiscard]] Ref<const Json> CaptureEntitySnapshot(entt::entity entity) const;
+
+		// §4.11: asserts that the caller runs on the thread that created the scene.
+		void AssertMainThread() const;
+		// True when changes to `component` count in the revision and reach the tracker: a registered type or DisabledTag.
+		[[nodiscard]] bool IsTrackedComponent(TypeKey component) const;
+		// The live handle of `id` (entt::null when no entity of this scene has it).
+		[[nodiscard]] entt::entity FindHandle(UUID id) const;
+		// The ordered child list of `parent`, or the root list for the invalid UUID; `parent` must exist (asserted).
+		[[nodiscard]] std::vector<UUID>& GetChildList(UUID parent);
+		// The shared body of CreateEntity and CreateEntityWithID: `parent` is entt::null for a root.
+		[[nodiscard]] Entity CreateEntityInternal(UUID id, std::string_view name, entt::entity parent);
+		// While tracking: records the child list of `parent` before its first hierarchy change in the edit.
+		void RecordChildOrderBeforeChange(UUID parent);
+		// While tracking: records the entity's snapshot, parent and sibling index before its first change in the edit.
+		void RecordFirstTouch(entt::entity entity);
+		// While tracking: records `component`'s registry name ("Active" for DisabledTag) for an already touched entity.
+		void RecordComponentName(entt::entity entity, TypeKey component);
+		// The subtree of `root` in destruction order: children before parents, later siblings before earlier ones.
+		[[nodiscard]] std::vector<entt::entity> CollectSubtreeForDestruction(entt::entity root) const;
+		// While tracking: records the child orders, snapshots and destruction of `entities` (all still intact).
+		void RecordDestruction(std::span<const entt::entity> entities);
+		// Rebuilds m_CanonicalOrder from the root list and the child lists (iteratively; hierarchies may be deep).
+		void RebuildCanonicalOrder() const;
+		// Makes the runtime-only HierarchyDisabledTag of `root` and its subtree match their effective active state (§5.2),
+		// given that the tag of `root`'s parent is current. Neither counted nor tracked.
+		void RefreshHierarchyDisabled(entt::entity root);
 	private:
 		entt::registry m_Registry;
 		std::unordered_map<UUID, entt::entity> m_EntityIndex; // lookup only, never iterated to produce output (§5.1)
@@ -213,6 +240,10 @@ namespace Engine {
 		SceneSpecification m_Specification; // its Registry and IdGenerator are back-references that outlive the scene
 		uint64_t m_Revision = 0;
 		float m_InterpolationAlpha = 1.0f;
+		// Runtime scenes: entities marked by DestroyEntity, in destruction order, destroyed by FlushPendingDestroys. They
+		// are already out of the UUID index and the hierarchy.
+		std::vector<entt::entity> m_PendingDestroys;
+		std::thread::id m_MainThread; // the creating thread (§4.11)
 	private:
 		friend class Entity;
 	};

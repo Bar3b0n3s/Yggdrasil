@@ -12,13 +12,14 @@ namespace Engine {
 
 	TEST_SUITE("Scene")
 	{
-		TEST_CASE("ScriptingRegistration: Script has no shortcut and a Variant map of field overrides" * doctest::skip(true))
+		TEST_CASE("ScriptingRegistration: Script has no shortcut and a Variant map of field overrides")
 		{
 			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
 			const ComponentInfo* script = registry->FindComponent("Script");
 			REQUIRE(script != nullptr);
 			CHECK(script->HasFlag(ComponentFlags::NoShortcut));
 			CHECK_FALSE(script->HasFlag(ComponentFlags::EntityLevel));
+			CHECK(script->GetCategory() == "Scripting");
 
 			const FieldInfo* fields = script->FindField("Fields");
 			REQUIRE(fields != nullptr);
@@ -26,9 +27,10 @@ namespace Engine {
 			CHECK(fields->GetType().GetElement()->GetKind() == FieldType::Variant);
 			CHECK(fields->GetResolver() != nullptr);
 			CHECK(script->FindField("Script")->GetMeta().AssetFilter == "Script");
+			CHECK(script->FindField("ExecutionOrder")->GetKind() == FieldType::Int32);
 		}
 
-		TEST_CASE("ScriptingRegistration: field overrides resolve against the script's schema" * doctest::skip(true))
+		TEST_CASE("ScriptingRegistration: field overrides resolve against the script's schema")
 		{
 			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
 			const ComponentInfo* script = registry->FindComponent("Script");
@@ -73,6 +75,47 @@ namespace Engine {
 			resolve.Schemas = nullptr;
 			resolve.Key = "Torque";
 			CHECK_FALSE(script->FindField("Fields")->ResolveVariant(resolve).has_value());
+		}
+
+		TEST_CASE("ScriptingRegistration: overrides without an assigned script stay unresolved")
+		{
+			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
+			const ComponentInfo* script = registry->FindComponent("Script");
+			REQUIRE(script != nullptr);
+			const FieldInfo* fields = script->FindField("Fields");
+			REQUIRE(fields != nullptr);
+			const Test::FixtureSchemaSource schemas = Test::FixtureSchemaSource::CreateStandard();
+
+			ResolveContext resolve;
+			resolve.Registry = registry.get();
+			resolve.OwnerType = script;
+			resolve.Schemas = &schemas;
+			resolve.Key = "Torque";
+
+			const ScriptComponent unassigned;
+			resolve.Owner = &unassigned;
+			const Result<const FieldInfo*> fromObject = fields->ResolveVariant(resolve);
+			REQUIRE_FALSE(fromObject.has_value());
+			CHECK(fromObject.error().GetCode() == ErrorCode::NotFound);
+
+			// A null or absent "Script" member is no script; a malformed one is the reader's located error.
+			resolve.Owner = nullptr;
+			for (const std::string_view text : { R"({ "Script": null })", R"({ "Fields": {} })", R"({ "Script": "c0ffee" })" })
+			{
+				INFO(std::string(text));
+				const Result<Json> document = JsonReader::Parse(text);
+				REQUIRE(document.has_value());
+				const JsonReader reader(*document);
+				resolve.OwnerJson = &reader;
+				const Result<const FieldInfo*> fromJson = fields->ResolveVariant(resolve);
+				REQUIRE_FALSE(fromJson.has_value());
+				CHECK(fromJson.error().GetCode() == (text.find("c0ffee") != std::string_view::npos ? ErrorCode::Validation : ErrorCode::NotFound));
+			}
+
+			resolve.OwnerJson = nullptr;
+			const Result<const FieldInfo*> noOwner = fields->ResolveVariant(resolve);
+			REQUIRE_FALSE(noOwner.has_value());
+			CHECK(noOwner.error().GetCode() == ErrorCode::InvalidArgument);
 		}
 	}
 

@@ -6,7 +6,7 @@ namespace Engine {
 
 	TEST_SUITE("Support")
 	{
-		TEST_CASE("ReflectionTestTypes: TestAllFields covers every FieldType and TestComponent can be randomized" * doctest::skip(true))
+		TEST_CASE("ReflectionTestTypes: TestAllFields covers every FieldType and TestComponent can be randomized")
 		{
 			TypeRegistry registry;
 			Test::RegisterReflectionTestTypes(registry);

@@ -21,6 +21,12 @@ namespace Engine {
 	class Random;
 	class TypeRegistry;
 
+	namespace Detail {
+
+		struct ReflectionAccess; // Reflection/Private/ReflectionWalk.h
+
+	}
+
 	// A type-level validation rule (registered with FieldBuilder::Validate), run after the per-field metadata checks.
 	using StructValidator = UniqueFunction<void(const void* object, ValidationContext& context)>;
 
@@ -139,9 +145,12 @@ namespace Engine {
 		const TypeRegistry* m_Registry = nullptr; // back-reference to the owning registry
 		const TypeInfo* m_Type = nullptr;
 		std::vector<Scope<FieldInfo>> m_Fields; // Scope: field addresses stay stable (VariantSchemaResolver results)
-		std::vector<StructValidator> m_Validators;
-		std::vector<StructGenerator> m_Generators;
+		// Scope: the rules are invoked from const members (a UniqueFunction is called through a non-const reference).
+		std::vector<Scope<StructValidator>> m_Validators;
+		std::vector<Scope<StructGenerator>> m_Generators;
 		Scope<FieldInfo> m_SelfField;
+	private:
+		friend struct Detail::ReflectionAccess;
 	};
 
 }

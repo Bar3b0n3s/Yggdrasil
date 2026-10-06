@@ -23,6 +23,12 @@ namespace Engine {
 	class StructInfo;
 	class TypeRegistry;
 
+	namespace Detail {
+
+		struct ReflectionAccess; // Reflection/Private/ReflectionWalk.h
+
+	}
+
 	// Per-field metadata (Architecture §5.4). Min, Max, Step and MinMagnitude apply to each numeric component of Int32,
 	// UInt32, Float, vector and colour fields (IsNumericFieldType), and are enforced on every write path: readers, reflected
 	// setters, script proxies and automation, never only in the inspector. Designated initializers name them in this order:
@@ -227,7 +233,15 @@ namespace Engine {
 		// Variant field (callers then treat the value as free-form JSON). Asserts that the field contains Variant values.
 		[[nodiscard]] Result<const FieldInfo*> ResolveVariant(const ResolveContext& context) const;
 	private:
+		// The resolution context of this field's own owner object, for SetValue.
+		[[nodiscard]] ResolveContext MakeOwnerResolveContext(const void* owner) const;
+	private:
 		Specification m_Specification;
+		// Back-reference to the struct that declares this field (set by StructInfo::AddField); null for schema-only fields
+		// and self fields. SetValue resolves Variant values with it.
+		const StructInfo* m_Owner = nullptr;
+	private:
+		friend struct Detail::ReflectionAccess;
 	};
 
 }

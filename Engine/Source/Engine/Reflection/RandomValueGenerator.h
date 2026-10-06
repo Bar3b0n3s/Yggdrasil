@@ -52,6 +52,15 @@ namespace Engine {
 
 		[[nodiscard]] Random& GetRandom() { return m_Random; }
 	private:
+		// Assigns a random value of `type` (the type of `field` or of one of its containers' elements) to `object`; `meta`
+		// is null for container elements. `owner` resolves Variant values.
+		void RandomizeObject(const TypeInfo& type, const FieldInfo& field, const FieldMeta* meta, void* object, const ResolveContext& owner);
+		[[nodiscard]] Json RandomJsonOf(const TypeInfo& type, const FieldInfo& field, const FieldMeta* meta, const ResolveContext& context);
+		// A value for a Variant held by `field`: generated from the resolved schema, or free-form JSON.
+		[[nodiscard]] Json RandomVariantJson(const FieldInfo& field, const ResolveContext& context);
+		// 0..MaxMapKeys distinct keys for a map whose values are of type `element`.
+		[[nodiscard]] std::vector<std::string> DrawMapKeys(const TypeInfo& element);
+	private:
 		const TypeRegistry* m_Registry = nullptr; // back-reference; outlives the generator
 		RandomValueOptions m_Options;
 		Random m_Random;

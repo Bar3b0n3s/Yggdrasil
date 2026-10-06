@@ -17,7 +17,7 @@ namespace Engine {
 
 	TEST_SUITE("Reflection")
 	{
-		TEST_CASE("MergePatch: matches the RFC 7386 appendix A test cases" * doctest::skip(true))
+		TEST_CASE("MergePatch: matches the RFC 7386 appendix A test cases")
 		{
 			struct Case
 			{
@@ -49,7 +49,7 @@ namespace Engine {
 			}
 		}
 
-		TEST_CASE("MergePatch: new members are appended in patch order and survivors keep their order" * doctest::skip(true))
+		TEST_CASE("MergePatch: new members are appended in patch order and survivors keep their order")
 		{
 			const Json result = ApplyMergePatch(ParsePatchJson(R"({"z":1,"a":2})"), ParsePatchJson(R"({"m":3,"z":4})"));
 			std::vector<std::string> keys;
@@ -58,7 +58,7 @@ namespace Engine {
 			CHECK(keys == std::vector<std::string>{ "z", "a", "m" });
 		}
 
-		TEST_CASE("MergePatch: CreateMergePatch produces a patch that reproduces the target" * doctest::skip(true))
+		TEST_CASE("MergePatch: CreateMergePatch produces a patch that reproduces the target")
 		{
 			const Json source = ParsePatchJson(R"({"Mass":1,"Layer":"Default","Scores":{"a":1,"b":2},"Tags":["x"]})");
 			const Json target = ParsePatchJson(R"({"Mass":2,"Layer":"Default","Scores":{"b":3,"c":4},"Tags":["x","y"]})");
@@ -66,6 +66,20 @@ namespace Engine {
 			CHECK(patch == ParsePatchJson(R"({"Mass":2,"Scores":{"b":3,"c":4,"a":null},"Tags":["x","y"]})"));
 			CHECK(ApplyMergePatch(source, patch) == target);
 			CHECK(CreateMergePatch(target, target) == Json::object());
+		}
+
+		TEST_CASE("MergePatch: CreateMergePatch recurses into nested objects and replaces everything else")
+		{
+			const Json source = ParsePatchJson(R"({"Inner":{"Weight":1,"Label":"a"},"List":[1,2],"Kind":"Box"})");
+			const Json target = ParsePatchJson(R"({"Inner":{"Weight":1,"Label":"b","New":true},"List":[1],"Kind":{"Shape":"Sphere"}})");
+			const Json patch = CreateMergePatch(source, target);
+			CHECK(patch == ParsePatchJson(R"({"Inner":{"Label":"b","New":true},"List":[1],"Kind":{"Shape":"Sphere"}})"));
+			CHECK(ApplyMergePatch(source, patch) == target);
+
+			// A non-object target replaces the source whole, and so does any value replacing an object.
+			CHECK(CreateMergePatch(source, ParsePatchJson("[1, 2]")) == ParsePatchJson("[1, 2]"));
+			CHECK(ApplyMergePatch(source, CreateMergePatch(source, ParsePatchJson("[1, 2]"))) == ParsePatchJson("[1, 2]"));
+			CHECK(CreateMergePatch(ParsePatchJson("3"), ParsePatchJson(R"({"a":1})")) == ParsePatchJson(R"({"a":1})"));
 		}
 	}
 

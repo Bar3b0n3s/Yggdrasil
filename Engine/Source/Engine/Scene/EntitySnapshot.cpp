@@ -1,19 +1,26 @@
 #include "EnginePCH.h"
 #include "Engine/Scene/Scene.h"
 
+#include "Engine/Core/Log.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/SceneSerializer.h"
 
-// Scene::CaptureEntitySnapshot lives with the serializer that defines the snapshot (stream C), like
-// Scene::ComputeStateHash in SceneStateHash.cpp, so stream B's Scene.cpp and stream C's files stay disjoint. M3 contract
-// stub (Roadmap rule 3).
+#include <nlohmann/json.hpp>
+
+// Scene::CaptureEntitySnapshot lives with the serializer that defines the snapshot, like Scene::ComputeStateHash in
+// SceneStateHash.cpp, so Scene.cpp never depends on serializer internals (Docs/Decisions/0006-m3-decisions.md, decision 10).
 
 namespace Engine {
 
-	Ref<const Json> Scene::CaptureEntitySnapshot(entt::entity /*entity*/) const
+	Ref<const Json> Scene::CaptureEntitySnapshot(entt::entity entity) const
 	{
-		ENGINE_CONTRACT_STUB();
-		return nullptr;
+		Result<Json> snapshot = SceneSerializer::EntityToJson(ConstEntity(entity, this));
+		if (!snapshot)
+		{
+			ENGINE_CORE_ERROR("Cannot snapshot an entity of scene '{}' for the change tracker: {}", GetName(), snapshot.error());
+			return nullptr;
+		}
+		return CreateRef<const Json>(std::move(*snapshot));
 	}
 
 }

@@ -10,7 +10,7 @@ namespace Engine {
 
 	TEST_SUITE("Scene")
 	{
-		TEST_CASE("ComponentRegistration: host operations add, read, patch and remove through Entity" * doctest::skip(true))
+		TEST_CASE("ComponentRegistration: host operations add, read, patch and remove through Entity")
 		{
 			Test::SceneTestFixture fixture;
 			const Entity entity = fixture.GetScene().CreateEntity("Box");
@@ -46,7 +46,7 @@ namespace Engine {
 			CHECK_FALSE(ops->Has(entity));
 		}
 
-		TEST_CASE("ComponentRegistration: every built-in component has host operations" * doctest::skip(true))
+		TEST_CASE("ComponentRegistration: every built-in component has host operations")
 		{
 			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
 			for (const ComponentInfo* component : registry->GetComponents())

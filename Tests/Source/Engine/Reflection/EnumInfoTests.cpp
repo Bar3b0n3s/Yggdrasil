@@ -16,7 +16,7 @@ namespace Engine {
 
 	TEST_SUITE("Reflection")
 	{
-		TEST_CASE("EnumInfo: names are matched exactly for files and ignoring case for automation" * doctest::skip(true))
+		TEST_CASE("EnumInfo: names are matched exactly for files and ignoring case for automation")
 		{
 			const EnumInfo info = CreateTonemapEnum();
 			CHECK(info.GetEntries().size() == 4);
@@ -31,7 +31,7 @@ namespace Engine {
 			CHECK(folded->Name == "PbrNeutral"); // the canonical spelling is echoed
 		}
 
-		TEST_CASE("EnumInfo: values map back to entries and unknown names get suggestions" * doctest::skip(true))
+		TEST_CASE("EnumInfo: values map back to entries and unknown names get suggestions")
 		{
 			const EnumInfo info = CreateTonemapEnum();
 			const EnumEntry* linear = info.FindByValue(3);
@@ -44,7 +44,20 @@ namespace Engine {
 			CHECK(suggestions.front() == "Linear");
 		}
 
-		TEST_CASE("EnumInfo: entries keep registration order" * doctest::skip(true))
+		TEST_CASE("EnumInfo: lookups miss cleanly and far names get no suggestions")
+		{
+			const EnumInfo info = CreateTonemapEnum();
+			CHECK(info.GetName() == "Tonemapper");
+			CHECK(info.GetDescription() == "The tonemapping curve.");
+			CHECK(info.FindByName("") == nullptr);
+			CHECK(info.FindByNameIgnoreCase("Filmic") == nullptr);
+			CHECK(info.FindByNameIgnoreCase("agx") != nullptr);
+			CHECK(info.FindByValue(-1) == nullptr);
+			CHECK(info.SuggestNames("Completely different").empty());
+			CHECK(info.SuggestNames("Aces") == std::vector<std::string>{ "ACES" }); // case-insensitive distance 0, but not the same name
+		}
+
+		TEST_CASE("EnumInfo: entries keep registration order")
 		{
 			const EnumInfo info = CreateTonemapEnum();
 			std::vector<std::string> names;

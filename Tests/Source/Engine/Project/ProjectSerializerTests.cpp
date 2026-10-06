@@ -13,7 +13,7 @@ namespace Engine {
 
 	TEST_SUITE("Project")
 	{
-		TEST_CASE("ProjectSerializer: AllSettings.eproj re-saves byte-identically" * doctest::skip(true))
+		TEST_CASE("ProjectSerializer: AllSettings.eproj re-saves byte-identically")
 		{
 			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
 			const Result<std::string> text = Test::ReadTestDataText("Project/AllSettings.eproj");
@@ -27,7 +27,7 @@ namespace Engine {
 			CHECK(*saved == *text);
 		}
 
-		TEST_CASE("ProjectSerializer: defaults are written explicitly with action keys sorted" * doctest::skip(true))
+		TEST_CASE("ProjectSerializer: defaults are written explicitly with action keys sorted")
 		{
 			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
 			ProjectSettings settings;
@@ -45,7 +45,7 @@ namespace Engine {
 			CHECK((*document)["Input"]["Actions"].begin().key() == "Accelerate");
 		}
 
-		TEST_CASE("ProjectSerializer: unknown keys warn, wrong types and newer versions fail" * doctest::skip(true))
+		TEST_CASE("ProjectSerializer: unknown keys warn, wrong types and newer versions fail")
 		{
 			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
 
@@ -79,7 +79,7 @@ namespace Engine {
 			CHECK(wrongFormat.error().GetCode() == ErrorCode::Validation);
 		}
 
-		TEST_CASE("ProjectSerializer: files are saved and loaded through the VFS" * doctest::skip(true))
+		TEST_CASE("ProjectSerializer: files are saved and loaded through the VFS")
 		{
 			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
 			VirtualFileSystem vfs;
@@ -97,6 +97,61 @@ namespace Engine {
 			REQUIRE(loaded.has_value());
 			CHECK(loaded->Name == "Game");
 			CHECK(loaded->Simulation.Seed == 99);
+
+			const Result<VfsPath> missing = VfsPath::Parse("project://Missing.eproj");
+			REQUIRE(missing.has_value());
+			const Result<ProjectSettings> notFound = ProjectSerializer::LoadFromFile(vfs, *missing, *registry, ProjectLoadOptions{}, report);
+			REQUIRE_FALSE(notFound.has_value());
+			CHECK(notFound.error().GetCode() == ErrorCode::NotFound);
+		}
+
+		TEST_CASE("ProjectSerializer: a missing key keeps its default and a document with only the header is a default project")
+		{
+			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
+			ProjectLoadReport report;
+			const std::string_view partial = R"({ "Format": "Project", "Version": 1, "Window": { "Width": 640 } })";
+			const Result<ProjectSettings> settings = ProjectSerializer::LoadFromString(partial, *registry, ProjectLoadOptions{}, report);
+			REQUIRE(settings.has_value());
+			CHECK(report.Diagnostics.empty());
+			CHECK(settings->Window.Width == 640);
+			CHECK(settings->Window.Height == WindowSettings{}.Height);
+			CHECK(settings->Name == ProjectSettings{}.Name);
+
+			const Result<ProjectSettings> header = ProjectSerializer::LoadFromString(R"({ "Format": "Project", "Version": 1 })", *registry,
+				ProjectLoadOptions{}, report);
+			REQUIRE(header.has_value());
+			CHECK(*ProjectSerializer::SaveToString(*header, *registry) == *ProjectSerializer::SaveToString(ProjectSettings{}, *registry));
+		}
+
+		TEST_CASE("ProjectSerializer: a malformed header or an invalid setting is a located Validation error naming the file")
+		{
+			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
+			ProjectLoadOptions options;
+			options.SourcePath = "Projects/Game/Game.eproj";
+			const std::array<std::pair<std::string_view, std::string_view>, 6> cases = { {
+				{ R"({ "Version": 1 })", "" },
+				{ R"({ "Format": "Project", "Version": 0 })", "/Version" },
+				{ R"({ "Format": "Project", "Version": "1" })", "/Version" },
+				{ R"({ "Format": "Project", "Version": 1, "Simulation": { "FixedHz": 0 } })", "/Simulation/FixedHz" },
+				{ R"({ "Format": "Project", "Version": 1, "Scripting": { "CallbackBudgetMs": 9 } })", "/Scripting/CallbackBudgetMs" },
+				{ R"({ "Format": "Project", "Version": 1, "Testing": { "Suites": [ { "Isolation": "case" } ] } })", "/Testing/Suites/0/Isolation" },
+			} };
+			for (const auto& [text, pointer] : cases)
+			{
+				INFO(std::string(text));
+				ProjectLoadReport report;
+				const Result<ProjectSettings> settings = ProjectSerializer::LoadFromString(text, *registry, options, report);
+				REQUIRE_FALSE(settings.has_value());
+				CHECK(settings.error().GetCode() == ErrorCode::Validation);
+				CHECK(settings.error().GetLocation().File == options.SourcePath);
+				CHECK(settings.error().GetLocation().JsonPointer == std::string(pointer));
+			}
+
+			ProjectLoadReport report;
+			const Result<ProjectSettings> parse = ProjectSerializer::LoadFromString("{ \"Format\": ", *registry, options, report);
+			REQUIRE_FALSE(parse.has_value());
+			CHECK(parse.error().GetCode() == ErrorCode::Parse);
+			CHECK(parse.error().GetLocation().File == options.SourcePath);
 		}
 	}
 

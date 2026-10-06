@@ -3,6 +3,7 @@
 #include "Engine/Scene/ComponentAccess.h"
 
 #include "Engine/Core/Json/JsonReader.h"
+#include "Engine/Scene/Components/BoxColliderComponent.h"
 #include "Engine/Scene/Components/CharacterControllerComponent.h"
 #include "Engine/Scene/Components/EnvironmentComponent.h"
 #include "Engine/Scene/Components/PrefabInstanceComponent.h"
@@ -28,7 +29,7 @@ namespace Engine {
 
 	TEST_SUITE("Scene")
 	{
-		TEST_CASE("ComponentAccess: components are added, read, patched and removed by name" * doctest::skip(true))
+		TEST_CASE("ComponentAccess: components are added, read, patched and removed by name")
 		{
 			Test::SceneTestFixture fixture;
 			const Entity entity = fixture.GetScene().CreateEntity("Ball");
@@ -49,7 +50,7 @@ namespace Engine {
 			CHECK_FALSE(entity.HasComponent<RigidBodyComponent>());
 		}
 
-		TEST_CASE("ComponentAccess: unknown names fail with suggestions" * doctest::skip(true))
+		TEST_CASE("ComponentAccess: unknown names fail with suggestions")
 		{
 			Test::SceneTestFixture fixture;
 			const Entity entity = fixture.GetScene().CreateEntity("Ball");
@@ -68,7 +69,7 @@ namespace Engine {
 			CHECK(entityLevel.error().GetCode() == ErrorCode::InvalidArgument);
 		}
 
-		TEST_CASE("ComponentAccess: writes are validated and atomic" * doctest::skip(true))
+		TEST_CASE("ComponentAccess: writes are validated and atomic")
 		{
 			Test::SceneTestFixture fixture;
 			const Entity entity = fixture.GetScene().CreateEntity("Ball");
@@ -86,7 +87,70 @@ namespace Engine {
 			CHECK(fixture.GetScene().GetRevision() == revision);
 		}
 
-		TEST_CASE("ComponentAccess: Requires, Excludes and UniquePerScene are enforced" * doctest::skip(true))
+		TEST_CASE("ComponentAccess: whole-component writes replace every field and reject unknown members")
+		{
+			Test::SceneTestFixture fixture;
+			const Entity entity = fixture.GetScene().CreateEntity("Ball");
+			REQUIRE(ComponentAccess::AddComponent(entity, "RigidBody", nullptr).has_value());
+			entity.Patch<RigidBodyComponent>([](RigidBodyComponent& body)
+			{
+				body.Friction = 0.9f;
+			});
+
+			REQUIRE(ComponentAccess::SetComponentJson(entity, "RigidBody", ParseAccessJson(R"({ "Mass": 2 })")).has_value());
+			CHECK(entity.GetComponent<RigidBodyComponent>().Mass == 2.0f);
+			CHECK(entity.GetComponent<RigidBodyComponent>().Friction == RigidBodyComponent{}.Friction); // reset to its default
+
+			const uint64_t revision = fixture.GetScene().GetRevision();
+			const Status unknown = ComponentAccess::SetComponentJson(entity, "RigidBody", ParseAccessJson(R"({ "Mas": 3 })"));
+			REQUIRE_FALSE(unknown.has_value());
+			CHECK(unknown.error().GetCode() == ErrorCode::Validation);
+			const Status notObject = ComponentAccess::PatchComponentJson(entity, "RigidBody", ParseAccessJson("[1, 2]"));
+			REQUIRE_FALSE(notObject.has_value());
+			CHECK(notObject.error().GetCode() == ErrorCode::Validation);
+			const Json number = ParseAccessJson("3");
+			const Status addNotObject = ComponentAccess::AddComponent(entity, "BoxCollider", &number);
+			REQUIRE_FALSE(addNotObject.has_value());
+			CHECK(addNotObject.error().GetCode() == ErrorCode::Validation);
+			CHECK_FALSE(entity.HasComponent<BoxColliderComponent>());
+			CHECK(entity.GetComponent<RigidBodyComponent>().Mass == 2.0f);
+			CHECK(fixture.GetScene().GetRevision() == revision); // nothing was written
+		}
+
+		TEST_CASE("ComponentAccess: absent components are reported and writes are tracked")
+		{
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			const Entity entity = scene.CreateEntity("Ball");
+
+			const Result<Json> absent = ComponentAccess::GetComponentJson(entity, "RigidBody");
+			REQUIRE_FALSE(absent.has_value());
+			CHECK(absent.error().GetCode() == ErrorCode::NotFound);
+			const Status removeAbsent = ComponentAccess::RemoveComponent(entity, "RigidBody");
+			REQUIRE_FALSE(removeAbsent.has_value());
+			CHECK(removeAbsent.error().GetCode() == ErrorCode::NotFound);
+			const Status patchAbsent = ComponentAccess::PatchComponentJson(entity, "RigidBody", ParseAccessJson("{}"));
+			REQUIRE_FALSE(patchAbsent.has_value());
+			CHECK(patchAbsent.error().GetCode() == ErrorCode::NotFound);
+			const Status addTwice = ComponentAccess::AddComponent(entity, "Transform", nullptr);
+			REQUIRE_FALSE(addTwice.has_value());
+			CHECK(addTwice.error().GetCode() == ErrorCode::InvalidState);
+
+			scene.GetChangeTracker().Begin();
+			const Value translationValue = Value::FromVec3(glm::vec3(1.0f, 2.0f, 3.0f));
+			REQUIRE(ComponentAccess::SetFieldValue(entity, "Transform", "Translation", translationValue).has_value());
+			REQUIRE(ComponentAccess::AddComponent(entity, "RigidBody", nullptr).has_value());
+			const std::vector<EntityChange> changes = scene.GetChangeTracker().End();
+			REQUIRE(changes.size() == 1);
+			CHECK(changes[0].Components == std::vector<std::string>{ "Transform", "RigidBody" });
+			CHECK(entity.GetComponent<TransformComponent>().Translation == glm::vec3(1.0f, 2.0f, 3.0f));
+
+			const Result<Value> translation = ComponentAccess::GetFieldValue(entity, "Transform", "Translation");
+			REQUIRE(translation.has_value());
+			CHECK(translation->AsVec3() == glm::vec3(1.0f, 2.0f, 3.0f));
+		}
+
+		TEST_CASE("ComponentAccess: Requires, Excludes and UniquePerScene are enforced")
 		{
 			Test::SceneTestFixture fixture;
 			Scene& scene = fixture.GetScene();
@@ -108,7 +172,7 @@ namespace Engine {
 			CHECK(required.error().GetCode() == ErrorCode::InvalidState);
 		}
 
-		TEST_CASE("ComponentAccess: engine-maintained Hidden components are readable but never written" * doctest::skip(true))
+		TEST_CASE("ComponentAccess: engine-maintained Hidden components are readable but never written")
 		{
 			Test::SceneTestFixture fixture;
 			const Entity entity = fixture.GetScene().CreateEntity("Member");
@@ -136,7 +200,7 @@ namespace Engine {
 			CHECK(entity.HasComponent<PrefabInstanceComponent>());
 		}
 
-		TEST_CASE("ComponentAccess: virtual Transform fields are read and written" * doctest::skip(true))
+		TEST_CASE("ComponentAccess: virtual Transform fields are read and written")
 		{
 			Test::SceneTestFixture fixture;
 			Scene& scene = fixture.GetScene();
@@ -147,7 +211,8 @@ namespace Engine {
 				transform.Translation = glm::vec3(0.0f, 10.0f, 0.0f);
 			});
 
-			REQUIRE(ComponentAccess::SetFieldValue(child, "Transform", "WorldPosition", Value::FromVec3(glm::vec3(1.0f, 12.0f, 0.0f))).has_value());
+			const Value worldPosition = Value::FromVec3(glm::vec3(1.0f, 12.0f, 0.0f));
+			REQUIRE(ComponentAccess::SetFieldValue(child, "Transform", "WorldPosition", worldPosition).has_value());
 			CHECK(Test::ApproxEqual(child.GetComponent<TransformComponent>().Translation, glm::vec3(1.0f, 2.0f, 0.0f)));
 
 			const Result<Value> world = ComponentAccess::GetFieldValue(child, "Transform", "WorldPosition");

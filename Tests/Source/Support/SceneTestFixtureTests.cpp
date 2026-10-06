@@ -8,7 +8,7 @@ namespace Engine {
 
 	TEST_SUITE("Support")
 	{
-		TEST_CASE("SceneTestFixture: provides a frozen registry, a seeded generator and an empty scene" * doctest::skip(true))
+		TEST_CASE("SceneTestFixture: provides a frozen registry, a seeded generator and an empty scene")
 		{
 			Test::SceneTestFixture fixture(7);
 			CHECK(fixture.GetRegistry().IsFrozen());

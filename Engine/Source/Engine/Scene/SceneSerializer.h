@@ -42,9 +42,10 @@ namespace Engine {
 	// LoadOptions::StrictUnknowns those warnings are errors. A known component whose value the registry rejects (wrong JSON
 	// type, out of range, non-finite, failed validator) fails a Strict load with a located Validation error; a Repair load
 	// drops it instead, or resets it to its defaults when it is Required (Transform), records SCENE_INVALID_COMPONENT as a
-	// warning and a LoadRepair whose Removed holds the rejected JSON, and continues. A failed load leaves the target scene
-	// empty. Load then save is byte-identical for every canonical file (§6), and serializing a copy gives the same bytes
-	// and state hash.
+	// warning and a LoadRepair whose Removed holds the rejected JSON, and continues; when that drops an instance root's
+	// Prefab component, the instance's members are unpacked with SCENE_INCONSISTENT_PREFAB_LINK, so a repaired scene always
+	// loads strictly again. A failed load leaves the target scene empty. Load then save is byte-identical for every
+	// canonical file (§6), and serializing a copy gives the same bytes and state hash.
 	//
 	// Static functions only. Scene access is main-thread (§4.11); the JSON functions are otherwise pure.
 	class SceneSerializer

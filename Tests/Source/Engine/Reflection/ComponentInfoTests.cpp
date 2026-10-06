@@ -67,7 +67,7 @@ namespace Engine {
 
 	TEST_SUITE("Reflection")
 	{
-		TEST_CASE("ComponentInfo: flags, category and version are what the builder set" * doctest::skip(true))
+		TEST_CASE("ComponentInfo: flags, category and version are what the builder set")
 		{
 			const Scope<TypeRegistry> registry = CreateComponentTestRegistry();
 			const ComponentInfo* versioned = registry->FindComponent("Versioned");
@@ -90,7 +90,7 @@ namespace Engine {
 			CHECK(other->GetIndex() == 1);
 		}
 
-		TEST_CASE("ComponentInfo: Migrate runs the chain from any older version" * doctest::skip(true))
+		TEST_CASE("ComponentInfo: Migrate runs the chain from any older version")
 		{
 			const Scope<TypeRegistry> registry = CreateComponentTestRegistry();
 			const ComponentInfo* versioned = registry->FindComponent("Versioned");
@@ -107,7 +107,7 @@ namespace Engine {
 			CHECK(*current == *JsonReader::Parse(R"({ "Radius": 3 })"));
 		}
 
-		TEST_CASE("ComponentInfo: Migrate rejects newer and invalid versions without changing the input" * doctest::skip(true))
+		TEST_CASE("ComponentInfo: Migrate rejects newer and invalid versions without changing the input")
 		{
 			const Scope<TypeRegistry> registry = CreateComponentTestRegistry();
 			const ComponentInfo* versioned = registry->FindComponent("Versioned");
@@ -130,6 +130,56 @@ namespace Engine {
 			const Status malformed = versioned->Migrate(1, *json); // version 1 data must have "Size"
 			CHECK_FALSE(malformed.has_value());
 			CHECK(*json == original);
+		}
+
+		TEST_CASE("ComponentInfo: Migrate from an intermediate version runs only the remaining steps")
+		{
+			const Scope<TypeRegistry> registry = CreateComponentTestRegistry();
+			const ComponentInfo* versioned = registry->FindComponent("Versioned");
+			REQUIRE(versioned != nullptr);
+
+			Result<Json> fromVersion2 = JsonReader::Parse(R"({ "Diameter": 3 })");
+			REQUIRE(fromVersion2.has_value());
+			REQUIRE(versioned->Migrate(2, *fromVersion2).has_value());
+			CHECK(*fromVersion2 == *JsonReader::Parse(R"({ "Radius": 1.5 })"));
+
+			// A failing step names the step it was running.
+			Result<Json> broken = JsonReader::Parse(R"({ "Diameter": "wide" })");
+			REQUIRE(broken.has_value());
+			const Status failed = versioned->Migrate(2, *broken);
+			REQUIRE_FALSE(failed.has_value());
+			REQUIRE_FALSE(failed.error().GetContexts().empty());
+			CHECK(failed.error().GetContexts()[0].find("from version 2 to 3") != std::string::npos);
+		}
+
+		TEST_CASE("ComponentInfo: Excludes resolve to registered components and relations are listed once")
+		{
+			TypeRegistry registry;
+			registry.Component<VersionedComponent>("Versioned", "Excludes Other.")
+				.Category("Test")
+				.Excludes<OtherComponent>()
+				.Excludes<OtherComponent>()
+				.Field("Radius", &VersionedComponent::Radius, "The radius.");
+			registry.Component<OtherComponent>("Other", "Excluded by Versioned.")
+				.Category("Test")
+				.Flags(ComponentFlags::Hidden | ComponentFlags::EntityLevel)
+				.RemoveFlags(ComponentFlags::EditorVisible)
+				.Field("Enabled", &OtherComponent::Enabled, "Whether it is enabled.");
+			registry.Freeze();
+
+			const ComponentInfo* versioned = registry.FindComponent("Versioned");
+			const ComponentInfo* other = registry.FindComponent("Other");
+			REQUIRE(versioned != nullptr);
+			REQUIRE(other != nullptr);
+			REQUIRE(versioned->GetExcludes().size() == 1);
+			CHECK(versioned->GetExcludes()[0] == other);
+			CHECK(versioned->GetRequires().empty());
+			CHECK(other->HasFlag(ComponentFlags::Hidden));
+			CHECK(other->HasFlag(ComponentFlags::EntityLevel));
+			CHECK_FALSE(other->HasFlag(ComponentFlags::EditorVisible));
+			CHECK(other->HasFlag(ComponentFlags::Removable));
+			CHECK(registry.GetComponents()[0] == versioned);
+			CHECK(registry.GetComponents()[1] == other);
 		}
 	}
 

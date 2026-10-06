@@ -6,7 +6,7 @@ namespace Engine {
 
 	TEST_SUITE("Support")
 	{
-		TEST_CASE("FixtureSchemaSource: the standard schema declares its six fields in declaration order" * doctest::skip(true))
+		TEST_CASE("FixtureSchemaSource: the standard schema declares its six fields in declaration order")
 		{
 			const Test::FixtureSchemaSource schemas = Test::FixtureSchemaSource::CreateStandard();
 			const std::vector<std::string> expected = { "Torque", "Count", "Enabled", "Goal", "Tint", "Label" };
@@ -39,7 +39,7 @@ namespace Engine {
 			CHECK(*(*torque)->GetMeta().Max == doctest::Approx(200.0));
 		}
 
-		TEST_CASE("FixtureSchemaSource: an owner without declarations answers with DefaultOwner's fields" * doctest::skip(true))
+		TEST_CASE("FixtureSchemaSource: an owner without declarations answers with DefaultOwner's fields")
 		{
 			Test::FixtureSchemaSource schemas = Test::FixtureSchemaSource::CreateStandard();
 			const UUID randomScript(0x5d1c9a7e33b04f12);
@@ -55,7 +55,7 @@ namespace Engine {
 			CHECK_FALSE(schemas.FindField(declaring, "Goal").has_value());
 		}
 
-		TEST_CASE("FixtureSchemaSource: an unknown field is NotFound with suggestions" * doctest::skip(true))
+		TEST_CASE("FixtureSchemaSource: an unknown field is NotFound with suggestions")
 		{
 			const Test::FixtureSchemaSource schemas = Test::FixtureSchemaSource::CreateStandard();
 			const Result<const FieldInfo*> missing = schemas.FindField(Test::FixtureSchemaSource::DefaultOwner, "Torqe");
@@ -64,7 +64,7 @@ namespace Engine {
 			CHECK(missing.error().GetHint().find("Torque") != std::string::npos);
 		}
 
-		TEST_CASE("FixtureSchemaSource: field addresses stay stable when the source moves" * doctest::skip(true))
+		TEST_CASE("FixtureSchemaSource: field addresses stay stable when the source moves")
 		{
 			Test::FixtureSchemaSource original = Test::FixtureSchemaSource::CreateStandard();
 			const Result<const FieldInfo*> before = original.FindField(Test::FixtureSchemaSource::DefaultOwner, "Label");

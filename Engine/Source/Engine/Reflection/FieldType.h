@@ -82,6 +82,10 @@ namespace Engine {
 		return type != FieldType::Array && type != FieldType::Map && type != FieldType::Struct;
 	}
 
+	// How far the length of a Quat value may be from 1. Every read and write path of a Quat field rejects a quaternion
+	// outside it (ADR 0006 decision 22); code that receives a rotation asserts or normalizes against the same measure.
+	inline constexpr double UnitQuaternionTolerance = 1e-3;
+
 	// True for the kinds whose numeric components FieldMeta::Min, Max, Step and MinMagnitude constrain: Int32, UInt32,
 	// Float, Vec2, Vec3, Vec4, Color3 and Color4 (per component). Quat is normalized instead, Bool3 has no range.
 	[[nodiscard]] constexpr bool IsNumericFieldType(FieldType type)

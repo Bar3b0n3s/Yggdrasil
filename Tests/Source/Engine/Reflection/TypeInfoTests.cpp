@@ -165,7 +165,7 @@ namespace Engine {
 			CHECK(schemaOnly.GetAssetTypeName() == "AudioClip");
 		}
 
-		TEST_CASE("TypeInfo: scalar operations read and write through Value" * doctest::skip(true))
+		TEST_CASE("TypeInfo: scalar operations read and write through Value")
 		{
 			const TypeOps number = Detail::MakeTypeOps<float>();
 			const ObjectPtr mass = number.Create();

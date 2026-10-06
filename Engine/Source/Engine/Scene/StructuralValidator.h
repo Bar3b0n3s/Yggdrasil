@@ -29,7 +29,9 @@ namespace Engine {
 	//     for example "Name" or "Relationship" put there by a hand edit or merge): it is dropped, its JSON kept in
 	//     LoadRepair::Removed. Such a component is never added to an entity (adding a Required one would assert);
 	//   - prefabs only (PREFAB_INVALID_ROOT): "Root" missing, naming no entity, or not the only root entity; not
-	//     repairable.
+	//     repairable;
+	//   - prefabs only (PREFAB_NESTED_INSTANCE): a "Prefab" or "PrefabLink" component, i.e. a nested instance, which a
+	//     prefab never contains (§5.5): it is dropped, which flattens the instance, its JSON kept in LoadRepair::Removed.
 	// A child listed before its parent is not an error: the result is normalized to canonical order with the warning
 	// SCENE_NONCANONICAL_ORDER, in both modes.
 	//
