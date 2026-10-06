@@ -13,11 +13,26 @@ This skill gives the commands, configurations, output locations and failure diag
 |---|---|---|---|
 | Compiler | VS 2026, toolset v145, MSVC 14.51 | GCC 14 (`CC=gcc-14 CXX=g++-14`) or Clang 19+ | Xcode 26+ (Apple Clang), arm64 |
 | Generator | `vs2026` (`Yggdrasil.slnx`) | `gmake` (or `ninja`) | `xcode4` |
-| Packages | Vulkan SDK 1.4.350.0 | `xorg-dev` (GLFW X11), Vulkan SDK 1.4.350.0 | Vulkan SDK 1.4.350.0 (MoltenVK) |
+| Packages | Vulkan SDK 1.4.350.0 | `xorg-dev` (GLFW X11), Vulkan SDK 1.4.350.0; for the unit suite without a desktop also `xvfb openbox x11-utils` | Vulkan SDK 1.4.350.0 (MoltenVK) |
 
 - `VULKAN_SDK` must point at SDK 1.4.350.0, which provides `slangc` and `spirv-val` for the `Shaders` project.
 - `Scripts/Lib/Toolchain.json` pins the SDK version and slangc 2026.8. Any other slangc version makes `CompileShaders.py` exit 3.
 - premake 5.0.0 lives in `Vendor/premake/bin/`. `Setup.py` downloads it, SHA-256 verified, when it is missing.
+- **The unit suite needs a display.** Windowed child processes (`--windowed-child`, the windowed Editor test, the minimized-window test) open native windows. Windows and macOS desktops have one. On Linux they need an X display with an EWMH window manager, because GLFW reports a window as minimized only once the window manager iconifies it. A Linux desktop session works as it is; without one, run the suite inside Xvfb with openbox, exactly as CI does (`Docs/Decisions/0005-m2-decisions.md` decision 22):
+
+  ```
+  xvfb-run -a --server-args='-screen 0 1920x1080x24' sh -c '
+    openbox --sm-disable &
+    tries=0
+    until xprop -root _NET_SUPPORTING_WM_CHECK >/dev/null 2>&1; do
+      tries=$((tries + 1))
+      if [ "$tries" -gt 300 ]; then echo "openbox did not start within 30 seconds" >&2; exit 1; fi
+      sleep 0.1
+    done
+    exec python3 Scripts/CI.py --stages build,unit --configs Debug'
+  ```
+
+  Without a display the windowed tests fail (GLFW cannot initialize X11); without a window manager the minimize tests fail.
 
 ## Commands
 
@@ -42,7 +57,7 @@ python Scripts/CI.py                                       # all stages; --stage
 
 **GitHub Actions** (`.github/workflows/ci.yml`) runs `CI.py` everywhere, with the stages a GPU-less hosted runner supports (setup, generate, lint, build, unit, portability):
 - Windows: one `CI.py` run, with `--require-clang-cl`.
-- Linux (GCC 14 and Clang 19) and macOS: one `CI.py` run per step (setup and generate, lint, Debug, Release, Dist, portability), so every configuration is reported even when another one failed. Each run writes `bin/TestResults/CI-<step>.xml`.
+- Linux (GCC 14 and Clang 19) and macOS: one `CI.py` run per step (setup and generate, lint, Debug, Release, Dist, portability), so every configuration is reported even when another one failed. Each run writes `bin/TestResults/CI-<step>.xml`. The Linux jobs install `xvfb openbox x11-utils` and run the Debug and Release steps (build and unit) inside the Xvfb display with openbox shown above.
 - JUnit results are uploaded as artifacts named `test-results-windows`, `test-results-linux-gcc`, `test-results-linux-clang` and `test-results-macos`.
 
 ## Configurations
@@ -66,6 +81,9 @@ Simulation results must be identical in all three. A test that passes in Debug a
 | Intermediates | `bin-int/<OutputDir>/<Project>/` |
 | SPIR-V, reflection and depfiles | `bin/<OutputDir>/Shaders/<Program>/<Entry>[.<KEY>-<VALUE>...].spv` plus `.stamp` |
 | Test results (JUnit) | `bin/TestResults/` |
+| Log of a top-level Tests run | `<UserData>/<ENGINE_PRODUCT_NAME>/Logs/Tests.log`, where `<UserData>` is `%LOCALAPPDATA%` (Windows), `$XDG_DATA_HOME` or `~/.local/share` (Linux), `~/Library/Application Support` (macOS). Child processes log only to the console their parent captures |
+| Crash reports of a Tests run | `<UserData>/<ENGINE_PRODUCT_NAME>/Crashes/crash-<epoch>-<pid>.txt`, plus a `.dmp` minidump on Windows. A child writes reports only into the root its parent passed with `--user-data-dir` (a test's temporary directory) |
+| Log and crash reports of the Editor and Runtime | `<UserData>/<ENGINE_PRODUCT_NAME>/Logs/<Executable>.log` and `.../Crashes/`; `--user-data-dir=<absolute path>` replaces `<UserData>` (not in Dist) |
 | Linker map of Runtime | next to the executable (`Runtime.map`), every configuration and platform |
 | Dist symbols | the PDB next to the executable for now (`bin/Dist-windows-x86_64/Runtime/Runtime.pdb`); archiving into `bin/Symbols/` lands with the M15 Dist stripping |
 | Generated projects | next to each `premake5.lua` (`Yggdrasil.slnx` at the root); gitignored |
@@ -84,7 +102,14 @@ bin/Debug-windows-x86_64/Tests/Tests.exe --reporters=junit --out=bin/TestResults
 ```
 
 - **Commas separate filters**, so a case name that contains a comma needs `\,`, or a `*` wildcard in place of the comma. For example, use `-tc="Physics: state hash identical with 0*"`.
-- **Engine-specific modes** are added to the Tests main as their milestones land (M1–M5, Architecture §15.2): `--death-test=<name>` runs one death-test body and `--windowed-child=<name>` runs a windowed child case; `--require-gpu` turns GPU-suite skips into failures. These are for tests that spawn child processes. Run the parent test case instead of calling them by hand.
+- **Engine-specific modes** are added to the Tests main as their milestones land (M1–M5, Architecture §15.2). They are for tests that spawn child processes; run the parent test case instead of calling them by hand. At most one child mode per run:
+  - `--death-test=<name>` runs one death-test body.
+  - `--windowed-child=<case>` runs one ChildTargets test case in a windowed process (GLFW's native platform).
+  - `--crash-child` crashes after the process context is up (`--child-argument=fatal-error` takes the fatal-error path instead).
+  - `--child-process` marks a process another Tests process started: it logs only to the console and writes no crash report unless it got `--user-data-dir`. Parents append it themselves.
+  - `--user-data-dir=<absolute path>` is the child's user-data root, so its crash reports land in the parent's temporary directory.
+  - `--child-argument=<text>` is input for a child body, such as the lock file a lock holder takes.
+  - `--require-gpu` (M5) turns GPU-suite skips into failures.
 - **`--test-timeout=<seconds>`** is the per-case limit for test cases without a `doctest::timeout` decorator (default 120). A case that runs longer is reported on stderr and the run exits with code 5.
 - **`--no-skip`** also runs the `ChildTargets` suite: cases that exist only as child-process targets of other tests, which hang or end the process by design. Exclude them: `Tests.exe --no-skip --test-suite-exclude=ChildTargets`.
 - **Skipped cases.** `--list-test-cases` omits skipped cases. `Tests.exe --no-skip --list-test-cases --reporters=xml --out=<file>` lists every case with its `testsuite` and `skipped` attributes; this is how `Test.py` finds skipped cases outside the `ChildTargets` suite.
@@ -99,6 +124,7 @@ bin/Debug-windows-x86_64/Tests/Tests.exe --reporters=junit --out=bin/TestResults
   - When a compile fails, the previous `.spv` files and the stamp are kept.
   - Exit 1 is a compile, validation or tool failure (a slangc or spirv-val run over 300 s is terminated and counts as one). Exit 2 is a usage or configuration error, such as an unknown `--program` or an invalid `Shaders.json`. Exit 3 means slangc or spirv-val is missing or slangc is not the pinned version. Neither 2 nor 3 is a shader bug.
 - **doctest failures** look like `file(line): ERROR: CHECK( a == b ) is NOT correct!` followed by `values: CHECK( 1 == 2 )`. Re-run the single case with `-s` to see the passing assertions around the failure.
+- **Exit code 4 (crash or assert).** The process printed `Crash: <reason>; report written to <path>` on stderr (or `...; no report written` when it had no report directory, as death-test children do; on Windows `...; incomplete report written to <path>` when the reporter could not finish within 10 s). The report holds the reason, the breadcrumbs (frame phase, scene, automation method), a symbolized stack trace and the last 256 log lines; a failed assertion or another fatal error instead logs `Fatal error (<Kind>): <message>` at Critical, followed by `Crash report written to '<path>'` in a process that writes reports. Reports of a top-level run are in `<UserData>/<ENGINE_PRODUCT_NAME>/Crashes/` (see "Where outputs land").
 - **CheckBuildConfig findings** look like `[windows] Debug: Tests includes JoltPhysics headers but lacks JPH_PROFILE_ENABLED ...`; the bracket names the target (`windows`, `windows-clang`, `linux`, `linux-clang`, `macosx`). The exit codes are 0 clean, 1 findings or a generation failure, 2 usage error, 3 premake missing or not the pinned 5.0.0, 5 timeout. `--keep` keeps the generated projects so you can inspect them.
 - **Exit code 3 from any script** means a required tool or file is missing or has the wrong version (premake, clang-format, clang-tidy or clang-query in `--mode clang`, slangc, a compiler, an archiver or lld). Run `python Scripts/Setup.py`, which names what to install.
 - **CI.py** prints a summary table with one row per stage and configuration. Fix the first failing stage; later stages did not run.

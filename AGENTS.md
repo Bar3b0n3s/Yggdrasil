@@ -163,7 +163,7 @@ The same inputs and seed must give the same state hash in Debug, Release and Dis
 - A module includes only lower layers and the listed exceptions. Layer 5 is an explicit DAG in `Scripts/ModuleRules.json`. `Lint.py` enforces all of this.
 - `Renderer` never includes `Scene`.
 - Public headers never expose GLFW, Jolt, Luau, miniaudio, cgltf or stb types.
-- Platform code lives only in `Platform/<OS>/` and in the Graphics device setup.
+- Platform code lives only in `Platform/Windows/`, `Platform/Posix/` (shared by Linux and macOS; `Platform/Linux/` and `Platform/MacOS/` when a difference grows) and in the Graphics device setup. Helpers that both OS halves of a unit share go in `Platform/Private/`, named after the unit. In Tests, only `Support/PlatformProbes.cpp` has OS headers (ADR 0005 decisions 1 and 25).
 
 **No product name in code.** "Yggdrasil" appears only in the premake workspace name (`WorkspaceName` in `premake5.lua`, which scripts read through `Scripts/Lib/paths.py`), in `ENGINE_PRODUCT_NAME` and in docs. Code, macros, files, shaders, Python and premake scripts say `Engine`/`ENGINE_`; `Lint.py` checks C++, Slang, Python and Lua.
 
@@ -175,7 +175,8 @@ The same inputs and seed must give the same state hash in Debug, Release and Dis
   - Tests use doctest, in `Tests/Source/<path of the unit>Tests.cpp`, inside `namespace Engine`.
   - Each file wraps its cases in `TEST_SUITE("<Module>")`.
   - Case names have the form `TEST_CASE("<Unit>: <present-tense behaviour>")`. Roadmap acceptance names are used verbatim.
-- **Deterministic:** no sleeps or wall-clock timing, fixed seeds, no network, files only in a per-test temporary directory, and no dependence on test order.
+- **Deterministic:** no sleeps or wall-clock timing, fixed seeds, no network, files only in a per-test temporary directory, and no dependence on test order. The one wall-clock exception is the windowed child "FrameLoop: a minimized window uses little CPU time per second" (ADR 0005 decision 13).
+- **Windowed children** (`--windowed-child`) need a display; on Linux without a desktop, run the unit suite inside Xvfb with a window manager, as the `build-and-test` skill shows.
 - **Public API only.** Expected error logs are declared with `Test::ExpectLog`. Expected asserts are death tests (`ENGINE_DEATH_TEST`). GPU tests skip with a reason unless `--require-gpu` is passed.
 - **No permanent `doctest::skip`.** It marks a contract task's tests until their implementation lands. The only permanent skips are child-process targets, which carry `doctest::test_suite(Test::ChildTargetSuite)` in the same decorator expression (Lint `test-skip`, Test.py's skip check).
 - **Fixtures** live in `Tests/Data/`, with licenses in `Tests/Data/LICENSES.md`. Generated fixtures come from committed generators.

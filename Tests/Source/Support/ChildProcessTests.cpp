@@ -7,8 +7,6 @@
 #include "Support/TempDirectory.h"
 #include "Support/TestOptions.h"
 
-#include <condition_variable>
-#include <mutex>
 #include <system_error>
 
 namespace Engine {
@@ -17,16 +15,10 @@ namespace Engine {
 	// characters a Windows command line must escape. No comma, '*' or '?', which doctest's --test-case filter interprets.
 	static constexpr const char* QuotingTargetName = "ChildProcess: the quoting target \"a b\" c\\d\\\"e\\";
 
-	// Blocks forever: the child of the timeout test. It never notifies, so the wait never ends.
+	// Blocks until killed: the child of the timeout test.
 	ENGINE_DEATH_TEST("Support/Hangs")
 	{
-		std::mutex mutex;
-		std::condition_variable never;
-		std::unique_lock lock(mutex);
-		never.wait(lock, []()
-		{
-			return false;
-		});
+		Test::BlockUntilKilled();
 	}
 
 	// Writes far more to stderr than a pipe holds (about 160 KB) before it exits, while nothing reaches stdout.
@@ -34,6 +26,12 @@ namespace Engine {
 	{
 		for (int line = 0; line < 2000; ++line)
 			ENGINE_CORE_WARN("Flooding standard error with line {} of 2000 to fill the pipe buffer", line);
+	}
+
+	// Reports whether the parent marked this process with --child-process (TestOptions::ChildProcess), then returns.
+	ENGINE_DEATH_TEST("Support/ReportsChildProcessFlag")
+	{
+		ENGINE_CORE_WARN("Child process flag: {}", Test::GetTestOptions().ChildProcess);
 	}
 
 	TEST_SUITE("Support")
@@ -111,6 +109,15 @@ namespace Engine {
 			INFO("child stdout: ", result->StandardOutput);
 			CHECK(result->ExitCode == 0);
 			CHECK(result->StandardOutput.contains(QuotingTargetName));
+		}
+
+		TEST_CASE("ChildProcess: the child is marked with --child-process")
+		{
+			const std::vector<std::string> arguments = { "--death-test=Support/ReportsChildProcessFlag" };
+			const Result<Test::ChildProcessResult> result = Test::RunChildProcess(Test::GetTestOptions().ExecutablePath,
+				arguments, std::chrono::seconds(60));
+			REQUIRE(result.has_value());
+			CHECK(result->StandardError.contains("Child process flag: true"));
 		}
 
 		TEST_CASE("ChildProcess: a missing executable is NotFound")

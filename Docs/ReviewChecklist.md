@@ -112,7 +112,7 @@ Section references (§) point to `Docs/Architecture.md` unless marked CodeStyle 
 - [ ] Every new or changed behaviour has a test, and every bug fix has a regression test that fails without the fix.
 - [ ] Tests are meaningful: they assert outcomes rather than mere execution, cover failure paths, and would catch a plausible regression. No test was weakened, skipped or deleted to get green. A permanent `doctest::skip` exists only on a child-process target, with `doctest::test_suite(Test::ChildTargetSuite)` in the same decorator expression.
 - [ ] Naming and location follow the conventions: `Tests/Source/<path>Tests.cpp`, `TEST_SUITE("<Module>")`, and `TEST_CASE("<Unit>: <behaviour>")`. Roadmap acceptance names are used verbatim.
-- [ ] Tests are deterministic: no sleeps or wall-clock time, fixed seeds, no network, temporary directories only, and no dependence on order.
+- [ ] Tests are deterministic: no sleeps or wall-clock time, fixed seeds, no network, temporary directories only, and no dependence on order. The one wall-clock exception is the windowed child "FrameLoop: a minimized window uses little CPU time per second" (ADR 0005 decision 13); another needs its own ADR entry.
 - [ ] Expected error logs use `Test::ExpectLog`, and expected asserts are death tests. GPU tests skip with a reason unless `--require-gpu`.
 - [ ] Parity (Roadmap rule 5): every editor-visible capability has its automation method and a Python test. New registry entries have FeatureTest coverage once M14 has landed.
 - [ ] Fixtures are small, committed, licensed (`Tests/Data/LICENSES.md`) and produced by a committed generator where possible.
