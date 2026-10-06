@@ -7,7 +7,7 @@ premake (--fatal), and every generated project is parsed:
   windows        premake5 vs2026                .vcxproj files and the .slnx solution (MSVC)
   windows-clang  premake5 --cc=clang vs2026     .vcxproj files (clang-cl, the portability build of §15.8)
   linux          premake5 --os=linux gmake      per-project makefiles (GCC)
-  linux-clang    premake5 --os=linux --cc=clang gmake  per-project makefiles (the Clang 18 CI job)
+  linux-clang    premake5 --os=linux --cc=clang gmake  per-project makefiles (the Clang 19 CI job)
   macosx         premake5 --os=macosx xcode4    project.pbxproj files (Apple Clang)
 
 For every compile unit (a project configuration, or a file that overrides it) the effective settings are computed

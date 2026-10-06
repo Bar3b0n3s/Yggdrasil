@@ -64,7 +64,7 @@ Go through `Docs/ReviewChecklist.md` section by section (§0–§13) and give ev
   - every new behaviour is asserted, including its failure paths;
   - a bug fix's test would fail without the fix;
   - names follow `"<Unit>: <behaviour>"`, and Roadmap acceptance names are used verbatim.
-- **Cross-platform:** Linux and macOS code must compile on GCC 14, Clang 18+ and Apple Clang. Read those branches as carefully as the Windows path.
+- **Cross-platform:** Linux and macOS code must compile on GCC 14, Clang 19+ and Apple Clang. Read those branches as carefully as the Windows path.
 
 For each finding, confirm the defect is real: trace the code path, or write a quick test in a scratch location. Remove anything you cannot substantiate. Do not report speculation as a finding.
 

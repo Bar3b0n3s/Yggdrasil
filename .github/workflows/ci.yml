@@ -4,7 +4,7 @@
 # Every job runs Scripts/CI.py, the single CI entry point (Architecture §15.8), with every stage a GPU-less hosted
 # runner can run: setup, generate, lint, build, unit and portability.
 # - windows: one CI.py run over all of them (the local gate is the full CI.py).
-# - linux:   gmake, once with GCC 14 and once with Clang 18 (Architecture §15.8).
+# - linux:   gmake, once with GCC 14 and once with Clang 19 (Architecture §15.8).
 # - macos:   arm64 with the xcode4 generator and xcodebuild.
 # On linux and macos, CI.py runs once per step below: setup + generate, then the static checks, then build + unit per
 # configuration, then portability. Each later step runs whenever generation succeeded, even when an earlier step
@@ -19,7 +19,7 @@
 #   platform toolset v145 / MSVC 14.51, the toolchain Architecture §16 specifies. The job pins that label instead of
 #   the moving `windows-latest`, and its first step fails if VS 2026, toolset v145, MSVC >= 14.51 or clang-format 22.x
 #   is missing. No other toolset is ever substituted silently; premake's vs2026 projects request v145 explicitly.
-# - Linux: `ubuntu-24.04` ships GCC 14.2 and Clang 18.1. The job still installs the compiler of each matrix entry
+# - Linux: `ubuntu-24.04` ships GCC 14.2 and Clang 18.1, and packages Clang 19 (Clang 18 cannot use libstdc++'s std::expected). The job still installs the compiler of each matrix entry
 #   explicitly, so an image change cannot swap it.
 # - macOS: `macos-26` is the arm64 image with Xcode 26.x. Architecture §16 requires Xcode 26 as the minimum, so the
 #   older `macos-15` image does not qualify. The job prints the Xcode version and fails below 26.
@@ -170,14 +170,14 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-  # Architecture §15.8: ubuntu-24.04 with GCC 14 and with Clang 18. Build.py passes CC, CXX and AR to make.
+  # Architecture §15.8: ubuntu-24.04 with GCC 14 and with Clang 19. Build.py passes CC, CXX and AR to make.
   # - GCC: gcc-ar passes GCC's LTO plugin, so the Dist (-flto) static libraries get a valid symbol index. Plain `ar`
   #   would load the system default GCC's plugin.
   # - Clang: llvm-ar writes the LTO symbol index, and lld (-fuse-ld=lld, set by Dependencies.lua for Clang on Linux)
   #   links the Dist LTO bitcode natively; the system linker would need the LLVM gold plugin. libstdc++ comes from
   #   g++-14, the newest GCC on the image.
   # - Both: the lint stage needs clang-format 22 (pip, .github/ci-requirements.txt), clang-tidy and clang-query (the
-  #   naming and json-access checkers) and clang++ (header self-containment), all from the Clang 18 packages.
+  #   naming and json-access checkers) and clang++ (header self-containment), all from the Clang 19 packages.
   linux:
     name: Linux x64 (${{ matrix.name }})
     runs-on: ubuntu-24.04
@@ -192,12 +192,12 @@ jobs:
             cc: gcc-14
             cxx: g++-14
             ar: gcc-ar-14
-          - name: Clang 18
+          - name: Clang 19
             toolset: clang
-            packages: llvm-18 lld-18 g++-14
-            cc: clang-18
-            cxx: clang++-18
-            ar: llvm-ar-18
+            packages: llvm-19 lld-19 g++-14
+            cc: clang-19
+            cxx: clang++-19
+            ar: llvm-ar-19
     defaults:
       run:
         shell: bash
@@ -241,10 +241,10 @@ jobs:
           first_line() { local output; output="$("$@")"; printf '%s\n' "${output%%$'\n'*}"; }
           sudo apt-get update
           # xorg-dev covers GLFW's X11 build (Vendor/GLFW/VENDOR.md) and is the package Setup.py checks for.
-          # clang-18, clang-tidy-18 and clang-tools-18 (clang-query) serve the lint stage in both matrix entries.
+          # clang-19, clang-tidy-19 and clang-tools-19 (clang-query) serve the lint stage in both matrix entries.
           # PACKAGES is a fixed list from the matrix above; it is split into words on purpose.
           # shellcheck disable=SC2086
-          sudo apt-get install --yes --no-install-recommends $PACKAGES clang-18 clang-tidy-18 clang-tools-18 xorg-dev
+          sudo apt-get install --yes --no-install-recommends $PACKAGES clang-19 clang-tidy-19 clang-tools-19 xorg-dev
           python3 -m pip install --disable-pip-version-check --require-hashes --no-deps --requirement .github/ci-requirements.txt
           versions="$(first_line "$CXX" --version); $(first_line "$AR" --version); $(first_line make --version); $(clang-format --version); Python $(python3 -c 'import platform; print(platform.python_version())')"
           echo "$versions"

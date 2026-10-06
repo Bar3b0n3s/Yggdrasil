@@ -692,7 +692,7 @@ The language standard is C++23 for Engine, Editor, Runtime and Tests.
 
 - MSVC 14.51 (Visual Studio 2026) and its STL.
 - GCC 14 with libstdc++ 14.
-- Clang 18 or later.
+- Clang 19 or later (Clang 18 cannot use libstdc++'s `std::expected`).
 - Apple Clang with the libc++ of the minimum supported Xcode **[Architecture]**.
 
 When in doubt, check the compiler-support tables on cppreference. CI on all three platforms has the final say.

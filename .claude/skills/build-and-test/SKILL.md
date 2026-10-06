@@ -11,7 +11,7 @@ This skill gives the commands, configurations, output locations and failure diag
 
 | | Windows | Linux | macOS |
 |---|---|---|---|
-| Compiler | VS 2026, toolset v145, MSVC 14.51 | GCC 14 (`CC=gcc-14 CXX=g++-14`) or Clang 18+ | Xcode 26+ (Apple Clang), arm64 |
+| Compiler | VS 2026, toolset v145, MSVC 14.51 | GCC 14 (`CC=gcc-14 CXX=g++-14`) or Clang 19+ | Xcode 26+ (Apple Clang), arm64 |
 | Generator | `vs2026` (`Yggdrasil.slnx`) | `gmake` (or `ninja`) | `xcode4` |
 | Packages | Vulkan SDK 1.4.350.0 | `xorg-dev` (GLFW X11), Vulkan SDK 1.4.350.0 | Vulkan SDK 1.4.350.0 (MoltenVK) |
 
@@ -42,7 +42,7 @@ python Scripts/CI.py                                       # all stages; --stage
 
 **GitHub Actions** (`.github/workflows/ci.yml`) runs `CI.py` everywhere, with the stages a GPU-less hosted runner supports (setup, generate, lint, build, unit, portability):
 - Windows: one `CI.py` run, with `--require-clang-cl`.
-- Linux (GCC 14 and Clang 18) and macOS: one `CI.py` run per step (setup and generate, lint, Debug, Release, Dist, portability), so every configuration is reported even when another one failed. Each run writes `bin/TestResults/CI-<step>.xml`.
+- Linux (GCC 14 and Clang 19) and macOS: one `CI.py` run per step (setup and generate, lint, Debug, Release, Dist, portability), so every configuration is reported even when another one failed. Each run writes `bin/TestResults/CI-<step>.xml`.
 - JUnit results are uploaded as artifacts named `test-results-windows`, `test-results-linux-gcc`, `test-results-linux-clang` and `test-results-macos`.
 
 ## Configurations

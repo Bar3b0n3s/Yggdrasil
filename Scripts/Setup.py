@@ -4,7 +4,7 @@
 Checks: Python, Git, the Vulkan SDK (VULKAN_SDK at least the version pinned in Scripts/Lib/Toolchain.json, slangc
 exactly at its pinned version, spirv-val), the Python interpreter the Shaders build rule invokes, and per host:
   Windows  Visual Studio 2026 with the x64 C++ tools (vswhere), the Windows SDK, the MSVC v145 CRT redistributables
-  Linux    GCC 14+ (or Clang 18+ for --toolset clang), make, the X11 development headers GLFW needs (xorg-dev)
+  Linux    GCC 14+ (or Clang 19+ for --toolset clang), make, the X11 development headers GLFW needs (xorg-dev)
   macOS    Xcode 26+
 clang-format 22.x is reported as a warning when missing (only Scripts/Format.py needs it).
 

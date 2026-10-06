@@ -133,7 +133,7 @@ Section references (§) point to `Docs/Architecture.md` unless marked CodeStyle 
 
 ## 11. Cross-platform (§16)
 
-- [ ] The code compiles on MSVC 14.51, GCC 14 (libstdc++ 14), Clang 18+ and Apple Clang (Xcode 26). It uses no feature one of them lacks (CodeStyle §13). CI is the judge for Linux and macOS.
+- [ ] The code compiles on MSVC 14.51, GCC 14 (libstdc++ 14), Clang 19+ and Apple Clang (Xcode 26). It uses no feature one of them lacks (CodeStyle §13). CI is the judge for Linux and macOS.
 - [ ] Paths are UTF-8 internally and converted only in `Platform`. Data paths use `/`. File names respect the case policy, so nothing relies on case-insensitive lookup.
 - [ ] Binary formats are little-endian and asserted. Text is LF, and JSON is UTF-8 without a BOM.
 - [ ] Premake changes are written for every OS branch (Windows, Linux, macOS). New files are picked up after `Generate.py`.

@@ -37,11 +37,11 @@ CRT_REDIST_FOLDER = "Microsoft.VC145.CRT"
 CRT_REDIST_FILES = ("vcruntime140.dll", "vcruntime140_1.dll", "msvcp140.dll")
 
 MINIMUM_GCC = 14
-MINIMUM_CLANG = 18
+MINIMUM_CLANG = 19  # with libstdc++: Clang 18 reports __cpp_concepts 201907, so libstdc++ hides std::expected
 MINIMUM_APPLE_CLANG = 17  # Apple Clang 17 ships with Xcode 26, the minimum Xcode (Architecture §16)
 MINIMUM_XCODE = 26
 CLANG_FORMAT_MAJOR = 22  # Docs/CodeStyle.md §1
-MINIMUM_CLANG_TIDY = 18  # the clang-tidy of Ubuntu 24.04; .clang-tidy uses only keys it understands
+MINIMUM_CLANG_TIDY = 19  # it parses the code with libstdc++, so it needs Clang 19 too (std::expected); Ubuntu 24.04 ships it
 
 # Newest first: the highest installed version that meets the minimum is selected.
 _VERSIONED_CANDIDATES = range(30, 0, -1)
@@ -408,14 +408,14 @@ def minimum_version(family: str) -> int:
 
 
 def _sibling(executable: str, old: str, new: str) -> str:
-    """The companion tool next to a compiler driver: g++-14 -> gcc-14, /usr/bin/clang++-18 -> /usr/bin/clang-18."""
+    """The companion tool next to a compiler driver: g++-14 -> gcc-14, /usr/bin/clang++-19 -> /usr/bin/clang-19."""
     path = Path(executable)
     name = path.name.replace(old, new, 1)
     return str(path.with_name(name)) if path.parent != Path(".") else name
 
 
 def _version_suffix(executable: str) -> str:
-    """'-18' for clang++-18, '' for an unversioned driver."""
+    """'-19' for clang++-19, '' for an unversioned driver."""
     match = re.search(r"(-\d+)$", Path(executable).name)
     return match.group(1) if match else ""
 
@@ -461,7 +461,7 @@ def _archiver_for(family: str, cxx: str) -> str:
     tool = "gcc-ar" if family == "gcc" else "llvm-ar"
     found = _find_tool(cxx, [f"{tool}{suffix}", tool])
     if found is None:
-        package = f"gcc{suffix or '-14'}" if family == "gcc" else f"llvm{suffix or '-18'}"
+        package = f"gcc{suffix or '-14'}" if family == "gcc" else f"llvm{suffix or '-19'}"
         raise ToolchainError(f"{tool}{suffix} not found for {cxx}: the Dist configuration links with LTO, which needs "
                              f"{tool} (Ubuntu: sudo apt install {package}), or set AR")
     return found
@@ -476,7 +476,7 @@ def _linker_for(family: str, cxx: str) -> str:
     if located is None:
         suffix = _version_suffix(cxx)
         raise ToolchainError(f"{cxx} does not find ld.lld: Clang builds on Linux link with lld (-fuse-ld=lld, "
-                             f"Dependencies.lua); install it (Ubuntu: sudo apt install lld{suffix or '-18'})")
+                             f"Dependencies.lua); install it (Ubuntu: sudo apt install lld{suffix or '-19'})")
     return located
 
 
@@ -522,7 +522,7 @@ def select_compiler(toolset: str, environment: Mapping[str, str]) -> Compiler:
         rejected.append(f"{candidate} is {version_text(version)}")
     found = f" (found: {'; '.join(rejected)})" if rejected else ""
     minimum = MINIMUM_GCC if toolset == "gcc" else MINIMUM_CLANG
-    packages = "g++-14" if toolset == "gcc" else "clang-18 llvm-18 lld-18"
+    packages = "g++-14" if toolset == "gcc" else "clang-19 llvm-19 lld-19"
     raise ToolchainError(f"no {driver} {minimum} or newer found{found}; install it (Ubuntu: sudo apt install "
                          f"{packages}) or set CXX")
 

@@ -64,7 +64,7 @@ Run every command from the repository root. Windows uses `python`; Linux and mac
 
 - **Toolchain:**
   - Windows: Visual Studio 2026 (toolset v145, MSVC 14.51).
-  - Linux: GCC 14 or Clang 18+.
+  - Linux: GCC 14 or Clang 19+.
   - macOS: Xcode 26 or later.
   - All platforms: Python 3.10+, and the Vulkan SDK 1.4.350.0 with `VULKAN_SDK` set (it provides `slangc` and `spirv-val`). `Scripts/Lib/Toolchain.json` pins the SDK and slangc versions; the other pins are listed in the repository map above.
 - **Configurations:**
@@ -205,7 +205,7 @@ The same inputs and seed must give the same state hash in Debug, Release and Dis
   - no weakened or deleted tests.
 
   First-party C++ builds at `/W4 /WX`, or `-Wall -Wextra -Wshadow -Werror` on GCC/Clang.
-- **Linux and macOS code must really compile** with GCC 14, Clang 18+ and Apple Clang (Xcode 26), because CI builds and tests it. Generating project files is not enough.
+- **Linux and macOS code must really compile** with GCC 14, Clang 19+ and Apple Clang (Xcode 26), because CI builds and tests it. Generating project files is not enough.
 - **Git:** read-only git is always fine. Commit only through the commit gate, and only when your task includes committing. Never force-push, rewrite published history or skip hooks.
 - **Deviations:** departing from Architecture or Roadmap needs an ADR in `Docs/Decisions/NNNN-<title>.md`. A doc that turns out to be wrong is fixed in the same change, by its owner.
 
