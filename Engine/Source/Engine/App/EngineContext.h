@@ -8,6 +8,7 @@
 #include "Engine/Core/VirtualFileSystem.h"
 #include "Engine/Platform/Input/InputState.h"
 #include "Engine/Platform/Window.h"
+#include "Engine/Reflection/TypeRegistry.h"
 
 #include <cstdint>
 #include <filesystem>
@@ -20,18 +21,23 @@
 namespace Engine {
 
 	// The steps that build an EngineContext, in order (§4.1: VFS -> JobSystem -> Window -> ...). Later milestones append
-	// theirs where §4.1 puts them: the GraphicsDevice after the Window, then the injected AssetManager, the AudioEngine and
-	// the registries.
+	// theirs where §4.1 puts them: the GraphicsDevice after the Window, then the injected AssetManager and the AudioEngine.
+	// The TypeRegistry is infallible and therefore part of Services (Docs/Decisions/0008-m4-decisions.md decision 2).
 	enum class EngineContextStep : uint8_t
 	{
 		// The infallible services, constructed in member order: VirtualFileSystem, MainThreadQueue, JobSystem, EventLog,
-		// InputState.
+		// InputState, and the TypeRegistry (built-in components, project settings types, RegisterTypes, then frozen).
 		Services,
 		// Mounts user:// when UserDataDirectory is set.
 		UserData,
 		// Window::Create when Window is set.
 		Window
 	};
+
+	// Registers an application's own reflected types into the context's TypeRegistry before it is frozen: the editor's
+	// automation param and result structs (Architecture §5.4, §13.4; EditorCore's RegisterEditorMethodTypes). It runs on
+	// the constructing thread, only registers types, and must not keep the reference.
+	using RegisterTypesFunction = void (*)(TypeRegistry& registry);
 
 	struct EngineContextSpecification
 	{
@@ -44,6 +50,9 @@ namespace Engine {
 		// The context's window, created on the process's GLFW platform (native when windowed, null when headless). Without
 		// it the context has no window and needs no GLFW, which lets tests build several contexts side by side.
 		std::optional<WindowSpecification> Window{};
+		// Called once by the constructor after RegisterBuiltinComponents and RegisterProjectSettingsTypes and before
+		// TypeRegistry::Freeze; null adds nothing.
+		RegisterTypesFunction RegisterTypes = nullptr;
 	};
 
 	// One engine context. Not copyable or movable. Tests may build several side by side in one process, all on that
@@ -87,6 +96,9 @@ namespace Engine {
 		[[nodiscard]] const EventLog& GetEventLog() const { return m_EventLog; }
 		[[nodiscard]] InputState& GetInputState() { return m_InputState; }
 		[[nodiscard]] const InputState& GetInputState() const { return m_InputState; }
+		// The context's type registry (§4.1, §5.4): every built-in component, the project settings types and what the
+		// specification's RegisterTypes added, frozen, so every const member is thread-safe.
+		[[nodiscard]] const TypeRegistry& GetTypeRegistry() const { return m_TypeRegistry; }
 
 		// The window; nullptr when the specification had none.
 		[[nodiscard]] Window* GetWindow() { return m_Window ? &*m_Window : nullptr; }
@@ -98,6 +110,7 @@ namespace Engine {
 		JobSystem m_JobSystem; // posts continuations to m_MainThreadQueue
 		EventLog m_EventLog;
 		InputState m_InputState;
+		TypeRegistry m_TypeRegistry; // frozen by the constructor
 		std::optional<Window> m_Window;
 	};
 

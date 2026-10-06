@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Engine/App/CommandLine.h"
+#include "Engine/App/EngineContext.h"
 #include "Engine/App/ExitCode.h"
 #include "Engine/App/FrameLoop.h"
 #include "Engine/Core/Base.h"
@@ -23,7 +24,6 @@
 
 namespace Engine {
 
-	class EngineContext;
 	class ProcessContext;
 
 	struct ApplicationSpecification
@@ -54,6 +54,9 @@ namespace Engine {
 		bool ThrottleHeadless = true;
 		// JobSystem workers; nullopt: JobSystem::GetDefaultWorkerCount().
 		std::optional<uint32_t> WorkerCount{};
+		// The application's own reflected types, registered into the context's TypeRegistry before it is frozen
+		// (EngineContextSpecification::RegisterTypes): the editor's automation structs. Null adds nothing.
+		RegisterTypesFunction RegisterTypes = nullptr;
 	};
 
 	// The options every application accepts, handled by ApplyEngineCommandLine:
@@ -73,10 +76,10 @@ namespace Engine {
 	// The base of the editor and runtime applications. Not copyable or movable.
 	//
 	// Run, on the main thread, with the ProcessContext alive (asserted):
-	//   1. Per-context initialization (§4.1 level 2): EngineContext::Create with the main window, the worker count and
-	//      the ProcessContext's user-data folder as user://; a clock from the specification (SystemClock, or ManualClock
-	//      with the loop's FixedDelta); then OnInitialize. A failure is logged at Error level, whatever was built is torn
-	//      down in reverse, and Run returns ExitCode::InitFailed.
+	//   1. Per-context initialization (§4.1 level 2): EngineContext::Create with the main window, the worker count, the
+	//      RegisterTypes function and the ProcessContext's user-data folder as user://; a clock from the specification
+	//      (SystemClock, or ManualClock with the loop's FixedDelta); then OnInitialize. A failure is logged at Error level,
+	//      whatever was built is torn down in reverse, and Run returns ExitCode::InitFailed.
 	//   2. The frame loop (FrameLoop; FrameLoopSpecification::ThrottleToFixedHz for headless runs with ThrottleHeadless),
 	//      until RequestExit, an unhandled window close (ExitCode::Success) or MaxFrames (ExitCode::Success). The hooks
 	//      below run inside it.
@@ -120,8 +123,12 @@ namespace Engine {
 		virtual void OnFixedStep(const SimStep& /*step*/) {}
 		// Once per frame after the steps; frame.Alpha is this frame's interpolation factor (§5.2).
 		virtual void OnUpdate(const FrameTime& /*frame*/) {}
+		// Once per frame before the steps, after queued main-thread work: the safe point where automation requests run
+		// (§4.2 step 3).
+		virtual void OnSafePoint() {}
 	private:
 		void OnFrameEvent(Event& event) override;
+		void OnFrameSafePoint() override;
 		void OnFrameFixedStep(const SimStep& step) override;
 		void OnFrameUpdate(const FrameTime& frame) override;
 

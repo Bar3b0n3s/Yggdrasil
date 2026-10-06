@@ -631,12 +631,20 @@
 		"OutputFiles": []
 	},
 	"Contract": {
-		"Notes": "Path scopes of the contract step (Roadmap rule 3, Docs/Decisions/0004-contract-stub-gate.md), which Lint.py --allow-contract-stubs (contract mode) turns into a report. StubDefinitionFiles may #define the contract-stub marker ENGINE_CONTRACT_STUB; every other occurrence in first-party C++ is a contract-stub finding. In TestFiles, a doctest::skip is a test-skip finding unless the same test-case decorator expression carries doctest::test_suite(Test::ChildTargetSuite): the child-process targets are the only permanent skips (Docs/Decisions/0003-m1-contract-decisions.md, decision 7).",
+		"Notes": "Path scopes of the contract step (Roadmap rule 3, Docs/Decisions/0004-contract-stub-gate.md), which Lint.py --allow-contract-stubs (contract mode) turns into a report. StubDefinitionFiles may #define the contract-stub marker ENGINE_CONTRACT_STUB; every other occurrence in first-party C++ is a contract-stub finding. In TestFiles, a doctest::skip is a test-skip finding unless the same test-case decorator expression carries doctest::test_suite(Test::ChildTargetSuite): the child-process targets are the only permanent skips (Docs/Decisions/0003-m1-contract-decisions.md, decision 7). The Python markers (Docs/Decisions/0008-m4-decisions.md, decision 16): in PythonStubFiles, raise NotImplementedError(\"contract stub ...\") is a contract-stub finding; in PythonTestFiles, every unittest or pytest skip marker is a test-skip finding (Python tests have no permanent skips).",
 		"StubDefinitionFiles": [
 			"Engine/Source/Engine/Core/Base.h"
 		],
 		"TestFiles": [
 			"Tests/Source/**"
+		],
+		"PythonStubFiles": [
+			"Tools/**",
+			"Tests/Automation/**"
+		],
+		"PythonTestFiles": [
+			"Tests/Automation/**",
+			"Tools/MCP/tests/**"
 		]
 	},
 	"Python": {

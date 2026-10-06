@@ -3,6 +3,8 @@
 #include "Engine/App/EngineContext.h"
 
 #include "Engine/Core/FileSystem.h"
+#include "Engine/Project/ProjectSettings.h"
+#include "Engine/Scene/Components/BuiltinComponents.h"
 #include "Support/TempDirectory.h"
 
 namespace Engine {
@@ -14,8 +16,50 @@ namespace Engine {
 		return *path;
 	}
 
+	namespace {
+
+		// A struct an application registers through RegisterTypes.
+		struct ApplicationOwnedSettings
+		{
+			uint32_t Level = 3;
+		};
+
+	}
+
+	static void RegisterApplicationOwnedTypes(TypeRegistry& registry)
+	{
+		registry.Struct<ApplicationOwnedSettings>("ApplicationOwnedSettings", "A struct registered by the application.")
+			.Field("Level", &ApplicationOwnedSettings::Level, "A level.");
+	}
+
 	TEST_SUITE("App")
 	{
+		TEST_CASE("EngineContext: the type registry holds the built-in components and the project settings types, frozen")
+		{
+			Result<Scope<EngineContext>> created = EngineContext::Create({ .WorkerCount = 0 });
+			REQUIRE(created.has_value());
+			const TypeRegistry& registry = (*created)->GetTypeRegistry();
+
+			CHECK(registry.IsFrozen());
+			CHECK(registry.AreComponentsRegistered(BuiltinComponents{}));
+			CHECK(registry.FindStruct<ProjectSettings>() != nullptr);
+			CHECK(registry.FindStruct("ApplicationOwnedSettings") == nullptr);
+		}
+
+		TEST_CASE("EngineContext: RegisterTypes adds the application's types before the registry is frozen")
+		{
+			Result<Scope<EngineContext>> created =
+				EngineContext::Create({ .WorkerCount = 0, .RegisterTypes = &RegisterApplicationOwnedTypes });
+			REQUIRE(created.has_value());
+			const TypeRegistry& registry = (*created)->GetTypeRegistry();
+
+			CHECK(registry.IsFrozen());
+			const StructInfo* settings = registry.FindStruct<ApplicationOwnedSettings>();
+			REQUIRE(settings != nullptr);
+			CHECK(settings->GetName() == "ApplicationOwnedSettings");
+			CHECK(registry.FindComponent<TransformComponent>() != nullptr);
+		}
+
 		TEST_CASE("EngineContext: builds its services without a window or GLFW")
 		{
 			Result<Scope<EngineContext>> created = EngineContext::Create({ .WorkerCount = 0 });

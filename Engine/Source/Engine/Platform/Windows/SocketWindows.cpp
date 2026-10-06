@@ -424,6 +424,21 @@ namespace Engine {
 		return readiness;
 	}
 
+	Result<size_t> Socket::SendAvailable(std::span<const std::byte> /*data*/)
+	{
+		// M4 contract stub (Roadmap rule 3): stream B (protocol, transport) implements non-blocking sends.
+		ENGINE_CONTRACT_STUB();
+		return MakeError(ErrorCode::Unsupported, "Socket::SendAvailable is an M4 contract stub");
+	}
+
+	Result<SocketReadiness> Socket::WaitAny(std::span<const Socket* const> /*sockets*/, std::span<const Socket* const> /*writers*/,
+		const SocketListener* /*listener*/, std::chrono::milliseconds /*timeout*/)
+	{
+		// M4 contract stub (Roadmap rule 3): stream B (protocol, transport) implements waiting for writability.
+		ENGINE_CONTRACT_STUB();
+		return MakeError(ErrorCode::Unsupported, "Socket::WaitAny with writers is an M4 contract stub");
+	}
+
 	SocketListener::SocketListener(Scope<Impl> impl)
 		: m_Impl(std::move(impl))
 	{

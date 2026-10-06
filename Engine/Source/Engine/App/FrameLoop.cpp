@@ -74,7 +74,12 @@ namespace Engine {
 		CrashHandler::SetBreadcrumb(CrashBreadcrumb::FramePhase, "MainThreadQueue");
 		m_Context->GetMainThreadQueue().Drain();
 
-		// Step 3 of §4.2, automation pumping, joins here with the automation server.
+		// 3. The safe point (§4.2 step 3): the client's automation server runs queued requests here.
+		CrashHandler::SetBreadcrumb(CrashBreadcrumb::FramePhase, "SafePoint");
+		{
+			ENGINE_PROFILE_SCOPE("FrameLoop::SafePoint");
+			m_Client->OnFrameSafePoint();
+		}
 
 		// 4. and 5. The fixed steps: exactly one per ManualClock frame (Alpha = 1), otherwise what the scheduler gives.
 		CrashHandler::SetBreadcrumb(CrashBreadcrumb::FramePhase, "FixedStep");

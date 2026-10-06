@@ -47,6 +47,30 @@ namespace Engine {
 			bool HandleClose = false; // an editor that asks to save first
 		};
 
+		// Records the safe point next to the steps and updates (§4.2 step 3).
+		class SafePointClient final : public IFrameLoopClient
+		{
+		public:
+			void OnFrameEvent(Event& /*event*/) override {}
+
+			void OnFrameSafePoint() override
+			{
+				Calls.push_back("safe point");
+			}
+
+			void OnFrameFixedStep(const SimStep& step) override
+			{
+				Calls.push_back(std::format("step {}", step.Tick));
+			}
+
+			void OnFrameUpdate(const FrameTime& frame) override
+			{
+				Calls.push_back(std::format("update {}", frame.FrameIndex));
+			}
+		public:
+			std::vector<std::string> Calls;
+		};
+
 		// Crashes in its fixed step once told to.
 		class CrashingClient final : public IFrameLoopClient
 		{
@@ -113,6 +137,24 @@ namespace Engine {
 			CHECK(loop.GetLastFrameTime().DeltaTime == doctest::Approx(FixedDelta));
 			CHECK(loop.GetClock().GetKind() == ClockKind::Manual);
 			CHECK_FALSE(loop.IsExitRequested());
+		}
+
+		TEST_CASE("FrameLoop: the safe point runs once per frame after the queue drain and before the steps")
+		{
+			Scope<EngineContext> context = CreateContext();
+			SafePointClient client;
+			FrameLoop loop(*context, client, CreateScope<ManualClock>(FixedDelta), {});
+			SafePointClient* recorder = &client;
+			context->GetMainThreadQueue().Post([recorder]()
+			{
+				recorder->Calls.push_back("drained");
+			});
+
+			loop.RunFrame();
+			loop.RunFrame();
+
+			const std::vector<std::string> expected = { "drained", "safe point", "step 0", "update 0", "safe point", "step 1", "update 1" };
+			CHECK(client.Calls == expected);
 		}
 
 		TEST_CASE("FrameLoop: other clocks run as many steps as the scheduler gives")
