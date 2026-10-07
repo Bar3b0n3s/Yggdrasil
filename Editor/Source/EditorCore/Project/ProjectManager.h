@@ -72,12 +72,14 @@ namespace Engine {
 		bool ReadOnly = false;
 		// --strict: unknown keys in the .eproj are errors (ProjectLoadOptions).
 		bool StrictUnknowns = false;
-		// The private cache of a read-only editor (required when ReadOnly, asserted); created when missing.
+		// The private cache of a read-only editor (required when ReadOnly, asserted). It starts empty (a leftover of an editor
+		// that did not exit cleanly is cleared first) and is removed when the LoadedProject is destroyed.
 		std::filesystem::path ReadOnlyCacheDirectory{};
 	};
 
 	// An open project: its files, settings and, unless read-only, the held lock. Created by ProjectManager::OpenProject and
-	// owned by EditorContext; destroying it releases the lock. Main thread only.
+	// owned by EditorContext; destroying it releases the lock, or removes the private cache of a read-only project. Main
+	// thread only.
 	class LoadedProject
 	{
 	public:

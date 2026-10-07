@@ -16,12 +16,12 @@ Read first: Architecture §13.2-§13.5 and §13.7, `Engine/Source/Engine/Automat
   - `Description`: one or two sentences, mandatory (gate 7).
   - `RequiredParams`: the camelCase members a call cannot do without.
   - `ExposeAsTool`: only for methods agents call routinely (§13.8 lists them); others stay reachable through `engine_call`.
-  - `Mutates`: the method changes project files or the open scene's content. Read-only editors refuse these unless the call is a dry run, and only these accept `ifRevision`. Methods that only change what the editor shows (`scene.open`, `edit.select`) are not flagged.
+  - `Mutates`: the method changes project files or the open scene's content. Read-only editors refuse these unless the call is a dry run. Every method accepts `ifRevision`, flagged or not. Methods that only change what the editor shows (`scene.open`, `edit.select`) are not flagged.
   - `SupportsDryRun`: the method can run in the dry-run sandbox (§13.4). File writes then go to the overlay and scene changes to a serializer copy, so most mutations support it for free. Pending methods never do.
   - `AvailableInLauncher`: only `session.*`, `rpc.discover`, `docs.get`, `project.create` and `project.open` (§12.1).
   - `AllowedInBatch`: the method may be an op of `edit.batch`. Set it only for pure reads and for methods whose every effect goes through `EditorContext::Execute` (entity edits, settings, validator fixes), so the batch's transaction can roll everything back. Never for pending methods, `edit.batch` itself, or methods that replace the open scene, write files outside a command or end the session.
   - `AvailableInRuntime`: the method is in the Runtime subset of §13.5 (M7+).
-  - `TestHook`: `debug.*` methods for the Python suite only; never tools, excluded from coverage.
+  - `TestHook`: `debug.*` methods for the Python suite only; never tools, excluded from coverage, and not `AvailableInLauncher`.
   - `TimeoutSeconds`: how long the bridge waits (default 60).
   - `Examples`: at least one; `MethodRegistry::Freeze` checks that each example's params prepare.
 - **Immediate or pending.** A method that needs more than one frame returns a `PendingOperation` (`AddPending`), polled once per frame; it must release what it holds in `Cancel` (the client may disconnect).
@@ -57,7 +57,7 @@ The twelve conventions at the top of `MethodRegistry.h` are binding; in short, n
 7. **Entity references** are `std::string`, resolved with `EditorMethodContext::ResolveEntity`.
 8. **Paths** are `std::string`, resolved with `EditorMethodContext::ResolveProjectPath`, so every method confines them to `project://` the same way (§13.2).
 9. **Lists** take `limit` (1 to 1000, default 100) and `cursor` (an opaque string, `""` for the start), and return `nextCursor` (`""` when there is nothing more). Log and event cursors are decimal sequence numbers and also accept `"end"`.
-10. **Component maps** are `std::map<std::string, VariantValue>` registered with `VariantField(..., &ResolveComponentValue)`.
+10. **Component maps** are `std::map<std::string, VariantValue>` registered with `VariantField(..., &ResolveComponentValue)`. A value may also set writable virtual fields (`Transform.EulerAngles`); the registry validates them, and the handler applies them with `ComponentAccess::SetFieldValue` after the stored fields (as `entity.create` does).
 11. **Polymorphic members** (`fix: true | [...]`) are free-form `VariantValue` members the handler validates.
 12. **Results** carry canonical ids plus readable names and paths; edit-scene mutations report `undoIndex` as `uint32_t` (`ToAutomationCounter` saturates, as for revisions, which are `EditorContext::GetRevision`). `_meta` and `dryRun` are added by the Dispatcher.
 
@@ -79,8 +79,9 @@ Result<EntityRenameResult> EntityRename(EditorMethodContext& context, const Enti
 }
 ```
 
-- **Mutations** go through `EditorContext::Execute`, normally via `SceneEdit` (one `SceneEditCommand` per call) or a `ProjectSettingsCommand`. An early return rolls the edit back, so a failed call changes nothing. Undo labels are plain ("Rename 'Board'"); the history adds `[agent] `.
+- **Mutations** go through `EditorContext::Execute`, normally via `SceneEdit` (one `SceneEditCommand` per call) or a `ProjectSettingsCommand`. An early return rolls the edit back, so a failed call changes nothing. Undo labels are plain ("Rename 'Board'"); the history adds `[agent] `. A new `Command` type that changes the scene overrides `Command::ReplayOnSceneCopy`, which `scene.diff {against: "revision"}` uses to rebuild earlier revisions (ADR 0008 decision 29).
 - **Files** are written only through `EditorContext::WriteProjectFile`, which handles read-only editors, dry runs and provenance.
+- **Large results** need no special handling: the Dispatcher offloads any result over 48 KB to a file and answers `{path, truncated, summary}` (§13.4, ADR 0008 decision 22). Offer filters or paging (`limit`/`cursor`) so agents rarely hit it.
 - **Errors** are `Result` values with the right `ErrorCode` (InvalidArgument for bad params, NotFound, InvalidState, Validation...), located and with a hint where possible (§13.3). Never assert on request data. Use `context.SetErrorData` for structured extras such as `failedOp`.
 - **Events** go through `EditorContext::AppendEvent`, which dry runs suppress.
 
@@ -101,7 +102,7 @@ A new domain is also added to `RegisterEditorMethodTypes` and `RegisterEditorMet
 ## 5. Test it
 
 - **C++ in-process round trip** (§15.2) in `Tests/Source/EditorCore/Automation/<Domain>MethodsTests.cpp`, through `Test::AutomationFixture` (`Support/AutomationTestClient.h`). Cover success, every documented error, a dry run when supported, and undo for mutations. Add the method to the expected list in `RegisterMethodsTests.cpp`.
-- **Python test** in `Tests/Automation/test_*.py` through the harness (`Tests/Automation/harness.py`). The suite must call every registered method (gate 5; `Scripts/Test.py --suite automation` fails otherwise). Python tests never skip: an unbuilt editor or a missing virtual environment is a failure.
+- **Python test** in `Tests/Automation/test_*.py` through the harness (`Tests/Automation/harness.py`: `open_editor_with_scene()` gives a client of a headless editor on a fresh project; `client.call(method, params)` returns the result or raises `engine_client.EngineError`, checked with `assert_engine_error`; `engine_client.load_offloaded(result)` reads an offloaded result's file). The suite must call every registered method (gate 5): every `call` is counted, and `python Scripts/Test.py --suite automation` fails naming each registered method no test called (`UNCOVERED METHOD`). Run one test with `--filter <test name>` (the coverage gate needs the whole suite). Python tests never skip: an unbuilt editor or a missing virtual environment (`python Scripts/Setup.py`) is a failure.
 - **FeatureTest coverage** from M14 on (Roadmap rule 5): every new method, enum value or field gets its FeatureTest coverage in every run mode it supports.
 
 ## 6. Refresh generated files

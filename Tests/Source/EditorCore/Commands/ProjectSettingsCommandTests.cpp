@@ -27,7 +27,7 @@ namespace Engine {
 
 	TEST_SUITE("EditorCore")
 	{
-		TEST_CASE("ProjectSettingsCommand: a merge patch changes the settings and writes the .eproj" * doctest::skip(true))
+		TEST_CASE("ProjectSettingsCommand: a merge patch changes the settings and writes the .eproj")
 		{
 			Test::EditorTestFixture fixture("SettingsPatch");
 			fixture.CreateAndOpenProject();
@@ -52,7 +52,7 @@ namespace Engine {
 			CHECK_FALSE(editor.IsSceneDirty());
 		}
 
-		TEST_CASE("ProjectSettingsCommand: undo restores the previous settings and file" * doctest::skip(true))
+		TEST_CASE("ProjectSettingsCommand: undo restores the previous settings and file")
 		{
 			Test::EditorTestFixture fixture("SettingsUndo");
 			fixture.CreateAndOpenProject();
@@ -69,7 +69,7 @@ namespace Engine {
 			CHECK(ReadProjectFile(fixture) == before);
 		}
 
-		TEST_CASE("ProjectSettingsCommand: an invalid patch is a located Validation error and changes nothing" * doctest::skip(true))
+		TEST_CASE("ProjectSettingsCommand: an invalid patch is a located Validation error and changes nothing")
 		{
 			Test::EditorTestFixture fixture("SettingsInvalid");
 			fixture.CreateAndOpenProject();
@@ -87,7 +87,7 @@ namespace Engine {
 			CHECK(editor.GetProject().GetSettings().Simulation.FixedHz == 60);
 		}
 
-		TEST_CASE("ProjectSettingsCommand: needs an open project" * doctest::skip(true))
+		TEST_CASE("ProjectSettingsCommand: needs an open project")
 		{
 			Test::EditorTestFixture fixture("SettingsNoProject");
 			const Result<Scope<ProjectSettingsCommand>> command =
@@ -96,7 +96,7 @@ namespace Engine {
 			CHECK(command.error().GetCode() == ErrorCode::InvalidState);
 		}
 
-		TEST_CASE("ProjectSettingsCommand: keeps both documents and never dirties the scene" * doctest::skip(true))
+		TEST_CASE("ProjectSettingsCommand: keeps both documents and never dirties the scene")
 		{
 			const ProjectSettingsCommand command("Label", CreateRef<const Json>(ParseSettingsJson(R"({"Name":"A"})")),
 				CreateRef<const Json>(ParseSettingsJson(R"({"Name":"B"})")));

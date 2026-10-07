@@ -17,11 +17,11 @@ STALL_MILLISECONDS = 10000
 
 
 class WatchdogTests(AutomationTestCase):
-    @unittest.skip("contract stub: un-skipped by M4 stream D")
     def test_busy_watchdog_reports_phase(self) -> None:
         editor = self.start_editor()
         staller = self.connect(editor, "staller")
         observer = self.connect(editor, "observer")
+        self.create_project(staller)  # the debug.* hooks, like every method outside §12.1's list, need a project
         outcome: dict[str, dict[str, object]] = {}
         stalling = threading.Event()
 

@@ -8,7 +8,6 @@ from harness import AutomationTestCase, read_json, engine_client
 
 
 class DryRunTests(AutomationTestCase):
-    @unittest.skip("contract stub: un-skipped by M4 stream D")
     def test_dry_run_leaves_revision_unchanged(self) -> None:
         client, _ = self.open_editor_with_scene()
         revision = client.call("session.info")["_meta"]["revision"]
@@ -20,7 +19,6 @@ class DryRunTests(AutomationTestCase):
         self.assertEqual(client.call("scene.query", {"where": {"name": "Ghost"}})["total"], 0)
         self.assertEqual(client.call("edit.history")["entries"], [])
 
-    @unittest.skip("contract stub: un-skipped by M4 stream D")
     def test_dry_run_writes_no_file_event_trash_or_provenance(self) -> None:
         client, root = self.open_editor_with_scene()
         provenance_before = read_json(root / "Automation" / "Provenance.json")
@@ -30,11 +28,12 @@ class DryRunTests(AutomationTestCase):
         self.assertNotIn("Dry", (root / f"{root.name}.eproj").read_text(encoding="utf-8"))
         client.call("edit.batch", {"label": "Dry", "dryRun": True,
                                    "ops": [{"method": "entity.create", "params": {"name": "A"}}]})
+        # The same call without dryRun appends EntityCreated (test_events_read_reports_entity_and_component_events).
+        client.call("entity.create", {"name": "Ghost", "dryRun": True})
         self.assertEqual(read_json(root / "Automation" / "Provenance.json"), provenance_before)
         self.assertEqual(client.call("events.read", {"cursor": cursor})["events"], [])
         self.assertFalse((root / "Library" / "Trash").exists())
 
-    @unittest.skip("contract stub: un-skipped by M4 stream D")
     def test_dry_run_rejects_unsupported_op_with_failed_op(self) -> None:
         client, _ = self.open_editor_with_scene()
         with self.assertRaises(engine_client.EngineError) as raised:

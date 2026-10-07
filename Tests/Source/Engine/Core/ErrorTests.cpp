@@ -245,6 +245,23 @@ namespace Engine {
 			CHECK(ErrorCodeToString(static_cast<ErrorCode>(0xffff)) == "Unknown");
 		}
 
+		TEST_CASE("Error: ErrorCodeFromString inverts ErrorCodeToString for every code and nothing else")
+		{
+			// Every value up to the first that is not a code: an enumerator appended to ErrorCode is covered as soon as
+			// ErrorCodeToString names it.
+			uint16_t value = 0;
+			for (; ErrorCodeToString(static_cast<ErrorCode>(value)) != "Unknown" || value == 0; ++value)
+			{
+				const auto code = static_cast<ErrorCode>(value);
+				CAPTURE(value);
+				CHECK(ErrorCodeFromString(ErrorCodeToString(code)) == code);
+			}
+			CHECK(value == static_cast<uint16_t>(ErrorCode::Cancelled) + 1);
+			CHECK_FALSE(ErrorCodeFromString("notfound").has_value()); // case-sensitive
+			CHECK_FALSE(ErrorCodeFromString("").has_value());
+			CHECK_FALSE(ErrorCodeFromString("Busy").has_value());
+		}
+
 		TEST_CASE("Error: std::format writes ToString and code names")
 		{
 			const Error error(ErrorCode::Conflict, "revision 7 is not 9");

@@ -28,7 +28,7 @@ namespace Engine {
 
 	TEST_SUITE("EditorCore")
 	{
-		TEST_CASE("ProvenanceRecorder: entries are sorted by path, one per path, and written canonically" * doctest::skip(true))
+		TEST_CASE("ProvenanceRecorder: entries are sorted by path, one per path, and written canonically")
 		{
 			Scope<VirtualFileSystem> vfs = MakeProvenanceVfs();
 			Result<ProvenanceRecorder> recorder = ProvenanceRecorder::Load(*vfs);
@@ -67,7 +67,7 @@ namespace Engine {
 			CHECK(project->Method == "project.create");
 		}
 
-		TEST_CASE("ProvenanceRecorder: ui and cli writes have null request ids and transcript lines" * doctest::skip(true))
+		TEST_CASE("ProvenanceRecorder: ui and cli writes have null request ids and transcript lines")
 		{
 			std::vector<ProvenanceEntry> entries = { { .Path = "Assets/A.scene", .Hash = 1, .Method = "ui", .RequestId = {}, .Client = "ui", .TranscriptLine = std::nullopt } };
 			const std::string text = ProvenanceRecorder::ToText(entries);
@@ -79,7 +79,7 @@ namespace Engine {
 			CHECK_FALSE((*read)[0].TranscriptLine.has_value());
 		}
 
-		TEST_CASE("ProvenanceRecorder: only the .eproj at the root and files under Assets/ are recorded" * doctest::skip(true))
+		TEST_CASE("ProvenanceRecorder: only the .eproj at the root and files under Assets/ are recorded")
 		{
 			CHECK(ProvenanceRecorder::IsRecordedPath("Tetris.eproj"));
 			CHECK(ProvenanceRecorder::IsRecordedPath("Assets/Scenes/Main.scene"));
@@ -91,7 +91,7 @@ namespace Engine {
 			CHECK_FALSE(ProvenanceRecorder::IsRecordedPath("AssetsX/a.scene"));
 		}
 
-		TEST_CASE("ProvenanceRecorder: malformed files are located errors" * doctest::skip(true))
+		TEST_CASE("ProvenanceRecorder: malformed files are located errors")
 		{
 			CHECK(ProvenanceRecorder::FromText("{").error().GetCode() == ErrorCode::Parse);
 			CHECK(ProvenanceRecorder::FromText(R"({"Format":"Scene","Version":1,"Entries":[]})").error().GetCode() == ErrorCode::Validation);
@@ -107,6 +107,49 @@ namespace Engine {
 				{"Path":"a","XXH64":"12","Method":"ui","RequestId":null,"Client":"ui","TranscriptLine":null}]})");
 			REQUIRE_FALSE(badHash.has_value());
 			CHECK(badHash.error().GetLocation().JsonPointer == "/Entries/0/XXH64");
+			const Result<std::vector<ProvenanceEntry>> unknown = ProvenanceRecorder::FromText(
+				R"({"Format":"Provenance","Version":1,"Entries":[
+				{"Path":"a","XXH64":"0000000000000001","Method":"ui","RequestId":null,"Client":"ui","TranscriptLine":null,"Extra":1}]})");
+			REQUIRE_FALSE(unknown.has_value());
+			CHECK(unknown.error().GetLocation().JsonPointer == "/Entries/0/Extra");
+			const Result<std::vector<ProvenanceEntry>> badLine = ProvenanceRecorder::FromText(
+				R"({"Format":"Provenance","Version":1,"Entries":[
+				{"Path":"a","XXH64":"0000000000000001","Method":"ui","RequestId":null,"Client":"ui","TranscriptLine":0}]})");
+			REQUIRE_FALSE(badLine.has_value());
+			CHECK(badLine.error().GetLocation().JsonPointer == "/Entries/0/TranscriptLine");
+		}
+
+		TEST_CASE("ProvenanceRecorder: a malformed provenance file fails to load with its path")
+		{
+			Scope<VirtualFileSystem> vfs = MakeProvenanceVfs();
+			const Result<VfsPath> directory = VfsPath::Parse("project://Automation");
+			REQUIRE(directory.has_value());
+			REQUIRE(vfs->CreateDirectories(*directory).has_value());
+			const Result<VfsPath> file = VfsPath::Parse("project://Automation/Provenance.json");
+			REQUIRE(file.has_value());
+			const std::string text = R"({"Format":"Provenance","Version":1,"Entries":7})";
+			REQUIRE(vfs->WriteFileAtomic(*file, std::as_bytes(std::span(text.data(), text.size()))).has_value());
+
+			const Result<ProvenanceRecorder> loaded = ProvenanceRecorder::Load(*vfs);
+			REQUIRE_FALSE(loaded.has_value());
+			CHECK(loaded.error().GetCode() == ErrorCode::Validation);
+			CHECK(loaded.error().GetLocation().File == "Automation/Provenance.json");
+			CHECK(loaded.error().GetLocation().JsonPointer == "/Entries");
+		}
+
+		TEST_CASE("ProvenanceRecorder: recording a path again replaces its entry and Find misses unknown paths")
+		{
+			ProvenanceRecorder recorder;
+			recorder.Record("Game.eproj", 1, MakeAttribution("project.create", Json(1), "engine-mcp", 1));
+			recorder.Record("Game.eproj", 2, MakeAttribution("project.setSettings", Json("abc"), "engine-mcp", std::nullopt));
+			REQUIRE(recorder.GetEntries().size() == 1);
+			const ProvenanceEntry* entry = recorder.Find("Game.eproj");
+			REQUIRE(entry != nullptr);
+			CHECK(entry->Hash == 2);
+			CHECK(entry->Method == "project.setSettings");
+			CHECK(entry->RequestId.Get() == Json("abc"));
+			CHECK_FALSE(entry->TranscriptLine.has_value());
+			CHECK(recorder.Find("Other.eproj") == nullptr);
 		}
 	}
 

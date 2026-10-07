@@ -514,4 +514,14 @@ namespace Engine {
 		}
 	}
 
+	std::filesystem::path FileSystem::PathFromUtf8(std::string_view utf8)
+	{
+		return Utils::PathFromUtf8(utf8);
+	}
+
+	std::string FileSystem::PathToUtf8(const std::filesystem::path& path)
+	{
+		return Utils::PathToUtf8(path);
+	}
+
 }

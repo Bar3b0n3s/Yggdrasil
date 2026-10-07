@@ -24,7 +24,7 @@ namespace Engine {
 
 	TEST_SUITE("EditorCore")
 	{
-		TEST_CASE("ProjectManager: the Empty template creates the folder skeleton and a canonical .eproj" * doctest::skip(true))
+		TEST_CASE("ProjectManager: the Empty template creates the folder skeleton and a canonical .eproj")
 		{
 			Test::EditorTestFixture fixture("ProjectCreate");
 			const TypeRegistry& registry = fixture.GetEngine().GetTypeRegistry();
@@ -67,7 +67,7 @@ namespace Engine {
 			CHECK(created->RecordedFiles[0].Path == "Tetris.eproj");
 		}
 
-		TEST_CASE("ProjectManager: creating into a non-empty directory is AlreadyExists and an invalid name Validation" * doctest::skip(true))
+		TEST_CASE("ProjectManager: creating into a non-empty directory is AlreadyExists and an invalid name Validation")
 		{
 			Test::EditorTestFixture fixture("ProjectCreateErrors");
 			const TypeRegistry& registry = fixture.GetEngine().GetTypeRegistry();
@@ -85,7 +85,7 @@ namespace Engine {
 			CHECK_FALSE(FileSystem::Exists(fixture.GetProjectRoot("Fine")));
 		}
 
-		TEST_CASE("ProjectManager: FindProjectFile accepts a .eproj or a directory with exactly one" * doctest::skip(true))
+		TEST_CASE("ProjectManager: FindProjectFile accepts a .eproj or a directory with exactly one")
 		{
 			Test::EditorTestFixture fixture("ProjectFind");
 			const TypeRegistry& registry = fixture.GetEngine().GetTypeRegistry();
@@ -102,7 +102,7 @@ namespace Engine {
 			CHECK(ambiguous.error().GetMessageText().contains("Second.eproj"));
 		}
 
-		TEST_CASE("ProjectManager: opening takes the lock and a second open fails naming the pid" * doctest::skip(true))
+		TEST_CASE("ProjectManager: opening takes the lock and a second open fails naming the pid")
 		{
 			Test::EditorTestFixture fixture("ProjectLock");
 			const TypeRegistry& registry = fixture.GetEngine().GetTypeRegistry();
@@ -123,7 +123,7 @@ namespace Engine {
 			CHECK(ProjectManager::OpenProject(fixture.GetProjectRoot("Locked"), {}, registry).has_value());
 		}
 
-		TEST_CASE("ProjectManager: a read-only open takes no lock, writes nothing and uses the private cache" * doctest::skip(true))
+		TEST_CASE("ProjectManager: a read-only open takes no lock, writes nothing and uses the private cache")
 		{
 			Test::EditorTestFixture fixture("ProjectReadOnly");
 			const TypeRegistry& registry = fixture.GetEngine().GetTypeRegistry();
@@ -137,7 +137,35 @@ namespace Engine {
 			CHECK((*reader)->GetCacheDirectory() == fixture.GetDirectory() / "Private");
 		}
 
-		TEST_CASE("ProjectManager: a malformed .eproj fails and releases the lock" * doctest::skip(true))
+		TEST_CASE("ProjectManager: a read-only project's private cache starts empty and is removed when the project closes")
+		{
+			Test::EditorTestFixture fixture("ProjectReadOnlyCache");
+			const TypeRegistry& registry = fixture.GetEngine().GetTypeRegistry();
+			REQUIRE(ProjectManager::CreateProject(MakeCreateSpecification(fixture, "Shared"), registry).has_value());
+			// The leftover of a read-only editor that crashed with the process id this one has now.
+			const std::filesystem::path cache = fixture.GetDirectory() / "ReadOnlyCache" / "4242";
+			REQUIRE(FileSystem::CreateDirectories(cache / "Stale").has_value());
+			REQUIRE(FileSystem::WriteFileAtomic(cache / "Stale" / "Thumbnail.bin", std::as_bytes(std::span("old", 3))).has_value());
+
+			const ProjectOpenOptions readOnly{ .ReadOnly = true, .StrictUnknowns = false, .ReadOnlyCacheDirectory = cache };
+			{
+				Result<Scope<LoadedProject>> reader = ProjectManager::OpenProject(fixture.GetProjectRoot("Shared"), readOnly, registry);
+				REQUIRE_MESSAGE(reader.has_value(), reader.error().ToString());
+				const Result<std::vector<std::filesystem::path>> entries = FileSystem::ListDirectory(cache);
+				REQUIRE(entries.has_value());
+				CHECK(entries->empty());
+			}
+			CHECK_FALSE(FileSystem::Exists(cache));
+
+			// A writable project's cache is the project's own Library/Cache, which stays.
+			{
+				Result<Scope<LoadedProject>> writer = ProjectManager::OpenProject(fixture.GetProjectRoot("Shared"), {}, registry);
+				REQUIRE(writer.has_value());
+			}
+			CHECK(FileSystem::Exists(fixture.GetProjectRoot("Shared") / "Library" / "Cache"));
+		}
+
+		TEST_CASE("ProjectManager: a malformed .eproj fails and releases the lock")
 		{
 			Test::EditorTestFixture fixture("ProjectMalformed");
 			const TypeRegistry& registry = fixture.GetEngine().GetTypeRegistry();
@@ -150,7 +178,7 @@ namespace Engine {
 			CHECK(ProjectLock::IsHeld(fixture.GetProjectRoot("Broken") / "Library" / "Editor.lock") == false);
 		}
 
-		TEST_CASE("ProjectManager: the recent list keeps ten projects, most recent first" * doctest::skip(true))
+		TEST_CASE("ProjectManager: the recent list keeps ten projects, most recent first")
 		{
 			Test::EditorTestFixture fixture("ProjectRecent");
 			VirtualFileSystem& vfs = fixture.GetEngine().GetVfs();
@@ -167,12 +195,67 @@ namespace Engine {
 			CHECK((*recent)[1] == fixture.GetDirectory() / "P11/P11.eproj");
 		}
 
-		TEST_CASE("ProjectTemplate: names print and parse case-insensitively" * doctest::skip(true))
+		TEST_CASE("ProjectTemplate: names print and parse case-insensitively")
 		{
 			CHECK(ProjectTemplateToString(ProjectTemplate::Empty) == "Empty");
 			CHECK(ProjectTemplateFromString("empty") == ProjectTemplate::Empty);
 			CHECK(ProjectTemplateFromString("EMPTY") == ProjectTemplate::Empty);
 			CHECK_FALSE(ProjectTemplateFromString("Basic3D").has_value());
+		}
+
+		TEST_CASE("ProjectManager: a missing template is NotFound and creates nothing")
+		{
+			Test::EditorTestFixture fixture("ProjectMissingTemplate");
+			ProjectCreateSpecification specification = MakeCreateSpecification(fixture, "Orphan");
+			specification.TemplatesDirectory = fixture.GetDirectory() / "NoTemplates";
+			const Result<CreatedProject> created = ProjectManager::CreateProject(specification, fixture.GetEngine().GetTypeRegistry());
+			REQUIRE_FALSE(created.has_value());
+			CHECK(created.error().GetCode() == ErrorCode::NotFound);
+			CHECK_FALSE(FileSystem::Exists(fixture.GetProjectRoot("Orphan")));
+		}
+
+		TEST_CASE("ProjectManager: creating into an existing empty directory keeps it")
+		{
+			Test::EditorTestFixture fixture("ProjectCreateEmptyDirectory");
+			REQUIRE(FileSystem::CreateDirectories(fixture.GetProjectRoot("Ready")).has_value());
+			const Result<CreatedProject> created = ProjectManager::CreateProject(MakeCreateSpecification(fixture, "Ready"), fixture.GetEngine().GetTypeRegistry());
+			REQUIRE_MESSAGE(created.has_value(), created.error().ToString());
+			CHECK(FileSystem::Exists(fixture.GetProjectRoot("Ready") / "Ready.eproj"));
+		}
+
+		TEST_CASE("ProjectManager: the recent list keeps other preferences and rejects a malformed file")
+		{
+			Test::EditorTestFixture fixture("ProjectRecentPreferences");
+			VirtualFileSystem& vfs = fixture.GetEngine().GetVfs();
+			const std::filesystem::path preferences = fixture.GetDirectory() / "UserData" / "Editor.json";
+			const std::string_view existing = "{\"Format\": \"EditorPreferences\", \"Version\": 1, \"Theme\": \"Dark\", \"RecentProjects\": []}";
+			REQUIRE(FileSystem::WriteFileAtomic(preferences, std::as_bytes(std::span(existing.data(), existing.size()))).has_value());
+			REQUIRE(ProjectManager::AddRecentProject(vfs, fixture.GetDirectory() / "A/A.eproj").has_value());
+			const Result<std::string> written = FileSystem::ReadText(preferences);
+			REQUIRE(written.has_value());
+			CHECK(written->contains("\"Theme\": \"Dark\""));
+			const Result<std::vector<std::filesystem::path>> recent = ProjectManager::ReadRecentProjects(vfs);
+			REQUIRE(recent.has_value());
+			REQUIRE(recent->size() == 1);
+			CHECK(recent->front() == fixture.GetDirectory() / "A/A.eproj");
+
+			const std::string_view malformed = "{\"Format\": \"EditorPreferences\", \"Version\": 1, \"RecentProjects\": [3]}";
+			REQUIRE(FileSystem::WriteFileAtomic(preferences, std::as_bytes(std::span(malformed.data(), malformed.size()))).has_value());
+			const Result<std::vector<std::filesystem::path>> rejected = ProjectManager::ReadRecentProjects(vfs);
+			REQUIRE_FALSE(rejected.has_value());
+			CHECK(rejected.error().GetCode() == ErrorCode::Validation);
+			CHECK_FALSE(ProjectManager::AddRecentProject(vfs, fixture.GetDirectory() / "B/B.eproj").has_value());
+		}
+
+		TEST_CASE("ProjectManager: without user:// the recent list is empty and cannot be saved")
+		{
+			VirtualFileSystem vfs;
+			const Result<std::vector<std::filesystem::path>> recent = ProjectManager::ReadRecentProjects(vfs);
+			REQUIRE(recent.has_value());
+			CHECK(recent->empty());
+			const Status added = ProjectManager::AddRecentProject(vfs, "Game.eproj");
+			REQUIRE_FALSE(added.has_value());
+			CHECK(added.error().GetCode() == ErrorCode::InvalidState);
 		}
 	}
 

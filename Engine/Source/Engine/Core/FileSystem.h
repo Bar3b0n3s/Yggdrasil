@@ -106,6 +106,17 @@ namespace Engine {
 		// mount then asks the host whether it still resolves the name to an existing entry (non-ASCII case folding,
 		// Unicode normalization, 8.3 short names), which this function does not detect.
 		[[nodiscard]] static Status VerifyCase(const std::filesystem::path& root, std::string_view relativePath);
+
+		// The host path spelled by the UTF-8 text `utf8`, for paths that arrive as text (command lines, automation params,
+		// files): forward slashes separate components on every host. std::filesystem::path's narrow constructor would use
+		// the ANSI code page on Windows. An ill-formed sequence becomes U+FFFD, so the result names no existing file rather
+		// than a wrong one. Never throws.
+		[[nodiscard]] static std::filesystem::path PathFromUtf8(std::string_view utf8);
+
+		// The generic form of `path` (forward slashes) as UTF-8, for messages, results and files. path::generic_u8string
+		// throws on Windows for a name with an unpaired UTF-16 surrogate (a name any program can create); here it becomes
+		// U+FFFD. On POSIX hosts the bytes are returned unchanged. Never throws.
+		[[nodiscard]] static std::string PathToUtf8(const std::filesystem::path& path);
 	};
 
 }

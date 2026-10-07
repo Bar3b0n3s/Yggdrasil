@@ -37,28 +37,41 @@ This skill gives the commands, configurations, output locations and failure diag
 ## Commands
 
 ```
-python Scripts/Setup.py                                    # toolchain checks, premake download
+python Scripts/Setup.py                                    # toolchain checks, premake download, Tools/MCP/.venv and .mcp.json
 python Scripts/Generate.py                                 # vs2026 | gmake | xcode4 (+ compile-commands); --action to override
 python Scripts/Build.py --config Debug                     # Release, Dist; --project Tests builds one project
 python Scripts/Test.py --suite unit --config Debug --junit # Release too; Dist has no Tests project; --allow-skips: contract mode
+python Scripts/Test.py --suite automation --junit          # Python suites against the Release editor, then method coverage
 python Scripts/CompileShaders.py --config Debug            # --program P, --force, --verbose
 python Scripts/CheckBuildConfig.py                         # ABI defines, JPH_CROSS_PLATFORM_DETERMINISTIC, Jolt ISA, FP model, Dist solution
 python Scripts/Format.py --check                           # without --check it rewrites files
 python Scripts/Lint.py                                     # --self-test: every seeded Tests/Data/Lint fixture fails as expected; --mode clang|regex; --allow-contract-stubs: contract mode
-python Scripts/PreCommit.py                                # the commit gate, strict; --contract only for a milestone's contract commit
+python Scripts/PreCommit.py                                # the commit gate, strict (generate, static checks, Debug build, unit + feature + automation against the Debug editor); --contract only for a milestone's contract commit
 python Scripts/CI.py                                       # all stages; --stages build,unit for a subset; --contract as for PreCommit
 ```
 
-**CI stages** run in order and fail fast: `setup → generate → lint → build → unit → portability`. Later milestones add bake, gpu, golden, feature, automation, export, determinism and games. The configurations follow the §15.8 matrix:
+**CI stages** run in order and fail fast: `setup → generate → lint → build → unit → automation → portability`. Later milestones add bake, gpu, golden, feature, export, determinism and games. The configurations follow the §15.8 matrix:
 - lint: `CheckBuildConfig.py` on the workspace and on each fixture workspace under `Tests/Data/BuildConfig/` (each must fail with its own defect), `Lint.py` (its `contract` step included), `Lint.py --self-test` and `Format.py --check`. `PreCommit.py` runs exactly this list too (`Scripts/Lib/scripts.py`);
 - build: Debug, Release and Dist, plus, after Debug, `"Shaders: slang-only change is not skipped by the up-to-date check"` (touching only a `.slang` file re-runs the shader rule; the next build skips it);
 - unit: Debug and Release, each failing on a test case skipped outside the child-process targets;
+- automation: Release; see "The automation suite" below;
 - portability: generates Linux gmake/ninja and macOS xcode4 projects (checked against the vs2026 reference; the xcode4 and gmake precompiled-header paths must resolve and the xcode4 Dist projects must enable LTO), then builds Tests with clang-cl in Release when the VS Clang component is installed (`--no-clang-cl` leaves it out, `--require-clang-cl` makes a missing component a failure). Only warnings located under `Vendor/` are tolerated in that build.
 
-**GitHub Actions** (`.github/workflows/ci.yml`) runs `CI.py` everywhere, with the stages a GPU-less hosted runner supports (setup, generate, lint, build, unit, portability):
+**GitHub Actions** (`.github/workflows/ci.yml`) runs `CI.py` everywhere, with the stages a GPU-less hosted runner supports (setup, generate, lint, build, unit, automation, portability):
 - Windows: one `CI.py` run, with `--require-clang-cl`.
-- Linux (GCC 14 and Clang 19) and macOS: one `CI.py` run per step (setup and generate, lint, Debug, Release, Dist, portability), so every configuration is reported even when another one failed. Each run writes `bin/TestResults/CI-<step>.xml`. The Linux jobs install `xvfb openbox x11-utils` and run the Debug and Release steps (build and unit) inside the Xvfb display with openbox shown above.
+- Linux (GCC 14 and Clang 19) and macOS: one `CI.py` run per step (setup and generate, lint, Debug, Release, Dist, portability), so every configuration is reported even when another one failed. Each run writes `bin/TestResults/CI-<step>.xml`. The Linux jobs install `xvfb openbox x11-utils` and run the Debug and Release steps (build, unit and, in Release, automation) inside the Xvfb display with openbox shown above.
 - JUnit results are uploaded as artifacts named `test-results-windows`, `test-results-linux-gcc`, `test-results-linux-clang` and `test-results-macos`.
+
+## The automation suite
+
+`python Scripts/Test.py --suite automation [--config Release] [--junit] [--filter <pattern>]` runs the Python suites of Architecture §15.7:
+- `Tests/Automation/` (scenario tests through `harness.py`, which starts `Editor --headless --renderer none --automation --automation-test-hooks` on temporary projects with a temporary `--user-data-dir`; `test_client.py` tests `Tools/Automation/engine_client.py` against the stand-in server `fake_editor.py`) and `Tools/MCP/tests/` (the MCP bridge, through the official SDK's client).
+- Both run with `Tools/MCP/.venv`'s interpreter (the bridge's tests need the MCP SDK), created by `python Scripts/Setup.py` from the hash-locked `Tools/MCP/requirements.lock`. A missing venv or editor build exits 3. Tests never skip: a skipped test fails the run.
+- `ENGINE_AUTOMATION_CONFIG` (set by Test.py from `--config`) picks the editor the tests and the bridge start. One test only: `--filter test_batch_rollback_reports_failed_op` (a unittest `-k` pattern).
+- **Method coverage** (§15.6 gate 5): every `engine_client` call is appended to `$ENGINE_AUTOMATION_COVERAGE`; afterwards `Editor --headless --renderer none --dump-reference <tmp>` lists the registered methods (`Methods.json`, without the `debug.*` hooks) and the run fails naming each one no test called (`UNCOVERED METHOD: <name>`). A `--filter` run skips this gate.
+- JUnit: `bin/TestResults/Automation-<Config>.xml`, one test suite per directory plus `Automation.<Config>.coverage`.
+- On Linux without a desktop, run it inside the Xvfb display with openbox (above): `test_launch_reports_editor_already_open_without_automation` starts a windowed editor.
+- Diagnosis: an editor that exits before it listens is reported with its exit code and the end of its console output (`RuntimeError: Editor exited with code 3 ...`: locked or invalid project; code 2: a command-line error). `EditorCrashed` in a bridge test names the crash report under the test's user-data folder.
 
 ## Configurations
 

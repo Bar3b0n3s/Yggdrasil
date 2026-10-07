@@ -253,7 +253,7 @@ namespace Engine {
 			CHECK(sent.error().GetCode() == ErrorCode::Timeout);
 		}
 
-		TEST_CASE("Socket: SendAvailable sends what fits without waiting and WaitAny reports writability" * doctest::skip(true))
+		TEST_CASE("Socket: SendAvailable sends what fits without waiting and WaitAny reports writability")
 		{
 			Result<SocketListener> listener = SocketListener::Listen(0);
 			REQUIRE(listener.has_value());
@@ -272,10 +272,12 @@ namespace Engine {
 			// never waits, which a 256 MB budget of 1 MB sends reaches on any host.
 			const std::vector<std::byte> chunk(1024 * 1024);
 			bool filled = false;
+			size_t sentTotal = 0;
 			for (int attempt = 0; attempt < 256 && !filled; ++attempt)
 			{
 				const Result<size_t> sent = client->SendAvailable(chunk);
 				REQUIRE(sent.has_value());
+				sentTotal += *sent;
 				filled = *sent < chunk.size();
 			}
 			REQUIRE(filled);
@@ -283,16 +285,24 @@ namespace Engine {
 			REQUIRE(full.has_value());
 			CHECK(full->WritableSockets.empty());
 
-			// Once the peer reads, the connection becomes writable again.
+			// Once the peer has read what was sent (how much fitted depends on the host's buffers), the connection is writable
+			// again.
 			std::array<std::byte, 64 * 1024> buffer{};
-			for (int read = 0; read < 64; ++read)
-				CHECK(accepted->Receive(buffer, SocketTimeout).has_value());
+			size_t receivedTotal = 0;
+			while (receivedTotal < sentTotal)
+			{
+				const Result<size_t> received = accepted->Receive(buffer, SocketTimeout);
+				REQUIRE(received.has_value());
+				REQUIRE(*received > 0);
+				receivedTotal += *received;
+			}
+			CHECK(receivedTotal == sentTotal);
 			const Result<SocketReadiness> drained = Socket::WaitAny({}, writers, nullptr, SocketTimeout);
 			REQUIRE(drained.has_value());
 			CHECK(drained->WritableSockets == std::vector<size_t>{ 0 });
 		}
 
-		TEST_CASE("Socket: SendAvailable to a closed peer fails with Io" * doctest::skip(true))
+		TEST_CASE("Socket: SendAvailable to a closed peer fails with Io")
 		{
 			Result<SocketListener> listener = SocketListener::Listen(0);
 			REQUIRE(listener.has_value());

@@ -755,7 +755,7 @@ The Tests project is a doctest executable. The quality bar is that every public 
   - `CHECK_FALSE` for negations.
   - Floating-point values are compared with `doctest::Approx`. Helpers for `glm` types are **[Architecture]**.
 - **Determinism:**
-  - No sleeps or wall-clock timing.
+  - No sleeps or wall-clock timing. A bounded wait is not timing: a deadline that only bounds the failure of a wait for another thread or process (`Test::WaitUntil`), or a timeout whose peer never answers, never asserted on (ADR 0008 decision 15); a spin count never bounds a wait.
   - No dependence on test order.
   - No network.
   - Random numbers use fixed seeds.

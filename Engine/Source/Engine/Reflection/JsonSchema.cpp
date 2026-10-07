@@ -304,6 +304,8 @@ namespace Engine {
 						ENGINE_TRY(ValidateNot(argument, instance));
 					else if (name == "pattern")
 						ENGINE_TRY(ValidatePattern(argument, instance));
+					else if (name == "required")
+						ENGINE_TRY(ValidateRequired(argument, instance));
 					else
 						return SchemaError(std::format("unsupported keyword '{}'", name));
 				}
@@ -449,6 +451,27 @@ namespace Engine {
 						else
 							ENGINE_TRY(ValidateChild(argument, member.value(), member.key()));
 					}
+				}
+				return {};
+			}
+
+			// "required" (automation params schemas list their required members, MethodRegistry::GetParamsSchema).
+			[[nodiscard]] Status ValidateRequired(const Json& argument, const Json& instance)
+			{
+				if (!argument.is_array())
+					return SchemaError("'required' must be an array of strings");
+				for (const Json& name : argument)
+				{
+					if (!name.is_string())
+						return SchemaError("'required' must be an array of strings");
+				}
+				if (!instance.is_object())
+					return {};
+				for (const Json& name : argument)
+				{
+					ENGINE_TRY_ASSIGN(const std::string member, JsonReader(name).ReadString());
+					if (!instance.contains(member))
+						AddViolation(std::format("missing required property '{}'", member));
 				}
 				return {};
 			}

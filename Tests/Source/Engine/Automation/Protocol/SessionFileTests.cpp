@@ -23,7 +23,7 @@ namespace Engine {
 
 	TEST_SUITE("Automation")
 	{
-		TEST_CASE("SessionFile: content round-trips through its text with camelCase keys in order" * doctest::skip(true))
+		TEST_CASE("SessionFile: content round-trips through its text with camelCase keys in order")
 		{
 			const SessionFileContent content = MakeSessionContent();
 			const std::string text = SessionFile::ToText(content);
@@ -51,7 +51,7 @@ namespace Engine {
 			CHECK(read->StartedAt == content.StartedAt);
 		}
 
-		TEST_CASE("SessionFile: malformed files name the member and unknown members are ignored" * doctest::skip(true))
+		TEST_CASE("SessionFile: malformed files name the member and unknown members are ignored")
 		{
 			CHECK(SessionFile::FromText("{").error().GetCode() == ErrorCode::Parse);
 			const Result<SessionFileContent> missing = SessionFile::FromText(R"({"pid": 1})");
@@ -64,7 +64,7 @@ namespace Engine {
 			CHECK(SessionFile::FromText(extended).has_value());
 		}
 
-		TEST_CASE("SessionFile: write creates the directory and remove deletes the file" * doctest::skip(true))
+		TEST_CASE("SessionFile: write creates the directory and remove deletes the file")
 		{
 			Test::TempDirectory directory("SessionFile");
 			const std::filesystem::path sessions = directory / "Automation/Sessions";
@@ -90,11 +90,21 @@ namespace Engine {
 			CHECK(SessionFile::Remove(sessions, content.Pid).has_value());
 		}
 
-		TEST_CASE("SessionFile: timestamps are UTC ISO 8601 with seconds" * doctest::skip(true))
+		TEST_CASE("SessionFile: timestamps are UTC ISO 8601 with seconds")
 		{
 			CHECK(SessionFile::FormatUtcTimestamp(std::chrono::system_clock::time_point{}) == "1970-01-01T00:00:00Z");
 			const std::chrono::system_clock::time_point leapDay{ std::chrono::seconds(951782400 + 3723) }; // 2000-02-29 01:02:03
 			CHECK(SessionFile::FormatUtcTimestamp(leapDay) == "2000-02-29T01:02:03Z");
+		}
+
+		TEST_CASE("SessionFile: timestamps with milliseconds round down, also before the epoch")
+		{
+			const std::chrono::system_clock::time_point leapDay{ std::chrono::milliseconds(951782400000LL + 3723512) }; // 2000-02-29 01:02:03.512
+			CHECK(SessionFile::FormatUtcTimestamp(leapDay, TimestampPrecision::Milliseconds) == "2000-02-29T01:02:03.512Z");
+			CHECK(SessionFile::FormatUtcTimestamp(leapDay) == "2000-02-29T01:02:03Z");
+			const std::chrono::system_clock::time_point beforeEpoch{ std::chrono::milliseconds(-1) };
+			CHECK(SessionFile::FormatUtcTimestamp(beforeEpoch, TimestampPrecision::Milliseconds) == "1969-12-31T23:59:59.999Z");
+			CHECK(SessionFile::FormatUtcTimestamp(beforeEpoch) == "1969-12-31T23:59:59Z");
 		}
 	}
 

@@ -15,7 +15,7 @@ namespace Engine {
 
 	TEST_SUITE("Automation")
 	{
-		TEST_CASE("Handshake: tokens are 64 lowercase hex digits and differ" * doctest::skip(true))
+		TEST_CASE("Handshake: tokens are 64 lowercase hex digits and differ")
 		{
 			const Result<std::string> first = GenerateAuthToken();
 			const Result<std::string> second = GenerateAuthToken();
@@ -29,7 +29,7 @@ namespace Engine {
 			CHECK(*first != *second);
 		}
 
-		TEST_CASE("Handshake: token comparison is exact" * doctest::skip(true))
+		TEST_CASE("Handshake: token comparison is exact")
 		{
 			const std::string token(AuthTokenLength, 'a');
 			CHECK(AuthTokensEqual(token, token));
@@ -39,7 +39,7 @@ namespace Engine {
 			CHECK_FALSE(AuthTokensEqual(token, {}));
 		}
 
-		TEST_CASE("Handshake: a bad token is PermissionDenied and a different major version Unsupported" * doctest::skip(true))
+		TEST_CASE("Handshake: a bad token is PermissionDenied and a different major version Unsupported")
 		{
 			const std::string token(AuthTokenLength, 'c');
 			const HelloRequest good{ .Token = token, .Version = { 1, 3 }, .ClientName = "engine-tests", .ClientVersion = "1" };
@@ -60,7 +60,7 @@ namespace Engine {
 			CHECK(incompatible.error().GetMessageText().contains("1.0"));
 		}
 
-		TEST_CASE("Handshake: hello params are read and malformed ones name the member" * doctest::skip(true))
+		TEST_CASE("Handshake: hello params are read and malformed ones name the member")
 		{
 			const Result<HelloRequest> hello = ParseHelloRequest(
 				ParseHandshakeJson(R"({"token":"abc","protocolVersion":"1.0","client":{"name":"engine-mcp","version":"0.1"}})"));

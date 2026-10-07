@@ -1,10 +1,14 @@
 #pragma once
 
 #include "Engine/Core/Base.h"
+#include "Engine/Core/Json/Json.h"
 #include "Engine/Core/Result.h"
+#include "Engine/Core/UUID.h"
 
 #include <cstdint>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace Engine {
 
@@ -36,7 +40,8 @@ namespace Engine {
 
 		// Ends tracking and records the edit: builds a SceneEditCommand from the tracker's changes (Before snapshots) and the
 		// scene's current state (After), then hands it to EditorContext::Execute, which records it in the history, appends it
-		// to the open transaction, or discards it after a dry run. Returns the undo index (CommandHistory sequence; 0 for a
+		// to the open transaction, or discards it after a dry run, and appends the edit's events
+		// (SceneEditCommand::AppendChangeEvents). Returns the undo index (CommandHistory sequence; 0 for a
 		// dry run, and when nothing changed, in which case nothing is recorded). In Debug builds, also asserts that the state
 		// hash of every entity the tracker did not report is unchanged (§12.3). Errors: Validation when an After state cannot
 		// be serialized (a non-finite value written through Patch); the edit is rolled back then.
@@ -53,6 +58,9 @@ namespace Engine {
 		EditorContext* m_Context = nullptr; // documented back-reference: outlives the edit
 		std::string m_Label;
 		std::string m_MergeKey;
+		uint64_t m_RevisionBefore = 0; // EditorContext::GetRevision when the edit began: the history entry's RevisionBefore
+		// Debug builds: every entity's canonical JSON when the edit began, for Commit's check of the untouched ones (§12.3).
+		std::vector<std::pair<UUID, Json>> m_EntityStates;
 		bool m_IsActive = true;
 	};
 

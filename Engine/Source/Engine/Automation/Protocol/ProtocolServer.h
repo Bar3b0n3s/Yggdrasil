@@ -36,8 +36,13 @@ namespace Engine {
 		// How long a connection may take from accept to a successful session.hello before the I/O thread closes it, so idle
 		// or half-finished connections never hold a slot (§13.2 treats the loopback surface as hostile).
 		std::chrono::milliseconds HandshakeTimeout{ 10000 };
-		// The most bytes a connection's outbound queue may hold (responses Send queued that the client has not read yet);
-		// a Send that would exceed it closes the connection instead.
+		// The largest frame payload a connection may send before its session.hello succeeds (a hello is well under 1 KB); a
+		// larger Content-Length closes the connection at the header, before any payload is buffered or parsed, so a process
+		// without the token cannot make the editor hold or parse large frames (§13.2). Authenticated connections may send
+		// up to MaxFramePayloadBytes.
+		size_t MaxHandshakePayloadBytes = 64 * 1024;
+		// The most bytes a connection's outbound queue may hold (responses Send queued and the I/O thread's own answers that
+		// the client has not read yet); a message that would exceed it closes the connection instead.
 		size_t MaxQueuedSendBytes = MaxFramePayloadBytes;
 		// How long the I/O thread waits in Socket::WaitAny before it checks its stop flag and the handshake deadlines;
 		// bounds how long Stop takes.
@@ -74,7 +79,8 @@ namespace Engine {
 	//   - accepts it, unless MaxPendingHandshakes connections are already in the handshake, in which case it is closed at
 	//     once; a connection that has not completed session.hello within HandshakeTimeout is closed without a response;
 	//   - frames the byte stream; a FrameDecoder failure (an HTTP probe's first line, an oversized frame, invalid UTF-8,
-	//     nesting over 128) closes the socket at once, without a response (§13.2);
+	//     nesting over 128) closes the socket at once, without a response (§13.2). Until session.hello succeeds a frame
+	//     may carry at most MaxHandshakePayloadBytes, afterwards MaxFramePayloadBytes;
 	//   - parses each payload (ParseRpcRequest); a ParseError or InvalidRequest is answered and the connection stays open;
 	//   - until the connection's session.hello succeeds: any other method is answered Unauthorized "session.hello must be the
 	//     first request", a bad token Unauthorized, malformed hello params (ParseHelloRequest, unknown members included)
@@ -95,10 +101,18 @@ namespace Engine {
 	// thread's own answers (Busy, handshake errors) append to it under the connection's short lock, and the I/O thread
 	// drains it with non-blocking writes (Socket::SendAvailable, waiting for writability in Socket::WaitAny), so frames
 	// never interleave (ADR 0005 decision 16), the main thread never waits on a socket, and a client that stops reading
-	// delays only itself. A connection whose queue would exceed MaxQueuedSendBytes is closed (its Disconnected queued).
+	// delays only itself. A connection whose queue would exceed MaxQueuedSendBytes, through Send or the I/O thread's own
+	// answers, is closed (its Disconnected queued when it was authenticated).
+	//
+	// Connections closed before they authenticated (refused at accept, an invalid frame, failed handshakes, an
+	// incompatible version, an overflowing queue) are logged at Warn at most once per RejectionReportInterval: the first
+	// at once, later ones as a count with the latest reason. A local process that connects in a loop therefore cannot
+	// flood the log, and with it every agent's _meta diagnostics.
 	class ProtocolServer
 	{
 	public:
+		static constexpr std::chrono::seconds RejectionReportInterval{ 10 };
+
 		// Restricts construction to Start; CreateScope still reaches the constructor.
 		class ConstructionKey
 		{

@@ -62,7 +62,7 @@ namespace Engine {
 
 	TEST_SUITE("EditorCore")
 	{
-		TEST_CASE("CommandHistory: execute, undo and redo move one position each" * doctest::skip(true))
+		TEST_CASE("CommandHistory: execute, undo and redo move one position each")
 		{
 			Test::EditorTestFixture fixture("History");
 			EditorContext& editor = fixture.GetEditor();
@@ -94,7 +94,7 @@ namespace Engine {
 			CHECK(history.CanRedo());
 		}
 
-		TEST_CASE("CommandHistory: a new command discards the redo branch and keeps increasing sequences" * doctest::skip(true))
+		TEST_CASE("CommandHistory: a new command discards the redo branch and keeps increasing sequences")
 		{
 			Test::EditorTestFixture fixture("HistoryBranch");
 			CommandHistory history;
@@ -111,7 +111,7 @@ namespace Engine {
 			CHECK(counter == 6);
 		}
 
-		TEST_CASE("CommandHistory: the oldest entries are dropped beyond the entry and byte bounds" * doctest::skip(true))
+		TEST_CASE("CommandHistory: the oldest entries are dropped beyond the entry and byte bounds")
 		{
 			Test::EditorTestFixture fixture("HistoryBounds");
 			int counter = 0;
@@ -133,7 +133,7 @@ namespace Engine {
 			CHECK(CommandHistoryLimits{}.MaxBytes == 256ull * 1024 * 1024);
 		}
 
-		TEST_CASE("CommandHistory: the save point decides the dirty flag in both directions" * doctest::skip(true))
+		TEST_CASE("CommandHistory: the save point decides the dirty flag in both directions")
 		{
 			Test::EditorTestFixture fixture("HistoryDirty");
 			CommandHistory history;
@@ -155,7 +155,7 @@ namespace Engine {
 			CHECK(history.IsDirty());
 		}
 
-		TEST_CASE("CommandHistory: commands that do not change the scene keep it clean" * doctest::skip(true))
+		TEST_CASE("CommandHistory: commands that do not change the scene keep it clean")
 		{
 			Test::EditorTestFixture fixture("HistorySettings");
 			CommandHistory history;
@@ -166,7 +166,7 @@ namespace Engine {
 			CHECK_FALSE(history.IsDirty());
 		}
 
-		TEST_CASE("CommandHistory: consecutive commands with the same merge key merge into one entry" * doctest::skip(true))
+		TEST_CASE("CommandHistory: consecutive commands with the same merge key merge into one entry")
 		{
 			Test::EditorTestFixture fixture("HistoryMerge");
 			CommandHistory history;
@@ -182,7 +182,7 @@ namespace Engine {
 			CHECK(counter == 0);
 		}
 
-		TEST_CASE("CommandHistory: a failing Execute leaves the history unchanged" * doctest::skip(true))
+		TEST_CASE("CommandHistory: a failing Execute leaves the history unchanged")
 		{
 			Test::EditorTestFixture fixture("HistoryFailure");
 			CommandHistory history;
@@ -196,7 +196,7 @@ namespace Engine {
 			CHECK(counter == 0);
 		}
 
-		TEST_CASE("CommandHistory: agent commands carry the [agent] label prefix" * doctest::skip(true))
+		TEST_CASE("CommandHistory: agent commands carry the [agent] label prefix")
 		{
 			Test::EditorTestFixture fixture("HistoryAgent");
 			CommandHistory history;
@@ -211,7 +211,7 @@ namespace Engine {
 			CHECK(entries[0].Label == "[agent] Add 1");
 		}
 
-		TEST_CASE("CommandHistory: undo stops at a command whose Undo fails and leaves it applied" * doctest::skip(true))
+		TEST_CASE("CommandHistory: undo stops at a command whose Undo fails and leaves it applied")
 		{
 			Test::EditorTestFixture fixture("HistoryUndoFailure");
 			EditorContext& editor = fixture.GetEditor();
@@ -231,6 +231,92 @@ namespace Engine {
 			CHECK(history.GetUndoCount() == 2);
 			CHECK(history.GetRedoCount() == 1);
 			CHECK(history.GetUndoLabel() == "Add 10");
+		}
+
+		TEST_CASE("CommandHistory: RecordExecuted records an applied command without executing it")
+		{
+			Test::EditorTestFixture fixture("HistoryRecord");
+			CommandHistory history;
+			int counter = 5; // as if the command had already added 5
+			const uint64_t sequence = history.RecordExecuted(CreateScope<CounterCommand>(counter, 5), fixture.GetEditor(), 7);
+			CHECK(sequence == 1);
+			CHECK(counter == 5);
+			const CommandHistoryEntry* entry = history.FindEntry(sequence);
+			REQUIRE(entry != nullptr);
+			CHECK(entry->RevisionBefore == 7);
+			REQUIRE(history.FindCommand(sequence) != nullptr);
+			CHECK(history.FindCommand(sequence)->GetLabel() == "Add 5");
+			CHECK(history.Undo(fixture.GetEditor()) == 1);
+			CHECK(counter == 0);
+		}
+
+		TEST_CASE("CommandHistory: entries end at the newest one, redo branch included")
+		{
+			Test::EditorTestFixture fixture("HistoryEntries");
+			CommandHistory history;
+			int counter = 0;
+			for (int index = 1; index <= 4; ++index)
+				REQUIRE(history.Execute(CreateScope<CounterCommand>(counter, index), fixture.GetEditor()).has_value());
+			CHECK(history.Undo(fixture.GetEditor()) == 1);
+			const std::vector<CommandHistoryEntry> entries = history.GetEntries(2);
+			REQUIRE(entries.size() == 2);
+			CHECK(entries[0].Label == "Add 3");
+			CHECK(entries[1].Label == "Add 4"); // the undone one
+			CHECK(history.GetUndoCount() == 3);
+			CHECK(history.GetRedoCount() == 1);
+			CHECK(history.GetEntries(100).size() == 4);
+			CHECK(history.GetMemorySize() == 4 * 64);
+		}
+
+		TEST_CASE("CommandHistory: Clear empties the history and keeps sequences increasing")
+		{
+			Test::EditorTestFixture fixture("HistoryClear");
+			CommandHistory history;
+			int counter = 0;
+			REQUIRE(history.Execute(CreateScope<CounterCommand>(counter, 1), fixture.GetEditor()).has_value());
+			REQUIRE(history.Execute(CreateScope<CounterCommand>(counter, 2), fixture.GetEditor()).has_value());
+			history.Clear();
+			CHECK_FALSE(history.CanUndo());
+			CHECK_FALSE(history.CanRedo());
+			CHECK_FALSE(history.IsDirty());
+			CHECK(history.GetMemorySize() == 0);
+			CHECK(history.GetCurrentSequence() == 0);
+			CHECK(history.Execute(CreateScope<CounterCommand>(counter, 3), fixture.GetEditor()) == 3u);
+		}
+
+		TEST_CASE("CommandHistory: a saved state that the bounds dropped makes the history dirty")
+		{
+			Test::EditorTestFixture fixture("HistoryBoundedSave");
+			CommandHistory history(CommandHistoryLimits{ .MaxEntries = 2, .MaxBytes = 1u << 30 });
+			int counter = 0;
+			history.MarkSavePoint(); // the empty history
+			for (int index = 1; index <= 3; ++index)
+				REQUIRE(history.Execute(CreateScope<CounterCommand>(counter, index), fixture.GetEditor()).has_value());
+			CHECK(history.Undo(fixture.GetEditor(), 10) == 2);
+			CHECK(history.IsDirty()); // the first command can no longer be undone, so the saved state is out of reach
+
+			// A saved state that stays reachable stays exact when older entries are dropped.
+			REQUIRE(history.Redo(fixture.GetEditor()).has_value());
+			history.MarkSavePoint(); // after the second command
+			REQUIRE(history.Redo(fixture.GetEditor()).has_value());
+			REQUIRE(history.Execute(CreateScope<CounterCommand>(counter, 4), fixture.GetEditor()).has_value()); // drops the second
+			CHECK(history.IsDirty());
+			CHECK(history.Undo(fixture.GetEditor(), 10) == 2);
+			CHECK_FALSE(history.IsDirty());
+		}
+
+		TEST_CASE("CommandHistory: merging past the save point makes the history dirty")
+		{
+			Test::EditorTestFixture fixture("HistoryMergeSave");
+			CommandHistory history;
+			int counter = 0;
+			REQUIRE(history.Execute(CreateScope<CounterCommand>(counter, 1, "drag"), fixture.GetEditor()).has_value());
+			history.MarkSavePoint();
+			REQUIRE(history.Execute(CreateScope<CounterCommand>(counter, 2, "drag"), fixture.GetEditor()).has_value());
+			CHECK(history.GetUndoCount() == 1);
+			CHECK(history.IsDirty());
+			CHECK(history.Undo(fixture.GetEditor()) == 1);
+			CHECK(history.IsDirty()); // the saved state (after the first step only) is gone
 		}
 	}
 

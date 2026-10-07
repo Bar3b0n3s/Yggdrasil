@@ -303,6 +303,26 @@ namespace Engine {
 			CHECK(created.error().GetMessageText().contains("File.txt"));
 			CHECK(FileSystem::ReadText(directory / "File.txt") == std::string("x"));
 		}
+
+		TEST_CASE("FileSystem: PathToUtf8 and PathFromUtf8 convert UTF-8 text and never throw on names the host allows")
+		{
+			const std::string text = "Projects/\xC3\xA9t\xC3\xA9/Main.scene"; // "Projects/ete/Main.scene" with two e-acute
+			const std::filesystem::path path = FileSystem::PathFromUtf8(text);
+			CHECK(path.filename() == std::filesystem::path(u8"Main.scene"));
+			CHECK(path.parent_path().filename() == std::filesystem::path(u8"été"));
+			CHECK(FileSystem::PathToUtf8(path) == text);
+			CHECK(FileSystem::PathToUtf8(FileSystem::PathFromUtf8("")).empty());
+			CHECK(FileSystem::PathToUtf8(FileSystem::PathFromUtf8("a\xff")) == "a\xEF\xBF\xBD"); // U+FFFD for the ill-formed byte
+
+			// An unpaired UTF-16 surrogate on Windows (path::generic_u8string throws for it), an invalid UTF-8 byte elsewhere
+			// (returned unchanged).
+			using NativeChar = std::filesystem::path::value_type;
+			std::basic_string<NativeChar> name;
+			name += static_cast<NativeChar>('B');
+			name += static_cast<NativeChar>(sizeof(NativeChar) == 1 ? 0xff : 0xd800);
+			const std::string converted = FileSystem::PathToUtf8(std::filesystem::path(name));
+			CHECK(converted == (sizeof(NativeChar) == 1 ? std::string("B\xff") : std::string("B\xEF\xBF\xBD")));
+		}
 	}
 
 }

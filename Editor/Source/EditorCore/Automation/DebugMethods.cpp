@@ -2,38 +2,129 @@
 #include "EditorCore/Automation/DebugMethods.h"
 
 #include "EditorCore/Automation/EditorMethodContext.h"
+#include "EditorCore/Automation/Private/MethodSupport.h"
 #include "Engine/Automation/Protocol/MethodRegistry.h"
+#include "Engine/Core/Log.h"
 #include "Engine/Reflection/TypeRegistry.h"
 
-// M4 contract stub (Roadmap rule 3): stream C (methods) implements the debug domain: its handlers, the
-// registration of its structs and enums (JSON keys per the conventions of MethodRegistry.h) and of its methods.
+#include <nlohmann/json.hpp>
+
+#include <chrono>
+#include <thread>
 
 namespace Engine {
 
+	namespace {
+
+		// debug.stall's bound (DebugStallParams::Ms).
+		constexpr uint32_t MaxStallMilliseconds = 60000;
+
+		// debug.pend's operation: resolves after its frames (one Poll per frame), or never for 0, until cancelled.
+		class DebugPendOperation final : public PendingOperation
+		{
+		public:
+			DebugPendOperation(uint32_t frames, std::string clientName)
+				: m_Frames(frames), m_ClientName(std::move(clientName))
+			{
+			}
+
+			[[nodiscard]] std::optional<Result<Json>> Poll(MethodContext& context) override
+			{
+				++m_Polls;
+				if (m_Frames == 0 || m_Polls < m_Frames)
+					return std::nullopt;
+				DebugPendResult result;
+				result.Frames = m_Polls;
+				return context.SerializeResult(result);
+			}
+
+			void Cancel(MethodContext& /*context*/) override
+			{
+				ENGINE_INFO("Cancelled debug.pend of client '{}'", m_ClientName);
+			}
+
+			[[nodiscard]] std::string GetPhase() const override
+			{
+				return m_Frames == 0 ? std::format("Debug:pend {}", m_Polls) : std::format("Debug:pend {}/{}", m_Polls, m_Frames);
+			}
+		private:
+			uint32_t m_Frames = 0;
+			uint32_t m_Polls = 0;
+			std::string m_ClientName;
+		};
+
+	}
+
 	namespace Automation {
 
-		Result<DebugStallResult> DebugStall(EditorMethodContext& /*context*/, const DebugStallParams& /*params*/)
+		Result<DebugStallResult> DebugStall(EditorMethodContext& context, const DebugStallParams& params)
 		{
-			ENGINE_CONTRACT_STUB();
-			return MakeError(ErrorCode::Unsupported, "Automation::DebugStall is an M4 contract stub");
+			if (params.Ms > MaxStallMilliseconds)
+			{
+				return std::unexpected(
+					Utils::MakeParamError(ErrorCode::InvalidArgument, "/ms", std::format("ms must be at most {}", MaxStallMilliseconds)));
+			}
+			// The test hook freezes the main thread on purpose, so the watchdog answers other clients with Busy and this phase.
+			context.SetPhase(std::format("Debug:stall {} ms", params.Ms));
+			std::this_thread::sleep_for(std::chrono::milliseconds(params.Ms));
+			DebugStallResult result;
+			result.StalledMs = params.Ms;
+			return result;
 		}
 
-		Result<Scope<PendingOperation>> DebugPend(EditorMethodContext& /*context*/, const DebugPendParams& /*params*/)
+		Result<Scope<PendingOperation>> DebugPend(EditorMethodContext& context, const DebugPendParams& params)
 		{
-			ENGINE_CONTRACT_STUB();
-			return MakeError(ErrorCode::Unsupported, "Automation::DebugPend is an M4 contract stub");
+			const std::string& client = context.GetRequest().ClientName;
+			ENGINE_INFO("Started debug.pend of client '{}'", client);
+			return Scope<PendingOperation>(CreateScope<DebugPendOperation>(params.Frames, client));
 		}
 
 	}
 
-	void RegisterDebugMethodTypes(TypeRegistry& /*registry*/)
+	void RegisterDebugMethodTypes(TypeRegistry& registry)
 	{
-		ENGINE_CONTRACT_STUB();
+		registry.Struct<DebugStallParams>("DebugStallParams", "The params of the test hook debug.stall.")
+			.Field("ms", &DebugStallParams::Ms, "How long to block the main thread, in milliseconds.",
+				{ .Min = 0.0, .Max = static_cast<double>(MaxStallMilliseconds), .Unit = "ms" });
+
+		registry.Struct<DebugStallResult>("DebugStallResult", "What the test hook debug.stall did.")
+			.Field("stalledMs", &DebugStallResult::StalledMs, "How long the main thread was blocked, in milliseconds.", { .Unit = "ms" });
+
+		registry.Struct<DebugPendParams>("DebugPendParams", "The params of the test hook debug.pend.")
+			.Field("frames", &DebugPendParams::Frames, "After how many frames the operation resolves; 0: never, until its client disconnects.");
+
+		registry.Struct<DebugPendResult>("DebugPendResult", "How the test hook debug.pend resolved.")
+			.Field("frames", &DebugPendResult::Frames, "The frames (polls) it took.");
 	}
 
-	void RegisterDebugMethods(MethodRegistry& /*methods*/)
+	void RegisterDebugMethods(MethodRegistry& methods)
 	{
-		ENGINE_CONTRACT_STUB();
+		Json stallExample = Json::object();
+		stallExample["ms"] = 100;
+		methods.Add(
+			{
+				.Name = "debug.stall",
+				.Description = "Test hook: blocks the main thread for ms milliseconds with the phase \"Debug:stall <ms> ms\", so the watchdog "
+							   "answers other requests with Busy.",
+				.RequiredParams = { "ms" },
+				.TestHook = true,
+				.TimeoutSeconds = 120,
+				.Examples = { { .Description = "Freeze the main thread for 100 ms.", .Params = stallExample } },
+			},
+			&Automation::DebugStall);
+
+		Json pendExample = Json::object();
+		pendExample["frames"] = 3;
+		methods.AddPending<EditorMethodContext, DebugPendParams, DebugPendResult>(
+			{
+				.Name = "debug.pend",
+				.Description = "Test hook: a pending operation that resolves after frames frames, or never for 0, until its client "
+							   "disconnects (which cancels it).",
+				.TestHook = true,
+				.TimeoutSeconds = 3600,
+				.Examples = { { .Description = "Resolve after three frames.", .Params = pendExample } },
+			},
+			&Automation::DebugPend);
 	}
 
 }

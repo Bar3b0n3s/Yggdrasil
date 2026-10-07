@@ -8,7 +8,6 @@ from harness import EXIT_INIT_FAILED, AutomationTestCase, engine_client
 
 
 class LockTests(AutomationTestCase):
-    @unittest.skip("contract stub: un-skipped by M4 stream D")
     def test_second_editor_on_locked_project_exits_3(self) -> None:
         client, root = self.open_editor_with_scene()
         holder = client.call("session.info")["pid"]
@@ -19,7 +18,6 @@ class LockTests(AutomationTestCase):
         self.assertIn(f"locked by process {holder}", stderr)
         self.assertEqual(engine_client.read_lock_holder(root), holder)
 
-    @unittest.skip("contract stub: un-skipped by M4 stream D")
     def test_read_only_editor_denies_mutations(self) -> None:
         client, root = self.open_editor_with_scene()
         client.call("entity.create", {"name": "Saved"})

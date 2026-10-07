@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """The single CI entry point (Docs/Architecture.md §15.8): runs the stages in order and stops at the first failing one.
 
-Stages that exist in milestone M0, with the configurations of the §15.8 matrix:
-  setup        n/a                   Scripts/Setup.py (toolchain checks, pinned premake)
+Stages that exist so far, with the configurations of the §15.8 matrix:
+  setup        n/a                   Scripts/Setup.py (toolchain checks, pinned premake, Tools/MCP/.venv and .mcp.json)
   generate     n/a                   Scripts/Generate.py (host workspace, compile_commands.json)
   lint         n/a                   static checks, shared with PreCommit.py (Scripts/Lib/scripts.py):
                                      Scripts/CheckBuildConfig.py passes on the workspace and fails, with the fixture's
@@ -15,6 +15,10 @@ Stages that exist in milestone M0, with the configurations of the §15.8 matrix:
                                      touching only a .slang file re-runs the shader rule, the next build does not
   unit         Debug, Release        Scripts/Test.py --suite unit --junit, which also fails on a skipped test case
                                      outside the child-process targets
+  automation   Release               Scripts/Test.py --suite automation --junit: the Python suites Tests/Automation and
+                                     Tools/MCP/tests against the headless editor, in the MCP bridge's virtual
+                                     environment (the setup stage creates it), and the method coverage gate (§15.6,
+                                     §15.7); on Linux it needs a display with a window manager, like unit
   portability  n/a                   premake --os=linux gmake, --os=linux ninja, --os=macosx xcode4 (and the vs2026
                                      reference) into bin-int/Portability/, each checked against the expected file list
                                      and project/configuration set; the xcode4 projects' precompiled headers
@@ -24,13 +28,13 @@ Stages that exist in milestone M0, with the configurations of the §15.8 matrix:
                                      and of every Dist project (asserts compiled out), warnings tolerated only in
                                      vendored code, when Visual Studio's C++ Clang component
                                      is installed, otherwise reported as skipped (a failure with --require-clang-cl)
-Later stages of §15.8 (bake, gpu, golden, feature, automation, export, determinism, games, hardening) are accepted by
+Later stages of §15.8 (bake, gpu, golden, feature, export, determinism, games, hardening) are accepted by
 --stages and reported as "not-available" until their milestone.
 
 Modes (Roadmap rule 3, Docs/Decisions/0004-contract-stub-gate.md): strict by default, so a milestone cannot end with a
 contract stub (ENGINE_CONTRACT_STUB) or a skipped test case outside the child-process targets. --contract passes
---allow-contract-stubs to Lint.py (lint) and --allow-skips to Test.py (unit), exactly like PreCommit.py --contract
-(Scripts/Lib/scripts.py); the run prints which mode it is in at the start and in the summary.
+--allow-contract-stubs to Lint.py (lint) and --allow-skips to Test.py (unit, automation), exactly like PreCommit.py
+--contract (Scripts/Lib/scripts.py); the run prints which mode it is in at the start and in the summary.
 
 Results: each stage's own output, a summary table, bin/TestResults/CI.xml (JUnit, one test case per step; another
 path with --summary-junit, so separate runs of one CI job keep separate summaries) and the unit JUnit files in
@@ -95,6 +99,7 @@ TIMEOUTS = {
     "generate": 600.0,
     "build": 7200.0,
     "unit": 1800.0,
+    "automation": 3600.0,
     "portability": 600.0,
     "clang-cl": 7200.0,
 }
@@ -119,7 +124,7 @@ STAGES = (
     Stage("gpu", ("Debug", "Release"), False, "M5 (Graphics foundation)"),
     Stage("golden", ("Release",), False, "M5 (golden comparator)"),
     Stage("feature", ("Debug", "Release"), False, "M14 (FeatureTest)"),
-    Stage("automation", ("Release",), False, "M4 (automation core)"),
+    Stage("automation", ("Release",), True),
     Stage("export", ("Release", "Dist"), False, "M7 (Exporter v0) / M15 (testing exports)"),
     Stage("determinism", ("Debug", "Release"), False, "M14 (determinism stage)"),
     Stage("games", ("Release",), False, "M16-M18 (demo games)"),
@@ -226,6 +231,11 @@ class Runner:
         mode = test_mode_arguments(self.arguments.contract)
         return [self.script(f"unit {config}", "Test.py", ["--suite", "unit", "--config", config, "--junit", *mode],
                             TIMEOUTS["unit"]) for config in configs]
+
+    def automation(self, configs: list[str]) -> list[Step]:
+        mode = test_mode_arguments(self.arguments.contract)
+        return [self.script(f"automation {config}", "Test.py", ["--suite", "automation", "--config", config, "--junit",
+                                                                *mode], TIMEOUTS["automation"]) for config in configs]
 
     # ----------------------------------------------------------------------------------------------------------------
 
@@ -462,6 +472,7 @@ def run_stage(runner: Runner, stage: Stage, configs: list[str]) -> list[Step]:
         "lint": runner.lint,
         "build": lambda: runner.build(stage_configs),
         "unit": lambda: runner.unit(stage_configs),
+        "automation": lambda: runner.automation(stage_configs),
         "portability": runner.portability,
     }
     return handlers[stage.name]()

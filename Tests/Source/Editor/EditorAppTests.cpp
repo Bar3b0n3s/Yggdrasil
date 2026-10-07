@@ -46,7 +46,7 @@ namespace Engine {
 
 	TEST_SUITE("Editor")
 	{
-		TEST_CASE("EditorApp: --dump-reference writes the method catalogue and the MCP catalogue" * doctest::skip(true))
+		TEST_CASE("EditorApp: --dump-reference writes the method catalogue and the MCP catalogue")
 		{
 			Test::TempDirectory userData("EditorDumpReference");
 			const std::filesystem::path out = userData / "Reference";
@@ -68,7 +68,7 @@ namespace Engine {
 			CHECK(*committed == *catalog);
 		}
 
-		TEST_CASE("EditorApp: a second editor on a locked project exits with code 3" * doctest::skip(true))
+		TEST_CASE("EditorApp: a second editor on a locked project exits with code 3")
 		{
 			Test::EditorTestFixture fixture("EditorLocked");
 			const std::filesystem::path projectFile = CreateProcessTestProject(fixture, "Locked");
@@ -82,7 +82,7 @@ namespace Engine {
 			CHECK(result->StandardError.contains(std::format("locked by process {}", Process::GetCurrentId())));
 		}
 
-		TEST_CASE("EditorApp: --read-only opens a locked project" * doctest::skip(true))
+		TEST_CASE("EditorApp: --read-only opens a locked project")
 		{
 			Test::EditorTestFixture fixture("EditorReadOnly");
 			const std::filesystem::path projectFile = CreateProcessTestProject(fixture, "Shared");
@@ -96,7 +96,7 @@ namespace Engine {
 			CHECK_MESSAGE(result->ExitCode == ExitCode::Success, result->StandardError);
 		}
 
-		TEST_CASE("EditorApp: --batch runs the file and exits with 1 at the first error" * doctest::skip(true))
+		TEST_CASE("EditorApp: --batch runs the file and exits with 1 at the first error")
 		{
 			Test::EditorTestFixture fixture("EditorBatch");
 			const std::filesystem::path projectFile = CreateProcessTestProject(fixture, "Batch");
@@ -118,7 +118,7 @@ namespace Engine {
 			CHECK(failed->StandardError.contains("line 1"));
 		}
 
-		TEST_CASE("EditorApp: --upgrade appends its transcript lines and records provenance" * doctest::skip(true))
+		TEST_CASE("EditorApp: --upgrade appends its transcript lines and records provenance")
 		{
 			Test::EditorTestFixture fixture("EditorUpgrade");
 			const std::filesystem::path projectFile = CreateProcessTestProject(fixture, "Old");
@@ -139,7 +139,46 @@ namespace Engine {
 			CHECK(provenance->contains(R"("TranscriptLine": 1)"));
 		}
 
-		TEST_CASE("EditorApp: inconsistent editor options are usage errors" * doctest::skip(true))
+		TEST_CASE("EditorApp: --dump-reference writes both catalogues in their formats without test hooks")
+		{
+			Test::TempDirectory userData("EditorDumpFormats");
+			const std::filesystem::path out = userData / "Reference";
+			const Result<ProcessResult> result =
+				RunEditor(userData, { "--headless", "--renderer", "none", "--dump-reference", Test::PathToUtf8(out) }, std::chrono::seconds(60));
+			REQUIRE_MESSAGE(result.has_value(), result.error().ToString());
+			CHECK_MESSAGE(result->ExitCode == ExitCode::Success, result->StandardError);
+			const Result<std::string> methods = FileSystem::ReadText(out / "Methods.json");
+			REQUIRE(methods.has_value());
+			CHECK(methods->starts_with("{\n\t\"Format\": \"MethodCatalog\",\n\t\"Version\": 1,\n\t\"ProtocolVersion\": \"1.0\","));
+			CHECK_FALSE(methods->contains(R"("debug.stall")"));
+			CHECK_FALSE(methods->contains(R"("debug.pend")"));
+			const Result<std::string> catalog = FileSystem::ReadText(out / "catalog.json");
+			REQUIRE(catalog.has_value());
+			CHECK(catalog->starts_with("{\n\t\"Format\": \"McpCatalog\",\n\t\"Version\": 1,\n\t\"ProtocolVersion\": \"1.0\","));
+			CHECK(catalog->ends_with("}\n"));
+			// A one-shot run never listens: no session file names it.
+			std::error_code error;
+			CHECK_FALSE(std::filesystem::exists(userData / ENGINE_PRODUCT_NAME / "Automation" / "Sessions", error));
+		}
+
+		TEST_CASE("EditorApp: --batch exits with 1 at a request that fails and names its line")
+		{
+			Test::TempDirectory userData("EditorBatchUnknown");
+			WriteProcessTestFile(userData / "Unknown.jsonl", std::string(R"({"method":"nosuch.method","params":{}})") + "\n");
+			const Result<ProcessResult> result = RunEditor(userData,
+				{ "--headless", "--renderer", "none", "--batch", Test::PathToUtf8(userData / "Unknown.jsonl") }, std::chrono::seconds(60));
+			REQUIRE_MESSAGE(result.has_value(), result.error().ToString());
+			CHECK(result->ExitCode == ExitCode::Failed);
+			CHECK(result->StandardError.contains("line 1"));
+			CHECK(result->StandardError.contains("nosuch.method"));
+
+			const Result<ProcessResult> missing = RunEditor(userData,
+				{ "--headless", "--renderer", "none", "--batch", Test::PathToUtf8(userData / "Missing.jsonl") }, std::chrono::seconds(60));
+			REQUIRE(missing.has_value());
+			CHECK(missing->ExitCode == ExitCode::InitFailed);
+		}
+
+		TEST_CASE("EditorApp: inconsistent editor options are usage errors")
 		{
 			Test::TempDirectory userData("EditorUsage");
 			const std::vector<std::vector<std::string>> invalid = {

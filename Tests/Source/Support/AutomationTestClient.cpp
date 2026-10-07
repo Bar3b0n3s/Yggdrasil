@@ -8,18 +8,6 @@ namespace Engine {
 
 	namespace Test {
 
-		// The ErrorCode named by a response's data.errorCode (Unknown for anything else).
-		static ErrorCode ErrorCodeFromName(std::string_view name)
-		{
-			for (uint16_t value = 0; value <= std::to_underlying(ErrorCode::Cancelled); ++value)
-			{
-				const ErrorCode code = static_cast<ErrorCode>(value);
-				if (ErrorCodeToString(code) == name)
-					return code;
-			}
-			return ErrorCode::Unknown;
-		}
-
 		AutomationServerSpecification MakeTestServerSpecification()
 		{
 			return {
@@ -31,12 +19,12 @@ namespace Engine {
 			};
 		}
 
-		AutomationTestClient::AutomationTestClient(EditorContext& editor, AutomationServerSpecification specification)
+		AutomationTestClient::AutomationTestClient(EditorContext& editor, AutomationServerSpecification specification, bool offloadLargeResults)
 		{
 			Result<Scope<AutomationServer>> server = AutomationServer::Create(editor, specification);
 			REQUIRE_MESSAGE(server.has_value(), server.error().ToString());
 			m_Server = std::move(*server);
-			m_Client = m_Server->ConnectInProcess("test");
+			m_Client = m_Server->ConnectInProcess("test", offloadLargeResults);
 			REQUIRE(m_Client != NoClient);
 		}
 
@@ -101,7 +89,7 @@ namespace Engine {
 				codeName = data->ReadMember<std::string>("errorCode").value_or(std::string());
 				detail = data->ReadMember<std::string>("detail").value_or(std::string());
 			}
-			Error failure(ErrorCodeFromName(codeName), detail);
+			Error failure(ErrorCodeFromString(codeName).value_or(ErrorCode::Unknown), detail);
 			if (data.has_value())
 			{
 				if (const std::optional<JsonReader> issues = data->FindMember("issues"); issues.has_value())

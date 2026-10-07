@@ -15,6 +15,8 @@
 	#include <sys/socket.h>
 	#include <unistd.h>
 
+	#include <algorithm>
+	#include <array>
 	#include <cerrno>
 	#include <chrono>
 	#include <climits>
@@ -366,9 +368,19 @@ namespace Engine {
 	Result<SocketReadiness> Socket::WaitAny(std::span<const Socket* const> sockets, const SocketListener* listener,
 		std::chrono::milliseconds timeout)
 	{
-		ENGINE_TRY(Utils::CheckWaitAnySockets(sockets));
+		return WaitAny(sockets, {}, listener, timeout);
+	}
 
-		std::array<pollfd, MaxSocketWaitCount + 1> entries{};
+	Result<SocketReadiness> Socket::WaitAny(std::span<const Socket* const> sockets, std::span<const Socket* const> writers,
+		const SocketListener* listener, std::chrono::milliseconds timeout)
+	{
+		ENGINE_TRY(Utils::CheckWaitAnySockets(sockets));
+		ENGINE_TRY(Utils::CheckWaitAnySockets(writers));
+
+		// One entry per distinct socket: a socket in both lists waits for both events in one entry.
+		std::array<pollfd, 2 * MaxSocketWaitCount + 1> entries{};
+		std::array<size_t, MaxSocketWaitCount> readerEntries{};
+		std::array<size_t, MaxSocketWaitCount> writerEntries{};
 		size_t entryCount = 0;
 		if (listener != nullptr)
 		{
@@ -378,13 +390,30 @@ namespace Engine {
 				return MakeError(ErrorCode::Io, "cannot wait on a closed listener");
 			entries[entryCount++] = pollfd{ .fd = listener->m_Impl->Descriptor.Get(), .events = POLLIN, .revents = 0 };
 		}
-		const size_t firstSocket = entryCount;
-		for (const Socket* socket : sockets)
+		for (size_t index = 0; index < sockets.size(); ++index)
 		{
+			const Socket* socket = sockets[index];
 			ENGINE_CORE_ASSERT(socket != nullptr && socket->IsOpen(), "Socket::WaitAny got a closed socket");
 			if (socket == nullptr || !socket->IsOpen())
 				return MakeError(ErrorCode::Io, "cannot wait on a closed socket");
+			readerEntries[index] = entryCount;
 			entries[entryCount++] = pollfd{ .fd = socket->m_Impl->Descriptor.Get(), .events = POLLIN, .revents = 0 };
+		}
+		for (size_t index = 0; index < writers.size(); ++index)
+		{
+			const Socket* socket = writers[index];
+			ENGINE_CORE_ASSERT(socket != nullptr && socket->IsOpen(), "Socket::WaitAny got a closed socket");
+			if (socket == nullptr || !socket->IsOpen())
+				return MakeError(ErrorCode::Io, "cannot wait on a closed socket");
+			const auto reader = std::find(sockets.begin(), sockets.end(), socket);
+			if (reader != sockets.end())
+			{
+				writerEntries[index] = readerEntries[static_cast<size_t>(reader - sockets.begin())];
+				entries[writerEntries[index]].events = static_cast<short>(entries[writerEntries[index]].events | POLLOUT);
+				continue;
+			}
+			writerEntries[index] = entryCount;
+			entries[entryCount++] = pollfd{ .fd = socket->m_Impl->Descriptor.Get(), .events = POLLOUT, .revents = 0 };
 		}
 
 		const Utils::SocketDeadline deadline(timeout);
@@ -397,8 +426,9 @@ namespace Engine {
 				return Utils::MakeSystemError(ErrorCode::Io, error, "waiting on sockets failed");
 		}
 
-		// A hang-up or an error counts as ready: Accept or Receive then returns at once, with the end of the stream or Io.
-		constexpr short ReadyEvents = POLLIN | POLLHUP | POLLERR;
+		// A hang-up or an error counts as ready: Accept, Receive or SendAvailable then returns at once, with the end of the
+		// stream or Io.
+		constexpr short FailureEvents = POLLHUP | POLLERR;
 		SocketReadiness readiness;
 		for (size_t index = 0; index < entryCount; ++index)
 		{
@@ -406,28 +436,45 @@ namespace Engine {
 				return MakeError(ErrorCode::Io, "waiting on sockets failed: descriptor {} is not open", entries[index].fd);
 		}
 		if (listener != nullptr)
-			readiness.ListenerReady = (entries[0].revents & ReadyEvents) != 0;
-		for (size_t index = firstSocket; index < entryCount; ++index)
+			readiness.ListenerReady = (entries[0].revents & (POLLIN | FailureEvents)) != 0;
+		for (size_t index = 0; index < sockets.size(); ++index)
 		{
-			if ((entries[index].revents & ReadyEvents) != 0)
-				readiness.ReadableSockets.push_back(index - firstSocket);
+			if ((entries[readerEntries[index]].revents & (POLLIN | FailureEvents)) != 0)
+				readiness.ReadableSockets.push_back(index);
+		}
+		for (size_t index = 0; index < writers.size(); ++index)
+		{
+			if ((entries[writerEntries[index]].revents & (POLLOUT | FailureEvents)) != 0)
+				readiness.WritableSockets.push_back(index);
 		}
 		return readiness;
 	}
 
-	Result<size_t> Socket::SendAvailable(std::span<const std::byte> /*data*/)
+	Result<size_t> Socket::SendAvailable(std::span<const std::byte> data)
 	{
-		// M4 contract stub (Roadmap rule 3): stream B (protocol, transport) implements non-blocking sends.
-		ENGINE_CONTRACT_STUB();
-		return MakeError(ErrorCode::Unsupported, "Socket::SendAvailable is an M4 contract stub");
-	}
+		if (!IsOpen())
+			return MakeError(ErrorCode::Io, "cannot send on a closed socket");
 
-	Result<SocketReadiness> Socket::WaitAny(std::span<const Socket* const> /*sockets*/, std::span<const Socket* const> /*writers*/,
-		const SocketListener* /*listener*/, std::chrono::milliseconds /*timeout*/)
-	{
-		// M4 contract stub (Roadmap rule 3): stream B (protocol, transport) implements waiting for writability.
-		ENGINE_CONTRACT_STUB();
-		return MakeError(ErrorCode::Unsupported, "Socket::WaitAny with writers is an M4 contract stub");
+		size_t sent = 0;
+		while (sent < data.size())
+		{
+			const ssize_t count = send(m_Impl->Descriptor.Get(), data.data() + sent, data.size() - sent, Utils::SendFlags);
+			if (count > 0)
+			{
+				sent += static_cast<size_t>(count);
+				continue;
+			}
+			if (count < 0)
+			{
+				const int error = errno;
+				if (error == EINTR)
+					continue;
+				if (!Utils::IsWouldBlock(error))
+					return Utils::MakeSystemError(ErrorCode::Io, error, "sending failed after {} of {} bytes", sent, data.size());
+			}
+			break; // the send buffer is full: the caller waits for writability
+		}
+		return sent;
 	}
 
 	SocketListener::SocketListener(Scope<Impl> impl)

@@ -1,6 +1,7 @@
 #include "EnginePCH.h"
 #include "Engine/Core/Error.h"
 
+#include <array>
 #include <iterator>
 
 namespace Engine {
@@ -103,6 +104,22 @@ namespace Engine {
 		// Documented: a value outside the enumeration (a code read from a newer peer, for example) is "Unknown". Not a
 		// programmer error, so no assert.
 		return "Unknown";
+	}
+
+	std::optional<ErrorCode> ErrorCodeFromString(std::string_view name)
+	{
+		// Every enumerator, in order: ErrorCodeToString's switch names each, and its test checks that the value after the
+		// last one listed here is not a code, so an appended enumerator cannot be left out.
+		static constexpr std::array<ErrorCode, 18> Codes = { ErrorCode::Unknown, ErrorCode::InvalidArgument, ErrorCode::NotFound,
+			ErrorCode::AlreadyExists, ErrorCode::InvalidState, ErrorCode::Io, ErrorCode::Parse, ErrorCode::Validation, ErrorCode::UnsupportedVersion,
+			ErrorCode::ImportFailed, ErrorCode::CompileFailed, ErrorCode::Script, ErrorCode::Gpu, ErrorCode::Timeout, ErrorCode::PermissionDenied,
+			ErrorCode::Unsupported, ErrorCode::Conflict, ErrorCode::Cancelled };
+		for (const ErrorCode code : Codes)
+		{
+			if (ErrorCodeToString(code) == name)
+				return code;
+		}
+		return std::nullopt;
 	}
 
 	std::string Error::ToString() const

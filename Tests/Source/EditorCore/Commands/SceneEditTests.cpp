@@ -28,7 +28,7 @@ namespace Engine {
 
 	TEST_SUITE("EditorCore")
 	{
-		TEST_CASE("SceneEdit: commit records one command and returns its undo index" * doctest::skip(true))
+		TEST_CASE("SceneEdit: commit records one command and returns its undo index")
 		{
 			Test::EditorTestFixture fixture("SceneEditCommit");
 			fixture.CreateAndOpenProject();
@@ -46,7 +46,7 @@ namespace Engine {
 			CHECK(editor.IsSceneDirty());
 		}
 
-		TEST_CASE("SceneEdit: an edit dropped without commit restores the scene" * doctest::skip(true))
+		TEST_CASE("SceneEdit: an edit dropped without commit restores the scene")
 		{
 			Test::EditorTestFixture fixture("SceneEditRollback");
 			fixture.CreateAndOpenProject();
@@ -65,7 +65,7 @@ namespace Engine {
 			CHECK_FALSE(editor.IsSceneDirty());
 		}
 
-		TEST_CASE("SceneEdit: an edit that changes nothing records nothing" * doctest::skip(true))
+		TEST_CASE("SceneEdit: an edit that changes nothing records nothing")
 		{
 			Test::EditorTestFixture fixture("SceneEditEmpty");
 			fixture.CreateAndOpenProject();
@@ -77,7 +77,7 @@ namespace Engine {
 			CHECK(fixture.GetEditor().GetHistory().GetUndoCount() == 0);
 		}
 
-		TEST_CASE("SceneEdit: a second edit while one is active asserts" * doctest::skip(true))
+		TEST_CASE("SceneEdit: a second edit while one is active asserts")
 		{
 			ENGINE_CHECK_DEATH("EditorCore/NestedSceneEditAsserts", "SceneEdit");
 		}

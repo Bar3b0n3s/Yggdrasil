@@ -19,7 +19,7 @@ namespace Engine {
 			CHECK(ToAutomationCounter(UINT64_MAX) == UINT32_MAX);
 		}
 
-		TEST_CASE("AutomationTypes: the shared structs and the enums automation names are registered" * doctest::skip(true))
+		TEST_CASE("AutomationTypes: the shared structs and the enums automation names are registered")
 		{
 			Test::EditorTestFixture fixture("AutomationTypes");
 			const TypeRegistry& types = fixture.GetEngine().GetTypeRegistry();

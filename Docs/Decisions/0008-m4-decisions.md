@@ -1,6 +1,6 @@
 # 0008 — M4 contract decisions
 
-- **Status:** proposed by the M4 contract task. The streams implement against it; the M4 integration task resolves what it leaves open, and the docs owner applies the amendments listed at the end.
+- **Status:** proposed by the M4 contract task and completed by the M4 integration task (decisions 29 to 35), which also resolved the streams' requests to the contract owner, and by the integration review (decision 36). The docs owner applies the amendments listed at the end.
 - **Date:** 2026-10-06
 - **Context:** The M4 contract task (Roadmap rule 3) froze the public interface of every M4 deliverable: the automation protocol (`Engine/Source/Engine/Automation/Protocol/`), EditorCore (editor state, commands, projects, validator, provenance, the automation server and every M4 method), the editor's command line, the Python client, the MCP bridge and both Python test suites. Writing complete headers exposed places where the Architecture is silent, sketches an interface that cannot be built as written, or conflicts with an earlier ADR. `AGENTS.md` ("Deviations") requires a record of each.
 
@@ -15,6 +15,8 @@ Each one is needed by a frozen interface or an acceptance test:
 - **Platform:** `Socket.h` gains `Socket::SendAvailable` and a `WaitAny` overload that reports writable connections (decision 27).
 - **Resources:** `Resources/Templates/Projects/Empty/{.gitignore,.luaurc,AGENTS.md}` (§2.1 `Templates/{Projects,Scripts}/`).
 - **Tests support:** `Support/EditorTestFixture`, `Support/AutomationTestClient` (with `AutomationFixture`), `Support/ProtocolTestTypes`; Python `Tests/Automation/harness.py`.
+- **Added by the streams** (accepted at integration, decision 30): `Editor/Source/EditorCore/Automation/Private/MethodSupport.h|.cpp` (what the domain method files share: located param errors, load-diagnostic logging, the project and scene summaries results carry, and the scene file operations of scene.*, project.* and session.shutdown), `Scripts/Lib/unittest_runner.py` (runs the Python suites with JUnit output for `Test.py`), `Tests/Automation/fake_editor.py` (a stand-in server, lock holder and session-file writer for client tests that need no editor), `Tests/Automation/test_client.py` and `Tools/MCP/tests/test_bridge.py`.
+- **Added by the integration review** (decision 36): `Editor/Source/EditorCore/Private/EditorFileError.h|.cpp` (decision 5's one conversion of operating-system access failures, shared by `EditorContext` and the method files) and `Tests/Source/Support/WaitUntil.h` (decision 15's bounded wait).
 
 ### 2. The type registry joins EngineContext
 
@@ -50,7 +52,7 @@ A headless editor pumps automation once per frame at `FixedHz` (60 Hz), which bo
   - Validation, Parse, UnsupportedVersion and ImportFailed → ValidationFailed (−32003);
   - AlreadyExists and Conflict → Conflict;
   - Script and CompileFailed → ScriptError;
-  - PermissionDenied → Unauthorized (−32008), which covers bad tokens and mutations refused by read-only editors. PermissionDenied is reserved for these refusals of the protocol and the editor: an operating-system access failure (EACCES, EPERM, a Windows sharing violation), which `FileSystem` reports as PermissionDenied, is converted to Io by the editor's file paths (`EditorContext::WriteProjectFile` and its reads), so a locked file is never reported as an authorization failure;
+  - PermissionDenied → Unauthorized (−32008), which covers bad tokens and mutations refused by read-only editors. PermissionDenied is reserved for these refusals of the protocol and the editor: an operating-system access failure (EACCES, EPERM, a Windows sharing violation), which `FileSystem` reports as PermissionDenied, is converted to Io by the editor's file paths (`EditorContext::WriteProjectFile` and its reads, scene loads, `docs.get`, `project.upgrade`), so a locked file is never reported as an authorization failure. One function does it, `Utils::ToEditorFileError` (`EditorCore/Private/EditorFileError.h`), with one wording: "<message> (the operating system denied access)";
   - Unsupported → Unsupported;
   - Unknown, Io and Gpu → Internal.
 
@@ -67,6 +69,8 @@ The token and version checks of `session.hello` run on the I/O thread, so unauth
 - **Closes the connection at once:** an incompatible major version.
 - **A good hello:** queues `Connected` and then the hello itself, which the `session.hello` handler answers with the session report. While the watchdog reports a stall, it is answered Busy at once instead and the connection stays unauthenticated, without a failure counted, so a client never hangs on a frozen editor (§13.2) and retries the hello.
 - **Client slots:** `MaxClients` (4) counts authenticated connections only; a good hello beyond it is answered InvalidState and closed. Connections still in the handshake have their own cap (`MaxPendingHandshakes`, 8, beyond which a connection is closed at accept) and a deadline (`HandshakeTimeout`, 10 s), so idle sockets from any local process can neither lock the bridge out nor pile up. The I/O thread's clock is injectable (`ProtocolServerSpecification::TimeSource`) so these are tested without waiting.
+- **Frames before authentication:** a connection may send frames of at most `MaxHandshakePayloadBytes` (64 KB; a hello is under 1 KB) until its hello succeeds, then of up to `MaxFramePayloadBytes` (`FrameDecoder::SetMaxPayloadBytes`). A larger Content-Length closes the connection at the header, before any payload is buffered or parsed, so a process without the token cannot make the editor hold or parse large frames.
+- **Rejections are rate-limited:** connections closed before they authenticated (refused at accept, invalid frames, failed handshakes, an incompatible version, an overflowing queue) are logged at Warn at most once per `ProtocolServer::RejectionReportInterval` (10 s): the first at once, later ones as a count with the latest reason, so a local process that connects in a loop cannot flood the log and every agent's `_meta.diagnostics`.
 
 ### 7. Host contexts without RTTI
 
@@ -93,7 +97,7 @@ They are listed in `MethodRegistry.h` and binding for every method. The points t
 - **JSON keys:** registered field names are camelCase JSON keys (§13.4), where `FieldInfo.h` describes field names as PascalCase, the rule for authored files. The registered name is the member name with a lower-cased first letter unless a comment in the header names another key, so the headers are the wire contract.
 - **Required params:** the registry has no required-field flag, so `MethodSpecification::RequiredParams` lists them. They are checked before parsing and become `required` in the schemas.
 - **Absent params:** "absent" and "default" are told apart with `MethodContext::HasParam`, so `entity.update {name?}` needs no optional `FieldType`.
-- **Reserved params:** `dryRun`, `ifRevision` and `_meta` are never declared. The registry takes them out first, so a method without `supportsDryRun` can answer Unsupported instead of "unknown field".
+- **Reserved params:** `dryRun`, `ifRevision` and `_meta` are never declared. The registry takes them out first, so a method without `supportsDryRun` can answer Unsupported instead of "unknown field". Every method accepts `ifRevision` (§13.4 defines it for calls in general): a call that changes something only when asked (`project.validate {fix}`, `scene.open {save}`, `session.shutdown {save}`) is guarded like a mutation, and for a read it is a precondition. Every params schema lists it, except the `session.hello` handshake's, which the I/O thread reads strictly.
 - **Enum spelling:** enums are rewritten to their canonical names before strict parsing, embedded component data included. Readers of authored files stay case-sensitive (§6).
 - **64-bit counters:** the registry has no 64-bit integer `FieldType`, so revisions (`EditorContext::GetRevision`, decision 28), undo indexes and ticks are `uint32_t` in param and result structs and saturate (`ToAutomationCounter`). `ifRevision`, `transcriptLine` and `_meta` are read or written outside the registry and keep 64 bits; both forms agree below 2^32.
 - **Cursors:** every `cursor`/`nextCursor` is a string (convention 9). Log and event cursors are the decimal 64-bit sequence numbers of their logs, so they never saturate, and also accept `"end"`, which reads nothing and returns the cursor of the next entry (the "now" cursor a caller takes before an action). `_meta.diagnostics.logCursor` is such a string.
@@ -149,14 +153,16 @@ A read-only editor may dry-run, since a dry run writes nothing.
 - `project.create` also opens the project, which it locks. `project.open {recover}` arrives with autosave (M10).
 - **`project.setSettings` writes through:** `ProjectSettingsCommand` writes the `.eproj` on Execute and on Undo, so the file always equals the running settings and every write is attributed. `project.save` writes the dirty open scene (dirty native assets join in M6). Settings commands do not make the scene dirty (`Command::ChangesScene`).
 - **`project.upgrade`** is a file-format operation, not an undoable command. It needs a clean open scene and reloads the scene when its file changed. Its dry run reports the changed files through the overlay.
-- **`scene.new`** writes its file at once (so `BUILD_START_SCENE_MISSING` clears, §13.11 step 3) and takes `save?`/`discardChanges?` like `scene.open`, which §13.5 does not list.
+- **`scene.new`** writes its file at once (so `BUILD_START_SCENE_MISSING` clears, §13.11 step 3) and takes `save?`/`discardChanges?` like `scene.open`, which §13.5 does not list. For both, a dirty open scene needs exactly one of the two (neither or both is InvalidState, as §13.5 says); both together for a clean scene is InvalidParams.
+- **`entity.create`** requires `name` (§13.5); there is no default name.
+- **Entity events:** every scene edit appends to the event log what it did (§4.9), in UUID order: `EntityCreated` (with the name), `EntityDestroyed`, and one `ComponentChanged` per component that was added, removed or edited (`SceneEditCommand::AppendChangeEvents`). `SceneEdit::Commit` appends a new edit's events, and undo and redo append those of each replay; a dry run appends none. A change of only the name, the activity, the tags or the parent has no event type in §4.9 and appends nothing.
 - **`scene.open`** of the open scene's own path needs `reload`.
 - **The undo history belongs to the open scene** and is cleared when another scene opens (v1 edits one scene at a time, §12.1).
 - **`scene.diff {against: "revision"}`** accepts only revisions the history still holds. It reconstructs older entity states from the `SceneEditCommand` changes (`SceneEditCommand::ApplyChanges` on a scratch copy).
 - **`scene.tree {format: "json"}`** returns a flat list in canonical order, with depth and parent, instead of a nested tree. That keeps the reflected result non-recursive.
 - **`entity.get`** returns every component when `components` is absent.
 - **`edit.select`** is editor state, not a command.
-- **`debug.pend {frames}`** is the test-hook pending operation of `test_disconnect_cancels_pending_operations`. It logs "Started debug.pend of client '<name>'" when it becomes pending, so the test waits for it before it disconnects (requests of different clients have no order).
+- **`debug.pend {frames}`** is the test-hook pending operation of `test_disconnect_cancels_pending_operations`. It logs "Started debug.pend of client '<name>'" when it becomes pending, so the test waits for it before it disconnects (requests of different clients have no order). The `debug.*` hooks are not available in the launcher state: §12.1's list has no exception for them.
 - **Transactions nest by joining:** an `EditorTransaction` opened while another is open joins the outermost one, so `ProjectValidator::Fix` run by an op `project.validate {fix}` becomes part of the batch's single undo step instead of asserting.
 
 ### 14. Mutates, read-only and the launcher state
@@ -173,9 +179,11 @@ A read-only editor may dry-run, since a dry run writes nothing.
   - `--batch`, `--upgrade` and `--dump-reference` exclude each other.
   - `--automation-test-hooks` needs `--automation` or `--batch`.
 
-### 15. The watchdog test waits past the threshold
+### 15. The watchdog test waits past the threshold; bounded waits are not timing
 
 The watchdog's 5 s threshold is wall-clock time. A request sent before the threshold is queued and answered after the stall, not answered Busy, so `test_busy_watchdog_reports_phase` waits past 5 s after starting a 10 s `debug.stall` before it sends its request. This is the Python suite's one wall-clock exception, like ADR 0005 decision 13's minimized-window test. The C++ watchdog tests take time as a parameter. The C++ Busy test starts a server with an hour-old heartbeat and needs no waiting.
+
+**Bounded waits.** Tests of concurrent code wait for what another thread or process does: an I/O thread closing a socket, a server queueing a request, a process taking a lock. Such a wait is bounded by a generous deadline that only bounds a failure (`Test::WaitUntil` in C++, 30 s; the Python polls of another process's state; client timeouts in tests whose peer never answers). It is not a wall-clock exception, because no passing outcome depends on how long anything takes: the deadline is never asserted on, and a fast or slow machine passes the same way. A spin count never bounds a wait: how long it waits depends on CPU speed and scheduler load, so a loaded runner can end it before the other thread has run. `AGENTS.md` "Tests", `CodeStyle.md` §14 and `ReviewChecklist.md` §8 say so.
 
 ### 16. Python contract markers are a mechanical gate
 
@@ -228,14 +236,14 @@ Further rules:
 - **Templates** are read from a native directory (`Resources/Templates/Projects/<Template>/`) given by the editor. `engine://` is not mounted before the asset milestones.
 - **Return value:** `ProjectManager::CreateProject` returns the files to record in provenance.
 - **Recent list:** `user://Editor.json` (`{"Format": "EditorPreferences", "Version": 1, "RecentProjects": [...]}`, at most 10; other members preserved for M10's preferences).
-- **Read-only:** a read-only open takes no lock and writes nothing under the project, `Library/` included. Its cache is the private directory the editor names.
+- **Read-only:** a read-only open takes no lock and writes nothing under the project, `Library/` included. Its cache is the private directory the editor names (`<UserData>/ReadOnlyCache/<pid>`), cleared at open when a read-only editor that did not exit cleanly left it behind (a reused process id must not inherit another project's cache) and removed when the project closes (`~LoadedProject`).
 - **Entity ids:** `EditorContextSpecification::IdGeneratorState` is optional. Absent, `EditorContext::Create` seeds the generator from the OS CSPRNG, so every session's ids are unique (§4.8); tests pass a fixed state. A fixed default on the production type would repeat the id sequence in every session.
 
 ### 20. Session files
 
 - **Keys:** camelCase, as §13.2 lists them.
 - **Permissions:** on POSIX the directory is created 0700 and the file 0600, set before the atomic rename makes the file visible. Windows relies on the per-user `%LOCALAPPDATA%` ACL.
-- **Rewrites:** the server rewrites the file when the open project changes, so a bridge finds an editor opened in the launcher state.
+- **Rewrites:** the server rewrites the file when the open project changes, so a bridge finds an editor opened in the launcher state. A failed rewrite (on Windows the replace fails while a client such as `engine_client.list_sessions` has the file open) is tried again by later pumps, at most once per `AutomationServerSpecification::SessionFileRetryInterval` (1 s), and reported once per project; the project is remembered only after a write succeeds.
 - **`startedAt`:** computed with the civil-date algorithm, not with `<chrono>` calendar support, which Apple's libc++ lacks.
 
 ### 21. The phase marker
@@ -249,6 +257,7 @@ The protocol layer owns it (`Watchdog`). The Dispatcher sets "Automation:<method
 - **Measurement:** the result's minified JSON without `_meta`.
 - **Summary:** a small (< 4 KB) description of the top-level members.
 - **Path:** the response names the absolute native path, which an agent can open.
+- **Cleanup:** offloaded results are transient (an agent reads one right after its response). The first write to a directory removes the files of servers whose process no longer runs (the process id leads the server tag; `Process::IsRunning`), and the server's destructor removes its own files from every directory it wrote to, so neither `user://Automation/Out/` nor a project's `Library/Automation/Out/` grows without bound.
 
 ### 23. The MCP virtual environment
 
@@ -354,7 +363,7 @@ The contract implemented `App/EngineContext`, `App/Application` and `App/FrameLo
 
 ### 27. Sends never block the main thread
 
-`ProtocolServer::Send` appends the framed message to the connection's outbound queue and returns at once. The I/O thread drains the queues with non-blocking writes, waiting for writability alongside readability, so the main thread (ECS, UI, every client) never waits on a socket and a client that stops reading delays only itself. A connection whose queue would exceed `MaxQueuedSendBytes` (64 MB) is closed and reported Disconnected. The I/O thread's own answers (Busy, handshake errors) use the same queue, so frames never interleave (ADR 0005 decision 16).
+`ProtocolServer::Send` appends the framed message to the connection's outbound queue and returns at once. The I/O thread drains the queues with non-blocking writes, waiting for writability alongside readability, so the main thread (ECS, UI, every client) never waits on a socket and a client that stops reading delays only itself. A connection whose queue would exceed `MaxQueuedSendBytes` (64 MB) is closed and reported Disconnected. The I/O thread's own answers (Busy, handshake errors) use the same queue, so frames never interleave (ADR 0005 decision 16), and the same bound: a client that keeps sending requests whose ids those answers echo, without reading them, is closed too.
 
 The M2 socket API sends only with a blocking `Send(data, timeout)`, whose timeout leaves an unknown part sent. The contract therefore appends to `Platform/Socket.h`:
 
@@ -367,39 +376,117 @@ The existing members are unchanged. Stream B implements both OS halves (stubs an
 
 `ifRevision`, `_meta.revision`, the revisions in results and history entries, and `scene.diff {against}` use `EditorContext::GetRevision`, not the open `Scene`'s own revision. A `Scene` object's revision starts at 0 and grows with the mutations of loading, so `scene.open`, `scene.new` and reloads restart it, and two scenes can report the same value. An `ifRevision` taken in one scene could then pass in another (ABA), and `scene.diff` revisions would go backwards. `GetRevision` is the open scene's revision plus a base that `SetScene` and `CloseScene` advance past every value reported so far, so it increases for the editor's lifetime.
 
+### 29. scene.diff replays history entries on a scene copy
+
+Decision 13 rebuilds older revisions with `SceneEditCommand::ApplyChanges` on a scratch copy, but `CommandHistory::FindCommand` returns a `const Command*`, and without RTTI nothing tells a `SceneEditCommand` from a `CompositeCommand` (a batch, a transaction, a validator fix). The integration therefore added one virtual to the frozen `Command.h`:
+
+- `Command::ReplayOnSceneCopy(Scene& scene, bool after) const` brings a scratch scene from the state before the command to the state after it, or back, without touching the editor or the command. The default changes nothing when `ChangesScene()` is false (settings commands) and fails with Unsupported for a scene-changing command that does not override it, so a future command type cannot silently produce a wrong diff.
+- `SceneEditCommand` applies its changes (`ApplyChanges`); `CompositeCommand` replays its children in order, or reverts them in reverse order, and refuses with InvalidState while only some children are applied (after a failed compensating step).
+- `scene.diff {against: "revision"}` finds the target position from the held entries' `RevisionBefore`/`RevisionAfter`, copies the open scene through the serializer onto a scratch id generator, and reverts the applied entries after the target (newest first) or replays the undone entries before it (oldest first, the redo branch). History entries keep the revisions of their first execution (`CommandHistoryEntry`), so a revision names one state however often it was undone and redone.
+
+Tests: "Command: the default replay changes nothing for settings commands and is Unsupported for scene commands", the two `CompositeCommand` replay cases, and "SceneMethods: scene.diff rebuilds revisions on both sides of the undo position, through batches".
+
+### 30. Changes the contract owner accepted at integration
+
+Each keeps public and protected declarations unchanged unless stated, as decision 24 allows:
+
+- **`EditorContext.h`:** the private helpers `GetRevisionBeforeCommand` (the revision a `SceneEdit` started from, recorded as the history entry's `RevisionBefore`, which `scene.diff` needs) and `CreateProjectMount` (the dry run remounts the project with it after a failed overlay mount); private members for the provenance recorder, the dirty flag of a repaired scene and the pending revision; friend declarations for `CommandHistory` (reads `GetRevisionBeforeCommand`) and `SceneEdit` (sets the pending revision around its Execute). The friends widen access to private state, so they were reviewed: both classes are EditorCore's own command machinery, which the editor state already trusts (`EditorTransaction`, `EditorDryRunScope` and `ProjectSettingsCommand` were friends before).
+- **`SceneEdit.h`, `SceneEditCommand.h`:** private members (the revision before the edit, the Debug-only entity snapshots, the cached memory size).
+- **`CommandHistory.h`:** comments only. `IsDirty` treats the scene as dirty when a scene-changing entry lies between the save point and the position, or when the saved state can no longer be reached (it lay on a discarded redo branch or before a dropped record); dropping the record the save point follows leaves the saved state reachable, so that alone does not make the scene dirty.
+- **`EditorApp.h`:** private overrides of `OnInitialize`, `OnShutdown` and `OnSafePoint`, a destructor and the opaque `State`; the factory's comment describes the editor options it now parses.
+- **`JsonSchema.h|.cpp` (M3 Reflection):** the validator accepts the `required` keyword. Decision 8 puts `required` into params schemas, and the validator rejected any keyword the generator did not emit, so the frozen test "MethodRegistry: params schemas mark required members..." could not pass. The change only adds a keyword, with its own test case.
+- **`Command.h`, `CompositeCommand.h`, `SceneEditCommand.h`:** the public `ReplayOnSceneCopy` of decision 29, the one public addition.
+- **`MethodRegistry.h`:** convention 10's comment describes the virtual fields of decision 35; no declaration changed.
+- **Test support:** `AutomationTestClient` takes `offloadLargeResults` (decision 31), and `EditorTestFixture` works in death-test child processes, where doctest assertions run outside a test case.
+
+### 31. rpc.discover is bounded like every other result
+
+The unfiltered `rpc.discover` (every method with its full params and result schemas, component `$defs` included) is far over the 48 KB threshold, so it is offloaded like any large result (§1.3 principle 7). There is no exemption: agents filter with `method` or `domain`, and the MCP bridge reads its tools from `catalog.json`, not from `rpc.discover`. The Python client gained `engine_client.load_offloaded(result)`, which reads an offloaded result's file and returns any other result unchanged; the tests that need the whole catalogue (`test_launcher_state_allows_only_project_methods`, `test_rpc_discover_matches_the_dumped_catalogue`) use it. The C++ round trip checks both forms: the default in-process client gets the offloaded summary, and a client connected with `offloadLargeResults` false (as `BatchRunner`'s is) gets the catalogue inline.
+
+### 32. Float bounds are float values
+
+`component.schema` reports a float field's `min`/`max` as the float value the validator compares (`FieldMeta` bounds of float fields are written with float literals), as `JsonSchema` rounds schema bounds. In-process the JSON holds that float widened to a double; the canonical writer prints it in its short float spelling (`0.001`), so agents see the authored value.
+
+### 33. The commit gate and CI run the automation suite
+
+- `PreCommit.py` runs `Test.py --suite unit,feature,automation --config Debug`: the automation suite drives the Debug editor (`ENGINE_AUTOMATION_CONFIG`), so every commit is checked by the tests of both languages without a Release build. It needs the MCP virtual environment (`Setup.py`); a missing one fails the step with exit code 3 and names `Setup.py`. §2.3, §15.9 and `AGENTS.md` say so.
+- `CI.py`'s automation stage runs in Release (§15.8). `.github/workflows/ci.yml` runs it on all three hosted runners after the Release unit tests (on Linux inside the Xvfb + openbox step, because `test_launch_reports_editor_already_open_without_automation` starts a windowed editor). The setup stage creates the virtual environment with `Setup.py`; `actions/setup-python` caches pip's download cache keyed by the hashes of `Tools/MCP/requirements.lock` and `.github/ci-requirements.txt`, and `--require-hashes` re-checks every restored wheel. The virtual environment itself is never cached.
+
+### 34. Implementation choices the streams recorded
+
+- **Protocol (B):**
+  - `ProtocolServer::Send` writes what fits at once without blocking when the connection's queue is empty; the I/O thread drains any remainder (decision 27 still holds: the main thread never waits).
+  - A payload that is not a valid request, sent before `session.hello`, counts as an authentication failure.
+  - Offload files hold indented JSON; the threshold is still measured on the minified result.
+  - Every error an `edit.batch` op returns through `InvokeNested` (its params errors and the handler's own) is located relative to the op under `/params`, and `edit.batch` prefixes `/ops/<k>`.
+  - A server without a sessions directory (in-process test servers only) names offloaded files by their `user://Automation/Out/` path; the editor always sets the directory, so its responses name absolute native paths.
+  - The I/O thread logs rejected connections (bad tokens, HTTP probes, oversized frames, connection caps) at Warn, rate-limited (decision 6).
+  - Batch ops run under the batch's phase marker, which reads `Automation:edit.batch > <op>` while each op runs.
+- **Commands (A):** `SceneEdit`'s Debug check (§12.3: untouched entities are unchanged) compares each untouched entity's canonical JSON, the input of the state hash, instead of hashing it: the same result at about half the cost. The 10,000-operation property test carries `doctest::timeout(600)` because that check makes it take about 30 s in MSVC Debug (under 1 s in Release).
+- **MCP bridge (D):** the bridge reads `ENGINE_MCP_USER_DATA_DIR` (the user-data root of editors it launches and of the session files it scans) and `ENGINE_AUTOMATION_CONFIG` (which build `editor_launch` starts; Release by default, then Debug; `engine_client.configurations_from_environment`, shared with the Python suite). Relative `project.create`/`project.open` paths are made absolute against the bridge's working directory. The transcript is locked per append, so two bridges number lines consistently. The transcript of a project being created or opened is pending: its lines are kept in memory, numbered after the lines the project's transcript already holds, and written only once the editor confirmed the project and its directory holds the `.eproj`; a refused call's lines are dropped. The bridge therefore creates nothing in a target directory first (`project.create` accepts an existing empty directory, and a refused call leaves nothing in a directory that is not a project). `engine_methods` reads the unfiltered `rpc.discover` from its offloaded file (decision 31). On exit the bridge shuts down an editor it launched only when nothing is unsaved. The pinned SDK is mcp 2.3.0.
+- **Scripts (D):** `Setup.py` installs the virtual environment from wheels only (`--only-binary=:all:`) and recreates it when the lock or the Python version changes. `Test.py`'s automation suite runs both Python suites with the venv interpreter, writes JUnit with one test suite per directory plus one for the coverage gate, and fails on skipped tests (contract mode: `--allow-skips`).
+
+### 35. Component values in params may set virtual fields
+
+§13.10's example batch creates a light with `"Transform": {"EulerAngles": [-50, -30, 0]}`, and §5.4 makes `EulerAngles`, `WorldPosition` and `WorldRotation` writable virtual fields. They are not part of a component's stored JSON, so the struct validation of a component value called them unknown. The integration completed convention 10 in `MethodRegistry`:
+
+- The validation pass takes the virtual fields out of every component value (on a copy of the params), checks each writable one against its own field (kind, length, range) at its pointer, and reports a read-only one (`WorldScale`, `RenderPosition`) as an error; the stored JSON that remains goes through the struct validation as before. The read pass is then not strict, because pass 1 already checked every member; the Variant values keep the virtual fields verbatim, and `entity.create`/`entity.update` apply them through their setters after the stored fields.
+- Enum spellings of virtual fields are made canonical like those of stored fields.
+- Full params schemas list the writable virtual fields in the component definitions they use (`MethodRegistry`'s component schema); results and `component.schema` keep the stored shape.
+- An unknown member's "did you mean" suggestions still come from the stored fields only (Reflection's walk).
+
+Tests: "EntityMethods: virtual component fields are set through their setters in entity.create and entity.update", the virtual-field checks in "RpcMethods: rpc.discover lists every method with schemas and flags", and `test_entity_create_sets_virtual_transform_fields`.
+
+### 36. Changes the integration review made
+
+The review of the integrated milestone found defects and gaps; the fixes are recorded with the decisions they belong to (5, 6, 8, 13, 15, 19, 20, 22, 27 and 34). The public declarations they changed, accepted by the contract owner:
+
+- **Protocol:** `FrameDecoder` takes a per-instance payload limit (`explicit FrameDecoder(size_t maxPayloadBytes = MaxFramePayloadBytes)`, `SetMaxPayloadBytes`, `GetMaxPayloadBytes`); `ProtocolServerSpecification::MaxHandshakePayloadBytes`; `ProtocolServer::RejectionReportInterval`; `SessionFile::FormatUtcTimestamp` takes a `TimestampPrecision` (Milliseconds for transcript lines, so `TranscriptLog` no longer has its own calendar code); `MetaBuilder`'s `newWarnings` counts the Script logger's warnings too (they were counted nowhere); the `ifRevision` comments of `MethodRegistry.h` and `MethodContext.h` (decision 8).
+- **Core and Platform (M1/M2 headers, additions only):** `ErrorCodeFromString` in `Core/Error.h`, the inverse of `ErrorCodeToString` that `BatchRunner` and the test client had each copied with a hard-coded last enumerator; `FileSystem::PathToUtf8` and `FileSystem::PathFromUtf8`, the public form of the non-throwing conversions of `Core/Private/NativePath.h`, which replace EditorCore's five copies (three of them threw on a name with an unpaired UTF-16 surrogate); `Process::IsRunning` (decision 22's cleanup).
+- **EditorCore:** `SceneEditCommand::AppendChangeEvents` (decision 13); `AutomationServerSpecification::SessionFileRetryInterval` (decision 20); `EntityCreateParams::Name` has no default (decision 13); comments of `SceneEdit.h`, `ProjectManager.h` (the read-only cache's lifetime) and `EditorApp.h`.
+- **Test support:** `EditorTestFixture` takes an optional type registration hook, so a validator test can register a component with an EntityRef field and one with a requirement other than Transform (M4's built-in components have neither); `Test::WaitUntil` (decision 15).
+- **Logging:** EditorCore and the Editor use the client macros (`ENGINE_ASSERT`, `ENGINE_INFO`, ...), as CodeStyle §11 and Architecture §4.4 say; the automation server's connect, disconnect and session-file messages now reach the `App` logger that `log.read {loggers: ["App"]}` filters by.
+
 ## Requested amendments (docs owner)
 
 - **Architecture §4.1:** `EngineContext` owns the `TypeRegistry` from M4, with `RegisterTypes` (decision 2).
 - **Architecture §4.2:** the safe point `OnFrameSafePoint`/`OnSafePoint`, and batch runs unthrottled (decisions 3 and 4).
-- **Architecture §12.3:** `GetMergeKey`, `ChangesScene`, `GetMemorySize`, the `Origin` accessors, `EditorTransaction` (nesting by joining), configurable history bounds, one history per open scene, and a fallible `Undo` (decisions 13 and 18).
+- **Architecture §12.3:** `GetMergeKey`, `ChangesScene`, `GetMemorySize`, the `Origin` accessors, `EditorTransaction` (nesting by joining), configurable history bounds, one history per open scene, and a fallible `Undo` (decisions 13 and 18); `ReplayOnSceneCopy` and the first-execution revisions of history entries (decision 29); the Debug check compares canonical JSON (decision 34).
 - **Architecture §12.1 / §4.8:** the editor's revision (decision 28), and the id generator seeded from the OS when no state is given (decision 19).
 - **Architecture §13.2:**
-  - The I/O thread authenticates, with one hello strictness rule, Busy hellos during a stall, client slots for authenticated connections only, and a handshake cap and deadline (decision 6).
+  - The I/O thread authenticates, with one hello strictness rule, Busy hellos during a stall, client slots for authenticated connections only, a handshake cap and deadline, a 64 KB frame limit before authentication and rate-limited rejection logs (decision 6).
   - Non-blocking sends through per-connection outbound queues (decision 27).
   - Session file permissions and rewrites (decision 20).
   - `ClientId`, `IMethodHost` (admission separate from invocation), `Dispatcher`, the typed handlers and `IsHostType` (decision 7).
   - Exceptions in handlers: Debug asserts, Release answers Internal (decision 7).
+  - The protocol implementation choices of decision 34.
+  - The I/O thread's own answers obey the outbound queue cap (decision 27).
 - **Architecture §13.3:** the code mapping and the error `data` layout (decision 5).
 - **Architecture §13.4:**
-  - The param-struct conventions, string cursors with `"end"`, and `AllowedInBatch` (decision 8).
+  - The param-struct conventions, string cursors with `"end"`, and `AllowedInBatch` (decision 8); every method accepts `ifRevision` (decision 8).
   - `ifRevision` compares with the editor's revision (decision 28).
   - `params._meta`, `result._meta` and `dryRun` in results (decision 5).
   - Dry runs use a scene copy, and read-only editors may dry-run (decisions 12 and 14).
-  - Offload file names and directories (decision 22).
+  - Offload file names, directories and cleanup (decision 22).
   - The provenance key spelling (decision 10).
 - **Architecture §13.5:**
-  - `scene.new {save?, discardChanges?}`, `debug.pend`, the `scene.tree` JSON form, and the semantics of decision 13.
+  - `scene.new {save?, discardChanges?}`, `debug.pend` (not in the launcher state), the `scene.tree` JSON form, and the semantics of decision 13.
   - `Mutates` as decision 14 defines it.
 - **Architecture §13.7:** the M4 validator codes, `ASSET_IMPORT_FAILED` for unreadable scenes, fixes limited to the open scene and settings, and diagnostic ids (decision 17).
 - **Architecture §13.8:**
+  - The bridge's environment variables, relative project paths, transcript locking, exit behaviour and pinned SDK (decision 34).
   - The transcript line format (decision 11).
   - The catalogue format and that C++ produces compact schemas (decision 9).
   - A headless editor listens except in one-shot runs (decision 14).
 - **Architecture §12.1 CLI:** the M4 option rules (decision 14).
 - **Architecture §2.3 `Lint.py`:** the Python contract rules (decision 16).
+- **Architecture §2.3 `Setup.py` and `Test.py`:** wheels-only installs and venv recreation; the automation suite's runner, JUnit layout and skip rule (decision 34).
+- **Architecture §13.4:** `rpc.discover` without a filter is offloaded like any large result (decision 31); float bounds are float values (decision 32); component values in params may set writable virtual fields (decision 35).
 - **Architecture §3 / §13.5:** how the Runtime subset reaches `Engine/Automation/Methods` in M7 (decision 26).
 - **Architecture §4.11:** the automation I/O thread also drains the outbound queues (decision 27).
+- **Architecture §4.9:** the entity events scene edits, undo and redo append (decision 13).
+- **Architecture §4.13:** the read-only editor's private cache is cleared at open and removed at close (decision 19); a failed session-file rewrite is retried (decision 20).
 - **ADR 0004:** Python markers join the gate (decision 16).
-- **CodeStyle §14 / AGENTS.md "Tests":** `test_busy_watchdog_reports_phase` is the Python suite's wall-clock exception (decision 15).
+- **CodeStyle §14 / AGENTS.md "Tests" / ReviewChecklist §8:** `test_busy_watchdog_reports_phase` is the Python suite's wall-clock exception, and bounded waits are not timing (decision 15). Applied by the integration review.
 - **`FieldInfo.h` comment:** automation structs register camelCase field names (decision 8).
-- **Roadmap M4 deliverables:** the files of decision 1.
+- **Roadmap M4 deliverables:** the files of decision 1, including those the streams added.

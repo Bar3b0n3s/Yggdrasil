@@ -44,6 +44,9 @@ namespace Engine {
 		// §4.2 step 3: "AutomationServer::Pump(budget 4 ms)".
 		std::chrono::microseconds PumpBudget{ 4000 };
 		std::chrono::milliseconds WatchdogStallThreshold = DefaultWatchdogStallThreshold;
+		// How often Pump tries again to rewrite a session file whose rewrite failed (on Windows, replacing it fails while a
+		// client such as engine_client.list_sessions has it open), so the file always comes to name the open project.
+		std::chrono::milliseconds SessionFileRetryInterval{ 1000 };
 	};
 
 	// One connected client, for session.info and the AutomationPanel (M10).

@@ -30,7 +30,7 @@ namespace Engine {
 			CHECK(names == expected);
 		}
 
-		TEST_CASE("EditorCommandLine: every option parses into the launch options" * doctest::skip(true))
+		TEST_CASE("EditorCommandLine: every option parses into the launch options")
 		{
 			const Result<EditorLaunchOptions> options =
 				ParseEditorArguments({ "--project", "Projects/Tetris", "--read-only", "--renderer", "NONE", "--automation=50123", "--automation-test-hooks" });
@@ -92,7 +92,7 @@ namespace Engine {
 			CHECK_FALSE(dump.ListensForAutomation(true));
 		}
 
-		TEST_CASE("EditorCommandLine: conflicting and incomplete options are InvalidArgument" * doctest::skip(true))
+		TEST_CASE("EditorCommandLine: conflicting and incomplete options are InvalidArgument")
 		{
 			const std::vector<std::vector<std::string>> invalid = {
 				{ "--renderer", "metal" },
@@ -119,7 +119,7 @@ namespace Engine {
 			}
 		}
 
-		TEST_CASE("EditorCommandLine: renderer names print as they are written on the command line" * doctest::skip(true))
+		TEST_CASE("EditorCommandLine: renderer names print as they are written on the command line")
 		{
 			CHECK(EditorRendererToString(EditorRenderer::Vulkan) == "vulkan");
 			CHECK(EditorRendererToString(EditorRenderer::None) == "none");

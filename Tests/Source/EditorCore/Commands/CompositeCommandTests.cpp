@@ -3,7 +3,10 @@
 #include "EditorCore/Commands/CompositeCommand.h"
 
 #include "EditorCore/EditorContext.h"
+#include "Engine/Core/Log.h"
+#include "Engine/Scene/Scene.h"
 #include "Support/EditorTestFixture.h"
+#include "Support/ExpectLog.h"
 
 namespace Engine {
 
@@ -34,6 +37,12 @@ namespace Engine {
 				return {};
 			}
 
+			Status ReplayOnSceneCopy(Scene& /*scene*/, bool after) const override
+			{
+				m_Log->push_back((after ? "replay " : "revert ") + m_Name);
+				return {};
+			}
+
 			std::string_view GetLabel() const override { return m_Name; }
 			bool ChangesScene() const override { return m_ChangesScene; }
 			size_t GetMemorySize() const override { return 16; }
@@ -49,7 +58,7 @@ namespace Engine {
 
 	TEST_SUITE("EditorCore")
 	{
-		TEST_CASE("CompositeCommand: a failing child undoes executed children" * doctest::skip(true))
+		TEST_CASE("CompositeCommand: a failing child undoes executed children")
 		{
 			Test::EditorTestFixture fixture("CompositeFailure");
 			std::vector<std::string> log;
@@ -66,7 +75,7 @@ namespace Engine {
 			CHECK(log == std::vector<std::string>{ "a", "b", "undo b", "undo a" });
 		}
 
-		TEST_CASE("CompositeCommand: undo runs the children in reverse order and redo in order" * doctest::skip(true))
+		TEST_CASE("CompositeCommand: undo runs the children in reverse order and redo in order")
 		{
 			Test::EditorTestFixture fixture("CompositeUndo");
 			std::vector<std::string> log;
@@ -84,7 +93,7 @@ namespace Engine {
 			CHECK(composite.GetMemorySize() == 32);
 		}
 
-		TEST_CASE("CompositeCommand: executed children make an applied composite" * doctest::skip(true))
+		TEST_CASE("CompositeCommand: executed children make an applied composite")
 		{
 			Test::EditorTestFixture fixture("CompositeExecuted");
 			std::vector<std::string> log;
@@ -99,7 +108,7 @@ namespace Engine {
 			CHECK(log == std::vector<std::string>{ "undo b", "undo a" });
 		}
 
-		TEST_CASE("CompositeCommand: a failing child Undo executes the undone children again and keeps the composite applied" * doctest::skip(true))
+		TEST_CASE("CompositeCommand: a failing child Undo executes the undone children again and keeps the composite applied")
 		{
 			Test::EditorTestFixture fixture("CompositeUndoFailure");
 			std::vector<std::string> log;
@@ -117,7 +126,48 @@ namespace Engine {
 			CHECK(composite.GetAppliedCount() == 3);
 		}
 
-		TEST_CASE("CompositeCommand: ChangesScene is true when any child changes the scene" * doctest::skip(true))
+		TEST_CASE("CompositeCommand: replaying on a scene copy runs the children in order and reverting in reverse order")
+		{
+			Test::EditorTestFixture fixture("CompositeReplay");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			std::vector<std::string> log;
+			CompositeCommand composite("Batch");
+			composite.Add(CreateScope<LoggingCommand>(log, "a"));
+			composite.Add(CreateScope<LoggingCommand>(log, "b"));
+			REQUIRE(composite.Execute(fixture.GetEditor()).has_value());
+			log.clear();
+
+			Scene& scene = fixture.GetEditor().GetScene();
+			REQUIRE(composite.ReplayOnSceneCopy(scene, false).has_value());
+			REQUIRE(composite.ReplayOnSceneCopy(scene, true).has_value());
+			CHECK(log == std::vector<std::string>{ "revert b", "revert a", "replay a", "replay b" });
+		}
+
+		TEST_CASE("CompositeCommand: a partly applied composite refuses to replay")
+		{
+			Test::EditorTestFixture fixture("CompositePartialReplay");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			std::vector<std::string> log;
+			CompositeCommand composite("Batch");
+			composite.Add(CreateScope<LoggingCommand>(log, "a"));
+			composite.Add(CreateScope<LoggingCommand>(log, "b", false, true, true));
+			composite.Add(CreateScope<LoggingCommand>(log, "c", true));
+			{
+				const Test::ExpectLog expected(LogLevel::Error, "could not be rolled back completely");
+				REQUIRE_FALSE(composite.Execute(fixture.GetEditor()).has_value());
+			}
+			REQUIRE(composite.GetAppliedCount() == 2); // a and b stay applied
+			log.clear();
+
+			const Status replayed = composite.ReplayOnSceneCopy(fixture.GetEditor().GetScene(), false);
+			REQUIRE_FALSE(replayed.has_value());
+			CHECK(replayed.error().GetCode() == ErrorCode::InvalidState);
+			CHECK(log.empty());
+		}
+
+		TEST_CASE("CompositeCommand: ChangesScene is true when any child changes the scene")
 		{
 			std::vector<std::string> log;
 			CompositeCommand settingsOnly("Settings");
@@ -126,6 +176,24 @@ namespace Engine {
 			settingsOnly.Add(CreateScope<LoggingCommand>(log, "scene", false, true));
 			CHECK(settingsOnly.ChangesScene());
 			CHECK(settingsOnly.GetLabel() == "Settings");
+		}
+
+		TEST_CASE("CompositeCommand: a rollback that fails too stops there and reports both failures")
+		{
+			Test::EditorTestFixture fixture("CompositeDoubleFailure");
+			std::vector<std::string> log;
+			CompositeCommand composite("Batch");
+			composite.Add(CreateScope<LoggingCommand>(log, "a"));
+			composite.Add(CreateScope<LoggingCommand>(log, "b", false, true, true)); // its Undo fails
+			composite.Add(CreateScope<LoggingCommand>(log, "c", true));              // its Execute fails
+			const Test::ExpectLog expected(LogLevel::Error, "could not be rolled back completely");
+			const Status status = composite.Execute(fixture.GetEditor());
+			REQUIRE_FALSE(status.has_value());
+			CHECK(status.error().GetCode() == ErrorCode::Validation);
+			CHECK(status.error().ToString().contains("in step 2 'c'"));
+			CHECK(status.error().ToString().contains("rolling back step 1 'b' failed too"));
+			CHECK(composite.GetAppliedCount() == 2); // a and b stay applied, and the composite knows it
+			CHECK(log == std::vector<std::string>{ "a", "b" });
 		}
 	}
 

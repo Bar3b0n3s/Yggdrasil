@@ -6,6 +6,7 @@
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Json/JsonReader.h"
 #include "Support/AutomationTestClient.h"
+#include "Support/ExpectLog.h"
 #include "Support/TestData.h"
 #include "Support/Utf8Path.h"
 
@@ -20,7 +21,7 @@ namespace Engine {
 
 	TEST_SUITE("EditorCore")
 	{
-		TEST_CASE("ProjectMethods: project.create creates, opens and records the .eproj" * doctest::skip(true))
+		TEST_CASE("ProjectMethods: project.create creates, opens and records the .eproj")
 		{
 			Test::EditorTestFixture fixture("ProjectCreateMethod");
 			Test::AutomationTestClient client(fixture.GetEditor());
@@ -43,7 +44,7 @@ namespace Engine {
 			CHECK(second.error().GetCode() == ErrorCode::InvalidState);
 		}
 
-		TEST_CASE("ProjectMethods: project.open opens an existing project and reports load warnings" * doctest::skip(true))
+		TEST_CASE("ProjectMethods: project.open opens an existing project and reports load warnings")
 		{
 			Test::EditorTestFixture fixture("ProjectOpenMethod");
 			fixture.CreateAndOpenProject("Game");
@@ -57,7 +58,27 @@ namespace Engine {
 			CHECK(client.Call("project.open", Json{ { "path", Test::PathToUtf8(projectFile) } }).error().GetCode() == ErrorCode::InvalidState);
 		}
 
-		TEST_CASE("ProjectMethods: project.info, project.save and project.getSettings report the project" * doctest::skip(true))
+		TEST_CASE("ProjectMethods: project.open logs a load warning in the scene loads' format")
+		{
+			Test::EditorTestFixture fixture("ProjectOpenWarning");
+			fixture.CreateAndOpenProject("Game");
+			const std::filesystem::path projectFile = fixture.GetEditor().GetProject().GetProjectFile();
+			fixture.GetEditor().CloseProject();
+			Json document = ParseProjectJson(FileSystem::ReadText(projectFile).value_or(std::string()));
+			document["FutureSetting"] = 1;
+			const std::string text = document.dump(1, '\t');
+			REQUIRE(FileSystem::WriteFileAtomic(projectFile, std::as_bytes(std::span(text.data(), text.size()))).has_value());
+
+			Test::AutomationTestClient client(fixture.GetEditor());
+			// "'<file>' <pointer>: <message> (<code>)", like Utils::LogLoadDiagnostics for scene files.
+			const Test::ExpectLog logged(LogLevel::Warn, std::format("'{}' /FutureSetting: ", FileSystem::PathToUtf8(projectFile)));
+			Result<Json> opened = client.Call("project.open", Json{ { "path", Test::PathToUtf8(projectFile) } });
+			REQUIRE_MESSAGE(opened.has_value(), opened.error().ToString());
+			REQUIRE((*opened)["warnings"].size() == 1);
+			CHECK((*opened)["warnings"][0].dump().contains("/FutureSetting"));
+		}
+
+		TEST_CASE("ProjectMethods: project.info, project.save and project.getSettings report the project")
 		{
 			Test::AutomationFixture setup("ProjectInfoMethod");
 			Result<Json> info = setup.Call("project.info", Json::object());
@@ -79,7 +100,7 @@ namespace Engine {
 			CHECK((*settings)["settings"]["Simulation"]["FixedHz"] == Json(60));
 		}
 
-		TEST_CASE("ProjectMethods: project.setSettings applies a merge patch as one undoable command" * doctest::skip(true))
+		TEST_CASE("ProjectMethods: project.setSettings applies a merge patch as one undoable command")
 		{
 			Test::AutomationFixture setup("ProjectSetSettingsMethod");
 			Result<Json> patched = setup.Call("project.setSettings",
@@ -98,7 +119,7 @@ namespace Engine {
 			CHECK(invalid.error().GetCode() == ErrorCode::Validation);
 		}
 
-		TEST_CASE("ProjectMethods: project.validate reports diagnostics and fixes only the selected ids" * doctest::skip(true))
+		TEST_CASE("ProjectMethods: project.validate reports diagnostics and fixes only the selected ids")
 		{
 			Test::AutomationFixture setup("ProjectValidateMethod");
 			REQUIRE(setup.Call("project.setSettings", ParseProjectJson(R"({"patch":{"Export":{"BuildScenes":["Assets/Scenes/Gone.scene"]}}})")).has_value());
@@ -125,7 +146,7 @@ namespace Engine {
 			CHECK(malformed.error().GetCode() == ErrorCode::InvalidArgument);
 		}
 
-		TEST_CASE("ProjectMethods: project.upgrade rewrites a v0 scene and records provenance" * doctest::skip(true))
+		TEST_CASE("ProjectMethods: project.upgrade rewrites a v0 scene and records provenance")
 		{
 			Test::AutomationFixture setup("ProjectUpgradeMethod", false);
 			const Result<std::string> v0 = Test::ReadTestDataText("Formats/Scene/v0.scene");

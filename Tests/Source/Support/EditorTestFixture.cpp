@@ -3,27 +3,50 @@
 
 #include "EditorCore/Automation/RegisterMethods.h"
 #include "EditorCore/Project/ProjectManager.h"
+#include "Engine/Core/FatalError.h"
 #include "Engine/Core/VfsPath.h"
 #include "Engine/Scene/SceneSerializer.h"
+#include "Support/TestCaseTracker.h"
 #include "Support/TestData.h"
 
 namespace Engine {
 
 	namespace Test {
 
-		EditorTestFixture::EditorTestFixture(std::string_view label, CommandHistoryLimits historyLimits)
+		namespace Utils {
+
+			// A failed setup step: inside a test case it fails the case (doctest FAIL stops it); outside one (a death-test
+			// child, where doctest's assertion macros cannot run) the process cannot continue either.
+			[[noreturn]] static void FailEditorFixture(const std::string& message)
+			{
+				if (GetRunningTestCase().has_value())
+					FAIL(message);
+				FatalError(FatalErrorKind::InitFailed, message);
+			}
+
+			template<typename T>
+			static void RequireEditorStep(const Result<T>& result, std::string_view step)
+			{
+				if (!result)
+					FailEditorFixture(std::format("EditorTestFixture: {} failed: {}", step, result.error().ToString()));
+			}
+
+		}
+
+		EditorTestFixture::EditorTestFixture(std::string_view label, CommandHistoryLimits historyLimits, RegisterTypesFunction registerTypes)
 			: m_Directory(label)
 		{
 			std::error_code error;
 			std::filesystem::create_directories(m_Directory / "UserData", error);
-			REQUIRE_MESSAGE(!error, error.message());
+			if (error)
+				Utils::FailEditorFixture(std::format("EditorTestFixture: creating the user-data directory failed: {}", error.message()));
 
 			Result<Scope<EngineContext>> engine = EngineContext::Create({
 				.WorkerCount = 0,
 				.UserDataDirectory = m_Directory / "UserData",
-				.RegisterTypes = &RegisterEditorMethodTypes,
+				.RegisterTypes = registerTypes != nullptr ? registerTypes : &RegisterEditorMethodTypes,
 			});
-			REQUIRE_MESSAGE(engine.has_value(), engine.error().ToString());
+			Utils::RequireEditorStep(engine, "creating the engine context");
 			m_Engine = std::move(*engine);
 
 			Result<Scope<EditorContext>> editor = EditorContext::Create(*m_Engine, {
@@ -32,7 +55,7 @@ namespace Engine {
 																					   .ReadOnlyCacheRoot = m_Directory / "ReadOnlyCache",
 																					   .HistoryLimits = historyLimits,
 																				   });
-			REQUIRE_MESSAGE(editor.has_value(), editor.error().ToString());
+			Utils::RequireEditorStep(editor, "creating the editor context");
 			m_Editor = std::move(*editor);
 		}
 
@@ -58,25 +81,24 @@ namespace Engine {
 					.TemplatesDirectory = m_Editor->GetSpecification().TemplatesDirectory,
 				},
 				m_Engine->GetTypeRegistry());
-			REQUIRE_MESSAGE(created.has_value(), created.error().ToString());
+			Utils::RequireEditorStep(created, "creating the project");
 
 			Result<Scope<LoadedProject>> project = ProjectManager::OpenProject(created->ProjectFile, {}, m_Engine->GetTypeRegistry());
-			REQUIRE_MESSAGE(project.has_value(), project.error().ToString());
-			const Status opened = m_Editor->OpenProject(std::move(*project));
-			REQUIRE_MESSAGE(opened.has_value(), opened.error().ToString());
+			Utils::RequireEditorStep(project, "opening the project");
+			Utils::RequireEditorStep(m_Editor->OpenProject(std::move(*project)), "opening the project in the editor");
 		}
 
 		void EditorTestFixture::CreateAndOpenScene(std::string_view path)
 		{
-			REQUIRE(m_Editor->HasProject());
-			Result<VfsPath> scenePath = VfsPath::Create("project", path);
-			REQUIRE_MESSAGE(scenePath.has_value(), scenePath.error().ToString());
+			if (!m_Editor->HasProject())
+				Utils::FailEditorFixture("EditorTestFixture::CreateAndOpenScene needs an open project");
+			const Result<VfsPath> scenePath = VfsPath::Create("project", path);
+			Utils::RequireEditorStep(scenePath, "parsing the scene path");
 
 			Scope<Scene> scene = m_Editor->CreateScene(std::string(scenePath->GetStem()));
 			const Result<std::string> text = SceneSerializer::SaveToString(*scene);
-			REQUIRE_MESSAGE(text.has_value(), text.error().ToString());
-			const Status written = m_Editor->WriteProjectFile(*scenePath, std::as_bytes(std::span(text->data(), text->size())));
-			REQUIRE_MESSAGE(written.has_value(), written.error().ToString());
+			Utils::RequireEditorStep(text, "serializing the scene");
+			Utils::RequireEditorStep(m_Editor->WriteProjectFile(*scenePath, std::as_bytes(std::span(text->data(), text->size()))), "writing the scene");
 			m_Editor->SetScene(std::move(scene), *scenePath);
 		}
 

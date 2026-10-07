@@ -10,7 +10,7 @@ namespace Engine {
 
 	TEST_SUITE("EditorCore")
 	{
-		TEST_CASE("SessionMethods: session.hello reports the client id and the capabilities" * doctest::skip(true))
+		TEST_CASE("SessionMethods: session.hello reports the client id and the capabilities")
 		{
 			Test::EditorTestFixture fixture("SessionHello");
 			Test::AutomationTestClient client(fixture.GetEditor());
@@ -25,7 +25,7 @@ namespace Engine {
 			CHECK((*hello)["project"]["open"] == Json(false));
 		}
 
-		TEST_CASE("SessionMethods: session.info reports versions, project, renderer and clients" * doctest::skip(true))
+		TEST_CASE("SessionMethods: session.info reports versions, project, renderer and clients")
 		{
 			Test::AutomationFixture setup("SessionInfo");
 			Result<Json> info = setup.Call("session.info", Json::object());
@@ -43,7 +43,7 @@ namespace Engine {
 			CHECK((*info)["clients"][0]["inProcess"] == Json(true));
 		}
 
-		TEST_CASE("SessionMethods: session.shutdown with a dirty scene requires save or force" * doctest::skip(true))
+		TEST_CASE("SessionMethods: session.shutdown with a dirty scene requires save or force")
 		{
 			Test::AutomationFixture setup("SessionShutdown");
 			REQUIRE(setup.Call("entity.create", Json{ { "name", "Unsaved" } }).has_value());
@@ -60,7 +60,7 @@ namespace Engine {
 			CHECK_FALSE(setup.GetEditor().IsSceneDirty());
 		}
 
-		TEST_CASE("SessionMethods: session.shutdown with force discards unsaved changes" * doctest::skip(true))
+		TEST_CASE("SessionMethods: session.shutdown with force discards unsaved changes")
 		{
 			Test::AutomationFixture setup("SessionForce");
 			REQUIRE(setup.Call("entity.create", Json{ { "name", "Unsaved" } }).has_value());

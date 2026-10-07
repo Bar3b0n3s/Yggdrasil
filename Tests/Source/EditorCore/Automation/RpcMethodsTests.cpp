@@ -8,10 +8,19 @@ namespace Engine {
 
 	TEST_SUITE("EditorCore")
 	{
-		TEST_CASE("RpcMethods: rpc.discover lists every method with schemas and flags" * doctest::skip(true))
+		TEST_CASE("RpcMethods: rpc.discover lists every method with schemas and flags")
 		{
 			Test::EditorTestFixture fixture("RpcDiscover");
-			Test::AutomationTestClient client(fixture.GetEditor());
+			// The whole catalogue, with full schemas, is far over the offload threshold (§13.4 bounded output): a client that
+			// allows offloading gets a file, so this test reads the result inline through one that does not.
+			{
+				Test::AutomationTestClient bounded(fixture.GetEditor());
+				Result<Json> offloaded = bounded.Call("rpc.discover", Json::object());
+				REQUIRE(offloaded.has_value());
+				CHECK((*offloaded)["truncated"] == Json(true));
+				CHECK((*offloaded)["summary"].contains("methods"));
+			}
+			Test::AutomationTestClient client(fixture.GetEditor(), Test::MakeTestServerSpecification(), false);
 			Result<Json> discovered = client.Call("rpc.discover", Json::object());
 			REQUIRE(discovered.has_value());
 			CHECK((*discovered)["protocolVersion"] == Json("1.0"));
@@ -26,6 +35,9 @@ namespace Engine {
 					CHECK(method["supportsDryRun"] == Json(true));
 					CHECK(method["exposeAsTool"] == Json(true));
 					CHECK(method["params"]["$defs"].contains("RigidBody"));
+					// Component values in params may set writable virtual fields, never read-only ones.
+					CHECK(method["params"]["$defs"]["Transform"]["properties"].contains("EulerAngles"));
+					CHECK_FALSE(method["params"]["$defs"]["Transform"]["properties"].contains("WorldScale"));
 					CHECK(method["result"]["properties"].contains("undoIndex"));
 				}
 			}
@@ -33,7 +45,7 @@ namespace Engine {
 			CHECK((*discovered)["domains"].dump().contains("\"edit\""));
 		}
 
-		TEST_CASE("RpcMethods: rpc.discover filters by method and by domain" * doctest::skip(true))
+		TEST_CASE("RpcMethods: rpc.discover filters by method and by domain")
 		{
 			Test::EditorTestFixture fixture("RpcFilter");
 			Test::AutomationTestClient client(fixture.GetEditor());

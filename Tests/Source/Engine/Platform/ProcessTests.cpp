@@ -263,6 +263,25 @@ namespace Engine {
 			CHECK(again.error().GetCode() == ErrorCode::InvalidState);
 		}
 
+		TEST_CASE("Process: IsRunning reports the current process and a running child, and not a child that has exited")
+		{
+			CHECK(Process::IsRunning(Process::GetCurrentId()));
+			CHECK_FALSE(Process::IsRunning(0));
+
+			Result<Process> spawned = Process::Spawn(Test::MakeTestsChildSpecification({ "--death-test=Platform/AnnouncesAndHangs" }));
+			REQUIRE(spawned.has_value());
+			Process& child = *spawned;
+			REQUIRE(child.WaitForOutput(ProcessStream::StandardError, "Process test child is ready", std::chrono::seconds(60)).has_value());
+			const uint32_t id = child.GetId();
+			CHECK(Process::IsRunning(id));
+
+			// Kill waits until the child is gone (reaped on POSIX); this Process still holds its handle on Windows, which
+			// keeps the ID valid, so IsRunning must look at the process's state, not only at whether the ID resolves.
+			REQUIRE(child.Kill().has_value());
+			CHECK_FALSE(Process::IsRunning(id));
+			CHECK(child.Wait(std::chrono::seconds(10)).has_value());
+		}
+
 		TEST_CASE("Process: WaitForOutput reports a stream that ended without the text")
 		{
 			Result<Process> spawned = Process::Spawn(Test::MakeTestsChildSpecification({ "--death-test=Support/ReturnsWithoutDying" }));

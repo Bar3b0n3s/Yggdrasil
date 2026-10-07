@@ -15,7 +15,7 @@ namespace Engine {
 
 	TEST_SUITE("Automation")
 	{
-		TEST_CASE("JsonRpc: a request parses with its id, method, params and transcript line" * doctest::skip(true))
+		TEST_CASE("JsonRpc: a request parses with its id, method, params and transcript line")
 		{
 			const auto request = ParseRpcRequest(
 				R"({"jsonrpc":"2.0","id":17,"method":"entity.create","params":{"name":"Board","_meta":{"transcriptLine":42}}})");
@@ -36,7 +36,7 @@ namespace Engine {
 			CHECK(stringId->Id == Json("a-1"));
 		}
 
-		TEST_CASE("JsonRpc: invalid JSON is ParseError and a non-request is InvalidRequest with the id recovered" * doctest::skip(true))
+		TEST_CASE("JsonRpc: invalid JSON is ParseError and a non-request is InvalidRequest with the id recovered")
 		{
 			const auto notJson = ParseRpcRequest("{\"jsonrpc\":");
 			REQUIRE_FALSE(notJson.has_value());
@@ -66,7 +66,7 @@ namespace Engine {
 			}
 		}
 
-		TEST_CASE("JsonRpc: error codes map as documented" * doctest::skip(true))
+		TEST_CASE("JsonRpc: error codes map as documented")
 		{
 			CHECK(ToRpcErrorCode(ErrorCode::InvalidArgument) == RpcErrorCode::InvalidParams);
 			CHECK(ToRpcErrorCode(ErrorCode::NotFound) == RpcErrorCode::NotFound);
@@ -90,7 +90,7 @@ namespace Engine {
 			CHECK(RpcErrorCodeToString(RpcErrorCode::InvalidParams) == "InvalidParams");
 		}
 
-		TEST_CASE("JsonRpc: error responses carry errorCode, issues, extra data and _meta" * doctest::skip(true))
+		TEST_CASE("JsonRpc: error responses carry errorCode, issues, extra data and _meta")
 		{
 			const Error error = Error(ErrorCode::Validation, "2 invalid fields")
 									.WithHint("check the field names")
@@ -119,7 +119,7 @@ namespace Engine {
 			CHECK(engineCode["error"]["data"]["issues"] == Json::array());
 		}
 
-		TEST_CASE("JsonRpc: results carry _meta inside the result object" * doctest::skip(true))
+		TEST_CASE("JsonRpc: results carry _meta inside the result object")
 		{
 			Json response = MakeResultResponse(Json(4), Json{ { "entity", Json{ { "id", "5d1c9a7e33b04f12" } } } }, Json{ { "revision", 9 } });
 			CHECK(response["result"]["entity"]["id"] == Json("5d1c9a7e33b04f12"));
@@ -127,7 +127,7 @@ namespace Engine {
 			CHECK_FALSE(response.contains("error"));
 		}
 
-		TEST_CASE("JsonRpc: ProtocolVersion parses and prints major.minor" * doctest::skip(true))
+		TEST_CASE("JsonRpc: ProtocolVersion parses and prints major.minor")
 		{
 			CHECK(CurrentProtocolVersion.ToString() == "1.0");
 			CHECK(ProtocolVersion::Parse("1.0") == ProtocolVersion{ 1, 0 });
@@ -140,7 +140,7 @@ namespace Engine {
 			}
 		}
 
-		TEST_CASE("JsonRpc: the Busy response names the phase" * doctest::skip(true))
+		TEST_CASE("JsonRpc: the Busy response names the phase")
 		{
 			Json busy = MakeBusyResponse(Json(12), "Automation:debug.stall", 5200);
 			CHECK(busy["error"]["code"] == Json(-32007));

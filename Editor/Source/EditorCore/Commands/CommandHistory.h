@@ -29,7 +29,10 @@ namespace Engine {
 		uint64_t Sequence = 0;
 		std::string Label{}; // the display label: "[agent] " + Command::GetLabel() for Agent commands
 		CommandOrigin Origin = CommandOrigin::User;
-		uint64_t RevisionBefore = 0; // EditorContext::GetRevision before and after the command executed (§12.3)
+		// EditorContext::GetRevision before and after the command's first execution (§12.3); undo and redo change the
+		// revision again but never these values, and a merge keeps the first RevisionBefore and takes the newest
+		// RevisionAfter.
+		uint64_t RevisionBefore = 0;
 		uint64_t RevisionAfter = 0;
 		size_t MemorySize = 0;
 		bool ChangesScene = true;
@@ -96,8 +99,10 @@ namespace Engine {
 
 		// Marks the current position as the save point (the open scene was just saved).
 		void MarkSavePoint();
-		// True when a scene-changing command lies between the save point and the current position, or when the save point's
-		// entry was dropped by the bounds or discarded with a redo branch (the saved state is no longer reachable).
+		// True when a scene-changing command lies between the save point and the current position, or when the saved state
+		// can no longer be reached by undo and redo: it lay on a discarded redo branch, or before a record the bounds
+		// dropped. Dropping the record the save point follows does not make the history dirty by itself, because the saved
+		// state is then the oldest reachable one (the state before the next record).
 		[[nodiscard]] bool IsDirty() const;
 
 		// Drops every entry and sets the save point to the empty history (a scene was opened or created).

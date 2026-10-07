@@ -24,16 +24,30 @@ M4_TOOLS = {
 MAX_SCHEMA_BYTES = 4096
 
 
+def schema_keywords(value: object) -> set[str]:
+    """Every member name used anywhere in a JSON value (so descriptions that mention a keyword do not count)."""
+    names: set[str] = set()
+    children: list[object] = []
+    if isinstance(value, dict):
+        names.update(str(name) for name in value)
+        children = list(value.values())
+    elif isinstance(value, list):
+        children = value
+    for child in children:
+        names |= schema_keywords(child)
+    return names
+
+
 class SchemaTests(unittest.TestCase):
-    @unittest.skip("contract stub: un-skipped by M4 stream D")
     def test_tool_schemas_are_compact(self) -> None:
         tools = server.load_catalog()
         self.assertEqual({tool.name for tool in tools}, M4_TOOLS)
         for tool in tools:
             with self.subTest(tool=tool.name):
                 text = json.dumps(tool.input_schema)
-                self.assertNotIn("$defs", text)
-                self.assertNotIn("$ref", text)
+                keywords = schema_keywords(tool.input_schema)
+                self.assertNotIn("$defs", keywords)
+                self.assertNotIn("$ref", keywords)
                 self.assertLess(len(text.encode("utf-8")), MAX_SCHEMA_BYTES)
                 self.assertTrue(tool.description)
         entity_create = next(tool for tool in tools if tool.name == "entity_create")

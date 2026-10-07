@@ -15,7 +15,7 @@ namespace Engine {
 
 	TEST_SUITE("Automation")
 	{
-		TEST_CASE("JsonReference: $ref values are replaced from earlier results" * doctest::skip(true))
+		TEST_CASE("JsonReference: $ref values are replaced from earlier results")
 		{
 			const std::vector<Json> results = {
 				ParseReferenceJson(R"({"asset":{"id":"a41f0c2290b1d3e4"}})"),
@@ -36,7 +36,7 @@ namespace Engine {
 			CHECK(line["entity"] == Json("5d1c9a7e33b04f12"));
 		}
 
-		TEST_CASE("JsonReference: forward, self and dangling references are located errors" * doctest::skip(true))
+		TEST_CASE("JsonReference: forward, self and dangling references are located errors")
 		{
 			const std::vector<Json> results = { ParseReferenceJson(R"({"entity":{"id":"5d1c9a7e33b04f12"}})") };
 			const std::array<std::string_view, 5> bad = {
@@ -59,7 +59,7 @@ namespace Engine {
 			}
 		}
 
-		TEST_CASE("JsonReference: objects with other members next to $ref are data" * doctest::skip(true))
+		TEST_CASE("JsonReference: objects with other members next to $ref are data")
 		{
 			const std::vector<Json> results = { Json::object() };
 			Json params = ParseReferenceJson(R"({"a":{"$ref":"0","note":"literal"},"b":{"$ref":5}})");

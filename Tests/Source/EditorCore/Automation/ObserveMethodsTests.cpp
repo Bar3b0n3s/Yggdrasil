@@ -22,7 +22,7 @@ namespace Engine {
 
 	TEST_SUITE("EditorCore")
 	{
-		TEST_CASE("ObserveMethods: log.read returns entries by cursor with filters" * doctest::skip(true))
+		TEST_CASE("ObserveMethods: log.read returns entries by cursor with filters")
 		{
 			Test::AutomationFixture setup("LogRead", false);
 			Result<Json> start = setup.Call("log.read", Json{ { "limit", 1 } });
@@ -45,7 +45,7 @@ namespace Engine {
 			CHECK((*app)["entries"].size() == 0);
 		}
 
-		TEST_CASE("ObserveMethods: the end cursor reads nothing and returns where the next entry will be" * doctest::skip(true))
+		TEST_CASE("ObserveMethods: the end cursor reads nothing and returns where the next entry will be")
 		{
 			Test::AutomationFixture setup("LogEnd", false);
 			Result<Json> now = setup.Call("log.read", Json{ { "cursor", "end" } });
@@ -62,7 +62,7 @@ namespace Engine {
 			CHECK(setup.Call("log.read", Json{ { "cursor", "later" } }).error().GetCode() == ErrorCode::InvalidArgument);
 		}
 
-		TEST_CASE("ObserveMethods: events.read returns engine events by cursor and type" * doctest::skip(true))
+		TEST_CASE("ObserveMethods: events.read returns engine events by cursor and type")
 		{
 			Test::AutomationFixture setup("EventsRead");
 			const std::string cursor = std::to_string(setup.GetEditorFixture().GetEngine().GetEventLog().GetNextSeq());
@@ -74,7 +74,7 @@ namespace Engine {
 			CHECK((*events)["events"][0]["path"].dump().contains("Second.scene"));
 		}
 
-		TEST_CASE("ObserveMethods: docs.get lists the skills and returns a topic" * doctest::skip(true))
+		TEST_CASE("ObserveMethods: docs.get lists the skills and returns a topic")
 		{
 			Test::EditorTestFixture fixture("DocsGet");
 			Test::AutomationTestClient client(fixture.GetEditor());

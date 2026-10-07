@@ -48,8 +48,9 @@ namespace Engine {
 	{
 		// "dryRun": true (§13.4). Accepted only by methods with SupportsDryRun; any other method answers Unsupported.
 		bool DryRun = false;
-		// "ifRevision": N (§13.4, optimistic concurrency). Accepted only by methods with Mutates (InvalidParams otherwise);
-		// the host fails the call with Conflict and data.currentRevision when its revision differs (the editor's
+		// "ifRevision": N (§13.4, optimistic concurrency). Accepted by every method (a precondition for reads, a guard for
+		// calls that write only when asked); the host fails the call with Conflict and data.currentRevision when its
+		// revision differs (the editor's
 		// EditorContext::GetRevision, which never repeats a value across scenes).
 		std::optional<uint64_t> IfRevision{};
 	};

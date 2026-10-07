@@ -3,7 +3,7 @@
 #include "Engine/Core/Base.h"
 
 // The registration of every editor automation method (Roadmap rule 4: RegisterMethods.cpp is a shared integration file
-// with one owner per milestone; in M4 stream C). Adding a method: its param and result structs and handler in the domain's
+// with one owner per milestone). Adding a method: its param and result structs and handler in the domain's
 // header and .cpp, its types and registration in that domain's Register*MethodTypes and Register*Methods, and a Python test
 // (skill add-automation-method).
 

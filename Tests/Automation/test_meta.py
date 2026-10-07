@@ -6,11 +6,10 @@ import json
 import unittest
 from pathlib import Path
 
-from harness import AutomationTestCase
+from harness import AutomationTestCase, engine_client
 
 
 class MetaTests(AutomationTestCase):
-    @unittest.skip("contract stub: un-skipped by M4 stream D")
     def test_meta_reports_new_warning(self) -> None:
         client, root = self.open_editor_with_scene()
         # A scene file with an unknown component loads with one warning, which the next response reports.
@@ -28,7 +27,6 @@ class MetaTests(AutomationTestCase):
         self.assertIn("FutureThing", diagnostics["firstNew"][0]["message"])
         self.assertEqual(client.call("session.info")["_meta"]["diagnostics"]["newWarnings"], 0)
 
-    @unittest.skip("contract stub: un-skipped by M4 stream D")
     def test_large_result_offloaded(self) -> None:
         client, root = self.open_editor_with_scene()
         ops = [{"method": "entity.create", "params": {"name": f"Cell{index:04}", "tags": ["Cell"]}}
@@ -42,8 +40,10 @@ class MetaTests(AutomationTestCase):
         self.assertEqual(len(json.loads(offloaded.read_text(encoding="utf-8"))["scene"]["Entities"]), 600)
         self.assertEqual(result["summary"]["scene"]["type"], "object")
         self.assertIn("_meta", result)
+        self.assertEqual(len(engine_client.load_offloaded(result)["scene"]["Entities"]), 600)
+        small = client.call("project.info")
+        self.assertIs(engine_client.load_offloaded(small), small)
 
-    @unittest.skip("contract stub: un-skipped by M4 stream D")
     def test_enum_values_case_insensitive_and_echoed_canonically(self) -> None:
         client, _ = self.open_editor_with_scene()
         created = client.call("entity.create", {"name": "Camera", "components": {

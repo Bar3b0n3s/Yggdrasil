@@ -22,10 +22,11 @@ A production-grade C++23 3D game engine with an editor, a standalone runtime and
 | `Tests/` | doctest executable (`Source/` mirrors the include roots), fixtures in `Data/`, goldens, Python automation tests |
 | `Resources/` | Engine resources: `Shaders/` (Slang and `Shaders.json`), environments, fonts, templates |
 | `Scripts/` | Python entry points and shared helpers in `Lib/`. Toolchain pins: `Lib/Toolchain.json` (Vulkan SDK, slangc), `Lib/toolchain.py` (MSVC, GCC, Clang, Xcode, clang-format and clang-tidy versions), `Lib/premake.py` (premake release and SHA-256) |
-| `Tools/`, `Projects/` | MCP bridge and automation client (M4+); FeatureTest and the demo games (M14+) |
+| `Tools/` | `Automation/engine_client.py` (the standard-library Python client of the automation protocol, Architecture §13.2) and `MCP/` (the MCP bridge, §13.8: `run.py`, `engine_mcp/`, `catalog.json` regenerated with `Editor --headless --renderer none --dump-reference <dir>`, the hash-pinned `requirements.lock` and `tests/`; `Setup.py` creates its `.venv`) |
+| `Projects/` | FeatureTest and the demo games (M14+) |
 | `Vendor/<Lib>/` | Third-party code, each with its own `premake5.lua` and `VENDOR.md` |
 | `Docs/` | Authoritative docs, `ReviewChecklist.md`, `Decisions/` (ADRs and approvals), `Reference/` (generated) |
-| `.claude/skills/` | Agent skills: `build-and-test` and `commit-review`; more land with their milestones |
+| `.claude/skills/` | Agent skills: `build-and-test`, `commit-review` and `add-automation-method`; more land with their milestones |
 | `bin/`, `bin-int/` | Build output and intermediates (gitignored) |
 
 ## Authoritative documents
@@ -51,10 +52,11 @@ Run every command from the repository root. Windows uses `python`; Linux and mac
 
 | Task | Command |
 |---|---|
-| Set up and check the toolchain | `python Scripts/Setup.py` |
+| Set up and check the toolchain | `python Scripts/Setup.py` (also creates `Tools/MCP/.venv` and the gitignored `.mcp.json` for the MCP bridge) |
 | Generate project files (again after adding or removing files) | `python Scripts/Generate.py` (vs2026, gmake or xcode4; `--action` overrides) |
 | Build | `python Scripts/Build.py --config Debug` (also `Release`, `Dist`; `--project Tests` for one project) |
 | Unit tests | `python Scripts/Test.py --suite unit --config Debug --junit` (fails on a test case skipped outside the child-process targets; `--allow-skips` is contract mode) |
+| Automation tests | `python Scripts/Test.py --suite automation --junit` (the Python suites `Tests/Automation` and `Tools/MCP/tests` against the Release editor, in `Tools/MCP/.venv` from `Setup.py`, then the method coverage gate; `--filter <test>` runs part of it) |
 | Format C++ | `python Scripts/Format.py` (rewrites files); `--check` only reports |
 | Lint | `python Scripts/Lint.py` (`--self-test` proves every seeded fixture in `Tests/Data/Lint/` still fails; `--mode regex` forces the checkers that do not need clang-tidy and clang-query; `--allow-contract-stubs` is contract mode) |
 | Check build configuration (ABI defines, Jolt instruction set, FP model) | `python Scripts/CheckBuildConfig.py` |
@@ -93,7 +95,7 @@ Run every command from the repository root. Windows uses `python`; Linux and mac
 
 ## Commit gate (Architecture §15.9)
 
-1. `python Scripts/PreCommit.py` is green: generate, the static checks (`CheckBuildConfig.py` on the workspace and its fixtures, `Lint.py`, `Lint.py --self-test`, the format check; the same list as `CI.py`'s lint stage), Debug build, and the unit and feature suites.
+1. `python Scripts/PreCommit.py` is green: generate, the static checks (`CheckBuildConfig.py` on the workspace and its fixtures, `Lint.py`, `Lint.py --self-test`, the format check; the same list as `CI.py`'s lint stage), Debug build, and the unit, feature and automation suites (the automation suite drives the Debug editor from the MCP virtual environment that `Setup.py` creates).
    - **Strict by default.** Lint rejects `ENGINE_CONTRACT_STUB` and any `doctest::skip` outside the child-process targets (`Test::ChildTargetSuite`), and the unit suite fails on, and names, any other skipped test case.
    - **Contract mode.** Only the commit of a milestone's contract task runs `python Scripts/PreCommit.py --contract`, which allows both and says so in its summary. Every other commit is strict.
 2. **Recorded review.** Run the `commit-review` skill on the staged diff against `Docs/ReviewChecklist.md`. Any of these blocks the commit:
@@ -175,7 +177,7 @@ The same inputs and seed must give the same state hash in Debug, Release and Dis
   - Tests use doctest, in `Tests/Source/<path of the unit>Tests.cpp`, inside `namespace Engine`.
   - Each file wraps its cases in `TEST_SUITE("<Module>")`.
   - Case names have the form `TEST_CASE("<Unit>: <present-tense behaviour>")`. Roadmap acceptance names are used verbatim.
-- **Deterministic:** no sleeps or wall-clock timing, fixed seeds, no network, files only in a per-test temporary directory, and no dependence on test order. The one wall-clock exception is the windowed child "FrameLoop: a minimized window uses little CPU time per second" (ADR 0005 decision 13).
+- **Deterministic:** no sleeps or wall-clock timing, fixed seeds, no network, files only in a per-test temporary directory, and no dependence on test order. The wall-clock exceptions are the windowed child "FrameLoop: a minimized window uses little CPU time per second" (ADR 0005 decision 13) and, in the Python suite, `test_busy_watchdog_reports_phase` (ADR 0008 decision 15). Bounded waits are not timing (ADR 0008 decision 15): waiting for another thread's or process's state with a generous deadline that only bounds a failure (`Test::WaitUntil`, a Python poll of another process), or a client timeout whose peer never answers, as long as no passing outcome depends on how long anything takes. A spin count never bounds a wait.
 - **Windowed children** (`--windowed-child`) need a display; on Linux without a desktop, run the unit suite inside Xvfb with a window manager, as the `build-and-test` skill shows.
 - **Public API only.** Expected error logs are declared with `Test::ExpectLog`. Expected asserts are death tests (`ENGINE_DEATH_TEST`). GPU tests skip with a reason unless `--require-gpu` is passed.
 - **No permanent `doctest::skip`.** It marks a contract task's tests until their implementation lands. The only permanent skips are child-process targets, which carry `doctest::test_suite(Test::ChildTargetSuite)` in the same decorator expression (Lint `test-skip`, Test.py's skip check).

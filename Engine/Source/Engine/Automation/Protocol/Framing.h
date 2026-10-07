@@ -35,7 +35,8 @@ namespace Engine {
 		// A header line that is not "Content-Length: <decimal>" first or "Content-Type: <text>" after it, a missing or
 		// repeated Content-Length, a bare LF, or a header section over MaxFrameHeaderBytes.
 		MalformedHeader,
-		// A Content-Length over MaxFramePayloadBytes (detected from the header, before the payload arrives).
+		// A Content-Length over the decoder's payload limit (MaxFramePayloadBytes unless set lower), detected from the header
+		// before the payload arrives.
 		Oversized,
 		// A payload that is not valid UTF-8.
 		InvalidUtf8,
@@ -50,10 +51,20 @@ namespace Engine {
 	// at once); every complete frame yields its payload in order. A value type; one thread at a time.
 	//
 	// Never crashes and never asserts on any input (Roadmap M4 "Framing: random byte streams never crash the decoder"); it
-	// buffers at most MaxFrameHeaderBytes + MaxFramePayloadBytes bytes of one frame plus whatever was appended after it.
+	// buffers at most MaxFrameHeaderBytes + its payload limit bytes of one frame plus whatever was appended after it.
 	class FrameDecoder
 	{
 	public:
+		// A decoder whose frames may carry at most `maxPayloadBytes` (at most MaxFramePayloadBytes, which is used beyond it).
+		// The automation server starts each connection with a small limit and raises it once the connection is
+		// authenticated, so traffic without the token never makes it buffer or parse a large frame (§13.2).
+		explicit FrameDecoder(size_t maxPayloadBytes = MaxFramePayloadBytes);
+
+		// Changes the payload limit (clamped to MaxFramePayloadBytes). It applies from the frame at the front of the buffer
+		// on: the header of the next frame is read again on every Next call.
+		void SetMaxPayloadBytes(size_t maxPayloadBytes);
+		[[nodiscard]] size_t GetMaxPayloadBytes() const { return m_MaxPayloadBytes; }
+
 		// Appends received bytes. After a failure appended bytes are ignored.
 		void Append(std::span<const std::byte> bytes);
 
@@ -70,6 +81,7 @@ namespace Engine {
 	private:
 		std::vector<std::byte> m_Buffer;
 		std::optional<FrameErrorKind> m_Failure;
+		size_t m_MaxPayloadBytes = MaxFramePayloadBytes;
 	};
 
 	// The frame of `payload`: "Content-Length: <payload.size()>\r\n\r\n" followed by the payload. The payload must be at most

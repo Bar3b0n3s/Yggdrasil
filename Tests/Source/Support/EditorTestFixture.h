@@ -9,7 +9,9 @@
 #include <string_view>
 
 // Shared setup for EditorCore tests (Roadmap M4): an engine context without a window whose type registry holds the editor's
-// automation types, an EditorContext over it with a fixed id generator state, and a temporary directory for projects.
+// automation types, an EditorContext over it with a fixed id generator state, and a temporary directory for projects. A
+// failed setup step fails the running test case, or, in a death-test child (no test case), ends the process with
+// FatalError, so the fixture also serves death tests.
 
 namespace Engine {
 
@@ -22,9 +24,11 @@ namespace Engine {
 		class EditorTestFixture
 		{
 		public:
-			// An engine context (inline jobs, user:// in <temp>/UserData, RegisterEditorMethodTypes) and an editor in the
-			// launcher state with `historyLimits`. `label` names the temporary directory.
-			explicit EditorTestFixture(std::string_view label = "Editor", CommandHistoryLimits historyLimits = {});
+			// An engine context (inline jobs, user:// in <temp>/UserData, `registerTypes` or, when null,
+			// RegisterEditorMethodTypes) and an editor in the launcher state with `historyLimits`. `label` names the temporary
+			// directory. A test that needs types of its own (a component with an EntityRef field) passes a function that calls
+			// RegisterEditorMethodTypes and adds them.
+			explicit EditorTestFixture(std::string_view label = "Editor", CommandHistoryLimits historyLimits = {}, RegisterTypesFunction registerTypes = nullptr);
 			~EditorTestFixture();
 
 			EditorTestFixture(const EditorTestFixture&) = delete;

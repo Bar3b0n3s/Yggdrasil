@@ -49,12 +49,12 @@ namespace Engine {
 		// next edit of the same key (continuous edits: one gizmo drag, one slider scrub).
 		SceneEditCommand(std::string label, std::vector<SceneEntityChange> changes, std::string mergeKey = {});
 
-		// Brings every touched entity to its After state (nothing when the command is applied). Errors: Validation when a
-		// snapshot no longer applies (a bug elsewhere: undo states are always valid), with the scene restored to the Before
-		// state first; the command stays unapplied.
+		// Brings every touched entity to its After state (nothing when the command is applied) and appends its events
+		// (AppendChangeEvents). Errors: Validation when a snapshot no longer applies (a bug elsewhere: undo states are always
+		// valid), with the scene restored to the Before state first; the command stays unapplied.
 		[[nodiscard]] Status Execute(EditorContext& context) override;
-		// Brings every touched entity back to its Before state. An in-memory restore: it always succeeds (a failure is a bug,
-		// asserted, Command.h), so the returned Status is always success.
+		// Brings every touched entity back to its Before state and appends its events. An in-memory restore: it always
+		// succeeds (a failure is a bug, asserted, Command.h), so the returned Status is always success.
 		[[nodiscard]] Status Undo(EditorContext& context) override;
 
 		[[nodiscard]] std::string_view GetLabel() const override { return m_Label; }
@@ -63,6 +63,8 @@ namespace Engine {
 		// and adds the entities only the other touched.
 		[[nodiscard]] bool MergeWith(const Command& next) override;
 		[[nodiscard]] size_t GetMemorySize() const override;
+		// ApplyChanges on `scene` with this command's changes.
+		[[nodiscard]] Status ReplayOnSceneCopy(Scene& scene, bool after) const override;
 
 		[[nodiscard]] std::span<const SceneEntityChange> GetChanges() const { return m_Changes; }
 		[[nodiscard]] bool IsApplied() const { return m_IsApplied; }
@@ -72,10 +74,20 @@ namespace Engine {
 		// scene.diff, which replays history changes on a scratch copy. Errors: Validation (nothing is rolled back: callers
 		// apply to scenes they can discard or restore).
 		[[nodiscard]] static Status ApplyChanges(Scene& scene, std::span<const SceneEntityChange> changes, bool after);
+
+		// Appends to the context's event log (§4.9, EditorContext::AppendEvent, which a dry run suppresses) what bringing
+		// the entities of `changes` to their After (`after` true) or Before state did, in the changes' UUID order:
+		// EntityCreated (with the entity's name) for an entity that gains a state, EntityDestroyed for one that loses it, and
+		// otherwise one ComponentChanged per component whose value differs between the two states (added, removed or
+		// edited), in the target state's component order and then the removed ones'. A change of only the name, the
+		// activity, the tags or the parent has no event type and appends nothing. SceneEdit::Commit appends the events of a
+		// new edit; Execute (redo) and Undo append those of each replay.
+		static void AppendChangeEvents(EditorContext& context, std::span<const SceneEntityChange> changes, bool after);
 	private:
 		std::string m_Label;
 		std::vector<SceneEntityChange> m_Changes;
 		std::string m_MergeKey;
+		size_t m_MemorySize = 0; // GetMemorySize, computed when the changes are set
 		bool m_IsApplied = true;
 	};
 

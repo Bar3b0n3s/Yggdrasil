@@ -22,7 +22,7 @@ namespace Engine {
 
 	TEST_SUITE("EditorCore")
 	{
-		TEST_CASE("EntityMethods: entity.create adds an entity with components as one undo step" * doctest::skip(true))
+		TEST_CASE("EntityMethods: entity.create adds an entity with components as one undo step")
 		{
 			Test::AutomationFixture setup("EntityCreate");
 			Result<Json> created = setup.Call("entity.create", ParseEntityMethodJson(R"({"name":"Camera","tags":["Main"],"active":false,
@@ -43,9 +43,15 @@ namespace Engine {
 
 			REQUIRE(setup.Call("edit.undo", Json::object()).has_value());
 			CHECK(setup.GetEditor().GetScene().GetEntityCount() == 0);
+
+			// §13.5 lists name as required: there is no default name.
+			Json nameless = setup.Request("entity.create", Json::object());
+			CHECK(nameless["error"]["code"] == Json(-32602));
+			CHECK(nameless["error"]["data"]["issues"][0]["pointer"] == Json("/name"));
+			CHECK(setup.GetEditor().GetScene().GetEntityCount() == 0);
 		}
 
-		TEST_CASE("EntityMethods: an unknown component field is InvalidParams with a did-you-mean hint" * doctest::skip(true))
+		TEST_CASE("EntityMethods: an unknown component field is InvalidParams with a did-you-mean hint")
 		{
 			Test::AutomationFixture setup("EntityUnknownField");
 			Json response = setup.Request("entity.create", ParseEntityMethodJson(R"({"name":"Ball","components":{"RigidBody":{"Mas":2}}})"));
@@ -57,7 +63,7 @@ namespace Engine {
 			CHECK(setup.GetEditor().GetScene().GetEntityCount() == 0);
 		}
 
-		TEST_CASE("EntityMethods: entity.get selects components and children" * doctest::skip(true))
+		TEST_CASE("EntityMethods: entity.get selects components and children")
 		{
 			Test::AutomationFixture setup("EntityGet");
 			REQUIRE(setup.Call("edit.batch", ParseEntityMethodJson(R"({"label":"Tree","ops":[
@@ -75,7 +81,7 @@ namespace Engine {
 			CHECK(setup.Call("entity.get", Json{ { "entity", "/Game" }, { "components", 3 } }).error().GetCode() == ErrorCode::InvalidArgument);
 		}
 
-		TEST_CASE("EntityMethods: entity.update changes only what is given and adds missing components" * doctest::skip(true))
+		TEST_CASE("EntityMethods: entity.update changes only what is given and adds missing components")
 		{
 			Test::AutomationFixture setup("EntityUpdate");
 			REQUIRE(setup.Call("entity.create", ParseEntityMethodJson(R"({"name":"Ball","tags":["Player"],"active":false})")).has_value());
@@ -94,7 +100,51 @@ namespace Engine {
 			CHECK(setup.Call("entity.update", ParseEntityMethodJson(R"({"entity":"/Orb","removeComponents":["Transform"]})")).error().GetCode() == ErrorCode::InvalidState);
 		}
 
-		TEST_CASE("EntityMethods: entity.destroy, entity.duplicate and entity.reparent are one command each" * doctest::skip(true))
+		TEST_CASE("EntityMethods: virtual component fields are set through their setters in entity.create and entity.update")
+		{
+			Test::AutomationFixture setup("EntityVirtualFields");
+			REQUIRE(setup.Call("entity.create", ParseEntityMethodJson(R"({"name":"Board","components":{"Transform":{"Translation":[1,0,0]}}})"))
+					.has_value());
+			// WorldPosition is computed from the parent: the child's local translation is what remains.
+			Result<Json> created = setup.Call("entity.create",
+				ParseEntityMethodJson(R"({"name":"Piece","parent":"/Board","components":{"Transform":{"WorldPosition":[3,0,0]}}})"));
+			REQUIRE_MESSAGE(created.has_value(), created.error().ToString());
+			Result<Json> fetched = setup.Call("entity.get", Json{ { "entity", "/Board/Piece" } });
+			REQUIRE(fetched.has_value());
+			CHECK((*fetched)["entity"]["components"]["Transform"]["Translation"] == ParseEntityMethodJson("[2,0,0]"));
+
+			// A virtual field and a stored field of the same component in one entity.update. EulerAngles are degrees applied
+			// Z, then X, then Y (q = qY * qX * qZ, TransformSystem::QuaternionFromEulerDegrees), and Rotation serializes as
+			// [x, y, z, w]: (90, 90, 0) is (0.5, 0.5, -0.5, 0.5). Radians, another axis order or a sign error give another
+			// quaternion (qX * qY would have z = +0.5).
+			Result<Json> updated = setup.Call("entity.update",
+				ParseEntityMethodJson(R"({"entity":"/Board/Piece","components":{"Transform":{"Scale":[2,2,2],"EulerAngles":[90,90,0]}}})"));
+			REQUIRE_MESSAGE(updated.has_value(), updated.error().ToString());
+			const Json& transform = (*updated)["entity"]["components"]["Transform"];
+			CHECK(transform["Scale"] == ParseEntityMethodJson("[2,2,2]"));
+			const std::array<double, 4> expected = { 0.5, 0.5, -0.5, 0.5 };
+			REQUIRE(transform["Rotation"].size() == expected.size());
+			for (size_t index = 0; index < expected.size(); ++index)
+			{
+				CAPTURE(index);
+				CHECK(JsonReader(transform["Rotation"][index]).ReadDouble().value_or(99.0) == doctest::Approx(expected[index]).epsilon(1e-5));
+			}
+			CHECK(setup.GetEditor().GetHistory().GetUndoCount() == 3);
+
+			Json misspelled = setup.Request("entity.update", ParseEntityMethodJson(R"({"entity":"/Board/Piece","components":{"Transform":{"EulerAngle":[0,0,0]}}})"));
+			CHECK(misspelled["error"]["code"] == Json(-32602));
+			CHECK(misspelled["error"]["data"]["issues"][0]["pointer"] == Json("/components/Transform/EulerAngle"));
+			Json readOnly = setup.Request("entity.update", ParseEntityMethodJson(R"({"entity":"/Board/Piece","components":{"Transform":{"WorldScale":[1,1,1]}}})"));
+			CHECK(readOnly["error"]["code"] == Json(-32602));
+			CHECK(readOnly["error"]["data"]["issues"][0]["pointer"] == Json("/components/Transform/WorldScale"));
+			CHECK(readOnly["error"]["data"]["issues"][0]["message"].dump().contains("read-only"));
+			Json outOfRange = setup.Request("entity.update", ParseEntityMethodJson(R"({"entity":"/Board/Piece","components":{"Transform":{"EulerAngles":[0,0]}}})"));
+			CHECK(outOfRange["error"]["code"] == Json(-32602));
+			CHECK(outOfRange["error"]["data"]["issues"][0]["pointer"].dump().contains("/components/Transform/EulerAngles"));
+			CHECK(setup.GetEditor().GetHistory().GetUndoCount() == 3);
+		}
+
+		TEST_CASE("EntityMethods: entity.destroy, entity.duplicate and entity.reparent are one command each")
 		{
 			Test::AutomationFixture setup("EntityStructure");
 			REQUIRE(setup.Call("edit.batch", ParseEntityMethodJson(R"({"label":"Tree","ops":[
@@ -121,10 +171,11 @@ namespace Engine {
 			CHECK(setup.GetEditor().GetScene().GetEntityCount() == 5);
 		}
 
-		TEST_CASE("EntityMethods: dry runs report the would-be result and change nothing" * doctest::skip(true))
+		TEST_CASE("EntityMethods: dry runs report the would-be result and change nothing")
 		{
 			Test::AutomationFixture setup("EntityDryRun");
-			const uint64_t revision = setup.GetEditor().GetScene().GetRevision();
+			// "_meta".revision is the editor's revision (EditorContext::GetRevision, ADR 0008 decision 28).
+			const uint64_t revision = setup.GetEditor().GetRevision();
 			Json response = setup.Request("entity.create", Json{ { "name", "Ghost" }, { "dryRun", true } });
 			REQUIRE(response.contains("result"));
 			CHECK(response["result"]["dryRun"] == Json(true));
@@ -132,7 +183,7 @@ namespace Engine {
 			CHECK(response["result"]["undoIndex"] == Json(0));
 			CHECK(response["result"]["_meta"]["revision"] == Json(revision));
 			CHECK(setup.GetEditor().GetScene().GetEntityCount() == 0);
-			CHECK(setup.GetEditor().GetScene().GetRevision() == revision);
+			CHECK(setup.GetEditor().GetRevision() == revision);
 		}
 	}
 

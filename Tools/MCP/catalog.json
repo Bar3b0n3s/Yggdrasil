@@ -2,5 +2,934 @@
 	"Format": "McpCatalog",
 	"Version": 1,
 	"ProtocolVersion": "1.0",
-	"Tools": []
+	"Tools": [
+		{
+			"name": "component_list",
+			"method": "component.list",
+			"description": "Lists every serializable component type in registry order, with its category, flags, requirements and exclusions.",
+			"inputSchema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "NoParams",
+				"description": "The params of a method that takes none: an empty object.",
+				"type": "object",
+				"properties": {
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false
+			},
+			"mutates": false,
+			"supportsDryRun": false,
+			"timeoutSeconds": 60
+		},
+		{
+			"name": "component_schema",
+			"method": "component.schema",
+			"description": "Describes one component type: every field with its type, unit, range, default and enum values, and the JSON Schema of the component.",
+			"inputSchema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "ComponentSchemaParams",
+				"description": "The params of component.schema.",
+				"type": "object",
+				"properties": {
+					"name": {
+						"description": "The component's registry name, such as \"RigidBody\".",
+						"type": "string"
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"required": ["name"]
+			},
+			"mutates": false,
+			"supportsDryRun": false,
+			"timeoutSeconds": 60
+		},
+		{
+			"name": "docs_get",
+			"method": "docs.get",
+			"description": "Serves the agent documentation: without a topic the list of skills and reference documents, with one its Markdown.",
+			"inputSchema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "DocsGetParams",
+				"description": "The params of docs.get.",
+				"type": "object",
+				"properties": {
+					"topic": {
+						"description": "The topic, such as \"skills/game-building\"; empty for the list of topics.",
+						"type": "string"
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false
+			},
+			"mutates": false,
+			"supportsDryRun": false,
+			"timeoutSeconds": 60
+		},
+		{
+			"name": "edit_batch",
+			"method": "edit.batch",
+			"description": "Runs ops atomically as one undo step: if op k fails, ops 0 to k-1 are rolled back and the error names failedOp k. {\"$ref\": \"<op>.<path>\"} uses an earlier op's result.",
+			"inputSchema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "EditBatchParams",
+				"description": "The params of edit.batch: ops run atomically as one undo step.",
+				"type": "object",
+				"properties": {
+					"label": {
+						"description": "The undo label of the batch.",
+						"type": "string"
+					},
+					"ops": {
+						"description": "The ops, 1 to 1000, run in order.",
+						"type": "array",
+						"items": {
+							"description": "One op of edit.batch: a method and its params.",
+							"type": "object",
+							"properties": {
+								"method": {
+									"description": "The method, such as \"entity.create\"; it must be allowed in batches.",
+									"type": "string"
+								},
+								"params": {
+									"description": "The method's params (an object); {\"$ref\": \"<op index>.<path>\"} stands for a value of an earlier op's result."
+								}
+							},
+							"additionalProperties": false
+						}
+					},
+					"dryRun": {
+						"description": "Validate and return the would-be result without applying anything.",
+						"type": "boolean"
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"required": ["ops"]
+			},
+			"mutates": true,
+			"supportsDryRun": true,
+			"timeoutSeconds": 60
+		},
+		{
+			"name": "edit_redo",
+			"method": "edit.redo",
+			"description": "Redoes the oldest undone commands of the open scene's history.",
+			"inputSchema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "EditRedoParams",
+				"description": "The params of edit.redo.",
+				"type": "object",
+				"properties": {
+					"steps": {
+						"description": "How many commands to redo.",
+						"type": "integer",
+						"minimum": 1,
+						"maximum": 1000
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false
+			},
+			"mutates": true,
+			"supportsDryRun": false,
+			"timeoutSeconds": 60
+		},
+		{
+			"name": "edit_undo",
+			"method": "edit.undo",
+			"description": "Undoes the newest commands of the open scene's history.",
+			"inputSchema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "EditUndoParams",
+				"description": "The params of edit.undo.",
+				"type": "object",
+				"properties": {
+					"steps": {
+						"description": "How many commands to undo.",
+						"type": "integer",
+						"minimum": 1,
+						"maximum": 1000
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false
+			},
+			"mutates": true,
+			"supportsDryRun": false,
+			"timeoutSeconds": 60
+		},
+		{
+			"name": "entity_create",
+			"method": "entity.create",
+			"description": "Creates an entity with a name, parent, position among its siblings, active flag, tags and component values, as one undoable command.",
+			"inputSchema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "EntityCreateParams",
+				"description": "The params of entity.create.",
+				"type": "object",
+				"properties": {
+					"name": {
+						"description": "The new entity's name.",
+						"type": "string"
+					},
+					"parent": {
+						"description": "The parent entity; empty for a root.",
+						"type": "string"
+					},
+					"index": {
+						"description": "The position among its siblings; omitted: last.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"active": {
+						"description": "Whether the entity starts active.",
+						"type": "boolean"
+					},
+					"tags": {
+						"description": "The entity's tags.",
+						"type": "array",
+						"items": {
+							"type": "string"
+						}
+					},
+					"components": {
+						"type": "object",
+						"description": "Field values by registry name; see component_schema."
+					},
+					"target": {
+						"description": "The scene to change; omitted: the edit scene. \"play\" changes the play scene transiently.",
+						"enum": ["Edit", "Play"]
+					},
+					"dryRun": {
+						"description": "Validate and return the would-be result without applying anything.",
+						"type": "boolean"
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"required": ["name"]
+			},
+			"mutates": true,
+			"supportsDryRun": true,
+			"timeoutSeconds": 60
+		},
+		{
+			"name": "entity_destroy",
+			"method": "entity.destroy",
+			"description": "Destroys entities with their subtrees, as one undoable command.",
+			"inputSchema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "EntityDestroyParams",
+				"description": "The params of entity.destroy.",
+				"type": "object",
+				"properties": {
+					"entities": {
+						"description": "The entities to destroy, each with its subtree.",
+						"type": "array",
+						"items": {
+							"type": "string"
+						}
+					},
+					"target": {
+						"description": "The scene to change; omitted: the edit scene. \"play\" changes the play scene transiently.",
+						"enum": ["Edit", "Play"]
+					},
+					"dryRun": {
+						"description": "Validate and return the would-be result without applying anything.",
+						"type": "boolean"
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"required": ["entities"]
+			},
+			"mutates": true,
+			"supportsDryRun": true,
+			"timeoutSeconds": 60
+		},
+		{
+			"name": "entity_duplicate",
+			"method": "entity.duplicate",
+			"description": "Copies entities with their subtrees, with fresh ids and internal references remapped, each right after its original, as one undoable command.",
+			"inputSchema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "EntityDuplicateParams",
+				"description": "The params of entity.duplicate.",
+				"type": "object",
+				"properties": {
+					"entities": {
+						"description": "The entities to copy, each with its subtree.",
+						"type": "array",
+						"items": {
+							"type": "string"
+						}
+					},
+					"target": {
+						"description": "The scene to change; omitted: the edit scene. \"play\" changes the play scene transiently.",
+						"enum": ["Edit", "Play"]
+					},
+					"dryRun": {
+						"description": "Validate and return the would-be result without applying anything.",
+						"type": "boolean"
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"required": ["entities"]
+			},
+			"mutates": true,
+			"supportsDryRun": true,
+			"timeoutSeconds": 60
+		},
+		{
+			"name": "entity_get",
+			"method": "entity.get",
+			"description": "Returns one entity: id, name, path, parent, active state, tags, the JSON of all or selected components, and optionally its children.",
+			"inputSchema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "EntityGetParams",
+				"description": "The params of entity.get.",
+				"type": "object",
+				"properties": {
+					"entity": {
+						"description": "The entity: 16 hex digits, a unique id prefix of at least 6, or a path.",
+						"type": "string"
+					},
+					"components": {
+						"description": "An array of component names, or \"all\" (the default)."
+					},
+					"children": {
+						"description": "Also list the children.",
+						"type": "boolean"
+					},
+					"target": {
+						"description": "The scene to read; omitted: the play scene while playing, else the edit scene.",
+						"enum": ["Edit", "Play"]
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"required": ["entity"]
+			},
+			"mutates": false,
+			"supportsDryRun": false,
+			"timeoutSeconds": 60
+		},
+		{
+			"name": "entity_reparent",
+			"method": "entity.reparent",
+			"description": "Moves an entity under another parent (or to the root list with parent \"\") at a sibling position, keeping its world transform unless keepWorld is false, as one undoable command.",
+			"inputSchema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "EntityReparentParams",
+				"description": "The params of entity.reparent.",
+				"type": "object",
+				"properties": {
+					"entity": {
+						"description": "The entity to move.",
+						"type": "string"
+					},
+					"parent": {
+						"description": "The new parent; empty for the root list.",
+						"type": "string"
+					},
+					"index": {
+						"description": "The position among its new siblings; omitted: last.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"keepWorld": {
+						"description": "Keep the world transform (else the local transform is kept).",
+						"type": "boolean"
+					},
+					"target": {
+						"description": "The scene to change; omitted: the edit scene. \"play\" changes the play scene transiently.",
+						"enum": ["Edit", "Play"]
+					},
+					"dryRun": {
+						"description": "Validate and return the would-be result without applying anything.",
+						"type": "boolean"
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"required": ["entity", "parent"]
+			},
+			"mutates": true,
+			"supportsDryRun": true,
+			"timeoutSeconds": 60
+		},
+		{
+			"name": "entity_update",
+			"method": "entity.update",
+			"description": "Changes only what is given: name, active flag, tags, component fields (merged; missing components are added) and removed components, as one undoable command.",
+			"inputSchema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "EntityUpdateParams",
+				"description": "The params of entity.update: only the given members change.",
+				"type": "object",
+				"properties": {
+					"entity": {
+						"description": "The entity: 16 hex digits, a unique id prefix of at least 6, or a path.",
+						"type": "string"
+					},
+					"name": {
+						"description": "The new name.",
+						"type": "string"
+					},
+					"active": {
+						"description": "The new active flag.",
+						"type": "boolean"
+					},
+					"tags": {
+						"description": "The new tag list (replaces the old one).",
+						"type": "array",
+						"items": {
+							"type": "string"
+						}
+					},
+					"components": {
+						"type": "object",
+						"description": "Field values by registry name; see component_schema."
+					},
+					"removeComponents": {
+						"description": "Components to remove (before the components are written).",
+						"type": "array",
+						"items": {
+							"type": "string"
+						}
+					},
+					"target": {
+						"description": "The scene to change; omitted: the edit scene. \"play\" changes the play scene transiently.",
+						"enum": ["Edit", "Play"]
+					},
+					"dryRun": {
+						"description": "Validate and return the would-be result without applying anything.",
+						"type": "boolean"
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"required": ["entity"]
+			},
+			"mutates": true,
+			"supportsDryRun": true,
+			"timeoutSeconds": 60
+		},
+		{
+			"name": "log_read",
+			"method": "log.read",
+			"description": "Reads the editor's log by cursor so nothing is lost between polls, filtered by level, logger and text. Pass nextCursor to the next read; \"end\" returns only the cursor of the next entry.",
+			"inputSchema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "LogReadParams",
+				"description": "The params of log.read: entries of the log by cursor, filtered.",
+				"type": "object",
+				"properties": {
+					"cursor": {
+						"description": "Where to start: \"\" for the oldest held entry, \"end\" for nothing but the cursor of the next entry, or a previous nextCursor.",
+						"type": "string"
+					},
+					"minLevel": {
+						"description": "Skip entries below this level.",
+						"enum": ["Trace", "Info", "Warn", "Error", "Critical"]
+					},
+					"loggers": {
+						"description": "Only these loggers; empty for every logger.",
+						"type": "array",
+						"items": {
+							"enum": ["Engine", "App", "Script"]
+						}
+					},
+					"contains": {
+						"description": "Only entries whose message contains this text (case-sensitive).",
+						"type": "string"
+					},
+					"limit": {
+						"description": "The most entries returned.",
+						"type": "integer",
+						"minimum": 1,
+						"maximum": 1000
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false
+			},
+			"mutates": false,
+			"supportsDryRun": false,
+			"timeoutSeconds": 60
+		},
+		{
+			"name": "project_create",
+			"method": "project.create",
+			"description": "Creates a project from a template at a native path and opens it, taking its lock. Provenance records the .eproj.",
+			"inputSchema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "ProjectCreateParams",
+				"description": "The params of project.create.",
+				"type": "object",
+				"properties": {
+					"path": {
+						"description": "The new project's directory: native, absolute or relative to the editor's working directory.",
+						"type": "string"
+					},
+					"name": {
+						"description": "The game's name: the .eproj file name and ProjectSettings.Name.",
+						"type": "string"
+					},
+					"template": {
+						"description": "What the project starts with.",
+						"enum": ["Empty"]
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"required": ["path", "name"]
+			},
+			"mutates": true,
+			"supportsDryRun": false,
+			"timeoutSeconds": 60
+		},
+		{
+			"name": "project_get_settings",
+			"method": "project.getSettings",
+			"description": "Returns the project settings (window, simulation, physics, input actions, rendering, scripting, export, testing).",
+			"inputSchema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "NoParams",
+				"description": "The params of a method that takes none: an empty object.",
+				"type": "object",
+				"properties": {
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false
+			},
+			"mutates": false,
+			"supportsDryRun": false,
+			"timeoutSeconds": 60
+		},
+		{
+			"name": "project_open",
+			"method": "project.open",
+			"description": "Opens the project a native path names (its .eproj, or its directory), taking its lock, and reports the .eproj's load warnings.",
+			"inputSchema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "ProjectOpenParams",
+				"description": "The params of project.open.",
+				"type": "object",
+				"properties": {
+					"path": {
+						"description": "The .eproj, or the directory holding exactly one: native, absolute or relative.",
+						"type": "string"
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"required": ["path"]
+			},
+			"mutates": false,
+			"supportsDryRun": false,
+			"timeoutSeconds": 60
+		},
+		{
+			"name": "project_save",
+			"method": "project.save",
+			"description": "Saves the open scene when it has unsaved changes. Settings are saved as they change.",
+			"inputSchema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "NoParams",
+				"description": "The params of a method that takes none: an empty object.",
+				"type": "object",
+				"properties": {
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false
+			},
+			"mutates": true,
+			"supportsDryRun": false,
+			"timeoutSeconds": 60
+		},
+		{
+			"name": "project_set_settings",
+			"method": "project.setSettings",
+			"description": "Applies an RFC 7386 merge patch to the project settings as one undoable command, which writes the .eproj.",
+			"inputSchema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "ProjectSetSettingsParams",
+				"description": "The params of project.setSettings.",
+				"type": "object",
+				"properties": {
+					"patch": {
+						"description": "An RFC 7386 merge patch of the settings: members replace, null resets a field (or deletes an input action), arrays replace."
+					},
+					"dryRun": {
+						"description": "Validate and return the would-be result without applying anything.",
+						"type": "boolean"
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"required": ["patch"]
+			},
+			"mutates": true,
+			"supportsDryRun": true,
+			"timeoutSeconds": 60
+		},
+		{
+			"name": "project_validate",
+			"method": "project.validate",
+			"description": "Validates the project (or the open scene): diagnostics with stable ids, codes, locations and hints. fix: true fixes every auto-fixable one, fix: [ids or codes] only those, as one undoable command.",
+			"inputSchema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "ProjectValidateParams",
+				"description": "The params of project.validate.",
+				"type": "object",
+				"properties": {
+					"scope": {
+						"description": "What to check: the whole project or the open scene.",
+						"enum": ["Project", "Scene"]
+					},
+					"fix": {
+						"description": "true fixes every auto-fixable diagnostic; an array fixes only the listed diagnostic ids and codes; false or absent fixes nothing."
+					},
+					"dryRun": {
+						"description": "Validate and return the would-be result without applying anything.",
+						"type": "boolean"
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false
+			},
+			"mutates": false,
+			"supportsDryRun": true,
+			"timeoutSeconds": 60
+		},
+		{
+			"name": "scene_diff",
+			"method": "scene.diff",
+			"description": "Reports what changed per entity, as RFC 6902 patches, against the saved file or an earlier revision.",
+			"inputSchema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "SceneDiffParams",
+				"description": "The params of scene.diff.",
+				"type": "object",
+				"properties": {
+					"against": {
+						"description": "Compare with the saved file or with an earlier revision.",
+						"enum": ["Saved", "Revision"]
+					},
+					"revision": {
+						"description": "The revision to compare with (against revision).",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"required": ["against"]
+			},
+			"mutates": false,
+			"supportsDryRun": false,
+			"timeoutSeconds": 60
+		},
+		{
+			"name": "scene_new",
+			"method": "scene.new",
+			"description": "Creates a scene file at path and makes it the open scene. With unsaved changes in the open scene it needs save or discardChanges.",
+			"inputSchema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "SceneNewParams",
+				"description": "The params of scene.new.",
+				"type": "object",
+				"properties": {
+					"path": {
+						"description": "The new scene's project-relative path, ending with \".scene\".",
+						"type": "string"
+					},
+					"template": {
+						"description": "What the scene starts with.",
+						"enum": ["Empty"]
+					},
+					"save": {
+						"description": "Save the open scene first when it has unsaved changes.",
+						"type": "boolean"
+					},
+					"discardChanges": {
+						"description": "Drop the open scene's unsaved changes.",
+						"type": "boolean"
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"required": ["path"]
+			},
+			"mutates": true,
+			"supportsDryRun": false,
+			"timeoutSeconds": 60
+		},
+		{
+			"name": "scene_open",
+			"method": "scene.open",
+			"description": "Opens the scene at path (one scene is open at a time). With unsaved changes in the open scene it needs save or discardChanges; reload reads the open scene again; repair loads a damaged file with reported repairs.",
+			"inputSchema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "SceneOpenParams",
+				"description": "The params of scene.open.",
+				"type": "object",
+				"properties": {
+					"path": {
+						"description": "The scene's project-relative path.",
+						"type": "string"
+					},
+					"save": {
+						"description": "Save the open scene first when it has unsaved changes.",
+						"type": "boolean"
+					},
+					"discardChanges": {
+						"description": "Drop the open scene's unsaved changes.",
+						"type": "boolean"
+					},
+					"reload": {
+						"description": "Read the open scene's own file again (a version changed on disk).",
+						"type": "boolean"
+					},
+					"repair": {
+						"description": "Load with structural repairs and report them; the scene is then unsaved.",
+						"type": "boolean"
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"required": ["path"]
+			},
+			"mutates": false,
+			"supportsDryRun": false,
+			"timeoutSeconds": 60
+		},
+		{
+			"name": "scene_query",
+			"method": "scene.query",
+			"description": "Finds entities by name pattern, tag, component and subtree, in canonical order and paginated, optionally with the JSON of selected components.",
+			"inputSchema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "SceneQueryParams",
+				"description": "The params of scene.query.",
+				"type": "object",
+				"properties": {
+					"where": {
+						"description": "What to match.",
+						"type": "object",
+						"properties": {
+							"name": {
+								"description": "The entity name; '*' matches any run of characters and '?' one character.",
+								"type": "string"
+							},
+							"tag": {
+								"description": "A tag the entity has.",
+								"type": "string"
+							},
+							"component": {
+								"description": "A component the entity has.",
+								"type": "string"
+							},
+							"path": {
+								"description": "An entity whose subtree (itself included) the matches are in.",
+								"type": "string"
+							}
+						},
+						"additionalProperties": false
+					},
+					"select": {
+						"description": "The components whose JSON each match carries; \"all\" for every one.",
+						"type": "array",
+						"items": {
+							"type": "string"
+						}
+					},
+					"limit": {
+						"description": "The most matches in one page.",
+						"type": "integer",
+						"minimum": 1,
+						"maximum": 1000
+					},
+					"cursor": {
+						"description": "The nextCursor of the previous page; empty for the first.",
+						"type": "string"
+					},
+					"target": {
+						"description": "The scene to read; omitted: the play scene while playing, else the edit scene.",
+						"enum": ["Edit", "Play"]
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"required": ["where"]
+			},
+			"mutates": false,
+			"supportsDryRun": false,
+			"timeoutSeconds": 60
+		},
+		{
+			"name": "scene_save",
+			"method": "scene.save",
+			"description": "Writes the open scene to its file, or to path (which then becomes its file), and records the write in provenance.",
+			"inputSchema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "SceneSaveParams",
+				"description": "The params of scene.save.",
+				"type": "object",
+				"properties": {
+					"path": {
+						"description": "Where to save, project-relative; empty for the scene's own file.",
+						"type": "string"
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false
+			},
+			"mutates": true,
+			"supportsDryRun": false,
+			"timeoutSeconds": 60
+		},
+		{
+			"name": "scene_tree",
+			"method": "scene.tree",
+			"description": "Shows the scene hierarchy: a compact text outline (names, short ids, components, translations) or a flat JSON list, optionally below one entity and to a depth.",
+			"inputSchema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "SceneTreeParams",
+				"description": "The params of scene.tree.",
+				"type": "object",
+				"properties": {
+					"root": {
+						"description": "The entity whose subtree to show; empty for the whole scene.",
+						"type": "string"
+					},
+					"depth": {
+						"description": "The most levels shown; 0 for every level.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"format": {
+						"description": "Text (an outline) or Json (a flat list).",
+						"enum": ["Text", "Json"]
+					},
+					"target": {
+						"description": "The scene to read; omitted: the play scene while playing, else the edit scene.",
+						"enum": ["Edit", "Play"]
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false
+			},
+			"mutates": false,
+			"supportsDryRun": false,
+			"timeoutSeconds": 60
+		}
+	]
 }

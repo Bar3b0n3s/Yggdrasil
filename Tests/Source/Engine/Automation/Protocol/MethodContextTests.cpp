@@ -79,8 +79,18 @@ namespace Engine {
 		Test::RegisterProtocolTestMethods(methods);
 		methods.Freeze();
 		Test::TestHostState state;
-		Scope<Test::TestHostContext> context = MakeEchoContext(methods, state, Json::object());
-		context->SetErrorData("issues", Json::array());
+		// No doctest assertion here (MakeEchoContext has one): a death test's body runs outside any test case. A missing
+		// method makes the context's constructor assert instead, with a message that does not contain "reserved".
+		Test::TestHostContext context(state, MethodRequest{
+												 .Info = { .Client = 1, .ClientName = "test", .Id = Json(1), .Method = "test.echo", .TranscriptLine = std::nullopt },
+												 .Options = {},
+												 .Method = methods.Find("test.echo"),
+												 .Params = Json::object(),
+												 .Registry = &methods,
+												 .PhaseMarker = nullptr,
+												 .NestingDepth = 0,
+											 });
+		context.SetErrorData("issues", Json::array());
 	}
 
 	TEST_SUITE("Automation")
@@ -111,7 +121,7 @@ namespace Engine {
 			CHECK(nested->IsHostType(TypeKeyOf<SharedTestContext>()));
 		}
 
-		TEST_CASE("MethodContext: accessors report the request" * doctest::skip(true))
+		TEST_CASE("MethodContext: accessors report the request")
 		{
 			Scope<TypeRegistry> types = Test::CreateProtocolTestTypes();
 			MethodRegistry methods(*types);
@@ -129,7 +139,7 @@ namespace Engine {
 			CHECK(context->GetNestingDepth() == 0);
 		}
 
-		TEST_CASE("MethodContext: HasParam tells absent members from given ones" * doctest::skip(true))
+		TEST_CASE("MethodContext: HasParam tells absent members from given ones")
 		{
 			Scope<TypeRegistry> types = Test::CreateProtocolTestTypes();
 			MethodRegistry methods(*types);
@@ -143,7 +153,7 @@ namespace Engine {
 			CHECK_FALSE(context->HasParam("shape"));
 		}
 
-		TEST_CASE("MethodContext: SetErrorData collects members and rejects reserved names" * doctest::skip(true))
+		TEST_CASE("MethodContext: SetErrorData collects members and rejects reserved names")
 		{
 			Scope<TypeRegistry> types = Test::CreateProtocolTestTypes();
 			MethodRegistry methods(*types);
@@ -162,7 +172,7 @@ namespace Engine {
 			ENGINE_CHECK_DEATH("Automation/MethodContextReservedErrorDataAsserts", "reserved");
 		}
 
-		TEST_CASE("MethodContext: SerializeResult writes the registered result struct" * doctest::skip(true))
+		TEST_CASE("MethodContext: SerializeResult writes the registered result struct")
 		{
 			Scope<TypeRegistry> types = Test::CreateProtocolTestTypes();
 			MethodRegistry methods(*types);

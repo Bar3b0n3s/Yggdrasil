@@ -8,7 +8,7 @@ namespace Engine {
 
 	TEST_SUITE("Automation")
 	{
-		TEST_CASE("ResultOffload: file names are the server tag and a zero-padded sequence number" * doctest::skip(true))
+		TEST_CASE("ResultOffload: file names are the server tag and a zero-padded sequence number")
 		{
 			const std::string tag = MakeOffloadServerTag(4242, 1791244800);
 			CHECK(tag == "4242-1791244800");
@@ -19,7 +19,7 @@ namespace Engine {
 			CHECK(DefaultOffloadThresholdBytes == 48 * 1024);
 		}
 
-		TEST_CASE("ResultOffload: two servers never produce the same file name" * doctest::skip(true))
+		TEST_CASE("ResultOffload: two servers never produce the same file name")
 		{
 			// Two editors at once (different processes), and a restarted editor that got its predecessor's process id.
 			const std::string first = MakeOffloadFileName(MakeOffloadServerTag(4242, 1791244800), 1);
@@ -27,7 +27,7 @@ namespace Engine {
 			CHECK(first != MakeOffloadFileName(MakeOffloadServerTag(4242, 1791244801), 1));
 		}
 
-		TEST_CASE("ResultOffload: the summary describes members without their content and stays small" * doctest::skip(true))
+		TEST_CASE("ResultOffload: the summary describes members without their content and stays small")
 		{
 			Json result = Json::object();
 			result["scene"] = Json::object();
@@ -57,7 +57,7 @@ namespace Engine {
 			CHECK(boundedText->size() < 4096);
 		}
 
-		TEST_CASE("ResultOffload: the replacement names the path and is marked truncated" * doctest::skip(true))
+		TEST_CASE("ResultOffload: the replacement names the path and is marked truncated")
 		{
 			Json replacement = MakeOffloadedResult("C:/Projects/Tetris/Library/Automation/Out/00000001.json", Json{ { "a", 1 } });
 			CHECK(replacement["path"] == Json("C:/Projects/Tetris/Library/Automation/Out/00000001.json"));

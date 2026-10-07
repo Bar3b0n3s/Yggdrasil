@@ -43,6 +43,9 @@ namespace Engine {
 		[[nodiscard]] bool ChangesScene() const override;
 		// The sum of the children's sizes.
 		[[nodiscard]] size_t GetMemorySize() const override;
+		// Replays every child in order (`after` true) or in reverse order (`after` false). Errors: a child's, with the context
+		// "replaying step <k> '<label>'"; InvalidState when only some children are applied (after a failed compensating step).
+		[[nodiscard]] Status ReplayOnSceneCopy(Scene& scene, bool after) const override;
 
 		[[nodiscard]] size_t GetChildCount() const { return m_Children.size(); }
 		[[nodiscard]] const Command& GetChild(size_t index) const;

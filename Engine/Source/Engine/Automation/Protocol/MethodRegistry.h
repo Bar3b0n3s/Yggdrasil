@@ -55,8 +55,11 @@
 //      64-bit sequence numbers of their logs, so they never saturate, and also accept "end" (ObserveMethods.h).
 //  10. Component values. std::map<std::string, VariantValue> registered with VariantField and ResolveComponentValue: each
 //      key is a component registry name and its value that component's (partial) JSON, so validation, enum spelling and
-//      "unknown field" hints work inside it. Full schemas reference the component $defs; compact (MCP) schemas show a
-//      free-form object (§13.8 "Compact tool schemas").
+//      "unknown field" hints work inside it. A value may also set the component's writable virtual fields
+//      (Transform.EulerAngles, WorldPosition), each checked against its own field; read-only virtual fields are errors.
+//      The handler applies virtual fields through their setters (ComponentAccess::SetFieldValue). Full schemas reference
+//      the component $defs, which list the writable virtual fields too; compact (MCP) schemas show a free-form object
+//      (§13.8 "Compact tool schemas").
 //  11. Polymorphic members ("fix": true | [ids], "components": [...] | "all") are free-form VariantValue members that the
 //      handler validates, reporting InvalidArgument located at the member's pointer.
 //  12. Results. Canonical ids (16 hex digits) plus readable names and paths (§13.4); every edit-scene mutation reports
@@ -89,10 +92,10 @@ namespace Engine {
 		// Proxied by the MCP bridge as the tool "domain_verb" (§13.8, with the verb converted to snake_case).
 		bool ExposeAsTool = false;
 		// Changes project files or the open scene's content (an undoable edit or a write). Read-only editors and the
-		// deny-mutations switch refuse these with PermissionDenied (Unauthorized) unless the call is a dry run, and only these
-		// accept ifRevision. Methods that change only what the editor shows (scene.open, edit.select) or write only when asked
-		// (session.shutdown {save}, project.validate {fix}) are not flagged: EditorContext refuses their writes in read-only
-		// editors instead.
+		// deny-mutations switch refuse these with PermissionDenied (Unauthorized) unless the call is a dry run. Methods that
+		// change only what the editor shows (scene.open, edit.select) or write only when asked (session.shutdown {save},
+		// project.validate {fix}) are not flagged: EditorContext refuses their writes in read-only editors instead. Every
+		// method accepts ifRevision, whatever this flag.
 		bool Mutates = false;
 		// Accepts "dryRun": true (§13.4). Usually a Mutates method; project.validate supports it without being one (it changes
 		// something only when asked to fix).
@@ -225,8 +228,8 @@ namespace Engine {
 		[[nodiscard]] const TypeRegistry& GetTypes() const { return *m_Types; }
 
 		// Prepares `params` (null reads as {}) for `method`, in this order: params must be an object; the reserved members
-		// are taken out (dryRun must be a boolean and requires SupportsDryRun, ifRevision a non-negative integer and requires
-		// Mutates); every RequiredParams member must be present; every enum spelling recognized by the params struct's schema
+		// are taken out (dryRun must be a boolean and requires SupportsDryRun, ifRevision a non-negative integer, accepted by
+		// every method); every RequiredParams member must be present; every enum spelling recognized by the params struct's schema
 		// (resolved Variant values included) is rewritten to its canonical name. Errors: InvalidArgument (InvalidParams) with
 		// one issue per problem, located at its pointer; Unsupported (dryRun on a method without SupportsDryRun). Pure.
 		[[nodiscard]] Result<PreparedParams> PrepareParams(const MethodDescriptor& method, const Json& params) const;
@@ -250,7 +253,8 @@ namespace Engine {
 		[[nodiscard]] Result<Json> InvokeNested(MethodContext& parent, std::string_view method, const Json& params) const;
 
 		// The JSON Schema (2020-12) of `method`'s params: the params struct's object schema with "required" set from
-		// RequiredParams, the reserved members dryRun (SupportsDryRun only) and ifRevision (Mutates only) added, and, in Full
+		// RequiredParams, the reserved members dryRun (SupportsDryRun only) and ifRevision (every method but the session.hello
+		// handshake) added, and, in Full
 		// style, "$defs" for every referenced struct and component. Compact style replaces component maps and Variant members
 		// with {"type": "object"} or {} plus a description pointing at component_schema, and drops "$defs" (§13.8).
 		[[nodiscard]] Json GetParamsSchema(const MethodDescriptor& method, SchemaStyle style) const;

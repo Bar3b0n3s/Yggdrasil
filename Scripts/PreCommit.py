@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""The commit gate (Docs/Architecture.md §15.9): regenerate, the static checks, Debug build, unit + feature suites.
+"""The commit gate (Docs/Architecture.md §15.9): regenerate, the static checks, Debug build, unit, feature and
+automation suites.
 
 Steps, in order:
   generate  Scripts/Generate.py, so the build sees the current premake scripts
@@ -12,8 +13,11 @@ Steps, in order:
               lint              Scripts/Lint.py, and Lint.py --self-test
               format            Scripts/Format.py --check
   build     Scripts/Build.py --config Debug (skipped when generate failed)
-  tests     Scripts/Test.py --suite unit,feature --config Debug (skipped when the build failed); a suite that does not
-            exist yet is reported as not available by Test.py and does not fail the gate
+  tests     Scripts/Test.py --suite unit,feature,automation --config Debug (skipped when the build failed); a suite
+            that does not exist yet is reported as not available by Test.py and does not fail the gate. The automation
+            suite (Tests/Automation and Tools/MCP/tests against the Debug editor, with the method coverage gate) runs in
+            the MCP bridge's virtual environment, which Scripts/Setup.py creates; without it the step fails with exit
+            code 3
 The static checks run even after an earlier failure, so one run reports every problem. A missing script fails its
 step.
 
@@ -49,7 +53,7 @@ from Lib.report import (
 )
 from Lib.scripts import CONTRACT_FLAG_HELP, mode_note, run_script, run_static_checks, test_mode_arguments
 
-TIMEOUTS = {"generate": 600.0, "build": 7200.0, "tests": 3600.0}
+TIMEOUTS = {"generate": 600.0, "build": 7200.0, "tests": 5400.0}
 
 
 def run_step(name: str, script: str, arguments: list[str], console: Console) -> Step:
@@ -68,7 +72,7 @@ def main(argv: list[str] | None = None) -> int:
     configure_stdio()
     parser = argparse.ArgumentParser(
         description="Commit gate: generate, the static checks (CheckBuildConfig, Lint, Lint self-test, format check), "
-        "Debug build, unit and feature suites (§15.9).",
+        "Debug build, unit, feature and automation suites (§15.9).",
         epilog="Exit codes: 0 every step passed, else the first failing step's code (1 failed, 2 usage, 3 missing "
                "tool or file, 5 timeout).",
     )
@@ -91,7 +95,7 @@ def main(argv: list[str] | None = None) -> int:
     if steps[-1].status != Status.PASSED:
         steps.append(skipped("tests", "the Debug build did not pass", console))
     else:
-        steps.append(run_step("tests", "Test.py", ["--suite", "unit,feature", "--config", "Debug",
+        steps.append(run_step("tests", "Test.py", ["--suite", "unit,feature,automation", "--config", "Debug",
                                                    *test_mode_arguments(arguments.contract)], console))
 
     exit_code = overall_exit_code(steps)

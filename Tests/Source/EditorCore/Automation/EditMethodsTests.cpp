@@ -19,7 +19,7 @@ namespace Engine {
 
 	TEST_SUITE("EditorCore")
 	{
-		TEST_CASE("EditMethods: edit.batch runs atomically with $ref substitution as one undo step" * doctest::skip(true))
+		TEST_CASE("EditMethods: edit.batch runs atomically with $ref substitution as one undo step")
 		{
 			Test::AutomationFixture setup("EditBatch");
 			Result<Json> batch = setup.Call("edit.batch", ParseEditMethodJson(R"({"label":"Scaffold","ops":[
@@ -34,7 +34,7 @@ namespace Engine {
 			CHECK(setup.GetEditor().GetScene().GetEntityCount() == 0);
 		}
 
-		TEST_CASE("EditMethods: a failing op rolls the batch back and reports failedOp" * doctest::skip(true))
+		TEST_CASE("EditMethods: a failing op rolls the batch back and reports failedOp")
 		{
 			Test::AutomationFixture setup("EditBatchRollback");
 			const Result<std::string> before = SceneSerializer::SaveToString(setup.GetEditor().GetScene());
@@ -49,7 +49,7 @@ namespace Engine {
 			CHECK(setup.GetEditor().GetHistory().GetUndoCount() == 0);
 		}
 
-		TEST_CASE("EditMethods: a dry-run batch with an op that cannot dry-run is rejected before anything runs" * doctest::skip(true))
+		TEST_CASE("EditMethods: a dry-run batch with an op that cannot dry-run is rejected before anything runs")
 		{
 			Test::AutomationFixture setup("EditBatchDryRun");
 			Json response = setup.Request("edit.batch", ParseEditMethodJson(R"({"label":"Dry","dryRun":true,"ops":[
@@ -65,7 +65,7 @@ namespace Engine {
 			CHECK(setup.GetEditor().GetScene().GetEntityCount() == 0);
 		}
 
-		TEST_CASE("EditMethods: ops that are not allowed in a batch or carry reserved members are rejected before anything runs" * doctest::skip(true))
+		TEST_CASE("EditMethods: ops that are not allowed in a batch or carry reserved members are rejected before anything runs")
 		{
 			Test::AutomationFixture setup("EditBatchRefused");
 			for (const std::string_view method : { "scene.save", "scene.open", "scene.new", "project.save", "project.upgrade", "session.shutdown", "edit.select" })
@@ -87,7 +87,7 @@ namespace Engine {
 			CHECK(setup.GetEditor().GetScene().GetEntityCount() == 0);
 		}
 
-		TEST_CASE("EditMethods: validator fixes inside a batch join its undo step" * doctest::skip(true))
+		TEST_CASE("EditMethods: validator fixes inside a batch join its undo step")
 		{
 			Test::AutomationFixture setup("EditBatchValidate");
 			Result<Json> batch = setup.Call("edit.batch", ParseEditMethodJson(R"({"label":"Cameras","ops":[
@@ -100,7 +100,7 @@ namespace Engine {
 			CHECK(setup.GetEditor().GetScene().GetEntityCount() == 0);
 		}
 
-		TEST_CASE("EditMethods: an undo whose command fails stops edit.undo and reports the count" * doctest::skip(true))
+		TEST_CASE("EditMethods: an undo whose command fails stops edit.undo and reports the count")
 		{
 			Test::AutomationFixture setup("EditUndoFailure");
 			REQUIRE(setup.Call("entity.create", Json{ { "name", "A" } }).has_value());
@@ -118,18 +118,18 @@ namespace Engine {
 			CHECK(setup.GetEditor().GetHistory().GetUndoCount() == 2); // the settings command stays applied
 		}
 
-		TEST_CASE("EditMethods: batches cannot nest and must hold an op" * doctest::skip(true))
+		TEST_CASE("EditMethods: batches cannot nest and must hold an op")
 		{
 			Test::AutomationFixture setup("EditBatchInvalid");
 			CHECK(setup.Call("edit.batch", ParseEditMethodJson(R"({"label":"Empty","ops":[]})")).error().GetCode() == ErrorCode::InvalidArgument);
 			CHECK(setup.Call("edit.batch", ParseEditMethodJson(R"({"ops":[{"method":"edit.batch","params":{"ops":[]}}]})")).error().GetCode() == ErrorCode::InvalidArgument);
-			CHECK(setup.Call("edit.batch", ParseEditMethodJson(R"({"ops":[{"method":"entity.create","params":{"parent":{"$ref":"3.entity.id"}}}]})"))
+			CHECK(setup.Call("edit.batch", ParseEditMethodJson(R"({"ops":[{"method":"entity.create","params":{"name":"A","parent":{"$ref":"3.entity.id"}}}]})"))
 					  .error()
 					  .GetCode()
 				== ErrorCode::InvalidArgument);
 		}
 
-		TEST_CASE("EditMethods: edit.undo, edit.redo and edit.history move through the history" * doctest::skip(true))
+		TEST_CASE("EditMethods: edit.undo, edit.redo and edit.history move through the history")
 		{
 			Test::AutomationFixture setup("EditHistory");
 			REQUIRE(setup.Call("entity.create", Json{ { "name", "A" } }).has_value());
@@ -153,7 +153,7 @@ namespace Engine {
 			CHECK(setup.Call("edit.undo", Json{ { "steps", 0 } }).error().GetCode() == ErrorCode::InvalidArgument);
 		}
 
-		TEST_CASE("EditMethods: edit.select and edit.getSelection keep the selection by id" * doctest::skip(true))
+		TEST_CASE("EditMethods: edit.select and edit.getSelection keep the selection by id")
 		{
 			Test::AutomationFixture setup("EditSelect");
 			REQUIRE(setup.Call("entity.create", Json{ { "name", "A" } }).has_value());

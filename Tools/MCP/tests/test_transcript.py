@@ -24,7 +24,6 @@ class TranscriptTests(unittest.TestCase):
         self.addCleanup(shutil.rmtree, directory, ignore_errors=True)
         return directory
 
-    @unittest.skip("contract stub: un-skipped by M4 stream D")
     def test_transcript_written_without_env_var(self) -> None:
         directory = self.make_directory()
         environment = {key: value for key, value in os.environ.items()
@@ -47,14 +46,12 @@ class TranscriptTests(unittest.TestCase):
             # A reopened transcript continues the numbering.
             self.assertEqual(transcript.Transcript.open(directory).append_request(3, "scene.tree", {}), 4)
 
-    @unittest.skip("contract stub: un-skipped by M4 stream D")
     def test_environment_variable_redirects_the_transcript(self) -> None:
         directory = self.make_directory()
         redirected = directory / "elsewhere.jsonl"
         with mock.patch.dict(os.environ, {transcript.TRANSCRIPT_ENVIRONMENT_VARIABLE: str(redirected)}):
             self.assertEqual(transcript.transcript_path(directory / "Project"), redirected)
 
-    @unittest.skip("contract stub: un-skipped by M4 stream D")
     def test_hello_params_never_reach_the_transcript(self) -> None:
         self.assertIn("session.hello", transcript.UNRECORDED_METHODS)
         error = {"code": -32001, "message": "no entity", "data": {"errorCode": "NotFound", "detail": "no entity"}}

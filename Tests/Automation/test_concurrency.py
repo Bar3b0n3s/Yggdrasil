@@ -8,7 +8,6 @@ from harness import AutomationTestCase, engine_client
 
 
 class ConcurrencyTests(AutomationTestCase):
-    @unittest.skip("contract stub: un-skipped by M4 stream D")
     def test_if_revision_conflict(self) -> None:
         client, _ = self.open_editor_with_scene()
         revision = client.call("session.info")["_meta"]["revision"]

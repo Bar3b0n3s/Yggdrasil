@@ -7,6 +7,8 @@
 #include "Engine/Automation/Protocol/Watchdog.h"
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Platform/Socket.h"
+#include "Support/ExpectLog.h"
+#include "Support/WaitUntil.h"
 
 #include <atomic>
 #include <thread>
@@ -122,31 +124,49 @@ namespace Engine {
 	}
 
 	// Drains `server` as the main thread does, answering each session.hello, until `count` clients have connected and been
-	// answered (at most a million polls); returns the ids of the clients that connected.
+	// answered (Test::WaitUntil bounds a failure); returns the ids of the clients that connected.
 	static std::vector<ClientId> AcceptClients(ProtocolServer& server, size_t count)
 	{
 		std::vector<ClientId> connected;
 		size_t answered = 0;
-		for (int attempt = 0; attempt < 1000000 && answered < count; ++attempt)
+		const bool accepted = Test::WaitUntil([&server, &connected, &answered, count]()
 		{
+			// Requests first, then events: a hello taken here had its Connected queued before it, so the events taken next
+			// hold it (the I/O thread may authenticate another client between the two calls).
+			const std::vector<InboundRequest> requests = server.TakeRequests();
 			for (const ClientEvent& event : server.TakeClientEvents())
 			{
 				if (event.Kind == ClientEventKind::Connected)
 					connected.push_back(event.Client);
 			}
-			for (const InboundRequest& request : server.TakeRequests())
+			for (const InboundRequest& request : requests)
 			{
 				CHECK(server.Send(request.Client, Json{ { "jsonrpc", "2.0" }, { "id", request.Request.Id }, { "result", Json::object() } }).has_value());
 				answered += request.Request.Method == "session.hello" ? 1 : 0;
 			}
-			std::this_thread::yield();
-		}
+			return answered >= count;
+		});
+		CHECK_MESSAGE(accepted, std::format("{} of {} clients said hello", answered, count));
 		return connected;
+	}
+
+	// True once `server` reports a Disconnected event (Test::WaitUntil bounds a failure).
+	static bool WaitForDisconnect(ProtocolServer& server)
+	{
+		return Test::WaitUntil([&server]()
+		{
+			for (const ClientEvent& event : server.TakeClientEvents())
+			{
+				if (event.Kind == ClientEventKind::Disconnected)
+					return true;
+			}
+			return false;
+		});
 	}
 
 	TEST_SUITE("Automation")
 	{
-		TEST_CASE("ProtocolServer: a client says hello, the main thread answers and the client disconnects" * doctest::skip(true))
+		TEST_CASE("ProtocolServer: a client says hello, the main thread answers and the client disconnects")
 		{
 			const std::string token(AuthTokenLength, 'e');
 			Watchdog watchdog(DefaultWatchdogStallThreshold, std::chrono::steady_clock::now());
@@ -167,9 +187,11 @@ namespace Engine {
 			std::vector<ClientEvent> events;
 			while (!done)
 			{
+				// Requests before events, as AutomationServer::Pump takes them: a request's Connected was queued before it.
+				const std::vector<InboundRequest> requests = server->TakeRequests();
 				for (ClientEvent& event : server->TakeClientEvents())
 					events.push_back(std::move(event));
-				for (const InboundRequest& request : server->TakeRequests())
+				for (const InboundRequest& request : requests)
 				{
 					CHECK(request.Request.Method == "session.hello");
 					CHECK(server->Send(request.Client, Json{ { "jsonrpc", "2.0" }, { "id", request.Request.Id }, { "result", Json{ { "ok", true } } } }).has_value());
@@ -184,17 +206,10 @@ namespace Engine {
 			CHECK(events[0].Name == "engine-tests");
 
 			// The client's socket closed when its thread ended.
-			bool disconnected = false;
-			for (int attempt = 0; attempt < 1000000 && !disconnected; ++attempt)
-			{
-				for (const ClientEvent& event : server->TakeClientEvents())
-					disconnected = disconnected || event.Kind == ClientEventKind::Disconnected;
-				std::this_thread::yield();
-			}
-			CHECK(disconnected);
+			CHECK(WaitForDisconnect(*server));
 		}
 
-		TEST_CASE("ProtocolServer: three bad tokens close the connection" * doctest::skip(true))
+		TEST_CASE("ProtocolServer: three bad tokens close the connection")
 		{
 			const std::string token(AuthTokenLength, 'e');
 			Watchdog watchdog(DefaultWatchdogStallThreshold, std::chrono::steady_clock::now());
@@ -211,7 +226,7 @@ namespace Engine {
 			CHECK(server->TakeRequests().empty());
 		}
 
-		TEST_CASE("ProtocolServer: a request before session.hello is Unauthorized" * doctest::skip(true))
+		TEST_CASE("ProtocolServer: a request before session.hello is Unauthorized")
 		{
 			const std::string token(AuthTokenLength, 'e');
 			Watchdog watchdog(DefaultWatchdogStallThreshold, std::chrono::steady_clock::now());
@@ -224,7 +239,7 @@ namespace Engine {
 			CHECK((*answer)["error"]["code"] == Json(-32008));
 		}
 
-		TEST_CASE("ProtocolServer: an incompatible protocol version is rejected and closes the connection" * doctest::skip(true))
+		TEST_CASE("ProtocolServer: an incompatible protocol version is rejected and closes the connection")
 		{
 			const std::string token(AuthTokenLength, 'e');
 			Watchdog watchdog(DefaultWatchdogStallThreshold, std::chrono::steady_clock::now());
@@ -237,7 +252,7 @@ namespace Engine {
 			CHECK(connection.IsClosedByServer());
 		}
 
-		TEST_CASE("ProtocolServer: an HTTP probe closes the socket without a response" * doctest::skip(true))
+		TEST_CASE("ProtocolServer: an HTTP probe closes the socket without a response")
 		{
 			const std::string token(AuthTokenLength, 'e');
 			Watchdog watchdog(DefaultWatchdogStallThreshold, std::chrono::steady_clock::now());
@@ -247,7 +262,7 @@ namespace Engine {
 			CHECK(connection.IsClosedByServer());
 		}
 
-		TEST_CASE("ProtocolServer: an oversized frame closes the connection" * doctest::skip(true))
+		TEST_CASE("ProtocolServer: an oversized frame closes the connection")
 		{
 			const std::string token(AuthTokenLength, 'e');
 			Watchdog watchdog(DefaultWatchdogStallThreshold, std::chrono::steady_clock::now());
@@ -257,7 +272,101 @@ namespace Engine {
 			CHECK(connection.IsClosedByServer());
 		}
 
-		TEST_CASE("ProtocolServer: a hello during a stall is answered Busy naming the phase and can be retried" * doctest::skip(true))
+		TEST_CASE("ProtocolServer: a frame over the handshake limit before session.hello closes the connection without a response")
+		{
+			// 1 MB is far below MaxFramePayloadBytes but over MaxHandshakePayloadBytes: refused at the header, before the
+			// payload is buffered or parsed, so a process without the token cannot make the server hold large frames.
+			const std::string token(AuthTokenLength, 'e');
+			Watchdog watchdog(DefaultWatchdogStallThreshold, std::chrono::steady_clock::now());
+			Scope<ProtocolServer> server = StartTestServer(token, watchdog);
+			TestConnection connection(server->GetPort());
+			REQUIRE(connection.SendRaw(std::format("Content-Length: {}\r\n\r\n[0,0,0", 1024 * 1024)).has_value());
+			CHECK(connection.IsClosedByServer());
+			CHECK(server->TakeRequests().empty());
+		}
+
+		TEST_CASE("ProtocolServer: an authenticated client may send frames up to the protocol limit")
+		{
+			const std::string token(AuthTokenLength, 'e');
+			Watchdog watchdog(DefaultWatchdogStallThreshold, std::chrono::steady_clock::now());
+			Scope<ProtocolServer> server = StartTestServer(token, watchdog);
+			TestConnection connection(server->GetPort());
+			REQUIRE(connection.SendMessage(MakeHello(token)).has_value());
+			REQUIRE(AcceptClients(*server, 1).size() == 1);
+			REQUIRE(connection.ReceiveMessage().has_value());
+
+			const std::string text(1024 * 1024, 'x');
+			REQUIRE(connection.SendMessage(std::format(R"({{"jsonrpc":"2.0","id":2,"method":"test.echo","params":{{"text":"{}"}}}})", text)).has_value());
+			std::vector<InboundRequest> requests;
+			const bool received = Test::WaitUntil([&server, &requests]()
+			{
+				std::vector<InboundRequest> taken = server->TakeRequests();
+				requests.insert(requests.end(), std::make_move_iterator(taken.begin()), std::make_move_iterator(taken.end()));
+				return !requests.empty();
+			});
+			REQUIRE(received);
+			REQUIRE(requests.size() == 1);
+			CHECK(requests[0].Request.Method == "test.echo");
+			CHECK(JsonReader(requests[0].Request.Params["text"]).ReadString().value_or(std::string()).size() == text.size());
+		}
+
+		TEST_CASE("ProtocolServer: the I/O thread's own answers obey the queue cap")
+		{
+			// During a stall the I/O thread answers every request Busy, echoing its id. A client that keeps sending requests
+			// with large ids and never reads is closed at the cap, like a Send past it.
+			const std::string token(AuthTokenLength, 'e');
+			Watchdog watchdog(DefaultWatchdogStallThreshold, std::chrono::steady_clock::now());
+			const ProtocolServerSpecification specification{ .Port = 0, .Token = token, .MaxQueuedSendBytes = 1024 * 1024 };
+			Scope<ProtocolServer> server = StartTestServer(specification, watchdog);
+			TestConnection connection(server->GetPort());
+			REQUIRE(connection.SendMessage(MakeHello(token)).has_value());
+			REQUIRE(AcceptClients(*server, 1).size() == 1);
+			watchdog.Heartbeat(std::chrono::steady_clock::now() - std::chrono::hours(1));
+
+			const std::string id(60 * 1024, 'i');
+			const std::string request = EncodeFrame(std::format(R"({{"jsonrpc":"2.0","id":"{}","method":"session.info"}})", id));
+			bool disconnected = false;
+			for (int attempt = 0; attempt < 4096 && !disconnected; ++attempt)
+			{
+				if (!connection.SendRaw(request).has_value())
+					break; // the server closed the connection and the peer reset it
+				for (const ClientEvent& event : server->TakeClientEvents())
+					disconnected = disconnected || event.Kind == ClientEventKind::Disconnected;
+			}
+			CHECK((disconnected || WaitForDisconnect(*server)));
+			CHECK(server->TakeRequests().empty()); // every request was answered Busy by the I/O thread
+		}
+
+		TEST_CASE("ProtocolServer: rejected unauthenticated connections are logged at most once per interval")
+		{
+			const std::string token(AuthTokenLength, 'e');
+			Watchdog watchdog(DefaultWatchdogStallThreshold, std::chrono::steady_clock::now());
+			TestTimeSource clock;
+			ProtocolServerSpecification specification{ .Port = 0, .Token = token, .MaxPendingHandshakes = 1 };
+			specification.TimeSource = clock.GetFunction();
+			const Test::ExpectLog first(LogLevel::Warn, "Automation server: refused a connection");
+			const Test::ExpectLog summary(LogLevel::Warn, "Automation server: rejected 3 unauthenticated connections");
+			Scope<ProtocolServer> server = StartTestServer(specification, watchdog);
+			TestConnection idle(server->GetPort());
+			REQUIRE(idle.IsConnected());
+			for (int probe = 0; probe < 4; ++probe)
+			{
+				TestConnection refused(server->GetPort());
+				REQUIRE(refused.IsClosedByServer());
+			}
+			CHECK(first.GetMatchCount() == 1);
+			CHECK(summary.GetMatchCount() == 0);
+
+			// The I/O thread reports the three it held back once the interval has passed.
+			clock.Advance(std::chrono::duration_cast<std::chrono::milliseconds>(ProtocolServer::RejectionReportInterval) + std::chrono::milliseconds(1));
+			CHECK(Test::WaitUntil([&summary]()
+			{
+				return summary.GetMatchCount() == 1;
+			}));
+			CHECK(first.GetMatchCount() == 1);
+		}
+
+		TEST_CASE("ProtocolServer: a hello during a stall is answered Busy naming the phase and can be retried")
 		{
 			// A heartbeat an hour old: the watchdog reports a stall at once, without the test waiting for one.
 			const std::string token(AuthTokenLength, 'e');
@@ -280,7 +389,7 @@ namespace Engine {
 			CHECK(answer->contains("result"));
 		}
 
-		TEST_CASE("ProtocolServer: a fifth authenticated client is refused and closed" * doctest::skip(true))
+		TEST_CASE("ProtocolServer: a fifth authenticated client is refused and closed")
 		{
 			const std::string token(AuthTokenLength, 'e');
 			Watchdog watchdog(DefaultWatchdogStallThreshold, std::chrono::steady_clock::now());
@@ -302,7 +411,7 @@ namespace Engine {
 			CHECK(server->GetClientCount() == MaxAutomationClients);
 		}
 
-		TEST_CASE("ProtocolServer: connections still in the handshake have their own cap and do not take client slots" * doctest::skip(true))
+		TEST_CASE("ProtocolServer: connections still in the handshake have their own cap and do not take client slots")
 		{
 			const std::string token(AuthTokenLength, 'e');
 			Watchdog watchdog(DefaultWatchdogStallThreshold, std::chrono::steady_clock::now());
@@ -320,22 +429,29 @@ namespace Engine {
 			CHECK(AcceptClients(*server, 1).size() == 1);
 		}
 
-		TEST_CASE("ProtocolServer: a connection that does not complete session.hello in time is closed" * doctest::skip(true))
+		TEST_CASE("ProtocolServer: a connection that does not complete session.hello in time is closed")
 		{
 			const std::string token(AuthTokenLength, 'e');
 			Watchdog watchdog(DefaultWatchdogStallThreshold, std::chrono::steady_clock::now());
 			TestTimeSource clock;
-			ProtocolServerSpecification specification{ .Port = 0, .Token = token };
+			ProtocolServerSpecification specification{ .Port = 0, .Token = token, .MaxPendingHandshakes = 1 };
 			specification.TimeSource = clock.GetFunction();
 			Scope<ProtocolServer> server = StartTestServer(specification, watchdog);
 			TestConnection idle(server->GetPort());
 			REQUIRE(idle.IsConnected());
+			// The connect completes before the I/O thread accepts, and the deadline starts at the accept. With room for one
+			// connection in the handshake, a second one is refused at its accept, which the I/O thread reaches only after it
+			// accepted the first (connections are accepted in arrival order): once the probe is closed, the idle connection's
+			// deadline is running.
+			TestConnection probe(server->GetPort());
+			REQUIRE(probe.IsConnected());
+			REQUIRE(probe.IsClosedByServer());
 			clock.Advance(specification.HandshakeTimeout + std::chrono::milliseconds(1));
 			CHECK(idle.IsClosedByServer());
 			CHECK(server->TakeClientEvents().empty()); // unauthenticated connections vanish silently
 		}
 
-		TEST_CASE("ProtocolServer: Send never waits for a client that stops reading and closes it past the queue cap" * doctest::skip(true))
+		TEST_CASE("ProtocolServer: Send never waits for a client that stops reading and closes it past the queue cap")
 		{
 			const std::string token(AuthTokenLength, 'e');
 			Watchdog watchdog(DefaultWatchdogStallThreshold, std::chrono::steady_clock::now());
@@ -354,17 +470,10 @@ namespace Engine {
 				sent = server->Send(clients[0], large);
 			REQUIRE_FALSE(sent.has_value());
 			CHECK(sent.error().GetCode() == ErrorCode::Io);
-			bool disconnected = false;
-			for (int attempt = 0; attempt < 1000000 && !disconnected; ++attempt)
-			{
-				for (const ClientEvent& event : server->TakeClientEvents())
-					disconnected = disconnected || event.Kind == ClientEventKind::Disconnected;
-				std::this_thread::yield();
-			}
-			CHECK(disconnected);
+			CHECK(WaitForDisconnect(*server));
 		}
 
-		TEST_CASE("ProtocolServer: Stop closes every connection and the port" * doctest::skip(true))
+		TEST_CASE("ProtocolServer: Stop closes every connection and the port")
 		{
 			const std::string token(AuthTokenLength, 'e');
 			Watchdog watchdog(DefaultWatchdogStallThreshold, std::chrono::steady_clock::now());

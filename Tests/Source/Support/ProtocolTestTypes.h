@@ -19,8 +19,8 @@
 #include <utility>
 #include <vector>
 
-// A host, methods and reflected structs for testing the protocol module without the editor (Roadmap M4 stream B): what
-// MethodRegistry, MethodContext and Dispatcher tests register and dispatch.
+// A host, methods and reflected structs for testing the protocol module without the editor: what the MethodRegistry,
+// MethodContext and Dispatcher tests register and dispatch.
 
 namespace Engine {
 

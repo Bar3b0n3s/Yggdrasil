@@ -8,7 +8,7 @@ namespace Engine {
 
 	TEST_SUITE("Automation")
 	{
-		TEST_CASE("Watchdog: a heartbeat older than the threshold reports the stall" * doctest::skip(true))
+		TEST_CASE("Watchdog: a heartbeat older than the threshold reports the stall")
 		{
 			// Time is passed in, so the test is exact and reads no clock (CodeStyle §14).
 			const std::chrono::steady_clock::time_point start{};
@@ -22,7 +22,7 @@ namespace Engine {
 			CHECK(watchdog.GetStallThreshold() == std::chrono::milliseconds(5000));
 		}
 
-		TEST_CASE("Watchdog: the phase marker defaults to Idle and is readable from another thread" * doctest::skip(true))
+		TEST_CASE("Watchdog: the phase marker defaults to Idle and is readable from another thread")
 		{
 			Watchdog watchdog(DefaultWatchdogStallThreshold, std::chrono::steady_clock::time_point{});
 			CHECK(watchdog.GetPhase() == "Idle");
@@ -38,7 +38,7 @@ namespace Engine {
 			CHECK(watchdog.GetPhase() == "Idle");
 		}
 
-		TEST_CASE("Watchdog: long phases are cut at a UTF-8 boundary" * doctest::skip(true))
+		TEST_CASE("Watchdog: long phases are cut at a UTF-8 boundary")
 		{
 			Watchdog watchdog(DefaultWatchdogStallThreshold, std::chrono::steady_clock::time_point{});
 			std::string phase(Watchdog::MaxPhaseLength - 1, 'x');
@@ -49,7 +49,7 @@ namespace Engine {
 			CHECK(kept == std::string(Watchdog::MaxPhaseLength - 1, 'x'));
 		}
 
-		TEST_CASE("WatchdogPhaseScope: sets a phase and restores the previous one" * doctest::skip(true))
+		TEST_CASE("WatchdogPhaseScope: sets a phase and restores the previous one")
 		{
 			Watchdog watchdog(DefaultWatchdogStallThreshold, std::chrono::steady_clock::time_point{});
 			watchdog.SetPhase("Pump");

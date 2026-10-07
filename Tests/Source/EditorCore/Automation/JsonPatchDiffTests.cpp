@@ -67,15 +67,37 @@ namespace Engine {
 		return document;
 	}
 
+	// `value` with the members of every object sorted by key, so documents compare equal whatever their member order.
+	static Json SortDiffMembers(const Json& value)
+	{
+		if (value.is_array())
+		{
+			Json array = Json::array();
+			for (const Json& element : value)
+				array.push_back(SortDiffMembers(element));
+			return array;
+		}
+		if (!value.is_object())
+			return value;
+		std::vector<std::string> keys;
+		for (auto member = value.begin(); member != value.end(); ++member)
+			keys.push_back(member.key());
+		std::sort(keys.begin(), keys.end());
+		Json object = Json::object();
+		for (const std::string& key : keys)
+			object[key] = SortDiffMembers(value.find(key).value());
+		return object;
+	}
+
 	TEST_SUITE("EditorCore")
 	{
-		TEST_CASE("JsonPatchDiff: equal documents give an empty patch" * doctest::skip(true))
+		TEST_CASE("JsonPatchDiff: equal documents give an empty patch")
 		{
 			const Json document = ParseDiffJson(R"({"a":[1,2],"b":{"c":null}})");
 			CHECK(DiffJson(document, document) == Json::array());
 		}
 
-		TEST_CASE("JsonPatchDiff: members are added, removed and replaced with escaped pointers" * doctest::skip(true))
+		TEST_CASE("JsonPatchDiff: members are added, removed and replaced with escaped pointers")
 		{
 			const Json from = ParseDiffJson(R"({"Name":"A","Gone":1,"Components":{"Transform":{"Translation":[0,0,0]}},"a/b":1})");
 			const Json to = ParseDiffJson(R"({"Name":"B","Components":{"Transform":{"Translation":[0,2,0]},"Camera":{}},"a/b":2})");
@@ -88,14 +110,14 @@ namespace Engine {
 				{"op":"replace","path":"/a~1b","value":2}])"));
 		}
 
-		TEST_CASE("JsonPatchDiff: arrays of equal length diff by index and others are replaced whole" * doctest::skip(true))
+		TEST_CASE("JsonPatchDiff: arrays of equal length diff by index and others are replaced whole")
 		{
 			CHECK(DiffJson(ParseDiffJson("[1,2,3]"), ParseDiffJson("[1,5,3]")) == ParseDiffJson(R"([{"op":"replace","path":"/1","value":5}])"));
 			CHECK(DiffJson(ParseDiffJson("[1,2]"), ParseDiffJson("[1,2,3]")) == ParseDiffJson(R"([{"op":"replace","path":"","value":[1,2,3]}])"));
 			CHECK(DiffJson(ParseDiffJson(R"({"a":1})"), ParseDiffJson("[1]")) == ParseDiffJson(R"([{"op":"replace","path":"","value":[1]}])"));
 		}
 
-		TEST_CASE("JsonPatchDiff: applying the patch to the source yields the target for random documents" * doctest::skip(true))
+		TEST_CASE("JsonPatchDiff: applying the patch to the source yields the target for random documents")
 		{
 			Random random(6902);
 			const auto makeValue = [&random](int depth, const auto& self) -> Json
@@ -126,8 +148,22 @@ namespace Engine {
 				const Json from = makeValue(0, makeValue);
 				const Json to = makeValue(0, makeValue);
 				INFO(from.dump() << " -> " << to.dump());
-				CHECK(ApplyDiffPatch(from, DiffJson(from, to)) == to);
+				// Member order inside a JSON object carries no meaning (RFC 8259, and RFC 6902 has no reordering operation), while
+				// the engine's Json compares objects in member order: the documents are compared with their members sorted.
+				CHECK(SortDiffMembers(ApplyDiffPatch(from, DiffJson(from, to))) == SortDiffMembers(to));
 			}
+		}
+
+		TEST_CASE("JsonPatchDiff: objects that differ only in member order give an empty patch")
+		{
+			CHECK(DiffJson(ParseDiffJson(R"({"a":1,"b":{"c":2,"d":3}})"), ParseDiffJson(R"({"b":{"d":3,"c":2},"a":1})")) == Json::array());
+		}
+
+		TEST_CASE("JsonPatchDiff: a type change is a replace and a removal inside an array element is located by index")
+		{
+			CHECK(DiffJson(ParseDiffJson(R"({"a":"1"})"), ParseDiffJson(R"({"a":1})")) == ParseDiffJson(R"([{"op":"replace","path":"/a","value":1}])"));
+			CHECK(DiffJson(ParseDiffJson(R"([{"x":1,"y":2}])"), ParseDiffJson(R"([{"x":1}])")) == ParseDiffJson(R"([{"op":"remove","path":"/0/y"}])"));
+			CHECK(DiffJson(ParseDiffJson(R"({"~":1})"), ParseDiffJson(R"({"~":2})")) == ParseDiffJson(R"([{"op":"replace","path":"/~0","value":2}])"));
 		}
 	}
 

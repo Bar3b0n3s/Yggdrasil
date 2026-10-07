@@ -68,7 +68,7 @@ namespace Engine {
 
 	TEST_SUITE("Automation")
 	{
-		TEST_CASE("Dispatcher: requests of one client run in order and every response carries _meta" * doctest::skip(true))
+		TEST_CASE("Dispatcher: requests of one client run in order and every response carries _meta")
 		{
 			DispatcherSetup setup;
 			setup.State.Revision = 7;
@@ -88,7 +88,7 @@ namespace Engine {
 			CHECK(setup.State.Calls == calls);
 		}
 
-		TEST_CASE("Dispatcher: availability is checked before the params are read" * doctest::skip(true))
+		TEST_CASE("Dispatcher: availability is checked before the params are read")
 		{
 			DispatcherSetup setup;
 			setup.State.LauncherState = true;
@@ -102,7 +102,7 @@ namespace Engine {
 			CHECK(messages[1].Message.contains("result"));
 		}
 
-		TEST_CASE("Dispatcher: a pending operation is admitted once and every Poll runs between enter and leave" * doctest::skip(true))
+		TEST_CASE("Dispatcher: a pending operation is admitted once and every Poll runs between enter and leave")
 		{
 			DispatcherSetup setup;
 			setup.Calls->Enqueue(1, Test::MakeTestRequest(1, "test.pend", Json{ { "polls", 2 } }));
@@ -113,7 +113,7 @@ namespace Engine {
 			CHECK(setup.CallsOf("test.pend") == calls);
 		}
 
-		TEST_CASE("Dispatcher: Cancel runs on disconnect even while the host refuses new requests" * doctest::skip(true))
+		TEST_CASE("Dispatcher: Cancel runs on disconnect even while the host refuses new requests")
 		{
 			DispatcherSetup setup;
 			setup.Calls->Enqueue(1, Test::MakeTestRequest(1, "test.pend", Json{ { "polls", 1000 } }));
@@ -130,7 +130,7 @@ namespace Engine {
 			CHECK(std::count(calls.begin(), calls.end(), "admit") == 1);
 		}
 
-		TEST_CASE("Dispatcher: a pending operation is polled once per pump and holds back its client's next request" * doctest::skip(true))
+		TEST_CASE("Dispatcher: a pending operation is polled once per pump and holds back its client's next request")
 		{
 			DispatcherSetup setup;
 			setup.Calls->Enqueue(1, Test::MakeTestRequest(1, "test.pend", Json{ { "polls", 3 } }));
@@ -152,7 +152,7 @@ namespace Engine {
 			CHECK((third.size() == 2 || rest.size() == 1));
 		}
 
-		TEST_CASE("Dispatcher: removing a client cancels its pending operations without a response" * doctest::skip(true))
+		TEST_CASE("Dispatcher: removing a client cancels its pending operations without a response")
 		{
 			DispatcherSetup setup;
 			setup.Calls->Enqueue(1, Test::MakeTestRequest(1, "test.pend", Json{ { "polls", 1000 } }));
@@ -168,7 +168,7 @@ namespace Engine {
 			CHECK(setup.PumpAll().empty());
 		}
 
-		TEST_CASE("Dispatcher: an exception escaping a handler asserts in Debug builds and is Internal otherwise" * doctest::skip(true))
+		TEST_CASE("Dispatcher: an exception escaping a handler asserts in Debug builds and is Internal otherwise")
 		{
 #if defined(ENGINE_DEBUG)
 			ENGINE_CHECK_DEATH("Automation/DispatcherHandlerExceptionAssertsInDebug", "test.throw");
@@ -183,7 +183,7 @@ namespace Engine {
 #endif
 		}
 
-		TEST_CASE("Dispatcher: unknown methods, invalid params and host refusals are error responses" * doctest::skip(true))
+		TEST_CASE("Dispatcher: unknown methods, invalid params and host refusals are error responses")
 		{
 			DispatcherSetup setup;
 			setup.Calls->Enqueue(1, Test::MakeTestRequest(1, "test.ecko", Json::object()));
@@ -210,7 +210,7 @@ namespace Engine {
 			CHECK(setup.CallsOf("test.read") == calls);
 		}
 
-		TEST_CASE("Dispatcher: results over the threshold are offloaded through the host" * doctest::skip(true))
+		TEST_CASE("Dispatcher: results over the threshold are offloaded through the host")
 		{
 			DispatcherSetup setup(DispatcherSpecification{ .OffloadThresholdBytes = 1024 });
 			setup.Calls->Enqueue(1, Test::MakeTestRequest(1, "test.large", Json{ { "count", 100 } }));
@@ -227,7 +227,7 @@ namespace Engine {
 			CHECK_FALSE(messages[1].Message["result"].contains("truncated"));
 		}
 
-		TEST_CASE("Dispatcher: a client added without offloading keeps large results inline" * doctest::skip(true))
+		TEST_CASE("Dispatcher: a client added without offloading keeps large results inline")
 		{
 			DispatcherSetup setup(DispatcherSpecification{ .OffloadThresholdBytes = 1024 });
 			setup.Calls->AddClient(3, "batch", false);
@@ -239,7 +239,7 @@ namespace Engine {
 			CHECK(setup.State.Offloaded.empty());
 		}
 
-		TEST_CASE("Dispatcher: dry runs carry dryRun and notifications get no response" * doctest::skip(true))
+		TEST_CASE("Dispatcher: dry runs carry dryRun and notifications get no response")
 		{
 			DispatcherSetup setup;
 			setup.Calls->Enqueue(1, Test::MakeTestRequest(1, "test.echo", Json{ { "text", "a" }, { "dryRun", true } }));

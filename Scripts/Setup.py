@@ -11,8 +11,9 @@ clang-format 22.x is reported as a warning when missing (only Scripts/Format.py 
 Installs:
   premake  the pinned premake 5.0.0 release for the host into Vendor/premake/bin/ when it is absent, verified with
            SHA-256 (archive and executable). An existing binary must match the pinned digest.
-  MCP      once Tools/MCP/requirements.lock exists (milestone M4): Tools/MCP/.venv from the hash-locked requirements
-           and .mcp.json with the venv interpreter's absolute path (§13.8). Until then the step reports "skipped".
+  MCP      Tools/MCP/.venv from the hash-locked Tools/MCP/requirements.lock (wheels only), recreated whenever the lock
+           or the Python version changes, and the gitignored .mcp.json with the venv interpreter's absolute path
+           (§13.8), so Claude Code starts the bridge with no python on PATH.
 
 Exit codes: 0 every required check passed, 2 usage error, 3 a required check or installation failed (a tool or file
 is missing, has the wrong version or could not be installed; Architecture §4.1 "initialization failed").
@@ -326,7 +327,9 @@ def mcp_configuration_text() -> str:
         "mcpServers": {
             MCP_SERVER_NAME: {
                 "type": "stdio",
-                "command": venv_python().resolve().as_posix(),
+                # Absolute but not resolved: on POSIX the venv's bin/python is a symbolic link to the base
+                # interpreter, and only the link's own path starts Python inside the virtual environment.
+                "command": venv_python().absolute().as_posix(),
                 "args": [MCP_RUNNER.resolve().as_posix()],
             }
         }
@@ -336,18 +339,11 @@ def mcp_configuration_text() -> str:
 
 def setup_mcp(install: bool, console: Console) -> Step:
     started = time.monotonic()
-    if not MCP_LOCK.is_file():
-        step = Step(
-            "mcp-venv",
-            Status.SKIPPED,
-            f"Tools/MCP not present yet: {paths.display_path(MCP_LOCK)} does not exist (the MCP bridge lands in M4)",
-        )
-        console.result(step)
-        return step
 
     def check() -> str:
-        if not MCP_RUNNER.is_file():
-            raise CheckFailed(f"{paths.display_path(MCP_LOCK)} exists but {paths.display_path(MCP_RUNNER)} is missing")
+        for required in (MCP_LOCK, MCP_RUNNER):
+            if not required.is_file():
+                raise CheckFailed(f"{paths.display_path(required)} is missing (the MCP bridge, Architecture §13.8)")
         lock_digest = hashlib.sha256(MCP_LOCK.read_bytes()).hexdigest()
         marker = f"{lock_digest} python-{platform.python_version()}\n"
         interpreter = venv_python()
@@ -360,16 +356,25 @@ def setup_mcp(install: bool, console: Console) -> Step:
             raise CheckFailed(f"{paths.display_path(MCP_VENV)} or {paths.display_path(MCP_CONFIG)} is missing or out "
                               f"of date (--no-install given)")
         if not current:
+            # A changed lock or Python version gets a fresh environment, so no package of an older lock stays behind.
+            if MCP_VENV.exists():
+                console.print(f"  mcp: removing the out-of-date {paths.display_path(MCP_VENV)}")
+                try:
+                    shutil.rmtree(MCP_VENV)
+                except OSError as error:
+                    raise CheckFailed(f"cannot remove the out-of-date {paths.display_path(MCP_VENV)} (is the MCP "
+                                      f"bridge still running?): {error}") from None
             if not interpreter.is_file():
                 console.print(f"  mcp: creating {paths.display_path(MCP_VENV)}")
                 created = run_streamed([sys.executable, "-m", "venv", str(MCP_VENV)], echo=console.stream,
                                        timeout=600, env=child_environment())
                 if not created.succeeded or not interpreter.is_file():
                     raise CheckFailed(f"creating the virtual environment failed ({created.describe_exit()})")
-            console.print(f"  mcp: installing {paths.display_path(MCP_LOCK)} (hash-checked)")
+            console.print(f"  mcp: installing {paths.display_path(MCP_LOCK)} (hash-checked wheels)")
+            # Wheels only: building an sdist would run code and fetch build dependencies that no hash covers.
             installed = run_streamed(
                 [str(interpreter), "-m", "pip", "install", "--disable-pip-version-check", "--no-input",
-                 "--require-hashes", "--requirement", str(MCP_LOCK)],
+                 "--require-hashes", "--only-binary=:all:", "--requirement", str(MCP_LOCK)],
                 echo=console.stream,
                 timeout=PIP_TIMEOUT_SECONDS,
                 env=child_environment(),

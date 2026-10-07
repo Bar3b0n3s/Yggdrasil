@@ -34,6 +34,13 @@ namespace Engine {
 		std::string StartedAt{}; // FormatUtcTimestamp
 	};
 
+	// The finest unit SessionFile::FormatUtcTimestamp writes.
+	enum class TimestampPrecision : uint8_t
+	{
+		Seconds,     // "2026-10-06T17:48:24Z" (session files)
+		Milliseconds // "2026-10-06T17:48:24.512Z" (transcript lines)
+	};
+
 	class SessionFile
 	{
 	public:
@@ -57,9 +64,11 @@ namespace Engine {
 		// Deletes the file of `pid`; a missing file is success. Errors: Io.
 		[[nodiscard]] static Status Remove(const std::filesystem::path& directory, uint32_t pid);
 
-		// "YYYY-MM-DDTHH:MM:SSZ" (UTC, seconds) for `time`, computed from the seconds since the epoch with the civil-date
-		// algorithm, not with <chrono> calendar or time-zone support (missing from Apple's libc++).
-		[[nodiscard]] static std::string FormatUtcTimestamp(std::chrono::system_clock::time_point time);
+		// "YYYY-MM-DDTHH:MM:SSZ" (UTC, seconds), or "YYYY-MM-DDTHH:MM:SS.mmmZ" with Milliseconds, for `time` (rounded down),
+		// computed from the time since the epoch with the civil-date algorithm, not with <chrono> calendar or time-zone
+		// support (missing from Apple's libc++). The one UTC ISO 8601 formatter of the engine and the editor.
+		[[nodiscard]] static std::string FormatUtcTimestamp(std::chrono::system_clock::time_point time,
+			TimestampPrecision precision = TimestampPrecision::Seconds);
 	};
 
 }

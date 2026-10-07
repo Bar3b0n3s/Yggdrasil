@@ -46,7 +46,7 @@ namespace Engine {
 
 	TEST_SUITE("Automation")
 	{
-		TEST_CASE("Framing: random byte streams never crash the decoder" * doctest::skip(true))
+		TEST_CASE("Framing: random byte streams never crash the decoder")
 		{
 			// Seeded random streams, and seeded mutations of valid frames (flipped, dropped and inserted bytes), fed in random
 			// chunk sizes. The oracle: the decoder never crashes or asserts, every result is a payload, "need more" or a
@@ -106,7 +106,7 @@ namespace Engine {
 			}
 		}
 
-		TEST_CASE("Framing: a frame split at every byte decodes to its payload" * doctest::skip(true))
+		TEST_CASE("Framing: a frame split at every byte decodes to its payload")
 		{
 			const std::string payload = R"({"jsonrpc":"2.0","id":7,"method":"entity.get","params":{"entity":"/Game"}})";
 			const std::array<size_t, 1> oneByte = { 1 };
@@ -116,7 +116,7 @@ namespace Engine {
 			CHECK(payloads[0] == payload);
 		}
 
-		TEST_CASE("Framing: several frames in one chunk decode in order" * doctest::skip(true))
+		TEST_CASE("Framing: several frames in one chunk decode in order")
 		{
 			const std::string stream = EncodeFrame("{\"a\":1}") + EncodeFrame("[]") + EncodeFrame("{\"b\":\"x\"}");
 			const std::array<size_t, 1> whole = { stream.size() };
@@ -125,7 +125,7 @@ namespace Engine {
 			CHECK(payloads == std::vector<std::string>{ "{\"a\":1}", "[]", "{\"b\":\"x\"}" });
 		}
 
-		TEST_CASE("Framing: an HTTP request line fails at once with NotContentLength" * doctest::skip(true))
+		TEST_CASE("Framing: an HTTP request line fails at once with NotContentLength")
 		{
 			// The decoder needs no line end to recognize the probe: "GE" can no longer start "Content-Length:".
 			FrameDecoder decoder;
@@ -138,7 +138,7 @@ namespace Engine {
 			CHECK(DecodeInChunks("content-length: 2\r\n\r\n{}", whole).second == std::nullopt);
 		}
 
-		TEST_CASE("Framing: a Content-Length over 64 MB fails as Oversized before the payload arrives" * doctest::skip(true))
+		TEST_CASE("Framing: a Content-Length over 64 MB fails as Oversized before the payload arrives")
 		{
 			FrameDecoder decoder;
 			decoder.Append(AsFrameBytes(std::format("Content-Length: {}\r\n\r\n", MaxFramePayloadBytes + 1)));
@@ -152,7 +152,7 @@ namespace Engine {
 			CHECK_FALSE(waiting->has_value());
 		}
 
-		TEST_CASE("Framing: invalid UTF-8 and nesting over 128 fail" * doctest::skip(true))
+		TEST_CASE("Framing: invalid UTF-8 and nesting over 128 fail")
 		{
 			const std::array<size_t, 1> whole = { 1u << 20 };
 			CHECK(DecodeInChunks(EncodeFrame("{\"a\":\"\xC3\x28\"}"), whole).second == FrameErrorKind::InvalidUtf8);
@@ -166,7 +166,7 @@ namespace Engine {
 			CHECK(DecodeInChunks(EncodeFrame(inString), whole).second == std::nullopt);
 		}
 
-		TEST_CASE("Framing: Content-Type after Content-Length is accepted and other headers are malformed" * doctest::skip(true))
+		TEST_CASE("Framing: Content-Type after Content-Length is accepted and other headers are malformed")
 		{
 			const std::array<size_t, 1> whole = { 256 };
 			const auto [payloads, failure] = DecodeInChunks("Content-Length: 2\r\nContent-Type: application/vscode-jsonrpc; charset=utf-8\r\n\r\n{}", whole);
@@ -179,13 +179,13 @@ namespace Engine {
 			CHECK(DecodeInChunks("Content-Length: 2\n\n{}", whole).second == FrameErrorKind::MalformedHeader);
 		}
 
-		TEST_CASE("Framing: EncodeFrame writes the header the decoder reads" * doctest::skip(true))
+		TEST_CASE("Framing: EncodeFrame writes the header the decoder reads")
 		{
 			CHECK(EncodeFrame("{}") == "Content-Length: 2\r\n\r\n{}");
 			CHECK(EncodeFrame("\xC3\xA9") == "Content-Length: 2\r\n\r\n\xC3\xA9"); // bytes, not characters
 		}
 
-		TEST_CASE("Framing: FrameErrorKindToString names every kind" * doctest::skip(true))
+		TEST_CASE("Framing: FrameErrorKindToString names every kind")
 		{
 			CHECK(FrameErrorKindToString(FrameErrorKind::NotContentLength) == "NotContentLength");
 			CHECK(FrameErrorKindToString(FrameErrorKind::MalformedHeader) == "MalformedHeader");

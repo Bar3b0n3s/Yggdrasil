@@ -8,7 +8,6 @@ from harness import AutomationTestCase
 
 
 class ValidateTests(AutomationTestCase):
-    @unittest.skip("contract stub: un-skipped by M4 stream D")
     def test_validate_fix_selected_ids_only(self) -> None:
         client, _ = self.open_editor_with_scene()
         client.call("project.setSettings", {"patch": {"Export": {"BuildScenes": ["Assets/Scenes/Main.scene",

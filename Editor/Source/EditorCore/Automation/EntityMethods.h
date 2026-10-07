@@ -30,7 +30,7 @@ namespace Engine {
 	// (missing fields keep their defaults; Transform is always present and may be given). All or nothing.
 	struct EntityCreateParams
 	{
-		std::string Name = "Entity";
+		std::string Name{}; // required (§13.5)
 		std::string Parent{};
 		uint32_t Index = 0; // only when given (MethodContext::HasParam)
 		bool Active = true;

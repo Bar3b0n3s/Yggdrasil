@@ -52,7 +52,7 @@ namespace Engine {
 
 		// The "_meta" object for `client` (asserted known) from `state` and the log entries since its cursor:
 		//   newErrors       entries at Error or Critical of the Engine and App loggers
-		//   newWarnings     entries at Warn of the Engine and App loggers
+		//   newWarnings     entries at Warn of every logger (Engine, App and Script)
 		//   newScriptErrors entries at Error or Critical of the Script logger
 		//   logCursor       the log's next sequence number as a decimal string: the "cursor" log.read continues from
 		//   firstNew        the first MaxFirstNewDiagnostics of those entries (Warn and above, every logger), each

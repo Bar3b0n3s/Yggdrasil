@@ -48,7 +48,7 @@ namespace Engine {
 			CHECK(request.Method == "test.read");
 		}
 
-		TEST_CASE("ProtocolTestTypes: the test methods register with their flags" * doctest::skip(true))
+		TEST_CASE("ProtocolTestTypes: the test methods register with their flags")
 		{
 			const Scope<TypeRegistry> types = Test::CreateProtocolTestTypes();
 			MethodRegistry methods(*types);

@@ -58,7 +58,7 @@ namespace Engine {
 
 	TEST_SUITE("Automation")
 	{
-		TEST_CASE("MethodRegistry: registered methods are found by name and listed in name order" * doctest::skip(true))
+		TEST_CASE("MethodRegistry: registered methods are found by name and listed in name order")
 		{
 			RegistrySetup setup;
 			const MethodDescriptor* echo = setup.Methods->Find("test.echo");
@@ -81,7 +81,7 @@ namespace Engine {
 			CHECK(suggestions.front() == "test.echo");
 		}
 
-		TEST_CASE("MethodRegistry: PrepareParams takes out reserved members and checks required ones" * doctest::skip(true))
+		TEST_CASE("MethodRegistry: PrepareParams takes out reserved members and checks required ones")
 		{
 			RegistrySetup setup;
 			const MethodDescriptor& echo = RequireMethod(*setup.Methods, "test.echo");
@@ -103,20 +103,24 @@ namespace Engine {
 			CHECK(setup.Methods->PrepareParams(echo, ParseRegistryJson(R"({"text":"a","dryRun":"yes"})")).error().GetCode() == ErrorCode::InvalidArgument);
 		}
 
-		TEST_CASE("MethodRegistry: dryRun on a method without supportsDryRun is Unsupported and ifRevision needs mutates" * doctest::skip(true))
+		TEST_CASE("MethodRegistry: dryRun on a method without supportsDryRun is Unsupported and every method accepts ifRevision")
 		{
 			RegistrySetup setup;
 			const MethodDescriptor& read = RequireMethod(*setup.Methods, "test.read");
 			const Result<PreparedParams> dryRun = setup.Methods->PrepareParams(read, ParseRegistryJson(R"({"dryRun":true})"));
 			REQUIRE_FALSE(dryRun.has_value());
 			CHECK(dryRun.error().GetCode() == ErrorCode::Unsupported);
+			// A read takes ifRevision as a precondition (§13.4), like a call that changes something only when asked.
 			const Result<PreparedParams> revision = setup.Methods->PrepareParams(read, ParseRegistryJson(R"({"ifRevision":3})"));
-			REQUIRE_FALSE(revision.has_value());
-			CHECK(revision.error().GetCode() == ErrorCode::InvalidArgument);
+			REQUIRE_MESSAGE(revision.has_value(), revision.error().ToString());
+			CHECK(revision->Options.IfRevision == std::optional<uint64_t>(3));
+			const Result<PreparedParams> negative = setup.Methods->PrepareParams(read, ParseRegistryJson(R"({"ifRevision":-1})"));
+			REQUIRE_FALSE(negative.has_value());
+			CHECK(negative.error().GetCode() == ErrorCode::InvalidArgument);
 			CHECK(setup.Methods->PrepareParams(read, ParseRegistryJson(R"({"dryRun":false})")).has_value());
 		}
 
-		TEST_CASE("MethodRegistry: enum values are parsed case-insensitively and echoed canonically" * doctest::skip(true))
+		TEST_CASE("MethodRegistry: enum values are parsed case-insensitively and echoed canonically")
 		{
 			RegistrySetup setup;
 			const MethodDescriptor& echo = RequireMethod(*setup.Methods, "test.echo");
@@ -128,7 +132,7 @@ namespace Engine {
 			CHECK(params["components"]["RigidBody"]["Type"] == Json("Kinematic"));
 		}
 
-		TEST_CASE("MethodRegistry: unknown params and component fields are InvalidParams with did-you-mean hints" * doctest::skip(true))
+		TEST_CASE("MethodRegistry: unknown params and component fields are InvalidParams with did-you-mean hints")
 		{
 			RegistrySetup setup;
 			Test::TestHostState state;
@@ -168,7 +172,7 @@ namespace Engine {
 			CHECK(state.Calls.empty()); // the handler never ran
 		}
 
-		TEST_CASE("MethodRegistry: Invoke runs the handler with the parsed params and serializes its result" * doctest::skip(true))
+		TEST_CASE("MethodRegistry: Invoke runs the handler with the parsed params and serializes its result")
 		{
 			RegistrySetup setup;
 			Test::TestHostState state;
@@ -193,7 +197,7 @@ namespace Engine {
 			CHECK(state.Calls == std::vector<std::string>{ "handler test.echo" });
 		}
 
-		TEST_CASE("MethodRegistry: params schemas mark required members and compact schemas drop component definitions" * doctest::skip(true))
+		TEST_CASE("MethodRegistry: params schemas mark required members and compact schemas drop component definitions")
 		{
 			RegistrySetup setup;
 			const MethodDescriptor& echo = RequireMethod(*setup.Methods, "test.echo");
@@ -213,10 +217,10 @@ namespace Engine {
 			const MethodDescriptor& read = RequireMethod(*setup.Methods, "test.read");
 			Json readSchema = setup.Methods->GetParamsSchema(read, SchemaStyle::Full);
 			CHECK_FALSE(readSchema["properties"].contains("dryRun"));
-			CHECK_FALSE(readSchema["properties"].contains("ifRevision"));
+			CHECK(readSchema["properties"].contains("ifRevision"));
 		}
 
-		TEST_CASE("MethodRegistry: Describe and the catalogues report the metadata" * doctest::skip(true))
+		TEST_CASE("MethodRegistry: Describe and the catalogues report the metadata")
 		{
 			RegistrySetup setup;
 			Json description = setup.Methods->Describe(RequireMethod(*setup.Methods, "test.echo"));
@@ -241,7 +245,7 @@ namespace Engine {
 			CHECK_FALSE(tools["Tools"][0]["inputSchema"].contains("$defs"));
 		}
 
-		TEST_CASE("MethodRegistry: InvokeNested runs an op allowed in batches and rejects every other method before it runs" * doctest::skip(true))
+		TEST_CASE("MethodRegistry: InvokeNested runs an op allowed in batches and rejects every other method before it runs")
 		{
 			RegistrySetup setup;
 			Test::TestHostState state;
@@ -256,6 +260,17 @@ namespace Engine {
 			REQUIRE_FALSE(unknown.has_value());
 			CHECK(unknown.error().GetCode() == ErrorCode::NotFound);
 
+			// An op's own errors are located relative to the op: its params are below "/params".
+			const Result<Json> misspelled = setup.Methods->InvokeNested(*batch, "test.echo", Json{ { "text", "a" }, { "cuont", 1 } });
+			REQUIRE_FALSE(misspelled.has_value());
+			CHECK(misspelled.error().GetCode() == ErrorCode::InvalidArgument);
+			REQUIRE(misspelled.error().GetIssues().size() == 1);
+			CHECK(misspelled.error().GetIssues()[0].JsonPointer == "/params/cuont");
+			const Result<Json> failed = setup.Methods->InvokeNested(*batch, "test.fail", Json::object());
+			REQUIRE_FALSE(failed.has_value());
+			CHECK(failed.error().GetCode() == ErrorCode::NotFound);
+			CHECK(failed.error().GetMessageText() == "nothing here");
+
 			state.Calls.clear();
 			for (const std::string_view method : { "test.pend", "test.large", "test.throw" }) // pending, or not AllowedInBatch
 			{
@@ -266,7 +281,7 @@ namespace Engine {
 			CHECK(state.Calls.empty()); // nothing ran
 		}
 
-		TEST_CASE("MethodRegistry: InvokeNested rejects reserved members in op params and applies the batch's options" * doctest::skip(true))
+		TEST_CASE("MethodRegistry: InvokeNested rejects reserved members in op params and applies the batch's options")
 		{
 			RegistrySetup setup;
 			Test::TestHostState state;
@@ -293,7 +308,7 @@ namespace Engine {
 			CHECK(setup.Methods->InvokeNested(*dryBatch, "test.echo", Json{ { "text", "b" } }).has_value());
 		}
 
-		TEST_CASE("MethodNameToToolName: converts the domain dot and camelCase verbs to snake_case" * doctest::skip(true))
+		TEST_CASE("MethodNameToToolName: converts the domain dot and camelCase verbs to snake_case")
 		{
 			CHECK(MethodNameToToolName("entity.create") == "entity_create");
 			CHECK(MethodNameToToolName("project.getSettings") == "project_get_settings");
@@ -301,7 +316,7 @@ namespace Engine {
 			CHECK(MethodNameToToolName("edit.getSelection") == "edit_get_selection");
 		}
 
-		TEST_CASE("ResolveComponentValue: resolves component names and suggests close ones" * doctest::skip(true))
+		TEST_CASE("ResolveComponentValue: resolves component names and suggests close ones")
 		{
 			RegistrySetup setup;
 			const ResolveContext known{ .Registry = setup.Types.get(), .Owner = nullptr, .OwnerType = nullptr, .OwnerJson = nullptr, .Key = "Transform", .Schemas = nullptr };

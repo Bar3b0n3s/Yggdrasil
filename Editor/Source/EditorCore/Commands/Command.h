@@ -13,6 +13,7 @@
 namespace Engine {
 
 	class EditorContext;
+	class Scene;
 
 	// Who issued a command (§12.3). The undo history shows Agent commands with the prefix "[agent] " (§12.2, §13.4).
 	enum class CommandOrigin : uint8_t
@@ -78,6 +79,19 @@ namespace Engine {
 
 		// An estimate of the bytes the command holds (snapshots, settings JSON), for the history's 256 MB bound (§12.3).
 		[[nodiscard]] virtual size_t GetMemorySize() const = 0;
+
+		// Brings `scene`, a scratch copy of the open scene, from the state before this command to the state after it (`after`
+		// true) or back (`after` false), without touching the editor or this command. scene.diff {against: "revision"}
+		// rebuilds an earlier revision this way, replaying held history entries on a copy (ADR 0008 decision 29). `scene`
+		// must be in the opposite state. A command that does not change the scene (ChangesScene false) changes nothing, which
+		// is the default; a scene-changing command that does not override it fails with Unsupported. Errors: Validation when
+		// a snapshot does not apply (the copy is unusable then), Unsupported as above.
+		[[nodiscard]] virtual Status ReplayOnSceneCopy(Scene& /*scene*/, bool /*after*/) const
+		{
+			if (!ChangesScene())
+				return {};
+			return MakeError(ErrorCode::Unsupported, "'{}' cannot be replayed on a scene copy", GetLabel());
+		}
 
 		[[nodiscard]] CommandOrigin GetOrigin() const { return m_Origin; }
 		// Set by EditorContext::Execute from the request being served (Agent during automation requests).

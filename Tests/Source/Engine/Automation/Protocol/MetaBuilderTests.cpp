@@ -13,7 +13,7 @@ namespace Engine {
 
 	TEST_SUITE("Automation")
 	{
-		TEST_CASE("MetaBuilder: counts the entries logged since the client's previous response" * doctest::skip(true))
+		TEST_CASE("MetaBuilder: counts the entries logged since the client's previous response")
 		{
 			// A ring of the test's own, so nothing else that logs can change the counts.
 			RingBufferSink log(64);
@@ -40,7 +40,20 @@ namespace Engine {
 			CHECK(quiet["diagnostics"]["firstNew"] == Json::array());
 		}
 
-		TEST_CASE("MetaBuilder: firstNew quotes at most three entries" * doctest::skip(true))
+		TEST_CASE("MetaBuilder: a Script warning counts as a new warning, not as a script error")
+		{
+			RingBufferSink log(64);
+			MetaBuilder builder(log);
+			builder.AddClient(1);
+			AppendMetaEntry(log, LogLevel::Warn, LogChannel::Script, "'speed' is unused");
+			Json meta = builder.Build(1, MetaState{});
+			CHECK(meta["diagnostics"]["newWarnings"] == Json(1));
+			CHECK(meta["diagnostics"]["newScriptErrors"] == Json(0));
+			CHECK(meta["diagnostics"]["newErrors"] == Json(0));
+			CHECK(meta["diagnostics"]["firstNew"][0]["message"] == Json("'speed' is unused"));
+		}
+
+		TEST_CASE("MetaBuilder: firstNew quotes at most three entries")
 		{
 			RingBufferSink log(64);
 			MetaBuilder builder(log);
@@ -53,7 +66,7 @@ namespace Engine {
 			CHECK(meta["diagnostics"]["firstNew"][2]["message"] == Json("warning 2"));
 		}
 
-		TEST_CASE("MetaBuilder: optional members are omitted and clients are independent" * doctest::skip(true))
+		TEST_CASE("MetaBuilder: optional members are omitted and clients are independent")
 		{
 			RingBufferSink log(64);
 			MetaBuilder builder(log);

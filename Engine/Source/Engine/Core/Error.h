@@ -43,6 +43,10 @@ namespace Engine {
 	// The enumerator name ("NotFound"); "Unknown" for a value outside the enumeration.
 	[[nodiscard]] std::string_view ErrorCodeToString(ErrorCode code);
 
+	// The inverse of ErrorCodeToString: the code whose enumerator name is exactly `name` (case-sensitive, as the automation
+	// protocol's data.errorCode spells it), or nullopt for any other text.
+	[[nodiscard]] std::optional<ErrorCode> ErrorCodeFromString(std::string_view name);
+
 	// Where an error was found. Every field is optional: an empty File, a zero Line or Column, a JsonPointer without a
 	// value and the invalid Entity mean "not set".
 	struct ErrorLocation

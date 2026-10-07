@@ -9,7 +9,6 @@ from harness import REPOSITORY_ROOT, AutomationTestCase, read_json
 
 
 class ProvenanceTests(AutomationTestCase):
-    @unittest.skip("contract stub: un-skipped by M4 stream D")
     def test_provenance_records_method_request_and_transcript_line(self) -> None:
         client, root = self.open_editor_with_scene()
         client.call("entity.create", {"name": "Board"})
@@ -29,7 +28,6 @@ class ProvenanceTests(AutomationTestCase):
         client.call("project.setSettings", {"patch": {"Window": {"Title": "Dry"}}, "dryRun": True})
         self.assertEqual(read_json(root / "Automation" / "Provenance.json"), provenance)
 
-    @unittest.skip("contract stub: un-skipped by M4 stream D")
     def test_upgrade_rewrites_and_records_provenance(self) -> None:
         client, root = self.open_editor_with_scene()
         formats = REPOSITORY_ROOT / "Tests" / "Data" / "Formats" / "Scene"

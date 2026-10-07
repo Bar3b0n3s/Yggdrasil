@@ -17,7 +17,7 @@ namespace Engine {
 			CHECK(specification.DocsRoot == Test::GetRepositoryRoot());
 		}
 
-		TEST_CASE("AutomationTestClient: requests get their own responses and errors become Results" * doctest::skip(true))
+		TEST_CASE("AutomationTestClient: requests get their own responses and errors become Results")
 		{
 			Test::EditorTestFixture fixture("TestClient");
 			Test::AutomationTestClient client(fixture.GetEditor());
@@ -29,7 +29,7 @@ namespace Engine {
 			CHECK(refused.error().GetCode() == ErrorCode::InvalidState);
 		}
 
-		TEST_CASE("AutomationFixture: opens a project and a scene and connects a client" * doctest::skip(true))
+		TEST_CASE("AutomationFixture: opens a project and a scene and connects a client")
 		{
 			Test::AutomationFixture setup("TestFixture");
 			CHECK(setup.GetEditor().HasScene());

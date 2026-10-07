@@ -20,10 +20,11 @@ class DisconnectTests(AutomationTestCase):
                 break
         return entries
 
-    @unittest.skip("contract stub: un-skipped by M4 stream D")
     def test_disconnect_cancels_pending_operations(self) -> None:
         editor = self.start_editor()
         observer = self.connect(editor, "observer")
+        # log.read and events.read need an open project (the launcher state, §12.1).
+        self.create_project(observer)
         log_cursor = observer.call("log.read", {"cursor": "end"})["nextCursor"]
         event_cursor = observer.call("events.read", {"cursor": "end"})["nextCursor"]
 

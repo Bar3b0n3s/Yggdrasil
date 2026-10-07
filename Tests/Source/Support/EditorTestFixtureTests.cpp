@@ -2,10 +2,29 @@
 
 #include "Support/EditorTestFixture.h"
 
+#include "EditorCore/Automation/RegisterMethods.h"
 #include "Engine/Core/FileSystem.h"
+#include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Scene/Components/BuiltinComponents.h"
 
 namespace Engine {
+
+	namespace Test {
+
+		// Registry struct "FixtureExtra": the type the registration hook test adds.
+		struct FixtureExtra
+		{
+			int32_t Value = 0;
+		};
+
+	}
+
+	static void RegisterFixtureTestTypes(TypeRegistry& registry)
+	{
+		RegisterEditorMethodTypes(registry);
+		registry.Struct<Test::FixtureExtra>("FixtureExtra", "A type only the fixture test registers.")
+			.Field("Value", &Test::FixtureExtra::Value, "A number.");
+	}
 
 	TEST_SUITE("Support")
 	{
@@ -20,7 +39,16 @@ namespace Engine {
 			CHECK(fixture.GetEditor().GetSpecification().IdGeneratorState == Test::EditorTestIdState);
 		}
 
-		TEST_CASE("EditorTestFixture: creates and opens a project and a scene" * doctest::skip(true))
+		TEST_CASE("EditorTestFixture: a registration hook adds the test's own types to the editor's")
+		{
+			Test::EditorTestFixture fixture("FixtureTypes", {}, &RegisterFixtureTestTypes);
+			const TypeRegistry& registry = fixture.GetEngine().GetTypeRegistry();
+			CHECK(registry.FindStruct("FixtureExtra") != nullptr);
+			CHECK(registry.AreComponentsRegistered(BuiltinComponents{}));
+			CHECK(Test::EditorTestFixture("FixtureDefaultTypes").GetEngine().GetTypeRegistry().FindStruct("FixtureExtra") == nullptr);
+		}
+
+		TEST_CASE("EditorTestFixture: creates and opens a project and a scene")
 		{
 			Test::EditorTestFixture fixture("FixtureProject");
 			fixture.CreateAndOpenProject("Game");

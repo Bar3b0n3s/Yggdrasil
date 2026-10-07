@@ -10,7 +10,7 @@ namespace Engine {
 
 	TEST_SUITE("EditorCore")
 	{
-		TEST_CASE("ComponentMethods: component.list lists the serializable components in registry order" * doctest::skip(true))
+		TEST_CASE("ComponentMethods: component.list lists the serializable components in registry order")
 		{
 			Test::AutomationFixture setup("ComponentList", false);
 			Result<Json> list = setup.Call("component.list", Json::object());
@@ -30,7 +30,7 @@ namespace Engine {
 			CHECK(std::find(names.begin(), names.end(), "Script") != names.end());
 		}
 
-		TEST_CASE("ComponentMethods: component.schema describes fields, ranges, defaults and enum values" * doctest::skip(true))
+		TEST_CASE("ComponentMethods: component.schema describes fields, ranges, defaults and enum values")
 		{
 			Test::AutomationFixture setup("ComponentSchema", false);
 			Result<Json> schema = setup.Call("component.schema", Json{ { "name", "RigidBody" } });
@@ -44,7 +44,9 @@ namespace Engine {
 				{
 					sawMass = true;
 					CHECK(field["unit"] == Json("kg"));
-					CHECK(field["min"] == Json(0.001));
+					// A float field's bound is the float value, as its validator compares it (JsonSchema rounds bounds the same
+					// way); over the wire the canonical writer prints it as 0.001.
+					CHECK(field["min"] == Json(static_cast<double>(0.001f)));
 					CHECK(field["default"] == Json(1));
 				}
 				if (field["name"] == Json("Type"))

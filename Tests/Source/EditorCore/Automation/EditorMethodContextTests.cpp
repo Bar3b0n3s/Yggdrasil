@@ -27,7 +27,7 @@ namespace Engine {
 
 	TEST_SUITE("EditorCore")
 	{
-		TEST_CASE("EditorMethodContext: entity references resolve by id, unique prefix and path" * doctest::skip(true))
+		TEST_CASE("EditorMethodContext: entity references resolve by id, unique prefix and path")
 		{
 			Test::AutomationFixture setup("ContextEntities");
 			Scene& scene = setup.GetEditor().GetScene();
@@ -72,7 +72,7 @@ namespace Engine {
 			CHECK(context->ResolveEntity(scene, "Game", "/entity").error().GetCode() == ErrorCode::InvalidArgument);
 		}
 
-		TEST_CASE("EditorMethodContext: project paths are confined to project://" * doctest::skip(true))
+		TEST_CASE("EditorMethodContext: project paths are confined to project://")
 		{
 			Test::AutomationFixture setup("ContextPaths", false);
 			Scope<EditorMethodContext> context = MakeEditorMethodContext(setup);
@@ -90,7 +90,7 @@ namespace Engine {
 			}
 		}
 
-		TEST_CASE("EditorMethodContext: the target scene is the edit scene until play sessions exist" * doctest::skip(true))
+		TEST_CASE("EditorMethodContext: the target scene is the edit scene until play sessions exist")
 		{
 			Test::AutomationFixture setup("ContextTarget");
 			Scope<EditorMethodContext> context = MakeEditorMethodContext(setup);
@@ -105,7 +105,7 @@ namespace Engine {
 			CHECK(context->ResolveTargetScene(SceneTarget::Edit, false, false).error().GetCode() == ErrorCode::InvalidState);
 		}
 
-		TEST_CASE("EditorMethodContext: entity summaries carry the id, name and path" * doctest::skip(true))
+		TEST_CASE("EditorMethodContext: entity summaries carry the id, name and path")
 		{
 			Test::AutomationFixture setup("ContextSummary");
 			Entity entity;

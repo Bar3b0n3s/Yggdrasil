@@ -33,7 +33,9 @@ namespace Engine {
 	class EditorDryRunScope;
 	class EditorTransaction;
 	class EngineContext;
+	class IMount;
 	class ProjectSettingsCommand;
+	class SceneEdit;
 	class TypeRegistry;
 	class VirtualFileSystem;
 
@@ -215,6 +217,14 @@ namespace Engine {
 		// (the class rule above). Errors: InvalidState without a project; Validation for an invalid document; the write
 		// errors; nothing changed then.
 		[[nodiscard]] Status ApplyProjectSettings(const Json& document);
+
+		// The revision a command about to be recorded started from: the revision before a SceneEdit's mutations while its
+		// Commit executes the command (SceneEditCommand is built applied), else GetRevision. CommandHistory and
+		// EditorTransaction record it as the entry's RevisionBefore (§12.3).
+		[[nodiscard]] uint64_t GetRevisionBeforeCommand() const;
+		// A mount of the open project's root as OpenProject mounts it at project:// (read-only for a read-only project,
+		// keeping .bak files). Errors: those of NativeDirectoryMount::Create.
+		[[nodiscard]] Result<Scope<IMount>> CreateProjectMount() const;
 	private:
 		EngineContext* m_Engine = nullptr; // documented back-reference: outlives the editor
 		EditorContextSpecification m_Specification;
@@ -222,18 +232,23 @@ namespace Engine {
 		Scope<LoadedProject> m_Project;
 		Scope<Scene> m_Scene;
 		std::optional<VfsPath> m_ScenePath;
+		bool m_SceneDirty = false;   // a dirty SetScene (a repaired load) not saved since; the history tracks the rest
 		uint64_t m_RevisionBase = 0; // GetRevision's base, advanced by SetScene and CloseScene
 		CommandHistory m_History;    // the open scene's history; a dry run swaps its sandbox history in
 		std::vector<UUID> m_Selection;
 		WriteAttribution m_Attribution;
 		bool m_HasRequestAttribution = false;
-		EditorTransaction* m_Transaction = nullptr; // the outermost open transaction, which registers itself
-		EditorDryRunScope* m_DryRun = nullptr;      // the open dry run, which registers itself
+		std::optional<ProvenanceRecorder> m_Provenance;  // the open writable project's provenance
+		std::optional<uint64_t> m_PendingRevisionBefore; // GetRevisionBeforeCommand's value while SceneEdit::Commit executes
+		EditorTransaction* m_Transaction = nullptr;      // the outermost open transaction, which registers itself
+		EditorDryRunScope* m_DryRun = nullptr;           // the open dry run, which registers itself
 		std::optional<int> m_ShutdownRequest;
 	private:
+		friend class CommandHistory; // reads GetRevisionBeforeCommand
 		friend class EditorDryRunScope;
 		friend class EditorTransaction;
 		friend class ProjectSettingsCommand; // the one caller of ApplyProjectSettings
+		friend class SceneEdit;              // sets m_PendingRevisionBefore around its Execute
 	};
 
 	// Groups every command executed while it is open into one CompositeCommand, recorded as one undo step (§12.3:

@@ -33,7 +33,7 @@ namespace Engine {
 
 	TEST_SUITE("EditorCore")
 	{
-		TEST_CASE("BatchRunner: a batch file runs line by line with line references" * doctest::skip(true))
+		TEST_CASE("BatchRunner: a batch file runs line by line with line references")
 		{
 			Test::EditorTestFixture fixture("BatchRun");
 			fixture.CreateAndOpenProject();
@@ -54,7 +54,7 @@ namespace Engine {
 			CHECK(fixture.GetEditor().GetScene().FindEntityByPath("/Game/Board").IsValid());
 		}
 
-		TEST_CASE("BatchRunner: a $ref into a result over the offload threshold reads the full result" * doctest::skip(true))
+		TEST_CASE("BatchRunner: a $ref into a result over the offload threshold reads the full result")
 		{
 			Test::EditorTestFixture fixture("BatchLargeRef");
 			fixture.CreateAndOpenProject();
@@ -79,7 +79,7 @@ namespace Engine {
 			CHECK(fixture.GetEditor().GetScene().FindEntityByPath("/Cell599/Marker").IsValid());
 		}
 
-		TEST_CASE("BatchRunner: the first error stops the run and names the line" * doctest::skip(true))
+		TEST_CASE("BatchRunner: the first error stops the run and names the line")
 		{
 			Test::EditorTestFixture fixture("BatchFailure");
 			fixture.CreateAndOpenProject();
@@ -100,7 +100,7 @@ namespace Engine {
 			CHECK_FALSE(fixture.GetEditor().GetScene().FindEntityByPath("/C").IsValid());
 		}
 
-		TEST_CASE("BatchRunner: malformed lines are located load errors" * doctest::skip(true))
+		TEST_CASE("BatchRunner: malformed lines are located load errors")
 		{
 			Test::EditorTestFixture fixture("BatchMalformed");
 			const std::array<std::pair<std::string_view, ErrorCode>, 4> cases = { {
@@ -120,7 +120,35 @@ namespace Engine {
 			CHECK(BatchRunner::LoadFile(fixture.GetDirectory() / "Missing.jsonl").error().GetCode() == ErrorCode::NotFound);
 		}
 
-		TEST_CASE("BatchRunner: transcript mode appends request and response lines and passes the line number" * doctest::skip(true))
+		TEST_CASE("BatchRunner: an unknown method or a dangling $ref stops the run and names the line")
+		{
+			Test::EditorTestFixture fixture("BatchStops");
+			Test::AutomationTestClient client(fixture.GetEditor());
+
+			BatchRunner unknown({ BatchRequest{ .Method = "nosuch.method", .Params = {}, .Line = 1 } }, {});
+			RunBatch(unknown, client.GetServer());
+			REQUIRE(unknown.GetFailure().has_value());
+			CHECK(unknown.GetFailure()->GetCode() == ErrorCode::NotFound);
+			CHECK(unknown.GetFailure()->ToString().contains("line 1"));
+			CHECK(unknown.GetFailedResponse()["error"]["code"] == Json(-32601));
+			CHECK(unknown.GetResults().empty());
+
+			// A reference to its own line is caught before anything is sent.
+			Json params = Json::object();
+			params["name"] = "Loop";
+			params["parent"] = Json{ { "$ref", "1.entity.id" } };
+			BatchRunner dangling({ BatchRequest{ .Method = "entity.create", .Params = VariantValue(params), .Line = 1 } }, {});
+			RunBatch(dangling, client.GetServer());
+			REQUIRE(dangling.GetFailure().has_value());
+			CHECK(dangling.GetFailure()->GetCode() == ErrorCode::InvalidArgument);
+			CHECK(dangling.GetFailure()->ToString().contains("line 1"));
+			CHECK(dangling.GetFailedResponse().is_null());
+
+			// Each run used its own in-process client, which is gone once it finished.
+			CHECK(client.GetServer().GetClients().size() == 1);
+		}
+
+		TEST_CASE("BatchRunner: transcript mode appends request and response lines and passes the line number")
 		{
 			Test::EditorTestFixture fixture("BatchTranscript");
 			fixture.CreateAndOpenProject();

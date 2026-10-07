@@ -29,8 +29,10 @@ namespace Engine {
 		{
 		public:
 			// Creates the server over `editor` (a documented back-reference that outlives the client) and connects the client
-			// "test"; fails the test case on error.
-			explicit AutomationTestClient(EditorContext& editor, AutomationServerSpecification specification = MakeTestServerSpecification());
+			// "test"; fails the test case on error. With `offloadLargeResults` false the client receives every result inline,
+			// like BatchRunner's (AutomationServer::ConnectInProcess), so a test can inspect a result over the offload threshold.
+			explicit AutomationTestClient(EditorContext& editor, AutomationServerSpecification specification = MakeTestServerSpecification(),
+				bool offloadLargeResults = true);
 			~AutomationTestClient();
 
 			AutomationTestClient(const AutomationTestClient&) = delete;
