@@ -219,12 +219,16 @@ jobs:
         include:
           - name: GCC 14
             toolset: gcc
+            # The lint stage runs in one Linux job only: its checks and the libstdc++ headers it compiles against are
+            # the same in both, and clang-tidy's naming check alone takes 20-45 minutes on these runners.
+            lint: false
             packages: gcc-14 g++-14
             cc: gcc-14
             cxx: g++-14
             ar: gcc-ar-14
           - name: Clang 19
             toolset: clang
+            lint: true
             packages: llvm-19 lld-19 g++-14
             cc: clang-19
             cxx: clang++-19
@@ -364,7 +368,7 @@ jobs:
         run: python3 Scripts/CI.py --stages setup,generate --toolset "${{ matrix.toolset }}" --summary-junit bin/TestResults/CI-generate.xml
 
       - name: Static checks (lint stage)
-        if: ${{ !cancelled() && steps.generate.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.generate.outcome == 'success' && matrix.lint }}
         run: python3 Scripts/CI.py --stages lint --summary-junit bin/TestResults/CI-lint.xml
 
       # Windowed child processes need a display and, on X11, a window manager that iconifies windows (ADR 0005
