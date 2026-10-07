@@ -110,6 +110,8 @@ Run every command from the repository root. Windows uses `python`; Linux and mac
 
 Milestone commits also need the full `python Scripts/CI.py` green. Push to `origin` only after the review and the gate have passed. GitHub Actions (`.github/workflows/ci.yml`) then builds and unit-tests Windows, Linux and macOS. The Linux jobs also run the gpu, golden and automation stages on Lavapipe (Mesa's software Vulkan driver) with the SDK's validation layer; golden images run in smoke mode there, since software-rasterizer goldens are never committed (§15.4). The Windows and macOS runners have no Vulkan device, so their GPU test cases and the automation tests that start a rendering editor report the reason and pass without running (`--gpu-optional`). A platform counts as verified only once its CI job is green.
 
+**Remote CI is non-blocking** (`Docs/Decisions/0011-non-blocking-remote-ci.md`). A milestone is done when the local Windows gate is green (strict `PreCommit.py` and `CI.py`, including the clang-cl Release and Dist builds of the portability stage); it is then merged and pushed without waiting for GitHub Actions. Linux and macOS failures are fixed in batches every few milestones and always before the demo games (Roadmap M16). A failure that points to a design problem is raised at once.
+
 ## Code style (summary; `Docs/CodeStyle.md` is the rule)
 
 - **Formatter:** clang-format 22.x with the repository's `.clang-format`. Code is format-clean before commit: tabs, braces on their own line, no column limit.
