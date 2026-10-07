@@ -45,8 +45,11 @@ namespace Engine {
 		OffscreenTarget& operator=(const OffscreenTarget&) = delete;
 		~OffscreenTarget();
 
-		// Recreates the textures at the new size; a no-op for the current size. The previous textures are released (NVRHI
-		// defers their destruction until submissions using them complete). Errors: those of Create.
+		// Recreates the textures at the new size; a no-op for the current size. This target drops its references to the
+		// previous textures and framebuffer. NVRHI keeps an object alive while an unretired submission references it, but
+		// its command lists do not reference textures used only by clears (Clear), so whoever submitted work that may
+		// still run on the previous textures keeps a reference until it completes (Application keeps each frame slot's
+		// target) or waits for idle first. Errors: those of Create.
 		[[nodiscard]] Status Resize(GraphicsDevice& device, uint32_t width, uint32_t height);
 
 		// Records clears of the color attachment to ClearColor and of the depth attachment to 0 into `commandList`.
@@ -61,8 +64,14 @@ namespace Engine {
 		[[nodiscard]] uint32_t GetHeight() const { return m_Specification.Height; }
 	private:
 		explicit OffscreenTarget(OffscreenTargetSpecification specification);
+
+		// Creates the textures and the framebuffer for m_Specification.
+		[[nodiscard]] Status CreateResources(GraphicsDevice& device);
 	private:
 		OffscreenTargetSpecification m_Specification;
+		nvrhi::TextureHandle m_ColorTexture;
+		nvrhi::TextureHandle m_DepthTexture; // null without a depth attachment
+		nvrhi::FramebufferHandle m_Framebuffer;
 	};
 
 }

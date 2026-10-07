@@ -7,7 +7,8 @@
 
 // slangc's reflection JSON as CompileShaders.py writes it (<variant>.refl.json). The documents come from this
 // configuration's compiled shaders (ENGINE_SHADER_DIRECTORY), so the parser is tested against the slangc version the
-// toolchain pins.
+// toolchain pins. The engine's programs use no storage images, register spaces above 0, arrays or specialization
+// constants yet, so those parts are tested on hand-written documents in slangc's format.
 
 namespace Engine {
 
@@ -19,9 +20,72 @@ namespace Engine {
 		return *text;
 	}
 
+	// A compute entry point with a storage image, an array in register space 1, an unbounded array in space 2, a
+	// specialization constant and push constants whose struct nests another struct directly and as array elements.
+	static constexpr std::string_view SyntheticReflection = R"({
+	"parameters": [
+		{ "name": "Shadows", "binding": { "kind": "shaderResource", "space": 1, "index": 3 },
+			"type": { "kind": "array", "elementCount": 4,
+				"elementType": { "kind": "resource", "baseShape": "texture2D", "array": true } } },
+		{ "name": "Output", "binding": { "kind": "unorderedAccess", "index": 386 }, "format": "r11f_g11f_b10f",
+			"type": { "kind": "resource", "baseShape": "texture2D", "access": "readWrite" } },
+		{ "name": "Cubes", "binding": { "kind": "shaderResource", "space": 2, "index": 0 },
+			"type": { "kind": "array", "elementCount": 0, "elementType": { "kind": "resource", "baseShape": "textureCube" } } },
+		{ "name": "Lights", "binding": { "kind": "shaderResource", "index": 5 },
+			"type": { "kind": "resource", "baseShape": "structuredBuffer" } },
+		{ "name": "Compare", "binding": { "kind": "samplerState", "index": 131 }, "type": { "kind": "samplerState" } },
+		{ "name": "DebugView", "binding": { "kind": "specializationConstant", "index": 3 },
+			"type": { "kind": "scalar", "scalarType": "int32" } },
+		{ "name": "Draw", "binding": { "kind": "pushConstantBuffer", "index": 0 },
+			"type": { "kind": "constantBuffer",
+				"elementVarLayout": {
+					"type": { "kind": "struct", "name": "DrawConstants", "fields": [
+						{ "name": "World", "type": { "kind": "matrix", "rowCount": 4, "columnCount": 4 },
+							"binding": { "kind": "uniform", "offset": 0, "size": 64 } },
+						{ "name": "Inner", "type": { "kind": "struct", "name": "Nested", "fields": [
+								{ "name": "A", "type": { "kind": "scalar", "scalarType": "float32" },
+									"binding": { "kind": "uniform", "offset": 0, "size": 4 } } ] },
+							"binding": { "kind": "uniform", "offset": 64, "size": 16 } },
+						{ "name": "List", "type": { "kind": "array", "elementCount": 2, "uniformStride": 16,
+								"elementType": { "kind": "struct", "name": "Nested", "fields": [
+									{ "name": "A", "type": { "kind": "scalar", "scalarType": "float32" },
+										"binding": { "kind": "uniform", "offset": 0, "size": 4 } } ] } },
+							"binding": { "kind": "uniform", "offset": 80, "size": 32 } } ] },
+					"binding": { "kind": "uniform", "offset": 0, "size": 112 } } } }
+	],
+	"entryPoints": [
+		{ "name": "CSMain", "stage": "compute", "threadGroupSize": [8, 8, 1],
+			"bindings": [
+				{ "name": "Shadows", "binding": { "kind": "shaderResource", "space": 1, "index": 3, "used": 1 } },
+				{ "name": "Output", "binding": { "kind": "unorderedAccess", "index": 386, "used": 0 } },
+				{ "name": "DebugView", "binding": { "kind": "specializationConstant", "index": 3 } },
+				{ "name": "Draw", "binding": { "kind": "pushConstantBuffer", "index": 0 } } ] }
+	]
+})";
+
+	// SyntheticReflection with `from` replaced by `to` (which must occur).
+	static std::string ReplaceInSynthetic(std::string_view from, std::string_view to)
+	{
+		std::string document(SyntheticReflection);
+		const size_t position = document.find(from);
+		REQUIRE(position != std::string::npos);
+		document.replace(position, from.size(), to);
+		return document;
+	}
+
+	// Parses `document`, which must fail with Validation located at `pointer`.
+	static void CheckRejected(const std::string& document, std::string_view pointer)
+	{
+		const Result<ShaderReflection> reflection = ParseShaderReflection(document);
+		REQUIRE_FALSE(reflection.has_value());
+		CHECK(reflection.error().GetCode() == ErrorCode::Validation);
+		REQUIRE(reflection.error().GetLocation().JsonPointer.has_value());
+		CHECK(*reflection.error().GetLocation().JsonPointer == std::string(pointer));
+	}
+
 	TEST_SUITE("Graphics")
 	{
-		TEST_CASE("ShaderReflection: parses bindings, structs and the entry point of a vertex shader" * doctest::skip(true))
+		TEST_CASE("ShaderReflection: parses bindings, structs and the entry point of a vertex shader")
 		{
 			const Result<ShaderReflection> reflection = ParseShaderReflection(ReadCompiledReflection("Triangle/VSMain"));
 			REQUIRE_MESSAGE(reflection.has_value(), reflection.error().ToString());
@@ -45,7 +109,7 @@ namespace Engine {
 			CHECK(constants->Fields.front().Size == 64);
 		}
 
-		TEST_CASE("ShaderReflection: parses push constants, textures, samplers and compute thread groups" * doctest::skip(true))
+		TEST_CASE("ShaderReflection: parses push constants, textures, samplers and compute thread groups")
 		{
 			const Result<ShaderReflection> pixel = ParseShaderReflection(ReadCompiledReflection("ImGui/PSMain"));
 			REQUIRE_MESSAGE(pixel.has_value(), pixel.error().ToString());
@@ -76,7 +140,153 @@ namespace Engine {
 			CHECK_FALSE(values->StorageFormat.has_value());
 		}
 
-		TEST_CASE("ShaderReflection: malformed and mutated documents are errors, never crashes" * doctest::skip(true))
+		TEST_CASE("ShaderReflection: use flags come from the entry point")
+		{
+			// The Triangle fragment shader declares View (the program's global) without using it; the vertex shader uses it.
+			const Result<ShaderReflection> pixel = ParseShaderReflection(ReadCompiledReflection("Triangle/PSMain"));
+			REQUIRE_MESSAGE(pixel.has_value(), pixel.error().ToString());
+			const ShaderBinding* view = pixel->FindBinding("View");
+			REQUIRE(view != nullptr);
+			CHECK_FALSE(view->Used);
+			CHECK(pixel->ThreadGroupSize == std::array<uint32_t, 3>{ 0, 0, 0 });
+
+			// The ImGui vertex shader uses its push constants, for which slangc writes no use flag: they count as used.
+			const Result<ShaderReflection> vertex = ParseShaderReflection(ReadCompiledReflection("ImGui/VSMain"));
+			REQUIRE_MESSAGE(vertex.has_value(), vertex.error().ToString());
+			const ShaderBinding* projection = vertex->FindBinding("Projection");
+			REQUIRE(projection != nullptr);
+			CHECK(projection->Used);
+			CHECK(projection->StructName == "ImGuiConstants");
+		}
+
+		TEST_CASE("ShaderReflection: reads register spaces, arrays and storage formats and skips specialization constants")
+		{
+			const Result<ShaderReflection> reflection = ParseShaderReflection(SyntheticReflection);
+			REQUIRE_MESSAGE(reflection.has_value(), reflection.error().ToString());
+			CHECK(reflection->EntryPoint == "CSMain");
+			CHECK(reflection->ThreadGroupSize == std::array<uint32_t, 3>{ 8, 8, 1 });
+			REQUIRE(reflection->Bindings.size() == 6);
+			CHECK(reflection->FindBinding("DebugView") == nullptr);
+
+			const ShaderBinding* shadows = reflection->FindBinding("Shadows");
+			REQUIRE(shadows != nullptr);
+			CHECK(shadows->Set == 1);
+			CHECK(shadows->Binding == 3);
+			CHECK(shadows->ArraySize == 4);
+			CHECK(shadows->Shape == ShaderResourceShape::Texture2DArray);
+			CHECK(shadows->Used);
+
+			const ShaderBinding* output = reflection->FindBinding("Output");
+			REQUIRE(output != nullptr);
+			CHECK(output->Kind == ShaderBindingKind::UnorderedAccess);
+			CHECK(output->Shape == ShaderResourceShape::Texture2D);
+			CHECK(output->StorageFormat == nvrhi::Format::R11G11B10_FLOAT);
+			CHECK_FALSE(output->Used);
+
+			// Unbounded arrays have size 0; a parameter the entry point does not list counts as used.
+			const ShaderBinding* cubes = reflection->FindBinding("Cubes");
+			REQUIRE(cubes != nullptr);
+			CHECK(cubes->Set == 2);
+			CHECK(cubes->ArraySize == 0);
+			CHECK(cubes->Shape == ShaderResourceShape::TextureCube);
+			CHECK(cubes->Used);
+
+			const ShaderBinding* lights = reflection->FindBinding("Lights");
+			REQUIRE(lights != nullptr);
+			CHECK(lights->Shape == ShaderResourceShape::StructuredBuffer);
+			const ShaderBinding* compare = reflection->FindBinding("Compare");
+			REQUIRE(compare != nullptr);
+			CHECK(compare->Kind == ShaderBindingKind::Sampler);
+			CHECK(compare->Binding == 131);
+
+			const ShaderBinding* draw = reflection->FindBinding("Draw");
+			REQUIRE(draw != nullptr);
+			CHECK(draw->Kind == ShaderBindingKind::PushConstantBuffer);
+			CHECK(draw->Set == 0);
+			CHECK(draw->Binding == 0);
+			CHECK(draw->ByteSize == 112);
+			CHECK(draw->StructName == "DrawConstants");
+
+			// Every reachable struct once, sorted by name; a nested struct has its own size (member size or array stride).
+			REQUIRE(reflection->Structs.size() == 2);
+			CHECK(reflection->Structs[0].Name == "DrawConstants");
+			CHECK(reflection->Structs[1].Name == "Nested");
+			const ShaderStruct* drawConstants = reflection->FindStruct("DrawConstants");
+			REQUIRE(drawConstants != nullptr);
+			CHECK(drawConstants->Size == 112);
+			REQUIRE(drawConstants->Fields.size() == 3);
+			CHECK(drawConstants->Fields[1].Name == "Inner");
+			CHECK(drawConstants->Fields[1].Offset == 64);
+			CHECK(drawConstants->Fields[2].Name == "List");
+			CHECK(drawConstants->Fields[2].Offset == 80);
+			CHECK(drawConstants->Fields[2].Size == 32);
+			const ShaderStruct* nested = reflection->FindStruct("Nested");
+			REQUIRE(nested != nullptr);
+			CHECK(nested->Size == 16);
+			REQUIRE(nested->Fields.size() == 1);
+			CHECK(nested->Fields[0].Size == 4);
+		}
+
+		TEST_CASE("ShaderReflection: shapes outside the binding model are located Validation errors")
+		{
+			SUBCASE("unknown stage")
+			{
+				CheckRejected(ReplaceInSynthetic(R"("stage": "compute")", R"("stage": "geometry")"), "/entryPoints/0/stage");
+			}
+			SUBCASE("thread-group size without three dimensions")
+			{
+				CheckRejected(ReplaceInSynthetic("[8, 8, 1]", "[8, 8]"), "/entryPoints/0/threadGroupSize");
+			}
+			SUBCASE("more than one entry point")
+			{
+				const std::string document = ReplaceInSynthetic(R"("entryPoints": [)",
+					R"("entryPoints": [ { "name": "Other", "stage": "compute", "threadGroupSize": [1, 1, 1] },)");
+				CheckRejected(document, "/entryPoints");
+			}
+			SUBCASE("unknown binding kind")
+			{
+				CheckRejected(ReplaceInSynthetic(R"({ "kind": "samplerState", "index": 131 })", R"({ "kind": "uniform", "index": 0 })"),
+					"/parameters/4/binding/kind");
+			}
+			SUBCASE("a parameter with several binding kinds")
+			{
+				CheckRejected(ReplaceInSynthetic(R"("binding": { "kind": "samplerState", "index": 131 })",
+								  R"("bindings": [ { "kind": "samplerState", "index": 0 }, { "kind": "uniform", "offset": 0, "size": 16 } ])"),
+					"/parameters/4");
+			}
+			SUBCASE("unknown image format")
+			{
+				CheckRejected(ReplaceInSynthetic(R"("format": "r11f_g11f_b10f")", R"("format": "rgb9e5")"), "/parameters/1/format");
+			}
+			SUBCASE("multisampled texture")
+			{
+				CheckRejected(ReplaceInSynthetic(R"("baseShape": "texture2D", "access")", R"("baseShape": "texture2D", "multisample": true, "access")"),
+					"/parameters/1/type/multisample");
+			}
+			SUBCASE("unsupported resource shape")
+			{
+				CheckRejected(ReplaceInSynthetic(R"("baseShape": "structuredBuffer")", R"("baseShape": "accelerationStructure")"),
+					"/parameters/3/type/baseShape");
+			}
+			SUBCASE("array of arrays")
+			{
+				CheckRejected(ReplaceInSynthetic(R"("elementType": { "kind": "resource", "baseShape": "textureCube" })",
+								  R"("elementType": { "kind": "array", "elementCount": 2, "elementType": { "kind": "resource", "baseShape": "textureCube" } })"),
+					"/parameters/2/type/elementType");
+			}
+			SUBCASE("a resource inside a constant-buffer struct")
+			{
+				CheckRejected(ReplaceInSynthetic(R"("binding": { "kind": "uniform", "offset": 0, "size": 64 })",
+								  R"("binding": { "kind": "shaderResource", "index": 0 })"),
+					"/parameters/6/type/elementVarLayout/type/fields/0/binding");
+			}
+			SUBCASE("a use flag that is not a number")
+			{
+				CheckRejected(ReplaceInSynthetic(R"("used": 0)", R"("used": "no")"), "/entryPoints/0/bindings/1/binding/used");
+			}
+		}
+
+		TEST_CASE("ShaderReflection: malformed and mutated documents are errors, never crashes")
 		{
 			const Result<ShaderReflection> notJson = ParseShaderReflection("{ \"parameters\": [");
 			REQUIRE_FALSE(notJson.has_value());

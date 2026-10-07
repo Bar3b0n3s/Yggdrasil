@@ -11,11 +11,12 @@
 #include <cstdint>
 
 // The clear-and-triangle view of the Graphics foundation (Roadmap M5): one counter-clockwise triangle drawn through the
-// Triangle program (Resources/Shaders/Passes/Triangle.slang) with ViewConstants from a fixed orthographic, reverse-Z,
-// Y-flipped camera (§8.3). It is what viewport.screenshot renders until the scene renderer arrives (M7), the golden image
+// Triangle program (Resources/Shaders/Passes/Triangle.slang) with ViewConstants from a fixed orthographic, reverse-Z
+// camera (§8.3). It is what viewport.screenshot renders until the scene renderer arrives (M7), the golden image
 // "Triangle", and the subject of "Rasterizer: CCW triangle survives back-face culling": with back-face culling and
-// rasterState.frontCounterClockwise = true the triangle must stay visible, which proves the projection's Y flip and the
-// pipelines' winding convention agree.
+// rasterState.frontCounterClockwise = true the triangle must stay visible, which proves the projection's Y convention and
+// the pipelines' winding convention agree. NVRHI's Vulkan backend performs the Vulkan Y flip itself (every viewport has a
+// negative height), so the projection keeps clip-space +Y up.
 
 namespace Engine {
 
@@ -66,9 +67,14 @@ namespace Engine {
 		[[nodiscard]] static PipelineLayoutDescription GetLayoutDescription();
 
 		// The fixed camera for a `width` x `height` target (both > 0, asserted): orthographic with OrthoHalfExtents
-		// (aspect, 1), Near 0.1, Far 100, at (0, 0, 5) looking down -Z, reverse-Z and Y-flipped for Vulkan clip space
-		// (§8.3), ProjectionKind orthographic. Pure and deterministic.
+		// (aspect, 1), Near 0.1, Far 100, at (0, 0, 5) looking down -Z, reverse-Z (§8.3) with clip-space +Y up (NVRHI's
+		// viewport performs the Vulkan Y flip), ProjectionKind orthographic. Pure and deterministic.
 		[[nodiscard]] static ViewConstants MakeViewConstants(uint32_t width, uint32_t height);
+	private:
+		TrianglePassSpecification m_Specification;
+		GraphicsPipeline m_Pipeline;
+		nvrhi::BufferHandle m_ViewConstantsBuffer;
+		nvrhi::BindingSetHandle m_BindingSet;
 	};
 
 }

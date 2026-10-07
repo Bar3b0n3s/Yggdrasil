@@ -41,23 +41,27 @@ python Scripts/Setup.py                                    # toolchain checks, p
 python Scripts/Generate.py                                 # vs2026 | gmake | xcode4 (+ compile-commands); --action to override
 python Scripts/Build.py --config Debug                     # Release, Dist; --project Tests builds one project
 python Scripts/Test.py --suite unit --config Debug --junit # Release too; Dist has no Tests project; --allow-skips: contract mode
+python Scripts/Test.py --suite gpu --config Debug --junit --require-gpu   # both API caps; --vulkan-api 1.3|1.4 for one
+python Scripts/Test.py --suite golden --config Release --junit --require-gpu   # --update-golden writes candidates
 python Scripts/CompileShaders.py --config Debug            # --program P, --force, --verbose
 python Scripts/CheckBuildConfig.py                         # ABI defines, JPH_CROSS_PLATFORM_DETERMINISTIC, Jolt ISA, FP model, Dist solution
 python Scripts/Format.py --check                           # without --check it rewrites files
 python Scripts/Lint.py                                     # --self-test: every seeded Tests/Data/Lint fixture fails as expected; --mode clang|regex; --allow-contract-stubs: contract mode
-python Scripts/PreCommit.py                                # the commit gate, strict; --contract only for a milestone's contract commit
-python Scripts/CI.py                                       # all stages; --stages build,unit for a subset; --contract as for PreCommit
+python Scripts/PreCommit.py                                # the commit gate, strict; --contract only for a milestone's contract commit; --gpu-optional without a Vulkan device
+python Scripts/CI.py                                       # all stages; --stages build,unit for a subset; --contract as for PreCommit; --gpu-optional as for PreCommit
 ```
 
-**CI stages** run in order and fail fast: `setup → generate → lint → build → unit → portability`. Later milestones add bake, gpu, golden, feature, automation, export, determinism and games. The configurations follow the §15.8 matrix:
+**CI stages** run in order and fail fast: `setup → generate → lint → build → unit → gpu → golden → portability`. Later milestones add bake, feature, automation, export, determinism and games. The configurations follow the §15.8 matrix:
 - lint: `CheckBuildConfig.py` on the workspace and on each fixture workspace under `Tests/Data/BuildConfig/` (each must fail with its own defect), `Lint.py` (its `contract` step included), `Lint.py --self-test` and `Format.py --check`. `PreCommit.py` runs exactly this list too (`Scripts/Lib/scripts.py`);
 - build: Debug, Release and Dist, plus, after Debug, `"Shaders: slang-only change is not skipped by the up-to-date check"` (touching only a `.slang` file re-runs the shader rule; the next build skips it);
 - unit: Debug and Release, each failing on a test case skipped outside the child-process targets;
+- gpu: Debug and Release, each under API 1.4 and capped with `--vulkan-api=1.3`, with validation and synchronization validation and `--require-gpu` (`--gpu-optional` drops it on a machine without a device);
+- golden: Release, compared with `Tests/Golden/<DeviceClass>/`; smoke mode (a warning) on a device class without goldens;
 - portability: generates Linux gmake/ninja and macOS xcode4 projects (checked against the vs2026 reference; the xcode4 and gmake precompiled-header paths must resolve and the xcode4 Dist projects must enable LTO), then builds Tests with clang-cl in Release when the VS Clang component is installed (`--no-clang-cl` leaves it out, `--require-clang-cl` makes a missing component a failure). Only warnings located under `Vendor/` are tolerated in that build.
 
-**GitHub Actions** (`.github/workflows/ci.yml`) runs `CI.py` everywhere, with the stages a GPU-less hosted runner supports (setup, generate, lint, build, unit, portability):
-- Windows: one `CI.py` run, with `--require-clang-cl`.
-- Linux (GCC 14 and Clang 19) and macOS: one `CI.py` run per step (setup and generate, lint, Debug, Release, Dist, portability), so every configuration is reported even when another one failed. Each run writes `bin/TestResults/CI-<step>.xml`. The Linux jobs install `xvfb openbox x11-utils` and run the Debug and Release steps (build and unit) inside the Xvfb display with openbox shown above.
+**GitHub Actions** (`.github/workflows/ci.yml`) runs `CI.py` everywhere, with the stages a hosted runner supports (setup, generate, lint, build, unit, gpu, golden, portability):
+- Windows: one `CI.py` run, with `--require-clang-cl` and `--gpu-optional` (the image has no Vulkan device, so the GPU test cases report the reason and pass without running).
+- Linux (GCC 14 and Clang 19) and macOS: one `CI.py` run per step (setup and generate, lint, Debug, Release, Dist, portability), so every configuration is reported even when another one failed. Each run writes `bin/TestResults/CI-<step>.xml`. The Linux jobs install `xvfb openbox x11-utils mesa-vulkan-drivers` and run the Debug step (build, unit, gpu) and the Release step (build, unit, gpu, golden) inside the Xvfb display with openbox shown above, on Lavapipe (`VK_DRIVER_FILES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json`) with the SDK's validation layer (`VK_LAYER_PATH=$VULKAN_SDK/share/vulkan/explicit_layer.d`) and `--require-gpu`; golden runs in smoke mode there (no software-rasterizer goldens, §15.4). macOS runs the GPU stages with `--gpu-optional`.
 - JUnit results are uploaded as artifacts named `test-results-windows`, `test-results-linux-gcc`, `test-results-linux-clang` and `test-results-macos`.
 
 ## Configurations
@@ -110,6 +114,8 @@ bin/Debug-windows-x86_64/Tests/Tests.exe --reporters=junit --out=bin/TestResults
   - `--user-data-dir=<absolute path>` is the child's user-data root, so its crash reports land in the parent's temporary directory.
   - `--child-argument=<text>` is input for a child body, such as the lock file a lock holder takes.
   - `--require-gpu` (M5) turns GPU-suite skips into failures.
+  - `--vulkan-api=1.3|1.4` (M5) caps the API of every GPU test's device and of the Editor and Runtime processes it starts.
+  - `--update-golden` (M5) makes golden tests write their image as the candidate of this machine's device class.
 - **`--test-timeout=<seconds>`** is the per-case limit for test cases without a `doctest::timeout` decorator (default 120). A case that runs longer is reported on stderr and the run exits with code 5.
 - **`--no-skip`** also runs the `ChildTargets` suite: cases that exist only as child-process targets of other tests, which hang or end the process by design. Exclude them: `Tests.exe --no-skip --test-suite-exclude=ChildTargets`.
 - **Skipped cases.** `--list-test-cases` omits skipped cases. `Tests.exe --no-skip --list-test-cases --reporters=xml --out=<file>` lists every case with its `testsuite` and `skipped` attributes; this is how `Test.py` finds skipped cases outside the `ChildTargets` suite.
@@ -129,6 +135,9 @@ bin/Debug-windows-x86_64/Tests/Tests.exe --reporters=junit --out=bin/TestResults
 - **Exit code 3 from any script** means a required tool or file is missing or has the wrong version (premake, clang-format, clang-tidy or clang-query in `--mode clang`, slangc, a compiler, an archiver or lld). Run `python Scripts/Setup.py`, which names what to install.
 - **CI.py** prints a summary table with one row per stage and configuration. Fix the first failing stage; later stages did not run.
 - **Contract stubs and skips** (Roadmap rule 3, `Docs/Decisions/0004-contract-stub-gate.md`). Lint `contract-stub` means an `ENGINE_CONTRACT_STUB();` stub is still in the tree: implement the function, replacing the whole stub body. Lint `test-skip` or a Test.py `UNEXPECTED SKIP: <case>` line means a test case is still marked `doctest::skip`: remove the decorator once its implementation has landed. Only child-process targets stay skipped, with `doctest::test_suite(Test::ChildTargetSuite)` in the same decorator expression. Only a milestone's contract commit may run `PreCommit.py --contract` (the summary prints "contract mode: stubs and skipped tests allowed").
+
+- **GPU tests** (doctest suites `GPU` and `Golden`, excluded from the unit stage). Every device is created with validation and synchronization validation; the fixture fails the test on any validation or NVRHI error or warning (`Vulkan validation: ...`, `NVRHI: ...` in the log) and on GPU objects still alive at its end (`GpuResourceTracker` counts). `Vulkan loader (...)` lines describe the machine's layers and drivers (a third-party overlay layer, a missing driver) and never fail a test. "GPU test skipped: <reason>" means no usable device: no loader, no Vulkan 1.3 device (the reason lists each candidate's rejection), or a missing `VK_LAYER_KHRONOS_validation`. A golden mismatch writes `<Name>-actual.png`, `-expected.png` and `-diff.png` into `bin/TestResults/Golden/`.
+- **Editor and Runtime without a GPU** need `--renderer none`; with the default Vulkan renderer they exit 3 when no device can be created.
 
 ## Pitfalls
 

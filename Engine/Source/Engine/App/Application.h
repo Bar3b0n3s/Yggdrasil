@@ -63,12 +63,13 @@ namespace Engine {
 		// The device's settings (§4.1: validation, GPU override, frames in flight, API cap): --gpu-validation, --gpu,
 		// --vulkan-api and --gpu-inject-fault. Ignored with RendererMode::None.
 		GraphicsSpecification Graphics{};
-		// --expect-no-gpu-errors: a run whose device reported any error (GpuDiagnostics::GetErrorCount: validation and
-		// synchronization-validation errors, NVRHI errors) up to the end of the rendering teardown returns ExitCode::Failed
-		// instead of Success, logging the count at Error level; an exit code other than Success is kept. Messages reported
-		// while the device itself is destroyed come after the check; they are still logged at Error level. The GPU tests pass
-		// it to every Editor and Runtime process they start, so a validation error inside such a process fails the test
-		// (§15.3). Ignored with RendererMode::None.
+		// --expect-no-gpu-errors: a run whose device reported any error or warning in its whole life (GpuDiagnostics:
+		// validation and synchronization-validation messages, NVRHI messages, and the leak report and validation-layer
+		// reports of the device's own teardown, read through EngineContext::DestroyGraphics) returns ExitCode::Failed
+		// instead of Success, logging both counts at Error level; an exit code other than Success is kept. The loader's
+		// notes about the machine's installation are not counted (IsLoaderInstallationMessage). The GPU tests pass it to
+		// every Editor and Runtime process they start, so a validation message inside such a process fails the test, as it
+		// fails an in-process GPU test (§15.3). Ignored with RendererMode::None.
 		bool ExpectNoGpuErrors = false;
 		// Dear ImGui for the application's own UI (OnImGuiRender, §8.11): the editor turns it on. Needs RendererMode::Vulkan;
 		// ignored otherwise.
@@ -122,10 +123,13 @@ namespace Engine {
 	//      frame), OnImGuiRender, EndFrame and Render into the same target; the submission (the swapchain's semaphores
 	//      queued before it), Present, FramePacer::EndFrame and GraphicsDevice::RunGarbageCollection. A frame the swapchain
 	//      skips (minimized or just recreated) records and submits nothing, calls neither OnRender nor OnImGuiRender, and
-	//      passes GraphicsDevice::GetLastSubmissionID to FramePacer::EndFrame.
+	//      passes GraphicsDevice::GetLastSubmissionID to FramePacer::EndFrame. A headless frame target replaced by a resize
+	//      stays alive until every frame that cleared it has completed. A Gpu error from ImGuiLayer::Render (a pipeline,
+	//      buffer or binding set could not be created) ends the process through FatalError(OutOfMemory) (§8.14 item 7);
+	//      other Render errors are logged once per run of failing frames.
 	//   3. OnShutdown, GraphicsDevice::WaitForIdle, the rendering objects (ImGuiLayer, GpuProfiler, swapchain or offscreen
-	//      target, pacer); with ExpectNoGpuErrors the device's error count (see the field); then the context is destroyed
-	//      (reverse order). Run returns the exit code.
+	//      target, pacer), then the GPU services (EngineContext::DestroyGraphics) with the ExpectNoGpuErrors check (see the
+	//      field), then the rest of the context (reverse order). Run returns the exit code.
 	// Run may be called once per Application.
 	class Application : private IFrameLoopClient
 	{
@@ -190,9 +194,14 @@ namespace Engine {
 		// The frame clock of the specification (ClockKind::Scripted is rejected before this is called).
 		[[nodiscard]] Scope<Clock> CreateClock() const;
 	private:
+		// The frame's rendering objects with a device (swapchain or offscreen target, pacer, profiler, command list),
+		// defined in Application.cpp.
+		struct FrameRendering;
+	private:
 		ApplicationSpecification m_Specification;
 		Scope<EngineContext> m_Context;       // between the start of initialization and the end of OnShutdown
 		Scope<FrameLoop> m_FrameLoop;         // while the frame loop runs
+		Scope<FrameRendering> m_Rendering;    // with a device, from InitializeRendering to ShutdownRendering
 		Scope<ImGuiLayer> m_ImGuiLayer;       // with EnableImGui, from InitializeRendering to ShutdownRendering
 		std::optional<int> m_PendingExitCode; // an exit requested before the frame loop exists (during OnInitialize)
 		bool m_HasRun = false;

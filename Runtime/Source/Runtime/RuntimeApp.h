@@ -10,8 +10,9 @@
 namespace Engine {
 
 	// The runtime application that runs exported games (Architecture §14.3). For now an empty Application subclass: the
-	// runtime executable runs the frame loop with a window, or headless with --headless; the game manifest, paks and the
-	// play session arrive with the walking-skeleton milestone.
+	// runtime executable runs the frame loop with a window, or headless with --headless, and with the Vulkan renderer
+	// Application's frame clears and presents every frame (§8.2); --renderer none (not in Dist) renders nothing. The game
+	// manifest, paks and the play session arrive with the walking-skeleton milestone.
 	class RuntimeApp final : public Application
 	{
 	public:

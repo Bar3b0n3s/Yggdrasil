@@ -156,7 +156,7 @@ namespace Engine {
 
 	TEST_SUITE("Static")
 	{
-		TEST_CASE("Shaders: LayoutsMatchReflection" * doctest::skip(true))
+		TEST_CASE("Shaders: LayoutsMatchReflection")
 		{
 			CompiledShaders shaders;
 			std::set<std::string> covered;
@@ -196,7 +196,7 @@ namespace Engine {
 			CHECK(mismatch.error().ToString().contains("View"));
 		}
 
-		TEST_CASE("Shaders: SharedStructsMatchReflection" * doctest::skip(true))
+		TEST_CASE("Shaders: SharedStructsMatchReflection")
 		{
 			CompiledShaders shaders;
 			for (const SharedStruct& shared : GetSharedStructs())
@@ -219,7 +219,7 @@ namespace Engine {
 			}
 		}
 
-		TEST_CASE("Shaders: every Shaders.json variant was compiled and passed spirv-val" * doctest::skip(true))
+		TEST_CASE("Shaders: every Shaders.json variant was compiled and passed spirv-val")
 		{
 			// CompileShaders.py runs spirv-val on every output and writes the stamp only after every program of a complete
 			// run compiled and validated (§8.12), so a stamp of this configuration proves the whole manifest is spirv-val
@@ -253,7 +253,7 @@ namespace Engine {
 			}
 		}
 
-		TEST_CASE("Shaders: matrix convention transforms known vectors" * doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+		TEST_CASE("Shaders: matrix convention transforms known vectors" * doctest::test_suite(Test::GpuSuite))
 		{
 			// §8.4: glm's column-major matrices, uploaded through a shared struct (ViewConstants::ViewProjection) and compiled
 			// with -matrix-layout-column-major, give mul(M, v) == M * v. A matrix with sixteen distinct entries tells M * v

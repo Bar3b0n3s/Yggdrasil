@@ -23,6 +23,7 @@ namespace Engine {
 	class GraphicsDevice;
 	class PipelineFactory;
 	class ShaderLibrary;
+	struct GpuMessageCounts;
 
 	// The steps that build an EngineContext, in order (§4.1: VFS -> JobSystem -> Window -> GraphicsDevice -> ...). Later
 	// milestones append theirs where §4.1 puts them: the injected AssetManager, the AudioEngine and the registries.
@@ -113,6 +114,12 @@ namespace Engine {
 		[[nodiscard]] GraphicsDevice* GetGraphicsDevice() { return m_GraphicsDevice.get(); }
 		[[nodiscard]] ShaderLibrary* GetShaderLibrary() { return m_ShaderLibrary.get(); }
 		[[nodiscard]] PipelineFactory* GetPipelineFactory() { return m_PipelineFactory.get(); }
+
+		// Destroys the GPU services now, in the destructor's order (pipeline factory, shader library, device), and returns
+		// the device's final message counts (GraphicsDevice::Destroy), which include the messages of the device's own
+		// teardown. Zero counts without a device; afterwards the three getters above return nullptr. Application calls it
+		// at shutdown, after its rendering objects are gone, so --expect-no-gpu-errors sees the device's whole life (§15.3).
+		[[nodiscard]] GpuMessageCounts DestroyGraphics();
 	private:
 		// The Graphics step (EngineContextStep::Graphics).
 		[[nodiscard]] Status CreateGraphics(const GraphicsSpecification& graphics);

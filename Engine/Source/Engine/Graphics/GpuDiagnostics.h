@@ -9,12 +9,13 @@
 
 #include <atomic>
 #include <cstdint>
+#include <string>
 #include <string_view>
 
 // GPU error accounting, device-loss detection and fault injection (Architecture §8.1 "Device loss surfaces three ways",
 // §8.14 items 6 and 8). GraphicsDevice owns one GpuDiagnostics, hands it to NVRHI as DeviceDesc::errorCB (and to the
-// validation layer wrapper), and forwards the VK_EXT_debug_utils messenger's messages to it. Every GPU test fixture
-// requires GetErrorCount() == 0 when its device is destroyed (§15.3).
+// validation layer wrapper), and forwards the VK_EXT_debug_utils messenger's messages to it. Every GPU test requires zero
+// errors and zero warnings over its device's whole life, teardown included (GraphicsDevice::Destroy, §15.3).
 
 namespace Engine {
 
@@ -25,6 +26,13 @@ namespace Engine {
 		Warning,
 		Error,
 		Fatal
+	};
+
+	// The counted messages of a device (GpuDiagnostics::GetCounts, GraphicsDevice::Destroy).
+	struct GpuMessageCounts
+	{
+		uint64_t Errors = 0;   // Error and Fatal messages
+		uint64_t Warnings = 0; // Warning messages
 	};
 
 	// The NVRHI message callback (nvrhi::IMessageCallback) and the debug messenger's sink.
@@ -56,9 +64,19 @@ namespace Engine {
 		// validation errors and count as errors (§15.3).
 		void ReportMessage(GpuMessageSeverity severity, std::string_view source, std::string_view text);
 
+		// The debug messenger's callback (VK_EXT_debug_utils, GraphicsDevice.cpp) delegates here. A loader installation
+		// message (IsLoaderInstallationMessage) is logged as a Warn entry "Vulkan loader (<severity>): <text>" and not
+		// counted; every other message goes to ReportMessage with the source "Vulkan validation", at the severity of its
+		// highest bit (error, warning, otherwise info), its text prefixed with "[<messageIdName>] " unless the ID is empty
+		// or already in the text.
+		void ReportDebugUtilsMessage(VkDebugUtilsMessageSeverityFlagBitsEXT severity, VkDebugUtilsMessageTypeFlagsEXT types,
+			std::string_view messageIdName, std::string_view text);
+
 		// Error and Fatal messages since construction (or the last ResetCounts).
 		[[nodiscard]] uint64_t GetErrorCount() const;
 		[[nodiscard]] uint64_t GetWarningCount() const;
+		// Both counters at once.
+		[[nodiscard]] GpuMessageCounts GetCounts() const;
 		// Zeroes both counters (a test that provokes a validation message on purpose resets afterwards).
 		void ResetCounts();
 
@@ -94,6 +112,17 @@ namespace Engine {
 	// VK_ERROR_OUT_OF_HOST_MEMORY and VK_ERROR_OUT_OF_DEVICE_MEMORY are OutOfMemory, anything else Gpu. Used by the
 	// frame-boundary catch of vk::SystemError in App/FrameLoop.cpp and by the VkResult paths of Swapchain and FramePacer.
 	[[nodiscard]] FatalErrorKind GetFatalErrorKind(VkResult result);
+
+	// "ErrorDeviceLost (-4)": vulkan.hpp's name of `result` and its value, how every message of the engine names a VkResult.
+	[[nodiscard]] std::string VkResultToString(VkResult result);
+
+	// Whether a debug messenger message is one of the Khronos loader's notes about the machine's installation rather
+	// than about the application's use of Vulkan: the message ID name "Loader Message" without the validation or
+	// performance type. Examples are a third-party implicit layer built for an older API version, an unreadable manifest
+	// or no driver at all. They are logged without counting (ADR 0009 decision 26): a machine without a usable driver
+	// fails GraphicsDevice::Create with an error value instead. The loader's validation of API calls carries the
+	// validation type and counts like the layer's messages.
+	[[nodiscard]] bool IsLoaderInstallationMessage(VkDebugUtilsMessageTypeFlagsEXT types, std::string_view messageIdName);
 
 	// "Info", "Warning", "Error" or "Fatal".
 	[[nodiscard]] std::string_view GpuMessageSeverityToString(GpuMessageSeverity severity);

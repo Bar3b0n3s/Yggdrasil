@@ -17,6 +17,8 @@
 
 namespace Engine {
 
+	// A headless editor rendering with the Vulkan renderer, validated like every GPU test's process
+	// (Test::GetGpuApplicationArguments), with its logs in `userData`.
 	static Result<ProcessResult> RunScreenshotEditor(const Test::TempDirectory& userData, std::vector<std::string> arguments)
 	{
 		ENGINE_TRY_ASSIGN(std::filesystem::path editor, Test::GetBuiltExecutablePath("Editor"));
@@ -74,8 +76,10 @@ namespace Engine {
 		}
 
 		TEST_CASE("EditorApp: --viewport-screenshot writes the 640x360 clear-and-triangle view"
-			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+			* doctest::test_suite(Test::GpuSuite))
 		{
+			if (!Test::ProbeGpuForProcess())
+				return;
 			Test::TempDirectory userData("ViewportScreenshot");
 			const std::filesystem::path png = userData / "Viewport.png";
 			const Result<ProcessResult> result =
@@ -83,6 +87,7 @@ namespace Engine {
 			REQUIRE_MESSAGE(result.has_value(), result.error().ToString());
 			INFO("editor stderr: ", result->StandardError);
 			CHECK(result->ExitCode == ExitCode::Success);
+			CHECK(Test::FindProblemLogLines(result->StandardError).empty());
 			const Result<Image> image = ReadPng(png);
 			REQUIRE_MESSAGE(image.has_value(), image.error().ToString());
 			CHECK(image->Width == DefaultViewportScreenshotWidth);
@@ -91,12 +96,15 @@ namespace Engine {
 			const std::span<const std::byte> centreRow = image->GetRow(image->Height / 2);
 			const std::span<const std::byte> topRow = image->GetRow(0);
 			const size_t centre = static_cast<size_t>(image->Width / 2) * 4;
-			CHECK_FALSE(std::equal(centreRow.begin() + static_cast<std::ptrdiff_t>(centre), centreRow.begin() + static_cast<std::ptrdiff_t>(centre) + 3, topRow.begin()));
+			const auto centrePixel = centreRow.begin() + static_cast<std::ptrdiff_t>(centre);
+			CHECK_FALSE(std::equal(centrePixel, centrePixel + 3, topRow.begin()));
 		}
 
 		TEST_CASE("EditorApp: --editor-screenshot writes the editor UI at the window's framebuffer size"
-			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+			* doctest::test_suite(Test::GpuSuite))
 		{
+			if (!Test::ProbeGpuForProcess())
+				return;
 			Test::TempDirectory userData("EditorScreenshot");
 			const std::filesystem::path png = userData / "Editor.png";
 			const Result<ProcessResult> result =
@@ -104,11 +112,18 @@ namespace Engine {
 			REQUIRE_MESSAGE(result.has_value(), result.error().ToString());
 			INFO("editor stderr: ", result->StandardError);
 			CHECK(result->ExitCode == ExitCode::Success);
+			CHECK(Test::FindProblemLogLines(result->StandardError).empty());
 			const Result<Image> image = ReadPng(png);
 			REQUIRE_MESSAGE(image.has_value(), image.error().ToString());
 			// The headless editor's window has the default WindowSpecification size on the null platform (content scale 1).
 			CHECK(image->Width == 1600);
 			CHECK(image->Height == 900);
+			// The demo window is drawn over the clear colour (FrameClearColor, opaque black).
+			const bool onlyClearColor = std::ranges::all_of(image->Pixels, [](std::byte value)
+			{
+				return value == std::byte{ 0 } || value == std::byte{ 255 };
+			});
+			CHECK_FALSE(onlyClearColor);
 		}
 	}
 

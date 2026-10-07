@@ -55,9 +55,18 @@ namespace Engine {
 			CHECK_FALSE(compressed.IsValid());
 			const Image depth{ .Width = 1, .Height = 1, .Format = nvrhi::Format::D32, .Pixels = std::vector<std::byte>(4) };
 			CHECK_FALSE(depth.IsValid());
+
+			// An empty image is no image: a comparison of two sizes has no difference image (ImageCompareResult), and PNG
+			// encoding refuses it instead of writing a file with a zero-size header.
+			CHECK_FALSE(Image{}.IsValid());
+			const Image wide{ .Width = 4, .Height = 0, .Format = nvrhi::Format::RGBA8_UNORM };
+			CHECK_FALSE(wide.IsValid());
+			const Result<Buffer> encoded = EncodePng(Image{});
+			REQUIRE_FALSE(encoded.has_value());
+			CHECK(encoded.error().GetCode() == ErrorCode::InvalidArgument);
 		}
 
-		TEST_CASE("Image: CreateImage zero-fills and rejects sizes and formats it cannot hold" * doctest::skip(true))
+		TEST_CASE("Image: CreateImage zero-fills and rejects sizes and formats it cannot hold")
 		{
 			const Result<Image> image = CreateImage(5, 3, nvrhi::Format::RG16_FLOAT);
 			REQUIRE_MESSAGE(image.has_value(), image.error().ToString());
@@ -72,7 +81,7 @@ namespace Engine {
 			CHECK(ErrorCodeOf(CreateImage(4, 4, nvrhi::Format::D32)) == ErrorCode::InvalidArgument);
 		}
 
-		TEST_CASE("Image: PNG encoding round-trips RGBA8 exactly and is deterministic" * doctest::skip(true))
+		TEST_CASE("Image: PNG encoding round-trips RGBA8 exactly and is deterministic")
 		{
 			const Image original = MakeGradient(37, 21);
 			const Result<Buffer> first = EncodePng(original);
@@ -96,7 +105,7 @@ namespace Engine {
 			CHECK(ErrorCodeOf(ReadPng(directory / "Missing.png")) == ErrorCode::NotFound);
 		}
 
-		TEST_CASE("Image: BGRA8 is swizzled and sRGB formats are taken as encoded bytes" * doctest::skip(true))
+		TEST_CASE("Image: BGRA8 is swizzled and sRGB formats are taken as encoded bytes")
 		{
 			Image bgra{ .Width = 1, .Height = 1, .Format = nvrhi::Format::BGRA8_UNORM };
 			bgra.Pixels = { std::byte{ 10 }, std::byte{ 20 }, std::byte{ 30 }, std::byte{ 40 } };
@@ -117,7 +126,7 @@ namespace Engine {
 			CHECK(ErrorCodeOf(EncodePng(floats)) == ErrorCode::InvalidArgument);
 		}
 
-		TEST_CASE("Image: malformed and mutated PNG data is a Parse error, never a crash" * doctest::skip(true))
+		TEST_CASE("Image: malformed and mutated PNG data is a Parse error, never a crash")
 		{
 			CHECK(ErrorCodeOf(DecodePng({})) == ErrorCode::Parse);
 			const std::array<std::byte, 8> notPng = {};
@@ -141,7 +150,63 @@ namespace Engine {
 			}
 		}
 
-		TEST_CASE("Image: DownscaleImage fits the larger side and keeps the aspect ratio" * doctest::skip(true))
+		TEST_CASE("Image: DecodePng accepts PNG only and rejects a header declaring more pixels than the file holds")
+		{
+			// stb_image decodes other formats too; a BMP is not a PNG.
+			std::array<std::byte, 64> bitmap{};
+			bitmap[0] = std::byte{ 'B' };
+			bitmap[1] = std::byte{ 'M' };
+			const Result<Image> notPng = DecodePng(bitmap);
+			REQUIRE_FALSE(notPng.has_value());
+			CHECK(notPng.error().GetCode() == ErrorCode::Parse);
+			CHECK(notPng.error().GetMessageText().contains("not a PNG"));
+
+			// The IHDR chunk's width and height (big-endian, after the 8-byte signature and the chunk's length and type) set
+			// to 4096 x 4096: a size stb_image accepts, but 16 Mi pixels cannot come from a file of a few hundred bytes.
+			Result<Buffer> encoded = EncodePng(MakeGradient(16, 16));
+			REQUIRE(encoded.has_value());
+			Buffer& bytes = *encoded;
+			REQUIRE(bytes.size() > 24);
+			for (const size_t offset : { size_t{ 16 }, size_t{ 20 } })
+			{
+				bytes[offset + 0] = std::byte{ 0x00 };
+				bytes[offset + 1] = std::byte{ 0x00 };
+				bytes[offset + 2] = std::byte{ 0x10 };
+				bytes[offset + 3] = std::byte{ 0x00 };
+			}
+			const Result<Image> oversized = DecodePng(bytes);
+			REQUIRE_FALSE(oversized.has_value());
+			CHECK(oversized.error().GetCode() == ErrorCode::Parse);
+			CHECK(oversized.error().GetMessageText().contains("4096x4096"));
+		}
+
+		TEST_CASE("Image: DownscaleImage averages the pixels each output pixel covers")
+		{
+			// 4 x 2 -> 2 x 1: each output pixel is the rounded mean of a 2 x 2 block.
+			Image source{ .Width = 4, .Height = 2, .Format = nvrhi::Format::RGBA8_UNORM, .Pixels = std::vector<std::byte>(32, std::byte{ 255 }) };
+			const std::array<uint8_t, 4> leftBlock = { 10, 20, 30, 43 };
+			for (size_t index = 0; index < leftBlock.size(); ++index)
+			{
+				const size_t pixel = (index / 2) * 4 + (index % 2); // (0, 0), (1, 0), (0, 1), (1, 1)
+				source.Pixels[pixel * 4] = static_cast<std::byte>(leftBlock[index]);
+			}
+			const Result<Image> result = DownscaleImage(source, 2);
+			REQUIRE_MESSAGE(result.has_value(), result.error().ToString());
+			REQUIRE(result->Width == 2);
+			REQUIRE(result->Height == 1);
+			CHECK(result->Pixels[0] == std::byte{ 26 }); // 103 / 4 = 25.75, rounded to the nearest value
+			CHECK(result->Pixels[1] == std::byte{ 255 });
+			CHECK(result->Pixels[4] == std::byte{ 255 });
+
+			// BGRA input comes out as RGBA8.
+			Image bgra = MakeGradient(8, 8);
+			bgra.Format = nvrhi::Format::BGRA8_UNORM;
+			const Result<Image> converted = DownscaleImage(bgra, 4);
+			REQUIRE(converted.has_value());
+			CHECK(converted->Format == nvrhi::Format::RGBA8_UNORM);
+		}
+
+		TEST_CASE("Image: DownscaleImage fits the larger side and keeps the aspect ratio")
 		{
 			const Image wide = MakeGradient(640, 360);
 			const Result<Image> small = DownscaleImage(wide, 320);

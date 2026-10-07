@@ -44,7 +44,7 @@ namespace Engine {
 
 	TEST_SUITE("Graphics")
 	{
-		TEST_CASE("Swapchain: acquire and present results map to the documented actions" * doctest::skip(true))
+		TEST_CASE("Swapchain: acquire and present results map to the documented actions")
 		{
 			CHECK(ClassifyAcquireResult(VK_SUCCESS) == SwapchainAction::Continue);
 			CHECK(ClassifyAcquireResult(VK_SUBOPTIMAL_KHR) == SwapchainAction::ContinueThenRecreate);
@@ -71,7 +71,7 @@ namespace Engine {
 
 		// Runs only in a windowed child process (Support/WindowedChild.h): a real window and its swapchain through a resize, a
 		// minimize and a restore, presenting all along.
-		TEST_CASE("Swapchain: a native window's swapchain survives resize, minimize and restore"
+		TEST_CASE("Swapchain: a native window's swapchain survives resizing and minimizing"
 			* doctest::test_suite(Test::ChildTargetSuite) * doctest::skip(true))
 		{
 			Result<Scope<EngineContext>> created = EngineContext::Create({
@@ -93,7 +93,8 @@ namespace Engine {
 			Window& window = *context.GetWindow();
 			Result<Scope<Swapchain>> swapchain = Swapchain::Create(device, window, { .VSync = true, .FramesInFlight = 2 });
 			REQUIRE_MESSAGE(swapchain.has_value(), swapchain.error().ToString());
-			FramePacer pacer(device, 2);
+			Scope<FramePacer> framePacer = CreateScope<FramePacer>(device, 2);
+			FramePacer& pacer = *framePacer;
 			Result<nvrhi::CommandListHandle> commandList = device.CreateCommandList();
 			REQUIRE_MESSAGE(commandList.has_value(), commandList.error().ToString());
 			const nvrhi::Format format = (*swapchain)->GetFormat();
@@ -166,15 +167,22 @@ namespace Engine {
 			CHECK(PresentFrames(device, **swapchain, pacer, **commandList, window, 5) == 1);
 			CHECK((*swapchain)->GetRecreationCount() == recreations + 1);
 
+			// Zero validation messages and nothing left alive, like the GPU fixture checks (HeadlessGpuFixture.h): the counts are
+			// read after the device's teardown, which reports leaks too.
 			device.WaitForIdle();
 			commandList->Reset();
 			swapchain->reset();
-			CHECK(device.GetDiagnostics().GetErrorCount() == 0);
+			framePacer.reset();
+			device.RunGarbageCollection();
+			CHECK_MESSAGE(device.GetResourceTracker().GetTotalLiveCount() == 0, device.GetResourceTracker().DescribeLiveCounts());
+			const GpuMessageCounts counts = context.DestroyGraphics();
+			CHECK(counts.Errors == 0);
+			CHECK(counts.Warnings == 0);
 		}
 
-		TEST_CASE("Swapchain: resize, minimize and out-of-date recover" * doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+		TEST_CASE("Swapchain: resize, minimize and out-of-date recover" * doctest::test_suite(Test::GpuSuite))
 		{
-			std::vector<std::string> arguments = { "--windowed-child=Swapchain: a native window's swapchain survives resize, minimize and restore" };
+			std::vector<std::string> arguments = { "--windowed-child=Swapchain: a native window's swapchain survives resizing and minimizing" };
 			const std::vector<std::string> gpuArguments = Test::GetGpuTestsChildArguments();
 			arguments.insert(arguments.end(), gpuArguments.begin(), gpuArguments.end());
 			const Result<ProcessResult> child = Process::Run(Test::MakeTestsChildSpecification(std::move(arguments)), std::chrono::seconds(60));

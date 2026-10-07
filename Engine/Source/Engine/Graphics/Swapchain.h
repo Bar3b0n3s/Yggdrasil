@@ -7,7 +7,9 @@
 #include <vulkan/vulkan_core.h>
 
 #include <cstdint>
+#include <optional>
 #include <string_view>
+#include <vector>
 
 // The window's swapchain (Architecture §8.1): our own code, not NVRHI's. glfwCreateWindowSurface, a VkSwapchainKHR, and
 // its images wrapped with GraphicsDevice::CreateHandleForNativeTexture. Format B8G8R8A8_UNORM, else R8G8B8A8_UNORM (UNORM
@@ -93,13 +95,17 @@ namespace Engine {
 		// Creates the surface (glfwCreateWindowSurface on window.GetNativeHandle()) and the swapchain at the window's
 		// framebuffer size. `device` and `window` are documented back-references and must outlive the swapchain; the
 		// device must have been created with this window as GraphicsDeviceSpecification::PresentWindow. A 0x0 framebuffer
-		// creates no VkSwapchainKHR yet (IsMinimized). Errors: Unsupported when the surface supports neither format;
-		// Gpu for a failed Vulkan call or image wrapping.
+		// (or an iconified window) creates no VkSwapchainKHR yet (IsMinimized). Errors: InvalidState when the device has no
+		// swapchain entry points (created without a PresentWindow); Unsupported when the surface supports neither format,
+		// or the graphics queue family cannot present to it; Gpu for a failed Vulkan call or image wrapping.
 		[[nodiscard]] static Result<Scope<Swapchain>> Create(GraphicsDevice& device, Window& window, const SwapchainSpecification& specification);
 
 		// Acquires the next image for frame slot `frameSlot` (FramePacer::GetFrameSlot). First, when the window's
 		// framebuffer size differs from the swapchain's (a resize) or a recreation is pending, recreates the swapchain
-		// (GraphicsDevice::WaitForIdle first) and returns Skipped; a 0x0 framebuffer returns Skipped without recreating.
+		// (GraphicsDevice::WaitForIdle first) and returns Skipped; a minimized window (Window::IsMinimized: iconified, or a
+		// framebuffer with a zero dimension) returns Skipped without recreating, and releases the swapchain (WaitForIdle
+		// first) until a later call sees it restored. However many resize events and results marked a recreation since the
+		// last call, it happens once, at the framebuffer size of that moment.
 		// Otherwise vkAcquireNextImageKHR with a timeout of GpuWaitSliceNanoseconds (FramePacer.h), acting on
 		// ClassifyAcquireResult: Continue returns Acquired; ContinueThenRecreate returns Acquired and marks a recreation for
 		// the next call; Recreate and RecreateSurface recreate and return Skipped; Retry returns Skipped (logged at Warn on
@@ -117,8 +123,9 @@ namespace Engine {
 		// the process. Call it after the frame's last submission.
 		void Present();
 
-		// Marks a recreation for the next AcquireNextImage (the application calls it on a WindowResizeEvent; a size change
-		// is also detected without it).
+		// Marks a recreation for the next AcquireNextImage, for a caller that knows of one the size check cannot see. A
+		// framebuffer size change needs no call: AcquireNextImage compares the size with the one the swapchain was created
+		// for, so Application does not call it on WindowResizeEvent (several events of one resize would each mark one).
 		void RequestRecreate();
 
 		// Test hooks for the windowed child of "Swapchain: resize, minimize and out-of-date recover": they make the next real
@@ -147,10 +154,61 @@ namespace Engine {
 		[[nodiscard]] uint32_t GetImageCount() const;
 		// VK_PRESENT_MODE_FIFO_KHR, MAILBOX or IMMEDIATE.
 		[[nodiscard]] VkPresentModeKHR GetPresentMode() const;
-		// True while the window's framebuffer is 0x0, or has a zero dimension, and no VkSwapchainKHR exists.
+		// True while no VkSwapchainKHR exists because the window is minimized (iconified, or a framebuffer with a zero
+		// dimension) or its surface reports a zero extent.
 		[[nodiscard]] bool IsMinimized() const;
 		// The number of recreations since Create (resize, out-of-date, suboptimal, surface loss); for tests.
 		[[nodiscard]] uint32_t GetRecreationCount() const;
+	private:
+		// One swapchain image: the VkImage the swapchain owns, its NVRHI wrapper and framebuffer, and its present semaphore,
+		// which the frame's last submission signals and vkQueuePresentKHR waits on.
+		struct SwapchainImage
+		{
+			VkImage Handle = VK_NULL_HANDLE;
+			nvrhi::TextureHandle Texture{};
+			nvrhi::FramebufferHandle Framebuffer{};
+			VkSemaphore PresentSemaphore = VK_NULL_HANDLE;
+		};
+	private:
+		// glfwCreateWindowSurface and the presentation-support check of the graphics queue family.
+		[[nodiscard]] Status CreateSurface();
+		// A VkSwapchainKHR at the framebuffer size `width` x `height` (the surface's fixed extent wins), replacing and
+		// destroying the current one, with its images wrapped. Creates none while the surface reports a zero extent.
+		[[nodiscard]] Status CreateSwapchain(uint32_t width, uint32_t height);
+		// GraphicsDevice::WaitForIdle, the images released, the surface recreated when it was lost, then CreateSwapchain.
+		[[nodiscard]] Status Recreate(uint32_t width, uint32_t height);
+		// Drops the images' handles, collects them (GraphicsDevice::RunGarbageCollection) and destroys the present
+		// semaphores. The GPU must be idle.
+		void ReleaseImages();
+		void DestroySwapchain();
+		void DestroySurface();
+		// The fatal end of a swapchain call: GraphicsDevice::RaiseDeviceLost for VK_ERROR_DEVICE_LOST, otherwise
+		// FatalError with GetFatalErrorKind(result).
+		[[noreturn]] void EndProcess(std::string_view call, VkResult result);
+	private:
+		GraphicsDevice* m_Device = nullptr; // documented back-reference: outlives the swapchain
+		Window* m_Window = nullptr;         // documented back-reference: outlives the swapchain
+		SwapchainSpecification m_Specification{};
+		VkSurfaceKHR m_Surface = VK_NULL_HANDLE;
+		VkSwapchainKHR m_Swapchain = VK_NULL_HANDLE;
+		std::vector<SwapchainImage> m_Images;
+		std::vector<VkSemaphore> m_AcquireSemaphores; // one per frame in flight
+		nvrhi::Format m_Format = nvrhi::Format::UNKNOWN;
+		VkPresentModeKHR m_PresentMode = VK_PRESENT_MODE_FIFO_KHR;
+		// The swapchain's extent, and the framebuffer size it was created for (they differ when the surface fixes the extent).
+		uint32_t m_Width = 0;
+		uint32_t m_Height = 0;
+		uint32_t m_RequestedWidth = 0;
+		uint32_t m_RequestedHeight = 0;
+		uint32_t m_CurrentImage = 0;
+		uint32_t m_CurrentSlot = 0;
+		uint32_t m_RecreationCount = 0;
+		std::optional<VkResult> m_InjectedAcquireResult{};
+		std::optional<VkResult> m_InjectedPresentResult{};
+		bool m_HasAcquiredImage = false;
+		bool m_IsRecreatePending = false;
+		bool m_IsSurfaceLost = false;
+		bool m_IsAcquireTimingOut = false; // the last acquire timed out, so the next timeout is not logged again
 	};
 
 	// The enumerator name ("Continue", "Recreate", ...).

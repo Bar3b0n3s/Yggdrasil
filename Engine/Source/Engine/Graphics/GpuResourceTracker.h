@@ -4,10 +4,12 @@
 
 #include <nvrhi/nvrhi.h>
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 
 // Live GPU object counts per type (Architecture §8.14 item 5). GPU tests assert that the live counts return to their
 // baseline after a scene unloads and are zero when the device is destroyed ("GpuResourceTracker: live counts return to
@@ -119,6 +121,18 @@ namespace Engine {
 			return true;
 #endif
 		}
+	private:
+		// One object a creation wrapper made, with the tracker's reference to it.
+		struct TrackedResource
+		{
+			GpuResourceType Type = GpuResourceType::Texture;
+			nvrhi::RefCountPtr<nvrhi::IResource> Resource{};
+		};
+	private:
+		std::array<GpuResourceCounts, GpuResourceTypeCount> m_Counts{};
+		// Keyed by the object, so HasOtherReferences finds whether the tracker holds it. The order of a Sweep's releases is
+		// not observable: each object is destroyed once its last reference drops, whatever the order.
+		std::unordered_map<nvrhi::IResource*, TrackedResource> m_Tracked;
 	};
 
 	// The enumerator name ("Texture", "HostImage", ...).

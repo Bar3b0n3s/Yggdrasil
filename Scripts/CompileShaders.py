@@ -69,6 +69,8 @@ VALIDATOR_FLAGS = ("--target-env", "vulkan1.3")
 PROGRAM_NAME_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 PERMUTATION_KEY_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]*$")
 PERMUTATION_VALUE_PATTERN = re.compile(r"^[A-Za-z0-9_]+$")
+# Macros slangc_flags defines for every variant; no permutation may use them as keys.
+RESERVED_DEFINES = frozenset({"ENGINE_SHADER"})
 
 
 class UsageError(Exception):
@@ -207,6 +209,8 @@ def load_variants(manifest_path: Path) -> list[Variant]:
             values = permutations[key]
             if not PERMUTATION_KEY_PATTERN.match(key):
                 raise UsageError(f"{where}: permutation key '{key}' must match {PERMUTATION_KEY_PATTERN.pattern}")
+            if key in RESERVED_DEFINES:
+                raise UsageError(f"{where}: permutation key '{key}' is defined by CompileShaders.py itself")
             if (
                 not isinstance(values, list)
                 or not values
@@ -307,6 +311,8 @@ def slangc_flags(variant: Variant, config: str) -> list[str]:
         "-fvk-b-shift", "256", "all",
         "-fvk-u-shift", "384", "all",
         "-I", SHADER_ROOT_RELATIVE,
+        # The Slang side of the headers shared with C++ (Resources/Shaders/Shared, §8.4).
+        "-DENGINE_SHADER=1",
         "-warnings-as-errors", "all",
         "-O2",
     ]

@@ -6,7 +6,8 @@
 // the C++ layout (glm types are 4-byte aligned) equals the constant-buffer layout slangc chooses, which
 // "Shaders: SharedStructsMatchReflection" compares member by member with offsetof.
 //
-// slangc predefines __SLANG__; C++ compilers never do. ENGINE_SHADER is set for the Slang side.
+// ENGINE_SHADER selects the Slang side: Scripts/CompileShaders.py defines it, and slangc's predefined __SLANG__, which C++
+// compilers never define, sets it for any other slangc run.
 #if defined(__SLANG__) && !defined(ENGINE_SHADER)
 	#define ENGINE_SHADER 1
 #endif

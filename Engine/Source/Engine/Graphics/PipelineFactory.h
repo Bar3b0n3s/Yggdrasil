@@ -30,6 +30,17 @@ namespace Engine {
 		nvrhi::Format Format = nvrhi::Format::UNKNOWN;
 	};
 
+	// The byte size of the buffer a pass binds to one of its constant buffers, sizeof the C++ struct it fills: the size of
+	// the binding's reflected element struct must equal it (§8.12: "constant-buffer size"), so a pass that binds the wrong
+	// struct, or a buffer of the wrong size, to a register fails the check. "Shaders: SharedStructsMatchReflection"
+	// checks the members of each shared struct; this ties the struct to the register.
+	struct ConstantBufferSize
+	{
+		uint32_t Set = 0;      // register space
+		uint32_t Register = 0; // the b register (BindingLayoutItem::slot)
+		uint32_t ByteSize = 0;
+	};
+
 	// Everything about a pipeline that the reflection check needs, available without a device. Each pass provides one
 	// through a static function (TrianglePass::GetLayoutDescription, ImGuiRenderer::GetLayoutDescription), so the CPU test
 	// can check every pipeline.
@@ -43,14 +54,21 @@ namespace Engine {
 		// true (§8.4). Push constants are a BindingLayoutItem::PushConstants of the set-0 layout.
 		std::vector<nvrhi::BindingLayoutDesc> BindingLayouts{};
 		std::vector<StorageImageFormat> StorageImages{};
+		// One entry per constant buffer of the layouts (push constants carry their size in their layout item).
+		std::vector<ConstantBufferSize> ConstantBuffers{};
 	};
 
 	// The reflection check (CPU only): every binding any of the entries uses must be declared by the layout of its set with
-	// the same register class, shift-adjusted binding number and array size; every constant buffer's size and the push
-	// constants' size must equal the reflected struct size; every layout item must exist in some entry's reflection; every
-	// storage image must have a StorageImages entry whose format equals its reflected [vk::image_format]; and every layout
-	// must set registerSpaceIsDescriptorSet. Errors: Validation listing every mismatch as an ErrorIssue (JSON pointer
-	// "/<set>/<binding name>") with the pipeline's name as context; those of ShaderLibrary::GetReflection.
+	// the same register class, resource shape, shift-adjusted binding number (the item's slot plus the layout's
+	// bindingOffsets) and array size, and must be visible to every stage that uses it; the entries must agree on every
+	// binding they share, constant-buffer sizes included; every constant buffer must have a ConstantBuffers entry whose
+	// ByteSize equals the reflected size of its element struct, and no ConstantBuffers entry may be left over; the push
+	// constants are one PushConstants item of the reflected size, at most 128 bytes, matched by kind rather than by slot;
+	// every layout item must exist in some entry's reflection; every storage image must declare its [vk::image_format]
+	// and have a StorageImages entry with that format, and no StorageImages entry may be left over; unbounded arrays,
+	// duplicate sets and duplicate bindings are rejected; and every layout must set registerSpaceIsDescriptorSet. Errors:
+	// Validation listing every mismatch as an ErrorIssue (JSON pointer "/<set>/<binding name>") with the pipeline's name
+	// as context; those of ShaderLibrary::GetReflection.
 	[[nodiscard]] Status ValidatePipelineLayout(const PipelineLayoutDescription& description, ShaderLibrary& shaders);
 
 	struct GraphicsPipelineSpecification
@@ -60,10 +78,11 @@ namespace Engine {
 		// through GraphicsDevice::CreateShaderSpecialization; a stage ignores the constant IDs it does not declare. Empty:
 		// the shaders as compiled.
 		std::vector<nvrhi::ShaderSpecialization> Specializations{};
-		std::vector<nvrhi::VertexAttributeDesc> VertexAttributes{}; // empty: no input layout (vertices from SV_VertexID)
+		std::vector<nvrhi::VertexAttributeDesc> VertexAttributes{}; // empty: no input layout (vertices from the vertex index)
 		nvrhi::PrimitiveType Primitive = nvrhi::PrimitiveType::TriangleList;
-		// Rasterizer, blend and depth-stencil state. Engine pipelines set rasterState.frontCounterClockwise = true, because the
-		// projection flips Y for Vulkan clip space and glTF front faces are counter-clockwise (§8.3).
+		// Rasterizer, blend and depth-stencil state. Engine pipelines set rasterState.frontCounterClockwise = true, because
+		// glTF front faces are counter-clockwise and clip-space +Y is up: NVRHI's Vulkan viewport performs the Vulkan Y flip
+		// (§8.3).
 		nvrhi::RenderState RenderState{};
 		// The target's formats and sample count.
 		nvrhi::FramebufferInfo Framebuffer{};
@@ -90,7 +109,8 @@ namespace Engine {
 		std::vector<nvrhi::BindingLayoutHandle> BindingLayouts{};
 	};
 
-	// Not copyable or movable; main thread only (§4.11). All engine pipelines are created at startup (§8.12).
+	// Not copyable or movable; main thread only (§4.11). The passes' pipelines are created at startup (§8.12); ImGui's are
+	// created per target format on first use (ADR 0009 decision 25).
 	class PipelineFactory
 	{
 	public:
@@ -112,6 +132,7 @@ namespace Engine {
 		[[nodiscard]] ShaderLibrary& GetShaderLibrary() { return *m_Shaders; }
 	private:
 		ShaderLibrary* m_Shaders = nullptr; // documented back-reference
+		GraphicsDevice* m_Device = nullptr; // documented back-reference
 	};
 
 }

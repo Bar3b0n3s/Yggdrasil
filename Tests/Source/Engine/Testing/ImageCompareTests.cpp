@@ -23,7 +23,7 @@ namespace Engine {
 
 	TEST_SUITE("Testing")
 	{
-		TEST_CASE("ImageCompare: thresholds of the golden comparison" * doctest::skip(true))
+		TEST_CASE("ImageCompare: thresholds of the golden comparison")
 		{
 			// 100 x 100 pixels: 0.1 % is 10 pixels (§15.4: fail above 0.1 % beyond 2/255, or any pixel beyond 24/255).
 			const Image expected = MakeUniform(100, 100, 100);
@@ -67,7 +67,52 @@ namespace Engine {
 			CHECK(loose->LargestDifference == 10);
 		}
 
-		TEST_CASE("ImageCompare: images of different sizes never pass" * doctest::skip(true))
+		TEST_CASE("ImageCompare: the difference image is black where equal, scaled where close and red beyond the maximum")
+		{
+			const Image expected = MakeUniform(3, 1, 100);
+			Image actual = expected;
+			actual.Pixels[4 + 1] = std::byte{ 103 }; // pixel 1: green off by 3
+			actual.Pixels[8 + 2] = std::byte{ 200 }; // pixel 2: blue off by 100
+			const Result<ImageCompareResult> result = CompareImages(actual, expected);
+			REQUIRE_MESSAGE(result.has_value(), result.error().ToString());
+			const std::vector<std::byte>& difference = result->Difference.Pixels;
+			REQUIRE(difference.size() == 12);
+			const auto pixel = [&difference](size_t index)
+			{
+				return std::array<uint8_t, 4>{ std::to_integer<uint8_t>(difference[index * 4 + 0]), std::to_integer<uint8_t>(difference[index * 4 + 1]),
+					std::to_integer<uint8_t>(difference[index * 4 + 2]), std::to_integer<uint8_t>(difference[index * 4 + 3]) };
+			};
+			CHECK(pixel(0) == std::array<uint8_t, 4>{ 0, 0, 0, 255 });
+			const std::array<uint8_t, 4> close = pixel(1);
+			CHECK(close[0] == 0);
+			CHECK(close[1] > 0); // the green difference, scaled up
+			CHECK(close[2] == 0);
+			CHECK(pixel(2) == std::array<uint8_t, 4>{ 255, 0, 0, 255 });
+			CHECK(result->DifferingPixels == 2);
+			CHECK(result->LargestDifference == 100);
+			CHECK_FALSE(result->Passed);
+			CHECK(result->Summary.starts_with("failed: 2 of 3 pixels"));
+		}
+
+		TEST_CASE("ImageCompare: BGRA8 and RGBA8 images of the same colours are equal")
+		{
+			Image rgba = MakeUniform(2, 2, 0);
+			Image bgra = rgba;
+			bgra.Format = nvrhi::Format::BGRA8_UNORM;
+			for (size_t offset = 0; offset < rgba.Pixels.size(); offset += 4)
+			{
+				rgba.Pixels[offset + 0] = std::byte{ 10 };  // red
+				rgba.Pixels[offset + 2] = std::byte{ 200 }; // blue
+				bgra.Pixels[offset + 0] = std::byte{ 200 }; // blue first in BGRA
+				bgra.Pixels[offset + 2] = std::byte{ 10 };
+			}
+			const Result<ImageCompareResult> result = CompareImages(bgra, rgba);
+			REQUIRE_MESSAGE(result.has_value(), result.error().ToString());
+			CHECK(result->Passed);
+			CHECK(result->LargestDifference == 0);
+		}
+
+		TEST_CASE("ImageCompare: images of different sizes never pass")
 		{
 			const Result<ImageCompareResult> result = CompareImages(MakeUniform(10, 10, 0), MakeUniform(10, 11, 0));
 			REQUIRE_MESSAGE(result.has_value(), result.error().ToString());
@@ -81,7 +126,7 @@ namespace Engine {
 			CHECK(rejected.error().GetCode() == ErrorCode::InvalidArgument);
 		}
 
-		TEST_CASE("ImageCompare: smoke statistics describe the luminance and the colours" * doctest::skip(true))
+		TEST_CASE("ImageCompare: smoke statistics describe the luminance and the colours")
 		{
 			const Result<ImageStatistics> black = ComputeImageStatistics(MakeUniform(4, 4, 0));
 			REQUIRE_MESSAGE(black.has_value(), black.error().ToString());

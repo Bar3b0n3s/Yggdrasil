@@ -1,11 +1,23 @@
 # Continuous integration on GitHub-hosted runners (Docs/Architecture.md §15.8; Docs/Decisions/0001-approvals.md,
 # "Repository remote and CI"). A platform counts as verified once its job here is green.
 #
-# Every job runs Scripts/CI.py, the single CI entry point (Architecture §15.8), with every stage a GPU-less hosted
-# runner can run: setup, generate, lint, build, unit and portability.
+# Every job runs Scripts/CI.py, the single CI entry point (Architecture §15.8), with every stage a hosted runner can
+# run: setup, generate, lint, build, unit, gpu, golden and portability.
 # - windows: one CI.py run over all of them (the local gate is the full CI.py).
 # - linux:   gmake, once with GCC 14 and once with Clang 19 (Architecture §15.8).
 # - macos:   arm64 with the xcode4 generator and xcodebuild.
+#
+# GPU stages (Docs/Decisions/0009-m5-decisions.md, integration decisions): the hosted runners have no GPU.
+# - linux runs the gpu (Debug, Release) and golden (Release) stages on Lavapipe, Mesa's software Vulkan driver
+#   (mesa-vulkan-drivers), with VK_LAYER_KHRONOS_validation from the pinned Vulkan SDK, under the same Xvfb display as
+#   the unit tests (the swapchain and windowed-application children present to X11). VK_DRIVER_FILES selects Lavapipe
+#   alone and VK_LAYER_PATH points the loader at the SDK's validation layer. CI.py passes --require-gpu, so a broken
+#   driver or layer setup fails instead of skipping. Lavapipe meets the Vulkan 1.3 feature set of §8.1 (dynamic
+#   rendering, synchronization2, timeline semaphores, anisotropy, cube arrays, extended storage formats); the golden
+#   stage runs in smoke mode there, because §15.4 commits no software-rasterizer goldens.
+# - windows and macos run the gpu and golden stages with --gpu-optional: without a usable Vulkan device (no driver on
+#   the Windows image; MoltenVK's loader is not on the macOS library path) every GPU test case passes without running,
+#   naming the reason, and the steps end as warnings.
 # On linux and macos, CI.py runs once per step below: setup + generate, then the static checks, then build + unit per
 # configuration, then portability. Each later step runs whenever generation succeeded, even when an earlier step
 # failed, so one run reports every configuration (CI.py itself stops at the first failing stage). Each run writes its
@@ -156,14 +168,15 @@ jobs:
           "VULKAN_SDK=$root" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "$root\Bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
-      # Stages a hosted runner can run: it has no GPU. These are all the M0 stages: setup, generate, lint (which
-      # includes CheckBuildConfig.py on the workspace and its fixtures, Lint.py, Lint.py --self-test and the format
-      # check), build, unit and portability (which includes the clang-cl Release build; this image has the VS C++
-      # Clang component, so --require-clang-cl turns a missing component into a failure instead of a skip). Add each
-      # later CPU-only stage here when it lands. The GPU stages (bake, gpu, golden, feature, automation, export,
+      # Stages a hosted runner can run: setup, generate, lint (which includes CheckBuildConfig.py on the workspace and
+      # its fixtures, Lint.py, Lint.py --self-test and the format check), build, unit, gpu and golden (with
+      # --gpu-optional: this image has no Vulkan device, so the GPU test cases report the reason and pass without
+      # running) and portability (which includes the clang-cl Release and Dist builds; this image has the VS C++ Clang
+      # component, so --require-clang-cl turns a missing component into a failure instead of a skip). Add each later
+      # CPU-only stage here when it lands. The stages that need a real GPU (bake, feature, automation, export,
       # determinism, games) stay with the local gate on a machine with a Vulkan device.
       - name: Run CI.py
-        run: python Scripts/CI.py --stages setup,generate,lint,build,unit,portability --require-clang-cl
+        run: python Scripts/CI.py --stages setup,generate,lint,build,unit,gpu,golden,portability --require-clang-cl --gpu-optional
 
       - name: Upload test results
         if: ${{ !cancelled() }}
@@ -247,10 +260,12 @@ jobs:
           # xorg-dev covers GLFW's X11 build (Vendor/GLFW/VENDOR.md) and is the package Setup.py checks for.
           # clang-19, clang-tidy-19 and clang-tools-19 (clang-query) serve the lint stage in both matrix entries.
           # xvfb, openbox and x11-utils (xprop) give the unit tests' windowed children a display with a window manager
-          # (ADR 0005 decision 13).
+          # (ADR 0005 decision 13). mesa-vulkan-drivers provides Lavapipe, the Vulkan device of the gpu and golden
+          # stages.
           # PACKAGES is a fixed list from the matrix above; it is split into words on purpose.
           # shellcheck disable=SC2086
-          sudo apt-get install --yes --no-install-recommends $PACKAGES clang-19 clang-tidy-19 clang-tools-19 xorg-dev             xvfb openbox x11-utils
+          sudo apt-get install --yes --no-install-recommends $PACKAGES clang-19 clang-tidy-19 clang-tools-19 xorg-dev \
+            xvfb openbox x11-utils mesa-vulkan-drivers
           python3 -m pip install --disable-pip-version-check --require-hashes --no-deps --requirement .github/ci-requirements.txt
           versions="$(first_line "$CXX" --version); $(first_line "$AR" --version); $(first_line make --version); $(clang-format --version); Python $(python3 -c 'import platform; print(platform.python_version())')"
           echo "$versions"
@@ -301,6 +316,16 @@ jobs:
           echo "VULKAN_SDK=$sdk" >> "$GITHUB_ENV"
           echo "LD_LIBRARY_PATH=$sdk/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" >> "$GITHUB_ENV"
           echo "$sdk/bin" >> "$GITHUB_PATH"
+          # The GPU stages: the SDK's validation layer (its manifest names the library, which the loader finds on
+          # LD_LIBRARY_PATH) and Lavapipe as the only driver.
+          layers="$sdk/share/vulkan/explicit_layer.d"
+          [ -f "$layers/VkLayer_khronos_validation.json" ] || { echo "::error::VkLayer_khronos_validation.json is missing from $layers"; exit 1; }
+          lavapipe=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+          [ -f "$lavapipe" ] || { echo "::error::Lavapipe's ICD manifest $lavapipe is missing (mesa-vulkan-drivers)"; exit 1; }
+          echo "VK_LAYER_PATH=$layers" >> "$GITHUB_ENV"
+          echo "VK_DRIVER_FILES=$lavapipe" >> "$GITHUB_ENV"
+          # The device the GPU stages use, for the log: its name, API version and driver version (the Mesa release).
+          VK_LAYER_PATH="$layers" VK_DRIVER_FILES="$lavapipe" LD_LIBRARY_PATH="$sdk/lib" "$sdk/bin/vulkaninfo" --summary
 
       - name: Setup and generate (gmake, ${{ matrix.toolset }})
         id: generate
@@ -313,7 +338,7 @@ jobs:
       # Windowed child processes need a display and, on X11, a window manager that iconifies windows (ADR 0005
       # decision 13): openbox runs inside a 24-bit Xvfb display and is confirmed through _NET_SUPPORTING_WM_CHECK
       # before CI.py starts.
-      - name: Debug (build, shader up-to-date check, unit tests)
+      - name: Debug (build, shader up-to-date check, unit and GPU tests)
         if: ${{ !cancelled() && steps.generate.outcome == 'success' }}
         run: |
           xvfb-run -a --server-args='-screen 0 1920x1080x24' sh -c '
@@ -324,12 +349,12 @@ jobs:
               if [ "$tries" -gt 300 ]; then echo "openbox did not start within 30 seconds" >&2; exit 1; fi
               sleep 0.1
             done
-            exec python3 Scripts/CI.py --stages build,unit --configs Debug --summary-junit bin/TestResults/CI-Debug.xml'
+            exec python3 Scripts/CI.py --stages build,unit,gpu --configs Debug --summary-junit bin/TestResults/CI-Debug.xml'
 
       # Windowed child processes need a display and, on X11, a window manager that iconifies windows (ADR 0005
       # decision 13): openbox runs inside a 24-bit Xvfb display and is confirmed through _NET_SUPPORTING_WM_CHECK
       # before CI.py starts.
-      - name: Release (build, unit tests)
+      - name: Release (build, unit, GPU and golden tests)
         if: ${{ !cancelled() && steps.generate.outcome == 'success' }}
         run: |
           xvfb-run -a --server-args='-screen 0 1920x1080x24' sh -c '
@@ -340,7 +365,7 @@ jobs:
               if [ "$tries" -gt 300 ]; then echo "openbox did not start within 30 seconds" >&2; exit 1; fi
               sleep 0.1
             done
-            exec python3 Scripts/CI.py --stages build,unit --configs Release --summary-junit bin/TestResults/CI-Release.xml'
+            exec python3 Scripts/CI.py --stages build,unit,gpu,golden --configs Release --summary-junit bin/TestResults/CI-Release.xml'
 
       - name: Dist (build)
         if: ${{ !cancelled() && steps.generate.outcome == 'success' }}
@@ -469,13 +494,14 @@ jobs:
         if: ${{ !cancelled() && steps.generate.outcome == 'success' }}
         run: python3 Scripts/CI.py --stages lint --summary-junit bin/TestResults/CI-lint.xml
 
-      - name: Debug (build, shader check, unit tests)
+      # --gpu-optional: the GPU test cases report why they cannot run (no Vulkan device) and pass without running.
+      - name: Debug (build, shader check, unit and GPU tests)
         if: ${{ !cancelled() && steps.generate.outcome == 'success' }}
-        run: python3 Scripts/CI.py --stages build,unit --configs Debug --summary-junit bin/TestResults/CI-Debug.xml
+        run: python3 Scripts/CI.py --stages build,unit,gpu --configs Debug --gpu-optional --summary-junit bin/TestResults/CI-Debug.xml
 
-      - name: Release (build, unit tests)
+      - name: Release (build, unit, GPU and golden tests)
         if: ${{ !cancelled() && steps.generate.outcome == 'success' }}
-        run: python3 Scripts/CI.py --stages build,unit --configs Release --summary-junit bin/TestResults/CI-Release.xml
+        run: python3 Scripts/CI.py --stages build,unit,gpu,golden --configs Release --gpu-optional --summary-junit bin/TestResults/CI-Release.xml
 
       - name: Dist (build)
         if: ${{ !cancelled() && steps.generate.outcome == 'success' }}

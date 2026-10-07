@@ -15,6 +15,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <vector>
 
 // The Vulkan device behind NVRHI (Architecture §8.1, §8.14): instance, debug messenger, physical-device selection,
 // logical device, the NVRHI device (wrapped by NVRHI's validation layer when validation is on), and the null-checked
@@ -90,11 +91,12 @@ namespace Engine {
 
 		// Use Create. Stores the specification and builds the diagnostics with its InjectFault.
 		GraphicsDevice(ConstructionKey key, const GraphicsSpecification& specification);
-		// waitForIdle (its boolean result checked: a failure is logged, never fatal during teardown), NVRHI's
-		// runGarbageCollection (so retired command lists drop their references), the HostImageUpload (its remaining host
-		// images), a final tracker Sweep, the live counts reported at Error level when any is above zero (the tests and
-		// application teardown assert zero), the tracker's ReleaseAll, then the §8.14 item 4 order for what the device owns:
-		// NVRHI device, VkDevice, debug messenger, VkInstance. Objects created through the wrappers must be gone by then.
+		// vkDeviceWaitIdle through the dispatcher's C entry point (a failure is logged, never fatal and never thrown during
+		// teardown), NVRHI's runGarbageCollection (so retired command lists drop their references), the HostImageUpload (its
+		// remaining host images), a final tracker Sweep, the live counts reported as a GpuDiagnostics error when any is
+		// above zero (the tests and application teardown assert zero), the tracker's ReleaseAll, then the §8.14 item 4 order
+		// for what the device owns: NVRHI device, VkDevice, debug messenger, VkInstance. Objects created through the
+		// wrappers must be gone by then.
 		~GraphicsDevice();
 
 		GraphicsDevice(const GraphicsDevice&) = delete;
@@ -120,6 +122,12 @@ namespace Engine {
 		// failure.
 		[[nodiscard]] static Result<Scope<GraphicsDevice>> Create(const GraphicsDeviceSpecification& specification);
 
+		// Destroys `device` (the destructor's teardown) and returns its GpuDiagnostics counts afterwards, which include the
+		// messages of the teardown itself: the leak report of objects still alive and the validation layer's reports at
+		// vkDestroyDevice and vkDestroyInstance. For the checks that must see a device's whole life: HeadlessGpuFixture and
+		// --expect-no-gpu-errors (EngineContext::DestroyGraphics). A null `device` gives zero counts.
+		[[nodiscard]] static GpuMessageCounts Destroy(Scope<GraphicsDevice> device);
+
 		// The NVRHI device (the validation wrapper when validation is on), for command lists and other non-creating calls.
 		// Engine code never calls its create* functions directly (§8.14 item 7): use the wrappers below.
 		[[nodiscard]] nvrhi::IDevice* GetNvrhiDevice() const;
@@ -134,10 +142,11 @@ namespace Engine {
 
 		// Creation wrappers (§8.14 item 7). Each calls the NVRHI function, turns a null result into an ErrorCode::Gpu error
 		// naming the object type and the descriptor's debugName ("cannot create texture 'SceneColor' (1920x1080
-		// RGBA16_FLOAT)"), and tracks the object (GpuResourceTracker), except CreateHandleForNativeTexture. CreateTexture also fails with Gpu, without calling
-		// NVRHI, when GpuDiagnostics::ShouldFailTextureCreation(desc) (--gpu-inject-fault=oom-texture). None of them ever
-		// crashes on a null result; the caller decides between a placeholder (asset uploads) and FatalError(OutOfMemory)
-		// (render targets and pipelines created at startup or resize, §8.14 item 7).
+		// RGBA16_FLOAT)"), and tracks the object (GpuResourceTracker), except CreateHandleForNativeTexture. CreateTexture
+		// also fails with Gpu, without calling NVRHI, when GpuDiagnostics::ShouldFailTextureCreation(desc)
+		// (--gpu-inject-fault=oom-texture). None of them ever crashes on a null result; the caller decides between a
+		// placeholder (asset uploads) and FatalError(OutOfMemory) (render targets and pipelines created at startup or
+		// resize, §8.14 item 7).
 		[[nodiscard]] Result<nvrhi::TextureHandle> CreateTexture(const nvrhi::TextureDesc& desc);
 		[[nodiscard]] Result<nvrhi::StagingTextureHandle> CreateStagingTexture(const nvrhi::TextureDesc& desc, nvrhi::CpuAccessMode cpuAccess);
 		[[nodiscard]] Result<nvrhi::BufferHandle> CreateBuffer(const nvrhi::BufferDesc& desc);
@@ -180,9 +189,10 @@ namespace Engine {
 		// still holds, then HostImageUpload::CollectGarbage, the host images' deferred release.
 		void RunGarbageCollection();
 
-		// waitForIdle, for shutdown and resize (§8.1). Its boolean result is checked: false while the device-lost flag is
-		// set (or with a device-lost result) calls RaiseDeviceLost, any other failure FatalError(Gpu). Never waits on its
-		// own beyond what waitForIdle does.
+		// vkDeviceWaitIdle, for shutdown and resize (§8.1), through the dispatcher's C entry point, so it never throws
+		// (§4.6 item 2) and works outside the frame boundary too. VK_ERROR_DEVICE_LOST, or the device-lost flag already set,
+		// calls RaiseDeviceLost; any other failure ends the process with FatalError(GetFatalErrorKind(result)) (out of
+		// memory is OutOfMemory). Never waits on its own beyond what vkDeviceWaitIdle does.
 		void WaitForIdle();
 
 		// Ends the process through FatalError(DeviceLost) with "<context>: device lost" followed by DescribeDeviceFault()
@@ -190,7 +200,9 @@ namespace Engine {
 		// crash report. Callable from any submission or wait path on the main thread.
 		[[noreturn]] void RaiseDeviceLost(std::string_view context);
 		// vkGetDeviceFaultInfoEXT as text (description, address infos, vendor infos); "VK_EXT_device_fault is not
-		// available" when the extension is not enabled, "no fault information" when the driver reports none.
+		// available" when the extension is not enabled, "no fault information" when the driver reports none. The query is
+		// valid only on a device that is really lost (the validation layer rejects it otherwise), so a healthy device, and
+		// one whose loss is only the injected device-lost fault, report "no fault information" without querying.
 		[[nodiscard]] std::string DescribeDeviceFault();
 
 		// Native handles for the code that calls Vulkan itself through the dispatcher's C entry points: Swapchain and
@@ -211,11 +223,41 @@ namespace Engine {
 		// GraphicsSpecification::FramesInFlight.
 		[[nodiscard]] uint32_t GetFramesInFlight() const { return m_Specification.FramesInFlight; }
 	private:
+		// The steps of Create, in order; each fills the members it creates, which the destructor tears down when a later
+		// step fails.
+		[[nodiscard]] Status CreateInstance(const GraphicsDeviceSpecification& specification);
+		[[nodiscard]] Status CreateLogicalDevice(const GraphicsDeviceSpecification& specification);
+		[[nodiscard]] Status CreateNvrhiDevice();
+		// Logs the Info line that names the device and its optional paths.
+		void LogDeviceInfo() const;
+		// The destructor's teardown (see there); runs once, from the destructor or from Destroy.
+		void Shutdown();
+	private:
 		GraphicsSpecification m_Specification;
 		GraphicsDeviceInfo m_Info;
 		GpuDiagnostics m_Diagnostics;
 		GpuResourceTracker m_ResourceTracker;
 		Scope<HostImageUpload> m_HostImageUpload; // created by Create once the device exists
+
+		// The Vulkan objects, destroyed by the destructor in the reverse order of creation (§8.14 item 4).
+		VkInstance m_Instance = VK_NULL_HANDLE;
+		VkDebugUtilsMessengerEXT m_DebugMessenger = VK_NULL_HANDLE;
+		VkPhysicalDevice m_PhysicalDevice = VK_NULL_HANDLE;
+		VkDevice m_Device = VK_NULL_HANDLE;
+		VkQueue m_GraphicsQueue = VK_NULL_HANDLE;
+		VkSemaphore m_GraphicsQueueTimelineSemaphore = VK_NULL_HANDLE; // owned by NVRHI's queue
+		// The extensions enabled at instance and device creation, which NVRHI is told about.
+		std::vector<std::string> m_InstanceExtensions;
+		std::vector<std::string> m_DeviceExtensions;
+		// NVRHI's Vulkan device (an nvrhi::vulkan::IDevice, for the queue semaphore calls) and the device engine code uses:
+		// the same object, or NVRHI's validation layer around it when validation is on.
+		nvrhi::DeviceHandle m_VulkanNvrhiDevice;
+		nvrhi::DeviceHandle m_NvrhiDevice;
+		uint64_t m_LastSubmissionID = 0;
+		// Whether this device counts as the process's live device (VulkanDispatch::RegisterDevice).
+		bool m_IsRegistered = false;
+		// Set by Shutdown, which runs once.
+		bool m_IsShutDown = false;
 	};
 
 }

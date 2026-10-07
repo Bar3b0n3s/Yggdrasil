@@ -4,15 +4,27 @@
 #include "Engine/App/EngineContext.h"
 #include "Engine/App/ProcessContext.h"
 #include "Engine/Core/Assert.h"
+#include "Engine/Core/FatalError.h"
 #include "Engine/Core/Jobs/JobSystem.h"
 #include "Engine/Core/Log.h"
 #include "Engine/Core/Utf8.h"
+#include "Engine/Graphics/FramePacer.h"
+#include "Engine/Graphics/GpuDiagnostics.h"
+#include "Engine/Graphics/GpuProfiler.h"
 #include "Engine/Graphics/GraphicsDevice.h"
+#include "Engine/Graphics/OffscreenTarget.h"
+#include "Engine/Graphics/RenderContext.h"
+#include "Engine/Graphics/Swapchain.h"
 #include "Engine/ImGui/ImGuiLayer.h"
 #include "Engine/Platform/ErrorDialog.h"
 
+#include <algorithm>
 #include <array>
+#include <filesystem>
+#include <format>
+#include <string>
 #include <utility>
+#include <vector>
 
 namespace Engine {
 
@@ -66,7 +78,8 @@ namespace Engine {
 			},
 			CommandLineOption{
 				.Name = ExpectNoGpuErrorsOption,
-				.Description = "Exit with code 1 when the GPU device reported any validation or other error during the run.",
+				.Description = "Exit with code 1 when the GPU device reported any validation, NVRHI or resource-leak error or "
+							   "warning during the run, its teardown included.",
 			},
 			CommandLineOption{
 				.Name = VulkanApiOption,
@@ -89,7 +102,51 @@ namespace Engine {
 #endif
 		};
 
+		// The startup rule of §8.14 item 7 for the frame's rendering objects: a Gpu error creating one means the device is
+		// out of memory and ends the process with FatalError(OutOfMemory) (exit code 4); any other error is returned with
+		// `context`, and Run reports it as InitFailed.
+		template<typename T>
+		static Result<T> CheckRenderingObject(Result<T> result, std::string_view fatalMessage, std::string context)
+		{
+			if (!result.has_value() && result.error().GetCode() == ErrorCode::Gpu)
+				FatalError(FatalErrorKind::OutOfMemory, std::format("{}: {}", fatalMessage, result.error().ToString()));
+			return WithContext(std::move(result), std::move(context));
+		}
+
+		// A rendering object recreated during the frame loop (a recreated swapchain, a resized offscreen target) that fails
+		// ends the process: OutOfMemory for a Gpu error (§8.14 item 7), Gpu for anything else.
+		[[noreturn]] static void EndRenderingObjectFailure(const Error& error, std::string_view message)
+		{
+			const FatalErrorKind kind = error.GetCode() == ErrorCode::Gpu ? FatalErrorKind::OutOfMemory : FatalErrorKind::Gpu;
+			FatalError(kind, std::format("{}: {}", message, error.ToString()));
+		}
+
+		// The rule of the --expect-no-gpu-errors check: any error or warning in the device's whole life fails the run.
+		[[nodiscard]] static bool HasGpuMessages(const GpuMessageCounts& counts)
+		{
+			return counts.Errors > 0 || counts.Warnings > 0;
+		}
+
 	}
+
+	// The frame's rendering objects with a device (Application.h, step 1), from InitializeRendering to ShutdownRendering.
+	struct Application::FrameRendering
+	{
+		Scope<Swapchain> WindowSwapchain;      // windowed processes
+		Scope<OffscreenTarget> OffscreenFrame; // headless processes (§8.13)
+		Scope<FramePacer> Pacer;
+		Scope<GpuProfiler> Profiler;
+		nvrhi::CommandListHandle CommandList{};
+		// Headless: per frame slot, the frame target (its framebuffer, which references its textures) of the slot's last
+		// submission, dropped when the slot's next frame begins, after FramePacer::BeginFrame has waited for that
+		// submission. NVRHI's command lists do not reference textures used only by clears (ADR 0009 decision 31), so
+		// without this a resize could destroy a target that a frame still in flight clears. The swapchain needs none: its
+		// recreation waits for idle.
+		std::vector<nvrhi::FramebufferHandle> SlotTargets;
+		// The frame clock's time since the last UI frame (ImGuiLayer::BeginFrame), accumulated over skipped frames.
+		double UiDeltaSeconds = 0.0;
+		bool IsImGuiFailing = false; // the last UI frame failed to render, so the next failure is not logged again
+	};
 
 	std::span<const CommandLineOption> GetEngineCommandLineOptions()
 	{
@@ -255,20 +312,19 @@ namespace Engine {
 		int exitCode = m_FrameLoop->Run();
 		m_FrameLoop.reset();
 
-		// 3. Shutdown in reverse order. A run that expects no GPU errors fails when its device reported any (§15.3); an
-		// earlier failure keeps its code.
+		// 3. Shutdown in reverse order. The GPU services go before the rest of the context, so a run that expects no GPU
+		// messages fails when its device reported any error or warning in its whole life, its teardown included (leaks, the
+		// validation layer's reports at vkDestroyDevice, §15.3); an earlier failure keeps its code.
 		OnShutdown();
 		m_PendingExitCode.reset();
 		ShutdownRendering();
-		const GraphicsDevice* device = m_Context->GetGraphicsDevice();
-		if (m_Specification.ExpectNoGpuErrors && device != nullptr && exitCode == ExitCode::Success)
+		const bool hadDevice = m_Context->GetGraphicsDevice() != nullptr;
+		const GpuMessageCounts gpuMessages = m_Context->DestroyGraphics();
+		if (m_Specification.ExpectNoGpuErrors && hadDevice && exitCode == ExitCode::Success && Utils::HasGpuMessages(gpuMessages))
 		{
-			const uint64_t errors = device->GetDiagnostics().GetErrorCount();
-			if (errors > 0)
-			{
-				ENGINE_CORE_ERROR("The GPU device reported {} error(s) during the run (--expect-no-gpu-errors)", errors);
-				exitCode = ExitCode::Failed;
-			}
+			ENGINE_CORE_ERROR("The GPU device reported {} error(s) and {} warning(s) during the run (--expect-no-gpu-errors)",
+				gpuMessages.Errors, gpuMessages.Warnings);
+			exitCode = ExitCode::Failed;
 		}
 		m_Context.reset();
 		return exitCode;
@@ -298,6 +354,9 @@ namespace Engine {
 
 	void Application::OnFrameEvent(Event& event)
 	{
+		// Resizes need no call here: the swapchain compares the framebuffer size with the size it was created for when the
+		// next frame acquires its image, so the several events of one resize (window size, framebuffer size, restore)
+		// cause one recreation, never one per event.
 		OnEvent(event);
 	}
 
@@ -311,28 +370,200 @@ namespace Engine {
 		OnUpdate(frame);
 	}
 
-	void Application::OnFrameRender(const FrameTime& /*frame*/)
+	void Application::OnFrameRender(const FrameTime& frame)
 	{
-		// M5 contract stub (Roadmap rule 3): stream B (swapchain, present, frame pacing, fault handling) renders the frame
-		// as the class comment describes (step 2). Without a device there is nothing to render.
-		ENGINE_CONTRACT_STUB();
+		// Without a device (RendererMode::None) there is nothing to render.
+		if (m_Rendering == nullptr)
+			return;
+		FrameRendering& rendering = *m_Rendering;
+		GraphicsDevice& device = *m_Context->GetGraphicsDevice();
+		Window& window = *m_Context->GetWindow();
+
+		// The UI clock runs on the frame clock, also across the frames that render nothing (ImGuiLayer::BeginFrame).
+		rendering.UiDeltaSeconds += frame.UnscaledDeltaTime;
+
+		// §8.2: wait (bounded) until this frame's slot is free, then pick the target. The slot's previous submission has
+		// completed, so the target it held may go (FrameRendering::SlotTargets).
+		rendering.Pacer->BeginFrame();
+		const uint32_t frameSlot = rendering.Pacer->GetFrameSlot();
+		rendering.Profiler->BeginFrame(frameSlot);
+		if (frameSlot < rendering.SlotTargets.size())
+			rendering.SlotTargets[frameSlot] = nullptr;
+
+		nvrhi::IFramebuffer* framebuffer = nullptr;
+		nvrhi::ITexture* target = nullptr;
+		uint32_t width = 0;
+		uint32_t height = 0;
+		if (rendering.WindowSwapchain != nullptr)
+		{
+			Swapchain& swapchain = *rendering.WindowSwapchain;
+			const Result<SwapchainAcquireStatus> status = swapchain.AcquireNextImage(frameSlot);
+			if (!status.has_value())
+				Utils::EndRenderingObjectFailure(status.error(), "Cannot recreate the swapchain");
+			if (*status == SwapchainAcquireStatus::Acquired)
+			{
+				framebuffer = swapchain.GetCurrentFramebuffer();
+				target = swapchain.GetCurrentTexture();
+				width = swapchain.GetWidth();
+				height = swapchain.GetHeight();
+			}
+		}
+		else if (window.GetFramebufferWidth() > 0 && window.GetFramebufferHeight() > 0)
+		{
+			// Headless: the offscreen target follows the window's framebuffer size (a render target created at resize,
+			// §8.14 item 7).
+			OffscreenTarget& offscreen = *rendering.OffscreenFrame;
+			const Status resized = offscreen.Resize(device, window.GetFramebufferWidth(), window.GetFramebufferHeight());
+			if (!resized.has_value())
+				Utils::EndRenderingObjectFailure(resized.error(), "Cannot resize the frame's offscreen target");
+			framebuffer = offscreen.GetFramebuffer();
+			target = offscreen.GetColorTexture();
+			width = offscreen.GetWidth();
+			height = offscreen.GetHeight();
+			rendering.SlotTargets[frameSlot] = framebuffer;
+		}
+
+		// A skipped frame (minimized, a recreated swapchain, an acquire that timed out) records and submits nothing.
+		if (framebuffer == nullptr || target == nullptr)
+		{
+			rendering.Pacer->EndFrame(device.GetLastSubmissionID());
+			device.RunGarbageCollection();
+			return;
+		}
+
+		nvrhi::ICommandList& commandList = *rendering.CommandList;
+		commandList.open();
+		commandList.clearTextureFloat(target, nvrhi::AllSubresources,
+			nvrhi::Color(FrameClearColor[0], FrameClearColor[1], FrameClearColor[2], FrameClearColor[3]));
+
+		RenderContext context = {
+			.Device = &device,
+			.CommandList = &commandList,
+			.Framebuffer = framebuffer,
+			.Target = target,
+			.Width = width,
+			.Height = height,
+			.FrameSlot = frameSlot,
+			.FrameIndex = rendering.Pacer->GetFrameIndex(),
+			.Profiler = rendering.Profiler.get(),
+		};
+		OnRender(context);
+
+		if (m_ImGuiLayer != nullptr)
+		{
+			m_ImGuiLayer->BeginFrame(rendering.UiDeltaSeconds, frameSlot);
+			rendering.UiDeltaSeconds = 0.0;
+			OnImGuiRender();
+			m_ImGuiLayer->EndFrame();
+
+			GpuProfileScope scope(*rendering.Profiler, commandList, "ImGui");
+			const Status rendered = m_ImGuiLayer->Render(commandList, *framebuffer);
+			// A Gpu error means that a pipeline (created per target format on first use, ADR 0009 decision 25), a geometry
+			// buffer or a binding set could not be created: the device is out of memory, which ends the process (§8.14
+			// item 7). Texture failures never come back here (the renderer logs them and skips their draws). Any other
+			// failure is logged once per run of failing frames, because the UI is recorded every frame.
+			if (!rendered.has_value() && rendered.error().GetCode() == ErrorCode::Gpu)
+				FatalError(FatalErrorKind::OutOfMemory, std::format("Cannot render the ImGui frame: {}", rendered.error().ToString()));
+			if (!rendered.has_value() && !rendering.IsImGuiFailing)
+				ENGINE_CORE_ERROR("Cannot render the ImGui frame: {}", rendered.error());
+			rendering.IsImGuiFailing = !rendered.has_value();
+		}
+		commandList.close();
+
+		if (rendering.WindowSwapchain != nullptr)
+			rendering.WindowSwapchain->QueueFrameSemaphores();
+		const uint64_t submission = device.ExecuteCommandList(commandList);
+		if (rendering.WindowSwapchain != nullptr)
+			rendering.WindowSwapchain->Present();
+		rendering.Pacer->EndFrame(submission);
+		device.RunGarbageCollection();
 	}
 
 	Status Application::InitializeRendering()
 	{
-		// M5 contract stub (Roadmap rule 3): stream B builds the swapchain or offscreen target and the pacer, and the
-		// ImGuiLayer with EnableImGui (step 1 of the class comment). RendererMode::None needs none of them.
-		ENGINE_CONTRACT_STUB();
-		if (m_Context->GetGraphicsDevice() == nullptr)
+		// RendererMode::None renders nothing and needs none of the rendering objects.
+		GraphicsDevice* device = m_Context->GetGraphicsDevice();
+		if (device == nullptr)
 			return {};
-		return MakeError(ErrorCode::Unsupported, "rendering the application's frames is not implemented yet");
+		Window* window = m_Context->GetWindow();
+		ENGINE_CORE_VERIFY(window != nullptr, "the application's context has no window");
+		const uint32_t framesInFlight = device->GetFramesInFlight();
+
+		m_Rendering = CreateScope<FrameRendering>();
+		FrameRendering& rendering = *m_Rendering;
+		if (m_Specification.Window == WindowMode::Windowed)
+		{
+			ENGINE_TRY_ASSIGN(rendering.WindowSwapchain,
+				Utils::CheckRenderingObject(Swapchain::Create(*device, *window,
+												{
+													.VSync = device->GetSpecification().VSync,
+													.FramesInFlight = framesInFlight,
+												}),
+					"Cannot create the swapchain", "while creating the swapchain"));
+		}
+		else
+		{
+			// Headless (§8.13): the frames land in an offscreen target of the window's framebuffer size.
+			const OffscreenTargetSpecification specification = {
+				.Width = std::max(window->GetFramebufferWidth(), 1u),
+				.Height = std::max(window->GetFramebufferHeight(), 1u),
+				.ColorFormat = nvrhi::Format::RGBA8_UNORM,
+				.Depth = false,
+				.ClearColor = nvrhi::Color(FrameClearColor[0], FrameClearColor[1], FrameClearColor[2], FrameClearColor[3]),
+				.DebugName = "FrameTarget",
+			};
+			ENGINE_TRY_ASSIGN(OffscreenTarget offscreen,
+				Utils::CheckRenderingObject(OffscreenTarget::Create(*device, specification), "Cannot create the frame's offscreen target",
+					"while creating the frame's offscreen target"));
+			rendering.OffscreenFrame = CreateScope<OffscreenTarget>(std::move(offscreen));
+			rendering.SlotTargets.resize(framesInFlight);
+		}
+		ENGINE_TRY_ASSIGN(rendering.CommandList,
+			Utils::CheckRenderingObject(device->CreateCommandList(), "Cannot create the frame's command list",
+				"while creating the frame's command list"));
+		rendering.Pacer = CreateScope<FramePacer>(*device, framesInFlight);
+		rendering.Profiler = CreateScope<GpuProfiler>(*device, framesInFlight);
+
+		if (m_Specification.EnableImGui)
+		{
+			// imgui.ini lives under the user-data folder (user://) while no project is open (§8.11).
+			std::filesystem::path iniFilePath;
+			if (!m_Specification.ImGuiIniPath.empty())
+			{
+				ENGINE_CORE_ASSERT(IsValidUtf8(m_Specification.ImGuiIniPath), "ApplicationSpecification::ImGuiIniPath must be UTF-8");
+				const std::string& iniPath = m_Specification.ImGuiIniPath;
+				iniFilePath = GetProcessContext().GetUserDataPaths().Root
+					/ std::filesystem::path(std::u8string_view(reinterpret_cast<const char8_t*>(iniPath.data()), iniPath.size()));
+			}
+			ENGINE_TRY_ASSIGN(m_ImGuiLayer,
+				Utils::CheckRenderingObject(ImGuiLayer::Create(*window, *device, *m_Context->GetPipelineFactory(),
+												{
+													.IniFilePath = std::move(iniFilePath),
+													.FramesInFlight = framesInFlight,
+												}),
+					"Cannot create the ImGui layer", "while creating the ImGui layer"));
+		}
+		return {};
 	}
 
 	void Application::ShutdownRendering()
 	{
-		// M5 contract stub (Roadmap rule 3): stream B waits for the device and destroys the rendering objects in reverse.
-		ENGINE_CONTRACT_STUB();
+		if (m_Rendering == nullptr && m_ImGuiLayer == nullptr)
+			return;
+		// §8.14 item 4: nothing the rendering objects own may still be in use by the GPU when they go.
+		if (GraphicsDevice* device = m_Context->GetGraphicsDevice())
+			device->WaitForIdle();
 		m_ImGuiLayer.reset();
+		if (m_Rendering != nullptr)
+		{
+			m_Rendering->Profiler.reset();
+			m_Rendering->CommandList = nullptr;
+			m_Rendering->WindowSwapchain.reset();
+			m_Rendering->SlotTargets.clear();
+			m_Rendering->OffscreenFrame.reset();
+			m_Rendering->Pacer.reset();
+			m_Rendering.reset();
+		}
 	}
 
 	void Application::ReportInitializationFailure(const ProcessContext& process, const Error& error) const

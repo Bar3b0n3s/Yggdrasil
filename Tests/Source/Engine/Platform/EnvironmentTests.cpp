@@ -25,7 +25,7 @@ namespace Engine {
 
 	TEST_SUITE("Platform")
 	{
-		TEST_CASE("Environment: reads variables set for the process as UTF-8 and reports unset ones" * doctest::skip(true))
+		TEST_CASE("Environment: reads variables set for the process as UTF-8 and reports unset ones")
 		{
 			ProcessSpecification specification = Test::MakeTestsChildSpecification({ "--death-test=Platform/ReportsEnvironment" });
 			specification.Environment = {
@@ -41,7 +41,7 @@ namespace Engine {
 			CHECK(child->StandardError.contains("unset: [unset]"));
 		}
 
-		TEST_CASE("Environment: names that cannot be variables are never set" * doctest::skip(true))
+		TEST_CASE("Environment: names that cannot be variables are never set")
 		{
 			CHECK_FALSE(ReadEnvironmentVariable("").has_value());
 			CHECK_FALSE(ReadEnvironmentVariable("A=B").has_value());

@@ -4,6 +4,8 @@
 #include "Engine/Core/Result.h"
 #include "Engine/Graphics/Image.h"
 
+#include <nvrhi/nvrhi.h>
+
 #include <cstdint>
 
 // Viewport screenshots (Architecture §8.13, §13.5 viewport.screenshot): the viewport re-rendered on demand at the
@@ -16,6 +18,8 @@ namespace Engine {
 
 	class GraphicsDevice;
 	class PipelineFactory;
+	class Readback;
+	class TrianglePass;
 
 	// The golden-image size (§15.4), the default of viewport screenshots.
 	inline constexpr uint32_t DefaultViewportScreenshotWidth = 640;
@@ -65,6 +69,11 @@ namespace Engine {
 		// Errors: InvalidArgument for a zero Width or Height or one above MaxViewportScreenshotDimension; those of
 		// OffscreenTarget::Create, Readback::ReadTexture and DownscaleImage.
 		[[nodiscard]] Result<Image> Capture(const ViewportScreenshotRequest& request);
+	private:
+		GraphicsDevice* m_Device = nullptr; // documented back-reference
+		Scope<TrianglePass> m_TrianglePass;
+		Scope<Readback> m_Readback;
+		nvrhi::CommandListHandle m_CommandList;
 	};
 
 }

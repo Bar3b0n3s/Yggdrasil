@@ -51,6 +51,14 @@ namespace Engine {
 		// vk::enumerateInstanceVersion() as VK_MAKE_API_VERSION-encoded value (variant, major, minor, patch); 0 when the
 		// loader is not initialized. The loader of a Vulkan 1.0 implementation, which lacks the function, reports 1.0.
 		[[nodiscard]] static uint32_t GetLoaderApiVersion();
+	private:
+		// Called by GraphicsDevice when it initializes the default dispatcher with its instance and device, and when it is
+		// destroyed: Shutdown asserts that no device is left, and GraphicsDevice::Create refuses a second live device.
+		static void RegisterDevice();
+		static void UnregisterDevice();
+		[[nodiscard]] static bool HasDevice();
+	private:
+		friend class GraphicsDevice;
 	};
 
 }

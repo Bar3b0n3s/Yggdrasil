@@ -1,6 +1,6 @@
 # 0009 — M5 contract decisions
 
-- **Status:** proposed by the M5 contract task. The streams implement against it; the M5 integration task accepts or revises it, and the docs owner applies the amendments listed at the end.
+- **Status:** accepted with revisions by the M5 integration task (decisions 20 to 32). The contract task proposed decisions 1 to 19 and the streams implemented against them. The amendments listed at the end are either applied by integration, where marked, or left for the docs owner.
 - **Date:** 2026-10-06
 - **Context:** The M5 contract task (Roadmap rule 3) froze the public headers of every M5 deliverable: `Engine/Source/Engine/Graphics/`, `Engine/Source/Engine/ImGui/`, `Engine/Source/Engine/Renderer/{TrianglePass,ViewportCapture}.h`, `Engine/Source/Engine/Testing/ImageCompare.h`, the M5 parts of `App/` and `Platform/`, the shared shader headers and the GPU and golden test support. M4 (EditorCore, automation core) runs in parallel, so its `MethodRegistry` is not available. Writing complete headers exposed places where the Architecture and Roadmap are silent or cannot be followed literally. `AGENTS.md` ("Deviations") requires a record of each. Two reviews of the contract revised it before the contract commit; the decisions below are the result.
 
@@ -25,7 +25,7 @@
 
 - `Graphics/GraphicsSpecification.h` holds `RendererMode`, `VulkanApiVersion`, `GpuFault` and `GraphicsSpecification` (§4.1 "validation, GPU override, frames in flight, API cap", plus VSync, synchronization validation and the injected fault), with their command-line spellings, implemented header-only by the contract.
 - `ApplicationSpecification` gains `Renderer` (default `Vulkan`, §4.1), `Graphics`, `ExpectNoGpuErrors`, `EnableImGui` and `ImGuiIniPath`. The engine options gain `--renderer vulkan|none` (§12.1, §13.9), `--gpu-validation[=sync]`, `--expect-no-gpu-errors`, `--vulkan-api 1.3|1.4`, `--gpu <index|name>` and `--gpu-inject-fault device-lost|oom-texture|hang`, all absent from Dist (§13.9 lists what Dist honours). `ENGINE_GPU` is read by `GraphicsDevice::Create` when `--gpu` is not given.
-- **GPU processes started by tests validate and fail like the fixture.** §15.3 and the Roadmap run the GPU acceptance tests (the `ImGuiDemo` golden included, which runs a whole editor) with synchronization validation on, and any hazard fails. `--gpu-validation=sync` turns on validation plus synchronization validation; `--expect-no-gpu-errors` makes a run whose device reported an error (`GpuDiagnostics::GetErrorCount`, checked after the rendering teardown) return `ExitCode::Failed` (1) instead of Success. `Test::GetGpuApplicationArguments` passes both to every Editor and Runtime process a GPU test starts. Architecture §13.9's later `--expect-no-errors` (M7, any logged error) is broader; the GPU-only option exists now because M5's process tests need it.
+- **GPU processes started by tests validate and fail like the fixture.** §15.3 and the Roadmap run the GPU acceptance tests (the `ImGuiDemo` golden included, which runs a whole editor) with synchronization validation on, and any hazard fails. `--gpu-validation=sync` turns on validation plus synchronization validation; `--expect-no-gpu-errors` makes a run whose device reported an error or a warning in its whole life return `ExitCode::Failed` (1) instead of Success. The counts are read after the device's own teardown (`EngineContext::DestroyGraphics`, decision 32), so leaks and the validation layer's reports at `vkDestroyDevice` count too. `Test::GetGpuApplicationArguments` passes both to every Editor and Runtime process a GPU test starts. Architecture §13.9's later `--expect-no-errors` (M7, any logged error) is broader; the GPU-only option exists now because M5's process tests need it.
 - **Overlap with M4:** M4's deliverables include `Editor --headless --renderer none`. Whichever milestone merges second keeps one definition of `--renderer` and of `RendererMode`; the lead resolves the conflict at the M4/M5 merge.
 - **CI has no GPU.** With the Vulkan renderer as the default, the existing Editor and Runtime process tests of the unit suite pass `--renderer none` (they test windowing, the frame loop and the log, not rendering), and the in-process `Application` tests set `Renderer = None`. Rendering processes are tested in the GPU suite (decision 14). `EditorApp: the --renderer none editor needs no Vulkan loader` proves that logic-only runs never touch the loader.
 
@@ -48,7 +48,7 @@
 
 - `RunBoundedGpuWait(slice, maxSlices)` is the pure state machine of §8.1: the budget is a count of slices (100 slices of 100 ms), so the "GpuHang after 10 s" rule is unit-tested without a GPU or a clock. `WaitForSubmission(device, submissionID, context)` applies it to `vkWaitSemaphores` on the graphics queue's timeline semaphore through the dispatcher's C entry point; `Readback` and screenshots use it, `FramePacer::BeginFrame` after `pollEventQuery`.
 - **Swapchain acquisition is bounded but never fatal by itself.** `vkAcquireNextImageKHR` with an infinite timeout would be an unbounded wait, so each acquire waits at most one slice (`GpuWaitSliceNanoseconds`). A timed-out acquire (`VK_TIMEOUT`, `VK_NOT_READY`) means the presentation engine is holding its images back, as compositors do for a window that is hidden or occluded without being minimized (Wayland's FIFO, macOS occlusion), not that the GPU stopped. The frame is skipped (`SwapchainAcquireStatus::Skipped`, logged at Warn on the first of consecutive timeouts) and the next frame tries again. A GPU that really stopped is caught by `FramePacer`'s timeline waits: the skipped frame records the device's last submission for its slot, and the next frame of that slot waits for it, ending in `FatalError(GpuHang)` after the budget. §8.1 bounds only the timeline waits, so this is consistent with it.
-- `GraphicsDevice::WaitForIdle` calls NVRHI's `waitForIdle` and checks its result, as §8.1 allows for shutdown and resize.
+- `GraphicsDevice::WaitForIdle` calls `vkDeviceWaitIdle` through the dispatcher's C entry point, as §8.1 allows for shutdown and resize, and maps its result: device loss to `RaiseDeviceLost`, anything else to `FatalError(GetFatalErrorKind(result))`. NVRHI's `waitForIdle` is the same call through vulkan.hpp's throwing wrapper, which catches only device loss, so out-of-memory results would have thrown outside the frame boundary (the swapchain's destructor, application shutdown) and terminated the process from a destructor (decision 32).
 - **Swapchain results are tested through the real paths.** "Swapchain: resize, minimize and out-of-date recover" requires out-of-date to be handled as a `VkResult`, but no compositor produces `VK_ERROR_OUT_OF_DATE_KHR`, `VK_SUBOPTIMAL_KHR` or `VK_ERROR_SURFACE_LOST_KHR` on demand. `Swapchain::InjectAcquireResultForTesting` and `InjectPresentResultForTesting` make the next real call act on a given result through the same classification switch: a suboptimal acquire replaces the success of a call that acquired an image, out-of-date and surface-lost acquires replace the call (they acquire no image), and a present result replaces the return value of a real `vkQueuePresentKHR`. The windowed child drives every result through them; production code never calls them.
 
 ### 7. Device-fault details travel in the fatal-error message
@@ -70,7 +70,7 @@
 
 NVRHI destroys its objects itself and offers no destruction hook. The tracker keeps one reference to every object the creation wrappers made and, in `Sweep`, releases those it is the last owner of and counts them as destroyed. Host-copied images, which NVRHI does not own, are counted with `RecordCreated`/`RecordDestroyed`. In Dist every member except `HasOtherReferences` is a no-op (§8.14 item 5: "non-Dist").
 
-- **Order.** NVRHI's submitted command lists hold a reference to every object they used until `runGarbageCollection` retires them, so `GraphicsDevice::RunGarbageCollection` runs NVRHI's `runGarbageCollection` first, then `Sweep`, then `HostImageUpload::CollectGarbage`; objects whose last other reference was a retired submission are released in the same frame. The device's destructor runs `waitForIdle`, `runGarbageCollection`, the `HostImageUpload`'s teardown, a final `Sweep`, the leak report, then `ReleaseAll`.
+- **Order.** NVRHI's submitted command lists hold a reference to every object they used until `runGarbageCollection` retires them, so `GraphicsDevice::RunGarbageCollection` runs NVRHI's `runGarbageCollection` first, then `Sweep`, then `HostImageUpload::CollectGarbage`; objects whose last other reference was a retired submission are released in the same frame. The device's destructor runs `vkDeviceWaitIdle`, `runGarbageCollection`, the `HostImageUpload`'s teardown, a final `Sweep`, the leak report (a `GpuDiagnostics` error, so it counts), then `ReleaseAll`. `GraphicsDevice::Destroy` runs the same teardown and returns the counts afterwards (decision 32).
 - **Sweep repeats until a pass releases nothing.** Objects reference each other (a framebuffer its textures, a binding set its resources, a pipeline its shaders and layouts), and releasing one can make the tracker the last owner of another, so one `Sweep` after a garbage collection on an idle device leaves exactly the objects someone still holds; a test dropping an `OffscreenTarget` with depth sees its live counts return to baseline after one `RunGarbageCollection`.
 - **Owners ask `HasOtherReferences`.** The tracker's reference would make "is the pool's reference the only one?" false forever in Debug and Release (and true in Dist), so `RenderTargetPool` would never reuse a target and `HostImageUpload` would never release an image. `GpuResourceTracker::HasOtherReferences(resource, callerReferences)` discounts the tracker's own reference and answers the same in every configuration; pools and caches (`RenderTargetPool`, `HostImageUpload`, M6's `GpuResourceCache`) use it and never read the reference count themselves.
 - **Native-texture wrappers are not tracked.** `GraphicsDevice::CreateHandleForNativeTexture` does not track its wrapper: the tracker's reference would keep a host image's wrapper, and the image views NVRHI creates for it, alive past the moment `HostImageUpload` destroys the `VkImage`. The host image is counted as `HostImage` instead, and the swapchain's images live exactly as long as the swapchain.
@@ -97,14 +97,14 @@ NVRHI destroys its objects itself and offers no destruction hook. The tracker ke
 ### 13. Shader reflection and pipeline layouts
 
 - `Graphics/ShaderReflection.h` (beyond the Roadmap's file list) parses the parts of slangc's `-reflection-json` the checks need, without a GPU: binding kind, set, shifted binding number, array size, constant-buffer and push-constant sizes, image formats, and struct member offsets.
-- `PipelineLayoutDescription` describes a pipeline without a device (program, entries, permutation, binding layouts, the formats the pass creates for its storage images); `ValidatePipelineLayout` is §8.12's check. Each pass provides one through a static function, and "Shaders: LayoutsMatchReflection" checks every engine pipeline and that every `Shaders.json` program has one. The Smoke and MatrixConvention programs, which no pass uses, have their layouts in `Tests/Source/Support/`; Smoke drives the §15.3 "compute arithmetic" GPU test.
+- `PipelineLayoutDescription` describes a pipeline without a device (program, entries, permutation, binding layouts, the formats the pass creates for its storage images, and since decision 32 the byte size it binds to each constant buffer); `ValidatePipelineLayout` is §8.12's check. Each pass provides one through a static function, and "Shaders: LayoutsMatchReflection" checks every engine pipeline and that every `Shaders.json` program has one. The Smoke and MatrixConvention programs, which no pass uses, have their layouts in `Tests/Source/Support/`; Smoke drives the §15.3 "compute arithmetic" GPU test.
 - The pipeline specifications carry `Specializations` (Vulkan specialization constants, applied to every stage through `GraphicsDevice::CreateShaderSpecialization`), which §8.5's debug-view toggles need, so M8 does not change the frozen header.
 - **"spirv-val clean":** `CompileShaders.py` already runs `spirv-val` on every output and writes the stamp only after a complete run validated, so a build with shaders is spirv-val clean by construction. "Shaders: every Shaders.json variant was compiled and passed spirv-val" checks the stamp and the outputs from C++.
 - The shader checks run in doctest's `Static` suite (§15.1 T0), which the unit stage includes.
 
 ### 14. GPU and golden tests
 
-- GPU test cases carry `doctest::test_suite(Test::GpuSuite)`; golden ones are in `TEST_SUITE("Golden")` (`Test::GoldenSuite`). The unit stage excludes both (`--test-suite-exclude=GPU,Golden`).
+- GPU test cases carry `doctest::test_suite(Test::GpuSuite)`; golden ones live in `TEST_SUITE(Test::GoldenSuite)` ("Golden"). The unit stage excludes both (`--test-suite-exclude=GPU,Golden`).
 - `HeadlessGpuFixture` creates the device (validation and synchronization validation on, the API cap of `--vulkan-api`), mounts `shaders://` and checks zero validation errors and zero live objects at destruction. doctest has no runtime skip, so `ENGINE_REQUIRE_GPU` passes a case after printing "GPU test skipped: <reason>" without a device, and fails it under `--require-gpu`, which CI.py passes on this machine (§15.2).
 - New Tests options: `--require-gpu`, `--vulkan-api=<1.3|1.4>`, `--update-golden`. Test.py's gpu suite runs the GPU tests once without and once with `--vulkan-api=1.3` (§8.1, §15.3). `GetGpuApplicationArguments` passes `--gpu-validation=sync`, `--expect-no-gpu-errors` and the API cap to Editor and Runtime processes (decision 3), and `GetGpuTestsChildArguments` the cap and `--require-gpu` to Tests child processes.
 - **Skipped GPU and golden tests:** Test.py's listing check (ADR 0004 section 3) lists the unit selection only. Lint's `test-skip` rule catches a skip in GPU and golden cases too, and Test.py's gpu and golden suites must run the same listing check over their own selection (stream E).
@@ -151,6 +151,131 @@ As in M2 (ADR 0005 decision 3), the contract declares private data members only 
 
 §8.2 times each pass with a pooled timer query, and §4.13 and §13.7 merge GPU timings into the profiler timeline, `stats.get` and the Chrome trace export. `Application` owns one `GpuProfiler` for its frames (`GpuProfiler::BeginFrame` after `FramePacer::BeginFrame`) and hands it to `OnRender` as `RenderContext::Profiler`, so the application's passes and the frame's ImGui pass share it. NVRHI's timer queries measure durations, not timestamps, so `GpuTimingSample::StartMilliseconds` is laid out back to back: a scope starts where its previous sibling ended, or where its parent started, relative to the frame's first scope; the gaps between scopes are not measured. That places a frame's passes on the timeline in order with their true durations, which is what the consumers need; exact GPU timestamps would need an NVRHI extension.
 
+## Integration decisions
+
+The M5 integration task merged the five streams onto the contract commit, acting as contract owner. It accepts decisions 1 to 19 with the revisions below. Each records what a stream found when its code first ran on a GPU, or what the merge needed.
+
+### 20. Frozen-header changes accepted at integration
+
+No public declaration of a frozen M5 header changed, except the test-support additions in decision 30. The streams added private members, nested types and helpers, as decision 17 allows:
+
+- `VulkanDispatch.h`: private `RegisterDevice`, `UnregisterDevice` and `HasDevice`, plus `friend class GraphicsDevice`. These enforce one device per process (decision 4).
+- `GraphicsDevice.h`, `GpuResourceTracker.h`, `HostImageUpload.h`, `Swapchain.h`, `FramePacer.h` (which now includes `<nvrhi/nvrhi.h>` and `<vector>`), `GpuProfiler.h`, `Application.h` (`FrameRendering`, `m_Rendering`), `ImGuiLayer.h`, `ImGuiRenderer.h`, `OffscreenTarget.h`, `Readback.h`, `RenderTargetPool.h`, `ViewportCapture.h` and `HeadlessGpuFixture.h`.
+
+These documentation comments were corrected to describe the behaviour the implementations and their tests established:
+
+- **`GraphicsDevice::DescribeDeviceFault`:** `vkGetDeviceFaultInfoEXT` is valid only on a device that is really lost, and the validation layer rejects it otherwise. A healthy device, and one whose loss is only the injected device-lost fault, report "no fault information" without querying.
+- **`HostImageUpload`:** both paths create `keepInitialState` textures whose initial state is `ShaderResource`, never `setPermanentTextureState`. NVRHI refuses `copyTexture` out of a permanent-state texture, which would break `Readback` and "Texture upload: host-copy and staging paths read back identically". Decision 10 and Architecture §8.1 path 1 and §8.2 follow.
+- **`Swapchain`:** an iconified window counts as minimized, and the swapchain is released while minimized. Recreations are coalesced into one per acquire (decision 22). `Application` no longer calls `RequestRecreate` on a `WindowResizeEvent`: the several events of one restore cost an extra recreation and an extra skipped frame, and the size check alone covers resizes. `Create` documents its InvalidState and Unsupported errors.
+- **`FramePacer`:** submission 0 returns at once, and failed waits map through `GetFatalErrorKind` (out of memory becomes OutOfMemory).
+- **`PipelineFactory::ValidatePipelineLayout`:** the comment now lists every check the implementation makes:
+  - the resource shape;
+  - stage visibility of each used binding;
+  - the layout's `bindingOffsets`;
+  - push constants matched by kind and capped at 128 bytes;
+  - agreement between entry points;
+  - leftover `StorageImages` entries, storage images without `[vk::image_format]`, unbounded arrays, and duplicate sets and bindings.
+
+  A `BindingLayoutDesc` carries no byte size, so decision 32 adds `PipelineLayoutDescription::ConstantBuffers` for the constant-buffer size check §8.12 names. `ParseShaderReflection` skips specialization constants and rejects ParameterBlocks.
+- **`TrianglePass.h`, the `PipelineFactory.h` `RenderState` comment, `Shared/ViewConstants.h` and `Passes/Triangle.slang`:** clip space has +Y up and nothing flips Y (decision 23).
+- **`ImGuiLayer.h` and `ImGuiRenderer.h`:**
+  - the null-platform backend (decision 24);
+  - `Create` fails with InvalidState while any Dear ImGui context exists, which the contract's own test expects;
+  - pipelines are created per target format on first use (decision 25), binding sets are cached per texture and per pipeline, and the error lists are completed.
+- **`Readback::ReadTexture`:** a 3D texture is InvalidArgument (NVRHI would assert on a depth-slice copy).
+- **`HeadlessGpuFixture.h`:**
+  - `ReportGpuUnavailable` also writes the Warn line that Test.py counts.
+  - The destruction checks include the warning count (decision 26).
+  - `ENGINE_CHECK_GOLDEN` in `GoldenImage.h` prints a doctest `MESSAGE` for the SmokePassed and Updated outcomes. Its `WARN_MESSAGE` printed nothing when the check passed. The macro's name, parameters and pass/fail meaning are unchanged.
+- **The skeleton test "HeadlessGpuFixture: GPU process arguments follow the run's options":** it looks for `--gpu-validation=sync`. `--gpu-validation` is an optional-value option, and the frozen comment already gave that spelling.
+- **The child test of "Swapchain: resize, minimize and out-of-date recover":** it is renamed "Swapchain: a native window's swapchain survives resizing and minimizing". doctest's `--test-case` filter splits on commas, so the contract's name selected no test. The acceptance name of the parent is unchanged.
+
+### 21. Uploaded and immutable textures keep their initial state
+
+Uploaded textures, and later every immutable texture, are `keepInitialState` textures in `ShaderResource` (decision 20). Every command list starts and ends with them in that state, and copying out of them stays legal. The host-copy path declares the layout to NVRHI with one submitted `beginTrackingTextureState` command list.
+
+M8 should follow the same rule for the IBL cubes and the DFG LUT that §8.6 calls "state permanent", because the §15.3 references read them back.
+
+### 22. The swapchain coalesces recreations
+
+Every resize event and every suboptimal or out-of-date result is coalesced into one recreation at the next acquire, which skips that frame. Recreation waits for idle, drops the image handles and runs garbage collection, so the image views go before the swapchain that owns the images. §8.1's "debounced for 2 frames" applies to viewport render targets (the editor viewport, M10), not to the swapchain.
+
+### 23. Clip space has +Y up; nothing flips Y
+
+NVRHI's Vulkan backend gives every viewport a negative height (`VKViewportWithDXCoords` in `Vendor/NVRHI/src/vulkan/vulkan-graphics.cpp`), so clip space is D3D-like with +Y up. With §8.3's Y-flipped projection, the GPU showed that back-face culling removed the counter-clockwise triangle and the image came out upside down.
+
+- Projections never flip Y. The perspective term `m[1][1]` is `+f`. `TrianglePass::MakeViewConstants` follows, its CPU test is "TrianglePass: the fixed camera is orthographic and reverse-Z with clip-space +Y up", and "Rasterizer: CCW triangle survives back-face culling" also checks that the image is upright and that front-face culling removes it.
+- ImGui's projection uses the same convention: Scale `(2/w, -2/h)`, Translate `(-1 - 2·x0/w, 1 + 2·y0/h)`.
+- `SV_VertexID` and `SV_InstanceID` compile to SPIR-V's DrawParameters capability, which needs `VkPhysicalDeviceVulkan11Features::shaderDrawParameters`, and the validation layer rejects such a shader without it. `Triangle.slang` uses `SV_VulkanVertexID` instead. No M5 shader needs the feature, so the device does not enable it yet. The first pass that uses `SV_InstanceID` (M7 or later) enables it in `GraphicsDevice::Create` when the device supports it, which nearly every Vulkan 1.3 device does, together with that pass's GPU test; until then shaders use `SV_VulkanVertexID` and `SV_VulkanInstanceID`.
+
+### 24. ImGui's GLFW backend runs on native platforms only
+
+The vendored `imgui_impl_glfw` needs a native window handle. On GLFW's null platform, `glfwGetWin32Window` raises `GLFW_PLATFORM_UNAVAILABLE`, after which `IM_ASSERT(bd->PrevWndProc != nullptr)` aborts the process on Windows, and `glfwGetCocoaWindow` logs a GLFW error on macOS. In headless mode `ImGuiLayer` is therefore the platform side itself:
+
+- display size and framebuffer scale come from the `Window` every frame;
+- the delta comes from the frame clock, as on native platforms;
+- the clipboard is GLFW's in-memory one, so a headless run never touches the user's clipboard;
+- there is no input, because the null platform delivers none.
+
+The vendored backend runs on Win32, Cocoa and X11, and the GPU suite covers it with a windowed child. This revises §8.11 and `Vendor/imgui/VENDOR.md`, both amended here.
+
+### 25. ImGui pipelines are created per target format on first use
+
+The frozen `ImGuiRenderer` creates its pipeline for a framebuffer format the first time it renders into one: the swapchain's format (BGRA8 on most desktops) on the first UI frame, and RGBA8 for the first screenshot. That departs from §8.12's "every engine pipeline is created at startup", which stays true for the passes. A pipeline failure on that frame returns a Gpu error from `Render`, and the failure rule of §8.14 item 7 still applies: `Application` turns any Gpu error from `ImGuiLayer::Render` (a pipeline, geometry buffer or binding set that could not be created) into `FatalError(OutOfMemory)`, as `InitializeRendering` does at startup (decision 5). Texture failures never come back through `Render`: the renderer logs them and skips their draws (decision 8). Other `Render` errors are logged once per run of failing frames.
+
+### 26. Zero validation messages; the loader's notes do not count
+
+- The GPU fixture fails a test on any `GpuDiagnostics` error or warning, which covers validation, synchronization validation and NVRHI, and reads the counts after the device's teardown (`GraphicsDevice::Destroy`). Editor and Runtime processes started by GPU tests fail the same way through `--expect-no-gpu-errors` (decision 3), and the windowed children check the same counts. "GraphicsDevice: create and destroy with zero validation messages" therefore holds for every GPU test. "GraphicsDevice: validation and synchronization-validation messages reach GpuDiagnostics and count" provokes a real write-after-write hazard and a real validation error to prove the wiring.
+- The debug messenger's general messages named "Loader Message" describe the machine's installation, not the application's use of Vulkan. Examples: a third-party implicit layer built for an older API version, such as OBS's `VK_LAYER_OBS_HOOK` on the developer machine, or no driver at all on a hosted runner. They are logged as `Vulkan loader (<severity>): ...` warnings and never counted. The rule is the public `IsLoaderInstallationMessage`, applied by `GpuDiagnostics::ReportDebugUtilsMessage` and unit-tested on the CPU. A machine without a driver then fails `GraphicsDevice::Create` with an error value that the GPU tests report as their skip reason, instead of failing the test through an undeclared Error log. The loader's validation of API calls carries the validation type and still counts.
+- Disabling implicit layers in GPU runs (`VK_LOADER_LAYERS_DISABLE=~implicit~`) was rejected. It also disables vendor layers such as `VK_LAYER_NV_optimus`, which change device enumeration on hybrid laptops, and the loader warns about each disabled layer.
+
+### 27. NVRHI's timer-query pool
+
+`GraphicsDevice` raises `DeviceDesc::maxTimerQueries` to at least `GpuProfiler::MaxScopesPerFrame × FramesInFlight × 2`. That covers an application profiler and a capture's. With NVRHI's default of 256, a third frame in flight or a second profiler would make `createTimerQuery` report an NVRHI error. "GpuProfiler: two profilers time MaxScopesPerFrame scopes in every one of three frames in flight" is the regression test: it fails on the default pool through the fixture's error check.
+
+### 28. GPU tests gate every commit; the hosted runners run them too
+
+- **Commit gate:** `PreCommit.py` runs the unit, gpu, golden and feature suites in Debug, the gpu and golden suites with `--require-gpu` (§15.1: T2 gates every commit on this machine's GPU). The golden images run in Debug there and must match the Release goldens, which the matrix allows (§15.8); the committed goldens match bit for bit in both configurations. `--gpu-optional` drops `--require-gpu` on a machine without a Vulkan device.
+- **`CI.py`:** the gpu and golden stages pass `--require-gpu` unless `--gpu-optional` is given.
+- **GitHub Actions** (revises decision 18's "the file needs no change"):
+  - **Linux** (GCC 14 and Clang 19) runs the gpu stage in Debug and Release and the golden stage in Release on Lavapipe (`mesa-vulkan-drivers`), with `--require-gpu`. The SDK's `VK_LAYER_KHRONOS_validation` comes through `VK_LAYER_PATH`, `VK_DRIVER_FILES` selects Lavapipe's ICD alone, and the stages run inside the unit stage's Xvfb display with openbox, so the windowed swapchain and application children present to X11. The workflow fails early if the layer or the ICD manifest is missing, and logs `vulkaninfo --summary`.
+  - **Lavapipe's features:** Every Mesa release Ubuntu 24.04 ships (24.0 and later) exposes Lavapipe as a Vulkan 1.3 device, and it meets §8.1's feature set: dynamic rendering, synchronization2, timeline semaphores, `samplerAnisotropy`, `imageCubeArray`, `shaderStorageImageExtendedFormats`, storage support for the six required formats, and a graphics and compute queue. `--require-gpu` is therefore correct there, and a regression in the image would fail with the selection's per-candidate rejection reasons instead of skipping silently. Mesa releases that report Vulkan 1.4 with `hostImageCopy` also run the host-copy path. No other machine has run this configuration yet: the first Linux CI run is the evidence.
+  - **Lavapipe goldens:** the golden stage runs in smoke mode on Lavapipe. §15.4 commits no software-rasterizer goldens, and this machine cannot run Lavapipe to render candidates for review, so none are committed.
+  - **Windows and macOS** run the gpu and golden stages with `--gpu-optional`. The Windows image has no Vulkan driver, and MoltenVK's loader is not on the macOS library path (`copy_only=1`). Every GPU test case therefore names the reason, passes without running, and the step ends as a warning.
+
+### 29. Goldens of the developer machine
+
+`Tests/Golden/nvidia-61x/` holds `Triangle.png` (640×360) and `ImGuiDemo.png` (1600×900). They were rendered on the RTX 5070 Ti Laptop GPU (NVIDIA driver 61x) with synchronization validation, and reviewed image by image: an upright counter-clockwise triangle with red, green and blue corners on the clear colour, and Dear ImGui 1.92.9b's demo window. They match with zero differing pixels in Debug and Release.
+
+### 30. GPU tests that render in another process probe for a device first
+
+`Test::ProbeGpuForProcess()` is a new function in `HeadlessGpuFixture.h`. It creates and destroys a fixture before an Editor or Runtime process starts, and reports a missing device like `ENGINE_REQUIRE_GPU`. Without it, the editor fault-injection tests and the runtime rendering test failed on the child's exit code on a machine without a GPU, instead of naming the reason. The editor screenshot tests used a local helper that this function replaces.
+
+The runtime gains "RuntimeApp: --gpu-inject-fault=device-lost exits 4 with a crash report" and "RuntimeApp: --gpu-inject-fault=hang exits 4 with a crash report after the bounded wait", next to the editor's tests.
+
+### 31. Known limits carried forward
+
+- **NVRHI does not reference cleared textures.** `clearTextureFloat` and `clearDepthStencilTexture` record no command-buffer reference to the texture, so a texture used only by a clear and dropped before its submission completes can be destroyed while the GPU uses it. Owners keep targets alive until their frame retires, or wait for idle before garbage collection, as the fixture does. `Application` keeps each frame slot's headless target until the slot's next frame has waited for it, and `RenderTargetPool` releases a free target only once the submission of the last frame that used it has completed (decision 32). The tracker cannot do it for every owner: in Dist it holds no reference, so a dropped object dies with its last handle.
+- **Readback assumes coherent staging memory.** It assumes NVRHI's `HostVisible | HostCached` staging memory is host-coherent, as it is on NVIDIA, AMD and Mesa drivers. NVRHI offers no hook to invalidate a mapped range.
+- **`imgui.ini` holds a date.** Dear ImGui 1.92.9 writes `LastUsed=<date>` into it. Rendering and goldens do not depend on the date: they use a fresh user-data folder.
+- **A rare hang at exit was not reproduced.** Stream B saw one hang after the crash report of an injected device-lost fault in about 30 runs. The likely cause is `std::_Exit` reaching `ExitProcess`, which runs the driver's and the validation layer's DLL detach while GPU work is in flight. Integration ran 30 runtime and 40 editor fault runs (device-lost and hang), and every one exited 4 within a second. The Core owner is asked to consider `TerminateProcess` after the logs are flushed on Windows (`Core/FatalError.cpp` is M1's).
+
+### 32. Review findings applied at integration
+
+The review of the integrated milestone found the following; the fixes are part of the milestone commit, each with a test that fails without it where the failure can be provoked.
+
+- **Frame targets outlive the frames that cleared them** (decision 31). Destroying a headless frame target that a frame still in flight had cleared was a use-after-free: with the frame held back on the GPU (`Test::GpuSubmissionGate`, below), the validation layer reported `vkDestroyImage` of an image in use, and the GPU then faulted on freed memory. "Application: a headless frame target replaced by a resize outlives the frames that cleared it" and "RenderTargetPool: a free target is released only after the submissions that used it completed" are the regression tests. A fix in `GpuResourceTracker::Sweep` was rejected: it covers only Debug and Release, because the Dist tracker holds no reference.
+- **The whole life of a device is checked.** `GraphicsDevice::Destroy(Scope<GraphicsDevice>) -> GpuMessageCounts` and `EngineContext::DestroyGraphics()` return the device's counts after its teardown; the tracker's leak report is a `GpuDiagnostics` error. `HeadlessGpuFixture`, `--expect-no-gpu-errors` (which counts warnings too) and the windowed swapchain child read them. Process tests also check that the process printed no GPU message line (`Test::FindGpuMessageLines`), and clean runs no error line either (`Test::FindProblemLogLines`).
+- **The debug messenger's routing is testable.** `GpuDiagnostics::ReportDebugUtilsMessage` holds the callback's logic and prefixes the message ID ("[SYNC-HAZARD-WRITE-AFTER-WRITE] ...") when the text lacks it; `IsLoaderInstallationMessage` is decision 26's rule. One `VkResultToString(VkResult)` ("ErrorDeviceLost (-4)") in `GpuDiagnostics.h` replaces four local versions.
+- **`WaitForIdle` never throws** (decision 6).
+- **Host image upload.** `ValidateUpload` checks every pitch product for overflow and the host copy's 32-bit row lengths, compares the subresource count before sizing anything from the desc, and rejects 1D textures taller than 1. `HostImageUpload::SupportsHostImageCopy(const nvrhi::TextureDesc&)` asks `vkGetPhysicalDeviceImageFormatProperties2` for the image the host copy would create (type, cube flag, usage) and checks the desc against its limits; `CreateTexture` takes the host-copy path only then. The per-format overload keeps only the cached format features.
+- **An empty `Image` is invalid.** The new tests of the golden harness found that a size mismatch wrote a bogus `<Name>-diff.png` (a PNG with a 0×0 header), because a default-constructed `Image` counted as valid. `Image::IsValid` now requires a size above zero, as `CreateImage` does, so `EncodePng` refuses an empty image and a comparison of two sizes writes no difference image.
+- **Constant-buffer sizes are checked** (§8.12): `ConstantBufferSize` and `PipelineLayoutDescription::ConstantBuffers`, filled by `TrianglePass` and the test programs.
+- **ImGui pipeline failures are fatal** (decision 25).
+- **Test support.** `Test::MountCompiledShaders`, `Test::GpuSubmissionGate` (a timeline semaphore the next submission waits for until the test signals it, so a submission stays in flight deterministically), `Test::FindGpuMessageLines` and `Test::FindProblemLogLines` join `HeadlessGpuFixture.h`; `Test::GoldenSettings`, `GetRepositoryGoldenSettings` and a `CheckGoldenImage` overload with explicit settings join `GoldenImage.h`, so the comparison paths are tested on the CPU in a temporary directory. Host-copy skips are logged with a stable prefix, which `Test.py` reports (a warning under the 1.4 cap).
+- **Frozen headers changed** (integration acting as contract owner): `GpuDiagnostics.h`, `GraphicsDevice.h`, `EngineContext.h`, `HostImageUpload.h`, `PipelineFactory.h` and `RenderTargetPool.h` (public additions and documentation), `Swapchain.h` (the private `Image` is now `SwapchainImage`, which no longer hides `Engine::Image`), `Image.h` (`IsValid`), `ImGuiRenderer.h` and `OffscreenTarget.h` (documentation), and the test support above.
+- **Not testable in process:** an out-of-memory result of `vkDeviceWaitIdle` and a Gpu error from `ImGuiLayer::Render`. Neither can be provoked: NVRHI asserts on every failed Vulkan creation in Debug and Release, and no injected fault reaches those paths.
+
 ## Requested amendments (docs owner)
 
 - **Architecture §2.2:** `ENGINE_SHADER_DIRECTORY` for non-Dist builds and the `shaders://` mount, from the workspace global `ShaderOutputDirectory` (decision 4); the stb implementation of stb_image and stb_image_write in `Graphics/ThirdParty/StbImageImplementation.cpp`, M6's file keeping stb_image_resize2 (decision 11); NoPCH files through `enablepch "Off"` (decision 15).
@@ -171,3 +296,24 @@ As in M2 (ADR 0005 decision 3), the contract declares private data members only 
 - **`Vendor/imgui/VENDOR.md`:** the GLFW backend's translation unit is `Engine/Source/Engine/ImGui/ImGuiGlfwImplementation.cpp`, compiled with `enablepch "Off"` (premake 5.0.0 has no `NoPCH` flag), and includes `<vulkan/vulkan.h>` before the backend (decision 15).
 - **`Vendor/stb/VENDOR.md`:** the implementation translation unit of stb_image and stb_image_write is `Engine/Source/Engine/Graphics/ThirdParty/StbImageImplementation.cpp` with `enablepch "Off"`; stb_image_resize2's implementation joins M6's `Asset/ThirdParty/StbImplementation.cpp` (decision 11).
 - **`AGENTS.md` and the `build-and-test` skill:** the gpu and golden suites, `--require-gpu`, `--vulkan-api`, `--update-golden`, and that the Editor and Runtime need `--renderer none` on machines without a GPU (stream E at integration).
+- **Roadmap M5 acceptance** (owner: the lead, a scope decision): the bullets still name what decisions 8 and 16 defer. `viewport.screenshot` and `editor.screenshot` are registered after the M4/M5 merge (the golden `ImGuiDemo` uses `--editor-screenshot` until then); the oom-texture placeholder arrives with `GpuResourceCache` in M6; the editor's autosave in a fault arrives with `EditorCore/Autosave` in M10. Either the bullets name the M5 substitutes, or the deferred checks are added to the acceptance of those milestones.
+
+**Applied by the M5 integration task** (decisions 20 to 32):
+- **Architecture §2.3:** the scripts table lists `CI.py --gpu-optional`, `PreCommit.py` with its gpu and golden suites, and `Test.py` with `--require-gpu`, `--vulkan-api`, the per-cap gpu runs and their JUnit names, the warning statuses and the skip check after every run.
+- **Architecture §8.12:** `PipelineLayoutDescription`'s `ConstantBuffers` and `StorageImages`, and ImGui's pipelines per target format on first use with the fatal failure rule (decisions 25 and 32).
+- **Architecture §8.14:** item 7 names ImGui's first-use pipelines; item 8 says what the fault tests check until M6 and M10 (decision 8).
+- **Architecture §15.2 and §15.3:** the fixture fails on warnings and reads its counts after the teardown, `ProbeGpuForProcess`, Editor and Runtime processes fail through `--expect-no-gpu-errors`, the wiring meta-test, and what the fault tests check (decisions 8, 26 and 32).
+- **Architecture §8.1:** path 1 uses `keepInitialState` instead of `setPermanentTextureState`. The NVRHI bullet now says the fixture counts errors and warnings and that the loader's notes are not counted. Swapchain recreations are coalesced, a minimized swapchain is released, and the 2-frame debounce applies to viewport targets.
+- **Architecture §8.2:** immutable resources are `keepInitialState` textures.
+- **Architecture §8.3:** the perspective term is `m[1][1] = f`, and nothing flips Y because NVRHI's viewport does it. §15.2's projection tests follow.
+- **Architecture §8.11:** the GLFW backend runs on native platforms only, and `ImGuiLayer` is the platform side on the null platform.
+- **Architecture §15.8:** the gpu and golden rows (warnings fail, `--gpu-optional`) and the GitHub Actions paragraph (Lavapipe on Linux, `--gpu-optional` on Windows and macOS).
+- **Architecture §15.9:** the commit gate runs the gpu and golden suites with `--require-gpu`.
+- **`Vendor/imgui/VENDOR.md`:** the GLFW backend's translation unit, `enablepch "Off"`, and the null-platform limitation.
+- **`AGENTS.md` and the `build-and-test` and `commit-review` skills:** the gpu and golden suites, `--require-gpu`, `--vulkan-api`, `--update-golden` and `--gpu-optional`, the GPU test conventions, the Lavapipe CI jobs, and that the Editor and Runtime need `--renderer none` without a GPU.
+
+**Still for the docs owner:**
+- every item of the list above not covered by the applied list;
+- **§8.6 item 5:** the DFG LUT is a `keepInitialState` texture (decision 21);
+- **§8.12:** `ValidatePipelineLayout`'s full list of checks (decision 20);
+- **§15.4:** the golden harness's `GoldenSettings` and that golden test cases live in `TEST_SUITE(Test::GoldenSuite)` (decisions 14 and 32).

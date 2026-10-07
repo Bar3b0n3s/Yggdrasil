@@ -10,7 +10,7 @@ namespace Engine {
 
 	TEST_SUITE("Graphics")
 	{
-		TEST_CASE("GpuResourceTracker: live counts return to zero" * doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+		TEST_CASE("GpuResourceTracker: live counts return to zero" * doctest::test_suite(Test::GpuSuite))
 		{
 			Test::HeadlessGpuFixture gpu;
 			ENGINE_REQUIRE_GPU(gpu);
@@ -48,7 +48,7 @@ namespace Engine {
 		}
 
 		TEST_CASE("GpuResourceTracker: HasOtherReferences discounts the tracker's own reference"
-			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+			* doctest::test_suite(Test::GpuSuite))
 		{
 			Test::HeadlessGpuFixture gpu;
 			ENGINE_REQUIRE_GPU(gpu);
@@ -75,11 +75,13 @@ namespace Engine {
 			}
 			CHECK_FALSE(tracker.HasOtherReferences(**texture, 1));
 
-			// A submission that used the texture references it until NVRHI retires it.
+			// A submission that used the texture references it until NVRHI retires it. The upload is writeTexture, which
+			// records the reference; NVRHI's clearTextureFloat records none.
+			const std::vector<std::byte> texels(static_cast<size_t>(desc.width) * desc.height * 4);
 			Result<nvrhi::CommandListHandle> commandList = device.CreateCommandList();
 			REQUIRE_MESSAGE(commandList.has_value(), commandList.error().ToString());
 			(*commandList)->open();
-			(*commandList)->clearTextureFloat(*texture, nvrhi::AllSubresources, nvrhi::Color(0.0f));
+			(*commandList)->writeTexture(*texture, 0, 0, texels.data(), static_cast<size_t>(desc.width) * 4);
 			(*commandList)->close();
 			device.ExecuteCommandList(**commandList);
 			CHECK(tracker.HasOtherReferences(**texture, 1));
@@ -88,7 +90,7 @@ namespace Engine {
 			CHECK_FALSE(tracker.HasOtherReferences(**texture, 1));
 		}
 
-		TEST_CASE("GpuResourceTracker: recorded host images count as created and destroyed" * doctest::skip(true))
+		TEST_CASE("GpuResourceTracker: recorded host images count as created and destroyed")
 		{
 			GpuResourceTracker tracker;
 			tracker.RecordCreated(GpuResourceType::HostImage);

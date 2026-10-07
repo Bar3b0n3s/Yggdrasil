@@ -1,17 +1,34 @@
 #include "EnginePCH.h"
 #include "Engine/Platform/Environment.h"
 
-// M5 contract stub (Roadmap rule 3): stream A (loader, device, selection, creation wrappers, host image upload) implements
-// reading a variable with getenv on Linux and macOS. Until then every variable reads as not set.
+// Reading the environment on Linux and macOS: getenv, whose bytes are the value (UTF-8 by convention, §16).
 
 #if defined(ENGINE_PLATFORM_LINUX) || defined(ENGINE_PLATFORM_MACOS)
 
+	#include <cstdlib>
+
 namespace Engine {
 
-	std::optional<std::string> ReadEnvironmentVariable(std::string_view /*name*/)
+	namespace Utils {
+
+		// Whether `name` can name a variable: not empty, and without '=' (the separator of the environment block) or NUL.
+		static bool IsValidEnvironmentVariableName(std::string_view name)
+		{
+			return !name.empty() && name.find('=') == std::string_view::npos && name.find('\0') == std::string_view::npos;
+		}
+
+	}
+
+	std::optional<std::string> ReadEnvironmentVariable(std::string_view name)
 	{
-		ENGINE_CONTRACT_STUB();
-		return std::nullopt;
+		if (!Utils::IsValidEnvironmentVariableName(name))
+			return std::nullopt;
+
+		const std::string terminatedName(name);
+		const char* value = std::getenv(terminatedName.c_str());
+		if (value == nullptr)
+			return std::nullopt;
+		return std::string(value);
 	}
 
 }

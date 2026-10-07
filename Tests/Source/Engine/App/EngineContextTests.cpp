@@ -3,7 +3,11 @@
 #include "Engine/App/EngineContext.h"
 
 #include "Engine/Core/FileSystem.h"
+#include "Engine/Graphics/GraphicsDevice.h"
+#include "Engine/Graphics/ShaderLibrary.h"
+#include "Support/HeadlessGpuFixture.h"
 #include "Support/TempDirectory.h"
+#include "Support/TestOptions.h"
 
 namespace Engine {
 
@@ -111,6 +115,45 @@ namespace Engine {
 				EngineContext::Create({ .WorkerCount = 0, .Graphics = GraphicsSpecification{ .FramesInFlight = 0 } });
 			REQUIRE_FALSE(created.has_value());
 			CHECK(created.error().ToString().contains("while creating the engine context (Graphics)"));
+		}
+
+		TEST_CASE("EngineContext: DestroyGraphics without a device returns zero counts")
+		{
+			Result<Scope<EngineContext>> created = EngineContext::Create({ .WorkerCount = 0 });
+			REQUIRE(created.has_value());
+			const GpuMessageCounts counts = (*created)->DestroyGraphics();
+			CHECK(counts.Errors == 0);
+			CHECK(counts.Warnings == 0);
+		}
+
+		TEST_CASE("EngineContext: the Graphics step mounts shaders:// and creates the device and its services"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			if (!Test::ProbeGpuForProcess())
+				return;
+			// Headless: the device presents to nothing, like the fixture's.
+			GraphicsSpecification graphics;
+			graphics.Validation = true;
+			graphics.SynchronizationValidation = true;
+			graphics.MaxApiVersion = Test::GetTestOptions().VulkanApi;
+			Result<Scope<EngineContext>> created = EngineContext::Create({ .WorkerCount = 0, .Graphics = graphics });
+			REQUIRE_MESSAGE(created.has_value(), created.error().ToString());
+			EngineContext& context = **created;
+			CHECK(context.GetVfs().IsMounted(ShaderScheme));
+			REQUIRE(context.GetGraphicsDevice() != nullptr);
+			CHECK(context.GetShaderLibrary() != nullptr);
+			CHECK(context.GetPipelineFactory() != nullptr);
+			const GraphicsDevice& device = *context.GetGraphicsDevice();
+			CHECK(device.GetInfo().Validation);
+			CHECK(device.GetInfo().ApiVersion <= Test::GetTestOptions().VulkanApi);
+
+			// DestroyGraphics tears the GPU services down now and returns the device's final counts.
+			const GpuMessageCounts counts = context.DestroyGraphics();
+			CHECK(counts.Errors == 0);
+			CHECK(counts.Warnings == 0);
+			CHECK(context.GetGraphicsDevice() == nullptr);
+			CHECK(context.GetShaderLibrary() == nullptr);
+			CHECK(context.GetPipelineFactory() == nullptr);
 		}
 
 		TEST_CASE("EngineContext: EngineContextStepToString names every step")

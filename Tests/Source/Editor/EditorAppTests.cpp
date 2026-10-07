@@ -55,7 +55,7 @@ namespace Engine {
 			CHECK(result->StandardError.contains("Frame loop started: System clock, 60 Hz, unthrottled"));
 		}
 
-		TEST_CASE("EditorApp: with ENGINE_VULKAN_LOADER=missing the editor exits 3 with the loader message" * doctest::skip(true))
+		TEST_CASE("EditorApp: with ENGINE_VULKAN_LOADER=missing the editor exits 3 with the loader message")
 		{
 			// Roadmap M5: a missing loader is an initialization failure (exit code 3) with a readable message (§8.1). Headless,
 			// so no error dialog can block the run.
@@ -69,7 +69,7 @@ namespace Engine {
 			CHECK_FALSE(result->StandardError.contains("Process context: Glfw initialized"));
 		}
 
-		TEST_CASE("EditorApp: an ENGINE_VULKAN_LOADER value other than missing exits 3 naming the variable" * doctest::skip(true))
+		TEST_CASE("EditorApp: an ENGINE_VULKAN_LOADER value other than missing exits 3 naming the variable")
 		{
 			Test::TempDirectory userData("EditorBadLoaderHook");
 			const Result<ProcessResult> result = RunEditor(userData, { "--headless", "--frames", "1" }, std::chrono::seconds(60),

@@ -23,7 +23,7 @@ namespace Engine {
 	TEST_SUITE("Graphics")
 	{
 		TEST_CASE("RenderTargetPool: equal descs reuse a free target and different ones do not"
-			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+			* doctest::test_suite(Test::GpuSuite))
 		{
 			Test::HeadlessGpuFixture gpu;
 			ENGINE_REQUIRE_GPU(gpu);
@@ -54,7 +54,7 @@ namespace Engine {
 		}
 
 		TEST_CASE("RenderTargetPool: EndFrame releases targets idle for longer than keepFrames"
-			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+			* doctest::test_suite(Test::GpuSuite))
 		{
 			Test::HeadlessGpuFixture gpu;
 			ENGINE_REQUIRE_GPU(gpu);
@@ -78,6 +78,55 @@ namespace Engine {
 			held->Reset();
 			pool.ReleaseFree();
 			CHECK(pool.GetTargetCount() == 0);
+		}
+
+		TEST_CASE("RenderTargetPool: a free target is released only after the submissions that used it completed"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			// NVRHI's command lists do not reference textures used only by clears, so the pool must not release a target that
+			// a pending submission cleared: the validation layer would report the destroyed image as in use, and the GPU would
+			// write freed memory.
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			GraphicsDevice& device = gpu.GetDevice();
+			RenderTargetPool pool(device, 0); // release free targets at the first EndFrame
+			Result<Scope<Test::GpuSubmissionGate>> gate = Test::GpuSubmissionGate::Create(device);
+			REQUIRE_MESSAGE(gate.has_value(), gate.error().ToString());
+			Result<nvrhi::CommandListHandle> commandList = device.CreateCommandList();
+			REQUIRE_MESSAGE(commandList.has_value(), commandList.error().ToString());
+
+			// A target acquired since the last EndFrame may still be recorded into an open command list: never released.
+			{
+				Result<nvrhi::TextureHandle> acquired = pool.Acquire(MakeTargetDesc(32, nvrhi::Format::RGBA8_UNORM, "Recorded"));
+				REQUIRE(acquired.has_value());
+			}
+			pool.ReleaseFree();
+			CHECK(pool.GetTargetCount() == 1);
+
+			// The frame clears the target, and its submission is held back on the GPU.
+			{
+				Result<nvrhi::TextureHandle> acquired = pool.Acquire(MakeTargetDesc(32, nvrhi::Format::RGBA8_UNORM, "Cleared"));
+				REQUIRE(acquired.has_value());
+				(*commandList)->open();
+				(*commandList)->clearTextureFloat(*acquired, nvrhi::AllSubresources, nvrhi::Color(0.5f, 0.25f, 0.0f, 1.0f));
+				(*commandList)->close();
+				(*gate)->HoldNextSubmission();
+				device.ExecuteCommandList(**commandList);
+			}
+			pool.EndFrame();
+			CHECK(pool.GetTargetCount() == 1); // free for longer than keepFrames, but its submission has not completed
+			pool.ReleaseFree();
+			CHECK(pool.GetTargetCount() == 1);
+			device.RunGarbageCollection();
+			CHECK(pool.GetAcquiredCount() == 0);
+
+			// Once the submission completed, the target goes.
+			(*gate)->Open();
+			device.WaitForIdle();
+			pool.ReleaseFree();
+			CHECK(pool.GetTargetCount() == 0);
+			gate->reset();
+			commandList->Reset();
 		}
 	}
 

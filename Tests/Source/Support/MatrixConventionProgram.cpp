@@ -1,6 +1,8 @@
 #include "TestsPCH.h"
 #include "Support/MatrixConventionProgram.h"
 
+#include "Shared/ViewConstants.h"
+
 namespace Engine {
 
 	namespace Test {
@@ -17,6 +19,7 @@ namespace Engine {
 				.Program = "MatrixConvention",
 				.Entries = { "CSMain" },
 				.BindingLayouts = { layout },
+				.ConstantBuffers = { { .Set = 0, .Register = 0, .ByteSize = sizeof(ViewConstants) } },
 			};
 		}
 

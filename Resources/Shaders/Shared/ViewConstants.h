@@ -21,10 +21,11 @@ inline constexpr uint32_t ProjectionKindOrthographic = 1;
 #endif
 
 	// Per-view constants: b0 of descriptor set 0 (§8.4). Depth is reverse-Z everywhere (§8.3): perspective projections
-	// have an infinite far plane, orthographic ones the finite range d = (Far + zView) / (Far - Near). Projection flips Y
-	// for Vulkan clip space. Linear depth is Near / d for perspective and Far - d * (Far - Near) for orthographic; the view
-	// ray is normalize(ndc.xy * TanHalfFovY * (AspectRatio, 1), -1) for perspective, while orthographic views use the
-	// direction (0, 0, -1) from the origin (ndc.xy * OrthoHalfExtents, 0).
+	// have an infinite far plane, orthographic ones the finite range d = (Far + zView) / (Far - Near). Clip-space +Y is up:
+	// NVRHI's Vulkan backend gives every viewport a negative height, which is the Vulkan Y flip, so projections do not
+	// flip Y. Linear depth is Near / d for perspective and Far - d * (Far - Near) for orthographic; the view ray is
+	// normalize(ndc.xy * TanHalfFovY * (AspectRatio, 1), -1) for perspective, while orthographic views use the direction
+	// (0, 0, -1) from the origin (ndc.xy * OrthoHalfExtents, 0).
 	struct ViewConstants
 	{
 		Float4x4 View;

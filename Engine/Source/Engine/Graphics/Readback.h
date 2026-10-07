@@ -32,9 +32,12 @@ namespace Engine {
 		// first: the copy goes into its own command list, executed with GraphicsDevice::ExecuteCommandList, and the call
 		// waits for it with WaitForSubmission (bounded; a hang or device loss is fatal, FramePacer.h). Blocks the caller
 		// until the pixels are on the CPU, so it is for screenshots and tests, never for per-frame work. Errors:
-		// InvalidArgument for a depth or block-compressed format, a multisampled texture, or a mip or slice out of range;
+		// InvalidArgument for a depth or block-compressed format, a multisampled or 3D texture, or a mip or slice out of range;
 		// Gpu when the staging texture or command list cannot be created, or mapping fails.
 		[[nodiscard]] Result<Image> ReadTexture(nvrhi::ITexture& texture, uint32_t mipLevel = 0, uint32_t arraySlice = 0);
+	private:
+		GraphicsDevice* m_Device = nullptr;     // documented back-reference
+		nvrhi::CommandListHandle m_CommandList; // created by the first ReadTexture, reused by the next ones
 	};
 
 }

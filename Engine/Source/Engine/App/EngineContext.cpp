@@ -91,6 +91,14 @@ namespace Engine {
 		return {};
 	}
 
+	GpuMessageCounts EngineContext::DestroyGraphics()
+	{
+		// The factory and the library hold GPU objects (pipelines, shaders), which must be gone before the device.
+		m_PipelineFactory.reset();
+		m_ShaderLibrary.reset();
+		return GraphicsDevice::Destroy(std::move(m_GraphicsDevice));
+	}
+
 	std::string_view EngineContextStepToString(EngineContextStep step)
 	{
 		switch (step)

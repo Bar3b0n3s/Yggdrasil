@@ -1,6 +1,8 @@
 #include "TestsPCH.h"
 #include "Support/SmokeProgram.h"
 
+#include "Shared/SmokeConstants.h"
+
 namespace Engine {
 
 	namespace Test {
@@ -18,6 +20,7 @@ namespace Engine {
 				.Entries = { "CSMain" },
 				.Permutation = { { .Key = "SMOKE_SATURATE", .Value = std::string(saturate) } },
 				.BindingLayouts = { layout },
+				.ConstantBuffers = { { .Set = 0, .Register = 0, .ByteSize = sizeof(SmokeConstants) } },
 			};
 		}
 

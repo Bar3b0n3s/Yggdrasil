@@ -55,12 +55,14 @@ Run every command from the repository root. Windows uses `python`; Linux and mac
 | Generate project files (again after adding or removing files) | `python Scripts/Generate.py` (vs2026, gmake or xcode4; `--action` overrides) |
 | Build | `python Scripts/Build.py --config Debug` (also `Release`, `Dist`; `--project Tests` for one project) |
 | Unit tests | `python Scripts/Test.py --suite unit --config Debug --junit` (fails on a test case skipped outside the child-process targets; `--allow-skips` is contract mode) |
+| GPU tests | `python Scripts/Test.py --suite gpu --config Debug --junit --require-gpu` (validation and synchronization validation on; runs under API 1.4 and again capped with `--vulkan-api=1.3`; `--vulkan-api 1.3\|1.4` runs one cap; without `--require-gpu` a test case without a device passes without running and the run ends as a warning) |
+| Golden images | `python Scripts/Test.py --suite golden --config Release --junit --require-gpu` (compares with `Tests/Golden/<DeviceClass>/`; smoke mode, a warning, on a device class without goldens; `--update-golden` writes candidates there, to review in the diff before committing) |
 | Format C++ | `python Scripts/Format.py` (rewrites files); `--check` only reports |
 | Lint | `python Scripts/Lint.py` (`--self-test` proves every seeded fixture in `Tests/Data/Lint/` still fails; `--mode regex` forces the checkers that do not need clang-tidy and clang-query; `--allow-contract-stubs` is contract mode) |
 | Check build configuration (ABI defines, Jolt instruction set, FP model) | `python Scripts/CheckBuildConfig.py` |
 | Compile shaders only | `python Scripts/CompileShaders.py --config Debug` |
-| Commit gate | `python Scripts/PreCommit.py` (`--contract` only for a milestone's contract commit) |
-| Full CI | `python Scripts/CI.py` (`--stages build,unit` for a subset; `--contract` as for PreCommit) |
+| Commit gate | `python Scripts/PreCommit.py` (`--contract` only for a milestone's contract commit; `--gpu-optional` on a machine without a usable Vulkan device) |
+| Full CI | `python Scripts/CI.py` (`--stages build,unit` for a subset; `--contract` as for PreCommit; `--gpu-optional` lets the gpu and golden stages pass without a device, as on the hosted Windows and macOS runners) |
 
 - **Toolchain:**
   - Windows: Visual Studio 2026 (toolset v145, MSVC 14.51).
@@ -93,7 +95,7 @@ Run every command from the repository root. Windows uses `python`; Linux and mac
 
 ## Commit gate (Architecture §15.9)
 
-1. `python Scripts/PreCommit.py` is green: generate, the static checks (`CheckBuildConfig.py` on the workspace and its fixtures, `Lint.py`, `Lint.py --self-test`, the format check; the same list as `CI.py`'s lint stage), Debug build, and the unit and feature suites.
+1. `python Scripts/PreCommit.py` is green: generate, the static checks (`CheckBuildConfig.py` on the workspace and its fixtures, `Lint.py`, `Lint.py --self-test`, the format check; the same list as `CI.py`'s lint stage), Debug build, and the unit, gpu, golden and feature suites in Debug. The gpu and golden suites require a Vulkan device (`--require-gpu`); only a machine without one passes `--gpu-optional`.
    - **Strict by default.** Lint rejects `ENGINE_CONTRACT_STUB` and any `doctest::skip` outside the child-process targets (`Test::ChildTargetSuite`), and the unit suite fails on, and names, any other skipped test case.
    - **Contract mode.** Only the commit of a milestone's contract task runs `python Scripts/PreCommit.py --contract`, which allows both and says so in its summary. Every other commit is strict.
 2. **Recorded review.** Run the `commit-review` skill on the staged diff against `Docs/ReviewChecklist.md`. Any of these blocks the commit:
@@ -104,7 +106,7 @@ Run every command from the repository root. Windows uses `python`; Linux and mac
 3. **Tests for every change.** New behaviour gets tests. Every bug fix gets a regression test that failed before the fix.
 4. **Trailer.** The commit message ends with a `Reviewed:` trailer that summarizes the review outcome and the PreCommit result.
 
-Milestone commits also need the full `python Scripts/CI.py` green. Push to `origin` only after the review and the gate have passed. GitHub Actions (`.github/workflows/ci.yml`) then builds and unit-tests Windows, Linux and macOS. A platform counts as verified only once its CI job is green.
+Milestone commits also need the full `python Scripts/CI.py` green. Push to `origin` only after the review and the gate have passed. GitHub Actions (`.github/workflows/ci.yml`) then builds and unit-tests Windows, Linux and macOS. The Linux jobs also run the gpu and golden stages on Lavapipe (Mesa's software Vulkan driver) with the SDK's validation layer; golden images run in smoke mode there, since software-rasterizer goldens are never committed (§15.4). The Windows and macOS runners have no Vulkan device, so their GPU test cases report the reason and pass without running (`--gpu-optional`). A platform counts as verified only once its CI job is green.
 
 ## Code style (summary; `Docs/CodeStyle.md` is the rule)
 
@@ -177,7 +179,8 @@ The same inputs and seed must give the same state hash in Debug, Release and Dis
   - Case names have the form `TEST_CASE("<Unit>: <present-tense behaviour>")`. Roadmap acceptance names are used verbatim.
 - **Deterministic:** no sleeps or wall-clock timing, fixed seeds, no network, files only in a per-test temporary directory, and no dependence on test order. The one wall-clock exception is the windowed child "FrameLoop: a minimized window uses little CPU time per second" (ADR 0005 decision 13).
 - **Windowed children** (`--windowed-child`) need a display; on Linux without a desktop, run the unit suite inside Xvfb with a window manager, as the `build-and-test` skill shows.
-- **Public API only.** Expected error logs are declared with `Test::ExpectLog`. Expected asserts are death tests (`ENGINE_DEATH_TEST`). GPU tests skip with a reason unless `--require-gpu` is passed.
+- **Public API only.** Expected error logs are declared with `Test::ExpectLog`. Expected asserts are death tests (`ENGINE_DEATH_TEST`).
+- **GPU tests** carry `doctest::test_suite(Test::GpuSuite)` (golden ones live in `TEST_SUITE(Test::GoldenSuite)`) and start with `Test::HeadlessGpuFixture` plus `ENGINE_REQUIRE_GPU`, or `Test::ProbeGpuForProcess()` when the code under test creates its own device (an Editor or Runtime process, a windowed child, an in-process `Application`). Without a device they pass without running after naming the reason, unless `--require-gpu` is passed. The fixture fails a test on any validation or NVRHI error or warning, its device's teardown included, and on any GPU object still alive at its end; Editor and Runtime processes fail the same way through `--expect-no-gpu-errors`. Editor and Runtime processes that tests start without a GPU pass `--renderer none`.
 - **No permanent `doctest::skip`.** It marks a contract task's tests until their implementation lands. The only permanent skips are child-process targets, which carry `doctest::test_suite(Test::ChildTargetSuite)` in the same decorator expression (Lint `test-skip`, Test.py's skip check).
 - **Fixtures** live in `Tests/Data/`, with licenses in `Tests/Data/LICENSES.md`. Generated fixtures come from committed generators.
 

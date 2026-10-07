@@ -4,14 +4,17 @@
 
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Graphics/Image.h"
+#include "Engine/Renderer/TrianglePass.h"
 #include "Support/HeadlessGpuFixture.h"
+
+#include <cstdlib>
 
 namespace Engine {
 
 	TEST_SUITE("Renderer")
 	{
 		TEST_CASE("ViewportCapture: captures the clear-and-triangle view at the requested size"
-			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+			* doctest::test_suite(Test::GpuSuite))
 		{
 			Test::HeadlessGpuFixture gpu;
 			ENGINE_REQUIRE_GPU(gpu);
@@ -33,6 +36,13 @@ namespace Engine {
 			const std::span<const std::byte> topRow = first->GetRow(0);
 			const auto centre = static_cast<std::ptrdiff_t>(static_cast<size_t>(first->Width / 2) * 4);
 			CHECK_FALSE(std::equal(centreRow.begin() + centre, centreRow.begin() + centre + 3, topRow.begin()));
+			// The top-left corner holds TriangleClearColor as stored in the UNORM target (within the GPU's conversion rounding).
+			for (size_t channel = 0; channel < TriangleClearColor.size(); ++channel)
+			{
+				CAPTURE(channel);
+				const int expected = static_cast<int>(TriangleClearColor[channel] * 255.0f + 0.5f);
+				CHECK(std::abs(std::to_integer<int>(topRow[channel]) - expected) <= 1);
+			}
 
 			// Another size needs no new pipeline: the capture renders any size with the pipeline it created at startup.
 			const Result<Image> small = (*capture)->Capture({ .Width = 320, .Height = 200 });
@@ -42,7 +52,7 @@ namespace Engine {
 		}
 
 		TEST_CASE("ViewportCapture: MaxDimension scales the image down and keeps the aspect ratio"
-			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+			* doctest::test_suite(Test::GpuSuite))
 		{
 			Test::HeadlessGpuFixture gpu;
 			ENGINE_REQUIRE_GPU(gpu);
@@ -55,7 +65,7 @@ namespace Engine {
 		}
 
 		TEST_CASE("ViewportCapture: a zero or oversized request is InvalidArgument"
-			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+			* doctest::test_suite(Test::GpuSuite))
 		{
 			Test::HeadlessGpuFixture gpu;
 			ENGINE_REQUIRE_GPU(gpu);

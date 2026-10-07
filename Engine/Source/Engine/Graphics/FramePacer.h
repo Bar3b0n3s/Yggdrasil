@@ -2,9 +2,12 @@
 
 #include "Engine/Core/Base.h"
 
+#include <nvrhi/nvrhi.h>
+
 #include <cstdint>
 #include <functional>
 #include <string_view>
+#include <vector>
 
 // Frame pacing that never waits unboundedly (Architecture §8.1). nvrhi::IDevice::waitEventQuery waits with an infinite
 // timeout and asserts its result (NDEBUG is set only in Dist), so the engine never calls it. Instead each frame in
@@ -47,9 +50,10 @@ namespace Engine {
 
 	// Waits until the graphics queue's timeline semaphore reaches `submissionID` (GraphicsDevice::ExecuteCommandList's
 	// result) with RunBoundedGpuWait over vkWaitSemaphores slices (through the dispatcher's C entry point, so nothing
-	// throws). Returns at once when the submission already completed (GraphicsDevice::GetCompletedSubmissionID). A Hang
-	// ends the process through FatalError(GpuHang) naming `context` and the submission; DeviceLost through
-	// GraphicsDevice::RaiseDeviceLost(context); Failed through FatalError(Gpu).
+	// throws). Returns at once for submission 0 (nothing submitted) and when the submission already completed
+	// (GraphicsDevice::GetCompletedSubmissionID). A Hang ends the process through FatalError(GpuHang) naming `context` and
+	// the submission; DeviceLost through GraphicsDevice::RaiseDeviceLost(context); Failed through FatalError with
+	// GetFatalErrorKind of the failed slice's VkResult (OutOfMemory for the out-of-memory results, otherwise Gpu).
 	//
 	// Under --gpu-inject-fault=hang (GpuDiagnostics::ShouldInjectHang) the wait skips the completed-submission early return
 	// and goes straight to RunBoundedGpuWait, whose every slice reports Timeout without calling vkWaitSemaphores, so the
@@ -97,6 +101,21 @@ namespace Engine {
 		// The number of BeginFrame calls so far minus one: 0 during the first frame.
 		[[nodiscard]] uint64_t GetFrameIndex() const;
 		[[nodiscard]] uint32_t GetFramesInFlight() const;
+	private:
+		// One frame in flight: the event query EndFrame sets and the submission it recorded (0: none yet).
+		struct Slot
+		{
+			nvrhi::EventQueryHandle EventQuery{};
+			uint64_t SubmissionID = 0;
+		};
+	private:
+		GraphicsDevice* m_Device = nullptr; // documented back-reference: outlives the pacer
+		std::vector<Slot> m_Slots;
+		uint64_t m_BegunFrames = 0;
+		uint64_t m_FrameIndex = 0;
+		uint32_t m_FramesInFlight = 1;
+		uint32_t m_FrameSlot = 0;
+		bool m_IsInFrame = false; // between BeginFrame and EndFrame
 	};
 
 	// "Signaled", "Hang", "DeviceLost" or "Failed".

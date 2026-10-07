@@ -8,6 +8,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <vector>
 
 // GPU pass timings (Architecture §8.2): each pass is wrapped in a debug marker (beginMarker) and a timer query from a
 // pool per frame slot. Results are read back without waiting, FramesInFlight frames later, when the slot comes round
@@ -61,6 +62,38 @@ namespace Engine {
 
 		// The samples of the most recently collected frame, in the order their scopes opened.
 		[[nodiscard]] std::span<const GpuTimingSample> GetLastFrameSamples() const;
+	private:
+		// One scope a frame opened; Query is null when the scope is not timed (over MaxScopesPerFrame or no query).
+		struct TimedScope
+		{
+			std::string Name{};
+			uint32_t Depth = 0;
+			nvrhi::TimerQueryHandle Query{};
+		};
+
+		// The scopes of the frame recorded in one slot, collected when the slot comes round again.
+		struct FrameRecord
+		{
+			std::vector<TimedScope> Scopes{};
+			uint32_t TimedScopeCount = 0;
+			bool IsRecorded = false; // a frame used the slot since the last collection
+		};
+	private:
+		// A recycled timer query, or a new one; null when creation fails (logged once).
+		[[nodiscard]] nvrhi::TimerQueryHandle AcquireQuery();
+		// Reads the frame's queries into the last samples, or drops the frame when one has not finished.
+		void CollectFrame(FrameRecord& frame);
+	private:
+		GraphicsDevice* m_Device = nullptr; // documented back-reference: outlives the profiler
+		std::vector<FrameRecord> m_Frames;  // one per frame slot
+		std::vector<nvrhi::TimerQueryHandle> m_FreeQueries;
+		std::vector<GpuTimingSample> m_LastFrameSamples;
+		std::vector<uint32_t> m_OpenScopes;                    // indices into the current frame's scopes, innermost last
+		nvrhi::ICommandList* m_OpenScopeCommandList = nullptr; // the command list of the open scopes, for the assertions
+		uint32_t m_FrameSlot = 0;
+		bool m_HasFrame = false;
+		bool m_HasReportedScopeLimit = false;
+		bool m_HasReportedQueryFailure = false;
 	};
 
 	// Opens a GpuProfiler scope for the lifetime of the object (RAII).

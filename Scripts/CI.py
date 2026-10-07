@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The single CI entry point (Docs/Architecture.md §15.8): runs the stages in order and stops at the first failing one.
 
-Stages that exist in milestone M0, with the configurations of the §15.8 matrix:
+Stages that exist (milestone M5), with the configurations of the §15.8 matrix:
   setup        n/a                   Scripts/Setup.py (toolchain checks, pinned premake)
   generate     n/a                   Scripts/Generate.py (host workspace, compile_commands.json)
   lint         n/a                   static checks, shared with PreCommit.py (Scripts/Lib/scripts.py):
@@ -15,6 +15,14 @@ Stages that exist in milestone M0, with the configurations of the §15.8 matrix:
                                      touching only a .slang file re-runs the shader rule, the next build does not
   unit         Debug, Release        Scripts/Test.py --suite unit --junit, which also fails on a skipped test case
                                      outside the child-process targets
+  gpu          Debug, Release        Scripts/Test.py --suite gpu --junit --require-gpu: the GPU test cases with
+                                     validation and synchronization validation, under API 1.4 and capped at 1.3
+                                     (§8.1, §15.3); a machine without a usable Vulkan device fails here unless
+                                     --gpu-optional is given (hosted CI runners without a GPU), which reports those
+                                     test cases as passed without running, with the reason, and the step as a warning
+  golden       Release               Scripts/Test.py --suite golden --junit --require-gpu: the golden images of this
+                                     machine's device class (§15.4); smoke mode, a warning, where it has none (always
+                                     so on Lavapipe: no software-rasterizer goldens); --gpu-optional as for gpu
   portability  n/a                   premake --os=linux gmake, --os=linux ninja, --os=macosx xcode4 (and the vs2026
                                      reference) into bin-int/Portability/, each checked against the expected file list
                                      and project/configuration set; the xcode4 projects' precompiled headers
@@ -24,17 +32,18 @@ Stages that exist in milestone M0, with the configurations of the §15.8 matrix:
                                      and of every Dist project (asserts compiled out), warnings tolerated only in
                                      vendored code, when Visual Studio's C++ Clang component
                                      is installed, otherwise reported as skipped (a failure with --require-clang-cl)
-Later stages of §15.8 (bake, gpu, golden, feature, automation, export, determinism, games, hardening) are accepted by
---stages and reported as "not-available" until their milestone.
+Later stages of §15.8 (bake, feature, automation, export, determinism, games, hardening) are accepted by --stages and
+reported as "not-available" until their milestone.
 
 Modes (Roadmap rule 3, Docs/Decisions/0004-contract-stub-gate.md): strict by default, so a milestone cannot end with a
 contract stub (ENGINE_CONTRACT_STUB) or a skipped test case outside the child-process targets. --contract passes
---allow-contract-stubs to Lint.py (lint) and --allow-skips to Test.py (unit), exactly like PreCommit.py --contract
+--allow-contract-stubs to Lint.py (lint) and --allow-skips to Test.py (unit, gpu, golden), like PreCommit.py --contract
 (Scripts/Lib/scripts.py); the run prints which mode it is in at the start and in the summary.
 
 Results: each stage's own output, a summary table, bin/TestResults/CI.xml (JUnit, one test case per step; another
-path with --summary-junit, so separate runs of one CI job keep separate summaries) and the unit JUnit files in
-bin/TestResults/.
+path with --summary-junit, so separate runs of one CI job keep separate summaries), the unit, gpu and golden JUnit
+files in bin/TestResults/, and the actual, expected and diff images of failed golden comparisons in
+bin/TestResults/Golden/.
 
 Exit codes (§4.1): 0 every selected stage passed, otherwise the code of the first failing step: 1 failed,
 2 usage error, 3 a required tool or file is missing, 5 timeout.
@@ -95,6 +104,8 @@ TIMEOUTS = {
     "generate": 600.0,
     "build": 7200.0,
     "unit": 1800.0,
+    "gpu": 3600.0,
+    "golden": 1800.0,
     "portability": 600.0,
     "clang-cl": 7200.0,
 }
@@ -116,8 +127,8 @@ STAGES = (
     Stage("build", ("Debug", "Release", "Dist"), True),
     Stage("bake", ("Release",), False, "M6 (engine asset bake)"),
     Stage("unit", ("Debug", "Release"), True),
-    Stage("gpu", ("Debug", "Release"), False, "M5 (Graphics foundation)"),
-    Stage("golden", ("Release",), False, "M5 (golden comparator)"),
+    Stage("gpu", ("Debug", "Release"), True),
+    Stage("golden", ("Release",), True),
     Stage("feature", ("Debug", "Release"), False, "M14 (FeatureTest)"),
     Stage("automation", ("Release",), False, "M4 (automation core)"),
     Stage("export", ("Release", "Dist"), False, "M7 (Exporter v0) / M15 (testing exports)"),
@@ -226,6 +237,21 @@ class Runner:
         mode = test_mode_arguments(self.arguments.contract)
         return [self.script(f"unit {config}", "Test.py", ["--suite", "unit", "--config", config, "--junit", *mode],
                             TIMEOUTS["unit"]) for config in configs]
+
+    def device_suite(self, suite: str, configs: list[str]) -> list[Step]:
+        """The gpu and golden stages (§15.8): with --require-gpu, so a test case without a device fails instead of
+        passing without running (§15.2), unless --gpu-optional says this machine may have no usable device. The gpu
+        suite runs both API caps per configuration (Test.py)."""
+        mode = test_mode_arguments(self.arguments.contract)
+        device = [] if self.arguments.gpu_optional else ["--require-gpu"]
+        steps: list[Step] = []
+        for config in configs:
+            steps.append(self.script(f"{suite} {config}", "Test.py",
+                                     ["--suite", suite, "--config", config, "--junit", *device, *mode],
+                                     TIMEOUTS[suite]))
+            if steps[-1].failed:
+                return steps
+        return steps
 
     # ----------------------------------------------------------------------------------------------------------------
 
@@ -426,6 +452,11 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--require-clang-cl", action="store_true",
                         help="portability: fail (exit code 3) instead of skipping the clang-cl build when Visual "
                              "Studio's C++ Clang component is missing (CI runners that must have it)")
+    parser.add_argument("--gpu-optional", action="store_true",
+                        help="gpu and golden: run without --require-gpu, so on a machine without a usable Vulkan "
+                             "device the GPU test cases pass without running, naming the reason, and the steps end as "
+                             "warnings (the GitHub-hosted Windows and macOS runners, which have no GPU); by default a "
+                             "missing device fails them")
     parser.add_argument("--contract", action="store_true", help=CONTRACT_FLAG_HELP)
     parser.add_argument("--summary-junit", type=Path, default=SUMMARY_JUNIT,
                         help=f"JUnit summary of this run (default: {paths.display_path(SUMMARY_JUNIT)})")
@@ -462,6 +493,8 @@ def run_stage(runner: Runner, stage: Stage, configs: list[str]) -> list[Step]:
         "lint": runner.lint,
         "build": lambda: runner.build(stage_configs),
         "unit": lambda: runner.unit(stage_configs),
+        "gpu": lambda: runner.device_suite("gpu", stage_configs),
+        "golden": lambda: runner.device_suite("golden", stage_configs),
         "portability": runner.portability,
     }
     return handlers[stage.name]()

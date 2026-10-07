@@ -2,6 +2,7 @@
 
 #include "Engine/App/ExitCode.h"
 #include "Engine/Platform/Process.h"
+#include "Support/ChildOutput.h"
 #include "Support/HeadlessGpuFixture.h"
 #include "Support/TempDirectory.h"
 #include "Support/TestOptions.h"
@@ -11,6 +12,17 @@
 // application. Runs that need no GPU pass --renderer none; the Vulkan renderer is covered in the GPU suite.
 
 namespace Engine {
+
+	// A headless runtime rendering with the Vulkan renderer, validated like every GPU test's process
+	// (Test::GetGpuApplicationArguments), with its logs and crash reports in `userData`.
+	static Result<ProcessResult> RunRenderingRuntime(const Test::TempDirectory& userData, std::vector<std::string> arguments)
+	{
+		ENGINE_TRY_ASSIGN(std::filesystem::path runtime, Test::GetBuiltExecutablePath("Runtime"));
+		const std::vector<std::string> gpuArguments = Test::GetGpuApplicationArguments();
+		arguments.insert(arguments.end(), gpuArguments.begin(), gpuArguments.end());
+		arguments.push_back("--user-data-dir=" + Test::PathToUtf8(userData.GetPath()));
+		return Process::Run({ .Executable = std::move(runtime), .Arguments = std::move(arguments) }, std::chrono::seconds(60));
+	}
 
 	TEST_SUITE("Runtime")
 	{
@@ -34,20 +46,56 @@ namespace Engine {
 		}
 
 		TEST_CASE("RuntimeApp: --headless --frames 10 renders with the Vulkan renderer and exits 0"
-			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+			* doctest::test_suite(Test::GpuSuite))
 		{
-			const Result<std::filesystem::path> runtime = Test::GetBuiltExecutablePath("Runtime");
-			REQUIRE_MESSAGE(runtime.has_value(), runtime.error().ToString());
+			if (!Test::ProbeGpuForProcess())
+				return;
 			Test::TempDirectory userData("RuntimeRenders");
-			std::vector<std::string> arguments = { "--headless", "--frames", "10", "--user-data-dir=" + Test::PathToUtf8(userData.GetPath()) };
-			const std::vector<std::string> gpuArguments = Test::GetGpuApplicationArguments();
-			arguments.insert(arguments.end(), gpuArguments.begin(), gpuArguments.end());
-			const Result<ProcessResult> result = Process::Run({ .Executable = *runtime, .Arguments = std::move(arguments) }, std::chrono::seconds(60));
+			const Result<ProcessResult> result = RunRenderingRuntime(userData, { "--headless", "--frames", "10" });
 			REQUIRE_MESSAGE(result.has_value(), result.error().ToString());
 			INFO("runtime stderr: ", result->StandardError);
 			CHECK(result->ExitCode == ExitCode::Success);
 			CHECK(result->StandardError.contains("Process context: VulkanLoader initialized"));
-			CHECK_FALSE(result->StandardError.contains("[error]"));
+			CHECK(Test::FindProblemLogLines(result->StandardError).empty());
+		}
+
+		TEST_CASE("RuntimeApp: --gpu-inject-fault=device-lost exits 4 with a crash report"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			// §8.14 item 8: the device is reported lost after the first submission, and the check that follows it ends the
+			// process through GraphicsDevice::RaiseDeviceLost.
+			if (!Test::ProbeGpuForProcess())
+				return;
+			Test::TempDirectory userData("RuntimeDeviceLost");
+			const Result<ProcessResult> result =
+				RunRenderingRuntime(userData, { "--headless", "--frames", "10", "--gpu-inject-fault", "device-lost" });
+			REQUIRE_MESSAGE(result.has_value(), result.error().ToString());
+			INFO("runtime stderr: ", result->StandardError);
+			CHECK(result->ExitCode == ExitCode::Crash);
+			const Result<std::string> report = Test::ReadOnlyCrashReport(userData.GetPath());
+			REQUIRE_MESSAGE(report.has_value(), report.error().ToString());
+			CHECK(report->contains("Reason: Fatal error (DeviceLost)"));
+			CHECK(report->contains("device lost"));
+			CHECK(Test::FindGpuMessageLines(result->StandardError).empty());
+		}
+
+		TEST_CASE("RuntimeApp: --gpu-inject-fault=hang exits 4 with a crash report after the bounded wait"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			// The frame pacer's first wait for a slot with a submission spends its budget of timed-out slices without waiting
+			// for wall time (FramePacer.h) and ends the process with GpuHang during the render phase.
+			if (!Test::ProbeGpuForProcess())
+				return;
+			Test::TempDirectory userData("RuntimeHang");
+			const Result<ProcessResult> result = RunRenderingRuntime(userData, { "--headless", "--frames", "10", "--gpu-inject-fault", "hang" });
+			REQUIRE_MESSAGE(result.has_value(), result.error().ToString());
+			INFO("runtime stderr: ", result->StandardError);
+			CHECK(result->ExitCode == ExitCode::Crash);
+			const Result<std::string> report = Test::ReadOnlyCrashReport(userData.GetPath());
+			REQUIRE_MESSAGE(report.has_value(), report.error().ToString());
+			CHECK(report->contains("Reason: Fatal error (GpuHang)"));
+			CHECK(report->contains("FramePhase: Render"));
+			CHECK(Test::FindGpuMessageLines(result->StandardError).empty());
 		}
 	}
 

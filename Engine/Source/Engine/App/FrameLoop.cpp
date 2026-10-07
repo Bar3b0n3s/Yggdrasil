@@ -4,10 +4,17 @@
 #include "Engine/App/EngineContext.h"
 #include "Engine/App/ExitCode.h"
 #include "Engine/Core/Assert.h"
+#include "Engine/Core/FatalError.h"
 #include "Engine/Core/Log.h"
 #include "Engine/Core/Profiler.h"
+#include "Engine/Graphics/GpuDiagnostics.h"
+#include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Platform/CrashHandler.h"
 
+#include <vulkan/vulkan.hpp>
+
+#include <format>
+#include <string>
 #include <string_view>
 #include <thread>
 #include <utility>
@@ -55,10 +62,22 @@ namespace Engine {
 
 	void FrameLoop::RunFrame()
 	{
-		// M5 contract stub (Roadmap rule 3): stream B (swapchain, present, frame pacing, fault handling) wraps the steps in
-		// the allowlisted frame-boundary catch of vk::SystemError (§4.6 item 2, §8.14; see FrameLoop.h).
-		ENGINE_CONTRACT_STUB();
-		RunFrameSteps();
+		// The one allowlisted frame-boundary catch (§4.6 item 2, §8.14). vulkan.hpp's enhanced mode throws from calls NVRHI
+		// makes internally; first-party Vulkan calls never throw. The frame never resumes: the handler ends the process, and
+		// the FramePhase breadcrumb still names the step that threw.
+		try
+		{
+			RunFrameSteps();
+		}
+		catch (const vk::SystemError& error)
+		{
+			const VkResult result = static_cast<VkResult>(error.code().value());
+			const std::string message = std::format("Vulkan error at the frame boundary: {}", error.what());
+			GraphicsDevice* device = m_Context->GetGraphicsDevice();
+			if (result == VK_ERROR_DEVICE_LOST && device != nullptr)
+				device->RaiseDeviceLost(message);
+			FatalError(GetFatalErrorKind(result), message);
+		}
 	}
 
 	void FrameLoop::RunFrameSteps()

@@ -32,7 +32,7 @@ git diff --staged
 python Scripts/PreCommit.py
 ```
 
-- PreCommit runs generate, the static checks (`CheckBuildConfig.py` on the workspace and on its fixtures, `Lint.py`, `Lint.py --self-test` and the format check, the same list as `CI.py`'s lint stage), the Debug build, and the unit and feature suites. Record the result of each step; `--json` adds a machine-readable summary.
+- PreCommit runs generate, the static checks (`CheckBuildConfig.py` on the workspace and on its fixtures, `Lint.py`, `Lint.py --self-test` and the format check, the same list as `CI.py`'s lint stage), the Debug build, and the unit, gpu, golden and feature suites in Debug (the gpu and golden suites with `--require-gpu` unless `--gpu-optional` is given on a machine without a Vulkan device). Record the result of each step; `--json` adds a machine-readable summary.
 - **Mode.** PreCommit is strict by default. Run `python Scripts/PreCommit.py --contract` only when the task statement says the change is a milestone's contract commit (Roadmap rule 3, `Docs/Decisions/0004-contract-stub-gate.md`); the summary prints the mode it ran in. A strict run fails on any `ENGINE_CONTRACT_STUB` (Lint `contract-stub`) and on any test case skipped outside the child-process targets (Lint `test-skip`, and Test.py's `UNEXPECTED SKIP` lines). Contract mode on any other commit is a blocking finding.
 - A red PreCommit is a blocking finding on its own. Report the first failing step and its error output, and do not continue to sign-off.
 - For a build or test failure, use the `build-and-test` skill to diagnose it.

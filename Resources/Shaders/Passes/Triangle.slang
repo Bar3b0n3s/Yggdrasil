@@ -1,8 +1,9 @@
 // Triangle: the clear-and-triangle view of the Graphics foundation (Roadmap M5; Renderer/TrianglePass). One triangle,
 // counter-clockwise in a +Y-up view, transformed by ViewConstants (b0, space 0, §8.4). Drawn with back-face culling and
-// frontCounterClockwise = true, it stays visible only if the projection's Y flip and the pipelines' winding convention
-// agree (§8.3; "Rasterizer: CCW triangle survives back-face culling"). The vertices come from SV_VertexID, so the
-// pipeline has no input layout.
+// frontCounterClockwise = true, it stays visible only if the projection's Y convention and the pipelines' winding
+// convention agree (§8.3; "Rasterizer: CCW triangle survives back-face culling"). The vertices come from the vertex index,
+// so the pipeline has no input layout. SV_VulkanVertexID is gl_VertexIndex itself: SV_VertexID would subtract the base
+// vertex and need the DrawParameters capability, which needs the shaderDrawParameters device feature.
 
 #include "Shared/ViewConstants.h"
 
@@ -30,7 +31,7 @@ static const float3 TriangleColors[3] = {
 };
 
 [shader("vertex")]
-VertexOutput VSMain(uint vertexID : SV_VertexID)
+VertexOutput VSMain(uint vertexID : SV_VulkanVertexID)
 {
 	VertexOutput output;
 	output.Position = mul(View.ViewProjection, float4(TrianglePositions[vertexID], 1.0));

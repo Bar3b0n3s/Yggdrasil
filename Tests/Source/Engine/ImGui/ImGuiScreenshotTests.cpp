@@ -19,7 +19,7 @@ namespace Engine {
 	TEST_SUITE("ImGui")
 	{
 		TEST_CASE("ImGuiScreenshot: captures the last UI frame at the UI's framebuffer size"
-			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+			* doctest::test_suite(Test::GpuSuite))
 		{
 			// A headless context with a null-platform window and a device, as the headless editor has.
 			Result<Scope<EngineContext>> created = EngineContext::Create({

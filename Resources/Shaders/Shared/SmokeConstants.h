@@ -1,7 +1,8 @@
 #pragma once
 
 // Shared between C++ and Slang (Architecture §8.4): the common subset of both languages, with ENGINE_SHADER
-// guarding what only one side sees. slangc predefines __SLANG__; C++ compilers never do.
+// guarding what only one side sees. Scripts/CompileShaders.py defines ENGINE_SHADER; slangc's predefined __SLANG__, which
+// C++ compilers never define, sets it for any other slangc run.
 #if defined(__SLANG__) && !defined(ENGINE_SHADER)
 	#define ENGINE_SHADER 1
 #endif

@@ -43,7 +43,7 @@ namespace Engine {
 
 	TEST_SUITE("Graphics")
 	{
-		TEST_CASE("DeviceSelection: scoring table" * doctest::skip(true))
+		TEST_CASE("DeviceSelection: scoring table")
 		{
 			struct Row
 			{
@@ -136,7 +136,7 @@ namespace Engine {
 			CHECK(*api14Score > *discreteScore);
 		}
 
-		TEST_CASE("DeviceSelection: the best acceptable device wins, the lowest index on a tie" * doctest::skip(true))
+		TEST_CASE("DeviceSelection: the best acceptable device wins, the lowest index on a tie")
 		{
 			const std::vector<DeviceCandidate> candidates = {
 				MakeAcceptableCandidate(0, "Integrated GPU", GpuDeviceType::Integrated),
@@ -158,9 +158,27 @@ namespace Engine {
 			CHECK(none.error().GetCode() == ErrorCode::Unsupported);
 			CHECK(none.error().ToString().contains("Discrete GPU B"));
 			CHECK(none.error().ToString().contains("MissingTimelineSemaphore"));
+
+			// No device at all, and a windowed process whose devices cannot present.
+			const Result<DeviceSelection> empty = SelectDevice({}, {});
+			REQUIRE_FALSE(empty.has_value());
+			CHECK(empty.error().GetCode() == ErrorCode::Unsupported);
+			std::vector<DeviceCandidate> headless = candidates;
+			for (DeviceCandidate& candidate : headless)
+				candidate.HasPresentSupport = false;
+			const Result<DeviceSelection> windowed = SelectDevice(headless, { .RequirePresent = true });
+			REQUIRE_FALSE(windowed.has_value());
+			CHECK(windowed.error().ToString().contains("NoPresentSupport"));
+
+			// The caller's order does not matter: the lowest Index still wins a tie.
+			const std::vector<DeviceCandidate> reversed(candidates.rbegin(), candidates.rend());
+			const Result<DeviceSelection> sameChoice = SelectDevice(reversed, {});
+			REQUIRE_MESSAGE(sameChoice.has_value(), sameChoice.error().ToString());
+			CHECK(sameChoice->Index == 1);
+			CHECK(sameChoice->BloomFormat == nvrhi::Format::RGBA16_FLOAT);
 		}
 
-		TEST_CASE("DeviceSelection: --gpu and ENGINE_GPU pick by index or by a case-insensitive name part" * doctest::skip(true))
+		TEST_CASE("DeviceSelection: --gpu and ENGINE_GPU pick by index or by a case-insensitive name part")
 		{
 			std::vector<DeviceCandidate> candidates = {
 				MakeAcceptableCandidate(0, "NVIDIA GeForce RTX 5070 Ti Laptop GPU", GpuDeviceType::Discrete),
@@ -180,6 +198,16 @@ namespace Engine {
 			const Result<DeviceSelection> unknown = SelectDevice(candidates, { .Override = "Radeon" });
 			REQUIRE_FALSE(unknown.has_value());
 			CHECK(unknown.error().GetCode() == ErrorCode::NotFound);
+			// The error lists the devices there are.
+			CHECK(unknown.error().ToString().contains("Intel(R) Graphics"));
+			const Result<DeviceSelection> noSuchIndex = SelectDevice(candidates, { .Override = "3" });
+			REQUIRE_FALSE(noSuchIndex.has_value());
+			CHECK(noSuchIndex.error().GetCode() == ErrorCode::NotFound);
+			// An override picks a device the ranking would not: the integrated one over the discrete one.
+			const Result<DeviceSelection> byCase = SelectDevice(candidates, { .Override = "GRAPHICS" });
+			REQUIRE_MESSAGE(byCase.has_value(), byCase.error().ToString());
+			CHECK(byCase->Index == 1);
+			CHECK(byCase->Score == *ScoreDevice(candidates[1]));
 
 			// An overridden device must still be acceptable.
 			candidates[2].DynamicRendering = false;
@@ -193,7 +221,7 @@ namespace Engine {
 			CHECK(windowed.has_value());
 		}
 
-		TEST_CASE("DeviceSelection: the device class names the vendor and the driver major" * doctest::skip(true))
+		TEST_CASE("DeviceSelection: the device class names the vendor and the driver major")
 		{
 			// The encoding follows the driver that reported the version, never the OS the test runs on, so every case
 			// gives the same class on Windows, Linux and macOS.
@@ -213,7 +241,7 @@ namespace Engine {
 			CHECK(GetDeviceClass(0x1234, VK_MAKE_API_VERSION(0, 1, 0, 0), VkDriverId{}) == "vendor1234-1");
 		}
 
-		TEST_CASE("DeviceSelection: the rejection and type names are their enumerator names" * doctest::skip(true))
+		TEST_CASE("DeviceSelection: the rejection and type names are their enumerator names")
 		{
 			CHECK(DeviceRejectionToString(DeviceRejection::None) == "None");
 			CHECK(DeviceRejectionToString(DeviceRejection::MissingStorageFormat) == "MissingStorageFormat");

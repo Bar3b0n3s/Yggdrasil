@@ -7,6 +7,8 @@
 
 #include <nvrhi/nvrhi.h>
 
+#include <functional>
+#include <map>
 #include <span>
 #include <string>
 #include <string_view>
@@ -74,6 +76,11 @@ namespace Engine {
 		[[nodiscard]] const VfsPath& GetRoot() const { return m_Root; }
 	private:
 		VfsPath m_Root;
+		GraphicsDevice* m_Device = nullptr;       // documented back-reference; null for a reflection-only library
+		const VirtualFileSystem* m_Vfs = nullptr; // documented back-reference
+		// By variant stem. std::map keeps every reflection at a stable address until Clear (GetReflection's pointers).
+		std::map<std::string, nvrhi::ShaderHandle, std::less<>> m_Shaders;
+		std::map<std::string, ShaderReflection, std::less<>> m_Reflections;
 	};
 
 }

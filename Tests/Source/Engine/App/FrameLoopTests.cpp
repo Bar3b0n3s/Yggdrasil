@@ -406,7 +406,7 @@ namespace Engine {
 		}
 
 		TEST_CASE("FrameLoop: a vk::SystemError from the render hook ends the process through FatalError"
-			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+			* doctest::test_suite(Test::GpuSuite))
 		{
 			// §4.6 item 2: the one frame-boundary catch maps the error's result (VK_ERROR_LAYER_NOT_PRESENT here) to
 			// FatalError(Gpu), which writes a crash report naming the frame phase, and exits with code 4.
@@ -414,7 +414,7 @@ namespace Engine {
 		}
 
 		TEST_CASE("FrameLoop: a vk::SystemError from the update hook ends the process through FatalError"
-			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+			* doctest::test_suite(Test::GpuSuite))
 		{
 			// The catch covers the whole frame (§4.2 step 7), not only rendering: NVRHI work outside the render step (a
 			// screenshot read back during an update, an asset swap's upload) is guarded the same way.

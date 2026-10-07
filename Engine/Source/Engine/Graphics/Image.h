@@ -36,7 +36,8 @@ namespace Engine {
 		[[nodiscard]] size_t GetRowPitch() const;
 		// The bytes of row `y` (< Height, asserted).
 		[[nodiscard]] std::span<const std::byte> GetRow(uint32_t y) const;
-		// True when the format is uncompressed and has no depth or stencil, and Pixels.size() equals GetRowPitch() * Height.
+		// True when the image has a size above zero (as CreateImage requires), the format is uncompressed and has no depth or
+		// stencil, and Pixels.size() equals GetRowPitch() * Height. A default-constructed Image is not valid.
 		[[nodiscard]] bool IsValid() const;
 	};
 

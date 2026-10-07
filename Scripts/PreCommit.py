@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""The commit gate (Docs/Architecture.md §15.9): regenerate, the static checks, Debug build, unit + feature suites.
+"""The commit gate (Docs/Architecture.md §15.9): regenerate, the static checks, Debug build, unit, GPU, golden and
+feature suites.
 
 Steps, in order:
   generate  Scripts/Generate.py, so the build sees the current premake scripts
@@ -12,8 +13,12 @@ Steps, in order:
               lint              Scripts/Lint.py, and Lint.py --self-test
               format            Scripts/Format.py --check
   build     Scripts/Build.py --config Debug (skipped when generate failed)
-  tests     Scripts/Test.py --suite unit,feature --config Debug (skipped when the build failed); a suite that does not
-            exist yet is reported as not available by Test.py and does not fail the gate
+  tests     Scripts/Test.py --suite unit,gpu,golden,feature --config Debug --require-gpu (skipped when the build
+            failed): T0 + T1, and T2 on this machine's GPU (§15.1: the GPU tests and golden images gate every commit),
+            with validation and synchronization validation, under both API caps; the golden images run in Debug,
+            which must match the Release goldens exactly (§15.8). A suite that does not exist yet is reported as not
+            available by Test.py and does not fail the gate. --gpu-optional, for a machine without a usable Vulkan
+            device, drops --require-gpu: the GPU test cases then pass without running, naming the reason, as a warning
 The static checks run even after an earlier failure, so one run reports every problem. A missing script fails its
 step.
 
@@ -68,15 +73,19 @@ def main(argv: list[str] | None = None) -> int:
     configure_stdio()
     parser = argparse.ArgumentParser(
         description="Commit gate: generate, the static checks (CheckBuildConfig, Lint, Lint self-test, format check), "
-        "Debug build, unit and feature suites (§15.9).",
+        "Debug build, unit, gpu, golden and feature suites (§15.9).",
         epilog="Exit codes: 0 every step passed, else the first failing step's code (1 failed, 2 usage, 3 missing "
                "tool or file, 5 timeout).",
     )
     parser.add_argument("--contract", action="store_true", help=CONTRACT_FLAG_HELP)
+    parser.add_argument("--gpu-optional", action="store_true",
+                        help="gpu and golden suites without --require-gpu, for a machine without a usable Vulkan "
+                             "device: their test cases pass without running, naming the reason (a warning)")
     parser.add_argument("--json", action="store_true", help="print a machine-readable result on stdout")
     arguments = parser.parse_args(sys.argv[1:] if argv is None else argv)
     console = Console(arguments.json)
-    console.heading(f"PreCommit, {mode_note(arguments.contract)}")
+    gpu_note = "GPU optional (--gpu-optional)" if arguments.gpu_optional else "GPU required"
+    console.heading(f"PreCommit, {mode_note(arguments.contract)}, {gpu_note}")
 
     def finished(step: Step) -> Step:
         console.result(step)
@@ -91,18 +100,19 @@ def main(argv: list[str] | None = None) -> int:
     if steps[-1].status != Status.PASSED:
         steps.append(skipped("tests", "the Debug build did not pass", console))
     else:
-        steps.append(run_step("tests", "Test.py", ["--suite", "unit,feature", "--config", "Debug",
+        device = [] if arguments.gpu_optional else ["--require-gpu"]
+        steps.append(run_step("tests", "Test.py", ["--suite", "unit,gpu,golden,feature", "--config", "Debug", *device,
                                                    *test_mode_arguments(arguments.contract)], console))
 
     exit_code = overall_exit_code(steps)
     if exit_code == EXIT_SUCCESS and any(step.status == Status.NOT_RUN for step in steps):
         exit_code = EXIT_FAILED
     console.summary("PreCommit summary", steps)
-    console.print(f"  {mode_note(arguments.contract)}")
+    console.print(f"  {mode_note(arguments.contract)}; {gpu_note}")
     console.print(f"\nPreCommit {'passed' if exit_code == EXIT_SUCCESS else 'FAILED'} (exit code {exit_code})")
     if arguments.json:
         emit_json({"success": exit_code == EXIT_SUCCESS, "exitCode": exit_code, "contract": arguments.contract,
-                   "steps": [step.to_json() for step in steps]})
+                   "gpuOptional": arguments.gpu_optional, "steps": [step.to_json() for step in steps]})
     return exit_code
 
 
