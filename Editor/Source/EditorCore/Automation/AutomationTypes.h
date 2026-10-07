@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Engine/Asset/AssetType.h"
 #include "Engine/Core/Base.h"
 
 #include <cstdint>
@@ -37,6 +38,16 @@ namespace Engine {
 		std::string Path{}; // Scene::GetEntityPath, which FindEntityByPath resolves back to the entity
 	};
 
+	// Registry struct "AssetSummary" (§7.1: "Responses always expand references to {id, path, type}"): an asset as every
+	// asset-related result names it (M6). Registered with the registry enum "AssetType" (Engine/Asset/AssetType.h, every
+	// name including "None") by RegisterAutomationCommonTypes, before the domains that use them.
+	struct AssetSummary
+	{
+		std::string Id{};   // 16 lowercase hex digits
+		std::string Path{}; // the readable reference (AssetManager::GetReferencePath): "Assets/Models/Track.glb#mesh:0:Straight"
+		AssetType Type = AssetType::None;
+	};
+
 	// Registry struct "NoParams": the params of methods that take none (session.info, project.save, component.list ...).
 	// It has no fields, so any member is an unknown-member InvalidParams.
 	struct NoParams
@@ -51,7 +62,7 @@ namespace Engine {
 
 	// Registers SceneTarget, EntitySummary and NoParams, plus the engine enums automation reports by name: CommandOrigin
 	// ("CommandOrigin"), DiagnosticSeverity ("DiagnosticSeverity"), LogLevel ("LogLevel"), LogChannel ("LogChannel") and
-	// EngineEventType ("EngineEventType").
+	// EngineEventType ("EngineEventType"); from M6 also AssetType ("AssetType") and AssetSummary.
 	void RegisterAutomationCommonTypes(TypeRegistry& registry);
 
 }

@@ -38,7 +38,11 @@ namespace Engine {
 		SceneEdit(SceneEdit&&) = delete;
 		SceneEdit& operator=(SceneEdit&&) = delete;
 
-		// Ends tracking and records the edit: builds a SceneEditCommand from the tracker's changes (Before snapshots) and the
+		// Ends tracking and records the edit. First, while the tracker still runs, it refreshes the override records of every
+		// prefab instance whose root or members the edit touched against the prefab's current version (§5.5 "the change
+		// tracker records field-level overrides"; PrefabInstantiator::RefreshOverrides), so they are part of the same step and
+		// rebuilding the instance from prefab + overrides keeps the edit; an instance whose prefab is not registered keeps its
+		// records. It then builds a SceneEditCommand from the tracker's changes (Before snapshots) and the
 		// scene's current state (After), then hands it to EditorContext::Execute, which records it in the history, appends it
 		// to the open transaction, or discards it after a dry run, and appends the edit's events
 		// (SceneEditCommand::AppendChangeEvents). Returns the undo index (CommandHistory sequence; 0 for a

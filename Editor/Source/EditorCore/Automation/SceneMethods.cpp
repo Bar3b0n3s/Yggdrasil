@@ -3,12 +3,14 @@
 
 #include "EditorCore/Automation/EditorMethodContext.h"
 #include "EditorCore/Automation/JsonPatchDiff.h"
+#include "EditorCore/Automation/Private/AssetMethodSupport.h"
 #include "EditorCore/Automation/Private/MethodSupport.h"
 #include "EditorCore/Commands/Command.h"
 #include "EditorCore/Commands/CommandHistory.h"
 #include "EditorCore/EditorContext.h"
 #include "Engine/Automation/Protocol/MethodRegistry.h"
 #include "Engine/Core/Json/JsonReader.h"
+#include "Engine/Core/Log.h"
 #include "Engine/Core/UUIDGenerator.h"
 #include "Engine/Core/VirtualFileSystem.h"
 #include "Engine/Reflection/FuzzySuggest.h"
@@ -389,15 +391,33 @@ namespace Engine {
 			if (isOpenPath && params.Save)
 				ENGINE_TRY(Utils::ResolveDirtyScene(editor, true, false, "discardChanges"));
 
+			// The registry first (§7.3: a path-taking call refreshes first), so the instances below are rebuilt from prefabs as
+			// they are on disk now.
+			context.SetPhase(std::format("Automation:scene.open {}", params.Path));
+			ENGINE_TRY(Utils::RefreshAssets(editor));
+
 			Scope<Scene> scene = editor.CreateScene(std::string(path.GetStem()));
 			LoadReport report;
-			context.SetPhase(std::format("Automation:scene.open {}", params.Path));
 			ENGINE_TRY(Utils::LoadSceneFile(editor, *scene, path, params.Repair ? LoadMode::Repair : LoadMode::Strict, &editor.GetIdGenerator(), report));
+
+			// §5.5 "Update": the instances follow the current version of their prefabs, so a scene reloaded after a
+			// SceneChangedOnDisk also adopts the prefabs that changed; the scene then opens dirty. An update that fails (a prefab
+			// that no longer imports) leaves the instances as saved, with a warning, rather than refusing to open the scene.
+			bool dirty = params.Repair && !report.Repairs.empty();
+			if (Result<bool> updated = editor.UpdatePrefabInstances(*scene, {}); updated)
+			{
+				dirty = dirty || *updated;
+			}
+			else
+			{
+				ENGINE_WARN("'{}': the prefab instances keep their saved state because they could not be updated: {}", params.Path,
+					updated.error().ToString());
+			}
 			if (!isOpenPath)
 				ENGINE_TRY(Utils::ResolveDirtyScene(editor, params.Save, params.DiscardChanges, "discardChanges"));
 
 			Utils::LogLoadDiagnostics(Utils::ToProjectRelative(path), report);
-			editor.SetScene(std::move(scene), path, params.Repair && !report.Repairs.empty());
+			editor.SetScene(std::move(scene), path, dirty);
 
 			SceneOpenResult result;
 			result.Scene = Utils::MakeSceneSummary(editor);

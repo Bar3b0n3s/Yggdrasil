@@ -2,6 +2,7 @@
 
 #include "EditorCore/Automation/RegisterMethods.h"
 
+#include "Engine/AssetPipeline/ImporterRegistry.h"
 #include "Engine/Automation/Protocol/MethodRegistry.h"
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Reflection/EnumInfo.h"
@@ -10,25 +11,28 @@
 #include "Engine/Reflection/StructInfo.h"
 #include "Support/AutomationTestClient.h"
 
+#include <set>
+
 namespace Engine {
 
-	// The M4 method set (Roadmap M4) and M5's screenshot methods (registered at the M4/M5 merge, ADR 0009 decision 33), test
-	// hooks excluded.
+	// The M4 method set (Roadmap M4), M5's screenshot methods (registered at the M4/M5 merge, ADR 0009 decision 33) and M6's
+	// asset.*, prefab.*, entity.bounds and project.refreshAssets (ADR 0010 decision 20), test hooks excluded.
 	static const std::vector<std::string>& GetExpectedMethodNames()
 	{
-		static const std::vector<std::string> ExpectedNames = {
+		static const std::vector<std::string> ExpectedNames = { "asset.create", "asset.delete", "asset.getImportSettings", "asset.getProperties",
+			"asset.import", "asset.info", "asset.list", "asset.move", "asset.reimport", "asset.setImportSettings", "asset.setProperties",
 			"component.list", "component.schema", "docs.get", "edit.batch", "edit.getSelection", "edit.history", "edit.redo", "edit.select",
-			"edit.undo", "editor.screenshot", "entity.create", "entity.destroy", "entity.duplicate", "entity.get", "entity.reparent",
-			"entity.update", "events.read", "log.read", "project.create", "project.getSettings", "project.info", "project.open", "project.save",
+			"edit.undo", "editor.screenshot", "entity.bounds", "entity.create", "entity.destroy", "entity.duplicate", "entity.get",
+			"entity.reparent", "entity.update", "events.read", "log.read", "prefab.apply", "prefab.create", "prefab.instantiate", "prefab.revert",
+			"prefab.unpack", "project.create", "project.getSettings", "project.info", "project.open", "project.refreshAssets", "project.save",
 			"project.setSettings", "project.upgrade", "project.validate", "rpc.discover", "scene.diff", "scene.get", "scene.new", "scene.open",
-			"scene.query", "scene.save", "scene.tree", "session.hello", "session.info", "session.shutdown", "viewport.screenshot"
-		};
+			"scene.query", "scene.save", "scene.tree", "session.hello", "session.info", "session.shutdown", "viewport.screenshot" };
 		return ExpectedNames;
 	}
 
 	TEST_SUITE("EditorCore")
 	{
-		TEST_CASE("RegisterMethods: the editor registers exactly the M4 method set and the M5 screenshot methods")
+		TEST_CASE("RegisterMethods: the editor registers exactly the M4 method set, the M5 screenshot methods and the M6 asset methods")
 		{
 			Test::EditorTestFixture fixture("RegisterSet");
 			MethodRegistry methods(fixture.GetEngine().GetTypeRegistry());
@@ -66,15 +70,20 @@ namespace Engine {
 			methods.Freeze();
 			const std::vector<std::string> launcher = { "docs.get", "project.create", "project.open", "rpc.discover", "session.hello",
 				"session.info", "session.shutdown" };
-			const std::vector<std::string> tools = { "component.list", "component.schema", "docs.get", "edit.batch", "edit.redo", "edit.undo",
-				"editor.screenshot", "entity.create", "entity.destroy", "entity.duplicate", "entity.get", "entity.reparent", "entity.update",
-				"log.read", "project.create", "project.getSettings", "project.open", "project.save", "project.setSettings", "project.validate",
-				"scene.diff", "scene.new", "scene.open", "scene.query", "scene.save", "scene.tree", "viewport.screenshot" };
-			// The edit.batch ops (ADR 0008 decision 8): pure reads and methods whose effects all go through Execute.
-			const std::vector<std::string> batchable = { "component.list", "component.schema", "docs.get", "edit.getSelection",
-				"edit.history", "entity.create", "entity.destroy", "entity.duplicate", "entity.get", "entity.reparent", "entity.update",
-				"events.read", "log.read", "project.getSettings", "project.info", "project.setSettings", "project.validate",
-				"rpc.discover", "scene.diff", "scene.get", "scene.query", "scene.tree", "session.info" };
+			const std::vector<std::string> tools = { "asset.create", "asset.delete", "asset.import", "asset.list", "asset.move",
+				"asset.setProperties", "component.list", "component.schema", "docs.get", "edit.batch", "edit.redo", "edit.undo", "editor.screenshot",
+				"entity.bounds", "entity.create", "entity.destroy", "entity.duplicate", "entity.get", "entity.reparent", "entity.update", "log.read",
+				"prefab.apply", "prefab.create", "prefab.instantiate", "project.create", "project.getSettings", "project.open", "project.save",
+				"project.setSettings", "project.validate", "scene.diff", "scene.new", "scene.open", "scene.query", "scene.save", "scene.tree",
+				"viewport.screenshot" };
+			// The edit.batch ops (ADR 0008 decision 8): pure reads and methods whose effects all go through Execute. asset.import and
+			// asset.reimport are pending operations; project.refreshAssets writes outside a command (ADR 0010 decision 20).
+			const std::vector<std::string> batchable = { "asset.create", "asset.delete", "asset.getImportSettings", "asset.getProperties",
+				"asset.info", "asset.list", "asset.move", "asset.setImportSettings", "asset.setProperties", "component.list", "component.schema",
+				"docs.get", "edit.getSelection", "edit.history", "entity.bounds", "entity.create", "entity.destroy", "entity.duplicate", "entity.get",
+				"entity.reparent", "entity.update", "events.read", "log.read", "prefab.apply", "prefab.create", "prefab.instantiate", "prefab.revert",
+				"prefab.unpack", "project.getSettings", "project.info", "project.setSettings", "project.validate", "rpc.discover", "scene.diff",
+				"scene.get", "scene.query", "scene.tree", "session.info" };
 			for (const MethodDescriptor* method : methods.GetMethods())
 			{
 				const MethodSpecification& specification = method->Specification;
@@ -138,8 +147,16 @@ namespace Engine {
 			});
 			REQUIRE(first != structs.end());
 			const std::vector<const StructInfo*> automation(first, structs.end());
-			for (const std::string_view name : { "NoParams", "ProjectDiagnostic", "SessionHelloParams", "EntityCreateParams", "EditBatchOp",
-					 "LogReadMethodResult", "ViewportScreenshotParams", "EditorScreenshotResult", "DebugPendResult" })
+			// The importers' settings structs (RegisterAssetPipelineTypes) are engine data, which keeps its PascalCase keys
+			// (convention 2 of MethodRegistry.h); every other automation struct has camelCase keys.
+			TypeRegistry pipeline;
+			RegisterAssetPipelineTypes(pipeline);
+			std::set<std::string> engineData;
+			for (const StructInfo* type : pipeline.GetStructs())
+				engineData.insert(type->GetName());
+			for (const std::string_view name : { "NoParams", "AssetSummary", "ProjectDiagnostic", "SessionHelloParams", "EntityCreateParams",
+					 "EntityBoundsResult", "EditBatchOp", "LogReadMethodResult", "ViewportScreenshotParams", "EditorScreenshotResult",
+					 "AssetInfoResult", "PrefabOverrideKey", "ProjectRefreshAssetsResult", "DebugPendResult" })
 			{
 				INFO(std::string(name));
 				CHECK(std::ranges::any_of(automation, [name](const StructInfo* type)
@@ -158,7 +175,8 @@ namespace Engine {
 					INFO(field->GetName());
 					CHECK_FALSE(field->GetDescription().empty());
 					// JSON keys are camelCase (ADR 0008 decision 8).
-					CHECK(std::islower(static_cast<unsigned char>(field->GetName().front())) != 0);
+					if (!engineData.contains(type->GetName()))
+						CHECK(std::islower(static_cast<unsigned char>(field->GetName().front())) != 0);
 				}
 				const Json schema = JsonSchema::ForStruct(*type);
 				const Json defaults = type->MakeDefaultJson();
@@ -184,7 +202,8 @@ namespace Engine {
 			Test::EditorTestFixture fixture("RegisterEnums");
 			const TypeRegistry& types = fixture.GetEngine().GetTypeRegistry();
 			for (const std::string_view name : { "SceneTarget", "CommandOrigin", "DiagnosticSeverity", "LogLevel", "LogChannel", "EngineEventType",
-					 "ValidationScope", "ProjectTemplate", "SceneTemplate", "SceneTreeFormat", "SceneDiffAgainst", "SceneEntityChangeKind", "ViewportView" })
+					 "ValidationScope", "ProjectTemplate", "SceneTemplate", "SceneTreeFormat", "SceneDiffAgainst", "SceneEntityChangeKind", "ViewportView",
+					 "AssetType", "AssetState", "AssetCreateType" })
 			{
 				INFO(std::string(name));
 				const EnumInfo* info = types.FindEnum(name);
@@ -207,7 +226,9 @@ namespace Engine {
 			RegisterEditorMethods(methods, {});
 			methods.Freeze();
 			Json catalog = methods.BuildToolCatalog();
-			CHECK(catalog["Tools"].size() == 27); // the 25 M4 tools, viewport_screenshot and editor_screenshot
+			// The 25 M4 tools, viewport_screenshot and editor_screenshot, and M6's asset_list, asset_import, asset_create,
+			// asset_set_properties, asset_move, asset_delete, prefab_create, prefab_instantiate, prefab_apply and entity_bounds.
+			CHECK(catalog["Tools"].size() == 37);
 			for (Json& tool : catalog["Tools"])
 			{
 				INFO(tool["name"].dump());

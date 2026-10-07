@@ -82,9 +82,10 @@ namespace Engine {
 		// Errors: InvalidState before Start; the errors of VirtualFileSystem::List on the root (the root itself vanished).
 		[[nodiscard]] Result<std::vector<FileChange>> Poll(double nowSeconds);
 
-		// Records the current state of `path` (a file under the root; it may no longer exist) as known: a change made by
-		// this process that must not come back as an external change. Drops a pending change of that path. Errors:
-		// InvalidArgument when `path` is not under the root; Io when it exists but cannot be read.
+		// Records the current state of `path` (a file under the root; it may no longer exist, or exist only under another
+		// spelling, as the old path of a case-only rename does: absent either way) as known: a change made by this process
+		// that must not come back as an external change. Drops a pending change of that path. Errors: InvalidArgument when
+		// `path` is not under the root; Io when it exists but cannot be read.
 		[[nodiscard]] Status MarkKnown(const VfsPath& path);
 
 		[[nodiscard]] const PollingFileWatcherSpecification& GetSpecification() const;

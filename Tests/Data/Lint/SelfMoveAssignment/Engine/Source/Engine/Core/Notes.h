@@ -23,5 +23,6 @@ namespace Engine {
 	};
 
 	[[nodiscard]] Notes CollectNotes(const std::vector<std::string>& lines);
+	[[nodiscard]] size_t CountLater(Notes notes, std::vector<std::string> extra);
 
 }

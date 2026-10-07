@@ -53,6 +53,24 @@ namespace Engine {
 			.Field("name", &EntitySummary::Name, "The entity's name.")
 			.Field("path", &EntitySummary::Path, "The entity's path from the scene root, such as \"/Game/Board\".");
 
+		registry.Enum<AssetType>("AssetType", "The kind of a loadable asset (§7.1).")
+			.Entry(AssetType::None, "None", "No type; as a filter, every type.")
+			.Entry(AssetType::Scene, "Scene", "A scene (.scene).")
+			.Entry(AssetType::Prefab, "Prefab", "A prefab (.prefab, or the hierarchy of a glTF model).")
+			.Entry(AssetType::Mesh, "Mesh", "A mesh (a glTF's mesh sub-asset, or a built-in mesh).")
+			.Entry(AssetType::Material, "Material", "A PBR material (.material, or a glTF's material sub-asset).")
+			.Entry(AssetType::Texture, "Texture", "A texture (PNG, JPEG, TGA, BMP, or a glTF's texture sub-asset).")
+			.Entry(AssetType::Environment, "Environment", "An image-based lighting environment (.hdr).")
+			.Entry(AssetType::AudioClip, "AudioClip", "A sound (WAV, FLAC, MP3, or a .sfx preset).")
+			.Entry(AssetType::Script, "Script", "A Luau script (.luau).")
+			.Entry(AssetType::Font, "Font", "A font (TTF, OTF) as a signed distance field atlas.")
+			.Entry(AssetType::Replay, "Replay", "An input replay (.replay).");
+
+		registry.Struct<AssetSummary>("AssetSummary", "An asset's canonical id with its readable path and type.")
+			.Field("id", &AssetSummary::Id, "The asset's handle: 16 lowercase hex digits.")
+			.Field("path", &AssetSummary::Path, "Its readable reference, such as \"Assets/Models/Track.glb#mesh:0:Straight\" or \"engine://Meshes/Cube\".")
+			.Field("type", &AssetSummary::Type, "Its type.");
+
 		static_cast<void>(registry.Struct<NoParams>("NoParams", "The params of a method that takes none: an empty object."));
 	}
 

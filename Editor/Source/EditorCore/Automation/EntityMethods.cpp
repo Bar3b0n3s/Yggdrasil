@@ -5,6 +5,7 @@
 #include "EditorCore/Automation/Private/MethodSupport.h"
 #include "EditorCore/Commands/SceneEdit.h"
 #include "EditorCore/EditorContext.h"
+#include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/Automation/Protocol/MethodRegistry.h"
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Core/UUIDGenerator.h"
@@ -14,6 +15,7 @@
 #include "Engine/Scene/ComponentAccess.h"
 #include "Engine/Scene/ComponentHostOps.h"
 #include "Engine/Scene/Entity.h"
+#include "Engine/Scene/EntityBounds.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/SceneSerializer.h"
 
@@ -599,6 +601,45 @@ namespace Engine {
 			return result;
 		}
 
+		Result<EntityBoundsResult> EntityBounds(EditorMethodContext& context, const EntityBoundsParams& params)
+		{
+			if (params.Entities.empty())
+				return std::unexpected(Utils::MakeParamError(ErrorCode::InvalidArgument, "/entities", "give at least one entity"));
+			ENGINE_TRY_ASSIGN(Scene * scene, context.ResolveTargetScene(params.Target, context.HasParam("target"), false));
+			std::vector<Entity> entities;
+			entities.reserve(params.Entities.size());
+			for (size_t index = 0; index < params.Entities.size(); ++index)
+			{
+				ENGINE_TRY_ASSIGN(Entity entity, context.ResolveEntity(*scene, params.Entities[index], std::format("/entities/{}", index)));
+				entities.push_back(entity);
+			}
+
+			// Layout feedback reads the settled state: imports and hot-reload swaps requested so far are published first (§8.13).
+			EditorAssetManager& assets = context.GetEditor().GetAssets();
+			assets.WaitIdle();
+			const auto toArray = [](const glm::vec3& value)
+			{
+				return std::vector<float>{ value.x, value.y, value.z };
+			};
+			EntityBoundsResult result;
+			result.Bounds.reserve(entities.size());
+			for (const Entity entity : entities)
+			{
+				EntityWorldBounds bounds;
+				bounds.Entity = context.MakeEntitySummary(entity);
+				if (const std::optional<Aabb> box = ComputeEntityWorldBounds(entity, assets, { .IncludeDescendants = params.IncludeDescendants }); box.has_value())
+				{
+					bounds.HasBounds = true;
+					bounds.Min = toArray(box->Min);
+					bounds.Max = toArray(box->Max);
+					bounds.Center = toArray(box->GetCenter());
+					bounds.Size = toArray(box->GetSize());
+				}
+				result.Bounds.push_back(std::move(bounds));
+			}
+			return result;
+		}
+
 	}
 
 	void RegisterEntityMethodTypes(TypeRegistry& registry)
@@ -680,6 +721,22 @@ namespace Engine {
 		registry.Struct<EntityReparentResult>("EntityReparentResult", "The moved entity.")
 			.Field("entity", &EntityReparentResult::Entity, "The entity with its new path.")
 			.Field("undoIndex", &EntityReparentResult::UndoIndex, "The command's undo index; 0 in a dry run or a batch.");
+
+		registry.Struct<EntityWorldBounds>("EntityWorldBounds", "One entity's world-space axis-aligned bounding box.")
+			.Field("entity", &EntityWorldBounds::Entity, "The entity.")
+			.Field("hasBounds", &EntityWorldBounds::HasBounds, "False when neither it nor (with includeDescendants) a descendant has a mesh.")
+			.Field("min", &EntityWorldBounds::Min, "The minimum corner [x, y, z] in metres; empty without bounds.")
+			.Field("max", &EntityWorldBounds::Max, "The maximum corner [x, y, z] in metres; empty without bounds.")
+			.Field("center", &EntityWorldBounds::Center, "The centre [x, y, z] in metres; empty without bounds.")
+			.Field("size", &EntityWorldBounds::Size, "The extent [x, y, z] in metres; empty without bounds.");
+
+		registry.Struct<EntityBoundsParams>("EntityBoundsParams", "The params of entity.bounds.")
+			.Field("entities", &EntityBoundsParams::Entities, "The entities: 16 hex digits, unique id prefixes or paths.")
+			.Field("includeDescendants", &EntityBoundsParams::IncludeDescendants, "Also include every descendant's meshes.")
+			.Field("target", &EntityBoundsParams::Target, "Which scene to read; the play scene while playing when absent.");
+
+		registry.Struct<EntityBoundsResult>("EntityBoundsResult", "The world bounds of the entities, in the order given.")
+			.Field("bounds", &EntityBoundsResult::Bounds, "One entry per entity.");
 	}
 
 	void RegisterEntityMethods(MethodRegistry& methods)
@@ -791,6 +848,21 @@ namespace Engine {
 				.Examples = { { .Description = "Move the board under the game, first.", .Params = reparentExample } },
 			},
 			&Automation::EntityReparent);
+
+		Json boundsExample = Json::object();
+		boundsExample["entities"] = Json::array({ "/Track", "/Track/Piece" });
+		methods.Add(
+			{
+				.Name = "entity.bounds",
+				.Description = "Reports the world-space bounding box of each entity's meshes (and, by default, its descendants'), for layout "
+							   "checks.",
+				.RequiredParams = { "entities" },
+				.ExposeAsTool = true,
+				.AvailableInRuntime = true,
+				.AllowedInBatch = true,
+				.Examples = { { .Description = "Measure the track and one piece.", .Params = boundsExample } },
+			},
+			&Automation::EntityBounds);
 	}
 
 }

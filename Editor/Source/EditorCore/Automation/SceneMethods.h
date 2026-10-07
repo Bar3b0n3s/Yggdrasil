@@ -78,6 +78,9 @@ namespace Engine {
 	// (write it first) and discardChanges is required, else InvalidState; giving both is InvalidArgument. Opening the open
 	// scene's own path needs reload (it re-reads the file, adopting a SceneChangedOnDisk version, §7.5). repair loads with
 	// structural repairs (§6) and reports them; the scene is then dirty until saved. Load warnings are reported and logged.
+	// From M6 the loaded scene's prefab instances are rebuilt from the current prefab versions before it opens
+	// (EditorContext::UpdatePrefabInstances, §5.5), so an externally changed prefab is adopted too; the scene then opens
+	// dirty when that changed it.
 	struct SceneOpenParams
 	{
 		std::string Path{};

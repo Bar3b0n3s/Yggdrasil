@@ -31,6 +31,9 @@ namespace Engine {
 
 		// A context for one op of edit.batch, over the same editor and server.
 		[[nodiscard]] Scope<MethodContext> CreateNested(MethodRequest request) const override;
+		// The server's resolver (AutomationServer::GetAssetReferenceResolver): requests and edit.batch's ops resolve asset references
+		// in their params through it (MethodRegistry.h convention 13).
+		[[nodiscard]] IAssetReferenceResolver* GetAssetReferenceResolver() const override;
 
 		// The scene a request addresses (§13.4 "Target"): `target` as given when `given`, else the play scene for reads while
 		// playing and the edit scene otherwise. Errors: InvalidState "no scene open" without an open edit scene, InvalidState

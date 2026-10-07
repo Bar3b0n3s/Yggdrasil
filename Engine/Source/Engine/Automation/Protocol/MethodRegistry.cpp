@@ -14,6 +14,7 @@
 #include <array>
 #include <format>
 #include <map>
+#include <optional>
 
 // Params are read in two passes (Invoke): FieldInfo::ValidateJson on the params struct's self field reports every problem
 // with the messages of §13.3 (Variant values, such as component maps, are checked against their resolved schema as
@@ -300,16 +301,18 @@ namespace Engine {
 		}
 
 		// Rewrites every enum spelling `value` holds that `type` recognizes, ignoring ASCII case, to its registry name
-		// (convention 6). Values of the wrong JSON type are left for the strict reader to report.
-		class EnumCanonicalizer
+		// (convention 6), and, with a resolver, every asset reference that is not a handle to the handle it names
+		// (convention 13), collecting one issue per reference that does not resolve. Values of the wrong JSON type are left
+		// for the strict reader to report.
+		class ParamsCanonicalizer
 		{
 		public:
-			explicit EnumCanonicalizer(const TypeRegistry& types)
-				: m_Types(&types)
+			ParamsCanonicalizer(const TypeRegistry& types, IAssetReferenceResolver* assets)
+				: m_Types(&types), m_Assets(assets)
 			{
 			}
 
-			void CanonicalizeStruct(const StructInfo& type, Json& object, uint32_t variantDepth) const
+			void CanonicalizeStruct(const StructInfo& type, Json& object, uint32_t variantDepth, const std::string& pointer)
 			{
 				if (!object.is_object())
 					return;
@@ -325,27 +328,39 @@ namespace Engine {
 						continue;
 					const auto member = object.find(field->GetName());
 					if (member != object.end())
-						CanonicalizeValue(field->GetType(), *field, *member, owner, variantDepth);
+						CanonicalizeValue(field->GetType(), *field, *member, owner, variantDepth, JsonReader::AppendPointer(pointer, field->GetName()));
 				}
 			}
 
+			// The asset references that did not resolve with NotFound or InvalidArgument, one issue each.
+			[[nodiscard]] std::vector<ErrorIssue> TakeIssues() { return std::move(m_Issues); }
+			// True when every reference that did not resolve names no asset (NotFound), so the call is NotFound rather than
+			// InvalidParams.
+			[[nodiscard]] bool AllNotFound() const { return m_AllNotFound; }
+			// The first resolver error of another code (InvalidState without a project, a refresh's Io), located at its value;
+			// Invoke returns it unchanged, so the code is the one the host gave.
+			[[nodiscard]] std::optional<Error> TakeHostError() { return std::move(m_HostError); }
+		private:
 			void CanonicalizeValue(const TypeInfo& type, const FieldInfo& field, Json& value, const ResolveContext& owner,
-				uint32_t variantDepth) const
+				uint32_t variantDepth, const std::string& pointer)
 			{
 				switch (type.GetKind())
 				{
 					case FieldType::Enum:
 						CanonicalizeEnum(type, value);
 						break;
+					case FieldType::AssetRef:
+						ResolveAssetReference(type, value, pointer);
+						break;
 					case FieldType::Struct:
 						if (type.GetStruct() != nullptr)
-							CanonicalizeStruct(*type.GetStruct(), value, variantDepth);
+							CanonicalizeStruct(*type.GetStruct(), value, variantDepth, pointer);
 						break;
 					case FieldType::Array:
 						if (value.is_array() && type.GetElement() != nullptr)
 						{
-							for (Json& element : value)
-								CanonicalizeValue(*type.GetElement(), field, element, owner, variantDepth);
+							for (size_t index = 0; index < value.size(); ++index)
+								CanonicalizeValue(*type.GetElement(), field, value[index], owner, variantDepth, JsonReader::AppendPointer(pointer, index));
 						}
 						break;
 					case FieldType::Map:
@@ -355,12 +370,12 @@ namespace Engine {
 							{
 								ResolveContext keyed = owner;
 								keyed.Key = entry.key();
-								CanonicalizeValue(*type.GetElement(), field, entry.value(), keyed, variantDepth);
+								CanonicalizeValue(*type.GetElement(), field, entry.value(), keyed, variantDepth, JsonReader::AppendPointer(pointer, entry.key()));
 							}
 						}
 						break;
 					case FieldType::Variant:
-						CanonicalizeVariant(field, value, owner, variantDepth);
+						CanonicalizeVariant(field, value, owner, variantDepth, pointer);
 						break;
 					case FieldType::Bool:
 					case FieldType::Int32:
@@ -375,11 +390,10 @@ namespace Engine {
 					case FieldType::Bool3:
 					case FieldType::String:
 					case FieldType::EntityRef:
-					case FieldType::AssetRef:
 						break;
 				}
 			}
-		private:
+
 			static void CanonicalizeEnum(const TypeInfo& type, Json& value)
 			{
 				if (!value.is_string() || type.GetEnum() == nullptr)
@@ -392,7 +406,35 @@ namespace Engine {
 					value = entry->Name;
 			}
 
-			void CanonicalizeVariant(const FieldInfo& field, Json& value, const ResolveContext& owner, uint32_t variantDepth) const
+			void ResolveAssetReference(const TypeInfo& type, Json& value, const std::string& pointer)
+			{
+				if (m_Assets == nullptr || !value.is_string())
+					return;
+				const Result<std::string> text = JsonReader(value).ReadString();
+				if (!text || UUID::FromString(*text).has_value())
+					return; // a handle (convention 13), or a value the strict reader reports
+				Result<UUID> handle = m_Assets->ResolveAssetReference(*text, type.GetAssetTypeName());
+				if (handle)
+				{
+					value = handle->ToString();
+					return;
+				}
+				const ErrorCode code = handle.error().GetCode();
+				if (code != ErrorCode::NotFound && code != ErrorCode::InvalidArgument)
+				{
+					if (!m_HostError.has_value())
+					{
+						ErrorLocation location;
+						location.JsonPointer = pointer;
+						m_HostError = std::move(handle).error().WithLocation(std::move(location));
+					}
+					return;
+				}
+				m_AllNotFound = m_AllNotFound && code == ErrorCode::NotFound;
+				m_Issues.push_back(ErrorIssue{ .JsonPointer = pointer, .Message = handle.error().GetMessageText(), .Hint = handle.error().GetHint(), .Suggestions = {} });
+			}
+
+			void CanonicalizeVariant(const FieldInfo& field, Json& value, const ResolveContext& owner, uint32_t variantDepth, const std::string& pointer)
 			{
 				if (field.GetResolver() == nullptr || variantDepth >= MaxCanonicalVariantDepth)
 					return;
@@ -403,10 +445,14 @@ namespace Engine {
 				ResolveContext nested;
 				nested.Registry = m_Types;
 				nested.Schemas = owner.Schemas;
-				CanonicalizeValue(resolved.GetType(), resolved, value, nested, variantDepth + 1);
+				CanonicalizeValue(resolved.GetType(), resolved, value, nested, variantDepth + 1, pointer);
 			}
 		private:
 			const TypeRegistry* m_Types = nullptr;
+			IAssetReferenceResolver* m_Assets = nullptr; // documented back-reference for one Invoke (convention 13); null in PrepareParams
+			std::vector<ErrorIssue> m_Issues;
+			std::optional<Error> m_HostError;
+			bool m_AllNotFound = true;
 		};
 
 		// Replaces every {"$ref": "#/$defs/<Name>"} inside `node` by the definition from `definitions` (keeping the referring
@@ -648,7 +694,7 @@ namespace Engine {
 			return std::unexpected(Utils::MakeParamsError(specification.Name, std::move(issues)));
 
 		if (method.Params != nullptr)
-			Utils::EnumCanonicalizer(*m_Types).CanonicalizeStruct(*method.Params, prepared.Params, 0);
+			Utils::ParamsCanonicalizer(*m_Types, nullptr).CanonicalizeStruct(*method.Params, prepared.Params, 0, std::string());
 		return prepared;
 	}
 
@@ -666,6 +712,31 @@ namespace Engine {
 			method.Specification.Name);
 		if (!context.IsHostType(registered.Host))
 			return Error(ErrorCode::Unknown, std::format("method '{}' cannot run in this host", method.Specification.Name));
+
+		// Convention 13: asset references become handles before anything reads the params. This runs after the host admitted
+		// the request, so a refresh the resolver makes for a dry run stays in the dry run's sandbox.
+		if (IAssetReferenceResolver* assets = context.GetAssetReferenceResolver(); assets != nullptr)
+		{
+			Json resolved = context.GetParams();
+			Utils::ParamsCanonicalizer canonicalizer(*m_Types, assets);
+			canonicalizer.CanonicalizeStruct(*method.Params, resolved, 0, std::string());
+			// A host's own error (InvalidState, Io) keeps its code; it outranks the references' NotFound and InvalidParams.
+			if (std::optional<Error> hostError = canonicalizer.TakeHostError(); hostError.has_value())
+				return std::move(*hostError);
+			std::vector<ErrorIssue> unresolved = canonicalizer.TakeIssues();
+			if (!unresolved.empty() && canonicalizer.AllNotFound())
+			{
+				// A reference that names no asset is NotFound, as for an asset param (§13.3), located at its value.
+				const Error notFound = Utils::MakeParamsError(method.Specification.Name, std::move(unresolved));
+				return Error(ErrorCode::NotFound, notFound.GetMessageText())
+					.WithHint(notFound.GetHint())
+					.WithLocation(notFound.GetLocation())
+					.WithIssues(notFound.GetIssues());
+			}
+			if (!unresolved.empty())
+				return Utils::MakeParamsError(method.Specification.Name, std::move(unresolved));
+			context.m_Request.Params = std::move(resolved);
+		}
 
 		// Pass 1: every problem, with the messages of §13.3.
 		const StructInfo& type = *method.Params;

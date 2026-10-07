@@ -83,9 +83,12 @@ namespace Engine {
 	//   - writes offloaded results to project://Library/Automation/Out/ (user://Automation/Out/ without a project or when
 	//     read-only), named with its server tag (its process id and start time).
 	// Method output files, such as screenshots, go to the same directory (WriteOutputFile).
+	// As the requests' IAssetReferenceResolver (MethodRegistry.h convention 13) it resolves the readable spellings of asset
+	// references in params through the editor's asset manager, refreshing first for a project path (§7.3), and checks the
+	// asset's type against the field's.
 	// On a client's disconnect it removes the client from the Dispatcher (cancelling its pending operations) and appends one
 	// AutomationClientDisconnected event (§13.2).
-	class AutomationServer final : private IMethodHost
+	class AutomationServer final : private IMethodHost, private IAssetReferenceResolver
 	{
 	public:
 		// Restricts construction to Create; CreateScope still reaches the constructor.
@@ -121,6 +124,9 @@ namespace Engine {
 		[[nodiscard]] const AutomationServerSpecification& GetSpecification() const { return m_Specification; }
 		[[nodiscard]] EditorContext& GetEditor() const { return *m_Editor; }
 		[[nodiscard]] Watchdog& GetWatchdog() { return m_Watchdog; }
+		// The asset reference resolver of convention 13 (MethodRegistry.h), which every EditorMethodContext of this server
+		// returns.
+		[[nodiscard]] IAssetReferenceResolver& GetAssetReferenceResolver() { return *this; }
 
 		// The connected clients (TCP after session.hello, and in-process ones), by id.
 		[[nodiscard]] std::vector<AutomationClientInfo> GetClients() const;
@@ -155,6 +161,7 @@ namespace Engine {
 		[[nodiscard]] MetaState GetMetaState() const override;
 		[[nodiscard]] std::string GetOffloadServerTag() const override;
 		[[nodiscard]] Result<std::string> WriteOffloadedResult(std::string_view fileName, std::string_view text) override;
+		[[nodiscard]] Result<UUID> ResolveAssetReference(std::string_view reference, std::string_view assetTypeName) override;
 	private:
 		// The Dispatcher, the ProtocolServer, the token, the session file path, the server tag, the clients with their
 		// names and versions, the in-process response queues, the project the session file last named and the output

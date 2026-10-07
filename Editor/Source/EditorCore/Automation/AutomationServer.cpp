@@ -2,8 +2,12 @@
 #include "EditorCore/Automation/AutomationServer.h"
 
 #include "EditorCore/Automation/EditorMethodContext.h"
+#include "EditorCore/Automation/Private/AssetMethodSupport.h"
 #include "EditorCore/Automation/RegisterMethods.h"
 #include "EditorCore/EditorContext.h"
+#include "Engine/Asset/AssetReference.h"
+#include "Engine/Asset/AssetType.h"
+#include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/Automation/Protocol/Handshake.h"
 #include "Engine/Automation/Protocol/ProtocolServer.h"
 #include "Engine/Automation/Protocol/ResultOffload.h"
@@ -368,6 +372,7 @@ namespace Engine {
 		state.Dirty = editor.HasScene() && editor.IsSceneDirty();
 		state.UndoLabel = editor.HasScene() ? editor.GetHistory().GetUndoLabel() : std::string();
 		state.PlayState = "Edit";
+		state.SceneChangedOnDisk = editor.IsSceneChangedOnDisk();
 		return state;
 	}
 
@@ -382,6 +387,25 @@ namespace Engine {
 		ENGINE_TRY_ASSIGN(const VfsPath file, directory.Join(fileName));
 		ENGINE_TRY(m_Editor->GetVfs().WriteFileAtomic(file, std::as_bytes(std::span(text.data(), text.size()))));
 		return State::GetOutputPath(*m_Editor, m_Specification, file);
+	}
+
+	Result<UUID> AutomationServer::ResolveAssetReference(std::string_view reference, std::string_view assetTypeName)
+	{
+		// An engine path names a built-in, which the asset manager serves without a project; a project path needs one.
+		if (!m_Editor->HasProject())
+		{
+			const Result<AssetReference> parsed = ParseAssetReference(reference);
+			if (parsed.has_value() && parsed->Kind == AssetReferenceKind::ProjectPath)
+				return MakeError(ErrorCode::InvalidState, "asset reference '{}' needs an open project", reference);
+		}
+		ENGINE_TRY_ASSIGN(const AssetHandle handle, Utils::ResolveAssetReference(*m_Editor, reference));
+		const AssetType type = m_Editor->GetAssets().GetAssetType(handle);
+		if (!assetTypeName.empty() && type != AssetType::None && AssetTypeToString(type) != assetTypeName)
+		{
+			return std::unexpected(Error(ErrorCode::InvalidArgument, std::format("'{}' is a {}, not a {}", reference, AssetTypeToString(type), assetTypeName))
+					.WithHint(std::format("give a {} asset; asset.list {{\"type\": \"{}\"}} lists them", assetTypeName, assetTypeName)));
+		}
+		return handle;
 	}
 
 	Result<std::string> AutomationServer::WriteOutputFile(std::string_view extension, std::span<const std::byte> bytes)

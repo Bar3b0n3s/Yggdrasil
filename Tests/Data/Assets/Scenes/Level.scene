@@ -1,0 +1,148 @@
+{
+	"Format": "Scene",
+	"Version": 1,
+	"Name": "Level",
+	"Seed": 7,
+	"ComponentVersions": {
+		"Transform": 1,
+		"Prefab": 1,
+		"PrefabLink": 1,
+		"MeshRenderer": 1,
+		"Camera": 1,
+		"DirectionalLight": 1,
+		"PointLight": 1
+	},
+	"Entities": [
+		{
+			"ID": "5ce0000000000001",
+			"Name": "MainCamera",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 5, 10],
+					"Rotation": [-0.28, 0, 0, 0.96],
+					"Scale": [1, 1, 1]
+				},
+				"Camera": {
+					"Projection": "Perspective",
+					"VerticalFov": 60,
+					"OrthographicSize": 5,
+					"NearClip": 0.1,
+					"FarClip": 500,
+					"Primary": true,
+					"Clear": "Skybox",
+					"ClearColor": [0.1, 0.1, 0.1]
+				}
+			}
+		},
+		{
+			"ID": "5ce0000000000002",
+			"Name": "Sun",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"DirectionalLight": {
+					"Color": [1, 0.95, 0.9],
+					"Intensity": 4,
+					"CastShadows": true,
+					"ShadowDistance": 80,
+					"CascadeCount": 4,
+					"CascadeSplitLambda": 0.75,
+					"LightAngle": 1,
+					"DepthBias": 1,
+					"NormalBias": 1
+				}
+			}
+		},
+		{
+			"ID": "5ce0000000000003",
+			"Name": "Floor",
+			"Parent": null,
+			"Active": true,
+			"Tags": ["Ground"],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [20, 1, 20]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000103",
+					"Materials": ["3a7e000000000002"],
+					"CastShadows": false,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "5ce0000000000004",
+			"Name": "Lamp",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [2, 0, -3],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Prefab": {
+					"Prefab": "5b1e7c40d29a8f13",
+					"Overrides": [
+						{
+							"PrefabEntityID": "00000000000c0002",
+							"Kind": "Field",
+							"Component": "MeshRenderer",
+							"Field": "Mesh",
+							"Value": "0000000000000107"
+						}
+					]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "00000000000c0001",
+					"InstanceRoot": "5ce0000000000004"
+				},
+				"PointLight": {
+					"Color": [1, 0.8, 0.6],
+					"Intensity": 12,
+					"Range": 8,
+					"SourceRadius": 0.05
+				}
+			}
+		},
+		{
+			"ID": "5ce0000000000005",
+			"Name": "Bulb",
+			"Parent": "5ce0000000000004",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0.5, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.25, 0.25, 0.25]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "00000000000c0002",
+					"InstanceRoot": "5ce0000000000004"
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000107",
+					"Materials": ["a41f0c2290b1d3e4"],
+					"CastShadows": false,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		}
+	]
+}

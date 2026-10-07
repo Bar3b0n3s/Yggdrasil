@@ -1810,7 +1810,9 @@ BANNED_PATTERNS = (
     BannedPattern("banned-null", re.compile(r"\bNULL\b"), "use nullptr, never NULL (CodeStyle section 6)"),
     BannedPattern(
         "banned-self-move",
-        re.compile(r"(?<![\w.>:])((?:\w+(?:\.|->))*\w+)\s*=\s*(?:::)?std::move\(\s*\1\s*\)"),
+        # A lambda init-capture ([value = std::move(value), ...]) makes a new closure member from the outer variable;
+        # it is not a self-move, so a match right after "[" or followed by "," or "]" is skipped.
+        re.compile(r"(?<![\w.>:\[])(?<!\[ )((?:\w+(?:\.|->))*\w+)\s*=\s*(?:::)?std::move\(\s*\1\s*\)(?![ \t]*[,\]])"),
         "never move-assign a value to itself, also not through an rvalue builder (error = std::move(error).WithHint(...)):"
         " MSVC's library keeps the value, libc++ and libstdc++ leave it empty (CodeStyle section 7). Build into a new "
         "variable, or attach collected parts once (Error::WithIssues)",

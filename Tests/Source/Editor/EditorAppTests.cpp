@@ -2,6 +2,7 @@
 
 #include "EditorCore/Project/ProjectManager.h"
 #include "Engine/App/ExitCode.h"
+#include "Engine/Asset/BuiltinAssets.h"
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Json/Json.h"
 #include "Engine/Graphics/VulkanDispatch.h"
@@ -19,8 +20,9 @@
 #include <nlohmann/json.hpp>
 
 // The editor executable as a whole process (Roadmap M2, M4): RunApplication with the editor's application, its EditorCore
-// modes (--project, --read-only, --batch, --upgrade, --dump-reference) and its loader checks (M5). Every run gets
-// --user-data-dir, so the editor's log file goes to the test's temporary directory. Runs that need no GPU pass --renderer
+// modes (--project, --read-only, --batch, --upgrade, --dump-reference, --bake-engine-assets) and its loader checks (M5). Every run gets
+// --user-data-dir, so the editor's log file goes to the test's temporary directory, and --engine-cache-dir below it, so no
+// run writes the checkout's engine cooked cache (bin/EngineCache). Runs that need no GPU pass --renderer
 // none; the ones that render are in the GPU suite: the initialization failures of a rendering editor below, and
 // EditorFaultInjectionTests.cpp and EditorScreenshotOptionsTests.cpp.
 
@@ -31,6 +33,7 @@ namespace Engine {
 	{
 		ENGINE_TRY_ASSIGN(std::filesystem::path editor, Test::GetBuiltExecutablePath("Editor"));
 		arguments.push_back("--user-data-dir=" + Test::PathToUtf8(userData.GetPath()));
+		arguments.push_back("--engine-cache-dir=" + Test::PathToUtf8(userData / "EngineCache"));
 		return Process::Run(
 			{ .Executable = std::move(editor), .Arguments = std::move(arguments), .Environment = std::move(environment) }, timeout);
 	}
@@ -212,6 +215,8 @@ namespace Engine {
 				{ "--headless", "--read-only" },
 				{ "--headless", "--renderer", "metal" },
 				{ "--headless", "--upgrade" },
+				{ "--headless", "--renderer", "none", "--bake-engine-assets", "--automation" },
+				{ "--headless", "--renderer", "none", "--bake-engine-assets", "--dump-reference", "Reference" },
 			};
 			for (const std::vector<std::string>& arguments : invalid)
 			{
@@ -219,6 +224,34 @@ namespace Engine {
 				REQUIRE(result.has_value());
 				CHECK(result->ExitCode == ExitCode::UsageError);
 			}
+		}
+
+		TEST_CASE("EditorApp: --bake-engine-assets fills the engine cooked cache and exits 0")
+		{
+			// RunEditor points the engine cooked cache (§7.5) at <userData>/EngineCache, which starts empty: the first run bakes
+			// the one File entry this build can import (the Default font) and skips the environments, which have no importer
+			// before M8 (a warning naming them, which does not fail the run).
+			Test::TempDirectory userData("EditorBakeEngineAssets");
+			const std::filesystem::path font = userData / "EngineCache" / BuiltinAssetHandles::DefaultFont.ToString();
+			const Result<ProcessResult> first =
+				RunEditor(userData, { "--headless", "--renderer", "none", "--bake-engine-assets" }, std::chrono::seconds(180));
+			REQUIRE_MESSAGE(first.has_value(), first.error().ToString());
+			CHECK_MESSAGE(first->ExitCode == ExitCode::Success, first->StandardError);
+			CHECK_MESSAGE(first->StandardError.contains("Engine assets: 1 baked, 0 up to date, 2 not baked"), first->StandardError);
+			CHECK(first->StandardError.contains("engine://Environments/Studio"));
+			const Result<std::vector<std::filesystem::path>> files = FileSystem::ListDirectory(font);
+			REQUIRE_MESSAGE(files.has_value(), files.error().ToString());
+			// The cooked font and its manifest: <key>.bin and <key>.import.
+			REQUIRE(files->size() == 2);
+			CHECK(((*files)[0].extension() == ".bin" && (*files)[1].extension() == ".import"));
+
+			// A second run finds the entry up to date and imports nothing.
+			const Result<ProcessResult> second =
+				RunEditor(userData, { "--headless", "--renderer", "none", "--bake-engine-assets" }, std::chrono::seconds(180));
+			REQUIRE_MESSAGE(second.has_value(), second.error().ToString());
+			CHECK_MESSAGE(second->ExitCode == ExitCode::Success, second->StandardError);
+			CHECK_MESSAGE(second->StandardError.contains("Engine assets: 0 baked, 1 up to date, 2 not baked"), second->StandardError);
+			CHECK(FileSystem::ListDirectory(font).value_or(std::vector<std::filesystem::path>()) == *files);
 		}
 
 		TEST_CASE("EditorApp: --headless --frames 10 exits 0 using ManualClock")

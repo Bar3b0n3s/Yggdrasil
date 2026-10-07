@@ -11,10 +11,10 @@ All requested items are approved. The product owner also granted standing permis
 
 | Item | Source | License | Destination | Needed by |
 |---|---|---|---|---|
-| Poly Haven HDRI `studio_small_09` (1k) | `api.polyhaven.com` / `dl.polyhaven.org` | CC0 | `Resources/Environments/` | M6 |
-| Poly Haven HDRI `kloofendal_48d_partly_cloudy_puresky` (1k) | `api.polyhaven.com` / `dl.polyhaven.org` | CC0 | `Resources/Environments/` | M6 |
-| Inter font (`Inter-Regular.ttf`, pinned release) | github.com/rsms/inter releases | SIL OFL 1.1 | `Resources/Fonts/` | M6 |
-| MikkTSpace (`mikktspace.c/.h`) | github.com/mmikk/MikkTSpace | zlib | `Vendor/MikkTSpace/` | M6 |
+| Poly Haven HDRI `studio_small_09` (1k) | `api.polyhaven.com` / `dl.polyhaven.org` | CC0 | `Resources/Environments/Studio.hdr` (committed in M6; SHA-256 and size in `DEFAULT_RESOURCES` of `Scripts/FetchAssets.py`, mirrored in `Resources/LICENSES.md`) | M6 |
+| Poly Haven HDRI `kloofendal_48d_partly_cloudy_puresky` (1k) | `api.polyhaven.com` / `dl.polyhaven.org` | CC0 | `Resources/Environments/Sky.hdr` (committed in M6; SHA-256 and size in `DEFAULT_RESOURCES` of `Scripts/FetchAssets.py`, mirrored in `Resources/LICENSES.md`) | M6 |
+| Inter font (`Inter-Regular.ttf`, pinned release) | github.com/rsms/inter releases | SIL OFL 1.1 | `Resources/Fonts/Inter-Regular.ttf` (Inter 4.1, committed in M6; archive and font SHA-256 in `Scripts/FetchAssets.py`, mirrored in `Resources/LICENSES.md` with the license text) | M6 |
+| MikkTSpace (`mikktspace.c/.h`) | github.com/mmikk/MikkTSpace | zlib | `Vendor/MikkTSpace/` (vendored by the M6 contract; commit and SHA-256 in `Vendor/MikkTSpace/VENDOR.md`) | M6 |
 | stb_vorbis (`stb_vorbis.c`) | github.com/nothings/stb (pinned commit) | MIT OR Unlicense | `Vendor/stb/` | M12 |
 | Format fixtures (FLAC, MP3, OTF) | pinned upstream sources, recorded in `Tests/Data/LICENSES.md` | permissive (per fixture) | `Tests/Data/` | M14 |
 

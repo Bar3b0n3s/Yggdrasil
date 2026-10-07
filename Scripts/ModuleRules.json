@@ -95,6 +95,9 @@
 		"stb": [
 			"Vendor/stb"
 		],
+		"MikkTSpace": [
+			"Vendor/MikkTSpace"
+		],
 		"doctest": [
 			"Vendor/doctest"
 		]
@@ -367,12 +370,19 @@
 			"Layer": 5,
 			"Includes": [],
 			"MaxLayer": 4,
+			"Notes": "The importers' third-party code, all private (section 3 rule 3): cgltf (GltfImporter, CgltfImplementation.cpp), stb_image and stb_image_resize2 (TextureImporter; stb_image's implementation is Graphics', Docs/Decisions/0009-m5-decisions.md decision 11), imstb_truetype.h from the vendored Dear ImGui (FontImporter, compiled with STBTT_STATIC in its own translation unit, Appendix C) and MikkTSpace, which only the glTF importer's tangent generator includes (Docs/Decisions/0010-m6-decisions.md).",
 			"ThirdParty": {
 				"Public": [],
 				"Private": [
 					"cgltf",
 					"stb",
-					"imgui:imstb_truetype.h"
+					"imgui:imstb_truetype.h",
+					"MikkTSpace"
+				]
+			},
+			"RestrictedThirdParty": {
+				"MikkTSpace": [
+					"Engine/Source/Engine/AssetPipeline/Private/TangentGenerator.cpp"
 				]
 			}
 		},
@@ -666,8 +676,10 @@
 			"Tests/Source/**"
 		],
 		"PythonStubFiles": [
+			"Scripts/**",
 			"Tools/**",
-			"Tests/Automation/**"
+			"Tests/Automation/**",
+			"Tests/Data/Generate/**"
 		],
 		"PythonTestFiles": [
 			"Tests/Automation/**",
@@ -675,18 +687,20 @@
 		]
 	},
 	"Python": {
-		"Notes": "CodeStyle section 15. EntryPoints are the developer scripts: PascalCase file names ending with sys.exit(main()). Libraries use snake_case module names. ThirdPartyImports may import packages outside the standard library (the MCP bridge runs in its own virtual environment).",
+		"Notes": "CodeStyle section 15. EntryPoints are the developer scripts and the committed fixture generators (Tests/Data/Generate, Docs/Decisions/0010-m6-decisions.md): PascalCase file names ending with sys.exit(main()). Libraries use snake_case module names. ThirdPartyImports may import packages outside the standard library (the MCP bridge runs in its own virtual environment). The lint fixtures under Tests/Data/Lint and Tests/Data/BuildConfig are excluded: they are deliberately defective.",
 		"Roots": [
 			"Scripts",
 			"Tools",
 			"Tests"
 		],
 		"Exclude": [
-			"Tests/Data/**",
+			"Tests/Data/BuildConfig/**",
+			"Tests/Data/Lint/**",
 			"Tools/MCP/.venv/**"
 		],
 		"EntryPoints": [
-			"Scripts/*.py"
+			"Scripts/*.py",
+			"Tests/Data/Generate/*.py"
 		],
 		"Libraries": [
 			"Scripts/Lib/**"

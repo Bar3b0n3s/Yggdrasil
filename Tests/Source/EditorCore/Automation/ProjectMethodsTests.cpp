@@ -175,6 +175,35 @@ namespace Engine {
 			REQUIRE(again.has_value());
 			CHECK((*again)["changedFiles"] == Json::array());
 		}
+
+		TEST_CASE("ProjectMethods: project.refreshAssets registers an externally written file")
+		{
+			Test::AutomationFixture setup("ProjectRefreshAssets", false);
+			// Written outside the editor (a user's file manager): the registry learns about it only by a scan.
+			const std::string material = R"({"Format": "Material", "Version": 1, "Roughness": 0.3})";
+			REQUIRE(FileSystem::WriteFileAtomic(setup.GetEditor().GetProject().GetRoot() / "Assets/External.material", AsBytes(material)).has_value());
+			Result<Json> refreshed = setup.Call("project.refreshAssets", Json::object());
+			REQUIRE_MESSAGE(refreshed.has_value(), refreshed.error().ToString());
+			CHECK((*refreshed)["createdMetas"] == Json::array({ "Assets/External.material.meta" }));
+			CHECK((*refreshed)["added"].size() == 1);
+			Result<Json> properties = setup.Call("asset.getProperties", Json{ { "asset", "Assets/External.material" } });
+			REQUIRE(properties.has_value());
+			CHECK((*properties)["values"]["Roughness"] == Json(0.3f));
+			// Nothing new: a second refresh reports nothing added.
+			Result<Json> again = setup.Call("project.refreshAssets", Json::object());
+			REQUIRE(again.has_value());
+			CHECK((*again)["added"].empty());
+		}
+
+		TEST_CASE("ProjectMethods: project.save writes only the scene because asset edits write through")
+		{
+			Test::AutomationFixture setup("ProjectSaveAssets");
+			REQUIRE(setup.Call("asset.create", Json{ { "type", "Material" }, { "path", "Assets/Red.material" } }).has_value());
+			REQUIRE(setup.Call("entity.create", Json{ { "name", "Dirty" } }).has_value());
+			Result<Json> saved = setup.Call("project.save", Json::object());
+			REQUIRE(saved.has_value());
+			CHECK((*saved)["savedFiles"] == Json::array({ "Assets/Scenes/Main.scene" }));
+		}
 	}
 
 }

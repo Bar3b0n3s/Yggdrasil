@@ -1,0 +1,176 @@
+{
+	"Format": "EngineAssets",
+	"Version": 1,
+	"Assets": [
+		{
+			"Handle": "0000000000000101",
+			"Path": "engine://Meshes/Cube",
+			"Type": "Mesh",
+			"Source": "Procedural",
+			"File": "",
+			"Importer": "",
+			"Settings": {},
+			"Generator": ""
+		},
+		{
+			"Handle": "0000000000000102",
+			"Path": "engine://Meshes/Sphere",
+			"Type": "Mesh",
+			"Source": "Procedural",
+			"File": "",
+			"Importer": "",
+			"Settings": {},
+			"Generator": ""
+		},
+		{
+			"Handle": "0000000000000103",
+			"Path": "engine://Meshes/Plane",
+			"Type": "Mesh",
+			"Source": "Procedural",
+			"File": "",
+			"Importer": "",
+			"Settings": {},
+			"Generator": ""
+		},
+		{
+			"Handle": "0000000000000104",
+			"Path": "engine://Meshes/Quad",
+			"Type": "Mesh",
+			"Source": "Procedural",
+			"File": "",
+			"Importer": "",
+			"Settings": {},
+			"Generator": ""
+		},
+		{
+			"Handle": "0000000000000105",
+			"Path": "engine://Meshes/Cylinder",
+			"Type": "Mesh",
+			"Source": "Procedural",
+			"File": "",
+			"Importer": "",
+			"Settings": {},
+			"Generator": ""
+		},
+		{
+			"Handle": "0000000000000106",
+			"Path": "engine://Meshes/Capsule",
+			"Type": "Mesh",
+			"Source": "Procedural",
+			"File": "",
+			"Importer": "",
+			"Settings": {},
+			"Generator": ""
+		},
+		{
+			"Handle": "0000000000000107",
+			"Path": "engine://Meshes/Cone",
+			"Type": "Mesh",
+			"Source": "Procedural",
+			"File": "",
+			"Importer": "",
+			"Settings": {},
+			"Generator": ""
+		},
+		{
+			"Handle": "0000000000000141",
+			"Path": "engine://Materials/Default",
+			"Type": "Material",
+			"Source": "Procedural",
+			"File": "",
+			"Importer": "",
+			"Settings": {},
+			"Generator": ""
+		},
+		{
+			"Handle": "0000000000000142",
+			"Path": "engine://Materials/Error",
+			"Type": "Material",
+			"Source": "Procedural",
+			"File": "",
+			"Importer": "",
+			"Settings": {},
+			"Generator": ""
+		},
+		{
+			"Handle": "0000000000000181",
+			"Path": "engine://Textures/White",
+			"Type": "Texture",
+			"Source": "Procedural",
+			"File": "",
+			"Importer": "",
+			"Settings": {},
+			"Generator": ""
+		},
+		{
+			"Handle": "0000000000000182",
+			"Path": "engine://Textures/Black",
+			"Type": "Texture",
+			"Source": "Procedural",
+			"File": "",
+			"Importer": "",
+			"Settings": {},
+			"Generator": ""
+		},
+		{
+			"Handle": "0000000000000183",
+			"Path": "engine://Textures/FlatNormal",
+			"Type": "Texture",
+			"Source": "Procedural",
+			"File": "",
+			"Importer": "",
+			"Settings": {},
+			"Generator": ""
+		},
+		{
+			"Handle": "0000000000000184",
+			"Path": "engine://Textures/Checker",
+			"Type": "Texture",
+			"Source": "Procedural",
+			"File": "",
+			"Importer": "",
+			"Settings": {},
+			"Generator": ""
+		},
+		{
+			"Handle": "0000000000000185",
+			"Path": "engine://Textures/Missing",
+			"Type": "Texture",
+			"Source": "Procedural",
+			"File": "",
+			"Importer": "",
+			"Settings": {},
+			"Generator": ""
+		},
+		{
+			"Handle": "00000000000001c1",
+			"Path": "engine://Fonts/Default",
+			"Type": "Font",
+			"Source": "File",
+			"File": "Fonts/Inter-Regular.ttf",
+			"Importer": "Font",
+			"Settings": {},
+			"Generator": ""
+		},
+		{
+			"Handle": "0000000000000201",
+			"Path": "engine://Environments/Studio",
+			"Type": "Environment",
+			"Source": "File",
+			"File": "Environments/Studio.hdr",
+			"Importer": "Environment",
+			"Settings": {},
+			"Generator": ""
+		},
+		{
+			"Handle": "0000000000000202",
+			"Path": "engine://Environments/Sky",
+			"Type": "Environment",
+			"Source": "File",
+			"File": "Environments/Sky.hdr",
+			"Importer": "Environment",
+			"Settings": {},
+			"Generator": ""
+		}
+	]
+}

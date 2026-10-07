@@ -4,6 +4,7 @@
 #include "Engine/Core/Base.h"
 #include "Engine/Core/Json/Json.h"
 #include "Engine/Core/Result.h"
+#include "Engine/Core/UUID.h"
 #include "Engine/Reflection/TypeInfo.h"
 
 #include <nlohmann/json.hpp>
@@ -55,6 +56,24 @@ namespace Engine {
 		std::optional<uint64_t> IfRevision{};
 	};
 
+	// Resolves the readable spellings of an asset reference in params (§7.1, convention 13 of MethodRegistry.h): a project
+	// path "Assets/..." (with "#<key>" for a sub-asset) or an engine path "engine://...". The protocol layer cannot know the
+	// asset manager (layer rules, §3), so a host that has one implements this (EditorCore's AutomationServer) and returns it
+	// from its context's GetAssetReferenceResolver. Main thread only.
+	class IAssetReferenceResolver
+	{
+	public:
+		virtual ~IAssetReferenceResolver() = default;
+
+		// The handle `reference` names. `assetTypeName` is the AssetType name the field accepts (TypeInfo::
+		// GetAssetTypeName), empty for any. May refresh the host's asset registry first (§7.3: a call that takes a path
+		// refreshes). Errors: InvalidArgument for a malformed reference or an asset of another type; NotFound for a
+		// reference that names no asset (with "did you mean" suggestions in the hint); any other code is the host's own
+		// (InvalidState for a project path while no project is open, a refresh's errors), which MethodRegistry::Invoke
+		// returns unchanged.
+		[[nodiscard]] virtual Result<UUID> ResolveAssetReference(std::string_view reference, std::string_view assetTypeName) = 0;
+	};
+
 	// Everything one invocation needs, assembled by the Dispatcher (or MethodRegistry::InvokeNested) and handed to the
 	// host's CreateContext.
 	struct MethodRequest
@@ -62,7 +81,9 @@ namespace Engine {
 		RequestInfo Info{};
 		RequestOptions Options{};
 		const MethodDescriptor* Method = nullptr; // required; a back-reference into the registry, which outlives the request
-		Json Params{};                            // prepared params: an object, reserved members removed, enums canonical
+		// Prepared params: an object, reserved members removed, enums canonical; MethodRegistry::Invoke then resolves the
+		// asset references in the context's copy (convention 13).
+		Json Params{};
 		const MethodRegistry* Registry = nullptr; // required; outlives the request
 		Watchdog* PhaseMarker = nullptr;          // the server's watchdog; null for in-process calls without a server
 		uint32_t NestingDepth = 0;                // 0 for a request, 1 for an op of edit.batch (batches do not nest)
@@ -95,7 +116,8 @@ namespace Engine {
 		[[nodiscard]] const MethodRegistry& GetRegistry() const { return *m_Request.Registry; }
 		[[nodiscard]] uint32_t GetNestingDepth() const { return m_Request.NestingDepth; }
 
-		// The prepared params (an object). Handlers normally read their typed param struct instead.
+		// The prepared params (an object), with the asset references resolved to handles by MethodRegistry::Invoke
+		// (convention 13) once it has run. Handlers normally read their typed param struct instead.
 		[[nodiscard]] const Json& GetParams() const { return m_Request.Params; }
 
 		// True when the prepared params hold the member `name` (camelCase). This is how a handler tells an absent optional
@@ -127,6 +149,11 @@ namespace Engine {
 		// from this context (attribution, dry-run state) into the new one. `request.Options` already holds this context's
 		// options (an op never carries its own dryRun or ifRevision).
 		[[nodiscard]] virtual Scope<MethodContext> CreateNested(MethodRequest request) const = 0;
+
+		// The host's asset reference resolver, through which MethodRegistry::Invoke rewrites the asset references in the
+		// params to handles (convention 13 of MethodRegistry.h) before it reads them; null (the default) for a host without
+		// assets, whose AssetRef values must then be handles. The pointer stays valid while the request lives.
+		[[nodiscard]] virtual IAssetReferenceResolver* GetAssetReferenceResolver() const { return nullptr; }
 	protected:
 		// `request.Method` and `request.Registry` must be set (asserted).
 		MethodContext(TypeKey hostKey, MethodRequest request);
@@ -136,6 +163,8 @@ namespace Engine {
 		TypeKey m_HostKey = nullptr;
 		MethodRequest m_Request;
 		Json m_ErrorData; // null until SetErrorData
+	private:
+		friend class MethodRegistry; // Invoke replaces the params with their resolved asset references (convention 13)
 	};
 
 }

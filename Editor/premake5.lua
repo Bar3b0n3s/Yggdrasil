@@ -43,6 +43,7 @@ project "EditorCore"
 	UseJoltPhysics()
 	UseSpdlog()
 	UseMiniaudio()
+	UseMikkTSpace()
 	UseLuau(true)
 
 project "Editor"
@@ -89,4 +90,5 @@ project "Editor"
 	UseJoltPhysics()
 	UseSpdlog()
 	UseMiniaudio()
+	UseMikkTSpace()
 	UseLuau(true)

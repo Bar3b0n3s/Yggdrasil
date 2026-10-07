@@ -4,6 +4,7 @@
 #include "EditorCore/Commands/Command.h"
 #include "EditorCore/Commands/CommandHistory.h"
 #include "EditorCore/Project/ProjectManager.h"
+#include "Engine/Asset/AssetHandle.h"
 #include "Engine/Core/Base.h"
 #include "Engine/Core/EventLog.h"
 #include "Engine/Core/Json/Json.h"
@@ -30,14 +31,19 @@
 
 namespace Engine {
 
+	class AssetLoaderRegistry;
+	class EditorAssetManager;
 	class EditorDryRunScope;
 	class EditorTransaction;
 	class EngineContext;
+	class IEnvironmentBaker;
 	class IMount;
+	class ImporterRegistry;
 	class ProjectSettingsCommand;
 	class SceneEdit;
 	class TypeRegistry;
 	class VirtualFileSystem;
+	struct AssetRefreshReport;
 
 	struct EditorContextSpecification
 	{
@@ -52,6 +58,10 @@ namespace Engine {
 		std::filesystem::path ReadOnlyCacheRoot{};
 		// The undo history's bounds (§12.3: 1,000 entries or 256 MB); the 10,000-operation property test raises them.
 		CommandHistoryLimits HistoryLimits{};
+		// The GPU environment baker for EnvironmentImporter (§7.4, §8.6): the Renderer's EnvironmentBaker when the editor has a
+		// device (M8); null with --renderer none, where environment imports reuse cooked bakes (§13.9). A documented
+		// back-reference that outlives the editor.
+		IEnvironmentBaker* EnvironmentBaker = nullptr;
 	};
 
 	// The editor state of one editor process (or one test). Not copyable or movable; main thread only (§4.11), like the scene.
@@ -63,6 +73,23 @@ namespace Engine {
 	// Mutation path. Execute is the only way to change the open scene or the project settings: it runs a Command with the
 	// current origin (Agent while an automation request is served) and records it in the history, or in the open
 	// transaction, or (during a dry run) in the sandbox history that the dry run discards.
+	//
+	// Assets (M6). The editor owns one EditorAssetManager for its lifetime, with the built-in importers and loaders, injected
+	// into the engine context (EngineContext::SetAssetManager). OpenProject opens the project's assets (scan, .meta files for
+	// new sources, hot reload), CloseProject closes them; the project write path routes through the manager's AssetWriter
+	// (no-echo writes, §7.5 race rule 1), so WriteProjectFile, MoveProjectFile and RemoveProjectFile update the registry and
+	// schedule reimports, and the hot reloader never sees the editor's own writes. Provenance is kept for every write the
+	// manager's writer reports (EditorAssetManager::SetWriteObserver), so the .meta files the manager writes itself (new
+	// sources, dependency metas, sub-asset updates) are recorded with the current attribution like the editor's own writes
+	// (§13.12 rule 1). Update drives hot reload once per frame. An external change of the open scene's file, or of a prefab
+	// it instantiates, raises SceneChangedOnDisk (§7.5 race rule 3) and is never reloaded silently.
+	//
+	// Prefab updates (§5.5 "Update": instances are rebuilt as prefab + overrides inside one undoable command). Every editor
+	// action that gives a Prefab asset the open scene instantiates a new version composes its asset command with
+	// CreatePrefabUpdateCommand into one undo step: prefab.apply, and asset.setImportSettings and asset.reimport of such an
+	// asset (a glTF), whose import then runs before the method returns. External changes are never applied silently: they
+	// raise SceneChangedOnDisk, and scene.open (reload included) rebuilds the loaded scene's instances from the current
+	// prefab versions (UpdatePrefabInstances), so adopting the disk version adopts the changed prefabs too.
 	class EditorContext
 	{
 	public:
@@ -94,6 +121,14 @@ namespace Engine {
 		[[nodiscard]] UUIDGenerator& GetIdGenerator() { return m_IdGenerator; }
 		// The specification as given (Create fills an absent IdGeneratorState only into the generator, not into this copy).
 		[[nodiscard]] const EditorContextSpecification& GetSpecification() const { return m_Specification; }
+		// The editor's asset manager (see the class comment); valid for the editor's lifetime.
+		[[nodiscard]] EditorAssetManager& GetAssets() { return *m_Assets; }
+		[[nodiscard]] const EditorAssetManager& GetAssets() const { return *m_Assets; }
+
+		// Once per frame (EditorApp::OnUpdate) with a monotonic time in seconds (the frame clock's accumulated unscaled time,
+		// so headless editors on a ManualClock are deterministic); tests pass chosen times: drives asset hot reload
+		// (EditorAssetManager::Update). No effect without a project.
+		void Update(double nowSeconds);
 
 		// --- Project -------------------------------------------------------------------------------------------------------
 
@@ -105,9 +140,11 @@ namespace Engine {
 
 		// Takes the opened project (ProjectManager::OpenProject): mounts project:// at its root (keeping .bak files, read-only
 		// for a read-only project) and cache:// at its cache directory, loads its provenance (none for read-only projects),
-		// adds it to the recent list (when user:// is mounted; a failure there is logged, not returned) and starts with no
-		// open scene and an empty history. Errors: InvalidState when a project is already open; the mount errors and
-		// ProvenanceRecorder::Load errors, after which nothing changed.
+		// adds it to the recent list (when user:// is mounted; a failure there is logged, not returned), opens its assets
+		// (EditorAssetManager::OpenProject on project://Assets, which is created first when a writable project lacks it) and
+		// starts with no open scene and an empty history. Errors: InvalidState when a project is already open; the mount
+		// errors, ProvenanceRecorder::Load errors, the errors of creating Assets/ and EditorAssetManager::OpenProject errors,
+		// after which the project stays closed.
 		[[nodiscard]] Status OpenProject(Scope<LoadedProject> project);
 
 		// Closes the open scene and the project (unmounts project:// and cache://, releases the lock). Unsaved changes are
@@ -138,8 +175,33 @@ namespace Engine {
 		// (repairs) not saved since.
 		[[nodiscard]] bool IsSceneDirty() const;
 
-		// The open scene was written to `path` (scene.save, project.save): sets the scene path and the save point.
+		// The open scene was written to `path` (scene.save, project.save): sets the scene path and the save point, and clears
+		// SceneChangedOnDisk.
 		void MarkSceneSaved(const VfsPath& path);
+
+		// §7.5 race rule 3: true once the open scene's file, or a prefab asset the open scene instantiates (a
+		// PrefabInstanceComponent names it), changed on disk through something other than this editor since the scene was
+		// opened, saved or reloaded. The change appended a SceneChangedOnDisk event {Path, Dirty} (§4.9) and "_meta" reports
+		// sceneChangedOnDisk: true (MetaState::SceneChangedOnDisk); the in-memory scene is left alone until scene.open {path,
+		// reload: true} (plus discardChanges when dirty) adopts the disk version and the current versions of its prefabs.
+		// SetScene and MarkSceneSaved clear it. False without an open scene. Raised once per change, whether a poll or a
+		// Refresh (project.refreshAssets, or the implicit refresh of a path-taking automation call) detected it.
+		[[nodiscard]] bool IsSceneChangedOnDisk() const { return m_SceneChangedOnDisk; }
+
+		// §5.5 "Update": rebuilds, in `scene` (the open scene or one scene.open just loaded), every instance of the Prefab
+		// assets `prefabs` (sorted; every instance in the scene when empty) from the prefab's current version through
+		// PrefabInstantiator (the single path, §5.5), keeping each instance's root ID, overrides and user children. Returns
+		// whether anything changed. Not a command: scene.open (reload included) calls it on the scene it loaded before
+		// SetScene, and the scene opens dirty when it changed something (like a repair). An instance whose prefab is missing
+		// is left as it is (PREFAB_MISSING_ASSET, ProjectValidator). Errors: those of PrefabInstantiator and of loading the
+		// prefab assets (LoadPrefabAsset).
+		[[nodiscard]] Result<bool> UpdatePrefabInstances(Scene& scene, std::span<const AssetHandle> prefabs);
+
+		// The undoable form for the open scene: a SceneEditCommand labelled "Update Prefab Instances" whose effect is
+		// UpdatePrefabInstances(GetScene(), prefabs), or nullptr when it would change nothing. The methods that give a
+		// prefab a new version compose it with their asset command (see the class comment). Errors: InvalidState without an
+		// open scene; those of UpdatePrefabInstances.
+		[[nodiscard]] Result<Scope<Command>> CreatePrefabUpdateCommand(std::span<const AssetHandle> prefabs);
 
 		// The editor's revision (§13.4: "_meta".revision, ifRevision, the revisions in results and history entries, scene.diff
 		// {against}). It increases with every mutation of the open scene and never repeats a value for the editor's lifetime,
@@ -183,6 +245,23 @@ namespace Engine {
 		// (JsonRpc.h ToRpcErrorCode); nothing recorded then.
 		[[nodiscard]] Status WriteProjectFile(const VfsPath& path, std::span<const std::byte> data);
 
+		// Renames a file or directory under the project (project:// paths, asserted; both in one scheme) through the asset
+		// writer, creating the destination's parent directories. Provenance moves with it (through the write observer): a
+		// recorded path's entry is removed and, when the destination is recorded too (under Assets/), re-recorded with the
+		// file's hash and the current attribution (a move into Library/Trash leaves no entry, §13.12 rule 3). During a dry run
+		// the move happens in the overlay and nothing is recorded. Errors: PermissionDenied for a read-only project; the VFS errors (NotFound,
+		// AlreadyExists, Validation for a case mismatch, Io with OS access failures converted like WriteProjectFile's).
+		[[nodiscard]] Status MoveProjectFile(const VfsPath& from, const VfsPath& to);
+
+		// Removes a file or an empty directory under the project through the asset writer, and its provenance entry (undo of a
+		// creation; the user-facing delete moves to the trash instead, AssetDeleteCommand). During a dry run the removal
+		// happens in the overlay and nothing is recorded. Errors: as MoveProjectFile; InvalidState for a non-empty directory.
+		[[nodiscard]] Status RemoveProjectFile(const VfsPath& path);
+
+		// Creates a directory (and missing parents) under the project through the asset writer (asset.create {type: Folder},
+		// moves into new folders). Errors: as MoveProjectFile.
+		[[nodiscard]] Status CreateProjectDirectory(const VfsPath& directory);
+
 		// The attribution of the request being served (set by AutomationServer::EnterInvocation, cleared by LeaveInvocation),
 		// or nullopt for UI writes (Method "ui").
 		void SetWriteAttribution(std::optional<WriteAttribution> attribution);
@@ -225,10 +304,21 @@ namespace Engine {
 		// A mount of the open project's root as OpenProject mounts it at project:// (read-only for a read-only project,
 		// keeping .bak files). Errors: those of NativeDirectoryMount::Create.
 		[[nodiscard]] Result<Scope<IMount>> CreateProjectMount() const;
+		// The checks every write path member makes before it changes `path` ("cannot <action> '<path>'"): InvalidState without
+		// a project, PermissionDenied for a read-only project outside dry runs. Asserts a project:// path.
+		[[nodiscard]] Status CheckProjectWrite(const VfsPath& path, std::string_view action) const;
+		// EditorAssetManager::OpenProject on the open project's project://Assets (created first when a writable project lacks
+		// it) and cache://, read-only for a read-only project, with hot reload. Errors: those of the creation and of OpenProject.
+		[[nodiscard]] Result<AssetRefreshReport> OpenProjectAssets();
 	private:
 		EngineContext* m_Engine = nullptr; // documented back-reference: outlives the editor
 		EditorContextSpecification m_Specification;
 		UUIDGenerator m_IdGenerator;
+		// The asset services (M6), after the generator the manager draws handles from, so they are destroyed before it.
+		Scope<ImporterRegistry> m_Importers;
+		Scope<AssetLoaderRegistry> m_Loaders;
+		Scope<EditorAssetManager> m_Assets;
+		bool m_SceneChangedOnDisk = false; // IsSceneChangedOnDisk
 		Scope<LoadedProject> m_Project;
 		Scope<Scene> m_Scene;
 		std::optional<VfsPath> m_ScenePath;
@@ -243,6 +333,10 @@ namespace Engine {
 		EditorTransaction* m_Transaction = nullptr;      // the outermost open transaction, which registers itself
 		EditorDryRunScope* m_DryRun = nullptr;           // the open dry run, which registers itself
 		std::optional<int> m_ShutdownRequest;
+		// While a write path member that can change provenance (WriteProjectFile, MoveProjectFile, RemoveProjectFile) runs, the
+		// write observer keeps the first provenance save failure here for that member to return; otherwise it logs it.
+		bool m_CollectProvenanceErrors = false;
+		std::optional<Error> m_ProvenanceError;
 	private:
 		friend class CommandHistory; // reads GetRevisionBeforeCommand
 		friend class EditorDryRunScope;

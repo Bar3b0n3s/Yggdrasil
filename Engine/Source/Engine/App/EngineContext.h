@@ -21,21 +21,28 @@
 
 namespace Engine {
 
+	class AssetManager;
 	class GraphicsDevice;
 	class PipelineFactory;
 	class ShaderLibrary;
 	struct GpuMessageCounts;
 
 	// The steps that build an EngineContext, in order (§4.1: VFS -> JobSystem -> Window -> GraphicsDevice -> ...). Later
-	// milestones append theirs where §4.1 puts them: the injected AssetManager and the AudioEngine. The TypeRegistry is
+	// milestones add theirs where §4.1 puts them: the AudioEngine (M12). The AssetManager is not a step: the application
+	// builds its manager on the context's services and injects it (SetAssetManager, §3 rule 4). The TypeRegistry is
 	// infallible and therefore part of Services (Docs/Decisions/0008-m4-decisions.md decision 2).
 	enum class EngineContextStep : uint8_t
 	{
 		// The infallible services, constructed in member order: VirtualFileSystem, MainThreadQueue, JobSystem, EventLog,
-		// InputState, and the TypeRegistry (built-in components, project settings types, RegisterTypes, then frozen).
+		// InputState, and the TypeRegistry (built-in components, project settings types, the Asset module's types
+		// (RegisterAssetTypes), RegisterTypes, then frozen).
 		Services,
 		// Mounts user:// when UserDataDirectory is set.
 		UserData,
+		// Mounts engine:// (read-only) at EngineResourcesDirectory and enginecache:// (read-write) at EngineCacheDirectory, each
+		// when set (§4.10, §7.5; ADR 0010). Development builds of the editor pass <repo>/Resources and <repo>/bin/EngineCache;
+		// exported games mount Engine.pak instead (M7).
+		EngineResources,
 		// Window::Create when Window is set.
 		Window,
 		// When Graphics is set (RendererMode::Vulkan): in development builds the read-only mount of the compiled shaders,
@@ -60,6 +67,12 @@ namespace Engine {
 		// Mounted as user:// when set (a NativeDirectoryMount without .bak files, ADR 0003 decision 16); the directory must
 		// exist. Applications pass ProcessContext's <UserData>/<AppName>.
 		std::filesystem::path UserDataDirectory{};
+		// engine:// for development builds (§2.2: "Dev builds mount engine:// at <repo>/Resources"): mounted read-only when set;
+		// the directory must exist. Empty: not mounted (tests, and exported games, which mount Engine.pak, M7).
+		std::filesystem::path EngineResourcesDirectory{};
+		// enginecache:// (§4.10, §7.5: bin/EngineCache, dev builds only): mounted read-write, without .bak files, when set; the
+		// directory is created when missing. Empty: not mounted.
+		std::filesystem::path EngineCacheDirectory{};
 		// The context's window, created on the process's GLFW platform (native when windowed, null when headless). Without
 		// it the context has no window and needs no GLFW, which lets tests build several contexts side by side.
 		std::optional<WindowSpecification> Window{};
@@ -102,7 +115,8 @@ namespace Engine {
 		EngineContext& operator=(const EngineContext&) = delete;
 
 		// Builds the context (see the class comment). Errors: those of the failed step, with the step as context: NotFound
-		// or Io when UserDataDirectory cannot be mounted; for the window, InvalidState without an initialized GLFW (no
+		// or Io when UserDataDirectory cannot be mounted; NotFound or Io when EngineResourcesDirectory or EngineCacheDirectory
+		// cannot be mounted (context "EngineResources"); for the window, InvalidState without an initialized GLFW (no
 		// ProcessContext) and Unsupported when GLFW cannot create it; for graphics, NotFound when the shader directory of a
 		// development build does not exist (the Shaders project did not run) and the errors of GraphicsDevice::Create.
 		[[nodiscard]] static Result<Scope<EngineContext>> Create(const EngineContextSpecification& specification);
@@ -115,13 +129,22 @@ namespace Engine {
 		[[nodiscard]] const EventLog& GetEventLog() const { return m_EventLog; }
 		[[nodiscard]] InputState& GetInputState() { return m_InputState; }
 		[[nodiscard]] const InputState& GetInputState() const { return m_InputState; }
-		// The context's type registry (§4.1, §5.4): every built-in component, the project settings types and what the
-		// specification's RegisterTypes added, frozen, so every const member is thread-safe.
+		// The context's type registry (§4.1, §5.4): every built-in component, the project settings types, the Asset module's
+		// types (RegisterAssetTypes) and what the specification's RegisterTypes added, frozen, so every const member is
+		// thread-safe.
 		[[nodiscard]] const TypeRegistry& GetTypeRegistry() const { return m_TypeRegistry; }
 
 		// The window; nullptr when the specification had none.
 		[[nodiscard]] Window* GetWindow() { return m_Window ? &*m_Window : nullptr; }
 		[[nodiscard]] const Window* GetWindow() const { return m_Window ? &*m_Window : nullptr; }
+
+		// The context's asset manager (§3 rule 4, §4.1 "AssetManager& (injected)"): the application's EditorAssetManager or
+		// RuntimeAssetManager, which it owns and builds on this context's services; nullptr until one is injected.
+		[[nodiscard]] AssetManager* GetAssetManager() const { return m_AssetManager; }
+		// Injects `manager` (a documented back-reference the application owns); nullptr removes it. The application removes it
+		// before destroying the manager, and destroys the manager before the context (the manager uses the context's VFS,
+		// JobSystem and MainThreadQueue). Main thread.
+		void SetAssetManager(AssetManager* manager) { m_AssetManager = manager; }
 
 		// The GPU services; nullptr without Graphics (RendererMode::None, §4.1).
 		[[nodiscard]] GraphicsDevice* GetGraphicsDevice() { return m_GraphicsDevice.get(); }
@@ -134,6 +157,8 @@ namespace Engine {
 		// at shutdown, after its rendering objects are gone, so --expect-no-gpu-errors sees the device's whole life (§15.3).
 		[[nodiscard]] GpuMessageCounts DestroyGraphics();
 	private:
+		// The EngineResources step (EngineContextStep::EngineResources).
+		[[nodiscard]] Status MountEngineResources(const EngineContextSpecification& specification);
 		// The Graphics step (EngineContextStep::Graphics).
 		[[nodiscard]] Status CreateGraphics(const GraphicsSpecification& graphics);
 	private:
@@ -150,9 +175,10 @@ namespace Engine {
 		Scope<GraphicsDevice> m_GraphicsDevice;
 		Scope<ShaderLibrary> m_ShaderLibrary;
 		Scope<PipelineFactory> m_PipelineFactory;
+		AssetManager* m_AssetManager = nullptr; // injected, owned by the application (SetAssetManager)
 	};
 
-	// "Services", "UserData", "Window" or "Graphics".
+	// "Services", "UserData", "EngineResources", "Window" or "Graphics".
 	[[nodiscard]] std::string_view EngineContextStepToString(EngineContextStep step);
 
 }

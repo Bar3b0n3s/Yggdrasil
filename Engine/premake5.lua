@@ -104,6 +104,7 @@ project "Engine"
 	UseJoltPhysics()
 	UseSpdlog()
 	UseMiniaudio()
+	UseMikkTSpace()
 	UseLuau(false)
 
 	if UseShadersProject then

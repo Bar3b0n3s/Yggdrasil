@@ -2,6 +2,9 @@
 
 #include "Engine/App/EngineContext.h"
 
+#include "Engine/Asset/AssetLoaderRegistry.h"
+#include "Engine/Asset/AssetManager.h"
+#include "Engine/Asset/RuntimeAssetManager.h"
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Graphics/ShaderLibrary.h"
@@ -111,6 +114,66 @@ namespace Engine {
 			CHECK_FALSE(std::filesystem::exists(directory / "Editor.json.bak", error));
 		}
 
+		TEST_CASE("EngineContext: engine resources mount engine:// read-only and enginecache:// read-write")
+		{
+			Test::TempDirectory directory("EngineContextResources");
+			REQUIRE(FileSystem::CreateDirectories(directory / "Resources").has_value());
+			const std::string catalogue = "{}";
+			REQUIRE(FileSystem::WriteFileAtomic(directory / "Resources/EngineAssets.json", std::as_bytes(std::span(catalogue))).has_value());
+			// The cache directory is created when missing.
+			Result<Scope<EngineContext>> created = EngineContext::Create({
+				.EngineResourcesDirectory = directory / "Resources",
+				.EngineCacheDirectory = directory / "bin/EngineCache",
+			});
+			REQUIRE_MESSAGE(created.has_value(), created.error().ToString());
+			VirtualFileSystem& vfs = (*created)->GetVfs();
+			CHECK(vfs.Exists(MakeVfsPath("engine://EngineAssets.json")));
+			const Status readOnly = vfs.WriteFileAtomic(MakeVfsPath("engine://Other.json"), std::as_bytes(std::span(catalogue)));
+			REQUIRE_FALSE(readOnly.has_value());
+			CHECK(readOnly.error().GetCode() == ErrorCode::PermissionDenied);
+			REQUIRE(vfs.CreateDirectories(MakeVfsPath("enginecache://00000000000001c1")).has_value());
+			REQUIRE(vfs.WriteFileAtomic(MakeVfsPath("enginecache://00000000000001c1/key.bin"), std::as_bytes(std::span(catalogue))).has_value());
+			std::error_code error;
+			CHECK(std::filesystem::exists(directory / "bin/EngineCache/00000000000001c1/key.bin", error));
+			// No .bak files in the engine cache.
+			CHECK_FALSE(std::filesystem::exists(directory / "bin/EngineCache/00000000000001c1/key.bin.bak", error));
+		}
+
+		TEST_CASE("EngineContext: a missing engine resources directory fails with the step as context")
+		{
+			Test::TempDirectory directory("EngineContextNoResources");
+			Result<Scope<EngineContext>> created = EngineContext::Create({ .EngineResourcesDirectory = directory / "Missing" });
+			REQUIRE_FALSE(created.has_value());
+			CHECK(created.error().ToString().find("EngineResources") != std::string::npos);
+		}
+
+		TEST_CASE("EngineContext: the injected asset manager is served until it is removed")
+		{
+			Result<Scope<EngineContext>> created = EngineContext::Create({});
+			REQUIRE(created.has_value());
+			EngineContext& context = **created;
+			CHECK(context.GetAssetManager() == nullptr);
+			AssetLoaderRegistry loaders;
+			RuntimeAssetManager manager({
+				.Jobs = &context.GetJobSystem(),
+				.MainThread = &context.GetMainThreadQueue(),
+				.Registry = &context.GetTypeRegistry(),
+				.Loaders = &loaders,
+			});
+			context.SetAssetManager(&manager);
+			CHECK(context.GetAssetManager() == &manager);
+			context.SetAssetManager(nullptr);
+			CHECK(context.GetAssetManager() == nullptr);
+		}
+
+		TEST_CASE("EngineContext: the type registry holds the Asset module's types")
+		{
+			Result<Scope<EngineContext>> created = EngineContext::Create({});
+			REQUIRE(created.has_value());
+			CHECK((*created)->GetTypeRegistry().FindStruct("Material") != nullptr);
+			CHECK((*created)->GetTypeRegistry().FindEnum("AlphaMode") != nullptr);
+		}
+
 		TEST_CASE("EngineContext: a missing user-data directory fails with the step as context")
 		{
 			Test::TempDirectory directory("EngineContextMissing");
@@ -204,6 +267,7 @@ namespace Engine {
 		{
 			CHECK(EngineContextStepToString(EngineContextStep::Services) == "Services");
 			CHECK(EngineContextStepToString(EngineContextStep::UserData) == "UserData");
+			CHECK(EngineContextStepToString(EngineContextStep::EngineResources) == "EngineResources");
 			CHECK(EngineContextStepToString(EngineContextStep::Window) == "Window");
 			CHECK(EngineContextStepToString(EngineContextStep::Graphics) == "Graphics");
 		}

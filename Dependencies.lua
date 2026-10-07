@@ -39,6 +39,7 @@ IncludeDir["entt"] = RepositoryRoot .. "/Vendor/entt/src"
 IncludeDir["json"] = RepositoryRoot .. "/Vendor/json/single_include"
 IncludeDir["cgltf"] = RepositoryRoot .. "/Vendor/cgltf"
 IncludeDir["stb"] = RepositoryRoot .. "/Vendor/stb"
+IncludeDir["MikkTSpace"] = RepositoryRoot .. "/Vendor/MikkTSpace"
 IncludeDir["doctest"] = RepositoryRoot .. "/Vendor/doctest"
 
 -- Project kinds that produce a linked binary and therefore link libraries.
@@ -312,6 +313,17 @@ function UseGLFW()
 
 	filter { LinkingKinds, "system:macosx" }
 		links { "Cocoa.framework", "IOKit.framework", "CoreFoundation.framework", "QuartzCore.framework" }
+
+	filter {}
+end
+
+-- MikkTSpace (Vendor/MikkTSpace/VENDOR.md): tangent generation for the glTF importer (Architecture §7.4). No defines; the
+-- library is C with the precise floating-point model, like Jolt (checked by Scripts/CheckBuildConfig.py).
+function UseMikkTSpace()
+	externalincludedirs { IncludeDir.MikkTSpace }
+
+	filter { LinkingKinds }
+		links { "MikkTSpace" }
 
 	filter {}
 end

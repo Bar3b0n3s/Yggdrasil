@@ -81,6 +81,7 @@ group "Dependencies"
 	include "Vendor/Luau"
 	include "Vendor/JoltPhysics"
 	include "Vendor/miniaudio"
+	include "Vendor/MikkTSpace"
 	include "Vendor/spdlog"
 
 group "Engine"

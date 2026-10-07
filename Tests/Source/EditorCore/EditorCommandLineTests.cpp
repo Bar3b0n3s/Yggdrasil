@@ -17,7 +17,7 @@ namespace Engine {
 
 	TEST_SUITE("EditorCore")
 	{
-		TEST_CASE("EditorCommandLine: the option table names every M4 editor option")
+		TEST_CASE("EditorCommandLine: the option table names every M4 and M6 editor option")
 		{
 			// --renderer is an engine option (GetEngineCommandLineOptions), which the Runtime takes too (ADR 0009 decisions 3 and 33).
 			std::vector<std::string_view> names;
@@ -27,7 +27,7 @@ namespace Engine {
 				CHECK_FALSE(option.Description.empty());
 			}
 			const std::vector<std::string_view> expected = { "--project", "--read-only", "--automation", "--automation-test-hooks", "--batch",
-				"--upgrade", "--dump-reference" };
+				"--upgrade", "--dump-reference", "--bake-engine-assets", "--engine-cache-dir" };
 			CHECK(names == expected);
 		}
 
@@ -115,6 +115,45 @@ namespace Engine {
 				REQUIRE_FALSE(options.has_value());
 				CHECK(options.error().GetCode() == ErrorCode::InvalidArgument);
 			}
+		}
+
+		TEST_CASE("EditorCommandLine: --bake-engine-assets is a one-shot run that excludes the other runs")
+		{
+			const Result<EditorLaunchOptions> bake = ParseEditorArguments({ "--headless", "--bake-engine-assets" });
+			REQUIRE_MESSAGE(bake.has_value(), bake.error().ToString());
+			CHECK(bake->BakeEngineAssets);
+			CHECK(bake->IsOneShot());
+			// A one-shot run never listens, even headless (ADR 0008 decision 14).
+			CHECK_FALSE(bake->ListensForAutomation(true));
+			// It needs no project, and with one it still bakes.
+			CHECK(ParseEditorArguments({ "--bake-engine-assets", "--project", "Projects/Tetris" }).has_value());
+			for (const std::vector<std::string>& conflicting : std::vector<std::vector<std::string>>{
+					 { "--bake-engine-assets", "--batch", "Scaffold.jsonl" },
+					 { "--bake-engine-assets", "--project", "Projects/Tetris", "--upgrade" },
+					 { "--bake-engine-assets", "--dump-reference", "Reference" },
+					 { "--bake-engine-assets", "--automation" },
+				 })
+			{
+				const Result<EditorLaunchOptions> parsed = ParseEditorArguments(conflicting);
+				REQUIRE_FALSE(parsed.has_value());
+				CHECK(parsed.error().GetCode() == ErrorCode::InvalidArgument);
+			}
+		}
+
+		TEST_CASE("EditorCommandLine: --engine-cache-dir names the engine cooked cache of any run")
+		{
+			const Result<EditorLaunchOptions> plain = ParseEditorArguments({ "--headless" });
+			REQUIRE(plain.has_value());
+			CHECK_FALSE(plain->EngineCacheDirectory.has_value());
+			const Result<EditorLaunchOptions> bake = ParseEditorArguments({ "--headless", "--bake-engine-assets", "--engine-cache-dir", "Temp/EngineCache" });
+			REQUIRE_MESSAGE(bake.has_value(), bake.error().ToString());
+			CHECK(bake->EngineCacheDirectory == std::filesystem::path("Temp/EngineCache"));
+			const Result<EditorLaunchOptions> automation = ParseEditorArguments({ "--automation", "--engine-cache-dir=Cache" });
+			REQUIRE(automation.has_value());
+			CHECK(automation->EngineCacheDirectory == std::filesystem::path("Cache"));
+			const Result<EditorLaunchOptions> empty = ParseEditorArguments({ "--engine-cache-dir=" });
+			REQUIRE_FALSE(empty.has_value());
+			CHECK(empty.error().GetCode() == ErrorCode::InvalidArgument);
 		}
 	}
 

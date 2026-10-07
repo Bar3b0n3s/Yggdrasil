@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The single CI entry point (Docs/Architecture.md §15.8): runs the stages in order and stops at the first failing one.
 
-Stages that exist so far (milestones M4 and M5), with the configurations of the §15.8 matrix:
+Stages that exist so far (milestones M4 to M6), with the configurations of the §15.8 matrix:
   setup        n/a                   Scripts/Setup.py (toolchain checks, pinned premake, Tools/MCP/.venv and .mcp.json)
   generate     n/a                   Scripts/Generate.py (host workspace, compile_commands.json)
   lint         n/a                   static checks, shared with PreCommit.py (Scripts/Lib/scripts.py):
@@ -9,10 +9,19 @@ Stages that exist so far (milestones M4 and M5), with the configurations of the 
                                      own defect, on every fixture workspace under Tests/Data/BuildConfig/;
                                      Scripts/Lint.py (header self-containment and the contract stubs and skipped tests
                                      included) and Lint.py --self-test (every seeded fixture under Tests/Data/Lint/
-                                     fails with exactly its expected findings); Scripts/Format.py --check
+                                     fails with exactly its expected findings); Scripts/Format.py --check; every
+                                     fixture generator under Tests/Data/Generate/ with --check (the committed fixtures
+                                     are byte-identical to a fresh generation); Scripts/FetchAssets.py defaults --check
+                                     (the committed engine resources match their SHA-256 pins, offline)
   build        Debug, Release, Dist  Scripts/Build.py per configuration, plus, after Debug, the Roadmap M0 acceptance
                                      check "Shaders: slang-only change is not skipped by the up-to-date check":
                                      touching only a .slang file re-runs the shader rule, the next build does not
+  bake         Release               Editor --headless --renderer none --bake-engine-assets (ADR 0010 decision 13):
+                                     fills the configuration-independent engine cooked cache bin/EngineCache from
+                                     Resources/EngineAssets.json, incrementally (up-to-date entries are kept); entries
+                                     this build has no importer or generator for (the environments before M8) are
+                                     skipped with a warning, and a failed bake fails the stage. Nothing it bakes needs a
+                                     device before M8's environment bakes, so it runs without a renderer
   unit         Debug, Release        Scripts/Test.py --suite unit --junit, which also fails on a skipped test case
                                      outside the child-process targets
   gpu          Debug, Release        Scripts/Test.py --suite gpu --junit --require-gpu: the GPU test cases with
@@ -38,7 +47,7 @@ Stages that exist so far (milestones M4 and M5), with the configurations of the 
                                      and of every Dist project (asserts compiled out), warnings tolerated only in
                                      vendored code, when Visual Studio's C++ Clang component
                                      is installed, otherwise reported as skipped (a failure with --require-clang-cl)
-Later stages of §15.8 (bake, feature, export, determinism, games, hardening) are accepted by --stages and reported as
+Later stages of §15.8 (feature, export, determinism, games, hardening) are accepted by --stages and reported as
 "not-available" until their milestone.
 
 Modes (Roadmap rule 3, Docs/Decisions/0004-contract-stub-gate.md): strict by default, so a milestone cannot end with a
@@ -69,11 +78,13 @@ import json
 import os
 import re
 import shutil
+import tempfile
 import time
 from pathlib import Path
 from typing import Callable
 
 from Lib import paths, premake, toolchain, workspace
+from Lib.process import ToolNotFoundError, child_environment, format_command, run_streamed
 from Lib.report import (
     EXIT_FAILED,
     EXIT_INIT_FAILED,
@@ -104,11 +115,15 @@ PORTABILITY_TARGETS = (("windows", "vs2026"), ("linux", "gmake"), ("linux", "nin
 XCODE_PREFIX_HEADER_PATTERN = re.compile(r"^\s*GCC_PREFIX_HEADER = (\"(?:[^\"\\]|\\.)*\"|[^;]+);", re.MULTILINE)
 XCODE_DIST_LTO_PROJECTS = ("Engine", "Runtime")
 MAKE_PCH_PATTERN = re.compile(r"^\s*PCH = (\S+)\s*$", re.MULTILINE)
+# The summary line of Editor --bake-engine-assets (Editor/EditorApp.cpp), the bake step's detail.
+BAKE_SUMMARY_PATTERN = re.compile(r"Engine assets: \d+ baked, \d+ up to date, \d+ not baked")
+ENGINE_CACHE = paths.REPOSITORY_ROOT / "bin" / "EngineCache"
 
 TIMEOUTS = {
     "setup": 1800.0,
     "generate": 600.0,
     "build": 7200.0,
+    "bake": 1800.0,
     "unit": 1800.0,
     "gpu": 3600.0,
     "golden": 1800.0,
@@ -132,7 +147,7 @@ STAGES = (
     Stage("generate", None, True),
     Stage("lint", None, True),
     Stage("build", ("Debug", "Release", "Dist"), True),
-    Stage("bake", ("Release",), False, "M6 (engine asset bake)"),
+    Stage("bake", ("Release",), True),
     Stage("unit", ("Debug", "Release"), True),
     Stage("gpu", ("Debug", "Release"), True),
     Stage("golden", ("Release",), True),
@@ -239,6 +254,41 @@ class Runner:
                         time.monotonic() - started)
         return Step(name, Status.PASSED, f"touching {shader.name} re-ran the shader rule; the next build skipped it",
                     time.monotonic() - started)
+
+    def bake(self, configs: list[str]) -> list[Step]:
+        steps: list[Step] = []
+        for config in configs:
+            steps.append(self.done(self.bake_engine_assets(config)))
+            if steps[-1].failed:
+                return steps
+        return steps
+
+    def bake_engine_assets(self, config: str) -> Step:
+        """§15.8 bake: the editor of `config` fills bin/EngineCache (shared by every configuration) and exits 0, or 1
+        when an entry failed to bake. Nothing it bakes needs a GPU before M8 (whose environment bakes switch this stage
+        to a rendering editor), so it runs with --renderer none and works on machines without a Vulkan device."""
+        name = f"bake {config}"
+        editor = paths.output_directory(config) / "Editor" / paths.executable_name("Editor")
+        if not editor.is_file():
+            return Step(name, Status.FAILED, f"{paths.display_path(editor)} not found: run python Scripts/Build.py "
+                                             f"--config {config} --project Editor", exit_code=EXIT_INIT_FAILED)
+        with tempfile.TemporaryDirectory(prefix="CI-Bake-") as user_data:
+            command = [str(editor), "--headless", "--renderer", "none", "--bake-engine-assets",
+                       f"--user-data-dir={user_data}"]
+            self.console.heading(f"{name}: {format_command(command)}")
+            try:
+                result = run_streamed(command, cwd=paths.REPOSITORY_ROOT, env=child_environment(),
+                                      timeout=TIMEOUTS["bake"], echo=self.console.stream, collect=BAKE_SUMMARY_PATTERN)
+            except ToolNotFoundError as error:
+                return Step(name, Status.FAILED, str(error), exit_code=EXIT_INIT_FAILED)
+        if result.timed_out:
+            return Step(name, Status.TIMEOUT, f"Editor --bake-engine-assets {result.describe_exit()}", result.duration)
+        if not result.succeeded:
+            return Step(name, Status.FAILED, f"Editor --bake-engine-assets {result.describe_exit()}: {result.tail(1)}",
+                        result.duration, data={"outputTail": result.tail(40)})
+        match = BAKE_SUMMARY_PATTERN.search(result.collected[-1]) if result.collected else None
+        summary = match.group(0) if match else "no summary line"
+        return Step(name, Status.PASSED, f"{paths.display_path(ENGINE_CACHE)}: {summary}", result.duration)
 
     def unit(self, configs: list[str]) -> list[Step]:
         mode = test_mode_arguments(self.arguments.contract)
@@ -500,6 +550,7 @@ def run_stage(runner: Runner, stage: Stage, configs: list[str]) -> list[Step]:
         "generate": runner.generate,
         "lint": runner.lint,
         "build": lambda: runner.build(stage_configs),
+        "bake": lambda: runner.bake(stage_configs),
         "unit": lambda: runner.unit(stage_configs),
         "gpu": lambda: runner.device_suite("gpu", stage_configs),
         "golden": lambda: runner.device_suite("golden", stage_configs),

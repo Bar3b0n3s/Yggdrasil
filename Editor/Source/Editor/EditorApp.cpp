@@ -11,6 +11,10 @@
 #include "Engine/App/EngineContext.h"
 #include "Engine/App/ExitCode.h"
 #include "Engine/App/ProcessContext.h"
+#include "Engine/Asset/AssetDiagnostic.h"
+#include "Engine/Asset/BuiltinAssets.h"
+#include "Engine/AssetPipeline/EngineAssetBaker.h"
+#include "Engine/AssetPipeline/ImporterRegistry.h"
 #include "Engine/Automation/Protocol/MethodRegistry.h"
 #include "Engine/Core/FatalError.h"
 #include "Engine/Core/FileSystem.h"
@@ -43,7 +47,8 @@ namespace Engine {
 		EditorLaunchOptions Options{};
 		Scope<EditorContext> Editor; // destroyed last (reverse member order): the server and the run use it
 		Scope<AutomationServer> Server;
-		Scope<BatchRunner> Batch; // --batch or --upgrade
+		Scope<BatchRunner> Batch;    // --batch or --upgrade
+		double ElapsedSeconds = 0.0; // the frame clock's accumulated unscaled time, for EditorContext::Update
 
 		// OnInitialize's work for `app`, whose server gets `captures` and `systemErrors` (empty without a device); on
 		// failure the caller releases what was built.
@@ -114,6 +119,51 @@ namespace Engine {
 			return FileSystem::WriteFileAtomic(file, std::as_bytes(std::span(text.data(), text.size())), { .KeepBackup = false });
 		}
 
+		// --bake-engine-assets (§7.5, ADR 0010 decision 13): bakes every File and Generated entry of engine://EngineAssets.json
+		// into enginecache:// with the built-in importers. There is no environment baker and there are no generators before
+		// M8, so those entries are skipped with a warning. Returns the exit code: Success when every entry is baked, up to
+		// date or skipped with a warning, Failed when an entry or the run failed (each failure logged at Error).
+		[[nodiscard]] static int BakeEngineResources(EngineContext& context)
+		{
+			ImporterRegistry importers;
+			RegisterBuiltinImporters(importers);
+			const Result<BuiltinAssetCatalog> catalog = BuiltinAssetCatalog::Load(context.GetVfs());
+			if (!catalog.has_value())
+			{
+				ENGINE_ERROR("Cannot bake the engine assets: {}", catalog.error());
+				return ExitCode::Failed;
+			}
+			const EngineBakeSpecification specification{
+				.Vfs = &context.GetVfs(),
+				.Importers = &importers,
+				.Registry = &context.GetTypeRegistry(),
+				.Jobs = &context.GetJobSystem(),
+				.EnvironmentBaker = nullptr,
+				.Generators = {},
+			};
+			const Result<EngineBakeReport> report = BakeEngineAssets(specification, *catalog);
+			if (!report.has_value())
+			{
+				ENGINE_ERROR("Cannot bake the engine assets: {}", report.error());
+				return ExitCode::Failed;
+			}
+			bool failed = false;
+			for (const AssetDiagnostic& diagnostic : report->Skipped)
+			{
+				if (diagnostic.Severity == DiagnosticSeverity::Error)
+				{
+					ENGINE_ERROR("{}", AssetDiagnosticToString(diagnostic));
+					failed = true;
+				}
+				else
+				{
+					ENGINE_WARN("{}", AssetDiagnosticToString(diagnostic));
+				}
+			}
+			ENGINE_INFO("Engine assets: {} baked, {} up to date, {} not baked", report->Baked.size(), report->UpToDate.size(), report->Skipped.size());
+			return failed ? ExitCode::Failed : ExitCode::Success;
+		}
+
 		// --dump-reference <dir>: Methods.json and catalog.json (ADR 0008 decision 9), from every method but the test hooks.
 		[[nodiscard]] static Status DumpReference(const TypeRegistry& types, const std::filesystem::path& directory)
 		{
@@ -147,6 +197,12 @@ namespace Engine {
 		{
 			ENGINE_TRY(Utils::DumpReference(app.GetContext().GetTypeRegistry(), *options.DumpReferenceDirectory));
 			app.RequestExit(ExitCode::Success);
+			return {};
+		}
+		// The bake needs no project and no editor state: a --project given with it is not opened.
+		if (options.BakeEngineAssets)
+		{
+			app.RequestExit(Utils::BakeEngineResources(app.GetContext()));
 			return {};
 		}
 
@@ -302,6 +358,12 @@ namespace Engine {
 
 	void EditorApp::OnUpdate(const FrameTime& frame)
 	{
+		// Asset hot reload polls on the frame clock (a ManualClock when headless, so headless runs are deterministic).
+		State& state = *m_State;
+		state.ElapsedSeconds += frame.UnscaledDeltaTime;
+		if (state.Editor != nullptr)
+			state.Editor->Update(state.ElapsedSeconds);
+
 		const std::optional<uint64_t> maxFrames = GetSpecification().MaxFrames;
 		if (maxFrames.has_value() && frame.FrameIndex + 1 == *maxFrames && !WriteScreenshots())
 			RequestExit(ExitCode::Failed);
@@ -375,6 +437,10 @@ namespace Engine {
 		specification.RegisterTypes = &RegisterEditorMethodTypes;
 		specification.EnableImGui = true;
 		specification.ImGuiIniPath = "Editor/imgui.ini";
+		// Development builds mount engine:// at <repo>/Resources and enginecache:// at <repo>/bin/EngineCache, or at
+		// --engine-cache-dir (§2.2, §7.5; the editor has no Dist build, so it always is one).
+		specification.EngineResourcesDirectory = Utils::GetEditorRepositoryRoot() / "Resources";
+		specification.EngineCacheDirectory = launch.EngineCacheDirectory.value_or(Utils::GetEditorRepositoryRoot() / "bin" / "EngineCache");
 		ENGINE_TRY(ApplyEngineCommandLine(commandLine, specification));
 		// Batch runs are among §4.2's unthrottled modes (ADR 0008 decision 4).
 		if (launch.BatchFile.has_value() || launch.Upgrade)

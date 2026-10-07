@@ -46,7 +46,7 @@ struct EntityRenameResult
 };
 ```
 
-The twelve conventions at the top of `MethodRegistry.h` are binding; in short, numbered as there:
+The thirteen conventions at the top of `MethodRegistry.h` are binding; in short, numbered as there:
 
 1. **Names.** C++ and registry names `<Domain><Verb>Params` and `<Domain><Verb>Result` (`Method` before the suffix when an engine type already has the name, as `LogReadMethodResult`).
 2. **Keys.** The registered field name is the JSON key: camelCase, normally the member name with its first letter lower-cased. Embedded component, settings and asset data keeps its PascalCase.
@@ -60,6 +60,7 @@ The twelve conventions at the top of `MethodRegistry.h` are binding; in short, n
 10. **Component maps** are `std::map<std::string, VariantValue>` registered with `VariantField(..., &ResolveComponentValue)`. A value may also set writable virtual fields (`Transform.EulerAngles`); the registry validates them, and the handler applies them with `ComponentAccess::SetFieldValue` after the stored fields (as `entity.create` does).
 11. **Polymorphic members** (`fix: true | [...]`) are free-form `VariantValue` members the handler validates.
 12. **Results** carry canonical ids plus readable names and paths; edit-scene mutations report `undoIndex` as `uint32_t` (`ToAutomationCounter` saturates, as for revisions, which are `EditorContext::GetRevision`). `_meta` and `dryRun` are added by the Dispatcher.
+13. **Asset references.** `AssetRef` fields anywhere in the params (component data included) accept a handle, `"Assets/...[#key]"` or `"engine://..."`; `MethodRegistry::Invoke` resolves them through the context's `IAssetReferenceResolver` before the handler runs (NotFound, InvalidParams, or the host's own code such as InvalidState, located at the value). A `std::string` asset param is resolved with `Utils::ResolveAssetParam` (`EditorCore/Automation/Private/AssetMethodSupport.h`), the same rule; never parse asset references by hand.
 
 Register the structs in the domain's `Register<Domain>MethodTypes(TypeRegistry&)`, with mandatory descriptions and `FieldMeta` ranges (`{ .Min = 1.0, .Max = 1000.0 }` for a limit). Shared structs go into `AutomationTypes.h`. A struct without fields still needs registering; discard the builder explicitly.
 

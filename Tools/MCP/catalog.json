@@ -4,6 +4,218 @@
 	"ProtocolVersion": "1.0",
 	"Tools": [
 		{
+			"name": "asset_create",
+			"method": "asset.create",
+			"description": "Creates a material (with values over the defaults), an empty scene, a one-entity prefab or a folder below Assets/, with its .meta, as one undoable command.",
+			"inputSchema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "AssetCreateParams",
+				"description": "The params of asset.create.",
+				"type": "object",
+				"properties": {
+					"type": {
+						"description": "What to create.",
+						"enum": ["Material", "Scene", "Prefab", "SoundEffect", "Folder"]
+					},
+					"path": {
+						"description": "The project-relative path below Assets/, with the type's extension (.material, .scene, .prefab).",
+						"type": "string"
+					},
+					"values": {
+						"description": "A Material's fields over the defaults (registry names, such as Roughness); absent for other types."
+					},
+					"dryRun": {
+						"description": "Validate and return the would-be result without applying anything.",
+						"type": "boolean"
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"required": ["type", "path"]
+			},
+			"mutates": true,
+			"supportsDryRun": true,
+			"timeoutSeconds": 60
+		},
+		{
+			"name": "asset_delete",
+			"method": "asset.delete",
+			"description": "Moves an asset with its .meta (and a glTF's dependency files) to Library/Trash as one undoable command; never a permanent delete.",
+			"inputSchema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "AssetDeleteParams",
+				"description": "The params of asset.delete.",
+				"type": "object",
+				"properties": {
+					"asset": {
+						"description": "The asset to move to the trash (a source, not a sub-asset).",
+						"type": "string"
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"required": ["asset"]
+			},
+			"mutates": true,
+			"supportsDryRun": false,
+			"timeoutSeconds": 60
+		},
+		{
+			"name": "asset_import",
+			"method": "asset.import",
+			"description": "Copies a file (and a glTF's buffers and images) into a folder below Assets/ with its .meta files as one undoable command, then imports it; resolves when the import completed.",
+			"inputSchema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "AssetImportParams",
+				"description": "The params of asset.import.",
+				"type": "object",
+				"properties": {
+					"source": {
+						"description": "The file to import: an absolute native path, or a project path.",
+						"type": "string"
+					},
+					"destDir": {
+						"description": "The project-relative folder below Assets/ to copy it into; created when missing.",
+						"type": "string"
+					},
+					"settings": {
+						"description": "Import settings merged over the importer's defaults; null for the defaults."
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"required": ["source", "destDir"]
+			},
+			"mutates": true,
+			"supportsDryRun": false,
+			"timeoutSeconds": 300
+		},
+		{
+			"name": "asset_list",
+			"method": "asset.list",
+			"description": "Lists the project's assets below a folder, optionally of one type, sorted by path with each glTF's sub-assets after it; paged with limit and cursor.",
+			"inputSchema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "AssetListParams",
+				"description": "The params of asset.list.",
+				"type": "object",
+				"properties": {
+					"dir": {
+						"description": "The project-relative folder to list, Assets or below it.",
+						"type": "string"
+					},
+					"type": {
+						"description": "Only assets of this type; None lists every type.",
+						"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay"]
+					},
+					"recursive": {
+						"description": "Also list the folders below dir.",
+						"type": "boolean"
+					},
+					"subAssets": {
+						"description": "Also list sub-assets (a glTF's meshes, materials and textures) after their source.",
+						"type": "boolean"
+					},
+					"limit": {
+						"description": "The most assets to return.",
+						"type": "integer",
+						"minimum": 1,
+						"maximum": 1000
+					},
+					"cursor": {
+						"description": "\"\" for the start, or the nextCursor of the previous call.",
+						"type": "string"
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false
+			},
+			"mutates": false,
+			"supportsDryRun": false,
+			"timeoutSeconds": 60
+		},
+		{
+			"name": "asset_move",
+			"method": "asset.move",
+			"description": "Moves an asset with its .meta (and a glTF's dependency files) to another path below Assets/ as one undoable command; its handle and every reference to it stay valid.",
+			"inputSchema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "AssetMoveParams",
+				"description": "The params of asset.move.",
+				"type": "object",
+				"properties": {
+					"asset": {
+						"description": "The asset to move (a source, not a sub-asset).",
+						"type": "string"
+					},
+					"path": {
+						"description": "Its new project-relative path below Assets/, with the same extension.",
+						"type": "string"
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"required": ["asset", "path"]
+			},
+			"mutates": true,
+			"supportsDryRun": false,
+			"timeoutSeconds": 60
+		},
+		{
+			"name": "asset_set_properties",
+			"method": "asset.setProperties",
+			"description": "Applies an RFC 7386 merge patch to a native asset's properties (a material) and writes it, as one undoable command.",
+			"inputSchema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "AssetSetPropertiesParams",
+				"description": "The params of asset.setProperties.",
+				"type": "object",
+				"properties": {
+					"asset": {
+						"description": "The native asset (a material).",
+						"type": "string"
+					},
+					"values": {
+						"description": "An RFC 7386 merge patch of its properties: members replace, null resets a field."
+					},
+					"dryRun": {
+						"description": "Validate and return the would-be result without applying anything.",
+						"type": "boolean"
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"required": ["asset", "values"]
+			},
+			"mutates": true,
+			"supportsDryRun": true,
+			"timeoutSeconds": 60
+		},
+		{
 			"name": "component_list",
 			"method": "component.list",
 			"description": "Lists every serializable component type in registry order, with its category, flags, requirements and exclusions.",
@@ -206,6 +418,44 @@
 					}
 				},
 				"additionalProperties": false
+			},
+			"mutates": false,
+			"supportsDryRun": false,
+			"timeoutSeconds": 60
+		},
+		{
+			"name": "entity_bounds",
+			"method": "entity.bounds",
+			"description": "Reports the world-space bounding box of each entity's meshes (and, by default, its descendants'), for layout checks.",
+			"inputSchema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "EntityBoundsParams",
+				"description": "The params of entity.bounds.",
+				"type": "object",
+				"properties": {
+					"entities": {
+						"description": "The entities: 16 hex digits, unique id prefixes or paths.",
+						"type": "array",
+						"items": {
+							"type": "string"
+						}
+					},
+					"includeDescendants": {
+						"description": "Also include every descendant's meshes.",
+						"type": "boolean"
+					},
+					"target": {
+						"description": "Which scene to read; the play scene while playing when absent.",
+						"enum": ["Edit", "Play"]
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"required": ["entities"]
 			},
 			"mutates": false,
 			"supportsDryRun": false,
@@ -540,6 +790,120 @@
 			},
 			"mutates": false,
 			"supportsDryRun": false,
+			"timeoutSeconds": 60
+		},
+		{
+			"name": "prefab_apply",
+			"method": "prefab.apply",
+			"description": "Writes an instance's overrides into its .prefab asset and rebuilds every instance of it in the open scene, as one undoable step.",
+			"inputSchema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "PrefabApplyParams",
+				"description": "The params of prefab.apply.",
+				"type": "object",
+				"properties": {
+					"instance": {
+						"description": "The instance root whose overrides become the prefab's.",
+						"type": "string"
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"required": ["instance"]
+			},
+			"mutates": true,
+			"supportsDryRun": false,
+			"timeoutSeconds": 60
+		},
+		{
+			"name": "prefab_create",
+			"method": "prefab.create",
+			"description": "Saves an entity's subtree as a new .prefab asset (nested instances flattened), optionally replacing the entity with an instance of it, as one undoable step.",
+			"inputSchema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "PrefabCreateParams",
+				"description": "The params of prefab.create.",
+				"type": "object",
+				"properties": {
+					"entity": {
+						"description": "The root of the subtree to save: 16 hex digits, a unique id prefix or a path.",
+						"type": "string"
+					},
+					"path": {
+						"description": "The new .prefab file, project-relative below Assets/.",
+						"type": "string"
+					},
+					"replaceWithInstance": {
+						"description": "Replace the entity with an instance of the new prefab, keeping its id, parent, place and transform.",
+						"type": "boolean"
+					},
+					"dryRun": {
+						"description": "Validate and return the would-be result without applying anything.",
+						"type": "boolean"
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"required": ["entity", "path"]
+			},
+			"mutates": true,
+			"supportsDryRun": true,
+			"timeoutSeconds": 60
+		},
+		{
+			"name": "prefab_instantiate",
+			"method": "prefab.instantiate",
+			"description": "Creates an instance of a prefab asset (a .prefab or a glTF) under a parent, with an optional transform and name, as one undoable step.",
+			"inputSchema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "PrefabInstantiateParams",
+				"description": "The params of prefab.instantiate.",
+				"type": "object",
+				"properties": {
+					"prefab": {
+						"description": "The prefab asset: 16 hex digits, a path such as \"Assets/Prefabs/Cell.prefab\", or a glTF.",
+						"type": "string"
+					},
+					"parent": {
+						"description": "The parent entity; empty for a root.",
+						"type": "string"
+					},
+					"index": {
+						"description": "The position among the parent's children; last when absent.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"transform": {
+						"description": "Transform fields over the prefab root's, such as {\"Translation\": [2, 0, 0]}."
+					},
+					"name": {
+						"description": "The instance root's name; the prefab root's when absent.",
+						"type": "string"
+					},
+					"dryRun": {
+						"description": "Validate and return the would-be result without applying anything.",
+						"type": "boolean"
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"required": ["prefab"]
+			},
+			"mutates": true,
+			"supportsDryRun": true,
 			"timeoutSeconds": 60
 		},
 		{

@@ -1,0 +1,54 @@
+{
+	"Format": "Prefab",
+	"Version": 1,
+	"Name": "Lamp",
+	"Root": "00000000000c0001",
+	"ComponentVersions": {
+		"Transform": 1,
+		"MeshRenderer": 1,
+		"PointLight": 1
+	},
+	"Entities": [
+		{
+			"ID": "00000000000c0001",
+			"Name": "Lamp",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"PointLight": {
+					"Color": [1, 0.8, 0.6],
+					"Intensity": 12,
+					"Range": 8,
+					"SourceRadius": 0.05
+				}
+			}
+		},
+		{
+			"ID": "00000000000c0002",
+			"Name": "Bulb",
+			"Parent": "00000000000c0001",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0.5, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.25, 0.25, 0.25]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000102",
+					"Materials": ["a41f0c2290b1d3e4"],
+					"CastShadows": false,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		}
+	]
+}

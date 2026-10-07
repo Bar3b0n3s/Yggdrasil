@@ -14,7 +14,8 @@ namespace Engine {
 
 	namespace Test {
 
-		// A new registry with RegisterBuiltinComponents and RegisterProjectSettingsTypes applied, frozen.
+		// A new registry with RegisterBuiltinComponents, RegisterProjectSettingsTypes, RegisterAssetTypes and
+		// RegisterAssetPipelineTypes applied (every reflected component and struct the registry suite covers, §5.4), frozen.
 		[[nodiscard]] Scope<TypeRegistry> CreateBuiltinRegistry();
 
 		// The registry, generator and scene of one test. Not copyable or movable (the scene points at the other two).

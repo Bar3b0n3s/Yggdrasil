@@ -23,12 +23,12 @@ and configuration:
 3. a Jolt consumer is compiled for another instruction set than JoltPhysics. Jolt/Core/Core.h derives JPH_USE_AVX2,
    JPH_USE_AVX, JPH_USE_F16C, JPH_USE_LZCNT, JPH_USE_TZCNT and more from the compiler's predefined __AVX2__,
    __AVX__, ... macros, and those are not part of JPH_VERSION_ID, so VerifyJoltVersionID() cannot catch a mismatch;
-4. a first-party project or JoltPhysics uses a non-precise floating-point model: MSVC FloatingPointModel=Fast,
-   /fp:fast, /fp:contract or /Qfast_transcendentals; GCC/Clang (and clang-cl's /clang: options) -ffast-math, -Ofast,
-   -ffp-model=fast or any component of -ffast-math in effect (unsafe, associative or reciprocal math, finite math
-   only, no NaNs or infinities, no signed zeros, no trapping math, limited complex range, approximate functions,
-   fast excess precision), or an effective -ffp-contract other than "off" (it must be explicit: GCC's C++ default is
-   "fast", clang-cl's is "on");
+4. a first-party project, JoltPhysics or MikkTSpace uses a non-precise floating-point model: MSVC
+   FloatingPointModel=Fast, /fp:fast, /fp:contract or /Qfast_transcendentals; GCC/Clang (and clang-cl's /clang:
+   options) -ffast-math, -Ofast, -ffp-model=fast or any component of -ffast-math in effect (unsafe, associative or
+   reciprocal math, finite math only, no NaNs or infinities, no signed zeros, no trapping math, limited complex
+   range, approximate functions, fast excess precision), or an effective -ffp-contract other than "off" (it must be
+   explicit: GCC's C++ default is "fast", clang-cl's is "on"). C sources are checked with the C compiler's flags;
 5. the solution builds EditorCore, Editor or Tests in Dist, or does not build Engine or Runtime in Dist.
 
 --workspace runs the check on another workspace, such as the fixtures in Tests/Data/BuildConfig/, each of which is
@@ -112,6 +112,8 @@ VENDOR_ABI_FAMILIES: dict[str, DefineFamily] = {
     "ImGui": _IMGUI_FAMILY,
     "ImGuizmo": DefineFamily(_IMGUI_FAMILY.prefixes, _IMGUI_FAMILY.names + ("USE_IMGUI_API", "IMGUIZMO_NAMESPACE")),
     "GLFW": DefineFamily(prefixes=("_GLFW_",), names=("GLFW_DLL",)),
+    # MikkTSpace has no configuration macros (Vendor/MikkTSpace/VENDOR.md): only NDEBUG is compared for it.
+    "MikkTSpace": DefineFamily(),
 }
 GLOBAL_ABI_DEFINES = ("NDEBUG",)
 
@@ -128,6 +130,10 @@ VENDOR_PRIVATE_DEFINES: dict[str, frozenset[str]] = {
 }
 
 JOLT_PROJECT = "JoltPhysics"
+# Vendored projects that must use the precise floating-point model like first-party code (Architecture §2.2): Jolt
+# (simulation determinism, §9.1) and MikkTSpace (generated tangents are cooked into meshes, which must be identical in
+# every configuration, Docs/Decisions/0010-m6-decisions.md).
+PRECISE_VENDOR_PROJECTS = (JOLT_PROJECT, "MikkTSpace")
 DETERMINISM_DEFINE = "JPH_CROSS_PLATFORM_DETERMINISTIC"
 NOT_IN_DIST = ("EditorCore", "Editor", "Tests")
 BUILT_IN_DIST = ("Engine", "Runtime")
@@ -528,10 +534,21 @@ def parse_makefile(path: Path) -> Project:
             return result
 
         define_flags = variables.get("DEFINES", [])
-        # First-party projects and JoltPhysics are C++: their translation units compile with ALL_CXXFLAGS.
-        language = "ALL_CXXFLAGS" if "ALL_CXXFLAGS" in variables else "ALL_CFLAGS"
+        # premake compiles .c files with $(CC) $(ALL_CFLAGS) and every other source with $(CXX) $(ALL_CXXFLAGS). The
+        # project's own unit uses the flags of its C++ sources (first-party projects, JoltPhysics), or ALL_CFLAGS when
+        # all of its sources are C (MikkTSpace); a project with both gets a second unit for its C sources.
+        c_sources = any(source.suffix.lower() == ".c" for source in project.sources)
+        cxx_sources = any(source.suffix.lower() != ".c" for source in project.sources)
+        if cxx_sources or not c_sources:
+            language = "ALL_CXXFLAGS" if "ALL_CXXFLAGS" in variables else "ALL_CFLAGS"
+        else:
+            language = "ALL_CFLAGS"
         flags = expand(language)
         units = [CompileUnit(apply_define_operations(define_operations(define_flags + flags)), flags)]
+        if language == "ALL_CXXFLAGS" and c_sources and "ALL_CFLAGS" in variables:
+            c_flags = expand("ALL_CFLAGS")
+            c_defines = apply_define_operations(define_operations(define_flags + c_flags))
+            units.append(CompileUnit(c_defines, c_flags, file="*.c"))
         for name in sorted(variable for variable in variables if variable.startswith("PERFILE_FLAGS_")):
             file_flags = expand(name)
             operations = define_operations(define_flags + file_flags)
@@ -688,15 +705,25 @@ def parse_pbxproj(path: Path) -> Project:
             project_level.get(config, {}).get("GCC_FAST_MATH"),
         )
 
-        # C++ files compile with OTHER_CPLUSPLUSFLAGS, whose default is $(OTHER_CFLAGS). GCC_FAST_MATH adds
-        # -ffast-math ahead of them. Xcode passes GCC_PREPROCESSOR_DEFINITIONS as -D options before them.
+        # C++ files compile with OTHER_CPLUSPLUSFLAGS, whose default is $(OTHER_CFLAGS); C files with OTHER_CFLAGS.
+        # GCC_FAST_MATH adds -ffast-math ahead of both. Xcode passes GCC_PREPROCESSOR_DEFINITIONS as -D options before
+        # them. The project's own unit uses the C++ flags, or the C flags when all of its sources are C (MikkTSpace); a
+        # project with both gets a second unit for its C sources.
         other_c = merged["OTHER_CFLAGS"]
         other_cpp: list[str] = []
         for flag in merged["OTHER_CPLUSPLUSFLAGS"] or ["$(OTHER_CFLAGS)"]:
             other_cpp.extend(other_c if flag == "$(OTHER_CFLAGS)" else [flag])
-        flags = (["-ffast-math"] if fast_math else []) + other_cpp
+        fast_math_flags = ["-ffast-math"] if fast_math else []
+        c_sources = any(source.suffix.lower() == ".c" for source in project.sources)
+        cxx_sources = any(source.suffix.lower() != ".c" for source in project.sources)
+        flags = fast_math_flags + (other_c if c_sources and not cxx_sources else other_cpp)
         listed = [("D", define) for define in merged["GCC_PREPROCESSOR_DEFINITIONS"] if define != "$(inherited)"]
         project.units[config] = [CompileUnit(apply_define_operations(listed + define_operations(flags)), flags)]
+        if c_sources and cxx_sources:
+            c_flags = fast_math_flags + other_c
+            project.units[config].append(
+                CompileUnit(apply_define_operations(listed + define_operations(c_flags)), c_flags, file="*.c")
+            )
         for file_name, file_flags in per_file_flags:
             combined = flags + file_flags
             defines = apply_define_operations(listed + define_operations(combined))
@@ -939,7 +966,7 @@ def msvc_floating_point_problems(unit: CompileUnit) -> list[str]:
 
 def check_floating_point(workspace: GeneratedWorkspace, first_party: set[str], findings: list[str]) -> None:
     target = workspace.target
-    for name in sorted((first_party | {JOLT_PROJECT}) & workspace.projects.keys()):
+    for name in sorted((first_party | set(PRECISE_VENDOR_PROJECTS)) & workspace.projects.keys()):
         for config, units in workspace.projects[name].units.items():
             for unit in units:
                 problems: list[str] = []
@@ -950,8 +977,8 @@ def check_floating_point(workspace: GeneratedWorkspace, first_party: set[str], f
                 for problem in problems:
                     findings.append(
                         f"[{target.name}] {config}: {unit_location(name, unit)} uses a non-precise floating-point "
-                        f"model: {problem} (first-party projects and JoltPhysics must use the precise model, "
-                        "Docs/Architecture.md section 2.2)"
+                        f"model: {problem} (first-party projects, JoltPhysics and MikkTSpace must use the precise "
+                        "model, Docs/Architecture.md section 2.2)"
                     )
 
 

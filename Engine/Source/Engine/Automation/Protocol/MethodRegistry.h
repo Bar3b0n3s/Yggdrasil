@@ -67,6 +67,17 @@
 //      0 when nothing was recorded, as in a dry run). Revisions in results are EditorContext::GetRevision saturated the
 //      same way; "_meta".revision and "ifRevision" carry the full 64 bits and agree with them below 2^32. The Dispatcher
 //      adds "_meta" (and "dryRun": true for dry runs), so result structs never declare them.
+//  13. Asset references. AssetRef values anywhere in the params (embedded component data included) accept the spellings
+//      of §7.1: 16 hex digits (a handle, kept as given), a project path "Assets/..." with an optional "#<sub-asset key>",
+//      or an engine path "engine://...". Invoke rewrites every other spelling to the handle it names through the
+//      context's IAssetReferenceResolver (MethodContext::GetAssetReferenceResolver), which also checks the asset's type
+//      against the field's; a host without one (null) leaves them for the strict reader, which accepts only handles. A
+//      handle that names no asset is accepted (the asset may be missing; §7.2's placeholder stands in), a path that names
+//      none is an error: NotFound when every unresolved reference names nothing, InvalidParams for a malformed reference
+//      or an asset of another type, and any other resolver error (InvalidState for a project path without a project, a
+//      refresh's Io) with its own code, each located at its value. A std::string asset param (asset.*, prefab.*) is
+//      resolved by the handler with Utils::ResolveAssetParam (EditorCore Automation/Private/AssetMethodSupport.h), the
+//      same rule.
 
 namespace Engine {
 
@@ -234,11 +245,15 @@ namespace Engine {
 		// one issue per problem, located at its pointer; Unsupported (dryRun on a method without SupportsDryRun). Pure.
 		[[nodiscard]] Result<PreparedParams> PrepareParams(const MethodDescriptor& method, const Json& params) const;
 
-		// Runs `context`'s method: reads context.GetParams() into a new params object (StructInfo::FromJson, strict: unknown
-		// members are errors), checks context.IsHostType(the handler's Host key) (asserted: a host registers only handlers
-		// typed on its own context or on one of its bases), and calls the handler. A parse failure is returned as an Error
-		// whose code is InvalidArgument (reported as InvalidParams) carrying every issue. Does not catch exceptions: the
-		// Dispatcher's allowlisted boundary does (§4.6 item 5).
+		// Runs `context`'s method: checks context.IsHostType(the handler's Host key) (asserted: a host registers only handlers
+		// typed on its own context or on one of its bases); when context.GetAssetReferenceResolver() is non-null, rewrites
+		// every AssetRef value that is not a handle to the handle it names (convention 13) and stores the result as the
+		// context's params; reads context.GetParams() into a new params object (StructInfo::FromJson, strict: unknown members
+		// are errors), and calls the handler. Errors, the handler not running: a resolver error other than NotFound and
+		// InvalidArgument (InvalidState without a project, a refresh's Io) unchanged, located at its value; NotFound when
+		// every other unresolved reference names nothing; otherwise InvalidArgument (reported as InvalidParams) with one
+		// issue per reference, located at its value; a parse failure as InvalidArgument carrying every issue. Does not catch
+		// exceptions: the Dispatcher's allowlisted boundary does (§4.6 item 5).
 		[[nodiscard]] MethodResult Invoke(MethodContext& context) const;
 
 		// One op of edit.batch (§13.4). Before anything runs it checks, in order: `method` exists (NotFound with

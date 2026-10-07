@@ -83,6 +83,17 @@ namespace Engine {
 			builder.RemoveClient(2);
 			builder.RemoveClient(99);
 		}
+
+		TEST_CASE("MetaBuilder: sceneChangedOnDisk appears only when set")
+		{
+			RingBufferSink log(64);
+			MetaBuilder builder(log);
+			builder.AddClient(1);
+			Json changed = builder.Build(1, MetaState{ .Revision = 3, .Dirty = true, .UndoLabel = {}, .Tick = std::nullopt, .PlayState = "Edit", .SceneChangedOnDisk = true });
+			CHECK(changed["sceneChangedOnDisk"] == Json(true));
+			Json quiet = builder.Build(1, MetaState{});
+			CHECK_FALSE(quiet.contains("sceneChangedOnDisk"));
+		}
 	}
 
 }

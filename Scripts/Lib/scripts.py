@@ -21,20 +21,21 @@ _PROPAGATED_EXIT_CODES = (EXIT_FAILED, EXIT_USAGE, EXIT_INIT_FAILED, EXIT_TIMEOU
 
 
 def run_script(name: str, script: str, arguments: list[str], console: Console, timeout: float,
-               expected_exit: int = 0, expected_output: re.Pattern[str] | None = None) -> Step:
-    """Run Scripts/<script> with `arguments`. The step passes when the script exits with `expected_exit` and, when
-    `expected_output` is given, at least one output line matches it (so an expected failure fails for the expected
-    reason)."""
-    path = paths.SCRIPTS_ROOT / script
+               expected_exit: int = 0, expected_output: re.Pattern[str] | None = None,
+               root: Path = paths.SCRIPTS_ROOT) -> Step:
+    """Run <root>/<script> (Scripts/<script> by default) with `arguments`. The step passes when the script exits with
+    `expected_exit` and, when `expected_output` is given, at least one output line matches it (so an expected failure
+    fails for the expected reason)."""
+    path = root / script
+    shown = paths.display_path(path)
     if not path.is_file():
-        return Step(name, Status.FAILED, f"Scripts/{script} does not exist (Architecture §2.3)",
-                    exit_code=EXIT_INIT_FAILED)
-    console.heading(f"{name}: {format_command([Path(sys.executable).name, f'Scripts/{script}', *arguments])}")
+        return Step(name, Status.FAILED, f"{shown} does not exist (Architecture §2.3)", exit_code=EXIT_INIT_FAILED)
+    console.heading(f"{name}: {format_command([Path(sys.executable).name, shown, *arguments])}")
     result = run_streamed([sys.executable, str(path), *arguments], cwd=paths.REPOSITORY_ROOT, env=child_environment(),
                           timeout=timeout, echo=console.stream, collect=expected_output)
     if result.timed_out:
         # The end of its output shows how far it got (Lint.py reports each step's duration as it finishes).
-        return Step(name, Status.TIMEOUT, f"Scripts/{script} {result.describe_exit()}", result.duration,
+        return Step(name, Status.TIMEOUT, f"{shown} {result.describe_exit()}", result.duration,
                     data={"outputTail": result.tail(40)})
     if result.exit_code != expected_exit:
         # Propagate the script's §4.1 exit code; an unexpected result of an expected-failure run is a plain failure.
@@ -42,17 +43,16 @@ def run_script(name: str, script: str, arguments: list[str], console: Console, t
         expectation = "" if expected_exit == 0 else f", expected exit code {expected_exit}"
         reported = [line for line in result.output.splitlines() if line.startswith(("[FAILED] ", "[TIMEOUT] "))]
         cause = f": {reported[-1]}" if reported else ""
-        return Step(name, Status.FAILED, f"Scripts/{script} {result.describe_exit()}{expectation}{cause}",
+        return Step(name, Status.FAILED, f"{shown} {result.describe_exit()}{expectation}{cause}",
                     result.duration, exit_code=code, data={"outputTail": result.tail(40)})
     if expected_output is not None and not result.collected:
-        return Step(name, Status.FAILED, f"Scripts/{script} {result.describe_exit()} as expected, but no output line "
+        return Step(name, Status.FAILED, f"{shown} {result.describe_exit()} as expected, but no output line "
                                          f"matches /{expected_output.pattern}/", result.duration,
                     data={"outputTail": result.tail(40)})
     # An expected failure passes: say so, because its own output reports a failure.
     expectation = " as required" if expected_exit != 0 else ""
     detail = f"; {result.collected[0].strip()}" if result.collected else ""
-    return Step(name, Status.PASSED, f"Scripts/{script} {result.describe_exit()}{expectation}{detail}",
-                result.duration)
+    return Step(name, Status.PASSED, f"{shown} {result.describe_exit()}{expectation}{detail}", result.duration)
 
 
 # --------------------------------------------------------------------------------------------------------------------
@@ -95,6 +95,7 @@ BUILD_FIXTURE_FINDINGS = {
     "MissingDeterministicDefine": re.compile(r"includes Jolt headers but does not define "
                                              r"JPH_CROSS_PLATFORM_DETERMINISTIC"),
     "FastMathJolt": re.compile(r"JoltPhysics uses a non-precise floating-point model"),
+    "FastMathMikkTSpace": re.compile(r"MikkTSpace uses a non-precise floating-point model"),
     "UndefinedJoltDefine": re.compile(r"Tests includes JoltPhysics headers but lacks JPH_PROFILE_ENABLED"),
     "JoltDefineInBuildOptions": re.compile(r"Engine includes JoltPhysics headers but defines JPH_DOUBLE_PRECISION"),
     "LuauVectorSize": re.compile(r"Engine includes Luau headers but defines LUA_VECTOR_SIZE=4"),
@@ -112,25 +113,36 @@ BUILD_FIXTURE_FINDINGS = {
 # clang-tidy and clang-query parse every translation unit against libstdc++ (CI run 37593307176). Under GitHub Actions it
 # reports each step's duration as a notice annotation. Each of its tool processes has its own 10-minute timeout, which
 # catches a hang.
-STATIC_CHECK_TIMEOUTS = {"checkbuildconfig": 1800.0, "lint": 5400.0, "format": 1800.0}
+STATIC_CHECK_TIMEOUTS = {"checkbuildconfig": 1800.0, "lint": 5400.0, "format": 1800.0, "fixtures": 600.0, "resources": 600.0}
+
+# The committed fixture generators (AGENTS.md "Tests": generated fixtures come from committed generators); each one's
+# --check compares a fresh generation with the committed files and writes nothing.
+FIXTURE_GENERATORS_ROOT = paths.REPOSITORY_ROOT / "Tests" / "Data" / "Generate"
 
 
 def run_static_checks(console: Console, finished: Callable[[Step], Step], contract: bool = False) -> list[Step]:
     """The static checks of §15.8 (T0 of §15.1), shared by CI.py's lint stage and PreCommit.py so the two gates cannot
     drift apart: CheckBuildConfig.py on the workspace and on every fixture workspace (each must fail with its own
-    defect), Lint.py, Lint.py --self-test and Format.py --check. Each runs even after an earlier one failed, so one run
+    defect), Lint.py, Lint.py --self-test, Format.py --check, every fixture generator under Tests/Data/Generate/ with
+    --check (the committed fixtures are byte-identical to a fresh generation) and FetchAssets.py defaults --check (the
+    committed engine resources match their pins, offline). Each runs even after an earlier one failed, so one run
     reports every problem. `finished` receives every step as soon as it is known (to print it) and returns it.
     `contract` selects contract mode: Lint.py allows contract stubs and skipped tests (its self-test stays strict)."""
 
     def script(name: str, script_name: str, arguments: list[str], timeout: float, expected_exit: int = 0,
-               expected_output: re.Pattern[str] | None = None) -> Step:
-        return finished(run_script(name, script_name, arguments, console, timeout, expected_exit, expected_output))
+               expected_output: re.Pattern[str] | None = None, root: Path = paths.SCRIPTS_ROOT) -> Step:
+        return finished(run_script(name, script_name, arguments, console, timeout, expected_exit, expected_output,
+                                   root))
 
     steps = [script("checkbuildconfig workspace", "CheckBuildConfig.py", [], STATIC_CHECK_TIMEOUTS["checkbuildconfig"])]
     steps += build_fixture_checks(script, finished)
     steps.append(script("lint", "Lint.py", lint_mode_arguments(contract), STATIC_CHECK_TIMEOUTS["lint"]))
     steps.append(script("lint self-test", "Lint.py", ["--self-test"], STATIC_CHECK_TIMEOUTS["lint"]))
     steps.append(script("format", "Format.py", ["--check"], STATIC_CHECK_TIMEOUTS["format"]))
+    for generator in sorted(FIXTURE_GENERATORS_ROOT.glob("*.py")):
+        steps.append(script(f"fixtures {generator.stem}", generator.name, ["--check"],
+                            STATIC_CHECK_TIMEOUTS["fixtures"], root=FIXTURE_GENERATORS_ROOT))
+    steps.append(script("resources", "FetchAssets.py", ["defaults", "--check"], STATIC_CHECK_TIMEOUTS["resources"]))
     return steps
 
 

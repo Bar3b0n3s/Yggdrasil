@@ -22,8 +22,10 @@ namespace Engine {
 	//   "minimum"/"maximum"; Float -> {"type": "number"} with Min/Max; Vec2/Vec3/Vec4/Quat/Color3/Color4 -> an array of
 	//   exactly 2, 3 or 4 numbers ("prefixItems" with the per-component range, "minItems" = "maxItems"); MinMagnitude -> per
 	//   component "not": {"exclusiveMinimum": -m, "exclusiveMaximum": m}; Bool3 -> an array of exactly 3 booleans;
-	//   String -> {"type": "string"}; EntityRef/AssetRef -> {"type": ["string", "null"], "pattern": "^[0-9a-fA-F]{16}$"}
-	//   plus "x-assetType" for an AssetRef with an AssetFilter; Enum -> {"enum": [names in registration order]};
+	//   String -> {"type": "string"}; EntityRef -> {"type": ["string", "null"], "pattern": "^[0-9a-fA-F]{16}$"}; AssetRef ->
+	//   {"type": ["string", "null"], "pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$"} (a handle, which files store,
+	//   or the project and engine paths automation params also accept, §7.1 and MethodRegistry.h convention 13), plus
+	//   "x-assetType" with an AssetFilter; Enum -> {"enum": [names in registration order]};
 	//   Array -> {"type": "array", "items": element}; Struct -> {"$ref": "#/$defs/<StructName>"} with the definition
 	//   {"type": "object", "properties": ..., "additionalProperties": false} (serialized fields only, in field order;
 	//   "required" is omitted because every field is optional on read, §6); Map -> {"type": "object",
@@ -47,7 +49,7 @@ namespace Engine {
 		// Validates `instance` against `schema`, supporting exactly the keywords the generator emits: "$ref" to "#/$defs/...",
 		// "type" (string or array), "properties", "additionalProperties" (boolean or schema), "items", "prefixItems",
 		// "minItems", "maxItems", "enum", "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "not", "pattern"
-		// (the UUID pattern above only) and "required" (which automation params schemas add, MethodRegistry::GetParamsSchema);
+		// (the two patterns above only) and "required" (which automation params schemas add, MethodRegistry::GetParamsSchema);
 		// annotations ("description", "title", "x-assetType", "$schema") are ignored.
 		// Errors: Validation carrying one ErrorIssue per violation, located at the instance's JSON pointer; InvalidArgument
 		// for a schema that uses another keyword or an unresolvable "$ref".

@@ -74,9 +74,14 @@ namespace Engine {
 			const std::filesystem::path file = setup.GetEditorFixture().GetProjectRoot() / "Assets/Scenes/Broken.scene";
 			REQUIRE(FileSystem::WriteFileAtomic(file, std::as_bytes(std::span(defective->data(), defective->size()))).has_value());
 
-			const Result<Json> strict = setup.Call("scene.open", Json{ { "path", "Assets/Scenes/Broken.scene" } });
-			REQUIRE_FALSE(strict.has_value());
-			CHECK(strict.error().GetCode() == ErrorCode::Validation);
+			// scene.open refreshes first (§7.3), which imports the new source and reports it as an asset that failed to import;
+			// then the strict load refuses the file.
+			{
+				const Test::ExpectLog importFailure(LogLevel::Error, "ASSET_IMPORT_FAILED Assets/Scenes/Broken.scene");
+				const Result<Json> strict = setup.Call("scene.open", Json{ { "path", "Assets/Scenes/Broken.scene" } });
+				REQUIRE_FALSE(strict.has_value());
+				CHECK(strict.error().GetCode() == ErrorCode::Validation);
+			}
 			// Each load diagnostic is logged as "'<file>' <pointer>: <message> (<code>)" (Utils::FormatLoadDiagnostic).
 			const Test::ExpectLog logged(LogLevel::Warn, "'Assets/Scenes/Broken.scene' /Entities/");
 			Result<Json> repaired = setup.Call("scene.open", Json{ { "path", "Assets/Scenes/Broken.scene" }, { "repair", true } });

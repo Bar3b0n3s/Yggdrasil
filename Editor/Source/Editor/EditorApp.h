@@ -36,8 +36,15 @@ namespace Engine {
 	// It hosts EditorCore (Docs/Decisions/0008-m4-decisions.md decision 14): the factory parses the editor options
 	// (GetEditorCommandLineOptions, ParseEditorLaunchOptions); OnInitialize creates the EditorContext, opens --project (exit 3
 	// when it is locked or invalid), creates the AutomationServer and handles the one-shot modes (--dump-reference writes the
-	// catalogues and exits; --batch and --upgrade run a BatchRunner); OnSafePoint pumps the server, advances a batch and
-	// honours a shutdown request; batch runs are unthrottled (ThrottleHeadless off). The server listens
+	// catalogues and exits; --bake-engine-assets fills the engine cooked cache with BakeEngineAssets over
+	// engine://EngineAssets.json, before any editor state exists, and exits 0, or 1 when an entry failed to bake (entries this
+	// build has no importer or generator for are skipped with a warning); --batch and --upgrade run a BatchRunner);
+	// OnSafePoint pumps the server, advances a batch and honours a shutdown request; OnUpdate drives asset hot reload
+	// (EditorContext::Update with the frame clock's accumulated unscaled time, a ManualClock when headless); batch runs are
+	// unthrottled (ThrottleHeadless off). The engine context mounts engine:// at <repo>/Resources and enginecache:// at
+	// <repo>/bin/EngineCache, or at --engine-cache-dir (ApplicationSpecification::EngineResourcesDirectory and
+	// EngineCacheDirectory; ADR 0010 decision 13), which every editor of the checkout shares, so any editor fills the engine
+	// cooked cache on first use; tests pass --engine-cache-dir with a temporary directory. The server listens
 	// (AutomationServerSpecification::Listen) when EditorLaunchOptions::ListensForAutomation(headless): with --automation, or
 	// headless unless the run is one-shot, so a one-shot run never opens a port or writes a session file that an MCP
 	// editor_launch could attach to.

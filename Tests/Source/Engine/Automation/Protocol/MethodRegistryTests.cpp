@@ -41,6 +41,47 @@ namespace Engine {
 		return *method;
 	}
 
+	namespace {
+
+		// Resolves "engine://Meshes/Cube" (a Mesh) and "Assets/Red.material" (a Material), fails "Assets/Unavailable.material"
+		// with the host's own InvalidState, and resolves nothing else; records every call, so a test can see that handles
+		// never reach it.
+		class FakeAssetReferences final : public IAssetReferenceResolver
+		{
+		public:
+			[[nodiscard]] Result<UUID> ResolveAssetReference(std::string_view reference, std::string_view assetTypeName) override
+			{
+				Calls.emplace_back(reference);
+				std::string_view type;
+				UUID handle;
+				if (reference == "engine://Meshes/Cube")
+				{
+					type = "Mesh";
+					handle = UUID(0x101);
+				}
+				else if (reference == "Assets/Red.material")
+				{
+					type = "Material";
+					handle = UUID(0xabcdef);
+				}
+				else if (reference == "Assets/Unavailable.material")
+				{
+					return MakeError(ErrorCode::InvalidState, "asset reference '{}' needs an open project", reference);
+				}
+				else
+				{
+					return std::unexpected(Error(ErrorCode::NotFound, std::format("no asset '{}'", reference)).WithHint("did you mean 'Assets/Red.material'?"));
+				}
+				if (!assetTypeName.empty() && assetTypeName != type)
+					return MakeError(ErrorCode::InvalidArgument, "'{}' is a {}, not a {}", reference, type, assetTypeName);
+				return handle;
+			}
+
+			std::vector<std::string> Calls;
+		};
+
+	}
+
 	// A request context of the test host for `method` with `options`, as the Dispatcher builds one.
 	static Scope<MethodContext> MakeRegistryContext(const MethodRegistry& methods, Test::TestMethodHost& host, std::string_view method,
 		RequestOptions options = {})
@@ -130,6 +171,92 @@ namespace Engine {
 			Json params = prepared->Params;
 			CHECK(params["shape"] == Json("Square"));
 			CHECK(params["components"]["RigidBody"]["Type"] == Json("Kinematic"));
+		}
+
+		TEST_CASE("MethodRegistry: Invoke resolves asset references in params through the context's resolver")
+		{
+			RegistrySetup setup;
+			FakeAssetReferences assets;
+			Test::TestHostState state;
+			Test::TestMethodHost host(state);
+			const MethodDescriptor& echo = RequireMethod(*setup.Methods, "test.echo");
+			const auto invoke = [&](std::string_view text) -> std::pair<MethodResult, Json>
+			{
+				const Result<PreparedParams> prepared = setup.Methods->PrepareParams(echo, ParseRegistryJson(text));
+				REQUIRE(prepared.has_value());
+				Scope<MethodContext> context = host.CreateContext(MethodRequest{
+					.Info = { .Client = 1, .ClientName = "test", .Id = Json(1), .Method = "test.echo", .TranscriptLine = std::nullopt },
+					.Options = prepared->Options,
+					.Method = &echo,
+					.Params = prepared->Params,
+					.Registry = setup.Methods.get(),
+					.PhaseMarker = nullptr,
+					.NestingDepth = 0,
+				});
+				MethodResult result = setup.Methods->Invoke(*context);
+				return { std::move(result), context->GetParams() };
+			};
+			const std::string_view params = R"({"text":"a","components":{"MeshRenderer":{"Mesh":"engine://Meshes/Cube",
+				"Materials":["Assets/Red.material","00000000000000AB"]}}})";
+
+			// Without a resolver the spellings reach the strict reader, which accepts only handles.
+			{
+				const auto [result, read] = invoke(params);
+				REQUIRE(std::holds_alternative<Error>(result));
+				CHECK(std::get<Error>(result).GetCode() == ErrorCode::InvalidArgument);
+				CHECK(state.Calls.empty());
+			}
+
+			// Convention 13: paths become handles before the handler runs; a handle is kept as given and never reaches the
+			// resolver.
+			state.AssetReferenceResolver = &assets;
+			{
+				const auto [result, read] = invoke(params);
+				const std::string failure = std::holds_alternative<Error>(result) ? std::get<Error>(result).ToString() : std::string();
+				REQUIRE_MESSAGE(std::holds_alternative<Json>(result), failure);
+				CHECK(read["components"]["MeshRenderer"]["Mesh"] == Json("0000000000000101"));
+				CHECK(read["components"]["MeshRenderer"]["Materials"] == ParseRegistryJson(R"(["0000000000abcdef","00000000000000AB"])"));
+				CHECK(assets.Calls == std::vector<std::string>{ "engine://Meshes/Cube", "Assets/Red.material" });
+				CHECK(state.Calls == std::vector<std::string>{ "handler test.echo" });
+			}
+
+			// An asset of another type is InvalidParams at its value, and the handler does not run.
+			state.Calls.clear();
+			{
+				const auto [result, read] = invoke(R"({"text":"a","components":{"MeshRenderer":{"Mesh":"Assets/Red.material"}}})");
+				REQUIRE(std::holds_alternative<Error>(result));
+				const Error& error = std::get<Error>(result);
+				CHECK(error.GetCode() == ErrorCode::InvalidArgument);
+				REQUIRE(error.GetIssues().size() == 1);
+				CHECK(error.GetIssues()[0].JsonPointer == "/components/MeshRenderer/Mesh");
+				CHECK(error.GetIssues()[0].Message.contains("not a Mesh"));
+				CHECK(state.Calls.empty());
+			}
+
+			// A path that names nothing is NotFound, located, with the resolver's hint.
+			{
+				const auto [result, read] = invoke(R"({"text":"a","components":{"MeshRenderer":{"Materials":["Assets/Red.material","Assets/Blue.material"]}}})");
+				REQUIRE(std::holds_alternative<Error>(result));
+				const Error& error = std::get<Error>(result);
+				CHECK(error.GetCode() == ErrorCode::NotFound);
+				REQUIRE(error.GetIssues().size() == 1);
+				CHECK(error.GetIssues()[0].JsonPointer == "/components/MeshRenderer/Materials/1");
+				CHECK(error.GetHint().contains("Assets/Red.material"));
+				CHECK(state.Calls.empty());
+			}
+
+			// Any other resolver error is the host's own and keeps its code (here InvalidState), located at its value; it
+			// outranks the NotFound of another reference.
+			{
+				const auto [result, read] =
+					invoke(R"({"text":"a","components":{"MeshRenderer":{"Mesh":"engine://Meshes/Nothing","Materials":["Assets/Unavailable.material"]}}})");
+				REQUIRE(std::holds_alternative<Error>(result));
+				const Error& error = std::get<Error>(result);
+				CHECK(error.GetCode() == ErrorCode::InvalidState);
+				CHECK(error.GetMessageText().contains("needs an open project"));
+				CHECK(error.GetLocation().JsonPointer.value_or(std::string()) == "/components/MeshRenderer/Materials/0");
+				CHECK(state.Calls.empty());
+			}
 		}
 
 		TEST_CASE("MethodRegistry: unknown params and component fields are InvalidParams with did-you-mean hints")

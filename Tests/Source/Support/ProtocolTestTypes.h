@@ -87,6 +87,8 @@ namespace Engine {
 			bool LauncherState = false;
 			bool DenyEverything = false;                                  // AdmitRequest fails with PermissionDenied
 			std::vector<std::pair<std::string, std::string>> Offloaded{}; // (file name, text)
+			// What the contexts return from GetAssetReferenceResolver (MethodRegistry.h convention 13); null: none.
+			IAssetReferenceResolver* AssetReferenceResolver = nullptr;
 		};
 
 		// The host context of the test methods.
@@ -97,6 +99,7 @@ namespace Engine {
 
 			[[nodiscard]] TestHostState& GetState() const { return *m_State; }
 			[[nodiscard]] Scope<MethodContext> CreateNested(MethodRequest request) const override;
+			[[nodiscard]] IAssetReferenceResolver* GetAssetReferenceResolver() const override { return m_State->AssetReferenceResolver; }
 		private:
 			TestHostState* m_State = nullptr; // documented back-reference
 		};

@@ -12,8 +12,8 @@
 #include <string>
 #include <vector>
 
-// project.* (Architecture §13.5), the M4 subset: create, open, save, info, getSettings, setSettings, validate, upgrade.
-// project.refreshAssets arrives with M6 and project.export with M7. Conventions as in MethodRegistry.h (JSON key = member
+// project.* (Architecture §13.5): create, open, save, info, getSettings, setSettings, validate, upgrade (M4) and
+// refreshAssets (M6); project.export arrives with M7. Conventions as in MethodRegistry.h (JSON key = member
 // name with a lower-case first letter unless commented).
 
 namespace Engine {
@@ -63,8 +63,9 @@ namespace Engine {
 		std::vector<std::string> Warnings{}; // the .eproj's load warnings ("unknown field 'Foo'"), also logged at Warn
 	};
 
-	// project.save {}: writes the open scene when it is dirty (to its path; an unsaved scene needs scene.save {path}) and,
-	// from M6, dirty native assets. Settings are already on disk (ProjectSettingsCommand writes through).
+	// project.save {}: writes the open scene when it is dirty (to its path; an unsaved scene needs scene.save {path}).
+	// Settings and native assets are already on disk: ProjectSettingsCommand and the asset commands write through (ADR 0010),
+	// so there are no dirty native assets.
 	struct ProjectSaveResult
 	{
 		std::vector<std::string> SavedFiles{}; // project-relative
@@ -141,6 +142,21 @@ namespace Engine {
 		uint32_t UnchangedCount = 0;
 	};
 
+	// project.refreshAssets {} (§7.3): EditorAssetManager::Refresh: a synchronous rescan of Assets/, a .meta for every
+	// source without one (writable editors), the import of every main asset it registered (ADR 0010 decision 31) and the
+	// reimport of every changed asset, all complete when the call returns.
+	// Not Mutates (it writes only .meta files a scan needs; read-only editors register transient metas instead), not
+	// AllowedInBatch (it writes outside a command), no dry run.
+	struct ProjectRefreshAssetsResult
+	{
+		uint32_t MetaCount = 0;
+		std::vector<std::string> CreatedMetas{}; // project-relative, sorted
+		std::vector<std::string> Added{};        // asset ids, sorted
+		std::vector<std::string> Removed{};
+		std::vector<std::string> Changed{};
+		std::vector<ProjectDiagnostic> Diagnostics{}; // the scan's diagnostics and the imports' and reimports' failures, as project.validate reports them
+	};
+
 	namespace Automation {
 
 		// project.create. Errors: InvalidState with a project open; Validation for an invalid name; AlreadyExists for a
@@ -161,13 +177,17 @@ namespace Engine {
 		// project.upgrade. Errors: InvalidState for a dirty open scene; the first file that fails to load or write (files
 		// rewritten before it stay rewritten and recorded).
 		[[nodiscard]] Result<ProjectUpgradeResult> ProjectUpgrade(EditorMethodContext& context, const NoParams& params);
+		// project.refreshAssets. Errors: those of EditorAssetManager::Refresh (the scan of Assets/).
+		[[nodiscard]] Result<ProjectRefreshAssetsResult> ProjectRefreshAssets(EditorMethodContext& context, const NoParams& params);
 
 	}
 
-	// Registers ProjectSummary, OpenSceneSummary and the params and result structs above, and the enum ProjectTemplate.
+	// Registers ProjectSummary, OpenSceneSummary and the params and result structs above (ProjectRefreshAssetsResult from
+	// M6), and the enum ProjectTemplate.
 	void RegisterProjectMethodTypes(TypeRegistry& registry);
 
-	// Registers the eight methods: project.create and project.open are available in the launcher state; create, open, save,
+	// Registers the nine methods (project.refreshAssets from M6, reached through engine_call, §13.8): project.create and
+	// project.open are available in the launcher state; create, open, save,
 	// getSettings, setSettings and validate are tools (§13.8; info and upgrade are reached through engine_call); create,
 	// save, setSettings and upgrade mutate; setSettings, validate and upgrade support dry runs; info, getSettings,
 	// setSettings and validate are AllowedInBatch (setSettings and validate's fixes go through EditorContext::Execute, and
