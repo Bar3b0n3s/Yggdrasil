@@ -213,10 +213,16 @@ namespace Engine {
 		return position != m_Entries.end() && position->Path == path ? &*position : nullptr;
 	}
 
-	bool ProvenanceRecorder::Remove(std::string_view /*path*/)
+	bool ProvenanceRecorder::Remove(std::string_view path)
 	{
-		ENGINE_CONTRACT_STUB();
-		return false;
+		const auto position = std::lower_bound(m_Entries.begin(), m_Entries.end(), path, [](const ProvenanceEntry& existing, std::string_view key)
+		{
+			return existing.Path < key;
+		});
+		if (position == m_Entries.end() || position->Path != path)
+			return false;
+		m_Entries.erase(position);
+		return true;
 	}
 
 }

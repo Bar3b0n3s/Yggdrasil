@@ -22,7 +22,7 @@ namespace Engine {
 
 	TEST_SUITE("Asset")
 	{
-		TEST_CASE("DocumentData: scene and prefab documents cook and load" * doctest::skip(true))
+		TEST_CASE("DocumentData: scene and prefab documents cook and load")
 		{
 			Result<std::string> sceneText = Test::ReadTestDataText("Scenes/AllComponents.scene");
 			REQUIRE(sceneText.has_value());
@@ -46,7 +46,7 @@ namespace Engine {
 			CHECK(*(*loadedPrefab)->Document == prefab);
 		}
 
-		TEST_CASE("DocumentData: a document of another format or type is rejected" * doctest::skip(true))
+		TEST_CASE("DocumentData: a document of another format or type is rejected")
 		{
 			const Json scene = ParseDocument(R"({"Format": "Scene", "Version": 1, "Name": "Empty", "Seed": 0, "ComponentVersions": {}, "Entities": []})");
 			Result<Buffer> cooked = CookDocument(AssetType::Scene, scene, 1);

@@ -79,4 +79,4 @@ CheckOptions:
   # declarations and Dear ImGui's vector operators. ABI-relevant configuration macros (JPH_*, SPDLOG_*, VULKAN_HPP_*,
   # NDEBUG, GLM_*, JSON_*, ...) are not listed: they are set in premake only, and Scripts/Lint.py bans defining them
   # in source (banned-abi-macro, Architecture section 2.2).
-  readability-identifier-naming.MacroDefinitionIgnoredRegexp: '^(DOCTEST_CONFIG_[A-Z0-9_]+|STB_[A-Z0-9_]+_IMPLEMENTATION|CGLTF_IMPLEMENTATION|CGLTF_WRITE_IMPLEMENTATION|GLFW_EXPOSE_NATIVE_[A-Z0-9_]+|IMGUI_DEFINE_MATH_OPERATORS)$'
+  readability-identifier-naming.MacroDefinitionIgnoredRegexp: '^(DOCTEST_CONFIG_[A-Z0-9_]+|STB_[A-Z0-9_]+_IMPLEMENTATION|STBTT_[A-Za-z0-9_]+|CGLTF_IMPLEMENTATION|CGLTF_WRITE_IMPLEMENTATION|GLFW_EXPOSE_NATIVE_[A-Z0-9_]+|IMGUI_DEFINE_MATH_OPERATORS)$'

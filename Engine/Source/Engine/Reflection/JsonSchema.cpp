@@ -15,6 +15,7 @@
 #include <format>
 #include <limits>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace Engine {
@@ -22,6 +23,17 @@ namespace Engine {
 	namespace Utils {
 
 		static constexpr std::string_view UUIDPattern = "^[0-9a-fA-F]{16}$";
+		// An asset reference (§7.1): a handle, which files store, or a project path "Assets/..." (with "#<key>" for a
+		// sub-asset) or an engine path "engine://...", which automation params also accept (MethodRegistry.h convention 13).
+		static constexpr std::string_view AssetReferencePattern = "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$";
+
+		static bool IsHexHandle(std::string_view text)
+		{
+			return text.size() == 16 && std::all_of(text.begin(), text.end(), [](char character)
+			{
+				return (character >= '0' && character <= '9') || (character >= 'a' && character <= 'f') || (character >= 'A' && character <= 'F');
+			});
+		}
 		static constexpr std::string_view DefsPrefix = "#/$defs/";
 		// $ref hops without descending into the instance before a schema counts as cyclic.
 		static constexpr int MaxReferenceHops = 64;
@@ -216,7 +228,7 @@ namespace Engine {
 						types.push_back("string");
 						types.push_back("null");
 						schema["type"] = std::move(types);
-						schema["pattern"] = std::string(UUIDPattern);
+						schema["pattern"] = std::string(type.GetKind() == FieldType::AssetRef ? AssetReferencePattern : UUIDPattern);
 						const std::string& filter = meta != nullptr ? meta->AssetFilter : type.GetAssetTypeName();
 						if (type.GetKind() == FieldType::AssetRef && !filter.empty())
 							schema["x-assetType"] = filter;
@@ -564,17 +576,24 @@ namespace Engine {
 			[[nodiscard]] Status ValidatePattern(const Json& argument, const Json& instance)
 			{
 				const Result<std::string> pattern = argument.is_string() ? JsonReader(argument).ReadString() : Result<std::string>(std::string());
-				if (!pattern.has_value() || *pattern != UUIDPattern)
-					return SchemaError("only the UUID pattern ^[0-9a-fA-F]{16}$ is supported");
+				const bool isAssetReference = pattern.has_value() && *pattern == AssetReferencePattern;
+				if (!pattern.has_value() || (*pattern != UUIDPattern && !isAssetReference))
+					return SchemaError(std::format("only the UUID pattern {} and the asset reference pattern {} are supported", UUIDPattern, AssetReferencePattern));
 				if (!instance.is_string())
 					return {};
 				ENGINE_TRY_ASSIGN(const std::string text, JsonReader(instance).ReadString());
-				const bool matches = text.size() == 16 && std::all_of(text.begin(), text.end(), [](char character)
+				if (!isAssetReference)
 				{
-					return (character >= '0' && character <= '9') || (character >= 'a' && character <= 'f') || (character >= 'A' && character <= 'F');
-				});
-				if (!matches)
-					AddViolation("must be a 16-digit hexadecimal UUID string");
+					if (!IsHexHandle(text))
+						AddViolation("must be a 16-digit hexadecimal UUID string");
+					return {};
+				}
+				const auto isPath = [&text](std::string_view prefix)
+				{
+					return text.size() > prefix.size() && std::string_view(text).starts_with(prefix);
+				};
+				if (!IsHexHandle(text) && !isPath("Assets/") && !isPath("engine://"))
+					AddViolation("must be a 16-digit hexadecimal handle, a project path \"Assets/...\" or an engine path \"engine://...\"");
 				return {};
 			}
 		private:

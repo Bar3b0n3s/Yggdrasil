@@ -54,6 +54,7 @@ namespace Engine {
 		std::string Id{};                      // "Gltf"
 		AssetType MainType = AssetType::None;  // AssetType::Prefab for glTF
 		std::vector<std::string> Extensions{}; // lower case with the dot: ".gltf", ".glb"; matched ASCII case-insensitively
+		uint32_t Version = 0;                  // the importer's version (the ImporterVersion of a .meta a RewriteImporter fix writes)
 	};
 
 	// What a scan found besides the records.
@@ -83,9 +84,10 @@ namespace Engine {
 	// The fix of one auto-fixable scan diagnostic.
 	enum class AssetScanFixKind : uint8_t
 	{
-		AssignNewHandle,       // ASSET_DUPLICATE_HANDLE: rewrite the .meta with a fresh handle (sub-asset handles re-derived)
-		TrashMeta,             // ASSET_ORPHAN_META, ASSET_ORPHAN_DEPENDENCY: move the .meta to the trash
-		RenameMetaToSourceCase // PATH_CASE_MISMATCH: case-only rename of the .meta to its source's spelling
+		AssignNewHandle,        // ASSET_DUPLICATE_HANDLE: rewrite the .meta with a fresh handle (sub-asset handles re-derived)
+		TrashMeta,              // ASSET_ORPHAN_META, ASSET_ORPHAN_DEPENDENCY: move the .meta to the trash
+		RenameMetaToSourceCase, // PATH_CASE_MISMATCH: case-only rename of the .meta to its source's spelling
+		RewriteImporter         // ASSET_TYPE_MISMATCH: rewrite the .meta for the importer that takes the source, keeping its handle
 	};
 
 	struct AssetScanFix
@@ -93,7 +95,10 @@ namespace Engine {
 		AssetScanFixKind Kind = AssetScanFixKind::AssignNewHandle;
 		VfsPath MetaPath{};
 		// RenameMetaToSourceCase: the .meta's new path. AssignNewHandle: the .meta's new text (SerializeAssetMetadata with the
-		// handle the caller passed). TrashMeta: unused (the caller picks the trash location).
+		// handle the caller passed). RewriteImporter: the .meta's new text, with its Handle, the Importer, Type and
+		// ImporterVersion of the importer that takes the source's extension, null Settings (that importer's defaults, which
+		// every import merges; the editor writes them out, EditorAssetManager::MergeImportSettings) and no SubAssets (the next
+		// import lists them). TrashMeta: unused (the caller picks the trash location).
 		VfsPath NewMetaPath{};
 		std::string NewMetaText{};
 	};
@@ -205,10 +210,31 @@ namespace Engine {
 		// the last scan did not report; InvalidArgument for one that is not auto-fixable.
 		[[nodiscard]] Result<AssetScanFix> PlanFix(const AssetDiagnostic& diagnostic, AssetHandle newHandle) const;
 	private:
+		// The record of a main asset `handle` that a move or trash plan may take, with its error otherwise.
+		[[nodiscard]] Result<const AssetRecord*> FindMovableRecord(AssetHandle handle) const;
+		// Checks that `record` can be registered next to the current records, ignoring the record registered under `ignored`
+		// (Update's own previous record).
+		[[nodiscard]] Status CheckInsertable(const AssetRecord& record, AssetHandle ignored) const;
+		void Insert(AssetRecord record);
+		void Erase(AssetHandle handle);
+	private:
+		// What PlanFix needs to know about one auto-fixable diagnostic of the last scan, which Scan did not register.
+		struct ScanFixSource
+		{
+			AssetScanFixKind Kind = AssetScanFixKind::AssignNewHandle;
+			std::string Code{};
+			std::string Path{};
+			std::string Subject{};
+			VfsPath MetaPath{};
+			VfsPath SourcePath{};     // RenameMetaToSourceCase: the source's own spelling
+			AssetMetadata Metadata{}; // AssignNewHandle: the duplicate .meta; RewriteImporter: the rewritten .meta
+		};
+	private:
 		std::map<AssetHandle, AssetRecord> m_Records;   // by the .meta's handle (main assets and dependencies)
 		std::map<VfsPath, AssetHandle> m_SourcePaths;   // source path -> handle
 		std::map<AssetHandle, AssetHandle> m_SubAssets; // sub-asset handle -> its source's handle
 		std::vector<AssetDiagnostic> m_ScanDiagnostics;
+		std::vector<ScanFixSource> m_ScanFixes; // the auto-fixable diagnostics of the last scan
 	};
 
 }

@@ -16,8 +16,8 @@ namespace Engine {
 		std::vector<AssetImporterDescription> MakeImporterDescriptions()
 		{
 			return {
-				{ .Id = "Gltf", .MainType = AssetType::Prefab, .Extensions = { ".gltf", ".glb" } },
-				{ .Id = "Texture", .MainType = AssetType::Texture, .Extensions = { ".png", ".jpg", ".jpeg", ".tga", ".bmp" } },
+				{ .Id = "Gltf", .MainType = AssetType::Prefab, .Extensions = { ".gltf", ".glb" }, .Version = 3 },
+				{ .Id = "Texture", .MainType = AssetType::Texture, .Extensions = { ".png", ".jpg", ".jpeg", ".tga", ".bmp" }, .Version = 1 },
 			};
 		}
 
@@ -69,6 +69,13 @@ namespace Engine {
 			return {};
 		}
 
+		// The error code of a failed result, or nullopt for a success.
+		template<typename T>
+		std::optional<ErrorCode> ErrorCodeOf(const Result<T>& result)
+		{
+			return result.has_value() ? std::nullopt : std::optional<ErrorCode>(result.error().GetCode());
+		}
+
 		bool HasDiagnostic(const AssetScanResult& result, std::string_view code, std::string_view path)
 		{
 			return std::ranges::any_of(result.Diagnostics, [code, path](const AssetDiagnostic& diagnostic)
@@ -81,7 +88,7 @@ namespace Engine {
 
 	TEST_SUITE("Asset")
 	{
-		TEST_CASE("AssetRegistry: moved file keeps its handle" * doctest::skip(true))
+		TEST_CASE("AssetRegistry: moved file keeps its handle")
 		{
 			Test::AssetTestFixture fixture;
 			const AssetHandle handle(0x1111222233334444ull);
@@ -108,7 +115,7 @@ namespace Engine {
 			CHECK_FALSE(registry.Resolve("Assets/Textures/Wood.png").has_value());
 		}
 
-		TEST_CASE("AssetRegistry: duplicate handle diagnostic and auto-fix" * doctest::skip(true))
+		TEST_CASE("AssetRegistry: duplicate handle diagnostic and auto-fix")
 		{
 			Test::AssetTestFixture fixture;
 			const AssetHandle handle(0x1111222233334444ull);
@@ -165,7 +172,7 @@ namespace Engine {
 			CHECK(copiedRegistry.Find(track)->SourcePath == copied.ProjectPath("Assets/Models/Track.png"));
 		}
 
-		TEST_CASE("AssetRegistry: a duplicated handle stays with its registered or last known file" * doctest::skip(true))
+		TEST_CASE("AssetRegistry: a duplicated handle stays with its registered or last known file")
 		{
 			const std::vector<AssetImporterDescription> importers = MakeImporterDescriptions();
 			const AssetHandle handle(0x3333444455556666ull);
@@ -215,7 +222,7 @@ namespace Engine {
 			}
 		}
 
-		TEST_CASE("AssetRegistry: case mismatch diagnostic" * doctest::skip(true))
+		TEST_CASE("AssetRegistry: case mismatch diagnostic")
 		{
 			Test::AssetTestFixture fixture;
 			const AssetHandle handle(0x1111222233334444ull);
@@ -244,7 +251,7 @@ namespace Engine {
 			CHECK(registry.Resolve("Assets/Wood.png") == handle);
 		}
 
-		TEST_CASE("AssetRegistry: dependency metas move and trash with their owner" * doctest::skip(true))
+		TEST_CASE("AssetRegistry: dependency metas move and trash with their owner")
 		{
 			Test::AssetTestFixture fixture;
 			const AssetHandle gltf(0x1000000000000001ull);
@@ -299,7 +306,7 @@ namespace Engine {
 			CHECK(registry.GetRecordCount() == 0);
 		}
 
-		TEST_CASE("AssetRegistry: orphan metas and orphan dependencies are reported and fixable" * doctest::skip(true))
+		TEST_CASE("AssetRegistry: orphan metas and orphan dependencies are reported and fixable")
 		{
 			Test::AssetTestFixture fixture;
 			fixture.WriteProjectText("Assets/Gone.png.meta", MakeTextureMeta(AssetHandle(0x2000000000000001ull)));
@@ -319,7 +326,7 @@ namespace Engine {
 			}
 		}
 
-		TEST_CASE("AssetRegistry: sources without a meta and unreadable metas are reported" * doctest::skip(true))
+		TEST_CASE("AssetRegistry: sources without a meta and unreadable metas are reported")
 		{
 			Test::AssetTestFixture fixture;
 			fixture.WriteProjectFile("Assets/New.png", Test::MakeTestPng(2, 2));
@@ -336,7 +343,7 @@ namespace Engine {
 			CHECK(scanned->MetaCount == 1);
 		}
 
-		TEST_CASE("AssetRegistry: references resolve to main assets and sub-assets" * doctest::skip(true))
+		TEST_CASE("AssetRegistry: references resolve to main assets and sub-assets")
 		{
 			Test::AssetTestFixture fixture;
 			const AssetHandle gltf(0x1000000000000001ull);
@@ -364,6 +371,113 @@ namespace Engine {
 			std::vector<AssetHandle> handles = { gltf, mesh };
 			std::ranges::sort(handles);
 			CHECK(registry.GetHandles() == handles);
+		}
+
+		TEST_CASE("AssetRegistry: edits keep the lookups consistent and refuse conflicts")
+		{
+			Test::AssetTestFixture fixture;
+			const AssetHandle handle(0x4000000000000001ull);
+			Result<AssetMetadata> parsed = ParseAssetMetadata(MakeTextureMeta(handle));
+			REQUIRE(parsed.has_value());
+			const AssetRecord record{ .Metadata = *parsed, .SourcePath = fixture.ProjectPath("Assets/Wood.png"), .MetaPath = fixture.ProjectPath("Assets/Wood.png.meta") };
+
+			AssetRegistry registry;
+			REQUIRE(registry.Add(record).has_value());
+			CHECK(ErrorCodeOf(registry.Add(record)) == ErrorCode::AlreadyExists);
+			AssetRecord samePath = record;
+			samePath.Metadata.Handle = AssetHandle(0x4000000000000002ull);
+			CHECK(ErrorCodeOf(registry.Add(samePath)) == ErrorCode::AlreadyExists);
+			AssetRecord misplacedMeta = samePath;
+			misplacedMeta.SourcePath = fixture.ProjectPath("Assets/Other.png");
+			CHECK(ErrorCodeOf(registry.Add(misplacedMeta)) == ErrorCode::InvalidArgument);
+
+			REQUIRE(registry.Rename(handle, fixture.ProjectPath("Assets/Textures/Oak.png")).has_value());
+			CHECK(registry.FindBySourcePath(fixture.ProjectPath("Assets/Wood.png")) == nullptr);
+			REQUIRE(registry.Find(handle) != nullptr);
+			CHECK(registry.Find(handle)->MetaPath == fixture.ProjectPath("Assets/Textures/Oak.png.meta"));
+			CHECK(registry.Resolve("Assets/Textures/Oak.png") == handle);
+			CHECK(ErrorCodeOf(registry.Rename(AssetHandle(0x99), fixture.ProjectPath("Assets/X.png"))) == ErrorCode::NotFound);
+
+			AssetRecord unknown = record;
+			unknown.Metadata.Handle = AssetHandle(0x4000000000000003ull);
+			CHECK(ErrorCodeOf(registry.Update(unknown)) == ErrorCode::NotFound);
+			REQUIRE(registry.Remove(handle).has_value());
+			CHECK(registry.GetRecordCount() == 0);
+			CHECK(ErrorCodeOf(registry.Remove(handle)) == ErrorCode::NotFound);
+			CHECK_FALSE(registry.Resolve("Assets/Textures/Oak.png").has_value());
+		}
+
+		TEST_CASE("AssetRegistry: a meta whose importer disagrees with its extension is ASSET_TYPE_MISMATCH")
+		{
+			Test::AssetTestFixture fixture;
+			const AssetHandle handle(0x4100000000000001ull);
+			fixture.WriteProjectFile("Assets/Wood.gltf", Test::MakeTestPng(2, 2));
+			fixture.WriteProjectText("Assets/Wood.gltf.meta", MakeTextureMeta(handle));
+			AssetRegistry registry;
+			Result<AssetScanResult> scanned = registry.Scan(fixture.GetVfs(), fixture.ProjectPath("Assets"), MakeImporterDescriptions());
+			REQUIRE_MESSAGE(scanned.has_value(), scanned.error().ToString());
+			REQUIRE(scanned->Diagnostics.size() == 1);
+			const AssetDiagnostic& mismatch = scanned->Diagnostics.front();
+			CHECK(mismatch.Code == AssetTypeMismatchCode);
+			CHECK(mismatch.Path == "Assets/Wood.gltf.meta");
+			CHECK(mismatch.Severity == DiagnosticSeverity::Error);
+			CHECK(mismatch.AutoFixable);
+			// Still registered: its handle stays valid while the .meta is corrected.
+			CHECK(registry.Find(handle) != nullptr);
+
+			// §7.3: the fix rewrites the .meta for the importer that takes the extension, keeping the handle; the old
+			// importer's settings and sub-assets go (null Settings: the new importer's defaults).
+			Result<AssetScanFix> fix = registry.PlanFix(mismatch, AssetHandle());
+			REQUIRE_MESSAGE(fix.has_value(), fix.error().ToString());
+			CHECK(fix->Kind == AssetScanFixKind::RewriteImporter);
+			CHECK(fix->MetaPath == fixture.ProjectPath("Assets/Wood.gltf.meta"));
+			Result<AssetMetadata> rewritten = ParseAssetMetadata(fix->NewMetaText);
+			REQUIRE_MESSAGE(rewritten.has_value(), rewritten.error().ToString());
+			CHECK(rewritten->Handle == handle);
+			CHECK(rewritten->Kind == AssetMetaKind::Asset);
+			CHECK(rewritten->Type == AssetType::Prefab);
+			CHECK(rewritten->Importer == "Gltf");
+			CHECK(rewritten->ImporterVersion == 3);
+			CHECK(rewritten->Settings.IsNull());
+			CHECK(rewritten->SubAssets.empty());
+
+			// Applied, the next scan reports nothing.
+			fixture.WriteProjectText("Assets/Wood.gltf.meta", fix->NewMetaText);
+			Result<AssetScanResult> rescanned = registry.Scan(fixture.GetVfs(), fixture.ProjectPath("Assets"), MakeImporterDescriptions());
+			REQUIRE(rescanned.has_value());
+			CHECK(rescanned->Diagnostics.empty());
+			CHECK(registry.Find(handle) != nullptr);
+			AssetDiagnostic unreported = mismatch;
+			unreported.Path = "Assets/Other.gltf.meta";
+			CHECK(ErrorCodeOf(registry.PlanFix(unreported, AssetHandle())) == ErrorCode::NotFound);
+		}
+
+		TEST_CASE("AssetRegistry: moves and trash refuse sub-assets, dependencies and bad destinations")
+		{
+			Test::AssetTestFixture fixture;
+			const AssetHandle gltf(0x1000000000000001ull);
+			const AssetHandle buffer(0x1000000000000002ull);
+			WriteGltfWithDependencies(fixture, gltf, buffer, AssetHandle(0x1000000000000003ull));
+			fixture.WriteProjectFile("Assets/Other.png", Test::MakeTestPng(2, 2));
+			fixture.WriteProjectText("Assets/Other.png.meta", MakeTextureMeta(AssetHandle(0x1000000000000004ull)));
+			AssetRegistry registry;
+			REQUIRE(registry.Scan(fixture.GetVfs(), fixture.ProjectPath("Assets"), MakeImporterDescriptions()).has_value());
+			AssetRecord record = *registry.Find(gltf);
+			record.Metadata.SubAssets = { { .Key = "mesh:0", .Handle = DeriveSubAssetHandle(gltf, "mesh:0"), .Type = AssetType::Mesh } };
+			REQUIRE(registry.Update(record).has_value());
+
+			CHECK(ErrorCodeOf(registry.PlanMove(DeriveSubAssetHandle(gltf, "mesh:0"), fixture.ProjectPath("Assets/X.gltf"))) == ErrorCode::InvalidArgument);
+			CHECK(ErrorCodeOf(registry.PlanMove(buffer, fixture.ProjectPath("Assets/X.bin"))) == ErrorCode::InvalidArgument);
+			CHECK(ErrorCodeOf(registry.PlanMove(AssetHandle(0x5), fixture.ProjectPath("Assets/X.gltf"))) == ErrorCode::NotFound);
+			CHECK(ErrorCodeOf(registry.PlanMove(gltf, fixture.ProjectPath("Library/Track.gltf"))) == ErrorCode::InvalidArgument);
+			CHECK(ErrorCodeOf(registry.PlanMove(gltf, fixture.ProjectPath("Assets/Models/Track.gltf"))) == ErrorCode::InvalidArgument);
+			CHECK(ErrorCodeOf(registry.PlanMove(gltf, fixture.ProjectPath("Assets/Other.png"))) == ErrorCode::AlreadyExists);
+			CHECK(ErrorCodeOf(registry.PlanTrash(buffer, fixture.ProjectPath("Library/Trash/1"))) == ErrorCode::InvalidArgument);
+
+			// A rename within the folder keeps the dependency files where they are.
+			Result<std::vector<AssetFileMove>> renamed = registry.PlanMove(gltf, fixture.ProjectPath("Assets/Models/Circuit.gltf"));
+			REQUIRE(renamed.has_value());
+			CHECK(renamed->size() == 2);
 		}
 	}
 

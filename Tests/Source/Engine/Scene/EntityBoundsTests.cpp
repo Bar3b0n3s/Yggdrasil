@@ -8,7 +8,10 @@
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/Scene.h"
 #include "Support/AssetTestFixture.h"
+#include "Support/ExpectLog.h"
 #include "Support/SceneTestFixture.h"
+
+#include <algorithm>
 
 namespace Engine {
 
@@ -30,7 +33,7 @@ namespace Engine {
 
 	TEST_SUITE("Scene")
 	{
-		TEST_CASE("EntityBounds: a translated and scaled unit cube has the transformed world AABB" * doctest::skip(true))
+		TEST_CASE("EntityBounds: a translated and scaled unit cube has the transformed world AABB")
 		{
 			Test::AssetTestFixture assets;
 			Test::SceneTestFixture scene;
@@ -44,7 +47,7 @@ namespace Engine {
 			CHECK_FALSE(ComputeEntityWorldBounds(empty, assets.GetManager()).has_value());
 		}
 
-		TEST_CASE("EntityBounds: descendants are included and disabled ones skipped" * doctest::skip(true))
+		TEST_CASE("EntityBounds: descendants are included and disabled ones skipped")
 		{
 			Test::AssetTestFixture assets;
 			Test::SceneTestFixture scene;
@@ -63,6 +66,38 @@ namespace Engine {
 			CHECK(all->Max == glm::vec3(5.5f, 0.5f, 0.5f));
 			// Without descendants the root has no mesh of its own.
 			CHECK_FALSE(ComputeEntityWorldBounds(root, assets.GetManager(), { .IncludeDescendants = false }).has_value());
+		}
+
+		TEST_CASE("EntityBounds: a missing mesh counts with the placeholder cube and records the diagnostic")
+		{
+			Test::AssetTestFixture assets;
+			Test::SceneTestFixture scene;
+			const AssetHandle missing(0x123456789ull);
+			Entity box = scene.GetScene().CreateEntity("Box");
+			box.Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Translation = glm::vec3(0.0f, 2.0f, 0.0f);
+			});
+			box.AddComponent<MeshRendererComponent>().Mesh.SetHandle(missing);
+			std::optional<Aabb> bounds;
+			{
+				const Test::ExpectLog logged(LogLevel::Error, missing.ToString());
+				bounds = ComputeEntityWorldBounds(box, assets.GetManager());
+			}
+			REQUIRE(bounds.has_value());
+			CHECK(bounds->Min == glm::vec3(-0.5f, 1.5f, -0.5f));
+			CHECK(bounds->Max == glm::vec3(0.5f, 2.5f, 0.5f));
+			CHECK(std::ranges::any_of(assets.GetManager().GetDiagnostics(), [missing](const AssetDiagnostic& diagnostic)
+			{
+				return diagnostic.Asset == missing && diagnostic.Code == AssetMissingCode;
+			}));
+			// MeshRenderer.Visible does not matter: an invisible mesh still occupies its space.
+			box.Patch<MeshRendererComponent>([](MeshRendererComponent& renderer)
+			{
+				renderer.Visible = false;
+				renderer.Mesh.SetHandle(BuiltinAssetHandles::CubeMesh);
+			});
+			CHECK(ComputeEntityWorldBounds(box, assets.GetManager()).has_value());
 		}
 	}
 

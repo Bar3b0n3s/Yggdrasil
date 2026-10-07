@@ -2,14 +2,18 @@
 
 #include "Engine/AssetPipeline/AssetWriter.h"
 
+#include "Engine/Core/Hash.h"
+#include "Engine/Core/Mounts/NativeDirectoryMount.h"
+#include "Engine/Core/VirtualFileSystem.h"
 #include "Engine/Platform/PollingFileWatcher.h"
 #include "Support/AssetTestFixture.h"
+#include "Support/TempDirectory.h"
 
 namespace Engine {
 
 	TEST_SUITE("AssetPipeline")
 	{
-		TEST_CASE("AssetWriter: writes are marked known and reported to the listener" * doctest::skip(true))
+		TEST_CASE("AssetWriter: writes are marked known and reported to the listener")
 		{
 			Test::AssetTestFixture fixture;
 			PollingFileWatcher watcher(fixture.GetVfs(), { .Root = fixture.ProjectPath("Assets"), .DebounceSeconds = 0.2 });
@@ -29,6 +33,8 @@ namespace Engine {
 			REQUIRE(writer.Remove(fixture.ProjectPath("Assets/Materials/Red.material")).has_value());
 			REQUIRE(events.size() == 4);
 			CHECK(events[0].Kind == AssetWriteKind::Written);
+			CHECK(events[0].ContentHash == XXH64(text));
+			CHECK(events[1].ContentHash == 0);
 			CHECK(events[1].Kind == AssetWriteKind::Moved);
 			CHECK(events[1].From == fixture.ProjectPath("Assets/Red.material"));
 			CHECK(events[1].Path == fixture.ProjectPath("Assets/Materials/Red.material"));
@@ -41,7 +47,7 @@ namespace Engine {
 			CHECK(changes->empty());
 		}
 
-		TEST_CASE("AssetWriter: a failed write reports nothing and dry runs never reach the watcher" * doctest::skip(true))
+		TEST_CASE("AssetWriter: a failed write reports nothing and dry runs never reach the watcher")
 		{
 			Test::AssetTestFixture fixture;
 			PollingFileWatcher watcher(fixture.GetVfs(), { .Root = fixture.ProjectPath("Assets"), .DebounceSeconds = 0.2 });
@@ -68,6 +74,104 @@ namespace Engine {
 			REQUIRE(changes.has_value());
 			REQUIRE(changes->size() == 1);
 			CHECK(changes->front().Path == fixture.ProjectPath("Assets/DryRun.material"));
+		}
+
+		TEST_CASE("AssetWriter: moving and removing a directory marks every file inside it known")
+		{
+			Test::AssetTestFixture fixture;
+			fixture.WriteProjectText("Assets/Models/Box.gltf", "{}");
+			fixture.WriteProjectText("Assets/Models/Textures/Checker.png", "png");
+			PollingFileWatcher watcher(fixture.GetVfs(), { .Root = fixture.ProjectPath("Assets"), .DebounceSeconds = 0.2 });
+			REQUIRE(watcher.Start().has_value());
+			AssetWriter writer(fixture.GetVfs());
+			writer.SetWatcher(&watcher);
+			std::vector<AssetWriteEvent> events;
+			writer.SetListener([&events](const AssetWriteEvent& event)
+			{
+				events.push_back(event);
+			});
+
+			// The destination's parent directory is created by the move.
+			REQUIRE(writer.Move(fixture.ProjectPath("Assets/Models"), fixture.ProjectPath("Assets/Levels/Track")).has_value());
+			CHECK(fixture.GetVfs().Exists(fixture.ProjectPath("Assets/Levels/Track/Textures/Checker.png")));
+			Result<std::vector<FileChange>> afterMove = watcher.Poll(1.0);
+			REQUIRE(afterMove.has_value());
+			CHECK(afterMove->empty());
+
+			REQUIRE(writer.Remove(fixture.ProjectPath("Assets/Levels")).has_value());
+			Result<std::vector<FileChange>> afterRemove = watcher.Poll(2.0);
+			REQUIRE(afterRemove.has_value());
+			CHECK(afterRemove->empty());
+			REQUIRE(events.size() == 2);
+			CHECK(events[0].From == fixture.ProjectPath("Assets/Models"));
+			CHECK(events[1].Path == fixture.ProjectPath("Assets/Levels"));
+
+			// A move between schemes is refused before anything happens.
+			fixture.WriteProjectText("Assets/Red.material", "{}");
+			CHECK_FALSE(writer.Move(fixture.ProjectPath("Assets/Red.material"), Test::ParseVfsPath("cache://Red.material")).has_value());
+			CHECK(events.size() == 2);
+		}
+
+		TEST_CASE("AssetWriter: a case-only rename leaves the watcher nothing to report")
+		{
+			// The old spelling still resolves to the renamed file under the case policy (a case mismatch, not NotFound); the
+			// watcher must record it as absent, or the next polls report the editor's own rename as a deletion.
+			Test::AssetTestFixture fixture;
+			fixture.WriteProjectText("Assets/Materials/red.material", "{}");
+			fixture.WriteProjectText("Assets/Materials/red.material.meta", "{}");
+			PollingFileWatcher watcher(fixture.GetVfs(), { .Root = fixture.ProjectPath("Assets"), .DebounceSeconds = 0.2 });
+			REQUIRE(watcher.Start().has_value());
+			AssetWriter writer(fixture.GetVfs());
+			writer.SetWatcher(&watcher);
+
+			REQUIRE(writer.Move(fixture.ProjectPath("Assets/Materials/red.material"), fixture.ProjectPath("Assets/Materials/Red.material")).has_value());
+			REQUIRE(writer.Move(fixture.ProjectPath("Assets/Materials/red.material.meta"), fixture.ProjectPath("Assets/Materials/Red.material.meta"))
+					.has_value());
+			CHECK(fixture.GetVfs().Exists(fixture.ProjectPath("Assets/Materials/Red.material")));
+			for (const double seconds : { 1.0, 2.0 })
+			{
+				Result<std::vector<FileChange>> changes = watcher.Poll(seconds);
+				REQUIRE(changes.has_value());
+				CHECK(changes->empty());
+			}
+		}
+
+		TEST_CASE("AssetWriter: the backup a mount keeps of a replaced file is reported and marked known")
+		{
+			// project:// is a native mount that keeps "<file>.bak" (§4.10), unlike the memory mounts of the other tests.
+			const Test::TempDirectory directory("AssetWriterBackup");
+			Result<Scope<NativeDirectoryMount>> mount = NativeDirectoryMount::Create(directory.GetPath());
+			REQUIRE_MESSAGE(mount.has_value(), mount.error().ToString());
+			VirtualFileSystem vfs;
+			REQUIRE(vfs.Mount("project", std::move(*mount)).has_value());
+			const VfsPath assets = Test::ParseVfsPath("project://Assets");
+			const VfsPath material = Test::ParseVfsPath("project://Assets/Red.material");
+			REQUIRE(vfs.CreateDirectories(assets).has_value());
+			PollingFileWatcher watcher(vfs, { .Root = assets, .DebounceSeconds = 0.2 });
+			REQUIRE(watcher.Start().has_value());
+			AssetWriter writer(vfs);
+			writer.SetWatcher(&watcher);
+			std::vector<AssetWriteEvent> events;
+			writer.SetListener([&events](const AssetWriteEvent& event)
+			{
+				events.push_back(event);
+			});
+
+			// A new file has no backup; replacing it leaves one.
+			const std::string first = "{}";
+			const std::string second = "{\"Format\": \"Material\"}";
+			REQUIRE(writer.Write(material, AsBytes(first)).has_value());
+			REQUIRE(writer.Write(material, AsBytes(second)).has_value());
+			REQUIRE(events.size() == 2);
+			CHECK(events[0].Backup.IsEmpty());
+			CHECK(events[1].Backup == Test::ParseVfsPath("project://Assets/Red.material.bak"));
+			CHECK(vfs.Exists(events[1].Backup));
+			for (const double seconds : { 1.0, 2.0 })
+			{
+				Result<std::vector<FileChange>> changes = watcher.Poll(seconds);
+				REQUIRE(changes.has_value());
+				CHECK(changes->empty());
+			}
 		}
 	}
 

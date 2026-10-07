@@ -176,7 +176,7 @@ namespace Engine {
 			CHECK((*again)["changedFiles"] == Json::array());
 		}
 
-		TEST_CASE("ProjectMethods: project.refreshAssets registers an externally written file" * doctest::skip(true))
+		TEST_CASE("ProjectMethods: project.refreshAssets registers an externally written file")
 		{
 			Test::AutomationFixture setup("ProjectRefreshAssets", false);
 			// Written outside the editor (a user's file manager): the registry learns about it only by a scan.
@@ -195,7 +195,7 @@ namespace Engine {
 			CHECK((*again)["added"].empty());
 		}
 
-		TEST_CASE("ProjectMethods: project.save writes only the scene because asset edits write through" * doctest::skip(true))
+		TEST_CASE("ProjectMethods: project.save writes only the scene because asset edits write through")
 		{
 			Test::AutomationFixture setup("ProjectSaveAssets");
 			REQUIRE(setup.Call("asset.create", Json{ { "type", "Material" }, { "path", "Assets/Red.material" } }).has_value());

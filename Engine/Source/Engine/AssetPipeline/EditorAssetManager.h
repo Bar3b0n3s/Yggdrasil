@@ -115,7 +115,7 @@ namespace Engine {
 		// Changed, but held instead of reimported because reloads are deferred (race rule 4); reimported when the deferral
 		// ends.
 		std::vector<AssetHandle> Deferred{};
-		std::vector<AssetDiagnostic> Diagnostics{}; // the scan's diagnostics and the reimports' failures and warnings
+		std::vector<AssetDiagnostic> Diagnostics{}; // the scan's diagnostics and the (re)imports' failures and warnings
 	};
 
 	// What one import produced.
@@ -193,16 +193,19 @@ namespace Engine {
 		// --- Refresh and imports ---------------------------------------------------------------------------------------
 
 		// project.refreshAssets (§7.3), and the implicit refresh before every automation call that takes a path: rescans
-		// synchronously, writes .meta files for new sources (one batch, the closure rule of the file comment), reimports
-		// every asset whose source, dependency files or referenced assets changed since its last import (and their
-		// dependents, in AssetDependencyGraph::GetReimportOrder), publishes the new versions and returns after all of it
-		// (WaitIdle), so a just-written file never races the watcher.
+		// synchronously, writes .meta files for new sources (one batch, the closure rule of the file comment), imports every
+		// main asset the rescan registered that was never imported (so its .meta lists its sub-assets and its import
+		// problems are reported now; a poll's batch starts the same imports on jobs), reimports every asset whose source,
+		// dependency files or referenced assets changed since its last import (and their dependents, in
+		// AssetDependencyGraph::GetReimportOrder), publishes the new versions and returns after all of it (WaitIdle), so a
+		// just-written file never races the watcher.
 		//
 		// Every external change Refresh detects takes the same path as one a poll detects, so §7.5's race rules hold
 		// whichever observer sees it first: the path is marked known on the hot reloader's watcher (PollingFileWatcher::
-		// MarkKnown, so the watcher never reports it again), the change reaches the external-change listener once (race
-		// rule 3: SceneChangedOnDisk is raised now, not at a later poll), and the asset is reimported and published once (one
-		// version bump and one AssetReloaded event, as for a poll; dependents follow). While reloads
+		// MarkKnown, so the watcher never reports it again; a poll the watcher already computed, delivered at a later frame,
+		// is dropped because the manager's known state of the file already holds it), the change reaches the external-change
+		// listener once (race rule 3: SceneChangedOnDisk is raised now, not at a later poll), and the asset is reimported and
+		// published once (one version bump and one AssetReloaded event, as for a poll; dependents follow). While reloads
 		// are deferred (race rule 4), Refresh still rescans and writes the new sources' metas but reimports nothing: the
 		// changed assets are listed in Deferred and held with the hot reloader's held changes, and the listener hears of
 		// them when the deferral ends. Errors: InvalidState without a project; the scan's errors. Failed reimports are

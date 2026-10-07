@@ -6,6 +6,7 @@
 #include "EditorCore/Commands/ProjectSettingsCommand.h"
 #include "EditorCore/Commands/SceneEdit.h"
 #include "EditorCore/EditorContext.h"
+#include "Engine/Asset/AssetMetadata.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/Core/Hash.h"
 #include "Engine/Core/Json/JsonReader.h"
@@ -16,7 +17,9 @@
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/LoadReport.h"
 #include "Engine/Scene/SceneSerializer.h"
+#include "Support/AssetTestFixture.h"
 #include "Support/EditorTestFixture.h"
+#include "Support/ExpectLog.h"
 #include "Support/TestData.h"
 
 #include <nlohmann/json.hpp>
@@ -560,10 +563,11 @@ namespace Engine {
 			CHECK(ProjectValidator::MapLoadCode(SceneInvalidComponentCode).empty());
 		}
 
-		TEST_CASE("ProjectValidator: GetCodes lists the codes the M4 validator reports, each once")
+		TEST_CASE("ProjectValidator: GetCodes lists the codes the validator reports, each once")
 		{
 			const std::span<const std::string_view> codes = ProjectValidator::GetCodes();
-			CHECK(codes.size() == 14);
+			// M4's 14 codes, and M6's 11: the asset codes but the runtime-only ASSET_UPLOAD_FAILED, and PREFAB_MISSING_ASSET.
+			CHECK(codes.size() == 25);
 			std::vector<std::string_view> sorted(codes.begin(), codes.end());
 			std::sort(sorted.begin(), sorted.end());
 			CHECK(std::adjacent_find(sorted.begin(), sorted.end()) == sorted.end());
@@ -571,8 +575,7 @@ namespace Engine {
 			CHECK(std::find(codes.begin(), codes.end(), AssetImportFailedCode) != codes.end());
 		}
 
-		TEST_CASE("ProjectValidator: the asset scan diagnostics are reported under their codes and fixed in one undo step"
-			* doctest::skip(true))
+		TEST_CASE("ProjectValidator: the asset scan diagnostics are reported under their codes and fixed in one undo step")
 		{
 			Test::EditorTestFixture fixture("ValidatorAssetScan");
 			fixture.CreateAndOpenProject();
@@ -624,7 +627,71 @@ namespace Engine {
 			CHECK(FindDiagnostic(*undone, AssetOrphanMetaCode) != nullptr);
 		}
 
-		TEST_CASE("ProjectValidator: a reference to an unregistered asset is ASSET_MISSING" * doctest::skip(true))
+		TEST_CASE("ProjectValidator: a .meta whose importer disagrees with its source is rewritten by the fix, keeping its handle")
+		{
+			Test::EditorTestFixture fixture("ValidatorTypeMismatch");
+			fixture.CreateAndOpenProject();
+			EditorContext& editor = fixture.GetEditor();
+			// A material's .meta beside a texture (a .meta copied onto the wrong file): ASSET_TYPE_MISMATCH, an Error that
+			// blocks play and export until the .meta names the Texture importer (§7.2, §7.3).
+			const std::string meta = R"({
+	"Format": "AssetMeta",
+	"Version": 1,
+	"Handle": "5555666677778888",
+	"Type": "Material",
+	"Importer": "Material",
+	"ImporterVersion": 1,
+	"Settings": null,
+	"SubAssets": []
+}
+)";
+			const auto projectPath = [](std::string_view relative)
+			{
+				Result<VfsPath> path = VfsPath::Create("project", relative);
+				REQUIRE(path.has_value());
+				return *path;
+			};
+			const auto readText = [&editor, &projectPath](std::string_view relative)
+			{
+				Result<Buffer> bytes = editor.GetVfs().ReadFile(projectPath(relative));
+				REQUIRE(bytes.has_value());
+				return std::string(AsStringView(*bytes));
+			};
+			// Written by another program; the refresh imports the new asset with the importer its .meta names, which fails.
+			REQUIRE(editor.GetVfs().WriteFileAtomic(projectPath("Assets/Wood.png.meta"), AsBytes(meta)).has_value());
+			REQUIRE(editor.GetVfs().WriteFileAtomic(projectPath("Assets/Wood.png"), Test::MakeTestPng(4, 4)).has_value());
+			const Test::ExpectLog importFailure(LogLevel::Error, "ASSET_IMPORT_FAILED Assets/Wood.png");
+			REQUIRE(editor.GetAssets().Refresh().has_value());
+
+			Result<ValidationReport> report = ProjectValidator::Validate(editor, ValidationScope::Project);
+			REQUIRE_MESSAGE(report.has_value(), report.error().ToString());
+			INFO(DescribeDiagnostics(*report));
+			const ProjectDiagnostic* mismatch = FindFileDiagnostic(*report, "Assets/Wood.png.meta", AssetTypeMismatchCode);
+			REQUIRE(mismatch != nullptr);
+			CHECK(mismatch->Severity == DiagnosticSeverity::Error);
+			CHECK(mismatch->AutoFixable);
+
+			Result<FixReport> fixed = ProjectValidator::Fix(editor, ValidationScope::Project, { .All = false, .IdsOrCodes = { std::string(AssetTypeMismatchCode) } });
+			REQUIRE_MESSAGE(fixed.has_value(), fixed.error().ToString());
+			CHECK(fixed->Fixed.size() == 1);
+			CHECK(fixed->UndoIndex != 0);
+			CHECK(FindDiagnostic(fixed->After, AssetTypeMismatchCode) == nullptr);
+			// The Texture importer's .meta with the same handle and its complete default settings; the texture imports.
+			const Result<AssetMetadata> rewritten = ParseAssetMetadata(readText("Assets/Wood.png.meta"));
+			REQUIRE(rewritten.has_value());
+			CHECK(rewritten->Handle == AssetHandle(0x5555666677778888ull));
+			CHECK(rewritten->Type == AssetType::Texture);
+			CHECK(rewritten->Importer == "Texture");
+			REQUIRE(rewritten->Settings.Get().is_object());
+			CHECK(rewritten->Settings.Get().contains("Usage"));
+			CHECK(editor.GetAssets().Load(AssetHandle(0x5555666677778888ull)).has_value());
+
+			// One undo step restores the old .meta.
+			REQUIRE(editor.GetHistory().Undo(editor).has_value());
+			CHECK(readText("Assets/Wood.png.meta") == meta);
+		}
+
+		TEST_CASE("ProjectValidator: a reference to an unregistered asset is ASSET_MISSING")
 		{
 			Test::EditorTestFixture fixture("ValidatorAssetMissing");
 			fixture.CreateAndOpenProject();
@@ -658,7 +725,7 @@ namespace Engine {
 			CHECK(FindDiagnostic(*fixedReport, AssetMissingCode) == nullptr);
 		}
 
-		TEST_CASE("ProjectValidator: an instance of an unregistered prefab is PREFAB_MISSING_ASSET" * doctest::skip(true))
+		TEST_CASE("ProjectValidator: an instance of an unregistered prefab is PREFAB_MISSING_ASSET")
 		{
 			Test::EditorTestFixture fixture("ValidatorPrefabMissing");
 			fixture.CreateAndOpenProject();
@@ -674,7 +741,7 @@ namespace Engine {
 			CHECK_FALSE(missing->AutoFixable);
 		}
 
-		TEST_CASE("ProjectValidator: GetCodes lists the M6 asset codes" * doctest::skip(true))
+		TEST_CASE("ProjectValidator: GetCodes lists the M6 asset codes")
 		{
 			const std::span<const std::string_view> codes = ProjectValidator::GetCodes();
 			for (const std::string_view code : GetAssetDiagnosticCodes())

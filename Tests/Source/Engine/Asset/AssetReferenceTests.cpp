@@ -8,7 +8,7 @@ namespace Engine {
 
 	TEST_SUITE("Asset")
 	{
-		TEST_CASE("AssetReference: handles, project paths, sub-asset paths and engine paths parse" * doctest::skip(true))
+		TEST_CASE("AssetReference: handles, project paths, sub-asset paths and engine paths parse")
 		{
 			Result<AssetReference> handle = ParseAssetReference("3C9F2E7A11D04B88");
 			REQUIRE_MESSAGE(handle.has_value(), handle.error().ToString());
@@ -36,7 +36,7 @@ namespace Engine {
 			CHECK(engine->Path.ToString() == "engine://Meshes/Cube");
 		}
 
-		TEST_CASE("AssetReference: malformed references are rejected with a hint" * doctest::skip(true))
+		TEST_CASE("AssetReference: malformed references are rejected with a hint")
 		{
 			constexpr std::array<std::string_view, 9> Malformed = {
 				"",
@@ -59,7 +59,7 @@ namespace Engine {
 			}
 		}
 
-		TEST_CASE("AssetReference: formatting round-trips" * doctest::skip(true))
+		TEST_CASE("AssetReference: formatting round-trips")
 		{
 			constexpr std::array<std::string_view, 4> Texts = {
 				"3c9f2e7a11d04b88",

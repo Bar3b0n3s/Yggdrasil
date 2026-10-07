@@ -21,7 +21,7 @@ namespace Engine {
 
 	TEST_SUITE("Asset")
 	{
-		TEST_CASE("CookedFormat: the 32-byte header round-trips" * doctest::skip(true))
+		TEST_CASE("CookedFormat: the 32-byte header round-trips")
 		{
 			const Buffer payload = MakePayload(100);
 			const Buffer artifact = WriteCookedArtifact(AssetType::Texture, 3, 7, payload);
@@ -48,7 +48,7 @@ namespace Engine {
 			CHECK(newer.error().GetCode() == ErrorCode::UnsupportedVersion);
 		}
 
-		TEST_CASE("CookedFormat: a flipped payload byte is a hash mismatch, a wrong size or magic is Parse" * doctest::skip(true))
+		TEST_CASE("CookedFormat: a flipped payload byte is a hash mismatch, a wrong size or magic is Parse")
 		{
 			Buffer artifact = WriteCookedArtifact(AssetType::Mesh, 1, 1, MakePayload(64));
 			Buffer flipped = artifact;
@@ -72,7 +72,7 @@ namespace Engine {
 			checkParseError(std::span<const std::byte>(artifact).first(31));
 		}
 
-		TEST_CASE("CookedFormat: 10,000 seeded mutations never crash and always return Result" * doctest::skip(true))
+		TEST_CASE("CookedFormat: 10,000 seeded mutations never crash and always return Result")
 		{
 			const Buffer original = WriteCookedArtifact(AssetType::Font, 1, 1, MakePayload(256));
 			Random random(0xC00CED);

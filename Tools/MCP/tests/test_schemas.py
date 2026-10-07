@@ -12,15 +12,17 @@ sys.path.insert(0, str(MCP_ROOT))
 
 from engine_mcp import server  # noqa: E402
 
-# The proxied tools of §13.8 that exist so far: M4's, and M5's screenshot tools, registered at the M4/M5 merge
-# (Docs/Decisions/0009-m5-decisions.md decision 33). entity_bounds arrives with M6; asset, prefab, script, play, input
-# and test tools with their milestones.
+# The proxied tools of §13.8 that exist so far: M4's, M5's screenshot tools, registered at the M4/M5 merge
+# (Docs/Decisions/0009-m5-decisions.md decision 33), and M6's asset, prefab and entity_bounds tools
+# (Docs/Decisions/0010-m6-decisions.md decision 20). Script, play, input and test tools arrive with their milestones.
 PROXIED_TOOLS = {
     "project_create", "project_open", "project_save", "project_get_settings", "project_set_settings",
     "project_validate",
     "scene_new", "scene_open", "scene_save", "scene_tree", "scene_query", "scene_diff", "entity_create", "entity_get",
-    "entity_update", "entity_destroy", "entity_duplicate", "entity_reparent", "component_list", "component_schema",
-    "edit_batch", "edit_undo", "edit_redo", "log_read", "docs_get", "viewport_screenshot", "editor_screenshot",
+    "entity_update", "entity_destroy", "entity_duplicate", "entity_reparent", "entity_bounds", "component_list",
+    "component_schema", "edit_batch", "edit_undo", "edit_redo", "log_read", "docs_get", "viewport_screenshot",
+    "editor_screenshot", "asset_list", "asset_import", "asset_create", "asset_set_properties", "asset_move",
+    "asset_delete", "prefab_create", "prefab_instantiate", "prefab_apply",
 }
 MAX_SCHEMA_BYTES = 4096
 

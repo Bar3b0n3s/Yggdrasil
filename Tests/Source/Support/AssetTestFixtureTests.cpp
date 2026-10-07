@@ -35,7 +35,7 @@ namespace Engine {
 			CHECK(Test::MakeTestPng(8, 4, 3) == png);
 		}
 
-		TEST_CASE("AssetTestFixture: opening the project scans an empty Assets folder" * doctest::skip(true))
+		TEST_CASE("AssetTestFixture: opening the project scans an empty Assets folder")
 		{
 			Test::AssetTestFixture fixture;
 			const AssetRefreshReport report = fixture.OpenProject(false);

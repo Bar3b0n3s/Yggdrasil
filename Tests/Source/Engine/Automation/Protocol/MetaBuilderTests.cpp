@@ -84,7 +84,7 @@ namespace Engine {
 			builder.RemoveClient(99);
 		}
 
-		TEST_CASE("MetaBuilder: sceneChangedOnDisk appears only when set" * doctest::skip(true))
+		TEST_CASE("MetaBuilder: sceneChangedOnDisk appears only when set")
 		{
 			RingBufferSink log(64);
 			MetaBuilder builder(log);

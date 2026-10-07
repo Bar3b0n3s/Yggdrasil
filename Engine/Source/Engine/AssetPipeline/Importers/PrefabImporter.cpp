@@ -1,10 +1,15 @@
 #include "EnginePCH.h"
 #include "Engine/AssetPipeline/Importers/PrefabImporter.h"
 
-#include <array>
+#include "Engine/Asset/DocumentData.h"
+#include "Engine/AssetPipeline/Private/DocumentAssetReferences.h"
+#include "Engine/Scene/LoadReport.h"
+#include "Engine/Scene/Prefab.h"
 
-// M6 contract stub (Roadmap rule 3): stream B (texture, material and font importers) implements the importer. The extension list is the frozen data of
-// the header.
+#include <nlohmann/json.hpp>
+
+#include <array>
+#include <utility>
 
 namespace Engine {
 
@@ -14,10 +19,23 @@ namespace Engine {
 		return Extensions;
 	}
 
-	Result<ImportResult> PrefabImporter::Import(ImportContext& /*context*/, const AssetMetadata& /*metadata*/) const
+	Result<ImportResult> PrefabImporter::Import(ImportContext& context, const AssetMetadata& metadata) const
 	{
-		ENGINE_CONTRACT_STUB();
-		return MakeError(ErrorCode::Unsupported, "PrefabImporter::Import is an M6 contract stub");
+		const std::string sourcePath = context.GetSourcePath().ToString();
+		LoadOptions options;
+		options.Mode = LoadMode::Strict;
+		options.SourcePath = sourcePath;
+		LoadReport report;
+		ENGINE_TRY_ASSIGN(const Prefab prefab, WithContext(Prefab::LoadFromString(AsStringView(context.GetSourceBytes()), context.GetRegistry(), options, report), std::format("while importing prefab '{}'", sourcePath)));
+
+		// The canonical document at the current version: what Prefab::FromJson reads in the Runtime (§7.4).
+		ENGINE_TRY_ASSIGN(const Json document, prefab.ToJson());
+		ENGINE_TRY_ASSIGN(Buffer cooked, CookDocument(AssetType::Prefab, document, Version));
+
+		ImportResult result;
+		result.Artifacts.push_back(ImportedArtifact{ .Handle = metadata.Handle, .Type = AssetType::Prefab, .SubAssetKey = {}, .Cooked = std::move(cooked) });
+		result.Dependencies = Utils::CollectDocumentAssetReferences(document, context.GetRegistry());
+		return result;
 	}
 
 }

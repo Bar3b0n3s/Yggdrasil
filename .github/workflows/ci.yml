@@ -2,9 +2,10 @@
 # "Repository remote and CI"). A platform counts as verified once its job here is green.
 #
 # Every job runs Scripts/CI.py, the single CI entry point (Architecture §15.8), with every stage a hosted runner can
-# run: setup, generate, lint, build, unit, gpu, golden, automation and portability. The setup stage creates the MCP
+# run: setup, generate, lint, build, bake, unit, gpu, golden, automation and portability. The setup stage creates the MCP
 # bridge's virtual environment from Tools/MCP/requirements.lock (hash-checked wheels from PyPI), which the automation
-# stage runs in.
+# stage runs in. The bake stage (Editor --headless --renderer none --bake-engine-assets, ADR 0010 decision 13) needs no
+# device until M8's environment bakes.
 # - windows: one CI.py run over all of them (the local gate is the full CI.py).
 # - linux:   gmake, once with GCC 14 and once with Clang 19 (Architecture §15.8).
 # - macos:   arm64 with the xcode4 generator and xcodebuild.
@@ -23,7 +24,7 @@
 #   automation test that starts a rendering editor, passes without running, naming the reason, and the steps end as
 #   warnings.
 # On linux and macos, CI.py runs once per step below: setup + generate, then the static checks, then build + unit per
-# configuration with the GPU tests (the Release step adds the golden and automation suites), then portability. Each later step
+# configuration with the GPU tests (the Release step adds the bake, golden and automation stages), then portability. Each later step
 # runs whenever generation succeeded, even when an earlier step failed, so one run reports every configuration (CI.py
 # itself stops at the first failing stage). Each run writes its own JUnit summary (--summary-junit) next to the unit
 # test results.
@@ -182,15 +183,16 @@ jobs:
           "$root\Bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       # Stages a hosted runner can run: setup, generate, lint (which includes CheckBuildConfig.py on the workspace and
-      # its fixtures, Lint.py, Lint.py --self-test and the format check), build, unit, gpu, golden and automation (the
-      # Python suites against the headless editor, M4; with --gpu-optional: this image has no Vulkan device, so the GPU
-      # test cases and the automation tests that start a rendering editor report the reason and pass without running)
-      # and portability (which includes the clang-cl Release and Dist builds; this image has the VS C++ Clang
-      # component, so --require-clang-cl turns a missing component into a failure instead of a skip). Add each later
-      # CPU-only stage here when it lands. The stages that need a real GPU (bake, feature, export, determinism, games)
-      # stay with the local gate on a machine with a Vulkan device.
+      # its fixtures, Lint.py, Lint.py --self-test and the format check), build, bake (CPU-only until M8's environment
+      # bakes need a GPU), unit, gpu, golden and automation (the Python suites against the headless editor, M4; with
+      # --gpu-optional: this image has no Vulkan device, so the GPU test cases and the automation tests that start a
+      # rendering editor report the reason and pass without running) and portability (which includes the clang-cl
+      # Release and Dist builds; this image has the VS C++ Clang component, so --require-clang-cl turns a missing
+      # component into a failure instead of a skip). Add each later CPU-only stage here when it lands. The stages that
+      # need a real GPU (feature, export, determinism, games, and bake from M8) stay with the local gate on a machine
+      # with a Vulkan device.
       - name: Run CI.py
-        run: python Scripts/CI.py --stages setup,generate,lint,build,unit,gpu,golden,automation,portability --require-clang-cl --gpu-optional
+        run: python Scripts/CI.py --stages setup,generate,lint,build,bake,unit,gpu,golden,automation,portability --require-clang-cl --gpu-optional
 
       - name: Upload test results
         if: ${{ !cancelled() }}
@@ -372,7 +374,7 @@ jobs:
       # Windowed child processes need a display and, on X11, a window manager that iconifies windows (ADR 0005
       # decision 13): openbox runs inside a 24-bit Xvfb display and is confirmed through _NET_SUPPORTING_WM_CHECK
       # before CI.py starts.
-      - name: Release (build, unit, GPU, golden and automation tests)
+      - name: Release (build, engine asset bake, unit, GPU, golden and automation tests)
         if: ${{ !cancelled() && steps.generate.outcome == 'success' }}
         run: |
           xvfb-run -a --server-args='-screen 0 1920x1080x24' sh -c '
@@ -383,7 +385,7 @@ jobs:
               if [ "$tries" -gt 300 ]; then echo "openbox did not start within 30 seconds" >&2; exit 1; fi
               sleep 0.1
             done
-            exec python3 Scripts/CI.py --stages build,unit,gpu,golden,automation --configs Release --summary-junit bin/TestResults/CI-Release.xml'
+            exec python3 Scripts/CI.py --stages build,bake,unit,gpu,golden,automation --configs Release --summary-junit bin/TestResults/CI-Release.xml'
 
       - name: Dist (build)
         if: ${{ !cancelled() && steps.generate.outcome == 'success' }}
@@ -521,9 +523,9 @@ jobs:
         if: ${{ !cancelled() && steps.generate.outcome == 'success' }}
         run: python3 Scripts/CI.py --stages build,unit,gpu --configs Debug --gpu-optional --summary-junit bin/TestResults/CI-Debug.xml
 
-      - name: Release (build, unit, GPU, golden and automation tests)
+      - name: Release (build, engine asset bake, unit, GPU, golden and automation tests)
         if: ${{ !cancelled() && steps.generate.outcome == 'success' }}
-        run: python3 Scripts/CI.py --stages build,unit,gpu,golden,automation --configs Release --gpu-optional --summary-junit bin/TestResults/CI-Release.xml
+        run: python3 Scripts/CI.py --stages build,bake,unit,gpu,golden,automation --configs Release --gpu-optional --summary-junit bin/TestResults/CI-Release.xml
 
       - name: Dist (build)
         if: ${{ !cancelled() && steps.generate.outcome == 'success' }}

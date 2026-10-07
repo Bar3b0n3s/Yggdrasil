@@ -12,6 +12,10 @@ Steps, in order:
                                 each of which must fail
               lint              Scripts/Lint.py, and Lint.py --self-test
               format            Scripts/Format.py --check
+              fixtures          every fixture generator under Tests/Data/Generate/ with --check (the committed
+                                fixtures are byte-identical to a fresh generation)
+              resources         Scripts/FetchAssets.py defaults --check (the committed engine resources match their
+                                SHA-256 pins, offline)
   build     Scripts/Build.py --config Debug (skipped when generate failed)
   tests     Scripts/Test.py --suite unit,gpu,golden,feature,automation --config Debug --require-gpu (skipped when the
             build failed): T0 + T1, and T2 on this machine's GPU (§15.1: the GPU tests and golden images gate every

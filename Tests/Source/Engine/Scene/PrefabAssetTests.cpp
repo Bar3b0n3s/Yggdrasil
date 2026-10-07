@@ -11,7 +11,7 @@ namespace Engine {
 
 	TEST_SUITE("Scene")
 	{
-		TEST_CASE("PrefabAsset: instantiating by handle records the prefab asset" * doctest::skip(true))
+		TEST_CASE("PrefabAsset: instantiating by handle records the prefab asset")
 		{
 			Test::AssetTestFixture assets;
 			Result<std::string> block = Test::ReadTestDataText("Prefabs/Block.prefab");
@@ -42,7 +42,7 @@ namespace Engine {
 			CHECK(instance->GetComponent<PrefabInstanceComponent>().Prefab.GetHandle() == handle);
 		}
 
-		TEST_CASE("PrefabAsset: a handle of another type, an unknown handle and a null handle are errors" * doctest::skip(true))
+		TEST_CASE("PrefabAsset: a handle of another type, an unknown handle and a null handle are errors")
 		{
 			Test::AssetTestFixture assets;
 			assets.WriteProjectText("Assets/Red.material", R"({"Format": "Material", "Version": 1})");

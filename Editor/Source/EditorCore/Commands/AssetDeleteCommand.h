@@ -21,7 +21,8 @@ namespace Engine {
 	// §13.5 asset.delete): the source, its .meta and every dependency file with its dependency meta (§6.4: trashed together
 	// with their owner) are moved into project://Library/Trash/<entry>/, keeping their project-relative paths; never a
 	// permanent delete. <entry> is the asset's 16-hex handle, followed by "-<n>" (2, 3, ...) when a previous delete of the
-	// same asset still occupies the name. Undo moves everything back, and the asset keeps its handle. References to the
+	// same asset still occupies the name. Undo moves everything back and removes the trash folders Execute created while
+	// they are empty (§12.3: Execute then Undo leaves the project as it was), and the asset keeps its handle. References to the
 	// asset elsewhere stay as they are: their uses report ASSET_MISSING (a reference diagnostic, cleared when the undo
 	// registers the handle again, AssetManager.h), and project.validate reports them until they are fixed or the delete is
 	// undone. ChangesScene is false.
@@ -56,6 +57,7 @@ namespace Engine {
 	private:
 		std::string m_Label;
 		std::vector<AssetFileMove> m_Moves;
+		std::vector<VfsPath> m_CreatedDirectories; // the folders the last Execute created, deepest first; removed by Undo
 	};
 
 }

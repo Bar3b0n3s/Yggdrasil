@@ -4,6 +4,9 @@
 *.ps1 text eol=crlf
 *.png binary
 *.jpg binary
+*.jpeg binary
+*.tga binary
+*.bmp binary
 *.hdr binary
 *.exr binary
 *.glb binary

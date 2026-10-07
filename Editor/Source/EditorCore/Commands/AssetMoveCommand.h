@@ -25,7 +25,8 @@ namespace Engine {
 	//
 	// The renames go through EditorContext::MoveProjectFile (provenance follows each file, the AssetWriter keeps the hot
 	// reloader from echoing, the registry is updated). Execute applies them in order, creating destination directories; Undo
-	// moves back in reverse order (directories it created stay, empty). Both are atomic (Command.h).
+	// moves back in reverse order and removes the directories Execute created while they are empty, so Execute then Undo
+	// leaves the project as it was and Redo (Execute again) as Execute did (§12.3). Both are atomic (Command.h).
 	class AssetMoveCommand final : public Command
 	{
 	public:
@@ -51,6 +52,7 @@ namespace Engine {
 	private:
 		std::string m_Label;
 		std::vector<AssetFileMove> m_Moves;
+		std::vector<VfsPath> m_CreatedDirectories; // the folders the last Execute created, deepest first; removed by Undo
 	};
 
 }

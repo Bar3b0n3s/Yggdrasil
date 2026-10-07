@@ -23,8 +23,10 @@ namespace Engine {
 		bool MergeMeshes = false;            // true: every mesh of the scene merged into the one mesh sub-asset "mesh:merged"
 	};
 
-	// glTF 2.0 (.gltf, .glb; Architecture §7.4), parsed with cgltf from memory with VFS-backed file callbacks
-	// (cgltf_parse, cgltf_load_buffers through ImportContext::ReadDependency, cgltf_validate).
+	// glTF 2.0 (.gltf, .glb; Architecture §7.4), parsed with cgltf from memory (cgltf_parse, then an overflow-safe bounds
+	// check of every buffer view and accessor and cgltf_validate before any data is read). The importer supplies every buffer and image itself (the .glb binary chunk, data URIs, and external
+	// files read through ImportContext::ReadDependency after the URI rule below), so cgltf never opens a file. URIs are
+	// JSON-decoded first (cgltf keeps escapes such as "\/" as written); the URI rule applies to the decoded string.
 	//
 	// Output (keys are the stable glTF identities of §6.4, so a reimport keeps every handle: "GltfImporter: reimport keeps
 	// sub-asset handles"):
@@ -71,9 +73,10 @@ namespace Engine {
 	// Rejected with ImportFailed and a precise message: a required extension other than KHR_materials_emissive_strength,
 	// KHR_texture_transform and KHR_mesh_quantization, naming it (Draco "KHR_draco_mesh_compression", meshopt
 	// "EXT_meshopt_compression", BasisU "KHR_texture_basisu": "GltfImporter: required Draco extension is rejected with a
-	// precise message"); cgltf_validate failures; an index out of range, a NaN or infinite attribute value, or a primitive
-	// with no non-degenerate triangle. Degenerate triangles are dropped. Skins, animations, cameras and lights are skipped
-	// (§1.2) with ASSET_CONTENT_SKIPPED.
+	// precise message"); a buffer view or accessor (sparse parts included) whose elements do not fit in its data, naming it
+	// ("accessors[<i>]"; an accessor without a buffer view may have at most 2^24 elements); cgltf_validate failures; an index
+	// out of range, a NaN or infinite attribute value, or a primitive with no non-degenerate triangle. Degenerate triangles
+	// are dropped. Skins, animations, cameras and lights are skipped (§1.2) with ASSET_CONTENT_SKIPPED.
 	//
 	// Warnings (ImportResult::Diagnostics, so they persist in the cache manifest): ASSET_UNSUPPORTED_UV_SET for a texture
 	// bound to TEXCOORD_1 (ignored), ASSET_VERTEX_COLORS_IGNORED for COLOR_0 ("GltfImporter: TEXCOORD_1 and COLOR_0 raise

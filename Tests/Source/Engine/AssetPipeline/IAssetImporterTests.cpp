@@ -4,13 +4,14 @@
 
 #include "Engine/AssetPipeline/Importers/TextureImporter.h"
 #include "Engine/Core/Hash.h"
+#include "Engine/Core/Mounts/MemoryMount.h"
 #include "Support/AssetTestFixture.h"
 
 namespace Engine {
 
 	TEST_SUITE("AssetPipeline")
 	{
-		TEST_CASE("ImportContext: dependency reads and lookups are recorded sorted and once" * doctest::skip(true))
+		TEST_CASE("ImportContext: dependency reads and lookups are recorded sorted and once")
 		{
 			Test::AssetTestFixture fixture;
 			fixture.WriteProjectText("Assets/Models/Data/B.bin", "bbbb");
@@ -49,7 +50,7 @@ namespace Engine {
 			CHECK(lookups[1].Found.has_value());
 		}
 
-		TEST_CASE("ImportContext: reads outside the source's asset root are rejected" * doctest::skip(true))
+		TEST_CASE("ImportContext: reads outside the source's asset root are rejected")
 		{
 			Test::AssetTestFixture fixture;
 			fixture.WriteProjectText("Assets/Shared/Utils.bin", "shared");
@@ -86,7 +87,34 @@ namespace Engine {
 			CHECK(context.GetDependencyReads().front().Path == fixture.ProjectPath("Assets/Shared/Utils.bin"));
 		}
 
-		TEST_CASE("IAssetImporter: CanImport matches the extensions ignoring ASCII case" * doctest::skip(true))
+		TEST_CASE("ImportContext: a built-in reads anywhere under engine:// and nowhere else")
+		{
+			Test::AssetTestFixture fixture;
+			REQUIRE(fixture.GetVfs().Mount("engine", CreateScope<MemoryMount>()).has_value());
+			const VfsPath atlas = Test::ParseVfsPath("engine://Fonts/Data/Atlas.bin");
+			REQUIRE(fixture.GetVfs().CreateDirectories(atlas.GetParent()).has_value());
+			REQUIRE(fixture.GetVfs().WriteFileAtomic(atlas, AsBytes(std::string_view("atlas"))).has_value());
+			fixture.WriteProjectText("Assets/Project.bin", "project");
+			ImportContext context({
+				.Vfs = &fixture.GetVfs(),
+				.SourcePath = Test::ParseVfsPath("engine://Fonts/Inter-Regular.ttf"),
+				.SourceBytes = {},
+				.Settings = VariantValue(),
+				.Registry = &fixture.GetRegistry(),
+				.Assets = {},
+				.EnvironmentBaker = nullptr,
+				.ScriptDiagnostics = nullptr,
+			});
+			Result<Buffer> read = context.ReadDependency(atlas);
+			REQUIRE_MESSAGE(read.has_value(), read.error().ToString());
+			CHECK(AsStringView(*read) == "atlas");
+			Result<Buffer> project = context.ReadDependency(fixture.ProjectPath("Assets/Project.bin"));
+			REQUIRE_FALSE(project.has_value());
+			CHECK(project.error().GetCode() == ErrorCode::InvalidArgument);
+			CHECK(context.GetDependencyReads() == std::vector<ImportDependencyRead>{ { .Path = atlas, .Hash = XXH64(std::string_view("atlas")) } });
+		}
+
+		TEST_CASE("IAssetImporter: CanImport matches the extensions ignoring ASCII case")
 		{
 			const TextureImporter importer;
 			CHECK(importer.CanImport(".png"));

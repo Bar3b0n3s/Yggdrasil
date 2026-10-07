@@ -191,7 +191,9 @@ namespace Engine {
 			else if (hash.error().GetCode() != ErrorCode::NotFound)
 				return std::unexpected(std::move(hash).error().WithContext(std::format("while recording '{}' as known", path.ToString())));
 		}
-		else if (info.error().GetCode() != ErrorCode::NotFound)
+		// NotFound, and Validation, the case policy's mismatch (§4.10): only another spelling exists, so this spelling,
+		// which is how a listing would name the file, is absent (the old path of a case-only rename).
+		else if (info.error().GetCode() != ErrorCode::NotFound && info.error().GetCode() != ErrorCode::Validation)
 		{
 			return std::unexpected(std::move(info).error().WithContext(std::format("while recording '{}' as known", path.ToString())));
 		}

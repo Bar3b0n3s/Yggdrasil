@@ -79,10 +79,25 @@ namespace Engine {
 		return context;
 	}
 
-	Status EngineContext::MountEngineResources(const EngineContextSpecification& /*specification*/)
+	Status EngineContext::MountEngineResources(const EngineContextSpecification& specification)
 	{
-		ENGINE_CONTRACT_STUB();
-		return MakeError(ErrorCode::Unsupported, "EngineContext::MountEngineResources is an M6 contract stub");
+		if (!specification.EngineResourcesDirectory.empty())
+		{
+			// The shipped resources are never written by the engine (§2.2, §4.10).
+			ENGINE_TRY_ASSIGN(Scope<NativeDirectoryMount> resources,
+				NativeDirectoryMount::Create(specification.EngineResourcesDirectory, MountAccess::ReadOnly));
+			ENGINE_TRY(m_Vfs.Mount("engine", std::move(resources)));
+		}
+
+		if (!specification.EngineCacheDirectory.empty())
+		{
+			// A cache is rebuilt from its sources, so it keeps no .bak files (§4.10, §7.5), like cache://.
+			ENGINE_TRY(FileSystem::CreateDirectories(specification.EngineCacheDirectory));
+			ENGINE_TRY_ASSIGN(Scope<NativeDirectoryMount> cache,
+				NativeDirectoryMount::Create(specification.EngineCacheDirectory, MountAccess::ReadWrite, AtomicWriteOptions{ .KeepBackup = false }));
+			ENGINE_TRY(m_Vfs.Mount("enginecache", std::move(cache)));
+		}
+		return {};
 	}
 
 	Status EngineContext::CreateGraphics(const GraphicsSpecification& graphics)

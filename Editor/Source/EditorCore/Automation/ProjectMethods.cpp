@@ -8,6 +8,7 @@
 #include "EditorCore/Commands/ProjectSettingsCommand.h"
 #include "EditorCore/EditorContext.h"
 #include "EditorCore/Private/EditorFileError.h"
+#include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/Automation/Protocol/MethodRegistry.h"
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Json/JsonReader.h"
@@ -130,6 +131,22 @@ namespace Engine {
 				return std::optional<std::string>(std::move(canonical));
 			}
 			return std::optional<std::string>();
+		}
+
+		// An asset diagnostic as project.validate reports it (§13.7): the same code, its file and asset, and the id the
+		// validator derives from the code, the file and the subject.
+		static ProjectDiagnostic MakeProjectDiagnostic(const AssetDiagnostic& diagnostic)
+		{
+			ProjectDiagnostic result;
+			result.Id = ProjectValidator::MakeDiagnosticId(diagnostic.Code, diagnostic.Path, {}, {}, {}, diagnostic.Subject);
+			result.Severity = diagnostic.Severity;
+			result.Code = diagnostic.Code;
+			result.Message = diagnostic.Message;
+			result.Asset = diagnostic.Asset.IsValid() ? diagnostic.Asset.ToString() : std::string();
+			result.File = diagnostic.Path;
+			result.Hint = diagnostic.Hint;
+			result.AutoFixable = diagnostic.AutoFixable;
+			return result;
 		}
 
 		// The project files project.upgrade rewrites: the .eproj, then every .scene and .prefab under Assets/, sorted.
@@ -369,10 +386,34 @@ namespace Engine {
 			return result;
 		}
 
-		Result<ProjectRefreshAssetsResult> ProjectRefreshAssets(EditorMethodContext& /*context*/, const NoParams& /*params*/)
+		Result<ProjectRefreshAssetsResult> ProjectRefreshAssets(EditorMethodContext& context, const NoParams& /*params*/)
 		{
-			ENGINE_CONTRACT_STUB();
-			return MakeError(ErrorCode::Unsupported, "Automation::ProjectRefreshAssets is an M6 contract stub");
+			ENGINE_TRY_ASSIGN(const AssetRefreshReport report, context.GetEditor().GetAssets().Refresh());
+			ProjectRefreshAssetsResult result;
+			result.MetaCount = ToAutomationCounter(report.MetaCount);
+			for (const VfsPath& meta : report.CreatedMetas)
+				result.CreatedMetas.push_back(Utils::ToProjectRelative(meta));
+			std::sort(result.CreatedMetas.begin(), result.CreatedMetas.end());
+			const auto toIds = [](std::span<const AssetHandle> handles)
+			{
+				std::vector<std::string> ids;
+				ids.reserve(handles.size());
+				for (const AssetHandle handle : handles)
+					ids.push_back(handle.ToString());
+				std::sort(ids.begin(), ids.end());
+				return ids;
+			};
+			result.Added = toIds(report.Added);
+			result.Removed = toIds(report.Removed);
+			result.Changed = toIds(report.Changed);
+			for (const AssetDiagnostic& diagnostic : report.Diagnostics)
+				result.Diagnostics.push_back(Utils::MakeProjectDiagnostic(diagnostic));
+			if (!result.CreatedMetas.empty() || !result.Changed.empty() || !result.Removed.empty())
+			{
+				ENGINE_INFO("project.refreshAssets: {} new .meta file(s), {} added, {} removed, {} reimported", result.CreatedMetas.size(), result.Added.size(),
+					result.Removed.size(), result.Changed.size());
+			}
+			return result;
 		}
 
 	}
@@ -446,6 +487,14 @@ namespace Engine {
 		registry.Struct<ProjectUpgradeResult>("ProjectUpgradeResult", "What project.upgrade rewrote.")
 			.Field("changedFiles", &ProjectUpgradeResult::ChangedFiles, "The files rewritten (or that a dry run would rewrite), project-relative and sorted.")
 			.Field("unchangedCount", &ProjectUpgradeResult::UnchangedCount, "The project files already canonical.");
+
+		registry.Struct<ProjectRefreshAssetsResult>("ProjectRefreshAssetsResult", "What a rescan of Assets/ found and did.")
+			.Field("metaCount", &ProjectRefreshAssetsResult::MetaCount, "The .meta files read.")
+			.Field("createdMetas", &ProjectRefreshAssetsResult::CreatedMetas, "The .meta files written for sources that had none, project-relative and sorted.")
+			.Field("added", &ProjectRefreshAssetsResult::Added, "The ids of the assets registered now, sorted.")
+			.Field("removed", &ProjectRefreshAssetsResult::Removed, "The ids of the assets whose files are gone, sorted.")
+			.Field("changed", &ProjectRefreshAssetsResult::Changed, "The ids of the assets reimported because their files changed, sorted.")
+			.Field("diagnostics", &ProjectRefreshAssetsResult::Diagnostics, "The scan's diagnostics and the imports' and reimports' failures and warnings.");
 	}
 
 	void RegisterProjectMethods(MethodRegistry& methods)
@@ -553,6 +602,16 @@ namespace Engine {
 				.Examples = { { .Description = "Rewrite every project file in the current format.", .Params = Json::object() } },
 			},
 			&Automation::ProjectUpgrade);
+
+		methods.Add(
+			{
+				.Name = "project.refreshAssets",
+				.Description = "Rescans Assets/ now: writes .meta files for new sources, registers and unregisters assets, imports the new "
+							   "ones and reimports every asset whose files changed; complete when the call returns.",
+				.TimeoutSeconds = 600,
+				.Examples = { { .Description = "Pick up files another program wrote.", .Params = Json::object() } },
+			},
+			&Automation::ProjectRefreshAssets);
 	}
 
 }

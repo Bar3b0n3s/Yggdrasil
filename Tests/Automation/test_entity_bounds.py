@@ -8,7 +8,6 @@ from harness import AutomationTestCase, engine_client
 
 
 class EntityBoundsTests(AutomationTestCase):
-    @unittest.skip("contract stub: un-skipped by M6 stream E")
     def test_entity_bounds_world_aabb(self) -> None:
         client, _ = self.open_editor_with_scene()
         client.call("entity.create", {"name": "Track", "components": {"Transform": {"Translation": [10, 0, 0]}}})

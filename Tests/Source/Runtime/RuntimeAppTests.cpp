@@ -1,6 +1,7 @@
 #include "TestsPCH.h"
 
 #include "Engine/App/ExitCode.h"
+#include "Engine/Asset/BuiltinAssets.h"
 #include "Engine/Platform/Process.h"
 #include "Support/ChildOutput.h"
 #include "Support/HeadlessGpuFixture.h"
@@ -8,8 +9,9 @@
 #include "Support/TestOptions.h"
 #include "Support/Utf8Path.h"
 
-// The runtime executable as a whole process (Roadmap M2): RunApplication with the runtime's (for now empty)
-// application. Runs that need no GPU pass --renderer none; the Vulkan renderer is covered in the GPU suite.
+// The runtime executable as a whole process (Roadmap M2, M6): RunApplication with the runtime's application, which builds
+// its RuntimeAssetManager (the game manifest and its paks arrive with M7). Runs that need no GPU pass --renderer none;
+// the Vulkan renderer is covered in the GPU suite.
 
 namespace Engine {
 
@@ -43,6 +45,23 @@ namespace Engine {
 			// The log file follows --user-data-dir, never the real user-data folder.
 			std::error_code error;
 			CHECK(std::filesystem::is_regular_file(userData / ENGINE_PRODUCT_NAME / "Logs" / "Runtime.log", error));
+		}
+
+		TEST_CASE("RuntimeApp: builds and injects its RuntimeAssetManager at startup")
+		{
+			const Result<std::filesystem::path> runtime = Test::GetBuiltExecutablePath("Runtime");
+			REQUIRE_MESSAGE(runtime.has_value(), runtime.error().ToString());
+			Test::TempDirectory userData("RuntimeAssets");
+			const ProcessSpecification specification = {
+				.Executable = *runtime,
+				.Arguments = { "--headless", "--renderer", "none", "--frames", "2", "--user-data-dir=" + Test::PathToUtf8(userData.GetPath()) },
+			};
+			const Result<ProcessResult> result = Process::Run(specification, std::chrono::seconds(60));
+			REQUIRE_MESSAGE(result.has_value(), result.error().ToString());
+			CHECK_MESSAGE(result->ExitCode == ExitCode::Success, result->StandardError);
+			// Until the game manifest adds paks (M7), the manager serves the procedural built-ins.
+			CHECK(result->StandardError.contains(std::format("Runtime asset manager: no paks, {} procedural built-ins", GetProceduralBuiltinEntries().size())));
+			CHECK(Test::FindProblemLogLines(result->StandardError).empty());
 		}
 
 		TEST_CASE("RuntimeApp: --headless --frames 10 renders with the Vulkan renderer and exits 0"

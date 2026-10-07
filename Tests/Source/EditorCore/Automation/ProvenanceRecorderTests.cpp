@@ -152,7 +152,7 @@ namespace Engine {
 			CHECK(recorder.Find("Other.eproj") == nullptr);
 		}
 
-		TEST_CASE("ProvenanceRecorder: Remove forgets an entry and keeps the others sorted" * doctest::skip(true))
+		TEST_CASE("ProvenanceRecorder: Remove forgets an entry and keeps the others sorted")
 		{
 			Scope<VirtualFileSystem> vfs = MakeProvenanceVfs();
 			Result<ProvenanceRecorder> recorder = ProvenanceRecorder::Load(*vfs);

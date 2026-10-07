@@ -3,14 +3,26 @@
 
 #include "EditorCore/Commands/SceneEditCommand.h"
 #include "EditorCore/EditorContext.h"
+#include "EditorCore/Private/SceneEditRollback.h"
+#include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/Core/Assert.h"
 #include "Engine/Core/Log.h"
 #include "Engine/Scene/ChangeTracker.h"
+#include "Engine/Scene/Components/PrefabInstanceComponent.h"
+#include "Engine/Scene/Components/PrefabLinkComponent.h"
 #include "Engine/Scene/Entity.h"
+#include "Engine/Scene/Prefab.h"
+#include "Engine/Scene/PrefabAsset.h"
+#include "Engine/Scene/PrefabInstantiator.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/SceneSerializer.h"
 
 #include <nlohmann/json.hpp>
+
+#include <map>
+#include <set>
+#include <utility>
+#include <vector>
 
 namespace Engine {
 
@@ -23,39 +35,69 @@ namespace Engine {
 			return parent.IsValid() ? parent.GetUUID() : UUID();
 		}
 
-		// The changes that bring the tracked entities back to their Before state from the scene's current state (After
-		// states are left out: SceneEditCommand::ApplyChanges then reads the current state from the scene). An entity that
-		// existed before the edit but has no Before snapshot cannot be restored and is left out, with an error logged.
-		static std::vector<SceneEntityChange> MakeRollbackChanges(std::span<const EntityChange> tracked, std::string_view label)
+		// True when `entity` (the instance root itself when `isRoot`) or a prefab member below it was touched by the active edit.
+		// A nested instance root answers for its own members, and user children (no PrefabLinkComponent) never count: they
+		// are stored in the scene as they are, not as overrides (§5.5).
+		static bool HasTouchedMember(const Scene& scene, const ChangeTracker& tracker, ConstEntity entity, bool isRoot)
 		{
-			std::vector<SceneEntityChange> changes;
-			changes.reserve(tracked.size());
-			for (const EntityChange& change : tracked)
+			if (!isRoot && entity.TryGetComponent<PrefabInstanceComponent>() != nullptr)
+				return false;
+			if ((isRoot || entity.TryGetComponent<PrefabLinkComponent>() != nullptr) && !tracker.NeedsSnapshot(entity.GetUUID()))
+				return true;
+			for (const UUID child : entity.GetChildren())
 			{
-				if (change.Kind != EntityChangeKind::Created && change.Before == nullptr)
-				{
-					ENGINE_ERROR("Rolling back '{}' cannot restore entity {}: its state before the edit could not be serialized", label, change.EntityID);
-					continue;
-				}
-				changes.push_back(SceneEntityChange{ .EntityID = change.EntityID,
-					.Before = change.Kind == EntityChangeKind::Created ? nullptr : change.Before,
-					.After = nullptr,
-					.ParentBefore = change.ParentBefore,
-					.SiblingIndexBefore = change.SiblingIndexBefore,
-					.ParentAfter = UUID(),
-					.SiblingIndexAfter = 0 });
+				const ConstEntity childEntity = scene.FindEntityByID(child);
+				if (childEntity.IsValid() && HasTouchedMember(scene, tracker, childEntity, false))
+					return true;
 			}
-			return changes;
+			return false;
 		}
 
-		// Restores the Before state of `tracked`; a failure is a bug (every Before state was valid), asserted and logged.
-		static void RollBackTrackedChanges(Scene& scene, std::span<const EntityChange> tracked, std::string_view label)
+		// §5.5 "When an edit commits on an instance member, the change tracker records field-level overrides": refreshes the
+		// override records of every prefab instance whose root or members the active edit touched, against the prefab's
+		// current version (PrefabInstantiator::RefreshOverrides; overrides are derived by diffing, ADR 0006 decision 17), while
+		// the tracker still runs, so the new records are part of the same undo step and scene.open's rebuild from prefab +
+		// overrides (ADR 0010 decision 11) keeps the edit. An instance whose prefab is not registered keeps its records
+		// (PREFAB_MISSING_ASSET); one whose prefab cannot be loaded or diffed keeps them with a warning.
+		static void RecordTouchedInstanceOverrides(EditorContext& context, Scene& scene, std::string_view label)
 		{
-			const std::vector<SceneEntityChange> changes = MakeRollbackChanges(tracked, label);
-			const Status restored = SceneEditCommand::ApplyChanges(scene, changes, false);
-			ENGINE_ASSERT(restored.has_value(), "rolling back '{}' failed: {}", label, restored ? std::string() : restored.error().ToString());
-			if (!restored)
-				ENGINE_ERROR("Rolling back '{}' failed: {}", label, restored.error().ToString());
+			const Scene& constScene = scene;
+			const ChangeTracker& tracker = scene.GetChangeTracker();
+			std::vector<std::pair<UUID, AssetHandle>> touched;
+			constScene.ForEachCanonical([&constScene, &tracker, &touched](ConstEntity entity)
+			{
+				const PrefabInstanceComponent* instance = entity.TryGetComponent<PrefabInstanceComponent>();
+				if (instance != nullptr && instance->Prefab.GetHandle().IsValid() && HasTouchedMember(constScene, tracker, entity, true))
+					touched.emplace_back(entity.GetUUID(), instance->Prefab.GetHandle());
+			});
+			if (touched.empty())
+				return;
+
+			const PrefabOptions options{ .Schemas = nullptr };
+			std::map<AssetHandle, Prefab> loaded;
+			std::set<AssetHandle> unavailable;
+			for (const auto& [rootID, handle] : touched)
+			{
+				if (unavailable.contains(handle))
+					continue;
+				auto prefab = loaded.find(handle);
+				if (prefab == loaded.end())
+				{
+					LoadReport report;
+					Result<Prefab> current = LoadPrefabAsset(context.GetAssets(), handle, scene.GetTypeRegistry(), report);
+					if (!current)
+					{
+						if (current.error().GetCode() != ErrorCode::NotFound)
+							ENGINE_WARN("'{}' keeps the recorded overrides of the instances of prefab {}: {}", label, handle, current.error().ToString());
+						unavailable.insert(handle);
+						continue;
+					}
+					prefab = loaded.emplace(handle, std::move(*current)).first;
+				}
+				const Entity root = scene.FindEntityByID(rootID);
+				if (Status refreshed = PrefabInstantiator::RefreshOverrides(root, prefab->second, options); !refreshed)
+					ENGINE_WARN("'{}' keeps the recorded overrides of the prefab instance '{}': {}", label, scene.GetEntityPath(root), refreshed.error().ToString());
+			}
 		}
 
 	}
@@ -94,6 +136,7 @@ namespace Engine {
 			return 0;
 		m_IsActive = false;
 		Scene& scene = GetScene();
+		Utils::RecordTouchedInstanceOverrides(*m_Context, scene, m_Label);
 		const std::vector<EntityChange> tracked = scene.GetChangeTracker().End();
 #if defined(ENGINE_DEBUG)
 		// §12.3: every entity the tracker did not report is unchanged (see the constructor).

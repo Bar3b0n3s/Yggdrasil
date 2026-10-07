@@ -37,6 +37,11 @@ namespace Engine {
 		return CreateScope<EditorMethodContext>(*m_Editor, *m_Server, std::move(request));
 	}
 
+	IAssetReferenceResolver* EditorMethodContext::GetAssetReferenceResolver() const
+	{
+		return &m_Server->GetAssetReferenceResolver();
+	}
+
 	Result<Scene*> EditorMethodContext::ResolveTargetScene(SceneTarget target, bool given, bool /*mutation*/) const
 	{
 		// Reads default to the play scene while playing and mutations to the edit scene (§13.4); there are no play sessions

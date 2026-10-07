@@ -86,8 +86,9 @@ namespace Engine {
 			* doctest::test_suite(Test::GpuSuite))
 		{
 			// Sampled-only textures fail (the ImGui font atlas here); render targets keep working, so the editor runs its
-			// frames, reports the failure once, and never crashes (§8.14 item 7). The asset placeholder of the same path
-			// arrives with GpuResourceCache (M6).
+			// frames, reports the failure once, and never crashes (§8.14 item 7). The editor draws no assets before the scene
+			// renderer (M7), so the asset half of the acceptance, the placeholder plus an ASSET_UPLOAD_FAILED diagnostic, is
+			// "GpuResourceCache: an injected texture OOM yields the placeholder and a diagnostic" (ADR 0010 decision 22).
 			if (!Test::ProbeGpuForProcess())
 				return;
 			Test::TempDirectory userData("EditorOomTexture");

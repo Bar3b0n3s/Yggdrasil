@@ -20,6 +20,8 @@ namespace Engine {
 		constexpr std::string_view BatchOption = "--batch";
 		constexpr std::string_view UpgradeOption = "--upgrade";
 		constexpr std::string_view DumpReferenceOption = "--dump-reference";
+		constexpr std::string_view BakeEngineAssetsOption = "--bake-engine-assets";
+		constexpr std::string_view EngineCacheDirectoryOption = "--engine-cache-dir";
 
 		constexpr std::array EditorOptions = {
 			CommandLineOption{ .Name = ProjectOption, .Value = CommandLineValue::Required, .ValueName = "path", .Description = "Open the project (.eproj or its directory)." },
@@ -29,6 +31,8 @@ namespace Engine {
 			CommandLineOption{ .Name = BatchOption, .Value = CommandLineValue::Required, .ValueName = "file.jsonl", .Description = "Run the automation requests of a batch file and exit." },
 			CommandLineOption{ .Name = UpgradeOption, .Value = CommandLineValue::None, .ValueName = {}, .Description = "Run project.upgrade on the project and exit." },
 			CommandLineOption{ .Name = DumpReferenceOption, .Value = CommandLineValue::Required, .ValueName = "dir", .Description = "Write the method catalogues and exit." },
+			CommandLineOption{ .Name = BakeEngineAssetsOption, .Value = CommandLineValue::None, .ValueName = {}, .Description = "Bake the engine resources into the engine cooked cache and exit." },
+			CommandLineOption{ .Name = EngineCacheDirectoryOption, .Value = CommandLineValue::Required, .ValueName = "dir", .Description = "Use this engine cooked cache instead of the checkout's bin/EngineCache." },
 		};
 
 	}
@@ -74,6 +78,8 @@ namespace Engine {
 		ENGINE_TRY_ASSIGN(options.BatchFile, Utils::ReadPathOption(commandLine, BatchOption));
 		options.Upgrade = commandLine.Has(UpgradeOption);
 		ENGINE_TRY_ASSIGN(options.DumpReferenceDirectory, Utils::ReadPathOption(commandLine, DumpReferenceOption));
+		options.BakeEngineAssets = commandLine.Has(BakeEngineAssetsOption);
+		ENGINE_TRY_ASSIGN(options.EngineCacheDirectory, Utils::ReadPathOption(commandLine, EngineCacheDirectoryOption));
 
 		if (options.ReadOnly && !options.Project.has_value())
 			return MakeError(ErrorCode::InvalidArgument, "option '{}' needs '{}'", ReadOnlyOption, ProjectOption);
@@ -81,16 +87,17 @@ namespace Engine {
 			return MakeError(ErrorCode::InvalidArgument, "option '{}' needs '{}'", UpgradeOption, ProjectOption);
 		if (options.Upgrade && options.ReadOnly)
 			return MakeError(ErrorCode::InvalidArgument, "option '{}' rewrites project files, which '{}' forbids", UpgradeOption, ReadOnlyOption);
-		const int oneShotModes = (options.BatchFile.has_value() ? 1 : 0) + (options.Upgrade ? 1 : 0) + (options.DumpReferenceDirectory.has_value() ? 1 : 0);
+		const int oneShotModes = (options.BatchFile.has_value() ? 1 : 0) + (options.Upgrade ? 1 : 0) + (options.DumpReferenceDirectory.has_value() ? 1 : 0)
+			+ (options.BakeEngineAssets ? 1 : 0);
 		if (oneShotModes > 1)
 		{
-			return MakeError(ErrorCode::InvalidArgument, "options '{}', '{}' and '{}' exclude each other", BatchOption, UpgradeOption,
-				DumpReferenceOption);
+			return MakeError(ErrorCode::InvalidArgument, "options '{}', '{}', '{}' and '{}' exclude each other", BatchOption, UpgradeOption,
+				DumpReferenceOption, BakeEngineAssetsOption);
 		}
-		if ((options.Automation || options.AutomationTestHooks) && (options.DumpReferenceDirectory.has_value() || options.Upgrade))
+		if ((options.Automation || options.AutomationTestHooks) && (options.DumpReferenceDirectory.has_value() || options.Upgrade || options.BakeEngineAssets))
 		{
-			return MakeError(ErrorCode::InvalidArgument, "options '{}' and '{}' cannot be combined with '{}' or '{}'", AutomationOption,
-				TestHooksOption, DumpReferenceOption, UpgradeOption);
+			return MakeError(ErrorCode::InvalidArgument, "options '{}' and '{}' cannot be combined with '{}', '{}' or '{}'", AutomationOption,
+				TestHooksOption, DumpReferenceOption, UpgradeOption, BakeEngineAssetsOption);
 		}
 		if (options.AutomationTestHooks && !options.Automation && !options.BatchFile.has_value())
 			return MakeError(ErrorCode::InvalidArgument, "option '{}' needs '{}' or '{}'", TestHooksOption, AutomationOption, BatchOption);

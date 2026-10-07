@@ -6,7 +6,7 @@ namespace Engine {
 
 	TEST_SUITE("AssetPipeline")
 	{
-		TEST_CASE("AssetDependencyGraph: dependents and transitive dependents are sorted" * doctest::skip(true))
+		TEST_CASE("AssetDependencyGraph: dependents and transitive dependents are sorted")
 		{
 			// texture 1 <- material 2 <- prefab 4; texture 1 <- material 3; material 3 <- prefab 4.
 			const AssetHandle texture(1), materialA(2), materialB(3), prefab(4);
@@ -29,7 +29,7 @@ namespace Engine {
 			CHECK(graph.GetDependencies(materialA).empty());
 		}
 
-		TEST_CASE("AssetDependencyGraph: the reimport order puts dependencies first, ties by handle" * doctest::skip(true))
+		TEST_CASE("AssetDependencyGraph: the reimport order puts dependencies first, ties by handle")
 		{
 			const AssetHandle texture(10), materialA(30), materialB(20), prefab(5), unrelated(7);
 			AssetDependencyGraph graph;

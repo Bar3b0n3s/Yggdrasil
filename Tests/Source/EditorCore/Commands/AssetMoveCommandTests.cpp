@@ -9,6 +9,8 @@
 #include "Support/EditorTestFixture.h"
 #include "Support/TestData.h"
 
+#include <algorithm>
+
 namespace Engine {
 
 	namespace {
@@ -35,11 +37,30 @@ namespace Engine {
 			REQUIRE(editor.GetAssets().Refresh().has_value());
 		}
 
+		// Every file and folder (with a trailing '/') under project://Assets and project://Library/Trash, sorted: the state
+		// §12.3's property compares (Execute then Undo equals the original, Execute then Undo then Redo equals Execute).
+		std::vector<std::string> ListAssetTree(EditorContext& editor)
+		{
+			std::vector<std::string> paths;
+			for (const std::string_view root : { "Assets", "Library/Trash" })
+			{
+				const VfsPath directory = MakeProjectPath(root);
+				if (!editor.GetVfs().Exists(directory))
+					continue;
+				Result<std::vector<VfsEntry>> entries = editor.GetVfs().List(directory, true);
+				REQUIRE_MESSAGE(entries.has_value(), entries.error().ToString());
+				for (const VfsEntry& entry : *entries)
+					paths.push_back(std::string(entry.Path.GetPath()) + (entry.Info.IsDirectory ? "/" : ""));
+			}
+			std::ranges::sort(paths);
+			return paths;
+		}
+
 	}
 
 	TEST_SUITE("EditorCore")
 	{
-		TEST_CASE("AssetMoveCommand: moves a glTF with its dependency files and keeps every handle" * doctest::skip(true))
+		TEST_CASE("AssetMoveCommand: moves a glTF with its dependency files and keeps every handle")
 		{
 			Test::EditorTestFixture fixture("AssetMoveCommand");
 			fixture.CreateAndOpenProject();
@@ -48,10 +69,13 @@ namespace Engine {
 			const AssetHandle handle = editor.GetAssets().Resolve("Assets/Models/Textured.gltf").value_or(AssetHandle());
 			REQUIRE(handle.IsValid());
 
+			const std::vector<std::string> before = ListAssetTree(editor);
+			CHECK(std::ranges::find(before, "Assets/Levels/") == before.end());
 			Result<Scope<AssetMoveCommand>> command = AssetMoveCommand::Create(editor, handle, MakeProjectPath("Assets/Levels/Track.gltf"));
 			REQUIRE_MESSAGE(command.has_value(), command.error().ToString());
 			CHECK((*command)->GetMoves().size() == 6);
 			REQUIRE(editor.Execute(std::move(*command)).has_value());
+			const std::vector<std::string> executed = ListAssetTree(editor);
 			CHECK(editor.GetVfs().Exists(MakeProjectPath("Assets/Levels/Track.gltf")));
 			CHECK(editor.GetVfs().Exists(MakeProjectPath("Assets/Levels/Textured.bin.meta")));
 			CHECK(editor.GetVfs().Exists(MakeProjectPath("Assets/Levels/Textures/Checker.png")));
@@ -61,12 +85,22 @@ namespace Engine {
 			CHECK(editor.GetProvenance()->Find("Assets/Levels/Track.gltf") != nullptr);
 			CHECK(editor.GetProvenance()->Find("Assets/Models/Textured.gltf") == nullptr);
 
+			// §12.3: Undo restores the exact prior state, the folders the move created (Assets/Levels, Assets/Levels/Textures)
+			// included, and Redo gives exactly the state after Execute.
 			REQUIRE(editor.GetHistory().Undo(editor).has_value());
 			CHECK(editor.GetAssets().Resolve("Assets/Models/Textured.gltf") == handle);
 			CHECK(editor.GetVfs().Exists(MakeProjectPath("Assets/Models/Textures/Checker.png.meta")));
+			CHECK(ListAssetTree(editor) == before);
+			REQUIRE(editor.GetHistory().Redo(editor).has_value());
+			CHECK(ListAssetTree(editor) == executed);
+			CHECK(editor.GetAssets().Resolve("Assets/Levels/Track.gltf") == handle);
+			REQUIRE(editor.GetHistory().Undo(editor).has_value());
+			CHECK(ListAssetTree(editor) == before);
+			// The folder can be created again, as before the move.
+			CHECK(editor.CreateProjectDirectory(MakeProjectPath("Assets/Levels")).has_value());
 		}
 
-		TEST_CASE("AssetMoveCommand: an occupied destination is refused and nothing moves" * doctest::skip(true))
+		TEST_CASE("AssetMoveCommand: an occupied destination is refused and nothing moves")
 		{
 			Test::EditorTestFixture fixture("AssetMoveOccupied");
 			fixture.CreateAndOpenProject();

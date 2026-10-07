@@ -1,19 +1,27 @@
 #include "EditorPCH.h"
 #include "EditorCore/Project/ProjectValidator.h"
 
+#include "EditorCore/Commands/AssetEditCommand.h"
+#include "EditorCore/Commands/AssetMoveCommand.h"
 #include "EditorCore/Commands/ProjectSettingsCommand.h"
 #include "EditorCore/Commands/SceneEdit.h"
 #include "EditorCore/EditorContext.h"
+#include "Engine/Asset/AssetMetadata.h"
+#include "Engine/Asset/AssetRegistry.h"
+#include "Engine/AssetPipeline/EditorAssetManager.h"
+#include "Engine/AssetPipeline/ImporterRegistry.h"
 #include "Engine/Core/Assert.h"
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Hash.h"
 #include "Engine/Core/Json/JsonReader.h"
+#include "Engine/Core/Log.h"
 #include "Engine/Core/UUIDGenerator.h"
 #include "Engine/Core/VirtualFileSystem.h"
 #include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Scene/ComponentAccess.h"
 #include "Engine/Scene/ComponentHostOps.h"
 #include "Engine/Scene/Components/CameraComponent.h"
+#include "Engine/Scene/Components/PrefabInstanceComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/LoadReport.h"
 #include "Engine/Scene/Scene.h"
@@ -25,8 +33,8 @@
 #include <set>
 #include <tuple>
 
-// The M4 validator (Architecture §13.7, ADR 0008 decision 17). The code list and the load-code mapping (ADR 0006 decision
-// 35) are data the contract froze.
+// The validator (Architecture §13.7, ADR 0008 decision 17; the asset checks of M6, ADR 0010 decision 5). The code list and
+// the load-code mapping (ADR 0006 decision 35) are data the contracts froze.
 
 namespace Engine {
 
@@ -44,9 +52,29 @@ namespace Engine {
 			ComponentFieldOutOfRangeCode,
 			ComponentMissingRequirementCode,
 			ComponentConflictCode,
+			AssetMissingCode,
+			AssetTypeMismatchCode,
 			AssetImportFailedCode,
+			AssetOrphanMetaCode,
+			AssetDuplicateHandleCode,
+			AssetOrphanDependencyCode,
+			AssetTangentsApproximatedCode,
+			AssetUnsupportedUvSetCode,
+			AssetVertexColorsIgnoredCode,
+			AssetContentSkippedCode,
+			PathCaseMismatchCode,
+			PrefabMissingAssetCode,
 			BuildStartSceneMissingCode,
 			BuildSceneMissingCode,
+		};
+
+		// The import diagnostics the asset manager records for an asset (the scan's come from the validator's own scan).
+		constexpr std::array ImportDiagnosticCodes = {
+			AssetImportFailedCode,
+			AssetTangentsApproximatedCode,
+			AssetUnsupportedUvSetCode,
+			AssetVertexColorsIgnoredCode,
+			AssetContentSkippedCode,
 		};
 
 		constexpr std::string_view FixLabel = "Fix Validation Issues";
@@ -82,11 +110,20 @@ namespace Engine {
 			bool InArray = false; // the value is an array element (or below one)
 		};
 
-		// A diagnostic with the subject its id was made from, which fixes need (ProjectDiagnostic does not carry it).
+		// A diagnostic with the subject its id was made from, which fixes need (ProjectDiagnostic does not carry it), and for
+		// an asset scan diagnostic the registry's own diagnostic, which AssetRegistry::PlanFix identifies.
 		struct CollectedDiagnostic
 		{
 			ProjectDiagnostic Diagnostic{};
 			std::string Subject{};
+			std::optional<AssetDiagnostic> Scan{};
+		};
+
+		// What a validation found: the diagnostics, and the scan of the Assets folder that their asset fixes are planned on.
+		struct Collection
+		{
+			std::vector<CollectedDiagnostic> Diagnostics{};
+			std::optional<AssetRegistry> Scanned{};
 		};
 
 	}
@@ -422,10 +459,205 @@ namespace Engine {
 			}
 		}
 
-		static void CheckScene(const CheckedScene& checked, std::vector<CollectedDiagnostic>& diagnostics)
+		// Calls `visit(site, handle, acceptedType)` for every non-null AssetRef value inside `value` (a JSON value of `type`).
+		// Variant values are skipped like in VisitEntityRefs.
+		template<typename Visit>
+		static void VisitAssetRefs(const Json& value, const TypeInfo& type, const EntityRefSite& site, Visit& visit)
+		{
+			switch (type.GetKind())
+			{
+				case FieldType::AssetRef:
+				{
+					if (!value.is_string())
+						return;
+					const Result<std::string> text = JsonReader(value).ReadString();
+					const std::optional<UUID> handle = text.has_value() ? UUID::FromString(*text) : std::nullopt;
+					if (handle.has_value() && handle->IsValid())
+						visit(site, *handle, std::string_view(type.GetAssetTypeName()));
+					return;
+				}
+				case FieldType::Array:
+				{
+					if (!value.is_array() || type.GetElement() == nullptr)
+						return;
+					EntityRefSite element = site;
+					element.InArray = true;
+					for (const Json& item : value)
+						VisitAssetRefs(item, *type.GetElement(), element, visit);
+					return;
+				}
+				case FieldType::Map:
+				{
+					if (!value.is_object() || type.GetElement() == nullptr)
+						return;
+					for (auto member = value.begin(); member != value.end(); ++member)
+					{
+						EntityRefSite element = site;
+						if (element.MapKey.empty())
+							element.MapKey = member.key();
+						VisitAssetRefs(member.value(), *type.GetElement(), element, visit);
+					}
+					return;
+				}
+				case FieldType::Struct:
+				{
+					if (!value.is_object() || type.GetStruct() == nullptr)
+						return;
+					for (const Scope<FieldInfo>& field : type.GetStruct()->GetFields())
+					{
+						if (field->IsVirtual() || !field->GetMeta().Serialized)
+							continue;
+						const auto member = value.find(field->GetName());
+						if (member != value.end())
+							VisitAssetRefs(member.value(), field->GetType(), site, visit);
+					}
+					return;
+				}
+				case FieldType::Bool:
+				case FieldType::Int32:
+				case FieldType::UInt32:
+				case FieldType::Float:
+				case FieldType::Vec2:
+				case FieldType::Vec3:
+				case FieldType::Vec4:
+				case FieldType::Quat:
+				case FieldType::Color3:
+				case FieldType::Color4:
+				case FieldType::Bool3:
+				case FieldType::String:
+				case FieldType::EntityRef:
+				case FieldType::Enum:
+				case FieldType::Variant:
+					return;
+			}
+		}
+
+		// Calls `visit(site, handle, acceptedType)` for every AssetRef value in the top-level fields `fields` of `object`.
+		template<typename Visit>
+		static void VisitFieldAssetRefs(const Json& object, std::span<const Scope<FieldInfo>> fields, Visit& visit)
+		{
+			for (const Scope<FieldInfo>& field : fields)
+			{
+				if (field->IsVirtual() || !field->GetMeta().Serialized)
+					continue;
+				const auto member = object.find(field->GetName());
+				if (member == object.end())
+					continue;
+				EntityRefSite site;
+				site.Field = field->GetName();
+				VisitAssetRefs(member.value(), field->GetType(), site, visit);
+			}
+		}
+
+		// ASSET_MISSING for a reference no registry knows, ASSET_TYPE_MISMATCH for one of another type than `acceptedType`
+		// (empty: any type) or one that cannot be loaded at all (a dependency file). The manager knows the built-ins too.
+		static void CheckAssetReference(const EditorContext& editor, AssetHandle handle, std::string_view acceptedType, const DiagnosticSite& site,
+			std::string_view where, std::vector<CollectedDiagnostic>& diagnostics)
+		{
+			const EditorAssetManager& assets = editor.GetAssets();
+			const AssetType actual = assets.GetAssetType(handle);
+			const std::string expected = acceptedType.empty() ? std::string("asset") : std::string(acceptedType);
+			CollectedDiagnostic collected;
+			if (actual == AssetType::None && assets.GetMetadata(handle) == nullptr)
+			{
+				collected = MakeDiagnostic(AssetMissingCode, DiagnosticSeverity::Error,
+					std::format("{} refers to the {} {}, which no asset has", where, expected, handle.ToString()), site,
+					"restore the asset (edit.undo of its deletion, or from version control), or assign another one", false);
+			}
+			else if (actual == AssetType::None || (!acceptedType.empty() && AssetTypeToString(actual) != acceptedType))
+			{
+				const std::string what = actual == AssetType::None ? std::string("a dependency file, which is never loaded on its own")
+																   : std::format("a {}", AssetTypeToString(actual));
+				collected = MakeDiagnostic(AssetTypeMismatchCode, DiagnosticSeverity::Error,
+					std::format("{} refers to {} ({}), but takes a {}", where, handle.ToString(), what, expected), site,
+					std::format("assign an asset of type {}", expected), false);
+			}
+			else
+			{
+				return;
+			}
+			collected.Diagnostic.Asset = handle.ToString();
+			diagnostics.push_back(std::move(collected));
+		}
+
+		// The asset references of one component (by its JSON), and of a prefab instance its prefab (PREFAB_MISSING_ASSET when
+		// it is not registered: the scene still loads, fully expanded, §5.5).
+		static void CheckComponentAssets(const EditorContext& editor, const ComponentInfo& info, const Json& component, const DiagnosticSite& at,
+			std::string_view owner, std::vector<CollectedDiagnostic>& diagnostics)
+		{
+			const TypeRegistry& registry = editor.GetTypeRegistry();
+			if (&info == registry.FindComponent<PrefabInstanceComponent>())
+			{
+				const auto prefab = component.find("Prefab");
+				const Result<std::string> text = prefab != component.end() && prefab->is_string() ? JsonReader(*prefab).ReadString()
+																								  : Result<std::string>(std::string());
+				const std::optional<UUID> handle = text.has_value() ? UUID::FromString(*text) : std::nullopt;
+				if (!handle.has_value() || !handle->IsValid())
+					return;
+				DiagnosticSite site = at;
+				site.Component = info.GetName();
+				site.Field = "Prefab";
+				if (editor.GetAssets().GetAssetType(*handle) == AssetType::None && editor.GetAssets().GetMetadata(*handle) == nullptr)
+				{
+					CollectedDiagnostic collected = MakeDiagnostic(PrefabMissingAssetCode, DiagnosticSeverity::Warning,
+						std::format("'{}' is an instance of the prefab {}, which is not registered; it stays as it is, fully expanded", owner,
+							handle->ToString()),
+						site, "restore the prefab asset, or unpack the instance (prefab.unpack)", false);
+					collected.Diagnostic.Asset = handle->ToString();
+					diagnostics.push_back(std::move(collected));
+					return;
+				}
+				CheckAssetReference(editor, *handle, AssetTypeToString(AssetType::Prefab), site, std::format("the instance '{}'", owner), diagnostics);
+				return;
+			}
+
+			const auto visit = [&](const EntityRefSite& reference, AssetHandle handle, std::string_view acceptedType)
+			{
+				DiagnosticSite site = at;
+				site.Component = info.GetName();
+				site.Field = reference.Field;
+				site.Subject = MakeReferenceSubject(reference, handle);
+				CheckAssetReference(editor, handle, acceptedType, site, std::format("'{}.{}' of '{}'", info.GetName(), reference.Field, owner),
+					diagnostics);
+			};
+			VisitFieldAssetRefs(component, info.GetFields(), visit);
+		}
+
+		// The components whose asset references the validator checks: those whose entity references it checks, plus the hidden
+		// prefab instance component, whose prefab reference PREFAB_MISSING_ASSET covers.
+		static bool HasAssetReferences(const ComponentInfo& info, const TypeRegistry& registry)
+		{
+			if (&info == registry.FindComponent<PrefabInstanceComponent>())
+				return info.GetHostOps() != nullptr;
+			return HasSceneReferences(info);
+		}
+
+		static void CheckSceneAssets(const EditorContext& editor, const CheckedScene& checked, std::vector<CollectedDiagnostic>& diagnostics)
+		{
+			const Scene& scene = *checked.Target;
+			const TypeRegistry& registry = scene.GetTypeRegistry();
+			scene.ForEachCanonical([&](ConstEntity entity)
+			{
+				for (const ComponentInfo* info : registry.GetComponents())
+				{
+					if (!HasAssetReferences(*info, registry) || !info->GetHostOps()->Has(entity))
+						continue;
+					const Result<Json> component = ComponentAccess::GetComponentJson(entity, info->GetName());
+					if (!component)
+						continue;
+					DiagnosticSite site;
+					site.File = checked.File;
+					site.Entity = entity.GetUUID().ToString();
+					CheckComponentAssets(editor, *info, *component, site, scene.GetEntityPath(entity), diagnostics);
+				}
+			});
+		}
+
+		static void CheckScene(const EditorContext& editor, const CheckedScene& checked, std::vector<CollectedDiagnostic>& diagnostics)
 		{
 			CheckCameras(checked, diagnostics);
 			CheckDanglingReferences(checked, diagnostics);
+			CheckSceneAssets(editor, checked, diagnostics);
 		}
 
 		// Loads the scene file `path` into a scratch scene in Repair mode and checks it; a file that cannot be loaded at all is
@@ -456,7 +688,7 @@ namespace Engine {
 				return;
 			}
 			MapLoadReport(*scratch, report, checked, diagnostics);
-			CheckScene(checked, diagnostics);
+			CheckScene(editor, checked, diagnostics);
 		}
 
 		// The project file's name, relative to the project root ("Tetris.eproj").
@@ -524,6 +756,114 @@ namespace Engine {
 			return scenes;
 		}
 
+		// The validator's own scan of the Assets folder (a copy of the editor's registry, so the keeper rule sees the registered
+		// paths, scanned now: the report describes the files as they are), its diagnostics under their codes. nullopt without
+		// an Assets folder.
+		static Result<std::optional<AssetRegistry>> ScanAssets(const EditorContext& editor, std::vector<CollectedDiagnostic>& diagnostics)
+		{
+			ENGINE_TRY_ASSIGN(const VfsPath assets, VfsPath::Create("project", "Assets"));
+			if (!editor.GetVfs().Exists(assets))
+				return std::optional<AssetRegistry>();
+			ImporterRegistry importers;
+			RegisterBuiltinImporters(importers);
+			AssetRegistry scanned = editor.GetAssets().GetRegistry();
+			ENGINE_TRY_ASSIGN(const AssetScanResult scan, scanned.Scan(editor.GetVfs(), assets, importers.Describe()));
+			for (const AssetDiagnostic& diagnostic : scan.Diagnostics)
+			{
+				DiagnosticSite site;
+				site.File = diagnostic.Path;
+				site.Subject = diagnostic.Subject;
+				CollectedDiagnostic collected = MakeDiagnostic(diagnostic.Code, diagnostic.Severity, diagnostic.Message, site, diagnostic.Hint,
+					diagnostic.AutoFixable);
+				collected.Diagnostic.Asset = FormatOptionalUUID(diagnostic.Asset);
+				collected.Scan = diagnostic;
+				diagnostics.push_back(std::move(collected));
+			}
+			return std::optional<AssetRegistry>(std::move(scanned));
+		}
+
+		// The import diagnostics the asset manager holds: failed imports and the importers' warnings (§7.4).
+		static void CollectImportDiagnostics(const EditorContext& editor, std::vector<CollectedDiagnostic>& diagnostics)
+		{
+			for (const AssetDiagnostic& diagnostic : editor.GetAssets().GetDiagnostics())
+			{
+				// An import diagnostic names its asset; the scan's (unreadable .meta files) come from ScanAssets.
+				if (!diagnostic.Asset.IsValid()
+					|| std::ranges::find(ImportDiagnosticCodes, std::string_view(diagnostic.Code)) == ImportDiagnosticCodes.end())
+				{
+					continue;
+				}
+				DiagnosticSite site;
+				site.File = diagnostic.Path;
+				site.Subject = diagnostic.Subject.empty() ? diagnostic.Asset.ToString() : diagnostic.Subject;
+				CollectedDiagnostic collected = MakeDiagnostic(diagnostic.Code, diagnostic.Severity, diagnostic.Message, site, diagnostic.Hint, false);
+				collected.Diagnostic.Asset = diagnostic.Asset.ToString();
+				diagnostics.push_back(std::move(collected));
+			}
+		}
+
+		// The asset references in the project's material and prefab files: the registered main assets of the Material and
+		// Prefab importers (a glTF's materials reference its own textures and are checked by its import).
+		static void CheckAssetFiles(const EditorContext& editor, std::vector<CollectedDiagnostic>& diagnostics)
+		{
+			const TypeRegistry& registry = editor.GetTypeRegistry();
+			for (const AssetRecord* record : editor.GetAssets().GetRegistry().GetRecords())
+			{
+				const AssetMetadata& metadata = record->Metadata;
+				const bool isMaterial = metadata.Kind == AssetMetaKind::Asset && metadata.Importer == "Material";
+				const bool isPrefab = metadata.Kind == AssetMetaKind::Asset && metadata.Importer == "Prefab";
+				if (!isMaterial && !isPrefab)
+					continue;
+				const Result<std::string> text = editor.GetVfs().ReadText(record->SourcePath);
+				// An unreadable file is the import's to report (ASSET_IMPORT_FAILED).
+				if (!text.has_value())
+					continue;
+				const Result<Json> document = JsonReader::Parse(*text);
+				if (!document.has_value() || !document->is_object())
+					continue;
+				const std::string file(record->SourcePath.GetPath());
+				if (isMaterial)
+				{
+					const StructInfo* material = registry.FindStruct("Material");
+					if (material == nullptr)
+						continue;
+					const auto visit = [&](const EntityRefSite& reference, AssetHandle handle, std::string_view acceptedType)
+					{
+						DiagnosticSite site;
+						site.File = file;
+						site.Field = reference.Field;
+						site.Subject = MakeReferenceSubject(reference, handle);
+						CheckAssetReference(editor, handle, acceptedType, site, std::format("'{}' of the material", reference.Field), diagnostics);
+					};
+					VisitFieldAssetRefs(*document, material->GetFields(), visit);
+					continue;
+				}
+
+				const auto entities = document->find("Entities");
+				if (entities == document->end() || !entities->is_array())
+					continue;
+				for (const Json& entity : *entities)
+				{
+					if (!entity.is_object())
+						continue;
+					const auto id = entity.find("ID");
+					const auto components = entity.find("Components");
+					if (id == entity.end() || !id->is_string() || components == entity.end() || !components->is_object())
+						continue;
+					DiagnosticSite site;
+					site.File = file;
+					site.Entity = JsonReader(*id).ReadString().value_or(std::string());
+					for (auto component = components->begin(); component != components->end(); ++component)
+					{
+						const ComponentInfo* info = registry.FindComponent(component.key());
+						if (info == nullptr || !component.value().is_object())
+							continue;
+						CheckComponentAssets(editor, *info, component.value(), site, std::format("entity {} of the prefab", site.Entity), diagnostics);
+					}
+				}
+			}
+		}
+
 		// Sorts `diagnostics` (by file, entity, code, component, field, id) and drops repeats of one id: the same problem found
 		// twice (two load diagnostics of one code at one pointer) is one diagnostic, so ids are unique within a report.
 		static void SortDiagnostics(std::vector<CollectedDiagnostic>& diagnostics)
@@ -560,8 +900,9 @@ namespace Engine {
 			return report;
 		}
 
-		// Every diagnostic of `scope`, sorted, with its subject (ProjectValidator::Validate's work).
-		static Result<std::vector<CollectedDiagnostic>> CollectDiagnostics(const EditorContext& context, ValidationScope scope)
+		// Every diagnostic of `scope`, sorted, with its subject, and the asset scan their fixes are planned on
+		// (ProjectValidator::Validate's work).
+		static Result<Collection> CollectDiagnostics(const EditorContext& context, ValidationScope scope)
 		{
 			if (!context.HasProject())
 				return MakeError(ErrorCode::InvalidState, "no project open; call project.create or project.open");
@@ -571,17 +912,21 @@ namespace Engine {
 					Error(ErrorCode::InvalidState, "no scene open to validate").WithHint("open one with scene.open, or validate the scope \"project\""));
 			}
 
-			std::vector<CollectedDiagnostic> diagnostics;
+			Collection collection;
+			std::vector<CollectedDiagnostic>& diagnostics = collection.Diagnostics;
 			const std::optional<VfsPath>& openPath = context.GetScenePath();
 			if (context.HasScene())
 			{
 				const CheckedScene open{ &context.GetScene(), openPath.has_value() ? std::string(openPath->GetPath()) : std::string(), true };
-				CheckScene(open, diagnostics);
+				CheckScene(context, open, diagnostics);
 			}
 
 			if (scope == ValidationScope::Project)
 			{
 				CheckSettings(context, diagnostics);
+				ENGINE_TRY_ASSIGN(collection.Scanned, ScanAssets(context, diagnostics));
+				CollectImportDiagnostics(context, diagnostics);
+				CheckAssetFiles(context, diagnostics);
 				ENGINE_TRY_ASSIGN(const std::vector<VfsPath> scenes, ListSceneFiles(context));
 				for (const VfsPath& scene : scenes)
 				{
@@ -592,7 +937,7 @@ namespace Engine {
 				}
 			}
 			SortDiagnostics(diagnostics);
-			return diagnostics;
+			return collection;
 		}
 
 		// The scene fixes (cameras, dangling references) of the selected diagnostics, as one SceneEdit of the open scene.
@@ -600,7 +945,7 @@ namespace Engine {
 		{
 			const bool hasSceneFix = std::ranges::any_of(selected, [](const CollectedDiagnostic* collected)
 			{
-				return collected->Diagnostic.Code != BuildSceneMissingCode;
+				return collected->Diagnostic.Code != BuildSceneMissingCode && !collected->Scan.has_value();
 			});
 			if (!hasSceneFix)
 				return {};
@@ -695,17 +1040,92 @@ namespace Engine {
 			return {};
 		}
 
+		// The trash folder of one .meta moved there by a fix (§12.3: Library/Trash/<handle>, or the first free -<n> variant).
+		static Result<VfsPath> MakeTrashDirectory(const EditorContext& editor, AssetHandle handle)
+		{
+			const std::string name = handle.IsValid() ? handle.ToString() : std::string("meta");
+			for (uint32_t index = 1;; ++index)
+			{
+				const std::string entry = index == 1 ? name : std::format("{}-{}", name, index);
+				ENGINE_TRY_ASSIGN(VfsPath directory, VfsPath::Create("project", std::format("Library/Trash/{}", entry)));
+				if (!editor.GetVfs().Exists(directory))
+					return directory;
+			}
+		}
+
+		// A RewriteImporter fix's .meta text with its null Settings replaced by the new importer's complete defaults (§6.4:
+		// a .meta stores every settings field), for an importer that has settings.
+		static Result<std::string> CompleteRewrittenMeta(const EditorContext& editor, std::string_view planned)
+		{
+			ENGINE_TRY_ASSIGN(AssetMetadata metadata, ParseAssetMetadata(planned));
+			Result<VariantValue> defaults = editor.GetAssets().MergeImportSettings(metadata.Importer, VariantValue(), Json());
+			if (defaults.has_value())
+				metadata.Settings = std::move(*defaults);
+			else if (defaults.error().GetCode() != ErrorCode::InvalidArgument) // InvalidArgument: an importer without settings
+				return std::unexpected(std::move(defaults).error());
+			return SerializeAssetMetadata(metadata);
+		}
+
+		// The asset scan fixes of the selected diagnostics (AssetRegistry::PlanFix on the validator's scan), each as an asset
+		// command: a fresh handle written into the copy's .meta, an orphan .meta moved to the trash, a .meta renamed to its
+		// source's spelling, a .meta rewritten for the importer that takes its source.
+		static Status FixAssets(EditorContext& editor, const std::optional<AssetRegistry>& scanned, const std::vector<const CollectedDiagnostic*>& selected)
+		{
+			for (const CollectedDiagnostic* collected : selected)
+			{
+				if (!collected->Scan.has_value())
+					continue;
+				ENGINE_ASSERT(scanned.has_value(), "An asset scan fix needs the validator's scan");
+				const AssetHandle fresh = collected->Scan->Code == AssetDuplicateHandleCode ? editor.GetIdGenerator().Next() : AssetHandle();
+				ENGINE_TRY_ASSIGN(const AssetScanFix fix, scanned->PlanFix(*collected->Scan, fresh));
+				switch (fix.Kind)
+				{
+					case AssetScanFixKind::AssignNewHandle:
+					{
+						ENGINE_TRY_ASSIGN(Scope<AssetEditCommand> command,
+							AssetEditCommand::CreateForWrite(editor, fix.MetaPath, AsBytes(fix.NewMetaText), std::string(FixLabel)));
+						ENGINE_TRY(editor.Execute(std::move(command)));
+						break;
+					}
+					case AssetScanFixKind::TrashMeta:
+					{
+						ENGINE_TRY_ASSIGN(const VfsPath trash, MakeTrashDirectory(editor, collected->Scan->Asset));
+						ENGINE_TRY_ASSIGN(VfsPath destination, trash.Join(fix.MetaPath.GetPath()));
+						std::vector<AssetFileMove> moves = { { .From = fix.MetaPath, .To = std::move(destination) } };
+						ENGINE_TRY(editor.Execute(CreateScope<AssetMoveCommand>(std::string(FixLabel), std::move(moves))));
+						break;
+					}
+					case AssetScanFixKind::RenameMetaToSourceCase:
+					{
+						std::vector<AssetFileMove> moves = { { .From = fix.MetaPath, .To = fix.NewMetaPath } };
+						ENGINE_TRY(editor.Execute(CreateScope<AssetMoveCommand>(std::string(FixLabel), std::move(moves))));
+						break;
+					}
+					case AssetScanFixKind::RewriteImporter:
+					{
+						ENGINE_TRY_ASSIGN(const std::string text, CompleteRewrittenMeta(editor, fix.NewMetaText));
+						ENGINE_TRY_ASSIGN(Scope<AssetEditCommand> command,
+							AssetEditCommand::CreateForWrite(editor, fix.MetaPath, AsBytes(text), std::string(FixLabel)));
+						ENGINE_TRY(editor.Execute(std::move(command)));
+						break;
+					}
+				}
+			}
+			return {};
+		}
+
 	}
 
 	Result<ValidationReport> ProjectValidator::Validate(const EditorContext& context, ValidationScope scope)
 	{
-		ENGINE_TRY_ASSIGN(const std::vector<CollectedDiagnostic> diagnostics, Utils::CollectDiagnostics(context, scope));
-		return Utils::MakeReport(diagnostics);
+		ENGINE_TRY_ASSIGN(const Collection collection, Utils::CollectDiagnostics(context, scope));
+		return Utils::MakeReport(collection.Diagnostics);
 	}
 
 	Result<FixReport> ProjectValidator::Fix(EditorContext& context, ValidationScope scope, const FixSelection& selection)
 	{
-		ENGINE_TRY_ASSIGN(const std::vector<CollectedDiagnostic> diagnostics, Utils::CollectDiagnostics(context, scope));
+		ENGINE_TRY_ASSIGN(const Collection collection, Utils::CollectDiagnostics(context, scope));
+		const std::vector<CollectedDiagnostic>& diagnostics = collection.Diagnostics;
 
 		const std::span<const std::string_view> codes = GetCodes();
 		std::set<std::string> selectedIds;
@@ -755,6 +1175,8 @@ namespace Engine {
 		Status applied = Utils::FixOpenScene(context, selected);
 		if (applied)
 			applied = Utils::FixSettings(context, selected);
+		if (applied)
+			applied = Utils::FixAssets(context, collection.Scanned, selected);
 		if (!applied)
 		{
 			Error error = std::move(applied).error();
@@ -768,6 +1190,16 @@ namespace Engine {
 		fixed.UndoIndex = transaction.Commit();
 		for (const CollectedDiagnostic* collected : selected)
 			fixed.Fixed.push_back(collected->Diagnostic.Id);
+		// The asset manager's registry follows the fixed files at once: its scan diagnostics gate play and export (§7.2).
+		const bool fixedAssets = std::ranges::any_of(selected, [](const CollectedDiagnostic* collected)
+		{
+			return collected->Scan.has_value();
+		});
+		if (fixedAssets && context.GetAssets().HasProject())
+		{
+			if (Result<AssetRefreshReport> refreshed = context.GetAssets().Refresh(); !refreshed.has_value())
+				ENGINE_WARN("Project validator: refreshing the assets after the fixes failed: {}", refreshed.error().ToString());
+		}
 		ENGINE_TRY_ASSIGN(fixed.After, Validate(context, scope));
 		return fixed;
 	}

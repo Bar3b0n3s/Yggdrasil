@@ -3,12 +3,14 @@
 #include "Engine/AssetPipeline/AssetHotReloader.h"
 
 #include "Engine/Asset/TextureData.h"
+#include "Engine/AssetPipeline/AssetWriter.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/AssetPipeline/IAssetImporter.h"
 #include "Engine/AssetPipeline/Importers/TextureImporter.h"
 #include "Engine/Core/EventLog.h"
 #include "Engine/Core/Hash.h"
 #include "Support/AssetTestFixture.h"
+#include "Support/ExpectLog.h"
 
 #include <algorithm>
 #include <condition_variable>
@@ -34,6 +36,13 @@ namespace Engine {
 		void RunFrame(Test::AssetTestFixture& fixture, double seconds)
 		{
 			fixture.GetManager().Update(seconds);
+			static_cast<void>(fixture.GetMainThreadQueue().Drain());
+		}
+
+		// Updates `reloader` at `seconds`, then drains the main-thread queue, where its poll results arrive.
+		void RunReloaderFrame(Test::AssetTestFixture& fixture, AssetHotReloader& reloader, double seconds)
+		{
+			reloader.Update(seconds);
 			static_cast<void>(fixture.GetMainThreadQueue().Drain());
 		}
 
@@ -121,7 +130,7 @@ namespace Engine {
 
 	TEST_SUITE("AssetPipeline")
 	{
-		TEST_CASE("HotReload: an editor write causes no echo reimport" * doctest::skip(true))
+		TEST_CASE("HotReload: an editor write causes no echo reimport")
 		{
 			Test::AssetTestFixture fixture;
 			fixture.WriteProjectText("Assets/Red.material", R"({"Format": "Material", "Version": 1, "Roughness": 0.5})");
@@ -146,7 +155,7 @@ namespace Engine {
 			CHECK(CountEvents(fixture.GetEventLog(), EngineEventType::AssetReloaded) == reloads);
 		}
 
-		TEST_CASE("AssetHotReloader: each reimport ticket is newer than the handle's earlier tickets" * doctest::skip(true))
+		TEST_CASE("AssetHotReloader: each reimport ticket is newer than the handle's earlier tickets")
 		{
 			Test::AssetTestFixture fixture;
 			AssetHotReloader reloader(fixture.GetVfs(), fixture.GetJobSystem(), { .Root = fixture.ProjectPath("Assets") });
@@ -161,9 +170,174 @@ namespace Engine {
 			const AssetReimportTicket other = reloader.BeginReimport(AssetHandle(0xcd), 3);
 			CHECK(reloader.IsCurrent(other));
 			CHECK(reloader.IsCurrent(fast));
+			// Stopping keeps the generations.
+			reloader.Stop();
+			CHECK(reloader.BeginReimport(handle, 4).Generation == fast.Generation + 1);
 		}
 
-		TEST_CASE("HotReload: a stale job completion is dropped" * doctest::skip(true))
+		TEST_CASE("AssetHotReloader: polls on a job at the poll interval and delivers debounced changes sorted by path")
+		{
+			Test::AssetTestFixture fixture;
+			fixture.WriteProjectText("Assets/A.material", "a");
+			AssetHotReloader reloader(fixture.GetVfs(), fixture.GetJobSystem(), { .Root = fixture.ProjectPath("Assets") });
+			std::vector<std::vector<FileChange>> delivered;
+			reloader.SetChangeListener([&delivered](std::span<const FileChange> changes)
+			{
+				delivered.emplace_back(changes.begin(), changes.end());
+			});
+			CHECK_FALSE(reloader.IsRunning());
+			REQUIRE(reloader.Start().has_value());
+			CHECK(reloader.IsRunning());
+			RunReloaderFrame(fixture, reloader, 0.0);
+
+			fixture.WriteProjectText("Assets/B.material", "b");
+			fixture.WriteProjectText("Assets/A.material", "changed");
+			RunReloaderFrame(fixture, reloader, 0.3); // before the poll interval: no poll
+			RunReloaderFrame(fixture, reloader, 0.5); // sees both changes; their debounce starts
+			RunReloaderFrame(fixture, reloader, 0.6); // the interval has not passed since 0.5
+			CHECK(delivered.empty());
+			RunReloaderFrame(fixture, reloader, 1.0);
+			REQUIRE(delivered.size() == 1);
+			const std::vector<FileChange> expected = {
+				{ .Path = fixture.ProjectPath("Assets/A.material"), .Kind = FileChangeKind::Modified },
+				{ .Path = fixture.ProjectPath("Assets/B.material"), .Kind = FileChangeKind::Created },
+			};
+			CHECK(delivered.front() == expected);
+
+			// A stopped reloader polls nothing.
+			reloader.Stop();
+			CHECK_FALSE(reloader.IsRunning());
+			fixture.WriteProjectText("Assets/A.material", "again");
+			RunReloaderFrame(fixture, reloader, 5.0);
+			RunReloaderFrame(fixture, reloader, 6.0);
+			CHECK(delivered.size() == 1);
+		}
+
+		TEST_CASE("AssetHotReloader: writes through an AssetWriter on its watcher never reach the listener")
+		{
+			Test::AssetTestFixture fixture;
+			AssetHotReloader reloader(fixture.GetVfs(), fixture.GetJobSystem(), { .Root = fixture.ProjectPath("Assets") });
+			std::vector<FileChange> delivered;
+			reloader.SetChangeListener([&delivered](std::span<const FileChange> changes)
+			{
+				delivered.insert(delivered.end(), changes.begin(), changes.end());
+			});
+			REQUIRE(reloader.Start().has_value());
+			AssetWriter writer(fixture.GetVfs());
+			writer.SetWatcher(&reloader.GetWatcher());
+			RunReloaderFrame(fixture, reloader, 0.0);
+
+			// The editor's writes (§7.5 race rule 1) and one external write at the same time: only the external one is reported.
+			REQUIRE(writer.Write(fixture.ProjectPath("Assets/Editor.material"), AsBytes(std::string_view("e"))).has_value());
+			REQUIRE(writer.Move(fixture.ProjectPath("Assets/Editor.material"), fixture.ProjectPath("Assets/Moved/Editor.material")).has_value());
+			fixture.WriteProjectText("Assets/External.material", "x");
+			for (double seconds = 0.5; seconds <= 2.0; seconds += 0.5)
+				RunReloaderFrame(fixture, reloader, seconds);
+			const std::vector<FileChange> expected = { { .Path = fixture.ProjectPath("Assets/External.material"), .Kind = FileChangeKind::Created } };
+			CHECK(delivered == expected);
+		}
+
+		TEST_CASE("AssetHotReloader: held changes are delivered merged per path when the deferral ends")
+		{
+			Test::AssetTestFixture fixture;
+			fixture.WriteProjectText("Assets/Gone.material", "g");
+			AssetHotReloader reloader(fixture.GetVfs(), fixture.GetJobSystem(), { .Root = fixture.ProjectPath("Assets") });
+			std::vector<std::vector<FileChange>> delivered;
+			reloader.SetChangeListener([&delivered](std::span<const FileChange> changes)
+			{
+				delivered.emplace_back(changes.begin(), changes.end());
+			});
+			REQUIRE(reloader.Start().has_value());
+			RunReloaderFrame(fixture, reloader, 0.0);
+
+			reloader.SetDeferred(true);
+			CHECK(reloader.IsDeferred());
+			fixture.WriteProjectText("Assets/New.material", "n");
+			fixture.WriteProjectText("Assets/Temp.material", "t");
+			REQUIRE(fixture.GetVfs().Remove(fixture.ProjectPath("Assets/Gone.material")).has_value());
+			RunReloaderFrame(fixture, reloader, 0.5);
+			RunReloaderFrame(fixture, reloader, 1.0);
+			// Created then modified stays Created; deleted then recreated is Modified; created then deleted is nothing.
+			fixture.WriteProjectText("Assets/New.material", "n2");
+			fixture.WriteProjectText("Assets/Gone.material", "g2");
+			REQUIRE(fixture.GetVfs().Remove(fixture.ProjectPath("Assets/Temp.material")).has_value());
+			RunReloaderFrame(fixture, reloader, 1.5);
+			RunReloaderFrame(fixture, reloader, 2.0);
+			CHECK(delivered.empty());
+
+			const std::vector<FileChange> expected = {
+				{ .Path = fixture.ProjectPath("Assets/Gone.material"), .Kind = FileChangeKind::Modified },
+				{ .Path = fixture.ProjectPath("Assets/New.material"), .Kind = FileChangeKind::Created },
+			};
+			CHECK(reloader.GetDeferredChanges() == expected);
+			reloader.SetDeferred(false);
+			CHECK_FALSE(reloader.IsDeferred());
+			REQUIRE(delivered.size() == 1);
+			CHECK(delivered.front() == expected);
+			CHECK(reloader.GetDeferredChanges().empty());
+		}
+
+		TEST_CASE("AssetHotReloader: a poll result that arrives after Stop or destruction is dropped")
+		{
+			Test::AssetTestFixture fixture;
+			size_t deliveries = 0;
+			{
+				AssetHotReloader reloader(fixture.GetVfs(), fixture.GetJobSystem(), { .Root = fixture.ProjectPath("Assets") });
+				reloader.SetChangeListener([&deliveries](std::span<const FileChange>)
+				{
+					++deliveries;
+				});
+				REQUIRE(reloader.Start().has_value());
+				RunReloaderFrame(fixture, reloader, 0.0);
+				fixture.WriteProjectText("Assets/Red.material", "r");
+				RunReloaderFrame(fixture, reloader, 0.5);
+
+				// The inline poll job has completed; its continuation waits in the main-thread queue when the reloader stops.
+				reloader.Update(1.0);
+				reloader.Stop();
+				static_cast<void>(fixture.GetMainThreadQueue().Drain());
+				CHECK(deliveries == 0);
+
+				// Restarted: a new baseline, which already holds the file.
+				REQUIRE(reloader.Start().has_value());
+				fixture.WriteProjectText("Assets/Blue.material", "b");
+				RunReloaderFrame(fixture, reloader, 2.0);
+				reloader.Update(2.5);
+			}
+			// The reloader is gone while the continuation of its last poll is queued.
+			static_cast<void>(fixture.GetMainThreadQueue().Drain());
+			CHECK(deliveries == 0);
+		}
+
+		TEST_CASE("AssetHotReloader: a failed poll is logged once and retried at the next interval")
+		{
+			Test::AssetTestFixture fixture;
+			fixture.WriteProjectText("Assets/Red.material", "r");
+			AssetHotReloader reloader(fixture.GetVfs(), fixture.GetJobSystem(), { .Root = fixture.ProjectPath("Assets") });
+			std::vector<FileChange> delivered;
+			reloader.SetChangeListener([&delivered](std::span<const FileChange> changes)
+			{
+				delivered.insert(delivered.end(), changes.begin(), changes.end());
+			});
+			REQUIRE(reloader.Start().has_value());
+			REQUIRE(fixture.GetVfs().Remove(fixture.ProjectPath("Assets")).has_value());
+			{
+				const Test::ExpectLog failed(LogLevel::Warn, "Hot reload could not poll 'project://Assets'");
+				RunReloaderFrame(fixture, reloader, 0.0);
+				RunReloaderFrame(fixture, reloader, 0.5);
+				RunReloaderFrame(fixture, reloader, 1.0);
+				CHECK(failed.GetMatchCount() == 1);
+			}
+			// The folder comes back: polling resumes and reports the file's removal and return as nothing at all.
+			fixture.WriteProjectText("Assets/Red.material", "r");
+			fixture.WriteProjectText("Assets/Blue.material", "b");
+			RunReloaderFrame(fixture, reloader, 1.5);
+			RunReloaderFrame(fixture, reloader, 2.0);
+			const std::vector<FileChange> expected = { { .Path = fixture.ProjectPath("Assets/Blue.material"), .Kind = FileChangeKind::Created } };
+			CHECK(delivered == expected);
+		}
+
+		TEST_CASE("HotReload: a stale job completion is dropped")
 		{
 			// End to end, on two workers: an import of content A is held inside Import while a newer import of content B
 			// completes and is published; A's completion arrives last and must be dropped (§7.5 race rule 2).
@@ -221,7 +395,7 @@ namespace Engine {
 			CHECK(AssetCast<TextureData>(*published)->Pixels == (*expected)->Pixels);
 		}
 
-		TEST_CASE("HotReload: changed texture swaps and bumps the version" * doctest::skip(true))
+		TEST_CASE("HotReload: changed texture swaps and bumps the version")
 		{
 			Test::AssetTestFixture fixture;
 			fixture.WriteProjectFile("Assets/Wood.png", Test::MakeTestPng(4, 4, 1));
@@ -251,7 +425,7 @@ namespace Engine {
 			CHECK(CountEvents(fixture.GetEventLog(), EngineEventType::AssetReloaded) == 1);
 		}
 
-		TEST_CASE("HotReload: reloads are held while a deterministic session runs" * doctest::skip(true))
+		TEST_CASE("HotReload: reloads are held while a deterministic session runs")
 		{
 			Test::AssetTestFixture fixture;
 			fixture.WriteProjectFile("Assets/Wood.png", Test::MakeTestPng(4, 4, 1));
@@ -276,7 +450,7 @@ namespace Engine {
 			CHECK(fixture.GetManager().GetVersion(handle) == 2);
 		}
 
-		TEST_CASE("HotReload: a failed reimport keeps the last good version and records a diagnostic" * doctest::skip(true))
+		TEST_CASE("HotReload: a failed reimport keeps the last good version and records a diagnostic")
 		{
 			Test::AssetTestFixture fixture;
 			fixture.WriteProjectFile("Assets/Wood.png", Test::MakeTestPng(4, 4, 1));
@@ -284,12 +458,15 @@ namespace Engine {
 			const AssetHandle handle = fixture.GetManager().Resolve("Assets/Wood.png").value_or(AssetHandle());
 			REQUIRE(fixture.GetManager().Load(handle).has_value());
 			RunFrame(fixture, 0.0);
+			// The failed reimport is reported once, at Error (AssetManager::ReportDiagnostic).
+			const Test::ExpectLog failure(LogLevel::Error, "ASSET_IMPORT_FAILED Assets/Wood.png");
 			fixture.WriteProjectText("Assets/Wood.png", "no longer a png");
 			for (double seconds = 0.5; seconds <= 2.0; seconds += 0.5)
 				RunFrame(fixture, seconds);
 			fixture.GetManager().WaitIdle();
 			CHECK(fixture.GetManager().GetVersion(handle) == 1);
 			CHECK(fixture.GetManager().Load(handle).has_value());
+			CHECK(failure.GetMatchCount() == 1);
 			CHECK(std::ranges::any_of(fixture.GetManager().GetDiagnostics(), [handle](const AssetDiagnostic& diagnostic)
 			{
 				return diagnostic.Asset == handle && diagnostic.Code == AssetImportFailedCode;

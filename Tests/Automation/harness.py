@@ -118,7 +118,7 @@ class AutomationTestCase(unittest.TestCase):
     def start_editor(self, arguments: list[str] | None = None, project: Path | None = None, test_hooks: bool = True,
                      wait_for_session: bool = True, renderer: str = "none") -> engine_client.EditorProcess:
         """Starts `Editor --headless --renderer none --automation [--automation-test-hooks] [--project <project>]
-        <arguments>` with this test's user-data root and remembers it for tearDown. With renderer "vulkan" the editor
+        --engine-cache-dir <dir> <arguments>` with this test's user-data root and remembers it for tearDown. With renderer "vulkan" the editor
         renders, with the GPU test options (GPU_EDITOR_ARGUMENTS); call require_gpu() first."""
         if renderer not in ("none", "vulkan"):
             raise ValueError(f"renderer must be none or vulkan, not {renderer!r}")
@@ -129,16 +129,22 @@ class AutomationTestCase(unittest.TestCase):
             command.append("--automation-test-hooks")
         if project is not None:
             command += ["--project", str(project)]
+        command.append(self.engine_cache_argument())
         command += arguments or []
         editor = engine_client.launch_editor(editor_executable(), command, self.user_data, app_name(),
                                              wait_for_session=wait_for_session)
         self.editors.append(editor)
         return editor
 
+    def engine_cache_argument(self) -> str:
+        """--engine-cache-dir below this test's user-data root, so no editor a test starts writes the checkout's engine
+        cooked cache (bin/EngineCache, ADR 0010 decision 13)."""
+        return f"--engine-cache-dir={self.user_data / 'EngineCache'}"
+
     def run_editor(self, arguments: list[str], timeout: float = 120.0) -> tuple[int, str]:
         """Runs a one-shot editor (--batch, --upgrade, --dump-reference, a locked project) to completion and returns its
         exit code and standard error."""
-        command = [str(editor_executable()), *arguments, f"--user-data-dir={self.user_data}"]
+        command = [str(editor_executable()), *arguments, f"--user-data-dir={self.user_data}", self.engine_cache_argument()]
         completed = subprocess.run(command, stdin=subprocess.DEVNULL, capture_output=True, timeout=timeout,
                                    check=False)
         return completed.returncode, completed.stderr.decode("utf-8", errors="replace")

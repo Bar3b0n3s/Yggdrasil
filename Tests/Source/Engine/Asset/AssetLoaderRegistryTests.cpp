@@ -4,14 +4,18 @@
 
 #include "Engine/Asset/BuiltinMeshes.h"
 #include "Engine/Asset/CookedFormat.h"
+#include "Engine/Asset/DocumentData.h"
 #include "Engine/Asset/MeshData.h"
+#include "Engine/Core/Json/JsonReader.h"
 #include "Support/SceneTestFixture.h"
+
+#include <nlohmann/json.hpp>
 
 namespace Engine {
 
 	TEST_SUITE("Asset")
 	{
-		TEST_CASE("AssetLoaderRegistry: the M6 loaders are registered" * doctest::skip(true))
+		TEST_CASE("AssetLoaderRegistry: the M6 loaders are registered")
 		{
 			AssetLoaderRegistry loaders;
 			RegisterBuiltinLoaders(loaders);
@@ -26,7 +30,7 @@ namespace Engine {
 			CHECK(loaders.Find(AssetType::Environment) == nullptr);
 		}
 
-		TEST_CASE("AssetLoaderRegistry: dispatches by the cooked header's type" * doctest::skip(true))
+		TEST_CASE("AssetLoaderRegistry: dispatches by the cooked header's type")
 		{
 			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
 			AssetLoaderRegistry loaders;
@@ -40,7 +44,7 @@ namespace Engine {
 			CHECK(SerializeMeshPayload(*mesh) == SerializeMeshPayload(cube));
 		}
 
-		TEST_CASE("AssetLoaderRegistry: a type without a loader is Unsupported and corrupt bytes are errors" * doctest::skip(true))
+		TEST_CASE("AssetLoaderRegistry: a type without a loader is Unsupported and corrupt bytes are errors")
 		{
 			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
 			AssetLoaderRegistry loaders;
@@ -54,6 +58,29 @@ namespace Engine {
 			Buffer truncated = CookMesh(GenerateBuiltinMesh(BuiltinMesh::Quad), 1);
 			truncated.resize(truncated.size() / 2);
 			CHECK_FALSE(loaders.Load(truncated, { .Registry = registry.get(), .Handle = AssetHandle(0x104) }).has_value());
+		}
+
+		TEST_CASE("AssetLoaderRegistry: scene and prefab documents reach their loaders, errors name the handle")
+		{
+			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
+			AssetLoaderRegistry loaders;
+			RegisterBuiltinLoaders(loaders);
+			Result<Json> document = JsonReader::Parse(R"({"Format": "Prefab", "Version": 1, "Entities": []})");
+			REQUIRE(document.has_value());
+			Result<Buffer> cooked = CookDocument(AssetType::Prefab, *document, 1);
+			REQUIRE(cooked.has_value());
+			Result<AssetRef<Asset>> loaded = loaders.Load(*cooked, { .Registry = registry.get(), .Handle = AssetHandle(0x1234) });
+			REQUIRE_MESSAGE(loaded.has_value(), loaded.error().ToString());
+			const AssetRef<PrefabData> prefab = AssetCast<PrefabData>(*loaded);
+			REQUIRE(prefab != nullptr);
+			CHECK(*prefab->Document == *document);
+
+			// A prefab document cooked as a scene is rejected by the scene loader, naming the asset.
+			Result<Buffer> mislabelled = CookDocument(AssetType::Scene, *document, 1);
+			REQUIRE(mislabelled.has_value());
+			Result<AssetRef<Asset>> rejected = loaders.Load(*mislabelled, { .Registry = registry.get(), .Handle = AssetHandle(0x1234) });
+			REQUIRE_FALSE(rejected.has_value());
+			CHECK(rejected.error().ToString().find("0000000000001234") != std::string::npos);
 		}
 	}
 

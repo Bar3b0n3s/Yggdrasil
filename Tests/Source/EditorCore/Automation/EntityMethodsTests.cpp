@@ -186,7 +186,7 @@ namespace Engine {
 			CHECK(setup.GetEditor().GetRevision() == revision);
 		}
 
-		TEST_CASE("EntityMethods: entity.bounds reports world AABBs of meshes and their descendants" * doctest::skip(true))
+		TEST_CASE("EntityMethods: entity.bounds reports world AABBs of meshes and their descendants")
 		{
 			Test::AutomationFixture setup("EntityBounds");
 			REQUIRE(setup.Call("entity.create", ParseEntityMethodJson(R"({"name": "Track", "components": {"Transform": {"Translation": [10, 0, 0]}}})")).has_value());
@@ -208,6 +208,42 @@ namespace Engine {
 			CHECK((*own)["bounds"][0]["min"] == Json::array());
 			Json missing = setup.Request("entity.bounds", ParseEntityMethodJson(R"({"entities": ["/Nothing"]})"));
 			CHECK(missing["error"]["code"] == Json(-32001));
+		}
+
+		TEST_CASE("EntityMethods: asset references in component values accept handles, project paths and engine paths")
+		{
+			Test::AutomationFixture setup("EntityAssetReferences");
+			Result<Json> material = setup.Call("asset.create", ParseEntityMethodJson(R"({"type": "Material", "path": "Assets/Materials/Red.material"})"));
+			REQUIRE_MESSAGE(material.has_value(), material.error().ToString());
+			const std::string materialId = JsonReader((*material)["asset"]["id"]).ReadString().value_or(std::string());
+
+			// §7.1: an engine path and a project path resolve to their handles, which entity.get reports.
+			Result<Json> created = setup.Call("entity.create", ParseEntityMethodJson(R"({"name": "Wall", "components": {
+				"MeshRenderer": {"Mesh": "engine://Meshes/Cube", "Materials": ["Assets/Materials/Red.material"]}}})"));
+			REQUIRE_MESSAGE(created.has_value(), created.error().ToString());
+			Result<Json> fetched = setup.Call("entity.get", Json{ { "entity", "/Wall" } });
+			REQUIRE(fetched.has_value());
+			CHECK((*fetched)["entity"]["components"]["MeshRenderer"]["Mesh"] == Json("0000000000000101"));
+			CHECK((*fetched)["entity"]["components"]["MeshRenderer"]["Materials"] == Json::array({ materialId }));
+
+			// An asset of another type is InvalidParams; a path that names nothing is NotFound; both located at the value.
+			Json wrongType = setup.Request("entity.update", ParseEntityMethodJson(R"({"entity": "/Wall", "components": {
+				"MeshRenderer": {"Mesh": "Assets/Materials/Red.material"}}})"));
+			CHECK(wrongType["error"]["code"] == Json(-32602));
+			CHECK(wrongType["error"]["data"]["issues"][0]["pointer"] == Json("/components/MeshRenderer/Mesh"));
+			Json unknown = setup.Request("entity.update", ParseEntityMethodJson(R"({"entity": "/Wall", "components": {
+				"MeshRenderer": {"Materials": ["Assets/Materials/Rde.material"]}}})"));
+			CHECK(unknown["error"]["code"] == Json(-32001));
+			CHECK(unknown["error"]["data"]["issues"][0]["pointer"] == Json("/components/MeshRenderer/Materials/0"));
+			CHECK(unknown["error"]["data"]["hint"].dump().contains("Assets/Materials/Red.material"));
+
+			// The ops of edit.batch resolve them too.
+			Result<Json> batch = setup.Call("edit.batch", ParseEntityMethodJson(R"({"ops": [{"method": "entity.update", "params": {"entity": "/Wall",
+				"components": {"MeshRenderer": {"Mesh": "engine://Meshes/Sphere"}}}}]})"));
+			REQUIRE_MESSAGE(batch.has_value(), batch.error().ToString());
+			fetched = setup.Call("entity.get", Json{ { "entity", "/Wall" } });
+			REQUIRE(fetched.has_value());
+			CHECK((*fetched)["entity"]["components"]["MeshRenderer"]["Mesh"] == Json("0000000000000102"));
 		}
 	}
 

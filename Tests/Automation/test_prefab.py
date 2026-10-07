@@ -8,7 +8,6 @@ from harness import AutomationTestCase, engine_client, read_json
 
 
 class PrefabTests(AutomationTestCase):
-    @unittest.skip("contract stub: un-skipped by M6 stream E")
     def test_prefab_create_instantiate_apply_revert_unpack(self) -> None:
         client, root = self.open_editor_with_scene()
         client.call("entity.create", {"name": "Cell", "components": {
@@ -49,7 +48,6 @@ class PrefabTests(AutomationTestCase):
         client.call("edit.undo", {"steps": len(history)})
         self.assertEqual([entity["name"] for entity in client.call("scene.tree", {"format": "json"})["entities"]], [])
 
-    @unittest.skip("contract stub: un-skipped by M6 stream E")
     def test_prefab_errors_and_dry_run(self) -> None:
         client, root = self.open_editor_with_scene()
         client.call("entity.create", {"name": "Plain"})

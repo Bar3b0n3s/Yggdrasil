@@ -3,6 +3,7 @@
 #include "Engine/Asset/AssetManager.h"
 
 #include "Engine/Asset/BuiltinAssets.h"
+#include "Engine/Asset/FontData.h"
 #include "Engine/Asset/MaterialData.h"
 #include "Engine/Asset/MeshData.h"
 #include "Engine/Asset/TextureData.h"
@@ -23,9 +24,11 @@ namespace Engine {
 		class FixedAssetManager final : public AssetManager
 		{
 		public:
-			// The dry-run hooks, public for the tests.
+			// The dry-run and scan hooks, public for the tests.
+			using AssetManager::ClearDiagnostics;
 			using AssetManager::RestoreSharedState;
 			using AssetManager::SaveSharedState;
+			using AssetManager::SetScanDiagnostics;
 
 			explicit FixedAssetManager(JobSystem& jobs)
 				: m_Jobs(&jobs)
@@ -98,7 +101,7 @@ namespace Engine {
 			CHECK(AssetStateToString(AssetState::Failed) == "Failed");
 		}
 
-		TEST_CASE("AssetManager: missing texture yields the Missing placeholder and logs once" * doctest::skip(true))
+		TEST_CASE("AssetManager: missing texture yields the Missing placeholder and logs once")
 		{
 			MainThreadQueue queue;
 			JobSystem jobs(0, queue);
@@ -127,7 +130,7 @@ namespace Engine {
 			CHECK(CountDiagnostics(manager, AssetMissingCode, missing) == 0);
 		}
 
-		TEST_CASE("AssetManager: an asset of another type yields the placeholder and ASSET_TYPE_MISMATCH" * doctest::skip(true))
+		TEST_CASE("AssetManager: an asset of another type yields the placeholder and ASSET_TYPE_MISMATCH")
 		{
 			MainThreadQueue queue;
 			JobSystem jobs(0, queue);
@@ -145,7 +148,7 @@ namespace Engine {
 			CHECK(manager.GetVersion(material) == 1);
 		}
 
-		TEST_CASE("AssetManager: a null handle yields the placeholder without a diagnostic" * doctest::skip(true))
+		TEST_CASE("AssetManager: a null handle yields the placeholder without a diagnostic")
 		{
 			MainThreadQueue queue;
 			JobSystem jobs(0, queue);
@@ -155,7 +158,7 @@ namespace Engine {
 			CHECK(manager.GetVersion(AssetHandle(42)) == 0);
 		}
 
-		TEST_CASE("AssetManager: ReportDiagnostic logs each problem once and records it" * doctest::skip(true))
+		TEST_CASE("AssetManager: ReportDiagnostic logs each problem once and records it")
 		{
 			MainThreadQueue queue;
 			JobSystem jobs(0, queue);
@@ -188,7 +191,7 @@ namespace Engine {
 			CHECK(manager.HasErrorDiagnostics());
 		}
 
-		TEST_CASE("AssetManager: restoring the saved shared state undoes versions and diagnostics" * doctest::skip(true))
+		TEST_CASE("AssetManager: restoring the saved shared state undoes versions and diagnostics")
 		{
 			MainThreadQueue queue;
 			JobSystem jobs(0, queue);
@@ -214,6 +217,93 @@ namespace Engine {
 			Test::ExpectLog again(LogLevel::Error, missing.ToString());
 			static_cast<void>(manager.GetOrPlaceholder<TextureData>(missing));
 			CHECK(again.GetMatchCount() == 1);
+		}
+
+		TEST_CASE("AssetManager: the Font placeholder is an empty font when the Default font cannot load")
+		{
+			MainThreadQueue queue;
+			JobSystem jobs(0, queue);
+			FixedAssetManager manager(jobs);
+			const AssetHandle missing(0x5151000051510000ull);
+			Test::ExpectLog fontFailure(LogLevel::Error, BuiltinAssetHandles::DefaultFont.ToString());
+			Test::ExpectLog referenceFailure(LogLevel::Error, missing.ToString());
+			const AssetRef<FontData> first = manager.GetOrPlaceholder<FontData>(missing);
+			const AssetRef<FontData> second = manager.GetOrPlaceholder<FontData>(missing);
+			REQUIRE(first != nullptr);
+			CHECK(first == second);
+			CHECK(first->Glyphs.empty());
+			// Each failure is logged once: the missing reference and the Default font.
+			CHECK(fontFailure.GetMatchCount() == 1);
+			CHECK(referenceFailure.GetMatchCount() == 1);
+			CHECK(CountDiagnostics(manager, AssetImportFailedCode, BuiltinAssetHandles::DefaultFont) == 1);
+		}
+
+		TEST_CASE("AssetManager: a registry scan ends the reference type mismatches and its errors gate export")
+		{
+			MainThreadQueue queue;
+			JobSystem jobs(0, queue);
+			FixedAssetManager manager(jobs);
+			const AssetHandle material(0x6161000061610000ull);
+			manager.Add(material, CreateRef<MaterialData>());
+			{
+				Test::ExpectLog expected(LogLevel::Error, material.ToString());
+				static_cast<void>(manager.GetOrPlaceholder<MeshData>(material));
+			}
+			REQUIRE(CountDiagnostics(manager, AssetTypeMismatchCode, material) == 1);
+
+			// The scan's own diagnostics replace the previous scan's; a reference mismatch goes with any scan.
+			const AssetDiagnostic duplicate{
+				.Severity = DiagnosticSeverity::Error,
+				.Code = std::string(AssetDuplicateHandleCode),
+				.Asset = AssetHandle(0x77),
+				.Path = "Assets/B.png.meta",
+				.Message = "duplicate handle 0000000000000077 (also in Assets/A.png.meta)",
+				.Hint = {},
+				.Subject = "Assets/A.png.meta",
+				.AutoFixable = true,
+			};
+			manager.SetScanDiagnostics({ duplicate });
+			CHECK(CountDiagnostics(manager, AssetTypeMismatchCode, material) == 0);
+			REQUIRE(manager.GetDiagnostics().size() == 1);
+			CHECK(manager.GetDiagnostics().front() == duplicate);
+			CHECK(manager.HasErrorDiagnostics());
+			manager.SetScanDiagnostics({});
+			CHECK(manager.GetDiagnostics().empty());
+			CHECK_FALSE(manager.HasErrorDiagnostics());
+		}
+
+		TEST_CASE("AssetManager: diagnostics are sorted by path, code and subject and cleared per handle")
+		{
+			MainThreadQueue queue;
+			JobSystem jobs(0, queue);
+			FixedAssetManager manager(jobs);
+			const auto makeWarning = [](std::string path, std::string_view code, std::string subject)
+			{
+				return AssetDiagnostic{
+					.Severity = DiagnosticSeverity::Warning,
+					.Code = std::string(code),
+					.Asset = AssetHandle(0x99),
+					.Path = std::move(path),
+					.Message = "warning",
+					.Hint = {},
+					.Subject = std::move(subject),
+					.AutoFixable = false,
+				};
+			};
+			Test::ExpectLog warnings(LogLevel::Warn, "warning");
+			manager.ReportDiagnostic(makeWarning("Assets/B.glb", AssetVertexColorsIgnoredCode, "mesh:0"));
+			manager.ReportDiagnostic(makeWarning("Assets/A.glb", AssetUnsupportedUvSetCode, "texture:1"));
+			manager.ReportDiagnostic(makeWarning("Assets/A.glb", AssetUnsupportedUvSetCode, "texture:0"));
+			const std::span<const AssetDiagnostic> diagnostics = manager.GetDiagnostics();
+			REQUIRE(diagnostics.size() == 3);
+			CHECK(diagnostics[0].Subject == "texture:0");
+			CHECK(diagnostics[1].Subject == "texture:1");
+			CHECK(diagnostics[2].Path == "Assets/B.glb");
+
+			manager.ClearDiagnostics(AssetHandle(0x99), std::array<std::string_view, 1>{ AssetUnsupportedUvSetCode });
+			REQUIRE(manager.GetDiagnostics().size() == 1);
+			CHECK(manager.GetDiagnostics().front().Code == AssetVertexColorsIgnoredCode);
+			CHECK(warnings.GetMatchCount() == 3);
 		}
 	}
 

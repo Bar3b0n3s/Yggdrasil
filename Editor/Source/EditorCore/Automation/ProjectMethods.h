@@ -143,7 +143,8 @@ namespace Engine {
 	};
 
 	// project.refreshAssets {} (§7.3): EditorAssetManager::Refresh: a synchronous rescan of Assets/, a .meta for every
-	// source without one (writable editors), and the reimport of every changed asset, all complete when the call returns.
+	// source without one (writable editors), the import of every main asset it registered (ADR 0010 decision 31) and the
+	// reimport of every changed asset, all complete when the call returns.
 	// Not Mutates (it writes only .meta files a scan needs; read-only editors register transient metas instead), not
 	// AllowedInBatch (it writes outside a command), no dry run.
 	struct ProjectRefreshAssetsResult
@@ -153,7 +154,7 @@ namespace Engine {
 		std::vector<std::string> Added{};        // asset ids, sorted
 		std::vector<std::string> Removed{};
 		std::vector<std::string> Changed{};
-		std::vector<ProjectDiagnostic> Diagnostics{}; // the scan's diagnostics and the reimports' failures, as project.validate reports them
+		std::vector<ProjectDiagnostic> Diagnostics{}; // the scan's diagnostics and the imports' and reimports' failures, as project.validate reports them
 	};
 
 	namespace Automation {

@@ -115,6 +115,8 @@ namespace Engine {
 		if (state.Tick.has_value())
 			meta["tick"] = *state.Tick;
 		meta["playState"] = state.PlayState;
+		if (state.SceneChangedOnDisk)
+			meta["sceneChangedOnDisk"] = true;
 		meta["diagnostics"] = std::move(diagnostics);
 		return meta;
 	}

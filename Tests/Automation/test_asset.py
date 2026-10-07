@@ -11,7 +11,6 @@ GLTF_FIXTURES = REPOSITORY_ROOT / "Tests" / "Data" / "Assets" / "Gltf"
 
 
 class AssetTests(AutomationTestCase):
-    @unittest.skip("contract stub: un-skipped by M6 stream E")
     def test_asset_create_set_move_delete_undo(self) -> None:
         client, root = self.open_editor_with_scene()
         created = client.call("asset.create", {"type": "material", "path": "Assets/Materials/Red.material",
@@ -48,9 +47,11 @@ class AssetTests(AutomationTestCase):
         self.assertFalse((root / "Assets" / "Red.material").exists())
         self.assertEqual(client.call("asset.list", {"type": "Material"})["assets"], [])
 
-    @unittest.skip("contract stub: un-skipped by M6 stream E")
     def test_refresh_assets_after_external_write(self) -> None:
         client, root = self.open_editor_with_scene()
+        # The scene the harness saved has no .meta until a refresh gives it one (writes never create metas, ADR 0010
+        # decision 11): settle that first, so the refresh below reports only the external file.
+        self.assertEqual(client.call("project.refreshAssets")["createdMetas"], ["Assets/Scenes/Main.scene.meta"])
         # Written by another program: the registry learns about it through project.refreshAssets, synchronously.
         (root / "Assets" / "External.material").write_text(
             '{"Format": "Material", "Version": 1, "Roughness": 0.3}\n', encoding="utf-8")
@@ -69,7 +70,6 @@ class AssetTests(AutomationTestCase):
         properties = client.call("asset.getProperties", {"asset": "Assets/External.material"})
         self.assertAlmostEqual(properties["values"]["Roughness"], 0.7, places=6)
 
-    @unittest.skip("contract stub: un-skipped by M6 stream E")
     def test_import_gltf_copies_dependency_closure(self) -> None:
         client, root = self.open_editor_with_scene()
         # The source lives outside the project with its external buffer and image (§13.2 "Paths").
@@ -102,7 +102,6 @@ class AssetTests(AutomationTestCase):
         client.call("edit.undo")
         self.assertFalse((root / "Assets" / "Models" / "Textured.gltf").exists())
 
-    @unittest.skip("contract stub: un-skipped by M6 stream E")
     def test_asset_list_info_and_import_settings(self) -> None:
         client, root = self.open_editor_with_scene()
         shutil.copy(GLTF_FIXTURES / "Textures" / "Checker.png", root / "Assets" / "Checker.png")
@@ -123,7 +122,6 @@ class AssetTests(AutomationTestCase):
         restored = client.call("asset.getImportSettings", {"asset": "Assets/Checker.png"})
         self.assertEqual(restored["settings"]["Usage"], "Color")
 
-    @unittest.skip("contract stub: un-skipped by M6 stream E")
     def test_asset_create_dry_run_writes_nothing(self) -> None:
         client, root = self.open_editor_with_scene()
         result = client.call("asset.create", {"type": "Material", "path": "Assets/Dry.material", "dryRun": True})

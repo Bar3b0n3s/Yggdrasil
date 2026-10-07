@@ -575,7 +575,7 @@ namespace Engine {
 			CHECK_FALSE(editor.GetHistory().CanUndo());
 		}
 
-		TEST_CASE("HotReload: a changed open scene raises SceneChangedOnDisk and is not reloaded" * doctest::skip(true))
+		TEST_CASE("HotReload: a changed open scene raises SceneChangedOnDisk and is not reloaded")
 		{
 			Test::EditorTestFixture fixture("SceneChangedOnDisk");
 			fixture.CreateAndOpenProject();
@@ -615,13 +615,19 @@ namespace Engine {
 			CHECK_FALSE(editor.IsSceneChangedOnDisk());
 		}
 
-		TEST_CASE("EditorContext: an external scene change found by a refresh raises SceneChangedOnDisk once" * doctest::skip(true))
+		TEST_CASE("EditorContext: an external scene change found by a refresh raises SceneChangedOnDisk once")
 		{
 			Test::EditorTestFixture fixture("SceneChangedRefresh");
 			fixture.CreateAndOpenProject();
 			fixture.CreateAndOpenScene("Assets/Scenes/Main.scene");
 			EditorContext& editor = fixture.GetEditor();
 			editor.Update(0.0);
+			// The scene was written through the editor without a .meta: it is registered by the next refresh (ADR 0010
+			// decision 11), which the editor's own write never echoes.
+			Result<AssetRefreshReport> registered = editor.GetAssets().Refresh();
+			REQUIRE_MESSAGE(registered.has_value(), registered.error().ToString());
+			CHECK(registered->CreatedMetas == std::vector<VfsPath>{ MakeEditorPath("project://Assets/Scenes/Main.scene.meta") });
+			CHECK_FALSE(editor.IsSceneChangedOnDisk());
 			const AssetHandle scene = editor.GetAssets().Resolve("Assets/Scenes/Main.scene").value_or(AssetHandle());
 			REQUIRE(editor.GetAssets().Load(scene).has_value());
 			REQUIRE(editor.GetAssets().GetVersion(scene) == 1);
@@ -648,7 +654,44 @@ namespace Engine {
 			CHECK(CountEditorEvents(editor, EngineEventType::SceneChangedOnDisk) == 1);
 		}
 
-		TEST_CASE("EditorContext: the asset manager's own .meta writes keep provenance in step" * doctest::skip(true))
+		TEST_CASE("HotReload: the backup an editor write leaves is no external change")
+		{
+			Test::EditorTestFixture fixture("EditorWriteBackup");
+			fixture.CreateAndOpenProject();
+			EditorContext& editor = fixture.GetEditor();
+			// A material that fails to import beside the one the editor rewrites: a failed import is retried by any external
+			// change in its folder, so an echoed backup would import it again at every save.
+			const VfsPath broken = MakeEditorPath("project://Assets/Materials/Broken.material");
+			const VfsPath red = MakeEditorPath("project://Assets/Materials/Red.material");
+			REQUIRE(editor.GetVfs().CreateDirectories(broken.GetParent()).has_value());
+			REQUIRE(editor.GetVfs().WriteFileAtomic(broken, AsEditorBytes("not a material")).has_value());
+			REQUIRE(editor.GetVfs().WriteFileAtomic(red, AsEditorBytes(R"({"Format": "Material", "Version": 1})")).has_value());
+			const Test::ExpectLog importFailure(LogLevel::Error, "ASSET_IMPORT_FAILED Assets/Materials/Broken.material");
+			REQUIRE(editor.GetAssets().Refresh().has_value());
+			const size_t failures = CountEditorEvents(editor, EngineEventType::AssetImportFailed);
+			REQUIRE(failures == 1);
+			editor.Update(0.0);
+
+			// project:// keeps the replaced content as Red.material.bak (§4.10): written by the editor, never an external
+			// change, neither for the polls nor for a refresh.
+			for (const std::string_view metallic : { "1", "0.5" })
+			{
+				const std::string text = std::format(R"({{"Format": "Material", "Version": 1, "Metallic": {}}})", metallic);
+				REQUIRE(editor.WriteProjectFile(red, AsEditorBytes(text)).has_value());
+			}
+			CHECK(editor.GetVfs().Exists(MakeEditorPath("project://Assets/Materials/Red.material.bak")));
+			for (double seconds = 0.5; seconds <= 2.0; seconds += 0.5)
+			{
+				editor.Update(seconds);
+				static_cast<void>(editor.GetEngine().GetMainThreadQueue().Drain());
+			}
+			Result<AssetRefreshReport> refreshed = editor.GetAssets().Refresh();
+			REQUIRE_MESSAGE(refreshed.has_value(), refreshed.error().ToString());
+			editor.GetAssets().WaitIdle();
+			CHECK(CountEditorEvents(editor, EngineEventType::AssetImportFailed) == failures);
+		}
+
+		TEST_CASE("EditorContext: the asset manager's own .meta writes keep provenance in step")
 		{
 			Test::EditorTestFixture fixture("ManagerProvenance");
 			fixture.CreateAndOpenProject();
@@ -694,7 +737,7 @@ namespace Engine {
 			}
 		}
 
-		TEST_CASE("EditorContext: the asset manager is injected into the engine context and opened with the project" * doctest::skip(true))
+		TEST_CASE("EditorContext: the asset manager is injected into the engine context and opened with the project")
 		{
 			Test::EditorTestFixture fixture("EditorAssets");
 			EditorContext& editor = fixture.GetEditor();
@@ -706,7 +749,7 @@ namespace Engine {
 			CHECK_FALSE(editor.GetAssets().HasProject());
 		}
 
-		TEST_CASE("EditorContext: moving and removing project files keeps provenance in step" * doctest::skip(true))
+		TEST_CASE("EditorContext: moving and removing project files keeps provenance in step")
 		{
 			Test::EditorTestFixture fixture("EditorMoveRemove");
 			fixture.CreateAndOpenProject();
@@ -722,6 +765,85 @@ namespace Engine {
 			CHECK_FALSE(editor.GetVfs().Exists(to));
 			REQUIRE(editor.CreateProjectDirectory(VfsPath::Create("project", "Assets/Empty").value_or(VfsPath())).has_value());
 			CHECK(editor.GetVfs().Exists(VfsPath::Create("project", "Assets/Empty").value_or(VfsPath())));
+		}
+
+		TEST_CASE("EditorContext: moving a folder re-records every file in it and removing a full folder is refused")
+		{
+			Test::EditorTestFixture fixture("EditorMoveFolder");
+			fixture.CreateAndOpenProject();
+			EditorContext& editor = fixture.GetEditor();
+			const std::string material = R"({"Format": "Material", "Version": 1})";
+			REQUIRE(editor.WriteProjectFile(MakeEditorPath("project://Assets/Old/Red.material"), AsEditorBytes(material)).has_value());
+			REQUIRE(editor.WriteProjectFile(MakeEditorPath("project://Assets/Old/Deep/Blue.material"), AsEditorBytes(material)).has_value());
+			editor.SetWriteAttribution(WriteAttribution{ .Method = "asset.move", .RequestId = VariantValue(Json(4)), .Client = "test", .TranscriptLine = 9 });
+			REQUIRE(editor.MoveProjectFile(MakeEditorPath("project://Assets/Old"), MakeEditorPath("project://Assets/New/Place")).has_value());
+			editor.SetWriteAttribution(std::nullopt);
+			const ProvenanceRecorder* provenance = editor.GetProvenance();
+			REQUIRE(provenance != nullptr);
+			CHECK(provenance->Find("Assets/Old/Red.material") == nullptr);
+			CHECK(provenance->Find("Assets/Old/Deep/Blue.material") == nullptr);
+			const ProvenanceEntry* moved = provenance->Find("Assets/New/Place/Deep/Blue.material");
+			REQUIRE(moved != nullptr);
+			CHECK(moved->Method == "asset.move");
+			CHECK(moved->Hash == XXH64(material));
+			CHECK(provenance->Find("Assets/New/Place/Red.material") != nullptr);
+
+			// A moved file that leaves Assets/ (the trash) loses its entry; only an empty folder can be removed.
+			REQUIRE(editor.MoveProjectFile(MakeEditorPath("project://Assets/New/Place/Red.material"), MakeEditorPath("project://Library/Trash/Red.material"))
+					.has_value());
+			CHECK(provenance->Find("Assets/New/Place/Red.material") == nullptr);
+			CHECK(provenance->Find("Library/Trash/Red.material") == nullptr);
+			const Status full = editor.RemoveProjectFile(MakeEditorPath("project://Assets/New/Place"));
+			REQUIRE_FALSE(full.has_value());
+			CHECK(full.error().GetCode() == ErrorCode::InvalidState);
+			CHECK(editor.GetVfs().Exists(MakeEditorPath("project://Assets/New/Place/Deep/Blue.material")));
+			const Status missing = editor.RemoveProjectFile(MakeEditorPath("project://Assets/Nothing.material"));
+			REQUIRE_FALSE(missing.has_value());
+			CHECK(missing.error().GetCode() == ErrorCode::NotFound);
+		}
+
+		TEST_CASE("EditorContext: the write path refuses read-only projects and works without provenance in dry runs")
+		{
+			Test::EditorTestFixture fixture("EditorWritePath");
+			EditorContext& editor = fixture.GetEditor();
+			const Status launcher = editor.CreateProjectDirectory(MakeEditorPath("project://Assets/Folder"));
+			REQUIRE_FALSE(launcher.has_value());
+			CHECK(launcher.error().GetCode() == ErrorCode::InvalidState);
+
+			fixture.CreateAndOpenProject();
+			{
+				const Result<Scope<EditorDryRunScope>> dryRun = EditorDryRunScope::Begin(editor);
+				REQUIRE(dryRun.has_value());
+				REQUIRE(editor.WriteProjectFile(MakeEditorPath("project://Assets/Dry.material"), AsEditorBytes("{}")).has_value());
+				REQUIRE(editor.MoveProjectFile(MakeEditorPath("project://Assets/Dry.material"), MakeEditorPath("project://Assets/Moved.material")).has_value());
+				CHECK(editor.GetVfs().Exists(MakeEditorPath("project://Assets/Moved.material")));
+				CHECK(editor.GetProvenance()->Find("Assets/Moved.material") == nullptr);
+			}
+			CHECK_FALSE(editor.GetVfs().Exists(MakeEditorPath("project://Assets/Moved.material")));
+			CHECK(editor.GetProvenance()->Find("Assets/Dry.material") == nullptr);
+		}
+
+		TEST_CASE("EditorContext: prefab updates need an open scene and change nothing without instances")
+		{
+			Test::EditorTestFixture fixture("EditorPrefabUpdate");
+			fixture.CreateAndOpenProject();
+			EditorContext& editor = fixture.GetEditor();
+			const AssetHandle prefab(0x1234567890abcdefull);
+			const AssetHandle prefabs[] = { prefab };
+			const Result<Scope<Command>> withoutScene = editor.CreatePrefabUpdateCommand(prefabs);
+			REQUIRE_FALSE(withoutScene.has_value());
+			CHECK(withoutScene.error().GetCode() == ErrorCode::InvalidState);
+
+			fixture.CreateAndOpenScene();
+			static_cast<void>(CreateTrackedEntity(editor, "Plain"));
+			const uint64_t revision = editor.GetRevision();
+			const Result<Scope<Command>> nothing = editor.CreatePrefabUpdateCommand(prefabs);
+			REQUIRE(nothing.has_value());
+			CHECK(*nothing == nullptr);
+			const Result<bool> updated = editor.UpdatePrefabInstances(editor.GetScene(), {});
+			REQUIRE(updated.has_value());
+			CHECK_FALSE(*updated);
+			CHECK(editor.GetRevision() == revision);
 		}
 	}
 

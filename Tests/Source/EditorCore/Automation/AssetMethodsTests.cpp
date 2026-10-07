@@ -6,6 +6,8 @@
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Core/VirtualFileSystem.h"
+#include "Engine/Scene/Entity.h"
+#include "Engine/Scene/Scene.h"
 #include "Support/AssetTestFixture.h"
 #include "Support/AutomationTestClient.h"
 #include "Support/TestData.h"
@@ -45,7 +47,7 @@ namespace Engine {
 
 	TEST_SUITE("EditorCore")
 	{
-		TEST_CASE("AssetMethods: asset.create, setProperties, move and delete are undoable steps" * doctest::skip(true))
+		TEST_CASE("AssetMethods: asset.create, setProperties, move and delete are undoable steps")
 		{
 			Test::AutomationFixture setup("AssetCreateSetMoveDelete");
 			Json created = CallOrFail(setup, "asset.create", ParseAssetMethodJson(R"({"type": "material", "path": "Assets/Materials/Red.material",
@@ -76,7 +78,7 @@ namespace Engine {
 			CHECK(CallOrFail(setup, "asset.getProperties", Json{ { "asset", id } })["values"]["Metallic"] == Json(0.0f));
 		}
 
-		TEST_CASE("AssetMethods: asset.create supports dry runs and rejects bad paths and values" * doctest::skip(true))
+		TEST_CASE("AssetMethods: asset.create supports dry runs and rejects bad paths and values")
 		{
 			Test::AutomationFixture setup("AssetCreateDryRun");
 			Json dry = CallOrFail(setup, "asset.create", ParseAssetMethodJson(R"({"type": "Material", "path": "Assets/Dry.material", "dryRun": true})"));
@@ -91,12 +93,18 @@ namespace Engine {
 			CHECK(invalid["error"]["data"]["issues"][0]["pointer"] == Json("/values/Roughness"));
 			Json soundEffect = setup.Request("asset.create", ParseAssetMethodJson(R"({"type": "SoundEffect", "path": "Assets/Lock.sfx"})"));
 			CHECK(soundEffect["error"]["code"] == Json(-32009));
-			Json folder = CallOrFail(setup, "asset.create", ParseAssetMethodJson(R"({"type": "Folder", "path": "Assets/Audio"})"));
+			// New projects already have Assets/Audio (ProjectManager's folders), so a second one is AlreadyExists.
+			Json existingFolder = setup.Request("asset.create", ParseAssetMethodJson(R"({"type": "Folder", "path": "Assets/Audio"})"));
+			CHECK(existingFolder["error"]["data"]["issues"][0]["pointer"] == Json("/path"));
+			Json folder = CallOrFail(setup, "asset.create", ParseAssetMethodJson(R"({"type": "Folder", "path": "Assets/Levels/Desert"})"));
 			CHECK(folder["asset"]["id"] == Json(""));
-			CHECK(folder["path"] == Json("Assets/Audio"));
+			CHECK(folder["path"] == Json("Assets/Levels/Desert"));
+			const Result<FileInfo> created = setup.GetEditor().GetVfs().GetInfo(VfsPath::Create("project", "Assets/Levels/Desert").value_or(VfsPath()));
+			REQUIRE(created.has_value());
+			CHECK(created->IsDirectory);
 		}
 
-		TEST_CASE("AssetMethods: asset.list and asset.info report sub-assets, dependencies and diagnostics" * doctest::skip(true))
+		TEST_CASE("AssetMethods: asset.list and asset.info report sub-assets, dependencies and diagnostics")
 		{
 			Test::AutomationFixture setup("AssetListInfo");
 			for (const std::string_view file : { "Textured.gltf", "Textured.bin", "Textures/Checker.png" })
@@ -124,7 +132,7 @@ namespace Engine {
 			CHECK(unknown["error"]["code"] == Json(-32001));
 		}
 
-		TEST_CASE("AssetMethods: import settings merge, persist and trigger a reimport" * doctest::skip(true))
+		TEST_CASE("AssetMethods: import settings merge, persist and trigger a reimport")
 		{
 			Test::AutomationFixture setup("AssetImportSettings");
 			const VfsPath png = VfsPath::Create("project", "Assets/Normal.png").value_or(VfsPath());
@@ -141,7 +149,7 @@ namespace Engine {
 			CHECK(reimported["asset"]["path"] == Json("Assets/Normal.png"));
 		}
 
-		TEST_CASE("AssetMethods: asset.import copies a glTF's dependency closure with dependency metas" * doctest::skip(true))
+		TEST_CASE("AssetMethods: asset.import copies a glTF's dependency closure with dependency metas")
 		{
 			Test::AutomationFixture setup("AssetImportClosure");
 			const std::string source = (Test::GetTestDataPath("Assets/Gltf") / "Textured.gltf").generic_string();
@@ -157,7 +165,7 @@ namespace Engine {
 			CHECK_FALSE(setup.GetEditor().GetVfs().Exists(VfsPath::Create("project", "Assets/Escaping").value_or(VfsPath())));
 		}
 
-		TEST_CASE("AssetMethods: asset.setImportSettings on an instanced glTF updates its instances in the same undo step" * doctest::skip(true))
+		TEST_CASE("AssetMethods: asset.setImportSettings on an instanced glTF updates its instances in the same undo step")
 		{
 			Test::AutomationFixture setup("AssetSettingsInstances");
 			WriteGltfFixture(setup, "Box.glb");
@@ -181,7 +189,7 @@ namespace Engine {
 			CHECK(CallOrFail(setup, "entity.bounds", boundsParams)["bounds"][0]["size"] == before["bounds"][0]["size"]);
 		}
 
-		TEST_CASE("AssetMethods: asset.move refuses a standalone texture that a glTF finds by path" * doctest::skip(true))
+		TEST_CASE("AssetMethods: asset.move refuses a standalone texture that a glTF finds by path")
 		{
 			Test::AutomationFixture setup("AssetMovePathDependent");
 			// The image gets its own Texture meta first; the glTF that references it arrives later and reuses it by path.
@@ -196,6 +204,84 @@ namespace Engine {
 			CHECK(refused["error"]["message"].dump().find("Assets/Models/StandaloneTexture.gltf") != std::string::npos);
 			CHECK(setup.GetEditor().GetVfs().Exists(VfsPath::Create("project", "Assets/Models/Textures/Shared.png").value_or(VfsPath())));
 			CHECK_FALSE(setup.GetEditor().GetHistory().CanUndo());
+		}
+
+		TEST_CASE("AssetMethods: references, folders, cursors and destinations are validated")
+		{
+			Test::AutomationFixture setup("AssetValidation");
+			CallOrFail(setup, "asset.create", ParseAssetMethodJson(R"({"type": "Material", "path": "Assets/Red.material"})"));
+			CHECK(setup.Request("asset.info", Json{ { "asset", "" } })["error"]["code"] == Json(-32602));
+			CHECK(setup.Request("asset.info", Json{ { "asset", "Library/Red.material" } })["error"]["code"] == Json(-32602));
+			Json misspelt = setup.Request("asset.info", Json{ { "asset", "Assets/Rad.material" } });
+			CHECK(misspelt["error"]["code"] == Json(-32001));
+			CHECK(misspelt["error"]["data"]["hint"].dump().find("Assets/Red.material") != std::string::npos);
+
+			CHECK(setup.Request("asset.list", Json{ { "dir", "Library" } })["error"]["code"] == Json(-32602));
+			CHECK(setup.Request("asset.list", Json{ { "dir", "Assets/Missing" } })["error"]["code"] == Json(-32001));
+			CHECK(setup.Request("asset.list", Json{ { "cursor", "page two" } })["error"]["code"] == Json(-32602));
+			CHECK(setup.Request("asset.list", Json{ { "limit", 0 } })["error"]["code"] == Json(-32602));
+			Json listed = CallOrFail(setup, "asset.list", ParseAssetMethodJson(R"({"type": "Material", "recursive": false})"));
+			CHECK(listed["total"] == Json(1));
+			CHECK(listed["nextCursor"] == Json(""));
+
+			// Built-ins have no .meta to change, a move keeps the extension, and a material has no import settings to patch with
+			// a non-object.
+			CHECK(setup.Request("asset.getImportSettings", Json{ { "asset", "engine://Meshes/Cube" } })["error"]["code"] == Json(-32602));
+			CHECK(setup.Request("asset.move", Json{ { "asset", "Assets/Red.material" }, { "path", "Assets/Red.png" } })["error"]["code"] == Json(-32602));
+			CHECK(setup.Request("asset.setProperties", Json{ { "asset", "Assets/Red.material" }, { "values", 3 } })["error"]["code"] == Json(-32602));
+			Json created = setup.Request("asset.create", ParseAssetMethodJson(R"({"type": "Scene", "path": "Assets/Red.scene", "values": {}})"));
+			CHECK(created["error"]["code"] == Json(-32602));
+			Json taken = setup.Request("asset.create", ParseAssetMethodJson(R"({"type": "Material", "path": "Assets/Red.material"})"));
+			CHECK(taken["error"]["code"] == Json(-32004));
+
+			// An unchanged patch writes nothing and records no undo step.
+			const size_t undoCount = setup.GetEditor().GetHistory().GetUndoCount();
+			Json same = CallOrFail(setup, "asset.setProperties", ParseAssetMethodJson(R"({"asset": "Assets/Red.material", "values": {"Roughness": 0.5}})"));
+			CHECK(same["undoIndex"] == Json(0));
+			CHECK(setup.GetEditor().GetHistory().GetUndoCount() == undoCount);
+		}
+
+		TEST_CASE("AssetMethods: an external change of the open scene is reported in _meta until the scene is reloaded")
+		{
+			Test::AutomationFixture setup("AssetSceneChangedMeta");
+			CallOrFail(setup, "project.refreshAssets", Json::object());
+			constexpr std::string_view External = R"({
+	"Format": "Scene",
+	"Version": 1,
+	"Name": "Main",
+	"Seed": 11,
+	"ComponentVersions": {
+		"Transform": 1
+	},
+	"Entities": [
+		{
+			"ID": "2b00000000000002",
+			"Name": "Outside",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [1, 2, 3],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				}
+			}
+		}
+	]
+}
+)";
+			EditorContext& editor = setup.GetEditor();
+			REQUIRE(FileSystem::WriteFileAtomic(editor.GetProject().GetRoot() / "Assets/Scenes/Main.scene", AsBytes(External)).has_value());
+			Json refreshed = setup.Request("project.refreshAssets", Json::object());
+			REQUIRE(refreshed.contains("result"));
+			CHECK(refreshed["result"]["_meta"]["sceneChangedOnDisk"] == Json(true));
+			CHECK_FALSE(editor.GetScene().FindEntityByPath("/Outside").IsValid());
+
+			Json reloaded = setup.Request("scene.open", ParseAssetMethodJson(R"({"path": "Assets/Scenes/Main.scene", "reload": true})"));
+			REQUIRE(reloaded.contains("result"));
+			CHECK_FALSE(reloaded["result"]["_meta"].contains("sceneChangedOnDisk"));
+			CHECK(editor.GetScene().FindEntityByPath("/Outside").IsValid());
 		}
 	}
 

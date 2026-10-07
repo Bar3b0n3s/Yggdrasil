@@ -114,7 +114,7 @@ namespace Engine {
 			CHECK_FALSE(std::filesystem::exists(directory / "Editor.json.bak", error));
 		}
 
-		TEST_CASE("EngineContext: engine resources mount engine:// read-only and enginecache:// read-write" * doctest::skip(true))
+		TEST_CASE("EngineContext: engine resources mount engine:// read-only and enginecache:// read-write")
 		{
 			Test::TempDirectory directory("EngineContextResources");
 			REQUIRE(FileSystem::CreateDirectories(directory / "Resources").has_value());
@@ -139,7 +139,7 @@ namespace Engine {
 			CHECK_FALSE(std::filesystem::exists(directory / "bin/EngineCache/00000000000001c1/key.bin.bak", error));
 		}
 
-		TEST_CASE("EngineContext: a missing engine resources directory fails with the step as context" * doctest::skip(true))
+		TEST_CASE("EngineContext: a missing engine resources directory fails with the step as context")
 		{
 			Test::TempDirectory directory("EngineContextNoResources");
 			Result<Scope<EngineContext>> created = EngineContext::Create({ .EngineResourcesDirectory = directory / "Missing" });
@@ -166,7 +166,7 @@ namespace Engine {
 			CHECK(context.GetAssetManager() == nullptr);
 		}
 
-		TEST_CASE("EngineContext: the type registry holds the Asset module's types" * doctest::skip(true))
+		TEST_CASE("EngineContext: the type registry holds the Asset module's types")
 		{
 			Result<Scope<EngineContext>> created = EngineContext::Create({});
 			REQUIRE(created.has_value());

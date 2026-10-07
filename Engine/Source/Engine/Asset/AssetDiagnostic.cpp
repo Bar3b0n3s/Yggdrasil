@@ -26,10 +26,13 @@ namespace Engine {
 		return Codes;
 	}
 
-	std::string AssetDiagnosticToString(const AssetDiagnostic& /*diagnostic*/)
+	std::string AssetDiagnosticToString(const AssetDiagnostic& diagnostic)
 	{
-		ENGINE_CONTRACT_STUB();
-		return {};
+		std::string text = diagnostic.Path.empty() ? std::format("{}: {}", diagnostic.Code, diagnostic.Message)
+												   : std::format("{} {}: {}", diagnostic.Code, diagnostic.Path, diagnostic.Message);
+		if (!diagnostic.Hint.empty())
+			text += std::format(" (hint: {})", diagnostic.Hint);
+		return text;
 	}
 
 }

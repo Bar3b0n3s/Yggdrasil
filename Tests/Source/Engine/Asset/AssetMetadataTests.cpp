@@ -75,7 +75,7 @@ namespace Engine {
 			CHECK(dependency.Type == AssetType::None);
 		}
 
-		TEST_CASE("AssetMetadata: asset and dependency metas round-trip byte-identically" * doctest::skip(true))
+		TEST_CASE("AssetMetadata: asset and dependency metas round-trip byte-identically")
 		{
 			const std::string gltfText = MakeGltfMetaText();
 			Result<AssetMetadata> gltf = ParseAssetMetadata(gltfText, "Assets/Track.glb.meta");
@@ -96,7 +96,7 @@ namespace Engine {
 			CHECK(SerializeAssetMetadata(*dependency) == DependencyMetaText);
 		}
 
-		TEST_CASE("AssetMetadata: malformed metas are located Validation errors" * doctest::skip(true))
+		TEST_CASE("AssetMetadata: malformed metas are located Validation errors")
 		{
 			struct Case
 			{
@@ -120,14 +120,59 @@ namespace Engine {
 			}
 		}
 
-		TEST_CASE("AssetMetadata: a newer version is UnsupportedVersion" * doctest::skip(true))
+		TEST_CASE("AssetMetadata: sub-asset entries must be sorted, unique and derived from the source handle")
+		{
+			const AssetHandle source(0x0000000000000001ull);
+			const auto makeText = [](std::string_view subAssets)
+			{
+				return std::format(R"({{"Format": "AssetMeta", "Version": 1, "Handle": "0000000000000001", "Type": "Prefab", "Importer": "Gltf",
+					"ImporterVersion": 1, "Settings": {{}}, "SubAssets": [{}]}})",
+					subAssets);
+			};
+			const auto entry = [](std::string_view key, AssetHandle handle)
+			{
+				return std::format(R"({{"Key": "{}", "Handle": "{}", "Type": "Mesh"}})", key, handle.ToString());
+			};
+			const AssetHandle a = DeriveSubAssetHandle(source, "mesh:0");
+			const AssetHandle b = DeriveSubAssetHandle(source, "mesh:1");
+			struct Case
+			{
+				std::string Text;
+				std::string_view Pointer;
+			};
+			const Case cases[] = {
+				{ makeText(entry("mesh:1", b) + ", " + entry("mesh:0", a)), "/SubAssets/1/Key" },
+				{ makeText(entry("mesh:0", a) + ", " + entry("mesh:0", a)), "/SubAssets/1/Key" },
+				{ makeText(entry("mesh:0", b)), "/SubAssets/0/Handle" },
+				{ makeText(entry("", a)), "/SubAssets/0/Key" },
+				{ makeText(R"({"Key": "mesh:0", "Handle": ")" + a.ToString() + R"(", "Type": "None"})"), "/SubAssets/0/Type" },
+				{ R"({"Format": "AssetMeta", "Version": 1, "Handle": "0000000000000001", "Type": "Dependency", "Owner": "0000000000000002", "Importer": "Gltf"})",
+					"/Importer" },
+				{ R"({"Format": "AssetMeta", "Version": 1, "Handle": "0000000000000001", "Type": "Texture", "Importer": "Texture", "ImporterVersion": 1, "Settings": {}, "SubAssets": [], "Owner": "0000000000000002"})",
+					"/Owner" },
+				{ R"({"Format": "AssetMeta", "Version": 1, "Handle": "0000000000000000", "Type": "Texture", "Importer": "Texture", "ImporterVersion": 1, "Settings": {}, "SubAssets": []})",
+					"/Handle" },
+			};
+			for (const Case& testCase : cases)
+			{
+				CAPTURE(testCase.Text);
+				Result<AssetMetadata> parsed = ParseAssetMetadata(testCase.Text, "Assets/Bad.glb.meta");
+				REQUIRE_FALSE(parsed.has_value());
+				CHECK(parsed.error().GetCode() == ErrorCode::Validation);
+				CHECK(parsed.error().GetLocation().File == "Assets/Bad.glb.meta");
+				REQUIRE(parsed.error().GetLocation().JsonPointer.has_value());
+				CHECK(*parsed.error().GetLocation().JsonPointer == testCase.Pointer);
+			}
+		}
+
+		TEST_CASE("AssetMetadata: a newer version is UnsupportedVersion")
 		{
 			Result<AssetMetadata> parsed = ParseAssetMetadata(R"({"Format": "AssetMeta", "Version": 2, "Handle": "0000000000000001"})");
 			REQUIRE_FALSE(parsed.has_value());
 			CHECK(parsed.error().GetCode() == ErrorCode::UnsupportedVersion);
 		}
 
-		TEST_CASE("AssetMetadata: meta paths are sibling sidecars" * doctest::skip(true))
+		TEST_CASE("AssetMetadata: meta paths are sibling sidecars")
 		{
 			const VfsPath source = Test::ParseVfsPath("project://Assets/Models/Track.glb");
 			Result<VfsPath> meta = GetMetaPath(source);

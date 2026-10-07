@@ -25,7 +25,7 @@ namespace Engine {
 			}
 		}
 
-		TEST_CASE("AssetDiagnostic: ToString names the code, the path, the message and the hint" * doctest::skip(true))
+		TEST_CASE("AssetDiagnostic: ToString names the code, the path, the message and the hint")
 		{
 			const AssetDiagnostic diagnostic{
 				.Severity = DiagnosticSeverity::Error,

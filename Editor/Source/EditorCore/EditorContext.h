@@ -43,6 +43,7 @@ namespace Engine {
 	class SceneEdit;
 	class TypeRegistry;
 	class VirtualFileSystem;
+	struct AssetRefreshReport;
 
 	struct EditorContextSpecification
 	{
@@ -139,9 +140,11 @@ namespace Engine {
 
 		// Takes the opened project (ProjectManager::OpenProject): mounts project:// at its root (keeping .bak files, read-only
 		// for a read-only project) and cache:// at its cache directory, loads its provenance (none for read-only projects),
-		// adds it to the recent list (when user:// is mounted; a failure there is logged, not returned) and starts with no
-		// open scene and an empty history. Errors: InvalidState when a project is already open; the mount errors and
-		// ProvenanceRecorder::Load errors, after which nothing changed.
+		// adds it to the recent list (when user:// is mounted; a failure there is logged, not returned), opens its assets
+		// (EditorAssetManager::OpenProject on project://Assets, which is created first when a writable project lacks it) and
+		// starts with no open scene and an empty history. Errors: InvalidState when a project is already open; the mount
+		// errors, ProvenanceRecorder::Load errors, the errors of creating Assets/ and EditorAssetManager::OpenProject errors,
+		// after which the project stays closed.
 		[[nodiscard]] Status OpenProject(Scope<LoadedProject> project);
 
 		// Closes the open scene and the project (unmounts project:// and cache://, releases the lock). Unsaved changes are
@@ -301,6 +304,12 @@ namespace Engine {
 		// A mount of the open project's root as OpenProject mounts it at project:// (read-only for a read-only project,
 		// keeping .bak files). Errors: those of NativeDirectoryMount::Create.
 		[[nodiscard]] Result<Scope<IMount>> CreateProjectMount() const;
+		// The checks every write path member makes before it changes `path` ("cannot <action> '<path>'"): InvalidState without
+		// a project, PermissionDenied for a read-only project outside dry runs. Asserts a project:// path.
+		[[nodiscard]] Status CheckProjectWrite(const VfsPath& path, std::string_view action) const;
+		// EditorAssetManager::OpenProject on the open project's project://Assets (created first when a writable project lacks
+		// it) and cache://, read-only for a read-only project, with hot reload. Errors: those of the creation and of OpenProject.
+		[[nodiscard]] Result<AssetRefreshReport> OpenProjectAssets();
 	private:
 		EngineContext* m_Engine = nullptr; // documented back-reference: outlives the editor
 		EditorContextSpecification m_Specification;
@@ -324,6 +333,10 @@ namespace Engine {
 		EditorTransaction* m_Transaction = nullptr;      // the outermost open transaction, which registers itself
 		EditorDryRunScope* m_DryRun = nullptr;           // the open dry run, which registers itself
 		std::optional<int> m_ShutdownRequest;
+		// While a write path member that can change provenance (WriteProjectFile, MoveProjectFile, RemoveProjectFile) runs, the
+		// write observer keeps the first provenance save failure here for that member to return; otherwise it logs it.
+		bool m_CollectProvenanceErrors = false;
+		std::optional<Error> m_ProvenanceError;
 	private:
 		friend class CommandHistory; // reads GetRevisionBeforeCommand
 		friend class EditorDryRunScope;

@@ -64,6 +64,41 @@ namespace Engine {
 			CHECK(std::find(pointers.begin(), pointers.end(), "/Bogus") != pointers.end());
 		}
 
+		TEST_CASE("JsonSchema: an AssetRef accepts a handle, a project path or an engine path, an EntityRef only a handle")
+		{
+			// §7.1 and MethodRegistry.h convention 13: automation params take every spelling of an asset reference, so the
+			// schemas rpc.discover and component.schema publish must too.
+			Scope<TypeRegistry> registry = CreateScope<TypeRegistry>();
+			Test::RegisterReflectionTestTypes(*registry);
+			registry->Freeze();
+			const StructInfo* type = registry->FindStruct<Test::TestAllFields>();
+			REQUIRE(type != nullptr);
+			const Json schema = JsonSchema::ForStruct(*type);
+			CHECK(schema["properties"]["Mesh"]["pattern"] == "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$");
+			CHECK(schema["properties"]["Target"]["pattern"] == "^[0-9a-fA-F]{16}$");
+
+			for (const std::string_view mesh : { "0000000000000101", "Assets/Models/Track.glb#mesh:0:Straight", "engine://Meshes/Cube" })
+			{
+				CAPTURE(std::string(mesh));
+				Json instance = type->MakeDefaultJson();
+				instance["Mesh"] = std::string(mesh);
+				CHECK(JsonSchema::Validate(schema, instance).has_value());
+			}
+			for (const std::string_view mesh : { "Meshes/Cube", "Assets/", "engine://", "000000000000010" })
+			{
+				CAPTURE(std::string(mesh));
+				Json instance = type->MakeDefaultJson();
+				instance["Mesh"] = std::string(mesh);
+				const Status status = JsonSchema::Validate(schema, instance);
+				REQUIRE_FALSE(status.has_value());
+				REQUIRE(status.error().GetIssues().size() == 1);
+				CHECK(status.error().GetIssues()[0].JsonPointer == "/Mesh");
+			}
+			Json entity = type->MakeDefaultJson();
+			entity["Target"] = "Assets/Materials/Red.material";
+			CHECK_FALSE(JsonSchema::Validate(schema, entity).has_value());
+		}
+
 		TEST_CASE("JsonSchema: unsupported keywords are rejected as invalid schemas")
 		{
 			const Json schema = ParseSchemaJson(R"({ "type": "string", "format": "email" })");

@@ -63,21 +63,22 @@ namespace Engine {
 
 	TEST_SUITE("AssetPipeline")
 	{
-		TEST_CASE("Importers: importing twice gives identical hashes" * doctest::skip(true))
+		TEST_CASE("Importers: importing twice gives identical hashes")
 		{
-			// The fixtures: Tests/Data/Assets (textures, materials, scenes, prefabs, the generated glTF files) as project://, and
-			// the engine's Resources (the Inter font) as engine://.
+			// The fixtures: Tests/Data/Assets (textures, materials, scenes, prefabs, the generated glTF files) as
+			// project://Assets, so that the importers read their dependency files inside the asset root as in a project
+			// (ImportContext::ReadDependency), and the engine's Resources (the Inter font) as engine://.
 			Test::AssetTestFixture fixture;
 			VirtualFileSystem vfs;
-			Result<Scope<NativeDirectoryMount>> assets = NativeDirectoryMount::Create(Test::GetTestDataPath("Assets"), MountAccess::ReadOnly);
-			REQUIRE_MESSAGE(assets.has_value(), assets.error().ToString());
-			REQUIRE(vfs.Mount("project", std::move(*assets)).has_value());
+			Result<Scope<NativeDirectoryMount>> data = NativeDirectoryMount::Create(Test::GetTestDataPath(), MountAccess::ReadOnly);
+			REQUIRE_MESSAGE(data.has_value(), data.error().ToString());
+			REQUIRE(vfs.Mount("project", std::move(*data)).has_value());
 			Result<Scope<NativeDirectoryMount>> resources = NativeDirectoryMount::Create(Test::GetRepositoryRoot() / "Resources", MountAccess::ReadOnly);
 			REQUIRE(resources.has_value());
 			REQUIRE(vfs.Mount("engine", std::move(*resources)).has_value());
 
 			std::vector<VfsPath> sources;
-			for (const std::string_view root : { "project://", "engine://Fonts" })
+			for (const std::string_view root : { "project://Assets", "engine://Fonts" })
 			{
 				Result<std::vector<VfsEntry>> listed = vfs.List(Test::ParseVfsPath(root), true);
 				REQUIRE_MESSAGE(listed.has_value(), listed.error().ToString());

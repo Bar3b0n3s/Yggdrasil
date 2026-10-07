@@ -9,7 +9,7 @@ namespace Engine {
 
 	TEST_SUITE("AssetPipeline")
 	{
-		TEST_CASE("ImporterRegistry: the built-in importers cover the M6 extensions" * doctest::skip(true))
+		TEST_CASE("ImporterRegistry: the built-in importers cover the M6 extensions")
 		{
 			ImporterRegistry importers;
 			RegisterBuiltinImporters(importers);
@@ -49,7 +49,7 @@ namespace Engine {
 			CHECK(importers.GetImporters().size() == 6);
 		}
 
-		TEST_CASE("ImporterRegistry: Describe lists ids, main types and extensions sorted by id" * doctest::skip(true))
+		TEST_CASE("ImporterRegistry: Describe lists ids, main types and extensions sorted by id")
 		{
 			ImporterRegistry importers;
 			RegisterBuiltinImporters(importers);
@@ -61,7 +61,7 @@ namespace Engine {
 				CHECK(descriptions[index - 1].Id < descriptions[index].Id);
 		}
 
-		TEST_CASE("ImporterRegistry: every importer's settings struct is registered" * doctest::skip(true))
+		TEST_CASE("ImporterRegistry: every importer's settings struct is registered")
 		{
 			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
 			ImporterRegistry importers;

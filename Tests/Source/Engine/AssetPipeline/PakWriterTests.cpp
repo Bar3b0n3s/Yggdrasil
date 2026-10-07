@@ -4,10 +4,13 @@
 
 #include "Engine/Asset/BuiltinMeshes.h"
 #include "Engine/Asset/BuiltinTextures.h"
+#include "Engine/Asset/CookedFormat.h"
 #include "Engine/Asset/MeshData.h"
 #include "Engine/Asset/PakReader.h"
 #include "Engine/Asset/TextureData.h"
+#include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Hash.h"
+#include "Support/TempDirectory.h"
 
 #include <nlohmann/json.hpp>
 
@@ -42,7 +45,7 @@ namespace Engine {
 
 	TEST_SUITE("AssetPipeline")
 	{
-		TEST_CASE("Pak: round trip" * doctest::skip(true))
+		TEST_CASE("Pak: round trip")
 		{
 			const std::vector<PakWriterEntry> entries = MakeEntries();
 			const Buffer pak = BuildPak(MakeEntries());
@@ -67,7 +70,7 @@ namespace Engine {
 			CHECK(metadata["Name"] == Json("Test"));
 		}
 
-		TEST_CASE("Pak: flipped byte is detected" * doctest::skip(true))
+		TEST_CASE("Pak: flipped byte is detected")
 		{
 			const Buffer pak = BuildPak(MakeEntries());
 			Result<Ref<const PakReader>> intact = PakReader::OpenMemory(pak, "Intact.pak");
@@ -92,7 +95,7 @@ namespace Engine {
 			CHECK(broken.error().GetCode() == ErrorCode::Validation);
 		}
 
-		TEST_CASE("Pak: writer is deterministic" * doctest::skip(true))
+		TEST_CASE("Pak: writer is deterministic")
 		{
 			std::vector<PakWriterEntry> reversed = MakeEntries();
 			std::ranges::reverse(reversed);
@@ -102,7 +105,7 @@ namespace Engine {
 			CHECK(XXH64(first) == XXH64(BuildPak(MakeEntries())));
 		}
 
-		TEST_CASE("PakWriter: invalid entries are rejected" * doctest::skip(true))
+		TEST_CASE("PakWriter: invalid entries are rejected")
 		{
 			PakWriter writer;
 			const Buffer cube = CookMesh(GenerateBuiltinMesh(BuiltinMesh::Cube), 1);
@@ -115,6 +118,74 @@ namespace Engine {
 			CHECK_FALSE(writer.Add({ .Handle = AssetHandle(7), .Type = "File", .Path = "Shaders/A.spv", .Data = {} }).has_value());
 			CHECK_FALSE(writer.Add({ .Handle = AssetHandle(), .Type = "File", .Path = "../A.spv", .Data = {} }).has_value());
 			CHECK(writer.GetEntryCount() == 1);
+		}
+
+		TEST_CASE("PakWriter: types, paths and cooked data are validated, and paths are unique across kinds")
+		{
+			PakWriter writer;
+			const Buffer cube = CookMesh(GenerateBuiltinMesh(BuiltinMesh::Cube), 1);
+			const auto codeOf = [&writer](PakWriterEntry entry)
+			{
+				const Status added = writer.Add(std::move(entry));
+				return added.has_value() ? ErrorCode::Unknown : added.error().GetCode();
+			};
+			CHECK(codeOf({ .Handle = AssetHandle(0x102), .Type = "None", .Path = "engine://Meshes/Sphere", .Data = cube }) == ErrorCode::InvalidArgument);
+			CHECK(codeOf({ .Handle = AssetHandle(0x102), .Type = "Gizmo", .Path = "engine://Meshes/Sphere", .Data = cube }) == ErrorCode::InvalidArgument);
+			CHECK(codeOf({ .Handle = AssetHandle(0x102), .Type = "Mesh", .Path = "", .Data = cube }) == ErrorCode::InvalidArgument);
+			// Cooked data must be a complete, intact artifact.
+			Buffer truncated = cube;
+			truncated.pop_back();
+			CHECK(codeOf({ .Handle = AssetHandle(0x102), .Type = "Mesh", .Path = "engine://Meshes/Sphere", .Data = truncated }) == ErrorCode::InvalidArgument);
+			const std::string notCooked = "not a cooked artifact";
+			CHECK(codeOf({ .Handle = AssetHandle(0x102), .Type = "Mesh", .Path = "engine://Meshes/Sphere", .Data = Buffer(AsBytes(notCooked).begin(), AsBytes(notCooked).end()) })
+				== ErrorCode::InvalidArgument);
+			// A plain file and a cooked asset never share a path.
+			REQUIRE(codeOf({ .Handle = AssetHandle(), .Type = "File", .Path = "Shared", .Data = {} }) == ErrorCode::Unknown);
+			CHECK(codeOf({ .Handle = AssetHandle(0x103), .Type = "Mesh", .Path = "Shared", .Data = cube }) == ErrorCode::AlreadyExists);
+			CHECK(writer.GetEntryCount() == 1);
+		}
+
+		TEST_CASE("PakWriter: the layout is the documented one")
+		{
+			const Buffer pak = BuildPak(MakeEntries());
+			Result<PakHeader> header = ReadPakHeader(pak);
+			REQUIRE(header.has_value());
+			CHECK(header->EntryCount == 3);
+			// The first entry starts right after the header; the TOC follows the entry data at a 16-byte boundary and ends the
+			// pak.
+			Result<Ref<const PakReader>> reader = PakReader::OpenMemory(pak, "Layout.pak");
+			REQUIRE(reader.has_value());
+			CHECK((*reader)->GetEntries()[0].Offset == PakHeader::Size);
+			CHECK(header->TocOffset % PakEntryAlignment == 0);
+			CHECK(header->TocOffset + header->TocSize == pak.size());
+			CHECK(header->TocHash == XXH64(std::span<const std::byte>(pak).subspan(header->TocOffset)));
+			// Zero padding between entries.
+			const PakEntry& first = (*reader)->GetEntries()[0];
+			const PakEntry& second = (*reader)->GetEntries()[1];
+			for (uint64_t offset = first.Offset + first.Size; offset < second.Offset; ++offset)
+				CHECK(pak[offset] == std::byte{ 0 });
+			// An empty pak is a header and an empty TOC.
+			Result<Ref<const PakReader>> empty = PakReader::OpenMemory(PakWriter().Build(), "Empty.pak");
+			REQUIRE_MESSAGE(empty.has_value(), empty.error().ToString());
+			CHECK((*empty)->GetEntries().empty());
+			CHECK((*empty)->GetMetadata().Get() == Json::object());
+		}
+
+		TEST_CASE("PakWriter: WriteToFile writes exactly Build's bytes")
+		{
+			PakWriter writer;
+			for (PakWriterEntry& entry : MakeEntries())
+				REQUIRE(writer.Add(std::move(entry)).has_value());
+			Test::TempDirectory directory("PakWriterFile");
+			REQUIRE(writer.WriteToFile(directory / "Game.pak").has_value());
+			Result<Buffer> written = FileSystem::ReadFile(directory / "Game.pak");
+			REQUIRE(written.has_value());
+			CHECK(*written == writer.Build());
+			// Rewriting replaces the pak without keeping a backup next to it.
+			REQUIRE(writer.WriteToFile(directory / "Game.pak").has_value());
+			CHECK_FALSE(FileSystem::Exists(directory / "Game.pak.bak"));
+			// The parent directory must exist.
+			CHECK_FALSE(writer.WriteToFile(directory / "Missing" / "Game.pak").has_value());
 		}
 	}
 

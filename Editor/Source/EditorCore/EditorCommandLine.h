@@ -9,9 +9,10 @@
 #include <optional>
 #include <span>
 
-// The editor's own command-line options (Architecture §12.1, §13.9), the M4 subset and M6's --bake-engine-assets:
+// The editor's own command-line options (Architecture §12.1, §13.9), the M4 subset and M6's --bake-engine-assets and
+// --engine-cache-dir:
 //   Editor [--project <path>] [--read-only] [--automation[=port]] [--automation-test-hooks] [--batch <file.jsonl>]
-//          [--upgrade] [--dump-reference <dir>] [--bake-engine-assets]
+//          [--upgrade] [--dump-reference <dir>] [--bake-engine-assets] [--engine-cache-dir <dir>]
 // plus the engine options every application takes (GetEngineCommandLineOptions: --headless, --frames N,
 // --user-data-dir, --renderer vulkan|none and the graphics options) and the Editor executable's screenshot options
 // (Editor/EditorApp.h). --renderer is an engine option because the Runtime takes it too (§13.9; ADR 0009 decision 3:
@@ -47,6 +48,10 @@ namespace Engine {
 		// to date (entries without an importer in this build are skipped with a warning), 1 when a bake failed. Needs no
 		// project; CI.py's bake stage runs it after the build (§15.8).
 		bool BakeEngineAssets = false;
+		// --engine-cache-dir <dir>: the engine cooked cache to mount as enginecache:// instead of the checkout's
+		// <repo>/bin/EngineCache (ApplicationSpecification::EngineCacheDirectory, created when missing); native, absolute or
+		// relative to the working directory. Tests pass a temporary directory, so they never write the checkout's cache.
+		std::optional<std::filesystem::path> EngineCacheDirectory{};
 
 		// True when the editor runs a task and exits (batch, upgrade, dump-reference, bake-engine-assets) instead of running
 		// until shutdown.

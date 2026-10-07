@@ -37,6 +37,9 @@ namespace Engine {
 		VfsPath Path{};           // the written, removed or created path, or a move's destination
 		VfsPath From{};           // a move's source; empty otherwise
 		uint64_t ContentHash = 0; // Written: XXH64 (seed 0) of the bytes written (provenance records it); 0 otherwise
+		// Written: "<Path>.bak", the copy of the replaced file that a mount keeping backups made (§4.10; project:// does),
+		// which the write produced too and marked known; empty otherwise (a new file, or a mount without backups).
+		VfsPath Backup{};
 	};
 
 	// The writer of one editor. Main thread only (§4.11). Not copyable.
@@ -66,9 +69,10 @@ namespace Engine {
 		void SetDryRun(bool dryRun);
 		[[nodiscard]] bool IsDryRun() const;
 
-		// VirtualFileSystem::WriteFileAtomic, then MarkKnown (paths under the watcher's root), then the listener. Errors: the
-		// VFS's (nothing marked or reported then); a failed MarkKnown after a successful write is logged at Warn (the change
-		// then comes back once as an external change, which reimports what was just written) and is not an error.
+		// VirtualFileSystem::WriteFileAtomic, then MarkKnown of the path and of the backup the mount kept of a replaced file
+		// (AssetWriteEvent::Backup; paths under the watcher's root), then the listener. Errors: the VFS's (nothing marked or
+		// reported then); a failed MarkKnown after a successful write is logged at Warn (the change then comes back once as
+		// an external change, which reimports what was just written) and is not an error.
 		[[nodiscard]] Status Write(const VfsPath& path, std::span<const std::byte> data);
 
 		// VirtualFileSystem::Remove, then MarkKnown of every file it removed under the watcher's root, then the listener.
