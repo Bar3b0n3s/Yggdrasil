@@ -93,6 +93,7 @@ BUILD_FIXTURE_FINDINGS = {
     "MissingDeterministicDefine": re.compile(r"includes Jolt headers but does not define "
                                              r"JPH_CROSS_PLATFORM_DETERMINISTIC"),
     "FastMathJolt": re.compile(r"JoltPhysics uses a non-precise floating-point model"),
+    "FastMathMikkTSpace": re.compile(r"MikkTSpace uses a non-precise floating-point model"),
     "UndefinedJoltDefine": re.compile(r"Tests includes JoltPhysics headers but lacks JPH_PROFILE_ENABLED"),
     "JoltDefineInBuildOptions": re.compile(r"Engine includes JoltPhysics headers but defines JPH_DOUBLE_PRECISION"),
     "LuauVectorSize": re.compile(r"Engine includes Luau headers but defines LUA_VECTOR_SIZE=4"),

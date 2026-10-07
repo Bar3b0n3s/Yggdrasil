@@ -12,8 +12,8 @@
 #include <string>
 
 // The diagnostics delta every response carries (Architecture §13.4): "_meta": {revision, dirty, undoLabel?, tick?,
-// playState, diagnostics: {newErrors, newWarnings, newScriptErrors, logCursor, firstNew: [<= 3 entries]}}, so an agent
-// learns about problems without polling.
+// playState, sceneChangedOnDisk?, diagnostics: {newErrors, newWarnings, newScriptErrors, logCursor, firstNew: [<= 3
+// entries]}}, so an agent learns about problems without polling.
 
 namespace Engine {
 
@@ -27,6 +27,9 @@ namespace Engine {
 		std::string UndoLabel{};        // the label edit.undo would undo ("[agent] Create Entity 'Board'"); empty: omitted
 		std::optional<uint64_t> Tick{}; // the play session's tick (M7); omitted when not playing
 		std::string PlayState = "Edit"; // "Edit", "Play", "Simulate" or "Paused"
+		// §7.5 race rule 3 (EditorContext::IsSceneChangedOnDisk): written as "sceneChangedOnDisk": true when set, omitted
+		// otherwise (M6).
+		bool SceneChangedOnDisk = false;
 	};
 
 	// The most new log entries quoted in diagnostics.firstNew.

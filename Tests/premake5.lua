@@ -55,4 +55,5 @@ project "Tests"
 	UseJoltPhysics()
 	UseSpdlog()
 	UseMiniaudio()
+	UseMikkTSpace()
 	UseLuau(true)

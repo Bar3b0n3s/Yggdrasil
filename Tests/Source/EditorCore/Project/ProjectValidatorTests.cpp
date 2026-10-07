@@ -6,6 +6,7 @@
 #include "EditorCore/Commands/ProjectSettingsCommand.h"
 #include "EditorCore/Commands/SceneEdit.h"
 #include "EditorCore/EditorContext.h"
+#include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/Core/Hash.h"
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Core/VirtualFileSystem.h"
@@ -568,6 +569,122 @@ namespace Engine {
 			CHECK(std::adjacent_find(sorted.begin(), sorted.end()) == sorted.end());
 			CHECK(std::find(codes.begin(), codes.end(), BuildSceneMissingCode) != codes.end());
 			CHECK(std::find(codes.begin(), codes.end(), AssetImportFailedCode) != codes.end());
+		}
+
+		TEST_CASE("ProjectValidator: the asset scan diagnostics are reported under their codes and fixed in one undo step"
+			* doctest::skip(true))
+		{
+			Test::EditorTestFixture fixture("ValidatorAssetScan");
+			fixture.CreateAndOpenProject();
+			EditorContext& editor = fixture.GetEditor();
+			// A copy-pasted texture pair (duplicate handle) and an orphan .meta, written outside the editor's knowledge.
+			const std::string meta = R"({
+	"Format": "AssetMeta",
+	"Version": 1,
+	"Handle": "1111222233334444",
+	"Type": "Texture",
+	"Importer": "Texture",
+	"ImporterVersion": 1,
+	"Settings": {
+		"Usage": "Color",
+		"GenerateMips": true
+	},
+	"SubAssets": []
+}
+)";
+			WriteValidatorFile(editor, "Assets/A.png", "not decoded by the scan");
+			WriteValidatorFile(editor, "Assets/A.png.meta", meta);
+			WriteValidatorFile(editor, "Assets/B.png", "not decoded by the scan");
+			WriteValidatorFile(editor, "Assets/B.png.meta", meta);
+			WriteValidatorFile(editor, "Assets/Gone.png.meta", meta);
+			REQUIRE(editor.GetAssets().Refresh().has_value());
+
+			Result<ValidationReport> report = ProjectValidator::Validate(editor, ValidationScope::Project);
+			REQUIRE_MESSAGE(report.has_value(), report.error().ToString());
+			INFO(DescribeDiagnostics(*report));
+			const ProjectDiagnostic* duplicate = FindFileDiagnostic(*report, "Assets/B.png.meta", AssetDuplicateHandleCode);
+			REQUIRE(duplicate != nullptr);
+			CHECK(duplicate->AutoFixable);
+			CHECK(duplicate->Asset == "1111222233334444");
+			const ProjectDiagnostic* orphan = FindFileDiagnostic(*report, "Assets/Gone.png.meta", AssetOrphanMetaCode);
+			REQUIRE(orphan != nullptr);
+			CHECK(orphan->Severity == DiagnosticSeverity::Warning);
+
+			Result<FixReport> fixed = ProjectValidator::Fix(editor, ValidationScope::Project, { .All = true, .IdsOrCodes = {} });
+			REQUIRE_MESSAGE(fixed.has_value(), fixed.error().ToString());
+			CHECK(fixed->Fixed.size() == 2);
+			CHECK(fixed->UndoIndex != 0);
+			CHECK(FindDiagnostic(fixed->After, AssetDuplicateHandleCode) == nullptr);
+			CHECK(FindDiagnostic(fixed->After, AssetOrphanMetaCode) == nullptr);
+			// The orphan went to the trash, never deleted (§12.3); undo restores both files.
+			REQUIRE(editor.GetHistory().Undo(editor).has_value());
+			Result<ValidationReport> undone = ProjectValidator::Validate(editor, ValidationScope::Project);
+			REQUIRE(undone.has_value());
+			CHECK(FindDiagnostic(*undone, AssetDuplicateHandleCode) != nullptr);
+			CHECK(FindDiagnostic(*undone, AssetOrphanMetaCode) != nullptr);
+		}
+
+		TEST_CASE("ProjectValidator: a reference to an unregistered asset is ASSET_MISSING" * doctest::skip(true))
+		{
+			Test::EditorTestFixture fixture("ValidatorAssetMissing");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			EditorContext& editor = fixture.GetEditor();
+			{
+				SceneEdit edit(editor, "Add Renderer");
+				Entity entity = editor.GetScene().CreateEntity("Box");
+				REQUIRE(ComponentAccess::AddComponent(entity, "MeshRenderer", nullptr).has_value());
+				REQUIRE(ComponentAccess::PatchComponentJson(entity, "MeshRenderer", ParseValidatorJson(R"({"Mesh": "7777000077770000"})")).has_value());
+				REQUIRE(edit.Commit().has_value());
+			}
+			Result<ValidationReport> report = ProjectValidator::Validate(editor, ValidationScope::Scene);
+			REQUIRE_MESSAGE(report.has_value(), report.error().ToString());
+			const ProjectDiagnostic* missing = FindDiagnostic(*report, AssetMissingCode);
+			REQUIRE(missing != nullptr);
+			CHECK(missing->Severity == DiagnosticSeverity::Error);
+			CHECK(missing->Component == "MeshRenderer");
+			CHECK(missing->Field == "Mesh");
+			CHECK(missing->Asset == "7777000077770000");
+			// A built-in reference is never missing.
+			{
+				SceneEdit edit(editor, "Use Cube");
+				REQUIRE(ComponentAccess::PatchComponentJson(editor.GetScene().FindEntityByPath("/Box"), "MeshRenderer",
+					ParseValidatorJson(R"({"Mesh": "0000000000000101"})"))
+						.has_value());
+				REQUIRE(edit.Commit().has_value());
+			}
+			Result<ValidationReport> fixedReport = ProjectValidator::Validate(editor, ValidationScope::Scene);
+			REQUIRE(fixedReport.has_value());
+			CHECK(FindDiagnostic(*fixedReport, AssetMissingCode) == nullptr);
+		}
+
+		TEST_CASE("ProjectValidator: an instance of an unregistered prefab is PREFAB_MISSING_ASSET" * doctest::skip(true))
+		{
+			Test::EditorTestFixture fixture("ValidatorPrefabMissing");
+			fixture.CreateAndOpenProject();
+			Result<std::string> scene = Test::ReadTestDataText("Scenes/AllComponents.scene");
+			REQUIRE(scene.has_value());
+			// AllComponents.scene holds a prefab instance whose prefab asset this project does not have.
+			WriteValidatorFile(fixture.GetEditor(), "Assets/Scenes/Instances.scene", *scene);
+			Result<ValidationReport> report = ProjectValidator::Validate(fixture.GetEditor(), ValidationScope::Project);
+			REQUIRE_MESSAGE(report.has_value(), report.error().ToString());
+			const ProjectDiagnostic* missing = FindFileDiagnostic(*report, "Assets/Scenes/Instances.scene", PrefabMissingAssetCode);
+			REQUIRE(missing != nullptr);
+			CHECK(missing->Severity == DiagnosticSeverity::Warning);
+			CHECK_FALSE(missing->AutoFixable);
+		}
+
+		TEST_CASE("ProjectValidator: GetCodes lists the M6 asset codes" * doctest::skip(true))
+		{
+			const std::span<const std::string_view> codes = ProjectValidator::GetCodes();
+			for (const std::string_view code : GetAssetDiagnosticCodes())
+			{
+				CAPTURE(std::string(code));
+				const bool listed = std::find(codes.begin(), codes.end(), code) != codes.end();
+				// Every asset code but the runtime-only upload failure is a validator code.
+				CHECK(listed == (code != AssetUploadFailedCode));
+			}
+			CHECK(std::find(codes.begin(), codes.end(), PrefabMissingAssetCode) != codes.end());
 		}
 	}
 

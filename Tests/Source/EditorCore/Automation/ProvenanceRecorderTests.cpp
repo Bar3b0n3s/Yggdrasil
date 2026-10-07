@@ -151,6 +151,19 @@ namespace Engine {
 			CHECK_FALSE(entry->TranscriptLine.has_value());
 			CHECK(recorder.Find("Other.eproj") == nullptr);
 		}
+
+		TEST_CASE("ProvenanceRecorder: Remove forgets an entry and keeps the others sorted" * doctest::skip(true))
+		{
+			Scope<VirtualFileSystem> vfs = MakeProvenanceVfs();
+			Result<ProvenanceRecorder> recorder = ProvenanceRecorder::Load(*vfs);
+			REQUIRE(recorder.has_value());
+			recorder->Record("Assets/A.material", 1, MakeAttribution("asset.create", Json(1), "engine-mcp", 1));
+			recorder->Record("Assets/B.material", 2, MakeAttribution("asset.create", Json(2), "engine-mcp", 2));
+			CHECK(recorder->Remove("Assets/A.material"));
+			CHECK_FALSE(recorder->Remove("Assets/A.material"));
+			REQUIRE(recorder->GetEntries().size() == 1);
+			CHECK(recorder->GetEntries().front().Path == "Assets/B.material");
+		}
 	}
 
 }

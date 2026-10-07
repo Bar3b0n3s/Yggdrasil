@@ -213,4 +213,10 @@ namespace Engine {
 		return position != m_Entries.end() && position->Path == path ? &*position : nullptr;
 	}
 
+	bool ProvenanceRecorder::Remove(std::string_view /*path*/)
+	{
+		ENGINE_CONTRACT_STUB();
+		return false;
+	}
+
 }

@@ -116,6 +116,29 @@ namespace Engine {
 				CHECK(options.error().GetCode() == ErrorCode::InvalidArgument);
 			}
 		}
+
+		TEST_CASE("EditorCommandLine: --bake-engine-assets is a one-shot run that excludes the other runs" * doctest::skip(true))
+		{
+			const Result<EditorLaunchOptions> bake = ParseEditorArguments({ "--headless", "--bake-engine-assets" });
+			REQUIRE_MESSAGE(bake.has_value(), bake.error().ToString());
+			CHECK(bake->BakeEngineAssets);
+			CHECK(bake->IsOneShot());
+			// A one-shot run never listens, even headless (ADR 0008 decision 14).
+			CHECK_FALSE(bake->ListensForAutomation(true));
+			// It needs no project, and with one it still bakes.
+			CHECK(ParseEditorArguments({ "--bake-engine-assets", "--project", "Projects/Tetris" }).has_value());
+			for (const std::vector<std::string>& conflicting : std::vector<std::vector<std::string>>{
+					 { "--bake-engine-assets", "--batch", "Scaffold.jsonl" },
+					 { "--bake-engine-assets", "--project", "Projects/Tetris", "--upgrade" },
+					 { "--bake-engine-assets", "--dump-reference", "Reference" },
+					 { "--bake-engine-assets", "--automation" },
+				 })
+			{
+				const Result<EditorLaunchOptions> parsed = ParseEditorArguments(conflicting);
+				REQUIRE_FALSE(parsed.has_value());
+				CHECK(parsed.error().GetCode() == ErrorCode::InvalidArgument);
+			}
+		}
 	}
 
 }

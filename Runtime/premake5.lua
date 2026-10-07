@@ -27,6 +27,7 @@ project "Runtime"
 	UseJoltPhysics()
 	UseSpdlog()
 	UseMiniaudio()
+	UseMikkTSpace()
 	UseLuau(false)
 
 	-- Shipping builds have no console window. The C++ main() stays the entry point on Windows.

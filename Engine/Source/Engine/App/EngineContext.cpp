@@ -1,6 +1,7 @@
 #include "EnginePCH.h"
 #include "Engine/App/EngineContext.h"
 
+#include "Engine/Asset/AssetTypeRegistration.h"
 #include "Engine/Core/Assert.h"
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Log.h"
@@ -34,6 +35,7 @@ namespace Engine {
 		// The registries (§4.1): everything the context's scenes, project files and automation read and write.
 		RegisterBuiltinComponents(m_TypeRegistry);
 		RegisterProjectSettingsTypes(m_TypeRegistry);
+		RegisterAssetTypes(m_TypeRegistry);
 		if (specification.RegisterTypes != nullptr)
 			specification.RegisterTypes(m_TypeRegistry);
 		m_TypeRegistry.Freeze();
@@ -57,6 +59,12 @@ namespace Engine {
 			ENGINE_TRY(WithContext(context->m_Vfs.Mount("user", std::move(mount)), step));
 		}
 
+		if (!specification.EngineResourcesDirectory.empty() || !specification.EngineCacheDirectory.empty())
+		{
+			ENGINE_TRY(WithContext(context->MountEngineResources(specification),
+				Utils::DescribeEngineContextStep(EngineContextStep::EngineResources)));
+		}
+
 		if (specification.Window.has_value())
 		{
 			ENGINE_TRY_ASSIGN(Window window,
@@ -69,6 +77,12 @@ namespace Engine {
 			ENGINE_TRY(WithContext(context->CreateGraphics(*specification.Graphics), Utils::DescribeEngineContextStep(EngineContextStep::Graphics)));
 
 		return context;
+	}
+
+	Status EngineContext::MountEngineResources(const EngineContextSpecification& /*specification*/)
+	{
+		ENGINE_CONTRACT_STUB();
+		return MakeError(ErrorCode::Unsupported, "EngineContext::MountEngineResources is an M6 contract stub");
 	}
 
 	Status EngineContext::CreateGraphics(const GraphicsSpecification& graphics)
@@ -111,10 +125,11 @@ namespace Engine {
 	{
 		switch (step)
 		{
-			case EngineContextStep::Services: return "Services";
-			case EngineContextStep::UserData: return "UserData";
-			case EngineContextStep::Window:   return "Window";
-			case EngineContextStep::Graphics: return "Graphics";
+			case EngineContextStep::Services:        return "Services";
+			case EngineContextStep::UserData:        return "UserData";
+			case EngineContextStep::EngineResources: return "EngineResources";
+			case EngineContextStep::Window:          return "Window";
+			case EngineContextStep::Graphics:        return "Graphics";
 		}
 
 		ENGINE_CORE_ASSERT(false, "Unknown EngineContextStep {}", std::to_underlying(step));

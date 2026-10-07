@@ -4,6 +4,9 @@
 #include "EditorCore/Commands/CompositeCommand.h"
 #include "EditorCore/Private/EditorFileError.h"
 #include "Engine/App/EngineContext.h"
+#include "Engine/Asset/AssetLoaderRegistry.h"
+#include "Engine/AssetPipeline/EditorAssetManager.h"
+#include "Engine/AssetPipeline/ImporterRegistry.h"
 #include "Engine/Core/Assert.h"
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Hash.h"
@@ -40,13 +43,68 @@ namespace Engine {
 
 	EditorContext::EditorContext(ConstructionKey /*key*/, EngineContext& engine, const EditorContextSpecification& specification,
 		const Random::State& idGeneratorState)
-		: m_Engine(&engine), m_Specification(specification), m_IdGenerator(UUIDGenerator::CreateRandom(idGeneratorState)), m_History(specification.HistoryLimits)
+		: m_Engine(&engine), m_Specification(specification), m_IdGenerator(UUIDGenerator::CreateRandom(idGeneratorState)), m_Importers(CreateScope<ImporterRegistry>()), m_Loaders(CreateScope<AssetLoaderRegistry>()), m_History(specification.HistoryLimits)
 	{
+		// The editor's asset services (§3 rule 4): the built-in importers and loaders, and the manager the engine context
+		// serves to engine code.
+		RegisterBuiltinImporters(*m_Importers);
+		RegisterBuiltinLoaders(*m_Loaders);
+		m_Assets = CreateScope<EditorAssetManager>(EditorAssetManagerSpecification{
+			.Vfs = &engine.GetVfs(),
+			.Jobs = &engine.GetJobSystem(),
+			.MainThread = &engine.GetMainThreadQueue(),
+			.Events = &engine.GetEventLog(),
+			.Registry = &engine.GetTypeRegistry(),
+			.IdGenerator = &m_IdGenerator,
+			.Importers = m_Importers.get(),
+			.Loaders = m_Loaders.get(),
+			.EnvironmentBaker = specification.EnvironmentBaker,
+			.ScriptDiagnostics = nullptr,
+			.EngineAssetGenerators = {},
+		});
+		engine.SetAssetManager(m_Assets.get());
 	}
 
 	EditorContext::~EditorContext()
 	{
 		CloseProject();
+		if (m_Engine->GetAssetManager() == m_Assets.get())
+			m_Engine->SetAssetManager(nullptr);
+	}
+
+	void EditorContext::Update(double /*nowSeconds*/)
+	{
+		ENGINE_CONTRACT_STUB();
+	}
+
+	Status EditorContext::MoveProjectFile(const VfsPath& /*from*/, const VfsPath& /*to*/)
+	{
+		ENGINE_CONTRACT_STUB();
+		return MakeError(ErrorCode::Unsupported, "EditorContext::MoveProjectFile is an M6 contract stub");
+	}
+
+	Status EditorContext::RemoveProjectFile(const VfsPath& /*path*/)
+	{
+		ENGINE_CONTRACT_STUB();
+		return MakeError(ErrorCode::Unsupported, "EditorContext::RemoveProjectFile is an M6 contract stub");
+	}
+
+	Status EditorContext::CreateProjectDirectory(const VfsPath& /*directory*/)
+	{
+		ENGINE_CONTRACT_STUB();
+		return MakeError(ErrorCode::Unsupported, "EditorContext::CreateProjectDirectory is an M6 contract stub");
+	}
+
+	Result<bool> EditorContext::UpdatePrefabInstances(Scene& /*scene*/, std::span<const AssetHandle> /*prefabs*/)
+	{
+		ENGINE_CONTRACT_STUB();
+		return MakeError(ErrorCode::Unsupported, "EditorContext::UpdatePrefabInstances is an M6 contract stub");
+	}
+
+	Result<Scope<Command>> EditorContext::CreatePrefabUpdateCommand(std::span<const AssetHandle> /*prefabs*/)
+	{
+		ENGINE_CONTRACT_STUB();
+		return MakeError(ErrorCode::Unsupported, "EditorContext::CreatePrefabUpdateCommand is an M6 contract stub");
 	}
 
 	Result<Scope<EditorContext>> EditorContext::Create(EngineContext& engine, const EditorContextSpecification& specification)

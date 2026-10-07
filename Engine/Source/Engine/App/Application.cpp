@@ -268,6 +268,8 @@ namespace Engine {
 		const EngineContextSpecification contextSpecification = {
 			.WorkerCount = m_Specification.WorkerCount.value_or(JobSystem::GetDefaultWorkerCount()),
 			.UserDataDirectory = process->GetUserDataPaths().Root,
+			.EngineResourcesDirectory = m_Specification.EngineResourcesDirectory,
+			.EngineCacheDirectory = m_Specification.EngineCacheDirectory,
 			.Window = std::move(window),
 			.RegisterTypes = m_Specification.RegisterTypes,
 			.Graphics = m_Specification.Renderer == RendererMode::Vulkan ? std::optional<GraphicsSpecification>(m_Specification.Graphics)

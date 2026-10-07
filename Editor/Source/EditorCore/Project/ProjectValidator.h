@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Engine/Asset/AssetDiagnostic.h"
 #include "Engine/Core/Base.h"
 #include "Engine/Core/Result.h"
 #include "Engine/Reflection/ValidationContext.h"
@@ -16,8 +17,12 @@
 //
 // Codes. §13.7 lists every code of the finished engine; each milestone adds the codes its subsystems can detect. The M4
 // validator reports the scene, entity, component and build codes below. Load diagnostics of scene files are reported under
-// these codes through MapLoadCode (ADR 0006 decision 35); asset, physics, script, input, audio, render and test codes
-// arrive with M6, M11, M13, M12, M8/M9 and M13.
+// these codes through MapLoadCode (ADR 0006 decision 35). M6 adds the asset codes of Engine/Asset/AssetDiagnostic.h, under
+// the same constants (every one but AssetUploadFailedCode, a runtime-only code): the registry's scan diagnostics with
+// their fixes (AssetRegistry::PlanFix applied as AssetEditCommand or AssetMoveCommand inside the fix transaction), the
+// asset manager's import diagnostics, ASSET_MISSING and ASSET_TYPE_MISMATCH for asset references in scene components,
+// materials and prefabs, PATH_CASE_MISMATCH, and PREFAB_MISSING_ASSET for an instance whose prefab asset is not registered.
+// Physics, script, input, audio, render and test codes arrive with M11, M13, M12, M8/M9 and M13.
 
 namespace Engine {
 
@@ -45,9 +50,13 @@ namespace Engine {
 	inline constexpr std::string_view BuildStartSceneMissingCode = "BUILD_START_SCENE_MISSING";
 	// Error, fixable: the Export.BuildScenes entry is removed (a ProjectSettingsCommand).
 	inline constexpr std::string_view BuildSceneMissingCode = "BUILD_SCENE_MISSING";
-	// Error, not fixable: a scene file under Assets/ cannot be loaded at all. Scenes are assets, and M6's importers report
-	// the same code for every asset type.
-	inline constexpr std::string_view AssetImportFailedCode = "ASSET_IMPORT_FAILED";
+	// (A scene file under Assets/ that cannot be loaded at all is an Error, not fixable, reported under AssetImportFailedCode
+	// of Engine/Asset/AssetDiagnostic.h: scenes are assets, and that is the code M6's importers report for every asset
+	// type.)
+
+	// Warning, not fixable (M6): a prefab instance root whose PrefabInstanceComponent names a prefab asset that is not
+	// registered (§5.5: the scene still loads, fully expanded).
+	inline constexpr std::string_view PrefabMissingAssetCode = "PREFAB_MISSING_ASSET";
 
 	// Registry enum "ValidationScope" (project.validate {scope}).
 	enum class ValidationScope : uint8_t

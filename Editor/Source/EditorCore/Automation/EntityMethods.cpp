@@ -599,6 +599,12 @@ namespace Engine {
 			return result;
 		}
 
+		Result<EntityBoundsResult> EntityBounds(EditorMethodContext& /*context*/, const EntityBoundsParams& /*params*/)
+		{
+			ENGINE_CONTRACT_STUB();
+			return MakeError(ErrorCode::Unsupported, "Automation::EntityBounds is an M6 contract stub");
+		}
+
 	}
 
 	void RegisterEntityMethodTypes(TypeRegistry& registry)

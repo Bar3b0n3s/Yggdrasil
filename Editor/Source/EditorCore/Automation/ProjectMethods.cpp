@@ -369,6 +369,12 @@ namespace Engine {
 			return result;
 		}
 
+		Result<ProjectRefreshAssetsResult> ProjectRefreshAssets(EditorMethodContext& /*context*/, const NoParams& /*params*/)
+		{
+			ENGINE_CONTRACT_STUB();
+			return MakeError(ErrorCode::Unsupported, "Automation::ProjectRefreshAssets is an M6 contract stub");
+		}
+
 	}
 
 	void RegisterProjectMethodTypes(TypeRegistry& registry)

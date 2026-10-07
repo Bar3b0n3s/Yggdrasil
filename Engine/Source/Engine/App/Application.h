@@ -60,6 +60,11 @@ namespace Engine {
 		// The application's own reflected types, registered into the context's TypeRegistry before it is frozen
 		// (EngineContextSpecification::RegisterTypes): the editor's automation structs. Null adds nothing.
 		RegisterTypesFunction RegisterTypes = nullptr;
+		// engine:// and enginecache:// for the context (EngineContextSpecification::EngineResourcesDirectory and
+		// EngineCacheDirectory, ADR 0010): development editors pass <repo>/Resources and <repo>/bin/EngineCache. Empty: not
+		// mounted.
+		std::filesystem::path EngineResourcesDirectory{};
+		std::filesystem::path EngineCacheDirectory{};
 		// Vulkan (a GraphicsDevice on the process's Vulkan loader, which RunApplication then requires) or None (logic only:
 		// no loader, no device, screenshot capabilities Unsupported, §13.9). --renderer.
 		RendererMode Renderer = RendererMode::Vulkan;

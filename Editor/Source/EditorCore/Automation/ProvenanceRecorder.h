@@ -82,6 +82,11 @@ namespace Engine {
 		// path's previous entry.
 		void Record(std::string_view path, uint64_t hash, const WriteAttribution& attribution);
 
+		// Forgets the entry of `path` (project-relative), when there is one: the editor moved or removed the file
+		// (EditorContext::MoveProjectFile, RemoveProjectFile), so no entry names a file that no longer exists (§13.12 rule 3).
+		// Returns whether an entry was removed.
+		bool Remove(std::string_view path);
+
 		// Writes ToText(GetEntries()) atomically to project://Automation/Provenance.json (creating Automation/). This write is
 		// not itself recorded. Errors: the VFS write errors.
 		[[nodiscard]] Status Save(VirtualFileSystem& vfs) const;

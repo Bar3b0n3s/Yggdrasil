@@ -9,14 +9,14 @@
 #include <optional>
 #include <span>
 
-// The editor's own command-line options (Architecture §12.1, §13.9), the M4 subset:
+// The editor's own command-line options (Architecture §12.1, §13.9), the M4 subset and M6's --bake-engine-assets:
 //   Editor [--project <path>] [--read-only] [--automation[=port]] [--automation-test-hooks] [--batch <file.jsonl>]
-//          [--upgrade] [--dump-reference <dir>]
+//          [--upgrade] [--dump-reference <dir>] [--bake-engine-assets]
 // plus the engine options every application takes (GetEngineCommandLineOptions: --headless, --frames N,
 // --user-data-dir, --renderer vulkan|none and the graphics options) and the Editor executable's screenshot options
 // (Editor/EditorApp.h). --renderer is an engine option because the Runtime takes it too (§13.9; ADR 0009 decision 3:
-// one definition after the M4/M5 merge, decision 33). --run-tests, --check-scripts, --validate, --export,
-// --bake-engine-assets and --timeout arrive with their milestones. Parsed in EditorCore so the rules are unit-tested;
+// one definition after the M4/M5 merge, decision 33). --run-tests, --check-scripts, --validate, --export and --timeout
+// arrive with their milestones. Parsed in EditorCore so the rules are unit-tested;
 // EditorApp applies them.
 
 namespace Engine {
@@ -42,9 +42,18 @@ namespace Engine {
 		// --dump-reference <dir>: write <dir>/Methods.json (MethodRegistry::BuildMethodCatalog) and <dir>/catalog.json
 		// (BuildToolCatalog, the MCP catalogue, ADR 0008 decision 9), creating <dir>, and exit with 0 (§2.3 GenerateDocs.py).
 		std::optional<std::filesystem::path> DumpReferenceDirectory{};
+		// --bake-engine-assets (§7.5): fill the engine cooked cache bin/EngineCache (BakeEngineAssets over
+		// engine://EngineAssets.json, with the device's environment baker from M8) and exit: 0 when every entry is baked or up
+		// to date (entries without an importer in this build are skipped with a warning), 1 when a bake failed. Needs no
+		// project; CI.py's bake stage runs it after the build (§15.8).
+		bool BakeEngineAssets = false;
 
-		// True when the editor runs a task and exits (batch, upgrade, dump-reference) instead of running until shutdown.
-		[[nodiscard]] bool IsOneShot() const { return BatchFile.has_value() || Upgrade || DumpReferenceDirectory.has_value(); }
+		// True when the editor runs a task and exits (batch, upgrade, dump-reference, bake-engine-assets) instead of running
+		// until shutdown.
+		[[nodiscard]] bool IsOneShot() const
+		{
+			return BatchFile.has_value() || Upgrade || DumpReferenceDirectory.has_value() || BakeEngineAssets;
+		}
 
 		// Whether the automation server listens on TCP and writes a session file (AutomationServerSpecification::Listen):
 		// with --automation, or headless unless the run is one-shot, so an MCP editor_launch can never attach to a batch,
@@ -56,9 +65,9 @@ namespace Engine {
 	[[nodiscard]] std::span<const CommandLineOption> GetEditorCommandLineOptions();
 
 	// Reads the editor options of `commandLine` (parsed with both option tables). Errors: InvalidArgument naming the option
-	// for: an --automation port that is not 1 to 65535; --read-only or --upgrade without --project; --upgrade with --read-only; more than one of --batch, --upgrade and
-	// --dump-reference; --automation or --automation-test-hooks together with --dump-reference or --upgrade; and
-	// --automation-test-hooks without --automation or --batch.
+	// for: an --automation port that is not 1 to 65535; --read-only or --upgrade without --project; --upgrade with --read-only; more than one of --batch, --upgrade,
+	// --dump-reference and --bake-engine-assets; --automation or --automation-test-hooks together with --dump-reference,
+	// --upgrade or --bake-engine-assets; and --automation-test-hooks without --automation or --batch.
 	[[nodiscard]] Result<EditorLaunchOptions> ParseEditorLaunchOptions(const CommandLine& commandLine);
 
 }

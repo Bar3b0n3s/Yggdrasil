@@ -185,6 +185,30 @@ namespace Engine {
 			CHECK(setup.GetEditor().GetScene().GetEntityCount() == 0);
 			CHECK(setup.GetEditor().GetRevision() == revision);
 		}
+
+		TEST_CASE("EntityMethods: entity.bounds reports world AABBs of meshes and their descendants" * doctest::skip(true))
+		{
+			Test::AutomationFixture setup("EntityBounds");
+			REQUIRE(setup.Call("entity.create", ParseEntityMethodJson(R"({"name": "Track", "components": {"Transform": {"Translation": [10, 0, 0]}}})")).has_value());
+			REQUIRE(setup.Call("entity.create", ParseEntityMethodJson(R"({"name": "Piece", "parent": "/Track", "components": {
+				"Transform": {"Translation": [0, 1, 0], "Scale": [2, 1, 4]}, "MeshRenderer": {"Mesh": "engine://Meshes/Cube"}}})"))
+					.has_value());
+			Result<Json> bounds = setup.Call("entity.bounds", ParseEntityMethodJson(R"({"entities": ["/Track", "/Track/Piece"]})"));
+			REQUIRE_MESSAGE(bounds.has_value(), bounds.error().ToString());
+			REQUIRE((*bounds)["bounds"].size() == 2);
+			// The root has no mesh of its own: its bounds are its child's (includeDescendants defaults to true).
+			CHECK((*bounds)["bounds"][0]["hasBounds"] == Json(true));
+			CHECK((*bounds)["bounds"][0]["min"] == ParseEntityMethodJson("[9, 0.5, -2]"));
+			CHECK((*bounds)["bounds"][0]["max"] == ParseEntityMethodJson("[11, 1.5, 2]"));
+			CHECK((*bounds)["bounds"][1]["center"] == ParseEntityMethodJson("[10, 1, 0]"));
+			CHECK((*bounds)["bounds"][1]["size"] == ParseEntityMethodJson("[2, 1, 4]"));
+			Result<Json> own = setup.Call("entity.bounds", ParseEntityMethodJson(R"({"entities": ["/Track"], "includeDescendants": false})"));
+			REQUIRE(own.has_value());
+			CHECK((*own)["bounds"][0]["hasBounds"] == Json(false));
+			CHECK((*own)["bounds"][0]["min"] == Json::array());
+			Json missing = setup.Request("entity.bounds", ParseEntityMethodJson(R"({"entities": ["/Nothing"]})"));
+			CHECK(missing["error"]["code"] == Json(-32001));
+		}
 	}
 
 }

@@ -4,6 +4,8 @@
 
 #include "EditorCore/Commands/ProjectSettingsCommand.h"
 #include "EditorCore/Commands/SceneEdit.h"
+#include "Engine/App/EngineContext.h"
+#include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Hash.h"
 #include "Engine/Core/Json/JsonReader.h"
@@ -12,6 +14,7 @@
 #include "Engine/Scene/Entity.h"
 #include "Support/EditorTestFixture.h"
 #include "Support/ExpectLog.h"
+#include "Support/TestData.h"
 
 #include <nlohmann/json.hpp>
 
@@ -30,6 +33,41 @@ namespace Engine {
 	}
 
 	namespace {
+
+		// The open scene "Main" as another program rewrites it in the SceneChangedOnDisk tests: another seed and one entity,
+		// so both its content and its size differ from what EditorTestFixture::CreateAndOpenScene wrote.
+		constexpr std::string_view ExternalMainScene = R"({
+	"Format": "Scene",
+	"Version": 1,
+	"Name": "Main",
+	"Seed": 7,
+	"ComponentVersions": {
+		"Transform": 1
+	},
+	"Entities": [
+		{
+			"ID": "1a00000000000001",
+			"Name": "Checkout",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				}
+			}
+		}
+	]
+}
+)";
+
+		size_t CountEditorEvents(EditorContext& editor, EngineEventType type)
+		{
+			const EngineEventType types[] = { type };
+			return editor.GetEngine().GetEventLog().Read(0, types, 100).Events.size();
+		}
 
 		// A command whose Undo fails, as a settings command's does when its file cannot be written.
 		class UndoFailsCommand final : public Command
@@ -535,6 +573,155 @@ namespace Engine {
 			REQUIRE(dryRun.has_value());
 			CHECK(editor.IsSceneDirty());
 			CHECK_FALSE(editor.GetHistory().CanUndo());
+		}
+
+		TEST_CASE("HotReload: a changed open scene raises SceneChangedOnDisk and is not reloaded" * doctest::skip(true))
+		{
+			Test::EditorTestFixture fixture("SceneChangedOnDisk");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene("Assets/Scenes/Main.scene");
+			EditorContext& editor = fixture.GetEditor();
+			editor.Update(0.0);
+			{
+				SceneEdit edit(editor, "Add Unsaved");
+				static_cast<void>(editor.GetScene().CreateEntity("Unsaved"));
+				REQUIRE(edit.Commit().has_value());
+			}
+			REQUIRE(editor.IsSceneDirty());
+			const uint64_t revision = editor.GetRevision();
+
+			// Another program rewrites the scene file (a git checkout): polled, debounced, never applied to the open scene. The
+			// content differs from what the editor wrote (another seed, one entity), and so does its size, so detection never
+			// depends on the file system's modification-time resolution.
+			const std::string external(ExternalMainScene);
+			REQUIRE(FileSystem::WriteFileAtomic(editor.GetProject().GetRoot() / "Assets/Scenes/Main.scene", AsBytes(external)).has_value());
+			for (double seconds = 0.5; seconds <= 2.0; seconds += 0.5)
+			{
+				editor.Update(seconds);
+				static_cast<void>(editor.GetEngine().GetMainThreadQueue().Drain());
+			}
+			CHECK(editor.IsSceneChangedOnDisk());
+			CHECK(editor.GetScene().FindEntityByPath("/Unsaved").IsValid());
+			CHECK(editor.GetRevision() == revision);
+			const EngineEventType types[] = { EngineEventType::SceneChangedOnDisk };
+			const EventReadResult events = editor.GetEngine().GetEventLog().Read(0, types, 10);
+			REQUIRE(events.Events.size() == 1);
+			CHECK(events.Events.front().Path == "Assets/Scenes/Main.scene");
+			CHECK(events.Events.front().Dirty);
+
+			// Saving (or reloading) the scene clears the flag.
+			REQUIRE(editor.WriteProjectFile(*editor.GetScenePath(), AsBytes(external)).has_value());
+			editor.MarkSceneSaved(*editor.GetScenePath());
+			CHECK_FALSE(editor.IsSceneChangedOnDisk());
+		}
+
+		TEST_CASE("EditorContext: an external scene change found by a refresh raises SceneChangedOnDisk once" * doctest::skip(true))
+		{
+			Test::EditorTestFixture fixture("SceneChangedRefresh");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene("Assets/Scenes/Main.scene");
+			EditorContext& editor = fixture.GetEditor();
+			editor.Update(0.0);
+			const AssetHandle scene = editor.GetAssets().Resolve("Assets/Scenes/Main.scene").value_or(AssetHandle());
+			REQUIRE(editor.GetAssets().Load(scene).has_value());
+			REQUIRE(editor.GetAssets().GetVersion(scene) == 1);
+
+			// An external rewrite, seen first by the refresh every path-taking automation call makes (here
+			// project.refreshAssets), before any poll: race rule 3 holds at once.
+			REQUIRE(FileSystem::WriteFileAtomic(editor.GetProject().GetRoot() / "Assets/Scenes/Main.scene", AsEditorBytes(ExternalMainScene)).has_value());
+			Result<AssetRefreshReport> refreshed = editor.GetAssets().Refresh();
+			REQUIRE_MESSAGE(refreshed.has_value(), refreshed.error().ToString());
+			CHECK(refreshed->Changed == std::vector<AssetHandle>{ scene });
+			CHECK(editor.IsSceneChangedOnDisk());
+			CHECK(CountEditorEvents(editor, EngineEventType::SceneChangedOnDisk) == 1);
+
+			// The refresh marked the path known on the watcher: later polls report nothing, so the change is reimported and
+			// published once.
+			for (double seconds = 0.5; seconds <= 2.0; seconds += 0.5)
+			{
+				editor.Update(seconds);
+				static_cast<void>(editor.GetEngine().GetMainThreadQueue().Drain());
+			}
+			editor.GetAssets().WaitIdle();
+			CHECK(editor.GetAssets().GetVersion(scene) == 2);
+			CHECK(CountEditorEvents(editor, EngineEventType::AssetReloaded) == 1);
+			CHECK(CountEditorEvents(editor, EngineEventType::SceneChangedOnDisk) == 1);
+		}
+
+		TEST_CASE("EditorContext: the asset manager's own .meta writes keep provenance in step" * doctest::skip(true))
+		{
+			Test::EditorTestFixture fixture("ManagerProvenance");
+			fixture.CreateAndOpenProject();
+			EditorContext& editor = fixture.GetEditor();
+			// A glTF with its closure, written by another program; the refresh and the import write the .meta files
+			// themselves (new sources, dependency metas, the sub-asset rewrite), never through WriteProjectFile.
+			for (const char* file : { "Textured.gltf", "Textured.bin", "Textures/Checker.png" })
+			{
+				Result<Buffer> bytes = FileSystem::ReadFile(Test::GetTestDataPath(std::string("Assets/Gltf/") + file));
+				REQUIRE(bytes.has_value());
+				const VfsPath path = MakeEditorPath(std::string("project://Assets/Models/") + file);
+				REQUIRE(editor.GetVfs().CreateDirectories(path.GetParent()).has_value());
+				REQUIRE(editor.GetVfs().WriteFileAtomic(path, *bytes).has_value());
+			}
+			editor.SetWriteAttribution(WriteAttribution{
+				.Method = "project.refreshAssets",
+				.RequestId = VariantValue(Json(7)),
+				.Client = "test",
+				.TranscriptLine = 3,
+			});
+			REQUIRE(editor.GetAssets().Refresh().has_value());
+			const AssetHandle gltf = editor.GetAssets().Resolve("Assets/Models/Textured.gltf").value_or(AssetHandle());
+			REQUIRE(editor.GetAssets().Load(gltf).has_value());
+			editor.SetWriteAttribution(std::nullopt);
+
+			const ProvenanceRecorder* provenance = editor.GetProvenance();
+			REQUIRE(provenance != nullptr);
+			for (const char* meta : { "Assets/Models/Textured.gltf.meta", "Assets/Models/Textured.bin.meta", "Assets/Models/Textures/Checker.png.meta" })
+			{
+				CAPTURE(std::string(meta));
+				const ProvenanceEntry* entry = provenance->Find(meta);
+				REQUIRE(entry != nullptr);
+				CHECK(entry->Method == "project.refreshAssets");
+			}
+			// §13.12 rule 1: every recorded hash is the hash of the file as it is now (the .meta rewritten with the glTF's
+			// sub-assets included).
+			for (const ProvenanceEntry& entry : provenance->GetEntries())
+			{
+				CAPTURE(entry.Path);
+				Result<Buffer> bytes = editor.GetVfs().ReadFile(MakeEditorPath("project://" + entry.Path));
+				REQUIRE(bytes.has_value());
+				CHECK(XXH64(*bytes) == entry.Hash);
+			}
+		}
+
+		TEST_CASE("EditorContext: the asset manager is injected into the engine context and opened with the project" * doctest::skip(true))
+		{
+			Test::EditorTestFixture fixture("EditorAssets");
+			EditorContext& editor = fixture.GetEditor();
+			CHECK(fixture.GetEngine().GetAssetManager() == &editor.GetAssets());
+			CHECK_FALSE(editor.GetAssets().HasProject());
+			fixture.CreateAndOpenProject();
+			CHECK(editor.GetAssets().HasProject());
+			editor.CloseProject();
+			CHECK_FALSE(editor.GetAssets().HasProject());
+		}
+
+		TEST_CASE("EditorContext: moving and removing project files keeps provenance in step" * doctest::skip(true))
+		{
+			Test::EditorTestFixture fixture("EditorMoveRemove");
+			fixture.CreateAndOpenProject();
+			EditorContext& editor = fixture.GetEditor();
+			const VfsPath from = VfsPath::Create("project", "Assets/Red.material").value_or(VfsPath());
+			const VfsPath to = VfsPath::Create("project", "Assets/Materials/Red.material").value_or(VfsPath());
+			REQUIRE(editor.WriteProjectFile(from, AsBytes(std::string_view(R"({"Format": "Material", "Version": 1})"))).has_value());
+			REQUIRE(editor.MoveProjectFile(from, to).has_value());
+			CHECK(editor.GetProvenance()->Find("Assets/Red.material") == nullptr);
+			CHECK(editor.GetProvenance()->Find("Assets/Materials/Red.material") != nullptr);
+			REQUIRE(editor.RemoveProjectFile(to).has_value());
+			CHECK(editor.GetProvenance()->Find("Assets/Materials/Red.material") == nullptr);
+			CHECK_FALSE(editor.GetVfs().Exists(to));
+			REQUIRE(editor.CreateProjectDirectory(VfsPath::Create("project", "Assets/Empty").value_or(VfsPath())).has_value());
+			CHECK(editor.GetVfs().Exists(VfsPath::Create("project", "Assets/Empty").value_or(VfsPath())));
 		}
 	}
 
