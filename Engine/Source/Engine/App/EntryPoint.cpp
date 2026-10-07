@@ -6,6 +6,7 @@
 #include "Engine/Core/Assert.h"
 #include "Engine/Core/FatalError.h"
 #include "Engine/Core/Log.h"
+#include "Engine/Platform/ErrorDialog.h"
 
 #include <exception>
 #include <new>
@@ -44,16 +45,22 @@ namespace Engine {
 			}
 			application = std::move(*created);
 
-			// 3. The process level (§4.1), set up as the application's specification asks.
+			// 3. The process level (§4.1), set up as the application's specification asks: the Vulkan loader when it renders
+			//    (a missing loader is exit code 3 with NoVulkanLoaderMessage, §8.1), error dialogs when it is windowed.
 			const ApplicationSpecification& specification = application->GetSpecification();
+			const bool windowed = specification.Window == WindowMode::Windowed;
 			Result<Scope<ProcessContext>> context = ProcessContext::Create({
 				.AppName = specification.Name,
 				.Window = specification.Window,
 				.UserDataRoot = specification.UserDataRoot,
+				.VulkanLoader = specification.Renderer == RendererMode::Vulkan ? VulkanLoaderPolicy::Required : VulkanLoaderPolicy::None,
+				.ShowErrorDialogs = windowed,
 			});
 			if (!context.has_value())
 			{
 				ENGINE_CORE_ERROR("Cannot initialize the process: {}", context.error());
+				if (windowed)
+					ShowErrorDialog(specification.Name, std::format("Cannot start: {}", context.error().ToString()));
 				return ExitCode::InitFailed;
 			}
 			processContext = std::move(*context);

@@ -7,7 +7,8 @@ Steps, selected with --steps (default: all, in this order):
             layer-5 DAG, the project rules (EditorCore, Editor, Runtime, Tests), third-party and OS headers per
             module and file kind (public header or private file), Private/ headers, the NVRHI-free snapshot headers
             (RenderSnapshot.h and DebugDrawList.h, direct and transitive includes) and include spelling (full paths
-            from an include root, quotes only for repository headers, no .cpp, no precompiled header in a header,
+            from an include root, quotes only for repository headers, no .cpp except the vendored implementation
+            sources ModuleRules.json's SourceIncludes grants one file each, no precompiled header in a header,
             never inside a namespace).
   banned    banned APIs and constructs: throw and the std::rethrow/throw_with_nested family; try/catch outside the
             boundary files of section 4.6; std::filesystem calls without an std::error_code; nlohmann json
@@ -332,6 +333,7 @@ class Rules:
     contract_test_files: GlobSet
     contract_python_stub_files: GlobSet
     contract_python_test_files: GlobSet
+    source_includes: dict[str, tuple[str, ...]]  # file -> the vendored source files it may include
     python_roots: tuple[str, ...]
     python_exclude: GlobSet
     python_entry_points: GlobSet
@@ -500,6 +502,11 @@ def parse_rules(document: dict[str, Any], path: Path) -> Rules:
         contract_test_files=GlobSet(_strings(contract["TestFiles"], "Contract.TestFiles")),
         contract_python_stub_files=GlobSet(_strings(contract.get("PythonStubFiles", []), "Contract.PythonStubFiles")),
         contract_python_test_files=GlobSet(_strings(contract.get("PythonTestFiles", []), "Contract.PythonTestFiles")),
+        source_includes={
+            file: _strings(names, f"SourceIncludes.{file}")
+            for file, names in _object(document.get("SourceIncludes", {}), "SourceIncludes").items()
+            if file != "Notes"
+        },
         python_roots=_strings(python["Roots"], "Python.Roots"),
         python_exclude=GlobSet(_strings(python.get("Exclude", []), "Python.Exclude")),
         python_entry_points=GlobSet(_strings(python.get("EntryPoints", []), "Python.EntryPoints")),
@@ -1179,7 +1186,9 @@ class IncludeChecker:
                     "(CodeStyle section 4.4)",
                 )
             )
-        if name.endswith((".cpp", ".c", ".cc", ".cxx")):
+        if name.endswith((".cpp", ".c", ".cc", ".cxx")) and name not in self.rules.source_includes.get(
+            source.relative, ()
+        ):
             problems.append(
                 ("include-source", f"'{name}' is a source file; never include a .cpp file (CodeStyle section 4.4)")
             )

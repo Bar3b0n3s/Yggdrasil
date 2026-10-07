@@ -1,6 +1,9 @@
 """MCP conformance through the official SDK's client (Docs/Architecture.md §15.7, Roadmap M4): the catalogue tools are
 listed without an editor, editor_launch starts a headless editor, entity_create and scene_tree work, a killed editor
-makes the next call return EditorCrashed, and the generated .mcp.json starts the bridge with no python on PATH.
+makes the next call return EditorCrashed, and the generated .mcp.json starts the bridge with no python on PATH. A
+rendering editor's viewport_screenshot returns an image content block (Roadmap M5; Docs/Decisions/0009-m5-decisions.md
+decision 33); that test needs a Vulkan device, which it probes for like the automation suite's rendering tests
+(Tests/Automation/harness.py, require_gpu).
 
 These tests run in the bridge's virtual environment (Scripts/Test.py starts them with Tools/MCP/.venv's interpreter),
 where the mcp package is installed from Tools/MCP/requirements.lock.
@@ -20,6 +23,8 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
+import base64
+
 import anyio
 from mcp import Client, StdioServerParameters
 
@@ -31,6 +36,7 @@ sys.path.insert(0, str(REPOSITORY_ROOT / "Tests" / "Automation"))
 
 import engine_client  # noqa: E402
 import fake_editor  # noqa: E402
+import harness  # noqa: E402
 from engine_mcp import server  # noqa: E402
 
 # The bridge's settings, which the SDK's stdio client (it passes only an allow-listed environment) must hand on.
@@ -74,6 +80,32 @@ class ConformanceTests(unittest.TestCase):
         names = {method["name"] for method in results[4]["structuredContent"]["methods"]}
         self.assertGreaterEqual(len(names), MIN_EDITOR_METHODS)
         self.assertTrue({"entity.create", "rpc.discover", "project.upgrade"} <= names, sorted(names))
+
+    def test_sdk_client_receives_an_image_from_viewport_screenshot(self) -> None:
+        reason = harness.probe_rendering_editor()
+        if reason is not None:
+            if os.environ.get(harness.REQUIRE_GPU_VARIABLE) == "1":
+                self.fail(f"no usable Vulkan device for a rendering editor ({harness.REQUIRE_GPU_VARIABLE}=1): {reason}")
+            print(f"{harness.NO_DEVICE_PREFIX}{self.id()}: {reason}", file=sys.stderr, flush=True)
+            return
+        results = self.run_session([
+            ("editor_launch", {"project": str(self.directory / "Game"), "create": True, "renderer": "vulkan"}),
+            ("viewport_screenshot", {"view": "scene", "maxDimension": 64}),
+            ("viewport_screenshot", {"view": "scene", "maxDimension": 64, "inline": True}),
+        ])
+        for shot in results[1:]:
+            self.assertFalse(shot["isError"], shot["text"])
+            self.assertEqual((shot["structuredContent"]["width"], shot["structuredContent"]["height"]), (64, 36))
+            self.assertIn(shot["structuredContent"]["path"], shot["text"])
+            self.assertEqual(len(shot["images"]), 1)
+            image = shot["images"][0]
+            self.assertEqual(image["mimeType"], "image/png")
+            png = base64.b64decode(image["data"], validate=True)
+            self.assertTrue(png.startswith(b"\x89PNG\r\n\x1a\n"))
+            self.assertEqual(png, Path(shot["structuredContent"]["path"]).read_bytes())
+        # The inline base64 travels once, as the image content block.
+        self.assertNotIn("data", results[2]["structuredContent"])
+        self.assertFalse(results[2]["structuredContent"]["inlineOmitted"])
 
     def test_killed_editor_reports_editor_crashed(self) -> None:
         results = self.run_session([
@@ -155,7 +187,8 @@ class ConformanceTests(unittest.TestCase):
     def run_session(self, calls: list[tuple[str, dict[str, object]]],
                     count_coverage: bool = True) -> list[dict[str, Any]]:
         """Runs `calls` in one bridge session through the SDK client ("$kill" kills the launched editor) and returns
-        each result as {"structuredContent": ..., "text": ..., "isError": ...}. At the end, editor_shutdown {force:
+        each result as {"structuredContent": ..., "text": ..., "isError": ..., "images": [{mimeType, data}]}. At the end,
+        editor_shutdown {force:
         true} shuts down a launched editor that still runs (and only disconnects from an attached one)."""
         parameters = StdioServerParameters(command=sys.executable, args=[str(MCP_ROOT / "run.py")],
                                            env=self.bridge_environment(None, count_coverage), cwd=str(REPOSITORY_ROOT))
@@ -163,7 +196,10 @@ class ConformanceTests(unittest.TestCase):
         async def call(client: Any, name: str, arguments: dict[str, object]) -> dict[str, Any]:
             result = await client.call_tool(name, arguments)
             text = "\n".join(block.text for block in result.content if getattr(block, "type", "") == "text")
-            return {"structuredContent": result.structured_content, "text": text, "isError": result.is_error}
+            images = [{"mimeType": block.mime_type, "data": block.data} for block in result.content
+                      if getattr(block, "type", "") == "image"]
+            return {"structuredContent": result.structured_content, "text": text, "isError": result.is_error,
+                    "images": images}
 
         async def session() -> tuple[list[dict[str, Any]], str]:
             results: list[dict[str, Any]] = []

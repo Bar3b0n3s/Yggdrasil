@@ -3,6 +3,8 @@
 
 #include "Engine/Scene/Components/BuiltinComponents.h"
 
+#include <thread>
+
 namespace Engine {
 
 	namespace Test {
@@ -84,6 +86,16 @@ namespace Engine {
 			// std::out_of_range from the standard library, which the Dispatcher's boundary must contain.
 			const std::vector<uint32_t> empty;
 			return ReadResult{ .Revision = empty.at(1) };
+		}
+
+		static Result<ReadResult> ThrowSystemError(TestHostContext& /*context*/, const ReadParams& /*params*/)
+		{
+			// std::system_error from the standard library (joining a thread that is not joinable): the base of the
+			// vk::SystemError that vulkan.hpp throws out of NVRHI, which the Dispatcher hands to the host's
+			// SystemErrorHandler first.
+			std::thread idle;
+			idle.join();
+			return ReadResult{};
 		}
 
 		TestHostContext::TestHostContext(TestHostState& state, MethodRequest request)
@@ -216,6 +228,11 @@ namespace Engine {
 			methods.Add<TestHostContext, ReadParams, ReadResult>(
 				{ .Name = "test.throw", .Description = "Lets an exception escape.", .Examples = { MethodExample{ .Description = "Throw.", .Params = Json::object() } } },
 				&Throw);
+			methods.Add<TestHostContext, ReadParams, ReadResult>(
+				{ .Name = "test.systemError",
+					.Description = "Lets a std::system_error escape.",
+					.Examples = { MethodExample{ .Description = "Throw a system error.", .Params = Json::object() } } },
+				&ThrowSystemError);
 		}
 
 		RpcRequest MakeTestRequest(int64_t id, std::string method, Json params)

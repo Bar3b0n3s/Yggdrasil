@@ -327,6 +327,41 @@ namespace Engine {
 			CHECK(FileSystem::Exists(other));
 		}
 
+		TEST_CASE("AutomationServer: output files share the offload directory and naming, and outlive their server")
+		{
+			Test::EditorTestFixture fixture("ServerOutputFiles");
+			fixture.CreateAndOpenProject();
+			const std::filesystem::path out = fixture.GetProjectRoot() / "Library" / "Automation" / "Out";
+			REQUIRE(FileSystem::CreateDirectories(out).has_value());
+			// The screenshot of a server that is gone (a process id no process has) is pruned like its offloaded results.
+			const std::filesystem::path stale = out / "2147483644-1700000000-00000001.png";
+			REQUIRE(FileSystem::WriteFileAtomic(stale, std::as_bytes(std::span("png", 3))).has_value());
+
+			std::filesystem::path first;
+			std::filesystem::path second;
+			{
+				Test::AutomationTestClient client(fixture.GetEditor());
+				const std::array<std::byte, 3> bytes = { std::byte{ 1 }, std::byte{ 2 }, std::byte{ 3 } };
+				const Result<std::string> written = client.GetServer().WriteOutputFile("png", bytes);
+				REQUIRE_MESSAGE(written.has_value(), written.error().ToString());
+				const Result<std::string> again = client.GetServer().WriteOutputFile("png", bytes);
+				REQUIRE(again.has_value());
+				first = FileSystem::PathFromUtf8(*written);
+				second = FileSystem::PathFromUtf8(*again);
+				CHECK(written->contains("Library/Automation/Out/"));
+				CHECK(Test::PathToUtf8(first.filename()).starts_with(std::format("{}-", Process::GetCurrentId())));
+				CHECK(Test::PathToUtf8(first.filename()).ends_with("-00000001.png"));
+				CHECK(Test::PathToUtf8(second.filename()).ends_with("-00000002.png"));
+				const Result<Buffer> read = FileSystem::ReadFile(first);
+				REQUIRE(read.has_value());
+				CHECK(std::ranges::equal(*read, bytes));
+				CHECK_FALSE(FileSystem::Exists(stale));
+			}
+			// Unlike offloaded results, a server's output files stay when it is destroyed (a --batch run's screenshots).
+			CHECK(FileSystem::Exists(first));
+			CHECK(FileSystem::Exists(second));
+		}
+
 		TEST_CASE("AutomationServer: a failed session-file rewrite is reported once and tried again until it succeeds")
 		{
 			Test::EditorTestFixture fixture("ServerSessionRetry");

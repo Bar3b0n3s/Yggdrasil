@@ -6,8 +6,13 @@
 #include "Engine/Core/Assert.h"
 #include "Engine/Core/Log.h"
 #include "Engine/Core/Profiler.h"
+#include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Platform/CrashHandler.h"
 
+#include <vulkan/vulkan.hpp>
+
+#include <format>
+#include <string>
 #include <string_view>
 #include <thread>
 #include <utility>
@@ -54,6 +59,22 @@ namespace Engine {
 	}
 
 	void FrameLoop::RunFrame()
+	{
+		// The one allowlisted frame-boundary catch (§4.6 item 2, §8.14). vulkan.hpp's enhanced mode throws from calls NVRHI
+		// makes internally; first-party Vulkan calls never throw. The frame never resumes: the handler ends the process, and
+		// the FramePhase breadcrumb still names the step that threw.
+		try
+		{
+			RunFrameSteps();
+		}
+		catch (const vk::SystemError& error)
+		{
+			RaiseVulkanError(m_Context->GetGraphicsDevice(), static_cast<VkResult>(error.code().value()),
+				std::format("Vulkan error at the frame boundary: {}", error.what()));
+		}
+	}
+
+	void FrameLoop::RunFrameSteps()
 	{
 		ENGINE_PROFILE_SCOPE("FrameLoop::RunFrame");
 		const std::chrono::steady_clock::time_point frameStart =
@@ -105,9 +126,12 @@ namespace Engine {
 			m_Client->OnFrameUpdate(frame);
 		}
 
-		// Step 7 of §4.2, rendering (OnRender, ImGui, present), joins here with the renderer, which also wraps the whole
-		// frame in the allowlisted frame-boundary catch of vk::SystemError (§4.6 item 2, §8.14). Until then nothing in the
-		// frame calls Vulkan, so there is nothing for that catch to handle.
+		// 7. Rendering: OnRender, ImGui, present.
+		CrashHandler::SetBreadcrumb(CrashBreadcrumb::FramePhase, "Render");
+		{
+			ENGINE_PROFILE_SCOPE("FrameLoop::Render");
+			m_Client->OnFrameRender(frame);
+		}
 
 		m_LastFrameTime = frame;
 		++m_FrameCount;

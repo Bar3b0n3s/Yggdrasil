@@ -8,8 +8,9 @@ editor_launch {project, create?, template?, headless?, renderer?}:
      Automation panel, then call editor_attach".
   3. Otherwise spawn bin/<cfg>-<sys>-<arch>/Editor/Editor(.exe) (Release preferred; a missing binary is an error naming
      "python Scripts/Build.py --config Release --project Editor") with --automation --project <path> (headless:
-     --headless; renderer: --renderer none by default in M4), and supervise it. With create, the project is created
-     first through project.create on a launcher-state editor.
+     --headless; renderer: --renderer none by default, so a launch needs no GPU; "vulkan" serves viewport_screenshot and
+     editor_screenshot, which a --renderer none editor answers with Unsupported), and supervise it. With create, the
+     project is created first through project.create on a launcher-state editor.
 editor_attach {project? | pid?}: attaches explicitly to a live session. The bridge never supervises or kills an editor
 it attached to; editor_shutdown on an attached editor only disconnects.
 

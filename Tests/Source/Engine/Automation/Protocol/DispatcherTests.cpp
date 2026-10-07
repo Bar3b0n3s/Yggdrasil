@@ -3,6 +3,7 @@
 #include "Engine/Automation/Protocol/Dispatcher.h"
 
 #include "Engine/Automation/Protocol/MethodRegistry.h"
+#include "Engine/Core/FatalError.h"
 #include "Engine/Core/RingBufferSink.h"
 #include "Support/DeathTest.h"
 #include "Support/ProtocolTestTypes.h"
@@ -63,6 +64,25 @@ namespace Engine {
 	{
 		DispatcherSetup setup;
 		setup.Calls->Enqueue(1, Test::MakeTestRequest(1, "test.throw", Json::object()));
+		static_cast<void>(setup.Calls->Pump(std::chrono::microseconds(1000000)));
+	}
+
+	// A host whose SystemErrorHandler ends the process, as the editor's does for a Vulkan error (RaiseVulkanError).
+	ENGINE_DEATH_TEST("Automation/DispatcherSystemErrorReachesTheHostHandler")
+	{
+		DispatcherSetup setup(DispatcherSpecification{ .SystemErrors = [](const std::system_error& /*error*/, std::string_view method)
+		{
+			FatalError(FatalErrorKind::Gpu, std::format("the host saw a std::system_error escape '{}'", method));
+		} });
+		setup.Calls->Enqueue(1, Test::MakeTestRequest(1, "test.systemError", Json::object()));
+		static_cast<void>(setup.Calls->Pump(std::chrono::microseconds(1000000)));
+	}
+
+	// A host whose SystemErrorHandler returns: the error is then handled like any other exception, which asserts in Debug.
+	ENGINE_DEATH_TEST("Automation/DispatcherReturningSystemErrorHandlerAsserts")
+	{
+		DispatcherSetup setup(DispatcherSpecification{ .SystemErrors = [](const std::system_error& /*error*/, std::string_view /*method*/) {} });
+		setup.Calls->Enqueue(1, Test::MakeTestRequest(1, "test.systemError", Json::object()));
 		static_cast<void>(setup.Calls->Pump(std::chrono::microseconds(1000000)));
 	}
 
@@ -178,6 +198,38 @@ namespace Engine {
 			setup.Calls->Enqueue(1, Test::MakeTestRequest(2, "test.read", Json::object()));
 			std::vector<OutboundMessage> messages = setup.PumpAll();
 			REQUIRE(messages.size() == 2);
+			CHECK(messages[0].Message["error"]["code"] == Json(-32000));
+			CHECK(messages[1].Message.contains("result")); // the dispatcher keeps serving
+#endif
+		}
+
+		TEST_CASE("Dispatcher: a std::system_error escaping a handler goes to the host's SystemErrorHandler first")
+		{
+			// vulkan.hpp's vk::SystemError is a std::system_error; the editor's handler ends the process like the
+			// frame-boundary catch (Docs/Decisions/0009-m5-decisions.md decisions 5 and 33).
+			ENGINE_CHECK_DEATH("Automation/DispatcherSystemErrorReachesTheHostHandler", "the host saw a std::system_error escape 'test.systemError'");
+		}
+
+		TEST_CASE("Dispatcher: after a SystemErrorHandler that returns, a system error is handled like any other exception")
+		{
+#if defined(ENGINE_DEBUG)
+			ENGINE_CHECK_DEATH("Automation/DispatcherReturningSystemErrorHandlerAsserts", "test.systemError");
+#else
+			int handled = 0;
+			int* count = &handled;
+			std::string method;
+			std::string* seen = &method;
+			DispatcherSetup setup(DispatcherSpecification{ .SystemErrors = [count, seen](const std::system_error& /*error*/, std::string_view name)
+			{
+				++*count;
+				*seen = std::string(name);
+			} });
+			setup.Calls->Enqueue(1, Test::MakeTestRequest(1, "test.systemError", Json::object()));
+			setup.Calls->Enqueue(1, Test::MakeTestRequest(2, "test.read", Json::object()));
+			std::vector<OutboundMessage> messages = setup.PumpAll();
+			REQUIRE(messages.size() == 2);
+			CHECK(handled == 1);
+			CHECK(method == "test.systemError");
 			CHECK(messages[0].Message["error"]["code"] == Json(-32000));
 			CHECK(messages[1].Message.contains("result")); // the dispatcher keeps serving
 #endif

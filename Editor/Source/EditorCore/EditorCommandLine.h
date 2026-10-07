@@ -8,27 +8,18 @@
 #include <filesystem>
 #include <optional>
 #include <span>
-#include <string_view>
 
 // The editor's own command-line options (Architecture §12.1, §13.9), the M4 subset:
-//   Editor [--project <path>] [--read-only] [--renderer vulkan|none] [--automation[=port]] [--automation-test-hooks]
-//          [--batch <file.jsonl>] [--upgrade] [--dump-reference <dir>]
-// plus the engine options every application takes (--headless, --frames N, --user-data-dir, GetEngineCommandLineOptions).
-// --run-tests, --check-scripts, --validate, --export, --bake-engine-assets, --gpu-validation, --vulkan-api and --timeout
-// arrive with their milestones. Parsed in EditorCore so the rules are unit-tested; EditorApp applies them.
+//   Editor [--project <path>] [--read-only] [--automation[=port]] [--automation-test-hooks] [--batch <file.jsonl>]
+//          [--upgrade] [--dump-reference <dir>]
+// plus the engine options every application takes (GetEngineCommandLineOptions: --headless, --frames N,
+// --user-data-dir, --renderer vulkan|none and the graphics options) and the Editor executable's screenshot options
+// (Editor/EditorApp.h). --renderer is an engine option because the Runtime takes it too (§13.9; ADR 0009 decision 3:
+// one definition after the M4/M5 merge, decision 33). --run-tests, --check-scripts, --validate, --export,
+// --bake-engine-assets and --timeout arrive with their milestones. Parsed in EditorCore so the rules are unit-tested;
+// EditorApp applies them.
 
 namespace Engine {
-
-	// --renderer (§13.9). Before the Graphics milestone (M5) the editor renders nothing either way; Vulkan is the default, so
-	// later milestones change behaviour, not the command line.
-	enum class EditorRenderer : uint8_t
-	{
-		Vulkan,
-		None
-	};
-
-	// "vulkan" or "none" (the command-line and session.info spelling).
-	[[nodiscard]] std::string_view EditorRendererToString(EditorRenderer renderer);
 
 	// What the editor was asked to do.
 	struct EditorLaunchOptions
@@ -38,7 +29,6 @@ namespace Engine {
 		std::optional<std::filesystem::path> Project{};
 		// --read-only (§4.13): open the project without the lock, mutations denied.
 		bool ReadOnly = false;
-		EditorRenderer Renderer = EditorRenderer::Vulkan;
 		// --automation[=port]: start the automation server listening (§13.2). --headless listens too, except in one-shot
 		// runs (IsOneShot; EditorApp.h, AutomationServerSpecification::Listen).
 		bool Automation = false;
@@ -66,8 +56,7 @@ namespace Engine {
 	[[nodiscard]] std::span<const CommandLineOption> GetEditorCommandLineOptions();
 
 	// Reads the editor options of `commandLine` (parsed with both option tables). Errors: InvalidArgument naming the option
-	// for: a --renderer value other than vulkan or none (any ASCII case accepted); an --automation port that is not 1 to
-	// 65535; --read-only or --upgrade without --project; --upgrade with --read-only; more than one of --batch, --upgrade and
+	// for: an --automation port that is not 1 to 65535; --read-only or --upgrade without --project; --upgrade with --read-only; more than one of --batch, --upgrade and
 	// --dump-reference; --automation or --automation-test-hooks together with --dump-reference or --upgrade; and
 	// --automation-test-hooks without --automation or --batch.
 	[[nodiscard]] Result<EditorLaunchOptions> ParseEditorLaunchOptions(const CommandLine& commandLine);

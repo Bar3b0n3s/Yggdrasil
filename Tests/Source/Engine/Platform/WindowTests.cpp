@@ -31,6 +31,15 @@ namespace Engine {
 		window.PollEvents();
 	}
 
+	// SetSize's precondition: a window never has a zero dimension (minimizing is Minimize).
+	ENGINE_DEATH_TEST("Platform/WindowSetSizeZero")
+	{
+		Result<Window> created = Window::Create({ .Title = "ZeroSize", .Width = 64, .Height = 48 });
+		if (!created.has_value())
+			return;
+		created->SetSize(0, 48);
+	}
+
 	TEST_SUITE("Platform")
 	{
 		TEST_CASE("Window: null platform creates a window and accepts injected events")
@@ -285,6 +294,43 @@ namespace Engine {
 		TEST_CASE("Window: polling from inside the event callback asserts")
 		{
 			ENGINE_CHECK_DEATH("Platform/WindowPollFromCallback", "Window::PollEvents called from inside the event callback");
+		}
+
+		TEST_CASE("Window: SetSize resizes a null-platform window and delivers one WindowResizeEvent")
+		{
+			Result<Window> created = Window::Create({ .Title = "Resize", .Width = 64, .Height = 48 });
+			REQUIRE(created.has_value());
+			Window& window = *created;
+			std::vector<WindowResizeEvent> resizes;
+			window.SetEventCallback([&resizes](Event& event)
+			{
+				if (const WindowResizeEvent* resize = std::get_if<WindowResizeEvent>(&event))
+					resizes.push_back(*resize);
+			});
+
+			window.SetSize(100, 80);
+			window.PollEvents();
+			CHECK(window.GetWidth() == 100);
+			CHECK(window.GetHeight() == 80);
+			// The null platform's content scale is 1, so the framebuffer follows the window size exactly.
+			CHECK(window.GetFramebufferWidth() == 100);
+			CHECK(window.GetFramebufferHeight() == 80);
+			// The window and framebuffer changes arrive as one event with both sizes.
+			REQUIRE(resizes.size() == 1);
+			CHECK(resizes[0].Width == 100);
+			CHECK(resizes[0].Height == 80);
+			CHECK(resizes[0].FramebufferWidth == 100);
+			CHECK(resizes[0].FramebufferHeight == 80);
+
+			// The current size again changes nothing and delivers nothing.
+			window.SetSize(100, 80);
+			window.PollEvents();
+			CHECK(resizes.size() == 1);
+		}
+
+		TEST_CASE("Window: SetSize with a zero dimension asserts")
+		{
+			ENGINE_CHECK_DEATH("Platform/WindowSetSizeZero", "Window::SetSize needs a non-zero size");
 		}
 
 		TEST_CASE("Window: a full-screen window takes the monitor's current video mode")

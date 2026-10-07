@@ -6,6 +6,7 @@
 #include "Engine/Core/Jobs/MainThreadQueue.h"
 #include "Engine/Core/Result.h"
 #include "Engine/Core/VirtualFileSystem.h"
+#include "Engine/Graphics/GraphicsSpecification.h"
 #include "Engine/Platform/Input/InputState.h"
 #include "Engine/Platform/Window.h"
 #include "Engine/Reflection/TypeRegistry.h"
@@ -20,9 +21,14 @@
 
 namespace Engine {
 
-	// The steps that build an EngineContext, in order (§4.1: VFS -> JobSystem -> Window -> ...). Later milestones append
-	// theirs where §4.1 puts them: the GraphicsDevice after the Window, then the injected AssetManager and the AudioEngine.
-	// The TypeRegistry is infallible and therefore part of Services (Docs/Decisions/0008-m4-decisions.md decision 2).
+	class GraphicsDevice;
+	class PipelineFactory;
+	class ShaderLibrary;
+	struct GpuMessageCounts;
+
+	// The steps that build an EngineContext, in order (§4.1: VFS -> JobSystem -> Window -> GraphicsDevice -> ...). Later
+	// milestones append theirs where §4.1 puts them: the injected AssetManager and the AudioEngine. The TypeRegistry is
+	// infallible and therefore part of Services (Docs/Decisions/0008-m4-decisions.md decision 2).
 	enum class EngineContextStep : uint8_t
 	{
 		// The infallible services, constructed in member order: VirtualFileSystem, MainThreadQueue, JobSystem, EventLog,
@@ -31,7 +37,14 @@ namespace Engine {
 		// Mounts user:// when UserDataDirectory is set.
 		UserData,
 		// Window::Create when Window is set.
-		Window
+		Window,
+		// When Graphics is set (RendererMode::Vulkan): in development builds the read-only mount of the compiled shaders,
+		// ENGINE_SHADER_DIRECTORY, as shaders:// (ShaderLibrary.h); GraphicsDevice::Create, presenting to the window when
+		// the process is windowed; the ShaderLibrary on shaders:// and the PipelineFactory. Dist builds have no shader
+		// directory: exported games read their shaders from Engine.pak, which M7 mounts in this step, so until then a Dist
+		// context's ShaderLibrary finds no variant (NotFound) and only frames that need no shader work there (the M5
+		// runtime's cleared frames; the runtime has no ImGui in Dist).
+		Graphics
 	};
 
 	// Registers an application's own reflected types into the context's TypeRegistry before it is frozen: the editor's
@@ -53,6 +66,10 @@ namespace Engine {
 		// Called once by the constructor after RegisterBuiltinComponents and RegisterProjectSettingsTypes and before
 		// TypeRegistry::Freeze; null adds nothing.
 		RegisterTypesFunction RegisterTypes = nullptr;
+		// The GPU device's settings (RendererMode::Vulkan); nullopt: no GraphicsDevice (RendererMode::None, §4.1). Needs the
+		// process's Vulkan loader (ProcessContext). At most one context of a process may have a device at a time
+		// (GraphicsDevice.h).
+		std::optional<GraphicsSpecification> Graphics{};
 	};
 
 	// One engine context. Not copyable or movable. Tests may build several side by side in one process, all on that
@@ -60,8 +77,9 @@ namespace Engine {
 	//
 	// Create runs the EngineContextStep steps in order, each returning Status. When a step fails, everything built so far
 	// is destroyed in reverse order and Create returns the error with the step as context. Destruction always runs in
-	// reverse member order: the window first, the JobSystem before the MainThreadQueue its continuations post to (queued
-	// jobs are cancelled, running ones finish; ~JobSystem), the VFS last.
+	// reverse member order: the GPU services first (pipeline factory, shader library, device), then the window, the
+	// JobSystem before the MainThreadQueue its continuations post to (queued jobs are cancelled, running ones finish;
+	// ~JobSystem), the VFS last.
 	//
 	// Thread safety: create, use and destroy it on the main thread, which becomes the main thread of the MainThreadQueue
 	// and the EventLog. The services document their own rules (VirtualFileSystem, JobSystem and MainThreadQueue::Post are
@@ -85,7 +103,8 @@ namespace Engine {
 
 		// Builds the context (see the class comment). Errors: those of the failed step, with the step as context: NotFound
 		// or Io when UserDataDirectory cannot be mounted; for the window, InvalidState without an initialized GLFW (no
-		// ProcessContext) and Unsupported when GLFW cannot create it.
+		// ProcessContext) and Unsupported when GLFW cannot create it; for graphics, NotFound when the shader directory of a
+		// development build does not exist (the Shaders project did not run) and the errors of GraphicsDevice::Create.
 		[[nodiscard]] static Result<Scope<EngineContext>> Create(const EngineContextSpecification& specification);
 
 		[[nodiscard]] VirtualFileSystem& GetVfs() { return m_Vfs; }
@@ -103,6 +122,20 @@ namespace Engine {
 		// The window; nullptr when the specification had none.
 		[[nodiscard]] Window* GetWindow() { return m_Window ? &*m_Window : nullptr; }
 		[[nodiscard]] const Window* GetWindow() const { return m_Window ? &*m_Window : nullptr; }
+
+		// The GPU services; nullptr without Graphics (RendererMode::None, §4.1).
+		[[nodiscard]] GraphicsDevice* GetGraphicsDevice() { return m_GraphicsDevice.get(); }
+		[[nodiscard]] ShaderLibrary* GetShaderLibrary() { return m_ShaderLibrary.get(); }
+		[[nodiscard]] PipelineFactory* GetPipelineFactory() { return m_PipelineFactory.get(); }
+
+		// Destroys the GPU services now, in the destructor's order (pipeline factory, shader library, device), and returns
+		// the device's final message counts (GraphicsDevice::Destroy), which include the messages of the device's own
+		// teardown. Zero counts without a device; afterwards the three getters above return nullptr. Application calls it
+		// at shutdown, after its rendering objects are gone, so --expect-no-gpu-errors sees the device's whole life (§15.3).
+		[[nodiscard]] GpuMessageCounts DestroyGraphics();
+	private:
+		// The Graphics step (EngineContextStep::Graphics).
+		[[nodiscard]] Status CreateGraphics(const GraphicsSpecification& graphics);
 	private:
 		// Declaration order is construction order; destruction runs in reverse.
 		VirtualFileSystem m_Vfs;
@@ -112,9 +145,14 @@ namespace Engine {
 		InputState m_InputState;
 		TypeRegistry m_TypeRegistry; // frozen by the constructor
 		std::optional<Window> m_Window;
+		// After the window, so they are destroyed before it (the device may present to it); the factory and the library
+		// refer to the device.
+		Scope<GraphicsDevice> m_GraphicsDevice;
+		Scope<ShaderLibrary> m_ShaderLibrary;
+		Scope<PipelineFactory> m_PipelineFactory;
 	};
 
-	// "Services", "UserData" or "Window".
+	// "Services", "UserData", "Window" or "Graphics".
 	[[nodiscard]] std::string_view EngineContextStepToString(EngineContextStep step);
 
 }

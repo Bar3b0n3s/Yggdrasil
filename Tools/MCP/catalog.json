@@ -184,6 +184,34 @@
 			"timeoutSeconds": 60
 		},
 		{
+			"name": "editor_screenshot",
+			"method": "editor.screenshot",
+			"description": "Re-renders the editor UI's last rendered frame (the whole editor as of that frame) at its framebuffer size, downscales it to maxDimension and writes it as a PNG whose path the result names. Needs a renderer (not --renderer none).",
+			"inputSchema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "EditorScreenshotParams",
+				"description": "The params of editor.screenshot: the whole editor UI as a PNG.",
+				"type": "object",
+				"properties": {
+					"maxDimension": {
+						"description": "The larger side of the PNG at most this many pixels.",
+						"type": "integer",
+						"minimum": 1,
+						"maximum": 8192
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false
+			},
+			"mutates": false,
+			"supportsDryRun": false,
+			"timeoutSeconds": 60
+		},
+		{
 			"name": "entity_create",
 			"method": "entity.create",
 			"description": "Creates an entity with a name, parent, position among its siblings, active flag, tags and component values, as one undoable command.",
@@ -926,6 +954,66 @@
 					}
 				},
 				"additionalProperties": false
+			},
+			"mutates": false,
+			"supportsDryRun": false,
+			"timeoutSeconds": 60
+		},
+		{
+			"name": "viewport_screenshot",
+			"method": "viewport.screenshot",
+			"description": "Renders the viewport afresh at width x height, downscales it to maxDimension and writes it as a PNG whose path the result names. Needs a renderer (not --renderer none).",
+			"inputSchema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "ViewportScreenshotParams",
+				"description": "The params of viewport.screenshot: a fresh render of a view as a PNG.",
+				"type": "object",
+				"properties": {
+					"view": {
+						"description": "The view to render: \"Scene\" (\"Game\" is not supported before M7).",
+						"enum": ["Scene", "Game"]
+					},
+					"width": {
+						"description": "The rendered width in pixels, before maxDimension.",
+						"type": "integer",
+						"minimum": 1,
+						"maximum": 8192
+					},
+					"height": {
+						"description": "The rendered height in pixels, before maxDimension.",
+						"type": "integer",
+						"minimum": 1,
+						"maximum": 8192
+					},
+					"camera": {
+						"description": "A camera entity to render through (not supported before M7; refused when present).",
+						"type": "string"
+					},
+					"debugView": {
+						"description": "A debug view to render (not supported before M8; refused when present).",
+						"type": "string"
+					},
+					"annotate": {
+						"description": "Labels, colliders, bounds and axes to draw (not supported before M9; refused when present)."
+					},
+					"maxDimension": {
+						"description": "The larger side of the PNG at most this many pixels.",
+						"type": "integer",
+						"minimum": 1,
+						"maximum": 8192
+					},
+					"inline": {
+						"description": "Also return the PNG as base64 in \"data\" when it is at most 30 KB; a larger one is only written (inlineOmitted).",
+						"type": "boolean"
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"required": ["view"]
 			},
 			"mutates": false,
 			"supportsDryRun": false,

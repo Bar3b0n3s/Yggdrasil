@@ -71,10 +71,15 @@ links { "ImGui" }
 
 ### GLFW platform backend (`backends/imgui_impl_glfw.cpp`)
 
-Not part of the `ImGui` project. The engine compiles it in its own translation unit, for example a dedicated
-source file that contains only `#include "backends/imgui_impl_glfw.cpp"`, excluded from the engine PCH
-(premake: `filter "files:<path>"  flags { "NoPCH" }`), with include dirs `Vendor/imgui` and
-`Vendor/GLFW/include`.
+Not part of the `ImGui` project. The engine compiles it in its own translation unit,
+`Engine/Source/Engine/ImGui/ImGuiGlfwImplementation.cpp`, which includes `<vulkan/vulkan.h>` and then
+`backends/imgui_impl_glfw.cpp`, excluded from the engine PCH with `enablepch "Off"` (premake 5.0.0 has no `NoPCH`
+flag), with include dirs `Vendor/imgui` and `Vendor/GLFW/include` (`Docs/Decisions/0009-m5-decisions.md` decision 15).
+
+- It needs a native window (`glfwGetWin32Window`, `glfwGetCocoaWindow`, X11): on GLFW's null platform
+  `ImGui_ImplGlfw_InitForVulkan` logs a GLFW error and, on Windows, asserts on the missing window procedure. The engine
+  therefore uses it on Win32, Cocoa and X11 only; headless, `ImGuiLayer` is the platform side itself
+  (`Docs/Decisions/0009-m5-decisions.md`, integration decision 24).
 
 - Use `ImGui_ImplGlfw_InitForVulkan(window, true)` (or `InitForOther`), `ImGui_ImplGlfw_NewFrame()`,
   `ImGui_ImplGlfw_Shutdown()`.

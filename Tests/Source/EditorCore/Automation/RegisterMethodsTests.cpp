@@ -12,22 +12,23 @@
 
 namespace Engine {
 
-	// The M4 method set (Roadmap M4), test hooks excluded.
+	// The M4 method set (Roadmap M4) and M5's screenshot methods (registered at the M4/M5 merge, ADR 0009 decision 33), test
+	// hooks excluded.
 	static const std::vector<std::string>& GetExpectedMethodNames()
 	{
 		static const std::vector<std::string> ExpectedNames = {
 			"component.list", "component.schema", "docs.get", "edit.batch", "edit.getSelection", "edit.history", "edit.redo", "edit.select",
-			"edit.undo", "entity.create", "entity.destroy", "entity.duplicate", "entity.get", "entity.reparent", "entity.update", "events.read",
-			"log.read", "project.create", "project.getSettings", "project.info", "project.open", "project.save", "project.setSettings",
-			"project.upgrade", "project.validate", "rpc.discover", "scene.diff", "scene.get", "scene.new", "scene.open", "scene.query",
-			"scene.save", "scene.tree", "session.hello", "session.info", "session.shutdown"
+			"edit.undo", "editor.screenshot", "entity.create", "entity.destroy", "entity.duplicate", "entity.get", "entity.reparent",
+			"entity.update", "events.read", "log.read", "project.create", "project.getSettings", "project.info", "project.open", "project.save",
+			"project.setSettings", "project.upgrade", "project.validate", "rpc.discover", "scene.diff", "scene.get", "scene.new", "scene.open",
+			"scene.query", "scene.save", "scene.tree", "session.hello", "session.info", "session.shutdown", "viewport.screenshot"
 		};
 		return ExpectedNames;
 	}
 
 	TEST_SUITE("EditorCore")
 	{
-		TEST_CASE("RegisterMethods: the editor registers exactly the M4 method set")
+		TEST_CASE("RegisterMethods: the editor registers exactly the M4 method set and the M5 screenshot methods")
 		{
 			Test::EditorTestFixture fixture("RegisterSet");
 			MethodRegistry methods(fixture.GetEngine().GetTypeRegistry());
@@ -66,9 +67,9 @@ namespace Engine {
 			const std::vector<std::string> launcher = { "docs.get", "project.create", "project.open", "rpc.discover", "session.hello",
 				"session.info", "session.shutdown" };
 			const std::vector<std::string> tools = { "component.list", "component.schema", "docs.get", "edit.batch", "edit.redo", "edit.undo",
-				"entity.create", "entity.destroy", "entity.duplicate", "entity.get", "entity.reparent", "entity.update", "log.read",
-				"project.create", "project.getSettings", "project.open", "project.save", "project.setSettings", "project.validate", "scene.diff",
-				"scene.new", "scene.open", "scene.query", "scene.save", "scene.tree" };
+				"editor.screenshot", "entity.create", "entity.destroy", "entity.duplicate", "entity.get", "entity.reparent", "entity.update",
+				"log.read", "project.create", "project.getSettings", "project.open", "project.save", "project.setSettings", "project.validate",
+				"scene.diff", "scene.new", "scene.open", "scene.query", "scene.save", "scene.tree", "viewport.screenshot" };
 			// The edit.batch ops (ADR 0008 decision 8): pure reads and methods whose effects all go through Execute.
 			const std::vector<std::string> batchable = { "component.list", "component.schema", "docs.get", "edit.getSelection",
 				"edit.history", "entity.create", "entity.destroy", "entity.duplicate", "entity.get", "entity.reparent", "entity.update",
@@ -138,7 +139,7 @@ namespace Engine {
 			REQUIRE(first != structs.end());
 			const std::vector<const StructInfo*> automation(first, structs.end());
 			for (const std::string_view name : { "NoParams", "ProjectDiagnostic", "SessionHelloParams", "EntityCreateParams", "EditBatchOp",
-					 "LogReadMethodResult", "DebugPendResult" })
+					 "LogReadMethodResult", "ViewportScreenshotParams", "EditorScreenshotResult", "DebugPendResult" })
 			{
 				INFO(std::string(name));
 				CHECK(std::ranges::any_of(automation, [name](const StructInfo* type)
@@ -183,7 +184,7 @@ namespace Engine {
 			Test::EditorTestFixture fixture("RegisterEnums");
 			const TypeRegistry& types = fixture.GetEngine().GetTypeRegistry();
 			for (const std::string_view name : { "SceneTarget", "CommandOrigin", "DiagnosticSeverity", "LogLevel", "LogChannel", "EngineEventType",
-					 "ValidationScope", "ProjectTemplate", "SceneTemplate", "SceneTreeFormat", "SceneDiffAgainst", "SceneEntityChangeKind" })
+					 "ValidationScope", "ProjectTemplate", "SceneTemplate", "SceneTreeFormat", "SceneDiffAgainst", "SceneEntityChangeKind", "ViewportView" })
 			{
 				INFO(std::string(name));
 				const EnumInfo* info = types.FindEnum(name);
@@ -206,7 +207,7 @@ namespace Engine {
 			RegisterEditorMethods(methods, {});
 			methods.Freeze();
 			Json catalog = methods.BuildToolCatalog();
-			CHECK(catalog["Tools"].size() == 25);
+			CHECK(catalog["Tools"].size() == 27); // the 25 M4 tools, viewport_screenshot and editor_screenshot
 			for (Json& tool : catalog["Tools"])
 			{
 				INFO(tool["name"].dump());

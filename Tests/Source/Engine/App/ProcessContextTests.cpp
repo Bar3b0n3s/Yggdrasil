@@ -89,16 +89,19 @@ namespace Engine {
 
 		TEST_CASE("ProcessContext: initializes GLFW once with the chosen platform and tears down in reverse")
 		{
-			// This process: headless, every step done in order, GLFW on the null platform.
+			// This process: headless, every step done in order (the Tests main asks for the Vulkan loader if available),
+			// GLFW on the null platform.
 			const ProcessContext* context = ProcessContext::GetCurrent();
 			REQUIRE(context != nullptr);
 			CHECK(context->GetSpecification().Window == WindowMode::Headless);
+			CHECK(context->GetSpecification().VulkanLoader == VulkanLoaderPolicy::IfAvailable);
 			CHECK(context->GetGlfwPlatform() == GlfwPlatform::Null);
 			const std::vector<ProcessContextStep> steps(context->GetSteps().begin(), context->GetSteps().end());
 			const std::vector<ProcessContextStep> expected = {
 				ProcessContextStep::Log,
 				ProcessContextStep::Profiler,
 				ProcessContextStep::CrashHandler,
+				ProcessContextStep::VulkanLoader,
 				ProcessContextStep::Glfw,
 			};
 			CHECK(steps == expected);
@@ -109,12 +112,14 @@ namespace Engine {
 			REQUIRE(child.has_value());
 			CHECK(child->ExitCode == 0);
 
-			const std::array<std::string, 8> lines = {
+			const std::array<std::string, 10> lines = {
 				"Process context: Log initialized",
 				"Process context: Profiler initialized",
 				"Process context: CrashHandler initialized",
+				"Process context: VulkanLoader initialized",
 				"Process context: Glfw initialized",
 				"Process context: shutting down Glfw",
+				"Process context: shutting down VulkanLoader",
 				"Process context: shutting down CrashHandler",
 				"Process context: shutting down Profiler",
 				"Process context: shutting down Log",
@@ -198,6 +203,7 @@ namespace Engine {
 			CHECK(ProcessContextStepToString(ProcessContextStep::Log) == "Log");
 			CHECK(ProcessContextStepToString(ProcessContextStep::Profiler) == "Profiler");
 			CHECK(ProcessContextStepToString(ProcessContextStep::CrashHandler) == "CrashHandler");
+			CHECK(ProcessContextStepToString(ProcessContextStep::VulkanLoader) == "VulkanLoader");
 			CHECK(ProcessContextStepToString(ProcessContextStep::Glfw) == "Glfw");
 
 			const std::string_view build = GetBuildDescription();

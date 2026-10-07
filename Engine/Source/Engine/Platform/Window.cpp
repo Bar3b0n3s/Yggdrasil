@@ -476,6 +476,16 @@ namespace Engine {
 		glfwRestoreWindow(m_Impl->Handle);
 	}
 
+	void Window::SetSize(uint32_t width, uint32_t height)
+	{
+		Impl::CheckUsable(m_Impl.get(), "SetSize");
+		ENGINE_CORE_ASSERT(width > 0 && height > 0, "Window::SetSize needs a non-zero size, got {}x{}", width, height);
+		ENGINE_CORE_ASSERT(width <= static_cast<uint32_t>(std::numeric_limits<int>::max())
+				&& height <= static_cast<uint32_t>(std::numeric_limits<int>::max()),
+			"Window::SetSize size {}x{} is out of GLFW's range", width, height);
+		glfwSetWindowSize(m_Impl->Handle, static_cast<int>(width), static_cast<int>(height));
+	}
+
 	void Window::SetTitle(std::string_view title)
 	{
 		Impl::CheckUsable(m_Impl.get(), "SetTitle");

@@ -15,11 +15,14 @@
 #include <format>
 #include <map>
 #include <new>
+#include <system_error>
 
 // This file is the protocol's allowlisted try/catch boundary (Architecture §4.6 item 5). Only the three calls into method
 // code are guarded (the handler through MethodRegistry::Invoke, PendingOperation::Poll and PendingOperation::Cancel):
-// std::bad_alloc is fatal like everywhere else (§4.6 "Fatal environment"); any other std::exception asserts in Debug builds
-// and becomes an Internal error response in the others, so a Release editor keeps serving its other clients.
+// std::bad_alloc is fatal like everywhere else (§4.6 "Fatal environment"); a std::system_error goes to the host's
+// SystemErrorHandler first (a Vulkan error ends the process there); any other std::exception, and a system error the
+// handler returns from, asserts in Debug builds and becomes an Internal error response in the others, so a Release editor
+// keeps serving its other clients.
 //
 // Handlers may change the client set while they run (a session.shutdown that disconnects, an in-process client that
 // removes itself), so the pump never holds a reference into the client map across a call into the host or a method: it
@@ -86,7 +89,16 @@ namespace Engine {
 			return Error(ErrorCode::Unknown, std::format("method '{}' failed with an unexpected exception: {}", method, what));
 		}
 
-		[[nodiscard]] static MethodResult InvokeGuarded(const MethodRegistry& registry, MethodContext& context)
+		// A std::system_error escaping method code: the host's handler first (it may end the process), then the error of
+		// any other exception.
+		[[nodiscard]] static Error MakeSystemErrorError(const SystemErrorHandler& handler, std::string_view method, const std::system_error& error)
+		{
+			if (handler)
+				handler(error, method);
+			return MakeExceptionError(method, error.what());
+		}
+
+		[[nodiscard]] static MethodResult InvokeGuarded(const MethodRegistry& registry, MethodContext& context, const SystemErrorHandler& systemErrors)
 		{
 			try
 			{
@@ -96,13 +108,18 @@ namespace Engine {
 			{
 				FatalError(FatalErrorKind::OutOfMemory, "std::bad_alloc: out of memory in an automation method");
 			}
+			catch (const std::system_error& error)
+			{
+				return MakeSystemErrorError(systemErrors, context.GetRequest().Method, error);
+			}
 			catch (const std::exception& exception)
 			{
 				return MakeExceptionError(context.GetRequest().Method, exception.what());
 			}
 		}
 
-		[[nodiscard]] static std::optional<Result<Json>> PollGuarded(PendingOperation& operation, MethodContext& context)
+		[[nodiscard]] static std::optional<Result<Json>> PollGuarded(PendingOperation& operation, MethodContext& context,
+			const SystemErrorHandler& systemErrors)
 		{
 			try
 			{
@@ -112,13 +129,17 @@ namespace Engine {
 			{
 				FatalError(FatalErrorKind::OutOfMemory, "std::bad_alloc: out of memory in an automation operation");
 			}
+			catch (const std::system_error& error)
+			{
+				return Result<Json>(std::unexpected(MakeSystemErrorError(systemErrors, context.GetRequest().Method, error)));
+			}
 			catch (const std::exception& exception)
 			{
 				return Result<Json>(std::unexpected(MakeExceptionError(context.GetRequest().Method, exception.what())));
 			}
 		}
 
-		static void CancelGuarded(PendingOperation& operation, MethodContext& context)
+		static void CancelGuarded(PendingOperation& operation, MethodContext& context, const SystemErrorHandler& systemErrors)
 		{
 			try
 			{
@@ -127,6 +148,10 @@ namespace Engine {
 			catch (const std::bad_alloc&)
 			{
 				FatalError(FatalErrorKind::OutOfMemory, "std::bad_alloc: out of memory while cancelling an automation operation");
+			}
+			catch (const std::system_error& error)
+			{
+				ENGINE_CORE_ERROR("{}", MakeSystemErrorError(systemErrors, context.GetRequest().Method, error).GetMessageText());
 			}
 			catch (const std::exception& exception)
 			{
@@ -155,7 +180,7 @@ namespace Engine {
 		std::optional<Result<Json>> outcome;
 		{
 			const WatchdogPhaseScope phase(PhaseMarker, Utils::GetOperationPhase(*pending->Operation, context.GetRequest().Method));
-			outcome = Utils::PollGuarded(*pending->Operation, context);
+			outcome = Utils::PollGuarded(*pending->Operation, context, Specification.SystemErrors);
 		}
 		Host->LeaveInvocation(context);
 
@@ -247,7 +272,7 @@ namespace Engine {
 		MethodResult result;
 		{
 			const WatchdogPhaseScope phase(PhaseMarker, std::format("Automation:{}", request.Method));
-			result = Utils::InvokeGuarded(*Registry, *context);
+			result = Utils::InvokeGuarded(*Registry, *context, Specification.SystemErrors);
 		}
 		Host->LeaveInvocation(*context);
 
@@ -287,7 +312,7 @@ namespace Engine {
 		Host->EnterInvocation(context);
 		{
 			const WatchdogPhaseScope phase(PhaseMarker, Utils::GetOperationPhase(*pending.Operation, context.GetRequest().Method));
-			Utils::CancelGuarded(*pending.Operation, context);
+			Utils::CancelGuarded(*pending.Operation, context, Specification.SystemErrors);
 		}
 		Host->LeaveInvocation(context);
 		Host->FinishRequest(context);

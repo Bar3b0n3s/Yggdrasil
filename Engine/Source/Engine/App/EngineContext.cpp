@@ -5,6 +5,10 @@
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Log.h"
 #include "Engine/Core/Mounts/NativeDirectoryMount.h"
+#include "Engine/Graphics/GraphicsDevice.h"
+#include "Engine/Graphics/PipelineFactory.h"
+#include "Engine/Graphics/ShaderLibrary.h"
+#include "Engine/Platform/GlfwLibrary.h"
 #include "Engine/Project/ProjectSettings.h"
 #include "Engine/Scene/Components/BuiltinComponents.h"
 
@@ -61,7 +65,46 @@ namespace Engine {
 			context->m_Window.emplace(std::move(window));
 		}
 
+		if (specification.Graphics.has_value())
+			ENGINE_TRY(WithContext(context->CreateGraphics(*specification.Graphics), Utils::DescribeEngineContextStep(EngineContextStep::Graphics)));
+
 		return context;
+	}
+
+	Status EngineContext::CreateGraphics(const GraphicsSpecification& graphics)
+	{
+		// Development builds read the shaders the Shaders project compiled for this configuration (§2.2, §8.12); exported
+		// games mount their Engine.pak instead (M7).
+#if !defined(ENGINE_DIST)
+		Result<Scope<NativeDirectoryMount>> shaders = NativeDirectoryMount::Create(std::filesystem::path(ENGINE_SHADER_DIRECTORY),
+			MountAccess::ReadOnly);
+		if (!shaders.has_value())
+		{
+			return std::unexpected(std::move(shaders).error().WithHint(
+				"build this configuration's Shaders project (python Scripts/Build.py), which compiles the shaders there"));
+		}
+		ENGINE_TRY(m_Vfs.Mount(ShaderScheme, std::move(*shaders)));
+#endif
+
+		// A windowed process presents to the context's window; a headless one renders offscreen only (§8.1, §8.13).
+		Window* presentWindow = GlfwLibrary::GetMode() == WindowMode::Windowed ? GetWindow() : nullptr;
+		ENGINE_TRY_ASSIGN(m_GraphicsDevice, GraphicsDevice::Create({
+												.Graphics = graphics,
+												.PresentWindow = presentWindow,
+												.ApplicationName = presentWindow != nullptr ? presentWindow->GetTitle() : std::string(),
+											}));
+		ENGINE_TRY_ASSIGN(const VfsPath shaderRoot, VfsPath::Create(ShaderScheme, ""));
+		m_ShaderLibrary = CreateScope<ShaderLibrary>(m_GraphicsDevice.get(), m_Vfs, shaderRoot);
+		m_PipelineFactory = CreateScope<PipelineFactory>(*m_GraphicsDevice, *m_ShaderLibrary);
+		return {};
+	}
+
+	GpuMessageCounts EngineContext::DestroyGraphics()
+	{
+		// The factory and the library hold GPU objects (pipelines, shaders), which must be gone before the device.
+		m_PipelineFactory.reset();
+		m_ShaderLibrary.reset();
+		return GraphicsDevice::Destroy(std::move(m_GraphicsDevice));
 	}
 
 	std::string_view EngineContextStepToString(EngineContextStep step)
@@ -71,6 +114,7 @@ namespace Engine {
 			case EngineContextStep::Services: return "Services";
 			case EngineContextStep::UserData: return "UserData";
 			case EngineContextStep::Window:   return "Window";
+			case EngineContextStep::Graphics: return "Graphics";
 		}
 
 		ENGINE_CORE_ASSERT(false, "Unknown EngineContextStep {}", std::to_underlying(step));

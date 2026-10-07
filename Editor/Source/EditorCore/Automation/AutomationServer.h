@@ -1,5 +1,6 @@
 #pragma once
 
+#include "EditorCore/Automation/ScreenshotMethods.h"
 #include "Engine/Automation/Protocol/Dispatcher.h"
 #include "Engine/Automation/Protocol/JsonRpc.h"
 #include "Engine/Automation/Protocol/MethodRegistry.h"
@@ -10,6 +11,7 @@
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -35,7 +37,13 @@ namespace Engine {
 		bool TestHooks = false;
 		// Reported by session.info and in the session file.
 		bool Headless = false;
-		std::string RendererName = "none"; // "vulkan" or "none" (--renderer)
+		std::string RendererName = "none"; // "vulkan" or "none" (--renderer, RendererModeToCommandLine)
+		// The captures behind viewport.screenshot and editor.screenshot, which the editor injects when it has a
+		// GraphicsDevice (ScreenshotMethods.h); empty with --renderer none, which makes both methods Unsupported.
+		ScreenshotCaptures Screenshots{};
+		// The Dispatcher's handler of a std::system_error escaping a method (DispatcherSpecification::SystemErrors): with a
+		// device the editor maps Vulkan errors like the frame-boundary catch (RaiseVulkanError). Empty: like any exception.
+		SystemErrorHandler SystemErrors{};
 		// <UserData>/<AppName>/Automation/Sessions (§13.2); required when Listen.
 		std::filesystem::path SessionsDirectory{};
 		// The repository root for docs.get (.claude/skills, Docs/Reference); empty: docs.get is Unsupported. The editor
@@ -74,6 +82,7 @@ namespace Engine {
 	//   - reports MetaState from EditorContext::GetRevision, the dirty flag and the history;
 	//   - writes offloaded results to project://Library/Automation/Out/ (user://Automation/Out/ without a project or when
 	//     read-only), named with its server tag (its process id and start time).
+	// Method output files, such as screenshots, go to the same directory (WriteOutputFile).
 	// On a client's disconnect it removes the client from the Dispatcher (cancelling its pending operations) and appends one
 	// AutomationClientDisconnected event (§13.2).
 	class AutomationServer final : private IMethodHost
@@ -127,6 +136,15 @@ namespace Engine {
 		void SubmitInProcess(ClientId client, RpcRequest request);
 		// The responses for an in-process client since the last call, in completion order.
 		[[nodiscard]] std::vector<Json> TakeInProcessResponses(ClientId client);
+
+		// Writes a method's output file, such as a screenshot's PNG, as "<serverTag>-<sequence>.<extension>" (the sequence
+		// counts this server's output files from 1, as at least 8 digits) into the directory of offloaded results
+		// (project://Library/Automation/Out/, or user://Automation/Out/ without a writable project), and returns its absolute
+		// native path, which results name like offloaded ones. `extension` is lowercase letters and digits without the dot
+		// ("png"). Unlike offloaded results, output files outlive the server, so the screenshots of a --batch run can be read
+		// after it exits; the first write of a later server to the directory removes them with the other leftovers of
+		// servers that are gone. Errors: those of the VFS writes.
+		[[nodiscard]] Result<std::string> WriteOutputFile(std::string_view extension, std::span<const std::byte> bytes);
 	private:
 		[[nodiscard]] Status CheckAvailability(const MethodDescriptor& method) const override;
 		[[nodiscard]] Scope<MethodContext> CreateContext(MethodRequest request) override;
@@ -139,8 +157,8 @@ namespace Engine {
 		[[nodiscard]] Result<std::string> WriteOffloadedResult(std::string_view fileName, std::string_view text) override;
 	private:
 		// The Dispatcher, the ProtocolServer, the token, the session file path, the server tag, the clients with their
-		// names and versions, the in-process response queues and the project the session file last named
-		// (AutomationServer.cpp).
+		// names and versions, the in-process response queues, the project the session file last named and the output
+		// files' sequence (AutomationServer.cpp).
 		struct State;
 	private:
 		EditorContext* m_Editor = nullptr; // documented back-reference: outlives the server

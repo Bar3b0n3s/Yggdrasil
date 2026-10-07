@@ -15,7 +15,6 @@ namespace Engine {
 
 		constexpr std::string_view ProjectOption = "--project";
 		constexpr std::string_view ReadOnlyOption = "--read-only";
-		constexpr std::string_view RendererOption = "--renderer";
 		constexpr std::string_view AutomationOption = "--automation";
 		constexpr std::string_view TestHooksOption = "--automation-test-hooks";
 		constexpr std::string_view BatchOption = "--batch";
@@ -25,7 +24,6 @@ namespace Engine {
 		constexpr std::array EditorOptions = {
 			CommandLineOption{ .Name = ProjectOption, .Value = CommandLineValue::Required, .ValueName = "path", .Description = "Open the project (.eproj or its directory)." },
 			CommandLineOption{ .Name = ReadOnlyOption, .Value = CommandLineValue::None, .ValueName = {}, .Description = "Open the project read-only, without the lock." },
-			CommandLineOption{ .Name = RendererOption, .Value = CommandLineValue::Required, .ValueName = "vulkan|none", .Description = "Render with Vulkan, or not at all." },
 			CommandLineOption{ .Name = AutomationOption, .Value = CommandLineValue::Optional, .ValueName = "port", .Description = "Start the automation server (127.0.0.1)." },
 			CommandLineOption{ .Name = TestHooksOption, .Value = CommandLineValue::None, .ValueName = {}, .Description = "Register the debug.* test hooks." },
 			CommandLineOption{ .Name = BatchOption, .Value = CommandLineValue::Required, .ValueName = "file.jsonl", .Description = "Run the automation requests of a batch file and exit." },
@@ -36,22 +34,6 @@ namespace Engine {
 	}
 
 	namespace Utils {
-
-		[[nodiscard]] static bool EqualsIgnoreAsciiCase(std::string_view a, std::string_view b)
-		{
-			if (a.size() != b.size())
-				return false;
-			for (size_t index = 0; index < a.size(); ++index)
-			{
-				const auto lower = [](char character)
-				{
-					return character >= 'A' && character <= 'Z' ? static_cast<char>(character - 'A' + 'a') : character;
-				};
-				if (lower(a[index]) != lower(b[index]))
-					return false;
-			}
-			return true;
-		}
 
 		// The path value of `option`, or nullopt when it was not given. std::filesystem::path throws on ill-formed UTF-8 on
 		// Windows, and a command line is external input, so the text is checked first.
@@ -69,16 +51,6 @@ namespace Engine {
 
 	}
 
-	std::string_view EditorRendererToString(EditorRenderer renderer)
-	{
-		switch (renderer)
-		{
-			case EditorRenderer::Vulkan: return "vulkan";
-			case EditorRenderer::None:   return "none";
-		}
-		return "vulkan";
-	}
-
 	std::span<const CommandLineOption> GetEditorCommandLineOptions()
 	{
 		return EditorOptions;
@@ -89,16 +61,6 @@ namespace Engine {
 		EditorLaunchOptions options;
 		ENGINE_TRY_ASSIGN(options.Project, Utils::ReadPathOption(commandLine, ProjectOption));
 		options.ReadOnly = commandLine.Has(ReadOnlyOption);
-
-		if (const std::optional<std::string_view> renderer = commandLine.GetValue(RendererOption))
-		{
-			if (Utils::EqualsIgnoreAsciiCase(*renderer, EditorRendererToString(EditorRenderer::Vulkan)))
-				options.Renderer = EditorRenderer::Vulkan;
-			else if (Utils::EqualsIgnoreAsciiCase(*renderer, EditorRendererToString(EditorRenderer::None)))
-				options.Renderer = EditorRenderer::None;
-			else
-				return MakeError(ErrorCode::InvalidArgument, "option '{}' takes vulkan or none, got '{}'", RendererOption, *renderer);
-		}
 
 		options.Automation = commandLine.Has(AutomationOption);
 		if (commandLine.GetValue(AutomationOption).has_value())

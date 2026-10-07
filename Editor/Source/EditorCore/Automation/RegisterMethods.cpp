@@ -10,6 +10,7 @@
 #include "EditorCore/Automation/ProjectMethods.h"
 #include "EditorCore/Automation/RpcMethods.h"
 #include "EditorCore/Automation/SceneMethods.h"
+#include "EditorCore/Automation/ScreenshotMethods.h"
 #include "EditorCore/Automation/SessionMethods.h"
 #include "EditorCore/Project/ProjectValidator.h"
 
@@ -28,6 +29,7 @@ namespace Engine {
 		RegisterComponentMethodTypes(registry);
 		RegisterEditMethodTypes(registry);
 		RegisterObserveMethodTypes(registry);
+		RegisterScreenshotMethodTypes(registry);
 		RegisterDebugMethodTypes(registry);
 	}
 
@@ -41,6 +43,7 @@ namespace Engine {
 		RegisterComponentMethods(methods);
 		RegisterEditMethods(methods);
 		RegisterObserveMethods(methods);
+		RegisterScreenshotMethods(methods);
 		if (options.TestHooks)
 			RegisterDebugMethods(methods);
 	}

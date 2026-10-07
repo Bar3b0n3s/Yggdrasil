@@ -54,7 +54,7 @@ namespace Engine {
 			MethodRegistry methods(*types);
 			Test::RegisterProtocolTestMethods(methods);
 			methods.Freeze();
-			CHECK(methods.GetMethods().size() == 6);
+			CHECK(methods.GetMethods().size() == 7);
 			const MethodDescriptor* echo = methods.Find("test.echo");
 			REQUIRE(echo != nullptr);
 			CHECK(echo->Specification.SupportsDryRun);

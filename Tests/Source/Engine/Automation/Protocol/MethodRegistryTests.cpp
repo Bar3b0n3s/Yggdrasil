@@ -74,7 +74,7 @@ namespace Engine {
 			std::vector<std::string> names;
 			for (const MethodDescriptor* method : setup.Methods->GetMethods())
 				names.push_back(method->Specification.Name);
-			CHECK(names == std::vector<std::string>{ "test.echo", "test.fail", "test.large", "test.pend", "test.read", "test.throw" });
+			CHECK(names == std::vector<std::string>{ "test.echo", "test.fail", "test.large", "test.pend", "test.read", "test.systemError", "test.throw" });
 			CHECK(setup.Methods->GetDomains() == std::vector<std::string>{ "test" });
 			const std::vector<std::string> suggestions = setup.Methods->SuggestMethodNames("test.ecko");
 			REQUIRE_FALSE(suggestions.empty());

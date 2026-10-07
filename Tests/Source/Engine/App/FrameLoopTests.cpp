@@ -4,16 +4,20 @@
 
 #include "Engine/App/EngineContext.h"
 #include "Engine/App/ExitCode.h"
+#include "Engine/App/ProcessContext.h"
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Log.h"
 #include "Engine/Platform/CrashHandler.h"
 #include "Engine/Platform/Process.h"
 #include "Support/ChildOutput.h"
 #include "Support/DeathTest.h"
+#include "Support/HeadlessGpuFixture.h"
 #include "Support/TempDirectory.h"
 #include "Support/TestOptions.h"
 #include "Support/Utf8Path.h"
 #include "Support/WindowedChild.h"
+
+#include <vulkan/vulkan.hpp>
 
 namespace Engine {
 
@@ -41,13 +45,18 @@ namespace Engine {
 			{
 				Calls.push_back(std::format("update {}", frame.FrameIndex));
 			}
+
+			void OnFrameRender(const FrameTime& frame) override
+			{
+				Calls.push_back(std::format("render {}", frame.FrameIndex));
+			}
 		public:
 			std::vector<std::string> Calls;
 			Key HandledKey = Key::None;
 			bool HandleClose = false; // an editor that asks to save first
 		};
 
-		// Records the safe point next to the steps and updates (§4.2 step 3).
+		// Records the safe point next to the steps, updates and renders (§4.2 step 3).
 		class SafePointClient final : public IFrameLoopClient
 		{
 		public:
@@ -67,8 +76,53 @@ namespace Engine {
 			{
 				Calls.push_back(std::format("update {}", frame.FrameIndex));
 			}
+
+			void OnFrameRender(const FrameTime& frame) override
+			{
+				Calls.push_back(std::format("render {}", frame.FrameIndex));
+			}
 		public:
 			std::vector<std::string> Calls;
+		};
+
+		// Makes vulkan.hpp throw, as NVRHI's internal calls do on device loss or out-of-memory (§4.6 item 2): creating an
+		// instance with a layer that does not exist throws vk::LayerNotPresentError.
+		void ThrowSystemError()
+		{
+			const std::array<const char*, 1> layers = { "VK_LAYER_ENGINE_does_not_exist" };
+			const vk::ApplicationInfo application("FrameLoopTests", 1, "Engine", 1, VK_API_VERSION_1_3);
+			const vk::InstanceCreateInfo createInfo({}, &application, layers);
+			const vk::Instance instance = vk::createInstance(createInfo);
+			ENGINE_CORE_ERROR("vk::createInstance with a missing layer returned instead of throwing");
+			instance.destroy();
+		}
+
+		// Throws a vk::SystemError from its update or its render hook: the frame-boundary catch covers the whole frame.
+		class ThrowingClient final : public IFrameLoopClient
+		{
+		public:
+			explicit ThrowingClient(bool throwInUpdate)
+				: m_ThrowInUpdate(throwInUpdate)
+			{
+			}
+
+			void OnFrameEvent(Event& /*event*/) override {}
+
+			void OnFrameFixedStep(const SimStep& /*step*/) override {}
+
+			void OnFrameUpdate(const FrameTime& /*frame*/) override
+			{
+				if (m_ThrowInUpdate)
+					ThrowSystemError();
+			}
+
+			void OnFrameRender(const FrameTime& /*frame*/) override
+			{
+				if (!m_ThrowInUpdate)
+					ThrowSystemError();
+			}
+		private:
+			bool m_ThrowInUpdate = false;
 		};
 
 		// Crashes in its fixed step once told to.
@@ -84,6 +138,8 @@ namespace Engine {
 			}
 
 			void OnFrameUpdate(const FrameTime& /*frame*/) override {}
+
+			void OnFrameRender(const FrameTime& /*frame*/) override {}
 		public:
 			bool CrashInFixedStep = false;
 		};
@@ -118,9 +174,66 @@ namespace Engine {
 		loop.RunFrame();
 	}
 
+	// Runs one frame whose update or render hook makes vulkan.hpp throw: the children of the frame-boundary catch tests.
+	// Without a Vulkan loader in this process there is nothing to throw, which the parents report as a skip.
+	static void RunThrowingFrame(bool throwInUpdate)
+	{
+		const ProcessContext* process = ProcessContext::GetCurrent();
+		if (process == nullptr || !process->IsVulkanLoaderAvailable())
+		{
+			ENGINE_CORE_WARN("No Vulkan loader in the frame-loop child");
+			return;
+		}
+		Result<Scope<EngineContext>> context = EngineContext::Create({ .WorkerCount = 0 });
+		if (!context.has_value())
+		{
+			ENGINE_CORE_ERROR("The frame-loop child cannot create its engine context: {}", context.error());
+			return;
+		}
+		ThrowingClient client(throwInUpdate);
+		FrameLoop loop(**context, client, CreateScope<ManualClock>(FixedDelta), {});
+		loop.RunFrame();
+	}
+
+	ENGINE_DEATH_TEST("App/FrameLoopRenderThrowsSystemError")
+	{
+		RunThrowingFrame(false);
+	}
+
+	ENGINE_DEATH_TEST("App/FrameLoopUpdateThrowsSystemError")
+	{
+		RunThrowingFrame(true);
+	}
+
+	// Runs the death-test child `name` and checks that the frame-boundary catch ended it through FatalError(Gpu) with a crash
+	// report whose FramePhase breadcrumb is `phase`.
+	static void CheckFrameBoundaryCatch(std::string_view name, std::string_view phase)
+	{
+		Test::TempDirectory directory("FrameBoundaryCatch");
+		const ProcessSpecification specification = Test::MakeTestsChildSpecification({
+			"--death-test=" + std::string(name),
+			"--user-data-dir=" + Test::PathToUtf8(directory.GetPath()),
+		});
+		const Result<ProcessResult> child = Process::Run(specification, std::chrono::seconds(60));
+		REQUIRE_MESSAGE(child.has_value(), child.error().ToString());
+		INFO("child stderr: ", child->StandardError);
+		if (child->StandardError.contains("No Vulkan loader in the frame-loop child"))
+		{
+			Test::ReportGpuUnavailable("no Vulkan loader");
+			return;
+		}
+		CHECK(child->ExitCode == ExitCode::Crash);
+		CHECK(child->StandardError.contains("Fatal error (Gpu)"));
+		const std::vector<std::filesystem::path> reports = Test::ListCrashFiles(directory / ENGINE_PRODUCT_NAME / "Crashes", ".txt");
+		REQUIRE(reports.size() == 1);
+		const Result<std::string> report = FileSystem::ReadText(reports[0]);
+		REQUIRE_MESSAGE(report.has_value(), report.error().ToString());
+		CHECK(report->contains(std::format("\n  FramePhase: {}\n", phase)));
+	}
+
 	TEST_SUITE("App")
 	{
-		TEST_CASE("FrameLoop: a ManualClock frame runs exactly one step before its update")
+		TEST_CASE("FrameLoop: a ManualClock frame runs exactly one step before its update and render")
 		{
 			Scope<EngineContext> context = CreateContext();
 			RecordingClient client;
@@ -129,7 +242,17 @@ namespace Engine {
 			for (int frame = 0; frame < 3; ++frame)
 				loop.RunFrame();
 
-			const std::vector<std::string> expected = { "step 0", "update 0", "step 1", "update 1", "step 2", "update 2" };
+			const std::vector<std::string> expected = {
+				"step 0",
+				"update 0",
+				"render 0",
+				"step 1",
+				"update 1",
+				"render 1",
+				"step 2",
+				"update 2",
+				"render 2",
+			};
 			CHECK(client.Calls == expected);
 			CHECK(loop.GetFrameCount() == 3);
 			CHECK(loop.GetScheduler().GetTick() == 3);
@@ -153,7 +276,7 @@ namespace Engine {
 			loop.RunFrame();
 			loop.RunFrame();
 
-			const std::vector<std::string> expected = { "drained", "safe point", "step 0", "update 0", "safe point", "step 1", "update 1" };
+			const std::vector<std::string> expected = { "drained", "safe point", "step 0", "update 0", "render 0", "safe point", "step 1", "update 1", "render 1" };
 			CHECK(client.Calls == expected);
 		}
 
@@ -176,7 +299,7 @@ namespace Engine {
 				{
 					return call.starts_with("step ");
 				})));
-				CHECK(client.Calls.back() == std::format("update {}", frame));
+				CHECK(client.Calls.back() == std::format("render {}", frame));
 			}
 			const std::vector<size_t> expected = { 0, 1, 3, 5 };
 			CHECK(stepsPerFrame == expected);
@@ -190,6 +313,7 @@ namespace Engine {
 			CHECK(loop.Run() == ExitCode::Success);
 			CHECK(loop.GetFrameCount() == 10);
 			CHECK(std::ranges::count(client.Calls, std::string("update 9")) == 1);
+			CHECK(std::ranges::count(client.Calls, std::string("render 9")) == 1);
 		}
 
 		TEST_CASE("FrameLoop: the first exit request wins and an early request runs no frame")
@@ -326,6 +450,22 @@ namespace Engine {
 		TEST_CASE("FrameLoop: a minimized window idles")
 		{
 			ENGINE_CHECK_WINDOWED_CHILD("FrameLoop: a minimized window uses little CPU time per second");
+		}
+
+		TEST_CASE("FrameLoop: a vk::SystemError from the render hook ends the process through FatalError"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			// §4.6 item 2: the one frame-boundary catch maps the error's result (VK_ERROR_LAYER_NOT_PRESENT here) to
+			// FatalError(Gpu), which writes a crash report naming the frame phase, and exits with code 4.
+			CheckFrameBoundaryCatch("App/FrameLoopRenderThrowsSystemError", "Render");
+		}
+
+		TEST_CASE("FrameLoop: a vk::SystemError from the update hook ends the process through FatalError"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			// The catch covers the whole frame (§4.2 step 7), not only rendering: NVRHI work outside the render step (a
+			// screenshot read back during an update, an asset swap's upload) is guarded the same way.
+			CheckFrameBoundaryCatch("App/FrameLoopUpdateThrowsSystemError", "Update");
 		}
 	}
 

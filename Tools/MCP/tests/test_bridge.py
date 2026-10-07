@@ -4,6 +4,7 @@ Tests/Automation/fake_editor.py and stand-in processes."""
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import shutil
@@ -95,6 +96,42 @@ class FormatTests(BridgeTestCase):
         self.assertLessEqual(len(text.encode("utf-8")), server.MAX_TEXT_BYTES)
         self.assertIn("structuredContent", text)
         self.assertTrue(text.endswith('_meta: {"revision": 4, "dirty": true}'))
+
+    def test_screenshot_results_return_image_content_and_name_the_file(self) -> None:
+        png = self.directory / "1-2-00000001.png"
+        png.write_bytes(b"\x89PNG\r\n\x1a\npixels")
+        meta = {"revision": 1}
+        shot = {"view": "Scene", "path": str(png), "mimeType": "image/png", "width": 320, "height": 180, "data": "",
+                "_meta": meta}
+        structured, text = server.format_result({"jsonrpc": "2.0", "id": 1, "result": shot})
+        self.assertIn(f"Screenshot 320x180: {png}", text)
+        self.assertEqual(server.image_content(structured), (base64.b64encode(png.read_bytes()).decode("ascii"),
+                                                            "image/png"))
+
+        # Inline data is used as it is and left out of the text summary.
+        inline = dict(shot, data="aW5saW5l")
+        structured, text = server.format_result({"jsonrpc": "2.0", "id": 2, "result": inline})
+        self.assertNotIn("aW5saW5l", text)
+        self.assertEqual(server.image_content(structured), ("aW5saW5l", "image/png"))
+
+        # The base64 travels once: the structuredContent of the tool result leaves out the data the image block carries.
+        content, image = server.tool_content(structured, False)
+        self.assertEqual(image, ("aW5saW5l", "image/png"))
+        self.assertNotIn("data", content)
+        self.assertEqual((content["path"], content["mimeType"], content["_meta"]), (str(png), "image/png", meta))
+        self.assertIn("data", structured)
+        self.assertEqual(server.tool_content(structured, True), (structured, None))
+
+        # Inline data the editor left out (a PNG over 30 KB): the image comes from the file.
+        omitted = dict(shot, inlineOmitted=True)
+        structured, _ = server.format_result({"jsonrpc": "2.0", "id": 3, "result": omitted})
+        content, image = server.tool_content(structured, False)
+        self.assertEqual(image, (base64.b64encode(png.read_bytes()).decode("ascii"), "image/png"))
+        self.assertTrue(content["inlineOmitted"])
+
+        # Other results, and a file that is gone, carry no image.
+        self.assertIsNone(server.image_content({"path": str(png), "truncated": True}))
+        self.assertIsNone(server.image_content(dict(shot, path=str(self.directory / "Missing.png"))))
 
     def test_catalog_reader_checks_format_and_entries(self) -> None:
         self.assertIsInstance(server.load_catalog(), list)

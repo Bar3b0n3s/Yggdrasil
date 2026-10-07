@@ -1,11 +1,9 @@
 -- Engine static library and the Shaders utility project (Docs/Architecture.md §2.2, §8.12).
 
 local ShaderSourceDirectory = RepositoryRoot .. "/Resources/Shaders"
--- Shaders always compile into the repository's bin/<OutputDir>/Shaders, also for a workspace generated elsewhere with
--- --to: development builds mount engine://Shaders there through ENGINE_REPO_ROOT (Architecture §2.2, §8.12), so every
--- workspace of this checkout shares one shader output per configuration. The SPIR-V does not depend on the C++
--- toolset, so sharing it is safe.
-local ShaderOutputDirectory = RepositoryRoot .. "/bin/" .. OutputDir .. "/Shaders"
+-- Shaders compile into ShaderOutputDirectory (premake5.lua), the repository's bin/<OutputDir>/Shaders, which development
+-- builds mount as shaders:// through ENGINE_SHADER_DIRECTORY (Dependencies.lua; Architecture §2.2, §8.12;
+-- Docs/Decisions/0009-m5-decisions.md decision 4).
 
 -- The single custom build rule that compiles every shader. Its inputs are Shaders.json, every .slang and .h file
 -- under Resources/Shaders, the compiler script and the pinned toolchain, so an IDE build re-runs it when only a
@@ -86,6 +84,13 @@ project "Engine"
 		"Source/**.h",
 		"Source/**.cpp"
 	}
+
+	-- Implementation translation units of vendored code (Architecture §2.2): each defines a library's implementation
+	-- macro, or includes a vendored .cpp, before anything else, so it is compiled without the precompiled header.
+	filter "files:**/Engine/*/ThirdParty/**.cpp or files:**/Engine/ImGui/ImGuiGlfwImplementation.cpp"
+		enablepch "Off"
+
+	filter {}
 
 	externalincludedirs
 	{

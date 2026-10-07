@@ -12,8 +12,10 @@
 
 #include <chrono>
 #include <cstddef>
+#include <functional>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <vector>
 
 // Request execution (Architecture §13.2 "Threading", "Pending operations", "Disconnect"): requests from one client run in
@@ -21,7 +23,11 @@
 // operations are polled once per frame. Dispatcher.cpp is the protocol's allowlisted try/catch boundary (§4.6 item 5): a
 // std::exception escaping a handler, a Poll or a Cancel (std::bad_alloc, an exception of the standard library or nlohmann)
 // asserts in Debug builds (ENGINE_DEBUG: it is a bug to find; the message names the method and the exception's what()) and
-// becomes an Internal error response naming both otherwise, so a Release editor keeps serving its other clients.
+// becomes an Internal error response naming both otherwise, so a Release editor keeps serving its other clients. A
+// std::system_error goes to the host's SystemErrorHandler first: vulkan.hpp throws vk::SystemError (a std::system_error)
+// out of NVRHI's internal calls, and a GPU error inside a method (viewport.screenshot) must end the process like the
+// frame-boundary catch (§4.6 item 2, App/FrameLoop.cpp), not leave the host running on a lost device
+// (Docs/Decisions/0009-m5-decisions.md decisions 5 and 33). First-party code never rethrows, so the handler does that work.
 
 namespace Engine {
 
@@ -85,9 +91,17 @@ namespace Engine {
 		Json Message{};
 	};
 
+	// Called with a std::system_error escaping method code (a handler, a Poll or a Cancel) and the method's name, before the
+	// exception is handled like any other. A host with a GPU device maps a Vulkan error (vk::SystemError's category) onto
+	// the fatal paths of the frame-boundary catch (RaiseVulkanError, Graphics/GraphicsDevice.h), which never returns; when
+	// the handler returns, the exception asserts in Debug builds and becomes an Internal response otherwise.
+	using SystemErrorHandler = std::function<void(const std::system_error& error, std::string_view method)>;
+
 	struct DispatcherSpecification
 	{
 		size_t OffloadThresholdBytes = DefaultOffloadThresholdBytes;
+		// Empty: a std::system_error is handled like any other exception.
+		SystemErrorHandler SystemErrors{};
 	};
 
 	// Per-client request queues, the pending operations and response building (results, errors, "_meta", offloading).

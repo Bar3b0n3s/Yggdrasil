@@ -19,25 +19,25 @@ namespace Engine {
 	{
 		TEST_CASE("EditorCommandLine: the option table names every M4 editor option")
 		{
+			// --renderer is an engine option (GetEngineCommandLineOptions), which the Runtime takes too (ADR 0009 decisions 3 and 33).
 			std::vector<std::string_view> names;
 			for (const CommandLineOption& option : GetEditorCommandLineOptions())
 			{
 				names.push_back(option.Name);
 				CHECK_FALSE(option.Description.empty());
 			}
-			const std::vector<std::string_view> expected = { "--project", "--read-only", "--renderer", "--automation", "--automation-test-hooks",
-				"--batch", "--upgrade", "--dump-reference" };
+			const std::vector<std::string_view> expected = { "--project", "--read-only", "--automation", "--automation-test-hooks", "--batch",
+				"--upgrade", "--dump-reference" };
 			CHECK(names == expected);
 		}
 
 		TEST_CASE("EditorCommandLine: every option parses into the launch options")
 		{
 			const Result<EditorLaunchOptions> options =
-				ParseEditorArguments({ "--project", "Projects/Tetris", "--read-only", "--renderer", "NONE", "--automation=50123", "--automation-test-hooks" });
+				ParseEditorArguments({ "--project", "Projects/Tetris", "--read-only", "--renderer", "none", "--automation=50123", "--automation-test-hooks" });
 			REQUIRE_MESSAGE(options.has_value(), options.error().ToString());
 			CHECK(options->Project == std::filesystem::path("Projects/Tetris"));
 			CHECK(options->ReadOnly);
-			CHECK(options->Renderer == EditorRenderer::None);
 			CHECK(options->Automation);
 			CHECK(options->AutomationPort == 50123);
 			CHECK(options->AutomationTestHooks);
@@ -46,7 +46,6 @@ namespace Engine {
 			const Result<EditorLaunchOptions> defaults = ParseEditorArguments({});
 			REQUIRE(defaults.has_value());
 			CHECK_FALSE(defaults->Project.has_value());
-			CHECK(defaults->Renderer == EditorRenderer::Vulkan);
 			CHECK_FALSE(defaults->Automation);
 
 			const Result<EditorLaunchOptions> batch = ParseEditorArguments({ "--headless", "--batch", "Scaffold.jsonl" });
@@ -95,7 +94,6 @@ namespace Engine {
 		TEST_CASE("EditorCommandLine: conflicting and incomplete options are InvalidArgument")
 		{
 			const std::vector<std::vector<std::string>> invalid = {
-				{ "--renderer", "metal" },
 				{ "--automation=0" },
 				{ "--automation=70000" },
 				{ "--automation=port" },
@@ -117,12 +115,6 @@ namespace Engine {
 				REQUIRE_FALSE(options.has_value());
 				CHECK(options.error().GetCode() == ErrorCode::InvalidArgument);
 			}
-		}
-
-		TEST_CASE("EditorCommandLine: renderer names print as they are written on the command line")
-		{
-			CHECK(EditorRendererToString(EditorRenderer::Vulkan) == "vulkan");
-			CHECK(EditorRendererToString(EditorRenderer::None) == "none");
 		}
 	}
 

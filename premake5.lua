@@ -67,6 +67,11 @@ workspace (WorkspaceName)
 	filter {}
 
 OutputDir = "%{cfg.buildcfg}-%{cfg.system}-%{cfg.architecture}"
+-- The compiled SPIR-V of a configuration: the Shaders project's output (Engine/premake5.lua) and the directory
+-- development builds mount as shaders:// (ENGINE_SHADER_DIRECTORY, Dependencies.lua). Always in the repository's bin/,
+-- also for a workspace generated elsewhere with --to, so every workspace of this checkout shares one shader output per
+-- configuration; the SPIR-V does not depend on the C++ toolset (Docs/Decisions/0009-m5-decisions.md decision 4).
+ShaderOutputDirectory = RepositoryRoot .. "/bin/" .. OutputDir .. "/Shaders"
 
 group "Dependencies"
 	include "Vendor/GLFW"

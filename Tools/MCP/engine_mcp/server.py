@@ -10,7 +10,11 @@ Tools:
     tool list does not flood the agent's context; full schemas stay available through rpc.discover and
     component_schema).
 Results return as structuredContent plus a short text summary that always includes the _meta delta; text over 48 KB is
-truncated with a pointer to the offloaded file; screenshots (M5) return image content.
+truncated with a pointer to the offloaded file. Screenshots (viewport_screenshot, editor_screenshot: results with a
+"mimeType" of image/png and the "path" of the PNG the editor wrote, Docs/Decisions/0009-m5-decisions.md decision 33) also
+return the image as an image content block, read from that file (the bridge runs on the editor's machine) unless the
+result carries it inline ("data"); neither the text summary nor the structuredContent repeats the base64 data, and the
+summary names the file. A screenshot result is never offloaded: the editor leaves out inline data that would make it so.
 
 Environment (all optional): ENGINE_MCP_TRANSCRIPT redirects the transcript (transcript.py); ENGINE_MCP_USER_DATA_DIR
 replaces the OS user-data root the bridge passes to the editors it launches and scans for session files (the bridge's
@@ -20,6 +24,7 @@ one build configuration whose editor editor_launch starts (default: Release, the
 
 from __future__ import annotations
 
+import base64
 import dataclasses
 import json
 import logging
@@ -37,6 +42,8 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 SERVER_NAME = "engine"
 SERVER_VERSION = "1.0"
 MAX_TEXT_BYTES = 48 * 1024
+# The MIME types of screenshot results, which return image content (image_content).
+IMAGE_MIME_TYPES = ("image/png",)
 LOCAL_TOOL_NAMES = (
     "editor_launch", "editor_attach", "editor_status", "editor_shutdown", "engine_methods", "engine_call",
 )
@@ -117,7 +124,8 @@ def local_tool_schemas() -> dict[str, dict[str, Any]]:
             "create": {"type": "boolean", "description": "Create the project first when it does not exist"},
             "template": {"type": "string", "enum": ["Empty"], "description": "The template of a created project"},
             "headless": {"type": "boolean", "description": "Run without a window (default true)"},
-            "renderer": {"type": "string", "enum": ["vulkan", "none"], "description": "Default none"},
+            "renderer": {"type": "string", "enum": ["vulkan", "none"],
+                         "description": "Default none; vulkan for the screenshot tools (needs a GPU)"},
         }, ("project",)),
         "editor_attach": _object_schema({
             "project": {"type": "string", "description": "Attach to the editor serving this project"},
@@ -176,12 +184,46 @@ def format_result(response: dict[str, Any]) -> tuple[dict[str, Any], str]:
     rest = {key: value for key, value in structured.items() if key != "_meta"}
     if structured.get("truncated") is True and isinstance(structured.get("path"), str):
         lines.append(f"The result is large; the editor wrote it to {structured['path']}")
+    if structured.get("mimeType") in IMAGE_MIME_TYPES:
+        # The image itself travels as image content (image_content); the summary names its file.
+        rest.pop("data", None)
+        lines.append(f"Screenshot {structured.get('width')}x{structured.get('height')}: {structured.get('path')}")
     if isinstance(rest.get("text"), str):
         lines.append(rest.pop("text"))
     if rest:
         lines.append(json.dumps(rest, ensure_ascii=False))
     lines.append(f"_meta: {json.dumps(structured.get('_meta', {}), ensure_ascii=False)}")
     return structured, _limit("\n".join(lines), structured.get("_meta"))
+
+
+def image_content(structured: dict[str, Any]) -> tuple[str, str] | None:
+    """The base64 data and MIME type of a screenshot result: its inline "data", or else the PNG at its "path", which the
+    editor wrote on this machine. None for any other result, and for a file that cannot be read (the text summary still
+    names it)."""
+    mime_type = structured.get("mimeType")
+    if mime_type not in IMAGE_MIME_TYPES:
+        return None
+    data = structured.get("data")
+    if isinstance(data, str) and data:
+        return data, mime_type
+    path = structured.get("path")
+    if not isinstance(path, str) or not path:
+        return None
+    try:
+        return base64.b64encode(Path(path).read_bytes()).decode("ascii"), mime_type
+    except OSError as error:
+        LOGGER.warning("cannot read the screenshot %s: %s", path, error)
+        return None
+
+
+def tool_content(structured: dict[str, Any], is_error: bool) -> tuple[dict[str, Any], tuple[str, str] | None]:
+    """The structuredContent of a tool result and its image content (image_content; None for an error and for a result
+    without an image). When the image travels as image content, the structuredContent leaves out the inline "data", so
+    the base64 is sent once."""
+    image = None if is_error else image_content(structured)
+    if image is None:
+        return structured, None
+    return {key: value for key, value in structured.items() if key != "data"}, image
 
 
 def _limit(text: str, meta: Any = None) -> str:
@@ -388,8 +430,11 @@ def _build_server(bridge: Bridge) -> tuple[Any, Bridge]:
             # The editor connection blocks on its socket (each call bounded by its method's timeoutSeconds), so the
             # call runs on a worker thread and the event loop keeps serving the MCP session meanwhile.
             structured, text, is_error = await anyio.to_thread.run_sync(bridge.call_tool, params.name, arguments)
-        return types.CallToolResult(content=[types.TextContent(type="text", text=text)], structured_content=structured,
-                                    is_error=is_error)
+        content: list[Any] = [types.TextContent(type="text", text=text)]
+        structured, image = tool_content(structured, is_error)
+        if image is not None:
+            content.append(types.ImageContent(type="image", data=image[0], mime_type=image[1]))
+        return types.CallToolResult(content=content, structured_content=structured, is_error=is_error)
 
     server = Server(SERVER_NAME, version=SERVER_VERSION, on_list_tools=list_tools, on_call_tool=call_tool)
     return server, bridge
