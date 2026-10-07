@@ -1750,6 +1750,13 @@ BANNED_PATTERNS = (
     ),
     BannedPattern("banned-null", re.compile(r"\bNULL\b"), "use nullptr, never NULL (CodeStyle section 6)"),
     BannedPattern(
+        "banned-self-move",
+        re.compile(r"(?<![\w.>:])((?:\w+(?:\.|->))*\w+)\s*=\s*(?:::)?std::move\(\s*\1\s*\)"),
+        "never move-assign a value to itself, also not through an rvalue builder (error = std::move(error).WithHint(...)):"
+        " MSVC's library keeps the value, libc++ and libstdc++ leave it empty (CodeStyle section 7). Build into a new "
+        "variable, or attach collected parts once (Error::WithIssues)",
+    ),
+    BannedPattern(
         "banned-unsupported-feature",
         re.compile(
             r"\bstd::(?:basic_)?stacktrace\b|\bstd::flat_(?:multi)?(?:map|set)\b|"

@@ -270,6 +270,11 @@ namespace Engine {
 			REQUIRE_FALSE(failed.has_value());
 			CHECK(failed.error().GetCode() == ErrorCode::NotFound);
 			CHECK(failed.error().GetMessageText() == "nothing here");
+			CHECK(failed.error().GetContexts() == std::vector<std::string>{ "while looking for something" });
+			CHECK(failed.error().GetHint() == "look elsewhere");
+			REQUIRE(failed.error().GetIssues().size() == 1);
+			CHECK(failed.error().GetIssues()[0].JsonPointer == "/params");
+			CHECK(failed.error().GetIssues()[0].Message == "nothing here");
 
 			state.Calls.clear();
 			for (const std::string_view method : { "test.pend", "test.large", "test.throw" }) // pending, or not AllowedInBatch

@@ -21,6 +21,8 @@ namespace Engine {
 		TEST_CASE("ImGuiScreenshot: captures the last UI frame at the UI's framebuffer size"
 			* doctest::test_suite(Test::GpuSuite))
 		{
+			if (!Test::ProbeGpuForProcess())
+				return;
 			// A headless context with a null-platform window and a device, as the headless editor has.
 			Result<Scope<EngineContext>> created = EngineContext::Create({
 				.WorkerCount = 0,
@@ -31,11 +33,7 @@ namespace Engine {
 					.MaxApiVersion = Test::GetTestOptions().VulkanApi,
 				},
 			});
-			if (!created.has_value())
-			{
-				Test::ReportGpuUnavailable(created.error().ToString());
-				return;
-			}
+			REQUIRE_MESSAGE(created.has_value(), created.error().ToString());
 			EngineContext& context = **created;
 			GraphicsDevice& device = *context.GetGraphicsDevice();
 			Result<Scope<ImGuiLayer>> layer = ImGuiLayer::Create(*context.GetWindow(), device, *context.GetPipelineFactory(), {});

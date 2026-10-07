@@ -252,11 +252,10 @@ namespace Engine {
 		TEST_CASE("GraphicsDevice: a GPU override that matches no device is NotFound and leaves nothing behind"
 			* doctest::test_suite(Test::GpuSuite))
 		{
-			if (!VulkanDispatch::IsInitialized())
-			{
-				Test::ReportGpuUnavailable("no Vulkan loader in this process");
+			// NotFound needs devices to match against: a loader without a driver fails at vkCreateInstance with a Gpu error,
+			// so the probe decides whether this machine can run the test.
+			if (!Test::ProbeGpuForProcess())
 				return;
-			}
 			GraphicsDeviceSpecification specification;
 			specification.Graphics.Validation = true;
 			specification.Graphics.MaxApiVersion = Test::GetTestOptions().VulkanApi;
@@ -266,23 +265,22 @@ namespace Engine {
 			CHECK(device.error().GetCode() == ErrorCode::NotFound);
 			CHECK(device.error().ToString().contains("no such device"));
 
-			// The failed creation released its instance and its claim on the process's one device.
+			// The failed creation released its instance and its claim on the process's one device: the probe created a
+			// device, so one must be created again now.
 			Test::HeadlessGpuFixture gpu;
-			ENGINE_REQUIRE_GPU(gpu);
+			REQUIRE_MESSAGE(gpu.IsAvailable(), gpu.GetUnavailableReason());
 		}
 
 		TEST_CASE("GraphicsDevice: ENGINE_GPU overrides the selection when --gpu is not given" * doctest::test_suite(Test::GpuSuite))
 		{
-			if (!VulkanDispatch::IsInitialized())
-			{
-				Test::ReportGpuUnavailable("no Vulkan loader in this process");
+			// Both outcomes need a device: without a driver the children fail at vkCreateInstance whatever ENGINE_GPU says.
+			if (!Test::ProbeGpuForProcess())
 				return;
-			}
 			const std::string unknown = RunDeviceFromEnvironmentChild("no such device");
 			CHECK(unknown.contains("Device creation: [NotFound]"));
 			CHECK(unknown.contains("no such device"));
 
-			// Index 0 always exists on a machine that runs the GPU suite.
+			// Index 0 exists: the probe created a device.
 			const std::string first = RunDeviceFromEnvironmentChild("0");
 			CHECK(first.contains("Device creation: [created '"));
 		}

@@ -33,14 +33,12 @@ namespace Engine {
 			if (!data.has_value())
 				return Error(ErrorCode::Unknown, std::move(message));
 
-			Error failure(ErrorCodeFromString(data->ReadMember<std::string>("errorCode").value_or(std::string())).value_or(ErrorCode::Unknown),
-				data->ReadMember<std::string>("detail").value_or(message));
-			const std::string hint = data->ReadMember<std::string>("hint").value_or(std::string());
-			if (!hint.empty())
-				failure = std::move(failure).WithHint(hint);
+			// The error is built in one expression once its issues are collected: assigning `std::move(failure).WithHint(...)`
+			// back to `failure` would move-assign the error to itself, which leaves its members empty outside MSVC's standard
+			// library.
+			std::vector<ErrorIssue> collected;
 			if (const std::optional<JsonReader> issues = data->FindMember("issues"))
 			{
-				std::vector<ErrorIssue> collected;
 				const size_t count = issues->GetArraySize().value_or(0);
 				for (size_t index = 0; index < count; ++index)
 				{
@@ -54,9 +52,12 @@ namespace Engine {
 						.Suggestions = {},
 					});
 				}
-				failure = std::move(failure).WithIssues(std::move(collected));
 			}
-			return failure;
+			// An absent hint reads as "", which is what an error without a hint holds.
+			return Error(ErrorCodeFromString(data->ReadMember<std::string>("errorCode").value_or(std::string())).value_or(ErrorCode::Unknown),
+				data->ReadMember<std::string>("detail").value_or(message))
+				.WithHint(data->ReadMember<std::string>("hint").value_or(std::string()))
+				.WithIssues(std::move(collected));
 		}
 
 		// "line 3 of the batch file" or "request 3", the context of a request's errors.

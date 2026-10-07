@@ -338,8 +338,22 @@ jobs:
           # LD_LIBRARY_PATH) and Lavapipe as the only driver.
           layers="$sdk/share/vulkan/explicit_layer.d"
           [ -f "$layers/VkLayer_khronos_validation.json" ] || { echo "::error::VkLayer_khronos_validation.json is missing from $layers"; exit 1; }
-          lavapipe=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json
-          [ -f "$lavapipe" ] || { echo "::error::Lavapipe's ICD manifest $lavapipe is missing (mesa-vulkan-drivers)"; exit 1; }
+          # Lavapipe's ICD manifest is found, not assumed: Mesa names it lvp_icd.x86_64.json in noble's release (Mesa 24.0)
+          # and lvp_icd.json from Mesa 25 (noble-updates), and the runner image installs whichever is current.
+          # VK_DRIVER_FILES must name exactly one manifest, or the loader would enumerate a second driver.
+          icds=/usr/share/vulkan/icd.d
+          mesa="$(dpkg-query --show --showformat='${Version}' mesa-vulkan-drivers 2>/dev/null || echo 'not installed')"
+          shopt -s nullglob
+          manifests=("$icds"/lvp_icd*.json)
+          shopt -u nullglob
+          if [ "${#manifests[@]}" -ne 1 ]; then
+            echo "::error::Expected one Lavapipe ICD manifest (lvp_icd*.json) in $icds, found ${#manifests[@]}: ${manifests[*]:-none} (mesa-vulkan-drivers $mesa)"
+            ls -l "$icds" || true
+            exit 1
+          fi
+          lavapipe="${manifests[0]}"
+          echo "Lavapipe: $lavapipe (mesa-vulkan-drivers $mesa)"
+          cat "$lavapipe"
           echo "VK_LAYER_PATH=$layers" >> "$GITHUB_ENV"
           echo "VK_DRIVER_FILES=$lavapipe" >> "$GITHUB_ENV"
           # The device the GPU stages use, for the log: its name, API version and driver version (the Mesa release).

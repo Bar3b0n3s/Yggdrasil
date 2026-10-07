@@ -89,7 +89,9 @@ namespace Engine {
 				codeName = data->ReadMember<std::string>("errorCode").value_or(std::string());
 				detail = data->ReadMember<std::string>("detail").value_or(std::string());
 			}
-			Error failure(ErrorCodeFromString(codeName).value_or(ErrorCode::Unknown), detail);
+			// The issues are collected and attached once: `failure = std::move(failure).WithIssue(...)` would move-assign the
+			// error to itself, which leaves its members empty outside MSVC's standard library (Error.h, WithIssues).
+			std::vector<ErrorIssue> collected;
 			if (data.has_value())
 			{
 				if (const std::optional<JsonReader> issues = data->FindMember("issues"); issues.has_value())
@@ -100,7 +102,7 @@ namespace Engine {
 						const Result<JsonReader> issue = issues->GetElement(index);
 						if (!issue.has_value())
 							continue;
-						failure = std::move(failure).WithIssue({
+						collected.push_back(ErrorIssue{
 							.JsonPointer = issue->ReadMember<std::string>("pointer").value_or(std::string()),
 							.Message = issue->ReadMember<std::string>("message").value_or(std::string()),
 							.Hint = issue->ReadMember<std::string>("hint").value_or(std::string()),
@@ -109,7 +111,7 @@ namespace Engine {
 					}
 				}
 			}
-			return std::unexpected(std::move(failure));
+			return std::unexpected(Error(ErrorCodeFromString(codeName).value_or(ErrorCode::Unknown), std::move(detail)).WithIssues(std::move(collected)));
 		}
 
 	}

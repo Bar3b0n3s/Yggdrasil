@@ -126,10 +126,12 @@ namespace Engine {
 			return JsonReader(value).ReadUInt32().value_or(0);
 		}
 
-		// The pointer of the error's first issue.
+		// The pointer of the error's first issue. An error without issues gives a text that is no pointer and names the whole
+		// error, so the comparison that called this fails showing it (a REQUIRE here would throw out of that CHECK).
 		std::string FirstIssuePointer(const Error& error)
 		{
-			REQUIRE_FALSE(error.GetIssues().empty());
+			if (error.GetIssues().empty())
+				return std::format("(an error without issues: {})", error.ToString());
 			return error.GetIssues().front().JsonPointer;
 		}
 

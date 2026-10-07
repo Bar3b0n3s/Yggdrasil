@@ -148,6 +148,28 @@ namespace Engine {
 			CHECK(client.GetServer().GetClients().size() == 1);
 		}
 
+		TEST_CASE("BatchRunner: the failure keeps the detail, hint and issues of the error response")
+		{
+			// A misspelled method: its MethodNotFound error has a detail, a did-you-mean hint and an issue at /method.
+			Test::EditorTestFixture fixture("BatchFailureDetail");
+			Test::AutomationTestClient client(fixture.GetEditor());
+			BatchRunner runner({ BatchRequest{ .Method = "session.inf", .Params = {}, .Line = 1 } }, {});
+			RunBatch(runner, client.GetServer());
+			REQUIRE(runner.GetFailure().has_value());
+			const Error& failure = *runner.GetFailure();
+			const Json& data = runner.GetFailedResponse()["error"]["data"];
+			INFO(data.dump());
+			CHECK(failure.GetCode() == ErrorCode::NotFound);
+			CHECK(failure.GetMessageText().contains("session.inf"));
+			CHECK(Json(failure.GetMessageText()) == data["detail"]);
+			CHECK(failure.GetHint().contains("session.info"));
+			CHECK(Json(failure.GetHint()) == data["hint"]);
+			REQUIRE(failure.GetIssues().size() == 1);
+			CHECK(failure.GetIssues()[0].JsonPointer == "/method");
+			CHECK(Json(failure.GetIssues()[0].Message) == data["issues"][0]["message"]);
+			CHECK(failure.GetContexts().size() == 1); // the request's line
+		}
+
 		TEST_CASE("BatchRunner: transcript mode appends request and response lines and passes the line number")
 		{
 			Test::EditorTestFixture fixture("BatchTranscript");

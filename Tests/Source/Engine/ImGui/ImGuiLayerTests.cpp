@@ -47,12 +47,10 @@ namespace Engine {
 		TEST_CASE("ImGuiLayer: frames take the given delta, not the wall clock, and render into a target"
 			* doctest::test_suite(Test::GpuSuite))
 		{
-			Result<Scope<EngineContext>> created = CreateRenderingContext();
-			if (!created.has_value())
-			{
-				Test::ReportGpuUnavailable(created.error().ToString());
+			if (!Test::ProbeGpuForProcess())
 				return;
-			}
+			Result<Scope<EngineContext>> created = CreateRenderingContext();
+			REQUIRE_MESSAGE(created.has_value(), created.error().ToString());
 			EngineContext& context = **created;
 			GraphicsDevice& device = *context.GetGraphicsDevice();
 			Result<Scope<ImGuiLayer>> layer = ImGuiLayer::Create(*context.GetWindow(), device, *context.GetPipelineFactory(), {});
@@ -120,12 +118,10 @@ namespace Engine {
 		TEST_CASE("ImGuiLayer: SetIniFilePath saves the current settings and loads the new file"
 			* doctest::test_suite(Test::GpuSuite))
 		{
-			Result<Scope<EngineContext>> created = CreateRenderingContext();
-			if (!created.has_value())
-			{
-				Test::ReportGpuUnavailable(created.error().ToString());
+			if (!Test::ProbeGpuForProcess())
 				return;
-			}
+			Result<Scope<EngineContext>> created = CreateRenderingContext();
+			REQUIRE_MESSAGE(created.has_value(), created.error().ToString());
 			EngineContext& context = **created;
 			Test::TempDirectory directory("ImGuiIni");
 			const std::filesystem::path launcherIni = directory / "User" / "Editor" / "imgui.ini";
@@ -178,12 +174,10 @@ namespace Engine {
 
 		TEST_CASE("ImGuiLayer: a second layer while one exists is InvalidState" * doctest::test_suite(Test::GpuSuite))
 		{
-			Result<Scope<EngineContext>> created = CreateRenderingContext();
-			if (!created.has_value())
-			{
-				Test::ReportGpuUnavailable(created.error().ToString());
+			if (!Test::ProbeGpuForProcess())
 				return;
-			}
+			Result<Scope<EngineContext>> created = CreateRenderingContext();
+			REQUIRE_MESSAGE(created.has_value(), created.error().ToString());
 			EngineContext& context = **created;
 			Result<Scope<ImGuiLayer>> first = ImGuiLayer::Create(*context.GetWindow(), *context.GetGraphicsDevice(), *context.GetPipelineFactory(), {});
 			REQUIRE_MESSAGE(first.has_value(), first.error().ToString());

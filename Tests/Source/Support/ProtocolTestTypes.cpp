@@ -76,9 +76,13 @@ namespace Engine {
 			return Scope<PendingOperation>(CreateScope<PendOperation>(params.Polls));
 		}
 
+		// Every part an error can have, so a test sees each survive the path it takes.
 		static Result<ReadResult> Fail(TestHostContext& /*context*/, const ReadParams& /*params*/)
 		{
-			return MakeError(ErrorCode::NotFound, "nothing here");
+			return std::unexpected(Error(ErrorCode::NotFound, "nothing here")
+					.WithContext("while looking for something")
+					.WithHint("look elsewhere")
+					.WithIssue(ErrorIssue{ .JsonPointer = "", .Message = "nothing here", .Hint = {}, .Suggestions = {} }));
 		}
 
 		static Result<ReadResult> Throw(TestHostContext& /*context*/, const ReadParams& /*params*/)

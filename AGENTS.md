@@ -136,7 +136,7 @@ Milestone commits also need the full `python Scripts/CI.py` green. Push to `orig
 
 **Errors (§4.5–4.6)**
 - First-party code never throws; lint bans `throw`. `try`/`catch` appears only at the boundaries that §4.6 allowlists.
-- Expected failures return `Result<T>` or `Status`. Both are `[[nodiscard]]`; propagate them with `ENGINE_TRY`/`ENGINE_TRY_ASSIGN` and add `WithContext`/`WithHint`.
+- Expected failures return `Result<T>` or `Status`. Both are `[[nodiscard]]`; propagate them with `ENGINE_TRY`/`ENGINE_TRY_ASSIGN` and add `WithContext`/`WithHint`. Never write `error = std::move(error).WithX(...)`: it is a self-move, which empties the error outside MSVC (CodeStyle §7, Lint `banned-self-move`).
 - Programmer errors use `ENGINE_CORE_ASSERT`, which is compiled out in Dist, so it must have no side effects. Use `ENGINE_CORE_VERIFY` (also active in Dist) when a violation would corrupt data or GPU state.
 - An assert is never the only guard against external input: files, scenes, scripts or automation commands. Never use `assert()`.
 - JSON: parse with `json::parse(text, nullptr, false)` plus `is_discarded()`, and read through `JsonReader`. `json::at` and `get<>` are banned outside `Core/Json`.

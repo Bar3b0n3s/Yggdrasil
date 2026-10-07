@@ -128,7 +128,8 @@ namespace Engine {
 
 		// Registers test.echo (mutates, supports dry runs, requires "text", a tool, allowed in batches), test.read (no params,
 		// read-only, available in the launcher state, allowed in batches), test.large, test.pend (pending), test.fail (NotFound
-		// "nothing here", allowed in batches), test.throw (an exception from the standard library escapes the handler) and
+		// "nothing here" with the context "while looking for something", the hint "look elsewhere" and one issue at the root,
+		// allowed in batches), test.throw (an exception from the standard library escapes the handler) and
 		// test.systemError (a std::system_error escapes the handler).
 		void RegisterProtocolTestMethods(MethodRegistry& methods);
 

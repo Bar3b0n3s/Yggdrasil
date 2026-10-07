@@ -144,6 +144,27 @@
 			]
 		},
 		{
+			"Name": "SelfMoveAssignment",
+			"Description": "An rvalue builder's result assigned back to the object it was called on: a self-move-assignment.",
+			"Steps": [
+				"includes",
+				"banned",
+				"naming",
+				"headers"
+			],
+			"Modes": [
+				"clang",
+				"regex"
+			],
+			"Expected": [
+				{
+					"Code": "banned-self-move",
+					"File": "Engine/Source/Engine/Core/Notes.cpp",
+					"Line": 9
+				}
+			]
+		},
+		{
 			"Name": "StdSinInScene",
 			"Description": "In Scene (simulation path): std::sin, a CRT call through a namespace alias of std, an Euler-angle glm::quat construction and glm::mix of quaternions; the std::sin in Renderer/Wave.cpp is allowed and must not be reported.",
 			"Steps": [

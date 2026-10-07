@@ -284,7 +284,12 @@ namespace Engine {
 		{
 			Error prefixed(error.GetCode(), error.GetMessageText());
 			for (const std::string& context : error.GetContexts())
-				prefixed = std::move(prefixed).WithContext(context);
+			{
+				// Through a second error: assigning `std::move(prefixed).WithContext(...)` to `prefixed` would move-assign it to
+				// itself, which leaves its members empty outside MSVC's standard library.
+				Error next = std::move(prefixed).WithContext(context);
+				prefixed = std::move(next);
+			}
 			ErrorLocation location = error.GetLocation();
 			if (location.JsonPointer.has_value())
 				location.JsonPointer = std::string(prefix) + *location.JsonPointer;

@@ -554,6 +554,7 @@ namespace Engine {
   - Jolt objects use `JPH::Ref` where Jolt's API expects it.
   - Do not wrap any of these in `Ref`.
 - **Views:** `std::string_view` and `std::span` are never stored beyond the call that received them, unless the lifetime of the viewed data is guaranteed and documented.
+- **No self-move:** a value is never move-assigned to itself, also not through an rvalue-qualified builder that returns `*this`: `error = std::move(error).WithHint(hint)` moves `error` onto itself. MSVC's standard library keeps the value; libc++ and libstdc++ leave its strings and vectors empty, so the bug shows only on Linux and macOS. Build into a new variable (`Error next = std::move(error).WithContext(context); error = std::move(next);`), build the whole value in one expression, or collect the parts and attach them once (`Error::WithIssues`). Lint reports `banned-self-move`.
 - **Lambda captures:**
   - A lambda that is stored or runs later lists its captures explicitly (`[this, voice]`), so that lifetimes are visible.
   - Default captures (`[&]`, `[=]`) are only for lambdas that run synchronously before the enclosing function returns.
