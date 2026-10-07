@@ -108,7 +108,11 @@ BUILD_FIXTURE_FINDINGS = {
                                        r"-ffp-contract is 'fast'"),
 }
 
-STATIC_CHECK_TIMEOUTS = {"checkbuildconfig": 1800.0, "lint": 3600.0, "format": 1800.0}
+# Lint.py takes 1.5 minutes on a 24-thread workstation but about 53 minutes on the 4-vCPU Linux runners, where
+# clang-tidy and clang-query parse every translation unit against libstdc++ (CI run 37593307176). Under GitHub Actions it
+# reports each step's duration as a notice annotation. Each of its tool processes has its own 10-minute timeout, which
+# catches a hang.
+STATIC_CHECK_TIMEOUTS = {"checkbuildconfig": 1800.0, "lint": 5400.0, "format": 1800.0}
 
 
 def run_static_checks(console: Console, finished: Callable[[Step], Step], contract: bool = False) -> list[Step]:

@@ -15,7 +15,7 @@ namespace Engine {
 	static std::string ReadCompiledReflection(std::string_view variant)
 	{
 		const Result<std::string> text =
-			FileSystem::ReadText(std::filesystem::path(ENGINE_SHADER_DIRECTORY) / (std::string(variant) + ".refl.json"));
+			FileSystem::ReadText(std::filesystem::path(ENGINE_SHADER_DIRECTORY) / std::format("{}.refl.json", variant));
 		REQUIRE_MESSAGE(text.has_value(), text.error().ToString());
 		return *text;
 	}

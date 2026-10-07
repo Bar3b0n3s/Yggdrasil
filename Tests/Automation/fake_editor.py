@@ -88,7 +88,9 @@ class FakeEditor:
     def stop(self) -> None:
         """Stops listening and closes every connection."""
         self.stopping.set()
-        self.listener.close()
+        # Shut down before closing: on Linux, closing a socket does not wake an accept() blocked on it in another
+        # thread, which keeps the socket listening and accepts the next connection; shutdown() ends the accept().
+        _close(self.listener)
         with self.lock:
             connections = list(self.connections)
         for connection in connections:

@@ -248,8 +248,8 @@ namespace Engine {
 			for (const std::string_view variant : variants)
 			{
 				CAPTURE(std::string(variant));
-				CHECK(FileSystem::Exists(directory / (std::string(variant) + ".spv")));
-				CHECK(FileSystem::Exists(directory / (std::string(variant) + ".refl.json")));
+				CHECK(FileSystem::Exists(directory / std::format("{}.spv", variant)));
+				CHECK(FileSystem::Exists(directory / std::format("{}.refl.json", variant)));
 			}
 		}
 

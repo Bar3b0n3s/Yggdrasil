@@ -184,6 +184,7 @@ class StepReport:
     files: int = 0
     findings: list[Finding] = dataclasses.field(default_factory=list)
     detail: str = ""
+    duration: float = 0.0  # seconds
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -192,6 +193,7 @@ class StepReport:
             "status": self.status,
             "files": self.files,
             "detail": self.detail,
+            "duration": round(self.duration, 1),
             "findings": [finding.as_dict() for finding in self.findings],
         }
 
@@ -4042,8 +4044,9 @@ def run_lint(options: LintOptions, progress: bool = False) -> tuple[list[StepRep
             run_json(context.tree, report)
         report.findings.sort()
         report.status = "failed" if report.findings else "passed"
+        report.duration = time.monotonic() - started
         if progress:
-            print(f"Lint: {STEP_TITLES[step]}: finished in {time.monotonic() - started:.0f} s", file=sys.stderr, flush=True)
+            print(f"Lint: {STEP_TITLES[step]}: finished in {report.duration:.0f} s", file=sys.stderr, flush=True)
     return reports, context
 
 
@@ -4318,6 +4321,11 @@ def main(argv: list[str] | None = None) -> int:
         if findings:
             # The summary line CI.py and PreCommit.py quote for a failing step.
             print(f"[FAILED] lint: {len(findings)} finding(s), first: {findings[0].format()}")
+    if os.environ.get("GITHUB_ACTIONS") == "true" and not arguments.json:
+        # A notice annotation: unlike job logs, annotations are public through the check-runs API, so where a CI run
+        # spends its lint time is visible to everyone.
+        durations = ", ".join(f"{report.name} {report.duration:.0f} s" for report in reports if report.status != "skipped")
+        print(f"::notice title=Lint step durations::{durations}", flush=True)
     return EXIT_SUCCESS if success else EXIT_FINDINGS
 
 
