@@ -35,7 +35,7 @@ namespace Engine {
 				(*commandList)->close();
 				device.ExecuteCommandList(**commandList);
 				CHECK(tracker.GetLiveCount(GpuResourceType::Texture) >= 2);
-				CHECK(tracker.GetLiveCount(GpuResourceType::Buffer) >= 1);
+				CHECK(tracker.GetLiveCount(GpuResourceType::GpuBuffer) >= 1);
 				CHECK(tracker.GetTotalLiveCount() > baseline);
 			}
 			// Dropped handles are counted as destroyed at the next garbage collection: NVRHI retires the submission's
@@ -111,6 +111,7 @@ namespace Engine {
 		TEST_CASE("GpuResourceTracker: every type has its enumerator name")
 		{
 			CHECK(GpuResourceTypeToString(GpuResourceType::Texture) == "Texture");
+			CHECK(GpuResourceTypeToString(GpuResourceType::GpuBuffer) == "GpuBuffer");
 			CHECK(GpuResourceTypeToString(GpuResourceType::GraphicsPipeline) == "GraphicsPipeline");
 			CHECK(GpuResourceTypeToString(GpuResourceType::HostImage) == "HostImage");
 			for (size_t index = 0; index < GpuResourceTypeCount; ++index)

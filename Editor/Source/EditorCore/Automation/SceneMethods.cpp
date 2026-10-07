@@ -454,7 +454,7 @@ namespace Engine {
 			TreeWalk walk;
 			walk.Target = scene;
 			walk.DepthLimit = params.Depth;
-			if (params.Format == SceneTreeFormat::Json)
+			if (params.Format == SceneTreeFormat::JsonList)
 			{
 				walk.Entries = &result.Entities;
 			}
@@ -673,7 +673,7 @@ namespace Engine {
 
 		registry.Enum<SceneTreeFormat>("SceneTreeFormat", "How scene.tree reports the hierarchy.")
 			.Entry(SceneTreeFormat::Text, "Text", "A token-efficient outline with names, short ids, components and translations.")
-			.Entry(SceneTreeFormat::Json, "Json", "A flat list of entries in canonical order, with depth and parent.");
+			.Entry(SceneTreeFormat::JsonList, "Json", "A flat list of entries in canonical order, with depth and parent.");
 
 		registry.Enum<SceneDiffAgainst>("SceneDiffAgainst", "What scene.diff compares the open scene with.")
 			.Entry(SceneDiffAgainst::Saved, "Saved", "The scene's file on disk.")

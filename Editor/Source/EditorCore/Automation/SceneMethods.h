@@ -108,11 +108,12 @@ namespace Engine {
 		std::string File{}; // project-relative path written
 	};
 
-	// Registry enum "SceneTreeFormat".
+	// Registry enum "SceneTreeFormat". The JSON format's enumerator is JsonList and its registry name "Json": an enumerator
+	// named Json would shadow the alias Engine::Json, which GCC's -Wshadow reports.
 	enum class SceneTreeFormat : uint8_t
 	{
-		Text, // the token-efficient outline of §13.7
-		Json  // entities as a flat list in canonical order
+		Text,    // the token-efficient outline of §13.7
+		JsonList // entities as a flat list in canonical order
 	};
 
 	// scene.tree {root?, depth?, format?, target?}: the hierarchy below `root` (an EntityRef; empty: every root), at most

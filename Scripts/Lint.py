@@ -16,10 +16,13 @@ Steps, selected with --steps (default: all, in this order):
             functions that call them on the simulation path (section 4.12); #define/#undef of the ABI-relevant
             configuration macros of vendored libraries and first-party settings (section 2.2); rand()/srand();
             dynamic_cast/typeid; output other than the logger; assert(); naked new/delete; the product name in C++,
-            Slang, Python and Lua code; and what CodeStyle section 13 forbids. json at()/get<>() receivers are found
-            by type with clang-query on the flags from compile_commands.json when it is available (aliases, values
-            returned by functions and call chains included); otherwise a regex checker recognises receivers declared
-            with a json type (or an alias of one) in the file or the header it implements.
+            Slang, Python and Lua code; a value move-assigned to itself; and what CodeStyle section 13 forbids. json
+            at()/get<>() receivers are found by type with clang-query on the flags from compile_commands.json when it
+            is available (aliases, values returned by functions and call chains included), run on the translation
+            units that can call basic_json's members: the sources that include nlohmann's json.hpp, through them the
+            headers they include, and on its own any other header that includes it. Otherwise a regex checker
+            recognises receivers declared with a json type (or an alias of one) in the file or the header it
+            implements.
   contract  milestone completeness (Roadmap rule 3, Docs/Decisions/0004-contract-stub-gate.md): ENGINE_CONTRACT_STUB
             anywhere in first-party C++ but its definition (contract-stub), and doctest::skip in Tests/Source unless
             the same TEST_CASE/TEST_CASE_FIXTURE/SUBCASE decorator expression also carries
@@ -32,7 +35,9 @@ Steps, selected with --steps (default: all, in this order):
             and raising SkipTest. --allow-contract-stubs (contract mode, the commit of a milestone's contract task)
             reports what it found as allowed instead of as findings.
   naming    identifier naming. clang-tidy runs with .clang-tidy on the flags from compile_commands.json when it is
-            available; otherwise a regex checker applies the same prefixes (m_, s_, g_) and PascalCase rules to types,
+            available, on every source and through them, with its header filter, on the headers that a source of a
+            project with the same flags includes outside #if blocks; any other header gets a translation unit of its
+            own. Otherwise a regex checker applies the same prefixes (m_, s_, g_) and PascalCase rules to types,
             functions, data members, statics, globals and macros. The mode that ran is reported. C++ file and
             directory names are checked in both modes.
   headers   header self-containment: every first-party header is compiled on its own, syntax-only, with the include
@@ -46,7 +51,8 @@ compile_commands.json is generated into a temporary directory with `premake5 com
 (Scripts/Premake/CompileCommands.lua) unless --compile-commands names an existing one. Nothing is built and nothing
 is written into the tree.
 
-Findings are printed as <file>:<line>: <code>: <message>, with the file relative to --root. --root lints another tree
+Findings are printed as <file>:<line>: <code>: <message>, with the file relative to --root, and each step's duration
+goes to stderr as it finishes. --root lints another tree
 with the repository layout, such as a fixture under Tests/Data/Lint/; the rules, .clang-tidy and the vendored headers
 still come from this repository. --self-test runs every fixture listed in Tests/Data/Lint/Fixtures.json and passes
 only when each one fails with exactly its expected findings.
@@ -76,6 +82,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import tokenize
 from pathlib import Path
 from typing import Any, Callable, Iterable
@@ -1046,6 +1053,7 @@ class Tree:
         self.system = host_system()
         self._sources: dict[str, SourceFile] = {}
         self._third_party_cache: dict[str, str | None] = {}
+        self._closure_cache: dict[tuple[str, bool], frozenset[str]] = {}
         modules_by_length = sorted(rules.modules, key=len, reverse=True)
         self._module_prefixes = [
             (rules.engine_module_root + "/" + name + "/", rules.modules[name]) for name in modules_by_length
@@ -1116,6 +1124,55 @@ class Tree:
             if relative.startswith(include_root + "/"):
                 return relative[len(include_root) + 1 :]
         return relative
+
+    def first_party_includes(self, relative: str, unconditional: bool) -> frozenset[str]:
+        """The first-party files `relative` includes, directly or through the files it includes. With `unconditional`,
+        only through #include directives outside #if blocks, which every configuration on every host compiles."""
+        key = (relative, unconditional)
+        if key not in self._closure_cache:
+            reached: set[str] = set()
+            pending = [relative]
+            while pending:
+                for include in self.source(pending.pop()).includes:
+                    if include.angled or (unconditional and include.conditions):
+                        continue
+                    target = self.resolve_first_party(include.name)
+                    if target is not None and target not in reached:
+                        reached.add(target)
+                        pending.append(target)
+            self._closure_cache[key] = frozenset(reached)
+        return self._closure_cache[key]
+
+    def sees_nlohmann_json(self, relative: str) -> bool:
+        """Whether `relative` or a first-party file it includes (under any condition) includes nlohmann's json.hpp, or
+        any nlohmann header but json_fwd.hpp. Without one a translation unit cannot call a member of basic_json, which
+        json_fwd.hpp only declares."""
+        for current in (relative, *self.first_party_includes(relative, False)):
+            for include in self.source(current).includes:
+                name = include.name
+                if name.startswith("nlohmann/") and name != "nlohmann/json_fwd.hpp":
+                    if include.angled or self.resolve_first_party(name) is None:
+                        return True
+        return False
+
+    def headers_checked_through(self, sources: Iterable[str]) -> set[str]:
+        """The headers a clang tool run on `sources` checks along with them: those that a source of a project with the
+        same flags includes outside #if blocks. They are preprocessed there as in a translation unit of their own, so
+        clang-tidy's header filter and clang-query's per-file results cover them without one."""
+        covered: set[str] = set()
+        for source in sources:
+            project = self.path_rules(source).project
+            if project is None:
+                continue
+            for header in self.first_party_includes(source, True):
+                header_project = self.path_rules(header).project
+                if (
+                    header.endswith(CXX_HEADER_EXTENSION)
+                    and header_project is not None
+                    and header_project.flags_from == project.flags_from
+                ):
+                    covered.add(header)
+        return covered
 
 
 # --------------------------------------------------------------------------------------------------------------------
@@ -2263,6 +2320,17 @@ def semantic_json_access(
     database = context.database()
     results: dict[str, list[tuple[int, str]]] = {}
     failures: list[Finding] = []
+    # Only translation units that can call basic_json's members run clang-query: sources that see nlohmann's json.hpp,
+    # and the headers that see it but no such source includes (the others report their matches through that source).
+    # A file left out is still checked: its result is empty, because nothing in it can match.
+    queried_sources = [
+        relative
+        for relative in candidates
+        if not relative.endswith(CXX_HEADER_EXTENSION)
+        and database.flags_for(relative) is not None
+        and tree.sees_nlohmann_json(relative)
+    ]
+    checked_through = tree.headers_checked_through(queried_sources)
     temporary = Path(tempfile.mkdtemp(prefix="Lint-JsonAccess-"))
     try:
         jobs: list[tuple[str, Path, list[str]]] = []
@@ -2270,12 +2338,16 @@ def semantic_json_access(
             flags = database.flags_for(relative)
             if flags is None:
                 continue  # no project flags (reported by the naming and headers steps); the regex checker applies
+            results[relative] = []
             if relative.endswith(CXX_HEADER_EXTENSION):
+                if relative in checked_through or not tree.sees_nlohmann_json(relative):
+                    continue
                 unit = header_translation_unit(temporary, index, tree.include_name(relative))
             else:
+                if relative not in queried_sources:
+                    continue
                 unit = tree.root / relative
             jobs.append((relative, unit, flags))
-            results[relative] = []
 
         def run_query(job: tuple[str, Path, list[str]]) -> tuple[str, subprocess.CompletedProcess[str]]:
             relative, unit, flags = job
@@ -2326,7 +2398,10 @@ def semantic_json_access(
                 )
     finally:
         shutil.rmtree(temporary, ignore_errors=True)
-    return results, failures, f"json access: clang-query ({clang_query}); flags from {context.database_origin}"
+    return results, failures, (
+        f"json access: clang-query ({clang_query}) on {len(jobs)} of {len(results)} file(s), the others cannot call "
+        f"basic_json members or are checked through a source that includes them; flags from {context.database_origin}"
+    )
 
 
 def run_banned(context: LintContext, report: StepReport) -> None:
@@ -3320,6 +3395,13 @@ def run_naming(context: LintContext, report: StepReport) -> None:
     database = context.database()
     on_host = [relative for relative in files if tree.builds_on_host(relative)]
     other_systems = [relative for relative in files if relative not in on_host]
+    # A header that a linted source includes is checked through that source (the header filter reports it there), so
+    # only the others get a translation unit of their own: parsing each header again doubled the step's time.
+    checked_through = tree.headers_checked_through(
+        relative
+        for relative in on_host
+        if not relative.endswith(CXX_HEADER_EXTENSION) and database.flags_for(relative) is not None
+    ) & set(on_host)
     temporary = Path(tempfile.mkdtemp(prefix="Lint-Naming-"))
     try:
         jobs: list[tuple[str, Path, list[str]]] = []
@@ -3336,6 +3418,8 @@ def run_naming(context: LintContext, report: StepReport) -> None:
                 )
                 continue
             if relative.endswith(CXX_HEADER_EXTENSION):
+                if relative in checked_through:
+                    continue
                 unit = header_translation_unit(temporary, index, tree.include_name(relative))
             else:
                 unit = tree.root / relative
@@ -3398,8 +3482,10 @@ def run_naming(context: LintContext, report: StepReport) -> None:
     # Files for another operating system do not compile here; the regex checker covers them.
     for relative in other_systems:
         report.findings += regex_checker.check(tree.source(relative))
-    report.detail = f"mode: {reason}; flags from {context.database_origin}" + (
-        f"; regex fallback for {len(other_systems)} file(s) of other systems" if other_systems else ""
+    report.detail = (
+        f"mode: {reason}; flags from {context.database_origin}; {len(checked_through)} header(s) checked through "
+        "the sources that include them"
+        + (f"; regex fallback for {len(other_systems)} file(s) of other systems" if other_systems else "")
     )
 
 
@@ -3927,7 +4013,9 @@ def run_json(tree: Tree, report: StepReport) -> None:
 # --------------------------------------------------------------------------------------------------------------------
 
 
-def run_lint(options: LintOptions) -> tuple[list[StepReport], LintContext]:
+def run_lint(options: LintOptions, progress: bool = False) -> tuple[list[StepReport], LintContext]:
+    """Run the selected steps. With `progress`, each step's duration goes to stderr as it finishes, so a run that
+    times out still shows how far it got."""
     rules = load_rules(options.rules_path)
     context = LintContext(options, rules)
     reports: list[StepReport] = []
@@ -3937,6 +4025,7 @@ def run_lint(options: LintOptions) -> tuple[list[StepReport], LintContext]:
         if step not in options.steps:
             report.status = "skipped"
             continue
+        started = time.monotonic()
         if step == "includes":
             run_includes(context.tree, report)
         elif step == "banned":
@@ -3953,6 +4042,8 @@ def run_lint(options: LintOptions) -> tuple[list[StepReport], LintContext]:
             run_json(context.tree, report)
         report.findings.sort()
         report.status = "failed" if report.findings else "passed"
+        if progress:
+            print(f"Lint: {STEP_TITLES[step]}: finished in {time.monotonic() - started:.0f} s", file=sys.stderr, flush=True)
     return reports, context
 
 
@@ -4185,7 +4276,7 @@ def main(argv: list[str] | None = None) -> int:
                     print(f"[FAILED] lint self-test: fixture(s) without exactly their expected findings: "
                           f"{', '.join(failing)}")
             return EXIT_SUCCESS if result["success"] else EXIT_FINDINGS
-        reports, context = run_lint(options)
+        reports, context = run_lint(options, progress=True)
     except (UsageError, ToolMissing, ToolFailure, OSError, subprocess.TimeoutExpired) as error:
         if arguments.json:
             print(json.dumps({"success": False, "error": str(error)}, indent=2))

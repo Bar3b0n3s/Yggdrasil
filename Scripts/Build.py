@@ -126,6 +126,9 @@ def finish_step(name: str, result: ProcessResult, warnings: list[str], errors: l
         return Step(name, Status.TIMEOUT, f"build {result.describe_exit()}", result.duration, data=data)
     if not result.succeeded:
         first = f": {errors[0]}" if errors else ""
+        # Every error line, not only the first: under GitHub Actions the step's annotation shows them (Console.result),
+        # since the end of a parallel build's output is usually other files compiling.
+        data["outputTail"] = "\n".join(errors[:REPORTED_DIAGNOSTICS])
         return Step(name, Status.FAILED, f"build failed ({result.describe_exit()}, {len(errors)} error(s)){first}",
                     result.duration, data=data)
     if warnings and enforce_warnings:

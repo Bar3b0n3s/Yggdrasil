@@ -9,6 +9,7 @@
 #include "Engine/Platform/Window.h"
 #include "Support/HeadlessGpuFixture.h"
 #include "Support/TestOptions.h"
+#include "Support/WaitUntil.h"
 #include "Support/WindowedChild.h"
 
 namespace Engine {
@@ -105,10 +106,17 @@ namespace Engine {
 			CHECK(PresentFrames(device, **swapchain, pacer, **commandList, window, 10) == 0);
 			const uint32_t recreationsBefore = (*swapchain)->GetRecreationCount();
 
-			// A resize recreates the swapchain at the new framebuffer size (asynchronous on X11 and macOS).
+			// A resize recreates the swapchain at the new framebuffer size. The window system reports the new size with its
+			// events, asynchronously on X11 and macOS, so until then the window still reports the old size, which the swapchain
+			// already has: frames are presented until the window reports a new size and the swapchain has followed it.
+			const uint32_t widthBefore = window.GetFramebufferWidth();
 			window.SetSize(480, 300);
-			for (int attempt = 0; attempt < 200 && (*swapchain)->GetWidth() != window.GetFramebufferWidth(); ++attempt)
+			const bool resized = Test::WaitUntil([&device, &swapchain, &pacer, &commandList, &window, widthBefore]()
+			{
 				PresentFrames(device, **swapchain, pacer, **commandList, window, 1);
+				return window.GetFramebufferWidth() != widthBefore && (*swapchain)->GetWidth() == window.GetFramebufferWidth();
+			});
+			CHECK(resized);
 			CHECK((*swapchain)->GetWidth() == window.GetFramebufferWidth());
 			CHECK((*swapchain)->GetHeight() == window.GetFramebufferHeight());
 			CHECK((*swapchain)->GetRecreationCount() > recreationsBefore);

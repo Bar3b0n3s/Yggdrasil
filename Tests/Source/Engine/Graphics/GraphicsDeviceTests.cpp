@@ -223,17 +223,17 @@ namespace Engine {
 			ENGINE_REQUIRE_GPU(gpu);
 			GraphicsDevice& device = gpu.GetDevice();
 			GpuResourceTracker& tracker = device.GetResourceTracker();
-			const uint64_t buffersBefore = tracker.GetLiveCount(GpuResourceType::Buffer);
+			const uint64_t buffersBefore = tracker.GetLiveCount(GpuResourceType::GpuBuffer);
 			{
 				nvrhi::BufferDesc desc;
 				desc.byteSize = 256;
 				desc.debugName = "TrackedBuffer";
 				Result<nvrhi::BufferHandle> buffer = device.CreateBuffer(desc);
 				REQUIRE_MESSAGE(buffer.has_value(), buffer.error().ToString());
-				CHECK(tracker.GetLiveCount(GpuResourceType::Buffer) == buffersBefore + 1);
+				CHECK(tracker.GetLiveCount(GpuResourceType::GpuBuffer) == buffersBefore + 1);
 			}
 			device.RunGarbageCollection();
-			CHECK(tracker.GetLiveCount(GpuResourceType::Buffer) == buffersBefore);
+			CHECK(tracker.GetLiveCount(GpuResourceType::GpuBuffer) == buffersBefore);
 		}
 
 		TEST_CASE("GraphicsDevice: a second device while one exists is InvalidState"

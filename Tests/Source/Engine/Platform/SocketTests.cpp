@@ -270,10 +270,11 @@ namespace Engine {
 
 			// The peer never reads, so the buffers fill: SendAvailable returns fewer bytes than offered (eventually 0) and
 			// never waits, which a 256 MB budget of 1 MB sends reaches on any host.
+			constexpr size_t SendBudget = size_t{ 256 } * 1024 * 1024;
 			const std::vector<std::byte> chunk(1024 * 1024);
 			bool filled = false;
 			size_t sentTotal = 0;
-			for (int attempt = 0; attempt < 256 && !filled; ++attempt)
+			while (!filled && sentTotal < SendBudget)
 			{
 				const Result<size_t> sent = client->SendAvailable(chunk);
 				REQUIRE(sent.has_value());
@@ -281,9 +282,26 @@ namespace Engine {
 				filled = *sent < chunk.size();
 			}
 			REQUIRE(filled);
-			const Result<SocketReadiness> full = Socket::WaitAny({}, writers, nullptr, std::chrono::milliseconds(0));
-			REQUIRE(full.has_value());
-			CHECK(full->WritableSockets.empty());
+
+			// A full connection is not writable. A short send does not make it stay full yet: until the peer's receive
+			// buffer is full too, the acknowledgement of data already sent can free space at any moment (macOS acknowledges
+			// loopback data late and grows receive buffers on demand), and WaitAny then rightly reports the socket writable.
+			// Whenever it does, SendAvailable sends at least one byte (WritableSockets), so filling the freed space again
+			// ends, within the budget, with both buffers full: nothing moves any more and the socket is not writable.
+			bool writable = true;
+			while (writable && sentTotal < SendBudget)
+			{
+				const Result<SocketReadiness> readiness = Socket::WaitAny({}, writers, nullptr, std::chrono::milliseconds(0));
+				REQUIRE(readiness.has_value());
+				writable = !readiness->WritableSockets.empty();
+				if (!writable)
+					break;
+				const Result<size_t> sent = client->SendAvailable(chunk);
+				REQUIRE(sent.has_value());
+				REQUIRE(*sent > 0);
+				sentTotal += *sent;
+			}
+			CHECK_FALSE(writable);
 
 			// Once the peer has read what was sent (how much fitted depends on the host's buffers), the connection is writable
 			// again.

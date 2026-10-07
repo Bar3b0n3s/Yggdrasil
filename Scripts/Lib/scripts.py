@@ -33,7 +33,9 @@ def run_script(name: str, script: str, arguments: list[str], console: Console, t
     result = run_streamed([sys.executable, str(path), *arguments], cwd=paths.REPOSITORY_ROOT, env=child_environment(),
                           timeout=timeout, echo=console.stream, collect=expected_output)
     if result.timed_out:
-        return Step(name, Status.TIMEOUT, f"Scripts/{script} {result.describe_exit()}", result.duration)
+        # The end of its output shows how far it got (Lint.py reports each step's duration as it finishes).
+        return Step(name, Status.TIMEOUT, f"Scripts/{script} {result.describe_exit()}", result.duration,
+                    data={"outputTail": result.tail(40)})
     if result.exit_code != expected_exit:
         # Propagate the script's §4.1 exit code; an unexpected result of an expected-failure run is a plain failure.
         code = result.exit_code if expected_exit == 0 and result.exit_code in _PROPAGATED_EXIT_CODES else EXIT_FAILED

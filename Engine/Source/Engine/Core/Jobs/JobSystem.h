@@ -233,11 +233,11 @@ namespace Engine {
 			requires Detail::JobFunction<Function>
 		[[nodiscard]] JobHandle<Detail::JobValue<Function>> Submit(Function&& job)
 		{
-			using Value = Detail::JobValue<Function>;
-			Ref<Detail::JobState<Value>> state = CreateRef<Detail::JobState<Value>>();
-			Enqueue(CreateScope<Detail::TypedJobTask<Value, std::decay_t<Function>>>(std::decay_t<Function>(std::forward<Function>(job)),
+			using ValueType = Detail::JobValue<Function>; // not Value, which would shadow the class Engine::Value (GCC -Wshadow)
+			Ref<Detail::JobState<ValueType>> state = CreateRef<Detail::JobState<ValueType>>();
+			Enqueue(CreateScope<Detail::TypedJobTask<ValueType, std::decay_t<Function>>>(std::decay_t<Function>(std::forward<Function>(job)),
 				state));
-			return JobHandle<Value>(std::move(state));
+			return JobHandle<ValueType>(std::move(state));
 		}
 
 		// Posts `continuation(Result<T>)` to the MainThreadQueue once the job has completed (immediately if it already

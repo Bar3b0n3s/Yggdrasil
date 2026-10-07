@@ -130,7 +130,7 @@ namespace Engine {
 		{
 			case GpuResourceType::Texture:          return "Texture";
 			case GpuResourceType::StagingTexture:   return "StagingTexture";
-			case GpuResourceType::Buffer:           return "Buffer";
+			case GpuResourceType::GpuBuffer:        return "GpuBuffer";
 			case GpuResourceType::Sampler:          return "Sampler";
 			case GpuResourceType::Shader:           return "Shader";
 			case GpuResourceType::InputLayout:      return "InputLayout";

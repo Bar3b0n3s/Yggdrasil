@@ -39,7 +39,7 @@ namespace Engine {
 	{
 		Texture,
 		StagingTexture,
-		Buffer,
+		GpuBuffer, // not Buffer: an enumerator named like the alias Engine::Buffer (Core/Buffer.h) trips GCC's -Wshadow
 		Sampler,
 		Shader,
 		InputLayout,

@@ -891,7 +891,7 @@ namespace Engine {
 		nvrhi::BufferHandle buffer = m_NvrhiDevice->createBuffer(desc);
 		if (!buffer)
 			return MakeError(ErrorCode::Gpu, "cannot create buffer '{}' ({} bytes)", Utils::DebugNameOrUnnamed(desc.debugName), desc.byteSize);
-		m_ResourceTracker.Track(GpuResourceType::Buffer, buffer.Get());
+		m_ResourceTracker.Track(GpuResourceType::GpuBuffer, buffer.Get());
 		return buffer;
 	}
 
