@@ -2,18 +2,22 @@
 # "Repository remote and CI"). A platform counts as verified once its job here is green.
 #
 # Every job runs Scripts/CI.py, the single CI entry point (Architecture §15.8), with every stage a GPU-less hosted
-# runner can run: setup, generate, lint, build, unit and portability.
+# runner can run: setup, generate, lint, build, unit, automation and portability. The setup stage creates the MCP
+# bridge's virtual environment from Tools/MCP/requirements.lock (hash-checked wheels from PyPI), which the automation
+# stage runs in.
 # - windows: one CI.py run over all of them (the local gate is the full CI.py).
 # - linux:   gmake, once with GCC 14 and once with Clang 19 (Architecture §15.8).
 # - macos:   arm64 with the xcode4 generator and xcodebuild.
 # On linux and macos, CI.py runs once per step below: setup + generate, then the static checks, then build + unit per
-# configuration, then portability. Each later step runs whenever generation succeeded, even when an earlier step
-# failed, so one run reports every configuration (CI.py itself stops at the first failing stage). Each run writes its
-# own JUnit summary (--summary-junit) next to the unit test results.
+# configuration (the Release step adds the automation suite after its unit tests), then portability. Each later step
+# runs whenever generation succeeded, even when an earlier step failed, so one run reports every configuration (CI.py
+# itself stops at the first failing stage). Each run writes its own JUnit summary (--summary-junit) next to the unit
+# test results.
 #
-# The unit tests start windowed child processes (Docs/Decisions/0005-m2-decisions.md, decision 13). The Windows and
-# macOS runners have a display; linux runs build + unit in an Xvfb display with the openbox window manager, without
-# which X11 never iconifies a window.
+# The unit tests start windowed child processes (Docs/Decisions/0005-m2-decisions.md, decision 13), and the automation
+# suite starts a windowed editor (Docs/Decisions/0008-m4-decisions.md decision 33). The Windows and macOS runners have a
+# display; linux runs build, unit and automation in an Xvfb display with the openbox window manager, without which X11
+# never iconifies a window.
 #
 # Fail-fast is off. The jobs are independent (no `needs:`), so a failure on one platform or compiler never cancels the
 # others.
@@ -28,8 +32,11 @@
 # - macOS: `macos-26` is the arm64 image with Xcode 26.x. Architecture §16 requires Xcode 26 as the minimum, so the
 #   older `macos-15` image does not qualify. The job prints the Xcode version and fails below 26.
 #
-# Caching: only the Vulkan SDK download is cached, keyed by version and SHA-256 and re-verified after every restore.
-# Build outputs are never cached, so a runner-image or toolchain update can never mix objects from two compilers.
+# Caching: the Vulkan SDK download, keyed by version and SHA-256 and re-verified after every restore, and pip's download
+# cache (actions/setup-python `cache: pip`), keyed by the hash of Tools/MCP/requirements.lock and
+# .github/ci-requirements.txt; pip re-checks every wheel against the lock's hashes after a restore (--require-hashes).
+# The virtual environment itself is never cached: Setup.py creates it in each run. Build outputs are never cached, so a
+# runner-image or toolchain update can never mix objects from two compilers.
 
 name: CI
 
@@ -78,6 +85,10 @@ jobs:
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            Tools/MCP/requirements.lock
+            .github/ci-requirements.txt
 
       - name: Check the Vulkan SDK pin against Scripts/Lib/Toolchain.json
         shell: python
@@ -156,14 +167,15 @@ jobs:
           "VULKAN_SDK=$root" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "$root\Bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
-      # Stages a hosted runner can run: it has no GPU. These are all the M0 stages: setup, generate, lint (which
-      # includes CheckBuildConfig.py on the workspace and its fixtures, Lint.py, Lint.py --self-test and the format
-      # check), build, unit and portability (which includes the clang-cl Release build; this image has the VS C++
-      # Clang component, so --require-clang-cl turns a missing component into a failure instead of a skip). Add each
-      # later CPU-only stage here when it lands. The GPU stages (bake, gpu, golden, feature, automation, export,
-      # determinism, games) stay with the local gate on a machine with a Vulkan device.
+      # Stages a hosted runner can run: it has no GPU. These are setup, generate, lint (which includes
+      # CheckBuildConfig.py on the workspace and its fixtures, Lint.py, Lint.py --self-test and the format check),
+      # build, unit, automation (the Python suites against the headless editor with --renderer none, M4) and
+      # portability (which includes the clang-cl Release build; this image has the VS C++ Clang component, so
+      # --require-clang-cl turns a missing component into a failure instead of a skip). Add each later CPU-only stage
+      # here when it lands. The GPU stages (bake, gpu, golden, feature, export, determinism, games) stay with the local
+      # gate on a machine with a Vulkan device.
       - name: Run CI.py
-        run: python Scripts/CI.py --stages setup,generate,lint,build,unit,portability --require-clang-cl
+        run: python Scripts/CI.py --stages setup,generate,lint,build,unit,automation,portability --require-clang-cl
 
       - name: Upload test results
         if: ${{ !cancelled() }}
@@ -221,6 +233,10 @@ jobs:
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.10"
+          cache: pip
+          cache-dependency-path: |
+            Tools/MCP/requirements.lock
+            .github/ci-requirements.txt
 
       - name: Check the Vulkan SDK pin against Scripts/Lib/Toolchain.json
         shell: python
@@ -329,7 +345,7 @@ jobs:
       # Windowed child processes need a display and, on X11, a window manager that iconifies windows (ADR 0005
       # decision 13): openbox runs inside a 24-bit Xvfb display and is confirmed through _NET_SUPPORTING_WM_CHECK
       # before CI.py starts.
-      - name: Release (build, unit tests)
+      - name: Release (build, unit tests, automation suite)
         if: ${{ !cancelled() && steps.generate.outcome == 'success' }}
         run: |
           xvfb-run -a --server-args='-screen 0 1920x1080x24' sh -c '
@@ -340,7 +356,7 @@ jobs:
               if [ "$tries" -gt 300 ]; then echo "openbox did not start within 30 seconds" >&2; exit 1; fi
               sleep 0.1
             done
-            exec python3 Scripts/CI.py --stages build,unit --configs Release --summary-junit bin/TestResults/CI-Release.xml'
+            exec python3 Scripts/CI.py --stages build,unit,automation --configs Release --summary-junit bin/TestResults/CI-Release.xml'
 
       - name: Dist (build)
         if: ${{ !cancelled() && steps.generate.outcome == 'success' }}
@@ -376,6 +392,10 @@ jobs:
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            Tools/MCP/requirements.lock
+            .github/ci-requirements.txt
 
       - name: Check the Vulkan SDK pin against Scripts/Lib/Toolchain.json
         shell: python
@@ -473,9 +493,9 @@ jobs:
         if: ${{ !cancelled() && steps.generate.outcome == 'success' }}
         run: python3 Scripts/CI.py --stages build,unit --configs Debug --summary-junit bin/TestResults/CI-Debug.xml
 
-      - name: Release (build, unit tests)
+      - name: Release (build, unit tests, automation suite)
         if: ${{ !cancelled() && steps.generate.outcome == 'success' }}
-        run: python3 Scripts/CI.py --stages build,unit --configs Release --summary-junit bin/TestResults/CI-Release.xml
+        run: python3 Scripts/CI.py --stages build,unit,automation --configs Release --summary-junit bin/TestResults/CI-Release.xml
 
       - name: Dist (build)
         if: ${{ !cancelled() && steps.generate.outcome == 'success' }}

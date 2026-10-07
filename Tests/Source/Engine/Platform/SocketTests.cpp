@@ -253,6 +253,74 @@ namespace Engine {
 			CHECK(sent.error().GetCode() == ErrorCode::Timeout);
 		}
 
+		TEST_CASE("Socket: SendAvailable sends what fits without waiting and WaitAny reports writability")
+		{
+			Result<SocketListener> listener = SocketListener::Listen(0);
+			REQUIRE(listener.has_value());
+			Result<Socket> client = Socket::Connect(listener->GetPort(), SocketTimeout);
+			REQUIRE(client.has_value());
+			Result<Socket> accepted = listener->Accept(SocketTimeout);
+			REQUIRE(accepted.has_value());
+			const std::array<const Socket*, 1> writers = { &*client };
+
+			// An empty send buffer is writable at once.
+			const Result<SocketReadiness> idle = Socket::WaitAny({}, writers, nullptr, std::chrono::milliseconds(0));
+			REQUIRE(idle.has_value());
+			CHECK(idle->WritableSockets == std::vector<size_t>{ 0 });
+
+			// The peer never reads, so the buffers fill: SendAvailable returns fewer bytes than offered (eventually 0) and
+			// never waits, which a 256 MB budget of 1 MB sends reaches on any host.
+			const std::vector<std::byte> chunk(1024 * 1024);
+			bool filled = false;
+			size_t sentTotal = 0;
+			for (int attempt = 0; attempt < 256 && !filled; ++attempt)
+			{
+				const Result<size_t> sent = client->SendAvailable(chunk);
+				REQUIRE(sent.has_value());
+				sentTotal += *sent;
+				filled = *sent < chunk.size();
+			}
+			REQUIRE(filled);
+			const Result<SocketReadiness> full = Socket::WaitAny({}, writers, nullptr, std::chrono::milliseconds(0));
+			REQUIRE(full.has_value());
+			CHECK(full->WritableSockets.empty());
+
+			// Once the peer has read what was sent (how much fitted depends on the host's buffers), the connection is writable
+			// again.
+			std::array<std::byte, 64 * 1024> buffer{};
+			size_t receivedTotal = 0;
+			while (receivedTotal < sentTotal)
+			{
+				const Result<size_t> received = accepted->Receive(buffer, SocketTimeout);
+				REQUIRE(received.has_value());
+				REQUIRE(*received > 0);
+				receivedTotal += *received;
+			}
+			CHECK(receivedTotal == sentTotal);
+			const Result<SocketReadiness> drained = Socket::WaitAny({}, writers, nullptr, SocketTimeout);
+			REQUIRE(drained.has_value());
+			CHECK(drained->WritableSockets == std::vector<size_t>{ 0 });
+		}
+
+		TEST_CASE("Socket: SendAvailable to a closed peer fails with Io")
+		{
+			Result<SocketListener> listener = SocketListener::Listen(0);
+			REQUIRE(listener.has_value());
+			Result<Socket> client = Socket::Connect(listener->GetPort(), SocketTimeout);
+			REQUIRE(client.has_value());
+			Result<Socket> accepted = listener->Accept(SocketTimeout);
+			REQUIRE(accepted.has_value());
+			accepted->Close();
+
+			// The first sends may still be buffered locally; a reset peer makes a later one fail.
+			const std::vector<std::byte> chunk(64 * 1024);
+			Result<size_t> sent = size_t{ 0 };
+			for (int attempt = 0; attempt < 256 && sent.has_value(); ++attempt)
+				sent = client->SendAvailable(chunk);
+			REQUIRE_FALSE(sent.has_value());
+			CHECK(sent.error().GetCode() == ErrorCode::Io);
+		}
+
 		TEST_CASE("Socket: sending nothing succeeds at once")
 		{
 			Result<SocketListener> listener = SocketListener::Listen(0);

@@ -27,6 +27,9 @@
 //   - Socket::WaitAny waits on the listener and every connection at once (poll, WSAPoll), so one thread serves them all
 //     without polling each in turn. Every blocking call takes a timeout, which lets the thread check its stop flag between
 //     calls instead of being woken from another thread.
+//   - A thread that must never block on one slow peer writes with SendAvailable, which sends only what fits, and waits for
+//     the rest with the WaitAny overload that also reports writable connections (the M4 automation server drains its
+//     outbound queues this way on its I/O thread, ADR 0008 decision 27).
 
 namespace Engine {
 
@@ -43,9 +46,12 @@ namespace Engine {
 		// Indexes into WaitAny's `sockets`, ascending, of the sockets whose Receive returns at once: data arrived, the peer
 		// closed the connection (Receive returns 0) or the connection failed (Receive reports Io).
 		std::vector<size_t> ReadableSockets{};
+		// Indexes into WaitAny's `writers`, ascending, of the sockets whose SendAvailable sends at least one byte or reports
+		// the failure at once (space in the send buffer, or the connection failed). Always empty without `writers`.
+		std::vector<size_t> WritableSockets{};
 
 		// Nothing is ready (WaitAny's timeout expired).
-		[[nodiscard]] bool IsEmpty() const { return !ListenerReady && ReadableSockets.empty(); }
+		[[nodiscard]] bool IsEmpty() const { return !ListenerReady && ReadableSockets.empty() && WritableSockets.empty(); }
 	};
 
 	// A connected TCP stream on 127.0.0.1.
@@ -67,6 +73,12 @@ namespace Engine {
 		// been sent; the connection should then be closed); Io when the connection fails or the peer closed it.
 		[[nodiscard]] Status Send(std::span<const std::byte> data, std::chrono::milliseconds timeout);
 
+		// Sends as much of the start of `data` as the connection accepts right now, without waiting, and returns how many
+		// bytes that was: data.size() when everything went, fewer (0 included) when the send buffer filled up. The caller
+		// keeps the rest and waits for writability with WaitAny. It counts as the socket's Send call (threading rules
+		// above). Errors: Io when the connection fails or the peer closed it.
+		[[nodiscard]] Result<size_t> SendAvailable(std::span<const std::byte> data);
+
 		// Waits up to `timeout` for data and receives up to destination.size() bytes (> 0, asserted). Returns the number of
 		// bytes received, at least 1, or 0 when the peer closed the connection in an orderly way. Errors: Timeout when
 		// nothing arrived; Io when the connection fails.
@@ -86,6 +98,12 @@ namespace Engine {
 		// error).
 		[[nodiscard]] static Result<SocketReadiness> WaitAny(std::span<const Socket* const> sockets, const SocketListener* listener,
 			std::chrono::milliseconds timeout);
+
+		// The same, and also returns as soon as one of `writers` can accept data, reported in WritableSockets. A socket may
+		// appear in both lists; each list holds at most MaxSocketWaitCount entries without duplicates, all open (asserted).
+		// The call counts as a receiving call for `sockets` only. Errors: Io.
+		[[nodiscard]] static Result<SocketReadiness> WaitAny(std::span<const Socket* const> sockets, std::span<const Socket* const> writers,
+			const SocketListener* listener, std::chrono::milliseconds timeout);
 	private:
 		struct Impl;
 

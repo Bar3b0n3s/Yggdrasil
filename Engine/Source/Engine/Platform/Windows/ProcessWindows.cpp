@@ -530,6 +530,22 @@ namespace Engine {
 		return GetCurrentProcessId();
 	}
 
+	bool Process::IsRunning(uint32_t processId)
+	{
+		if (processId == 0)
+			return false;
+		if (processId == GetCurrentProcessId())
+			return true;
+		HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, FALSE, processId);
+		if (process == nullptr)
+			return GetLastError() == ERROR_ACCESS_DENIED; // it exists, but belongs to someone this process may not query
+		// A handle someone still holds keeps an exited process's ID valid; its handle is signaled then. The exit code cannot
+		// tell (a process may exit with STILL_ACTIVE).
+		const DWORD state = WaitForSingleObject(process, 0);
+		CloseHandle(process);
+		return state == WAIT_TIMEOUT;
+	}
+
 	Result<std::filesystem::path> Process::GetCurrentExecutablePath()
 	{
 		constexpr size_t MaxPathCharacters = 32768; // the longest path Windows supports, with the terminator

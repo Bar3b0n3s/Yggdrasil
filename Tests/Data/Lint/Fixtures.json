@@ -512,6 +512,65 @@
 					"Line": 16
 				}
 			]
+		},
+		{
+			"Name": "PythonContract",
+			"Description": "Python contract markers: stubs raising NotImplementedError(\"contract stub ...\") in Tools (a plain string and an f-string), and unittest and pytest skips in Tests/Automation (decorators through the module and a bare name, skipIf, skipTest, a raised SkipTest, expectedFailure on a class, pytest.skip and pytest.importorskip calls). Another NotImplementedError message, a string that spells the marker and skips named in a comment or string are the allowed controls.",
+			"Steps": [
+				"contract"
+			],
+			"Expected": [
+				{
+					"Code": "test-skip",
+					"File": "Tests/Automation/test_client.py",
+					"Line": 10
+				},
+				{
+					"Code": "test-skip",
+					"File": "Tests/Automation/test_client.py",
+					"Line": 14
+				},
+				{
+					"Code": "test-skip",
+					"File": "Tests/Automation/test_client.py",
+					"Line": 18
+				},
+				{
+					"Code": "test-skip",
+					"File": "Tests/Automation/test_client.py",
+					"Line": 23
+				},
+				{
+					"Code": "test-skip",
+					"File": "Tests/Automation/test_client.py",
+					"Line": 26
+				},
+				{
+					"Code": "test-skip",
+					"File": "Tests/Automation/test_client.py",
+					"Line": 33
+				},
+				{
+					"Code": "test-skip",
+					"File": "Tests/Automation/test_client.py",
+					"Line": 43
+				},
+				{
+					"Code": "test-skip",
+					"File": "Tests/Automation/test_client.py",
+					"Line": 48
+				},
+				{
+					"Code": "contract-stub",
+					"File": "Tools/Automation/client.py",
+					"Line": 7
+				},
+				{
+					"Code": "contract-stub",
+					"File": "Tools/Automation/client.py",
+					"Line": 21
+				}
+			]
 		}
 	]
 }

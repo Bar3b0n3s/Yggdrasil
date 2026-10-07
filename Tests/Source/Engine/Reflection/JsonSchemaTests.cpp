@@ -118,6 +118,21 @@ namespace Engine {
 			CHECK(JsonSchema::Validate(anything, ParseSchemaJson(R"({ "a": [1, { "b": null }] })")).has_value());
 		}
 
+		TEST_CASE("JsonSchema: required lists the members an object must have")
+		{
+			const Json schema = ParseSchemaJson(R"({ "type": "object", "properties": { "text": { "type": "string" } }, "required": ["text"] })");
+			CHECK(JsonSchema::Validate(schema, ParseSchemaJson(R"({ "text": "a" })")).has_value());
+			const Status missing = JsonSchema::Validate(schema, Json::object());
+			REQUIRE_FALSE(missing.has_value());
+			REQUIRE(missing.error().GetIssues().size() == 1);
+			CHECK(missing.error().GetIssues()[0].JsonPointer.empty());
+			CHECK(missing.error().GetIssues()[0].Message.contains("text"));
+			CHECK(JsonSchema::Validate(schema, Json(3)).error().GetIssues().size() == 1); // the type, not the member
+
+			const Json malformed = ParseSchemaJson(R"({ "required": "text" })");
+			CHECK(JsonSchema::Validate(malformed, Json::object()).error().GetCode() == ErrorCode::InvalidArgument);
+		}
+
 		TEST_CASE("JsonSchema: field and component schemas carry the definitions they reference")
 		{
 			Scope<TypeRegistry> registry = CreateScope<TypeRegistry>();

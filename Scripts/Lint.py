@@ -24,8 +24,12 @@ Steps, selected with --steps (default: all, in this order):
             the same TEST_CASE/TEST_CASE_FIXTURE/SUBCASE decorator expression also carries
             doctest::test_suite(Test::ChildTargetSuite), the child-process targets that are the only permanent skips
             (test-skip). Comments and string literals are ignored, decorators may span lines, and doctest may be named
-            through a namespace alias or a using-directive. --allow-contract-stubs (contract mode, the commit of a
-            milestone's contract task) reports what it found as allowed instead of as findings.
+            through a namespace alias or a using-directive. The Python equivalents (Docs/Decisions/0008-m4-decisions.md
+            decision 16): a stub that raises NotImplementedError("contract stub ...") in Contract.PythonStubFiles
+            (contract-stub), and unittest/pytest skip markers in Contract.PythonTestFiles (test-skip): the skip,
+            skipIf, skipUnless and expectedFailure decorators, pytest.mark.skip, skipif and xfail, self.skipTest(...)
+            and raising SkipTest. --allow-contract-stubs (contract mode, the commit of a milestone's contract task)
+            reports what it found as allowed instead of as findings.
   naming    identifier naming. clang-tidy runs with .clang-tidy on the flags from compile_commands.json when it is
             available; otherwise a regex checker applies the same prefixes (m_, s_, g_) and PascalCase rules to types,
             functions, data members, statics, globals and macros. The mode that ran is reported. C++ file and
@@ -326,6 +330,8 @@ class Rules:
     output_files: GlobSet
     contract_stub_definition_files: GlobSet
     contract_test_files: GlobSet
+    contract_python_stub_files: GlobSet
+    contract_python_test_files: GlobSet
     python_roots: tuple[str, ...]
     python_exclude: GlobSet
     python_entry_points: GlobSet
@@ -492,6 +498,8 @@ def parse_rules(document: dict[str, Any], path: Path) -> Rules:
             _strings(contract["StubDefinitionFiles"], "Contract.StubDefinitionFiles")
         ),
         contract_test_files=GlobSet(_strings(contract["TestFiles"], "Contract.TestFiles")),
+        contract_python_stub_files=GlobSet(_strings(contract.get("PythonStubFiles", []), "Contract.PythonStubFiles")),
+        contract_python_test_files=GlobSet(_strings(contract.get("PythonTestFiles", []), "Contract.PythonTestFiles")),
         python_roots=_strings(python["Roots"], "Python.Roots"),
         python_exclude=GlobSet(_strings(python.get("Exclude", []), "Python.Exclude")),
         python_entry_points=GlobSet(_strings(python.get("EntryPoints", []), "Python.EntryPoints")),
@@ -2440,17 +2448,112 @@ class ContractChecker:
         return list(findings.values()), child_targets
 
 
+# The Python contract markers (Docs/Decisions/0008-m4-decisions.md decision 16): what a contract task leaves in Python
+# code.
+PYTHON_CONTRACT_STUB_PREFIX = "contract stub"
+PYTHON_CONTRACT_STUB_MESSAGE = (
+    'raise NotImplementedError("contract stub ...") marks a Python stub written by a milestone contract task '
+    "(Roadmap rule 3): implement the function before the milestone ends. Outside contract mode (Lint.py "
+    "--allow-contract-stubs, PreCommit.py --contract) none may remain"
+)
+PYTHON_TEST_SKIP_MESSAGE = (
+    "leaves a Python test unrun: automation and MCP tests never skip (a missing editor build or virtual environment "
+    "is a failure, not a skip). A contract task's skipped tests are un-skipped when their implementation lands "
+    "(Roadmap rule 3); outside contract mode (Lint.py --allow-contract-stubs, PreCommit.py --contract) none may remain"
+)
+# unittest's and pytest's skip markers, by their final attribute or name.
+PYTHON_SKIP_DECORATORS = frozenset({"skip", "skipIf", "skipUnless", "expectedFailure", "skipif", "xfail"})
+PYTHON_SKIP_EXCEPTIONS = frozenset({"SkipTest"})
+# pytest's imperative skips, by the end of their dotted name.
+PYTHON_SKIP_CALLS = ("pytest.skip", "pytest.importorskip")
+
+
+def dotted_name(node: ast.AST) -> str:
+    """"unittest.skip" for the expression unittest.skip, "skip" for a bare name; "" for anything else."""
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        base = dotted_name(node.value)
+        return f"{base}.{node.attr}" if base else ""
+    return ""
+
+
+def literal_prefix(node: ast.AST) -> str | None:
+    """The text a string expression starts with: a str constant's value, or the leading literal parts of an f-string
+    (f"contract stub: {name}" starts with "contract stub: "); None for anything else."""
+    if isinstance(node, ast.Constant):
+        return node.value if isinstance(node.value, str) else None
+    if isinstance(node, ast.JoinedStr):
+        prefix = ""
+        for part in node.values:
+            if not (isinstance(part, ast.Constant) and isinstance(part.value, str)):
+                break
+            prefix += part.value
+        return prefix
+    return None
+
+
+def python_contract_findings(tree: Tree, relative: str) -> list[Finding]:
+    """The Python contract markers of one file: contract-stub in Contract.PythonStubFiles, test-skip in
+    Contract.PythonTestFiles. Comments and strings that merely spell a marker do not count (the AST is checked)."""
+    rules = tree.rules
+    is_stub_file = rules.contract_python_stub_files.matches(relative)
+    is_test_file = rules.contract_python_test_files.matches(relative)
+    if not (is_stub_file or is_test_file):
+        return []
+    try:
+        module = ast.parse(read_text(tree.root / relative), filename=relative)
+    except SyntaxError:
+        return []  # the python step reports it
+    findings: list[Finding] = []
+    for node in ast.walk(module):
+        if is_stub_file and isinstance(node, ast.Raise) and isinstance(node.exc, ast.Call):
+            call = node.exc
+            message = literal_prefix(call.args[0]) if call.args else None
+            if (
+                dotted_name(call.func) == "NotImplementedError"
+                and message is not None
+                and message.startswith(PYTHON_CONTRACT_STUB_PREFIX)
+            ):
+                findings.append(Finding(relative, node.lineno, "contract-stub", PYTHON_CONTRACT_STUB_MESSAGE))
+        if not is_test_file:
+            continue
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            for decorator in node.decorator_list:
+                target = decorator.func if isinstance(decorator, ast.Call) else decorator
+                name = dotted_name(target)
+                if name.rsplit(".", 1)[-1] in PYTHON_SKIP_DECORATORS and (
+                    "." not in name or name.startswith(("unittest.", "pytest.mark."))
+                ):
+                    findings.append(
+                        Finding(relative, decorator.lineno, "test-skip", f"'{name}' {PYTHON_TEST_SKIP_MESSAGE}")
+                    )
+        elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "skipTest":
+            findings.append(Finding(relative, node.lineno, "test-skip", f"'skipTest' {PYTHON_TEST_SKIP_MESSAGE}"))
+        elif isinstance(node, ast.Call) and dotted_name(node.func).endswith(PYTHON_SKIP_CALLS):
+            name = dotted_name(node.func)
+            findings.append(Finding(relative, node.lineno, "test-skip", f"'{name}' {PYTHON_TEST_SKIP_MESSAGE}"))
+        elif isinstance(node, ast.Raise) and node.exc is not None:
+            raised = node.exc.func if isinstance(node.exc, ast.Call) else node.exc
+            if dotted_name(raised).rsplit(".", 1)[-1] in PYTHON_SKIP_EXCEPTIONS:
+                findings.append(Finding(relative, node.lineno, "test-skip", f"'SkipTest' {PYTHON_TEST_SKIP_MESSAGE}"))
+    return sorted(findings, key=lambda finding: finding.line)
+
+
 def run_contract(context: LintContext, report: StepReport) -> None:
     tree = context.tree
     checker = ContractChecker(tree)
     files = [relative for relative in tree.cxx_files() if tree.in_scope(relative)]
-    report.files = len(files)
+    python = python_files(tree)
+    report.files = len(files) + len(python)
     findings: list[Finding] = []
     child_targets = 0
     for relative in files:
         file_findings, file_child_targets = checker.check(tree.source(relative))
         findings += file_findings
         child_targets += file_child_targets
+    for relative in python:
+        findings += python_contract_findings(tree, relative)
     stubs = sum(1 for finding in findings if finding.code == "contract-stub")
     if context.options.allow_contract_stubs:
         report.detail = (
@@ -2972,9 +3075,10 @@ class RegexNamingChecker:
 
 
 def declares_override(text: str, name_position: int) -> bool:
-    """True when the member function whose name starts at name_position is declared override or final: the virt-specifier
-    follows its parameter list. Only an in-class declaration can carry it, so an override of a third-party interface
-    with a name outside the naming rules (spdlog's sink_it_, doctest's test_case_start) is defined in its class."""
+    """True when the member function whose name starts at name_position is declared override or final: the
+    virt-specifier follows its parameter list. Only an in-class declaration can carry it, so an override of a
+    third-party interface with a name outside the naming rules (spdlog's sink_it_, doctest's test_case_start) is defined
+    in its class."""
     open_index = text.find("(", name_position)
     if open_index < 0:
         return False

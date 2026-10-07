@@ -99,6 +99,13 @@ namespace Engine {
 		// The current process's ID.
 		[[nodiscard]] static uint32_t GetCurrentId();
 
+		// True while a process with ID `processId` runs (the current one included), including one this process may not
+		// otherwise touch (another user's); false for an ID no process has (0, an exited process). A process ID is reused
+		// after its process ended, so true can also mean a later process with the same ID; on POSIX an exited child that
+		// its parent has not reaped yet still counts as running. Used to tell files of live processes from leftovers (the
+		// automation server's offloaded results).
+		[[nodiscard]] static bool IsRunning(uint32_t processId);
+
 		// The absolute path of the running executable as the OS reports it (GetModuleFileNameW, /proc/self/exe,
 		// _NSGetExecutablePath), with symbolic links resolved, however the process was started (argv[0] may be a bare name
 		// found through PATH or anything the parent chose). Errors: Io.

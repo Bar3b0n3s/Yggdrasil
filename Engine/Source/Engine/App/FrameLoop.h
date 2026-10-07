@@ -26,6 +26,10 @@ namespace Engine {
 		// One polled or injected event, before InputState sees it. Marking it handled keeps it from InputState, and a
 		// handled WindowCloseEvent does not end the loop (an editor asking to save first).
 		virtual void OnFrameEvent(Event& event) = 0;
+		// Once per frame, after the MainThreadQueue drain and before the steps: the frame's safe point, where the editor's
+		// (and, from M7, the runtime's) automation server runs queued requests and polls pending operations (§4.2 step 3).
+		// Does nothing by default.
+		virtual void OnFrameSafePoint() {}
 		// One fixed step; zero or more per frame (step.Tick increases by one per call).
 		virtual void OnFrameFixedStep(const SimStep& step) = 0;
 		// Once per frame, after the frame's steps.
@@ -51,6 +55,7 @@ namespace Engine {
 	//      context's InputState. The loop does not latch InputState: the simulation that reads it latches at the points
 	//      §5.7 gives (PlaySession, M7), so events stamped for a tick are applied before that tick's LatchStep.
 	//   2. MainThreadQueue::Drain of the context: job completions, asset swaps and file-watcher results in posting order.
+	//   2b. OnFrameSafePoint: automation requests run here, between input and update (§4.2 step 3, §13.2).
 	//   3. Steps: with a ManualClock, exactly one step (FixedStepScheduler::StepExactly(1), Alpha = 1, §4.2); with any
 	//      other clock, FixedStepScheduler::Advance(clock.Delta(), 1.0). OnFrameFixedStep runs once per step, in tick
 	//      order.
@@ -59,8 +64,7 @@ namespace Engine {
 	//   5. The frame count grows by one; when it reaches MaxFrames the loop requests exit with ExitCode::Success (an
 	//      earlier request keeps its code). With ThrottleToFixedHz the loop then sleeps until the frame's wall-clock slot
 	//      ends.
-	// Automation pumping (M4) and rendering with the frame-boundary vk::SystemError catch (M5) join the frame at the
-	// places §4.2 gives.
+	// Rendering with the frame-boundary vk::SystemError catch (M5) joins the frame at the place §4.2 gives.
 	//
 	// Run logs one Info line before the first frame, "Frame loop started: <ClockKind> clock, <FixedHz> Hz" with the
 	// ClockKind enumerator name, so a process's output shows which clock it runs on.

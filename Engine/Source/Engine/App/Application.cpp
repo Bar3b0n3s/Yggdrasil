@@ -121,6 +121,7 @@ namespace Engine {
 			.WorkerCount = m_Specification.WorkerCount.value_or(JobSystem::GetDefaultWorkerCount()),
 			.UserDataDirectory = process->GetUserDataPaths().Root,
 			.Window = std::move(window),
+			.RegisterTypes = m_Specification.RegisterTypes,
 		};
 		Result<Scope<EngineContext>> context = EngineContext::Create(contextSpecification);
 		if (!context.has_value())
@@ -184,6 +185,11 @@ namespace Engine {
 	void Application::OnFrameEvent(Event& event)
 	{
 		OnEvent(event);
+	}
+
+	void Application::OnFrameSafePoint()
+	{
+		OnSafePoint();
 	}
 
 	void Application::OnFrameFixedStep(const SimStep& step)

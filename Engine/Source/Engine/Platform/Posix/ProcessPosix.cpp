@@ -30,6 +30,7 @@
 	#endif
 
 	#include <cerrno>
+	#include <limits>
 	#include <system_error>
 	#include <thread>
 
@@ -613,6 +614,16 @@ namespace Engine {
 	uint32_t Process::GetCurrentId()
 	{
 		return static_cast<uint32_t>(getpid());
+	}
+
+	bool Process::IsRunning(uint32_t processId)
+	{
+		// kill() with a pid that is 0 or negative signals process groups, so those values are never passed on.
+		if (processId == 0 || processId > static_cast<uint32_t>(std::numeric_limits<pid_t>::max()))
+			return false;
+		if (kill(static_cast<pid_t>(processId), 0) == 0)
+			return true;
+		return errno == EPERM; // it exists, but belongs to another user
 	}
 
 	Result<std::filesystem::path> Process::GetCurrentExecutablePath()

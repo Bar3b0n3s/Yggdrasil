@@ -5,6 +5,8 @@
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Log.h"
 #include "Engine/Core/Mounts/NativeDirectoryMount.h"
+#include "Engine/Project/ProjectSettings.h"
+#include "Engine/Scene/Components/BuiltinComponents.h"
 
 #include <format>
 #include <string>
@@ -25,6 +27,12 @@ namespace Engine {
 	EngineContext::EngineContext(ConstructionKey /*key*/, const EngineContextSpecification& specification)
 		: m_JobSystem(specification.WorkerCount, m_MainThreadQueue)
 	{
+		// The registries (§4.1): everything the context's scenes, project files and automation read and write.
+		RegisterBuiltinComponents(m_TypeRegistry);
+		RegisterProjectSettingsTypes(m_TypeRegistry);
+		if (specification.RegisterTypes != nullptr)
+			specification.RegisterTypes(m_TypeRegistry);
+		m_TypeRegistry.Freeze();
 	}
 
 	EngineContext::~EngineContext() = default;

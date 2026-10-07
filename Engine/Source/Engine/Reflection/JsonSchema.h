@@ -46,8 +46,9 @@ namespace Engine {
 
 		// Validates `instance` against `schema`, supporting exactly the keywords the generator emits: "$ref" to "#/$defs/...",
 		// "type" (string or array), "properties", "additionalProperties" (boolean or schema), "items", "prefixItems",
-		// "minItems", "maxItems", "enum", "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "not" and "pattern"
-		// (the UUID pattern above only); annotations ("description", "title", "x-assetType", "$schema") are ignored.
+		// "minItems", "maxItems", "enum", "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "not", "pattern"
+		// (the UUID pattern above only) and "required" (which automation params schemas add, MethodRegistry::GetParamsSchema);
+		// annotations ("description", "title", "x-assetType", "$schema") are ignored.
 		// Errors: Validation carrying one ErrorIssue per violation, located at the instance's JSON pointer; InvalidArgument
 		// for a schema that uses another keyword or an unresolvable "$ref".
 		[[nodiscard]] static Status Validate(const Json& schema, const Json& instance);
