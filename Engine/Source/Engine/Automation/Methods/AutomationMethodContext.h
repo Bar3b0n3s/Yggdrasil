@@ -27,11 +27,13 @@
 // which moved the M4 to M6 handlers of the Runtime subset here (session.*, rpc.discover, scene.tree|query|get,
 // entity.get, entity.bounds, log.read, events.read), added the pure virtual functions those handlers need at the end, as
 // reviewed additions (ADR 0012 decisions 12 and 21); the integration's review gave DescribeSession a return value and
-// added GetWallClockTime. One context per request; main thread only.
+// added GetWallClockTime. The M12 contract added GetAudioEngine (audio.stats, Docs/Decisions/0015-m12-decisions.md). One
+// context per request; main thread only.
 
 namespace Engine {
 
 	class AssetManager;
+	class AudioEngine;
 	class ConstEntity;
 	class Entity;
 	class EventLog;
@@ -141,6 +143,13 @@ namespace Engine {
 		// play.step measures its frame budget with it (PlayStepFrameBudget, PlayMethods.h); nothing on the simulation path
 		// reads it.
 		[[nodiscard]] virtual std::chrono::steady_clock::time_point GetWallClockTime() const = 0;
+
+		// --- Audio (M12) ----------------------------------------------------------------------------------------------------
+
+		// The host's audio engine (audio.stats, Automation/Methods/AudioMethods.h): the editor's and the Runtime's
+		// EngineContext::GetAudioEngine (RuntimeAutomationServerSpecification::Audio); null for a host without one, where
+		// audio.stats is Unsupported. The pointer is non-owning and valid for the request.
+		[[nodiscard]] virtual AudioEngine* GetAudioEngine() const = 0;
 	protected:
 		// `hostKey` is the most-derived context's TypeKeyOf, as for MethodContext.
 		AutomationMethodContext(TypeKey hostKey, MethodRequest request);

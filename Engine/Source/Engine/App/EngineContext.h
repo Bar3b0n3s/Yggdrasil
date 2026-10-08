@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Engine/Audio/AudioEngine.h"
 #include "Engine/Core/Base.h"
 #include "Engine/Core/EventLog.h"
 #include "Engine/Core/Jobs/JobSystem.h"
@@ -28,10 +29,10 @@ namespace Engine {
 	class ShaderLibrary;
 	struct GpuMessageCounts;
 
-	// The steps that build an EngineContext, in order (§4.1: VFS -> JobSystem -> Window -> GraphicsDevice -> ...). Later
-	// milestones add theirs where §4.1 puts them: the AudioEngine (M12). The AssetManager is not a step: the application
-	// builds its manager on the context's services and injects it (SetAssetManager, §3 rule 4). The TypeRegistry is
-	// infallible and therefore part of Services (Docs/Decisions/0008-m4-decisions.md decision 2).
+	// The steps that build an EngineContext, in order (§4.1: VFS -> JobSystem -> Window -> GraphicsDevice -> AssetManager ->
+	// AudioEngine -> registries). The AssetManager is not a step: the application builds its manager on the context's
+	// services and injects it (SetAssetManager, §3 rule 4). The TypeRegistry is infallible and therefore part of Services
+	// (Docs/Decisions/0008-m4-decisions.md decision 2).
 	enum class EngineContextStep : uint8_t
 	{
 		// The infallible services, constructed in member order: VirtualFileSystem, MainThreadQueue, JobSystem, EventLog,
@@ -52,7 +53,9 @@ namespace Engine {
 		// the process is windowed; the ShaderLibrary and the PipelineFactory. The ShaderLibrary's root is engine://Shaders
 		// when EnginePak is set (exported games, in every configuration: the pak holds the target configuration's SPIR-V,
 		// §14.1; no shaders:// is mounted then), else shaders://. A Dist context without EnginePak has no shaders.
-		Graphics
+		Graphics,
+		// M12: AudioEngine::Create with the specification's Audio over the context's VFS, when Audio is set (§4.1, §10.1).
+		Audio
 	};
 
 	// Registers an application's own reflected types into the context's TypeRegistry before it is frozen: the editor's
@@ -87,6 +90,10 @@ namespace Engine {
 		// M7: an exported game's Engine.pak (a native path), mounted as engine:// by the EngineResources step (see there) and
 		// the root of the ShaderLibrary's SPIR-V; must not be set together with EngineResourcesDirectory. Empty: none.
 		std::filesystem::path EnginePak{};
+		// M12: the context's AudioEngine (§4.1, §10.1): Application passes its ApplicationSpecification::Audio (windowed runs a
+		// System device and threaded decoding, headless runs no device and deterministic decoding). nullopt: no AudioEngine
+		// (GetAudioEngine returns null; most in-process tests), so play sessions are silent.
+		std::optional<AudioEngineSpecification> Audio{};
 	};
 
 	// One engine context. Not copyable or movable. Tests may build several side by side in one process, all on that
@@ -96,7 +103,9 @@ namespace Engine {
 	// is destroyed in reverse order and Create returns the error with the step as context. Destruction always runs in
 	// reverse member order: the GPU services first (pipeline factory, shader library, device), then the window, the
 	// JobSystem before the MainThreadQueue its continuations post to (queued jobs are cancelled, running ones finish;
-	// ~JobSystem), the VFS last.
+	// ~JobSystem), the VFS last. The AudioEngine (M12), the last member, goes first: its device thread stops before the window,
+	// the jobs and the VFS it reads go, and its owners (play sessions, the editor's preview) have released their voices by
+	// then.
 	//
 	// Thread safety: create, use and destroy it on the main thread, which becomes the main thread of the MainThreadQueue
 	// and the EventLog. The services document their own rules (VirtualFileSystem, JobSystem and MainThreadQueue::Post are
@@ -122,7 +131,9 @@ namespace Engine {
 		// or Io when UserDataDirectory cannot be mounted; NotFound or Io when EngineResourcesDirectory or EngineCacheDirectory
 		// cannot be mounted (context "EngineResources"); for the window, InvalidState without an initialized GLFW (no
 		// ProcessContext) and Unsupported when GLFW cannot create it; for graphics, NotFound when the shader directory of a
-		// development build does not exist (the Shaders project did not run) and the errors of GraphicsDevice::Create.
+		// development build does not exist (the Shaders project did not run) and the errors of GraphicsDevice::Create; for
+		// audio, the errors of AudioEngine::Create (a missing audio device is not one: the engine then runs device-less with
+		// a warning, §10.1).
 		[[nodiscard]] static Result<Scope<EngineContext>> Create(const EngineContextSpecification& specification);
 
 		[[nodiscard]] VirtualFileSystem& GetVfs() { return m_Vfs; }
@@ -154,6 +165,10 @@ namespace Engine {
 		// JobSystem and MainThreadQueue). Main thread.
 		void SetAssetManager(AssetManager* manager) { m_AssetManager = manager; }
 
+		// M12: the context's audio engine (§4.1, §10.1); nullptr when the specification had no Audio.
+		[[nodiscard]] AudioEngine* GetAudioEngine() { return m_AudioEngine.get(); }
+		[[nodiscard]] const AudioEngine* GetAudioEngine() const { return m_AudioEngine.get(); }
+
 		// The GPU services; nullptr without Graphics (RendererMode::None, §4.1).
 		[[nodiscard]] GraphicsDevice* GetGraphicsDevice() { return m_GraphicsDevice.get(); }
 		[[nodiscard]] ShaderLibrary* GetShaderLibrary() { return m_ShaderLibrary.get(); }
@@ -171,6 +186,8 @@ namespace Engine {
 		[[nodiscard]] Status MountEnginePak(const std::filesystem::path& pak);
 		// The Graphics step (EngineContextStep::Graphics).
 		[[nodiscard]] Status CreateGraphics(const GraphicsSpecification& graphics);
+		// The Audio step (EngineContextStep::Audio, M12).
+		[[nodiscard]] Status CreateAudio(const AudioEngineSpecification& audio);
 	private:
 		// Declaration order is construction order; destruction runs in reverse.
 		VirtualFileSystem m_Vfs;
@@ -187,9 +204,11 @@ namespace Engine {
 		Scope<PipelineFactory> m_PipelineFactory;
 		AssetManager* m_AssetManager = nullptr; // injected, owned by the application (SetAssetManager)
 		Ref<const PakReader> m_EnginePak;       // EnginePak (M7), opened by the EngineResources step
+		// M12, last, so it is destroyed first (see the class comment); it reads the VFS above.
+		Scope<AudioEngine> m_AudioEngine;
 	};
 
-	// "Services", "UserData", "EngineResources", "Window" or "Graphics".
+	// "Services", "UserData", "EngineResources", "Window", "Graphics" or "Audio".
 	[[nodiscard]] std::string_view EngineContextStepToString(EngineContextStep step);
 
 }

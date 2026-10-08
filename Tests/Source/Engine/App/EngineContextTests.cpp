@@ -307,6 +307,7 @@ namespace Engine {
 			CHECK(EngineContextStepToString(EngineContextStep::EngineResources) == "EngineResources");
 			CHECK(EngineContextStepToString(EngineContextStep::Window) == "Window");
 			CHECK(EngineContextStepToString(EngineContextStep::Graphics) == "Graphics");
+			CHECK(EngineContextStepToString(EngineContextStep::Audio) == "Audio");
 		}
 
 		TEST_CASE("EngineContext: an Engine.pak is mounted as engine:// and kept for the asset manager")
@@ -334,6 +335,28 @@ namespace Engine {
 			const Result<Scope<EngineContext>> conflicting = EngineContext::Create(both);
 			REQUIRE_FALSE(conflicting.has_value());
 			CHECK(conflicting.error().GetCode() == ErrorCode::InvalidArgument);
+		}
+
+		// M12 (Docs/Decisions/0015-m12-decisions.md; Architecture §4.1: "... GraphicsDevice -> AssetManager -> AudioEngine").
+		// The step's name is implemented by the contract; creating the engine is a skipped skeleton for stream A.
+
+		TEST_CASE("EngineContext: without an audio specification the context has no audio engine")
+		{
+			const Result<Scope<EngineContext>> context = EngineContext::Create({});
+			REQUIRE_MESSAGE(context.has_value(), context.error().ToString());
+			CHECK((*context)->GetAudioEngine() == nullptr);
+		}
+
+		TEST_CASE("EngineContext: the Audio step creates a device-less engine over the context's VFS" * doctest::skip(true))
+		{
+			const Result<Scope<EngineContext>> context = EngineContext::Create(
+				{ .Audio = AudioEngineSpecification{ .Device = AudioDeviceKind::None, .Decoding = AudioDecoding::Deterministic } });
+			REQUIRE_MESSAGE(context.has_value(), context.error().ToString());
+			AudioEngine* audio = (*context)->GetAudioEngine();
+			REQUIRE(audio != nullptr);
+			CHECK(audio->GetDeviceState() == AudioDeviceState::None);
+			CHECK(audio->GetTimeSource() == AudioTimeSource::Host);
+			CHECK(audio->GetSpecification().Decoding == AudioDecoding::Deterministic);
 		}
 	}
 

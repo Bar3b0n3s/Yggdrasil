@@ -24,11 +24,15 @@
 // (§4.8, §4.12), its game input (PlayInput) and the game view's last render snapshot; physics (M11), scripts (M13) and audio
 // (M12) join it in their milestones, in the hook phases below, which are empty in M7.
 //
-// Frozen by the M7 contract (Docs/Decisions/0012-m7-decisions.md decisions 2 to 5).
+// Frozen by the M7 contract (Docs/Decisions/0012-m7-decisions.md decisions 2 to 5); the M12 contract added the audio hook
+// (PlaySessionSpecification::Audio and OwnsAudioTime, GetAudioSystem, IsAudioTimeOwned and the "Audio" paragraph below;
+// Docs/Decisions/0015-m12-decisions.md).
 
 namespace Engine {
 
 	class AssetManager;
+	class AudioEngine;
+	class AudioSystem;
 	class Entity;
 	class Scene;
 	class TypeRegistry;
@@ -68,7 +72,8 @@ namespace Engine {
 		FrameDestroyFlush,    // 2: destroy flush, as DestroyFlush
 		FrameTransformUpdate, // 2: TransformSystem::Update; entities whose world matrix changed outside the fixed steps get
 							  //    InterpolationResetTag (see "Render interpolation" below)
-		AudioUpdate,          // 3: AudioSystem::Update (M12; empty)
+		AudioUpdate,          // 3: AudioSystem::Update, then, while the session owns audio time, the simulation-time pulls of
+							  //    the ticks run since the last pull (M12; see "Audio" below)
 		RenderExtraction      // 4: the game view's snapshot (ExtractRenderSnapshot), unless extraction is disabled
 	};
 
@@ -139,6 +144,13 @@ namespace Engine {
 		// sessions from 1; the Runtime has one): what code that outlives a call recognizes its session by (a pending
 		// play.step, the editor's transient play-scene undos), since a new session may reuse an ended one's address.
 		uint64_t Serial = 0;
+		// M12: the context's audio engine (EngineContext::GetAudioEngine), outliving the session; null: a silent session (no
+		// AudioSystem). See "Audio" in PlaySession's comment.
+		AudioEngine* Audio = nullptr;
+		// M12: the session owns the engine's simulation time from its creation to its end, in lockstep or not: a test run
+		// (§10.1 "or a test run is active"; M13's FeatureTest runner sets it for every suite, ScriptedClock suites included,
+		// §11.10). Without it the session owns audio time only while it is in lockstep. Ignored without an AudioSystem.
+		bool OwnsAudioTime = false;
 	};
 
 	// One play session. Not copyable or movable; main thread only (§4.11).
@@ -179,6 +191,29 @@ namespace Engine {
 	// drivers such as the FeatureTest runner); a time scale the host applies to its frame loop; a stepping flag while a
 	// play.step runs (the host's loop is then unthrottled, §4.2); and the modified flag (a hot reload during ordinary play,
 	// §7.5 race rule 4).
+	//
+	// Audio (§5.6, §5.7, §10.1, §10.2; M12). A Play session with PlaySessionSpecification::Audio owns an AudioSystem over its
+	// scene (GetAudioSystem; none in Simulate mode and none without an engine). Scripts reach the AudioSource methods,
+	// Audio.PlayOneShot and Audio.SetGroupVolume/GetGroupVolume through it (M13), so a game's mix ends with its session.
+	//   - Start and hold. Create builds the AudioSystem with its voices held (paused) and ends with AudioSystem::Start (§5.6:
+	//     "PlayOnStart audio starts"), so PlayOnStart voices exist at tick 0 with their cursors at 0. The first AudioUpdate
+	//     phase releases the hold: whatever paused and lockstep state the host applies after Create (EditorPlayController,
+	//     the Runtime's --paused) is in force before a voice can play on a device.
+	//   - Pause. The voices are paused while the session is paused and not in lockstep (§10.2: play-mode pause; a paused
+	//     session's play.step then advances only the simulation). A lockstep session's voices follow its ticks whatever its
+	//     paused flag, since play.step is its only clock (§10.1: "voices advance with simulation time").
+	//   - Time ownership (§10.1). The session owns the engine's simulation time (AudioEngine::BeginSimulationTime with
+	//     Simulation.FixedHz) while it is in lockstep (SetLockstep(true); lockstep owned by a client or by an in-process
+	//     driver) and for its whole life when PlaySessionSpecification::OwnsAudioTime is set (a test run). Then the device
+	//     reads nothing, and each AudioUpdate phase pulls, after AudioSystem::Update, one tick of frames
+	//     (AudioEngine::AdvanceSimulationTick) for every tick run since the last pull: exactly one per Tick, and 0 to
+	//     MaxStepsPerFrame per frame of a ScriptedClock test run. Ticks run before the session took time are never pulled.
+	//     Leaving lockstep (without OwnsAudioTime) or destroying the session gives time back (EndSimulationTime).
+	//   - Order. Voices pause before time goes back to the device and resume only after the session has taken it; hosts
+	//     that pause a lockstep session and leave lockstep (play.pause, a lockstep owner's disconnect) call SetPaused(true)
+	//     first. Destroying the session is Stop: the AudioSystem releases every voice and restores the group volumes, and
+	//     only then does time go back.
+	// Audio is not simulated state: it never reaches the state hash.
 	//
 	// Determinism (§1.3, §4.12): the scene, the state hash, the UUIDs it creates and its Random stream depend only on the
 	// document, the seed, the FixedHz and the input applied per tick, in every configuration.
@@ -249,6 +284,11 @@ namespace Engine {
 		[[nodiscard]] UUIDGenerator& GetIdGenerator();
 		[[nodiscard]] PlayInput& GetInput();
 		[[nodiscard]] const PlayInput& GetInput() const;
+		// M12: the session's audio (see "Audio" above): null in Simulate mode and without PlaySessionSpecification::Audio.
+		[[nodiscard]] AudioSystem* GetAudioSystem();
+		[[nodiscard]] const AudioSystem* GetAudioSystem() const;
+		// M12: true while the session holds the audio engine's simulation time (see "Audio" above).
+		[[nodiscard]] bool IsAudioTimeOwned() const;
 
 		// The state hash (§13.7, §5.1): XXH64 (seed 0) over the scene's minified canonical serialization
 		// (SceneSerializer::SaveToString, JsonStyle::Minified), followed by the tick, the Random state and the UUIDGenerator's
@@ -273,6 +313,7 @@ namespace Engine {
 
 		// Run state (see the class comment).
 		[[nodiscard]] bool IsPaused() const;
+		// Also pauses or resumes the session's voices unless the session is in lockstep (see "Audio" above, M12).
 		void SetPaused(bool paused);
 		[[nodiscard]] double GetTimeScale() const;
 		// Errors: InvalidArgument for a scale that is not finite or outside [0, MaxTimeScale].
@@ -281,7 +322,9 @@ namespace Engine {
 		// The client that owns lockstep; NoClient when the session is not in lockstep or an in-process driver owns it.
 		[[nodiscard]] ClientId GetLockstepOwner() const;
 		// Enters (true) or leaves (false) lockstep; `owner` is the owning client (NoClient for in-process drivers). Leaving
-		// lockstep does not resume: the session keeps its paused state.
+		// lockstep does not resume: the session keeps its paused state. With an AudioSystem, entering takes the engine's
+		// simulation time and lets the voices follow the ticks, and leaving pauses them when the session is paused and gives
+		// time back unless the session is a test run (see "Audio" above, M12).
 		void SetLockstep(bool lockstep, ClientId owner = NoClient);
 		// True while a play.step runs (the host does not throttle its frames then, §4.2).
 		[[nodiscard]] bool IsStepping() const;

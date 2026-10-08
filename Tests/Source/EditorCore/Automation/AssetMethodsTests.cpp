@@ -283,6 +283,65 @@ namespace Engine {
 			CHECK_FALSE(reloaded["result"]["_meta"].contains("sceneChangedOnDisk"));
 			CHECK(editor.GetScene().FindEntityByPath("/Outside").IsValid());
 		}
+
+		// M12 (Docs/Decisions/0015-m12-decisions.md): sound effects through asset.create, asset.getProperties and
+		// asset.setProperties (Architecture §6.6, §10.3, §13.5). Skipped skeletons: stream C implements them over stream B's
+		// .sfx document functions and removes the skips, and turns the SoundEffect refusal of "asset.create supports dry runs
+		// and rejects bad paths and values" into a success.
+
+		TEST_CASE("AssetMethods: asset.create makes a SoundEffect from values over the defaults" * doctest::skip(true))
+		{
+			Test::AutomationFixture setup("AssetCreateSoundEffect");
+			const Json created = CallOrFail(setup, "asset.create", ParseAssetMethodJson(R"({"type": "SoundEffect", "path": "Assets/Audio/Lock.sfx",
+				"values": {"Seed": 3, "Layers": [{"Wave": "Square", "Notes": ["A3:0.05"]}]}})"));
+			CHECK(created["asset"]["type"] == Json("AudioClip"));
+			CHECK(created["path"] == Json("Assets/Audio/Lock.sfx"));
+			CHECK(created["undoIndex"] != Json(0));
+			const Result<std::string> text = setup.GetEditor().GetVfs().ReadText(VfsPath::Create("project", "Assets/Audio/Lock.sfx").value_or(VfsPath()));
+			REQUIRE_MESSAGE(text.has_value(), text.error().ToString());
+			CHECK(text->starts_with("{\n\t\"Format\": \"SoundEffect\",\n\t\"Version\": 1,"));
+			// The new clip imports through SoundEffectImporter.
+			const Json info = CallOrFail(setup, "asset.info", ParseAssetMethodJson(R"({"asset": "Assets/Audio/Lock.sfx"})"));
+			CHECK(info["importer"] == Json("SoundEffect"));
+			CHECK(info["diagnostics"].empty());
+			// Undo removes the file and its .meta.
+			CallOrFail(setup, "edit.undo", Json::object());
+			CHECK_FALSE(setup.GetEditor().GetVfs().Exists(VfsPath::Create("project", "Assets/Audio/Lock.sfx").value_or(VfsPath())));
+		}
+
+		TEST_CASE("AssetMethods: asset.getProperties and asset.setProperties read and patch a sound effect" * doctest::skip(true))
+		{
+			Test::AutomationFixture setup("AssetSoundEffectProperties");
+			CallOrFail(setup, "asset.create", ParseAssetMethodJson(R"({"type": "SoundEffect", "path": "Assets/Audio/Coin.sfx",
+				"values": {"Layers": [{"Wave": "Square", "Notes": ["B5:0.05", "E6:0.2"]}]}})"));
+			const Json properties = CallOrFail(setup, "asset.getProperties", ParseAssetMethodJson(R"({"asset": "Assets/Audio/Coin.sfx"})"));
+			CHECK(properties["values"]["Seed"] == Json(0));
+			CHECK(properties["values"]["Volume"] == Json(1.0));
+			REQUIRE(properties["values"]["Layers"].size() == 1);
+			CHECK(properties["values"]["Layers"][0]["Envelope"]["Sustain"] == Json(1.0));
+
+			const Json patched = CallOrFail(setup, "asset.setProperties", ParseAssetMethodJson(R"({"asset": "Assets/Audio/Coin.sfx", "values": {"Volume": 0.5}})"));
+			CHECK(patched["values"]["Volume"] == Json(0.5));
+			CHECK(patched["values"]["Layers"].size() == 1);
+			CallOrFail(setup, "edit.undo", Json::object());
+			const Json undone = CallOrFail(setup, "asset.getProperties", ParseAssetMethodJson(R"({"asset": "Assets/Audio/Coin.sfx"})"));
+			CHECK(undone["values"]["Volume"] == Json(1.0));
+		}
+
+		TEST_CASE("AssetMethods: an invalid sound effect is InvalidParams located in its values" * doctest::skip(true))
+		{
+			Test::AutomationFixture setup("AssetInvalidSoundEffect");
+			const Json badNote = setup.Request("asset.create", ParseAssetMethodJson(R"({"type": "SoundEffect", "path": "Assets/Audio/Bad.sfx",
+				"values": {"Layers": [{"Notes": ["Z9:0.1"]}]}})"));
+			CHECK(badNote["error"]["code"] == Json(-32602));
+			CHECK(badNote["error"]["data"]["issues"][0]["pointer"] == Json("/values/Layers/0/Notes/0"));
+			const Json outOfRange = setup.Request("asset.create", ParseAssetMethodJson(R"({"type": "SoundEffect", "path": "Assets/Audio/Loud.sfx",
+				"values": {"Volume": 4, "Layers": [{"Duration": 0.1}]}})"));
+			CHECK(outOfRange["error"]["data"]["issues"][0]["pointer"] == Json("/values/Volume"));
+			const Json noLayers = setup.Request("asset.create", ParseAssetMethodJson(R"({"type": "SoundEffect", "path": "Assets/Audio/Empty.sfx"})"));
+			CHECK(noLayers["error"]["code"] == Json(-32602));
+			CHECK_FALSE(setup.GetEditor().GetVfs().Exists(VfsPath::Create("project", "Assets/Audio/Bad.sfx").value_or(VfsPath())));
+		}
 	}
 
 }

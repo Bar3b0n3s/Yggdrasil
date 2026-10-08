@@ -47,8 +47,9 @@ namespace Engine {
 	void RegisterBuiltinImporters(ImporterRegistry& registry);
 
 	// Registers every importer's settings struct and enum (§5.4: "every *ImportSettings" is a reflected struct) in the order
-	// of RegisterBuiltinImporters. The editor's RegisterEditorMethodTypes calls it (asset.getImportSettings and
-	// asset.setImportSettings validate against these types); the registry suite's registry includes it.
+	// of RegisterBuiltinImporters, then M12's AudioImportSettings and the .sfx description structs (SoundEffectImporter.h).
+	// The editor's RegisterEditorMethodTypes calls it (asset.getImportSettings and asset.setImportSettings validate against
+	// these types); the registry suite's registry includes it.
 	void RegisterAssetPipelineTypes(TypeRegistry& registry);
 
 }

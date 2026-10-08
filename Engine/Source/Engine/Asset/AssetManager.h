@@ -41,7 +41,7 @@ namespace Engine {
 	//     mirrors by (handle, GetVersion(handle)).
 	//   - One load path: both managers decode cooked bytes with the same IAssetLoader (AssetLoaderRegistry).
 	//   - A missing or failed asset never yields null through GetOrPlaceholder: the caller gets the type's placeholder
-	//     (GetPlaceholderHandle: Cube, Missing, Error, Default font), the problem is logged once and an AssetDiagnostic is
+	//     (GetPlaceholderHandle: Cube, Missing, Error, Default font, the silent clip), the problem is logged once and an AssetDiagnostic is
 	//     recorded (GetDiagnostics; the editor, "_meta" through the log, project.validate). Export refuses to run while any
 	//     diagnostic has severity Error.
 	//   - The procedural built-ins (GetProceduralBuiltinEntries) are served by this base class without loading anything, so

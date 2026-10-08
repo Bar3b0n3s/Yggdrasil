@@ -180,6 +180,13 @@ namespace Engine {
 		uint64_t ListenerId = 0;
 	};
 
+	AudioEngineSpecification GetDefaultAudioSpecification(WindowMode window)
+	{
+		if (window == WindowMode::Windowed)
+			return AudioEngineSpecification{ .Device = AudioDeviceKind::System, .Decoding = AudioDecoding::Threaded };
+		return AudioEngineSpecification{ .Device = AudioDeviceKind::None, .Decoding = AudioDecoding::Deterministic };
+	}
+
 	std::span<const CommandLineOption> GetEngineCommandLineOptions()
 	{
 		return Utils::EngineCommandLineOptions;
@@ -315,6 +322,7 @@ namespace Engine {
 			.Graphics = m_Specification.Renderer == RendererMode::Vulkan ? std::optional<GraphicsSpecification>(m_Specification.Graphics)
 																		 : std::nullopt,
 			.EnginePak = m_Specification.EnginePak,
+			.Audio = m_Specification.Audio.value_or(GetDefaultAudioSpecification(m_Specification.Window)),
 		};
 		Result<Scope<EngineContext>> context = EngineContext::Create(contextSpecification);
 		if (!context.has_value())
@@ -421,6 +429,13 @@ namespace Engine {
 	void Application::OnFrameUpdate(const FrameTime& frame)
 	{
 		OnUpdate(frame);
+		// M12 (§10.1): the audio engine's frame, after the frame phase's AudioSystem::Update (inside OnUpdate): device
+		// notifications and re-creation, finished voices, and the host pull of a device-less engine. Real time, so unscaled.
+		if (AudioEngine* audio = m_Context->GetAudioEngine(); audio != nullptr)
+		{
+			m_AudioClockSeconds += frame.UnscaledDeltaTime;
+			audio->Update(m_AudioClockSeconds, frame.UnscaledDeltaTime);
+		}
 	}
 
 	void Application::OnFrameRender(const FrameTime& frame)

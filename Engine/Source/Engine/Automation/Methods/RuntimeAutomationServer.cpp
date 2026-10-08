@@ -206,6 +206,11 @@ namespace Engine {
 				const RuntimeAutomationServerSpecification& specification = m_Host->Specification;
 				return specification.WallClock ? specification.WallClock() : std::chrono::steady_clock::now();
 			}
+
+			[[nodiscard]] AudioEngine* GetAudioEngine() const override
+			{
+				return m_Host->Specification.Audio;
+			}
 		private:
 			RuntimeHost* m_Host = nullptr; // documented back-reference
 		};

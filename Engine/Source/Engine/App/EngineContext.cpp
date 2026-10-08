@@ -78,6 +78,9 @@ namespace Engine {
 		if (specification.Graphics.has_value())
 			ENGINE_TRY(WithContext(context->CreateGraphics(*specification.Graphics), Utils::DescribeEngineContextStep(EngineContextStep::Graphics)));
 
+		if (specification.Audio.has_value())
+			ENGINE_TRY(WithContext(context->CreateAudio(*specification.Audio), Utils::DescribeEngineContextStep(EngineContextStep::Audio)));
+
 		return context;
 	}
 
@@ -156,6 +159,14 @@ namespace Engine {
 		return {};
 	}
 
+	Status EngineContext::CreateAudio(const AudioEngineSpecification& /*audio*/)
+	{
+		// The contract's stub creates no engine, so every context stays silent (GetAudioEngine null) until stream A
+		// implements AudioEngine::Create and this step (AudioEngine::Create(audio, m_Vfs) into m_AudioEngine).
+		ENGINE_CONTRACT_STUB();
+		return {};
+	}
+
 	GpuMessageCounts EngineContext::DestroyGraphics()
 	{
 		// The factory and the library hold GPU objects (pipelines, shaders), which must be gone before the device.
@@ -173,6 +184,7 @@ namespace Engine {
 			case EngineContextStep::EngineResources: return "EngineResources";
 			case EngineContextStep::Window:          return "Window";
 			case EngineContextStep::Graphics:        return "Graphics";
+			case EngineContextStep::Audio:           return "Audio";
 		}
 
 		ENGINE_CORE_ASSERT(false, "Unknown EngineContextStep {}", std::to_underlying(step));

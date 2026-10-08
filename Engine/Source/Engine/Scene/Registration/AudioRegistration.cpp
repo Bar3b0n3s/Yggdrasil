@@ -1,23 +1,20 @@
 #include "EnginePCH.h"
 #include "Engine/Scene/Components/BuiltinComponents.h"
 
+#include "Engine/Audio/AudioTypes.h"
 #include "Engine/Core/Random.h"
 #include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Scene/ComponentRegistration.h"
 
 #include <utility>
 
-// The Audio category (Docs/Decisions/0006-m3-decisions.md, decision 9; Architecture §10.2). Distances are metres and
-// strictly positive, so distance attenuation never divides zero by zero; pitch is strictly positive.
+// The Audio category (Docs/Decisions/0006-m3-decisions.md, decision 9; Architecture §10.2). Distances are metres and at
+// least MinAudioDistance, so distance attenuation never divides zero by zero; pitch is at least MinAudioPitch (both in
+// Audio/AudioTypes.h, which the AudioEngine checks voices against too).
 
 namespace Engine {
 
 	namespace Utils {
-
-		// The smallest attenuation distance, in metres.
-		constexpr float MinAudioDistance = 0.01f;
-		// The smallest playback pitch (a multiplier of the clip's speed).
-		constexpr float MinAudioPitch = 0.01f;
 
 		// The attenuation range runs from MinDistance out to MaxDistance (equal is allowed: no attenuation).
 		static void ValidateAudioSource(const AudioSourceComponent& source, ValidationContext& context)
@@ -53,14 +50,14 @@ namespace Engine {
 			.Field("Clip", &AudioSourceComponent::Clip, "The audio clip to play; null plays nothing.")
 			.Field("Volume", &AudioSourceComponent::Volume, "The linear volume multiplier (1 is the clip's own level).", { .Min = 0.0 })
 			.Field("Pitch", &AudioSourceComponent::Pitch, "The playback speed and pitch multiplier (1 is unchanged).",
-				{ .Min = Utils::MinAudioPitch })
+				{ .Min = MinAudioPitch })
 			.Field("Loop", &AudioSourceComponent::Loop, "Whether the clip restarts when it ends.")
 			.Field("PlayOnStart", &AudioSourceComponent::PlayOnStart, "Whether the clip starts playing when the play session starts.")
 			.Field("Spatial", &AudioSourceComponent::Spatial, "Whether the sound is positioned at the entity and attenuated with distance.")
 			.Field("MinDistance", &AudioSourceComponent::MinDistance, "The distance within which the sound plays at full volume, in metres.",
-				{ .Min = Utils::MinAudioDistance, .Unit = "m" })
+				{ .Min = MinAudioDistance, .Unit = "m" })
 			.Field("MaxDistance", &AudioSourceComponent::MaxDistance, "The distance beyond which the sound stops getting quieter, in metres.",
-				{ .Min = Utils::MinAudioDistance, .Unit = "m" })
+				{ .Min = MinAudioDistance, .Unit = "m" })
 			.Field("Attenuation", &AudioSourceComponent::Attenuation, "The distance attenuation model of a spatial sound.")
 			.Field("Rolloff", &AudioSourceComponent::Rolloff, "How quickly the attenuation model falls off (1 is the model's own rate).",
 				{ .Min = 0.0 })

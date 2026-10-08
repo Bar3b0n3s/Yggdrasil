@@ -1,6 +1,7 @@
 -- miniaudio (https://github.com/mackron/miniaudio), vendored at 0.11.25. See VENDOR.md.
--- Upstream ships the implementation translation unit (miniaudio.c defines MINIAUDIO_IMPLEMENTATION and
--- includes miniaudio.h), so it is compiled as-is; no local implementation file is needed.
+-- The implementation translation unit is the local miniaudio_vorbis.c (VENDOR.md, "Local additions"): upstream's
+-- miniaudio.c (MINIAUDIO_IMPLEMENTATION + miniaudio.h) with stb_vorbis (Vendor/stb/stb_vorbis.c) included around it,
+-- the route miniaudio.h documents for Ogg Vorbis decoding. miniaudio.c stays vendored unmodified but is not compiled.
 --
 -- Consumers include <miniaudio.h> with includedirs { "%{wks.location}/Vendor/miniaudio" } (adjust to the
 -- workspace layout) and should use the same configuration defines as this project (see VENDOR.md):
@@ -17,16 +18,19 @@ project "miniaudio"
 	targetdir ("%{wks.location}/bin/" .. OutputDir .. "/%{prj.name}")
 	objdir ("%{wks.location}/bin-int/" .. OutputDir .. "/%{prj.name}")
 
-	-- Mirrors add_library(miniaudio miniaudio.c miniaudio.h) in upstream CMakeLists.txt.
+	-- Mirrors add_library(miniaudio miniaudio.c miniaudio.h) in upstream CMakeLists.txt, with the local implementation
+	-- translation unit in place of miniaudio.c (Ogg Vorbis through stb_vorbis, VENDOR.md).
 	files
 	{
 		"miniaudio.h",
-		"miniaudio.c",
+		"miniaudio_vorbis.c",
 	}
 
+	-- "../stb" holds stb_vorbis.c, which miniaudio_vorbis.c includes; nothing else of stb is used here.
 	includedirs
 	{
 		".",
+		"../stb",
 	}
 
 	-- Configuration defines. These must match what consumers see when they include miniaudio.h.
@@ -43,7 +47,7 @@ project "miniaudio"
 	-- Upstream's implementation has exactly one MSVC warning at the default level: C4244 (64-to-32-bit conversion)
 	-- in the dr_wav "smpl" chunk parser, ma_dr_wav__read_smpl_to_metadata_obj. It is harmless (see VENDOR.md) and
 	-- the source stays unmodified, so it is disabled for this vendored translation unit only.
-	filter { "toolset:msc*", "files:miniaudio.c" }
+	filter { "toolset:msc*", "files:miniaudio_vorbis.c" }
 		disablewarnings { "4244" }
 
 	filter "system:linux"

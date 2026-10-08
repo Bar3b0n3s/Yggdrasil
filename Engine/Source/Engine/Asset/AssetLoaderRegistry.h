@@ -33,16 +33,16 @@ namespace Engine {
 		[[nodiscard]] std::vector<AssetType> GetTypes() const;
 
 		// Reads the artifact's header and dispatches to the loader of its type. Errors: those of ReadCookedArtifact; Unsupported
-		// "no loader for AssetType <Type>" (the environment, audio clip, script and replay loaders arrive with M8, M12 and
-		// M13); the loader's errors.
+		// "no loader for AssetType <Type>" (the environment, script and replay loaders arrive with M8 and M13); the loader's
+		// errors.
 		[[nodiscard]] Result<AssetRef<Asset>> Load(std::span<const std::byte> cooked, const AssetLoadContext& context) const;
 	private:
 		std::vector<Scope<IAssetLoader>> m_Loaders; // sorted by type
 	};
 
 	// Registers the M6 loaders: Mesh (LoadCookedMesh), Texture (LoadCookedTexture), Material (LoadCookedMaterial), Font
-	// (LoadCookedFont), Scene (LoadCookedScene) and Prefab (LoadCookedPrefab). Both asset managers call it; later milestones
-	// add theirs here.
+	// (LoadCookedFont), Scene (LoadCookedScene) and Prefab (LoadCookedPrefab), and M12's AudioClip (LoadCookedAudioClip).
+	// Both asset managers call it; later milestones add theirs here.
 	void RegisterBuiltinLoaders(AssetLoaderRegistry& registry);
 
 }

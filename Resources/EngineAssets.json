@@ -171,6 +171,16 @@
 			"Importer": "Environment",
 			"Settings": {},
 			"Generator": ""
+		},
+		{
+			"Handle": "000000000000024b",
+			"Path": "engine://Audio/Silence",
+			"Type": "AudioClip",
+			"Source": "Procedural",
+			"File": "",
+			"Importer": "",
+			"Settings": {},
+			"Generator": ""
 		}
 	]
 }

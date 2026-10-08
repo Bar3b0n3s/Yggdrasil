@@ -35,8 +35,8 @@ namespace Engine {
 
 	// The built-in handles of M6, grouped in blocks of 0x40 per type. Reserved for later milestones (added to
 	// EngineAssets.json and here by them): 0x0186 the blue-noise texture (M8, §8.4; a Generated entry, generator
-	// "BlueNoise") and 0x0241-0x024a the sound-effect presets Click, Blip, Coin, Jump, Hit, Explosion, PowerUp, LineClear,
-	// Win and Lose (M12, §7.1).
+	// "BlueNoise"). The audio block (M12, Docs/Decisions/0015-m12-decisions.md) holds the ten sound-effect presets and the
+	// silent clip.
 	struct BuiltinAssetHandles
 	{
 		BuiltinAssetHandles() = delete;
@@ -64,20 +64,36 @@ namespace Engine {
 		// Resources/Environments/*.hdr through EnvironmentImporter (M8; until then they have no importer and do not load).
 		static constexpr AssetHandle StudioEnvironment{ 0x0201 };
 		static constexpr AssetHandle SkyEnvironment{ 0x0202 };
+		// M12: engine://Audio/{Click, Blip, Coin, Jump, Hit, Explosion, PowerUp, LineClear, Win, Lose}, the sound-effect presets
+		// (§7.1, §10.3): File entries, Resources/Audio/<Name>.sfx through SoundEffectImporter.
+		static constexpr AssetHandle ClickSound{ 0x0241 };
+		static constexpr AssetHandle BlipSound{ 0x0242 };
+		static constexpr AssetHandle CoinSound{ 0x0243 };
+		static constexpr AssetHandle JumpSound{ 0x0244 };
+		static constexpr AssetHandle HitSound{ 0x0245 };
+		static constexpr AssetHandle ExplosionSound{ 0x0246 };
+		static constexpr AssetHandle PowerUpSound{ 0x0247 };
+		static constexpr AssetHandle LineClearSound{ 0x0248 };
+		static constexpr AssetHandle WinSound{ 0x0249 };
+		static constexpr AssetHandle LoseSound{ 0x024a };
+		// M12: engine://Audio/Silence (procedural): 0.1 s of 48 kHz mono silence (CreateSilentAudioClip), the AudioClip
+		// placeholder (§7.2 "silent clip").
+		static constexpr AssetHandle SilentClip{ 0x024b };
 	};
 
-	// The placeholder of a type (§7.2 failure policy): the unit Cube mesh, the Missing checker texture, the Error material
-	// and the Default font; null for the other types (scenes, prefabs, scripts and replays report their failure to the
-	// caller; the environment placeholder, the fallback colour, and the silent clip arrive with M8 and M12).
+	// The placeholder of a type (§7.2 failure policy): the unit Cube mesh, the Missing checker texture, the Error material,
+	// the Default font and the silent clip (M12); null for the other types (scenes, prefabs, scripts and replays report their
+	// failure to the caller; the environment placeholder, the fallback colour, arrives with M8).
 	[[nodiscard]] constexpr AssetHandle GetPlaceholderHandle(AssetType type)
 	{
 		switch (type)
 		{
-			case AssetType::Mesh:     return BuiltinAssetHandles::CubeMesh;
-			case AssetType::Texture:  return BuiltinAssetHandles::MissingTexture;
-			case AssetType::Material: return BuiltinAssetHandles::ErrorMaterial;
-			case AssetType::Font:     return BuiltinAssetHandles::DefaultFont;
-			default:                  return AssetHandle();
+			case AssetType::Mesh:      return BuiltinAssetHandles::CubeMesh;
+			case AssetType::Texture:   return BuiltinAssetHandles::MissingTexture;
+			case AssetType::Material:  return BuiltinAssetHandles::ErrorMaterial;
+			case AssetType::Font:      return BuiltinAssetHandles::DefaultFont;
+			case AssetType::AudioClip: return BuiltinAssetHandles::SilentClip;
+			default:                   return AssetHandle();
 		}
 	}
 
@@ -151,8 +167,8 @@ namespace Engine {
 		std::vector<BuiltinAssetEntry> m_Entries; // sorted by handle
 	};
 
-	// The catalogue entries of the procedural built-ins, compiled in (the meshes, materials and textures above), sorted by
-	// handle. Both asset managers serve these without reading anything, so placeholders never fail.
+	// The catalogue entries of the procedural built-ins, compiled in (the meshes, materials and textures above, and the silent
+	// clip, M12), sorted by handle. Both asset managers serve these without reading anything, so placeholders never fail.
 	[[nodiscard]] std::span<const BuiltinAssetEntry> GetProceduralBuiltinEntries();
 
 	// The procedural built-in `handle`, generated deterministically (identical bytes on every run and configuration).

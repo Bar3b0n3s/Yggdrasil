@@ -466,6 +466,9 @@ namespace Engine {
 			specification.MaxFrames = 10;
 			specification.WorkerCount = 0;
 			specification.EnableImGui = true;
+			// No test touches the machine's audio device (§15.1 T1): a device-less, deterministic engine instead of the
+			// windowed default (System, Threaded).
+			specification.Audio = AudioEngineSpecification{};
 			UseTestRenderer(specification);
 			RenderingApplication application(std::move(specification));
 			application.MinimizeAtFrame = 3;
@@ -755,6 +758,19 @@ namespace Engine {
 			Test::ExpectLog logged(LogLevel::Error, "the test mount logged an error at teardown");
 			Test::ExpectLog failed(LogLevel::Error, "--expect-no-errors");
 			CHECK(application.Run() == ExitCode::Failed);
+		}
+
+		TEST_CASE("Application: windowed runs default to the system audio device and headless runs to none")
+		{
+			// M12 (Architecture §10.1; Docs/Decisions/0015-m12-decisions.md).
+			const AudioEngineSpecification windowed = GetDefaultAudioSpecification(WindowMode::Windowed);
+			CHECK(windowed.Device == AudioDeviceKind::System);
+			CHECK(windowed.Decoding == AudioDecoding::Threaded);
+			const AudioEngineSpecification headless = GetDefaultAudioSpecification(WindowMode::Headless);
+			CHECK(headless.Device == AudioDeviceKind::None);
+			CHECK(headless.Decoding == AudioDecoding::Deterministic);
+			CHECK(windowed.InjectedDeviceCreationFailures == 0);
+			CHECK_FALSE(ApplicationSpecification{}.Audio.has_value());
 		}
 	}
 

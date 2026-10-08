@@ -1,13 +1,13 @@
-# stb (stb_image, stb_image_write, stb_image_resize2)
+# stb (stb_image, stb_image_write, stb_image_resize2, stb_vorbis)
 
 | | |
 |---|---|
 | Upstream | https://github.com/nothings/stb |
-| Version | No release tags exist upstream; pinned to `master`. Header versions: stb_image v2.30, stb_image_write v1.16, stb_image_resize2 v2.18 |
+| Version | No release tags exist upstream; pinned to `master`. Header versions: stb_image v2.30, stb_image_write v1.16, stb_image_resize2 v2.18, stb_vorbis v1.22 |
 | Commit | `2c980bb59875b0d32144a71867fbdebb2f77cd20` (master, 2026-08-01) |
-| Date vendored | 2026-10-05 |
+| Date vendored | 2026-10-05 (stb_vorbis.c: 2026-10-08, M12, at the same commit) |
 | License | Dual: MIT **or** Public Domain (Unlicense), at the user's choice (SPDX: `MIT OR Unlicense`). Full text: `LICENSE` (also at the end of each header). |
-| Kind | Single-header C libraries (no premake project); compile as C or C++ |
+| Kind | Single-header C libraries (no premake project); compile as C or C++. `stb_vorbis.c` is compiled only inside miniaudio's implementation translation unit (below) |
 
 ## Contents
 
@@ -16,9 +16,12 @@ Kept (byte-identical to upstream at the commit above, LF line endings):
 - `stb_image.h` - image loading (PNG, JPEG, TGA, BMP, PSD, GIF, HDR, PIC, PNM)
 - `stb_image_write.h` - PNG/BMP/TGA/JPEG/HDR writing
 - `stb_image_resize2.h` - image resizing (SSE2/AVX/NEON SIMD)
+- `stb_vorbis.c` - Ogg Vorbis decoder (v1.22; SHA-256 `4c7cb2ff1f7011e9d67950446b7eb9ca044f2e464d76bfbb0b84dd2e23e65636`,
+  192,790 bytes), approved for M12 in `Docs/Decisions/0001-approvals.md`. Byte-identical to miniaudio 0.11.25's
+  `extras/stb_vorbis.c` (same SHA-256), the copy miniaudio documents for its Vorbis backend.
 - `LICENSE`
 
-Removed: every other stb library (`stb_truetype.h`, `stb_vorbis.c`, `stb_ds.h`, ...), `deprecated/`, `docs/`, `data/`, `tests/`, `tools/`, `stb_image_resize_test/`, `README.md`, `CONTRIBUTING.md`, `SECURITY.md`, `.NO_AI/`, `.travis.yml`, `.github/`. Add other stb headers here only when the engine needs them.
+Removed: every other stb library (`stb_truetype.h`, `stb_ds.h`, ...), `deprecated/`, `docs/`, `data/`, `tests/`, `tools/`, `stb_image_resize_test/`, `README.md`, `CONTRIBUTING.md`, `SECURITY.md`, `.NO_AI/`, `.travis.yml`, `.github/`. Add other stb headers here only when the engine needs them.
 
 Local modifications: **none**. Do not rename `stb_image_resize2.h`: its implementation re-includes itself by name (`STBIR__HEADER_FILENAME`).
 
@@ -29,6 +32,19 @@ Upstream policy note: stb's `CONTRIBUTING.md` forbids issues and pull requests w
 - Include directory: `Vendor/stb` (add as an *external* include dir - required for warning-free /WX builds on MSVC, see Warnings)
 - Include as: `#include <stb_image.h>`, `<stb_image_write.h>`, `<stb_image_resize2.h>`
 - Link requirements: nothing beyond the C runtime and the math library. Windows/macOS: none. Linux: `libm` (`pow`, `ldexp`, ...), which `g++`/`clang++` already link for every C++ program; add `links { "m" }` only if the code ever ends up in a pure-C link.
+
+### stb_vorbis (Ogg Vorbis, M12)
+
+`stb_vorbis.c` is not used by first-party code. The miniaudio project compiles it inside its local implementation
+translation unit `Vendor/miniaudio/miniaudio_vorbis.c` (with `Vendor/stb` on that project's include path): the
+declarations (`STB_VORBIS_HEADER_ONLY`) before miniaudio's implementation, which then registers its Vorbis decoding
+backend, and the decoder's implementation after it (`Vendor/miniaudio/VENDOR.md`, "Local additions"). Engine code decodes
+Ogg Vorbis only through miniaudio (`Engine/Audio`). No defines are set: the stdio paths stay in, since miniaudio's
+backend uses `stb_vorbis_open_filename` for file paths. It adds no MSVC warning at the default warning level of the
+miniaudio project (checked with MSVC 14.51 when it was vendored). clang-cl (the portability stage's build, which tolerates
+vendored warnings) reports one: `-Wtautological-compare` at line 1404 (`f->stream_start + loc < f->stream_start`, an
+overflow check of `set_file_offset` that the compiler may fold because pointer overflow is undefined); it is upstream's
+code and harmless for the in-memory streams miniaudio hands it, whose offsets come from the decoder itself.
 
 ### Implementation TU (exactly one in the whole program)
 
@@ -84,6 +100,7 @@ stb has no releases; pin a `master` commit.
 
 1. `git ls-remote https://github.com/nothings/stb.git refs/heads/master`
 2. `git clone --depth 1 https://github.com/nothings/stb.git <tmp>` (verify `git rev-parse HEAD`)
-3. Replace `stb_image.h`, `stb_image_write.h`, `stb_image_resize2.h`, `LICENSE`.
+3. Replace `stb_image.h`, `stb_image_write.h`, `stb_image_resize2.h`, `stb_vorbis.c`, `LICENSE`. Compare `stb_vorbis.c`
+   with the `extras/stb_vorbis.c` of the vendored miniaudio release and record any difference here.
 4. Ensure LF line endings (clone with `-c core.autocrlf=false`); note the new header version numbers from the first line of each header.
-5. Update this file (commit, versions, date, warning line numbers), rebuild all configurations and run the unit tests (image import tests).
+5. Update this file (commit, versions, SHA-256 of `stb_vorbis.c`, date, warning line numbers), rebuild all configurations and run the unit tests (image import tests, and the audio decoder and importer tests for stb_vorbis).

@@ -1,6 +1,7 @@
 #include "EnginePCH.h"
 #include "Engine/Asset/AssetLoaderRegistry.h"
 
+#include "Engine/Asset/AudioClipData.h"
 #include "Engine/Asset/CookedFormat.h"
 #include "Engine/Asset/DocumentData.h"
 #include "Engine/Asset/FontData.h"
@@ -67,6 +68,11 @@ namespace Engine {
 			return LoadCookedFont(cooked);
 		}
 
+		static Result<AssetRef<AudioClipData>> LoadAudioClip(std::span<const std::byte> cooked, const AssetLoadContext& /*context*/)
+		{
+			return LoadCookedAudioClip(cooked);
+		}
+
 	}
 
 	AssetLoaderRegistry::AssetLoaderRegistry() = default;
@@ -127,6 +133,8 @@ namespace Engine {
 		registry.Register(CreateScope<PayloadLoader<MaterialData, &Utils::LoadMaterial>>());
 		registry.Register(CreateScope<PayloadLoader<TextureData, &Utils::LoadTexture>>());
 		registry.Register(CreateScope<PayloadLoader<FontData, &Utils::LoadFont>>());
+		// M12 (Docs/Decisions/0015-m12-decisions.md).
+		registry.Register(CreateScope<PayloadLoader<AudioClipData, &Utils::LoadAudioClip>>());
 	}
 
 }

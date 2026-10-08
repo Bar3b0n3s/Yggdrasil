@@ -1,6 +1,7 @@
 #include "EditorPCH.h"
 #include "EditorCore/EditorContext.h"
 
+#include "EditorCore/Audio/AudioPreview.h"
 #include "EditorCore/Commands/CompositeCommand.h"
 #include "EditorCore/Commands/SceneEditCommand.h"
 #include "EditorCore/Play/EditorPlayController.h"
@@ -345,6 +346,9 @@ namespace Engine {
 			.EngineAssetGenerators = {},
 		});
 		engine.SetAssetManager(m_Assets.get());
+		// M12: the asset browser's audio preview, when the engine context has an audio engine.
+		if (AudioEngine* audio = engine.GetAudioEngine(); audio != nullptr)
+			m_AudioPreview = CreateScope<AudioPreview>(*audio, *m_Assets);
 
 		// Provenance for every write of the manager's AssetWriter, the editor's own and the manager's .meta writes alike
 		// (§13.12 rule 1); never during a dry run, and not for read-only projects (no provenance).
@@ -407,6 +411,8 @@ namespace Engine {
 	{
 		if (HasProject())
 			m_Assets->Update(nowSeconds);
+		if (m_AudioPreview != nullptr)
+			m_AudioPreview->Update();
 	}
 
 	Status EditorContext::CheckProjectWrite(const VfsPath& path, std::string_view action) const
@@ -683,6 +689,9 @@ namespace Engine {
 			ENGINE_ASSERT(stopped.has_value(), "stopping the play session of a closing project failed: {}", stopped ? std::string() : stopped.error().ToString());
 		}
 		CloseScene();
+		// M12: a preview plays a clip of the closing project.
+		if (m_AudioPreview != nullptr)
+			m_AudioPreview->Stop();
 		// The manager's jobs and hot reload use project:// and cache://: they stop before the mounts go.
 		m_Assets->CloseProject();
 		VirtualFileSystem& vfs = GetVfs();

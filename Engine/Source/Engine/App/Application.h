@@ -4,6 +4,7 @@
 #include "Engine/App/EngineContext.h"
 #include "Engine/App/ExitCode.h"
 #include "Engine/App/FrameLoop.h"
+#include "Engine/Audio/AudioEngine.h"
 #include "Engine/Core/Base.h"
 #include "Engine/Core/Clock.h"
 #include "Engine/Core/FixedStepScheduler.h"
@@ -94,7 +95,15 @@ namespace Engine {
 		// at Error level; an exit code other than Success is kept. The export smoke test and the exported-runtime tests pass
 		// it (§14.2 step 7).
 		bool ExpectNoErrors = false;
+		// M12: the context's AudioEngine (EngineContextSpecification::Audio, §10.1); nullopt: GetDefaultAudioSpecification of
+		// Window. Every application has an engine; tests that start windowed applications may ask for AudioDeviceKind::None.
+		std::optional<AudioEngineSpecification> Audio{};
 	};
+
+	// The audio engine an application gets by default (§10.1): windowed runs play through the system's default device with
+	// miniaudio's job thread (AudioDeviceKind::System, AudioDecoding::Threaded); headless runs have no device and decode
+	// deterministically (AudioDeviceKind::None, AudioDecoding::Deterministic), pulling frames per frame or per tick.
+	[[nodiscard]] AudioEngineSpecification GetDefaultAudioSpecification(WindowMode window);
 
 	// The options every application accepts, handled by ApplyEngineCommandLine:
 	//   --headless              Window = Headless, Clock = Manual (all headless runs use ManualClock, §13.9)
@@ -124,9 +133,10 @@ namespace Engine {
 	//
 	// Run, on the main thread, with the ProcessContext alive (asserted):
 	//   1. Per-context initialization (§4.1 level 2): EngineContext::Create with the main window, the worker count, the
-	//      RegisterTypes function, the ProcessContext's user-data folder as user:// and, with RendererMode::Vulkan, the
-	//      GraphicsSpecification; then the frame's rendering objects (a Swapchain on the window in a windowed process, an
-	//      OffscreenTarget of the window's framebuffer size in a headless one, the FramePacer, the GpuProfiler, and the
+	//      RegisterTypes function, the ProcessContext's user-data folder as user://, with RendererMode::Vulkan the
+	//      GraphicsSpecification, and the audio specification (Audio, or GetDefaultAudioSpecification; M12); then the frame's
+	//      rendering objects (a Swapchain on the window in a windowed process, an OffscreenTarget of the window's
+	//      framebuffer size in a headless one, the FramePacer, the GpuProfiler, and the
 	//      ImGuiLayer when EnableImGui is set, with ImGuiIniPath under the user-data folder); a clock from the
 	//      specification (SystemClock, or ManualClock with the loop's FixedDelta); then OnInitialize. A failure is logged
 	//      at Error level (and shown in an error dialog when the ProcessContext has ShowErrorDialogs), whatever was built
@@ -136,16 +146,17 @@ namespace Engine {
 	//      swapchain accepts) stays InitFailed.
 	//   2. The frame loop (FrameLoop; FrameLoopSpecification::ThrottleToFixedHz for headless runs with ThrottleHeadless),
 	//      until RequestExit, an unhandled window close (ExitCode::Success) or MaxFrames (ExitCode::Success). The hooks
-	//      below run inside it. With a device, each frame renders (§8.2): FramePacer::BeginFrame and
-	//      GpuProfiler::BeginFrame, the swapchain image or the offscreen target, a command list cleared to FrameClearColor
-	//      (Graphics/RenderContext.h), OnRender, then with ImGui ImGuiLayer::BeginFrame (with the time since the last UI
-	//      frame), OnImGuiRender, EndFrame and Render into the same target; the submission (the swapchain's semaphores
-	//      queued before it), Present, FramePacer::EndFrame and GraphicsDevice::RunGarbageCollection. A frame the swapchain
-	//      skips (minimized or just recreated) records and submits nothing, calls neither OnRender nor OnImGuiRender, and
-	//      passes GraphicsDevice::GetLastSubmissionID to FramePacer::EndFrame. A headless frame target replaced by a resize
-	//      stays alive until every frame that cleared it has completed. A Gpu error from ImGuiLayer::Render (a pipeline,
-	//      buffer or binding set could not be created) ends the process through FatalError(OutOfMemory) (§8.14 item 7);
-	//      other Render errors are logged once per run of failing frames.
+	//      below run inside it. After OnUpdate, each frame updates the context's AudioEngine (AudioEngine::Update with the
+	//      frame clock's accumulated unscaled time and the frame's unscaled delta, M12). With a device, each frame renders
+	//      (§8.2): FramePacer::BeginFrame and GpuProfiler::BeginFrame, the swapchain image or the offscreen target, a command
+	//      list cleared to FrameClearColor (Graphics/RenderContext.h), OnRender, then with ImGui ImGuiLayer::BeginFrame (with
+	//      the time since the last UI frame), OnImGuiRender, EndFrame and Render into the same target; the submission (the
+	//      swapchain's semaphores queued before it), Present, FramePacer::EndFrame and GraphicsDevice::RunGarbageCollection.
+	//      A frame the swapchain skips (minimized or just recreated) records and submits nothing, calls neither OnRender nor
+	//      OnImGuiRender, and passes GraphicsDevice::GetLastSubmissionID to FramePacer::EndFrame. A headless frame target
+	//      replaced by a resize stays alive until every frame that cleared it has completed. A Gpu error from
+	//      ImGuiLayer::Render (a pipeline, buffer or binding set could not be created) ends the process through
+	//      FatalError(OutOfMemory) (§8.14 item 7); other Render errors are logged once per run of failing frames.
 	//   3. OnShutdown, GraphicsDevice::WaitForIdle, the rendering objects (ImGuiLayer, GpuProfiler, swapchain or offscreen
 	//      target, pacer), then the GPU services (EngineContext::DestroyGraphics) with the ExpectNoGpuErrors check (see the
 	//      field), then the rest of the context (reverse order), then the ExpectNoErrors check, which so counts the errors
@@ -243,6 +254,7 @@ namespace Engine {
 		Scope<ImGuiLayer> m_ImGuiLayer;           // with EnableImGui, from InitializeRendering to ShutdownRendering
 		Scope<LoggedErrorCounter> m_LoggedErrors; // with ExpectNoErrors, from the start of Run to its end
 		std::optional<int> m_PendingExitCode;     // an exit requested before the frame loop exists (during OnInitialize)
+		double m_AudioClockSeconds = 0.0;         // the frame clock's accumulated unscaled time for AudioEngine::Update (M12)
 		bool m_HasRun = false;
 	};
 

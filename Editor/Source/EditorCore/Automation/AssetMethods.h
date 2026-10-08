@@ -130,15 +130,19 @@ namespace Engine {
 		Material,
 		Scene,
 		Prefab,
-		SoundEffect, // M12 (AudioSystem's .sfx); Unsupported until then, located at /type
+		SoundEffect, // M12: a .sfx sound effect (§6.6)
 		Folder
 	};
 
 	// asset.create {type, path, values?}: creates a native asset at project-relative `path` (below Assets/, with the type's
-	// extension: .material, .scene, .prefab, .sfx) with its .meta, or a folder. `values` (Material only) is a partial
-	// MaterialData object (registry PascalCase keys) over the defaults; for the other types it must be absent. A Scene is an
-	// empty scene named after the file stem; a Prefab holds one root entity named after the file stem. One AssetEditCommand;
-	// supports dry runs (the files then go to the overlay, §13.4).
+	// extension: .material, .scene, .prefab, .sfx) with its .meta, or a folder. `values` is a partial object of registry
+	// PascalCase keys over the defaults: MaterialData's ("Material") for a Material, and, from M12, the sound effect's
+	// ("SoundEffect", Audio/SoundSynth.h, written with SoundEffectToText) for a SoundEffect, which must then pass
+	// ValidateSoundEffect (at least one layer; every violation InvalidParams located under /values, such as
+	// /values/Layers/0/Notes/2); for the other types it must be absent. A Scene is an empty scene named after the file stem;
+	// a Prefab holds one root entity named after the file stem. The new asset's id and type are its importer's main type
+	// (a SoundEffect is an AudioClip, §7.4). One AssetEditCommand; supports dry runs (the files then go to the overlay,
+	// §13.4).
 	struct AssetCreateParams
 	{
 		AssetCreateType Type = AssetCreateType::Material;
@@ -153,8 +157,8 @@ namespace Engine {
 		uint32_t UndoIndex = 0;
 	};
 
-	// asset.getProperties {asset}: the properties of a native asset (§13.5: materials; sound effects from M12) as its
-	// registry JSON (PascalCase, every field).
+	// asset.getProperties {asset}: the properties of a native asset (§13.5: materials; sound effects from M12, the .sfx
+	// document's fields after its header) as its registry JSON (PascalCase, every field).
 	struct AssetGetPropertiesParams
 	{
 		std::string Asset{};

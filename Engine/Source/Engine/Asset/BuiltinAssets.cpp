@@ -1,6 +1,7 @@
 #include "EnginePCH.h"
 #include "Engine/Asset/BuiltinAssets.h"
 
+#include "Engine/Asset/AudioClipData.h"
 #include "Engine/Asset/BuiltinMeshes.h"
 #include "Engine/Asset/BuiltinTextures.h"
 #include "Engine/Asset/MeshData.h"
@@ -30,7 +31,7 @@ namespace Engine {
 			AssetType Type = AssetType::None;
 		};
 
-		constexpr std::array<ProceduralEntry, 14> ProceduralEntries = { {
+		constexpr std::array<ProceduralEntry, 15> ProceduralEntries = { {
 			{ BuiltinAssetHandles::CubeMesh, "engine://Meshes/Cube", AssetType::Mesh },
 			{ BuiltinAssetHandles::SphereMesh, "engine://Meshes/Sphere", AssetType::Mesh },
 			{ BuiltinAssetHandles::PlaneMesh, "engine://Meshes/Plane", AssetType::Mesh },
@@ -45,6 +46,7 @@ namespace Engine {
 			{ BuiltinAssetHandles::FlatNormalTexture, "engine://Textures/FlatNormal", AssetType::Texture },
 			{ BuiltinAssetHandles::CheckerTexture, "engine://Textures/Checker", AssetType::Texture },
 			{ BuiltinAssetHandles::MissingTexture, "engine://Textures/Missing", AssetType::Texture },
+			{ BuiltinAssetHandles::SilentClip, "engine://Audio/Silence", AssetType::AudioClip },
 		} };
 
 		// The generator of each procedural handle.
@@ -392,6 +394,8 @@ namespace Engine {
 			return AssetRef<Asset>(CreateRef<TextureData>(GenerateBuiltinTexture(*texture)));
 		if (const std::optional<BuiltinMaterial> material = Utils::FindProcedural(ProceduralMaterials, handle))
 			return AssetRef<Asset>(CreateRef<MaterialData>(CreateBuiltinMaterial(*material)));
+		if (handle == BuiltinAssetHandles::SilentClip)
+			return AssetRef<Asset>(CreateRef<AudioClipData>(CreateSilentAudioClip()));
 		return MakeError(ErrorCode::NotFound, "{} is not a procedural built-in asset", handle);
 	}
 

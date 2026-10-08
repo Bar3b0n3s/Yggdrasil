@@ -15,12 +15,13 @@ namespace Engine {
 
 	TEST_SUITE("Asset")
 	{
-		TEST_CASE("AssetLoaderRegistry: the M6 loaders are registered")
+		TEST_CASE("AssetLoaderRegistry: the built-in loaders are registered")
 		{
 			AssetLoaderRegistry loaders;
 			RegisterBuiltinLoaders(loaders);
+			// The M6 loaders and M12's audio clip loader, in AssetType order.
 			const std::vector<AssetType> expected = { AssetType::Scene, AssetType::Prefab, AssetType::Mesh, AssetType::Material,
-				AssetType::Texture, AssetType::Font };
+				AssetType::Texture, AssetType::AudioClip, AssetType::Font };
 			CHECK(loaders.GetTypes() == expected);
 			for (const AssetType type : expected)
 			{

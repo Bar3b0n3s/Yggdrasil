@@ -1,11 +1,13 @@
 #include "EnginePCH.h"
 #include "Engine/AssetPipeline/ImporterRegistry.h"
 
+#include "Engine/AssetPipeline/Importers/AudioImporter.h"
 #include "Engine/AssetPipeline/Importers/FontImporter.h"
 #include "Engine/AssetPipeline/Importers/GltfImporter.h"
 #include "Engine/AssetPipeline/Importers/MaterialImporter.h"
 #include "Engine/AssetPipeline/Importers/PrefabImporter.h"
 #include "Engine/AssetPipeline/Importers/SceneImporter.h"
+#include "Engine/AssetPipeline/Importers/SoundEffectImporter.h"
 #include "Engine/AssetPipeline/Importers/TextureImporter.h"
 #include "Engine/Core/Assert.h"
 
@@ -110,6 +112,10 @@ namespace Engine {
 		TextureImporter::RegisterTypes(registry);
 		GltfImporter::RegisterTypes(registry);
 		FontImporter::RegisterTypes(registry);
+		// M12 (Docs/Decisions/0015-m12-decisions.md): the audio import settings and the .sfx description. Stream B registers
+		// AudioImporter and SoundEffectImporter in RegisterBuiltinImporters with their implementation.
+		AudioImporter::RegisterTypes(registry);
+		SoundEffectImporter::RegisterTypes(registry);
 	}
 
 }

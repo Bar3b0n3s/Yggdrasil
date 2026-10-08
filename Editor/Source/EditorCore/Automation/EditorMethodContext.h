@@ -89,6 +89,8 @@ namespace Engine {
 		[[nodiscard]] SceneSummary MakeSceneSummary(const Scene& scene) const override;
 		[[nodiscard]] AssetManager* GetAssets() const override;
 		[[nodiscard]] std::chrono::steady_clock::time_point GetWallClockTime() const override;
+		// M12: the editor's EngineContext::GetAudioEngine.
+		[[nodiscard]] AudioEngine* GetAudioEngine() const override;
 	private:
 		EditorContext* m_Editor = nullptr;    // documented back-reference
 		AutomationServer* m_Server = nullptr; // documented back-reference

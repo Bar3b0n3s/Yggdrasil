@@ -2,6 +2,7 @@
 
 #include "Engine/Asset/BuiltinAssets.h"
 
+#include "Engine/Asset/AudioClipData.h"
 #include "Engine/Asset/MaterialData.h"
 #include "Engine/Asset/MeshData.h"
 #include "Engine/Asset/TextureData.h"
@@ -9,6 +10,8 @@
 #include "Support/TestData.h"
 
 #include <algorithm>
+#include <cstddef>
+#include <cstdint>
 #include <format>
 #include <initializer_list>
 #include <set>
@@ -59,14 +62,17 @@ namespace Engine {
 			CHECK(GetPlaceholderHandle(AssetType::Texture) == BuiltinAssetHandles::MissingTexture);
 			CHECK(GetPlaceholderHandle(AssetType::Material) == BuiltinAssetHandles::ErrorMaterial);
 			CHECK(GetPlaceholderHandle(AssetType::Font) == BuiltinAssetHandles::DefaultFont);
+			CHECK(GetPlaceholderHandle(AssetType::AudioClip) == BuiltinAssetHandles::SilentClip);
+			CHECK(IsBuiltinAssetHandle(BuiltinAssetHandles::ClickSound));
+			CHECK(IsBuiltinAssetHandle(BuiltinAssetHandles::SilentClip));
 			CHECK_FALSE(GetPlaceholderHandle(AssetType::Scene).IsValid());
 			CHECK_FALSE(GetPlaceholderHandle(AssetType::Script).IsValid());
 		}
 
-		TEST_CASE("BuiltinAssets: the procedural entries are the compiled-in meshes, materials and textures")
+		TEST_CASE("BuiltinAssets: the procedural entries are the compiled-in meshes, materials, textures and the silent clip")
 		{
 			const std::span<const BuiltinAssetEntry> entries = GetProceduralBuiltinEntries();
-			REQUIRE(entries.size() == 14);
+			REQUIRE(entries.size() == 15);
 			std::set<std::string> paths;
 			for (size_t index = 0; index < entries.size(); ++index)
 			{
@@ -84,7 +90,9 @@ namespace Engine {
 			}
 			CHECK(entries.front().Handle == BuiltinAssetHandles::CubeMesh);
 			CHECK(entries.front().Path == "engine://Meshes/Cube");
-			CHECK(entries.back().Handle == BuiltinAssetHandles::MissingTexture);
+			CHECK(entries.back().Handle == BuiltinAssetHandles::SilentClip);
+			CHECK(entries.back().Path == "engine://Audio/Silence");
+			CHECK(entries.back().Type == AssetType::AudioClip);
 		}
 
 		TEST_CASE("BuiltinAssets: EngineAssets.json names exactly the compiled-in handles")
@@ -264,6 +272,22 @@ namespace Engine {
 				if (const AssetRef<TextureData> texture = AssetCast<TextureData>(*asset))
 					CHECK(ValidateTextureData(*texture).has_value());
 			}
+			// The silent clip (M12): 0.1 s of 48 kHz mono 16-bit zeros, already decoded.
+			Result<AssetRef<Asset>> silence = CreateProceduralBuiltinAsset(BuiltinAssetHandles::SilentClip);
+			REQUIRE_MESSAGE(silence.has_value(), silence.error().ToString());
+			const AssetRef<AudioClipData> clip = AssetCast<AudioClipData>(*silence);
+			REQUIRE(clip != nullptr);
+			CHECK(clip->Encoding == AudioClipEncoding::Pcm16);
+			CHECK(clip->SampleRate == 48000);
+			CHECK(clip->ChannelCount == 1);
+			CHECK(clip->FrameCount == 4800);
+			CHECK_FALSE(clip->Stream);
+			CHECK(clip->Bytes.size() == 4800 * sizeof(int16_t));
+			CHECK(std::ranges::all_of(clip->Bytes, [](std::byte value)
+			{
+				return value == std::byte{ 0 };
+			}));
+			CHECK(GetAudioClipDuration(*clip) == doctest::Approx(0.1));
 			Result<AssetRef<Asset>> notProcedural = CreateProceduralBuiltinAsset(BuiltinAssetHandles::DefaultFont);
 			REQUIRE_FALSE(notProcedural.has_value());
 			CHECK(notProcedural.error().GetCode() == ErrorCode::NotFound);

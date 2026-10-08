@@ -33,7 +33,8 @@ namespace Engine {
 
 		}
 
-		EditorTestFixture::EditorTestFixture(std::string_view label, CommandHistoryLimits historyLimits, RegisterTypesFunction registerTypes)
+		EditorTestFixture::EditorTestFixture(std::string_view label, CommandHistoryLimits historyLimits, RegisterTypesFunction registerTypes,
+			std::optional<AudioEngineSpecification> audio)
 			: m_Directory(label)
 		{
 			std::error_code error;
@@ -45,6 +46,7 @@ namespace Engine {
 				.WorkerCount = 0,
 				.UserDataDirectory = m_Directory / "UserData",
 				.RegisterTypes = registerTypes != nullptr ? registerTypes : &RegisterEditorMethodTypes,
+				.Audio = audio,
 			});
 			Utils::RequireEditorStep(engine, "creating the engine context");
 			m_Engine = std::move(*engine);
