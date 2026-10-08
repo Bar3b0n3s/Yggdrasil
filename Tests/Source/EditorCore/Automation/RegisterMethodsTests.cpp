@@ -17,16 +17,17 @@
 namespace Engine {
 
 	// The M4 method set (Roadmap M4), M5's screenshot methods (registered at the M4/M5 merge, ADR 0009 decision 33), M6's
-	// asset.*, prefab.*, entity.bounds and project.refreshAssets (ADR 0010 decision 20) and M7's play.*, input.inject and
-	// project.export (ADR 0012 decisions 4, 8 and 14), test hooks excluded.
+	// asset.*, prefab.*, entity.bounds and project.refreshAssets (ADR 0010 decision 20), M7's play.*, input.inject and
+	// project.export (ADR 0012 decisions 4, 8 and 14) and M11's physics.bodyInfo (ADR 0014 decision 18), test hooks
+	// excluded.
 	static const std::vector<std::string>& GetExpectedMethodNames()
 	{
 		static const std::vector<std::string> ExpectedNames = { "asset.create", "asset.delete", "asset.getImportSettings", "asset.getProperties",
 			"asset.import", "asset.info", "asset.list", "asset.move", "asset.reimport", "asset.setImportSettings", "asset.setProperties",
 			"component.list", "component.schema", "docs.get", "edit.batch", "edit.getSelection", "edit.history", "edit.redo", "edit.select",
 			"edit.undo", "editor.screenshot", "entity.bounds", "entity.create", "entity.destroy", "entity.duplicate", "entity.get",
-			"entity.reparent", "entity.update", "events.read", "input.inject", "log.read", "play.pause", "play.resume", "play.setTimeScale",
-			"play.start", "play.state", "play.step", "play.stop", "prefab.apply", "prefab.create", "prefab.instantiate", "prefab.revert",
+			"entity.reparent", "entity.update", "events.read", "input.inject", "log.read", "physics.bodyInfo", "play.pause", "play.resume",
+			"play.setTimeScale", "play.start", "play.state", "play.step", "play.stop", "prefab.apply", "prefab.create", "prefab.instantiate", "prefab.revert",
 			"prefab.unpack", "project.create", "project.export", "project.getSettings", "project.info", "project.open", "project.refreshAssets",
 			"project.save", "project.setSettings", "project.upgrade", "project.validate", "rpc.discover", "scene.diff", "scene.get", "scene.new", "scene.open",
 			"scene.query", "scene.save", "scene.tree", "session.hello", "session.info", "session.shutdown", "viewport.screenshot" };
@@ -35,7 +36,7 @@ namespace Engine {
 
 	TEST_SUITE("EditorCore")
 	{
-		TEST_CASE("RegisterMethods: the editor registers exactly the M4 method set, the M5 screenshot methods, the M6 asset methods and the M7 play, input and export methods")
+		TEST_CASE("RegisterMethods: the editor registers exactly the documented method set")
 		{
 			Test::EditorTestFixture fixture("RegisterSet");
 			MethodRegistry methods(fixture.GetEngine().GetTypeRegistry());
@@ -117,8 +118,8 @@ namespace Engine {
 			const std::vector<std::string> batchable = { "asset.create", "asset.delete", "asset.getImportSettings", "asset.getProperties",
 				"asset.info", "asset.list", "asset.move", "asset.setImportSettings", "asset.setProperties", "component.list", "component.schema",
 				"docs.get", "edit.getSelection", "edit.history", "entity.bounds", "entity.create", "entity.destroy", "entity.duplicate", "entity.get",
-				"entity.reparent", "entity.update", "events.read", "log.read", "prefab.apply", "prefab.create", "prefab.instantiate", "prefab.revert",
-				"prefab.unpack", "project.getSettings", "project.info", "project.setSettings", "project.validate", "rpc.discover", "scene.diff",
+				"entity.reparent", "entity.update", "events.read", "log.read", "physics.bodyInfo", "prefab.apply", "prefab.create", "prefab.instantiate",
+				"prefab.revert", "prefab.unpack", "project.getSettings", "project.info", "project.setSettings", "project.validate", "rpc.discover", "scene.diff",
 				"scene.get", "scene.query", "scene.tree", "session.info" };
 			for (const MethodDescriptor* method : methods.GetMethods())
 			{

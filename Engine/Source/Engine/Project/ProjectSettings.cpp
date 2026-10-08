@@ -16,6 +16,9 @@ namespace Engine {
 		// Architecture §9.2 ("up to 16 named project layers"); Physics/PhysicsLayers.h's MaxPhysicsLayers, which Project
 		// cannot include (ADR 0014 decision 4; ProjectSettingsTests checks that they agree).
 		static constexpr size_t MaxProjectPhysicsLayers = 16;
+		// The largest magnitude of a Physics.Gravity component, in m/s^2: Physics/PhysicsTypes.h's MaxPhysicsGravity, which
+		// the physics world refuses beyond (ADR 0014 decision 34; ProjectSettingsTests checks that they agree).
+		static constexpr double MaxProjectGravity = 1.0e12;
 		static constexpr std::string_view DefaultLayer = "Default";
 		static constexpr double MinShadowMapSize = 256.0;
 		static constexpr double MaxShadowMapSize = 8192.0;
@@ -257,7 +260,8 @@ namespace Engine {
 			.Field("MaxEntities", &SimulationSettings::MaxEntities, "Most entities one play session may hold.", { .Min = 1.0 });
 
 		registry.Struct<PhysicsSettings>("PhysicsSettings", "World gravity and the collision layers of physics bodies.")
-			.Field("Gravity", &PhysicsSettings::Gravity, "World gravity in metres per second squared.", { .Unit = "m/s^2" })
+			.Field("Gravity", &PhysicsSettings::Gravity, "World gravity in metres per second squared; each component at most 1e12 in magnitude.",
+				{ .Min = -Utils::MaxProjectGravity, .Max = Utils::MaxProjectGravity, .Unit = "m/s^2" })
 			.Field("Layers", &PhysicsSettings::Layers, "Collision layer names, unique and non-empty: 1 to 16, the first one \"Default\".")
 			.Field("Collisions", &PhysicsSettings::Collisions, "Pairs of declared layer names whose bodies collide; unlisted pairs do not.")
 			.Validate(&Utils::ValidatePhysics)

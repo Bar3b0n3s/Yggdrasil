@@ -12,19 +12,22 @@
 // Physics determinism through the play session's state hash (Architecture §9.1, §9.7: "A 200-body pile stepped 600 times
 // gives the same ComputeStateHash() across repeated runs and with Jolt thread counts 0, 1 and 8. Contact-event order is
 // identical across runs. The same pile's final hash is a committed constant checked in the Debug and Release unit runs";
-// Roadmap M11 acceptance, names verbatim). The acceptance cases are skipped skeletons of the M11 contract
-// (Docs/Decisions/0014-m11-decisions.md): stream B makes them pass and removes the skips.
+// Roadmap M11 acceptance, names verbatim; Docs/Decisions/0014-m11-decisions.md decision 19).
 
 namespace Engine {
 
 	namespace {
 
-		// The pile's state hash after 600 ticks, recorded by stream B from the first run of the finished implementation (the
-		// same in Debug, Release and Dist, §9.1; ADR 0014 decision 19). A change of physics or of the pile that legitimately
-		// changes the simulation updates it with the reason in the change's review (§13.6 "Re-recording").
-		constexpr uint64_t CommittedPileHash = 0x0000000000000000;
+		// The pile's state hash after 600 ticks, recorded by the M11 integration from the merged implementation and verified
+		// equal in Debug, Release and Dist (§9.1; ADR 0014 decisions 19 and 33). A change of physics or of the pile that
+		// legitimately changes the simulation updates it with the reason in the change's review (§13.6 "Re-recording").
+		constexpr uint64_t CommittedPileHash = 0x279ae005b817678e;
 
 		constexpr uint32_t PileTicks = 600;
+
+		// The time limit of one pile run: the 600 steps of a 200-body pile take about half a minute in Debug, so the cases
+		// that run several piles get a doctest::timeout of this per run instead of the default per-case limit.
+		constexpr double PileTimeoutSeconds = 150.0;
 
 		// 200 boxes of three sizes in a 5 x 5 footprint, 8 layers high, each layer offset and rotated a little so the pile
 		// topples and keeps many contacts busy, over a ground; positions are exact binary fractions.
@@ -50,33 +53,11 @@ namespace Engine {
 			}
 		}
 
-		// Sets the process's Jolt worker thread count for its lifetime and restores the previous count on every exit path, a
-		// failed REQUIRE included, so no later test runs with another count (tests never depend on order, CodeStyle §14).
-		class ScopedWorkerThreadCount
-		{
-		public:
-			explicit ScopedWorkerThreadCount(uint32_t count)
-				: m_Original(PhysicsEngine::GetWorkerThreadCount())
-			{
-				REQUIRE(PhysicsEngine::SetWorkerThreadCount(count).has_value());
-			}
-
-			~ScopedWorkerThreadCount()
-			{
-				CHECK(PhysicsEngine::SetWorkerThreadCount(m_Original).has_value());
-			}
-
-			ScopedWorkerThreadCount(const ScopedWorkerThreadCount&) = delete;
-			ScopedWorkerThreadCount& operator=(const ScopedWorkerThreadCount&) = delete;
-		private:
-			uint32_t m_Original = 0;
-		};
-
 		// The pile's hash after PileTicks ticks with `workerThreads` Jolt threads; `events`, when given, receives every event.
 		// It REQUIREs, so callers keep it out of CHECK expressions.
 		uint64_t RunPile(uint32_t workerThreads, std::vector<PhysicsEvent>* events = nullptr)
 		{
-			const ScopedWorkerThreadCount threads(workerThreads);
+			const Test::ScopedWorkerThreadCount threads(workerThreads);
 			Test::SceneTestFixture fixture;
 			BuildPile(fixture.GetScene());
 			Result<Scope<PlaySession>> session = Test::StartPhysicsSession(fixture, Test::MakePhysicsSessionSpecification(fixture, 1234));
@@ -95,7 +76,7 @@ namespace Engine {
 
 	TEST_SUITE("Session")
 	{
-		TEST_CASE("Physics: state hash identical with 0, 1 and 8 Jolt threads" * doctest::skip(true))
+		TEST_CASE("Physics: state hash identical with 0, 1 and 8 Jolt threads" * doctest::timeout(PileTimeoutSeconds * 4.0))
 		{
 			const uint64_t none = RunPile(0);
 			const uint64_t one = RunPile(1);
@@ -107,7 +88,7 @@ namespace Engine {
 			CHECK(again == none);
 		}
 
-		TEST_CASE("Physics: 200-body pile hash equals the committed constant" * doctest::skip(true))
+		TEST_CASE("Physics: 200-body pile hash equals the committed constant" * doctest::timeout(PileTimeoutSeconds))
 		{
 			// One committed value for every configuration (§9.1: a configuration-dependent result is a bug).
 			const uint64_t hash = RunPile(PhysicsEngine::GetWorkerThreadCount());
@@ -115,7 +96,7 @@ namespace Engine {
 			CHECK(hash == CommittedPileHash);
 		}
 
-		TEST_CASE("Physics: contact event order identical across runs" * doctest::skip(true))
+		TEST_CASE("Physics: contact event order identical across runs" * doctest::timeout(PileTimeoutSeconds * 3.0))
 		{
 			std::vector<PhysicsEvent> first;
 			std::vector<PhysicsEvent> second;

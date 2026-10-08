@@ -3,6 +3,7 @@
 #include "Engine/Core/Aabb.h"
 #include "Engine/Core/Base.h"
 #include "Engine/Core/Result.h"
+#include "Engine/Physics/PhysicsTypes.h"
 
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
@@ -135,13 +136,40 @@ namespace Engine {
 		// InvalidState when the PhysicsEngine is not initialized; Validation "PHYSICS_INVALID_SHAPE: collider <i>: <reason>"
 		// for no collider, a non-finite or non-positive dimension, a non-finite or zero scale component, a scale IsValidScale
 		// refuses, a non-unit rotation, a hull or mesh index out of range, a SharedShapeGeometry without a shape or with
-		// several colliders, or a ShapeResult error (its text quoted). Nothing is created on error.
+		// several colliders, a collider smaller than MinColliderSize or larger than MaxColliderSize after scaling, a position or
+		// scaled coordinate beyond MaxPhysicsCoordinate, a ShapeResult error (its text quoted), or a whole shape whose bounds or centre of mass are not
+		// finite or lie beyond four times MaxPhysicsCoordinate. Colliders are built with a uniform density far below Jolt's
+		// default (a power of two times it), so the sums Jolt makes for a compound's centre of mass stay finite; no body uses
+		// a shape's own mass.
+		// Nothing is created on error.
 		[[nodiscard]] static Result<Ref<const PhysicsShape>> Create(const BodyShapeDescription& description);
+
+		// The smallest collider Create accepts, in metres after scaling: twice the registry's 1 mm minimum dimension
+		// (MinColliderDimension), measured on the collider's smallest extent (a triangle mesh, which may be flat, on its
+		// largest). Below it Jolt's collision tolerances (about 0.1 mm) break down and its asserts can be reached.
+		static constexpr float MinColliderSize = 0.002f;
+		// The largest collider Create accepts, in metres after scaling, measured on the collider's largest extent (a box's
+		// edge, a sphere's diameter, a capsule's height, a hull's or mesh's bounding box). Jolt finds how deep two convex
+		// shapes (a mesh's triangles included) penetrate with float products of about the sixth power of their size (EPA),
+		// which overflow for colliders a few thousand kilometres across and lose contacts (in MSVC Debug, Jolt's floating-
+		// point exceptions end the process) well before; at 100 km two colliders keep five orders of magnitude of margin.
+		// Positions and offsets may still reach MaxPhysicsCoordinate.
+		static constexpr float MaxColliderSize = 1.0e5f;
 
 		// Whether `scale` can be applied to `geometry` (Jolt's Shape::IsValidScale on the unscaled shape, a
 		// SharedShapeGeometry's on its shape: spheres and capsules need |x| = |y| = |z|; every component non-zero and
 		// finite). A SharedShapeGeometry without a shape takes no scale.
 		[[nodiscard]] static bool IsValidScale(const PhysicsShapeGeometry& geometry, const glm::vec3& scale);
+
+		// Whether a Dynamic body of `mass` kilograms whose degrees of freedom are `allowedDofs` can take this shape: the
+		// check PhysicsWorld::CreateBody and SetShape make for every Dynamic body (its mass properties are the shape's scaled
+		// to `mass`), so the edit-time validation reports what the world would refuse. Errors: InvalidArgument for a mass
+		// that is not finite or not in (0, MaxPhysicsMass]; Validation "PHYSICS_ALL_DOFS_LOCKED: ..." for no degree of
+		// freedom, or a body that cannot translate whose shape has no rotational inertia; Validation
+		// "PHYSICS_NONCONVEX_DYNAMIC: ..." for a shape holding a triangle mesh; Validation "PHYSICS_INVALID_SHAPE: ..." for a
+		// shape without volume, or one whose inertia at `mass` exceeds 1e18 kg m^2 (beyond it Jolt's float decomposition of
+		// the inertia overflows: a box of MaxPhysicsMass about 75 km across).
+		[[nodiscard]] Status CheckDynamicBody(float mass, PhysicsDofs allowedDofs) const;
 
 		// The bounds of the whole shape in body space.
 		[[nodiscard]] Aabb GetLocalBounds() const;

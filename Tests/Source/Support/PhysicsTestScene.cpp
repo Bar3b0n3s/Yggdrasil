@@ -2,6 +2,7 @@
 #include "Support/PhysicsTestScene.h"
 
 #include "Engine/Core/Assert.h"
+#include "Engine/Physics/PhysicsEngine.h"
 #include "Engine/Scene/Components/BoxColliderComponent.h"
 #include "Engine/Scene/Components/SphereColliderComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
@@ -120,6 +121,17 @@ namespace Engine {
 				return event.Self == self && event.Type == type;
 			});
 			return found;
+		}
+
+		ScopedWorkerThreadCount::ScopedWorkerThreadCount(uint32_t count)
+			: m_Original(PhysicsEngine::GetWorkerThreadCount())
+		{
+			REQUIRE(PhysicsEngine::SetWorkerThreadCount(count).has_value());
+		}
+
+		ScopedWorkerThreadCount::~ScopedWorkerThreadCount()
+		{
+			CHECK(PhysicsEngine::SetWorkerThreadCount(m_Original).has_value());
 		}
 
 	}

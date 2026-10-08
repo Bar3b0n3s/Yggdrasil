@@ -9,8 +9,7 @@
 #include <vector>
 
 // Physics layers and the collision filters (Architecture §9.2 "Layers"; §9.7 "layer matrix (incl. no Sensor-Static /
-// Sensor-Sensor pairs)"). The object-layer encoding is complete in the contract; the table's cases are skipped skeletons of
-// the M11 contract (Docs/Decisions/0014-m11-decisions.md): stream A implements the table and removes the skips.
+// Sensor-Sensor pairs)"): the object-layer encoding, the kind rule, and the project's layer table with its matrix and masks.
 
 namespace Engine {
 
@@ -63,7 +62,7 @@ namespace Engine {
 			CHECK(PhysicsObjectKindsCollide(Moving, Sensor));
 		}
 
-		TEST_CASE("PhysicsLayerTable: the default table is the Default layer colliding with itself" * doctest::skip(true))
+		TEST_CASE("PhysicsLayerTable: the default table is the Default layer colliding with itself")
 		{
 			const PhysicsLayerTable table;
 			CHECK(table.GetLayerCount() == 1);
@@ -72,7 +71,7 @@ namespace Engine {
 			CHECK(table.LayersCollide(0, 0));
 		}
 
-		TEST_CASE("PhysicsLayerTable: the matrix is symmetric and the pair filter applies the kind rule" * doctest::skip(true))
+		TEST_CASE("PhysicsLayerTable: the matrix is symmetric and the pair filter applies the kind rule")
 		{
 			Result<PhysicsLayerTable> table = MakeRollingBallTable();
 			REQUIRE_MESSAGE(table.has_value(), table.error().ToString());
@@ -104,7 +103,7 @@ namespace Engine {
 			CHECK_FALSE(table->ShouldCollide(MakePhysicsObjectLayer(track, Static), PhysicsBroadPhaseLayer::NonMoving));
 		}
 
-		TEST_CASE("PhysicsLayerTable: Create applies the project settings' rules with located errors" * doctest::skip(true))
+		TEST_CASE("PhysicsLayerTable: Create applies the project settings' rules with located errors")
 		{
 			// The JSON pointer of a refusal, or what went wrong instead; no assertion inside, so it can sit in a CHECK.
 			const auto pointerOf = [](std::vector<std::string> layers, std::vector<std::vector<std::string>> collisions) -> std::string
@@ -131,7 +130,7 @@ namespace Engine {
 			CHECK(PhysicsLayerTable::Create(tooMany, {}).has_value());
 		}
 
-		TEST_CASE("PhysicsLayerTable: MakeMask selects the named layers and suggests a name for a typo" * doctest::skip(true))
+		TEST_CASE("PhysicsLayerTable: MakeMask selects the named layers and suggests a name for a typo")
 		{
 			Result<PhysicsLayerTable> table = MakeRollingBallTable();
 			REQUIRE(table.has_value());

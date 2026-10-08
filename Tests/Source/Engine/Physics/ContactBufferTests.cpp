@@ -4,14 +4,13 @@
 
 #include <thread>
 
-// The contact buffer (Architecture §9.4: worker threads append, the main thread drains). Skipped skeletons of the M11
-// contract (Docs/Decisions/0014-m11-decisions.md): stream A implements the buffer and removes the skips.
+// The contact buffer (Architecture §9.4: worker threads append, the main thread drains).
 
 namespace Engine {
 
 	TEST_SUITE("Physics")
 	{
-		TEST_CASE("ContactBuffer: appends from many threads and drains every record exactly once" * doctest::skip(true))
+		TEST_CASE("ContactBuffer: appends from many threads and drains every record exactly once")
 		{
 			ContactBuffer buffer;
 			constexpr uint32_t ThreadCount = 4;
@@ -42,7 +41,7 @@ namespace Engine {
 				CHECK(count == RecordsPerThread);
 		}
 
-		TEST_CASE("ContactBuffer: Clear discards the records and keeps the buffer usable" * doctest::skip(true))
+		TEST_CASE("ContactBuffer: Clear discards the records and keeps the buffer usable")
 		{
 			ContactBuffer buffer;
 			buffer.Append(ContactEvent{ .Kind = ContactEventKind::Removed });

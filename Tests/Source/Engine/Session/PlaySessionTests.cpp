@@ -6,8 +6,10 @@
 #include "Engine/Scene/Components/RuntimeComponents.h"
 #include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Entity.h"
+#include "Engine/Scene/PhysicsSystem.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/SceneSerializer.h"
+#include "Support/PhysicsTestScene.h"
 #include "Support/SceneTestFixture.h"
 
 #include <iterator>
@@ -468,6 +470,50 @@ namespace Engine {
 			static_assert(PlaySession::ComputeSessionSeed(1337u, 42u) == (1337u ^ 42u));
 			CHECK(PlaySession::ComputeSessionSeed(0u, 0u) == 0u);
 			CHECK(PlaySession::ComputeSessionSeed(0xffffffffu, 0x0000ffffu) == 0xffff0000u);
+		}
+
+		TEST_CASE("PlaySession: the physics phases simulate bodies in Simulate mode as in Play mode")
+		{
+			// M11 (Docs/Decisions/0014-m11-decisions.md decision 14): Simulate is Play without scripts and audio, so a falling box
+			// lands in both, at the same place.
+			Test::SceneTestFixture fixture;
+			static_cast<void>(Test::AddGround(fixture.GetScene()));
+			static_cast<void>(Test::AddBoxBody(fixture.GetScene(), "Box", glm::vec3(0.0f, 3.0f, 0.0f), glm::vec3(0.5f), BodyType::Dynamic));
+			std::vector<glm::vec3> landed;
+			for (const PlayMode mode : { PlayMode::Play, PlayMode::Simulate })
+			{
+				Result<Scope<PlaySession>> session = Test::StartPhysicsSession(fixture, Test::MakePhysicsSessionSpecification(fixture, 42, mode));
+				REQUIRE_MESSAGE(session.has_value(), session.error().ToString());
+				Test::RunTicks(**session, 120);
+				landed.push_back(Test::GetWorldPosition(**session, "/Box"));
+			}
+			CHECK(landed[0].y == doctest::Approx(0.48f).epsilon(0.02));
+			CHECK(landed[1] == landed[0]);
+		}
+
+		TEST_CASE("PlaySession: the state hash covers the bodies' velocities")
+		{
+			// §5.1 "+ physics velocities at runtime": a velocity that has not moved anything yet changes the hash.
+			Test::SceneTestFixture fixture;
+			static_cast<void>(Test::AddBoxBody(fixture.GetScene(), "Box", glm::vec3(0.0f), glm::vec3(0.5f), BodyType::Dynamic));
+			Result<Scope<PlaySession>> session = Test::StartPhysicsSession(fixture, Test::MakePhysicsSessionSpecification(fixture));
+			REQUIRE_MESSAGE(session.has_value(), session.error().ToString());
+			const uint64_t before = (*session)->ComputeStateHash();
+			const UUID box = Test::GetEntityId((*session)->GetScene(), "/Box");
+			REQUIRE((*session)->GetPhysics().SetLinearVelocity(box, glm::vec3(1.0f, 0.0f, 0.0f)).has_value());
+			CHECK((*session)->ComputeStateHash() != before);
+		}
+
+		TEST_CASE("PlaySession: physics settings that cannot make a world fail the start with its context")
+		{
+			Test::SceneTestFixture fixture;
+			PlaySessionSpecification specification = Test::MakePhysicsSessionSpecification(fixture);
+			specification.Project.Physics.Layers = { "Track" };
+			specification.Project.Physics.Collisions = {};
+			const Result<Scope<PlaySession>> session = Test::StartPhysicsSession(fixture, specification);
+			REQUIRE_FALSE(session.has_value());
+			CHECK(session.error().GetCode() == ErrorCode::Validation);
+			CHECK(session.error().ToString().contains("while starting the play session"));
 		}
 
 		TEST_CASE("PlaySessionPhase: every phase has its enumerator name")

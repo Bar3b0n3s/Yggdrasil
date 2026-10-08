@@ -23,6 +23,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include <functional>
+
 // The Runtime's automation server (Architecture §13.2, §13.5 "Runtime subset"; Docs/Decisions/0012-m7-decisions.md
 // decision 12) in process: the shared handlers on the Runtime's context, over a play session of a test scene.
 
@@ -44,16 +46,20 @@ namespace Engine {
 			return registry;
 		}
 
-		// A Runtime server over a session of a scene with a "Ball" under "Game", and an in-process client.
+		// A Runtime server over a session of a scene with a "Ball" under "Game" (and whatever `build` adds before the session
+		// starts), and an in-process client.
 		class RuntimeServerFixture
 		{
 		public:
-			explicit RuntimeServerFixture(RuntimeAutomationServerSpecification specification = { .GameName = "Tiny" })
+			explicit RuntimeServerFixture(RuntimeAutomationServerSpecification specification = { .GameName = "Tiny" },
+				const std::function<void(Scene&)>& build = {})
 				: m_Registry(CreateRuntimeRegistry())
 			{
 				Scene& scene = m_Scene.GetScene();
 				Entity game = scene.CreateEntity("Game");
 				static_cast<void>(scene.CreateEntity("Ball", game));
+				if (build)
+					build(scene);
 				PlaySessionSpecification session;
 				session.Registry = m_Registry.get();
 				Result<Scope<PlaySession>> created = PlaySession::CreateFromScene(session, scene);
@@ -111,7 +117,7 @@ namespace Engine {
 			const MethodRegistry& methods = fixture.GetServer().GetMethods();
 			for (const char* name : { "session.hello", "session.info", "session.shutdown", "rpc.discover", "scene.tree", "scene.query", "scene.get",
 					 "entity.get", "entity.bounds", "log.read", "events.read", "play.pause", "play.resume", "play.step", "play.state",
-					 "play.setTimeScale", "input.inject", "viewport.screenshot" })
+					 "play.setTimeScale", "input.inject", "viewport.screenshot", "physics.bodyInfo" })
 			{
 				INFO(std::string(name));
 				const MethodDescriptor* method = methods.Find(name);
@@ -200,6 +206,40 @@ namespace Engine {
 			// Without the game's asset manager entity.bounds cannot read meshes.
 			const Json bounds = fixture.Call("entity.bounds", Json{ { "entities", Json::array({ "/Game" }) } });
 			CHECK(RuntimeServerFixture::GetErrorCode(bounds) == static_cast<int64_t>(RpcErrorCode::Unsupported));
+		}
+
+		TEST_CASE("RuntimeAutomationServer: physics.bodyInfo answers for an entity of the Runtime's session")
+		{
+			// The ball has no collider, so no body (§13.5: physics.bodyInfo is in the Runtime subset).
+			RuntimeServerFixture fixture;
+			const Json ball = fixture.Call("physics.bodyInfo", Json{ { "entity", "/Game/Ball" } });
+			CHECK(RuntimeServerFixture::GetErrorCode(ball) == static_cast<int64_t>(RpcErrorCode::NotFound));
+			CHECK(ball["error"]["data"]["issues"][0]["pointer"] == Json("/entity"));
+			const Json missing = fixture.Call("physics.bodyInfo", Json{ { "entity", "/Nobody" } });
+			CHECK(RuntimeServerFixture::GetErrorCode(missing) == static_cast<int64_t>(RpcErrorCode::NotFound));
+		}
+
+		TEST_CASE("RuntimeAutomationServer: physics.bodyInfo reports a body of the Runtime's session")
+		{
+			// A floor with a Static RigidBody and a box collider: the Runtime's session created its body.
+			RuntimeServerFixture fixture({ .GameName = "Tiny" }, [](Scene& scene)
+			{
+				Entity ground = scene.CreateEntity("Floor");
+				ground.AddComponent<RigidBodyComponent>(RigidBodyComponent{ .Type = BodyType::Static });
+				ground.AddComponent<BoxColliderComponent>(BoxColliderComponent{ .HalfExtents = glm::vec3(5.0f, 0.5f, 5.0f) });
+			});
+			const Json info = fixture.Call("physics.bodyInfo", Json{ { "entity", "/Floor" } });
+			REQUIRE_MESSAGE(RuntimeServerFixture::GetErrorCode(info) == 0, info.dump());
+			const Json& result = info["result"];
+			CHECK(result["entity"]["name"] == Json("Floor"));
+			CHECK(result["body"]["id"] == result["entity"]["id"]);
+			CHECK(result["origin"] == Json("RigidBody"));
+			CHECK(result["type"] == Json("Static"));
+			CHECK(result["layer"] == Json("Default"));
+			CHECK(result["colliders"].size() == 1);
+			CHECK(result["contacts"].empty());
+			CHECK(result["tick"] == Json(0));
+			CHECK(JsonReader(result["boundsMax"][0]).ReadFloat().value_or(0.0f) == doctest::Approx(5.0f));
 		}
 
 		TEST_CASE("RuntimeAutomationServer: a disconnect releases the client's lockstep and pauses play")

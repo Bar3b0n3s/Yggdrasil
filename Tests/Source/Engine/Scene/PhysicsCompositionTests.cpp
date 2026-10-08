@@ -12,9 +12,10 @@
 #include "Support/AssetTestFixture.h"
 #include "Support/PhysicsTestScene.h"
 
+#include <set>
+
 // The physics composition rules (Architecture §5.3 "Physics composition rules", §9.2; Docs/Decisions/0014-m11-decisions.md
-// decision 10). The name function is complete; the rest are skipped skeletons of the M11 contract: stream B implements the
-// rules and removes the skips.
+// decision 10), the shape descriptions they give and the mesh shape cache.
 
 namespace Engine {
 
@@ -55,7 +56,7 @@ namespace Engine {
 			CHECK(PhysicsBodyOriginToString(PhysicsBodyOrigin::Character) == "Character");
 		}
 
-		TEST_CASE("PhysicsComposition: a RigidBody gathers its collider-only descendants into one compound" * doctest::skip(true))
+		TEST_CASE("PhysicsComposition: a RigidBody gathers its collider-only descendants into one compound")
 		{
 			Test::SceneTestFixture fixture;
 			Scene& scene = fixture.GetScene();
@@ -89,7 +90,7 @@ namespace Engine {
 			CHECK(moving.Colliders[1].Entity == Test::GetEntityId(scene, "/Level/Platform/Rail"));
 		}
 
-		TEST_CASE("PhysicsComposition: solid colliders without a RigidBody form implicit static bodies" * doctest::skip(true))
+		TEST_CASE("PhysicsComposition: solid colliders without a RigidBody form implicit static bodies")
 		{
 			Test::SceneTestFixture fixture;
 			Scene& scene = fixture.GetScene();
@@ -109,7 +110,7 @@ namespace Engine {
 			CHECK(body.Colliders[2].Type == PhysicsColliderType::Sphere);
 		}
 
-		TEST_CASE("PhysicsComposition: trigger colliders without their own RigidBody form implicit sensor bodies" * doctest::skip(true))
+		TEST_CASE("PhysicsComposition: trigger colliders without their own RigidBody form implicit sensor bodies")
 		{
 			Test::SceneTestFixture fixture;
 			Scene& scene = fixture.GetScene();
@@ -148,7 +149,7 @@ namespace Engine {
 			CHECK(body->Colliders.size() == 1);
 		}
 
-		TEST_CASE("PhysicsComposition: a Static RigidBody with trigger colliders is planned as a Kinematic sensor" * doctest::skip(true))
+		TEST_CASE("PhysicsComposition: a Static RigidBody with trigger colliders is planned as a Kinematic sensor")
 		{
 			// A goal authored as a Static RigidBody with a trigger: triggers are Kinematic and kept active (§9.2), so it also
 			// detects sleeping bodies.
@@ -167,7 +168,7 @@ namespace Engine {
 			CHECK(plan->IsCreatable);
 		}
 
-		TEST_CASE("PhysicsComposition: a body's collision group is the nearest RigidBody or CharacterController owner at or above it" * doctest::skip(true))
+		TEST_CASE("PhysicsComposition: a body's collision group is the nearest RigidBody or CharacterController owner at or above it")
 		{
 			Test::SceneTestFixture fixture;
 			Scene& scene = fixture.GetScene();
@@ -206,7 +207,7 @@ namespace Engine {
 			CHECK(groupOf(zone.GetUUID(), PhysicsBodyOrigin::ImplicitSensor) == std::optional<UUID>(UUID()));
 		}
 
-		TEST_CASE("PhysicsComposition: bodies are listed in canonical order whatever order components were added in" * doctest::skip(true))
+		TEST_CASE("PhysicsComposition: bodies are listed in canonical order whatever order components were added in")
 		{
 			Test::SceneTestFixture fixture;
 			Scene& scene = fixture.GetScene();
@@ -223,7 +224,7 @@ namespace Engine {
 			CHECK(composition.Bodies[1].Owner == second.GetUUID());
 		}
 
-		TEST_CASE("PhysicsComposition: mixed, Dynamic-trigger, non-convex Dynamic and all-DOF-locked bodies are refused with their codes" * doctest::skip(true))
+		TEST_CASE("PhysicsComposition: mixed, Dynamic-trigger, non-convex Dynamic and all-DOF-locked bodies are refused with their codes")
 		{
 			Test::SceneTestFixture fixture;
 			Scene& scene = fixture.GetScene();
@@ -263,7 +264,7 @@ namespace Engine {
 			CHECK(composition.Diagnostics.size() == 4);
 		}
 
-		TEST_CASE("PhysicsComposition: an unknown layer resolves to Default with PHYSICS_UNKNOWN_LAYER" * doctest::skip(true))
+		TEST_CASE("PhysicsComposition: an unknown layer resolves to Default with PHYSICS_UNKNOWN_LAYER")
 		{
 			Test::SceneTestFixture fixture;
 			Entity ball = Test::AddSphereBody(fixture.GetScene(), "Ball", glm::vec3(0.0f), 0.5f, BodyType::Dynamic);
@@ -282,7 +283,7 @@ namespace Engine {
 			CHECK(unknown[0].Field == "Layer");
 		}
 
-		TEST_CASE("PhysicsComposition: a sphere under a non-uniform scale raises PHYSICS_NONUNIFORM_SCALE" * doctest::skip(true))
+		TEST_CASE("PhysicsComposition: a sphere under a non-uniform scale raises PHYSICS_NONUNIFORM_SCALE")
 		{
 			Test::SceneTestFixture fixture;
 			Entity ball = Test::AddSphereBody(fixture.GetScene(), "Ball", glm::vec3(0.0f), 0.5f, BodyType::Dynamic);
@@ -297,7 +298,7 @@ namespace Engine {
 			CHECK(composition.Bodies.at(0).IsCreatable);
 		}
 
-		TEST_CASE("PhysicsComposition: a Dynamic body under a moving parent raises PHYSICS_DYNAMIC_UNDER_MOVING_PARENT" * doctest::skip(true))
+		TEST_CASE("PhysicsComposition: a Dynamic body under a moving parent raises PHYSICS_DYNAMIC_UNDER_MOVING_PARENT")
 		{
 			Test::SceneTestFixture fixture;
 			Scene& scene = fixture.GetScene();
@@ -313,7 +314,7 @@ namespace Engine {
 			CHECK(moving[0].Severity == DiagnosticSeverity::Warning);
 		}
 
-		TEST_CASE("PhysicsComposition: bodies beyond the limit are refused with PHYSICS_LIMIT_EXCEEDED" * doctest::skip(true))
+		TEST_CASE("PhysicsComposition: bodies beyond the limit are refused with PHYSICS_LIMIT_EXCEEDED")
 		{
 			Test::SceneTestFixture fixture;
 			for (int body = 0; body < 5; ++body)
@@ -323,13 +324,37 @@ namespace Engine {
 			CHECK(composition.Bodies[2].IsCreatable);
 			CHECK_FALSE(composition.Bodies[3].IsCreatable);
 			CHECK_FALSE(composition.Bodies[4].IsCreatable);
+			// One diagnostic per refused entity (§9.1), each on its owner.
 			const std::vector<PhysicsDiagnostic> limit = DiagnosticsWithCode(composition, PhysicsLimitExceededCode);
-			REQUIRE(limit.size() == 1);
-			CHECK(limit[0].Entity == composition.Bodies[3].Owner);
-			CHECK(limit[0].Severity == DiagnosticSeverity::Error);
+			REQUIRE(limit.size() == 2);
+			const std::set<UUID> refused = { limit[0].Entity, limit[1].Entity };
+			CHECK(refused == std::set<UUID>{ composition.Bodies[3].Owner, composition.Bodies[4].Owner });
+			for (const PhysicsDiagnostic& diagnostic : limit)
+			{
+				CHECK(diagnostic.Severity == DiagnosticSeverity::Error);
+				CHECK(diagnostic.Subject == "bodies");
+			}
 		}
 
-		TEST_CASE("PhysicsComposition: disabled entities and their subtrees make no bodies" * doctest::skip(true))
+		TEST_CASE("PhysicsComposition: an owner with two refused bodies gets one limit diagnostic")
+		{
+			// An entity with solid colliders and trigger colliders of its own and no RigidBody owns an implicit static body and
+			// an implicit sensor body; both beyond the limit make one diagnostic, so its (code, entity, subject) stays unique.
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			static_cast<void>(Test::AddBoxBody(scene, "First", glm::vec3(0.0f), glm::vec3(0.5f), BodyType::Dynamic));
+			Entity mixed = Test::AddBoxBody(scene, "Mixed", glm::vec3(5.0f, 0.0f, 0.0f), glm::vec3(0.5f), std::nullopt);
+			mixed.AddComponent<SphereColliderComponent>(SphereColliderComponent{ .Radius = 2.0f, .IsTrigger = true });
+			const PhysicsComposition composition = ComposePhysicsBodies(scene, PhysicsLayerTable(), 1);
+			REQUIRE(composition.Bodies.size() == 3);
+			CHECK_FALSE(composition.Bodies[1].IsCreatable);
+			CHECK_FALSE(composition.Bodies[2].IsCreatable);
+			const std::vector<PhysicsDiagnostic> limit = DiagnosticsWithCode(composition, PhysicsLimitExceededCode);
+			REQUIRE(limit.size() == 1);
+			CHECK(limit[0].Entity == mixed.GetUUID());
+		}
+
+		TEST_CASE("PhysicsComposition: disabled entities and their subtrees make no bodies")
 		{
 			Test::SceneTestFixture fixture;
 			Scene& scene = fixture.GetScene();
@@ -339,7 +364,7 @@ namespace Engine {
 			CHECK(ComposePhysicsBodies(scene, PhysicsLayerTable()).Bodies.empty());
 		}
 
-		TEST_CASE("PhysicsComposition: implicit sensor bodies take the nearest ancestor RigidBody's layer, characters their own" * doctest::skip(true))
+		TEST_CASE("PhysicsComposition: implicit sensor bodies take the nearest ancestor RigidBody's layer, characters their own")
 		{
 			const std::vector<std::string> layers = { "Default", "Track" };
 			const std::vector<std::vector<std::string>> collisions = { { "Default", "Track" } };
@@ -367,7 +392,7 @@ namespace Engine {
 			CHECK(character->Colliders.empty());
 		}
 
-		TEST_CASE("PhysicsComposition: DescribePhysicsBodyShape places gathered colliders relative to the owner with scale baked in" * doctest::skip(true))
+		TEST_CASE("PhysicsComposition: DescribePhysicsBodyShape places gathered colliders relative to the owner with scale baked in")
 		{
 			Test::SceneTestFixture fixture;
 			Scene& scene = fixture.GetScene();
@@ -409,7 +434,7 @@ namespace Engine {
 			CHECK(GetPhysicsDiagnosticCode(missing.error()) == PhysicsInvalidShapeCode);
 		}
 
-		TEST_CASE("PhysicsMeshShapeCache: mesh colliders share one shape per mesh, version, convexity and scale" * doctest::skip(true))
+		TEST_CASE("PhysicsMeshShapeCache: mesh colliders share one shape per mesh, version, convexity and scale")
 		{
 			Test::AssetTestFixture assets;
 			assets.OpenProject();

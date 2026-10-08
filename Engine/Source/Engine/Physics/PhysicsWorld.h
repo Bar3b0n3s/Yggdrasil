@@ -46,7 +46,7 @@ namespace Engine {
 	// What a world is created with.
 	struct PhysicsWorldSpecification
 	{
-		// Metres per second squared (PhysicsSettings.Gravity). Finite.
+		// Metres per second squared (PhysicsSettings.Gravity). Finite, each component at most MaxPhysicsGravity in magnitude.
 		glm::vec3 Gravity = glm::vec3(0.0f, -9.81f, 0.0f);
 		// The project's layers and collision matrix (§9.2), copied into the world's filters.
 		PhysicsLayerTable Layers{};
@@ -61,7 +61,7 @@ namespace Engine {
 		// Required.
 		Ref<const PhysicsShape> Shape{};
 		PhysicsMotionType MotionType = PhysicsMotionType::Dynamic;
-		// The body origin's world pose; Rotation unit.
+		// The body origin's world pose: Position within MaxPhysicsCoordinate, Rotation unit.
 		PhysicsPose Pose{};
 		// The project layer (< the table's layer count); the object layer adds the kind (§9.2).
 		uint32_t Layer = 0;
@@ -72,12 +72,15 @@ namespace Engine {
 		// Jolt's mCollideKinematicVsNonDynamic: sensors set it so they detect kinematic platforms and character inner bodies
 		// (§9.2, §9.6).
 		bool CollideKinematicVsNonDynamic = false;
+		// LinearCast is Discrete for a shape without an inner radius (Jolt asserts on casting one); SetShape decides again.
 		PhysicsMotionQuality MotionQuality = PhysicsMotionQuality::Discrete;
 		// Dynamic bodies: at least one, else PHYSICS_ALL_DOFS_LOCKED. Every other body gets PhysicsDofs::All whatever this
 		// holds (Jolt asserts on a Kinematic body that cannot move).
 		PhysicsDofs AllowedDofs = PhysicsDofs::All;
-		// Dynamic bodies, kg, > 0: overrides the shape's mass, inertia scaled to it (EOverrideMassProperties::
-		// CalculateInertia). Ignored otherwise: a Kinematic body gets fixed mass properties instead of its shape's
+		// Dynamic bodies, kg, in (0, MaxPhysicsMass]: overrides the shape's mass, inertia scaled to it (as EOverrideMassProperties::
+		// CalculateInertia computes it, made exactly symmetric, and with a little isotropic inertia added to a needle-thin
+		// shape whose smallest principal moment is far below its largest, which Jolt's eigen decomposition cannot handle;
+		// given as MassAndInertiaProvided; PhysicsShape::CheckDynamicBody's rules apply). Ignored otherwise: a Kinematic body gets fixed mass properties instead of its shape's
 		// (EOverrideMassProperties::MassAndInertiaProvided, 1 kg with a unit sphere's inertia; Jolt never uses a kinematic
 		// body's mass in contacts), so a triangle mesh, whose MeshShape has no mass, is valid on it; a Static body has none.
 		float Mass = 1.0f;
@@ -85,6 +88,8 @@ namespace Engine {
 		float Restitution = 0.0f;    // [0, 1]
 		float LinearDamping = 0.05f; // >= 0
 		float AngularDamping = 0.05f;
+		// Clamped to [-1000, 1000], and the maximum velocities to 1e6, so no velocity can grow until Jolt's squared lengths
+		// overflow.
 		float GravityFactor = 1.0f;
 		float MaxLinearVelocity = 500.0f;  // m/s, >= 0
 		float MaxAngularVelocity = 47.12f; // rad/s, >= 0
@@ -135,21 +140,23 @@ namespace Engine {
 		// A world with `specification` (§9.1: PhysicsSystem::Init with the limits, a TempAllocatorImpl of
 		// Limits.TempAllocatorBytes, the gravity, the layer filters over the table, the contact listener over the world's
 		// ContactBuffer). Errors: InvalidState when the PhysicsEngine is not initialized (ProcessContext's Physics step);
-		// InvalidArgument for a non-finite gravity or a zero limit.
+		// InvalidArgument for a gravity component that is not finite or above MaxPhysicsGravity in magnitude, or a zero
+		// limit.
 		[[nodiscard]] static Result<Scope<PhysicsWorld>> Create(const PhysicsWorldSpecification& specification);
 
 		// --- Bodies ---------------------------------------------------------------------------------------------------
-		// Creates and adds a body (activated unless it is Static), with BodyDescription's safety rules applied (a Kinematic
-		// body takes any shape, triangle meshes included, and every degree of freedom; starting velocities are clamped; a
-		// body holding a mesh never meets another one, see the file comment).
+		// Creates and adds a body (activated unless it is Static; a Static body wakes the sleeping bodies it overlaps), with
+		// BodyDescription's safety rules applied (a Kinematic body takes any shape, triangle meshes included, and every degree
+		// of freedom; starting velocities are clamped; a body holding a mesh never meets another one, see the file comment).
 		// Errors, with nothing created: InvalidArgument for a missing shape, a non-finite value, a non-unit rotation, a value
 		// outside its documented range or a layer outside the table; Validation "PHYSICS_DYNAMIC_TRIGGER: ..." for a Dynamic
-		// sensor, "PHYSICS_ALL_DOFS_LOCKED: ..." for a Dynamic body without a degree of freedom, "PHYSICS_NONCONVEX_DYNAMIC:
-		// ..." for a Dynamic body whose shape holds a mesh; InvalidState "PHYSICS_LIMIT_EXCEEDED: ..." when the world holds
-		// Limits.MaxBodies bodies.
+		// sensor, and PhysicsShape::CheckDynamicBody's errors for a Dynamic body (its Mass, its degrees of freedom, a mesh,
+		// an inertia too large); InvalidState "PHYSICS_LIMIT_EXCEEDED: ..." when the world holds Limits.MaxBodies bodies.
 		[[nodiscard]] Result<BodyHandle> CreateBody(const BodyDescription& description);
-		// Removes and destroys a body (Jolt reports no OnContactRemoved for its pairs: the session synthesizes exits, §9.4).
-		// A handle that names no live body of this world is a programmer error (asserted) and ignored.
+		// Removes and destroys a body and wakes the bodies around it. Jolt reports the Removed records of its contacts at the
+		// next step, with the destroyed (stale) handle; a consumer that already closed those pairs ignores them
+		// (Scene/PhysicsSystem synthesizes the exits itself, §9.4). A handle that names no live body of this world is a
+		// programmer error (asserted) and ignored.
 		void DestroyBody(BodyHandle body);
 		// Whether `body` names a live body of this world.
 		[[nodiscard]] bool IsBodyValid(BodyHandle body) const;
@@ -166,21 +173,24 @@ namespace Engine {
 		// velocities and contacts' bookkeeping to Jolt (its contacts are re-evaluated at the next step, and Jolt reports the
 		// sub-shape contacts that ended and began as usual). A Dynamic body keeps its Mass, its inertia recomputed from the
 		// new shape and scaled to it; other bodies keep the mass properties CreateBody gave them (never the shape's, so a
-		// Kinematic body may take a mesh). Errors: InvalidArgument for a dead handle or a missing shape; Validation
-		// "PHYSICS_NONCONVEX_DYNAMIC: ..." for a mesh on a Dynamic body.
+		// Kinematic body may take a mesh). Errors: InvalidArgument for a dead handle or a missing shape; for a Dynamic body,
+		// PhysicsShape::CheckDynamicBody's errors with its Mass and degrees of freedom.
 		[[nodiscard]] Status SetShape(BodyHandle body, const Ref<const PhysicsShape>& shape);
 
 		// --- Poses and motion (§9.3) ----------------------------------------------------------------------------------
 		// The body origin's world pose (Jolt's position and rotation; the centre of mass is internal).
 		[[nodiscard]] PhysicsPose GetPose(BodyHandle body) const;
-		// Teleports the body (SetPositionAndRotation) and, when `activate`, wakes it; velocities are kept (§9.3: "keeping its
-		// velocity unless the script also set it").
+		// Teleports the body (SetPositionAndRotation) and, when `activate`, wakes it, or for a Static body the bodies around
+		// its old and new place (a static body cannot wake); velocities are kept (§9.3: "keeping its velocity unless the
+		// script also set it"). The pose satisfies IsPlaceablePhysicsPose (asserted; the call is ignored otherwise).
 		void SetPose(BodyHandle body, const PhysicsPose& pose, bool activate);
 		// Kinematic bodies: moves the body so it reaches `target` at the end of a step of `deltaTime` seconds (> 0), with the
 		// velocities that carry resting bodies along (Jolt's MoveKinematic; §9.3 moving platforms, implicit sensor bodies).
 		void MoveKinematic(BodyHandle body, const PhysicsPose& target, float deltaTime);
 		// Dynamic bodies (others: asserted and ignored). Forces and torques act during the next step and are then cleared;
-		// impulses change the velocity at once. Each wakes the body.
+		// impulses change the velocity at once, clamped to the body's maximum velocity. Each wakes the body. Step scales down
+		// what a body's forces and torques would add to its velocities in one step beyond 1e9 m/s or rad/s (a huge force on a
+		// tiny body), so no velocity overflows inside Jolt.
 		void AddForce(BodyHandle body, const glm::vec3& force);
 		void AddForceAtPosition(BodyHandle body, const glm::vec3& force, const glm::vec3& position);
 		void AddTorque(BodyHandle body, const glm::vec3& torque);
@@ -226,7 +236,7 @@ namespace Engine {
 		// buffer (the step still ran; contacts beyond the limit were dropped).
 		[[nodiscard]] Status Step(float deltaTime, uint32_t collisionSteps);
 		[[nodiscard]] glm::vec3 GetGravity() const;
-		// Errors: InvalidArgument for a non-finite gravity.
+		// Errors: InvalidArgument for a gravity component that is not finite or above MaxPhysicsGravity in magnitude.
 		[[nodiscard]] Status SetGravity(const glm::vec3& gravity);
 		// The contact records the listeners appended since the last drain (ContactBuffer::Drain).
 		[[nodiscard]] std::vector<ContactEvent> DrainContactEvents();

@@ -1,10 +1,9 @@
 """Physics through automation (Docs/Architecture.md §5.6 Simulate, §9, §13.5 "physics.bodyInfo", §13.7
 PHYSICS_ADJACENT_STATIC_BODIES; Roadmap M11 acceptance): a Simulate session drops a ball, physics.bodyInfo reports its
-contacts, and project.validate reports adjacent implicit static bodies and fixes them with a Static RigidBody on their
-common parent.
-
-Skipped skeletons of the M11 contract (Docs/Decisions/0014-m11-decisions.md): stream D implements physics.bodyInfo and the
-validator's physics checks and removes the skips; test_simulate_mode_ball_falls also needs stream B's PhysicsSystem.
+velocity, sleeping state and contacts, and project.validate reports adjacent implicit static bodies and fixes them with a
+Static RigidBody on their common parent. test_simulate_mode_ball_falls, test_body_info_reports_contacts and
+test_validate_reports_adjacent_static_bodies_and_fix_adds_parent_body are the Roadmap acceptance tests;
+test_body_info_needs_a_play_session_and_a_body covers physics.bodyInfo's errors.
 """
 
 from __future__ import annotations
@@ -31,7 +30,6 @@ class PhysicsTests(AutomationTestCase):
         entity = client.call("entity.get", {"entity": "/Ball", "components": ["Transform"], "target": target})["entity"]
         return float(entity["components"]["Transform"]["Translation"][1])
 
-    @unittest.skip("contract stub: un-skipped by M11 streams B and D")
     def test_simulate_mode_ball_falls(self) -> None:
         client, _ = self.open_editor_with_scene()
         self.create_ground_and_ball(client)
@@ -55,12 +53,19 @@ class PhysicsTests(AutomationTestCase):
         client.call("play.stop")
         self.assertEqual(client.call("play.state")["state"], "Edit")
 
-    @unittest.skip("contract stub: un-skipped by M11 stream D")
     def test_body_info_reports_contacts(self) -> None:
         client, _ = self.open_editor_with_scene()
         self.create_ground_and_ball(client, height=1.0)
         client.call("play.start", {"lockstep": True, "seed": 5})
-        client.call("play.step", {"ticks": 60, "render": "none"})
+
+        # A fifth of a second in, the ball falls (about 2 m/s), awake and touching nothing.
+        client.call("play.step", {"ticks": 12, "render": "none"})
+        falling = client.call("physics.bodyInfo", {"entity": "/Ball"})
+        self.assertLess(falling["linearVelocity"][1], -1.0)
+        self.assertFalse(falling["sleeping"])
+        self.assertEqual(falling["contacts"], [])
+
+        client.call("play.step", {"ticks": 48, "render": "none"})
 
         info = client.call("physics.bodyInfo", {"entity": "/Ball"})
         self.assertEqual(info["entity"]["name"], "Ball")
@@ -68,13 +73,21 @@ class PhysicsTests(AutomationTestCase):
         self.assertEqual(info["type"], "Dynamic")
         self.assertEqual(info["origin"], "RigidBody")
         self.assertEqual(info["layer"], "Default")
-        self.assertEqual(len(info["linearVelocity"]), 3)
-        self.assertIn("sleeping", info)
+        # At rest on the ground.
+        for axis in range(3):
+            self.assertLess(abs(info["linearVelocity"][axis]), 0.05)
+            self.assertLess(abs(info["angularVelocity"][axis]), 0.05)
         self.assertEqual(len(info["contacts"]), 1)
         contact = info["contacts"][0]
         self.assertEqual(contact["other"]["name"], "Ground")
         self.assertFalse(contact["isTrigger"])
         self.assertLessEqual(contact["sinceTick"], 60)
+
+        # Resting long enough, it falls asleep and keeps its contact (sleeping never ends a pair).
+        client.call("play.step", {"ticks": 120, "render": "none"})
+        asleep = client.call("physics.bodyInfo", {"entity": "/Ball"})
+        self.assertTrue(asleep["sleeping"])
+        self.assertEqual([pair["other"]["name"] for pair in asleep["contacts"]], ["Ground"])
 
         # The ground's side of the same pair.
         ground = client.call("physics.bodyInfo", {"entity": "/Ground"})
@@ -91,7 +104,6 @@ class PhysicsTests(AutomationTestCase):
             client.call("physics.bodyInfo", {"entity": "/Ball"})
         self.assert_engine_error(not_playing.exception, engine_client.INVALID_STATE, "InvalidState")
 
-    @unittest.skip("contract stub: un-skipped by M11 stream D")
     def test_validate_reports_adjacent_static_bodies_and_fix_adds_parent_body(self) -> None:
         client, _ = self.open_editor_with_scene()
         client.call("entity.create", {"name": "Track"})
@@ -117,6 +129,32 @@ class PhysicsTests(AutomationTestCase):
         self.assertNotIn("RigidBody", track["components"])
         again = client.call("project.validate", {"scope": "scene"})
         self.assertIn("PHYSICS_ADJACENT_STATIC_BODIES", [item["code"] for item in again["diagnostics"]])
+
+    def test_body_info_needs_a_play_session_and_a_body(self) -> None:
+        client, _ = self.open_editor_with_scene()
+        client.call("entity.create", {"name": "Empty"})
+
+        # Bodies exist only in a play session; the hint names Simulate, which needs no scripts.
+        with self.assertRaises(engine_client.EngineError) as not_playing:
+            client.call("physics.bodyInfo", {"entity": "/Empty"})
+        self.assert_engine_error(not_playing.exception, engine_client.INVALID_STATE, "InvalidState")
+        self.assertIn("simulate", str(not_playing.exception.data.get("hint", "")))
+
+        started = client.call("play.start", {"mode": "simulate", "lockstep": True})
+        self.assertEqual(started["state"], "Simulate")
+        self.assertEqual(started["mode"], "Simulate")
+        # An entity without a collider owns no body.
+        with self.assertRaises(engine_client.EngineError) as no_body:
+            client.call("physics.bodyInfo", {"entity": "/Empty"})
+        self.assert_engine_error(no_body.exception, engine_client.NOT_FOUND, "NotFound")
+        self.assertEqual(no_body.exception.issues[0]["pointer"], "/entity")
+        with self.assertRaises(engine_client.EngineError) as missing:
+            client.call("physics.bodyInfo", {"entity": "/Nobody"})
+        self.assert_engine_error(missing.exception, engine_client.NOT_FOUND, "NotFound")
+        with self.assertRaises(engine_client.EngineError) as no_entity:
+            client.call("physics.bodyInfo", {})
+        self.assert_engine_error(no_entity.exception, engine_client.INVALID_PARAMS)
+        client.call("play.stop")
 
 
 if __name__ == "__main__":

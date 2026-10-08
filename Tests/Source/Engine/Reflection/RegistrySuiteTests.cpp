@@ -16,6 +16,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <cmath>
 #include <limits>
 
 // The registry-parametrized suite of Architecture §5.4 and Roadmap M3: for every registered component and reflected
@@ -323,6 +324,17 @@ namespace Engine {
 		return Value::FromColor4(components);
 	}
 
+	// A float just past `bound` (above it when `above`): the bound plus or minus 1 where that is another float, else the
+	// nearest float past it, so a large bound such as RigidBody.Mass's 1e9, where floats are 64 apart, is broken too.
+	static float GetFloatBeyond(double bound, bool above)
+	{
+		const float direction = above ? std::numeric_limits<float>::infinity() : -std::numeric_limits<float>::infinity();
+		float value = static_cast<float>(bound) + (above ? 1.0f : -1.0f);
+		while (above ? static_cast<double>(value) <= bound : static_cast<double>(value) >= bound)
+			value = std::nextafter(value, direction);
+		return value;
+	}
+
 	// Writes through the reflected setter must reject every value outside the field's metadata (§5.4 "Min/Max/MinMagnitude
 	// are enforced on every write path"; non-finite floats; enum values without a name; non-unit quaternions). Each float
 	// check starts from the field's valid default and breaks one component, so every component is held to the rule.
@@ -368,9 +380,9 @@ namespace Engine {
 						if (meta.MinMagnitude)
 							rejects(withComponent(0.0f));
 						if (meta.Min)
-							rejects(withComponent(static_cast<float>(*meta.Min) - 1.0f));
+							rejects(withComponent(GetFloatBeyond(*meta.Min, false)));
 						if (meta.Max)
-							rejects(withComponent(static_cast<float>(*meta.Max) + 1.0f));
+							rejects(withComponent(GetFloatBeyond(*meta.Max, true)));
 					}
 				}
 				else if (kind == FieldType::Int32)

@@ -40,7 +40,9 @@ namespace Engine {
 		Sleeping,  // a sleeping Dynamic RigidBody (play sessions only)
 		Trigger,   // a sensor: trigger colliders, implicit sensor bodies
 		Character, // a CharacterController's capsule
-		Invalid    // a body the composition refuses (PhysicsBodyPlan::IsCreatable false)
+		// A body that is not created: refused by the composition (PhysicsBodyPlan::IsCreatable false), by its shape (an edit
+		// scene builds each body's shape as the session does) or by the session (play).
+		Invalid
 	};
 
 	// The colour of a category (linear RGBA).
@@ -108,8 +110,10 @@ namespace Engine {
 	// character. Mesh colliders draw their mesh's triangle edges (the source mesh's, also for Convex ones), loaded through
 	// `assets` as DescribePhysicsBodyShape loads them; a mesh collider without a mesh (or with null `assets`) draws nothing.
 	// With `physics` (the session's PhysicsSystem; null for an edit scene), awake and sleeping Dynamic bodies are told
-	// apart. Poses are the entities' world poses (walking the parent chain), which equal the bodies' after PostStep. Main
-	// thread; a pure function of its inputs.
+	// apart, and a body the session did not create is Invalid; without it, each body's shape is built as the session builds
+	// it (DescribePhysicsBodyShape, PhysicsShape::Create, PhysicsShape::CheckDynamicBody; needs the PhysicsEngine) and a body
+	// it refuses is Invalid. Poses are the entities' world poses (walking the parent chain), which equal the bodies' after
+	// PostStep. Main thread; a pure function of its inputs.
 	[[nodiscard]] std::vector<ColliderDebugShape> BuildColliderDebugDraw(const Scene& scene, const PhysicsLayerTable& layers, const PhysicsSystem* physics,
 		AssetManager* assets, const ColliderDebugDrawOptions& options = {});
 

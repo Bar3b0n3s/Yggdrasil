@@ -17,8 +17,8 @@
 #include <vector>
 
 // Scene building blocks for the physics tests (Architecture §9.7; Docs/Decisions/0014-m11-decisions.md decision 19):
-// bodies and colliders added to an edit scene, play sessions over it, and a listener that records the sorted events.
-// Shared by the M11 streams' test files; stream B owns it.
+// bodies and colliders added to an edit scene, play sessions over it, a listener that records the sorted events, and a
+// scoped Jolt worker thread count. Shared by the physics test files.
 
 namespace Engine {
 
@@ -53,6 +53,21 @@ namespace Engine {
 
 		// The UUID of the entity at `path` in `scene` (the invalid UUID when no entity has that path).
 		[[nodiscard]] UUID GetEntityId(const Scene& scene, std::string_view path);
+
+		// Sets the process's Jolt worker thread count (PhysicsEngine::SetWorkerThreadCount) for its lifetime and restores the
+		// previous count on every exit path, a failed REQUIRE included, so no later test runs with another count (tests never
+		// depend on order, CodeStyle §14).
+		class ScopedWorkerThreadCount
+		{
+		public:
+			explicit ScopedWorkerThreadCount(uint32_t count);
+			~ScopedWorkerThreadCount();
+
+			ScopedWorkerThreadCount(const ScopedWorkerThreadCount&) = delete;
+			ScopedWorkerThreadCount& operator=(const ScopedWorkerThreadCount&) = delete;
+		private:
+			uint32_t m_Original = 0;
+		};
 
 		// Records every physics event and diagnostic it receives, in order, and calls OnEvent (when set) after recording each
 		// event.

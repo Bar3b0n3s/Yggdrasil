@@ -2,9 +2,10 @@
 
 #include "Engine/Physics/PhysicsWorld.h"
 
+#include "Support/DeathTest.h"
+
 // The world's queries (Architecture §9.5: raycasts, shape casts and overlaps through the NarrowPhaseQuery, filtered by
-// layer mask; hits name the collider through the sub-shape user data, §9.2). Skipped skeletons of the M11 contract
-// (Docs/Decisions/0014-m11-decisions.md): stream C implements the queries and removes the skips.
+// layer mask; hits name the collider through the sub-shape user data, §9.2) and the bounds of bodies and colliders.
 
 namespace Engine {
 
@@ -48,11 +49,33 @@ namespace Engine {
 			return *body;
 		}
 
+		// A static box of `halfExtents` at `position` (user data `userData` for its collider), on layer 0.
+		BodyHandle CreateBox(PhysicsWorld& world, const glm::vec3& position, const glm::vec3& halfExtents, uint32_t userData = 0,
+			const glm::quat& rotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f))
+		{
+			Result<Ref<const PhysicsShape>> shape =
+				PhysicsShape::Create({ .Colliders = { ColliderShapeDescription{ .Geometry = BoxShapeGeometry{ .HalfExtents = halfExtents }, .UserData = userData } } });
+			REQUIRE(shape.has_value());
+			Result<BodyHandle> body =
+				world.CreateBody({ .Shape = *shape, .MotionType = PhysicsMotionType::Static, .Pose = { .Position = position, .Rotation = rotation } });
+			REQUIRE(body.has_value());
+			return *body;
+		}
+
+	}
+
+	// A ray without a direction is a programmer error the world refuses before Jolt sees it (PhysicsSystem validates script
+	// input first).
+	ENGINE_DEATH_TEST("Physics/RaycastWithoutDirectionAsserts")
+	{
+		Result<Scope<PhysicsWorld>> world = PhysicsWorld::Create({});
+		if (world.has_value())
+			static_cast<void>((*world)->Raycast({ .Origin = glm::vec3(0.0f), .Direction = glm::vec3(0.0f), .MaxDistance = 1.0f }, {}));
 	}
 
 	TEST_SUITE("Physics")
 	{
-		TEST_CASE("PhysicsWorld: Raycast returns the closest hit and the collider's user data" * doctest::skip(true))
+		TEST_CASE("PhysicsWorld: Raycast returns the closest hit and the collider's user data")
 		{
 			Scope<PhysicsWorld> world = CreateQueryWorld();
 			const BodyHandle track = CreateTrack(*world);
@@ -70,7 +93,7 @@ namespace Engine {
 					.has_value());
 		}
 
-		TEST_CASE("PhysicsWorld: hits on a compound that places one shared shape several times name each collider" * doctest::skip(true))
+		TEST_CASE("PhysicsWorld: hits on a compound that places one shared shape several times name each collider")
 		{
 			// The mesh shape cache's case (§9.2): the colliders share one leaf, so the collider comes from the compound's
 			// sub-shape user data, never from the leaf's own.
@@ -102,7 +125,7 @@ namespace Engine {
 			CHECK(last->GetCenter().x == doctest::Approx(2.0f).epsilon(1.0e-4));
 		}
 
-		TEST_CASE("PhysicsWorld: RaycastAll returns one hit per sub-shape along the ray" * doctest::skip(true))
+		TEST_CASE("PhysicsWorld: RaycastAll returns one hit per sub-shape along the ray")
 		{
 			Scope<PhysicsWorld> world = CreateQueryWorld();
 			static_cast<void>(CreateTrack(*world));
@@ -115,7 +138,7 @@ namespace Engine {
 			CHECK(colliders == std::vector<uint32_t>{ 10, 11, 12 });
 		}
 
-		TEST_CASE("PhysicsWorld: ShapeCast finds where a swept sphere first touches" * doctest::skip(true))
+		TEST_CASE("PhysicsWorld: ShapeCast finds where a swept sphere first touches")
 		{
 			Scope<PhysicsWorld> world = CreateQueryWorld();
 			static_cast<void>(CreateTrack(*world));
@@ -127,7 +150,7 @@ namespace Engine {
 			CHECK(hit->Distance == doctest::Approx(2.25f).epsilon(1.0e-3));
 		}
 
-		TEST_CASE("PhysicsWorld: Overlap reports every overlapping sub-shape" * doctest::skip(true))
+		TEST_CASE("PhysicsWorld: Overlap reports every overlapping sub-shape")
 		{
 			Scope<PhysicsWorld> world = CreateQueryWorld();
 			const BodyHandle track = CreateTrack(*world);
@@ -143,7 +166,7 @@ namespace Engine {
 			CHECK(colliders == std::vector<uint32_t>{ 10, 11 });
 		}
 
-		TEST_CASE("PhysicsWorld: queries honour the layer mask, sensors and the ignored body" * doctest::skip(true))
+		TEST_CASE("PhysicsWorld: queries honour the layer mask, sensors and the ignored body")
 		{
 			Scope<PhysicsWorld> world = CreateQueryWorld();
 			const BodyHandle track = CreateTrack(*world);
@@ -158,7 +181,7 @@ namespace Engine {
 			CHECK_FALSE(world->Raycast(down, { .Layers = 0b100u }).has_value());
 		}
 
-		TEST_CASE("PhysicsWorld: body and sub-shape bounds are world AABBs" * doctest::skip(true))
+		TEST_CASE("PhysicsWorld: body and sub-shape bounds are world AABBs")
 		{
 			Scope<PhysicsWorld> world = CreateQueryWorld();
 			const BodyHandle track = CreateTrack(*world);
@@ -172,6 +195,167 @@ namespace Engine {
 			CHECK(Test::ApproxEqual(middle->Max, glm::vec3(1.5f, 0.5f, 0.5f), 1.0e-4f));
 			CHECK_FALSE(world->GetSubShapeBounds(track, 99).has_value());
 			CHECK_FALSE(world->GetBodyBounds(BodyHandle()).has_value());
+		}
+
+		TEST_CASE("PhysicsWorld: equally close hits are chosen by body handle")
+		{
+			// Two boxes whose top faces meet under the ray: both are hit at exactly the same distance, and the closest-hit
+			// queries choose the body created first, whatever order Jolt found them in.
+			Scope<PhysicsWorld> world = CreateQueryWorld();
+			const BodyHandle first = CreateBox(*world, glm::vec3(-0.5f, 0.0f, 0.0f), glm::vec3(0.5f), 1);
+			const BodyHandle second = CreateBox(*world, glm::vec3(0.5f, 0.0f, 0.0f), glm::vec3(0.5f), 2);
+			REQUIRE(first < second);
+			const PhysicsRay down{ .Origin = glm::vec3(0.0f, 5.0f, 0.0f), .Direction = glm::vec3(0.0f, -1.0f, 0.0f), .MaxDistance = 10.0f };
+			const std::vector<PhysicsQueryHit> hits = world->RaycastAll(down, {});
+			REQUIRE(hits.size() == 2);
+			CHECK(hits[0].Distance == hits[1].Distance);
+			CHECK(world->Raycast(down, {}).value_or(PhysicsQueryHit{}).Body == first);
+			const std::optional<PhysicsQueryHit> cast =
+				world->ShapeCast(SphereShapeGeometry{ .Radius = 0.25f }, { .Position = down.Origin }, down.Direction, down.MaxDistance, {});
+			REQUIRE(cast.has_value());
+			CHECK(cast->Body == first);
+			CHECK(cast->Collider == 1);
+		}
+
+		TEST_CASE("PhysicsWorld: a ray that starts inside a shape hits it at distance 0, facing the ray")
+		{
+			Scope<PhysicsWorld> world = CreateQueryWorld();
+			const BodyHandle box = CreateBox(*world, glm::vec3(0.0f), glm::vec3(1.0f), 7);
+			const std::optional<PhysicsQueryHit> hit =
+				world->Raycast({ .Origin = glm::vec3(0.0f), .Direction = glm::vec3(1.0f, 0.0f, 0.0f), .MaxDistance = 5.0f }, {});
+			REQUIRE(hit.has_value());
+			CHECK(hit->Body == box);
+			CHECK(hit->Collider == 7);
+			CHECK(hit->Distance == 0.0f);
+			CHECK(Test::ApproxEqual(hit->Point, glm::vec3(0.0f), 1.0e-6f));
+			CHECK(Test::ApproxEqual(hit->Normal, glm::vec3(-1.0f, 0.0f, 0.0f), 1.0e-6f));
+			// From outside, the normal is the face's.
+			const std::optional<PhysicsQueryHit> outside =
+				world->Raycast({ .Origin = glm::vec3(-5.0f, 0.25f, 0.0f), .Direction = glm::vec3(1.0f, 0.0f, 0.0f), .MaxDistance = 10.0f }, {});
+			REQUIRE(outside.has_value());
+			CHECK(outside->Distance == doctest::Approx(4.0f).epsilon(1.0e-4));
+			CHECK(Test::ApproxEqual(outside->Normal, glm::vec3(-1.0f, 0.0f, 0.0f), 1.0e-4f));
+		}
+
+		TEST_CASE("PhysicsWorld: shape casts of each primitive report the first touch, and an initial overlap at distance 0")
+		{
+			Scope<PhysicsWorld> world = CreateQueryWorld();
+			static_cast<void>(CreateTrack(*world));
+			const glm::vec3 down(0.0f, -1.0f, 0.0f);
+			// A 0.2 m box (half extents 0.1) and a capsule of half height 0.3 and radius 0.1 (standing, 0.8 m tall) above the
+			// track's top face at y = 0.5.
+			const std::optional<PhysicsQueryHit> box =
+				world->ShapeCast(BoxShapeGeometry{ .HalfExtents = glm::vec3(0.1f) }, { .Position = glm::vec3(2.0f, 3.0f, 0.0f) }, down, 10.0f, {});
+			REQUIRE(box.has_value());
+			CHECK(box->Collider == 12);
+			CHECK(box->Distance == doctest::Approx(2.4f).epsilon(1.0e-3));
+			CHECK(Test::ApproxEqual(box->Normal, glm::vec3(0.0f, 1.0f, 0.0f), 1.0e-3f));
+			CHECK(box->Point.y == doctest::Approx(0.5f).epsilon(1.0e-3));
+			const std::optional<PhysicsQueryHit> capsule = world->ShapeCast(CapsuleShapeGeometry{ .HalfHeight = 0.3f, .Radius = 0.1f },
+				{ .Position = glm::vec3(1.0f, 3.0f, 0.0f) }, down, 10.0f, {});
+			REQUIRE(capsule.has_value());
+			CHECK(capsule->Collider == 11);
+			CHECK(capsule->Distance == doctest::Approx(2.1f).epsilon(1.0e-3));
+			// Lying along X (rotated 90 degrees about Z), the same capsule touches 0.3 m later.
+			const glm::quat lying(0.70710678f, 0.0f, 0.0f, 0.70710678f);
+			const std::optional<PhysicsQueryHit> rotated = world->ShapeCast(CapsuleShapeGeometry{ .HalfHeight = 0.3f, .Radius = 0.1f },
+				{ .Position = glm::vec3(1.0f, 3.0f, 0.0f), .Rotation = lying }, down, 10.0f, {});
+			REQUIRE(rotated.has_value());
+			CHECK(rotated->Distance == doctest::Approx(2.4f).epsilon(1.0e-3));
+			// Starting inside the track: distance 0.
+			const std::optional<PhysicsQueryHit> inside =
+				world->ShapeCast(SphereShapeGeometry{ .Radius = 0.2f }, { .Position = glm::vec3(0.0f) }, down, 1.0f, {});
+			REQUIRE(inside.has_value());
+			CHECK(inside->Distance == 0.0f);
+			// Too short a cast misses.
+			CHECK_FALSE(world->ShapeCast(SphereShapeGeometry{ .Radius = 0.25f }, { .Position = glm::vec3(0.0f, 3.0f, 0.0f) }, down, 2.0f, {}).has_value());
+		}
+
+		TEST_CASE("PhysicsWorld: shape casts and overlaps honour the layer mask, sensors and the ignored body")
+		{
+			Scope<PhysicsWorld> world = CreateQueryWorld();
+			const BodyHandle track = CreateTrack(*world);
+			const BodyHandle sensor = CreateSensor(*world, glm::vec3(0.0f, 3.0f, 0.0f));
+			const glm::vec3 down(0.0f, -1.0f, 0.0f);
+			const auto castBody = [&world, &down](const PhysicsQueryFilter& filter)
+			{
+				return world->ShapeCast(SphereShapeGeometry{ .Radius = 0.25f }, { .Position = glm::vec3(0.0f, 10.0f, 0.0f) }, down, 20.0f, filter)
+					.value_or(PhysicsQueryHit{})
+					.Body;
+			};
+			CHECK(castBody({}) == sensor);
+			CHECK(castBody({ .IncludeSensors = false }) == track);
+			CHECK(castBody({ .IgnoreBody = sensor }) == track);
+			CHECK(castBody({ .Layers = 0b10u }) == track);
+			CHECK_FALSE(castBody({ .Layers = 0b100u }).IsValid());
+
+			// A sphere around both the sensor (a unit box at y = 3) and the top of the first two track pieces: the bodies it
+			// overlaps, each once.
+			const auto overlapBodies = [&world](const PhysicsQueryFilter& filter)
+			{
+				std::vector<BodyHandle> bodies;
+				for (const PhysicsOverlap& overlap : world->Overlap(SphereShapeGeometry{ .Radius = 2.0f }, { .Position = glm::vec3(0.0f, 2.0f, 0.0f) }, filter))
+					bodies.push_back(overlap.Body);
+				std::sort(bodies.begin(), bodies.end());
+				bodies.erase(std::unique(bodies.begin(), bodies.end()), bodies.end());
+				return bodies;
+			};
+			std::vector<BodyHandle> both = { track, sensor };
+			std::sort(both.begin(), both.end());
+			CHECK(overlapBodies({}) == both);
+			CHECK(overlapBodies({ .IncludeSensors = false }) == std::vector<BodyHandle>{ track });
+			CHECK(overlapBodies({ .IgnoreBody = track }) == std::vector<BodyHandle>{ sensor });
+			CHECK(overlapBodies({ .Layers = 0b01u }) == std::vector<BodyHandle>{ sensor });
+			CHECK(overlapBodies({ .Layers = 0u }).empty());
+		}
+
+		TEST_CASE("PhysicsWorld: Overlap reports each collider once and capsules overlap by their own shape")
+		{
+			Scope<PhysicsWorld> world = CreateQueryWorld();
+			const BodyHandle track = CreateTrack(*world);
+			// A capsule standing on the middle piece's top face: it overlaps only that piece.
+			const std::vector<PhysicsOverlap> standing =
+				world->Overlap(CapsuleShapeGeometry{ .HalfHeight = 0.5f, .Radius = 0.2f }, { .Position = glm::vec3(1.0f, 1.1f, 0.0f) }, {});
+			REQUIRE(standing.size() == 1);
+			CHECK(standing[0].Body == track);
+			CHECK(standing[0].Collider == 11);
+			// Lying along X over all three pieces, it overlaps each once.
+			const glm::quat lying(0.70710678f, 0.0f, 0.0f, 0.70710678f);
+			const std::vector<PhysicsOverlap> lyingOverlaps = world->Overlap(CapsuleShapeGeometry{ .HalfHeight = 1.2f, .Radius = 0.2f },
+				{ .Position = glm::vec3(1.0f, 0.6f, 0.0f), .Rotation = lying }, {});
+			std::vector<uint32_t> colliders;
+			for (const PhysicsOverlap& overlap : lyingOverlaps)
+				colliders.push_back(overlap.Collider);
+			std::sort(colliders.begin(), colliders.end());
+			CHECK(colliders == std::vector<uint32_t>{ 10, 11, 12 });
+			// Nothing above the track.
+			CHECK(world->Overlap(SphereShapeGeometry{ .Radius = 0.25f }, { .Position = glm::vec3(1.0f, 2.0f, 0.0f) }, {}).empty());
+		}
+
+		TEST_CASE("PhysicsWorld: bounds follow the body's pose and end with the body")
+		{
+			Scope<PhysicsWorld> world = CreateQueryWorld();
+			// A one-collider body rotated 90 degrees about Y: its 2 x 1 x 1 box spans 1 x 1 x 2 in the world.
+			const glm::quat quarter(0.70710678f, 0.0f, 0.70710678f, 0.0f);
+			const BodyHandle box = CreateBox(*world, glm::vec3(3.0f, 0.0f, 0.0f), glm::vec3(1.0f, 0.5f, 0.5f), 4, quarter);
+			const std::optional<Aabb> bounds = world->GetBodyBounds(box);
+			REQUIRE(bounds.has_value());
+			CHECK(Test::ApproxEqual(bounds->Min, glm::vec3(2.5f, -0.5f, -1.0f), 1.0e-4f));
+			CHECK(Test::ApproxEqual(bounds->Max, glm::vec3(3.5f, 0.5f, 1.0f), 1.0e-4f));
+			// Its only collider is the whole body.
+			CHECK(world->GetSubShapeBounds(box, 4) == bounds);
+			CHECK_FALSE(world->GetSubShapeBounds(box, 0).has_value());
+			// A teleport moves them.
+			world->SetPose(box, { .Position = glm::vec3(3.0f, 2.0f, 0.0f), .Rotation = quarter }, false);
+			CHECK(world->GetBodyBounds(box).value_or(Aabb{}).GetCenter().y == doctest::Approx(2.0f).epsilon(1.0e-4));
+			world->DestroyBody(box);
+			CHECK_FALSE(world->GetBodyBounds(box).has_value());
+			CHECK_FALSE(world->GetSubShapeBounds(box, 4).has_value());
+		}
+
+		TEST_CASE("PhysicsWorld: queries refuse invalid input before Jolt sees it")
+		{
+			ENGINE_CHECK_DEATH("Physics/RaycastWithoutDirectionAsserts", "PhysicsWorld::Raycast: the ray needs");
 		}
 	}
 

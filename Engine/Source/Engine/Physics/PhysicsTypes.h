@@ -5,6 +5,7 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
 
+#include <cmath>
 #include <compare>
 #include <cstddef>
 #include <cstdint>
@@ -83,6 +84,29 @@ namespace Engine {
 	// Every layer.
 	inline constexpr PhysicsLayerMask AllPhysicsLayers = 0xffffffffu;
 
+	// The largest coordinate magnitude, in metres, of anything physics places: a body's or character's position, a
+	// collider's offset within its body, and the points of a hull or mesh (a collider's size has its own, smaller bound,
+	// PhysicsShape::MaxColliderSize). Content beyond it (finite values the registry accepts) is refused
+	// (PhysicsShape::Create, PhysicsWorld::CreateBody) or not applied (Scene/PhysicsSystem's teleports), so Jolt's broad
+	// phase never sees bounds outside its range. Far beyond any game world (floats are 64 m apart there).
+	inline constexpr float MaxPhysicsCoordinate = 1.0e9f;
+
+	// The largest mass, in kilograms, of a Dynamic body or a character (PhysicsWorld::CreateBody and
+	// CharacterController::Create refuse more; RigidBody.Mass and CharacterController.Mass have the same registry maximum):
+	// with it, a body's inertia stays far inside the float range whatever its shape (Jolt asserts on an inertia it cannot
+	// decompose), and so does the weight a character puts on what it stands on.
+	inline constexpr float MaxPhysicsMass = 1.0e9f;
+
+	// The largest magnitude, in m/s^2, of a component of a world's gravity (PhysicsWorld::Create and SetGravity refuse
+	// more; the project setting PhysicsSettings.Gravity has the same bound): one step's velocity change from it, at the
+	// largest gravity factor a body gets, stays far below the velocities whose squared length overflows a float.
+	inline constexpr float MaxPhysicsGravity = 1.0e12f;
+
+	// How far a rotation's squared length may be from 1 for physics to accept it as a unit quaternion (body poses, collider
+	// rotations, character poses). Looser than Jolt's own Quat::IsNormalized (1e-5), so a rotation that went through a
+	// matrix or a file is accepted; the Physics module normalizes it for Jolt.
+	inline constexpr float PhysicsUnitRotationTolerance = 1.0e-3f;
+
 	// A world pose: the position of a body's origin and its rotation (a unit quaternion).
 	struct PhysicsPose
 	{
@@ -91,6 +115,30 @@ namespace Engine {
 
 		bool operator==(const PhysicsPose&) const = default;
 	};
+
+	// Whether every coordinate of `position` is finite and at most MaxPhysicsCoordinate in magnitude.
+	[[nodiscard]] inline bool IsWithinPhysicsRange(const glm::vec3& position)
+	{
+		return std::abs(position.x) <= MaxPhysicsCoordinate && std::abs(position.y) <= MaxPhysicsCoordinate && std::abs(position.z) <= MaxPhysicsCoordinate;
+	}
+
+	// Whether `rotation` is finite with a squared length within PhysicsUnitRotationTolerance of 1.
+	[[nodiscard]] inline bool IsPhysicsUnitRotation(const glm::quat& rotation)
+	{
+		if (!std::isfinite(rotation.x) || !std::isfinite(rotation.y) || !std::isfinite(rotation.z) || !std::isfinite(rotation.w))
+			return false;
+		const float lengthSquared = rotation.x * rotation.x + rotation.y * rotation.y + rotation.z * rotation.z + rotation.w * rotation.w;
+		return std::abs(lengthSquared - 1.0f) <= PhysicsUnitRotationTolerance;
+	}
+
+	// Whether physics places a body or a character at `pose`: its position within range (IsWithinPhysicsRange) and its
+	// rotation a unit quaternion (IsPhysicsUnitRotation). PhysicsWorld::CreateBody, SetPose and MoveKinematic and
+	// CharacterController::Create and SetPose take only such poses; Scene/PhysicsSystem checks every pose it computes
+	// from the scene against this rule before it hands it over.
+	[[nodiscard]] inline bool IsPlaceablePhysicsPose(const PhysicsPose& pose)
+	{
+		return IsWithinPhysicsRange(pose.Position) && IsPhysicsUnitRotation(pose.Rotation);
+	}
 
 	// The capacities of one PhysicsWorld (§9.1: PhysicsSystem::Init(maxBodies 16384, 0, maxBodyPairs 65536,
 	// maxContactConstraints 16384) and a 16 MB TempAllocatorImpl). Approaching one (LimitWarningFraction of it) raises a

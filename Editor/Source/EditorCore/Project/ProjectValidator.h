@@ -22,7 +22,11 @@
 // their fixes (AssetRegistry::PlanFix applied as AssetEditCommand or AssetMoveCommand inside the fix transaction), the
 // asset manager's import diagnostics, ASSET_MISSING and ASSET_TYPE_MISMATCH for asset references in scene components,
 // materials and prefabs, PATH_CASE_MISMATCH, and PREFAB_MISSING_ASSET for an instance whose prefab asset is not registered.
-// Physics, script, input, audio, render and test codes arrive with M11, M13, M12, M8/M9 and M13.
+// M11 adds the physics codes of Engine/Physics/PhysicsDiagnostics.h: Scene/PhysicsValidation.h's ValidateScenePhysics runs
+// on the open scene and on every scratch scene, with the layer table of the project's PhysicsSettings, each diagnostic
+// keeping its entity, component, field and subject (so its id); PHYSICS_ADJACENT_STATIC_BODIES of the open scene is fixed
+// by adding a Static RigidBody to the two bodies' nearest common ancestor (PhysicsDiagnostic::FixTarget), inside the one
+// undoable fix command. Script, input, audio, render and test codes arrive with M13, M12, M8/M9 and M13.
 
 namespace Engine {
 

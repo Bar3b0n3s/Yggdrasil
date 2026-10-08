@@ -1,12 +1,14 @@
 #include "EnginePCH.h"
 #include "Engine/Scene/Components/BuiltinComponents.h"
 
+#include "Engine/Physics/PhysicsTypes.h"
 #include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Scene/ComponentRegistration.h"
 
 // The Physics category (Docs/Decisions/0006-m3-decisions.md, decision 9; Architecture §5.3, §9). Field bounds keep every
-// value Jolt receives valid (§9.1 "nothing invalid reaches Jolt"): positive masses, non-negative friction, damping and
-// velocity limits, restitution in [0, 1] and collider dimensions of at least MinColliderDimension. The composition rules
+// value Jolt receives valid (§9.1 "nothing invalid reaches Jolt"): masses above 0 and at most MaxPhysicsMass (the most the
+// physics world accepts, Docs/Decisions/0014-m11-decisions.md decision 34), non-negative friction, damping and velocity
+// limits, restitution in [0, 1] and collider dimensions of at least MinColliderDimension. The composition rules
 // that span several components or entities (a non-convex MeshCollider on a Dynamic body, Dynamic triggers, all six
 // degrees of freedom locked, mixed triggers, unknown layers) are diagnostics of the physics validator (M11,
 // PHYSICS_* codes of §13.7), not rules of a single component.
@@ -39,7 +41,8 @@ namespace Engine {
 			.Requires<TransformComponent>()
 			.Excludes<CharacterControllerComponent>()
 			.Field("Type", &RigidBodyComponent::Type, "Static never moves; Kinematic is moved by script; Dynamic is simulated.")
-			.Field("Mass", &RigidBodyComponent::Mass, "Mass in kilograms (Dynamic only).", { .Min = Utils::MinPhysicsMass, .Unit = "kg" })
+			.Field("Mass", &RigidBodyComponent::Mass, "Mass in kilograms (Dynamic only).",
+				{ .Min = Utils::MinPhysicsMass, .Max = static_cast<double>(MaxPhysicsMass), .Unit = "kg" })
 			.Field("Friction", &RigidBodyComponent::Friction, "The friction coefficient of the body's surfaces.", { .Min = 0.0 })
 			.Field("Restitution", &RigidBodyComponent::Restitution, "Bounciness, from no bounce (0) to a perfectly elastic bounce (1).",
 				{ .Min = 0.0, .Max = 1.0 })
@@ -119,7 +122,7 @@ namespace Engine {
 			.Field("StepHeight", &CharacterControllerComponent::StepHeight, "The highest step the character climbs without jumping, in metres.",
 				{ .Min = 0.0, .Unit = "m" })
 			.Field("Mass", &CharacterControllerComponent::Mass, "The character's mass in kilograms, used when it pushes bodies.",
-				{ .Min = Utils::MinPhysicsMass, .Unit = "kg" })
+				{ .Min = Utils::MinPhysicsMass, .Max = static_cast<double>(MaxPhysicsMass), .Unit = "kg" })
 			.Field("GravityFactor", &CharacterControllerComponent::GravityFactor, "The multiplier of the project's gravity for the character.")
 			.Field("Layer", &CharacterControllerComponent::Layer, "Physics layer name from project settings.");
 	}

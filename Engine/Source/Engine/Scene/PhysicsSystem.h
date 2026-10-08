@@ -40,9 +40,9 @@
 //          the hierarchy, scales, meshes, moves) that leaves the body's motion type and sensor flag as they were replaces
 //          its shape in place (PhysicsWorld::SetShape: handle, pose, velocities and Jolt's contact bookkeeping kept); any
 //          other rebuild (a RigidBody or CharacterController change) destroys the body and creates it again with its
-//          current linear and angular velocity. The RigidBody's Initial* velocities apply only to a body created for an
-//          owner that had none
-//          (session start, a new component or entity, a re-enabled entity). An entity that became disabled or is pending
+//          current linear and angular velocity. The RigidBody's Initial* velocities apply only to a Dynamic body created
+//          for an owner that had none (session start, a new component or entity, a re-enabled entity); a Kinematic body
+//          follows its Transform. An entity that became disabled or is pending
 //          destruction keeps the body it has until FlushDestroyed (step 8), which closes its pairs, and gets none
 //          created; PreStep never removes it.
 //       2. Pairs across rebuilds. Active pairs are keyed by the two owners' UUIDs and their kind (collision or trigger),
@@ -55,15 +55,18 @@
 //       3. Kinematic bodies (Static sensor RigidBodies included) and implicit sensor bodies MoveKinematic to their
 //          entity's world pose over the fixed delta, with the velocities that carry resting bodies (§9.3); one whose
 //          entity carries InterpolationResetTag (teleported in steps 1 to 4 of this tick: Teleport,
-//          PlaySession::MarkTeleported) is placed with PhysicsWorld::SetPose instead, so a teleport never flings what
-//          rests on it.
+//          PlaySession::MarkTeleported) is placed with PhysicsWorld::SetPose instead, at rest, so a teleport never flings
+//          what rests on it.
 //       4. Teleports (§9.3 "Transform write in OnFixedUpdate teleports the body in the same tick"), compared bit for bit
 //          against values the engine wrote, so a body at rest is never teleported by its own write-back: a Dynamic body
 //          when its owner's local TransformComponent Translation or Rotation differs from what PostStep last wrote there
 //          (or what the body was created from), so a moving parent never drags it (PHYSICS_DYNAMIC_UNDER_MOVING_PARENT);
 //          a Static body when its owner's world matrix differs from the one it was created or last teleported at; a
 //          character as a Dynamic body, moved with CharacterController::SetPose. A teleported body keeps its velocity
-//          unless it was set too, and a Dynamic one is woken.
+//          unless it was set too; a Dynamic one is woken, and a Static one wakes the bodies around its old and new place.
+//          A pose that is not IsPlaceablePhysicsPose (a Transform written beyond MaxPhysicsCoordinate) is not applied:
+//          the entity's local Translation and Rotation go back to the body's (the values PostStep last wrote, or those
+//          the body was placed from; a Kinematic body's current pose, where it then stops).
 //       5. Characters run CharacterController::Update with the velocity of their last MoveCharacter, which it consumes.
 //   - Step (step 6): PhysicsWorld::Step(fixedDelta, max(1, ceil(60 / FixedHz))).
 //   - PostStep (step 7): Dynamic bodies that are active or have a parent write their world pose back as their entity's
@@ -72,7 +75,9 @@
 //     contacts are drained, mapped to owners, collapsed into body-pair begin and end events with a per-pair reference
 //     count of sub-shape contacts (net over the step's records: a pair whose count rises from zero enters, one whose count
 //     falls to zero exits), sorted by (UUID a, UUID b, type), and dispatched (§9.4 steps 1 to 4, PhysicsEvent,
-//     IPhysicsEventListener).
+//     IPhysicsEventListener). Sleeping never ends a pair: a Removed record for a contact whose bodies fell asleep leaves
+//     it dormant (it still counts), and a dormant contact is dropped only after a step that began with one of its bodies
+//     awake and did not report it again.
 //   - FlushDestroyed (step 8, and the frame phase's destroy flush, before Scene::FlushPendingDestroys and after the
 //     scripts' OnDestroy): every active pair involving an entity marked for destruction (PendingDestroyTag) or effectively
 //     disabled is closed, each surviving side that received the pair's enter getting a synthesized exit (§9.4 "Exit on
@@ -284,8 +289,9 @@ namespace Engine {
 		// The physics of `specification.RuntimeScene`: the layer table (PhysicsLayerTable::Create), the PhysicsWorld, and
 		// every body and character of the scene's current components, created in canonical order (§5.6 "Session setup:
 		// physics bodies are created in canonical order"), so physics.bodyInfo and queries work at tick 0. Content problems
-		// become diagnostics (GetDiagnostics), never errors. Errors: InvalidArgument for a missing scene or a FixedHz of 0;
-		// the layer table's Validation errors; PhysicsWorld::Create's errors.
+		// become diagnostics (GetDiagnostics), never errors. Errors: InvalidArgument for a missing scene, a FixedHz of 0 or a
+		// Gravity component that is not finite or above MaxPhysicsGravity in magnitude (the project's Physics.Gravity); the
+		// layer table's Validation errors; PhysicsWorld::Create's errors.
 		[[nodiscard]] static Result<Scope<PhysicsSystem>> Create(const PhysicsSystemSpecification& specification);
 
 		// --- The step (see the file comment) ------------------------------------------------------------------------------
@@ -306,8 +312,9 @@ namespace Engine {
 		// --- Bodies (§11.5 RigidBody; `entity` owns a RigidBody body) ------------------------------------------------------
 		// Errors of every function in this group: NotFound "entity <id> has no physics body" when the entity owns no
 		// created body (no RigidBody, refused by a diagnostic, or disabled); InvalidArgument for a non-finite or out-of-range
-		// value; InvalidState naming the body's motion type when the operation needs another (forces, impulses and torques:
-		// Dynamic; MoveKinematic: Kinematic; velocities: not Static).
+		// value; InvalidState naming the body's motion type when the operation needs another (forces, impulses, torques and
+		// setting velocities: Dynamic, since a Kinematic body's velocity comes from its Transform at every step;
+		// MoveKinematic: Kinematic).
 		[[nodiscard]] Status AddForce(UUID entity, const glm::vec3& force);
 		[[nodiscard]] Status AddForceAtPosition(UUID entity, const glm::vec3& force, const glm::vec3& position);
 		[[nodiscard]] Status AddTorque(UUID entity, const glm::vec3& torque);
@@ -323,7 +330,9 @@ namespace Engine {
 		// Any body or character: sets the entity's world pose (rotation kept when nullopt) and the body's at once
 		// (PhysicsWorld::SetPose, also for a Kinematic body, which is not swept there; CharacterController::SetPose), without
 		// interpolation (InterpolationResetTag, as PlaySession::MarkTeleported) and keeping its velocity (§9.3, §11.5
-		// RigidBody:Teleport; a respawn sets the velocity to zero separately).
+		// RigidBody:Teleport; a respawn sets the velocity to zero separately). A Static body wakes the bodies around its old
+		// and new place. InvalidArgument, with nothing changed, when the world position the entity gets under its parent is
+		// not within MaxPhysicsCoordinate.
 		[[nodiscard]] Status Teleport(UUID entity, const glm::vec3& position, std::optional<glm::quat> rotation);
 		[[nodiscard]] Result<bool> IsSleeping(UUID entity) const;
 		[[nodiscard]] Status WakeUp(UUID entity);
@@ -331,8 +340,8 @@ namespace Engine {
 		// --- Characters (§9.6, §11.5 CharacterController) -------------------------------------------------------------------
 		// Sets the velocity of the character's next PreStep update (CharacterController::Update's desired velocity), which
 		// is consumed by that update: a script calls Move in every OnFixedUpdate it wants the character to move. Errors:
-		// NotFound "entity <id> has no character" when the entity owns no created character; InvalidArgument for a
-		// non-finite velocity.
+		// NotFound "entity <id> has no character" when the entity owns no created character (or is disabled); InvalidArgument
+		// for a non-finite velocity or one with a component above MaxCharacterSpeed (Physics/CharacterController.h).
 		[[nodiscard]] Status MoveCharacter(UUID entity, const glm::vec3& velocity);
 		// The state after the last update. Errors: as MoveCharacter.
 		[[nodiscard]] Result<PhysicsCharacterState> GetCharacterState(UUID entity) const;
@@ -340,9 +349,11 @@ namespace Engine {
 		// --- Queries (§9.5; between steps) ----------------------------------------------------------------------------------
 		// Hits report the collider entity and the owning body entity. Results are sorted by distance, then by collider UUID
 		// (overlaps, which have no distance: by collider UUID, each collider once). Every query sees sensors (implicit sensor
-		// bodies and triggers; Raycast through a checkpoint hits it). Errors of every query: InvalidArgument for a non-finite
-		// value, a direction that is not normalizable (length below 1e-6; it is normalized otherwise), a distance or radius
-		// <= 0, or a half extent <= 0.
+		// bodies and triggers; Raycast through a checkpoint hits it). Entities pending destruction or disabled are not hit
+		// (their bodies stay until FlushDestroyed). Errors of every query: InvalidArgument for a non-finite value, a direction
+		// that is not normalizable (length below 1e-6; it is normalized otherwise), a distance <= 0, a radius or half extent
+		// outside [PhysicsShape::MinColliderSize / 2, PhysicsShape::MaxColliderSize / 2] (a collider's sizes), or an origin,
+		// end point or centre beyond MaxPhysicsCoordinate.
 		[[nodiscard]] Result<std::optional<PhysicsRaycastHit>> Raycast(const glm::vec3& origin, const glm::vec3& direction, float maxDistance,
 			PhysicsLayerMask layers = AllPhysicsLayers) const;
 		[[nodiscard]] Result<std::vector<PhysicsRaycastHit>> RaycastAll(const glm::vec3& origin, const glm::vec3& direction, float maxDistance,
@@ -352,24 +363,28 @@ namespace Engine {
 		[[nodiscard]] Result<std::vector<PhysicsOverlapHit>> OverlapSphere(const glm::vec3& center, float radius, PhysicsLayerMask layers = AllPhysicsLayers) const;
 		[[nodiscard]] Result<std::vector<PhysicsOverlapHit>> OverlapBox(const glm::vec3& center, const glm::vec3& halfExtents, const glm::quat& rotation,
 			PhysicsLayerMask layers = AllPhysicsLayers) const;
-		// The world AABB of the body `entity` owns (§9.5 GetBodyBounds); nullopt when it owns none.
+		// The world AABB of the body `entity` owns (§9.5 GetBodyBounds); nullopt when it owns none or is pending destruction
+		// or disabled.
 		[[nodiscard]] std::optional<Aabb> GetBodyBounds(UUID entity) const;
 		// The world AABB of `entity`'s own collider sub-shapes, whether they form a standalone body or part of an
-		// ancestor's compound (§9.5 GetColliderBounds); nullopt when the entity has no collider in a created body.
+		// ancestor's compound (§9.5 GetColliderBounds); nullopt when the entity has no collider in a created body, or is
+		// pending destruction or disabled.
 		[[nodiscard]] std::optional<Aabb> GetColliderBounds(UUID entity) const;
 		// Physics.LayerMask(...names) (§11.5): PhysicsLayerTable::MakeMask over the session's layers.
 		[[nodiscard]] Result<PhysicsLayerMask> MakeLayerMask(std::span<const std::string_view> names) const;
 		[[nodiscard]] const PhysicsLayerTable& GetLayers() const;
 
 		[[nodiscard]] glm::vec3 GetGravity() const;
-		// Errors: InvalidArgument for a non-finite gravity.
+		// Errors: InvalidArgument for a gravity component that is not finite or above MaxPhysicsGravity in magnitude.
 		[[nodiscard]] Status SetGravity(const glm::vec3& gravity);
 
 		// --- Observability (§13.5 physics.bodyInfo, §13.7 stats.get) ------------------------------------------------------
 		// The body `entity` owns (its RigidBody, character or implicit static body, before its implicit sensor body when it
-		// owns both), else the body its colliders were gathered into; nullopt when neither exists.
+		// owns both), else the body its colliders were gathered into; nullopt when neither exists, or when the entity or that
+		// body's owner is pending destruction or disabled.
 		[[nodiscard]] std::optional<PhysicsBodyReport> GetBodyInfo(UUID entity) const;
-		// Every diagnostic the session has raised, each (code, entity, subject) once, sorted by (entity, code, subject). Each
+		// Every diagnostic the session has raised, each (code, severity, entity, subject) once (a limit's Warning near it and
+		// its Error at it are two), sorted by (entity, code, subject, severity). Each
 		// is logged once when raised, at Error or Warn by its severity, as "<CODE>: <message>" with the entity's name and id,
 		// so "_meta" counts it (§13.4) and tests can expect it (Test::ExpectLog), and then passed to the listener
 		// (IPhysicsEventListener::OnPhysicsDiagnostic).

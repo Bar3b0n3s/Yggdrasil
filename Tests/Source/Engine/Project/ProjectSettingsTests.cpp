@@ -5,6 +5,7 @@
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Core/Random.h"
 #include "Engine/Physics/PhysicsLayers.h"
+#include "Engine/Physics/PhysicsTypes.h"
 #include "Engine/Project/ProjectSerializer.h"
 #include "Engine/Reflection/TypeRegistry.h"
 #include "Support/SceneTestFixture.h"
@@ -242,6 +243,20 @@ namespace Engine {
 			collisions.Layers = { "Default", "Ball" };
 			collisions.Collisions = { { "Default", "Ball" }, { "Ball" }, { "Ball", "Track" } };
 			CHECK(pointersOf(collisions) == std::vector<std::string>{ "/Collisions/1", "/Collisions/2/1" });
+		}
+
+		TEST_CASE("ProjectSettings: each physics gravity component is at most MaxPhysicsGravity in magnitude")
+		{
+			// The physics world refuses a stronger gravity (ADR 0014 decision 34); the settings stop it at every write.
+			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
+			PhysicsSettings strongest;
+			strongest.Gravity = glm::vec3(MaxPhysicsGravity, -MaxPhysicsGravity, 0.0f);
+			CHECK(ValidationErrorPointers(*registry, strongest).empty());
+			PhysicsSettings tooStrong;
+			tooStrong.Gravity = glm::vec3(0.0f, -1.0e37f, 0.0f);
+			const std::vector<std::string> pointers = ValidationErrorPointers(*registry, tooStrong);
+			REQUIRE(pointers.size() == 1);
+			CHECK(pointers[0].starts_with("/Gravity"));
 		}
 
 		TEST_CASE("ProjectSettings: test suites need positive frame deltas, unique modes, object parameters and a budget of 0 or at least 10")

@@ -124,8 +124,8 @@ namespace Engine {
 	};
 
 	// The bodies of `scene` under the rules above, with layer names resolved against `layers` and at most `maxBodies` bodies
-	// creatable (characters included; the rest are listed with IsCreatable false and one PHYSICS_LIMIT_EXCEEDED Error on
-	// the first refused owner). Reports PHYSICS_MIXED_TRIGGER, PHYSICS_DYNAMIC_TRIGGER, PHYSICS_NONCONVEX_DYNAMIC,
+	// creatable (characters included; the rest are listed with IsCreatable false and one PHYSICS_LIMIT_EXCEEDED Error, Subject
+	// "bodies", on each refused owner). Reports PHYSICS_MIXED_TRIGGER, PHYSICS_DYNAMIC_TRIGGER, PHYSICS_NONCONVEX_DYNAMIC,
 	// PHYSICS_ALL_DOFS_LOCKED, PHYSICS_UNKNOWN_LAYER, PHYSICS_NONUNIFORM_SCALE (a sphere or capsule collider whose entity's
 	// world scale is not uniform; the world scale is TransformSystem::GetWorldScale), PHYSICS_DYNAMIC_UNDER_MOVING_PARENT
 	// (a Dynamic RigidBody with an ancestor that owns a Kinematic or Dynamic RigidBody or a CharacterController) and

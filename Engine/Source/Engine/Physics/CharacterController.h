@@ -9,9 +9,11 @@
 #include <cstdint>
 
 // The character controller (Architecture §9.6): a JPH::CharacterVirtual moved with ExtendedUpdate (stair stepping, floor
-// sticking). A CharacterVirtual is not in the broad phase, so its settings set mInnerBodyShape, a kinematic capsule of the
-// controller's size on the controller's layer: raycasts, overlaps and sensors see the character through that inner body
-// (§9.2: sensors set mCollideKinematicVsNonDynamic). A CharacterContactListener records the character's own contacts into
+// sticking). A CharacterVirtual is not in the broad phase, so the controller creates an inner body, a kinematic capsule of
+// the controller's size on the controller's layer, as the world's next body (PhysicsWorld::CreateBody, so the world's
+// bookkeeping, limits and collision groups cover it), and places it at the character after every update and teleport:
+// raycasts, overlaps and sensors see the character through that inner body (§9.2: sensors set
+// mCollideKinematicVsNonDynamic). A CharacterContactListener records the character's own contacts into
 // the world's ContactBuffer (ContactEvent::FromCharacter, BodyA the inner body), so the character's entity and the other
 // body receive collision events with the same sorting and exit rules as bodies (§9.4).
 //
@@ -26,6 +28,12 @@ namespace Engine {
 
 	class PhysicsWorld;
 
+	// The fastest a character moves, in m/s: CharacterController::Update clamps the velocity of every step to this length
+	// (the terminal speed of a long fall), and Scene/PhysicsSystem::MoveCharacter refuses a desired velocity with a larger
+	// component. Far beyond any game's character, and small enough that a step's movement stays well inside Jolt's world
+	// bounds whatever the gravity.
+	inline constexpr float MaxCharacterSpeed = 500.0f;
+
 	// What a controller is created with (CharacterControllerComponent, §5.3). Every float finite.
 	struct CharacterControllerDescription
 	{
@@ -37,7 +45,8 @@ namespace Engine {
 		float MaxSlopeAngle = 45.0f;
 		// The highest step climbed without jumping (ExtendedUpdate's walk-stairs step up), metres >= 0.
 		float StepHeight = 0.3f;
-		// Kilograms > 0: how hard the character pushes dynamic bodies.
+		// Kilograms in (0, MaxPhysicsMass]: how hard the character pushes dynamic bodies, and the weight it puts on what it
+		// stands on (capped per update so no body's velocity can overflow, see Update).
 		float Mass = 70.0f;
 		// The project layer of the character and its inner body (< the world's layer count).
 		uint32_t Layer = 0;
@@ -89,15 +98,21 @@ namespace Engine {
 		// One step of the character (§9.6, run in PreStep before the world steps): the velocity for the step is the
 		// horizontal part of `desiredVelocity` plus a vertical part, which is, while grounded, the ground's vertical velocity
 		// plus the desired vertical part (a jump when positive) and, in the air, the previous vertical velocity plus
-		// `gravity` * `deltaTime` (the desired vertical part is ignored). Then ExtendedUpdate with walk-stairs and
-		// stick-to-floor over `deltaTime` seconds, which moves the character and its inner body and records its contacts;
-		// its body filter ignores the inner body and every body of the character's CollisionGroup. `deltaTime` > 0 and every
+		// `gravity` * `deltaTime` (the desired vertical part is ignored); that velocity is clamped to MaxCharacterSpeed.
+		// "Grounded" is Jolt's OnGround while the character does not move away from the ground faster than 0.1 m/s (else
+		// the step after a jump would cancel it). Then ExtendedUpdate with walk-stairs (up to StepHeight) and stick-to-floor
+		// (down to StepHeight) over `deltaTime` seconds, which moves the character and its inner body and records its
+		// contacts; its body filter ignores the inner body and every body of the character's CollisionGroup. The weight the
+		// update puts on the body the character stands on (Mass * |gravity| * deltaTime) is capped at 1e10 N s. An update that
+		// would carry the character beyond MaxPhysicsCoordinate leaves it where it was with no velocity (a warning is logged
+		// once per controller), so the character always stays where the world places bodies. `deltaTime` > 0 and every
 		// vector finite (asserted; Scene/PhysicsSystem validates script input first).
 		void Update(float deltaTime, const glm::vec3& desiredVelocity, const glm::vec3& gravity);
 
 		// The character's base position and rotation.
 		[[nodiscard]] PhysicsPose GetPose() const;
-		// Teleports the character and its inner body; velocity and ground state are kept until the next Update.
+		// Teleports the character and its inner body; velocity and ground state are kept until the next Update. `pose`
+		// satisfies IsPlaceablePhysicsPose (asserted; the call is ignored otherwise).
 		void SetPose(const PhysicsPose& pose);
 		// The velocity of the last Update (world space, m/s).
 		[[nodiscard]] glm::vec3 GetVelocity() const;
