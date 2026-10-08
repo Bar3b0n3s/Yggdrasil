@@ -1,14 +1,14 @@
 """Environments through automation (Docs/Architecture.md §7.4 EnvironmentImporter, §7.5, §8.6; Roadmap M8 acceptance
 test_environment_import_and_screenshot and test_renderer_none_environment_import_uses_cached_bake): a Radiance .hdr is
-imported, baked on the GPU, lights the scene and shows as its skybox; a cooked bake is reused by an editor without a
-device, and an environment no cache holds is Unsupported there with the hint to bake it once with a GPU.
-
-Skipped skeletons of the M8 contract (Docs/Decisions/0013-m8-decisions.md decision 9): stream B implements the baker and
-the importer and removes the skips; the screenshot needs stream A's scene renderer and stream C's tonemap too.
+imported, baked on the GPU, lights the scene (its SH9 and specular cube on a white sphere) and shows as its skybox; a
+cooked bake is reused by an editor without a device (under its own handle, and for a copy of the same bytes, which has
+the same cache key), and an environment no cache holds is Unsupported there with the hint to bake it once with a GPU
+(Docs/Decisions/0013-m8-decisions.md decision 9).
 """
 
 from __future__ import annotations
 
+import json
 import math
 import struct
 import unittest
@@ -94,16 +94,20 @@ class EnvironmentTests(AutomationTestCase):
         ]
         client.call("edit.batch", {"label": "Environment", "ops": ops})
 
-    @unittest.skip("contract stub: un-skipped by M8 stream B")
+    def import_environment(self, client: engine_client.EngineClient, source: Path) -> dict[str, Any]:
+        """asset.import of `source` into Assets/Environments; returns the imported asset's summary {id, path, type}."""
+        imported = client.call("asset.import", {"source": str(source), "destDir": "Assets/Environments"})
+        environment: dict[str, Any] = imported["asset"]
+        self.assertEqual(environment["type"], "Environment", imported)
+        return environment
+
     def test_environment_import_and_screenshot(self) -> None:
         if not self.require_gpu():
             return
         client, root = self.open_editor_with_scene(renderer="vulkan")
         source = self.directory / "Sources" / "Orange.hdr"
         write_hdr(source, 64, (2.0, 0.5, 0.125))
-        imported = client.call("asset.import", {"source": str(source), "destDir": "Assets/Environments"})
-        environment = imported["assets"][0]
-        self.assertEqual(environment["type"], "Environment")
+        environment = self.import_environment(client, source)
         self.assertTrue((root / "Assets" / "Environments" / "Orange.hdr.meta").is_file())
 
         self.set_environment(client, environment["id"])
@@ -120,11 +124,30 @@ class EnvironmentTests(AutomationTestCase):
         client.call("entity.update", {"entity": "/World", "components": {"Environment": {"ShowSkybox": False}}})
         hidden = client.call("viewport.screenshot", {"view": "game", "width": 64, "height": 36})
         self.assertNotEqual(Path(hidden["path"]).read_bytes(), Path(shot["path"]).read_bytes())
+
+        # The baked SH9 and specular cube light the scene: a white sphere in front of the camera, over a neutral grey clear
+        # colour, takes the environment's orange (red above green above blue, brighter than the clear colour) ...
+        client.call("entity.update", {"entity": "/Camera", "components": {"Camera": {"ClearColor": [0.05, 0.05, 0.05]}}})
+        client.call("entity.create", {"name": "Ball", "components": {
+            "Transform": {"Translation": [0, 0, -3]}, "MeshRenderer": {"Mesh": "engine://Meshes/Sphere"}}})
+        lit = client.call("viewport.screenshot", {"view": "game", "width": 64, "height": 36})
+        _, _, lit_pixels = png_pixels(Path(lit["path"]))
+        red, green, blue = lit_pixels[centre], lit_pixels[centre + 1], lit_pixels[centre + 2]
+        corner = 0  # the clear colour at the top-left pixel
+        self.assertGreater(red, green, (red, green, blue))
+        self.assertGreater(green, blue, (red, green, blue))
+        self.assertGreater(red, lit_pixels[corner] + 32, (red, lit_pixels[corner]))
+        # ... and without the environment map the neutral FallbackColor lights it instead, no longer orange.
+        client.call("entity.update", {"entity": "/World", "components": {"Environment": {
+            "Environment": None, "FallbackColor": [0.5, 0.5, 0.5]}}})
+        fallback = client.call("viewport.screenshot", {"view": "game", "width": 64, "height": 36})
+        _, _, fallback_pixels = png_pixels(Path(fallback["path"]))
+        fallback_red, fallback_blue = fallback_pixels[centre], fallback_pixels[centre + 2]
+        self.assertLess(abs(fallback_red - fallback_blue), (red - blue) // 2, (fallback_red, fallback_blue, red, blue))
         client.call("scene.save")
         client.call("session.shutdown")
         self.assertEqual(self.editors[-1].wait(), EXIT_SUCCESS, self.editors[-1].output())
 
-    @unittest.skip("contract stub: un-skipped by M8 stream B")
     def test_renderer_none_environment_import_uses_cached_bake(self) -> None:
         if not self.require_gpu():
             return
@@ -132,32 +155,38 @@ class EnvironmentTests(AutomationTestCase):
         client, root = self.open_editor_with_scene(renderer="vulkan")
         source = self.directory / "Sources" / "Orange.hdr"
         write_hdr(source, 64, (2.0, 0.5, 0.125))
-        imported = client.call("asset.import", {"source": str(source), "destDir": "Assets/Environments"})
-        environment = imported["assets"][0]
+        environment = self.import_environment(client, source)
         self.set_environment(client, environment["id"])
         client.call("scene.save")
         client.call("session.shutdown")
         self.assertEqual(self.editors[-1].wait(), EXIT_SUCCESS, self.editors[-1].output())
 
-        # An editor without a device opens the project: the cooked bake is served, so nothing is reported.
+        # An editor without a device opens the project. Even a reimport, which bypasses the cache, is served from the
+        # cooked bake, since the bake cannot be redone here; nothing is reported.
         client = self.connect(self.start_editor(project=root))
+        client.call("asset.reimport", {"asset": environment["id"]})
+        info = client.call("asset.info", {"asset": environment["id"]})
+        self.assertEqual(info["asset"]["type"], "Environment")
+        self.assertEqual(info["state"], "Loaded", info)
         report = client.call("project.validate", {"scope": "project"})
         codes = [diagnostic["code"] for diagnostic in report["diagnostics"]]
         self.assertNotIn("ASSET_IMPORT_FAILED", codes, report)
-        info = client.call("asset.info", {"asset": environment["id"]})["asset"]
-        self.assertEqual(info["type"], "Environment")
 
         # A second copy of the same bytes has the same cache key (§7.5) and is served from the bake as well.
         copy = self.directory / "Sources" / "Copy.hdr"
         copy.write_bytes(source.read_bytes())
-        client.call("asset.import", {"source": str(copy), "destDir": "Assets/Environments"})
+        copied = self.import_environment(client, copy)
+        self.assertEqual(client.call("asset.info", {"asset": copied["id"]})["state"], "Loaded")
         report = client.call("project.validate", {"scope": "project"})
         self.assertNotIn("ASSET_IMPORT_FAILED", [diagnostic["code"] for diagnostic in report["diagnostics"]], report)
 
-        # An environment no cache holds cannot be baked here: its diagnostic names the GPU hint.
+        # An environment no cache holds cannot be baked here: the import fails with the GPU hint, and so does its
+        # diagnostic.
         other = self.directory / "Sources" / "Blue.hdr"
         write_hdr(other, 64, (0.1, 0.2, 1.0))
-        client.call("asset.import", {"source": str(other), "destDir": "Assets/Environments"})
+        with self.assertRaises(engine_client.EngineError) as raised:
+            client.call("asset.import", {"source": str(other), "destDir": "Assets/Environments"})
+        self.assertIn(GPU_HINT, json.dumps(raised.exception.data))
         report = client.call("project.validate", {"scope": "project"})
         failed = [diagnostic for diagnostic in report["diagnostics"] if diagnostic["code"] == "ASSET_IMPORT_FAILED"]
         self.assertEqual(len(failed), 1, report)

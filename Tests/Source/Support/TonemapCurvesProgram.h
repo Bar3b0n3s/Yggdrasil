@@ -15,7 +15,7 @@
 // Common/Tonemapping.slang, the functions TonemapPass uses, at the points of a buffer, so the curves are compared in floating
 // point rather than through an 8-bit target. No engine pass uses it, so its pipeline layout lives here, shared by the
 // reflection check ("Shaders: LayoutsMatchReflection") and the test. Frozen by the M8 contract
-// (Docs/Decisions/0013-m8-decisions.md decision 8); stream C implements the program and the layout.
+// (Docs/Decisions/0013-m8-decisions.md decision 8).
 
 namespace Engine {
 
@@ -23,7 +23,7 @@ namespace Engine {
 
 		class HeadlessGpuFixture;
 
-		// The layout of the TonemapCurves program (stream C: the points in, the tonemapped values out, and which tonemapper).
+		// The layout of the TonemapCurves program: the points in, the tonemapped values out, and which tonemapper.
 		[[nodiscard]] PipelineLayoutDescription MakeTonemapCurvesLayoutDescription();
 
 		// Evaluates `tonemapper` at every point on the fixture's device (one dispatch, read back): the display-linear values

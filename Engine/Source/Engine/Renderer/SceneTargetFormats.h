@@ -5,9 +5,11 @@
 #include <nvrhi/nvrhi.h>
 
 // The formats of the scene renderer's per-view targets (Architecture §8.3), which several passes create pipelines for: the
-// depth/normal prepass and the forward passes (SceneRenderer), the skybox (SkyboxPass, which draws into SceneColor with
-// SceneDepth bound read-only), the tonemap (TonemapPass, SceneColor to LdrColor), FXAA (FxaaPass, LdrColor ping-pong), the
-// debug lines (DebugRenderer) and the text (TextRenderer), both of which draw into LdrColor with SceneDepth bound read-only.
+// depth/normal prepass and the forward passes (SceneRenderer), the skybox (SkyboxPass, which draws into SceneColor and tests
+// against SceneDepth without writing it), the tonemap (TonemapPass, SceneColor to LdrColor), FXAA (FxaaPass, LdrColor
+// ping-pong), the debug lines (DebugRenderer) and the text (TextRenderer), both of which draw into LdrColor and test against
+// SceneDepth without writing it (the attachment itself is not marked read-only, Docs/Decisions/0013-m8-decisions.md
+// decision 20).
 // Frozen by the M8 contract (Docs/Decisions/0013-m8-decisions.md decision 4); a pass never assumes another format.
 
 namespace Engine {

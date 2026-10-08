@@ -17,7 +17,7 @@
 // Binding layout: the source (sampled through LinearClamp) and the destination (storage image, [vk::image_format("rgba8")]).
 // Created once per device at startup and owned by SceneRendererPipelines; the pass keeps no binding sets: each Record takes
 // them from the view's PassBindingCache. Main thread only; not copyable or movable. Frozen by the M8 contract
-// (Docs/Decisions/0013-m8-decisions.md decision 8); stream C implements it.
+// (Docs/Decisions/0013-m8-decisions.md decision 8).
 
 namespace Engine {
 

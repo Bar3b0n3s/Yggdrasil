@@ -31,13 +31,16 @@ namespace Engine {
 	//
 	// Runs on the main thread (RequiresMainThread), because the bake records GPU work (§4.11). Deterministic for a device
 	// class: the same source, settings and device give identical cooked bytes. Frozen by the M8 contract
-	// (Docs/Decisions/0013-m8-decisions.md decision 9); stream B implements it and registers it (RegisterBuiltinImporters,
-	// RegisterAssetPipelineTypes).
+	// (Docs/Decisions/0013-m8-decisions.md decision 9); registered by RegisterBuiltinImporters, its settings by
+	// RegisterAssetPipelineTypes.
 	class EnvironmentImporter final : public IAssetImporter
 	{
 	public:
 		static constexpr std::string_view Id = "Environment";
 		static constexpr uint32_t Version = 1;
+		// The hint of an environment no editor here can bake (no baker, no cooked bake under its cache key, §7.4, §13.9): the
+		// import's, and the exporter's for a built-in environment Engine.pak leaves out (EditorCore/Export/Exporter.h).
+		static constexpr std::string_view GpuHint = "start the editor with a GPU once to bake this environment";
 
 		[[nodiscard]] std::string_view GetId() const override { return Id; }
 		[[nodiscard]] uint32_t GetVersion() const override { return Version; }

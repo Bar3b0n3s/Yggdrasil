@@ -416,10 +416,9 @@ namespace Engine {
 			CHECK(ComputeRenderedWorldMatrix(growing, 1.0f) == growing.GetComponent<WorldTransformComponent>().Matrix);
 		}
 
-		// M8 (Docs/Decisions/0013-m8-decisions.md decision 11): texts. Skeletons of the M8 contract; stream D extracts
-		// TextComponent and removes the skips.
+		// M8 (Docs/Decisions/0013-m8-decisions.md decision 11): texts.
 
-		TEST_CASE("RenderExtraction: texts of enabled entities are extracted in canonical order with every field" * doctest::skip(true))
+		TEST_CASE("RenderExtraction: texts of enabled entities are extracted in canonical order with every field")
 		{
 			Test::SceneTestFixture fixture;
 			Scene& scene = fixture.GetScene();
@@ -476,7 +475,7 @@ namespace Engine {
 			CHECK(snapshot->DebugView == RenderDebugView::Lit);
 		}
 
-		TEST_CASE("RenderExtraction: world texts in a play scene render at the interpolated pose" * doctest::skip(true))
+		TEST_CASE("RenderExtraction: world texts in a play scene render at the interpolated pose")
 		{
 			Test::SceneTestFixture fixture(1, true);
 			Scene& scene = fixture.GetScene();

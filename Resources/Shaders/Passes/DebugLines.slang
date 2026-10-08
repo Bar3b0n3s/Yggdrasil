@@ -1,17 +1,38 @@
-// DebugLines: §8.3 pass 13's debug lines (Renderer/DebugRenderer.h): 1 px LineList with linear colours
-// encoded in the shader.
-// Contract stub of the M8 contract (Docs/Decisions/0013-m8-decisions.md decision 3): the program, its entry points and
-// permutations are declared in Shaders.json; stream D replaces this body with the real shader and its C++ pass
-// adds the pipeline layout description that "Shaders: LayoutsMatchReflection" checks.
+// DebugLines: §8.3 pass 13's debug lines (Renderer/DebugRenderer.h, Architecture §8.10). The DebugDrawList tessellated on the
+// CPU into a LineList of DebugLineVertex (world position, linear straight-alpha colour), drawn 1 px wide into the final LDR
+// target after tonemapping. The target holds display-encoded values (§8.9), so the vertex shader encodes the linear colour
+// with the sRGB OETF and the pipelines blend with straight alpha. One program for both pipelines: depth-tested against
+// SceneDepth (reverse-Z, GreaterOrEqual, no writes) or on top (no depth test).
+
+#include "Shared/ViewConstants.h"
+
+import Common.Color;
+
+ConstantBuffer<ViewConstants> View : register(b0, space0);
+
+struct VertexInput
+{
+	float3 Position : POSITION;
+	float4 Color : COLOR0;
+};
+
+struct VertexOutput
+{
+	float4 Position : SV_Position;
+	float4 Color : COLOR0;
+};
 
 [shader("vertex")]
-float4 VSMain(uint vertexID : SV_VulkanVertexID) : SV_Position
+VertexOutput VSMain(VertexInput input)
 {
-	return float4(0.0, 0.0, 0.0, 1.0);
+	VertexOutput output;
+	output.Position = mul(View.ViewProjection, float4(input.Position, 1.0));
+	output.Color = float4(LinearToSrgb(input.Color.rgb), saturate(input.Color.a));
+	return output;
 }
 
 [shader("fragment")]
-float4 PSMain() : SV_Target0
+float4 PSMain(VertexOutput input) : SV_Target0
 {
-	return float4(0.0, 0.0, 0.0, 0.0);
+	return input.Color;
 }

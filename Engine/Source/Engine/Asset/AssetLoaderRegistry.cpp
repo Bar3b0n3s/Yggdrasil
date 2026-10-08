@@ -3,6 +3,7 @@
 
 #include "Engine/Asset/CookedFormat.h"
 #include "Engine/Asset/DocumentData.h"
+#include "Engine/Asset/EnvironmentData.h"
 #include "Engine/Asset/FontData.h"
 #include "Engine/Asset/MaterialData.h"
 #include "Engine/Asset/MeshData.h"
@@ -67,6 +68,11 @@ namespace Engine {
 			return LoadCookedFont(cooked);
 		}
 
+		static Result<AssetRef<EnvironmentData>> LoadEnvironment(std::span<const std::byte> cooked, const AssetLoadContext& /*context*/)
+		{
+			return LoadCookedEnvironment(cooked);
+		}
+
 	}
 
 	AssetLoaderRegistry::AssetLoaderRegistry() = default;
@@ -127,6 +133,7 @@ namespace Engine {
 		registry.Register(CreateScope<PayloadLoader<MaterialData, &Utils::LoadMaterial>>());
 		registry.Register(CreateScope<PayloadLoader<TextureData, &Utils::LoadTexture>>());
 		registry.Register(CreateScope<PayloadLoader<FontData, &Utils::LoadFont>>());
+		registry.Register(CreateScope<PayloadLoader<EnvironmentData, &Utils::LoadEnvironment>>());
 	}
 
 }

@@ -22,7 +22,7 @@
 // ReleaseUnused drops the sets that were not used since its previous call; SceneRenderer calls it at the end of every
 // Render, so a view keeps exactly what its last render bound, and an old environment cube, font atlas or blue-noise version
 // is released one render after its last use (a command list that recorded a set keeps it alive until the GPU is done with
-// it, §8.14 item 2). Implemented by the M8 contract; stream A owns it afterwards. Main thread only; not copyable.
+// it, §8.14 item 2). Implemented by the M8 contract. Main thread only; not copyable.
 
 namespace Engine {
 

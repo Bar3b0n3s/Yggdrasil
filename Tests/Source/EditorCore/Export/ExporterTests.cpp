@@ -2,24 +2,35 @@
 
 #include "EditorCore/Export/Exporter.h"
 
+#include "EditorCore/Automation/RegisterMethods.h"
 #include "EditorCore/Commands/ProjectSettingsCommand.h"
 #include "EditorCore/EditorContext.h"
 #include "EditorCore/Project/ProjectManager.h"
+#include "Engine/App/EngineContext.h"
 #include "Engine/Asset/BuiltinAssets.h"
+#include "Engine/Asset/EnvironmentData.h"
+#include "Engine/Asset/IEnvironmentBaker.h"
 #include "Engine/Asset/PakReader.h"
+#include "Engine/Asset/TextureData.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
+#include "Engine/AssetPipeline/Importers/EnvironmentImporter.h"
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Hash.h"
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Core/VfsPath.h"
+#include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Platform/Paths.h"
 #include "Engine/Project/GameManifest.h"
+#include "Engine/Renderer/EnvironmentBaker.h"
+#include "Engine/Scene/Components/EnvironmentComponent.h"
 #include "Engine/Scene/Components/MeshRendererComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/SceneSerializer.h"
 #include "Support/EditorTestFixture.h"
+#include "Support/HeadlessGpuFixture.h"
 #include "Support/TempDirectory.h"
+#include "Support/TestData.h"
 #include "Support/WaitUntil.h"
 
 #include <nlohmann/json.hpp>
@@ -161,6 +172,91 @@ namespace Engine {
 			for (const ErrorIssue& issue : error.GetIssues())
 				pointers.push_back(issue.JsonPointer);
 			return pointers;
+		}
+
+		// M8: an editor whose engine context mounts the repository's Resources as engine:// and a temporary engine cooked cache
+		// as enginecache:// (as a development editor does, with --engine-cache-dir), so Engine.pak takes the built-ins of
+		// EngineAssets.json; `baker` is the editor's environment baker (null: no GPU, as with --renderer none). The project
+		// is MakeExportableProject's.
+		class EngineResourcesEditor
+		{
+		public:
+			explicit EngineResourcesEditor(IEnvironmentBaker* baker = nullptr)
+				: m_Directory("ExportEngineResources")
+			{
+				REQUIRE(FileSystem::CreateDirectories(m_Directory / "UserData").has_value());
+				Result<Scope<EngineContext>> engine = EngineContext::Create({
+					.WorkerCount = 0,
+					.UserDataDirectory = m_Directory / "UserData",
+					.EngineResourcesDirectory = Test::GetRepositoryRoot() / "Resources",
+					.EngineCacheDirectory = m_Directory / "EngineCache",
+					.RegisterTypes = &RegisterEditorMethodTypes,
+				});
+				REQUIRE_MESSAGE(engine.has_value(), engine.error().ToString());
+				m_Engine = std::move(*engine);
+				Result<Scope<EditorContext>> editor = EditorContext::Create(*m_Engine, {
+																						   .IdGeneratorState = Test::EditorTestIdState,
+																						   .TemplatesDirectory = Test::GetRepositoryRoot() / "Resources" / "Templates" / "Projects",
+																						   .ReadOnlyCacheRoot = m_Directory / "ReadOnlyCache",
+																						   .HistoryLimits = {},
+																						   .EnvironmentBaker = baker,
+																					   });
+				REQUIRE_MESSAGE(editor.has_value(), editor.error().ToString());
+				m_Editor = std::move(*editor);
+
+				const Result<CreatedProject> created = ProjectManager::CreateProject(
+					{
+						.Directory = GetProjectRoot(),
+						.Name = "TestProject",
+						.Template = ProjectTemplate::Empty,
+						.TemplatesDirectory = m_Editor->GetSpecification().TemplatesDirectory,
+					},
+					m_Engine->GetTypeRegistry());
+				REQUIRE_MESSAGE(created.has_value(), created.error().ToString());
+				Result<Scope<LoadedProject>> project = ProjectManager::OpenProject(created->ProjectFile, {}, m_Engine->GetTypeRegistry());
+				REQUIRE_MESSAGE(project.has_value(), project.error().ToString());
+				REQUIRE(m_Editor->OpenProject(std::move(*project)).has_value());
+
+				const Result<VfsPath> scenePath = VfsPath::Create("project", MainScene);
+				REQUIRE(scenePath.has_value());
+				Scope<Scene> scene = m_Editor->CreateScene("Main");
+				const Entity cube = scene->CreateEntity("Cube");
+				cube.AddComponent<MeshRendererComponent>().Mesh = TypedAssetHandle<AssetType::Mesh>(BuiltinAssetHandles::CubeMesh);
+				const Result<std::string> text = SceneSerializer::SaveToString(*scene);
+				REQUIRE(text.has_value());
+				REQUIRE(m_Editor->WriteProjectFile(*scenePath, AsBytes(*text)).has_value());
+				m_Editor->SetScene(std::move(scene), *scenePath);
+				ApplySettings(*m_Editor, R"({"StartScene":"Assets/Scenes/Main.scene","Export":{"BuildScenes":["Assets/Scenes/Main.scene"]}})");
+			}
+
+			~EngineResourcesEditor()
+			{
+				// The editor holds the project lock and the project:// mount: release both before the directory goes.
+				m_Editor.reset();
+				m_Engine.reset();
+			}
+
+			EngineResourcesEditor(const EngineResourcesEditor&) = delete;
+			EngineResourcesEditor& operator=(const EngineResourcesEditor&) = delete;
+
+			[[nodiscard]] EditorContext& GetEditor() { return *m_Editor; }
+			[[nodiscard]] std::filesystem::path GetProjectRoot() const { return m_Directory / "TestProject"; }
+		private:
+			Test::TempDirectory m_Directory;
+			Scope<EngineContext> m_Engine;
+			Scope<EditorContext> m_Editor;
+		};
+
+		// The warnings of `report` that mention environments.
+		std::vector<std::string> EnvironmentWarnings(const ExportReport& report)
+		{
+			std::vector<std::string> warnings;
+			for (const std::string& warning : report.Warnings)
+			{
+				if (warning.find("environment") != std::string::npos)
+					warnings.push_back(warning);
+			}
+			return warnings;
 		}
 
 	}
@@ -550,6 +646,104 @@ namespace Engine {
 			CHECK(ExportPhaseToString(ExportPhase::SmokeTest) == "SmokeTest");
 			CHECK(ExportPhaseToString(ExportPhase::MoveToOutput) == "MoveToOutput");
 			CHECK(ExportPhaseToString(ExportPhase::Done) == "Done");
+		}
+
+		// M8 (§7.5, §7.6; Docs/Decisions/0013-m8-decisions.md decision 9): the built-in environments in Engine.pak.
+
+		TEST_CASE("Exporter: without a bake or a GPU the built-in environments are left out of Engine.pak with a warning")
+		{
+			EngineResourcesEditor fixture;
+			const Test::TempDirectory binaries("ExportBinaries");
+			Result<Scope<Exporter>> exporter = Exporter::Start(fixture.GetEditor(), MakeSpecification(MakeBinaryRoot(binaries, ExportConfiguration::Release)));
+			REQUIRE(exporter.has_value());
+			const std::optional<Result<ExportReport>> outcome = RunToEnd(**exporter);
+			REQUIRE(outcome.has_value());
+			REQUIRE_MESSAGE(outcome->has_value(), outcome->error().ToString());
+			const std::vector<std::string> warnings = EnvironmentWarnings(**outcome);
+			REQUIRE(warnings.size() == 1);
+			CHECK(warnings.front().find("engine://Environments/Studio") != std::string::npos);
+			CHECK(warnings.front().find("engine://Environments/Sky") != std::string::npos);
+			CHECK(warnings.front().find(EnvironmentImporter::GpuHint) != std::string::npos);
+
+			// The other File built-ins and the Generated blue noise (which needs no GPU) are there; the environments are not.
+			const Result<Ref<const PakReader>> enginePak = PakReader::Open((*outcome)->OutputDirectory / "Data" / "Engine.pak");
+			REQUIRE_MESSAGE(enginePak.has_value(), enginePak.error().ToString());
+			CHECK((*enginePak)->FindByHandle(BuiltinAssetHandles::DefaultFont) != nullptr);
+			CHECK((*enginePak)->FindByHandle(BuiltinAssetHandles::BlueNoiseTexture) != nullptr);
+			CHECK((*enginePak)->FindByHandle(BuiltinAssetHandles::StudioEnvironment) == nullptr);
+			CHECK((*enginePak)->FindByHandle(BuiltinAssetHandles::SkyEnvironment) == nullptr);
+		}
+
+		TEST_CASE("Exporter: a reference to a built-in environment that has no bake fails the export with the GPU hint")
+		{
+			EngineResourcesEditor fixture;
+			EditorContext& editor = fixture.GetEditor();
+			const Entity world = editor.GetScene().CreateEntity("World");
+			world.AddComponent<EnvironmentComponent>().Environment = TypedAssetHandle<AssetType::Environment>(BuiltinAssetHandles::StudioEnvironment);
+			SaveScene(editor);
+			const Test::TempDirectory binaries("ExportBinaries");
+			Result<Scope<Exporter>> exporter = Exporter::Start(editor, MakeSpecification(MakeBinaryRoot(binaries, ExportConfiguration::Release)));
+			REQUIRE(exporter.has_value());
+			const std::optional<Result<ExportReport>> outcome = RunToEnd(**exporter);
+			REQUIRE(outcome.has_value());
+			REQUIRE_FALSE(outcome->has_value());
+			const Error& error = outcome->error();
+			INFO(error.ToString());
+			CHECK(error.GetCode() == ErrorCode::Validation);
+			REQUIRE(error.GetIssues().size() == 1);
+			const ErrorIssue& issue = error.GetIssues().front();
+			CHECK(issue.Message.find("engine://Environments/Studio") != std::string::npos);
+			CHECK(issue.Message.find(std::string(MainScene)) != std::string::npos);
+			CHECK(issue.Hint == EnvironmentImporter::GpuHint);
+			std::error_code exists;
+			CHECK_FALSE(std::filesystem::exists(fixture.GetProjectRoot() / "Build", exists));
+		}
+
+		TEST_CASE("Exporter: the built-in environments baked with the editor's GPU go into Engine.pak" * doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			{
+				Result<Scope<EnvironmentBaker>> baker = EnvironmentBaker::Create(gpu.GetDevice(), gpu.GetPipelines());
+				REQUIRE_MESSAGE(baker.has_value(), baker.error().ToString());
+				EngineResourcesEditor fixture(baker->get());
+				EditorContext& editor = fixture.GetEditor();
+				const Entity world = editor.GetScene().CreateEntity("World");
+				world.AddComponent<EnvironmentComponent>().Environment = TypedAssetHandle<AssetType::Environment>(BuiltinAssetHandles::StudioEnvironment);
+				SaveScene(editor);
+				const Test::TempDirectory binaries("ExportBinaries");
+				Result<Scope<Exporter>> exporter = Exporter::Start(editor, MakeSpecification(MakeBinaryRoot(binaries, ExportConfiguration::Release)));
+				REQUIRE(exporter.has_value());
+				const std::optional<Result<ExportReport>> outcome = RunToEnd(**exporter);
+				REQUIRE(outcome.has_value());
+				REQUIRE_MESSAGE(outcome->has_value(), outcome->error().ToString());
+				CHECK(EnvironmentWarnings(**outcome).empty());
+
+				const Result<Ref<const PakReader>> enginePak = PakReader::Open((*outcome)->OutputDirectory / "Data" / "Engine.pak");
+				REQUIRE_MESSAGE(enginePak.has_value(), enginePak.error().ToString());
+				for (const AssetHandle handle : { BuiltinAssetHandles::StudioEnvironment, BuiltinAssetHandles::SkyEnvironment })
+				{
+					CAPTURE(handle.ToString());
+					const PakEntry* entry = (*enginePak)->FindByHandle(handle);
+					REQUIRE(entry != nullptr);
+					CHECK(entry->Type == "Environment");
+					const Result<Buffer> bytes = (*enginePak)->ReadEntry(*entry);
+					REQUIRE(bytes.has_value());
+					CHECK(LoadCookedEnvironment(*bytes).has_value());
+				}
+				// With them, the blue noise of the tonemap's dither (a Generated built-in, decision 8): the 64x64 R8 texture.
+				const PakEntry* noise = (*enginePak)->FindByHandle(BuiltinAssetHandles::BlueNoiseTexture);
+				REQUIRE(noise != nullptr);
+				CHECK(noise->Type == "Texture");
+				const Result<Buffer> noiseBytes = (*enginePak)->ReadEntry(*noise);
+				REQUIRE(noiseBytes.has_value());
+				const Result<AssetRef<TextureData>> texture = LoadCookedTexture(*noiseBytes);
+				REQUIRE_MESSAGE(texture.has_value(), texture.error().ToString());
+				CHECK((*texture)->Format == TextureFormat::R8Unorm);
+				CHECK((*texture)->Width == 64);
+				CHECK((*texture)->Height == 64);
+			}
+			gpu.GetDevice().RunGarbageCollection();
 		}
 	}
 

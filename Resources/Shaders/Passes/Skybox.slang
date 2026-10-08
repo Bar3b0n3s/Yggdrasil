@@ -1,25 +1,54 @@
-// Skybox: §8.3 pass 8 (Renderer/SkyboxPass.h): the skybox cube at depth 0 along each pixel's view ray.
-// Contract stub of the M8 contract (Docs/Decisions/0013-m8-decisions.md decision 3): the program, its entry points and
-// permutations are declared in Shaders.json; stream B replaces this body with the real shader and its C++ pass
-// adds the pipeline layout description that "Shaders: LayoutsMatchReflection" checks.
+// Skybox: §8.3 pass 8 (Renderer/SkyboxPass.h). One fullscreen triangle at depth 0, drawn with the depth test GreaterOrEqual
+// against SceneDepth and writes off, so it covers exactly the pixels the scene left at the cleared (far) depth. Each pixel
+// samples the skybox cube along its view ray, rotated by the environment's Rotation, at SkyboxLod, times Intensity: linear
+// radiance into SceneColor (exposure and tonemapping follow).
 
 #include "Shared/EnvironmentConstants.h"
+#include "Shared/ViewConstants.h"
 
 import Common.Environment;
 
-[shader("vertex")]
-float4 VSMain(uint vertexID : SV_VulkanVertexID) : SV_Position
+ConstantBuffer<ViewConstants> View : register(b0, space0);
+ConstantBuffer<EnvironmentConstants> SkyEnvironment : register(b2, space0);
+TextureCube<float4> EnvSkybox : register(t4, space0);
+SamplerState LinearClamp : register(s0, space0);
+
+struct SkyboxVaryings
 {
-	return float4(0.0, 0.0, 0.0, 1.0);
+	float4 Position : SV_Position;
+	float2 Ndc : TEXCOORD0;
+};
+
+// The world-space point at normalized device coordinates `ndc` and reverse-Z depth `depth`.
+float3 Unproject(float2 ndc, float depth)
+{
+	const float4 position = mul(View.InverseViewProjection, float4(ndc, depth, 1.0));
+	return position.xyz / position.w;
 }
 
-// Uses the frozen Common/Environment.slang functions and the Slang side of Shared/EnvironmentConstants.h, so every build
-// compiles and validates them (slangc, spirv-val) before stream B's shader imports them for real; it binds nothing, so the
-// stub's layout description stays valid.
-[shader("fragment")]
-float4 PSMain() : SV_Target0
+// The triangle (-1, -1), (3, -1), (-1, 3) covers the viewport; depth 0 is the far plane (reverse-Z, §8.3).
+[shader("vertex")]
+SkyboxVaryings VSMain(uint vertexID : SV_VulkanVertexID)
 {
-	const EnvironmentConstants environment = (EnvironmentConstants)0;
-	const float3 direction = RotateEnvironmentDirection(float3(0.0, 0.0, -1.0), environment.RotationSin, environment.RotationCos);
-	return float4(EvaluateIrradianceSH9(environment.IrradianceSH9, direction), 0.0);
+	const float2 ndc = float2(vertexID == 1 ? 3.0 : -1.0, vertexID == 2 ? 3.0 : -1.0);
+	SkyboxVaryings output;
+	output.Position = float4(ndc, 0.0, 1.0);
+	output.Ndc = ndc;
+	return output;
+}
+
+// The view ray per §8.3: per pixel for a perspective camera (two points on the pixel's ray: the near plane at depth 1 and twice
+// the near distance at depth 0.5, the far plane being at infinity), the constant view direction for an orthographic one (its
+// far plane at depth 0 minus its near plane at depth 1).
+[shader("fragment")]
+float4 PSMain(SkyboxVaryings input) : SV_Target0
+{
+	float3 ray;
+	if (View.ProjectionKind == ProjectionKindOrthographic)
+		ray = Unproject(float2(0.0), 0.0) - Unproject(float2(0.0), 1.0);
+	else
+		ray = Unproject(input.Ndc, 0.5) - Unproject(input.Ndc, 1.0);
+	const float3 lookup = RotateEnvironmentDirection(normalize(ray), SkyEnvironment.RotationSin, SkyEnvironment.RotationCos);
+	const float3 radiance = EnvSkybox.SampleLevel(LinearClamp, lookup, SkyEnvironment.SkyboxLod).rgb * SkyEnvironment.Intensity;
+	return float4(radiance, 1.0);
 }

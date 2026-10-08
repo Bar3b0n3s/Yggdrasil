@@ -115,7 +115,7 @@ namespace Engine {
 			}
 			CHECK(hasSpirv);
 			CHECK(hasReflection);
-			CHECK((*enginePak)->FindByPath("Shaders/Scene/VSMain.spv") != nullptr);
+			CHECK((*enginePak)->FindByPath("Shaders/Scene/VSMain.ALPHA_MASK-0.spv") != nullptr);
 		}
 	}
 

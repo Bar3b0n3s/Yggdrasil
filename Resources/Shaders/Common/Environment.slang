@@ -1,6 +1,6 @@
 // Environment lookups shared by the forward passes and the skybox (Architecture §8.6; Shared/EnvironmentConstants.h and
 // Asset/EnvironmentData.h hold the conventions). Frozen by the M8 contract (Docs/Decisions/0013-m8-decisions.md decision 9),
-// which implemented these formulas because streams A and B both depend on them; stream B owns the module.
+// which implemented these formulas because the forward passes and the skybox both depend on them.
 module Environment;
 
 // The direction an environment map is looked up at for the world direction `direction`, with the environment turned by its

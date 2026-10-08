@@ -20,7 +20,7 @@
 // constants and resolved textures; the renderer caches one set-1 binding set per material generation, §8.4) and
 // environments (the skybox and specular cubes, uploaded through HostImageUpload like textures, and the SH9 irradiance).
 // Frozen by the M6 contract; the M8 contract added the material and environment members (Docs/Decisions/0013-m8-decisions.md
-// decision 7), which stream A implements.
+// decision 7).
 
 namespace Engine {
 

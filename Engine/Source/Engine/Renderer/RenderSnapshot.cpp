@@ -18,7 +18,7 @@ namespace Engine {
 		constexpr double ProjectionDegreesToRadians = 0.017453292519943295769236907684886; // pi / 180
 
 		// The debug views and their names, in enumerator order.
-		constexpr std::array<std::pair<RenderDebugView, std::string_view>, 6> DebugViewNames = { {
+		constexpr std::array<std::pair<RenderDebugView, std::string_view>, RenderDebugViewCount> DebugViewNames = { {
 			{ RenderDebugView::Lit, "Lit" },
 			{ RenderDebugView::Albedo, "Albedo" },
 			{ RenderDebugView::Normals, "Normals" },
@@ -26,6 +26,20 @@ namespace Engine {
 			{ RenderDebugView::Metallic, "Metallic" },
 			{ RenderDebugView::Emissive, "Emissive" },
 		} };
+
+		// Every view has its entry at its enumerator's index with a name; an entry the array value-initialized because a view
+		// was appended without one fails here.
+		[[nodiscard]] static consteval bool AreDebugViewNamesComplete()
+		{
+			for (size_t index = 0; index < DebugViewNames.size(); ++index)
+			{
+				if (static_cast<size_t>(DebugViewNames[index].first) != index || DebugViewNames[index].second.empty())
+					return false;
+			}
+			return true;
+		}
+
+		static_assert(AreDebugViewNamesComplete(), "every RenderDebugView needs its name, in enumerator order");
 
 		[[nodiscard]] static constexpr char ToLowerAscii(char character)
 		{

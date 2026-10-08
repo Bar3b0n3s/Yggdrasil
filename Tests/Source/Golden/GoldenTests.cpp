@@ -208,10 +208,11 @@ namespace Engine {
 			ENGINE_CHECK_GOLDEN("ImGuiDemo", *image, deviceClass);
 		}
 
-		// M8 (Roadmap M8, §15.4): skeletons of the M8 contract. Stream E writes the scenes (Projects/FeatureTest/Scaffold/
-		// Golden.jsonl), implements Test::RenderGoldenScene and, after the integration of streams A to D, reviews and commits
-		// the images of this device class and removes the skips (LitScene's image is regenerated then too: the PBR renderer,
-		// AgX, bloom and FXAA change it).
+		// M8 (Roadmap M8, §15.4): the scenes Projects/FeatureTest/Scaffold/Golden.jsonl wrote into
+		// Projects/FeatureTest/Assets/Scenes/Golden, rendered by Test::RenderGoldenScene. Their images are committed for the
+		// device class nvidia-61x (Docs/Decisions/0013-m8-decisions.md decision 24, with LitScene's regenerated for the PBR
+		// renderer, AgX, bloom and FXAA); every other device class checks them in smoke mode and the golden stage warns
+		// "goldens missing" (GoldenImage.h).
 
 		// Renders golden scene `name` with `options` and compares it with the golden of the same name.
 		static void CheckGoldenScene(std::string_view name, const Test::GoldenSceneOptions& options = {})
@@ -226,20 +227,20 @@ namespace Engine {
 			gpu.GetDevice().RunGarbageCollection();
 		}
 
-		TEST_CASE("Golden: MaterialGrid" * doctest::skip(true))
+		TEST_CASE("Golden: MaterialGrid")
 		{
 			// §15.4: a PBR roughness x metallic sphere grid under the Studio HDRI.
 			CheckGoldenScene("MaterialGrid");
 		}
 
-		TEST_CASE("Golden: IblOnly" * doctest::skip(true))
+		TEST_CASE("Golden: IblOnly")
 		{
 			// Image-based lighting alone (no light components): the Sky HDRI's SH9 diffuse and prefiltered specular on a few
 			// shapes, with the skybox visible.
 			CheckGoldenScene("IblOnly");
 		}
 
-		TEST_CASE("Golden: Tonemappers" * doctest::skip(true))
+		TEST_CASE("Golden: Tonemappers")
 		{
 			// Each tonemapper (AgX, ACES, PbrNeutral, Linear) on one HDR scene, as a 2 x 2 grid of 320 x 180 renders.
 			Test::HeadlessGpuFixture gpu;
@@ -261,20 +262,21 @@ namespace Engine {
 			gpu.GetDevice().RunGarbageCollection();
 		}
 
-		TEST_CASE("Golden: Bloom" * doctest::skip(true))
+		TEST_CASE("Golden: Bloom")
 		{
 			// Bright emissive shapes against a dark background with BloomEnabled and a high BloomIntensity.
 			CheckGoldenScene("Bloom");
 		}
 
-		TEST_CASE("Golden: AlphaModes" * doctest::skip(true))
+		TEST_CASE("Golden: AlphaModes")
 		{
-			// Opaque, Mask (a cut-out checker) and Blend (overlapping translucent quads sorted back to front), single- and
-			// double-sided.
+			// Opaque; Mask (the cut-out pattern of Tests/Data's Rgba.png alpha) on a quad seen from the front, a double-sided
+			// one seen from the back and a single-sided one seen from the back (culled); Blend (overlapping translucent quads
+			// sorted back to front, and a translucent double-sided sphere); lit by a point light and a spot light.
 			CheckGoldenScene("AlphaModes");
 		}
 
-		TEST_CASE("Golden: DebugDraw" * doctest::skip(true))
+		TEST_CASE("Golden: DebugDraw")
 		{
 			// Every primitive of the DebugDrawList, depth-tested and on top, over a simple scene (scripts emit them from M13; the
 			// golden appends them to the extracted snapshot).
@@ -295,17 +297,19 @@ namespace Engine {
 			} });
 		}
 
-		TEST_CASE("Golden: Text" * doctest::skip(true))
+		TEST_CASE("Golden: Text")
 		{
 			// Screen texts at several anchors, pivots, sizes, colours and alignments (multi-line), and world texts, one of them
 			// billboarded, in the Default font.
 			CheckGoldenScene("Text");
 		}
 
-		TEST_CASE("Golden: GltfFixture" * doctest::skip(true))
+		TEST_CASE("Golden: GltfFixture")
 		{
-			// An imported glTF fixture (Tests/Data/Generate/MakeGltfFixtures.py's textured, normal-mapped model, copied into
-			// Projects/FeatureTest/Assets/Models by the scaffold) under the Studio HDRI and a sun.
+			// The imported glTF fixtures of Tests/Data/Generate/MakeGltfFixtures.py, the textured two-material cube
+			// (Textured.gltf, with its external buffer and image) and the normal-mapped quad (NormalMapped.gltf), copied into
+			// Projects/FeatureTest/Assets/Models/Golden by the scaffold and instantiated as prefabs, under the Studio HDRI
+			// with a blurred skybox (SkyboxBlur) and a sun.
 			CheckGoldenScene("GltfFixture");
 		}
 	}

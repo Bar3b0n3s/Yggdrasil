@@ -23,7 +23,7 @@
 // Test::ComputeDfg (Tests/Source/Support/RenderReference.h); "BrdfLut: DFG matches the CPU reference" compares them.
 //
 // Owned by SceneRendererPipelines (its forward pass binds the texture at t5 of set 0, §8.4). Main thread only; not copyable
-// or movable. Frozen by the M8 contract (Docs/Decisions/0013-m8-decisions.md decision 7); stream A implements it.
+// or movable. Frozen by the M8 contract (Docs/Decisions/0013-m8-decisions.md decision 7).
 
 namespace Engine {
 

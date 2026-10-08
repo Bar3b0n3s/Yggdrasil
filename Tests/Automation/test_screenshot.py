@@ -151,7 +151,6 @@ class ScreenshotRenderingTests(AutomationTestCase):
         client.call("scene.save")
         self.shut_down(client)
 
-    @unittest.skip("contract stub: un-skipped by M8 stream A")
     def test_viewport_screenshot_renders_debug_views(self) -> None:
         # M8 (§8.5; ADR 0009 decision 33 deferred debugView here; Docs/Decisions/0013-m8-decisions.md decision 12): each
         # debug view renders, the names ignore case, an empty name is Lit, and an unknown one is InvalidParams.
@@ -178,6 +177,7 @@ class ScreenshotRenderingTests(AutomationTestCase):
             client.call("viewport.screenshot", {**size, "debugView": "Wireframe"})
         self.assert_engine_error(raised.exception, engine_client.INVALID_PARAMS)
         self.assertEqual(raised.exception.issues[0]["pointer"], "/debugView")
+        client.call("scene.save")
         self.shut_down(client)
 
     def test_editor_screenshot_writes_the_editor_ui_as_png(self) -> None:

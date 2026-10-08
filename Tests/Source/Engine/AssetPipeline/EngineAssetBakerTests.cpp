@@ -263,19 +263,20 @@ namespace Engine {
 			CHECK_FALSE(BakeEngineAssets(specification, *catalog).has_value());
 		}
 
-		TEST_CASE("EngineAssetBaker: entries without an importer in this build are skipped with a warning")
+		TEST_CASE("EngineAssetBaker: the environments are skipped with a warning without a GPU baker")
 		{
 			BakeEnvironment environment;
 			Result<BuiltinAssetCatalog> catalog = BuiltinAssetCatalog::Load(environment.Vfs);
 			REQUIRE(catalog.has_value());
 			Result<EngineBakeReport> report = BakeEngineAssets(environment.GetSpecification(), *catalog);
 			REQUIRE(report.has_value());
-			// The environments wait for EnvironmentImporter (M8).
+			// EnvironmentImporter needs a GPU (§8.6): its warning carries the importer's hint.
 			const auto skipped = [&report](AssetHandle handle)
 			{
 				return std::ranges::any_of(report->Skipped, [handle](const AssetDiagnostic& diagnostic)
 				{
-					return diagnostic.Asset == handle && diagnostic.Severity == DiagnosticSeverity::Warning;
+					return diagnostic.Asset == handle && diagnostic.Severity == DiagnosticSeverity::Warning
+						&& diagnostic.Hint == "start the editor with a GPU once to bake this environment";
 				});
 			};
 			CHECK(skipped(BuiltinAssetHandles::StudioEnvironment));
@@ -285,6 +286,7 @@ namespace Engine {
 			Result<std::vector<Buffer>> baked = GetOrBakeEngineAsset(environment.GetSpecification(), *studio);
 			REQUIRE_FALSE(baked.has_value());
 			CHECK(baked.error().GetCode() == ErrorCode::Unsupported);
+			CHECK(baked.error().GetHint() == "start the editor with a GPU once to bake this environment");
 		}
 
 		TEST_CASE("EngineAssetBaker: generated entries and entry settings are baked under their own keys")
@@ -497,12 +499,10 @@ namespace Engine {
 			CHECK(artifact.error().GetCode() == ErrorCode::InvalidArgument);
 		}
 
-		// M8 (Docs/Decisions/0013-m8-decisions.md decision 9): the built-in environments bake with a GPU baker. Skeleton of the
-		// M8 contract; stream B removes the skip (and updates "entries without an importer in this build are skipped with a
-		// warning" once EnvironmentImporter is registered: the environments then skip because no baker is given).
+		// M8 (Docs/Decisions/0013-m8-decisions.md decision 9): the built-in environments bake with a GPU baker.
 
 		TEST_CASE("EngineAssetBaker: the built-in environments bake with a GPU and are reused without one"
-			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+			* doctest::test_suite(Test::GpuSuite))
 		{
 			Test::HeadlessGpuFixture gpu;
 			ENGINE_REQUIRE_GPU(gpu);

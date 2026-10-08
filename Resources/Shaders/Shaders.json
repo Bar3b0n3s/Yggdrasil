@@ -138,7 +138,13 @@
 					"Name": "PSForward",
 					"Stage": "fragment"
 				}
-			]
+			],
+			"Permutations": {
+				"ALPHA_MASK": [
+					"0",
+					"1"
+				]
+			}
 		},
 		{
 			"Name": "Skybox",

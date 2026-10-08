@@ -14,8 +14,8 @@
 // GPU oracle tests compare the shaders' results with these. Written from the papers and the formulas the engine headers
 // freeze (Renderer/BrdfLut.h, Asset/EnvironmentData.h, Shared/EnvironmentConstants.h, Renderer/TonemapPass.h), never from
 // the shaders, so a shared mistake cannot hide; double precision throughout. Deterministic and thread-safe (pure
-// functions). Frozen by the M8 contract (Docs/Decisions/0013-m8-decisions.md decision 14); stream E implements it and its
-// own tests (RenderReferenceTests.cpp) check each against analytic values; streams A, B and C use it in their GPU tests.
+// functions). Frozen by the M8 contract (Docs/Decisions/0013-m8-decisions.md decision 14); its own tests
+// (RenderReferenceTests.cpp) check each against analytic values, and the renderer's GPU oracle tests compare with it.
 
 namespace Engine {
 

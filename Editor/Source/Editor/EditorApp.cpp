@@ -9,6 +9,7 @@
 #include "EditorCore/EngineAssetGenerators.h"
 #include "EditorCore/Play/EditorPlayController.h"
 #include "EditorCore/Project/ProjectManager.h"
+#include "EditorCore/ShownSceneTracker.h"
 #include "Engine/App/CommandLine.h"
 #include "Engine/App/EngineContext.h"
 #include "Engine/App/ExitCode.h"
@@ -20,6 +21,7 @@
 #include "Engine/AssetPipeline/EngineAssetBaker.h"
 #include "Engine/AssetPipeline/ImporterRegistry.h"
 #include "Engine/Automation/Protocol/MethodRegistry.h"
+#include "Engine/Core/EventLog.h"
 #include "Engine/Core/FatalError.h"
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Json/JsonWriter.h"
@@ -34,9 +36,11 @@
 #include "Engine/Platform/Process.h"
 #include "Engine/Platform/Window.h"
 #include "Engine/Renderer/BlitPass.h"
+#include "Engine/Renderer/EnvironmentBaker.h"
 #include "Engine/Renderer/GpuResourceCache.h"
 #include "Engine/Renderer/RenderSnapshot.h"
 #include "Engine/Renderer/SceneRenderer.h"
+#include "Engine/Renderer/StaleMirrorSchedule.h"
 #include "Engine/Renderer/ViewportCapture.h"
 #include "Engine/Scene/RenderExtraction.h"
 #include "Engine/Scene/Scene.h"
@@ -58,6 +62,9 @@ namespace Engine {
 	struct EditorApp::State
 	{
 		EditorLaunchOptions Options{};
+		// With a device: the GPU environment bake (§8.6) the editor's asset manager imports environments with (M8). Created
+		// before the editor and destroyed after it (OnShutdown), since the asset manager keeps a pointer to it.
+		Scope<EnvironmentBaker> Baker;
 		Scope<EditorContext> Editor; // destroyed last (reverse member order): the server and the run use it
 		Scope<AutomationServer> Server;
 		Scope<BatchRunner> Batch;    // --batch or --upgrade
@@ -85,6 +92,10 @@ namespace Engine {
 		nvrhi::FramebufferInfo BlitFramebuffer{}; // the target format Blit was created for
 		bool IsViewFailing = false;               // a failed extraction is logged once per run of failing frames
 		bool IsRenderFailing = false;             // a failed render or blit is logged once per run of failing frames
+		// Stale mirrors (SceneRenderer.h; Docs/Decisions/0013-m8-decisions.md decision 7): the scene change OnUpdate noticed
+		// and when the collections release what only the previous scene used.
+		ShownSceneTracker ShownScenes{};
+		StaleMirrorSchedule Mirrors{};
 	};
 
 	namespace Utils {
@@ -160,11 +171,11 @@ namespace Engine {
 		}
 
 		// --bake-engine-assets (§7.5, ADR 0010 decision 13): bakes every File and Generated entry of engine://EngineAssets.json
-		// into enginecache:// with the built-in importers and the editor's generators (EditorCore/EngineAssetGenerators.h).
-		// Without an environment baker (M8 stream B injects it) the environments are skipped with a warning. Returns the exit
-		// code: Success when every entry is baked, up to date or skipped with a warning, Failed when an entry or the run
-		// failed (each failure logged at Error).
-		[[nodiscard]] static int BakeEngineResources(EngineContext& context)
+		// into enginecache:// with the built-in importers, the editor's generators (EditorCore/EngineAssetGenerators.h) and,
+		// with a device, the GPU environment baker (M8); without one (--renderer none, no Vulkan device) the environments are
+		// skipped with a warning. Returns the exit code: Success when every entry is baked, up to date or skipped with a
+		// warning, Failed when an entry or the run failed (each failure logged at Error).
+		[[nodiscard]] static int BakeEngineResources(EngineContext& context, IEnvironmentBaker* environmentBaker)
 		{
 			ImporterRegistry importers;
 			RegisterBuiltinImporters(importers);
@@ -179,7 +190,7 @@ namespace Engine {
 				.Importers = &importers,
 				.Registry = &context.GetTypeRegistry(),
 				.Jobs = &context.GetJobSystem(),
-				.EnvironmentBaker = nullptr,
+				.EnvironmentBaker = environmentBaker,
 				.Generators = GetEngineAssetGenerators(),
 			};
 			const Result<EngineBakeReport> report = BakeEngineAssets(specification, *catalog);
@@ -240,10 +251,22 @@ namespace Engine {
 			app.RequestExit(ExitCode::Success);
 			return {};
 		}
+
+		// With a device, the environment baker's pipelines are created at startup with the editor's other pipelines (§8.12);
+		// the asset manager's EnvironmentImporter and the engine asset bake use it (§7.4, §7.5).
+		EngineContext& context = app.GetContext();
+		if (GraphicsDevice* device = context.GetGraphicsDevice())
+		{
+			Result<Scope<EnvironmentBaker>> baker = EnvironmentBaker::Create(*device, *context.GetPipelineFactory());
+			if (!baker.has_value())
+				return std::unexpected(Utils::CheckStartupGpuObject(std::move(baker).error(), "the environment baker"));
+			state.Baker = std::move(*baker);
+		}
+
 		// The bake needs no project and no editor state: a --project given with it is not opened.
 		if (options.BakeEngineAssets)
 		{
-			app.RequestExit(Utils::BakeEngineResources(app.GetContext()));
+			app.RequestExit(Utils::BakeEngineResources(context, state.Baker.get()));
 			return {};
 		}
 
@@ -252,6 +275,7 @@ namespace Engine {
 		EditorContextSpecification editorSpecification;
 		editorSpecification.TemplatesDirectory = repository / "Resources" / "Templates" / "Projects";
 		editorSpecification.ReadOnlyCacheRoot = userData.Root / "ReadOnlyCache";
+		editorSpecification.EnvironmentBaker = state.Baker.get();
 		ENGINE_TRY_ASSIGN(state.Editor, EditorContext::Create(app.GetContext(), editorSpecification));
 
 		if (options.Project.has_value())
@@ -383,6 +407,7 @@ namespace Engine {
 		m_State->ReleaseServer();
 		m_Rendering.reset();
 		m_State->Editor.reset();
+		m_State->Baker.reset(); // after the editor, whose asset manager points at it; before the device
 		GetProcessContext().SetFatalErrorHook({});
 	}
 
@@ -455,6 +480,8 @@ namespace Engine {
 		// The view of this frame, after everything that changes the scenes this frame.
 		if (m_Rendering != nullptr && width > 0 && height > 0)
 			PrepareViewportView(width, height);
+		if (m_Rendering != nullptr)
+			NoteShownScene();
 
 		const std::optional<uint64_t> maxFrames = GetSpecification().MaxFrames;
 		if (maxFrames.has_value() && frame.FrameIndex + 1 == *maxFrames && !WriteScreenshots())
@@ -481,12 +508,40 @@ namespace Engine {
 		rendering.ViewSnapshot = RenderSnapshot{};
 	}
 
+	// --- Stale mirrors (SceneRenderer.h; Docs/Decisions/0013-m8-decisions.md decision 7) ---------------------------------
+
+	void EditorApp::NoteShownScene()
+	{
+		// The edit scene and the play session's scene, compared with the last frame's, plus the SceneOpened and
+		// PlayStateChanged events since (ShownSceneTracker).
+		Rendering& rendering = *m_Rendering;
+		const EditorContext* editor = m_State->Editor.get();
+		const PlaySession* session = editor != nullptr ? editor->GetPlay().GetSession() : nullptr;
+		const Scene* editScene = editor != nullptr && editor->HasScene() ? &editor->GetScene() : nullptr;
+		const Scene* sessionScene = session != nullptr ? &session->GetScene() : nullptr;
+		if (rendering.ShownScenes.Update(editScene, sessionScene, GetContext().GetEventLog()))
+			rendering.Mirrors.NoteSceneChange();
+	}
+
+	void EditorApp::CollectStaleMirrors()
+	{
+		// The previous frame's renders were executed (each frame's command list runs before the next frame begins): mirrors of
+		// replaced asset versions go every frame, and after the first frame rendered with a newly shown scene, also what only
+		// the previous scene used (StaleMirrorSchedule). The screenshots rendered in between count as uses.
+		Rendering& rendering = *m_Rendering;
+		const bool releaseUnused = rendering.Mirrors.TakeReleaseUnused();
+		rendering.Cache->CollectStale(releaseUnused);
+		if (const AssetManager* assets = GetContext().GetAssetManager())
+			rendering.Pipelines->CollectStale(*assets, releaseUnused);
+	}
+
 	void EditorApp::OnRender(RenderContext& context)
 	{
 		if (m_Rendering == nullptr)
 			return;
 		Rendering& rendering = *m_Rendering;
 		SceneRenderer& viewport = *rendering.Viewport;
+		CollectStaleMirrors();
 		GpuProfileScope scope(*context.Profiler, *context.CommandList, "Viewport");
 		// Render targets are created at startup or resize, and one the device has no memory for is fatal (§8.14 item 7).
 		const Status resized = viewport.Resize(context.Width, context.Height);
@@ -516,6 +571,7 @@ namespace Engine {
 		const RenderSnapshot& snapshot = rendering.UsesSessionView && session != nullptr ? session->GetLastExtraction() : rendering.ViewSnapshot;
 		// A render error names a draw it skipped (a non-finite matrix); the rest of the view rendered and is shown.
 		const Status rendered = viewport.Render(*context.CommandList, snapshot);
+		rendering.Mirrors.NoteRendered();
 		const Status blitted = rendering.Blit->Record(*context.CommandList, *viewport.GetFinalTexture(), *context.Framebuffer);
 		// A binding set the device has no memory for is fatal like any GPU object (§8.14 item 7); anything else is logged
 		// once per run of failing frames.

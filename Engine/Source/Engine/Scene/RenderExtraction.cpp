@@ -11,6 +11,7 @@
 #include "Engine/Scene/Components/PostProcessComponent.h"
 #include "Engine/Scene/Components/RuntimeComponents.h"
 #include "Engine/Scene/Components/SpotLightComponent.h"
+#include "Engine/Scene/Components/TextComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/TransformSystem.h"
@@ -127,6 +128,27 @@ namespace Engine {
 				case SsaoQuality::High:   return RenderSsaoQuality::High;
 			}
 			return RenderSsaoQuality::Medium;
+		}
+
+		static RenderTextSpace ToRenderTextSpace(TextSpace space)
+		{
+			switch (space)
+			{
+				case TextSpace::Screen: return RenderTextSpace::Screen;
+				case TextSpace::World:  return RenderTextSpace::World;
+			}
+			return RenderTextSpace::Screen;
+		}
+
+		static RenderTextAlignment ToRenderTextAlignment(TextAlignment alignment)
+		{
+			switch (alignment)
+			{
+				case TextAlignment::Left:   return RenderTextAlignment::Left;
+				case TextAlignment::Center: return RenderTextAlignment::Center;
+				case TextAlignment::Right:  return RenderTextAlignment::Right;
+			}
+			return RenderTextAlignment::Center;
 		}
 
 		// The world -> view matrix of a camera at `position` whose rotation is `rotation` (it looks down its local -Z with
@@ -416,6 +438,23 @@ namespace Engine {
 						.CastShadows = light->CastShadows,
 					},
 					getWorld(), id);
+			}
+			if (const TextComponent* text = entity.TryGetComponent<TextComponent>(); text != nullptr && !text->Text.empty())
+			{
+				snapshot.Texts.push_back(TextItem{
+					.Text = text->Text,
+					.Font = text->Font.GetHandle(),
+					.Size = text->Size,
+					.Color = text->Color,
+					.Space = Utils::ToRenderTextSpace(text->Space),
+					.Anchor = text->Anchor,
+					.Pivot = text->Pivot,
+					.Offset = text->Offset,
+					.Alignment = Utils::ToRenderTextAlignment(text->Alignment),
+					.Billboard = text->Billboard,
+					.World = getWorld(),
+					.Entity = id,
+				});
 			}
 			if (const EnvironmentComponent* component = entity.TryGetComponent<EnvironmentComponent>(); component != nullptr && !environment.has_value())
 			{

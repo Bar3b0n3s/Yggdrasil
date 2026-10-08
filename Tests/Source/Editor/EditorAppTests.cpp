@@ -229,15 +229,15 @@ namespace Engine {
 		TEST_CASE("EditorApp: --bake-engine-assets fills the engine cooked cache and exits 0")
 		{
 			// RunEditor points the engine cooked cache (§7.5) at <userData>/EngineCache, which starts empty: the first run bakes
-			// the one File entry this build can import (the Default font) and skips the environments, which have no importer
-			// before M8 (a warning naming them, which does not fail the run).
+			// the one File entry this build can import without a GPU (the Default font) and the Generated blue noise (M8), and
+			// skips the environments, which need a GPU (a warning naming them, which does not fail the run).
 			Test::TempDirectory userData("EditorBakeEngineAssets");
 			const std::filesystem::path font = userData / "EngineCache" / BuiltinAssetHandles::DefaultFont.ToString();
 			const Result<ProcessResult> first =
 				RunEditor(userData, { "--headless", "--renderer", "none", "--bake-engine-assets" }, std::chrono::seconds(180));
 			REQUIRE_MESSAGE(first.has_value(), first.error().ToString());
 			CHECK_MESSAGE(first->ExitCode == ExitCode::Success, first->StandardError);
-			CHECK_MESSAGE(first->StandardError.contains("Engine assets: 1 baked, 0 up to date, 2 not baked"), first->StandardError);
+			CHECK_MESSAGE(first->StandardError.contains("Engine assets: 2 baked, 0 up to date, 2 not baked"), first->StandardError);
 			CHECK(first->StandardError.contains("engine://Environments/Studio"));
 			const Result<std::vector<std::filesystem::path>> files = FileSystem::ListDirectory(font);
 			REQUIRE_MESSAGE(files.has_value(), files.error().ToString());
@@ -245,12 +245,12 @@ namespace Engine {
 			REQUIRE(files->size() == 2);
 			CHECK(((*files)[0].extension() == ".bin" && (*files)[1].extension() == ".import"));
 
-			// A second run finds the entry up to date and imports nothing.
+			// A second run finds both entries up to date and bakes nothing.
 			const Result<ProcessResult> second =
 				RunEditor(userData, { "--headless", "--renderer", "none", "--bake-engine-assets" }, std::chrono::seconds(180));
 			REQUIRE_MESSAGE(second.has_value(), second.error().ToString());
 			CHECK_MESSAGE(second->ExitCode == ExitCode::Success, second->StandardError);
-			CHECK_MESSAGE(second->StandardError.contains("Engine assets: 0 baked, 1 up to date, 2 not baked"), second->StandardError);
+			CHECK_MESSAGE(second->StandardError.contains("Engine assets: 0 baked, 2 up to date, 2 not baked"), second->StandardError);
 			CHECK(FileSystem::ListDirectory(font).value_or(std::vector<std::filesystem::path>()) == *files);
 		}
 

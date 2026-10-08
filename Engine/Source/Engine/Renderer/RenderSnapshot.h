@@ -79,6 +79,11 @@ namespace Engine {
 		Emissive   // emitted radiance (Emissive times map times EmissiveStrength), clamped to [0, 1]
 	};
 
+	// The number of debug views: RenderDebugView's last enumerator plus one, so the view that M9 appends last is named here.
+	// The view names (RenderDebugViewToString), the forward pipelines per view (SceneRendererPipelines::EnsureDebugView) and
+	// viewport.screenshot's list of valid names all follow it.
+	inline constexpr uint32_t RenderDebugViewCount = static_cast<uint32_t>(RenderDebugView::Emissive) + 1;
+
 	// Where a TextItem is laid out (TextComponent::Space, §5.3, §8.10).
 	enum class RenderTextSpace : uint8_t
 	{

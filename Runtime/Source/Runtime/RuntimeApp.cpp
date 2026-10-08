@@ -29,6 +29,7 @@
 #include "Engine/Renderer/BlitPass.h"
 #include "Engine/Renderer/GpuResourceCache.h"
 #include "Engine/Renderer/SceneRenderer.h"
+#include "Engine/Renderer/StaleMirrorSchedule.h"
 #include "Engine/Renderer/ViewportCapture.h"
 #include "Engine/Scene/RenderExtraction.h"
 #include "Engine/Scene/Scene.h"
@@ -185,7 +186,10 @@ namespace Engine {
 		nvrhi::Format BlitFormat = nvrhi::Format::UNKNOWN;
 		Scope<ViewportCapture> Capture;
 		bool RenderFailing = false; // the last frame's render or blit failed, so the next failure is not logged again
-		bool Running = false;       // OnInitialize succeeded: the frames ran
+		// M8 stale mirrors (SceneRenderer.h): when the collections also release what the start scene's first frame did not
+		// use (CreateRenderers notes the start scene as the shown scene's change).
+		StaleMirrorSchedule Mirrors{};
+		bool Running = false; // OnInitialize succeeded: the frames ran
 		bool ScreenshotWritten = false;
 #if !defined(ENGINE_DIST)
 		Scope<RuntimeAutomationServer> Server;
@@ -388,6 +392,7 @@ namespace Engine {
 		ENGINE_TRY_ASSIGN(state.Renderer, Utils::CheckStartupCreation(SceneRenderer::Create(device, *state.Pipelines, *state.GpuCache, *m_Assets, { .Width = state.ViewWidth, .Height = state.ViewHeight }), "the game view's renderer"));
 		ENGINE_TRY_ASSIGN(state.Capture,
 			Utils::CheckStartupCreation(ViewportCapture::CreateForScenes(device, *state.Pipelines, *state.GpuCache, *m_Assets), "the screenshot capture"));
+		state.Mirrors.NoteSceneChange();
 		return {};
 	}
 
@@ -430,6 +435,15 @@ namespace Engine {
 	void RuntimeApp::OnSafePoint()
 	{
 		State& state = *m_State;
+		// M8 stale mirrors (SceneRenderer.h, "Stale mirrors"; Docs/Decisions/0013-m8-decisions.md decision 7): the previous
+		// frame's renders were executed, so the mirrors of replaced asset versions are released; after the first frame the
+		// start scene rendered, also everything that frame did not use (StaleMirrorSchedule).
+		if (state.GpuCache != nullptr && state.Pipelines != nullptr)
+		{
+			const bool releaseUnused = state.Mirrors.TakeReleaseUnused();
+			state.GpuCache->CollectStale(releaseUnused);
+			state.Pipelines->CollectStale(*m_Assets, releaseUnused);
+		}
 #if !defined(ENGINE_DIST)
 		if (state.Server != nullptr)
 		{
@@ -530,6 +544,7 @@ namespace Engine {
 		// The session's last snapshot (its frame phase extracted it at the view size), rendered at the frame's size. A render
 		// error names a draw it skipped (a non-finite matrix); the rest of the view rendered and is shown.
 		const Status rendered = state.Renderer->Render(*context.CommandList, state.Session->GetLastExtraction());
+		state.Mirrors.NoteRendered();
 		const Status blitted = state.Blit->Record(*context.CommandList, *state.Renderer->GetFinalTexture(), *context.Framebuffer);
 		// A binding set the device has no memory for is fatal like any GPU object (§8.14 item 7); anything else is logged
 		// once per run of failing frames.

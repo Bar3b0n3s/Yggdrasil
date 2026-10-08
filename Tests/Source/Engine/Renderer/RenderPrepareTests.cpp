@@ -8,8 +8,8 @@
 #include <cstdint>
 #include <vector>
 
-// The CPU rules of §8.3 pass 1 (Architecture §15.2 "Renderer (CPU): ... light culling; transparent sort ties"). Skeletons of
-// the M8 contract (Docs/Decisions/0013-m8-decisions.md decision 7); stream A implements RenderPrepare and removes the skips.
+// The CPU rules of §8.3 pass 1 (Architecture §15.2 "Renderer (CPU): ... light culling; transparent sort ties";
+// Docs/Decisions/0013-m8-decisions.md decision 7).
 
 namespace Engine {
 
@@ -38,7 +38,7 @@ namespace Engine {
 
 	TEST_SUITE("Renderer")
 	{
-		TEST_CASE("RenderPrepare: bounds behind the camera, beside the frustum or beyond FarClip are outside the view" * doctest::skip(true))
+		TEST_CASE("RenderPrepare: bounds behind the camera, beside the frustum or beyond FarClip are outside the view")
 		{
 			const CameraData camera = MakeCamera();
 			const Aabb unit{ .Min = glm::vec3(-0.5f), .Max = glm::vec3(0.5f) };
@@ -49,7 +49,7 @@ namespace Engine {
 			CHECK_FALSE(IsOutsideView(Aabb{}, glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, 5.0f)), camera));
 		}
 
-		TEST_CASE("RenderPrepare: directional lights are always visible and point lights outside the view are culled" * doctest::skip(true))
+		TEST_CASE("RenderPrepare: directional lights are always visible and point lights outside the view are culled")
 		{
 			const CameraData camera = MakeCamera();
 			const std::vector<LightData> lights = {
@@ -66,7 +66,32 @@ namespace Engine {
 			CHECK(result.Dropped == 0);
 		}
 
-		TEST_CASE("RenderPrepare: more than 256 visible lights keeps the most important and counts the dropped ones" * doctest::skip(true))
+		TEST_CASE("RenderPrepare: a spot light is culled by the bounding sphere of its cone")
+		{
+			const CameraData camera = MakeCamera();
+			// Behind the camera with a range that reaches the view: as a point light it would be visible, but its narrow cone
+			// points away from the view and its sphere lies behind the near plane; turned towards the view it is visible.
+			LightData away{ .Type = RenderLightType::Spot,
+				.Intensity = 1.0f,
+				.Position = glm::vec3(0.0f, 0.0f, 1.0f),
+				.Direction = glm::vec3(0.0f, 0.0f, 1.0f),
+				.Range = 2.0f,
+				.InnerConeAngle = 10.0f,
+				.OuterConeAngle = 20.0f,
+				.Entity = UUID(1) };
+			LightData towards = away;
+			towards.Direction = glm::vec3(0.0f, 0.0f, -1.0f);
+			towards.Entity = UUID(2);
+			LightData wide = away;
+			wide.OuterConeAngle = 80.0f; // the base circle's sphere, which reaches past the camera
+			wide.Entity = UUID(3);
+			const std::vector<LightData> lights = { away, towards, wide };
+			const LightCullResult result = CullLights(lights, camera);
+			CHECK(result.Visible == std::vector<uint32_t>{ 1, 2 });
+			CHECK(result.Culled == 1);
+		}
+
+		TEST_CASE("RenderPrepare: more than 256 visible lights keeps the most important and counts the dropped ones")
 		{
 			const CameraData camera = MakeCamera();
 			std::vector<LightData> lights;
@@ -82,7 +107,7 @@ namespace Engine {
 			CHECK(CullLights(lights, camera).Visible == result.Visible);
 		}
 
-		TEST_CASE("RenderPrepare: lights with zero or non-finite radiance are culled" * doctest::skip(true))
+		TEST_CASE("RenderPrepare: lights with zero or non-finite radiance are culled")
 		{
 			const CameraData camera = MakeCamera();
 			std::vector<LightData> lights = { MakePointLight(glm::vec3(0.0f, 0.0f, -5.0f), 0.0f, 1),
@@ -93,7 +118,7 @@ namespace Engine {
 			CHECK(result.Culled == 3);
 		}
 
-		TEST_CASE("RenderPrepare: transparent draws sort back to front with ties by entity UUID" * doctest::skip(true))
+		TEST_CASE("RenderPrepare: transparent draws sort back to front with ties by entity UUID")
 		{
 			std::vector<TransparentSortKey> keys = {
 				{ .ViewDepth = 2.0f, .Entity = UUID(5), .Submesh = 0, .DrawIndex = 0 },
@@ -109,7 +134,7 @@ namespace Engine {
 			CHECK(order == std::vector<uint32_t>{ 4, 1, 3, 2, 0 });
 		}
 
-		TEST_CASE("RenderPrepare: opaque draws sort by pipeline, material and mesh, ties in snapshot order" * doctest::skip(true))
+		TEST_CASE("RenderPrepare: opaque draws sort by pipeline, material and mesh, ties in snapshot order")
 		{
 			std::vector<OpaqueSortKey> keys = {
 				{ .Pipeline = 1, .Material = AssetHandle(10), .Mesh = AssetHandle(1), .DrawIndex = 0 },

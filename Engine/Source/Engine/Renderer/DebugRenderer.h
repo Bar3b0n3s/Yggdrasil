@@ -14,10 +14,11 @@
 
 // §8.3 pass 13's debug lines (Architecture §8.10): the RenderSnapshot's DebugDrawList drawn after tonemapping into the final
 // LDR target as 1 px LineList (wide lines are unavailable on MoltenVK) from one geometrically growing dynamic vertex
-// buffer, with two pipelines: depth-tested against SceneDepth (GreaterOrEqual, bound read-only) and on top (no depth test).
+// buffer, with two pipelines: depth-tested against SceneDepth (GreaterOrEqual, no depth writes) and on top (no depth test).
 // Colours are linear with straight alpha: the vertex shader encodes them with the sRGB OETF (the target holds
 // display-encoded values, §8.9) and the pipelines blend with straight alpha. DebugText commands are labels drawn by
-// TextRenderer, not here. Primitives with a non-finite value are skipped. Deterministic: commands in list order.
+// TextRenderer, not here. Primitives with a non-finite value, or with finite values that tessellate to a vertex beyond
+// float's range, are skipped. Deterministic: commands in list order.
 //
 // Binding layout (set 0): b0 ViewConstants (ViewProjection). The pipelines are created for GetOverlayFramebufferInfo()
 // (SceneTargetFormats.h). Created once per device at startup and owned by SceneRendererPipelines; any number of views record
@@ -25,7 +26,7 @@
 // reads); the renderer keeps no binding sets: each Record takes them from the view's PassBindingCache. At most
 // MaxDebugLineVertices vertices per record, so a runaway producer cannot exhaust CPU or GPU memory either (the list's
 // MaxCommands bounds commands, not their tessellation). Main thread only; not copyable or movable. Frozen by the M8
-// contract (Docs/Decisions/0013-m8-decisions.md decision 10); stream D implements it.
+// contract (Docs/Decisions/0013-m8-decisions.md decision 10).
 
 namespace Engine {
 
@@ -52,7 +53,9 @@ namespace Engine {
 	{
 		std::vector<DebugLineVertex> Tested{};
 		std::vector<DebugLineVertex> OnTop{};
-		uint32_t SkippedCommands = 0;       // commands with a non-finite value (DebugText commands are not lines and not counted)
+		// Commands with a non-finite value or a tessellated vertex beyond float's range (DebugText commands are not lines and
+		// not counted).
+		uint32_t SkippedCommands = 0;
 		uint32_t BudgetSkippedCommands = 0; // commands left out because their segments would exceed MaxDebugLineVertices
 	};
 

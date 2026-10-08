@@ -12,7 +12,9 @@
 #include "Engine/Asset/MaterialData.h"
 #include "Engine/Asset/MeshData.h"
 #include "Engine/Asset/TextureData.h"
+#include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/Core/RingBufferSink.h"
+#include "Engine/Graphics/GpuResourceTracker.h"
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Graphics/Readback.h"
 #include "Engine/Renderer/RenderSnapshot.h"
@@ -26,6 +28,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 
 #include <algorithm>
+#include <array>
 #include <format>
 #include <map>
 #include <optional>
@@ -330,15 +333,15 @@ namespace Engine {
 		}
 
 		// M8 (Docs/Decisions/0013-m8-decisions.md decision 7): materials and environments, the unload and hot-reload
-		// acceptance tests. Skeletons of the M8 contract; stream A implements the mirrors and removes the skips.
+		// acceptance tests.
 
-		TEST_CASE("GpuResourceCache: live counts return to baseline after unloading a scene" * doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+		TEST_CASE("GpuResourceCache: live counts return to baseline after unloading a scene" * doctest::test_suite(Test::GpuSuite))
 		{
 			// A scene's GPU state is a mesh, a material with its texture, an environment and a text's font atlas, mirrored by
 			// the cache and the TextRenderer and bound by a SceneRenderer. Unloading it (the view's renderer destroyed, then
-			// the hosts' collections of SceneRenderer.h, "Stale mirrors") returns every live count to its baseline. The
-			// baseline is taken after a first load and unload, because the pass-owned vertex buffers grow once and stay by
-			// design; a second load must then come back to exactly that count.
+			// the hosts' collections of SceneRenderer.h, "Stale mirrors") returns every live count to its baseline: the
+			// counts before the first load plus exactly the pass-owned vertex buffers, which grow once and stay by design
+			// (here the TextRenderer's; the scene draws no debug lines). A second load must then come back to exactly that.
 			Test::HeadlessGpuFixture gpu;
 			ENGINE_REQUIRE_GPU(gpu);
 			GraphicsDevice& device = gpu.GetDevice();
@@ -403,16 +406,41 @@ namespace Engine {
 					return loaded;
 				};
 
-				static_cast<void>(loadAndUnload());
+				// The live count of every type.
+				const auto countLive = [&device]()
+				{
+					std::array<uint64_t, GpuResourceTypeCount> counts{};
+					for (size_t type = 0; type < GpuResourceTypeCount; ++type)
+						counts[type] = device.GetResourceTracker().GetLiveCount(static_cast<GpuResourceType>(type));
+					return counts;
+				};
+
+				device.WaitForIdle();
+				device.RunGarbageCollection();
+				const std::array<uint64_t, GpuResourceTypeCount> beforeLoad = countLive();
+				// Each load runs outside its CHECK: the helper REQUIREs a successful render.
+				const uint64_t loadedFirst = loadAndUnload();
+				const std::array<uint64_t, GpuResourceTypeCount> afterFirstUnload = countLive();
+				const std::string firstUnloadCounts = device.GetResourceTracker().DescribeLiveCounts();
+				INFO("live after the first unload: ", firstUnloadCounts);
+				CHECK(loadedFirst > device.GetResourceTracker().GetTotalLiveCount());
+				for (size_t type = 0; type < GpuResourceTypeCount; ++type)
+				{
+					CAPTURE(type);
+					const uint64_t grown = static_cast<GpuResourceType>(type) == GpuResourceType::GpuBuffer ? 1 : 0;
+					CHECK(afterFirstUnload[type] == beforeLoad[type] + grown);
+				}
 				const uint64_t baseline = device.GetResourceTracker().GetTotalLiveCount();
-				CHECK(loadAndUnload() > baseline);
-				INFO("live: ", device.GetResourceTracker().DescribeLiveCounts());
+				const uint64_t loadedAgain = loadAndUnload();
+				CHECK(loadedAgain > baseline);
+				const std::string secondUnloadCounts = device.GetResourceTracker().DescribeLiveCounts();
+				INFO("live after the second unload: ", secondUnloadCounts);
 				CHECK(device.GetResourceTracker().GetTotalLiveCount() == baseline);
 			}
 			device.RunGarbageCollection();
 		}
 
-		TEST_CASE("HotReload: texture change re-uploads" * doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+		TEST_CASE("HotReload: texture change re-uploads" * doctest::test_suite(Test::GpuSuite))
 		{
 			// An external change of a texture through the editor's asset manager (polled, reimported, swapped, §7.5) gives the
 			// cache a new version: the next GetTexture uploads it and a material using it is rebuilt with the new texture.
@@ -421,11 +449,15 @@ namespace Engine {
 			GraphicsDevice& device = gpu.GetDevice();
 			Test::AssetTestFixture fixture;
 			fixture.WriteProjectFile("Assets/Wood.png", Test::MakeTestPng(4, 4, 1));
-			fixture.WriteProjectText("Assets/Wood.material", R"({ "Format": "Material", "Version": 1, "BaseColorMap": "Assets/Wood.png" })");
 			fixture.OpenProject(true);
 			const AssetHandle texture = fixture.GetManager().Resolve("Assets/Wood.png").value_or(AssetHandle());
-			const AssetHandle material = fixture.GetManager().Resolve("Assets/Wood.material").value_or(AssetHandle());
 			REQUIRE(texture.IsValid());
+			// A material references its textures by handle (§6.5); the scan registers it.
+			fixture.WriteProjectText("Assets/Wood.material",
+				std::format(R"({{ "Format": "Material", "Version": 1, "BaseColorMap": "{}" }})", texture.ToString()));
+			const Result<AssetRefreshReport> refreshed = fixture.GetManager().Refresh();
+			REQUIRE_MESSAGE(refreshed.has_value(), refreshed.error().ToString());
+			const AssetHandle material = fixture.GetManager().Resolve("Assets/Wood.material").value_or(AssetHandle());
 			REQUIRE(material.IsValid());
 			{
 				GpuResourceCache cache(device, fixture.GetManager());
@@ -459,13 +491,16 @@ namespace Engine {
 				const GpuMaterial& materialAfter = cache.GetMaterial(material);
 				CHECK(materialAfter.Generation != generationBefore);
 				CHECK(materialAfter.BaseColorMap == afterTexture);
+				// The replaced version is released; the new one stays with the three slot defaults the material binds (White for
+				// metallic-roughness and occlusion, FlatNormal, Black).
 				cache.CollectStale();
-				CHECK(cache.GetStats().TextureCount == 1);
+				CHECK(cache.GetStats().TextureCount == 4);
+				CHECK(cache.GetMaterial(material).BaseColorMap == afterTexture);
 			}
 			device.RunGarbageCollection();
 		}
 
-		TEST_CASE("GpuResourceCache: a material mirror binds White, FlatNormal and Black to its empty slots" * doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+		TEST_CASE("GpuResourceCache: a material mirror binds White, FlatNormal and Black to its empty slots" * doctest::test_suite(Test::GpuSuite))
 		{
 			Test::HeadlessGpuFixture gpu;
 			ENGINE_REQUIRE_GPU(gpu);
@@ -516,7 +551,7 @@ namespace Engine {
 			gpu.GetDevice().RunGarbageCollection();
 		}
 
-		TEST_CASE("GpuResourceCache: an environment mirrors both cubes, and a null or unloadable one is null" * doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+		TEST_CASE("GpuResourceCache: an environment mirrors both cubes, and a null or unloadable one is null" * doctest::test_suite(Test::GpuSuite))
 		{
 			Test::HeadlessGpuFixture gpu;
 			ENGINE_REQUIRE_GPU(gpu);

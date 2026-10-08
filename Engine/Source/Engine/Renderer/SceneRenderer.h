@@ -65,7 +65,8 @@
 // RuntimeApp) calls GpuResourceCache::CollectStale() and SceneRendererPipelines::CollectStale(assets) once per frame after
 // the frame's renders were recorded and executed, which releases the mirrors of replaced asset versions (hot reload,
 // reimport); and, after the first frame rendered once a scene was opened, closed or swapped (play mode included), the same
-// two calls with releaseUnused = true, which releases what the previous scene alone used.
+// two calls with releaseUnused = true, which releases what the previous scene alone used. StaleMirrorSchedule.h decides
+// which collection that is, for both hosts.
 //
 // Main thread only (NVRHI recording, §4.11); not copyable or movable. Destroyed before the SceneRendererPipelines, the
 // GpuResourceCache and the device (§8.14 item 4).
@@ -137,9 +138,10 @@ namespace Engine {
 
 		// Creates the DebugViewPipelineCount forward variants of `view`, specialized with it, unless they exist (Lit's are the
 		// startup pipelines: no effect); logs the new pipeline count at Info. SceneRenderer::Render calls it the first time a
-		// snapshot asks for a view, and a host may call it ahead of time. Errors: those of PipelineFactory; a Gpu error is an
-		// out-of-memory creation, which the caller turns into FatalError(OutOfMemory) (§8.14 item 7). Nothing is kept on
-		// failure, so a later call tries again.
+		// snapshot asks for a view, and a host may call it ahead of time. Errors: InvalidArgument for a view this build has no
+		// pipelines for (not below RenderDebugViewCount); those of PipelineFactory, where a Gpu error is an out-of-memory
+		// creation, which the caller turns into FatalError(OutOfMemory) (§8.14 item 7). Nothing is kept on failure, so a later
+		// call tries again.
 		[[nodiscard]] Status EnsureDebugView(RenderDebugView view);
 
 		// The number of pipelines created so far: StartupPipelineCount after Create, plus DebugViewPipelineCount for each

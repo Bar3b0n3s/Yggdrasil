@@ -1,0 +1,363 @@
+{
+	"Format": "Scene",
+	"Version": 1,
+	"Name": "Text",
+	"Seed": 0,
+	"ComponentVersions": {
+		"Transform": 1,
+		"MeshRenderer": 1,
+		"Camera": 1,
+		"DirectionalLight": 1,
+		"Environment": 1,
+		"PostProcess": 1,
+		"Text": 1
+	},
+	"Entities": [
+		{
+			"ID": "4a32420123eb6659",
+			"Name": "Camera",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 1.6, 6],
+					"Rotation": [-0.06975647, 0, 0, 0.9975641],
+					"Scale": [1, 1, 1]
+				},
+				"Camera": {
+					"Projection": "Perspective",
+					"VerticalFov": 45,
+					"OrthographicSize": 10,
+					"NearClip": 0.1,
+					"FarClip": 1000,
+					"Primary": true,
+					"Clear": "Color",
+					"ClearColor": [0.08, 0.09, 0.11]
+				}
+			}
+		},
+		{
+			"ID": "35496fd016ed8726",
+			"Name": "Environment",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Environment": {
+					"Environment": null,
+					"Intensity": 1,
+					"Rotation": 0,
+					"ShowSkybox": false,
+					"SkyboxBlur": 0,
+					"FallbackColor": [0.35, 0.37, 0.4]
+				}
+			}
+		},
+		{
+			"ID": "8943c9dcd8afb7bb",
+			"Name": "Sun",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [-0.4082179, -0.23456971, -0.10938165, 0.8754261],
+					"Scale": [1, 1, 1]
+				},
+				"DirectionalLight": {
+					"Color": [1, 1, 1],
+					"Intensity": 2,
+					"CastShadows": false,
+					"ShadowDistance": 100,
+					"CascadeCount": 4,
+					"CascadeSplitLambda": 0.75,
+					"LightAngle": 1,
+					"DepthBias": 1,
+					"NormalBias": 1
+				}
+			}
+		},
+		{
+			"ID": "ec15c876769a24b0",
+			"Name": "PostProcess",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"PostProcess": {
+					"ExposureEV": 0,
+					"Tonemap": "AgX",
+					"SsaoEnabled": false,
+					"SsaoRadius": 0.5,
+					"SsaoIntensity": 1,
+					"SsaoQuality": "Medium",
+					"BloomEnabled": false,
+					"BloomIntensity": 0.04,
+					"FxaaEnabled": true
+				}
+			}
+		},
+		{
+			"ID": "7357ed44bb1a1125",
+			"Name": "Ground",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [10, 1, 10]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000103",
+					"Materials": ["562d6d14dd648b17"],
+					"CastShadows": false,
+					"ReceiveShadows": false,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "a8da67afd293b708",
+			"Name": "Occluder",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [1.2, 0.5, 0.8],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["ba0ee3d8d88f5e74"],
+					"CastShadows": false,
+					"ReceiveShadows": false,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "6610207216d28e96",
+			"Name": "TopLeft",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Text": {
+					"Text": "Top left",
+					"Font": null,
+					"Size": 40,
+					"Color": [1, 1, 1, 1],
+					"Space": "Screen",
+					"Anchor": [0, 0],
+					"Pivot": [0, 0],
+					"Offset": [24, 20],
+					"Alignment": "Left",
+					"Billboard": false
+				}
+			}
+		},
+		{
+			"ID": "9c937c045db60c71",
+			"Name": "TopRight",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Text": {
+					"Text": "Top right\nsecond line",
+					"Font": null,
+					"Size": 32,
+					"Color": [1, 0.8, 0.2, 1],
+					"Space": "Screen",
+					"Anchor": [1, 0],
+					"Pivot": [1, 0],
+					"Offset": [-24, 20],
+					"Alignment": "Right",
+					"Billboard": false
+				}
+			}
+		},
+		{
+			"ID": "b32634891d0bfb5f",
+			"Name": "Centre",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Text": {
+					"Text": "Centered\nmulti-line text\nblock",
+					"Font": null,
+					"Size": 56,
+					"Color": [0.4, 0.9, 1, 1],
+					"Space": "Screen",
+					"Anchor": [0.5, 0.5],
+					"Pivot": [0.5, 0.5],
+					"Offset": [0, -150],
+					"Alignment": "Center",
+					"Billboard": false
+				}
+			}
+		},
+		{
+			"ID": "d7a2c2e0b5b76f01",
+			"Name": "BottomLeft",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Text": {
+					"Text": "Bottom left, 24 px",
+					"Font": null,
+					"Size": 24,
+					"Color": [0.6, 1, 0.6, 1],
+					"Space": "Screen",
+					"Anchor": [0, 1],
+					"Pivot": [0, 1],
+					"Offset": [24, -20],
+					"Alignment": "Left",
+					"Billboard": false
+				}
+			}
+		},
+		{
+			"ID": "a7f7a44586094418",
+			"Name": "BottomRight",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Text": {
+					"Text": "Translucent 72",
+					"Font": null,
+					"Size": 72,
+					"Color": [1, 0.3, 0.3, 0.6],
+					"Space": "Screen",
+					"Anchor": [1, 1],
+					"Pivot": [1, 1],
+					"Offset": [-24, -20],
+					"Alignment": "Right",
+					"Billboard": false
+				}
+			}
+		},
+		{
+			"ID": "6377d845706821af",
+			"Name": "WorldTurned",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-1.6, 1.2, 0],
+					"Rotation": [0, 0.17364818, 0, 0.9848077],
+					"Scale": [1, 1, 1]
+				},
+				"Text": {
+					"Text": "World text",
+					"Font": null,
+					"Size": 64,
+					"Color": [1, 1, 1, 1],
+					"Space": "World",
+					"Anchor": [0.5, 0.5],
+					"Pivot": [0.5, 0.5],
+					"Offset": [0, 0],
+					"Alignment": "Center",
+					"Billboard": false
+				}
+			}
+		},
+		{
+			"ID": "3eff1ba8ec4207da",
+			"Name": "WorldBehindCube",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [1.2, 0.6, -0.4],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Text": {
+					"Text": "Behind the cube",
+					"Font": null,
+					"Size": 40,
+					"Color": [0.7, 0.85, 1, 1],
+					"Space": "World",
+					"Anchor": [0.5, 0.5],
+					"Pivot": [0.5, 0.5],
+					"Offset": [0, 0],
+					"Alignment": "Center",
+					"Billboard": false
+				}
+			}
+		},
+		{
+			"ID": "b6167bd80361b1b3",
+			"Name": "WorldBillboard",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-0.2, 2.1, -1.5],
+					"Rotation": [0.22414386, 0.4829629, -0.12940952, 0.8365163],
+					"Scale": [1, 1, 1]
+				},
+				"Text": {
+					"Text": "Billboard",
+					"Font": null,
+					"Size": 48,
+					"Color": [1, 1, 0.6, 1],
+					"Space": "World",
+					"Anchor": [0.5, 0.5],
+					"Pivot": [0.5, 0.5],
+					"Offset": [0, 0],
+					"Alignment": "Center",
+					"Billboard": true
+				}
+			}
+		}
+	]
+}

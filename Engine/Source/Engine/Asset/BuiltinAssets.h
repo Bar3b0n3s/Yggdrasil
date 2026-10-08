@@ -58,8 +58,8 @@ namespace Engine {
 		static constexpr AssetHandle CheckerTexture{ 0x0184 };
 		static constexpr AssetHandle MissingTexture{ 0x0185 };
 		// engine://Textures/BlueNoise (M8, §8.4): the tonemap's 64x64 R8 dither texture, a Generated entry whose generator
-		// "BlueNoise" (Renderer/BlueNoise.h) the editor registers (EditorCore/EngineAssetGenerators.h). Stream C adds its
-		// EngineAssets.json entry together with the generator (Docs/Decisions/0013-m8-decisions.md decision 8).
+		// "BlueNoise" (Renderer/BlueNoise.h) the editor registers (EditorCore/EngineAssetGenerators.h;
+		// Docs/Decisions/0013-m8-decisions.md decision 8).
 		static constexpr AssetHandle BlueNoiseTexture{ 0x0186 };
 		// engine://Fonts/Default: Inter Regular (SIL OFL), Resources/Fonts/Inter-Regular.ttf through FontImporter.
 		static constexpr AssetHandle DefaultFont{ 0x01c1 };

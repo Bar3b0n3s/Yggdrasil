@@ -411,10 +411,9 @@ namespace Engine {
 			CHECK(log.ViewCalls == 0);
 		}
 
-		TEST_CASE("ScreenshotMethods: debugView renders the named debug view, ignoring case, and empty is Lit" * doctest::skip(true))
+		TEST_CASE("ScreenshotMethods: debugView renders the named debug view, ignoring case, and empty is Lit")
 		{
-			// M8 (§8.5; ADR 0009 decision 33 deferred it here; Docs/Decisions/0013-m8-decisions.md decision 12). Skeleton of the
-			// M8 contract; stream A wires the param and removes the skip.
+			// M8 (§8.5; ADR 0009 decision 33 deferred it here; Docs/Decisions/0013-m8-decisions.md decision 12).
 			CaptureLog log;
 			ScreenshotSetup setup("ViewportScreenshotDebugView", log);
 			const std::vector<std::pair<std::string, RenderDebugView>> views = {
@@ -439,7 +438,7 @@ namespace Engine {
 			CHECK(log.LastSnapshot->DebugView == RenderDebugView::Lit);
 		}
 
-		TEST_CASE("ScreenshotMethods: an unknown debug view is InvalidArgument at /debugView naming the valid views" * doctest::skip(true))
+		TEST_CASE("ScreenshotMethods: an unknown debug view is InvalidArgument at /debugView naming the valid views")
 		{
 			CaptureLog log;
 			ScreenshotSetup setup("ViewportScreenshotBadDebugView", log);

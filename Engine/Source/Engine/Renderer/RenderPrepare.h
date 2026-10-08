@@ -17,7 +17,7 @@
 // (CPU): ... light culling; transparent sort ties"): frustum culling of submesh bounds, the light list with its limit, and
 // the two draw orders. SceneRenderer calls them on every Render. Deterministic: no unordered containers, ties broken by
 // stable keys, only the snapshot's data. Thread-safe (no state). Frozen by the M8 contract
-// (Docs/Decisions/0013-m8-decisions.md decision 7); stream A implements it.
+// (Docs/Decisions/0013-m8-decisions.md decision 7).
 
 namespace Engine {
 

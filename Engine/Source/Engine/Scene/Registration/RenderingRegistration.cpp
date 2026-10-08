@@ -28,8 +28,13 @@ namespace Engine {
 		constexpr double MaxExposureEV = 16.0;
 		// The smallest SSAO radius, in metres.
 		constexpr float MinSsaoRadius = 0.01f;
-		// The smallest text size, in pixels at the 1080p reference height.
+		// The text size range, in pixels per em at the 1080p reference height: the largest is about 93 screen heights per em on
+		// the screen and 1 km per em in the world (WorldTextPixelsPerMetre, Renderer/RenderSnapshot.h).
 		constexpr double MinTextSize = 1.0;
+		constexpr double MaxTextSize = 100000.0;
+		// The largest environment intensity: the largest finite binary16 value, which the renderer clamps it to like the baked
+		// environment it scales (Renderer/Private/LightingInputs.h).
+		constexpr double MaxEnvironmentIntensity = 65504.0;
 
 		// A colour channel range: linear colours in [0, 1].
 		static FieldMeta ColorRange()
@@ -187,7 +192,8 @@ namespace Engine {
 			.Version(1)
 			.Flags(ComponentFlags::UniquePerScene)
 			.Field("Environment", &EnvironmentComponent::Environment, "The environment map; null lights the scene with FallbackColor.")
-			.Field("Intensity", &EnvironmentComponent::Intensity, "The unitless strength of the image-based lighting.", { .Min = 0.0 })
+			.Field("Intensity", &EnvironmentComponent::Intensity, "The unitless strength of the image-based lighting.",
+				{ .Min = 0.0, .Max = Utils::MaxEnvironmentIntensity })
 			.Field("Rotation", &EnvironmentComponent::Rotation, "The rotation of the environment about the +Y axis, in degrees.",
 				{ .Unit = "deg" })
 			.Field("ShowSkybox", &EnvironmentComponent::ShowSkybox, "Whether cameras that clear to the skybox show the environment map.")
@@ -220,7 +226,7 @@ namespace Engine {
 			.Field("Text", &TextComponent::Text, "The UTF-8 text; a line feed starts a new line.")
 			.Field("Font", &TextComponent::Font, "The font; null uses the default font.")
 			.Field("Size", &TextComponent::Size, "The text height in pixels at the 1080p reference resolution.",
-				{ .Min = Utils::MinTextSize, .Unit = "px" })
+				{ .Min = Utils::MinTextSize, .Max = Utils::MaxTextSize, .Unit = "px" })
 			.ColorField("Color", &TextComponent::Color, "The linear text colour with opacity in the fourth component.", Utils::ColorRange())
 			.Field("Space", &TextComponent::Space, "Whether the text is placed on the screen or in the world.")
 			.Field("Anchor", &TextComponent::Anchor, "The screen point the text is placed at, normalized to the viewport (Screen space).",

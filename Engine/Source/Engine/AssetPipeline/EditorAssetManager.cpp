@@ -76,6 +76,12 @@ namespace Engine {
 			IEnvironmentBaker* EnvironmentBaker = nullptr;
 			IScriptDiagnosticsProvider* ScriptDiagnostics = nullptr;
 			Ref<AssetCache> Cache{}; // null: no cache (a dry run never stores, but may read)
+			// M8: the importer needs a GPU bake this editor cannot run (an environment without an IEnvironmentBaker, §7.4), so
+			// the import is served from any cooked bake with the same cache key before the importer is called: the source's
+			// own entry, another source's in the project cache, then the engine cooked cache (EngineCache, null when
+			// enginecache:// is not mounted). Docs/Decisions/0013-m8-decisions.md decision 9.
+			bool ReuseBakes = false;
+			Ref<AssetCache> EngineCache{};
 			AssetMetadata Metadata{};
 			VfsPath SourcePath{};
 			VariantValue Settings{}; // complete
@@ -93,7 +99,24 @@ namespace Engine {
 			CachedImport Import{};
 			std::vector<AssetRef<Asset>> Decoded{}; // parallel to Import.Import.Artifacts
 			bool FromCache = false;
+			// Served from another source's cache entry with the same key (ImportRequest::ReuseBakes): stored under this source
+			// as well, so the exporter and later sessions find it under the source's own handle.
+			bool ReusedBake = false;
 			std::optional<std::string> CacheWarning{}; // a cache that could not be read
+		};
+
+		// A cooked bake an import may reuse (ImportRequest::ReuseBakes), and whether it is the source's own cache entry.
+		struct ReusableBake
+		{
+			CachedImport Import{};
+			bool IsOwnEntry = false;
+		};
+
+		// What FindReusableBake found: the bake, if any, and the error of the last cache that could not be read.
+		struct ReusableBakeSearch
+		{
+			std::optional<ReusableBake> Bake{};
+			std::optional<std::string> Warning{};
 		};
 
 		struct DryRunSnapshot
@@ -235,6 +258,69 @@ namespace Engine {
 			return {};
 		}
 
+		// A cached import of the same cache key as an import of `metadata`'s source (ImportRequest::ReuseBakes): only an import
+		// that read and looked up nothing but its source and produced exactly its main artifact, without dependencies or
+		// diagnostics (a bake), since the key then covers everything it depends on; the artifact takes the source's handle.
+		static std::optional<CachedImport> AdoptCachedBake(CachedImport cached, const AssetMetadata& metadata, std::string_view importerId)
+		{
+			ImportResult& result = cached.Import;
+			if (result.Artifacts.size() != 1 || !result.Dependencies.empty() || !result.Diagnostics.empty() || !cached.Reads.empty()
+				|| !cached.Lookups.empty())
+			{
+				return std::nullopt;
+			}
+			result.Artifacts.front().Handle = metadata.Handle;
+			if (!ValidateImportResult(result, metadata, importerId).has_value())
+				return std::nullopt;
+			return cached;
+		}
+
+		// The first cooked bake with `key` the request may reuse: under the source's own handle, under another source of the
+		// project cache, then in the engine cooked cache, each cache's sources in handle order. A cache or entry that cannot
+		// be read is skipped, the last such error kept as the search's warning. No bake when none holds one.
+		static ReusableBakeSearch FindReusableBake(const ImportRequest& request, uint64_t key)
+		{
+			ReusableBakeSearch search;
+			const std::string_view importerId = request.Importer->GetId();
+			for (const AssetCache* cache : { request.Cache.get(), request.EngineCache.get() })
+			{
+				if (cache == nullptr)
+					continue;
+				Result<std::vector<AssetHandle>> sources = cache->FindSourcesWithKey(key);
+				if (!sources.has_value())
+				{
+					search.Warning = sources.error().ToString();
+					continue;
+				}
+				// The source's own entry first (a reimport bypasses the cache, but a bake that cannot be redone here is reused).
+				if (const auto own = std::ranges::find(*sources, request.Metadata.Handle); cache == request.Cache.get() && own != sources->end())
+					std::rotate(sources->begin(), own, own + 1);
+				for (const AssetHandle source : *sources)
+				{
+					Result<std::optional<CachedImport>> cached = cache->Find(source, key);
+					if (!cached.has_value())
+					{
+						search.Warning = cached.error().ToString();
+						continue;
+					}
+					if (!cached->has_value())
+						continue;
+					if (std::optional<CachedImport> adopted = AdoptCachedBake(std::move(**cached), request.Metadata, importerId))
+					{
+						const bool isOwnEntry = cache == request.Cache.get() && source == request.Metadata.Handle;
+						if (!isOwnEntry)
+						{
+							ENGINE_CORE_INFO("Asset import: '{}' needs a GPU bake this editor cannot run; it reuses the cooked bake of {} in '{}' (same cache key)",
+								RelativeText(request.SourcePath), source, cache->GetRoot().ToString());
+						}
+						search.Bake = ReusableBake{ .Import = std::move(*adopted), .IsOwnEntry = isOwnEntry };
+						return search;
+					}
+				}
+			}
+			return search;
+		}
+
 		// The import itself, a pure function of the request: on a job or inline, never touching the manager.
 		static ImportOutput RunImport(const ImportRequest& request)
 		{
@@ -294,6 +380,25 @@ namespace Engine {
 						}
 						output.Decoded = std::move(*decoded);
 						output.FromCache = true;
+						return output;
+					}
+				}
+			}
+
+			if (request.ReuseBakes)
+			{
+				ReusableBakeSearch search = FindReusableBake(request, output.Key);
+				if (search.Warning.has_value())
+					output.CacheWarning = std::move(search.Warning);
+				if (std::optional<ReusableBake>& reused = search.Bake; reused.has_value())
+				{
+					Result<std::vector<AssetRef<Asset>>> decoded = decodeAll(reused->Import.Import);
+					if (decoded.has_value())
+					{
+						output.Import = std::move(reused->Import);
+						output.Decoded = std::move(*decoded);
+						output.FromCache = true;
+						output.ReusedBake = !reused->IsOwnEntry;
 						return output;
 					}
 				}
@@ -922,6 +1027,15 @@ namespace Engine {
 			Result<VariantValue> settings = GetImportSettings(*importer, record->Metadata);
 			if (!settings.has_value())
 				return std::unexpected(std::move(settings).error().WithContext(std::format("in the settings of '{}'", Utils::RelativeText(record->MetaPath))));
+			// An environment is a GPU bake (§8.6): without a baker its import reuses a cooked bake with the same key (§7.4).
+			const bool reuseBakes = importer->GetMainType() == AssetType::Environment && Specification.EnvironmentBaker == nullptr;
+			Ref<AssetCache> engineCache;
+			if (reuseBakes && Specification.Vfs->IsMounted(EngineCacheScheme))
+			{
+				Result<VfsPath> engineCacheRoot = VfsPath::Create(EngineCacheScheme, {});
+				if (engineCacheRoot.has_value())
+					engineCache = CreateRef<AssetCache>(*Specification.Vfs, std::move(*engineCacheRoot));
+			}
 			return ImportRequest{
 				.Vfs = Specification.Vfs,
 				.Registry = Specification.Registry,
@@ -930,6 +1044,8 @@ namespace Engine {
 				.EnvironmentBaker = Specification.EnvironmentBaker,
 				.ScriptDiagnostics = Specification.ScriptDiagnostics,
 				.Cache = OpenProject->Cache,
+				.ReuseBakes = reuseBakes,
+				.EngineCache = std::move(engineCache),
 				.Metadata = record->Metadata,
 				.SourcePath = record->SourcePath,
 				.Settings = std::move(*settings),
@@ -996,7 +1112,7 @@ namespace Engine {
 			const std::vector<SubAssetEntry> subAssets = Utils::MakeSubAssetEntries(result);
 			UpdateSubAssets(source, subAssets);
 
-			if (!output.FromCache && !DryRun.has_value() && OpenProject->Cache != nullptr)
+			if ((!output.FromCache || output.ReusedBake) && !DryRun.has_value() && OpenProject->Cache != nullptr)
 			{
 				if (Status stored = OpenProject->Cache->Store(source, output.Key, output.Import); !stored.has_value())
 					LogCacheWarning(stored.error().ToString());

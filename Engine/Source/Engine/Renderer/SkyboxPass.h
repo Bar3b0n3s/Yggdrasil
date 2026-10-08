@@ -10,8 +10,8 @@
 #include <cstdint>
 #include <vector>
 
-// §8.3 pass 8, the skybox (Architecture §8.6): one fullscreen triangle at depth 0 drawn into SceneColor with SceneDepth bound
-// read-only (depth test GreaterOrEqual, writes off), so it covers exactly the pixels the scene left at the cleared depth 0.
+// §8.3 pass 8, the skybox (Architecture §8.6): one fullscreen triangle at depth 0 drawn into SceneColor tested against
+// SceneDepth (depth test GreaterOrEqual, writes off), so it covers exactly the pixels the scene left at the cleared depth 0.
 // Each pixel samples the environment's skybox cube (EnvironmentData::Skybox, RGBA16_FLOAT with mips) along its view ray
 // (ViewConstants: per pixel from InverseViewProjection for perspective cameras; the constant view direction for
 // orthographic ones, §8.3), rotated by the environment's Rotation, at the mip level SkyboxLod (SkyboxBlur scaled to the
@@ -21,8 +21,7 @@
 // Binding layout (set 0, the registers of §8.4): b0 ViewConstants, b2 EnvironmentConstants, t4 EnvSkybox, s0 LinearClamp.
 // The pipeline is created for GetSceneColorFramebufferInfo() (SceneTargetFormats.h). Created once per device at startup and
 // owned by SceneRendererPipelines; the pass keeps no binding sets: each Record takes them from the view's PassBindingCache.
-// Main thread only; not copyable or movable. Frozen by the M8 contract (Docs/Decisions/0013-m8-decisions.md decision 9);
-// stream B implements it.
+// Main thread only; not copyable or movable. Frozen by the M8 contract (Docs/Decisions/0013-m8-decisions.md decision 9).
 
 namespace Engine {
 

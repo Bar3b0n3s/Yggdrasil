@@ -94,8 +94,10 @@ namespace Engine {
 				const std::span<const std::byte> topRow = first->GetRow(0);
 				const auto centre = static_cast<std::ptrdiff_t>(static_cast<size_t>(first->Width / 2) * 4);
 				CHECK_FALSE(std::equal(centreRow.begin() + centre, centreRow.begin() + centre + 3, topRow.begin()));
-				// The top-left corner holds the camera's linear clear colour, sRGB-encoded: (0.2, 0.3, 0.4) -> 124, 149, 170.
-				const std::array<int, 4> expected = { 124, 149, 170, 255 };
+				// The top-left corner holds the camera's linear clear colour through the default post chain (§8.9: the AgX Base
+				// tonemapper, then the sRGB OETF and the +-1 LSB dither; bloom leaves a uniform region as it is and FXAA does not
+				// touch it): (0.2, 0.3, 0.4) -> 134, 152, 165 (TonemapPass.h's AgX formula, computed in double precision).
+				const std::array<int, 4> expected = { 134, 152, 165, 255 };
 				for (size_t channel = 0; channel < expected.size(); ++channel)
 				{
 					CAPTURE(channel);

@@ -13,7 +13,8 @@ namespace Engine {
 	// The environment's lighting constants: b2 of descriptor set 0 (§8.4 "b2 EnvironmentConstants (SH9, intensity,
 	// rotation)"), written once per view by the scene renderer from the snapshot's RenderEnvironment and its GpuEnvironment,
 	// read by the forward passes (diffuse and specular IBL, or the constant ambient) and the skybox pass. Frozen by the M8
-	// contract (Docs/Decisions/0013-m8-decisions.md decision 9): stream A writes and reads it, stream B's skybox reads it.
+	// contract (Docs/Decisions/0013-m8-decisions.md decision 9): the scene renderer writes it, the forward passes and the
+	// skybox read it.
 	//
 	// Rotation (§8.6: "Rotation rotates the lookup vector"): the environment appears turned by Rotation degrees about +Y
 	// (counter-clockwise seen from above), so a world direction d is looked up at

@@ -1,0 +1,31 @@
+{
+	"Format": "AssetMeta",
+	"Version": 1,
+	"Handle": "605c3dece315e623",
+	"Type": "Prefab",
+	"Importer": "Gltf",
+	"ImporterVersion": 1,
+	"Settings": {
+		"Scale": 1,
+		"GenerateMissingTangents": true,
+		"ImportMaterials": true,
+		"MergeMeshes": false
+	},
+	"SubAssets": [
+		{
+			"Key": "material:0:NormalMapped",
+			"Handle": "b1a0eb4ca43f6e39",
+			"Type": "Material"
+		},
+		{
+			"Key": "mesh:0:Panel",
+			"Handle": "754a6bb94ccf1dce",
+			"Type": "Mesh"
+		},
+		{
+			"Key": "texture:0:normal",
+			"Handle": "e3bcdabb181b0571",
+			"Type": "Texture"
+		}
+	]
+}

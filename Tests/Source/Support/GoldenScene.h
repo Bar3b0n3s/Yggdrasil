@@ -13,7 +13,7 @@
 // The golden scenes of the M8 goldens (Architecture §15.4; Roadmap M8): Projects/FeatureTest/Assets/Scenes/Golden/*.scene,
 // produced by the committed scaffold Projects/FeatureTest/Scaffold/Golden.jsonl (§15.5), rendered headless at 640x360 with
 // FXAA on and the fixed blue noise, through the same path as viewport.screenshot's game view (ViewportCapture). Frozen by
-// the M8 contract (Docs/Decisions/0013-m8-decisions.md decision 14); stream E implements it with the scenes.
+// the M8 contract (Docs/Decisions/0013-m8-decisions.md decision 14).
 
 namespace Engine {
 

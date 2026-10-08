@@ -53,8 +53,8 @@
 // Created once per device at startup and owned by SceneRendererPipelines (§8.12); any number of views record with it, one
 // at a time. The pass keeps no binding sets: each Record takes them from the view's PassBindingCache (the SceneRenderer
 // keeps one per pass with its targets). Main thread only; not copyable or movable. Frozen by the M8 contract
-// (Docs/Decisions/0013-m8-decisions.md decision 8): stream C owns the implementation, which the contract moved here from
-// the walking skeleton's SceneRenderer (exposure, Linear and the OETF only).
+// (Docs/Decisions/0013-m8-decisions.md decision 8), which moved the walking skeleton's tonemap (exposure, Linear and the
+// OETF) here from the SceneRenderer.
 
 namespace Engine {
 

@@ -360,7 +360,10 @@ namespace Engine {
 
 	Result<TextureUpload> HostImageUpload::CreateStagedTexture(const nvrhi::TextureDesc& desc, std::span<const TextureSubresourceData> subresources)
 	{
-		ENGINE_TRY_ASSIGN(nvrhi::CommandListHandle commandList, m_Device->CreateCommandList());
+		// Not an immediate command list: NVRHI's validation allows one open immediate list at a time, and the scene renderer
+		// uploads the textures and environments a frame needs while the frame's own list is open (GpuResourceCache, M8).
+		ENGINE_TRY_ASSIGN(nvrhi::CommandListHandle commandList,
+			m_Device->CreateCommandList(nvrhi::CommandListParameters().setEnableImmediateExecution(false)));
 		ENGINE_TRY_ASSIGN(nvrhi::TextureHandle texture, m_Device->CreateTexture(desc));
 
 		// writeTexture copies the texels into NVRHI's upload buffer while recording; closing the list returns the texture
@@ -387,8 +390,10 @@ namespace Engine {
 				GpuFaultToString(GpuFault::OomTexture));
 		}
 
-		// The command list that tells NVRHI the image's state comes first, so a failure leaves nothing behind.
-		ENGINE_TRY_ASSIGN(nvrhi::CommandListHandle commandList, m_Device->CreateCommandList());
+		// The command list that tells NVRHI the image's state comes first, so a failure leaves nothing behind. Not an immediate
+		// one, for the reason CreateStagedTexture gives.
+		ENGINE_TRY_ASSIGN(nvrhi::CommandListHandle commandList,
+			m_Device->CreateCommandList(nvrhi::CommandListParameters().setEnableImmediateExecution(false)));
 
 		const vk::detail::DispatchLoaderDynamic& dispatcher = VULKAN_HPP_DEFAULT_DISPATCHER;
 		const VkDevice device = m_Device->GetVulkanDevice();

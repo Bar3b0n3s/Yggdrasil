@@ -20,9 +20,11 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <array>
 #include <format>
 #include <optional>
 #include <span>
+#include <string_view>
 
 namespace Engine {
 
@@ -77,11 +79,48 @@ namespace Engine {
 		// Unsupported for the members of ViewportScreenshotParams that need later milestones (ScreenshotMethods.h).
 		static Status CheckLaterMilestoneParams(const AutomationMethodContext& context)
 		{
-			if (context.HasParam("debugView"))
-				return std::unexpected(MakeLaterMilestoneError("debugView", "the debug views arrive with the PBR renderer (M8)"));
 			if (context.HasParam("annotate"))
 				return std::unexpected(MakeLaterMilestoneError("annotate", "annotations are drawn by the overlay pass (M9)"));
 			return {};
+		}
+
+		// The debug views M9 adds (§8.5): refused by name until then.
+		constexpr std::array<std::string_view, 3> LaterDebugViews = { "AO", "ShadowCascades", "Overdraw" };
+
+		[[nodiscard]] static bool EqualsIgnoringAsciiCase(std::string_view left, std::string_view right)
+		{
+			const auto lower = [](char character)
+			{
+				return character >= 'A' && character <= 'Z' ? static_cast<char>(character - 'A' + 'a') : character;
+			};
+			return left.size() == right.size() && std::ranges::equal(left, right, [&lower](char a, char b)
+			{
+				return lower(a) == lower(b);
+			});
+		}
+
+		// The debug view `name` asks for (ScreenshotMethods.h): Lit when empty; a RenderDebugView name ignoring ASCII case;
+		// Unsupported at /debugView for M9's views; InvalidArgument at /debugView, listing the valid names, for anything else.
+		static Result<RenderDebugView> ParseDebugViewParam(std::string_view name)
+		{
+			if (name.empty())
+				return RenderDebugView::Lit;
+			if (const std::optional<RenderDebugView> view = ParseRenderDebugView(name))
+				return *view;
+			std::string valid;
+			for (uint32_t index = 0; index < RenderDebugViewCount; ++index)
+				valid += std::format("{}{}", valid.empty() ? "" : ", ", RenderDebugViewToString(static_cast<RenderDebugView>(index)));
+			for (const std::string_view later : LaterDebugViews)
+			{
+				if (EqualsIgnoringAsciiCase(name, later))
+				{
+					return std::unexpected(MakeParamError(ErrorCode::Unsupported, "/debugView",
+						std::format("viewport.screenshot debug view '{}' is not supported yet: it arrives with Renderer II (M9)", name),
+						std::format("use one of {}", valid)));
+				}
+			}
+			return std::unexpected(MakeParamError(ErrorCode::InvalidArgument, "/debugView",
+				std::format("unknown debug view '{}'; the debug views are {}", name, valid), "leave out 'debugView' for the lit image"));
 		}
 
 		// The camera of the view: the "camera" param's entity, the primary camera of the game view, or the host's scene-view
@@ -158,6 +197,7 @@ namespace Engine {
 		Result<ViewportScreenshotResult> ViewportScreenshot(AutomationMethodContext& context, const ViewportScreenshotParams& params)
 		{
 			ENGINE_TRY(Utils::CheckLaterMilestoneParams(context));
+			ENGINE_TRY_ASSIGN(const RenderDebugView debugView, Utils::ParseDebugViewParam(params.DebugView));
 			const std::optional<ExplicitRenderCamera> sceneViewCamera = context.GetSceneViewCamera();
 			if (params.View == ViewportView::Scene && !sceneViewCamera.has_value())
 			{
@@ -189,6 +229,7 @@ namespace Engine {
 				TransformSystem::Update(*scene);
 				ENGINE_TRY_ASSIGN(snapshot, ExtractRenderSnapshot(*scene, request));
 			}
+			snapshot.DebugView = debugView;
 
 			const ViewportScreenshotRequest capture{ .Width = params.Width, .Height = params.Height, .MaxDimension = 0 };
 			ENGINE_TRY_ASSIGN(const Image captured, WithContext(context.CaptureView(snapshot, capture), "while rendering the viewport"));
@@ -225,7 +266,9 @@ namespace Engine {
 			.Field("height", &ViewportScreenshotParams::Height, "The rendered height in pixels, before maxDimension.", dimensionMeta)
 			.Field("camera", &ViewportScreenshotParams::Camera,
 				"A camera entity of the target scene (an EntityRef) to render through instead of the view's camera.")
-			.Field("debugView", &ViewportScreenshotParams::DebugView, "A debug view to render (not supported before M8; refused when present).")
+			.Field("debugView", &ViewportScreenshotParams::DebugView,
+				"A debug view to render instead of the lit image, ignoring case: \"Lit\" (the default, also for \"\"), \"Albedo\", "
+				"\"Normals\", \"Roughness\", \"Metallic\" or \"Emissive\". A data view stores each value v as round(255 v).")
 			.Field("annotate", &ViewportScreenshotParams::Annotate,
 				"Labels, colliders, bounds and axes to draw (not supported before M9; refused when present).")
 			.Field("maxDimension", &ViewportScreenshotParams::MaxDimension, "The larger side of the PNG at most this many pixels.", dimensionMeta)

@@ -25,7 +25,7 @@
 // Created once per device at startup for one format and owned by SceneRendererPipelines; the per-view chain belongs to the
 // SceneRenderer (created from GetChainDesc at Create and Resize). The pass keeps no binding sets: each Record takes them
 // from the view's PassBindingCache. Main thread only; not copyable or movable. Frozen by the M8 contract
-// (Docs/Decisions/0013-m8-decisions.md decision 8); stream C implements it.
+// (Docs/Decisions/0013-m8-decisions.md decision 8).
 
 namespace Engine {
 

@@ -76,6 +76,20 @@ namespace Engine {
 	// OnShutdown destroys the GPU objects after the server and before the editor (the scene renderers, then the pipelines,
 	// then the cache, §8.14 item 4).
 	//
+	// Environments (M8; §7.4, §8.6; Docs/Decisions/0013-m8-decisions.md decision 9): with a device, OnInitialize creates the
+	// Renderer's EnvironmentBaker (its pipelines with the editor's other pipelines, a Gpu error being
+	// FatalError(OutOfMemory)) before the EditorContext and injects it into EditorContextSpecification::EnvironmentBaker, so
+	// EnvironmentImporter bakes .hdr sources; --bake-engine-assets passes it to BakeEngineAssets, so a rendering editor bakes
+	// the built-in environments into the engine cooked cache (without a device they are skipped with a warning). OnShutdown
+	// destroys it after the editor, whose asset manager points at it.
+	//
+	// Stale mirrors (Renderer/SceneRenderer.h; decision 7): every rendered frame starts with GpuResourceCache::CollectStale
+	// and SceneRendererPipelines::CollectStale (the previous frame's renders were executed by then), which release the
+	// mirrors of replaced asset versions; once a scene was opened, closed or swapped, play mode included (OnUpdate asks
+	// EditorCore's ShownSceneTracker, which compares the shown edit scene and play session's scene with the last frame's and
+	// reads the SceneOpened and PlayStateChanged events), the first of those calls after a frame rendered the new scene
+	// passes releaseUnused, which releases what only the previous scene used (Renderer/StaleMirrorSchedule.h).
+	//
 	// A failed OnInitialize (an invalid or locked project, a missing batch file, a server that cannot start, GPU objects that
 	// cannot be created) runs OnShutdown itself before it returns the error, because Application::Run then destroys the
 	// engine context and its device without calling OnShutdown: the server, the GPU objects, the editor and the hook are
@@ -112,6 +126,12 @@ namespace Engine {
 		// OnUpdate's extraction of this frame's view at `width` x `height` (Rendering::ViewSnapshot), or, in Play mode, the
 		// choice of the session's last extraction; a failure is logged and leaves the empty view.
 		void PrepareViewportView(uint32_t width, uint32_t height);
+		// OnUpdate, with a device: notes a scene opened, closed or swapped since the last frame, play mode included (see
+		// "Stale mirrors" above).
+		void NoteShownScene();
+		// OnRender's first step, with a device: GpuResourceCache::CollectStale and SceneRendererPipelines::CollectStale, with
+		// releaseUnused once the first frame after a scene change was rendered (see "Stale mirrors" above).
+		void CollectStaleMirrors();
 		// The viewport's view (see "Viewport" above) extracted for `width` x `height` (both >= 1); the empty view without
 		// a scene. Errors: those of ExtractRenderSnapshot and PlaySession::ExtractView.
 		[[nodiscard]] Result<RenderSnapshot> ExtractViewportView(uint32_t width, uint32_t height);

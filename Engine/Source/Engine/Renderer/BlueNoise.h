@@ -17,8 +17,7 @@
 //
 // Deterministic on every compiler, host and configuration: the Gaussian energy uses Core/DetMath (never <cmath>'s exp),
 // candidates are scanned in row-major order and ties go to the lowest index, and the initial pattern comes from a seeded
-// Core/Random. Pure and thread-safe. Frozen by the M8 contract (Docs/Decisions/0013-m8-decisions.md decision 8); stream C
-// implements it.
+// Core/Random. Pure and thread-safe. Frozen by the M8 contract (Docs/Decisions/0013-m8-decisions.md decision 8).
 
 namespace Engine {
 

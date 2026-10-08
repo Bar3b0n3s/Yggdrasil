@@ -16,8 +16,8 @@
 
 // Baked image-based lighting (Architecture §6.8 "environment: skybox cube RGBA16F with mips, specular cube 256² x 7 mips,
 // SH9 coefficients", §8.6). M6 defined the CPU shape because IEnvironmentBaker, an M6 interface, produces it; the M8 contract
-// froze the conventions below and the cooked payload (Docs/Decisions/0013-m8-decisions.md decision 9), which stream B
-// implements with EnvironmentImporter (AssetPipeline) and the loader.
+// froze the conventions below and the cooked payload (Docs/Decisions/0013-m8-decisions.md decision 9), which
+// EnvironmentImporter (AssetPipeline) writes and the Environment loader reads.
 //
 // Conventions, shared by the baker (Renderer/EnvironmentBaker), the shaders (Shared/EnvironmentConstants.h,
 // Common/Environment.slang) and the CPU references (Tests/Source/Support/RenderReference.h):

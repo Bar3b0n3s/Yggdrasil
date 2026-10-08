@@ -18,8 +18,8 @@
 #include <span>
 #include <vector>
 
-// The DFG LUT (Architecture §8.5, §8.6 step 5, §15.3 "DFG LUT vs CPU reference"). Skeletons of the M8 contract
-// (Docs/Decisions/0013-m8-decisions.md decision 7); stream A implements BrdfLut and removes the skips.
+// The DFG LUT (Architecture §8.5, §8.6 step 5, §15.3 "DFG LUT vs CPU reference"; Docs/Decisions/0013-m8-decisions.md
+// decision 7).
 
 namespace Engine {
 
@@ -46,7 +46,7 @@ namespace Engine {
 
 	TEST_SUITE("Renderer")
 	{
-		TEST_CASE("BrdfLut: DFG matches the CPU reference" * doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+		TEST_CASE("BrdfLut: DFG matches the CPU reference" * doctest::test_suite(Test::GpuSuite))
 		{
 			Test::HeadlessGpuFixture gpu;
 			ENGINE_REQUIRE_GPU(gpu);
@@ -76,7 +76,7 @@ namespace Engine {
 			device.RunGarbageCollection();
 		}
 
-		TEST_CASE("BrdfLut: the LUT is created once and readable after later submissions" * doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+		TEST_CASE("BrdfLut: the LUT is created once and readable after later submissions" * doctest::test_suite(Test::GpuSuite))
 		{
 			// A keepInitialState texture in ShaderResource, never a permanent state: Readback copies out of it (§8.2).
 			Test::HeadlessGpuFixture gpu;

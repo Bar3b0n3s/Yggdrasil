@@ -12,8 +12,8 @@
 #include <cstring>
 #include <limits>
 
-// The cooked environment payload (Architecture §6.8, §8.6; Asset/EnvironmentData.h) and the Environment loader. Skeletons of
-// the M8 contract (Docs/Decisions/0013-m8-decisions.md decision 9); stream B implements the codec and removes the skips.
+// The cooked environment payload (Architecture §6.8, §8.6; Asset/EnvironmentData.h; Docs/Decisions/0013-m8-decisions.md decision 9)
+// and the Environment loader.
 
 namespace Engine {
 
@@ -61,7 +61,7 @@ namespace Engine {
 			static_assert(ComputeCubeMapByteSize(4, 3) == (16 + 4 + 1) * 6 * 8);
 		}
 
-		TEST_CASE("EnvironmentData: the payload round-trips byte for byte" * doctest::skip(true))
+		TEST_CASE("EnvironmentData: the payload round-trips byte for byte")
 		{
 			const EnvironmentData environment = MakeEnvironment();
 			REQUIRE(ValidateEnvironmentData(environment).has_value());
@@ -77,7 +77,7 @@ namespace Engine {
 			CHECK(SerializeEnvironmentPayload(*read) == payload);
 		}
 
-		TEST_CASE("EnvironmentData: invalid environments name the first violation" * doctest::skip(true))
+		TEST_CASE("EnvironmentData: invalid environments name the first violation")
 		{
 			EnvironmentData partialChain = MakeEnvironment();
 			partialChain.Skybox.MipCount = 2;
@@ -102,7 +102,7 @@ namespace Engine {
 			}
 		}
 
-		TEST_CASE("EnvironmentData: truncated and padded payloads are Parse errors, never asserts" * doctest::skip(true))
+		TEST_CASE("EnvironmentData: truncated and padded payloads are Parse errors, never asserts")
 		{
 			const Buffer payload = SerializeEnvironmentPayload(MakeEnvironment());
 			const std::array<size_t, 4> sizes = { 0, 15, 16 + 9 * 12, payload.size() - 1 };
@@ -122,7 +122,7 @@ namespace Engine {
 			CHECK_FALSE(DeserializeEnvironmentPayload(huge).has_value());
 		}
 
-		TEST_CASE("EnvironmentData: the Environment loader reads a cooked environment" * doctest::skip(true))
+		TEST_CASE("EnvironmentData: the Environment loader reads a cooked environment")
 		{
 			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
 			AssetLoaderRegistry loaders;

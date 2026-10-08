@@ -1,0 +1,229 @@
+{
+	"Format": "Scene",
+	"Version": 1,
+	"Name": "GltfFixture",
+	"Seed": 0,
+	"ComponentVersions": {
+		"Transform": 1,
+		"Prefab": 1,
+		"PrefabLink": 1,
+		"MeshRenderer": 1,
+		"Camera": 1,
+		"DirectionalLight": 1,
+		"Environment": 1,
+		"PostProcess": 1
+	},
+	"Entities": [
+		{
+			"ID": "ca9afb9493da66c2",
+			"Name": "Camera",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 1.3, 4],
+					"Rotation": [-0.104528464, 0, 0, 0.9945219],
+					"Scale": [1, 1, 1]
+				},
+				"Camera": {
+					"Projection": "Perspective",
+					"VerticalFov": 45,
+					"OrthographicSize": 10,
+					"NearClip": 0.1,
+					"FarClip": 1000,
+					"Primary": true,
+					"Clear": "Skybox",
+					"ClearColor": [0.05, 0.05, 0.06]
+				}
+			}
+		},
+		{
+			"ID": "12e6e73cbc50d57a",
+			"Name": "Environment",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Environment": {
+					"Environment": "0000000000000201",
+					"Intensity": 1,
+					"Rotation": 0,
+					"ShowSkybox": true,
+					"SkyboxBlur": 0.3,
+					"FallbackColor": [0.2, 0.22, 0.25]
+				}
+			}
+		},
+		{
+			"ID": "0a78531ec58f330a",
+			"Name": "Sun",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [-0.3696438, 0.23911762, 0.09904576, 0.8923991],
+					"Scale": [1, 1, 1]
+				},
+				"DirectionalLight": {
+					"Color": [1, 1, 1],
+					"Intensity": 2.5,
+					"CastShadows": false,
+					"ShadowDistance": 100,
+					"CascadeCount": 4,
+					"CascadeSplitLambda": 0.75,
+					"LightAngle": 1,
+					"DepthBias": 1,
+					"NormalBias": 1
+				}
+			}
+		},
+		{
+			"ID": "d5ea3e5e07d989c2",
+			"Name": "PostProcess",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"PostProcess": {
+					"ExposureEV": 0,
+					"Tonemap": "AgX",
+					"SsaoEnabled": false,
+					"SsaoRadius": 0.5,
+					"SsaoIntensity": 1,
+					"SsaoQuality": "Medium",
+					"BloomEnabled": true,
+					"BloomIntensity": 0.04,
+					"FxaaEnabled": true
+				}
+			}
+		},
+		{
+			"ID": "9200265d27e5a54f",
+			"Name": "Ground",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [8, 1, 8]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000103",
+					"Materials": ["baf4efcb4549963e"],
+					"CastShadows": false,
+					"ReceiveShadows": false,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "155dd98002eff778",
+			"Name": "Textured",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-0.9, 0.5, 0],
+					"Rotation": [0, 0.25881904, 0, 0.9659258],
+					"Scale": [1, 1, 1]
+				},
+				"Prefab": {
+					"Prefab": "00b42495a90673f0",
+					"Overrides": []
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "5cc9b88209088b98",
+					"InstanceRoot": "155dd98002eff778"
+				}
+			}
+		},
+		{
+			"ID": "e11b47513feb30fa",
+			"Name": "TexturedCube",
+			"Parent": "155dd98002eff778",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "a52f07f2aa43c866",
+					"InstanceRoot": "155dd98002eff778"
+				},
+				"MeshRenderer": {
+					"Mesh": "95b2b0ffa573c606",
+					"Materials": [],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "282f2f83a0cb82ce",
+			"Name": "NormalMapped",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0.9, 0.75, 0],
+					"Rotation": [0, -0.17364818, 0, 0.9848077],
+					"Scale": [1.2, 1.2, 1.2]
+				},
+				"Prefab": {
+					"Prefab": "605c3dece315e623",
+					"Overrides": []
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "d356a8c163ce2b48",
+					"InstanceRoot": "282f2f83a0cb82ce"
+				}
+			}
+		},
+		{
+			"ID": "abd97cd562ccbb61",
+			"Name": "Panel",
+			"Parent": "282f2f83a0cb82ce",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "51b3abe2bc4f4a47",
+					"InstanceRoot": "282f2f83a0cb82ce"
+				},
+				"MeshRenderer": {
+					"Mesh": "754a6bb94ccf1dce",
+					"Materials": [],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		}
+	]
+}

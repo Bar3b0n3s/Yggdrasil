@@ -14,30 +14,30 @@
 #include <span>
 #include <vector>
 
-// The blue-noise generator (Architecture §8.4, §8.9; Renderer/BlueNoise.h). Skeletons of the M8 contract
-// (Docs/Decisions/0013-m8-decisions.md decision 8); stream C implements the generator, commits the hash below (the one value
-// the implementation produces, identical in Debug and Release and on every compiler) and removes the skips.
+// The blue-noise generator (Architecture §8.4, §8.9; Renderer/BlueNoise.h; Docs/Decisions/0013-m8-decisions.md decision 8).
+// The committed hash is the one value the implementation produces, identical in Debug, Release and Dist and on every
+// compiler (integer energies and Core/DetMath).
 
 namespace Engine {
 
 	namespace {
 
-		// The XXH64 of GenerateBlueNoise() with the default size and seed. Stream C sets it from the first implementation's
-		// output and never changes it without bumping BlueNoiseGeneratorVersion (the cooked built-in's key).
-		constexpr uint64_t CommittedBlueNoiseHash = 0;
+		// The XXH64 of GenerateBlueNoise() with the default size and seed, set from the first implementation's output. It never
+		// changes without bumping BlueNoiseGeneratorVersion (the cooked built-in's key).
+		constexpr uint64_t CommittedBlueNoiseHash = 0x5F7E9B5C0BE7B81Cull;
 
 	}
 
 	TEST_SUITE("Renderer")
 	{
-		TEST_CASE("BlueNoise: output hash matches the committed value" * doctest::skip(true))
+		TEST_CASE("BlueNoise: output hash matches the committed value")
 		{
 			const std::vector<uint8_t> noise = GenerateBlueNoise();
 			REQUIRE(noise.size() == static_cast<size_t>(BlueNoiseSize) * BlueNoiseSize);
 			CHECK(XXH64(std::as_bytes(std::span(noise))) == CommittedBlueNoiseHash);
 		}
 
-		TEST_CASE("BlueNoise: every value occurs equally often and the generator is deterministic" * doctest::skip(true))
+		TEST_CASE("BlueNoise: every value occurs equally often and the generator is deterministic")
 		{
 			// The ranks of 4,096 texels scaled to 256 levels: each level 16 times.
 			const std::vector<uint8_t> noise = GenerateBlueNoise();
@@ -51,7 +51,7 @@ namespace Engine {
 			CHECK(GenerateBlueNoise(16).size() == 256);
 		}
 
-		TEST_CASE("BlueNoise: the spectrum has little low-frequency energy" * doctest::skip(true))
+		TEST_CASE("BlueNoise: the spectrum has little low-frequency energy")
 		{
 			// Blue noise: neighbouring texels are anti-correlated. The mean absolute difference of horizontal neighbours is
 			// well above white noise's (about 85 for uniform 8-bit values) and the 4x4 block means stay near the middle.
@@ -82,7 +82,7 @@ namespace Engine {
 			}
 		}
 
-		TEST_CASE("BlueNoise: the generator cooks a linear R8 texture of the noise" * doctest::skip(true))
+		TEST_CASE("BlueNoise: the generator cooks a linear R8 texture of the noise")
 		{
 			const Result<Buffer> cooked = GenerateBlueNoiseTexture();
 			REQUIRE_MESSAGE(cooked.has_value(), cooked.error().ToString());

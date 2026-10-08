@@ -7,6 +7,7 @@
 #include "Support/RenderReference.h"
 
 #include <glm/glm.hpp>
+#include <glm/gtc/constants.hpp>
 
 #include <algorithm>
 #include <array>
@@ -18,10 +19,9 @@
 #include <utility>
 #include <vector>
 
-// The GPU environment bake (Architecture §8.6) against its device-independent oracles (§15.3): the white furnace for the
-// prefilter and the SH, the prefilter against the CPU reference at 16², and the continuity of the equirectangular-to-cube
-// seams. Skeletons of the M8 contract (Docs/Decisions/0013-m8-decisions.md decision 9); stream B implements the baker and
-// removes the skips (the comparisons need stream E's references).
+// The GPU environment bake (Architecture §8.6; Docs/Decisions/0013-m8-decisions.md decision 9) against its device-independent
+// oracles (§15.3): the white furnace for the prefilter and the SH, the prefilter against the CPU reference at 16²
+// (Support/RenderReference.h), and the continuity of the equirectangular-to-cube seams.
 
 namespace Engine {
 
@@ -59,6 +59,29 @@ namespace Engine {
 			return input;
 		}
 
+		// An equirectangular input whose red channel turns eight times around the horizon, 1 + 0.5 sin(8 phi) for the azimuth
+		// phi = (u - 0.5) 2 pi: continuous across the image's u = 0 / 1 seam, but changing by about 0.4 per texel there at a
+		// width of 64, so a sample that does not wrap around the seam is far off. Green follows the height, blue is 1.
+		EnvironmentBakeInput MakeAzimuthInput(uint32_t width)
+		{
+			EnvironmentBakeInput input;
+			input.Width = width;
+			input.Height = width / 2;
+			input.Texels.reserve(static_cast<size_t>(input.Width) * input.Height * 3);
+			for (uint32_t row = 0; row < input.Height; ++row)
+			{
+				for (uint32_t column = 0; column < input.Width; ++column)
+				{
+					const double azimuth = ((column + 0.5) / input.Width - 0.5) * 2.0 * glm::pi<double>();
+					const double height = 1.0 - 2.0 * (row + 0.5) / input.Height;
+					input.Texels.push_back(static_cast<float>(1.0 + 0.5 * std::sin(8.0 * azimuth)));
+					input.Texels.push_back(static_cast<float>(1.0 + 0.5 * height));
+					input.Texels.push_back(1.0f);
+				}
+			}
+			return input;
+		}
+
 		// The RGB of texel (column, row) of `face` at `level` of a cube (CubeMapData's layout, binary16 texels).
 		glm::dvec3 ReadTexel(const CubeMapData& cube, uint32_t level, uint32_t face, uint32_t column, uint32_t row)
 		{
@@ -88,7 +111,7 @@ namespace Engine {
 	TEST_SUITE("Renderer")
 	{
 		TEST_CASE("EnvironmentBaker: furnace: a constant environment prefilters to the constant in every mip"
-			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+			* doctest::test_suite(Test::GpuSuite))
 		{
 			// §15.3: "prefiltered constant environment = 1 +- 0.5% in every mip".
 			Test::HeadlessGpuFixture gpu;
@@ -122,7 +145,7 @@ namespace Engine {
 		}
 
 		TEST_CASE("EnvironmentBaker: furnace: the SH irradiance of a constant environment is constant"
-			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+			* doctest::test_suite(Test::GpuSuite))
 		{
 			// §15.3: "SH irradiance constant": only the L0 band, evaluating to the radiance in every direction (irradiance / pi,
 			// Asset/EnvironmentData.h).
@@ -147,7 +170,7 @@ namespace Engine {
 			gpu.GetDevice().RunGarbageCollection();
 		}
 
-		TEST_CASE("EnvironmentBaker: prefilter vs CPU at 16x16" * doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+		TEST_CASE("EnvironmentBaker: prefilter vs CPU at 16x16" * doctest::test_suite(Test::GpuSuite))
 		{
 			// §15.3 "GPU prefilter vs CPU reference at 16²": the same source cube (the bake's own skybox mip 0 at 16²) filtered
 			// on the GPU (importance sampled) and by brute force on the CPU agree within the sampling error.
@@ -173,9 +196,11 @@ namespace Engine {
 					const double roughness = static_cast<double>(level) / (options.SpecularMipCount - 1);
 					const uint32_t edge = 16 >> level;
 					const Test::ReferenceCube expected = Test::PrefilterSpecular(source, roughness, edge);
+					REQUIRE(expected.Size == edge);
 					double worst = 0.0;
 					for (uint32_t face = 0; face < CubeMapData::FaceCount; ++face)
 					{
+						REQUIRE(expected.Faces[face].size() == static_cast<size_t>(edge) * edge);
 						for (uint32_t row = 0; row < edge; ++row)
 						{
 							for (uint32_t column = 0; column < edge; ++column)
@@ -192,7 +217,7 @@ namespace Engine {
 			gpu.GetDevice().RunGarbageCollection();
 		}
 
-		TEST_CASE("EnvironmentBaker: equirect-to-cube seams are continuous" * doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+		TEST_CASE("EnvironmentBaker: equirect-to-cube seams are continuous" * doctest::test_suite(Test::GpuSuite))
 		{
 			// §15.3 "equirect-to-cube seam continuity": a smooth input stays smooth across every cube edge and across the
 			// equirectangular image's u = 0 / 1 seam (behind the default camera, at +Z): every edge texel holds the input's value
@@ -219,11 +244,38 @@ namespace Engine {
 					}
 				}
 				CHECK(worst < 0.02);
+
+				// The u = 0 / 1 seam itself, behind the default camera at +Z: at a width of 64 the +Z face's central columns of a
+				// 32-texel face sample 0.3 texels from the seam, so their bilinear footprints take the last and the first column
+				// of the image. Every texel of every face must equal the CPU resampling (Test::EquirectToCube, wrapping in u),
+				// which an unwrapped, clamped or out-of-range read of those columns misses by far more than the tolerance.
+				const EnvironmentBakeInput azimuth = MakeAzimuthInput(64);
+				const Result<EnvironmentData> wrapped = baker->BakeWithOptions(azimuth, EnvironmentBakeOptions{ .SkyboxFaceSize = 32 });
+				REQUIRE_MESSAGE(wrapped.has_value(), wrapped.error().ToString());
+				const Test::ReferenceCube expected = Test::EquirectToCube(azimuth.Texels, azimuth.Width, azimuth.Height, 32);
+				uint32_t wrappingTexels = 0;
+				double worstWrapped = 0.0;
+				for (uint32_t face = 0; face < CubeMapData::FaceCount; ++face)
+				{
+					for (uint32_t row = 0; row < 32; ++row)
+					{
+						for (uint32_t column = 0; column < 32; ++column)
+						{
+							// The bilinear footprint's left column is the image's last one exactly when the sample wraps.
+							const glm::dvec2 uv = Test::DirectionToEquirectUv(Test::CubeTexelDirection(face, column, row, 32));
+							wrappingTexels += std::floor(uv.x * azimuth.Width - 0.5) == azimuth.Width - 1.0 || uv.x * azimuth.Width < 0.5 ? 1U : 0U;
+							const glm::dvec3 actual = ReadTexel(wrapped->Skybox, 0, face, column, row);
+							worstWrapped = std::max(worstWrapped, glm::length(actual - expected.Faces[face][row * 32 + column]));
+						}
+					}
+				}
+				CHECK(wrappingTexels >= 32); // the +Z face's two central columns, at least
+				CHECK(worstWrapped < 0.01);
 			}
 			gpu.GetDevice().RunGarbageCollection();
 		}
 
-		TEST_CASE("EnvironmentBaker: malformed inputs are InvalidArgument" * doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+		TEST_CASE("EnvironmentBaker: malformed inputs are InvalidArgument" * doctest::test_suite(Test::GpuSuite))
 		{
 			Test::HeadlessGpuFixture gpu;
 			ENGINE_REQUIRE_GPU(gpu);
@@ -246,11 +298,20 @@ namespace Engine {
 				const Result<EnvironmentData> badOptions = baker->BakeWithOptions(MakeConstantInput(64, 1.0f), EnvironmentBakeOptions{ .SpecularFaceSize = 3 });
 				REQUIRE_FALSE(badOptions.has_value());
 				CHECK(badOptions.error().GetCode() == ErrorCode::InvalidArgument);
+				// Wider than 8,192 texels (decision 21, B): refused by its size before the texels are looked at, so no 16k
+				// image is allocated here.
+				EnvironmentBakeInput wide;
+				wide.Width = 16384;
+				wide.Height = 8192;
+				const Result<EnvironmentData> tooWide = baker->Bake(wide);
+				REQUIRE_FALSE(tooWide.has_value());
+				CHECK(tooWide.error().GetCode() == ErrorCode::InvalidArgument);
+				CHECK(tooWide.error().ToString().contains("16384"));
 			}
 			gpu.GetDevice().RunGarbageCollection();
 		}
 
-		TEST_CASE("EnvironmentBaker: ClampLuminance scales texels above the limit down to it" * doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+		TEST_CASE("EnvironmentBaker: ClampLuminance scales texels above the limit down to it" * doctest::test_suite(Test::GpuSuite))
 		{
 			// A constant environment of 100 with ClampLuminance at 10 bakes like a constant environment of 10.
 			Test::HeadlessGpuFixture gpu;

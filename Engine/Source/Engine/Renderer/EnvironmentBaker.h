@@ -36,7 +36,7 @@
 // Deterministic for a device class (no temporal noise, fixed sample sequences), so a cooked bake is reproducible where it
 // was made; bakes are not compared across devices. Main thread only (it records and submits GPU work and waits for its
 // readback, §4.11), so EnvironmentImporter runs on the main thread (IAssetImporter::RequiresMainThread). Not copyable or
-// movable. Frozen by the M8 contract (Docs/Decisions/0013-m8-decisions.md decision 9); stream B implements it.
+// movable. Frozen by the M8 contract (Docs/Decisions/0013-m8-decisions.md decision 9).
 
 namespace Engine {
 

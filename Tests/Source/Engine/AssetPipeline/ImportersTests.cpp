@@ -2,6 +2,7 @@
 
 #include "Engine/AssetPipeline/IAssetImporter.h"
 #include "Engine/AssetPipeline/ImporterRegistry.h"
+#include "Engine/AssetPipeline/Importers/EnvironmentImporter.h"
 #include "Engine/Core/Hash.h"
 #include "Engine/Core/Mounts/NativeDirectoryMount.h"
 #include "Support/AssetTestFixture.h"
@@ -118,11 +119,14 @@ namespace Engine {
 				}
 			}
 
-			// Every importer is covered by at least one fixture that imports.
+			// Every importer is covered by at least one fixture that imports. EnvironmentImporter imports only with a GPU baker
+			// (§8.6), so its determinism is checked by the GPU test "EnvironmentImporter: bakes and cooks the Studio HDRI
+			// deterministically" instead.
 			for (const IAssetImporter* importer : fixture.GetImporters().GetImporters())
 			{
 				CAPTURE(std::string(importer->GetId()));
-				CHECK(covered.contains(std::string(importer->GetId())));
+				if (importer->GetId() != EnvironmentImporter::Id)
+					CHECK(covered.contains(std::string(importer->GetId())));
 			}
 		}
 	}

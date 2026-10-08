@@ -1,6 +1,7 @@
 #include "EnginePCH.h"
 #include "Engine/AssetPipeline/ImporterRegistry.h"
 
+#include "Engine/AssetPipeline/Importers/EnvironmentImporter.h"
 #include "Engine/AssetPipeline/Importers/FontImporter.h"
 #include "Engine/AssetPipeline/Importers/GltfImporter.h"
 #include "Engine/AssetPipeline/Importers/MaterialImporter.h"
@@ -102,6 +103,7 @@ namespace Engine {
 		registry.Register(CreateScope<SceneImporter>());
 		registry.Register(CreateScope<PrefabImporter>());
 		registry.Register(CreateScope<FontImporter>());
+		registry.Register(CreateScope<EnvironmentImporter>());
 	}
 
 	void RegisterAssetPipelineTypes(TypeRegistry& registry)
@@ -110,6 +112,7 @@ namespace Engine {
 		TextureImporter::RegisterTypes(registry);
 		GltfImporter::RegisterTypes(registry);
 		FontImporter::RegisterTypes(registry);
+		EnvironmentImporter::RegisterTypes(registry);
 	}
 
 }

@@ -53,10 +53,13 @@ namespace Engine {
 		uint32_t Size = 0;
 	};
 
-	// A struct type the shader uses in a constant buffer or push constants, with its fields in declaration order.
+	// A struct type the shader uses in a constant buffer, push constants or as a structured buffer's element, with its fields
+	// in declaration order.
 	struct ShaderStruct
 	{
 		std::string Name{}; // the Slang type name, which equals the C++ name for the shared structs of Resources/Shaders/Shared
+		// The element size of a constant buffer or push constants (or a nested struct's member size); for a structured buffer's
+		// element, which slangc reports without a stride, the end of its last field.
 		uint32_t Size = 0;
 		std::vector<ShaderStructField> Fields{};
 	};
@@ -88,7 +91,7 @@ namespace Engine {
 		std::string EntryPoint{};
 		nvrhi::ShaderType Stage = nvrhi::ShaderType::None; // Vertex, Pixel or Compute
 		std::vector<ShaderBinding> Bindings{};             // in slangc's order
-		std::vector<ShaderStruct> Structs{};               // every struct reachable from a constant buffer or push constants, by name, each once
+		std::vector<ShaderStruct> Structs{};               // every struct reachable from a constant buffer, push constants or a structured buffer's element, by name, each once
 		std::array<uint32_t, 3> ThreadGroupSize{};         // compute only; zero otherwise
 
 		// The binding named `name`, or nullptr.
@@ -98,10 +101,10 @@ namespace Engine {
 	};
 
 	// Parses one slangc -reflection-json document for the entry point it describes (the variant files hold exactly one).
-	// Struct fields are taken from the constant buffers' and push constants' element layouts ("elementVarLayout"), nested
-	// structs flattened into their own ShaderStruct entries. Errors: Parse for malformed JSON (json::parse with
-	// allow_exceptions false), Validation naming the JSON pointer for an unexpected shape (no entry point, an unknown
-	// stage, binding kind or image format). Never throws.
+	// Struct fields are taken from the constant buffers' and push constants' element layouts ("elementVarLayout") and the
+	// structured buffers' element types ("resultType"), nested structs flattened into their own ShaderStruct entries. Errors:
+	// Parse for malformed JSON (json::parse with allow_exceptions false), Validation naming the JSON pointer for an
+	// unexpected shape (no entry point, an unknown stage, binding kind or image format). Never throws.
 	[[nodiscard]] Result<ShaderReflection> ParseShaderReflection(std::string_view json);
 
 	// The enumerator name ("ConstantBuffer", ...).

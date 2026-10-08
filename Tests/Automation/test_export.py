@@ -137,7 +137,6 @@ class ExportTests(AutomationTestCase):
         self.assertFalse(report["smokeTestRan"])
         self.assertTrue(any("smoke test" in warning for warning in report["warnings"]), report["warnings"])
 
-    @unittest.skip("contract stub: un-skipped by M8 stream B")
     def test_export_with_renderer_none_uses_prebaked_engine_cache(self) -> None:
         # §7.5, §7.6 (Roadmap M8; Docs/Decisions/0013-m8-decisions.md decision 9): without a device and without a bake,
         # Engine.pak leaves the built-in environments out with a warning, and an export whose scenes reference one fails

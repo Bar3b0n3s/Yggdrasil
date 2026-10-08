@@ -6,6 +6,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
+
 // slangc's -reflection-json, as written by Scripts/CompileShaders.py for one entry point (Slang 2026.8, the pinned
 // version). The parts read here:
 //
@@ -14,7 +16,9 @@
 //       "entryPoints": [ { "name": ..., "stage": ..., "threadGroupSize": [x, y, z],
 //                          "bindings": [ { "name": ..., "binding": { ..., "used": 0 | 1 } } ] } ] }
 //
-// "space" is omitted for space 0 and "used" for push constants; a parameter without a use flag counts as used.
+// "space" is omitted for space 0 and "used" for push constants; a parameter without a use flag counts as used. A structured
+// buffer's type also carries its element type ("resultType"), whose struct fields have the same "binding" records as a
+// constant buffer's.
 // Specialization constants are parameters too ("specializationConstant") and are skipped: they are no bindings.
 // Parameters with several binding kinds (a ParameterBlock, a struct of resources) are not part of the binding model of
 // §8.4 and are rejected.
@@ -276,6 +280,32 @@ namespace Engine {
 			return CollectStruct(elementType, binding.ByteSize, structs);
 		}
 
+		// The element struct of a structured buffer (its "resultType"), sized by the extent of its fields, the end of the one
+		// that ends last: slangc reports std430 field offsets for the element but no stride. A shared struct without tail
+		// padding beyond its last member (Shared/ShaderLight.h pads explicitly) has exactly that size in C++. Elements that are
+		// not structs carry no struct.
+		static Status ReadStructuredBufferElement(const JsonReader& type, std::vector<ShaderStruct>& structs)
+		{
+			const std::optional<JsonReader> element = type.FindMember("resultType");
+			if (!element.has_value())
+				return {};
+			ENGINE_TRY_ASSIGN(const std::string elementKind, ReadTypeKind(*element));
+			if (elementKind != "struct")
+				return {};
+			ENGINE_TRY_ASSIGN(const JsonReader fields, element->GetMember("fields"));
+			ENGINE_TRY_ASSIGN(const size_t count, fields.GetArraySize());
+			uint32_t extent = 0;
+			for (size_t index = 0; index < count; ++index)
+			{
+				ENGINE_TRY_ASSIGN(const JsonReader field, fields.GetElement(index));
+				ENGINE_TRY_ASSIGN(const JsonReader binding, field.GetMember("binding"));
+				ENGINE_TRY_ASSIGN(const uint32_t offset, binding.ReadMember<uint32_t>("offset"));
+				ENGINE_TRY_ASSIGN(const uint32_t fieldSize, binding.ReadMember<uint32_t>("size"));
+				extent = std::max(extent, offset + fieldSize);
+			}
+			return CollectStruct(*element, extent, structs);
+		}
+
 		// One global parameter; nullopt for a specialization constant.
 		static Result<std::optional<ShaderBinding>> ReadParameter(const JsonReader& parameter, const UsageMap& usage,
 			std::vector<ShaderStruct>& structs)
@@ -332,6 +362,8 @@ namespace Engine {
 					if (typeKind != "resource")
 						return MakeShapeError(type, std::format("resource '{}' has type kind '{}'", binding.Name, typeKind));
 					ENGINE_TRY_ASSIGN(binding.Shape, ReadResourceShape(type));
+					if (binding.Shape == ShaderResourceShape::StructuredBuffer)
+						ENGINE_TRY(ReadStructuredBufferElement(type, structs));
 					break;
 				}
 				case ShaderBindingKind::Sampler:

@@ -12,7 +12,7 @@
 // Text layout for the TextRenderer (Architecture §8.10): pure CPU functions from a font's metrics (Asset/FontData.h) and a
 // UTF-8 string to glyph quads, and the placement of a screen text block on the viewport. Deterministic: identical input
 // gives identical quads in every configuration (only IEEE-exact operations on the font's floats). Thread-safe (no state).
-// Frozen by the M8 contract (Docs/Decisions/0013-m8-decisions.md decision 11); stream D implements it.
+// Frozen by the M8 contract (Docs/Decisions/0013-m8-decisions.md decision 11).
 
 namespace Engine {
 
