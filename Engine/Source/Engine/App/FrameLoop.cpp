@@ -216,4 +216,36 @@ namespace Engine {
 		std::this_thread::sleep_until(*m_FrameSlotEnd);
 	}
 
+	void FrameLoop::SetTimeScale(double timeScale)
+	{
+		ENGINE_CONTRACT_STUB();
+		m_TimeScale = timeScale;
+	}
+
+	double FrameLoop::GetTimeScale() const
+	{
+		return m_TimeScale;
+	}
+
+	void FrameLoop::SetThrottleSuspended(bool suspended)
+	{
+		ENGINE_CONTRACT_STUB();
+		m_ThrottleSuspended = suspended;
+	}
+
+	bool FrameLoop::IsThrottleSuspended() const
+	{
+		return m_ThrottleSuspended;
+	}
+
+	void FrameLoop::SetLoopConfig(const FrameLoopConfig& /*config*/)
+	{
+		ENGINE_CONTRACT_STUB();
+	}
+
+	const FrameLoopConfig& FrameLoop::GetLoopConfig() const
+	{
+		return m_Scheduler.GetConfig();
+	}
+
 }

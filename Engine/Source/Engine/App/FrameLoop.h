@@ -70,13 +70,13 @@ namespace Engine {
 	//   2b. OnFrameSafePoint: automation requests run here, between input and update (§4.2 step 3, §13.2).
 	//   3. Steps: with a ManualClock, exactly one step (FixedStepScheduler::StepExactly(1), Alpha = 1, §4.2); with any
 	//      other clock, FixedStepScheduler::Advance(clock.Delta(), 1.0). OnFrameFixedStep runs once per step, in tick
-	//      order.
-	//   4. OnFrameUpdate with this frame's FrameTime: the clock's delta (DeltaTime equals UnscaledDeltaTime until time
-	//      scaling arrives with play sessions), the scheduler's Alpha, and the frame index from 0.
+	//      order. M7: SetTimeScale scales both and SetLoopConfig changes the FixedHz (see there).
+	//   4. OnFrameUpdate with this frame's FrameTime: the clock's delta (DeltaTime is UnscaledDeltaTime times the time scale,
+	//      M7), the scheduler's Alpha, and the frame index from 0.
 	//   5. OnFrameRender with the same FrameTime (§4.2 step 7).
 	//   6. The frame count grows by one; when it reaches MaxFrames the loop requests exit with ExitCode::Success (an
 	//      earlier request keeps its code). With ThrottleToFixedHz the loop then sleeps until the frame's wall-clock slot
-	//      ends.
+	//      ends, unless the throttle is suspended (SetThrottleSuspended, M7).
 	//
 	// Run logs one Info line before the first frame, "Frame loop started: <ClockKind> clock, <FixedHz> Hz" with the
 	// ClockKind enumerator name, so a process's output shows which clock it runs on.
@@ -84,7 +84,7 @@ namespace Engine {
 	{
 	public:
 		// `context` and `client` are documented back-references (§4.7): both must outlive the loop. `clock` must be
-		// non-null (asserted). The scheduler is built from specification.Loop.
+		// non-null (asserted). The scheduler is built from specification.Loop (SetLoopConfig rebuilds it, M7).
 		FrameLoop(EngineContext& context, IFrameLoopClient& client, Scope<Clock> clock, const FrameLoopSpecification& specification);
 		~FrameLoop();
 
@@ -100,6 +100,29 @@ namespace Engine {
 
 		// Ends the loop after the current frame with `exitCode`. The first request wins; later ones are ignored.
 		void RequestExit(int exitCode);
+
+		// M7 (§4.2, §5.6, §13.6; ADR 0008 decision 3 reserved them): the play session's controls.
+		// The time scale of step 3: FixedStepScheduler::Advance(delta, timeScale) for clocks other than Manual; a ManualClock
+		// frame runs StepExactly(1) at a scale of exactly 1 and Advance(FixedDelta, timeScale) otherwise; FrameTime::DeltaTime
+		// is the unscaled delta times the scale. `timeScale` finite and in [0, PlaySession::MaxTimeScale] (asserted; callers
+		// validate input). 1 initially.
+		void SetTimeScale(double timeScale);
+		[[nodiscard]] double GetTimeScale() const;
+		// While suspended, ThrottleToFixedHz does not wait at the end of a frame (lockstep advances as fast as the machine
+		// allows while a play.step runs, §4.2), and the next throttled frame's slot starts when that frame starts. False
+		// initially; no effect without ThrottleToFixedHz.
+		void SetThrottleSuspended(bool suspended);
+		[[nodiscard]] bool IsThrottleSuspended() const;
+		// The loop's FixedHz, MaxStepsPerFrame and MaxFrameDelta (§4.2, §6.1; Docs/Decisions/0012-m7-decisions.md decision 3):
+		// the editor runs its frames at the play session's project settings while a session exists and at its own
+		// ApplicationSpecification::Loop otherwise, so a project plays at its Simulation.FixedHz in real time. A config equal
+		// to the current one changes nothing (the editor applies it every frame). A different one rebuilds the scheduler (an
+		// empty accumulator, and the loop's tick back to 0: a play session counts its own ticks), replaces a ManualClock with
+		// one of the new FixedDelta, and paces ThrottleToFixedHz at the new FixedHz from the current frame's slot on. `config`
+		// meets FixedStepScheduler's preconditions (asserted; the project loader validated it). Called at the safe point or
+		// between frames, never from the steps.
+		void SetLoopConfig(const FrameLoopConfig& config);
+		[[nodiscard]] const FrameLoopConfig& GetLoopConfig() const;
 
 		[[nodiscard]] bool IsExitRequested() const;
 		// The requested exit code; ExitCode::Success while none was requested.
@@ -129,6 +152,8 @@ namespace Engine {
 		bool m_ExitRequested = false;
 		// The end of the current throttle slot (ThrottleToFixedHz); nullopt before the first throttled frame.
 		std::optional<std::chrono::steady_clock::time_point> m_FrameSlotEnd;
+		double m_TimeScale = 1.0;         // SetTimeScale
+		bool m_ThrottleSuspended = false; // SetThrottleSuspended
 	};
 
 }

@@ -3,6 +3,7 @@
 
 #include "EditorCore/Commands/CompositeCommand.h"
 #include "EditorCore/Commands/SceneEditCommand.h"
+#include "EditorCore/Play/EditorPlayController.h"
 #include "EditorCore/Private/EditorFileError.h"
 #include "EditorCore/Private/PrefabInstances.h"
 #include "EditorCore/Private/SceneEditRollback.h"
@@ -323,7 +324,7 @@ namespace Engine {
 
 	EditorContext::EditorContext(ConstructionKey /*key*/, EngineContext& engine, const EditorContextSpecification& specification,
 		const Random::State& idGeneratorState)
-		: m_Engine(&engine), m_Specification(specification), m_IdGenerator(UUIDGenerator::CreateRandom(idGeneratorState)), m_Importers(CreateScope<ImporterRegistry>()), m_Loaders(CreateScope<AssetLoaderRegistry>()), m_History(specification.HistoryLimits)
+		: m_Engine(&engine), m_Specification(specification), m_IdGenerator(UUIDGenerator::CreateRandom(idGeneratorState)), m_Importers(CreateScope<ImporterRegistry>()), m_Loaders(CreateScope<AssetLoaderRegistry>()), m_History(specification.HistoryLimits), m_Play(CreateScope<EditorPlayController>(*this))
 	{
 		// The editor's asset services (§3 rule 4): the built-in importers and loaders, and the manager the engine context
 		// serves to engine code.

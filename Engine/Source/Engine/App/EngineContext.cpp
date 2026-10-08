@@ -81,6 +81,9 @@ namespace Engine {
 
 	Status EngineContext::MountEngineResources(const EngineContextSpecification& specification)
 	{
+		if (!specification.EnginePak.empty())
+			ENGINE_TRY(MountEnginePak(specification.EnginePak));
+
 		if (!specification.EngineResourcesDirectory.empty())
 		{
 			// The shipped resources are never written by the engine (§2.2, §4.10).
@@ -98,6 +101,12 @@ namespace Engine {
 			ENGINE_TRY(m_Vfs.Mount("enginecache", std::move(cache)));
 		}
 		return {};
+	}
+
+	Status EngineContext::MountEnginePak(const std::filesystem::path& /*pak*/)
+	{
+		ENGINE_CONTRACT_STUB();
+		return MakeError(ErrorCode::Unsupported, "mounting Engine.pak is not implemented yet (M7 stream C)");
 	}
 
 	Status EngineContext::CreateGraphics(const GraphicsSpecification& graphics)

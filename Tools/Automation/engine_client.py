@@ -516,7 +516,7 @@ def connect_raw(port: int, timeout: float = DEFAULT_TIMEOUT_SECONDS) -> socket.s
 # --------------------------------------------------------------------------------------------------------------------
 
 
-def _output_directory_name(config: str) -> str:
+def output_directory_name(config: str) -> str:
     """bin/<Config>-<system>-<arch> as premake names it (Scripts/Lib/paths.py output_directory_name)."""
     if sys.platform == "win32":
         return f"{config}-windows-x86_64"
@@ -536,7 +536,7 @@ def find_editor_executable(repository_root: Path, configurations: tuple[str, ...
     """bin/<Config>-<system>-<arch>/Editor/Editor(.exe) of the first configuration that is built (§13.8: the bridge
     prefers Release). Raises FileNotFoundError naming `python Scripts/Build.py --config Release --project Editor`."""
     name = "Editor.exe" if sys.platform == "win32" else "Editor"
-    candidates = [repository_root / "bin" / _output_directory_name(config) / "Editor" / name
+    candidates = [repository_root / "bin" / output_directory_name(config) / "Editor" / name
                   for config in configurations]
     for candidate in candidates:
         if candidate.is_file():

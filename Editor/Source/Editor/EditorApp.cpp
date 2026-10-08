@@ -6,6 +6,7 @@
 #include "EditorCore/Automation/RegisterMethods.h"
 #include "EditorCore/EditorCommandLine.h"
 #include "EditorCore/EditorContext.h"
+#include "EditorCore/Play/EditorPlayController.h"
 #include "EditorCore/Project/ProjectManager.h"
 #include "Engine/App/CommandLine.h"
 #include "Engine/App/EngineContext.h"
@@ -238,6 +239,7 @@ namespace Engine {
 			serverSpecification.SystemErrors = std::move(systemErrors);
 			serverSpecification.SessionsDirectory = userData.Root / "Automation" / "Sessions";
 			serverSpecification.DocsRoot = repository;
+			serverSpecification.ExportBinaryRoot = repository / "bin";
 			ENGINE_TRY_ASSIGN(state.Server, AutomationServer::Create(*state.Editor, serverSpecification));
 		}
 
@@ -353,7 +355,23 @@ namespace Engine {
 		{
 			if (const std::optional<int> exitCode = state.Editor->GetShutdownRequest())
 				RequestExit(*exitCode);
+
+			// The play session's loop (the project's FixedHz), its time scale and the unthrottled frames of a running
+			// play.step reach the frame loop here, after the requests that changed them (§4.2, §13.6).
+			const EditorPlayController& play = state.Editor->GetPlay();
+			SetFrameLoopConfig(play.GetFrameLoopConfig().value_or(GetSpecification().Loop));
+			SetFrameTimeScale(play.GetFrameTimeScale());
+			SetFrameThrottleSuspended(play.IsFrameThrottleSuspended());
 		}
+	}
+
+	void EditorApp::OnFixedStep(const SimStep& /*step*/)
+	{
+		// A running play session that is not in lockstep advances one tick per loop step (§4.2 step 5, §5.7); the session
+		// counts its own ticks from 0.
+		State& state = *m_State;
+		if (state.Editor != nullptr)
+			state.Editor->GetPlay().OnFixedStep();
 	}
 
 	void EditorApp::OnUpdate(const FrameTime& frame)
@@ -362,7 +380,11 @@ namespace Engine {
 		State& state = *m_State;
 		state.ElapsedSeconds += frame.UnscaledDeltaTime;
 		if (state.Editor != nullptr)
+		{
+			// The play session's frame phase (§4.2 step 6, §5.7), then the editor's own frame work.
+			state.Editor->GetPlay().OnUpdate(frame);
 			state.Editor->Update(state.ElapsedSeconds);
+		}
 
 		const std::optional<uint64_t> maxFrames = GetSpecification().MaxFrames;
 		if (maxFrames.has_value() && frame.FrameIndex + 1 == *maxFrames && !WriteScreenshots())

@@ -49,6 +49,9 @@ namespace Engine {
 		// The repository root for docs.get (.claude/skills, Docs/Reference); empty: docs.get is Unsupported. The editor
 		// passes ENGINE_REPO_ROOT in development builds.
 		std::filesystem::path DocsRoot{};
+		// The repository's bin directory for project.export (ExportSpecification::BinaryRoot: the target configuration's
+		// Runtime and shaders, §14.2; M7). The editor passes ENGINE_REPO_ROOT/bin; empty: project.export is Unsupported.
+		std::filesystem::path ExportBinaryRoot{};
 		// §4.2 step 3: "AutomationServer::Pump(budget 4 ms)".
 		std::chrono::microseconds PumpBudget{ 4000 };
 		std::chrono::milliseconds WatchdogStallThreshold = DefaultWatchdogStallThreshold;

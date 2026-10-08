@@ -32,6 +32,7 @@ namespace Engine {
 
 		constexpr std::string_view HeadlessOption = "--headless";
 		constexpr std::string_view FramesOption = "--frames";
+		constexpr std::string_view ExpectNoErrorsOption = "--expect-no-errors";
 #if !defined(ENGINE_DIST)
 		constexpr std::string_view UserDataDirectoryOption = "--user-data-dir";
 		constexpr std::string_view RendererOption = "--renderer";
@@ -55,6 +56,10 @@ namespace Engine {
 				.Value = CommandLineValue::Required,
 				.ValueName = "N",
 				.Description = "Exit with code 0 after N frames (N >= 1).",
+			},
+			CommandLineOption{
+				.Name = ExpectNoErrorsOption,
+				.Description = "Exit with code 1 when any error was logged during the run.",
 			},
 #if !defined(ENGINE_DIST)
 			CommandLineOption{
@@ -231,6 +236,9 @@ namespace Engine {
 		}
 #endif
 
+		if (commandLine.Has(Utils::ExpectNoErrorsOption))
+			specification.ExpectNoErrors = true;
+
 		specification.Args = commandLine;
 		return {};
 	}
@@ -274,6 +282,7 @@ namespace Engine {
 			.RegisterTypes = m_Specification.RegisterTypes,
 			.Graphics = m_Specification.Renderer == RendererMode::Vulkan ? std::optional<GraphicsSpecification>(m_Specification.Graphics)
 																		 : std::nullopt,
+			.EnginePak = m_Specification.EnginePak,
 		};
 		Result<Scope<EngineContext>> context = EngineContext::Create(contextSpecification);
 		if (!context.has_value())
@@ -329,6 +338,7 @@ namespace Engine {
 				gpuMessages.Errors, gpuMessages.Warnings);
 			exitCode = ExitCode::Failed;
 		}
+		exitCode = ApplyExpectNoErrors(exitCode);
 		m_Context.reset();
 		return exitCode;
 	}
@@ -586,6 +596,30 @@ namespace Engine {
 		if (m_Specification.Clock == ClockKind::Manual)
 			return CreateScope<ManualClock>(m_Specification.Loop.GetFixedDelta());
 		return CreateScope<SystemClock>();
+	}
+
+	void Application::SetFrameTimeScale(double timeScale)
+	{
+		ENGINE_CORE_ASSERT(m_FrameLoop != nullptr, "Application::SetFrameTimeScale needs the running frame loop");
+		m_FrameLoop->SetTimeScale(timeScale);
+	}
+
+	void Application::SetFrameThrottleSuspended(bool suspended)
+	{
+		ENGINE_CORE_ASSERT(m_FrameLoop != nullptr, "Application::SetFrameThrottleSuspended needs the running frame loop");
+		m_FrameLoop->SetThrottleSuspended(suspended);
+	}
+
+	void Application::SetFrameLoopConfig(const FrameLoopConfig& config)
+	{
+		ENGINE_CORE_ASSERT(m_FrameLoop != nullptr, "Application::SetFrameLoopConfig needs the running frame loop");
+		m_FrameLoop->SetLoopConfig(config);
+	}
+
+	int Application::ApplyExpectNoErrors(int exitCode) const
+	{
+		ENGINE_CONTRACT_STUB();
+		return exitCode;
 	}
 
 }

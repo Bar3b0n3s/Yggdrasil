@@ -17,10 +17,15 @@
 
 namespace Engine {
 
+	class AssetManager;
+	class GpuResourceCache;
 	class GraphicsDevice;
 	class PipelineFactory;
 	class Readback;
+	class SceneRenderer;
+	class SceneRendererPipelines;
 	class TrianglePass;
+	struct RenderSnapshot;
 
 	// The golden-image size (§15.4), the default of viewport screenshots.
 	inline constexpr uint32_t DefaultViewportScreenshotWidth = 640;
@@ -39,7 +44,13 @@ namespace Engine {
 	// Renders and reads back the viewport. Created once at startup, next to the application's other GPU objects, because
 	// every engine pipeline is created at startup (§8.12): the capture owns the pipeline it draws with, and each Capture
 	// only creates the target of the requested size. In M5 the viewport is the clear-and-triangle view
-	// (Renderer/TrianglePass); the scene renderer replaces it in M7 and the request gains the camera, view and debug view.
+	// (Renderer/TrianglePass). M7 (Docs/Decisions/0012-m7-decisions.md decision 9): the capture renders RenderSnapshots
+	// through its own SceneRenderer over the host's shared SceneRendererPipelines (CreateForScenes with the pipelines, the
+	// GpuResourceCache and the AssetManager; Capture with a snapshot); the
+	// viewport.screenshot handler extracts the snapshot of the requested view, camera and size (Scene/RenderExtraction.h),
+	// and the Runtime's --screenshot-at does the same with its game view. The M5 members (the triangle Create and Capture)
+	// remain until stream B moves their last callers (the editor's M5 handler, the Triangle golden, which then draws
+	// TrianglePass directly) and removes them.
 	// Not copyable or movable; main thread only (§4.11).
 	class ViewportCapture
 	{
@@ -70,9 +81,24 @@ namespace Engine {
 		// Errors: InvalidArgument for a zero Width or Height or one above MaxViewportScreenshotDimension; those of
 		// OffscreenTarget::Create, Readback::ReadTexture and DownscaleImage.
 		[[nodiscard]] Result<Image> Capture(const ViewportScreenshotRequest& request);
+
+		// M7: the capture of RenderSnapshots. Creates the capture's SceneRenderer over the host's `pipelines` (at 1 x 1;
+		// Capture resizes it; no pipeline is created) and its Readback. `device`, `pipelines`, `cache` and `assets` are
+		// documented back-references that outlive the capture. Errors: those of SceneRenderer::Create (a Gpu error is an
+		// out-of-memory creation, FatalError(OutOfMemory) for a caller at startup, §8.14 item 7).
+		[[nodiscard]] static Result<Scope<ViewportCapture>> CreateForScenes(GraphicsDevice& device, const SceneRendererPipelines& pipelines,
+			GpuResourceCache& cache, AssetManager& assets);
+
+		// M7: renders `snapshot` (extracted for request.Width x request.Height) through the capture's SceneRenderer resized to
+		// the request's size, reads LdrColor back (Readback::ReadTexture) and applies MaxDimension. Blocks until the image is
+		// on the CPU. Errors: InvalidState for a capture made by the M5 Create; InvalidArgument for a zero Width or Height or
+		// one above MaxViewportScreenshotDimension; those of SceneRenderer::Resize and Render, Readback::ReadTexture and
+		// DownscaleImage.
+		[[nodiscard]] Result<Image> Capture(const ViewportScreenshotRequest& request, const RenderSnapshot& snapshot);
 	private:
 		GraphicsDevice* m_Device = nullptr; // documented back-reference
 		Scope<TrianglePass> m_TrianglePass;
+		Scope<SceneRenderer> m_SceneRenderer; // CreateForScenes (M7)
 		Scope<Readback> m_Readback;
 		nvrhi::CommandListHandle m_CommandList;
 	};

@@ -4,6 +4,7 @@
 
 #include "Engine/App/EngineContext.h"
 #include "Engine/App/ProcessContext.h"
+#include "Engine/Core/Log.h"
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Graphics/RenderContext.h"
 #include "Engine/Platform/Process.h"
@@ -650,6 +651,38 @@ namespace Engine {
 			REQUIRE_FALSE(applied.has_value());
 			CHECK(applied.error().GetCode() == ErrorCode::InvalidArgument);
 			CHECK(applied.error().GetMessageText().contains("--frames"));
+		}
+
+		TEST_CASE("ApplyEngineCommandLine: --expect-no-errors sets ExpectNoErrors")
+		{
+			// Implemented by the contract (the option and its parse); the check itself is stream C's (Application::Run).
+			const std::vector<std::string> arguments = { "--expect-no-errors" };
+			const Result<CommandLine> commandLine = CommandLine::Parse(arguments, GetEngineCommandLineOptions());
+			REQUIRE(commandLine.has_value());
+			ApplicationSpecification specification;
+			REQUIRE(ApplyEngineCommandLine(*commandLine, specification).has_value());
+			CHECK(specification.ExpectNoErrors);
+		}
+
+		TEST_CASE("Application: --expect-no-errors fails a run that logged an error" * doctest::skip(true))
+		{
+			// Skipped skeleton of the M7 contract (Docs/Decisions/0012-m7-decisions.md decision 15); stream C.
+			class ErrorLoggingApplication final : public Application
+			{
+			public:
+				using Application::Application;
+			protected:
+				void OnUpdate(const FrameTime& /*frame*/) override
+				{
+					ENGINE_ERROR("an error the run logs on purpose");
+				}
+			};
+			ApplicationSpecification specification = MakeHeadlessSpecification(2);
+			specification.ExpectNoErrors = true;
+			ErrorLoggingApplication application(std::move(specification));
+			Test::ExpectLog logged(LogLevel::Error, "an error the run logs on purpose");
+			Test::ExpectLog failed(LogLevel::Error, "--expect-no-errors");
+			CHECK(application.Run() == ExitCode::Failed);
 		}
 	}
 

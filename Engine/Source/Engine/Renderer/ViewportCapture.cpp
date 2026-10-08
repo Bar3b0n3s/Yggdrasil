@@ -5,6 +5,8 @@
 #include "Engine/Graphics/OffscreenTarget.h"
 #include "Engine/Graphics/PipelineFactory.h"
 #include "Engine/Graphics/Readback.h"
+#include "Engine/Renderer/RenderSnapshot.h"
+#include "Engine/Renderer/SceneRenderer.h"
 #include "Engine/Renderer/TrianglePass.h"
 
 namespace Engine {
@@ -71,6 +73,19 @@ namespace Engine {
 		if (request.MaxDimension > 0)
 			return DownscaleImage(image, request.MaxDimension);
 		return image;
+	}
+
+	Result<Scope<ViewportCapture>> ViewportCapture::CreateForScenes(GraphicsDevice& /*device*/, const SceneRendererPipelines& /*pipelines*/,
+		GpuResourceCache& /*cache*/, AssetManager& /*assets*/)
+	{
+		ENGINE_CONTRACT_STUB();
+		return MakeError(ErrorCode::Unsupported, "scene captures are not implemented yet (M7 stream B)");
+	}
+
+	Result<Image> ViewportCapture::Capture(const ViewportScreenshotRequest& /*request*/, const RenderSnapshot& /*snapshot*/)
+	{
+		ENGINE_CONTRACT_STUB();
+		return MakeError(ErrorCode::Unsupported, "scene captures are not implemented yet (M7 stream B)");
 	}
 
 }

@@ -2,10 +2,17 @@
 
 #include "Engine/Renderer/ViewportCapture.h"
 
+#include "Engine/Asset/BuiltinAssets.h"
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Graphics/Image.h"
+#include "Engine/Renderer/GpuResourceCache.h"
+#include "Engine/Renderer/RenderSnapshot.h"
+#include "Engine/Renderer/SceneRenderer.h"
 #include "Engine/Renderer/TrianglePass.h"
+#include "Support/AssetTestFixture.h"
 #include "Support/HeadlessGpuFixture.h"
+
+#include <glm/gtc/matrix_transform.hpp>
 
 #include <cstdlib>
 
@@ -85,6 +92,41 @@ namespace Engine {
 				REQUIRE_FALSE(image.has_value());
 				CHECK(image.error().GetCode() == ErrorCode::InvalidArgument);
 			}
+		}
+
+		TEST_CASE("ViewportCapture: renders a snapshot at the requested size over shared pipelines"
+			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+		{
+			// Skipped skeleton of the M7 contract (Docs/Decisions/0012-m7-decisions.md decision 9); stream B.
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::AssetTestFixture assets;
+			{
+				GpuResourceCache cache(gpu.GetDevice(), assets.GetManager());
+				Result<Scope<SceneRendererPipelines>> pipelines = SceneRendererPipelines::Create(gpu.GetDevice(), gpu.GetPipelines());
+				REQUIRE_MESSAGE(pipelines.has_value(), pipelines.error().ToString());
+				Result<Scope<ViewportCapture>> capture = ViewportCapture::CreateForScenes(gpu.GetDevice(), **pipelines, cache, assets.GetManager());
+				REQUIRE_MESSAGE(capture.has_value(), capture.error().ToString());
+
+				RenderSnapshot snapshot;
+				snapshot.HasCamera = true;
+				snapshot.Camera.Position = glm::vec3(0.0f, 0.0f, 5.0f);
+				snapshot.Camera.View = glm::translate(glm::mat4(1.0f), -snapshot.Camera.Position);
+				snapshot.Camera.ViewportWidth = 96;
+				snapshot.Camera.ViewportHeight = 48;
+				snapshot.Camera.Projection = ComputeReverseZProjection(RenderProjection::Perspective, 60.0f, 10.0f, 0.1f, 1000.0f, 96, 48);
+				snapshot.Meshes.push_back(MeshDrawItem{ .Mesh = BuiltinAssetHandles::CubeMesh });
+				Result<Image> image = (*capture)->Capture({ .Width = 96, .Height = 48, .MaxDimension = 0 }, snapshot);
+				REQUIRE_MESSAGE(image.has_value(), image.error().ToString());
+				CHECK(image->Width == 96);
+				CHECK(image->Height == 48);
+				// MaxDimension downscales the rendered image.
+				Result<Image> small = (*capture)->Capture({ .Width = 96, .Height = 48, .MaxDimension = 48 }, snapshot);
+				REQUIRE_MESSAGE(small.has_value(), small.error().ToString());
+				CHECK(small->Width == 48);
+				CHECK(small->Height == 24);
+			}
+			gpu.GetDevice().RunGarbageCollection();
 		}
 	}
 

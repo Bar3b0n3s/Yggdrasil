@@ -19,6 +19,9 @@
 
 #include <vulkan/vulkan.hpp>
 
+#include <algorithm>
+#include <array>
+
 namespace Engine {
 
 	namespace {
@@ -466,6 +469,97 @@ namespace Engine {
 			// The catch covers the whole frame (§4.2 step 7), not only rendering: NVRHI work outside the render step (a
 			// screenshot read back during an update, an asset swap's upload) is guarded the same way.
 			CheckFrameBoundaryCatch("App/FrameLoopUpdateThrowsSystemError", "Update");
+		}
+
+		TEST_CASE("FrameLoop: the time scale scales the steps and the frame delta" * doctest::skip(true))
+		{
+			// Skipped skeleton of the M7 contract (Docs/Decisions/0012-m7-decisions.md decision 3); stream C.
+			const std::array<double, 1> deltas = { 4.0 * FixedDelta };
+			Result<ScriptedClock> clock = ScriptedClock::Create(deltas);
+			REQUIRE(clock.has_value());
+			Scope<EngineContext> context = CreateContext();
+			RecordingClient client;
+			FrameLoop loop(*context, client, CreateScope<ScriptedClock>(std::move(*clock)), {});
+			CHECK(loop.GetTimeScale() == 1.0);
+			loop.SetTimeScale(0.5);
+			loop.RunFrame();
+			const auto steps = std::ranges::count_if(client.Calls, [](const std::string& call)
+			{
+				return call.starts_with("step ");
+			});
+			CHECK(steps == 2);
+			CHECK(loop.GetLastFrameTime().DeltaTime == doctest::Approx(2.0 * FixedDelta));
+			CHECK(loop.GetLastFrameTime().UnscaledDeltaTime == doctest::Approx(4.0 * FixedDelta));
+
+			// A paused session's scale of 0 runs no step.
+			loop.SetTimeScale(0.0);
+			client.Calls.clear();
+			loop.RunFrame();
+			CHECK(std::ranges::none_of(client.Calls, [](const std::string& call)
+			{
+				return call.starts_with("step ");
+			}));
+		}
+
+		TEST_CASE("FrameLoop: a ManualClock frame at a time scale other than 1 advances by the scaled fixed delta" * doctest::skip(true))
+		{
+			// Skipped skeleton of the M7 contract (Docs/Decisions/0012-m7-decisions.md decision 3); stream C.
+			Scope<EngineContext> context = CreateContext();
+			RecordingClient client;
+			FrameLoop loop(*context, client, CreateScope<ManualClock>(FixedDelta), {});
+			loop.SetTimeScale(2.0);
+			loop.RunFrame();
+			CHECK(std::ranges::count_if(client.Calls, [](const std::string& call)
+			{
+				return call.starts_with("step ");
+			}) == 2);
+			CHECK(loop.GetLastFrameTime().DeltaTime == doctest::Approx(2.0 * FixedDelta));
+		}
+
+		TEST_CASE("FrameLoop: a suspended throttle runs frames without waiting for their slots" * doctest::skip(true))
+		{
+			// Skipped skeleton of the M7 contract (Docs/Decisions/0012-m7-decisions.md decision 3); stream C. One-second slots:
+			// a loop that still waited for them would need hours for these frames and fail at the suite's timeout, a failure
+			// bound only; nothing here measures time (ADR 0008 decision 15).
+			Scope<EngineContext> context = CreateContext();
+			RecordingClient client;
+			constexpr uint64_t Frames = 10000;
+			FrameLoop loop(*context, client, CreateScope<ManualClock>(1.0),
+				{ .Loop = { .FixedHz = 1 }, .MaxFrames = Frames, .ThrottleToFixedHz = true });
+			CHECK_FALSE(loop.IsThrottleSuspended());
+			loop.SetThrottleSuspended(true);
+			CHECK(loop.IsThrottleSuspended());
+			CHECK(loop.Run() == ExitCode::Success);
+			CHECK(loop.GetFrameCount() == Frames);
+		}
+
+		TEST_CASE("FrameLoop: a new loop config rebuilds the scheduler and the ManualClock at its FixedHz" * doctest::skip(true))
+		{
+			// Skipped skeleton of the M7 contract (Docs/Decisions/0012-m7-decisions.md decision 3); stream C. The editor plays
+			// a project at its Simulation.FixedHz (EditorPlayController::GetFrameLoopConfig).
+			Scope<EngineContext> context = CreateContext();
+			RecordingClient client;
+			FrameLoop loop(*context, client, CreateScope<ManualClock>(FixedDelta), {});
+			loop.RunFrame();
+			loop.RunFrame();
+
+			// The current config changes nothing: the tick goes on.
+			loop.SetLoopConfig(FrameLoopConfig{});
+			CHECK(loop.GetScheduler().GetTick() == 2);
+
+			// A 30 Hz project: the loop's tick restarts at 0 and every ManualClock frame steps 1/30 s.
+			loop.SetLoopConfig({ .FixedHz = 30, .MaxStepsPerFrame = 3 });
+			CHECK(loop.GetLoopConfig().FixedHz == 30);
+			CHECK(loop.GetLoopConfig().MaxStepsPerFrame == 3);
+			CHECK(loop.GetScheduler().GetTick() == 0);
+			client.Calls.clear();
+			loop.RunFrame();
+			REQUIRE_FALSE(client.Calls.empty());
+			CHECK(client.Calls.front() == "step 0");
+			CHECK(loop.GetScheduler().GetFixedDelta() == doctest::Approx(1.0 / 30.0));
+			CHECK(loop.GetLastFrameTime().DeltaTime == doctest::Approx(1.0 / 30.0));
+			REQUIRE(loop.GetClock().GetKind() == ClockKind::Manual);
+			CHECK(static_cast<const ManualClock&>(loop.GetClock()).GetFixedDelta() == doctest::Approx(1.0 / 30.0));
 		}
 	}
 

@@ -13,6 +13,7 @@
 #include "Engine/Core/UUID.h"
 #include "Engine/Core/UUIDGenerator.h"
 #include "Engine/Core/VfsPath.h"
+#include "Engine/Scene/RenderExtraction.h"
 #include "Engine/Scene/Scene.h"
 
 #include <cstddef>
@@ -34,6 +35,7 @@ namespace Engine {
 	class AssetLoaderRegistry;
 	class EditorAssetManager;
 	class EditorDryRunScope;
+	class EditorPlayController;
 	class EditorTransaction;
 	class EngineContext;
 	class IEnvironmentBaker;
@@ -284,6 +286,18 @@ namespace Engine {
 		// The open dry run, or nullptr.
 		[[nodiscard]] EditorDryRunScope* GetDryRun() const { return m_DryRun; }
 
+		// --- Play mode (§5.6, §12.4; M7) ---------------------------------------------------------------------------------
+
+		// The editor's play mode: at most one PlaySession, made from the open edit scene (EditorPlayController). Valid for the
+		// editor's lifetime; a running session is stopped before the project closes.
+		[[nodiscard]] EditorPlayController& GetPlay() { return *m_Play; }
+		[[nodiscard]] const EditorPlayController& GetPlay() const { return *m_Play; }
+
+		// The camera of the editor's scene view (§8.13; viewport.screenshot {view: "scene"}): the default
+		// ExplicitRenderCamera until the editor camera and viewport.camera arrive with the editor panels (M10;
+		// Docs/Decisions/0012-m7-decisions.md decision 9).
+		[[nodiscard]] const ExplicitRenderCamera& GetSceneViewCamera() const { return m_SceneViewCamera; }
+
 		// --- Shutdown (session.shutdown) --------------------------------------------------------------------------------
 
 		// Asks the application to exit with `exitCode` after the current frame; the first request wins. EditorApp polls it at
@@ -337,6 +351,9 @@ namespace Engine {
 		// write observer keeps the first provenance save failure here for that member to return; otherwise it logs it.
 		bool m_CollectProvenanceErrors = false;
 		std::optional<Error> m_ProvenanceError;
+		ExplicitRenderCamera m_SceneViewCamera{};
+		// Last, so it is destroyed first: a play session refers to the asset manager and the type registry (M7).
+		Scope<EditorPlayController> m_Play;
 	private:
 		friend class CommandHistory; // reads GetRevisionBeforeCommand
 		friend class EditorDryRunScope;

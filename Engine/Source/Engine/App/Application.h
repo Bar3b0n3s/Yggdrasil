@@ -85,11 +85,21 @@ namespace Engine {
 		// imgui.ini while no project is open, relative to the user-data folder (user://, §8.11): the editor's
 		// "Editor/imgui.ini". Run resolves it to the native path under ProcessContext's user-data root. Empty: no ini file.
 		std::string ImGuiIniPath{};
+		// M7: the exported game's Engine.pak (EngineContextSpecification::EnginePak): mounted as engine:// instead of
+		// EngineResourcesDirectory, and its Shaders/ are the ShaderLibrary's root in every configuration, so an exported game
+		// renders with the target configuration's SPIR-V (§2.2, §14.1). The Runtime sets it from its manifest; empty: none.
+		std::filesystem::path EnginePak{};
+		// M7, --expect-no-errors (§13.9, every configuration, Dist included): a run during which any Error or Critical entry
+		// was logged (every logger, the Script logger included) returns ExitCode::Failed instead of Success, logging the count
+		// at Error level; an exit code other than Success is kept. The export smoke test and the exported-runtime tests pass
+		// it (§14.2 step 7).
+		bool ExpectNoErrors = false;
 	};
 
 	// The options every application accepts, handled by ApplyEngineCommandLine:
 	//   --headless              Window = Headless, Clock = Manual (all headless runs use ManualClock, §13.9)
 	//   --frames N              MaxFrames = N, N >= 1 (stub runs and smoke tests, §13.9, §14.2)
+	//   --expect-no-errors      ExpectNoErrors = true (M7)
 	//   --user-data-dir <path>  UserDataRoot = path, absolute (process tests)
 	//   --renderer <mode>       Renderer = Vulkan for "vulkan", None for "none" (§12.1, §13.9)
 	//   --gpu-validation[=sync] Graphics.Validation = true (§2.2: on by default in Debug, never in Dist); with "=sync" also
@@ -98,8 +108,8 @@ namespace Engine {
 	//   --vulkan-api <version>  Graphics.MaxApiVersion: "1.3" or "1.4" (§8.1)
 	//   --gpu <index|name>      Graphics.GpuOverride (§8.1; ENGINE_GPU when absent)
 	//   --gpu-inject-fault <f>  Graphics.InjectFault: "device-lost", "oom-texture" or "hang" (§8.14 item 8)
-	// Every option except --headless and --frames is absent from Dist builds, where it is an unknown option (§13.9 lists
-	// the options Dist honours).
+	// Every option except --headless, --frames and --expect-no-errors is absent from Dist builds, where it is an unknown
+	// option (§13.9 lists the options Dist honours).
 	// An application parses its command line with these plus its own options (CommandLine::Parse). The returned options
 	// refer to static storage.
 	[[nodiscard]] std::span<const CommandLineOption> GetEngineCommandLineOptions();
@@ -189,6 +199,14 @@ namespace Engine {
 		// The application's ImGuiLayer (editor screenshots re-render its last frame, §8.13); nullptr without ImGui, and
 		// outside the span from rendering initialization to the end of OnShutdown.
 		[[nodiscard]] ImGuiLayer* GetImGuiLayer() { return m_ImGuiLayer.get(); }
+
+		// M7 play-session controls of the frame loop (FrameLoop::SetTimeScale, SetThrottleSuspended and SetLoopConfig), for the
+		// play session's time scale, the unthrottled frames of a running play.step and the project's Simulation.FixedHz and
+		// MaxStepsPerFrame while the editor plays (§4.2, §13.6). Only while the frame loop runs (from the first frame's hooks
+		// to the last's; asserted): the editor and the Runtime call them at their safe point.
+		void SetFrameTimeScale(double timeScale);
+		void SetFrameThrottleSuspended(bool suspended);
+		void SetFrameLoopConfig(const FrameLoopConfig& config);
 	private:
 		void OnFrameEvent(Event& event) override;
 		void OnFrameSafePoint() override;
@@ -206,6 +224,9 @@ namespace Engine {
 
 		// The frame clock of the specification (ClockKind::Scripted is rejected before this is called).
 		[[nodiscard]] Scope<Clock> CreateClock() const;
+		// Step 3's --expect-no-errors check (ApplicationSpecification::ExpectNoErrors): `exitCode`, or ExitCode::Failed when
+		// it is Success and an error was logged since Run started (M7).
+		[[nodiscard]] int ApplyExpectNoErrors(int exitCode) const;
 	private:
 		// The frame's rendering objects with a device (swapchain or offscreen target, pacer, profiler, command list),
 		// defined in Application.cpp.

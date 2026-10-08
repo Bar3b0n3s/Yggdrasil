@@ -18,13 +18,15 @@ namespace Engine {
 		bool TestHooks = false;
 	};
 
-	// Every editor automation struct and enum, in dependency order: RegisterAutomationCommonTypes, the importers' settings
-	// types (RegisterAssetPipelineTypes, M6), RegisterProjectValidatorTypes, then each domain's Register*MethodTypes
-	// (session, rpc, project, scene, entity, component, edit, observe, screenshot, asset, prefab, debug). It is the editor's
-	// EngineContextSpecification::RegisterTypes.
+	// Every editor automation struct and enum, in dependency order: RegisterAutomationCommonTypes, the shared domains'
+	// types (RegisterSharedMethodTypes, Engine/Automation/Methods, M7), the importers' settings types
+	// (RegisterAssetPipelineTypes, M6), RegisterProjectValidatorTypes, then each editor domain's Register*MethodTypes
+	// (session, rpc, project, scene, entity, component, edit, observe, screenshot, asset, prefab, export, debug). It is the
+	// editor's EngineContextSpecification::RegisterTypes.
 	void RegisterEditorMethodTypes(TypeRegistry& registry);
 
-	// Every editor method, each domain's Register*Methods in the order above (debug only with options.TestHooks).
+	// Every editor method: each editor domain's Register*Methods in the order above, then the shared methods
+	// (RegisterSharedMethods with AutomationHost::Editor), then debug only with options.TestHooks.
 	void RegisterEditorMethods(MethodRegistry& methods, const EditorMethodOptions& options);
 
 }

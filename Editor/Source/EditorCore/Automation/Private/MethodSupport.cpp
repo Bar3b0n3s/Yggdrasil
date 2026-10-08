@@ -5,6 +5,7 @@
 #include "EditorCore/Automation/SceneMethods.h"
 #include "EditorCore/EditorContext.h"
 #include "EditorCore/Private/EditorFileError.h"
+#include "Engine/Automation/Methods/AutomationMethodContext.h"
 #include "Engine/Core/Assert.h"
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Json/JsonReader.h"
@@ -19,6 +20,7 @@
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/SceneSerializer.h"
+#include "Engine/Session/PlaySession.h"
 
 #include <nlohmann/json.hpp>
 
@@ -299,6 +301,30 @@ namespace Engine {
 					std::format("'{}' is not a cursor", cursor), "pass \"\" (the oldest entry), \"end\" or the nextCursor of the previous read"));
 			}
 			return std::optional<uint64_t>(value);
+		}
+
+		Status CheckPlayEntityCapacity(const AutomationMethodContext& context, const Scene& scene, size_t additional)
+		{
+			const PlaySession* session = context.GetPlaySession();
+			if (session == nullptr || &session->GetScene() != &scene)
+				return {};
+			return session->CheckEntityCapacity(additional);
+		}
+
+		size_t CountSubtreeEntities(std::span<const Entity> roots)
+		{
+			size_t count = 0;
+			std::vector<ConstEntity> pending(roots.begin(), roots.end());
+			while (!pending.empty())
+			{
+				const ConstEntity entity = pending.back();
+				pending.pop_back();
+				ENGINE_ASSERT(entity.IsValid(), "CountSubtreeEntities needs valid entities");
+				++count;
+				for (const UUID child : entity.GetChildren())
+					pending.push_back(entity.GetScene()->FindEntityByID(child));
+			}
+			return count;
 		}
 
 	}

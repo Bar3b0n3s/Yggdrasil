@@ -470,6 +470,7 @@ namespace Engine {
 				ENGINE_TRY_ASSIGN(parent, context.ResolveEntity(*scene, params.Parent, "/parent"));
 			}
 
+			ENGINE_TRY(Utils::CheckPlayEntityCapacity(context, *scene, 1));
 			SceneEdit edit(context.GetEditor(), std::format("Create Entity '{}'", params.Name));
 			const Entity entity = parent.IsValid() ? scene->CreateEntity(params.Name, parent) : scene->CreateEntity(params.Name);
 			if (context.HasParam("index"))
@@ -560,6 +561,7 @@ namespace Engine {
 		{
 			ENGINE_TRY_ASSIGN(Scene * scene, context.ResolveTargetScene(params.Target, context.HasParam("target"), true));
 			ENGINE_TRY_ASSIGN(const std::vector<Entity> roots, Utils::ResolveEntityRoots(context, *scene, params.Entities));
+			ENGINE_TRY(Utils::CheckPlayEntityCapacity(context, *scene, Utils::CountSubtreeEntities(roots)));
 
 			SceneEdit edit(context.GetEditor(), Utils::MakeListLabel("Duplicate", roots));
 			std::vector<UUID> copies;

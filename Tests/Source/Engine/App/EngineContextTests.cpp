@@ -4,8 +4,12 @@
 
 #include "Engine/Asset/AssetLoaderRegistry.h"
 #include "Engine/Asset/AssetManager.h"
+#include "Engine/Asset/PakFormat.h"
 #include "Engine/Asset/RuntimeAssetManager.h"
+#include "Engine/AssetPipeline/PakWriter.h"
 #include "Engine/Core/FileSystem.h"
+#include "Engine/Core/VfsPath.h"
+#include "Engine/Core/VirtualFileSystem.h"
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Graphics/ShaderLibrary.h"
 #include "Engine/Project/ProjectSettings.h"
@@ -270,6 +274,33 @@ namespace Engine {
 			CHECK(EngineContextStepToString(EngineContextStep::EngineResources) == "EngineResources");
 			CHECK(EngineContextStepToString(EngineContextStep::Window) == "Window");
 			CHECK(EngineContextStepToString(EngineContextStep::Graphics) == "Graphics");
+		}
+
+		TEST_CASE("EngineContext: an Engine.pak is mounted as engine:// and kept for the asset manager" * doctest::skip(true))
+		{
+			// Skipped skeleton of the M7 contract (Docs/Decisions/0012-m7-decisions.md decision 10); stream C. The pak holds
+			// one plain file; a context without a device needs no shaders.
+			const Test::TempDirectory directory("EnginePak");
+			PakWriter writer;
+			const std::string text = "engine resource";
+			const std::span<const std::byte> bytes = std::as_bytes(std::span(text.data(), text.size()));
+			REQUIRE(writer.Add(PakWriterEntry{ .Type = std::string(PakFileEntryType), .Path = "Shaders/Readme.txt", .Data = Buffer(bytes.begin(), bytes.end()) }).has_value());
+			REQUIRE(writer.WriteToFile(directory.GetPath() / "Engine.pak").has_value());
+
+			EngineContextSpecification specification;
+			specification.EnginePak = directory.GetPath() / "Engine.pak";
+			Result<Scope<EngineContext>> context = EngineContext::Create(specification);
+			REQUIRE_MESSAGE(context.has_value(), context.error().ToString());
+			REQUIRE((*context)->GetEnginePak() != nullptr);
+			const Result<std::string> read = (*context)->GetVfs().ReadText(VfsPath::Parse("engine://Shaders/Readme.txt").value());
+			REQUIRE(read.has_value());
+			CHECK(*read == text);
+
+			EngineContextSpecification both = specification;
+			both.EngineResourcesDirectory = directory.GetPath();
+			const Result<Scope<EngineContext>> conflicting = EngineContext::Create(both);
+			REQUIRE_FALSE(conflicting.has_value());
+			CHECK(conflicting.error().GetCode() == ErrorCode::InvalidArgument);
 		}
 	}
 

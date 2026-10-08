@@ -5,6 +5,7 @@
 #include "EditorCore/Automation/Private/AssetMethodSupport.h"
 #include "EditorCore/Automation/RegisterMethods.h"
 #include "EditorCore/EditorContext.h"
+#include "EditorCore/Play/EditorPlayController.h"
 #include "Engine/Asset/AssetReference.h"
 #include "Engine/Asset/AssetType.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
@@ -371,7 +372,8 @@ namespace Engine {
 		state.Revision = editor.GetRevision();
 		state.Dirty = editor.HasScene() && editor.IsSceneDirty();
 		state.UndoLabel = editor.HasScene() ? editor.GetHistory().GetUndoLabel() : std::string();
-		state.PlayState = "Edit";
+		state.PlayState = editor.GetPlay().GetPlayStateName();
+		state.Tick = editor.GetPlay().GetTick();
 		state.SceneChangedOnDisk = editor.IsSceneChangedOnDisk();
 		return state;
 	}
@@ -428,7 +430,10 @@ namespace Engine {
 		const auto record = Clients.find(client);
 		if (record == Clients.end())
 			return;
+		// Cancelling the client's pending operations first lets a running play.step release what it holds (§13.2); then the
+		// play controller releases the client's lockstep and pauses play (M7).
 		Calls->RemoveClient(client);
+		editor.GetPlay().OnClientDisconnected(client);
 		const std::string name = record->second.Name;
 		if (!record->second.InProcess)
 			Connections.erase(record->second.Connection);

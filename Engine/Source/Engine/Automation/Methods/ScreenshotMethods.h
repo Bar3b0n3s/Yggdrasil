@@ -1,0 +1,111 @@
+#pragma once
+
+#include "Engine/Automation/Methods/AutomationTypes.h"
+#include "Engine/Core/Base.h"
+#include "Engine/Core/Result.h"
+#include "Engine/Reflection/VariantValue.h"
+
+#include <cstddef>
+#include <cstdint>
+#include <string>
+
+// viewport.screenshot (Architecture §8.13, §13.4 "Screenshots", §13.5), the screenshot method the Editor and the Runtime
+// share (§13.5 "Runtime subset: viewport.screenshot (game view)"). Its params and result moved here from
+// EditorCore/Automation/ScreenshotMethods.h with the M7 contract, unchanged in name and wire format apart from the M7
+// additions marked below; editor.screenshot stays in EditorCore (Docs/Decisions/0012-m7-decisions.md decision 9).
+//
+// Every screenshot is re-rendered for the call (§8.13): the handler extracts a snapshot of the requested view at the
+// requested size (Scene/RenderExtraction.h ExtractRenderSnapshot for the edit scene; PlaySession::ExtractView for the play
+// scene, which first brings the scene's transforms and interpolation tags up to date, so a write made since the last tick
+// shows at once) and the host renders it through its ViewportCapture
+// (AutomationMethodContext::CaptureView), never taking the last presented image. The image is downscaled so that its larger
+// side is at most maxDimension (default 1024, §13.4), encoded as PNG and written to the host's output directory
+// (AutomationMethodContext::WriteOutputFile); the result names the file's absolute path, which the MCP bridge returns as
+// image content (§13.8), and stays below the offload threshold (§13.4): inline data is left out of a PNG larger than
+// MaxInlineScreenshotPngBytes.
+//
+// Views (M7, ADR 0009 decision 33 deferred them here):
+//   - "game": the target scene through its primary camera (FindPrimaryCamera): the play scene while playing, else the edit
+//     scene (§13.11 step 7 looks at the game view while building). Without a primary camera: InvalidState naming
+//     SCENE_NO_PRIMARY_CAMERA.
+//   - "scene": the target scene through the editor's scene-view camera (AutomationMethodContext::GetSceneViewCamera: a
+//     fixed default until the editor camera of M10). The Runtime has no scene view: Unsupported located at /view.
+//   - "camera": an EntityRef of a camera entity in the view's target scene, rendered through that camera instead
+//     (InvalidArgument at /camera when the entity has no CameraComponent; NotFound when it names none).
+// The interpolation alpha is PlaySession::GetViewAlpha for the play scene (1 while paused, in lockstep or after a
+// ManualClock frame, otherwise the last frame's Alpha; RenderSnapshot::Alpha), 1 for the edit scene. "debugView" (§8.5, M8) and "annotate" (the overlay pass, M9) stay refused with Unsupported located at
+// their pointer whenever they are present; they are never ignored.
+
+namespace Engine {
+
+	class AutomationMethodContext;
+	class MethodRegistry;
+	class TypeRegistry;
+
+	// The largest PNG viewport.screenshot returns inline (base64 "data"): 30 KB, 40 KB of base64, which leaves the result's
+	// other members (the path among them) 8 KB below the 48 KB offload threshold (DefaultOffloadThresholdBytes). A larger
+	// PNG is only written, and the result reports inlineOmitted.
+	inline constexpr size_t MaxInlineScreenshotPngBytes = 30 * 1024;
+
+	// Which view viewport.screenshot renders (§13.5): registry enum "ViewportView".
+	enum class ViewportView : uint8_t
+	{
+		Scene, // the target scene through the editor's scene-view camera (editor only)
+		Game   // the target scene through its primary camera (M7)
+	};
+
+	// viewport.screenshot {view, target?, width?, height?, camera?, debugView?, annotate?, maxDimension?, inline?} (§13.5).
+	struct ViewportScreenshotParams
+	{
+		ViewportView View = ViewportView::Scene; // required
+		// M7: the scene to render (§13.4 "Target"); absent: the play scene while playing, else the edit scene.
+		SceneTarget Target = SceneTarget::Edit;
+		uint32_t Width = 640; // 1 to MaxViewportScreenshotDimension; the rendered size before maxDimension
+		uint32_t Height = 360;
+		std::string Camera{};         // an EntityRef of a camera entity of the target scene (M7)
+		std::string DebugView{};      // a debug view name (M8)
+		VariantValue Annotate{};      // {labels, colliders, bounds, axes} (M9)
+		uint32_t MaxDimension = 1024; // 1 to MaxViewportScreenshotDimension
+		bool Inline = false;          // also return the PNG as base64 in "data", when it fits MaxInlineScreenshotPngBytes
+	};
+
+	struct ViewportScreenshotResult
+	{
+		ViewportView View = ViewportView::Scene;
+		// M7: the scene that was rendered.
+		SceneTarget Target = SceneTarget::Edit;
+		// M7: the camera entity it was rendered through; every member empty for the editor's scene-view camera.
+		EntitySummary Camera{};
+		std::string Path{};                 // the PNG's absolute native path
+		std::string MimeType = "image/png"; // "mimeType"
+		uint32_t Width = 0;                 // the PNG's size, after maxDimension
+		uint32_t Height = 0;
+		// With inline: the PNG, base64 (RFC 4648, with padding), when it is at most MaxInlineScreenshotPngBytes; empty
+		// otherwise. Inline images suit a small maxDimension.
+		std::string Data{};
+		// With inline and a PNG larger than MaxInlineScreenshotPngBytes: true, and Data is empty (the PNG is at Path).
+		bool InlineOmitted = false;
+	};
+
+	namespace Automation {
+
+		// viewport.screenshot on any host. Errors: InvalidParams for the ranges; Unsupported at /debugView and /annotate when
+		// present, at /view for "scene" in the Runtime, and without a device (AutomationMethodContext::CaptureView);
+		// InvalidState "not playing" or "no scene open" from the target, and naming SCENE_NO_PRIMARY_CAMERA for a game view
+		// without a primary camera; NotFound and InvalidArgument at /camera; those of ExtractRenderSnapshot; the capture's
+		// errors (a Gpu error is Internal) with the context "while rendering the viewport"; those of DownscaleImage, EncodePng
+		// and AutomationMethodContext::WriteOutputFile.
+		[[nodiscard]] Result<ViewportScreenshotResult> ViewportScreenshot(AutomationMethodContext& context, const ViewportScreenshotParams& params);
+
+	}
+
+	// Registers ViewportView, ViewportScreenshotParams and ViewportScreenshotResult. The editor calls it from its
+	// RegisterScreenshotMethodTypes (EditorCore) and the Runtime from RegisterSharedMethodTypes' caller.
+	void RegisterViewportScreenshotMethodTypes(TypeRegistry& registry);
+
+	// Registers viewport.screenshot typed on AutomationMethodContext: a read-only tool (§13.8), AvailableInRuntime, not
+	// available in the launcher state, no dry run (it renders, it changes nothing) and not a batch op (it writes a file
+	// outside a command).
+	void RegisterViewportScreenshotMethods(MethodRegistry& methods);
+
+}

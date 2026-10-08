@@ -23,6 +23,7 @@ namespace Engine {
 
 	class AssetManager;
 	class GraphicsDevice;
+	class PakReader;
 	class PipelineFactory;
 	class ShaderLibrary;
 	struct GpuMessageCounts;
@@ -41,16 +42,16 @@ namespace Engine {
 		UserData,
 		// Mounts engine:// (read-only) at EngineResourcesDirectory and enginecache:// (read-write) at EngineCacheDirectory, each
 		// when set (§4.10, §7.5; ADR 0010). Development builds of the editor pass <repo>/Resources and <repo>/bin/EngineCache;
-		// exported games mount Engine.pak instead (M7).
+		// exported games mount Engine.pak instead (M7: EnginePak, opened with PakReader, its TOC hash verified, and mounted
+		// read-only as engine:// through PakMount; EnginePak and EngineResourcesDirectory exclude each other).
 		EngineResources,
 		// Window::Create when Window is set.
 		Window,
 		// When Graphics is set (RendererMode::Vulkan): in development builds the read-only mount of the compiled shaders,
 		// ENGINE_SHADER_DIRECTORY, as shaders:// (ShaderLibrary.h); GraphicsDevice::Create, presenting to the window when
-		// the process is windowed; the ShaderLibrary on shaders:// and the PipelineFactory. Dist builds have no shader
-		// directory: exported games read their shaders from Engine.pak, which M7 mounts in this step, so until then a Dist
-		// context's ShaderLibrary finds no variant (NotFound) and only frames that need no shader work there (the M5
-		// runtime's cleared frames; the runtime has no ImGui in Dist).
+		// the process is windowed; the ShaderLibrary and the PipelineFactory. The ShaderLibrary's root is engine://Shaders
+		// when EnginePak is set (exported games, in every configuration: the pak holds the target configuration's SPIR-V,
+		// §14.1; no shaders:// is mounted then), else shaders://. A Dist context without EnginePak has no shaders.
 		Graphics
 	};
 
@@ -83,6 +84,9 @@ namespace Engine {
 		// process's Vulkan loader (ProcessContext). At most one context of a process may have a device at a time
 		// (GraphicsDevice.h).
 		std::optional<GraphicsSpecification> Graphics{};
+		// M7: an exported game's Engine.pak (a native path), mounted as engine:// by the EngineResources step (see there) and
+		// the root of the ShaderLibrary's SPIR-V; must not be set together with EngineResourcesDirectory. Empty: none.
+		std::filesystem::path EnginePak{};
 	};
 
 	// One engine context. Not copyable or movable. Tests may build several side by side in one process, all on that
@@ -138,6 +142,10 @@ namespace Engine {
 		[[nodiscard]] Window* GetWindow() { return m_Window ? &*m_Window : nullptr; }
 		[[nodiscard]] const Window* GetWindow() const { return m_Window ? &*m_Window : nullptr; }
 
+		// The opened EnginePak (M7), for the Runtime's RuntimeAssetManager (RuntimeAssetManager::AddPak), so the pak is opened
+		// and its TOC verified once; null without EnginePak.
+		[[nodiscard]] const Ref<const PakReader>& GetEnginePak() const { return m_EnginePak; }
+
 		// The context's asset manager (§3 rule 4, §4.1 "AssetManager& (injected)"): the application's EditorAssetManager or
 		// RuntimeAssetManager, which it owns and builds on this context's services; nullptr until one is injected.
 		[[nodiscard]] AssetManager* GetAssetManager() const { return m_AssetManager; }
@@ -159,6 +167,8 @@ namespace Engine {
 	private:
 		// The EngineResources step (EngineContextStep::EngineResources).
 		[[nodiscard]] Status MountEngineResources(const EngineContextSpecification& specification);
+		// The EnginePak part of the EngineResources step (M7): opens the pak, keeps it (GetEnginePak) and mounts it as engine://.
+		[[nodiscard]] Status MountEnginePak(const std::filesystem::path& pak);
 		// The Graphics step (EngineContextStep::Graphics).
 		[[nodiscard]] Status CreateGraphics(const GraphicsSpecification& graphics);
 	private:
@@ -176,6 +186,7 @@ namespace Engine {
 		Scope<ShaderLibrary> m_ShaderLibrary;
 		Scope<PipelineFactory> m_PipelineFactory;
 		AssetManager* m_AssetManager = nullptr; // injected, owned by the application (SetAssetManager)
+		Ref<const PakReader> m_EnginePak;       // EnginePak (M7), opened by the EngineResources step
 	};
 
 	// "Services", "UserData", "EngineResources", "Window" or "Graphics".

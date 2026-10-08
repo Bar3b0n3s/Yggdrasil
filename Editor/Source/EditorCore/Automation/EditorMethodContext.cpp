@@ -4,10 +4,15 @@
 #include "EditorCore/Automation/AutomationServer.h"
 #include "EditorCore/Automation/Private/MethodSupport.h"
 #include "EditorCore/EditorContext.h"
+#include "EditorCore/Play/EditorPlayController.h"
+#include "Engine/App/EngineContext.h"
 #include "Engine/Core/Assert.h"
 #include "Engine/Core/UUID.h"
+#include "Engine/Renderer/RenderSnapshot.h"
+#include "Engine/Renderer/ViewportCapture.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/Scene.h"
+#include "Engine/Session/PlaySession.h"
 
 namespace Engine {
 
@@ -26,7 +31,7 @@ namespace Engine {
 	}
 
 	EditorMethodContext::EditorMethodContext(EditorContext& editor, AutomationServer& server, MethodRequest request)
-		: MethodContext(TypeKeyOf<EditorMethodContext>(), std::move(request)), m_Editor(&editor), m_Server(&server)
+		: AutomationMethodContext(TypeKeyOf<EditorMethodContext>(), std::move(request)), m_Editor(&editor), m_Server(&server)
 	{
 	}
 
@@ -42,15 +47,22 @@ namespace Engine {
 		return &m_Server->GetAssetReferenceResolver();
 	}
 
-	Result<Scene*> EditorMethodContext::ResolveTargetScene(SceneTarget target, bool given, bool /*mutation*/) const
+	Result<Scene*> EditorMethodContext::ResolveTargetScene(SceneTarget target, bool given, bool mutation) const
 	{
-		// Reads default to the play scene while playing and mutations to the edit scene (§13.4); there are no play sessions
-		// before M7, so every implicit target is the edit scene and an explicit "play" is refused.
+		// Reads default to the play scene while playing and mutations to the edit scene (§13.4); an explicit "play" needs a
+		// running session.
+		PlaySession* session = m_Editor->GetPlay().GetSession();
 		if (given && target == SceneTarget::Play)
 		{
-			return std::unexpected(Utils::MakeParamError(ErrorCode::InvalidState, "/target", "not playing: there is no play scene",
-				"start play mode first, or omit target to use the edit scene"));
+			if (session == nullptr)
+			{
+				return std::unexpected(Utils::MakeParamError(ErrorCode::InvalidState, "/target", "not playing: there is no play scene",
+					"start play mode first, or omit target to use the edit scene"));
+			}
+			return &session->GetScene();
 		}
+		if (!given && !mutation && session != nullptr)
+			return &session->GetScene();
 		if (!m_Editor->HasScene())
 		{
 			return std::unexpected(Error(ErrorCode::InvalidState, "no scene open").WithHint("open one with scene.open {path} or create one with scene.new {path}"));
@@ -161,6 +173,54 @@ namespace Engine {
 		summary.Name = entity.GetName();
 		summary.Path = entity.GetScene()->GetEntityPath(entity);
 		return summary;
+	}
+
+	PlaySession* EditorMethodContext::GetPlaySession() const
+	{
+		return m_Editor->GetPlay().GetSession();
+	}
+
+	Status EditorMethodContext::StartPlay(const PlayStartOptions& options)
+	{
+		return m_Editor->GetPlay().Start(options);
+	}
+
+	Status EditorMethodContext::StopPlay()
+	{
+		return m_Editor->GetPlay().Stop();
+	}
+
+	std::string EditorMethodContext::GetClientName(ClientId client) const
+	{
+		for (const AutomationClientInfo& info : m_Server->GetClients())
+		{
+			if (info.Id == client)
+				return info.Name;
+		}
+		return {};
+	}
+
+	EventLog& EditorMethodContext::GetEventLog() const
+	{
+		return m_Editor->GetEngine().GetEventLog();
+	}
+
+	Result<Image> EditorMethodContext::CaptureView(const RenderSnapshot& snapshot, const ViewportScreenshotRequest& request)
+	{
+		const ScreenshotCaptures& captures = m_Server->GetSpecification().Screenshots;
+		if (!captures.View)
+			return MakeError(ErrorCode::Unsupported, "the editor renders no views with --renderer none: start the editor without --renderer none");
+		return captures.View(snapshot, request);
+	}
+
+	std::optional<ExplicitRenderCamera> EditorMethodContext::GetSceneViewCamera() const
+	{
+		return m_Editor->GetSceneViewCamera();
+	}
+
+	Result<std::string> EditorMethodContext::WriteOutputFile(std::string_view extension, std::span<const std::byte> bytes)
+	{
+		return m_Server->WriteOutputFile(extension, bytes);
 	}
 
 }

@@ -8,9 +8,11 @@
 #include "Engine/Core/VfsPath.h"
 #include "Engine/Scene/LoadReport.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -22,9 +24,11 @@
 
 namespace Engine {
 
+	class AutomationMethodContext;
 	class ComponentInfo;
 	class ConstEntity;
 	class EditorContext;
+	class Entity;
 	class Scene;
 	class TypeInfo;
 	class UUIDGenerator;
@@ -111,6 +115,14 @@ namespace Engine {
 		// number, and "end" is nullopt (read nothing; the caller answers with the next sequence number). Errors:
 		// InvalidArgument at "/cursor" for anything else.
 		[[nodiscard]] Result<std::optional<uint64_t>> ParseSequenceCursor(std::string_view cursor);
+
+		// The entity cap of play sessions (§5.7, M7): OK when `scene` is not the play session's scene, else
+		// PlaySession::CheckEntityCapacity(additional) (InvalidState "entity limit <N> reached"). entity.create and
+		// entity.duplicate call it before they create entities in a "play" target.
+		[[nodiscard]] Status CheckPlayEntityCapacity(const AutomationMethodContext& context, const Scene& scene, size_t additional);
+
+		// The number of entities in the subtrees of `roots` (valid, asserted; disjoint subtrees, as ResolveEntityRoots gives).
+		[[nodiscard]] size_t CountSubtreeEntities(std::span<const Entity> roots);
 
 	}
 

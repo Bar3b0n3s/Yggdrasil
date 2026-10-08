@@ -201,7 +201,9 @@ namespace Engine {
 		Json viewportExample = Json::object();
 		viewportExample["view"] = "scene";
 		viewportExample["maxDimension"] = 512;
-		methods.Add(
+		// The host type is named because Engine/Automation/Methods/ScreenshotMethods.h overloads the handler for
+		// AutomationMethodContext (the shared one, M7).
+		methods.Add<EditorMethodContext, ViewportScreenshotParams, ViewportScreenshotResult>(
 			{
 				.Name = "viewport.screenshot",
 				.Description = "Renders the viewport afresh at width x height, downscales it to maxDimension and writes it as a PNG whose path "

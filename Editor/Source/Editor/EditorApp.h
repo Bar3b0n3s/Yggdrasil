@@ -39,7 +39,9 @@ namespace Engine {
 	// catalogues and exits; --bake-engine-assets fills the engine cooked cache with BakeEngineAssets over
 	// engine://EngineAssets.json, before any editor state exists, and exits 0, or 1 when an entry failed to bake (entries this
 	// build has no importer or generator for are skipped with a warning); --batch and --upgrade run a BatchRunner);
-	// OnSafePoint pumps the server, advances a batch and honours a shutdown request; OnUpdate drives asset hot reload
+	// OnSafePoint pumps the server, advances a batch, honours a shutdown request and applies the play session's loop (the
+	// project's FixedHz), time scale and throttle suspension to the frame loop (M7); OnFixedStep and OnUpdate drive the play session (EditorPlayController,
+	// Docs/Decisions/0012-m7-decisions.md decision 3); OnUpdate drives asset hot reload
 	// (EditorContext::Update with the frame clock's accumulated unscaled time, a ManualClock when headless); batch runs are
 	// unthrottled (ThrottleHeadless off). The engine context mounts engine:// at <repo>/Resources and enginecache:// at
 	// <repo>/bin/EngineCache, or at --engine-cache-dir (ApplicationSpecification::EngineResourcesDirectory and
@@ -80,6 +82,7 @@ namespace Engine {
 		[[nodiscard]] Status OnInitialize() override;
 		void OnShutdown() override;
 		void OnSafePoint() override;
+		void OnFixedStep(const SimStep& step) override;
 		void OnUpdate(const FrameTime& frame) override;
 		void OnImGuiRender() override;
 

@@ -1,11 +1,15 @@
 #pragma once
 
 #include "EditorCore/Automation/AutomationTypes.h"
+#include "Engine/Automation/Methods/AutomationMethodContext.h"
 #include "Engine/Automation/Protocol/MethodContext.h"
 #include "Engine/Core/Base.h"
 #include "Engine/Core/Result.h"
 #include "Engine/Core/VfsPath.h"
 
+#include <cstddef>
+#include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 
@@ -19,8 +23,10 @@ namespace Engine {
 
 	// The context every editor method handler receives (MethodRegistry: Host = EditorMethodContext). It gives handlers the
 	// editor state and the shared resolution rules of §13.4, so every domain resolves entity references, paths and targets
-	// the same way. One per request; main thread only.
-	class EditorMethodContext final : public MethodContext
+	// the same way. Since M7 it derives from AutomationMethodContext (Engine/Automation/Methods), so the handlers the Editor
+	// and the Runtime share run on it too; it implements the shared services over the EditorContext and its server
+	// (Docs/Decisions/0012-m7-decisions.md decision 12). One per request; main thread only.
+	class EditorMethodContext final : public AutomationMethodContext
 	{
 	public:
 		// `editor` and `server` are documented back-references that outlive the request.
@@ -36,17 +42,17 @@ namespace Engine {
 		[[nodiscard]] IAssetReferenceResolver* GetAssetReferenceResolver() const override;
 
 		// The scene a request addresses (§13.4 "Target"): `target` as given when `given`, else the play scene for reads while
-		// playing and the edit scene otherwise. Errors: InvalidState "no scene open" without an open edit scene, InvalidState
-		// "not playing" for the play scene (always in M4, which has no play sessions). The pointer is non-owning and valid
-		// until the open scene changes.
-		[[nodiscard]] Result<Scene*> ResolveTargetScene(SceneTarget target, bool given, bool mutation) const;
+		// playing (EditorPlayController) and the edit scene otherwise. Errors: InvalidState "no scene open" without an open
+		// edit scene, InvalidState "not playing" for the play scene without a session (located at /target). The pointer is
+		// non-owning and valid until the open scene or the play session changes.
+		[[nodiscard]] Result<Scene*> ResolveTargetScene(SceneTarget target, bool given, bool mutation) const override;
 
 		// Resolves an EntityRef (§13.4) in `scene`: 16 hex digits (either case) is an exact id; 6 to 15 hex digits a unique
 		// prefix of an entity's id; text starting with '/' an entity path (Scene::ResolveEntityPath). `pointer` locates the
 		// param in errors ("/entity", "/entities/2"). Errors: InvalidArgument for anything else, or for an ambiguous prefix or
 		// path (every candidate listed as an ErrorIssue with its path); NotFound for a valid reference that names no entity
 		// (with "did you mean" suggestions for paths).
-		[[nodiscard]] Result<Entity> ResolveEntity(Scene& scene, std::string_view reference, std::string_view pointer) const;
+		[[nodiscard]] Result<Entity> ResolveEntity(Scene& scene, std::string_view reference, std::string_view pointer) const override;
 
 		// Resolves a project path param (§13.2 "Paths"): "Assets/Scenes/Main.scene" (project-relative) or
 		// "project://Assets/Scenes/Main.scene". With a non-empty `extension` (".scene") the path must end with it (ASCII
@@ -56,7 +62,20 @@ namespace Engine {
 		[[nodiscard]] Result<VfsPath> ResolveProjectPath(std::string_view path, std::string_view pointer, std::string_view extension = {}) const;
 
 		// {id, name, path} of `entity` (valid, asserted).
-		[[nodiscard]] EntitySummary MakeEntitySummary(ConstEntity entity) const;
+		[[nodiscard]] EntitySummary MakeEntitySummary(ConstEntity entity) const override;
+
+		// The shared services of AutomationMethodContext over the editor: the play controller's session, StartPlay and StopPlay
+		// (EditorContext::GetPlay), the server's client names, the engine's event log, the server's view capture
+		// (ScreenshotCaptures::View; Unsupported without a device), the editor's scene-view camera
+		// (EditorContext::GetSceneViewCamera) and output files (AutomationServer::WriteOutputFile).
+		[[nodiscard]] PlaySession* GetPlaySession() const override;
+		[[nodiscard]] Status StartPlay(const PlayStartOptions& options) override;
+		[[nodiscard]] Status StopPlay() override;
+		[[nodiscard]] std::string GetClientName(ClientId client) const override;
+		[[nodiscard]] EventLog& GetEventLog() const override;
+		[[nodiscard]] Result<Image> CaptureView(const RenderSnapshot& snapshot, const ViewportScreenshotRequest& request) override;
+		[[nodiscard]] std::optional<ExplicitRenderCamera> GetSceneViewCamera() const override;
+		[[nodiscard]] Result<std::string> WriteOutputFile(std::string_view extension, std::span<const std::byte> bytes) override;
 	private:
 		EditorContext* m_Editor = nullptr;    // documented back-reference
 		AutomationServer* m_Server = nullptr; // documented back-reference

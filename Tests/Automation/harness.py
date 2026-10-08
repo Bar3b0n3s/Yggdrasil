@@ -57,6 +57,18 @@ def editor_executable() -> Path:
     return engine_client.find_editor_executable(REPOSITORY_ROOT, engine_client.configurations_from_environment())
 
 
+def automation_config() -> str:
+    """The build configuration of the editor the suite starts (editor_executable, which falls back to Debug when Release
+    is not built), so exports target the configuration that is built."""
+    return editor_executable().parents[1].name.split("-", 1)[0]
+
+
+def runtime_executable(config: str) -> Path:
+    """bin/<Config>-<system>-<arch>/Runtime/Runtime(.exe), the Runtime Scripts/Build.py builds and exports copy."""
+    name = "Runtime.exe" if sys.platform == "win32" else "Runtime"
+    return REPOSITORY_ROOT / "bin" / engine_client.output_directory_name(config) / "Runtime" / name
+
+
 def app_name() -> str:
     """The editor's application name (the workspace name of premake5.lua), the user-data folder below
     --user-data-dir."""
