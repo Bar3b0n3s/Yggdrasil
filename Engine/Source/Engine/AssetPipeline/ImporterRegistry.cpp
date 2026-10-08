@@ -1,12 +1,14 @@
 #include "EnginePCH.h"
 #include "Engine/AssetPipeline/ImporterRegistry.h"
 
+#include "Engine/AssetPipeline/Importers/AudioImporter.h"
 #include "Engine/AssetPipeline/Importers/EnvironmentImporter.h"
 #include "Engine/AssetPipeline/Importers/FontImporter.h"
 #include "Engine/AssetPipeline/Importers/GltfImporter.h"
 #include "Engine/AssetPipeline/Importers/MaterialImporter.h"
 #include "Engine/AssetPipeline/Importers/PrefabImporter.h"
 #include "Engine/AssetPipeline/Importers/SceneImporter.h"
+#include "Engine/AssetPipeline/Importers/SoundEffectImporter.h"
 #include "Engine/AssetPipeline/Importers/TextureImporter.h"
 #include "Engine/Core/Assert.h"
 
@@ -104,6 +106,9 @@ namespace Engine {
 		registry.Register(CreateScope<PrefabImporter>());
 		registry.Register(CreateScope<FontImporter>());
 		registry.Register(CreateScope<EnvironmentImporter>());
+		// M12 (Docs/Decisions/0015-m12-decisions.md).
+		registry.Register(CreateScope<AudioImporter>());
+		registry.Register(CreateScope<SoundEffectImporter>());
 	}
 
 	void RegisterAssetPipelineTypes(TypeRegistry& registry)
@@ -113,6 +118,9 @@ namespace Engine {
 		GltfImporter::RegisterTypes(registry);
 		FontImporter::RegisterTypes(registry);
 		EnvironmentImporter::RegisterTypes(registry);
+		// M12 (Docs/Decisions/0015-m12-decisions.md): the audio import settings and the .sfx description.
+		AudioImporter::RegisterTypes(registry);
+		SoundEffectImporter::RegisterTypes(registry);
 	}
 
 }

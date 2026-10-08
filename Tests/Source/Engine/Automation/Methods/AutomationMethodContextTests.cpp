@@ -77,6 +77,7 @@ namespace Engine {
 			[[nodiscard]] AssetManager* GetAssets() const override { return nullptr; }
 
 			[[nodiscard]] std::chrono::steady_clock::time_point GetWallClockTime() const override { return std::chrono::steady_clock::time_point(); }
+			[[nodiscard]] AudioEngine* GetAudioEngine() const override { return nullptr; }
 		private:
 			mutable EventLog m_Events;
 		};

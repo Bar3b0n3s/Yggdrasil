@@ -110,6 +110,12 @@ namespace Engine {
 		// `python Scripts/Build.py --project <project>`.
 		[[nodiscard]] Result<std::filesystem::path> GetBuiltExecutablePath(std::string_view project);
 
+		// `arguments` of an Editor or Runtime process a test starts, with "--audio-device none" appended unless they contain
+		// --headless or choose a device with --audio-device already. A windowed process opens the machine's default audio
+		// device otherwise (M12), which no test does (Architecture §15.1 T1; Docs/Decisions/0015-m12-decisions.md decision
+		// 23); a headless one has no device. Every helper that starts such a process passes its arguments through this.
+		[[nodiscard]] std::vector<std::string> WithoutAudioDevice(std::vector<std::string> arguments);
+
 		// The specification that starts the running Tests executable as a child through Platform::Process:
 		// GetTestOptions().ExecutablePath with `arguments` followed by ChildProcessOption, in the parent's working
 		// directory and environment.

@@ -2,10 +2,12 @@
 
 #include "EditorCore/EditorContext.h"
 #include "Engine/App/EngineContext.h"
+#include "Engine/Audio/AudioEngine.h"
 #include "Engine/Core/Base.h"
 #include "Support/TempDirectory.h"
 
 #include <filesystem>
+#include <optional>
 #include <string_view>
 
 // Shared setup for EditorCore tests (Roadmap M4): an engine context without a window whose type registry holds the editor's
@@ -27,8 +29,11 @@ namespace Engine {
 			// An engine context (inline jobs, user:// in <temp>/UserData, `registerTypes` or, when null,
 			// RegisterEditorMethodTypes) and an editor in the launcher state with `historyLimits`. `label` names the temporary
 			// directory. A test that needs types of its own (a component with an EntityRef field) passes a function that calls
-			// RegisterEditorMethodTypes and adds them.
-			explicit EditorTestFixture(std::string_view label = "Editor", CommandHistoryLimits historyLimits = {}, RegisterTypesFunction registerTypes = nullptr);
+			// RegisterEditorMethodTypes and adds them. `audio` gives the engine context an AudioEngine (M12; tests pass a device-less,
+			// deterministic one), so the editor has an audio preview and its play sessions and audio.stats have audio; without it
+			// they have none.
+			explicit EditorTestFixture(std::string_view label = "Editor", CommandHistoryLimits historyLimits = {},
+				RegisterTypesFunction registerTypes = nullptr, std::optional<AudioEngineSpecification> audio = std::nullopt);
 			~EditorTestFixture();
 
 			EditorTestFixture(const EditorTestFixture&) = delete;

@@ -130,15 +130,19 @@ namespace Engine {
 		Material,
 		Scene,
 		Prefab,
-		SoundEffect, // M12 (AudioSystem's .sfx); Unsupported until then, located at /type
+		SoundEffect, // M12: a .sfx sound effect (§6.6)
 		Folder
 	};
 
 	// asset.create {type, path, values?}: creates a native asset at project-relative `path` (below Assets/, with the type's
-	// extension: .material, .scene, .prefab, .sfx) with its .meta, or a folder. `values` (Material only) is a partial
-	// MaterialData object (registry PascalCase keys) over the defaults; for the other types it must be absent. A Scene is an
-	// empty scene named after the file stem; a Prefab holds one root entity named after the file stem. One AssetEditCommand;
-	// supports dry runs (the files then go to the overlay, §13.4).
+	// extension: .material, .scene, .prefab, .sfx) with its .meta, or a folder. `values` is a partial object of registry
+	// PascalCase keys over the defaults: MaterialData's ("Material") for a Material, and, from M12, the sound effect's
+	// ("SoundEffect", Audio/SoundSynth.h, written with SoundEffectToText) for a SoundEffect, which must then pass
+	// ValidateSoundEffect (at least one layer; every violation Validation located under /values, such as
+	// /values/Layers/0/Notes/2, as for a material); for the other types it must be absent. A Scene is an empty scene
+	// named after the file stem; a Prefab holds one root entity named after the file stem. The new asset's id and type are
+	// its importer's main type (a SoundEffect is an AudioClip, §7.4). One AssetEditCommand; supports dry runs (the files
+	// then go to the overlay, §13.4).
 	struct AssetCreateParams
 	{
 		AssetCreateType Type = AssetCreateType::Material;
@@ -153,8 +157,8 @@ namespace Engine {
 		uint32_t UndoIndex = 0;
 	};
 
-	// asset.getProperties {asset}: the properties of a native asset (§13.5: materials; sound effects from M12) as its
-	// registry JSON (PascalCase, every field).
+	// asset.getProperties {asset}: the properties of a native asset (§13.5: materials; sound effects from M12, the .sfx
+	// document's fields after its header) as its registry JSON (PascalCase, every field).
 	struct AssetGetPropertiesParams
 	{
 		std::string Asset{};
@@ -263,14 +267,14 @@ namespace Engine {
 		// when the operation resolves.
 		[[nodiscard]] Result<Scope<PendingOperation>> AssetReimport(EditorMethodContext& context, const AssetReimportParams& params);
 		// asset.create. Errors: InvalidArgument for a path outside Assets/, a wrong extension, values given for a type that
-		// takes none; Unsupported for SoundEffect before M12; AlreadyExists; Validation for invalid values (located under
-		// /values).
+		// takes none, and a Material's or SoundEffect's values that are not an object or that set "Format" or "Version";
+		// AlreadyExists; Validation for invalid values (located under /values; a SoundEffect without layers included).
 		[[nodiscard]] Result<AssetCreateResult> AssetCreate(EditorMethodContext& context, const AssetCreateParams& params);
 		// asset.getProperties. Errors: as asset.info; InvalidArgument for an asset that is not native (with the hint
 		// "use asset.getImportSettings").
 		[[nodiscard]] Result<AssetGetPropertiesResult> AssetGetProperties(EditorMethodContext& context, const AssetGetPropertiesParams& params);
-		// asset.setProperties. Errors: as asset.getProperties; InvalidArgument for values that are not an object; Validation
-		// (located under /values) for an invalid result.
+		// asset.setProperties. Errors: as asset.getProperties; InvalidArgument for values that are not an object or that set
+		// "Format" or "Version"; Validation (located under /values) for an invalid result, a material's or a sound effect's.
 		[[nodiscard]] Result<AssetSetPropertiesResult> AssetSetProperties(EditorMethodContext& context, const AssetSetPropertiesParams& params);
 		// asset.getImportSettings. Errors: as asset.info; InvalidArgument for a sub-asset or built-in.
 		[[nodiscard]] Result<AssetGetImportSettingsResult> AssetGetImportSettings(EditorMethodContext& context,

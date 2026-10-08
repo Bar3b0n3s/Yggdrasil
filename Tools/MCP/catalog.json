@@ -6,7 +6,7 @@
 		{
 			"name": "asset_create",
 			"method": "asset.create",
-			"description": "Creates a material (with values over the defaults), an empty scene, a one-entity prefab or a folder below Assets/, with its .meta, as one undoable command.",
+			"description": "Creates a material or a sound effect (with values over the defaults), an empty scene, a one-entity prefab or a folder below Assets/, with its .meta, as one undoable command.",
 			"inputSchema": {
 				"$schema": "https://json-schema.org/draft/2020-12/schema",
 				"title": "AssetCreateParams",
@@ -18,11 +18,11 @@
 						"enum": ["Material", "Scene", "Prefab", "SoundEffect", "Folder"]
 					},
 					"path": {
-						"description": "The project-relative path below Assets/, with the type's extension (.material, .scene, .prefab).",
+						"description": "The project-relative path below Assets/, with the type's extension (.material, .scene, .prefab, .sfx).",
 						"type": "string"
 					},
 					"values": {
-						"description": "A Material's fields over the defaults (registry names, such as Roughness); absent for other types."
+						"description": "A Material's or a SoundEffect's fields over the defaults (registry names, such as Roughness, or Layers, which a sound effect needs); absent for other types."
 					},
 					"dryRun": {
 						"description": "Validate and return the would-be result without applying anything.",
@@ -184,7 +184,7 @@
 		{
 			"name": "asset_set_properties",
 			"method": "asset.setProperties",
-			"description": "Applies an RFC 7386 merge patch to a native asset's properties (a material) and writes it, as one undoable command.",
+			"description": "Applies an RFC 7386 merge patch to a native asset's properties (a material or a sound effect) and writes it, as one undoable command.",
 			"inputSchema": {
 				"$schema": "https://json-schema.org/draft/2020-12/schema",
 				"title": "AssetSetPropertiesParams",
@@ -192,7 +192,7 @@
 				"type": "object",
 				"properties": {
 					"asset": {
-						"description": "The native asset (a material).",
+						"description": "The native asset (a material or a sound effect).",
 						"type": "string"
 					},
 					"values": {

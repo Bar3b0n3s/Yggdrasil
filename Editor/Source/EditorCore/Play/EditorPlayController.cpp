@@ -2,6 +2,7 @@
 #include "EditorCore/Play/EditorPlayController.h"
 
 #include "EditorCore/EditorContext.h"
+#include "Engine/App/EngineContext.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/Automation/Methods/PlayMethods.h"
 #include "Engine/Automation/Methods/SharedMethodSupport.h"
@@ -165,6 +166,8 @@ namespace Engine {
 		specification.ViewWidth = project.Window.Width;
 		specification.ViewHeight = project.Window.Height;
 		specification.Serial = state.NextSerial;
+		// M12: the editor's audio engine (null without one, as in most in-process tests); Simulate sessions stay silent.
+		specification.Audio = editor.GetEngine().GetAudioEngine();
 		ENGINE_TRY_ASSIGN(Scope<PlaySession> session, PlaySession::Create(specification, document));
 		++state.NextSerial;
 

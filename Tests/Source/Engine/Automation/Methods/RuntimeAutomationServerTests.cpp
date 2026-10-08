@@ -3,6 +3,7 @@
 #include "Engine/Automation/Methods/RuntimeAutomationServer.h"
 
 #include "Engine/Asset/AssetTypeRegistration.h"
+#include "Engine/Audio/AudioEngine.h"
 #include "Engine/Automation/Methods/AutomationTypes.h"
 #include "Engine/Automation/Methods/RegisterSharedMethods.h"
 #include "Engine/Automation/Protocol/MethodRegistry.h"
@@ -117,7 +118,7 @@ namespace Engine {
 			const MethodRegistry& methods = fixture.GetServer().GetMethods();
 			for (const char* name : { "session.hello", "session.info", "session.shutdown", "rpc.discover", "scene.tree", "scene.query", "scene.get",
 					 "entity.get", "entity.bounds", "log.read", "events.read", "play.pause", "play.resume", "play.step", "play.state",
-					 "play.setTimeScale", "input.inject", "viewport.screenshot", "physics.bodyInfo" })
+					 "play.setTimeScale", "input.inject", "viewport.screenshot", "physics.bodyInfo", "audio.stats" })
 			{
 				INFO(std::string(name));
 				const MethodDescriptor* method = methods.Find(name);
@@ -285,6 +286,27 @@ namespace Engine {
 			}
 			std::error_code error;
 			CHECK_FALSE(std::filesystem::exists(SessionFile::GetPath(sessions, Process::GetCurrentId()), error));
+		}
+
+		// M12 (Docs/Decisions/0015-m12-decisions.md): audio.stats is in the Runtime subset (§13.5), listed in "serves the Runtime
+		// subset and only it".
+		TEST_CASE("RuntimeAutomationServer: audio.stats reports the game's audio engine")
+		{
+			VirtualFileSystem vfs;
+			Result<Scope<AudioEngine>> audio = AudioEngine::Create({ .Device = AudioDeviceKind::None, .Decoding = AudioDecoding::Deterministic }, vfs);
+			REQUIRE_MESSAGE(audio.has_value(), audio.error().ToString());
+			{
+				RuntimeServerFixture fixture({ .GameName = "Tiny", .Audio = audio->get() });
+				const MethodDescriptor* method = fixture.GetServer().GetMethods().Find("audio.stats");
+				REQUIRE(method != nullptr);
+				CHECK(method->Specification.AvailableInRuntime);
+				const Json stats = fixture.Call("audio.stats");
+				REQUIRE(stats.contains("result"));
+				CHECK(stats["result"]["deviceState"] == Json("None"));
+				CHECK(stats["result"]["voiceCount"] == Json(0));
+			}
+			RuntimeServerFixture silent;
+			CHECK(RuntimeServerFixture::GetErrorCode(silent.Call("audio.stats")) != 0);
 		}
 	}
 

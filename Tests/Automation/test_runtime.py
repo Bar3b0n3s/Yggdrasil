@@ -174,6 +174,36 @@ class RuntimeTests(AutomationTestCase):
         client.call("session.shutdown")
         self.assertEqual(game.wait(), EXIT_SUCCESS, game.output())
 
+    def test_runtime_audio_stats_reports_the_game_voices(self) -> None:
+        # M12 (Docs/Decisions/0015-m12-decisions.md): audio.stats is in the Runtime subset (§13.5). The game plays a
+        # sound effect created through automation and cooked into Game.pak; the exported Runtime's session, started
+        # paused at tick 0 (--paused), holds its voice paused (§10.2).
+        client = self.connect(self.start_editor())
+        self.create_project(client, TINY_GAME_NAME)
+        build_tiny_game(client)
+        client.call("asset.create", {"type": "SoundEffect", "path": "Assets/Audio/Hum.sfx",
+                                     "values": {"Layers": [{"Wave": "Sine", "Duration": 2.0}]}})
+        client.call("entity.create", {"name": "Speaker", "components": {"AudioSource": {
+            "Clip": "Assets/Audio/Hum.sfx", "PlayOnStart": True, "Loop": True, "Spatial": False}}})
+        client.call("scene.save")
+        executable = exported_executable(export_tiny_game(client))
+        client.call("session.shutdown")
+        self.editors[-1].wait()
+
+        arguments = ["--headless", "--automation", "--paused", "--renderer", "none"]
+        game = engine_client.launch_editor(executable, arguments, self.directory / "Audio", TINY_GAME_NAME)
+        self.editors.append(game)
+        game_client = self.connect(game)
+        stats = game_client.call("audio.stats")
+        self.assertEqual(stats["deviceState"], "None")
+        self.assertEqual(stats["voiceCount"], 1)
+        voice = stats["voices"][0]
+        self.assertEqual(voice["entity"]["name"], "Speaker")
+        self.assertEqual(voice["clip"]["path"], "Assets/Audio/Hum.sfx")
+        self.assertTrue(voice["paused"])
+        game_client.call("session.shutdown")
+        self.assertEqual(game.wait(), EXIT_SUCCESS, game.output())
+
 
 if __name__ == "__main__":
     unittest.main()

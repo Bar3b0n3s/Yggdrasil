@@ -34,6 +34,7 @@
 namespace Engine {
 
 	class AssetLoaderRegistry;
+	class AudioPreview;
 	class EditorAssetManager;
 	class EditorDryRunScope;
 	class EditorPlayController;
@@ -127,10 +128,14 @@ namespace Engine {
 		// The editor's asset manager (see the class comment); valid for the editor's lifetime.
 		[[nodiscard]] EditorAssetManager& GetAssets() { return *m_Assets; }
 		[[nodiscard]] const EditorAssetManager& GetAssets() const { return *m_Assets; }
+		// M12: the asset browser's audio preview (EditorCore/Audio/AudioPreview.h) over the engine context's AudioEngine;
+		// nullptr when the engine context has none (most in-process tests). Valid for the editor's lifetime; CloseProject
+		// stops it.
+		[[nodiscard]] AudioPreview* GetAudioPreview() { return m_AudioPreview.get(); }
 
 		// Once per frame (EditorApp::OnUpdate) with a monotonic time in seconds (the frame clock's accumulated unscaled time,
 		// so headless editors on a ManualClock are deterministic); tests pass chosen times: drives asset hot reload
-		// (EditorAssetManager::Update). No effect without a project.
+		// (EditorAssetManager::Update; nothing without a project) and the audio preview (AudioPreview::Update, M12).
 		void Update(double nowSeconds);
 
 		// --- Project -------------------------------------------------------------------------------------------------------
@@ -333,7 +338,8 @@ namespace Engine {
 		Scope<ImporterRegistry> m_Importers;
 		Scope<AssetLoaderRegistry> m_Loaders;
 		Scope<EditorAssetManager> m_Assets;
-		bool m_SceneChangedOnDisk = false; // IsSceneChangedOnDisk
+		Scope<AudioPreview> m_AudioPreview; // M12: after the manager it loads clips through, so it is destroyed first
+		bool m_SceneChangedOnDisk = false;  // IsSceneChangedOnDisk
 		Scope<LoadedProject> m_Project;
 		Scope<Scene> m_Scene;
 		std::optional<VfsPath> m_ScenePath;

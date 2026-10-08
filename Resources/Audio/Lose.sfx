@@ -1,0 +1,42 @@
+{
+	"Format": "SoundEffect",
+	"Version": 1,
+	"Seed": 10,
+	"Volume": 0.75,
+	"Layers": [
+		{
+			"Wave": "Saw",
+			"DutyCycle": 0.5,
+			"Notes": ["G4:0.18", "F#4:0.18", "F4:0.18", "E4:0.6"],
+			"Duration": 0.1,
+			"StartFrequency": 440,
+			"EndFrequency": 440,
+			"Volume": 0.45,
+			"Envelope": {
+				"Attack": 0.01,
+				"Decay": 0.1,
+				"Sustain": 0.7,
+				"Release": 0.2
+			},
+			"LowPass": 1800,
+			"Delay": 0
+		},
+		{
+			"Wave": "Triangle",
+			"DutyCycle": 0.5,
+			"Notes": ["C3:0.54", "C2:0.6"],
+			"Duration": 0.1,
+			"StartFrequency": 440,
+			"EndFrequency": 440,
+			"Volume": 0.5,
+			"Envelope": {
+				"Attack": 0.01,
+				"Decay": 0.1,
+				"Sustain": 0.7,
+				"Release": 0.2
+			},
+			"LowPass": 0,
+			"Delay": 0
+		}
+	]
+}

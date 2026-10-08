@@ -5,6 +5,7 @@
 #include "Support/ChildProcess.h"
 #include "Support/Utf8Path.h"
 
+#include <algorithm>
 #include <cctype>
 #include <cmath>
 #include <cstdlib>
@@ -239,6 +240,17 @@ namespace Engine {
 			std::string message = std::format("the {} executable '{}' does not exist", project, PathToUtf8(executable));
 			std::string hint = std::format("build it with python Scripts/Build.py --config {} --project {}", configuration, project);
 			return std::unexpected(Error(ErrorCode::NotFound, std::move(message)).WithHint(std::move(hint)));
+		}
+
+		std::vector<std::string> WithoutAudioDevice(std::vector<std::string> arguments)
+		{
+			const bool decided = std::ranges::any_of(arguments, [](const std::string& argument)
+			{
+				return argument == "--headless" || argument.starts_with("--audio-device");
+			});
+			if (!decided)
+				arguments.insert(arguments.end(), { "--audio-device", "none" });
+			return arguments;
 		}
 
 		ProcessSpecification MakeTestsChildSpecification(std::vector<std::string> arguments)

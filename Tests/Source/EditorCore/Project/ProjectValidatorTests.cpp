@@ -14,6 +14,7 @@
 #include "Engine/Physics/PhysicsDiagnostics.h"
 #include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Renderer/RenderPrepare.h"
+#include "Engine/Scene/AudioSystem.h"
 #include "Engine/Scene/ComponentAccess.h"
 #include "Engine/Scene/ComponentRegistration.h"
 #include "Engine/Scene/Components/RigidBodyComponent.h"
@@ -570,8 +571,8 @@ namespace Engine {
 		{
 			const std::span<const std::string_view> codes = ProjectValidator::GetCodes();
 			// M4's 14 codes, M6's 11 (the asset codes but the runtime-only ASSET_UPLOAD_FAILED, and PREFAB_MISSING_ASSET), M8's
-			// RENDER_LIGHT_LIMIT_EXCEEDED and M11's 10 physics codes.
-			CHECK(codes.size() == 26 + PhysicsDiagnosticCodes.size());
+			// RENDER_LIGHT_LIMIT_EXCEEDED, M11's 10 physics codes and M12's 2 audio codes.
+			CHECK(codes.size() == 28 + PhysicsDiagnosticCodes.size());
 			std::vector<std::string_view> sorted(codes.begin(), codes.end());
 			std::sort(sorted.begin(), sorted.end());
 			CHECK(std::adjacent_find(sorted.begin(), sorted.end()) == sorted.end());
@@ -989,6 +990,81 @@ namespace Engine {
 			// so it is the same in every run.
 			CHECK(adjacent->Entity == first);
 			CHECK(adjacent->Id == ProjectValidator::MakeDiagnosticId(PhysicsAdjacentStaticBodiesCode, "Assets/Scenes/Track.scene", first, "", "", second));
+		}
+
+		// M12 (Docs/Decisions/0015-m12-decisions.md decision 12; Architecture §10.2, §13.7): the audio codes of
+		// Scene/AudioSystem.h (FindAudioSceneIssues), reported and fixed by the validator and listed by GetCodes.
+
+		TEST_CASE("ProjectValidator: several primary audio listeners are reported and fixed keeping the first")
+		{
+			Test::EditorTestFixture fixture("ValidatorListeners");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			EditorContext& editor = fixture.GetEditor();
+			{
+				SceneEdit edit(editor, "Listeners");
+				for (const std::string_view name : { "EarA", "EarB", "EarC" })
+				{
+					const Entity listener = editor.GetScene().CreateEntity(name);
+					REQUIRE(ComponentAccess::AddComponent(listener, "AudioListener", nullptr).has_value());
+				}
+				REQUIRE(edit.Commit().has_value());
+			}
+			const Result<ValidationReport> report = ProjectValidator::Validate(editor, ValidationScope::Scene);
+			REQUIRE(report.has_value());
+			std::vector<const ProjectDiagnostic*> listeners;
+			for (const ProjectDiagnostic& diagnostic : report->Diagnostics)
+			{
+				if (diagnostic.Code == AudioMultiplePrimaryListenersCode)
+					listeners.push_back(&diagnostic);
+			}
+			REQUIRE(listeners.size() == 2);
+			CHECK(listeners[0]->Severity == DiagnosticSeverity::Warning);
+			CHECK(listeners[0]->AutoFixable);
+			CHECK(listeners[0]->Component == "AudioListener");
+			CHECK(listeners[0]->Field == "Primary");
+			CHECK(std::find(ProjectValidator::GetCodes().begin(), ProjectValidator::GetCodes().end(), AudioMultiplePrimaryListenersCode)
+				!= ProjectValidator::GetCodes().end());
+
+			const FixSelection selection{ .All = false, .IdsOrCodes = { std::string(AudioMultiplePrimaryListenersCode) } };
+			const Result<FixReport> fixed = ProjectValidator::Fix(editor, ValidationScope::Scene, selection);
+			REQUIRE_MESSAGE(fixed.has_value(), fixed.error().ToString());
+			CHECK(fixed->Fixed.size() == 2);
+			CHECK(FindDiagnostic(fixed->After, AudioMultiplePrimaryListenersCode) == nullptr);
+			for (const auto& [name, primary] : { std::pair<std::string_view, bool>{ "/EarA", true }, { "/EarB", false }, { "/EarC", false } })
+			{
+				CAPTURE(std::string(name));
+				const Result<Json> listener = ComponentAccess::GetComponentJson(editor.GetScene().FindEntityByPath(name), "AudioListener");
+				REQUIRE(listener.has_value());
+				CHECK((*listener)["Primary"] == Json(primary));
+			}
+			// One undo step restores both.
+			REQUIRE(editor.GetHistory().Undo(editor) == 1u);
+			const Result<ValidationReport> undone = ProjectValidator::Validate(editor, ValidationScope::Scene);
+			REQUIRE(undone.has_value());
+			CHECK(FindDiagnostic(*undone, AudioMultiplePrimaryListenersCode) != nullptr);
+		}
+
+		TEST_CASE("ProjectValidator: spatial audio sources without a listener or a camera are AUDIO_NO_LISTENER")
+		{
+			Test::EditorTestFixture fixture("ValidatorNoListener");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			EditorContext& editor = fixture.GetEditor();
+			{
+				SceneEdit edit(editor, "Speaker");
+				const Entity speaker = editor.GetScene().CreateEntity("Speaker");
+				REQUIRE(ComponentAccess::AddComponent(speaker, "AudioSource", nullptr).has_value());
+				REQUIRE(edit.Commit().has_value());
+			}
+			const Result<ValidationReport> report = ProjectValidator::Validate(editor, ValidationScope::Scene);
+			REQUIRE(report.has_value());
+			const ProjectDiagnostic* noListener = FindDiagnostic(*report, AudioNoListenerCode);
+			REQUIRE(noListener != nullptr);
+			CHECK(noListener->Severity == DiagnosticSeverity::Warning);
+			CHECK_FALSE(noListener->AutoFixable);
+			CHECK(noListener->File == "Assets/Scenes/Main.scene");
+			CHECK_FALSE(noListener->Hint.empty());
 		}
 	}
 

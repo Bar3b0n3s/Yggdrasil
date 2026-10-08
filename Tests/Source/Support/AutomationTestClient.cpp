@@ -63,8 +63,8 @@ namespace Engine {
 			return Json();
 		}
 
-		AutomationFixture::AutomationFixture(std::string_view label, bool openScene)
-			: m_Fixture(label)
+		AutomationFixture::AutomationFixture(std::string_view label, bool openScene, std::optional<AudioEngineSpecification> audio)
+			: m_Fixture(label, {}, nullptr, audio)
 		{
 			m_Fixture.CreateAndOpenProject();
 			if (openScene)

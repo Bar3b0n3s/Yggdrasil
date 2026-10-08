@@ -220,4 +220,9 @@ namespace Engine {
 		return specification.WallClock ? specification.WallClock() : std::chrono::steady_clock::now();
 	}
 
+	AudioEngine* EditorMethodContext::GetAudioEngine() const
+	{
+		return m_Editor->GetEngine().GetAudioEngine();
+	}
+
 }

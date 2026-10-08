@@ -207,9 +207,10 @@ namespace Engine {
 			ENGINE_TRY(Utils::CheckLockstepOwner(context, *session));
 			const PlayRunState before = GetPlayRunState(session);
 			// The owner's pause leaves lockstep, as its disconnect does (§13.2): the session then waits for play.resume or
-			// play.step like any paused session.
-			session->SetLockstep(false);
+			// play.step like any paused session. Paused first, so its voices pause before the audio engine's time goes back
+			// to the device (PlaySession "Audio").
 			session->SetPaused(true);
+			session->SetLockstep(false);
 			if (GetPlayRunState(session) != before)
 				context.GetEventLog().Append(Utils::MakePlayStateChangedEvent(session));
 			return MakePlayStateResult(context);

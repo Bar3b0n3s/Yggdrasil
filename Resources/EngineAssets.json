@@ -183,6 +183,116 @@
 				"ClampLuminance": true
 			},
 			"Generator": ""
+		},
+		{
+			"Handle": "0000000000000241",
+			"Path": "engine://Audio/Click",
+			"Type": "AudioClip",
+			"Source": "File",
+			"File": "Audio/Click.sfx",
+			"Importer": "SoundEffect",
+			"Settings": {},
+			"Generator": ""
+		},
+		{
+			"Handle": "0000000000000242",
+			"Path": "engine://Audio/Blip",
+			"Type": "AudioClip",
+			"Source": "File",
+			"File": "Audio/Blip.sfx",
+			"Importer": "SoundEffect",
+			"Settings": {},
+			"Generator": ""
+		},
+		{
+			"Handle": "0000000000000243",
+			"Path": "engine://Audio/Coin",
+			"Type": "AudioClip",
+			"Source": "File",
+			"File": "Audio/Coin.sfx",
+			"Importer": "SoundEffect",
+			"Settings": {},
+			"Generator": ""
+		},
+		{
+			"Handle": "0000000000000244",
+			"Path": "engine://Audio/Jump",
+			"Type": "AudioClip",
+			"Source": "File",
+			"File": "Audio/Jump.sfx",
+			"Importer": "SoundEffect",
+			"Settings": {},
+			"Generator": ""
+		},
+		{
+			"Handle": "0000000000000245",
+			"Path": "engine://Audio/Hit",
+			"Type": "AudioClip",
+			"Source": "File",
+			"File": "Audio/Hit.sfx",
+			"Importer": "SoundEffect",
+			"Settings": {},
+			"Generator": ""
+		},
+		{
+			"Handle": "0000000000000246",
+			"Path": "engine://Audio/Explosion",
+			"Type": "AudioClip",
+			"Source": "File",
+			"File": "Audio/Explosion.sfx",
+			"Importer": "SoundEffect",
+			"Settings": {},
+			"Generator": ""
+		},
+		{
+			"Handle": "0000000000000247",
+			"Path": "engine://Audio/PowerUp",
+			"Type": "AudioClip",
+			"Source": "File",
+			"File": "Audio/PowerUp.sfx",
+			"Importer": "SoundEffect",
+			"Settings": {},
+			"Generator": ""
+		},
+		{
+			"Handle": "0000000000000248",
+			"Path": "engine://Audio/LineClear",
+			"Type": "AudioClip",
+			"Source": "File",
+			"File": "Audio/LineClear.sfx",
+			"Importer": "SoundEffect",
+			"Settings": {},
+			"Generator": ""
+		},
+		{
+			"Handle": "0000000000000249",
+			"Path": "engine://Audio/Win",
+			"Type": "AudioClip",
+			"Source": "File",
+			"File": "Audio/Win.sfx",
+			"Importer": "SoundEffect",
+			"Settings": {},
+			"Generator": ""
+		},
+		{
+			"Handle": "000000000000024a",
+			"Path": "engine://Audio/Lose",
+			"Type": "AudioClip",
+			"Source": "File",
+			"File": "Audio/Lose.sfx",
+			"Importer": "SoundEffect",
+			"Settings": {},
+			"Generator": ""
+		},
+		{
+			"Handle": "000000000000024b",
+			"Path": "engine://Audio/Silence",
+			"Type": "AudioClip",
+			"Source": "Procedural",
+			"File": "",
+			"Importer": "",
+			"Settings": {},
+			"Generator": ""
 		}
 	]
 }

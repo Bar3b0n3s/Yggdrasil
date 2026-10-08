@@ -2,6 +2,7 @@
 
 #include "EditorCore/Automation/AutomationServer.h"
 #include "EditorCore/EditorContext.h"
+#include "Engine/Audio/AudioEngine.h"
 #include "Engine/Automation/Protocol/JsonRpc.h"
 #include "Engine/Core/Base.h"
 #include "Engine/Core/Json/Json.h"
@@ -11,6 +12,7 @@
 #include <nlohmann/json.hpp>
 
 #include <cstdint>
+#include <optional>
 #include <string_view>
 
 // In-process automation for EditorCore tests (Architecture §15.2: "an in-process round trip for every method"): an
@@ -58,11 +60,12 @@ namespace Engine {
 		};
 
 		// The usual setup of a method test: an EditorTestFixture with a project open (and, unless `openScene` is false, the
-		// scene Assets/Scenes/Main.scene open), and an AutomationTestClient on its editor. Not copyable or movable.
+		// scene Assets/Scenes/Main.scene open), and an AutomationTestClient on its editor. `audio` is the EditorTestFixture's
+		// (M12: audio.stats and audible play sessions need an AudioEngine). Not copyable or movable.
 		class AutomationFixture
 		{
 		public:
-			explicit AutomationFixture(std::string_view label, bool openScene = true);
+			explicit AutomationFixture(std::string_view label, bool openScene = true, std::optional<AudioEngineSpecification> audio = std::nullopt);
 
 			AutomationFixture(const AutomationFixture&) = delete;
 			AutomationFixture& operator=(const AutomationFixture&) = delete;

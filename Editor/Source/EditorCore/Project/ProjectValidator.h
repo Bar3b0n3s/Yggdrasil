@@ -27,8 +27,9 @@
 // Scene/PhysicsValidation.h's ValidateScenePhysics runs on the open scene and on every scratch scene, with the layer table
 // of the project's PhysicsSettings, each diagnostic keeping its entity, component, field and subject (so its id);
 // PHYSICS_ADJACENT_STATIC_BODIES of the open scene is fixed by adding a Static RigidBody to the two bodies' nearest common
-// ancestor (PhysicsDiagnostic::FixTarget), inside the one undoable fix command. Script, input, audio, the other render and
-// test codes arrive with M13, M12, M9 and M13.
+// ancestor (PhysicsDiagnostic::FixTarget), inside the one undoable fix command. M12 adds AUDIO_NO_LISTENER and
+// AUDIO_MULTIPLE_PRIMARY_LISTENERS (Scene/AudioSystem.h's FindAudioSceneIssues); the extra primary listeners of the open
+// scene are fixed by clearing their Primary. Script, input, the other render and test codes arrive with M13, M9 and M13.
 
 namespace Engine {
 

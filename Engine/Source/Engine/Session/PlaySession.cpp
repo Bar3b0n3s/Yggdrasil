@@ -1,11 +1,13 @@
 #include "EnginePCH.h"
 #include "Engine/Session/PlaySession.h"
 
+#include "Engine/Audio/AudioEngine.h"
 #include "Engine/Core/Assert.h"
 #include "Engine/Core/FixedStepScheduler.h"
 #include "Engine/Core/Hash.h"
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Core/Log.h"
+#include "Engine/Scene/AudioSystem.h"
 #include "Engine/Scene/Components/RuntimeComponents.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/LoadReport.h"
@@ -146,6 +148,18 @@ namespace Engine {
 		// GetViewAlpha: the last frame phase's alpha, and whether it ran through Tick().
 		float LastFrameAlpha = 1.0f;
 		bool LastFrameFromTick = false;
+		// M12 audio (see "Audio" in PlaySession.h). Audio is the context's engine (a documented back-reference; null in
+		// Simulate mode and without an engine) and SceneAudio the session's AudioSystem, declared after the scene so it is
+		// destroyed first and releases its voices while the scene exists. TestRunAudioTime is
+		// PlaySessionSpecification::OwnsAudioTime; AudioTimeOwned whether the session holds the engine's simulation time, and
+		// AudioTick the tick up to which the engine has pulled frames since. AudioHeld keeps the voices paused from Create to
+		// the first AudioUpdate phase, so nothing plays before the host has applied its paused and lockstep state.
+		AudioEngine* Audio = nullptr;
+		Scope<AudioSystem> SceneAudio;
+		bool TestRunAudioTime = false;
+		bool AudioTimeOwned = false;
+		uint64_t AudioTick = 0;
+		bool AudioHeld = false;
 
 		// The observer's notification at the start of `phase` (IPlaySessionObserver).
 		void EnterPhase(PlaySession& session, PlaySessionPhase phase, uint64_t tick) const;
@@ -164,6 +178,15 @@ namespace Engine {
 		void RunFramePhase(PlaySession& session, const FrameTime& frame);
 		// The RenderExtraction phase's work: the game view through the primary camera at `alpha`.
 		void ExtractGameView(float alpha);
+		// M12: the AudioUpdate phase's work (see "Audio" in PlaySession.h).
+		void UpdateAudio(double deltaSeconds);
+		// M12: applies the run state to the audio: the voices are paused while held, or while the session is paused and not in
+		// lockstep; the session owns the engine's simulation time while it is in lockstep or a test run. Voices pause before
+		// time goes back to the device and resume only after the session has taken it, so the device never plays a voice
+		// the session holds.
+		void ApplyAudioRunState();
+		// M12: takes (true) or gives back (false) the audio engine's simulation time, when the session has audio.
+		void SetAudioTimeOwned(bool owned);
 	};
 
 	void PlaySession::State::EnterPhase(PlaySession& session, PlaySessionPhase phase, uint64_t tick) const
@@ -243,7 +266,10 @@ namespace Engine {
 		UpdateTransforms();
 		TagWritesOutsideSteps(true);
 		if (play)
+		{
 			EnterPhase(session, PlaySessionPhase::AudioUpdate, tick);
+			UpdateAudio(frame.DeltaTime);
+		}
 		EnterPhase(session, PlaySessionPhase::RenderExtraction, tick);
 		if (ExtractionEnabled)
 			ExtractGameView(alpha);
@@ -274,6 +300,53 @@ namespace Engine {
 			ENGINE_CORE_WARN("The game view of the play session could not be extracted (it keeps showing its previous view): {}", snapshot.error());
 			ExtractionErrorLogged = true;
 		}
+	}
+
+	void PlaySession::State::UpdateAudio(double deltaSeconds)
+	{
+		// M12 audio hook (§5.7 frame phase step 3, §10.1): the first phase releases the voices held since Create; then the
+		// listener and sources; then, while the session owns audio time, one tick of frames for every tick run since the last
+		// pull (one per Tick, 0 to MaxStepsPerFrame per frame of a ScriptedClock test run).
+		if (SceneAudio == nullptr)
+			return;
+		if (AudioHeld)
+		{
+			AudioHeld = false;
+			ApplyAudioRunState();
+		}
+		SceneAudio->Update(deltaSeconds);
+		if (!AudioTimeOwned)
+			return;
+		for (; AudioTick < Tick; ++AudioTick)
+			Audio->AdvanceSimulationTick();
+	}
+
+	void PlaySession::State::ApplyAudioRunState()
+	{
+		if (SceneAudio == nullptr)
+			return;
+		const bool voicesPaused = AudioHeld || (Paused && !Lockstep);
+		if (voicesPaused)
+			SceneAudio->SetPaused(true);
+		SetAudioTimeOwned(Lockstep || TestRunAudioTime);
+		if (!voicesPaused)
+			SceneAudio->SetPaused(false);
+	}
+
+	void PlaySession::State::SetAudioTimeOwned(bool owned)
+	{
+		if (Audio == nullptr || owned == AudioTimeOwned)
+			return;
+		if (owned)
+		{
+			Audio->BeginSimulationTime(Project.Simulation.FixedHz);
+			AudioTick = Tick;
+		}
+		else
+		{
+			Audio->EndSimulationTime();
+		}
+		AudioTimeOwned = owned;
 	}
 
 	std::string_view PlaySessionPhaseToString(PlaySessionPhase phase)
@@ -310,7 +383,13 @@ namespace Engine {
 	{
 	}
 
-	PlaySession::~PlaySession() = default;
+	PlaySession::~PlaySession()
+	{
+		// M12 (§10.2 Stop): the AudioSystem releases its voices and restores the group volumes while the scene exists, and
+		// only then does the engine's time go back to the device, so the device never plays a voice of the ended session.
+		m_State->SceneAudio.reset();
+		m_State->SetAudioTimeOwned(false);
+	}
 
 	Result<Scope<PlaySession>> PlaySession::Create(const PlaySessionSpecification& specification, const Json& sceneDocument)
 	{
@@ -365,6 +444,19 @@ namespace Engine {
 			return std::unexpected(std::move(physics).error().WithContext("while starting the play session"));
 		state.Physics = std::move(*physics);
 		state.RecordReferenceTransforms();
+
+		// M12 audio hook (§5.6 session setup: "PlayOnStart audio starts"; Simulate mode has no audio). The voices start held
+		// (paused) and a test run takes the engine's time before any voice exists.
+		if (specification.Audio != nullptr && specification.Mode == PlayMode::Play)
+		{
+			state.Audio = specification.Audio;
+			state.TestRunAudioTime = specification.OwnsAudioTime;
+			state.SceneAudio = CreateScope<AudioSystem>(*state.RuntimeScene,
+				AudioSystemSpecification{ .Audio = specification.Audio, .Assets = specification.Assets });
+			state.AudioHeld = true;
+			state.ApplyAudioRunState();
+			state.SceneAudio->Start();
+		}
 		return session;
 	}
 
@@ -514,6 +606,21 @@ namespace Engine {
 		return *m_State->Physics;
 	}
 
+	AudioSystem* PlaySession::GetAudioSystem()
+	{
+		return m_State->SceneAudio.get();
+	}
+
+	const AudioSystem* PlaySession::GetAudioSystem() const
+	{
+		return m_State->SceneAudio.get();
+	}
+
+	bool PlaySession::IsAudioTimeOwned() const
+	{
+		return m_State->AudioTimeOwned;
+	}
+
 	uint64_t PlaySession::ComputeStateHash() const
 	{
 		const State& state = *m_State;
@@ -580,6 +687,7 @@ namespace Engine {
 	void PlaySession::SetPaused(bool paused)
 	{
 		m_State->Paused = paused;
+		m_State->ApplyAudioRunState();
 	}
 
 	double PlaySession::GetTimeScale() const
@@ -612,6 +720,8 @@ namespace Engine {
 	{
 		m_State->Lockstep = lockstep;
 		m_State->LockstepOwner = lockstep ? owner : NoClient;
+		// M12: lockstep owns the audio engine's time (§10.1), and a lockstep session's voices follow its ticks.
+		m_State->ApplyAudioRunState();
 	}
 
 	bool PlaySession::IsStepping() const

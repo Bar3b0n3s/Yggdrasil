@@ -1,6 +1,7 @@
 #include "EnginePCH.h"
 #include "Engine/Automation/Methods/RegisterSharedMethods.h"
 
+#include "Engine/Automation/Methods/AudioMethods.h"
 #include "Engine/Automation/Methods/EntityMethods.h"
 #include "Engine/Automation/Methods/InputMethods.h"
 #include "Engine/Automation/Methods/ObserveMethods.h"
@@ -27,6 +28,8 @@ namespace Engine {
 		RegisterObserveMethodTypes(registry);
 		// M11 (ADR 0014 decision 18).
 		RegisterPhysicsMethodTypes(registry);
+		// M12 (ADR 0015): audio.stats.
+		RegisterAudioMethodTypes(registry);
 	}
 
 	void RegisterSharedMethods(MethodRegistry& methods, AutomationHost host)
@@ -41,6 +44,8 @@ namespace Engine {
 		RegisterObserveMethods(methods);
 		// M11 (ADR 0014 decision 18).
 		RegisterPhysicsMethods(methods);
+		// M12 (ADR 0015): audio.stats.
+		RegisterAudioMethods(methods);
 	}
 
 }

@@ -19,8 +19,9 @@ namespace Engine {
 		{
 			AssetLoaderRegistry loaders;
 			RegisterBuiltinLoaders(loaders);
+			// The M6 loaders, M8's environment loader and M12's audio clip loader, in AssetType order.
 			const std::vector<AssetType> expected = { AssetType::Scene, AssetType::Prefab, AssetType::Mesh, AssetType::Material,
-				AssetType::Texture, AssetType::Environment, AssetType::Font };
+				AssetType::Texture, AssetType::Environment, AssetType::AudioClip, AssetType::Font };
 			CHECK(loaders.GetTypes() == expected);
 			for (const AssetType type : expected)
 			{

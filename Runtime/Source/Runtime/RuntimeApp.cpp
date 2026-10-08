@@ -335,7 +335,8 @@ namespace Engine {
 		session.Project = std::move(project);
 		session.ViewWidth = viewWidth;
 		session.ViewHeight = viewHeight;
-		session.Serial = 1; // the Runtime's only session
+		session.Serial = 1;                       // the Runtime's only session
+		session.Audio = context.GetAudioEngine(); // M12
 		ENGINE_TRY_ASSIGN(state.Session, PlaySession::Create(session, *scene->Document));
 		state.ViewWidth = viewWidth;
 		state.ViewHeight = viewHeight;
@@ -358,6 +359,7 @@ namespace Engine {
 			server.RendererName = std::string(RendererModeToCommandLine(GetSpecification().Renderer));
 			server.SessionsDirectory = GetProcessContext().GetUserDataPaths().Root / "Automation" / "Sessions";
 			server.Assets = m_Assets.get();
+			server.Audio = context.GetAudioEngine(); // M12: audio.stats
 			server.ScenePath = m_Assets->GetReferencePath(manifest.StartScene);
 			if (state.Capture != nullptr)
 			{

@@ -28,10 +28,12 @@
 
 namespace Engine {
 
+	// A windowed run gets --audio-device none (Test::WithoutAudioDevice).
 	static Result<ProcessResult> RunEditor(const Test::TempDirectory& userData, std::vector<std::string> arguments,
 		std::chrono::milliseconds timeout, std::vector<std::pair<std::string, std::string>> environment = {})
 	{
 		ENGINE_TRY_ASSIGN(std::filesystem::path editor, Test::GetBuiltExecutablePath("Editor"));
+		arguments = Test::WithoutAudioDevice(std::move(arguments));
 		arguments.push_back("--user-data-dir=" + Test::PathToUtf8(userData.GetPath()));
 		arguments.push_back("--engine-cache-dir=" + Test::PathToUtf8(userData / "EngineCache"));
 		return Process::Run(
@@ -229,15 +231,16 @@ namespace Engine {
 		TEST_CASE("EditorApp: --bake-engine-assets fills the engine cooked cache and exits 0")
 		{
 			// RunEditor points the engine cooked cache (§7.5) at <userData>/EngineCache, which starts empty: the first run bakes
-			// the one File entry this build can import without a GPU (the Default font) and the Generated blue noise (M8), and
-			// skips the environments, which need a GPU (a warning naming them, which does not fail the run).
+			// the File entries this build can import without a GPU (the Default font and the ten sound effect presets of M12) and
+			// the Generated blue noise (M8), and skips the environments, which need a GPU (a warning naming them, which does not
+			// fail the run).
 			Test::TempDirectory userData("EditorBakeEngineAssets");
 			const std::filesystem::path font = userData / "EngineCache" / BuiltinAssetHandles::DefaultFont.ToString();
 			const Result<ProcessResult> first =
 				RunEditor(userData, { "--headless", "--renderer", "none", "--bake-engine-assets" }, std::chrono::seconds(180));
 			REQUIRE_MESSAGE(first.has_value(), first.error().ToString());
 			CHECK_MESSAGE(first->ExitCode == ExitCode::Success, first->StandardError);
-			CHECK_MESSAGE(first->StandardError.contains("Engine assets: 2 baked, 0 up to date, 2 not baked"), first->StandardError);
+			CHECK_MESSAGE(first->StandardError.contains("Engine assets: 12 baked, 0 up to date, 2 not baked"), first->StandardError);
 			CHECK(first->StandardError.contains("engine://Environments/Studio"));
 			const Result<std::vector<std::filesystem::path>> files = FileSystem::ListDirectory(font);
 			REQUIRE_MESSAGE(files.has_value(), files.error().ToString());
@@ -250,7 +253,7 @@ namespace Engine {
 				RunEditor(userData, { "--headless", "--renderer", "none", "--bake-engine-assets" }, std::chrono::seconds(180));
 			REQUIRE_MESSAGE(second.has_value(), second.error().ToString());
 			CHECK_MESSAGE(second->ExitCode == ExitCode::Success, second->StandardError);
-			CHECK_MESSAGE(second->StandardError.contains("Engine assets: 0 baked, 2 up to date, 2 not baked"), second->StandardError);
+			CHECK_MESSAGE(second->StandardError.contains("Engine assets: 0 baked, 12 up to date, 2 not baked"), second->StandardError);
 			CHECK(FileSystem::ListDirectory(font).value_or(std::vector<std::filesystem::path>()) == *files);
 		}
 
@@ -270,7 +273,8 @@ namespace Engine {
 
 		TEST_CASE("EditorApp: a windowed editor opens and closes within a 10 second timeout")
 		{
-			// A native window on the system clock; Linux CI provides a display through Xvfb.
+			// A native window on the system clock; Linux CI provides a display through Xvfb. RunEditor adds --audio-device none:
+			// no test opens the machine's audio device (§15.1 T1), which a windowed editor would by default (M12).
 			Test::TempDirectory userData("EditorWindowed");
 			const Result<ProcessResult> result = RunEditor(userData, { "--renderer", "none", "--frames", "30" }, std::chrono::seconds(10));
 			REQUIRE_MESSAGE(result.has_value(), result.error().ToString());
@@ -281,6 +285,11 @@ namespace Engine {
 			CHECK(result->StandardError.contains(std::format("Engine context: window '{}' created", ENGINE_PRODUCT_NAME)));
 			// The frame loop never throttles a windowed run; presenting paces it (M5).
 			CHECK(result->StandardError.contains("Frame loop started: System clock, 60 Hz, unthrottled"));
+			// The audio engine runs without a device by configuration: it neither opened one nor tried to (AudioEngine::Create
+			// logs all three at startup).
+			CHECK(result->StandardError.contains("Audio engine: no device, Threaded decoding"));
+			CHECK_FALSE(result->StandardError.contains("Audio engine: device"));
+			CHECK_FALSE(result->StandardError.contains("No audio device could be created"));
 		}
 
 		TEST_CASE("EditorApp: with ENGINE_VULKAN_LOADER=missing the editor exits 3 with the loader message")

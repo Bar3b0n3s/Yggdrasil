@@ -213,8 +213,9 @@ namespace Engine {
 			if (client == NoClient || !session.IsLockstep() || session.GetLockstepOwner() != client)
 				return {};
 			const PlayRunState before = GetPlayRunState(&session);
-			session.SetLockstep(false);
+			// Paused first, so the voices pause before the audio engine's time goes back to the device (PlaySession "Audio").
 			session.SetPaused(true);
+			session.SetLockstep(false);
 			return DisconnectedLockstep{ .Released = true, .StateChanged = GetPlayRunState(&session) != before };
 		}
 

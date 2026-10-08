@@ -29,9 +29,14 @@ class MetaTests(AutomationTestCase):
 
     def test_large_result_offloaded(self) -> None:
         client, root = self.open_editor_with_scene()
-        ops = [{"method": "entity.create", "params": {"name": f"Cell{index:04}", "tags": ["Cell"]}}
-               for index in range(600)]
-        client.call("edit.batch", {"label": "Cells", "ops": ops})
+        # 600 entities (about 120 KB of scene JSON, over the 48 KB offload threshold), created in batches of 100. In a
+        # Debug editor every op's SceneEdit serializes every entity of the scene to check the change tracker
+        # (SceneEdit.cpp, §12.3), so one 600-op batch takes about 30 s on a quiet machine, half of a call's 60 s
+        # timeout, and a busy machine exceeds it; the last batch of 100 takes under a third of that.
+        for first in range(0, 600, 100):
+            ops = [{"method": "entity.create", "params": {"name": f"Cell{index:04}", "tags": ["Cell"]}}
+                   for index in range(first, first + 100)]
+            client.call("edit.batch", {"label": "Cells", "ops": ops})
         result = client.call("scene.get")
         self.assertTrue(result["truncated"])
         offloaded = Path(result["path"])

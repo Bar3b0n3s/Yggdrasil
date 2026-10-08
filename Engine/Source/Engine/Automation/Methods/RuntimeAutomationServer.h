@@ -34,6 +34,7 @@
 namespace Engine {
 
 	class AssetManager;
+	class AudioEngine;
 	class EventLog;
 	class PlaySession;
 	class TypeRegistry;
@@ -71,6 +72,9 @@ namespace Engine {
 		// As AutomationServerSpecification::WallClock: play.step's frame budget is measured with it; empty:
 		// std::chrono::steady_clock::now. Tests script it.
 		std::function<std::chrono::steady_clock::time_point()> WallClock{};
+		// M12: the game's audio engine (AutomationMethodContext::GetAudioEngine: audio.stats), a documented back-reference that
+		// outlives the server; null makes audio.stats Unsupported.
+		AudioEngine* Audio = nullptr;
 	};
 
 	// Main thread only (its ProtocolServer's I/O thread is internal); not copyable or movable.

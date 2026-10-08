@@ -5,6 +5,9 @@
 #include "Support/ChildProcess.h"
 #include "Support/Utf8Path.h"
 
+#include <string>
+#include <vector>
+
 namespace Engine {
 
 	TEST_SUITE("Support")
@@ -149,6 +152,19 @@ namespace Engine {
 			CHECK(missing.error().GetCode() == ErrorCode::NotFound);
 			CHECK(missing.error().GetHint().contains("Scripts/Build.py"));
 			CHECK(missing.error().GetHint().contains("--project NoSuchProject"));
+		}
+
+		TEST_CASE("TestOptions: WithoutAudioDevice keeps windowed processes off the audio device")
+		{
+			using Arguments = std::vector<std::string>;
+			CHECK(Test::WithoutAudioDevice({ "--frames", "30" }) == Arguments{ "--frames", "30", "--audio-device", "none" });
+			CHECK(Test::WithoutAudioDevice({}) == Arguments{ "--audio-device", "none" });
+			// Headless processes have no device, and a test that chooses one keeps its choice.
+			CHECK(Test::WithoutAudioDevice({ "--headless", "--frames", "1" }) == Arguments{ "--headless", "--frames", "1" });
+			CHECK(Test::WithoutAudioDevice({ "--audio-device", "null" }) == Arguments{ "--audio-device", "null" });
+			CHECK(Test::WithoutAudioDevice({ "--audio-device=null" }) == Arguments{ "--audio-device=null" });
+			// Only the exact option counts: a value that merely contains it does not.
+			CHECK(Test::WithoutAudioDevice({ "--manifest=--headless" }) == Arguments{ "--manifest=--headless", "--audio-device", "none" });
 		}
 
 		TEST_CASE("TestOptions: the last occurrence wins and longer option names are not engine options")

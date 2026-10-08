@@ -28,7 +28,7 @@ namespace Engine {
 	// (RegisterPlayMethodTypes), viewport.screenshot (RegisterViewportScreenshotMethodTypes), then the domains moved from
 	// EditorCore with M7: session (RegisterSessionMethodTypes), rpc (RegisterRpcMethodTypes), the scene and entity reads
 	// (RegisterSceneMethodTypes, RegisterEntityMethodTypes) and the observe reads (RegisterObserveMethodTypes); then the
-	// later milestones' domains: physics (RegisterPhysicsMethodTypes, M11).
+	// later milestones' domains: physics (RegisterPhysicsMethodTypes, M11) and audio.stats (RegisterAudioMethodTypes, M12).
 	// RegisterAutomationSharedTypes must have run on the registry first (the editor's RegisterAutomationCommonTypes runs it;
 	// the Runtime calls it itself).
 	void RegisterSharedMethodTypes(TypeRegistry& registry);

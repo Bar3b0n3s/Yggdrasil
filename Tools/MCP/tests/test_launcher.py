@@ -49,7 +49,8 @@ class LauncherTests(unittest.TestCase):
             client.call("session.shutdown")
         creator.wait()
         project_file = self.directory / "Game" / "Game.eproj"
-        mode = ["--headless"] if headless else []
+        # A windowed editor would open the machine's audio device by default (M12); no test does (§15.1 T1).
+        mode = ["--headless"] if headless else ["--audio-device", "none"]
         editor_arguments = [*mode, "--renderer", "none", "--project", str(project_file), *arguments]
         listens = headless or "--automation" in arguments
         editor = engine_client.launch_editor(executable, editor_arguments, self.user_data, self.app_name,

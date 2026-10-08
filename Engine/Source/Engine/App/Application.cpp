@@ -23,7 +23,9 @@
 #include <atomic>
 #include <filesystem>
 #include <format>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -43,6 +45,7 @@ namespace Engine {
 		constexpr std::string_view VulkanApiOption = "--vulkan-api";
 		constexpr std::string_view GpuOption = "--gpu";
 		constexpr std::string_view GpuInjectFaultOption = "--gpu-inject-fault";
+		constexpr std::string_view AudioDeviceOption = "--audio-device";
 #endif
 
 		// Every option of GetEngineCommandLineOptions. Dist honours only the options §13.9 lists, so --user-data-dir is
@@ -105,8 +108,29 @@ namespace Engine {
 				.ValueName = "device-lost|oom-texture|hang",
 				.Description = "Force a GPU fault path for tests: device loss, texture out-of-memory or a GPU hang.",
 			},
+			CommandLineOption{
+				.Name = AudioDeviceOption,
+				.Value = CommandLineValue::Required,
+				.ValueName = "system|null|none",
+				.Description = "Play through the system's default audio device (the windowed default), miniaudio's Null "
+							   "backend, or no device (the headless default; tests never open a real device).",
+			},
 #endif
 		};
+
+#if !defined(ENGINE_DIST)
+		// The --audio-device spellings.
+		[[nodiscard]] static std::optional<AudioDeviceKind> AudioDeviceKindFromCommandLine(std::string_view text)
+		{
+			if (text == "system")
+				return AudioDeviceKind::System;
+			if (text == "null")
+				return AudioDeviceKind::Null;
+			if (text == "none")
+				return AudioDeviceKind::None;
+			return std::nullopt;
+		}
+#endif
 
 		// The startup rule of §8.14 item 7 for the frame's rendering objects: a Gpu error creating one means the device is
 		// out of memory and ends the process with FatalError(OutOfMemory) (exit code 4); any other error is returned with
@@ -179,6 +203,13 @@ namespace Engine {
 		std::atomic<uint64_t> Count{ 0 };
 		uint64_t ListenerId = 0;
 	};
+
+	AudioEngineSpecification GetDefaultAudioSpecification(WindowMode window)
+	{
+		if (window == WindowMode::Windowed)
+			return AudioEngineSpecification{ .Device = AudioDeviceKind::System, .Decoding = AudioDecoding::Threaded };
+		return AudioEngineSpecification{ .Device = AudioDeviceKind::None, .Decoding = AudioDecoding::Deterministic };
+	}
 
 	std::span<const CommandLineOption> GetEngineCommandLineOptions()
 	{
@@ -261,6 +292,20 @@ namespace Engine {
 			}
 			specification.Graphics.InjectFault = *injected;
 		}
+
+		// After --headless, so the decoding mode is the final window mode's.
+		if (const std::optional<std::string_view> device = commandLine.GetValue(Utils::AudioDeviceOption))
+		{
+			const std::optional<AudioDeviceKind> kind = Utils::AudioDeviceKindFromCommandLine(*device);
+			if (!kind.has_value())
+			{
+				return MakeError(ErrorCode::InvalidArgument, "option '{}' takes 'system', 'null' or 'none', got '{}'",
+					Utils::AudioDeviceOption, *device);
+			}
+			AudioEngineSpecification audio = specification.Audio.value_or(GetDefaultAudioSpecification(specification.Window));
+			audio.Device = *kind;
+			specification.Audio = audio;
+		}
 #endif
 
 		if (commandLine.Has(Utils::ExpectNoErrorsOption))
@@ -315,6 +360,7 @@ namespace Engine {
 			.Graphics = m_Specification.Renderer == RendererMode::Vulkan ? std::optional<GraphicsSpecification>(m_Specification.Graphics)
 																		 : std::nullopt,
 			.EnginePak = m_Specification.EnginePak,
+			.Audio = m_Specification.Audio.value_or(GetDefaultAudioSpecification(m_Specification.Window)),
 		};
 		Result<Scope<EngineContext>> context = EngineContext::Create(contextSpecification);
 		if (!context.has_value())
@@ -421,6 +467,13 @@ namespace Engine {
 	void Application::OnFrameUpdate(const FrameTime& frame)
 	{
 		OnUpdate(frame);
+		// M12 (§10.1): the audio engine's frame, after the frame phase's AudioSystem::Update (inside OnUpdate): device
+		// notifications and re-creation, finished voices, and the host pull of a device-less engine. Real time, so unscaled.
+		if (AudioEngine* audio = m_Context->GetAudioEngine(); audio != nullptr)
+		{
+			m_AudioClockSeconds += frame.UnscaledDeltaTime;
+			audio->Update(m_AudioClockSeconds, frame.UnscaledDeltaTime);
+		}
 	}
 
 	void Application::OnFrameRender(const FrameTime& frame)

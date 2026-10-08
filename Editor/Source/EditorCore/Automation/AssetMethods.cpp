@@ -18,6 +18,8 @@
 #include "Engine/AssetPipeline/ImporterRegistry.h"
 #include "Engine/AssetPipeline/Importers/GltfImporter.h"
 #include "Engine/AssetPipeline/Importers/MaterialImporter.h"
+#include "Engine/AssetPipeline/Importers/SoundEffectImporter.h"
+#include "Engine/Audio/SoundSynth.h"
 #include "Engine/Automation/Protocol/MethodRegistry.h"
 #include "Engine/Automation/Protocol/PendingOperation.h"
 #include "Engine/Core/FileSystem.h"
@@ -37,6 +39,7 @@
 #include <charconv>
 #include <filesystem>
 #include <set>
+#include <utility>
 
 namespace Engine {
 
@@ -139,9 +142,114 @@ namespace Engine {
 			return material;
 		}
 
-		// The text of a new native asset of `type` at `path`: a material from `values` over the defaults, an empty scene
-		// named after the file stem, or a prefab with one root entity named after it. Errors: those of PatchMaterial and of
-		// the serializers.
+		// The registry JSON of `sound` as asset.getProperties reports it: every field, without "Format" and "Version".
+		Result<Json> SoundEffectToValues(const SoundEffectDescription& sound, const TypeRegistry& registry)
+		{
+			ENGINE_TRY_ASSIGN(Json document, SoundEffectToJson(sound, registry));
+			document.erase("Format");
+			document.erase("Version");
+			return document;
+		}
+
+		// The sound effect `document` (a canonical .sfx document) with the merge patch `values` applied (null resets a field),
+		// read strictly through the registry and checked by ValidateSoundEffect (SoundEffectFromJson). Enum names are accepted
+		// in any ASCII case (§13.4). The same rule as PatchMaterial: InvalidArgument at `pointer` for values that are not an
+		// object or that set "Format" or "Version"; Validation located under `pointer` for every violation of the registry
+		// ranges or of ValidateSoundEffect (at least one layer, valid notes).
+		Result<SoundEffectDescription> PatchSoundEffect(const Json& document, const Json& values, const TypeRegistry& registry, std::string_view pointer)
+		{
+			if (!values.is_object())
+			{
+				return std::unexpected(Utils::MakeParamError(ErrorCode::InvalidArgument, pointer, "the values must be an object of sound effect fields",
+					"for example {\"Layers\": [{\"Wave\": \"Square\", \"Notes\": [\"C5:0.06\", \"G5:0.1\"]}]}"));
+			}
+			for (const std::string_view key : { std::string_view("Format"), std::string_view("Version") })
+			{
+				if (values.contains(key))
+				{
+					return std::unexpected(Utils::MakeParamError(ErrorCode::InvalidArgument, std::format("{}/{}", pointer, key),
+						std::format("'{}' is part of the file format, not a sound effect property", key)));
+				}
+			}
+			Json patch = values;
+			const StructInfo* type = registry.FindStruct<SoundEffectDescription>();
+			ENGINE_ASSERT(type != nullptr, "The SoundEffect struct is registered by the engine context (RegisterAssetPipelineTypes)");
+			Utils::CanonicalizeEnumSpellings(patch, type->GetType());
+			SoundEffectLoadReport report;
+			Result<SoundEffectDescription> sound = SoundEffectFromJson(ApplyMergePatch(document, patch), registry, report, true);
+			if (!sound)
+				return std::unexpected(Utils::PrefixPointers(sound.error(), pointer));
+			return sound;
+		}
+
+		// The native assets with properties of their own (asset.getProperties, asset.setProperties), by importer.
+		enum class NativePropertiesKind : uint8_t
+		{
+			Material,
+			SoundEffect
+		};
+
+		std::optional<NativePropertiesKind> FindNativePropertiesKind(const AssetRecord& record)
+		{
+			if (record.Metadata.Importer == MaterialImporter::Id)
+				return NativePropertiesKind::Material;
+			if (record.Metadata.Importer == SoundEffectImporter::Id)
+				return NativePropertiesKind::SoundEffect;
+			return std::nullopt;
+		}
+
+		// A native asset's properties: the canonical text of its file and the values asset.getProperties reports.
+		struct NativeProperties
+		{
+			std::string Text{};
+			Json Values{};
+		};
+
+		// The properties of the native asset of `kind` whose file holds `text`, read from `source` (named in errors), with
+		// the merge patch `patch` applied when given. Errors: those of the readers (Parse, Validation, UnsupportedVersion,
+		// with "reading '<source>'"), of PatchMaterial and PatchSoundEffect (located under /values) and of the writers.
+		Result<NativeProperties> ReadNativeProperties(NativePropertiesKind kind, std::string_view text, const VfsPath& source, const TypeRegistry& registry,
+			const Json* patch)
+		{
+			const std::string reading = std::format("reading '{}'", Utils::ToProjectRelative(source));
+			NativeProperties properties;
+			switch (kind)
+			{
+				case NativePropertiesKind::Material:
+				{
+					MaterialLoadReport report;
+					ENGINE_TRY_ASSIGN(MaterialData material, WithContext(MaterialFromText(text, registry, report), reading));
+					if (patch != nullptr)
+					{
+						ENGINE_TRY_ASSIGN(const Json document, MaterialToJson(material, registry));
+						ENGINE_TRY_ASSIGN(material, PatchMaterial(document, *patch, registry, "/values"));
+					}
+					ENGINE_TRY_ASSIGN(properties.Text, MaterialToText(material, registry));
+					ENGINE_TRY_ASSIGN(properties.Values, MaterialToValues(material, registry));
+					return properties;
+				}
+				case NativePropertiesKind::SoundEffect:
+				{
+					SoundEffectLoadReport report;
+					ENGINE_TRY_ASSIGN(SoundEffectDescription sound, WithContext(SoundEffectFromText(text, registry, report), reading));
+					if (patch != nullptr)
+					{
+						ENGINE_TRY_ASSIGN(const Json document, SoundEffectToJson(sound, registry));
+						ENGINE_TRY_ASSIGN(sound, PatchSoundEffect(document, *patch, registry, "/values"));
+					}
+					ENGINE_TRY_ASSIGN(properties.Text, SoundEffectToText(sound, registry));
+					ENGINE_TRY_ASSIGN(properties.Values, SoundEffectToValues(sound, registry));
+					return properties;
+				}
+			}
+
+			ENGINE_ASSERT(false, "Unknown NativePropertiesKind {}", std::to_underlying(kind));
+			return MakeError(ErrorCode::Unsupported, "this asset has no properties of its own");
+		}
+
+		// The text of a new native asset of `type` at `path`: a material or a sound effect from `values` over the defaults, an
+		// empty scene named after the file stem, or a prefab with one root entity named after it. Errors: those of
+		// PatchMaterial, PatchSoundEffect and the serializers.
 		Result<std::string> MakeNativeAssetText(EditorContext& editor, AssetCreateType type, const VfsPath& path, const VariantValue& values)
 		{
 			const std::string stem(path.GetStem());
@@ -171,6 +279,13 @@ namespace Engine {
 					return prefab.SaveToString();
 				}
 				case AssetCreateType::SoundEffect:
+				{
+					// The defaults have no layer, so a sound effect always needs values (ValidateSoundEffect).
+					ENGINE_TRY_ASSIGN(const Json defaults, SoundEffectToJson(SoundEffectDescription{}, registry));
+					const Json patch = values.Get().is_null() ? Json::object() : values.Get();
+					ENGINE_TRY_ASSIGN(const SoundEffectDescription sound, PatchSoundEffect(defaults, patch, registry, "/values"));
+					return SoundEffectToText(sound, registry);
+				}
 				case AssetCreateType::Folder:
 					break;
 			}
@@ -621,14 +736,10 @@ namespace Engine {
 		Result<AssetCreateResult> AssetCreate(EditorMethodContext& context, const AssetCreateParams& params)
 		{
 			EditorContext& editor = context.GetEditor();
-			if (params.Type == AssetCreateType::SoundEffect)
+			const bool takesValues = params.Type == AssetCreateType::Material || params.Type == AssetCreateType::SoundEffect;
+			if (!takesValues && context.HasParam("values") && !params.Values.Get().is_null())
 			{
-				return std::unexpected(Utils::MakeParamError(ErrorCode::Unsupported, "/type", "sound effect assets are not supported by this editor yet",
-					"create a Material, Scene, Prefab or Folder"));
-			}
-			if (params.Type != AssetCreateType::Material && context.HasParam("values") && !params.Values.Get().is_null())
-			{
-				return std::unexpected(Utils::MakeParamError(ErrorCode::InvalidArgument, "/values", "only a Material takes values",
+				return std::unexpected(Utils::MakeParamError(ErrorCode::InvalidArgument, "/values", "only a Material or a SoundEffect takes values",
 					"leave values out for scenes, prefabs and folders"));
 			}
 			ENGINE_TRY_ASSIGN(const VfsPath path, Utils::ResolveAssetsPath(context, params.Path, "/path", GetCreateExtension(params.Type)));
@@ -659,7 +770,9 @@ namespace Engine {
 				edits.push_back(AssetFileEdit{ .Path = path, .Kind = AssetFileKind::File, .Before = std::nullopt, .After = TextToBuffer(text) });
 				edits.push_back(AssetFileEdit{ .Path = metaPath, .Kind = AssetFileKind::File, .Before = std::nullopt, .After = TextToBuffer(metaText) });
 				result.Asset = AssetSummary{ .Id = metadata.Handle.ToString(), .Path = relative, .Type = metadata.Type };
-				label = std::format("Create {} '{}'", AssetTypeToString(metadata.Type), stem);
+				// A sound effect is an AudioClip asset (SoundEffectImporter's main type); its undo label names what was created.
+				const std::string_view what = params.Type == AssetCreateType::SoundEffect ? std::string_view("Sound Effect") : AssetTypeToString(metadata.Type);
+				label = std::format("Create {} '{}'", what, stem);
 			}
 			ENGINE_TRY_ASSIGN(const uint64_t undoIndex, editor.Execute(CreateScope<AssetEditCommand>(std::move(label), std::move(edits))));
 			result.UndoIndex = ToAutomationCounter(undoIndex);
@@ -672,20 +785,20 @@ namespace Engine {
 			ENGINE_TRY_ASSIGN(const AssetHandle handle, Utils::ResolveAssetParam(context, params.Asset, "/asset"));
 			const EditorAssetManager& assets = editor.GetAssets();
 			Result<const AssetRecord*> record = FindMainAssetRecord(assets, handle, "/asset", "properties");
-			if (!record || (*record)->Metadata.Importer != MaterialImporter::Id)
+			const std::optional<NativePropertiesKind> kind = record ? FindNativePropertiesKind(**record) : std::nullopt;
+			if (!kind.has_value())
 			{
 				return std::unexpected(Utils::MakeParamError(ErrorCode::InvalidArgument, "/asset",
 					std::format("'{}' is not a native asset: it has no properties of its own", assets.GetReferencePath(handle)), std::string(NotNativeHint)));
 			}
-			Result<std::string> text = editor.GetVfs().ReadText((*record)->SourcePath);
+			const VfsPath source = (*record)->SourcePath;
+			Result<std::string> text = editor.GetVfs().ReadText(source);
 			if (!text)
 				return std::unexpected(Utils::ToEditorFileError(std::move(text).error()));
-			MaterialLoadReport report;
-			ENGINE_TRY_ASSIGN(const MaterialData material, WithContext(MaterialFromText(*text, editor.GetTypeRegistry(), report), std::format("reading '{}'", Utils::ToProjectRelative((*record)->SourcePath))));
+			ENGINE_TRY_ASSIGN(NativeProperties properties, ReadNativeProperties(*kind, *text, source, editor.GetTypeRegistry(), nullptr));
 			AssetGetPropertiesResult result;
 			result.Asset = Utils::MakeAssetSummary(assets, handle);
-			ENGINE_TRY_ASSIGN(Json values, MaterialToValues(material, editor.GetTypeRegistry()));
-			result.Values = VariantValue(std::move(values));
+			result.Values = VariantValue(std::move(properties.Values));
 			return result;
 		}
 
@@ -695,32 +808,29 @@ namespace Engine {
 			ENGINE_TRY_ASSIGN(const AssetHandle handle, Utils::ResolveAssetParam(context, params.Asset, "/asset"));
 			const EditorAssetManager& assets = editor.GetAssets();
 			Result<const AssetRecord*> found = FindMainAssetRecord(assets, handle, "/asset", "properties");
-			if (!found || (*found)->Metadata.Importer != MaterialImporter::Id)
+			const std::optional<NativePropertiesKind> kind = found ? FindNativePropertiesKind(**found) : std::nullopt;
+			if (!kind.has_value())
 			{
 				return std::unexpected(Utils::MakeParamError(ErrorCode::InvalidArgument, "/asset",
 					std::format("'{}' is not a native asset: it has no properties of its own", assets.GetReferencePath(handle)), std::string(NotNativeHint)));
 			}
 			const VfsPath source = (*found)->SourcePath;
-			const TypeRegistry& registry = editor.GetTypeRegistry();
 			Result<std::string> text = editor.GetVfs().ReadText(source);
 			if (!text)
 				return std::unexpected(Utils::ToEditorFileError(std::move(text).error()));
-			MaterialLoadReport report;
-			ENGINE_TRY_ASSIGN(const MaterialData current, WithContext(MaterialFromText(*text, registry, report), std::format("reading '{}'", Utils::ToProjectRelative(source))));
-			ENGINE_TRY_ASSIGN(const Json document, MaterialToJson(current, registry));
-			ENGINE_TRY_ASSIGN(const MaterialData patched, PatchMaterial(document, params.Values.Get(), registry, "/values"));
-			ENGINE_TRY_ASSIGN(const std::string patchedText, MaterialToText(patched, registry));
+			ENGINE_TRY_ASSIGN(NativeProperties patched, ReadNativeProperties(*kind, *text, source, editor.GetTypeRegistry(), &params.Values.Get()));
 
 			AssetSetPropertiesResult result;
-			if (patchedText != *text)
+			if (patched.Text != *text)
 			{
-				ENGINE_TRY_ASSIGN(Scope<AssetEditCommand> command, AssetEditCommand::CreateForWrite(editor, source, AsBytes(patchedText), std::format("Set Material '{}'", source.GetStem())));
+				const std::string_view what = *kind == NativePropertiesKind::SoundEffect ? "Sound Effect" : "Material";
+				ENGINE_TRY_ASSIGN(Scope<AssetEditCommand> command,
+					AssetEditCommand::CreateForWrite(editor, source, AsBytes(patched.Text), std::format("Set {} '{}'", what, source.GetStem())));
 				ENGINE_TRY_ASSIGN(const uint64_t undoIndex, editor.Execute(std::move(command)));
 				result.UndoIndex = ToAutomationCounter(undoIndex);
 			}
 			result.Asset = Utils::MakeAssetSummary(assets, handle);
-			ENGINE_TRY_ASSIGN(Json values, MaterialToValues(patched, registry));
-			result.Values = VariantValue(std::move(values));
+			result.Values = VariantValue(std::move(patched.Values));
 			return result;
 		}
 
@@ -841,7 +951,7 @@ namespace Engine {
 			.Entry(AssetCreateType::Material, "Material", "A .material file: a PBR material.")
 			.Entry(AssetCreateType::Scene, "Scene", "A .scene file: an empty scene named after the file.")
 			.Entry(AssetCreateType::Prefab, "Prefab", "A .prefab file with one root entity named after the file.")
-			.Entry(AssetCreateType::SoundEffect, "SoundEffect", "A .sfx sound effect preset; not supported by this editor yet.")
+			.Entry(AssetCreateType::SoundEffect, "SoundEffect", "A .sfx sound effect: synthesized layers of oscillators, imported as an AudioClip.")
 			.Entry(AssetCreateType::Folder, "Folder", "A folder below Assets/.");
 
 		registry.Struct<AssetDiagnosticInfo>("AssetDiagnosticInfo", "A diagnostic of an asset.")
@@ -903,8 +1013,10 @@ namespace Engine {
 
 		registry.Struct<AssetCreateParams>("AssetCreateParams", "The params of asset.create.")
 			.Field("type", &AssetCreateParams::Type, "What to create.")
-			.Field("path", &AssetCreateParams::Path, "The project-relative path below Assets/, with the type's extension (.material, .scene, .prefab).")
-			.Field("values", &AssetCreateParams::Values, "A Material's fields over the defaults (registry names, such as Roughness); absent for other types.");
+			.Field("path", &AssetCreateParams::Path, "The project-relative path below Assets/, with the type's extension (.material, .scene, .prefab, .sfx).")
+			.Field("values", &AssetCreateParams::Values,
+				"A Material's or a SoundEffect's fields over the defaults (registry names, such as Roughness, or Layers, which a sound effect "
+				"needs); absent for other types.");
 
 		registry.Struct<AssetCreateResult>("AssetCreateResult", "The created asset.")
 			.Field("asset", &AssetCreateResult::Asset, "The created asset; an empty id and type None for a folder.")
@@ -912,14 +1024,14 @@ namespace Engine {
 			.Field("undoIndex", &AssetCreateResult::UndoIndex, "The command's undo index; 0 in a dry run or a batch.");
 
 		registry.Struct<AssetGetPropertiesParams>("AssetGetPropertiesParams", "The params of asset.getProperties.")
-			.Field("asset", &AssetGetPropertiesParams::Asset, "The native asset (a material).");
+			.Field("asset", &AssetGetPropertiesParams::Asset, "The native asset (a material or a sound effect).");
 
 		registry.Struct<AssetGetPropertiesResult>("AssetGetPropertiesResult", "A native asset's properties.")
 			.Field("asset", &AssetGetPropertiesResult::Asset, "The asset.")
 			.Field("values", &AssetGetPropertiesResult::Values, "Every property, by registry name.");
 
 		registry.Struct<AssetSetPropertiesParams>("AssetSetPropertiesParams", "The params of asset.setProperties.")
-			.Field("asset", &AssetSetPropertiesParams::Asset, "The native asset (a material).")
+			.Field("asset", &AssetSetPropertiesParams::Asset, "The native asset (a material or a sound effect).")
 			.Field("values", &AssetSetPropertiesParams::Values, "An RFC 7386 merge patch of its properties: members replace, null resets a field.");
 
 		registry.Struct<AssetSetPropertiesResult>("AssetSetPropertiesResult", "The properties after the patch.")
@@ -1029,17 +1141,25 @@ namespace Engine {
 		createExample["values"] = Json::object();
 		createExample["values"]["BaseColor"] = Json::array({ 0.9, 0.15, 0.15, 1.0 });
 		createExample["values"]["Roughness"] = 0.45;
+		Json soundExample = Json::object();
+		soundExample["type"] = "SoundEffect";
+		soundExample["path"] = "Assets/Audio/Coin.sfx";
+		soundExample["values"] = Json::object();
+		soundExample["values"]["Layers"] = Json::array({ Json::object() });
+		soundExample["values"]["Layers"][0]["Wave"] = "Square";
+		soundExample["values"]["Layers"][0]["Notes"] = Json::array({ "B5:0.05", "E6:0.2" });
 		methods.Add(
 			{
 				.Name = "asset.create",
-				.Description = "Creates a material (with values over the defaults), an empty scene, a one-entity prefab or a folder below "
-							   "Assets/, with its .meta, as one undoable command.",
+				.Description = "Creates a material or a sound effect (with values over the defaults), an empty scene, a one-entity prefab or a "
+							   "folder below Assets/, with its .meta, as one undoable command.",
 				.RequiredParams = { "type", "path" },
 				.ExposeAsTool = true,
 				.Mutates = true,
 				.SupportsDryRun = true,
 				.AllowedInBatch = true,
-				.Examples = { { .Description = "Create a red material.", .Params = createExample } },
+				.Examples = { { .Description = "Create a red material.", .Params = createExample },
+					{ .Description = "Create a two-note coin pickup sound.", .Params = soundExample } },
 			},
 			&Automation::AssetCreate);
 
@@ -1048,7 +1168,7 @@ namespace Engine {
 		methods.Add(
 			{
 				.Name = "asset.getProperties",
-				.Description = "Returns every property of a native asset (a material) by registry name.",
+				.Description = "Returns every property of a native asset (a material or a sound effect) by registry name.",
 				.RequiredParams = { "asset" },
 				.AllowedInBatch = true,
 				.Examples = { { .Description = "Read a material.", .Params = getPropertiesExample } },
@@ -1062,8 +1182,8 @@ namespace Engine {
 		methods.Add(
 			{
 				.Name = "asset.setProperties",
-				.Description = "Applies an RFC 7386 merge patch to a native asset's properties (a material) and writes it, as one undoable "
-							   "command.",
+				.Description = "Applies an RFC 7386 merge patch to a native asset's properties (a material or a sound effect) and writes it, as "
+							   "one undoable command.",
 				.RequiredParams = { "asset", "values" },
 				.ExposeAsTool = true,
 				.Mutates = true,
