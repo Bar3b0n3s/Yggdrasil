@@ -17,6 +17,7 @@
 #include "Engine/Core/Log.h"
 #include "Engine/Core/UUIDGenerator.h"
 #include "Engine/Core/VirtualFileSystem.h"
+#include "Engine/Physics/PhysicsDiagnostics.h"
 #include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Scene/ComponentAccess.h"
 #include "Engine/Scene/ComponentHostOps.h"
@@ -64,6 +65,17 @@ namespace Engine {
 			AssetContentSkippedCode,
 			PathCaseMismatchCode,
 			PrefabMissingAssetCode,
+			// M11 (Engine/Physics/PhysicsDiagnostics.h, ADR 0014 decision 9), in §13.7 order.
+			PhysicsNonconvexDynamicCode,
+			PhysicsMixedTriggerCode,
+			PhysicsDynamicTriggerCode,
+			PhysicsAllDofsLockedCode,
+			PhysicsInvalidShapeCode,
+			PhysicsAdjacentStaticBodiesCode,
+			PhysicsUnknownLayerCode,
+			PhysicsNonuniformScaleCode,
+			PhysicsDynamicUnderMovingParentCode,
+			PhysicsLimitExceededCode,
 			BuildStartSceneMissingCode,
 			BuildSceneMissingCode,
 		};

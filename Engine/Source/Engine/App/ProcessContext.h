@@ -4,6 +4,7 @@
 #include "Engine/Core/FatalError.h"
 #include "Engine/Core/Result.h"
 #include "Engine/Core/RingBufferSink.h"
+#include "Engine/Physics/PhysicsEngine.h"
 #include "Engine/Platform/GlfwLibrary.h"
 #include "Engine/Platform/Paths.h"
 
@@ -16,19 +17,20 @@
 #include <vector>
 
 // Process-level initialization (Architecture §4.1 level 1, §3 rule 5). GLFW, the logger registry, the profiler, the
-// crash handler, the Vulkan loader and later Jolt's factory and Luau's flags are process-global, so exactly one
-// ProcessContext initializes them, created first by RunApplication or the Tests main and destroyed last, after every
-// EngineContext.
+// crash handler, Jolt's process-level state (PhysicsEngine, M11), the Vulkan loader and later Luau's flags are
+// process-global, so exactly one ProcessContext initializes them, created first by RunApplication or the Tests main and
+// destroyed last, after every EngineContext.
 
 namespace Engine {
 
 	// The process-level steps, in initialization order. Teardown runs them in reverse. Later milestones insert theirs at
-	// the places §4.1 gives: Luau fast flags and PhysicsEngine::Initialize after CrashHandler, before VulkanLoader.
+	// the places §4.1 gives: Luau fast flags (M13) after CrashHandler, before Physics.
 	enum class ProcessContextStep : uint8_t
 	{
 		Log,          // Log::Initialize: console sink and the rotating file <UserData>/<AppName>/Logs/<exe>.log (§4.4)
 		Profiler,     // Profiler::Initialize (ADR 0003 decision 6)
 		CrashHandler, // CrashHandler::Install with <UserData>/<AppName>/Crashes, and the fatal-error handler (below)
+		Physics,      // PhysicsEngine::Initialize with ProcessContextSpecification::Physics (§9.1; M11)
 		VulkanLoader, // VulkanDispatch::Initialize (§8.1); only when VulkanLoaderPolicy is not None
 		Glfw          // GlfwLibrary::Initialize with the chosen platform, handing GLFW the loader (glfwInitVulkanLoader)
 	};
@@ -69,6 +71,8 @@ namespace Engine {
 		// initialization failures RunApplication and Application::Run report. RunApplication sets it for Windowed
 		// applications; tests never do, because a dialog blocks until a user dismisses it. Ignored when Window is Headless.
 		bool ShowErrorDialogs = false;
+		// Jolt's process-level state (the Physics step): the worker threads of the job system every PhysicsWorld steps on.
+		PhysicsEngineSpecification Physics{};
 	};
 
 	// An application's step in the fatal-error path (§4.6): the editor's autosave of the open scene and dirty native assets
@@ -126,8 +130,9 @@ namespace Engine {
 		// Initializes the process (see the class comment). Creating a second context while one exists is a programmer
 		// error (asserted with the message "a ProcessContext already exists"). Errors: those of the failed step, with the
 		// step as context: Validation for a bad AppName, NotFound or Io for the user-data folders, Io for the log file,
-		// Unsupported with NoVulkanLoaderMessage for a missing loader under VulkanLoaderPolicy::Required (InvalidArgument for
-		// a bad ENGINE_VULKAN_LOADER value), Unsupported when GLFW cannot use the windowed platform.
+		// InvalidArgument for Physics.WorkerThreads above PhysicsEngineSpecification::MaxWorkerThreads, Unsupported with
+		// NoVulkanLoaderMessage for a missing loader under VulkanLoaderPolicy::Required (InvalidArgument for a bad
+		// ENGINE_VULKAN_LOADER value), Unsupported when GLFW cannot use the windowed platform.
 		[[nodiscard]] static Result<Scope<ProcessContext>> Create(const ProcessContextSpecification& specification);
 
 		// The live context; nullptr when none exists. Only the App module (RunApplication, Application::Run, which hands it
@@ -178,7 +183,7 @@ namespace Engine {
 		bool m_IsVulkanLoaderAvailable = false;
 	};
 
-	// "Log", "Profiler", "CrashHandler", "VulkanLoader" or "Glfw".
+	// "Log", "Profiler", "CrashHandler", "Physics", "VulkanLoader" or "Glfw".
 	[[nodiscard]] std::string_view ProcessContextStepToString(ProcessContextStep step);
 
 	// The build description written into crash reports and the startup log line: "<Debug|Release|Dist>

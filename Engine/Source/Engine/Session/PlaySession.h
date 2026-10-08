@@ -30,6 +30,7 @@ namespace Engine {
 
 	class AssetManager;
 	class Entity;
+	class PhysicsSystem;
 	class Scene;
 	class TypeRegistry;
 	struct RenderExtractionRequest;
@@ -54,9 +55,9 @@ namespace Engine {
 		FixedUpdate,             // 3: script OnFixedUpdate, (ExecutionOrder, canonical) order (M13; empty)
 		Tasks,                   // 4: Task.Wait*/Task.Delay threads due at this tick, then the test case thread (M13; empty)
 		PreStepTransformUpdate,  // 5: TransformSystem::Update, before PhysicsSystem::PreStep
-		PhysicsPreStep,          // 5: create, rebuild or remove bodies; teleports; MoveKinematic (M11; empty)
-		PhysicsStep,             // 6: PhysicsWorld::Step(fixedDt) (M11; empty)
-		PhysicsPostStep,         // 7: dynamic poses written back; sorted collision and trigger events (M11; empty)
+		PhysicsPreStep,          // 5: PhysicsSystem::PreStep: create, rebuild or remove bodies; teleports; MoveKinematic (M11)
+		PhysicsStep,             // 6: PhysicsSystem::Step: PhysicsWorld::Step(fixedDt) (M11)
+		PhysicsPostStep,         // 7: PhysicsSystem::PostStep: dynamic poses written back; sorted collision and trigger events (M11)
 		DestroyFlush,            // 8: OnDestroy, synthesized exits, body/voice/instance removal (M11-M13), then entity destruction,
 								 //    children first (Scene::FlushPendingDestroys)
 		PostStepTransformUpdate, // 9: TransformSystem::Update
@@ -249,6 +250,18 @@ namespace Engine {
 		[[nodiscard]] UUIDGenerator& GetIdGenerator();
 		[[nodiscard]] PlayInput& GetInput();
 		[[nodiscard]] const PlayInput& GetInput() const;
+
+		// --- Physics (M11; added by the M11 contract, Docs/Decisions/0014-m11-decisions.md decision 14) ------------------
+		// The session's PhysicsSystem (§9.2 to §9.6). Create makes it right after the scene loaded, from Project.Physics
+		// (gravity, layers, collisions), Project.Simulation.FixedHz and Assets, and it creates every body in canonical order
+		// (§5.6 "Session setup"); its errors fail Create with the context "while starting the play session". The fixed step
+		// calls its PreStep, Step and PostStep in their phases, and both destroy flushes (DestroyFlush, FrameDestroyFlush)
+		// call its FlushDestroyed before Scene::FlushPendingDestroys, in Play and Simulate alike (Simulate is Play without
+		// scripts and audio, §5.6). ComputeStateHash appends PhysicsSystem::AppendStateHash after the M7 values. Valid for the
+		// session's lifetime.
+		[[nodiscard]] PhysicsSystem& GetPhysics();
+		[[nodiscard]] const PhysicsSystem& GetPhysics() const;
+		// --- End of the M11 additions ------------------------------------------------------------------------------------
 
 		// The state hash (§13.7, §5.1): XXH64 (seed 0) over the scene's minified canonical serialization
 		// (SceneSerializer::SaveToString, JsonStyle::Minified), followed by the tick, the Random state and the UUIDGenerator's

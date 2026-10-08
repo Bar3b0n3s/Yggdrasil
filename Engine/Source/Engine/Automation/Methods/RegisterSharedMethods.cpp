@@ -4,6 +4,7 @@
 #include "Engine/Automation/Methods/EntityMethods.h"
 #include "Engine/Automation/Methods/InputMethods.h"
 #include "Engine/Automation/Methods/ObserveMethods.h"
+#include "Engine/Automation/Methods/PhysicsMethods.h"
 #include "Engine/Automation/Methods/PlayMethods.h"
 #include "Engine/Automation/Methods/RpcMethods.h"
 #include "Engine/Automation/Methods/SceneMethods.h"
@@ -24,6 +25,8 @@ namespace Engine {
 		RegisterSceneMethodTypes(registry);
 		RegisterEntityMethodTypes(registry);
 		RegisterObserveMethodTypes(registry);
+		// M11 (ADR 0014 decision 18).
+		RegisterPhysicsMethodTypes(registry);
 	}
 
 	void RegisterSharedMethods(MethodRegistry& methods, AutomationHost host)
@@ -36,6 +39,8 @@ namespace Engine {
 		RegisterSceneMethods(methods);
 		RegisterEntityMethods(methods);
 		RegisterObserveMethods(methods);
+		// M11 (ADR 0014 decision 18).
+		RegisterPhysicsMethods(methods);
 	}
 
 }

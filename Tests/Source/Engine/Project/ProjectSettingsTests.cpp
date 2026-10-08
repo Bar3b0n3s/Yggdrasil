@@ -4,6 +4,7 @@
 
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Core/Random.h"
+#include "Engine/Physics/PhysicsLayers.h"
 #include "Engine/Project/ProjectSerializer.h"
 #include "Engine/Reflection/TypeRegistry.h"
 #include "Support/SceneTestFixture.h"
@@ -197,7 +198,7 @@ namespace Engine {
 			CHECK(validate(shadow));
 		}
 
-		TEST_CASE("ProjectSettings: physics layers are 1 to 32 unique names starting with Default, and collisions pair declared layers")
+		TEST_CASE("ProjectSettings: physics layers are 1 to 16 unique names starting with Default, and collisions pair declared layers")
 		{
 			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
 			const std::vector<std::string> errors = ValidationErrorPointers(*registry, PhysicsSettings{});
@@ -223,12 +224,18 @@ namespace Engine {
 			duplicate.Collisions.clear();
 			CHECK(pointersOf(duplicate) == std::vector<std::string>{ "/Layers/2", "/Layers/3" });
 
-			PhysicsSettings tooMany;
-			tooMany.Layers.clear();
-			tooMany.Collisions.clear();
-			tooMany.Layers.push_back("Default");
-			for (int layer = 1; layer < 33; ++layer)
-				tooMany.Layers.push_back(std::format("Layer{}", layer));
+			// The physics module's limit (Architecture §9.2; ADR 0014 decision 4): 16 layers are accepted, 17 are not.
+			static_assert(MaxPhysicsLayers == 16, "the settings validator and the physics layer table share one layer limit");
+			PhysicsSettings full;
+			full.Layers.clear();
+			full.Collisions.clear();
+			full.Layers.push_back("Default");
+			for (uint32_t layer = 1; layer < MaxPhysicsLayers; ++layer)
+				full.Layers.push_back(std::format("Layer{}", layer));
+			CHECK(pointersOf(full).empty());
+
+			PhysicsSettings tooMany = full;
+			tooMany.Layers.push_back("OneTooMany");
 			CHECK(pointersOf(tooMany) == std::vector<std::string>{ "/Layers" });
 
 			PhysicsSettings collisions;

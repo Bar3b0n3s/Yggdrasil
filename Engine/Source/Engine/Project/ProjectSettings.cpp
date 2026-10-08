@@ -13,7 +13,9 @@ namespace Engine {
 
 	namespace Utils {
 
-		static constexpr size_t MaxPhysicsLayers = 32;
+		// Architecture §9.2 ("up to 16 named project layers"); Physics/PhysicsLayers.h's MaxPhysicsLayers, which Project
+		// cannot include (ADR 0014 decision 4; ProjectSettingsTests checks that they agree).
+		static constexpr size_t MaxProjectPhysicsLayers = 16;
 		static constexpr std::string_view DefaultLayer = "Default";
 		static constexpr double MinShadowMapSize = 256.0;
 		static constexpr double MaxShadowMapSize = 8192.0;
@@ -47,8 +49,8 @@ namespace Engine {
 		static void ValidatePhysics(const PhysicsSettings& physics, ValidationContext& context)
 		{
 			const std::vector<std::string>& layers = physics.Layers;
-			if (layers.empty() || layers.size() > MaxPhysicsLayers)
-				context.Error("Layers", std::format("must declare 1 to {} layers (got {})", MaxPhysicsLayers, layers.size()));
+			if (layers.empty() || layers.size() > MaxProjectPhysicsLayers)
+				context.Error("Layers", std::format("must declare 1 to {} layers (got {})", MaxProjectPhysicsLayers, layers.size()));
 
 			context.PushKey("Layers");
 			for (size_t index = 0; index < layers.size(); ++index)
@@ -90,7 +92,7 @@ namespace Engine {
 			std::vector<std::string> layers = { std::string(DefaultLayer) };
 			for (const std::string& layer : physics.Layers)
 			{
-				if (layers.size() == MaxPhysicsLayers)
+				if (layers.size() == MaxProjectPhysicsLayers)
 					break;
 				if (!layer.empty() && std::find(layers.begin(), layers.end(), layer) == layers.end())
 					layers.push_back(layer);
@@ -256,7 +258,7 @@ namespace Engine {
 
 		registry.Struct<PhysicsSettings>("PhysicsSettings", "World gravity and the collision layers of physics bodies.")
 			.Field("Gravity", &PhysicsSettings::Gravity, "World gravity in metres per second squared.", { .Unit = "m/s^2" })
-			.Field("Layers", &PhysicsSettings::Layers, "Collision layer names, unique and non-empty: 1 to 32, the first one \"Default\".")
+			.Field("Layers", &PhysicsSettings::Layers, "Collision layer names, unique and non-empty: 1 to 16, the first one \"Default\".")
 			.Field("Collisions", &PhysicsSettings::Collisions, "Pairs of declared layer names whose bodies collide; unlisted pairs do not.")
 			.Validate(&Utils::ValidatePhysics)
 			.Generate(&Utils::GeneratePhysics);
