@@ -1,0 +1,490 @@
+{
+	"Format": "Scene",
+	"Version": 1,
+	"Name": "MaterialGrid",
+	"Seed": 0,
+	"ComponentVersions": {
+		"Transform": 1,
+		"MeshRenderer": 1,
+		"Camera": 1,
+		"DirectionalLight": 1,
+		"Environment": 1,
+		"PostProcess": 1
+	},
+	"Entities": [
+		{
+			"ID": "176a0c9622e6f582",
+			"Name": "Camera",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 7],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Camera": {
+					"Projection": "Perspective",
+					"VerticalFov": 40,
+					"OrthographicSize": 10,
+					"NearClip": 0.1,
+					"FarClip": 1000,
+					"Primary": true,
+					"Clear": "Skybox",
+					"ClearColor": [0.05, 0.05, 0.06]
+				}
+			}
+		},
+		{
+			"ID": "1fa6842733eec3d6",
+			"Name": "Environment",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Environment": {
+					"Environment": "0000000000000201",
+					"Intensity": 1,
+					"Rotation": 0,
+					"ShowSkybox": true,
+					"SkyboxBlur": 0,
+					"FallbackColor": [0.2, 0.22, 0.25]
+				}
+			}
+		},
+		{
+			"ID": "dd20960f92a41247",
+			"Name": "Sun",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [-0.28257102, 0.3261904, 0.10284744, 0.8962008],
+					"Scale": [1, 1, 1]
+				},
+				"DirectionalLight": {
+					"Color": [1, 0.97, 0.92],
+					"Intensity": 2,
+					"CastShadows": false,
+					"ShadowDistance": 100,
+					"CascadeCount": 4,
+					"CascadeSplitLambda": 0.75,
+					"LightAngle": 1,
+					"DepthBias": 1,
+					"NormalBias": 1
+				}
+			}
+		},
+		{
+			"ID": "cbf9e5bcb760e10f",
+			"Name": "PostProcess",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"PostProcess": {
+					"ExposureEV": 0,
+					"Tonemap": "AgX",
+					"SsaoEnabled": false,
+					"SsaoRadius": 0.5,
+					"SsaoIntensity": 1,
+					"SsaoQuality": "Medium",
+					"BloomEnabled": true,
+					"BloomIntensity": 0.04,
+					"FxaaEnabled": true
+				}
+			}
+		},
+		{
+			"ID": "fb1e55de5c1ea8f4",
+			"Name": "Sphere_Metallic0_Roughness0",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-3, 1.25, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000102",
+					"Materials": ["0b181520097ad987"],
+					"CastShadows": false,
+					"ReceiveShadows": false,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "9acd5015ae74db19",
+			"Name": "Sphere_Metallic0_Roughness20",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-1.8, 1.25, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000102",
+					"Materials": ["0601b1e27b372656"],
+					"CastShadows": false,
+					"ReceiveShadows": false,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "3e1d27a54086bf6b",
+			"Name": "Sphere_Metallic0_Roughness40",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-0.6, 1.25, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000102",
+					"Materials": ["c3f6f709e66bc7be"],
+					"CastShadows": false,
+					"ReceiveShadows": false,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "0038bd9eda80cb4c",
+			"Name": "Sphere_Metallic0_Roughness60",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0.6, 1.25, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000102",
+					"Materials": ["9d463d7e9a42e5d8"],
+					"CastShadows": false,
+					"ReceiveShadows": false,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "a016d5279ddb89ea",
+			"Name": "Sphere_Metallic0_Roughness80",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [1.8, 1.25, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000102",
+					"Materials": ["652bf6f0a2234e1c"],
+					"CastShadows": false,
+					"ReceiveShadows": false,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "bf3bbe1635565806",
+			"Name": "Sphere_Metallic0_Roughness100",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [3, 1.25, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000102",
+					"Materials": ["772404386e1c8918"],
+					"CastShadows": false,
+					"ReceiveShadows": false,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "b06b2a66acdf59f1",
+			"Name": "Sphere_Metallic50_Roughness0",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-3, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000102",
+					"Materials": ["c127e1d7b45d2614"],
+					"CastShadows": false,
+					"ReceiveShadows": false,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "fb7ae73635c24316",
+			"Name": "Sphere_Metallic50_Roughness20",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-1.8, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000102",
+					"Materials": ["aa64d347c6842f22"],
+					"CastShadows": false,
+					"ReceiveShadows": false,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "d36716bc3856ee6c",
+			"Name": "Sphere_Metallic50_Roughness40",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-0.6, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000102",
+					"Materials": ["6f436ca330e70f90"],
+					"CastShadows": false,
+					"ReceiveShadows": false,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "ff7e0f86004b6723",
+			"Name": "Sphere_Metallic50_Roughness60",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0.6, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000102",
+					"Materials": ["bf2293891fc6283d"],
+					"CastShadows": false,
+					"ReceiveShadows": false,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "af5db71063f4b98b",
+			"Name": "Sphere_Metallic50_Roughness80",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [1.8, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000102",
+					"Materials": ["cd05355655f73b71"],
+					"CastShadows": false,
+					"ReceiveShadows": false,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "43bf972aa7cad05f",
+			"Name": "Sphere_Metallic50_Roughness100",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [3, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000102",
+					"Materials": ["9652e6d1ec938bbc"],
+					"CastShadows": false,
+					"ReceiveShadows": false,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "0c0f6bc7e27ca08b",
+			"Name": "Sphere_Metallic100_Roughness0",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-3, -1.25, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000102",
+					"Materials": ["a1f6660e6dcde14f"],
+					"CastShadows": false,
+					"ReceiveShadows": false,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "9ab58818d6b9a12c",
+			"Name": "Sphere_Metallic100_Roughness20",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-1.8, -1.25, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000102",
+					"Materials": ["14c648d5f75a3021"],
+					"CastShadows": false,
+					"ReceiveShadows": false,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "fc3cfcf4e9e2b0db",
+			"Name": "Sphere_Metallic100_Roughness40",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-0.6, -1.25, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000102",
+					"Materials": ["e87092c1020f8bbf"],
+					"CastShadows": false,
+					"ReceiveShadows": false,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "e5f615e2e2788293",
+			"Name": "Sphere_Metallic100_Roughness60",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0.6, -1.25, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000102",
+					"Materials": ["9e7643b70abe46c1"],
+					"CastShadows": false,
+					"ReceiveShadows": false,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "a4eacbf4fbabf6ff",
+			"Name": "Sphere_Metallic100_Roughness80",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [1.8, -1.25, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000102",
+					"Materials": ["c18f28f79e1bea85"],
+					"CastShadows": false,
+					"ReceiveShadows": false,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "9e8301402b36de02",
+			"Name": "Sphere_Metallic100_Roughness100",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [3, -1.25, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000102",
+					"Materials": ["44fbc81dcc8bde6e"],
+					"CastShadows": false,
+					"ReceiveShadows": false,
+					"Visible": true
+				}
+			}
+		}
+	]
+}

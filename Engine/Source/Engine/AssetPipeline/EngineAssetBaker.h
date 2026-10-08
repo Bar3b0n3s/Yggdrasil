@@ -76,7 +76,8 @@ namespace Engine {
 	// The cooked artifacts of one File or Generated entry from enginecache://, baking it first when its entry is missing,
 	// stale or corrupted (the "first use" path of EditorAssetManager). The main artifact comes first. Errors: NotFound for a
 	// Procedural entry; Unsupported when its importer is not registered or needs a GPU this run lacks, or its generator is
-	// not in the specification (with the hint "run Editor --headless --bake-engine-assets on a machine with a GPU"); the
+	// not in the specification (with the importer's own hint, such as EnvironmentImporter's "start the editor with a GPU
+	// once to bake this environment", else "run Editor --headless --bake-engine-assets on a machine with a GPU"); the
 	// import's, the generator's and the cache's read errors. A bake that cannot be stored is logged at Warn and still
 	// returned: the cache is an optimisation (BakeEngineAssets, the explicit bake, reports the store's error).
 	[[nodiscard]] Result<std::vector<Buffer>> GetOrBakeEngineAsset(const EngineBakeSpecification& specification, const BuiltinAssetEntry& entry);

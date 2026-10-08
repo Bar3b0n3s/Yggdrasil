@@ -97,12 +97,12 @@ namespace Engine {
 			CHECK(view->Set == 0);
 			CHECK(view->Binding == 256); // b0 shifted by NVRHI's CBV offset (§8.4)
 			CHECK(view->ArraySize == 1);
-			CHECK(view->ByteSize == 384);
+			CHECK(view->ByteSize == 400); // ViewConstants with the light count M8 appended
 			CHECK(view->StructName == "ViewConstants");
 			CHECK(view->Used);
 			const ShaderStruct* constants = reflection->FindStruct("ViewConstants");
 			REQUIRE(constants != nullptr);
-			CHECK(constants->Size == 384);
+			CHECK(constants->Size == 400);
 			REQUIRE_FALSE(constants->Fields.empty());
 			CHECK(constants->Fields.front().Name == "View");
 			CHECK(constants->Fields.front().Offset == 0);
@@ -284,6 +284,51 @@ namespace Engine {
 			{
 				CheckRejected(ReplaceInSynthetic(R"("used": 0)", R"("used": "no")"), "/entryPoints/0/bindings/1/binding/used");
 			}
+		}
+
+		TEST_CASE("ShaderReflection: a structured buffer's struct element is collected with its fields and extent")
+		{
+			// slangc reports a structured buffer's element type as "resultType", its fields with the std430 offsets of a
+			// constant buffer's but without a stride: the struct's size is the end of its last field. A vector element carries
+			// no struct.
+			constexpr std::string_view Document = R"({
+	"parameters": [
+		{ "name": "Lights", "binding": { "kind": "shaderResource", "index": 0 },
+			"type": { "kind": "resource", "baseShape": "structuredBuffer",
+				"resultType": { "kind": "struct", "name": "Light", "fields": [
+					{ "name": "Position", "type": { "kind": "vector", "elementCount": 3, "elementType": { "kind": "scalar", "scalarType": "float32" } },
+						"binding": { "kind": "uniform", "offset": 0, "size": 12, "elementStride": 4 } },
+					{ "name": "Range", "type": { "kind": "scalar", "scalarType": "float32" },
+						"binding": { "kind": "uniform", "offset": 12, "size": 4, "elementStride": 0 } },
+					{ "name": "Color", "type": { "kind": "vector", "elementCount": 3, "elementType": { "kind": "scalar", "scalarType": "float32" } },
+						"binding": { "kind": "uniform", "offset": 16, "size": 12, "elementStride": 4 } } ] } } },
+		{ "name": "Values", "binding": { "kind": "unorderedAccess", "index": 384 },
+			"type": { "kind": "resource", "baseShape": "structuredBuffer", "access": "readWrite",
+				"resultType": { "kind": "vector", "elementCount": 4, "elementType": { "kind": "scalar", "scalarType": "float32" } } } }
+	],
+	"entryPoints": [ { "name": "CSMain", "stage": "compute", "threadGroupSize": [64, 1, 1], "bindings": [] } ]
+})";
+			const Result<ShaderReflection> reflection = ParseShaderReflection(Document);
+			REQUIRE_MESSAGE(reflection.has_value(), reflection.error().ToString());
+			REQUIRE(reflection->Bindings.size() == 2);
+			CHECK(reflection->FindBinding("Lights")->Shape == ShaderResourceShape::StructuredBuffer);
+			CHECK(reflection->FindBinding("Values")->Shape == ShaderResourceShape::StructuredBuffer);
+			REQUIRE(reflection->Structs.size() == 1);
+			const ShaderStruct* light = reflection->FindStruct("Light");
+			REQUIRE(light != nullptr);
+			CHECK(light->Size == 28);
+			REQUIRE(light->Fields.size() == 3);
+			CHECK(light->Fields[1].Name == "Range");
+			CHECK(light->Fields[1].Offset == 12);
+			CHECK(light->Fields[2].Offset == 16);
+			CHECK(light->Fields[2].Size == 12);
+
+			// The compiled forward pass's light list: ShaderLight, 64 bytes (Shared/ShaderLight.h).
+			const Result<ShaderReflection> forward = ParseShaderReflection(ReadCompiledReflection("Scene/PSForward.ALPHA_MASK-0"));
+			REQUIRE_MESSAGE(forward.has_value(), forward.error().ToString());
+			const ShaderStruct* shaderLight = forward->FindStruct("ShaderLight");
+			REQUIRE(shaderLight != nullptr);
+			CHECK(shaderLight->Size == 64);
 		}
 
 		TEST_CASE("ShaderReflection: malformed and mutated documents are errors, never crashes")

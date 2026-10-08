@@ -2,6 +2,7 @@
 
 #include "Engine/Asset/AssetLoaderRegistry.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
+#include "Engine/AssetPipeline/EngineAssetBaker.h"
 #include "Engine/AssetPipeline/ImporterRegistry.h"
 #include "Engine/Core/Base.h"
 #include "Engine/Core/Buffer.h"
@@ -23,20 +24,41 @@
 
 namespace Engine {
 
+	class IEnvironmentBaker;
+
 	namespace Test {
+
+		// What an AssetTestFixture provides beyond the defaults (M8, Docs/Decisions/0013-m8-decisions.md decision 14).
+		struct AssetTestFixtureOptions
+		{
+			uint64_t Seed = 1;
+			uint32_t WorkerCount = 0;
+			// Mounts engine:// read-only at the repository's Resources/ and enginecache:// as a MemoryMount, so the File
+			// built-ins (the Default font, the Studio and Sky environments) load and bake into memory, never into
+			// bin/EngineCache.
+			bool EngineResources = false;
+			// The asset manager's environment baker (a Renderer EnvironmentBaker over a test's HeadlessGpuFixture device);
+			// must outlive the fixture's manager. Null: environments are Unsupported unless a bake is cached.
+			IEnvironmentBaker* EnvironmentBaker = nullptr;
+			// The generators of Generated built-ins (EditorCore's GetEngineAssetGenerators in editor tests); must outlive the
+			// fixture.
+			std::span<const EngineAssetGenerator> EngineAssetGenerators{};
+		};
 
 		// One asset environment of one test: project:// and cache:// as MemoryMounts (project://Assets created), a JobSystem
 		// with `workerCount` workers (0, the default: inline, every job runs inside the call that submits it, so tests are
 		// deterministic; race tests that need overlapping jobs pass workers and synchronize through latches, never sleeps), a
 		// main-thread queue, an event log, a frozen registry (the built-in components, the project settings, the Asset types
 		// and the importers' settings types: Test::CreateBuiltinRegistry), the built-in importers and loaders, a
-		// deterministic id generator, and an EditorAssetManager over them, not yet opened. A test may register an importer of
+		// deterministic id generator, and an EditorAssetManager over them, not yet opened (AssetTestFixtureOptions adds the
+		// engine resources, an environment baker and generators). A test may register an importer of
 		// its own (GetImporters) before OpenProject. Failed setup steps fail the running test case. Main thread; not copyable
 		// or movable (the manager points at the services; the manager and its jobs are gone before the services).
 		class AssetTestFixture
 		{
 		public:
 			explicit AssetTestFixture(uint64_t seed = 1, uint32_t workerCount = 0);
+			explicit AssetTestFixture(const AssetTestFixtureOptions& options);
 			~AssetTestFixture();
 
 			AssetTestFixture(const AssetTestFixture&) = delete;

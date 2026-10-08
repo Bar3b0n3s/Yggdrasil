@@ -12,6 +12,7 @@
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Core/VirtualFileSystem.h"
 #include "Engine/Reflection/TypeRegistry.h"
+#include "Engine/Renderer/RenderPrepare.h"
 #include "Engine/Scene/ComponentAccess.h"
 #include "Engine/Scene/ComponentRegistration.h"
 #include "Engine/Scene/Entity.h"
@@ -566,8 +567,9 @@ namespace Engine {
 		TEST_CASE("ProjectValidator: GetCodes lists the codes the validator reports, each once")
 		{
 			const std::span<const std::string_view> codes = ProjectValidator::GetCodes();
-			// M4's 14 codes, and M6's 11: the asset codes but the runtime-only ASSET_UPLOAD_FAILED, and PREFAB_MISSING_ASSET.
-			CHECK(codes.size() == 25);
+			// M4's 14 codes, M6's 11 (the asset codes but the runtime-only ASSET_UPLOAD_FAILED, and PREFAB_MISSING_ASSET) and M8's
+			// RENDER_LIGHT_LIMIT_EXCEEDED.
+			CHECK(codes.size() == 26);
 			std::vector<std::string_view> sorted(codes.begin(), codes.end());
 			std::sort(sorted.begin(), sorted.end());
 			CHECK(std::adjacent_find(sorted.begin(), sorted.end()) == sorted.end());
@@ -752,6 +754,56 @@ namespace Engine {
 				CHECK(listed == (code != AssetUploadFailedCode));
 			}
 			CHECK(std::find(codes.begin(), codes.end(), PrefabMissingAssetCode) != codes.end());
+		}
+
+		TEST_CASE("ProjectValidator: more lights than the renderer shades per view is RENDER_LIGHT_LIMIT_EXCEEDED, a warning without a fix")
+		{
+			// M8 (§13.7; Docs/Decisions/0013-m8-decisions.md decision 7): the scene's effectively enabled lights are counted.
+			Test::EditorTestFixture fixture("ValidatorLightLimit");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			EditorContext& editor = fixture.GetEditor();
+			Scene& scene = editor.GetScene();
+			{
+				SceneEdit edit(editor, "Lights");
+				for (uint32_t index = 0; index < MaxVisibleLights; ++index)
+					REQUIRE(ComponentAccess::AddComponent(scene.CreateEntity("Light"), "PointLight", nullptr).has_value());
+				REQUIRE(edit.Commit().has_value());
+			}
+			Result<ValidationReport> report = ProjectValidator::Validate(editor, ValidationScope::Scene);
+			REQUIRE(report.has_value());
+			CHECK(FindDiagnostic(*report, RenderLightLimitExceededCode) == nullptr); // exactly the limit is fine
+			UUID sunId;
+			{
+				SceneEdit edit(editor, "One more");
+				const Entity sun = scene.CreateEntity("Sun");
+				sunId = sun.GetUUID();
+				REQUIRE(ComponentAccess::AddComponent(sun, "DirectionalLight", nullptr).has_value());
+				REQUIRE(edit.Commit().has_value());
+			}
+			report = ProjectValidator::Validate(editor, ValidationScope::Scene);
+			REQUIRE(report.has_value());
+			const ProjectDiagnostic* limit = FindDiagnostic(*report, RenderLightLimitExceededCode);
+			REQUIRE(limit != nullptr);
+			CHECK(limit->Severity == DiagnosticSeverity::Warning);
+			CHECK_FALSE(limit->AutoFixable);
+			CHECK(limit->File == "Assets/Scenes/Main.scene");
+			CHECK(limit->Entity.empty());
+			CHECK(limit->Message.contains("257"));
+			const std::span<const std::string_view> codes = ProjectValidator::GetCodes();
+			CHECK(std::find(codes.begin(), codes.end(), RenderLightLimitExceededCode) != codes.end());
+
+			// An inactive entity's light is not effectively enabled, so it does not count.
+			{
+				SceneEdit edit(editor, "Disable one");
+				const Entity sun = scene.FindEntityByID(sunId);
+				REQUIRE(sun.IsValid());
+				sun.SetActive(false);
+				REQUIRE(edit.Commit().has_value());
+			}
+			report = ProjectValidator::Validate(editor, ValidationScope::Scene);
+			REQUIRE(report.has_value());
+			CHECK(FindDiagnostic(*report, RenderLightLimitExceededCode) == nullptr);
 		}
 	}
 

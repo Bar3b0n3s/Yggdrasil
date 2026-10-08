@@ -44,12 +44,20 @@ inline constexpr uint32_t ProjectionKindOrthographic = 1;
 		float AspectRatio = 1.0f;   // ViewportSize.x / ViewportSize.y
 		float Exposure = 1.0f;      // 2^ExposureEV (§8.9); 1 when unused
 		uint32_t Padding0 = 0;
+		// M8 (Docs/Decisions/0013-m8-decisions.md decision 7: appended, the members above are frozen): the number of valid
+		// entries of the Lights structured buffer (t0, Shared/ShaderLight.h), at most MaxVisibleLights; 0 for passes that
+		// bind no light list.
+		uint32_t LightCount = 0;
+		uint32_t Padding1 = 0;
+		uint32_t Padding2 = 0;
+		uint32_t Padding3 = 0;
 	};
 
 #if !defined(ENGINE_SHADER)
-	static_assert(sizeof(ViewConstants) == 384, "ViewConstants must match its 384-byte constant-buffer layout");
+	static_assert(sizeof(ViewConstants) == 400, "ViewConstants must match its 400-byte constant-buffer layout");
 	static_assert(offsetof(ViewConstants, CameraPosition) == 320 && offsetof(ViewConstants, OrthoHalfExtents) == 336
-			&& offsetof(ViewConstants, ViewportSize) == 352 && offsetof(ViewConstants, TanHalfFovY) == 368,
+			&& offsetof(ViewConstants, ViewportSize) == 352 && offsetof(ViewConstants, TanHalfFovY) == 368
+			&& offsetof(ViewConstants, LightCount) == 384,
 		"ViewConstants members must sit where the constant-buffer layout puts them");
 
 }

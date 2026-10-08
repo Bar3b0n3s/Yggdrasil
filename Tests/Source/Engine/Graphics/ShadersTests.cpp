@@ -10,23 +10,32 @@
 #include "Engine/Graphics/ShaderLibrary.h"
 #include "Engine/ImGui/ImGuiRenderer.h"
 #include "Engine/Renderer/BlitPass.h"
+#include "Engine/Renderer/BloomPass.h"
+#include "Engine/Renderer/EnvironmentBaker.h"
 #include "Engine/Renderer/SceneRenderer.h"
 #include "Engine/Renderer/TrianglePass.h"
+#include "Shared/BloomConstants.h"
 #include "Shared/DrawConstants.h"
+#include "Shared/EnvironmentBakeConstants.h"
+#include "Shared/EnvironmentConstants.h"
 #include "Shared/ImGuiConstants.h"
-#include "Shared/LightingConstants.h"
 #include "Shared/MaterialConstants.h"
+#include "Shared/ShaderLight.h"
 #include "Shared/SmokeConstants.h"
+#include "Shared/TonemapConstants.h"
 #include "Shared/ViewConstants.h"
 #include "Support/HeadlessGpuFixture.h"
 #include "Support/MatrixConventionProgram.h"
 #include "Support/SmokeProgram.h"
+#include "Support/TonemapCurvesProgram.h"
 
 #include <nlohmann/json.hpp>
 
 #include <cstddef>
 #include <iterator>
+#include <map>
 #include <set>
+#include <utility>
 #include <vector>
 
 // The static shader checks of Architecture §15.1 (T0, "Tests --test-suite=Static"): every engine pipeline's binding
@@ -62,7 +71,9 @@ namespace Engine {
 
 	}
 
-	// Every engine pipeline's layout description; a new pass adds its own here.
+	// Every engine pipeline's layout description; a new pass adds its own here. The scene renderer's set includes the passes
+	// it owns (SceneRenderer.h) with the R11G11B10 Bloom permutation; the RGBA16 fallback (§8.1) and the environment bake,
+	// which no SceneRendererPipelines creates, are added beside it (M8, Docs/Decisions/0013-m8-decisions.md decision 3).
 	static std::vector<PipelineLayoutDescription> GetEnginePipelineLayouts()
 	{
 		std::vector<PipelineLayoutDescription> layouts = {
@@ -72,9 +83,11 @@ namespace Engine {
 			Test::MakeMatrixConventionLayoutDescription(),
 			Test::MakeSmokeLayoutDescription("0"),
 			Test::MakeSmokeLayoutDescription("1"),
+			Test::MakeTonemapCurvesLayoutDescription(),
 		};
-		std::vector<PipelineLayoutDescription> scene = SceneRendererPipelines::GetLayoutDescriptions();
-		layouts.insert(layouts.end(), std::make_move_iterator(scene.begin()), std::make_move_iterator(scene.end()));
+		for (std::vector<PipelineLayoutDescription> more : { SceneRendererPipelines::GetLayoutDescriptions(nvrhi::Format::R11G11B10_FLOAT),
+				 BloomPass::GetLayoutDescriptions(nvrhi::Format::RGBA16_FLOAT), EnvironmentBaker::GetLayoutDescriptions() })
+			layouts.insert(layouts.end(), std::make_move_iterator(more.begin()), std::make_move_iterator(more.end()));
 		return layouts;
 	}
 
@@ -133,6 +146,10 @@ namespace Engine {
 					ENGINE_TEST_SHARED_FIELD(ViewConstants, AspectRatio),
 					ENGINE_TEST_SHARED_FIELD(ViewConstants, Exposure),
 					ENGINE_TEST_SHARED_FIELD(ViewConstants, Padding0),
+					ENGINE_TEST_SHARED_FIELD(ViewConstants, LightCount),
+					ENGINE_TEST_SHARED_FIELD(ViewConstants, Padding1),
+					ENGINE_TEST_SHARED_FIELD(ViewConstants, Padding2),
+					ENGINE_TEST_SHARED_FIELD(ViewConstants, Padding3),
 				},
 				.Program = "Triangle",
 				.Entry = "VSMain",
@@ -148,6 +165,48 @@ namespace Engine {
 				.Entry = "VSMain",
 			},
 			{
+				.Name = "TonemapConstants",
+				.Size = sizeof(TonemapConstants),
+				.Fields = {
+					ENGINE_TEST_SHARED_FIELD(TonemapConstants, Tonemapper),
+					ENGINE_TEST_SHARED_FIELD(TonemapConstants, Flags),
+					ENGINE_TEST_SHARED_FIELD(TonemapConstants, BloomIntensity),
+					ENGINE_TEST_SHARED_FIELD(TonemapConstants, Padding0),
+				},
+				.Program = "Tonemap",
+				.Entry = "CSMain",
+			},
+			{
+				.Name = "BloomConstants",
+				.Size = sizeof(BloomConstants),
+				.Fields = {
+					ENGINE_TEST_SHARED_FIELD(BloomConstants, SourceTexelSize),
+					ENGINE_TEST_SHARED_FIELD(BloomConstants, DestinationTexelSize),
+					ENGINE_TEST_SHARED_FIELD(BloomConstants, DestinationSize),
+					ENGINE_TEST_SHARED_FIELD(BloomConstants, Scale),
+					ENGINE_TEST_SHARED_FIELD(BloomConstants, Padding0),
+				},
+				.Program = "Bloom",
+				.Entry = "CSUpsample",
+				.Permutation = { { .Key = "BLOOM_RGBA16", .Value = "0" } },
+			},
+			{
+				.Name = "EnvironmentBakeConstants",
+				.Size = sizeof(EnvironmentBakeConstants),
+				.Fields = {
+					ENGINE_TEST_SHARED_FIELD(EnvironmentBakeConstants, FaceSize),
+					ENGINE_TEST_SHARED_FIELD(EnvironmentBakeConstants, SourceFaceSize),
+					ENGINE_TEST_SHARED_FIELD(EnvironmentBakeConstants, SourceWidth),
+					ENGINE_TEST_SHARED_FIELD(EnvironmentBakeConstants, SampleCount),
+					ENGINE_TEST_SHARED_FIELD(EnvironmentBakeConstants, Alpha),
+					ENGINE_TEST_SHARED_FIELD(EnvironmentBakeConstants, SourceTexelSolidAngle),
+					ENGINE_TEST_SHARED_FIELD(EnvironmentBakeConstants, SourceMaxLod),
+					ENGINE_TEST_SHARED_FIELD(EnvironmentBakeConstants, GroupCount),
+				},
+				.Program = "EnvironmentBake",
+				.Entry = "CSPrefilterSpecular",
+			},
+			{
 				.Name = "DrawConstants",
 				.Size = sizeof(DrawConstants),
 				.Fields = {
@@ -158,29 +217,69 @@ namespace Engine {
 				},
 				.Program = "Scene",
 				.Entry = "VSMain",
+				.Permutation = { { .Key = "ALPHA_MASK", .Value = "0" } },
 			},
 			{
-				.Name = "LightingConstants",
-				.Size = sizeof(LightingConstants),
+				.Name = "EnvironmentConstants",
+				.Size = sizeof(EnvironmentConstants),
 				.Fields = {
-					ENGINE_TEST_SHARED_FIELD(LightingConstants, LightDirection),
-					ENGINE_TEST_SHARED_FIELD(LightingConstants, Padding0),
-					ENGINE_TEST_SHARED_FIELD(LightingConstants, LightRadiance),
-					ENGINE_TEST_SHARED_FIELD(LightingConstants, Padding1),
-					ENGINE_TEST_SHARED_FIELD(LightingConstants, AmbientRadiance),
-					ENGINE_TEST_SHARED_FIELD(LightingConstants, Padding2),
+					ENGINE_TEST_SHARED_FIELD(EnvironmentConstants, IrradianceSH9),
+					ENGINE_TEST_SHARED_FIELD(EnvironmentConstants, AmbientColor),
+					ENGINE_TEST_SHARED_FIELD(EnvironmentConstants, Intensity),
+					ENGINE_TEST_SHARED_FIELD(EnvironmentConstants, RotationSin),
+					ENGINE_TEST_SHARED_FIELD(EnvironmentConstants, RotationCos),
+					ENGINE_TEST_SHARED_FIELD(EnvironmentConstants, SpecularMaxLod),
+					ENGINE_TEST_SHARED_FIELD(EnvironmentConstants, SkyboxLod),
+					ENGINE_TEST_SHARED_FIELD(EnvironmentConstants, HasEnvironment),
+					ENGINE_TEST_SHARED_FIELD(EnvironmentConstants, Padding0),
+					ENGINE_TEST_SHARED_FIELD(EnvironmentConstants, Padding1),
+					ENGINE_TEST_SHARED_FIELD(EnvironmentConstants, Padding2),
 				},
 				.Program = "Scene",
 				.Entry = "PSForward",
+				.Permutation = { { .Key = "ALPHA_MASK", .Value = "0" } },
 			},
 			{
 				.Name = "MaterialConstants",
 				.Size = sizeof(MaterialConstants),
 				.Fields = {
 					ENGINE_TEST_SHARED_FIELD(MaterialConstants, BaseColor),
+					ENGINE_TEST_SHARED_FIELD(MaterialConstants, Emissive),
+					ENGINE_TEST_SHARED_FIELD(MaterialConstants, Metallic),
+					ENGINE_TEST_SHARED_FIELD(MaterialConstants, Roughness),
+					ENGINE_TEST_SHARED_FIELD(MaterialConstants, NormalScale),
+					ENGINE_TEST_SHARED_FIELD(MaterialConstants, OcclusionStrength),
+					ENGINE_TEST_SHARED_FIELD(MaterialConstants, AlphaCutoff),
+					ENGINE_TEST_SHARED_FIELD(MaterialConstants, UVScale),
+					ENGINE_TEST_SHARED_FIELD(MaterialConstants, UVOffset),
+					ENGINE_TEST_SHARED_FIELD(MaterialConstants, AlphaMode),
+					ENGINE_TEST_SHARED_FIELD(MaterialConstants, Flags),
+					ENGINE_TEST_SHARED_FIELD(MaterialConstants, Padding0),
+					ENGINE_TEST_SHARED_FIELD(MaterialConstants, Padding1),
 				},
 				.Program = "Scene",
 				.Entry = "PSForward",
+				.Permutation = { { .Key = "ALPHA_MASK", .Value = "1" } },
+			},
+			{
+				// The element of the Lights structured buffer (std430; its reflected size is the end of its last member).
+				.Name = "ShaderLight",
+				.Size = sizeof(ShaderLight),
+				.Fields = {
+					ENGINE_TEST_SHARED_FIELD(ShaderLight, Position),
+					ENGINE_TEST_SHARED_FIELD(ShaderLight, Type),
+					ENGINE_TEST_SHARED_FIELD(ShaderLight, Direction),
+					ENGINE_TEST_SHARED_FIELD(ShaderLight, InverseRangeSquared),
+					ENGINE_TEST_SHARED_FIELD(ShaderLight, Radiance),
+					ENGINE_TEST_SHARED_FIELD(ShaderLight, SourceRadius),
+					ENGINE_TEST_SHARED_FIELD(ShaderLight, SpotCosOuter),
+					ENGINE_TEST_SHARED_FIELD(ShaderLight, SpotCosInner),
+					ENGINE_TEST_SHARED_FIELD(ShaderLight, Padding0),
+					ENGINE_TEST_SHARED_FIELD(ShaderLight, Padding1),
+				},
+				.Program = "Scene",
+				.Entry = "PSForward",
+				.Permutation = { { .Key = "ALPHA_MASK", .Value = "0" } },
 			},
 			{
 				.Name = "SmokeConstants",
@@ -242,6 +341,39 @@ namespace Engine {
 			CHECK(mismatch.error().ToString().contains("View"));
 		}
 
+		TEST_CASE("Shaders: RW texture image formats match the C++ formats")
+		{
+			// §8.4: every RWTexture declares its storage format with [vk::image_format], and the reflection check compares it
+			// with the format the C++ pass creates (PipelineLayoutDescription::StorageImages). Beyond the per-pipeline check of
+			// "Shaders: LayoutsMatchReflection", this pins down which formats the M8 passes write as storage images, both
+			// Bloom permutations included: LdrColor RGBA8 (tonemap, FXAA), the bloom chain in R11G11B10 or its RGBA16 fallback
+			// (§8.1), the environment bake's RGBA16 cubes and the DFG LUT's RG16.
+			CompiledShaders shaders;
+			std::map<std::string, std::set<nvrhi::Format>> formatsByProgram;
+			for (const PipelineLayoutDescription& description : GetEnginePipelineLayouts())
+			{
+				CAPTURE(description.Name);
+				const Status valid = ValidatePipelineLayout(description, shaders.GetLibrary());
+				CHECK_MESSAGE(valid.has_value(), (valid.has_value() ? std::string() : valid.error().ToString()));
+				for (const StorageImageFormat& image : description.StorageImages)
+					formatsByProgram[description.Program].insert(image.Format);
+			}
+			const std::vector<std::pair<std::string, nvrhi::Format>> expected = {
+				{ "Tonemap", nvrhi::Format::RGBA8_UNORM },
+				{ "Fxaa", nvrhi::Format::RGBA8_UNORM },
+				{ "Bloom", nvrhi::Format::R11G11B10_FLOAT },
+				{ "Bloom", nvrhi::Format::RGBA16_FLOAT },
+				{ "EnvironmentBake", nvrhi::Format::RGBA16_FLOAT },
+				{ "BrdfLut", nvrhi::Format::RG16_FLOAT },
+			};
+			for (const auto& [program, format] : expected)
+			{
+				CAPTURE(program);
+				CAPTURE(std::string(nvrhi::getFormatInfo(format).name));
+				CHECK(formatsByProgram[program].contains(format));
+			}
+		}
+
 		TEST_CASE("Shaders: SharedStructsMatchReflection")
 		{
 			CompiledShaders shaders;
@@ -282,15 +414,19 @@ namespace Engine {
 #else
 			CHECK(*configuration == "Release");
 #endif
-			const std::array<std::string_view, 13> variants = {
+			const std::array<std::string_view, 17> variants = {
 				"Blit/VSMain",
 				"Blit/PSMain",
+				"BrdfLut/CSMain",
 				"ImGui/VSMain",
 				"ImGui/PSMain",
 				"MatrixConvention/CSMain",
-				"Scene/VSMain",
-				"Scene/PSPrepass",
-				"Scene/PSForward",
+				"Scene/VSMain.ALPHA_MASK-0",
+				"Scene/VSMain.ALPHA_MASK-1",
+				"Scene/PSPrepass.ALPHA_MASK-0",
+				"Scene/PSPrepass.ALPHA_MASK-1",
+				"Scene/PSForward.ALPHA_MASK-0",
+				"Scene/PSForward.ALPHA_MASK-1",
 				"Triangle/VSMain",
 				"Triangle/PSMain",
 				"Smoke/CSMain.SMOKE_SATURATE-0",

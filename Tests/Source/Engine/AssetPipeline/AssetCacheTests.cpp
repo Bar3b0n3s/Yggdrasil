@@ -35,6 +35,14 @@ namespace Engine {
 			return import;
 		}
 
+		// MakeImport's texture as the main artifact of `source`.
+		CachedImport MakeImportFor(AssetHandle source)
+		{
+			CachedImport import = MakeImport();
+			import.Import.Artifacts.front().Handle = source;
+			return import;
+		}
+
 		// A glTF-shaped import: a main artifact (a mesh stands in for the prefab) and one mesh sub-asset per key.
 		CachedImport MakeTrackImport(const std::vector<std::string>& meshKeys)
 		{
@@ -358,6 +366,46 @@ namespace Engine {
 			// Removing what is not there changes nothing.
 			CHECK(cache.Remove(Track).has_value());
 			CHECK(cache.Remove(AssetHandle(0x1234)).has_value());
+		}
+
+		TEST_CASE("AssetCache: FindSourcesWithKey lists the sources with an import manifest under the key, in handle order")
+		{
+			// Decision 9's reuse of a bake by its cache key (Docs/Decisions/0013-m8-decisions.md): every source whose
+			// <handle>/<key>.import exists, sorted. A glTF-like source's sub-assets hold artifacts but no manifest, and the
+			// root's AssetLocations.json and other entries that are not handle directories are skipped.
+			Test::AssetTestFixture fixture;
+			VirtualFileSystem& vfs = fixture.GetVfs();
+			AssetCache cache(vfs, Test::ParseVfsPath("cache://"));
+			constexpr AssetHandle Second{ 0x0a00000000000002ull };
+			constexpr AssetHandle Other{ 0xd000000000000003ull };
+			constexpr uint64_t Key = 0x51;
+			const Result<std::vector<AssetHandle>> none = cache.FindSourcesWithKey(Key);
+			REQUIRE_MESSAGE(none.has_value(), none.error().ToString());
+			CHECK(none->empty());
+
+			REQUIRE(cache.Store(Wood, Key, MakeImportFor(Wood)).has_value());
+			REQUIRE(cache.Store(Other, Key + 1, MakeImportFor(Other)).has_value());
+			REQUIRE(cache.Store(Second, Key, MakeImportFor(Second)).has_value());
+			REQUIRE(cache.Store(Track, Key, MakeTrackImport({ "mesh:0:Straight" })).has_value());
+			REQUIRE(vfs.Exists(CacheFile(DeriveSubAssetHandle(Track, "mesh:0:Straight"), Key, ".bin")));
+			REQUIRE(vfs.WriteFileAtomic(Test::ParseVfsPath("cache://AssetLocations.json"), AsBytes(std::string_view("{}"))).has_value());
+			REQUIRE(vfs.CreateDirectories(Test::ParseVfsPath("cache://NotAHandleAtAll1")).has_value());
+
+			const Result<std::vector<AssetHandle>> found = cache.FindSourcesWithKey(Key);
+			REQUIRE_MESSAGE(found.has_value(), found.error().ToString());
+			CHECK(*found == std::vector<AssetHandle>{ Second, Track, Wood });
+			const Result<std::vector<AssetHandle>> other = cache.FindSourcesWithKey(Key + 1);
+			REQUIRE(other.has_value());
+			CHECK(*other == std::vector<AssetHandle>{ Other });
+			const Result<std::vector<AssetHandle>> unknown = cache.FindSourcesWithKey(Key + 2);
+			REQUIRE(unknown.has_value());
+			CHECK(unknown->empty());
+
+			// A cache whose root does not exist yet finds nothing.
+			const AssetCache missing(vfs, Test::ParseVfsPath("cache://Missing/Below"));
+			const Result<std::vector<AssetHandle>> nothing = missing.FindSourcesWithKey(Key);
+			REQUIRE_MESSAGE(nothing.has_value(), nothing.error().ToString());
+			CHECK(nothing->empty());
 		}
 
 		TEST_CASE("AssetCache: a cache below a subdirectory keeps its layout there")

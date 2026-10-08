@@ -13,8 +13,10 @@
 
 #include <algorithm>
 #include <format>
+#include <optional>
 #include <set>
 #include <utility>
+#include <vector>
 
 namespace Engine {
 
@@ -622,6 +624,34 @@ namespace Engine {
 			}
 		}
 		return WithContext(Utils::RemoveIfPresent(vfs, directory), context);
+	}
+
+	Result<std::vector<AssetHandle>> AssetCache::FindSourcesWithKey(uint64_t key) const
+	{
+		const VirtualFileSystem& vfs = *m_State->Vfs;
+		const VfsPath& root = m_State->Root;
+		std::vector<AssetHandle> sources;
+		Result<std::vector<VfsEntry>> listed = vfs.List(root, false);
+		if (!listed.has_value())
+		{
+			if (listed.error().GetCode() == ErrorCode::NotFound)
+				return sources;
+			return std::unexpected(std::move(listed).error().WithContext(std::format("while listing the cache '{}'", root.ToString())));
+		}
+		// Only the handle directories (16 hex digits); AssetLocations.json and anything else at the root is skipped.
+		for (const VfsEntry& entry : *listed)
+		{
+			if (!entry.Info.IsDirectory || entry.Path.GetFileName().size() != 16)
+				continue;
+			const std::optional<UUID> handle = UUID::FromString(entry.Path.GetFileName());
+			if (!handle.has_value() || !handle->IsValid())
+				continue;
+			ENGINE_TRY_ASSIGN(const VfsPath manifestPath, Utils::KeyFile(root, *handle, key, ManifestExtension));
+			if (vfs.Exists(manifestPath))
+				sources.push_back(*handle);
+		}
+		std::ranges::sort(sources);
+		return sources;
 	}
 
 	const VfsPath& AssetCache::GetRoot() const

@@ -100,8 +100,10 @@ namespace Engine {
 			CHECK(image->Width == DefaultViewportScreenshotWidth);
 			CHECK(image->Height == DefaultViewportScreenshotHeight);
 			// The launcher state has no scene: the scene renderer's empty view, the default clear colour (0.05, 0.05, 0.06)
-			// through the sRGB OETF, everywhere (the view under the UI, not the UI).
-			const std::array<int, 4> expected = { 63, 63, 69, 255 };
+			// through the default post chain (§8.9: the AgX Base tonemapper, the sRGB OETF and the +-1 LSB dither; bloom and
+			// FXAA leave a uniform image as it is), everywhere (the view under the UI, not the UI): 70, 70, 78 (TonemapPass.h's
+			// AgX formula, computed in double precision).
+			const std::array<int, 4> expected = { 70, 70, 78, 255 };
 			for (uint32_t y : { 0U, image->Height / 2, image->Height - 1 })
 			{
 				const std::span<const std::byte> row = image->GetRow(y);

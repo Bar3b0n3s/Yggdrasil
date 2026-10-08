@@ -14,7 +14,7 @@ namespace Engine {
 
 	ViewportCapture::~ViewportCapture() = default;
 
-	Result<Scope<ViewportCapture>> ViewportCapture::CreateForScenes(GraphicsDevice& device, const SceneRendererPipelines& pipelines,
+	Result<Scope<ViewportCapture>> ViewportCapture::CreateForScenes(GraphicsDevice& device, SceneRendererPipelines& pipelines,
 		GpuResourceCache& cache, AssetManager& assets)
 	{
 		ENGINE_TRY_ASSIGN(Scope<SceneRenderer> renderer, SceneRenderer::Create(device, pipelines, cache, assets, { .Width = 1, .Height = 1 }));

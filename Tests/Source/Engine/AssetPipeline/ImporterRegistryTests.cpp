@@ -9,7 +9,7 @@ namespace Engine {
 
 	TEST_SUITE("AssetPipeline")
 	{
-		TEST_CASE("ImporterRegistry: the built-in importers cover the M6 extensions")
+		TEST_CASE("ImporterRegistry: the built-in importers cover their extensions")
 		{
 			ImporterRegistry importers;
 			RegisterBuiltinImporters(importers);
@@ -32,6 +32,8 @@ namespace Engine {
 				{ ".prefab", "Prefab", AssetType::Prefab },
 				{ ".ttf", "Font", AssetType::Font },
 				{ ".otf", "Font", AssetType::Font },
+				{ ".hdr", "Environment", AssetType::Environment },
+				{ ".exr", "Environment", AssetType::Environment },
 			};
 			for (const Expected& entry : expected)
 			{
@@ -44,9 +46,9 @@ namespace Engine {
 				CHECK(importer->GetVersion() >= 1);
 			}
 			CHECK(importers.FindForExtension(".GLB") == importers.FindById("Gltf"));
-			CHECK(importers.FindForExtension(".hdr") == nullptr);
+			CHECK(importers.FindForExtension(".HDR") == importers.FindById("Environment"));
 			CHECK(importers.FindForExtension(".luau") == nullptr);
-			CHECK(importers.GetImporters().size() == 6);
+			CHECK(importers.GetImporters().size() == 7);
 		}
 
 		TEST_CASE("ImporterRegistry: Describe lists ids, main types and extensions sorted by id")
@@ -54,8 +56,8 @@ namespace Engine {
 			ImporterRegistry importers;
 			RegisterBuiltinImporters(importers);
 			const std::vector<AssetImporterDescription> descriptions = importers.Describe();
-			REQUIRE(descriptions.size() == 6);
-			CHECK(descriptions.front().Id == "Font");
+			REQUIRE(descriptions.size() == 7);
+			CHECK(descriptions.front().Id == "Environment");
 			CHECK(descriptions.back().Id == "Texture");
 			for (size_t index = 1; index < descriptions.size(); ++index)
 				CHECK(descriptions[index - 1].Id < descriptions[index].Id);
@@ -75,6 +77,7 @@ namespace Engine {
 			CHECK(registry->FindStruct("TextureImportSettings") != nullptr);
 			CHECK(registry->FindStruct("GltfImportSettings") != nullptr);
 			CHECK(registry->FindStruct("FontImportSettings") != nullptr);
+			CHECK(registry->FindStruct("EnvironmentImportSettings") != nullptr);
 			CHECK(registry->FindEnum("TextureUsage") != nullptr);
 		}
 	}

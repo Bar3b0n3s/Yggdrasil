@@ -1706,7 +1706,7 @@
 						"type": "string"
 					},
 					"debugView": {
-						"description": "A debug view to render (not supported before M8; refused when present).",
+						"description": "A debug view to render instead of the lit image, ignoring case: \"Lit\" (the default, also for \"\"), \"Albedo\", \"Normals\", \"Roughness\", \"Metallic\" or \"Emissive\". A data view stores each value v as round(255 v).",
 						"type": "string"
 					},
 					"annotate": {

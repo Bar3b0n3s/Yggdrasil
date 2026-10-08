@@ -1,0 +1,1054 @@
+{
+	"Format": "Provenance",
+	"Version": 1,
+	"Entries": [
+		{
+			"Path": "Assets/Materials/Golden/AlphaModes/BlendBlue.material",
+			"XXH64": "9afb766a25ed1271",
+			"Method": "asset.create",
+			"RequestId": 63,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/AlphaModes/BlendBlue.material.meta",
+			"XXH64": "36ecf5e400765c64",
+			"Method": "asset.create",
+			"RequestId": 63,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/AlphaModes/BlendGreen.material",
+			"XXH64": "aeb939d0605f941c",
+			"Method": "asset.create",
+			"RequestId": 62,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/AlphaModes/BlendGreen.material.meta",
+			"XXH64": "9f8b74e621636d48",
+			"Method": "asset.create",
+			"RequestId": 62,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/AlphaModes/BlendRed.material",
+			"XXH64": "6abb3884adb781d6",
+			"Method": "asset.create",
+			"RequestId": 61,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/AlphaModes/BlendRed.material.meta",
+			"XXH64": "e91c05665b65d9ce",
+			"Method": "asset.create",
+			"RequestId": 61,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/AlphaModes/GlassDoubleSided.material",
+			"XXH64": "09ff406d4c938438",
+			"Method": "asset.create",
+			"RequestId": 60,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/AlphaModes/GlassDoubleSided.material.meta",
+			"XXH64": "e872746af5def6bf",
+			"Method": "asset.create",
+			"RequestId": 60,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/AlphaModes/Ground.material",
+			"XXH64": "0edd2964060cc836",
+			"Method": "asset.create",
+			"RequestId": 56,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/AlphaModes/Ground.material.meta",
+			"XXH64": "ed5b9d4f4cdf5fd4",
+			"Method": "asset.create",
+			"RequestId": 56,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/AlphaModes/MaskDoubleSided.material",
+			"XXH64": "b9fabba931a618e1",
+			"Method": "asset.create",
+			"RequestId": 58,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/AlphaModes/MaskDoubleSided.material.meta",
+			"XXH64": "210338a08c444fb2",
+			"Method": "asset.create",
+			"RequestId": 58,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/AlphaModes/MaskSingleSided.material",
+			"XXH64": "044e2cc76a6eb487",
+			"Method": "asset.create",
+			"RequestId": 57,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/AlphaModes/MaskSingleSided.material.meta",
+			"XXH64": "748f5f4dd692d084",
+			"Method": "asset.create",
+			"RequestId": 57,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/AlphaModes/Opaque.material",
+			"XXH64": "3e40e283c9e0e3e2",
+			"Method": "asset.create",
+			"RequestId": 59,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/AlphaModes/Opaque.material.meta",
+			"XXH64": "e4d8137be64cf10e",
+			"Method": "asset.create",
+			"RequestId": 59,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/Bloom/CyanOrb.material",
+			"XXH64": "24802b6bafbd17bb",
+			"Method": "asset.create",
+			"RequestId": 50,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/Bloom/CyanOrb.material.meta",
+			"XXH64": "56e5e1e91ba4fe9d",
+			"Method": "asset.create",
+			"RequestId": 50,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/Bloom/GreenBar.material",
+			"XXH64": "721dfdd47ac598a3",
+			"Method": "asset.create",
+			"RequestId": 52,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/Bloom/GreenBar.material.meta",
+			"XXH64": "58e993ca08355df4",
+			"Method": "asset.create",
+			"RequestId": 52,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/Bloom/Ground.material",
+			"XXH64": "a6af0eef5d9fae8f",
+			"Method": "asset.create",
+			"RequestId": 48,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/Bloom/Ground.material.meta",
+			"XXH64": "8bdb364182aa92ad",
+			"Method": "asset.create",
+			"RequestId": 48,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/Bloom/RedOrb.material",
+			"XXH64": "64aa75dbd5796cd4",
+			"Method": "asset.create",
+			"RequestId": 49,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/Bloom/RedOrb.material.meta",
+			"XXH64": "4b6343cd4d1ff3ef",
+			"Method": "asset.create",
+			"RequestId": 49,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/Bloom/WhiteSpark.material",
+			"XXH64": "9f54f2f1f8194dfe",
+			"Method": "asset.create",
+			"RequestId": 51,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/Bloom/WhiteSpark.material.meta",
+			"XXH64": "fe76bbbdccf8d143",
+			"Method": "asset.create",
+			"RequestId": 51,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/DebugDraw/Ground.material",
+			"XXH64": "231d4a91f9e3db68",
+			"Method": "asset.create",
+			"RequestId": 67,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/DebugDraw/Ground.material.meta",
+			"XXH64": "82b6ae2fd89e9974",
+			"Method": "asset.create",
+			"RequestId": 67,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/DebugDraw/Occluder.material",
+			"XXH64": "c9cad59cbf76bb28",
+			"Method": "asset.create",
+			"RequestId": 68,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/DebugDraw/Occluder.material.meta",
+			"XXH64": "2b0fb9b47e280646",
+			"Method": "asset.create",
+			"RequestId": 68,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/GltfFixture/Ground.material",
+			"XXH64": "e4bb4d7e41af9011",
+			"Method": "asset.create",
+			"RequestId": 77,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/GltfFixture/Ground.material.meta",
+			"XXH64": "7e723adcf75e26bd",
+			"Method": "asset.create",
+			"RequestId": 77,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/IblOnly/Chalk.material",
+			"XXH64": "555acc45417a2d17",
+			"Method": "asset.create",
+			"RequestId": 27,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/IblOnly/Chalk.material.meta",
+			"XXH64": "e1fd607dcaa828bc",
+			"Method": "asset.create",
+			"RequestId": 27,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/IblOnly/Chrome.material",
+			"XXH64": "44da36f1010ca7dc",
+			"Method": "asset.create",
+			"RequestId": 28,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/IblOnly/Chrome.material.meta",
+			"XXH64": "2f087de8adb1bb81",
+			"Method": "asset.create",
+			"RequestId": 28,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/IblOnly/Gold.material",
+			"XXH64": "0b2b94dfd1c95bc6",
+			"Method": "asset.create",
+			"RequestId": 29,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/IblOnly/Gold.material.meta",
+			"XXH64": "5cfc10bf0f5c7dea",
+			"Method": "asset.create",
+			"RequestId": 29,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/IblOnly/Ground.material",
+			"XXH64": "e4bb4d7e41af9011",
+			"Method": "asset.create",
+			"RequestId": 26,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/IblOnly/Ground.material.meta",
+			"XXH64": "a2db8825203934a8",
+			"Method": "asset.create",
+			"RequestId": 26,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/IblOnly/Plastic.material",
+			"XXH64": "004fa93010525eae",
+			"Method": "asset.create",
+			"RequestId": 30,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/IblOnly/Plastic.material.meta",
+			"XXH64": "5b9327e0da52f851",
+			"Method": "asset.create",
+			"RequestId": 30,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic0_Roughness0.material",
+			"XXH64": "59d7d51039296796",
+			"Method": "asset.create",
+			"RequestId": 5,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic0_Roughness0.material.meta",
+			"XXH64": "ef23c57880005b5e",
+			"Method": "asset.create",
+			"RequestId": 5,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic0_Roughness100.material",
+			"XXH64": "9a57b8e62c699f22",
+			"Method": "asset.create",
+			"RequestId": 10,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic0_Roughness100.material.meta",
+			"XXH64": "23350f325d0ba930",
+			"Method": "asset.create",
+			"RequestId": 10,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic0_Roughness20.material",
+			"XXH64": "b0d58226fb5c73f7",
+			"Method": "asset.create",
+			"RequestId": 6,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic0_Roughness20.material.meta",
+			"XXH64": "a7f7c5642d1d6bd0",
+			"Method": "asset.create",
+			"RequestId": 6,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic0_Roughness40.material",
+			"XXH64": "44d1cf6c4f5967fc",
+			"Method": "asset.create",
+			"RequestId": 7,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic0_Roughness40.material.meta",
+			"XXH64": "29185956bd1af6f0",
+			"Method": "asset.create",
+			"RequestId": 7,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic0_Roughness60.material",
+			"XXH64": "7222a55be5bf2bcb",
+			"Method": "asset.create",
+			"RequestId": 8,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic0_Roughness60.material.meta",
+			"XXH64": "3b81547efbda068e",
+			"Method": "asset.create",
+			"RequestId": 8,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic0_Roughness80.material",
+			"XXH64": "64709d73e497edd6",
+			"Method": "asset.create",
+			"RequestId": 9,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic0_Roughness80.material.meta",
+			"XXH64": "974647c9889c327e",
+			"Method": "asset.create",
+			"RequestId": 9,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic100_Roughness0.material",
+			"XXH64": "18d1badda815c59f",
+			"Method": "asset.create",
+			"RequestId": 17,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic100_Roughness0.material.meta",
+			"XXH64": "a7acdaede4631315",
+			"Method": "asset.create",
+			"RequestId": 17,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic100_Roughness100.material",
+			"XXH64": "d50b19ad72d534d7",
+			"Method": "asset.create",
+			"RequestId": 22,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic100_Roughness100.material.meta",
+			"XXH64": "0e49cf15d6a06ebe",
+			"Method": "asset.create",
+			"RequestId": 22,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic100_Roughness20.material",
+			"XXH64": "49df78eeb4f6240c",
+			"Method": "asset.create",
+			"RequestId": 18,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic100_Roughness20.material.meta",
+			"XXH64": "b9f9a08b5dba67a3",
+			"Method": "asset.create",
+			"RequestId": 18,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic100_Roughness40.material",
+			"XXH64": "62f1450d9bc43252",
+			"Method": "asset.create",
+			"RequestId": 19,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic100_Roughness40.material.meta",
+			"XXH64": "9e0332cf40e29ab0",
+			"Method": "asset.create",
+			"RequestId": 19,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic100_Roughness60.material",
+			"XXH64": "76725fa2b2df9dec",
+			"Method": "asset.create",
+			"RequestId": 20,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic100_Roughness60.material.meta",
+			"XXH64": "69013de6b69bf292",
+			"Method": "asset.create",
+			"RequestId": 20,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic100_Roughness80.material",
+			"XXH64": "9103c765bd95e505",
+			"Method": "asset.create",
+			"RequestId": 21,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic100_Roughness80.material.meta",
+			"XXH64": "a6fff255aa9629a6",
+			"Method": "asset.create",
+			"RequestId": 21,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic50_Roughness0.material",
+			"XXH64": "f8d29619d4899e0e",
+			"Method": "asset.create",
+			"RequestId": 11,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic50_Roughness0.material.meta",
+			"XXH64": "06e6772ba8f330e9",
+			"Method": "asset.create",
+			"RequestId": 11,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic50_Roughness100.material",
+			"XXH64": "f790807eef6845e2",
+			"Method": "asset.create",
+			"RequestId": 16,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic50_Roughness100.material.meta",
+			"XXH64": "2df33c3c55b6da66",
+			"Method": "asset.create",
+			"RequestId": 16,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic50_Roughness20.material",
+			"XXH64": "b65888167bd75813",
+			"Method": "asset.create",
+			"RequestId": 12,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic50_Roughness20.material.meta",
+			"XXH64": "2a89753eccc773ff",
+			"Method": "asset.create",
+			"RequestId": 12,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic50_Roughness40.material",
+			"XXH64": "407030b1e62fc623",
+			"Method": "asset.create",
+			"RequestId": 13,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic50_Roughness40.material.meta",
+			"XXH64": "8aa6601c2912419d",
+			"Method": "asset.create",
+			"RequestId": 13,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic50_Roughness60.material",
+			"XXH64": "829ed320f94bee36",
+			"Method": "asset.create",
+			"RequestId": 14,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic50_Roughness60.material.meta",
+			"XXH64": "308d9eeffd270383",
+			"Method": "asset.create",
+			"RequestId": 14,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic50_Roughness80.material",
+			"XXH64": "3e7aa0834e771970",
+			"Method": "asset.create",
+			"RequestId": 15,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/MaterialGrid/Metallic50_Roughness80.material.meta",
+			"XXH64": "66ef8fc8f86756fa",
+			"Method": "asset.create",
+			"RequestId": 15,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/Text/Ground.material",
+			"XXH64": "e4bb4d7e41af9011",
+			"Method": "asset.create",
+			"RequestId": 72,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/Text/Ground.material.meta",
+			"XXH64": "7d15fbf7d4d2d475",
+			"Method": "asset.create",
+			"RequestId": 72,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/Text/Occluder.material",
+			"XXH64": "193d46a83e371432",
+			"Method": "asset.create",
+			"RequestId": 73,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/Text/Occluder.material.meta",
+			"XXH64": "a161bcb0754e72ff",
+			"Method": "asset.create",
+			"RequestId": 73,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/Tonemappers/Blue.material",
+			"XXH64": "4427c65303aeb311",
+			"Method": "asset.create",
+			"RequestId": 38,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/Tonemappers/Blue.material.meta",
+			"XXH64": "1a072b7832b526cb",
+			"Method": "asset.create",
+			"RequestId": 38,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/Tonemappers/Emissive0_5.material",
+			"XXH64": "93fd4bee25fc4ae8",
+			"Method": "asset.create",
+			"RequestId": 40,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/Tonemappers/Emissive0_5.material.meta",
+			"XXH64": "3ee724cbe243bba0",
+			"Method": "asset.create",
+			"RequestId": 40,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/Tonemappers/Emissive128.material",
+			"XXH64": "feaa94dfbbb91c6c",
+			"Method": "asset.create",
+			"RequestId": 44,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/Tonemappers/Emissive128.material.meta",
+			"XXH64": "8534c9458e1df67a",
+			"Method": "asset.create",
+			"RequestId": 44,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/Tonemappers/Emissive2.material",
+			"XXH64": "840b5b36bd851ecb",
+			"Method": "asset.create",
+			"RequestId": 41,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/Tonemappers/Emissive2.material.meta",
+			"XXH64": "93505774bc2d56ac",
+			"Method": "asset.create",
+			"RequestId": 41,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/Tonemappers/Emissive32.material",
+			"XXH64": "4003ac504ac6b5f7",
+			"Method": "asset.create",
+			"RequestId": 43,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/Tonemappers/Emissive32.material.meta",
+			"XXH64": "270a70c956c58430",
+			"Method": "asset.create",
+			"RequestId": 43,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/Tonemappers/Emissive8.material",
+			"XXH64": "39f3c51b89fa215a",
+			"Method": "asset.create",
+			"RequestId": 42,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/Tonemappers/Emissive8.material.meta",
+			"XXH64": "9c92e02cbfa9164f",
+			"Method": "asset.create",
+			"RequestId": 42,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/Tonemappers/Green.material",
+			"XXH64": "39ca358ea79e944f",
+			"Method": "asset.create",
+			"RequestId": 37,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/Tonemappers/Green.material.meta",
+			"XXH64": "ed356030e4bd3308",
+			"Method": "asset.create",
+			"RequestId": 37,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/Tonemappers/Ground.material",
+			"XXH64": "93b9b5f07e8bf731",
+			"Method": "asset.create",
+			"RequestId": 34,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/Tonemappers/Ground.material.meta",
+			"XXH64": "6415904802ee98a3",
+			"Method": "asset.create",
+			"RequestId": 34,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/Tonemappers/Orange.material",
+			"XXH64": "02b82ecdb16446c9",
+			"Method": "asset.create",
+			"RequestId": 36,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/Tonemappers/Orange.material.meta",
+			"XXH64": "6eb849467a707ddd",
+			"Method": "asset.create",
+			"RequestId": 36,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/Tonemappers/Red.material",
+			"XXH64": "16f10ae6314ae7e4",
+			"Method": "asset.create",
+			"RequestId": 35,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/Tonemappers/Red.material.meta",
+			"XXH64": "ca93ee5398686751",
+			"Method": "asset.create",
+			"RequestId": 35,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/Tonemappers/White.material",
+			"XXH64": "154a348e92bed617",
+			"Method": "asset.create",
+			"RequestId": 39,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Golden/Tonemappers/White.material.meta",
+			"XXH64": "d17262071f802080",
+			"Method": "asset.create",
+			"RequestId": 39,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Models/Golden/NormalMapped.gltf",
+			"XXH64": "0e0fa6232698a6e9",
+			"Method": "asset.import",
+			"RequestId": 4,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Models/Golden/NormalMapped.gltf.meta",
+			"XXH64": "6f6a80b3a3ceef6d",
+			"Method": "ui",
+			"RequestId": null,
+			"Client": "ui",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Models/Golden/Textured.bin",
+			"XXH64": "dbbf118a73e29b31",
+			"Method": "asset.import",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Models/Golden/Textured.bin.meta",
+			"XXH64": "22e412e0515075dd",
+			"Method": "asset.import",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Models/Golden/Textured.gltf",
+			"XXH64": "0df2b28d7482401e",
+			"Method": "asset.import",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Models/Golden/Textured.gltf.meta",
+			"XXH64": "739345b02039efe5",
+			"Method": "ui",
+			"RequestId": null,
+			"Client": "ui",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Models/Golden/Textures/Checker.png",
+			"XXH64": "65e5c00da15713ba",
+			"Method": "asset.import",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Models/Golden/Textures/Checker.png.meta",
+			"XXH64": "1fc6de8fd90dca0c",
+			"Method": "asset.import",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/Golden/AlphaModes.scene",
+			"XXH64": "eec75f37edca8a8c",
+			"Method": "scene.save",
+			"RequestId": 66,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/Golden/AlphaModes.scene.meta",
+			"XXH64": "3c9214c6ee2373a9",
+			"Method": "edit.batch",
+			"RequestId": 65,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/Golden/Bloom.scene",
+			"XXH64": "ea63ed40aa3cb539",
+			"Method": "scene.save",
+			"RequestId": 55,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/Golden/Bloom.scene.meta",
+			"XXH64": "a0033ea0eee40bde",
+			"Method": "edit.batch",
+			"RequestId": 54,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/Golden/DebugDraw.scene",
+			"XXH64": "87188662739de170",
+			"Method": "scene.save",
+			"RequestId": 71,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/Golden/DebugDraw.scene.meta",
+			"XXH64": "64df6021602ead44",
+			"Method": "edit.batch",
+			"RequestId": 70,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/Golden/GltfFixture.scene",
+			"XXH64": "b53e748aad1d1385",
+			"Method": "scene.save",
+			"RequestId": 80,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/Golden/GltfFixture.scene.meta",
+			"XXH64": "2d65fa67746d9196",
+			"Method": "edit.batch",
+			"RequestId": 79,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/Golden/IblOnly.scene",
+			"XXH64": "445d10273d988436",
+			"Method": "scene.save",
+			"RequestId": 33,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/Golden/IblOnly.scene.meta",
+			"XXH64": "b5737101f7a732f5",
+			"Method": "edit.batch",
+			"RequestId": 32,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/Golden/MaterialGrid.scene",
+			"XXH64": "bb9de17e66b56bce",
+			"Method": "scene.save",
+			"RequestId": 25,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/Golden/MaterialGrid.scene.meta",
+			"XXH64": "90390d2897b4d205",
+			"Method": "edit.batch",
+			"RequestId": 24,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/Golden/Text.scene",
+			"XXH64": "b9263796b036a398",
+			"Method": "scene.save",
+			"RequestId": 76,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/Golden/Text.scene.meta",
+			"XXH64": "7954a26a80a02f40",
+			"Method": "edit.batch",
+			"RequestId": 75,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/Golden/Tonemappers.scene",
+			"XXH64": "8b1018e0a5c26692",
+			"Method": "scene.save",
+			"RequestId": 47,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/Golden/Tonemappers.scene.meta",
+			"XXH64": "5322f090c3cb52b2",
+			"Method": "edit.batch",
+			"RequestId": 46,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Textures/Golden/Rgba.png",
+			"XXH64": "2a4bed42f9a31ba0",
+			"Method": "asset.import",
+			"RequestId": 2,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Textures/Golden/Rgba.png.meta",
+			"XXH64": "42cb24a12abbf95a",
+			"Method": "asset.import",
+			"RequestId": 2,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "FeatureTest.eproj",
+			"XXH64": "d663c7e6173b360c",
+			"Method": "project.create",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		}
+	]
+}

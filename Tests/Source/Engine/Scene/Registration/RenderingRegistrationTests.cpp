@@ -72,6 +72,12 @@ namespace Engine {
 			REQUIRE(blur != nullptr);
 			CHECK(blur->GetMeta().Min == 0.0);
 			CHECK(blur->GetMeta().Max == 1.0);
+			// The environment's intensity is bounded by the largest finite binary16 value, as the renderer clamps it
+			// (Docs/Decisions/0013-m8-decisions.md decision 27).
+			const FieldInfo* intensity = registry->FindComponent("Environment")->FindField("Intensity");
+			REQUIRE(intensity != nullptr);
+			CHECK(intensity->GetMeta().Min == 0.0);
+			CHECK(intensity->GetMeta().Max == 65504.0);
 
 			CHECK(registry->FindComponent("MeshRenderer")->FindField("Mesh")->GetMeta().AssetFilter == "Mesh");
 			CHECK(registry->FindComponent("MeshRenderer")->FindField("Materials")->GetType().GetElement()->GetAssetTypeName() == "Material");
@@ -116,6 +122,7 @@ namespace Engine {
 			const ComponentInfo& text = FindRenderingComponent(*registry, "Text");
 			CHECK(text.FindField("Size")->GetMeta().Unit == "px");
 			CHECK(text.FindField("Size")->GetMeta().Min == 1.0);
+			CHECK(text.FindField("Size")->GetMeta().Max == 100000.0);
 			CHECK(text.FindField("Anchor")->GetMeta().Max == 1.0);
 			CHECK(text.FindField("Offset")->GetMeta().Unit == "px");
 			CHECK_FALSE(text.FindField("Offset")->GetMeta().Min.has_value());

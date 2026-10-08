@@ -1,0 +1,320 @@
+{
+	"Format": "Scene",
+	"Version": 1,
+	"Name": "AlphaModes",
+	"Seed": 0,
+	"ComponentVersions": {
+		"Transform": 1,
+		"MeshRenderer": 1,
+		"Camera": 1,
+		"PointLight": 1,
+		"SpotLight": 1,
+		"Environment": 1,
+		"PostProcess": 1
+	},
+	"Entities": [
+		{
+			"ID": "c832aa712100fb9e",
+			"Name": "Camera",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 1.5, 6.5],
+					"Rotation": [-0.06975647, 0, 0, 0.9975641],
+					"Scale": [1, 1, 1]
+				},
+				"Camera": {
+					"Projection": "Perspective",
+					"VerticalFov": 45,
+					"OrthographicSize": 10,
+					"NearClip": 0.1,
+					"FarClip": 1000,
+					"Primary": true,
+					"Clear": "Color",
+					"ClearColor": [0.18, 0.2, 0.24]
+				}
+			}
+		},
+		{
+			"ID": "fc9e06d74cbecdc3",
+			"Name": "Environment",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Environment": {
+					"Environment": "0000000000000201",
+					"Intensity": 0.8,
+					"Rotation": 0,
+					"ShowSkybox": false,
+					"SkyboxBlur": 0,
+					"FallbackColor": [0.2, 0.22, 0.25]
+				}
+			}
+		},
+		{
+			"ID": "e5e96ab5e2011e2c",
+			"Name": "PostProcess",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"PostProcess": {
+					"ExposureEV": 0,
+					"Tonemap": "AgX",
+					"SsaoEnabled": false,
+					"SsaoRadius": 0.5,
+					"SsaoIntensity": 1,
+					"SsaoQuality": "Medium",
+					"BloomEnabled": true,
+					"BloomIntensity": 0.04,
+					"FxaaEnabled": true
+				}
+			}
+		},
+		{
+			"ID": "dfc8e5c9249c64cb",
+			"Name": "PointLight",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-2.2, 2.4, 1.8],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"PointLight": {
+					"Color": [1, 0.75, 0.45],
+					"Intensity": 12,
+					"Range": 8,
+					"SourceRadius": 0.05
+				}
+			}
+		},
+		{
+			"ID": "9a37e13c3fdf2091",
+			"Name": "SpotLight",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [2.2, 4, 2.5],
+					"Rotation": [-0.5, 0, 0, 0.8660254],
+					"Scale": [1, 1, 1]
+				},
+				"SpotLight": {
+					"Color": [0.55, 0.7, 1],
+					"Intensity": 40,
+					"Range": 12,
+					"InnerConeAngle": 18,
+					"OuterConeAngle": 28,
+					"CastShadows": false,
+					"SourceRadius": 0.05
+				}
+			}
+		},
+		{
+			"ID": "bc65cb8b2e7b85e2",
+			"Name": "Ground",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [12, 1, 12]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000103",
+					"Materials": ["c64137b1deadb184"],
+					"CastShadows": false,
+					"ReceiveShadows": false,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "8ef3b0c8128b35dc",
+			"Name": "OpaqueCube",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-3, 0.5, 0],
+					"Rotation": [0, 0.21643962, 0, 0.976296],
+					"Scale": [1, 1, 1]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["e41456778ff60d87"],
+					"CastShadows": false,
+					"ReceiveShadows": false,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "cad93b162926cd2f",
+			"Name": "GlassSphere",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-2.4, 0.6, 1.2],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.9, 0.9, 0.9]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000102",
+					"Materials": ["6aea49fb6a761a7e"],
+					"CastShadows": false,
+					"ReceiveShadows": false,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "04a18b8969be7125",
+			"Name": "MaskFront",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-1.5, 1, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1.4, 1.4, 1]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000104",
+					"Materials": ["d3d9bfb6f90307f8"],
+					"CastShadows": false,
+					"ReceiveShadows": false,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "eb8bfecba81e72e1",
+			"Name": "MaskBackDoubleSided",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 1, 0],
+					"Rotation": [0, 1, 0, 6.123234e-17],
+					"Scale": [1.4, 1.4, 1]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000104",
+					"Materials": ["041bd7cbdb995f08"],
+					"CastShadows": false,
+					"ReceiveShadows": false,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "5d9711ca9e3f75fe",
+			"Name": "MaskBackSingleSided",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [1.5, 1, 0],
+					"Rotation": [0, 1, 0, 6.123234e-17],
+					"Scale": [1.4, 1.4, 1]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000104",
+					"Materials": ["d3d9bfb6f90307f8"],
+					"CastShadows": false,
+					"ReceiveShadows": false,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "2d356ac124697ac9",
+			"Name": "BlendRed",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [2.6, 1, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.9, 0.9, 1]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000104",
+					"Materials": ["fd9f210f89ea021c"],
+					"CastShadows": false,
+					"ReceiveShadows": false,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "7f4f82a7f738baac",
+			"Name": "BlendGreen",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [3, 1.25, -0.4],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.9, 0.9, 1]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000104",
+					"Materials": ["e0ac5612f5a11bf0"],
+					"CastShadows": false,
+					"ReceiveShadows": false,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "fd31babba96acdef",
+			"Name": "BlendBlue",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [3.4, 0.85, -0.8],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.9, 0.9, 1]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000104",
+					"Materials": ["f38819f9908d24c9"],
+					"CastShadows": false,
+					"ReceiveShadows": false,
+					"Visible": true
+				}
+			}
+		}
+	]
+}

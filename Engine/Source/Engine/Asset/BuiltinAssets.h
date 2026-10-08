@@ -33,10 +33,9 @@ namespace Engine {
 		return handle.GetValue() >= FirstBuiltinAssetHandle && handle.GetValue() <= LastBuiltinAssetHandle;
 	}
 
-	// The built-in handles of M6, grouped in blocks of 0x40 per type. Reserved for later milestones (added to
-	// EngineAssets.json and here by them): 0x0186 the blue-noise texture (M8, §8.4; a Generated entry, generator
-	// "BlueNoise") and 0x0241-0x024a the sound-effect presets Click, Blip, Coin, Jump, Hit, Explosion, PowerUp, LineClear,
-	// Win and Lose (M12, §7.1).
+	// The built-in handles, grouped in blocks of 0x40 per type. Reserved for a later milestone (added to EngineAssets.json and
+	// here by it): 0x0241-0x024a the sound-effect presets Click, Blip, Coin, Jump, Hit, Explosion, PowerUp, LineClear, Win and
+	// Lose (M12, §7.1).
 	struct BuiltinAssetHandles
 	{
 		BuiltinAssetHandles() = delete;
@@ -58,17 +57,23 @@ namespace Engine {
 		static constexpr AssetHandle FlatNormalTexture{ 0x0183 };
 		static constexpr AssetHandle CheckerTexture{ 0x0184 };
 		static constexpr AssetHandle MissingTexture{ 0x0185 };
+		// engine://Textures/BlueNoise (M8, §8.4): the tonemap's 64x64 R8 dither texture, a Generated entry whose generator
+		// "BlueNoise" (Renderer/BlueNoise.h) the editor registers (EditorCore/EngineAssetGenerators.h;
+		// Docs/Decisions/0013-m8-decisions.md decision 8).
+		static constexpr AssetHandle BlueNoiseTexture{ 0x0186 };
 		// engine://Fonts/Default: Inter Regular (SIL OFL), Resources/Fonts/Inter-Regular.ttf through FontImporter.
 		static constexpr AssetHandle DefaultFont{ 0x01c1 };
 		// engine://Environments/{Studio, Sky}: Poly Haven CC0 studio_small_09 and kloofendal_48d_partly_cloudy_puresky at 1k,
-		// Resources/Environments/*.hdr through EnvironmentImporter (M8; until then they have no importer and do not load).
+		// Resources/Environments/*.hdr through EnvironmentImporter (M8), baked with a GPU into the engine cooked cache
+		// (Editor --bake-engine-assets) and shipped in Engine.pak.
 		static constexpr AssetHandle StudioEnvironment{ 0x0201 };
 		static constexpr AssetHandle SkyEnvironment{ 0x0202 };
 	};
 
 	// The placeholder of a type (§7.2 failure policy): the unit Cube mesh, the Missing checker texture, the Error material
 	// and the Default font; null for the other types (scenes, prefabs, scripts and replays report their failure to the
-	// caller; the environment placeholder, the fallback colour, and the silent clip arrive with M8 and M12).
+	// caller; an environment has no placeholder asset: the renderer lights with the EnvironmentComponent's FallbackColor
+	// instead, GpuResourceCache::GetEnvironment; the silent clip arrives with M12).
 	[[nodiscard]] constexpr AssetHandle GetPlaceholderHandle(AssetType type)
 	{
 		switch (type)

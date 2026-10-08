@@ -47,6 +47,15 @@
 // (AssetHotReloader::BeginReimport) and only a completion whose ticket is still current is published and stored in the
 // cache (§7.5 race rule 2); the manager serializes the cache stores of one handle, which AssetCache requires.
 //
+// Cooked bakes without a GPU (M8; §7.4, §7.5; Docs/Decisions/0013-m8-decisions.md decision 9). An environment's import is a
+// GPU bake (EnvironmentImporter). Without an environment baker (--renderer none, tools), the manager serves it, before the
+// importer is ever called and even for a reimport, from a cooked bake with the same cache key: the source's own project
+// cache entry, then another source's (a copy of the same bytes, AssetCache::FindSourcesWithKey, in handle order), then the
+// engine cooked cache's (a copy of a built-in HDRI), adopting only an import that read nothing but its source and produced
+// just its main artifact. A bake taken from another entry is stored under the source's own handle too. Only when no cache
+// holds one does the importer run and fail with Unsupported and the hint "start the editor with a GPU once to bake this
+// environment" (ASSET_IMPORT_FAILED).
+//
 // Duplicated handles keep their original file (AssetRegistry::Scan's keeper rule). The manager passes the scan the
 // locations of the last session, which it keeps in the local, gitignored <CacheRoot>/AssetLocations.json (canonical
 // JSON {"Format": "AssetLocations", "Version": 1, "Assets": [{"Handle", "Path"}...]} sorted by handle, paths

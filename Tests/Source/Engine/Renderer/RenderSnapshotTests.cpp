@@ -4,6 +4,9 @@
 
 #include <glm/glm.hpp>
 
+#include <string>
+#include <string_view>
+
 // The render snapshot's reverse-Z projection (Architecture §8.3; Docs/Decisions/0012-m7-decisions.md decision 6).
 
 namespace Engine {
@@ -50,6 +53,39 @@ namespace Engine {
 			CHECK((orthographic * glm::vec4(8.0f, 0.0f, -1.0f, 1.0f)).x == doctest::Approx(1.0f));
 			CHECK((orthographic * glm::vec4(0.0f, 4.0f, -1.0f, 1.0f)).y == doctest::Approx(1.0f));
 			CHECK(orthographic[3][3] == 1.0f);
+		}
+
+		TEST_CASE("RenderSnapshot: debug views have their viewport.screenshot names, parsed ignoring case")
+		{
+			for (const RenderDebugView view : { RenderDebugView::Lit, RenderDebugView::Albedo, RenderDebugView::Normals, RenderDebugView::Roughness,
+					 RenderDebugView::Metallic, RenderDebugView::Emissive })
+			{
+				const std::string_view name = RenderDebugViewToString(view);
+				CAPTURE(std::string(name));
+				CHECK(ParseRenderDebugView(name) == view);
+			}
+			CHECK(RenderDebugViewToString(RenderDebugView::Albedo) == "Albedo");
+			CHECK(ParseRenderDebugView("NORMALS") == RenderDebugView::Normals);
+			CHECK(ParseRenderDebugView("emissive") == RenderDebugView::Emissive);
+			// M9's views and anything else are not M8 debug views.
+			CHECK_FALSE(ParseRenderDebugView("AO").has_value());
+			CHECK_FALSE(ParseRenderDebugView("ShadowCascades").has_value());
+			CHECK_FALSE(ParseRenderDebugView("").has_value());
+			CHECK_FALSE(ParseRenderDebugView("Albedo ").has_value());
+		}
+
+		TEST_CASE("RenderSnapshot: a default snapshot has no texts, no debug primitives and the Lit view")
+		{
+			const RenderSnapshot snapshot;
+			CHECK(snapshot.Texts.empty());
+			CHECK(snapshot.DebugDraw.IsEmpty());
+			CHECK(snapshot.DebugView == RenderDebugView::Lit);
+			const TextItem text;
+			CHECK(text.Size == 32.0f);
+			CHECK(text.Space == RenderTextSpace::Screen);
+			CHECK(text.Alignment == RenderTextAlignment::Center);
+			CHECK(text.Anchor == glm::vec2(0.5f));
+			CHECK_FALSE(text.Font.IsValid());
 		}
 	}
 

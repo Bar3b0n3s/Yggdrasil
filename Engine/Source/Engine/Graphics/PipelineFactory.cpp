@@ -455,6 +455,51 @@ namespace Engine {
 			return bindingLayouts;
 		}
 
+		// Whether two binding layout descs declare the same layout (what NVRHI and Vulkan create from them).
+		static bool IsSameBindingLayout(const nvrhi::BindingLayoutDesc& left, const nvrhi::BindingLayoutDesc& right)
+		{
+			return left.visibility == right.visibility && left.registerSpace == right.registerSpace
+				&& left.registerSpaceIsDescriptorSet == right.registerSpaceIsDescriptorSet
+				&& left.bindingOffsets.shaderResource == right.bindingOffsets.shaderResource
+				&& left.bindingOffsets.sampler == right.bindingOffsets.sampler
+				&& left.bindingOffsets.constantBuffer == right.bindingOffsets.constantBuffer
+				&& left.bindingOffsets.unorderedAccess == right.bindingOffsets.unorderedAccess && left.bindings == right.bindings;
+		}
+
+		// The pipeline's binding layouts, one per set: the shared one where `shared` has a non-null entry (checked against the
+		// description), a new one where it has a null entry; all new when `shared` is empty.
+		static Result<std::vector<nvrhi::BindingLayoutHandle>> ResolveBindingLayouts(GraphicsDevice& device, const PipelineLayoutDescription& layout,
+			const std::vector<nvrhi::BindingLayoutHandle>& shared)
+		{
+			if (shared.empty())
+				return CreateBindingLayouts(device, layout);
+			const std::vector<const nvrhi::BindingLayoutDesc*> descs = SortBySet(layout.BindingLayouts);
+			if (shared.size() != descs.size())
+			{
+				return MakeError(ErrorCode::InvalidArgument, "the pipeline '{}' declares {} binding layout(s) but was given {} shared one(s)", layout.Name,
+					descs.size(), shared.size());
+			}
+			std::vector<nvrhi::BindingLayoutHandle> bindingLayouts;
+			bindingLayouts.reserve(descs.size());
+			for (size_t index = 0; index < descs.size(); ++index)
+			{
+				if (shared[index] == nullptr)
+				{
+					ENGINE_TRY_ASSIGN(nvrhi::BindingLayoutHandle created, device.CreateBindingLayout(*descs[index]));
+					bindingLayouts.push_back(std::move(created));
+					continue;
+				}
+				const nvrhi::BindingLayoutDesc* sharedDesc = shared[index]->getDesc();
+				if (sharedDesc == nullptr || !IsSameBindingLayout(*sharedDesc, *descs[index]))
+				{
+					return MakeError(ErrorCode::InvalidArgument, "the shared binding layout of set {} does not match the pipeline '{}'",
+						descs[index]->registerSpace, layout.Name);
+				}
+				bindingLayouts.push_back(shared[index]);
+			}
+			return bindingLayouts;
+		}
+
 	}
 
 	Status ValidatePipelineLayout(const PipelineLayoutDescription& description, ShaderLibrary& shaders)
@@ -658,7 +703,8 @@ namespace Engine {
 			WithContext(Utils::CreateEntryShader(*m_Device, *m_Shaders, layout, 0, specification.Specializations), context));
 		ENGINE_TRY_ASSIGN(nvrhi::ShaderHandle pixelShader,
 			WithContext(Utils::CreateEntryShader(*m_Device, *m_Shaders, layout, 1, specification.Specializations), context));
-		ENGINE_TRY_ASSIGN(std::vector<nvrhi::BindingLayoutHandle> bindingLayouts, WithContext(Utils::CreateBindingLayouts(*m_Device, layout), context));
+		ENGINE_TRY_ASSIGN(std::vector<nvrhi::BindingLayoutHandle> bindingLayouts,
+			WithContext(Utils::ResolveBindingLayouts(*m_Device, layout, specification.SharedBindingLayouts), context));
 
 		nvrhi::GraphicsPipelineDesc desc;
 		desc.primType = specification.Primitive;
@@ -690,7 +736,8 @@ namespace Engine {
 		const std::string context = std::format("while creating the compute pipeline '{}'", layout.Name);
 		ENGINE_TRY_ASSIGN(nvrhi::ShaderHandle computeShader,
 			WithContext(Utils::CreateEntryShader(*m_Device, *m_Shaders, layout, 0, specification.Specializations), context));
-		ENGINE_TRY_ASSIGN(std::vector<nvrhi::BindingLayoutHandle> bindingLayouts, WithContext(Utils::CreateBindingLayouts(*m_Device, layout), context));
+		ENGINE_TRY_ASSIGN(std::vector<nvrhi::BindingLayoutHandle> bindingLayouts,
+			WithContext(Utils::ResolveBindingLayouts(*m_Device, layout, specification.SharedBindingLayouts), context));
 
 		nvrhi::ComputePipelineDesc desc;
 		desc.CS = computeShader;
@@ -699,6 +746,12 @@ namespace Engine {
 
 		ENGINE_TRY_ASSIGN(nvrhi::ComputePipelineHandle pipeline, WithContext(m_Device->CreateComputePipeline(desc), context));
 		return ComputePipeline{ .Pipeline = std::move(pipeline), .BindingLayouts = std::move(bindingLayouts) };
+	}
+
+	Result<std::vector<nvrhi::BindingLayoutHandle>> PipelineFactory::CreateBindingLayouts(const PipelineLayoutDescription& layout)
+	{
+		ENGINE_TRY(ValidatePipelineLayout(layout, *m_Shaders));
+		return WithContext(Utils::CreateBindingLayouts(*m_Device, layout), std::format("while creating the binding layouts of '{}'", layout.Name));
 	}
 
 }

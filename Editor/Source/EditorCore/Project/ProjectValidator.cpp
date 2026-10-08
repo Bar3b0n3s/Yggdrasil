@@ -21,7 +21,11 @@
 #include "Engine/Scene/ComponentAccess.h"
 #include "Engine/Scene/ComponentHostOps.h"
 #include "Engine/Scene/Components/CameraComponent.h"
+#include "Engine/Scene/Components/DirectionalLightComponent.h"
+#include "Engine/Scene/Components/PointLightComponent.h"
 #include "Engine/Scene/Components/PrefabInstanceComponent.h"
+#include "Engine/Scene/Components/RuntimeComponents.h"
+#include "Engine/Scene/Components/SpotLightComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/LoadReport.h"
 #include "Engine/Scene/Scene.h"
@@ -64,6 +68,7 @@ namespace Engine {
 			AssetContentSkippedCode,
 			PathCaseMismatchCode,
 			PrefabMissingAssetCode,
+			RenderLightLimitExceededCode,
 			BuildStartSceneMissingCode,
 			BuildSceneMissingCode,
 		};
@@ -337,6 +342,29 @@ namespace Engine {
 			std::string hint = fixable ? "fix it to make the scene's only camera Primary" : "set Primary on the camera the scene renders through";
 			diagnostics.push_back(MakeDiagnostic(SceneNoPrimaryCameraCode, DiagnosticSeverity::Warning,
 				std::format("none of the scene's {} camera(s) is Primary", cameras.size()), site, std::move(hint), fixable));
+		}
+
+		// RENDER_LIGHT_LIMIT_EXCEEDED (M8, §13.7; ProjectValidator.h): the validator cannot know every view, so it counts the
+		// scene's effectively enabled lights against what one view shades.
+		static void CheckLightLimit(const CheckedScene& checked, std::vector<CollectedDiagnostic>& diagnostics)
+		{
+			const Scene& scene = *checked.Target;
+			size_t lights = 0;
+			scene.ForEachCanonical([&lights](ConstEntity entity)
+			{
+				if (entity.HasComponent<HierarchyDisabledTag>())
+					return;
+				lights += static_cast<size_t>(entity.HasComponent<DirectionalLightComponent>()) + static_cast<size_t>(entity.HasComponent<PointLightComponent>())
+					+ static_cast<size_t>(entity.HasComponent<SpotLightComponent>());
+			});
+			if (lights <= MaxVisibleLights)
+				return;
+			DiagnosticSite site;
+			site.File = checked.File;
+			diagnostics.push_back(MakeDiagnostic(RenderLightLimitExceededCode, DiagnosticSeverity::Warning,
+				std::format("the scene has {} enabled lights; a view shades at most {}, and leaves out the least important lights it sees beyond that",
+					lights, MaxVisibleLights),
+				site, "disable or remove lights, or keep fewer of them in view at once", false));
 		}
 
 		static void CheckDanglingReferences(const CheckedScene& checked, std::vector<CollectedDiagnostic>& diagnostics)
@@ -658,6 +686,7 @@ namespace Engine {
 			CheckCameras(checked, diagnostics);
 			CheckDanglingReferences(checked, diagnostics);
 			CheckSceneAssets(editor, checked, diagnostics);
+			CheckLightLimit(checked, diagnostics);
 		}
 
 		// Loads the scene file `path` into a scratch scene in Repair mode and checks it; a file that cannot be loaded at all is

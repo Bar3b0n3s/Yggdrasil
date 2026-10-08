@@ -143,6 +143,16 @@
 			"Generator": ""
 		},
 		{
+			"Handle": "0000000000000186",
+			"Path": "engine://Textures/BlueNoise",
+			"Type": "Texture",
+			"Source": "Generated",
+			"File": "",
+			"Importer": "",
+			"Settings": {},
+			"Generator": "BlueNoise"
+		},
+		{
 			"Handle": "00000000000001c1",
 			"Path": "engine://Fonts/Default",
 			"Type": "Font",
@@ -169,7 +179,9 @@
 			"Source": "File",
 			"File": "Environments/Sky.hdr",
 			"Importer": "Environment",
-			"Settings": {},
+			"Settings": {
+				"ClampLuminance": true
+			},
 			"Generator": ""
 		}
 	]

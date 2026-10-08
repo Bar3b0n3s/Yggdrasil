@@ -87,6 +87,12 @@ namespace Engine {
 		// Removes every entry of `handle` (artifacts and manifests). No effect when there is none. Errors: Io.
 		[[nodiscard]] Status Remove(AssetHandle handle);
 
+		// M8: the sources whose import manifest is cached under `key` (a <handle>/<key>.import file), sorted by handle; empty
+		// for a root that does not exist yet. The EditorAssetManager serves an import it cannot run here (a GPU bake without a
+		// device, §7.4) from another source's entry with the same key (Docs/Decisions/0013-m8-decisions.md decision 9), reading
+		// each with Find. Errors: Io for a cache that cannot be listed.
+		[[nodiscard]] Result<std::vector<AssetHandle>> FindSourcesWithKey(uint64_t key) const;
+
 		[[nodiscard]] const VfsPath& GetRoot() const;
 	private:
 		// The VFS back-reference and the root (AssetCache.cpp).

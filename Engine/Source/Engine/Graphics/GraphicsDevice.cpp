@@ -410,8 +410,11 @@ namespace Engine {
 			m_NvrhiDevice->runGarbageCollection();
 		}
 
-		// 2. The host-copied images, which NVRHI does not own, then what only the tracker still holds. A leak counts as a
-		// GPU error, so the checks that read the counts after the teardown (Destroy) see it.
+		// 2. What only the tracker still holds (RunGarbageCollection's order): a binding set released since the last frame
+		// may reference a host-copied image (a material's map, M8), so the sweep comes before the host images' leak check.
+		// Then the host-copied images, which NVRHI does not own, and what only the tracker still holds after them. A leak
+		// counts as a GPU error, so the checks that read the counts after the teardown (Destroy) see it.
+		m_ResourceTracker.Sweep();
 		m_HostImageUpload.reset();
 		m_ResourceTracker.Sweep();
 		if (m_ResourceTracker.GetTotalLiveCount() > 0)

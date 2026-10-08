@@ -1,0 +1,21 @@
+{
+	"Format": "Material",
+	"Version": 1,
+	"BaseColor": [1, 1, 1, 1],
+	"BaseColorMap": "8c5e9fa7d7637795",
+	"Metallic": 0,
+	"Roughness": 0.6,
+	"MetallicRoughnessMap": null,
+	"NormalMap": null,
+	"NormalScale": 1,
+	"OcclusionMap": null,
+	"OcclusionStrength": 1,
+	"Emissive": [0, 0, 0],
+	"EmissiveStrength": 1,
+	"EmissiveMap": null,
+	"AlphaMode": "Mask",
+	"AlphaCutoff": 0.5,
+	"DoubleSided": true,
+	"UVScale": [2, 2],
+	"UVOffset": [0, 0]
+}

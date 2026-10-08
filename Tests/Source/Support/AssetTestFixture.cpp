@@ -2,19 +2,31 @@
 #include "Support/AssetTestFixture.h"
 
 #include "Engine/Core/Mounts/MemoryMount.h"
+#include "Engine/Core/Mounts/NativeDirectoryMount.h"
 #include "Engine/Graphics/Image.h"
 #include "Support/SceneTestFixture.h"
+#include "Support/TestData.h"
 
 namespace Engine {
 
 	namespace Test {
 
 		AssetTestFixture::AssetTestFixture(uint64_t seed, uint32_t workerCount)
-			: m_JobSystem(workerCount, m_MainThreadQueue), m_Registry(CreateBuiltinRegistry()), m_Generator(UUIDGenerator::CreateRandom(seed))
+			: AssetTestFixture(AssetTestFixtureOptions{ .Seed = seed, .WorkerCount = workerCount })
+		{
+		}
+
+		AssetTestFixture::AssetTestFixture(const AssetTestFixtureOptions& options)
+			: m_JobSystem(options.WorkerCount, m_MainThreadQueue), m_Registry(CreateBuiltinRegistry()), m_Generator(UUIDGenerator::CreateRandom(options.Seed))
 		{
 			REQUIRE(m_Vfs.Mount("project", CreateScope<MemoryMount>()).has_value());
 			REQUIRE(m_Vfs.Mount("cache", CreateScope<MemoryMount>()).has_value());
 			REQUIRE(m_Vfs.CreateDirectories(ProjectPath("Assets")).has_value());
+			if (options.EngineResources)
+			{
+				REQUIRE(m_Vfs.Mount("engine", CreateScope<NativeDirectoryMount>(GetRepositoryRoot() / "Resources", MountAccess::ReadOnly)).has_value());
+				REQUIRE(m_Vfs.Mount("enginecache", CreateScope<MemoryMount>()).has_value());
+			}
 			RegisterBuiltinImporters(m_Importers);
 			RegisterBuiltinLoaders(m_Loaders);
 			m_Manager = CreateScope<EditorAssetManager>(EditorAssetManagerSpecification{
@@ -26,9 +38,9 @@ namespace Engine {
 				.IdGenerator = &m_Generator,
 				.Importers = &m_Importers,
 				.Loaders = &m_Loaders,
-				.EnvironmentBaker = nullptr,
+				.EnvironmentBaker = options.EnvironmentBaker,
 				.ScriptDiagnostics = nullptr,
-				.EngineAssetGenerators = {},
+				.EngineAssetGenerators = options.EngineAssetGenerators,
 			});
 		}
 

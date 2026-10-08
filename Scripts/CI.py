@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The single CI entry point (Docs/Architecture.md §15.8): runs the stages in order and stops at the first failing one.
 
-Stages that exist so far (milestones M4 to M6), with the configurations of the §15.8 matrix:
+The stages, with the configurations of the §15.8 matrix:
   setup        n/a                   Scripts/Setup.py (toolchain checks, pinned premake, Tools/MCP/.venv and .mcp.json)
   generate     n/a                   Scripts/Generate.py (host workspace, compile_commands.json)
   lint         n/a                   static checks, shared with PreCommit.py (Scripts/Lib/scripts.py):
@@ -16,12 +16,14 @@ Stages that exist so far (milestones M4 to M6), with the configurations of the �
   build        Debug, Release, Dist  Scripts/Build.py per configuration, plus, after Debug, the Roadmap M0 acceptance
                                      check "Shaders: slang-only change is not skipped by the up-to-date check":
                                      touching only a .slang file re-runs the shader rule, the next build does not
-  bake         Release               Editor --headless --renderer none --bake-engine-assets (ADR 0010 decision 13):
-                                     fills the configuration-independent engine cooked cache bin/EngineCache from
-                                     Resources/EngineAssets.json, incrementally (up-to-date entries are kept); entries
-                                     this build has no importer or generator for (the environments before M8) are
-                                     skipped with a warning, and a failed bake fails the stage. Nothing it bakes needs a
-                                     device before M8's environment bakes, so it runs without a renderer
+  bake         Release               Editor --headless --renderer vulkan --bake-engine-assets (ADR 0010 decision 13,
+                                     ADR 0013 decision 9): fills the configuration-independent engine cooked cache
+                                     bin/EngineCache from Resources/EngineAssets.json, incrementally (up-to-date entries
+                                     are kept), the built-in environments with the GPU environment baker; entries this
+                                     build has no importer or generator for are skipped with a warning, and a failed
+                                     bake fails the stage. Without a usable Vulkan device the editor exits 3 and the
+                                     stage fails, unless --gpu-optional is given: the bake then reruns with --renderer
+                                     none, the environments are skipped with a warning and the stage ends as a warning
   unit         Debug, Release        Scripts/Test.py --suite unit --junit, which also fails on a skipped test case
                                      outside the child-process targets
   gpu          Debug, Release        Scripts/Test.py --suite gpu --junit --require-gpu: the GPU test cases with
@@ -265,29 +267,47 @@ class Runner:
 
     def bake_engine_assets(self, config: str) -> Step:
         """§15.8 bake: the editor of `config` fills bin/EngineCache (shared by every configuration) and exits 0, or 1
-        when an entry failed to bake. Nothing it bakes needs a GPU before M8 (whose environment bakes switch this stage
-        to a rendering editor), so it runs with --renderer none and works on machines without a Vulkan device."""
+        when an entry failed to bake. The built-in environments are GPU bakes (M8, Docs/Decisions/0013-m8-decisions.md
+        decision 9), so it runs a rendering editor; a machine without a usable Vulkan device fails here (the editor
+        exits 3) unless --gpu-optional is given, which reruns it with --renderer none: the environments are then
+        skipped with a warning and the step ends as a warning."""
         name = f"bake {config}"
         editor = paths.output_directory(config) / "Editor" / paths.executable_name("Editor")
         if not editor.is_file():
             return Step(name, Status.FAILED, f"{paths.display_path(editor)} not found: run python Scripts/Build.py "
                                              f"--config {config} --project Editor", exit_code=EXIT_INIT_FAILED)
-        with tempfile.TemporaryDirectory(prefix="CI-Bake-") as user_data:
-            command = [str(editor), "--headless", "--renderer", "none", "--bake-engine-assets",
-                       f"--user-data-dir={user_data}"]
-            self.console.heading(f"{name}: {format_command(command)}")
-            try:
-                result = run_streamed(command, cwd=paths.REPOSITORY_ROOT, env=child_environment(),
-                                      timeout=TIMEOUTS["bake"], echo=self.console.stream, collect=BAKE_SUMMARY_PATTERN)
-            except ToolNotFoundError as error:
-                return Step(name, Status.FAILED, str(error), exit_code=EXIT_INIT_FAILED)
+        renderer = "vulkan"
+        while True:
+            with tempfile.TemporaryDirectory(prefix="CI-Bake-") as user_data:
+                command = [str(editor), "--headless", "--renderer", renderer, "--bake-engine-assets",
+                           f"--user-data-dir={user_data}"]
+                self.console.heading(f"{name}: {format_command(command)}")
+                try:
+                    result = run_streamed(command, cwd=paths.REPOSITORY_ROOT, env=child_environment(),
+                                          timeout=TIMEOUTS["bake"], echo=self.console.stream,
+                                          collect=BAKE_SUMMARY_PATTERN)
+                except ToolNotFoundError as error:
+                    return Step(name, Status.FAILED, str(error), exit_code=EXIT_INIT_FAILED)
+            if renderer == "vulkan" and result.exit_code == EXIT_INIT_FAILED and self.arguments.gpu_optional:
+                self.console.heading(f"{name}: no usable Vulkan device (--gpu-optional): baking without the "
+                                     "environments")
+                renderer = "none"
+                continue
+            break
         if result.timed_out:
             return Step(name, Status.TIMEOUT, f"Editor --bake-engine-assets {result.describe_exit()}", result.duration)
         if not result.succeeded:
-            return Step(name, Status.FAILED, f"Editor --bake-engine-assets {result.describe_exit()}: {result.tail(1)}",
+            hint = " (no usable Vulkan device? --gpu-optional bakes without the environments)" \
+                if result.exit_code == EXIT_INIT_FAILED else ""
+            return Step(name, Status.FAILED,
+                        f"Editor --bake-engine-assets {result.describe_exit()}{hint}: {result.tail(1)}",
                         result.duration, data={"outputTail": result.tail(40)})
         match = BAKE_SUMMARY_PATTERN.search(result.collected[-1]) if result.collected else None
         summary = match.group(0) if match else "no summary line"
+        if renderer == "none":
+            return Step(name, Status.WARNING,
+                        f"{paths.display_path(ENGINE_CACHE)}: {summary}; no usable Vulkan device, so the built-in "
+                        "environments were not baked", result.duration)
         return Step(name, Status.PASSED, f"{paths.display_path(ENGINE_CACHE)}: {summary}", result.duration)
 
     def unit(self, configs: list[str]) -> list[Step]:
@@ -514,7 +534,9 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
                         help="gpu, golden and automation: run without --require-gpu, so on a machine without a usable "
                              "Vulkan device the GPU test cases and the rendering automation tests pass without "
                              "running, naming the reason, and the steps end as warnings (the GitHub-hosted Windows and "
-                             "macOS runners, which have no GPU); by default a missing device fails them")
+                             "macOS runners, which have no GPU); bake: without a usable device, bake without the "
+                             "environments (--renderer none) and end as a warning; by default a missing device fails "
+                             "them")
     parser.add_argument("--contract", action="store_true", help=CONTRACT_FLAG_HELP)
     parser.add_argument("--summary-junit", type=Path, default=SUMMARY_JUNIT,
                         help=f"JUnit summary of this run (default: {paths.display_path(SUMMARY_JUNIT)})")

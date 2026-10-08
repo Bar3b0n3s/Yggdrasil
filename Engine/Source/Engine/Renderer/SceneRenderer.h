@@ -10,31 +10,63 @@
 #include <cstdint>
 #include <vector>
 
-// The scene renderer (Architecture §8.2, §8.3), the walking skeleton's subset (Roadmap M7; Docs/Decisions/0012-m7-decisions.md
-// decision 7): it renders a RenderSnapshot, never the ECS, through a fixed pass list:
-//   1. Prepare (CPU): every MeshDrawItem resolved through the GpuResourceCache (a missing or failed mesh draws its
-//      placeholder, §7.2) and its materials through the AssetManager (MaterialData; a null slot uses the mesh's default
-//      material, an unknown one the Error material); submeshes outside the camera frustum (their bounds transformed by
-//      World) are culled; opaque draws sorted by pipeline, then material, then mesh (§8.3 pass 1). Every material is
-//      opaque in M7 (AlphaMode Mask and Blend arrive with M8).
-//   4. Depth/normal prepass: SceneDepth (D32_FLOAT, reverse-Z: cleared to 0, GreaterOrEqual) and SceneNormals (RG16_FLOAT,
-//      octahedral view-space normals of the interpolated vertex normals; normal maps arrive with M8). No EntityId target
-//      (M9).
-//   7. Forward opaque: SceneColor (RGBA16_FLOAT) cleared to the camera's ClearColor, depth test GreaterOrEqual with depth
-//      writes off; Lambert diffuse with one directional light (the snapshot's first directional light, radiance Color *
-//      Intensity) plus the constant ambient RenderEnvironment::FallbackColor * Intensity, times the material's BaseColor
-//      factor (base colour maps and PBR arrive with M8). Without a directional light, only the ambient term lights.
-//  11. Tonemap + encode (compute): LdrColor (RGBA8_UNORM) = sRGB OETF(clamp(SceneColor * 2^ExposureEV, 0, 1)): the Linear
-//      tonemapper (§8.9) whatever PostProcessSettings::Tonemap says (the others, blue-noise dither, bloom and FXAA arrive with
-//      M8).
-// Pipelines use frontCounterClockwise = true with back-face culling (§8.3: glTF's counter-clockwise front faces), the
-// set-0 per-view layout of §8.4 with the 80-byte DrawConstants push constants, and are created at startup (§8.12), once
-// per device: SceneRendererPipelines holds them and every SceneRenderer of the device shares it (the host's game view,
-// the ViewportCapture of screenshots, the editor's scene viewport from M10), so the pipeline count does not depend on the
-// number of views (§8.5: "The total pipeline count is logged and asserted by a test"). A SceneRenderer owns only its
-// size-dependent targets and per-view buffers: Create builds them and Resize rebuilds the targets. A snapshot without a
-// camera (HasCamera false) clears SceneColor to the default ClearColor and draws nothing. Rendering is deterministic for
-// a snapshot on a given device (§8.3: no temporal effects), which the golden images rely on.
+// The scene renderer (Architecture §8.2, §8.3): it renders a RenderSnapshot, never the ECS, through a fixed pass list (no
+// render graph). The M8 pass list (Roadmap M8; Docs/Decisions/0013-m8-decisions.md decisions 7 to 13); passes 2, 3, 5, 6 and
+// 13's grid, icons and outline arrive with M9:
+//   1. Prepare (CPU, RenderPrepare.h): every MeshDrawItem resolved through the GpuResourceCache (meshes, materials with their
+//      textures, the environment; placeholders for missing assets, §7.2), submeshes culled against the view frustum by their
+//      bounds, opaque draws (AlphaMode Opaque and Mask) sorted by pipeline, then material, then mesh, transparent draws
+//      (AlphaMode Blend) back to front with ties by entity UUID; the lights culled and packed, at most MaxVisibleLights,
+//      logging RENDER_LIGHT_LIMIT_EXCEEDED once per renderer when more are visible; the per-view constants written
+//      (ViewConstants b0, EnvironmentConstants b2, the Lights structured buffer t0).
+//   4. Depth/normal prepass: SceneDepth (reverse-Z) and SceneNormals (octahedral view-space normals, normal-mapped); Mask
+//      materials discard below AlphaCutoff here and in the forward pass.
+//   7. Forward opaque: SceneColor cleared to the camera's ClearColor; PBR (§8.5: GGX, height-correlated Smith, Schlick,
+//      Lambert, multi-scatter energy compensation from the DFG LUT (BrdfLut.h), perceptual roughness >= 0.045, geometric
+//      specular anti-aliasing) with every visible light (artist units, windowed inverse-square falloff, smoothstep cones,
+//      SourceRadius widening) and IBL (§8.6: SH9 diffuse, split-sum specular from the prefiltered cube, specular and
+//      horizon occlusion), or the constant ambient FallbackColor * Intensity without an environment map; emissive added.
+//   8. Skybox (SkyboxPass.h): when the camera clears to the skybox and the environment has a map and ShowSkybox.
+//   9. Forward transparent: the Blend draws sorted back to front, alpha blended, depth tested without writes.
+//  10. Bloom (BloomPass.h): when PostProcessSettings::BloomEnabled.
+//  11. Tonemap + encode (TonemapPass.h): exposure 2^ExposureEV, the snapshot's tonemapper, the sRGB OETF, blue-noise dither
+//      (the BlueNoise built-in through the GpuResourceCache). The renderer asks for it only when
+//      AssetManager::GetAssetType(BuiltinAssetHandles::BlueNoiseTexture) is AssetType::Texture, which records no
+//      diagnostic, and passes no blue noise (no dither) when that check fails or the mirror IsPlaceholder: a manager
+//      without the built-in (InMemoryAssetManager, a test's AssetTestFixture without the engine resources) must not log
+//      GetOrPlaceholder's ASSET_MISSING error on every render.
+//  12. FXAA (FxaaPass.h): when PostProcessSettings::FxaaEnabled, LdrColor into its ping-pong partner.
+//  13. Overlays: the snapshot's DebugDrawList (DebugRenderer.h), depth-tested against SceneDepth or on top.
+//  14. Text (TextRenderer.h): world texts (depth-tested), then screen texts, then the debug list's labels.
+// Debug views (RenderSnapshot::DebugView other than Lit) specialize the forward pipelines and fix the post chain: no skybox,
+// bloom, FXAA or dither, exposure 1, the Linear tonemapper, the OETF only for Albedo and Emissive; overlays and text still
+// draw. A snapshot without a camera clears SceneColor to the default ClearColor and draws nothing but screen texts.
+// Rendering is deterministic for a snapshot on a given device (§8.3: no temporal effects), which the golden images rely on.
+//
+// Pipelines (§8.5, §8.12). SceneRendererPipelines holds every pipeline of the pass list, created once per device at startup
+// and shared by every SceneRenderer of that device (Docs/Decisions/0012-m7-decisions.md decision 7): the scene's own mesh
+// pipelines, {Opaque, Mask} prepass and forward variants and the Blend transparent variants, each for CullBack (front
+// faces counter-clockwise, §8.3), CullFront (a mirroring world matrix, whose front faces turn clockwise on screen; the
+// shaders flip the normal by DrawConstants::Flags) and CullNone (double-sided materials; the shaders flip back faces'
+// normals), 15 in all; plus the passes it owns: SkyboxPass, BloomPass (for the device's Bloom format, §8.1), TonemapPass,
+// FxaaPass, DebugRenderer, TextRenderer and BrdfLut (which generates the DFG LUT once at Create). Material binding sets
+// (set 1) are shared by every variant through shared binding layouts (PipelineFactory.h). A non-Lit debug view's
+// pipelines (the 9 forward opaque and transparent variants specialized with the view) are created the first time a
+// snapshot asks for that view and kept: debug views are a debugging path, like ImGui's per-format pipelines (ADR 0009
+// decision 25), and creating them at startup would multiply the startup count by six (decision 12): Render creates them
+// through SceneRendererPipelines::EnsureDebugView, which a host may also call ahead of time. The pipeline count is logged at
+// creation and asserted by "Pipelines: count matches the expected total".
+//
+// Binding sets. The passes the set owns keep none of their own: every SceneRenderer keeps one PassBindingCache per pass
+// with its per-view targets, clears them in Resize, releases the sets its last Render did not use at the end of every
+// Render, and destroys them with itself, so views never evict each other's sets and no view's old targets outlive it.
+//
+// Stale mirrors (§8.14 items 1 and 2; Docs/Decisions/0013-m8-decisions.md decision 7). Every host that renders (EditorApp,
+// RuntimeApp) calls GpuResourceCache::CollectStale() and SceneRendererPipelines::CollectStale(assets) once per frame after
+// the frame's renders were recorded and executed, which releases the mirrors of replaced asset versions (hot reload,
+// reimport); and, after the first frame rendered once a scene was opened, closed or swapped (play mode included), the same
+// two calls with releaseUnused = true, which releases what the previous scene alone used. StaleMirrorSchedule.h decides
+// which collection that is, for both hosts.
 //
 // Main thread only (NVRHI recording, §4.11); not copyable or movable. Destroyed before the SceneRendererPipelines, the
 // GpuResourceCache and the device (§8.14 item 4).
@@ -55,9 +87,15 @@ namespace Engine {
 	// What the last Render did (stats.get's per-pass detail arrives with M9).
 	struct SceneRenderStats
 	{
-		uint32_t MeshDraws = 0;       // submesh draws recorded by the forward pass
+		uint32_t MeshDraws = 0;       // submesh draws recorded by the forward passes (opaque and transparent)
 		uint32_t CulledSubmeshes = 0; // submeshes outside the frustum
-		uint32_t Lights = 0;          // lights used (0 or 1 in M7)
+		uint32_t Lights = 0;          // lights used after culling (at most MaxVisibleLights, RenderPrepare.h)
+		// M8 additions.
+		uint32_t TransparentDraws = 0;  // of MeshDraws, the Blend draws of pass 9
+		uint32_t CulledLights = 0;      // LightCullResult::Culled: outside the view, or zero or non-finite radiance or range
+		uint32_t DroppedLights = 0;     // visible lights beyond MaxVisibleLights (RENDER_LIGHT_LIMIT_EXCEEDED)
+		uint32_t TextDraws = 0;         // text items and debug labels drawn
+		uint32_t DebugLineVertices = 0; // vertices of the debug lines drawn
 	};
 
 	// The pipelines of the pass list (see the file comment), created once per device at startup and shared by every
@@ -66,6 +104,15 @@ namespace Engine {
 	class SceneRendererPipelines
 	{
 	public:
+		// The scene's own mesh pipelines at startup: prepass {Opaque, Mask} x {CullBack, CullFront, CullNone} (6), forward
+		// opaque the same (6), forward transparent {CullBack, CullFront, CullNone} (3).
+		static constexpr uint32_t MeshPipelineCount = 15;
+		// The pipelines one non-Lit debug view adds the first time it renders: the 6 forward opaque and 3 transparent variants.
+		static constexpr uint32_t DebugViewPipelineCount = 9;
+		// Every pipeline Create makes: the mesh pipelines plus SkyboxPass (1), BloomPass (3), TonemapPass (1), FxaaPass (1),
+		// DebugRenderer (2), TextRenderer (2) and BrdfLut (1). Each pass declares its own PipelineCount; this is their sum.
+		static constexpr uint32_t StartupPipelineCount = MeshPipelineCount + 1 + 3 + 1 + 1 + 2 + 2 + 1;
+
 		// Restricts construction to Create; CreateScope still reaches the constructor.
 		class ConstructionKey
 		{
@@ -81,21 +128,40 @@ namespace Engine {
 		SceneRendererPipelines& operator=(const SceneRendererPipelines&) = delete;
 
 		// Creates every pipeline of the pass list through `pipelines`, checking each layout against its reflection
-		// (ValidatePipelineLayout), with their binding layouts and samplers. `device` is a documented back-reference that
-		// outlives the set. Errors: those of PipelineFactory and of the GraphicsDevice wrappers; a Gpu error is an
-		// out-of-memory creation, which a caller creating the set at startup turns into FatalError(OutOfMemory) (§8.14 item 7).
+		// (ValidatePipelineLayout), with their binding layouts and samplers, and the passes it owns (BloomPass for
+		// device.GetInfo().BloomFormat; BrdfLut generates the DFG LUT, executing one command list). Logs the pipeline count at
+		// Info. `device` and `pipelines` are documented back-references that outlive the set (EnsureDebugView creates
+		// pipelines through `pipelines` after Create). Errors: those of PipelineFactory, the passes' Create and the
+		// GraphicsDevice wrappers; a Gpu error is an out-of-memory creation, which a caller creating the set at startup turns
+		// into FatalError(OutOfMemory) (§8.14 item 7).
 		[[nodiscard]] static Result<Scope<SceneRendererPipelines>> Create(GraphicsDevice& device, PipelineFactory& pipelines);
 
-		// The number of pipelines Create made: the size of GetLayoutDescriptions (§8.5's logged and tested count).
+		// Creates the DebugViewPipelineCount forward variants of `view`, specialized with it, unless they exist (Lit's are the
+		// startup pipelines: no effect); logs the new pipeline count at Info. SceneRenderer::Render calls it the first time a
+		// snapshot asks for a view, and a host may call it ahead of time. Errors: InvalidArgument for a view this build has no
+		// pipelines for (not below RenderDebugViewCount); those of PipelineFactory, where a Gpu error is an out-of-memory
+		// creation, which the caller turns into FatalError(OutOfMemory) (§8.14 item 7). Nothing is kept on failure, so a later
+		// call tries again.
+		[[nodiscard]] Status EnsureDebugView(RenderDebugView view);
+
+		// The number of pipelines created so far: StartupPipelineCount after Create, plus DebugViewPipelineCount for each
+		// non-Lit debug view created since by EnsureDebugView (§8.5's logged and tested count).
 		[[nodiscard]] uint32_t GetPipelineCount() const;
 
-		// The layout description of every pipeline of the set, for the CPU-only reflection test
-		// ("Shaders: LayoutsMatchReflection", PipelineFactory.h).
-		[[nodiscard]] static std::vector<PipelineLayoutDescription> GetLayoutDescriptions();
+		// The layout description of every pipeline Create makes, its passes' included, with the BloomPass pipelines for
+		// `bloomFormat` (R11G11B10_FLOAT or RGBA16_FLOAT, §8.1), for the CPU-only reflection test ("Shaders:
+		// LayoutsMatchReflection", PipelineFactory.h). A debug view's pipelines share their Lit variant's description.
+		[[nodiscard]] static std::vector<PipelineLayoutDescription> GetLayoutDescriptions(nvrhi::Format bloomFormat = nvrhi::Format::R11G11B10_FLOAT);
+
+		// Releases what the owned passes cache per asset version (the TextRenderer's font atlases): mirrors of old versions,
+		// and with `releaseUnused` those no Render used since the previous call (a scene unload, with
+		// GpuResourceCache::CollectStale; "GpuResourceCache: live counts return to baseline after unloading a scene"). Hosts
+		// call it as the file comment says.
+		void CollectStale(const AssetManager& assets, bool releaseUnused = false);
 	private:
-		// SceneRenderer records with the set's pipelines, binding layouts and samplers (State, SceneRenderer.cpp).
+		// SceneRenderer records with the set's pipelines, passes, binding layouts and samplers (State, SceneRenderer.cpp).
 		friend class SceneRenderer;
-		// The back-reference, the pipelines, their binding layouts and the samplers (SceneRenderer.cpp).
+		// The back-reference, the pipelines, the passes, their binding layouts and the samplers (SceneRenderer.cpp).
 		struct State;
 	private:
 		Scope<State> m_State;
@@ -118,26 +184,32 @@ namespace Engine {
 		SceneRenderer(const SceneRenderer&) = delete;
 		SceneRenderer& operator=(const SceneRenderer&) = delete;
 
-		// Creates the per-view buffers and the targets of the specification's size; it records with the shared `pipelines`
-		// and creates none. `device`, `pipelines`, `cache` and `assets` are documented back-references that outlive the
-		// renderer. Errors: those of the GraphicsDevice wrappers; a Gpu error is an out-of-memory creation, which a caller
-		// creating the renderer at startup turns into FatalError(OutOfMemory) (§8.14 item 7).
-		[[nodiscard]] static Result<Scope<SceneRenderer>> Create(GraphicsDevice& device, const SceneRendererPipelines& pipelines,
-			GpuResourceCache& cache, AssetManager& assets, const SceneRendererSpecification& specification);
+		// Creates the per-view buffers and the targets of the specification's size (SceneTargetFormats.h; LdrColor and its
+		// FXAA partner, the bloom chain of BloomPass::GetChainDesc); it records with the shared `pipelines` and creates no
+		// pipeline itself (Render extends `pipelines` through EnsureDebugView, which every renderer of the device then
+		// shares). `device`, `pipelines`, `cache` and `assets` are documented back-references that outlive the renderer.
+		// Errors: those of the GraphicsDevice wrappers; a Gpu error is an out-of-memory creation, which a caller creating the
+		// renderer at startup turns into FatalError(OutOfMemory) (§8.14 item 7).
+		[[nodiscard]] static Result<Scope<SceneRenderer>> Create(GraphicsDevice& device, SceneRendererPipelines& pipelines, GpuResourceCache& cache,
+			AssetManager& assets, const SceneRendererSpecification& specification);
 
-		// Recreates the size-dependent targets for `width` x `height` (both >= 1, asserted); no effect at the current size.
-		// Errors: those of the target creation (Gpu: FatalError(OutOfMemory) for the caller, §8.14 item 7).
+		// Recreates the size-dependent targets for `width` x `height` (both >= 1, asserted) and clears the renderer's binding
+		// sets (which reference the old targets); no effect at the current size. Errors: those of the target creation (Gpu:
+		// FatalError(OutOfMemory) for the caller, §8.14 item 7).
 		[[nodiscard]] Status Resize(uint32_t width, uint32_t height);
 
 		// Records the pass list for `snapshot` into `commandList` (open, asserted). The snapshot's camera viewport should
 		// match the renderer's size; a different one renders at the renderer's size with the snapshot's projection. Uploads
-		// the meshes it needs through the GpuResourceCache first. Afterwards GetFinalTexture holds the image. Errors: none
-		// from rendering itself (a missing asset draws its placeholder); InvalidArgument for a non-finite matrix in the
-		// snapshot (the draw is skipped and the error names the entity).
+		// the assets it needs through the GpuResourceCache first, and creates a debug view's pipelines the first time it is
+		// asked for (SceneRendererPipelines::EnsureDebugView; a failure there is FatalError(OutOfMemory), §8.14 item 7).
+		// Afterwards GetFinalTexture holds the image.
+		// Errors: none from rendering itself (a missing asset draws its placeholder, a missing environment the fallback
+		// ambient); InvalidArgument for a non-finite matrix in the snapshot (the draw is skipped and the error names the
+		// entity); Gpu when a per-frame binding set cannot be created.
 		[[nodiscard]] Status Render(nvrhi::ICommandList& commandList, const RenderSnapshot& snapshot);
 
-		// LdrColor (RGBA8_UNORM, display-encoded values, §8.9) after the last Render: what BlitPass presents and
-		// ViewportCapture reads back.
+		// The LDR target holding the last Render's image (RGBA8_UNORM, display-encoded values, §8.9): LdrColor, or its FXAA
+		// partner when FXAA ran. What BlitPass presents and ViewportCapture reads back.
 		[[nodiscard]] nvrhi::ITexture* GetFinalTexture() const;
 		[[nodiscard]] uint32_t GetWidth() const;
 		[[nodiscard]] uint32_t GetHeight() const;

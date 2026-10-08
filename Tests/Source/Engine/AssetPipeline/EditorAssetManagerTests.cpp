@@ -3,12 +3,16 @@
 #include "Engine/AssetPipeline/EditorAssetManager.h"
 
 #include "Engine/Asset/BuiltinAssets.h"
+#include "Engine/Asset/CookedFormat.h"
 #include "Engine/Asset/DocumentData.h"
+#include "Engine/Asset/EnvironmentData.h"
 #include "Engine/Asset/MaterialData.h"
 #include "Engine/Asset/MeshData.h"
 #include "Engine/Asset/TextureData.h"
+#include "Engine/AssetPipeline/AssetCache.h"
 #include "Engine/AssetPipeline/AssetHotReloader.h"
 #include "Engine/AssetPipeline/IAssetImporter.h"
+#include "Engine/AssetPipeline/Importers/EnvironmentImporter.h"
 #include "Engine/AssetPipeline/Importers/TextureImporter.h"
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Hash.h"
@@ -17,9 +21,13 @@
 #include "Support/ExpectLog.h"
 #include "Support/TestData.h"
 
+#include <glm/glm.hpp>
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <array>
+#include <cmath>
+#include <cstring>
 #include <initializer_list>
 #include <map>
 #include <mutex>
@@ -264,6 +272,68 @@ namespace Engine {
 		std::string MakeLeafText(int64_t value)
 		{
 			return std::format("{{\"Value\": {}}}", value);
+		}
+
+		// M8: a flat (uncompressed) Radiance RGBE image of `width` x width / 2 texels of radiance `rgb`, which EnvironmentImporter
+		// decodes.
+		Buffer MakeFlatHdr(uint32_t width, const glm::vec3& rgb)
+		{
+			const std::string header = std::format("#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n-Y {} +X {}\n", width / 2, width);
+			const std::span<const std::byte> headerBytes = AsBytes(header);
+			Buffer bytes(headerBytes.begin(), headerBytes.end());
+			const float largest = std::max({ rgb.r, rgb.g, rgb.b });
+			int exponent = 0;
+			const float mantissa = std::frexp(largest, &exponent); // largest = mantissa * 2^exponent, mantissa in [0.5, 1)
+			const float scale = mantissa * 256.0f / largest;
+			const std::array<std::byte, 4> texel = { static_cast<std::byte>(static_cast<uint8_t>(rgb.r * scale)),
+				static_cast<std::byte>(static_cast<uint8_t>(rgb.g * scale)), static_cast<std::byte>(static_cast<uint8_t>(rgb.b * scale)),
+				static_cast<std::byte>(static_cast<uint8_t>(exponent + 128)) };
+			for (uint32_t index = 0; index < width * (width / 2); ++index)
+				bytes.insert(bytes.end(), texel.begin(), texel.end());
+			return bytes;
+		}
+
+		// M8: a valid environment as a GPU bake would cook it (a 4² skybox with its 3 mips, the 256² x 7 specular cube, every
+		// texel binary16 `half`) with distinct SH coefficients.
+		EnvironmentData MakeBakedEnvironment(uint16_t half)
+		{
+			const auto fill = [half](uint32_t faceSize, uint32_t mipCount)
+			{
+				CubeMapData cube{ .FaceSize = faceSize, .MipCount = mipCount, .Texels = Buffer(ComputeCubeMapByteSize(faceSize, mipCount)) };
+				for (size_t offset = 0; offset < cube.Texels.size(); offset += sizeof(half))
+					std::memcpy(cube.Texels.data() + offset, &half, sizeof(half));
+				return cube;
+			};
+			EnvironmentData environment;
+			environment.Skybox = fill(4, 3);
+			environment.Specular = fill(EnvironmentData::SpecularFaceSize, EnvironmentData::SpecularMipCount);
+			for (size_t index = 0; index < environment.IrradianceSH9.size(); ++index)
+				environment.IrradianceSH9[index] = glm::vec3(0.25f * static_cast<float>(index), 0.5f, 1.0f);
+			return environment;
+		}
+
+		// The cache key (§7.5) the manager gives an environment source of `bytes` with the default settings.
+		uint64_t ComputeEnvironmentKey(Test::AssetTestFixture& fixture, std::span<const std::byte> bytes)
+		{
+			const Result<VariantValue> settings = fixture.GetManager().MergeImportSettings(EnvironmentImporter::Id, VariantValue(), Json::object());
+			REQUIRE_MESSAGE(settings.has_value(), settings.error().ToString());
+			return AssetCache::ComputeKey(bytes, EnvironmentImporter::Id, EnvironmentImporter::Version, settings->Get(), EngineCookVersion);
+		}
+
+		// Stores `environment` cooked as the bake of source `source` under `key` in the cache at `root` ("cache://" or
+		// "enginecache://"), as a GPU editor's import or engine bake leaves it.
+		void StoreEnvironmentBake(Test::AssetTestFixture& fixture, std::string_view root, AssetHandle source, uint64_t key, const EnvironmentData& environment)
+		{
+			AssetCache cache(fixture.GetVfs(), Test::ParseVfsPath(root));
+			CachedImport bake;
+			bake.Import.Artifacts.push_back(ImportedArtifact{
+				.Handle = source,
+				.Type = AssetType::Environment,
+				.SubAssetKey = {},
+				.Cooked = CookEnvironment(environment, EnvironmentImporter::Version),
+			});
+			const Status stored = cache.Store(source, key, bake);
+			REQUIRE_MESSAGE(stored.has_value(), stored.error().ToString());
 		}
 
 	}
@@ -1066,6 +1136,93 @@ namespace Engine {
 			fixture.OpenProject(false);
 			REQUIRE(fixture.GetManager().Load(pack).has_value());
 			CHECK(counts.Get("project://Assets/Kit.pack") == 2);
+		}
+
+		// M8 (§7.4, §7.5; Docs/Decisions/0013-m8-decisions.md decision 9): an editor without a GPU serves an environment from
+		// any cooked bake with the same cache key.
+
+		TEST_CASE("EditorAssetManager: without a GPU an environment is served from a cooked bake with the same key")
+		{
+			Test::AssetTestFixture fixture;
+			const Buffer orange = MakeFlatHdr(16, glm::vec3(2.0f, 0.5f, 0.125f));
+			fixture.WriteProjectFile("Assets/Environments/Orange.hdr", orange);
+			fixture.OpenProject(false);
+			const AssetHandle handle = fixture.GetManager().Resolve("Assets/Environments/Orange.hdr").value_or(AssetHandle());
+			REQUIRE(handle.IsValid());
+			CHECK(fixture.GetManager().GetAssetType(handle) == AssetType::Environment);
+
+			// A GPU editor baked the same bytes for another source (a copy of the file elsewhere in the project).
+			const uint64_t key = ComputeEnvironmentKey(fixture, orange);
+			const EnvironmentData baked = MakeBakedEnvironment(0x3C00);
+			StoreEnvironmentBake(fixture, "cache://", AssetHandle(0x0123456789abcdefull), key, baked);
+			Result<AssetRef<Asset>> loaded = fixture.GetManager().Load(handle);
+			REQUIRE_MESSAGE(loaded.has_value(), loaded.error().ToString());
+			const AssetRef<EnvironmentData> environment = AssetCast<EnvironmentData>(*loaded);
+			REQUIRE(environment != nullptr);
+			CHECK(environment->IrradianceSH9 == baked.IrradianceSH9);
+			CHECK(environment->Specular.Texels == baked.Specular.Texels);
+
+			// It is stored under the source's own handle too, where the exporter and the next session look for it.
+			const AssetCache cache(fixture.GetVfs(), Test::ParseVfsPath("cache://"));
+			const Result<std::optional<CachedImport>> own = cache.Find(handle, key);
+			REQUIRE(own.has_value());
+			REQUIRE(own->has_value());
+			CHECK((*own)->Import.Artifacts.front().Handle == handle);
+			const Result<std::vector<AssetHandle>> sources = cache.FindSourcesWithKey(key);
+			REQUIRE(sources.has_value());
+			CHECK(*sources == std::vector<AssetHandle>{ AssetHandle(0x0123456789abcdefull), handle });
+
+			// A reimport bypasses the cache, but a bake cannot be redone here: it is served from the source's own entry.
+			const Result<AssetImportOutcome> reimported = fixture.GetManager().Reimport(handle);
+			REQUIRE_MESSAGE(reimported.has_value(), reimported.error().ToString());
+			CHECK(reimported->FromCache);
+			CHECK(CountDiagnostics(fixture.GetManager(), AssetImportFailedCode, handle) == 0);
+		}
+
+		TEST_CASE("EditorAssetManager: without a GPU a copy of a built-in HDRI is served from the engine cooked cache")
+		{
+			Test::AssetTestFixture fixture(Test::AssetTestFixtureOptions{ .EngineResources = true });
+			const Result<Buffer> studio = FileSystem::ReadFile(Test::GetRepositoryRoot() / "Resources/Environments/Studio.hdr");
+			REQUIRE_MESSAGE(studio.has_value(), studio.error().ToString());
+			fixture.WriteProjectFile("Assets/Environments/StudioCopy.hdr", *studio);
+			fixture.OpenProject(false);
+			const AssetHandle handle = fixture.GetManager().Resolve("Assets/Environments/StudioCopy.hdr").value_or(AssetHandle());
+			REQUIRE(handle.IsValid());
+
+			// The engine cooked cache holds the Studio built-in's bake (default settings, so the same key).
+			const EnvironmentData baked = MakeBakedEnvironment(0x3800);
+			StoreEnvironmentBake(fixture, "enginecache://", BuiltinAssetHandles::StudioEnvironment, ComputeEnvironmentKey(fixture, *studio), baked);
+			Result<AssetRef<Asset>> loaded = fixture.GetManager().Load(handle);
+			REQUIRE_MESSAGE(loaded.has_value(), loaded.error().ToString());
+			const AssetRef<EnvironmentData> environment = AssetCast<EnvironmentData>(*loaded);
+			REQUIRE(environment != nullptr);
+			CHECK(environment->Skybox.Texels == baked.Skybox.Texels);
+		}
+
+		TEST_CASE("EditorAssetManager: without a GPU an environment no cache holds fails with the GPU hint")
+		{
+			Test::AssetTestFixture fixture;
+			fixture.WriteProjectFile("Assets/Environments/Blue.hdr", MakeFlatHdr(16, glm::vec3(0.125f, 0.25f, 1.0f)));
+			fixture.OpenProject(false);
+			const AssetHandle handle = fixture.GetManager().Resolve("Assets/Environments/Blue.hdr").value_or(AssetHandle());
+			REQUIRE(handle.IsValid());
+			// A bake of other bytes has another key and is not used.
+			StoreEnvironmentBake(fixture, "cache://", AssetHandle(0x0123456789abcdefull), ComputeEnvironmentKey(fixture, MakeFlatHdr(16, glm::vec3(1.0f))),
+				MakeBakedEnvironment(0x3C00));
+			{
+				const Test::ExpectLog failure(LogLevel::Error, "Assets/Environments/Blue.hdr");
+				const Result<AssetRef<Asset>> loaded = fixture.GetManager().Load(handle);
+				REQUIRE_FALSE(loaded.has_value());
+				CHECK(loaded.error().GetCode() == ErrorCode::Unsupported);
+				CHECK(loaded.error().GetHint() == "start the editor with a GPU once to bake this environment");
+			}
+			const std::span<const AssetDiagnostic> diagnostics = fixture.GetManager().GetDiagnostics();
+			const auto diagnostic = std::ranges::find_if(diagnostics, [handle](const AssetDiagnostic& candidate)
+			{
+				return candidate.Asset == handle && candidate.Code == AssetImportFailedCode;
+			});
+			REQUIRE(diagnostic != diagnostics.end());
+			CHECK(diagnostic->Hint == "start the editor with a GPU once to bake this environment");
 		}
 	}
 

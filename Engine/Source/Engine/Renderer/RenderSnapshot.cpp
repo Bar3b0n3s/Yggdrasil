@@ -3,6 +3,10 @@
 
 #include "Engine/Core/DetMath.h"
 
+#include <array>
+#include <cstddef>
+#include <utility>
+
 // The reverse-Z projection of §8.3 through Core/DetMath (RenderSnapshot.h): Scene's render extraction calls it on the
 // simulation path's lint scope, and the matrix must be bit-identical in every configuration. Only IEEE-exact operations
 // besides DetMath::Tan, in double precision, rounded to float once per entry.
@@ -13,6 +17,67 @@ namespace Engine {
 
 		constexpr double ProjectionDegreesToRadians = 0.017453292519943295769236907684886; // pi / 180
 
+		// The debug views and their names, in enumerator order.
+		constexpr std::array<std::pair<RenderDebugView, std::string_view>, RenderDebugViewCount> DebugViewNames = { {
+			{ RenderDebugView::Lit, "Lit" },
+			{ RenderDebugView::Albedo, "Albedo" },
+			{ RenderDebugView::Normals, "Normals" },
+			{ RenderDebugView::Roughness, "Roughness" },
+			{ RenderDebugView::Metallic, "Metallic" },
+			{ RenderDebugView::Emissive, "Emissive" },
+		} };
+
+		// Every view has its entry at its enumerator's index with a name; an entry the array value-initialized because a view
+		// was appended without one fails here.
+		[[nodiscard]] static consteval bool AreDebugViewNamesComplete()
+		{
+			for (size_t index = 0; index < DebugViewNames.size(); ++index)
+			{
+				if (static_cast<size_t>(DebugViewNames[index].first) != index || DebugViewNames[index].second.empty())
+					return false;
+			}
+			return true;
+		}
+
+		static_assert(AreDebugViewNamesComplete(), "every RenderDebugView needs its name, in enumerator order");
+
+		[[nodiscard]] static constexpr char ToLowerAscii(char character)
+		{
+			return character >= 'A' && character <= 'Z' ? static_cast<char>(character - 'A' + 'a') : character;
+		}
+
+		[[nodiscard]] static bool EqualsIgnoringAsciiCase(std::string_view left, std::string_view right)
+		{
+			if (left.size() != right.size())
+				return false;
+			for (size_t index = 0; index < left.size(); ++index)
+			{
+				if (ToLowerAscii(left[index]) != ToLowerAscii(right[index]))
+					return false;
+			}
+			return true;
+		}
+
+	}
+
+	std::string_view RenderDebugViewToString(RenderDebugView view)
+	{
+		for (const auto& [value, name] : Utils::DebugViewNames)
+		{
+			if (value == view)
+				return name;
+		}
+		return "Unknown";
+	}
+
+	std::optional<RenderDebugView> ParseRenderDebugView(std::string_view name)
+	{
+		for (const auto& [value, spelling] : Utils::DebugViewNames)
+		{
+			if (Utils::EqualsIgnoringAsciiCase(name, spelling))
+				return value;
+		}
+		return std::nullopt;
 	}
 
 	glm::mat4 ComputeReverseZProjection(RenderProjection projection, float verticalFovDegrees, float orthographicSize, float nearClip, float farClip,

@@ -41,9 +41,9 @@ namespace Engine {
 		std::vector<Scope<IAssetImporter>> m_Importers; // sorted by id
 	};
 
-	// Registers the M6 importers (§7.4): TextureImporter, GltfImporter, MaterialImporter, SceneImporter, PrefabImporter and
-	// FontImporter. EnvironmentImporter (M8), AudioImporter and SoundEffectImporter (M12), ScriptImporter and ReplayImporter
-	// (M13) join here with their milestones.
+	// Registers the built-in importers (§7.4): M6's TextureImporter, GltfImporter, MaterialImporter, SceneImporter,
+	// PrefabImporter and FontImporter, and M8's EnvironmentImporter. AudioImporter and SoundEffectImporter (M12), ScriptImporter
+	// and ReplayImporter (M13) join here with their milestones.
 	void RegisterBuiltinImporters(ImporterRegistry& registry);
 
 	// Registers every importer's settings struct and enum (§5.4: "every *ImportSettings" is a reflected struct) in the order

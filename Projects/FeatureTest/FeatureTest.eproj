@@ -1,0 +1,53 @@
+{
+	"Format": "Project",
+	"Version": 1,
+	"Name": "FeatureTest",
+	"StartScene": "",
+	"Window": {
+		"Title": "Game",
+		"Width": 1600,
+		"Height": 900,
+		"VSync": true,
+		"Fullscreen": false,
+		"Resizable": true
+	},
+	"Simulation": {
+		"FixedHz": 60,
+		"MaxStepsPerFrame": 5,
+		"Seed": 0,
+		"MaxEntities": 65536
+	},
+	"Physics": {
+		"Gravity": [0, -9.81, 0],
+		"Layers": ["Default"],
+		"Collisions": [
+			["Default", "Default"]
+		]
+	},
+	"Input": {
+		"Actions": {}
+	},
+	"Rendering": {
+		"ShadowMapSize": 2048,
+		"SsaoHalfResolution": false
+	},
+	"Scripting": {
+		"MemoryLimitMB": 256,
+		"CallbackBudgetMs": 1000,
+		"PauseOnError": true,
+		"BlockPlayOnTypeErrors": false
+	},
+	"Export": {
+		"BuildScenes": [],
+		"Exclude": ["Assets/Tests/**"],
+		"Icon": "",
+		"Version": "1.0.0",
+		"Company": ""
+	},
+	"Testing": {
+		"Suites": [],
+		"Replays": [],
+		"CaseTimeoutTicks": 600,
+		"SuiteTickLimit": 36000
+	}
+}
