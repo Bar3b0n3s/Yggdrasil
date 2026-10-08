@@ -101,6 +101,7 @@ namespace Engine {
 				ProcessContextStep::Log,
 				ProcessContextStep::Profiler,
 				ProcessContextStep::CrashHandler,
+				ProcessContextStep::Physics,
 				ProcessContextStep::VulkanLoader,
 				ProcessContextStep::Glfw,
 			};
@@ -112,14 +113,16 @@ namespace Engine {
 			REQUIRE(child.has_value());
 			CHECK(child->ExitCode == 0);
 
-			const std::array<std::string, 10> lines = {
+			const std::array<std::string, 12> lines = {
 				"Process context: Log initialized",
 				"Process context: Profiler initialized",
 				"Process context: CrashHandler initialized",
+				"Process context: Physics initialized",
 				"Process context: VulkanLoader initialized",
 				"Process context: Glfw initialized",
 				"Process context: shutting down Glfw",
 				"Process context: shutting down VulkanLoader",
+				"Process context: shutting down Physics",
 				"Process context: shutting down CrashHandler",
 				"Process context: shutting down Profiler",
 				"Process context: shutting down Log",
@@ -203,6 +206,7 @@ namespace Engine {
 			CHECK(ProcessContextStepToString(ProcessContextStep::Log) == "Log");
 			CHECK(ProcessContextStepToString(ProcessContextStep::Profiler) == "Profiler");
 			CHECK(ProcessContextStepToString(ProcessContextStep::CrashHandler) == "CrashHandler");
+			CHECK(ProcessContextStepToString(ProcessContextStep::Physics) == "Physics");
 			CHECK(ProcessContextStepToString(ProcessContextStep::VulkanLoader) == "VulkanLoader");
 			CHECK(ProcessContextStepToString(ProcessContextStep::Glfw) == "Glfw");
 

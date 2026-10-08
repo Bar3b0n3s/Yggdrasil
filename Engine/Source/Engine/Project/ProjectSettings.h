@@ -42,7 +42,8 @@ namespace Engine {
 		uint32_t MaxEntities = 65536;
 	};
 
-	// Registry struct "PhysicsSettings" (§6.1 "Physics", §9). Layers: 1 to 32 unique non-empty names, the first "Default".
+	// Registry struct "PhysicsSettings" (§6.1 "Physics", §9). Layers: 1 to 16 unique non-empty names, the first "Default"
+	// (§9.2; Docs/Decisions/0014-m11-decisions.md decision 4).
 	// Collisions: pairs of declared layer names that collide (each inner array exactly 2 names); unlisted pairs do not.
 	struct PhysicsSettings
 	{

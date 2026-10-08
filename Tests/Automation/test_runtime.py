@@ -1,6 +1,7 @@
 """The Runtime executable and exported games (Docs/Architecture.md §14.1, §14.3, §13.5 "Runtime subset", §13.9; Roadmap
 M7 acceptance): the manifest's name for the user-data folder, headless runs that log no error, the missing-manifest exit
-code, and the automation subset served by an exported build.
+code, the automation subset served by an exported build, and the physics an exported game simulates (§9, Roadmap M11),
+read through that subset's physics.bodyInfo.
 
 The exports come from project.export and the games run a play session rendered by the scene renderer
 (Docs/Decisions/0012-m7-decisions.md decisions 10 and 12). test_runtime_missing_manifest_exits_3 needs only the Runtime.
@@ -26,13 +27,22 @@ TINY_GAME_ENTITIES = 3
 class RuntimeTests(AutomationTestCase):
     """Exported builds of the tiny game, and the bare Runtime."""
 
-    def export_game(self, lockstep_ticks: int = 0) -> tuple[Path, str]:
+    def export_game(self, lockstep_ticks: int = 0, with_physics: bool = False) -> tuple[Path, str]:
         """Exports the tiny game (a fresh project) and returns its executable; the exporting editor is shut down first.
         With `lockstep_ticks`, the editor first plays the game in lockstep with its default seed for that many ticks and
-        the state hash it reached is returned too (empty otherwise)."""
+        the state hash it reached is returned too (empty otherwise). With `with_physics`, the scene also holds a static
+        Ground box whose top face is at y = 0 and a dynamic Ball of radius 0.5 whose centre is at y = 1."""
         client = self.connect(self.start_editor())
         self.create_project(client, TINY_GAME_NAME)
         build_tiny_game(client)
+        if with_physics:
+            client.call("entity.create", {"name": "Ground", "components": {
+                "Transform": {"Translation": [0, -0.5, 0]}, "RigidBody": {"Type": "Static"},
+                "BoxCollider": {"HalfExtents": [50, 0.5, 50]}}})
+            client.call("entity.create", {"name": "Ball", "components": {
+                "Transform": {"Translation": [0, 1, 0]}, "RigidBody": {"Type": "Dynamic"},
+                "SphereCollider": {"Radius": 0.5}}})
+            client.call("scene.save")
         state_hash = ""
         if lockstep_ticks:
             client.call("play.start", {"lockstep": True})
@@ -82,6 +92,31 @@ class RuntimeTests(AutomationTestCase):
         # Without a manifest there is no application name, so nothing is written into a user-data folder.
         self.assertFalse((self.directory / "Bare" / app_name()).exists())
 
+    def test_exported_runtime_simulates_physics(self) -> None:
+        # The exported game runs its play session's physics (§9) with the project settings in Game.pak: the ball falls
+        # onto the ground and rests there, as physics.bodyInfo of the Runtime's automation subset (§13.5) reports.
+        executable, _ = self.export_game(with_physics=True)
+        arguments = ["--headless", "--automation", "--paused", "--renderer", "none"]
+        game = engine_client.launch_editor(executable, arguments, self.directory / "Physics", TINY_GAME_NAME)
+        self.editors.append(game)
+        client = self.connect(game)
+        # A fifth of a second in, the ball falls, touching nothing.
+        client.call("play.step", {"ticks": 12, "render": "none"})
+        falling = client.call("physics.bodyInfo", {"entity": "/Ball"})
+        self.assertLess(falling["linearVelocity"][1], -1.0)
+        self.assertEqual(falling["contacts"], [])
+        # A second in, it rests on the ground.
+        client.call("play.step", {"ticks": 48, "render": "none"})
+        ball = client.call("physics.bodyInfo", {"entity": "/Ball"})
+        self.assertEqual(ball["type"], "Dynamic")
+        for axis in range(3):
+            self.assertLess(abs(ball["linearVelocity"][axis]), 0.05)
+        self.assertEqual([pair["other"]["name"] for pair in ball["contacts"]], ["Ground"])
+        transform = client.call("entity.get", {"entity": "/Ball", "components": ["Transform"]})["entity"]
+        self.assertAlmostEqual(transform["components"]["Transform"]["Translation"][1], 0.5, delta=0.05)
+        client.call("session.shutdown")
+        self.assertEqual(game.wait(), EXIT_SUCCESS, game.output())
+
     def test_runtime_automation_subset(self) -> None:
         if not self.require_gpu():
             return
@@ -112,6 +147,11 @@ class RuntimeTests(AutomationTestCase):
         self.assertIn("MeshRenderer", cube["entity"]["components"])
         bounds = client.call("entity.bounds", {"entities": ["/Cube"]})
         self.assertTrue(bounds["bounds"][0]["hasBounds"])
+        # physics.bodyInfo is served too (§13.5 Runtime subset): the cube has no collider, so it has no body.
+        with self.assertRaises(engine_client.EngineError) as no_body:
+            client.call("physics.bodyInfo", {"entity": "/Cube"})
+        self.assert_engine_error(no_body.exception, engine_client.NOT_FOUND, "NotFound")
+        self.assertEqual(no_body.exception.issues[0]["pointer"], "/entity")
         self.assertIn("nextCursor", client.call("log.read", {"cursor": "end"}))
         self.assertIn("nextCursor", client.call("events.read", {"cursor": "end"}))
         with self.assertRaises(engine_client.EngineError) as edit_scene:

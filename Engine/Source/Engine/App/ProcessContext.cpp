@@ -5,6 +5,7 @@
 #include "Engine/Core/Log.h"
 #include "Engine/Core/Profiler.h"
 #include "Engine/Graphics/VulkanDispatch.h"
+#include "Engine/Physics/PhysicsEngine.h"
 #include "Engine/Platform/CrashHandler.h"
 #include "Engine/Platform/ErrorDialog.h"
 #include "Engine/Platform/Process.h"
@@ -21,10 +22,11 @@ namespace Engine {
 		// The live context, read by the fatal-error handler on whichever thread fails (process-level state, §3 rule 5).
 		static std::atomic<ProcessContext*> s_CurrentProcessContext{ nullptr };
 
-		constexpr std::array<ProcessContextStep, 5> ProcessContextSteps = {
+		constexpr std::array<ProcessContextStep, 6> ProcessContextSteps = {
 			ProcessContextStep::Log,
 			ProcessContextStep::Profiler,
 			ProcessContextStep::CrashHandler,
+			ProcessContextStep::Physics,
 			ProcessContextStep::VulkanLoader,
 			ProcessContextStep::Glfw,
 		};
@@ -148,6 +150,12 @@ namespace Engine {
 				m_PreviousFatalErrorHandler = SetFatalErrorHandler(&ProcessContext::HandleFatalError);
 				break;
 			}
+			case ProcessContextStep::Physics:
+			{
+				// Jolt's allocator, factory, types and job system (§9.1), after the crash handler that its asserts report to.
+				ENGINE_TRY(PhysicsEngine::Initialize(m_Specification.Physics));
+				break;
+			}
 			case ProcessContextStep::VulkanLoader:
 			{
 				Status loaded = VulkanDispatch::Initialize();
@@ -193,6 +201,9 @@ namespace Engine {
 				CrashHandler::Uninstall();
 				break;
 			}
+			case ProcessContextStep::Physics:
+				PhysicsEngine::Shutdown();
+				break;
 			case ProcessContextStep::VulkanLoader:
 				VulkanDispatch::Shutdown();
 				m_IsVulkanLoaderAvailable = false;
@@ -245,6 +256,7 @@ namespace Engine {
 			case ProcessContextStep::Log:          return "Log";
 			case ProcessContextStep::Profiler:     return "Profiler";
 			case ProcessContextStep::CrashHandler: return "CrashHandler";
+			case ProcessContextStep::Physics:      return "Physics";
 			case ProcessContextStep::VulkanLoader: return "VulkanLoader";
 			case ProcessContextStep::Glfw:         return "Glfw";
 		}

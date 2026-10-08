@@ -9,6 +9,7 @@
 #include "Engine/Scene/Components/RuntimeComponents.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/LoadReport.h"
+#include "Engine/Scene/PhysicsSystem.h"
 #include "Engine/Scene/RenderExtraction.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/SceneSerializer.h"
@@ -79,6 +80,21 @@ namespace Engine {
 					.WithHint("raise the project setting Simulation.MaxEntities, or destroy entities first"));
 		}
 
+		// The session's physics (M11, PlaySession::GetPhysics): the project's PhysicsSettings, its FixedHz and the session's
+		// asset manager, over the session's runtime scene.
+		static PhysicsSystemSpecification MakePhysicsSpecification(const PlaySessionSpecification& specification, Scene& scene)
+		{
+			const PhysicsSettings& physics = specification.Project.Physics;
+			PhysicsSystemSpecification result;
+			result.RuntimeScene = &scene;
+			result.Gravity = physics.Gravity;
+			result.Layers = physics.Layers;
+			result.Collisions = physics.Collisions;
+			result.FixedHz = specification.Project.Simulation.FixedHz;
+			result.Assets = specification.Assets;
+			return result;
+		}
+
 		// The entity cap's error for a scene that holds more entities than a session may (§5.7), with the start's context.
 		static std::unexpected<Error> MakeSceneOverLimitError(uint32_t limit, size_t count)
 		{
@@ -105,6 +121,8 @@ namespace Engine {
 		UUIDGenerator IdGenerator = UUIDGenerator::CreateDeterministic(0);
 		Random Stream{ 0 };
 		Scope<Scene> RuntimeScene;
+		// The scene's physics (M11), declared after the scene it refers to, so it is destroyed first.
+		Scope<PhysicsSystem> Physics;
 		PlayInput Input;
 		uint64_t Tick = 0;       // the next tick
 		uint64_t FrameIndex = 0; // frame phases run so far
@@ -219,6 +237,7 @@ namespace Engine {
 			EnterPhase(session, PlaySessionPhase::LateUpdate, tick);
 		}
 		EnterPhase(session, PlaySessionPhase::FrameDestroyFlush, tick);
+		Physics->FlushDestroyed(tick);
 		scene.FlushPendingDestroys();
 		EnterPhase(session, PlaySessionPhase::FrameTransformUpdate, tick);
 		UpdateTransforms();
@@ -340,6 +359,11 @@ namespace Engine {
 			return Utils::MakeSceneOverLimitError(maxEntities, loadedCount);
 
 		state.UpdateTransforms();
+		// M11: the bodies, in canonical order (§5.6 "Session setup").
+		Result<Scope<PhysicsSystem>> physics = PhysicsSystem::Create(Utils::MakePhysicsSpecification(specification, *state.RuntimeScene));
+		if (!physics)
+			return std::unexpected(std::move(physics).error().WithContext("while starting the play session"));
+		state.Physics = std::move(*physics);
 		state.RecordReferenceTransforms();
 		return session;
 	}
@@ -356,7 +380,9 @@ namespace Engine {
 	{
 		State& state = *m_State;
 		const uint64_t tick = state.Tick;
+		const SimStep step = SimStep::FromTick(tick, state.FixedDelta);
 		Scene& scene = *state.RuntimeScene;
+		PhysicsSystem& physics = *state.Physics;
 		const bool play = state.Mode == PlayMode::Play;
 
 		state.EnterPhase(*this, PlaySessionPhase::InterpolationSnapshot, tick);
@@ -372,9 +398,13 @@ namespace Engine {
 		state.EnterPhase(*this, PlaySessionPhase::PreStepTransformUpdate, tick);
 		state.UpdateTransforms();
 		state.EnterPhase(*this, PlaySessionPhase::PhysicsPreStep, tick);
+		physics.PreStep(step);
 		state.EnterPhase(*this, PlaySessionPhase::PhysicsStep, tick);
+		physics.Step(step);
 		state.EnterPhase(*this, PlaySessionPhase::PhysicsPostStep, tick);
+		physics.PostStep(step);
 		state.EnterPhase(*this, PlaySessionPhase::DestroyFlush, tick);
+		physics.FlushDestroyed(tick);
 		scene.FlushPendingDestroys();
 		state.EnterPhase(*this, PlaySessionPhase::PostStepTransformUpdate, tick);
 		state.UpdateTransforms();
@@ -474,6 +504,16 @@ namespace Engine {
 		return m_State->Input;
 	}
 
+	PhysicsSystem& PlaySession::GetPhysics()
+	{
+		return *m_State->Physics;
+	}
+
+	const PhysicsSystem& PlaySession::GetPhysics() const
+	{
+		return *m_State->Physics;
+	}
+
 	uint64_t PlaySession::ComputeStateHash() const
 	{
 		const State& state = *m_State;
@@ -489,6 +529,7 @@ namespace Engine {
 		for (const uint64_t word : state.Stream.GetState())
 			hasher.UpdateU64(word);
 		hasher.UpdateU64(state.IdGenerator.GetDrawCount());
+		state.Physics->AppendStateHash(hasher);
 		return hasher.Digest();
 	}
 

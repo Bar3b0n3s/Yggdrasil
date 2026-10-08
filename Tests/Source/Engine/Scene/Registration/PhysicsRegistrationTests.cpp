@@ -1,5 +1,6 @@
 #include "TestsPCH.h"
 
+#include "Engine/Physics/PhysicsTypes.h"
 #include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Scene/Components/BuiltinComponents.h"
 #include "Support/SceneTestFixture.h"
@@ -100,6 +101,14 @@ namespace Engine {
 			CHECK(FindPhysicsMeta(*registry, "CharacterController", "MaxSlopeAngle").Unit == "deg");
 			CHECK(FindPhysicsMeta(*registry, "CharacterController", "StepHeight").Min == 0.0);
 			CHECK(*FindPhysicsMeta(*registry, "CharacterController", "Mass").Min == doctest::Approx(0.001));
+			// The physics world refuses a heavier body or character (ADR 0014 decision 34): the registry stops it at every write.
+			for (const std::string_view component : { "RigidBody", "CharacterController" })
+			{
+				INFO(std::string(component));
+				const FieldMeta& mass = FindPhysicsMeta(*registry, component, "Mass");
+				REQUIRE(mass.Max.has_value());
+				CHECK(*mass.Max == static_cast<double>(MaxPhysicsMass));
+			}
 		}
 
 		TEST_CASE("PhysicsRegistration: BodyType and MotionQuality values are registered by name")

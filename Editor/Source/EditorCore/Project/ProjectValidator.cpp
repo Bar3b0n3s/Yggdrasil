@@ -6,6 +6,7 @@
 #include "EditorCore/Commands/ProjectSettingsCommand.h"
 #include "EditorCore/Commands/SceneEdit.h"
 #include "EditorCore/EditorContext.h"
+#include "Engine/App/EngineContext.h"
 #include "Engine/Asset/AssetMetadata.h"
 #include "Engine/Asset/AssetRegistry.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
@@ -17,6 +18,8 @@
 #include "Engine/Core/Log.h"
 #include "Engine/Core/UUIDGenerator.h"
 #include "Engine/Core/VirtualFileSystem.h"
+#include "Engine/Physics/PhysicsDiagnostics.h"
+#include "Engine/Physics/PhysicsLayers.h"
 #include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Scene/ComponentAccess.h"
 #include "Engine/Scene/ComponentHostOps.h"
@@ -24,10 +27,12 @@
 #include "Engine/Scene/Components/DirectionalLightComponent.h"
 #include "Engine/Scene/Components/PointLightComponent.h"
 #include "Engine/Scene/Components/PrefabInstanceComponent.h"
+#include "Engine/Scene/Components/RigidBodyComponent.h"
 #include "Engine/Scene/Components/RuntimeComponents.h"
 #include "Engine/Scene/Components/SpotLightComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/LoadReport.h"
+#include "Engine/Scene/PhysicsValidation.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/SceneSerializer.h"
 
@@ -37,8 +42,9 @@
 #include <set>
 #include <tuple>
 
-// The validator (Architecture §13.7, ADR 0008 decision 17; the asset checks of M6, ADR 0010 decision 5). The code list and
-// the load-code mapping (ADR 0006 decision 35) are data the contracts froze.
+// The validator (Architecture §13.7, ADR 0008 decision 17; the asset checks of M6, ADR 0010 decision 5; the physics checks
+// of M11, ADR 0014 decision 15). The code list and the load-code mapping (ADR 0006 decision 35) are data the contracts
+// froze.
 
 namespace Engine {
 
@@ -68,6 +74,18 @@ namespace Engine {
 			AssetContentSkippedCode,
 			PathCaseMismatchCode,
 			PrefabMissingAssetCode,
+			// M11 (Engine/Physics/PhysicsDiagnostics.h, ADR 0014 decision 9), in §13.7 order.
+			PhysicsNonconvexDynamicCode,
+			PhysicsMixedTriggerCode,
+			PhysicsDynamicTriggerCode,
+			PhysicsAllDofsLockedCode,
+			PhysicsInvalidShapeCode,
+			PhysicsAdjacentStaticBodiesCode,
+			PhysicsUnknownLayerCode,
+			PhysicsNonuniformScaleCode,
+			PhysicsDynamicUnderMovingParentCode,
+			PhysicsLimitExceededCode,
+			// M8 (Renderer/RenderPrepare.h, ADR 0013 decision 7).
 			RenderLightLimitExceededCode,
 			BuildStartSceneMissingCode,
 			BuildSceneMissingCode,
@@ -98,12 +116,14 @@ namespace Engine {
 			std::string Subject{};
 		};
 
-		// One scene the validator checks: the open scene (whose checks may fix it) or a scratch copy of a file.
+		// One scene the validator checks: the open scene (whose checks may fix it) or a scratch copy of a file. Layers is the
+		// project's physics layer table (M11), null when the settings give none (the physics checks are skipped then).
 		struct CheckedScene
 		{
 			const Scene* Target = nullptr;
 			std::string File{};
 			bool IsOpenScene = false;
+			const PhysicsLayerTable* Layers = nullptr;
 		};
 
 		// The position of one EntityRef value inside a component, as diagnostics name it (ProjectValidator::MakeDiagnosticId):
@@ -115,13 +135,15 @@ namespace Engine {
 			bool InArray = false; // the value is an array element (or below one)
 		};
 
-		// A diagnostic with the subject its id was made from, which fixes need (ProjectDiagnostic does not carry it), and for
-		// an asset scan diagnostic the registry's own diagnostic, which AssetRegistry::PlanFix identifies.
+		// A diagnostic with the subject its id was made from, which fixes need (ProjectDiagnostic does not carry it), for an
+		// asset scan diagnostic the registry's own diagnostic, which AssetRegistry::PlanFix identifies, and for
+		// PHYSICS_ADJACENT_STATIC_BODIES the entity its fix gives a Static RigidBody (PhysicsDiagnostic::FixTarget).
 		struct CollectedDiagnostic
 		{
 			ProjectDiagnostic Diagnostic{};
 			std::string Subject{};
 			std::optional<AssetDiagnostic> Scan{};
+			UUID FixTarget{};
 		};
 
 		// What a validation found: the diagnostics, and the scan of the Assets folder that their asset fixes are planned on.
@@ -681,17 +703,41 @@ namespace Engine {
 			});
 		}
 
+		// The physics codes of the scene (M11, Scene/PhysicsValidation.h). Mesh colliders load their meshes through the asset
+		// manager the editor injects into its engine context (EditorContext::Create). Only the open scene's diagnostics are
+		// fixable: the fix edits the open scene.
+		static void CheckPhysics(const EditorContext& editor, const CheckedScene& checked, std::vector<CollectedDiagnostic>& diagnostics)
+		{
+			if (checked.Layers == nullptr)
+				return;
+			for (const PhysicsDiagnostic& physics : ValidateScenePhysics(*checked.Target, *checked.Layers, editor.GetEngine().GetAssetManager()))
+			{
+				DiagnosticSite site;
+				site.File = checked.File;
+				site.Entity = FormatOptionalUUID(physics.Entity);
+				site.Component = physics.Component;
+				site.Field = physics.Field;
+				site.Subject = physics.Subject;
+				CollectedDiagnostic collected =
+					MakeDiagnostic(physics.Code, physics.Severity, physics.Message, site, physics.Hint, physics.AutoFixable && checked.IsOpenScene);
+				collected.FixTarget = physics.FixTarget;
+				diagnostics.push_back(std::move(collected));
+			}
+		}
+
 		static void CheckScene(const EditorContext& editor, const CheckedScene& checked, std::vector<CollectedDiagnostic>& diagnostics)
 		{
 			CheckCameras(checked, diagnostics);
 			CheckDanglingReferences(checked, diagnostics);
 			CheckSceneAssets(editor, checked, diagnostics);
+			CheckPhysics(editor, checked, diagnostics);
 			CheckLightLimit(checked, diagnostics);
 		}
 
 		// Loads the scene file `path` into a scratch scene in Repair mode and checks it; a file that cannot be loaded at all is
-		// ASSET_IMPORT_FAILED.
-		static void CheckSceneFile(const EditorContext& editor, const VfsPath& path, std::vector<CollectedDiagnostic>& diagnostics)
+		// ASSET_IMPORT_FAILED. `layers` as CheckedScene::Layers.
+		static void CheckSceneFile(const EditorContext& editor, const VfsPath& path, const PhysicsLayerTable* layers,
+			std::vector<CollectedDiagnostic>& diagnostics)
 		{
 			UUIDGenerator scratchIds = UUIDGenerator::CreateDeterministic(0);
 			SceneSpecification specification;
@@ -705,7 +751,7 @@ namespace Engine {
 			options.RepairIdGenerator = &scratchIds;
 			options.SourcePath = std::string(path.GetPath());
 			LoadReport report;
-			CheckedScene checked{ scratch.get(), std::string(path.GetPath()), false };
+			CheckedScene checked{ scratch.get(), std::string(path.GetPath()), false, layers };
 			const Status loaded = SceneSerializer::LoadFromFile(*scratch, editor.GetVfs(), path, options, report);
 			if (!loaded)
 			{
@@ -929,6 +975,20 @@ namespace Engine {
 			return report;
 		}
 
+		// The project's physics layer table (PhysicsSettings), which the physics checks resolve layer names against; nullopt,
+		// logged, when the settings give none (a loaded project's always do: its settings passed the same rules).
+		static std::optional<PhysicsLayerTable> MakePhysicsLayers(const EditorContext& context)
+		{
+			const PhysicsSettings& physics = context.GetProject().GetSettings().Physics;
+			Result<PhysicsLayerTable> layers = PhysicsLayerTable::Create(physics.Layers, physics.Collisions);
+			if (!layers)
+			{
+				ENGINE_WARN("Project validator: the physics checks are skipped, the project's physics layers give no layer table: {}", layers.error().ToString());
+				return std::nullopt;
+			}
+			return std::move(*layers);
+		}
+
 		// Every diagnostic of `scope`, sorted, with its subject, and the asset scan their fixes are planned on
 		// (ProjectValidator::Validate's work).
 		static Result<Collection> CollectDiagnostics(const EditorContext& context, ValidationScope scope)
@@ -943,10 +1003,12 @@ namespace Engine {
 
 			Collection collection;
 			std::vector<CollectedDiagnostic>& diagnostics = collection.Diagnostics;
+			const std::optional<PhysicsLayerTable> layers = MakePhysicsLayers(context);
+			const PhysicsLayerTable* physicsLayers = layers.has_value() ? &*layers : nullptr;
 			const std::optional<VfsPath>& openPath = context.GetScenePath();
 			if (context.HasScene())
 			{
-				const CheckedScene open{ &context.GetScene(), openPath.has_value() ? std::string(openPath->GetPath()) : std::string(), true };
+				const CheckedScene open{ &context.GetScene(), openPath.has_value() ? std::string(openPath->GetPath()) : std::string(), true, physicsLayers };
 				CheckScene(context, open, diagnostics);
 			}
 
@@ -962,14 +1024,15 @@ namespace Engine {
 					// The open scene's in-memory state replaces its file (it was checked above).
 					if (context.HasScene() && openPath.has_value() && *openPath == scene)
 						continue;
-					CheckSceneFile(context, scene, diagnostics);
+					CheckSceneFile(context, scene, physicsLayers, diagnostics);
 				}
 			}
 			SortDiagnostics(diagnostics);
 			return collection;
 		}
 
-		// The scene fixes (cameras, dangling references) of the selected diagnostics, as one SceneEdit of the open scene.
+		// The scene fixes (cameras, dangling references, adjacent static bodies) of the selected diagnostics, as one SceneEdit
+		// of the open scene.
 		static Status FixOpenScene(EditorContext& editor, const std::vector<const CollectedDiagnostic*>& selected)
 		{
 			const bool hasSceneFix = std::ranges::any_of(selected, [](const CollectedDiagnostic* collected)
@@ -1007,6 +1070,30 @@ namespace Engine {
 					patch["Primary"] = wanted;
 					ENGINE_TRY(ComponentAccess::PatchComponentJson(camera, "Camera", patch));
 				}
+			}
+
+			// Adjacent implicit static bodies (M11): a Static RigidBody on each fix target joins the bodies below it into one
+			// static compound. A target below another selected target is left alone: the upper one's RigidBody gathers its
+			// pieces too, which makes one compound instead of two.
+			std::set<UUID> targets;
+			for (const CollectedDiagnostic* collected : selected)
+			{
+				if (collected->Diagnostic.Code == PhysicsAdjacentStaticBodiesCode && collected->FixTarget.IsValid())
+					targets.insert(collected->FixTarget);
+			}
+			for (const UUID target : targets)
+			{
+				const Entity entity = scene.FindEntityByID(target);
+				if (!entity.IsValid() || entity.HasComponent<RigidBodyComponent>())
+					continue;
+				bool belowAnotherTarget = false;
+				for (Entity ancestor = entity.GetParent(); ancestor.IsValid() && !belowAnotherTarget; ancestor = ancestor.GetParent())
+					belowAnotherTarget = targets.contains(ancestor.GetUUID());
+				if (belowAnotherTarget)
+					continue;
+				Json body = Json::object();
+				body["Type"] = "Static";
+				ENGINE_TRY(ComponentAccess::AddComponent(entity, "RigidBody", &body));
 			}
 
 			// Dangling references: every selected one of a component is cleared in one write of that component.

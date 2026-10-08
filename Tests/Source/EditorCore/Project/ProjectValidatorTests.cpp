@@ -11,10 +11,12 @@
 #include "Engine/Core/Hash.h"
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Core/VirtualFileSystem.h"
+#include "Engine/Physics/PhysicsDiagnostics.h"
 #include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Renderer/RenderPrepare.h"
 #include "Engine/Scene/ComponentAccess.h"
 #include "Engine/Scene/ComponentRegistration.h"
+#include "Engine/Scene/Components/RigidBodyComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/LoadReport.h"
 #include "Engine/Scene/SceneSerializer.h"
@@ -567,9 +569,9 @@ namespace Engine {
 		TEST_CASE("ProjectValidator: GetCodes lists the codes the validator reports, each once")
 		{
 			const std::span<const std::string_view> codes = ProjectValidator::GetCodes();
-			// M4's 14 codes, M6's 11 (the asset codes but the runtime-only ASSET_UPLOAD_FAILED, and PREFAB_MISSING_ASSET) and M8's
-			// RENDER_LIGHT_LIMIT_EXCEEDED.
-			CHECK(codes.size() == 26);
+			// M4's 14 codes, M6's 11 (the asset codes but the runtime-only ASSET_UPLOAD_FAILED, and PREFAB_MISSING_ASSET), M8's
+			// RENDER_LIGHT_LIMIT_EXCEEDED and M11's 10 physics codes.
+			CHECK(codes.size() == 26 + PhysicsDiagnosticCodes.size());
 			std::vector<std::string_view> sorted(codes.begin(), codes.end());
 			std::sort(sorted.begin(), sorted.end());
 			CHECK(std::adjacent_find(sorted.begin(), sorted.end()) == sorted.end());
@@ -804,6 +806,189 @@ namespace Engine {
 			report = ProjectValidator::Validate(editor, ValidationScope::Scene);
 			REQUIRE(report.has_value());
 			CHECK(FindDiagnostic(*report, RenderLightLimitExceededCode) == nullptr);
+		}
+
+		TEST_CASE("ProjectValidator: GetCodes lists the M11 physics codes right after PREFAB_MISSING_ASSET")
+		{
+			const std::span<const std::string_view> codes = ProjectValidator::GetCodes();
+			const auto prefab = std::find(codes.begin(), codes.end(), PrefabMissingAssetCode);
+			REQUIRE(prefab != codes.end());
+			// §13.7 lists the physics codes right after PREFAB_MISSING_ASSET, in PhysicsDiagnosticCodes' order.
+			REQUIRE(static_cast<size_t>(codes.end() - prefab) > PhysicsDiagnosticCodes.size());
+			for (size_t index = 0; index < PhysicsDiagnosticCodes.size(); ++index)
+			{
+				CAPTURE(std::string(PhysicsDiagnosticCodes[index]));
+				CHECK(*(prefab + 1 + static_cast<std::ptrdiff_t>(index)) == PhysicsDiagnosticCodes[index]);
+			}
+		}
+
+		// M11: the physics checks of Scene/PhysicsValidation.h through project.validate (Docs/Decisions/0014-m11-decisions.md
+		// decision 15): the diagnostics of the open scene under their codes, and the fix of PHYSICS_ADJACENT_STATIC_BODIES.
+		TEST_CASE("ProjectValidator: physics diagnostics of the open scene are reported under their codes")
+		{
+			Test::EditorTestFixture fixture("ValidatorPhysics");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			EditorContext& editor = fixture.GetEditor();
+			{
+				SceneEdit edit(editor, "Physics problems");
+				const Entity locked = editor.GetScene().CreateEntity("Locked");
+				const Json body = ParseValidatorJson(R"({"Type":"Dynamic","LockTranslation":[true,true,true],"LockRotation":[true,true,true]})");
+				REQUIRE(ComponentAccess::AddComponent(locked, "RigidBody", &body).has_value());
+				REQUIRE(ComponentAccess::AddComponent(locked, "BoxCollider", nullptr).has_value());
+				const Entity stray = editor.GetScene().CreateEntity("Stray");
+				const Json strayBody = ParseValidatorJson(R"({"Layer":"NoSuchLayer"})");
+				REQUIRE(ComponentAccess::AddComponent(stray, "RigidBody", &strayBody).has_value());
+				REQUIRE(ComponentAccess::AddComponent(stray, "SphereCollider", nullptr).has_value());
+				REQUIRE(edit.Commit().has_value());
+			}
+			const Result<ValidationReport> report = ProjectValidator::Validate(editor, ValidationScope::Scene);
+			REQUIRE(report.has_value());
+			INFO(DescribeDiagnostics(*report));
+			const ProjectDiagnostic* locked = FindDiagnostic(*report, PhysicsAllDofsLockedCode);
+			REQUIRE(locked != nullptr);
+			CHECK(locked->Severity == DiagnosticSeverity::Error);
+			CHECK(locked->Entity == editor.GetScene().FindEntityByPath("/Locked").GetUUID().ToString());
+			CHECK(locked->Component == "RigidBody");
+			CHECK(locked->File == "Assets/Scenes/Main.scene");
+			CHECK_FALSE(locked->AutoFixable);
+			const ProjectDiagnostic* layer = FindDiagnostic(*report, PhysicsUnknownLayerCode);
+			REQUIRE(layer != nullptr);
+			CHECK(layer->Field == "Layer");
+		}
+
+		TEST_CASE("ProjectValidator: fixing PHYSICS_ADJACENT_STATIC_BODIES adds a Static RigidBody to the common parent in one undo step")
+		{
+			Test::EditorTestFixture fixture("ValidatorAdjacentStatic");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			EditorContext& editor = fixture.GetEditor();
+			{
+				SceneEdit edit(editor, "Track");
+				const Entity track = editor.GetScene().CreateEntity("Track");
+				for (const std::string_view translation : { R"({"Translation":[0,0,0]})", R"({"Translation":[1,0,0]})" })
+				{
+					const Entity piece = editor.GetScene().CreateEntity("Piece", track);
+					const Json transform = ParseValidatorJson(translation);
+					REQUIRE(ComponentAccess::PatchComponentJson(piece, "Transform", transform).has_value());
+					REQUIRE(ComponentAccess::AddComponent(piece, "BoxCollider", nullptr).has_value());
+				}
+				REQUIRE(edit.Commit().has_value());
+			}
+			const Result<ValidationReport> report = ProjectValidator::Validate(editor, ValidationScope::Scene);
+			REQUIRE(report.has_value());
+			const ProjectDiagnostic* adjacent = FindDiagnostic(*report, PhysicsAdjacentStaticBodiesCode);
+			REQUIRE(adjacent != nullptr);
+			CHECK(adjacent->Severity == DiagnosticSeverity::Warning);
+			CHECK(adjacent->AutoFixable);
+
+			const size_t undoCount = editor.GetHistory().GetUndoCount();
+			const Result<FixReport> fixed =
+				ProjectValidator::Fix(editor, ValidationScope::Scene, FixSelection{ .All = false, .IdsOrCodes = { std::string(PhysicsAdjacentStaticBodiesCode) } });
+			REQUIRE_MESSAGE(fixed.has_value(), fixed.error().ToString());
+			CHECK(fixed->Fixed == std::vector<std::string>{ adjacent->Id });
+			CHECK(FindDiagnostic(fixed->After, PhysicsAdjacentStaticBodiesCode) == nullptr);
+			CHECK(editor.GetHistory().GetUndoCount() == undoCount + 1);
+			const Result<Json> body = ComponentAccess::GetComponentJson(editor.GetScene().FindEntityByPath("/Track"), "RigidBody");
+			REQUIRE(body.has_value());
+			CHECK((*body)["Type"] == Json("Static"));
+			REQUIRE(editor.GetHistory().Undo(editor) == 1u);
+			CHECK_FALSE(ComponentAccess::GetComponentJson(editor.GetScene().FindEntityByPath("/Track"), "RigidBody").has_value());
+		}
+
+		TEST_CASE("ProjectValidator: fixing nested adjacent groups gives only the outermost common parent a RigidBody")
+		{
+			// Level holds two groups of two touching pieces, and the groups touch each other: the groups' pairs name the groups,
+			// the pair across them names Level. One Static RigidBody on Level makes all four pieces one compound.
+			Test::EditorTestFixture fixture("ValidatorNestedAdjacent");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			EditorContext& editor = fixture.GetEditor();
+			{
+				SceneEdit edit(editor, "Level");
+				Scene& scene = editor.GetScene();
+				const Entity level = scene.CreateEntity("Level");
+				float x = 0.0f;
+				for (const std::string_view group : { "GroupA", "GroupB" })
+				{
+					const Entity parent = scene.CreateEntity(group, level);
+					for (int index = 0; index < 2; ++index, x += 1.0f)
+					{
+						const Entity piece = scene.CreateEntity("Piece", parent);
+						Json transform = Json::object();
+						transform["Translation"] = Json::array({ x, 0.0f, 0.0f });
+						REQUIRE(ComponentAccess::PatchComponentJson(piece, "Transform", transform).has_value());
+						REQUIRE(ComponentAccess::AddComponent(piece, "BoxCollider", nullptr).has_value());
+					}
+				}
+				REQUIRE(edit.Commit().has_value());
+			}
+			const Result<ValidationReport> report = ProjectValidator::Validate(editor, ValidationScope::Scene);
+			REQUIRE(report.has_value());
+			INFO(DescribeDiagnostics(*report));
+			std::vector<std::string> adjacent;
+			for (const ProjectDiagnostic& diagnostic : report->Diagnostics)
+			{
+				if (diagnostic.Code == PhysicsAdjacentStaticBodiesCode)
+				{
+					CHECK(diagnostic.AutoFixable);
+					adjacent.push_back(diagnostic.Id);
+				}
+			}
+			REQUIRE(adjacent.size() == 3);
+
+			const Result<FixReport> fixed = ProjectValidator::Fix(editor, ValidationScope::Scene, FixSelection{ .All = true, .IdsOrCodes = {} });
+			REQUIRE_MESSAGE(fixed.has_value(), fixed.error().ToString());
+			CHECK(fixed->Fixed.size() == 3);
+			CHECK(FindDiagnostic(fixed->After, PhysicsAdjacentStaticBodiesCode) == nullptr);
+			const Scene& scene = editor.GetScene();
+			const Result<Json> body = ComponentAccess::GetComponentJson(scene.FindEntityByPath("/Level"), "RigidBody");
+			REQUIRE(body.has_value());
+			CHECK((*body)["Type"] == Json("Static"));
+			CHECK_FALSE(scene.FindEntityByPath("/Level/GroupA").HasComponent<RigidBodyComponent>());
+			CHECK_FALSE(scene.FindEntityByPath("/Level/GroupB").HasComponent<RigidBodyComponent>());
+		}
+
+		TEST_CASE("ProjectValidator: physics diagnostics of a scene file that is not open are reported without a fix")
+		{
+			Test::EditorTestFixture fixture("ValidatorPhysicsFile");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			EditorContext& editor = fixture.GetEditor();
+			{
+				SceneEdit edit(editor, "Track");
+				const Entity track = editor.GetScene().CreateEntity("Track");
+				for (const std::string_view translation : { R"({"Translation":[0,0,0]})", R"({"Translation":[1,0,0]})" })
+				{
+					const Entity piece = editor.GetScene().CreateEntity("Piece", track);
+					const Json transform = ParseValidatorJson(translation);
+					REQUIRE(ComponentAccess::PatchComponentJson(piece, "Transform", transform).has_value());
+					REQUIRE(ComponentAccess::AddComponent(piece, "BoxCollider", nullptr).has_value());
+				}
+				REQUIRE(edit.Commit().has_value());
+			}
+			// The track goes into a second scene file; the open scene loses it again.
+			const std::span<const UUID> pieces = editor.GetScene().FindEntityByPath("/Track").GetChildren();
+			REQUIRE(pieces.size() == 2);
+			const std::string first = pieces[0].ToString();
+			const std::string second = pieces[1].ToString();
+			const Result<std::string> saved = SceneSerializer::SaveToString(editor.GetScene());
+			REQUIRE(saved.has_value());
+			WriteValidatorFile(editor, "Assets/Scenes/Track.scene", *saved);
+			REQUIRE(editor.GetHistory().Undo(editor) == 1u);
+
+			const Result<ValidationReport> report = ProjectValidator::Validate(editor, ValidationScope::Project);
+			REQUIRE(report.has_value());
+			INFO(DescribeDiagnostics(*report));
+			CHECK(FindFileDiagnostic(*report, "Assets/Scenes/Main.scene", PhysicsAdjacentStaticBodiesCode) == nullptr);
+			const ProjectDiagnostic* adjacent = FindFileDiagnostic(*report, "Assets/Scenes/Track.scene", PhysicsAdjacentStaticBodiesCode);
+			REQUIRE(adjacent != nullptr);
+			CHECK(adjacent->Severity == DiagnosticSeverity::Warning);
+			CHECK_FALSE(adjacent->AutoFixable);
+			// On the piece first in canonical order; the id is made from the file, that piece and the other one (the subject),
+			// so it is the same in every run.
+			CHECK(adjacent->Entity == first);
+			CHECK(adjacent->Id == ProjectValidator::MakeDiagnosticId(PhysicsAdjacentStaticBodiesCode, "Assets/Scenes/Track.scene", first, "", "", second));
 		}
 	}
 
