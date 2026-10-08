@@ -159,11 +159,10 @@ namespace Engine {
 		return {};
 	}
 
-	Status EngineContext::CreateAudio(const AudioEngineSpecification& /*audio*/)
+	Status EngineContext::CreateAudio(const AudioEngineSpecification& audio)
 	{
-		// The contract's stub creates no engine, so every context stays silent (GetAudioEngine null) until stream A
-		// implements AudioEngine::Create and this step (AudioEngine::Create(audio, m_Vfs) into m_AudioEngine).
-		ENGINE_CONTRACT_STUB();
+		// The engine reads clips through the context's VFS, which outlives it (m_AudioEngine is the last member).
+		ENGINE_TRY_ASSIGN(m_AudioEngine, AudioEngine::Create(audio, m_Vfs));
 		return {};
 	}
 

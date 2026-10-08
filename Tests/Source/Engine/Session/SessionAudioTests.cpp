@@ -17,10 +17,9 @@
 #include <vector>
 
 // The play session's audio hook (Architecture §5.6, §5.7 frame phase step 3, §10.1 time ownership, §10.2 pause and stop;
-// Docs/Decisions/0015-m12-decisions.md decision 13). The hook in PlaySession.cpp is wired by the M12 contract; these skipped
-// skeletons need the AudioEngine (stream A) and the AudioSystem (stream C), and stream C removes the skips. The sources play
-// the built-in silent clip (looping, so the voices live across many ticks); the session has no asset manager, so the clip
-// is "missing" and AudioSystem logs a warning for it, which does not fail a test.
+// Docs/Decisions/0015-m12-decisions.md decision 13). Every test but the first runs a device-less AudioEngine with
+// deterministic decoding. The sources play the built-in silent clip (looping, so the voices live across many ticks); the
+// session has no asset manager, so AudioSystem plays the silent clip for every clip without loading anything.
 
 namespace Engine {
 
@@ -104,7 +103,7 @@ namespace Engine {
 			CHECK(session->GetTick() == 1);
 		}
 
-		TEST_CASE("PlaySession: a Play session starts its PlayOnStart sources held until its first frame phase" * doctest::skip(true))
+		TEST_CASE("PlaySession: a Play session starts its PlayOnStart sources held until its first frame phase")
 		{
 			Test::SceneTestFixture fixture;
 			PopulateAudioScene(fixture.GetScene());
@@ -130,7 +129,7 @@ namespace Engine {
 			CHECK(engine->GetStats().LiveVoices == 0);
 		}
 
-		TEST_CASE("PlaySession: Simulate and engine-less sessions have no audio" * doctest::skip(true))
+		TEST_CASE("PlaySession: Simulate and engine-less sessions have no audio")
 		{
 			Test::SceneTestFixture fixture;
 			PopulateAudioScene(fixture.GetScene());
@@ -148,7 +147,7 @@ namespace Engine {
 			CHECK(engine->GetStats().LiveVoices == 0);
 		}
 
-		TEST_CASE("PlaySession: lockstep owns the audio engine's time and every tick pulls 800 frames" * doctest::skip(true))
+		TEST_CASE("PlaySession: lockstep owns the audio engine's time and every tick pulls 800 frames")
 		{
 			Test::SceneTestFixture fixture;
 			PopulateAudioScene(fixture.GetScene());
@@ -185,8 +184,7 @@ namespace Engine {
 			CHECK(engine->GetTimeSource() == AudioTimeSource::Host);
 		}
 
-		TEST_CASE("PlaySession: a test run owns audio time and pulls one tick of frames per tick run since the last pull"
-			* doctest::skip(true))
+		TEST_CASE("PlaySession: a test run owns audio time and pulls one tick of frames per tick run since the last pull")
 		{
 			// §10.1 "or a test run is active": a ScriptedClock suite (§11.10) is not in lockstep and runs 0 to MaxStepsPerFrame
 			// steps per frame.
@@ -220,8 +218,7 @@ namespace Engine {
 			CHECK_FALSE(engine->IsSimulationTimeOwned());
 		}
 
-		TEST_CASE("PlaySession: a paused lockstep session's voices follow its ticks and pause when it leaves lockstep"
-			* doctest::skip(true))
+		TEST_CASE("PlaySession: a paused lockstep session's voices follow its ticks and pause when it leaves lockstep")
 		{
 			Test::SceneTestFixture fixture;
 			PopulateAudioScene(fixture.GetScene());
@@ -246,7 +243,7 @@ namespace Engine {
 			CHECK(paused.CursorFrames == 800);
 		}
 
-		TEST_CASE("PlaySession: pausing the session pauses its voices" * doctest::skip(true))
+		TEST_CASE("PlaySession: pausing the session pauses its voices")
 		{
 			Test::SceneTestFixture fixture;
 			PopulateAudioScene(fixture.GetScene());

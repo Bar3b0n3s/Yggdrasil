@@ -104,6 +104,9 @@ namespace Engine {
 		registry.Register(CreateScope<SceneImporter>());
 		registry.Register(CreateScope<PrefabImporter>());
 		registry.Register(CreateScope<FontImporter>());
+		// M12 (Docs/Decisions/0015-m12-decisions.md).
+		registry.Register(CreateScope<AudioImporter>());
+		registry.Register(CreateScope<SoundEffectImporter>());
 	}
 
 	void RegisterAssetPipelineTypes(TypeRegistry& registry)
@@ -112,8 +115,7 @@ namespace Engine {
 		TextureImporter::RegisterTypes(registry);
 		GltfImporter::RegisterTypes(registry);
 		FontImporter::RegisterTypes(registry);
-		// M12 (Docs/Decisions/0015-m12-decisions.md): the audio import settings and the .sfx description. Stream B registers
-		// AudioImporter and SoundEffectImporter in RegisterBuiltinImporters with their implementation.
+		// M12 (Docs/Decisions/0015-m12-decisions.md): the audio import settings and the .sfx description.
 		AudioImporter::RegisterTypes(registry);
 		SoundEffectImporter::RegisterTypes(registry);
 	}

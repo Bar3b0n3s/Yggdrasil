@@ -91,8 +91,6 @@ namespace Engine {
 			CHECK(wrongExtension["error"]["code"] == Json(-32602));
 			Json invalid = setup.Request("asset.create", ParseAssetMethodJson(R"({"type": "Material", "path": "Assets/Red.material", "values": {"Roughness": 2}})"));
 			CHECK(invalid["error"]["data"]["issues"][0]["pointer"] == Json("/values/Roughness"));
-			Json soundEffect = setup.Request("asset.create", ParseAssetMethodJson(R"({"type": "SoundEffect", "path": "Assets/Lock.sfx"})"));
-			CHECK(soundEffect["error"]["code"] == Json(-32009));
 			// New projects already have Assets/Audio (ProjectManager's folders), so a second one is AlreadyExists.
 			Json existingFolder = setup.Request("asset.create", ParseAssetMethodJson(R"({"type": "Folder", "path": "Assets/Audio"})"));
 			CHECK(existingFolder["error"]["data"]["issues"][0]["pointer"] == Json("/path"));
@@ -284,14 +282,19 @@ namespace Engine {
 			CHECK(editor.GetScene().FindEntityByPath("/Outside").IsValid());
 		}
 
-		// M12 (Docs/Decisions/0015-m12-decisions.md): sound effects through asset.create, asset.getProperties and
-		// asset.setProperties (Architecture §6.6, §10.3, §13.5). Skipped skeletons: stream C implements them over stream B's
-		// .sfx document functions and removes the skips, and turns the SoundEffect refusal of "asset.create supports dry runs
-		// and rejects bad paths and values" into a success.
+		// M12 (Docs/Decisions/0015-m12-decisions.md decision 16): sound effects through asset.create, asset.getProperties and
+		// asset.setProperties (Architecture §6.6, §10.3, §13.5) over the .sfx document functions and SoundEffectImporter.
+		// (SoundEffect is no longer refused by "asset.create supports dry runs and rejects bad paths and values"; its dry run
+		// and its refusals are checked here.)
 
-		TEST_CASE("AssetMethods: asset.create makes a SoundEffect from values over the defaults" * doctest::skip(true))
+		TEST_CASE("AssetMethods: asset.create makes a SoundEffect from values over the defaults")
 		{
 			Test::AutomationFixture setup("AssetCreateSoundEffect");
+			const Json dry = CallOrFail(setup, "asset.create", ParseAssetMethodJson(R"({"type": "SoundEffect", "path": "Assets/Audio/Lock.sfx",
+				"values": {"Layers": [{"Duration": 0.1}]}, "dryRun": true})"));
+			CHECK(dry["dryRun"] == Json(true));
+			CHECK(dry["asset"]["type"] == Json("AudioClip"));
+			CHECK_FALSE(setup.GetEditor().GetVfs().Exists(VfsPath::Create("project", "Assets/Audio/Lock.sfx").value_or(VfsPath())));
 			const Json created = CallOrFail(setup, "asset.create", ParseAssetMethodJson(R"({"type": "SoundEffect", "path": "Assets/Audio/Lock.sfx",
 				"values": {"Seed": 3, "Layers": [{"Wave": "Square", "Notes": ["A3:0.05"]}]}})"));
 			CHECK(created["asset"]["type"] == Json("AudioClip"));
@@ -309,7 +312,7 @@ namespace Engine {
 			CHECK_FALSE(setup.GetEditor().GetVfs().Exists(VfsPath::Create("project", "Assets/Audio/Lock.sfx").value_or(VfsPath())));
 		}
 
-		TEST_CASE("AssetMethods: asset.getProperties and asset.setProperties read and patch a sound effect" * doctest::skip(true))
+		TEST_CASE("AssetMethods: asset.getProperties and asset.setProperties read and patch a sound effect")
 		{
 			Test::AutomationFixture setup("AssetSoundEffectProperties");
 			CallOrFail(setup, "asset.create", ParseAssetMethodJson(R"({"type": "SoundEffect", "path": "Assets/Audio/Coin.sfx",
@@ -328,18 +331,38 @@ namespace Engine {
 			CHECK(undone["values"]["Volume"] == Json(1.0));
 		}
 
-		TEST_CASE("AssetMethods: an invalid sound effect is InvalidParams located in its values" * doctest::skip(true))
+		TEST_CASE("AssetMethods: invalid sound effect values are ValidationFailed located in them, as a material's are")
 		{
+			// Both native asset kinds follow one rule: data that breaks the asset's rules is Validation (ValidationFailed,
+			// -32003) located under /values; values that are not an object, or that set the file header, are InvalidParams.
 			Test::AutomationFixture setup("AssetInvalidSoundEffect");
 			const Json badNote = setup.Request("asset.create", ParseAssetMethodJson(R"({"type": "SoundEffect", "path": "Assets/Audio/Bad.sfx",
 				"values": {"Layers": [{"Notes": ["Z9:0.1"]}]}})"));
-			CHECK(badNote["error"]["code"] == Json(-32602));
+			CHECK(badNote["error"]["code"] == Json(-32003));
+			CHECK(badNote["error"]["data"]["errorCode"] == Json("Validation"));
 			CHECK(badNote["error"]["data"]["issues"][0]["pointer"] == Json("/values/Layers/0/Notes/0"));
 			const Json outOfRange = setup.Request("asset.create", ParseAssetMethodJson(R"({"type": "SoundEffect", "path": "Assets/Audio/Loud.sfx",
 				"values": {"Volume": 4, "Layers": [{"Duration": 0.1}]}})"));
+			CHECK(outOfRange["error"]["code"] == Json(-32003));
 			CHECK(outOfRange["error"]["data"]["issues"][0]["pointer"] == Json("/values/Volume"));
 			const Json noLayers = setup.Request("asset.create", ParseAssetMethodJson(R"({"type": "SoundEffect", "path": "Assets/Audio/Empty.sfx"})"));
-			CHECK(noLayers["error"]["code"] == Json(-32602));
+			CHECK(noLayers["error"]["code"] == Json(-32003));
+			const Json format = setup.Request("asset.create", ParseAssetMethodJson(R"({"type": "SoundEffect", "path": "Assets/Audio/Bad.sfx",
+				"values": {"Version": 2, "Layers": [{"Duration": 0.1}]}})"));
+			CHECK(format["error"]["code"] == Json(-32602));
+			CHECK(format["error"]["data"]["issues"][0]["pointer"] == Json("/values/Version"));
+			const Json notObject = setup.Request("asset.create", ParseAssetMethodJson(R"({"type": "SoundEffect", "path": "Assets/Audio/Bad.sfx", "values": [1]})"));
+			CHECK(notObject["error"]["code"] == Json(-32602));
+			// A material is not a sound effect: its properties keep their own rules, with the same codes.
+			CallOrFail(setup, "asset.create", ParseAssetMethodJson(R"({"type": "Material", "path": "Assets/Red.material"})"));
+			const Json wrongKind = setup.Request("asset.setProperties", ParseAssetMethodJson(R"({"asset": "Assets/Red.material", "values": {"Layers": []}})"));
+			CHECK(wrongKind["error"]["code"] == Json(-32003));
+			CHECK(wrongKind["error"]["data"]["issues"][0]["pointer"] == Json("/values/Layers"));
+			CallOrFail(setup, "asset.create", ParseAssetMethodJson(R"({"type": "SoundEffect", "path": "Assets/Audio/Coin.sfx",
+				"values": {"Layers": [{"Duration": 0.1}]}})"));
+			const Json badPatch = setup.Request("asset.setProperties", ParseAssetMethodJson(R"({"asset": "Assets/Audio/Coin.sfx", "values": {"Volume": -1}})"));
+			CHECK(badPatch["error"]["code"] == Json(-32003));
+			CHECK(badPatch["error"]["data"]["issues"][0]["pointer"] == Json("/values/Volume"));
 			CHECK_FALSE(setup.GetEditor().GetVfs().Exists(VfsPath::Create("project", "Assets/Audio/Bad.sfx").value_or(VfsPath())));
 		}
 	}

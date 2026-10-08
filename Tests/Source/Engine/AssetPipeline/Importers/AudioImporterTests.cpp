@@ -12,13 +12,16 @@
 
 #include <nlohmann/json.hpp>
 
+#include <limits>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
-// The audio importer (Architecture §7.4: WAV, FLAC, MP3 and, approved in Docs/Decisions/0001-approvals.md, Ogg Vorbis). Its
-// settings types are registered by the M12 contract; the import is a skipped skeleton (Docs/Decisions/0015-m12-decisions.md):
-// stream B implements it, registers the importer in RegisterBuiltinImporters and removes the skips.
+// The audio importer (Architecture §7.4: WAV, FLAC, MP3 and, approved in Docs/Decisions/0001-approvals.md, Ogg Vorbis;
+// Docs/Decisions/0015-m12-decisions.md decision 10). The import probes through Audio/AudioDecoder and imports the format
+// fixtures of Tests/Data/Assets/Audio (ADR 0015 decision 18); the first case also checks that RegisterBuiltinImporters
+// registers the importer.
 
 namespace Engine {
 
@@ -93,7 +96,25 @@ namespace Engine {
 			CHECK_FALSE(importer.CanImport(".sfx"));
 		}
 
-		TEST_CASE("AudioImporter: WAV, FLAC, MP3 and Ogg Vorbis files import with their original bytes" * doctest::skip(true))
+		TEST_CASE("AudioImporter: settings the registry rejects fail before the file is decoded")
+		{
+			// Bytes the decoder rejects too: only an importer that reads its settings first reports the settings' Validation
+			// error instead of the decoder's ImportFailed.
+			Test::AssetTestFixture fixture;
+			const Buffer garbage(256, std::byte{ 0x42 });
+			const Result<ImportResult> rejected = ImportAudio(fixture, "Settings.wav", garbage, "Sometimes");
+			REQUIRE_FALSE(rejected.has_value());
+			CHECK(rejected.error().GetCode() == ErrorCode::Validation);
+			const std::string message = rejected.error().ToString();
+			CHECK(message.contains("/Stream"));
+			CHECK(message.contains("Assets/Audio/Settings.wav"));
+			// The same bytes with valid settings are the decoder's refusal.
+			const Result<ImportResult> undecodable = ImportAudio(fixture, "Settings.wav", garbage, "Auto");
+			REQUIRE_FALSE(undecodable.has_value());
+			CHECK(undecodable.error().GetCode() == ErrorCode::ImportFailed);
+		}
+
+		TEST_CASE("AudioImporter: WAV, FLAC, MP3 and Ogg Vorbis files import with their original bytes")
 		{
 			struct Fixture
 			{
@@ -110,6 +131,10 @@ namespace Engine {
 			{
 				CAPTURE(std::string(entry.Name));
 				Test::AssetTestFixture fixture;
+				// The editor imports these files with this importer (RegisterBuiltinImporters).
+				const IAssetImporter* registered = fixture.GetImporters().FindForExtension(entry.Name.substr(entry.Name.rfind('.')));
+				REQUIRE(registered != nullptr);
+				CHECK(registered->GetId() == AudioImporter::Id);
 				const Buffer bytes = ReadFixture(std::string("Assets/Audio/") + std::string(entry.Name));
 				const Result<ImportResult> imported = ImportAudio(fixture, entry.Name, bytes);
 				REQUIRE_MESSAGE(imported.has_value(), imported.error().ToString());
@@ -123,7 +148,7 @@ namespace Engine {
 			}
 		}
 
-		TEST_CASE("AudioImporter: Auto streams clips longer than 10 seconds" * doctest::skip(true))
+		TEST_CASE("AudioImporter: Auto streams clips longer than 10 seconds")
 		{
 			Test::AssetTestFixture fixture;
 			const auto importTone = [&fixture](std::string_view name, uint64_t frames)
@@ -141,7 +166,7 @@ namespace Engine {
 			CHECK(GetAudioClipDuration(*longer) > MaxDecodedClipSeconds);
 		}
 
-		TEST_CASE("AudioImporter: Stream and Decode override the length rule" * doctest::skip(true))
+		TEST_CASE("AudioImporter: Stream and Decode override the length rule")
 		{
 			Test::AssetTestFixture fixture;
 			const Buffer shortWav = Test::MakeToneWav({ .SampleRate = 48000, .ChannelCount = 1, .FrameCount = 4800 });
@@ -156,7 +181,7 @@ namespace Engine {
 			CHECK_FALSE(decodedClip->Stream);
 		}
 
-		TEST_CASE("AudioImporter: a file the decoder rejects is ImportFailed with the decoder's message" * doctest::skip(true))
+		TEST_CASE("AudioImporter: a file the decoder rejects is ImportFailed with the decoder's message")
 		{
 			Test::AssetTestFixture fixture;
 			const Buffer garbage(256, std::byte{ 0x42 });
@@ -169,9 +194,18 @@ namespace Engine {
 			REQUIRE_FALSE(tooManyChannels.has_value());
 			CHECK(tooManyChannels.error().GetCode() == ErrorCode::ImportFailed);
 			CHECK(tooManyChannels.error().ToString().contains("mono or stereo"));
+			// A non-finite sample is refused at import, also for a clip that will stream (its frames are never decoded at
+			// registration).
+			std::vector<float> samples(480, 0.5f);
+			samples[100] = std::numeric_limits<float>::quiet_NaN();
+			const Buffer withNaN = Test::MakeFloatWav(samples, 48000, 1);
+			const Result<ImportResult> notFinite = ImportAudio(fixture, "NaN.wav", withNaN, "Stream");
+			REQUIRE_FALSE(notFinite.has_value());
+			CHECK(notFinite.error().GetCode() == ErrorCode::ImportFailed);
+			CHECK(notFinite.error().ToString().contains("non-finite"));
 		}
 
-		TEST_CASE("AudioImporter: the content decides the format, not the extension" * doctest::skip(true))
+		TEST_CASE("AudioImporter: the content decides the format, not the extension")
 		{
 			Test::AssetTestFixture fixture;
 			const Buffer wav = Test::MakeToneWav({ .SampleRate = 48000, .ChannelCount = 1, .FrameCount = 4800 });
@@ -181,7 +215,7 @@ namespace Engine {
 			CHECK(clip->Encoding == AudioClipEncoding::Wav);
 		}
 
-		TEST_CASE("AudioImporter: importing twice gives identical artifacts" * doctest::skip(true))
+		TEST_CASE("AudioImporter: importing twice gives identical artifacts")
 		{
 			Test::AssetTestFixture fixture;
 			const Buffer wav = Test::MakeToneWav({ .SampleRate = 22050, .ChannelCount = 2, .FrameCount = 22050 });

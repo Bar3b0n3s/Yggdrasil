@@ -2,9 +2,8 @@
 §13.7; Roadmap M12 acceptance): sound effects created by agents, voices in lockstep sessions, the audio validation codes
 and the built-in presets.
 
-Skipped skeletons of the M12 contract (Docs/Decisions/0015-m12-decisions.md): stream C implements and registers
-audio.stats and the SoundEffect asset methods over streams A (AudioEngine) and B (SoundSynth, importers, presets) and
-removes the skips. The editors are headless, so their AudioEngine has no device and decodes deterministically (§10.1).
+Docs/Decisions/0015-m12-decisions.md decisions 12, 15 and 16. The editors are headless, so their AudioEngine has no
+device and decodes deterministically (§10.1).
 """
 
 from __future__ import annotations
@@ -28,7 +27,6 @@ class AudioTests(AutomationTestCase):
         source = {"Clip": clip, "PlayOnStart": True, "Spatial": False, **fields}
         client.call("entity.create", {"name": name, "components": {"AudioSource": source}})
 
-    @unittest.skip("contract stub: un-skipped by M12 stream C")
     def test_sound_effect_create_and_play_in_lockstep(self) -> None:
         client, _ = self.open_editor_with_scene()
         created = client.call("asset.create", {"type": "SoundEffect", "path": LOCK_PATH, "values": LOCK_SOUND})
@@ -57,7 +55,30 @@ class AudioTests(AutomationTestCase):
         self.assertEqual(client.call("audio.stats")["voiceCount"], 0)
         client.call("play.stop")
 
-    @unittest.skip("contract stub: un-skipped by M12 stream C")
+    def test_audio_stats_reports_a_spatial_voice_at_its_entity_position(self) -> None:
+        # §13.5: audio.stats reports each voice's position; a spatial source's is its entity's world translation, and it
+        # follows the entity from one tick to the next.
+        client, _ = self.open_editor_with_scene()
+        client.call("entity.create", {"name": "Ear", "components": {"AudioListener": {"Primary": True}}})
+        client.call("entity.create", {"name": "Beacon", "components": {
+            "Transform": {"Translation": [3, 0, -4]},
+            "AudioSource": {"Clip": "engine://Audio/Coin", "PlayOnStart": True, "Spatial": True, "Loop": True},
+        }})
+        client.call("play.start", {"lockstep": True})
+        client.call("play.step", {"ticks": 1})
+        voices = client.call("audio.stats")["voices"]
+        self.assertEqual(len(voices), 1, voices)
+        self.assertEqual(voices[0]["entity"]["name"], "Beacon")
+        self.assertTrue(voices[0]["spatial"])
+        self.assertEqual(voices[0]["position"], [3.0, 0.0, -4.0])
+
+        client.call("entity.update", {"entity": "/Beacon", "target": "play",
+                                      "components": {"Transform": {"Translation": [-2, 1.5, 6]}}})
+        client.call("play.step", {"ticks": 1})
+        moved = client.call("audio.stats")["voices"]
+        self.assertEqual(moved[0]["position"], [-2.0, 1.5, 6.0])
+        client.call("play.stop")
+
     def test_audio_stats_reports_the_device_and_no_voices_in_edit_mode(self) -> None:
         client, _ = self.open_editor_with_scene()
         stats = client.call("audio.stats")
@@ -70,7 +91,6 @@ class AudioTests(AutomationTestCase):
         self.assertEqual([group["group"] for group in stats["groups"]], ["Music", "Sfx", "Ui"])
         self.assertEqual(stats["voices"], [])
 
-    @unittest.skip("contract stub: un-skipped by M12 stream C")
     def test_pause_holds_session_voices_and_stop_releases_them(self) -> None:
         client, _ = self.open_editor_with_scene()
         self.create_speaker(client, "Loop", "engine://Audio/Coin", Loop=True)
@@ -87,7 +107,6 @@ class AudioTests(AutomationTestCase):
         client.call("play.stop")
         self.assertEqual(client.call("audio.stats")["voiceCount"], 0)
 
-    @unittest.skip("contract stub: un-skipped by M12 stream C")
     def test_builtin_sound_effect_presets_play(self) -> None:
         client, _ = self.open_editor_with_scene()
         presets = ("Click", "Blip", "Coin", "Jump", "Hit", "Explosion", "PowerUp", "LineClear", "Win", "Lose")
@@ -102,7 +121,6 @@ class AudioTests(AutomationTestCase):
             self.assertEqual(voice["clip"]["type"], "AudioClip")
         client.call("play.stop")
 
-    @unittest.skip("contract stub: un-skipped by M12 stream C")
     def test_sound_effect_properties_round_trip_and_undo(self) -> None:
         client, _ = self.open_editor_with_scene()
         client.call("asset.create", {"type": "SoundEffect", "path": LOCK_PATH, "values": LOCK_SOUND})
@@ -118,7 +136,6 @@ class AudioTests(AutomationTestCase):
         self.assertEqual(info["importer"], "SoundEffect")
         self.assertEqual(info["diagnostics"], [])
 
-    @unittest.skip("contract stub: un-skipped by M12 stream C")
     def test_sound_effect_create_rejects_invalid_values(self) -> None:
         client, _ = self.open_editor_with_scene()
         invalid = (
@@ -132,11 +149,11 @@ class AudioTests(AutomationTestCase):
                 params = {"type": "SoundEffect", "path": "Assets/Audio/Bad.sfx", "values": values}
                 with self.assertRaises(engine_client.EngineError) as raised:
                     client.call("asset.create", params)
-                self.assert_engine_error(raised.exception, engine_client.INVALID_PARAMS)
+                # Invalid data, as for a material: ValidationFailed located under /values (ADR 0015 decision 28).
+                self.assert_engine_error(raised.exception, engine_client.VALIDATION_FAILED, "Validation")
                 self.assertEqual(raised.exception.issues[0]["pointer"], pointer)
         self.assertEqual(client.call("asset.list", {"dir": "Assets/Audio"})["assets"], [])
 
-    @unittest.skip("contract stub: un-skipped by M12 stream C")
     def test_validate_reports_audio_listener_codes_and_fix_clears_extra_primaries(self) -> None:
         client, _ = self.open_editor_with_scene()
         client.call("entity.create", {"name": "Speaker", "components": {"AudioSource": {"Spatial": True}}})
@@ -159,6 +176,15 @@ class AudioTests(AutomationTestCase):
         self.assertFalse(ear_b["entity"]["components"]["AudioListener"]["Primary"])
         ear_a = client.call("entity.get", {"entity": "/EarA", "components": ["AudioListener"]})
         self.assertTrue(ear_a["entity"]["components"]["AudioListener"]["Primary"])
+
+    def test_audio_stats_takes_no_params(self) -> None:
+        # audio.stats takes the shared NoParams: any member is an unknown-member InvalidParams (MethodRegistry.h
+        # convention 5).
+        client, _ = self.open_editor_with_scene()
+        with self.assertRaises(engine_client.EngineError) as raised:
+            client.call("audio.stats", {"voices": True})
+        self.assert_engine_error(raised.exception, engine_client.INVALID_PARAMS)
+        self.assertEqual(raised.exception.issues[0]["pointer"], "/voices")
 
 
 if __name__ == "__main__":

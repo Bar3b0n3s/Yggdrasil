@@ -31,7 +31,9 @@ namespace Engine {
 
 	// Registry enum "Attenuation" (§5.3, §10.2): how a spatial sound's volume falls off with distance. Moved here from
 	// Scene/Components/AudioSourceComponent.h by the M12 contract, so the ECS-agnostic engine and the component share one
-	// type; names and values unchanged (the component and its registration still use it).
+	// type; names and values unchanged (the component and its registration still use it). None keeps the sound positioned
+	// (panned and Doppler-shifted) without any distance falloff: the engine maps it to miniaudio's inverse model with a
+	// rolloff of 0, because miniaudio's own "none" model turns spatialization off entirely.
 	enum class Attenuation : uint8_t
 	{
 		None,

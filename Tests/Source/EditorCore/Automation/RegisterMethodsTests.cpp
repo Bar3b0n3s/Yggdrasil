@@ -17,13 +17,13 @@
 namespace Engine {
 
 	// The M4 method set (Roadmap M4), M5's screenshot methods (registered at the M4/M5 merge, ADR 0009 decision 33), M6's
-	// asset.*, prefab.*, entity.bounds and project.refreshAssets (ADR 0010 decision 20) and M7's play.*, input.inject and
-	// project.export (ADR 0012 decisions 4, 8 and 14), test hooks excluded.
+	// asset.*, prefab.*, entity.bounds and project.refreshAssets (ADR 0010 decision 20), M7's play.*, input.inject and
+	// project.export (ADR 0012 decisions 4, 8 and 14) and M12's audio.stats (ADR 0015 decision 15), test hooks excluded.
 	static const std::vector<std::string>& GetExpectedMethodNames()
 	{
 		static const std::vector<std::string> ExpectedNames = { "asset.create", "asset.delete", "asset.getImportSettings", "asset.getProperties",
 			"asset.import", "asset.info", "asset.list", "asset.move", "asset.reimport", "asset.setImportSettings", "asset.setProperties",
-			"component.list", "component.schema", "docs.get", "edit.batch", "edit.getSelection", "edit.history", "edit.redo", "edit.select",
+			"audio.stats", "component.list", "component.schema", "docs.get", "edit.batch", "edit.getSelection", "edit.history", "edit.redo", "edit.select",
 			"edit.undo", "editor.screenshot", "entity.bounds", "entity.create", "entity.destroy", "entity.duplicate", "entity.get",
 			"entity.reparent", "entity.update", "events.read", "input.inject", "log.read", "play.pause", "play.resume", "play.setTimeScale",
 			"play.start", "play.state", "play.step", "play.stop", "prefab.apply", "prefab.create", "prefab.instantiate", "prefab.revert",
@@ -115,7 +115,7 @@ namespace Engine {
 			// The edit.batch ops (ADR 0008 decision 8): pure reads and methods whose effects all go through Execute. asset.import and
 			// asset.reimport are pending operations; project.refreshAssets writes outside a command (ADR 0010 decision 20).
 			const std::vector<std::string> batchable = { "asset.create", "asset.delete", "asset.getImportSettings", "asset.getProperties",
-				"asset.info", "asset.list", "asset.move", "asset.setImportSettings", "asset.setProperties", "component.list", "component.schema",
+				"asset.info", "asset.list", "asset.move", "asset.setImportSettings", "asset.setProperties", "audio.stats", "component.list", "component.schema",
 				"docs.get", "edit.getSelection", "edit.history", "entity.bounds", "entity.create", "entity.destroy", "entity.duplicate", "entity.get",
 				"entity.reparent", "entity.update", "events.read", "log.read", "prefab.apply", "prefab.create", "prefab.instantiate", "prefab.revert",
 				"prefab.unpack", "project.getSettings", "project.info", "project.setSettings", "project.validate", "rpc.discover", "scene.diff",
@@ -272,6 +272,42 @@ namespace Engine {
 				CHECK_FALSE(tool["inputSchema"].contains("$defs"));
 				CHECK(tool["inputSchema"].dump().size() < 4096);
 			}
+		}
+
+		TEST_CASE("RegisterMethods: audio.stats is a read-only shared method of the Runtime subset, not a tool")
+		{
+			// M12 (Docs/Decisions/0015-m12-decisions.md decision 15; Architecture §13.5, §13.8).
+			Test::EditorTestFixture fixture("RegisterAudio");
+			const TypeRegistry& types = fixture.GetEngine().GetTypeRegistry();
+			MethodRegistry methods(types);
+			RegisterEditorMethods(methods, {});
+			methods.Freeze();
+			const MethodDescriptor* stats = methods.Find("audio.stats");
+			REQUIRE(stats != nullptr);
+			const MethodSpecification& specification = stats->Specification;
+			CHECK_FALSE(specification.Mutates);
+			CHECK_FALSE(specification.SupportsDryRun);
+			CHECK_FALSE(specification.ExposeAsTool);
+			CHECK_FALSE(specification.AvailableInLauncher);
+			CHECK(specification.AllowedInBatch);
+			CHECK(specification.AvailableInRuntime);
+			CHECK_FALSE(stats->Pending);
+			REQUIRE(stats->Params != nullptr);
+			CHECK(stats->Params->GetName() == "NoParams");
+			REQUIRE(stats->Result != nullptr);
+			CHECK(stats->Result->GetName() == "AudioStatsResult");
+			for (const std::string_view name : { "AudioDeviceState", "AudioTimeSource", "AudioGroup" })
+			{
+				INFO(std::string(name));
+				const EnumInfo* info = types.FindEnum(name);
+				REQUIRE(info != nullptr);
+				CHECK_FALSE(info->GetEntries().empty());
+			}
+
+			MethodRegistry runtime(types);
+			RegisterSharedMethods(runtime, AutomationHost::Runtime);
+			runtime.Freeze();
+			CHECK(runtime.Find("audio.stats") != nullptr);
 		}
 	}
 

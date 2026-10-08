@@ -134,7 +134,6 @@ class RuntimeTests(AutomationTestCase):
         client.call("session.shutdown")
         self.assertEqual(game.wait(), EXIT_SUCCESS, game.output())
 
-    @unittest.skip("contract stub: un-skipped by M12 stream C")
     def test_runtime_audio_stats_reports_the_game_voices(self) -> None:
         # M12 (Docs/Decisions/0015-m12-decisions.md): audio.stats is in the Runtime subset (§13.5). The game plays a
         # sound effect created through automation and cooked into Game.pak; the exported Runtime's session, started

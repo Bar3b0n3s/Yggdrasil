@@ -112,7 +112,7 @@ namespace Engine {
 			const MethodRegistry& methods = fixture.GetServer().GetMethods();
 			for (const char* name : { "session.hello", "session.info", "session.shutdown", "rpc.discover", "scene.tree", "scene.query", "scene.get",
 					 "entity.get", "entity.bounds", "log.read", "events.read", "play.pause", "play.resume", "play.step", "play.state",
-					 "play.setTimeScale", "input.inject", "viewport.screenshot" })
+					 "play.setTimeScale", "input.inject", "viewport.screenshot", "audio.stats" })
 			{
 				INFO(std::string(name));
 				const MethodDescriptor* method = methods.Find(name);
@@ -248,9 +248,9 @@ namespace Engine {
 			CHECK_FALSE(std::filesystem::exists(SessionFile::GetPath(sessions, Process::GetCurrentId()), error));
 		}
 
-		// M12 (Docs/Decisions/0015-m12-decisions.md): audio.stats is in the Runtime subset (§13.5). A skipped skeleton: stream C
-		// registers audio.stats, adds it to the list of "serves the Runtime subset and only it" and removes the skip.
-		TEST_CASE("RuntimeAutomationServer: audio.stats reports the game's audio engine" * doctest::skip(true))
+		// M12 (Docs/Decisions/0015-m12-decisions.md): audio.stats is in the Runtime subset (§13.5), listed in "serves the Runtime
+		// subset and only it".
+		TEST_CASE("RuntimeAutomationServer: audio.stats reports the game's audio engine")
 		{
 			VirtualFileSystem vfs;
 			Result<Scope<AudioEngine>> audio = AudioEngine::Create({ .Device = AudioDeviceKind::None, .Decoding = AudioDecoding::Deterministic }, vfs);

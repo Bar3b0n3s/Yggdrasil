@@ -96,7 +96,8 @@ namespace Engine {
 		// it (§14.2 step 7).
 		bool ExpectNoErrors = false;
 		// M12: the context's AudioEngine (EngineContextSpecification::Audio, §10.1); nullopt: GetDefaultAudioSpecification of
-		// Window. Every application has an engine; tests that start windowed applications may ask for AudioDeviceKind::None.
+		// Window. Every application has an engine; tests that start windowed applications in-process ask for
+		// AudioDeviceKind::None, and windowed Editor and Runtime processes that tests start pass --audio-device none.
 		std::optional<AudioEngineSpecification> Audio{};
 	};
 
@@ -117,6 +118,9 @@ namespace Engine {
 	//   --vulkan-api <version>  Graphics.MaxApiVersion: "1.3" or "1.4" (§8.1)
 	//   --gpu <index|name>      Graphics.GpuOverride (§8.1; ENGINE_GPU when absent)
 	//   --gpu-inject-fault <f>  Graphics.InjectFault: "device-lost", "oom-texture" or "hang" (§8.14 item 8)
+	//   --audio-device <kind>   Audio = GetDefaultAudioSpecification(Window) with Device System for "system", Null for
+	//                           "null" or None for "none" (M12: windowed processes that tests start never open the
+	//                           machine's audio device, §15.1 T1); the decoding mode stays the window mode's
 	// Every option except --headless, --frames and --expect-no-errors is absent from Dist builds, where it is an unknown
 	// option (§13.9 lists the options Dist honours).
 	// An application parses its command line with these plus its own options (CommandLine::Parse). The returned options
@@ -126,7 +130,8 @@ namespace Engine {
 	// Applies the engine options of `commandLine` to `specification` (see GetEngineCommandLineOptions) and stores the
 	// command line in specification.Args. Errors: InvalidArgument naming the option for a --frames value that is not an
 	// integer >= 1, a --user-data-dir value that is not an absolute path in valid UTF-8, or a --renderer, --gpu-validation,
-	// --vulkan-api or --gpu-inject-fault value other than the spellings listed above (the message lists them).
+	// --vulkan-api, --gpu-inject-fault or --audio-device value other than the spellings listed above (the message lists
+	// them).
 	[[nodiscard]] Status ApplyEngineCommandLine(const CommandLine& commandLine, ApplicationSpecification& specification);
 
 	// The base of the editor and runtime applications. Not copyable or movable.

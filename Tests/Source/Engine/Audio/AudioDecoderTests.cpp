@@ -8,15 +8,15 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
 
-// Probing and decoding encoded audio (Architecture §7.4 AudioImporter, §10.1 clips that decode at registration). Skipped
-// skeletons of the M12 contract (Docs/Decisions/0015-m12-decisions.md): stream A implements the decoder and its fixtures
-// (Tests/Data/Assets/Audio: Tone.wav and Tone.flac from its committed generator, Tone.mp3 and Tone.ogg pinned with their
-// licences in Tests/Data/LICENSES.md) and removes the skips.
+// Probing and decoding encoded audio (Architecture §7.4 AudioImporter, §10.1 clips that decode at registration;
+// Docs/Decisions/0015-m12-decisions.md). The format fixtures are Tests/Data/Assets/Audio: Tone.wav and Tone.flac from their
+// committed generator, Tone.mp3 and Tone.ogg pinned with their licences in Tests/Data/LICENSES.md.
 
 namespace Engine {
 
@@ -54,7 +54,7 @@ namespace Engine {
 			CHECK(EncodedAudioInfo{}.GetDurationSeconds() == 0.0);
 		}
 
-		TEST_CASE("AudioDecoder: a WAV file is probed with its exact frame count" * doctest::skip(true))
+		TEST_CASE("AudioDecoder: a WAV file is probed with its exact frame count")
 		{
 			const Test::TestToneSpecification tone{ .SampleRate = 44100, .ChannelCount = 2, .FrameCount = 12345, .Frequency = 440.0, .Amplitude = 0.5 };
 			const Result<EncodedAudioInfo> info = ProbeEncodedAudio(Test::MakeToneWav(tone));
@@ -65,7 +65,7 @@ namespace Engine {
 			CHECK(info->FrameCount == 12345);
 		}
 
-		TEST_CASE("AudioDecoder: decoding a WAV file returns its samples" * doctest::skip(true))
+		TEST_CASE("AudioDecoder: decoding a WAV file returns its samples")
 		{
 			const Test::TestToneSpecification tone{ .SampleRate = 48000, .ChannelCount = 1, .FrameCount = 480, .Frequency = 1000.0, .Amplitude = 0.5 };
 			const Result<DecodedAudio> decoded = DecodeEncodedAudio(Test::MakeToneWav(tone));
@@ -76,7 +76,7 @@ namespace Engine {
 				CHECK(decoded->Samples[index] == doctest::Approx(static_cast<float>(expected[index]) / 32768.0f).epsilon(0.0001));
 		}
 
-		TEST_CASE("AudioDecoder: WAV, FLAC, MP3 and Ogg Vorbis fixtures decode" * doctest::skip(true))
+		TEST_CASE("AudioDecoder: WAV, FLAC, MP3 and Ogg Vorbis fixtures decode")
 		{
 			struct Fixture
 			{
@@ -104,7 +104,7 @@ namespace Engine {
 			}
 		}
 
-		TEST_CASE("AudioDecoder: bytes that are no audio file are a Parse error naming the formats" * doctest::skip(true))
+		TEST_CASE("AudioDecoder: bytes that are no audio file are a Parse error naming the formats")
 		{
 			const Buffer text = { std::byte{ 'h' }, std::byte{ 'e' }, std::byte{ 'l' }, std::byte{ 'l' }, std::byte{ 'o' } };
 			const Result<EncodedAudioInfo> probed = ProbeEncodedAudio(text);
@@ -116,7 +116,30 @@ namespace Engine {
 			CHECK(GetErrorCode(ProbeEncodedAudio({})) == ErrorCode::Parse);
 		}
 
-		TEST_CASE("AudioDecoder: a truncated file fails the probe" * doctest::skip(true))
+		TEST_CASE("AudioDecoder: an Ogg file of another codec is a Parse error with a conversion hint")
+		{
+			// The first page of an Ogg Opus stream: the 27-byte page header, one lacing value and the "OpusHead" packet.
+			Buffer opus;
+			const auto append = [&opus](std::string_view text)
+			{
+				for (const char character : text)
+					opus.push_back(static_cast<std::byte>(character));
+			};
+			append("OggS");
+			opus.insert(opus.end(), { std::byte{ 0 }, std::byte{ 2 } });  // version, beginning of stream
+			opus.insert(opus.end(), 20, std::byte{ 0 });                  // granule position, serial, sequence, CRC
+			opus.insert(opus.end(), { std::byte{ 1 }, std::byte{ 19 } }); // one segment of 19 bytes
+			append("OpusHead");
+			opus.insert(opus.end(), { std::byte{ 1 }, std::byte{ 2 } }); // version, channels
+			opus.insert(opus.end(), 9, std::byte{ 0 });
+			const Result<EncodedAudioInfo> probed = ProbeEncodedAudio(opus);
+			REQUIRE_FALSE(probed.has_value());
+			CHECK(probed.error().GetCode() == ErrorCode::Parse);
+			CHECK(probed.error().GetMessageText().contains("Opus"));
+			CHECK(probed.error().GetHint().contains("Ogg Vorbis"));
+		}
+
+		TEST_CASE("AudioDecoder: a truncated file fails the probe")
 		{
 			const Test::TestToneSpecification tone{ .SampleRate = 48000, .ChannelCount = 1, .FrameCount = 4800, .Frequency = 440.0, .Amplitude = 0.5 };
 			Buffer wav = Test::MakeToneWav(tone);
@@ -127,7 +150,34 @@ namespace Engine {
 			CHECK(GetErrorCode(ProbeEncodedAudio(ogg)) == ErrorCode::Parse);
 		}
 
-		TEST_CASE("AudioDecoder: more than two channels, unsupported rates and empty files are Validation errors" * doctest::skip(true))
+		TEST_CASE("AudioDecoder: a float WAV file with a non-finite sample is a Validation error naming the frame")
+		{
+			// An IEEE-float WAV can hold NaN and infinities, which the mixer would carry to the device and the capture buffer.
+			// The probe decodes every frame, so the importer refuses such a file whether the clip will stream or not.
+			std::vector<float> samples(4800 * 2, 0.25f);
+			const Buffer finite = Test::MakeFloatWav(samples, 48000, 2);
+			const Result<DecodedAudio> decoded = DecodeEncodedAudio(finite);
+			REQUIRE_MESSAGE(decoded.has_value(), decoded.error().ToString());
+			CHECK(decoded->Samples == samples);
+
+			const float infinity = std::numeric_limits<float>::infinity();
+			for (const float bad : { std::numeric_limits<float>::quiet_NaN(), infinity, -infinity })
+			{
+				CAPTURE(bad);
+				std::vector<float> withBad = samples;
+				withBad[4500 * 2 + 1] = bad; // frame 4500, in the second decode chunk
+				const Buffer wav = Test::MakeFloatWav(withBad, 48000, 2);
+				const Result<EncodedAudioInfo> probed = ProbeEncodedAudio(wav);
+				REQUIRE_FALSE(probed.has_value());
+				CHECK(probed.error().GetCode() == ErrorCode::Validation);
+				CHECK(probed.error().GetMessageText().contains("non-finite"));
+				CHECK(probed.error().GetMessageText().contains("frame 4500"));
+				CHECK_FALSE(probed.error().GetHint().empty());
+				CHECK(GetErrorCode(DecodeEncodedAudio(wav)) == ErrorCode::Validation);
+			}
+		}
+
+		TEST_CASE("AudioDecoder: more than two channels, unsupported rates and empty files are Validation errors")
 		{
 			const Result<EncodedAudioInfo> surround = ProbeEncodedAudio(
 				Test::MakeToneWav({ .SampleRate = 48000, .ChannelCount = 6, .FrameCount = 480, .Frequency = 440.0, .Amplitude = 0.5 }));

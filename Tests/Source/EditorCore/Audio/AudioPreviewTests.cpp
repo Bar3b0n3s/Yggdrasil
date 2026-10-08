@@ -10,9 +10,8 @@
 
 #include <vector>
 
-// The asset browser's audio preview (Architecture §10.2, §12.2; Docs/Decisions/0015-m12-decisions.md). The editor without an
-// audio engine is checked from the start; the other tests are skipped skeletons that need the AudioEngine (stream A) and
-// the preview (stream C), and stream C removes the skips.
+// The asset browser's audio preview (Architecture §10.2, §12.2; Docs/Decisions/0015-m12-decisions.md decision 17): an
+// editor without an audio engine has no preview; the others run over a device-less, deterministic AudioEngine.
 
 namespace Engine {
 
@@ -35,7 +34,7 @@ namespace Engine {
 			fixture.GetEditor().CloseProject();
 		}
 
-		TEST_CASE("AudioPreview: plays a clip once in the Ui group and replaces the previous preview" * doctest::skip(true))
+		TEST_CASE("AudioPreview: plays a clip once in the Ui group and replaces the previous preview")
 		{
 			Test::EditorTestFixture fixture("AudioPreviewPlay", {}, nullptr, TestAudio);
 			fixture.CreateAndOpenProject();
@@ -64,7 +63,7 @@ namespace Engine {
 			CHECK(audio.GetVoices().empty());
 		}
 
-		TEST_CASE("AudioPreview: a finished preview is forgotten at the next update" * doctest::skip(true))
+		TEST_CASE("AudioPreview: a finished preview is forgotten at the next update")
 		{
 			Test::EditorTestFixture fixture("AudioPreviewEnd", {}, nullptr, TestAudio);
 			fixture.CreateAndOpenProject();
@@ -80,7 +79,7 @@ namespace Engine {
 			CHECK(audio.GetStats().RegisteredClips == 0);
 		}
 
-		TEST_CASE("AudioPreview: a missing or non-clip asset is an error and plays nothing" * doctest::skip(true))
+		TEST_CASE("AudioPreview: a missing or non-clip asset is an error and plays nothing")
 		{
 			Test::EditorTestFixture fixture("AudioPreviewErrors", {}, nullptr, TestAudio);
 			fixture.CreateAndOpenProject();
@@ -99,7 +98,7 @@ namespace Engine {
 			CHECK(fixture.GetEngine().GetAudioEngine()->GetVoices().empty());
 		}
 
-		TEST_CASE("AudioPreview: closing the project stops the preview" * doctest::skip(true))
+		TEST_CASE("AudioPreview: closing the project stops the preview")
 		{
 			Test::EditorTestFixture fixture("AudioPreviewClose", {}, nullptr, TestAudio);
 			fixture.CreateAndOpenProject();

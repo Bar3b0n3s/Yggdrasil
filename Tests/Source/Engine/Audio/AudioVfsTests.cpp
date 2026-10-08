@@ -10,8 +10,7 @@
 #include <string>
 #include <vector>
 
-// The VFS bridge of the audio module (Architecture §10.1). Skipped skeletons of the M12 contract
-// (Docs/Decisions/0015-m12-decisions.md): stream A implements AudioVfs and removes the skips.
+// The VFS bridge of the audio module (Architecture §10.1; Docs/Decisions/0015-m12-decisions.md).
 
 namespace Engine {
 
@@ -41,7 +40,7 @@ namespace Engine {
 
 	TEST_SUITE("Audio")
 	{
-		TEST_CASE("AudioVfs: a memory file is served by name and shares its bytes" * doctest::skip(true))
+		TEST_CASE("AudioVfs: a memory file is served by name and shares its bytes")
 		{
 			VirtualFileSystem vfs;
 			AudioVfs audioVfs(vfs);
@@ -64,7 +63,7 @@ namespace Engine {
 			CHECK(ErrorCodeOf((*stream)->Seek(5)) == ErrorCode::InvalidArgument);
 		}
 
-		TEST_CASE("AudioVfs: other names are opened through the engine VFS" * doctest::skip(true))
+		TEST_CASE("AudioVfs: other names are opened through the engine VFS")
 		{
 			Test::AssetTestFixture fixture;
 			const Buffer bytes = { std::byte{ 9 }, std::byte{ 8 }, std::byte{ 7 } };
@@ -79,7 +78,7 @@ namespace Engine {
 			CHECK(ErrorCodeOf(audioVfs.Open("project://Assets/Audio/music.ogg")) == ErrorCode::Validation);
 		}
 
-		TEST_CASE("AudioVfs: invalid, duplicate and unknown names are rejected" * doctest::skip(true))
+		TEST_CASE("AudioVfs: invalid, duplicate and unknown names are rejected")
 		{
 			VirtualFileSystem vfs;
 			AudioVfs audioVfs(vfs);
@@ -95,7 +94,7 @@ namespace Engine {
 			CHECK(audioVfs.GetMemoryFileCount() == 1);
 		}
 
-		TEST_CASE("AudioVfs: a removed memory file keeps its open streams" * doctest::skip(true))
+		TEST_CASE("AudioVfs: a removed memory file keeps its open streams")
 		{
 			VirtualFileSystem vfs;
 			AudioVfs audioVfs(vfs);

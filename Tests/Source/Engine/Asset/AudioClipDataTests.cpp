@@ -14,9 +14,8 @@
 #include <optional>
 #include <utility>
 
-// Audio clip CPU data and its cooked payload (Architecture §6.8, §10.1). The silent clip is implemented by the M12 contract;
-// the other tests are skipped skeletons (Docs/Decisions/0015-m12-decisions.md): stream B implements the payload codec and
-// the loader and removes the skips.
+// Audio clip CPU data and its cooked payload (Architecture §6.8, §10.1; Docs/Decisions/0015-m12-decisions.md decision 9):
+// the silent clip, validation, the payload codec, its fuzzing and the loader.
 
 namespace Engine {
 
@@ -101,7 +100,7 @@ namespace Engine {
 			CHECK(AudioClipEncodingToString(AudioClipEncoding::Vorbis) == "Vorbis");
 		}
 
-		TEST_CASE("AudioClipData: the payload round-trips for PCM and encoded clips" * doctest::skip(true))
+		TEST_CASE("AudioClipData: the payload round-trips for PCM and encoded clips")
 		{
 			for (const AudioClipData& clip : { MakePcmClip(), MakeEncodedClip(), CreateSilentAudioClip() })
 			{
@@ -114,7 +113,7 @@ namespace Engine {
 			}
 		}
 
-		TEST_CASE("AudioClipData: the payload layout is the documented one" * doctest::skip(true))
+		TEST_CASE("AudioClipData: the payload layout is the documented one")
 		{
 			const AudioClipData clip = MakeEncodedClip();
 			const Buffer payload = SerializeAudioClipPayload(clip);
@@ -128,7 +127,7 @@ namespace Engine {
 			CHECK(std::equal(clip.Bytes.begin(), clip.Bytes.end(), payload.begin() + 28));
 		}
 
-		TEST_CASE("AudioClipData: validation rejects inconsistent clips" * doctest::skip(true))
+		TEST_CASE("AudioClipData: validation rejects inconsistent clips")
 		{
 			const AudioClipData clip = MakePcmClip();
 			CHECK(ValidateAudioClipData(clip).has_value());
@@ -155,7 +154,7 @@ namespace Engine {
 			CHECK(GetErrorCode(ValidateAudioClipData(unknown)) == ErrorCode::Validation);
 		}
 
-		TEST_CASE("AudioClipData: truncation, trailing bytes and bad header fields fail with Parse" * doctest::skip(true))
+		TEST_CASE("AudioClipData: truncation, trailing bytes and bad header fields fail with Parse")
 		{
 			const Buffer payload = SerializeAudioClipPayload(MakePcmClip());
 			Buffer truncated = payload;
@@ -175,7 +174,7 @@ namespace Engine {
 			CHECK(GetErrorCode(DeserializeAudioClipPayload(encoding)) == ErrorCode::Parse);
 		}
 
-		TEST_CASE("AudioClipData: 10,000 seeded mutations of a payload never crash" * doctest::skip(true))
+		TEST_CASE("AudioClipData: 10,000 seeded mutations of a payload never crash")
 		{
 			const Buffer payload = SerializeAudioClipPayload(MakePcmClip());
 			Random random(0xA0D1);
@@ -192,7 +191,7 @@ namespace Engine {
 			}
 		}
 
-		TEST_CASE("AudioClipData: a cooked clip loads through the built-in loaders" * doctest::skip(true))
+		TEST_CASE("AudioClipData: a cooked clip loads through the built-in loaders")
 		{
 			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
 			AssetLoaderRegistry loaders;

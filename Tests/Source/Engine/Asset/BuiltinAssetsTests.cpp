@@ -124,7 +124,8 @@ namespace Engine {
 				if (entry.Source == BuiltinAssetSource::File)
 					CHECK(FileSystem::Exists(Test::GetRepositoryRoot() / "Resources" / entry.File));
 			}
-			CHECK(catalog->GetEntries().size() == GetProceduralBuiltinEntries().size() + 3);
+			// The File entries: the Default font, the two environments and the ten sound effect presets (M12).
+			CHECK(catalog->GetEntries().size() == GetProceduralBuiltinEntries().size() + 13);
 		}
 
 		TEST_CASE("BuiltinAssets: a catalogue with settings and generated entries round-trips and finds its entries")

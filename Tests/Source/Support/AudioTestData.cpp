@@ -42,27 +42,42 @@ namespace Engine {
 			return writer.TakeBuffer();
 		}
 
-		Buffer MakeToneWav(const TestToneSpecification& tone)
+		// A RIFF/WAVE file with a 16-byte fmt chunk of `format` and `bitsPerSample`, then `data`.
+		static Buffer MakeWav(uint16_t format, uint32_t sampleRate, uint32_t channelCount, uint16_t bitsPerSample, std::span<const std::byte> data)
 		{
-			const Buffer data = MakeTonePcm16Bytes(tone);
 			const auto dataSize = static_cast<uint32_t>(data.size());
-			const uint32_t blockAlign = tone.ChannelCount * 2;
+			const uint32_t blockAlign = channelCount * (bitsPerSample / 8u);
 			BinaryWriter writer;
 			writer.WriteBytes(AsBytes("RIFF"));
 			writer.WriteU32(36 + dataSize);
 			writer.WriteBytes(AsBytes("WAVE"));
 			writer.WriteBytes(AsBytes("fmt "));
 			writer.WriteU32(16);
-			writer.WriteU16(1); // PCM
-			writer.WriteU16(static_cast<uint16_t>(tone.ChannelCount));
-			writer.WriteU32(tone.SampleRate);
-			writer.WriteU32(tone.SampleRate * blockAlign);
+			writer.WriteU16(format);
+			writer.WriteU16(static_cast<uint16_t>(channelCount));
+			writer.WriteU32(sampleRate);
+			writer.WriteU32(sampleRate * blockAlign);
 			writer.WriteU16(static_cast<uint16_t>(blockAlign));
-			writer.WriteU16(16);
+			writer.WriteU16(bitsPerSample);
 			writer.WriteBytes(AsBytes("data"));
 			writer.WriteU32(dataSize);
 			writer.WriteBytes(data);
 			return writer.TakeBuffer();
+		}
+
+		Buffer MakeToneWav(const TestToneSpecification& tone)
+		{
+			const Buffer data = MakeTonePcm16Bytes(tone);
+			return MakeWav(1, tone.SampleRate, tone.ChannelCount, 16, data); // PCM
+		}
+
+		Buffer MakeFloatWav(std::span<const float> samples, uint32_t sampleRate, uint32_t channelCount)
+		{
+			BinaryWriter data;
+			for (const float sample : samples)
+				data.WriteF32(sample);
+			const Buffer bytes = data.TakeBuffer();
+			return MakeWav(3, sampleRate, channelCount, 32, bytes); // IEEE float
 		}
 
 	}

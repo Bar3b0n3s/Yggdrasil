@@ -338,7 +338,6 @@ namespace Engine {
 		}
 
 		// M12 (Docs/Decisions/0015-m12-decisions.md; Architecture §4.1: "... GraphicsDevice -> AssetManager -> AudioEngine").
-		// The step's name is implemented by the contract; creating the engine is a skipped skeleton for stream A.
 
 		TEST_CASE("EngineContext: without an audio specification the context has no audio engine")
 		{
@@ -347,7 +346,7 @@ namespace Engine {
 			CHECK((*context)->GetAudioEngine() == nullptr);
 		}
 
-		TEST_CASE("EngineContext: the Audio step creates a device-less engine over the context's VFS" * doctest::skip(true))
+		TEST_CASE("EngineContext: the Audio step creates a device-less engine over the context's VFS")
 		{
 			const Result<Scope<EngineContext>> context = EngineContext::Create(
 				{ .Audio = AudioEngineSpecification{ .Device = AudioDeviceKind::None, .Decoding = AudioDecoding::Deterministic } });

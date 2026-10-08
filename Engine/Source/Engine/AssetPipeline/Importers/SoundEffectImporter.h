@@ -76,8 +76,11 @@ namespace Engine {
 		[[nodiscard]] Result<ImportResult> Import(ImportContext& context, const AssetMetadata& metadata) const override;
 
 		// Registers the enum "SoundWave" and the structs "SoundEnvelope", "SoundLayer" and "SoundEffect" with the ranges of
-		// Audio/SoundSynth.h, with the description's cross-field rules (ValidateSoundEffect) as the struct's Validate hook
-		// (RegisterAssetPipelineTypes calls it).
+		// Audio/SoundSynth.h and the description's cross-field rules (ValidateSoundEffect) as Validate hooks
+		// (RegisterAssetPipelineTypes calls it): "SoundLayer"'s hook checks one layer's rules, so a bad layer is reported
+		// even when another field of the sound is invalid, and "SoundEffect"'s runs ValidateSoundEffect except on an empty
+		// Layers list, the registry's default object (SoundEffectFromJson and asset.create still require a layer through
+		// ValidateSoundEffect). Both have Generate hooks that keep the registry's random round trips valid.
 		static void RegisterTypes(TypeRegistry& registry);
 	};
 

@@ -67,7 +67,8 @@ namespace Engine {
 		{
 			// The fixtures: Tests/Data/Assets (textures, materials, scenes, prefabs, the generated glTF files) as
 			// project://Assets, so that the importers read their dependency files inside the asset root as in a project
-			// (ImportContext::ReadDependency), and the engine's Resources (the Inter font) as engine://.
+			// (ImportContext::ReadDependency), and the engine's Resources (the Inter font and the sound effect presets) as
+			// engine://.
 			Test::AssetTestFixture fixture;
 			VirtualFileSystem vfs;
 			Result<Scope<NativeDirectoryMount>> data = NativeDirectoryMount::Create(Test::GetTestDataPath(), MountAccess::ReadOnly);
@@ -78,7 +79,7 @@ namespace Engine {
 			REQUIRE(vfs.Mount("engine", std::move(*resources)).has_value());
 
 			std::vector<VfsPath> sources;
-			for (const std::string_view root : { "project://Assets", "engine://Fonts" })
+			for (const std::string_view root : { "project://Assets", "engine://Fonts", "engine://Audio" })
 			{
 				Result<std::vector<VfsEntry>> listed = vfs.List(Test::ParseVfsPath(root), true);
 				REQUIRE_MESSAGE(listed.has_value(), listed.error().ToString());

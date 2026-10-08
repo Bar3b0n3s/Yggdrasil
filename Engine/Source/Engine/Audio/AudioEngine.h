@@ -30,11 +30,16 @@
 // Device notifications (§10.1). The device's notificationCallback (miniaudio's device thread) only queues the notification;
 // Update handles the queue on the main thread, in order:
 //   - Rerouted (the default device changed) is logged at Info and changes nothing else;
-//   - an unexpected Stopped (one the engine did not ask for) uninitializes the ma_device (AudioDeviceState::Recreating)
-//     and schedules a re-creation on the current default device DeviceRecreationDelaySeconds later (by Update's clock);
-//     a failed attempt schedules the next one as long; after MaxDeviceRecreationAttempts failed attempts the engine gives
-//     up with exactly one warning and keeps running without a device (AudioDeviceState::Failed, time source Host). While
-//     Recreating nothing reads the engine, so every voice holds its cursor;
+//   - a Stopped the engine did not ask for is not acted on at once, because some backends stop the device to reroute it
+//     and start it again (WASAPI posts Stopped, Rerouted, Started when the default device changes): a Rerouted or Started
+//     after it cancels it. A real one still pending DeviceRecreationDelaySeconds later (by Update's clock) is unexpected
+//     when the device has not started again by then; an injected one (InjectDeviceNotification) is unexpected at the end
+//     of the Update that handles it, unless a Rerouted or Started follows it in that Update;
+//   - an unexpected stop uninitializes the ma_device (AudioDeviceState::Recreating) and re-creates it on the current
+//     default device DeviceRecreationDelaySeconds after the stop (an injected stop: after that Update); a failed attempt
+//     schedules the next one as long; after MaxDeviceRecreationAttempts failed attempts the engine gives up with exactly
+//     one warning and keeps running without a device (AudioDeviceState::Failed, time source Host). While Recreating
+//     nothing reads the engine, so every voice holds its cursor;
 //   - Started, InterruptionBegan, InterruptionEnded and Unlocked are logged at Trace.
 // A device that cannot be created at startup leaves the engine device-less with one warning (AudioDeviceState::Failed);
 // Create still succeeds.
@@ -51,13 +56,16 @@
 // Every pull of the engine's own (AdvanceSimulationTick, Update's host pull, ReadFrames) first processes the pending
 // resource-manager jobs inline when decoding is Deterministic, then reads ma_engine_read_pcm_frames, appends the frames to
 // the capture buffer while capturing and discards them otherwise, and finally releases the voices that reached the end of
-// a non-looping clip.
+// a non-looping clip. A pull longer than 10 ms (480 frames) is read in chunks of at most 480 frames with the pending jobs
+// processed before each chunk, so a stream's next page is decoded before the mixer needs it whatever the pull's length.
 //
 // Deterministic decoding (§10.1). AudioDecoding::Deterministic (tests and headless processes) creates the resource manager
 // with MA_RESOURCE_MANAGER_FLAG_NO_THREADING (non-blocking) and jobThreadCount 0, and processes its jobs inline before every
-// pull (ma_resource_manager_process_next_job until empty), so streamed and asynchronously loaded clips decode at the same
-// simulation point in every run: captured PCM of a fixed scene is bit-identical across runs, and streamed and decoded
-// playback of one clip are sample-identical. AudioDecoding::Threaded (windowed runs) keeps miniaudio's job thread.
+// pull and every chunk of one (ma_resource_manager_process_next_job until empty), so streamed and asynchronously loaded
+// clips decode at the same simulation point in every run: captured PCM of a fixed scene is bit-identical across runs, and
+// streamed and decoded playback of one clip are sample-identical. Update also processes them, so a device that reads the
+// engine (time source Device) finds the pages of its streams decoded. AudioDecoding::Threaded (windowed runs) keeps
+// miniaudio's job thread.
 //
 // Clips (§10.1). A registration is known to miniaudio by its resource name, MakeAudioResourceName(Name, Version)
 // ("<16 hex digits>@<version>"), so a hot-reloaded clip's new version is a separate resource while voices of the old one
@@ -66,15 +74,22 @@
 //   - Pcm16 (synthesized sound effects): ma_resource_manager_register_decoded_data over the shared bytes (ma_format_s16).
 //   - Encoded without Stream (clips up to MaxDecodedClipSeconds by default): decoded once, here, with DecodeEncodedAudio
 //     (Audio/AudioDecoder.h) to interleaved f32 at the clip's own rate and channel count, and that PCM registered with
-//     ma_resource_manager_register_decoded_data (ma_format_f32). Every voice of the clip shares the decoded data (one-shots
-//     use ma_sound_init_copy); none decodes on the fly. ma_resource_manager_register_encoded_data is not used: registered
-//     encoded data stays encoded and every voice would run its own decoder over it.
+//     ma_resource_manager_register_decoded_data (ma_format_f32). Every voice of the clip shares the decoded data (each
+//     voice is an ma_sound_init_from_file on the registration's resource name, which acquires the same data buffer node,
+//     as ma_sound_init_copy does); none decodes on the fly. ma_resource_manager_register_encoded_data is not used:
+//     registered encoded data stays encoded and every voice would run its own decoder over it.
 //   - Encoded with Stream: an AudioVfs memory file under the resource name, played with MA_SOUND_FLAG_STREAM. The resource
 //     manager decodes streams to f32 at the clip's own rate and channels (decodedFormat ma_format_f32, decodedSampleRate
 //     and decodedChannels 0), the format DecodeEncodedAudio produces, so streamed and decoded playback of one clip are
 //     sample-identical.
 // The engine keeps a registration's data (the shared Bytes, or the PCM it decoded) until the registration is removed and
 // its last voice has ended.
+//
+// Pitch and Doppler bounds. miniaudio converts each voice's resampling ratio to a 32-bit fixed-point rate, so the engine
+// bounds what reaches it: a voice plays at a pitch of at most 16 (a larger AudioVoiceSettings::Pitch is accepted and
+// reported as given), and its Doppler factor is reduced where needed so that the factor times the speed of the voice, and
+// times the speed of the listener, stays at or below half the speed of sound, which keeps the Doppler pitch within
+// [1/3, 3]. Every output sample that is not finite is replaced with silence before the device or a capture gets it.
 //
 // Voices (§10.1). A HandlePool of MaxAudioVoices voices, each one ma_sound in its group (Master -> Music, Sfx, Ui). When the
 // pool is full, PlayVoice steals the voice with the lowest priority, among those the one farthest from the listener (a
@@ -237,8 +252,12 @@ namespace Engine {
 		AudioVoiceTransform Transform{};
 		bool Paused = false;
 		bool Streamed = false;
-		// The voice's playback position and its clip's length in the clip's own frames (ma_sound_get_cursor_in_pcm_frames,
-		// _get_length_in_pcm_frames); LengthFrames is 0 when the decoder cannot tell yet (a stream before its first page).
+		// The voice's playback position and its clip's length in the clip's own frames; LengthFrames is 0 when the decoder
+		// cannot tell yet (a stream before its first page). CursorFrames is the frames the engine has mixed of the voice:
+		// ma_sound_get_cursor_in_pcm_frames minus the frames the voice has read ahead but the mixer has not output yet
+		// (modulo the length for a looping voice). It is exact while the engine pulls its own frames (time sources
+		// Simulation and Host) or has no device; while the device may read the engine it is miniaudio's cursor alone, a
+		// snapshot that can run ahead of the output by the voice's read-ahead.
 		uint64_t CursorFrames = 0;
 		uint64_t LengthFrames = 0;
 		// The order voices were started in (1 for the engine's first voice): the "oldest" of the stealing rule.
@@ -417,7 +436,8 @@ namespace Engine {
 		// --- Test instrumentation (§10.4: "a fake notification source") ---------------------------------------------------
 
 		// Queues `notification` as if the device's notification callback had posted it (Update handles it). A Stopped
-		// injected this way counts as unexpected, whether or not the device really stopped. Thread-safe.
+		// injected this way counts as unexpected, whether or not the device really stopped, unless a Rerouted or Started
+		// follows it in the same Update (see "Device notifications"). Thread-safe.
 		void InjectDeviceNotification(AudioDeviceNotification notification);
 		// Makes the next `count` device re-creations fail as if the backend had refused them (startup failures:
 		// AudioEngineSpecification::InjectedDeviceCreationFailures).

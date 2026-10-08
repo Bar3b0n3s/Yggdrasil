@@ -14,9 +14,9 @@
 #include <string>
 
 // audio.stats in process, through the editor's server (Architecture §13.5; ADR 0008: "an in-process round trip for every
-// method"). Skipped skeletons of the M12 contract (Docs/Decisions/0015-m12-decisions.md): stream C implements and registers
-// audio.stats and removes the skips; the Runtime's side is tested in RuntimeAutomationServerTests.cpp and test_runtime.py.
-// The fixtures' engine contexts get a device-less, deterministic AudioEngine (stream A).
+// method"; Docs/Decisions/0015-m12-decisions.md decision 15); the Runtime's side is tested in
+// RuntimeAutomationServerTests.cpp and test_runtime.py. The fixtures' engine contexts get a device-less, deterministic
+// AudioEngine.
 
 namespace Engine {
 
@@ -39,7 +39,7 @@ namespace Engine {
 
 	TEST_SUITE("Automation")
 	{
-		TEST_CASE("AudioMethods: audio.stats reports the device, the groups and no voices in Edit mode" * doctest::skip(true))
+		TEST_CASE("AudioMethods: audio.stats reports the device, the groups and no voices in Edit mode")
 		{
 			Test::AutomationFixture fixture("AudioStatsEdit", true, TestAudio);
 			const Result<Json> stats = fixture.Call("audio.stats", Json::object());
@@ -58,7 +58,7 @@ namespace Engine {
 			CHECK((*stats)["voices"].empty());
 		}
 
-		TEST_CASE("AudioMethods: audio.stats lists a lockstep session's voices with their clip and entity" * doctest::skip(true))
+		TEST_CASE("AudioMethods: audio.stats lists a lockstep session's voices with their clip and entity")
 		{
 			Test::AutomationFixture fixture("AudioStatsPlay", true, TestAudio);
 			CreateSpeaker(fixture, "Speaker", true);
@@ -93,7 +93,7 @@ namespace Engine {
 			CHECK((*stopped)["timeSource"] == "Host");
 		}
 
-		TEST_CASE("AudioMethods: audio.stats reports an asset-browser preview without an entity" * doctest::skip(true))
+		TEST_CASE("AudioMethods: audio.stats reports an asset-browser preview without an entity")
 		{
 			Test::AutomationFixture fixture("AudioStatsPreview", true, TestAudio);
 			AudioPreview* preview = fixture.GetEditor().GetAudioPreview();
@@ -109,7 +109,7 @@ namespace Engine {
 			preview->Stop();
 		}
 
-		TEST_CASE("AudioMethods: audio.stats is Unsupported without an audio engine and takes no params" * doctest::skip(true))
+		TEST_CASE("AudioMethods: audio.stats is Unsupported without an audio engine and takes no params")
 		{
 			Test::AutomationFixture silent("AudioStatsNone");
 			const Json response = silent.Request("audio.stats", Json::object());

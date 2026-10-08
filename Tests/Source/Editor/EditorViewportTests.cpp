@@ -32,7 +32,9 @@ namespace Engine {
 			Test::TempDirectory userData("EditorWindowedViewport");
 			const Result<std::filesystem::path> editor = Test::GetBuiltExecutablePath("Editor");
 			REQUIRE_MESSAGE(editor.has_value(), editor.error().ToString());
-			std::vector<std::string> arguments = { "--frames", "30", "--user-data-dir=" + Test::PathToUtf8(userData.GetPath()) };
+			// Windowed, so without --audio-device none it would open the machine's audio device (§15.1 T1).
+			std::vector<std::string> arguments =
+				Test::WithoutAudioDevice({ "--frames", "30", "--user-data-dir=" + Test::PathToUtf8(userData.GetPath()) });
 			const std::vector<std::string> gpuArguments = Test::GetGpuApplicationArguments();
 			arguments.insert(arguments.end(), gpuArguments.begin(), gpuArguments.end());
 			const Result<ProcessResult> result =
@@ -41,6 +43,9 @@ namespace Engine {
 			INFO("editor stderr: ", result->StandardError);
 			CHECK(result->ExitCode == ExitCode::Success);
 			CHECK(Test::FindProblemLogLines(result->StandardError).empty());
+			CHECK(result->StandardError.contains("Audio engine: no device"));
+			CHECK_FALSE(result->StandardError.contains("Audio engine: device"));
+			CHECK_FALSE(result->StandardError.contains("No audio device could be created"));
 			// §8.5: the scene renderer's pipelines are created once at startup and their count is logged.
 			CHECK(result->StandardError.contains(
 				std::format("Created the scene renderer's {} pipelines", SceneRendererPipelines::GetLayoutDescriptions().size())));

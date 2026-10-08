@@ -3,6 +3,7 @@
 #include "Engine/Asset/RuntimeAssetManager.h"
 
 #include "Engine/Asset/AssetLoaderRegistry.h"
+#include "Engine/Asset/AudioClipData.h"
 #include "Engine/Asset/BuiltinAssets.h"
 #include "Engine/Asset/BuiltinMeshes.h"
 #include "Engine/Asset/BuiltinTextures.h"
@@ -23,7 +24,9 @@ namespace Engine {
 		constexpr AssetHandle TrackMesh{ 0x77e1a0c4d2b95f01ull };
 		constexpr AssetHandle TrackTexture{ 0x77e1a0c4d2b95f02ull };
 		constexpr AssetHandle TestTexture{ 0x0000000000000190ull };
-		constexpr AssetHandle Music{ 0x5a5a5a5a5a5a5a5aull };
+		constexpr AssetHandle PlayerScript{ 0x5a5a5a5a5a5a5a5aull };
+		constexpr AssetHandle Music{ 0x5a5a5a5a5a5a5a5bull };
+		constexpr AssetHandle BrokenSound{ 0x5a5a5a5a5a5a5a5cull };
 
 		Buffer MakeGamePak(bool corruptMesh)
 		{
@@ -227,10 +230,10 @@ namespace Engine {
 		{
 			RuntimeEnvironment environment;
 			RuntimeAssetManager manager(environment.GetSpecification());
-			const std::string audio = "RIFF";
-			const Ref<const PakReader> gamePak = MakePak("Game.pak", [&audio](PakWriter& writer)
+			const std::string bytecode = "luau";
+			const Ref<const PakReader> gamePak = MakePak("Game.pak", [&bytecode](PakWriter& writer)
 			{
-				REQUIRE(writer.Add({ .Handle = Music, .Type = "AudioClip", .Path = "Assets/Audio/Music.wav", .Data = WriteCookedArtifact(AssetType::AudioClip, 1, 1, AsBytes(audio)) })
+				REQUIRE(writer.Add({ .Handle = PlayerScript, .Type = "Script", .Path = "Assets/Scripts/Player.luau", .Data = WriteCookedArtifact(AssetType::Script, 1, 1, AsBytes(bytecode)) })
 						.has_value());
 			});
 			REQUIRE(manager.AddPak(gamePak).has_value());
@@ -243,20 +246,59 @@ namespace Engine {
 			CHECK(unknown.error().GetCode() == ErrorCode::NotFound);
 			CHECK(manager.GetDiagnostics().empty());
 
-			// A type this build has no loader for (audio clips arrive with M12) is served and fails when loaded, once.
-			CHECK(manager.GetAssetType(Music) == AssetType::AudioClip);
-			Test::ExpectLog expected(LogLevel::Error, "Assets/Audio/Music.wav");
-			Result<AssetRef<Asset>> clip = manager.Load(Music);
-			REQUIRE_FALSE(clip.has_value());
-			CHECK(clip.error().GetCode() == ErrorCode::Unsupported);
-			CHECK(clip.error().ToString().contains(Music.ToString()));
-			Result<AssetRef<Asset>> remembered = manager.Load(Music);
+			// A type this build has no loader for (scripts arrive with M13; audio clips load since M12) is served and fails when
+			// loaded, once.
+			CHECK(manager.GetAssetType(PlayerScript) == AssetType::Script);
+			Test::ExpectLog expected(LogLevel::Error, "Assets/Scripts/Player.luau");
+			Result<AssetRef<Asset>> script = manager.Load(PlayerScript);
+			REQUIRE_FALSE(script.has_value());
+			CHECK(script.error().GetCode() == ErrorCode::Unsupported);
+			CHECK(script.error().ToString().contains(PlayerScript.ToString()));
+			Result<AssetRef<Asset>> remembered = manager.Load(PlayerScript);
 			REQUIRE_FALSE(remembered.has_value());
 			CHECK(remembered.error().GetCode() == ErrorCode::Unsupported);
-			CHECK(manager.GetState(Music) == AssetState::Failed);
+			CHECK(manager.GetState(PlayerScript) == AssetState::Failed);
 			CHECK(expected.GetMatchCount() == 1);
 			REQUIRE(manager.GetDiagnostics().size() == 1);
-			CHECK(manager.GetDiagnostics().front().Path == "Assets/Audio/Music.wav");
+			CHECK(manager.GetDiagnostics().front().Path == "Assets/Scripts/Player.luau");
+		}
+
+		TEST_CASE("RuntimeAssetManager: audio clips load from paks, and a broken one yields a diagnostic and the silent clip")
+		{
+			RuntimeEnvironment environment;
+			RuntimeAssetManager manager(environment.GetSpecification());
+			AudioClipData tone = CreateSilentAudioClip();
+			tone.Bytes[1] = std::byte{ 0x40 };
+			const std::string truncated = "RIFF";
+			const Ref<const PakReader> gamePak = MakePak("Game.pak", [&tone, &truncated](PakWriter& writer)
+			{
+				REQUIRE(writer.Add({ .Handle = Music, .Type = "AudioClip", .Path = "Assets/Audio/Music.wav", .Data = CookAudioClip(tone, 1) }).has_value());
+				REQUIRE(writer.Add({ .Handle = BrokenSound, .Type = "AudioClip", .Path = "Assets/Audio/Broken.wav", .Data = WriteCookedArtifact(AssetType::AudioClip, 1, 1, AsBytes(truncated)) })
+						.has_value());
+			});
+			REQUIRE(manager.AddPak(gamePak).has_value());
+
+			Result<AssetRef<Asset>> loaded = manager.Load(Music);
+			REQUIRE_MESSAGE(loaded.has_value(), loaded.error().ToString());
+			const AssetRef<AudioClipData> clip = AssetCast<AudioClipData>(*loaded);
+			REQUIRE(clip != nullptr);
+			CHECK(clip->Bytes == tone.Bytes);
+			CHECK(manager.GetDiagnostics().empty());
+
+			// A missing or broken clip plays the silent clip (§7.2), with one diagnostic.
+			Test::ExpectLog expected(LogLevel::Error, "Assets/Audio/Broken.wav");
+			const AssetRef<AudioClipData> silent = manager.GetOrPlaceholder<AudioClipData>(BrokenSound);
+			REQUIRE(silent != nullptr);
+			CHECK(silent.get() == AssetCast<AudioClipData>(manager.GetPlaceholder(AssetType::AudioClip)).get());
+			CHECK(silent->FrameCount == 4800);
+			CHECK(std::ranges::all_of(silent->Bytes, [](std::byte value)
+			{
+				return value == std::byte{ 0 };
+			}));
+			CHECK(expected.GetMatchCount() == 1);
+			CHECK(manager.GetState(BrokenSound) == AssetState::Failed);
+			REQUIRE(manager.GetDiagnostics().size() == 1);
+			CHECK(manager.GetDiagnostics().front().Path == "Assets/Audio/Broken.wav");
 		}
 
 		TEST_CASE("RuntimeAssetManager: asynchronous loads on workers publish their results and failures")

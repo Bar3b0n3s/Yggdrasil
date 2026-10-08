@@ -4,6 +4,7 @@
 #include "Engine/Core/Buffer.h"
 
 #include <cstdint>
+#include <span>
 #include <vector>
 
 // Deterministic audio built in memory for the audio tests of M12 (Docs/Decisions/0015-m12-decisions.md): the clips the
@@ -34,6 +35,11 @@ namespace Engine {
 
 		// A canonical 44-byte-header RIFF/WAVE file (format 1, PCM, 16 bits) of MakeTonePcm16's samples.
 		[[nodiscard]] Buffer MakeToneWav(const TestToneSpecification& tone);
+
+		// A 44-byte-header RIFF/WAVE file (format 3, IEEE float, 32 bits) of the interleaved `samples`, written as given:
+		// NaN and infinities included, which is how the decoder tests build files that hold non-finite samples. A partial
+		// trailing frame is written too.
+		[[nodiscard]] Buffer MakeFloatWav(std::span<const float> samples, uint32_t sampleRate, uint32_t channelCount);
 
 	}
 

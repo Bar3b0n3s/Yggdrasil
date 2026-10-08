@@ -567,8 +567,9 @@ namespace Engine {
 		TEST_CASE("ProjectValidator: GetCodes lists the codes the validator reports, each once")
 		{
 			const std::span<const std::string_view> codes = ProjectValidator::GetCodes();
-			// M4's 14 codes, and M6's 11: the asset codes but the runtime-only ASSET_UPLOAD_FAILED, and PREFAB_MISSING_ASSET.
-			CHECK(codes.size() == 25);
+			// M4's 14 codes, M6's 11 (the asset codes but the runtime-only ASSET_UPLOAD_FAILED, and PREFAB_MISSING_ASSET) and
+			// M12's 2 audio codes.
+			CHECK(codes.size() == 27);
 			std::vector<std::string_view> sorted(codes.begin(), codes.end());
 			std::sort(sorted.begin(), sorted.end());
 			CHECK(std::adjacent_find(sorted.begin(), sorted.end()) == sorted.end());
@@ -755,11 +756,10 @@ namespace Engine {
 			CHECK(std::find(codes.begin(), codes.end(), PrefabMissingAssetCode) != codes.end());
 		}
 
-		// M12 (Docs/Decisions/0015-m12-decisions.md; Architecture §10.2, §13.7): the audio codes of Scene/AudioSystem.h
-		// (FindAudioSceneIssues). Skipped skeletons: stream C reports and fixes them in ProjectValidator, adds both to
-		// GetCodes (and to the count of "GetCodes lists the codes the validator reports, each once") and removes the skips.
+		// M12 (Docs/Decisions/0015-m12-decisions.md decision 12; Architecture §10.2, §13.7): the audio codes of
+		// Scene/AudioSystem.h (FindAudioSceneIssues), reported and fixed by the validator and listed by GetCodes.
 
-		TEST_CASE("ProjectValidator: several primary audio listeners are reported and fixed keeping the first" * doctest::skip(true))
+		TEST_CASE("ProjectValidator: several primary audio listeners are reported and fixed keeping the first")
 		{
 			Test::EditorTestFixture fixture("ValidatorListeners");
 			fixture.CreateAndOpenProject();
@@ -809,7 +809,7 @@ namespace Engine {
 			CHECK(FindDiagnostic(*undone, AudioMultiplePrimaryListenersCode) != nullptr);
 		}
 
-		TEST_CASE("ProjectValidator: spatial audio sources without a listener or a camera are AUDIO_NO_LISTENER" * doctest::skip(true))
+		TEST_CASE("ProjectValidator: spatial audio sources without a listener or a camera are AUDIO_NO_LISTENER")
 		{
 			Test::EditorTestFixture fixture("ValidatorNoListener");
 			fixture.CreateAndOpenProject();

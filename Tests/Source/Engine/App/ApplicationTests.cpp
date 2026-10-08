@@ -16,6 +16,12 @@
 #include "Support/Utf8Path.h"
 #include "Support/WindowedChild.h"
 
+#include <cmath>
+#include <format>
+#include <string>
+#include <string_view>
+#include <vector>
+
 namespace Engine {
 
 	namespace {
@@ -771,6 +777,95 @@ namespace Engine {
 			CHECK(headless.Decoding == AudioDecoding::Deterministic);
 			CHECK(windowed.InjectedDeviceCreationFailures == 0);
 			CHECK_FALSE(ApplicationSpecification{}.Audio.has_value());
+		}
+
+		TEST_CASE("ApplyEngineCommandLine: --audio-device chooses the audio device and keeps the window mode's decoding")
+		{
+			// M12: windowed Editor and Runtime processes that tests start pass --audio-device none, so no test opens the
+			// machine's audio device (§15.1 T1).
+			const auto apply = [](const std::vector<std::string>& arguments) -> Result<ApplicationSpecification>
+			{
+				ENGINE_TRY_ASSIGN(const CommandLine commandLine, CommandLine::Parse(arguments, GetEngineCommandLineOptions()));
+				ApplicationSpecification specification;
+				ENGINE_TRY(ApplyEngineCommandLine(commandLine, specification));
+				return specification;
+			};
+
+			const Result<ApplicationSpecification> windowed = apply({ "--audio-device", "none" });
+			REQUIRE_MESSAGE(windowed.has_value(), windowed.error().ToString());
+			REQUIRE(windowed->Audio.has_value());
+			CHECK(windowed->Audio->Device == AudioDeviceKind::None);
+			CHECK(windowed->Audio->Decoding == AudioDecoding::Threaded);
+
+			// The option may come before --headless: the decoding mode is still the headless one.
+			const Result<ApplicationSpecification> headless = apply({ "--audio-device=null", "--headless" });
+			REQUIRE_MESSAGE(headless.has_value(), headless.error().ToString());
+			REQUIRE(headless->Audio.has_value());
+			CHECK(headless->Audio->Device == AudioDeviceKind::Null);
+			CHECK(headless->Audio->Decoding == AudioDecoding::Deterministic);
+
+			const Result<ApplicationSpecification> system = apply({ "--audio-device", "system" });
+			REQUIRE_MESSAGE(system.has_value(), system.error().ToString());
+			REQUIRE(system->Audio.has_value());
+			CHECK(system->Audio->Device == AudioDeviceKind::System);
+
+			// Without the option the application keeps its default (GetDefaultAudioSpecification of its window mode).
+			const Result<ApplicationSpecification> absent = apply({});
+			REQUIRE_MESSAGE(absent.has_value(), absent.error().ToString());
+			CHECK_FALSE(absent->Audio.has_value());
+
+			for (const std::string_view spelling : { "System", "wasapi", "" })
+			{
+				CAPTURE(std::string(spelling));
+				const Result<ApplicationSpecification> rejected = apply({ std::format("--audio-device={}", spelling) });
+				REQUIRE_FALSE(rejected.has_value());
+				CHECK(rejected.error().GetCode() == ErrorCode::InvalidArgument);
+				CHECK(rejected.error().GetMessageText().contains("--audio-device"));
+			}
+		}
+
+		TEST_CASE("Application: a headless application's audio engine pulls the frames of every frame's unscaled delta")
+		{
+			// M12 (§10.1 "Headless runs ... pull frames themselves"; Docs/Decisions/0015-m12-decisions.md decision 14): the
+			// application updates its device-less engine after each frame's OnUpdate, so voices advance in headless runs.
+			class AudioApplication final : public Application
+			{
+			public:
+				explicit AudioApplication(ApplicationSpecification specification)
+					: Application(std::move(specification))
+				{
+				}
+			public:
+				double UnscaledSeconds = 0.0;
+				uint64_t PulledFrames = 0;
+				bool HasEngine = false;
+				AudioDeviceState DeviceState = AudioDeviceState::Running;
+				AudioTimeSource TimeSource = AudioTimeSource::Device;
+			protected:
+				void OnUpdate(const FrameTime& frame) override { UnscaledSeconds += frame.UnscaledDeltaTime; }
+
+				void OnShutdown() override
+				{
+					const AudioEngine* audio = GetContext().GetAudioEngine();
+					HasEngine = audio != nullptr;
+					if (audio == nullptr)
+						return;
+					const AudioEngineStats stats = audio->GetStats();
+					PulledFrames = stats.PulledFrames;
+					DeviceState = stats.DeviceState;
+					TimeSource = stats.TimeSource;
+				}
+			};
+
+			AudioApplication application(MakeHeadlessSpecification(30));
+			CHECK(application.Run() == ExitCode::Success);
+			REQUIRE(application.HasEngine);
+			CHECK(application.DeviceState == AudioDeviceState::None);
+			CHECK(application.TimeSource == AudioTimeSource::Host);
+			CHECK(application.UnscaledSeconds > 0.0);
+			// The engine's accumulator rounds the running total, so the frames match the summed deltas exactly.
+			const auto expected = static_cast<uint64_t>(std::floor(application.UnscaledSeconds * 48000.0 + 0.5));
+			CHECK(application.PulledFrames == expected);
 		}
 	}
 

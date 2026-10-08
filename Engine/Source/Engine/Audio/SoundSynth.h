@@ -26,7 +26,10 @@
 //     F(Duration) frames whose frequency at frame n of the tone moves exponentially from StartFrequency to EndFrequency
 //     (f(n) = f0 * (f1 / f0)^(n / N)). A note is "<Name><Octave>:<seconds>": Name C, C#, Db, D, D#, Eb, E, F, F#, Gb, G, G#,
 //     Ab, A, A#, Bb or B, Octave 0 to 8 (equal temperament, A4 = 440 Hz: f = 440 * 2^((midi - 69) / 12), midi = 12 *
-//     (Octave + 1) + semitone), or "R:<seconds>" for a rest; seconds > 0 in plain decimal notation ("C5:0.06").
+//     (Octave + 1) + semitone), or "R:<seconds>" for a rest; seconds > 0 in plain decimal notation ("C5:0.06") with at
+//     most 7 digits before and 8 after the decimal point, so the decimal rounds to the nearest float exactly through
+//     double. Every layer lasts at least one frame (F of its notes or Duration, plus nR, is not 0). A tone sweeps only over
+//     its N frames and holds EndFrequency during its release tail.
 //   - Every note (and the one tone) gets its own ADSR envelope, linear in each segment, with nA = F(Attack), nD = F(Decay),
 //     nR = F(Release), S = Sustain and the note's N frames: at frame n of the note the level is n / nA for n < nA, then
 //     1 - (1 - S) (n - nA) / nD for n < nA + nD, then S, until the note's end at n = N; from there it falls linearly from L,
@@ -37,9 +40,11 @@
 //   - Waves at phase p in [0, 1), the phase advancing by f / 48000 per sample from 0 at each note's start: Sine sin(2 pi p),
 //     Square +1 for p < DutyCycle else -1, Triangle 1 - 4 |p - 0.5|, Saw 2p - 1, and Noise a value drawn uniformly in
 //     [-1, 1) from the layer's generator each time the phase wraps (sample and hold, so the frequency sets the noise's
-//     pitch). Layer i's generator is a Core Random seeded with Hash64(Seed, i).
+//     pitch). Layer i's generator is a Core Random seeded with Hash64(Seed, i); Noise draws its first value at each note's
+//     start, the phase's first wrap.
 //   - LowPass > 0 runs the layer through a one-pole low-pass at that cutoff in Hz (y += a (x - y), a = 1 - exp(-2 pi fc /
-//     48000)); 0 leaves it unfiltered.
+//     48000), y = 0 at the layer's start) over the layer's span only, from F(Delay) to the end of its last release; 0
+//     leaves it unfiltered. The layer's Volume applies after the filter.
 // Determinism (§10.3: "synthesis is bit-identical across runs"; "SoundSynth: presets hash to committed values"): the
 // synthesizer computes in double precision with Core/DetMath (Sin, Exp, Pow), never the C runtime's transcendental
 // functions, iterates layers and notes in order and uses no threads, so the PCM, and the hashes committed for the presets,
@@ -122,6 +127,9 @@ namespace Engine {
 	// at most MaxSoundNotesPerLayer valid notes, or no notes and a Duration > 0; every float finite; a length
 	// (ComputeSoundEffectFrameCount) of at most MaxSoundEffectFrames. Errors: Validation with one issue per violation, each
 	// located by its JSON pointer into the .sfx document ("/Layers/1/Notes/3", "/Layers/0/Envelope/Attack", "/Volume").
+	// A range compares the float with its bounds rounded to float, as the type registry does, so a file that spells
+	// DutyCycle 0.99 is accepted. The span rules (at least one frame, at most MaxSoundEffectFrames) are checked per layer
+	// and located at "/Layers/<i>", only for a layer whose fields are valid.
 	[[nodiscard]] Status ValidateSoundEffect(const SoundEffectDescription& description);
 
 	// The sound's length in frames at 48 kHz (the file comment's rule: the largest layer span), for a description

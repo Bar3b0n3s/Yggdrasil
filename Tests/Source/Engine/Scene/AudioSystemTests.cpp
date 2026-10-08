@@ -16,6 +16,7 @@
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/TransformSystem.h"
 #include "Support/AudioTestData.h"
+#include "Support/ExpectLog.h"
 #include "Support/SceneTestFixture.h"
 
 #include <algorithm>
@@ -26,10 +27,9 @@
 #include <utility>
 #include <vector>
 
-// Components to voices (Architecture §10.2, §10.4). The listener-source names are implemented by the M12 contract; the
-// other tests are skipped skeletons (Docs/Decisions/0015-m12-decisions.md): stream C implements AudioSystem and the
-// validation checks and removes the skips. They run a device-less AudioEngine with deterministic decoding (stream A) over
-// clips served from memory.
+// Components to voices (Architecture §10.2, §10.4; Docs/Decisions/0015-m12-decisions.md decision 12). The listener rule,
+// the validation checks and MakeAudioClipSource need no engine. The tests that play run a device-less AudioEngine with
+// deterministic decoding over clips served from memory.
 
 namespace Engine {
 
@@ -187,7 +187,7 @@ namespace Engine {
 			CHECK(AudioMultiplePrimaryListenersCode == "AUDIO_MULTIPLE_PRIMARY_LISTENERS");
 		}
 
-		TEST_CASE("AudioSystem: PlayOnStart sources start with the session and others wait for Play" * doctest::skip(true))
+		TEST_CASE("AudioSystem: PlayOnStart sources start with the session and others wait for Play")
 		{
 			AudioSceneFixture fixture;
 			const AssetHandle clip = fixture.AddToneClip(0xa001);
@@ -214,7 +214,7 @@ namespace Engine {
 			CHECK(fixture.GetEngine().GetStats().LiveVoices == 0);
 		}
 
-		TEST_CASE("AudioSystem: a spatial source to the listener's right is louder on the right" * doctest::skip(true))
+		TEST_CASE("AudioSystem: a spatial source to the listener's right is louder on the right")
 		{
 			AudioSceneFixture fixture;
 			const AssetHandle clip = fixture.AddToneClip(0xa001);
@@ -229,7 +229,7 @@ namespace Engine {
 			CHECK(system.GetListener().Source == AudioListenerSource::Listener);
 		}
 
-		TEST_CASE("AudioSystem: captured PCM of a fixed scene is bit-identical across runs" * doctest::skip(true))
+		TEST_CASE("AudioSystem: captured PCM of a fixed scene is bit-identical across runs")
 		{
 			const auto captureOnce = []()
 			{
@@ -259,7 +259,7 @@ namespace Engine {
 			CHECK(first.Samples == second.Samples);
 		}
 
-		TEST_CASE("AudioSystem: a missing clip yields a diagnostic and silence" * doctest::skip(true))
+		TEST_CASE("AudioSystem: a missing clip yields a diagnostic and silence")
 		{
 			AudioSceneFixture fixture;
 			fixture.AddListener();
@@ -267,6 +267,8 @@ namespace Engine {
 			const Entity source = fixture.AddSource("Missing", missing, glm::vec3(0.0f, 0.0f, -1.0f));
 			TransformSystem::Update(fixture.GetScene());
 			AudioSystem system(fixture.GetScene(), fixture.GetSpecification());
+			// GetOrPlaceholder logs the missing clip once, at Error (§7.2).
+			const Test::ExpectLog logged(LogLevel::Error, missing.ToString());
 			system.Start();
 			// The silent clip plays in its place (§7.2), so the source counts as playing.
 			CHECK(system.IsPlaying(source));
@@ -281,7 +283,7 @@ namespace Engine {
 			CHECK(voices.front().ClipName == BuiltinAssetHandles::SilentClip.ToString());
 		}
 
-		TEST_CASE("AudioSystem: the listener is the first primary AudioListener, else the primary camera" * doctest::skip(true))
+		TEST_CASE("AudioSystem: the listener is the first primary AudioListener, else the primary camera")
 		{
 			Test::SceneTestFixture fixture(1, true);
 			Scene& scene = fixture.GetScene();
@@ -314,7 +316,7 @@ namespace Engine {
 			CHECK(selection.PrimaryListenerCount == 1);
 		}
 
-		TEST_CASE("AudioSystem: several primary listeners raise AUDIO_MULTIPLE_PRIMARY_LISTENERS" * doctest::skip(true))
+		TEST_CASE("AudioSystem: several primary listeners raise AUDIO_MULTIPLE_PRIMARY_LISTENERS")
 		{
 			Test::SceneTestFixture fixture(1, false);
 			Scene& scene = fixture.GetScene();
@@ -334,7 +336,7 @@ namespace Engine {
 			CHECK(issues[0].AutoFixable);
 		}
 
-		TEST_CASE("AudioSystem: group volumes belong to the session and destroying the system restores the engine's" * doctest::skip(true))
+		TEST_CASE("AudioSystem: group volumes belong to the session and destroying the system restores the engine's")
 		{
 			AudioSceneFixture fixture;
 			AudioEngine& engine = fixture.GetEngine();
@@ -367,7 +369,7 @@ namespace Engine {
 			CHECK(engine.GetMasterVolume() == 0.75f);
 		}
 
-		TEST_CASE("AudioSystem: spatial sources without a listener or a camera raise AUDIO_NO_LISTENER" * doctest::skip(true))
+		TEST_CASE("AudioSystem: spatial sources without a listener or a camera raise AUDIO_NO_LISTENER")
 		{
 			Test::SceneTestFixture fixture(1, false);
 			Scene& scene = fixture.GetScene();
@@ -389,7 +391,7 @@ namespace Engine {
 			CHECK(FindAudioSceneIssues(scene).empty());
 		}
 
-		TEST_CASE("AudioSystem: component fields reach the voice at every update" * doctest::skip(true))
+		TEST_CASE("AudioSystem: component fields reach the voice at every update")
 		{
 			AudioSceneFixture fixture;
 			const AssetHandle clip = fixture.AddToneClip(0xa001);
@@ -411,7 +413,8 @@ namespace Engine {
 			REQUIRE(voices.size() == 1);
 			const AudioVoiceInfo& voice = voices.front();
 			CHECK(voice.Owner == source.GetUUID().GetValue());
-			CHECK(voice.Priority == AudioSystemMusicPriority);
+			// The stealing priority is decided by the group when the voice starts (it began in Sfx).
+			CHECK(voice.Priority == AudioSystemEffectPriority);
 			CHECK(voice.Settings.Volume == 0.25f);
 			CHECK(voice.Settings.Pitch == 1.5f);
 			CHECK(voice.Settings.Group == AudioGroup::Music);
@@ -420,15 +423,24 @@ namespace Engine {
 			};
 			CHECK(voice.Settings.Spatialization == expected);
 			CHECK(voice.Transform.Position == glm::vec3(0.0f, 0.0f, -4.0f));
-			// A changed clip restarts the playing voice with the new clip.
+			// A changed clip restarts the playing voice with the new clip, now with the Music group's priority.
 			const AssetHandle other = fixture.AddToneClip(0xa002);
 			component.Clip.SetHandle(other);
 			fixture.Frame(system);
-			REQUIRE(fixture.GetEngine().GetVoices().size() == 1);
-			CHECK(fixture.GetEngine().GetVoices().front().ClipName == other.ToString());
+			const std::vector<AudioVoiceInfo> restarted = fixture.GetEngine().GetVoices();
+			REQUIRE(restarted.size() == 1);
+			CHECK(restarted.front().ClipName == other.ToString());
+			CHECK(restarted.front().Priority == AudioSystemMusicPriority);
+			// From the clip's start: one frame of playback, as the first voice had after its first frame.
+			CHECK(restarted.front().CursorFrames <= voice.CursorFrames);
+			// A null clip plays nothing ("null plays nothing", the AudioSource registration).
+			component.Clip.SetHandle(AssetHandle());
+			fixture.Frame(system);
+			CHECK(fixture.GetEngine().GetVoices().empty());
+			CHECK_FALSE(system.IsPlaying(source));
 		}
 
-		TEST_CASE("AudioSystem: destroying or disabling a source's entity releases its voice" * doctest::skip(true))
+		TEST_CASE("AudioSystem: destroying or disabling a source's entity releases its voice")
 		{
 			AudioSceneFixture fixture;
 			const AssetHandle clip = fixture.AddToneClip(0xa001);
@@ -452,7 +464,7 @@ namespace Engine {
 			CHECK(system.IsPlaying(disabled));
 		}
 
-		TEST_CASE("AudioSystem: pause holds every voice and resume continues it" * doctest::skip(true))
+		TEST_CASE("AudioSystem: pause holds every voice and resume continues it")
 		{
 			AudioSceneFixture fixture;
 			const AssetHandle clip = fixture.AddToneClip(0xa001);
@@ -490,7 +502,7 @@ namespace Engine {
 			CHECK(system.IsPlaying(source));
 		}
 
-		TEST_CASE("AudioSystem: PlayOneShot is non-spatial without a position and plays in the Sfx group by default" * doctest::skip(true))
+		TEST_CASE("AudioSystem: PlayOneShot is non-spatial without a position and plays in the Sfx group by default")
 		{
 			AudioSceneFixture fixture;
 			const AssetHandle clip = fixture.AddToneClip(0xa001, 0.1);
@@ -525,7 +537,7 @@ namespace Engine {
 			CHECK_FALSE(fixture.GetEngine().IsVoiceAlive(*flat));
 		}
 
-		TEST_CASE("AudioSystem: sources created during play with PlayOnStart start at the next update" * doctest::skip(true))
+		TEST_CASE("AudioSystem: sources created during play with PlayOnStart start at the next update")
 		{
 			AudioSceneFixture fixture;
 			const AssetHandle clip = fixture.AddToneClip(0xa001);
@@ -539,7 +551,7 @@ namespace Engine {
 			CHECK(system.IsPlaying(spawned));
 		}
 
-		TEST_CASE("AudioSystem: a source's velocity comes from its world-position delta" * doctest::skip(true))
+		TEST_CASE("AudioSystem: a source's velocity comes from its world-position delta")
 		{
 			AudioSceneFixture fixture;
 			const AssetHandle clip = fixture.AddToneClip(0xa001);
@@ -559,7 +571,38 @@ namespace Engine {
 			CHECK(fixture.GetEngine().GetVoices().front().Transform.Velocity == glm::vec3(0.0f));
 		}
 
-		TEST_CASE("AudioSystem: destroying the system releases every voice and clip" * doctest::skip(true))
+		TEST_CASE("AudioSystem: a source or listener that jumps faster than sound has no velocity")
+		{
+			// A teleport, a respawn or a camera cut is a jump, not motion: its velocity would Doppler-shift every voice for a
+			// frame. A position that moves at or above the speed of sound (343.3 m/s) in one frame reports no velocity.
+			AudioSceneFixture fixture;
+			const AssetHandle clip = fixture.AddToneClip(0xa001);
+			const Entity listener = fixture.AddListener();
+			const Entity source = fixture.AddSource("Jumping", clip, glm::vec3(0.0f));
+			TransformSystem::Update(fixture.GetScene());
+			AudioSystem system(fixture.GetScene(), fixture.GetSpecification());
+			system.Start();
+			fixture.Frame(system);
+			// 5 m in 1/60 s is 300 m/s: motion.
+			source.GetComponent<TransformComponent>().Translation = glm::vec3(5.0f, 0.0f, 0.0f);
+			fixture.Frame(system);
+			CHECK(fixture.GetEngine().GetVoices().front().Transform.Velocity.x == doctest::Approx(300.0f));
+			// 10 m more in 1/60 s is 600 m/s: a jump.
+			source.GetComponent<TransformComponent>().Translation = glm::vec3(15.0f, 0.0f, 0.0f);
+			fixture.Frame(system);
+			CHECK(fixture.GetEngine().GetVoices().front().Transform.Velocity == glm::vec3(0.0f));
+			// The listener is held to the same rule: 100 m in one frame.
+			listener.GetComponent<TransformComponent>().Translation = glm::vec3(0.0f, 0.0f, 100.0f);
+			fixture.Frame(system);
+			CHECK(fixture.GetEngine().GetListener().Position == glm::vec3(0.0f, 0.0f, 100.0f));
+			CHECK(fixture.GetEngine().GetListener().Velocity == glm::vec3(0.0f));
+			// The frame after a jump measures from the new position.
+			listener.GetComponent<TransformComponent>().Translation = glm::vec3(0.0f, 0.0f, 101.0f);
+			fixture.Frame(system);
+			CHECK(fixture.GetEngine().GetListener().Velocity.z == doctest::Approx(60.0f));
+		}
+
+		TEST_CASE("AudioSystem: destroying the system releases every voice and clip")
 		{
 			AudioSceneFixture fixture;
 			const AssetHandle clip = fixture.AddToneClip(0xa001);
@@ -577,7 +620,7 @@ namespace Engine {
 			CHECK(fixture.GetEngine().GetStats().RegisteredClips == 0);
 		}
 
-		TEST_CASE("AudioSystem: MakeAudioClipSource names the clip by its handle and keeps the data alive" * doctest::skip(true))
+		TEST_CASE("AudioSystem: MakeAudioClipSource names the clip by its handle and keeps the data alive")
 		{
 			Ref<AudioClipData> pcm = CreateRef<AudioClipData>(CreateSilentAudioClip());
 			const AudioClipSource source = MakeAudioClipSource(AssetHandle(0x1234), 3, pcm);
@@ -599,6 +642,190 @@ namespace Engine {
 			const AudioClipSource streamed = MakeAudioClipSource(AssetHandle(0x99), 1, encoded);
 			CHECK(streamed.Format == AudioClipFormat::Encoded);
 			CHECK(streamed.Stream);
+		}
+
+		TEST_CASE("AudioSystem: disabled listeners, cameras and sources do not count for the audio checks")
+		{
+			Test::SceneTestFixture fixture(1, false);
+			Scene& scene = fixture.GetScene();
+			Entity spatial = scene.CreateEntity("Spatial");
+			spatial.AddComponent<AudioSourceComponent>();
+			Entity camera = scene.CreateEntity("Camera");
+			camera.AddComponent<CameraComponent>(CameraComponent{ .Primary = true });
+			CHECK(FindAudioSceneIssues(scene).empty());
+			// A disabled camera does not listen.
+			camera.SetActive(false);
+			CHECK(GetCodes(FindAudioSceneIssues(scene)) == std::vector<std::string>{ std::string(AudioNoListenerCode) });
+			// Neither does a disabled listener, nor a secondary one.
+			Entity group = scene.CreateEntity("Group");
+			group.SetActive(false);
+			Entity disabledEar = scene.CreateEntity("DisabledEar", group);
+			disabledEar.AddComponent<AudioListenerComponent>();
+			Entity secondaryEar = scene.CreateEntity("SecondaryEar");
+			secondaryEar.AddComponent<AudioListenerComponent>(AudioListenerComponent{ .Primary = false });
+			CHECK(GetCodes(FindAudioSceneIssues(scene)) == std::vector<std::string>{ std::string(AudioNoListenerCode) });
+			CHECK(SelectAudioListener(scene) == AudioListenerSelection{});
+			// A disabled spatial source is not heard at all.
+			spatial.SetActive(false);
+			CHECK(FindAudioSceneIssues(scene).empty());
+			// Enabling the group brings its listener back, as the only primary one.
+			group.SetActive(true);
+			const AudioListenerSelection selection = SelectAudioListener(scene);
+			CHECK(selection.Source == AudioListenerSource::Listener);
+			CHECK(selection.Entity == disabledEar.GetUUID());
+			CHECK(selection.PrimaryListenerCount == 1);
+		}
+
+		TEST_CASE("AudioSystem: the AudioSource methods check their entity")
+		{
+			AudioSceneFixture fixture;
+			const AssetHandle clip = fixture.AddToneClip(0xa001);
+			fixture.AddListener();
+			const Entity source = fixture.AddSource("Source", clip, glm::vec3(0.0f), false);
+			const Entity silent = fixture.GetScene().CreateEntity("Silent");
+			Test::SceneTestFixture other(2, true);
+			const Entity stranger = other.GetScene().CreateEntity("Stranger");
+			stranger.AddComponent<AudioSourceComponent>();
+			TransformSystem::Update(fixture.GetScene());
+			AudioSystem system(fixture.GetScene(), fixture.GetSpecification());
+			system.Start();
+
+			for (const Entity entity : { silent, stranger, Entity() })
+			{
+				const Status played = system.Play(entity);
+				REQUIRE_FALSE(played.has_value());
+				CHECK(played.error().GetCode() == ErrorCode::InvalidArgument);
+				CHECK_FALSE(system.Stop(entity).has_value());
+				CHECK_FALSE(system.IsPlaying(entity));
+			}
+			// Stop, Pause and Resume of a source that does not play change nothing.
+			CHECK(system.Stop(source).has_value());
+			CHECK(system.Pause(source).has_value());
+			CHECK(system.Resume(source).has_value());
+			CHECK_FALSE(system.IsPlaying(source));
+			CHECK(fixture.GetEngine().GetStats().LiveVoices == 0);
+
+			// A disabled source refuses Play and Resume.
+			source.SetActive(false);
+			const Status disabled = system.Play(source);
+			REQUIRE_FALSE(disabled.has_value());
+			CHECK(disabled.error().GetCode() == ErrorCode::InvalidState);
+			const Status resumed = system.Resume(source);
+			REQUIRE_FALSE(resumed.has_value());
+			CHECK(resumed.error().GetCode() == ErrorCode::InvalidState);
+			source.SetActive(true);
+
+			// Play restarts a playing source from the start.
+			REQUIRE(system.Play(source).has_value());
+			fixture.Frame(system);
+			REQUIRE(system.Play(source).has_value());
+			const std::vector<AudioVoiceInfo> voices = fixture.GetEngine().GetVoices();
+			REQUIRE(voices.size() == 1);
+			CHECK(voices.front().CursorFrames == 0);
+			CHECK(voices.front().Owner == source.GetUUID().GetValue());
+		}
+
+		TEST_CASE("AudioSystem: removing the AudioSource releases its voice and adding one plays it on start")
+		{
+			AudioSceneFixture fixture;
+			const AssetHandle clip = fixture.AddToneClip(0xa001);
+			fixture.AddListener();
+			const Entity source = fixture.AddSource("Source", clip, glm::vec3(0.0f));
+			TransformSystem::Update(fixture.GetScene());
+			AudioSystem system(fixture.GetScene(), fixture.GetSpecification());
+			system.Start();
+			REQUIRE(system.IsPlaying(source));
+			source.RemoveComponent<AudioSourceComponent>();
+			CHECK(fixture.GetEngine().GetStats().LiveVoices == 0);
+			fixture.Frame(system);
+			CHECK(fixture.GetEngine().GetStats().LiveVoices == 0);
+
+			AudioSourceComponent again;
+			again.Clip.SetHandle(clip);
+			again.PlayOnStart = true;
+			again.Spatial = false;
+			source.AddComponent<AudioSourceComponent>(again);
+			CHECK_FALSE(system.IsPlaying(source));
+			fixture.Frame(system);
+			CHECK(system.IsPlaying(source));
+			const std::vector<AudioVoiceInfo> voices = fixture.GetEngine().GetVoices();
+			REQUIRE(voices.size() == 1);
+			CHECK_FALSE(voices.front().Settings.Spatial);
+		}
+
+		TEST_CASE("AudioSystem: a disabled PlayOnStart source starts when its entity is enabled")
+		{
+			AudioSceneFixture fixture;
+			const AssetHandle clip = fixture.AddToneClip(0xa001);
+			fixture.AddListener();
+			const Entity source = fixture.AddSource("Source", clip, glm::vec3(0.0f));
+			source.SetActive(false);
+			TransformSystem::Update(fixture.GetScene());
+			AudioSystem system(fixture.GetScene(), fixture.GetSpecification());
+			system.Start();
+			CHECK_FALSE(system.IsPlaying(source));
+			fixture.Frame(system);
+			CHECK(fixture.GetEngine().GetStats().LiveVoices == 0);
+			source.SetActive(true);
+			fixture.Frame(system);
+			CHECK(system.IsPlaying(source));
+		}
+
+		TEST_CASE("AudioSystem: the primary camera listens when there is no listener, with its pose and velocity")
+		{
+			AudioSceneFixture fixture;
+			Entity camera = fixture.GetScene().CreateEntity("Camera");
+			camera.AddComponent<CameraComponent>(CameraComponent{ .Primary = true });
+			camera.GetComponent<TransformComponent>().Translation = glm::vec3(1.0f, 2.0f, 3.0f);
+			TransformSystem::Update(fixture.GetScene());
+			AudioSystem system(fixture.GetScene(), fixture.GetSpecification());
+			system.Start();
+			CHECK(system.GetListener().Source == AudioListenerSource::Camera);
+			CHECK(system.GetListener().Entity == camera.GetUUID());
+			AudioListenerPose pose = fixture.GetEngine().GetListener();
+			CHECK(pose.Position == glm::vec3(1.0f, 2.0f, 3.0f));
+			CHECK(pose.Forward == glm::vec3(0.0f, 0.0f, -1.0f));
+			CHECK(pose.Up == glm::vec3(0.0f, 1.0f, 0.0f));
+			CHECK(pose.Velocity == glm::vec3(0.0f));
+
+			// Half a metre along +X in 1/60 s; a quarter turn about +Y looks down -X.
+			camera.GetComponent<TransformComponent>().Translation.x += 0.5f;
+			camera.GetComponent<TransformComponent>().Rotation = TransformSystem::QuaternionFromEulerDegrees(glm::vec3(0.0f, 90.0f, 0.0f));
+			fixture.Frame(system);
+			pose = fixture.GetEngine().GetListener();
+			CHECK(pose.Position == glm::vec3(1.5f, 2.0f, 3.0f));
+			CHECK(pose.Velocity.x == doctest::Approx(30.0f));
+			CHECK(pose.Forward.x == doctest::Approx(-1.0f));
+			CHECK(pose.Forward.z == doctest::Approx(0.0f).epsilon(1e-6));
+
+			// A listener takes over from the camera; its first frame has no velocity.
+			const Entity listener = fixture.AddListener();
+			fixture.Frame(system);
+			CHECK(system.GetListener().Entity == listener.GetUUID());
+			CHECK(fixture.GetEngine().GetListener().Position == glm::vec3(0.0f));
+			CHECK(fixture.GetEngine().GetListener().Velocity == glm::vec3(0.0f));
+		}
+
+		TEST_CASE("AudioSystem: without an asset manager every clip plays the silent clip with one warning each")
+		{
+			AudioSceneFixture fixture;
+			const AssetHandle clip = fixture.AddToneClip(0xa001);
+			fixture.AddListener();
+			fixture.AddSource("First", clip, glm::vec3(0.0f));
+			fixture.AddSource("Second", clip, glm::vec3(0.0f));
+			TransformSystem::Update(fixture.GetScene());
+			const Test::ExpectLog warned(LogLevel::Warn, clip.ToString());
+			{
+				AudioSystem system(fixture.GetScene(), AudioSystemSpecification{ .Audio = &fixture.GetEngine(), .Assets = nullptr });
+				system.Start();
+				const std::vector<AudioVoiceInfo> voices = fixture.GetEngine().GetVoices();
+				REQUIRE(voices.size() == 2);
+				for (const AudioVoiceInfo& voice : voices)
+					CHECK(voice.ClipName == BuiltinAssetHandles::SilentClip.ToString());
+				CHECK(fixture.GetEngine().GetStats().RegisteredClips == 1);
+				CHECK(MeasureAudioLevels(fixture.Frame(system)).Peak == 0.0f);
+			}
+			CHECK(warned.GetMatchCount() == 1);
 		}
 	}
 

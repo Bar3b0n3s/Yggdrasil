@@ -32,6 +32,12 @@ namespace Engine {
 				{ ".prefab", "Prefab", AssetType::Prefab },
 				{ ".ttf", "Font", AssetType::Font },
 				{ ".otf", "Font", AssetType::Font },
+				// M12.
+				{ ".wav", "Audio", AssetType::AudioClip },
+				{ ".flac", "Audio", AssetType::AudioClip },
+				{ ".mp3", "Audio", AssetType::AudioClip },
+				{ ".ogg", "Audio", AssetType::AudioClip },
+				{ ".sfx", "SoundEffect", AssetType::AudioClip },
 			};
 			for (const Expected& entry : expected)
 			{
@@ -46,7 +52,7 @@ namespace Engine {
 			CHECK(importers.FindForExtension(".GLB") == importers.FindById("Gltf"));
 			CHECK(importers.FindForExtension(".hdr") == nullptr);
 			CHECK(importers.FindForExtension(".luau") == nullptr);
-			CHECK(importers.GetImporters().size() == 6);
+			CHECK(importers.GetImporters().size() == 8);
 		}
 
 		TEST_CASE("ImporterRegistry: Describe lists ids, main types and extensions sorted by id")
@@ -54,8 +60,8 @@ namespace Engine {
 			ImporterRegistry importers;
 			RegisterBuiltinImporters(importers);
 			const std::vector<AssetImporterDescription> descriptions = importers.Describe();
-			REQUIRE(descriptions.size() == 6);
-			CHECK(descriptions.front().Id == "Font");
+			REQUIRE(descriptions.size() == 8);
+			CHECK(descriptions.front().Id == "Audio");
 			CHECK(descriptions.back().Id == "Texture");
 			for (size_t index = 1; index < descriptions.size(); ++index)
 				CHECK(descriptions[index - 1].Id < descriptions[index].Id);
@@ -76,6 +82,8 @@ namespace Engine {
 			CHECK(registry->FindStruct("GltfImportSettings") != nullptr);
 			CHECK(registry->FindStruct("FontImportSettings") != nullptr);
 			CHECK(registry->FindEnum("TextureUsage") != nullptr);
+			CHECK(registry->FindStruct("AudioImportSettings") != nullptr);
+			CHECK(registry->FindStruct("SoundEffect") != nullptr);
 		}
 	}
 

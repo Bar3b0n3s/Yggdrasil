@@ -5,22 +5,28 @@
 #include "Engine/Asset/AudioClipData.h"
 #include "Engine/Asset/BuiltinAssets.h"
 #include "Engine/Core/FileSystem.h"
+#include "Engine/Reflection/StructInfo.h"
 #include "Engine/Reflection/TypeRegistry.h"
 #include "Support/AssetTestFixture.h"
 #include "Support/TestData.h"
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <array>
+#include <cstddef>
+#include <cstdint>
+#include <limits>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
-// The .sfx sound effect (Architecture §6.6, §7.4, §10.3). Its reflected types are registered by the M12 contract; the
-// document functions and the import are skipped skeletons (Docs/Decisions/0015-m12-decisions.md): stream B implements them,
-// registers the importer in RegisterBuiltinImporters, adds the ten presets (Resources/Audio/*.sfx and their
-// EngineAssets.json entries) and removes the skips.
+// The .sfx sound effect (Architecture §6.6, §7.4, §10.3; Docs/Decisions/0015-m12-decisions.md decisions 9 and 11): its
+// reflected types and their Validate hooks, the document functions, the import and the ten presets (Resources/Audio/*.sfx
+// and their EngineAssets.json entries).
 
 namespace Engine {
 
@@ -90,7 +96,7 @@ namespace Engine {
 			CHECK_FALSE(importer.CanImport(".wav"));
 		}
 
-		TEST_CASE("SoundEffectImporter: the example of the architecture reads and writes back canonically" * doctest::skip(true))
+		TEST_CASE("SoundEffectImporter: the example of the architecture reads and writes back canonically")
 		{
 			Test::AssetTestFixture fixture;
 			SoundEffectLoadReport report;
@@ -115,7 +121,7 @@ namespace Engine {
 			CHECK(canonical->starts_with("{\n\t\"Format\": \"SoundEffect\",\n\t\"Version\": 1,"));
 		}
 
-		TEST_CASE("SoundEffectImporter: invalid documents are located errors" * doctest::skip(true))
+		TEST_CASE("SoundEffectImporter: invalid documents are located errors")
 		{
 			Test::AssetTestFixture fixture;
 			SoundEffectLoadReport report;
@@ -140,7 +146,7 @@ namespace Engine {
 			CHECK(GetErrorCode(SoundEffectFromText(unknown, fixture.GetRegistry(), warnings, true)) == ErrorCode::Validation);
 		}
 
-		TEST_CASE("SoundEffectImporter: a .sfx imports as 48 kHz mono PCM" * doctest::skip(true))
+		TEST_CASE("SoundEffectImporter: a .sfx imports as 48 kHz mono PCM")
 		{
 			Test::AssetTestFixture fixture;
 			const Result<ImportResult> imported = ImportSoundEffect(fixture, "LineClear.sfx", LineClearText);
@@ -158,9 +164,76 @@ namespace Engine {
 			const Result<ImportResult> again = ImportSoundEffect(fixture, "LineClear.sfx", LineClearText);
 			REQUIRE(again.has_value());
 			CHECK(again->Artifacts.front().Cooked == imported->Artifacts.front().Cooked);
+
+			// The clip holds the synthesizer's samples, little-endian.
+			SoundEffectLoadReport report;
+			const Result<SoundEffectDescription> description = SoundEffectFromText(LineClearText, fixture.GetRegistry(), report, true);
+			REQUIRE(description.has_value());
+			const Result<std::vector<int16_t>> samples = SynthesizeSoundEffect(*description);
+			REQUIRE(samples.has_value());
+			CHECK((*clip)->FrameCount == samples->size());
+			const std::span<const std::byte> expected = std::as_bytes(std::span<const int16_t>(*samples));
+			CHECK(std::ranges::equal((*clip)->Bytes, expected));
 		}
 
-		TEST_CASE("SoundEffectImporter: an invalid .sfx is ImportFailed with located issues" * doctest::skip(true))
+		TEST_CASE("SoundEffectImporter: the registry checks the rules of SoundSynth at the caller's pointer")
+		{
+			// asset.create and asset.setProperties validate a description inside a request (under /values).
+			Test::AssetTestFixture fixture;
+			const TypeRegistry& registry = fixture.GetRegistry();
+			const StructInfo* type = registry.FindStruct("SoundEffect");
+			REQUIRE(type != nullptr);
+			CHECK(type->HasValidators());
+			CHECK(type->HasGenerators());
+			SoundEffectLoadReport report;
+			Result<SoundEffectDescription> description = SoundEffectFromText(LineClearText, registry, report, true);
+			REQUIRE(description.has_value());
+			description->Layers[0].Notes[2] = "X5:0.06";
+			description->Layers[1].LowPass = 5.0f;
+			ResolveContext resolve;
+			resolve.Registry = &registry;
+			ValidationContext validation("/values");
+			type->Validate(&*description, resolve, validation);
+			CHECK(validation.GetErrorCount() == 2);
+			std::vector<std::string> pointers;
+			for (const ValidationIssue& issue : validation.GetIssues())
+				pointers.push_back(issue.JsonPointer);
+			CHECK(std::ranges::find(pointers, "/values/Layers/0/Notes/2") != pointers.end());
+			CHECK(std::ranges::find(pointers, "/values/Layers/1/LowPass") != pointers.end());
+
+			// More layers than the limit, located at the array.
+			SoundEffectDescription crowded;
+			crowded.Layers.resize(MaxSoundLayers + 1);
+			ValidationContext tooMany("/values");
+			type->Validate(&crowded, resolve, tooMany);
+			REQUIRE(tooMany.GetErrorCount() == 1);
+			CHECK(tooMany.GetIssues().front().JsonPointer == "/values/Layers");
+
+			// The registry's default object has no layer and passes (the registry suite round-trips it); a document without a
+			// layer does not.
+			const SoundEffectDescription defaultDescription;
+			ValidationContext defaults;
+			type->Validate(&defaultDescription, resolve, defaults);
+			CHECK_FALSE(defaults.HasErrors());
+			const Result<SoundEffectDescription> empty = SoundEffectFromText(R"({"Format": "SoundEffect", "Version": 1})", registry, report);
+			REQUIRE_FALSE(empty.has_value());
+			CHECK(empty.error().GetCode() == ErrorCode::Validation);
+			CHECK(empty.error().ToString().contains("/Layers"));
+		}
+
+		TEST_CASE("SoundEffectImporter: a value that cannot be written is a located Validation error")
+		{
+			Test::AssetTestFixture fixture;
+			SoundEffectDescription description;
+			description.Layers.resize(1);
+			description.Layers[0].Envelope.Attack = std::numeric_limits<float>::infinity();
+			const Result<std::string> text = SoundEffectToText(description, fixture.GetRegistry());
+			REQUIRE_FALSE(text.has_value());
+			CHECK(text.error().GetCode() == ErrorCode::Validation);
+			CHECK(text.error().ToString().contains("/Layers/0/Envelope/Attack"));
+		}
+
+		TEST_CASE("SoundEffectImporter: an invalid .sfx is ImportFailed with located issues")
 		{
 			Test::AssetTestFixture fixture;
 			const Result<ImportResult> rejected = ImportSoundEffect(fixture, "Broken.sfx",
@@ -173,7 +246,7 @@ namespace Engine {
 			CHECK(message.contains("/Layers/0/Duration"));
 		}
 
-		TEST_CASE("SoundEffectImporter: the ten presets import and EngineAssets.json lists them" * doctest::skip(true))
+		TEST_CASE("SoundEffectImporter: the ten presets import and EngineAssets.json lists them")
 		{
 			struct Preset
 			{

@@ -55,7 +55,9 @@ namespace Engine {
 	// through playback fails here. Errors: Parse listing the four formats ("WAV, FLAC, MP3 or Ogg Vorbis") for bytes that
 	// are none of them (Ogg Opus and other Ogg codecs included, with the hint to convert the file); Parse for a truncated
 	// or corrupt file (with miniaudio's result description and the frame reached); Validation for a sample rate outside
-	// 8,000 to 192,000 Hz, a channel count other than 1 or 2 (hint: convert to mono or stereo) or no frames.
+	// 8,000 to 192,000 Hz, a channel count other than 1 or 2 (hint: convert to mono or stereo), no frames, or a sample that
+	// is not finite (NaN or an infinity, which an IEEE-float WAV can hold; the message names the frame), so no such sample
+	// reaches the mixer through an imported clip, streamed or not.
 	[[nodiscard]] Result<EncodedAudioInfo> ProbeEncodedAudio(std::span<const std::byte> bytes);
 
 	// ProbeEncodedAudio's checks, keeping the decoded samples (tests compare decoders and playback with it). Errors: as

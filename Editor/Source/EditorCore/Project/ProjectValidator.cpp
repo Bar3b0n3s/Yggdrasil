@@ -18,8 +18,10 @@
 #include "Engine/Core/UUIDGenerator.h"
 #include "Engine/Core/VirtualFileSystem.h"
 #include "Engine/Reflection/TypeRegistry.h"
+#include "Engine/Scene/AudioSystem.h"
 #include "Engine/Scene/ComponentAccess.h"
 #include "Engine/Scene/ComponentHostOps.h"
+#include "Engine/Scene/Components/AudioListenerComponent.h"
 #include "Engine/Scene/Components/CameraComponent.h"
 #include "Engine/Scene/Components/PrefabInstanceComponent.h"
 #include "Engine/Scene/Entity.h"
@@ -64,6 +66,9 @@ namespace Engine {
 			AssetContentSkippedCode,
 			PathCaseMismatchCode,
 			PrefabMissingAssetCode,
+			// M12 (Scene/AudioSystem.h, FindAudioSceneIssues).
+			AudioNoListenerCode,
+			AudioMultiplePrimaryListenersCode,
 			BuildStartSceneMissingCode,
 			BuildSceneMissingCode,
 		};
@@ -337,6 +342,26 @@ namespace Engine {
 			std::string hint = fixable ? "fix it to make the scene's only camera Primary" : "set Primary on the camera the scene renders through";
 			diagnostics.push_back(MakeDiagnostic(SceneNoPrimaryCameraCode, DiagnosticSeverity::Warning,
 				std::format("none of the scene's {} camera(s) is Primary", cameras.size()), site, std::move(hint), fixable));
+		}
+
+		// The audio checks of §13.7 (FindAudioSceneIssues): AUDIO_MULTIPLE_PRIMARY_LISTENERS on each extra primary listener
+		// (fixable in the open scene: its Primary is cleared) and AUDIO_NO_LISTENER on the first spatial AudioSource.
+		static void CheckAudio(const CheckedScene& checked, std::vector<CollectedDiagnostic>& diagnostics)
+		{
+			for (AudioSceneIssue& issue : FindAudioSceneIssues(*checked.Target))
+			{
+				DiagnosticSite site;
+				site.File = checked.File;
+				site.Entity = FormatOptionalUUID(issue.Entity);
+				const bool listener = issue.Code == AudioMultiplePrimaryListenersCode;
+				site.Component = listener ? "AudioListener" : "AudioSource";
+				site.Field = listener ? "Primary" : "";
+				const bool fixable = issue.AutoFixable && checked.IsOpenScene;
+				std::string hint = issue.AutoFixable && !checked.IsOpenScene
+					? std::string("open the scene (scene.open) to fix it, or clear Primary on all but one AudioListener")
+					: std::move(issue.Hint);
+				diagnostics.push_back(MakeDiagnostic(issue.Code, issue.Severity, std::move(issue.Message), site, std::move(hint), fixable));
+			}
 		}
 
 		static void CheckDanglingReferences(const CheckedScene& checked, std::vector<CollectedDiagnostic>& diagnostics)
@@ -656,6 +681,7 @@ namespace Engine {
 		static void CheckScene(const EditorContext& editor, const CheckedScene& checked, std::vector<CollectedDiagnostic>& diagnostics)
 		{
 			CheckCameras(checked, diagnostics);
+			CheckAudio(checked, diagnostics);
 			CheckDanglingReferences(checked, diagnostics);
 			CheckSceneAssets(editor, checked, diagnostics);
 		}
@@ -940,7 +966,8 @@ namespace Engine {
 			return collection;
 		}
 
-		// The scene fixes (cameras, dangling references) of the selected diagnostics, as one SceneEdit of the open scene.
+		// The scene fixes (cameras, audio listeners, dangling references) of the selected diagnostics, as one SceneEdit of the
+		// open scene.
 		static Status FixOpenScene(EditorContext& editor, const std::vector<const CollectedDiagnostic*>& selected)
 		{
 			const bool hasSceneFix = std::ranges::any_of(selected, [](const CollectedDiagnostic* collected)
@@ -978,6 +1005,20 @@ namespace Engine {
 					patch["Primary"] = wanted;
 					ENGINE_TRY(ComponentAccess::PatchComponentJson(camera, "Camera", patch));
 				}
+			}
+
+			// Several primary audio listeners: each diagnostic names one after the first, whose Primary is cleared.
+			for (const CollectedDiagnostic* collected : selected)
+			{
+				if (collected->Diagnostic.Code != AudioMultiplePrimaryListenersCode)
+					continue;
+				const std::optional<UUID> id = UUID::FromString(collected->Diagnostic.Entity);
+				const Entity listener = id.has_value() ? scene.FindEntityByID(*id) : Entity();
+				if (!listener.IsValid() || !listener.HasComponent<AudioListenerComponent>() || !listener.GetComponent<AudioListenerComponent>().Primary)
+					continue;
+				Json patch = Json::object();
+				patch["Primary"] = false;
+				ENGINE_TRY(ComponentAccess::PatchComponentJson(listener, "AudioListener", patch));
 			}
 
 			// Dangling references: every selected one of a component is cleared in one write of that component.

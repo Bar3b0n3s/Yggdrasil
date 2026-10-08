@@ -20,10 +20,12 @@ namespace Engine {
 
 	namespace {
 
-		// The Runtime with `arguments`, its user data in `userData`.
+		// The Runtime with `arguments`, its user data in `userData`; a windowed run gets --audio-device none
+		// (Test::WithoutAudioDevice).
 		Result<ProcessResult> RunRuntime(const Test::TempDirectory& userData, std::vector<std::string> arguments)
 		{
 			ENGINE_TRY_ASSIGN(std::filesystem::path runtime, Test::GetBuiltExecutablePath("Runtime"));
+			arguments = Test::WithoutAudioDevice(std::move(arguments));
 			arguments.push_back("--user-data-dir=" + Test::PathToUtf8(userData.GetPath()));
 			return Process::Run({ .Executable = std::move(runtime), .Arguments = std::move(arguments) }, std::chrono::seconds(120));
 		}

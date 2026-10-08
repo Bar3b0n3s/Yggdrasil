@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <span>
 #include <string>
 #include <vector>
@@ -58,6 +59,35 @@ namespace Engine {
 			CHECK(readTag() == "data");
 			CHECK(reader.ReadU32().value_or(0) == pcm.size());
 			CHECK(std::equal(pcm.begin(), pcm.end(), wav.begin() + 44));
+		}
+
+		TEST_CASE("AudioTestData: a float WAV file has the IEEE-float header followed by the samples as given")
+		{
+			const float infinity = std::numeric_limits<float>::infinity();
+			const std::vector<float> samples = { 0.25f, -0.5f, infinity, 1.0e30f };
+			const Buffer wav = Test::MakeFloatWav(samples, 22050, 2);
+			REQUIRE(wav.size() == 44 + samples.size() * sizeof(float));
+			BinaryReader reader(wav);
+			const auto readTag = [&reader]()
+			{
+				const Result<std::span<const std::byte>> bytes = reader.ReadBytes(4);
+				return bytes.has_value() ? std::string(AsStringView(*bytes)) : std::string();
+			};
+			CHECK(readTag() == "RIFF");
+			CHECK(reader.ReadU32().value_or(0) == 36 + samples.size() * sizeof(float));
+			CHECK(readTag() == "WAVE");
+			CHECK(readTag() == "fmt ");
+			CHECK(reader.ReadU32().value_or(0) == 16);
+			CHECK(reader.ReadU16().value_or(0) == 3);
+			CHECK(reader.ReadU16().value_or(0) == 2);
+			CHECK(reader.ReadU32().value_or(0) == 22050);
+			CHECK(reader.ReadU32().value_or(0) == 22050 * 8);
+			CHECK(reader.ReadU16().value_or(0) == 8);
+			CHECK(reader.ReadU16().value_or(0) == 32);
+			CHECK(readTag() == "data");
+			CHECK(reader.ReadU32().value_or(0) == samples.size() * sizeof(float));
+			for (const float expected : samples)
+				CHECK(reader.ReadF32().value_or(0.0f) == expected);
 		}
 	}
 

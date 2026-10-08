@@ -2,23 +2,31 @@
 
 #include "Engine/Audio/AudioEngine.h"
 
+#include "Engine/Core/FileSystem.h"
+#include "Engine/Core/Log.h"
 #include "Engine/Core/VirtualFileSystem.h"
 #include "Support/AudioTestData.h"
 #include "Support/ExpectLog.h"
+#include "Support/TestData.h"
+#include "Support/WaitUntil.h"
 
 #include <algorithm>
+#include <atomic>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
-// The audio engine (Architecture §10.1, §10.4; Roadmap M12). Skipped skeletons of the M12 contract
-// (Docs/Decisions/0015-m12-decisions.md): stream A implements the engine and removes the skips. Every test runs a
+// The audio engine (Architecture §10.1, §10.4; Roadmap M12; Docs/Decisions/0015-m12-decisions.md). Every test runs a
 // device-less engine (AudioDeviceKind::None) or miniaudio's Null backend as a real device (AudioDeviceKind::Null), never the
-// machine's audio device (§15.1 T1), with deterministic decoding.
+// machine's audio device (§15.1 T1), with deterministic decoding except the threaded-decoding case. The device cases wait
+// for the Null device's thread with Test::WaitUntil, a bounded wait whose bound only limits a failure (ADR 0008 decision
+// 15).
 
 namespace Engine {
 
@@ -48,6 +56,31 @@ namespace Engine {
 			[[nodiscard]] AudioEngine* operator->() const { return m_Engine.get(); }
 		private:
 			Scope<AudioEngine> m_Engine;
+		};
+
+		// Counts the Warn entries logged, from any thread, while it is alive. Test::ExpectLog fails a test case whose
+		// expectation never matched, so it cannot assert that nothing was logged. Not copyable or movable.
+		class WarningCounter
+		{
+		public:
+			WarningCounter()
+				: m_ListenerId(Log::AddListener([this](const LogEntry& entry)
+			{
+				if (entry.Level == LogLevel::Warn)
+					m_Count.fetch_add(1);
+			}))
+			{
+			}
+
+			~WarningCounter() { Log::RemoveListener(m_ListenerId); }
+
+			WarningCounter(const WarningCounter&) = delete;
+			WarningCounter& operator=(const WarningCounter&) = delete;
+
+			[[nodiscard]] uint32_t GetCount() const { return m_Count.load(); }
+		private:
+			std::atomic<uint32_t> m_Count{ 0 }; // declared first: the listener may run as soon as it is registered
+			uint64_t m_ListenerId = 0;
 		};
 
 		// An engine of `specification` over `vfs`; fails the test case on error.
@@ -154,6 +187,74 @@ namespace Engine {
 				.Amplitude = amplitude };
 		}
 
+		// The bytes of Tests/Data/<relative>; fails the test case on error.
+		Buffer ReadFixture(std::string_view relative)
+		{
+			Result<Buffer> bytes = FileSystem::ReadFile(Test::GetTestDataPath(relative));
+			REQUIRE_MESSAGE(bytes.has_value(), bytes.error().ToString());
+			return std::move(*bytes);
+		}
+
+		// The format fixtures of Tests/Data/Assets/Audio (ADR 0015 decisions 18 and 25), one per container the decoder knows.
+		constexpr std::string_view AudioFixtures[] = {
+			"Assets/Audio/Tone.wav",
+			"Assets/Audio/Tone.flac",
+			"Assets/Audio/Tone.mp3",
+			"Assets/Audio/Tone.ogg",
+		};
+
+		// `bytes` registered as an Encoded clip under `name`, streamed or decoded at registration; fails the test case on error.
+		AudioClipHandle RegisterEncodedClip(AudioEngine& engine, std::string name, const Buffer& bytes, bool stream)
+		{
+			const Result<AudioClipHandle> clip = engine.RegisterClip(
+				{ .Name = std::move(name), .Format = AudioClipFormat::Encoded, .Bytes = CreateRef<const Buffer>(bytes), .Stream = stream });
+			REQUIRE_MESSAGE(clip.has_value(), clip.error().ToString());
+			return *clip;
+		}
+
+		// The current stats' device read and silent frame counts, for the device cases' bounded waits.
+		uint64_t GetDeviceReadFrames(const AudioEngine& engine)
+		{
+			return engine.GetStats().DeviceReadFrames;
+		}
+
+		uint64_t GetDeviceSilentFrames(const AudioEngine& engine)
+		{
+			return engine.GetStats().DeviceSilentFrames;
+		}
+
+		// True when every sample is finite.
+		bool AllFinite(std::span<const float> samples)
+		{
+			return std::ranges::all_of(samples, [](float sample)
+			{
+				return std::isfinite(sample);
+			});
+		}
+
+		// How many clip frames a spatial voice of a 10 s, 48 kHz clip at (0, 0, -10) advances over 4,800 mixed frames, with
+		// the voice moving at `sourceVelocity` and the listener (at the origin) at `listenerVelocity`, after 480 frames in
+		// which miniaudio computes the voice's first Doppler pitch. 0 when the voice ended (a runaway pitch).
+		uint64_t MeasureDopplerAdvance(const glm::vec3& sourceVelocity, const glm::vec3& listenerVelocity, float dopplerFactor = 1.0f)
+		{
+			VirtualFileSystem vfs;
+			const TestEngine engine = CreateTestEngine(vfs);
+			const AudioClipHandle clip = RegisterToneClip(*engine, "0000000000000001", MakeTone(10.0));
+			REQUIRE(engine->SetListener({ .Velocity = listenerVelocity }).has_value());
+			const AudioVoiceHandle voice = PlayTestVoice(*engine,
+				{ .Clip = clip,
+					.Settings = { .Spatial = true, .Spatialization = { .Model = Attenuation::None, .DopplerFactor = dopplerFactor } },
+					.Transform = { .Position = glm::vec3(0.0f, 0.0f, -10.0f), .Velocity = sourceVelocity } });
+			PullFrames(*engine, 480);
+			if (!engine->IsVoiceAlive(voice))
+				return 0;
+			const uint64_t before = GetCursor(*engine, voice);
+			PullFrames(*engine, 4800);
+			if (!engine->IsVoiceAlive(voice))
+				return 0;
+			return GetCursor(*engine, voice) - before;
+		}
+
 		// A non-spatial-attenuation spatial voice of `clip` at `position` (only the panning changes with the position).
 		AudioVoiceDescription MakePannedVoice(AudioClipHandle clip, const glm::vec3& position)
 		{
@@ -205,7 +306,7 @@ namespace Engine {
 			CHECK(MakeAudioResourceName("0000000000000001", largest) == "0000000000000001@18446744073709551615");
 		}
 
-		TEST_CASE("AudioEngine: a device-less engine starts with no device, host time and no voices" * doctest::skip(true))
+		TEST_CASE("AudioEngine: a device-less engine starts with no device, host time and no voices")
 		{
 			VirtualFileSystem vfs;
 			const TestEngine engine = CreateTestEngine(vfs);
@@ -224,7 +325,7 @@ namespace Engine {
 			CHECK(engine->GetListener() == AudioListenerPose{});
 		}
 
-		TEST_CASE("AudioEngine: a playing clip has non-zero RMS" * doctest::skip(true))
+		TEST_CASE("AudioEngine: a playing clip has non-zero RMS")
 		{
 			VirtualFileSystem vfs;
 			const TestEngine engine = CreateTestEngine(vfs);
@@ -239,7 +340,7 @@ namespace Engine {
 			CHECK(cursor == 4800);
 		}
 
-		TEST_CASE("AudioEngine: volume 0 is silent" * doctest::skip(true))
+		TEST_CASE("AudioEngine: volume 0 is silent")
 		{
 			VirtualFileSystem vfs;
 			const TestEngine engine = CreateTestEngine(vfs);
@@ -262,7 +363,7 @@ namespace Engine {
 			CHECK(silentMaster.Peak == 0.0f);
 		}
 
-		TEST_CASE("AudioEngine: a source panned hard right has right RMS > left" * doctest::skip(true))
+		TEST_CASE("AudioEngine: a source panned hard right has right RMS > left")
 		{
 			VirtualFileSystem vfs;
 			const TestEngine engine = CreateTestEngine(vfs);
@@ -279,7 +380,7 @@ namespace Engine {
 			CHECK(left.RmsLeft > left.RmsRight);
 		}
 
-		TEST_CASE("AudioEngine: attenuation is monotonic with distance" * doctest::skip(true))
+		TEST_CASE("AudioEngine: attenuation is monotonic with distance")
 		{
 			const AudioEngineSpecification specification{ .Device = AudioDeviceKind::None, .Decoding = AudioDecoding::Deterministic };
 			for (const Attenuation model : { Attenuation::Inverse, Attenuation::Linear, Attenuation::Exponential })
@@ -304,7 +405,7 @@ namespace Engine {
 			}
 		}
 
-		TEST_CASE("AudioEngine: streamed and decoded playback of the same clip are sample-identical" * doctest::skip(true))
+		TEST_CASE("AudioEngine: streamed and decoded playback of the same clip are sample-identical")
 		{
 			// Three seconds, so the stream crosses its first page; deterministic decoding processes the stream's jobs inline.
 			const Test::TestToneSpecification tone = MakeTone(3.0, 2);
@@ -329,9 +430,29 @@ namespace Engine {
 			}
 			CHECK(MeasureAudioLevels(decoded).Peak > 0.1f);
 			CHECK(streamed == decoded);
+
+			// The same for every container: a decoded clip goes through DecodeEncodedAudio and a stream through the resource
+			// manager's decoder over the AudioVfs, two code paths that must produce the same samples.
+			for (const std::string_view fixture : AudioFixtures)
+			{
+				CAPTURE(std::string(fixture));
+				const Buffer bytes = ReadFixture(fixture);
+				std::vector<float> fromDecoded;
+				std::vector<float> fromStream;
+				for (const bool stream : { false, true })
+				{
+					const TestEngine engine = CreateTestEngine(vfs);
+					const AudioClipHandle clip = RegisterEncodedClip(*engine, "0000000000000002", bytes, stream);
+					PlayTestVoice(*engine, { .Clip = clip });
+					// The whole clip at the mixing rate, and a stream page and a half past its end when it is shorter.
+					(stream ? fromStream : fromDecoded) = PullFrames(*engine, 48000 * 5 + 24000);
+				}
+				CHECK(MeasureAudioLevels(fromDecoded).Peak > 0.01f);
+				CHECK(fromStream == fromDecoded);
+			}
 		}
 
-		TEST_CASE("AudioEngine: streamed playback captured twice is bit-identical" * doctest::skip(true))
+		TEST_CASE("AudioEngine: streamed playback captured twice is bit-identical")
 		{
 			const Test::TestToneSpecification tone = MakeTone(12.0, 2);
 			const auto captureOnce = [&tone]()
@@ -351,9 +472,32 @@ namespace Engine {
 			CHECK_FALSE(first.Truncated);
 			CHECK(MeasureAudioLevels(first.Samples).Peak > 0.1f);
 			CHECK(first.Samples == second.Samples);
+
+			// Every container streams the same way twice.
+			for (const std::string_view fixture : AudioFixtures)
+			{
+				CAPTURE(std::string(fixture));
+				const Buffer bytes = ReadFixture(fixture);
+				const auto captureFixture = [&bytes]()
+				{
+					VirtualFileSystem vfs;
+					const TestEngine engine = CreateTestEngine(vfs);
+					const AudioClipHandle clip = RegisterEncodedClip(*engine, "0000000000000002", bytes, true);
+					engine->StartCapture();
+					PlayTestVoice(*engine, { .Clip = clip, .Settings = { .Volume = 0.8f, .Pitch = 1.25f } });
+					for (int frame = 0; frame < 300; ++frame)
+						PullFrames(*engine, 800);
+					return engine->StopCapture();
+				};
+				const AudioCapture once = captureFixture();
+				const AudioCapture again = captureFixture();
+				CHECK(once.GetFrameCount() == 300 * 800);
+				CHECK(MeasureAudioLevels(once.Samples).Peak > 0.01f);
+				CHECK(once.Samples == again.Samples);
+			}
 		}
 
-		TEST_CASE("AudioEngine: a stopped Null-backend device is re-created and the voice cursor is unchanged" * doctest::skip(true))
+		TEST_CASE("AudioEngine: a stopped Null-backend device is re-created and the voice cursor is unchanged")
 		{
 			VirtualFileSystem vfs;
 			const TestEngine engine = CreateTestEngine(vfs, AudioDeviceKind::Null);
@@ -371,24 +515,44 @@ namespace Engine {
 			engine->InjectDeviceNotification(AudioDeviceNotification::Stopped);
 			engine->Update(10.0, 0.0);
 			CHECK(engine->GetDeviceState() == AudioDeviceState::Recreating);
-			engine->Update(10.5, 0.0);
+			CHECK(engine->GetStats().DeviceName.empty());
+			// Time goes back to the engine, but nothing reads it while Recreating: no device exists to, and a non-zero delta
+			// pulls nothing (the time source stays Device), so the cursor holds.
+			engine->EndSimulationTime();
+			CHECK(engine->GetTimeSource() == AudioTimeSource::Device);
+			const uint64_t pulledBefore = engine->GetStats().PulledFrames;
+			engine->Update(10.5, 0.5);
 			CHECK(engine->GetDeviceState() == AudioDeviceState::Recreating);
-			engine->Update(11.0, 0.0);
+			CHECK(engine->GetStats().PulledFrames == pulledBefore);
+			const uint64_t whileRecreating = GetCursor(*engine, voice);
+			CHECK(whileRecreating == cursor);
+
+			const uint64_t readBefore = GetDeviceReadFrames(*engine);
+			engine->Update(11.0, 0.5);
 			CHECK(engine->GetDeviceState() == AudioDeviceState::Running);
 			CHECK(engine->GetStats().DeviceRecreations == 1);
+			CHECK_FALSE(engine->GetStats().DeviceName.empty());
 
-			// Only the device was re-created: the voice, its clip and its cursor are untouched.
+			// Only the device was re-created: the voice and its clip are untouched, and the new device plays the voice on from
+			// where it was (its cursor moves once the device reads).
 			REQUIRE(engine->IsVoiceAlive(voice));
 			CHECK(engine->IsClipRegistered(clip));
 			const uint64_t afterRecreation = GetCursor(*engine, voice);
-			CHECK(afterRecreation == cursor);
-			CHECK(engine->AdvanceSimulationTick() == 800);
-			const uint64_t afterTick = GetCursor(*engine, voice);
-			CHECK(afterTick == cursor + 800);
-			engine->EndSimulationTime();
+			const bool deviceRead = Test::WaitUntil([&engine, readBefore]()
+			{
+				return GetDeviceReadFrames(*engine) > readBefore;
+			});
+			CHECK(deviceRead);
+			const bool advanced = Test::WaitUntil([&engine, voice, afterRecreation]()
+			{
+				const Result<AudioVoiceInfo> info = engine->GetVoiceInfo(voice);
+				return info.has_value() && info->CursorFrames != afterRecreation;
+			});
+			CHECK(advanced);
+			CHECK(engine->IsVoiceAlive(voice));
 		}
 
-		TEST_CASE("AudioEngine: three failed re-creations leave the engine device-less with one warning" * doctest::skip(true))
+		TEST_CASE("AudioEngine: three failed re-creations leave the engine device-less with one warning")
 		{
 			VirtualFileSystem vfs;
 			const TestEngine engine = CreateTestEngine(vfs, AudioDeviceKind::Null);
@@ -423,20 +587,35 @@ namespace Engine {
 			CHECK(warnings.GetMatchCount() == 1);
 		}
 
-		TEST_CASE("AudioEngine: lockstep pulls exactly 800 frames per tick and the device reads nothing" * doctest::skip(true))
+		TEST_CASE("AudioEngine: lockstep pulls exactly 800 frames per tick and the device reads nothing")
 		{
 			VirtualFileSystem vfs;
 			const TestEngine engine = CreateTestEngine(vfs, AudioDeviceKind::Null);
 			REQUIRE(engine->GetDeviceState() == AudioDeviceState::Running);
 			const AudioClipHandle clip = RegisterToneClip(*engine, "0000000000000001", MakeTone());
 
+			// Without simulation time the running Null device reads the engine (time source Device).
+			CHECK(engine->GetTimeSource() == AudioTimeSource::Device);
+			const bool deviceReads = Test::WaitUntil([&engine]()
+			{
+				return GetDeviceReadFrames(*engine) > 0;
+			});
+			CHECK(deviceReads);
+
 			engine->BeginSimulationTime(60);
 			CHECK(engine->IsSimulationTimeOwned());
 			CHECK(engine->GetTimeSource() == AudioTimeSource::Simulation);
-			const AudioVoiceHandle voice = PlayTestVoice(*engine, { .Clip = clip, .Settings = { .Loop = true } });
+			// BeginSimulationTime waited for a device read in progress, so from here on the device must read nothing.
 			const AudioEngineStats before = engine->GetStats();
+			const AudioVoiceHandle voice = PlayTestVoice(*engine, { .Clip = clip, .Settings = { .Loop = true } });
 			for (int tick = 0; tick < 30; ++tick)
 				CHECK(engine->AdvanceSimulationTick() == 800);
+			// The device's callback ran (it filled frames with silence) while simulation time was owned, and read nothing.
+			const bool deviceCalledBack = Test::WaitUntil([&engine, &before]()
+			{
+				return GetDeviceSilentFrames(*engine) > before.DeviceSilentFrames;
+			});
+			CHECK(deviceCalledBack);
 			const AudioEngineStats after = engine->GetStats();
 			CHECK(after.DeviceReadFrames == before.DeviceReadFrames);
 			CHECK(after.PulledFrames - before.PulledFrames == 30 * 800);
@@ -451,7 +630,7 @@ namespace Engine {
 			CHECK(engine->AdvanceSimulationTick() == 0);
 		}
 
-		TEST_CASE("AudioEngine: simulation time pulls round(n x 48000 / FixedHz) frames after n ticks" * doctest::skip(true))
+		TEST_CASE("AudioEngine: simulation time pulls round(n x 48000 / FixedHz) frames after n ticks")
 		{
 			VirtualFileSystem vfs;
 			const TestEngine engine = CreateTestEngine(vfs);
@@ -471,11 +650,12 @@ namespace Engine {
 			}
 		}
 
-		TEST_CASE("AudioEngine: the host pull advances a device-less engine by the frame's delta" * doctest::skip(true))
+		TEST_CASE("AudioEngine: the host pull advances a device-less engine by the frame's delta")
 		{
 			VirtualFileSystem vfs;
 			const TestEngine engine = CreateTestEngine(vfs);
-			const AudioClipHandle clip = RegisterToneClip(*engine, "0000000000000001", MakeTone());
+			// Two seconds, so one second of playback does not wrap the looping voice's cursor back to the start.
+			const AudioClipHandle clip = RegisterToneClip(*engine, "0000000000000001", MakeTone(2.0));
 			const AudioVoiceHandle voice = PlayTestVoice(*engine, { .Clip = clip, .Settings = { .Loop = true } });
 			engine->Update(0.0, 0.0);
 			const uint64_t start = GetCursor(*engine, voice);
@@ -492,7 +672,7 @@ namespace Engine {
 			CHECK(cursor <= 48001);
 		}
 
-		TEST_CASE("AudioEngine: a full pool steals the lowest priority, then the farthest, then the oldest voice" * doctest::skip(true))
+		TEST_CASE("AudioEngine: a full pool steals the lowest priority, then the farthest, then the oldest voice")
 		{
 			VirtualFileSystem vfs;
 			const TestEngine engine = CreateTestEngine(vfs);
@@ -528,7 +708,7 @@ namespace Engine {
 			CHECK(ErrorCodeOf(engine->StopVoice(farLow)) == ErrorCode::NotFound);
 		}
 
-		TEST_CASE("AudioEngine: a full pool of higher-priority voices refuses a new voice" * doctest::skip(true))
+		TEST_CASE("AudioEngine: a full pool of higher-priority voices refuses a new voice")
 		{
 			VirtualFileSystem vfs;
 			const TestEngine engine = CreateTestEngine(vfs);
@@ -542,7 +722,7 @@ namespace Engine {
 			CHECK(engine->GetStats().StolenVoices == 0);
 		}
 
-		TEST_CASE("AudioEngine: a finished voice is released and its handle becomes stale" * doctest::skip(true))
+		TEST_CASE("AudioEngine: a finished voice is released and its handle becomes stale")
 		{
 			VirtualFileSystem vfs;
 			const TestEngine engine = CreateTestEngine(vfs);
@@ -563,7 +743,7 @@ namespace Engine {
 			CHECK(engine->IsVoiceAlive(looping));
 		}
 
-		TEST_CASE("AudioEngine: paused voices hold their cursor" * doctest::skip(true))
+		TEST_CASE("AudioEngine: paused voices hold their cursor")
 		{
 			VirtualFileSystem vfs;
 			const TestEngine engine = CreateTestEngine(vfs);
@@ -587,7 +767,7 @@ namespace Engine {
 			CHECK(notStarted == 0);
 		}
 
-		TEST_CASE("AudioEngine: stale and null handles are NotFound" * doctest::skip(true))
+		TEST_CASE("AudioEngine: stale and null handles are NotFound")
 		{
 			VirtualFileSystem vfs;
 			const TestEngine engine = CreateTestEngine(vfs);
@@ -607,7 +787,7 @@ namespace Engine {
 			CHECK(ErrorCodeOf(engine->PlayVoice({ .Clip = AudioClipHandle() })) == ErrorCode::NotFound);
 		}
 
-		TEST_CASE("AudioEngine: invalid clips, settings, listeners and volumes are InvalidArgument" * doctest::skip(true))
+		TEST_CASE("AudioEngine: invalid clips, settings, listeners and volumes are InvalidArgument")
 		{
 			VirtualFileSystem vfs;
 			const TestEngine engine = CreateTestEngine(vfs);
@@ -644,7 +824,7 @@ namespace Engine {
 			CHECK(engine->GetVoices().empty());
 		}
 
-		TEST_CASE("AudioEngine: group and master volumes scale their voices" * doctest::skip(true))
+		TEST_CASE("AudioEngine: group and master volumes scale their voices")
 		{
 			VirtualFileSystem vfs;
 			const TestEngine engine = CreateTestEngine(vfs);
@@ -665,7 +845,7 @@ namespace Engine {
 			CHECK(quarter == doctest::Approx(full * 0.25f).epsilon(0.02));
 		}
 
-		TEST_CASE("AudioEngine: capture records only the frames the engine pulls" * doctest::skip(true))
+		TEST_CASE("AudioEngine: capture records only the frames the engine pulls")
 		{
 			VirtualFileSystem vfs;
 			const TestEngine engine = CreateTestEngine(vfs);
@@ -686,7 +866,7 @@ namespace Engine {
 			CHECK(std::equal(pulled.begin(), pulled.end(), capture.Samples.begin()));
 		}
 
-		TEST_CASE("AudioEngine: ReadFrames is refused while the device reads the engine" * doctest::skip(true))
+		TEST_CASE("AudioEngine: ReadFrames is refused while the device reads the engine")
 		{
 			VirtualFileSystem vfs;
 			const TestEngine engine = CreateTestEngine(vfs, AudioDeviceKind::Null);
@@ -699,7 +879,7 @@ namespace Engine {
 			engine->EndSimulationTime();
 		}
 
-		TEST_CASE("AudioEngine: a rerouted notification is logged and keeps the device" * doctest::skip(true))
+		TEST_CASE("AudioEngine: a rerouted notification is logged and keeps the device")
 		{
 			VirtualFileSystem vfs;
 			const TestEngine engine = CreateTestEngine(vfs, AudioDeviceKind::Null);
@@ -718,8 +898,46 @@ namespace Engine {
 			}
 		}
 
-		TEST_CASE("AudioEngine: a device that cannot be created at startup leaves the engine device-less with one warning"
-			* doctest::skip(true))
+		TEST_CASE("AudioEngine: a stop the backend follows with a reroute or a restart keeps the device")
+		{
+			// WASAPI reroutes a default-device change by stopping the device, rerouting it and starting it again, which posts
+			// Stopped, Rerouted and Started: the device was never lost, so nothing is destroyed or re-created.
+			VirtualFileSystem vfs;
+			const TestEngine engine = CreateTestEngine(vfs, AudioDeviceKind::Null);
+			REQUIRE(engine->GetDeviceState() == AudioDeviceState::Running);
+			const std::string deviceName = engine->GetStats().DeviceName;
+			const Test::ExpectLog rerouted(LogLevel::Info, "rerouted");
+			for (const AudioDeviceNotification notification :
+				{ AudioDeviceNotification::Stopped, AudioDeviceNotification::Rerouted, AudioDeviceNotification::Started })
+			{
+				engine->InjectDeviceNotification(notification);
+			}
+			engine->Update(0.0, 0.0);
+			CHECK(rerouted.GetMatchCount() == 1);
+			CHECK(engine->GetDeviceState() == AudioDeviceState::Running);
+			CHECK(engine->GetStats().DeviceName == deviceName);
+			// No delayed re-creation either.
+			engine->Update(5.0, 0.0);
+			CHECK(engine->GetDeviceState() == AudioDeviceState::Running);
+			CHECK(engine->GetStats().DeviceRecreations == 0);
+
+			// A stop followed by a restart alone (a backend that restarts without rerouting) keeps the device too.
+			engine->InjectDeviceNotification(AudioDeviceNotification::Stopped);
+			engine->InjectDeviceNotification(AudioDeviceNotification::Started);
+			engine->Update(6.0, 0.0);
+			engine->Update(10.0, 0.0);
+			CHECK(engine->GetDeviceState() == AudioDeviceState::Running);
+			CHECK(engine->GetStats().DeviceRecreations == 0);
+			// The device still plays: its callback keeps reading the engine.
+			const uint64_t readBefore = GetDeviceReadFrames(*engine);
+			const bool reading = Test::WaitUntil([&engine, readBefore]()
+			{
+				return GetDeviceReadFrames(*engine) > readBefore;
+			});
+			CHECK(reading);
+		}
+
+		TEST_CASE("AudioEngine: a device that cannot be created at startup leaves the engine device-less with one warning")
 		{
 			VirtualFileSystem vfs;
 			const Test::ExpectLog warnings(LogLevel::Warn, "");
@@ -738,12 +956,13 @@ namespace Engine {
 			CHECK(warnings.GetMatchCount() == 1);
 		}
 
-		TEST_CASE("AudioEngine: one failed re-creation is retried a second later without a warning" * doctest::skip(true))
+		TEST_CASE("AudioEngine: one failed re-creation is retried a second later without a warning")
 		{
 			VirtualFileSystem vfs;
 			const TestEngine engine = CreateTestEngine(vfs, AudioDeviceKind::Null);
 			engine->InjectDeviceCreationFailures(1);
-			const Test::ExpectLog warnings(LogLevel::Warn, "");
+			// Test::ExpectLog requires a match, so the absence of warnings is counted by a listener of its own.
+			const WarningCounter warnings;
 			engine->InjectDeviceNotification(AudioDeviceNotification::Stopped);
 			engine->Update(0.0, 0.0);
 			engine->Update(1.0, 0.0);
@@ -752,11 +971,10 @@ namespace Engine {
 			CHECK(engine->GetDeviceState() == AudioDeviceState::Running);
 			CHECK(engine->GetStats().FailedDeviceCreations == 1);
 			CHECK(engine->GetStats().DeviceRecreations == 1);
-			CHECK(warnings.GetMatchCount() == 0);
+			CHECK(warnings.GetCount() == 0);
 		}
 
-		TEST_CASE("AudioEngine: registering a clip twice shares one registration and an unregistered clip keeps its voices"
-			* doctest::skip(true))
+		TEST_CASE("AudioEngine: registering a clip twice shares one registration and an unregistered clip keeps its voices")
 		{
 			VirtualFileSystem vfs;
 			const TestEngine engine = CreateTestEngine(vfs);
@@ -780,8 +998,7 @@ namespace Engine {
 			CHECK(info.ClipVersion == 1);
 		}
 
-		TEST_CASE("AudioEngine: a hot-reloaded clip's new version plays its own data while the old version's voices keep theirs"
-			* doctest::skip(true))
+		TEST_CASE("AudioEngine: a hot-reloaded clip's new version plays its own data while the old version's voices keep theirs")
 		{
 			// miniaudio never replaces the data of a registered name, so each version is a resource of its own
 			// (MakeAudioResourceName). Version 1 is a tone and version 2 silence: a version-2 voice that played version 1's data
@@ -828,7 +1045,7 @@ namespace Engine {
 			}
 		}
 
-		TEST_CASE("AudioEngine: MeasureAudioLevels reports per-channel RMS and the peak" * doctest::skip(true))
+		TEST_CASE("AudioEngine: MeasureAudioLevels reports per-channel RMS and the peak")
 		{
 			CHECK(MeasureAudioLevels({}).Peak == 0.0f);
 			const std::vector<float> frames = { 0.5f, 0.0f, -0.5f, 0.0f, 0.5f, -1.0f, -0.5f, 0.0f };
@@ -839,6 +1056,244 @@ namespace Engine {
 			// A trailing odd sample is ignored.
 			const std::vector<float> odd = { 1.0f, 1.0f, 1.0f };
 			CHECK(MeasureAudioLevels(odd).RmsLeft == doctest::Approx(1.0f));
+		}
+
+		TEST_CASE("AudioEngine: a Pcm16 clip and the WAV file of the same samples play identically")
+		{
+			// Synthesized sound effects register their PCM directly; an Encoded clip is decoded once at registration. Both
+			// reach the mixer as the same f32 samples.
+			const Test::TestToneSpecification tone = MakeTone(0.5);
+			VirtualFileSystem vfs;
+			std::vector<float> fromWav;
+			std::vector<float> fromPcm;
+			{
+				const TestEngine engine = CreateTestEngine(vfs);
+				PlayTestVoice(*engine, { .Clip = RegisterToneClip(*engine, "0000000000000001", tone) });
+				fromWav = PullFrames(*engine, 12000);
+			}
+			{
+				const TestEngine engine = CreateTestEngine(vfs);
+				const Result<AudioClipHandle> clip = engine->RegisterClip({ .Name = "0000000000000001",
+					.Format = AudioClipFormat::Pcm16,
+					.Bytes = CreateRef<const Buffer>(Test::MakeTonePcm16Bytes(tone)),
+					.SampleRate = tone.SampleRate,
+					.ChannelCount = tone.ChannelCount });
+				REQUIRE_MESSAGE(clip.has_value(), clip.error().ToString());
+				const AudioVoiceHandle voice = PlayTestVoice(*engine, { .Clip = *clip });
+				const uint64_t length = GetInfo(*engine, voice).LengthFrames;
+				CHECK(length == tone.FrameCount);
+				fromPcm = PullFrames(*engine, 12000);
+			}
+			CHECK(MeasureAudioLevels(fromPcm).Peak > 0.1f);
+			CHECK(fromPcm == fromWav);
+		}
+
+		TEST_CASE("AudioEngine: a clip at another sample rate plays resampled to the mixing rate")
+		{
+			// 24 kHz: every clip frame lasts two mixer frames, so after 4800 mixer frames the voice is 2400 frames in.
+			VirtualFileSystem vfs;
+			const TestEngine engine = CreateTestEngine(vfs);
+			const Test::TestToneSpecification tone{ .SampleRate = 24000, .ChannelCount = 2, .FrameCount = 24000, .Frequency = 440.0, .Amplitude = 0.5 };
+			const AudioVoiceHandle voice = PlayTestVoice(*engine, { .Clip = RegisterToneClip(*engine, "0000000000000001", tone) });
+			const AudioLevels levels = PullLevels(*engine, 4800);
+			CHECK(levels.RmsLeft > 0.1f);
+			CHECK(levels.RmsRight > 0.1f);
+			const AudioVoiceInfo info = GetInfo(*engine, voice);
+			CHECK(info.LengthFrames == 24000);
+			CHECK(info.CursorFrames >= 2399);
+			CHECK(info.CursorFrames <= 2401);
+		}
+
+		TEST_CASE("AudioEngine: threaded decoding plays decoded and streamed clips")
+		{
+			// Windowed runs keep miniaudio's job thread (AudioDecoding::Threaded): a stream's first pages load before
+			// PlayVoice returns, later pages on the job thread.
+			VirtualFileSystem vfs;
+			const TestEngine engine = CreateTestEngine(vfs, AudioEngineSpecification{ .Device = AudioDeviceKind::None, .Decoding = AudioDecoding::Threaded });
+			CHECK(engine->GetStats().Decoding == AudioDecoding::Threaded);
+			for (const bool stream : { false, true })
+			{
+				CAPTURE(stream);
+				const AudioClipHandle clip = RegisterToneClip(*engine, stream ? "0000000000000002" : "0000000000000001", MakeTone(), stream);
+				const AudioVoiceHandle voice = PlayTestVoice(*engine, { .Clip = clip });
+				const bool isStreamed = GetInfo(*engine, voice).Streamed;
+				CHECK(isStreamed == stream);
+				const AudioLevels levels = PullLevels(*engine, 4800);
+				CHECK(levels.Peak > 0.1f);
+				StopAllVoices(*engine);
+				REQUIRE(engine->UnregisterClip(clip).has_value());
+			}
+			CHECK(engine->GetStats().RegisteredClips == 0);
+		}
+
+		TEST_CASE("AudioEngine: a clip registered again while a voice of its previous registration plays keeps playing")
+		{
+			// miniaudio keeps the data of a name while a voice uses it and gives a new registration of that name the same
+			// data; the engine keeps that data alive for the new registration after the old voice ends.
+			VirtualFileSystem vfs;
+			const TestEngine engine = CreateTestEngine(vfs);
+			const Test::TestToneSpecification tone = MakeTone();
+			const AudioClipHandle first = RegisterToneClip(*engine, "0000000000000001", tone);
+			const AudioVoiceHandle oldVoice = PlayTestVoice(*engine, { .Clip = first, .Settings = { .Loop = true } });
+			REQUIRE(engine->UnregisterClip(first).has_value());
+			CHECK_FALSE(engine->IsClipRegistered(first));
+
+			const AudioClipHandle second = RegisterToneClip(*engine, "0000000000000001", tone);
+			CHECK(second != first);
+			CHECK(engine->GetStats().RegisteredClips == 1);
+			REQUIRE(engine->StopVoice(oldVoice).has_value());
+			PlayTestVoice(*engine, { .Clip = second, .Settings = { .Loop = true } });
+			const AudioLevels levels = PullLevels(*engine, 4800);
+			CHECK(levels.Peak > 0.1f);
+			CHECK(levels.Peak <= 0.51f);
+		}
+
+		TEST_CASE("AudioEngine: a streamed clip that cannot be decoded fails to play")
+		{
+			// A stream is not decoded at registration; its first voice is where the decoder fails.
+			VirtualFileSystem vfs;
+			const TestEngine engine = CreateTestEngine(vfs);
+			const Result<AudioClipHandle> clip = engine->RegisterClip(
+				{ .Name = "0000000000000001", .Bytes = CreateRef<const Buffer>(Buffer(4096, std::byte{ 0x5a })), .Stream = true });
+			REQUIRE_MESSAGE(clip.has_value(), clip.error().ToString());
+			const Result<AudioVoiceHandle> voice = engine->PlayVoice({ .Clip = *clip });
+			REQUIRE_FALSE(voice.has_value());
+			CHECK((voice.error().GetCode() == ErrorCode::Io || voice.error().GetCode() == ErrorCode::Unsupported));
+			CHECK(engine->GetVoices().empty());
+			CHECK(engine->GetStats().StartedVoices == 0);
+			REQUIRE(engine->UnregisterClip(*clip).has_value());
+		}
+
+		TEST_CASE("AudioEngine: the voices report their settings, owner and start order")
+		{
+			VirtualFileSystem vfs;
+			const TestEngine engine = CreateTestEngine(vfs);
+			const AudioClipHandle clip = RegisterToneClip(*engine, "00000000000000a1", MakeTone());
+			const AudioVoiceSettings settings{ .Group = AudioGroup::Music, .Volume = 0.25f, .Pitch = 1.5f, .Loop = true, .Spatial = true };
+			const AudioVoiceTransform transform{ .Position = glm::vec3(1.0f, 2.0f, 3.0f) };
+			const AudioVoiceHandle first = PlayTestVoice(*engine,
+				{ .Clip = clip, .Settings = settings, .Transform = transform, .Priority = 3, .StartPaused = true, .Owner = 42 });
+			const AudioVoiceHandle second = PlayTestVoice(*engine, { .Clip = clip });
+			const std::vector<AudioVoiceInfo> voices = engine->GetVoices();
+			REQUIRE(voices.size() == 2);
+			CHECK(voices[0].Voice == first);
+			CHECK(voices[1].Voice == second);
+			CHECK(voices[0].StartSequence < voices[1].StartSequence);
+			CHECK(voices[0].Clip == clip);
+			CHECK(voices[0].ClipName == "00000000000000a1");
+			CHECK(voices[0].Settings == settings);
+			CHECK(voices[0].Transform == transform);
+			CHECK(voices[0].Priority == 3);
+			CHECK(voices[0].Owner == 42);
+			CHECK(voices[0].Paused);
+			CHECK_FALSE(voices[0].Streamed);
+			CHECK(voices[0].LengthFrames == 48000);
+
+			// Settings and transforms change while a voice plays.
+			const AudioVoiceSettings changed{ .Group = AudioGroup::Ui, .Volume = 0.5f };
+			REQUIRE(engine->SetVoiceSettings(second, changed).has_value());
+			REQUIRE(engine->SetVoiceTransform(second, { .Position = glm::vec3(0.0f, 0.0f, -4.0f) }).has_value());
+			const AudioVoiceInfo updated = GetInfo(*engine, second);
+			CHECK(updated.Settings == changed);
+			CHECK(updated.Transform.Position == glm::vec3(0.0f, 0.0f, -4.0f));
+			const AudioEngineStats stats = engine->GetStats();
+			CHECK(stats.LiveVoices == 2);
+			CHECK(stats.StartedVoices == 2);
+			CHECK(stats.RegisteredClips == 1);
+		}
+
+		TEST_CASE("AudioEngine: a clip with a non-finite sample is refused at registration and never reaches the output")
+		{
+			VirtualFileSystem vfs;
+			const TestEngine engine = CreateTestEngine(vfs);
+			std::vector<float> samples(4800, 0.5f);
+			samples[100] = std::numeric_limits<float>::quiet_NaN();
+			samples[200] = std::numeric_limits<float>::infinity();
+			const Buffer wav = Test::MakeFloatWav(samples, 48000, 1);
+
+			// A clip that decodes at registration is refused there (the decoder's Validation).
+			const Result<AudioClipHandle> decoded =
+				engine->RegisterClip({ .Name = "0000000000000001", .Format = AudioClipFormat::Encoded, .Bytes = CreateRef<const Buffer>(wav) });
+			CHECK(ErrorCodeOf(decoded) == ErrorCode::Validation);
+
+			// A stream is decoded while it plays (bytes that never went through an import, such as a hand-made pak entry): its
+			// non-finite samples are silenced before the output and the capture.
+			const AudioClipHandle streamed = RegisterEncodedClip(*engine, "0000000000000002", wav, true);
+			engine->StartCapture();
+			PlayTestVoice(*engine, { .Clip = streamed, .Settings = { .Pitch = 1.25f } });
+			const std::vector<float> output = PullFrames(*engine, 4800);
+			const AudioCapture capture = engine->StopCapture();
+			CHECK(AllFinite(output));
+			CHECK(AllFinite(capture.Samples));
+			CHECK(MeasureAudioLevels(output).Peak > 0.1f);
+			const AudioLevels levels = MeasureAudioLevels(output);
+			CHECK(std::isfinite(levels.RmsLeft));
+			CHECK(std::isfinite(levels.RmsRight));
+
+			// Volumes whose product overflows are silenced the same way.
+			StopAllVoices(*engine);
+			const AudioClipHandle tone = RegisterToneClip(*engine, "0000000000000003", MakeTone());
+			REQUIRE(engine->SetMasterVolume(3.0e38f).has_value());
+			REQUIRE(engine->SetGroupVolume(AudioGroup::Sfx, 3.0e38f).has_value());
+			PlayTestVoice(*engine, { .Clip = tone, .Settings = { .Volume = 3.0e38f } });
+			CHECK(AllFinite(PullFrames(*engine, 4800)));
+		}
+
+		TEST_CASE("AudioEngine: a pitch above 16 plays at 16 and is reported as given")
+		{
+			// miniaudio converts a voice's resampling ratio to a 32-bit fixed-point rate, which a huge pitch overflows (it
+			// then kept the old rate: a pitch of 1e30 played at 1).
+			const auto pullAtPitch = [](float pitch)
+			{
+				VirtualFileSystem vfs;
+				const TestEngine engine = CreateTestEngine(vfs);
+				const AudioClipHandle clip = RegisterToneClip(*engine, "0000000000000001", MakeTone(4.0));
+				const AudioVoiceHandle voice = PlayTestVoice(*engine, { .Clip = clip, .Settings = { .Pitch = pitch } });
+				const float reported = GetInfo(*engine, voice).Settings.Pitch;
+				CHECK(reported == pitch);
+				std::vector<float> frames = PullFrames(*engine, 4800);
+				const uint64_t cursor = GetCursor(*engine, voice);
+				return std::pair(std::move(frames), cursor);
+			};
+			const auto [atSixteen, sixteenCursor] = pullAtPitch(16.0f);
+			const auto [huge, hugeCursor] = pullAtPitch(1.0e30f);
+			const auto [large, largeCursor] = pullAtPitch(5000.0f);
+			CHECK(sixteenCursor >= 4800 * 16 - 16);
+			CHECK(sixteenCursor <= 4800 * 16 + 16);
+			CHECK(hugeCursor == sixteenCursor);
+			CHECK(largeCursor == sixteenCursor);
+			CHECK(huge == atSixteen);
+			CHECK(large == atSixteen);
+		}
+
+		TEST_CASE("AudioEngine: the Doppler pitch stays within one third and three")
+		{
+			// The voice approaches (+Z, toward the listener at the origin) or recedes; miniaudio's Doppler pitch
+			// (c - f vListener) / (c - f vSource) divides by zero at vSource = c / f. The engine keeps the factor times either
+			// speed at or below c / 2, so a source at or above that speed plays at exactly twice its pitch.
+			const glm::vec3 still(0.0f);
+			const auto inRange = [](uint64_t advance, double pitch)
+			{
+				const double expected = 4800.0 * pitch;
+				return static_cast<double>(advance) >= expected * 0.98 && static_cast<double>(advance) <= expected * 1.02;
+			};
+			CHECK(inRange(MeasureDopplerAdvance(still, still), 1.0));
+			// 100 m/s toward the listener: c / (c - 100), unbounded.
+			CHECK(inRange(MeasureDopplerAdvance(glm::vec3(0.0f, 0.0f, 100.0f), still), 343.3 / 243.3));
+			// At and above the bound: twice the pitch (miniaudio ran away at 343 m/s and ignored 400 and 6,000).
+			for (const float speed : { 343.0f, 343.3f, 400.0f, 6000.0f })
+			{
+				CAPTURE(speed);
+				CHECK(inRange(MeasureDopplerAdvance(glm::vec3(0.0f, 0.0f, speed), still), 2.0));
+			}
+			// A large factor reaches the bound at a lower speed: 40 m/s with a factor of 10.
+			CHECK(inRange(MeasureDopplerAdvance(glm::vec3(0.0f, 0.0f, 40.0f), still, 10.0f), 2.0));
+			// The listener's speed is bounded too: rushing toward the source gives 3/2, rushing away 1/2 (miniaudio gave
+			// 18.5 and a refused rate of 0).
+			CHECK(inRange(MeasureDopplerAdvance(still, glm::vec3(0.0f, 0.0f, -6000.0f)), 1.5));
+			CHECK(inRange(MeasureDopplerAdvance(still, glm::vec3(0.0f, 0.0f, 6000.0f)), 0.5));
+			// A source receding at any speed stays at or above a third.
+			CHECK(inRange(MeasureDopplerAdvance(glm::vec3(0.0f, 0.0f, -6000.0f), still), 2.0 / 3.0));
 		}
 	}
 
