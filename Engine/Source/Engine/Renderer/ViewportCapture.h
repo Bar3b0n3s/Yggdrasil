@@ -63,10 +63,11 @@ namespace Engine {
 		ViewportCapture& operator=(const ViewportCapture&) = delete;
 
 		// Creates the capture's SceneRenderer over the host's `pipelines` (at 1 x 1; Capture resizes it; no pipeline is
-		// created), its command list and its Readback. `device`, `pipelines`, `cache` and `assets` are documented
+		// created here, and a capture of a debug view extends `pipelines` through SceneRendererPipelines::EnsureDebugView),
+		// its command list and its Readback. `device`, `pipelines`, `cache` and `assets` are documented
 		// back-references that outlive the capture. Errors: those of SceneRenderer::Create (a Gpu error is an
 		// out-of-memory creation, FatalError(OutOfMemory) for a caller at startup, §8.14 item 7).
-		[[nodiscard]] static Result<Scope<ViewportCapture>> CreateForScenes(GraphicsDevice& device, const SceneRendererPipelines& pipelines,
+		[[nodiscard]] static Result<Scope<ViewportCapture>> CreateForScenes(GraphicsDevice& device, SceneRendererPipelines& pipelines,
 			GpuResourceCache& cache, AssetManager& assets);
 
 		// Renders `snapshot` (extracted for request.Width x request.Height) through the capture's SceneRenderer resized to the

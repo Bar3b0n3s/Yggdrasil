@@ -1,6 +1,8 @@
 #include "TestsPCH.h"
 #include "Support/AssetTestFixture.h"
 
+#include "Engine/Asset/BuiltinAssets.h"
+#include "Engine/Asset/FontData.h"
 #include "Engine/Graphics/Image.h"
 
 namespace Engine {
@@ -33,6 +35,17 @@ namespace Engine {
 			CHECK(decoded->Width == 8);
 			CHECK(decoded->Height == 4);
 			CHECK(Test::MakeTestPng(8, 4, 3) == png);
+		}
+
+		TEST_CASE("AssetTestFixture: engine resources load the File built-ins and bake into memory")
+		{
+			Test::AssetTestFixture fixture({ .EngineResources = true });
+			CHECK(fixture.GetVfs().IsMounted("engine"));
+			CHECK(fixture.GetVfs().IsMounted("enginecache"));
+			fixture.OpenProject(false);
+			Result<AssetRef<Asset>> font = fixture.GetManager().Load(BuiltinAssetHandles::DefaultFont);
+			REQUIRE_MESSAGE(font.has_value(), font.error().ToString());
+			CHECK(AssetCast<FontData>(*font) != nullptr);
 		}
 
 		TEST_CASE("AssetTestFixture: opening the project scans an empty Assets folder")

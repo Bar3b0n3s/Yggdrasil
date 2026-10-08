@@ -4,6 +4,7 @@
 #include "Engine/Core/Base.h"
 #include "Engine/Core/Result.h"
 #include "Engine/Reflection/ValidationContext.h"
+#include "Engine/Renderer/RenderPrepare.h"
 #include "Engine/Scene/LoadReport.h"
 
 #include <cstdint>
@@ -22,7 +23,8 @@
 // their fixes (AssetRegistry::PlanFix applied as AssetEditCommand or AssetMoveCommand inside the fix transaction), the
 // asset manager's import diagnostics, ASSET_MISSING and ASSET_TYPE_MISMATCH for asset references in scene components,
 // materials and prefabs, PATH_CASE_MISMATCH, and PREFAB_MISSING_ASSET for an instance whose prefab asset is not registered.
-// Physics, script, input, audio, render and test codes arrive with M11, M13, M12, M8/M9 and M13.
+// M8 adds RENDER_LIGHT_LIMIT_EXCEEDED; physics, script, input, audio, the other render and test codes arrive with M11, M13,
+// M12, M9 and M13.
 
 namespace Engine {
 
@@ -57,6 +59,12 @@ namespace Engine {
 	// Warning, not fixable (M6): a prefab instance root whose PrefabInstanceComponent names a prefab asset that is not
 	// registered (§5.5: the scene still loads, fully expanded).
 	inline constexpr std::string_view PrefabMissingAssetCode = "PREFAB_MISSING_ASSET";
+
+	// (Warning, not fixable, M8, §13.7: "more than 256 visible lights": a scene whose effectively enabled DirectionalLight,
+	// PointLight and SpotLight components number more than MaxVisibleLights is reported under RenderLightLimitExceededCode
+	// of Engine/Renderer/RenderPrepare.h, which the renderer logs too. The validator cannot know every view, so it counts
+	// the scene's lights; the renderer culls per view and logs the code once per renderer when a view really drops lights,
+	// the least important ones (RenderPrepare.h's CullLights). Reported on the scene file, without an entity.)
 
 	// Registry enum "ValidationScope" (project.validate {scope}).
 	enum class ValidationScope : uint8_t

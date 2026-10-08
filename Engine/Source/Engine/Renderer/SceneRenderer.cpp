@@ -9,7 +9,16 @@
 #include "Engine/Core/Assert.h"
 #include "Engine/Core/Log.h"
 #include "Engine/Graphics/GraphicsDevice.h"
+#include "Engine/Renderer/BloomPass.h"
+#include "Engine/Renderer/BrdfLut.h"
+#include "Engine/Renderer/DebugRenderer.h"
+#include "Engine/Renderer/FxaaPass.h"
 #include "Engine/Renderer/GpuResourceCache.h"
+#include "Engine/Renderer/PassBindingCache.h"
+#include "Engine/Renderer/SceneTargetFormats.h"
+#include "Engine/Renderer/SkyboxPass.h"
+#include "Engine/Renderer/TextRenderer.h"
+#include "Engine/Renderer/TonemapPass.h"
 #include "Shared/DrawConstants.h"
 #include "Shared/LightingConstants.h"
 #include "Shared/MaterialConstants.h"
@@ -22,6 +31,7 @@
 #include <cmath>
 #include <cstddef>
 #include <format>
+#include <iterator>
 #include <map>
 #include <optional>
 #include <string>
@@ -29,29 +39,31 @@
 #include <utility>
 
 // The pipelines (SceneRendererPipelines): the Scene program's prepass and forward pipelines, each in two windings, and the
-// Tonemap compute pipeline. A draw whose world matrix mirrors (a negative determinant) turns the mesh's counter-clockwise
-// front faces clockwise on screen, so it uses the "Mirrored" variants (frontCounterClockwise = false, the same back-face
-// culling) and the shaders sign its normals by the determinant; every other draw uses frontCounterClockwise = true (§8.3).
-// NVRHI requires a binding set made for the pipeline's own binding layout objects, so each variant has its own set-0
-// binding set and each material a set-1 binding set per forward variant.
+// passes the set owns. The M8 contract created them all here (Docs/Decisions/0013-m8-decisions.md decision 7): TonemapPass
+// holds the walking skeleton's tonemap; the other passes belong to streams A to D, create pipelines from their stub
+// programs (no bindings) and record nothing until they land. Stream A replaces the mesh pipelines with the PBR variants of
+// SceneRenderer.h and records the M8 pass list. A draw whose world matrix mirrors (a negative determinant) turns the mesh's
+// counter-clockwise front faces clockwise on screen, so it uses the "Mirrored" variants (frontCounterClockwise = false,
+// the same back-face culling) and the shaders sign its normals by the determinant; every other draw uses
+// frontCounterClockwise = true (§8.3). NVRHI requires a binding set made for the pipeline's own binding layout objects, so
+// each variant has its own set-0 binding set and each material a set-1 binding set per forward variant.
 //
-// Per renderer: the targets (SceneDepth, SceneNormals, SceneColor, LdrColor) and their framebuffers and tonemap binding
-// set, rebuilt by Resize; the ViewConstants and LightingConstants buffers, written by every Render; the material cache,
-// one MaterialConstants buffer per material handle, rewritten when the material's constants change (a hot reload, a
-// placeholder replaced by the real asset) and released after MaterialIdleRenders renders without a draw using it. Every
-// buffer is a keepInitialState constant buffer written through the command list, so NVRHI orders its writes after the
-// reads of earlier submissions.
+// Per renderer: the targets (SceneDepth, SceneNormals, SceneColor, LdrColor) and their framebuffers, rebuilt by Resize; the
+// ViewConstants and LightingConstants buffers, written by every Render; the material cache, one MaterialConstants buffer
+// per material handle, rewritten when the material's constants change (a hot reload, a placeholder replaced by the real
+// asset) and released after MaterialIdleRenders renders without a draw using it; one PassBindingCache per shared pass,
+// cleared by Resize and trimmed to what the render used at the end of every Render. Every buffer is a keepInitialState
+// constant buffer written through the command list, so NVRHI orders its writes after the reads of earlier submissions.
 
 namespace Engine {
 
+	// The startup count is the sum of the pipelines each part of the set declares (SceneRenderer.h).
+	static_assert(SceneRendererPipelines::StartupPipelineCount
+		== SceneRendererPipelines::MeshPipelineCount + SkyboxPass::PipelineCount + BloomPass::PipelineCount + TonemapPass::PipelineCount
+			+ FxaaPass::PipelineCount + DebugRenderer::PipelineCount + TextRenderer::PipelineCount + BrdfLut::PipelineCount);
+
 	namespace Utils {
 
-		constexpr nvrhi::Format SceneDepthFormat = nvrhi::Format::D32;
-		constexpr nvrhi::Format SceneNormalsFormat = nvrhi::Format::RG16_FLOAT;
-		constexpr nvrhi::Format SceneColorFormat = nvrhi::Format::RGBA16_FLOAT;
-		constexpr nvrhi::Format LdrColorFormat = nvrhi::Format::RGBA8_UNORM;
-		// The Tonemap program's [numthreads(8, 8, 1)].
-		constexpr uint32_t TonemapGroupSize = 8;
 		// Renders a cached material may go without a draw before its buffer and binding sets are released.
 		constexpr uint64_t MaterialIdleRenders = 64;
 		// The winding variants: index 0 for ordinary draws, 1 for mirrored ones.
@@ -64,7 +76,6 @@ namespace Engine {
 		constexpr uint32_t DrawConstantsSlot = 3;
 
 		constexpr std::string_view SceneProgram = "Scene";
-		constexpr std::string_view TonemapProgram = "Tonemap";
 
 		// The set-0 layout of the prepass: ViewConstants and the draw's push constants.
 		static nvrhi::BindingLayoutDesc MakePrepassViewLayout()
@@ -129,25 +140,10 @@ namespace Engine {
 			};
 		}
 
-		static PipelineLayoutDescription MakeTonemapDescription()
+		// Appends `descriptions` to `all`.
+		static void AppendDescriptions(std::vector<PipelineLayoutDescription>& all, std::vector<PipelineLayoutDescription> descriptions)
 		{
-			nvrhi::BindingLayoutDesc layout;
-			layout.visibility = nvrhi::ShaderType::Compute;
-			layout.registerSpace = 0;
-			layout.registerSpaceIsDescriptorSet = true;
-			layout.bindings = {
-				nvrhi::BindingLayoutItem::ConstantBuffer(0),
-				nvrhi::BindingLayoutItem::Texture_SRV(0),
-				nvrhi::BindingLayoutItem::Texture_UAV(0),
-			};
-			return {
-				.Name = "Tonemap",
-				.Program = std::string(TonemapProgram),
-				.Entries = { "CSMain" },
-				.BindingLayouts = { layout },
-				.StorageImages = { { .Set = 0, .Register = 0, .Format = LdrColorFormat } },
-				.ConstantBuffers = { { .Set = 0, .Register = 0, .ByteSize = sizeof(ViewConstants) } },
-			};
+			all.insert(all.end(), std::make_move_iterator(descriptions.begin()), std::make_move_iterator(descriptions.end()));
 		}
 
 		// MeshVertex (§6.8): the position and the normal, the attributes the Scene program reads, at locations 0 and 1.
@@ -392,17 +388,24 @@ namespace Engine {
 			nvrhi::TextureHandle LdrColor{};
 			nvrhi::FramebufferHandle PrepassFramebuffer{};
 			nvrhi::FramebufferHandle ForwardFramebuffer{};
-			nvrhi::BindingSetHandle TonemapBindings{};
 		};
 
 	}
 
 	struct SceneRendererPipelines::State
 	{
-		GraphicsDevice* Device = nullptr; // documented back-reference
+		GraphicsDevice* Device = nullptr;   // documented back-reference
+		PipelineFactory* Factory = nullptr; // documented back-reference (EnsureDebugView)
 		std::array<GraphicsPipeline, Utils::WindingCount> Prepass{};
 		std::array<GraphicsPipeline, Utils::WindingCount> Forward{};
-		ComputePipeline Tonemap{};
+		// The passes the set owns (SceneRenderer.h).
+		Scope<SkyboxPass> Skybox;
+		Scope<BloomPass> Bloom;
+		Scope<TonemapPass> Tonemap;
+		Scope<FxaaPass> Fxaa;
+		Scope<DebugRenderer> Debug;
+		Scope<TextRenderer> Text;
+		Scope<BrdfLut> DfgLut;
 		uint32_t PipelineCount = 0;
 	};
 
@@ -410,9 +413,13 @@ namespace Engine {
 	{
 		// Documented back-references.
 		GraphicsDevice* Device = nullptr;
-		const SceneRendererPipelines::State* Pipelines = nullptr;
+		SceneRendererPipelines::State* Pipelines = nullptr;
 		GpuResourceCache* Cache = nullptr;
 		AssetManager* Assets = nullptr;
+
+		// The binding sets of the shared passes for this view (PassBindingCache.h; the other passes' caches arrive with
+		// their records, stream A).
+		PassBindingCache TonemapBindings{};
 
 		SceneTargets Targets{};
 		nvrhi::BufferHandle ViewConstantsBuffer{};
@@ -448,16 +455,31 @@ namespace Engine {
 		Scope<SceneRendererPipelines> set = CreateScope<SceneRendererPipelines>(ConstructionKey());
 		State& state = *set->m_State;
 		state.Device = &device;
+		state.Factory = &pipelines;
 		for (size_t winding = 0; winding < Utils::WindingCount; ++winding)
 		{
 			const bool mirrored = winding == Utils::MirroredWinding;
-			ENGINE_TRY_ASSIGN(state.Prepass[winding], pipelines.CreateGraphicsPipeline(Utils::MakeMeshPipelineSpecification(Utils::MakePrepassDescription(mirrored), mirrored, true, Utils::SceneNormalsFormat)));
-			ENGINE_TRY_ASSIGN(state.Forward[winding], pipelines.CreateGraphicsPipeline(Utils::MakeMeshPipelineSpecification(Utils::MakeForwardDescription(mirrored), mirrored, false, Utils::SceneColorFormat)));
+			ENGINE_TRY_ASSIGN(state.Prepass[winding], pipelines.CreateGraphicsPipeline(Utils::MakeMeshPipelineSpecification(Utils::MakePrepassDescription(mirrored), mirrored, true, SceneNormalsFormat)));
+			ENGINE_TRY_ASSIGN(state.Forward[winding], pipelines.CreateGraphicsPipeline(Utils::MakeMeshPipelineSpecification(Utils::MakeForwardDescription(mirrored), mirrored, false, SceneColorFormat)));
 		}
-		ENGINE_TRY_ASSIGN(state.Tonemap, pipelines.CreateComputePipeline({ .Layout = Utils::MakeTonemapDescription(), .Specializations = {} }));
-		state.PipelineCount = static_cast<uint32_t>(GetLayoutDescriptions().size());
+		ENGINE_TRY_ASSIGN(state.Skybox, SkyboxPass::Create(device, pipelines));
+		ENGINE_TRY_ASSIGN(state.Bloom, BloomPass::Create(device, pipelines, device.GetInfo().BloomFormat));
+		ENGINE_TRY_ASSIGN(state.Tonemap, TonemapPass::Create(device, pipelines));
+		ENGINE_TRY_ASSIGN(state.Fxaa, FxaaPass::Create(device, pipelines));
+		ENGINE_TRY_ASSIGN(state.Debug, DebugRenderer::Create(device, pipelines));
+		ENGINE_TRY_ASSIGN(state.Text, TextRenderer::Create(device, pipelines));
+		ENGINE_TRY_ASSIGN(state.DfgLut, BrdfLut::Create(device, pipelines));
+		state.PipelineCount = static_cast<uint32_t>(2 * Utils::WindingCount) + state.Skybox->GetPipelineCount() + state.Bloom->GetPipelineCount()
+			+ state.Tonemap->GetPipelineCount() + state.Fxaa->GetPipelineCount() + state.Debug->GetPipelineCount() + state.Text->GetPipelineCount()
+			+ state.DfgLut->GetPipelineCount();
 		ENGINE_CORE_INFO("Created the scene renderer's {} pipelines", state.PipelineCount);
 		return set;
+	}
+
+	Status SceneRendererPipelines::EnsureDebugView(RenderDebugView /*view*/)
+	{
+		ENGINE_CONTRACT_STUB();
+		return MakeError(ErrorCode::Unsupported, "debug views are not implemented yet (M8 stream A)");
 	}
 
 	uint32_t SceneRendererPipelines::GetPipelineCount() const
@@ -465,15 +487,27 @@ namespace Engine {
 		return m_State->PipelineCount;
 	}
 
-	std::vector<PipelineLayoutDescription> SceneRendererPipelines::GetLayoutDescriptions()
+	std::vector<PipelineLayoutDescription> SceneRendererPipelines::GetLayoutDescriptions(nvrhi::Format bloomFormat)
 	{
-		return {
+		std::vector<PipelineLayoutDescription> descriptions = {
 			Utils::MakePrepassDescription(false),
 			Utils::MakePrepassDescription(true),
 			Utils::MakeForwardDescription(false),
 			Utils::MakeForwardDescription(true),
-			Utils::MakeTonemapDescription(),
 		};
+		Utils::AppendDescriptions(descriptions, SkyboxPass::GetLayoutDescriptions());
+		Utils::AppendDescriptions(descriptions, BloomPass::GetLayoutDescriptions(bloomFormat));
+		Utils::AppendDescriptions(descriptions, TonemapPass::GetLayoutDescriptions());
+		Utils::AppendDescriptions(descriptions, FxaaPass::GetLayoutDescriptions());
+		Utils::AppendDescriptions(descriptions, DebugRenderer::GetLayoutDescriptions());
+		Utils::AppendDescriptions(descriptions, TextRenderer::GetLayoutDescriptions());
+		Utils::AppendDescriptions(descriptions, BrdfLut::GetLayoutDescriptions());
+		return descriptions;
+	}
+
+	void SceneRendererPipelines::CollectStale(const AssetManager& assets, bool releaseUnused)
+	{
+		m_State->Text->CollectStale(assets, releaseUnused);
 	}
 
 	Result<SceneTargets> SceneRenderer::State::CreateTargets(uint32_t width, uint32_t height) const
@@ -483,25 +517,17 @@ namespace Engine {
 		targets.Width = width;
 		targets.Height = height;
 		ENGINE_TRY_ASSIGN(targets.SceneDepth,
-			Utils::CreateTarget(device, width, height, Utils::SceneDepthFormat, Utils::TargetUsage::Attachment, "SceneDepth"));
+			Utils::CreateTarget(device, width, height, SceneDepthFormat, Utils::TargetUsage::Attachment, "SceneDepth"));
 		ENGINE_TRY_ASSIGN(targets.SceneNormals,
-			Utils::CreateTarget(device, width, height, Utils::SceneNormalsFormat, Utils::TargetUsage::Attachment, "SceneNormals"));
+			Utils::CreateTarget(device, width, height, SceneNormalsFormat, Utils::TargetUsage::Attachment, "SceneNormals"));
 		ENGINE_TRY_ASSIGN(targets.SceneColor,
-			Utils::CreateTarget(device, width, height, Utils::SceneColorFormat, Utils::TargetUsage::Attachment, "SceneColor"));
-		ENGINE_TRY_ASSIGN(targets.LdrColor, Utils::CreateTarget(device, width, height, Utils::LdrColorFormat, Utils::TargetUsage::StorageImage, "LdrColor"));
+			Utils::CreateTarget(device, width, height, SceneColorFormat, Utils::TargetUsage::Attachment, "SceneColor"));
+		ENGINE_TRY_ASSIGN(targets.LdrColor, Utils::CreateTarget(device, width, height, LdrColorFormat, Utils::TargetUsage::StorageImage, "LdrColor"));
 
 		ENGINE_TRY_ASSIGN(targets.PrepassFramebuffer,
 			device.CreateFramebuffer(nvrhi::FramebufferDesc().addColorAttachment(targets.SceneNormals).setDepthAttachment(targets.SceneDepth)));
 		ENGINE_TRY_ASSIGN(targets.ForwardFramebuffer,
 			device.CreateFramebuffer(nvrhi::FramebufferDesc().addColorAttachment(targets.SceneColor).setDepthAttachment(targets.SceneDepth)));
-
-		nvrhi::BindingSetDesc tonemap;
-		tonemap.bindings = {
-			nvrhi::BindingSetItem::ConstantBuffer(0, ViewConstantsBuffer),
-			nvrhi::BindingSetItem::Texture_SRV(0, targets.SceneColor),
-			nvrhi::BindingSetItem::Texture_UAV(0, targets.LdrColor, Utils::LdrColorFormat),
-		};
-		ENGINE_TRY_ASSIGN(targets.TonemapBindings, device.CreateBindingSet(tonemap, *Pipelines->Tonemap.BindingLayouts[0]));
 		return targets;
 	}
 
@@ -672,7 +698,7 @@ namespace Engine {
 
 	SceneRenderer::~SceneRenderer() = default;
 
-	Result<Scope<SceneRenderer>> SceneRenderer::Create(GraphicsDevice& device, const SceneRendererPipelines& pipelines, GpuResourceCache& cache,
+	Result<Scope<SceneRenderer>> SceneRenderer::Create(GraphicsDevice& device, SceneRendererPipelines& pipelines, GpuResourceCache& cache,
 		AssetManager& assets, const SceneRendererSpecification& specification)
 	{
 		ENGINE_CORE_ASSERT(specification.Width > 0 && specification.Height > 0, "SceneRenderer::Create needs a size of at least 1x1, got {}x{}",
@@ -718,6 +744,7 @@ namespace Engine {
 		// list still references them (their framebuffers and binding sets are referenced by every list that used them).
 		ENGINE_TRY_ASSIGN(SceneTargets targets, state.CreateTargets(width, height));
 		state.Targets = std::move(targets);
+		state.TonemapBindings.Clear();
 		return {};
 	}
 
@@ -780,16 +807,22 @@ namespace Engine {
 			state.Stats.Lights = lightCount;
 		}
 
-		// Pass 11: tonemap and encode.
-		commandList.beginMarker("Tonemap");
-		nvrhi::ComputeState compute;
-		compute.pipeline = state.Pipelines->Tonemap.Pipeline;
-		compute.bindings = { targets.TonemapBindings };
-		commandList.setComputeState(compute);
-		commandList.dispatch((targets.Width + Utils::TonemapGroupSize - 1) / Utils::TonemapGroupSize,
-			(targets.Height + Utils::TonemapGroupSize - 1) / Utils::TonemapGroupSize);
+		// Pass 11: tonemap and encode (the walking skeleton's Linear tonemap until stream A records the M8 pass list).
+		const TonemapPassInputs tonemap{
+			.ViewConstants = state.ViewConstantsBuffer,
+			.SceneColor = targets.SceneColor,
+			.Bloom = nullptr,
+			.BloomIntensity = 0.0f,
+			.BlueNoise = nullptr,
+			.LdrColor = targets.LdrColor,
+			.Settings = { .Tonemapper = RenderTonemapper::Linear, .Dither = false, .EncodeSrgb = true },
+		};
+		Status tonemapped = state.Pipelines->Tonemap->Record(commandList, state.TonemapBindings, tonemap);
+		if (!tonemapped.has_value() && status.has_value())
+			status = std::move(tonemapped);
 		commandList.endMarker();
-		commandList.endMarker();
+		// The view keeps only the sets this render bound (the recorded command list holds its own references).
+		state.TonemapBindings.ReleaseUnused();
 
 		// Materials no draw used for a while are released (NVRHI keeps them until the submissions using them complete).
 		std::erase_if(state.Materials, [&state](const auto& entry)

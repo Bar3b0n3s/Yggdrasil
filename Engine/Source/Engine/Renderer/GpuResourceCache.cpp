@@ -327,6 +327,8 @@ namespace Engine {
 		MirrorTable<MeshTraits> Meshes;
 		MirrorTable<TextureTraits> Textures;
 		size_t UploadFailures = 0;
+		// What the contract's GetMaterial stub returns until stream A implements the material mirrors (M8).
+		GpuMaterial StubMaterial{};
 
 		[[nodiscard]] UploadContext GetContext() { return { .Device = Device, .Assets = Assets, .UploadFailures = &UploadFailures }; }
 	};
@@ -350,6 +352,18 @@ namespace Engine {
 		return m_State->Textures.Get(m_State->GetContext(), handle);
 	}
 
+	const GpuMaterial& GpuResourceCache::GetMaterial(AssetHandle /*handle*/)
+	{
+		ENGINE_CONTRACT_STUB();
+		return m_State->StubMaterial;
+	}
+
+	const GpuEnvironment* GpuResourceCache::GetEnvironment(AssetHandle /*handle*/)
+	{
+		ENGINE_CONTRACT_STUB();
+		return nullptr;
+	}
+
 	void GpuResourceCache::CollectStale(bool releaseUnused)
 	{
 		// A mirror whose version differs from the asset's current one is stale; besides older versions, that covers the
@@ -370,6 +384,8 @@ namespace Engine {
 			.MeshCount = m_State->Meshes.GetCount(),
 			.TextureCount = m_State->Textures.GetCount(),
 			.UploadFailures = m_State->UploadFailures,
+			.MaterialCount = 0,
+			.EnvironmentCount = 0,
 		};
 	}
 

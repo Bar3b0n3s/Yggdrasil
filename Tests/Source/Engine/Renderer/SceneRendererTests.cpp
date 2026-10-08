@@ -3,19 +3,27 @@
 #include "Engine/Renderer/SceneRenderer.h"
 
 #include "Engine/Asset/BuiltinAssets.h"
+#include "Engine/Asset/EnvironmentData.h"
+#include "Engine/Asset/MaterialData.h"
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Graphics/Image.h"
 #include "Engine/Graphics/Readback.h"
 #include "Engine/Renderer/GpuResourceCache.h"
+#include "Engine/Renderer/RenderPrepare.h"
 #include "Engine/Renderer/RenderSnapshot.h"
 #include "Support/AssetTestFixture.h"
+#include "Support/ExpectLog.h"
 #include "Support/HeadlessGpuFixture.h"
+#include "Support/InMemoryAssetManager.h"
+#include "Support/RenderReference.h"
 
 #include <glm/gtc/matrix_transform.hpp>
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <limits>
 #include <utility>
 
@@ -81,6 +89,37 @@ namespace Engine {
 		int GetRed(const Image& image, uint32_t x, uint32_t y)
 		{
 			return GetChannel(image, x, y, 0);
+		}
+
+		// A constant environment of `radiance` (M8): both cubes filled with it (binary16) and the SH9 of a constant, so every
+		// lookup returns `radiance` (the conventions of Asset/EnvironmentData.h).
+		AssetRef<Asset> MakeConstantEnvironment(double radiance)
+		{
+			const uint16_t half = Test::DoubleToHalf(radiance);
+			const uint16_t one = Test::DoubleToHalf(1.0);
+			const auto fill = [half, one](uint32_t faceSize, uint32_t mipCount)
+			{
+				CubeMapData cube{ .FaceSize = faceSize, .MipCount = mipCount, .Texels = Buffer(ComputeCubeMapByteSize(faceSize, mipCount)) };
+				for (size_t offset = 0; offset < cube.Texels.size(); offset += CubeMapData::BytesPerTexel)
+				{
+					const std::array<uint16_t, 4> texel = { half, half, half, one };
+					std::memcpy(cube.Texels.data() + offset, texel.data(), sizeof(texel));
+				}
+				return cube;
+			};
+			EnvironmentData environment;
+			environment.Skybox = fill(16, 5);
+			environment.Specular = fill(EnvironmentData::SpecularFaceSize, EnvironmentData::SpecularMipCount);
+			// Y00 = 0.282095: c00 * Y00 = radiance.
+			environment.IrradianceSH9[0] = glm::vec3(static_cast<float>(radiance / 0.28209479177387814));
+			return CreateRef<EnvironmentData>(std::move(environment));
+		}
+
+		// Post-processing that maps linear values straight to the OETF: Linear, exposure 1, no bloom, FXAA or dither effects
+		// on the tested pixels.
+		PostProcessSettings MakeLinearPost()
+		{
+			return PostProcessSettings{ .ExposureEV = 0.0f, .Tonemap = RenderTonemapper::Linear, .BloomEnabled = false, .FxaaEnabled = false };
 		}
 
 		// The pipelines, a cache and a renderer of `width` x `height` over the fixture's device and asset manager.
@@ -332,6 +371,204 @@ namespace Engine {
 				CHECK(setup.GetRenderer().GetLastStats().MeshDraws == 1);
 				const Image image = ReadFinalImage(gpu.GetDevice(), setup.GetRenderer());
 				CHECK(GetRed(image, 8, 8) > 0);
+			}
+			gpu.GetDevice().RunGarbageCollection();
+		}
+
+		// M8 (Roadmap M8; Docs/Decisions/0013-m8-decisions.md decisions 7 and 12). Skeletons of the M8 contract: stream A
+		// implements the PBR pass list and removes the skips; the furnace test also needs stream E's references.
+
+		TEST_CASE("Pipelines: count matches the expected total" * doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+		{
+			// §8.5: "The total pipeline count is logged and asserted by a test." 15 mesh pipelines ({Opaque, Mask} prepass and
+			// forward opaque, Blend transparent, each for CullBack, CullFront and CullNone) + Skybox 1 + Bloom 3 + Tonemap 1 +
+			// FXAA 1 + debug lines 2 + text 2 + the DFG LUT 1 = 26 at startup; each non-Lit debug view adds its 9 forward
+			// variants the first time it renders, 45 for the five.
+			static_assert(SceneRendererPipelines::StartupPipelineCount == 26);
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::AssetTestFixture assets;
+			{
+				GpuResourceCache cache(gpu.GetDevice(), assets.GetManager());
+				Result<Scope<SceneRendererPipelines>> pipelines = SceneRendererPipelines::Create(gpu.GetDevice(), gpu.GetPipelines());
+				REQUIRE_MESSAGE(pipelines.has_value(), pipelines.error().ToString());
+				CHECK((*pipelines)->GetPipelineCount() == 26);
+				CHECK(SceneRendererPipelines::GetLayoutDescriptions().size() == 26);
+				Result<Scope<SceneRenderer>> renderer = SceneRenderer::Create(gpu.GetDevice(), **pipelines, cache, assets.GetManager(),
+					{ .Width = 16, .Height = 16 });
+				REQUIRE_MESSAGE(renderer.has_value(), renderer.error().ToString());
+				RenderSnapshot snapshot = MakeCubeSnapshot(16, 16, 1.0f);
+				for (const RenderDebugView view : { RenderDebugView::Albedo, RenderDebugView::Normals, RenderDebugView::Roughness,
+						 RenderDebugView::Metallic, RenderDebugView::Emissive, RenderDebugView::Albedo })
+				{
+					snapshot.DebugView = view;
+					static_cast<void>(RenderToImage(gpu.GetDevice(), **renderer, snapshot));
+				}
+				CHECK((*pipelines)->GetPipelineCount() == 26 + 5 * SceneRendererPipelines::DebugViewPipelineCount);
+				// EnsureDebugView, which Render called, has no effect for Lit or for a view that exists.
+				const Status lit = (*pipelines)->EnsureDebugView(RenderDebugView::Lit);
+				const Status existing = (*pipelines)->EnsureDebugView(RenderDebugView::Albedo);
+				CHECK(lit.has_value());
+				CHECK(existing.has_value());
+				CHECK((*pipelines)->GetPipelineCount() == 26 + 5 * SceneRendererPipelines::DebugViewPipelineCount);
+			}
+			gpu.GetDevice().RunGarbageCollection();
+		}
+
+		TEST_CASE("SceneRenderer: white furnace: white surfaces under a constant environment reflect it unchanged"
+			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+		{
+			// §15.3 "white furnace: BRDF energy ~ 1 with multi-scatter compensation": a white material (dielectric or metal, any
+			// roughness) lit only by a constant environment of radiance 0.5 reflects 0.5, so the sphere's centre encodes as
+			// round(255 * OETF(0.5)) = 188 within the dither and the test's energy tolerance.
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::InMemoryAssetManager assets;
+			constexpr AssetHandle EnvironmentHandle{ 0x9301 };
+			constexpr AssetHandle MaterialHandle{ 0x9302 };
+			assets.Publish(EnvironmentHandle, MakeConstantEnvironment(0.5));
+			{
+				GpuResourceCache cache(gpu.GetDevice(), assets);
+				Result<Scope<SceneRendererPipelines>> pipelines = SceneRendererPipelines::Create(gpu.GetDevice(), gpu.GetPipelines());
+				REQUIRE_MESSAGE(pipelines.has_value(), pipelines.error().ToString());
+				Result<Scope<SceneRenderer>> renderer = SceneRenderer::Create(gpu.GetDevice(), **pipelines, cache, assets, { .Width = 32, .Height = 32 });
+				REQUIRE_MESSAGE(renderer.has_value(), renderer.error().ToString());
+				for (const float metallic : { 0.0f, 1.0f })
+				{
+					for (const float roughness : { 0.1f, 0.5f, 1.0f })
+					{
+						CAPTURE(metallic);
+						CAPTURE(roughness);
+						MaterialData material;
+						material.Metallic = metallic;
+						material.Roughness = roughness;
+						assets.Publish(MaterialHandle, CreateRef<MaterialData>(std::move(material)));
+						RenderSnapshot snapshot = MakeCubeSnapshot(32, 32, 0.0f);
+						snapshot.Lights.clear();
+						snapshot.Meshes.front() = MeshDrawItem{ .Mesh = BuiltinAssetHandles::SphereMesh, .Materials = { MaterialHandle } };
+						snapshot.Environment = RenderEnvironment{ .Environment = EnvironmentHandle, .Intensity = 1.0f, .ShowSkybox = false };
+						snapshot.Post = MakeLinearPost();
+						const Image image = RenderToImage(gpu.GetDevice(), **renderer, snapshot);
+						CHECK(std::abs(GetRed(image, 16, 16) - 188) <= 3);
+					}
+				}
+			}
+			gpu.GetDevice().RunGarbageCollection();
+		}
+
+		TEST_CASE("SceneRenderer: Mask discards below the cutoff and Blend composites over the opaque scene"
+			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::InMemoryAssetManager assets;
+			constexpr AssetHandle MaskHandle{ 0x9311 };
+			constexpr AssetHandle BlendHandle{ 0x9312 };
+			MaterialData mask;
+			mask.AlphaMode = AlphaMode::Mask;
+			mask.AlphaCutoff = 0.5f;
+			mask.BaseColor = glm::vec4(1.0f, 1.0f, 1.0f, 0.25f);
+			assets.Publish(MaskHandle, CreateRef<MaterialData>(std::move(mask)));
+			MaterialData blend;
+			blend.AlphaMode = AlphaMode::Blend;
+			blend.BaseColor = glm::vec4(1.0f, 0.0f, 0.0f, 0.5f);
+			blend.Emissive = glm::vec3(1.0f, 0.0f, 0.0f);
+			blend.Metallic = 0.0f;
+			assets.Publish(BlendHandle, CreateRef<MaterialData>(std::move(blend)));
+			{
+				GpuResourceCache cache(gpu.GetDevice(), assets);
+				Result<Scope<SceneRendererPipelines>> pipelines = SceneRendererPipelines::Create(gpu.GetDevice(), gpu.GetPipelines());
+				REQUIRE_MESSAGE(pipelines.has_value(), pipelines.error().ToString());
+				Result<Scope<SceneRenderer>> renderer = SceneRenderer::Create(gpu.GetDevice(), **pipelines, cache, assets, { .Width = 32, .Height = 32 });
+				REQUIRE_MESSAGE(renderer.has_value(), renderer.error().ToString());
+
+				// A Mask cube whose alpha is below the cutoff leaves the clear colour.
+				RenderSnapshot snapshot = MakeCubeSnapshot(32, 32, 1.0f);
+				snapshot.Camera.ClearColor = glm::vec3(0.0f, 0.0f, 1.0f);
+				snapshot.Meshes.front().Materials = { MaskHandle };
+				snapshot.Post = MakeLinearPost();
+				const Image masked = RenderToImage(gpu.GetDevice(), **renderer, snapshot);
+				CHECK(GetChannel(masked, 16, 16, 2) == 255);
+				CHECK(GetRed(masked, 16, 16) == 0);
+				CHECK((*renderer)->GetLastStats().MeshDraws == 1);
+
+				// A Blend cube half covers the blue clear colour with its red emission.
+				snapshot.Meshes.front().Materials = { BlendHandle };
+				const Image blended = RenderToImage(gpu.GetDevice(), **renderer, snapshot);
+				CHECK(GetRed(blended, 16, 16) > 100);
+				CHECK(GetChannel(blended, 16, 16, 2) > 100);
+				CHECK((*renderer)->GetLastStats().TransparentDraws == 1);
+			}
+			gpu.GetDevice().RunGarbageCollection();
+		}
+
+		TEST_CASE("SceneRenderer: each debug view outputs its quantity" * doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+		{
+			// The cube's +Z face fills the centre: base colour (1, 0, 0), metallic 0.25, roughness 0.75, emissive (0, 0.5, 0).
+			// Colour views are encoded (Albedo red 255, Emissive green round(255 * OETF(0.5)) = 188); data views are stored as
+			// round(255 v) (Metallic 64, Roughness 191, the +Z normal (0, 0, 1) as (128, 128, 255)).
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::InMemoryAssetManager assets;
+			constexpr AssetHandle MaterialHandle{ 0x9321 };
+			MaterialData material;
+			material.BaseColor = glm::vec4(1.0f, 0.0f, 0.0f, 1.0f);
+			material.Metallic = 0.25f;
+			material.Roughness = 0.75f;
+			material.Emissive = glm::vec3(0.0f, 0.5f, 0.0f);
+			assets.Publish(MaterialHandle, CreateRef<MaterialData>(std::move(material)));
+			{
+				GpuResourceCache cache(gpu.GetDevice(), assets);
+				Result<Scope<SceneRendererPipelines>> pipelines = SceneRendererPipelines::Create(gpu.GetDevice(), gpu.GetPipelines());
+				REQUIRE_MESSAGE(pipelines.has_value(), pipelines.error().ToString());
+				Result<Scope<SceneRenderer>> renderer = SceneRenderer::Create(gpu.GetDevice(), **pipelines, cache, assets, { .Width = 32, .Height = 32 });
+				REQUIRE_MESSAGE(renderer.has_value(), renderer.error().ToString());
+				RenderSnapshot snapshot = MakeCubeSnapshot(32, 32, 1.0f);
+				snapshot.Meshes.front().Materials = { MaterialHandle };
+				const auto centre = [&](RenderDebugView view)
+				{
+					snapshot.DebugView = view;
+					const Image image = RenderToImage(gpu.GetDevice(), **renderer, snapshot);
+					return glm::ivec3(GetChannel(image, 16, 16, 0), GetChannel(image, 16, 16, 1), GetChannel(image, 16, 16, 2));
+				};
+				// Each view renders outside its CHECK: the helpers REQUIRE a successful render and readback.
+				const glm::ivec3 albedo = centre(RenderDebugView::Albedo);
+				const glm::ivec3 metallic = centre(RenderDebugView::Metallic);
+				const glm::ivec3 roughness = centre(RenderDebugView::Roughness);
+				const glm::ivec3 normals = centre(RenderDebugView::Normals);
+				const glm::ivec3 emissive = centre(RenderDebugView::Emissive);
+				CHECK(albedo == glm::ivec3(255, 0, 0));
+				CHECK(metallic == glm::ivec3(64, 64, 64));
+				CHECK(roughness == glm::ivec3(191, 191, 191));
+				CHECK(normals == glm::ivec3(128, 128, 255));
+				CHECK(emissive == glm::ivec3(0, 188, 0));
+			}
+			gpu.GetDevice().RunGarbageCollection();
+		}
+
+		TEST_CASE("SceneRenderer: more visible lights than the limit shade the most important and warn once"
+			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::AssetTestFixture assets;
+			{
+				RendererSetup setup(gpu, assets, 16, 16);
+				RenderSnapshot snapshot = MakeCubeSnapshot(16, 16, 1.0f);
+				for (uint32_t index = 0; index < MaxVisibleLights + 4; ++index)
+				{
+					snapshot.Lights.push_back(LightData{ .Type = RenderLightType::Point,
+						.Intensity = 1.0f,
+						.Position = glm::vec3(0.0f, 0.0f, 1.0f),
+						.Range = 5.0f,
+						.Entity = UUID(index + 1) });
+				}
+				Test::ExpectLog warning(LogLevel::Warn, "RENDER_LIGHT_LIMIT_EXCEEDED");
+				static_cast<void>(RenderToImage(gpu.GetDevice(), setup.GetRenderer(), snapshot));
+				static_cast<void>(RenderToImage(gpu.GetDevice(), setup.GetRenderer(), snapshot));
+				CHECK(warning.GetMatchCount() == 1); // once per renderer
+				CHECK(setup.GetRenderer().GetLastStats().Lights == MaxVisibleLights);
+				CHECK(setup.GetRenderer().GetLastStats().DroppedLights == 5);
 			}
 			gpu.GetDevice().RunGarbageCollection();
 		}

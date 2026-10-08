@@ -12,6 +12,7 @@
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Core/VirtualFileSystem.h"
 #include "Engine/Reflection/TypeRegistry.h"
+#include "Engine/Renderer/RenderPrepare.h"
 #include "Engine/Scene/ComponentAccess.h"
 #include "Engine/Scene/ComponentRegistration.h"
 #include "Engine/Scene/Entity.h"
@@ -752,6 +753,43 @@ namespace Engine {
 				CHECK(listed == (code != AssetUploadFailedCode));
 			}
 			CHECK(std::find(codes.begin(), codes.end(), PrefabMissingAssetCode) != codes.end());
+		}
+
+		TEST_CASE("ProjectValidator: more lights than the renderer shades per view is RENDER_LIGHT_LIMIT_EXCEEDED, a warning without a fix"
+			* doctest::skip(true))
+		{
+			// M8 (§13.7; Docs/Decisions/0013-m8-decisions.md decision 7). Skeleton of the M8 contract; stream A adds the check
+			// (and RenderLightLimitExceededCode to GetCodes) and removes the skip.
+			Test::EditorTestFixture fixture("ValidatorLightLimit");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			EditorContext& editor = fixture.GetEditor();
+			Scene& scene = editor.GetScene();
+			{
+				SceneEdit edit(editor, "Lights");
+				for (uint32_t index = 0; index < MaxVisibleLights; ++index)
+					REQUIRE(ComponentAccess::AddComponent(scene.CreateEntity("Light"), "PointLight", nullptr).has_value());
+				REQUIRE(edit.Commit().has_value());
+			}
+			Result<ValidationReport> report = ProjectValidator::Validate(editor, ValidationScope::Scene);
+			REQUIRE(report.has_value());
+			CHECK(FindDiagnostic(*report, RenderLightLimitExceededCode) == nullptr); // exactly the limit is fine
+			{
+				SceneEdit edit(editor, "One more");
+				REQUIRE(ComponentAccess::AddComponent(scene.CreateEntity("Sun"), "DirectionalLight", nullptr).has_value());
+				REQUIRE(edit.Commit().has_value());
+			}
+			report = ProjectValidator::Validate(editor, ValidationScope::Scene);
+			REQUIRE(report.has_value());
+			const ProjectDiagnostic* limit = FindDiagnostic(*report, RenderLightLimitExceededCode);
+			REQUIRE(limit != nullptr);
+			CHECK(limit->Severity == DiagnosticSeverity::Warning);
+			CHECK_FALSE(limit->AutoFixable);
+			CHECK(limit->File == "Assets/Scenes/Main.scene");
+			CHECK(limit->Entity.empty());
+			CHECK(limit->Message.contains("257"));
+			const std::span<const std::string_view> codes = ProjectValidator::GetCodes();
+			CHECK(std::find(codes.begin(), codes.end(), RenderLightLimitExceededCode) != codes.end());
 		}
 	}
 

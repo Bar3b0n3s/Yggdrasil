@@ -78,6 +78,14 @@ namespace Engine {
 		// through GraphicsDevice::CreateShaderSpecialization; a stage ignores the constant IDs it does not declare. Empty:
 		// the shaders as compiled.
 		std::vector<nvrhi::ShaderSpecialization> Specializations{};
+		// M8: binding layouts the pipeline uses instead of creating its own, one entry per set of Layout.BindingLayouts in set
+		// order: a layout made by PipelineFactory::CreateBindingLayouts for an equal desc of that set, or null for a set the
+		// pipeline creates its own layout for. Pipelines created with the same handle for a set accept the same binding sets
+		// for it (NVRHI requires a binding set made for the pipeline's own layout objects), so pipelines whose other sets
+		// differ still share one set per resource (§8.4: "one cached BindingSet per (material, version)": the material's set
+		// 1 serves the forward variants, the Mask prepass and M9's shadow casters alike, whatever their set 0). Empty: the
+		// pipeline creates every layout.
+		std::vector<nvrhi::BindingLayoutHandle> SharedBindingLayouts{};
 		std::vector<nvrhi::VertexAttributeDesc> VertexAttributes{}; // empty: no input layout (vertices from the vertex index)
 		nvrhi::PrimitiveType Primitive = nvrhi::PrimitiveType::TriangleList;
 		// Rasterizer, blend and depth-stencil state. Engine pipelines set rasterState.frontCounterClockwise = true, because
@@ -93,6 +101,8 @@ namespace Engine {
 		PipelineLayoutDescription Layout{}; // Entries: { compute entry }
 		// As GraphicsPipelineSpecification::Specializations, for the compute shader.
 		std::vector<nvrhi::ShaderSpecialization> Specializations{};
+		// As GraphicsPipelineSpecification::SharedBindingLayouts (M8).
+		std::vector<nvrhi::BindingLayoutHandle> SharedBindingLayouts{};
 	};
 
 	// A created pipeline and the binding layouts it was created with (one per set, in set order), which binding sets for it
@@ -126,8 +136,17 @@ namespace Engine {
 		// pipeline through the GraphicsDevice wrappers. Errors: those of ValidatePipelineLayout and ShaderLibrary::Get;
 		// InvalidArgument for a wrong number of entries or an entry whose stage does not fit its position; Gpu when a
 		// creation fails (callers creating at startup treat it as FatalError(OutOfMemory), §8.14 item 7).
+		// With SharedBindingLayouts, the pipeline uses the non-null entries (GraphicsPipeline::BindingLayouts returns them)
+		// and creates the layouts of the sets whose entry is null; InvalidArgument when their number differs from
+		// Layout.BindingLayouts' or a non-null entry's desc (visibility, register space, registerSpaceIsDescriptorSet, binding
+		// offsets and items) differs from its set's in set order.
 		[[nodiscard]] Result<GraphicsPipeline> CreateGraphicsPipeline(const GraphicsPipelineSpecification& specification);
 		[[nodiscard]] Result<ComputePipeline> CreateComputePipeline(const ComputePipelineSpecification& specification);
+
+		// M8: the binding layouts of `layout`, one per set in set order, for SharedBindingLayouts: ValidatePipelineLayout first
+		// (so a layout that does not match its shaders is never shared), then GraphicsDevice::CreateBindingLayout per set.
+		// Errors: those of ValidatePipelineLayout; Gpu when a creation fails.
+		[[nodiscard]] Result<std::vector<nvrhi::BindingLayoutHandle>> CreateBindingLayouts(const PipelineLayoutDescription& layout);
 
 		[[nodiscard]] ShaderLibrary& GetShaderLibrary() { return *m_Shaders; }
 	private:

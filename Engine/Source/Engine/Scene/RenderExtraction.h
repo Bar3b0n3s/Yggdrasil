@@ -96,6 +96,10 @@ namespace Engine {
 	//   - Environment and Post: the first effectively enabled EnvironmentComponent and PostProcessComponent in canonical
 	//     order (both are unique per scene, §5.3), or their defaults when there is none.
 	//   - Alpha: request.Alpha.
+	//   - Texts (M8): every effectively enabled entity with a TextComponent whose Text is not empty, with its fields mapped to
+	//     TextItem (Space, Alignment and the font handle as they are; World = the rendered world matrix, used by World
+	//     texts). DebugDraw stays empty (its producers append: M11's colliders, M13's scripts) and DebugView is Lit (a
+	//     screenshot sets it).
 	// Errors: InvalidArgument for a zero Width or Height or an Alpha that is not finite or outside [0, 1]; NotFound for an
 	// Entity request whose CameraEntity names no entity of the scene, and InvalidArgument when that entity has no
 	// CameraComponent (both name the id); InvalidArgument for an Explicit camera whose Target equals its Position.

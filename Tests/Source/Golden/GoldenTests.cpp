@@ -23,6 +23,7 @@
 #include "Engine/Testing/ImageCompare.h"
 #include "Support/AssetTestFixture.h"
 #include "Support/GoldenImage.h"
+#include "Support/GoldenScene.h"
 #include "Support/HeadlessGpuFixture.h"
 #include "Support/SceneTestFixture.h"
 #include "Support/TempDirectory.h"
@@ -43,8 +44,10 @@
 // drawn by TrianglePass into an OffscreenTarget at 640x360; "LitScene", a simple lit scene (Roadmap M7: a camera, a sun, a
 // cube, a sphere and a ground plane) extracted from a scene and rendered by the scene renderer through the viewport
 // capture (viewport.screenshot's path); and "ImGuiDemo", the editor UI (Dear ImGui's demo window) through
-// editor.screenshot in an Editor process. They run in the golden stage (Release) on this machine's device class;
-// Test.py --update-golden writes candidates for review.
+// editor.screenshot in an Editor process; and the M8 goldens of Roadmap M8 (MaterialGrid, IblOnly, Tonemappers, Bloom,
+// AlphaModes, DebugDraw, Text, GltfFixture), each a scene of Projects/FeatureTest/Assets/Scenes/Golden rendered through
+// Test::RenderGoldenScene (§15.4; Docs/Decisions/0013-m8-decisions.md decision 14). They run in the golden stage (Release) on
+// this machine's device class; Test.py --update-golden writes candidates for review.
 
 namespace Engine {
 
@@ -203,6 +206,107 @@ namespace Engine {
 			const Result<Image> image = ReadPng(screenshots.front());
 			REQUIRE_MESSAGE(image.has_value(), image.error().ToString());
 			ENGINE_CHECK_GOLDEN("ImGuiDemo", *image, deviceClass);
+		}
+
+		// M8 (Roadmap M8, §15.4): skeletons of the M8 contract. Stream E writes the scenes (Projects/FeatureTest/Scaffold/
+		// Golden.jsonl), implements Test::RenderGoldenScene and, after the integration of streams A to D, reviews and commits
+		// the images of this device class and removes the skips (LitScene's image is regenerated then too: the PBR renderer,
+		// AgX, bloom and FXAA change it).
+
+		// Renders golden scene `name` with `options` and compares it with the golden of the same name.
+		static void CheckGoldenScene(std::string_view name, const Test::GoldenSceneOptions& options = {})
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			const Result<Image> image = Test::RenderGoldenScene(gpu, name, options);
+			REQUIRE_MESSAGE(image.has_value(), image.error().ToString());
+			CHECK(image->Width == options.Width);
+			CHECK(image->Height == options.Height);
+			ENGINE_CHECK_GOLDEN(std::string(name), *image, gpu.GetDevice().GetInfo().DeviceClass);
+			gpu.GetDevice().RunGarbageCollection();
+		}
+
+		TEST_CASE("Golden: MaterialGrid" * doctest::skip(true))
+		{
+			// §15.4: a PBR roughness x metallic sphere grid under the Studio HDRI.
+			CheckGoldenScene("MaterialGrid");
+		}
+
+		TEST_CASE("Golden: IblOnly" * doctest::skip(true))
+		{
+			// Image-based lighting alone (no light components): the Sky HDRI's SH9 diffuse and prefiltered specular on a few
+			// shapes, with the skybox visible.
+			CheckGoldenScene("IblOnly");
+		}
+
+		TEST_CASE("Golden: Tonemappers" * doctest::skip(true))
+		{
+			// Each tonemapper (AgX, ACES, PbrNeutral, Linear) on one HDR scene, as a 2 x 2 grid of 320 x 180 renders.
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			std::vector<Image> images;
+			for (const RenderTonemapper tonemapper : { RenderTonemapper::AgX, RenderTonemapper::Aces, RenderTonemapper::PbrNeutral, RenderTonemapper::Linear })
+			{
+				const Test::GoldenSceneOptions options{ .Width = 320, .Height = 180, .EditSnapshot = [tonemapper](RenderSnapshot& snapshot)
+				{
+					snapshot.Post.Tonemap = tonemapper;
+				} };
+				Result<Image> image = Test::RenderGoldenScene(gpu, "Tonemappers", options);
+				REQUIRE_MESSAGE(image.has_value(), image.error().ToString());
+				images.push_back(std::move(*image));
+			}
+			const Result<Image> grid = Test::ComposeImageGrid(images, 2);
+			REQUIRE_MESSAGE(grid.has_value(), grid.error().ToString());
+			ENGINE_CHECK_GOLDEN("Tonemappers", *grid, gpu.GetDevice().GetInfo().DeviceClass);
+			gpu.GetDevice().RunGarbageCollection();
+		}
+
+		TEST_CASE("Golden: Bloom" * doctest::skip(true))
+		{
+			// Bright emissive shapes against a dark background with BloomEnabled and a high BloomIntensity.
+			CheckGoldenScene("Bloom");
+		}
+
+		TEST_CASE("Golden: AlphaModes" * doctest::skip(true))
+		{
+			// Opaque, Mask (a cut-out checker) and Blend (overlapping translucent quads sorted back to front), single- and
+			// double-sided.
+			CheckGoldenScene("AlphaModes");
+		}
+
+		TEST_CASE("Golden: DebugDraw" * doctest::skip(true))
+		{
+			// Every primitive of the DebugDrawList, depth-tested and on top, over a simple scene (scripts emit them from M13; the
+			// golden appends them to the extracted snapshot).
+			CheckGoldenScene("DebugDraw", { .EditSnapshot = [](RenderSnapshot& snapshot)
+			{
+				DebugDrawList& list = snapshot.DebugDraw;
+				list.AddLine(glm::vec3(-2.0f, 0.0f, 0.0f), glm::vec3(2.0f, 0.0f, 0.0f), glm::vec4(1.0f, 0.0f, 0.0f, 1.0f));
+				list.AddRay(glm::vec3(0.0f), glm::vec3(0.0f, 1.0f, 0.0f), 1.5f, glm::vec4(0.0f, 1.0f, 0.0f, 1.0f));
+				list.AddBox(glm::vec3(-1.5f, 0.5f, 0.0f), glm::vec3(0.5f), glm::quat(glm::vec3(0.0f, 0.5f, 0.0f)), glm::vec4(1.0f, 1.0f, 0.0f, 1.0f));
+				list.AddSphere(glm::vec3(1.5f, 0.5f, 0.0f), 0.5f, glm::vec4(0.0f, 1.0f, 1.0f, 1.0f));
+				list.AddCapsule(glm::vec3(0.0f, 0.5f, -1.5f), glm::vec3(0.0f, 1.5f, -1.5f), 0.3f, glm::vec4(1.0f, 0.0f, 1.0f, 1.0f));
+				list.AddArrow(glm::vec3(-1.0f, 2.0f, 0.0f), glm::vec3(1.0f, 2.0f, 0.0f), 0.2f, glm::vec4(1.0f));
+				list.AddFrustum({ glm::vec3(-0.5f, -0.5f, 1.0f), glm::vec3(0.5f, -0.5f, 1.0f), glm::vec3(0.5f, 0.5f, 1.0f), glm::vec3(-0.5f, 0.5f, 1.0f),
+									glm::vec3(-1.0f, -1.0f, 2.5f), glm::vec3(1.0f, -1.0f, 2.5f), glm::vec3(1.0f, 1.0f, 2.5f), glm::vec3(-1.0f, 1.0f, 2.5f) },
+					glm::vec4(0.5f, 0.5f, 1.0f, 1.0f));
+				list.AddLine(glm::vec3(-2.0f, 0.25f, -3.0f), glm::vec3(2.0f, 0.25f, 3.0f), glm::vec4(1.0f, 0.5f, 0.0f, 1.0f), 0.0f, DebugDepthMode::OnTop);
+				list.AddText(glm::vec3(0.0f, 2.5f, 0.0f), "Debug", 32.0f, glm::vec4(1.0f));
+			} });
+		}
+
+		TEST_CASE("Golden: Text" * doctest::skip(true))
+		{
+			// Screen texts at several anchors, pivots, sizes, colours and alignments (multi-line), and world texts, one of them
+			// billboarded, in the Default font.
+			CheckGoldenScene("Text");
+		}
+
+		TEST_CASE("Golden: GltfFixture" * doctest::skip(true))
+		{
+			// An imported glTF fixture (Tests/Data/Generate/MakeGltfFixtures.py's textured, normal-mapped model, copied into
+			// Projects/FeatureTest/Assets/Models by the scaffold) under the Studio HDRI and a sun.
+			CheckGoldenScene("GltfFixture");
 		}
 	}
 

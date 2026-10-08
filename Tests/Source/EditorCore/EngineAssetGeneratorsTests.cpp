@@ -1,0 +1,73 @@
+#include "TestsPCH.h"
+
+#include "EditorCore/EngineAssetGenerators.h"
+
+#include "Engine/Asset/BuiltinAssets.h"
+#include "Engine/Asset/TextureData.h"
+#include "Engine/Core/Mounts/MemoryMount.h"
+#include "Engine/Core/Mounts/NativeDirectoryMount.h"
+#include "Engine/Renderer/BlueNoise.h"
+#include "Support/AssetTestFixture.h"
+#include "Support/TestData.h"
+
+#include <algorithm>
+#include <span>
+
+// The editor's generators of Generated built-ins (Docs/Decisions/0013-m8-decisions.md decision 8).
+
+namespace Engine {
+
+	TEST_SUITE("EditorCore")
+	{
+		TEST_CASE("EngineAssetGenerators: the list is sorted by id, each once, and holds the blue noise")
+		{
+			const std::span<const EngineAssetGenerator> generators = GetEngineAssetGenerators();
+			REQUIRE_FALSE(generators.empty());
+			CHECK(std::ranges::is_sorted(generators, std::less<>(), &EngineAssetGenerator::Id));
+			CHECK(std::ranges::adjacent_find(generators, std::equal_to<>(), &EngineAssetGenerator::Id) == generators.end());
+			const auto noise = std::ranges::find(generators, BlueNoiseGeneratorId, &EngineAssetGenerator::Id);
+			REQUIRE(noise != generators.end());
+			CHECK(noise->Version == BlueNoiseGeneratorVersion);
+			CHECK(noise->Generate == &GenerateBlueNoiseTexture);
+			for (const EngineAssetGenerator& generator : generators)
+			{
+				CHECK(generator.Version >= 1);
+				CHECK(generator.Generate != nullptr);
+			}
+		}
+
+		TEST_CASE("EngineAssetGenerators: the blue-noise built-in bakes through the editor's generator" * doctest::skip(true))
+		{
+			// Stream C adds the EngineAssets.json entry (0x0186, Generated, "BlueNoise") with the generator and removes the skip.
+			Test::AssetTestFixture fixture;
+			VirtualFileSystem vfs;
+			Result<Scope<NativeDirectoryMount>> resources = NativeDirectoryMount::Create(Test::GetRepositoryRoot() / "Resources", MountAccess::ReadOnly);
+			REQUIRE_MESSAGE(resources.has_value(), resources.error().ToString());
+			REQUIRE(vfs.Mount("engine", std::move(*resources)).has_value());
+			REQUIRE(vfs.Mount("enginecache", CreateScope<MemoryMount>()).has_value());
+			Result<BuiltinAssetCatalog> catalog = BuiltinAssetCatalog::Load(vfs);
+			REQUIRE_MESSAGE(catalog.has_value(), catalog.error().ToString());
+			const BuiltinAssetEntry* noise = catalog->Find(BuiltinAssetHandles::BlueNoiseTexture);
+			REQUIRE(noise != nullptr);
+			CHECK(noise->Path == "engine://Textures/BlueNoise");
+			CHECK(noise->Source == BuiltinAssetSource::Generated);
+			CHECK(noise->Generator == BlueNoiseGeneratorId);
+			const EngineBakeSpecification specification{
+				.Vfs = &vfs,
+				.Importers = &fixture.GetImporters(),
+				.Registry = &fixture.GetRegistry(),
+				.Jobs = &fixture.GetJobSystem(),
+				.EnvironmentBaker = nullptr,
+				.Generators = GetEngineAssetGenerators(),
+			};
+			Result<std::vector<Buffer>> artifacts = GetOrBakeEngineAsset(specification, *noise);
+			REQUIRE_MESSAGE(artifacts.has_value(), artifacts.error().ToString());
+			Result<AssetRef<TextureData>> texture = LoadCookedTexture(artifacts->front());
+			REQUIRE_MESSAGE(texture.has_value(), texture.error().ToString());
+			CHECK((*texture)->Format == TextureFormat::R8Unorm);
+			CHECK((*texture)->Width == BlueNoiseSize);
+			CHECK((*texture)->Height == BlueNoiseSize);
+		}
+	}
+
+}

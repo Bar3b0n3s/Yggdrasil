@@ -2,6 +2,7 @@
 #include "EditorCore/Export/Exporter.h"
 
 #include "EditorCore/EditorContext.h"
+#include "EditorCore/EngineAssetGenerators.h"
 #include "EditorCore/Export/Private/ExportPaths.h"
 #include "EditorCore/Project/ProjectManager.h"
 #include "Engine/App/EngineContext.h"
@@ -725,7 +726,7 @@ namespace Engine {
 				.Registry = &Editor->GetTypeRegistry(),
 				.Jobs = &Editor->GetEngine().GetJobSystem(),
 				.EnvironmentBaker = Editor->GetSpecification().EnvironmentBaker,
-				.Generators = {},
+				.Generators = GetEngineAssetGenerators(),
 			};
 			std::vector<std::string> environments;
 			for (const BuiltinAssetEntry& entry : assets.GetBuiltins().GetEntries())

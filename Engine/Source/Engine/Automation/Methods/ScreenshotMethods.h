@@ -33,8 +33,14 @@
 //   - "camera": an EntityRef of a camera entity in the view's target scene, rendered through that camera instead
 //     (InvalidArgument at /camera when the entity has no CameraComponent; NotFound when it names none).
 // The interpolation alpha is PlaySession::GetViewAlpha for the play scene (1 while paused, in lockstep or after a
-// ManualClock frame, otherwise the last frame's Alpha; RenderSnapshot::Alpha), 1 for the edit scene. "debugView" (§8.5, M8) and "annotate" (the overlay pass, M9) stay refused with Unsupported located at
-// their pointer whenever they are present; they are never ignored.
+// ManualClock frame, otherwise the last frame's Alpha; RenderSnapshot::Alpha), 1 for the edit scene.
+//
+// Debug views (M8, §8.5; ADR 0009 decision 33 deferred them to M8, Docs/Decisions/0013-m8-decisions.md decision 12):
+// "debugView" names a RenderDebugView ("Lit", "Albedo", "Normals", "Roughness", "Metallic", "Emissive"; ParseRenderDebugView,
+// ignoring ASCII case), which the handler sets on the extracted snapshot (RenderSnapshot::DebugView); absent or empty is
+// Lit. M9's views ("AO", "ShadowCascades", "Overdraw") are Unsupported located at /debugView, naming M9; any other name is
+// InvalidParams at /debugView listing the valid names. "annotate" (the overlay pass, M9) stays refused with Unsupported
+// located at /annotate whenever it is present; nothing is ever ignored.
 
 namespace Engine {
 
@@ -63,7 +69,7 @@ namespace Engine {
 		uint32_t Width = 640; // 1 to MaxViewportScreenshotDimension; the rendered size before maxDimension
 		uint32_t Height = 360;
 		std::string Camera{};         // an EntityRef of a camera entity of the target scene (M7)
-		std::string DebugView{};      // a debug view name (M8)
+		std::string DebugView{};      // a debug view name (M8; see the file comment); empty: Lit
 		VariantValue Annotate{};      // {labels, colliders, bounds, axes} (M9)
 		uint32_t MaxDimension = 1024; // 1 to MaxViewportScreenshotDimension
 		bool Inline = false;          // also return the PNG as base64 in "data", when it fits MaxInlineScreenshotPngBytes
@@ -89,8 +95,9 @@ namespace Engine {
 
 	namespace Automation {
 
-		// viewport.screenshot on any host. Errors: InvalidParams for the ranges; Unsupported at /debugView and /annotate when
-		// present, at /view for "scene" in the Runtime, and without a device (AutomationMethodContext::CaptureView);
+		// viewport.screenshot on any host. Errors: InvalidParams for the ranges and an unknown debug view (at /debugView);
+		// Unsupported at /debugView for M9's debug views, at /annotate when present, at /view for "scene" in the Runtime, and
+		// without a device (AutomationMethodContext::CaptureView);
 		// InvalidState "not playing" or "no scene open" from the target, and naming SCENE_NO_PRIMARY_CAMERA for a game view
 		// without a primary camera; NotFound and InvalidArgument at /camera; those of ExtractRenderSnapshot; the capture's
 		// errors (a Gpu error is Internal) with the context "while rendering the viewport"; those of DownscaleImage, EncodePng

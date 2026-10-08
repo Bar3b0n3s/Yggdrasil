@@ -44,10 +44,12 @@ class ScreenshotParamsTests(AutomationTestCase):
                 self.assertIn("--renderer none", raised.exception.detail)
 
     def test_viewport_screenshot_refuses_members_of_later_milestones_at_their_pointer(self) -> None:
+        # M9's debug views and annotations (Docs/Decisions/0013-m8-decisions.md decision 12).
         client, _ = self.open_editor_with_scene()
         refused = [
-            ({"view": "scene", "debugView": "Albedo"}, "/debugView"),
-            ({"view": "game", "debugView": "Normals"}, "/debugView"),
+            ({"view": "scene", "debugView": "AO"}, "/debugView"),
+            ({"view": "game", "debugView": "ShadowCascades"}, "/debugView"),
+            ({"view": "scene", "debugView": "Overdraw"}, "/debugView"),
             ({"view": "scene", "annotate": {"labels": "all"}}, "/annotate"),
         ]
         for params, pointer in refused:
@@ -147,6 +149,35 @@ class ScreenshotRenderingTests(AutomationTestCase):
         self.assertNotEqual(cube, empty)
         self.assertEqual(again, cube)
         client.call("scene.save")
+        self.shut_down(client)
+
+    @unittest.skip("contract stub: un-skipped by M8 stream A")
+    def test_viewport_screenshot_renders_debug_views(self) -> None:
+        # M8 (§8.5; ADR 0009 decision 33 deferred debugView here; Docs/Decisions/0013-m8-decisions.md decision 12): each
+        # debug view renders, the names ignore case, an empty name is Lit, and an unknown one is InvalidParams.
+        if not self.require_gpu():
+            return
+        client, _ = self.open_editor_with_scene(renderer="vulkan")
+        client.call("entity.create", {"name": "Cube", "components": {"MeshRenderer": {"Mesh": "engine://Meshes/Cube"}}})
+        size = {"view": "scene", "width": 160, "height": 90}
+
+        def shoot(view: str | None) -> bytes:
+            params = size if view is None else {**size, "debugView": view}
+            return Path(client.call("viewport.screenshot", params)["path"]).read_bytes()
+
+        lit = shoot(None)
+        self.assertEqual(shoot(""), lit)
+        self.assertEqual(shoot("LIT"), lit)
+        images = {}
+        for view in ("Albedo", "Normals", "Roughness", "Metallic", "Emissive"):
+            with self.subTest(view=view):
+                images[view] = shoot(view)
+                self.assertNotEqual(images[view], lit)
+        self.assertNotEqual(images["Albedo"], images["Normals"])
+        with self.assertRaises(engine_client.EngineError) as raised:
+            client.call("viewport.screenshot", {**size, "debugView": "Wireframe"})
+        self.assert_engine_error(raised.exception, engine_client.INVALID_PARAMS)
+        self.assertEqual(raised.exception.issues[0]["pointer"], "/debugView")
         self.shut_down(client)
 
     def test_editor_screenshot_writes_the_editor_ui_as_png(self) -> None:

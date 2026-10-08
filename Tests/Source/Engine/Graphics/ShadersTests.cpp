@@ -10,6 +10,8 @@
 #include "Engine/Graphics/ShaderLibrary.h"
 #include "Engine/ImGui/ImGuiRenderer.h"
 #include "Engine/Renderer/BlitPass.h"
+#include "Engine/Renderer/BloomPass.h"
+#include "Engine/Renderer/EnvironmentBaker.h"
 #include "Engine/Renderer/SceneRenderer.h"
 #include "Engine/Renderer/TrianglePass.h"
 #include "Shared/DrawConstants.h"
@@ -21,12 +23,15 @@
 #include "Support/HeadlessGpuFixture.h"
 #include "Support/MatrixConventionProgram.h"
 #include "Support/SmokeProgram.h"
+#include "Support/TonemapCurvesProgram.h"
 
 #include <nlohmann/json.hpp>
 
 #include <cstddef>
 #include <iterator>
+#include <map>
 #include <set>
+#include <utility>
 #include <vector>
 
 // The static shader checks of Architecture §15.1 (T0, "Tests --test-suite=Static"): every engine pipeline's binding
@@ -62,7 +67,9 @@ namespace Engine {
 
 	}
 
-	// Every engine pipeline's layout description; a new pass adds its own here.
+	// Every engine pipeline's layout description; a new pass adds its own here. The scene renderer's set includes the passes
+	// it owns (SceneRenderer.h) with the R11G11B10 Bloom permutation; the RGBA16 fallback (§8.1) and the environment bake,
+	// which no SceneRendererPipelines creates, are added beside it (M8, Docs/Decisions/0013-m8-decisions.md decision 3).
 	static std::vector<PipelineLayoutDescription> GetEnginePipelineLayouts()
 	{
 		std::vector<PipelineLayoutDescription> layouts = {
@@ -72,9 +79,11 @@ namespace Engine {
 			Test::MakeMatrixConventionLayoutDescription(),
 			Test::MakeSmokeLayoutDescription("0"),
 			Test::MakeSmokeLayoutDescription("1"),
+			Test::MakeTonemapCurvesLayoutDescription(),
 		};
-		std::vector<PipelineLayoutDescription> scene = SceneRendererPipelines::GetLayoutDescriptions();
-		layouts.insert(layouts.end(), std::make_move_iterator(scene.begin()), std::make_move_iterator(scene.end()));
+		for (std::vector<PipelineLayoutDescription> more : { SceneRendererPipelines::GetLayoutDescriptions(nvrhi::Format::R11G11B10_FLOAT),
+				 BloomPass::GetLayoutDescriptions(nvrhi::Format::RGBA16_FLOAT), EnvironmentBaker::GetLayoutDescriptions() })
+			layouts.insert(layouts.end(), std::make_move_iterator(more.begin()), std::make_move_iterator(more.end()));
 		return layouts;
 	}
 
@@ -240,6 +249,40 @@ namespace Engine {
 			REQUIRE_FALSE(mismatch.has_value());
 			CHECK(mismatch.error().GetCode() == ErrorCode::Validation);
 			CHECK(mismatch.error().ToString().contains("View"));
+		}
+
+		TEST_CASE("Shaders: RW texture image formats match the C++ formats" * doctest::skip(true))
+		{
+			// §8.4: every RWTexture declares its storage format with [vk::image_format], and the reflection check compares it
+			// with the format the C++ pass creates (PipelineLayoutDescription::StorageImages). Beyond the per-pipeline check of
+			// "Shaders: LayoutsMatchReflection", this pins down which formats the M8 passes write as storage images, both
+			// Bloom permutations included: LdrColor RGBA8 (tonemap, FXAA), the bloom chain in R11G11B10 or its RGBA16 fallback
+			// (§8.1), the environment bake's RGBA16 cubes and the DFG LUT's RG16 (skeleton of the M8 contract; stream C, with
+			// A's and B's passes, removes the skip).
+			CompiledShaders shaders;
+			std::map<std::string, std::set<nvrhi::Format>> formatsByProgram;
+			for (const PipelineLayoutDescription& description : GetEnginePipelineLayouts())
+			{
+				CAPTURE(description.Name);
+				const Status valid = ValidatePipelineLayout(description, shaders.GetLibrary());
+				CHECK_MESSAGE(valid.has_value(), (valid.has_value() ? std::string() : valid.error().ToString()));
+				for (const StorageImageFormat& image : description.StorageImages)
+					formatsByProgram[description.Program].insert(image.Format);
+			}
+			const std::vector<std::pair<std::string, nvrhi::Format>> expected = {
+				{ "Tonemap", nvrhi::Format::RGBA8_UNORM },
+				{ "Fxaa", nvrhi::Format::RGBA8_UNORM },
+				{ "Bloom", nvrhi::Format::R11G11B10_FLOAT },
+				{ "Bloom", nvrhi::Format::RGBA16_FLOAT },
+				{ "EnvironmentBake", nvrhi::Format::RGBA16_FLOAT },
+				{ "BrdfLut", nvrhi::Format::RG16_FLOAT },
+			};
+			for (const auto& [program, format] : expected)
+			{
+				CAPTURE(program);
+				CAPTURE(std::string(nvrhi::getFormatInfo(format).name));
+				CHECK(formatsByProgram[program].contains(format));
+			}
 		}
 
 		TEST_CASE("Shaders: SharedStructsMatchReflection")

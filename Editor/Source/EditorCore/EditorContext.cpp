@@ -3,6 +3,7 @@
 
 #include "EditorCore/Commands/CompositeCommand.h"
 #include "EditorCore/Commands/SceneEditCommand.h"
+#include "EditorCore/EngineAssetGenerators.h"
 #include "EditorCore/Play/EditorPlayController.h"
 #include "EditorCore/Private/EditorFileError.h"
 #include "EditorCore/Private/PrefabInstances.h"
@@ -342,7 +343,7 @@ namespace Engine {
 			.Loaders = m_Loaders.get(),
 			.EnvironmentBaker = specification.EnvironmentBaker,
 			.ScriptDiagnostics = nullptr,
-			.EngineAssetGenerators = {},
+			.EngineAssetGenerators = GetEngineAssetGenerators(),
 		});
 		engine.SetAssetManager(m_Assets.get());
 

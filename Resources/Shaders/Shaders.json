@@ -15,6 +15,90 @@
 			]
 		},
 		{
+			"Name": "Bloom",
+			"File": "Passes/Bloom.slang",
+			"Entries": [
+				{
+					"Name": "CSDownsampleKaris",
+					"Stage": "compute"
+				},
+				{
+					"Name": "CSDownsample",
+					"Stage": "compute"
+				},
+				{
+					"Name": "CSUpsample",
+					"Stage": "compute"
+				}
+			],
+			"Permutations": {
+				"BLOOM_RGBA16": [
+					"0",
+					"1"
+				]
+			}
+		},
+		{
+			"Name": "BrdfLut",
+			"File": "Passes/BrdfLut.slang",
+			"Entries": [
+				{
+					"Name": "CSMain",
+					"Stage": "compute"
+				}
+			]
+		},
+		{
+			"Name": "DebugLines",
+			"File": "Passes/DebugLines.slang",
+			"Entries": [
+				{
+					"Name": "VSMain",
+					"Stage": "vertex"
+				},
+				{
+					"Name": "PSMain",
+					"Stage": "fragment"
+				}
+			]
+		},
+		{
+			"Name": "EnvironmentBake",
+			"File": "Passes/EnvironmentBake.slang",
+			"Entries": [
+				{
+					"Name": "CSEquirectToCube",
+					"Stage": "compute"
+				},
+				{
+					"Name": "CSDownsampleCube",
+					"Stage": "compute"
+				},
+				{
+					"Name": "CSPrefilterSpecular",
+					"Stage": "compute"
+				},
+				{
+					"Name": "CSProjectIrradiance",
+					"Stage": "compute"
+				},
+				{
+					"Name": "CSReduceIrradiance",
+					"Stage": "compute"
+				}
+			]
+		},
+		{
+			"Name": "Fxaa",
+			"File": "Passes/Fxaa.slang",
+			"Entries": [
+				{
+					"Name": "CSMain",
+					"Stage": "compute"
+				}
+			]
+		},
+		{
 			"Name": "ImGui",
 			"File": "Passes/ImGui.slang",
 			"Entries": [
@@ -57,6 +141,20 @@
 			]
 		},
 		{
+			"Name": "Skybox",
+			"File": "Passes/Skybox.slang",
+			"Entries": [
+				{
+					"Name": "VSMain",
+					"Stage": "vertex"
+				},
+				{
+					"Name": "PSMain",
+					"Stage": "fragment"
+				}
+			]
+		},
+		{
 			"Name": "Smoke",
 			"File": "Passes/Smoke.slang",
 			"Entries": [
@@ -73,8 +171,32 @@
 			}
 		},
 		{
+			"Name": "Text",
+			"File": "Passes/Text.slang",
+			"Entries": [
+				{
+					"Name": "VSMain",
+					"Stage": "vertex"
+				},
+				{
+					"Name": "PSMain",
+					"Stage": "fragment"
+				}
+			]
+		},
+		{
 			"Name": "Tonemap",
 			"File": "Passes/Tonemap.slang",
+			"Entries": [
+				{
+					"Name": "CSMain",
+					"Stage": "compute"
+				}
+			]
+		},
+		{
+			"Name": "TonemapCurves",
+			"File": "Passes/TonemapCurves.slang",
 			"Entries": [
 				{
 					"Name": "CSMain",

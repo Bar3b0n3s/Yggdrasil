@@ -6,6 +6,7 @@
 #include "EditorCore/Automation/RegisterMethods.h"
 #include "EditorCore/EditorCommandLine.h"
 #include "EditorCore/EditorContext.h"
+#include "EditorCore/EngineAssetGenerators.h"
 #include "EditorCore/Play/EditorPlayController.h"
 #include "EditorCore/Project/ProjectManager.h"
 #include "Engine/App/CommandLine.h"
@@ -159,9 +160,10 @@ namespace Engine {
 		}
 
 		// --bake-engine-assets (§7.5, ADR 0010 decision 13): bakes every File and Generated entry of engine://EngineAssets.json
-		// into enginecache:// with the built-in importers. There is no environment baker and there are no generators before
-		// M8, so those entries are skipped with a warning. Returns the exit code: Success when every entry is baked, up to
-		// date or skipped with a warning, Failed when an entry or the run failed (each failure logged at Error).
+		// into enginecache:// with the built-in importers and the editor's generators (EditorCore/EngineAssetGenerators.h).
+		// Without an environment baker (M8 stream B injects it) the environments are skipped with a warning. Returns the exit
+		// code: Success when every entry is baked, up to date or skipped with a warning, Failed when an entry or the run
+		// failed (each failure logged at Error).
 		[[nodiscard]] static int BakeEngineResources(EngineContext& context)
 		{
 			ImporterRegistry importers;
@@ -178,7 +180,7 @@ namespace Engine {
 				.Registry = &context.GetTypeRegistry(),
 				.Jobs = &context.GetJobSystem(),
 				.EnvironmentBaker = nullptr,
-				.Generators = {},
+				.Generators = GetEngineAssetGenerators(),
 			};
 			const Result<EngineBakeReport> report = BakeEngineAssets(specification, *catalog);
 			if (!report.has_value())

@@ -3,14 +3,18 @@
 #include "Engine/AssetPipeline/EngineAssetBaker.h"
 
 #include "Engine/Asset/BuiltinTextures.h"
+#include "Engine/Asset/EnvironmentData.h"
 #include "Engine/Asset/FontData.h"
 #include "Engine/Asset/TextureData.h"
 #include "Engine/AssetPipeline/Importers/TextureImporter.h"
 #include "Engine/Core/Mounts/MemoryMount.h"
 #include "Engine/Core/Mounts/NativeDirectoryMount.h"
 #include "Engine/Core/RingBufferSink.h"
+#include "Engine/Graphics/GraphicsDevice.h"
+#include "Engine/Renderer/EnvironmentBaker.h"
 #include "Support/AssetTestFixture.h"
 #include "Support/ExpectLog.h"
+#include "Support/HeadlessGpuFixture.h"
 #include "Support/TestData.h"
 
 #include <nlohmann/json.hpp>
@@ -491,6 +495,43 @@ namespace Engine {
 			Result<std::vector<Buffer>> artifact = GetOrBakeEngineAsset(specification, GetProceduralBuiltinEntries().front());
 			REQUIRE_FALSE(artifact.has_value());
 			CHECK(artifact.error().GetCode() == ErrorCode::InvalidArgument);
+		}
+
+		// M8 (Docs/Decisions/0013-m8-decisions.md decision 9): the built-in environments bake with a GPU baker. Skeleton of the
+		// M8 contract; stream B removes the skip (and updates "entries without an importer in this build are skipped with a
+		// warning" once EnvironmentImporter is registered: the environments then skip because no baker is given).
+
+		TEST_CASE("EngineAssetBaker: the built-in environments bake with a GPU and are reused without one"
+			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			{
+				Result<Scope<EnvironmentBaker>> baker = EnvironmentBaker::Create(gpu.GetDevice(), gpu.GetPipelines());
+				REQUIRE_MESSAGE(baker.has_value(), baker.error().ToString());
+				BakeEnvironment environment;
+				Result<BuiltinAssetCatalog> catalog = BuiltinAssetCatalog::Load(environment.Vfs);
+				REQUIRE(catalog.has_value());
+				EngineBakeSpecification withGpu = environment.GetSpecification();
+				withGpu.EnvironmentBaker = baker->get();
+				Result<EngineBakeReport> baked = BakeEngineAssets(withGpu, *catalog);
+				REQUIRE_MESSAGE(baked.has_value(), baked.error().ToString());
+				CHECK(std::ranges::find(baked->Baked, BuiltinAssetHandles::StudioEnvironment) != baked->Baked.end());
+				CHECK(std::ranges::find(baked->Baked, BuiltinAssetHandles::SkyEnvironment) != baked->Baked.end());
+
+				// Without a baker (--renderer none) the cooked bakes are current and served (§7.5).
+				Result<EngineBakeReport> reused = BakeEngineAssets(environment.GetSpecification(), *catalog);
+				REQUIRE(reused.has_value());
+				CHECK(std::ranges::find(reused->UpToDate, BuiltinAssetHandles::StudioEnvironment) != reused->UpToDate.end());
+				const BuiltinAssetEntry* sky = catalog->Find(BuiltinAssetHandles::SkyEnvironment);
+				REQUIRE(sky != nullptr);
+				// The sun-heavy Sky turns ClampLuminance on (§8.6 step 1).
+				CHECK(sky->Settings.Get().contains("ClampLuminance"));
+				Result<std::vector<Buffer>> artifacts = GetOrBakeEngineAsset(environment.GetSpecification(), *sky);
+				REQUIRE_MESSAGE(artifacts.has_value(), artifacts.error().ToString());
+				CHECK(LoadCookedEnvironment(artifacts->front()).has_value());
+			}
+			gpu.GetDevice().RunGarbageCollection();
 		}
 	}
 

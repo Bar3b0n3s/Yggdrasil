@@ -443,6 +443,77 @@ namespace Engine {
 			CHECK(notCompute.error().GetCode() == ErrorCode::InvalidArgument);
 		}
 
+		TEST_CASE("PipelineFactory: pipelines created with shared binding layouts accept the same binding set" * doctest::test_suite(Test::GpuSuite))
+		{
+			// M8 (Docs/Decisions/0013-m8-decisions.md decision 7): the variants of a pass share their layout objects, so one
+			// binding set (a material's set 1, §8.4) serves all of them; NVRHI requires the set's layout to be the pipeline's.
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			GraphicsDevice& device = gpu.GetDevice();
+			{
+				const PipelineLayoutDescription layout = TrianglePass::GetLayoutDescription();
+				const Result<std::vector<nvrhi::BindingLayoutHandle>> shared = gpu.GetPipelines().CreateBindingLayouts(layout);
+				REQUIRE_MESSAGE(shared.has_value(), shared.error().ToString());
+				REQUIRE(shared->size() == layout.BindingLayouts.size());
+
+				GraphicsPipelineSpecification back;
+				back.Layout = layout;
+				back.SharedBindingLayouts = *shared;
+				back.RenderState.rasterState.setCullBack().setFrontCounterClockwise(true);
+				back.RenderState.depthStencilState.setDepthTestEnable(false).setDepthWriteEnable(false);
+				back.Framebuffer.addColorFormat(nvrhi::Format::RGBA8_UNORM);
+				GraphicsPipelineSpecification none = back;
+				none.RenderState.rasterState.setCullNone();
+				const Result<GraphicsPipeline> first = gpu.GetPipelines().CreateGraphicsPipeline(back);
+				const Result<GraphicsPipeline> second = gpu.GetPipelines().CreateGraphicsPipeline(none);
+				REQUIRE_MESSAGE(first.has_value(), first.error().ToString());
+				REQUIRE_MESSAGE(second.has_value(), second.error().ToString());
+				REQUIRE(first->BindingLayouts.size() == shared->size());
+				for (size_t index = 0; index < shared->size(); ++index)
+				{
+					CHECK(first->BindingLayouts[index] == (*shared)[index]);
+					CHECK(second->BindingLayouts[index] == (*shared)[index]);
+				}
+
+				// A null entry shares nothing for its set: the pipeline creates that layout itself (pipelines whose other sets
+				// differ share only the sets they agree on).
+				GraphicsPipelineSpecification own = back;
+				own.SharedBindingLayouts.assign(shared->size(), nullptr);
+				const Result<GraphicsPipeline> ownLayouts = gpu.GetPipelines().CreateGraphicsPipeline(own);
+				REQUIRE_MESSAGE(ownLayouts.has_value(), ownLayouts.error().ToString());
+				REQUIRE(ownLayouts->BindingLayouts.size() == shared->size());
+				for (size_t index = 0; index < shared->size(); ++index)
+				{
+					CHECK(ownLayouts->BindingLayouts[index] != nullptr);
+					CHECK(ownLayouts->BindingLayouts[index] != (*shared)[index]);
+				}
+
+				// A shared layout that differs from the description, or the wrong number of them, is refused.
+				GraphicsPipelineSpecification extra = back;
+				extra.SharedBindingLayouts.push_back((*shared)[0]);
+				const Result<GraphicsPipeline> tooMany = gpu.GetPipelines().CreateGraphicsPipeline(extra);
+				REQUIRE_FALSE(tooMany.has_value());
+				CHECK(tooMany.error().GetCode() == ErrorCode::InvalidArgument);
+				nvrhi::BindingLayoutDesc otherDesc = layout.BindingLayouts[0];
+				otherDesc.visibility = nvrhi::ShaderType::Pixel;
+				Result<nvrhi::BindingLayoutHandle> other = device.CreateBindingLayout(otherDesc);
+				REQUIRE(other.has_value());
+				GraphicsPipelineSpecification mismatched = back;
+				mismatched.SharedBindingLayouts = { *other };
+				const Result<GraphicsPipeline> refused = gpu.GetPipelines().CreateGraphicsPipeline(mismatched);
+				REQUIRE_FALSE(refused.has_value());
+				CHECK(refused.error().GetCode() == ErrorCode::InvalidArgument);
+
+				// A layout the reflection disagrees with is never created for sharing.
+				PipelineLayoutDescription broken = layout;
+				broken.BindingLayouts[0].bindings.push_back(nvrhi::BindingLayoutItem::Texture_SRV(7));
+				const Result<std::vector<nvrhi::BindingLayoutHandle>> brokenLayouts = gpu.GetPipelines().CreateBindingLayouts(broken);
+				REQUIRE_FALSE(brokenLayouts.has_value());
+				CHECK(brokenLayouts.error().GetCode() == ErrorCode::Validation);
+			}
+			device.RunGarbageCollection();
+		}
+
 		TEST_CASE("Compute: Smoke scales a buffer exactly" * doctest::test_suite(Test::GpuSuite))
 		{
 			// §15.3 "compute arithmetic": a power-of-two scale is exact in floating point, and saturation clamps to [0, 1].

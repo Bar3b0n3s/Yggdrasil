@@ -11,11 +11,15 @@ import json
 import sys
 import unittest
 from pathlib import Path
+from typing import Any
 
-from harness import AutomationTestCase, automation_config, engine_client, runtime_executable
+from harness import (EXIT_SUCCESS, GPU_EDITOR_ARGUMENTS, AutomationTestCase, automation_config, engine_client,
+                     runtime_executable)
 from tiny_game import TINY_GAME_NAME, TINY_SCENE, WINDOW_HEIGHT, WINDOW_WIDTH, build_tiny_game, export_tiny_game
 
 CRT_FILES = ("vcruntime140.dll", "vcruntime140_1.dll", "msvcp140.dll")
+# The hint of an environment that needs a bake no cache holds (Docs/Decisions/0013-m8-decisions.md decision 9).
+ENVIRONMENT_GPU_HINT = "start the editor with a GPU once to bake this environment"
 
 
 def platform_name() -> str:
@@ -25,6 +29,11 @@ def platform_name() -> str:
     if sys.platform == "darwin":
         return "macOS"
     return "Linux"
+
+
+def environment_warnings(report: dict[str, Any]) -> list[str]:
+    """The warnings of an export report that mention environments."""
+    return [warning for warning in report["warnings"] if "environment" in warning.lower()]
 
 
 class ExportTests(AutomationTestCase):
@@ -127,6 +136,43 @@ class ExportTests(AutomationTestCase):
         report = export_tiny_game(client, "Dist", smoke_test=True)
         self.assertFalse(report["smokeTestRan"])
         self.assertTrue(any("smoke test" in warning for warning in report["warnings"]), report["warnings"])
+
+    @unittest.skip("contract stub: un-skipped by M8 stream B")
+    def test_export_with_renderer_none_uses_prebaked_engine_cache(self) -> None:
+        # §7.5, §7.6 (Roadmap M8; Docs/Decisions/0013-m8-decisions.md decision 9): without a device and without a bake,
+        # Engine.pak leaves the built-in environments out with a warning, and an export whose scenes reference one fails
+        # with the GPU hint; once a GPU run of --bake-engine-assets filled the engine cooked cache, an editor without a
+        # device exports them from it.
+        if not self.require_gpu():
+            return
+        client, root = self.open_tiny_game()  # --renderer none, this test's empty engine cache directory
+        unbaked = export_tiny_game(client)
+        self.assertTrue(environment_warnings(unbaked), unbaked["warnings"])
+        client.call("entity.update", {"entity": "/Camera", "components": {"Camera": {"Clear": "Skybox"}}})
+        client.call("entity.create", {"name": "World", "components": {
+            "Environment": {"Environment": "engine://Environments/Studio"}}})
+        client.call("scene.save")
+        with self.assertRaises(engine_client.EngineError) as raised:
+            export_tiny_game(client)
+        self.assert_engine_error(raised.exception, engine_client.VALIDATION_FAILED)
+        refusal = json.dumps(raised.exception.issues)
+        self.assertIn("engine://Environments/Studio", refusal)
+        self.assertIn(ENVIRONMENT_GPU_HINT, refusal)
+        client.call("session.shutdown")
+        self.assertEqual(self.editors[-1].wait(), EXIT_SUCCESS, self.editors[-1].output())
+
+        bake = ["--headless", "--renderer", "vulkan", *GPU_EDITOR_ARGUMENTS, "--bake-engine-assets"]
+        code, output = self.run_editor(bake, timeout=600.0)
+        self.assertEqual(code, EXIT_SUCCESS, output)
+        self.assertIn("Engine assets:", output)
+        engine_cache = self.user_data / "EngineCache"
+        self.assertTrue(any(path.is_dir() for path in engine_cache.glob("0000000000000201")), output)
+
+        client = self.connect(self.start_editor(project=root))  # --renderer none, the same engine cache directory
+        baked = export_tiny_game(client)
+        self.assertFalse(environment_warnings(baked), baked["warnings"])
+        # Engine.pak holds the two built-in environments (Studio and Sky) besides what the unbaked export had.
+        self.assertEqual(baked["engineEntryCount"], unbaked["engineEntryCount"] + 2)
 
     def test_export_validates_the_project_and_its_params(self) -> None:
         client = self.connect(self.start_editor())

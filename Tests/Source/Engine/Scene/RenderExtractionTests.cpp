@@ -11,6 +11,7 @@
 #include "Engine/Scene/Components/PostProcessComponent.h"
 #include "Engine/Scene/Components/RuntimeComponents.h"
 #include "Engine/Scene/Components/SpotLightComponent.h"
+#include "Engine/Scene/Components/TextComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/Scene.h"
@@ -413,6 +414,84 @@ namespace Engine {
 			// Alpha 0 is the previous pose and alpha 1 the current one.
 			CHECK(Test::ApproxEqual(ComputeRenderedWorldMatrix(growing, 0.0f), glm::mat4(1.0f), 1e-6f));
 			CHECK(ComputeRenderedWorldMatrix(growing, 1.0f) == growing.GetComponent<WorldTransformComponent>().Matrix);
+		}
+
+		// M8 (Docs/Decisions/0013-m8-decisions.md decision 11): texts. Skeletons of the M8 contract; stream D extracts
+		// TextComponent and removes the skips.
+
+		TEST_CASE("RenderExtraction: texts of enabled entities are extracted in canonical order with every field" * doctest::skip(true))
+		{
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			Entity title = scene.CreateEntity("Title");
+			title.AddComponent<TextComponent>(TextComponent{ .Text = "Score: 10",
+				.Font = TypedAssetHandle<AssetType::Font>(AssetHandle(0x5555)),
+				.Size = 48.0f,
+				.Color = glm::vec4(1.0f, 0.5f, 0.25f, 0.75f),
+				.Space = TextSpace::Screen,
+				.Anchor = glm::vec2(0.5f, 0.0f),
+				.Pivot = glm::vec2(0.5f, 0.0f),
+				.Offset = glm::vec2(0.0f, 24.0f),
+				.Alignment = TextAlignment::Left,
+				.Billboard = false });
+			Entity empty = scene.CreateEntity("Empty");
+			empty.AddComponent<TextComponent>(); // no text: not extracted
+			Entity hidden = scene.CreateEntity("Hidden");
+			hidden.AddComponent<TextComponent>().Text = "Hidden";
+			hidden.SetActive(false);
+			Entity label = scene.CreateEntity("Label");
+			label.Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Translation = glm::vec3(1.0f, 2.0f, 3.0f);
+			});
+			TextComponent& labelText = label.AddComponent<TextComponent>();
+			labelText.Text = "World";
+			labelText.Space = TextSpace::World;
+			labelText.Alignment = TextAlignment::Right;
+			labelText.Billboard = true;
+			TransformSystem::Update(scene);
+
+			const Result<RenderSnapshot> snapshot = ExtractRenderSnapshot(scene, { .Width = 64, .Height = 64 });
+			REQUIRE_MESSAGE(snapshot.has_value(), snapshot.error().ToString());
+			REQUIRE(snapshot->Texts.size() == 2);
+			const TextItem& screen = snapshot->Texts[0];
+			CHECK(screen.Entity == title.GetUUID());
+			CHECK(screen.Text == "Score: 10");
+			CHECK(screen.Font == AssetHandle(0x5555));
+			CHECK(screen.Size == 48.0f);
+			CHECK(screen.Color == glm::vec4(1.0f, 0.5f, 0.25f, 0.75f));
+			CHECK(screen.Space == RenderTextSpace::Screen);
+			CHECK(screen.Anchor == glm::vec2(0.5f, 0.0f));
+			CHECK(screen.Pivot == glm::vec2(0.5f, 0.0f));
+			CHECK(screen.Offset == glm::vec2(0.0f, 24.0f));
+			CHECK(screen.Alignment == RenderTextAlignment::Left);
+			const TextItem& world = snapshot->Texts[1];
+			CHECK(world.Entity == label.GetUUID());
+			CHECK(world.Space == RenderTextSpace::World);
+			CHECK(world.Alignment == RenderTextAlignment::Right);
+			CHECK(world.Billboard);
+			CHECK(Test::ApproxEqual(glm::vec3(world.World[3]), glm::vec3(1.0f, 2.0f, 3.0f), 1e-6f));
+			// Extraction adds no debug primitives and leaves the debug view Lit.
+			CHECK(snapshot->DebugDraw.IsEmpty());
+			CHECK(snapshot->DebugView == RenderDebugView::Lit);
+		}
+
+		TEST_CASE("RenderExtraction: world texts in a play scene render at the interpolated pose" * doctest::skip(true))
+		{
+			Test::SceneTestFixture fixture(1, true);
+			Scene& scene = fixture.GetScene();
+			Entity label = scene.CreateEntity("Label");
+			TextComponent& moving = label.AddComponent<TextComponent>();
+			moving.Text = "Moving";
+			moving.Space = TextSpace::World;
+			TransformSystem::Update(scene);
+			SnapshotPreviousPose(label);
+			SetTranslation(label, glm::vec3(4.0f, 0.0f, 0.0f));
+			TransformSystem::Update(scene);
+			const Result<RenderSnapshot> snapshot = ExtractRenderSnapshot(scene, { .Width = 8, .Height = 8, .Alpha = 0.25f });
+			REQUIRE_MESSAGE(snapshot.has_value(), snapshot.error().ToString());
+			REQUIRE(snapshot->Texts.size() == 1);
+			CHECK(Test::ApproxEqual(glm::vec3(snapshot->Texts[0].World[3]), glm::vec3(1.0f, 0.0f, 0.0f), 1e-6f));
 		}
 	}
 

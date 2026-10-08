@@ -392,9 +392,11 @@ namespace Engine {
 			CaptureLog log;
 			ScreenshotSetup setup("ViewportScreenshotLater", log);
 
+			// M9's debug views (AO, ShadowCascades, Overdraw) and annotations (Docs/Decisions/0013-m8-decisions.md decision 12).
 			const std::vector<std::pair<Json, std::string>> refused = {
-				{ Json{ { "view", "scene" }, { "debugView", "Albedo" } }, "/debugView" },
-				{ Json{ { "view", "game" }, { "debugView", "" } }, "/debugView" },
+				{ Json{ { "view", "scene" }, { "debugView", "AO" } }, "/debugView" },
+				{ Json{ { "view", "game" }, { "debugView", "ShadowCascades" } }, "/debugView" },
+				{ Json{ { "view", "scene" }, { "debugView", "Overdraw" } }, "/debugView" },
 				{ Json{ { "view", "scene" }, { "annotate", Json{ { "labels", "all" } } } }, "/annotate" },
 			};
 			for (const auto& [params, pointer] : refused)
@@ -406,6 +408,46 @@ namespace Engine {
 				CHECK(FirstIssuePointer(shot.error()) == pointer);
 			}
 			// Refused before anything renders.
+			CHECK(log.ViewCalls == 0);
+		}
+
+		TEST_CASE("ScreenshotMethods: debugView renders the named debug view, ignoring case, and empty is Lit" * doctest::skip(true))
+		{
+			// M8 (§8.5; ADR 0009 decision 33 deferred it here; Docs/Decisions/0013-m8-decisions.md decision 12). Skeleton of the
+			// M8 contract; stream A wires the param and removes the skip.
+			CaptureLog log;
+			ScreenshotSetup setup("ViewportScreenshotDebugView", log);
+			const std::vector<std::pair<std::string, RenderDebugView>> views = {
+				{ "Lit", RenderDebugView::Lit },
+				{ "albedo", RenderDebugView::Albedo },
+				{ "NORMALS", RenderDebugView::Normals },
+				{ "Roughness", RenderDebugView::Roughness },
+				{ "Metallic", RenderDebugView::Metallic },
+				{ "Emissive", RenderDebugView::Emissive },
+				{ "", RenderDebugView::Lit },
+			};
+			for (const auto& [name, view] : views)
+			{
+				INFO(name);
+				const Result<Json> shot = setup.Call("viewport.screenshot", Json{ { "view", "scene" }, { "debugView", name } });
+				REQUIRE_MESSAGE(shot.has_value(), shot.error().ToString());
+				REQUIRE(log.LastSnapshot.has_value());
+				CHECK(log.LastSnapshot->DebugView == view);
+			}
+			// Without the member the view is Lit.
+			REQUIRE(setup.Call("viewport.screenshot", Json{ { "view", "scene" } }).has_value());
+			CHECK(log.LastSnapshot->DebugView == RenderDebugView::Lit);
+		}
+
+		TEST_CASE("ScreenshotMethods: an unknown debug view is InvalidArgument at /debugView naming the valid views" * doctest::skip(true))
+		{
+			CaptureLog log;
+			ScreenshotSetup setup("ViewportScreenshotBadDebugView", log);
+			const Result<Json> shot = setup.Call("viewport.screenshot", Json{ { "view", "scene" }, { "debugView", "Wireframe" } });
+			REQUIRE_FALSE(shot.has_value());
+			CHECK(shot.error().GetCode() == ErrorCode::InvalidArgument);
+			CHECK(FirstIssuePointer(shot.error()) == "/debugView");
+			CHECK(shot.error().ToString().contains("Albedo"));
 			CHECK(log.ViewCalls == 0);
 		}
 
