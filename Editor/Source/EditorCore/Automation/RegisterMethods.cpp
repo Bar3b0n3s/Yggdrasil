@@ -11,10 +11,8 @@
 #include "EditorCore/Automation/ObserveMethods.h"
 #include "EditorCore/Automation/PrefabMethods.h"
 #include "EditorCore/Automation/ProjectMethods.h"
-#include "EditorCore/Automation/RpcMethods.h"
 #include "EditorCore/Automation/SceneMethods.h"
 #include "EditorCore/Automation/ScreenshotMethods.h"
-#include "EditorCore/Automation/SessionMethods.h"
 #include "EditorCore/Project/ProjectValidator.h"
 #include "Engine/AssetPipeline/ImporterRegistry.h"
 #include "Engine/Automation/Methods/RegisterSharedMethods.h"
@@ -25,19 +23,19 @@ namespace Engine {
 	{
 		// Shared types first: the domains' structs use them as field types (TypeRegistry asserts registration before use).
 		RegisterAutomationCommonTypes(registry);
-		// The domains the Runtime shares (Engine/Automation/Methods; M7): input, play, viewport.screenshot.
+		// The domains the Runtime shares (Engine/Automation/Methods; M7): input, play, viewport.screenshot, and the session,
+		// rpc, scene, entity and observe reads moved from EditorCore, whose types (SceneSummary, EntityDetails) the editor's
+		// own scene and entity results use.
 		RegisterSharedMethodTypes(registry);
 		// The importers' settings structs (§5.4): asset.getImportSettings and asset.setImportSettings validate against them.
 		RegisterAssetPipelineTypes(registry);
 		RegisterProjectValidatorTypes(registry);
-		RegisterSessionMethodTypes(registry);
-		RegisterRpcMethodTypes(registry);
 		RegisterProjectMethodTypes(registry);
-		RegisterSceneMethodTypes(registry);
-		RegisterEntityMethodTypes(registry);
+		RegisterEditorSceneMethodTypes(registry);
+		RegisterEditorEntityMethodTypes(registry);
 		RegisterComponentMethodTypes(registry);
 		RegisterEditMethodTypes(registry);
-		RegisterObserveMethodTypes(registry);
+		RegisterEditorObserveMethodTypes(registry);
 		RegisterScreenshotMethodTypes(registry);
 		RegisterAssetMethodTypes(registry);
 		RegisterPrefabMethodTypes(registry);
@@ -47,14 +45,12 @@ namespace Engine {
 
 	void RegisterEditorMethods(MethodRegistry& methods, const EditorMethodOptions& options)
 	{
-		RegisterSessionMethods(methods);
-		RegisterRpcMethods(methods);
 		RegisterProjectMethods(methods);
-		RegisterSceneMethods(methods);
-		RegisterEntityMethods(methods);
+		RegisterEditorSceneMethods(methods);
+		RegisterEditorEntityMethods(methods);
 		RegisterComponentMethods(methods);
 		RegisterEditMethods(methods);
-		RegisterObserveMethods(methods);
+		RegisterEditorObserveMethods(methods);
 		RegisterScreenshotMethods(methods);
 		RegisterAssetMethods(methods);
 		RegisterPrefabMethods(methods);

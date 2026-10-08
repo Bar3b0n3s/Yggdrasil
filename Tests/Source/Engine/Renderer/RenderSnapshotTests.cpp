@@ -4,14 +4,13 @@
 
 #include <glm/glm.hpp>
 
-// The render snapshot's reverse-Z projection (Architecture §8.3). Skipped skeleton of the M7 contract
-// (Docs/Decisions/0012-m7-decisions.md decision 6): stream B implements the projection and removes the skip.
+// The render snapshot's reverse-Z projection (Architecture §8.3; Docs/Decisions/0012-m7-decisions.md decision 6).
 
 namespace Engine {
 
 	TEST_SUITE("Renderer")
 	{
-		TEST_CASE("RenderSnapshot: the reverse-Z projection maps the near plane to depth 1 for both projection kinds" * doctest::skip(true))
+		TEST_CASE("RenderSnapshot: the reverse-Z projection maps the near plane to depth 1 for both projection kinds")
 		{
 			// §8.3: perspective m[0][0] = f / aspect, m[1][1] = f, m[2][3] = -1, m[3][2] = near, infinite far plane.
 			const glm::mat4 perspective = ComputeReverseZProjection(RenderProjection::Perspective, 90.0f, 10.0f, 0.1f, 1000.0f, 200, 100);
@@ -29,6 +28,28 @@ namespace Engine {
 			CHECK((orthographic * glm::vec4(0.0f, 0.0f, -1.0f, 1.0f)).z == doctest::Approx(1.0f));
 			CHECK((orthographic * glm::vec4(0.0f, 0.0f, -11.0f, 1.0f)).z == doctest::Approx(0.0f));
 			CHECK((orthographic * glm::vec4(0.0f, 5.0f, -2.0f, 1.0f)).y == doctest::Approx(1.0f));
+		}
+
+		TEST_CASE("RenderSnapshot: perspective depth falls towards 0 with distance and the aspect ratio scales x only")
+		{
+			// An infinite far plane: depth is near / distance, positive for every point in front of the camera.
+			const glm::mat4 perspective = ComputeReverseZProjection(RenderProjection::Perspective, 60.0f, 10.0f, 0.5f, 100.0f, 320, 180);
+			const glm::vec4 far = perspective * glm::vec4(0.0f, 0.0f, -1.0e6f, 1.0f);
+			CHECK(far.z / far.w == doctest::Approx(0.5e-6f));
+			CHECK(far.z / far.w > 0.0f);
+			const glm::vec4 middle = perspective * glm::vec4(0.0f, 0.0f, -2.0f, 1.0f);
+			CHECK(middle.z / middle.w == doctest::Approx(0.25f));
+			// tan(30 degrees) = 1 / sqrt(3): f = sqrt(3), divided by the aspect ratio 16:9 on x.
+			CHECK(perspective[1][1] == doctest::Approx(1.7320508f));
+			CHECK(perspective[0][0] == doctest::Approx(1.7320508f * 9.0f / 16.0f));
+			// Clip-space +Y is up: a point above the axis has a positive clip y (NVRHI's viewport flips it, §8.3).
+			CHECK((perspective * glm::vec4(0.0f, 1.0f, -2.0f, 1.0f)).y > 0.0f);
+
+			// Orthographic: x is scaled by the half width OrthographicSize * aspect.
+			const glm::mat4 orthographic = ComputeReverseZProjection(RenderProjection::Orthographic, 60.0f, 4.0f, 0.1f, 50.0f, 200, 100);
+			CHECK((orthographic * glm::vec4(8.0f, 0.0f, -1.0f, 1.0f)).x == doctest::Approx(1.0f));
+			CHECK((orthographic * glm::vec4(0.0f, 4.0f, -1.0f, 1.0f)).y == doctest::Approx(1.0f));
+			CHECK(orthographic[3][3] == 1.0f);
 		}
 	}
 

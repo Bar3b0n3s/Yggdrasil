@@ -145,6 +145,7 @@ namespace Engine {
 	{
 	public:
 		using ExternalChangeListener = UniqueFunction<void(const AssetExternalChange& change)>;
+		using ReloadListener = UniqueFunction<void(AssetHandle source)>;
 
 		explicit EditorAssetManager(const EditorAssetManagerSpecification& specification);
 		// Closes the project (waiting for its jobs).
@@ -276,6 +277,14 @@ namespace Engine {
 		// Receives every published external change, whether a poll or Refresh detected it, once (race rule 3 is the
 		// listener's: EditorContext). Empty: none.
 		void SetExternalChangeListener(ExternalChangeListener listener);
+
+		// Receives every published reload: a reimport of a main asset already published that changed what it cooks (when the
+		// AssetReloaded event is appended), whatever started it: an external change (a poll or Refresh), the editor's own
+		// write of the source or its .meta (EditorContext::WriteProjectFile: asset.setProperties, asset.import, script.write),
+		// Reimport. Not during a dry run, which publishes nothing that stays, and not while reloads are deferred (they are
+		// published when the deferral ends). EditorContext marks a running play session modified with it (§7.5 race rule 4).
+		// Empty: none.
+		void SetReloadListener(ReloadListener listener);
 
 		// The hot reloader of the open project, or nullptr (no project, read-only, or hot reload off). For tests and
 		// diagnostics.

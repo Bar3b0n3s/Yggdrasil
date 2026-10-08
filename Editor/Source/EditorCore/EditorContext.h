@@ -12,6 +12,7 @@
 #include "Engine/Core/Result.h"
 #include "Engine/Core/UUID.h"
 #include "Engine/Core/UUIDGenerator.h"
+#include "Engine/Core/UniqueFunction.h"
 #include "Engine/Core/VfsPath.h"
 #include "Engine/Scene/RenderExtraction.h"
 #include "Engine/Scene/Scene.h"
@@ -352,6 +353,11 @@ namespace Engine {
 		bool m_CollectProvenanceErrors = false;
 		std::optional<Error> m_ProvenanceError;
 		ExplicitRenderCamera m_SceneViewCamera{};
+		// The undo of each play-scene change a SceneEdit committed inside the open dry run or transaction (M7, §13.4: play-scene
+		// edits are transient and never recorded, yet a dry run leaves no trace and a failed edit.batch rolls back every op):
+		// run newest first when the dry run ends or the transaction rolls back, dropped when the outermost transaction commits
+		// outside a dry run. SceneEdit::Commit appends them.
+		std::vector<UniqueFunction<void()>> m_TransientPlayUndos;
 		// Last, so it is destroyed first: a play session refers to the asset manager and the type registry (M7).
 		Scope<EditorPlayController> m_Play;
 	private:
@@ -359,7 +365,7 @@ namespace Engine {
 		friend class EditorDryRunScope;
 		friend class EditorTransaction;
 		friend class ProjectSettingsCommand; // the one caller of ApplyProjectSettings
-		friend class SceneEdit;              // sets m_PendingRevisionBefore around its Execute
+		friend class SceneEdit;              // sets m_PendingRevisionBefore around its Execute and appends m_TransientPlayUndos
 	};
 
 	// Groups every command executed while it is open into one CompositeCommand, recorded as one undo step (§12.3:

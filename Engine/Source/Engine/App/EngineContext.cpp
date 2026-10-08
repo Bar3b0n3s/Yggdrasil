@@ -2,6 +2,8 @@
 #include "Engine/App/EngineContext.h"
 
 #include "Engine/Asset/AssetTypeRegistration.h"
+#include "Engine/Asset/PakMount.h"
+#include "Engine/Asset/PakReader.h"
 #include "Engine/Core/Assert.h"
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Log.h"
@@ -59,7 +61,7 @@ namespace Engine {
 			ENGINE_TRY(WithContext(context->m_Vfs.Mount("user", std::move(mount)), step));
 		}
 
-		if (!specification.EngineResourcesDirectory.empty() || !specification.EngineCacheDirectory.empty())
+		if (!specification.EnginePak.empty() || !specification.EngineResourcesDirectory.empty() || !specification.EngineCacheDirectory.empty())
 		{
 			ENGINE_TRY(WithContext(context->MountEngineResources(specification),
 				Utils::DescribeEngineContextStep(EngineContextStep::EngineResources)));
@@ -82,7 +84,15 @@ namespace Engine {
 	Status EngineContext::MountEngineResources(const EngineContextSpecification& specification)
 	{
 		if (!specification.EnginePak.empty())
+		{
+			// engine:// is either the exported game's pak or the development resources, never both.
+			if (!specification.EngineResourcesDirectory.empty())
+			{
+				return MakeError(ErrorCode::InvalidArgument, "an Engine.pak ('{}') and an engine resources directory ('{}') were both given",
+					FileSystem::PathToUtf8(specification.EnginePak), FileSystem::PathToUtf8(specification.EngineResourcesDirectory));
+			}
 			ENGINE_TRY(MountEnginePak(specification.EnginePak));
+		}
 
 		if (!specification.EngineResourcesDirectory.empty())
 		{
@@ -103,25 +113,34 @@ namespace Engine {
 		return {};
 	}
 
-	Status EngineContext::MountEnginePak(const std::filesystem::path& /*pak*/)
+	Status EngineContext::MountEnginePak(const std::filesystem::path& pak)
 	{
-		ENGINE_CONTRACT_STUB();
-		return MakeError(ErrorCode::Unsupported, "mounting Engine.pak is not implemented yet (M7 stream C)");
+		// The pak is opened (its TOC hash verified) once: the mount and, through GetEnginePak, the Runtime's asset manager
+		// share the reader.
+		ENGINE_TRY_ASSIGN(Ref<const PakReader> reader, PakReader::Open(pak));
+		ENGINE_TRY_ASSIGN(Scope<PakMount> mount, PakMount::Create(reader));
+		ENGINE_TRY(m_Vfs.Mount("engine", std::move(mount)));
+		m_EnginePak = std::move(reader);
+		ENGINE_CORE_INFO("Engine context: '{}' mounted as engine:// ({} entries)", FileSystem::PathToUtf8(pak), m_EnginePak->GetEntries().size());
+		return {};
 	}
 
 	Status EngineContext::CreateGraphics(const GraphicsSpecification& graphics)
 	{
 		// Development builds read the shaders the Shaders project compiled for this configuration (§2.2, §8.12); exported
-		// games mount their Engine.pak instead (M7).
+		// games read the target configuration's SPIR-V from their Engine.pak in every configuration (§14.1).
 #if !defined(ENGINE_DIST)
-		Result<Scope<NativeDirectoryMount>> shaders = NativeDirectoryMount::Create(std::filesystem::path(ENGINE_SHADER_DIRECTORY),
-			MountAccess::ReadOnly);
-		if (!shaders.has_value())
+		if (m_EnginePak == nullptr)
 		{
-			return std::unexpected(std::move(shaders).error().WithHint(
-				"build this configuration's Shaders project (python Scripts/Build.py), which compiles the shaders there"));
+			Result<Scope<NativeDirectoryMount>> shaders = NativeDirectoryMount::Create(std::filesystem::path(ENGINE_SHADER_DIRECTORY),
+				MountAccess::ReadOnly);
+			if (!shaders.has_value())
+			{
+				return std::unexpected(std::move(shaders).error().WithHint(
+					"build this configuration's Shaders project (python Scripts/Build.py), which compiles the shaders there"));
+			}
+			ENGINE_TRY(m_Vfs.Mount(ShaderScheme, std::move(*shaders)));
 		}
-		ENGINE_TRY(m_Vfs.Mount(ShaderScheme, std::move(*shaders)));
 #endif
 
 		// A windowed process presents to the context's window; a headless one renders offscreen only (§8.1, §8.13).
@@ -131,7 +150,7 @@ namespace Engine {
 												.PresentWindow = presentWindow,
 												.ApplicationName = presentWindow != nullptr ? presentWindow->GetTitle() : std::string(),
 											}));
-		ENGINE_TRY_ASSIGN(const VfsPath shaderRoot, VfsPath::Create(ShaderScheme, ""));
+		ENGINE_TRY_ASSIGN(const VfsPath shaderRoot, m_EnginePak != nullptr ? VfsPath::Create("engine", "Shaders") : VfsPath::Create(ShaderScheme, ""));
 		m_ShaderLibrary = CreateScope<ShaderLibrary>(m_GraphicsDevice.get(), m_Vfs, shaderRoot);
 		m_PipelineFactory = CreateScope<PipelineFactory>(*m_GraphicsDevice, *m_ShaderLibrary);
 		return {};

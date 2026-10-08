@@ -100,7 +100,10 @@ namespace Engine {
 			{
 				if (mesh.Vertices.empty() || mesh.Indices.empty())
 					return MakeError(ErrorCode::InvalidArgument, "mesh '{}' has no vertices or no indices", name);
-				ENGINE_TRY_ASSIGN(nvrhi::CommandListHandle commandList, device.CreateCommandList());
+				// Not an immediate command list: the scene renderer resolves its meshes inside the frame (§8.3 pass 1), while the
+				// frame's immediate list is open, and NVRHI's validation allows one open immediate list at a time.
+				ENGINE_TRY_ASSIGN(nvrhi::CommandListHandle commandList,
+					device.CreateCommandList(nvrhi::CommandListParameters().setEnableImmediateExecution(false)));
 				commandList->open();
 				Result<nvrhi::BufferHandle> vertices = Utils::CreateGeometryBuffer(device, *commandList, mesh.Vertices.data(),
 					mesh.Vertices.size() * sizeof(MeshVertex), false, std::format("{} (vertices)", name));

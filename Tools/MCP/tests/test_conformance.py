@@ -88,12 +88,15 @@ class ConformanceTests(unittest.TestCase):
                 self.fail(f"no usable Vulkan device for a rendering editor ({harness.REQUIRE_GPU_VARIABLE}=1): {reason}")
             print(f"{harness.NO_DEVICE_PREFIX}{self.id()}: {reason}", file=sys.stderr, flush=True)
             return
+        # The scene view renders the open scene (Docs/Decisions/0012-m7-decisions.md decision 9), so one is created first.
         results = self.run_session([
             ("editor_launch", {"project": str(self.directory / "Game"), "create": True, "renderer": "vulkan"}),
+            ("scene_new", {"path": "Assets/Scenes/Main.scene"}),
             ("viewport_screenshot", {"view": "scene", "maxDimension": 64}),
             ("viewport_screenshot", {"view": "scene", "maxDimension": 64, "inline": True}),
         ])
-        for shot in results[1:]:
+        self.assertFalse(results[1]["isError"], results[1]["text"])
+        for shot in results[2:]:
             self.assertFalse(shot["isError"], shot["text"])
             self.assertEqual((shot["structuredContent"]["width"], shot["structuredContent"]["height"]), (64, 36))
             self.assertIn(shot["structuredContent"]["path"], shot["text"])
@@ -104,8 +107,8 @@ class ConformanceTests(unittest.TestCase):
             self.assertTrue(png.startswith(b"\x89PNG\r\n\x1a\n"))
             self.assertEqual(png, Path(shot["structuredContent"]["path"]).read_bytes())
         # The inline base64 travels once, as the image content block.
-        self.assertNotIn("data", results[2]["structuredContent"])
-        self.assertFalse(results[2]["structuredContent"]["inlineOmitted"])
+        self.assertNotIn("data", results[3]["structuredContent"])
+        self.assertFalse(results[3]["structuredContent"]["inlineOmitted"])
 
     def test_killed_editor_reports_editor_crashed(self) -> None:
         results = self.run_session([

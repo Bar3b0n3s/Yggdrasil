@@ -64,21 +64,24 @@ namespace Engine {
 	// OnInitialize: the engine context already mounted Data/Engine.pak as engine:// (ApplicationSpecification::EnginePak);
 	// the Runtime checks each pak's XXH64 against the manifest (a mismatch is InitFailed naming the pak), mounts Game.pak as
 	// project://, builds the RuntimeAssetManager with the built-in loaders over both paks and injects it
-	// (EngineContext::SetAssetManager, §3 rule 4), reads the project settings from Game.pak's TOC metadata, loads the start
-	// scene (its cooked SceneData) and starts a PlaySession through the same SceneSerializer::FromJson path Play uses
-	// (§14.3), seeded with ComputeSessionSeed(Simulation.Seed, the scene's Seed), from the TOC's ProjectSettings
-	// (PlaySessionSpecification::Project), paused at tick 0 with --paused. With a device it creates the GpuResourceCache,
-	// the SceneRendererPipelines (once), the SceneRenderer of the game view, the BlitPass for the frame target's format and,
-	// for --screenshot-at and viewport.screenshot, a ViewportCapture over the same pipelines (a Gpu error there is
-	// FatalError(OutOfMemory), §8.14 item 7); with --automation (non-Dist) the RuntimeAutomationServer.
+	// (EngineContext::SetAssetManager, §3 rule 4), reads the project settings from Game.pak's TOC metadata (their Simulation
+	// must equal the manifest's, which set up the loop: Validation otherwise), loads the start scene (its cooked SceneData)
+	// and starts a PlaySession through the same SceneSerializer::FromJson path Play uses (§14.3), seeded with
+	// ComputeSessionSeed(Simulation.Seed, the scene's Seed), from the TOC's ProjectSettings (PlaySessionSpecification::
+	// Project), paused at tick 0 with --paused. With a device it creates the GpuResourceCache, the SceneRendererPipelines
+	// (once), the SceneRenderer of the game view and, for --screenshot-at and viewport.screenshot, a ViewportCapture over the
+	// same pipelines (a Gpu error there is FatalError(OutOfMemory), §8.14 item 7); with --automation (non-Dist) the
+	// RuntimeAutomationServer.
 	//
 	// The frame: OnEvent queues the window's input events for the session's next tick (PlayInput::QueueDeviceEvent);
 	// OnSafePoint pumps the server and applies the session's time scale and stepping flag to the loop
 	// (SetFrameTimeScale, SetFrameThrottleSuspended); OnFixedStep and OnUpdate drive the session
-	// (PlaySession::AdvanceLoopStep, AdvanceLoopFrame); OnRender renders the session's last snapshot with the SceneRenderer
-	// and blits it into the frame target, and after the tick of --screenshot-at writes the screenshot of the session's
-	// current view (PlaySession::ExtractView at the window's framebuffer size; a failure is logged at Error level and ends
-	// the run with ExitCode::Failed). The run ends at window close, --frames, session.shutdown, or
+	// (PlaySession::AdvanceLoopStep, AdvanceLoopFrame), and OnUpdate, after the frame phase in which the tick reaches
+	// --screenshot-at's T, writes the screenshot of the session's current view (PlaySession::ExtractView at the window's
+	// framebuffer size, rendered through the ViewportCapture; a failure, or --frames ending the run first, is logged at
+	// Error level and ends the run with ExitCode::Failed); OnRender renders the session's last snapshot with the
+	// SceneRenderer and blits it into the frame target (the BlitPass is created for the target's format at the first
+	// rendered frame, when the swapchain's format is known). The run ends at window close, --frames, session.shutdown, or
 	// Application.Quit (M13). Escape does nothing by default (§14.3). OnShutdown releases, in order, the server, the
 	// capture, the renderer and blit pass, the pipelines, the session, the GPU cache, then removes and destroys the asset
 	// manager, while the context still exists.
@@ -95,6 +98,14 @@ namespace Engine {
 		void OnFixedStep(const SimStep& step) override;
 		void OnUpdate(const FrameTime& frame) override;
 		void OnRender(RenderContext& context) override;
+	private:
+		// OnInitialize's work (see the class comment); OnInitialize releases what it built when it fails.
+		[[nodiscard]] Status InitializeGame();
+		// The rendering objects of OnInitialize with a device (a Gpu error is FatalError(OutOfMemory), §8.14 item 7).
+		[[nodiscard]] Status CreateRenderers();
+		// --screenshot-at: the session's current view at the window's framebuffer size, written as a PNG; false, logged at
+		// Error level, when it fails.
+		[[nodiscard]] bool WriteScreenshot();
 	private:
 		// The options, the manifest, the session, the renderer objects, the capture and the automation server (RuntimeApp.cpp).
 		struct State;

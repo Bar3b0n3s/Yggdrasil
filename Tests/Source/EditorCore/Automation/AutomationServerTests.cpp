@@ -2,12 +2,14 @@
 
 #include "EditorCore/Automation/AutomationServer.h"
 
+#include "EditorCore/Play/EditorPlayController.h"
 #include "Engine/Automation/Protocol/Framing.h"
 #include "Engine/Automation/Protocol/SessionFile.h"
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Platform/Process.h"
 #include "Engine/Platform/Socket.h"
+#include "Engine/Session/PlaySession.h"
 #include "Support/AutomationTestClient.h"
 #include "Support/EditorTestFixture.h"
 #include "Support/ExpectLog.h"
@@ -130,6 +132,62 @@ namespace Engine {
 			Result<Json> log = client.Call("log.read", Json{ { "contains", "Cancelled debug.pend" } });
 			REQUIRE(log.has_value());
 			CHECK((*log)["entries"].size() == 1);
+		}
+
+		TEST_CASE("AutomationServer: _meta reports the play state and the session's tick")
+		{
+			Test::EditorTestFixture fixture("ServerPlayMeta");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			Test::AutomationTestClient client(fixture.GetEditor());
+			Json response = client.Request("play.start", Json{ { "lockstep", true } });
+			REQUIRE(response.contains("result"));
+			CHECK(response["result"]["_meta"]["playState"] == Json("Play"));
+			response = client.Request("play.step", Json{ { "ticks", 4 } });
+			REQUIRE(response.contains("result"));
+			CHECK(response["result"]["_meta"]["tick"] == Json(4));
+			response = client.Request("play.pause", Json::object());
+			CHECK(response["result"]["_meta"]["playState"] == Json("Paused"));
+			response = client.Request("play.stop", Json::object());
+			CHECK(response["result"]["_meta"]["playState"] == Json("Edit"));
+			CHECK_FALSE(response["result"]["_meta"].contains("tick"));
+		}
+
+		TEST_CASE("AutomationServer: a disconnect during play.step cancels it, releases lockstep and pauses play")
+		{
+			Test::EditorTestFixture fixture("ServerPlayDisconnect");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			Test::AutomationTestClient client(fixture.GetEditor());
+			AutomationServer& server = client.GetServer();
+			const ClientId owner = server.ConnectInProcess("owner");
+			server.SubmitInProcess(owner, RpcRequest{ .Id = Json(1), .IsNotification = false, .Method = "play.start", .Params = Json{ { "lockstep", true } }, .TranscriptLine = std::nullopt });
+			server.Pump();
+			server.SubmitInProcess(owner, RpcRequest{ .Id = Json(2), .IsNotification = false, .Method = "play.step", .Params = Json{ { "ticks", 1000000 }, { "render", "last" } }, .TranscriptLine = std::nullopt });
+			server.Pump(); // the step starts
+			server.Pump(); // and runs its first frame
+			const std::vector<Json> answered = server.TakeInProcessResponses(owner);
+			REQUIRE(answered.size() == 1); // play.start's
+			PlaySession* session = fixture.GetEditor().GetPlay().GetSession();
+			REQUIRE(session != nullptr);
+			REQUIRE(session->IsStepping());
+			session->SetExtractionEnabled(false); // as a step between its rendered ticks leaves it
+
+			server.DisconnectInProcess(owner);
+			CHECK_FALSE(session->IsStepping());
+			CHECK(session->IsExtractionEnabled());
+			CHECK_FALSE(session->IsLockstep());
+			CHECK(session->IsPaused());
+			const uint64_t tick = session->GetTick();
+			CHECK(tick > 0);
+
+			// The session survives the disconnect; another client steps it from where it stopped.
+			const Result<Json> stepped = client.Call("play.step", Json{ { "ticks", 2 } });
+			REQUIRE_MESSAGE(stepped.has_value(), stepped.error().ToString());
+			CHECK((*stepped)["tick"] == Json(tick + 2));
+			const Result<Json> state = client.Call("play.state", Json::object());
+			REQUIRE(state.has_value());
+			CHECK((*state)["state"] == Json("Paused"));
 		}
 
 		TEST_CASE("AutomationServer: listening writes a session file that is removed on destruction")

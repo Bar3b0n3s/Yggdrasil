@@ -3,6 +3,7 @@
 
 #include "EditorCore/Commands/SceneEditCommand.h"
 #include "EditorCore/EditorContext.h"
+#include "EditorCore/Play/EditorPlayController.h"
 #include "EditorCore/Private/SceneEditRollback.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/Core/Assert.h"
@@ -16,11 +17,16 @@
 #include "Engine/Scene/PrefabInstantiator.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/SceneSerializer.h"
+#include "Engine/Session/PlaySession.h"
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
+#include <format>
 #include <map>
 #include <set>
+#include <span>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -102,26 +108,123 @@ namespace Engine {
 
 	}
 
-	SceneEdit::SceneEdit(EditorContext& context, std::string label, std::string mergeKey)
-		: m_Context(&context), m_Label(std::move(label)), m_MergeKey(std::move(mergeKey))
+	namespace Utils {
+
+		// The SceneEditCommand changes of one tracked scene: the tracker's Before snapshots with the scene's current state
+		// (After). Errors: Validation when a state cannot be serialized; nothing is rolled back here.
+		static Result<std::vector<SceneEntityChange>> BuildSceneEntityChanges(const Scene& scene, std::span<const EntityChange> tracked,
+			std::string_view label)
+		{
+			std::vector<SceneEntityChange> changes;
+			changes.reserve(tracked.size());
+			for (const EntityChange& change : tracked)
+			{
+				if (change.Kind != EntityChangeKind::Created && change.Before == nullptr)
+				{
+					return MakeError(ErrorCode::Validation, "'{}' cannot be recorded: the state of entity {} before the edit could not be serialized", label,
+						change.EntityID);
+				}
+				SceneEntityChange recorded{ .EntityID = change.EntityID,
+					.Before = change.Kind == EntityChangeKind::Created ? nullptr : change.Before,
+					.After = nullptr,
+					.ParentBefore = change.ParentBefore,
+					.SiblingIndexBefore = change.SiblingIndexBefore,
+					.ParentAfter = UUID(),
+					.SiblingIndexAfter = 0 };
+				if (const ConstEntity entity = scene.FindEntityByID(change.EntityID); entity.IsValid())
+				{
+					Result<Json> after = SceneSerializer::EntityToJson(entity);
+					if (!after)
+						return std::unexpected(std::move(after).error().WithContext(std::format("recording '{}'", label)));
+					recorded.After = CreateRef<const Json>(std::move(*after));
+					recorded.ParentAfter = GetParentID(entity);
+					recorded.SiblingIndexAfter = entity.GetSiblingIndex();
+				}
+				if (recorded.Before == nullptr && recorded.After == nullptr)
+					continue; // ChangeTracker never reports these, but such a change would have nothing to restore
+				changes.push_back(std::move(recorded));
+			}
+			return changes;
+		}
+
+		// Brings `scene`'s entities of `changes` back to their Before state. Every Before state was valid when it was
+		// captured, so a failure is a bug: asserted, and logged in configurations without asserts.
+		static void RestoreBefore(Scene& scene, std::span<const SceneEntityChange> changes, std::string_view label)
+		{
+			const Status restored = SceneEditCommand::ApplyChanges(scene, changes, false);
+			ENGINE_ASSERT(restored.has_value(), "rolling back '{}' failed: {}", label, restored ? std::string() : restored.error().ToString());
+			if (!restored)
+				ENGINE_ERROR("Rolling back '{}' failed: {}", label, restored.error().ToString());
+		}
+
+		// The editor's play session when it is still the one with `serial` (PlaySession::GetSerial); nullptr after it ended,
+		// also when a new session took its place, possibly at the same address.
+		static PlaySession* FindPlaySession(const EditorContext& context, uint64_t serial)
+		{
+			PlaySession* session = context.GetPlay().GetSession();
+			return session != nullptr && session->GetSerial() == serial ? session : nullptr;
+		}
+
+	}
+
+	void SceneEdit::TrackedScene::Begin(Scene& scene, std::string_view label)
 	{
-		ENGINE_ASSERT(context.HasScene(), "SceneEdit '{}' needs an open scene", m_Label);
-		Scene& scene = context.GetScene();
-		ENGINE_ASSERT(!scene.GetChangeTracker().IsTracking(), "SceneEdit '{}': another SceneEdit of scene '{}' is active (edits do not nest)",
-			m_Label, scene.GetName());
-		m_RevisionBefore = context.GetRevision();
+		ENGINE_ASSERT(!scene.GetChangeTracker().IsTracking(), "SceneEdit '{}': another SceneEdit of scene '{}' is active (edits do not nest)", label,
+			scene.GetName());
+		Target = &scene;
 #if defined(ENGINE_DEBUG)
 		// §12.3: Commit checks that the state of every entity the tracker does not report is unchanged. The state compared
 		// is the canonical entity JSON, the input of the state hash, so the check is exact and needs no hashing.
 		const Scene& constScene = scene;
-		m_EntityStates.reserve(scene.GetEntityCount());
+		EntityStates.reserve(scene.GetEntityCount());
 		constScene.ForEachCanonical([this](ConstEntity entity)
 		{
 			Result<Json> json = SceneSerializer::EntityToJson(entity);
-			m_EntityStates.emplace_back(entity.GetUUID(), json ? std::move(*json) : Json());
+			EntityStates.emplace_back(entity.GetUUID(), json ? std::move(*json) : Json());
 		});
 #endif
 		scene.GetChangeTracker().Begin();
+	}
+
+	std::vector<EntityChange> SceneEdit::TrackedScene::End([[maybe_unused]] std::string_view label)
+	{
+		if (Target == nullptr)
+			return {};
+		std::vector<EntityChange> tracked = Target->GetChangeTracker().End();
+#if defined(ENGINE_DEBUG)
+		// §12.3: every entity the tracker did not report is unchanged (see Begin).
+		for (const auto& [id, state] : EntityStates)
+		{
+			// ChangeTracker::End sorts by UUID.
+			const auto found = std::lower_bound(tracked.begin(), tracked.end(), id, [](const EntityChange& change, UUID value)
+			{
+				return change.EntityID < value;
+			});
+			if (found != tracked.end() && found->EntityID == id)
+				continue;
+			const ConstEntity entity = std::as_const(*Target).FindEntityByID(id);
+			ENGINE_ASSERT(entity.IsValid() && SceneSerializer::EntityToJson(entity) == state,
+				"SceneEdit '{}' changed entity {} without the change tracker recording it", label, id);
+		}
+#endif
+		EntityStates.clear();
+		return tracked;
+	}
+
+	SceneEdit::SceneEdit(EditorContext& context, std::string label, std::string mergeKey)
+		: m_Context(&context), m_Label(std::move(label)), m_MergeKey(std::move(mergeKey))
+	{
+		PlaySession* session = context.GetPlay().GetSession();
+		ENGINE_ASSERT(context.HasScene() || session != nullptr, "SceneEdit '{}' needs an open scene or a play session", m_Label);
+		m_RevisionBefore = context.GetRevision();
+		if (context.HasScene())
+			m_EditScene.Begin(context.GetScene(), m_Label);
+		if (session != nullptr)
+		{
+			m_PlayScene.Begin(session->GetScene(), m_Label);
+			m_PlaySerial = session->GetSerial();
+			m_PlayIdsBefore = session->GetIdGenerator();
+		}
 	}
 
 	SceneEdit::~SceneEdit()
@@ -135,83 +238,81 @@ namespace Engine {
 		if (!m_IsActive)
 			return 0;
 		m_IsActive = false;
-		Scene& scene = GetScene();
-		Utils::RecordTouchedInstanceOverrides(*m_Context, scene, m_Label);
-		const std::vector<EntityChange> tracked = scene.GetChangeTracker().End();
-#if defined(ENGINE_DEBUG)
-		// §12.3: every entity the tracker did not report is unchanged (see the constructor).
-		for (const auto& [id, state] : m_EntityStates)
+		if (m_EditScene.Target != nullptr)
+			Utils::RecordTouchedInstanceOverrides(*m_Context, *m_EditScene.Target, m_Label);
+		const std::vector<EntityChange> editTracked = m_EditScene.End(m_Label);
+		const std::vector<EntityChange> playTracked = m_PlayScene.End(m_Label);
+
+		std::vector<SceneEntityChange> editChanges;
+		std::vector<SceneEntityChange> playChanges;
+		Status built = {};
+		if (!editTracked.empty())
 		{
-			// ChangeTracker::End sorts by UUID.
-			const auto found = std::lower_bound(tracked.begin(), tracked.end(), id, [](const EntityChange& change, UUID value)
+			Result<std::vector<SceneEntityChange>> changes = Utils::BuildSceneEntityChanges(*m_EditScene.Target, editTracked, m_Label);
+			if (changes)
+				editChanges = std::move(*changes);
+			else
+				built = std::unexpected(std::move(changes).error());
+		}
+		if (built && !playTracked.empty())
+		{
+			Result<std::vector<SceneEntityChange>> changes = Utils::BuildSceneEntityChanges(*m_PlayScene.Target, playTracked, m_Label);
+			if (changes)
+				playChanges = std::move(*changes);
+			else
+				built = std::unexpected(std::move(changes).error());
+		}
+		if (!built)
+		{
+			if (!editTracked.empty())
+				Utils::RollBackTrackedChanges(*m_EditScene.Target, editTracked, m_Label);
+			if (!playTracked.empty())
+				Utils::RollBackTrackedChanges(*m_PlayScene.Target, playTracked, m_Label);
+			RestorePlayIds();
+			return std::unexpected(std::move(built).error());
+		}
+
+		uint64_t undoIndex = 0;
+		if (!editChanges.empty())
+		{
+			// Kept to roll back if the context refuses the command (a read-only project); the snapshots are shared.
+			std::vector<SceneEntityChange> rollback = editChanges;
+			m_Context->m_PendingRevisionBefore = m_RevisionBefore;
+			Result<uint64_t> executed = m_Context->Execute(CreateScope<SceneEditCommand>(m_Label, std::move(editChanges), m_MergeKey));
+			m_Context->m_PendingRevisionBefore.reset();
+			if (!executed)
 			{
-				return change.EntityID < value;
+				Utils::RestoreBefore(*m_EditScene.Target, rollback, m_Label);
+				if (!playChanges.empty())
+					Utils::RestoreBefore(*m_PlayScene.Target, playChanges, m_Label);
+				RestorePlayIds();
+				return std::unexpected(std::move(executed).error());
+			}
+			// The command was built applied, so its Execute appended nothing: the events of the edit are appended here, once it
+			// is recorded (a dry run suppresses them).
+			SceneEditCommand::AppendChangeEvents(*m_Context, rollback, true);
+			undoIndex = *executed;
+		}
+
+		// Play-scene changes are transient (§13.4): nothing records them, and they raise none of the edit scene's events. A dry
+		// run or a transaction must still be able to take them back, with the ids they drew (see the class comment).
+		PlaySession* session = m_PlayIdsBefore.has_value() ? Utils::FindPlaySession(*m_Context, m_PlaySerial) : nullptr;
+		const bool drewIds = session != nullptr && session->GetIdGenerator().GetDrawCount() != m_PlayIdsBefore->GetDrawCount();
+		if ((!playChanges.empty() || drewIds) && (m_Context->IsDryRun() || m_Context->GetTransaction() != nullptr))
+		{
+			m_Context->m_TransientPlayUndos.push_back(
+				[context = m_Context, serial = m_PlaySerial, ids = *m_PlayIdsBefore, changes = std::move(playChanges), label = m_Label]()
+			{
+				// The changes belong to the session they were made in; one that ended has nothing to undo.
+				PlaySession* owner = Utils::FindPlaySession(*context, serial);
+				if (owner == nullptr)
+					return;
+				if (!changes.empty())
+					Utils::RestoreBefore(owner->GetScene(), changes, label);
+				owner->GetIdGenerator() = ids;
 			});
-			if (found != tracked.end() && found->EntityID == id)
-				continue;
-			const ConstEntity entity = std::as_const(scene).FindEntityByID(id);
-			ENGINE_ASSERT(entity.IsValid() && SceneSerializer::EntityToJson(entity) == state,
-				"SceneEdit '{}' changed entity {} without the change tracker recording it", m_Label, id);
 		}
-		m_EntityStates.clear();
-#endif
-
-		if (tracked.empty())
-			return 0;
-
-		std::vector<SceneEntityChange> changes;
-		changes.reserve(tracked.size());
-		for (const EntityChange& change : tracked)
-		{
-			if (change.Kind != EntityChangeKind::Created && change.Before == nullptr)
-			{
-				Utils::RollBackTrackedChanges(scene, tracked, m_Label);
-				return MakeError(ErrorCode::Validation, "'{}' cannot be recorded: the state of entity {} before the edit could not be serialized", m_Label,
-					change.EntityID);
-			}
-			SceneEntityChange recorded{ .EntityID = change.EntityID,
-				.Before = change.Kind == EntityChangeKind::Created ? nullptr : change.Before,
-				.After = nullptr,
-				.ParentBefore = change.ParentBefore,
-				.SiblingIndexBefore = change.SiblingIndexBefore,
-				.ParentAfter = UUID(),
-				.SiblingIndexAfter = 0 };
-			if (const ConstEntity entity = std::as_const(scene).FindEntityByID(change.EntityID); entity.IsValid())
-			{
-				Result<Json> after = SceneSerializer::EntityToJson(entity);
-				if (!after)
-				{
-					Utils::RollBackTrackedChanges(scene, tracked, m_Label);
-					return std::unexpected(std::move(after).error().WithContext(std::format("recording '{}'", m_Label)));
-				}
-				recorded.After = CreateRef<const Json>(std::move(*after));
-				recorded.ParentAfter = Utils::GetParentID(entity);
-				recorded.SiblingIndexAfter = entity.GetSiblingIndex();
-			}
-			if (recorded.Before == nullptr && recorded.After == nullptr)
-				continue; // ChangeTracker never reports these, but such a change would have nothing to restore
-			changes.push_back(std::move(recorded));
-		}
-		if (changes.empty())
-			return 0;
-
-		// Kept to roll back if the context refuses the command (a read-only project); the snapshots are shared.
-		std::vector<SceneEntityChange> rollback = changes;
-		m_Context->m_PendingRevisionBefore = m_RevisionBefore;
-		Result<uint64_t> executed = m_Context->Execute(CreateScope<SceneEditCommand>(m_Label, std::move(changes), m_MergeKey));
-		m_Context->m_PendingRevisionBefore.reset();
-		if (!executed)
-		{
-			const Status restored = SceneEditCommand::ApplyChanges(scene, rollback, false);
-			ENGINE_ASSERT(restored.has_value(), "rolling back '{}' failed: {}", m_Label, restored ? std::string() : restored.error().ToString());
-			if (!restored)
-				ENGINE_ERROR("Rolling back '{}' failed: {}", m_Label, restored.error().ToString());
-			return std::unexpected(std::move(executed).error());
-		}
-		// The command was built applied, so its Execute appended nothing: the events of the edit are appended here, once it
-		// is recorded (a dry run suppresses them).
-		SceneEditCommand::AppendChangeEvents(*m_Context, rollback, true);
-		return *executed;
+		return undoIndex;
 	}
 
 	void SceneEdit::Cancel()
@@ -219,11 +320,21 @@ namespace Engine {
 		if (!m_IsActive)
 			return;
 		m_IsActive = false;
-		Scene& scene = GetScene();
-		const std::vector<EntityChange> tracked = scene.GetChangeTracker().End();
-		m_EntityStates.clear();
-		if (!tracked.empty())
-			Utils::RollBackTrackedChanges(scene, tracked, m_Label);
+		const std::vector<EntityChange> editTracked = m_EditScene.End(m_Label);
+		if (!editTracked.empty())
+			Utils::RollBackTrackedChanges(*m_EditScene.Target, editTracked, m_Label);
+		const std::vector<EntityChange> playTracked = m_PlayScene.End(m_Label);
+		if (!playTracked.empty())
+			Utils::RollBackTrackedChanges(*m_PlayScene.Target, playTracked, m_Label);
+		RestorePlayIds();
+	}
+
+	void SceneEdit::RestorePlayIds() const
+	{
+		if (!m_PlayIdsBefore.has_value())
+			return;
+		if (PlaySession* session = Utils::FindPlaySession(*m_Context, m_PlaySerial))
+			session->GetIdGenerator() = *m_PlayIdsBefore;
 	}
 
 	Scene& SceneEdit::GetScene() const

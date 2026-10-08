@@ -9,11 +9,18 @@
 #include "Support/TestOptions.h"
 #include "Support/Utf8Path.h"
 
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <cstdlib>
+#include <span>
+
 // The Editor's --viewport-screenshot and --editor-screenshot options (Editor/EditorApp.h): thin callers of the screenshot
 // capability (Renderer/ViewportCapture.h, ImGui/ImGuiScreenshot.h), which viewport.screenshot and editor.screenshot call
-// too, through the same captures (ScreenshotMethodsTests.cpp, Tests/Automation/test_screenshot.py, the golden
-// "ImGuiDemo"). The options belong to the Editor executable, whose sources are not linked into Tests, so these tests run it
-// as a process; the capture functions themselves are tested in process (ViewportCaptureTests.cpp, ImGuiScreenshotTests.cpp).
+// too, through the same captures (ScreenshotMethodsTests.cpp, Tests/Automation/test_screenshot.py, the goldens "LitScene"
+// and "ImGuiDemo"). The options belong to the Editor executable, whose sources are not linked into Tests, so these tests
+// run it as a process; the capture functions themselves are tested in process (ViewportCaptureTests.cpp,
+// ImGuiScreenshotTests.cpp).
 
 namespace Engine {
 
@@ -75,7 +82,7 @@ namespace Engine {
 			CHECK_FALSE(std::filesystem::exists(png, error));
 		}
 
-		TEST_CASE("EditorApp: --viewport-screenshot writes the 640x360 clear-and-triangle view"
+		TEST_CASE("EditorApp: --viewport-screenshot writes the 640x360 viewport, the empty view without a scene"
 			* doctest::test_suite(Test::GpuSuite))
 		{
 			if (!Test::ProbeGpuForProcess())
@@ -92,12 +99,23 @@ namespace Engine {
 			REQUIRE_MESSAGE(image.has_value(), image.error().ToString());
 			CHECK(image->Width == DefaultViewportScreenshotWidth);
 			CHECK(image->Height == DefaultViewportScreenshotHeight);
-			// The triangle covers the centre; the clear colour the corners.
-			const std::span<const std::byte> centreRow = image->GetRow(image->Height / 2);
-			const std::span<const std::byte> topRow = image->GetRow(0);
-			const size_t centre = static_cast<size_t>(image->Width / 2) * 4;
-			const auto centrePixel = centreRow.begin() + static_cast<std::ptrdiff_t>(centre);
-			CHECK_FALSE(std::equal(centrePixel, centrePixel + 3, topRow.begin()));
+			// The launcher state has no scene: the scene renderer's empty view, the default clear colour (0.05, 0.05, 0.06)
+			// through the sRGB OETF, everywhere (the view under the UI, not the UI).
+			const std::array<int, 4> expected = { 63, 63, 69, 255 };
+			for (uint32_t y : { 0U, image->Height / 2, image->Height - 1 })
+			{
+				const std::span<const std::byte> row = image->GetRow(y);
+				for (uint32_t x : { 0U, image->Width / 2, image->Width - 1 })
+				{
+					for (size_t channel = 0; channel < expected.size(); ++channel)
+					{
+						CAPTURE(x);
+						CAPTURE(y);
+						CAPTURE(channel);
+						CHECK(std::abs(std::to_integer<int>(row[static_cast<size_t>(x) * 4 + channel]) - expected[channel]) <= 1);
+					}
+				}
+			}
 		}
 
 		TEST_CASE("EditorApp: --editor-screenshot writes the editor UI at the window's framebuffer size"

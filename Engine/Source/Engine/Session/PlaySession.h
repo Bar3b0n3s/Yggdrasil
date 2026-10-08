@@ -135,6 +135,10 @@ namespace Engine {
 		uint32_t ViewHeight = 900;
 		// Test instrumentation (see IPlaySessionObserver); null in production. Outlives the session.
 		IPlaySessionObserver* Observer = nullptr;
+		// The host's number for this session, never repeated during the host's lifetime (EditorPlayController counts its
+		// sessions from 1; the Runtime has one): what code that outlives a call recognizes its session by (a pending
+		// play.step, the editor's transient play-scene undos), since a new session may reuse an ended one's address.
+		uint64_t Serial = 0;
 	};
 
 	// One play session. Not copyable or movable; main thread only (§4.11).
@@ -239,6 +243,8 @@ namespace Engine {
 		// The specification's copy of the project's settings.
 		[[nodiscard]] const ProjectSettings& GetProjectSettings() const;
 		[[nodiscard]] uint64_t GetSeed() const;
+		// PlaySessionSpecification::Serial.
+		[[nodiscard]] uint64_t GetSerial() const;
 		[[nodiscard]] Random& GetRandom();
 		[[nodiscard]] UUIDGenerator& GetIdGenerator();
 		[[nodiscard]] PlayInput& GetInput();

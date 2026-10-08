@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <map>
 #include <string>
+#include <string_view>
 #include <vector>
 
 // The play methods (Architecture §5.6, §13.5 "play", §13.6): play.start, play.stop, play.pause, play.resume, play.step,
@@ -31,8 +32,9 @@
 // runs at a time per session (a second one is InvalidState).
 //
 // play.step (a pending operation, §13.2, §13.6): queues its input events (stamped relative to the first tick it runs),
-// then each frame runs as many ticks as fit PlayStepFrameBudget of wall-clock time, at least one (PlaySession::Tick: fixed
-// step + frame phase), while the session's stepping flag keeps the host's loop unthrottled (§4.2). render:
+// then each frame runs as many ticks as fit PlayStepFrameBudget of the host's wall clock
+// (AutomationMethodContext::GetWallClockTime), at least one (PlaySession::Tick: fixed step + frame phase), while the session's
+// stepping flag keeps the host's loop unthrottled (§4.2). render:
 //   - "every": one tick per frame, and every tick's frame phase extracts the game view, which the host renders;
 //   - "last" (default): budgeted ticks; only the last tick extracts (the frames before it render the previous view);
 //   - "none": budgeted ticks; no tick extracts.
@@ -40,7 +42,7 @@
 // identical for any budget, machine and configuration (§1.3). Cancelled when the client disconnects: the ticks already run
 // stay, extraction is re-enabled, the stepping flag cleared, and the disconnect releases lockstep (§13.2). The operation
 // holds no pointer to the session: every Poll resolves it again (AutomationMethodContext::GetPlaySession) and checks it is
-// the session the step started on, so a session that ended meanwhile (the owner's play.stop, the editor UI's Stop in M10)
+// the session the step started on (PlaySession::GetSerial, never its address), so a session that ended meanwhile (the owner's play.stop, the editor UI's Stop in M10)
 // resolves the step with Cancelled "the play session ended after <n> of <ticks> ticks".
 //
 // Deferred to later milestones: play.waitFor (§13.6, a Luau predicate evaluated in the play VM after every tick) needs
@@ -68,6 +70,13 @@ namespace Engine {
 		Simulate, // a running Simulate session (editor only)
 		Paused    // a paused session of either mode (PlayStateResult::Mode)
 	};
+
+	// The run state of `session`: Edit for null (the editor without a session), Paused for a paused session, else Play or
+	// Simulate by its mode. The one mapping behind play.state's "state", session.info's playState, both hosts' "_meta"
+	// playState and the PlayStateChanged event's name (Docs/Decisions/0012-m7-decisions.md decision 8).
+	[[nodiscard]] PlayRunState GetPlayRunState(const PlaySession* session);
+	// The registry name of `state`: "Edit", "Play", "Simulate" or "Paused".
+	[[nodiscard]] std::string_view PlayRunStateToString(PlayRunState state);
 
 	// Registry enum "PlayStepRender": which ticks of a play.step render (see the file comment).
 	enum class PlayStepRender : uint8_t

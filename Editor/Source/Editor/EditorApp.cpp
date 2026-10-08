@@ -12,8 +12,10 @@
 #include "Engine/App/EngineContext.h"
 #include "Engine/App/ExitCode.h"
 #include "Engine/App/ProcessContext.h"
+#include "Engine/App/VulkanErrorHandler.h"
 #include "Engine/Asset/AssetDiagnostic.h"
 #include "Engine/Asset/BuiltinAssets.h"
+#include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/AssetPipeline/EngineAssetBaker.h"
 #include "Engine/AssetPipeline/ImporterRegistry.h"
 #include "Engine/Automation/Protocol/MethodRegistry.h"
@@ -22,19 +24,28 @@
 #include "Engine/Core/Json/JsonWriter.h"
 #include "Engine/Core/Log.h"
 #include "Engine/Core/Utf8.h"
+#include "Engine/Graphics/GpuProfiler.h"
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Graphics/PipelineFactory.h"
+#include "Engine/Graphics/RenderContext.h"
 #include "Engine/ImGui/ImGuiLayer.h"
 #include "Engine/ImGui/ImGuiScreenshot.h"
 #include "Engine/Platform/Process.h"
+#include "Engine/Platform/Window.h"
+#include "Engine/Renderer/BlitPass.h"
+#include "Engine/Renderer/GpuResourceCache.h"
+#include "Engine/Renderer/RenderSnapshot.h"
+#include "Engine/Renderer/SceneRenderer.h"
 #include "Engine/Renderer/ViewportCapture.h"
+#include "Engine/Scene/RenderExtraction.h"
+#include "Engine/Scene/Scene.h"
+#include "Engine/Scene/TransformSystem.h"
+#include "Engine/Session/PlaySession.h"
 
 #include <imgui.h>
-#include <vulkan/vulkan.hpp>
 
 #include <array>
 #include <format>
-#include <system_error>
 #include <vector>
 
 #if !defined(ENGINE_REPO_ROOT)
@@ -54,13 +65,39 @@ namespace Engine {
 		// OnInitialize's work for `app`, whose server gets `captures` and `systemErrors` (empty without a device); on
 		// failure the caller releases what was built.
 		[[nodiscard]] Status Initialize(EditorApp& app, ScreenshotCaptures captures, SystemErrorHandler systemErrors);
-		// Releases the run, the server and the editor, in that order, while the engine context still exists.
-		void Release();
+		// Releases the run and the server, in that order (the server's pending operations are cancelled against a live
+		// editor, and it holds the captures).
+		void ReleaseServer();
+	};
+
+	struct EditorApp::Rendering
+	{
+		// Declared in creation order; destroyed in reverse (§8.14 item 4: the scene renderers before the pipelines they
+		// record with, the pipelines and renderers before the GpuResourceCache).
+		Scope<GpuResourceCache> Cache;
+		Scope<SceneRendererPipelines> Pipelines;
+		Scope<ViewportCapture> Capture;           // screenshots (CaptureView)
+		Scope<SceneRenderer> Viewport;            // the view drawn under the UI every frame
+		Scope<BlitPass> Blit;                     // created for the frame target's format on the first frame (OnRender)
+		RenderSnapshot ViewSnapshot{};            // the view OnUpdate extracted for this frame (outside Play mode)
+		bool UsesSessionView = false;             // this frame shows the play session's last extraction instead
+		nvrhi::FramebufferInfo BlitFramebuffer{}; // the target format Blit was created for
+		bool IsViewFailing = false;               // a failed extraction is logged once per run of failing frames
+		bool IsRenderFailing = false;             // a failed render or blit is logged once per run of failing frames
 	};
 
 	namespace Utils {
 
 		constexpr std::string_view ViewportScreenshotOption = "--viewport-screenshot";
+
+		// Ends the process for a GPU object the editor creates at startup or resize that the device has no memory for
+		// (§8.14 item 7); other errors are returned with `context`.
+		[[nodiscard]] static Error CheckStartupGpuObject(Error error, std::string_view what)
+		{
+			if (error.GetCode() == ErrorCode::Gpu)
+				FatalError(FatalErrorKind::OutOfMemory, std::format("Cannot create {}: {}", what, error.ToString()));
+			return std::move(error).WithContext(std::format("while creating {}", what));
+		}
 		constexpr std::string_view EditorScreenshotOption = "--editor-screenshot";
 
 		constexpr std::array EditorAppCommandLineOptions = {
@@ -68,7 +105,8 @@ namespace Engine {
 				.Name = ViewportScreenshotOption,
 				.Value = CommandLineValue::Required,
 				.ValueName = "path",
-				.Description = "After the last frame of a --frames run, write a 640x360 viewport screenshot to this PNG file.",
+				.Description = "After the last frame of a --frames run, write a 640x360 screenshot of the viewport (the view under the UI) to "
+							   "this PNG file.",
 			},
 			CommandLineOption{
 				.Name = EditorScreenshotOption,
@@ -256,11 +294,10 @@ namespace Engine {
 		return {};
 	}
 
-	void EditorApp::State::Release()
+	void EditorApp::State::ReleaseServer()
 	{
 		Batch.reset();
 		Server.reset();
-		Editor.reset();
 	}
 
 	Status EditorApp::OnInitialize()
@@ -268,7 +305,7 @@ namespace Engine {
 		GetProcessContext().SetFatalErrorHook({ .Function = &Utils::OnEditorFatalError, .UserData = nullptr });
 		Status initialized = InitializeEditor();
 		// Run calls OnShutdown only after a successful OnInitialize, and destroys the engine context and its device next:
-		// what was built (the viewport capture's GPU objects, the editor the server refers to) and the hook go now.
+		// what was built (the GPU objects, the editor the server refers to) and the hook go now.
 		if (!initialized)
 			OnShutdown();
 		return initialized;
@@ -276,27 +313,17 @@ namespace Engine {
 
 	Status EditorApp::InitializeEditor()
 	{
-		// The viewport capture owns its pipeline from startup (§8.12); creating a pipeline at startup that the device has no
-		// memory for is fatal (§8.14 item 7).
 		EngineContext& context = GetContext();
 		ScreenshotCaptures captures;
 		SystemErrorHandler systemErrors;
-		if (GraphicsDevice* device = context.GetGraphicsDevice())
+		if (context.GetGraphicsDevice() != nullptr)
 		{
-			Result<Scope<ViewportCapture>> capture = ViewportCapture::Create(*device, *context.GetPipelineFactory());
-			if (!capture.has_value())
-			{
-				if (capture.error().GetCode() == ErrorCode::Gpu)
-					FatalError(FatalErrorKind::OutOfMemory, std::format("Cannot create the viewport capture: {}", capture.error().ToString()));
-				return std::unexpected(std::move(capture).error().WithContext("while creating the viewport capture"));
-			}
-			m_ViewportCapture = std::move(*capture);
-
 			// The captures and the system-error mapping refer to this application, which outlives the server (OnShutdown
-			// releases the server first).
-			captures.Viewport = [this](uint32_t width, uint32_t height)
+			// releases the server first). They render through the GPU objects InitializeRendering creates below, before the
+			// first frame serves a request.
+			captures.View = [this](const RenderSnapshot& snapshot, const ViewportScreenshotRequest& request)
 			{
-				return CaptureViewport(width, height);
+				return CaptureView(snapshot, request);
 			};
 			captures.EditorUi = [this]()
 			{
@@ -304,26 +331,56 @@ namespace Engine {
 			};
 			// A Vulkan error thrown out of NVRHI inside a method (vk::SystemError, §4.6 item 2) ends the process like the
 			// frame-boundary catch (App/FrameLoop.cpp) would, instead of becoming an Internal response on a lost device.
-			systemErrors = [this](const std::system_error& error, std::string_view method)
-			{
-				if (error.code().category() == vk::errorCategory())
-				{
-					RaiseVulkanError(GetContext().GetGraphicsDevice(), static_cast<VkResult>(error.code().value()),
-						std::format("Vulkan error in automation method '{}': {}", method, error.what()));
-				}
-			};
+			systemErrors = MakeVulkanSystemErrorHandler(GetContext());
 		}
 
-		return m_State->Initialize(*this, std::move(captures), std::move(systemErrors));
+		ENGINE_TRY(m_State->Initialize(*this, std::move(captures), std::move(systemErrors)));
+		return InitializeRendering();
+	}
+
+	Status EditorApp::InitializeRendering()
+	{
+		// Only an editor with a device and an EditorContext renders views (the one-shot modes --dump-reference and
+		// --bake-engine-assets create no editor).
+		EngineContext& context = GetContext();
+		GraphicsDevice* device = context.GetGraphicsDevice();
+		if (device == nullptr || m_State->Editor == nullptr)
+			return {};
+
+		// Every pipeline is created at startup (§8.12), and a startup creation the device has no memory for is fatal (§8.14
+		// item 7).
+		AssetManager& assets = m_State->Editor->GetAssets();
+		Scope<Rendering> rendering = CreateScope<Rendering>();
+		rendering->Cache = CreateScope<GpuResourceCache>(*device, assets);
+		Result<Scope<SceneRendererPipelines>> pipelines = SceneRendererPipelines::Create(*device, *context.GetPipelineFactory());
+		if (!pipelines.has_value())
+			return std::unexpected(Utils::CheckStartupGpuObject(std::move(pipelines).error(), "the scene renderer's pipelines"));
+		rendering->Pipelines = std::move(*pipelines);
+		Result<Scope<ViewportCapture>> capture = ViewportCapture::CreateForScenes(*device, *rendering->Pipelines, *rendering->Cache, assets);
+		if (!capture.has_value())
+			return std::unexpected(Utils::CheckStartupGpuObject(std::move(capture).error(), "the viewport capture"));
+		rendering->Capture = std::move(*capture);
+		Window& window = *context.GetWindow();
+		const SceneRendererSpecification viewport{
+			.Width = std::max(window.GetFramebufferWidth(), 1U),
+			.Height = std::max(window.GetFramebufferHeight(), 1U),
+		};
+		Result<Scope<SceneRenderer>> renderer = SceneRenderer::Create(*device, *rendering->Pipelines, *rendering->Cache, assets, viewport);
+		if (!renderer.has_value())
+			return std::unexpected(Utils::CheckStartupGpuObject(std::move(renderer).error(), "the viewport's scene renderer"));
+		rendering->Viewport = std::move(*renderer);
+		m_Rendering = std::move(rendering);
+		return {};
 	}
 
 	void EditorApp::OnShutdown()
 	{
 		// The server first (its pending operations are cancelled against a live editor, and it holds the captures), then the
-		// editor (the project lock), then the viewport capture, then the hook. Also what a failed OnInitialize has built,
-		// any part of which may be missing.
-		m_State->Release();
-		m_ViewportCapture.reset();
+		// GPU objects (the cache refers to the editor's asset manager), then the editor (the project lock), then the hook.
+		// Also what a failed OnInitialize has built, any part of which may be missing.
+		m_State->ReleaseServer();
+		m_Rendering.reset();
+		m_State->Editor.reset();
 		GetProcessContext().SetFatalErrorHook({});
 	}
 
@@ -379,16 +436,93 @@ namespace Engine {
 		// Asset hot reload polls on the frame clock (a ManualClock when headless, so headless runs are deterministic).
 		State& state = *m_State;
 		state.ElapsedSeconds += frame.UnscaledDeltaTime;
+		const Window& window = *GetContext().GetWindow();
+		const uint32_t width = window.GetFramebufferWidth();
+		const uint32_t height = window.GetFramebufferHeight();
 		if (state.Editor != nullptr)
 		{
+			// The game view is extracted at the window's size (§5.7 frame phase step 4); a minimized window keeps the last.
+			EditorPlayController& play = state.Editor->GetPlay();
+			if (PlaySession* session = play.GetSession(); session != nullptr && width > 0 && height > 0)
+				session->SetViewSize(width, height);
 			// The play session's frame phase (§4.2 step 6, §5.7), then the editor's own frame work.
-			state.Editor->GetPlay().OnUpdate(frame);
+			play.OnUpdate(frame);
 			state.Editor->Update(state.ElapsedSeconds);
 		}
+
+		// The view of this frame, after everything that changes the scenes this frame.
+		if (m_Rendering != nullptr && width > 0 && height > 0)
+			PrepareViewportView(width, height);
 
 		const std::optional<uint64_t> maxFrames = GetSpecification().MaxFrames;
 		if (maxFrames.has_value() && frame.FrameIndex + 1 == *maxFrames && !WriteScreenshots())
 			RequestExit(ExitCode::Failed);
+	}
+
+	void EditorApp::PrepareViewportView(uint32_t width, uint32_t height)
+	{
+		Rendering& rendering = *m_Rendering;
+		const PlaySession* session = m_State->Editor != nullptr ? m_State->Editor->GetPlay().GetSession() : nullptr;
+		rendering.UsesSessionView = session != nullptr && session->GetMode() == PlayMode::Play;
+		if (rendering.UsesSessionView)
+			return; // the session extracted its game view in its frame phase
+		Result<RenderSnapshot> view = ExtractViewportView(width, height);
+		if (view.has_value())
+		{
+			rendering.ViewSnapshot = std::move(*view);
+			rendering.IsViewFailing = false;
+			return;
+		}
+		if (!rendering.IsViewFailing)
+			ENGINE_ERROR("Cannot extract the viewport's view: {}", view.error());
+		rendering.IsViewFailing = true;
+		rendering.ViewSnapshot = RenderSnapshot{};
+	}
+
+	void EditorApp::OnRender(RenderContext& context)
+	{
+		if (m_Rendering == nullptr)
+			return;
+		Rendering& rendering = *m_Rendering;
+		SceneRenderer& viewport = *rendering.Viewport;
+		GpuProfileScope scope(*context.Profiler, *context.CommandList, "Viewport");
+		// Render targets are created at startup or resize, and one the device has no memory for is fatal (§8.14 item 7).
+		const Status resized = viewport.Resize(context.Width, context.Height);
+		if (!resized.has_value())
+			FatalError(FatalErrorKind::OutOfMemory, std::format("Cannot resize the viewport's targets: {}", resized.error().ToString()));
+
+		// The blit's pipeline is created for the frame target's format on the first frame that renders into it (§8.12, as
+		// ImGui's), and again if the format changes.
+		const nvrhi::FramebufferInfo& target = context.Framebuffer->getFramebufferInfo();
+		if (rendering.Blit == nullptr || target != rendering.BlitFramebuffer)
+		{
+			Result<Scope<BlitPass>> blit = BlitPass::Create(*context.Device, *GetContext().GetPipelineFactory(), target);
+			if (!blit.has_value())
+			{
+				const Error error = Utils::CheckStartupGpuObject(std::move(blit).error(), "the viewport's blit");
+				if (!rendering.IsRenderFailing)
+					ENGINE_ERROR("Cannot draw the viewport: {}", error);
+				rendering.IsRenderFailing = true;
+				return;
+			}
+			rendering.Blit = std::move(*blit);
+			rendering.BlitFramebuffer = target;
+		}
+
+		// Play mode shows the session's game view, extracted in its frame phase; every other mode the view OnUpdate extracted.
+		const PlaySession* session = m_State->Editor != nullptr ? m_State->Editor->GetPlay().GetSession() : nullptr;
+		const RenderSnapshot& snapshot = rendering.UsesSessionView && session != nullptr ? session->GetLastExtraction() : rendering.ViewSnapshot;
+		// A render error names a draw it skipped (a non-finite matrix); the rest of the view rendered and is shown.
+		const Status rendered = viewport.Render(*context.CommandList, snapshot);
+		const Status blitted = rendering.Blit->Record(*context.CommandList, *viewport.GetFinalTexture(), *context.Framebuffer);
+		// A binding set the device has no memory for is fatal like any GPU object (§8.14 item 7); anything else is logged
+		// once per run of failing frames.
+		if (!blitted.has_value() && blitted.error().GetCode() == ErrorCode::Gpu)
+			FatalError(FatalErrorKind::OutOfMemory, std::format("Cannot draw the viewport: {}", blitted.error().ToString()));
+		const Status& drawn = blitted.has_value() ? rendered : blitted;
+		if (!drawn.has_value() && !rendering.IsRenderFailing)
+			ENGINE_ERROR("Cannot draw the viewport: {}", drawn.error());
+		rendering.IsRenderFailing = !drawn.has_value();
 	}
 
 	void EditorApp::OnImGuiRender()
@@ -396,11 +530,54 @@ namespace Engine {
 		ImGui::ShowDemoWindow();
 	}
 
+	Result<RenderSnapshot> EditorApp::ExtractViewportView(uint32_t width, uint32_t height)
+	{
+		EditorContext* editor = m_State->Editor.get();
+		if (editor != nullptr)
+		{
+			// While playing, the game view (the session's primary camera); while simulating, the scene-view camera (§5.6).
+			if (PlaySession* session = editor->GetPlay().GetSession())
+			{
+				RenderExtractionRequest request{ .Width = width, .Height = height };
+				if (session->GetMode() == PlayMode::Simulate)
+				{
+					request.Camera = RenderCameraSource::Explicit;
+					request.ExplicitCamera = editor->GetSceneViewCamera();
+				}
+				return session->ExtractView(request);
+			}
+			// The edit scene's world matrices are runtime-only components: recomputing them leaves its revision unchanged.
+			if (editor->HasScene())
+			{
+				Scene& scene = editor->GetScene();
+				TransformSystem::Update(scene);
+				return ExtractRenderSnapshot(scene,
+					{ .Camera = RenderCameraSource::Explicit, .ExplicitCamera = editor->GetSceneViewCamera(), .Width = width, .Height = height });
+			}
+		}
+		// No scene: the empty view, cleared to the default clear colour.
+		RenderSnapshot empty;
+		empty.Camera.ViewportWidth = width;
+		empty.Camera.ViewportHeight = height;
+		return empty;
+	}
+
+	Result<Image> EditorApp::CaptureView(const RenderSnapshot& snapshot, const ViewportScreenshotRequest& request)
+	{
+		if (m_Rendering == nullptr)
+			return MakeError(ErrorCode::Unsupported, "screenshots need a renderer (not --renderer none)");
+		// §8.13: screenshots render after the asset manager has published every load and reload requested so far.
+		if (AssetManager* assets = GetContext().GetAssetManager())
+			assets->WaitIdle();
+		return m_Rendering->Capture->Capture(request, snapshot);
+	}
+
 	Result<Image> EditorApp::CaptureViewport(uint32_t width, uint32_t height)
 	{
-		if (m_ViewportCapture == nullptr)
+		if (m_Rendering == nullptr)
 			return MakeError(ErrorCode::Unsupported, "screenshots need a renderer (not --renderer none)");
-		return m_ViewportCapture->Capture({ .Width = width, .Height = height, .MaxDimension = 0 });
+		ENGINE_TRY_ASSIGN(const RenderSnapshot snapshot, ExtractViewportView(width, height));
+		return CaptureView(snapshot, { .Width = width, .Height = height, .MaxDimension = 0 });
 	}
 
 	Result<Image> EditorApp::CaptureEditorUi()

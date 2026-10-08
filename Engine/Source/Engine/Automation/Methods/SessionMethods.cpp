@@ -1,17 +1,20 @@
-#include "EditorPCH.h"
-#include "EditorCore/Automation/SessionMethods.h"
+#include "EnginePCH.h"
+#include "Engine/Automation/Methods/SessionMethods.h"
 
-#include "EditorCore/Automation/AutomationServer.h"
-#include "EditorCore/Automation/EditorMethodContext.h"
-#include "EditorCore/Automation/Private/MethodSupport.h"
-#include "EditorCore/EditorContext.h"
+#include "Engine/Automation/Methods/AutomationMethodContext.h"
+#include "Engine/Automation/Methods/PlayMethods.h"
+#include "Engine/Automation/Methods/SharedMethodSupport.h"
 #include "Engine/Automation/Protocol/JsonRpc.h"
 #include "Engine/Automation/Protocol/MethodRegistry.h"
-#include "Engine/Core/FileSystem.h"
 #include "Engine/Platform/Process.h"
 #include "Engine/Reflection/TypeRegistry.h"
+#include "Engine/Session/PlaySession.h"
 
 #include <nlohmann/json.hpp>
+
+#include <algorithm>
+#include <format>
+#include <utility>
 
 namespace Engine {
 
@@ -20,26 +23,6 @@ namespace Engine {
 		// session.hello's client.name: 1 to 64 printable ASCII characters (the rule Handshake.h's ParseHelloRequest applies
 		// on the I/O thread; in-process callers reach the handler without it).
 		constexpr size_t MaxClientNameLength = 64;
-
-		static std::vector<std::string> GetCapabilities(const AutomationServer& server)
-		{
-			std::vector<std::string> capabilities = { "dryRun", "ifRevision", "batch", "pendingOperations", "offload" };
-			if (server.GetSpecification().TestHooks)
-				capabilities.emplace_back("testHooks");
-			return capabilities;
-		}
-
-		static SessionProjectSummary MakeSessionProjectSummary(const EditorContext& editor)
-		{
-			SessionProjectSummary summary;
-			if (!editor.HasProject())
-				return summary;
-			summary.Open = true;
-			summary.Name = editor.GetProject().GetSettings().Name;
-			summary.ProjectFile = FileSystem::PathToUtf8(editor.GetProject().GetProjectFile());
-			summary.ReadOnly = editor.IsReadOnly();
-			return summary;
-		}
 
 		static Status ValidateHello(const SessionHelloParams& params)
 		{
@@ -72,67 +55,49 @@ namespace Engine {
 
 	namespace Automation {
 
-		Result<SessionHelloResult> SessionHello(EditorMethodContext& context, const SessionHelloParams& params)
+		Result<SessionHelloResult> SessionHello(AutomationMethodContext& context, const SessionHelloParams& params)
 		{
 			// The I/O thread already checked the token and the version of TCP clients (Handshake.h); in-process callers have no
 			// token, and get the same param checks here.
 			ENGINE_TRY(Utils::ValidateHello(params));
 
+			SessionHostDescription host = context.DescribeSession();
 			SessionHelloResult result;
 			result.Protocol = CurrentProtocolVersion.ToString();
 			result.EngineVersion = std::string(EngineVersionString);
 			result.Client = context.GetRequest().Client;
-			result.Capabilities = Utils::GetCapabilities(context.GetServer());
-			result.Project = Utils::MakeSessionProjectSummary(context.GetEditor());
+			result.Capabilities = std::move(host.Capabilities);
+			result.Project = std::move(host.Project);
 			return result;
 		}
 
-		Result<SessionInfoResult> SessionInfo(EditorMethodContext& context, const NoParams& /*params*/)
+		Result<SessionInfoResult> SessionInfo(AutomationMethodContext& context, const NoParams& /*params*/)
 		{
-			const EditorContext& editor = context.GetEditor();
-			const AutomationServer& server = context.GetServer();
+			SessionHostDescription host = context.DescribeSession();
 			SessionInfoResult result;
 			result.Protocol = CurrentProtocolVersion.ToString();
 			result.EngineVersion = std::string(EngineVersionString);
 			result.ProcessId = Process::GetCurrentId();
-			result.Capabilities = Utils::GetCapabilities(server);
-			result.Project = Utils::MakeSessionProjectSummary(editor);
-			result.Renderer = server.GetSpecification().RendererName;
-			result.ReadOnly = editor.HasProject() && editor.IsReadOnly();
-			result.Headless = server.GetSpecification().Headless;
-
-			std::vector<AutomationClientInfo> clients = server.GetClients();
-			std::sort(clients.begin(), clients.end(), [](const AutomationClientInfo& left, const AutomationClientInfo& right)
+			result.Capabilities = std::move(host.Capabilities);
+			result.Project = std::move(host.Project);
+			const PlaySession* session = context.GetPlaySession();
+			result.PlayState = std::string(PlayRunStateToString(GetPlayRunState(session)));
+			result.Renderer = std::move(host.Renderer);
+			if (session != nullptr && session->IsLockstep())
+				result.LockstepOwner = context.GetClientName(session->GetLockstepOwner());
+			result.ReadOnly = host.ReadOnly;
+			result.Headless = host.Headless;
+			result.Clients = std::move(host.Clients);
+			std::sort(result.Clients.begin(), result.Clients.end(), [](const SessionClientSummary& left, const SessionClientSummary& right)
 			{
 				return left.Id < right.Id;
 			});
-			for (const AutomationClientInfo& client : clients)
-			{
-				SessionClientSummary summary;
-				summary.Id = client.Id;
-				summary.Name = client.Name;
-				summary.Version = client.Version;
-				summary.InProcess = client.InProcess;
-				result.Clients.push_back(std::move(summary));
-			}
 			return result;
 		}
 
-		Result<SessionShutdownResult> SessionShutdown(EditorMethodContext& context, const SessionShutdownParams& params)
+		Result<SessionShutdownResult> SessionShutdown(AutomationMethodContext& context, const SessionShutdownParams& params)
 		{
-			EditorContext& editor = context.GetEditor();
-			SessionShutdownResult result;
-			const bool mustSave = params.Save && editor.HasScene() && editor.IsSceneDirty();
-			ENGINE_TRY(Utils::CheckDirtyScene(editor, params.Save, params.Force && !params.Save, "force"));
-			if (mustSave)
-			{
-				ENGINE_TRY_ASSIGN(const VfsPath path, Utils::GetOwnScenePath(editor));
-				ENGINE_TRY(Utils::SaveOpenScene(editor, path));
-				result.Saved = true;
-				result.SavedFiles.push_back(Utils::ToProjectRelative(path));
-			}
-			editor.RequestShutdown(0);
-			return result;
+			return context.Shutdown(params);
 		}
 
 	}
@@ -144,7 +109,7 @@ namespace Engine {
 			.Field("version", &SessionClientInfo::Version, "The client's version; free text, may be empty.");
 
 		registry.Struct<SessionHelloParams>("SessionHelloParams", "The params of session.hello, the first request of every connection.")
-			.Field("token", &SessionHelloParams::Token, "The session token from the editor's session file; never logged or echoed.")
+			.Field("token", &SessionHelloParams::Token, "The session token from the server's session file; never logged or echoed.")
 			.Field("protocolVersion", &SessionHelloParams::Protocol, "The protocol version the client speaks, \"<major>.<minor>\".")
 			.Field("client", &SessionHelloParams::Client, "Who connects.");
 
@@ -168,24 +133,24 @@ namespace Engine {
 			.Field("version", &SessionClientSummary::Version, "The client's version.")
 			.Field("inProcess", &SessionClientSummary::InProcess, "A batch, command-line or test caller rather than a TCP connection.");
 
-		registry.Struct<SessionInfoResult>("SessionInfoResult", "The editor session: versions, project, play state, renderer and clients.")
+		registry.Struct<SessionInfoResult>("SessionInfoResult", "The host's session (the editor's or the exported game's): versions, project, play state, renderer and clients.")
 			.Field("protocolVersion", &SessionInfoResult::Protocol, "The protocol version the server speaks.")
 			.Field("engineVersion", &SessionInfoResult::EngineVersion, "The engine's version.")
-			.Field("pid", &SessionInfoResult::ProcessId, "The editor's process id.")
+			.Field("pid", &SessionInfoResult::ProcessId, "The host's process id.")
 			.Field("capabilities", &SessionInfoResult::Capabilities, "The optional protocol features the server offers.")
 			.Field("project", &SessionInfoResult::Project, "The open project.")
 			.Field("playState", &SessionInfoResult::PlayState, "\"Edit\", \"Play\", \"Simulate\" or \"Paused\".")
 			.Field("renderer", &SessionInfoResult::Renderer, "\"vulkan\" or \"none\" (--renderer).")
 			.Field("lockstepOwner", &SessionInfoResult::LockstepOwner, "The name of the client that owns lockstep; empty when none.")
-			.Field("readOnly", &SessionInfoResult::ReadOnly, "Whether the editor denies mutations (--read-only).")
-			.Field("headless", &SessionInfoResult::Headless, "Whether the editor runs without a visible window (--headless).")
+			.Field("readOnly", &SessionInfoResult::ReadOnly, "Whether the host denies mutations: the editor with --read-only, the Runtime always.")
+			.Field("headless", &SessionInfoResult::Headless, "Whether the host runs without a visible window (--headless).")
 			.Field("clients", &SessionInfoResult::Clients, "The connected clients, by id.");
 
 		registry.Struct<SessionShutdownParams>("SessionShutdownParams", "The params of session.shutdown.")
-			.Field("save", &SessionShutdownParams::Save, "Save the open scene first when it has unsaved changes.")
-			.Field("force", &SessionShutdownParams::Force, "Exit even when the open scene has unsaved changes, discarding them.");
+			.Field("save", &SessionShutdownParams::Save, "The editor saves the open scene first when it has unsaved changes (the Runtime has none to save).")
+			.Field("force", &SessionShutdownParams::Force, "The editor exits even when the open scene has unsaved changes, discarding them.");
 
-		registry.Struct<SessionShutdownResult>("SessionShutdownResult", "What session.shutdown saved before the editor exits.")
+		registry.Struct<SessionShutdownResult>("SessionShutdownResult", "What session.shutdown saved before the host exits (always nothing in the Runtime).")
 			.Field("saved", &SessionShutdownResult::Saved, "Whether the open scene was written.")
 			.Field("savedFiles", &SessionShutdownResult::SavedFiles, "The project-relative files written.");
 	}
@@ -201,8 +166,8 @@ namespace Engine {
 		methods.Add(
 			{
 				.Name = "session.hello",
-				.Description = "Opens the session: the first request of every connection, with the token from the editor's session file. Reports "
-							   "the protocol and engine versions, the client id, the capabilities and the open project.",
+				.Description = "Opens the session: the first request of every connection, with the token from the server's session file. Reports "
+							   "the protocol and engine versions, the client id, the capabilities and the open project (the game in the Runtime).",
 				.RequiredParams = { "token", "protocolVersion", "client" },
 				.AvailableInRuntime = true,
 				.AvailableInLauncher = true,
@@ -213,8 +178,8 @@ namespace Engine {
 		methods.Add(
 			{
 				.Name = "session.info",
-				.Description = "Reports the editor session: versions, capabilities, the open project, play state, renderer, lockstep owner, the "
-							   "read-only flag and the connected clients.",
+				.Description = "Reports the host's session (the editor's or the exported game's): versions, capabilities, the open project, play "
+							   "state, renderer, lockstep owner, the read-only flag and the connected clients.",
 				.AvailableInRuntime = true,
 				.AvailableInLauncher = true,
 				.AllowedInBatch = true,
@@ -227,8 +192,8 @@ namespace Engine {
 		methods.Add(
 			{
 				.Name = "session.shutdown",
-				.Description = "Exits the editor after the response. With unsaved changes in the open scene it needs save (write them first) or "
-							   "force (discard them).",
+				.Description = "Exits the host after the response. The editor with unsaved changes in the open scene needs save (write them "
+							   "first) or force (discard them); the Runtime saves nothing and needs neither.",
 				.AvailableInRuntime = true,
 				.AvailableInLauncher = true,
 				.Examples = { { .Description = "Save the open scene, then exit.", .Params = saveExample } },

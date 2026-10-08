@@ -16,6 +16,7 @@
 #include "Engine/Scene/Components/BuiltinComponents.h"
 #include "Support/HeadlessGpuFixture.h"
 #include "Support/TempDirectory.h"
+#include "Support/TestGame.h"
 #include "Support/TestOptions.h"
 
 namespace Engine {
@@ -267,6 +268,38 @@ namespace Engine {
 			CHECK(context.GetPipelineFactory() == nullptr);
 		}
 
+		TEST_CASE("EngineContext: with an Engine.pak the ShaderLibrary reads the pak's shaders" * doctest::test_suite(Test::GpuSuite))
+		{
+			// Docs/Decisions/0012-m7-decisions.md decision 10: an exported game renders with its pak's SPIR-V, never the build
+			// machine's shader directory, so no shaders:// is mounted.
+			if (!Test::ProbeGpuForProcess())
+				return;
+			const Test::TempDirectory directory("EnginePakShaders");
+			const Result<std::filesystem::path> game = Test::WriteTestGame(directory.GetPath(), { .Shaders = true });
+			REQUIRE_MESSAGE(game.has_value(), game.error().ToString());
+			GraphicsSpecification graphics;
+			graphics.Validation = true;
+			graphics.SynchronizationValidation = true;
+			graphics.MaxApiVersion = Test::GetTestOptions().VulkanApi;
+			Result<Scope<EngineContext>> created =
+				EngineContext::Create({ .WorkerCount = 0, .Graphics = graphics, .EnginePak = directory / "Data/Engine.pak" });
+			REQUIRE_MESSAGE(created.has_value(), created.error().ToString());
+			EngineContext& context = **created;
+			CHECK_FALSE(context.GetVfs().IsMounted(ShaderScheme));
+			REQUIRE(context.GetShaderLibrary() != nullptr);
+			CHECK(context.GetShaderLibrary()->GetRoot().ToString() == "engine://Shaders");
+			{
+				// The handle goes before the device.
+				const Result<nvrhi::ShaderHandle> shader = context.GetShaderLibrary()->Get("Triangle", "VSMain");
+				REQUIRE_MESSAGE(shader.has_value(), shader.error().ToString());
+				CHECK(*shader != nullptr);
+			}
+
+			const GpuMessageCounts counts = context.DestroyGraphics();
+			CHECK(counts.Errors == 0);
+			CHECK(counts.Warnings == 0);
+		}
+
 		TEST_CASE("EngineContext: EngineContextStepToString names every step")
 		{
 			CHECK(EngineContextStepToString(EngineContextStep::Services) == "Services");
@@ -276,10 +309,10 @@ namespace Engine {
 			CHECK(EngineContextStepToString(EngineContextStep::Graphics) == "Graphics");
 		}
 
-		TEST_CASE("EngineContext: an Engine.pak is mounted as engine:// and kept for the asset manager" * doctest::skip(true))
+		TEST_CASE("EngineContext: an Engine.pak is mounted as engine:// and kept for the asset manager")
 		{
-			// Skipped skeleton of the M7 contract (Docs/Decisions/0012-m7-decisions.md decision 10); stream C. The pak holds
-			// one plain file; a context without a device needs no shaders.
+			// Docs/Decisions/0012-m7-decisions.md decision 10. The pak holds one plain file; a context without a device needs
+			// no shaders.
 			const Test::TempDirectory directory("EnginePak");
 			PakWriter writer;
 			const std::string text = "engine resource";

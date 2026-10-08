@@ -5,9 +5,13 @@
 #include "EditorCore/Automation/Private/MethodSupport.h"
 #include "EditorCore/EditorContext.h"
 #include "EditorCore/Play/EditorPlayController.h"
+#include "EditorCore/Project/ProjectManager.h"
 #include "Engine/App/EngineContext.h"
-#include "Engine/Core/Assert.h"
-#include "Engine/Core/UUID.h"
+#include "Engine/AssetPipeline/EditorAssetManager.h"
+#include "Engine/Automation/Methods/SceneMethods.h"
+#include "Engine/Automation/Methods/SessionMethods.h"
+#include "Engine/Automation/Methods/SharedMethodSupport.h"
+#include "Engine/Core/FileSystem.h"
 #include "Engine/Renderer/RenderSnapshot.h"
 #include "Engine/Renderer/ViewportCapture.h"
 #include "Engine/Scene/Entity.h"
@@ -15,20 +19,6 @@
 #include "Engine/Session/PlaySession.h"
 
 namespace Engine {
-
-	namespace Utils {
-
-		static bool IsHexDigit(char character)
-		{
-			return (character >= '0' && character <= '9') || (character >= 'a' && character <= 'f') || (character >= 'A' && character <= 'F');
-		}
-
-		static bool IsHexText(std::string_view text)
-		{
-			return !text.empty() && std::all_of(text.begin(), text.end(), &IsHexDigit);
-		}
-
-	}
 
 	EditorMethodContext::EditorMethodContext(EditorContext& editor, AutomationServer& server, MethodRequest request)
 		: AutomationMethodContext(TypeKeyOf<EditorMethodContext>(), std::move(request)), m_Editor(&editor), m_Server(&server)
@@ -72,63 +62,7 @@ namespace Engine {
 
 	Result<Entity> EditorMethodContext::ResolveEntity(Scene& scene, std::string_view reference, std::string_view pointer) const
 	{
-		if (reference.empty())
-		{
-			return std::unexpected(Utils::MakeParamError(ErrorCode::InvalidArgument, pointer, "an entity reference must not be empty",
-				"give 16 hex digits, a unique id prefix of at least 6 hex digits, or a path such as \"/Game/Board\""));
-		}
-
-		if (reference.front() == '/')
-		{
-			Result<Entity> entity = scene.ResolveEntityPath(reference);
-			if (!entity)
-				return std::unexpected(Utils::LocateAtParam(entity.error(), pointer));
-			return *entity;
-		}
-
-		if (Utils::IsHexText(reference) && reference.size() == UUID::TextLength)
-		{
-			const std::optional<UUID> id = UUID::FromString(reference);
-			const Entity entity = id.has_value() ? scene.FindEntityByID(*id) : Entity();
-			if (!entity.IsValid())
-				return std::unexpected(Utils::MakeParamError(ErrorCode::NotFound, pointer, std::format("no entity has the id {}", reference)));
-			return entity;
-		}
-
-		if (UUID::IsValidPrefix(reference))
-		{
-			std::vector<Entity> matches;
-			scene.ForEachCanonical([&matches, reference](Entity entity)
-			{
-				if (entity.GetUUID().MatchesPrefix(reference))
-					matches.push_back(entity);
-			});
-			if (matches.empty())
-				return std::unexpected(Utils::MakeParamError(ErrorCode::NotFound, pointer, std::format("no entity id starts with '{}'", reference)));
-			if (matches.size() > 1)
-			{
-				std::vector<ErrorIssue> candidates;
-				for (const Entity match : matches)
-				{
-					ErrorIssue issue;
-					issue.JsonPointer = std::string(pointer);
-					issue.Message = std::format("candidate {} '{}'", match.GetUUID().ToString(), scene.GetEntityPath(match));
-					issue.Suggestions = { match.GetUUID().ToString() };
-					candidates.push_back(std::move(issue));
-				}
-				ErrorLocation location;
-				location.JsonPointer = std::string(pointer);
-				return std::unexpected(
-					Error(ErrorCode::InvalidArgument, std::format("the id prefix '{}' is ambiguous: {} entities match", reference, matches.size()))
-						.WithHint("give more hex digits, or the full 16-digit id")
-						.WithLocation(std::move(location))
-						.WithIssues(std::move(candidates)));
-			}
-			return matches.front();
-		}
-
-		return std::unexpected(Utils::MakeParamError(ErrorCode::InvalidArgument, pointer, std::format("'{}' is not an entity reference", reference),
-			"give 16 hex digits, a unique id prefix of at least 6 hex digits, or a path starting with '/' such as \"/Game/Board\""));
+		return Utils::ResolveEntityReference(scene, reference, pointer);
 	}
 
 	Result<VfsPath> EditorMethodContext::ResolveProjectPath(std::string_view path, std::string_view pointer, std::string_view extension) const
@@ -167,12 +101,7 @@ namespace Engine {
 
 	EntitySummary EditorMethodContext::MakeEntitySummary(ConstEntity entity) const
 	{
-		ENGINE_ASSERT(entity.IsValid(), "MakeEntitySummary needs a valid entity");
-		EntitySummary summary;
-		summary.Id = entity.GetUUID().ToString();
-		summary.Name = entity.GetName();
-		summary.Path = entity.GetScene()->GetEntityPath(entity);
-		return summary;
+		return Utils::SummarizeEntity(entity);
 	}
 
 	PlaySession* EditorMethodContext::GetPlaySession() const
@@ -221,6 +150,74 @@ namespace Engine {
 	Result<std::string> EditorMethodContext::WriteOutputFile(std::string_view extension, std::span<const std::byte> bytes)
 	{
 		return m_Server->WriteOutputFile(extension, bytes);
+	}
+
+	SessionHostDescription EditorMethodContext::DescribeSession() const
+	{
+		const AutomationServerSpecification& specification = m_Server->GetSpecification();
+		SessionHostDescription host;
+		host.Capabilities = { "dryRun", "ifRevision", "batch", "pendingOperations", "offload" };
+		if (specification.TestHooks)
+			host.Capabilities.emplace_back("testHooks");
+		if (m_Editor->HasProject())
+		{
+			host.Project.Open = true;
+			host.Project.Name = m_Editor->GetProject().GetSettings().Name;
+			host.Project.ProjectFile = FileSystem::PathToUtf8(m_Editor->GetProject().GetProjectFile());
+			host.Project.ReadOnly = m_Editor->IsReadOnly();
+		}
+		host.Renderer = specification.RendererName;
+		host.ReadOnly = m_Editor->HasProject() && m_Editor->IsReadOnly();
+		host.Headless = specification.Headless;
+		for (const AutomationClientInfo& client : m_Server->GetClients())
+		{
+			host.Clients.push_back(
+				SessionClientSummary{ .Id = client.Id, .Name = client.Name, .Version = client.Version, .InProcess = client.InProcess });
+		}
+		return host;
+	}
+
+	Result<SessionShutdownResult> EditorMethodContext::Shutdown(const SessionShutdownParams& params)
+	{
+		EditorContext& editor = *m_Editor;
+		SessionShutdownResult result;
+		const bool mustSave = params.Save && editor.HasScene() && editor.IsSceneDirty();
+		ENGINE_TRY(Utils::CheckDirtyScene(editor, params.Save, params.Force && !params.Save, "force"));
+		if (mustSave)
+		{
+			ENGINE_TRY_ASSIGN(const VfsPath path, Utils::GetOwnScenePath(editor));
+			ENGINE_TRY(Utils::SaveOpenScene(editor, path));
+			result.Saved = true;
+			result.SavedFiles.push_back(Utils::ToProjectRelative(path));
+		}
+		editor.RequestShutdown(0);
+		return result;
+	}
+
+	SceneSummary EditorMethodContext::MakeSceneSummary(const Scene& scene) const
+	{
+		if (m_Editor->HasScene() && &m_Editor->GetScene() == &scene)
+			return Utils::MakeSceneSummary(*m_Editor);
+		// The play scene, a copy of the edit scene: its file and name, the editor's revision, and never dirty, because it is
+		// never saved.
+		SceneSummary summary;
+		summary.Path = m_Editor->GetScenePath().has_value() ? Utils::ToProjectRelative(*m_Editor->GetScenePath()) : std::string();
+		summary.Name = scene.GetName();
+		summary.Revision = ToAutomationCounter(m_Editor->GetRevision());
+		summary.Dirty = false;
+		summary.EntityCount = ToAutomationCounter(scene.GetEntityCount());
+		return summary;
+	}
+
+	AssetManager* EditorMethodContext::GetAssets() const
+	{
+		return &m_Editor->GetAssets();
+	}
+
+	std::chrono::steady_clock::time_point EditorMethodContext::GetWallClockTime() const
+	{
+		const AutomationServerSpecification& specification = m_Server->GetSpecification();
+		return specification.WallClock ? specification.WallClock() : std::chrono::steady_clock::now();
 	}
 
 }

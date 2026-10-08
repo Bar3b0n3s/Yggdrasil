@@ -19,10 +19,11 @@ namespace Engine {
 	};
 
 	// Every editor automation struct and enum, in dependency order: RegisterAutomationCommonTypes, the shared domains'
-	// types (RegisterSharedMethodTypes, Engine/Automation/Methods, M7), the importers' settings types
-	// (RegisterAssetPipelineTypes, M6), RegisterProjectValidatorTypes, then each editor domain's Register*MethodTypes
-	// (session, rpc, project, scene, entity, component, edit, observe, screenshot, asset, prefab, export, debug). It is the
-	// editor's EngineContextSpecification::RegisterTypes.
+	// types (RegisterSharedMethodTypes, Engine/Automation/Methods, M7: input, play, viewport.screenshot, session, rpc and
+	// the scene, entity and observe reads), the importers' settings types (RegisterAssetPipelineTypes, M6),
+	// RegisterProjectValidatorTypes, then each editor domain's Register*MethodTypes (project, the editor's scene and entity
+	// methods, component, edit, docs.get, screenshot, asset, prefab, export, debug). It is the editor's
+	// EngineContextSpecification::RegisterTypes.
 	void RegisterEditorMethodTypes(TypeRegistry& registry);
 
 	// Every editor method: each editor domain's Register*Methods in the order above, then the shared methods

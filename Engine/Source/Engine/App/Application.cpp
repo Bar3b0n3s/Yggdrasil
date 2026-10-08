@@ -20,6 +20,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <filesystem>
 #include <format>
 #include <string>
@@ -153,6 +154,32 @@ namespace Engine {
 		bool IsImGuiFailing = false; // the last UI frame failed to render, so the next failure is not logged again
 	};
 
+	// --expect-no-errors (Application.h, step 3): counts every Error and Critical entry of every logger while it lives. The
+	// listener runs on whichever thread logs (jobs included), so the count is atomic; RemoveListener in the destructor
+	// returns only once the listener can no longer run.
+	struct Application::LoggedErrorCounter
+	{
+		LoggedErrorCounter()
+		{
+			ListenerId = Log::AddListener([this](const LogEntry& entry)
+			{
+				if (entry.Level == LogLevel::Error || entry.Level == LogLevel::Critical)
+					Count.fetch_add(1, std::memory_order_relaxed);
+			});
+		}
+
+		~LoggedErrorCounter()
+		{
+			Log::RemoveListener(ListenerId);
+		}
+
+		LoggedErrorCounter(const LoggedErrorCounter&) = delete;
+		LoggedErrorCounter& operator=(const LoggedErrorCounter&) = delete;
+
+		std::atomic<uint64_t> Count{ 0 };
+		uint64_t ListenerId = 0;
+	};
+
 	std::span<const CommandLineOption> GetEngineCommandLineOptions()
 	{
 		return Utils::EngineCommandLineOptions;
@@ -269,6 +296,11 @@ namespace Engine {
 			return ExitCode::InitFailed;
 		}
 
+		// --expect-no-errors counts from here: an error logged while the context, the rendering objects or the application
+		// initialize fails the run too.
+		if (m_Specification.ExpectNoErrors)
+			m_LoggedErrors = CreateScope<LoggedErrorCounter>();
+
 		// 1. Per-context initialization (§4.1 level 2), then the application's own.
 		WindowSpecification window = m_Specification.WindowSettings;
 		if (window.Title.empty())
@@ -338,8 +370,11 @@ namespace Engine {
 				gpuMessages.Errors, gpuMessages.Warnings);
 			exitCode = ExitCode::Failed;
 		}
-		exitCode = ApplyExpectNoErrors(exitCode);
+		// The rest of the context goes before --expect-no-errors decides, so an error logged while it tears down (the job
+		// system, the mounts, the event log) fails the run too; the counter is a process-level log listener.
 		m_Context.reset();
+		exitCode = ApplyExpectNoErrors(exitCode);
+		m_LoggedErrors.reset();
 		return exitCode;
 	}
 
@@ -618,8 +653,13 @@ namespace Engine {
 
 	int Application::ApplyExpectNoErrors(int exitCode) const
 	{
-		ENGINE_CONTRACT_STUB();
-		return exitCode;
+		if (m_LoggedErrors == nullptr || exitCode != ExitCode::Success)
+			return exitCode;
+		const uint64_t errors = m_LoggedErrors->Count.load(std::memory_order_relaxed);
+		if (errors == 0)
+			return exitCode;
+		ENGINE_CORE_ERROR("{} error(s) were logged during the run (--expect-no-errors)", errors);
+		return ExitCode::Failed;
 	}
 
 }

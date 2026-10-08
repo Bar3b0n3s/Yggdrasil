@@ -5,6 +5,8 @@
 #include "Engine/App/EngineContext.h"
 #include "Engine/App/ProcessContext.h"
 #include "Engine/Core/Log.h"
+#include "Engine/Core/VfsPath.h"
+#include "Engine/Core/VirtualFileSystem.h"
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Graphics/RenderContext.h"
 #include "Engine/Platform/Process.h"
@@ -220,6 +222,37 @@ namespace Engine {
 	}
 
 	// A headless application, which the headless Tests process can run in place.
+	namespace {
+
+		// A mount that serves nothing and logs an error when the context's file system destroys it: an error logged while the
+		// context tears down, after OnShutdown and the GPU services.
+		class ErrorAtTeardownMount final : public IMount
+		{
+		public:
+			~ErrorAtTeardownMount() override
+			{
+				ENGINE_ERROR("the test mount logged an error at teardown");
+			}
+
+			[[nodiscard]] Result<Buffer> ReadFile(const VfsPath& /*path*/) const override { return MakeError(ErrorCode::NotFound, "an empty mount"); }
+			[[nodiscard]] Result<Scope<IFileStream>> Open(const VfsPath& /*path*/) const override { return MakeError(ErrorCode::NotFound, "an empty mount"); }
+			[[nodiscard]] Status WriteFileAtomic(const VfsPath& /*path*/, std::span<const std::byte> /*data*/) override
+			{
+				return MakeError(ErrorCode::PermissionDenied, "a read-only mount");
+			}
+			[[nodiscard]] Result<FileInfo> GetInfo(const VfsPath& /*path*/) const override { return MakeError(ErrorCode::NotFound, "an empty mount"); }
+			[[nodiscard]] Result<std::vector<VfsEntry>> List(const VfsPath& /*directory*/, bool /*recursive*/) const override
+			{
+				return MakeError(ErrorCode::NotFound, "an empty mount");
+			}
+			[[nodiscard]] Status CreateDirectories(const VfsPath& /*directory*/) override { return MakeError(ErrorCode::PermissionDenied, "a read-only mount"); }
+			[[nodiscard]] Status Remove(const VfsPath& /*path*/) override { return MakeError(ErrorCode::PermissionDenied, "a read-only mount"); }
+			[[nodiscard]] Status Move(const VfsPath& /*from*/, const VfsPath& /*to*/) override { return MakeError(ErrorCode::PermissionDenied, "a read-only mount"); }
+			[[nodiscard]] MountAccess GetAccess() const override { return MountAccess::ReadOnly; }
+		};
+
+	}
+
 	static ApplicationSpecification MakeHeadlessSpecification(std::optional<uint64_t> maxFrames)
 	{
 		ApplicationSpecification specification;
@@ -655,7 +688,6 @@ namespace Engine {
 
 		TEST_CASE("ApplyEngineCommandLine: --expect-no-errors sets ExpectNoErrors")
 		{
-			// Implemented by the contract (the option and its parse); the check itself is stream C's (Application::Run).
 			const std::vector<std::string> arguments = { "--expect-no-errors" };
 			const Result<CommandLine> commandLine = CommandLine::Parse(arguments, GetEngineCommandLineOptions());
 			REQUIRE(commandLine.has_value());
@@ -664,9 +696,28 @@ namespace Engine {
 			CHECK(specification.ExpectNoErrors);
 		}
 
-		TEST_CASE("Application: --expect-no-errors fails a run that logged an error" * doctest::skip(true))
+		TEST_CASE("Application: --expect-no-errors keeps the exit code of a run without errors")
 		{
-			// Skipped skeleton of the M7 contract (Docs/Decisions/0012-m7-decisions.md decision 15); stream C.
+			// Warnings do not count (Docs/Decisions/0012-m7-decisions.md decision 15).
+			class WarningLoggingApplication final : public Application
+			{
+			public:
+				using Application::Application;
+			protected:
+				void OnUpdate(const FrameTime& /*frame*/) override
+				{
+					ENGINE_WARN("a warning the run logs on purpose");
+				}
+			};
+			ApplicationSpecification specification = MakeHeadlessSpecification(2);
+			specification.ExpectNoErrors = true;
+			WarningLoggingApplication application(std::move(specification));
+			CHECK(application.Run() == ExitCode::Success);
+		}
+
+		TEST_CASE("Application: --expect-no-errors fails a run that logged an error")
+		{
+			// Docs/Decisions/0012-m7-decisions.md decision 15: every logger counts, from the start of Run.
 			class ErrorLoggingApplication final : public Application
 			{
 			public:
@@ -681,6 +732,27 @@ namespace Engine {
 			specification.ExpectNoErrors = true;
 			ErrorLoggingApplication application(std::move(specification));
 			Test::ExpectLog logged(LogLevel::Error, "an error the run logs on purpose");
+			Test::ExpectLog failed(LogLevel::Error, "--expect-no-errors");
+			CHECK(application.Run() == ExitCode::Failed);
+		}
+
+		TEST_CASE("Application: --expect-no-errors counts the errors logged while the context tears down")
+		{
+			// The check runs after the whole context is gone (its file system, job system and event log), not before.
+			class TeardownErrorApplication final : public Application
+			{
+			public:
+				using Application::Application;
+			protected:
+				Status OnInitialize() override
+				{
+					return GetContext().GetVfs().Mount("teardown", CreateScope<ErrorAtTeardownMount>());
+				}
+			};
+			ApplicationSpecification specification = MakeHeadlessSpecification(2);
+			specification.ExpectNoErrors = true;
+			TeardownErrorApplication application(std::move(specification));
+			Test::ExpectLog logged(LogLevel::Error, "the test mount logged an error at teardown");
 			Test::ExpectLog failed(LogLevel::Error, "--expect-no-errors");
 			CHECK(application.Run() == ExitCode::Failed);
 		}

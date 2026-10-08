@@ -1,6 +1,6 @@
 #include "TestsPCH.h"
 
-#include "EditorCore/Automation/SessionMethods.h"
+#include "Engine/Automation/Methods/SessionMethods.h"
 
 #include "Engine/Automation/Protocol/JsonRpc.h"
 #include "Engine/Platform/Process.h"
@@ -8,7 +8,7 @@
 
 namespace Engine {
 
-	TEST_SUITE("EditorCore")
+	TEST_SUITE("Automation")
 	{
 		TEST_CASE("SessionMethods: session.hello reports the client id and the capabilities")
 		{

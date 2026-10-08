@@ -1,8 +1,8 @@
-#include "EditorPCH.h"
-#include "EditorCore/Automation/RpcMethods.h"
+#include "EnginePCH.h"
+#include "Engine/Automation/Methods/RpcMethods.h"
 
-#include "EditorCore/Automation/EditorMethodContext.h"
-#include "EditorCore/Automation/Private/MethodSupport.h"
+#include "Engine/Automation/Methods/AutomationMethodContext.h"
+#include "Engine/Automation/Methods/SharedMethodSupport.h"
 #include "Engine/Automation/Protocol/JsonRpc.h"
 #include "Engine/Automation/Protocol/MethodRegistry.h"
 #include "Engine/Reflection/FuzzySuggest.h"
@@ -10,11 +10,14 @@
 
 #include <nlohmann/json.hpp>
 
+#include <format>
+#include <span>
+
 namespace Engine {
 
 	namespace Automation {
 
-		Result<RpcDiscoverResult> RpcDiscover(EditorMethodContext& context, const RpcDiscoverParams& params)
+		Result<RpcDiscoverResult> RpcDiscover(AutomationMethodContext& context, const RpcDiscoverParams& params)
 		{
 			const MethodRegistry& registry = context.GetRegistry();
 			if (!params.Method.empty() && !params.Domain.empty())

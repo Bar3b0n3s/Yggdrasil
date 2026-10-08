@@ -2,21 +2,11 @@
 #include "Engine/Renderer/ViewportCapture.h"
 
 #include "Engine/Graphics/GraphicsDevice.h"
-#include "Engine/Graphics/OffscreenTarget.h"
-#include "Engine/Graphics/PipelineFactory.h"
 #include "Engine/Graphics/Readback.h"
 #include "Engine/Renderer/RenderSnapshot.h"
 #include "Engine/Renderer/SceneRenderer.h"
-#include "Engine/Renderer/TrianglePass.h"
 
 namespace Engine {
-
-	namespace Utils {
-
-		// Viewport screenshots hold display-encoded values (§8.9).
-		constexpr nvrhi::Format ViewportCaptureFormat = nvrhi::Format::RGBA8_UNORM;
-
-	}
 
 	ViewportCapture::ViewportCapture(ConstructionKey /*key*/)
 	{
@@ -24,12 +14,10 @@ namespace Engine {
 
 	ViewportCapture::~ViewportCapture() = default;
 
-	Result<Scope<ViewportCapture>> ViewportCapture::Create(GraphicsDevice& device, PipelineFactory& pipelines)
+	Result<Scope<ViewportCapture>> ViewportCapture::CreateForScenes(GraphicsDevice& device, const SceneRendererPipelines& pipelines,
+		GpuResourceCache& cache, AssetManager& assets)
 	{
-		TrianglePassSpecification specification;
-		specification.Framebuffer.addColorFormat(Utils::ViewportCaptureFormat);
-		specification.CullMode = nvrhi::RasterCullMode::Back;
-		ENGINE_TRY_ASSIGN(Scope<TrianglePass> trianglePass, TrianglePass::Create(device, pipelines, specification));
+		ENGINE_TRY_ASSIGN(Scope<SceneRenderer> renderer, SceneRenderer::Create(device, pipelines, cache, assets, { .Width = 1, .Height = 1 }));
 		// Not an immediate command list: NVRHI's validation allows one open immediate list at a time, and a capture may be
 		// requested while the caller's frame has its own list open.
 		ENGINE_TRY_ASSIGN(nvrhi::CommandListHandle commandList,
@@ -37,13 +25,13 @@ namespace Engine {
 
 		Scope<ViewportCapture> capture = CreateScope<ViewportCapture>(ConstructionKey());
 		capture->m_Device = &device;
-		capture->m_TrianglePass = std::move(trianglePass);
+		capture->m_SceneRenderer = std::move(renderer);
 		capture->m_Readback = CreateScope<Readback>(device);
 		capture->m_CommandList = std::move(commandList);
 		return capture;
 	}
 
-	Result<Image> ViewportCapture::Capture(const ViewportScreenshotRequest& request)
+	Result<Image> ViewportCapture::Capture(const ViewportScreenshotRequest& request, const RenderSnapshot& snapshot)
 	{
 		const auto isValidSide = [](uint32_t side)
 		{
@@ -55,37 +43,18 @@ namespace Engine {
 				MaxViewportScreenshotDimension, MaxViewportScreenshotDimension, request.Width, request.Height);
 		}
 
-		// A new target per capture: the size is the request's, and nothing else renders into it.
-		OffscreenTargetSpecification targetSpecification;
-		targetSpecification.Width = request.Width;
-		targetSpecification.Height = request.Height;
-		targetSpecification.ColorFormat = Utils::ViewportCaptureFormat;
-		targetSpecification.ClearColor = nvrhi::Color(TriangleClearColor[0], TriangleClearColor[1], TriangleClearColor[2], TriangleClearColor[3]);
-		targetSpecification.DebugName = "ViewportCapture";
-		ENGINE_TRY_ASSIGN(const OffscreenTarget target, OffscreenTarget::Create(*m_Device, targetSpecification));
-
+		ENGINE_TRY(m_SceneRenderer->Resize(request.Width, request.Height));
 		m_CommandList->open();
-		m_TrianglePass->Render(*m_CommandList, *target.GetFramebuffer());
+		// The list is executed whatever Render reports (an error names a skipped draw; the rest rendered).
+		const Status rendered = m_SceneRenderer->Render(*m_CommandList, snapshot);
 		m_CommandList->close();
 		m_Device->ExecuteCommandList(*m_CommandList);
+		ENGINE_TRY(rendered);
 
-		ENGINE_TRY_ASSIGN(Image image, m_Readback->ReadTexture(*target.GetColorTexture()));
+		ENGINE_TRY_ASSIGN(Image image, m_Readback->ReadTexture(*m_SceneRenderer->GetFinalTexture()));
 		if (request.MaxDimension > 0)
 			return DownscaleImage(image, request.MaxDimension);
 		return image;
-	}
-
-	Result<Scope<ViewportCapture>> ViewportCapture::CreateForScenes(GraphicsDevice& /*device*/, const SceneRendererPipelines& /*pipelines*/,
-		GpuResourceCache& /*cache*/, AssetManager& /*assets*/)
-	{
-		ENGINE_CONTRACT_STUB();
-		return MakeError(ErrorCode::Unsupported, "scene captures are not implemented yet (M7 stream B)");
-	}
-
-	Result<Image> ViewportCapture::Capture(const ViewportScreenshotRequest& /*request*/, const RenderSnapshot& /*snapshot*/)
-	{
-		ENGINE_CONTRACT_STUB();
-		return MakeError(ErrorCode::Unsupported, "scene captures are not implemented yet (M7 stream B)");
 	}
 
 }

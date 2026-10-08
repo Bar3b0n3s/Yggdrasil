@@ -417,10 +417,13 @@ namespace Engine {
 
 	}
 
-	struct EditorAssetManager::State
-	{
-		// The project-scoped part of the state, present while a project is open.
-		struct Project
+	namespace {
+
+		// The project-scoped part of the manager's state, present while a project is open. A namespace-scope struct rather
+		// than one nested in State: a nested class's default member initializers are parsed only once the enclosing class is
+		// complete, so Clang with libstdc++ finds it not default-constructible where std::optional<OpenProjectState>::emplace
+		// checks (CWG 1397).
+		struct OpenProjectState
 		{
 			AssetProjectSpecification Specification{};
 			Ref<AssetCache> Cache{};
@@ -430,6 +433,10 @@ namespace Engine {
 			std::map<VfsPath, AssetMetadata> TransientMetas{};
 		};
 
+	}
+
+	struct EditorAssetManager::State
+	{
 		State(EditorAssetManager& self, const EditorAssetManagerSpecification& specification)
 			: Self(&self), Specification(specification), Writer(*specification.Vfs), Alive(CreateRef<bool>(true))
 		{
@@ -441,7 +448,7 @@ namespace Engine {
 		AssetDependencyGraph Graph;
 		BuiltinAssetCatalog Builtins;
 		AssetWriter Writer;
-		std::optional<Project> OpenProject;
+		std::optional<OpenProjectState> OpenProject;
 		uint64_t ProjectSerial = 0; // changes at every open and close, so completions of a closed project are dropped
 
 		std::map<AssetHandle, LoadedArtifact> Loaded; // project artifacts and File/Generated built-ins
@@ -452,6 +459,7 @@ namespace Engine {
 		std::set<std::string> CacheWarnings;          // logged once each
 		WriteObserver Observer;
 		ExternalChangeListener ChangeListener;
+		ReloadListener OnReload;
 		bool Deferred = false;
 		std::set<AssetHandle> HeldReimports; // Refresh's changes while deferred
 		std::vector<AssetExternalChange> HeldChanges;
@@ -1065,7 +1073,11 @@ namespace Engine {
 			import.Failure.reset();
 
 			if (reload && changed)
+			{
 				AppendEvent(EngineEventType::AssetReloaded, source, sourcePath, {});
+				if (OnReload && !DryRun.has_value())
+					OnReload(source);
+			}
 			if (scheduleDependents && changed)
 			{
 				for (const AssetHandle dependent : Graph.GetTransitiveDependents(source))
@@ -2258,6 +2270,11 @@ namespace Engine {
 	void EditorAssetManager::SetExternalChangeListener(ExternalChangeListener listener)
 	{
 		m_State->ChangeListener = std::move(listener);
+	}
+
+	void EditorAssetManager::SetReloadListener(ReloadListener listener)
+	{
+		m_State->OnReload = std::move(listener);
 	}
 
 	AssetHotReloader* EditorAssetManager::GetHotReloader()

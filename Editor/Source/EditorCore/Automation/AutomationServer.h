@@ -11,6 +11,7 @@
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -58,6 +59,9 @@ namespace Engine {
 		// How often Pump tries again to rewrite a session file whose rewrite failed (on Windows, replacing it fails while a
 		// client such as engine_client.list_sessions has it open), so the file always comes to name the open project.
 		std::chrono::milliseconds SessionFileRetryInterval{ 1000 };
+		// The main thread's wall clock of the methods (AutomationMethodContext::GetWallClockTime: play.step's frame budget);
+		// empty: std::chrono::steady_clock::now. Tests script it.
+		std::function<std::chrono::steady_clock::time_point()> WallClock{};
 	};
 
 	// One connected client, for session.info and the AutomationPanel (M10).

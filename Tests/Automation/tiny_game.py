@@ -1,8 +1,7 @@
 """The tiny game of the M7 walking-skeleton tests (Roadmap M7; Docs/Architecture.md §14): a project with one scene
 holding a primary camera, a sun and a cube, set up as the start scene and the only build scene, built through automation
 only, like the demo games (§13.12). The export, runtime and game-view suites (test_export.py, test_runtime.py,
-test_game_view.py) share it, and the export suite exports it (project.export). Contract helpers of the M7 contract
-(Docs/Decisions/0012-m7-decisions.md): the methods they call land with streams A to D.
+test_game_view.py) share it, and the export suite exports it (project.export; Docs/Decisions/0012-m7-decisions.md).
 """
 
 from __future__ import annotations

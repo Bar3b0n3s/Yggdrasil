@@ -32,7 +32,7 @@ namespace Engine {
 		struct LoadSlot
 		{
 			AssetState State = AssetState::Unloaded;
-			AssetRef<Asset> Asset;
+			AssetRef<Asset> Loaded;       // the published asset while State is Loaded
 			std::optional<Error> Failure; // the recorded error while State is Failed
 		};
 
@@ -94,7 +94,7 @@ namespace Engine {
 			if (result.has_value())
 			{
 				slot.State = AssetState::Loaded;
-				slot.Asset = *result;
+				slot.Loaded = *result;
 				bumpVersion(handle);
 				return;
 			}
@@ -178,7 +178,7 @@ namespace Engine {
 				WithContext(GetProceduralBuiltin(handle), std::format("while loading asset {} ('{}')", handle, builtin->Path)));
 			LoadSlot& slot = state.Slots[handle];
 			slot.State = AssetState::Loaded;
-			slot.Asset = asset;
+			slot.Loaded = asset;
 			return asset;
 		}
 
@@ -189,7 +189,7 @@ namespace Engine {
 		if (const auto existing = state.Slots.find(handle); existing != state.Slots.end())
 		{
 			if (existing->second.State == AssetState::Loaded)
-				return existing->second.Asset;
+				return existing->second.Loaded;
 			if (existing->second.State == AssetState::Failed)
 				return std::unexpected(*existing->second.Failure);
 		}

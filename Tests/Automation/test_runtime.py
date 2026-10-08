@@ -2,9 +2,8 @@
 M7 acceptance): the manifest's name for the user-data folder, headless runs that log no error, the missing-manifest exit
 code, and the automation subset served by an exported build.
 
-Skipped skeletons of the M7 contract (Docs/Decisions/0012-m7-decisions.md decisions 10 and 12): stream C implements the
-Runtime (manifest, paks, play session, rendering, --automation, --paused) and removes the skips; the exports come from
-stream D's project.export.
+The exports come from project.export and the games run a play session rendered by the scene renderer
+(Docs/Decisions/0012-m7-decisions.md decisions 10 and 12). test_runtime_missing_manifest_exits_3 needs only the Runtime.
 """
 
 from __future__ import annotations
@@ -20,6 +19,8 @@ from tiny_game import TINY_GAME_NAME, build_tiny_game, export_tiny_game, exporte
 RUNTIME_TIMEOUT_SECONDS = 120.0
 # The ticks the Runtime's automation test steps, in the editor and in the exported game.
 STEPPED_TICKS = 30
+# The entities of the tiny game's scene (tiny_game.build_tiny_game).
+TINY_GAME_ENTITIES = 3
 
 
 class RuntimeTests(AutomationTestCase):
@@ -48,7 +49,6 @@ class RuntimeTests(AutomationTestCase):
         return subprocess.run(command, stdin=subprocess.DEVNULL, capture_output=True,
                               timeout=RUNTIME_TIMEOUT_SECONDS, check=False)
 
-    @unittest.skip("contract stub: un-skipped by M7 stream C")
     def test_exported_user_data_folder_uses_manifest_name(self) -> None:
         executable, _ = self.export_game()
         user_data = self.directory / "GameUserData"
@@ -58,7 +58,6 @@ class RuntimeTests(AutomationTestCase):
         self.assertTrue((user_data / TINY_GAME_NAME / "Logs").is_dir())
         self.assertFalse((user_data / app_name()).exists())
 
-    @unittest.skip("contract stub: un-skipped by M7 stream C")
     def test_exported_runtime_headless_exits_zero(self) -> None:
         executable, _ = self.export_game()
         logic_only = ["--headless", "--renderer", "none", "--frames", "120", "--expect-no-errors"]
@@ -70,17 +69,19 @@ class RuntimeTests(AutomationTestCase):
         rendered = self.run_game(executable, rendering, self.directory / "Rendering")
         self.assertEqual(rendered.returncode, EXIT_SUCCESS, rendered.stderr.decode("utf-8", errors="replace"))
 
-    @unittest.skip("contract stub: un-skipped by M7 stream C")
     def test_runtime_missing_manifest_exits_3(self) -> None:
+        # The bare Runtime of the build has no Game.json next to it (§4.1: a required file missing is InitFailed).
         runtime = runtime_executable(automation_config())
         self.assertTrue(runtime.is_file(),
                         f"build the Runtime first: python Scripts/Build.py --config {automation_config()}")
         completed = self.run_game(runtime, ["--headless", "--renderer", "none", "--frames", "1"],
                                   self.directory / "Bare")
-        self.assertEqual(completed.returncode, EXIT_INIT_FAILED)
-        self.assertIn("Game.json", completed.stderr.decode("utf-8", errors="replace"))
+        stderr = completed.stderr.decode("utf-8", errors="replace")
+        self.assertEqual(completed.returncode, EXIT_INIT_FAILED, stderr)
+        self.assertIn("Game.json", stderr)
+        # Without a manifest there is no application name, so nothing is written into a user-data folder.
+        self.assertFalse((self.directory / "Bare" / app_name()).exists())
 
-    @unittest.skip("contract stub: un-skipped by M7 stream C")
     def test_runtime_automation_subset(self) -> None:
         if not self.require_gpu():
             return
@@ -90,7 +91,10 @@ class RuntimeTests(AutomationTestCase):
         game = engine_client.launch_editor(executable, arguments, self.directory / "Automated", TINY_GAME_NAME)
         self.editors.append(game)
         client = self.connect(game)
-        self.assertEqual(client.call("session.info")["playState"], "Paused")
+        info = client.call("session.info")
+        self.assertEqual(info["playState"], "Paused")
+        self.assertEqual(info["project"]["name"], TINY_GAME_NAME)
+        self.assertTrue(info["readOnly"])
         self.assertEqual(client.call("play.state")["tick"], 0)
         stepped = client.call("play.step", {"ticks": STEPPED_TICKS})
         self.assertEqual(stepped["tick"], STEPPED_TICKS)
@@ -101,6 +105,18 @@ class RuntimeTests(AutomationTestCase):
         self.assertTrue(Path(shot["path"]).is_file())
         self.assertEqual(shot["view"], "Game")
         self.assertEqual(shot["target"], "Play")
+        # The shared reads address the play scene, the Runtime's only scene.
+        tree = client.call("scene.tree", {"format": "Json"})
+        self.assertEqual(len(tree["entities"]), TINY_GAME_ENTITIES)
+        cube = client.call("entity.get", {"entity": "/Cube", "components": ["MeshRenderer"]})
+        self.assertIn("MeshRenderer", cube["entity"]["components"])
+        bounds = client.call("entity.bounds", {"entities": ["/Cube"]})
+        self.assertTrue(bounds["bounds"][0]["hasBounds"])
+        self.assertIn("nextCursor", client.call("log.read", {"cursor": "end"}))
+        self.assertIn("nextCursor", client.call("events.read", {"cursor": "end"}))
+        with self.assertRaises(engine_client.EngineError) as edit_scene:
+            client.call("scene.tree", {"target": "edit"})
+        self.assert_engine_error(edit_scene.exception, engine_client.INVALID_STATE)
         # The Runtime serves its subset only.
         editor_only = (("play.start", {}), ("play.stop", {}), ("entity.create", {"name": "X"}),
                        ("project.export", {"config": "Release"}))

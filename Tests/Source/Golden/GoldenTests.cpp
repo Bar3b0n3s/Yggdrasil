@@ -1,13 +1,30 @@
 #include "TestsPCH.h"
 
 #include "Engine/App/ExitCode.h"
+#include "Engine/Asset/BuiltinAssets.h"
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Json/Json.h"
 #include "Engine/Graphics/GraphicsDevice.h"
+#include "Engine/Graphics/OffscreenTarget.h"
+#include "Engine/Graphics/Readback.h"
 #include "Engine/Platform/Process.h"
+#include "Engine/Renderer/GpuResourceCache.h"
+#include "Engine/Renderer/SceneRenderer.h"
+#include "Engine/Renderer/TrianglePass.h"
 #include "Engine/Renderer/ViewportCapture.h"
+#include "Engine/Scene/Components/CameraComponent.h"
+#include "Engine/Scene/Components/DirectionalLightComponent.h"
+#include "Engine/Scene/Components/MeshRendererComponent.h"
+#include "Engine/Scene/Components/TransformComponent.h"
+#include "Engine/Scene/Entity.h"
+#include "Engine/Scene/RenderExtraction.h"
+#include "Engine/Scene/Scene.h"
+#include "Engine/Scene/TransformSystem.h"
+#include "Engine/Testing/ImageCompare.h"
+#include "Support/AssetTestFixture.h"
 #include "Support/GoldenImage.h"
 #include "Support/HeadlessGpuFixture.h"
+#include "Support/SceneTestFixture.h"
 #include "Support/TempDirectory.h"
 #include "Support/TestOptions.h"
 #include "Support/Utf8Path.h"
@@ -15,14 +32,67 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <iterator>
+#include <span>
+#include <string>
+#include <utility>
+#include <vector>
 
-// The golden images of the Graphics foundation (Roadmap M5, Architecture §15.4): "Triangle", the clear-and-triangle view
-// rendered headless at 640x360 through the viewport capture (viewport.screenshot's path), and "ImGuiDemo", the editor UI
-// (Dear ImGui's demo window) through editor.screenshot in an Editor process. They run in the golden stage (Release) on
-// this machine's device class; Test.py --update-golden writes candidates for review.
+// The golden images (Architecture §15.4): "Triangle", the clear-and-triangle view of the Graphics foundation (Roadmap M5)
+// drawn by TrianglePass into an OffscreenTarget at 640x360; "LitScene", a simple lit scene (Roadmap M7: a camera, a sun, a
+// cube, a sphere and a ground plane) extracted from a scene and rendered by the scene renderer through the viewport
+// capture (viewport.screenshot's path); and "ImGuiDemo", the editor UI (Dear ImGui's demo window) through
+// editor.screenshot in an Editor process. They run in the golden stage (Release) on this machine's device class;
+// Test.py --update-golden writes candidates for review.
 
 namespace Engine {
+
+	namespace {
+
+		// The scene of "LitScene": a primary camera above and in front of the origin looking slightly down at it, a sun from
+		// the upper left behind the camera, a white cube turned 30 degrees, a magenta sphere (the Error material) and a ground
+		// plane 8 m wide; the light stays below 1 everywhere, so no channel saturates and the faces tell apart.
+		void BuildLitScene(Scene& scene)
+		{
+			Entity camera = scene.CreateEntity("Camera");
+			camera.Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Translation = glm::vec3(0.0f, 1.6f, 5.5f);
+				transform.Rotation = TransformSystem::QuaternionFromEulerDegrees(glm::vec3(-12.0f, 0.0f, 0.0f));
+			});
+			camera.AddComponent<CameraComponent>(CameraComponent{ .Primary = true, .Clear = ClearMode::Color, .ClearColor = glm::vec3(0.1f, 0.12f, 0.16f) });
+
+			Entity sun = scene.CreateEntity("Sun");
+			sun.Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Rotation = TransformSystem::QuaternionFromEulerDegrees(glm::vec3(-50.0f, -30.0f, 0.0f));
+			});
+			sun.AddComponent<DirectionalLightComponent>(DirectionalLightComponent{ .Intensity = 1.0f });
+
+			const auto addMesh = [&scene](std::string_view name, AssetHandle mesh, const glm::vec3& translation, const glm::vec3& euler,
+									 const glm::vec3& scale, AssetHandle material)
+			{
+				Entity entity = scene.CreateEntity(name);
+				entity.Patch<TransformComponent>([&translation, &euler, &scale](TransformComponent& transform)
+				{
+					transform.Translation = translation;
+					transform.Rotation = TransformSystem::QuaternionFromEulerDegrees(euler);
+					transform.Scale = scale;
+				});
+				MeshRendererComponent& renderer = entity.AddComponent<MeshRendererComponent>();
+				renderer.Mesh = TypedAssetHandle<AssetType::Mesh>(mesh);
+				if (material.IsValid())
+					renderer.Materials = { TypedAssetHandle<AssetType::Material>(material) };
+			};
+			addMesh("Ground", BuiltinAssetHandles::PlaneMesh, glm::vec3(0.0f, -0.5f, 0.0f), glm::vec3(0.0f), glm::vec3(8.0f, 1.0f, 8.0f), AssetHandle());
+			addMesh("Cube", BuiltinAssetHandles::CubeMesh, glm::vec3(-0.9f, 0.0f, 0.0f), glm::vec3(0.0f, 30.0f, 0.0f), glm::vec3(1.0f), AssetHandle());
+			addMesh("Sphere", BuiltinAssetHandles::SphereMesh, glm::vec3(1.0f, 0.0f, 0.5f), glm::vec3(0.0f), glm::vec3(1.2f),
+				BuiltinAssetHandles::ErrorMaterial);
+			TransformSystem::Update(scene);
+		}
+
+	}
 
 	TEST_SUITE(Test::GoldenSuite)
 	{
@@ -31,11 +101,57 @@ namespace Engine {
 			Test::HeadlessGpuFixture gpu;
 			ENGINE_REQUIRE_GPU(gpu);
 			GraphicsDevice& device = gpu.GetDevice();
-			Result<Scope<ViewportCapture>> capture = ViewportCapture::Create(device, gpu.GetPipelines());
-			REQUIRE_MESSAGE(capture.has_value(), capture.error().ToString());
-			const Result<Image> image = (*capture)->Capture({ .Width = 640, .Height = 360 });
-			REQUIRE_MESSAGE(image.has_value(), image.error().ToString());
-			ENGINE_CHECK_GOLDEN("Triangle", *image, device.GetInfo().DeviceClass);
+			{
+				// The triangle view drawn by its pass into an RGBA8 target without depth, with back-face culling.
+				TrianglePassSpecification specification;
+				specification.Framebuffer.addColorFormat(nvrhi::Format::RGBA8_UNORM);
+				specification.CullMode = nvrhi::RasterCullMode::Back;
+				Result<Scope<TrianglePass>> pass = TrianglePass::Create(device, gpu.GetPipelines(), specification);
+				REQUIRE_MESSAGE(pass.has_value(), pass.error().ToString());
+				Result<OffscreenTarget> target = OffscreenTarget::Create(device, { .Width = 640, .Height = 360, .DebugName = "GoldenTriangle" });
+				REQUIRE_MESSAGE(target.has_value(), target.error().ToString());
+
+				Result<nvrhi::CommandListHandle> commandList = device.CreateCommandList();
+				REQUIRE_MESSAGE(commandList.has_value(), commandList.error().ToString());
+				(*commandList)->open();
+				(*pass)->Render(**commandList, *target->GetFramebuffer());
+				(*commandList)->close();
+				device.ExecuteCommandList(**commandList);
+
+				Readback readback(device);
+				const Result<Image> image = readback.ReadTexture(*target->GetColorTexture());
+				REQUIRE_MESSAGE(image.has_value(), image.error().ToString());
+				ENGINE_CHECK_GOLDEN("Triangle", *image, device.GetInfo().DeviceClass);
+			}
+			device.RunGarbageCollection();
+		}
+
+		TEST_CASE("Golden: LitScene")
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			GraphicsDevice& device = gpu.GetDevice();
+			Test::AssetTestFixture assets;
+			Test::SceneTestFixture scene;
+			BuildLitScene(scene.GetScene());
+			{
+				GpuResourceCache cache(device, assets.GetManager());
+				Result<Scope<SceneRendererPipelines>> pipelines = SceneRendererPipelines::Create(device, gpu.GetPipelines());
+				REQUIRE_MESSAGE(pipelines.has_value(), pipelines.error().ToString());
+				Result<Scope<ViewportCapture>> capture = ViewportCapture::CreateForScenes(device, **pipelines, cache, assets.GetManager());
+				REQUIRE_MESSAGE(capture.has_value(), capture.error().ToString());
+
+				// The game view at the golden-image size, as viewport.screenshot {view: "game"} renders an edit scene.
+				const Result<RenderSnapshot> snapshot = ExtractRenderSnapshot(scene.GetScene(),
+					{ .Width = DefaultViewportScreenshotWidth, .Height = DefaultViewportScreenshotHeight });
+				REQUIRE_MESSAGE(snapshot.has_value(), snapshot.error().ToString());
+				REQUIRE(snapshot->HasCamera);
+				REQUIRE(snapshot->Meshes.size() == 3);
+				const Result<Image> image = (*capture)->Capture({}, *snapshot);
+				REQUIRE_MESSAGE(image.has_value(), image.error().ToString());
+				ENGINE_CHECK_GOLDEN("LitScene", *image, device.GetInfo().DeviceClass);
+			}
+			device.RunGarbageCollection();
 		}
 
 		TEST_CASE("Golden: ImGuiDemo")

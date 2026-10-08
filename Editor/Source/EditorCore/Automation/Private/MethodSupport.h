@@ -1,6 +1,7 @@
 #pragma once
 
 #include "EditorCore/Automation/AutomationTypes.h"
+#include "Engine/Automation/Methods/SharedMethodSupport.h"
 #include "Engine/Core/Base.h"
 #include "Engine/Core/Error.h"
 #include "Engine/Core/Json/Json.h"
@@ -18,14 +19,15 @@
 #include <vector>
 
 // What the editor method domains share inside EditorCore/Automation (the param-struct conventions of
-// Engine/Automation/Protocol/MethodRegistry.h made concrete): located errors, the summaries several
-// results carry, and the scene file operations of scene.*, project.* and session.shutdown, so every domain saves, loads
-// and reports a scene the same way.
+// Engine/Automation/Protocol/MethodRegistry.h made concrete): the summaries several results carry and the scene file
+// operations of scene.*, project.* and session.shutdown, so every domain saves, loads and reports a scene the same way.
+// The helpers the Editor and the Runtime share (located errors, entity references, the components results report, log
+// cursors) are Engine/Automation/Methods/SharedMethodSupport.h's, which this header includes (Docs/Decisions/
+// 0012-m7-decisions.md decision 12).
 
 namespace Engine {
 
 	class AutomationMethodContext;
-	class ComponentInfo;
 	class ConstEntity;
 	class EditorContext;
 	class Entity;
@@ -37,25 +39,8 @@ namespace Engine {
 
 	namespace Utils {
 
-		// `error` with its issues replaced by `issues`; code, message, contexts, location and hint are kept.
-		[[nodiscard]] Error ReplaceIssues(const Error& error, std::vector<ErrorIssue> issues);
-
-		// `error` relocated below `prefix` (a JSON pointer such as "/components/RigidBody"): the location's pointer and every
-		// issue's pointer are prefixed; an unset location pointer becomes `prefix` itself.
-		[[nodiscard]] Error PrefixPointers(const Error& error, std::string_view prefix);
-
-		// `error` located at the param `pointer`: the location's pointer is set to it, and issues without a pointer (located
-		// at the root of whatever produced them) are moved there too.
-		[[nodiscard]] Error LocateAtParam(const Error& error, std::string_view pointer);
-
-		// An error of `code` located at the param `pointer`, with an optional hint.
-		[[nodiscard]] Error MakeParamError(ErrorCode code, std::string_view pointer, std::string message, std::string hint = {});
-
 		// The project-relative text of a project:// path ("Assets/Scenes/Main.scene").
 		[[nodiscard]] std::string ToProjectRelative(const VfsPath& path);
-
-		// The 16 lowercase hex digits of a valid UUID, or "" for the invalid one.
-		[[nodiscard]] std::string FormatOptionalUUID(UUID id);
 
 		// The open project as project.* results report it (asserted: a project is open).
 		[[nodiscard]] ProjectSummary MakeProjectSummary(const EditorContext& editor);
@@ -106,15 +91,6 @@ namespace Engine {
 		// nested structs; Variant values and unrecognized spellings are left alone (the strict read reports those). Used for
 		// documents the registry reads as a whole (project.setSettings's merge patch).
 		void CanonicalizeEnumSpellings(Json& value, const TypeInfo& type);
-
-		// The components of `entity` that results report (serializable and not entity-level, Hidden ones included because
-		// they are readable), in registry order, which is the order scene files use.
-		[[nodiscard]] std::vector<const ComponentInfo*> GetEntityComponents(ConstEntity entity);
-
-		// The decimal 64-bit cursor of log.read and events.read: "" is 0 (the oldest held entry), digits are the sequence
-		// number, and "end" is nullopt (read nothing; the caller answers with the next sequence number). Errors:
-		// InvalidArgument at "/cursor" for anything else.
-		[[nodiscard]] Result<std::optional<uint64_t>> ParseSequenceCursor(std::string_view cursor);
 
 		// The entity cap of play sessions (§5.7, M7): OK when `scene` is not the play session's scene, else
 		// PlaySession::CheckEntityCapacity(additional) (InvalidState "entity limit <N> reached"). entity.create and

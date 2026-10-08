@@ -2,11 +2,14 @@
 
 #include "Engine/Automation/Methods/AutomationMethodContext.h"
 
+#include "Engine/Automation/Methods/SceneMethods.h"
+#include "Engine/Automation/Methods/SessionMethods.h"
 #include "Engine/Automation/Protocol/MethodRegistry.h"
 #include "Engine/Core/EventLog.h"
 #include "Engine/Scene/Entity.h"
 #include "Support/ProtocolTestTypes.h"
 
+#include <chrono>
 #include <optional>
 #include <span>
 #include <string>
@@ -61,6 +64,19 @@ namespace Engine {
 			{
 				return MakeError(ErrorCode::Unsupported, "no output");
 			}
+
+			[[nodiscard]] SessionHostDescription DescribeSession() const override { return SessionHostDescription{ .Renderer = "none" }; }
+
+			[[nodiscard]] Result<SessionShutdownResult> Shutdown(const SessionShutdownParams& /*params*/) override
+			{
+				return MakeError(ErrorCode::Unsupported, "no shutdown");
+			}
+
+			[[nodiscard]] SceneSummary MakeSceneSummary(const Scene& /*scene*/) const override { return {}; }
+
+			[[nodiscard]] AssetManager* GetAssets() const override { return nullptr; }
+
+			[[nodiscard]] std::chrono::steady_clock::time_point GetWallClockTime() const override { return std::chrono::steady_clock::time_point(); }
 		private:
 			mutable EventLog m_Events;
 		};

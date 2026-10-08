@@ -2,13 +2,14 @@
 
 #include "Engine/Project/GameManifest.h"
 
+#include "Engine/Core/FileSystem.h"
 #include "Support/TempDirectory.h"
 
+#include <array>
 #include <string>
 #include <string_view>
 
-// Game.json (Architecture §14.1, §14.3). Skipped skeletons of the M7 contract (Docs/Decisions/0012-m7-decisions.md decision
-// 10): stream C implements the serializer and removes the skips.
+// Game.json (Architecture §14.1, §14.3; Docs/Decisions/0012-m7-decisions.md decision 10).
 
 namespace Engine {
 
@@ -33,7 +34,7 @@ namespace Engine {
 
 	TEST_SUITE("Project")
 	{
-		TEST_CASE("GameManifest: a written manifest reads back equal, in the documented key order" * doctest::skip(true))
+		TEST_CASE("GameManifest: a written manifest reads back equal, in the documented key order")
 		{
 			const GameManifest manifest = MakeManifest();
 			const Result<std::string> text = GameManifestSerializer::SaveToString(manifest);
@@ -56,7 +57,7 @@ namespace Engine {
 			CHECK(*again == *text);
 		}
 
-		TEST_CASE("GameManifest: invalid, newer and missing manifests are located errors" * doctest::skip(true))
+		TEST_CASE("GameManifest: invalid, newer and missing manifests are located errors")
 		{
 			GameManifest manifest = MakeManifest();
 			manifest.Simulation.FixedHz = 0;
@@ -85,7 +86,7 @@ namespace Engine {
 			CHECK(missing.error().GetMessageText().contains("Game.json"));
 		}
 
-		TEST_CASE("GameManifest: Paks holds exactly Engine.pak and Game.pak" * doctest::skip(true))
+		TEST_CASE("GameManifest: Paks holds exactly Engine.pak and Game.pak")
 		{
 			// Nothing is accepted and ignored (ADR 0012 decision 16): the Runtime mounts exactly these two paks.
 			const Result<std::string> text = GameManifestSerializer::SaveToString(MakeManifest());
@@ -114,7 +115,63 @@ namespace Engine {
 			CHECK(refused.error().GetCode() == ErrorCode::Validation);
 		}
 
-		TEST_CASE("GameManifest: a testing manifest is refused until testing exports exist" * doctest::skip(true))
+		TEST_CASE("GameManifest: unknown keys, bad names, pak paths and hashes are located Validation errors")
+		{
+			const Result<std::string> text = GameManifestSerializer::SaveToString(MakeManifest());
+			REQUIRE_MESSAGE(text.has_value(), text.error().ToString());
+			struct Case
+			{
+				std::string_view From;
+				std::string_view To;
+				std::string_view Pointer;
+			};
+			const std::array<Case, 7> cases = { {
+				{ "\"Testing\": false", "\"Testing\": false, \"Extra\": 1", "/Extra" },
+				{ "\"Name\": \"Tetris\"", "\"Name\": \"Te/tris\"", "/Name" },
+				{ "\"Name\": \"Tetris\"", "\"Name\": \"CON\"", "/Name" },
+				{ "\"Path\": \"Data/Engine.pak\"", "\"Path\": \"../Engine.pak\"", "/Paks/0/Path" },
+				{ "\"Path\": \"Data/Engine.pak\"", "\"Path\": \"Data/Game.pak\"", "/Paks/0/Path" },
+				{ "\"XXH64\": \"0123456789abcdef\"", "\"XXH64\": \"0123456789ABCDEF\"", "/Paks/0/XXH64" },
+				{ "\"StartScene\": \"8a61c0d2e4f31b77\"", "\"StartScene\": \"0000000000000000\"", "/StartScene" },
+			} };
+			for (const Case& edit : cases)
+			{
+				std::string edited = *text;
+				const size_t position = edited.find(edit.From);
+				REQUIRE(position != std::string::npos);
+				edited.replace(position, edit.From.size(), edit.To);
+				INFO(std::string(edit.To));
+				const Result<GameManifest> read = GameManifestSerializer::LoadFromString(edited);
+				REQUIRE_FALSE(read.has_value());
+				CHECK(read.error().GetCode() == ErrorCode::Validation);
+				REQUIRE_FALSE(read.error().GetIssues().empty());
+				CHECK(read.error().GetIssues().front().JsonPointer == edit.Pointer);
+			}
+		}
+
+		TEST_CASE("GameManifest: a file is read with its path as the error's file")
+		{
+			const Test::TempDirectory directory("GameManifestFile");
+			const Result<std::string> text = GameManifestSerializer::SaveToString(MakeManifest());
+			REQUIRE(text.has_value());
+			const std::filesystem::path path = directory / "Game.json";
+			REQUIRE(FileSystem::WriteFileAtomic(path, std::as_bytes(std::span(text->data(), text->size()))).has_value());
+			const Result<GameManifest> read = GameManifestSerializer::LoadFromFile(path);
+			REQUIRE_MESSAGE(read.has_value(), read.error().ToString());
+			CHECK(read->Name == "Tetris");
+
+			std::string broken = *text;
+			broken.replace(broken.find("\"Width\": 720"), std::string_view("\"Width\": 720").size(), "\"Width\": 0");
+			REQUIRE(FileSystem::WriteFileAtomic(path, std::as_bytes(std::span(broken.data(), broken.size()))).has_value());
+			const Result<GameManifest> invalid = GameManifestSerializer::LoadFromFile(path);
+			REQUIRE_FALSE(invalid.has_value());
+			CHECK(invalid.error().GetCode() == ErrorCode::Validation);
+			CHECK(invalid.error().GetLocation().File == FileSystem::PathToUtf8(path));
+			REQUIRE_FALSE(invalid.error().GetIssues().empty());
+			CHECK(invalid.error().GetIssues().front().JsonPointer == "/Window/Width");
+		}
+
+		TEST_CASE("GameManifest: a testing manifest is refused until testing exports exist")
 		{
 			// "Testing": true needs the testing runner of M15; the M7 Runtime would ignore it (ADR 0012 decision 16).
 			GameManifest manifest = MakeManifest();

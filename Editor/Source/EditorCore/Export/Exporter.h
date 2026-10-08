@@ -39,9 +39,11 @@
 // cancelled export leaves an earlier export there untouched:
 //   1. Validate: a project is open; StartScene is set and is a registered scene; every Export.BuildScenes entry and the
 //      start scene load strictly (SceneSerializer, LoadOptions Strict); the asset manager has no error diagnostic
-//      (EditorAssetManager::HasErrorDiagnostics, §7.2); every asset handle a build scene references resolves; Name is a
-//      valid file name. Scripts and replays join in M13/M15.
-//   2. Cook every included asset (EditorAssetManager, incrementally from Library/Cache), on jobs.
+//      (EditorAssetManager::HasErrorDiagnostics, §7.2); Name is a valid file name. Scripts and replays join in M13/M15.
+//   2. Cook every included asset (EditorAssetManager, incrementally from Library/Cache), on jobs. Every asset handle a
+//      packaged asset references (scenes, prefabs, materials) must resolve in Game.pak, Engine.pak or the procedural
+//      built-ins; one that does not is a Validation error of this step (a built-in environment, which waits for M8's
+//      baker, is a warning).
 //   3. Write Engine.pak and Game.pak atomically into the staging directory, then reopen both (PakReader) and verify every
 //      hash.
 //   4. Copy the Runtime executable of the target configuration, renamed, and on Windows its Redist/*.dll. A missing binary

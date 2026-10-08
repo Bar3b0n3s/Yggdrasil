@@ -8,6 +8,7 @@
 #include "Engine/Graphics/Image.h"
 #include "Engine/Scene/RenderExtraction.h"
 
+#include <chrono>
 #include <cstddef>
 #include <optional>
 #include <span>
@@ -23,12 +24,14 @@
 // session and server).
 //
 // Frozen by the M7 contract with the services the M7 handlers need (play.*, input.inject, viewport.screenshot). Stream C,
-// which moves the M4 to M6 handlers of the Runtime subset here (session.*, rpc.discover, scene.tree|query|get,
-// entity.get, entity.bounds, log.read, events.read), adds the pure virtual functions those handlers need, as reviewed
-// additions (ADR 0012 decision 12); no member below changes. One context per request; main thread only.
+// which moved the M4 to M6 handlers of the Runtime subset here (session.*, rpc.discover, scene.tree|query|get,
+// entity.get, entity.bounds, log.read, events.read), added the pure virtual functions those handlers need at the end, as
+// reviewed additions (ADR 0012 decisions 12 and 21); the integration's review gave DescribeSession a return value and
+// added GetWallClockTime. One context per request; main thread only.
 
 namespace Engine {
 
+	class AssetManager;
 	class ConstEntity;
 	class Entity;
 	class EventLog;
@@ -36,6 +39,10 @@ namespace Engine {
 	class Scene;
 	struct PlayStartOptions;
 	struct RenderSnapshot;
+	struct SceneSummary;
+	struct SessionHostDescription;
+	struct SessionShutdownParams;
+	struct SessionShutdownResult;
 	struct ViewportScreenshotRequest;
 
 	class AutomationMethodContext : public MethodContext
@@ -107,6 +114,33 @@ namespace Engine {
 		// user://Automation/Out/ with the same naming). `extension` is lowercase letters and digits without the dot. Errors:
 		// those of the writes.
 		[[nodiscard]] virtual Result<std::string> WriteOutputFile(std::string_view extension, std::span<const std::byte> bytes) = 0;
+
+		// --- The moved M4 to M6 domains (ADR 0012 decisions 12 and 21: added with their handlers) -----------------------
+
+		// The host's part of session.hello and session.info (SessionMethods.h): its capabilities, project, renderer, read-only
+		// and headless flags and clients. The handlers add the versions, the process id, the play state and the lockstep
+		// owner, and session.info sorts the clients by id.
+		[[nodiscard]] virtual SessionHostDescription DescribeSession() const = 0;
+
+		// session.shutdown's effect: the editor first saves the open scene when params.Save asks (refusing a dirty scene
+		// without save or force, SessionMethods.h); the Runtime has no scene file to save. The host then exits with code 0 at
+		// its next frame, after the response. Errors: those of the editor's save and its dirty-scene check.
+		[[nodiscard]] virtual Result<SessionShutdownResult> Shutdown(const SessionShutdownParams& params) = 0;
+
+		// scene.tree's summary of `scene`, a scene ResolveTargetScene returned: its file, name, revision (the "_meta"
+		// revision), dirty flag and entity count.
+		[[nodiscard]] virtual SceneSummary MakeSceneSummary(const Scene& scene) const = 0;
+
+		// The host's asset manager (entity.bounds reads mesh bounds through it): the editor's EditorAssetManager, the
+		// Runtime's RuntimeAssetManager (RuntimeAutomationServerSpecification::Assets); null for a host without one, where
+		// entity.bounds is Unsupported. The pointer is non-owning and valid for the request.
+		[[nodiscard]] virtual AssetManager* GetAssets() const = 0;
+
+		// The host's wall clock: std::chrono::steady_clock::now unless the host's specification supplies another
+		// (AutomationServerSpecification::WallClock, RuntimeAutomationServerSpecification::WallClock), which tests script.
+		// play.step measures its frame budget with it (PlayStepFrameBudget, PlayMethods.h); nothing on the simulation path
+		// reads it.
+		[[nodiscard]] virtual std::chrono::steady_clock::time_point GetWallClockTime() const = 0;
 	protected:
 		// `hostKey` is the most-derived context's TypeKeyOf, as for MethodContext.
 		AutomationMethodContext(TypeKey hostKey, MethodRequest request);

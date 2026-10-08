@@ -746,9 +746,121 @@
 			"timeoutSeconds": 60
 		},
 		{
+			"name": "input_inject",
+			"method": "input.inject",
+			"description": "Queues input events for the play session: each is applied at step 1 of its tick (an offset from the session's next tick), like real input and replays. Every event is checked before any is queued.",
+			"inputSchema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "InputInjectParams",
+				"description": "The params of input.inject: events for the play session's next ticks.",
+				"type": "object",
+				"properties": {
+					"events": {
+						"description": "The events, each with a tick offset from the session's next tick (required; may be empty).",
+						"type": "array",
+						"items": {
+							"description": "One input event, stamped with a tick offset (§13.6); each type reads only its own members.",
+							"type": "object",
+							"properties": {
+								"tick": {
+									"description": "The tick offset: from the session's next tick (input.inject) or from the first tick of the play.step that carries it.",
+									"type": "integer",
+									"minimum": 0,
+									"maximum": 4294967295
+								},
+								"type": {
+									"description": "The event type (required).",
+									"enum": ["Action", "Key", "MouseButton", "MouseMove", "MouseDelta", "Scroll", "GamepadButton", "GamepadAxis", "Text"]
+								},
+								"name": {
+									"description": "action: the project action's name (exact, case-sensitive).",
+									"type": "string"
+								},
+								"state": {
+									"description": "action, key, mouseButton, gamepadButton: down (the default), up or tap.",
+									"enum": ["Down", "Up", "Tap"]
+								},
+								"value": {
+									"description": "action: an axis value in [-1, 1]; gamepadAxis: [-1, 1] for sticks (up positive), [0, 1] for triggers.",
+									"type": "number",
+									"minimum": -1,
+									"maximum": 1
+								},
+								"key": {
+									"description": "key: the key's name, such as \"Space\", \"A\" or \"Escape\".",
+									"type": "string"
+								},
+								"button": {
+									"description": "mouseButton: \"Left\", \"Right\", \"Middle\" ...; gamepadButton: \"South\", \"Start\" ...",
+									"type": "string"
+								},
+								"gamepad": {
+									"description": "gamepadButton, gamepadAxis: the gamepad, 0 to 3.",
+									"type": "integer",
+									"minimum": 0,
+									"maximum": 3
+								},
+								"axis": {
+									"description": "gamepadAxis: \"LeftX\", \"LeftY\", \"RightX\", \"RightY\", \"LeftTrigger\" or \"RightTrigger\".",
+									"type": "string"
+								},
+								"position": {
+									"description": "mouseMove (required), mouseButton (optional): [x, y] in window coordinates.",
+									"type": "array",
+									"prefixItems": [
+										{
+											"type": "number"
+										},
+										{
+											"type": "number"
+										}
+									],
+									"minItems": 2,
+									"maxItems": 2
+								},
+								"delta": {
+									"description": "mouseDelta: the cursor motion [x, y]; scroll: [x, y], y up-positive.",
+									"type": "array",
+									"prefixItems": [
+										{
+											"type": "number"
+										},
+										{
+											"type": "number"
+										}
+									],
+									"minItems": 2,
+									"maxItems": 2
+								},
+								"text": {
+									"description": "text: the typed text (UTF-8).",
+									"type": "string"
+								}
+							},
+							"additionalProperties": false
+						}
+					},
+					"releaseAll": {
+						"description": "First release every held key, button and injected action, and zero every axis, at the next tick.",
+						"type": "boolean"
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"required": ["events"]
+			},
+			"mutates": false,
+			"supportsDryRun": false,
+			"timeoutSeconds": 60
+		},
+		{
 			"name": "log_read",
 			"method": "log.read",
-			"description": "Reads the editor's log by cursor so nothing is lost between polls, filtered by level, logger and text. Pass nextCursor to the next read; \"end\" returns only the cursor of the next entry.",
+			"description": "Reads the host's log (the editor's or the exported game's) by cursor so nothing is lost between polls, filtered by level, logger and text. Pass nextCursor to the next read; \"end\" returns only the cursor of the next entry.",
 			"inputSchema": {
 				"$schema": "https://json-schema.org/draft/2020-12/schema",
 				"title": "LogReadParams",
@@ -780,6 +892,203 @@
 						"minimum": 1,
 						"maximum": 1000
 					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false
+			},
+			"mutates": false,
+			"supportsDryRun": false,
+			"timeoutSeconds": 60
+		},
+		{
+			"name": "play_start",
+			"method": "play.start",
+			"description": "Starts a play session of the open scene (or of scene) through the serializer copy; with lockstep, ticks advance only through this client's play.step. Returns the session's state.",
+			"inputSchema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "PlayStartParams",
+				"description": "The params of play.start (§13.5).",
+				"type": "object",
+				"properties": {
+					"mode": {
+						"description": "Play (the default) or Simulate.",
+						"enum": ["Play", "Simulate"]
+					},
+					"lockstep": {
+						"description": "Advance only through this client's play.step calls (§13.6).",
+						"type": "boolean"
+					},
+					"seed": {
+						"description": "The session seed; absent: the project's Simulation.Seed xor the scene's Seed.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"scene": {
+						"description": "A project scene to play, such as \"Assets/Scenes/Level2.scene\"; absent: the open scene.",
+						"type": "string"
+					},
+					"parameters": {
+						"description": "Load parameters for scripts (M13; refused when present)."
+					},
+					"paused": {
+						"description": "Start paused at tick 0.",
+						"type": "boolean"
+					},
+					"timeScale": {
+						"description": "The time scale, 0 to 100 (1 is real time).",
+						"type": "number",
+						"minimum": 0,
+						"maximum": 100
+					},
+					"pauseOnError": {
+						"description": "Pause on a script error (M13; refused when present).",
+						"type": "boolean"
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false
+			},
+			"mutates": false,
+			"supportsDryRun": false,
+			"timeoutSeconds": 60
+		},
+		{
+			"name": "play_step",
+			"method": "play.step",
+			"description": "Runs ticks (fixed step + frame phase each) of a lockstep or paused session, as many per frame as fit 50 ms, with optional tick-stamped input. Returns the tick, the state hash, and the frames and renders it took.",
+			"inputSchema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "PlayStepParams",
+				"description": "The params of play.step (§13.6).",
+				"type": "object",
+				"properties": {
+					"ticks": {
+						"description": "The ticks to run (required), each a fixed step and a frame phase.",
+						"type": "integer",
+						"minimum": 1,
+						"maximum": 1000000
+					},
+					"input": {
+						"description": "Input events, each with a tick offset from the first tick this call runs (below ticks).",
+						"type": "array",
+						"items": {
+							"description": "One input event, stamped with a tick offset (§13.6); each type reads only its own members.",
+							"type": "object",
+							"properties": {
+								"tick": {
+									"description": "The tick offset: from the session's next tick (input.inject) or from the first tick of the play.step that carries it.",
+									"type": "integer",
+									"minimum": 0,
+									"maximum": 4294967295
+								},
+								"type": {
+									"description": "The event type (required).",
+									"enum": ["Action", "Key", "MouseButton", "MouseMove", "MouseDelta", "Scroll", "GamepadButton", "GamepadAxis", "Text"]
+								},
+								"name": {
+									"description": "action: the project action's name (exact, case-sensitive).",
+									"type": "string"
+								},
+								"state": {
+									"description": "action, key, mouseButton, gamepadButton: down (the default), up or tap.",
+									"enum": ["Down", "Up", "Tap"]
+								},
+								"value": {
+									"description": "action: an axis value in [-1, 1]; gamepadAxis: [-1, 1] for sticks (up positive), [0, 1] for triggers.",
+									"type": "number",
+									"minimum": -1,
+									"maximum": 1
+								},
+								"key": {
+									"description": "key: the key's name, such as \"Space\", \"A\" or \"Escape\".",
+									"type": "string"
+								},
+								"button": {
+									"description": "mouseButton: \"Left\", \"Right\", \"Middle\" ...; gamepadButton: \"South\", \"Start\" ...",
+									"type": "string"
+								},
+								"gamepad": {
+									"description": "gamepadButton, gamepadAxis: the gamepad, 0 to 3.",
+									"type": "integer",
+									"minimum": 0,
+									"maximum": 3
+								},
+								"axis": {
+									"description": "gamepadAxis: \"LeftX\", \"LeftY\", \"RightX\", \"RightY\", \"LeftTrigger\" or \"RightTrigger\".",
+									"type": "string"
+								},
+								"position": {
+									"description": "mouseMove (required), mouseButton (optional): [x, y] in window coordinates.",
+									"type": "array",
+									"prefixItems": [
+										{
+											"type": "number"
+										},
+										{
+											"type": "number"
+										}
+									],
+									"minItems": 2,
+									"maxItems": 2
+								},
+								"delta": {
+									"description": "mouseDelta: the cursor motion [x, y]; scroll: [x, y], y up-positive.",
+									"type": "array",
+									"prefixItems": [
+										{
+											"type": "number"
+										},
+										{
+											"type": "number"
+										}
+									],
+									"minItems": 2,
+									"maxItems": 2
+								},
+								"text": {
+									"description": "text: the typed text (UTF-8).",
+									"type": "string"
+								}
+							},
+							"additionalProperties": false
+						}
+					},
+					"render": {
+						"description": "Which ticks extract the game view: every, last (the default) or none.",
+						"enum": ["Every", "Last", "None"]
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"required": ["ticks"]
+			},
+			"mutates": false,
+			"supportsDryRun": false,
+			"timeoutSeconds": 600
+		},
+		{
+			"name": "play_stop",
+			"method": "play.stop",
+			"description": "Stops the play session; the edit scene was never touched. Returns the final tick and state hash.",
+			"inputSchema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "NoParams",
+				"description": "The params of a method that takes none: an empty object.",
+				"type": "object",
+				"properties": {
 					"ifRevision": {
 						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
 						"type": "integer",
@@ -940,6 +1249,45 @@
 			"mutates": true,
 			"supportsDryRun": false,
 			"timeoutSeconds": 60
+		},
+		{
+			"name": "project_export",
+			"method": "project.export",
+			"description": "Exports the open project as a standalone game below Build/: the configuration's Runtime renamed after the project, the app-local CRT, Game.json, Data/Engine.pak and Data/Game.pak, optionally smoke-tested; resolves with the report.",
+			"inputSchema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "ProjectExportParams",
+				"description": "The params of project.export.",
+				"type": "object",
+				"properties": {
+					"config": {
+						"description": "The build configuration whose Runtime and shaders the export packages.",
+						"enum": ["Debug", "Release", "Dist"]
+					},
+					"outDir": {
+						"description": "The project-relative output directory below Build/; empty or absent: Build/<Platform>-<Config>/<Name>. An earlier export there is replaced once the new one is complete.",
+						"type": "string"
+					},
+					"smokeTest": {
+						"description": "Run the exported game headless for 300 frames with --expect-no-errors before it replaces the output directory, and require exit code 0.",
+						"type": "boolean"
+					},
+					"testing": {
+						"description": "A testing export (M15): refused while present.",
+						"type": "boolean"
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"required": ["config"]
+			},
+			"mutates": true,
+			"supportsDryRun": false,
+			"timeoutSeconds": 900
 		},
 		{
 			"name": "project_get_settings",
@@ -1326,7 +1674,7 @@
 		{
 			"name": "viewport_screenshot",
 			"method": "viewport.screenshot",
-			"description": "Renders the viewport afresh at width x height, downscales it to maxDimension and writes it as a PNG whose path the result names. Needs a renderer (not --renderer none).",
+			"description": "Renders a view of the target scene afresh at width x height (the game view through the primary camera, the editor's scene view, or a camera entity), downscales it to maxDimension and writes it as a PNG whose path the result names. Needs a renderer (not --renderer none).",
 			"inputSchema": {
 				"$schema": "https://json-schema.org/draft/2020-12/schema",
 				"title": "ViewportScreenshotParams",
@@ -1334,8 +1682,12 @@
 				"type": "object",
 				"properties": {
 					"view": {
-						"description": "The view to render: \"Scene\" (\"Game\" is not supported before M7).",
+						"description": "The view to render: \"Game\" (the primary camera) or \"Scene\" (the editor's scene-view camera; not in the Runtime).",
 						"enum": ["Scene", "Game"]
+					},
+					"target": {
+						"description": "The scene to render; omitted: the play scene while playing, else the edit scene.",
+						"enum": ["Edit", "Play"]
 					},
 					"width": {
 						"description": "The rendered width in pixels, before maxDimension.",
@@ -1350,7 +1702,7 @@
 						"maximum": 8192
 					},
 					"camera": {
-						"description": "A camera entity to render through (not supported before M7; refused when present).",
+						"description": "A camera entity of the target scene (an EntityRef) to render through instead of the view's camera.",
 						"type": "string"
 					},
 					"debugView": {

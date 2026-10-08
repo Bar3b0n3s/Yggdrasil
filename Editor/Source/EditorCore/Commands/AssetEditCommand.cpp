@@ -34,26 +34,31 @@ namespace Engine {
 			return context.WriteProjectFile(edit.Path, *state);
 		}
 
-		// The current state of `path` as an AssetFileEdit records it: the bytes of a file, an empty buffer for a folder, nullopt
-		// when nothing is there. Errors: the read errors other than NotFound (an operating-system access failure as Io).
-		static Result<std::optional<Buffer>> ReadAssetFileState(const VirtualFileSystem& vfs, const VfsPath& path, AssetFileKind& kind)
+		// Reads the current state of `path` into `state` as an AssetFileEdit records it: the bytes of a file, an empty buffer
+		// for a folder, nullopt when nothing is there. It fills the edit's member in place rather than returning an optional
+		// buffer through a Result, which GCC's -O2 flow analysis misreads as a use of an uninitialized vector
+		// (-Wmaybe-uninitialized). Errors: the read errors other than NotFound (an operating-system access failure as Io).
+		static Status ReadAssetFileState(const VirtualFileSystem& vfs, const VfsPath& path, AssetFileKind& kind, std::optional<Buffer>& state)
 		{
+			state.reset();
 			Result<FileInfo> info = vfs.GetInfo(path);
 			if (!info)
 			{
 				if (info.error().GetCode() == ErrorCode::NotFound)
-					return std::optional<Buffer>();
+					return Status();
 				return std::unexpected(ToEditorFileError(std::move(info).error()));
 			}
 			if (info->IsDirectory)
 			{
 				kind = AssetFileKind::Directory;
-				return std::optional<Buffer>(Buffer());
+				state.emplace();
+				return Status();
 			}
 			Result<Buffer> bytes = vfs.ReadFile(path);
 			if (!bytes)
 				return std::unexpected(ToEditorFileError(std::move(bytes).error()));
-			return std::optional<Buffer>(std::move(*bytes));
+			state.emplace(std::move(*bytes));
+			return Status();
 		}
 
 	}
@@ -81,14 +86,16 @@ namespace Engine {
 		edits.reserve(files.size());
 		for (const auto& [path, bytes] : files)
 		{
+			AssetFileEdit& edit = edits.emplace_back();
+			edit.Path = path;
+			edit.After.emplace(bytes);
 			AssetFileKind kind = AssetFileKind::File;
-			ENGINE_TRY_ASSIGN(std::optional<Buffer> before, Utils::ReadAssetFileState(context.GetVfs(), path, kind));
+			ENGINE_TRY(Utils::ReadAssetFileState(context.GetVfs(), path, kind, edit.Before));
 			if (kind == AssetFileKind::Directory)
 			{
 				return std::unexpected(Error(ErrorCode::AlreadyExists, std::format("cannot write '{}': a folder has that name", path.ToString()))
 						.WithHint("choose another file name"));
 			}
-			edits.push_back(AssetFileEdit{ .Path = path, .Kind = AssetFileKind::File, .Before = std::move(before), .After = bytes });
 		}
 		return CreateScope<AssetEditCommand>(std::move(label), std::move(edits));
 	}

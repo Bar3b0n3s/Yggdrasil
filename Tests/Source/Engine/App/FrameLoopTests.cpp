@@ -471,9 +471,9 @@ namespace Engine {
 			CheckFrameBoundaryCatch("App/FrameLoopUpdateThrowsSystemError", "Update");
 		}
 
-		TEST_CASE("FrameLoop: the time scale scales the steps and the frame delta" * doctest::skip(true))
+		TEST_CASE("FrameLoop: the time scale scales the steps and the frame delta")
 		{
-			// Skipped skeleton of the M7 contract (Docs/Decisions/0012-m7-decisions.md decision 3); stream C.
+			// Docs/Decisions/0012-m7-decisions.md decision 3.
 			const std::array<double, 1> deltas = { 4.0 * FixedDelta };
 			Result<ScriptedClock> clock = ScriptedClock::Create(deltas);
 			REQUIRE(clock.has_value());
@@ -501,9 +501,9 @@ namespace Engine {
 			}));
 		}
 
-		TEST_CASE("FrameLoop: a ManualClock frame at a time scale other than 1 advances by the scaled fixed delta" * doctest::skip(true))
+		TEST_CASE("FrameLoop: a ManualClock frame at a time scale other than 1 advances by the scaled fixed delta")
 		{
-			// Skipped skeleton of the M7 contract (Docs/Decisions/0012-m7-decisions.md decision 3); stream C.
+			// Docs/Decisions/0012-m7-decisions.md decision 3.
 			Scope<EngineContext> context = CreateContext();
 			RecordingClient client;
 			FrameLoop loop(*context, client, CreateScope<ManualClock>(FixedDelta), {});
@@ -516,11 +516,11 @@ namespace Engine {
 			CHECK(loop.GetLastFrameTime().DeltaTime == doctest::Approx(2.0 * FixedDelta));
 		}
 
-		TEST_CASE("FrameLoop: a suspended throttle runs frames without waiting for their slots" * doctest::skip(true))
+		TEST_CASE("FrameLoop: a suspended throttle runs frames without waiting for their slots")
 		{
-			// Skipped skeleton of the M7 contract (Docs/Decisions/0012-m7-decisions.md decision 3); stream C. One-second slots:
-			// a loop that still waited for them would need hours for these frames and fail at the suite's timeout, a failure
-			// bound only; nothing here measures time (ADR 0008 decision 15).
+			// Docs/Decisions/0012-m7-decisions.md decision 3. One-second slots: a loop that still waited for them would need
+			// hours for these frames and fail at the suite's timeout, a failure bound only; nothing here measures time (ADR 0008
+			// decision 15).
 			Scope<EngineContext> context = CreateContext();
 			RecordingClient client;
 			constexpr uint64_t Frames = 10000;
@@ -533,10 +533,10 @@ namespace Engine {
 			CHECK(loop.GetFrameCount() == Frames);
 		}
 
-		TEST_CASE("FrameLoop: a new loop config rebuilds the scheduler and the ManualClock at its FixedHz" * doctest::skip(true))
+		TEST_CASE("FrameLoop: a new loop config rebuilds the scheduler and the ManualClock at its FixedHz")
 		{
-			// Skipped skeleton of the M7 contract (Docs/Decisions/0012-m7-decisions.md decision 3); stream C. The editor plays
-			// a project at its Simulation.FixedHz (EditorPlayController::GetFrameLoopConfig).
+			// Docs/Decisions/0012-m7-decisions.md decision 3: the editor plays a project at its Simulation.FixedHz
+			// (EditorPlayController::GetFrameLoopConfig).
 			Scope<EngineContext> context = CreateContext();
 			RecordingClient client;
 			FrameLoop loop(*context, client, CreateScope<ManualClock>(FixedDelta), {});

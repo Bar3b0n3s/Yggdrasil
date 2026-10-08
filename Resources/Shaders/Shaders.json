@@ -1,6 +1,20 @@
 {
 	"Programs": [
 		{
+			"Name": "Blit",
+			"File": "Passes/Blit.slang",
+			"Entries": [
+				{
+					"Name": "VSMain",
+					"Stage": "vertex"
+				},
+				{
+					"Name": "PSMain",
+					"Stage": "fragment"
+				}
+			]
+		},
+		{
 			"Name": "ImGui",
 			"File": "Passes/ImGui.slang",
 			"Entries": [
@@ -25,6 +39,24 @@
 			]
 		},
 		{
+			"Name": "Scene",
+			"File": "Passes/Scene.slang",
+			"Entries": [
+				{
+					"Name": "VSMain",
+					"Stage": "vertex"
+				},
+				{
+					"Name": "PSPrepass",
+					"Stage": "fragment"
+				},
+				{
+					"Name": "PSForward",
+					"Stage": "fragment"
+				}
+			]
+		},
+		{
 			"Name": "Smoke",
 			"File": "Passes/Smoke.slang",
 			"Entries": [
@@ -39,6 +71,16 @@
 					"1"
 				]
 			}
+		},
+		{
+			"Name": "Tonemap",
+			"File": "Passes/Tonemap.slang",
+			"Entries": [
+				{
+					"Name": "CSMain",
+					"Stage": "compute"
+				}
+			]
 		},
 		{
 			"Name": "Triangle",

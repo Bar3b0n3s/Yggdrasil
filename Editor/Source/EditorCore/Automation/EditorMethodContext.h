@@ -7,6 +7,7 @@
 #include "Engine/Core/Result.h"
 #include "Engine/Core/VfsPath.h"
 
+#include <chrono>
 #include <cstddef>
 #include <optional>
 #include <span>
@@ -76,6 +77,18 @@ namespace Engine {
 		[[nodiscard]] Result<Image> CaptureView(const RenderSnapshot& snapshot, const ViewportScreenshotRequest& request) override;
 		[[nodiscard]] std::optional<ExplicitRenderCamera> GetSceneViewCamera() const override;
 		[[nodiscard]] Result<std::string> WriteOutputFile(std::string_view extension, std::span<const std::byte> bytes) override;
+
+		// The services of the moved M4 to M6 domains (Docs/Decisions/0012-m7-decisions.md decision 12) over the editor:
+		// DescribeSession reports the server's capabilities, clients, renderer and headless flag and the open project;
+		// Shutdown saves the open scene with save (InvalidState for a dirty scene without save or force, PermissionDenied for
+		// save in a read-only editor) and requests the exit (EditorContext::RequestShutdown); MakeSceneSummary reports the
+		// edit scene's file and dirty flag (Utils::MakeSceneSummary), and for the play scene the edit scene's file, never
+		// dirty; GetAssets is the EditorAssetManager; GetWallClockTime is the server's AutomationServerSpecification::WallClock.
+		[[nodiscard]] SessionHostDescription DescribeSession() const override;
+		[[nodiscard]] Result<SessionShutdownResult> Shutdown(const SessionShutdownParams& params) override;
+		[[nodiscard]] SceneSummary MakeSceneSummary(const Scene& scene) const override;
+		[[nodiscard]] AssetManager* GetAssets() const override;
+		[[nodiscard]] std::chrono::steady_clock::time_point GetWallClockTime() const override;
 	private:
 		EditorContext* m_Editor = nullptr;    // documented back-reference
 		AutomationServer* m_Server = nullptr; // documented back-reference

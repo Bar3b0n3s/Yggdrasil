@@ -30,6 +30,8 @@ ACTIONS = tuple(_WORKSPACE_FILE_TEMPLATES)
 
 # MSBuild replaces these characters with '_' in solution target names (ProjectInSolution.CleanseProjectName).
 _MSBUILD_TARGET_CHARACTERS = re.compile(r"[%$@;.()']")
+# A project a .vcxproj links (premake's links): <ProjectReference Include="..\Engine\Engine.vcxproj">.
+_PROJECT_REFERENCE_PATTERN = re.compile(r'<ProjectReference\s+Include="([^"]+)"')
 
 
 class WorkspaceError(Exception):
@@ -96,6 +98,20 @@ class Solution(Workspace):
     target_names: dict[str, str] = dataclasses.field(default_factory=dict)  # project -> MSBuild solution target
     project_files: dict[str, Path] = dataclasses.field(default_factory=dict)
     utility_projects: set[str] = dataclasses.field(default_factory=set)
+    # project -> the projects it depends on directly: the solution's BuildDependency entries (premake's dependson) and
+    # the project file's ProjectReference items (premake's links)
+    dependencies: dict[str, set[str]] = dataclasses.field(default_factory=dict)
+
+    def builds_with(self, project: str) -> set[str]:
+        """`project` and every project that building it builds first (its dependencies, transitively)."""
+        built: set[str] = set()
+        pending = [project]
+        while pending:
+            name = pending.pop()
+            if name not in built:
+                built.add(name)
+                pending.extend(self.dependencies.get(name, set()))
+        return built
 
 
 def _builds_in(project: ElementTree.Element, solution_configuration: str) -> bool:
@@ -141,12 +157,17 @@ def read_solution(path: Path) -> Solution:
         for config in configurations:
             if _builds_in(element, f"{config}|{platform}"):
                 solution.configurations[config].append(name)
+        dependencies = {Path(dependency.get("Project", "").replace("\\", "/")).stem
+                        for dependency in element.findall("BuildDependency")}
         try:
             text = project_file.read_text(encoding="utf-8-sig", errors="replace")
             if "<ConfigurationType>Utility</ConfigurationType>" in text:
                 solution.utility_projects.add(name)
         except OSError:
             raise WorkspaceError(f"{paths.display_path(path)} lists {relative}, which does not exist") from None
+        dependencies.update(Path(reference.replace("\\", "/")).stem
+                            for reference in _PROJECT_REFERENCE_PATTERN.findall(text))
+        solution.dependencies[name] = dependencies - {"", name}
     return solution
 
 

@@ -4,7 +4,10 @@
 
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Scene/Entity.h"
+#include "Engine/Scene/Scene.h"
 #include "Support/AutomationTestClient.h"
+
+#include <utility>
 
 namespace Engine {
 
@@ -61,24 +64,6 @@ namespace Engine {
 			Json unknownComponent = setup.Request("entity.create", ParseEntityMethodJson(R"({"name":"Ball","components":{"RigidBdy":{}}})"));
 			CHECK(unknownComponent["error"]["data"]["issues"][0]["hint"].dump().contains("RigidBody"));
 			CHECK(setup.GetEditor().GetScene().GetEntityCount() == 0);
-		}
-
-		TEST_CASE("EntityMethods: entity.get selects components and children")
-		{
-			Test::AutomationFixture setup("EntityGet");
-			REQUIRE(setup.Call("edit.batch", ParseEntityMethodJson(R"({"label":"Tree","ops":[
-				{"method":"entity.create","params":{"name":"Game","components":{"Camera":{}}}},
-				{"method":"entity.create","params":{"name":"Child","parent":{"$ref":"0.entity.id"}}}]})"))
-					.has_value());
-			Result<Json> selected = setup.Call("entity.get", ParseEntityMethodJson(R"({"entity":"/Game","components":["Camera"],"children":true})"));
-			REQUIRE(selected.has_value());
-			CHECK((*selected)["entity"]["components"].size() == 1);
-			CHECK((*selected)["entity"]["children"][0]["name"] == Json("Child"));
-			Result<Json> byPrefix = setup.Call("entity.get", Json{ { "entity", JsonReader((*selected)["entity"]["id"]).ReadString().value_or("").substr(0, 6) } });
-			REQUIRE(byPrefix.has_value());
-			CHECK((*byPrefix)["entity"]["name"] == Json("Game"));
-			CHECK(setup.Call("entity.get", Json{ { "entity", "/Nobody" } }).error().GetCode() == ErrorCode::NotFound);
-			CHECK(setup.Call("entity.get", Json{ { "entity", "/Game" }, { "components", 3 } }).error().GetCode() == ErrorCode::InvalidArgument);
 		}
 
 		TEST_CASE("EntityMethods: entity.update changes only what is given and adds missing components")
@@ -186,28 +171,34 @@ namespace Engine {
 			CHECK(setup.GetEditor().GetRevision() == revision);
 		}
 
-		TEST_CASE("EntityMethods: entity.bounds reports world AABBs of meshes and their descendants")
+		TEST_CASE("EntityMethods: play-scene creations stop at Simulation.MaxEntities with InvalidState")
 		{
-			Test::AutomationFixture setup("EntityBounds");
-			REQUIRE(setup.Call("entity.create", ParseEntityMethodJson(R"({"name": "Track", "components": {"Transform": {"Translation": [10, 0, 0]}}})")).has_value());
-			REQUIRE(setup.Call("entity.create", ParseEntityMethodJson(R"({"name": "Piece", "parent": "/Track", "components": {
-				"Transform": {"Translation": [0, 1, 0], "Scale": [2, 1, 4]}, "MeshRenderer": {"Mesh": "engine://Meshes/Cube"}}})"))
-					.has_value());
-			Result<Json> bounds = setup.Call("entity.bounds", ParseEntityMethodJson(R"({"entities": ["/Track", "/Track/Piece"]})"));
-			REQUIRE_MESSAGE(bounds.has_value(), bounds.error().ToString());
-			REQUIRE((*bounds)["bounds"].size() == 2);
-			// The root has no mesh of its own: its bounds are its child's (includeDescendants defaults to true).
-			CHECK((*bounds)["bounds"][0]["hasBounds"] == Json(true));
-			CHECK((*bounds)["bounds"][0]["min"] == ParseEntityMethodJson("[9, 0.5, -2]"));
-			CHECK((*bounds)["bounds"][0]["max"] == ParseEntityMethodJson("[11, 1.5, 2]"));
-			CHECK((*bounds)["bounds"][1]["center"] == ParseEntityMethodJson("[10, 1, 0]"));
-			CHECK((*bounds)["bounds"][1]["size"] == ParseEntityMethodJson("[2, 1, 4]"));
-			Result<Json> own = setup.Call("entity.bounds", ParseEntityMethodJson(R"({"entities": ["/Track"], "includeDescendants": false})"));
-			REQUIRE(own.has_value());
-			CHECK((*own)["bounds"][0]["hasBounds"] == Json(false));
-			CHECK((*own)["bounds"][0]["min"] == Json::array());
-			Json missing = setup.Request("entity.bounds", ParseEntityMethodJson(R"({"entities": ["/Nothing"]})"));
-			CHECK(missing["error"]["code"] == Json(-32001));
+			// §5.7: creating beyond the cap is an automation InvalidState error, never a crash; the edit scene is untouched.
+			Test::AutomationFixture setup("EntityCap");
+			REQUIRE(setup.Call("project.setSettings", ParseEntityMethodJson(R"({"patch": {"Simulation": {"MaxEntities": 3}}})")).has_value());
+			REQUIRE(setup.Call("entity.create", Json{ { "name", "A" } }).has_value());
+			REQUIRE(setup.Call("entity.create", Json{ { "name", "B" } }).has_value());
+			REQUIRE(setup.Call("play.start", Json{ { "lockstep", true } }).has_value());
+
+			const Result<Json> third = setup.Call("entity.create", Json{ { "name", "C" }, { "target", "play" } });
+			REQUIRE_MESSAGE(third.has_value(), third.error().ToString());
+			for (const auto& [method, params] : { std::pair{ "entity.create", Json{ { "name", "D" }, { "target", "play" } } },
+					 std::pair{ "entity.duplicate", Json{ { "entities", Json::array({ "/A" }) }, { "target", "play" } } } })
+			{
+				INFO(std::string(method));
+				const Result<Json> refused = setup.Call(method, params);
+				REQUIRE_FALSE(refused.has_value());
+				INFO(refused.error().ToString());
+				CHECK(refused.error().GetCode() == ErrorCode::InvalidState);
+				CHECK(refused.error().GetMessageText().contains("entity limit 3 reached"));
+			}
+			const Result<Json> state = setup.Call("play.state", Json::object());
+			REQUIRE(state.has_value());
+			CHECK((*state)["entityCount"] == Json(3));
+			CHECK((*state)["maxEntities"] == Json(3));
+			CHECK(setup.GetEditor().GetScene().GetEntityCount() == 2);
+			REQUIRE(setup.Call("play.stop", Json::object()).has_value());
+			CHECK(setup.GetEditor().GetScene().GetEntityCount() == 2);
 		}
 
 		TEST_CASE("EntityMethods: asset references in component values accept handles, project paths and engine paths")

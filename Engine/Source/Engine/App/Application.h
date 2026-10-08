@@ -148,7 +148,8 @@ namespace Engine {
 	//      other Render errors are logged once per run of failing frames.
 	//   3. OnShutdown, GraphicsDevice::WaitForIdle, the rendering objects (ImGuiLayer, GpuProfiler, swapchain or offscreen
 	//      target, pacer), then the GPU services (EngineContext::DestroyGraphics) with the ExpectNoGpuErrors check (see the
-	//      field), then the rest of the context (reverse order). Run returns the exit code.
+	//      field), then the rest of the context (reverse order), then the ExpectNoErrors check, which so counts the errors
+	//      logged during the whole teardown too. Run returns the exit code.
 	// Run may be called once per Application.
 	class Application : private IFrameLoopClient
 	{
@@ -231,13 +232,17 @@ namespace Engine {
 		// The frame's rendering objects with a device (swapchain or offscreen target, pacer, profiler, command list),
 		// defined in Application.cpp.
 		struct FrameRendering;
+		// The log listener that counts the Error and Critical entries of a run with ExpectNoErrors, defined in
+		// Application.cpp.
+		struct LoggedErrorCounter;
 	private:
 		ApplicationSpecification m_Specification;
-		Scope<EngineContext> m_Context;       // between the start of initialization and the end of OnShutdown
-		Scope<FrameLoop> m_FrameLoop;         // while the frame loop runs
-		Scope<FrameRendering> m_Rendering;    // with a device, from InitializeRendering to ShutdownRendering
-		Scope<ImGuiLayer> m_ImGuiLayer;       // with EnableImGui, from InitializeRendering to ShutdownRendering
-		std::optional<int> m_PendingExitCode; // an exit requested before the frame loop exists (during OnInitialize)
+		Scope<EngineContext> m_Context;           // between the start of initialization and the end of OnShutdown
+		Scope<FrameLoop> m_FrameLoop;             // while the frame loop runs
+		Scope<FrameRendering> m_Rendering;        // with a device, from InitializeRendering to ShutdownRendering
+		Scope<ImGuiLayer> m_ImGuiLayer;           // with EnableImGui, from InitializeRendering to ShutdownRendering
+		Scope<LoggedErrorCounter> m_LoggedErrors; // with ExpectNoErrors, from the start of Run to its end
+		std::optional<int> m_PendingExitCode;     // an exit requested before the frame loop exists (during OnInitialize)
 		bool m_HasRun = false;
 	};
 

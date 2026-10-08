@@ -2,10 +2,10 @@
 #include "EditorCore/Automation/Private/MethodSupport.h"
 
 #include "EditorCore/Automation/ProjectMethods.h"
-#include "EditorCore/Automation/SceneMethods.h"
 #include "EditorCore/EditorContext.h"
 #include "EditorCore/Private/EditorFileError.h"
 #include "Engine/Automation/Methods/AutomationMethodContext.h"
+#include "Engine/Automation/Methods/SceneMethods.h"
 #include "Engine/Core/Assert.h"
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Json/JsonReader.h"
@@ -16,7 +16,6 @@
 #include "Engine/Reflection/StructInfo.h"
 #include "Engine/Reflection/TypeInfo.h"
 #include "Engine/Reflection/TypeRegistry.h"
-#include "Engine/Scene/ComponentHostOps.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/SceneSerializer.h"
@@ -24,78 +23,13 @@
 
 #include <nlohmann/json.hpp>
 
-#include <charconv>
-
 namespace Engine {
 
 	namespace Utils {
 
-		// `source` with a new code, message and issues; its contexts, hint and location are kept.
-		static Error RebuildError(const Error& source, ErrorCode code, std::string message, std::vector<ErrorIssue> issues)
-		{
-			Error rebuilt(code, std::move(message));
-			for (const std::string& context : source.GetContexts())
-			{
-				Error next = std::move(rebuilt).WithContext(context);
-				rebuilt = std::move(next);
-			}
-			if (!source.GetHint().empty())
-			{
-				Error next = std::move(rebuilt).WithHint(source.GetHint());
-				rebuilt = std::move(next);
-			}
-			Error located = std::move(rebuilt).WithLocation(source.GetLocation());
-			return std::move(located).WithIssues(std::move(issues));
-		}
-
-		Error ReplaceIssues(const Error& error, std::vector<ErrorIssue> issues)
-		{
-			return RebuildError(error, error.GetCode(), error.GetMessageText(), std::move(issues));
-		}
-
-		Error PrefixPointers(const Error& error, std::string_view prefix)
-		{
-			std::vector<ErrorIssue> issues = error.GetIssues();
-			for (ErrorIssue& issue : issues)
-				issue.JsonPointer = std::string(prefix) + issue.JsonPointer;
-
-			ErrorLocation location;
-			location.JsonPointer = std::string(prefix) + error.GetLocation().JsonPointer.value_or(std::string());
-			return ReplaceIssues(Error(error).WithLocation(std::move(location)), std::move(issues));
-		}
-
-		Error LocateAtParam(const Error& error, std::string_view pointer)
-		{
-			std::vector<ErrorIssue> issues = error.GetIssues();
-			for (ErrorIssue& issue : issues)
-			{
-				if (issue.JsonPointer.empty())
-					issue.JsonPointer = std::string(pointer);
-			}
-			ErrorLocation location;
-			location.JsonPointer = std::string(pointer);
-			return ReplaceIssues(Error(error).WithLocation(std::move(location)), std::move(issues));
-		}
-
-		Error MakeParamError(ErrorCode code, std::string_view pointer, std::string message, std::string hint)
-		{
-			ErrorLocation location;
-			location.JsonPointer = std::string(pointer);
-			ErrorIssue issue;
-			issue.JsonPointer = std::string(pointer);
-			issue.Message = message;
-			issue.Hint = hint;
-			return Error(code, std::move(message)).WithHint(std::move(hint)).WithLocation(std::move(location)).WithIssue(std::move(issue));
-		}
-
 		std::string ToProjectRelative(const VfsPath& path)
 		{
 			return std::string(path.GetPath());
-		}
-
-		std::string FormatOptionalUUID(UUID id)
-		{
-			return id.IsValid() ? id.ToString() : std::string();
 		}
 
 		ProjectSummary MakeProjectSummary(const EditorContext& editor)
@@ -266,41 +200,6 @@ namespace Engine {
 				case FieldType::Variant:
 					return;
 			}
-		}
-
-		std::vector<const ComponentInfo*> GetEntityComponents(ConstEntity entity)
-		{
-			std::vector<const ComponentInfo*> components;
-			for (const ComponentInfo* info : entity.GetScene()->GetTypeRegistry().GetComponents())
-			{
-				if (info->HasFlag(ComponentFlags::Serializable) && !info->HasFlag(ComponentFlags::EntityLevel) && info->GetHostOps() != nullptr
-					&& info->GetHostOps()->Has(entity))
-				{
-					components.push_back(info);
-				}
-			}
-			return components;
-		}
-
-		Result<std::optional<uint64_t>> ParseSequenceCursor(std::string_view cursor)
-		{
-			if (cursor.empty())
-				return std::optional<uint64_t>(0);
-			if (cursor == "end")
-				return std::optional<uint64_t>();
-
-			uint64_t value = 0;
-			const bool digitsOnly = std::all_of(cursor.begin(), cursor.end(), [](char character)
-			{
-				return character >= '0' && character <= '9';
-			});
-			const std::from_chars_result parsed = std::from_chars(cursor.data(), cursor.data() + cursor.size(), value);
-			if (!digitsOnly || parsed.ec != std::errc() || parsed.ptr != cursor.data() + cursor.size())
-			{
-				return std::unexpected(MakeParamError(ErrorCode::InvalidArgument, "/cursor",
-					std::format("'{}' is not a cursor", cursor), "pass \"\" (the oldest entry), \"end\" or the nextCursor of the previous read"));
-			}
-			return std::optional<uint64_t>(value);
 		}
 
 		Status CheckPlayEntityCapacity(const AutomationMethodContext& context, const Scene& scene, size_t additional)

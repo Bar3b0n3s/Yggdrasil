@@ -5,9 +5,10 @@ The generator is detected from the workspace files Scripts/Generate.py wrote in 
   vs2026  MSBuild from Visual Studio 2026 (located with vswhere) on the workspace's .slnx. MSBuild warnings fail the
           build (the milestone rule is zero warnings at /W4 /WX). --allow-vendor-warnings tolerates warnings located
           in files under Vendor/ only (vendored code keeps its own warning settings, which clang-cl reports more of);
-          --allow-warnings tolerates every warning. After a build that includes Runtime, the app-local CRT
-          (vcruntime140.dll, vcruntime140_1.dll, msvcp140.dll from VC/Redist/MSVC/<newest>/x64/Microsoft.VC145.CRT) is
-          copied to bin/<OutputDir>/Runtime/Redist/.
+          --allow-warnings tolerates every warning. After a build that includes Runtime (every project, Runtime
+          itself, or a project that depends on it, such as Tests), the app-local CRT (vcruntime140.dll,
+          vcruntime140_1.dll, msvcp140.dll from VC/Redist/MSVC/<newest>/x64/Microsoft.VC145.CRT) is copied to
+          bin/<OutputDir>/Runtime/Redist/, where exports take it from (§14.2 step 4).
   gmake   make -j<jobs> config=<config> with CC/CXX/AR set to the selected compiler: CC/CXX/AR from the environment,
           else the newest installed g++-N/clang++-N (GCC >= 14, Clang >= 18) matching the toolset the makefiles
           were generated for, with the matching gcc-ar/llvm-ar for the LTO archives of Dist. Clang on Linux links with
@@ -170,6 +171,15 @@ def copy_crt_redist(visual_studio: toolchain.VisualStudio, config: str, root: Pa
             "copied": copied}
 
 
+def builds_runtime(solution: workspace.Solution, config: str, project: str | None) -> bool:
+    """Whether building `project` (None: every project of the configuration) builds the Runtime, directly or as a
+    dependency (Tests depends on it), so its app-local CRT must be next to it (Docs/Decisions/0012-m7-decisions.md
+    decision 14)."""
+    if RUNTIME_PROJECT not in solution.projects_in(config):
+        return False
+    return project is None or RUNTIME_PROJECT in solution.builds_with(project)
+
+
 def build_msbuild(solution: workspace.Solution, config: str, project: str | None, arguments: argparse.Namespace,
                   console: Console) -> Step:
     visual_studio = toolchain.find_visual_studio()
@@ -217,7 +227,7 @@ def build_msbuild(solution: workspace.Solution, config: str, project: str | None
     built = [project] if project else solution.projects_in(config)
     step = finish_step(name, result, warnings, errors, not arguments.allow_warnings,
                        f"{len(built)} project(s) built" if not project else f"{project} built", tolerated)
-    if not step.failed and (project is None or project == RUNTIME_PROJECT):
+    if not step.failed and builds_runtime(solution, config, project):
         redist = copy_crt_redist(visual_studio, config, solution.path.parent)
         step.data["crtRedist"] = redist
         copied = len(redist["copied"])  # type: ignore[arg-type]

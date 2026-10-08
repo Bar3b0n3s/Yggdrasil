@@ -8,9 +8,11 @@
 #include "Engine/Core/Profiler.h"
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Platform/CrashHandler.h"
+#include "Engine/Session/PlaySession.h"
 
 #include <vulkan/vulkan.hpp>
 
+#include <cmath>
 #include <format>
 #include <string>
 #include <string_view>
@@ -34,6 +36,12 @@ namespace Engine {
 
 			ENGINE_CORE_ASSERT(false, "Unknown ClockKind {}", std::to_underlying(kind));
 			return "Unknown";
+		}
+
+		// FrameLoopConfig has no equality operator: every member compared exactly.
+		static bool IsSameLoopConfig(const FrameLoopConfig& left, const FrameLoopConfig& right)
+		{
+			return left.FixedHz == right.FixedHz && left.MaxStepsPerFrame == right.MaxStepsPerFrame && left.MaxFrameDelta == right.MaxFrameDelta;
 		}
 
 	}
@@ -102,21 +110,22 @@ namespace Engine {
 			m_Client->OnFrameSafePoint();
 		}
 
-		// 4. and 5. The fixed steps: exactly one per ManualClock frame (Alpha = 1), otherwise what the scheduler gives.
+		// 4. and 5. The fixed steps: exactly one per ManualClock frame at a time scale of 1 (Alpha = 1), otherwise what the
+		// scheduler gives for the clock's delta at the time scale (a ManualClock's delta is FixedDelta).
 		CrashHandler::SetBreadcrumb(CrashBreadcrumb::FramePhase, "FixedStep");
 		const double delta = m_Clock->Delta();
-		const FrameSteps steps =
-			m_Clock->GetKind() == ClockKind::Manual ? m_Scheduler.StepExactly(1) : m_Scheduler.Advance(delta, 1.0);
+		const bool exactStep = m_Clock->GetKind() == ClockKind::Manual && m_TimeScale == 1.0;
+		const FrameSteps steps = exactStep ? m_Scheduler.StepExactly(1) : m_Scheduler.Advance(delta, m_TimeScale);
 		{
 			ENGINE_PROFILE_SCOPE("FrameLoop::FixedSteps");
 			for (uint32_t step = 0; step < steps.StepCount; ++step)
 				m_Client->OnFrameFixedStep(m_Scheduler.GetSimStep(steps.FirstTick + step));
 		}
 
-		// 6. The frame update. Time scaling arrives with play sessions, so the scaled delta equals the clock's.
+		// 6. The frame update, with the clock's delta scaled by the play session's time scale.
 		CrashHandler::SetBreadcrumb(CrashBreadcrumb::FramePhase, "Update");
 		const FrameTime frame = {
-			.DeltaTime = delta,
+			.DeltaTime = delta * m_TimeScale,
 			.UnscaledDeltaTime = delta,
 			.Alpha = steps.Alpha,
 			.FrameIndex = m_FrameCount,
@@ -139,9 +148,15 @@ namespace Engine {
 			RequestExit(ExitCode::Success);
 		CrashHandler::SetBreadcrumb(CrashBreadcrumb::FramePhase, {});
 
-		// A frame that ends the loop does not wait for its slot.
+		// A frame that ends the loop does not wait for its slot. While the throttle is suspended (a running play.step), frames
+		// follow each other at once, and the next throttled frame starts a new slot when it starts.
 		if (m_Specification.ThrottleToFixedHz && !m_ExitRequested)
-			WaitForFrameSlot(frameStart);
+		{
+			if (m_ThrottleSuspended)
+				m_FrameSlotEnd.reset();
+			else
+				WaitForFrameSlot(frameStart);
+		}
 	}
 
 	int FrameLoop::Run()
@@ -218,7 +233,8 @@ namespace Engine {
 
 	void FrameLoop::SetTimeScale(double timeScale)
 	{
-		ENGINE_CONTRACT_STUB();
+		ENGINE_CORE_ASSERT(std::isfinite(timeScale) && timeScale >= 0.0 && timeScale <= PlaySession::MaxTimeScale,
+			"FrameLoop::SetTimeScale: {} is not a time scale in [0, {}]", timeScale, PlaySession::MaxTimeScale);
 		m_TimeScale = timeScale;
 	}
 
@@ -229,7 +245,6 @@ namespace Engine {
 
 	void FrameLoop::SetThrottleSuspended(bool suspended)
 	{
-		ENGINE_CONTRACT_STUB();
 		m_ThrottleSuspended = suspended;
 	}
 
@@ -238,9 +253,20 @@ namespace Engine {
 		return m_ThrottleSuspended;
 	}
 
-	void FrameLoop::SetLoopConfig(const FrameLoopConfig& /*config*/)
+	void FrameLoop::SetLoopConfig(const FrameLoopConfig& config)
 	{
-		ENGINE_CONTRACT_STUB();
+		// The editor applies its config every frame: an unchanged one keeps the scheduler's tick and accumulator.
+		if (Utils::IsSameLoopConfig(config, m_Scheduler.GetConfig()))
+			return;
+
+		// FixedStepScheduler asserts the ranges; the project loader validated them. Throttled frames are paced by the
+		// scheduler's FixedDelta (WaitForFrameSlot), so the current frame's slot already ends at the new rate.
+		m_Scheduler = FixedStepScheduler(config);
+		m_Specification.Loop = config;
+		// A ManualClock advances exactly one FixedDelta per frame, so it is replaced by one at the new rate.
+		if (m_Clock->GetKind() == ClockKind::Manual)
+			m_Clock = CreateScope<ManualClock>(m_Scheduler.GetFixedDelta());
+		ENGINE_CORE_INFO("Frame loop: {} Hz, at most {} steps per frame", config.FixedHz, config.MaxStepsPerFrame);
 	}
 
 	const FrameLoopConfig& FrameLoop::GetLoopConfig() const

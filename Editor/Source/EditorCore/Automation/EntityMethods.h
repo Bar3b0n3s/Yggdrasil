@@ -1,6 +1,7 @@
 #pragma once
 
 #include "EditorCore/Automation/AutomationTypes.h"
+#include "Engine/Automation/Methods/EntityMethods.h"
 #include "Engine/Core/Base.h"
 #include "Engine/Core/Result.h"
 #include "Engine/Reflection/VariantValue.h"
@@ -10,14 +11,15 @@
 #include <string>
 #include <vector>
 
-// entity.* (Architecture §13.5): create, get, update, destroy, duplicate, reparent (M4) and bounds (M6, which brings
-// meshes). Every edit-scene mutation is exactly one SceneEditCommand labelled for the agent and
-// reports its undoIndex (§13.4); every mutation supports dry runs. Undo labels (CommandHistory adds "[agent] "):
-// "Create Entity '<name>'", "Update Entity '<name>'", "Reparent Entity '<name>'", and for the list methods
-// "Destroy Entity '<name>'" / "Duplicate Entity '<name>'" for one entity or "Destroy <n> Entities" /
-// "Duplicate <n> Entities" for more. Entity references follow §13.4 (16 hex digits, a unique
-// prefix of at least 6, or a path). Component maps use ResolveComponentValue (convention 10 of MethodRegistry.h), so
-// "/components/RigidBody/Mas" is an unknown-field InvalidParams with the hint "did you mean 'Mass'?".
+// The editor's entity.* methods (Architecture §13.5): create, update, destroy, duplicate and reparent. The reads the
+// Runtime shares (entity.get, entity.bounds, and EntityDetails, which entity.update reports too) are
+// Engine/Automation/Methods/EntityMethods.h's (M7, Docs/Decisions/0012-m7-decisions.md decision 12). Every edit-scene
+// mutation is exactly one SceneEditCommand labelled for the agent and reports its undoIndex (§13.4); every mutation
+// supports dry runs. Undo labels (CommandHistory adds "[agent] "): "Create Entity '<name>'", "Update Entity '<name>'",
+// "Reparent Entity '<name>'", and for the list methods "Destroy Entity '<name>'" / "Duplicate Entity '<name>'" for one
+// entity or "Destroy <n> Entities" / "Duplicate <n> Entities" for more. Entity references follow §13.4 (16 hex digits, a
+// unique prefix of at least 6, or a path). Component maps use ResolveComponentValue (convention 10 of MethodRegistry.h),
+// so "/components/RigidBody/Mas" is an unknown-field InvalidParams with the hint "did you mean 'Mass'?".
 
 namespace Engine {
 
@@ -43,35 +45,6 @@ namespace Engine {
 	{
 		EntitySummary Entity{};
 		uint32_t UndoIndex = 0;
-	};
-
-	// Registry struct "EntityDetails": one entity as entity.get and entity.update report it.
-	struct EntityDetails
-	{
-		std::string Id{};
-		std::string Name{};
-		std::string Path{};
-		std::string Parent{}; // the parent's id; empty for a root
-		bool Active = true;   // its own flag ("Active" in files)
-		bool ActiveInHierarchy = true;
-		std::vector<std::string> Tags{};
-		std::map<std::string, VariantValue> Components{}; // the selected components' canonical JSON, entity-level ones excluded
-		std::vector<EntitySummary> Children{};            // only with children: true
-	};
-
-	// entity.get {entity, components?, children?, target?}: `components` is an array of registry names or "all" (absent:
-	// "all").
-	struct EntityGetParams
-	{
-		std::string Entity{};
-		VariantValue Components{};
-		bool Children = false;
-		SceneTarget Target = SceneTarget::Edit;
-	};
-
-	struct EntityGetResult
-	{
-		EntityDetails Entity{};
 	};
 
 	// entity.update {entity, name?, active?, tags?, components?, removeComponents?, target?}: changes only what is given
@@ -140,42 +113,12 @@ namespace Engine {
 		uint32_t UndoIndex = 0;
 	};
 
-	// Registry struct "EntityWorldBounds": one entity's world AABB (entity.bounds).
-	struct EntityWorldBounds
-	{
-		EntitySummary Entity{};
-		bool HasBounds = false;   // false when neither it nor (with includeDescendants) a descendant has a mesh
-		std::vector<float> Min{}; // [x, y, z] in metres; empty without bounds
-		std::vector<float> Max{};
-		std::vector<float> Center{};
-		std::vector<float> Size{};
-	};
-
-	// entity.bounds {entities, includeDescendants?, target?} (§13.5 "world AABBs", §13.7 layout feedback): for each entity in
-	// the order given, ComputeEntityWorldBounds (Scene/EntityBounds.h): the world AABB of its MeshRenderer mesh and, with
-	// includeDescendants (default true), of every descendant's, skipping effectively disabled entities. A missing mesh counts
-	// with the placeholder cube's bounds (and records ASSET_MISSING). Reads the play scene while playing unless target says
-	// otherwise. Available in the Runtime subset (§13.5; its declarations move to Engine/Automation/Methods in M7).
-	struct EntityBoundsParams
-	{
-		std::vector<std::string> Entities{};
-		bool IncludeDescendants = true;
-		SceneTarget Target = SceneTarget::Edit;
-	};
-
-	struct EntityBoundsResult
-	{
-		std::vector<EntityWorldBounds> Bounds{};
-	};
-
 	namespace Automation {
 
 		// entity.create. Errors: NotFound (parent, or an unknown component with suggestions); InvalidState (a Requires or
 		// Excludes violation, a second unique-per-scene component); InvalidArgument (an entity-level or hidden component);
 		// Validation (field values).
 		[[nodiscard]] Result<EntityCreateResult> EntityCreate(EditorMethodContext& context, const EntityCreateParams& params);
-		// entity.get. Errors: NotFound; InvalidArgument for a malformed components value.
-		[[nodiscard]] Result<EntityGetResult> EntityGet(EditorMethodContext& context, const EntityGetParams& params);
 		// entity.update. Errors: as entity.create, plus InvalidState for a removal that is not allowed.
 		[[nodiscard]] Result<EntityUpdateResult> EntityUpdate(EditorMethodContext& context, const EntityUpdateParams& params);
 		// entity.destroy. Errors: NotFound for any reference (nothing destroyed then); InvalidArgument for an empty list.
@@ -184,18 +127,14 @@ namespace Engine {
 		[[nodiscard]] Result<EntityDuplicateResult> EntityDuplicate(EditorMethodContext& context, const EntityDuplicateParams& params);
 		// entity.reparent. Errors: NotFound; InvalidArgument for a cycle or an unrepresentable keepWorld transform.
 		[[nodiscard]] Result<EntityReparentResult> EntityReparent(EditorMethodContext& context, const EntityReparentParams& params);
-		// entity.bounds. Errors: NotFound for any reference (nothing reported then); InvalidArgument for an empty list.
-		[[nodiscard]] Result<EntityBoundsResult> EntityBounds(EditorMethodContext& context, const EntityBoundsParams& params);
 
 	}
 
-	// Registers EntityDetails and the params and result structs above (EntityWorldBounds and entity.bounds' params and
-	// result from M6).
-	void RegisterEntityMethodTypes(TypeRegistry& registry);
+	// Registers the params and result structs above (after RegisterEntityMethodTypes, whose EntityDetails they use).
+	void RegisterEditorEntityMethodTypes(TypeRegistry& registry);
 
-	// Registers the seven methods: all are tools and AllowedInBatch (every effect goes through EditorContext::Execute); every
-	// one but entity.get and entity.bounds mutates and supports dry runs; entity.get and entity.bounds are available in the
-	// Runtime (M7; their declarations move to Engine/Automation/Methods then, ADR 0008 decision 26).
-	void RegisterEntityMethods(MethodRegistry& methods);
+	// Registers the five methods: all are tools, AllowedInBatch (every effect goes through EditorContext::Execute), mutate
+	// and support dry runs.
+	void RegisterEditorEntityMethods(MethodRegistry& methods);
 
 }

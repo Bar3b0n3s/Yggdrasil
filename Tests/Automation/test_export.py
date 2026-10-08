@@ -1,10 +1,7 @@
 """The exporter through automation (Docs/Architecture.md §7.6, §14.1, §14.2, §13.5 project.export; Roadmap M7
-acceptance): the package layout, the app-local CRT, deterministic paks and the smoke test. The exports use the Runtime
-of the configuration the suite's editor was built in (harness.automation_config), which Scripts/Build.py builds with
-its Redist DLLs.
-
-Skipped skeletons of the M7 contract (Docs/Decisions/0012-m7-decisions.md decision 14): stream D implements and
-registers project.export and removes the skips.
+acceptance): the package layout, the app-local CRT, deterministic paks, the output directory and the smoke test. The
+exports use the Runtime of the configuration the suite's editor was built in (harness.automation_config), which
+Scripts/Build.py builds with its Redist DLLs. The exported game's own behaviour is test_runtime.py's.
 """
 
 from __future__ import annotations
@@ -16,9 +13,18 @@ import unittest
 from pathlib import Path
 
 from harness import AutomationTestCase, automation_config, engine_client, runtime_executable
-from tiny_game import TINY_GAME_NAME, build_tiny_game, export_tiny_game
+from tiny_game import TINY_GAME_NAME, TINY_SCENE, WINDOW_HEIGHT, WINDOW_WIDTH, build_tiny_game, export_tiny_game
 
 CRT_FILES = ("vcruntime140.dll", "vcruntime140_1.dll", "msvcp140.dll")
+
+
+def platform_name() -> str:
+    """Exporter::GetPlatformName: the host, the only platform an export targets."""
+    if sys.platform == "win32":
+        return "Windows"
+    if sys.platform == "darwin":
+        return "macOS"
+    return "Linux"
 
 
 class ExportTests(AutomationTestCase):
@@ -30,16 +36,18 @@ class ExportTests(AutomationTestCase):
         build_tiny_game(client)
         return client, root
 
-    @unittest.skip("contract stub: un-skipped by M7 stream D")
     def test_export_tiny_project(self) -> None:
         client, root = self.open_tiny_game()
         report = export_tiny_game(client)
         output = Path(report["outputDirectory"])
         self.assertTrue(output.is_relative_to(root / "Build"))
+        self.assertEqual(output, root / "Build" / f"{platform_name()}-{automation_config()}" / TINY_GAME_NAME)
+        self.assertEqual(report["config"], automation_config())
         executable = Path(report["executable"])
         self.assertEqual(executable.parent, output)
         self.assertEqual(executable.stem, TINY_GAME_NAME)
         self.assertTrue(executable.is_file())
+        self.assertEqual(executable.read_bytes(), runtime_executable(automation_config()).read_bytes())
         self.assertTrue((output / "Data" / "Engine.pak").is_file())
         self.assertTrue((output / "Data" / "Game.pak").is_file())
         if sys.platform == "win32":
@@ -51,13 +59,22 @@ class ExportTests(AutomationTestCase):
         self.assertEqual([pak["Path"] for pak in manifest["Paks"]], ["Data/Engine.pak", "Data/Game.pak"])
         for pak in manifest["Paks"]:
             self.assertRegex(pak["XXH64"], r"^[0-9a-f]{16}$")
+        self.assertEqual(manifest["StartScene"], client.call("asset.info", {"asset": TINY_SCENE})["asset"]["id"])
+        self.assertEqual((manifest["Window"]["Width"], manifest["Window"]["Height"]), (WINDOW_WIDTH, WINDOW_HEIGHT))
+        self.assertFalse(manifest["Testing"])
         self.assertGreater(report["gameAssetCount"], 0)
-        listed = {entry["path"] for entry in report["files"]}
+        self.assertGreater(report["engineEntryCount"], 0)
+        listed = {entry["path"]: entry for entry in report["files"]}
+        self.assertEqual(list(listed), sorted(listed))
         self.assertIn("Game.json", listed)
         self.assertIn("Data/Game.pak", listed)
+        for path, entry in listed.items():
+            self.assertEqual(entry["size"], (output / path).stat().st_size, path)
+            self.assertRegex(entry["hash"], r"^[0-9a-f]{16}$")
         self.assertFalse(report["smokeTestRan"])
+        # Nothing but the output directory is left beside it: the staging directory became the output.
+        self.assertEqual([entry.name for entry in output.parent.iterdir()], [TINY_GAME_NAME])
 
-    @unittest.skip("contract stub: un-skipped by M7 stream D")
     def test_export_is_deterministic(self) -> None:
         client, _ = self.open_tiny_game()
         first = export_tiny_game(client)
@@ -70,20 +87,32 @@ class ExportTests(AutomationTestCase):
         for name, digest in digests.items():
             self.assertEqual(hashlib.sha256((output / "Data" / name).read_bytes()).hexdigest(), digest, name)
         self.assertEqual((output / "Game.json").read_bytes(), manifest)
+        self.assertEqual(second["files"], first["files"])
 
-    @unittest.skip("contract stub: un-skipped by M7 stream D")
+    def test_export_into_out_dir_replaces_the_earlier_export(self) -> None:
+        client, root = self.open_tiny_game()
+        output = root / "Build" / "Shipping" / TINY_GAME_NAME
+        output.mkdir(parents=True)
+        (output / "Old.txt").write_text("an earlier export", encoding="utf-8")
+        report = client.call("project.export", {"config": automation_config(), "outDir": "Build/Shipping/TinyGame"})
+        self.assertEqual(Path(report["outputDirectory"]), output)
+        self.assertFalse((output / "Old.txt").exists())
+        self.assertTrue(Path(report["executable"]).is_file())
+        self.assertEqual([entry.name for entry in output.parent.iterdir()], [TINY_GAME_NAME])
+
     def test_export_smoke_test_runs_the_exported_game(self) -> None:
         # The suite's editor has no device (--renderer none), so a Debug or Release smoke test passes --renderer none.
         client, _ = self.open_tiny_game()
         report = export_tiny_game(client, smoke_test=True)
         self.assertTrue(report["smokeTestRan"])
         self.assertEqual(report["smokeTestExitCode"], 0)
-        # The smoke test ran on the staged package: nothing it wrote is in the package.
+        # The smoke test ran on the staged package: nothing it wrote is in the package, and its user-data directory is
+        # gone too.
         output = Path(report["outputDirectory"])
         self.assertEqual({entry.name for entry in output.iterdir()} - set(CRT_FILES),
                          {Path(report["executable"]).name, "Game.json", "Data"})
+        self.assertEqual([entry.name for entry in output.parent.iterdir()], [TINY_GAME_NAME])
 
-    @unittest.skip("contract stub: un-skipped by M7 stream D")
     def test_export_dist_smoke_test_without_a_device_is_reported_not_run(self) -> None:
         # A Dist Runtime has no --renderer none and exits 3 without a device, so an editor without one cannot run the
         # Dist smoke test: the export succeeds and says so (Exporter.h step 6). Without a Dist build the export names
@@ -99,16 +128,18 @@ class ExportTests(AutomationTestCase):
         self.assertFalse(report["smokeTestRan"])
         self.assertTrue(any("smoke test" in warning for warning in report["warnings"]), report["warnings"])
 
-    @unittest.skip("contract stub: un-skipped by M7 stream D")
     def test_export_validates_the_project_and_its_params(self) -> None:
         client = self.connect(self.start_editor())
-        self.create_project(client, TINY_GAME_NAME)
+        root = self.create_project(client, TINY_GAME_NAME)
         client.call("scene.new", {"path": "Assets/Scenes/Main.scene"})
         # No StartScene yet: validation fails and nothing is written.
         with self.assertRaises(engine_client.EngineError) as raised:
             client.call("project.export", {"config": automation_config()})
         self.assert_engine_error(raised.exception, engine_client.VALIDATION_FAILED)
+        self.assertEqual([issue["pointer"] for issue in raised.exception.issues], ["/StartScene"])
+        self.assertFalse((root / "Build").exists())
         refusals = (({"config": "Release", "outDir": "Assets/Game"}, engine_client.INVALID_PARAMS, "/outDir"),
+                    ({"config": "Release", "outDir": "Build"}, engine_client.INVALID_PARAMS, "/outDir"),
                     ({"config": "Release", "testing": True}, engine_client.UNSUPPORTED, "/testing"))
         for params, code, pointer in refusals:
             with self.subTest(params=params):

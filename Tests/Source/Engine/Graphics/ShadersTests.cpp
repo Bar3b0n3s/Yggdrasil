@@ -9,8 +9,13 @@
 #include "Engine/Graphics/PipelineFactory.h"
 #include "Engine/Graphics/ShaderLibrary.h"
 #include "Engine/ImGui/ImGuiRenderer.h"
+#include "Engine/Renderer/BlitPass.h"
+#include "Engine/Renderer/SceneRenderer.h"
 #include "Engine/Renderer/TrianglePass.h"
+#include "Shared/DrawConstants.h"
 #include "Shared/ImGuiConstants.h"
+#include "Shared/LightingConstants.h"
+#include "Shared/MaterialConstants.h"
 #include "Shared/SmokeConstants.h"
 #include "Shared/ViewConstants.h"
 #include "Support/HeadlessGpuFixture.h"
@@ -20,7 +25,9 @@
 #include <nlohmann/json.hpp>
 
 #include <cstddef>
+#include <iterator>
 #include <set>
+#include <vector>
 
 // The static shader checks of Architecture §15.1 (T0, "Tests --test-suite=Static"): every engine pipeline's binding
 // layouts against slangc's reflection, every shared struct's member offsets against the C++ layout, and the compiled
@@ -58,13 +65,17 @@ namespace Engine {
 	// Every engine pipeline's layout description; a new pass adds its own here.
 	static std::vector<PipelineLayoutDescription> GetEnginePipelineLayouts()
 	{
-		return {
+		std::vector<PipelineLayoutDescription> layouts = {
 			TrianglePass::GetLayoutDescription(),
 			ImGuiRenderer::GetLayoutDescription(),
+			BlitPass::GetLayoutDescription(),
 			Test::MakeMatrixConventionLayoutDescription(),
 			Test::MakeSmokeLayoutDescription("0"),
 			Test::MakeSmokeLayoutDescription("1"),
 		};
+		std::vector<PipelineLayoutDescription> scene = SceneRendererPipelines::GetLayoutDescriptions();
+		layouts.insert(layouts.end(), std::make_move_iterator(scene.begin()), std::make_move_iterator(scene.end()));
+		return layouts;
 	}
 
 	namespace {
@@ -135,6 +146,41 @@ namespace Engine {
 				},
 				.Program = "ImGui",
 				.Entry = "VSMain",
+			},
+			{
+				.Name = "DrawConstants",
+				.Size = sizeof(DrawConstants),
+				.Fields = {
+					ENGINE_TEST_SHARED_FIELD(DrawConstants, World),
+					ENGINE_TEST_SHARED_FIELD(DrawConstants, EntityId),
+					ENGINE_TEST_SHARED_FIELD(DrawConstants, Flags),
+					ENGINE_TEST_SHARED_FIELD(DrawConstants, Padding),
+				},
+				.Program = "Scene",
+				.Entry = "VSMain",
+			},
+			{
+				.Name = "LightingConstants",
+				.Size = sizeof(LightingConstants),
+				.Fields = {
+					ENGINE_TEST_SHARED_FIELD(LightingConstants, LightDirection),
+					ENGINE_TEST_SHARED_FIELD(LightingConstants, Padding0),
+					ENGINE_TEST_SHARED_FIELD(LightingConstants, LightRadiance),
+					ENGINE_TEST_SHARED_FIELD(LightingConstants, Padding1),
+					ENGINE_TEST_SHARED_FIELD(LightingConstants, AmbientRadiance),
+					ENGINE_TEST_SHARED_FIELD(LightingConstants, Padding2),
+				},
+				.Program = "Scene",
+				.Entry = "PSForward",
+			},
+			{
+				.Name = "MaterialConstants",
+				.Size = sizeof(MaterialConstants),
+				.Fields = {
+					ENGINE_TEST_SHARED_FIELD(MaterialConstants, BaseColor),
+				},
+				.Program = "Scene",
+				.Entry = "PSForward",
 			},
 			{
 				.Name = "SmokeConstants",
@@ -236,14 +282,20 @@ namespace Engine {
 #else
 			CHECK(*configuration == "Release");
 #endif
-			const std::array<std::string_view, 7> variants = {
+			const std::array<std::string_view, 13> variants = {
+				"Blit/VSMain",
+				"Blit/PSMain",
 				"ImGui/VSMain",
 				"ImGui/PSMain",
 				"MatrixConvention/CSMain",
+				"Scene/VSMain",
+				"Scene/PSPrepass",
+				"Scene/PSForward",
 				"Triangle/VSMain",
 				"Triangle/PSMain",
 				"Smoke/CSMain.SMOKE_SATURATE-0",
 				"Smoke/CSMain.SMOKE_SATURATE-1",
+				"Tonemap/CSMain",
 			};
 			for (const std::string_view variant : variants)
 			{

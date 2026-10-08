@@ -14,8 +14,9 @@
 
 // Render interpolation through a play session (Architecture §5.2, §5.7 step 0 and frame phase; Roadmap M7 acceptance).
 // The observer stands in for the scripts of M13: it moves an entity in FixedUpdate (a script's OnFixedUpdate) and writes
-// one in Update (a script's OnUpdate). Skipped skeleton of the M7 contract (Docs/Decisions/0012-m7-decisions.md): stream A
-// implements the session's tagging, stream B the extraction it uses.
+// one in Update (a script's OnUpdate). The session tags and snapshots (stream A); render extraction interpolates by them
+// (stream B, Engine/Scene/RenderExtraction.h). The two cases that read the extraction have their session's half checked by
+// the cases below them, which read the runtime components extraction uses.
 
 namespace Engine {
 
@@ -73,8 +74,7 @@ namespace Engine {
 
 	TEST_SUITE("Session")
 	{
-		TEST_CASE("Interpolation: script-moved entities interpolate; frame-phase writes, teleports and new entities do not"
-			* doctest::skip(true))
+		TEST_CASE("Interpolation: script-moved entities interpolate; frame-phase writes, teleports and new entities do not")
 		{
 			Test::SceneTestFixture fixture;
 			Scene& edit = fixture.GetScene();
@@ -121,8 +121,7 @@ namespace Engine {
 			CHECK(ExtractedX(scene, "/Mover", 0.5f) == doctest::Approx(2.5f));
 		}
 
-		TEST_CASE("Interpolation: a write at the safe point is snapshotted current, never interpolated from its stale pose"
-			* doctest::skip(true))
+		TEST_CASE("Interpolation: a write at the safe point is snapshotted current, never interpolated from its stale pose")
 		{
 			Test::SceneTestFixture fixture;
 			static_cast<void>(fixture.GetScene().CreateEntity("Moved"));
@@ -141,10 +140,112 @@ namespace Engine {
 			});
 			session.FixedStep();
 			session.FrameUpdate(FrameTime{ .DeltaTime = 1.0 / 120.0, .UnscaledDeltaTime = 1.0 / 120.0, .Alpha = 0.5, .FrameIndex = 2 });
+			// The step-0 refresh made the snapshot read the written pose: previous and current agree.
+			CHECK(moved.GetComponent<PreviousWorldTransformComponent>().Matrix[3].x == doctest::Approx(10.0f));
+			CHECK(moved.GetComponent<WorldTransformComponent>().Matrix[3].x == doctest::Approx(10.0f));
 			CHECK(ExtractedX(session.GetScene(), "/Moved", 0.5f) == doctest::Approx(10.0f));
 		}
 
-		TEST_CASE("Interpolation: a view between ticks shows a write made since the last step at its new pose" * doctest::skip(true))
+		TEST_CASE("Interpolation: the session snapshots every pose and tags frame-phase writes, teleports, new and enabled entities")
+		{
+			// The session's half of the interpolation rules (§5.2), read from the runtime components extraction uses.
+			Test::SceneTestFixture fixture;
+			Scene& edit = fixture.GetScene();
+			static_cast<void>(edit.CreateEntity("Mover"));
+			Entity writer = edit.CreateEntity("Writer");
+			static_cast<void>(edit.CreateEntity("WriterChild", writer));
+			static_cast<void>(edit.CreateEntity("Teleported"));
+			Entity hidden = edit.CreateEntity("Hidden");
+			hidden.SetActive(false);
+
+			ScriptStandIn standIn;
+			PlaySessionSpecification specification;
+			specification.Registry = &fixture.GetRegistry();
+			specification.Observer = &standIn;
+			Result<Scope<PlaySession>> created = PlaySession::CreateFromScene(specification, edit);
+			REQUIRE_MESSAGE(created.has_value(), created.error().ToString());
+			PlaySession& session = **created;
+			Scene& scene = session.GetScene();
+			const auto tagged = [&scene](std::string_view path)
+			{
+				return scene.FindEntityByPath(path).HasComponent<InterpolationResetTag>();
+			};
+			const auto x = [&scene](std::string_view path, bool previous)
+			{
+				const Entity entity = scene.FindEntityByPath(path);
+				return previous ? entity.GetComponent<PreviousWorldTransformComponent>().Matrix[3].x : entity.GetComponent<WorldTransformComponent>().Matrix[3].x;
+			};
+
+			session.Tick();
+			session.FixedStep();
+			// Enabled outside the fixed steps, like a script's OnUpdate (M13).
+			scene.FindEntityByPath("/Hidden").SetActive(true);
+			session.FrameUpdate(FrameTime{ .DeltaTime = 1.0 / 240.0, .UnscaledDeltaTime = 1.0 / 240.0, .Alpha = 0.25, .FrameIndex = 1 });
+
+			// Moved inside the fixed step: snapshotted at the start of tick 1 and moved after it, so it interpolates 1 -> 2.
+			CHECK(x("/Mover", true) == doctest::Approx(1.0f));
+			CHECK(x("/Mover", false) == doctest::Approx(2.0f));
+			CHECK_FALSE(tagged("/Mover"));
+			// Written in the frame phase, with its child.
+			CHECK(tagged("/Writer"));
+			CHECK(tagged("/Writer/WriterChild"));
+			// Teleported, created since the snapshot (without a previous pose), enabled since the snapshot.
+			CHECK(tagged("/Teleported"));
+			CHECK(tagged("/Spawned"));
+			CHECK_FALSE(scene.FindEntityByPath("/Spawned").HasComponent<PreviousWorldTransformComponent>());
+			CHECK(tagged("/Hidden"));
+
+			// A frame without a step that writes nothing new keeps the tags until the next snapshot clears them.
+			session.FrameUpdate(FrameTime{ .DeltaTime = 1.0 / 240.0, .UnscaledDeltaTime = 1.0 / 240.0, .Alpha = 0.5, .FrameIndex = 2 });
+			CHECK(tagged("/Teleported"));
+			session.FixedStep();
+			for (const std::string_view path : { "/Writer", "/Writer/WriterChild", "/Teleported", "/Spawned", "/Hidden" })
+			{
+				CAPTURE(std::string(path));
+				CHECK_FALSE(tagged(path));
+			}
+			CHECK(x("/Teleported", true) == doctest::Approx(100.0f));
+			CHECK(x("/Spawned", true) == doctest::Approx(0.0f));
+		}
+
+		TEST_CASE("Interpolation: a view between ticks refreshes world matrices and tags the writes since the last step, hash unchanged")
+		{
+			// The session's half of ExtractView (decision 5 of Docs/Decisions/0012-m7-decisions.md); the snapshot it extracts is
+			// checked by "Interpolation: a view between ticks shows a write made since the last step at its new pose".
+			Test::SceneTestFixture fixture;
+			static_cast<void>(fixture.GetScene().CreateEntity("Cube"));
+			PlaySessionSpecification specification;
+			specification.Registry = &fixture.GetRegistry();
+			Result<Scope<PlaySession>> created = PlaySession::CreateFromScene(specification, fixture.GetScene());
+			REQUIRE_MESSAGE(created.has_value(), created.error().ToString());
+			PlaySession& session = **created;
+
+			session.Tick();
+			CHECK(session.GetViewAlpha() == 1.0f); // after Tick()
+			session.FixedStep();
+			session.FrameUpdate(FrameTime{ .DeltaTime = 1.0 / 240.0, .UnscaledDeltaTime = 1.0 / 240.0, .Alpha = 0.25, .FrameIndex = 1 });
+			CHECK(session.GetViewAlpha() == doctest::Approx(0.25f));
+			session.SetLockstep(true);
+			CHECK(session.GetViewAlpha() == 1.0f);
+			session.SetLockstep(false);
+			session.SetPaused(true);
+			CHECK(session.GetViewAlpha() == 1.0f);
+
+			Entity cube = session.GetScene().FindEntityByPath("/Cube");
+			cube.Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Translation.x = 7.0f;
+			});
+			const uint64_t hash = session.ComputeStateHash();
+			CHECK(cube.GetComponent<WorldTransformComponent>().Matrix[3].x == doctest::Approx(0.0f)); // stale until refreshed
+			[[maybe_unused]] const Result<RenderSnapshot> view = session.ExtractView({ .Camera = RenderCameraSource::Explicit, .Width = 64, .Height = 64, .Alpha = 0.0f });
+			CHECK(cube.GetComponent<WorldTransformComponent>().Matrix[3].x == doctest::Approx(7.0f));
+			CHECK(cube.HasComponent<InterpolationResetTag>());
+			CHECK(session.ComputeStateHash() == hash);
+			CHECK(session.GetTick() == 2);
+		}
+
+		TEST_CASE("Interpolation: a view between ticks shows a write made since the last step at its new pose")
 		{
 			// viewport.screenshot of the play scene and --screenshot-at render PlaySession::ExtractView: after a pause and
 			// entity.update {target: "play"} at the safe point, the image shows the new pose, never the stale WorldTransform.

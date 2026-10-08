@@ -3,17 +3,21 @@
 #include "Engine/Session/PlaySession.h"
 
 #include "Engine/Core/Json/Json.h"
+#include "Engine/Scene/Components/RuntimeComponents.h"
 #include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/SceneSerializer.h"
 #include "Support/SceneTestFixture.h"
 
+#include <iterator>
+#include <limits>
 #include <string>
+#include <utility>
 #include <vector>
 
-// PlaySession (Architecture §5.6, §5.7; Roadmap M7 acceptance). Skipped skeletons of the M7 contract
-// (Docs/Decisions/0012-m7-decisions.md): stream A implements PlaySession and removes the skips.
+// PlaySession (Architecture §5.6, §5.7; Roadmap M7 acceptance; Docs/Decisions/0012-m7-decisions.md decisions 2 and 3):
+// the serializer copy, the documented step order, the entity cap, the state hash and the session's seeded ids.
 
 namespace Engine {
 
@@ -30,6 +34,49 @@ namespace Engine {
 			}
 
 			std::vector<PlaySessionPhase> Phases;
+		};
+
+		// Records, in every fixed update, whether the step view saw Space pressed and released.
+		class InputProbe final : public IPlaySessionObserver
+		{
+		public:
+			void OnPhase(PlaySession& session, PlaySessionPhase phase, uint64_t /*tick*/) override
+			{
+				if (phase != PlaySessionPhase::FixedUpdate)
+					return;
+				const InputState& devices = session.GetInput().GetDevices();
+				Pressed.push_back(devices.WasKeyPressed(InputPhase::Step, Key::Space));
+				Released.push_back(devices.WasKeyReleased(InputPhase::Step, Key::Space));
+			}
+
+			std::vector<bool> Pressed;
+			std::vector<bool> Released;
+		};
+
+		// Destroys "/Board" in the first fixed update (a script's Destroy, M13) and counts the entities marked for destruction
+		// when the destroy flush starts and when the post-step transform update starts.
+		class DestroyingObserver final : public IPlaySessionObserver
+		{
+		public:
+			void OnPhase(PlaySession& session, PlaySessionPhase phase, uint64_t tick) override
+			{
+				Scene& scene = session.GetScene();
+				if (phase == PlaySessionPhase::FixedUpdate && tick == 0)
+					scene.DestroyEntity(scene.FindEntityByPath("/Board"));
+				else if (phase == PlaySessionPhase::DestroyFlush)
+					PendingAtFlush = CountPending(scene);
+				else if (phase == PlaySessionPhase::PostStepTransformUpdate)
+					PendingAfterFlush = CountPending(scene);
+			}
+
+			size_t PendingAtFlush = 0;
+			size_t PendingAfterFlush = 0;
+		private:
+			static size_t CountPending(Scene& scene)
+			{
+				const auto pending = scene.GetRegistry().view<PendingDestroyTag>();
+				return static_cast<size_t>(std::distance(pending.begin(), pending.end()));
+			}
 		};
 
 		// The specification of a session over the fixture's registry.
@@ -58,7 +105,7 @@ namespace Engine {
 
 	TEST_SUITE("Session")
 	{
-		TEST_CASE("PlaySession: play then stop leaves the edit scene byte-identical" * doctest::skip(true))
+		TEST_CASE("PlaySession: play then stop leaves the edit scene byte-identical")
 		{
 			Test::SceneTestFixture fixture;
 			PopulateScene(fixture.GetScene());
@@ -86,7 +133,7 @@ namespace Engine {
 			CHECK(fixture.GetScene().GetRevision() == revisionBefore);
 		}
 
-		TEST_CASE("PlaySession: step order matches the documented sequence" * doctest::skip(true))
+		TEST_CASE("PlaySession: step order matches the documented sequence")
 		{
 			Test::SceneTestFixture fixture;
 			PopulateScene(fixture.GetScene());
@@ -128,7 +175,7 @@ namespace Engine {
 			CHECK(observer.Phases == std::vector<PlaySessionPhase>(expected.begin() + 11, expected.end()));
 		}
 
-		TEST_CASE("PlaySession: Simulate mode skips the script and audio phases" * doctest::skip(true))
+		TEST_CASE("PlaySession: Simulate mode skips the script and audio phases")
 		{
 			Test::SceneTestFixture fixture;
 			RecordingObserver observer;
@@ -154,7 +201,7 @@ namespace Engine {
 			CHECK(observer.Phases == expected);
 		}
 
-		TEST_CASE("PlaySession: entity cap raises an error, never crashes" * doctest::skip(true))
+		TEST_CASE("PlaySession: entity cap raises an error, never crashes")
 		{
 			Test::SceneTestFixture fixture;
 			PopulateScene(fixture.GetScene()); // 3 entities
@@ -182,7 +229,7 @@ namespace Engine {
 			CHECK(tooMany.error().GetCode() == ErrorCode::InvalidState);
 		}
 
-		TEST_CASE("PlaySession: identical sessions report identical state hashes, different seeds different ones" * doctest::skip(true))
+		TEST_CASE("PlaySession: identical sessions report identical state hashes, different seeds different ones")
 		{
 			Test::SceneTestFixture fixture;
 			PopulateScene(fixture.GetScene());
@@ -204,7 +251,7 @@ namespace Engine {
 			CHECK(run(8) != first);
 		}
 
-		TEST_CASE("PlaySession: runtime spawns get the seeded deterministic ids of the session" * doctest::skip(true))
+		TEST_CASE("PlaySession: runtime spawns get the seeded deterministic ids of the session")
 		{
 			Test::SceneTestFixture fixture;
 			Result<Scope<PlaySession>> session = PlaySession::CreateFromScene(MakeSpecification(fixture), fixture.GetScene());
@@ -215,7 +262,7 @@ namespace Engine {
 			CHECK(spawned->GetUUID() == expected.Next());
 		}
 
-		TEST_CASE("PlaySession: a session starts only from a strictly valid document" * doctest::skip(true))
+		TEST_CASE("PlaySession: a session starts only from a strictly valid document")
 		{
 			Test::SceneTestFixture fixture;
 			Json document = Json::object();
@@ -233,7 +280,7 @@ namespace Engine {
 			CHECK(invalid.error().GetCode() == ErrorCode::InvalidArgument);
 		}
 
-		TEST_CASE("PlaySession: the project settings are checked and kept with the session" * doctest::skip(true))
+		TEST_CASE("PlaySession: the project settings are checked and kept with the session")
 		{
 			Test::SceneTestFixture fixture;
 			PopulateScene(fixture.GetScene());
@@ -252,6 +299,167 @@ namespace Engine {
 			CHECK((*session)->GetFixedDelta() == doctest::Approx(1.0 / 30.0));
 			CHECK((*session)->GetProjectSettings().Simulation.FixedHz == 30);
 			CHECK((*session)->GetProjectSettings().Simulation.MaxStepsPerFrame == 3);
+
+			// The other members a session cannot run without.
+			for (const auto& [member, change] : std::vector<std::pair<std::string, void (*)(PlaySessionSpecification&)>>{
+					 { "MaxStepsPerFrame", [](PlaySessionSpecification& changed)
+			{
+				changed.Project.Simulation.MaxStepsPerFrame = 0;
+			} },
+					 { "MaxEntities", [](PlaySessionSpecification& changed)
+			{
+				changed.Project.Simulation.MaxEntities = 0;
+			} },
+					 { "ViewWidth", [](PlaySessionSpecification& changed)
+			{
+				changed.ViewWidth = 0;
+			} } })
+			{
+				CAPTURE(member);
+				PlaySessionSpecification invalid = MakeSpecification(fixture);
+				change(invalid);
+				const Result<Scope<PlaySession>> refused = PlaySession::CreateFromScene(invalid, fixture.GetScene());
+				REQUIRE_FALSE(refused.has_value());
+				CHECK(refused.error().GetCode() == ErrorCode::InvalidArgument);
+				CHECK(refused.error().GetMessageText().contains(member));
+			}
+		}
+
+		TEST_CASE("PlaySession: the input stamped for a tick is applied at its step 1, before its fixed update")
+		{
+			Test::SceneTestFixture fixture;
+			InputProbe probe;
+			Result<Scope<PlaySession>> session = PlaySession::CreateFromScene(MakeSpecification(fixture, &probe), fixture.GetScene());
+			REQUIRE_MESSAGE(session.has_value(), session.error().ToString());
+			PlayInputEvent space;
+			space.Type = PlayInputEventType::KeyInput;
+			space.KeyCode = Key::Space;
+			space.State = PlayInputEventState::Tap;
+			REQUIRE((*session)->GetInput().Queue(1, space).has_value());
+			for (int tick = 0; tick < 4; ++tick)
+				(*session)->Tick();
+			// Down at tick 1, up at tick 2 (a tap), seen by that tick's fixed update.
+			CHECK(probe.Pressed == std::vector<bool>{ false, true, false, false });
+			CHECK(probe.Released == std::vector<bool>{ false, false, true, false });
+			CHECK((*session)->GetInput().GetNextTick() == 4);
+		}
+
+		TEST_CASE("PlaySession: paused and lockstep sessions advance only through Tick")
+		{
+			Test::SceneTestFixture fixture;
+			PopulateScene(fixture.GetScene());
+			Result<Scope<PlaySession>> created = PlaySession::CreateFromScene(MakeSpecification(fixture), fixture.GetScene());
+			REQUIRE_MESSAGE(created.has_value(), created.error().ToString());
+			PlaySession& session = **created;
+			const FrameTime frame{ .DeltaTime = 1.0 / 60.0, .UnscaledDeltaTime = 1.0 / 60.0, .Alpha = 0.5, .FrameIndex = 0 };
+
+			// A running session follows the host's loop.
+			session.AdvanceLoopStep();
+			session.AdvanceLoopFrame(frame);
+			CHECK(session.GetTick() == 1);
+			CHECK(session.GetExtractionCount() == 1);
+			CHECK(session.GetViewAlpha() == doctest::Approx(0.5f));
+
+			session.SetPaused(true);
+			session.AdvanceLoopStep();
+			session.AdvanceLoopFrame(frame);
+			CHECK(session.GetTick() == 1);
+			CHECK(session.GetExtractionCount() == 1);
+			CHECK(session.GetViewAlpha() == 1.0f);
+
+			session.SetPaused(false);
+			session.SetLockstep(true, 5);
+			CHECK(session.IsLockstep());
+			CHECK(session.GetLockstepOwner() == 5);
+			session.AdvanceLoopStep();
+			session.AdvanceLoopFrame(frame);
+			CHECK(session.GetTick() == 1);
+			session.Tick();
+			CHECK(session.GetTick() == 2);
+			CHECK(session.GetExtractionCount() == 2);
+
+			// Leaving lockstep keeps the paused state, and forgets the owner.
+			session.SetLockstep(false, 5);
+			CHECK(session.GetLockstepOwner() == NoClient);
+			CHECK_FALSE(session.IsPaused());
+			session.SetExtractionEnabled(false);
+			session.Tick();
+			CHECK(session.GetExtractionCount() == 2);
+			CHECK(session.GetViewAlpha() == 1.0f);
+		}
+
+		TEST_CASE("PlaySession: entities destroyed in a tick are gone after its destroy flush")
+		{
+			Test::SceneTestFixture fixture;
+			PopulateScene(fixture.GetScene());
+			DestroyingObserver destroyer;
+			Result<Scope<PlaySession>> session = PlaySession::CreateFromScene(MakeSpecification(fixture, &destroyer), fixture.GetScene());
+			REQUIRE_MESSAGE(session.has_value(), session.error().ToString());
+			(*session)->FixedStep();
+			CHECK(destroyer.PendingAtFlush == 2); // the board and its cell, marked in the fixed update
+			CHECK(destroyer.PendingAfterFlush == 0);
+			CHECK((*session)->GetScene().GetEntityCount() == 1);
+			CHECK_FALSE((*session)->GetScene().FindEntityByPath("/Board").IsValid());
+		}
+
+		TEST_CASE("PlaySession: the state hash covers the scene, the tick, the random stream and the spawn counter")
+		{
+			Test::SceneTestFixture fixture;
+			PopulateScene(fixture.GetScene());
+			Result<Scope<PlaySession>> created = PlaySession::CreateFromScene(MakeSpecification(fixture), fixture.GetScene());
+			REQUIRE_MESSAGE(created.has_value(), created.error().ToString());
+			PlaySession& session = **created;
+			std::vector<uint64_t> hashes = { session.ComputeStateHash() };
+			session.Tick();
+			hashes.push_back(session.ComputeStateHash());
+			static_cast<void>(session.GetRandom().NextU64());
+			hashes.push_back(session.ComputeStateHash());
+			static_cast<void>(session.GetIdGenerator().Next());
+			hashes.push_back(session.ComputeStateHash());
+			Entity ball = session.GetScene().FindEntityByPath("/Ball");
+			ball.Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Translation.y = 5.0f;
+			});
+			hashes.push_back(session.ComputeStateHash());
+			for (size_t first = 0; first < hashes.size(); ++first)
+			{
+				for (size_t second = first + 1; second < hashes.size(); ++second)
+					CHECK(hashes[first] != hashes[second]);
+			}
+			// Reading the hash changes nothing.
+			CHECK(session.ComputeStateHash() == hashes.back());
+		}
+
+		TEST_CASE("PlaySession: the run state is kept as set, and the time scale is checked")
+		{
+			Test::SceneTestFixture fixture;
+			Result<Scope<PlaySession>> created = PlaySession::CreateFromScene(MakeSpecification(fixture), fixture.GetScene());
+			REQUIRE_MESSAGE(created.has_value(), created.error().ToString());
+			PlaySession& session = **created;
+			CHECK(session.GetMode() == PlayMode::Play);
+			CHECK(session.GetSeed() == 42);
+			CHECK(session.GetTimeScale() == 1.0);
+			REQUIRE(session.SetTimeScale(0.0).has_value());
+			REQUIRE(session.SetTimeScale(PlaySession::MaxTimeScale).has_value());
+			for (const double invalid : { -0.5, PlaySession::MaxTimeScale + 1.0, std::numeric_limits<double>::infinity(), std::numeric_limits<double>::quiet_NaN() })
+			{
+				CAPTURE(invalid);
+				const Status refused = session.SetTimeScale(invalid);
+				REQUIRE_FALSE(refused.has_value());
+				CHECK(refused.error().GetCode() == ErrorCode::InvalidArgument);
+			}
+			CHECK(session.GetTimeScale() == PlaySession::MaxTimeScale);
+
+			CHECK_FALSE(session.IsStepping());
+			session.SetStepping(true);
+			CHECK(session.IsStepping());
+			CHECK_FALSE(session.IsModified());
+			session.MarkModified();
+			CHECK(session.IsModified());
+			CHECK(session.IsExtractionEnabled());
+			session.SetViewSize(320, 180);
+			CHECK_FALSE(session.GetLastExtraction().HasCamera);
 		}
 
 		TEST_CASE("PlaySession: the session seed is Project Seed xor Scene Seed")

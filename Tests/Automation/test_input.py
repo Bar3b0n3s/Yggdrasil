@@ -1,8 +1,6 @@
 """Input injection through automation (Docs/Architecture.md §4.3, §5.7 step 1, §13.5 "input", §13.6; Roadmap M7
-acceptance): tick-stamped events, taps, and what the game's step view saw (play.state's "input").
-
-Skipped skeletons of the M7 contract (Docs/Decisions/0012-m7-decisions.md decision 4): stream A implements and registers
-input.inject and removes the skips.
+acceptance; Docs/Decisions/0012-m7-decisions.md decision 4): tick-stamped events, taps, and what the game's step view
+saw (play.state's "input").
 """
 
 from __future__ import annotations
@@ -21,7 +19,6 @@ class InputTests(AutomationTestCase):
             "Jump": {"Type": "Button", "Bindings": ["Key.Space"]}}}}})
         client.call("play.start", {"lockstep": True})
 
-    @unittest.skip("contract stub: un-skipped by M7 stream A")
     def test_tap_event_seen_once_pressed_and_released(self) -> None:
         client, _ = self.open_editor_with_scene()
         self.start_lockstep_with_jump(client)
@@ -47,7 +44,6 @@ class InputTests(AutomationTestCase):
         client.call("play.step", {"ticks": 1})
         self.assertIn("Key.Space", client.call("play.state")["input"]["pressed"])
 
-    @unittest.skip("contract stub: un-skipped by M7 stream A")
     def test_input_inject_rejects_invalid_events_before_queuing_any(self) -> None:
         client, _ = self.open_editor_with_scene()
         self.start_lockstep_with_jump(client)
@@ -66,7 +62,6 @@ class InputTests(AutomationTestCase):
         client.call("play.step", {"ticks": 1})
         self.assertEqual(client.call("play.state")["input"]["down"], [])
 
-    @unittest.skip("contract stub: un-skipped by M7 stream A")
     def test_input_inject_needs_a_play_session(self) -> None:
         client, _ = self.open_editor_with_scene()
         with self.assertRaises(engine_client.EngineError) as raised:

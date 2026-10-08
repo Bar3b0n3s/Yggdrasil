@@ -99,8 +99,8 @@ namespace Engine {
 
 	}
 
-	// Registers ViewportView, ViewportScreenshotParams and ViewportScreenshotResult. The editor calls it from its
-	// RegisterScreenshotMethodTypes (EditorCore) and the Runtime from RegisterSharedMethodTypes' caller.
+	// Registers ViewportView, ViewportScreenshotParams and ViewportScreenshotResult. Both hosts call it through
+	// RegisterSharedMethodTypes (the editor from RegisterEditorMethodTypes).
 	void RegisterViewportScreenshotMethodTypes(TypeRegistry& registry);
 
 	// Registers viewport.screenshot typed on AutomationMethodContext: a read-only tool (§13.8), AvailableInRuntime, not

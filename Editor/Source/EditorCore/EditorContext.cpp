@@ -28,6 +28,7 @@
 #include "Engine/Scene/PrefabAsset.h"
 #include "Engine/Scene/PrefabInstantiator.h"
 #include "Engine/Scene/SceneSerializer.h"
+#include "Engine/Session/PlaySession.h"
 
 #include <nlohmann/json.hpp>
 
@@ -370,6 +371,14 @@ namespace Engine {
 
 		// §7.5 race rule 3: an external change of the open scene's file, or of a prefab it instantiates, is reported and never
 		// applied to the scene in memory.
+		// §7.5 race rule 4: a reload during ordinary play marks the session modified, whether an external change or the
+		// editor's own write started it (a lockstep session defers reloads until it ends, EditorPlayController, so none reaches
+		// it).
+		m_Assets->SetReloadListener([this](AssetHandle /*source*/)
+		{
+			if (PlaySession* session = m_Play->GetSession(); session != nullptr)
+				session->MarkModified();
+		});
 		m_Assets->SetExternalChangeListener([this](const AssetExternalChange& change)
 		{
 			if (m_Scene == nullptr || !Utils::AffectsOpenScene(*m_Scene, m_ScenePath, change))
@@ -389,6 +398,7 @@ namespace Engine {
 		// The manager outlives this object's other members: it must not call back into them.
 		m_Assets->SetWriteObserver({});
 		m_Assets->SetExternalChangeListener({});
+		m_Assets->SetReloadListener({});
 		if (m_Engine->GetAssetManager() == m_Assets.get())
 			m_Engine->SetAssetManager(nullptr);
 	}
@@ -666,6 +676,12 @@ namespace Engine {
 		if (!HasProject())
 			return;
 		ENGINE_ASSERT(m_DryRun == nullptr && m_Transaction == nullptr, "EditorContext::CloseProject inside a dry run or a transaction");
+		// A play session refers to the project's settings and assets: it stops before they go (M7).
+		if (m_Play->IsPlaying())
+		{
+			const Status stopped = m_Play->Stop();
+			ENGINE_ASSERT(stopped.has_value(), "stopping the play session of a closing project failed: {}", stopped ? std::string() : stopped.error().ToString());
+		}
 		CloseScene();
 		// The manager's jobs and hot reload use project:// and cache://: they stop before the mounts go.
 		m_Assets->CloseProject();
@@ -792,11 +808,16 @@ namespace Engine {
 
 	void EditorContext::SetSelection(std::vector<UUID> selection)
 	{
+		// While playing, the selection may name entities of the play scene too (the scene the editor shows, M10); Stop sets it
+		// again, so it is restored by UUID to the entities of the edit scene (§5.6).
+		const PlaySession* session = m_Play->GetSession();
 		std::vector<UUID> kept;
 		kept.reserve(selection.size());
 		for (const UUID id : selection)
 		{
-			if (m_Scene == nullptr || !std::as_const(*m_Scene).FindEntityByID(id).IsValid())
+			const bool inEditScene = m_Scene != nullptr && std::as_const(*m_Scene).FindEntityByID(id).IsValid();
+			const bool inPlayScene = session != nullptr && session->GetScene().FindEntityByID(id).IsValid();
+			if (!inEditScene && !inPlayScene)
 				continue;
 			if (std::find(kept.begin(), kept.end(), id) == kept.end())
 				kept.push_back(id);
@@ -854,9 +875,21 @@ namespace Engine {
 		size_t OpenJoined = 0;                  // the outermost: how many joined transactions are open
 		size_t ClosedCount = 0;                 // GetCommandCount once closed
 		uint64_t RevisionBefore = 0;            // EditorContext::GetRevision before the first command
+		size_t TransientPlayFirst = 0;          // EditorContext::m_TransientPlayUndos' size when this transaction opened
 	};
 
 	namespace Utils {
+
+		// Runs the transient play-scene undos[first ..] newest first and removes them (EditorContext::m_TransientPlayUndos).
+		static void UndoTransientPlayEdits(std::vector<UniqueFunction<void()>>& undos, size_t first)
+		{
+			while (undos.size() > first)
+			{
+				UniqueFunction<void()> undo = std::move(undos.back());
+				undos.pop_back();
+				undo();
+			}
+		}
 
 		// Undoes commands[first ..] newest first and removes them. When one's Undo fails, it and the older ones of
 		// commands[first ..] stay applied: they are replaced by one composite of them labelled "<label> (partially rolled
@@ -889,6 +922,7 @@ namespace Engine {
 	{
 		m_State->Context = &context;
 		m_State->Label = std::move(label);
+		m_State->TransientPlayFirst = context.m_TransientPlayUndos.size();
 		if (EditorTransaction* outermost = context.m_Transaction; outermost != nullptr)
 		{
 			m_State->Outermost = outermost;
@@ -927,6 +961,9 @@ namespace Engine {
 		ENGINE_ASSERT(state.OpenJoined == 0, "EditorTransaction '{}' committed while a transaction that joined it is open", state.Label);
 		EditorContext& context = *state.Context;
 		context.m_Transaction = nullptr;
+		// The play-scene changes stay (§13.4: transient, never recorded); a dry run still takes them back when it ends.
+		if (!context.IsDryRun())
+			context.m_TransientPlayUndos.resize(state.TransientPlayFirst);
 		if (state.Executed.empty())
 			return 0;
 		Scope<CompositeCommand> composite = CreateScope<CompositeCommand>(state.Label);
@@ -946,6 +983,8 @@ namespace Engine {
 		state.ClosedCount = GetCommandCount();
 		m_IsOpen = false;
 		EditorContext& context = *state.Context;
+		// The play-scene changes made inside the transaction go back with its commands (play-scene edits record none).
+		Utils::UndoTransientPlayEdits(context.m_TransientPlayUndos, state.TransientPlayFirst);
 		if (state.Outermost != nullptr)
 		{
 			State& outer = *state.Outermost->m_State;
@@ -1098,6 +1137,8 @@ namespace Engine {
 		ENGINE_ASSERT(context.m_DryRun == this, "EditorDryRunScope: dry runs close in the order they opened");
 		ENGINE_ASSERT(context.m_Transaction == nullptr, "EditorDryRunScope closed while a transaction opened in it is still open");
 
+		// The play scene is real during a dry run: its changes are taken back here, newest first (§13.4).
+		Utils::UndoTransientPlayEdits(context.m_TransientPlayUndos, 0);
 		context.m_Assets->EndDryRun();
 		context.m_Scene = std::move(state.RealScene);
 		context.m_ScenePath = std::move(state.RealScenePath);

@@ -12,8 +12,8 @@
 
 // The clear-and-triangle view of the Graphics foundation (Roadmap M5): one counter-clockwise triangle drawn through the
 // Triangle program (Resources/Shaders/Passes/Triangle.slang) with ViewConstants from a fixed orthographic, reverse-Z
-// camera (§8.3). It is what viewport.screenshot renders until the scene renderer arrives (M7), the golden image
-// "Triangle", and the subject of "Rasterizer: CCW triangle survives back-face culling": with back-face culling and
+// camera (§8.3). It is the golden image "Triangle" (rendered directly into an OffscreenTarget) and the subject of
+// "Rasterizer: CCW triangle survives back-face culling": with back-face culling and
 // rasterState.frontCounterClockwise = true the triangle must stay visible, which proves the projection's Y convention and
 // the pipelines' winding convention agree. NVRHI's Vulkan backend performs the Vulkan Y flip itself (every viewport has a
 // negative height), so the projection keeps clip-space +Y up.

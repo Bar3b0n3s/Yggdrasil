@@ -69,6 +69,12 @@ def runtime_executable(config: str) -> Path:
     return REPOSITORY_ROOT / "bin" / engine_client.output_directory_name(config) / "Runtime" / name
 
 
+def tests_executable(config: str) -> Path:
+    """bin/<Config>-<system>-<arch>/Tests/Tests(.exe), the doctest runner whose child targets some tests run."""
+    name = "Tests.exe" if sys.platform == "win32" else "Tests"
+    return REPOSITORY_ROOT / "bin" / engine_client.output_directory_name(config) / "Tests" / name
+
+
 def app_name() -> str:
     """The editor's application name (the workspace name of premake5.lua), the user-data folder below
     --user-data-dir."""

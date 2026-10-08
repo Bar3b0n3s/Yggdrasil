@@ -33,6 +33,7 @@
 
 namespace Engine {
 
+	class AssetManager;
 	class EventLog;
 	class PlaySession;
 	class TypeRegistry;
@@ -61,6 +62,15 @@ namespace Engine {
 		// §4.2 step 3: the pump's budget per frame.
 		std::chrono::microseconds PumpBudget{ 4000 };
 		std::chrono::milliseconds WatchdogStallThreshold = DefaultWatchdogStallThreshold;
+		// The game's asset manager (AutomationMethodContext::GetAssets: entity.bounds reads mesh bounds through it), a
+		// documented back-reference that outlives the server; null makes entity.bounds Unsupported.
+		AssetManager* Assets = nullptr;
+		// The play scene's project-relative path (the start scene's reference path in Game.pak), which scene.tree's
+		// SceneSummary reports; empty: none.
+		std::string ScenePath{};
+		// As AutomationServerSpecification::WallClock: play.step's frame budget is measured with it; empty:
+		// std::chrono::steady_clock::now. Tests script it.
+		std::function<std::chrono::steady_clock::time_point()> WallClock{};
 	};
 
 	// Main thread only (its ProtocolServer's I/O thread is internal); not copyable or movable.

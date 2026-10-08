@@ -136,7 +136,12 @@ namespace Engine {
 		// Converts a real device event of the host (the Runtime's window; the editor's game viewport from M10) and queues it
 		// for GetNextTick(): keys, mouse buttons, cursor motion, scrolling, gamepad buttons and axes, and characters.
 		// Gamepad connection changes are applied at once instead (they are no replayable input); window and file-drop
-		// events are ignored.
+		// events are ignored. Continuous sources are coalesced while their tick has not run, so a session that does not
+		// advance (paused, or between ticks of a slow FixedHz) holds one event per source instead of one per frame: a cursor
+		// position replaces the cursor position queued for that tick, a gamepad axis value the value queued for the same
+		// gamepad and axis (each moved to the end of the tick's events), and a scroll offset is added to the tick's last
+		// queued scroll. The tick's resulting step view is the same as without coalescing: positions and axis values are
+		// absolute, and the step's scroll delta is a sum.
 		void QueueDeviceEvent(const Event& event);
 
 		// §5.7 step 1 for tick `tick`, which must equal GetNextTick() (asserted): applies the tick's queued events in order,

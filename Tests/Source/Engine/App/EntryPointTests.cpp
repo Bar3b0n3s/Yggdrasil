@@ -5,6 +5,7 @@
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Platform/Process.h"
 #include "Support/TempDirectory.h"
+#include "Support/TestGame.h"
 #include "Support/TestOptions.h"
 #include "Support/Utf8Path.h"
 
@@ -69,13 +70,17 @@ namespace Engine {
 
 		TEST_CASE("RunApplication: a user-data root that cannot be created exits with InitFailed")
 		{
-			// The root is a regular file, so ProcessContext::Create cannot create <root>/<AppName>/Logs.
+			// The root is a regular file, so ProcessContext::Create cannot create <root>/<AppName>/Logs. The runtime's factory
+			// reads its Game.json first (it names the application), so the run gets a valid one (M7).
 			Test::TempDirectory directory("BlockedUserData");
+			const Result<std::filesystem::path> manifest = Test::WriteTestGame(directory / "Game");
+			REQUIRE_MESSAGE(manifest.has_value(), manifest.error().ToString());
 			const std::filesystem::path blocked = directory / "NotADirectory";
 			const std::string_view content = "a file where the user-data root should be";
 			REQUIRE(FileSystem::WriteFileAtomic(blocked, std::as_bytes(std::span(content.data(), content.size()))).has_value());
 			const std::string blockedOption = "--user-data-dir=" + Test::PathToUtf8(blocked);
-			const Result<ProcessResult> result = RunRuntime({ "--headless", "--frames", "1", blockedOption });
+			const Result<ProcessResult> result =
+				RunRuntime({ "--headless", "--frames", "1", "--manifest=" + Test::PathToUtf8(*manifest), blockedOption });
 			REQUIRE_MESSAGE(result.has_value(), result.error().ToString());
 			CHECK(result->ExitCode == ExitCode::InitFailed);
 			CHECK(result->StandardError.contains("NotADirectory"));

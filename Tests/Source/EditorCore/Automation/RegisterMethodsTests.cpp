@@ -3,6 +3,7 @@
 #include "EditorCore/Automation/RegisterMethods.h"
 
 #include "Engine/AssetPipeline/ImporterRegistry.h"
+#include "Engine/Automation/Methods/RegisterSharedMethods.h"
 #include "Engine/Automation/Protocol/MethodRegistry.h"
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Reflection/EnumInfo.h"
@@ -15,24 +16,26 @@
 
 namespace Engine {
 
-	// The M4 method set (Roadmap M4), M5's screenshot methods (registered at the M4/M5 merge, ADR 0009 decision 33) and M6's
-	// asset.*, prefab.*, entity.bounds and project.refreshAssets (ADR 0010 decision 20), test hooks excluded.
+	// The M4 method set (Roadmap M4), M5's screenshot methods (registered at the M4/M5 merge, ADR 0009 decision 33), M6's
+	// asset.*, prefab.*, entity.bounds and project.refreshAssets (ADR 0010 decision 20) and M7's play.*, input.inject and
+	// project.export (ADR 0012 decisions 4, 8 and 14), test hooks excluded.
 	static const std::vector<std::string>& GetExpectedMethodNames()
 	{
 		static const std::vector<std::string> ExpectedNames = { "asset.create", "asset.delete", "asset.getImportSettings", "asset.getProperties",
 			"asset.import", "asset.info", "asset.list", "asset.move", "asset.reimport", "asset.setImportSettings", "asset.setProperties",
 			"component.list", "component.schema", "docs.get", "edit.batch", "edit.getSelection", "edit.history", "edit.redo", "edit.select",
 			"edit.undo", "editor.screenshot", "entity.bounds", "entity.create", "entity.destroy", "entity.duplicate", "entity.get",
-			"entity.reparent", "entity.update", "events.read", "log.read", "prefab.apply", "prefab.create", "prefab.instantiate", "prefab.revert",
-			"prefab.unpack", "project.create", "project.getSettings", "project.info", "project.open", "project.refreshAssets", "project.save",
-			"project.setSettings", "project.upgrade", "project.validate", "rpc.discover", "scene.diff", "scene.get", "scene.new", "scene.open",
+			"entity.reparent", "entity.update", "events.read", "input.inject", "log.read", "play.pause", "play.resume", "play.setTimeScale",
+			"play.start", "play.state", "play.step", "play.stop", "prefab.apply", "prefab.create", "prefab.instantiate", "prefab.revert",
+			"prefab.unpack", "project.create", "project.export", "project.getSettings", "project.info", "project.open", "project.refreshAssets",
+			"project.save", "project.setSettings", "project.upgrade", "project.validate", "rpc.discover", "scene.diff", "scene.get", "scene.new", "scene.open",
 			"scene.query", "scene.save", "scene.tree", "session.hello", "session.info", "session.shutdown", "viewport.screenshot" };
 		return ExpectedNames;
 	}
 
 	TEST_SUITE("EditorCore")
 	{
-		TEST_CASE("RegisterMethods: the editor registers exactly the M4 method set, the M5 screenshot methods and the M6 asset methods")
+		TEST_CASE("RegisterMethods: the editor registers exactly the M4 method set, the M5 screenshot methods, the M6 asset methods and the M7 play, input and export methods")
 		{
 			Test::EditorTestFixture fixture("RegisterSet");
 			MethodRegistry methods(fixture.GetEngine().GetTypeRegistry());
@@ -42,6 +45,38 @@ namespace Engine {
 			for (const MethodDescriptor* method : methods.GetMethods())
 				names.push_back(method->Specification.Name);
 			CHECK(names == GetExpectedMethodNames());
+		}
+
+		TEST_CASE("RegisterMethods: the play and input methods carry their documented flags, and the Runtime gets them without start and stop")
+		{
+			Test::EditorTestFixture fixture("RegisterPlay");
+			MethodRegistry methods(fixture.GetEngine().GetTypeRegistry());
+			RegisterEditorMethods(methods, {});
+			methods.Freeze();
+			for (const std::string_view name : { "play.start", "play.stop", "play.pause", "play.resume", "play.step", "play.state", "play.setTimeScale",
+					 "input.inject" })
+			{
+				INFO(std::string(name));
+				const MethodDescriptor* method = methods.Find(name);
+				REQUIRE(method != nullptr);
+				const MethodSpecification& specification = method->Specification;
+				CHECK_FALSE(specification.Mutates);
+				CHECK_FALSE(specification.SupportsDryRun);
+				CHECK_FALSE(specification.AllowedInBatch);
+				CHECK_FALSE(specification.AvailableInLauncher);
+				CHECK(specification.AvailableInRuntime == (name != "play.start" && name != "play.stop"));
+				CHECK(method->Pending == (name == "play.step"));
+			}
+			CHECK(methods.Find("play.step")->Specification.TimeoutSeconds == 600);
+
+			// The Runtime's subset (§13.5): every shared play and input method except play.start and play.stop.
+			MethodRegistry runtime(fixture.GetEngine().GetTypeRegistry());
+			RegisterSharedMethods(runtime, AutomationHost::Runtime);
+			runtime.Freeze();
+			CHECK(runtime.Find("play.step") != nullptr);
+			CHECK(runtime.Find("input.inject") != nullptr);
+			CHECK(runtime.Find("play.start") == nullptr);
+			CHECK(runtime.Find("play.stop") == nullptr);
 		}
 
 		TEST_CASE("RegisterMethods: test hooks are registered only when enabled")
@@ -72,9 +107,10 @@ namespace Engine {
 				"session.info", "session.shutdown" };
 			const std::vector<std::string> tools = { "asset.create", "asset.delete", "asset.import", "asset.list", "asset.move",
 				"asset.setProperties", "component.list", "component.schema", "docs.get", "edit.batch", "edit.redo", "edit.undo", "editor.screenshot",
-				"entity.bounds", "entity.create", "entity.destroy", "entity.duplicate", "entity.get", "entity.reparent", "entity.update", "log.read",
-				"prefab.apply", "prefab.create", "prefab.instantiate", "project.create", "project.getSettings", "project.open", "project.save",
-				"project.setSettings", "project.validate", "scene.diff", "scene.new", "scene.open", "scene.query", "scene.save", "scene.tree",
+				"entity.bounds", "entity.create", "entity.destroy", "entity.duplicate", "entity.get", "entity.reparent", "entity.update", "input.inject",
+				"log.read", "play.start", "play.step", "play.stop", "prefab.apply", "prefab.create", "prefab.instantiate", "project.create",
+				"project.export", "project.getSettings", "project.open", "project.save", "project.setSettings", "project.validate", "scene.diff",
+				"scene.new", "scene.open", "scene.query", "scene.save", "scene.tree",
 				"viewport.screenshot" };
 			// The edit.batch ops (ADR 0008 decision 8): pure reads and methods whose effects all go through Execute. asset.import and
 			// asset.reimport are pending operations; project.refreshAssets writes outside a command (ADR 0010 decision 20).
@@ -203,7 +239,7 @@ namespace Engine {
 			const TypeRegistry& types = fixture.GetEngine().GetTypeRegistry();
 			for (const std::string_view name : { "SceneTarget", "CommandOrigin", "DiagnosticSeverity", "LogLevel", "LogChannel", "EngineEventType",
 					 "ValidationScope", "ProjectTemplate", "SceneTemplate", "SceneTreeFormat", "SceneDiffAgainst", "SceneEntityChangeKind", "ViewportView",
-					 "AssetType", "AssetState", "AssetCreateType" })
+					 "AssetType", "AssetState", "AssetCreateType", "PlayMode", "PlayRunState", "PlayStepRender", "InputEventType", "InputEventState" })
 			{
 				INFO(std::string(name));
 				const EnumInfo* info = types.FindEnum(name);
@@ -227,8 +263,9 @@ namespace Engine {
 			methods.Freeze();
 			Json catalog = methods.BuildToolCatalog();
 			// The 25 M4 tools, viewport_screenshot and editor_screenshot, and M6's asset_list, asset_import, asset_create,
-			// asset_set_properties, asset_move, asset_delete, prefab_create, prefab_instantiate, prefab_apply and entity_bounds.
-			CHECK(catalog["Tools"].size() == 37);
+			// asset_set_properties, asset_move, asset_delete, prefab_create, prefab_instantiate, prefab_apply and entity_bounds, and
+			// M7's play_start, play_stop, play_step, input_inject and project_export.
+			CHECK(catalog["Tools"].size() == 42);
 			for (Json& tool : catalog["Tools"])
 			{
 				INFO(tool["name"].dump());

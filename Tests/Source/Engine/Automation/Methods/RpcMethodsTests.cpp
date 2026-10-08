@@ -1,12 +1,12 @@
 #include "TestsPCH.h"
 
-#include "EditorCore/Automation/RpcMethods.h"
+#include "Engine/Automation/Methods/RpcMethods.h"
 
 #include "Support/AutomationTestClient.h"
 
 namespace Engine {
 
-	TEST_SUITE("EditorCore")
+	TEST_SUITE("Automation")
 	{
 		TEST_CASE("RpcMethods: rpc.discover lists every method with schemas and flags")
 		{
