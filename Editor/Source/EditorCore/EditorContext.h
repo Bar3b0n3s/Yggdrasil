@@ -3,8 +3,11 @@
 #include "EditorCore/Automation/ProvenanceRecorder.h"
 #include "EditorCore/Commands/Command.h"
 #include "EditorCore/Commands/CommandHistory.h"
+#include "EditorCore/EditorUiState.h"
 #include "EditorCore/Project/ProjectManager.h"
+#include "EditorCore/Viewport/EditorViewportState.h"
 #include "Engine/Asset/AssetHandle.h"
+#include "Engine/Automation/Methods/AutomationTypes.h"
 #include "Engine/Core/Base.h"
 #include "Engine/Core/EventLog.h"
 #include "Engine/Core/Json/Json.h"
@@ -242,6 +245,11 @@ namespace Engine {
 		// Replaces the selection; ids that are not entities of the open scene are dropped, duplicates removed (first kept).
 		// Selection is editor state, not a command (it is never undone).
 		void SetSelection(std::vector<UUID> selection);
+		// M10 explicit target. Validates all ids in the chosen scene before replacing selection; InvalidState without
+		// that scene, NotFound for a missing id. No dirty/history change; selection target prevents editing a UUID in the
+		// wrong scene. Stop restores the captured edit selection; play scene replacement clears its selection.
+		[[nodiscard]] Status SetSelection(std::vector<UUID> selection, SceneTarget target);
+		[[nodiscard]] SceneTarget GetSelectionTarget() const { return m_SelectionTarget; }
 
 		// --- Write attribution and provenance (§13.4) ----------------------------------------------------------------------
 
@@ -299,10 +307,13 @@ namespace Engine {
 		[[nodiscard]] EditorPlayController& GetPlay() { return *m_Play; }
 		[[nodiscard]] const EditorPlayController& GetPlay() const { return *m_Play; }
 
-		// The camera of the editor's scene view (§8.13; viewport.screenshot {view: "scene"}): the default
-		// ExplicitRenderCamera until the editor camera and viewport.camera arrive with the editor panels (M10;
-		// Docs/Decisions/0012-m7-decisions.md decision 9).
-		[[nodiscard]] const ExplicitRenderCamera& GetSceneViewCamera() const { return m_SceneViewCamera; }
+		// Shared CPU state of the UI and viewport methods. Main thread; valid for this context's lifetime. View changes
+		// are session preferences, never a scene mutation or undo step. Existing screenshot camera access is preserved.
+		[[nodiscard]] EditorViewportState& GetViewportState() { return m_ViewportState; }
+		[[nodiscard]] const EditorViewportState& GetViewportState() const { return m_ViewportState; }
+		[[nodiscard]] const ExplicitRenderCamera& GetSceneViewCamera() const { return m_ViewportState.GetCamera(); }
+		[[nodiscard]] EditorUiState& GetUiState() { return m_UiState; }
+		[[nodiscard]] const EditorUiState& GetUiState() const { return m_UiState; }
 
 		// --- Shutdown (session.shutdown) --------------------------------------------------------------------------------
 
@@ -347,6 +358,7 @@ namespace Engine {
 		uint64_t m_RevisionBase = 0; // GetRevision's base, advanced by SetScene and CloseScene
 		CommandHistory m_History;    // the open scene's history; a dry run swaps its sandbox history in
 		std::vector<UUID> m_Selection;
+		SceneTarget m_SelectionTarget = SceneTarget::Edit;
 		WriteAttribution m_Attribution;
 		bool m_HasRequestAttribution = false;
 		std::optional<ProvenanceRecorder> m_Provenance;  // the open writable project's provenance
@@ -358,7 +370,8 @@ namespace Engine {
 		// write observer keeps the first provenance save failure here for that member to return; otherwise it logs it.
 		bool m_CollectProvenanceErrors = false;
 		std::optional<Error> m_ProvenanceError;
-		ExplicitRenderCamera m_SceneViewCamera{};
+		EditorViewportState m_ViewportState{};
+		EditorUiState m_UiState{};
 		// The undo of each play-scene change a SceneEdit committed inside the open dry run or transaction (M7, §13.4: play-scene
 		// edits are transient and never recorded, yet a dry run leaves no trace and a failed edit.batch rolls back every op):
 		// run newest first when the dry run ends or the transaction rolls back, dropped when the outermost transaction commits

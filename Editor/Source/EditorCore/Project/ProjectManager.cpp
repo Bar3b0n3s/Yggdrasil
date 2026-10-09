@@ -1,6 +1,7 @@
 #include "EditorPCH.h"
 #include "EditorCore/Project/ProjectManager.h"
 
+#include "EditorCore/Project/Basic3DTemplate.h"
 #include "Engine/Core/Assert.h"
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Hash.h"
@@ -163,6 +164,8 @@ namespace Engine {
 		{
 			case ProjectTemplate::Empty:
 				return "Empty";
+			case ProjectTemplate::Basic3D:
+				return "Basic3D";
 		}
 		return "Empty";
 	}
@@ -182,6 +185,8 @@ namespace Engine {
 		};
 		if (equalsIgnoringCase(text, ProjectTemplateToString(ProjectTemplate::Empty)))
 			return ProjectTemplate::Empty;
+		if (equalsIgnoringCase(text, ProjectTemplateToString(ProjectTemplate::Basic3D)))
+			return ProjectTemplate::Basic3D;
 		return std::nullopt;
 	}
 
@@ -203,6 +208,8 @@ namespace Engine {
 
 	Result<CreatedProject> ProjectManager::CreateProject(const ProjectCreateSpecification& specification, const TypeRegistry& registry)
 	{
+		if (specification.Template == ProjectTemplate::Basic3D)
+			return CreateBasic3DProject(specification, registry);
 		ENGINE_TRY(Paths::ValidateAppName(specification.Name));
 		const std::filesystem::path& root = specification.Directory;
 		if (root.empty())

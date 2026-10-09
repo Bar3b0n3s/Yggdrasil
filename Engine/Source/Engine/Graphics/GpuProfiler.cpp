@@ -19,6 +19,17 @@ namespace Engine {
 
 	GpuProfiler::~GpuProfiler() = default;
 
+	void GpuProfiler::BeginFrame(uint32_t, uint64_t)
+	{
+		ENGINE_CONTRACT_STUB();
+	}
+
+	GpuTimingFrame GpuProfiler::GetLastFrameResult() const
+	{
+		ENGINE_CONTRACT_STUB();
+		return {};
+	}
+
 	void GpuProfiler::BeginFrame(uint32_t frameSlot)
 	{
 		ENGINE_CORE_VERIFY(frameSlot < m_Frames.size(), "GpuProfiler::BeginFrame slot {} is out of range ({} frames in flight)", frameSlot,

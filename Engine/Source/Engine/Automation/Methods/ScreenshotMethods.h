@@ -4,10 +4,12 @@
 #include "Engine/Core/Base.h"
 #include "Engine/Core/Result.h"
 #include "Engine/Reflection/VariantValue.h"
+#include "Engine/Renderer/RenderSnapshot.h"
 
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <vector>
 
 // viewport.screenshot (Architecture §8.13, §13.4 "Screenshots", §13.5), the screenshot method the Editor and the Runtime
 // share (§13.5 "Runtime subset: viewport.screenshot (game view)"). Its params and result moved here from
@@ -44,6 +46,7 @@
 
 namespace Engine {
 
+	class Scene;
 	class AutomationMethodContext;
 	class MethodRegistry;
 	class TypeRegistry;
@@ -92,6 +95,29 @@ namespace Engine {
 		// With inline and a PNG larger than MaxInlineScreenshotPngBytes: true, and Data is empty (the PNG is at Path).
 		bool InlineOmitted = false;
 	};
+
+	struct ViewportAnnotationOptions
+	{
+		RenderAnnotations Annotations{};
+		std::vector<std::string> LabelReferences{}; // unresolved EntityRefs for labels:[ids], in request order
+		bool Colliders = false;
+	};
+
+	// Strict object: labels = "all"|"selection"|[EntityRefs]; "selected" aliases "selection", "none" disables labels.
+	// Strings ignore ASCII case; array strings are exact EntityRefs (UUID/prefix/path), never enum spellings. Up to 1000
+	// nonempty refs; [] selects Explicit with no labels. colliders/bounds/axes booleans default false. Absent labels=None.
+	// Pure parse only: array refs stay owned in LabelReferences; no lookup/selection mutation. Unknown members and wrong
+	// types/count/values return InvalidArgument at /annotate/member[/index]. No partial options returned on failure.
+	[[nodiscard]] Result<ViewportAnnotationOptions> ParseViewportAnnotations(const VariantValue& value);
+
+	// Main thread. Resolve every LabelReference against the screenshot's already resolved target scene through the
+	// context's normal EntityRef resolver; NotFound/ambiguity/invalid refs retain /annotate/labels/index locations.
+	// All references must succeed, then sort/deduplicate copied UUIDs into Annotations.LabelEntities. Explicit IDs work
+	// in Runtime. All/None/Selected retain empty LabelEntities: the screenshot host separately fills SelectedEntities
+	// from context.GetSelectedEntities, filtered to target (empty in Runtime), before extraction. Reject inconsistent
+	// options with InvalidArgument; borrow inputs for this call only, return owns values. No scene/editor mutation.
+	[[nodiscard]] Result<RenderAnnotations> ResolveViewportAnnotations(AutomationMethodContext& context, Scene& scene,
+		const ViewportAnnotationOptions& options);
 
 	namespace Automation {
 

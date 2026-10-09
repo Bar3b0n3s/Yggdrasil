@@ -8,6 +8,7 @@
 #include <glm/glm.hpp>
 
 #include <cstdint>
+#include <vector>
 
 // Render extraction (Architecture §5.2, §5.7 frame phase step 4, §8.2): builds the plain RenderSnapshot of one view from a
 // scene, so the renderer never sees the ECS. The play session extracts its game view at the end of every frame phase
@@ -71,6 +72,10 @@ namespace Engine {
 		uint32_t Width = 1;                    // the view's size in pixels (the projection's aspect ratio), both >= 1
 		uint32_t Height = 1;
 		float Alpha = 1.0f; // the interpolation factor in [0, 1] (FrameTime::Alpha; 1 for ManualClock frames and lockstep)
+		RenderViewFlags Flags = RenderViewFlags::None;
+		std::vector<UUID> SelectedEntities{};
+		RenderAnnotations Annotations{};
+		RenderQualitySettings Quality{}; // host copies ProjectSettings.Rendering, including screenshot and Runtime paths
 	};
 
 	// The scene's primary camera: the first entity in canonical order (§5.1) that is effectively enabled (no
@@ -100,9 +105,17 @@ namespace Engine {
 	//     TextItem (Space, Alignment and the font handle as they are; World = the rendered world matrix, used by World
 	//     texts). DebugDraw stays empty (its producers append: M11's colliders, M13's scripts) and DebugView is Lit (a
 	//     screenshot sets it).
+	// M9 additions: copy Flags, Quality, Annotations and SelectedEntities (sort/unique/filter unknown ids), assign mesh
+	// PickIds/PickTable in canonical entity order before GPU culling, and copy all five directional shadow fields.
+	// The default request preserves M8 behavior during contract scaffolding; nondefault M9 options currently return
+	// Unsupported. The integrator replaces that marked guard with the behavior above, preserving the existing extraction.
+	// Asset-dependent overlays are appended afterwards with AppendRenderAnnotations at the snapshot's Alpha.
 	// Errors: InvalidArgument for a zero Width or Height or an Alpha that is not finite or outside [0, 1]; NotFound for an
 	// Entity request whose CameraEntity names no entity of the scene, and InvalidArgument when that entity has no
 	// CameraComponent (both name the id); InvalidArgument for an Explicit camera whose Target equals its Position.
+	// M9 implementation also rejects unknown flag bits, invalid annotation enums and invalid ShadowMapSize before copying
+	// options. Explicit label IDs are copied, sorted/deduplicated and unknown IDs filtered; other label modes require
+	// an empty LabelEntities vector. Returned values own selection and label storage.
 	[[nodiscard]] Result<RenderSnapshot> ExtractRenderSnapshot(const Scene& scene, const RenderExtractionRequest& request);
 
 }

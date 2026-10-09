@@ -27,14 +27,14 @@ namespace Engine {
 	class TypeRegistry;
 	class VirtualFileSystem;
 
-	// New-project templates (§12.4). Basic3D (a scene with camera, sun, environment, post-process and ground) arrives with
-	// the Editor UI milestone (M10), when its components render.
+	// New-project templates (§12.4). Basic3D's generated scene uses BuildBasic3DScene (M10).
 	enum class ProjectTemplate : uint8_t
 	{
-		Empty
+		Empty,
+		Basic3D
 	};
 
-	// "Empty".
+	// "Empty" or "Basic3D".
 	[[nodiscard]] std::string_view ProjectTemplateToString(ProjectTemplate projectTemplate);
 	// ASCII case-insensitive inverse (automation, §13.4); nullopt otherwise.
 	[[nodiscard]] std::optional<ProjectTemplate> ProjectTemplateFromString(std::string_view text);
@@ -47,7 +47,7 @@ namespace Engine {
 		// because exported games use it as their user-data folder name (§14.1).
 		std::string Name{};
 		ProjectTemplate Template = ProjectTemplate::Empty;
-		// Resources/Templates/Projects: holds one directory per template (Empty/) whose files (.luaurc, .gitignore,
+		// Resources/Templates/Projects: holds one directory per template (Empty/, Basic3D/) whose files (.luaurc, .gitignore,
 		// AGENTS.md) are copied verbatim, AGENTS.md with "{{Name}}" replaced by the name.
 		std::filesystem::path TemplatesDirectory{};
 	};

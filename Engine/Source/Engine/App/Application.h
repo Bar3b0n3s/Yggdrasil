@@ -212,6 +212,18 @@ namespace Engine {
 		// submit the frame's widgets. Not called for a frame the swapchain skips; the next UI frame's io.DeltaTime then
 		// covers the skipped frames' time too.
 		virtual void OnImGuiRender() {}
+		// M9: once AFTER executing this frame's scene/UI list and BEFORE Present, with that list's actual submission ID.
+		// Main thread; never called for an unrendered/skipped frame. Notify each renderer used by this frame through
+		// SceneRenderer::OnSubmitted, then drain queued UI picks against that submitted image/table/generation before a
+		// subsequent Render or Resize can replace them. Pick requests from OnImGuiRender only enqueue owned click data.
+		// The hook may submit nonblocking copies; frame pacing covers the device's last submission after this hook.
+		// Screenshot/thumbnail lists submit and notify their own renderers directly, never call this application hook.
+		virtual void OnRenderSubmitted(uint64_t frameIndex, uint64_t submissionId);
+		// M10: request a complete offscreen scene/UI frame at the next render phase, even while minimized. No swapchain
+		// acquire/present in that case; retain the last nonzero UI size. Normal rendering consumes the request too.
+		// Main thread, while Run is active. Unsupported without a device/ImGui; does not advance simulation or render here.
+		// Forced frames invoke the same render/submission hooks, with no reuse of stale ImGui draw data.
+		[[nodiscard]] Status RequestOffscreenUiFrame();
 
 		// The application's ImGuiLayer (editor screenshots re-render its last frame, §8.13); nullptr without ImGui, and
 		// outside the span from rendering initialization to the end of OnShutdown.

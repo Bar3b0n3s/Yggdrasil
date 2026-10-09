@@ -51,16 +51,22 @@ namespace Engine {
 
 	// project.open {path}: opens the .eproj `path` names (or the directory holding exactly one), taking the lock (§4.13); a
 	// read-only editor (--read-only) opens without it. Available in the launcher state; with a project open it is
-	// InvalidState. project.open {recover} arrives with autosave (M10).
+	// InvalidState. recover=true adopts a validated newer autosave atomically into memory (M10, Autosave.h), never
+	// overwrites source files. recover=false opens normally and reports whether recovery is available; it is not an
+	// inspection-only call. UI acceptance later uses the injected already-open recovery service (EditorPanelContext),
+	// not a second project.open. Automation chooses recover=true on its initial open; no retry while a project is open.
 	struct ProjectOpenParams
 	{
 		std::string Path{};
+		bool Recover = false;
 	};
 
 	struct ProjectOpenResult
 	{
 		ProjectSummary Project{};
 		std::vector<std::string> Warnings{}; // the .eproj's load warnings ("unknown field 'Foo'"), also logged at Warn
+		bool RecoveryAvailable = false;
+		bool Recovered = false;
 	};
 
 	// project.save {}: writes the open scene when it is dirty (to its path; an unsaved scene needs scene.save {path}).

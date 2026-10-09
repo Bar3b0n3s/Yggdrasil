@@ -16,6 +16,9 @@
 
 namespace Engine {
 
+	struct ViewportPixelSize;
+	enum class ViewportView : uint8_t;
+
 	class AutomationServer;
 	class ConstEntity;
 	class EditorContext;
@@ -91,6 +94,11 @@ namespace Engine {
 		[[nodiscard]] std::chrono::steady_clock::time_point GetWallClockTime() const override;
 		// M12: the editor's EngineContext::GetAudioEngine.
 		[[nodiscard]] AudioEngine* GetAudioEngine() const override;
+		// M9/M10 bridge: current logical view's framebuffer pixel extent (headless stored default 640x360). M10 owns the
+		// EditorContext::GetViewportState().GetPixelSize(view); M9 owns this adapter. Scene/game extents are independent.
+		// Never substitutes retained aspect, pending panel size or a screenshot target; host publishes after actual render.
+		// InvalidState for an unavailable/minimized view; Unsupported only while this contract adapter is unimplemented.
+		[[nodiscard]] Result<ViewportPixelSize> GetViewportPixelSize(ViewportView view) const;
 	private:
 		EditorContext* m_Editor = nullptr;    // documented back-reference
 		AutomationServer* m_Server = nullptr; // documented back-reference

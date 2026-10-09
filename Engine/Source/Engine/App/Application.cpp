@@ -446,6 +446,17 @@ namespace Engine {
 		return *process;
 	}
 
+	void Application::OnRenderSubmitted(uint64_t, uint64_t)
+	{
+		ENGINE_CONTRACT_STUB();
+	}
+
+	Status Application::RequestOffscreenUiFrame()
+	{
+		ENGINE_CONTRACT_STUB();
+		return MakeError(ErrorCode::Unsupported, "M10 offscreen UI contract is not implemented");
+	}
+
 	void Application::OnFrameEvent(Event& event)
 	{
 		// Resizes need no call here: the swapchain compares the framebuffer size with the size it was created for when the

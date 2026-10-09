@@ -200,7 +200,11 @@ namespace Engine {
 			CHECK(ProjectTemplateToString(ProjectTemplate::Empty) == "Empty");
 			CHECK(ProjectTemplateFromString("empty") == ProjectTemplate::Empty);
 			CHECK(ProjectTemplateFromString("EMPTY") == ProjectTemplate::Empty);
-			CHECK_FALSE(ProjectTemplateFromString("Basic3D").has_value());
+			CHECK(ProjectTemplateToString(ProjectTemplate::Basic3D) == "Basic3D");
+			CHECK(ProjectTemplateFromString("Basic3D") == ProjectTemplate::Basic3D);
+			CHECK(ProjectTemplateFromString("basic3d") == ProjectTemplate::Basic3D);
+			CHECK(ProjectTemplateFromString("BASIC3D") == ProjectTemplate::Basic3D);
+			CHECK_FALSE(ProjectTemplateFromString("UnknownTemplate").has_value());
 		}
 
 		TEST_CASE("ProjectManager: a missing template is NotFound and creates nothing")

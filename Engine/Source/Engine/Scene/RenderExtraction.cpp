@@ -361,6 +361,13 @@ namespace Engine {
 
 	Result<RenderSnapshot> ExtractRenderSnapshot(const Scene& scene, const RenderExtractionRequest& request)
 	{
+		if (request.Flags != RenderViewFlags::None || !request.SelectedEntities.empty()
+			|| !request.Annotations.LabelEntities.empty() || request.Annotations.Labels != RenderAnnotationLabels::None || request.Annotations.Bounds || request.Annotations.Axes
+			|| request.Quality.ShadowMapSize != 2048 || request.Quality.SsaoHalfResolution)
+		{
+			ENGINE_CONTRACT_STUB();
+			return std::unexpected(Error(ErrorCode::Unsupported, "M9 render extraction options are not implemented"));
+		}
 		if (request.Width == 0 || request.Height == 0)
 			return MakeError(ErrorCode::InvalidArgument, "a render extraction needs a view of at least 1x1 pixels, got {}x{}", request.Width, request.Height);
 		if (!std::isfinite(request.Alpha) || request.Alpha < 0.0f || request.Alpha > 1.0f)

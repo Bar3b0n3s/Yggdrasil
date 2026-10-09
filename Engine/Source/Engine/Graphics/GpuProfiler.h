@@ -34,6 +34,15 @@ namespace Engine {
 		uint32_t Depth = 0; // nesting depth: 0 for a top-level scope
 	};
 
+	// Owned observation of the last BeginFrame collection attempt. Unavailable means no retired frame or an unfinished
+	// query; Samples is then empty, never a previous frame's vector labelled with a new FrameIndex.
+	struct GpuTimingFrame
+	{
+		bool Available = false;
+		uint64_t FrameIndex = 0; // the collected frame's supplied identity; meaningful only when Available
+		std::vector<GpuTimingSample> Samples{};
+	};
+
 	// Not copyable or movable; main thread only (§4.11). Application owns one for its frames (RenderContext::Profiler).
 	class GpuProfiler
 	{
@@ -53,6 +62,13 @@ namespace Engine {
 		// Starts the frame of `frameSlot` (FramePacer::GetFrameSlot, after FramePacer::BeginFrame, so the slot's previous
 		// frame has completed): collects that frame's finished queries into GetLastFrameSamples and recycles them.
 		void BeginFrame(uint32_t frameSlot);
+		// M9 per-view form: caller supplies the host frame identity and has already established that this slot's prior
+		// submission retired. Collect without waiting, tag samples with the OLD recorded frame's identity, then start this
+		// frame. The one-argument form uses a monotonically increasing local sequence; do not mix forms in one profiler.
+		void BeginFrame(uint32_t frameSlot, uint64_t frameIndex);
+		// Copy of the most recent collection attempt, including availability and source identity. Failure/no prior frame
+		// produces unavailable/empty, not a stale successful result. Missing query scopes remain absent, not zero timings.
+		[[nodiscard]] GpuTimingFrame GetLastFrameResult() const;
 
 		// Opens a scope on `commandList`: beginMarker(name) and beginTimerQuery. Scopes nest and must be closed in reverse
 		// order on the same command list (asserted).

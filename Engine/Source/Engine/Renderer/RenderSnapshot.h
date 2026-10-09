@@ -2,6 +2,7 @@
 
 #include "Engine/Asset/AssetHandle.h"
 #include "Engine/Core/Base.h"
+#include "Engine/Core/Result.h"
 #include "Engine/Core/UUID.h"
 #include "Engine/Renderer/DebugDrawList.h"
 
@@ -29,6 +30,77 @@
 // owner; no member here changes meaning. A plain value type: copyable, movable, thread-compatible.
 
 namespace Engine {
+
+	// Per-view switches. None preserves a clean game/capture view. EditorOverlays gates Grid, Icons and Selection;
+	// Colliders, Picking and Wireframe are independent. Flags affect this snapshot only, never the scene or UI state.
+	// Wireframe replaces Lit mesh color with portable one-pixel triangle edges over camera ClearColor; normal solid
+	// depth/EntityId prepass still runs, so picking/selection remain geometry-based. No fillModeNonSolid requirement.
+	// DebugView != Lit takes precedence over Wireframe. Full wireframe/color/count rules are frozen in ADR0017.
+	enum class RenderViewFlags : uint32_t
+	{
+		None = 0,
+		EditorOverlays = 1U << 0,
+		Grid = 1U << 1,
+		Selection = 1U << 2,
+		Colliders = 1U << 3,
+		Icons = 1U << 4,
+		Picking = 1U << 5,
+		Wireframe = 1U << 6
+	};
+
+	template<>
+	inline constexpr bool EnableFlagOperators<RenderViewFlags> = true;
+
+	enum class RenderAnnotationLabels : uint8_t
+	{
+		None,
+		All,
+		Selected,
+		Explicit
+	};
+
+	// Capture-only annotations. Collider annotations use Flags::Colliders; Selected refers to SelectedEntities.
+	struct RenderAnnotations
+	{
+		RenderAnnotationLabels Labels = RenderAnnotationLabels::None;
+		std::vector<UUID> LabelEntities{}; // Explicit only: owned, sorted/deduplicated; no editor-selection mutation
+		bool Bounds = false;
+		bool Axes = false;
+	};
+
+	enum class RenderIconKind : uint8_t
+	{
+		Camera,
+		DirectionalLight,
+		PointLight,
+		SpotLight,
+		AudioSource,
+		AudioListener
+	};
+
+	// Renderer-owned world glyphs; Editor/Icons.cpp supplies UI glyphs separately. No UI font/ImGui dependency.
+	struct RenderIcon
+	{
+		RenderIconKind Kind = RenderIconKind::Camera;
+		glm::vec3 Position = glm::vec3(0.0f);
+		glm::vec4 Color = glm::vec4(1.0f);
+		float Size = 20.0f; // framebuffer pixels, constant apparent size in either projection
+		UUID Entity{};
+	};
+
+	// Copied from ProjectSettings.Rendering by the host; no Project dependency in Renderer.
+	struct RenderQualitySettings
+	{
+		uint32_t ShadowMapSize = 2048; // power of two, [256, 8192]
+		bool SsaoHalfResolution = false;
+	};
+
+	// A world-space ray. Camera pixel rays are normalized; SceneRaycast also accepts and normalizes non-unit directions.
+	struct RenderRay
+	{
+		glm::vec3 Origin = glm::vec3(0.0f);
+		glm::vec3 Direction = glm::vec3(0.0f, 0.0f, -1.0f);
+	};
 
 	// How a camera projects (CameraComponent::Projection, without including Scene).
 	enum class RenderProjection : uint8_t
@@ -67,22 +139,28 @@ namespace Engine {
 	// one material or geometry quantity per pixel through a Vulkan specialization constant of the forward pipelines (the
 	// enumerator's value is the constant's value). With a view other than Lit the post chain is fixed (SceneRenderer.h):
 	// no skybox, bloom, FXAA or dither, exposure 1, the Linear tonemapper, and the sRGB OETF only for the colour views
-	// (Albedo, Emissive), so a data view's value v is stored as round(255 v). M9 appends AO, ShadowCascades and Overdraw after
+	// (Albedo, Emissive), so a data view's value v is stored as round(255 v). Overdraw bypasses the forward-depth test
+	// and counts geometric coverage in its dedicated additive pass; it is not a forward shading specialization alone.
+	// AO/ShadowCascades/Overdraw suppress ordinary overlays and text; explicit capture annotations append afterwards.
+	// M9 appends AO, ShadowCascades and Overdraw after
 	// Emissive (Docs/Decisions/0013-m8-decisions.md decision 12).
 	enum class RenderDebugView : uint8_t
 	{
-		Lit,       // the shaded image
-		Albedo,    // base colour (factor times map, linear), alpha ignored
-		Normals,   // the shading normal (normal-mapped, world space) as N * 0.5 + 0.5
-		Roughness, // perceptual roughness (after the 0.045 clamp, §8.5) as grey
-		Metallic,  // metallic as grey
-		Emissive   // emitted radiance (Emissive times map times EmissiveStrength), clamped to [0, 1]
+		Lit,            // the shaded image
+		Albedo,         // base colour (factor times map, linear), alpha ignored
+		Normals,        // the shading normal (normal-mapped, world space) as N * 0.5 + 0.5
+		Roughness,      // perceptual roughness (after the 0.045 clamp, §8.5) as grey
+		Metallic,       // metallic as grey
+		Emissive,       // emitted radiance (Emissive times map times EmissiveStrength), clamped to [0, 1]
+		AO,             // final denoised/upscaled GTAO (before materialAO), scalar grey; disabled/background = white
+		ShadowCascades, // receiver cascade index colors, blended/faded exactly like shadow visibility; no allocation = black
+		Overdraw        // accepted fragment count before depth rejection, palette specified in ADR0017; background black
 	};
 
 	// The number of debug views: RenderDebugView's last enumerator plus one, so the view that M9 appends last is named here.
 	// The view names (RenderDebugViewToString), the forward pipelines per view (SceneRendererPipelines::EnsureDebugView) and
 	// viewport.screenshot's list of valid names all follow it.
-	inline constexpr uint32_t RenderDebugViewCount = static_cast<uint32_t>(RenderDebugView::Emissive) + 1;
+	inline constexpr uint32_t RenderDebugViewCount = static_cast<uint32_t>(RenderDebugView::Overdraw) + 1;
 
 	// Where a TextItem is laid out (TextComponent::Space, §5.3, §8.10).
 	enum class RenderTextSpace : uint8_t
@@ -131,6 +209,7 @@ namespace Engine {
 		bool CastShadows = true;
 		bool ReceiveShadows = true;
 		UUID Entity{};
+		uint32_t PickId = 0; // 0: not pickable; otherwise PickTable[PickId - 1] is Entity, stable within this snapshot
 	};
 
 	// One light (§8.2: directional, point, spot). The renderer culls them on the CPU and lights with at most
@@ -150,6 +229,12 @@ namespace Engine {
 		float LightAngle = 1.0f;                            // degrees (directional; PCSS from M9)
 		bool CastShadows = false;
 		UUID Entity{};
+		// DirectionalLightComponent's shadow settings. Spot maps use DepthBias/NormalBias defaults; points cast no shadows.
+		float ShadowDistance = 100.0f;
+		uint32_t CascadeCount = 4;
+		float CascadeSplitLambda = 0.75f;
+		float DepthBias = 1.0f;
+		float NormalBias = 1.0f;
 	};
 
 	// The scene's EnvironmentComponent (§5.3, §8.6), or its defaults when the scene has none. With an environment map the
@@ -236,13 +321,28 @@ namespace Engine {
 		DebugDrawList DebugDraw{};
 		// M8: what the forward passes output; Lit for every view except a viewport.screenshot with "debugView".
 		RenderDebugView DebugView = RenderDebugView::Lit;
+		// M9: assigned once in canonical mesh-entity order before visibility culling; no duplicate or invalid UUIDs.
+		std::vector<UUID> PickTable{};
+		RenderViewFlags Flags = RenderViewFlags::None;
+		std::vector<UUID> SelectedEntities{}; // copied, canonicalized; unknown ids ignored; never component references
+		RenderAnnotations Annotations{};
+		RenderQualitySettings Quality{};
+		std::vector<RenderIcon> Icons{};
+		uint64_t FrameIndex = 0;    // host frame for nonblocking timings; capture hosts use their own sequence
+		uint64_t SceneRevision = 0; // opaque host revision stamped alongside FrameIndex before Render, echoed by picking
 	};
 
-	// The name of `view` as viewport.screenshot spells it ("Lit", "Albedo", "Normals", "Roughness", "Metallic", "Emissive").
+	// World ray through pixel centre (x + 0.5, y + 0.5), top-left origin, in Camera.ViewportWidth/Height.
+	// Perspective starts at Position; orthographic starts on the near plane and uses constant forward direction.
+	// Pure, thread-safe, deterministic (DetMath). InvalidArgument: non-finite/singular camera, invalid clip range,
+	// zero extent or pixel outside [0, width) x [0, height). No viewport or GPU state is read.
+	[[nodiscard]] Result<RenderRay> ComputeViewPixelRay(const CameraData& camera, uint32_t x, uint32_t y);
+
+	// Canonical debug-view spelling, including M9's AO, ShadowCascades and Overdraw.
 	[[nodiscard]] std::string_view RenderDebugViewToString(RenderDebugView view);
 
-	// The debug view named `name`, ignoring ASCII case; nullopt for any other name (M9's AO, ShadowCascades and Overdraw
-	// included).
+	// The debug view named `name`, ignoring ASCII case; nullopt for any other name. Name recognition does not imply that
+	// the contract's GPU pass is implemented: M9 views are Unsupported by render/capture until their implementation lands.
 	[[nodiscard]] std::optional<RenderDebugView> ParseRenderDebugView(std::string_view name);
 
 	// The reverse-Z projection of §8.3 for a `width` x `height` viewport (both > 0, asserted by callers):
@@ -255,5 +355,25 @@ namespace Engine {
 	// identical in every configuration.
 	[[nodiscard]] glm::mat4 ComputeReverseZProjection(RenderProjection projection, float verticalFovDegrees, float orthographicSize,
 		float nearClip, float farClip, uint32_t width, uint32_t height);
+
+	struct RenderRayInterval
+	{
+		RenderRay Ray{};
+		float MinDistance = 0.0f;
+		float MaxDistance = 0.0f;
+	};
+
+	// ComputeViewPixelRay plus inclusive camera clipping. For perspective let c = -viewDirection.z of the normalized
+	// world ray transformed by View (rotation only): [NearClip/c, FarClip/c]. Orthographic origin is already on the near
+	// plane: [0, FarClip-NearClip]. Distances refer to Ray.Origin, not view-axis depth. Pure, same errors as pixel ray;
+	// InvalidArgument for an unrepresentable interval. Narrow-phase queries reject out-of-interval hits while searching,
+	// so a near-clipped foreground triangle cannot hide a valid farther triangle.
+	[[nodiscard]] Result<RenderRayInterval> ComputeViewPixelRayInterval(const CameraData& camera, uint32_t x, uint32_t y);
+
+	// Pure data-view palette helpers, thread-safe. Display-encoded colors, bypass OETF/dither. Counts: 0 black,
+	// 1 blue, 2 cyan, 3 green, 4 yellow, >=5 red (unit RGB primaries). Input is accepted-fragment count per pixel.
+	[[nodiscard]] glm::vec3 GetOverdrawDebugColor(uint32_t count);
+	// Cascade 0 red, 1 green, 2 blue, 3 yellow; invalid index asserted. Blend/fade weights applied by renderer.
+	[[nodiscard]] glm::vec3 GetShadowCascadeDebugColor(uint32_t cascadeIndex);
 
 }

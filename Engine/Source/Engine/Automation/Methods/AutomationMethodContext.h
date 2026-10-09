@@ -14,6 +14,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <vector>
 
 // The request context of the method handlers the Editor and the Runtime share (Architecture §3 "Automation/Methods",
 // §13.5 "Runtime subset"; Docs/Decisions/0008-m4-decisions.md decisions 7 and 26, Docs/Decisions/0012-m7-decisions.md
@@ -31,6 +32,9 @@
 // context per request; main thread only.
 
 namespace Engine {
+
+	struct ProjectSettings;
+	struct StatsGetResult;
 
 	class AssetManager;
 	class AudioEngine;
@@ -150,6 +154,16 @@ namespace Engine {
 		// EngineContext::GetAudioEngine (RuntimeAutomationServerSpecification::Audio); null for a host without one, where
 		// audio.stats is Unsupported. The pointer is non-owning and valid for the request.
 		[[nodiscard]] virtual AudioEngine* GetAudioEngine() const = 0;
+
+		// Project settings observed by render extraction, scene raycast layer filtering and screenshots. Borrowed for the
+		// current request only; null without an open project. Editor: open project. Runtime: PlaySession project copy.
+		[[nodiscard]] virtual const ProjectSettings* GetProjectSettings() const;
+		// Copies CPU/session counts plus independent scene/game RenderStats histories. Never initiates a GPU wait/render.
+		// Unsupported until host service is injected; renderer none must still return CPU/session counts when integrated.
+		[[nodiscard]] virtual Result<StatsGetResult> GetHostStatistics() const;
+		// Copy of the editor selection for capture-only "selected" annotations; Runtime returns an empty vector. The
+		// snapshot filters ids against its target scene, so selection cannot retain an entity/component reference.
+		[[nodiscard]] virtual std::vector<UUID> GetSelectedEntities() const;
 	protected:
 		// `hostKey` is the most-derived context's TypeKeyOf, as for MethodContext.
 		AutomationMethodContext(TypeKey hostKey, MethodRequest request);

@@ -37,6 +37,7 @@ namespace Engine {
 
 	class EditorMethodContext;
 	class MethodRegistry;
+	class PendingOperation;
 	class TypeRegistry;
 	struct RenderSnapshot;
 	struct ViewportScreenshotRequest;
@@ -53,6 +54,11 @@ namespace Engine {
 		// The editor UI's last frame re-rendered at the UI's framebuffer size (CaptureImGuiScreenshot): the editor UI as a
 		// user would see it over the frame's clear colour, on the GLFW null platform when headless (§13.9).
 		std::function<Result<Image>()> EditorUi{};
+		// M10 pending screenshot boundary. A request remembers the current completed serial and requests a new UI frame;
+		// capture is allowed only after a later serial. Host services this while minimized, without a swapchain acquire.
+		// Empty until the panels integrate; legacy synchronous capture remains available to pre-M10 callers.
+		std::function<uint64_t()> CompletedUiFrame{};
+		std::function<void()> RequestUiFrame{};
 	};
 
 	// viewport.screenshot's params and result (ViewportView, ViewportScreenshotParams, ViewportScreenshotResult) and
@@ -79,6 +85,10 @@ namespace Engine {
 		// before the first UI frame) with the context "while rendering the editor UI"; those of DownscaleImage, EncodePng and
 		// AutomationServer::WriteOutputFile.
 		[[nodiscard]] Result<EditorScreenshotResult> EditorScreenshot(EditorMethodContext& context, const EditorScreenshotParams& params);
+		// M10 pending entry point, same wire params/result. Unsupported without the three UI callbacks. Poll until a fresh
+		// frame, then use the existing encoder/output path. Cancel releases the request; timeout is the normal dispatcher
+		// deadline. Integration switches RegisterScreenshotMethods to AddPending without changing the method's wire flags.
+		[[nodiscard]] Result<Scope<PendingOperation>> BeginEditorScreenshot(EditorMethodContext& context, const EditorScreenshotParams& params);
 
 	}
 

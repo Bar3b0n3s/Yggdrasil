@@ -1170,6 +1170,12 @@ namespace Engine {
 		return text;
 	}
 
+	uint32_t GraphicsDevice::GetMemoryAllocationCount() const
+	{
+		ENGINE_CONTRACT_STUB();
+		return 0;
+	}
+
 	VkInstance GraphicsDevice::GetVulkanInstance() const
 	{
 		return m_Instance;

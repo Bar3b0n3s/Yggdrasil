@@ -67,9 +67,10 @@ namespace Engine {
 			CHECK(RenderDebugViewToString(RenderDebugView::Albedo) == "Albedo");
 			CHECK(ParseRenderDebugView("NORMALS") == RenderDebugView::Normals);
 			CHECK(ParseRenderDebugView("emissive") == RenderDebugView::Emissive);
-			// M9's views and anything else are not M8 debug views.
-			CHECK_FALSE(ParseRenderDebugView("AO").has_value());
-			CHECK_FALSE(ParseRenderDebugView("ShadowCascades").has_value());
+			// Names are available to contract consumers before their rendering passes are implemented.
+			CHECK(ParseRenderDebugView("AO") == RenderDebugView::AO);
+			CHECK(ParseRenderDebugView("ShadowCascades") == RenderDebugView::ShadowCascades);
+			CHECK(ParseRenderDebugView("overdraw") == RenderDebugView::Overdraw);
 			CHECK_FALSE(ParseRenderDebugView("").has_value());
 			CHECK_FALSE(ParseRenderDebugView("Albedo ").has_value());
 		}
@@ -86,6 +87,15 @@ namespace Engine {
 			CHECK(text.Alignment == RenderTextAlignment::Center);
 			CHECK(text.Anchor == glm::vec2(0.5f));
 			CHECK_FALSE(text.Font.IsValid());
+		}
+	}
+
+	TEST_SUITE("Renderer")
+	{
+		TEST_CASE("DebugViews: debug palettes have exact display-encoded colors" * doctest::skip(true))
+		{
+			// Overdraw 0..6, four cascade indices, no exposure/OETF/dither; compare against literal RGB values.
+			FAIL("M9 reviewed contract: implement this acceptance before removing skip");
 		}
 	}
 

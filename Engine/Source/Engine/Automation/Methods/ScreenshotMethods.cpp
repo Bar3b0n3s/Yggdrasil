@@ -106,7 +106,10 @@ namespace Engine {
 			if (name.empty())
 				return RenderDebugView::Lit;
 			if (const std::optional<RenderDebugView> view = ParseRenderDebugView(name))
-				return *view;
+			{
+				if (*view < RenderDebugView::AO)
+					return *view;
+			}
 			std::string valid;
 			for (uint32_t index = 0; index < RenderDebugViewCount; ++index)
 				valid += std::format("{}{}", valid.empty() ? "" : ", ", RenderDebugViewToString(static_cast<RenderDebugView>(index)));

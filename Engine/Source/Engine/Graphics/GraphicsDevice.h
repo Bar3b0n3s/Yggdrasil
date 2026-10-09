@@ -141,6 +141,10 @@ namespace Engine {
 		// Engine code never calls its create* functions directly (§8.14 item 7): use the wrappers below.
 		[[nodiscard]] nvrhi::IDevice* GetNvrhiDevice() const;
 		[[nodiscard]] const GraphicsDeviceInfo& GetInfo() const;
+		// M9: live successful Vulkan device-memory allocations, including NVRHI staging/heaps and host-image blocks.
+		// Counts vkAllocateMemory/vkFreeMemory, not GPU objects or CPU allocation callbacks; shared blocks count once.
+		// Deferred resources count until the actual free. Main thread; no GPU waits. The count resets with this device.
+		[[nodiscard]] uint32_t GetMemoryAllocationCount() const;
 		[[nodiscard]] const GraphicsSpecification& GetSpecification() const;
 		[[nodiscard]] GpuDiagnostics& GetDiagnostics();
 		[[nodiscard]] const GpuDiagnostics& GetDiagnostics() const;

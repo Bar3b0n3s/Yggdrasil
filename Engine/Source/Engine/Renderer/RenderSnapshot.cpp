@@ -25,6 +25,9 @@ namespace Engine {
 			{ RenderDebugView::Roughness, "Roughness" },
 			{ RenderDebugView::Metallic, "Metallic" },
 			{ RenderDebugView::Emissive, "Emissive" },
+			{ RenderDebugView::AO, "AO" },
+			{ RenderDebugView::ShadowCascades, "ShadowCascades" },
+			{ RenderDebugView::Overdraw, "Overdraw" },
 		} };
 
 		// Every view has its entry at its enumerator's index with a name; an entry the array value-initialized because a view

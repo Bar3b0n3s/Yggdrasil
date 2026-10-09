@@ -24,6 +24,13 @@ namespace Engine {
 	// and drawn into by the overlay and text passes.
 	inline constexpr nvrhi::Format LdrColorFormat = nvrhi::Format::RGBA8_UNORM;
 
+	// M9 per-view targets. Shadow depth uses the same reverse-Z convention as SceneDepth.
+	inline constexpr nvrhi::Format EntityIdFormat = nvrhi::Format::R32_UINT;
+	inline constexpr nvrhi::Format ShadowDepthFormat = nvrhi::Format::D32;
+	inline constexpr nvrhi::Format ViewDepthFormat = nvrhi::Format::R16_FLOAT;
+	inline constexpr nvrhi::Format AmbientOcclusionFormat = nvrhi::Format::R8_UNORM;
+	inline constexpr nvrhi::Format SelectionMaskFormat = nvrhi::Format::R8_UNORM;
+
 	// The framebuffer of the forward and skybox passes: SceneColor with SceneDepth.
 	[[nodiscard]] inline nvrhi::FramebufferInfo GetSceneColorFramebufferInfo()
 	{

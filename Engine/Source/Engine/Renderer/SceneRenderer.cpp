@@ -400,6 +400,11 @@ namespace Engine {
 
 	Status SceneRendererPipelines::EnsureDebugView(RenderDebugView view)
 	{
+		if (view >= RenderDebugView::AO && view <= RenderDebugView::Overdraw)
+		{
+			ENGINE_CONTRACT_STUB();
+			return std::unexpected(Error(ErrorCode::Unsupported, "M9 debug rendering is not implemented"));
+		}
 		State& state = *m_State;
 		const auto index = static_cast<size_t>(view);
 		if (index >= RenderDebugViewCount)
@@ -714,6 +719,18 @@ namespace Engine {
 
 	Status SceneRenderer::Render(nvrhi::ICommandList& commandList, const RenderSnapshot& snapshot)
 	{
+		if (snapshot.Flags != RenderViewFlags::None || !snapshot.SelectedEntities.empty() || !snapshot.Icons.empty()
+			|| !snapshot.Annotations.LabelEntities.empty() || snapshot.Annotations.Labels != RenderAnnotationLabels::None || snapshot.Annotations.Bounds || snapshot.Annotations.Axes
+			|| snapshot.Quality.ShadowMapSize != 2048 || snapshot.Quality.SsaoHalfResolution)
+		{
+			ENGINE_CONTRACT_STUB();
+			return std::unexpected(Error(ErrorCode::Unsupported, "M9 render view options are not implemented"));
+		}
+		if (snapshot.DebugView >= RenderDebugView::AO && snapshot.DebugView <= RenderDebugView::Overdraw)
+		{
+			ENGINE_CONTRACT_STUB();
+			return std::unexpected(Error(ErrorCode::Unsupported, "M9 debug rendering is not implemented"));
+		}
 		State& state = *m_State;
 		SceneRendererPipelines::State& pipelines = *state.Pipelines;
 		state.Stats = {};

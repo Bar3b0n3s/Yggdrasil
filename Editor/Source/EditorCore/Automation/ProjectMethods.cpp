@@ -4,6 +4,7 @@
 #include "EditorCore/Automation/EditorMethodContext.h"
 #include "EditorCore/Automation/Private/MethodSupport.h"
 #include "EditorCore/Automation/ProvenanceRecorder.h"
+#include "EditorCore/Automation/RecoveryMethods.h"
 #include "EditorCore/Automation/SceneMethods.h"
 #include "EditorCore/Commands/ProjectSettingsCommand.h"
 #include "EditorCore/EditorContext.h"
@@ -204,6 +205,8 @@ namespace Engine {
 
 		Result<ProjectOpenResult> ProjectOpen(EditorMethodContext& context, const ProjectOpenParams& params)
 		{
+			if (params.Recover)
+				return OpenProjectWithRecovery(context, params);
 			EditorContext& editor = context.GetEditor();
 			ENGINE_TRY(Utils::RequireNoProject(editor));
 			ENGINE_TRY_ASSIGN(const std::filesystem::path path, Utils::ResolveNativeProjectPath(params.Path, "/path"));

@@ -3,7 +3,9 @@
 #include "Engine/Core/Base.h"
 #include "Engine/Core/Result.h"
 #include "Engine/Graphics/PipelineFactory.h"
+#include "Engine/Renderer/AsyncPicker.h"
 #include "Engine/Renderer/RenderSnapshot.h"
+#include "Engine/Renderer/RenderStats.h"
 
 #include <nvrhi/nvrhi.h>
 
@@ -39,8 +41,10 @@
 //  13. Overlays: the snapshot's DebugDrawList (DebugRenderer.h), depth-tested against SceneDepth or on top.
 //  14. Text (TextRenderer.h): world texts (depth-tested), then screen texts, then the debug list's labels.
 // Debug views (RenderSnapshot::DebugView other than Lit) specialize the forward pipelines and fix the post chain: no skybox,
-// bloom, FXAA or dither, exposure 1, the Linear tonemapper, the OETF only for Albedo and Emissive; overlays and text still
-// draw. A snapshot without a camera clears SceneColor to the default ClearColor and draws nothing but screen texts.
+// bloom, FXAA or dither, exposure 1, the Linear tonemapper, the OETF only for Albedo and Emissive. Existing M8 material
+// views retain overlays/text. M9 AO/ShadowCascades/Overdraw suppress them except explicit capture annotations (ADR0017);
+// Overdraw uses a dedicated depth-independent additive pass, not the forward shading specialization.
+// A snapshot without a camera clears SceneColor to the default ClearColor and draws nothing but screen texts.
 // Rendering is deterministic for a snapshot on a given device (§8.3: no temporal effects), which the golden images rely on.
 //
 // Pipelines (§8.5, §8.12). SceneRendererPipelines holds every pipeline of the pass list, created once per device at startup
@@ -107,7 +111,9 @@ namespace Engine {
 		// The scene's own mesh pipelines at startup: prepass {Opaque, Mask} x {CullBack, CullFront, CullNone} (6), forward
 		// opaque the same (6), forward transparent {CullBack, CullFront, CullNone} (3).
 		static constexpr uint32_t MeshPipelineCount = 15;
-		// The pipelines one non-Lit debug view adds the first time it renders: the 6 forward opaque and 3 transparent variants.
+		// The pipelines one M8 material debug view adds: 6 forward opaque and 3 transparent variants. M9 data views use
+		// their dedicated passes (ADR0017); the integrator adds their counts/layout tests with the actual shader manifest.
+		// This scaffold preserves the existing M8 counts and does not claim new debug views are renderable yet.
 		static constexpr uint32_t DebugViewPipelineCount = 9;
 		// Every pipeline Create makes: the mesh pipelines plus SkyboxPass (1), BloomPass (3), TonemapPass (1), FxaaPass (1),
 		// DebugRenderer (2), TextRenderer (2) and BrdfLut (1). Each pass declares its own PipelineCount; this is their sum.
@@ -136,7 +142,8 @@ namespace Engine {
 		// into FatalError(OutOfMemory) (§8.14 item 7).
 		[[nodiscard]] static Result<Scope<SceneRendererPipelines>> Create(GraphicsDevice& device, PipelineFactory& pipelines);
 
-		// Creates the DebugViewPipelineCount forward variants of `view`, specialized with it, unless they exist (Lit's are the
+		// For M8 material views creates DebugViewPipelineCount forward variants; M9 data views ensure their dedicated
+		// pass resources instead (ADR0017, integration). Variants are specialized with view unless they exist (Lit's are the
 		// startup pipelines: no effect); logs the new pipeline count at Info. SceneRenderer::Render calls it the first time a
 		// snapshot asks for a view, and a host may call it ahead of time. Errors: InvalidArgument for a view this build has no
 		// pipelines for (not below RenderDebugViewCount); those of PipelineFactory, where a Gpu error is an out-of-memory
@@ -144,8 +151,8 @@ namespace Engine {
 		// call tries again.
 		[[nodiscard]] Status EnsureDebugView(RenderDebugView view);
 
-		// The number of pipelines created so far: StartupPipelineCount after Create, plus DebugViewPipelineCount for each
-		// non-Lit debug view created since by EnsureDebugView (§8.5's logged and tested count).
+		// Actual pipelines created so far: startup plus each lazily created family, counted once. The M8 scaffold uses
+		// DebugViewPipelineCount per material view; M9 dedicated pass counts land with their manifest and reflection tests.
 		[[nodiscard]] uint32_t GetPipelineCount() const;
 
 		// The layout description of every pipeline Create makes, its passes' included, with the BloomPass pipelines for
@@ -214,6 +221,35 @@ namespace Engine {
 		[[nodiscard]] uint32_t GetWidth() const;
 		[[nodiscard]] uint32_t GetHeight() const;
 		[[nodiscard]] const SceneRenderStats& GetLastStats() const;
+
+		// M9: borrowed R32_UINT target of the last view with Flags::Picking, otherwise null. Valid until Resize/destruction.
+		// Transparent geometry and text do not write EntityId; Opaque/Mask use the same discard and cull rules as depth.
+		[[nodiscard]] nvrhi::ITexture* GetEntityIdTexture() const;
+		// Monotonic, nonzero; increments after actual resize or CancelPicks, never wraps/reuses a generation.
+		// Host calls CancelPicks on camera change, scene replacement, play target switch and hidden/minimized transition.
+		// M10 image.Generation is exactly this value; options that change visible geometry also invalidate it.
+		[[nodiscard]] uint64_t GetViewGeneration() const;
+		// UI drawing only queues an owned click. Application::OnRenderSubmitted(frameIndex, submissionId) first calls
+		// OnSubmitted on each view recorded in that frame, then drains matching clicks before any Render/Resize.
+		// Uses that submitted image's copied PickTable, FrameIndex, SceneRevision and generation, not a newer camera/table.
+		// InvalidState before a submitted picking render (including a newer recorded-but-unsubmitted Render); Conflict
+		// when request FrameIndex/SceneRevision/ViewGeneration differs from that image. A rejected stale miss never clears
+		// selection. Other errors follow AsyncPicker::Request. Pixel coordinates are framebuffer
+		// pixels, not logical ImGui coordinates. The UI suppresses requests while ImGuizmo is hovered/active.
+		[[nodiscard]] Result<PickTicket> RequestPick(const PickRequest& request);
+		[[nodiscard]] Result<std::optional<PickResult>> PollPick(PickTicket ticket, uint64_t currentFrameIndex);
+		void CancelPicks();
+		// Copy of this view's counters/timings, never a shared last-render value. Screenshot renderer owns separate history.
+		[[nodiscard]] RenderStats GetRenderStats() const;
+		// After the host submits the command list containing this view's Render, stamp this view's RenderTargetPool and
+		// profiling frame with its actual submission. Main thread; nonzero submissionId belongs to this device (asserted).
+		// Called for each rendered view, including ViewportCapture's private renderer, before another Render/Resize.
+		// Does not wait. Required even for a no-camera clear, which NVRHI may not retain as a texture reference.
+		// With pending recorded work, frameIndex must equal snapshot.FrameIndex (asserted); stamp once per Render, including
+		// partial/error renders. Without pending work, no-op, so hosts can notify after an attempt that failed before recording.
+		// Skipped frames receive no notification. Captures notify directly.
+		// The application pacer covers GetLastSubmissionID AFTER its hook drains pick-copy submissions.
+		void OnSubmitted(uint64_t frameIndex, uint64_t submissionId);
 	private:
 		// The back-references (the shared pipelines among them), the targets, the per-view and material buffers and the
 		// stats (SceneRenderer.cpp).
