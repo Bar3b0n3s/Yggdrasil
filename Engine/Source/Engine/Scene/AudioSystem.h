@@ -105,13 +105,18 @@ namespace Engine {
 	// destroyed (the destroy flush, §5.7 step 8, through the destroy signal) and by the entity becoming effectively
 	// disabled (a PlayOnStart source starts again when it is enabled again). Every Update applies the component's fields to
 	// its voice (Volume, Pitch, Loop, Spatial, MinDistance, MaxDistance, Attenuation, Rolloff, DopplerFactor, Group; a
-	// changed Clip restarts a playing voice with the new clip) and, for spatial sources, the entity's world position, its
-	// forward axis (-Z, §5.2) as direction and its velocity from the world-position delta over the frame's delta (0 for a
-	// zero delta and on the first frame). Clips load through the asset manager and are registered with the engine once per
-	// (handle, version) (MakeAudioClipSource); they are unregistered when the system is destroyed.
+	// changed Clip restarts a playing voice with the new clip) and, for spatial sources, the entity's pose as it is drawn:
+	// the position and forward axis (-Z, §5.2) of its rendered world matrix at the scene's interpolation alpha
+	// (ComputeRenderedWorldMatrix; the current world matrix at alpha 1), and its velocity from that position's delta over
+	// the frame's delta, so a body that physics moves in fixed steps is heard at its speed on every frame whatever the
+	// number of steps the frame ran. The velocity is 0 for a zero delta, on the first frame, on the frame the pose stops
+	// interpolating (the entity or an ancestor gained InterpolationResetTag: teleported, created or enabled, or first
+	// written outside the fixed steps; a pose written outside them on every frame keeps its velocity) and for a move at or
+	// above the speed of sound in one frame (a jump). Clips load through the asset manager and are registered with the
+	// engine once per (handle, version) (MakeAudioClipSource); they are unregistered when the system is destroyed.
 	//
-	// Listener. Every Update sets the engine's listener from SelectAudioListener: the entity's world position, forward (-Z)
-	// and up (+Y) axes and velocity, or the origin pose for AudioListenerSource::None.
+	// Listener. Every Update sets the engine's listener from SelectAudioListener: the entity's rendered position, forward
+	// (-Z) and up (+Y) axes and velocity, by the rules of the sources, or the origin pose for AudioListenerSource::None.
 	//
 	// One-shots (§11.5 Audio.PlayOneShot). Non-spatial without a position, spatial at the position (default
 	// AudioSpatialization) otherwise; group Sfx unless one is given; priority AudioSystemEffectPriority; released when they end.

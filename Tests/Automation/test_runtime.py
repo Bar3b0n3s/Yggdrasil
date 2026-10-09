@@ -1,7 +1,8 @@
 """The Runtime executable and exported games (Docs/Architecture.md §14.1, §14.3, §13.5 "Runtime subset", §13.9; Roadmap
 M7 acceptance): the manifest's name for the user-data folder, headless runs that log no error, the missing-manifest exit
-code, the automation subset served by an exported build, and the physics an exported game simulates (§9, Roadmap M11),
-read through that subset's physics.bodyInfo.
+code, the automation subset served by an exported build, the physics an exported game simulates (§9, Roadmap M11), read
+through that subset's physics.bodyInfo, and the voices an exported game holds, read through audio.stats (§10, Roadmap
+M12).
 
 The exports come from project.export and the games run a play session rendered by the scene renderer
 (Docs/Decisions/0012-m7-decisions.md decisions 10 and 12). test_runtime_missing_manifest_exits_3 needs only the Runtime.

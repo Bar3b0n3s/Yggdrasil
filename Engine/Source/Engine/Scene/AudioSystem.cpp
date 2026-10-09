@@ -12,7 +12,6 @@
 #include "Engine/Scene/Private/AudioSourceRuntime.h"
 #include "Engine/Scene/RenderExtraction.h"
 #include "Engine/Scene/Scene.h"
-#include "Engine/Scene/TransformSystem.h"
 
 #include <algorithm>
 #include <array>
@@ -63,13 +62,37 @@ namespace Engine {
 			return !entity.HasComponent<HierarchyDisabledTag>();
 		}
 
-		// The world matrix the frame phase computed (TransformSystem::Update runs before AudioSystem::Update, §5.7), or the
-		// chain walk for an entity the last TransformSystem::Update did not see yet.
-		static glm::mat4 GetWorldMatrix(ConstEntity entity)
+		// Where the entity is heard: its rendered world matrix at the scene's interpolation alpha (ComputeRenderedWorldMatrix,
+		// §5.2), over the world matrices the frame phase computed (TransformSystem::Update runs before AudioSystem::Update,
+		// §5.7; the chain walk for an entity it did not see yet). Physics and FixedUpdate scripts move entities only inside
+		// the fixed steps, of which a frame runs 0 to MaxStepsPerFrame; the rendered pose moves with the frame's time, so a
+		// body at a constant speed is heard at that speed on every frame, where it is drawn. Outside the frame phase (Start,
+		// the AudioSource methods called from the fixed step) and outside play the alpha is 1: the current world matrix.
+		static glm::mat4 GetHeardWorldMatrix(ConstEntity entity)
 		{
-			if (const WorldTransformComponent* world = entity.TryGetComponent<WorldTransformComponent>())
-				return world->Matrix;
-			return TransformSystem::ComputeWorldMatrix(entity);
+			return ComputeRenderedWorldMatrix(entity, entity.GetScene()->GetInterpolationAlpha());
+		}
+
+		// Whether the entity or an ancestor has InterpolationResetTag (§5.2): its rendered pose is its current world pose this
+		// frame, because it was teleported, created or enabled since the last fixed step, or written outside the fixed steps.
+		static bool HasInterpolationReset(ConstEntity entity)
+		{
+			for (ConstEntity current = entity; current.IsValid(); current = current.GetParent())
+			{
+				if (current.HasComponent<InterpolationResetTag>())
+					return true;
+			}
+			return false;
+		}
+
+		// Whether a pose sampled now (`reset`: HasInterpolationReset) continues the one sampled last (`hadPosition`,
+		// `wasReset`) as motion. A pose that stops interpolating jumped to the entity's current pose (a teleport, a respawn, a
+		// write at the automation safe point): measured across that jump, its Doppler shift would chirp every voice for a
+		// frame. A pose that stays reset is being written outside the fixed steps on every frame (a camera that follows a
+		// body in a script's OnLateUpdate, a mover in OnUpdate), which is motion.
+		static bool ContinuesPose(bool hadPosition, bool wasReset, bool reset)
+		{
+			return hadPosition && (!reset || wasReset);
 		}
 
 		// `axis` normalized, or `fallback` for a zero or non-finite axis (a degenerate world matrix written by a runtime system).
@@ -87,10 +110,11 @@ namespace Engine {
 			return NormalizeOr(-glm::vec3(world[2]), glm::vec3(0.0f, 0.0f, -1.0f));
 		}
 
-		// The velocity of a world position that moved from `previous` over `deltaSeconds`; zero without a previous position
-		// or for a zero delta (§10.2: "velocity from the transform delta"), and zero for a move at or above the speed of
-		// sound, which is a jump (a teleport, a respawn, a camera cut) rather than motion: its Doppler shift would chirp
-		// every voice for a frame.
+		// The velocity of a rendered world position that moved from `previous` over `deltaSeconds`; zero without a previous
+		// position (see ContinuesPose) or for a zero delta (§10.2: "velocity from the transform delta"), and zero for a move
+		// at or above the speed of sound, which is a jump rather than motion (a camera cut or a respawn that ContinuesPose
+		// cannot tell: an entity written outside the fixed steps on every frame, or one teleported in a fixed step followed
+		// by another in the same frame): its Doppler shift would chirp every voice for a frame.
 		static glm::vec3 ComputeVelocity(const glm::vec3& position, const glm::vec3& previous, bool hasPrevious, double deltaSeconds)
 		{
 			if (!hasPrevious || deltaSeconds <= 0.0)
@@ -145,10 +169,12 @@ namespace Engine {
 		AudioEngine* Audio = nullptr;   // documented back-reference
 		AssetManager* Assets = nullptr; // documented back-reference, may be null
 		AudioListenerSelection Listener{};
-		// The listener entity of the last Start or Update and its world position, for the listener's velocity.
+		// The listener entity of the last Start or Update, its rendered world position and whether that pose was reset
+		// (Utils::ContinuesPose), for the listener's velocity.
 		UUID ListenerEntity{};
 		glm::vec3 ListenerPosition{ 0.0f };
 		bool HasListenerPosition = false;
+		bool ListenerPoseReset = false;
 		// The clips this system registered with the engine, by (handle, version); each holds one registration reference,
 		// dropped when the system is destroyed.
 		std::map<std::pair<AssetHandle, uint64_t>, AudioClipHandle> Clips;
@@ -310,14 +336,18 @@ namespace Engine {
 		}
 		else
 		{
-			const glm::mat4 world = Utils::GetWorldMatrix(TargetScene->FindEntityByID(Listener.Entity));
+			const ConstEntity entity = TargetScene->FindEntityByID(Listener.Entity);
+			const glm::mat4 world = Utils::GetHeardWorldMatrix(entity);
+			const bool reset = Utils::HasInterpolationReset(entity);
 			pose.Position = glm::vec3(world[3]);
 			pose.Forward = Utils::GetWorldForward(world);
 			pose.Up = Utils::NormalizeOr(glm::vec3(world[1]), glm::vec3(0.0f, 1.0f, 0.0f));
-			pose.Velocity = Utils::ComputeVelocity(pose.Position, ListenerPosition, HasListenerPosition && ListenerEntity == Listener.Entity, deltaSeconds);
+			const bool continues = Utils::ContinuesPose(HasListenerPosition && ListenerEntity == Listener.Entity, ListenerPoseReset, reset);
+			pose.Velocity = Utils::ComputeVelocity(pose.Position, ListenerPosition, continues, deltaSeconds);
 			ListenerEntity = Listener.Entity;
 			ListenerPosition = pose.Position;
 			HasListenerPosition = Utils::IsFiniteVector(pose.Position);
+			ListenerPoseReset = reset;
 		}
 		if (const Status set = Audio->SetListener(pose); !set)
 		{
@@ -347,12 +377,15 @@ namespace Engine {
 			return;
 		}
 
-		const glm::mat4 world = Utils::GetWorldMatrix(entity);
+		const glm::mat4 world = Utils::GetHeardWorldMatrix(entity);
 		const glm::vec3 position(world[3]);
 		const bool finitePosition = Utils::IsFiniteVector(position);
-		const glm::vec3 velocity = finitePosition ? Utils::ComputeVelocity(position, runtime.Position, runtime.HasPosition, deltaSeconds) : glm::vec3(0.0f);
+		const bool reset = Utils::HasInterpolationReset(entity);
+		const bool continues = Utils::ContinuesPose(runtime.HasPosition, runtime.PoseReset, reset);
+		const glm::vec3 velocity = finitePosition ? Utils::ComputeVelocity(position, runtime.Position, continues, deltaSeconds) : glm::vec3(0.0f);
 		runtime.Position = finitePosition ? position : runtime.Position;
 		runtime.HasPosition = runtime.HasPosition || finitePosition;
+		runtime.PoseReset = reset;
 		const AudioVoiceTransform transform = MakeSourceTransform(world, velocity);
 
 		// A new source, or one whose entity was enabled again: PlayOnStart starts it. A changed Clip restarts a playing voice.
@@ -551,9 +584,10 @@ namespace Engine {
 			runtime.Enabled = Utils::IsEffectivelyEnabled(entity);
 			if (!runtime.Enabled)
 				return;
-			const glm::mat4 world = Utils::GetWorldMatrix(entity);
+			const glm::mat4 world = Utils::GetHeardWorldMatrix(entity);
 			runtime.Position = glm::vec3(world[3]);
 			runtime.HasPosition = Utils::IsFiniteVector(runtime.Position);
+			runtime.PoseReset = Utils::HasInterpolationReset(entity);
 			if (!source->PlayOnStart)
 				return;
 			if (const Status started = state.StartSourceVoice(entity, *source, runtime, State::MakeSourceTransform(world, glm::vec3(0.0f))); !started)
@@ -613,11 +647,12 @@ namespace Engine {
 		AudioSourceRuntime& runtime = state.GetRuntime(entity);
 		runtime.Paused = false;
 		runtime.Enabled = true;
-		const glm::mat4 world = Utils::GetWorldMatrix(entity);
+		const glm::mat4 world = Utils::GetHeardWorldMatrix(entity);
 		if (!runtime.HasPosition)
 		{
 			runtime.Position = glm::vec3(world[3]);
 			runtime.HasPosition = Utils::IsFiniteVector(runtime.Position);
+			runtime.PoseReset = Utils::HasInterpolationReset(entity);
 		}
 		return state.StartSourceVoice(entity, *source, runtime, State::MakeSourceTransform(world, glm::vec3(0.0f)));
 	}

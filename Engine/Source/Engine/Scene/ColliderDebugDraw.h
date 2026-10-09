@@ -24,7 +24,7 @@
 // RenderViewFlags, arrive with M9 and M10; Docs/Decisions/0016-m8-m11-m12-integration.md decision 3).
 //
 // Frozen by the M11 contract (Docs/Decisions/0014-m11-decisions.md decision 16); the integration of M8 and M11 added
-// AppendColliderDebugDraw (decision 16's adapter).
+// AppendColliderDebugDraw (decision 16's adapter) and ColliderDebugDrawOptions::Alpha.
 
 namespace Engine {
 
@@ -105,6 +105,13 @@ namespace Engine {
 		bool Characters = true;
 		// A mesh collider with more distinct triangle edges than this draws its local bounding box (a Box record) instead.
 		uint32_t MaxMeshEdges = 65536;
+		// The interpolation alpha of the view the records are drawn in, in [0, 1] (asserted): its snapshot's Alpha
+		// (RenderSnapshot::Alpha; PlaySession::GetViewAlpha for the play view). In a runtime scene below 1, every record sits
+		// at its entity's rendered pose (ComputeRenderedWorldMatrix, §5.2, over the WorldTransformComponents as the view's
+		// extraction refreshed them), where the view's meshes are drawn, so the wireframe of a body that moves in fixed steps
+		// stays on its mesh between steps; at 1 (edit scenes, lockstep, ManualClock frames) at its world pose
+		// (Docs/Decisions/0016-m8-m11-m12-integration.md decision 3).
+		float Alpha = 1.0f;
 	};
 
 	// The wire shapes of `scene`'s colliders: one record per collider of every body ComposePhysicsBodies(scene, layers)
@@ -115,7 +122,8 @@ namespace Engine {
 	// apart, and a body the session did not create is Invalid; without it, each body's shape is built as the session builds
 	// it (DescribePhysicsBodyShape, PhysicsShape::Create, PhysicsShape::CheckDynamicBody; needs the PhysicsEngine) and a body
 	// it refuses is Invalid. Poses are the entities' world poses (walking the parent chain), which equal the bodies' after
-	// PostStep. Main thread; a pure function of its inputs.
+	// PostStep, or their rendered poses in a runtime scene at an options.Alpha below 1 (ColliderDebugDrawOptions::Alpha).
+	// Main thread; a pure function of its inputs.
 	[[nodiscard]] std::vector<ColliderDebugShape> BuildColliderDebugDraw(const Scene& scene, const PhysicsLayerTable& layers, const PhysicsSystem* physics,
 		AssetManager* assets, const ColliderDebugDrawOptions& options = {});
 

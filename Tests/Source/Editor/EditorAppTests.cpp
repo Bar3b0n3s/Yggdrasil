@@ -248,7 +248,7 @@ namespace Engine {
 			REQUIRE(files->size() == 2);
 			CHECK(((*files)[0].extension() == ".bin" && (*files)[1].extension() == ".import"));
 
-			// A second run finds both entries up to date and bakes nothing.
+			// A second run finds all twelve entries up to date and bakes nothing.
 			const Result<ProcessResult> second =
 				RunEditor(userData, { "--headless", "--renderer", "none", "--bake-engine-assets" }, std::chrono::seconds(180));
 			REQUIRE_MESSAGE(second.has_value(), second.error().ToString());

@@ -18,6 +18,7 @@
 #include "Engine/Scene/PhysicsComposition.h"
 #include "Engine/Scene/PhysicsSystem.h"
 #include "Engine/Scene/Private/PhysicsBodySettings.h"
+#include "Engine/Scene/RenderExtraction.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/TransformSystem.h"
 
@@ -26,15 +27,17 @@
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <cmath>
 #include <optional>
 #include <tuple>
 #include <utility>
 
 // The collider visualization (Docs/Decisions/0014-m11-decisions.md decision 16): the composition decides which bodies
-// exist and which colliders each holds, the components give the shapes, and each collider's world matrix gives its frame,
-// so the records show what DescribePhysicsBodyShape bakes into the bodies (scale along the collider's axes, the largest
-// component for spheres and capsules). A body the composition accepts but the session refuses is Invalid too: in play,
-// one the session has not created; in edit, one whose shape cannot be built as the session builds it.
+// exist and which colliders each holds, the components give the shapes, and each collider's world matrix (its rendered one
+// in a play view between steps, Docs/Decisions/0016-m8-m11-m12-integration.md decision 3) gives its frame, so the records
+// show what DescribePhysicsBodyShape bakes into the bodies (scale along the collider's axes, the largest component for
+// spheres and capsules). A body the composition accepts but the session refuses is Invalid too: in play, one the session
+// has not created; in edit, one whose shape cannot be built as the session builds it.
 
 namespace Engine {
 
@@ -53,15 +56,25 @@ namespace Engine {
 
 	namespace Utils {
 
-		// The frame of a collider whose Offset and Rotation are given in its entity's space; nullopt when the matrix does not
-		// decompose (a scale product below the transform minimum), in which case the body is refused too
+		// The world matrix an entity's records are drawn at (ColliderDebugDrawOptions::Alpha): in a runtime scene below alpha
+		// 1, its rendered pose (ComputeRenderedWorldMatrix over its WorldTransformComponent, §5.2), where the view's meshes
+		// are extracted; otherwise its world matrix, walking the parent chain.
+		static glm::mat4 GetDrawnWorldMatrix(ConstEntity entity, float alpha)
+		{
+			if (alpha < 1.0f && entity.GetScene()->IsRuntime())
+				return ComputeRenderedWorldMatrix(entity, alpha);
+			return TransformSystem::ComputeWorldMatrix(entity);
+		}
+
+		// The frame of a collider whose Offset and Rotation are given in its entity's space, drawn at `alpha`; nullopt when
+		// the matrix does not decompose (a scale product below the transform minimum), in which case the body is refused too
 		// (DescribePhysicsBodyShape reports PHYSICS_INVALID_SHAPE) and nothing is drawn.
-		static std::optional<ColliderFrame> ComputeColliderFrame(ConstEntity entity, const glm::vec3& offset, const glm::quat& rotation)
+		static std::optional<ColliderFrame> ComputeColliderFrame(ConstEntity entity, const glm::vec3& offset, const glm::quat& rotation, float alpha)
 		{
 			glm::mat4 local = glm::mat4_cast(rotation);
 			local[3] = glm::vec4(offset, 1.0f);
 			ColliderFrame frame;
-			frame.Matrix = TransformSystem::ComputeWorldMatrix(entity) * local;
+			frame.Matrix = GetDrawnWorldMatrix(entity, alpha) * local;
 			const Result<TransformDecomposition> decomposed = TransformSystem::DecomposeMatrix(frame.Matrix);
 			if (!decomposed)
 				return std::nullopt;
@@ -224,7 +237,7 @@ namespace Engine {
 			}
 			if (!handle.IsValid() || assets == nullptr)
 				return std::nullopt;
-			const std::optional<ColliderFrame> frame = ComputeColliderFrame(entity, glm::vec3(0.0f), glm::quat(1.0f, 0.0f, 0.0f, 0.0f));
+			const std::optional<ColliderFrame> frame = ComputeColliderFrame(entity, glm::vec3(0.0f), glm::quat(1.0f, 0.0f, 0.0f, 0.0f), options.Alpha);
 			if (!frame.has_value())
 				return std::nullopt;
 
@@ -263,7 +276,7 @@ namespace Engine {
 				case PhysicsColliderType::Box:
 				{
 					const BoxColliderComponent* box = entity.TryGetComponent<BoxColliderComponent>();
-					const std::optional<ColliderFrame> frame = box != nullptr ? ComputeColliderFrame(entity, box->Offset, box->Rotation) : std::nullopt;
+					const std::optional<ColliderFrame> frame = box != nullptr ? ComputeColliderFrame(entity, box->Offset, box->Rotation, options.Alpha) : std::nullopt;
 					if (!frame.has_value())
 						return std::nullopt;
 					ColliderDebugShape shape = MakeShape(ColliderDebugShapeType::Box, category, collider.Entity, body);
@@ -275,7 +288,7 @@ namespace Engine {
 				{
 					const SphereColliderComponent* sphere = entity.TryGetComponent<SphereColliderComponent>();
 					const std::optional<ColliderFrame> frame = sphere != nullptr
-						? ComputeColliderFrame(entity, sphere->Offset, glm::quat(1.0f, 0.0f, 0.0f, 0.0f))
+						? ComputeColliderFrame(entity, sphere->Offset, glm::quat(1.0f, 0.0f, 0.0f, 0.0f), options.Alpha)
 						: std::nullopt;
 					if (!frame.has_value())
 						return std::nullopt;
@@ -287,7 +300,8 @@ namespace Engine {
 				case PhysicsColliderType::Capsule:
 				{
 					const CapsuleColliderComponent* capsule = entity.TryGetComponent<CapsuleColliderComponent>();
-					const std::optional<ColliderFrame> frame = capsule != nullptr ? ComputeColliderFrame(entity, capsule->Offset, capsule->Rotation) : std::nullopt;
+					const std::optional<ColliderFrame> frame =
+						capsule != nullptr ? ComputeColliderFrame(entity, capsule->Offset, capsule->Rotation, options.Alpha) : std::nullopt;
 					if (!frame.has_value())
 						return std::nullopt;
 					ColliderDebugShape shape = MakeShape(ColliderDebugShapeType::Capsule, category, collider.Entity, body);
@@ -310,9 +324,9 @@ namespace Engine {
 			return std::nullopt;
 		}
 
-		// A character's capsule (§9.6): upright, its base at the entity's world position (the capsule's bottom), in metres
-		// (the controller's size takes no scale), and symmetric about the up axis, so only the base matters.
-		static std::optional<ColliderDebugShape> MakeCharacterShape(const Scene& scene, const PhysicsBodyPlan& plan, ColliderDebugCategory category)
+		// A character's capsule (§9.6): upright, its base at the entity's world position drawn at `alpha` (the capsule's
+		// bottom), in metres (the controller's size takes no scale), and symmetric about the up axis, so only the base matters.
+		static std::optional<ColliderDebugShape> MakeCharacterShape(const Scene& scene, const PhysicsBodyPlan& plan, ColliderDebugCategory category, float alpha)
 		{
 			const ConstEntity entity = scene.FindEntityByID(plan.Owner);
 			if (!entity.IsValid())
@@ -321,7 +335,7 @@ namespace Engine {
 			if (controller == nullptr)
 				return std::nullopt;
 			ColliderDebugShape shape = MakeShape(ColliderDebugShapeType::Capsule, category, plan.Owner, plan.Owner);
-			shape.Position = TransformSystem::GetWorldPosition(entity) + glm::vec3(0.0f, controller->Height * 0.5f, 0.0f);
+			shape.Position = glm::vec3(GetDrawnWorldMatrix(entity, alpha)[3]) + glm::vec3(0.0f, controller->Height * 0.5f, 0.0f);
 			shape.Radius = controller->Radius;
 			// A controller without a cylinder (Height <= 2 * Radius, PHYSICS_INVALID_SHAPE, drawn Invalid) draws its sphere.
 			shape.HalfHeight = std::max(controller->Height * 0.5f - controller->Radius, 0.0f);
@@ -333,6 +347,8 @@ namespace Engine {
 	std::vector<ColliderDebugShape> BuildColliderDebugDraw(const Scene& scene, const PhysicsLayerTable& layers, const PhysicsSystem* physics,
 		AssetManager* assets, const ColliderDebugDrawOptions& options)
 	{
+		ENGINE_CORE_ASSERT(std::isfinite(options.Alpha) && options.Alpha >= 0.0f && options.Alpha <= 1.0f,
+			"BuildColliderDebugDraw needs an alpha in [0, 1], got {}", options.Alpha);
 		const PhysicsComposition composition = ComposePhysicsBodies(scene, layers);
 		std::vector<ColliderDebugShape> shapes;
 		for (const PhysicsBodyPlan& plan : composition.Bodies)
@@ -344,7 +360,7 @@ namespace Engine {
 			{
 				if (!options.Characters)
 					continue;
-				if (std::optional<ColliderDebugShape> shape = Utils::MakeCharacterShape(scene, plan, category))
+				if (std::optional<ColliderDebugShape> shape = Utils::MakeCharacterShape(scene, plan, category, options.Alpha))
 					shapes.push_back(std::move(*shape));
 				continue;
 			}

@@ -11,6 +11,7 @@
 #include "Engine/Scene/Components/AudioListenerComponent.h"
 #include "Engine/Scene/Components/AudioSourceComponent.h"
 #include "Engine/Scene/Components/CameraComponent.h"
+#include "Engine/Scene/Components/RuntimeComponents.h"
 #include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/Scene.h"
@@ -600,6 +601,88 @@ namespace Engine {
 			listener.GetComponent<TransformComponent>().Translation = glm::vec3(0.0f, 0.0f, 101.0f);
 			fixture.Frame(system);
 			CHECK(fixture.GetEngine().GetListener().Velocity.z == doctest::Approx(60.0f));
+		}
+
+		TEST_CASE("AudioSystem: a spatial source is heard at its rendered pose and that pose's velocity")
+		{
+			// Physics and FixedUpdate scripts move entities only inside fixed steps, of which a frame runs 0 to
+			// MaxStepsPerFrame: the world pose of a moving body stands still on some frames and jumps on others. The rendered
+			// pose (§5.2) moves with the frame's time, so the voice is heard where the body is drawn and at its speed
+			// (Docs/Decisions/0016-m8-m11-m12-integration.md decision 8).
+			AudioSceneFixture fixture;
+			Scene& scene = fixture.GetScene();
+			const AssetHandle clip = fixture.AddToneClip(0xa001);
+			fixture.AddListener();
+			Entity source = fixture.AddSource("Body", clip, glm::vec3(0.0f));
+			TransformSystem::Update(scene);
+			AudioSystem system(scene, fixture.GetSpecification());
+			system.Start();
+
+			// A fixed step moved the body from x = 0 (the interpolation snapshot's previous pose) to x = 1; the frame's alpha
+			// is 0.25, so it is drawn at x = 0.25, a quarter metre on in 1/60 s.
+			source.AddComponent<PreviousWorldTransformComponent>(PreviousWorldTransformComponent{ .Matrix = glm::mat4(1.0f) });
+			source.GetComponent<TransformComponent>().Translation = glm::vec3(1.0f, 0.0f, 0.0f);
+			scene.SetInterpolationAlpha(0.25f);
+			fixture.Frame(system);
+			AudioVoiceInfo voice = fixture.GetEngine().GetVoices().front();
+			CHECK(voice.Transform.Position.x == doctest::Approx(0.25f));
+			CHECK(voice.Transform.Velocity.x == doctest::Approx(15.0f));
+			// The next frame runs no step: the world pose stands still and the drawn one moves on by another quarter metre.
+			scene.SetInterpolationAlpha(0.5f);
+			fixture.Frame(system);
+			voice = fixture.GetEngine().GetVoices().front();
+			CHECK(voice.Transform.Position.x == doctest::Approx(0.5f));
+			CHECK(voice.Transform.Velocity.x == doctest::Approx(15.0f));
+
+			// Teleported (InterpolationResetTag, PlaySession::MarkTeleported): drawn and heard at its current pose, with no
+			// velocity, although 2.5 m in 1/60 s is slower than sound.
+			source.GetComponent<TransformComponent>().Translation = glm::vec3(3.0f, 0.0f, 0.0f);
+			source.AddComponent<InterpolationResetTag>();
+			fixture.Frame(system);
+			voice = fixture.GetEngine().GetVoices().front();
+			CHECK(voice.Transform.Position.x == doctest::Approx(3.0f));
+			CHECK(voice.Transform.Velocity == glm::vec3(0.0f));
+			// Written outside the fixed steps on the next frame as well (a script's OnUpdate): a pose that stays reset moves.
+			source.GetComponent<TransformComponent>().Translation = glm::vec3(3.5f, 0.0f, 0.0f);
+			fixture.Frame(system);
+			voice = fixture.GetEngine().GetVoices().front();
+			CHECK(voice.Transform.Position.x == doctest::Approx(3.5f));
+			CHECK(voice.Transform.Velocity.x == doctest::Approx(30.0f));
+		}
+
+		TEST_CASE("AudioSystem: the listener is heard from its rendered pose, and its ancestor's teleport stops its velocity")
+		{
+			AudioSceneFixture fixture;
+			Scene& scene = fixture.GetScene();
+			Entity rig = scene.CreateEntity("Rig");
+			Entity ear = scene.CreateEntity("Ear", rig);
+			ear.AddComponent<AudioListenerComponent>(AudioListenerComponent{ .Primary = true });
+			TransformSystem::Update(scene);
+			AudioSystem system(scene, fixture.GetSpecification());
+			system.Start();
+
+			// A fixed step moved the rig from z = 0 to z = 2; at alpha 0.5 the ear is drawn at z = 1, a metre on in 1/60 s.
+			rig.AddComponent<PreviousWorldTransformComponent>(PreviousWorldTransformComponent{ .Matrix = glm::mat4(1.0f) });
+			ear.AddComponent<PreviousWorldTransformComponent>(PreviousWorldTransformComponent{ .Matrix = glm::mat4(1.0f) });
+			rig.GetComponent<TransformComponent>().Translation = glm::vec3(0.0f, 0.0f, 2.0f);
+			scene.SetInterpolationAlpha(0.5f);
+			fixture.Frame(system);
+			AudioListenerPose pose = fixture.GetEngine().GetListener();
+			CHECK(pose.Position.z == doctest::Approx(1.0f));
+			CHECK(pose.Velocity.z == doctest::Approx(60.0f));
+			scene.SetInterpolationAlpha(0.75f);
+			fixture.Frame(system);
+			pose = fixture.GetEngine().GetListener();
+			CHECK(pose.Position.z == doctest::Approx(1.5f));
+			CHECK(pose.Velocity.z == doctest::Approx(30.0f));
+
+			// The rig is teleported 2.5 m on: the ear's pose stops interpolating with its ancestor's and has no velocity.
+			rig.GetComponent<TransformComponent>().Translation = glm::vec3(0.0f, 0.0f, 4.0f);
+			rig.AddComponent<InterpolationResetTag>();
+			fixture.Frame(system);
+			pose = fixture.GetEngine().GetListener();
+			CHECK(pose.Position.z == doctest::Approx(4.0f));
+			CHECK(pose.Velocity == glm::vec3(0.0f));
 		}
 
 		TEST_CASE("AudioSystem: destroying the system releases every voice and clip")

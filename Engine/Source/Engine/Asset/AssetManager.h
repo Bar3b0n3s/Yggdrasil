@@ -65,8 +65,8 @@ namespace Engine {
 		// cooking first when the cache has no valid entry, §7.2 "One load path"). A procedural built-in is served directly.
 		// Errors: InvalidArgument for the null handle or a dependency's handle (§6.4: never loaded on its own); NotFound for
 		// an unknown handle; ImportFailed, Parse, Validation, UnsupportedVersion or Io from the import, the cache or the
-		// loader; Unsupported for a type without a loader in this build (M8, M12, M13 types). Each error names the handle and
-		// its path.
+		// loader; Unsupported for a type without a loader in this build (the script and replay types until M13). Each error
+		// names the handle and its path.
 		//
 		// Failures are remembered, so repeated calls (GetOrPlaceholder from renderer lookups, a batch of prefab.instantiate
 		// ops) never import a broken source again and again: when a previous version is loaded, a failed reimport keeps it in

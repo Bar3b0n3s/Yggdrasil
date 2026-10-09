@@ -4,22 +4,31 @@
 
 #include "Engine/Asset/BuiltinAssets.h"
 #include "Engine/Audio/AudioEngine.h"
+#include "Engine/Core/FixedStepScheduler.h"
 #include "Engine/Core/Time.h"
 #include "Engine/Core/VirtualFileSystem.h"
 #include "Engine/Scene/AudioSystem.h"
 #include "Engine/Scene/Components/AudioListenerComponent.h"
 #include "Engine/Scene/Components/AudioSourceComponent.h"
+#include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Entity.h"
+#include "Engine/Scene/RenderExtraction.h"
 #include "Engine/Scene/Scene.h"
+#include "Engine/Scene/TransformSystem.h"
+#include "Support/GlmApprox.h"
+#include "Support/PhysicsTestScene.h"
 #include "Support/SceneTestFixture.h"
 
+#include <cstdint>
 #include <utility>
 #include <vector>
 
 // The play session's audio hook (Architecture §5.6, §5.7 frame phase step 3, §10.1 time ownership, §10.2 pause and stop;
 // Docs/Decisions/0015-m12-decisions.md decision 13). Every test but the first runs a device-less AudioEngine with
 // deterministic decoding. The sources play the built-in silent clip (looping, so the voices live across many ticks); the
-// session has no asset manager, so AudioSystem plays the silent clip for every clip without loading anything.
+// session has no asset manager, so AudioSystem plays the silent clip for every clip without loading anything. The last
+// test hears a physics body (Support/PhysicsTestScene) at its rendered pose through SystemClock-like frames
+// (Docs/Decisions/0016-m8-m11-m12-integration.md decision 8).
 
 namespace Engine {
 
@@ -78,6 +87,28 @@ namespace Engine {
 
 		// A frame phase of 1/60 s that follows no fixed step of its own (a ScriptedClock frame).
 		constexpr FrameTime SixtiethFrame{ .DeltaTime = 1.0 / 60.0, .UnscaledDeltaTime = 1.0 / 60.0, .Alpha = 0.0, .FrameIndex = 0 };
+
+		// The constant velocity of the ball that FollowCamera follows, and where the camera sits relative to it.
+		constexpr glm::vec3 BallVelocity(10.0f, 0.0f, 0.0f);
+		constexpr glm::vec3 FollowOffset(0.0f, 2.0f, 6.0f);
+
+		// Stands in for a follow camera's script (M13), as the Rolling Ball design places its camera: in every LateUpdate,
+		// "Ear" moves to the rendered position of "Ball" (Transform.RenderPosition, §11.5) plus FollowOffset.
+		class FollowCamera final : public IPlaySessionObserver
+		{
+		public:
+			void OnPhase(PlaySession& session, PlaySessionPhase phase, uint64_t /*tick*/) override
+			{
+				if (phase != PlaySessionPhase::LateUpdate)
+					return;
+				Scene& scene = session.GetScene();
+				const glm::vec3 ball = TransformSystem::GetRenderPosition(scene.FindEntityByPath("/Ball"));
+				scene.FindEntityByPath("/Ear").Patch<TransformComponent>([&ball](TransformComponent& transform)
+				{
+					transform.Translation = ball + FollowOffset;
+				});
+			}
+		};
 
 	}
 
@@ -269,6 +300,69 @@ namespace Engine {
 			session->SetPaused(false);
 			const AudioVoiceInfo resumed = GetOnlyVoice(*engine);
 			CHECK_FALSE(resumed.Paused);
+		}
+
+		TEST_CASE("PlaySession: a body that physics moves is heard at its speed on every frame, at any frame rate")
+		{
+			// Physics moves bodies only inside the fixed steps, of which a SystemClock frame runs 0 to MaxStepsPerFrame
+			// (FixedStepScheduler::Advance): at 144 Hz most frames run none and the others one, at 45 Hz each runs one or two.
+			// A ball rolls at a constant 10 m/s and a follow camera, the listener, keeps a constant offset from where the ball
+			// is drawn. Both are heard at their rendered poses, so both move at 10 m/s on every frame and the ball's sound
+			// has no Doppler shift relative to the camera (Docs/Decisions/0016-m8-m11-m12-integration.md decision 8).
+			for (const uint32_t displayHz : { 144u, 45u })
+			{
+				CAPTURE(displayHz);
+				Test::SceneTestFixture fixture;
+				Scene& edit = fixture.GetScene();
+				Entity ball = Test::AddSphereBody(edit, "Ball", glm::vec3(0.0f, 10.0f, 0.0f), 0.5f, BodyType::Dynamic);
+				Test::PatchRigidBody(ball, [](RigidBodyComponent& body)
+				{
+					body.GravityFactor = 0.0f;
+					body.LinearDamping = 0.0f;
+					body.AllowSleeping = false;
+					body.InitialLinearVelocity = BallVelocity;
+				});
+				AudioSourceComponent source;
+				source.Clip.SetHandle(BuiltinAssetHandles::SilentClip);
+				source.Loop = true;
+				source.PlayOnStart = true;
+				source.Spatial = true;
+				ball.AddComponent<AudioSourceComponent>(source);
+				Entity ear = edit.CreateEntity("Ear");
+				ear.AddComponent<AudioListenerComponent>();
+
+				VirtualFileSystem vfs;
+				const Scope<AudioEngine> engine = CreateSessionEngine(vfs);
+				FollowCamera camera;
+				PlaySessionSpecification specification = Test::MakePhysicsSessionSpecification(fixture);
+				specification.Audio = engine.get();
+				specification.Observer = &camera;
+				const Scope<PlaySession> session = StartSession(fixture, specification);
+				const Entity runtimeBall = session->GetScene().FindEntityByPath("/Ball");
+				REQUIRE(runtimeBall.IsValid());
+
+				// The host's loop (FrameLoop::RunFrameSteps) at displayHz. The first frames warm up: before the first step
+				// nothing has a previous pose, and the first frame after it starts from the pose the session was created at.
+				FixedStepScheduler scheduler(FrameLoopConfig{ .FixedHz = 60 });
+				const double delta = 1.0 / static_cast<double>(displayHz);
+				const uint32_t warmUpFrames = displayHz / 10;
+				for (uint32_t frame = 0; frame < warmUpFrames + displayHz / 2; ++frame)
+				{
+					const FrameSteps steps = scheduler.Advance(delta, 1.0);
+					for (uint32_t step = 0; step < steps.StepCount; ++step)
+						session->FixedStep();
+					session->FrameUpdate(FrameTime{ .DeltaTime = delta, .UnscaledDeltaTime = delta, .Alpha = steps.Alpha, .FrameIndex = frame });
+					if (frame < warmUpFrames)
+						continue;
+					CAPTURE(frame);
+					CAPTURE(steps.StepCount);
+					const AudioVoiceInfo voice = GetOnlyVoice(*engine);
+					const glm::vec3 drawn(ComputeRenderedWorldMatrix(runtimeBall, static_cast<float>(steps.Alpha))[3]);
+					CHECK(Test::ApproxEqual(voice.Transform.Position, drawn));
+					CHECK(Test::ApproxEqual(voice.Transform.Velocity, BallVelocity, 0.01f));
+					CHECK(Test::ApproxEqual(engine->GetListener().Velocity, BallVelocity, 0.01f));
+				}
+			}
 		}
 	}
 

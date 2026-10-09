@@ -45,8 +45,8 @@
 #include <tuple>
 
 // The validator (Architecture §13.7, ADR 0008 decision 17; the asset checks of M6, ADR 0010 decision 5; the physics checks
-// of M11, ADR 0014 decision 15). The code list and the load-code mapping (ADR 0006 decision 35) are data the contracts
-// froze.
+// of M11, ADR 0014 decision 15; the audio checks of M12, ADR 0015 decision 12; the light limit of M8, ADR 0013 decision 7).
+// The code list and the load-code mapping (ADR 0006 decision 35) are data the contracts froze.
 
 namespace Engine {
 

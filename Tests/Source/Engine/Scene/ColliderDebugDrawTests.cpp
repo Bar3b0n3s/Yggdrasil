@@ -3,6 +3,7 @@
 #include "Engine/Scene/ColliderDebugDraw.h"
 
 #include "Engine/Asset/BuiltinAssets.h"
+#include "Engine/Core/Time.h"
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Graphics/Image.h"
 #include "Engine/Physics/PhysicsTypes.h"
@@ -39,8 +40,8 @@
 // (Docs/Decisions/0014-m11-decisions.md decision 16), and, since the integration with M8, their mapping onto the debug draw
 // list and the pixels the scene renderer's debug lines draw for them. The record cases cover the colour table, the
 // categories of an edit scene (by the composition and by building each body's shape as the session would) and of a play
-// session (sleeping bodies, bodies the session refused), world frames and scaled dimensions, the options, and mesh
-// colliders.
+// session (sleeping bodies, bodies the session refused), world frames and scaled dimensions, the options, mesh colliders,
+// and a play view's records at its interpolation alpha.
 
 namespace Engine {
 
@@ -361,6 +362,48 @@ namespace Engine {
 
 			// Without an asset manager no mesh loads, so no mesh collider draws.
 			CHECK(BuildColliderDebugDraw(scene, PhysicsLayerTable(), nullptr, nullptr).empty());
+		}
+
+		TEST_CASE("ColliderDebugDraw: a play view's records sit where its meshes are drawn, at the view's alpha")
+		{
+			// Between two fixed steps a play view draws a moving body at its rendered pose (§5.2); its collider records, built at
+			// the view's alpha, sit on that mesh rather than up to a step ahead of it (Docs/Decisions/0016-m8-m11-m12-integration.md
+			// decision 3).
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			Entity ball = Test::AddSphereBody(scene, "Ball", glm::vec3(0.0f, 50.0f, 0.0f), 0.5f, BodyType::Dynamic);
+			Test::PatchRigidBody(ball, [](RigidBodyComponent& body)
+			{
+				body.GravityFactor = 0.0f;
+				body.LinearDamping = 0.0f;
+				body.InitialLinearVelocity = glm::vec3(12.0f, 0.0f, 0.0f);
+			});
+			ball.AddComponent<MeshRendererComponent>().Mesh.SetHandle(BuiltinAssetHandles::SphereMesh);
+			Result<Scope<PlaySession>> session = Test::StartPhysicsSession(fixture, Test::MakePhysicsSessionSpecification(fixture));
+			REQUIRE(session.has_value());
+			Test::RunTicks(**session, 2);
+			// A SystemClock frame a quarter of the way from this step to the next: the step moved the ball 0.2 m on.
+			constexpr float ViewAlpha = 0.25f;
+			(*session)->FixedStep();
+			(*session)->FrameUpdate(FrameTime{ .DeltaTime = 1.0 / 240.0, .UnscaledDeltaTime = 1.0 / 240.0, .Alpha = ViewAlpha, .FrameIndex = 3 });
+			const Scene& runtime = (*session)->GetScene();
+			const UUID id = Test::GetEntityId(runtime, "/Ball");
+			const std::vector<MeshDrawItem>& meshes = (*session)->GetLastExtraction().Meshes;
+			REQUIRE(meshes.size() == 1);
+			const glm::vec3 drawn(meshes[0].World[3]);
+
+			const std::vector<ColliderDebugShape> atView =
+				BuildColliderDebugDraw(runtime, PhysicsLayerTable(), &(*session)->GetPhysics(), nullptr, { .Alpha = ViewAlpha });
+			const ColliderDebugShape* sphere = FindShape(atView, id);
+			REQUIRE(sphere != nullptr);
+			CHECK(Test::ApproxEqual(sphere->Position, drawn));
+			// At alpha 1 (an edit scene's view, a lockstep or ManualClock frame) a record sits at its body's world pose, the
+			// latest step's: here three quarters of a step, 0.15 m, ahead of the drawn ball.
+			const std::vector<ColliderDebugShape> atStep = BuildColliderDebugDraw(runtime, PhysicsLayerTable(), &(*session)->GetPhysics(), nullptr);
+			const ColliderDebugShape* stepped = FindShape(atStep, id);
+			REQUIRE(stepped != nullptr);
+			CHECK(Test::ApproxEqual(stepped->Position, TransformSystem::GetWorldPosition(runtime.FindEntityByID(id))));
+			CHECK(stepped->Position.x - drawn.x == doctest::Approx(0.15f).epsilon(1.0e-3));
 		}
 
 		TEST_CASE("ColliderDebugDraw: AppendColliderDebugDraw maps each record onto the debug draw list in order")

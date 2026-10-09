@@ -30,10 +30,13 @@ namespace Engine {
 		// yet (created during play, through the construct signal), so the next Update starts it when it is PlayOnStart and
 		// enabled, exactly as it starts a PlayOnStart source whose entity is enabled again.
 		bool Enabled = false;
-		// The world position at the last Start or Update, for the velocity of a spatial voice; HasPosition is false before
-		// the first one and while the entity is disabled.
+		// The rendered world position (§5.2) at the last Start or Update, for the velocity of a spatial voice; HasPosition is
+		// false before the first one and while the entity is disabled.
 		glm::vec3 Position{ 0.0f };
 		bool HasPosition = false;
+		// The entity or an ancestor had InterpolationResetTag at the last Start or Update (its rendered pose was its current
+		// pose), so a pose that stops interpolating is told apart from one that keeps being written outside the fixed steps.
+		bool PoseReset = false;
 	};
 
 }
