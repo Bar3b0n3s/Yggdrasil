@@ -16,6 +16,10 @@
 #include "Engine/Renderer/PassBindingCache.h"
 #include "Engine/Renderer/Private/ForwardPipelines.h"
 #include "Engine/Renderer/Private/LightingInputs.h"
+#include "Engine/Renderer/Private/SceneRendererState.h"
+#include "Engine/Renderer/EditorOverlay.h"
+#include "Shared/ShadowConstants.h"
+#include "Shared/Private/SceneDataViewConstants.h"
 #include "Engine/Renderer/Private/MaterialBindingCache.h"
 #include "Engine/Renderer/RenderPrepare.h"
 #include "Engine/Renderer/SceneTargetFormats.h"
@@ -32,6 +36,10 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <chrono>
+#include <limits>
+#include <numbers>
+#include <set>
 #include <cstddef>
 #include <format>
 #include <iterator>
@@ -62,8 +70,9 @@ namespace Engine {
 	// The startup count is the sum of the pipelines each part of the set declares (SceneRenderer.h).
 	static_assert(SceneRendererPipelines::StartupPipelineCount
 		== SceneRendererPipelines::MeshPipelineCount + SkyboxPass::PipelineCount + BloomPass::PipelineCount + TonemapPass::PipelineCount
-			+ FxaaPass::PipelineCount + DebugRenderer::PipelineCount + TextRenderer::PipelineCount + BrdfLut::PipelineCount);
-	static_assert(SceneRendererPipelines::MeshPipelineCount == Utils::PrepassVariantCount + Utils::ForwardVariantCount);
+			+ FxaaPass::PipelineCount + DebugRenderer::PipelineCount + TextRenderer::PipelineCount + BrdfLut::PipelineCount
+			+ ShadowPass::PipelineCount + DepthPyramidPass::PipelineCount + GtaoPass::PipelineCount + SelectionPass::PipelineCount + 1);
+	static_assert(SceneRendererPipelines::MeshPipelineCount == 2 * Utils::PrepassVariantCount + Utils::ForwardVariantCount + Utils::MeshCullModeCount);
 	static_assert(SceneRendererPipelines::DebugViewPipelineCount == Utils::ForwardVariantCount);
 	// The Scene program's specialization constant takes RenderDebugView's values (Shared/DrawConstants.h).
 	static_assert(static_cast<uint32_t>(RenderDebugView::Lit) == SceneDebugViewLit && static_cast<uint32_t>(RenderDebugView::Albedo) == SceneDebugViewAlbedo
@@ -118,7 +127,7 @@ namespace Engine {
 
 		// One of the renderer's targets, sampled by later passes and copied by Readback, kept between command lists in its
 		// writing state (RenderTarget, DepthWrite) or, for an LDR target, in ShaderResource, the state BlitPass samples it in.
-		static Result<nvrhi::TextureHandle> CreateTarget(GraphicsDevice& device, uint32_t width, uint32_t height, nvrhi::Format format,
+		static Result<nvrhi::TextureHandle> CreateTarget(RenderTargetPool& pool, uint32_t width, uint32_t height, nvrhi::Format format,
 			TargetUsage usage, std::string_view name)
 		{
 			const bool isDepth = format == SceneDepthFormat;
@@ -136,7 +145,7 @@ namespace Engine {
 				desc.initialState = isDepth ? nvrhi::ResourceStates::DepthWrite : nvrhi::ResourceStates::RenderTarget;
 			desc.keepInitialState = true;
 			desc.debugName = std::format("SceneRenderer.{}", name);
-			return device.CreateTexture(desc);
+			return pool.Acquire(desc);
 		}
 
 		// The ViewConstants of `camera` for a `width` x `height` target (§8.3, Shared/ViewConstants.h).
@@ -220,6 +229,36 @@ namespace Engine {
 			return texture;
 		}
 
+		// Shared neutral resources keep the forward descriptor set complete when a pass is disabled.
+		static Result<nvrhi::TextureHandle> CreateSceneNeutralTexture(GraphicsDevice& device, nvrhi::Format format, bool array, float value)
+		{
+			nvrhi::TextureDesc desc;
+			desc.width = 1;
+			desc.height = 1;
+			desc.arraySize = array ? 4 : 1;
+			desc.dimension = array ? nvrhi::TextureDimension::Texture2DArray : nvrhi::TextureDimension::Texture2D;
+			desc.format = format;
+			desc.isRenderTarget = true;
+			desc.initialState = nvrhi::ResourceStates::ShaderResource;
+			desc.keepInitialState = true;
+			desc.debugName = "SceneRenderer.Neutral";
+			ENGINE_TRY_ASSIGN(nvrhi::TextureHandle texture, device.CreateTexture(desc));
+			ENGINE_TRY_ASSIGN(const nvrhi::CommandListHandle list, device.CreateCommandList(nvrhi::CommandListParameters().setEnableImmediateExecution(false)));
+			list->open();
+			if (format == nvrhi::Format::D32)
+				list->clearDepthStencilTexture(texture, nvrhi::AllSubresources, true, value, false, 0);
+			else
+				list->clearTextureFloat(texture, nvrhi::AllSubresources, nvrhi::Color(value));
+			list->close();
+			device.ExecuteCommandList(*list);
+			return texture;
+		}
+
+		static double SceneRendererNowSeconds()
+		{
+			return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+		}
+
 		// Appends `descriptions` to `all`.
 		static void AppendDescriptions(std::vector<PipelineLayoutDescription>& all, std::vector<PipelineLayoutDescription> descriptions)
 		{
@@ -227,133 +266,6 @@ namespace Engine {
 		}
 
 	}
-
-	namespace {
-
-		// One submesh draw of the frame, resolved by pass 1.
-		struct SceneDraw
-		{
-			nvrhi::IBuffer* VertexBuffer = nullptr; // held by the GpuResourceCache for the render
-			nvrhi::IBuffer* IndexBuffer = nullptr;
-			uint32_t IndexOffset = 0;
-			uint32_t IndexCount = 0;
-			nvrhi::IBindingSet* Material = nullptr; // held by the renderer's material cache for the render
-			uint32_t ForwardVariant = 0;
-			uint32_t PrepassVariant = 0; // opaque draws only
-			DrawConstants Constants{};
-			// Sort keys (§8.3 pass 1).
-			AssetHandle MaterialHandle{};
-			AssetHandle Mesh{};
-			UUID Entity{};
-			uint32_t Submesh = 0;
-			float ViewDepth = 0.0f; // transparent draws: the view depth of the submesh bounds' centre
-		};
-
-		// A material of the frame, resolved once per render: its set, or null when its draws are skipped.
-		struct ResolvedMaterial
-		{
-			nvrhi::IBindingSet* Set = nullptr;
-			Engine::AlphaMode Mode = Engine::AlphaMode::Opaque; // the type is spelled Engine:: (GCC's "changes meaning")
-			bool DoubleSided = false;
-		};
-
-		// Which mesh pass RecordMeshPass records.
-		enum class MeshPass : uint8_t
-		{
-			Prepass,
-			ForwardOpaque,
-			ForwardTransparent
-		};
-
-		// The size-dependent targets of a renderer.
-		struct SceneTargets
-		{
-			uint32_t Width = 0;
-			uint32_t Height = 0;
-			nvrhi::TextureHandle SceneDepth{};
-			nvrhi::TextureHandle SceneNormals{};
-			nvrhi::TextureHandle SceneColor{};
-			std::array<nvrhi::TextureHandle, 2> Ldr{}; // LdrColor and its FXAA ping-pong partner
-			nvrhi::TextureHandle Bloom{};              // BloomPass::GetChainDesc
-			nvrhi::FramebufferHandle PrepassFramebuffer{};
-			nvrhi::FramebufferHandle ForwardFramebuffer{};
-			std::array<nvrhi::FramebufferHandle, 2> OverlayFramebuffers{}; // each LDR target with SceneDepth (tested, not written)
-		};
-
-	}
-
-	struct SceneRendererPipelines::State
-	{
-		GraphicsDevice* Device = nullptr;   // documented back-reference
-		PipelineFactory* Factory = nullptr; // documented back-reference (EnsureDebugView)
-		Utils::MeshBindingLayouts Layouts{};
-		std::array<GraphicsPipeline, Utils::PrepassVariantCount> Prepass{};
-		// The forward variants of each debug view, indexed by RenderDebugView (Lit's at startup, the others by
-		// EnsureDebugView).
-		std::array<std::array<GraphicsPipeline, Utils::ForwardVariantCount>, RenderDebugViewCount> Forward{};
-		std::array<bool, RenderDebugViewCount> HasView{};
-		nvrhi::SamplerHandle LinearClamp{};
-		nvrhi::SamplerHandle AnisoWrap{};
-		nvrhi::TextureHandle BlackCube{};
-		// The passes the set owns (SceneRenderer.h).
-		Scope<SkyboxPass> Skybox;
-		Scope<BloomPass> Bloom;
-		Scope<TonemapPass> Tonemap;
-		Scope<FxaaPass> Fxaa;
-		Scope<DebugRenderer> Debug;
-		Scope<TextRenderer> Text;
-		Scope<BrdfLut> DfgLut;
-		uint32_t PipelineCount = 0;
-	};
-
-	struct SceneRenderer::State
-	{
-		// Documented back-references.
-		GraphicsDevice* Device = nullptr;
-		SceneRendererPipelines* PipelineSet = nullptr; // EnsureDebugView
-		SceneRendererPipelines::State* Pipelines = nullptr;
-		GpuResourceCache* Cache = nullptr;
-		AssetManager* Assets = nullptr;
-
-		// The view's binding sets (PassBindingCache.h): its own set-0 sets, those of each shared pass, the materials'.
-		PassBindingCache ViewBindings{};
-		PassBindingCache SkyboxBindings{};
-		PassBindingCache BloomBindings{};
-		PassBindingCache TonemapBindings{};
-		PassBindingCache FxaaBindings{};
-		PassBindingCache DebugBindings{};
-		PassBindingCache TextBindings{};
-		Utils::MaterialBindingCache Materials{};
-
-		SceneTargets Targets{};
-		size_t FinalTarget = 0; // the index of the LDR target holding the last image
-		nvrhi::BufferHandle ViewConstantsBuffer{};
-		nvrhi::BufferHandle EnvironmentConstantsBuffer{};
-		nvrhi::BufferHandle LightBuffer{};
-		// Reused by every Render.
-		std::vector<SceneDraw> OpaqueDraws{};
-		std::vector<SceneDraw> TransparentDraws{};
-		std::vector<ShaderLight> Lights{};
-		bool LightLimitLogged = false; // RENDER_LIGHT_LIMIT_EXCEEDED is logged once per renderer
-		SceneRenderStats Stats{};
-
-		// The targets of `width` x `height` with their framebuffers.
-		[[nodiscard]] Result<SceneTargets> CreateTargets(uint32_t width, uint32_t height) const;
-		// Clears every binding-set cache that references the targets.
-		void ClearTargetBindings();
-		// The material `handle` of this render: its mirror's set, created or found in the material cache; an empty
-		// ResolvedMaterial (no set: its draws are skipped) when the mirror lacks GPU objects, which the cache reported.
-		// Errors: those of the material cache's GetOrCreate (Gpu), with the material named.
-		[[nodiscard]] Result<ResolvedMaterial> ResolveMaterial(AssetHandle handle);
-		// Pass 1: the draws of `snapshot` seen by `camera` into OpaqueDraws and TransparentDraws, culled, resolved and sorted.
-		// Returns the first non-finite world matrix's error, after skipping that draw, or a material set's creation error.
-		[[nodiscard]] Status PrepareDraws(const RenderSnapshot& snapshot, const CameraData& camera);
-		// Passes 4, 7 and 9: `draws` with the pipelines of `pass` (the forward ones of `view`) and the view set `viewSet`.
-		void RecordMeshPass(nvrhi::ICommandList& commandList, MeshPass pass, std::span<const SceneDraw> draws, nvrhi::IBindingSet& viewSet,
-			RenderDebugView view);
-		// Drops what the render did not use from every binding-set cache.
-		void ReleaseUnusedBindings();
-	};
 
 	SceneRendererPipelines::SceneRendererPipelines(ConstructionKey /*key*/)
 		: m_State(CreateScope<State>())
@@ -372,6 +284,7 @@ namespace Engine {
 		for (uint32_t variant = 0; variant < Utils::PrepassVariantCount; ++variant)
 		{
 			ENGINE_TRY_ASSIGN(state.Prepass[variant], Utils::CreatePrepassPipeline(pipelines, state.Layouts, variant));
+			ENGINE_TRY_ASSIGN(state.Picking[variant], Utils::CreatePrepassPipeline(pipelines, state.Layouts, variant, true));
 		}
 		const auto lit = static_cast<size_t>(RenderDebugView::Lit);
 		for (uint32_t variant = 0; variant < Utils::ForwardVariantCount; ++variant)
@@ -379,11 +292,27 @@ namespace Engine {
 			ENGINE_TRY_ASSIGN(state.Forward[lit][variant], Utils::CreateForwardPipeline(pipelines, state.Layouts, variant, RenderDebugView::Lit));
 		}
 		state.HasView[lit] = true;
+		for (uint32_t variant = 0; variant < Utils::MeshCullModeCount; ++variant)
+		{
+			ENGINE_TRY_ASSIGN(state.Overdraw[variant], Utils::CreateOverdrawPipeline(pipelines, state.Layouts, variant));
+		}
+		ENGINE_TRY_ASSIGN(state.DataView, pipelines.CreateComputePipeline({ .Layout = Utils::GetSceneDataViewLayout() }));
+		for (size_t index = static_cast<size_t>(RenderDebugView::AO); index < RenderDebugViewCount; ++index)
+			state.HasView[index] = true;
 
 		ENGINE_TRY_ASSIGN(state.LinearClamp,
 			device.CreateSampler(nvrhi::SamplerDesc().setAllFilters(true).setAllAddressModes(nvrhi::SamplerAddressMode::Clamp)));
 		ENGINE_TRY_ASSIGN(state.AnisoWrap, device.CreateSampler(nvrhi::SamplerDesc().setAllFilters(true).setAllAddressModes(nvrhi::SamplerAddressMode::Wrap).setMaxAnisotropy(Utils::MaxSamplerAnisotropy)));
 		ENGINE_TRY_ASSIGN(state.BlackCube, Utils::CreateBlackCube(device));
+		ENGINE_TRY_ASSIGN(state.EmptyCascades, Utils::CreateSceneNeutralTexture(device, nvrhi::Format::D32, true, 0.0f));
+		ENGINE_TRY_ASSIGN(state.EmptyAtlas, Utils::CreateSceneNeutralTexture(device, nvrhi::Format::D32, false, 0.0f));
+		ENGINE_TRY_ASSIGN(state.WhiteAo, Utils::CreateSceneNeutralTexture(device, nvrhi::Format::R8_UNORM, false, 1.0f));
+		ENGINE_TRY_ASSIGN(state.FarDepth, Utils::CreateSceneNeutralTexture(device, nvrhi::Format::R16_FLOAT, false, 65504.0f));
+		ENGINE_TRY_ASSIGN(state.ShadowCompare, device.CreateSampler(nvrhi::SamplerDesc().setAllFilters(true).setAllAddressModes(nvrhi::SamplerAddressMode::Clamp).setReductionType(nvrhi::SamplerReductionType::Comparison)));
+		ENGINE_TRY_ASSIGN(state.Shadows, ShadowPass::Create(device, pipelines));
+		ENGINE_TRY_ASSIGN(state.DepthPyramid, DepthPyramidPass::Create(device, pipelines));
+		ENGINE_TRY_ASSIGN(state.Gtao, GtaoPass::Create(device, pipelines));
+		ENGINE_TRY_ASSIGN(state.Selection, SelectionPass::Create(device, pipelines));
 
 		ENGINE_TRY_ASSIGN(state.Skybox, SkyboxPass::Create(device, pipelines));
 		ENGINE_TRY_ASSIGN(state.Bloom, BloomPass::Create(device, pipelines, device.GetInfo().BloomFormat));
@@ -393,18 +322,14 @@ namespace Engine {
 		ENGINE_TRY_ASSIGN(state.Text, TextRenderer::Create(device, pipelines));
 		ENGINE_TRY_ASSIGN(state.DfgLut, BrdfLut::Create(device, pipelines));
 		state.PipelineCount = MeshPipelineCount + state.Skybox->GetPipelineCount() + state.Bloom->GetPipelineCount() + state.Tonemap->GetPipelineCount()
-			+ state.Fxaa->GetPipelineCount() + state.Debug->GetPipelineCount() + state.Text->GetPipelineCount() + state.DfgLut->GetPipelineCount();
+			+ state.Fxaa->GetPipelineCount() + state.Debug->GetPipelineCount() + state.Text->GetPipelineCount() + state.DfgLut->GetPipelineCount()
+			+ ShadowPass::PipelineCount + DepthPyramidPass::PipelineCount + GtaoPass::PipelineCount + SelectionPass::PipelineCount + 1;
 		ENGINE_CORE_INFO("Created the scene renderer's {} pipelines", state.PipelineCount);
 		return set;
 	}
 
 	Status SceneRendererPipelines::EnsureDebugView(RenderDebugView view)
 	{
-		if (view >= RenderDebugView::AO && view <= RenderDebugView::Overdraw)
-		{
-			ENGINE_CONTRACT_STUB();
-			return std::unexpected(Error(ErrorCode::Unsupported, "M9 debug rendering is not implemented"));
-		}
 		State& state = *m_State;
 		const auto index = static_cast<size_t>(view);
 		if (index >= RenderDebugViewCount)
@@ -439,6 +364,11 @@ namespace Engine {
 		Utils::AppendDescriptions(descriptions, DebugRenderer::GetLayoutDescriptions());
 		Utils::AppendDescriptions(descriptions, TextRenderer::GetLayoutDescriptions());
 		Utils::AppendDescriptions(descriptions, BrdfLut::GetLayoutDescriptions());
+		Utils::AppendDescriptions(descriptions, ShadowPass::GetLayoutDescriptions());
+		Utils::AppendDescriptions(descriptions, DepthPyramidPass::GetLayoutDescriptions());
+		Utils::AppendDescriptions(descriptions, GtaoPass::GetLayoutDescriptions());
+		Utils::AppendDescriptions(descriptions, SelectionPass::GetLayoutDescriptions());
+		descriptions.push_back(Utils::GetSceneDataViewLayout());
 		return descriptions;
 	}
 
@@ -447,21 +377,21 @@ namespace Engine {
 		m_State->Text->CollectStale(assets, releaseUnused);
 	}
 
-	Result<SceneTargets> SceneRenderer::State::CreateTargets(uint32_t width, uint32_t height) const
+	Result<Detail::SceneRendererTargets> SceneRenderer::State::CreateTargets(uint32_t width, uint32_t height) const
 	{
 		GraphicsDevice& device = *Device;
-		SceneTargets targets;
+		Detail::SceneRendererTargets targets;
 		targets.Width = width;
 		targets.Height = height;
 		ENGINE_TRY_ASSIGN(targets.SceneDepth,
-			Utils::CreateTarget(device, width, height, SceneDepthFormat, Utils::TargetUsage::Attachment, "SceneDepth"));
+			Utils::CreateTarget(*TargetPool, width, height, SceneDepthFormat, Utils::TargetUsage::Attachment, "SceneDepth"));
 		ENGINE_TRY_ASSIGN(targets.SceneNormals,
-			Utils::CreateTarget(device, width, height, SceneNormalsFormat, Utils::TargetUsage::Attachment, "SceneNormals"));
+			Utils::CreateTarget(*TargetPool, width, height, SceneNormalsFormat, Utils::TargetUsage::Attachment, "SceneNormals"));
 		ENGINE_TRY_ASSIGN(targets.SceneColor,
-			Utils::CreateTarget(device, width, height, SceneColorFormat, Utils::TargetUsage::Attachment, "SceneColor"));
-		ENGINE_TRY_ASSIGN(targets.Ldr[0], Utils::CreateTarget(device, width, height, LdrColorFormat, Utils::TargetUsage::LdrColor, "LdrColor"));
-		ENGINE_TRY_ASSIGN(targets.Ldr[1], Utils::CreateTarget(device, width, height, LdrColorFormat, Utils::TargetUsage::LdrColor, "LdrColorFxaa"));
-		ENGINE_TRY_ASSIGN(targets.Bloom, device.CreateTexture(BloomPass::GetChainDesc(width, height, Pipelines->Bloom->GetFormat())));
+			Utils::CreateTarget(*TargetPool, width, height, SceneColorFormat, Utils::TargetUsage::Attachment, "SceneColor"));
+		ENGINE_TRY_ASSIGN(targets.Ldr[0], Utils::CreateTarget(*TargetPool, width, height, LdrColorFormat, Utils::TargetUsage::LdrColor, "LdrColor"));
+		ENGINE_TRY_ASSIGN(targets.Ldr[1], Utils::CreateTarget(*TargetPool, width, height, LdrColorFormat, Utils::TargetUsage::LdrColor, "LdrColorFxaa"));
+		ENGINE_TRY_ASSIGN(targets.Bloom, TargetPool->Acquire(BloomPass::GetChainDesc(width, height, Pipelines->Bloom->GetFormat())));
 
 		ENGINE_TRY_ASSIGN(targets.PrepassFramebuffer,
 			device.CreateFramebuffer(nvrhi::FramebufferDesc().addColorAttachment(targets.SceneNormals).setDepthAttachment(targets.SceneDepth)));
@@ -479,6 +409,61 @@ namespace Engine {
 		return targets;
 	}
 
+	Status SceneRenderer::State::EnsureFrameTargets(bool picking, bool ao, bool halfAo, uint32_t shadowSize, bool spots, bool selection, bool overdraw)
+	{
+		const uint32_t width = Targets.Width;
+		const uint32_t height = Targets.Height;
+		if (picking && Targets.EntityId == nullptr)
+		{
+			ENGINE_TRY_ASSIGN(Targets.EntityId, Utils::CreateTarget(*TargetPool, width, height, nvrhi::Format::R32_UINT, Utils::TargetUsage::Attachment, "EntityId"));
+		}
+		if (picking && Targets.PickingFramebuffer == nullptr)
+		{
+			ENGINE_TRY_ASSIGN(Targets.PickingFramebuffer, Device->CreateFramebuffer(nvrhi::FramebufferDesc().addColorAttachment(Targets.SceneNormals).addColorAttachment(Targets.EntityId).setDepthAttachment(Targets.SceneDepth)));
+		}
+		if (ao)
+		{
+			if (Targets.ViewDepth == nullptr)
+			{
+				ENGINE_TRY_ASSIGN(Targets.ViewDepth, TargetPool->Acquire(DepthPyramidPass::GetTargetDesc(width, height)));
+			}
+			const auto desc = GtaoPass::GetTargetDesc(width, height, halfAo);
+			if (Targets.Occlusion == nullptr || Targets.Occlusion->getDesc().width != desc.width || Targets.Occlusion->getDesc().height != desc.height)
+			{
+				ClearTargetBindings();
+				ENGINE_TRY_ASSIGN(nvrhi::TextureHandle occlusion, TargetPool->Acquire(desc));
+				ENGINE_TRY_ASSIGN(nvrhi::TextureHandle scratch, TargetPool->Acquire(desc));
+				Targets.Occlusion = std::move(occlusion);
+				Targets.AoScratch = std::move(scratch);
+			}
+		}
+		if (shadowSize != 0 && (Targets.Cascades == nullptr || Targets.Cascades->getDesc().width != shadowSize))
+		{
+			ClearTargetBindings();
+			ENGINE_TRY_ASSIGN(Targets.Cascades, TargetPool->Acquire(ShadowPass::GetCascadeTargetDesc(shadowSize)));
+		}
+		if (spots && Targets.SpotAtlas == nullptr)
+		{
+			ENGINE_TRY_ASSIGN(Targets.SpotAtlas, TargetPool->Acquire(ShadowPass::GetAtlasTargetDesc()));
+		}
+		if (selection && Targets.SelectionMask == nullptr)
+		{
+			ENGINE_TRY_ASSIGN(nvrhi::TextureHandle mask, TargetPool->Acquire(SelectionPass::GetMaskDesc(width, height)));
+			ENGINE_TRY_ASSIGN(nvrhi::TextureHandle scratch, TargetPool->Acquire(SelectionPass::GetMaskDesc(width, height)));
+			Targets.SelectionMask = std::move(mask);
+			Targets.SelectionScratch = std::move(scratch);
+		}
+		if (overdraw && Targets.Overdraw == nullptr)
+		{
+			ENGINE_TRY_ASSIGN(Targets.Overdraw, Utils::CreateTarget(*TargetPool, width, height, nvrhi::Format::RGBA16_FLOAT, Utils::TargetUsage::Attachment, "Overdraw"));
+		}
+		if (overdraw && Targets.OverdrawFramebuffer == nullptr)
+		{
+			ENGINE_TRY_ASSIGN(Targets.OverdrawFramebuffer, Device->CreateFramebuffer(nvrhi::FramebufferDesc().addColorAttachment(Targets.Overdraw)));
+		}
+		return {};
+	}
+
 	void SceneRenderer::State::ClearTargetBindings()
 	{
 		ViewBindings.Clear();
@@ -488,6 +473,11 @@ namespace Engine {
 		FxaaBindings.Clear();
 		DebugBindings.Clear();
 		TextBindings.Clear();
+		ShadowBindings.Clear();
+		DepthBindings.Clear();
+		GtaoBindings.Clear();
+		SelectionBindings.Clear();
+		DataViewBindings.Clear();
 	}
 
 	void SceneRenderer::State::ReleaseUnusedBindings()
@@ -499,20 +489,26 @@ namespace Engine {
 		FxaaBindings.ReleaseUnused();
 		DebugBindings.ReleaseUnused();
 		TextBindings.ReleaseUnused();
+		ShadowBindings.ReleaseUnused();
+		DepthBindings.ReleaseUnused();
+		GtaoBindings.ReleaseUnused();
+		SelectionBindings.ReleaseUnused();
+		DataViewBindings.ReleaseUnused();
+
 		Materials.ReleaseUnused();
 	}
 
-	Result<ResolvedMaterial> SceneRenderer::State::ResolveMaterial(AssetHandle handle)
+	Result<Detail::SceneRendererMaterial> SceneRenderer::State::ResolveMaterial(AssetHandle handle)
 	{
 		// The mirror is valid until the next upload: everything needed is taken now.
 		const GpuMaterial& material = Cache->GetMaterial(handle);
 		if (material.Constants == nullptr || material.BaseColorMap == nullptr || material.MetallicRoughnessMap == nullptr || material.NormalMap == nullptr
 			|| material.OcclusionMap == nullptr || material.EmissiveMap == nullptr)
-			return ResolvedMaterial{}; // not even a placeholder could be created (reported by the cache)
+			return Detail::SceneRendererMaterial{}; // not even a placeholder could be created (reported by the cache)
 		Result<nvrhi::IBindingSet*> set = Materials.GetOrCreate(*Device, handle, material, *Pipelines->Layouts.Material);
 		if (!set.has_value())
 			return std::unexpected(std::move(set).error().WithContext(std::format("while binding material {}", handle)));
-		return ResolvedMaterial{ .Set = *set, .Mode = material.AlphaMode, .DoubleSided = material.DoubleSided };
+		return Detail::SceneRendererMaterial{ .Set = *set, .Mode = material.AlphaMode, .DoubleSided = material.DoubleSided };
 	}
 
 	Status SceneRenderer::State::PrepareDraws(const RenderSnapshot& snapshot, const CameraData& camera)
@@ -520,7 +516,7 @@ namespace Engine {
 		OpaqueDraws.clear();
 		TransparentDraws.clear();
 		Status status;
-		std::map<AssetHandle, ResolvedMaterial> materials;
+		std::map<AssetHandle, Detail::SceneRendererMaterial> materials;
 		std::vector<GpuSubmesh> submeshes;
 		std::vector<AssetHandle> defaults;
 		for (size_t index = 0; index < snapshot.Meshes.size(); ++index)
@@ -564,17 +560,17 @@ namespace Engine {
 				if (found == materials.end())
 				{
 					// A material whose set cannot be created skips its draws; the first such error is the render's.
-					Result<ResolvedMaterial> resolved = ResolveMaterial(materialHandle);
+					Result<Detail::SceneRendererMaterial> resolved = ResolveMaterial(materialHandle);
 					if (!resolved.has_value() && status.has_value())
 						status = std::unexpected(std::move(resolved).error());
-					found = materials.emplace(materialHandle, resolved.value_or(ResolvedMaterial{})).first;
+					found = materials.emplace(materialHandle, resolved.value_or(Detail::SceneRendererMaterial{})).first;
 				}
-				const ResolvedMaterial& material = found->second;
+				const Detail::SceneRendererMaterial& material = found->second;
 				if (material.Set == nullptr)
 					continue; // its GPU objects are missing (reported)
 
 				const Utils::MeshCullMode cullMode = Utils::SelectCullMode(mirrored, material.DoubleSided);
-				SceneDraw draw;
+				Detail::SceneRendererDraw draw;
 				draw.VertexBuffer = vertexBuffer;
 				draw.IndexBuffer = indexBuffer;
 				draw.IndexOffset = submesh.IndexOffset;
@@ -582,12 +578,13 @@ namespace Engine {
 				draw.Material = material.Set;
 				draw.ForwardVariant = Utils::GetForwardVariant(material.Mode, cullMode);
 				draw.Constants.World = item.World;
-				draw.Constants.EntityId = static_cast<uint32_t>(index + 1);
-				draw.Constants.Flags = mirrored ? DrawFlagMirrored : 0U;
+				draw.Constants.EntityId = item.PickId;
+				draw.Constants.Flags = (mirrored ? DrawFlagMirrored : 0U) | (item.ReceiveShadows ? DrawFlagReceiveShadows : 0U);
 				draw.MaterialHandle = materialHandle;
 				draw.Mesh = item.Mesh;
 				draw.Entity = item.Entity;
 				draw.Submesh = submeshIndex;
+				draw.SnapshotIndex = index;
 				if (material.Mode == AlphaMode::Blend)
 				{
 					const glm::vec3 centre = submesh.Bounds.IsEmpty() ? glm::vec3(0.0f) : (submesh.Bounds.Min + submesh.Bounds.Max) * 0.5f;
@@ -608,7 +605,7 @@ namespace Engine {
 		opaqueKeys.reserve(OpaqueDraws.size());
 		for (uint32_t index = 0; index < OpaqueDraws.size(); ++index)
 		{
-			const SceneDraw& draw = OpaqueDraws[index];
+			const Detail::SceneRendererDraw& draw = OpaqueDraws[index];
 			opaqueKeys.push_back({ .Pipeline = draw.ForwardVariant, .Material = draw.MaterialHandle, .Mesh = draw.Mesh, .DrawIndex = index });
 		}
 		SortOpaqueDraws(opaqueKeys);
@@ -616,14 +613,14 @@ namespace Engine {
 		transparentKeys.reserve(TransparentDraws.size());
 		for (uint32_t index = 0; index < TransparentDraws.size(); ++index)
 		{
-			const SceneDraw& draw = TransparentDraws[index];
+			const Detail::SceneRendererDraw& draw = TransparentDraws[index];
 			transparentKeys.push_back({ .ViewDepth = draw.ViewDepth, .Entity = draw.Entity, .Submesh = draw.Submesh, .DrawIndex = index });
 		}
 		SortTransparentDraws(transparentKeys);
 
-		const auto reorder = []<typename Key>(std::vector<SceneDraw>& draws, const std::vector<Key>& keys)
+		const auto reorder = []<typename Key>(std::vector<Detail::SceneRendererDraw>& draws, const std::vector<Key>& keys)
 		{
-			std::vector<SceneDraw> sorted;
+			std::vector<Detail::SceneRendererDraw> sorted;
 			sorted.reserve(draws.size());
 			for (const Key& key : keys)
 				sorted.push_back(draws[key.DrawIndex]);
@@ -634,10 +631,15 @@ namespace Engine {
 		return status;
 	}
 
-	void SceneRenderer::State::RecordMeshPass(nvrhi::ICommandList& commandList, MeshPass pass, std::span<const SceneDraw> draws, nvrhi::IBindingSet& viewSet,
-		RenderDebugView view)
+	void SceneRenderer::State::RecordMeshPass(nvrhi::ICommandList& commandList, Detail::SceneRendererMeshPass pass, std::span<const Detail::SceneRendererDraw> draws, nvrhi::IBindingSet& viewSet,
+		RenderDebugView view, RenderPassCounters& counters)
 	{
-		nvrhi::IFramebuffer* framebuffer = pass == MeshPass::Prepass ? Targets.PrepassFramebuffer.Get() : Targets.ForwardFramebuffer.Get();
+		const bool prepass = pass == Detail::SceneRendererMeshPass::Prepass || pass == Detail::SceneRendererMeshPass::Picking;
+		nvrhi::IFramebuffer* framebuffer = pass == Detail::SceneRendererMeshPass::Prepass ? Targets.PrepassFramebuffer.Get() : Targets.ForwardFramebuffer.Get();
+		if (pass == Detail::SceneRendererMeshPass::Picking)
+			framebuffer = Targets.PickingFramebuffer;
+		if (pass == Detail::SceneRendererMeshPass::Overdraw)
+			framebuffer = Targets.OverdrawFramebuffer;
 		const nvrhi::Viewport viewport(static_cast<float>(Targets.Width), static_cast<float>(Targets.Height));
 		const auto& forward = Pipelines->Forward[static_cast<size_t>(view)];
 
@@ -646,9 +648,11 @@ namespace Engine {
 		const nvrhi::IGraphicsPipeline* lastPipeline = nullptr;
 		const nvrhi::IBindingSet* lastMaterial = nullptr;
 		const nvrhi::IBuffer* lastVertexBuffer = nullptr;
-		for (const SceneDraw& draw : draws)
+		for (const Detail::SceneRendererDraw& draw : draws)
 		{
-			const GraphicsPipeline& pipeline = pass == MeshPass::Prepass ? Pipelines->Prepass[draw.PrepassVariant] : forward[draw.ForwardVariant];
+			const GraphicsPipeline& pipeline = prepass
+				? (pass == Detail::SceneRendererMeshPass::Picking ? Pipelines->Picking[draw.PrepassVariant] : Pipelines->Prepass[draw.PrepassVariant])
+				: (pass == Detail::SceneRendererMeshPass::Overdraw ? Pipelines->Overdraw[draw.ForwardVariant % Utils::MeshCullModeCount] : forward[draw.ForwardVariant]);
 			if (pipeline.Pipeline.Get() != lastPipeline || draw.Material != lastMaterial || draw.VertexBuffer != lastVertexBuffer)
 			{
 				nvrhi::GraphicsState state;
@@ -665,10 +669,12 @@ namespace Engine {
 			}
 			commandList.setPushConstants(&draw.Constants, sizeof(draw.Constants));
 			commandList.drawIndexed(nvrhi::DrawArguments().setVertexCount(draw.IndexCount).setStartIndexLocation(draw.IndexOffset));
+			++counters.DrawCalls;
+			counters.Triangles += draw.IndexCount / 3;
 		}
-		if (pass != MeshPass::Prepass)
+		if (pass == Detail::SceneRendererMeshPass::ForwardOpaque || pass == Detail::SceneRendererMeshPass::ForwardTransparent)
 			Stats.MeshDraws += static_cast<uint32_t>(draws.size());
-		if (pass == MeshPass::ForwardTransparent)
+		if (pass == Detail::SceneRendererMeshPass::ForwardTransparent)
 			Stats.TransparentDraws = static_cast<uint32_t>(draws.size());
 	}
 
@@ -698,6 +704,11 @@ namespace Engine {
 		ENGINE_TRY_ASSIGN(state.LightBuffer,
 			Utils::CreateViewBuffer(device, sizeof(ShaderLight) * MaxVisibleLights, sizeof(ShaderLight), "SceneRenderer.Lights"));
 		state.Lights.reserve(MaxVisibleLights);
+		state.TargetPool = CreateScope<RenderTargetPool>(device);
+		state.Picker = CreateScope<AsyncPicker>(device);
+		state.Profiler = CreateScope<GpuProfiler>(device, device.GetFramesInFlight());
+		state.TimingSubmissions.resize(device.GetFramesInFlight(), 0);
+		ENGINE_TRY_ASSIGN(state.ShadowConstantsBuffer, Utils::CreateViewBuffer(device, sizeof(ShadowConstants), 0, "SceneRenderer.ShadowConstants"));
 		ENGINE_TRY_ASSIGN(state.Targets, state.CreateTargets(specification.Width, specification.Height));
 		return renderer;
 	}
@@ -708,71 +719,85 @@ namespace Engine {
 		State& state = *m_State;
 		if (width == state.Targets.Width && height == state.Targets.Height)
 			return {};
+		ENGINE_CORE_ASSERT(!state.PendingSubmission, "Resize requires OnSubmitted for the prior Render");
+		if (state.PendingSubmission)
+			return MakeError(ErrorCode::InvalidState, "Resize requires OnSubmitted for the prior Render");
 		// Built aside first, so a failure keeps the current targets. The previous ones stay alive while a submitted command
 		// list still references them (their framebuffers and binding sets are referenced by every list that used them).
-		ENGINE_TRY_ASSIGN(SceneTargets targets, state.CreateTargets(width, height));
+		ENGINE_TRY_ASSIGN(Detail::SceneRendererTargets targets, state.CreateTargets(width, height));
 		state.Targets = std::move(targets);
 		state.FinalTarget = 0;
 		state.ClearTargetBindings();
+		state.TargetPool->ReleaseFree();
+		CancelPicks();
+		state.RecordedPicking = false;
 		return {};
 	}
 
 	Status SceneRenderer::Render(nvrhi::ICommandList& commandList, const RenderSnapshot& snapshot)
 	{
-		if (snapshot.Flags != RenderViewFlags::None || !snapshot.SelectedEntities.empty() || !snapshot.Icons.empty()
-			|| !snapshot.Annotations.LabelEntities.empty() || snapshot.Annotations.Labels != RenderAnnotationLabels::None || snapshot.Annotations.Bounds || snapshot.Annotations.Axes
-			|| snapshot.Quality.ShadowMapSize != 2048 || snapshot.Quality.SsaoHalfResolution)
-		{
-			ENGINE_CONTRACT_STUB();
-			return std::unexpected(Error(ErrorCode::Unsupported, "M9 render view options are not implemented"));
-		}
-		if (snapshot.DebugView >= RenderDebugView::AO && snapshot.DebugView <= RenderDebugView::Overdraw)
-		{
-			ENGINE_CONTRACT_STUB();
-			return std::unexpected(Error(ErrorCode::Unsupported, "M9 debug rendering is not implemented"));
-		}
 		State& state = *m_State;
+		ENGINE_CORE_ASSERT(!state.PendingSubmission, "Render requires OnSubmitted for the prior Render");
+		if (state.PendingSubmission)
+			return MakeError(ErrorCode::InvalidState, "Render requires OnSubmitted for the prior Render");
+		const double started = Utils::SceneRendererNowSeconds();
+		const RenderDebugView debugView = snapshot.DebugView;
+		ENGINE_TRY(state.PipelineSet->EnsureDebugView(debugView));
+		if (snapshot.Quality.ShadowMapSize < 256 || snapshot.Quality.ShadowMapSize > 8192
+			|| (snapshot.Quality.ShadowMapSize & (snapshot.Quality.ShadowMapSize - 1)) != 0)
+			return MakeError(ErrorCode::InvalidArgument, "shadow map size must be a power of two in [256,8192]");
 		SceneRendererPipelines::State& pipelines = *state.Pipelines;
 		state.Stats = {};
-		const SceneTargets& targets = state.Targets;
+		state.RecordedPicking = false;
+		state.SubmittedPicking = false;
+		const bool isLit = debugView == RenderDebugView::Lit;
+		const bool dataView = debugView >= RenderDebugView::AO;
+		const bool overdraw = debugView == RenderDebugView::Overdraw;
+		const bool wireframe = isLit && HasFlag(snapshot.Flags, RenderViewFlags::Wireframe);
+		const bool picking = HasFlag(snapshot.Flags, RenderViewFlags::Picking);
+		const bool selection = !dataView && snapshot.HasCamera && HasFlag(snapshot.Flags, RenderViewFlags::EditorOverlays)
+			&& HasFlag(snapshot.Flags, RenderViewFlags::Selection) && !snapshot.SelectedEntities.empty();
 		Status status;
 		const auto keepFirstError = [&status](Status result)
 		{
-			if (!result.has_value() && status.has_value())
+			if (!result && status)
 				status = std::move(result);
 		};
-
-		// A debug view's pipelines are created the first time it is asked for (SceneRendererPipelines::EnsureDebugView).
-		const RenderDebugView debugView = snapshot.DebugView;
-		ENGINE_CORE_ASSERT(static_cast<size_t>(debugView) < RenderDebugViewCount, "unknown debug view {}", std::to_underlying(debugView));
-		const bool isLit = debugView == RenderDebugView::Lit;
-		if (!isLit)
-		{
-			const Status ensured = state.PipelineSet->EnsureDebugView(debugView);
-			if (!ensured.has_value())
-			{
-				FatalError(FatalErrorKind::OutOfMemory,
-					std::format("Cannot create the {} debug view's pipelines: {}", RenderDebugViewToString(debugView), ensured.error().ToString()));
-			}
-		}
-
-		// Pass 1: Prepare. A camera whose matrices are not finite renders like no camera, and is the render's error.
 		bool hasCamera = snapshot.HasCamera;
 		if (hasCamera && (!Utils::IsFinite(snapshot.Camera.View) || !Utils::IsFinite(snapshot.Camera.Projection) || !Utils::IsFinite(snapshot.Camera.Position)))
 		{
-			status = MakeError(ErrorCode::InvalidArgument, "the camera of the render snapshot (entity {}) has a matrix that is not finite; the view is cleared",
-				snapshot.Camera.Entity);
+			status = MakeError(ErrorCode::InvalidArgument, "the camera of the render snapshot (entity {}) has a matrix that is not finite; the view is cleared", snapshot.Camera.Entity);
 			hasCamera = false;
 		}
+		CameraData camera = hasCamera ? snapshot.Camera : CameraData{};
+		camera.ViewportWidth = state.Targets.Width;
+		camera.ViewportHeight = state.Targets.Height;
 		const PostProcessSettings& post = snapshot.Post;
-		const CameraData camera = hasCamera ? snapshot.Camera : CameraData{};
-		ViewConstants view = Utils::MakeViewConstants(camera, targets.Width, targets.Height, isLit ? Utils::GetExposure(post) : 1.0f);
+		const bool ao = hasCamera && ((isLit && !wireframe) || debugView == RenderDebugView::AO) && post.SsaoEnabled;
+		const bool halfAo = snapshot.Quality.SsaoHalfResolution || post.SsaoQuality == RenderSsaoQuality::Low;
+		const bool shadows = hasCamera && ((isLit && !wireframe) || debugView == RenderDebugView::ShadowCascades);
 
-		// The light list (§8.3 pass 1): at most MaxVisibleLights, RENDER_LIGHT_LIMIT_EXCEEDED once per renderer.
+		RenderStats stats{ .Available = true, .FrameIndex = snapshot.FrameIndex, .Width = state.Targets.Width, .Height = state.Targets.Height };
+		GpuProfiler* profiler = nullptr;
+		const uint32_t slot = state.NextTimingSlot;
+		state.NextTimingSlot = (slot + 1) % static_cast<uint32_t>(state.TimingSubmissions.size());
+		state.PendingTimingSlot.reset();
+		GpuTimingFrame completedTiming;
+		if (state.TimingSubmissions[slot] <= state.Device->GetCompletedSubmissionID())
+		{
+			state.Profiler->BeginFrame(slot, snapshot.FrameIndex);
+			completedTiming = state.Profiler->GetLastFrameResult();
+			profiler = state.Profiler.get();
+			state.PendingTimingSlot = slot;
+		}
+		RenderRecordingContext recording(stats, Utils::SceneRendererNowSeconds, profiler);
+		recording.BeginPass("Prepare");
+		ViewConstants view = Utils::MakeViewConstants(camera, stats.Width, stats.Height, isLit ? Utils::GetExposure(post) : 1.0f);
+		LightCullResult culled;
 		state.Lights.clear();
 		if (hasCamera)
 		{
-			const LightCullResult culled = CullLights(snapshot.Lights, camera);
+			culled = CullLights(snapshot.Lights, camera);
 			for (const uint32_t index : culled.Visible)
 				state.Lights.push_back(Utils::MakeShaderLight(snapshot.Lights[index]));
 			state.Stats.Lights = static_cast<uint32_t>(culled.Visible.size());
@@ -781,19 +806,75 @@ namespace Engine {
 			if (culled.Dropped > 0 && !state.LightLimitLogged)
 			{
 				state.LightLimitLogged = true;
-				ENGINE_CORE_WARN("{}: {} lights are visible in a view that shades at most {}; the {} least important are left out (logged once per view)",
-					RenderLightLimitExceededCode, culled.Visible.size() + culled.Dropped, MaxVisibleLights, culled.Dropped);
+				ENGINE_CORE_WARN("{}: {} lights exceed the view's budget of {} (logged once per view)", RenderLightLimitExceededCode, culled.Dropped, MaxVisibleLights);
 			}
 		}
 		view.LightCount = static_cast<uint32_t>(state.Lights.size());
-
-		// The environment (§8.6): its mirror, or the constant ambient. The cube handles are held for the render.
-		const GpuEnvironment* environment = hasCamera ? state.Cache->GetEnvironment(snapshot.Environment.Environment) : nullptr;
+		ShadowCascadeSet cascades;
+		SpotShadowAtlas spots;
+		ShadowConstants shadowConstants{};
+		if (shadows)
+		{
+			// Choose in snapshot order, independently of CullLights' importance ordering. Uploaded indices are remapped.
+			for (uint32_t index = 0; index < snapshot.Lights.size(); ++index)
+			{
+				const LightData& light = snapshot.Lights[index];
+				const auto visible = std::find(culled.Visible.begin(), culled.Visible.end(), index);
+				if (light.Type != RenderLightType::Directional || !light.CastShadows || visible == culled.Visible.end())
+					continue;
+				auto planned = BuildShadowCascades(camera, light, index, snapshot.Quality.ShadowMapSize);
+				if (!planned)
+					keepFirstError(std::unexpected(std::move(planned).error()));
+				else
+				{
+					cascades = *planned;
+					shadowConstants.Counts.x = cascades.Count;
+					shadowConstants.Counts.z = static_cast<uint32_t>(visible - culled.Visible.begin());
+					shadowConstants.Directional = glm::vec4(light.LightAngle * std::numbers::pi_v<float> / 180.0f, light.DepthBias, light.NormalBias, light.ShadowDistance);
+					for (uint32_t cascade = 0; cascade < cascades.Count; ++cascade)
+					{
+						const ShadowCascade& plan = cascades.Cascades[cascade];
+						shadowConstants.CascadeViewProjection[cascade] = plan.ViewProjection;
+						shadowConstants.CascadeSplits[cascade] = plan.SplitFar;
+						shadowConstants.CascadeBlendStarts[cascade] = plan.BlendStart;
+						shadowConstants.CascadeTexelWorldSizes[cascade] = plan.TexelWorldSize;
+						shadowConstants.CascadeDepthRanges[cascade] = glm::vec4(plan.LightNear, plan.LightFar, plan.PenumbraUvPerMetre, 0.05f);
+					}
+				}
+				break;
+			}
+			auto allocated = AllocateSpotShadowAtlas(snapshot.Lights, culled.Visible, camera);
+			if (!allocated)
+				keepFirstError(std::unexpected(std::move(allocated).error()));
+			else
+				spots = std::move(*allocated);
+			shadowConstants.Counts.y = static_cast<uint32_t>(spots.Tiles.size());
+			for (size_t index = 0; index < spots.Tiles.size(); ++index)
+			{
+				const SpotShadowTile& tile = spots.Tiles[index];
+				const LightData& light = snapshot.Lights[tile.LightIndex];
+				SpotShadowConstants& constants = shadowConstants.Spots[index];
+				constants.ViewProjection = tile.ViewProjection;
+				constants.UvScaleBias = tile.UvScaleBias;
+				constants.DepthSoftness = glm::vec4(tile.NearClip, tile.FarClip, light.SourceRadius, 0.05f * tile.UvScaleBias.x);
+				const float projectionScale = glm::length(glm::vec3(tile.ViewProjection[0][0], tile.ViewProjection[1][0], tile.ViewProjection[2][0]));
+				constants.Bias = glm::vec4(light.DepthBias, light.NormalBias, 2.0f / (projectionScale * static_cast<float>(SpotShadowTileSize - 2 * SpotShadowGuardTexels)), 0.0f);
+				constants.Indices.x = static_cast<uint32_t>(std::find(culled.Visible.begin(), culled.Visible.end(), tile.LightIndex) - culled.Visible.begin());
+			}
+			if (spots.Dropped > 0 && !state.SpotLimitLogged)
+			{
+				state.SpotLimitLogged = true;
+				ENGINE_CORE_WARN("{}: {} visible spot shadows exceed the budget of {} (logged once per view)", RenderSpotShadowBudgetCode, spots.Dropped, MaxSpotShadowLights);
+			}
+		}
+		state.OpaqueDraws.clear();
+		state.TransparentDraws.clear();
+		if (hasCamera)
+			keepFirstError(state.PrepareDraws(snapshot, camera));
+		const GpuEnvironment* environment = hasCamera && isLit && !wireframe ? state.Cache->GetEnvironment(snapshot.Environment.Environment) : nullptr;
 		const EnvironmentConstants environmentConstants = Utils::MakeEnvironmentConstants(snapshot.Environment, environment);
 		const nvrhi::TextureHandle environmentSpecular = environment != nullptr ? environment->Specular : pipelines.BlackCube;
 		const nvrhi::TextureHandle environmentSkybox = environment != nullptr ? environment->Skybox : nvrhi::TextureHandle();
-
-		// The blue noise of the dither (Lit only), when the manager has the built-in and it is not a placeholder.
 		nvrhi::TextureHandle blueNoise;
 		if (isLit && state.Assets->GetAssetType(BuiltinAssetHandles::BlueNoiseTexture) == AssetType::Texture)
 		{
@@ -801,151 +882,297 @@ namespace Engine {
 			if (!noise.IsPlaceholder)
 				blueNoise = noise.Texture;
 		}
-
-		// Without a camera nothing is drawn (PrepareDraws clears both lists itself).
-		state.OpaqueDraws.clear();
-		state.TransparentDraws.clear();
-		if (hasCamera)
-			keepFirstError(state.PrepareDraws(snapshot, camera));
-
+		recording.EndPass({});
+		ENGINE_TRY(state.EnsureFrameTargets(picking, ao, halfAo, cascades.Count != 0 ? snapshot.Quality.ShadowMapSize : 0, !spots.Tiles.empty(), selection, overdraw));
+		const Detail::SceneRendererTargets& targets = state.Targets;
+		state.PendingSubmission = true;
+		state.ImageFrame = snapshot.FrameIndex;
+		state.ImageRevision = snapshot.SceneRevision;
+		state.ImageGeneration = state.Generation;
+		state.ImagePickTable = picking ? snapshot.PickTable : std::vector<UUID>();
+		state.FinalTarget = 0;
 		commandList.beginMarker("SceneRenderer");
 		commandList.writeBuffer(state.ViewConstantsBuffer, &view, sizeof(view));
 		commandList.writeBuffer(state.EnvironmentConstantsBuffer, &environmentConstants, sizeof(environmentConstants));
+		commandList.writeBuffer(state.ShadowConstantsBuffer, &shadowConstants, sizeof(shadowConstants));
 		if (!state.Lights.empty())
 			commandList.writeBuffer(state.LightBuffer, state.Lights.data(), state.Lights.size() * sizeof(ShaderLight));
-
 		const glm::vec3 clearColor = camera.ClearColor;
 		commandList.clearTextureFloat(targets.SceneColor, nvrhi::AllSubresources, nvrhi::Color(clearColor.r, clearColor.g, clearColor.b, 1.0f));
 		commandList.clearDepthStencilTexture(targets.SceneDepth, nvrhi::AllSubresources, true, 0.0f, false, 0);
-		commandList.clearTextureFloat(targets.SceneNormals, nvrhi::AllSubresources, nvrhi::Color(0.0f, 0.0f, 0.0f, 0.0f));
+		commandList.clearTextureFloat(targets.SceneNormals, nvrhi::AllSubresources, nvrhi::Color(0.0f));
+		if (picking)
+		{
+			commandList.clearTextureUInt(targets.EntityId, nvrhi::AllSubresources, 0);
+			state.RecordedPicking = true;
+		}
+		if (cascades.Count != 0 || !spots.Tiles.empty())
+		{
+			std::vector<MeshDrawItem> finiteCasters;
+			for (const MeshDrawItem& item : snapshot.Meshes)
+				if (Utils::IsFinite(item.World))
+					finiteCasters.push_back(item);
+			const ShadowRenderInputs inputs{
+				.Casters = finiteCasters,
+				.Cascades = cascades.Count != 0 ? &cascades : nullptr,
+				.Spots = !spots.Tiles.empty() ? &spots : nullptr,
+				.CascadeTarget = cascades.Count != 0 ? targets.Cascades.Get() : nullptr,
+				.AtlasTarget = !spots.Tiles.empty() ? targets.SpotAtlas.Get() : nullptr,
+				.DepthBias = cascades.Count != 0 ? snapshot.Lights[cascades.LightIndex].DepthBias : 1.0f,
+				.NormalBias = cascades.Count != 0 ? snapshot.Lights[cascades.LightIndex].NormalBias : 1.0f,
+			};
+			auto result = pipelines.Shadows->Record(commandList, recording, state.ShadowBindings, *state.Cache, *state.Assets, inputs);
+			if (!result)
+				keepFirstError(std::unexpected(std::move(result).error()));
+		}
+		nvrhi::IBindingSet* prepassSet = nullptr;
 		if (hasCamera)
 		{
-			nvrhi::BindingSetDesc prepassDesc;
-			prepassDesc.bindings = {
+			nvrhi::BindingSetDesc desc;
+			desc.bindings = {
 				nvrhi::BindingSetItem::ConstantBuffer(Utils::ViewConstantsRegister, state.ViewConstantsBuffer),
 				nvrhi::BindingSetItem::Sampler(Utils::AnisoWrapRegister, pipelines.AnisoWrap),
 				nvrhi::BindingSetItem::PushConstants(Utils::DrawConstantsSlot, sizeof(DrawConstants)),
 			};
-			nvrhi::BindingSetDesc forwardDesc;
-			forwardDesc.bindings = {
+			auto created = state.ViewBindings.GetOrCreate(*state.Device, desc, *pipelines.Layouts.PrepassView);
+			if (created)
+				prepassSet = *created;
+			else
+				keepFirstError(std::unexpected(std::move(created).error()));
+		}
+		if (prepassSet != nullptr && (!overdraw || picking))
+		{
+			recording.BeginPass("DepthNormal", &commandList);
+			RenderPassCounters counters;
+			state.RecordMeshPass(commandList, picking ? Detail::SceneRendererMeshPass::Picking : Detail::SceneRendererMeshPass::Prepass,
+				state.OpaqueDraws, *prepassSet, debugView, counters);
+			recording.EndPass(counters);
+		}
+		nvrhi::ITexture* occlusion = pipelines.WhiteAo;
+		nvrhi::ITexture* linearDepth = pipelines.FarDepth;
+		if (ao)
+		{
+			const Status depth = pipelines.DepthPyramid->Record(commandList, recording, state.DepthBindings, { .SceneDepth = targets.SceneDepth, .ViewDepth = targets.ViewDepth, .Camera = camera });
+			keepFirstError(depth);
+			if (depth)
+			{
+				auto result = pipelines.Gtao->Record(commandList, recording, state.GtaoBindings, { .Camera = camera, .Post = post, .HalfResolution = halfAo, .ViewDepth = targets.ViewDepth, .SceneNormals = targets.SceneNormals, .Occlusion = targets.Occlusion, .Scratch = targets.AoScratch });
+				if (result)
+				{
+					occlusion = *result;
+					linearDepth = targets.ViewDepth;
+				}
+				else
+					keepFirstError(std::unexpected(std::move(result).error()));
+			}
+		}
+		if (hasCamera && !dataView && !wireframe)
+		{
+			nvrhi::BindingSetDesc desc;
+			desc.bindings = {
 				nvrhi::BindingSetItem::ConstantBuffer(Utils::ViewConstantsRegister, state.ViewConstantsBuffer),
+				nvrhi::BindingSetItem::ConstantBuffer(Utils::ShadowConstantsRegister, state.ShadowConstantsBuffer),
 				nvrhi::BindingSetItem::ConstantBuffer(Utils::EnvironmentConstantsRegister, state.EnvironmentConstantsBuffer),
 				nvrhi::BindingSetItem::StructuredBuffer_SRV(Utils::LightsRegister, state.LightBuffer),
+				nvrhi::BindingSetItem::Texture_SRV(Utils::ShadowCascadesRegister, cascades.Count != 0 ? targets.Cascades : pipelines.EmptyCascades),
+				nvrhi::BindingSetItem::Texture_SRV(Utils::ShadowAtlasRegister, !spots.Tiles.empty() ? targets.SpotAtlas : pipelines.EmptyAtlas),
 				nvrhi::BindingSetItem::Texture_SRV(Utils::EnvSpecularRegister, environmentSpecular),
 				nvrhi::BindingSetItem::Texture_SRV(Utils::BrdfLutRegister, pipelines.DfgLut->GetTexture()),
+				nvrhi::BindingSetItem::Texture_SRV(Utils::AmbientOcclusionRegister, occlusion),
+				nvrhi::BindingSetItem::Texture_SRV(Utils::ViewDepthRegister, linearDepth),
+				nvrhi::BindingSetItem::Texture_SRV(Utils::SceneNormalsRegister, targets.SceneNormals),
 				nvrhi::BindingSetItem::Sampler(Utils::LinearClampRegister, pipelines.LinearClamp),
+				nvrhi::BindingSetItem::Sampler(Utils::ShadowCompareRegister, pipelines.ShadowCompare),
 				nvrhi::BindingSetItem::Sampler(Utils::AnisoWrapRegister, pipelines.AnisoWrap),
 				nvrhi::BindingSetItem::PushConstants(Utils::DrawConstantsSlot, sizeof(DrawConstants)),
 			};
-			const Result<nvrhi::IBindingSet*> prepassSet = state.ViewBindings.GetOrCreate(*state.Device, prepassDesc, *pipelines.Layouts.PrepassView);
-			const Result<nvrhi::IBindingSet*> forwardSet = state.ViewBindings.GetOrCreate(*state.Device, forwardDesc, *pipelines.Layouts.ForwardView);
-			if (prepassSet.has_value() && forwardSet.has_value())
+			auto forwardSet = state.ViewBindings.GetOrCreate(*state.Device, desc, *pipelines.Layouts.ForwardView);
+			if (!forwardSet)
+				keepFirstError(std::unexpected(std::move(forwardSet).error()));
+			else
 			{
-				// Pass 4: the depth/normal prepass (Opaque and Mask).
-				commandList.beginMarker("Prepass");
-				state.RecordMeshPass(commandList, MeshPass::Prepass, state.OpaqueDraws, **prepassSet, debugView);
-				commandList.endMarker();
-
-				// Pass 7: forward opaque.
-				commandList.beginMarker("ForwardOpaque");
-				state.RecordMeshPass(commandList, MeshPass::ForwardOpaque, state.OpaqueDraws, **forwardSet, debugView);
-				commandList.endMarker();
-
-				// Pass 8: the skybox, over every pixel the scene left at the cleared depth (Lit only).
+				if (!state.OpaqueDraws.empty())
+				{
+					recording.BeginPass("ForwardOpaque", &commandList);
+					RenderPassCounters counters;
+					state.RecordMeshPass(commandList, Detail::SceneRendererMeshPass::ForwardOpaque, state.OpaqueDraws, **forwardSet, debugView, counters);
+					recording.EndPass(counters);
+				}
 				if (isLit && camera.ClearToSkybox && environmentSkybox != nullptr && snapshot.Environment.ShowSkybox)
 				{
-					const SkyboxPassInputs skybox{
-						.Framebuffer = targets.ForwardFramebuffer,
-						.ViewConstants = state.ViewConstantsBuffer,
-						.EnvironmentConstants = state.EnvironmentConstantsBuffer,
-						.Skybox = environmentSkybox,
-					};
-					keepFirstError(pipelines.Skybox->Record(commandList, state.SkyboxBindings, skybox));
+					recording.BeginPass("Skybox", &commandList);
+					const Status drawn = pipelines.Skybox->Record(commandList, state.SkyboxBindings, { .Framebuffer = targets.ForwardFramebuffer, .ViewConstants = state.ViewConstantsBuffer, .EnvironmentConstants = state.EnvironmentConstantsBuffer, .Skybox = environmentSkybox });
+					recording.EndPass({ .DrawCalls = drawn ? 1U : 0U, .Triangles = drawn ? 1U : 0U });
+					keepFirstError(drawn);
 				}
-
-				// Pass 9: forward transparent (Blend), back to front.
-				commandList.beginMarker("ForwardTransparent");
-				state.RecordMeshPass(commandList, MeshPass::ForwardTransparent, state.TransparentDraws, **forwardSet, debugView);
-				commandList.endMarker();
-			}
-			else
-			{
-				keepFirstError(prepassSet.has_value() ? Status() : Status(std::unexpected(prepassSet.error())));
-				keepFirstError(forwardSet.has_value() ? Status() : Status(std::unexpected(forwardSet.error())));
+				if (!state.TransparentDraws.empty())
+				{
+					recording.BeginPass("ForwardTransparent", &commandList);
+					RenderPassCounters counters;
+					state.RecordMeshPass(commandList, Detail::SceneRendererMeshPass::ForwardTransparent, state.TransparentDraws, **forwardSet, debugView, counters);
+					recording.EndPass(counters);
+				}
 			}
 		}
-
-		// Pass 10: bloom (Lit only).
+		if (overdraw)
+		{
+			recording.BeginPass("Overdraw", &commandList);
+			RenderPassCounters counters;
+			commandList.clearTextureFloat(targets.Overdraw, nvrhi::AllSubresources, nvrhi::Color(0.0f));
+			if (prepassSet != nullptr)
+			{
+				state.RecordMeshPass(commandList, Detail::SceneRendererMeshPass::Overdraw, state.OpaqueDraws, *prepassSet, debugView, counters);
+				state.RecordMeshPass(commandList, Detail::SceneRendererMeshPass::Overdraw, state.TransparentDraws, *prepassSet, debugView, counters);
+			}
+			recording.EndPass(counters);
+		}
 		nvrhi::ITexture* bloom = nullptr;
 		const float bloomIntensity = std::isfinite(post.BloomIntensity) ? std::clamp(post.BloomIntensity, 0.0f, 1.0f) : 0.0f;
-		if (isLit && post.BloomEnabled && bloomIntensity > 0.0f)
+		if (isLit && !wireframe && post.BloomEnabled && bloomIntensity > 0.0f)
 		{
-			Result<nvrhi::ITexture*> chain = pipelines.Bloom->Record(commandList, state.BloomBindings, { .SceneColor = targets.SceneColor, .Chain = targets.Bloom });
-			if (chain.has_value())
-				bloom = *chain;
+			recording.BeginPass("Bloom", &commandList);
+			RenderPassCounters counters;
+			auto result = pipelines.Bloom->RecordCounted(commandList, state.BloomBindings, { .SceneColor = targets.SceneColor, .Chain = targets.Bloom }, counters);
+			if (result)
+				bloom = *result;
 			else
-				keepFirstError(std::unexpected(std::move(chain).error()));
+				keepFirstError(std::unexpected(std::move(result).error()));
+			recording.EndPass(counters);
 		}
-
-		// Pass 11: tonemap and encode. A debug view: Linear at exposure 1, no dither, the OETF only for the colour views.
-		const TonemapPassInputs tonemap{
-			.ViewConstants = state.ViewConstantsBuffer,
-			.SceneColor = targets.SceneColor,
-			.Bloom = bloom,
-			.BloomIntensity = bloom != nullptr ? bloomIntensity : 0.0f,
-			.BlueNoise = blueNoise,
-			.LdrColor = targets.Ldr[0],
-			.Settings = {
-				.Tonemapper = isLit ? post.Tonemap : RenderTonemapper::Linear,
-				.Dither = isLit && blueNoise != nullptr,
-				.EncodeSrgb = isLit || debugView == RenderDebugView::Albedo || debugView == RenderDebugView::Emissive,
-			},
-		};
-		keepFirstError(pipelines.Tonemap->Record(commandList, state.TonemapBindings, tonemap));
-
-		// Pass 12: FXAA (Lit only), into the partner target.
-		state.FinalTarget = 0;
-		if (isLit && post.FxaaEnabled)
+		// Dedicated data views bypass all tone/color transforms; Tonemap names the final output stage in every view.
+		recording.BeginPass("Tonemap", &commandList);
+		Status encoded;
+		if (dataView)
 		{
-			Result<nvrhi::ITexture*> antialiased = pipelines.Fxaa->Record(commandList, state.FxaaBindings, { .Source = targets.Ldr[0], .Destination = targets.Ldr[1] });
-			if (antialiased.has_value())
-				state.FinalTarget = *antialiased == targets.Ldr[1].Get() ? 1 : 0;
-			else
-				keepFirstError(std::unexpected(std::move(antialiased).error()));
-		}
-
-		// Passes 13 and 14: the debug lines (world space, so with a camera only), then the texts and the debug labels.
-		nvrhi::IFramebuffer* overlay = targets.OverlayFramebuffers[state.FinalTarget].Get();
-		if (hasCamera && !snapshot.DebugDraw.IsEmpty())
-		{
-			const DebugRenderInputs lines{ .DebugDraw = &snapshot.DebugDraw, .Framebuffer = overlay, .ViewConstants = state.ViewConstantsBuffer };
-			Result<uint32_t> vertices = pipelines.Debug->Record(commandList, state.DebugBindings, lines);
-			if (vertices.has_value())
-				state.Stats.DebugLineVertices = *vertices;
-			else
-				keepFirstError(std::unexpected(std::move(vertices).error()));
-		}
-		if (!snapshot.Texts.empty() || (hasCamera && !snapshot.DebugDraw.IsEmpty()))
-		{
-			const TextRenderInputs texts{
-				.Texts = snapshot.Texts,
-				.DebugDraw = &snapshot.DebugDraw,
-				.Assets = state.Assets,
-				.Framebuffer = overlay,
-				.ViewConstants = state.ViewConstantsBuffer,
-				.HasCamera = hasCamera,
-				.CameraView = hasCamera ? std::optional<glm::mat4>(camera.View) : std::nullopt,
+			nvrhi::BindingSetDesc desc;
+			desc.bindings = {
+				nvrhi::BindingSetItem::ConstantBuffer(0, state.ViewConstantsBuffer),
+				nvrhi::BindingSetItem::ConstantBuffer(1, state.ShadowConstantsBuffer),
+				nvrhi::BindingSetItem::Texture_SRV(0, targets.SceneDepth),
+				nvrhi::BindingSetItem::Texture_SRV(1, occlusion),
+				nvrhi::BindingSetItem::Texture_SRV(2, linearDepth),
+				nvrhi::BindingSetItem::Texture_SRV(3, targets.SceneNormals),
+				nvrhi::BindingSetItem::Texture_SRV(4, overdraw ? targets.Overdraw : targets.SceneColor),
+				nvrhi::BindingSetItem::Texture_UAV(0, targets.Ldr[0]),
+				nvrhi::BindingSetItem::PushConstants(3, sizeof(SceneDataViewConstants)),
 			};
-			Result<uint32_t> drawn = pipelines.Text->Record(commandList, state.TextBindings, texts);
-			if (drawn.has_value())
-				state.Stats.TextDraws = *drawn;
+			auto set = state.DataViewBindings.GetOrCreate(*state.Device, desc, *pipelines.DataView.BindingLayouts[0]);
+			if (!set)
+				encoded = std::unexpected(std::move(set).error());
 			else
-				keepFirstError(std::unexpected(std::move(drawn).error()));
+			{
+				nvrhi::ComputeState compute;
+				compute.pipeline = pipelines.DataView.Pipeline;
+				compute.bindings = { *set };
+				commandList.setComputeState(compute);
+				const SceneDataViewConstants constants{ .Options = glm::uvec4(static_cast<uint32_t>(debugView), 0, 0, 0) };
+				commandList.setPushConstants(&constants, sizeof(constants));
+				commandList.dispatch((targets.Width + 7) / 8, (targets.Height + 7) / 8);
+			}
+		}
+		else
+		{
+			encoded = pipelines.Tonemap->Record(commandList, state.TonemapBindings, { .ViewConstants = state.ViewConstantsBuffer, .SceneColor = targets.SceneColor, .Bloom = bloom, .BloomIntensity = bloom != nullptr ? bloomIntensity : 0.0f, .BlueNoise = blueNoise, .LdrColor = targets.Ldr[0], .Settings = { .Tonemapper = isLit ? post.Tonemap : RenderTonemapper::Linear, .Dither = isLit && blueNoise != nullptr, .EncodeSrgb = isLit || debugView == RenderDebugView::Albedo || debugView == RenderDebugView::Emissive } });
+		}
+		recording.EndPass({ .Dispatches = encoded ? 1U : 0U });
+		keepFirstError(encoded);
+		if (isLit && !wireframe && post.FxaaEnabled)
+		{
+			recording.BeginPass("FXAA", &commandList);
+			auto result = pipelines.Fxaa->Record(commandList, state.FxaaBindings, { .Source = targets.Ldr[0], .Destination = targets.Ldr[1] });
+			if (result)
+				state.FinalTarget = 1;
+			else
+				keepFirstError(std::unexpected(std::move(result).error()));
+			recording.EndPass({ .Dispatches = result ? 1U : 0U });
+		}
+		nvrhi::IFramebuffer* overlay = targets.OverlayFramebuffers[state.FinalTarget];
+		const auto drawLines = [&state, &pipelines, &commandList, &recording, &keepFirstError, overlay](std::string_view name, const DebugDrawList& lines)
+		{
+			if (std::none_of(lines.GetCommands().begin(), lines.GetCommands().end(), [](const DebugDrawCommand& command)
+			{
+				return !std::holds_alternative<DebugText>(command.Shape);
+			}))
+				return;
+			recording.BeginPass(name, &commandList);
+			RenderPassCounters counters;
+			auto result = pipelines.Debug->RecordCounted(commandList, state.DebugBindings, { .DebugDraw = &lines, .Framebuffer = overlay, .ViewConstants = state.ViewConstantsBuffer }, counters);
+			if (result)
+				state.Stats.DebugLineVertices += *result;
+			else
+				keepFirstError(std::unexpected(std::move(result).error()));
+			recording.EndPass(counters);
+		};
+		std::optional<RenderSnapshot> resizedOverlaySnapshot;
+		if (hasCamera && !dataView && (snapshot.Camera.ViewportWidth != targets.Width || snapshot.Camera.ViewportHeight != targets.Height))
+		{
+			resizedOverlaySnapshot = snapshot;
+			resizedOverlaySnapshot->Camera = camera;
+		}
+		const RenderSnapshot& overlaySnapshot = resizedOverlaySnapshot ? *resizedOverlaySnapshot : snapshot;
+		if (hasCamera && wireframe)
+		{
+			DebugDrawList edges;
+			keepFirstError(AppendWireframeOverlay(overlaySnapshot, *state.Assets, edges));
+			drawLines("Wireframe", edges);
+		}
+		if (hasCamera && selection)
+			keepFirstError(pipelines.Selection->Record(commandList, recording, state.SelectionBindings, *state.Cache, *state.Assets, { .Snapshot = &snapshot, .SceneDepth = targets.SceneDepth, .Mask = targets.SelectionMask, .Scratch = targets.SelectionScratch, .LdrColor = targets.Ldr[state.FinalTarget] }));
+		const bool annotations = snapshot.Annotations.Labels != RenderAnnotationLabels::None || snapshot.Annotations.Bounds || snapshot.Annotations.Axes
+			|| HasFlag(snapshot.Flags, RenderViewFlags::Colliders);
+		DebugDrawList overlays;
+		if (!dataView || annotations)
+			overlays.Append(snapshot.DebugDraw);
+		if (hasCamera && !dataView)
+			keepFirstError(AppendEditorOverlay(overlaySnapshot, overlays));
+		if (hasCamera)
+			drawLines("Overlays", overlays);
+		const std::span<const TextItem> texts = dataView ? std::span<const TextItem>() : std::span<const TextItem>(snapshot.Texts);
+		const bool hasLabels = std::any_of(overlays.GetCommands().begin(), overlays.GetCommands().end(), [](const DebugDrawCommand& command)
+		{
+			return std::holds_alternative<DebugText>(command.Shape);
+		});
+		if (!texts.empty() || (hasCamera && hasLabels))
+		{
+			recording.BeginPass("Text", &commandList);
+			RenderPassCounters counters;
+			auto result = pipelines.Text->RecordCounted(commandList, state.TextBindings, { .Texts = texts, .DebugDraw = &overlays, .Assets = state.Assets, .Framebuffer = overlay, .ViewConstants = state.ViewConstantsBuffer, .HasCamera = hasCamera, .CameraView = hasCamera ? std::optional<glm::mat4>(camera.View) : std::nullopt }, counters);
+			if (result)
+				state.Stats.TextDraws = *result;
+			else
+				keepFirstError(std::unexpected(std::move(result).error()));
+			recording.EndPass(counters);
 		}
 		commandList.endMarker();
-
-		// The view keeps only the sets this render bound (the recorded command list holds its own references).
 		state.ReleaseUnusedBindings();
+		std::set<size_t> visibleMeshes;
+		for (const auto& draw : state.OpaqueDraws)
+			visibleMeshes.insert(draw.SnapshotIndex);
+		for (const auto& draw : state.TransparentDraws)
+			visibleMeshes.insert(draw.SnapshotIndex);
+		stats.VisibleMeshes = static_cast<uint32_t>(visibleMeshes.size());
+		stats.CulledSubmeshes = state.Stats.CulledSubmeshes;
+		stats.ShadowedSpotLights = static_cast<uint32_t>(spots.Tiles.size());
+		stats.DroppedSpotShadows = spots.Dropped;
+		for (const RenderPassStats& pass : stats.Passes)
+			if (pass.Name == "DirectionalShadows" || pass.Name == "SpotShadows")
+				stats.ShadowDraws += pass.DrawCalls;
+		stats.MemoryAllocationCount = state.Device->GetMemoryAllocationCount();
+		stats.MaxMemoryAllocationCount = state.Device->GetInfo().MaxMemoryAllocationCount;
+		if (stats.MemoryAllocationCount > 2000 && !state.AllocationLimitLogged)
+		{
+			state.AllocationLimitLogged = true;
+			ENGINE_CORE_WARN("Renderer device uses {} native memory allocations (device limit {}); more than 2000 warrants inspection (logged once per view)",
+				stats.MemoryAllocationCount, stats.MaxMemoryAllocationCount);
+		}
+		stats.CpuMilliseconds = (Utils::SceneRendererNowSeconds() - started) * 1000.0;
+		constexpr std::array<std::string_view, 22> Order = { "Prepare", "DirectionalShadows", "SpotShadows", "DepthNormal", "DepthPyramid", "GTAO", "GTAODenoiseHorizontal", "GTAODenoiseVertical", "ForwardOpaque", "Skybox", "ForwardTransparent", "Overdraw", "Bloom", "Tonemap", "FXAA", "SelectionMask", "SelectionDilateHorizontal", "SelectionDilateVertical", "SelectionComposite", "Wireframe", "Overlays", "Text" };
+		std::stable_sort(stats.Passes.begin(), stats.Passes.end(), [&Order](const RenderPassStats& left, const RenderPassStats& right)
+		{
+			return std::find(Order.begin(), Order.end(), left.Name) < std::find(Order.begin(), Order.end(), right.Name);
+		});
+		state.History.PublishCpu(std::move(stats));
+		state.History.PublishGpu(completedTiming);
 		return status;
 	}
 

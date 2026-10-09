@@ -571,8 +571,8 @@ namespace Engine {
 		{
 			const std::span<const std::string_view> codes = ProjectValidator::GetCodes();
 			// M4's 14 codes, M6's 11 (the asset codes but the runtime-only ASSET_UPLOAD_FAILED, and PREFAB_MISSING_ASSET), M8's
-			// RENDER_LIGHT_LIMIT_EXCEEDED, M11's 10 physics codes and M12's 2 audio codes.
-			CHECK(codes.size() == 28 + PhysicsDiagnosticCodes.size());
+			// RENDER_LIGHT_LIMIT_EXCEEDED, M9's two render warnings, M11's 10 physics codes and M12's 2 audio codes.
+			CHECK(codes.size() == 30 + PhysicsDiagnosticCodes.size());
 			std::vector<std::string_view> sorted(codes.begin(), codes.end());
 			std::sort(sorted.begin(), sorted.end());
 			CHECK(std::adjacent_find(sorted.begin(), sorted.end()) == sorted.end());
@@ -708,6 +708,8 @@ namespace Engine {
 
 		TEST_CASE("ProjectValidator: a reference to an unregistered asset is ASSET_MISSING")
 		{
+			// The render validation scan resolves the same missing mesh to its CPU placeholder and logs it once.
+			const Test::ExpectLog missingMesh(LogLevel::Error, "ASSET_MISSING: asset 7777000077770000");
 			Test::EditorTestFixture fixture("ValidatorAssetMissing");
 			fixture.CreateAndOpenProject();
 			fixture.CreateAndOpenScene();
@@ -727,6 +729,7 @@ namespace Engine {
 			CHECK(missing->Component == "MeshRenderer");
 			CHECK(missing->Field == "Mesh");
 			CHECK(missing->Asset == "7777000077770000");
+			CHECK(missingMesh.GetMatchCount() == 1);
 			// A built-in reference is never missing.
 			{
 				SceneEdit edit(editor, "Use Cube");

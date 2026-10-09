@@ -1,15 +1,21 @@
 #pragma once
 
+#include "Engine/Core/Base.h"
 #include "Engine/Core/Result.h"
 
+#include <cstddef>
 #include <cstdint>
+#include <filesystem>
+#include <functional>
 #include <optional>
+#include <span>
 #include <string>
 #include <vector>
 
 namespace Engine {
 
 	class EditorContext;
+	class LoadedProject;
 
 	enum class AutosaveReason : uint8_t
 	{
@@ -30,6 +36,11 @@ namespace Engine {
 	{
 		double IntervalSeconds = 120.0;
 		uint32_t RetainedGenerations = 3;
+		// Optional native atomic writer; empty uses FileSystem::WriteFileAtomic without backups. Copied into the service.
+		// Called under the sole writer lease, on either the main or failing thread. Production callbacks must never
+		// access editor/ECS/VFS/GPU state, wait on an application lock, or log. Captures must outlive this service.
+		// Expected failures return Status. An exception on the fatal path becomes IoFailure without logging.
+		std::function<Status(const std::filesystem::path&, std::span<const std::byte>)> WriteFile{};
 	};
 
 	struct AutosaveRecoveryInfo
@@ -63,8 +74,8 @@ namespace Engine {
 	// Keep the last published generation usable while preparing the next. Fixed bounded slots; no unbounded snapshots.
 	// One atomic disk-writer claim covers payloads, manifest publication and retention. Fatal claims never wait; a normal
 	// save already writing means Busy. The claim keeps the closing project pinned through the host Reset protocol.
-	// Main-thread GPU failures at a known safe boundary call Save(FatalError) first to capture the newest committed scene;
-	// all other fatal paths use the last published revision (best effort, explicitly allowed to lag in-flight edits).
+	// The host publishes after committed edits and before GPU work. Every fatal callback uses that last published
+	// revision through WriteFatalSnapshot, including main-thread GPU failures; in-flight edits may be absent.
 	//
 	// Writes use generation directories under Library/Autosave and atomically publish the manifest LAST. Incomplete
 	// generations are ignored. Read-only/dry-run/no-project states never publish paths or write into the project.
@@ -110,6 +121,15 @@ namespace Engine {
 		// Never overwrite source Assets files. A failure leaves current scene/project data untouched. Requires the held
 		// writer lock: PermissionDenied read-only; NotFound stale generation; Conflict source changed since offer.
 		[[nodiscard]] Status Recover(const AutosaveRecoveryInfo& recovery);
+		// Main-thread launcher operation. Takes the already-locked project and preflights the recovery into temporary
+		// CPU objects, including its original source fingerprint/untitled token, before opening any editor mounts.
+		// Requires this service to be quiescent/unbound (new, or after successful Reset); it never closes a project or
+		// changes host lifecycle policy. InvalidArgument for null; PermissionDenied read-only; InvalidState if already open,
+		// in a dry run or busy;
+		// otherwise the validation/read errors of Recover and EditorContext::OpenProject. On failure the editor remains
+		// in the launcher and the transferred project lock is released. On success installs once, dirty, empty history,
+		// retaining the validated baseline in this same long-lived service for matching cleanup after explicit save.
+		[[nodiscard]] Status OpenRecoveredProject(Scope<LoadedProject> project, const AutosaveRecoveryInfo& recovery);
 		// After successful explicit save, discard only generations whose source matches the saved canonical path and
 		// captured source fingerprint (untitled uses the captured in-session document token until first save).
 		// Never discard another scene's recovery. InvalidState dry-run; PermissionDenied read-only; Io.
@@ -120,6 +140,9 @@ namespace Engine {
 		// Idempotent; never reopens admission. Do not spin, unlock, unmount or replace the project after a false result.
 		// Shutdown first quiesces/uninstalls the fatal hook, then requires a successful Reset before destruction.
 		[[nodiscard]] bool Reset();
+	private:
+		struct State;
+		Scope<State> m_State{};
 	};
 
 }

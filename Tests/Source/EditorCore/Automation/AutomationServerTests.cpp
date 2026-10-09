@@ -7,6 +7,7 @@
 #include "Engine/Automation/Protocol/SessionFile.h"
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Json/JsonReader.h"
+#include "Engine/Core/Log.h"
 #include "Engine/Platform/Process.h"
 #include "Engine/Platform/Socket.h"
 #include "Engine/Session/PlaySession.h"
@@ -15,6 +16,8 @@
 #include "Support/ExpectLog.h"
 #include "Support/Utf8Path.h"
 #include "Support/WaitUntil.h"
+
+#include <tuple>
 
 namespace Engine {
 
@@ -27,6 +30,241 @@ namespace Engine {
 
 	TEST_SUITE("EditorCore")
 	{
+		TEST_CASE("AutomationServer: one-shot exclusion suppresses preference listening but preserves explicit intent")
+		{
+			for (bool explicitIntent : { false, true })
+			{
+				Test::EditorTestFixture fixture("ServerOneShot");
+				auto specification = Test::MakeTestServerSpecification();
+				specification.PreferenceListeningAllowed = false;
+				specification.Listen = explicitIntent;
+				specification.SessionsDirectory = fixture.GetDirectory() / "Sessions";
+				Test::AutomationTestClient client(fixture.GetEditor(), specification);
+				AutomationServer& server = client.GetServer();
+				const uint16_t port = server.GetPort();
+				for (bool allowed : { true, false, true })
+				{
+					REQUIRE(server.SetPreferenceListening(allowed));
+					CHECK(server.GetPort() == port);
+					CHECK((port != 0) == explicitIntent);
+					CHECK(server.GetSpecification().Listen == explicitIntent);
+					CHECK(client.Call("session.info", Json::object()));
+				}
+			}
+		}
+
+		TEST_CASE("AutomationServer: failed binding leaves the session and in-process clients intact")
+		{
+			Test::EditorTestFixture fixture("ServerBindRollback");
+			auto blocker = SocketListener::Listen(0);
+			REQUIRE(blocker);
+			auto specification = Test::MakeTestServerSpecification();
+			specification.Port = blocker->GetPort();
+			specification.SessionsDirectory = fixture.GetDirectory() / "Sessions";
+			const auto file = SessionFile::GetPath(specification.SessionsDirectory, Process::GetCurrentId());
+			REQUIRE(FileSystem::CreateDirectories(specification.SessionsDirectory));
+			const std::string previous = "previous session bytes";
+			REQUIRE(FileSystem::WriteFileAtomic(file, std::as_bytes(std::span(previous.data(), previous.size()))));
+			Test::AutomationTestClient client(fixture.GetEditor(), specification);
+			AutomationServer& server = client.GetServer();
+			const auto failed = server.SetPreferenceListening(true);
+			REQUIRE_FALSE(failed);
+			CHECK(failed.error().GetCode() == ErrorCode::AlreadyExists);
+			CHECK(server.GetPort() == 0);
+			CHECK(FileSystem::ReadText(file).value_or("") == previous);
+			CHECK(client.Call("session.info", Json::object()));
+			blocker->Close();
+			REQUIRE(server.SetPreferenceListening(true));
+			CHECK(server.GetPort() == specification.Port);
+			REQUIRE(server.SetPreferenceListening(false));
+			CHECK_FALSE(FileSystem::Exists(file));
+			CHECK(client.Call("session.info", Json::object()));
+		}
+
+		TEST_CASE("AutomationServer: activity reports notifications and preparation failures without responses")
+		{
+			Test::EditorTestFixture fixture("ServerNotificationActivity");
+			auto now = std::chrono::steady_clock::time_point{};
+			auto specification = Test::MakeTestServerSpecification();
+			specification.WallClock = [&now]()
+			{
+				return now;
+			};
+			Test::AutomationTestClient client(fixture.GetEditor(), specification);
+			AutomationServer& server = client.GetServer();
+			for (const auto& [method, params, failed] : std::vector<std::tuple<std::string, Json, bool>>{
+					 { "session.info", Json::object(), false },
+					 { "session.info", Json{ { "unexpected", true } }, true },
+					 { "unknown.method", Json::object(), true },
+					 { "entity.get", Json::object(), true } })
+			{
+				server.SubmitInProcess(client.GetClient(), RpcRequest{ .Id = {}, .IsNotification = true, .Method = method, .Params = params, .TranscriptLine = std::nullopt });
+				server.Pump();
+				CHECK(server.TakeInProcessResponses(client.GetClient()).empty());
+				const auto activity = server.GetRecentRequestActivity();
+				REQUIRE_FALSE(activity.empty());
+				CHECK(activity.front().Method == method);
+				CHECK(activity.front().RequestId == "null");
+				CHECK(activity.front().Completed);
+				CHECK(activity.front().Failed == failed);
+				CHECK(activity.front().DurationMilliseconds == 0.0);
+			}
+		}
+
+		TEST_CASE("AutomationServer: stopping preference listening cancels TCP work and preserves in-process clients")
+		{
+			Test::EditorTestFixture fixture("ServerPreferenceDisconnect");
+			fixture.CreateAndOpenProject();
+			auto specification = Test::MakeTestServerSpecification();
+			specification.SessionsDirectory = fixture.GetDirectory() / "Sessions";
+			Test::AutomationTestClient client(fixture.GetEditor(), specification);
+			AutomationServer& server = client.GetServer();
+			REQUIRE(server.SetPreferenceListening(true));
+			const auto file = SessionFile::GetPath(specification.SessionsDirectory, Process::GetCurrentId());
+			const auto session = SessionFile::FromText(FileSystem::ReadText(file).value_or(""));
+			REQUIRE(session);
+			auto socket = Socket::Connect(server.GetPort(), std::chrono::seconds(10));
+			REQUIRE(socket);
+			const Json hello{ { "jsonrpc", "2.0" }, { "id", 1 }, { "method", "session.hello" },
+				{ "params", Json{ { "token", session->Token }, { "protocolVersion", "1.0" }, { "client", Json{ { "name", "tcp-pending" }, { "version", "1" } } } } } };
+			const std::string frames = EncodeFrame(hello.dump()) + EncodeFrame(R"({"jsonrpc":"2.0","method":"debug.pend","params":{"frames":0}})")
+				+ EncodeFrame(R"({"jsonrpc":"2.0","method":"project.info","params":{}})");
+			REQUIRE(socket->Send(std::as_bytes(std::span(frames.data(), frames.size())), std::chrono::seconds(10)));
+			REQUIRE(Test::WaitUntil([&server]()
+			{
+				server.Pump();
+				const auto activity = server.GetRecentRequestActivity();
+				return !activity.empty() && activity.front().Method == "debug.pend" && !activity.front().Completed;
+			}));
+			REQUIRE(server.SetPreferenceListening(false));
+			CHECK(server.GetPort() == 0);
+			CHECK_FALSE(FileSystem::Exists(file));
+			const auto clients = server.GetClients();
+			REQUIRE(clients.size() == 1);
+			CHECK(clients[0].Id == client.GetClient());
+			CHECK(clients[0].InProcess);
+			const auto activity = server.GetRecentRequestActivity();
+			REQUIRE(activity.size() == 2);
+			CHECK(activity.front().Method == "debug.pend");
+			CHECK(activity.front().Completed);
+			CHECK(activity.front().Failed);
+			CHECK(client.Call("session.info", Json::object()));
+			REQUIRE(server.SetPreferenceListening(true));
+			const auto restarted = SessionFile::FromText(FileSystem::ReadText(file).value_or(""));
+			REQUIRE(restarted);
+			CHECK(restarted->Token != session->Token);
+			CHECK(restarted->Port == server.GetPort());
+		}
+
+		TEST_CASE("AutomationServer: failed session removal retains the working listener")
+		{
+			Test::EditorTestFixture fixture("ServerStopRollback");
+			auto specification = Test::MakeTestServerSpecification();
+			specification.SessionsDirectory = fixture.GetDirectory() / "Sessions";
+			Test::AutomationTestClient client(fixture.GetEditor(), specification);
+			AutomationServer& server = client.GetServer();
+			REQUIRE(server.SetPreferenceListening(true));
+			const uint16_t port = server.GetPort();
+			const auto file = SessionFile::GetPath(specification.SessionsDirectory, Process::GetCurrentId());
+			REQUIRE(FileSystem::Remove(file));
+			REQUIRE(FileSystem::CreateDirectories(file));
+			REQUIRE(FileSystem::WriteFileAtomic(file / "Blocker", {}));
+			CHECK_FALSE(server.SetPreferenceListening(false));
+			CHECK(server.GetPort() == port);
+			CHECK(client.Call("session.info", Json::object()));
+			REQUIRE(FileSystem::Remove(file / "Blocker"));
+			REQUIRE(FileSystem::Remove(file));
+			REQUIRE(server.SetPreferenceListening(false));
+			CHECK(server.GetPort() == 0);
+		}
+
+		TEST_CASE("AutomationServer: pausing preserves admitted work and rejects queued work at admission")
+		{
+			Test::EditorTestFixture fixture("ServerPauseAdmission");
+			fixture.CreateAndOpenProject();
+			auto now = std::chrono::steady_clock::time_point{};
+			auto specification = Test::MakeTestServerSpecification();
+			specification.WallClock = [&now]()
+			{
+				return now;
+			};
+			Test::AutomationTestClient client(fixture.GetEditor(), specification);
+			AutomationServer& server = client.GetServer();
+			server.SubmitInProcess(client.GetClient(), RpcRequest{ .Id = 1, .Method = "debug.pend", .Params = Json{ { "frames", 2 } }, .TranscriptLine = std::nullopt });
+			server.SubmitInProcess(client.GetClient(), RpcRequest{ .Id = 2, .Method = "project.info", .Params = Json::object(), .TranscriptLine = std::nullopt });
+			server.Pump();
+			auto activity = server.GetRecentRequestActivity();
+			REQUIRE(activity.size() == 1);
+			CHECK_FALSE(activity[0].Completed);
+			now += std::chrono::milliseconds(25);
+			CHECK(server.GetRecentRequestActivity()[0].DurationMilliseconds == 25.0);
+			server.SetEditorPolicy({ .Paused = true });
+			server.Pump();
+			server.Pump();
+			const auto responses = server.TakeInProcessResponses(client.GetClient());
+			REQUIRE(responses.size() == 2);
+			CHECK(responses[0].contains("result"));
+			CHECK(responses[1]["error"]["code"] == Json(std::to_underlying(RpcErrorCode::Busy)));
+			activity = server.GetRecentRequestActivity();
+			REQUIRE(activity.size() == 2);
+			CHECK(activity[0].Failed);
+			CHECK(activity[1].Completed);
+			CHECK_FALSE(activity[1].Failed);
+			CHECK(activity[1].DurationMilliseconds == 25.0);
+		}
+
+		TEST_CASE("AutomationServer: cancellation completes activity and drops unadmitted queued notifications")
+		{
+			Test::EditorTestFixture fixture("ServerCancelledActivity");
+			fixture.CreateAndOpenProject();
+			auto now = std::chrono::steady_clock::time_point{};
+			auto specification = Test::MakeTestServerSpecification();
+			specification.WallClock = [&now]()
+			{
+				return now;
+			};
+			Test::AutomationTestClient client(fixture.GetEditor(), specification);
+			AutomationServer& server = client.GetServer();
+			const ClientId doomed = server.ConnectInProcess("doomed");
+			server.SubmitInProcess(doomed, RpcRequest{ .Id = {}, .IsNotification = true, .Method = "debug.pend", .Params = Json{ { "frames", 0 } }, .TranscriptLine = std::nullopt });
+			server.SubmitInProcess(doomed, RpcRequest{ .Id = {}, .IsNotification = true, .Method = "session.info", .Params = Json::object(), .TranscriptLine = std::nullopt });
+			server.Pump();
+			now += std::chrono::milliseconds(13);
+			server.DisconnectInProcess(doomed);
+			const auto activity = server.GetRecentRequestActivity();
+			REQUIRE(activity.size() == 1);
+			CHECK(activity[0].Completed);
+			CHECK(activity[0].Failed);
+			CHECK(activity[0].DurationMilliseconds == 13.0);
+			CHECK(activity[0].Client == "doomed");
+			CHECK(client.Call("session.info", Json::object()));
+		}
+
+		TEST_CASE("AutomationServer: identical notification IDs keep independent pending outcomes")
+		{
+			Test::EditorTestFixture fixture("ServerConcurrentActivity");
+			fixture.CreateAndOpenProject();
+			Test::AutomationTestClient client(fixture.GetEditor());
+			AutomationServer& server = client.GetServer();
+			const ClientId pending = server.ConnectInProcess("pending-notification");
+			server.SubmitInProcess(pending, RpcRequest{ .Id = {}, .IsNotification = true, .Method = "debug.pend", .Params = Json{ { "frames", 0 } }, .TranscriptLine = std::nullopt });
+			server.Pump();
+			server.SubmitInProcess(client.GetClient(), RpcRequest{ .Id = {}, .IsNotification = true, .Method = "session.info", .Params = Json::object(), .TranscriptLine = std::nullopt });
+			server.Pump();
+			const auto during = server.GetRecentRequestActivity();
+			REQUIRE(during.size() == 2);
+			CHECK(during[0].Completed);
+			CHECK_FALSE(during[0].Failed);
+			CHECK_FALSE(during[1].Completed);
+			server.DisconnectInProcess(pending);
+			const auto after = server.GetRecentRequestActivity();
+			REQUIRE(after.size() == 2);
+			CHECK(after[0].Completed);
+			CHECK_FALSE(after[0].Failed);
+			CHECK(after[1].Completed);
+			CHECK(after[1].Failed);
+		}
+
 		TEST_CASE("AutomationServer: the launcher state allows only session, rpc, docs and project creation methods")
 		{
 			Test::EditorTestFixture fixture("ServerLauncher");
@@ -52,7 +290,7 @@ namespace Engine {
 			fixture.CreateAndOpenProject();
 			fixture.CreateAndOpenScene();
 			const std::filesystem::path projectFile = fixture.GetEditor().GetProject().GetProjectFile();
-			fixture.GetEditor().CloseProject();
+			REQUIRE(fixture.GetEditor().CloseProject());
 			Result<Scope<LoadedProject>> project = ProjectManager::OpenProject(projectFile,
 				{ .ReadOnly = true, .StrictUnknowns = false, .ReadOnlyCacheDirectory = fixture.GetDirectory() / "Private" },
 				fixture.GetEngine().GetTypeRegistry());
@@ -115,7 +353,7 @@ namespace Engine {
 		TEST_CASE("AutomationServer: disconnecting a client cancels its pending operations and appends the event")
 		{
 			Test::EditorTestFixture fixture("ServerDisconnect");
-			fixture.CreateAndOpenProject(); // log.read, which checks the cancellation below, needs a project (§12.1)
+			fixture.CreateAndOpenProject(); // log.read, which checks the cancellation below, needs a project (Â§12.1)
 			Test::AutomationTestClient client(fixture.GetEditor());
 			AutomationServer& server = client.GetServer();
 			const ClientId other = server.ConnectInProcess("doomed");
@@ -123,13 +361,14 @@ namespace Engine {
 			server.Pump();
 			CHECK(server.TakeInProcessResponses(other).empty());
 			const uint64_t nextEvent = fixture.GetEngine().GetEventLog().GetNextSeq();
+			const uint64_t nextLog = Log::GetRingBuffer().GetNextSeq();
 			server.DisconnectInProcess(other);
 			server.Pump();
 			const EventReadResult events = fixture.GetEngine().GetEventLog().Read(nextEvent);
 			REQUIRE(events.Events.size() == 1);
 			CHECK(events.Events[0].Type == EngineEventType::AutomationClientDisconnected);
 			CHECK(events.Events[0].Name == "doomed");
-			Result<Json> log = client.Call("log.read", Json{ { "contains", "Cancelled debug.pend" } });
+			Result<Json> log = client.Call("log.read", Json{ { "cursor", std::to_string(nextLog) }, { "contains", "Cancelled debug.pend" } });
 			REQUIRE(log.has_value());
 			CHECK((*log)["entries"].size() == 1);
 		}

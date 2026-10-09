@@ -28,10 +28,12 @@
 #include "Shared/MaterialConstants.h"
 #include "Shared/ShaderLight.h"
 #include "Shared/ViewConstants.h"
+#include "Common/Shadows.slang"
 
 import Common.Brdf;
 import Common.Environment;
 import Common.Lighting;
+import Common.Gtao;
 
 #if !defined(ALPHA_MASK)
 	#define ALPHA_MASK 0
@@ -39,11 +41,18 @@ import Common.Lighting;
 
 // Set 0: per view (§8.4).
 ConstantBuffer<ViewConstants> View : register(b0, space0);
+ConstantBuffer<ShadowConstants> Shadows : register(b1, space0);
 ConstantBuffer<EnvironmentConstants> Env : register(b2, space0);
 StructuredBuffer<ShaderLight> Lights : register(t0, space0);
+Texture2DArray<float> ShadowMaps : register(t1, space0);
+Texture2D<float> ShadowAtlas : register(t2, space0);
 TextureCube<float4> EnvSpecular : register(t3, space0);
 Texture2D<float2> DfgLut : register(t5, space0);
+Texture2D<float> AmbientOcclusion : register(t6, space0);
+Texture2D<float> LinearViewDepth : register(t8, space0);
+Texture2D<float2> SceneNormals : register(t9, space0);
 SamplerState LinearClamp : register(s0, space0);
+SamplerComparisonState ShadowCompare : register(s1, space0);
 SamplerState AnisoWrap : register(s2, space0);
 [[vk::push_constant]] ConstantBuffer<DrawConstants> Draw;
 
@@ -295,9 +304,29 @@ float4 ShadeForward(VertexOutput input, Surface surface)
 	const float3 energyCompensation = float3(1.0) + f0 * (1.0 / max(dfg.y, 1e-4) - 1.0);
 	const float3 reflection = reflect(-view, normal);
 
+	// Receiver depth follows the triangle plane, not interpolated or normal-mapped shading normals. Evaluate
+	// derivatives before any per-light/cascade divergence, then orient the plane for the receiver normal offset.
+	float3 shadowNormal = cross(ddx(input.WorldPosition), ddy(input.WorldPosition));
+	float shadowNormalLength = dot(shadowNormal, shadowNormal);
+	shadowNormal = shadowNormalLength > 1e-20 ? shadowNormal * rsqrt(shadowNormalLength) : surface.GeometricNormal;
+	shadowNormal *= dot(shadowNormal, surface.GeometricNormal) < 0.0 ? -1.0 : 1.0;
+
 	float3 radiance = float3(0.0);
 	for (uint index = 0; index < View.LightCount; ++index)
-		radiance += ShadeLight(Lights[index], input.WorldPosition, normal, view, nDotV, diffuseColor, f0, energyCompensation, alpha, reflection);
+	{
+		const ShaderLight light = Lights[index];
+		float visibility = 1.0;
+		if ((Draw.Flags & DrawFlagReceiveShadows) != 0)
+		{
+			if (light.Type == ShaderLightTypeDirectional && Shadows.Counts.x != 0 && index == Shadows.Counts.z)
+				visibility = SampleDirectionalShadow(ShadowMaps, ShadowCompare, Shadows, input.WorldPosition, shadowNormal, -light.Direction,
+					-mul(View.View, float4(input.WorldPosition, 1.0)).z, uint2(input.Position.xy));
+			else if (light.Type == ShaderLightTypeSpot && Shadows.Counts.y != 0)
+				visibility = SampleSpotShadow(ShadowAtlas, ShadowCompare, Shadows, index, input.WorldPosition, shadowNormal,
+					SafeNormalize(light.Position - input.WorldPosition), uint2(input.Position.xy));
+		}
+		radiance += visibility * ShadeLight(light, input.WorldPosition, normal, view, nDotV, diffuseColor, f0, energyCompensation, alpha, reflection);
+	}
 
 	// Image-based lighting (§8.6), or the constant ambient as a uniform environment.
 	float3 irradiance = Env.AmbientColor;
@@ -309,7 +338,7 @@ float4 ShadeForward(VertexOutput input, Surface surface)
 		prefiltered = EnvSpecular.SampleLevel(LinearClamp, lookup, roughness * Env.SpecularMaxLod).rgb * Env.Intensity;
 	}
 	const float3 multiScatter = singleScatter * energyCompensation;
-	const float occlusion = surface.Occlusion;
+	const float occlusion = min(surface.Occlusion, SampleGtao(AmbientOcclusion, LinearViewDepth, SceneNormals, uint2(input.Position.xy)));
 	radiance += irradiance * diffuseColor * saturate(float3(1.0) - multiScatter) * MultiBounceAmbientOcclusion(occlusion, diffuseColor);
 	radiance += prefiltered * multiScatter * (SpecularOcclusion(nDotV, occlusion, alpha) * HorizonOcclusion(reflection, surface.GeometricNormal));
 	radiance += surface.Emissive;
@@ -327,5 +356,41 @@ ForwardOutput PSForward(VertexOutput input, bool isFrontFace : SV_IsFrontFace)
 #if ALPHA_MASK
 	output.Coverage = GetCoverage(surface);
 #endif
+	return output;
+}
+
+struct PickingOutput
+{
+	float2 Normal : SV_Target0;
+	uint EntityId : SV_Target1;
+	uint Coverage : SV_Coverage;
+};
+
+[shader("fragment")]
+PickingOutput PSPicking(VertexOutput input, bool isFrontFace : SV_IsFrontFace)
+{
+	const Surface surface = EvaluateSurface(input, isFrontFace);
+	PickingOutput output;
+	output.Normal = EncodeOctahedral(SafeNormalize(mul((float3x3)View.View, surface.Normal)));
+	output.EntityId = Draw.EntityId;
+	output.Coverage = GetCoverage(surface);
+	return output;
+}
+
+struct OverdrawOutput
+{
+	float4 Count : SV_Target0;
+	uint Coverage : SV_Coverage;
+};
+
+[shader("fragment")]
+OverdrawOutput PSOverdraw(VertexOutput input)
+{
+	const float alpha = BaseColorMap.Sample(AnisoWrap, input.TexCoord * Material.UVScale + Material.UVOffset).a * Material.BaseColor.a;
+	const bool rejected = (Material.AlphaMode == MaterialAlphaModeMask && alpha < Material.AlphaCutoff)
+		|| (Material.AlphaMode == MaterialAlphaModeBlend && alpha <= 0.0);
+	OverdrawOutput output;
+	output.Count = float4(1.0, 0.0, 0.0, 0.0);
+	output.Coverage = rejected ? 0u : 0xffffffffu;
 	return output;
 }

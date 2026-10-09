@@ -37,9 +37,8 @@ namespace Engine {
 		{
 			Scope<MethodContext> Context; // destroyed after the operation (reverse member order)
 			Scope<PendingOperation> Operation;
-			Json Id{};
+			DispatcherRequestEvent Activity{};
 			bool IsNotification = false;
-			uint64_t StartOrder = 0; // pending operations are polled in the order they started
 		};
 
 		struct Client
@@ -56,7 +55,7 @@ namespace Engine {
 		DispatcherSpecification Specification{};
 		MetaBuilder Meta;
 		uint64_t NextOffloadSequence = 1;
-		uint64_t NextStartOrder = 1;
+		uint64_t NextRequestSequence = 1;
 		std::map<ClientId, Client> Clients{}; // id order is the round-robin order
 		ClientId LastServed = NoClient;
 
@@ -71,10 +70,11 @@ namespace Engine {
 		// Cancels a pending operation without answering it (§13.2 "Disconnect"): Cancel between EnterInvocation and
 		// LeaveInvocation, then FinishRequest.
 		void Cancel(PendingRequest& pending);
-		void RespondResult(ClientId client, const Json& id, bool isNotification, Json result, const MethodContext& context,
+		void Observe(const DispatcherRequestEvent& activity, DispatcherRequestPhase phase) const;
+		void RespondResult(const DispatcherRequestEvent& activity, bool isNotification, Json result, const MethodContext& context,
 			std::vector<OutboundMessage>& messages);
 		// `meta`: the "_meta" already built for this response, or null to build it now.
-		void RespondError(ClientId client, const Json& id, bool isNotification, RpcErrorCode code, const Error& error, const Json& extraData,
+		void RespondError(const DispatcherRequestEvent& activity, bool isNotification, RpcErrorCode code, const Error& error, const Json& extraData,
 			std::vector<OutboundMessage>& messages, const Json* meta = nullptr);
 	};
 
@@ -196,15 +196,41 @@ namespace Engine {
 		Host->FinishRequest(context);
 		if (*outcome)
 		{
-			RespondResult(client, pending->Id, pending->IsNotification, std::move(**outcome), context, messages);
+			RespondResult(pending->Activity, pending->IsNotification, std::move(**outcome), context, messages);
 			return;
 		}
 		const Error& error = outcome->error();
-		RespondError(client, pending->Id, pending->IsNotification, ToRpcErrorCode(error.GetCode()), error, context.GetErrorData(), messages);
+		RespondError(pending->Activity, pending->IsNotification, ToRpcErrorCode(error.GetCode()), error, context.GetErrorData(), messages);
 	}
 
 	void Dispatcher::State::RunRequest(ClientId client, RpcRequest request, std::vector<OutboundMessage>& messages)
 	{
+		const auto found = Clients.find(client);
+		ENGINE_CORE_VERIFY(NextRequestSequence != 0, "Dispatcher request sequences exhausted");
+		const DispatcherRequestEvent activity{
+			.Sequence = NextRequestSequence++,
+			.Request = { .Client = client, .ClientName = found != Clients.end() ? found->second.Name : std::string(), .Id = request.Id, .Method = request.Method, .TranscriptLine = request.TranscriptLine }
+		};
+		Observe(activity, DispatcherRequestPhase::Started);
+		if (!Clients.contains(client))
+		{
+			Observe(activity, DispatcherRequestPhase::Cancelled);
+			return;
+		}
+		if (Specification.RequestAdmission)
+		{
+			const auto rejection = Specification.RequestAdmission(activity.Request);
+			if (rejection)
+			{
+				RespondError(activity, request.IsNotification, rejection->Code, rejection->Failure, Json(), messages);
+				return;
+			}
+			if (!Clients.contains(client))
+			{
+				Observe(activity, DispatcherRequestPhase::Cancelled);
+				return;
+			}
+		}
 		const MethodDescriptor* method = Registry->Find(request.Method);
 		if (method == nullptr)
 		{
@@ -214,14 +240,14 @@ namespace Engine {
 			const Error error = Error(ErrorCode::NotFound, message)
 									.WithHint(hint)
 									.WithIssue(ErrorIssue{ .JsonPointer = "/method", .Message = message, .Hint = hint, .Suggestions = std::move(suggestions) });
-			RespondError(client, request.Id, request.IsNotification, RpcErrorCode::MethodNotFound, error, Json(), messages);
+			RespondError(activity, request.IsNotification, RpcErrorCode::MethodNotFound, error, Json(), messages);
 			return;
 		}
 
 		const Status available = Host->CheckAvailability(*method);
 		if (!available)
 		{
-			RespondError(client, request.Id, request.IsNotification, ToRpcErrorCode(available.error().GetCode()), available.error(), Json(),
+			RespondError(activity, request.IsNotification, ToRpcErrorCode(available.error().GetCode()), available.error(), Json(),
 				messages);
 			return;
 		}
@@ -229,21 +255,13 @@ namespace Engine {
 		Result<PreparedParams> prepared = Registry->PrepareParams(*method, request.Params);
 		if (!prepared)
 		{
-			RespondError(client, request.Id, request.IsNotification, ToRpcErrorCode(prepared.error().GetCode()), prepared.error(), Json(),
+			RespondError(activity, request.IsNotification, ToRpcErrorCode(prepared.error().GetCode()), prepared.error(), Json(),
 				messages);
 			return;
 		}
 
-		const auto found = Clients.find(client);
-		RequestInfo info{
-			.Client = client,
-			.ClientName = found != Clients.end() ? found->second.Name : std::string(),
-			.Id = request.Id,
-			.Method = request.Method,
-			.TranscriptLine = request.TranscriptLine,
-		};
 		Scope<MethodContext> context = Host->CreateContext(MethodRequest{
-			.Info = std::move(info),
+			.Info = activity.Request,
 			.Options = prepared->Options,
 			.Method = method,
 			.Params = std::move(prepared->Params),
@@ -254,7 +272,7 @@ namespace Engine {
 		ENGINE_CORE_ASSERT(context != nullptr, "IMethodHost::CreateContext returned no context for '{}'", request.Method);
 		if (context == nullptr)
 		{
-			RespondError(client, request.Id, request.IsNotification, RpcErrorCode::Internal,
+			RespondError(activity, request.IsNotification, RpcErrorCode::Internal,
 				Error(ErrorCode::Unknown, std::format("the host created no context for '{}'", request.Method)), Json(), messages);
 			return;
 		}
@@ -263,7 +281,7 @@ namespace Engine {
 		if (!admitted)
 		{
 			Host->FinishRequest(*context);
-			RespondError(client, request.Id, request.IsNotification, ToRpcErrorCode(admitted.error().GetCode()), admitted.error(),
+			RespondError(activity, request.IsNotification, ToRpcErrorCode(admitted.error().GetCode()), admitted.error(),
 				context->GetErrorData(), messages);
 			return;
 		}
@@ -281,9 +299,8 @@ namespace Engine {
 			Scope<PendingRequest> pending = CreateScope<PendingRequest>();
 			pending->Context = std::move(context);
 			pending->Operation = std::move(*operation);
-			pending->Id = std::move(request.Id);
+			pending->Activity = activity;
 			pending->IsNotification = request.IsNotification;
-			pending->StartOrder = NextStartOrder++;
 			const auto owner = Clients.find(client);
 			if (owner == Clients.end())
 			{
@@ -299,11 +316,11 @@ namespace Engine {
 		Host->FinishRequest(*context);
 		if (Json* json = std::get_if<Json>(&result))
 		{
-			RespondResult(client, request.Id, request.IsNotification, std::move(*json), *context, messages);
+			RespondResult(activity, request.IsNotification, std::move(*json), *context, messages);
 			return;
 		}
 		const Error& error = std::get<Error>(result);
-		RespondError(client, request.Id, request.IsNotification, ToRpcErrorCode(error.GetCode()), error, context->GetErrorData(), messages);
+		RespondError(activity, request.IsNotification, ToRpcErrorCode(error.GetCode()), error, context->GetErrorData(), messages);
 	}
 
 	void Dispatcher::State::Cancel(PendingRequest& pending)
@@ -316,24 +333,40 @@ namespace Engine {
 		}
 		Host->LeaveInvocation(context);
 		Host->FinishRequest(context);
+		Observe(pending.Activity, DispatcherRequestPhase::Cancelled);
 	}
 
-	void Dispatcher::State::RespondResult(ClientId client, const Json& id, bool isNotification, Json result, const MethodContext& context,
+	void Dispatcher::State::Observe(const DispatcherRequestEvent& activity, DispatcherRequestPhase phase) const
+	{
+		if (Specification.RequestObserver)
+		{
+			DispatcherRequestEvent event = activity;
+			event.Phase = phase;
+			Specification.RequestObserver(event);
+		}
+	}
+
+	void Dispatcher::State::RespondResult(const DispatcherRequestEvent& activity, bool isNotification, Json result, const MethodContext& context,
 		std::vector<OutboundMessage>& messages)
 	{
-		const auto found = Clients.find(client);
-		if (isNotification || found == Clients.end())
-			return;
-		const Json meta = Meta.Build(client, Host->GetMetaState());
 		if (!result.is_object())
 		{
-			RespondError(client, id, isNotification, RpcErrorCode::Internal,
+			RespondError(activity, isNotification, RpcErrorCode::Internal,
 				Error(ErrorCode::Unknown, std::format("method '{}' produced a result that is not an object", context.GetRequest().Method)), Json(),
-				messages, &meta);
+				messages);
 			return;
 		}
+		const ClientId client = activity.Request.Client;
+		const auto found = Clients.find(client);
+		if (isNotification || found == Clients.end())
+		{
+			Observe(activity, DispatcherRequestPhase::Succeeded);
+			return;
+		}
+		const bool offload = found->second.Offload;
+		const Json meta = Meta.Build(client, Host->GetMetaState());
 
-		if (found->second.Offload)
+		if (offload)
 		{
 			// Measured on the minified result without "_meta" (ADR 0008 decision 22); the file holds it indented, for reading.
 			const std::string text = result.dump(-1, ' ', false, Json::error_handler_t::replace);
@@ -346,7 +379,7 @@ namespace Engine {
 				{
 					const Error error = std::move(path).error().WithContext(
 						std::format("while offloading the {}-byte result of '{}'", text.size(), context.GetRequest().Method));
-					RespondError(client, id, isNotification, ToRpcErrorCode(error.GetCode()), error, Json(), messages, &meta);
+					RespondError(activity, isNotification, ToRpcErrorCode(error.GetCode()), error, Json(), messages, &meta);
 					return;
 				}
 				result = MakeOffloadedResult(*path, MakeOffloadSummary(result));
@@ -354,16 +387,21 @@ namespace Engine {
 		}
 		if (context.IsDryRun())
 			result["dryRun"] = true;
-		messages.push_back(OutboundMessage{ .Client = client, .Message = MakeResultResponse(id, std::move(result), meta) });
+		if (Clients.contains(client))
+			messages.push_back(OutboundMessage{ .Client = client, .Message = MakeResultResponse(activity.Request.Id, std::move(result), meta) });
+		Observe(activity, DispatcherRequestPhase::Succeeded);
 	}
 
-	void Dispatcher::State::RespondError(ClientId client, const Json& id, bool isNotification, RpcErrorCode code, const Error& error,
+	void Dispatcher::State::RespondError(const DispatcherRequestEvent& activity, bool isNotification, RpcErrorCode code, const Error& error,
 		const Json& extraData, std::vector<OutboundMessage>& messages, const Json* meta)
 	{
-		if (isNotification || !Clients.contains(client))
-			return;
-		const Json built = meta != nullptr ? Json() : Meta.Build(client, Host->GetMetaState());
-		messages.push_back(OutboundMessage{ .Client = client, .Message = MakeErrorResponse(id, code, error, extraData, meta != nullptr ? *meta : built) });
+		const ClientId client = activity.Request.Client;
+		if (!isNotification && Clients.contains(client))
+		{
+			const Json built = meta != nullptr ? Json() : Meta.Build(client, Host->GetMetaState());
+			messages.push_back(OutboundMessage{ .Client = client, .Message = MakeErrorResponse(activity.Request.Id, code, error, extraData, meta != nullptr ? *meta : built) });
+		}
+		Observe(activity, DispatcherRequestPhase::Failed);
 	}
 
 	Dispatcher::Dispatcher(const MethodRegistry& registry, IMethodHost& host, const RingBufferSink& log, Watchdog* watchdog,
@@ -442,7 +480,7 @@ namespace Engine {
 		for (const auto& [client, state] : m_State->Clients)
 		{
 			if (state.Pending != nullptr)
-				pending.emplace_back(state.Pending->StartOrder, client);
+				pending.emplace_back(state.Pending->Activity.Sequence, client);
 		}
 		std::sort(pending.begin(), pending.end());
 		for (const auto& [order, client] : pending)

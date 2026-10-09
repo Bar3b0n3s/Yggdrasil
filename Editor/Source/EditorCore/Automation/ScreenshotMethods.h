@@ -24,14 +24,10 @@
 // project://Library/Automation/Out/, or user://Automation/Out/ without a writable project); the result names the file's
 // absolute path, which the MCP bridge returns as image content (§13.8).
 //
-// editor.screenshot re-records the draw data of the last UI frame the editor rendered (CaptureImGuiScreenshot) over the
-// frame's clear colour, so it shows the editor UI as of that frame, without the view the editor draws under it until the
-// viewport panels (M10): a request answered at the safe point after another one sees that request's effects, since a UI
-// frame renders in between, but a request that changed something earlier in the same AutomationServer::Pump (pipelined,
-// or from another client) does not show yet, and while a windowed editor is minimized no UI frame renders, so the
-// screenshot shows the UI from before it was minimized. The M5 UI (Dear ImGui's demo window) shows no editor state;
-// waiting for a UI frame rendered after the request (a pending operation, which keeps the wire contract) comes with the
-// editor panels (M10).
+// editor.screenshot requests a UI frame after admission and waits for its completed serial before capturing its draw
+// data. This includes changes made earlier in the same automation pump. The host renders a fresh offscreen UI frame
+// while minimized, using the last usable extent. Cancellation releases the request; the registered method bounds the
+// wait to its 60-second deadline. The capture/encoding helper below does not itself request or wait for a frame.
 
 namespace Engine {
 
@@ -56,7 +52,7 @@ namespace Engine {
 		std::function<Result<Image>()> EditorUi{};
 		// M10 pending screenshot boundary. A request remembers the current completed serial and requests a new UI frame;
 		// capture is allowed only after a later serial. Host services this while minimized, without a swapchain acquire.
-		// Empty until the panels integrate; legacy synchronous capture remains available to pre-M10 callers.
+		// Both callbacks and EditorUi are required by the registered pending method.
 		std::function<uint64_t()> CompletedUiFrame{};
 		std::function<void()> RequestUiFrame{};
 	};
@@ -65,7 +61,7 @@ namespace Engine {
 	// MaxInlineScreenshotPngBytes live in Engine/Automation/Methods/ScreenshotMethods.h since the M7 contract, because the
 	// Editor and the Runtime share the method (ADR 0008 decision 26).
 
-	// editor.screenshot {maxDimension?} (§13.5): the whole editor UI, its last UI frame re-recorded (see the file comment).
+	// editor.screenshot {maxDimension?} (§13.5): the whole editor UI after a fresh frame (see the file comment).
 	struct EditorScreenshotParams
 	{
 		uint32_t MaxDimension = 1024; // 1 to MaxViewportScreenshotDimension
@@ -81,13 +77,13 @@ namespace Engine {
 
 	namespace Automation {
 
-		// editor.screenshot. Errors: Unsupported without an editor UI capture (--renderer none); the capture's errors (InvalidState
+		// Capture/encode helper after the pending operation has observed a fresh frame. Errors: Unsupported without an editor UI capture (--renderer none); the capture's errors (InvalidState
 		// before the first UI frame) with the context "while rendering the editor UI"; those of DownscaleImage, EncodePng and
 		// AutomationServer::WriteOutputFile.
 		[[nodiscard]] Result<EditorScreenshotResult> EditorScreenshot(EditorMethodContext& context, const EditorScreenshotParams& params);
-		// M10 pending entry point, same wire params/result. Unsupported without the three UI callbacks. Poll until a fresh
-		// frame, then use the existing encoder/output path. Cancel releases the request; timeout is the normal dispatcher
-		// deadline. Integration switches RegisterScreenshotMethods to AddPending without changing the method's wire flags.
+		// Pending entry point, same wire params/result. Unsupported without the three UI callbacks. Poll until a fresh
+		// frame, then use the encoder/output path. Cancel releases the request; the registered wrapper enforces the method's
+		// deadline using the context's wall clock and returns Timeout if the host never publishes a fresh frame.
 		[[nodiscard]] Result<Scope<PendingOperation>> BeginEditorScreenshot(EditorMethodContext& context, const EditorScreenshotParams& params);
 
 	}

@@ -30,6 +30,8 @@
 
 namespace Engine {
 
+	struct RenderPassCounters;
+
 	class GraphicsDevice;
 
 	// The segments of a full circle, a sphere's great circles and a capsule's rings.
@@ -111,6 +113,8 @@ namespace Engine {
 		// lines are skipped).
 		[[nodiscard]] Result<uint32_t> Record(nvrhi::ICommandList& commandList, PassBindingCache& bindings, const DebugRenderInputs& inputs);
 	private:
+		friend class SceneRenderer;
+		[[nodiscard]] Result<uint32_t> RecordCounted(nvrhi::ICommandList& commandList, PassBindingCache& bindings, const DebugRenderInputs& inputs, RenderPassCounters& counters);
 		// The back-reference, the pipelines and the vertex buffer (DebugRenderer.cpp).
 		struct State;
 	private:

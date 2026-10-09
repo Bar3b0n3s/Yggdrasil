@@ -63,6 +63,20 @@
 			]
 		},
 		{
+			"Name": "DepthPyramid",
+			"File": "Passes/DepthPyramid.slang",
+			"Entries": [
+				{
+					"Name": "CSLinearize",
+					"Stage": "compute"
+				},
+				{
+					"Name": "CSReduce",
+					"Stage": "compute"
+				}
+			]
+		},
+		{
 			"Name": "EnvironmentBake",
 			"File": "Passes/EnvironmentBake.slang",
 			"Entries": [
@@ -94,6 +108,24 @@
 			"Entries": [
 				{
 					"Name": "CSMain",
+					"Stage": "compute"
+				}
+			]
+		},
+		{
+			"Name": "Gtao",
+			"File": "Passes/Gtao.slang",
+			"Entries": [
+				{
+					"Name": "CSMain",
+					"Stage": "compute"
+				},
+				{
+					"Name": "CSDenoise",
+					"Stage": "compute"
+				},
+				{
+					"Name": "CSTestUpsample",
 					"Stage": "compute"
 				}
 			]
@@ -137,6 +169,14 @@
 				{
 					"Name": "PSForward",
 					"Stage": "fragment"
+				},
+				{
+					"Name": "PSPicking",
+					"Stage": "fragment"
+				},
+				{
+					"Name": "PSOverdraw",
+					"Stage": "fragment"
 				}
 			],
 			"Permutations": {
@@ -145,6 +185,86 @@
 					"1"
 				]
 			}
+		},
+		{
+			"Name": "SceneDataView",
+			"File": "Passes/SceneDataView.slang",
+			"Entries": [
+				{
+					"Name": "CSMain",
+					"Stage": "compute"
+				}
+			]
+		},
+		{
+			"Name": "SelectionComposite",
+			"File": "Passes/SelectionFilter.slang",
+			"Entries": [
+				{
+					"Name": "CSComposite",
+					"Stage": "compute"
+				}
+			]
+		},
+		{
+			"Name": "SelectionDilate",
+			"File": "Passes/SelectionFilter.slang",
+			"Entries": [
+				{
+					"Name": "CSDilate",
+					"Stage": "compute"
+				}
+			]
+		},
+		{
+			"Name": "SelectionMask",
+			"File": "Passes/Selection.slang",
+			"Entries": [
+				{
+					"Name": "VSMain",
+					"Stage": "vertex"
+				},
+				{
+					"Name": "PSMask",
+					"Stage": "fragment"
+				}
+			],
+			"Permutations": {
+				"ALPHA_MASK": [
+					"0",
+					"1"
+				]
+			}
+		},
+		{
+			"Name": "Shadow",
+			"File": "Passes/Shadow.slang",
+			"Entries": [
+				{
+					"Name": "VSMain",
+					"Stage": "vertex"
+				},
+				{
+					"Name": "PSMain",
+					"Stage": "fragment"
+				}
+			],
+			"Permutations": {
+				"ALPHA_MASK": [
+					"0",
+					"1"
+				]
+			}
+		},
+		{
+			"Name": "ShadowProbe",
+			"File": "Passes/ShadowProbe.slang",
+			"Entries": [
+				{
+					"Name": "CSMain",
+					"Stage": "compute"
+				}
+			]
 		},
 		{
 			"Name": "Skybox",

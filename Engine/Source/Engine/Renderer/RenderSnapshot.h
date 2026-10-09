@@ -341,8 +341,8 @@ namespace Engine {
 	// Canonical debug-view spelling, including M9's AO, ShadowCascades and Overdraw.
 	[[nodiscard]] std::string_view RenderDebugViewToString(RenderDebugView view);
 
-	// The debug view named `name`, ignoring ASCII case; nullopt for any other name. Name recognition does not imply that
-	// the contract's GPU pass is implemented: M9 views are Unsupported by render/capture until their implementation lands.
+	// The debug view named `name`, ignoring ASCII case; nullopt for any other name. All enumerated views are supported
+	// by rendering and capture.
 	[[nodiscard]] std::optional<RenderDebugView> ParseRenderDebugView(std::string_view name);
 
 	// The reverse-Z projection of §8.3 for a `width` x `height` viewport (both > 0, asserted by callers):

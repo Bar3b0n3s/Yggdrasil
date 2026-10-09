@@ -91,6 +91,10 @@ namespace Engine {
 	class GraphicsDevice
 	{
 	public:
+		// Native timer-query capacity reserves MaxScopesPerFrame * FramesInFlight for each of these concurrent
+		// profilers: application, scene, game, viewport capture, editor capture, thumbnails, plus two spare owners.
+		// Retire/destroy transient profilers and sweep their queries before exceeding this diagnostic budget.
+		static constexpr uint32_t MaxConcurrentGpuProfilers = 8;
 		// Restricts construction to Create; CreateScope still reaches the constructor.
 		class ConstructionKey
 		{
@@ -123,7 +127,8 @@ namespace Engine {
 		// device's GpuDiagnostics as errorCB, wrapped by nvrhi::validation::createValidationLayer when validation is on.
 		// vk::SystemError thrown during these steps is caught here (§4.6 item 1) and becomes a Gpu error.
 		// Logs one Info line naming the device, its type, the API version, the device class and the optional paths.
-		// Errors, in the order they are checked: InvalidArgument for FramesInFlight 0, or an InjectFault other than None in
+		// Errors, in the order they are checked: InvalidArgument for FramesInFlight 0 or a timer-query capacity that cannot
+		// be represented by Vulkan/NVRHI (two timestamps per query), or an InjectFault other than None in
 		// Dist (before any Vulkan call); InvalidState without an initialized VulkanDispatch or while another GraphicsDevice
 		// exists; Unsupported for an API version
 		// below 1.3, a missing validation layer while Validation is on, or no acceptable device (SelectDevice); NotFound
@@ -215,7 +220,8 @@ namespace Engine {
 		// vkGetDeviceFaultInfoEXT as text (description, address infos, vendor infos); "VK_EXT_device_fault is not
 		// available" when the extension is not enabled, "no fault information" when the driver reports none. The query is
 		// valid only on a device that is really lost (the validation layer rejects it otherwise), so a healthy device, and
-		// one whose loss is only the injected device-lost fault, report "no fault information" without querying.
+		// one marked by SetDeviceLost(true) or the CLI injected device-lost fault, report "no fault information" without
+		// querying. Synthetic marking is sticky even when RaiseDeviceLost subsequently reports loss again.
 		[[nodiscard]] std::string DescribeDeviceFault();
 
 		// Native handles for the code that calls Vulkan itself through the dispatcher's C entry points: Swapchain and
@@ -269,6 +275,7 @@ namespace Engine {
 		uint64_t m_LastSubmissionID = 0;
 		// Whether this device counts as the process's live device (VulkanDispatch::RegisterDevice).
 		bool m_IsRegistered = false;
+		bool m_IsMemoryTracking = false;
 		// Set by Shutdown, which runs once.
 		bool m_IsShutDown = false;
 	};

@@ -1,5 +1,6 @@
 #include "EnginePCH.h"
 #include "Engine/Renderer/BloomPass.h"
+#include "Engine/Renderer/RenderStats.h"
 
 #include "Engine/Core/Assert.h"
 #include "Engine/Graphics/GraphicsDevice.h"
@@ -157,6 +158,12 @@ namespace Engine {
 
 	Result<nvrhi::ITexture*> BloomPass::Record(nvrhi::ICommandList& commandList, PassBindingCache& bindings, const BloomPassInputs& inputs)
 	{
+		RenderPassCounters counters{};
+		return RecordCounted(commandList, bindings, inputs, counters);
+	}
+
+	Result<nvrhi::ITexture*> BloomPass::RecordCounted(nvrhi::ICommandList& commandList, PassBindingCache& bindings, const BloomPassInputs& inputs, RenderPassCounters& counters)
+	{
 		ENGINE_CORE_ASSERT(inputs.SceneColor != nullptr && inputs.Chain != nullptr, "BloomPass::Record needs SceneColor and a chain");
 		State& state = *m_State;
 		const nvrhi::TextureDesc& scene = inputs.SceneColor->getDesc();
@@ -168,7 +175,7 @@ namespace Engine {
 		const uint32_t mipCount = chain.mipLevels;
 
 		// One step: `source` (SceneColor, or mip `sourceMip` of the chain) into mip `destinationMip` of the chain.
-		const auto recordStep = [&commandList, &bindings, &state, &inputs, &chain, mipCount](Utils::BloomStep step, nvrhi::ITexture* source,
+		const auto recordStep = [&commandList, &bindings, &state, &inputs, &chain, mipCount, &counters](Utils::BloomStep step, nvrhi::ITexture* source,
 									uint32_t sourceMip, uint32_t sourceWidth, uint32_t sourceHeight, uint32_t destinationMip) -> Status
 		{
 			const uint32_t width = Utils::GetMipExtent(chain.width, destinationMip);
@@ -195,6 +202,7 @@ namespace Engine {
 			commandList.setComputeState(compute);
 			commandList.setPushConstants(&constants, sizeof(constants));
 			commandList.dispatch(Utils::GetGroupCount(width), Utils::GetGroupCount(height));
+			++counters.Dispatches;
 			return {};
 		};
 

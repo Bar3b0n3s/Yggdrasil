@@ -2,6 +2,10 @@
 
 #include "Engine/Core/Result.h"
 
+#include <array>
+#include <cstdint>
+#include <string>
+
 namespace Engine {
 
 	struct EditorPanelContext;
@@ -13,6 +17,14 @@ namespace Engine {
 	{
 	public:
 		[[nodiscard]] Status Draw(EditorPanelContext& context);
+	private:
+		std::array<char, 256> m_Search{};
+		int m_MinimumLevel = 0;
+		int m_Logger = 0;
+		uint64_t m_ClearBefore = 0;
+		uint64_t m_SelectionTicket = 0;
+		bool m_Follow = true;
+		std::string m_Error{};
 	};
 
 }

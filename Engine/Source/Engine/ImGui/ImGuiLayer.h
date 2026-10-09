@@ -74,7 +74,8 @@ namespace Engine {
 		// accumulates over the frames the swapchain skipped. It replaces the backend's wall-clock delta, so headless runs on a
 		// ManualClock render identical frames (the ImGuiDemo golden). Dear ImGui asserts a positive DeltaTime, and a
 		// SystemClock's first delta is 0, hence the minimum.
-		void BeginFrame(double deltaSeconds, uint32_t frameSlot);
+		// A forced minimized frame retains the last usable display size and scale after updating backend input.
+		void BeginFrame(double deltaSeconds, uint32_t frameSlot, bool retainDisplaySize = false);
 
 		// ImGui::Render: finishes the frame's draw data.
 		void EndFrame();

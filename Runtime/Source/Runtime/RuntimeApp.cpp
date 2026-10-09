@@ -10,6 +10,7 @@
 #include "Engine/Asset/PakMount.h"
 #include "Engine/Asset/PakReader.h"
 #include "Engine/Asset/RuntimeAssetManager.h"
+#include "Engine/Core/Assert.h"
 #include "Engine/Core/FatalError.h"
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Hash.h"
@@ -41,6 +42,7 @@
 	#include "Engine/Automation/Methods/AutomationTypes.h"
 	#include "Engine/Automation/Methods/RegisterSharedMethods.h"
 	#include "Engine/Automation/Methods/RuntimeAutomationServer.h"
+	#include "Engine/Automation/Methods/StatsMethods.h"
 #endif
 
 #include <algorithm>
@@ -186,6 +188,7 @@ namespace Engine {
 		nvrhi::Format BlitFormat = nvrhi::Format::UNKNOWN;
 		Scope<ViewportCapture> Capture;
 		bool RenderFailing = false; // the last frame's render or blit failed, so the next failure is not logged again
+		std::optional<uint64_t> PendingRenderFrame{};
 		// M8 stale mirrors (SceneRenderer.h): when the collections also release what the start scene's first frame did not
 		// use (CreateRenderers notes the start scene as the shown scene's change).
 		StaleMirrorSchedule Mirrors{};
@@ -361,6 +364,23 @@ namespace Engine {
 			server.Assets = m_Assets.get();
 			server.Audio = context.GetAudioEngine(); // M12: audio.stats
 			server.ScenePath = m_Assets->GetReferencePath(manifest.StartScene);
+			// The server is released before this application's renderers and context. It calls this on the main thread
+			// at the safe point; getters copy observations without advancing the game or polling the GPU.
+			server.ReadHostStatistics = [this]()
+			{
+				StatsGetResult result;
+				const FrameLoopStatistics frame = GetFrameStatistics();
+				result.Fps = ToStatsTelemetry(frame.Fps);
+				result.CpuMilliseconds = ToStatsTelemetry(frame.CpuMilliseconds);
+				result.DroppedSeconds = ToStatsTelemetry(frame.DroppedSeconds);
+				if (const GraphicsDevice* device = GetContext().GetGraphicsDevice())
+				{
+					result.MemoryAllocationCount = device->GetMemoryAllocationCount();
+					result.MaxMemoryAllocationCount = device->GetInfo().MaxMemoryAllocationCount;
+				}
+				result.Views.push_back(MakeStatsViewSummary("game", m_State->Renderer != nullptr ? m_State->Renderer->GetRenderStats() : RenderStats{}));
+				return result;
+			};
 			if (state.Capture != nullptr)
 			{
 				// The capture and the asset manager belong to this application, which outlives the server (OnShutdown releases
@@ -415,6 +435,7 @@ namespace Engine {
 		state.Capture.reset();
 		state.Blit.reset();
 		state.Renderer.reset();
+		state.PendingRenderFrame.reset();
 		state.Pipelines.reset();
 		state.Session.reset();
 		state.GpuCache.reset();
@@ -545,7 +566,14 @@ namespace Engine {
 
 		// The session's last snapshot (its frame phase extracted it at the view size), rendered at the frame's size. A render
 		// error names a draw it skipped (a non-finite matrix); the rest of the view rendered and is shown.
-		const Status rendered = state.Renderer->Render(*context.CommandList, state.Session->GetLastExtraction());
+		// Render frame identities differ from simulation ticks and completed loop-frame counts, especially while paused
+		// or minimized. Keep the session's snapshot unchanged, and pair this copy with the actual submission below.
+		ENGINE_ASSERT(!state.PendingRenderFrame.has_value(), "the previous game view has not been submitted");
+		RenderSnapshot snapshot = state.Session->GetLastExtraction();
+		snapshot.FrameIndex = context.FrameIndex;
+		snapshot.SceneRevision = state.Session->GetScene().GetRevision();
+		state.PendingRenderFrame = context.FrameIndex;
+		const Status rendered = state.Renderer->Render(*context.CommandList, snapshot);
 		state.Mirrors.NoteRendered();
 		const Status blitted = state.Blit->Record(*context.CommandList, *state.Renderer->GetFinalTexture(), *context.Framebuffer);
 		// A binding set the device has no memory for is fatal like any GPU object (§8.14 item 7); anything else is logged
@@ -556,6 +584,18 @@ namespace Engine {
 		if (!drawn.has_value() && !state.RenderFailing)
 			ENGINE_ERROR("Cannot render the game view: {}", drawn.error().ToString());
 		state.RenderFailing = !drawn.has_value();
+	}
+
+	void RuntimeApp::OnRenderSubmitted(uint64_t frameIndex, uint64_t submissionId)
+	{
+		State& state = *m_State;
+		if (!state.PendingRenderFrame.has_value())
+			return;
+		ENGINE_VERIFY(*state.PendingRenderFrame == frameIndex && state.Renderer != nullptr, "game view submission does not match its recorded frame");
+		// Partial/error renders can also hold target references and timer queries. The renderer ignores attempts that
+		// failed before recording. Captures use their own renderer and notify it directly.
+		state.Renderer->OnSubmitted(frameIndex, submissionId);
+		state.PendingRenderFrame.reset();
 	}
 
 	bool RuntimeApp::WriteScreenshot()
@@ -578,6 +618,8 @@ namespace Engine {
 		request.Camera = RenderCameraSource::Primary;
 		request.Width = width;
 		request.Height = height;
+		const RenderingSettings& quality = state.Session->GetProjectSettings().Rendering;
+		request.Quality = { .ShadowMapSize = quality.ShadowMapSize, .SsaoHalfResolution = quality.SsaoHalfResolution };
 		Result<RenderSnapshot> snapshot = state.Session->ExtractView(request);
 		Result<Image> image = snapshot.has_value() ? state.Capture->Capture({ .Width = width, .Height = height, .MaxDimension = 0 }, *snapshot)
 												   : Result<Image>(std::unexpected(snapshot.error()));

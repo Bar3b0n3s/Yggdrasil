@@ -7,6 +7,7 @@
 #include "Engine/Automation/Methods/SceneMethods.h"
 #include "Engine/Automation/Methods/SessionMethods.h"
 #include "Engine/Automation/Methods/SharedMethodSupport.h"
+#include "Engine/Audio/AudioEngine.h"
 #include "Engine/Automation/Protocol/Handshake.h"
 #include "Engine/Automation/Protocol/ProtocolServer.h"
 #include "Engine/Automation/Protocol/ResultOffload.h"
@@ -19,6 +20,7 @@
 #include "Engine/Core/VirtualFileSystem.h"
 #include "Engine/Platform/Process.h"
 #include "Engine/Scene/Entity.h"
+#include "Engine/Scene/PhysicsSystem.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Session/PlaySession.h"
 
@@ -210,6 +212,24 @@ namespace Engine {
 			[[nodiscard]] AudioEngine* GetAudioEngine() const override
 			{
 				return m_Host->Specification.Audio;
+			}
+
+			[[nodiscard]] const ProjectSettings* GetProjectSettings() const override
+			{
+				return &m_Host->Session->GetProjectSettings();
+			}
+
+			[[nodiscard]] Result<StatsGetResult> GetHostStatistics() const override
+			{
+				const auto& read = m_Host->Specification.ReadHostStatistics;
+				StatsGetResult result = read ? read() : StatsGetResult{};
+				if (result.Views.empty())
+					result.Views = { StatsViewSummary{ .Name = "game" } };
+				result.Entities = static_cast<uint32_t>(m_Host->Session->GetScene().GetEntityCount());
+				result.Bodies = m_Host->Session->GetPhysics().GetStats().BodyCount;
+				if (const AudioEngine* audio = GetAudioEngine())
+					result.Voices = audio->GetStats().LiveVoices;
+				return result;
 			}
 		private:
 			RuntimeHost* m_Host = nullptr; // documented back-reference

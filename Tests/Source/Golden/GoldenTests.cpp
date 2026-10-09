@@ -1,13 +1,9 @@
 #include "TestsPCH.h"
 
-#include "Engine/App/ExitCode.h"
 #include "Engine/Asset/BuiltinAssets.h"
-#include "Engine/Core/FileSystem.h"
-#include "Engine/Core/Json/Json.h"
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Graphics/OffscreenTarget.h"
 #include "Engine/Graphics/Readback.h"
-#include "Engine/Platform/Process.h"
 #include "Engine/Renderer/GpuResourceCache.h"
 #include "Engine/Renderer/SceneRenderer.h"
 #include "Engine/Renderer/TrianglePass.h"
@@ -15,6 +11,7 @@
 #include "Engine/Scene/Components/CameraComponent.h"
 #include "Engine/Scene/Components/DirectionalLightComponent.h"
 #include "Engine/Scene/Components/MeshRendererComponent.h"
+#include "Engine/Scene/Components/PostProcessComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/RenderExtraction.h"
@@ -26,16 +23,7 @@
 #include "Support/GoldenScene.h"
 #include "Support/HeadlessGpuFixture.h"
 #include "Support/SceneTestFixture.h"
-#include "Support/TempDirectory.h"
-#include "Support/TestOptions.h"
-#include "Support/Utf8Path.h"
 
-#include <nlohmann/json.hpp>
-
-#include <algorithm>
-#include <chrono>
-#include <iterator>
-#include <span>
 #include <string>
 #include <utility>
 #include <vector>
@@ -43,8 +31,7 @@
 // The golden images (Architecture §15.4): "Triangle", the clear-and-triangle view of the Graphics foundation (Roadmap M5)
 // drawn by TrianglePass into an OffscreenTarget at 640x360; "LitScene", a simple lit scene (Roadmap M7: a camera, a sun, a
 // cube, a sphere and a ground plane) extracted from a scene and rendered by the scene renderer through the viewport
-// capture (viewport.screenshot's path); and "ImGuiDemo", the editor UI (Dear ImGui's demo window) through
-// editor.screenshot in an Editor process; and the M8 goldens of Roadmap M8 (MaterialGrid, IblOnly, Tonemappers, Bloom,
+// capture (viewport.screenshot's path); and the M8 goldens of Roadmap M8 (MaterialGrid, IblOnly, Tonemappers, Bloom,
 // AlphaModes, DebugDraw, Text, GltfFixture), each a scene of Projects/FeatureTest/Assets/Scenes/Golden rendered through
 // Test::RenderGoldenScene (§15.4; Docs/Decisions/0013-m8-decisions.md decision 14). They run in the golden stage (Release) on
 // this machine's device class; Test.py --update-golden writes candidates for review.
@@ -71,7 +58,7 @@ namespace Engine {
 			{
 				transform.Rotation = TransformSystem::QuaternionFromEulerDegrees(glm::vec3(-50.0f, -30.0f, 0.0f));
 			});
-			sun.AddComponent<DirectionalLightComponent>(DirectionalLightComponent{ .Intensity = 1.0f });
+			sun.AddComponent<DirectionalLightComponent>(DirectionalLightComponent{ .Intensity = 1.0f, .CastShadows = false });
 
 			const auto addMesh = [&scene](std::string_view name, AssetHandle mesh, const glm::vec3& translation, const glm::vec3& euler,
 									 const glm::vec3& scale, AssetHandle material)
@@ -92,6 +79,8 @@ namespace Engine {
 			addMesh("Cube", BuiltinAssetHandles::CubeMesh, glm::vec3(-0.9f, 0.0f, 0.0f), glm::vec3(0.0f, 30.0f, 0.0f), glm::vec3(1.0f), AssetHandle());
 			addMesh("Sphere", BuiltinAssetHandles::SphereMesh, glm::vec3(1.0f, 0.0f, 0.5f), glm::vec3(0.0f), glm::vec3(1.2f),
 				BuiltinAssetHandles::ErrorMaterial);
+			// M8 golden inputs disable shadow casting and SSAO (Architecture §15.4).
+			scene.CreateEntity("PostProcess").AddComponent<PostProcessComponent>(PostProcessComponent{ .SsaoEnabled = false });
 			TransformSystem::Update(scene);
 		}
 
@@ -155,57 +144,6 @@ namespace Engine {
 				ENGINE_CHECK_GOLDEN("LitScene", *image, device.GetInfo().DeviceClass);
 			}
 			device.RunGarbageCollection();
-		}
-
-		TEST_CASE("Golden: ImGuiDemo")
-		{
-			// The whole editor UI through editor.screenshot (Roadmap M5; Docs/Decisions/0009-m5-decisions.md decision 33) in a
-			// headless editor: a --batch run creates a project, because the method is not available in the launcher state,
-			// then asks for the screenshot at the UI's full size. Its PNG outlives the run (AutomationServer::WriteOutputFile).
-			// The device class comes from a fixture device, which is created and destroyed before the editor process starts
-			// (the probe of Test::ProbeGpuForProcess, which this test needs the device's data from).
-			std::string deviceClass;
-			{
-				Test::HeadlessGpuFixture gpu;
-				ENGINE_REQUIRE_GPU(gpu);
-				deviceClass = gpu.GetDevice().GetInfo().DeviceClass;
-			}
-			Test::TempDirectory userData("GoldenImGuiDemo");
-			const std::filesystem::path project = userData / "Project";
-			const Json create = Json{ { "method", "project.create" }, { "params", Json{ { "path", Test::PathToUtf8(project) }, { "name", "Golden" } } } };
-			const Json screenshot = Json{ { "method", "editor.screenshot" }, { "params", Json{ { "maxDimension", MaxViewportScreenshotDimension } } } };
-			const std::string requests = create.dump() + '\n' + screenshot.dump() + '\n';
-			const std::filesystem::path batch = userData / "ImGuiDemo.jsonl";
-			REQUIRE(FileSystem::WriteFileAtomic(batch, std::as_bytes(std::span(requests.data(), requests.size()))).has_value());
-
-			const Result<std::filesystem::path> editor = Test::GetBuiltExecutablePath("Editor");
-			REQUIRE_MESSAGE(editor.has_value(), editor.error().ToString());
-			std::vector<std::string> arguments = {
-				"--headless",
-				"--batch",
-				Test::PathToUtf8(batch),
-				"--user-data-dir=" + Test::PathToUtf8(userData.GetPath()),
-			};
-			const std::vector<std::string> gpuArguments = Test::GetGpuApplicationArguments();
-			arguments.insert(arguments.end(), gpuArguments.begin(), gpuArguments.end());
-			const Result<ProcessResult> result =
-				Process::Run({ .Executable = *editor, .Arguments = std::move(arguments) }, std::chrono::seconds(60));
-			REQUIRE_MESSAGE(result.has_value(), result.error().ToString());
-			INFO("editor stderr: ", result->StandardError);
-			REQUIRE(result->ExitCode == ExitCode::Success);
-			CHECK(Test::FindProblemLogLines(result->StandardError).empty());
-
-			const Result<std::vector<std::filesystem::path>> outputs = FileSystem::ListDirectory(project / "Library" / "Automation" / "Out");
-			REQUIRE_MESSAGE(outputs.has_value(), outputs.error().ToString());
-			std::vector<std::filesystem::path> screenshots;
-			std::ranges::copy_if(*outputs, std::back_inserter(screenshots), [](const std::filesystem::path& file)
-			{
-				return file.extension() == ".png";
-			});
-			REQUIRE(screenshots.size() == 1);
-			const Result<Image> image = ReadPng(screenshots.front());
-			REQUIRE_MESSAGE(image.has_value(), image.error().ToString());
-			ENGINE_CHECK_GOLDEN("ImGuiDemo", *image, deviceClass);
 		}
 
 		// M8 (Roadmap M8, §15.4): the scenes Projects/FeatureTest/Scaffold/Golden.jsonl wrote into

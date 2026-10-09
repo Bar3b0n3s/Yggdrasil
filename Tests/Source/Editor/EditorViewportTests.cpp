@@ -15,7 +15,7 @@
 
 // The editor's viewport (Editor/EditorApp.h "Viewport"; Roadmap M7): the view of the scene renderer drawn under the UI and
 // blitted into the frame's target, whose format is the swapchain's (BGRA8_UNORM) in a windowed editor and RGBA8_UNORM in a
-// headless one. Headless rendering editors run it in every rendering test (the screenshot suites, the golden "ImGuiDemo");
+// headless one. Headless rendering editors run it in every rendering test (the screenshot suites, the golden "EditorDefaultLayout");
 // this case runs it windowed, validated like every GPU test's process (--expect-no-gpu-errors). The views themselves are
 // tested through their screenshots (EditorScreenshotOptionsTests.cpp, Tests/Automation/test_screenshot.py and
 // test_game_view.py).

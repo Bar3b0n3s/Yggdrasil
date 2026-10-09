@@ -4,6 +4,9 @@
 
 #include "Engine/Core/Log.h"
 #include "Support/ExpectLog.h"
+#include "Support/WaitUntil.h"
+
+#include <thread>
 
 // GpuDiagnostics is plain CPU state, so its message routing, device-loss detection and fault rules are tested without a
 // device; the paths that end the process are tested through the editor (Editor/EditorFaultInjectionTests.cpp).
@@ -79,12 +82,52 @@ namespace Engine {
 		{
 			GpuDiagnostics diagnostics;
 			CHECK_FALSE(diagnostics.IsDeviceLost());
+			CHECK_FALSE(diagnostics.IsDeviceLossInjected());
 			diagnostics.SetDeviceLost();
 			CHECK(diagnostics.IsDeviceLost());
+			CHECK_FALSE(diagnostics.IsDeviceLossInjected());
 			diagnostics.ResetCounts();
 			CHECK(diagnostics.IsDeviceLost());
 			CHECK(diagnostics.GetInjectedFault() == GpuFault::None);
 			CHECK(GpuMessageSeverityToString(GpuMessageSeverity::Fatal) == "Fatal");
+		}
+
+		TEST_CASE("GpuDiagnostics: injected device loss stays marked after native reports and resetting counts")
+		{
+			GpuDiagnostics diagnostics;
+			diagnostics.SetDeviceLost(true);
+			CHECK(diagnostics.IsDeviceLost());
+			CHECK(diagnostics.IsDeviceLossInjected());
+			CHECK(diagnostics.GetInjectedFault() == GpuFault::None);
+			diagnostics.SetDeviceLost(); // RaiseDeviceLost reports the loss again through this defaulted call.
+			diagnostics.ResetCounts();
+			diagnostics.OnSubmitted();
+			CHECK(diagnostics.IsDeviceLost());
+			CHECK(diagnostics.IsDeviceLossInjected());
+			{
+				Test::ExpectLog error(LogLevel::Error, "NVRHI: Device Removed!");
+				diagnostics.ReportNvrhiMessage(nvrhi::MessageSeverity::Error, "Device Removed!");
+			}
+			CHECK(diagnostics.IsDeviceLossInjected());
+			GpuDiagnostics nativeThenInjected;
+			nativeThenInjected.SetDeviceLost();
+			CHECK_FALSE(nativeThenInjected.IsDeviceLossInjected());
+			nativeThenInjected.SetDeviceLost(true);
+			CHECK(nativeThenInjected.IsDeviceLossInjected());
+		}
+
+		TEST_CASE("GpuDiagnostics: observing injected device loss across threads also observes its marker")
+		{
+			GpuDiagnostics diagnostics;
+			std::jthread publisher([&diagnostics]()
+			{
+				diagnostics.SetDeviceLost(true);
+			});
+			REQUIRE(Test::WaitUntil([&diagnostics]()
+			{
+				return diagnostics.IsDeviceLost();
+			}));
+			CHECK(diagnostics.IsDeviceLossInjected());
 		}
 
 		TEST_CASE("GpuDiagnostics: injected faults follow --gpu-inject-fault")
@@ -92,8 +135,12 @@ namespace Engine {
 			// device-lost: the flag after the first submission.
 			GpuDiagnostics deviceLost(GpuFault::DeviceLost);
 			CHECK_FALSE(deviceLost.IsDeviceLost());
+			CHECK_FALSE(deviceLost.IsDeviceLossInjected());
 			deviceLost.OnSubmitted();
 			CHECK(deviceLost.IsDeviceLost());
+			CHECK(deviceLost.IsDeviceLossInjected());
+			deviceLost.SetDeviceLost();
+			CHECK(deviceLost.IsDeviceLossInjected());
 			CHECK_FALSE(deviceLost.ShouldInjectHang());
 
 			// oom-texture: sampled-only textures fail, render targets and storage images do not.

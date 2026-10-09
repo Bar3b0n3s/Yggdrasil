@@ -2,6 +2,10 @@
 
 #include "Engine/Core/Result.h"
 
+#include <cstdint>
+#include <string>
+#include <vector>
+
 namespace Engine {
 
 	struct EditorPanelContext;
@@ -14,6 +18,11 @@ namespace Engine {
 	{
 	public:
 		[[nodiscard]] Status Draw(EditorPanelContext& context);
+	private:
+		void ReportFailure(const Error& error);
+		std::string m_Search{};
+		std::string m_Error{};
+		std::vector<uint64_t> m_Tickets{};
 	};
 
 }

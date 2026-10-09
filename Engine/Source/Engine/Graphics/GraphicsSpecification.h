@@ -77,6 +77,10 @@ namespace Engine {
 		// --gpu-inject-fault. Must be None in Dist builds (GpuTestHooksEnabled); GraphicsDevice::Create rejects any other
 		// value there with InvalidArgument.
 		GpuFault InjectFault = GpuFault::None;
+		// Restricts the effective DepthClamp capability and the Vulkan device feature to false. The default preserves
+		// hardware support; neither value can enable an unsupported feature. Honoured in every configuration, with no
+		// command-line option, so callers can deterministically exercise the extended-near shadow fallback.
+		bool DisableDepthClamp = false;
 	};
 
 	// "None" or "Vulkan".

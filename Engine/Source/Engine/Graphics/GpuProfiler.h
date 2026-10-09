@@ -91,10 +91,19 @@ namespace Engine {
 		struct FrameRecord
 		{
 			std::vector<TimedScope> Scopes{};
+			uint64_t FrameIndex = 0;
 			uint32_t TimedScopeCount = 0;
 			bool IsRecorded = false; // a frame used the slot since the last collection
 		};
+
+		enum class FrameIdentityMode : uint8_t
+		{
+			None,
+			Local,
+			Host
+		};
 	private:
+		void BeginFrameInternal(uint32_t frameSlot, uint64_t frameIndex);
 		// A recycled timer query, or a new one; null when creation fails (logged once).
 		[[nodiscard]] nvrhi::TimerQueryHandle AcquireQuery();
 		// Reads the frame's queries into the last samples, or drops the frame when one has not finished.
@@ -103,10 +112,12 @@ namespace Engine {
 		GraphicsDevice* m_Device = nullptr; // documented back-reference: outlives the profiler
 		std::vector<FrameRecord> m_Frames;  // one per frame slot
 		std::vector<nvrhi::TimerQueryHandle> m_FreeQueries;
-		std::vector<GpuTimingSample> m_LastFrameSamples;
+		GpuTimingFrame m_LastFrameResult{};
 		std::vector<uint32_t> m_OpenScopes;                    // indices into the current frame's scopes, innermost last
 		nvrhi::ICommandList* m_OpenScopeCommandList = nullptr; // the command list of the open scopes, for the assertions
 		uint32_t m_FrameSlot = 0;
+		uint64_t m_NextFrameIndex = 0;
+		FrameIdentityMode m_FrameIdentityMode = FrameIdentityMode::None;
 		bool m_HasFrame = false;
 		bool m_HasReportedScopeLimit = false;
 		bool m_HasReportedQueryFailure = false;

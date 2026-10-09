@@ -12,7 +12,9 @@
 #include "Engine/Renderer/BrdfLut.h"
 #include "Engine/Renderer/GpuResourceCache.h"
 #include "Engine/Renderer/RenderPrepare.h"
+#include "Engine/Renderer/Private/SceneRendererIntegrationFixture.h"
 #include "Engine/Renderer/RenderSnapshot.h"
+#include "Engine/Renderer/ViewportCapture.h"
 #include "Support/AssetTestFixture.h"
 #include "Support/ExpectLog.h"
 #include "Support/HeadlessGpuFixture.h"
@@ -75,7 +77,7 @@ namespace Engine {
 			(*commandList)->open();
 			const Status rendered = renderer.Render(**commandList, snapshot);
 			(*commandList)->close();
-			device.ExecuteCommandList(**commandList);
+			renderer.OnSubmitted(snapshot.FrameIndex, device.ExecuteCommandList(**commandList));
 			return rendered;
 		}
 
@@ -390,11 +392,10 @@ namespace Engine {
 
 		TEST_CASE("Pipelines: count matches the expected total" * doctest::test_suite(Test::GpuSuite))
 		{
-			// §8.5: "The total pipeline count is logged and asserted by a test." 15 mesh pipelines ({Opaque, Mask} prepass and
-			// forward opaque, Blend transparent, each for CullBack, CullFront and CullNone) + Skybox 1 + Bloom 3 + Tonemap 1 +
-			// FXAA 1 + debug lines 2 + text 2 + the DFG LUT 1 = 26 at startup; each non-Lit debug view adds its 9 forward
-			// variants the first time it renders, 45 for the five.
-			static_assert(SceneRendererPipelines::StartupPipelineCount == 26);
+			// §8.5: "The total pipeline count is logged and asserted by a test." Mesh 24 + Skybox 1 + Bloom 3 + Tonemap 1 +
+			// FXAA 1 + debug lines 2 + text 2 + DFG LUT 1 + shadows 6 + depth pyramid 2 + GTAO 2 + selection 8 + data views 1.
+			// Each material debug view adds its 9 forward variants the first time it renders, 45 for the five.
+			static_assert(SceneRendererPipelines::StartupPipelineCount == 54);
 			Test::HeadlessGpuFixture gpu;
 			ENGINE_REQUIRE_GPU(gpu);
 			Test::AssetTestFixture assets;
@@ -402,8 +403,8 @@ namespace Engine {
 				GpuResourceCache cache(gpu.GetDevice(), assets.GetManager());
 				Result<Scope<SceneRendererPipelines>> pipelines = SceneRendererPipelines::Create(gpu.GetDevice(), gpu.GetPipelines());
 				REQUIRE_MESSAGE(pipelines.has_value(), pipelines.error().ToString());
-				CHECK((*pipelines)->GetPipelineCount() == 26);
-				CHECK(SceneRendererPipelines::GetLayoutDescriptions().size() == 26);
+				CHECK((*pipelines)->GetPipelineCount() == 54);
+				CHECK(SceneRendererPipelines::GetLayoutDescriptions().size() == 54);
 				Result<Scope<SceneRenderer>> renderer = SceneRenderer::Create(gpu.GetDevice(), **pipelines, cache, assets.GetManager(),
 					{ .Width = 16, .Height = 16 });
 				REQUIRE_MESSAGE(renderer.has_value(), renderer.error().ToString());
@@ -414,13 +415,13 @@ namespace Engine {
 					snapshot.DebugView = view;
 					static_cast<void>(RenderToImage(gpu.GetDevice(), **renderer, snapshot));
 				}
-				CHECK((*pipelines)->GetPipelineCount() == 26 + 5 * SceneRendererPipelines::DebugViewPipelineCount);
+				CHECK((*pipelines)->GetPipelineCount() == 54 + 5 * SceneRendererPipelines::DebugViewPipelineCount);
 				// EnsureDebugView, which Render called, has no effect for Lit or for a view that exists.
 				const Status lit = (*pipelines)->EnsureDebugView(RenderDebugView::Lit);
 				const Status existing = (*pipelines)->EnsureDebugView(RenderDebugView::Albedo);
 				CHECK(lit.has_value());
 				CHECK(existing.has_value());
-				CHECK((*pipelines)->GetPipelineCount() == 26 + 5 * SceneRendererPipelines::DebugViewPipelineCount);
+				CHECK((*pipelines)->GetPipelineCount() == 54 + 5 * SceneRendererPipelines::DebugViewPipelineCount);
 			}
 			gpu.GetDevice().RunGarbageCollection();
 		}
@@ -982,6 +983,372 @@ namespace Engine {
 				CHECK(unrotated != halfScale);
 			}
 			gpu.GetDevice().RunGarbageCollection();
+		}
+	}
+
+	TEST_SUITE(Test::GpuSuite)
+	{
+		TEST_CASE("SceneRenderer: directional and spot shadows affect receivers and honor both shadow flags")
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::SceneRendererIntegrationFixture fixture(gpu);
+			for (const auto projection : { RenderProjection::Perspective, RenderProjection::Orthographic })
+				for (const auto type : { RenderLightType::Directional, RenderLightType::Spot })
+				{
+					CAPTURE(static_cast<uint32_t>(projection));
+					CAPTURE(static_cast<uint32_t>(type));
+					auto snapshot = fixture.Snapshot(projection);
+					snapshot.Environment.FallbackColor = glm::vec3(0);
+					snapshot.Meshes[0].World = glm::translate(glm::mat4(1), glm::vec3(0, 0, -5)) * glm::scale(glm::mat4(1), glm::vec3(3, 3, 1));
+					snapshot.Meshes[0].CastShadows = false;
+					auto blocker = snapshot.Meshes[0];
+					blocker.Entity = UUID(40);
+					blocker.PickId = 2;
+					blocker.CastShadows = true;
+					blocker.World = glm::translate(glm::mat4(1), glm::vec3(type == RenderLightType::Directional ? 0.7f : 0.4f, 0, -3))
+						* glm::scale(glm::mat4(1), glm::vec3(0.3f));
+					snapshot.Meshes.push_back(blocker);
+					LightData shadow;
+					shadow.Type = type;
+					shadow.Position = { 1, 0, 0 };
+					shadow.Direction = glm::normalize(type == RenderLightType::Directional ? glm::vec3(-0.35f, 0, -1) : glm::vec3(-1, 0, -5));
+					shadow.Intensity = type == RenderLightType::Directional ? 0.5f : 100.0f;
+					shadow.CastShadows = true;
+					shadow.ShadowDistance = 10;
+					shadow.CascadeCount = 1;
+					shadow.DepthBias = shadow.NormalBias = 0;
+					shadow.LightAngle = 0;
+					shadow.SourceRadius = 0;
+					shadow.Entity = UUID(22);
+					LightData culled;
+					culled.Intensity = 0;
+					// The shadowed light's snapshot index differs from its uploaded index.
+					snapshot.Lights = { culled, shadow };
+					const auto shaded = fixture.Render(snapshot);
+					snapshot.Meshes[0].ReceiveShadows = false;
+					const auto unreceived = fixture.Render(snapshot);
+					snapshot.Meshes[0].ReceiveShadows = true;
+					snapshot.Meshes[1].CastShadows = false;
+					const auto uncast = fixture.Render(snapshot);
+					const int dark = Test::SceneRendererIntegrationFixture::Channel(shaded, 32, 32);
+					const int lit = Test::SceneRendererIntegrationFixture::Channel(unreceived, 32, 32);
+					CAPTURE(dark);
+					CAPTURE(lit);
+					CHECK(lit > dark + 20);
+					CHECK(std::abs(lit - Test::SceneRendererIntegrationFixture::Channel(uncast, 32, 32)) <= 1);
+					const auto stats = fixture.Renderer().GetRenderStats();
+					CHECK(stats.ShadowDraws == 0);
+				}
+		}
+
+		TEST_CASE("SceneRenderer: GTAO shades only indirect light and data views show the final occlusion")
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::SceneRendererIntegrationFixture fixture(gpu, 67, 49);
+			MaterialData grey;
+			grey.BaseColor = glm::vec4(0.3f, 0.3f, 0.3f, 1.0f); // White's multibounce compensation can remove diffuse darkening.
+			fixture.Assets().Publish(UUID(8911), CreateRef<MaterialData>(grey));
+			for (const auto projection : { RenderProjection::Perspective, RenderProjection::Orthographic })
+			{
+				auto snapshot = fixture.Snapshot(projection);
+				snapshot.Meshes[0].World = glm::translate(glm::mat4(1), glm::vec3(0, 0, -3)) * glm::scale(glm::mat4(1), glm::vec3(2));
+				auto raised = snapshot.Meshes[0];
+				raised.Entity = UUID(40);
+				raised.World = glm::translate(glm::mat4(1), glm::vec3(0.4f, 0, -2.8f)) * glm::scale(glm::mat4(1), glm::vec3(0.35f));
+				snapshot.Meshes.push_back(raised);
+				snapshot.DebugView = RenderDebugView::AO;
+				snapshot.Post.ExposureEV = 8;
+				snapshot.Post.SsaoIntensity = 4; // Make the low-contrast orthographic contact exceed RGBA8 quantization after multibounce.
+				const auto disabled = fixture.Render(snapshot);
+				for (size_t pixel = 0; pixel < disabled.Pixels.size(); pixel += 4)
+					CHECK(disabled.Pixels[pixel] == std::byte{ 255 });
+				for (const auto quality : { RenderSsaoQuality::Low, RenderSsaoQuality::Medium, RenderSsaoQuality::High })
+				{
+					snapshot.Post.SsaoQuality = quality;
+					snapshot.Post.SsaoEnabled = true;
+					snapshot.Quality.SsaoHalfResolution = quality == RenderSsaoQuality::High;
+					const auto enabled = fixture.Render(snapshot);
+					int darkest = 255;
+					for (size_t pixel = 0; pixel < enabled.Pixels.size(); pixel += 4)
+					{
+						darkest = std::min(darkest, std::to_integer<int>(enabled.Pixels[pixel]));
+						CHECK(enabled.Pixels[pixel] == enabled.Pixels[pixel + 1]);
+						CHECK(enabled.Pixels[pixel] == enabled.Pixels[pixel + 2]);
+					}
+					CHECK(darkest < 245);
+					const auto stats = fixture.Renderer().GetRenderStats();
+					REQUIRE(Test::SceneRendererIntegrationFixture::FindPass(stats, "GTAO") != nullptr);
+				}
+				snapshot.DebugView = RenderDebugView::Lit;
+				snapshot.Post.ExposureEV = 0;
+				const auto occludedAmbient = fixture.Render(snapshot);
+				snapshot.Post.SsaoEnabled = false;
+				const auto ambient = fixture.Render(snapshot);
+				size_t darker = 0;
+				int maximumDifference = 0;
+				for (size_t pixel = 0; pixel < ambient.Pixels.size(); pixel += 4)
+				{
+					maximumDifference = std::max(maximumDifference, std::to_integer<int>(ambient.Pixels[pixel]) - std::to_integer<int>(occludedAmbient.Pixels[pixel]));
+					if (std::to_integer<int>(occludedAmbient.Pixels[pixel]) + 1 < std::to_integer<int>(ambient.Pixels[pixel]))
+						++darker;
+				}
+				CAPTURE(static_cast<uint32_t>(projection));
+				CAPTURE(maximumDifference);
+				CAPTURE(GetRed(ambient, 33, 24));
+				CAPTURE(GetRed(occludedAmbient, 33, 24));
+				CHECK(darker > 10);
+				snapshot.Environment.FallbackColor = glm::vec3(0);
+				snapshot.Lights = { LightData{} };
+				const auto direct = fixture.Render(snapshot);
+				snapshot.Post.SsaoEnabled = true;
+				const auto directWithAo = fixture.Render(snapshot);
+				CHECK(direct.Pixels == directWithAo.Pixels);
+			}
+		}
+
+		TEST_CASE("SceneRenderer: capture keeps the snapshot projection at a different target aspect")
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::SceneRendererIntegrationFixture fixture(gpu);
+			MaterialData flat;
+			flat.NormalScale = 0.0f; // Remove the normal-map texel's byte-quantization tilt from the flat-plane AO oracle.
+			fixture.Assets().Publish(UUID(8911), CreateRef<MaterialData>(flat));
+			auto capture = ViewportCapture::CreateForScenes(gpu.GetDevice(), fixture.Pipelines(), fixture.Cache(), fixture.Assets());
+			REQUIRE(capture);
+			for (const auto projection : { RenderProjection::Perspective, RenderProjection::Orthographic })
+			{
+				auto snapshot = fixture.Snapshot(projection);
+				snapshot.DebugView = RenderDebugView::Albedo;
+				const auto originalProjection = snapshot.Camera.Projection;
+				const auto image = (*capture)->Capture({ .Width = 32, .Height = 16 }, snapshot);
+				REQUIRE_MESSAGE(image.has_value(), image.error().ToString());
+				CHECK(image->Width == 32);
+				CHECK(image->Height == 16);
+				// The square projection covers this pixel. Rebuilding it for a 2:1 target would expose the black background.
+				CHECK(Test::SceneRendererIntegrationFixture::Channel(*image, 8, 8) == 255);
+				CHECK(Test::SceneRendererIntegrationFixture::Channel(*image, 0, 8) == 0);
+				CHECK(snapshot.Camera.Projection == originalProjection);
+				CHECK(snapshot.Camera.ViewportWidth == 64);
+				CHECK(snapshot.Camera.ViewportHeight == 64);
+				CHECK(snapshot.FrameIndex == 17);
+
+				// GTAO targets use the actual capture dimensions even while the projection retains its original aspect.
+				snapshot.DebugView = RenderDebugView::AO;
+				snapshot.Post.SsaoEnabled = true;
+				const auto ao = (*capture)->Capture({ .Width = 31, .Height = 17 }, snapshot);
+				REQUIRE_MESSAGE(ao.has_value(), ao.error().ToString());
+				CHECK(ao->Width == 31);
+				CHECK(ao->Height == 17);
+				for (size_t pixel = 0; pixel < ao->Pixels.size(); pixel += 4)
+					CHECK(ao->Pixels[pixel] == std::byte{ 255 }); // Isolated flat surface and background are unoccluded.
+			}
+		}
+
+		TEST_CASE("SceneRenderer: cascade view emits exact primaries and blends without color transforms")
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::SceneRendererIntegrationFixture fixture(gpu);
+			auto snapshot = fixture.Snapshot();
+			snapshot.DebugView = RenderDebugView::ShadowCascades;
+			snapshot.Post.ExposureEV = 9;
+			snapshot.Post.BloomEnabled = snapshot.Post.FxaaEnabled = true;
+			LightData light;
+			light.CastShadows = true;
+			light.CascadeCount = 2;
+			light.CascadeSplitLambda = 0;
+			light.ShadowDistance = 10;
+			snapshot.Lights = { light };
+			for (const auto& [distance, expected] : std::array<std::pair<float, glm::ivec3>, 5>{ { { 3.0f, { 255, 0, 0 } }, { 7.0f, { 0, 255, 0 } }, { 4.8025f, { 128, 128, 0 } }, { 9.7525f, { 0, 128, 0 } }, { 11.0f, { 0, 0, 0 } } } })
+			{
+				CAPTURE(distance);
+				snapshot.Meshes[0].World[3].z = -distance;
+				const auto image = fixture.Render(snapshot);
+				for (size_t channel = 0; channel < 3; ++channel)
+					CHECK(std::abs(Test::SceneRendererIntegrationFixture::Channel(image, 32, 32, channel) - expected[static_cast<glm::length_t>(channel)]) <= 1);
+				CHECK(Test::SceneRendererIntegrationFixture::Channel(image, 0, 0) == 0);
+			}
+			snapshot.Lights[0].CastShadows = false;
+			snapshot.Meshes[0].World[3].z = -3;
+			CHECK(Test::SceneRendererIntegrationFixture::Channel(fixture.Render(snapshot), 32, 32) == 0);
+		}
+
+		TEST_CASE("SceneRenderer: submitted picking owns the exact table despite culled draws and later mutations")
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::SceneRendererIntegrationFixture fixture(gpu);
+			auto snapshot = fixture.Snapshot();
+			snapshot.Flags = RenderViewFlags::Picking;
+			auto center = snapshot.Meshes[0];
+			center.Entity = UUID(40);
+			center.PickId = 2;
+			snapshot.Meshes[0].World[3].x = 100;
+			snapshot.Meshes.push_back(center);
+			fixture.Submit(snapshot);
+			snapshot.PickTable = { UUID(11), UUID(12) };
+			PickRequest request{ .X = 32, .Y = 32, .FrameIndex = snapshot.FrameIndex, .SceneRevision = snapshot.SceneRevision, .Sequence = 5, .ViewGeneration = fixture.Renderer().GetViewGeneration() };
+			auto ticket = fixture.Renderer().RequestPick(request);
+			REQUIRE(ticket);
+			gpu.GetDevice().WaitForIdle();
+			const auto early = fixture.Renderer().PollPick(*ticket, snapshot.FrameIndex + 1);
+			REQUIRE(early);
+			CHECK_FALSE(early->has_value());
+			const auto ready = fixture.Renderer().PollPick(*ticket, snapshot.FrameIndex + 2);
+			REQUIRE(ready);
+			REQUIRE(ready->has_value());
+			CHECK((**ready).Entity == UUID(40));
+			CHECK((**ready).PickId == 2);
+			CHECK((**ready).Sequence == 5);
+			CHECK((**ready).SceneRevision == 41);
+			// A non-picking render cannot advertise or accept the previous ID image.
+			snapshot.Flags = RenderViewFlags::None;
+			++snapshot.FrameIndex;
+			fixture.Submit(snapshot);
+			CHECK(fixture.Renderer().GetEntityIdTexture() == nullptr);
+			const auto unavailable = fixture.Renderer().RequestPick(request);
+			REQUIRE_FALSE(unavailable);
+			CHECK(unavailable.error().GetCode() == ErrorCode::InvalidState);
+		}
+	}
+
+	TEST_SUITE(Test::GpuSuite)
+	{
+		TEST_CASE("SceneRenderer: scene game and capture views keep independent extents picks and timing frames")
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::SceneRendererIntegrationFixture fixture(gpu, 64, 48);
+			auto game = SceneRenderer::Create(gpu.GetDevice(), fixture.Pipelines(), fixture.Cache(), fixture.Assets(), { 23, 11 });
+			REQUIRE(game);
+			auto scene = fixture.Snapshot();
+			scene.Flags = RenderViewFlags::Picking;
+			scene.Post.SsaoEnabled = true;
+			auto gameSnapshot = scene;
+			gameSnapshot.FrameIndex = 900;
+			gameSnapshot.SceneRevision = 72;
+			gameSnapshot.Meshes[0].Entity = UUID(777);
+			gameSnapshot.PickTable = { UUID(777) };
+			for (uint32_t frame = 0; frame <= gpu.GetDevice().GetFramesInFlight(); ++frame)
+			{
+				scene.FrameIndex = 31 + frame;
+				gameSnapshot.FrameIndex = 900 + frame;
+				fixture.Submit(scene);
+				auto list = gpu.GetDevice().CreateCommandList();
+				REQUIRE(list);
+				(*list)->open();
+				const auto rendered = (*game)->Render(**list, gameSnapshot);
+				(*list)->close();
+				(*game)->OnSubmitted(gameSnapshot.FrameIndex, gpu.GetDevice().ExecuteCommandList(**list));
+				REQUIRE_MESSAGE(rendered.has_value(), rendered.error().ToString());
+				gpu.GetDevice().WaitForIdle();
+			}
+			const auto sceneStats = fixture.Renderer().GetRenderStats();
+			const auto gameStats = (*game)->GetRenderStats();
+			CHECK(sceneStats.Width == 64);
+			CHECK(sceneStats.Height == 48);
+			CHECK(gameStats.Width == 23);
+			CHECK(gameStats.Height == 11);
+			CHECK(sceneStats.GpuFrameIndex == 31);
+			CHECK(gameStats.GpuFrameIndex == 900);
+			CHECK(sceneStats.GpuAvailable);
+			CHECK(gameStats.GpuAvailable);
+			CHECK(sceneStats.MemoryAllocationCount > 0);
+			CHECK(gameStats.MemoryAllocationCount > 0);
+			CHECK(fixture.Renderer().GetEntityIdTexture() != (*game)->GetEntityIdTexture());
+			auto sceneTicket = fixture.Renderer().RequestPick({ .X = 32, .Y = 24, .FrameIndex = scene.FrameIndex, .SceneRevision = scene.SceneRevision, .ViewGeneration = fixture.Renderer().GetViewGeneration() });
+			auto gameTicket = (*game)->RequestPick({ .X = 11, .Y = 5, .FrameIndex = gameSnapshot.FrameIndex, .SceneRevision = gameSnapshot.SceneRevision, .ViewGeneration = (*game)->GetViewGeneration() });
+			REQUIRE(sceneTicket);
+			REQUIRE(gameTicket);
+			gpu.GetDevice().WaitForIdle();
+			auto scenePick = fixture.Renderer().PollPick(*sceneTicket, scene.FrameIndex + 2);
+			auto gamePick = (*game)->PollPick(*gameTicket, gameSnapshot.FrameIndex + 2);
+			REQUIRE(scenePick);
+			REQUIRE(scenePick->has_value());
+			REQUIRE(gamePick);
+			REQUIRE(gamePick->has_value());
+			CHECK((**scenePick).Entity == UUID(900));
+			CHECK((**gamePick).Entity == UUID(777));
+			const auto oldGameGeneration = (*game)->GetViewGeneration();
+			REQUIRE(fixture.Renderer().Resize(31, 17));
+			CHECK((*game)->GetViewGeneration() == oldGameGeneration);
+			CHECK((*game)->GetRenderStats().FrameIndex == gameStats.FrameIndex);
+			gpu.GetDevice().WaitForIdle();
+		}
+
+		TEST_CASE("SceneRenderer: selection and icon composites respect the editor gate and data view precedence")
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::SceneRendererIntegrationFixture fixture(gpu);
+			auto snapshot = fixture.Snapshot();
+			const auto clean = fixture.Render(snapshot);
+			snapshot.SelectedEntities = { UUID(900) };
+			snapshot.Flags = RenderViewFlags::Selection | RenderViewFlags::Icons;
+			snapshot.Icons = { { .Position = { 0, 0, -2 }, .Color = { 1, 0, 0, 1 }, .Size = 20 } };
+			CHECK(fixture.Render(snapshot).Pixels == clean.Pixels);
+			snapshot.Flags |= RenderViewFlags::EditorOverlays;
+			const auto decorated = fixture.Render(snapshot);
+			size_t changed = 0;
+			for (size_t pixel = 0; pixel < clean.Pixels.size(); pixel += 4)
+				if (clean.Pixels[pixel] != decorated.Pixels[pixel] || clean.Pixels[pixel + 1] != decorated.Pixels[pixel + 1])
+					++changed;
+			CHECK(changed > 100);
+			const auto stats = fixture.Renderer().GetRenderStats();
+			const auto* composite = Test::SceneRendererIntegrationFixture::FindPass(stats, "SelectionComposite");
+			REQUIRE(composite != nullptr);
+			CHECK(composite->DrawCalls == 0);
+			CHECK(composite->Dispatches == 1);
+			REQUIRE(Test::SceneRendererIntegrationFixture::FindPass(stats, "Overlays") != nullptr);
+			snapshot.DebugView = RenderDebugView::AO;
+			const auto data = fixture.Render(snapshot);
+			for (size_t pixel = 0; pixel < data.Pixels.size(); ++pixel)
+				CHECK(data.Pixels[pixel] == std::byte{ 255 });
+			// Capture-only annotations deliberately survive data-view suppression.
+			snapshot.Annotations.Axes = true;
+			snapshot.DebugDraw.AddLine({ -1, 0, -1 }, { 1, 0, -1 }, { 1, 0, 0, 1 }, 0, DebugDepthMode::OnTop);
+			CHECK(fixture.Render(snapshot).Pixels != data.Pixels);
+		}
+
+		TEST_CASE("SceneRenderer: partial error submissions retire targets and preserve valid picking work")
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::SceneRendererIntegrationFixture fixture(gpu);
+			auto snapshot = fixture.Snapshot();
+			snapshot.Flags = RenderViewFlags::Picking;
+			auto invalid = snapshot.Meshes[0];
+			invalid.World[0][0] = std::numeric_limits<float>::quiet_NaN();
+			invalid.Entity = UUID(40);
+			snapshot.Meshes.push_back(invalid);
+			auto list = gpu.GetDevice().CreateCommandList();
+			REQUIRE(list);
+			(*list)->open();
+			const auto rendered = fixture.Renderer().Render(**list, snapshot);
+			(*list)->close();
+			fixture.Renderer().OnSubmitted(snapshot.FrameIndex, gpu.GetDevice().ExecuteCommandList(**list));
+			REQUIRE_FALSE(rendered);
+			CHECK(rendered.error().GetCode() == ErrorCode::InvalidArgument);
+			CHECK(fixture.Renderer().GetRenderStats().VisibleMeshes == 1);
+			auto ticket = fixture.Renderer().RequestPick({ .X = 32, .Y = 32, .FrameIndex = snapshot.FrameIndex, .SceneRevision = snapshot.SceneRevision, .ViewGeneration = fixture.Renderer().GetViewGeneration() });
+			REQUIRE(ticket);
+			const uint64_t generation = fixture.Renderer().GetViewGeneration();
+			// Resize immediately, before waiting for either submission. The old pool targets remain owned until retirement.
+			REQUIRE(fixture.Renderer().Resize(17, 9));
+			CHECK(fixture.Renderer().GetViewGeneration() > generation);
+			const auto cancelled = fixture.Renderer().PollPick(*ticket, snapshot.FrameIndex + 2);
+			REQUIRE_FALSE(cancelled);
+			CHECK(cancelled.error().GetCode() == ErrorCode::Cancelled);
+			snapshot = fixture.Snapshot();
+			snapshot.HasCamera = false;
+			fixture.Submit(snapshot);
+			REQUIRE(fixture.Renderer().Resize(19, 13));
+			fixture.Submit(snapshot);
+			CHECK(fixture.Renderer().GetRenderStats().Width == 19);
+			CHECK(fixture.Renderer().GetRenderStats().Height == 13);
 		}
 	}
 

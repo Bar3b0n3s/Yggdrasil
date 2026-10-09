@@ -33,6 +33,9 @@ namespace Engine {
 		[[nodiscard]] Result<std::optional<Result<Json>>> TakeResult(uint64_t ticket);
 		// NotFound unknown ticket; queued cancellation has no side effects, pending cancellation follows the handler.
 		[[nodiscard]] Status Cancel(uint64_t ticket);
+	private:
+		struct State;
+		Scope<State> m_State;
 	};
 
 }

@@ -1,9 +1,12 @@
 #include "TestsPCH.h"
 
 #include "EditorCore/Automation/EditMethods.h"
+#include "EditorCore/Play/EditorPlayController.h"
 
 #include "Engine/Core/Json/JsonReader.h"
+#include "Engine/Scene/Entity.h"
 #include "Engine/Scene/SceneSerializer.h"
+#include "Engine/Session/PlaySession.h"
 #include "Support/AutomationTestClient.h"
 
 #include <nlohmann/json.hpp>
@@ -19,6 +22,28 @@ namespace Engine {
 
 	TEST_SUITE("EditorCore")
 	{
+		TEST_CASE("EditMethods: play selection resolves runtime entities and clears to the shown target")
+		{
+			Test::AutomationFixture setup("EditSelectPlay");
+			auto& editor = setup.GetEditor();
+			REQUIRE(editor.GetPlay().Start(PlayStartOptions{ .Lockstep = true }));
+			auto runtime = editor.GetPlay().GetSession()->CreateEntity("RuntimeOnly");
+			REQUIRE(runtime);
+			auto selected = setup.Call("edit.select", Json{ { "entities", Json::array({ "/RuntimeOnly" }) } });
+			REQUIRE(selected);
+			REQUIRE((*selected)["selection"].size() == 1);
+			CHECK((*selected)["selection"][0]["name"] == Json("RuntimeOnly"));
+			CHECK(editor.GetSelectionTarget() == SceneTarget::Play);
+			auto current = setup.Call("edit.getSelection", Json::object());
+			REQUIRE(current);
+			CHECK((*current)["selection"] == (*selected)["selection"]);
+			REQUIRE(setup.Call("edit.select", Json{ { "entities", Json::array() } }));
+			CHECK(editor.GetSelection().empty());
+			CHECK(editor.GetSelectionTarget() == SceneTarget::Play);
+			REQUIRE(editor.GetPlay().Stop());
+			CHECK(editor.GetSelectionTarget() == SceneTarget::Edit);
+		}
+
 		TEST_CASE("EditMethods: edit.batch runs atomically with $ref substitution as one undo step")
 		{
 			Test::AutomationFixture setup("EditBatch");

@@ -398,7 +398,7 @@
 		{
 			"name": "editor_screenshot",
 			"method": "editor.screenshot",
-			"description": "Re-renders the editor UI's last rendered frame (the whole editor as of that frame) at its framebuffer size, downscales it to maxDimension and writes it as a PNG whose path the result names. Needs a renderer (not --renderer none).",
+			"description": "Requests a fresh editor UI frame, including while minimized, waits for that frame and captures the whole editor. Downscales it to maxDimension and writes it as a PNG whose path the result names. Needs a renderer (not --renderer none).",
 			"inputSchema": {
 				"$schema": "https://json-schema.org/draft/2020-12/schema",
 				"title": "EditorScreenshotParams",
@@ -1235,7 +1235,7 @@
 					},
 					"template": {
 						"description": "What the project starts with.",
-						"enum": ["Empty"]
+						"enum": ["Empty", "Basic3D"]
 					},
 					"ifRevision": {
 						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
@@ -1324,6 +1324,10 @@
 					"path": {
 						"description": "The .eproj, or the directory holding exactly one: native, absolute or relative.",
 						"type": "string"
+					},
+					"recover": {
+						"description": "Adopt the newest validated dirty recovery before opening; source files are preserved.",
+						"type": "boolean"
 					},
 					"ifRevision": {
 						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
@@ -1706,11 +1710,11 @@
 						"type": "string"
 					},
 					"debugView": {
-						"description": "A debug view to render instead of the lit image, ignoring case: \"Lit\" (the default, also for \"\"), \"Albedo\", \"Normals\", \"Roughness\", \"Metallic\" or \"Emissive\". A data view stores each value v as round(255 v).",
+						"description": "A debug view to render instead of the lit image, ignoring case: \"Lit\" (the default, also for \"\"), \"Albedo\", \"Normals\", \"Roughness\", \"Metallic\", \"Emissive\", \"AO\", \"ShadowCascades\" or \"Overdraw\". A data view stores each value v as round(255 v).",
 						"type": "string"
 					},
 					"annotate": {
-						"description": "Labels, colliders, bounds and axes to draw (not supported before M9; refused when present)."
+						"description": "Capture-only annotations: labels=all, selection (selected), none or an EntityRef array; colliders, bounds and axes are booleans. Unknown members and invalid references are rejected."
 					},
 					"maxDimension": {
 						"description": "The larger side of the PNG at most this many pixels.",

@@ -53,6 +53,8 @@ namespace Engine {
 			// GraphicsSpecification::InjectFault, for the in-process fault tests.
 			GpuFault InjectFault = GpuFault::None;
 			uint32_t FramesInFlight = 2;
+			// GraphicsSpecification::DisableDepthClamp; forces the real device feature and capability off.
+			bool DisableDepthClamp = false;
 		};
 
 		// One headless GraphicsDevice (GraphicsSpecification with Validation, the options above and MaxApiVersion =

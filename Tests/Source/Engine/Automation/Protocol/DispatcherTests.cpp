@@ -12,13 +12,75 @@ namespace Engine {
 
 	namespace {
 
+		// Fault injection at the protocol host boundary; normal operations delegate to the existing test host.
+		class DispatcherOutcomeHost final : public IMethodHost
+		{
+		public:
+			explicit DispatcherOutcomeHost(Test::TestHostState& state)
+				: m_Host(state)
+			{
+			}
+			[[nodiscard]] Status CheckAvailability(const MethodDescriptor& method) const override { return m_Host.CheckAvailability(method); }
+			[[nodiscard]] Scope<MethodContext> CreateContext(MethodRequest request) override { return m_Host.CreateContext(std::move(request)); }
+			[[nodiscard]] Status AdmitRequest(MethodContext& context) override { return m_Host.AdmitRequest(context); }
+			void EnterInvocation(MethodContext& context) override { m_Host.EnterInvocation(context); }
+			void LeaveInvocation(MethodContext& context) override
+			{
+				m_Host.LeaveInvocation(context);
+				if (AfterInvocation)
+					AfterInvocation();
+			}
+			void FinishRequest(MethodContext& context) override { m_Host.FinishRequest(context); }
+			[[nodiscard]] MetaState GetMetaState() const override { return m_Host.GetMetaState(); }
+			[[nodiscard]] std::string GetOffloadServerTag() const override { return m_Host.GetOffloadServerTag(); }
+			[[nodiscard]] Result<std::string> WriteOffloadedResult(std::string_view name, std::string_view text) override
+			{
+				++OffloadAttempts;
+				if (BeforeOffload)
+					BeforeOffload();
+				if (FailOffload)
+					return MakeError(ErrorCode::Io, "injected offload failure");
+				return m_Host.WriteOffloadedResult(name, text);
+			}
+			std::function<void()> AfterInvocation{};
+			std::function<void()> BeforeOffload{};
+			bool FailOffload = false;
+			uint32_t OffloadAttempts = 0;
+		private:
+			Test::TestMethodHost m_Host;
+		};
+
+		// A real pending operation returning deliberate errors or malformed output to exercise dispatcher outcomes.
+		class DispatcherOutcomeOperation final : public PendingOperation
+		{
+		public:
+			explicit DispatcherOutcomeOperation(uint32_t mode)
+				: m_Mode(mode)
+			{
+			}
+			[[nodiscard]] std::optional<Result<Json>> Poll(MethodContext&) override
+			{
+				if (m_Mode == 0)
+					return Result<Json>(MakeError(ErrorCode::NotFound, "injected pending failure"));
+				return Json::array();
+			}
+			void Cancel(MethodContext&) override {}
+		private:
+			uint32_t m_Mode = 0;
+		};
+
+		[[nodiscard]] static Result<Scope<PendingOperation>> BeginDispatcherOutcome(Test::TestHostContext&, const Test::PendParams& params)
+		{
+			return Scope<PendingOperation>(CreateScope<DispatcherOutcomeOperation>(params.Polls));
+		}
+
 		// The test types, methods and host, a ring of the test's own and a dispatcher over them, with clients 1 and 2.
 		struct DispatcherSetup
 		{
 			Scope<TypeRegistry> Types = Test::CreateProtocolTestTypes();
 			Scope<MethodRegistry> Methods;
 			Test::TestHostState State;
-			Test::TestMethodHost Host{ State };
+			DispatcherOutcomeHost Host{ State };
 			RingBufferSink Log{ 256 };
 			Scope<Dispatcher> Calls;
 
@@ -26,6 +88,8 @@ namespace Engine {
 			{
 				Methods = CreateScope<MethodRegistry>(*Types);
 				Test::RegisterProtocolTestMethods(*Methods);
+				Methods->AddPending<Test::TestHostContext, Test::PendParams, Test::PendResult>(
+					{ .Name = "test.observedOutcome", .Description = "Exercises pending result failure reporting.", .Examples = { { .Description = "Fail during Poll.", .Params = Json{ { "polls", 0 } } } } }, &BeginDispatcherOutcome);
 				Methods->Freeze();
 				Calls = CreateScope<Dispatcher>(*Methods, Host, Log, nullptr, specification);
 				Calls->AddClient(1, "first");
@@ -88,6 +152,269 @@ namespace Engine {
 
 	TEST_SUITE("Automation")
 	{
+		TEST_CASE("Dispatcher: observers receive one terminal event for every request and notification")
+		{
+			for (bool notification : { false, true })
+			{
+				std::vector<DispatcherRequestEvent> events;
+				DispatcherSetup setup({ .RequestObserver = [&events](const DispatcherRequestEvent& event)
+				{
+					events.push_back(event);
+				} });
+				const std::vector<std::pair<std::string, Json>> requests{
+					{ "test.read", Json::object() }, { "unknown.method", Json::object() },
+					{ "test.echo", Json::object() }, { "test.fail", Json::object() }
+				};
+				for (const auto& [method, params] : requests)
+				{
+					RpcRequest request = Test::MakeTestRequest(1, method, params);
+					request.Id = notification ? Json() : Json("same-wire-id");
+					request.IsNotification = notification;
+					request.TranscriptLine = 45;
+					setup.Calls->Enqueue(1, std::move(request));
+				}
+				const auto messages = setup.PumpAll();
+				CHECK(messages.size() == (notification ? 0 : requests.size()));
+				REQUIRE(events.size() == requests.size() * 2);
+				for (size_t index = 0; index < requests.size(); ++index)
+				{
+					const auto& start = events[index * 2];
+					const auto& end = events[index * 2 + 1];
+					CHECK(start.Sequence == index + 1);
+					CHECK(start.Sequence == end.Sequence);
+					CHECK(start.Phase == DispatcherRequestPhase::Started);
+					CHECK(end.Phase == (index == 0 ? DispatcherRequestPhase::Succeeded : DispatcherRequestPhase::Failed));
+					CHECK(start.Request.Client == 1);
+					CHECK(start.Request.ClientName == "first");
+					CHECK(start.Request.Method == requests[index].first);
+					CHECK(end.Request.Method == start.Request.Method);
+					CHECK(start.Request.Id == (notification ? Json() : Json("same-wire-id")));
+					CHECK(end.Request.Id == start.Request.Id);
+					CHECK(end.Request.TranscriptLine == 45);
+				}
+				setup.State.LauncherState = true;
+				setup.Calls->Enqueue(1, Test::MakeTestRequest(5, "test.echo", Json{ { "text", "unavailable" } }));
+				REQUIRE(setup.PumpAll().size() == 1);
+				CHECK(events.back().Phase == DispatcherRequestPhase::Failed);
+				setup.State.DenyEverything = true;
+				setup.Calls->Enqueue(1, Test::MakeTestRequest(6, "test.read", Json::object()));
+				REQUIRE(setup.PumpAll().size() == 1);
+				CHECK(events.back().Phase == DispatcherRequestPhase::Failed);
+				CHECK(events.size() == 12);
+			}
+		}
+
+		TEST_CASE("Dispatcher: protocol admission precedes lookup and never readmits pending work")
+		{
+			std::vector<DispatcherRequestEvent> events;
+			bool reject = false;
+			uint32_t admissions = 0;
+			DispatcherSetup setup({ .RequestObserver = [&events](const DispatcherRequestEvent& event)
+			{
+				events.push_back(event);
+			},
+				.RequestAdmission = [&reject, &admissions, &events](const RequestInfo& request) -> std::optional<DispatcherRequestRejection>
+			{
+				++admissions;
+				REQUIRE_FALSE(events.empty());
+				CHECK(events.back().Phase == DispatcherRequestPhase::Started);
+				CHECK(events.back().Request.Method == request.Method);
+				if (reject)
+					return DispatcherRequestRejection{ .Code = RpcErrorCode::Busy, .Failure = Error(ErrorCode::InvalidState, "paused") };
+				return std::nullopt;
+			} });
+			setup.Calls->Enqueue(1, Test::MakeTestRequest(1, "test.pend", Json{ { "polls", 2 } }));
+			setup.Calls->Enqueue(1, Test::MakeTestRequest(2, "unknown.method", Json::object()));
+			CHECK(setup.Calls->Pump(std::chrono::seconds(1)).empty());
+			CHECK(admissions == 1);
+			CHECK(events.size() == 1);
+			reject = true;
+			const auto messages = setup.PumpAll();
+			REQUIRE(messages.size() == 2);
+			CHECK(messages[0].Message.contains("result"));
+			CHECK(messages[1].Message["error"]["code"] == Json(std::to_underlying(RpcErrorCode::Busy)));
+			CHECK(messages[1].Message["error"]["data"].contains("_meta"));
+			CHECK(admissions == 2);
+			REQUIRE(events.size() == 4);
+			CHECK(events[1].Phase == DispatcherRequestPhase::Succeeded);
+			CHECK(events[1].Sequence == 1);
+			CHECK(events[2].Sequence == 2);
+			CHECK(events[3].Phase == DispatcherRequestPhase::Failed);
+			CHECK(setup.CallsOf("unknown.method").empty());
+			RpcRequest notification = Test::MakeTestRequest(3, "test.echo", Json::object());
+			notification.Id = Json();
+			notification.IsNotification = true;
+			setup.Calls->Enqueue(1, std::move(notification));
+			CHECK(setup.PumpAll().empty());
+			CHECK(admissions == 3);
+			REQUIRE(events.size() == 6);
+			CHECK(events[4].Sequence == 3);
+			CHECK(events[5].Sequence == 3);
+			CHECK(events[5].Phase == DispatcherRequestPhase::Failed);
+			CHECK(setup.CallsOf("test.echo").empty());
+		}
+
+		TEST_CASE("Dispatcher: disconnect and destruction cancel starts and never observe dropped queues")
+		{
+			std::vector<DispatcherRequestEvent> events;
+			DispatcherSetup setup({ .RequestObserver = [&events](const DispatcherRequestEvent& event)
+			{
+				events.push_back(event);
+			} });
+			setup.Calls->AddClient(3, "never-started");
+			setup.Calls->Enqueue(3, Test::MakeTestRequest(1, "test.read", Json::object()));
+			setup.Calls->RemoveClient(3);
+			CHECK(events.empty());
+			for (ClientId client : { ClientId{ 1 }, ClientId{ 2 } })
+			{
+				RpcRequest notification = Test::MakeTestRequest(1, "test.pend", Json{ { "polls", 1000 } });
+				notification.Id = Json();
+				notification.IsNotification = true;
+				setup.Calls->Enqueue(client, std::move(notification));
+				setup.Calls->Enqueue(client, Test::MakeTestRequest(2, "test.read", Json::object()));
+			}
+			CHECK(setup.Calls->Pump(std::chrono::seconds(1)).empty());
+			REQUIRE(events.size() == 2);
+			CHECK(events[0].Sequence == 1);
+			CHECK(events[1].Sequence == 2);
+			setup.Calls->RemoveClient(1);
+			setup.Calls->RemoveClient(1);
+			setup.Calls.reset();
+			REQUIRE(events.size() == 4);
+			CHECK(events[2].Sequence == 1);
+			CHECK(events[3].Sequence == 2);
+			CHECK(events[2].Phase == DispatcherRequestPhase::Cancelled);
+			CHECK(events[3].Phase == DispatcherRequestPhase::Cancelled);
+			CHECK(events[2].Request.ClientName == "first");
+			CHECK(events[3].Request.ClientName == "second");
+			CHECK(events[2].Request.Id.is_null());
+			CHECK(events[3].Request.Id.is_null());
+		}
+
+		TEST_CASE("Dispatcher: pending errors and malformed notification results report failure")
+		{
+			for (uint32_t mode : { 0U, 1U })
+			{
+				for (bool notification : { false, true })
+				{
+					std::vector<DispatcherRequestEvent> events;
+					DispatcherSetup setup({ .RequestObserver = [&events](const DispatcherRequestEvent& event)
+					{
+						events.push_back(event);
+					} });
+					RpcRequest request = Test::MakeTestRequest(1, "test.observedOutcome", Json{ { "polls", mode } });
+					request.IsNotification = notification;
+					if (notification)
+						request.Id = Json();
+					setup.Calls->Enqueue(1, std::move(request));
+					const auto messages = setup.PumpAll();
+					CHECK(messages.size() == (notification ? 0U : 1U));
+					REQUIRE(events.size() == 2);
+					CHECK(events[0].Phase == DispatcherRequestPhase::Started);
+					CHECK(events[1].Phase == DispatcherRequestPhase::Failed);
+					CHECK(events[1].Sequence == events[0].Sequence);
+					const auto calls = setup.CallsOf("test.observedOutcome");
+					CHECK(std::count(calls.begin(), calls.end(), "finish") == 1);
+				}
+			}
+		}
+
+		TEST_CASE("Dispatcher: offload failures remain failures when the client disconnects during output")
+		{
+			for (bool disconnect : { false, true })
+			{
+				std::vector<DispatcherRequestEvent> events;
+				DispatcherSetup setup({ .OffloadThresholdBytes = 16,
+					.RequestObserver = [&events](const DispatcherRequestEvent& event)
+				{
+					events.push_back(event);
+				} });
+				setup.Host.FailOffload = true;
+				if (disconnect)
+					setup.Host.BeforeOffload = [&setup]()
+					{
+						setup.Calls->RemoveClient(1);
+					};
+				setup.Calls->Enqueue(1, Test::MakeTestRequest(1, "test.large", Json{ { "count", 3 } }));
+				const auto messages = setup.PumpAll();
+				CHECK(messages.size() == (disconnect ? 0U : 1U));
+				if (!disconnect)
+					CHECK(messages[0].Message["error"]["code"] == Json(std::to_underlying(RpcErrorCode::Internal)));
+				REQUIRE(events.size() == 2);
+				CHECK(events.back().Phase == DispatcherRequestPhase::Failed);
+				CHECK(setup.Host.OffloadAttempts == 1);
+			}
+		}
+
+		TEST_CASE("Dispatcher: disconnects during invocation retain explicit completion or cancellation")
+		{
+			for (const std::string method : { "test.fail", "test.read", "test.pend" })
+			{
+				std::vector<DispatcherRequestEvent> events;
+				DispatcherSetup setup({ .RequestObserver = [&events](const DispatcherRequestEvent& event)
+				{
+					events.push_back(event);
+				} });
+				setup.Host.AfterInvocation = [&setup]()
+				{
+					setup.Calls->RemoveClient(1);
+				};
+				setup.Calls->Enqueue(1, Test::MakeTestRequest(1, method, method == "test.pend" ? Json{ { "polls", 1000 } } : Json::object()));
+				CHECK(setup.PumpAll().empty());
+				REQUIRE(events.size() == 2);
+				CHECK(events[1].Phase == (method == "test.fail" ? DispatcherRequestPhase::Failed : method == "test.read" ? DispatcherRequestPhase::Succeeded
+																														 : DispatcherRequestPhase::Cancelled));
+				const auto calls = setup.CallsOf(method);
+				CHECK(std::count(calls.begin(), calls.end(), "finish") == 1);
+			}
+		}
+
+		TEST_CASE("Dispatcher: a disconnect during Poll emits one terminal event after finishing the request")
+		{
+			for (const bool resolves : { false, true })
+			{
+				std::vector<DispatcherRequestEvent> events;
+				DispatcherSetup setup({ .RequestObserver = [&events](const DispatcherRequestEvent& event)
+				{
+					events.push_back(event);
+				} });
+				setup.Calls->Enqueue(1, Test::MakeTestRequest(1, "test.pend", Json{ { "polls", resolves ? 2 : 1000 } }));
+				CHECK(setup.Calls->Pump(std::chrono::seconds(1)).empty());
+				REQUIRE(events.size() == 1);
+				setup.Host.AfterInvocation = [&setup]()
+				{
+					setup.Calls->RemoveClient(1);
+				};
+				CHECK(setup.PumpAll().empty());
+				REQUIRE(events.size() == 2);
+				CHECK(events[1].Sequence == events[0].Sequence);
+				CHECK(events[1].Phase == (resolves ? DispatcherRequestPhase::Succeeded : DispatcherRequestPhase::Cancelled));
+				const auto calls = setup.CallsOf("test.pend");
+				CHECK(std::count(calls.begin(), calls.end(), "finish") == 1);
+				CHECK(std::count(calls.begin(), calls.end(), "cancel") == (resolves ? 0 : 1));
+			}
+		}
+
+		TEST_CASE("Dispatcher: a completed offload retains success without responding to a disconnected client")
+		{
+			std::vector<DispatcherRequestEvent> events;
+			DispatcherSetup setup({ .OffloadThresholdBytes = 16,
+				.RequestObserver = [&events](const DispatcherRequestEvent& event)
+			{
+				events.push_back(event);
+			} });
+			setup.Host.BeforeOffload = [&setup]()
+			{
+				setup.Calls->RemoveClient(1);
+			};
+			setup.Calls->Enqueue(1, Test::MakeTestRequest(1, "test.large", Json{ { "count", 3 } }));
+			CHECK(setup.PumpAll().empty());
+			REQUIRE(events.size() == 2);
+			CHECK(events[1].Phase == DispatcherRequestPhase::Succeeded);
+			CHECK(events[1].Sequence == events[0].Sequence);
+			CHECK(setup.Host.OffloadAttempts == 1);
+		}
+
 		TEST_CASE("Dispatcher: requests of one client run in order and every response carries _meta")
 		{
 			DispatcherSetup setup;

@@ -175,6 +175,9 @@ namespace Engine {
 		std::vector<nvrhi::FramebufferHandle> SlotTargets;
 		// The frame clock's time since the last UI frame (ImGuiLayer::BeginFrame), accumulated over skipped frames.
 		double UiDeltaSeconds = 0.0;
+		bool UiFrameRequested = false;
+		uint32_t LastWidth = 1;
+		uint32_t LastHeight = 1;
 		bool IsImGuiFailing = false; // the last UI frame failed to render, so the next failure is not logged again
 	};
 
@@ -448,13 +451,19 @@ namespace Engine {
 
 	void Application::OnRenderSubmitted(uint64_t, uint64_t)
 	{
-		ENGINE_CONTRACT_STUB();
 	}
 
 	Status Application::RequestOffscreenUiFrame()
 	{
-		ENGINE_CONTRACT_STUB();
-		return MakeError(ErrorCode::Unsupported, "M10 offscreen UI contract is not implemented");
+		if (m_Rendering == nullptr || m_ImGuiLayer == nullptr)
+			return MakeError(ErrorCode::Unsupported, "a fresh UI frame requires an active renderer and ImGui layer");
+		m_Rendering->UiFrameRequested = true;
+		return {};
+	}
+
+	FrameLoopStatistics Application::GetFrameStatistics() const
+	{
+		return m_FrameLoop != nullptr ? m_FrameLoop->GetStatistics() : FrameLoopStatistics{};
 	}
 
 	void Application::OnFrameEvent(Event& event)
@@ -503,7 +512,7 @@ namespace Engine {
 		// completed, so the target it held may go (FrameRendering::SlotTargets).
 		rendering.Pacer->BeginFrame();
 		const uint32_t frameSlot = rendering.Pacer->GetFrameSlot();
-		rendering.Profiler->BeginFrame(frameSlot);
+		rendering.Profiler->BeginFrame(frameSlot, rendering.Pacer->GetFrameIndex());
 		if (frameSlot < rendering.SlotTargets.size())
 			rendering.SlotTargets[frameSlot] = nullptr;
 
@@ -511,7 +520,9 @@ namespace Engine {
 		nvrhi::ITexture* target = nullptr;
 		uint32_t width = 0;
 		uint32_t height = 0;
-		if (rendering.WindowSwapchain != nullptr)
+		const bool minimized = window.IsMinimized() || window.GetFramebufferWidth() == 0 || window.GetFramebufferHeight() == 0;
+		bool acquiredSwapchain = false;
+		if (rendering.WindowSwapchain != nullptr && !(rendering.UiFrameRequested && minimized))
 		{
 			Swapchain& swapchain = *rendering.WindowSwapchain;
 			const Result<SwapchainAcquireStatus> status = swapchain.AcquireNextImage(frameSlot);
@@ -519,18 +530,34 @@ namespace Engine {
 				Utils::EndRenderingObjectFailure(status.error(), "Cannot recreate the swapchain");
 			if (*status == SwapchainAcquireStatus::Acquired)
 			{
+				acquiredSwapchain = true;
 				framebuffer = swapchain.GetCurrentFramebuffer();
 				target = swapchain.GetCurrentTexture();
 				width = swapchain.GetWidth();
 				height = swapchain.GetHeight();
 			}
 		}
-		else if (window.GetFramebufferWidth() > 0 && window.GetFramebufferHeight() > 0)
+		if (framebuffer == nullptr && ((rendering.WindowSwapchain == nullptr && !minimized) || rendering.UiFrameRequested))
 		{
-			// Headless: the offscreen target follows the window's framebuffer size (a render target created at resize,
-			// §8.14 item 7).
+			// A forced frame also works before a windowed swapchain has ever acquired an image. Keep its resources
+			// per slot, just like headless targets; minimized frames retain the last rendered nonzero extent.
+			width = minimized ? rendering.LastWidth : window.GetFramebufferWidth();
+			height = minimized ? rendering.LastHeight : window.GetFramebufferHeight();
+			if (rendering.OffscreenFrame == nullptr)
+			{
+				Result<OffscreenTarget> created = OffscreenTarget::Create(device, {
+																					  .Width = width,
+																					  .Height = height,
+																					  .ColorFormat = nvrhi::Format::RGBA8_UNORM,
+																					  .Depth = false,
+																					  .DebugName = "ForcedUiFrame",
+																				  });
+				if (!created)
+					Utils::EndRenderingObjectFailure(created.error(), "Cannot create the forced UI target");
+				rendering.OffscreenFrame = CreateScope<OffscreenTarget>(std::move(*created));
+			}
 			OffscreenTarget& offscreen = *rendering.OffscreenFrame;
-			const Status resized = offscreen.Resize(device, window.GetFramebufferWidth(), window.GetFramebufferHeight());
+			const Status resized = offscreen.Resize(device, width, height);
 			if (!resized.has_value())
 				Utils::EndRenderingObjectFailure(resized.error(), "Cannot resize the frame's offscreen target");
 			framebuffer = offscreen.GetFramebuffer();
@@ -547,6 +574,10 @@ namespace Engine {
 			device.RunGarbageCollection();
 			return;
 		}
+		rendering.LastWidth = width;
+		rendering.LastHeight = height;
+		// Consume only when recording starts. A request made by a render hook belongs to the following frame.
+		rendering.UiFrameRequested = false;
 
 		nvrhi::ICommandList& commandList = *rendering.CommandList;
 		commandList.open();
@@ -568,7 +599,7 @@ namespace Engine {
 
 		if (m_ImGuiLayer != nullptr)
 		{
-			m_ImGuiLayer->BeginFrame(rendering.UiDeltaSeconds, frameSlot);
+			m_ImGuiLayer->BeginFrame(rendering.UiDeltaSeconds, frameSlot, minimized);
 			rendering.UiDeltaSeconds = 0.0;
 			OnImGuiRender();
 			m_ImGuiLayer->EndFrame();
@@ -587,12 +618,13 @@ namespace Engine {
 		}
 		commandList.close();
 
-		if (rendering.WindowSwapchain != nullptr)
+		if (acquiredSwapchain)
 			rendering.WindowSwapchain->QueueFrameSemaphores();
 		const uint64_t submission = device.ExecuteCommandList(commandList);
-		if (rendering.WindowSwapchain != nullptr)
+		OnRenderSubmitted(rendering.Pacer->GetFrameIndex(), submission);
+		if (acquiredSwapchain)
 			rendering.WindowSwapchain->Present();
-		rendering.Pacer->EndFrame(submission);
+		rendering.Pacer->EndFrame(device.GetLastSubmissionID());
 		device.RunGarbageCollection();
 	}
 
@@ -608,6 +640,9 @@ namespace Engine {
 
 		m_Rendering = CreateScope<FrameRendering>();
 		FrameRendering& rendering = *m_Rendering;
+		rendering.LastWidth = std::max(window->GetFramebufferWidth(), 1u);
+		rendering.LastHeight = std::max(window->GetFramebufferHeight(), 1u);
+		rendering.SlotTargets.resize(framesInFlight);
 		if (m_Specification.Window == WindowMode::Windowed)
 		{
 			ENGINE_TRY_ASSIGN(rendering.WindowSwapchain,

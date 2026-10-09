@@ -236,6 +236,50 @@ namespace Engine {
 
 	TEST_SUITE("App")
 	{
+		TEST_CASE("FrameLoop: diagnostics measure completed frames without changing simulation")
+		{
+			const std::array<double, 2> deltas = { 1.0, 1.0 };
+			Result<ScriptedClock> clock = ScriptedClock::Create(deltas);
+			REQUIRE(clock.has_value());
+			Scope<EngineContext> context = CreateContext();
+			RecordingClient client;
+			const std::array<int, 4> milliseconds = { 0, 5, 20, 25 };
+			size_t diagnosticCalls = 0;
+			FrameLoopSpecification specification;
+			specification.Loop.FixedHz = 10;
+			specification.Loop.MaxStepsPerFrame = 2;
+			specification.Loop.MaxFrameDelta = 0.5;
+			specification.DiagnosticClock = [&milliseconds, &diagnosticCalls]()
+			{
+				REQUIRE(diagnosticCalls < milliseconds.size());
+				return std::chrono::steady_clock::time_point(std::chrono::milliseconds(milliseconds[diagnosticCalls++]));
+			};
+			FrameLoop loop(*context, client, CreateScope<ScriptedClock>(std::move(*clock)), specification);
+			CHECK(loop.GetStatistics().CompletedFrames == 0);
+			CHECK(loop.GetStatistics().Fps == 0.0);
+			CHECK(diagnosticCalls == 0);
+
+			loop.RunFrame();
+			CHECK(loop.GetStatistics().CompletedFrames == 1);
+			CHECK(loop.GetStatistics().CpuMilliseconds == doctest::Approx(5.0));
+			CHECK(loop.GetStatistics().Fps == 0.0);
+			CHECK(loop.GetStatistics().DroppedSeconds == doctest::Approx(0.8));
+			CHECK(loop.GetScheduler().GetTick() == 2);
+
+			loop.RunFrame();
+			CHECK(loop.GetStatistics().CompletedFrames == 2);
+			CHECK(loop.GetStatistics().CpuMilliseconds == doctest::Approx(5.0));
+			CHECK(loop.GetStatistics().Fps == doctest::Approx(50.0));
+			CHECK(loop.GetStatistics().DroppedSeconds == doctest::Approx(1.6));
+			CHECK(loop.GetScheduler().GetTick() == 4);
+			CHECK(diagnosticCalls == 4);
+			specification.Loop.FixedHz = 20;
+			loop.SetLoopConfig(specification.Loop);
+			CHECK(loop.GetStatistics().DroppedSeconds == doctest::Approx(1.6));
+			CHECK(loop.GetStatistics().CompletedFrames == 2);
+			CHECK(diagnosticCalls == 4);
+		}
+
 		TEST_CASE("FrameLoop: a ManualClock frame runs exactly one step before its update and render")
 		{
 			Scope<EngineContext> context = CreateContext();

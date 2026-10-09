@@ -237,6 +237,12 @@ namespace Engine {
 		ENGINE_ASSERT(m_IsActive, "SceneEdit '{}' committed after it ended", m_Label);
 		if (!m_IsActive)
 			return 0;
+		// Play-only edits bypass the persistent command history; check the same policy before either target commits.
+		if (Status permission = m_Context->CheckMutationPermission(); !permission)
+		{
+			Cancel();
+			return std::unexpected(std::move(permission).error());
+		}
 		m_IsActive = false;
 		if (m_EditScene.Target != nullptr)
 			Utils::RecordTouchedInstanceOverrides(*m_Context, *m_EditScene.Target, m_Label);

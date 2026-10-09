@@ -13,16 +13,17 @@
 #include <vector>
 
 // The scene renderer (Architecture §8.2, §8.3): it renders a RenderSnapshot, never the ECS, through a fixed pass list (no
-// render graph). The M8 pass list (Roadmap M8; Docs/Decisions/0013-m8-decisions.md decisions 7 to 13); passes 2, 3, 5, 6 and
-// 13's grid, icons and outline arrive with M9:
+// render graph). The pass list (Roadmap M8/M9; Docs/Decisions/0013-m8-decisions.md and 0017-m9-contract.md):
 //   1. Prepare (CPU, RenderPrepare.h): every MeshDrawItem resolved through the GpuResourceCache (meshes, materials with their
 //      textures, the environment; placeholders for missing assets, §7.2), submeshes culled against the view frustum by their
 //      bounds, opaque draws (AlphaMode Opaque and Mask) sorted by pipeline, then material, then mesh, transparent draws
 //      (AlphaMode Blend) back to front with ties by entity UUID; the lights culled and packed, at most MaxVisibleLights,
 //      logging RENDER_LIGHT_LIMIT_EXCEEDED once per renderer when more are visible; the per-view constants written
 //      (ViewConstants b0, EnvironmentConstants b2, the Lights structured buffer t0).
+//   2. Directional cascades and 3. spot shadow atlas: shared shadow pipelines, per-view depth targets and constants (b1).
 //   4. Depth/normal prepass: SceneDepth (reverse-Z) and SceneNormals (octahedral view-space normals, normal-mapped); Mask
-//      materials discard below AlphaCutoff here and in the forward pass.
+//      materials discard below AlphaCutoff here and in the forward pass. Picking adds the same visible surfaces to EntityId.
+//   5. Linear view-depth pyramid and 6. GTAO: projection-aware, with optional half resolution and edge-aware filtering.
 //   7. Forward opaque: SceneColor cleared to the camera's ClearColor; PBR (§8.5: GGX, height-correlated Smith, Schlick,
 //      Lambert, multi-scatter energy compensation from the DFG LUT (BrdfLut.h), perceptual roughness >= 0.045, geometric
 //      specular anti-aliasing) with every visible light (artist units, windowed inverse-square falloff, smoothstep cones,
@@ -38,7 +39,8 @@
 //      without the built-in (InMemoryAssetManager, a test's AssetTestFixture without the engine resources) must not log
 //      GetOrPlaceholder's ASSET_MISSING error on every render.
 //  12. FXAA (FxaaPass.h): when PostProcessSettings::FxaaEnabled, LdrColor into its ping-pong partner.
-//  13. Overlays: the snapshot's DebugDrawList (DebugRenderer.h), depth-tested against SceneDepth or on top.
+//  13. Wireframe edges, selection mask/dilation/composite, then grid/icons and the snapshot's DebugDrawList, depth-tested
+//      against SceneDepth or on top. Grid/icons/selection require EditorOverlays and their respective flags.
 //  14. Text (TextRenderer.h): world texts (depth-tested), then screen texts, then the debug list's labels.
 // Debug views (RenderSnapshot::DebugView other than Lit) specialize the forward pipelines and fix the post chain: no skybox,
 // bloom, FXAA or dither, exposure 1, the Linear tonemapper, the OETF only for Albedo and Emissive. Existing M8 material
@@ -52,8 +54,9 @@
 // pipelines, {Opaque, Mask} prepass and forward variants and the Blend transparent variants, each for CullBack (front
 // faces counter-clockwise, §8.3), CullFront (a mirroring world matrix, whose front faces turn clockwise on screen; the
 // shaders flip the normal by DrawConstants::Flags) and CullNone (double-sided materials; the shaders flip back faces'
-// normals), 15 in all; plus the passes it owns: SkyboxPass, BloomPass (for the device's Bloom format, §8.1), TonemapPass,
-// FxaaPass, DebugRenderer, TextRenderer and BrdfLut (which generates the DFG LUT once at Create). Material binding sets
+// normals), plus picking and overdraw, 24 in all; plus the passes it owns: SkyboxPass, BloomPass (for the device's Bloom
+// format, §8.1), TonemapPass, FxaaPass, DebugRenderer, TextRenderer, shadows, depth pyramid, GTAO, selection, data views and
+// BrdfLut (which generates the DFG LUT once at Create). Material binding sets
 // (set 1) are shared by every variant through shared binding layouts (PipelineFactory.h). A non-Lit debug view's
 // pipelines (the 9 forward opaque and transparent variants specialized with the view) are created the first time a
 // snapshot asks for that view and kept: debug views are a debugging path, like ImGui's per-format pipelines (ADR 0009
@@ -88,7 +91,7 @@ namespace Engine {
 		uint32_t Height = 1;
 	};
 
-	// What the last Render did (stats.get's per-pass detail arrives with M9).
+	// The legacy draw summary of the last Render; GetRenderStats supplies the per-pass detail.
 	struct SceneRenderStats
 	{
 		uint32_t MeshDraws = 0;       // submesh draws recorded by the forward passes (opaque and transparent)
@@ -109,15 +112,16 @@ namespace Engine {
 	{
 	public:
 		// The scene's own mesh pipelines at startup: prepass {Opaque, Mask} x {CullBack, CullFront, CullNone} (6), forward
-		// opaque the same (6), forward transparent {CullBack, CullFront, CullNone} (3).
-		static constexpr uint32_t MeshPipelineCount = 15;
+		// opaque the same (6), forward transparent (3), picking prepass (6), depth-independent overdraw (3).
+		static constexpr uint32_t MeshPipelineCount = 24;
 		// The pipelines one M8 material debug view adds: 6 forward opaque and 3 transparent variants. M9 data views use
-		// their dedicated passes (ADR0017); the integrator adds their counts/layout tests with the actual shader manifest.
-		// This scaffold preserves the existing M8 counts and does not claim new debug views are renderable yet.
+		// their dedicated passes (ADR0017).
+		// Data-view pipelines are included in StartupPipelineCount.
 		static constexpr uint32_t DebugViewPipelineCount = 9;
 		// Every pipeline Create makes: the mesh pipelines plus SkyboxPass (1), BloomPass (3), TonemapPass (1), FxaaPass (1),
-		// DebugRenderer (2), TextRenderer (2) and BrdfLut (1). Each pass declares its own PipelineCount; this is their sum.
-		static constexpr uint32_t StartupPipelineCount = MeshPipelineCount + 1 + 3 + 1 + 1 + 2 + 2 + 1;
+		// DebugRenderer (2), TextRenderer (2), BrdfLut (1), ShadowPass (6), DepthPyramid (2), GTAO (2), Selection (8),
+		// and the data-view composite (1). Each pass declares its own PipelineCount; this is their sum.
+		static constexpr uint32_t StartupPipelineCount = MeshPipelineCount + 1 + 3 + 1 + 1 + 2 + 2 + 1 + 6 + 2 + 2 + 8 + 1;
 
 		// Restricts construction to Create; CreateScope still reaches the constructor.
 		class ConstructionKey
@@ -151,8 +155,7 @@ namespace Engine {
 		// call tries again.
 		[[nodiscard]] Status EnsureDebugView(RenderDebugView view);
 
-		// Actual pipelines created so far: startup plus each lazily created family, counted once. The M8 scaffold uses
-		// DebugViewPipelineCount per material view; M9 dedicated pass counts land with their manifest and reflection tests.
+		// Actual pipelines created so far: startup plus each lazily created material-view family, counted once.
 		[[nodiscard]] uint32_t GetPipelineCount() const;
 
 		// The layout description of every pipeline Create makes, its passes' included, with the BloomPass pipelines for

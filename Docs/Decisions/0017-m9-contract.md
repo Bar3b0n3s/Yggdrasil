@@ -1,11 +1,11 @@
 # 0017 — M9 rendering contract
 
-- Status: reviewed public contract; the freeze takes effect with its reviewed, passing contract-mode commit. Marked scaffolds do not establish implementation completion.
-- Scope: Roadmap M9 only. M10 runs in parallel. No implementation milestone is declared complete.
-- Worktree: branch `codex/m9-renderer`. No commit or push belongs to this assignment.
+- Status: public contract frozen in `dd5d57d`, with approved implementation amendments below. Milestone acceptance is recorded by the reviewed implementation commit.
+- Scope: Roadmap M9, integrated with M10 on `codex/m9-m10`.
+- Original contract worktree: branch `codex/m9-renderer`; the parent owns integration, verification and publication.
 - Authority: Architecture sections 3, 8.2–8.14, 13.4–13.7 and 15; Roadmap M9; ADRs 0004, 0009, 0011, 0013 and 0016.
 
-## 1. What is present
+## 1. Initial contract snapshot
 
 Public value types and documented APIs, marked compiled C++ stubs, and failing-by-design skipped acceptance cases. Existing M8 behavior is kept. New debug names are recognized, but rendering and screenshot requests still return Unsupported until M9 implements them. A nondefault M9 extraction/render option is explicitly refused by a marked contract guard. Existing tests are not skipped or weakened: the debug-name test now checks all three new names, while the old screenshot refusal tests remain valid until implementation changes the behavior.
 
@@ -42,6 +42,8 @@ M10 owns EditorContext camera/options and viewport extent storage, viewport.came
 
 ## 3. Shadows
 
+Implementation review: `GraphicsSpecification::DisableDepthClamp` is a default-false programmatic capability restriction in every build configuration, with no CLI option. Both the effective device capability and the enabled Vulkan feature are `hardwareSupport && !DisableDepthClamp`. `HeadlessGpuFixture` forwards the option so tests exercise the actual extended-near fallback, including off-screen caster depth and receiver visibility, under Vulkan 1.4 and 1.3 even on hardware supporting depth clamp. A subsequent default device must regain the hardware capability. This adds no vendor modification or validation suppression.
+
 One shadowed directional light per view: the first eligible visible directional light in canonical order, consistent with the single four-layer ShadowCascades target. Every other directional light still illuminates; it does not receive a second directional shadow allocation. The parent contract owner accepted this resolution of the otherwise unspecified multiple-directional-light budget.
 
 LightData gains ShadowDistance, CascadeCount, CascadeSplitLambda, DepthBias and NormalBias. These copy DirectionalLightComponent verbatim; defaults for spot bias are 1. ShadowMapSize comes from the snapshot quality copied from the project, range 256–8192, power of two.
@@ -68,6 +70,12 @@ GtaoPass owns main and bilateral-denoise pipelines. Low/Medium/High use one/two/
 
 AO combines with material AO by min and modifies indirect lighting only. Diffuse uses the multibounce fit; specular uses AO, NdotV and roughness. Disabled AO yields white. No temporal reprojection, history buffers or simulation changes. AO debug view shows the final occlusion value directly.
 
+The orthographic reconstruction scale comes from the reciprocal diagonal of the captured projection, as it already
+does for perspective. Rebuilding horizontal extent from the destination texture aspect is wrong when a capture keeps a
+different frozen camera projection. A conical-contact GPU regression uses independent homogeneous unprojection and a
+numerical visibility integral at matching and mismatched aspects, in full and half resolution; the old reconstruction
+fails at both mismatched aspects.
+
 ## 5. Picking and selection
 
 AsyncPicker owns a bounded pool of eight staging/query/command-list slots. Request is called only after the matching render submission is notified, records and submits its own one-pixel copy, and retains that request's PickTable copy, SceneRevision, Sequence, FrameIndex and ViewGeneration. It uses GraphicsDevice wrappers (CreateStagingTexture, CreateEventQuery, completed submission id), never blocking Readback::ReadTexture.
@@ -82,6 +90,12 @@ SelectionPass writes full-resolution R8 SelectionMask (1 visible, .5 occluded), 
 
 ## 6. Overlays, annotations and raycasting
 
+Implementation review: the raycast uses the existing synchronous CPU mesh lookup from Architecture §7, including its
+normal cook/load and placeholder behavior. The original header's promise to avoid import waits was broader than the
+asset interface supports; it is corrected rather than introducing a second asset-loading API. Raycasts do not wait for
+GPU work or step physics. Statistics' nine reflected diagnostic numbers use the registry's supported `float` type,
+with finite, range-safe conversions. They are approximate observations; frame identifiers remain exact decimal strings.
+
 AppendEditorOverlay is pure renderer-side grid/icon tessellation into a caller-owned DebugDrawList. Grid is XZ, spacing in powers of ten, axis emphasis and distance fade, valid with both camera projections. Renderer world glyphs are separate from M10's Editor/Icons.cpp UI glyphs; neither implementation includes the other. Existing DebugRenderer/TextRenderer render the resulting lines and labels.
 
 AppendRenderAnnotations is the real asset-dependent operation after extraction. It reads snapshot flags, selection, annotations and Alpha, then appends capture-local DebugDraw commands and plain icon records. Labels carry entity name and six-character UUID prefix in owned DebugText strings. Bounds come from CPU mesh AABBs transformed at the rendered pose. Axes use RGB. Collider geometry comes from BuildColliderDebugDraw with ColliderDebugDrawOptions.Alpha exactly equal to snapshot.Alpha, then AppendColliderDebugDraw. Pass the play PhysicsSystem to classify sleeping/refused bodies; edit scenes use null. This closes ADR0016's collider-alpha seam without Renderer-to-Scene coupling.
@@ -93,6 +107,11 @@ RaycastScene uses CPU AABB broad phase then two-sided mesh triangles at the rend
 Pixel rays use integer framebuffer x/y, top-left origin, centre x+.5/y+.5, exactly the pixel GPU picking copies. Perspective origin is camera.Position; orthographic origin is the near-plane point with constant forward direction. Camera range and matrix validity are checked; CPU math uses DetMath where needed. `ComputeViewPixelRayInterval` supplies the interval: perspective `[NearClip/c, FarClip/c]` with c the normalized ray's forward component; orthographic `[0,FarClip-NearClip]` relative to its near-plane origin. Narrow-phase traversal rejects out-of-interval triangles before selecting a winner, so clipped foreground cannot hide a farther valid hit.
 
 ## 7. Statistics and host adapters
+
+The display order of statistics rows is stable independently of command recording order. Selection rows precede the
+Wireframe row in the statistics schema; the visual wireframe is recorded before the selection composite so the selected
+edge remains visible. Counted Bloom, Text and DebugDraw helpers stay private to their passes and `SceneRenderer`;
+existing public recording signatures are unchanged. Each `ViewportCapture` owns its own frame counter and history.
 
 RenderStatsHistory is per SceneRenderer and copies values; screenshots have separate histories. The renderer uses the existing Graphics/GpuProfiler pooled delayed nonblocking timer queries. It does not introduce another timer-query implementation. CPU frame and GPU source-frame indices remain separate, with explicit availability bits; an absent timing never appears as a fabricated zero measurement.
 
@@ -142,11 +161,34 @@ The Tests paths mirror their source include root unless explicitly named. Golden
 
 ## 10. Acceptance and remaining integration
 
+The reviewed native-memory implementation wraps the device's original Vulkan allocation/free dispatch entries before
+NVRHI initialization and restores them after host-image and NVRHI teardown, including partial startup failures. It
+counts successful device-memory blocks, not resource objects or suballocations; failed allocations and null frees leave
+the count unchanged. A device-local `VulkanMemoryAllocationTracker` accepts injectable native entries so tests can cover
+failure returns without exhausting GPU memory. State resets between devices. The timer pool reserves
+`MaxConcurrentGpuProfilers` (eight) times `FramesInFlight` times `GpuProfiler::MaxScopesPerFrame` queries, checking native
+index overflow before Vulkan creation. Hosts must retire and sweep transient profilers before exceeding this budget.
+
 Scaffolding names every Roadmap acceptance CPU/GPU case and all nine goldens, plus stale/cancelled picker, mask/cull parity, half-resolution, per-view stats, annotation-alpha and settings propagation regressions. Python scaffolding names test_stats_report_pass_timings and test_viewport_pick_deterministic plus exported Runtime raycasts and capture-local annotation checks. All new skipped bodies fail if forced to run; removing a decorator without implementing the case cannot produce green.
 
 Before milestone completion: every marker and non-child skip removed; Runtime methods and host services wired; project rendering settings observed in edit/play/capture/export; no screenshot stats eviction; async cancellation reclamation and shutdown tested; schemas/catalog regenerated; RENDER_NO_LIGHTING and RENDER_SPOT_SHADOW_BUDGET validator codes and fixtures registered; shader reflection checks cover all new programs/constants; candidate goldens reviewed; 1080p timing logged without a speed gate; no M8 behavior or tests weakened; strict local PreCommit and CI green including both Vulkan API caps and clang-cl portability. Remote CI remains non-blocking (ADR0011).
 
 Parent-owned documentation amendments: Architecture sections 8.2–8.4, 8.7–8.10, 8.13–8.14 and 13.5–13.7; Roadmap M9 status/details; add-automation-method Runtime list for scene.raycast/stats.get. Remove interim M8/M9 scaffold comments once implementations land. No root documentation amendments have been applied by this worker.
+
+## Shadow receiver correction
+
+Visual review found broad self-shadow ripples in the near/spot golden candidates. PCSS previously compared offset
+samples to the centre receiver depth, treating the same sloped surface as an occluder. The accepted correction derives
+an analytic UV/depth gradient from the geometric triangle plane, outside divergent light/cascade branches. Blocker
+search compares the receiver at the sampled texel centre. Bilinear comparison uses the nearest receiver depth over
+exactly its four-texel footprint, with eight relative float epsilons for matrix/raster roundoff. Degenerate light-plane
+projections retain the existing normal/caster bias. Atlas scale is included in spot gradients.
+
+`Scene.slang` obtains the geometric plane from world-position derivatives before light selection and orients it to the
+surface geometric normal. Shading normals still drive lighting, but never the receiver-plane correction. No fixture,
+shadow-bias default or image threshold changed. The regression compares a plane against shadows disabled across both
+light/projection kinds, two map sizes and flat/interpolated/normal-mapped normals, then checks that a nearby real
+occluder retains its shadow. Golden candidates are reviewed after this correction.
 
 ## 11. Initial contract-worker verification (before review corrections)
 
@@ -183,6 +225,10 @@ The clipped-ray helper, MinDistance field and per-candidate rejection freeze cor
 
 ### Validation (finding 7)
 
+The integrated validator propagates a failed illumination scan with scene-file context rather than emitting incomplete
+render diagnostics. Its public error contract includes invalid nonfinite CPU asset/environment data. Lighting and
+spot-shadow warnings are unfixable, scene-level diagnostics with identical IDs for open and scratch-loaded scenes.
+
 Stream D owns EvaluateRenderSceneValidation in Scene/RenderAnnotations. Parent integrator owns ProjectValidator adapters/GetCodes, exact-list tests and generated reference wiring. Both diagnostics are Warning, not automatically fixable, keyed once per scene file without an entity. NoLighting requires a visible enabled non-null mesh with a nonemissive material, zero effective ambient, and no contributing enabled light. Effective environment is the first enabled Environment or RenderEnvironment defaults: a positive loaded map SH DC term at positive intensity, or the renderer's effective positive fallback when no usable map is present. A skybox background alone is not indirect lighting. Missing resources use renderer CPU placeholders and keep their separate asset diagnostics. Empty/text-only scenes and scenes where every visible submesh has potential emission do not warn; potential emission is max(Emissive*EmissiveStrength)>0 without inspecting texture texels. Emission never lights other nonemissive meshes. There is no invented Unlit material field. Shadow budget counts all enabled, finite contributing spots with CastShadows (not only the current camera's visible subset), warning above eight; actual per-view allocation still follows CullLights. Open and scratch-loaded scenes use the same checks. Tests include Basic3D positive illumination, black fallback, emission mixed with nonemissive meshes, and stable warning IDs/no undo changes; AUDIO_NO_LISTENER remains a separate warning, never an error.
 
 ### Debug outputs and wireframe (finding 8)
@@ -212,3 +258,11 @@ Focused checks on the corrected worktree, with VULKAN_SDK set per command to the
 - No new untracked files; the unstaged patch includes every correction. The initial staged contract is unchanged. Application.h/.cpp and Graphics/GpuProfiler.h/.cpp are untouched by this worker.
 
 No linked build, executed acceptance suite, full gate, remote CI, feature implementation, staging or commit is claimed for these corrections. The parent owns combined contract verification and application of the exported unstaged patch.
+
+### Final renderer acceptance fixtures
+
+The nine M9 goldens use committed FeatureTest scenes and three native materials created by the appended 30 automation scaffold commands. Existing M8 commands and asset files remain unchanged. The common RenderGoldenScene helper loads temporary project copies, rejects scan/load/error diagnostics, appends actual scene annotations and verifies that capture leaves scene serialization unchanged. The contract owner approves the appended synchronous const InspectSnapshot observer in GoldenSceneOptions for validating extracted state before capture.
+
+The parent visually reviewed all nine final 640x360 candidates on 2026-10-09 and approved their nvidia-61x baselines: ShadowsNear, ShadowsFar, ShadowsOrtho, SpotShadows, GtaoOn, GtaoOff, GtaoOrtho, SelectionOutline and AnnotatedScreenshot. Ground shadow ripples are absent; cast shadows, contact shading, occluded selection edges and labels/bounds/axes are visible as intended. Existing scene baselines are preserved. Independent feature-disabled captures, repeated fresh captures, both Vulkan caps and Debug/Release runs supplement the image comparison. The scaffold regression reproduces the 24 scene/material/metadata files byte for byte from a pinned test ID state.
+
+Orthographic CPU reconstruction, like its GPU counterpart, derives extents from the frozen projection diagonals. Capturing at a different destination aspect must not change the camera projection; a CPU round-trip regression covers square and portrait captures of a 2:1 camera.

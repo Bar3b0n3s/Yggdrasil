@@ -96,6 +96,29 @@ namespace Engine {
 			CHECK_FALSE(gpu.IsAvailable());
 		}
 
+		TEST_CASE("GraphicsDevice: disabling depth clamp restricts the capability without changing hardware support"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			CHECK_FALSE(GraphicsSpecification{}.DisableDepthClamp);
+			CHECK_FALSE(Test::HeadlessGpuOptions{}.DisableDepthClamp);
+			// Recreate the real logical device with the restriction, then without it: it must not change process-level
+			// dispatch state or the physical-device feature. This also covers hardware that has no depth clamp support.
+			for (const bool disableDepthClamp : { false, true, false })
+			{
+				CAPTURE(disableDepthClamp);
+				Test::HeadlessGpuFixture gpu({ .DisableDepthClamp = disableDepthClamp });
+				ENGINE_REQUIRE_GPU(gpu);
+				GraphicsDevice& device = gpu.GetDevice();
+				VkPhysicalDeviceFeatures supported{};
+				VULKAN_HPP_DEFAULT_DISPATCHER.vkGetPhysicalDeviceFeatures(device.GetVulkanPhysicalDevice(), &supported);
+				CHECK(device.GetSpecification().DisableDepthClamp == disableDepthClamp);
+				CHECK(device.GetInfo().DepthClamp == (supported.depthClamp == VK_TRUE && !disableDepthClamp));
+				CHECK(device.GetVulkanDevice() != VK_NULL_HANDLE);
+				CHECK(device.GetInfo().Validation);
+				CHECK(device.GetInfo().SynchronizationValidation);
+			}
+		}
+
 		TEST_CASE("GraphicsDevice: validation and synchronization-validation messages reach GpuDiagnostics and count"
 			* doctest::test_suite(Test::GpuSuite))
 		{
@@ -295,6 +318,34 @@ namespace Engine {
 				CHECK(description == "no fault information");
 			else
 				CHECK(description == "VK_EXT_device_fault is not available");
+		}
+
+		TEST_CASE("GraphicsDevice: injected loss on a healthy device never queries native device-fault information"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			if (!Test::ProbeGpuForProcess())
+				return;
+			GraphicsDeviceSpecification specification;
+			specification.Graphics.Validation = true;
+			specification.Graphics.SynchronizationValidation = true;
+			specification.Graphics.MaxApiVersion = Test::GetTestOptions().VulkanApi;
+			specification.ApplicationName = "Tests";
+			Result<Scope<GraphicsDevice>> device = GraphicsDevice::Create(specification);
+			REQUIRE_MESSAGE(device.has_value(), device.error().ToString());
+			GpuDiagnostics& diagnostics = (*device)->GetDiagnostics();
+			diagnostics.SetDeviceLost(true);
+			diagnostics.SetDeviceLost(); // the same repeated report as RaiseDeviceLost, without exiting this test
+			CHECK(diagnostics.IsDeviceLossInjected());
+			const std::string description = (*device)->DescribeDeviceFault();
+			if ((*device)->GetInfo().DeviceFault)
+				CHECK(description == "no fault information (the device loss was injected)");
+			else
+				CHECK(description == "VK_EXT_device_fault is not available");
+			// Destroy calls the native idle wait and counts teardown diagnostics; the ordinary fixture's fatal loss check
+			// would intentionally terminate on this marked device. No work or GPU resource is submitted by this test.
+			const GpuMessageCounts counts = GraphicsDevice::Destroy(std::move(*device));
+			CHECK(counts.Errors == 0);
+			CHECK(counts.Warnings == 0);
 		}
 
 		TEST_CASE("GraphicsDevice: FramesInFlight 0 is InvalidArgument")

@@ -346,6 +346,11 @@ namespace Engine {
 			.ScriptDiagnostics = nullptr,
 			.EngineAssetGenerators = GetEngineAssetGenerators(),
 		});
+		// Borrowed editor back-reference, cleared after CloseProject drains the manager and before members are destroyed.
+		m_Assets->GetWriter().SetMutationGuard([this]()
+		{
+			return CheckMutationPermission();
+		});
 		engine.SetAssetManager(m_Assets.get());
 		// M12: the asset browser's audio preview, when the engine context has an audio engine.
 		if (AudioEngine* audio = engine.GetAudioEngine(); audio != nullptr)
@@ -399,8 +404,10 @@ namespace Engine {
 
 	EditorContext::~EditorContext()
 	{
-		CloseProject();
+		const Status closed = CloseProject();
+		ENGINE_VERIFY(closed.has_value(), "EditorContext destroyed before its project could close: {}", closed ? std::string() : closed.error().ToString());
 		// The manager outlives this object's other members: it must not call back into them.
+		m_Assets->GetWriter().SetMutationGuard({});
 		m_Assets->SetWriteObserver({});
 		m_Assets->SetExternalChangeListener({});
 		m_Assets->SetReloadListener({});
@@ -418,6 +425,7 @@ namespace Engine {
 
 	Status EditorContext::CheckProjectWrite(const VfsPath& path, std::string_view action) const
 	{
+		ENGINE_TRY(CheckMutationPermission());
 		ENGINE_ASSERT(path.GetScheme() == Utils::ProjectScheme, "EditorContext: project writes take project:// paths, not '{}'", path.ToString());
 		if (!HasProject())
 			return MakeError(ErrorCode::InvalidState, "cannot {} '{}': no project is open", action, path.ToString());
@@ -639,6 +647,8 @@ namespace Engine {
 		m_SceneChangedOnDisk = false;
 		m_History.Clear();
 		m_Selection.clear();
+		m_SelectionTarget = SceneTarget::Edit;
+		m_UiState.SetSelectedAsset({});
 
 		// The project's assets (M6): scan, .meta files for new sources (recorded in provenance through the write observer,
 		// with the current attribution) and hot reload. A project the editor cannot index stays closed.
@@ -678,11 +688,23 @@ namespace Engine {
 		});
 	}
 
-	void EditorContext::CloseProject()
+	void EditorContext::SetLifecycleCallbacks(EditorLifecycleCallbacks callbacks)
+	{
+		m_Lifecycle = std::move(callbacks);
+	}
+
+	Status EditorContext::PrepareForPlay()
+	{
+		return !IsDryRun() && m_Lifecycle.BeforePlay ? m_Lifecycle.BeforePlay() : Status{};
+	}
+
+	Status EditorContext::CloseProject()
 	{
 		if (!HasProject())
-			return;
+			return {};
 		ENGINE_ASSERT(m_DryRun == nullptr && m_Transaction == nullptr, "EditorContext::CloseProject inside a dry run or a transaction");
+		if (m_Lifecycle.BeforeProjectClose)
+			ENGINE_TRY(m_Lifecycle.BeforeProjectClose());
 		// A play session refers to the project's settings and assets: it stops before they go (M7).
 		if (m_Play->IsPlaying())
 		{
@@ -702,6 +724,7 @@ namespace Engine {
 		m_Provenance.reset();
 		m_Project.reset(); // releases the project lock
 		ENGINE_INFO("Closed project '{}'", name);
+		return {};
 	}
 
 	Status EditorContext::ApplyProjectSettings(const Json& document)
@@ -715,6 +738,7 @@ namespace Engine {
 		ENGINE_TRY_ASSIGN(const VfsPath path, VfsPath::Create(Utils::ProjectScheme, FileSystem::PathToUtf8(m_Project->GetProjectFile().filename())));
 		ENGINE_TRY(WriteProjectFile(path, std::as_bytes(std::span(text.data(), text.size()))));
 		m_Project->SetSettings(std::move(settings));
+		++m_RevisionBase;
 		return {};
 	}
 
@@ -752,6 +776,8 @@ namespace Engine {
 		m_SceneChangedOnDisk = false;
 		m_History.Clear();
 		m_Selection.clear();
+		m_SelectionTarget = SceneTarget::Edit;
+		m_UiState.SetSelectedAsset({});
 
 		const std::string pathText = m_ScenePath.has_value() ? std::string(m_ScenePath->GetPath()) : std::string();
 		AppendEvent(EngineEvent{ .Seq = 0, .Tick = std::nullopt, .Type = EngineEventType::SceneOpened, .Id = UUID(), .Path = pathText, .Name = {}, .Message = {}, .Dirty = dirty });
@@ -772,6 +798,8 @@ namespace Engine {
 		m_SceneChangedOnDisk = false;
 		m_History.Clear();
 		m_Selection.clear();
+		m_SelectionTarget = SceneTarget::Edit;
+		m_UiState.SetSelectedAsset({});
 	}
 
 	bool EditorContext::IsSceneDirty() const
@@ -779,18 +807,26 @@ namespace Engine {
 		return m_Scene != nullptr && (m_SceneDirty || m_History.IsDirty());
 	}
 
-	void EditorContext::MarkSceneSaved(const VfsPath& path)
+	Status EditorContext::MarkSceneSaved(const VfsPath& path)
 	{
 		ENGINE_ASSERT(m_Scene != nullptr, "EditorContext::MarkSceneSaved without an open scene");
 		m_ScenePath = path;
 		m_SceneDirty = false;
 		m_SceneChangedOnDisk = false;
 		m_History.MarkSavePoint();
+		if (!IsDryRun() && m_Lifecycle.AfterSceneSaved)
+		{
+			Status cleaned = m_Lifecycle.AfterSceneSaved();
+			if (!cleaned)
+				return std::unexpected(std::move(cleaned).error().WithHint("the scene was saved; recovery cleanup failed and can be retried"));
+		}
+		return {};
 	}
 
 	Result<uint64_t> EditorContext::Execute(Scope<Command> command)
 	{
 		ENGINE_ASSERT(command != nullptr, "EditorContext::Execute needs a command");
+		ENGINE_TRY(CheckMutationPermission());
 		if (IsReadOnly() && !IsDryRun())
 		{
 			return std::unexpected(Error(ErrorCode::PermissionDenied, std::format("'{}' cannot run: the project is open read-only", command->GetLabel()))
@@ -818,21 +854,21 @@ namespace Engine {
 
 	void EditorContext::SetSelection(std::vector<UUID> selection)
 	{
-		// While playing, the selection may name entities of the play scene too (the scene the editor shows, M10); Stop sets it
-		// again, so it is restored by UUID to the entities of the edit scene (§5.6).
+		// Legacy callers address the shown scene. After Stop the same UUIDs are filtered against the edit scene.
 		const PlaySession* session = m_Play->GetSession();
+		const Scene* scene = session != nullptr ? &session->GetScene() : m_Scene.get();
 		std::vector<UUID> kept;
 		kept.reserve(selection.size());
 		for (const UUID id : selection)
 		{
-			const bool inEditScene = m_Scene != nullptr && std::as_const(*m_Scene).FindEntityByID(id).IsValid();
-			const bool inPlayScene = session != nullptr && session->GetScene().FindEntityByID(id).IsValid();
-			if (!inEditScene && !inPlayScene)
+			if (scene == nullptr || !scene->FindEntityByID(id).IsValid())
 				continue;
 			if (std::find(kept.begin(), kept.end(), id) == kept.end())
 				kept.push_back(id);
 		}
 		m_Selection = std::move(kept);
+		m_SelectionTarget = session != nullptr ? SceneTarget::Play : SceneTarget::Edit;
+		m_UiState.SetSelectedAsset({});
 	}
 
 	Status EditorContext::WriteProjectFile(const VfsPath& path, std::span<const std::byte> data)
@@ -853,6 +889,13 @@ namespace Engine {
 	{
 		m_HasRequestAttribution = attribution.has_value();
 		m_Attribution = attribution.has_value() ? std::move(*attribution) : WriteAttribution{};
+	}
+
+	Status EditorContext::CheckMutationPermission() const
+	{
+		if (m_AgentMutationsDenied && GetCommandOrigin() == CommandOrigin::Agent && !IsDryRun())
+			return MakeError(ErrorCode::PermissionDenied, "agent mutations are disabled by the editor automation policy");
+		return {};
 	}
 
 	const ProvenanceRecorder* EditorContext::GetProvenance() const
@@ -1062,6 +1105,8 @@ namespace Engine {
 		std::optional<UUIDGenerator> RealIdGenerator{};
 		uint64_t RealRevisionBase = 0;
 		std::vector<UUID> RealSelection{};
+		SceneTarget RealSelectionTarget = SceneTarget::Edit;
+		AssetHandle RealSelectedAsset{};
 		std::optional<ProjectSettings> RealSettings{};
 	};
 
@@ -1119,6 +1164,8 @@ namespace Engine {
 		state.RealIdGenerator = context.m_IdGenerator;
 		state.RealRevisionBase = context.m_RevisionBase;
 		state.RealSelection = context.m_Selection;
+		state.RealSelectionTarget = context.m_SelectionTarget;
+		state.RealSelectedAsset = context.m_UiState.GetSelectedAsset();
 		state.RealSettings = context.m_Project->GetSettings();
 		const bool realDirty = context.IsSceneDirty();
 		state.RealScene = std::move(context.m_Scene);
@@ -1157,6 +1204,8 @@ namespace Engine {
 		context.m_IdGenerator = *state.RealIdGenerator;
 		context.m_RevisionBase = state.RealRevisionBase;
 		context.m_Selection = std::move(state.RealSelection);
+		context.m_SelectionTarget = state.RealSelectionTarget;
+		context.m_UiState.SetSelectedAsset(state.RealSelectedAsset);
 		if (context.m_Project != nullptr)
 			context.m_Project->SetSettings(std::move(*state.RealSettings));
 

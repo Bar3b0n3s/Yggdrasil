@@ -10,7 +10,7 @@
 
 #include <vector>
 
-// The asset browser's audio preview (Architecture §10.2, §12.2; Docs/Decisions/0015-m12-decisions.md decision 17): an
+// The asset browser's audio preview (Architecture Â§10.2, Â§12.2; Docs/Decisions/0015-m12-decisions.md decision 17): an
 // editor without an audio engine has no preview; the others run over a device-less, deterministic AudioEngine.
 
 namespace Engine {
@@ -31,7 +31,7 @@ namespace Engine {
 			// EditorContext::Update and CloseProject work without one.
 			fixture.GetEditor().Update(0.0);
 			fixture.CreateAndOpenProject();
-			fixture.GetEditor().CloseProject();
+			REQUIRE(fixture.GetEditor().CloseProject());
 		}
 
 		TEST_CASE("AudioPreview: plays a clip once in the Ui group and replaces the previous preview")
@@ -105,7 +105,7 @@ namespace Engine {
 			AudioPreview* preview = fixture.GetEditor().GetAudioPreview();
 			REQUIRE(preview != nullptr);
 			REQUIRE(preview->Play(BuiltinAssetHandles::SilentClip).has_value());
-			fixture.GetEditor().CloseProject();
+			REQUIRE(fixture.GetEditor().CloseProject());
 			CHECK_FALSE(preview->IsPlaying());
 			CHECK(fixture.GetEngine().GetAudioEngine()->GetVoices().empty());
 		}

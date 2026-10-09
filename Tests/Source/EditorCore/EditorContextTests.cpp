@@ -4,6 +4,7 @@
 
 #include "EditorCore/Commands/ProjectSettingsCommand.h"
 #include "EditorCore/Commands/SceneEdit.h"
+#include "EditorCore/Automation/Private/MethodSupport.h"
 #include "Engine/App/EngineContext.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/Core/FileSystem.h"
@@ -93,6 +94,148 @@ namespace Engine {
 
 	TEST_SUITE("EditorCore")
 	{
+		TEST_CASE("EditorContext: a refused close retains the project lock mounts and scene for retry")
+		{
+			uint32_t calls = 0;
+			Test::EditorTestFixture fixture;
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			EditorContext& editor = fixture.GetEditor();
+			const auto projectFile = editor.GetProject().GetProjectFile();
+			Scene* const scene = &editor.GetScene();
+			editor.SetLifecycleCallbacks({ .BeforeProjectClose = [&calls]() -> Status
+			{
+				++calls;
+				if (calls == 1)
+					return MakeError(ErrorCode::InvalidState, "writer lease is active");
+				return {};
+			} });
+			const auto refused = editor.CloseProject();
+			REQUIRE_FALSE(refused);
+			CHECK(refused.error().GetCode() == ErrorCode::InvalidState);
+			CHECK(calls == 1);
+			CHECK(editor.HasProject());
+			CHECK(&editor.GetScene() == scene);
+			CHECK(editor.GetVfs().IsMounted("project"));
+			CHECK(editor.GetVfs().IsMounted("cache"));
+			CHECK_FALSE(ProjectManager::OpenProject(projectFile, {}, editor.GetTypeRegistry()));
+			editor.SetLifecycleCallbacks({});
+			REQUIRE(editor.CloseProject());
+			CHECK_FALSE(editor.HasProject());
+			CHECK_FALSE(editor.GetVfs().IsMounted("project"));
+			CHECK_FALSE(editor.GetVfs().IsMounted("cache"));
+			CHECK(ProjectManager::OpenProject(projectFile, {}, editor.GetTypeRegistry()));
+		}
+
+		TEST_CASE("EditorContext: scene-save cleanup runs after the durable save and is excluded from dry runs")
+		{
+			Test::EditorTestFixture fixture;
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			EditorContext& editor = fixture.GetEditor();
+			{
+				SceneEdit edit(editor, "Add entity");
+				static_cast<void>(editor.GetScene().CreateEntity("SavedEntity"));
+				REQUIRE(edit.Commit());
+			}
+			CHECK(editor.IsSceneDirty());
+			uint32_t calls = 0;
+			editor.SetLifecycleCallbacks({ .AfterSceneSaved = [&calls, &editor]() -> Status
+			{
+				++calls;
+				CHECK_FALSE(editor.IsSceneDirty());
+				REQUIRE(editor.GetScenePath());
+				const auto saved = editor.GetVfs().ReadText(*editor.GetScenePath());
+				REQUIRE(saved);
+				CHECK(saved->contains("SavedEntity"));
+				return MakeError(ErrorCode::Io, "cannot remove recovery generation");
+			} });
+			const auto path = MakeEditorPath("project://Assets/Scenes/Saved.scene");
+			const auto saved = Utils::SaveOpenScene(editor, path);
+			REQUIRE_FALSE(saved);
+			CHECK(saved.error().GetCode() == ErrorCode::Io);
+			CHECK(saved.error().ToString().contains("the scene was saved"));
+			CHECK(calls == 1);
+			CHECK_FALSE(editor.IsSceneDirty());
+			{
+				auto dryRun = EditorDryRunScope::Begin(editor);
+				REQUIRE(dryRun);
+				REQUIRE(editor.MarkSceneSaved(path));
+				CHECK(calls == 1);
+			}
+			editor.SetLifecycleCallbacks({});
+			REQUIRE(Utils::SaveOpenScene(editor, path));
+		}
+
+		TEST_CASE("EditorContext: denying agent mutations rolls back edits and rejects every project write")
+		{
+			Test::EditorTestFixture fixture("EditorAgentPolicy");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			EditorContext& editor = fixture.GetEditor();
+			const VfsPath source = MakeEditorPath("project://Assets/source.txt");
+			const VfsPath moved = MakeEditorPath("project://Assets/moved.txt");
+			const VfsPath folder = MakeEditorPath("project://Assets/DeniedFolder");
+			REQUIRE(editor.WriteProjectFile(source, AsEditorBytes("original")).has_value());
+			editor.SetAgentMutationsDenied(true);
+			CHECK(editor.AreAgentMutationsDenied());
+			editor.SetWriteAttribution(WriteAttribution{ .Method = "project.validate" });
+			const uint64_t count = editor.GetScene().GetEntityCount();
+			{
+				SceneEdit edit(editor, "Optional fix");
+				const UUID id = editor.GetScene().CreateEntity("Denied").GetUUID();
+				const auto result = edit.Commit();
+				REQUIRE_FALSE(result.has_value());
+				CHECK(result.error().GetCode() == ErrorCode::PermissionDenied);
+				CHECK_FALSE(editor.GetScene().FindEntityByID(id).IsValid());
+			}
+			CHECK(editor.GetScene().GetEntityCount() == count);
+			CHECK_FALSE(editor.GetHistory().CanUndo());
+			const Status results[] = {
+				editor.WriteProjectFile(source, AsEditorBytes("changed")),
+				editor.MoveProjectFile(source, moved),
+				editor.RemoveProjectFile(source),
+				editor.CreateProjectDirectory(folder),
+			};
+			for (const Status& result : results)
+			{
+				REQUIRE_FALSE(result.has_value());
+				CHECK(result.error().GetCode() == ErrorCode::PermissionDenied);
+			}
+			CHECK(editor.GetVfs().ReadText(source) == "original");
+			CHECK_FALSE(editor.GetVfs().Exists(moved));
+			CHECK_FALSE(editor.GetVfs().Exists(folder));
+			editor.SetWriteAttribution(std::nullopt);
+			CHECK(CreateTrackedEntity(editor, "Human").IsValid());
+			REQUIRE(editor.WriteProjectFile(source, AsEditorBytes("human")).has_value());
+			editor.SetWriteAttribution(WriteAttribution{ .Method = "entity.create" });
+			editor.SetAgentMutationsDenied(false);
+			CHECK(CreateTrackedEntity(editor, "AllowedAgent").IsValid());
+		}
+
+		TEST_CASE("EditorContext: denying agent mutations still allows disposable dry runs")
+		{
+			Test::EditorTestFixture fixture("EditorPolicyDryRun");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			EditorContext& editor = fixture.GetEditor();
+			const VfsPath path = MakeEditorPath("project://Assets/sandbox.txt");
+			const uint64_t count = editor.GetScene().GetEntityCount();
+			editor.SetAgentMutationsDenied(true);
+			editor.SetWriteAttribution(WriteAttribution{ .Method = "edit.batch" });
+			{
+				auto dryRun = EditorDryRunScope::Begin(editor);
+				REQUIRE(dryRun.has_value());
+				CHECK(CreateTrackedEntity(editor, "Sandboxed").IsValid());
+				REQUIRE(editor.WriteProjectFile(path, AsEditorBytes("sandbox")).has_value());
+				CHECK(editor.GetVfs().Exists(path));
+			}
+			CHECK(editor.GetScene().GetEntityCount() == count);
+			CHECK_FALSE(editor.GetHistory().CanUndo());
+			CHECK_FALSE(editor.GetVfs().Exists(path));
+			CHECK(editor.AreAgentMutationsDenied());
+		}
+
 		TEST_CASE("EditorContext: starts in the launcher state without a project or scene")
 		{
 			Test::EditorTestFixture fixture("EditorLauncher");
@@ -171,7 +314,7 @@ namespace Engine {
 			CHECK(editor.GetProject().GetSettings().Name == "TestProject");
 			CHECK(editor.GetProvenance() != nullptr);
 
-			editor.CloseProject();
+			REQUIRE(editor.CloseProject());
 			CHECK_FALSE(editor.HasProject());
 			CHECK_FALSE(editor.GetVfs().IsMounted("project"));
 		}
@@ -227,7 +370,7 @@ namespace Engine {
 			Test::EditorTestFixture fixture("EditorReadOnly");
 			fixture.CreateAndOpenProject();
 			const std::filesystem::path projectFile = fixture.GetEditor().GetProject().GetProjectFile();
-			fixture.GetEditor().CloseProject();
+			REQUIRE(fixture.GetEditor().CloseProject());
 
 			Result<Scope<LoadedProject>> project = ProjectManager::OpenProject(projectFile,
 				{ .ReadOnly = true, .StrictUnknowns = false, .ReadOnlyCacheDirectory = fixture.GetDirectory() / "ReadOnlyCache" },
@@ -446,7 +589,7 @@ namespace Engine {
 			Test::EditorTestFixture fixture("EditorReadOnlyEdit");
 			fixture.CreateAndOpenProject();
 			const std::filesystem::path projectFile = fixture.GetEditor().GetProject().GetProjectFile();
-			fixture.GetEditor().CloseProject();
+			REQUIRE(fixture.GetEditor().CloseProject());
 			Result<Scope<LoadedProject>> project = ProjectManager::OpenProject(projectFile,
 				{ .ReadOnly = true, .StrictUnknowns = false, .ReadOnlyCacheDirectory = fixture.GetDirectory() / "ReadOnlyCache" },
 				fixture.GetEngine().GetTypeRegistry());
@@ -478,7 +621,7 @@ namespace Engine {
 			static_cast<void>(CreateTrackedEntity(editor, "A"));
 			CHECK(editor.GetHistory().Undo(editor) == 1u);
 			CHECK(editor.IsSceneDirty()); // undoing the edit does not undo the repair
-			editor.MarkSceneSaved(MakeEditorPath("project://Assets/Scenes/Saved.scene"));
+			REQUIRE(editor.MarkSceneSaved(MakeEditorPath("project://Assets/Scenes/Saved.scene")));
 			CHECK_FALSE(editor.IsSceneDirty());
 			REQUIRE(editor.GetScenePath().has_value());
 			CHECK(editor.GetScenePath()->GetPath() == "Assets/Scenes/Saved.scene");
@@ -611,7 +754,7 @@ namespace Engine {
 
 			// Saving (or reloading) the scene clears the flag.
 			REQUIRE(editor.WriteProjectFile(*editor.GetScenePath(), AsBytes(external)).has_value());
-			editor.MarkSceneSaved(*editor.GetScenePath());
+			REQUIRE(editor.MarkSceneSaved(*editor.GetScenePath()));
 			CHECK_FALSE(editor.IsSceneChangedOnDisk());
 		}
 
@@ -672,7 +815,7 @@ namespace Engine {
 			REQUIRE(failures == 1);
 			editor.Update(0.0);
 
-			// project:// keeps the replaced content as Red.material.bak (§4.10): written by the editor, never an external
+			// project:// keeps the replaced content as Red.material.bak (Â§4.10): written by the editor, never an external
 			// change, neither for the polls nor for a refresh.
 			for (const std::string_view metallic : { "1", "0.5" })
 			{
@@ -726,7 +869,7 @@ namespace Engine {
 				REQUIRE(entry != nullptr);
 				CHECK(entry->Method == "project.refreshAssets");
 			}
-			// §13.12 rule 1: every recorded hash is the hash of the file as it is now (the .meta rewritten with the glTF's
+			// Â§13.12 rule 1: every recorded hash is the hash of the file as it is now (the .meta rewritten with the glTF's
 			// sub-assets included).
 			for (const ProvenanceEntry& entry : provenance->GetEntries())
 			{
@@ -745,7 +888,7 @@ namespace Engine {
 			CHECK_FALSE(editor.GetAssets().HasProject());
 			fixture.CreateAndOpenProject();
 			CHECK(editor.GetAssets().HasProject());
-			editor.CloseProject();
+			REQUIRE(editor.CloseProject());
 			CHECK_FALSE(editor.GetAssets().HasProject());
 		}
 

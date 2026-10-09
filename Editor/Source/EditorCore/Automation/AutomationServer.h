@@ -1,6 +1,8 @@
 #pragma once
 
+#include "EditorCore/Automation/EditorAutomationControls.h"
 #include "EditorCore/Automation/ScreenshotMethods.h"
+#include "Engine/Automation/Methods/StatsMethods.h"
 #include "Engine/Automation/Protocol/Dispatcher.h"
 #include "Engine/Automation/Protocol/JsonRpc.h"
 #include "Engine/Automation/Protocol/MethodRegistry.h"
@@ -23,6 +25,7 @@
 
 namespace Engine {
 
+	class Autosave;
 	class EditorContext;
 
 	struct AutomationServerSpecification
@@ -32,6 +35,9 @@ namespace Engine {
 		// --upgrade, --dump-reference), so no MCP bridge can attach to a batch or upgrade run. Without it only in-process
 		// clients exist (--batch, --upgrade, the Tests).
 		bool Listen = false;
+		// False for one-shot launches: the UI preference must never start a listener during batch/upgrade/reference work.
+		// Listen remains explicit launch intent; changing the preference never overwrites it.
+		bool PreferenceListeningAllowed = true;
 		// --automation=<port>; 0: OS-assigned.
 		uint16_t Port = 0;
 		// --automation-test-hooks: register the debug.* methods.
@@ -42,6 +48,11 @@ namespace Engine {
 		// The captures behind viewport.screenshot and editor.screenshot, which the editor injects when it has a
 		// GraphicsDevice (ScreenshotMethods.h); empty with --renderer none, which makes both methods Unsupported.
 		ScreenshotCaptures Screenshots{};
+		// Optional borrowed recovery service, bound to this server's EditorContext and outliving the server.
+		// project.open with an available recovery and recover=true requires it (Unsupported otherwise).
+		// The host retains ownership and performs publication, explicit-save cleanup and the Reset close handshake.
+		// Requests use it only on the main thread; a missing service never silently drops recovery identity.
+		Autosave* AutosaveService = nullptr;
 		// The Dispatcher's handler of a std::system_error escaping a method (DispatcherSpecification::SystemErrors): with a
 		// device the editor maps Vulkan errors like the frame-boundary catch (RaiseVulkanError). Empty: like any exception.
 		SystemErrorHandler SystemErrors{};
@@ -62,6 +73,13 @@ namespace Engine {
 		// The main thread's wall clock of the methods (AutomationMethodContext::GetWallClockTime: play.step's frame budget);
 		// empty: std::chrono::steady_clock::now. Tests script it.
 		std::function<std::chrono::steady_clock::time_point()> WallClock{};
+		// Main-thread owned copy of host timing and displayed-view observations. No waits, rendering or mutation.
+		// Empty: no rendered samples. EditorMethodContext adds current CPU/entity/body/audio/device counts.
+		std::function<StatsGetResult()> ReadHostStatistics{};
+		// Test-hooks-only, main-thread request to queue device loss after the host's next autosave publication. The
+		// callback only queues intent, never renders, loses the device or writes recovery inside method dispatch. Captured
+		// host state outlives the server. Empty, or RendererName == "none", makes debug.deviceLost Unsupported.
+		std::function<Status()> QueueDeviceLost{};
 	};
 
 	// One connected client, for session.info and the AutomationPanel (M10).
@@ -127,6 +145,15 @@ namespace Engine {
 
 		// The bound TCP port; 0 without Listen.
 		[[nodiscard]] uint16_t GetPort() const;
+		// Main-thread controls. Policy applies only to Agent requests, including actual write boundaries.
+		[[nodiscard]] EditorAutomationPolicy GetEditorPolicy() const;
+		void SetEditorPolicy(const EditorAutomationPolicy& policy);
+		// At most 256 requests, newest first; elapsed times use Specification.WallClock.
+		[[nodiscard]] std::vector<EditorRequestActivity> GetRecentRequestActivity() const;
+		// Transactional preference-owned listener. Explicit launch intent and one-shot exclusion take precedence.
+		// Startup failure leaves the previous listener/session intact; in-process clients remain connected.
+		// Does not persist preferences; EditorAutomationControls owns that transaction.
+		[[nodiscard]] Status SetPreferenceListening(bool allowed);
 		[[nodiscard]] const MethodRegistry& GetMethods() const { return m_Methods; }
 		[[nodiscard]] const AutomationServerSpecification& GetSpecification() const { return m_Specification; }
 		[[nodiscard]] EditorContext& GetEditor() const { return *m_Editor; }

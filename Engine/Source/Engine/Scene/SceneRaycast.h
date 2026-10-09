@@ -47,7 +47,9 @@ namespace Engine {
 	// Default. Unknown names use Default as physics does. Parent accepted this visual mask policy in ADR0017;
 	// it adds no render-layer field and requires no physics world.
 	// InvalidArgument for nonfinite/zero direction, nonfinite origin, invalid distance interval or Alpha.
-	// Empty optional is a successful miss. Does not mutate scene, step physics, or wait for GPU/import jobs.
+	// Empty optional is a successful miss. Uses the existing synchronous CPU AssetManager lookup and rendering's
+	// loaded-asset/placeholder policy; it may load, cook or wait for a CPU mesh. Never waits for GPU or steps physics,
+	// and does not mutate the scene.
 	[[nodiscard]] Result<std::optional<SceneRaycastHit>> RaycastScene(const Scene& scene, AssetManager& assets,
 		const PhysicsLayerTable& layers, const SceneRaycastRequest& request);
 

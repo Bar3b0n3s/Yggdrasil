@@ -82,6 +82,7 @@ namespace Engine {
 		Scope<SceneRenderer> m_SceneRenderer;
 		Scope<Readback> m_Readback;
 		nvrhi::CommandListHandle m_CommandList;
+		uint64_t m_FrameIndex = 0;
 	};
 
 }

@@ -1,10 +1,13 @@
 #include "EnginePCH.h"
 #include "Engine/Renderer/ViewportCapture.h"
 
+#include "Engine/Core/Assert.h"
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Graphics/Readback.h"
 #include "Engine/Renderer/RenderSnapshot.h"
 #include "Engine/Renderer/SceneRenderer.h"
+
+#include <limits>
 
 namespace Engine {
 
@@ -44,11 +47,15 @@ namespace Engine {
 		}
 
 		ENGINE_TRY(m_SceneRenderer->Resize(request.Width, request.Height));
+		ENGINE_CORE_VERIFY(m_FrameIndex < std::numeric_limits<uint64_t>::max(), "capture frame identity exhausted");
+		RenderSnapshot captured = snapshot;
+		captured.FrameIndex = ++m_FrameIndex;
 		m_CommandList->open();
 		// The list is executed whatever Render reports (an error names a skipped draw; the rest rendered).
-		const Status rendered = m_SceneRenderer->Render(*m_CommandList, snapshot);
+		const Status rendered = m_SceneRenderer->Render(*m_CommandList, captured);
 		m_CommandList->close();
-		m_Device->ExecuteCommandList(*m_CommandList);
+		const uint64_t submission = m_Device->ExecuteCommandList(*m_CommandList);
+		m_SceneRenderer->OnSubmitted(captured.FrameIndex, submission);
 		ENGINE_TRY(rendered);
 
 		ENGINE_TRY_ASSIGN(Image image, m_Readback->ReadTexture(*m_SceneRenderer->GetFinalTexture()));

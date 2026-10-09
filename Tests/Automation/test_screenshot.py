@@ -6,7 +6,7 @@ name its path. The game and camera views of a rendering editor are covered by te
 
 The tests that render start a headless editor with the Vulkan renderer and the GPU test options (harness.require_gpu);
 the parameter checks, the view and camera errors and the --renderer none answers need no GPU. The golden images
-"LitScene" (a scene through the viewport capture) and "ImGuiDemo" (the editor.screenshot of a --batch run) are compared by
+"LitScene" (a scene through the viewport capture) and "EditorDefaultLayout" (the editor.screenshot of a --batch run) are compared by
 the C++ golden suite (Tests/Source/Golden/GoldenTests.cpp).
 """
 
@@ -43,21 +43,46 @@ class ScreenshotParamsTests(AutomationTestCase):
                 self.assert_engine_error(raised.exception, engine_client.UNSUPPORTED, "Unsupported")
                 self.assertIn("--renderer none", raised.exception.detail)
 
-    def test_viewport_screenshot_refuses_members_of_later_milestones_at_their_pointer(self) -> None:
-        # M9's debug views and annotations (Docs/Decisions/0013-m8-decisions.md decision 12).
+    def test_m9_debug_views_and_annotations_reach_the_renderer(self) -> None:
         client, _ = self.open_editor_with_scene()
-        refused = [
-            ({"view": "scene", "debugView": "AO"}, "/debugView"),
-            ({"view": "game", "debugView": "ShadowCascades"}, "/debugView"),
-            ({"view": "scene", "debugView": "Overdraw"}, "/debugView"),
-            ({"view": "scene", "annotate": {"labels": "all"}}, "/annotate"),
+        supported = [
+            {"debugView": view} for view in ("AO", "shadowcascades", "OVERDRAW")
+        ] + [
+            {"annotate": {"labels": mode, "bounds": True, "axes": True, "colliders": True}}
+            for mode in ("all", "selection", "selected", "none", [])
         ]
-        for params, pointer in refused:
-            with self.subTest(params=params):
+        for options in supported:
+            with self.subTest(options=options):
                 with self.assertRaises(engine_client.EngineError) as raised:
-                    client.call("viewport.screenshot", params)
+                    client.call("viewport.screenshot", {"view": "scene", **options})
+                # Admission succeeds; the only missing service is this process's renderer.
                 self.assert_engine_error(raised.exception, engine_client.UNSUPPORTED, "Unsupported")
+                self.assertIn("--renderer none", raised.exception.detail)
+
+    def test_annotations_reject_invalid_members_at_their_pointer(self) -> None:
+        client, _ = self.open_editor_with_scene()
+        invalid = [
+            (None, "/annotate"),
+            ([], "/annotate"),
+            ({"labels": True}, "/annotate/labels"),
+            ({"labels": "typo"}, "/annotate/labels"),
+            ({"labels": [42]}, "/annotate/labels/0"),
+            ({"labels": [""]}, "/annotate/labels/0"),
+            ({"bounds": 1}, "/annotate/bounds"),
+            ({"axes": "true"}, "/annotate/axes"),
+            ({"colliders": {}}, "/annotate/colliders"),
+            ({"typo": True}, "/annotate/typo"),
+        ]
+        for annotation, pointer in invalid:
+            with self.subTest(annotation=annotation):
+                with self.assertRaises(engine_client.EngineError) as raised:
+                    client.call("viewport.screenshot", {"view": "scene", "annotate": annotation})
+                self.assert_engine_error(raised.exception, engine_client.INVALID_PARAMS, "InvalidArgument")
                 self.assertEqual(raised.exception.issues[0]["pointer"], pointer)
+        with self.assertRaises(engine_client.EngineError) as raised:
+            client.call("viewport.screenshot", {"view": "scene", "annotate": {"labels": ["/Missing"]}})
+        self.assert_engine_error(raised.exception, engine_client.NOT_FOUND, "NotFound")
+        self.assertEqual(raised.exception.issues[0]["pointer"], "/annotate/labels/0")
 
     def test_game_view_and_camera_errors_come_before_rendering(self) -> None:
         # The view's scene and camera are resolved before anything renders, so a --renderer none editor reports them.
@@ -168,15 +193,39 @@ class ScreenshotRenderingTests(AutomationTestCase):
         self.assertEqual(shoot(""), lit)
         self.assertEqual(shoot("LIT"), lit)
         images = {}
-        for view in ("Albedo", "Normals", "Roughness", "Metallic", "Emissive"):
+        for view in ("Albedo", "Normals", "Roughness", "Metallic", "Emissive", "ao", "SHADOWCASCADES", "Overdraw"):
             with self.subTest(view=view):
                 images[view] = shoot(view)
-                self.assertNotEqual(images[view], lit)
+                self.assertEqual(shoot(view), images[view])
+                self.assertTrue(images[view].startswith(PNG_SIGNATURE))
+                if view in ("Albedo", "Normals", "Roughness", "Metallic", "Emissive"):
+                    self.assertNotEqual(images[view], lit)
         self.assertNotEqual(images["Albedo"], images["Normals"])
         with self.assertRaises(engine_client.EngineError) as raised:
             client.call("viewport.screenshot", {**size, "debugView": "Wireframe"})
         self.assert_engine_error(raised.exception, engine_client.INVALID_PARAMS)
         self.assertEqual(raised.exception.issues[0]["pointer"], "/debugView")
+        client.call("scene.save")
+        self.shut_down(client)
+
+    def test_viewport_annotations_are_capture_local_and_deterministic(self) -> None:
+        if not self.require_gpu():
+            return
+        client, _ = self.open_editor_with_scene(renderer="vulkan")
+        client.call("entity.create", {"name": "Annotated", "components": {
+            "MeshRenderer": {"Mesh": "engine://Meshes/Cube"}, "BoxCollider": {},
+        }})
+        size = {"view": "scene", "width": 320, "height": 180}
+        clean = Path(client.call("viewport.screenshot", size)["path"]).read_bytes()
+        annotated_params = {**size, "annotate": {
+            "labels": ["/Annotated"], "bounds": True, "axes": True, "colliders": True,
+        }}
+        annotated = Path(client.call("viewport.screenshot", annotated_params)["path"]).read_bytes()
+        repeated = Path(client.call("viewport.screenshot", annotated_params)["path"]).read_bytes()
+        after = Path(client.call("viewport.screenshot", size)["path"]).read_bytes()
+        self.assertNotEqual(annotated, clean)
+        self.assertEqual(repeated, annotated)
+        self.assertEqual(after, clean)
         client.call("scene.save")
         self.shut_down(client)
 
@@ -195,6 +244,12 @@ class ScreenshotRenderingTests(AutomationTestCase):
         full = client.call("editor.screenshot", {"maxDimension": 4096})
         self.assertEqual((full["width"], full["height"]), (1600, 900))
         self.assertEqual(png_size(Path(full["path"])), (1600, 900))
+        before = Path(full["path"]).read_bytes()
+        client.call("entity.create", {"name": "FreshScreenshotHierarchyRow"})
+        changed = client.call("editor.screenshot", {"maxDimension": 4096})
+        self.assertNotEqual(changed["path"], full["path"])
+        self.assertNotEqual(Path(changed["path"]).read_bytes(), before)
+        client.call("scene.save")
         self.shut_down(client)
 
 

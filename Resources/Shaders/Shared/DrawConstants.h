@@ -16,8 +16,10 @@ namespace Engine {
 	// bitangent sign, and take SV_IsFrontFace inverted.
 #if defined(ENGINE_SHADER)
 	static const uint DrawFlagMirrored = 1;
+	static const uint DrawFlagReceiveShadows = 2;
 #else
 inline constexpr uint32_t DrawFlagMirrored = 1;
+inline constexpr uint32_t DrawFlagReceiveShadows = 2;
 #endif
 
 	// The Scene program's debug views (§8.5): Vulkan specialization constant SceneDebugViewConstantId of the forward

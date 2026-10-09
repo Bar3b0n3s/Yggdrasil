@@ -12,8 +12,6 @@
 // Value snapshots for §8.2 and §13.7. Timings are diagnostic, never simulation input or part of a state hash.
 namespace Engine {
 
-	struct GpuTimingFrame; // Graphics-owned frame-aware result; parent integration adds its definition.
-
 	struct RenderPassStats
 	{
 		std::string Name{}; // fixed pass-list order, stable names in ADR 0017
@@ -93,6 +91,8 @@ namespace Engine {
 		void Reset();
 	private:
 		RenderStats m_Latest{};
+		uint64_t m_LastGpuFrameIndex = 0;
+		bool m_HasGpuFrame = false;
 	};
 
 }

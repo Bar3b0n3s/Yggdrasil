@@ -7,12 +7,15 @@
 #include "Engine/Automation/Protocol/ResultOffload.h"
 #include "Engine/Core/Assert.h"
 #include "Engine/Graphics/Image.h"
+#include "Engine/Physics/PhysicsLayers.h"
+#include "Engine/Project/ProjectSettings.h"
 #include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Renderer/RenderSnapshot.h"
 #include "Engine/Renderer/ViewportCapture.h"
 #include "Engine/Scene/Components/CameraComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/RenderExtraction.h"
+#include "Engine/Scene/RenderAnnotations.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/TransformSystem.h"
 #include "Engine/Session/PlaySession.h"
@@ -20,7 +23,6 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
-#include <array>
 #include <format>
 #include <optional>
 #include <span>
@@ -69,59 +71,15 @@ namespace Engine {
 			return text;
 		}
 
-		// A member that needs a later milestone, present in the params: Unsupported located at it (never ignored).
-		static Error MakeLaterMilestoneError(std::string_view member, std::string_view reason)
-		{
-			return MakeParamError(ErrorCode::Unsupported, std::format("/{}", member),
-				std::format("viewport.screenshot '{}' is not supported yet: {}", member, reason), std::format("leave out '{}'", member));
-		}
-
-		// Unsupported for the members of ViewportScreenshotParams that need later milestones (ScreenshotMethods.h).
-		static Status CheckLaterMilestoneParams(const AutomationMethodContext& context)
-		{
-			if (context.HasParam("annotate"))
-				return std::unexpected(MakeLaterMilestoneError("annotate", "annotations are drawn by the overlay pass (M9)"));
-			return {};
-		}
-
-		// The debug views M9 adds (§8.5): refused by name until then.
-		constexpr std::array<std::string_view, 3> LaterDebugViews = { "AO", "ShadowCascades", "Overdraw" };
-
-		[[nodiscard]] static bool EqualsIgnoringAsciiCase(std::string_view left, std::string_view right)
-		{
-			const auto lower = [](char character)
-			{
-				return character >= 'A' && character <= 'Z' ? static_cast<char>(character - 'A' + 'a') : character;
-			};
-			return left.size() == right.size() && std::ranges::equal(left, right, [&lower](char a, char b)
-			{
-				return lower(a) == lower(b);
-			});
-		}
-
-		// The debug view `name` asks for (ScreenshotMethods.h): Lit when empty; a RenderDebugView name ignoring ASCII case;
-		// Unsupported at /debugView for M9's views; InvalidArgument at /debugView, listing the valid names, for anything else.
 		static Result<RenderDebugView> ParseDebugViewParam(std::string_view name)
 		{
 			if (name.empty())
 				return RenderDebugView::Lit;
-			if (const std::optional<RenderDebugView> view = ParseRenderDebugView(name))
-			{
-				if (*view < RenderDebugView::AO)
-					return *view;
-			}
+			if (const auto view = ParseRenderDebugView(name))
+				return *view;
 			std::string valid;
 			for (uint32_t index = 0; index < RenderDebugViewCount; ++index)
 				valid += std::format("{}{}", valid.empty() ? "" : ", ", RenderDebugViewToString(static_cast<RenderDebugView>(index)));
-			for (const std::string_view later : LaterDebugViews)
-			{
-				if (EqualsIgnoringAsciiCase(name, later))
-				{
-					return std::unexpected(MakeParamError(ErrorCode::Unsupported, "/debugView",
-						std::format("viewport.screenshot debug view '{}' is not supported yet: it arrives with Renderer II (M9)", name),
-						std::format("use one of {}", valid)));
-				}
-			}
 			return std::unexpected(MakeParamError(ErrorCode::InvalidArgument, "/debugView",
 				std::format("unknown debug view '{}'; the debug views are {}", name, valid), "leave out 'debugView' for the lit image"));
 		}
@@ -199,8 +157,23 @@ namespace Engine {
 
 		Result<ViewportScreenshotResult> ViewportScreenshot(AutomationMethodContext& context, const ViewportScreenshotParams& params)
 		{
-			ENGINE_TRY(Utils::CheckLaterMilestoneParams(context));
 			ENGINE_TRY_ASSIGN(const RenderDebugView debugView, Utils::ParseDebugViewParam(params.DebugView));
+			ViewportAnnotationOptions annotations;
+			if (context.HasParam("annotate"))
+			{
+				const auto parsed = ParseViewportAnnotations(params.Annotate);
+				if (!parsed)
+				{
+					const Error& error = parsed.error();
+					return std::unexpected(Error(error).WithIssue({
+						.JsonPointer = error.GetLocation().JsonPointer.value_or("/annotate"),
+						.Message = error.GetMessageText(),
+						.Hint = error.GetHint(),
+						.Suggestions = {},
+					}));
+				}
+				annotations = *parsed;
+			}
 			const std::optional<ExplicitRenderCamera> sceneViewCamera = context.GetSceneViewCamera();
 			if (params.View == ViewportView::Scene && !sceneViewCamera.has_value())
 			{
@@ -215,6 +188,13 @@ namespace Engine {
 			const bool isPlayScene = session != nullptr && &session->GetScene() == scene;
 
 			RenderExtractionRequest request{ .Width = params.Width, .Height = params.Height, .Alpha = 1.0f };
+			const ProjectSettings* settings = context.GetProjectSettings();
+			if (settings == nullptr)
+				return MakeError(ErrorCode::Unsupported, "viewport.screenshot needs the host's project rendering settings");
+			request.Quality = { .ShadowMapSize = settings->Rendering.ShadowMapSize, .SsaoHalfResolution = settings->Rendering.SsaoHalfResolution };
+			request.SelectedEntities = context.GetSelectedEntities();
+			ENGINE_TRY_ASSIGN(request.Annotations, ResolveViewportAnnotations(context, *scene, annotations));
+			request.Flags = annotations.Colliders ? RenderViewFlags::Colliders : RenderViewFlags::None;
 			EntitySummary cameraSummary;
 			ENGINE_TRY(Utils::SelectCamera(context, params, *scene, sceneViewCamera.has_value() ? &*sceneViewCamera : nullptr, request, cameraSummary));
 
@@ -233,6 +213,18 @@ namespace Engine {
 				ENGINE_TRY_ASSIGN(snapshot, ExtractRenderSnapshot(*scene, request));
 			}
 			snapshot.DebugView = debugView;
+			snapshot.SceneRevision = scene->GetRevision();
+			// Data views admit only the annotations this call requests, never ordinary session debug primitives.
+			if (debugView == RenderDebugView::AO || debugView == RenderDebugView::ShadowCascades || debugView == RenderDebugView::Overdraw)
+				snapshot.DebugDraw.Clear();
+			if (annotations.Colliders || request.Annotations.Labels != RenderAnnotationLabels::None || request.Annotations.Bounds || request.Annotations.Axes)
+			{
+				AssetManager* assets = context.GetAssets();
+				if (assets == nullptr)
+					return MakeError(ErrorCode::Unsupported, "viewport annotations need the host's asset manager");
+				ENGINE_TRY_ASSIGN(const PhysicsLayerTable layers, PhysicsLayerTable::Create(settings->Physics.Layers, settings->Physics.Collisions));
+				ENGINE_TRY(AppendRenderAnnotations(*scene, *assets, layers, isPlayScene ? &session->GetPhysics() : nullptr, snapshot));
+			}
 
 			const ViewportScreenshotRequest capture{ .Width = params.Width, .Height = params.Height, .MaxDimension = 0 };
 			ENGINE_TRY_ASSIGN(const Image captured, WithContext(context.CaptureView(snapshot, capture), "while rendering the viewport"));
@@ -271,9 +263,9 @@ namespace Engine {
 				"A camera entity of the target scene (an EntityRef) to render through instead of the view's camera.")
 			.Field("debugView", &ViewportScreenshotParams::DebugView,
 				"A debug view to render instead of the lit image, ignoring case: \"Lit\" (the default, also for \"\"), \"Albedo\", "
-				"\"Normals\", \"Roughness\", \"Metallic\" or \"Emissive\". A data view stores each value v as round(255 v).")
+				"\"Normals\", \"Roughness\", \"Metallic\", \"Emissive\", \"AO\", \"ShadowCascades\" or \"Overdraw\". A data view stores each value v as round(255 v).")
 			.Field("annotate", &ViewportScreenshotParams::Annotate,
-				"Labels, colliders, bounds and axes to draw (not supported before M9; refused when present).")
+				"Capture-only annotations: labels=all, selection (selected), none or an EntityRef array; colliders, bounds and axes are booleans. Unknown members and invalid references are rejected.")
 			.Field("maxDimension", &ViewportScreenshotParams::MaxDimension, "The larger side of the PNG at most this many pixels.", dimensionMeta)
 			.Field("inline", &ViewportScreenshotParams::Inline,
 				"Also return the PNG as base64 in \"data\" when it is at most 30 KB; a larger one is only written (inlineOmitted).");

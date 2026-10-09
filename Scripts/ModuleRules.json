@@ -647,6 +647,7 @@
 			"Engine/Source/Engine/Graphics/GraphicsDevice.cpp",
 			"Engine/Source/Engine/App/FrameLoop.cpp",
 			"Editor/Source/EditorCore/Scripting/ScriptTypeChecker.cpp",
+			"Editor/Source/EditorCore/Autosave/Autosave.cpp",
 			"Engine/Source/Engine/Automation/Protocol/Dispatcher.cpp",
 			"Engine/Source/Engine/Core/Jobs/JobSystem.cpp",
 			"Engine/Source/Engine/App/EntryPoint.cpp"

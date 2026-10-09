@@ -1,14 +1,25 @@
 #pragma once
 
 #include "Engine/Core/Result.h"
+#include "Engine/Core/UUID.h"
 #include "Engine/Reflection/FieldInfo.h"
 #include "Engine/Reflection/Value.h"
 
+#include <functional>
 #include <string>
+#include <string_view>
+#include <vector>
 
 namespace Engine {
 
 	class TypeRegistry;
+
+	struct ReflectedReferenceCandidate
+	{
+		UUID Id{};
+		std::string Label{};
+		std::string Path{};
+	};
 
 	struct ReflectedDrawerContext
 	{
@@ -17,6 +28,10 @@ namespace Engine {
 		std::string Path{};        // stable reflected path in ImGui IDs, never just the display label
 		bool ReadOnly = false;
 		bool Mixed = false; // multi-selection differs; edit replaces all, never silently picks the first
+		// Synchronous, borrowed for Draw only; candidates own their strings/UUIDs. The caller filters by field kind and
+		// AssetFilter, searches label/path/UUID, and sorts by label, path, then UUID. Empty retains typed/drop entry.
+		// Errors are displayed and returned. Neither callback nor entity/component pointers are retained by the drawer.
+		std::function<Result<std::vector<ReflectedReferenceCandidate>>(const FieldInfo&, std::string_view)> FindReferences{};
 	};
 	struct ReflectedDrawerResult
 	{

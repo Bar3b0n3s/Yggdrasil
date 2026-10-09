@@ -47,6 +47,7 @@ namespace Engine {
 	{
 	public:
 		using Listener = UniqueFunction<void(const AssetWriteEvent&)>;
+		using MutationGuard = UniqueFunction<Status()>;
 
 		// `vfs` is a documented back-reference that outlives the writer.
 		explicit AssetWriter(VirtualFileSystem& vfs);
@@ -63,6 +64,12 @@ namespace Engine {
 		// Receives every event after its VFS call succeeded (the EditorAssetManager: registry updates and reimports). Empty:
 		// no listener.
 		void SetListener(Listener listener);
+
+		// Optional main-thread permission check before every Write, Remove, Move or CreateDirectories call touches the VFS,
+		// including backups and missing parents. A failure is returned unchanged, with no watcher or listener notification.
+		// Empty allows ordinary writes. Still called during dry runs: the owner decides whether an overlay permits the write.
+		// Captured services are borrowed and must outlive the binding; clear it before those services begin destruction.
+		void SetMutationGuard(MutationGuard guard);
 
 		// During a dry run (§13.4) project:// is an overlay: writes still go through the VFS (into the overlay) and reach the
 		// listener, but never the watcher, which describes the disk.
@@ -86,7 +93,7 @@ namespace Engine {
 		// VirtualFileSystem::CreateDirectories, then the listener (directories are not watched). Errors: the VFS's.
 		[[nodiscard]] Status CreateDirectories(const VfsPath& directory);
 	private:
-		// The VFS and watcher back-references, the listener and the dry-run flag (AssetWriter.cpp).
+		// The VFS and watcher back-references, the listener, mutation guard and dry-run flag (AssetWriter.cpp).
 		struct State;
 	private:
 		Scope<State> m_State;

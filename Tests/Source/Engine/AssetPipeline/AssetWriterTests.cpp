@@ -9,10 +9,93 @@
 #include "Support/AssetTestFixture.h"
 #include "Support/TempDirectory.h"
 
+#include <algorithm>
+
 namespace Engine {
 
 	TEST_SUITE("AssetPipeline")
 	{
+		TEST_CASE("AssetWriter: the mutation guard precedes backups parents watcher updates and notifications")
+		{
+			const Test::TempDirectory directory("AssetWriterGuard");
+			auto mount = NativeDirectoryMount::Create(directory.GetPath());
+			REQUIRE(mount);
+			VirtualFileSystem vfs;
+			REQUIRE(vfs.Mount("project", std::move(*mount)));
+			const VfsPath assets = Test::ParseVfsPath("project://Assets");
+			const VfsPath source = Test::ParseVfsPath("project://Assets/Source.txt");
+			const VfsPath backup = Test::ParseVfsPath("project://Assets/Source.txt.bak");
+			const VfsPath fresh = Test::ParseVfsPath("project://Assets/Fresh.txt");
+			const VfsPath parent = Test::ParseVfsPath("project://Assets/NewParent");
+			const VfsPath moved = Test::ParseVfsPath("project://Assets/NewParent/Moved.txt");
+			const VfsPath folder = Test::ParseVfsPath("project://Assets/Another/Child");
+			REQUIRE(vfs.CreateDirectories(assets));
+			REQUIRE(vfs.WriteFileAtomic(source, AsBytes("older")));
+			REQUIRE(vfs.WriteFileAtomic(source, AsBytes("original")));
+			REQUIRE(vfs.ReadText(backup) == "older");
+			PollingFileWatcher watcher(vfs, { .Root = assets, .DebounceSeconds = 0.2 });
+			REQUIRE(watcher.Start());
+			AssetWriter writer(vfs);
+			writer.SetWatcher(&watcher);
+			uint32_t admitted = 0;
+			uint32_t reported = 0;
+			bool allowed = false;
+			writer.SetMutationGuard([&admitted, &allowed]() -> Status
+			{
+				++admitted;
+				return allowed ? Status{} : MakeError(ErrorCode::PermissionDenied, "test writer policy");
+			});
+			writer.SetListener([&reported](const AssetWriteEvent&)
+			{
+				++reported;
+			});
+			const Status denied[] = {
+				writer.Write(source, AsBytes("denied")), writer.Write(fresh, AsBytes("denied")),
+				writer.Remove(source), writer.Move(source, moved), writer.CreateDirectories(folder)
+			};
+			for (const Status& result : denied)
+			{
+				REQUIRE_FALSE(result);
+				CHECK(result.error().GetCode() == ErrorCode::PermissionDenied);
+				CHECK(result.error().GetMessageText() == "test writer policy");
+			}
+			writer.SetDryRun(true);
+			CHECK_FALSE(writer.Write(source, AsBytes("still denied")));
+			writer.SetDryRun(false);
+			CHECK(admitted == 6);
+			CHECK(reported == 0);
+			CHECK(vfs.ReadText(source) == "original");
+			CHECK(vfs.ReadText(backup) == "older");
+			CHECK_FALSE(vfs.Exists(fresh));
+			CHECK_FALSE(vfs.Exists(parent));
+			CHECK_FALSE(vfs.Exists(folder.GetParent()));
+			// A denied write must not mark an external change known and hide it from the watcher.
+			REQUIRE(vfs.WriteFileAtomic(source, AsBytes("external bytes")));
+			CHECK_FALSE(writer.Write(source, AsBytes("denied")));
+			REQUIRE(watcher.Poll(1.0));
+			const auto external = watcher.Poll(2.0);
+			REQUIRE(external);
+			const auto sourceChange = std::ranges::find(*external, source, &FileChange::Path);
+			REQUIRE(sourceChange != external->end());
+			CHECK(sourceChange->Kind == FileChangeKind::Modified);
+			allowed = true;
+			REQUIRE(writer.Write(source, AsBytes("allowed")));
+			REQUIRE(writer.Move(source, moved));
+			REQUIRE(writer.CreateDirectories(folder));
+			REQUIRE(writer.Remove(moved));
+			CHECK(admitted == 11);
+			CHECK(reported == 4);
+			const auto changes = watcher.Poll(3.0);
+			REQUIRE(changes);
+			CHECK(changes->empty());
+			allowed = false;
+			writer.SetMutationGuard({});
+			REQUIRE(writer.Write(fresh, AsBytes("unbound")));
+			CHECK(admitted == 11);
+			CHECK(vfs.ReadText(fresh) == "unbound");
+			writer.SetListener({});
+		}
+
 		TEST_CASE("AssetWriter: writes are marked known and reported to the listener")
 		{
 			Test::AssetTestFixture fixture;

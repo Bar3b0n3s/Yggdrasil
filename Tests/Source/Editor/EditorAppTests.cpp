@@ -1,5 +1,6 @@
 #include "TestsPCH.h"
 
+#include "EditorCore/Autosave/Autosave.h"
 #include "EditorCore/Project/ProjectManager.h"
 #include "Engine/App/ExitCode.h"
 #include "Engine/Asset/BuiltinAssets.h"
@@ -78,6 +79,46 @@ namespace Engine {
 
 	TEST_SUITE("Editor")
 	{
+		TEST_CASE("EditorApp: first save of a recovered untitled scene removes only its generation")
+		{
+			Test::EditorTestFixture fixture("HostUntitledRecovery");
+			fixture.CreateAndOpenProject();
+			EditorContext& editor = fixture.GetEditor();
+			const auto projectFile = editor.GetProject().GetProjectFile();
+			const auto recoveryRoot = fixture.GetProjectRoot() / "Library/Autosave";
+			Autosave saves(editor);
+			editor.SetScene(editor.CreateScene("PreserveUntitled"), std::nullopt, true);
+			const auto first = saves.Save(AutosaveReason::BeforePlay);
+			REQUIRE(first.has_value());
+			REQUIRE(first->Written);
+			const auto preservedPath = recoveryRoot / first->Generation / "Scene.json";
+			const auto preserved = FileSystem::ReadText(preservedPath);
+			REQUIRE(preserved.has_value());
+			editor.SetScene(editor.CreateScene("RecoverUntitled"), std::nullopt, true);
+			const auto second = saves.Save(AutosaveReason::BeforePlay);
+			REQUIRE(second.has_value());
+			REQUIRE(second->Written);
+			REQUIRE(saves.Reset());
+			REQUIRE(editor.CloseProject().has_value());
+
+			const Json open = { { "method", "project.open" }, { "params", { { "path", Test::PathToUtf8(projectFile) }, { "recover", true } } } };
+			const Json save = { { "method", "scene.save" }, { "params", { { "path", "Assets/Scenes/FirstSave.scene" } } } };
+			const auto batchPath = fixture.GetDirectory() / "RecoverSave.jsonl";
+			WriteProcessTestFile(batchPath, open.dump() + "\n" + save.dump() + "\n");
+			const auto result = RunEditor(fixture.GetDirectory(),
+				{ "--headless", "--renderer", "none", "--batch", Test::PathToUtf8(batchPath) }, std::chrono::seconds(60));
+			REQUIRE_MESSAGE(result.has_value(), result.error().ToString());
+			INFO(result->StandardError);
+			REQUIRE(result->ExitCode == ExitCode::Success);
+			CHECK_FALSE(FileSystem::Exists(recoveryRoot / second->Generation));
+			CHECK(FileSystem::ReadText(preservedPath).value_or("") == *preserved);
+			const auto saved = FileSystem::ReadText(fixture.GetProjectRoot() / "Assets/Scenes/FirstSave.scene");
+			REQUIRE(saved.has_value());
+			CHECK(saved->contains("RecoverUntitled"));
+			CHECK_FALSE(saved->contains("PreserveUntitled"));
+			CHECK(ProjectLock::Acquire(fixture.GetProjectRoot() / "Library/Editor.lock").has_value());
+		}
+
 		TEST_CASE("EditorApp: --dump-reference writes the method catalogue and the MCP catalogue")
 		{
 			Test::TempDirectory userData("EditorDumpReference");
@@ -359,6 +400,23 @@ namespace Engine {
 			REQUIRE_MESSAGE(result.has_value(), result.error().ToString());
 			CheckCleanInitializationFailure(*result);
 			CHECK(result->StandardError.contains(std::format("locked by process {}", Process::GetCurrentId())));
+		}
+
+		TEST_CASE("EditorApp: an unusable project layout path releases initialized host services without GPU errors" * doctest::test_suite(Test::GpuSuite))
+		{
+			if (!Test::ProbeGpuForProcess())
+				return;
+			Test::EditorTestFixture fixture("EditorLayoutFailure");
+			const auto projectFile = CreateProcessTestProject(fixture, "LayoutFailure");
+			const auto library = projectFile.parent_path() / "Library";
+			REQUIRE(FileSystem::CreateDirectories(library).has_value());
+			WriteProcessTestFile(library / "Editor", "Preserve this file");
+			const auto result = RunRenderingEditor(fixture.GetDirectory(), { "--headless", "--project", Test::PathToUtf8(projectFile), "--frames", "1" });
+			REQUIRE(result.has_value());
+			CheckCleanInitializationFailure(*result);
+			CHECK(FileSystem::ReadText(library / "Editor").value_or("") == "Preserve this file");
+			// The partially initialized host released its project lock as well as UI/GPU resources.
+			CHECK(ProjectLock::Acquire(library / "Editor.lock").has_value());
 		}
 	}
 

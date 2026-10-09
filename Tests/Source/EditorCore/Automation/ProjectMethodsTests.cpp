@@ -3,6 +3,7 @@
 #include "EditorCore/Automation/ProjectMethods.h"
 
 #include "EditorCore/Automation/ProvenanceRecorder.h"
+#include "EditorCore/Automation/RegisterMethods.h"
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Json/JsonReader.h"
 #include "Support/AutomationTestClient.h"
@@ -21,6 +22,28 @@ namespace Engine {
 
 	TEST_SUITE("EditorCore")
 	{
+		TEST_CASE("ProjectMethods: Basic3D creates a playable starter scene through the typed method")
+		{
+			Test::TempDirectory directory("Basic3DMethod");
+			REQUIRE(FileSystem::CreateDirectories(directory / "User").has_value());
+			auto engine = EngineContext::Create({ .WorkerCount = 0, .UserDataDirectory = directory / "User", .EngineResourcesDirectory = Test::GetRepositoryRoot() / "Resources", .EngineCacheDirectory = directory / "EngineCache", .RegisterTypes = &RegisterEditorMethodTypes });
+			REQUIRE(engine.has_value());
+			auto editor = EditorContext::Create(**engine, { .IdGeneratorState = Test::EditorTestIdState, .TemplatesDirectory = Test::GetRepositoryRoot() / "Resources/Templates/Projects", .ReadOnlyCacheRoot = directory / "ReadOnly" });
+			REQUIRE(editor.has_value());
+			Test::AutomationTestClient client(**editor);
+			const auto root = directory / "Basic";
+			const auto created = client.Call("project.create", Json{ { "path", Test::PathToUtf8(root) }, { "name", "Basic" }, { "template", "Basic3D" } });
+			REQUIRE_MESSAGE(created.has_value(), created.error().ToString());
+			REQUIRE(client.Call("scene.open", Json{ { "path", "Assets/Scenes/Main.scene" } }).has_value());
+			const auto validated = client.Call("project.validate", Json{ { "scope", "scene" } });
+			REQUIRE_MESSAGE(validated.has_value(), validated.error().ToString());
+			INFO(validated->dump());
+			CHECK((*validated)["errorCount"] == Json(0));
+			const auto camera = client.Call("entity.get", Json{ { "entity", "/Camera" } });
+			REQUIRE(camera.has_value());
+			CHECK((*editor)->GetProject().GetSettings().StartScene == "Assets/Scenes/Main.scene");
+		}
+
 		TEST_CASE("ProjectMethods: project.create creates, opens and records the .eproj")
 		{
 			Test::EditorTestFixture fixture("ProjectCreateMethod");
@@ -49,7 +72,7 @@ namespace Engine {
 			Test::EditorTestFixture fixture("ProjectOpenMethod");
 			fixture.CreateAndOpenProject("Game");
 			const std::filesystem::path projectFile = fixture.GetEditor().GetProject().GetProjectFile();
-			fixture.GetEditor().CloseProject();
+			REQUIRE(fixture.GetEditor().CloseProject());
 			Test::AutomationTestClient client(fixture.GetEditor());
 			Result<Json> opened = client.Call("project.open", Json{ { "path", Test::PathToUtf8(projectFile.parent_path()) } });
 			REQUIRE_MESSAGE(opened.has_value(), opened.error().ToString());
@@ -63,7 +86,7 @@ namespace Engine {
 			Test::EditorTestFixture fixture("ProjectOpenWarning");
 			fixture.CreateAndOpenProject("Game");
 			const std::filesystem::path projectFile = fixture.GetEditor().GetProject().GetProjectFile();
-			fixture.GetEditor().CloseProject();
+			REQUIRE(fixture.GetEditor().CloseProject());
 			Json document = ParseProjectJson(FileSystem::ReadText(projectFile).value_or(std::string()));
 			document["FutureSetting"] = 1;
 			const std::string text = document.dump(1, '\t');

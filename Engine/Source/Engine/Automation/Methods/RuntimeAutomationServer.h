@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Engine/Automation/Methods/StatsMethods.h"
 #include "Engine/Automation/Protocol/Dispatcher.h"
 #include "Engine/Automation/Protocol/JsonRpc.h"
 #include "Engine/Automation/Protocol/MethodRegistry.h"
@@ -72,6 +73,8 @@ namespace Engine {
 		// As AutomationServerSpecification::WallClock: play.step's frame budget is measured with it; empty:
 		// std::chrono::steady_clock::now. Tests script it.
 		std::function<std::chrono::steady_clock::time_point()> WallClock{};
+		// Main-thread snapshot of the host's timing/device/render observations; never renders or waits.
+		std::function<StatsGetResult()> ReadHostStatistics{};
 		// M12: the game's audio engine (AutomationMethodContext::GetAudioEngine: audio.stats), a documented back-reference that
 		// outlives the server; null makes audio.stats Unsupported.
 		AudioEngine* Audio = nullptr;

@@ -3,10 +3,12 @@
 #include "Engine/Session/PlaySession.h"
 
 #include "Engine/Core/Json/Json.h"
+#include "Engine/Scene/Components/CameraComponent.h"
 #include "Engine/Scene/Components/RuntimeComponents.h"
 #include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/PhysicsSystem.h"
+#include "Engine/Scene/RenderExtraction.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/SceneSerializer.h"
 #include "Support/PhysicsTestScene.h"
@@ -107,6 +109,70 @@ namespace Engine {
 
 	TEST_SUITE("Session")
 	{
+		TEST_CASE("PlaySession: game views retain each session's project rendering quality")
+		{
+			Test::SceneTestFixture fixture;
+			SUBCASE("a primary camera")
+			{
+				fixture.GetScene().CreateEntity("Camera").AddComponent<CameraComponent>(CameraComponent{ .Primary = true });
+			}
+			SUBCASE("a camera-less clear")
+			{
+			}
+			PlaySessionSpecification first = MakeSpecification(fixture);
+			first.Project.Rendering.ShadowMapSize = 512;
+			first.Project.Rendering.SsaoHalfResolution = true;
+			PlaySessionSpecification second = MakeSpecification(fixture);
+			second.Project.Rendering.ShadowMapSize = 4096;
+			Result<Scope<PlaySession>> firstSession = PlaySession::CreateFromScene(first, fixture.GetScene());
+			Result<Scope<PlaySession>> secondSession = PlaySession::CreateFromScene(second, fixture.GetScene());
+			REQUIRE(firstSession.has_value());
+			REQUIRE(secondSession.has_value());
+			// The session owns its settings; neither the caller nor an interleaved second view can replace them.
+			first.Project.Rendering = {};
+			(*firstSession)->Tick();
+			(*secondSession)->Tick();
+			(*firstSession)->SetViewSize(173, 91);
+			(*firstSession)->Tick();
+			CHECK((*firstSession)->GetLastExtraction().HasCamera == FindPrimaryCamera(fixture.GetScene()).IsValid());
+			CHECK((*firstSession)->GetLastExtraction().Quality.ShadowMapSize == 512);
+			CHECK((*firstSession)->GetLastExtraction().Quality.SsaoHalfResolution);
+			CHECK((*secondSession)->GetLastExtraction().Quality.ShadowMapSize == 4096);
+			CHECK_FALSE((*secondSession)->GetLastExtraction().Quality.SsaoHalfResolution);
+		}
+
+		TEST_CASE("PlaySession: explicit capture quality does not replace game-view quality or advance simulation")
+		{
+			Test::SceneTestFixture fixture;
+			PlaySessionSpecification specification = MakeSpecification(fixture);
+			specification.Project.Rendering.ShadowMapSize = 512;
+			specification.Project.Rendering.SsaoHalfResolution = true;
+			Result<Scope<PlaySession>> created = PlaySession::CreateFromScene(specification, fixture.GetScene());
+			REQUIRE(created.has_value());
+			PlaySession& session = **created;
+			session.Tick();
+			session.SetPaused(true);
+			const uint64_t hash = session.ComputeStateHash();
+			const uint64_t tick = session.GetTick();
+			const uint64_t extractions = session.GetExtractionCount();
+			RenderExtractionRequest request;
+			request.Camera = RenderCameraSource::Explicit;
+			request.Width = 73;
+			request.Height = 51;
+			request.Quality = { .ShadowMapSize = 1024, .SsaoHalfResolution = false };
+			const Result<RenderSnapshot> capture = session.ExtractView(request);
+			REQUIRE_MESSAGE(capture.has_value(), capture.error().ToString());
+			CHECK(capture->Quality.ShadowMapSize == 1024);
+			CHECK_FALSE(capture->Quality.SsaoHalfResolution);
+			CHECK(capture->Camera.ViewportWidth == 73);
+			CHECK(capture->Camera.ViewportHeight == 51);
+			CHECK(session.GetLastExtraction().Quality.ShadowMapSize == 512);
+			CHECK(session.GetLastExtraction().Quality.SsaoHalfResolution);
+			CHECK(session.ComputeStateHash() == hash);
+			CHECK(session.GetTick() == tick);
+			CHECK(session.GetExtractionCount() == extractions);
+		}
+
 		TEST_CASE("PlaySession: play then stop leaves the edit scene byte-identical")
 		{
 			Test::SceneTestFixture fixture;

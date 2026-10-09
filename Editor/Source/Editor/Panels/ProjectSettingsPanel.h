@@ -1,6 +1,14 @@
 #pragma once
 
 #include "Engine/Core/Result.h"
+#include "Engine/Project/ProjectSettings.h"
+#include "Engine/Reflection/Value.h"
+
+#include <nlohmann/json.hpp>
+
+#include <cstdint>
+#include <filesystem>
+#include <string>
 
 namespace Engine {
 
@@ -13,6 +21,16 @@ namespace Engine {
 	{
 	public:
 		[[nodiscard]] Status Draw(EditorPanelContext& context);
+	private:
+		ProjectSettings m_Draft{};
+		Value m_Value{};
+		Json m_Baseline{};
+		std::filesystem::path m_Project{};
+		uint64_t m_Revision = 0;
+		uint64_t m_Ticket = 0;
+		uint64_t m_DraftEpoch = 0; // invalidates active ImGui text buffers when a draft is discarded
+		bool m_Editing = false;
+		std::string m_Error{};
 	};
 
 }

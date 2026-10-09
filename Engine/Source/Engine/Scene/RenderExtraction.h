@@ -107,13 +107,11 @@ namespace Engine {
 	//     screenshot sets it).
 	// M9 additions: copy Flags, Quality, Annotations and SelectedEntities (sort/unique/filter unknown ids), assign mesh
 	// PickIds/PickTable in canonical entity order before GPU culling, and copy all five directional shadow fields.
-	// The default request preserves M8 behavior during contract scaffolding; nondefault M9 options currently return
-	// Unsupported. The integrator replaces that marked guard with the behavior above, preserving the existing extraction.
 	// Asset-dependent overlays are appended afterwards with AppendRenderAnnotations at the snapshot's Alpha.
 	// Errors: InvalidArgument for a zero Width or Height or an Alpha that is not finite or outside [0, 1]; NotFound for an
 	// Entity request whose CameraEntity names no entity of the scene, and InvalidArgument when that entity has no
 	// CameraComponent (both name the id); InvalidArgument for an Explicit camera whose Target equals its Position.
-	// M9 implementation also rejects unknown flag bits, invalid annotation enums and invalid ShadowMapSize before copying
+	// Also rejects unknown flag bits, invalid annotation enums and invalid ShadowMapSize before copying
 	// options. Explicit label IDs are copied, sorted/deduplicated and unknown IDs filtered; other label modes require
 	// an empty LabelEntities vector. Returned values own selection and label storage.
 	[[nodiscard]] Result<RenderSnapshot> ExtractRenderSnapshot(const Scene& scene, const RenderExtractionRequest& request);

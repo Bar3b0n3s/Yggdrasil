@@ -92,10 +92,19 @@ namespace Engine {
 
 	TEST_SUITE("Renderer")
 	{
-		TEST_CASE("DebugViews: debug palettes have exact display-encoded colors" * doctest::skip(true))
+		TEST_CASE("DebugViews: debug palettes have exact display-encoded colors")
 		{
-			// Overdraw 0..6, four cascade indices, no exposure/OETF/dither; compare against literal RGB values.
-			FAIL("M9 reviewed contract: implement this acceptance before removing skip");
+			CHECK(GetOverdrawDebugColor(0) == glm::vec3(0));
+			CHECK(GetOverdrawDebugColor(1) == glm::vec3(0, 0, 1));
+			CHECK(GetOverdrawDebugColor(2) == glm::vec3(0, 1, 1));
+			CHECK(GetOverdrawDebugColor(3) == glm::vec3(0, 1, 0));
+			CHECK(GetOverdrawDebugColor(4) == glm::vec3(1, 1, 0));
+			CHECK(GetOverdrawDebugColor(5) == glm::vec3(1, 0, 0));
+			CHECK(GetOverdrawDebugColor(6) == glm::vec3(1, 0, 0));
+			CHECK(GetShadowCascadeDebugColor(0) == glm::vec3(1, 0, 0));
+			CHECK(GetShadowCascadeDebugColor(1) == glm::vec3(0, 1, 0));
+			CHECK(GetShadowCascadeDebugColor(2) == glm::vec3(0, 0, 1));
+			CHECK(GetShadowCascadeDebugColor(3) == glm::vec3(1, 1, 0));
 		}
 	}
 

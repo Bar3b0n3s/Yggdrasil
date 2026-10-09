@@ -7,14 +7,17 @@
 #include "EditorCore/Play/EditorPlayController.h"
 #include "EditorCore/Project/ProjectManager.h"
 #include "Engine/App/EngineContext.h"
+#include "Engine/Audio/AudioEngine.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/Automation/Methods/SceneMethods.h"
 #include "Engine/Automation/Methods/SessionMethods.h"
 #include "Engine/Automation/Methods/SharedMethodSupport.h"
 #include "Engine/Core/FileSystem.h"
+#include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Renderer/RenderSnapshot.h"
 #include "Engine/Renderer/ViewportCapture.h"
 #include "Engine/Scene/Entity.h"
+#include "Engine/Scene/PhysicsSystem.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Session/PlaySession.h"
 
@@ -30,6 +33,42 @@ namespace Engine {
 		// The batch's attribution and dry-run sandbox live on the EditorContext for the whole batch (the server set them for
 		// the parent request), so an op's context needs only the same editor and server.
 		return CreateScope<EditorMethodContext>(*m_Editor, *m_Server, std::move(request));
+	}
+
+	const ProjectSettings* EditorMethodContext::GetProjectSettings() const
+	{
+		return m_Editor->HasProject() ? &m_Editor->GetProject().GetSettings() : nullptr;
+	}
+
+	std::vector<UUID> EditorMethodContext::GetSelectedEntities() const
+	{
+		const auto selection = m_Editor->GetSelection();
+		return { selection.begin(), selection.end() };
+	}
+
+	Result<StatsGetResult> EditorMethodContext::GetHostStatistics() const
+	{
+		if (!m_Editor->HasProject())
+			return MakeError(ErrorCode::InvalidState, "statistics require an open project");
+		const auto& read = m_Server->GetSpecification().ReadHostStatistics;
+		StatsGetResult result = read ? read() : StatsGetResult{};
+		if (result.Views.empty())
+			result.Views = { StatsViewSummary{ .Name = "scene" }, StatsViewSummary{ .Name = "game" } };
+		if (const PlaySession* session = GetPlaySession())
+		{
+			result.Entities = static_cast<uint32_t>(session->GetScene().GetEntityCount());
+			result.Bodies = session->GetPhysics().GetStats().BodyCount;
+		}
+		else
+			result.Entities = m_Editor->HasScene() ? static_cast<uint32_t>(m_Editor->GetScene().GetEntityCount()) : 0;
+		if (const AudioEngine* audio = GetAudioEngine())
+			result.Voices = audio->GetStats().LiveVoices;
+		if (const GraphicsDevice* device = m_Editor->GetEngine().GetGraphicsDevice())
+		{
+			result.MemoryAllocationCount = device->GetMemoryAllocationCount();
+			result.MaxMemoryAllocationCount = device->GetInfo().MaxMemoryAllocationCount;
+		}
+		return result;
 	}
 
 	IAssetReferenceResolver* EditorMethodContext::GetAssetReferenceResolver() const

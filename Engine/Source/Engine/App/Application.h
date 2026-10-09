@@ -236,6 +236,8 @@ namespace Engine {
 		void SetFrameTimeScale(double timeScale);
 		void SetFrameThrottleSuspended(bool suspended);
 		void SetFrameLoopConfig(const FrameLoopConfig& config);
+		// Main-thread copy of completed loop observations; zeros outside the active loop. Reading never advances time.
+		[[nodiscard]] FrameLoopStatistics GetFrameStatistics() const;
 	private:
 		void OnFrameEvent(Event& event) override;
 		void OnFrameSafePoint() override;

@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <array>
 #include <format>
+#include <limits>
 #include <optional>
 
 // Device creation (Architecture §8.1) through the dispatcher's C entry points, which report failures as VkResult values.
@@ -427,6 +428,15 @@ namespace Engine {
 		// 3. §8.14 item 4: NVRHI device, VkDevice, debug messenger, VkInstance.
 		m_NvrhiDevice = nullptr;
 		m_VulkanNvrhiDevice = nullptr;
+		if (m_IsMemoryTracking)
+		{
+			const uint32_t remaining = VulkanDispatch::GetMemoryAllocationCount(m_Device);
+			if (remaining != 0)
+				m_Diagnostics.ReportMessage(GpuMessageSeverity::Error, "Vulkan memory tracker",
+					std::format("{} native device-memory allocations remain after GPU resource teardown", remaining));
+			VulkanDispatch::EndMemoryTracking(m_Device);
+			m_IsMemoryTracking = false;
+		}
 		if (m_Device != VK_NULL_HANDLE)
 			dispatcher.vkDestroyDevice(m_Device, nullptr);
 		if (m_DebugMessenger != VK_NULL_HANDLE)
@@ -451,6 +461,9 @@ namespace Engine {
 		const GraphicsSpecification& graphics = specification.Graphics;
 		if (graphics.FramesInFlight == 0)
 			return MakeError(ErrorCode::InvalidArgument, "FramesInFlight must be at least 1");
+		constexpr uint64_t QueriesPerFrame = uint64_t{ GpuProfiler::MaxScopesPerFrame } * MaxConcurrentGpuProfilers;
+		if (uint64_t{ graphics.FramesInFlight } * QueriesPerFrame > static_cast<uint64_t>(std::numeric_limits<int32_t>::max()) / 2)
+			return MakeError(ErrorCode::InvalidArgument, "FramesInFlight exceeds the native timer-query capacity");
 		if constexpr (!GpuTestHooksEnabled)
 		{
 			if (graphics.InjectFault != GpuFault::None)
@@ -678,7 +691,7 @@ namespace Engine {
 		m_Info.DeviceClass = GetDeviceClass(candidate.VendorID, candidate.DriverVersion, candidate.DriverID);
 		m_Info.HostImageCopy = deviceVulkan14 && candidate.HostImageCopy;
 		m_Info.DeviceFault = candidate.DeviceFault;
-		m_Info.DepthClamp = candidate.DepthClamp;
+		m_Info.DepthClamp = candidate.DepthClamp && !m_Specification.DisableDepthClamp;
 		m_Info.FillModeNonSolid = candidate.FillModeNonSolid;
 		m_Info.PortabilitySubset = candidate.PortabilitySubset;
 		m_Info.BloomFormat = selection.BloomFormat;
@@ -748,6 +761,8 @@ namespace Engine {
 			return MakeError(ErrorCode::Gpu, "vkCreateDevice on '{}' failed: {}", m_Info.DeviceName, VkResultToString(created));
 		}
 		VULKAN_HPP_DEFAULT_DISPATCHER.init(vk::Device(m_Device));
+		ENGINE_TRY(VulkanDispatch::BeginMemoryTracking(m_Device));
+		m_IsMemoryTracking = true;
 		dispatcher.vkGetDeviceQueue(m_Device, chosen.QueueFamily, 0, &m_GraphicsQueue);
 
 		if (m_Info.BloomFormat != nvrhi::Format::R11G11B10_FLOAT)
@@ -777,9 +792,10 @@ namespace Engine {
 		desc.numInstanceExtensions = instanceExtensions.size();
 		desc.deviceExtensions = deviceExtensions.data();
 		desc.numDeviceExtensions = deviceExtensions.size();
-		// NVRHI's timer-query pool must hold every query the frame profilers create: a GpuProfiler times up to
-		// MaxScopesPerFrame scopes per frame slot, and the application's profiler and a capture's may coexist.
-		desc.maxTimerQueries = std::max<uint32_t>(desc.maxTimerQueries, GpuProfiler::MaxScopesPerFrame * m_Specification.FramesInFlight * 2);
+		// Every live profiler retains one query per scope per slot, including delayed views and offscreen work.
+		// Create checked the multiplication and NVRHI's two signed timestamp indices per timer query before any device work.
+		desc.maxTimerQueries = std::max<uint32_t>(desc.maxTimerQueries,
+			GpuProfiler::MaxScopesPerFrame * m_Specification.FramesInFlight * MaxConcurrentGpuProfilers);
 
 		// NVRHI calls vulkan.hpp's throwing wrappers while it creates its queue objects (§4.6 item 1).
 		try
@@ -1130,6 +1146,8 @@ namespace Engine {
 			return "no fault information";
 		if (m_Diagnostics.GetInjectedFault() == GpuFault::DeviceLost)
 			return std::format("no fault information (the device loss was injected by --gpu-inject-fault={})", GpuFaultToString(GpuFault::DeviceLost));
+		if (m_Diagnostics.IsDeviceLossInjected())
+			return "no fault information (the device loss was injected)";
 		const vk::detail::DispatchLoaderDynamic& dispatcher = VULKAN_HPP_DEFAULT_DISPATCHER;
 
 		VkDeviceFaultCountsEXT counts{};
@@ -1172,8 +1190,7 @@ namespace Engine {
 
 	uint32_t GraphicsDevice::GetMemoryAllocationCount() const
 	{
-		ENGINE_CONTRACT_STUB();
-		return 0;
+		return m_IsMemoryTracking ? VulkanDispatch::GetMemoryAllocationCount(m_Device) : 0;
 	}
 
 	VkInstance GraphicsDevice::GetVulkanInstance() const

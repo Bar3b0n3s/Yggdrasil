@@ -83,6 +83,8 @@ namespace Engine {
 		EditorViewportOptions m_Options{};
 		RenderDebugView m_DebugView = RenderDebugView::Lit;
 		glm::uvec2 m_SceneSize = glm::uvec2(640, 360);
+		glm::uvec2 m_ScenePixels = glm::uvec2(640, 360);
+		glm::uvec2 m_GamePixels = glm::uvec2(640, 360);
 		glm::uvec2 m_GameResolution = glm::uvec2(0);
 	};
 

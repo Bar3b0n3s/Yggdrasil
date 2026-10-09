@@ -98,6 +98,7 @@ namespace Engine {
 		void OnFixedStep(const SimStep& step) override;
 		void OnUpdate(const FrameTime& frame) override;
 		void OnRender(RenderContext& context) override;
+		void OnRenderSubmitted(uint64_t frameIndex, uint64_t submissionId) override;
 	private:
 		// OnInitialize's work (see the class comment); OnInitialize releases what it built when it fails.
 		[[nodiscard]] Status InitializeGame();

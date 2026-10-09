@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Engine/Core/Base.h"
 #include "Engine/Core/Result.h"
 #include "Engine/Core/UUID.h"
 
@@ -64,6 +65,12 @@ namespace Engine {
 		[[nodiscard]] bool IsDragging() const;
 		// Borrowed until Update/End/Cancel; nullptr idle. For scene-viewport extraction only, never simulation/autosave.
 		[[nodiscard]] const Scene* GetPreviewScene() const;
+	private:
+		[[nodiscard]] bool HasCurrentSource() const;
+	private:
+		struct DragState;
+		EditorContext* m_Context = nullptr; // documented back-reference; context outlives this controller
+		Scope<DragState> m_Drag{};
 	};
 
 }

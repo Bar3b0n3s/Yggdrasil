@@ -23,12 +23,38 @@
 #include <string>
 #include <utility>
 
-// The editor's play mode (Architecture §5.6, §12.4; Docs/Decisions/0012-m7-decisions.md decisions 3 and 11).
+// The editor's play mode (Architecture Â§5.6, Â§12.4; Docs/Decisions/0012-m7-decisions.md decisions 3 and 11).
 
 namespace Engine {
 
 	TEST_SUITE("EditorCore")
 	{
+		TEST_CASE("EditorPlayController: before-play failure prevents the copy and a retry observes completed preparation")
+		{
+			Test::EditorTestFixture fixture;
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			auto& editor = fixture.GetEditor();
+			uint32_t calls = 0;
+			editor.SetLifecycleCallbacks({ .BeforePlay = [&calls, &editor]() -> Status
+			{
+				if (++calls == 1)
+					return MakeError(ErrorCode::Io, "cannot save before play");
+				static_cast<void>(editor.GetScene().CreateEntity("Prepared"));
+				return {};
+			} });
+			const auto failed = editor.GetPlay().Start({});
+			REQUIRE_FALSE(failed);
+			CHECK(failed.error().GetCode() == ErrorCode::Io);
+			CHECK_FALSE(editor.GetPlay().IsPlaying());
+			CHECK(calls == 1);
+			REQUIRE(editor.GetPlay().Start({}));
+			CHECK(calls == 2);
+			CHECK(editor.GetPlay().GetSession()->GetScene().FindEntityByPath("/Prepared").IsValid());
+			REQUIRE(editor.GetPlay().Stop());
+			editor.SetLifecycleCallbacks({});
+		}
+
 		TEST_CASE("EditorPlayController: play then stop leaves the edit scene, its revision and its history untouched")
 		{
 			Test::EditorTestFixture fixture;
@@ -217,7 +243,7 @@ namespace Engine {
 
 		TEST_CASE("EditorPlayController: a reload during ordinary play marks the session modified, whatever started it")
 		{
-			// §7.5 race rule 4: the editor's own write of an asset (asset.setProperties, asset.import) reloads it in the running
+			// Â§7.5 race rule 4: the editor's own write of an asset (asset.setProperties, asset.import) reloads it in the running
 			// game as an external change does, and both mark the session modified; a lockstep session defers both.
 			Test::EditorTestFixture fixture("PlayReloadModified");
 			fixture.CreateAndOpenProject();
@@ -320,7 +346,7 @@ namespace Engine {
 			fixture.CreateAndOpenScene();
 			EditorContext& editor = fixture.GetEditor();
 			REQUIRE(editor.GetPlay().Start(PlayStartOptions{ .Lockstep = true }).has_value());
-			editor.CloseProject();
+			REQUIRE(editor.CloseProject());
 			CHECK_FALSE(editor.GetPlay().IsPlaying());
 			CHECK_FALSE(editor.GetAssets().AreReloadsDeferred());
 		}

@@ -1,6 +1,11 @@
 #pragma once
 
+#include "Engine/Automation/Methods/StatsMethods.h"
 #include "Engine/Core/Result.h"
+
+#include <cstdint>
+#include <filesystem>
+#include <string>
 
 namespace Engine {
 
@@ -13,6 +18,13 @@ namespace Engine {
 	{
 	public:
 		[[nodiscard]] Status Draw(EditorPanelContext& context);
+	private:
+		StatsGetResult m_Stats{};
+		std::filesystem::path m_Project{};
+		uint64_t m_Ticket = 0;
+		bool m_HasSample = false;
+		bool m_Refresh = true;
+		std::string m_Error{};
 	};
 
 }

@@ -18,7 +18,7 @@
 // The Editor's --viewport-screenshot and --editor-screenshot options (Editor/EditorApp.h): thin callers of the screenshot
 // capability (Renderer/ViewportCapture.h, ImGui/ImGuiScreenshot.h), which viewport.screenshot and editor.screenshot call
 // too, through the same captures (ScreenshotMethodsTests.cpp, Tests/Automation/test_screenshot.py, the goldens "LitScene"
-// and "ImGuiDemo"). The options belong to the Editor executable, whose sources are not linked into Tests, so these tests
+// and "EditorDefaultLayout"). The options belong to the Editor executable, whose sources are not linked into Tests, so these tests
 // run it as a process; the capture functions themselves are tested in process (ViewportCaptureTests.cpp,
 // ImGuiScreenshotTests.cpp).
 

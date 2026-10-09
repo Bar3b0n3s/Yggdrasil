@@ -20,6 +20,13 @@
 #include "Shared/EnvironmentConstants.h"
 #include "Shared/ImGuiConstants.h"
 #include "Shared/MaterialConstants.h"
+#include "Shared/DepthPyramidConstants.h"
+#include "Shared/GtaoConstants.h"
+#include "Shared/ShadowCasterConstants.h"
+#include "Shared/ShadowProbeConstants.h"
+#include "Shared/Private/SceneDataViewConstants.h"
+#include "Shared/Private/SelectionPassConstants.h"
+#include "Shared/ShadowConstants.h"
 #include "Shared/ShaderLight.h"
 #include "Shared/SmokeConstants.h"
 #include "Shared/TonemapConstants.h"
@@ -88,6 +95,15 @@ namespace Engine {
 		for (std::vector<PipelineLayoutDescription> more : { SceneRendererPipelines::GetLayoutDescriptions(nvrhi::Format::R11G11B10_FLOAT),
 				 BloomPass::GetLayoutDescriptions(nvrhi::Format::RGBA16_FLOAT), EnvironmentBaker::GetLayoutDescriptions() })
 			layouts.insert(layouts.end(), std::make_move_iterator(more.begin()), std::make_move_iterator(more.end()));
+		nvrhi::BindingLayoutDesc shadowProbe;
+		shadowProbe.visibility = nvrhi::ShaderType::Compute;
+		shadowProbe.registerSpaceIsDescriptorSet = true;
+		shadowProbe.bindings = {
+			nvrhi::BindingLayoutItem::ConstantBuffer(1), nvrhi::BindingLayoutItem::Texture_SRV(1),
+			nvrhi::BindingLayoutItem::Texture_SRV(2), nvrhi::BindingLayoutItem::Sampler(1),
+			nvrhi::BindingLayoutItem::Texture_UAV(0), nvrhi::BindingLayoutItem::PushConstants(3, sizeof(ShadowProbeConstants))
+		};
+		layouts.push_back({ .Name = "ShadowProbe", .Program = "ShadowProbe", .Entries = { "CSMain" }, .BindingLayouts = { shadowProbe }, .StorageImages = { { .Set = 0, .Register = 0, .Format = nvrhi::Format::RGBA32_FLOAT } }, .ConstantBuffers = { { .Set = 0, .Register = 1, .ByteSize = sizeof(ShadowConstants) } } });
 		return layouts;
 	}
 
@@ -126,6 +142,90 @@ namespace Engine {
 	static std::vector<SharedStruct> GetSharedStructs()
 	{
 		return {
+			{ .Name = "DepthPyramidConstants", .Size = sizeof(DepthPyramidConstants), .Fields = {
+																						  ENGINE_TEST_SHARED_FIELD(DepthPyramidConstants, SourceSize),
+																						  ENGINE_TEST_SHARED_FIELD(DepthPyramidConstants, DestinationSize),
+																						  ENGINE_TEST_SHARED_FIELD(DepthPyramidConstants, Near),
+																						  ENGINE_TEST_SHARED_FIELD(DepthPyramidConstants, Far),
+																						  ENGINE_TEST_SHARED_FIELD(DepthPyramidConstants, ProjectionKind),
+																						  ENGINE_TEST_SHARED_FIELD(DepthPyramidConstants, Padding0),
+																					  },
+				.Program = "DepthPyramid",
+				.Entry = "CSLinearize" },
+			{ .Name = "GtaoConstants", .Size = sizeof(GtaoConstants), .Fields = {
+																		  ENGINE_TEST_SHARED_FIELD(GtaoConstants, FullSize),
+																		  ENGINE_TEST_SHARED_FIELD(GtaoConstants, OutputSize),
+																		  ENGINE_TEST_SHARED_FIELD(GtaoConstants, PositionScale),
+																		  ENGINE_TEST_SHARED_FIELD(GtaoConstants, Radius),
+																		  ENGINE_TEST_SHARED_FIELD(GtaoConstants, Intensity),
+																		  ENGINE_TEST_SHARED_FIELD(GtaoConstants, ProjectionKind),
+																		  ENGINE_TEST_SHARED_FIELD(GtaoConstants, SliceCount),
+																		  ENGINE_TEST_SHARED_FIELD(GtaoConstants, MipCount),
+																		  ENGINE_TEST_SHARED_FIELD(GtaoConstants, Axis),
+																		  ENGINE_TEST_SHARED_FIELD(GtaoConstants, RadiusScale),
+																		  ENGINE_TEST_SHARED_FIELD(GtaoConstants, Padding0),
+																		  ENGINE_TEST_SHARED_FIELD(GtaoConstants, Padding1),
+																		  ENGINE_TEST_SHARED_FIELD(GtaoConstants, Padding2),
+																	  },
+				.Program = "Gtao",
+				.Entry = "CSMain" },
+			{ .Name = "ShadowCasterConstants", .Size = sizeof(ShadowCasterConstants), .Fields = {
+																						  ENGINE_TEST_SHARED_FIELD(ShadowCasterConstants, ViewProjection),
+																						  ENGINE_TEST_SHARED_FIELD(ShadowCasterConstants, Bias),
+																					  },
+				.Program = "Shadow",
+				.Entry = "VSMain",
+				.Permutation = { { .Key = "ALPHA_MASK", .Value = "0" } } },
+			{ .Name = "ShadowProbeConstants", .Size = sizeof(ShadowProbeConstants), .Fields = {
+																						ENGINE_TEST_SHARED_FIELD(ShadowProbeConstants, Options),
+																						ENGINE_TEST_SHARED_FIELD(ShadowProbeConstants, Parameters),
+																					},
+				.Program = "ShadowProbe",
+				.Entry = "CSMain" },
+			{ .Name = "SceneDataViewConstants", .Size = sizeof(SceneDataViewConstants), .Fields = {
+																							ENGINE_TEST_SHARED_FIELD(SceneDataViewConstants, Options),
+																						},
+				.Program = "SceneDataView",
+				.Entry = "CSMain" },
+			{ .Name = "SelectionMaskConstants", .Size = sizeof(SelectionMaskConstants), .Fields = {
+																							ENGINE_TEST_SHARED_FIELD(SelectionMaskConstants, World),
+																							ENGINE_TEST_SHARED_FIELD(SelectionMaskConstants, ViewProjection),
+																						},
+				.Program = "SelectionMask",
+				.Entry = "VSMain",
+				.Permutation = { { .Key = "ALPHA_MASK", .Value = "0" } } },
+			{ .Name = "SelectionFilterConstants", .Size = sizeof(SelectionFilterConstants), .Fields = {
+																								ENGINE_TEST_SHARED_FIELD(SelectionFilterConstants, Color),
+																								ENGINE_TEST_SHARED_FIELD(SelectionFilterConstants, Radius),
+																								ENGINE_TEST_SHARED_FIELD(SelectionFilterConstants, Vertical),
+																								ENGINE_TEST_SHARED_FIELD(SelectionFilterConstants, Padding),
+																							},
+				.Program = "SelectionDilate",
+				.Entry = "CSDilate" },
+			{ .Name = "ShadowConstants", .Size = sizeof(ShadowConstants), .Fields = {
+																			  ENGINE_TEST_SHARED_FIELD(ShadowConstants, CascadeViewProjection),
+																			  ENGINE_TEST_SHARED_FIELD(ShadowConstants, CascadeSplits),
+																			  ENGINE_TEST_SHARED_FIELD(ShadowConstants, CascadeBlendStarts),
+																			  ENGINE_TEST_SHARED_FIELD(ShadowConstants, CascadeTexelWorldSizes),
+																			  ENGINE_TEST_SHARED_FIELD(ShadowConstants, CascadeDepthRanges),
+																			  ENGINE_TEST_SHARED_FIELD(ShadowConstants, Spots),
+																			  ENGINE_TEST_SHARED_FIELD(ShadowConstants, Directional),
+																			  ENGINE_TEST_SHARED_FIELD(ShadowConstants, Counts),
+																		  },
+				.Program = "Scene",
+				.Entry = "PSForward",
+				.Permutation = { { .Key = "ALPHA_MASK", .Value = "0" } } },
+			{ .Name = "SpotShadowConstants", .Size = sizeof(SpotShadowConstants), .Fields = {
+																					  ENGINE_TEST_SHARED_FIELD(SpotShadowConstants, ViewProjection),
+																					  ENGINE_TEST_SHARED_FIELD(SpotShadowConstants, UvScaleBias),
+																					  ENGINE_TEST_SHARED_FIELD(SpotShadowConstants, DepthSoftness),
+																					  ENGINE_TEST_SHARED_FIELD(SpotShadowConstants, Bias),
+																					  ENGINE_TEST_SHARED_FIELD(SpotShadowConstants, Indices),
+																				  },
+				.Program = "Scene",
+				.Entry = "PSForward",
+				.Permutation = { { .Key = "ALPHA_MASK", .Value = "0" } } },
+
 			{
 				.Name = "ViewConstants",
 				.Size = sizeof(ViewConstants),

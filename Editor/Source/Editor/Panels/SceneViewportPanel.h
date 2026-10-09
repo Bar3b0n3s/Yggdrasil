@@ -1,6 +1,14 @@
 #pragma once
 
+#include "EditorCore/Viewport/GizmoController.h"
+#include "Engine/Core/Json/Json.h"
 #include "Engine/Core/Result.h"
+#include "Engine/Core/UUID.h"
+
+#include <cstdint>
+#include <string>
+#include <string_view>
+#include <vector>
 
 namespace Engine {
 
@@ -14,6 +22,18 @@ namespace Engine {
 	{
 	public:
 		[[nodiscard]] Status Draw(EditorPanelContext& context);
+	private:
+		[[nodiscard]] Status QueueAction(EditorPanelContext& context, std::string_view method, const Json& params);
+		[[nodiscard]] Status CollectActions(EditorPanelContext& context);
+		[[nodiscard]] Status FrameSelection(EditorPanelContext& context);
+		[[nodiscard]] Status AcceptAssetDrop(EditorPanelContext& context);
+	private:
+		GizmoSettings m_GizmoSettings{};
+		uint64_t m_ClickSequence = 0;
+		std::vector<uint64_t> m_ActionTickets{};
+		std::vector<UUID> m_DragSelection{};
+		bool m_DragInPlay = false;
+		std::string m_LastError{};
 	};
 
 }

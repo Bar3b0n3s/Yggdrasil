@@ -23,6 +23,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <optional>
 #include <span>
 #include <string>
@@ -51,6 +52,15 @@ namespace Engine {
 	class TypeRegistry;
 	class VirtualFileSystem;
 	struct AssetRefreshReport;
+
+	// Main-thread host hooks. Captured services must outlive the binding; clear it only after asynchronous writers
+	// and the fatal hook are quiescent, before destroying those services. Empty callbacks preserve CPU-only behavior.
+	struct EditorLifecycleCallbacks
+	{
+		std::function<Status()> BeforePlay{};
+		std::function<Status()> AfterSceneSaved{};
+		std::function<Status()> BeforeProjectClose{};
+	};
 
 	struct EditorContextSpecification
 	{
@@ -159,8 +169,14 @@ namespace Engine {
 		[[nodiscard]] Status OpenProject(Scope<LoadedProject> project);
 
 		// Closes the open scene and the project (unmounts project:// and cache://, releases the lock). Unsaved changes are
-		// discarded: callers ask IsSceneDirty first. No effect without a project.
-		void CloseProject();
+		// discarded: callers ask IsSceneDirty first. No effect without a project. BeforeProjectClose runs before stopping
+		// play or changing state/mounts; its failure leaves the project and lock intact for a later retry.
+		[[nodiscard]] Status CloseProject();
+
+		void SetLifecycleCallbacks(EditorLifecycleCallbacks callbacks);
+		// Called by EditorPlayController after validating options and before serializing the runtime scene copy.
+		// A failure prevents play. Disposable dry runs do not call host services.
+		[[nodiscard]] Status PrepareForPlay();
 
 		// --- The open scene ------------------------------------------------------------------------------------------------
 
@@ -187,8 +203,9 @@ namespace Engine {
 		[[nodiscard]] bool IsSceneDirty() const;
 
 		// The open scene was written to `path` (scene.save, project.save): sets the scene path and the save point, and clears
-		// SceneChangedOnDisk.
-		void MarkSceneSaved(const VfsPath& path);
+		// SceneChangedOnDisk, then calls AfterSceneSaved outside a dry run. Callback failure is returned with a hint
+		// explaining that the scene was saved but recovery cleanup failed; it never makes the durable save dirty again.
+		[[nodiscard]] Status MarkSceneSaved(const VfsPath& path);
 
 		// §7.5 race rule 3: true once the open scene's file, or a prefab asset the open scene instantiates (a
 		// PrefabInstanceComponent names it), changed on disk through something other than this editor since the scene was
@@ -242,12 +259,13 @@ namespace Engine {
 
 		// The selected entities, in the order selected, without duplicates.
 		[[nodiscard]] std::span<const UUID> GetSelection() const { return m_Selection; }
-		// Replaces the selection; ids that are not entities of the open scene are dropped, duplicates removed (first kept).
+		// Replaces the selection in the shown scene (play while running, otherwise edit), recording that target.
+		// Missing ids are dropped and duplicates removed (first kept).
 		// Selection is editor state, not a command (it is never undone).
 		void SetSelection(std::vector<UUID> selection);
 		// M10 explicit target. Validates all ids in the chosen scene before replacing selection; InvalidState without
 		// that scene, NotFound for a missing id. No dirty/history change; selection target prevents editing a UUID in the
-		// wrong scene. Stop restores the captured edit selection; play scene replacement clears its selection.
+		// wrong scene. Stop keeps the current selection's UUIDs that still exist in the edit scene; scene replacement clears it.
 		[[nodiscard]] Status SetSelection(std::vector<UUID> selection, SceneTarget target);
 		[[nodiscard]] SceneTarget GetSelectionTarget() const { return m_SelectionTarget; }
 
@@ -284,6 +302,10 @@ namespace Engine {
 		[[nodiscard]] const WriteAttribution& GetWriteAttribution() const { return m_Attribution; }
 		// Agent while an automation request is served (an attribution is set), User otherwise.
 		[[nodiscard]] CommandOrigin GetCommandOrigin() const { return m_HasRequestAttribution ? CommandOrigin::Agent : CommandOrigin::User; }
+		// Main-thread editor policy. Denies persistent agent command/file mutations, including optional fixes in
+		// otherwise read-only methods. Human actions and sandboxed dry runs remain available.
+		void SetAgentMutationsDenied(bool denied) { m_AgentMutationsDenied = denied; }
+		[[nodiscard]] bool AreAgentMutationsDenied() const { return m_AgentMutationsDenied; }
 
 		// The provenance of the open writable project; nullptr without a project and for read-only projects.
 		[[nodiscard]] const ProvenanceRecorder* GetProvenance() const;
@@ -325,7 +347,7 @@ namespace Engine {
 		// Replaces the project settings with the canonical ProjectSerializer document `document` and writes it to the .eproj
 		// through WriteProjectFile (§12.3). Private: settings change only through ProjectSettingsCommand, executed by Execute
 		// (the class rule above). Errors: InvalidState without a project; Validation for an invalid document; the write
-		// errors; nothing changed then.
+		// errors; nothing changed then. A successful installation advances the editor revision, including undo and redo.
 		[[nodiscard]] Status ApplyProjectSettings(const Json& document);
 
 		// The revision a command about to be recorded started from: the revision before a SceneEdit's mutations while its
@@ -338,12 +360,14 @@ namespace Engine {
 		// The checks every write path member makes before it changes `path` ("cannot <action> '<path>'"): InvalidState without
 		// a project, PermissionDenied for a read-only project outside dry runs. Asserts a project:// path.
 		[[nodiscard]] Status CheckProjectWrite(const VfsPath& path, std::string_view action) const;
+		[[nodiscard]] Status CheckMutationPermission() const;
 		// EditorAssetManager::OpenProject on the open project's project://Assets (created first when a writable project lacks
 		// it) and cache://, read-only for a read-only project, with hot reload. Errors: those of the creation and of OpenProject.
 		[[nodiscard]] Result<AssetRefreshReport> OpenProjectAssets();
 	private:
 		EngineContext* m_Engine = nullptr; // documented back-reference: outlives the editor
 		EditorContextSpecification m_Specification;
+		EditorLifecycleCallbacks m_Lifecycle{};
 		UUIDGenerator m_IdGenerator;
 		// The asset services (M6), after the generator the manager draws handles from, so they are destroyed before it.
 		Scope<ImporterRegistry> m_Importers;
@@ -361,6 +385,7 @@ namespace Engine {
 		SceneTarget m_SelectionTarget = SceneTarget::Edit;
 		WriteAttribution m_Attribution;
 		bool m_HasRequestAttribution = false;
+		bool m_AgentMutationsDenied = false;
 		std::optional<ProvenanceRecorder> m_Provenance;  // the open writable project's provenance
 		std::optional<uint64_t> m_PendingRevisionBefore; // GetRevisionBeforeCommand's value while SceneEdit::Commit executes
 		EditorTransaction* m_Transaction = nullptr;      // the outermost open transaction, which registers itself

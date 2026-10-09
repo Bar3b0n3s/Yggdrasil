@@ -15,6 +15,8 @@ namespace Engine {
 		constexpr std::string_view NvrhiDeviceRemovedMessage = "Device Removed!";
 		// VkDebugUtilsMessengerCallbackDataEXT::pMessageIdName of the Khronos loader's own messages.
 		constexpr std::string_view LoaderMessageIdName = "Loader Message";
+		constexpr uint8_t DeviceLostFlag = 1;
+		constexpr uint8_t InjectedDeviceLossFlag = 2;
 
 		static GpuMessageSeverity FromNvrhiSeverity(nvrhi::MessageSeverity severity)
 		{
@@ -130,12 +132,18 @@ namespace Engine {
 
 	bool GpuDiagnostics::IsDeviceLost() const
 	{
-		return m_IsDeviceLost.load();
+		return (m_DeviceLossState.load(std::memory_order_acquire) & Utils::DeviceLostFlag) != 0;
 	}
 
-	void GpuDiagnostics::SetDeviceLost()
+	void GpuDiagnostics::SetDeviceLost(bool injected)
 	{
-		m_IsDeviceLost.store(true);
+		const uint8_t flags = injected ? Utils::DeviceLostFlag | Utils::InjectedDeviceLossFlag : Utils::DeviceLostFlag;
+		m_DeviceLossState.fetch_or(flags, std::memory_order_release);
+	}
+
+	bool GpuDiagnostics::IsDeviceLossInjected() const
+	{
+		return (m_DeviceLossState.load(std::memory_order_acquire) & Utils::InjectedDeviceLossFlag) != 0;
 	}
 
 	void GpuDiagnostics::OnSubmitted()
@@ -143,7 +151,8 @@ namespace Engine {
 		if (m_InjectedFault != GpuFault::DeviceLost)
 			return;
 		// The first submission sets the flag; the check after it (GraphicsDevice::ExecuteCommandList) ends the process.
-		if (!m_IsDeviceLost.exchange(true))
+		const uint8_t previous = m_DeviceLossState.fetch_or(Utils::DeviceLostFlag | Utils::InjectedDeviceLossFlag, std::memory_order_acq_rel);
+		if ((previous & Utils::DeviceLostFlag) == 0)
 			ENGINE_CORE_WARN("Injected GPU fault (device-lost): the device is reported lost after this submission");
 	}
 

@@ -12,7 +12,9 @@
 
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <functional>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -97,11 +99,40 @@ namespace Engine {
 	// the handler returns, the exception asserts in Debug builds and becomes an Internal response otherwise.
 	using SystemErrorHandler = std::function<void(const std::system_error& error, std::string_view method)>;
 
+	enum class DispatcherRequestPhase : uint8_t
+	{
+		Started,
+		Succeeded,
+		Failed,
+		Cancelled
+	};
+
+	struct DispatcherRequestEvent
+	{
+		uint64_t Sequence = 0;
+		RequestInfo Request{};
+		DispatcherRequestPhase Phase = DispatcherRequestPhase::Started;
+	};
+
+	struct DispatcherRequestRejection
+	{
+		RpcErrorCode Code = RpcErrorCode::InvalidState;
+		Error Failure;
+	};
+
 	struct DispatcherSpecification
 	{
 		size_t OffloadThresholdBytes = DefaultOffloadThresholdBytes;
 		// Empty: a std::system_error is handled like any other exception.
 		SystemErrorHandler SystemErrors{};
+		// Main-thread events, borrowed for the call. Sequences are nonzero, increasing per dispatcher and independent of
+		// wire IDs. Started precedes admission and lookup; each start has exactly one terminal event, including for
+		// notifications, errors before invocation, result/offload errors and cancellation. Dropped, never-started queued
+		// requests have no event. The callbacks and their captures must remain valid through dispatcher destruction.
+		std::function<void(const DispatcherRequestEvent&)> RequestObserver{};
+		// Optional protocol-level admission, once after Started and before method lookup/parameter decoding. A rejection
+		// uses its explicit RPC code; pending requests are never readmitted. Empty hooks preserve existing host behavior.
+		std::function<std::optional<DispatcherRequestRejection>(const RequestInfo&)> RequestAdmission{};
 	};
 
 	// Per-client request queues, the pending operations and response building (results, errors, "_meta", offloading).

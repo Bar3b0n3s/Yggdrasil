@@ -27,6 +27,39 @@ namespace Engine {
 
 	TEST_SUITE("EditorCore")
 	{
+		TEST_CASE("ProjectSettingsCommand: successful changes undo and redo advance the revision while dry runs restore it")
+		{
+			Test::EditorTestFixture fixture;
+			fixture.CreateAndOpenProject();
+			EditorContext& editor = fixture.GetEditor();
+			const uint64_t before = editor.GetRevision();
+			auto command = ProjectSettingsCommand::CreateFromPatch(editor, ParseSettingsJson(R"({"Name":"New name"})"), "Rename");
+			REQUIRE(command);
+			REQUIRE(editor.Execute(std::move(*command)));
+			CHECK(editor.GetRevision() == before + 1);
+			REQUIRE(editor.GetHistory().Undo(editor) == 1);
+			CHECK(editor.GetRevision() == before + 2);
+			REQUIRE(editor.GetHistory().Redo(editor) == 1);
+			CHECK(editor.GetRevision() == before + 3);
+			const auto fileBeforeDryRun = ReadProjectFile(fixture);
+			{
+				auto dryRun = EditorDryRunScope::Begin(editor);
+				REQUIRE(dryRun);
+				auto preview = ProjectSettingsCommand::CreateFromPatch(editor, ParseSettingsJson(R"({"Name":"Preview"})"), "Preview");
+				REQUIRE(preview);
+				REQUIRE(editor.Execute(std::move(*preview)));
+				CHECK(editor.GetRevision() == before + 4);
+			}
+			CHECK(editor.GetRevision() == before + 3);
+			CHECK(editor.GetProject().GetSettings().Name == "New name");
+			CHECK(ReadProjectFile(fixture) == fileBeforeDryRun);
+			const auto rejected = editor.Execute(CreateScope<ProjectSettingsCommand>("Invalid",
+				CreateRef<const Json>(Json::object()), CreateRef<const Json>(Json::object())));
+			REQUIRE_FALSE(rejected);
+			CHECK(editor.GetRevision() == before + 3);
+			CHECK(ReadProjectFile(fixture) == fileBeforeDryRun);
+		}
+
 		TEST_CASE("ProjectSettingsCommand: a merge patch changes the settings and writes the .eproj")
 		{
 			Test::EditorTestFixture fixture("SettingsPatch");

@@ -45,6 +45,8 @@
 
 namespace Engine {
 
+	struct RenderPassCounters;
+
 	class AssetManager;
 	class GraphicsDevice;
 
@@ -107,6 +109,8 @@ namespace Engine {
 		// The font atlases mirrored now.
 		[[nodiscard]] size_t GetFontAtlasCount() const;
 	private:
+		friend class SceneRenderer;
+		[[nodiscard]] Result<uint32_t> RecordCounted(nvrhi::ICommandList& commandList, PassBindingCache& bindings, const TextRenderInputs& inputs, RenderPassCounters& counters);
 		// The back-reference, the pipelines, the sampler, the vertex buffer and the atlas mirrors (TextRenderer.cpp).
 		struct State;
 	private:

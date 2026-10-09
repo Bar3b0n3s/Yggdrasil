@@ -115,9 +115,12 @@ namespace Engine {
 			const EditorContext& editor = context.GetEditor();
 			if (!editor.HasScene())
 				return selection;
+			const auto scene = context.ResolveTargetScene(editor.GetSelectionTarget(), true, false);
+			if (!scene)
+				return selection;
 			for (const UUID id : editor.GetSelection())
 			{
-				const ConstEntity entity = editor.GetScene().FindEntityByID(id);
+				const ConstEntity entity = std::as_const(**scene).FindEntityByID(id);
 				if (entity.IsValid())
 					selection.push_back(context.MakeEntitySummary(entity));
 			}
@@ -253,7 +256,7 @@ namespace Engine {
 		{
 			EditorContext& editor = context.GetEditor();
 			std::vector<UUID> selection;
-			if (!params.Entities.empty())
+			if (editor.HasScene() || !params.Entities.empty())
 			{
 				ENGINE_TRY_ASSIGN(Scene * scene, context.ResolveTargetScene(SceneTarget::Edit, false, false));
 				for (size_t index = 0; index < params.Entities.size(); ++index)
@@ -261,10 +264,9 @@ namespace Engine {
 					ENGINE_TRY_ASSIGN(const Entity entity, context.ResolveEntity(*scene, params.Entities[index], std::format("/entities/{}", index)));
 					selection.push_back(entity.GetUUID());
 				}
+				const SceneTarget target = scene == &editor.GetScene() ? SceneTarget::Edit : SceneTarget::Play;
+				ENGINE_TRY(editor.SetSelection(std::move(selection), target));
 			}
-			// Without an open scene the selection is already empty (closing a scene clears it), so there is nothing to change.
-			if (editor.HasScene())
-				editor.SetSelection(std::move(selection));
 
 			EditSelectResult result;
 			result.Selection = Utils::MakeSelection(context);

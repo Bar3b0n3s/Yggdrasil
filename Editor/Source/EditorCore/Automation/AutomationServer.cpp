@@ -24,6 +24,8 @@
 #include <algorithm>
 #include <array>
 #include <charconv>
+#include <deque>
+#include <filesystem>
 #include <format>
 #include <map>
 
@@ -51,6 +53,22 @@ namespace Engine {
 		constexpr std::string_view OffloadExtension = ".json";
 		// The extensions of the output files servers write (WriteOutputFile): the screenshots' PNGs.
 		constexpr std::array<std::string_view, 1> OutputExtensions = { ".png" };
+
+		[[nodiscard]] static Status RemoveUtilityAutomationSession(const std::filesystem::path& directory)
+		{
+			const auto path = SessionFile::GetPath(directory, Process::GetCurrentId());
+			std::error_code error;
+			const auto status = std::filesystem::symlink_status(path, error);
+			if (error == std::errc::no_such_file_or_directory)
+				return {};
+			if (error || status.type() == std::filesystem::file_type::directory)
+				return MakeError(ErrorCode::Io, "cannot remove automation session file '{}': {}", FileSystem::PathToUtf8(path), error ? error.message() : "the path is a directory");
+			// Session discovery owns one file. Never recursively remove a directory substituted at its path.
+			static_cast<void>(std::filesystem::remove(path, error));
+			if (error)
+				return MakeError(ErrorCode::Io, "cannot remove automation session file '{}': {}", FileSystem::PathToUtf8(path), error.message());
+			return {};
+		}
 
 		// The process id at the start of an offload or output file name ("<processId>-<startSeconds>-<sequence>.json",
 		// MakeOffloadServerTag and MakeOffloadFileName, or ".png"), or nullopt for a name of another form.
@@ -105,6 +123,15 @@ namespace Engine {
 
 		Scope<Dispatcher> Calls;
 		Scope<ProtocolServer> Transport;
+		EditorAutomationPolicy Policy{};
+		bool PreviousMutationPolicy = false;
+		struct RequestActivity
+		{
+			uint64_t Sequence = 0;
+			std::chrono::steady_clock::time_point Started{};
+			EditorRequestActivity Entry{};
+		};
+		std::deque<RequestActivity> Activity{};
 		std::string Token{};
 		std::string ServerTag{}; // MakeOffloadServerTag of the process id and start time
 		std::string StartedAt{}; // SessionFile::FormatUtcTimestamp of the start time
@@ -147,6 +174,8 @@ namespace Engine {
 	AutomationServer::AutomationServer(ConstructionKey /*key*/, EditorContext& editor, const AutomationServerSpecification& specification)
 		: m_Editor(&editor), m_Specification(specification), m_Watchdog(specification.WatchdogStallThreshold, std::chrono::steady_clock::now()), m_Methods(editor.GetTypeRegistry()), m_State(CreateScope<State>())
 	{
+		m_State->PreviousMutationPolicy = editor.AreAgentMutationsDenied();
+		m_State->Policy.DenyMutations = m_State->PreviousMutationPolicy;
 	}
 
 	AutomationServer::~AutomationServer()
@@ -155,11 +184,12 @@ namespace Engine {
 		if (m_State->Transport != nullptr)
 			m_State->Transport->Stop();
 		m_State->Calls.reset();
+		m_Editor->SetAgentMutationsDenied(m_State->PreviousMutationPolicy);
 		m_State->Transport.reset();
 		m_State->RemoveOwnOffloadFiles(m_Editor->GetVfs());
 		if (m_State->SessionFileWritten)
 		{
-			const Status removed = SessionFile::Remove(m_Specification.SessionsDirectory, Process::GetCurrentId());
+			const Status removed = Utils::RemoveUtilityAutomationSession(m_Specification.SessionsDirectory);
 			if (!removed)
 				ENGINE_WARN("Could not remove the automation session file: {}", removed.error().ToString());
 		}
@@ -177,17 +207,40 @@ namespace Engine {
 		state.ServerTag = MakeOffloadServerTag(Process::GetCurrentId(), startSeconds);
 		state.StartedAt = SessionFile::FormatUtcTimestamp(started);
 		IMethodHost& host = *server;
+		AutomationServer* const owner = server.get(); // captured back-reference; the server owns the dispatcher
 		state.Calls = CreateScope<Dispatcher>(server->m_Methods, host, Log::GetRingBuffer(), &server->m_Watchdog,
-			DispatcherSpecification{ .SystemErrors = specification.SystemErrors });
-
-		if (specification.Listen)
+			DispatcherSpecification{
+				.SystemErrors = specification.SystemErrors,
+				.RequestObserver = [owner](const DispatcherRequestEvent& event)
 		{
-			if (specification.SessionsDirectory.empty())
-				return MakeError(ErrorCode::InvalidArgument, "a listening automation server needs a sessions directory");
-			ENGINE_TRY_ASSIGN(state.Token, GenerateAuthToken());
-			ENGINE_TRY_ASSIGN(state.Transport, ProtocolServer::Start({ .Port = specification.Port, .Token = state.Token }, server->m_Watchdog));
-			ENGINE_TRY(state.WriteSessionFileIfChanged(editor, specification, std::chrono::steady_clock::now()));
-		}
+			State& current = *owner->m_State;
+			const auto now = owner->m_Specification.WallClock ? owner->m_Specification.WallClock() : std::chrono::steady_clock::now();
+			if (event.Phase == DispatcherRequestPhase::Started)
+			{
+				current.Activity.push_front(State::RequestActivity{
+					.Sequence = event.Sequence,
+					.Started = now,
+					.Entry = { .Client = event.Request.ClientName, .Method = event.Request.Method, .RequestId = event.Request.Id.dump() } });
+				if (current.Activity.size() > 256)
+					current.Activity.pop_back();
+				return;
+			}
+			const auto found = std::ranges::find(current.Activity, event.Sequence, &State::RequestActivity::Sequence);
+			if (found == current.Activity.end())
+				return; // an old pending request may have aged out of the bounded view
+			found->Entry.Completed = true;
+			found->Entry.Failed = event.Phase != DispatcherRequestPhase::Succeeded;
+			found->Entry.DurationMilliseconds = std::max(0.0, std::chrono::duration<double, std::milli>(now - found->Started).count());
+		},
+				.RequestAdmission = [owner](const RequestInfo& request) -> std::optional<DispatcherRequestRejection>
+		{
+			if (!owner->m_State->Policy.Paused || request.Method == "session.info" || request.Method == "session.hello"
+				|| request.Method == "session.shutdown" || request.Method == "rpc.discover")
+				return std::nullopt;
+			return DispatcherRequestRejection{ .Code = RpcErrorCode::Busy, .Failure = Error(ErrorCode::InvalidState, "agent automation is paused") };
+		} });
+
+		ENGINE_TRY(server->SetPreferenceListening(false));
 		return server;
 	}
 
@@ -258,6 +311,86 @@ namespace Engine {
 		return m_State->Transport != nullptr ? m_State->Transport->GetPort() : 0;
 	}
 
+	EditorAutomationPolicy AutomationServer::GetEditorPolicy() const
+	{
+		return m_State->Policy;
+	}
+
+	void AutomationServer::SetEditorPolicy(const EditorAutomationPolicy& policy)
+	{
+		m_State->Policy = policy;
+		m_Editor->SetAgentMutationsDenied(policy.DenyMutations);
+	}
+
+	std::vector<EditorRequestActivity> AutomationServer::GetRecentRequestActivity() const
+	{
+		const auto now = m_Specification.WallClock ? m_Specification.WallClock() : std::chrono::steady_clock::now();
+		std::vector<EditorRequestActivity> result;
+		result.reserve(m_State->Activity.size());
+		for (const State::RequestActivity& activity : m_State->Activity)
+		{
+			EditorRequestActivity entry = activity.Entry;
+			if (!entry.Completed)
+				entry.DurationMilliseconds = std::max(0.0, std::chrono::duration<double, std::milli>(now - activity.Started).count());
+			result.push_back(std::move(entry));
+		}
+		return result;
+	}
+
+	Status AutomationServer::SetPreferenceListening(bool allowed)
+	{
+		State& state = *m_State;
+		const bool listen = m_Specification.Listen || (allowed && m_Specification.PreferenceListeningAllowed);
+		if (listen == (state.Transport != nullptr))
+			return {};
+		if (listen)
+		{
+			if (m_Specification.SessionsDirectory.empty())
+				return MakeError(ErrorCode::InvalidArgument, "a listening automation server needs a sessions directory");
+			ENGINE_TRY_ASSIGN(std::string token, GenerateAuthToken());
+			ENGINE_TRY_ASSIGN(Scope<ProtocolServer> transport, ProtocolServer::Start({ .Port = m_Specification.Port, .Token = token }, m_Watchdog));
+			const std::string project = m_Editor->HasProject() ? FileSystem::PathToUtf8(m_Editor->GetProject().GetProjectFile()) : std::string();
+			const SessionFileContent content{
+				.Pid = Process::GetCurrentId(),
+				.Port = transport->GetPort(),
+				.Token = token,
+				.ProtocolVersionText = CurrentProtocolVersion.ToString(),
+				.EngineVersionText = std::string(EngineVersionString),
+				.ProjectPath = project,
+				.Headless = m_Specification.Headless,
+				.StartedAt = state.StartedAt
+			};
+			// Publish only once the socket and atomic session-file write both succeed. The local transport closes on failure.
+			const Status published = SessionFile::Write(m_Specification.SessionsDirectory, content);
+			if (!published)
+				return MakeError(ErrorCode::Io, "cannot publish the automation listener: {}", published.error().ToString());
+			state.Token = std::move(token);
+			state.Transport = std::move(transport);
+			state.SessionProject = project;
+			state.SessionFileWritten = true;
+			state.FailedSessionProject.reset();
+			return {};
+		}
+		// A failed removal keeps the working listener and preference transaction intact.
+		if (state.SessionFileWritten)
+			ENGINE_TRY(Utils::RemoveUtilityAutomationSession(m_Specification.SessionsDirectory));
+		state.Transport->Stop();
+		std::vector<ClientId> disconnected;
+		for (const auto& [client, record] : state.Clients)
+		{
+			if (!record.InProcess)
+				disconnected.push_back(client);
+		}
+		for (const ClientId client : disconnected)
+			state.RemoveClient(client, *m_Editor);
+		state.Transport.reset();
+		state.Token.clear();
+		state.SessionProject.reset();
+		state.FailedSessionProject.reset();
+		state.SessionFileWritten = false;
+		return {};
+	}
+
 	std::vector<AutomationClientInfo> AutomationServer::GetClients() const
 	{
 		std::vector<AutomationClientInfo> clients;
@@ -319,6 +452,8 @@ namespace Engine {
 		const MethodSpecification& specification = context.GetMethod().Specification;
 		if (specification.Mutates && !context.IsDryRun() && m_Editor->IsReadOnly())
 			return MakeError(ErrorCode::PermissionDenied, "the editor is read-only (--read-only): '{}' changes the project", specification.Name);
+		if (specification.Mutates && !context.IsDryRun() && m_State->Policy.DenyMutations)
+			return MakeError(ErrorCode::PermissionDenied, "agent mutations are disabled: '{}' changes the project", specification.Name);
 
 		if (const std::optional<uint64_t> expected = context.GetOptions().IfRevision)
 		{
@@ -412,6 +547,8 @@ namespace Engine {
 
 	Result<std::string> AutomationServer::WriteOutputFile(std::string_view extension, std::span<const std::byte> bytes)
 	{
+		if (m_State->Policy.DenyMutations && m_Editor->GetCommandOrigin() == CommandOrigin::Agent && !m_Editor->IsDryRun())
+			return MakeError(ErrorCode::PermissionDenied, "agent mutations are disabled: cannot write a method output file");
 		ENGINE_ASSERT(!extension.empty() && std::ranges::all_of(extension, [](char character)
 		{
 			return (character >= 'a' && character <= 'z') || (character >= '0' && character <= '9');

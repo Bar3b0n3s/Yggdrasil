@@ -87,6 +87,7 @@ namespace Engine {
 		ENGINE_PROFILE_SCOPE("FrameLoop::RunFrame");
 		const std::chrono::steady_clock::time_point frameStart =
 			m_Specification.ThrottleToFixedHz ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point();
+		const auto diagnosticStart = m_Specification.DiagnosticClock ? m_Specification.DiagnosticClock() : std::chrono::steady_clock::now();
 
 		// 1. Events: the window delivers them to DispatchEvent. A minimized window waits for one instead of spinning (§4.2).
 		CrashHandler::SetBreadcrumb(CrashBreadcrumb::FramePhase, "Events");
@@ -144,6 +145,18 @@ namespace Engine {
 
 		m_LastFrameTime = frame;
 		++m_FrameCount;
+		const auto diagnosticEnd = m_Specification.DiagnosticClock ? m_Specification.DiagnosticClock() : std::chrono::steady_clock::now();
+		ENGINE_CORE_ASSERT(diagnosticEnd >= diagnosticStart, "frame diagnostic clock moved backwards");
+		m_Statistics.CompletedFrames = m_FrameCount;
+		m_Statistics.CpuMilliseconds = std::chrono::duration<double, std::milli>(diagnosticEnd - diagnosticStart).count();
+		m_Statistics.DroppedSeconds += steps.DroppedSeconds;
+		if (m_PreviousDiagnosticStart)
+		{
+			const double seconds = std::chrono::duration<double>(diagnosticStart - *m_PreviousDiagnosticStart).count();
+			ENGINE_CORE_ASSERT(seconds >= 0.0, "frame diagnostic clock moved backwards between frames");
+			m_Statistics.Fps = seconds > 0.0 ? 1.0 / seconds : 0.0;
+		}
+		m_PreviousDiagnosticStart = diagnosticStart;
 		if (m_Specification.MaxFrames.has_value() && m_FrameCount >= *m_Specification.MaxFrames)
 			RequestExit(ExitCode::Success);
 		CrashHandler::SetBreadcrumb(CrashBreadcrumb::FramePhase, {});

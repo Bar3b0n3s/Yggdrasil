@@ -1,33 +1,45 @@
 #include "EditorPCH.h"
 #include "EditorCore/EditorUiState.h"
 
+#include <algorithm>
+#include <array>
+
 namespace Engine {
 
-	std::string_view EditorPanelToString(EditorPanel /*panel*/)
+	std::string_view EditorPanelToString(EditorPanel panel)
 	{
-		ENGINE_CONTRACT_STUB();
+		constexpr std::array Names{ "SceneHierarchy", "Inspector", "SceneViewport", "GameViewport", "ContentBrowser", "Console", "Diagnostics", "ProjectSettings", "Stats", "Automation", "UndoHistory", "ProjectLauncher" };
+		const size_t index = static_cast<size_t>(panel);
+		return index < Names.size() ? std::string_view(Names[index]) : std::string_view{};
+	}
+
+	Status EditorUiState::SetPanelOpen(EditorPanel panel, bool open)
+	{
+		if (EditorPanelToString(panel).empty())
+			return MakeError(ErrorCode::InvalidArgument, "unknown editor panel");
+		auto position = std::lower_bound(m_OpenPanels.begin(), m_OpenPanels.end(), panel);
+		if (open && (position == m_OpenPanels.end() || *position != panel))
+			m_OpenPanels.insert(position, panel);
+		else if (!open && position != m_OpenPanels.end() && *position == panel)
+			m_OpenPanels.erase(position);
 		return {};
 	}
 
-	Status EditorUiState::SetPanelOpen(EditorPanel /*panel*/, bool /*open*/)
+	void EditorUiState::SetSelectedAsset(AssetHandle asset)
 	{
-		ENGINE_CONTRACT_STUB();
-		return MakeError(ErrorCode::Unsupported, "M10 contract stub");
-	}
-
-	void EditorUiState::SetSelectedAsset(AssetHandle /*asset*/)
-	{
-		ENGINE_CONTRACT_STUB();
+		m_SelectedAsset = asset;
 	}
 
 	void EditorUiState::CompleteFrame()
 	{
-		ENGINE_CONTRACT_STUB();
+		++m_CompletedFrame;
 	}
 
-	void EditorUiState::ResetLayout(bool /*hasProject*/)
+	void EditorUiState::ResetLayout(bool hasProject)
 	{
-		ENGINE_CONTRACT_STUB();
+		m_OpenPanels = { EditorPanel::SceneHierarchy, EditorPanel::Inspector, EditorPanel::SceneViewport, EditorPanel::GameViewport, EditorPanel::ContentBrowser, EditorPanel::Console };
+		if (!hasProject)
+			m_OpenPanels.push_back(EditorPanel::ProjectLauncher);
 	}
 
 }

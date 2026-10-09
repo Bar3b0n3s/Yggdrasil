@@ -40,11 +40,18 @@ namespace Engine {
 
 		// The registers of set 0 (§8.4) and set 1.
 		inline constexpr uint32_t ViewConstantsRegister = 0;
+		inline constexpr uint32_t ShadowConstantsRegister = 1;
 		inline constexpr uint32_t EnvironmentConstantsRegister = 2;
 		inline constexpr uint32_t LightsRegister = 0;
+		inline constexpr uint32_t ShadowCascadesRegister = 1;
+		inline constexpr uint32_t ShadowAtlasRegister = 2;
 		inline constexpr uint32_t EnvSpecularRegister = 3;
 		inline constexpr uint32_t BrdfLutRegister = 5;
+		inline constexpr uint32_t AmbientOcclusionRegister = 6;
+		inline constexpr uint32_t ViewDepthRegister = 8;
+		inline constexpr uint32_t SceneNormalsRegister = 9;
 		inline constexpr uint32_t LinearClampRegister = 0;
+		inline constexpr uint32_t ShadowCompareRegister = 1;
 		inline constexpr uint32_t AnisoWrapRegister = 2;
 		inline constexpr uint32_t MaterialConstantsRegister = 0;
 		inline constexpr uint32_t MaterialMapCount = 5; // t0..t4 of set 1
@@ -87,7 +94,9 @@ namespace Engine {
 		[[nodiscard]] Result<MeshBindingLayouts> CreateMeshBindingLayouts(PipelineFactory& pipelines);
 
 		// Creates prepass variant `variant` with the shared layouts. Errors: those of PipelineFactory.
-		[[nodiscard]] Result<GraphicsPipeline> CreatePrepassPipeline(PipelineFactory& pipelines, const MeshBindingLayouts& layouts, uint32_t variant);
+		[[nodiscard]] Result<GraphicsPipeline> CreatePrepassPipeline(PipelineFactory& pipelines, const MeshBindingLayouts& layouts, uint32_t variant, bool picking = false);
+		[[nodiscard]] Result<GraphicsPipeline> CreateOverdrawPipeline(PipelineFactory& pipelines, const MeshBindingLayouts& layouts, uint32_t cullMode);
+		[[nodiscard]] PipelineLayoutDescription GetSceneDataViewLayout();
 
 		// Creates forward variant `variant` specialized with `view` (Lit: the shaders as compiled). Errors: those of
 		// PipelineFactory.

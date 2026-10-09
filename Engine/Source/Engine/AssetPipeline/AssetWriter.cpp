@@ -25,6 +25,7 @@ namespace Engine {
 		VirtualFileSystem* Vfs = nullptr;      // documented back-reference
 		PollingFileWatcher* Watcher = nullptr; // documented back-reference, cleared by its owner
 		Listener WriteListener;
+		MutationGuard Guard{};
 		bool IsDryRun = false;
 
 		// The watcher that describes the disk, or nullptr: none is set, or a dry run writes into the overlay.
@@ -96,6 +97,11 @@ namespace Engine {
 		m_State->WriteListener = std::move(listener);
 	}
 
+	void AssetWriter::SetMutationGuard(MutationGuard guard)
+	{
+		m_State->Guard = std::move(guard);
+	}
+
 	void AssetWriter::SetDryRun(bool dryRun)
 	{
 		m_State->IsDryRun = dryRun;
@@ -108,6 +114,8 @@ namespace Engine {
 
 	Status AssetWriter::Write(const VfsPath& path, std::span<const std::byte> data)
 	{
+		if (m_State->Guard)
+			ENGINE_TRY(m_State->Guard());
 		const bool replaces = m_State->Vfs->Exists(path);
 		ENGINE_TRY(m_State->Vfs->WriteFileAtomic(path, data));
 
@@ -137,6 +145,8 @@ namespace Engine {
 
 	Status AssetWriter::Remove(const VfsPath& path)
 	{
+		if (m_State->Guard)
+			ENGINE_TRY(m_State->Guard());
 		const std::vector<VfsPath> files = m_State->ListFiles(path);
 		ENGINE_TRY(m_State->Vfs->Remove(path));
 		m_State->MarkKnown(files);
@@ -146,6 +156,8 @@ namespace Engine {
 
 	Status AssetWriter::Move(const VfsPath& from, const VfsPath& to)
 	{
+		if (m_State->Guard)
+			ENGINE_TRY(m_State->Guard());
 		if (from.GetScheme() != to.GetScheme())
 			return MakeError(ErrorCode::InvalidArgument, "cannot move '{}' to '{}': both paths must have the same scheme", from.ToString(), to.ToString());
 		const std::vector<VfsPath> files = m_State->ListFiles(from);
@@ -177,6 +189,8 @@ namespace Engine {
 
 	Status AssetWriter::CreateDirectories(const VfsPath& directory)
 	{
+		if (m_State->Guard)
+			ENGINE_TRY(m_State->Guard());
 		ENGINE_TRY(m_State->Vfs->CreateDirectories(directory));
 		m_State->Report(AssetWriteEvent{ .Kind = AssetWriteKind::DirectoryCreated, .Path = directory, .From = {}, .ContentHash = 0, .Backup = {} });
 		return {};

@@ -31,18 +31,18 @@
 //     scene (§13.11 step 7 looks at the game view while building). Without a primary camera: InvalidState naming
 //     SCENE_NO_PRIMARY_CAMERA.
 //   - "scene": the target scene through the editor's scene-view camera (AutomationMethodContext::GetSceneViewCamera: a
-//     fixed default until the editor camera of M10). The Runtime has no scene view: Unsupported located at /view.
+//     persistent scene-view camera). The Runtime has no scene view: Unsupported located at /view.
 //   - "camera": an EntityRef of a camera entity in the view's target scene, rendered through that camera instead
 //     (InvalidArgument at /camera when the entity has no CameraComponent; NotFound when it names none).
 // The interpolation alpha is PlaySession::GetViewAlpha for the play scene (1 while paused, in lockstep or after a
 // ManualClock frame, otherwise the last frame's Alpha; RenderSnapshot::Alpha), 1 for the edit scene.
 //
 // Debug views (M8, §8.5; ADR 0009 decision 33 deferred them to M8, Docs/Decisions/0013-m8-decisions.md decision 12):
-// "debugView" names a RenderDebugView ("Lit", "Albedo", "Normals", "Roughness", "Metallic", "Emissive"; ParseRenderDebugView,
-// ignoring ASCII case), which the handler sets on the extracted snapshot (RenderSnapshot::DebugView); absent or empty is
-// Lit. M9's views ("AO", "ShadowCascades", "Overdraw") are Unsupported located at /debugView, naming M9; any other name is
-// InvalidParams at /debugView listing the valid names. "annotate" (the overlay pass, M9) stays refused with Unsupported
-// located at /annotate whenever it is present; nothing is ever ignored.
+// "debugView" names any RenderDebugView (including "AO", "ShadowCascades" and "Overdraw"; ParseRenderDebugView ignores
+// ASCII case), which the handler sets on the extracted snapshot; absent or empty is Lit. An unknown name is
+// InvalidParams at /debugView listing the valid names. "annotate" is parsed strictly into capture-only labels, colliders,
+// bounds and axes; invalid members and entity references retain their parameter paths. Extraction uses project quality
+// settings and the target scene's selection without changing either the editor's viewport options or the scene.
 
 namespace Engine {
 
@@ -122,7 +122,7 @@ namespace Engine {
 	namespace Automation {
 
 		// viewport.screenshot on any host. Errors: InvalidParams for the ranges and an unknown debug view (at /debugView);
-		// Unsupported at /debugView for M9's debug views, at /annotate when present, at /view for "scene" in the Runtime, and
+		// Unsupported at /view for "scene" in the Runtime, and
 		// without a device (AutomationMethodContext::CaptureView);
 		// InvalidState "not playing" or "no scene open" from the target, and naming SCENE_NO_PRIMARY_CAMERA for a game view
 		// without a primary camera; NotFound and InvalidArgument at /camera; those of ExtractRenderSnapshot; the capture's

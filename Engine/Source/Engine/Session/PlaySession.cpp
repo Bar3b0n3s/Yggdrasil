@@ -287,7 +287,8 @@ namespace Engine {
 			.ExplicitCamera = ExplicitRenderCamera{},
 			.Width = ViewWidth,
 			.Height = ViewHeight,
-			.Alpha = alpha };
+			.Alpha = alpha,
+			.Quality = { .ShadowMapSize = Project.Rendering.ShadowMapSize, .SsaoHalfResolution = Project.Rendering.SsaoHalfResolution } };
 		Result<RenderSnapshot> snapshot = ExtractRenderSnapshot(*RuntimeScene, request);
 		if (snapshot)
 		{

@@ -131,7 +131,8 @@ namespace Engine {
 		// its in-memory state), their load diagnostics and repairs mapped through MapLoadCode, and the scene checks run on
 		// each. A scene file that cannot be loaded at all (Parse, UnsupportedVersion, an unrepairable structural defect) is
 		// an Error under AssetImportFailedCode with the load error as message. Errors: InvalidState without an open project,
-		// or for ValidationScope::Scene without an open scene.
+		// or for ValidationScope::Scene without an open scene; InvalidArgument when nonfinite CPU asset or environment
+		// data prevents render illumination classification. Render lighting and spot-shadow warnings never have fixes.
 		[[nodiscard]] static Result<ValidationReport> Validate(const EditorContext& context, ValidationScope scope);
 
 		// Validates, then fixes the selected auto-fixable diagnostics as one undoable command (an EditorTransaction holding a

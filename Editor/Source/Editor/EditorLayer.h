@@ -33,6 +33,9 @@ namespace Engine {
 		// UI frame, not stale draw data; serial completed after the request is required before capture.
 		void RequestFrame();
 		[[nodiscard]] bool IsFrameRequested() const;
+	private:
+		struct State;
+		Scope<State> m_State;
 	};
 
 }

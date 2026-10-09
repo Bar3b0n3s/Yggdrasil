@@ -1,5 +1,6 @@
 #include "EnginePCH.h"
 #include "Engine/Renderer/TextRenderer.h"
+#include "Engine/Renderer/RenderStats.h"
 
 #include "Engine/Asset/AssetDiagnostic.h"
 #include "Engine/Asset/AssetManager.h"
@@ -417,6 +418,12 @@ namespace Engine {
 
 	Result<uint32_t> TextRenderer::Record(nvrhi::ICommandList& commandList, PassBindingCache& bindings, const TextRenderInputs& inputs)
 	{
+		RenderPassCounters counters{};
+		return RecordCounted(commandList, bindings, inputs, counters);
+	}
+
+	Result<uint32_t> TextRenderer::RecordCounted(nvrhi::ICommandList& commandList, PassBindingCache& bindings, const TextRenderInputs& inputs, RenderPassCounters& counters)
+	{
 		ENGINE_CORE_ASSERT(inputs.Assets != nullptr && inputs.Framebuffer != nullptr && inputs.ViewConstants != nullptr,
 			"TextRenderer::Record needs an asset manager, a framebuffer and ViewConstants");
 		State& state = *m_State;
@@ -616,6 +623,8 @@ namespace Engine {
 			arguments.vertexCount = batch.VertexCount;
 			arguments.startVertexLocation = batch.FirstVertex;
 			commandList.draw(arguments);
+			++counters.DrawCalls;
+			counters.Triangles += batch.VertexCount / 3;
 		}
 		commandList.endMarker();
 		return drawn;

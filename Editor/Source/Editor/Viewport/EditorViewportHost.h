@@ -25,6 +25,7 @@ namespace Engine {
 		uint64_t Generation = 0;    // target/camera/scene generation; invalidates pending clicks
 		uint64_t FrameIndex = 0;    // actual RenderSnapshot/RenderContext source frame, never EditorUiState UI serial
 		uint64_t SceneRevision = 0; // revision of the scene from which this image and its PickTable were extracted
+		CameraData Camera{};        // camera copied from the same render snapshot as the displayed image
 	};
 
 	struct EditorViewportClick
@@ -53,7 +54,7 @@ namespace Engine {
 		// Measured logical content rect/framebuffer scale, remembered for NEXT OnRender; zero area suppresses render/input
 		// and retains last nonzero camera aspect. Fixed game resolution is letterboxed; rect excludes its bars.
 		virtual void SetRectangle(ViewportView view, const EditorViewportRect& rectangle) = 0;
-		// Unsupported until M9 is integrated; not falsely successful. InvalidArgument outside current image, Conflict
+		// Unsupported without a rendered picking image. InvalidArgument outside current image, Conflict
 		// stale source identity. Queue the copied click during Draw, with no GPU call. The host drains the queue from
 		// Application::OnRenderSubmitted(frameIndex, submissionId), AFTER SceneRenderer::OnSubmitted and before any
 		// overwrite/reuse, pairing only the same image/frame/table/generation. Frame-slot reuse includes the copy submission.

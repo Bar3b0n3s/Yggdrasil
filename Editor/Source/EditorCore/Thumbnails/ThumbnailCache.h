@@ -65,6 +65,9 @@ namespace Engine {
 		// Drop entries and queued work for an asset in the CURRENT binding (all on invalid handle); disk entries remain.
 		// Does not switch projects or replace Reset at project close.
 		void Invalidate(AssetHandle asset = {});
+	private:
+		struct State;
+		Scope<State> m_State;
 	};
 
 }

@@ -383,8 +383,8 @@ namespace Engine {
 						(*commandList)->open();
 						const Status rendered = (*renderer)->Render(**commandList, snapshot);
 						(*commandList)->close();
+						(*renderer)->OnSubmitted(snapshot.FrameIndex, device.ExecuteCommandList(**commandList));
 						REQUIRE_MESSAGE(rendered.has_value(), rendered.error().ToString());
-						device.ExecuteCommandList(**commandList);
 						CHECK(cache.GetStats().MaterialCount == 1);
 						CHECK(cache.GetStats().EnvironmentCount == 1);
 						device.RunGarbageCollection();

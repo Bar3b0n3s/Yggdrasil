@@ -5,6 +5,10 @@
 #include "EditorCore/Automation/AutomationServer.h"
 #include "EditorCore/Automation/ScreenshotMethods.h"
 #include "EditorCore/EditorContext.h"
+#include "EditorCore/Play/EditorPlayController.h"
+#include "Engine/Scene/ColliderDebugDraw.h"
+#include "Engine/Scene/Entity.h"
+#include "Engine/Session/PlaySession.h"
 #include "Engine/Asset/BuiltinAssets.h"
 #include "Engine/Automation/Protocol/MethodRegistry.h"
 #include "Engine/Core/FileSystem.h"
@@ -27,7 +31,7 @@
 // server, with CPU captures injected in place of the editor's GPU ones (ScreenshotCaptures), so the method's params, views,
 // cameras, results, files and errors are tested without a device. editor.screenshot and how the editor offers both
 // screenshot methods are tested in Tests/Source/EditorCore/Automation/ScreenshotMethodsTests.cpp. The real captures are tested on the GPU
-// (ViewportCaptureTests.cpp, ImGuiScreenshotTests.cpp, the golden images "LitScene" and "ImGuiDemo") and from Python
+// (ViewportCaptureTests.cpp, ImGuiScreenshotTests.cpp, the golden images "LitScene" and "EditorDefaultLayout") and from Python
 // (Tests/Automation/test_screenshot.py, test_game_view.py).
 
 namespace Engine {
@@ -387,28 +391,149 @@ namespace Engine {
 			CHECK(ReadString((*plain)["data"]).empty());
 		}
 
-		TEST_CASE("ScreenshotMethods: members that need later milestones are Unsupported at their pointer")
+		TEST_CASE("ScreenshotMethods: capture annotations and project quality reach the snapshot without persisting")
 		{
 			CaptureLog log;
-			ScreenshotSetup setup("ViewportScreenshotLater", log);
-
-			// M9's debug views (AO, ShadowCascades, Overdraw) and annotations (Docs/Decisions/0013-m8-decisions.md decision 12).
-			const std::vector<std::pair<Json, std::string>> refused = {
-				{ Json{ { "view", "scene" }, { "debugView", "AO" } }, "/debugView" },
-				{ Json{ { "view", "game" }, { "debugView", "ShadowCascades" } }, "/debugView" },
-				{ Json{ { "view", "scene" }, { "debugView", "Overdraw" } }, "/debugView" },
-				{ Json{ { "view", "scene" }, { "annotate", Json{ { "labels", "all" } } } }, "/annotate" },
-			};
-			for (const auto& [params, pointer] : refused)
+			ScreenshotSetup setup("ViewportAnnotationsCapture", log);
+			REQUIRE(setup.Call("project.setSettings", ParseJson(R"({"patch":{"Rendering":{"ShadowMapSize":512,"SsaoHalfResolution":true}}})")));
+			const auto created = setup.Call("entity.create", ParseJson(R"({"name":"Annotated","components":{"MeshRenderer":{"Mesh":"engine://Meshes/Cube"},"BoxCollider":{}}})"));
+			REQUIRE(created);
+			const UUID id = JsonReader((*created)["entity"]["id"]).ReadUUID().value();
+			auto& editor = setup.GetFixture().GetEditor();
+			REQUIRE(editor.SetSelection({ id }, SceneTarget::Edit));
+			const uint64_t revision = editor.GetScene().GetRevision();
+			const size_t history = editor.GetHistory().GetUndoCount();
+			REQUIRE(setup.Call("viewport.screenshot", ParseJson(R"({"view":"scene","width":32,"height":24,"annotate":{"labels":"selection","bounds":true,"axes":true,"colliders":true}})")));
+			REQUIRE(log.LastSnapshot);
+			const auto& snapshot = *log.LastSnapshot;
+			CHECK(snapshot.SceneRevision == revision);
+			CHECK(snapshot.Quality.ShadowMapSize == 512);
+			CHECK(snapshot.Quality.SsaoHalfResolution);
+			CHECK(snapshot.Flags == RenderViewFlags::Colliders);
+			CHECK(snapshot.SelectedEntities == std::vector<UUID>{ id });
+			CHECK(snapshot.Annotations.Labels == RenderAnnotationLabels::Selected);
+			CHECK(snapshot.Alpha == 1.0f);
+			uint32_t labels = 0, boxes = 0, axes = 0;
+			for (const auto& command : snapshot.DebugDraw.GetCommands())
 			{
-				INFO(params.dump());
-				const Result<Json> shot = setup.Call("viewport.screenshot", params);
-				REQUIRE_FALSE(shot.has_value());
-				CHECK(shot.error().GetCode() == ErrorCode::Unsupported);
-				CHECK(FirstIssuePointer(shot.error()) == pointer);
+				if (const auto* label = std::get_if<DebugText>(&command.Shape))
+				{
+					++labels;
+					CHECK(label->Text == "Annotated " + id.ToString().substr(0, 6));
+				}
+				boxes += std::holds_alternative<DebugBox>(command.Shape) ? 1 : 0;
+				axes += std::holds_alternative<DebugLine>(command.Shape) ? 1 : 0;
 			}
-			// Refused before anything renders.
+			CHECK(labels == 1);
+			CHECK(boxes == 2); // mesh bounds and real collider outline
+			CHECK(axes == 3);
+			CHECK(editor.GetScene().GetRevision() == revision);
+			CHECK(editor.GetHistory().GetUndoCount() == history);
+			REQUIRE(setup.Call("viewport.screenshot", Json{ { "view", "scene" }, { "width", 32 }, { "height", 24 } }));
+			CHECK(log.LastSnapshot->DebugDraw.GetCommands().empty());
+			CHECK(log.LastSnapshot->Flags == RenderViewFlags::None);
+			CHECK(log.LastSnapshot->Annotations.Labels == RenderAnnotationLabels::None);
+			CHECK(log.LastSnapshot->Quality.ShadowMapSize == 512);
+			CHECK(editor.GetSelection().front() == id);
+		}
+
+		TEST_CASE("ScreenshotMethods: M9 data views include exactly the requested annotations and colliders")
+		{
+			CaptureLog log;
+			ScreenshotSetup setup("DataViewAnnotations", log);
+			REQUIRE(setup.Call("entity.create", ParseJson(R"({"name":"Subject","components":{"MeshRenderer":{"Mesh":"engine://Meshes/Cube"},"BoxCollider":{}}})")));
+			for (const char* view : { "AO", "ShadowCascades", "Overdraw" })
+				for (const char* target : { "edit", "play" })
+				{
+					INFO(view, " ", target);
+					if (std::string_view(target) == "play")
+						REQUIRE(setup.Call("play.start", Json{ { "lockstep", true } }));
+					Json params{ { "view", "scene" }, { "debugView", view }, { "target", target }, { "width", 32 }, { "height", 24 } };
+					REQUIRE(setup.Call("viewport.screenshot", params));
+					REQUIRE(log.LastSnapshot);
+					CHECK(log.LastSnapshot->DebugDraw.GetCommands().empty());
+					params["annotate"] = Json{ { "labels", Json::array({ "/Subject" }) }, { "bounds", true }, { "axes", true }, { "colliders", true } };
+					REQUIRE(setup.Call("viewport.screenshot", params));
+					const auto commands = log.LastSnapshot->DebugDraw.GetCommands();
+					CHECK(commands.size() == 6);
+					CHECK(std::ranges::count_if(commands, [](const auto& command)
+					{
+						return std::holds_alternative<DebugText>(command.Shape);
+					}) == 1);
+					CHECK(std::ranges::count_if(commands, [](const auto& command)
+					{
+						return std::holds_alternative<DebugBox>(command.Shape);
+					}) == 2);
+					CHECK(std::ranges::count_if(commands, [](const auto& command)
+					{
+						return std::holds_alternative<DebugLine>(command.Shape);
+					}) == 3);
+					CHECK(log.LastSnapshot->Flags == RenderViewFlags::Colliders);
+					if (std::string_view(target) == "play")
+						REQUIRE(setup.Call("play.stop", Json::object()));
+				}
+		}
+
+		TEST_CASE("ScreenshotMethods: annotation validation is located and precedes capture")
+		{
+			CaptureLog log;
+			ScreenshotSetup setup("ViewportAnnotationsInvalid", log);
+			const std::vector<std::pair<Json, std::string>> invalid = {
+				{ Json(), "/annotate" },
+				{ Json::array(), "/annotate" },
+				{ Json{ { "labels", true } }, "/annotate/labels" },
+				{ Json{ { "labels", "typo" } }, "/annotate/labels" },
+				{ Json{ { "labels", Json::array({ 42 }) } }, "/annotate/labels/0" },
+				{ Json{ { "labels", Json::array({ "" }) } }, "/annotate/labels/0" },
+				{ Json{ { "bounds", 1 } }, "/annotate/bounds" },
+				{ Json{ { "axes", "true" } }, "/annotate/axes" },
+				{ Json{ { "colliders", Json::object() } }, "/annotate/colliders" },
+				{ Json{ { "typo", true } }, "/annotate/typo" },
+			};
+			for (const auto& [annotation, pointer] : invalid)
+			{
+				INFO(annotation.dump());
+				const auto result = setup.Call("viewport.screenshot", Json{ { "view", "scene" }, { "annotate", annotation } });
+				REQUIRE_FALSE(result);
+				CHECK(result.error().GetCode() == ErrorCode::InvalidArgument);
+				CHECK(FirstIssuePointer(result.error()) == pointer);
+			}
+			const auto missing = setup.Call("viewport.screenshot", ParseJson(R"({"view":"scene","annotate":{"labels":["/Missing"]}})"));
+			REQUIRE_FALSE(missing);
+			CHECK(missing.error().GetCode() == ErrorCode::NotFound);
+			CHECK(FirstIssuePointer(missing.error()) == "/annotate/labels/0");
 			CHECK(log.ViewCalls == 0);
+		}
+
+		TEST_CASE("ScreenshotMethods: explicit annotations resolve against the addressed play scene and use its collider pose")
+		{
+			CaptureLog log;
+			ScreenshotSetup setup("ViewportAnnotationsPlay", log);
+			REQUIRE(setup.Call("entity.create", ParseJson(R"({"name":"Body","components":{"BoxCollider":{},"RigidBody":{"Type":"Kinematic"}}})")));
+			REQUIRE(setup.Call("play.start", Json{ { "lockstep", true } }));
+			REQUIRE(setup.Call("entity.create", ParseJson(R"({"name":"OnlyPlay","target":"play"})")));
+			REQUIRE(setup.Call("entity.update", ParseJson(R"({"entity":"/Body","target":"play","components":{"Transform":{"Translation":[2,0,0]}}})")));
+			REQUIRE(setup.Call("viewport.screenshot", ParseJson(R"({"view":"scene","target":"play","width":32,"height":24,"annotate":{"labels":["/OnlyPlay","/OnlyPlay"],"colliders":true}})")));
+			auto& editor = setup.GetFixture().GetEditor();
+			REQUIRE(log.LastSnapshot);
+			CHECK(log.LastSnapshot->Annotations.LabelEntities.size() == 1);
+			CHECK(log.LastSnapshot->SceneRevision == editor.GetPlay().GetSession()->GetScene().GetRevision());
+			CHECK(log.LastSnapshot->Alpha == editor.GetPlay().GetSession()->GetViewAlpha());
+			bool foundBody = false;
+			for (const auto& command : log.LastSnapshot->DebugDraw.GetCommands())
+				if (const auto* box = std::get_if<DebugBox>(&command.Shape))
+				{
+					foundBody = true;
+					CHECK(box->Center == glm::vec3(2.0f, 0.0f, 0.0f));
+					CHECK(command.Color == GetColliderDebugColor(ColliderDebugCategory::Kinematic));
+				}
+			CHECK(foundBody);
+			const uint32_t captures = log.ViewCalls;
+			const auto missing = setup.Call("viewport.screenshot", ParseJson(R"({"view":"scene","target":"edit","annotate":{"labels":["/OnlyPlay"]}})"));
+			REQUIRE_FALSE(missing);
+			CHECK(missing.error().GetCode() == ErrorCode::NotFound);
+			CHECK(FirstIssuePointer(missing.error()) == "/annotate/labels/0");
+			CHECK(log.ViewCalls == captures);
 		}
 
 		TEST_CASE("ScreenshotMethods: debugView renders the named debug view, ignoring case, and empty is Lit")
@@ -423,6 +548,9 @@ namespace Engine {
 				{ "Roughness", RenderDebugView::Roughness },
 				{ "Metallic", RenderDebugView::Metallic },
 				{ "Emissive", RenderDebugView::Emissive },
+				{ "ao", RenderDebugView::AO },
+				{ "SHADOWCASCADES", RenderDebugView::ShadowCascades },
+				{ "Overdraw", RenderDebugView::Overdraw },
 				{ "", RenderDebugView::Lit },
 			};
 			for (const auto& [name, view] : views)

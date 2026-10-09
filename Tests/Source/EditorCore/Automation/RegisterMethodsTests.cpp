@@ -25,12 +25,13 @@ namespace Engine {
 		static const std::vector<std::string> ExpectedNames = { "asset.create", "asset.delete", "asset.getImportSettings", "asset.getProperties",
 			"asset.import", "asset.info", "asset.list", "asset.move", "asset.reimport", "asset.setImportSettings", "asset.setProperties",
 			"audio.stats", "component.list", "component.schema", "docs.get", "edit.batch", "edit.getSelection", "edit.history", "edit.redo", "edit.select",
-			"edit.undo", "editor.screenshot", "entity.bounds", "entity.create", "entity.destroy", "entity.duplicate", "entity.get",
+			"edit.undo", "editor.screenshot", "editor.state", "entity.bounds", "entity.create", "entity.destroy", "entity.duplicate", "entity.get",
 			"entity.reparent", "entity.update", "events.read", "input.inject", "log.read", "physics.bodyInfo", "play.pause", "play.resume",
 			"play.setTimeScale", "play.start", "play.state", "play.step", "play.stop", "prefab.apply", "prefab.create", "prefab.instantiate", "prefab.revert",
 			"prefab.unpack", "project.create", "project.export", "project.getSettings", "project.info", "project.open", "project.refreshAssets",
 			"project.save", "project.setSettings", "project.upgrade", "project.validate", "rpc.discover", "scene.diff", "scene.get", "scene.new", "scene.open",
-			"scene.query", "scene.save", "scene.tree", "session.hello", "session.info", "session.shutdown", "viewport.screenshot" };
+			"scene.query", "scene.raycast", "scene.save", "scene.tree", "session.hello", "session.info", "session.shutdown", "stats.get", "viewport.camera", "viewport.frame",
+			"viewport.pick", "viewport.screenshot", "viewport.setOptions" };
 		return ExpectedNames;
 	}
 
@@ -117,10 +118,10 @@ namespace Engine {
 			// asset.reimport are pending operations; project.refreshAssets writes outside a command (ADR 0010 decision 20).
 			const std::vector<std::string> batchable = { "asset.create", "asset.delete", "asset.getImportSettings", "asset.getProperties",
 				"asset.info", "asset.list", "asset.move", "asset.setImportSettings", "asset.setProperties", "audio.stats", "component.list", "component.schema",
-				"docs.get", "edit.getSelection", "edit.history", "entity.bounds", "entity.create", "entity.destroy", "entity.duplicate", "entity.get",
+				"docs.get", "edit.getSelection", "edit.history", "editor.state", "entity.bounds", "entity.create", "entity.destroy", "entity.duplicate", "entity.get",
 				"entity.reparent", "entity.update", "events.read", "log.read", "physics.bodyInfo", "prefab.apply", "prefab.create", "prefab.instantiate",
 				"prefab.revert", "prefab.unpack", "project.getSettings", "project.info", "project.setSettings", "project.validate", "rpc.discover", "scene.diff",
-				"scene.get", "scene.query", "scene.tree", "session.info" };
+				"scene.get", "scene.query", "scene.raycast", "scene.tree", "session.info", "stats.get", "viewport.pick" };
 			for (const MethodDescriptor* method : methods.GetMethods())
 			{
 				const MethodSpecification& specification = method->Specification;
@@ -136,7 +137,8 @@ namespace Engine {
 				const bool isBatchable = std::find(batchable.begin(), batchable.end(), specification.Name) != batchable.end();
 				CHECK(specification.AllowedInBatch == isBatchable);
 				if (specification.SupportsDryRun)
-					CHECK((specification.Mutates || specification.Name == "project.validate"));
+					CHECK((specification.Mutates || specification.Name == "project.validate" || specification.Name == "scene.raycast"
+						|| specification.Name == "stats.get" || specification.Name == "viewport.pick"));
 			}
 		}
 

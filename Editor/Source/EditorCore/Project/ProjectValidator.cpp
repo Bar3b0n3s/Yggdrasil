@@ -21,6 +21,7 @@
 #include "Engine/Physics/PhysicsDiagnostics.h"
 #include "Engine/Physics/PhysicsLayers.h"
 #include "Engine/Reflection/TypeRegistry.h"
+#include "Engine/Renderer/SpotShadowAtlas.h"
 #include "Engine/Scene/AudioSystem.h"
 #include "Engine/Scene/ComponentAccess.h"
 #include "Engine/Scene/ComponentHostOps.h"
@@ -35,6 +36,7 @@
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/LoadReport.h"
 #include "Engine/Scene/PhysicsValidation.h"
+#include "Engine/Scene/RenderAnnotations.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/SceneSerializer.h"
 
@@ -91,7 +93,9 @@ namespace Engine {
 			AudioNoListenerCode,
 			AudioMultiplePrimaryListenersCode,
 			// M8 (Renderer/RenderPrepare.h, ADR 0013 decision 7).
+			RenderNoLightingCode,
 			RenderLightLimitExceededCode,
+			RenderSpotShadowBudgetCode,
 			BuildStartSceneMissingCode,
 			BuildSceneMissingCode,
 		};
@@ -750,7 +754,25 @@ namespace Engine {
 			}
 		}
 
-		static void CheckScene(const EditorContext& editor, const CheckedScene& checked, std::vector<CollectedDiagnostic>& diagnostics)
+		static Status CheckRenderScene(const EditorContext& editor, const CheckedScene& checked, std::vector<CollectedDiagnostic>& diagnostics)
+		{
+			const auto render = EvaluateRenderSceneValidation(*checked.Target, *editor.GetEngine().GetAssetManager());
+			if (!render)
+				return std::unexpected(Error(render.error()).WithContext(std::format("validating rendering in scene '{}'", checked.File)));
+			DiagnosticSite site;
+			site.File = checked.File;
+			if (render->NoLighting)
+				diagnostics.push_back(MakeDiagnostic(RenderNoLightingCode, DiagnosticSeverity::Warning,
+					"the scene has nonemissive meshes but no contributing light or ambient illumination", site,
+					"add a light or increase the environment's effective illumination", false));
+			if (render->ShadowedSpotLights > MaxSpotShadowLights)
+				diagnostics.push_back(MakeDiagnostic(RenderSpotShadowBudgetCode, DiagnosticSeverity::Warning,
+					std::format("the scene has {} shadow-casting spot lights; each view shadows at most {}", render->ShadowedSpotLights, MaxSpotShadowLights),
+					site, "disable shadows on less important spot lights or keep fewer in view at once", false));
+			return {};
+		}
+
+		static Status CheckScene(const EditorContext& editor, const CheckedScene& checked, std::vector<CollectedDiagnostic>& diagnostics)
 		{
 			CheckCameras(checked, diagnostics);
 			CheckAudio(checked, diagnostics);
@@ -758,11 +780,12 @@ namespace Engine {
 			CheckSceneAssets(editor, checked, diagnostics);
 			CheckPhysics(editor, checked, diagnostics);
 			CheckLightLimit(checked, diagnostics);
+			return CheckRenderScene(editor, checked, diagnostics);
 		}
 
 		// Loads the scene file `path` into a scratch scene in Repair mode and checks it; a file that cannot be loaded at all is
 		// ASSET_IMPORT_FAILED. `layers` as CheckedScene::Layers.
-		static void CheckSceneFile(const EditorContext& editor, const VfsPath& path, const PhysicsLayerTable* layers,
+		static Status CheckSceneFile(const EditorContext& editor, const VfsPath& path, const PhysicsLayerTable* layers,
 			std::vector<CollectedDiagnostic>& diagnostics)
 		{
 			UUIDGenerator scratchIds = UUIDGenerator::CreateDeterministic(0);
@@ -786,10 +809,10 @@ namespace Engine {
 				diagnostics.push_back(MakeDiagnostic(AssetImportFailedCode, DiagnosticSeverity::Error,
 					std::format("the scene file cannot be loaded: {}", loaded.error().ToString()), site,
 					"correct the file by hand or restore it from version control; scene.open reports where loading fails", false));
-				return;
+				return {};
 			}
 			MapLoadReport(*scratch, report, checked, diagnostics);
-			CheckScene(editor, checked, diagnostics);
+			return CheckScene(editor, checked, diagnostics);
 		}
 
 		// The project file's name, relative to the project root ("Tetris.eproj").
@@ -1035,7 +1058,7 @@ namespace Engine {
 			if (context.HasScene())
 			{
 				const CheckedScene open{ &context.GetScene(), openPath.has_value() ? std::string(openPath->GetPath()) : std::string(), true, physicsLayers };
-				CheckScene(context, open, diagnostics);
+				ENGINE_TRY(CheckScene(context, open, diagnostics));
 			}
 
 			if (scope == ValidationScope::Project)
@@ -1050,7 +1073,7 @@ namespace Engine {
 					// The open scene's in-memory state replaces its file (it was checked above).
 					if (context.HasScene() && openPath.has_value() && *openPath == scene)
 						continue;
-					CheckSceneFile(context, scene, physicsLayers, diagnostics);
+					ENGINE_TRY(CheckSceneFile(context, scene, physicsLayers, diagnostics));
 				}
 			}
 			SortDiagnostics(diagnostics);

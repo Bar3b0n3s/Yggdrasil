@@ -13,6 +13,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace Engine {
 
@@ -94,6 +95,9 @@ namespace Engine {
 		[[nodiscard]] std::chrono::steady_clock::time_point GetWallClockTime() const override;
 		// M12: the editor's EngineContext::GetAudioEngine.
 		[[nodiscard]] AudioEngine* GetAudioEngine() const override;
+		[[nodiscard]] const ProjectSettings* GetProjectSettings() const override;
+		[[nodiscard]] Result<StatsGetResult> GetHostStatistics() const override;
+		[[nodiscard]] std::vector<UUID> GetSelectedEntities() const override;
 		// M9/M10 bridge: current logical view's framebuffer pixel extent (headless stored default 640x360). M10 owns the
 		// EditorContext::GetViewportState().GetPixelSize(view); M9 owns this adapter. Scene/game extents are independent.
 		// Never substitutes retained aspect, pending panel size or a screenshot target; host publishes after actual render.

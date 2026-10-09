@@ -1,6 +1,7 @@
 #include "EditorPCH.h"
 #include "EditorCore/Automation/ProjectMethods.h"
 
+#include "EditorCore/Autosave/Private/AutosaveRecoveryData.h"
 #include "EditorCore/Automation/EditorMethodContext.h"
 #include "EditorCore/Automation/Private/MethodSupport.h"
 #include "EditorCore/Automation/ProvenanceRecorder.h"
@@ -213,6 +214,18 @@ namespace Engine {
 			ENGINE_TRY_ASSIGN(Scope<LoadedProject> project, ProjectManager::OpenProject(path, {}, editor.GetTypeRegistry()));
 
 			ProjectOpenResult result;
+			const auto recovery = Utils::ReadAutosaveRecovery(*project);
+			if (!recovery)
+				result.Warnings.push_back(std::format("Recovery is unavailable: {}", recovery.error().ToString()));
+			else if (*recovery)
+			{
+				const Scope<Scene> recoveredScene = editor.CreateScene((*recovery)->Info.SceneName);
+				LoadReport report;
+				const Status valid = SceneSerializer::LoadFromString(*recoveredScene, (*recovery)->SceneText, {}, report);
+				result.RecoveryAvailable = valid.has_value() && recoveredScene->GetName() == (*recovery)->Info.SceneName;
+				if (!result.RecoveryAvailable)
+					result.Warnings.push_back("Recovery is unavailable: invalid scene payload");
+			}
 			const std::string projectFile = FileSystem::PathToUtf8(project->GetProjectFile());
 			for (const ValidationIssue& issue : project->GetLoadReport().Diagnostics)
 			{
@@ -424,7 +437,8 @@ namespace Engine {
 	void RegisterProjectMethodTypes(TypeRegistry& registry)
 	{
 		registry.Enum<ProjectTemplate>("ProjectTemplate", "What a new project starts with.")
-			.Entry(ProjectTemplate::Empty, "Empty", "The folder skeleton, .luaurc, .gitignore and an AGENTS.md stub; no scene.");
+			.Entry(ProjectTemplate::Empty, "Empty", "The folder skeleton, .luaurc, .gitignore and an AGENTS.md stub; no scene.")
+			.Entry(ProjectTemplate::Basic3D, "Basic3D", "A camera with audio listener, sun, Studio environment and ground collider in a ready-to-edit scene.");
 
 		registry.Struct<ProjectSummary>("ProjectSummary", "The open project.")
 			.Field("name", &ProjectSummary::Name, "The project's name (ProjectSettings.Name).")
@@ -450,11 +464,14 @@ namespace Engine {
 			.Field("createdFiles", &ProjectCreateResult::CreatedFiles, "The files created, project-relative and sorted.");
 
 		registry.Struct<ProjectOpenParams>("ProjectOpenParams", "The params of project.open.")
-			.Field("path", &ProjectOpenParams::Path, "The .eproj, or the directory holding exactly one: native, absolute or relative.");
+			.Field("path", &ProjectOpenParams::Path, "The .eproj, or the directory holding exactly one: native, absolute or relative.")
+			.Field("recover", &ProjectOpenParams::Recover, "Adopt the newest validated dirty recovery before opening; source files are preserved.");
 
 		registry.Struct<ProjectOpenResult>("ProjectOpenResult", "The opened project.")
 			.Field("project", &ProjectOpenResult::Project, "The open project.")
-			.Field("warnings", &ProjectOpenResult::Warnings, "The .eproj's load warnings, also logged.");
+			.Field("warnings", &ProjectOpenResult::Warnings, "Project load and recovery validation warnings.")
+			.Field("recoveryAvailable", &ProjectOpenResult::RecoveryAvailable, "A complete dirty recovery is available for this unchanged project and source.")
+			.Field("recovered", &ProjectOpenResult::Recovered, "The recovery was installed as a dirty scene with empty undo history.");
 
 		registry.Struct<ProjectSaveResult>("ProjectSaveResult", "What project.save wrote.")
 			.Field("savedFiles", &ProjectSaveResult::SavedFiles, "The project-relative files written.");

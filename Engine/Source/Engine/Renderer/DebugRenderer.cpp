@@ -1,5 +1,6 @@
 #include "EnginePCH.h"
 #include "Engine/Renderer/DebugRenderer.h"
+#include "Engine/Renderer/RenderStats.h"
 
 #include "Engine/Core/Assert.h"
 #include "Engine/Core/Log.h"
@@ -488,6 +489,12 @@ namespace Engine {
 
 	Result<uint32_t> DebugRenderer::Record(nvrhi::ICommandList& commandList, PassBindingCache& bindings, const DebugRenderInputs& inputs)
 	{
+		RenderPassCounters counters{};
+		return RecordCounted(commandList, bindings, inputs, counters);
+	}
+
+	Result<uint32_t> DebugRenderer::RecordCounted(nvrhi::ICommandList& commandList, PassBindingCache& bindings, const DebugRenderInputs& inputs, RenderPassCounters& counters)
+	{
 		ENGINE_CORE_ASSERT(inputs.DebugDraw != nullptr && inputs.Framebuffer != nullptr && inputs.ViewConstants != nullptr,
 			"DebugRenderer::Record needs a debug draw list, a framebuffer and ViewConstants");
 		State& state = *m_State;
@@ -556,6 +563,7 @@ namespace Engine {
 			arguments.vertexCount = static_cast<uint32_t>(count);
 			arguments.startVertexLocation = first;
 			commandList.draw(arguments);
+			++counters.DrawCalls;
 			first += static_cast<uint32_t>(count);
 		}
 		commandList.endMarker();

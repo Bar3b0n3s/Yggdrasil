@@ -2,6 +2,9 @@
 
 #include "Engine/Core/Result.h"
 
+#include <cstdint>
+#include <string>
+
 namespace Engine {
 
 	struct EditorPanelContext;
@@ -13,6 +16,9 @@ namespace Engine {
 	{
 	public:
 		[[nodiscard]] Status Draw(EditorPanelContext& context);
+	private:
+		uint64_t m_Ticket = 0;
+		std::string m_Error{};
 	};
 
 }

@@ -8,6 +8,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <functional>
 #include <optional>
 
 // The main loop (Architecture §4.2): fixed-step simulation, variable-rate frames.
@@ -47,6 +48,16 @@ namespace Engine {
 		// Pace frames to FixedHz per wall-clock second (§4.2: headless play without lockstep never runs unthrottled).
 		// Lockstep, batch and test runs, and unit tests, leave it off.
 		bool ThrottleToFixedHz = false;
+		// Optional monotonic clock for diagnostics only; empty uses steady_clock. Never controls simulation or pacing.
+		std::function<std::chrono::steady_clock::time_point()> DiagnosticClock{};
+	};
+
+	struct FrameLoopStatistics
+	{
+		uint64_t CompletedFrames = 0;
+		double Fps = 0.0;             // measured start-to-start rate; zero before the second frame
+		double CpuMilliseconds = 0.0; // completed frame wall duration before the optional throttle
+		double DroppedSeconds = 0.0;  // cumulative scheduler loss for this loop, including across configuration changes
 	};
 
 	// Runs frames over an EngineContext for one client (§4.2). Not copyable or movable; main thread only.
@@ -133,6 +144,8 @@ namespace Engine {
 		[[nodiscard]] const Clock& GetClock() const;
 		// The FrameTime of the last completed frame (all zero before the first).
 		[[nodiscard]] const FrameTime& GetLastFrameTime() const;
+		// Read-only observations of completed frames. Hosts subtract the dropped-time baseline at session start.
+		[[nodiscard]] const FrameLoopStatistics& GetStatistics() const { return m_Statistics; }
 	private:
 		// Steps 1 to 6 of one frame; RunFrame calls it inside the frame-boundary catch of vk::SystemError.
 		void RunFrameSteps();
@@ -146,6 +159,8 @@ namespace Engine {
 		Scope<Clock> m_Clock;
 		FrameLoopSpecification m_Specification;
 		FixedStepScheduler m_Scheduler;
+		FrameLoopStatistics m_Statistics{};
+		std::optional<std::chrono::steady_clock::time_point> m_PreviousDiagnosticStart{};
 		FrameTime m_LastFrameTime;
 		uint64_t m_FrameCount = 0;
 		int m_ExitCode = 0; // ExitCode::Success until a request

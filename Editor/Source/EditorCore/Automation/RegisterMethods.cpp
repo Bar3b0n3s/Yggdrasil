@@ -6,6 +6,7 @@
 #include "EditorCore/Automation/ComponentMethods.h"
 #include "EditorCore/Automation/DebugMethods.h"
 #include "EditorCore/Automation/EditMethods.h"
+#include "EditorCore/Automation/EditorMethods.h"
 #include "EditorCore/Automation/EntityMethods.h"
 #include "EditorCore/Automation/ExportMethods.h"
 #include "EditorCore/Automation/ObserveMethods.h"
@@ -13,6 +14,8 @@
 #include "EditorCore/Automation/ProjectMethods.h"
 #include "EditorCore/Automation/SceneMethods.h"
 #include "EditorCore/Automation/ScreenshotMethods.h"
+#include "EditorCore/Automation/ViewportMethods.h"
+#include "EditorCore/Automation/ViewportPickMethods.h"
 #include "EditorCore/Project/ProjectValidator.h"
 #include "Engine/AssetPipeline/ImporterRegistry.h"
 #include "Engine/Automation/Methods/RegisterSharedMethods.h"
@@ -35,6 +38,9 @@ namespace Engine {
 		RegisterEditorEntityMethodTypes(registry);
 		RegisterComponentMethodTypes(registry);
 		RegisterEditMethodTypes(registry);
+		RegisterEditorStateMethodTypes(registry);
+		RegisterViewportMethodTypes(registry);
+		RegisterViewportPickMethodTypes(registry);
 		RegisterEditorObserveMethodTypes(registry);
 		RegisterScreenshotMethodTypes(registry);
 		RegisterAssetMethodTypes(registry);
@@ -50,6 +56,9 @@ namespace Engine {
 		RegisterEditorEntityMethods(methods);
 		RegisterComponentMethods(methods);
 		RegisterEditMethods(methods);
+		RegisterEditorStateMethods(methods);
+		RegisterViewportMethods(methods);
+		RegisterViewportPickMethods(methods);
 		RegisterEditorObserveMethods(methods);
 		RegisterScreenshotMethods(methods);
 		RegisterAssetMethods(methods);

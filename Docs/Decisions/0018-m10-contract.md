@@ -1,6 +1,6 @@
 # 0018 — M10 editor UI contract
 
-- **Status:** reviewed public contract; the freeze takes effect with its reviewed, passing contract-mode commit. Interfaces and marked scaffolds only, no implementation completion claim.
+- **Status:** public contract frozen in `dd5d57d`, with approved implementation amendments below. Milestone acceptance is recorded by the reviewed implementation commit.
 - **Date:** 2026-10-09.
 - **Base:** `b7b972d` (M8 renderer, M11 physics, M12 audio integrated).
 - **Authority:** Architecture §4.13, §5.6, §12, §13.4–§13.8; Roadmap M10. Local contract checks only here; the parent owns the scheduled gate, review, contract commit and final integration. Remote CI remains non-blocking (ADR 0011).
@@ -109,6 +109,25 @@ Unqualified production paths in the table are relative to `Editor/Source/`. Mirr
 
 ## Shared integration checklist
 
+### Implementation contract review
+
+The contract owner reviewed the first implementation reports and approved these additions:
+
+- `EditorPanelContext::Gizmos` borrows the host's single `GizmoController`. Its lifetime follows the other injected services; only the Scene view consumes its preview.
+- `EditorViewportImage::Camera` owns the camera copied from the same rendered snapshot as its texture, frame index, revision and generation. The gizmo must not use a newer live camera to interpret an older displayed image.
+- The reflected drawer context may inject a synchronous reference search returning owned UUID, label and path candidates. The caller supplies scene/asset access and honors the field's asset filter; drawers never retain component pointers. Missing search injection preserves direct reference entry. Search failures are displayed, and selecting a result follows the existing single-command edit path.
+- `AutosaveSpecification::WriteFile` may inject a native atomic writer for deterministic failure/interleaving tests. The default remains `FileSystem::WriteFileAtomic` without backups. The callback is covered by the sole writer lease and the fatal-path lifetime restrictions. Only `WriteFatalSnapshot` may catch exceptions from that best-effort write and return `IoFailure`, without logging, allocating an error or recursively invoking fatal handling; the nonallocating lease release still executes. Architecture §4.6 and the lint boundary list record this exception boundary.
+
+These additions do not mark M10 complete. The parent still owns live host construction, target-aware selection on Stop, recovery identity handoff, UI test integration and the strict final gates.
+
+The second implementation review approves `Autosave::OpenRecoveredProject` with a transferred locked project and validated offer, and a borrowed `AutomationServerSpecification::AutosaveService`. Recovery must preserve its original fingerprint and untitled token in the same long-lived service that later cleans up an explicit save. Validation happens before mounting or changing editor state; failure retains the launcher and releases only the transferred lock. A missing service refuses recovery rather than silently discarding identity.
+
+Automation controls use server-owned policy, bounded request activity, and transactional preference-owned listening. `AutomationServerSpecification::Listen` retains launch intent; `PreferenceListeningAllowed` is false for one-shot runs. The UI injects memory-only preference state and a queued change callback; disk and listener changes occur at the safe point. A source-editor helper builds executable and separate argv values using single-pass `{path}`/`{line}` expansion, never shell text; the host retains the spawned process until exit.
+
+Tests compile the production `Editor/` UI sources directly with their PCH disabled, excluding `EditorApp.cpp` and `EditorMain.cpp`. This enables real headless ImGui interaction tests without making EditorCore depend on ImGui or linking the Editor executable. Process/graphics host behavior remains tested through the built Editor.
+
+Selection integration records which scene owns the selected UUIDs. Legacy selection calls and `edit.select` address the shown scene (play while running, otherwise edit); `edit.getSelection` resolves the recorded target. Stop retains only UUIDs still present in the edit scene and changes the target to Edit. Opening/replacing/closing an edit scene clears the target and asset selection. A dry run restores UUIDs, selection target and selected asset together. No new wire parameter is added to `edit.select`.
+
 1. Create CPU services after EditorContext and before EditorLayer, inject the viewport host, controls and thumbnail renderer. Keep the demo until contract staging ends; then replace it with EditorLayer. Use the existing ImGuiLayer ini-path API. Reset default layout only when no saved layout exists or explicitly requested.
 2. Register new method types before freeze, methods in RegisterMethods, Basic3D and recover fields in ProjectMethods, and editor.screenshot as pending. Regenerate Tools/MCP/catalog.json; update method/schema counts and examples. All new methods require in-process and Python calls for coverage.
 3. Honor current-loop ordering for pending screenshots/resize/input. Retire every texture key before shutting down render services. Route M9 flags/picking/stats without copying or changing M9 files in this contract branch.
@@ -119,10 +138,124 @@ Unqualified production paths in the table are relative to `Editor/Source/`. Mirr
 8. Update the MCP crash/recovery probe: it currently treats *any* file under Library/Autosave as a recovery. It must recognize a complete published manifest, not incomplete payloads. Add bridge tests and preserve attached-editor ownership semantics.
 9. Run the parent's scheduled contract gate only for the contract snapshot. Implementation/final milestone gates are strict: no stub marker or non-child skip may remain. Do not present a header compile as a full build or claim remote platforms verified.
 
+## MCP recovery publication probe
+
+The bridge advertises an autosave candidate only when `Manifest.json` publishes a complete generation with matching
+sequence, confined regular files, bounded sizes, payload XXH64 and project/source byte fingerprints. Stray payloads,
+temporary writes and unpublished directories cannot advertise recovery. It checks the manifest again after the read.
+The standard-library implementation shares the engine's seed-zero XXH64 reference vectors and adds no dependency.
+Opaque C++ file-clock values are validated as uint64, not converted to Unix times or ordered. Final timestamp equality
+and scene semantics remain the editor's responsibility; this read-only crash diagnostic never adopts recovery or changes
+ownership of an attached editor.
+
+## Lifecycle integration amendment
+
+The contract owner adds `EditorLifecycleCallbacks` to `EditorContext`, with fallible `BeforePlay`, `AfterSceneSaved`
+and `BeforeProjectClose` hooks. These main-thread callbacks capture host services that outlive the binding. The host
+clears the binding only after the fatal hook and asynchronous writers are quiescent, before destroying those services.
+Empty callbacks preserve CPU-only contexts. This places UI and automation on the same autosave boundary.
+
+`EditorPlayController` calls `PrepareForPlay` after validating the requested session, before copying its scene. A failed
+pre-play save prevents the session from starting. `MarkSceneSaved` now returns `Status`: the durable file write and clean
+save point precede recovery cleanup. Cleanup failure is reported with a hint that the scene was saved; the saved scene
+is not marked dirty again. Dry runs omit both lifecycle side effects.
+
+`CloseProject` now returns `Status` and runs the close hook before stopping play or releasing the scene, mounts or lock.
+A refused close leaves the project open for retry. The destructor verifies successful closure; the concrete host must
+finish its writers and remove the borrowed callbacks before normal destruction. Regression tests exercise close refusal
+and retained locks, durable-save ordering and failed cleanup, dry-run exclusion, and failed/successful pre-play preparation.
+
 ## Scaffold and verification record
+
+### Editor layout and fatal-path acceptance
+
+`EditorDefaultLayout` replaces the M5 `ImGuiDemo` golden after review of the actual headless editor screenshot.
+It creates a Basic3D project, opens its scene and calls `editor.screenshot` with isolated preferences. The first layout
+and an explicit reset select SceneViewport and ContentBrowser; existing saved layouts and later user tab choices stay
+intact. The reviewed 1600×900 image shows the hierarchy, scene, inspector and content browser without machine paths.
+A repeated Debug capture matched every pixel on nvidia-61x. The legacy LitScene fixture explicitly disables shadows
+and SSAO and still matches its existing reference exactly; no image-comparison threshold changed.
+
+`MakeEditorAutosaveFatalHook` is a private host helper shared by EditorApp and fault tests. Its callback only attempts
+to write previously published CPU bytes through the autosave writer lease. It never reads live scene state or uses the
+GPU. Tests exercise the same callback during device loss and GPU timeout, recover the published dirty scene, and verify
+that later unpublished edits are absent. The host quiesces this callback before clearing lifecycle bindings or destroying
+the autosave service. Normal save/close and the fatal path therefore share the same recovery publication contract.
+
+### Recovery decisions and live fault injection
+
+The private `EditorHostRecovery` helper owns the authoritative recovery bytes and queues UI decisions. Each offer is
+bound to the current project epoch, project identity and editor revision; acceptance rechecks the binding at both
+enqueue and execution. Monotonic offer IDs survive reset. Repeated inspection in one epoch preserves dismissal. Acceptance
+uses the existing autosave service and lock. Decline of the matching offer only dismisses it in memory, including after
+a binding conflict, so stale recovery cannot trap the user in the modal. Failures remain visible without adopting or
+overwriting scene state. Real ImGui interaction tests exercise acceptance, decline, intervening edits and project changes.
+
+EditorLayer initializes ImGuizmo once at the start of each production UI frame, after ImGui frame setup. Interaction
+tests use that same entry point without a harness-only BeginFrame call, so gizmo hover and selection behavior exercise
+the real frame lifecycle.
+
+The contract owner approves the borrowed `AutomationServerSpecification::QueueDeviceLost` callback for the test-only
+`debug.deviceLost` hook. Dispatch only queues intent. The host consumes it after publishing the post-dispatch CPU
+snapshot and the next real rendering submission takes the fatal path. The hook requires an open project, enabled
+test hooks and a rendering host; it is absent from public catalogues, MCP tools, Runtime, batches and dry runs.
+Its regression edits a running editor, injects the fault, then recovers that exact dirty edit in a fresh editor while
+checking the original source bytes and all GPU validation diagnostics.
+
+### Third implementation review
+
+The parent approves three queued content-host services on `EditorPanelContext`: a memory-only thumbnail texture lookup,
+draining copied OS-drop paths for the current project epoch, and queued audio preview play/stop. Draw callbacks perform
+no file I/O or asset loading. The host validates the epoch, performs work at a safe point, reports failures, and retires
+texture registrations before rebinding the cache. Asset drag payloads remain exactly sixteen hex digits plus NUL.
+
+Dispatcher admission and activity hooks run on the main thread. Each started request receives a nonzero monotonic
+sequence, a Started event before admission/lookup, and exactly one Succeeded, Failed or Cancelled terminal event.
+Notifications have outcomes even without responses. Never-started disconnected requests emit nothing; pending requests
+are admitted once. Result-production failures remain failures even after disconnect. Empty callbacks preserve existing
+Runtime behavior. The server retains only the newest 256 events.
+
+The editor policy also guards actual commands and project file writes by command origin. Denied agent mutations return
+PermissionDenied; humans and disposable dry runs remain allowed. SceneEdit checks before committing either edit or play
+changes and cancels on denial, covering optional validator fixes and transient edits outside persistent command history.
+
+The contract owner approves `AssetWriter::MutationGuard = UniqueFunction<Status()>` and `SetMutationGuard`.
+This optional main-thread guard runs at the beginning of Write, Remove, Move and CreateDirectories, before VFS access
+or any side effect, including backups and destination-parent creation. Failure is returned unchanged and produces no
+watcher update or listener event; an empty guard preserves existing behavior. The guard also runs during dry runs:
+SetDryRun(true) alone does not bypass admission. EditorContext binds CheckMutationPermission, covering manager-generated
+metadata from explicit refresh and implicit path resolution without marking read methods as mutating. Humans, passive
+refresh and disposable EditorDryRunScope overlays remain allowed. The callback borrows EditorContext; its services remain
+alive while the manager drains, and the binding is cleared after CloseProject and before editor member destruction.
+
+Application submission callbacks run after executing the scene/UI list and before presentation; frame pacing tracks the
+device's final submission after the callback. A fresh UI request can render into an offscreen target while minimized,
+retaining the last usable extent and creating new ImGui draw data. `ImGuiLayer::BeginFrame` accepts an optional retained
+display-size flag for this path; normal frames preserve the previous backend behavior.
+
+Frame-loop diagnostics expose an owned application snapshot of completed frames, measured FPS, CPU frame duration
+before throttling, and cumulative scheduler dropped seconds. The optional monotonic diagnostic clock enables exact
+tests and never drives simulation or pacing. Counters survive loop configuration changes; hosts subtract a baseline
+for each play session. Stats callbacks only copy these observations and each displayed renderer's history through
+`MakeStatsViewSummary`, retaining exact CPU and delayed GPU frame identities and explicit unavailable samples.
+
+Successful project-settings installation advances the editor revision after the file write and in-memory replacement.
+Undo and redo use the same path; failed writes/validation do not advance it and dry runs restore the original base.
+The settings panel's interaction regression demonstrated why this is required: a draft captured before an agent edit
+must conflict instead of overwriting the newly installed settings.
 
 The initial staged contract adds 90 named C++ and 14 Python acceptance scaffolds, including both exact Roadmap unit names, EditorDefaultLayout, and all four named Python acceptance cases. Each new case is explicitly skipped and fails by design when forced; existing tests are not skipped or weakened. Runtime symbols are not linked from the Editor executable into Tests.
 
 Initial staged-contract selected-file verification on this worktree: includes, banned APIs (clang-query), contract markers, naming (clang-tidy 22.1.3), standalone headers (Clang 22.1.3), and Python syntax/style passed with zero findings. The selected set contained 89 C++ files (37 headers) and 5 Python files; contract mode reported 100 marked stubs and 104 skipped cases. Format was clean and git diff --check passed. Logs are local ignored files under bin/M10Contract. No full linked build, PreCommit, CI, commit or push was run by this worker. Full gate/review/commit scheduling remains with the parent.
 
 The unstaged review correction adds 24 C++ and 2 Python regression scaffolds. Focused contract-mode lint on the corrected files passed with zero findings: include/layer rules, banned APIs, contract markers, clang-tidy naming, 11 standalone headers and Python checks. Its scope contained 21 C++ files and one Python file, with 31 marked stubs and 63 intentional contract skips. Scoped formatting and whitespace checks passed. These checks do not execute the skipped regressions or establish feature completion. The original staged contract remains unchanged; only the unstaged correction patch is handed to the parent, with no whole gate, staging or commit here.
+
+### Synthetic device-loss diagnostics
+
+Contract-owner-approved amendment for M10's dirty-scene crash/recovery test: `GpuDiagnostics::SetDeviceLost(bool injected = false)` publishes a sticky synthetic-loss marker together with the lost flag. Both bits share one atomic state, published with release ordering and read with acquire ordering. `IsDeviceLossInjected()` is true after `SetDeviceLost(true)` or the CLI device-loss injection reaches its first submission. Ordinary `SetDeviceLost()`, later native reports, `ResetCounts`, and `RaiseDeviceLost` never clear synthetic provenance. `GetInjectedFault()` continues to report only the immutable command-line configuration.
+
+`GraphicsDevice::DescribeDeviceFault` never calls `vkGetDeviceFaultInfoEXT` for synthetic loss, because Vulkan requires an actually lost native device for that query (VUID-vkGetDeviceFaultInfoEXT-device-07336). Healthy devices and unavailable extensions retain their existing responses; CLI injection retains its existing explanatory text. A dynamically injected loss reports `no fault information (the device loss was injected)`. Native loss without synthetic marking retains the existing fault-description query and diagnostics.
+
+`debug.deviceLost` remains a test-hooks-only method on a rendering editor with an open project. Its callback queues intent only. EditorApp publishes the current CPU autosave snapshot at the safe point before consuming the request with `SetDeviceLost(true)`; the next real submission follows the normal fatal path. No rendering or live-state access occurs inside the fatal autosave callback. The test requires no validation errors or warnings, verifies unchanged source bytes, and recovers the dirty entity through a fresh Editor process under Vulkan 1.4 and 1.3.
+
+Regression coverage includes native-only loss, sticky mixed native/synthetic reports, cross-thread observation of the paired flags, CLI fault behavior, and description/teardown of a healthy native device marked synthetically lost.

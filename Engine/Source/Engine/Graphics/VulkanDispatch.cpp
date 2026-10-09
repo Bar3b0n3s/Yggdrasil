@@ -9,6 +9,7 @@
 
 #include <vulkan/vulkan.hpp>
 
+#include <limits>
 #include <optional>
 #include <stdexcept>
 #include <thread>
@@ -27,6 +28,25 @@ namespace Engine {
 		static std::thread::id s_VulkanLoaderThread;
 		// The live GraphicsDevice objects (at most one, GraphicsDevice.h), which must be gone before the loader unloads.
 		static uint32_t s_VulkanDeviceCount = 0;
+		static std::optional<VulkanMemoryAllocationTracker> s_MemoryTracker;
+		static VkDevice s_TrackedDevice = VK_NULL_HANDLE;
+		static PFN_vkAllocateMemory s_OriginalAllocateMemory = nullptr;
+		static PFN_vkFreeMemory s_OriginalFreeMemory = nullptr;
+
+		static VKAPI_ATTR VkResult VKAPI_CALL TrackAllocateMemory(VkDevice device, const VkMemoryAllocateInfo* info,
+			const VkAllocationCallbacks* allocator, VkDeviceMemory* memory)
+		{
+			ENGINE_CORE_VERIFY(s_MemoryTracker.has_value(), "allocation hook outlived its device");
+			ENGINE_CORE_ASSERT(s_VulkanLoaderThread == std::this_thread::get_id(), "Vulkan allocation is main-thread-only");
+			return s_MemoryTracker->AllocateMemory(device, info, allocator, memory);
+		}
+
+		static VKAPI_ATTR void VKAPI_CALL TrackFreeMemory(VkDevice device, VkDeviceMemory memory, const VkAllocationCallbacks* allocator)
+		{
+			ENGINE_CORE_VERIFY(s_MemoryTracker.has_value(), "free hook outlived its device");
+			ENGINE_CORE_ASSERT(s_VulkanLoaderThread == std::this_thread::get_id(), "Vulkan free is main-thread-only");
+			s_MemoryTracker->FreeMemory(device, memory, allocator);
+		}
 
 		// The ENGINE_VULKAN_LOADER test hook (Roadmap M5): true when it asks for a missing loader. Dist ignores it.
 		static Result<bool> IsMissingLoaderRequested()
@@ -62,6 +82,35 @@ namespace Engine {
 			}
 		}
 
+	}
+
+	VulkanMemoryAllocationTracker::VulkanMemoryAllocationTracker(VkDevice device, PFN_vkAllocateMemory allocateMemory, PFN_vkFreeMemory freeMemory)
+		: m_Device(device), m_AllocateMemory(allocateMemory), m_FreeMemory(freeMemory)
+	{
+		ENGINE_CORE_VERIFY(m_AllocateMemory != nullptr && m_FreeMemory != nullptr, "allocation tracker needs both native entry points");
+	}
+
+	VkResult VulkanMemoryAllocationTracker::AllocateMemory(VkDevice device, const VkMemoryAllocateInfo* info,
+		const VkAllocationCallbacks* allocator, VkDeviceMemory* memory)
+	{
+		ENGINE_CORE_VERIFY(device == m_Device, "allocation tracker used with another device");
+		const VkResult result = m_AllocateMemory(device, info, allocator, memory);
+		if (result == VK_SUCCESS)
+		{
+			ENGINE_CORE_VERIFY(memory != nullptr && *memory != VK_NULL_HANDLE, "successful native allocation returned no memory");
+			ENGINE_CORE_VERIFY(m_Count < std::numeric_limits<uint32_t>::max(), "native allocation count overflow");
+			++m_Count;
+		}
+		return result;
+	}
+
+	void VulkanMemoryAllocationTracker::FreeMemory(VkDevice device, VkDeviceMemory memory, const VkAllocationCallbacks* allocator)
+	{
+		ENGINE_CORE_VERIFY(device == m_Device, "allocation tracker used with another device");
+		ENGINE_CORE_VERIFY(memory == VK_NULL_HANDLE || m_Count > 0, "native memory freed without a tracked allocation");
+		m_FreeMemory(device, memory, allocator);
+		if (memory != VK_NULL_HANDLE)
+			--m_Count;
 	}
 
 	Status VulkanDispatch::Initialize()
@@ -109,6 +158,7 @@ namespace Engine {
 			return;
 		ENGINE_CORE_ASSERT(Utils::s_VulkanLoaderThread == std::this_thread::get_id(), "VulkanDispatch is main-thread-only");
 		ENGINE_CORE_ASSERT(Utils::s_VulkanDeviceCount == 0, "VulkanDispatch::Shutdown while a GraphicsDevice exists");
+		ENGINE_CORE_VERIFY(!Utils::s_MemoryTracker.has_value(), "VulkanDispatch::Shutdown with allocation hooks still installed");
 
 		// No function pointer into the library may outlive it.
 		VULKAN_HPP_DEFAULT_DISPATCHER = vk::detail::DispatchLoaderDynamic();
@@ -163,6 +213,44 @@ namespace Engine {
 	bool VulkanDispatch::HasDevice()
 	{
 		return Utils::s_VulkanDeviceCount > 0;
+	}
+
+	Status VulkanDispatch::BeginMemoryTracking(VkDevice device)
+	{
+		ENGINE_CORE_VERIFY(HasDevice() && device != VK_NULL_HANDLE && !Utils::s_MemoryTracker.has_value(), "invalid native allocation tracking lifetime");
+		ENGINE_CORE_ASSERT(Utils::s_VulkanLoaderThread == std::this_thread::get_id(), "VulkanDispatch is main-thread-only");
+		auto& dispatcher = VULKAN_HPP_DEFAULT_DISPATCHER;
+		if (dispatcher.vkAllocateMemory == nullptr || dispatcher.vkFreeMemory == nullptr)
+			return MakeError(ErrorCode::Gpu, "Vulkan device lacks native memory allocation entry points");
+		Utils::s_OriginalAllocateMemory = dispatcher.vkAllocateMemory;
+		Utils::s_OriginalFreeMemory = dispatcher.vkFreeMemory;
+		Utils::s_TrackedDevice = device;
+		Utils::s_MemoryTracker.emplace(device, Utils::s_OriginalAllocateMemory, Utils::s_OriginalFreeMemory);
+		dispatcher.vkAllocateMemory = &Utils::TrackAllocateMemory;
+		dispatcher.vkFreeMemory = &Utils::TrackFreeMemory;
+		return {};
+	}
+
+	void VulkanDispatch::EndMemoryTracking(VkDevice device)
+	{
+		ENGINE_CORE_VERIFY(Utils::s_MemoryTracker.has_value() && device == Utils::s_TrackedDevice, "removing another device's allocation hooks");
+		ENGINE_CORE_ASSERT(Utils::s_VulkanLoaderThread == std::this_thread::get_id(), "VulkanDispatch is main-thread-only");
+		auto& dispatcher = VULKAN_HPP_DEFAULT_DISPATCHER;
+		ENGINE_CORE_VERIFY(dispatcher.vkAllocateMemory == &Utils::TrackAllocateMemory && dispatcher.vkFreeMemory == &Utils::TrackFreeMemory,
+			"native allocation dispatch changed while tracking was active");
+		dispatcher.vkAllocateMemory = Utils::s_OriginalAllocateMemory;
+		dispatcher.vkFreeMemory = Utils::s_OriginalFreeMemory;
+		Utils::s_MemoryTracker.reset();
+		Utils::s_TrackedDevice = VK_NULL_HANDLE;
+		Utils::s_OriginalAllocateMemory = nullptr;
+		Utils::s_OriginalFreeMemory = nullptr;
+	}
+
+	uint32_t VulkanDispatch::GetMemoryAllocationCount(VkDevice device)
+	{
+		ENGINE_CORE_VERIFY(Utils::s_MemoryTracker.has_value() && device == Utils::s_TrackedDevice, "querying another device's allocation count");
+		ENGINE_CORE_ASSERT(Utils::s_VulkanLoaderThread == std::this_thread::get_id(), "VulkanDispatch is main-thread-only");
+		return Utils::s_MemoryTracker->GetCount();
 	}
 
 }

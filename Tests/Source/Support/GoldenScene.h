@@ -10,7 +10,7 @@
 #include <span>
 #include <string_view>
 
-// The golden scenes of the M8 goldens (Architecture §15.4; Roadmap M8): Projects/FeatureTest/Assets/Scenes/Golden/*.scene,
+// The golden scenes of M8/M9 (Architecture §15.4): Projects/FeatureTest/Assets/Scenes/Golden/*.scene,
 // produced by the committed scaffold Projects/FeatureTest/Scaffold/Golden.jsonl (§15.5), rendered headless at 640x360 with
 // FXAA on and the fixed blue noise, through the same path as viewport.screenshot's game view (ViewportCapture). Frozen by
 // the M8 contract (Docs/Decisions/0013-m8-decisions.md decision 14).
@@ -28,6 +28,9 @@ namespace Engine {
 			// Applied to the extracted snapshot before it renders: the DebugDraw golden appends its primitives (scripts emit
 			// them from M13), the Tonemappers golden selects each tonemapper.
 			std::function<void(RenderSnapshot&)> EditSnapshot{};
+			// Synchronously observes the final snapshot after EditSnapshot and real scene annotation assembly, before
+			// capture. The const snapshot is borrowed only for this call.
+			std::function<void(const RenderSnapshot&)> InspectSnapshot{};
 		};
 
 		// Renders the golden scene `name` ("MaterialGrid" for Golden/MaterialGrid.scene): a copy of Projects/FeatureTest in a
@@ -35,7 +38,8 @@ namespace Engine {
 		// fixture's device (the Studio and Sky environments bake into memory) and the editor's generators; the scene's game
 		// view through its primary camera (ExtractRenderSnapshot) captured by a ViewportCapture over SceneRendererPipelines.
 		// Every GPU object is released before it returns. Errors: NotFound for an unknown scene; those of the project copy,
-		// the scene load, the extraction and the capture.
+		// the scene load, the extraction, annotations and the capture. Annotations use the copied project's physics layers.
+		// Any scan/load error, Error-level asset diagnostic or scene mutation during capture fails the render.
 		[[nodiscard]] Result<Image> RenderGoldenScene(HeadlessGpuFixture& gpu, std::string_view name, const GoldenSceneOptions& options = {});
 
 		// Lays `images` (all of one size and format) out in a grid of `columns` columns, row by row: the Tonemappers golden

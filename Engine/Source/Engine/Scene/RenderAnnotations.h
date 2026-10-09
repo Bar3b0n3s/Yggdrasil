@@ -35,7 +35,8 @@ namespace Engine {
 		uint32_t ShadowedSpotLights = 0; // global scene count, not view-dependent atlas allocation
 	};
 
-	// Main-thread read-only scene/CPU asset scan, no GPU/physics/import wait. NoLighting only when a visible enabled
+	// Main-thread read-only scene/CPU asset scan. Uses the existing synchronous CPU AssetManager lookup, which may
+	// load, cook or wait for CPU assets; never waits for GPU or steps physics. NoLighting only when a visible enabled
 	// non-null mesh has at least one material without potential emission and there is neither an enabled light with positive finite radiance
 	// (local lights also positive range) nor ambient environment illumination. Effective environment uses the first
 	// enabled Environment or default RenderEnvironment: positive intensity and either a loaded map with a positive SH

@@ -57,6 +57,9 @@ namespace Engine {
 		[[nodiscard]] Result<uint64_t> Commit();
 		void Cancel();
 		[[nodiscard]] bool IsEditing() const;
+	private:
+		struct State;
+		Scope<State> m_State;
 	};
 
 }

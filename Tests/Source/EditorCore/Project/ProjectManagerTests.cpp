@@ -24,6 +24,25 @@ namespace Engine {
 
 	TEST_SUITE("EditorCore")
 	{
+		TEST_CASE("ProjectManager: a relative create path returns an absolute project file")
+		{
+			Test::EditorTestFixture fixture("ProjectRelativeCreate");
+			auto specification = MakeCreateSpecification(fixture, "RelativeGame");
+			std::error_code error;
+			const auto workingDirectory = std::filesystem::current_path(error);
+			REQUIRE_FALSE(error);
+			const auto relative = specification.Directory.lexically_relative(workingDirectory);
+			// Windows permits the per-test temp directory on another drive, which has no relative spelling.
+			if (!relative.empty())
+				specification.Directory = relative;
+			const auto created = ProjectManager::CreateProject(specification, fixture.GetEngine().GetTypeRegistry());
+			REQUIRE(created);
+			CHECK(created->ProjectFile.is_absolute());
+			CHECK(created->ProjectFile == fixture.GetProjectRoot("RelativeGame") / "RelativeGame.eproj");
+			CHECK(std::filesystem::current_path(error) == workingDirectory);
+			CHECK_FALSE(error);
+		}
+
 		TEST_CASE("ProjectManager: the Empty template creates the folder skeleton and a canonical .eproj")
 		{
 			Test::EditorTestFixture fixture("ProjectCreate");

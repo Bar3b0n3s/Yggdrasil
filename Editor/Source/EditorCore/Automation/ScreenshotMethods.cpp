@@ -4,14 +4,17 @@
 #include "EditorCore/Automation/AutomationServer.h"
 #include "EditorCore/Automation/EditorMethodContext.h"
 #include "Engine/Automation/Protocol/MethodRegistry.h"
+#include "Engine/Automation/Protocol/PendingOperation.h"
 #include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Renderer/ViewportCapture.h"
 
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <format>
 #include <optional>
+#include <utility>
 
 namespace Engine {
 
@@ -24,6 +27,51 @@ namespace Engine {
 		{
 			return Error(ErrorCode::Unsupported, "editor.screenshot needs a renderer, and this editor runs with --renderer none")
 				.WithHint("start the editor without --renderer none (it needs a Vulkan 1.3 GPU)");
+		}
+
+		// The wire request has a bounded lifetime even if the host never publishes the requested frame.
+		class EditorScreenshotDeadline final : public PendingOperation
+		{
+		public:
+			EditorScreenshotDeadline(Scope<PendingOperation> operation, std::chrono::steady_clock::time_point deadline)
+				: m_Operation(std::move(operation)), m_Deadline(deadline)
+			{
+			}
+
+			std::optional<Result<Json>> Poll(MethodContext& context) override
+			{
+				if (m_Operation == nullptr)
+					return MakeError(ErrorCode::Cancelled, "editor screenshot was cancelled");
+				if (static_cast<EditorMethodContext&>(context).GetWallClockTime() >= m_Deadline)
+				{
+					Cancel(context);
+					return MakeError(ErrorCode::Timeout, "editor screenshot timed out waiting for a fresh UI frame");
+				}
+				return m_Operation->Poll(context);
+			}
+
+			void Cancel(MethodContext& context) override
+			{
+				if (m_Operation != nullptr)
+				{
+					m_Operation->Cancel(context);
+					m_Operation.reset();
+				}
+			}
+
+			std::string GetPhase() const override { return m_Operation != nullptr ? m_Operation->GetPhase() : std::string(); }
+		private:
+			Scope<PendingOperation> m_Operation{};
+			std::chrono::steady_clock::time_point m_Deadline{};
+		};
+
+		static Result<Scope<PendingOperation>> BeginRegisteredEditorScreenshot(EditorMethodContext& context, const EditorScreenshotParams& params)
+		{
+			if (!context.GetServer().GetSpecification().Screenshots.EditorUi)
+				return std::unexpected(MakeNoEditorUiError());
+			const auto deadline = context.GetWallClockTime() + std::chrono::seconds(context.GetMethod().Specification.TimeoutSeconds);
+			ENGINE_TRY_ASSIGN(auto operation, Automation::BeginEditorScreenshot(context, params));
+			return CreateScope<EditorScreenshotDeadline>(std::move(operation), deadline);
 		}
 
 		// The PNG of `image`, downscaled to `maxDimension`, written to the server's output directory.
@@ -85,16 +133,16 @@ namespace Engine {
 
 	void RegisterScreenshotMethods(MethodRegistry& methods)
 	{
-		methods.Add(
+		methods.AddPending<EditorMethodContext, EditorScreenshotParams, EditorScreenshotResult>(
 			{
 				.Name = "editor.screenshot",
-				.Description = "Re-renders the editor UI's last rendered frame (the whole editor as of that frame) at its framebuffer size, "
-							   "downscales it to maxDimension and writes it as a PNG whose path the result names. Needs a renderer (not "
+				.Description = "Requests a fresh editor UI frame, including while minimized, waits for that frame and captures the whole editor. "
+							   "Downscales it to maxDimension and writes it as a PNG whose path the result names. Needs a renderer (not "
 							   "--renderer none).",
 				.ExposeAsTool = true,
 				.Examples = { { .Description = "A screenshot of the editor at most 1024 pixels wide.", .Params = Json::object() } },
 			},
-			&Automation::EditorScreenshot);
+			&Utils::BeginRegisteredEditorScreenshot);
 	}
 
 }

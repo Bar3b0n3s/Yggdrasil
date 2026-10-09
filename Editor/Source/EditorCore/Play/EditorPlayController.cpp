@@ -131,6 +131,8 @@ namespace Engine {
 			return std::unexpected(Error(ErrorCode::InvalidArgument, std::format("the time scale must be 0 to {} (got {})", PlaySession::MaxTimeScale, options.TimeScale)));
 		}
 
+		ENGINE_TRY(editor.PrepareForPlay());
+
 		// The serializer copy of §5.6: the open edit scene, or the named scene file, as one canonical document.
 		Json document;
 		std::string sceneName;

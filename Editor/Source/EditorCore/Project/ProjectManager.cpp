@@ -11,6 +11,8 @@
 #include "Engine/Core/Mounts/NativeDirectoryMount.h"
 #include "Engine/Core/VirtualFileSystem.h"
 #include "Engine/Platform/Paths.h"
+#include "Engine/Platform/SecureRandom.h"
+#include "Engine/Core/UUIDGenerator.h"
 #include "Engine/Reflection/TypeRegistry.h"
 
 #include <nlohmann/json.hpp>
@@ -113,6 +115,11 @@ namespace Engine {
 
 			ProjectSettings settings;
 			settings.Name = specification.Name;
+			if (specification.Template == ProjectTemplate::Basic3D)
+			{
+				settings.StartScene = "Assets/Scenes/Main.scene";
+				settings.Export.BuildScenes = { settings.StartScene };
+			}
 			ENGINE_TRY_ASSIGN(const std::string text, ProjectSerializer::SaveToString(settings, registry));
 			const std::string fileName = std::format("{}{}", specification.Name, ProjectManager::ProjectFileExtension);
 			const std::filesystem::path projectFile = root / FileSystem::PathFromUtf8(fileName);
@@ -121,6 +128,12 @@ namespace Engine {
 			CreatedProject created;
 			created.ProjectFile = projectFile;
 			created.RecordedFiles.push_back(CreatedProjectFile{ .Path = fileName, .Hash = XXH64(text) });
+			for (const TemplateFile& file : files)
+			{
+				const std::string relative = FileSystem::PathToUtf8(file.RelativePath);
+				if (relative.starts_with("Assets/"))
+					created.RecordedFiles.push_back(CreatedProjectFile{ .Path = relative, .Hash = XXH64(file.Contents) });
+			}
 			return created;
 		}
 
@@ -208,12 +221,17 @@ namespace Engine {
 
 	Result<CreatedProject> ProjectManager::CreateProject(const ProjectCreateSpecification& specification, const TypeRegistry& registry)
 	{
-		if (specification.Template == ProjectTemplate::Basic3D)
-			return CreateBasic3DProject(specification, registry);
+		if (specification.Template != ProjectTemplate::Empty && specification.Template != ProjectTemplate::Basic3D)
+			return MakeError(ErrorCode::InvalidArgument, "unknown project template");
 		ENGINE_TRY(Paths::ValidateAppName(specification.Name));
-		const std::filesystem::path& root = specification.Directory;
-		if (root.empty())
+		if (specification.Directory.empty())
 			return MakeError(ErrorCode::InvalidArgument, "a new project needs a directory");
+		ProjectCreateSpecification resolved = specification;
+		std::error_code pathError;
+		resolved.Directory = std::filesystem::absolute(specification.Directory, pathError).lexically_normal();
+		if (pathError)
+			return MakeError(ErrorCode::Io, "cannot resolve new project directory: {}", pathError.message());
+		const std::filesystem::path& root = resolved.Directory;
 		if (Result<FileInfo> existing = FileSystem::GetInfo(root); existing)
 		{
 			if (!existing->IsDirectory)
@@ -233,11 +251,19 @@ namespace Engine {
 		std::vector<Utils::TemplateFile> files;
 		std::vector<std::filesystem::path> directories;
 		ENGINE_TRY(Utils::ReadTemplate(specification.TemplatesDirectory / ProjectTemplateToString(specification.Template), files, directories));
+		if (specification.Template == ProjectTemplate::Basic3D)
+		{
+			ENGINE_TRY_ASSIGN(const Random::State seed, SecureRandom::GenerateState());
+			UUIDGenerator ids = UUIDGenerator::CreateRandom(seed);
+			ENGINE_TRY_ASSIGN(const Json scene, BuildBasic3DScene(registry, ids));
+			ENGINE_TRY_ASSIGN(std::string text, JsonWriter::Write(scene));
+			files.push_back(Utils::TemplateFile{ "Assets/Scenes/Main.scene", std::move(text) });
+		}
 
 		// Nothing is left behind on failure: the first missing directory on the way to the root goes again, or, when the root
 		// existed (empty), everything created in it.
 		const std::filesystem::path firstMissing = Utils::FindFirstMissing(root);
-		Result<CreatedProject> created = Utils::WriteNewProject(specification, registry, files, directories);
+		Result<CreatedProject> created = Utils::WriteNewProject(resolved, registry, files, directories);
 		if (created)
 			return created;
 		if (!firstMissing.empty())

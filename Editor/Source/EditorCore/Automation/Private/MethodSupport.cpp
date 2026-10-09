@@ -65,8 +65,7 @@ namespace Engine {
 
 			ENGINE_TRY_ASSIGN(const std::string text, WithContext(SceneSerializer::SaveToString(editor.GetScene()), std::format("while saving the scene to '{}'", ToProjectRelative(path))));
 			ENGINE_TRY(editor.WriteProjectFile(path, std::as_bytes(std::span(text.data(), text.size()))));
-			editor.MarkSceneSaved(path);
-			return {};
+			return editor.MarkSceneSaved(path);
 		}
 
 		Result<VfsPath> GetOwnScenePath(const EditorContext& editor)

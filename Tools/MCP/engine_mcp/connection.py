@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 import engine_client
+from engine_mcp.autosave import has_published_autosave
 from engine_mcp.transcript import UNRECORDED_METHODS, Transcript
 
 DEFAULT_TIMEOUT_SECONDS = 60.0
@@ -196,14 +197,8 @@ class EditorConnection:
         return max(recent, key=lambda path: path.stat().st_mtime).as_posix()
 
     def autosave_available(self) -> bool:
-        """Whether the project has an autosave to recover (§4.13: Library/Autosave/, from M10)."""
-        if self.project_root is None:
-            return False
-        autosave = self.project_root / "Library" / "Autosave"
-        try:
-            return autosave.is_dir() and any(path.is_file() for path in autosave.rglob("*"))
-        except OSError:
-            return False
+        """Whether the project has a complete published recovery candidate (§4.13; final validation is the editor's)."""
+        return self.project_root is not None and has_published_autosave(self.project_root)
 
     def prepare_params(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
         """Makes a relative project path absolute (against the bridge's working directory) before project.create or

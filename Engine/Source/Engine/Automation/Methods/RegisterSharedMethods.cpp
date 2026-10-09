@@ -7,10 +7,12 @@
 #include "Engine/Automation/Methods/ObserveMethods.h"
 #include "Engine/Automation/Methods/PhysicsMethods.h"
 #include "Engine/Automation/Methods/PlayMethods.h"
+#include "Engine/Automation/Methods/RaycastMethods.h"
 #include "Engine/Automation/Methods/RpcMethods.h"
 #include "Engine/Automation/Methods/SceneMethods.h"
 #include "Engine/Automation/Methods/ScreenshotMethods.h"
 #include "Engine/Automation/Methods/SessionMethods.h"
+#include "Engine/Automation/Methods/StatsMethods.h"
 
 namespace Engine {
 
@@ -30,6 +32,8 @@ namespace Engine {
 		RegisterPhysicsMethodTypes(registry);
 		// M12 (ADR 0015): audio.stats.
 		RegisterAudioMethodTypes(registry);
+		RegisterRaycastMethodTypes(registry);
+		RegisterStatsMethodTypes(registry);
 	}
 
 	void RegisterSharedMethods(MethodRegistry& methods, AutomationHost host)
@@ -46,6 +50,8 @@ namespace Engine {
 		RegisterPhysicsMethods(methods);
 		// M12 (ADR 0015): audio.stats.
 		RegisterAudioMethods(methods);
+		RegisterRaycastMethods(methods);
+		RegisterStatsMethods(methods);
 	}
 
 }

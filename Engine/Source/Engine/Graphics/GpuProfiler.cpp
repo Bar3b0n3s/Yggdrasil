@@ -5,6 +5,7 @@
 #include "Engine/Core/Log.h"
 #include "Engine/Graphics/GraphicsDevice.h"
 
+#include <limits>
 #include <utility>
 
 namespace Engine {
@@ -19,18 +20,27 @@ namespace Engine {
 
 	GpuProfiler::~GpuProfiler() = default;
 
-	void GpuProfiler::BeginFrame(uint32_t, uint64_t)
+	void GpuProfiler::BeginFrame(uint32_t frameSlot, uint64_t frameIndex)
 	{
-		ENGINE_CONTRACT_STUB();
+		ENGINE_CORE_ASSERT(m_FrameIdentityMode != FrameIdentityMode::Local, "GpuProfiler cannot mix local and host frame identities");
+		m_FrameIdentityMode = FrameIdentityMode::Host;
+		BeginFrameInternal(frameSlot, frameIndex);
 	}
 
 	GpuTimingFrame GpuProfiler::GetLastFrameResult() const
 	{
-		ENGINE_CONTRACT_STUB();
-		return {};
+		return m_LastFrameResult;
 	}
 
 	void GpuProfiler::BeginFrame(uint32_t frameSlot)
+	{
+		ENGINE_CORE_ASSERT(m_FrameIdentityMode != FrameIdentityMode::Host, "GpuProfiler cannot mix local and host frame identities");
+		ENGINE_CORE_VERIFY(m_NextFrameIndex != std::numeric_limits<uint64_t>::max(), "GpuProfiler exhausted its local frame identities");
+		m_FrameIdentityMode = FrameIdentityMode::Local;
+		BeginFrameInternal(frameSlot, m_NextFrameIndex++);
+	}
+
+	void GpuProfiler::BeginFrameInternal(uint32_t frameSlot, uint64_t frameIndex)
 	{
 		ENGINE_CORE_VERIFY(frameSlot < m_Frames.size(), "GpuProfiler::BeginFrame slot {} is out of range ({} frames in flight)", frameSlot,
 			m_Frames.size());
@@ -41,6 +51,7 @@ namespace Engine {
 		// The slot's previous frame has completed (FramePacer::BeginFrame waited for it), so its queries are readable and,
 		// once read or dropped, free to record again.
 		FrameRecord& frame = m_Frames[frameSlot];
+		m_LastFrameResult = {};
 		if (frame.IsRecorded)
 			CollectFrame(frame);
 		for (TimedScope& scope : frame.Scopes)
@@ -50,6 +61,7 @@ namespace Engine {
 		}
 		frame.Scopes.clear();
 		frame.TimedScopeCount = 0;
+		frame.FrameIndex = frameIndex;
 		frame.IsRecorded = true;
 		m_FrameSlot = frameSlot;
 		m_HasFrame = true;
@@ -105,7 +117,7 @@ namespace Engine {
 
 	std::span<const GpuTimingSample> GpuProfiler::GetLastFrameSamples() const
 	{
-		return m_LastFrameSamples;
+		return m_LastFrameResult.Samples;
 	}
 
 	nvrhi::TimerQueryHandle GpuProfiler::AcquireQuery()
@@ -156,7 +168,8 @@ namespace Engine {
 		// NVRHI's timer queries measure durations, so the scopes are laid out back to back: each starts where its previous
 		// sibling ended, or where its parent started (GpuTimingSample::StartMilliseconds). nextStart[d] is where the next
 		// scope of depth d starts.
-		m_LastFrameSamples.clear();
+		m_LastFrameResult.Available = true;
+		m_LastFrameResult.FrameIndex = frame.FrameIndex;
 		std::vector<double> nextStart(1, 0.0);
 		for (size_t index = 0; index < frame.Scopes.size(); ++index)
 		{
@@ -167,7 +180,7 @@ namespace Engine {
 			nextStart.push_back(start);
 			if (scope.Query != nullptr)
 			{
-				m_LastFrameSamples.push_back({
+				m_LastFrameResult.Samples.push_back({
 					.Name = scope.Name,
 					.StartMilliseconds = start,
 					.Milliseconds = durations[index],

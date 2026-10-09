@@ -19,6 +19,7 @@
 #include <glm/gtc/quaternion.hpp>
 
 #include <cmath>
+#include <algorithm>
 #include <optional>
 
 // Simulation path (§4.12): only + - * /, sqrt (glm's normalize, cross, inverse and mat4_cast are built from them) and
@@ -361,13 +362,15 @@ namespace Engine {
 
 	Result<RenderSnapshot> ExtractRenderSnapshot(const Scene& scene, const RenderExtractionRequest& request)
 	{
-		if (request.Flags != RenderViewFlags::None || !request.SelectedEntities.empty()
-			|| !request.Annotations.LabelEntities.empty() || request.Annotations.Labels != RenderAnnotationLabels::None || request.Annotations.Bounds || request.Annotations.Axes
-			|| request.Quality.ShadowMapSize != 2048 || request.Quality.SsaoHalfResolution)
-		{
-			ENGINE_CONTRACT_STUB();
-			return std::unexpected(Error(ErrorCode::Unsupported, "M9 render extraction options are not implemented"));
-		}
+		constexpr uint32_t ValidFlags = (1u << 7) - 1u;
+		if ((std::to_underlying(request.Flags) & ~ValidFlags) != 0)
+			return MakeError(ErrorCode::InvalidArgument, "render extraction has unknown view flags");
+		if (request.Annotations.Labels > RenderAnnotationLabels::Explicit
+			|| (request.Annotations.Labels != RenderAnnotationLabels::Explicit && !request.Annotations.LabelEntities.empty()))
+			return MakeError(ErrorCode::InvalidArgument, "render extraction has invalid annotation labels");
+		const uint32_t shadowSize = request.Quality.ShadowMapSize;
+		if (shadowSize < 256 || shadowSize > 8192 || (shadowSize & (shadowSize - 1)) != 0)
+			return MakeError(ErrorCode::InvalidArgument, "shadow map size must be a power of two from 256 to 8192");
 		if (request.Width == 0 || request.Height == 0)
 			return MakeError(ErrorCode::InvalidArgument, "a render extraction needs a view of at least 1x1 pixels, got {}x{}", request.Width, request.Height);
 		if (!std::isfinite(request.Alpha) || request.Alpha < 0.0f || request.Alpha > 1.0f)
@@ -375,6 +378,21 @@ namespace Engine {
 
 		RenderSnapshot snapshot;
 		snapshot.Alpha = request.Alpha;
+		snapshot.Flags = request.Flags;
+		snapshot.Quality = request.Quality;
+		snapshot.Annotations = request.Annotations;
+		snapshot.SelectedEntities = request.SelectedEntities;
+		const auto canonicalize = [&scene](std::vector<UUID>& ids)
+		{
+			std::erase_if(ids, [&scene](UUID id)
+			{
+				return !scene.FindEntityByID(id).IsValid();
+			});
+			std::ranges::sort(ids);
+			ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
+		};
+		canonicalize(snapshot.SelectedEntities);
+		canonicalize(snapshot.Annotations.LabelEntities);
 		ENGINE_TRY(Utils::ExtractCamera(scene, request, snapshot));
 
 		std::optional<RenderEnvironment> environment;
@@ -404,6 +422,8 @@ namespace Engine {
 				item.CastShadows = renderer->CastShadows;
 				item.ReceiveShadows = renderer->ReceiveShadows;
 				item.Entity = id;
+				snapshot.PickTable.push_back(id);
+				item.PickId = static_cast<uint32_t>(snapshot.PickTable.size());
 				snapshot.Meshes.push_back(std::move(item));
 			}
 			if (const DirectionalLightComponent* light = entity.TryGetComponent<DirectionalLightComponent>())
@@ -415,6 +435,11 @@ namespace Engine {
 						.Intensity = light->Intensity,
 						.LightAngle = light->LightAngle,
 						.CastShadows = light->CastShadows,
+						.ShadowDistance = light->ShadowDistance,
+						.CascadeCount = light->CascadeCount,
+						.CascadeSplitLambda = light->CascadeSplitLambda,
+						.DepthBias = light->DepthBias,
+						.NormalBias = light->NormalBias,
 					},
 					getWorld(), id);
 			}

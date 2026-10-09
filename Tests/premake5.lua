@@ -19,8 +19,22 @@ project "Tests"
 	files
 	{
 		"Source/**.h",
-		"Source/**.cpp"
+		"Source/**.cpp",
+		"../Editor/Source/Editor/**.cpp"
 	}
+
+	-- Exercise the production UI with a headless ImGui context, without linking the Editor executable or moving UI
+	-- into EditorCore. App/process integration is tested through the real executable; it has its own entry point.
+	removefiles
+	{
+		"../Editor/Source/Editor/EditorMain.cpp",
+		"../Editor/Source/Editor/EditorApp.cpp"
+	}
+
+	filter "files:../Editor/Source/Editor/**.cpp"
+		enablepch "Off"
+
+	filter {}
 
 	includedirs
 	{

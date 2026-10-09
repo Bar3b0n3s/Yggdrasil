@@ -32,9 +32,10 @@
 
 namespace Engine {
 
-	// The golden scenes of Roadmap M8, as Projects/FeatureTest/Scaffold/Golden.jsonl writes them.
-	static constexpr std::array<std::string_view, 8> GoldenSceneNames = { "AlphaModes", "Bloom", "DebugDraw", "GltfFixture", "IblOnly",
-		"MaterialGrid", "Text", "Tonemappers" };
+	// The golden scenes of Roadmap M8/M9, as Projects/FeatureTest/Scaffold/Golden.jsonl writes them.
+	static constexpr std::array<std::string_view, 17> GoldenSceneNames = { "AlphaModes", "AnnotatedScreenshot", "Bloom", "DebugDraw",
+		"GltfFixture", "GtaoOff", "GtaoOn", "GtaoOrtho", "IblOnly", "MaterialGrid", "SelectionOutline", "ShadowsFar", "ShadowsNear",
+		"ShadowsOrtho", "SpotShadows", "Text", "Tonemappers" };
 
 	static std::filesystem::path GetFeatureTestRoot()
 	{
@@ -105,7 +106,7 @@ namespace Engine {
 			REQUIRE_MESSAGE(refresh.has_value(), refresh.error().ToString());
 			CHECK(refresh->Diagnostics.empty());
 
-			// Exactly the scenes of Roadmap M8 live in the folder.
+			// Exactly the scenes of Roadmap M8/M9 live in the folder.
 			const Result<std::vector<std::filesystem::path>> files = FileSystem::ListDirectory(GetFeatureTestPath("Assets/Scenes/Golden"));
 			REQUIRE_MESSAGE(files.has_value(), files.error().ToString());
 			std::vector<std::string> scenes;
@@ -144,8 +145,8 @@ namespace Engine {
 				}
 				if (snapshot->Environment.Environment.IsValid())
 					CHECK(manager.GetAssetType(snapshot->Environment.Environment) == AssetType::Environment);
-				// Every golden scene turns GTAO off, so M9's GTAO does not change the M8 goldens.
-				CHECK_FALSE(snapshot->Post.SsaoEnabled);
+				// Only the two M9 GTAO-on fixtures enable AO; the M8 scenes keep it disabled.
+				CHECK(snapshot->Post.SsaoEnabled == (name == "GtaoOn" || name == "GtaoOrtho"));
 			}
 		}
 

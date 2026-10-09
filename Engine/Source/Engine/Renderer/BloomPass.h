@@ -29,6 +29,8 @@
 
 namespace Engine {
 
+	struct RenderPassCounters;
+
 	class GraphicsDevice;
 
 	struct BloomPassInputs
@@ -82,6 +84,8 @@ namespace Engine {
 		// of creating binding sets for new resources (Gpu).
 		[[nodiscard]] Result<nvrhi::ITexture*> Record(nvrhi::ICommandList& commandList, PassBindingCache& bindings, const BloomPassInputs& inputs);
 	private:
+		friend class SceneRenderer;
+		[[nodiscard]] Result<nvrhi::ITexture*> RecordCounted(nvrhi::ICommandList& commandList, PassBindingCache& bindings, const BloomPassInputs& inputs, RenderPassCounters& counters);
 		// The back-reference, the format, the pipelines and the sampler (BloomPass.cpp).
 		struct State;
 	private:

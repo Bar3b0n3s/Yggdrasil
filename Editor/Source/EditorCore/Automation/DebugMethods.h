@@ -15,6 +15,7 @@ namespace Engine {
 	class EditorMethodContext;
 	class MethodRegistry;
 	class TypeRegistry;
+	struct NoParams;
 
 	// debug.stall {ms}: blocks the main thread for `ms` milliseconds inside the handler, with the phase marker
 	// "Debug:stall <ms> ms", so another client's requests meet the watchdog (test_busy_watchdog_reports_phase).
@@ -43,18 +44,28 @@ namespace Engine {
 		uint32_t Frames = 0; // the polls it took
 	};
 
+	// debug.deviceLost {}: queue a real device-loss path for the next submission after the host publishes its CPU
+	// autosave snapshot. Test hooks only; needs an open project and a rendering host with QueueDeviceLost installed.
+	// Unsupported without that callback or with renderer none; otherwise propagates callback errors unchanged.
+	struct DebugDeviceLostResult
+	{
+		bool Queued = false;
+	};
+
 	namespace Automation {
 
 		[[nodiscard]] Result<DebugStallResult> DebugStall(EditorMethodContext& context, const DebugStallParams& params);
 		[[nodiscard]] Result<Scope<PendingOperation>> DebugPend(EditorMethodContext& context, const DebugPendParams& params);
+		[[nodiscard]] Result<DebugDeviceLostResult> DebugDeviceLost(EditorMethodContext& context, const NoParams& params);
 
 	}
 
 	// The structs are always registered (the registry is built before the command line is known to the methods).
 	void RegisterDebugMethodTypes(TypeRegistry& registry);
 
-	// Registers debug.stall and debug.pend (TestHook; available in the launcher state, so the hooks work before a project
-	// opens; not AllowedInBatch). Called by RegisterEditorMethods only with EditorMethodOptions::TestHooks.
+	// Registers debug.stall, debug.pend and debug.deviceLost as TestHook methods. debug.deviceLost has no tools/runtime/
+	// dry-run/batch/launcher support; the existing stall/pend availability policies are unchanged.
+	// Called by RegisterEditorMethods only with EditorMethodOptions::TestHooks.
 	void RegisterDebugMethods(MethodRegistry& methods);
 
 }

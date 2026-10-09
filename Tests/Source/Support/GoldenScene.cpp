@@ -10,11 +10,13 @@
 #include "Engine/Core/VfsPath.h"
 #include "Engine/Core/VirtualFileSystem.h"
 #include "Engine/Graphics/GraphicsDevice.h"
+#include "Engine/Project/ProjectSerializer.h"
 #include "Engine/Renderer/EnvironmentBaker.h"
 #include "Engine/Renderer/GpuResourceCache.h"
 #include "Engine/Renderer/SceneRenderer.h"
 #include "Engine/Renderer/ViewportCapture.h"
 #include "Engine/Scene/LoadReport.h"
+#include "Engine/Scene/RenderAnnotations.h"
 #include "Engine/Scene/RenderExtraction.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/SceneSerializer.h"
@@ -126,6 +128,9 @@ namespace Engine {
 				ENGINE_TRY_ASSIGN(const VfsPath cacheRoot, VfsPath::Parse("cache://"));
 				ENGINE_TRY_ASSIGN(const AssetRefreshReport refresh,
 					assets.GetManager().OpenProject({ .AssetsRoot = assetsRoot, .CacheRoot = cacheRoot, .ReadOnly = false, .HotReload = false }));
+				const std::string scanErrors = DescribeAssetErrors(refresh.Diagnostics);
+				if (!scanErrors.empty())
+					return MakeError(ErrorCode::Validation, "the golden project scan failed: {}", scanErrors);
 				if (!refresh.CreatedMetas.empty())
 				{
 					const std::string message = std::format("Projects/FeatureTest has {} source(s) without a .meta, the first '{}'", refresh.CreatedMetas.size(),
@@ -147,6 +152,7 @@ namespace Engine {
 				if (!report.Diagnostics.empty())
 					return MakeError(ErrorCode::Validation, "the golden scene '{}' loads with diagnostics: {}", name, DescribeLoadDiagnostics(report));
 				TransformSystem::Update(*scene);
+				ENGINE_TRY_ASSIGN(const std::string sceneBefore, SceneSerializer::SaveToString(*scene));
 
 				GpuResourceCache cache(device, assets.GetManager());
 				ENGINE_TRY_ASSIGN(const Scope<SceneRendererPipelines> pipelines, SceneRendererPipelines::Create(device, gpu.GetPipelines()));
@@ -158,8 +164,21 @@ namespace Engine {
 					return MakeError(ErrorCode::Validation, "the golden scene '{}' has no primary camera", name);
 				if (options.EditSnapshot)
 					options.EditSnapshot(snapshot);
+				// Use the actual loaded scene and assets, as the screenshot host does. No borrowed scene state escapes.
+				ENGINE_TRY_ASSIGN(const VfsPath projectPath, VfsPath::Create("project", "FeatureTest.eproj"));
+				ProjectLoadReport projectReport;
+				ENGINE_TRY_ASSIGN(const ProjectSettings settings, ProjectSerializer::LoadFromFile(vfs, projectPath, assets.GetRegistry(), { .StrictUnknowns = true, .SourcePath = {} }, projectReport));
+				if (!projectReport.Diagnostics.empty())
+					return MakeError(ErrorCode::Validation, "the golden project settings load with diagnostics");
+				ENGINE_TRY_ASSIGN(const PhysicsLayerTable layers, PhysicsLayerTable::Create(settings.Physics.Layers, settings.Physics.Collisions));
+				ENGINE_TRY(AppendRenderAnnotations(*scene, assets.GetManager(), layers, nullptr, snapshot));
+				if (options.InspectSnapshot)
+					options.InspectSnapshot(snapshot);
 				assets.GetManager().WaitIdle();
 				ENGINE_TRY_ASSIGN(Image image, capture->Capture({ .Width = options.Width, .Height = options.Height }, snapshot));
+				ENGINE_TRY_ASSIGN(const std::string sceneAfter, SceneSerializer::SaveToString(*scene));
+				if (sceneBefore != sceneAfter)
+					return MakeError(ErrorCode::Validation, "the golden scene '{}' was mutated during rendering", name);
 
 				const std::string errors = DescribeAssetErrors(assets.GetManager().GetDiagnostics());
 				if (!errors.empty())

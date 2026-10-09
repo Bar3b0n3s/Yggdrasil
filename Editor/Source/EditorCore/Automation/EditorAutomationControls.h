@@ -42,6 +42,9 @@ namespace Engine {
 		// Listener preference toggle: persist user://Editor.json before changing listener state; roll back on startup error.
 		// Existing --automation explicit opt-in and one-shot exclusion take precedence. Errors: Io, InvalidState, bind errors.
 		[[nodiscard]] Status SetAllowAiAutomation(bool allowed);
+	private:
+		EditorContext* m_Context = nullptr;   // back-reference; context outlives this service
+		AutomationServer* m_Server = nullptr; // back-reference; server outlives this service
 	};
 
 }

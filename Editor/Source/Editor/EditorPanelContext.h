@@ -1,6 +1,7 @@
 #pragma once
 
 #include "EditorCore/Autosave/Autosave.h"
+#include "Engine/Asset/AssetHandle.h"
 #include "Engine/Core/Result.h"
 
 #include <cstdint>
@@ -8,6 +9,7 @@
 #include <functional>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace Engine {
 
@@ -16,8 +18,10 @@ namespace Engine {
 	class EditorAutomationControls;
 	class EditorContext;
 	class EditorViewportHost;
+	class GizmoController;
 	class ReflectedEditController;
 	class ThumbnailCache;
+	struct ThumbnailRequest;
 
 	enum class EditorRecoveryDecision : uint8_t
 	{
@@ -51,6 +55,22 @@ namespace Engine {
 		std::function<Status(const EditorRecoveryOffer&, EditorRecoveryDecision)> QueueDecision{};
 	};
 
+	struct EditorAutomationPreferenceState
+	{
+		bool Allowed = false;
+		bool Pending = false;
+		std::optional<Error> Failure{};
+	};
+
+	struct EditorAutomationPreferenceServices
+	{
+		// Memory-only snapshot; startup loads preferences and safe points publish completion or failure.
+		std::function<EditorAutomationPreferenceState()> GetState{};
+		// Queue only, no I/O in Draw. The host calls Controls.SetAllowAiAutomation at the next safe point.
+		// InvalidState if another change is pending; completion clears Pending and publishes Allowed or Failure.
+		std::function<Status(bool)> QueueChange{};
+	};
+
 	// The host owns this service bundle for EditorLayer's lifetime. Its references are documented back-references to
 	// services that outlive it; individual panels borrow it only for Draw. CPU models live in EditorCore, and no panel
 	// owns the scene or retains a component/asset pointer. Errors remain visible in the initiating panel and Console.
@@ -63,7 +83,17 @@ namespace Engine {
 		EditorViewportHost& Viewports;
 		ReflectedEditController& InspectorEdits;
 		ThumbnailCache& Thumbnails;
+		GizmoController& Gizmos; // shared with the scene viewport host; preview is scene-view only
+		// Memory-only lookup of the registered thumbnail texture for this exact bound request; 0 when absent.
+		// The host pumps/uploads outside Draw and retires registrations before the cache binding is reset.
+		std::function<uint64_t(const ThumbnailRequest&)> FindThumbnailTexture{};
+		// Drain copied OS-drop paths for the current project epoch. No I/O; the panel queues asset.import.
+		std::function<std::vector<std::filesystem::path>()> TakeContentDrops{};
+		// Queue only: valid handle plays via AudioPreview; null stops. The host checks the project epoch at execution,
+		// calls Play/Stop at a safe point, and publishes asynchronous failures in Console. No asset loading in Draw.
+		std::function<Status(AssetHandle)> QueueAudioPreview{};
 		EditorRecoveryServices Recovery{};
+		EditorAutomationPreferenceServices AutomationPreferences{};
 		// OS drops are copied as native paths; asset.import validates them and writes/provenance through existing commands.
 		// External editor launch uses Process with argument lists, never a shell, and propagates Io/NotFound.
 		std::function<Status(const std::filesystem::path&, uint32_t)> OpenSource{};

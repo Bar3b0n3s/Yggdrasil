@@ -190,7 +190,7 @@ namespace Engine {
 		TEST_CASE("ImGuiLayer: imgui.ini is written under user:// before a project opens"
 			* doctest::test_suite(Test::GpuSuite))
 		{
-			// §8.11: while no project is open (M5 has no projects), the editor keeps imgui.ini in user://Editor/, which is
+			// §8.11: while no project is open, the editor keeps its launcher layout in user://Editor/imgui.ini, which is
 			// <user-data root>/<AppName>/Editor/imgui.ini on disk; ImGui writes it at shutdown at the latest. The editor
 			// renders, so the test needs a device like every GPU test; the probe device is gone before the editor starts.
 			if (!Test::ProbeGpuForProcess())
@@ -209,7 +209,7 @@ namespace Engine {
 			CHECK(Test::FindProblemLogLines(result->StandardError).empty());
 			const Result<std::string> ini = FileSystem::ReadText(userData / ENGINE_PRODUCT_NAME / "Editor" / "imgui.ini");
 			REQUIRE_MESSAGE(ini.has_value(), ini.error().ToString());
-			CHECK(ini->contains("[Window][Dear ImGui Demo]"));
+			CHECK(ini->contains("[Window][ProjectLauncher]"));
 		}
 
 		TEST_CASE("ImGuiLayer: on a native platform the vendored GLFW backend is the platform side" * doctest::test_suite(Test::GpuSuite))

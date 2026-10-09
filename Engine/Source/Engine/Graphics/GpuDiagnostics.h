@@ -83,7 +83,13 @@ namespace Engine {
 		// Set by message's "Device Removed!", by SetDeviceLost, or by the injected device-lost fault. GraphicsDevice checks it
 		// after every submission and then calls RaiseDeviceLost (§8.1). Never cleared: recovery is out of scope (§8.14).
 		[[nodiscard]] bool IsDeviceLost() const;
-		void SetDeviceLost();
+		// injected=true publishes synthetic loss and the lost flag together. Both are sticky, including across later
+		// native-loss reports/SetDeviceLost(false) and ResetCounts. A reader observing synthetic loss through IsDeviceLost
+		// also observes IsDeviceLossInjected; native-only loss never sets that marker. Never changes GetInjectedFault.
+		void SetDeviceLost(bool injected = false);
+		// True once loss is injected by SetDeviceLost(true) or OnSubmitted's CLI fault. GraphicsDevice must never query
+		// native device-fault details for that device: synthetic loss does not put the Vulkan device into a lost state.
+		[[nodiscard]] bool IsDeviceLossInjected() const;
 
 		[[nodiscard]] GpuFault GetInjectedFault() const { return m_InjectedFault; }
 
@@ -105,7 +111,7 @@ namespace Engine {
 		GpuFault m_InjectedFault = GpuFault::None;
 		std::atomic<uint64_t> m_ErrorCount{ 0 };
 		std::atomic<uint64_t> m_WarningCount{ 0 };
-		std::atomic<bool> m_IsDeviceLost{ false };
+		std::atomic<uint8_t> m_DeviceLossState{ 0 }; // lost and synthetic bits are published in one atomic operation
 	};
 
 	// The fatal error a failed Vulkan result becomes (§4.6 item 2, §8.14 item 6): VK_ERROR_DEVICE_LOST is DeviceLost,

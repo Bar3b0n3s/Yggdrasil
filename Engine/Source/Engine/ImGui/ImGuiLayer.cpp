@@ -131,15 +131,25 @@ namespace Engine {
 		return layer;
 	}
 
-	void ImGuiLayer::BeginFrame(double deltaSeconds, uint32_t frameSlot)
+	void ImGuiLayer::BeginFrame(double deltaSeconds, uint32_t frameSlot, bool retainDisplaySize)
 	{
 		ENGINE_CORE_ASSERT(deltaSeconds >= 0.0 && std::isfinite(deltaSeconds), "ImGuiLayer::BeginFrame with the delta {}", deltaSeconds);
 		ENGINE_CORE_ASSERT(ImGui::GetCurrentContext() == m_Context, "ImGuiLayer::BeginFrame with another Dear ImGui context current");
 		m_Renderer->BeginFrame(frameSlot);
+		ImGuiIO& io = ImGui::GetIO();
+		const ImVec2 previousSize = io.DisplaySize;
+		const ImVec2 previousScale = io.DisplayFramebufferScale;
 		if (m_UsesGlfwBackend)
 			ImGui_ImplGlfw_NewFrame();
 		else
 			UpdateNullPlatform();
+		if (retainDisplaySize)
+		{
+			io.DisplaySize = previousSize.x > 0.0f && previousSize.y > 0.0f
+				? previousSize
+				: ImVec2(static_cast<float>(std::max(m_Window->GetWidth(), 1u)), static_cast<float>(std::max(m_Window->GetHeight(), 1u)));
+			io.DisplayFramebufferScale = previousScale;
+		}
 		// After the backend, which sets its own wall-clock delta (see the declaration).
 		ImGui::GetIO().DeltaTime = static_cast<float>(std::max(deltaSeconds, MinimumDeltaSeconds));
 		ImGui::NewFrame();

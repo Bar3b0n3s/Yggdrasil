@@ -1,6 +1,12 @@
 #pragma once
 
 #include "Engine/Core/Result.h"
+#include "EditorCore/Inspector/ReflectedEditController.h"
+
+#include <cstdint>
+#include <optional>
+#include <string>
+#include <vector>
 
 namespace Engine {
 
@@ -14,6 +20,15 @@ namespace Engine {
 	{
 	public:
 		[[nodiscard]] Status Draw(EditorPanelContext& context);
+	private:
+		void ReportFailure(const Error& error);
+		[[nodiscard]] Status ApplyQueuedEdit(EditorPanelContext& context);
+		void CancelEdit(EditorPanelContext& context);
+		std::optional<InspectorEditTarget> m_ActiveTarget{};
+		std::string m_Error{};
+		std::vector<uint64_t> m_Tickets{};
+		bool m_CommitQueued = false;
+		friend class EditorLayer;
 	};
 
 }

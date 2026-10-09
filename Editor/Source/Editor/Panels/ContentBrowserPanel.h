@@ -2,6 +2,11 @@
 
 #include "Engine/Core/Result.h"
 
+#include <array>
+#include <cstdint>
+#include <string>
+#include <vector>
+
 namespace Engine {
 
 	struct EditorPanelContext;
@@ -14,6 +19,16 @@ namespace Engine {
 	{
 	public:
 		[[nodiscard]] Status Draw(EditorPanelContext& context);
+	private:
+		std::string m_Project{};
+		std::string m_Directory = "Assets";
+		std::array<char, 256> m_Search{};
+		std::array<char, 256> m_CreateName{};
+		std::array<char, 4096> m_ImportSource{};
+		std::array<char, 4096> m_MovePath{};
+		std::vector<uint64_t> m_Tickets{};
+		std::string m_Error{};
+		int m_CreateType = 0;
 	};
 
 }

@@ -1,6 +1,7 @@
 #include "EditorPCH.h"
 #include "EditorCore/Automation/DebugMethods.h"
 
+#include "EditorCore/Automation/AutomationServer.h"
 #include "EditorCore/Automation/EditorMethodContext.h"
 #include "EditorCore/Automation/Private/MethodSupport.h"
 #include "Engine/Automation/Protocol/MethodRegistry.h"
@@ -79,6 +80,15 @@ namespace Engine {
 			return Scope<PendingOperation>(CreateScope<DebugPendOperation>(params.Frames, client));
 		}
 
+		Result<DebugDeviceLostResult> DebugDeviceLost(EditorMethodContext& context, const NoParams& /*params*/)
+		{
+			const auto& specification = context.GetServer().GetSpecification();
+			if (specification.RendererName == "none" || !specification.QueueDeviceLost)
+				return MakeError(ErrorCode::Unsupported, "This host cannot queue an injected device loss");
+			ENGINE_TRY(specification.QueueDeviceLost());
+			return DebugDeviceLostResult{ .Queued = true };
+		}
+
 	}
 
 	void RegisterDebugMethodTypes(TypeRegistry& registry)
@@ -95,10 +105,19 @@ namespace Engine {
 
 		registry.Struct<DebugPendResult>("DebugPendResult", "How the test hook debug.pend resolved.")
 			.Field("frames", &DebugPendResult::Frames, "The frames (polls) it took.");
+
+		registry.Struct<DebugDeviceLostResult>("DebugDeviceLostResult", "Whether the rendering host queued an injected device loss.")
+			.Field("queued", &DebugDeviceLostResult::Queued, "The fault is queued for a submission after the host publishes its autosave snapshot.");
 	}
 
 	void RegisterDebugMethods(MethodRegistry& methods)
 	{
+		methods.Add({ .Name = "debug.deviceLost",
+						.Description = "Test hook: queue device loss on the next rendering submission after publishing the editor's autosave snapshot.",
+						.TestHook = true,
+						.Examples = { { .Description = "Exercise crash recovery after making a dirty edit.", .Params = Json::object() } } },
+			&Automation::DebugDeviceLost);
+
 		Json stallExample = Json::object();
 		stallExample["ms"] = 100;
 		methods.Add(
