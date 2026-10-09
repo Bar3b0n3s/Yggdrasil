@@ -17,6 +17,7 @@ All requested items are approved. The product owner also granted standing permis
 | MikkTSpace (`mikktspace.c/.h`) | github.com/mmikk/MikkTSpace | zlib | `Vendor/MikkTSpace/` (vendored by the M6 contract; commit and SHA-256 in `Vendor/MikkTSpace/VENDOR.md`) | M6 |
 | stb_vorbis (`stb_vorbis.c`) | github.com/nothings/stb (pinned commit) | MIT OR Unlicense | `Vendor/stb/` (vendored by the M12 contract at the stb commit pinned in `Vendor/stb/VENDOR.md`, which records its version and SHA-256; built into miniaudio, `Vendor/miniaudio/VENDOR.md`) | M12 |
 | Format fixtures (FLAC, MP3, OTF) | pinned upstream sources, recorded in `Tests/Data/LICENSES.md` | permissive (per fixture) | `Tests/Data/` | M14 |
+| Audio format fixtures `Tone.ogg` (Wikimedia Commons `File:1000Hz.ogg`) and `Tone.mp3` (NASA `File:Sputnik - Beep.mp3` via Wikimedia Commons) | commons.wikimedia.org (unmodified downloads; neither codec project publishes a small public-domain sample at a stable address) | public domain | `Tests/Data/Assets/Audio/` (SHA-256 and Commons revision SHA-1 in `Tests/Data/LICENSES.md`) | M12 — approved by the product owner on 2026-10-08 (ADR 0015 decision 25) |
 
 Exact sizes and checksums are not part of this record because they were not known when the items were approved. They are pinned when each item is first fetched, as part of that milestone's change:
 
