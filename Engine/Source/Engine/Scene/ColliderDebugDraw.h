@@ -8,6 +8,7 @@
 #include <glm/gtc/quaternion.hpp>
 
 #include <cstdint>
+#include <span>
 #include <vector>
 
 // Collider visualization (Architecture §8.10 "Filled by ... collider visualization (built from components, so it works in
@@ -16,18 +17,19 @@
 // shows exactly the bodies a play session will create, and a play session adds the sleeping state of its bodies.
 //
 // The shapes are renderer-agnostic records in the vocabulary of the renderer's DebugDrawList (§8.10: Box, Sphere, Capsule,
-// Line), so the render snapshot's debug draw list (M8) takes them one to one: Box, Sphere and Capsule records become the
-// list's Box, Sphere and Capsule entries, Lines records one Line per vertex pair, each with the record's colour, duration 0
-// (this frame) and DepthMode Tested. Render extraction appends them when the view asks for colliders (the editor's
-// viewport option and the screenshot annotation "colliders", M9/M10); the adapter and that request flag land with the
-// merge of M8's DebugDrawList (Docs/Decisions/0014-m11-decisions.md decision 16), so the tests of this unit check the
-// records, not pixels.
+// Line), so the render snapshot's debug draw list (M8) takes them one to one through AppendColliderDebugDraw: Box, Sphere
+// and Capsule records become the list's Box, Sphere and Capsule entries, Lines records one Line per vertex pair, each with
+// the record's colour, duration 0 (this frame) and DepthMode Tested. The view that asks for colliders appends them to its
+// snapshot's DebugDraw (the screenshot annotation "colliders" and the editor's viewport option, with the snapshot's
+// RenderViewFlags, arrive with M9 and M10; Docs/Decisions/0016-m8-m11-m12-integration.md decision 3).
 //
-// Frozen by the M11 contract (Docs/Decisions/0014-m11-decisions.md decision 16).
+// Frozen by the M11 contract (Docs/Decisions/0014-m11-decisions.md decision 16); the integration of M8 and M11 added
+// AppendColliderDebugDraw (decision 16's adapter).
 
 namespace Engine {
 
 	class AssetManager;
+	class DebugDrawList;
 	class PhysicsSystem;
 	class Scene;
 
@@ -116,5 +118,14 @@ namespace Engine {
 	// PostStep. Main thread; a pure function of its inputs.
 	[[nodiscard]] std::vector<ColliderDebugShape> BuildColliderDebugDraw(const Scene& scene, const PhysicsLayerTable& layers, const PhysicsSystem* physics,
 		AssetManager* assets, const ColliderDebugDrawOptions& options = {});
+
+	// Appends `shapes` to `list`, in their order (Docs/Decisions/0014-m11-decisions.md decision 16): a Box record becomes a
+	// DebugBox (Position, HalfExtents, Rotation), a Sphere record a DebugSphere (Position, Radius), a Capsule record a
+	// DebugCapsule between the centres of its hemispheres (Position -/+ Rotation * (0, HalfHeight, 0)) with its Radius, and a
+	// Lines record one DebugLine per vertex pair (an unpaired last vertex is ignored). Every command takes the record's
+	// Color, duration 0 (drawn in this extraction only) and DebugDepthMode::Tested; past DebugDrawList::MaxCommands the list
+	// drops and counts them. A pure function of its inputs: additions and multiplications only (Scene is on the simulation
+	// path, §4.12).
+	void AppendColliderDebugDraw(std::span<const ColliderDebugShape> shapes, DebugDrawList& list);
 
 }

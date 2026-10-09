@@ -578,6 +578,16 @@ namespace Engine {
 			CHECK(std::adjacent_find(sorted.begin(), sorted.end()) == sorted.end());
 			CHECK(std::find(codes.begin(), codes.end(), BuildSceneMissingCode) != codes.end());
 			CHECK(std::find(codes.begin(), codes.end(), AssetImportFailedCode) != codes.end());
+			// §13.7 order across the milestones merged in parallel (Docs/Decisions/0016-m8-m11-m12-integration.md decision 2):
+			// the physics codes, then audio, then render, then build.
+			const auto position = [&codes](std::string_view code)
+			{
+				return std::find(codes.begin(), codes.end(), code) - codes.begin();
+			};
+			CHECK(position(PhysicsLimitExceededCode) < position(AudioNoListenerCode));
+			CHECK(position(AudioNoListenerCode) + 1 == position(AudioMultiplePrimaryListenersCode));
+			CHECK(position(AudioMultiplePrimaryListenersCode) < position(RenderLightLimitExceededCode));
+			CHECK(position(RenderLightLimitExceededCode) < position(BuildStartSceneMissingCode));
 		}
 
 		TEST_CASE("ProjectValidator: the asset scan diagnostics are reported under their codes and fixed in one undo step")

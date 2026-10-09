@@ -7,6 +7,7 @@
 #include "EditorCore/EditorContext.h"
 #include "EditorCore/Project/ProjectManager.h"
 #include "Engine/App/EngineContext.h"
+#include "Engine/Asset/AudioClipData.h"
 #include "Engine/Asset/BuiltinAssets.h"
 #include "Engine/Asset/EnvironmentData.h"
 #include "Engine/Asset/IEnvironmentBaker.h"
@@ -36,6 +37,7 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <array>
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -257,6 +259,28 @@ namespace Engine {
 					warnings.push_back(warning);
 			}
 			return warnings;
+		}
+
+		// M12's sound-effect presets (engine://Audio/*, File entries cooked by SoundEffectImporter, which needs no GPU) are in
+		// `enginePak` as AudioClips that load.
+		void CheckSoundPresets(const PakReader& enginePak)
+		{
+			constexpr std::array Presets = { BuiltinAssetHandles::ClickSound, BuiltinAssetHandles::BlipSound, BuiltinAssetHandles::CoinSound,
+				BuiltinAssetHandles::JumpSound, BuiltinAssetHandles::HitSound, BuiltinAssetHandles::ExplosionSound, BuiltinAssetHandles::PowerUpSound,
+				BuiltinAssetHandles::LineClearSound, BuiltinAssetHandles::WinSound, BuiltinAssetHandles::LoseSound };
+			for (const AssetHandle handle : Presets)
+			{
+				CAPTURE(handle.ToString());
+				const PakEntry* entry = enginePak.FindByHandle(handle);
+				REQUIRE(entry != nullptr);
+				CHECK(entry->Type == "AudioClip");
+				const Result<Buffer> bytes = enginePak.ReadEntry(*entry);
+				REQUIRE(bytes.has_value());
+				const Result<AssetRef<AudioClipData>> clip = LoadCookedAudioClip(*bytes);
+				REQUIRE_MESSAGE(clip.has_value(), clip.error().ToString());
+			}
+			// The silent clip is procedural: the Runtime generates it, so it is not in the pak.
+			CHECK(enginePak.FindByHandle(BuiltinAssetHandles::SilentClip) == nullptr);
 		}
 
 	}
@@ -665,13 +689,15 @@ namespace Engine {
 			CHECK(warnings.front().find("engine://Environments/Sky") != std::string::npos);
 			CHECK(warnings.front().find(EnvironmentImporter::GpuHint) != std::string::npos);
 
-			// The other File built-ins and the Generated blue noise (which needs no GPU) are there; the environments are not.
+			// The other File built-ins (the Default font and M12's sound-effect presets) and the Generated blue noise (which needs
+			// no GPU) are there; the environments are not.
 			const Result<Ref<const PakReader>> enginePak = PakReader::Open((*outcome)->OutputDirectory / "Data" / "Engine.pak");
 			REQUIRE_MESSAGE(enginePak.has_value(), enginePak.error().ToString());
 			CHECK((*enginePak)->FindByHandle(BuiltinAssetHandles::DefaultFont) != nullptr);
 			CHECK((*enginePak)->FindByHandle(BuiltinAssetHandles::BlueNoiseTexture) != nullptr);
 			CHECK((*enginePak)->FindByHandle(BuiltinAssetHandles::StudioEnvironment) == nullptr);
 			CHECK((*enginePak)->FindByHandle(BuiltinAssetHandles::SkyEnvironment) == nullptr);
+			CheckSoundPresets(**enginePak);
 		}
 
 		TEST_CASE("Exporter: a reference to a built-in environment that has no bake fails the export with the GPU hint")
@@ -742,6 +768,8 @@ namespace Engine {
 				CHECK((*texture)->Format == TextureFormat::R8Unorm);
 				CHECK((*texture)->Width == 64);
 				CHECK((*texture)->Height == 64);
+				// And M12's sound-effect presets: one Engine.pak holds the built-ins of both milestones.
+				CheckSoundPresets(**enginePak);
 			}
 			gpu.GetDevice().RunGarbageCollection();
 		}

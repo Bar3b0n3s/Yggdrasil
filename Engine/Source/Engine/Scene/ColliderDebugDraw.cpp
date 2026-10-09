@@ -6,6 +6,7 @@
 #include "Engine/Core/Assert.h"
 #include "Engine/Physics/PhysicsEngine.h"
 #include "Engine/Physics/PhysicsShape.h"
+#include "Engine/Renderer/DebugDrawList.h"
 #include "Engine/Scene/Components/BoxColliderComponent.h"
 #include "Engine/Scene/Components/CapsuleColliderComponent.h"
 #include "Engine/Scene/Components/CharacterControllerComponent.h"
@@ -354,6 +355,32 @@ namespace Engine {
 			}
 		}
 		return shapes;
+	}
+
+	void AppendColliderDebugDraw(std::span<const ColliderDebugShape> shapes, DebugDrawList& list)
+	{
+		for (const ColliderDebugShape& shape : shapes)
+		{
+			switch (shape.Type)
+			{
+				case ColliderDebugShapeType::Box:
+					list.AddBox(shape.Position, shape.HalfExtents, shape.Rotation, shape.Color);
+					break;
+				case ColliderDebugShapeType::Sphere:
+					list.AddSphere(shape.Position, shape.Radius, shape.Color);
+					break;
+				case ColliderDebugShapeType::Capsule:
+				{
+					const glm::vec3 axis = shape.Rotation * glm::vec3(0.0f, shape.HalfHeight, 0.0f);
+					list.AddCapsule(shape.Position - axis, shape.Position + axis, shape.Radius, shape.Color);
+					break;
+				}
+				case ColliderDebugShapeType::Lines:
+					for (size_t index = 0; index + 1 < shape.LineVertices.size(); index += 2)
+						list.AddLine(shape.LineVertices[index], shape.LineVertices[index + 1], shape.Color);
+					break;
+			}
+		}
 	}
 
 }
