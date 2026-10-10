@@ -4,6 +4,7 @@
 #include "Engine/Asset/AssetHandle.h"
 #include "Engine/Asset/AssetMetadata.h"
 #include "Engine/Asset/AssetType.h"
+#include "Engine/Asset/IScriptDiagnosticsProvider.h"
 #include "Engine/Core/Base.h"
 #include "Engine/Core/Buffer.h"
 #include "Engine/Core/Json/Json.h"
@@ -61,6 +62,9 @@ namespace Engine {
 	{
 		VfsPath Path{};
 		std::optional<ImportAssetLookupEntry> Found{};
+		// M13: nonnull selects lookup by stable handle, with Path empty. Found retains the current readable path.
+		// Null selects the existing path lookup. Missing handle lookups are recorded too, so appearance invalidates cache.
+		AssetHandle RequestedHandle{};
 
 		bool operator==(const ImportAssetLookup&) const = default;
 	};
@@ -111,8 +115,17 @@ namespace Engine {
 		// The registered asset whose source is exactly `path`, recording the lookup: a standalone Texture meta there makes a
 		// glTF reference that texture instead of creating a texture sub-asset (§6.4). nullopt for a file without a .meta.
 		[[nodiscard]] std::optional<ImportAssetLookupEntry> FindAsset(const VfsPath& path);
+		// Stable-handle lookup over the same immutable snapshot, for replay scene identity after a move. Null handles
+		// return nullopt; nonnull requests, including misses, are recorded by RequestedHandle. No unrecorded registry read.
+		[[nodiscard]] std::optional<ImportAssetLookupEntry> FindAsset(AssetHandle handle);
+		// ScriptImporter publishes this before extraction/cooking can fail. The manager retains it for the latest
+		// attempt even when Import returns an error, while retaining its last good artifact independently. A missing
+		// provider records Performed=false; no import or cache hit may turn an unchecked script into a clean check.
+		void SetScriptCheck(ScriptImportCheck result);
+		[[nodiscard]] std::optional<ScriptImportCheck> GetScriptCheck() const;
 
-		// What the import read and looked up so far, sorted by path, each path once.
+		// What the import read and looked up so far. Reads/path lookups sorted by path; handle lookups follow in handle
+		// order, each query once. The two kinds never overwrite one another.
 		[[nodiscard]] std::vector<ImportDependencyRead> GetDependencyReads() const;
 		[[nodiscard]] std::vector<ImportAssetLookup> GetLookups() const;
 	private:

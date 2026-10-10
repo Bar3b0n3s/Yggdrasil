@@ -2417,6 +2417,17 @@ namespace Engine {
 		RestoreSharedState();
 	}
 
+	Result<ScriptImportCheck> EditorAssetManager::GetScriptCheck(AssetHandle /*script*/) const
+	{
+		ENGINE_CONTRACT_STUB();
+		return MakeError(ErrorCode::Unsupported, "Script check publication is an M13 contract stub");
+	}
+
+	void EditorAssetManager::SetScriptDiagnosticsProvider(IScriptDiagnosticsProvider* /*provider*/)
+	{
+		ENGINE_CONTRACT_STUB();
+	}
+
 	bool EditorAssetManager::IsDryRun() const
 	{
 		return m_State->DryRun.has_value();

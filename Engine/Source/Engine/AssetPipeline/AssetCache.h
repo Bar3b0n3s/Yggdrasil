@@ -45,6 +45,9 @@ namespace Engine {
 		ImportResult Import{};                     // the artifacts with their bytes, dependencies and diagnostics
 		std::vector<ImportDependencyRead> Reads{}; // as recorded by the ImportContext
 		std::vector<ImportAssetLookup> Lookups{};
+		// M13: lossless check metadata copied from ImportContext, serialized in the manifest. Missing on legacy entries
+		// means unchecked. Includes all source ranges, environment fingerprint and root hash; never affects cooked bytes.
+		std::optional<ScriptImportCheck> ScriptCheck{};
 	};
 
 	// The cache over one root. Stateless beyond the VFS: thread-safe, and calls for different sources may run concurrently
@@ -106,5 +109,9 @@ namespace Engine {
 	// files through `vfs`; a file that cannot be read makes it false.
 	[[nodiscard]] bool IsManifestCurrent(const VirtualFileSystem& vfs, std::span<const ImportDependencyRead> reads,
 		std::span<const ImportAssetLookup> lookups, std::span<const ImportAssetLookupEntry> assets);
+	// M13: the manager additionally checks this for Script assets. null provider permits unchecked tool imports;
+	// a provider requires a performed check with its current fingerprint. Input hashes/lookups must independently
+	// pass IsManifestCurrent, including handle lookup misses/moves. Legacy manifests with no check require rechecking.
+	[[nodiscard]] bool IsScriptCheckCurrent(const std::optional<ScriptImportCheck>& check, const IScriptDiagnosticsProvider* provider);
 
 }

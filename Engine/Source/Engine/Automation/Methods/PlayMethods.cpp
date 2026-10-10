@@ -24,6 +24,16 @@
 
 namespace Engine {
 
+	namespace Automation {
+
+		Result<Scope<PendingOperation>> PlayWaitFor(AutomationMethodContext& /*context*/, const PlayWaitForParams& /*params*/)
+		{
+			ENGINE_CONTRACT_STUB();
+			return MakeError(ErrorCode::Unsupported, "Waiting for a script predicate is an M13 contract stub");
+		}
+
+	}
+
 	namespace {
 
 		// play.step's operation (PlayMethods.h): ticks run from Poll, as many per frame as fit PlayStepFrameBudget on the

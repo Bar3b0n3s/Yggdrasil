@@ -27,8 +27,20 @@ namespace Engine {
 		uint32_t Line = 0;   // 1-based
 		uint32_t Column = 0; // 1-based
 		std::string Message{};
+		uint32_t EndLine = 0;   // 1-based exclusive range end; zero only when the checker supplies no range
+		uint32_t EndColumn = 0; // UTF-8 byte column, matching Luau's source positions
 
 		bool operator==(const ScriptDiagnostic&) const = default;
+	};
+
+	// Owned result of the latest script import attempt. Unchecked is different from a checked script with no findings.
+	// SourceHash identifies the exact root bytes; dependency reads/lookups remain in the ordinary import manifest.
+	struct ScriptImportCheck
+	{
+		bool Performed = false;
+		uint64_t EnvironmentHash = 0;
+		uint64_t SourceHash = 0;
+		std::vector<ScriptDiagnostic> Diagnostics{};
 	};
 
 	// Reads the modules a script requires. ScriptImporter passes one that reads through ImportContext::ReadDependency, so
@@ -58,6 +70,9 @@ namespace Engine {
 	{
 	public:
 		virtual ~IScriptDiagnosticsProvider() = default;
+		// Immutable fingerprint of declarations, compiler/solver policy and captured configuration, independent of
+		// build configuration. Cached checks are reusable only when this fingerprint and their inputs still match.
+		[[nodiscard]] virtual uint64_t GetEnvironmentHash() const = 0;
 
 		// The findings of `request`, sorted by (File, Line, Column, Code). A checker failure that is not a finding of the
 		// script (an internal compiler error) is reported as one Error finding located at line 1 (§4.6 item 4).

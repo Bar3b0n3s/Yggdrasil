@@ -5,6 +5,7 @@
 #include "Engine/Asset/AssetMetadata.h"
 #include "Engine/Asset/AssetRegistry.h"
 #include "Engine/Asset/BuiltinAssets.h"
+#include "Engine/Asset/IScriptDiagnosticsProvider.h"
 #include "Engine/AssetPipeline/AssetDependencyGraph.h"
 #include "Engine/AssetPipeline/AssetWriter.h"
 #include "Engine/AssetPipeline/EngineAssetBaker.h"
@@ -175,6 +176,13 @@ namespace Engine {
 		[[nodiscard]] std::optional<AssetHandle> Resolve(std::string_view reference) const override;
 		[[nodiscard]] std::string GetReferencePath(AssetHandle handle) const override;
 		void WaitIdle() override;
+		// M13: latest attempted check, including failed imports; NotFound when no Script attempt is known. Copies owned
+		// ranges/fingerprint/root hash; no pointer into a worker or checker survives. A failed reimport updates this record
+		// but preserves the last good loaded artifact. Cache hits restore it; dry runs save/restore it with other state.
+		[[nodiscard]] Result<ScriptImportCheck> GetScriptCheck(AssetHandle script) const;
+		// Waits for admitted imports before rebinding this borrowed provider. It must outlive all future jobs until
+		// replaced/cleared. Invalidates stale checked-state/failure fingerprints and schedules rechecks through Refresh.
+		void SetScriptDiagnosticsProvider(IScriptDiagnosticsProvider* provider);
 
 		// --- Projects --------------------------------------------------------------------------------------------------
 

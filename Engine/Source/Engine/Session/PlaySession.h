@@ -8,7 +8,10 @@
 #include "Engine/Core/Time.h"
 #include "Engine/Core/UUIDGenerator.h"
 #include "Engine/Project/ProjectSettings.h"
+#include "Engine/Reflection/FieldType.h"
+#include "Engine/Reflection/VariantValue.h"
 #include "Engine/Renderer/RenderSnapshot.h"
+#include "Engine/Scripting/ScriptHost.h"
 #include "Engine/Session/PlayInput.h"
 
 #include <cstddef>
@@ -35,7 +38,12 @@ namespace Engine {
 	class AudioSystem;
 	class Entity;
 	class PhysicsSystem;
+	class ReplayRecorder;
 	class Scene;
+	class ScriptApiRegistry;
+	class ScriptEngine;
+	class ScriptFieldSchemaSource;
+	class IScriptTestHost;
 	class TypeRegistry;
 	struct RenderExtractionRequest;
 
@@ -83,6 +91,30 @@ namespace Engine {
 
 	class PlaySession;
 
+	// Optional production test driver, distinct from the phase-entry instrumentation below. Borrowed main-thread
+	// back-reference, outliving the session. AfterTasks runs after normal tasks in phase 4, never re-enters Tick.
+	// OnQuit records intent only: teardown waits until the active protected call and frame have unwound.
+	class IPlaySessionTestHook
+	{
+	public:
+		virtual ~IPlaySessionTestHook() = default;
+		virtual void AfterTasks(PlaySession& session, const SimStep& step) = 0;
+		virtual void OnQuit(int32_t exitCode) = 0;
+	};
+
+	// Optional application-facing services of scripts; Session does not include App or editor code. Outlives the
+	// session. A missing host uses the specification's Environment, rejects cursor changes and exposes quit intent
+	// through GetQuitRequest. Error publication is still retained in ScriptEngine's owned error stream.
+	class IPlaySessionHost
+	{
+	public:
+		virtual ~IPlaySessionHost() = default;
+		[[nodiscard]] virtual ScriptEnvironment GetScriptEnvironment() const = 0;
+		[[nodiscard]] virtual Status SetScriptCursorMode(CursorMode mode) = 0;
+		[[nodiscard]] virtual CursorMode GetScriptCursorMode() const = 0;
+		virtual void OnScriptError(const ScriptError& error, bool fatal) = 0;
+	};
+
 	// Instrumentation of the step order (§5.7 "documented and tested"; "PlaySession: step order matches the documented
 	// sequence"): the session calls OnPhase at the start of every phase it runs, the empty hook phases of M7 included. The
 	// observer may change the session's scene during FixedUpdate, Update, LateUpdate and PhysicsStep, standing in for the
@@ -113,7 +145,9 @@ namespace Engine {
 		// A project-relative scene path to play instead of the open edit scene; empty: the open edit scene.
 		std::string ScenePath{};
 		bool Paused = false;
-		double TimeScale = 1.0; // [0, PlaySession::MaxTimeScale]
+		double TimeScale = 1.0;             // [0, PlaySession::MaxTimeScale]
+		VariantValue Parameters{};          // absent normalizes to an empty JSON object
+		std::optional<bool> PauseOnError{}; // absent inherits project settings
 	};
 
 	// Everything a session needs to start. The project's settings are copied in whole, so a session never reads the project
@@ -152,6 +186,17 @@ namespace Engine {
 		// (§10.1 "or a test run is active"; M13's FeatureTest runner sets it for every suite, ScriptedClock suites included,
 		// §11.10). Without it the session owns audio time only while it is in lockstep. Ignored without an AudioSystem.
 		bool OwnsAudioTime = false;
+		// M13: borrowed frozen scripting registry. Null creates a session-owned registry through RegisterBindings.
+		// Simulate ignores scripting services. A schema snapshot pins every FieldInfo used by this scene/VM.
+		ScriptApiRegistry* ScriptApi = nullptr;
+		Ref<const ScriptFieldSchemaSource> ScriptSchemas{};
+		VariantValue Parameters{}; // absent normalizes to an empty JSON object
+		ScriptEnvironment Environment{};
+		RunModes ScriptRunMode = RunModes::Editor;
+		bool TestMode = false;
+		IPlaySessionTestHook* TestHook = nullptr;
+		IScriptTestHost* TestHost = nullptr; // test-mode reporting from setup until teardown; outlives the session
+		IPlaySessionHost* Host = nullptr;
 	};
 
 	// One play session. Not copyable or movable; main thread only (§4.11).
@@ -285,6 +330,19 @@ namespace Engine {
 		[[nodiscard]] UUIDGenerator& GetIdGenerator();
 		[[nodiscard]] PlayInput& GetInput();
 		[[nodiscard]] const PlayInput& GetInput() const;
+		// M13: null in Simulate, otherwise the session's VM. Replaced on Scene.Load at the end of a frame. No caller may
+		// retain a pointer across Tick/FrameUpdate; use session serial plus scene generation for pending operations.
+		[[nodiscard]] ScriptEngine* GetScripts();
+		[[nodiscard]] const ScriptEngine* GetScripts() const;
+		[[nodiscard]] uint64_t GetSceneGeneration() const;
+		[[nodiscard]] const Json& GetLoadParameters() const;
+		// Application.Quit records the first request. The editor stops play and the Runtime exits only after returning
+		// from the current frame; a test hook also receives it for ExpectQuit. It is not a recursive destruction call.
+		[[nodiscard]] std::optional<int32_t> GetQuitRequest() const;
+		// One recorder for this session's absolute input timeline, owned by the session. Null in Simulate. Session
+		// feeds it every ApplyInput result before scripts run, and MarkModified invalidates it. It survives Scene.Load.
+		[[nodiscard]] ReplayRecorder* GetRecorder();
+		[[nodiscard]] const ReplayRecorder* GetRecorder() const;
 		// M12: the session's audio (see "Audio" above): null in Simulate mode and without PlaySessionSpecification::Audio.
 		[[nodiscard]] AudioSystem* GetAudioSystem();
 		[[nodiscard]] const AudioSystem* GetAudioSystem() const;

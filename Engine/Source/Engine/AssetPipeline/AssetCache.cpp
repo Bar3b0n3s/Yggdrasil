@@ -659,6 +659,12 @@ namespace Engine {
 		return m_State->Root;
 	}
 
+	bool IsScriptCheckCurrent(const std::optional<ScriptImportCheck>& /*check*/, const IScriptDiagnosticsProvider* /*provider*/)
+	{
+		ENGINE_CONTRACT_STUB();
+		return false;
+	}
+
 	bool IsManifestCurrent(const VirtualFileSystem& vfs, std::span<const ImportDependencyRead> reads, std::span<const ImportAssetLookup> lookups,
 		std::span<const ImportAssetLookupEntry> assets)
 	{

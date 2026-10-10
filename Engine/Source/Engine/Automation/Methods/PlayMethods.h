@@ -151,6 +151,19 @@ namespace Engine {
 		float Scale = 1.0f; // required; 0 to PlaySession::MaxTimeScale
 	};
 
+	struct PlayWaitForParams
+	{
+		std::string Until{};         // required Luau chunk returning a value
+		uint32_t TimeoutTicks = 600; // required; 1 to MaxPlayStepTicks
+	};
+
+	struct PlayWaitForResult
+	{
+		bool Satisfied = false;
+		uint32_t Tick = 0;
+		VariantValue Value{}; // last predicate result, finite acyclic JSON
+	};
+
 	namespace Automation {
 
 		// play.start (editor only): AutomationMethodContext::StartPlay with the params (the requesting client as the lockstep
@@ -172,6 +185,13 @@ namespace Engine {
 		// play.setTimeScale. Errors: InvalidState "not playing" or for another client of a lockstep session; InvalidParams for
 		// a scale out of range.
 		[[nodiscard]] Result<PlayStateResult> PlaySetTimeScale(AutomationMethodContext& context, const PlaySetTimeScaleParams& params);
+		// M13: pending, with the same admission, session-serial checks, frame budget and cancellation as play.step.
+		// Compiles once before advancing; evaluates in the play VM after each tick. Lua truthiness decides satisfaction;
+		// timeout returns satisfied:false and the last value, script faults return a located Error. No dry run/batch.
+		// Requires Play (Simulate has no VM). Predicate execution has external-driver origin: before any host write
+		// or session RNG use it invokes OnExternalMutation, invalidating an active input-only recording even on fault.
+		// Re-resolves the current VM after Scene.Load. Tool, AvailableInRuntime, not Mutates, timeout 600 seconds.
+		[[nodiscard]] Result<Scope<PendingOperation>> PlayWaitFor(AutomationMethodContext& context, const PlayWaitForParams& params);
 
 		// The state of `context`'s session as play.state reports it (shared by the handlers above and input.inject).
 		[[nodiscard]] PlayStateResult MakePlayStateResult(AutomationMethodContext& context);

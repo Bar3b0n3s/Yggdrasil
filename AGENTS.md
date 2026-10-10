@@ -121,7 +121,7 @@ Milestone commits also need the full `python Scripts/CI.py` green. Push to `orig
   - camelCase: locals and parameters.
   - Macros start with `ENGINE_`.
   - Files are PascalCase after their primary type; test files are named `<Unit>Tests.cpp`.
-- **Namespaces:** `namespace Engine` everywhere, including Editor, Runtime and Tests. Sub-namespaces are limited to `Utils`, `Detail`, `Automation`, `ScriptBindings` and `Test`.
+- **Namespaces:** `namespace Engine` everywhere, including Editor, Runtime and Tests. Sub-namespaces are limited to `Utils`, `Detail`, `Automation`, `ScriptBindings`, `Lua` (checked Scripting helpers only, ADR 0019) and `Test`.
 - **Includes:**
   - Order: `EnginePCH.h` (first line, Engine `.cpp` files only), then the file's own header, then repository headers (quoted, full path from the include root), then third-party `<...>`, then standard `<...>`.
   - Headers are self-contained, never include a PCH, and never use relative paths.
@@ -161,7 +161,7 @@ The same inputs and seed must give the same state hash in Debug, Release and Dis
 
 **Globals and threading (§3 rule 5, §4.11)**
 - No mutable globals except the process-level state that §3 lists; `ProcessContext` initializes all of it.
-- The ECS, scripts, physics stepping, NVRHI and ImGui run on the main thread.
+- The ECS, runtime scripts, physics stepping, NVRHI and ImGui run on the main thread. Isolated load-time script VMs stay on their import worker and touch no runtime state (ADR 0019).
 - Jobs take and return values and never touch the ECS.
 - First-party code never uses `dynamic_cast` or `typeid`.
 

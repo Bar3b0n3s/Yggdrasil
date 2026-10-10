@@ -42,6 +42,7 @@ namespace Engine {
 	class EditorAssetManager;
 	class EditorDryRunScope;
 	class EditorPlayController;
+	class EditorScriptService;
 	class EditorTransaction;
 	class EngineContext;
 	class IEnvironmentBaker;
@@ -141,6 +142,10 @@ namespace Engine {
 		// The editor's asset manager (see the class comment); valid for the editor's lifetime.
 		[[nodiscard]] EditorAssetManager& GetAssets() { return *m_Assets; }
 		[[nodiscard]] const EditorAssetManager& GetAssets() const { return *m_Assets; }
+		// M13: borrowed main-thread service, null without an open project. The context owns its diagnostics provider
+		// and shares that provider with imports. Before replacing configuration, drain jobs, then recreate both borrowed
+		// references; the provider outlives every job and service. The pointer expires at project/configuration changes.
+		[[nodiscard]] EditorScriptService* GetScriptService();
 		// M12: the asset browser's audio preview (EditorCore/Audio/AudioPreview.h) over the engine context's AudioEngine;
 		// nullptr when the engine context has none (most in-process tests). Valid for the editor's lifetime; CloseProject
 		// stops it.

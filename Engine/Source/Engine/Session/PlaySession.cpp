@@ -597,6 +597,49 @@ namespace Engine {
 		return m_State->Input;
 	}
 
+	ScriptEngine* PlaySession::GetScripts()
+	{
+		ENGINE_CONTRACT_STUB();
+		return nullptr;
+	}
+
+	const ScriptEngine* PlaySession::GetScripts() const
+	{
+		ENGINE_CONTRACT_STUB();
+		return nullptr;
+	}
+
+	uint64_t PlaySession::GetSceneGeneration() const
+	{
+		ENGINE_CONTRACT_STUB();
+		return 0;
+	}
+
+	const Json& PlaySession::GetLoadParameters() const
+	{
+		ENGINE_CONTRACT_STUB();
+		static const Json EmptyParameters = Json::object();
+		return EmptyParameters;
+	}
+
+	std::optional<int32_t> PlaySession::GetQuitRequest() const
+	{
+		ENGINE_CONTRACT_STUB();
+		return std::nullopt;
+	}
+
+	ReplayRecorder* PlaySession::GetRecorder()
+	{
+		ENGINE_CONTRACT_STUB();
+		return nullptr;
+	}
+
+	const ReplayRecorder* PlaySession::GetRecorder() const
+	{
+		ENGINE_CONTRACT_STUB();
+		return nullptr;
+	}
+
 	PhysicsSystem& PlaySession::GetPhysics()
 	{
 		return *m_State->Physics;

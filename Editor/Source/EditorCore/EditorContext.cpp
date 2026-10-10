@@ -561,6 +561,12 @@ namespace Engine {
 		return CreateScope<EditorContext>(ConstructionKey(), engine, specification, *generated);
 	}
 
+	EditorScriptService* EditorContext::GetScriptService()
+	{
+		ENGINE_CONTRACT_STUB();
+		return nullptr;
+	}
+
 	uint64_t EditorContext::GetRevision() const
 	{
 		// During a dry run the base may have wrapped around (EditorDryRunScope::Begin); unsigned arithmetic makes the sum the

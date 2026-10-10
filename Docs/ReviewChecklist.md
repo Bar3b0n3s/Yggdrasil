@@ -102,7 +102,7 @@ Section references (§) point to `Docs/Architecture.md` unless marked CodeStyle 
 
 ## 7. Threading (§4.11)
 
-- [ ] The ECS, scripts, physics stepping, NVRHI recording and submission, and ImGui are touched only on the main thread. Debug thread asserts are present at new entry points that need them.
+- [ ] The ECS, runtime scripts, physics stepping, NVRHI recording and submission, and ImGui are touched only on the main thread. Debug thread asserts are present at new entry points that need them. Isolated load-time VMs are confined to one import worker and never access runtime state (ADR 0019).
 - [ ] Jobs capture values, return `Result`s and never touch the ECS. Completions run through `MainThreadQueue`, and stale completions are dropped.
 - [ ] Shared state has a clear synchronization owner. There are no data races, no `volatile` used for synchronization, and no lock held across a callback into foreign code.
 - [ ] Tests that involve jobs use `JobSystem(0)` or another deterministic setup.

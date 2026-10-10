@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Engine/Asset/ReplayData.h"
 #include "Engine/Automation/Methods/AutomationTypes.h"
 #include "Engine/Automation/Protocol/JsonRpc.h"
 #include "Engine/Automation/Protocol/MethodContext.h"
@@ -43,6 +44,8 @@ namespace Engine {
 	class EventLog;
 	class PlaySession;
 	class Scene;
+	class ScriptErrorStream;
+	struct ScriptEvaluation;
 	struct PlayStartOptions;
 	struct RenderSnapshot;
 	struct SceneSummary;
@@ -95,6 +98,32 @@ namespace Engine {
 		// PlayStateChanged; the deferred asset reloads of a lockstep session are applied (§7.5 race rule 4). Errors:
 		// InvalidState "not playing"; Unsupported in the Runtime.
 		[[nodiscard]] virtual Status StopPlay() = 0;
+
+		// M13 recording/replay host services, shared with Runtime automation. These are transient session operations,
+		// never a project-setting edit. Implementations prepare/validate the new start before replacing the old session,
+		// preserve the requesting client's identity, and use a fresh session serial. Defaults are Unsupported until wired.
+		[[nodiscard]] virtual Status StartRecordingSession(const PlayStartOptions& options, bool restart);
+		[[nodiscard]] virtual Status RestartForReplay(const ReplayHeader& header);
+		// Current session's original scene asset identity/path, initial load parameters, seed and FixedHz, plus engine
+		// version/build config. An unsaved editor scene cannot produce a reproducible asset header (InvalidState).
+		[[nodiscard]] virtual Result<ReplayHeader> DescribeReplayHeader() const;
+		// Confined paths, never arbitrary native I/O. The editor imports/loads the project replay; Runtime reads its
+		// cooked replay assets or its user://Replays/ recordings. Editor writes require project write permission;
+		// Runtime writes confine relative paths below user://Replays/ and return that identity (ADR 0019). Absolute
+		// paths, traversal and other schemes are rejected. Write validates before atomic replacement, with provenance.
+		[[nodiscard]] virtual Result<AssetRef<ReplayData>> LoadReplay(std::string_view path);
+		// Non-writing preflight for permission/confinement and canonical path, before consuming a recorder. WriteReplay
+		// repeats validation when it writes, so permission or filesystem changes cannot bypass publication checks.
+		[[nodiscard]] virtual Result<std::string> ValidateReplayOutput(std::string_view path) const;
+		[[nodiscard]] virtual Result<std::string> WriteReplay(std::string_view path, const ReplayDocument& document);
+
+		// Host-owned diagnostics outlive individual play/scene/edit-eval VMs. Cursor IDs remain monotonic across their
+		// replacement. The pointer is borrowed for this request only; null means no installed script-error service.
+		[[nodiscard]] virtual ScriptErrorStream* GetScriptErrors() const;
+		// Editor-only, fresh read-only VM over the edit scene, with fields/class links but no lifecycle callbacks.
+		// Entity is an optional EntityRef, resolved at /entity. Runtime returns Unsupported at /context before trying
+		// to resolve a nonexistent edit scene. Returns owned value/prints; errors retain full script error data.
+		[[nodiscard]] virtual Result<ScriptEvaluation> EvalInEdit(std::string_view code, std::string_view entity);
 
 		// The display name of `client` (session.hello's client.name, or "batch", "cli", "test" for in-process clients); empty
 		// for NoClient or a client that is gone. play.state reports the lockstep owner by it.

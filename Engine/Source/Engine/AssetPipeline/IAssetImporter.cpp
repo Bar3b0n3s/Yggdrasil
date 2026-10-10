@@ -98,6 +98,23 @@ namespace Engine {
 		return *entry;
 	}
 
+	std::optional<ImportAssetLookupEntry> ImportContext::FindAsset(AssetHandle /*handle*/)
+	{
+		ENGINE_CONTRACT_STUB();
+		return std::nullopt;
+	}
+
+	void ImportContext::SetScriptCheck(ScriptImportCheck /*result*/)
+	{
+		ENGINE_CONTRACT_STUB();
+	}
+
+	std::optional<ScriptImportCheck> ImportContext::GetScriptCheck() const
+	{
+		ENGINE_CONTRACT_STUB();
+		return std::nullopt;
+	}
+
 	std::vector<ImportDependencyRead> ImportContext::GetDependencyReads() const
 	{
 		std::vector<ImportDependencyRead> reads = m_Reads;

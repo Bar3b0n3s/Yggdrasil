@@ -22,6 +22,7 @@
 namespace Engine {
 
 	class EnumInfo;
+	class FieldInfo;
 	class StructInfo;
 
 	// A compile-time identity of a C++ type without RTTI (first-party code never uses typeid, §3): the address of a
@@ -125,6 +126,10 @@ namespace Engine {
 			std::string AssetTypeName;          // AssetRef: the accepted AssetType name, empty = any
 			TypeOps Ops;                        // all null for a schema-only type
 			TypeKey Key = nullptr;              // null for a schema-only type
+			// Optional metadata for an Array element, owned by the immutable schema source alongside Element. Its type
+			// must be exactly Element. Ordinary C++ arrays leave this null. Recursive validation/schema/drawers apply
+			// these element bounds and options at each array index instead of discarding them (M13 Field.Array).
+			const FieldInfo* ElementSchema = nullptr;
 		};
 
 		explicit TypeInfo(Specification specification)
@@ -135,6 +140,7 @@ namespace Engine {
 		[[nodiscard]] FieldType GetKind() const { return m_Specification.Kind; }
 		[[nodiscard]] const std::string& GetName() const { return m_Specification.Name; }
 		[[nodiscard]] const TypeInfo* GetElement() const { return m_Specification.Element; }
+		[[nodiscard]] const FieldInfo* GetElementSchema() const { return m_Specification.ElementSchema; }
 		[[nodiscard]] const EnumInfo* GetEnum() const { return m_Specification.Enum; }
 		[[nodiscard]] const StructInfo* GetStruct() const { return m_Specification.Struct; }
 		[[nodiscard]] const std::string& GetAssetTypeName() const { return m_Specification.AssetTypeName; }
