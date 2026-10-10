@@ -34,6 +34,8 @@ namespace Engine {
 	// Initializes every released non-experimental Luau fast flag and installs the engine assert bridge once (§3).
 	// InvalidState when already initialized. Workers never change these globals. No VM is created by this call.
 	[[nodiscard]] Status InitializeScriptingRuntime();
+	// Read-only process status; workers may query it but must never initialize or change runtime flags.
+	[[nodiscard]] bool IsScriptingRuntimeInitialized() noexcept;
 	// Main-thread, after every VM/Analysis user and import job has stopped; reverses owned process hooks. A no-op
 	// when initialization never succeeded. Does not reset flags while any worker could still read them.
 	void ShutdownScriptingRuntime();
@@ -142,6 +144,10 @@ namespace Engine {
 		// Supplying entity without an engine is InvalidState; a missing entity is NotFound. Source is Unsupported in Dist.
 		// Converts the first return to finite, acyclic JSON (scalars, arrays, string-keyed objects), rejecting unsupported
 		// functions/threads/userdata, mixed-key tables or cycles with located Script errors. Captures print strings.
+		// Native JSON conversion has a separate allowance of min(4 MiB, MemoryLimitMB MiB), charging 256 bytes per
+		// expanded value/table entry and four per string/key byte. Repeated aliases are charged each time. Exhaustion
+		// rejects the value with Script/Runtime without a VM allocator breach; the next evaluation remains usable.
+		// Traversal polls the inherited deadline, including after the snippet returns; depth is at most MaxJsonDepth.
 		// Loaded source maps use private immutable identities, so retained closures from earlier calls still resolve
 		// their own path/pointer/wrapper offset when a later call reuses the same authored diagnostic label.
 		[[nodiscard]] Result<ScriptEvaluation> Evaluate(std::string_view source, const VfsPath& path,

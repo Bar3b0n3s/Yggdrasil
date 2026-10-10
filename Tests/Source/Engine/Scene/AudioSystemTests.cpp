@@ -370,6 +370,22 @@ namespace Engine {
 			CHECK(engine.GetMasterVolume() == 0.75f);
 		}
 
+		TEST_CASE("AudioSystem: mixer initialization is idempotent and restores without starting voices")
+		{
+			AudioSceneFixture fixture;
+			AudioEngine& engine = fixture.GetEngine();
+			REQUIRE(engine.SetGroupVolume(AudioGroup::Music, 0.75f));
+			{
+				AudioSystem system(fixture.GetScene(), fixture.GetSpecification());
+				system.InitializeMix();
+				CHECK(system.GetGroupVolume(AudioGroup::Music) == 1.0f);
+				REQUIRE(system.SetGroupVolume(AudioGroup::Music, 0.25f));
+				system.InitializeMix();
+				CHECK(system.GetGroupVolume(AudioGroup::Music) == 0.25f);
+			}
+			CHECK(engine.GetGroupVolume(AudioGroup::Music) == 0.75f);
+		}
+
 		TEST_CASE("AudioSystem: spatial sources without a listener or a camera raise AUDIO_NO_LISTENER")
 		{
 			Test::SceneTestFixture fixture(1, false);

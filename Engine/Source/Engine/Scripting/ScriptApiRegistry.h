@@ -21,6 +21,11 @@ namespace Engine {
 	class ScriptProxy;
 	class ScriptTypeBuilder;
 	class TypeRegistry;
+	namespace Detail {
+
+		struct ScriptRegistryAccess;
+
+	}
 
 	// Engine callback ABI. ScriptCall is defined only in Scripting/Private/ScriptCall.h; public headers never name VM
 	// types. A callback returns its stack result count (or the VM yield sentinel for an explicitly yieldable API).
@@ -242,6 +247,7 @@ namespace Engine {
 		friend class ScriptModuleBuilder;
 		friend class ScriptProxy;
 		friend class ScriptTypeBuilder;
+		friend struct Detail::ScriptRegistryAccess;
 	};
 
 	class ScriptModuleBuilder
@@ -255,6 +261,8 @@ namespace Engine {
 			ScriptApiEnvironment environments = ScriptApiEnvironment::All);
 	private:
 		ScriptModuleBuilder() = default;
+		ScriptApiRegistry* m_Registry = nullptr; // borrowed for the registration statement
+		size_t m_GroupIndex = 0;
 	private:
 		friend class ScriptApiRegistry;
 	};
@@ -277,6 +285,8 @@ namespace Engine {
 			ScriptMemberOptions options = {});
 	private:
 		ScriptTypeBuilder() = default;
+		ScriptApiRegistry* m_Registry = nullptr; // borrowed for the registration statement
+		size_t m_GroupIndex = 0;
 	private:
 		friend class ScriptApiRegistry;
 	};

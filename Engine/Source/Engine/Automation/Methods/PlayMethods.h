@@ -45,9 +45,8 @@
 // the session the step started on (PlaySession::GetSerial, never its address), so a session that ended meanwhile (the owner's play.stop, the editor UI's Stop in M10)
 // resolves the step with Cancelled "the play session ended after <n> of <ticks> ticks".
 //
-// Deferred to later milestones: play.waitFor (§13.6, a Luau predicate evaluated in the play VM after every tick) needs
-// scripts and is registered with M13; play.start's "parameters" (Scene.GetLoadParameters) and "pauseOnError" (script
-// errors) are refused with Unsupported located at their pointer until M13. Nothing is accepted and ignored.
+// M13 adds play.waitFor (§13.6): a Luau predicate evaluated in the live Play VM after every tick. play.start carries
+// parameters into Scene.GetLoadParameters and applies the optional pauseOnError override to this session only.
 
 namespace Engine {
 
@@ -94,10 +93,10 @@ namespace Engine {
 		bool Lockstep = false;
 		uint32_t Seed = 0;         // absent (HasParam): Project Simulation.Seed ^ Scene.Seed (§4.12)
 		std::string Scene{};       // a project scene path ("Assets/Scenes/Level2.scene") to play instead of the open edit scene
-		VariantValue Parameters{}; // M13 (Scene.GetLoadParameters): Unsupported at /parameters when present
+		VariantValue Parameters{}; // Initial Scene.GetLoadParameters object; omitted means empty.
 		bool Paused = false;
 		float TimeScale = 1.0f;   // 0 to PlaySession::MaxTimeScale
-		bool PauseOnError = true; // M13 (script errors): Unsupported at /pauseOnError when present
+		bool PauseOnError = true; // Per-session override; omitted inherits project policy.
 	};
 
 	// play.state's result, and the result of play.start, play.pause, play.resume and play.setTimeScale (the state after the
@@ -113,7 +112,7 @@ namespace Engine {
 		bool OwnedByCaller = false;  // the requesting client owns lockstep
 		float TimeScale = 1.0f;
 		bool Modified = false;  // §7.5 race rule 4
-		bool Recording = false; // input.record (M13): always false in M7
+		bool Recording = false; // Whether the session recorder is active.
 		uint32_t EntityCount = 0;
 		uint32_t MaxEntities = 0;
 		// The game input as the last tick's step view saw it (PlayInput::GetSummary(InputPhase::Step)).
@@ -167,7 +166,7 @@ namespace Engine {
 	namespace Automation {
 
 		// play.start (editor only): AutomationMethodContext::StartPlay with the params (the requesting client as the lockstep
-		// owner). Errors: Unsupported at /parameters or /pauseOnError when present; those of StartPlay.
+		// owner). Errors: InvalidArgument at /parameters for a non-object; those of StartPlay.
 		[[nodiscard]] Result<PlayStateResult> PlayStart(AutomationMethodContext& context, const PlayStartParams& params);
 		// play.stop (editor only). Errors: InvalidState naming the owner for another client of a lockstep session; those of
 		// AutomationMethodContext::StopPlay (InvalidState "not playing").
@@ -199,15 +198,15 @@ namespace Engine {
 	}
 
 	// Registers PlayMode, PlayRunState, PlayStepRender, PlayStartParams, PlayStateResult, PlayStopResult, PlayStepParams,
-	// PlayStepResult and PlaySetTimeScaleParams (after RegisterInputMethodTypes, whose InputEventParams and PlayInputSummary
+	// PlayStepResult, PlaySetTimeScaleParams and PlayWaitForParams/Result (after RegisterInputMethodTypes, whose InputEventParams and PlayInputSummary
 	// they use).
 	void RegisterPlayMethodTypes(TypeRegistry& registry);
 
 	// Registers the play methods: play.pause, play.resume, play.step, play.state and play.setTimeScale for every host
-	// (AvailableInRuntime), play.start and play.stop only when `includeEditorMethods`. Flags: play.start, play.stop and
-	// play.step are tools (§13.8: play_start, play_stop, play_step); none supports a dry run (§13.4: play.* return
+	// and play.waitFor (AvailableInRuntime), play.start and play.stop only when `includeEditorMethods`. Flags: play.start, play.stop and
+	// play.step and play.waitFor are tools (§13.8: play_start, play_stop, play_step, play_waitFor); none supports a dry run (§13.4: play.* return
 	// Unsupported for dryRun); none is AllowedInBatch (they are not commands); none is available in the launcher state;
-	// none Mutates (a session never changes project files or the edit scene). play.step is pending with a timeout of 600 s.
+	// none Mutates (a session never changes project files or the edit scene). play.step and play.waitFor are pending with a timeout of 600 s.
 	void RegisterPlayMethods(MethodRegistry& methods, bool includeEditorMethods);
 
 }

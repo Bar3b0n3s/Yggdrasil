@@ -61,10 +61,13 @@ namespace Engine {
 		// Empty paths checks all project scripts; validates every requested path before checking any. Never writes or
 		// reloads code. Required modules use the same confined module reader as import. Missing files return NotFound;
 		// syntax/type errors are findings. Infrastructure errors retain their ErrorCode and file context.
-		[[nodiscard]] Result<EditorScriptCheckResult> Check(std::span<const VfsPath> paths);
+		[[nodiscard]] Result<EditorScriptCheckResult> Check(std::span<const VfsPath> paths) const;
 		// Pins the current immutable cooked schema. NotFound for a missing handle; InvalidArgument for a non-Script;
 		// ImportFailed with findings when no valid schema exists. Module/TestSuite legitimately expose zero fields.
 		[[nodiscard]] Result<AssetRef<ScriptData>> GetFields(AssetHandle script) const;
+	private:
+		EditorContext* m_Editor = nullptr;                   // Borrowed; outlives the service.
+		IScriptDiagnosticsProvider* m_Diagnostics = nullptr; // Borrowed; outlives each synchronous check.
 	};
 
 }

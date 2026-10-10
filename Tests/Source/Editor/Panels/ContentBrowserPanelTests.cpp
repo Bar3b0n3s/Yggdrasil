@@ -10,10 +10,10 @@
 #include "EditorCore/Inspector/ReflectedEditController.h"
 #include "EditorCore/Thumbnails/ThumbnailCache.h"
 #include "EditorCore/Viewport/GizmoController.h"
+#include "Engine/Asset/MaterialData.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Json/JsonReader.h"
-#include "Engine/Asset/MaterialData.h"
 #include "Engine/Core/VirtualFileSystem.h"
 #include "Support/AutomationTestClient.h"
 
@@ -64,6 +64,64 @@ namespace Engine {
 
 	TEST_SUITE("Editor")
 	{
+		TEST_CASE("ContentBrowserPanel: Behaviour Module and Test templates queue undoable script creation")
+		{
+			for (int choice = 5; choice <= 7; ++choice)
+			{
+				INFO(choice);
+				Test::AutomationFixture fixture("ContentCreateScript", false, std::nullopt, true);
+				auto& editor = fixture.GetEditor();
+				auto& server = fixture.GetClient().GetServer();
+				EditorActions actions(editor, server);
+				EditorAutomationControls controls(editor, server);
+				ContentBrowserTestViewport viewports;
+				ReflectedEditController edits(editor);
+				GizmoController gizmos(editor);
+				ThumbnailCache thumbnails(editor, {});
+				EditorPanelContext context{ editor, server, actions, controls, viewports, edits, thumbnails, gizmos };
+				ContentBrowserPanel panel;
+				Test::PanelInteractionUi ui;
+				ImVec2 origin{};
+				const auto draw = [&panel, &context, &origin]()
+				{
+					origin = ImGui::GetCursorScreenPos();
+					return panel.Draw(context);
+				};
+				REQUIRE(ui.Frame(draw));
+				const float frame = ImGui::GetFrameHeightWithSpacing();
+				REQUIRE(ui.Click(draw, ImVec2(origin.x + 80.0f, origin.y + 2.0f * frame + 8.0f)));
+				const float comboY = origin.y + 3.0f * frame;
+				REQUIRE(ui.Click(draw, ImVec2(origin.x + 80.0f, comboY + 8.0f)));
+				const float choiceY = comboY + ImGui::GetFrameHeight() + ImGui::GetStyle().WindowPadding.y
+					+ static_cast<float>(choice) * ImGui::GetTextLineHeightWithSpacing() + 6.0f;
+				REQUIRE(ui.Click(draw, ImVec2(origin.x + 80.0f, choiceY)));
+				REQUIRE(ui.Click(draw, ImVec2(origin.x + 80.0f, comboY + frame + 8.0f)));
+				ImGui::GetIO().AddInputCharactersUTF8("ClickScript");
+				REQUIRE(ui.Frame(draw));
+				REQUIRE(ui.Click(draw, ImVec2(origin.x + 22.0f, comboY + 2.0f * frame + 8.0f)));
+				const std::string path = choice == 7 ? "Assets/ClickScript.test.luau" : "Assets/ClickScript.luau";
+				CHECK_FALSE(context.Editor.GetAssets().Resolve(path));
+				CHECK(context.Editor.GetHistory().GetUndoCount() == 0);
+				context.Actions.Pump();
+				context.Editor.GetAssets().WaitIdle();
+				context.Actions.Pump();
+				const auto asset = context.Editor.GetAssets().Resolve(path);
+				REQUIRE(asset);
+				const auto fields = fixture.Call("script.fields", Json{ { "script", asset->ToString() } });
+				REQUIRE_MESSAGE(fields, (fields ? "" : fields.error().ToString()));
+				CHECK((*fields)["kind"] == Json(choice == 5 ? "Behaviour" : choice == 6 ? "Module"
+																						: "TestSuite"));
+				const auto history = context.Editor.GetHistory().GetEntries(10);
+				REQUIRE(history.size() == 1);
+				CHECK(history.front().Origin == CommandOrigin::User);
+				REQUIRE(ui.Frame(draw));
+				REQUIRE(fixture.Call("edit.undo", Json::object()));
+				CHECK_FALSE(context.Editor.GetAssets().Resolve(path));
+				REQUIRE(fixture.Call("edit.redo", Json::object()));
+				CHECK(context.Editor.GetAssets().Resolve(path) == asset);
+			}
+		}
+
 		TEST_CASE("ContentBrowserPanel: creating a sound effect queues a valid initial layer")
 		{
 			Test::PanelInteractionFixture fixture("ContentCreateSound", false);

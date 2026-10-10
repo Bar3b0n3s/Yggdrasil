@@ -11,6 +11,9 @@
 #include "Engine/Platform/Input/InputState.h"
 #include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Scene/Scene.h"
+#include "Engine/Scripting/ScriptCompiler.h"
+#include "Engine/Scripting/ScriptEngine.h"
+#include "Engine/Session/ReplayRecorder.h"
 
 #include <nlohmann/json.hpp>
 
@@ -24,17 +27,92 @@
 
 namespace Engine {
 
-	namespace Automation {
-
-		Result<Scope<PendingOperation>> PlayWaitFor(AutomationMethodContext& /*context*/, const PlayWaitForParams& /*params*/)
-		{
-			ENGINE_CONTRACT_STUB();
-			return MakeError(ErrorCode::Unsupported, "Waiting for a script predicate is an M13 contract stub");
-		}
-
-	}
-
 	namespace {
+
+		class PlayWaitForOperation final : public PendingOperation
+		{
+		public:
+			PlayWaitForOperation(const PlaySession& session, ScriptCompilation compilation, uint32_t timeout)
+				: m_Serial(session.GetSerial()), m_ExpectedTick(session.GetTick()), m_Timeout(timeout)
+			{
+				m_Predicate.Bytecode = std::move(compilation.Bytecode);
+				m_Predicate.SourceMap = std::move(compilation.SourceMap);
+			}
+
+			[[nodiscard]] std::optional<Result<Json>> Poll(MethodContext& context) override
+			{
+				auto& host = static_cast<AutomationMethodContext&>(context);
+				const auto start = host.GetWallClockTime();
+				do
+				{
+					PlaySession* session = host.GetPlaySession();
+					if (session == nullptr || session->GetSerial() != m_Serial || !session->IsStepping() || session->GetTick() != m_ExpectedTick)
+					{
+						Cancel(context);
+						return MakeError(ErrorCode::Cancelled, "the play.waitFor session ended or its tick changed");
+					}
+					session->Tick();
+					++m_Ran;
+					++m_ExpectedTick;
+					// Scene.Load can replace the VM at the end of Tick. Neither VM nor entity pointers cross that boundary.
+					session = host.GetPlaySession();
+					if (session == nullptr || session->GetSerial() != m_Serial || session->GetTick() != m_ExpectedTick)
+					{
+						Cancel(context);
+						return MakeError(ErrorCode::Cancelled, "the play.waitFor session ended during its tick");
+					}
+					ScriptEngine* scripts = session->GetScripts();
+					if (scripts == nullptr || scripts->IsStopped())
+					{
+						Cancel(context);
+						return MakeError(ErrorCode::InvalidState, "play.waitFor requires a live Play VM");
+					}
+					const uint64_t before = scripts->GetErrors().GetCursor();
+					Result<ScriptEvaluation> evaluated = scripts->ExecuteBytecode(m_Predicate);
+					if (!evaluated)
+					{
+						const std::vector<ScriptError> errors = scripts->GetErrors().Read(before, 1000);
+						if (!errors.empty())
+							context.SetErrorData("scriptError", ScriptErrorToJson(errors.back()));
+						Cancel(context);
+						return std::unexpected(evaluated.error());
+					}
+					m_LastValue = std::move(evaluated->Value);
+					const Json& value = m_LastValue.Get();
+					const bool satisfied = !value.is_null() && (!value.is_boolean() || value == Json(true));
+					if (satisfied || m_Ran == m_Timeout)
+					{
+						const PlayWaitForResult result{ .Satisfied = satisfied, .Tick = ToAutomationCounter(m_ExpectedTick), .Value = m_LastValue };
+						Cancel(context);
+						return context.SerializeResult(result);
+					}
+				} while (host.GetWallClockTime() - start < PlayStepFrameBudget);
+				return std::nullopt;
+			}
+
+			void Cancel(MethodContext& context) override
+			{
+				if (m_Released)
+					return;
+				m_Released = true;
+				PlaySession* session = static_cast<AutomationMethodContext&>(context).GetPlaySession();
+				if (session != nullptr && session->GetSerial() == m_Serial)
+				{
+					session->SetStepping(false);
+					session->SetExtractionEnabled(true);
+				}
+			}
+
+			[[nodiscard]] std::string GetPhase() const override { return std::format("Play:waitFor {}/{}", m_Ran, m_Timeout); }
+		private:
+			uint64_t m_Serial = 0;
+			uint64_t m_ExpectedTick = 0;
+			uint32_t m_Timeout = 0;
+			uint32_t m_Ran = 0;
+			bool m_Released = false;
+			ScriptData m_Predicate{};
+			VariantValue m_LastValue{};
+		};
 
 		// play.step's operation (PlayMethods.h): ticks run from Poll, as many per frame as fit PlayStepFrameBudget on the
 		// host's wall clock (AutomationMethodContext::GetWallClockTime).
@@ -58,6 +136,7 @@ namespace Engine {
 				PlaySession* session = FindSession(automation);
 				if (session == nullptr)
 				{
+					Cancel(context);
 					return std::optional<Result<Json>>(std::unexpected(
 						Error(ErrorCode::Cancelled, std::format("the play session ended after {} of {} ticks of this play.step", m_Ran, m_Ticks))));
 				}
@@ -71,6 +150,12 @@ namespace Engine {
 					session->SetExtractionEnabled(m_Render == PlayStepRender::Every || (m_Render == PlayStepRender::Last && last));
 					session->Tick();
 					++m_Ran;
+					session = FindSession(automation);
+					if (session == nullptr)
+					{
+						Cancel(context);
+						return MakeError(ErrorCode::Cancelled, "the play.step session ended or its tick changed during the step");
+					}
 				} while (m_Ran < m_Ticks && m_Render != PlayStepRender::Every && automation.GetWallClockTime() - start < PlayStepFrameBudget);
 
 				if (m_Ran < m_Ticks)
@@ -89,8 +174,13 @@ namespace Engine {
 			void Cancel(MethodContext& context) override
 			{
 				// The ticks already run stay (§13.2 "Disconnect"); the session is left as play.step found it otherwise.
-				if (PlaySession* session = FindSession(static_cast<AutomationMethodContext&>(context)))
+				if (m_Released)
+					return;
+				PlaySession* session = static_cast<AutomationMethodContext&>(context).GetPlaySession();
+				if (session != nullptr && session->GetSerial() == m_SessionSerial)
 					Release(*session);
+				else
+					m_Released = true;
 			}
 
 			[[nodiscard]] std::string GetPhase() const override
@@ -102,14 +192,15 @@ namespace Engine {
 			[[nodiscard]] PlaySession* FindSession(const AutomationMethodContext& context) const
 			{
 				PlaySession* session = context.GetPlaySession();
-				if (session == nullptr || session->GetSerial() != m_SessionSerial || !session->IsStepping() || session->GetTick() != m_FirstTick + m_Ran)
+				if (m_Released || session == nullptr || session->GetSerial() != m_SessionSerial || !session->IsStepping() || session->GetTick() != m_FirstTick + m_Ran)
 					return nullptr;
 				return session;
 			}
 
 			// Ends the step's hold on `session`: the host's loop is throttled again and every frame phase extracts.
-			static void Release(PlaySession& session)
+			void Release(PlaySession& session)
 			{
+				m_Released = true;
 				session.SetStepping(false);
 				session.SetExtractionEnabled(true);
 			}
@@ -121,6 +212,7 @@ namespace Engine {
 			uint64_t m_ExtractionsBefore = 0;
 			uint32_t m_Ran = 0;
 			uint32_t m_Frames = 0;
+			bool m_Released = false;
 		};
 
 	}
@@ -169,7 +261,7 @@ namespace Engine {
 			}
 			result.TimeScale = static_cast<float>(session->GetTimeScale());
 			result.Modified = session->IsModified();
-			result.Recording = false;
+			result.Recording = session->GetRecorder() != nullptr && session->GetRecorder()->IsRecording();
 			result.EntityCount = ToAutomationCounter(session->GetScene().GetEntityCount());
 			result.MaxEntities = session->GetMaxEntities();
 			result.Input = session->GetInput().GetSummary(InputPhase::Step);
@@ -178,17 +270,8 @@ namespace Engine {
 
 		Result<PlayStateResult> PlayStart(AutomationMethodContext& context, const PlayStartParams& params)
 		{
-			// Members of later milestones are refused wherever they are present (ADR 0012 decision 16).
-			if (context.HasParam("parameters"))
-			{
-				return std::unexpected(Utils::MakeParamError(ErrorCode::Unsupported, "/parameters",
-					"play.start {parameters} arrives with scripts (M13): Scene.GetLoadParameters reads them", "remove parameters"));
-			}
-			if (context.HasParam("pauseOnError"))
-			{
-				return std::unexpected(Utils::MakeParamError(ErrorCode::Unsupported, "/pauseOnError",
-					"play.start {pauseOnError} arrives with scripts (M13): only script errors pause play", "remove pauseOnError"));
-			}
+			if (context.HasParam("parameters") && !params.Parameters.Get().is_object())
+				return std::unexpected(Utils::MakeParamError(ErrorCode::InvalidArgument, "/parameters", "parameters must be an object", {}));
 
 			PlayStartOptions options;
 			options.Mode = params.Mode;
@@ -198,6 +281,8 @@ namespace Engine {
 			options.ScenePath = params.Scene;
 			options.Paused = params.Paused;
 			options.TimeScale = params.TimeScale;
+			options.Parameters = params.Parameters;
+			options.PauseOnError = context.HasParam("pauseOnError") ? std::optional<bool>(params.PauseOnError) : std::nullopt;
 			ENGINE_TRY(context.StartPlay(options));
 			return MakePlayStateResult(context);
 		}
@@ -296,6 +381,22 @@ namespace Engine {
 			return MakePlayStateResult(context);
 		}
 
+		Result<Scope<PendingOperation>> PlayWaitFor(AutomationMethodContext& context, const PlayWaitForParams& params)
+		{
+			ENGINE_TRY_ASSIGN(PlaySession * session, Utils::RequirePlaySession(context));
+			ENGINE_TRY(Utils::CheckLockstepOwner(context, *session));
+			if (session->IsStepping() || (!session->IsLockstep() && !session->IsPaused()))
+				return MakeError(ErrorCode::InvalidState, "play.waitFor needs an idle paused or lockstep session");
+			if (session->GetMode() != PlayMode::Play || session->GetScripts() == nullptr || session->GetScripts()->IsStopped())
+				return MakeError(ErrorCode::InvalidState, "play.waitFor requires a live Play VM");
+			if (params.TimeoutTicks < 1 || params.TimeoutTicks > MaxPlayStepTicks)
+				return std::unexpected(Utils::MakeParamError(ErrorCode::InvalidArgument, "/timeoutTicks", "timeoutTicks is outside the supported range", {}));
+			ENGINE_TRY_ASSIGN(ScriptCompilation compiled, ScriptCompiler::Compile({ .Source = params.Until, .Mode = ScriptCompileMode::ExpressionOrChunk, .ChunkName = "=play.waitFor", .JsonPointer = "/until" }));
+			auto operation = CreateScope<PlayWaitForOperation>(*session, std::move(compiled), params.TimeoutTicks);
+			session->SetStepping(true);
+			return Scope<PendingOperation>(std::move(operation));
+		}
+
 		Result<PlayStateResult> PlaySetTimeScale(AutomationMethodContext& context, const PlaySetTimeScaleParams& params)
 		{
 			ENGINE_TRY_ASSIGN(PlaySession * session, Utils::RequirePlaySession(context));
@@ -332,10 +433,10 @@ namespace Engine {
 			.Field("lockstep", &PlayStartParams::Lockstep, "Advance only through this client's play.step calls (§13.6).")
 			.Field("seed", &PlayStartParams::Seed, "The session seed; absent: the project's Simulation.Seed xor the scene's Seed.")
 			.Field("scene", &PlayStartParams::Scene, "A project scene to play, such as \"Assets/Scenes/Level2.scene\"; absent: the open scene.")
-			.Field("parameters", &PlayStartParams::Parameters, "Load parameters for scripts (M13; refused when present).")
+			.Field("parameters", &PlayStartParams::Parameters, "Object returned by Scene.GetLoadParameters; absent means an empty object.")
 			.Field("paused", &PlayStartParams::Paused, "Start paused at tick 0.")
 			.Field("timeScale", &PlayStartParams::TimeScale, "The time scale, 0 to 100 (1 is real time).", timeScaleMeta)
-			.Field("pauseOnError", &PlayStartParams::PauseOnError, "Pause on a script error (M13; refused when present).");
+			.Field("pauseOnError", &PlayStartParams::PauseOnError, "Pause on a script error; absent inherits project settings.");
 
 		registry.Struct<PlayStateResult>("PlayStateResult", "A play session's state (play.state, and the result of play.start, pause, resume and setTimeScale).")
 			.Field("state", &PlayStateResult::State, "Edit, Play, Simulate or Paused (as _meta.playState).")
@@ -347,7 +448,7 @@ namespace Engine {
 			.Field("ownedByCaller", &PlayStateResult::OwnedByCaller, "The requesting client owns lockstep.")
 			.Field("timeScale", &PlayStateResult::TimeScale, "The time scale (1 is real time).")
 			.Field("modified", &PlayStateResult::Modified, "An asset or script reloaded during play (§7.5).")
-			.Field("recording", &PlayStateResult::Recording, "An input recording runs (M13; always false).")
+			.Field("recording", &PlayStateResult::Recording, "An input recording is active.")
 			.Field("entityCount", &PlayStateResult::EntityCount, "The entities of the play scene.")
 			.Field("maxEntities", &PlayStateResult::MaxEntities, "The project's entity cap of a session (Simulation.MaxEntities).")
 			.Field("input", &PlayStateResult::Input, "The game input as the last tick's step view saw it.");
@@ -371,10 +472,20 @@ namespace Engine {
 
 		registry.Struct<PlaySetTimeScaleParams>("PlaySetTimeScaleParams", "The params of play.setTimeScale.")
 			.Field("scale", &PlaySetTimeScaleParams::Scale, "The time scale, 0 to 100 (required; 1 is real time).", timeScaleMeta);
+		registry.Struct<PlayWaitForParams>("PlayWaitForParams", "Advance until a Luau predicate becomes truthy.")
+			.Field("until", &PlayWaitForParams::Until, "Expression or chunk evaluated after every tick in the live VM.")
+			.Field("timeoutTicks", &PlayWaitForParams::TimeoutTicks, "Maximum ticks to advance.", { .Min = 1.0, .Max = static_cast<double>(MaxPlayStepTicks) });
+		registry.Struct<PlayWaitForResult>("PlayWaitForResult", "The final predicate value and tick.")
+			.Field("satisfied", &PlayWaitForResult::Satisfied, "The predicate returned a Lua-truthy value.")
+			.Field("tick", &PlayWaitForResult::Tick, "Completed simulation ticks.")
+			.Field("value", &PlayWaitForResult::Value, "Last predicate value, including false or null on timeout.");
 	}
 
 	void RegisterPlayMethods(MethodRegistry& methods, bool includeEditorMethods)
 	{
+		methods.AddPending<AutomationMethodContext, PlayWaitForParams, PlayWaitForResult>(
+			{ .Name = "play.waitFor", .Description = "Advances a paused or lockstep Play session until the predicate is truthy or timeoutTicks is reached.", .RequiredParams = { "until", "timeoutTicks" }, .ExposeAsTool = true, .AvailableInRuntime = true, .TimeoutSeconds = 600, .Examples = { { .Description = "Wait for tick 60.", .Params = Json{ { "until", "Time.GetTick() >= 60" }, { "timeoutTicks", 600 } } } } },
+			&Automation::PlayWaitFor);
 		Json startExample = Json::object();
 		startExample["lockstep"] = true;
 		startExample["seed"] = 42;

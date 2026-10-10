@@ -45,6 +45,12 @@ namespace Engine {
 		// The server's resolver (AutomationServer::GetAssetReferenceResolver): requests and edit.batch's ops resolve asset references
 		// in their params through it (MethodRegistry.h convention 13).
 		[[nodiscard]] IAssetReferenceResolver* GetAssetReferenceResolver() const override;
+		// Lazily pins the editor's current script field snapshot for this request, after path resolution. No project is
+		// InvalidState; snapshot acquisition failures propagate. Methods without schema-dependent params never load it.
+		[[nodiscard]] Result<Ref<const IFieldSchemaSource>> GetFieldSchemaSnapshot() override;
+		// entity.update's Fields-only Script patch borrows its absent Script handle from the addressed entity. An explicit
+		// Script (including null), or removing/re-adding the component, never borrows the old handle. No scene writes.
+		[[nodiscard]] Status CompleteParameterOwners(Json& params) override;
 
 		// The scene a request addresses (§13.4 "Target"): `target` as given when `given`, else the play scene for reads while
 		// playing (EditorPlayController) and the edit scene otherwise. Errors: InvalidState "no scene open" without an open
@@ -76,6 +82,15 @@ namespace Engine {
 		[[nodiscard]] PlaySession* GetPlaySession() const override;
 		[[nodiscard]] Status StartPlay(const PlayStartOptions& options) override;
 		[[nodiscard]] Status StopPlay() override;
+		[[nodiscard]] Status StartRecordingSession(const PlayStartOptions& options, bool restart) override;
+		[[nodiscard]] Status RestartForReplay(const ReplayHeader& header) override;
+		void ReleaseReplayInput(uint64_t sessionSerial) override;
+		[[nodiscard]] Result<ReplayHeader> DescribeReplayHeader() const override;
+		[[nodiscard]] Result<AssetRef<ReplayData>> LoadReplay(std::string_view path) override;
+		[[nodiscard]] Result<std::string> ValidateReplayOutput(std::string_view path) const override;
+		[[nodiscard]] Result<std::string> WriteReplay(std::string_view path, const ReplayDocument& document) override;
+		[[nodiscard]] ScriptErrorStream* GetScriptErrors() const override;
+		[[nodiscard]] Result<ScriptEvaluation> EvalInEdit(std::string_view code, std::string_view entity) override;
 		[[nodiscard]] std::string GetClientName(ClientId client) const override;
 		[[nodiscard]] EventLog& GetEventLog() const override;
 		[[nodiscard]] Result<Image> CaptureView(const RenderSnapshot& snapshot, const ViewportScreenshotRequest& request) override;
@@ -104,6 +119,7 @@ namespace Engine {
 		// InvalidState for an unavailable/minimized view; Unsupported only while this contract adapter is unimplemented.
 		[[nodiscard]] Result<ViewportPixelSize> GetViewportPixelSize(ViewportView view) const;
 	private:
+		Ref<const IFieldSchemaSource> m_FieldSchemas{};
 		EditorContext* m_Editor = nullptr;    // documented back-reference
 		AutomationServer* m_Server = nullptr; // documented back-reference
 	};

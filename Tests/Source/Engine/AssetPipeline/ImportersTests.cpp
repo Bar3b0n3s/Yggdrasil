@@ -1,10 +1,12 @@
 #include "TestsPCH.h"
 
+#include "Engine/Asset/ReplayData.h"
 #include "Engine/AssetPipeline/IAssetImporter.h"
 #include "Engine/AssetPipeline/ImporterRegistry.h"
 #include "Engine/AssetPipeline/Importers/EnvironmentImporter.h"
 #include "Engine/Core/Hash.h"
 #include "Engine/Core/Mounts/NativeDirectoryMount.h"
+#include "Engine/Core/Mounts/OverlayMount.h"
 #include "Support/AssetTestFixture.h"
 #include "Support/TestData.h"
 
@@ -31,7 +33,7 @@ namespace Engine {
 		};
 
 		Result<ImportFingerprint> ImportOnce(const IAssetImporter& importer, const VirtualFileSystem& vfs, const VfsPath& source,
-			const VariantValue& settings, const TypeRegistry& registry)
+			const VariantValue& settings, const TypeRegistry& registry, std::span<const ImportAssetLookupEntry> assets)
 		{
 			ENGINE_TRY_ASSIGN(const Buffer bytes, vfs.ReadFile(source));
 			AssetMetadata metadata;
@@ -46,7 +48,7 @@ namespace Engine {
 				.SourceBytes = bytes,
 				.Settings = settings,
 				.Registry = &registry,
-				.Assets = {},
+				.Assets = assets,
 				.EnvironmentBaker = nullptr,
 				.ScriptDiagnostics = nullptr,
 			});
@@ -74,10 +76,24 @@ namespace Engine {
 			VirtualFileSystem vfs;
 			Result<Scope<NativeDirectoryMount>> data = NativeDirectoryMount::Create(Test::GetTestDataPath(), MountAccess::ReadOnly);
 			REQUIRE_MESSAGE(data.has_value(), data.error().ToString());
-			REQUIRE(vfs.Mount("project", std::move(*data)).has_value());
+			REQUIRE(vfs.Mount("project", CreateScope<OverlayMount>(std::move(*data))).has_value());
 			Result<Scope<NativeDirectoryMount>> resources = NativeDirectoryMount::Create(Test::GetRepositoryRoot() / "Resources", MountAccess::ReadOnly);
 			REQUIRE(resources.has_value());
 			REQUIRE(vfs.Mount("engine", std::move(*resources)).has_value());
+			// Extend the read-only fixture corpus in memory with script and replay sources. The replay's lookup uses the
+			// same stable source-path handles as ImportOnce, and exercises compiled expectations as well as the container.
+			REQUIRE(vfs.WriteFileAtomic(Test::ParseVfsPath("project://Assets/Deterministic.luau"),
+						   AsBytes("return Script.Define('Deterministic', { Fields = { Speed = Field.Number(2) } })"))
+					.has_value());
+			ReplayDocument replay;
+			replay.Header.Scene = { AssetHandle(Hash64(0, "Assets/Scenes/Level.scene")), "Assets/Scenes/Level.scene" };
+			replay.Header.EngineVersion = "1.0.0";
+			replay.Header.Config = "Debug";
+			replay.Expect.push_back({ .Tick = 0, .Luau = "return 2 ^ 1.5 > 2" });
+			replay.FinalStateHash = "0123456789abcdef";
+			const auto replayText = ReplayToText(replay);
+			REQUIRE(replayText.has_value());
+			REQUIRE(vfs.WriteFileAtomic(Test::ParseVfsPath("project://Assets/Deterministic.replay"), AsBytes(*replayText)).has_value());
 
 			std::vector<VfsPath> sources;
 			for (const std::string_view root : { "project://Assets", "engine://Fonts", "engine://Audio" })
@@ -91,6 +107,13 @@ namespace Engine {
 				}
 			}
 
+			std::vector<ImportAssetLookupEntry> assets;
+			for (const VfsPath& source : sources)
+			{
+				const IAssetImporter* importer = fixture.GetImporters().FindForExtension(source.GetExtension());
+				REQUIRE(importer != nullptr);
+				assets.push_back({ .SourcePath = source, .Handle = AssetHandle(Hash64(0, source.GetPath())), .Type = importer->GetMainType() });
+			}
 			std::set<std::string> covered;
 			for (const VfsPath& source : sources)
 			{
@@ -105,8 +128,8 @@ namespace Engine {
 					settings = *defaults;
 				}
 				// Fixtures meant to fail (the rejected glTF variants) fail the same way twice; the others must match exactly.
-				const Result<ImportFingerprint> first = ImportOnce(*importer, vfs, source, settings, fixture.GetRegistry());
-				const Result<ImportFingerprint> second = ImportOnce(*importer, vfs, source, settings, fixture.GetRegistry());
+				const Result<ImportFingerprint> first = ImportOnce(*importer, vfs, source, settings, fixture.GetRegistry(), assets);
+				const Result<ImportFingerprint> second = ImportOnce(*importer, vfs, source, settings, fixture.GetRegistry(), assets);
 				REQUIRE(first.has_value() == second.has_value());
 				if (first.has_value())
 				{

@@ -6,17 +6,19 @@
 #include "EditorCore/EditorActions.h"
 #include "EditorCore/EditorContext.h"
 #include "EditorCore/Play/EditorPlayController.h"
+#include "EditorCore/Scripting/EditorScriptService.h"
 #include "Engine/Asset/MaterialData.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/AssetPipeline/ImporterRegistry.h"
 #include "Engine/AssetPipeline/Importers/SoundEffectImporter.h"
+#include "Engine/Core/Log.h"
 #include "Engine/Core/VirtualFileSystem.h"
 #include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Scene/ComponentAccess.h"
 #include "Engine/Scene/ComponentHostOps.h"
 #include "Engine/Scene/Components/PrefabInstanceComponent.h"
 #include "Engine/Scene/Components/PrefabLinkComponent.h"
-#include "Engine/Core/Log.h"
+#include "Engine/Scene/Components/ScriptComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Session/PlaySession.h"
 
@@ -170,7 +172,7 @@ namespace Engine {
 				ReportFailure(submitted.error());
 		};
 		auto drawField = [this, &context, &editor](const FieldInfo& field, Value value, InspectorEditTarget target,
-							 const ResolveContext& resolve, bool mixed)
+							 const ResolveContext& resolve, bool mixed, const ScriptFieldSchema* scriptSchema = nullptr)
 		{
 			if (field.GetMeta().Hidden)
 				return;
@@ -186,7 +188,8 @@ namespace Engine {
 			auto result = DrawReflectedValue(field, value, { .Types = editor.GetTypeRegistry(), .Resolve = resolve, .Path = target.Component + "." + target.FieldPath, .ReadOnly = editor.IsReadOnly(), .Mixed = mixed, .FindReferences = [&editor, addressedTarget = target.Target](const FieldInfo& referenceField, std::string_view query)
 			{
 				return Utils::FindInspectorReferenceCandidates(editor, addressedTarget, referenceField, query);
-			} });
+			},
+															   .ScriptSchema = scriptSchema });
 			if (!result)
 			{
 				ReportFailure(result.error());
@@ -313,16 +316,86 @@ namespace Engine {
 				ResolveContext resolve{ .Registry = &editor.GetTypeRegistry(), .Owner = object, .OwnerType = component, .Key = {} };
 				for (const auto& field : component->GetFields())
 				{
-					auto value = ComponentAccess::GetFieldValue(first, component->GetName(), field->GetName());
-					if (!value)
-						continue;
-					bool mixed = false;
-					for (const UUID id : selection)
+					if (component->GetName() == "Script" && field->GetName() == "Fields")
 					{
-						auto other = ComponentAccess::GetFieldValue(scene->FindEntityByID(id), component->GetName(), field->GetName());
-						mixed |= !other || *other != *value;
+						const auto& attached = first.GetComponent<ScriptComponent>();
+						EditorScriptService* service = editor.GetScriptService();
+						const auto script = service == nullptr ? Result<AssetRef<ScriptData>>(MakeError(ErrorCode::InvalidState, "script schemas are unavailable"))
+															   : service->GetFields(attached.Script.GetHandle());
+						if (!script)
+						{
+							ImGui::TextWrapped("Script fields: %s", script.error().GetMessageText().c_str());
+							continue;
+						}
+						if ((*script)->Kind != ScriptKind::Behaviour)
+						{
+							ImGui::TextWrapped("SCRIPT_NOT_A_BEHAVIOUR: assign a Behaviour script.");
+							continue;
+						}
+						auto schemas = ScriptFieldSchemaSource::Create({ { attached.Script.GetHandle(), *script } });
+						if (!schemas)
+						{
+							ImGui::TextWrapped("Script fields: %s", schemas.error().GetMessageText().c_str());
+							continue;
+						}
+						bool sameScript = true;
+						for (const UUID id : selection)
+							sameScript &= scene->FindEntityByID(id).GetComponent<ScriptComponent>().Script == attached.Script;
+						if (!sameScript)
+						{
+							ImGui::TextDisabled("Select entities with the same Behaviour to edit script fields together.");
+							continue;
+						}
+						ResolveContext scriptResolve = resolve;
+						scriptResolve.Schemas = schemas->get();
+						for (const auto& declaration : (*script)->Fields)
+						{
+							if (declaration.Meta.Hidden)
+								continue;
+							const auto descriptor = (*schemas)->FindField(attached.Script.GetHandle(), declaration.Name);
+							if (!descriptor)
+								continue;
+							bool invalid = false;
+							const auto effective = [&declaration, &descriptor](const ScriptComponent& instance, bool& mismatch)
+							{
+								const auto found = instance.Fields.find(declaration.Name);
+								if (found == instance.Fields.end())
+									return declaration.DefaultValue;
+								ValidationContext validation;
+								(*descriptor)->ValidateJson(JsonReader(found->second.Get()), {}, validation);
+								mismatch |= validation.HasErrors();
+								return validation.HasErrors() ? declaration.DefaultValue : found->second;
+							};
+							const VariantValue initial = effective(attached, invalid);
+							bool mixed = false;
+							for (const UUID id : selection)
+								mixed |= effective(scene->FindEntityByID(id).GetComponent<ScriptComponent>(), invalid).Get() != initial.Get();
+							if (invalid)
+								ImGui::TextWrapped("SCRIPT_FIELD_TYPE_MISMATCH: %s uses its default until the override is corrected.", declaration.Name.c_str());
+							FieldInfo variant({ .Name = declaration.Name, .Description = (*descriptor)->GetDescription(), .Type = field->GetType().GetElement(), .Meta = declaration.Meta, .Accessor = {}, .Resolver = field->GetResolver() });
+							scriptResolve.Key = declaration.Name;
+							drawField(variant, Value::FromVariant(initial), { .Entities = selection, .Component = "Script", .FieldPath = "Fields[" + declaration.Name + "]", .Target = sceneTarget },
+								scriptResolve, mixed, &declaration);
+						}
+						for (const auto& [name, value] : attached.Fields)
+						{
+							if (!(*schemas)->FindField(attached.Script.GetHandle(), name))
+								ImGui::TextWrapped("SCRIPT_UNKNOWN_FIELD_OVERRIDE: %s = %s (preserved)", name.c_str(), value.Get().dump().c_str());
+						}
 					}
-					drawField(*field, std::move(*value), { .Entities = selection, .Component = component->GetName(), .FieldPath = field->GetName(), .Target = sceneTarget }, resolve, mixed);
+					else
+					{
+						auto value = ComponentAccess::GetFieldValue(first, component->GetName(), field->GetName());
+						if (!value)
+							continue;
+						bool mixed = false;
+						for (const UUID id : selection)
+						{
+							auto other = ComponentAccess::GetFieldValue(scene->FindEntityByID(id), component->GetName(), field->GetName());
+							mixed |= !other || *other != *value;
+						}
+						drawField(*field, std::move(*value), { .Entities = selection, .Component = component->GetName(), .FieldPath = field->GetName(), .Target = sceneTarget }, resolve, mixed);
+					}
 					if (selection.size() == 1 && first.HasComponent<PrefabLinkComponent>() && sceneTarget == SceneTarget::Edit)
 					{
 						const auto link = first.GetComponent<PrefabLinkComponent>();

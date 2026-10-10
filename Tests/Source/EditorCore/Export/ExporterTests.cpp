@@ -6,6 +6,7 @@
 #include "EditorCore/Commands/ProjectSettingsCommand.h"
 #include "EditorCore/EditorContext.h"
 #include "EditorCore/Project/ProjectManager.h"
+#include "EditorCore/Scripting/EditorScriptService.h"
 #include "Engine/App/EngineContext.h"
 #include "Engine/Asset/AudioClipData.h"
 #include "Engine/Asset/BuiltinAssets.h"
@@ -29,6 +30,7 @@
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/SceneSerializer.h"
 #include "Support/EditorTestFixture.h"
+#include "Support/ExpectLog.h"
 #include "Support/HeadlessGpuFixture.h"
 #include "Support/TempDirectory.h"
 #include "Support/TestData.h"
@@ -359,6 +361,51 @@ namespace Engine {
 			CHECK(IssuePointers(outcome->error()) == std::vector<std::string>{ "/StartScene" });
 			std::error_code error;
 			CHECK_FALSE(std::filesystem::exists(fixture.GetProjectRoot() / "Build", error));
+		}
+
+		TEST_CASE("Exporter: script type errors block export even when play allows them")
+		{
+			Test::EditorTestFixture fixture;
+			MakeExportableProject(fixture);
+			EditorContext& editor = fixture.GetEditor();
+			ApplySettings(editor, R"({"Scripting":{"BlockPlayOnTypeErrors":false}})");
+			WriteTestFile(fixture.GetProjectRoot() / "Assets/Scripts/Bad.luau", "--!strict\nlocal value: number = \"wrong\"\nreturn {Value = value}\n");
+			const Test::TempDirectory binaries("ExportScriptError");
+			Result<Scope<Exporter>> exporter = Exporter::Start(editor, MakeSpecification(MakeBinaryRoot(binaries, ExportConfiguration::Release)));
+			REQUIRE_MESSAGE(exporter.has_value(), exporter.error().ToString());
+			const std::optional<Result<ExportReport>> outcome = RunToEnd(**exporter);
+			REQUIRE(outcome.has_value());
+			REQUIRE_FALSE(outcome->has_value());
+			CHECK(outcome->error().GetCode() == ErrorCode::Validation);
+			CHECK(outcome->error().ToString().find("Bad.luau") != std::string::npos);
+			CHECK((*exporter)->GetPhase() == ExportPhase::Validate);
+			CHECK_FALSE(FileSystem::Exists(fixture.GetProjectRoot() / "Build"));
+		}
+
+		TEST_CASE("Exporter: invalid checker configuration blocks export instead of skipping type checks")
+		{
+			Test::EditorTestFixture fixture;
+			MakeExportableProject(fixture);
+			EditorContext& editor = fixture.GetEditor();
+			ApplySettings(editor, R"({"Scripting":{"BlockPlayOnTypeErrors":false}})");
+			WriteTestFile(fixture.GetProjectRoot() / "Assets/Scripts/Bad.luau", "--!strict\nlocal value: number = \"wrong\"\nreturn {Value = value}\n");
+			EditorScriptService* scripts = editor.GetScriptService();
+			REQUIRE(scripts != nullptr);
+			const auto checked = scripts->Check({});
+			REQUIRE(checked.has_value());
+			CHECK_FALSE(checked->Diagnostics.empty());
+			WriteTestFile(fixture.GetProjectRoot() / ".luaurc", "\xff");
+			Test::ExpectLog expected(LogLevel::Error, "Cannot refresh script diagnostics");
+			const Test::TempDirectory binaries("ExportCheckerConfigurationError");
+			auto exporter = Exporter::Start(editor, MakeSpecification(MakeBinaryRoot(binaries, ExportConfiguration::Release)));
+			REQUIRE_MESSAGE(exporter, (exporter ? "" : exporter.error().ToString()));
+			const auto outcome = RunToEnd(**exporter);
+			REQUIRE(outcome.has_value());
+			REQUIRE_FALSE(outcome->has_value());
+			CHECK(outcome->error().GetCode() == ErrorCode::InvalidState);
+			CHECK(outcome->error().GetMessageText().contains("script diagnostics are unavailable"));
+			CHECK((*exporter)->GetPhase() == ExportPhase::Validate);
+			CHECK_FALSE(FileSystem::Exists(fixture.GetProjectRoot() / "Build"));
 		}
 
 		TEST_CASE("Exporter: validation reports every problem of the project at its setting")

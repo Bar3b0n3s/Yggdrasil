@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Engine/Asset/ReplayData.h"
 #include "Engine/Automation/Methods/StatsMethods.h"
 #include "Engine/Automation/Protocol/Dispatcher.h"
 #include "Engine/Automation/Protocol/JsonRpc.h"
@@ -16,6 +17,7 @@
 #include <functional>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 // The Runtime's automation server (Architecture §13.2, §13.5 "Runtime subset", §13.9 `Runtime --automation[=port]`): the
@@ -38,9 +40,11 @@ namespace Engine {
 	class AudioEngine;
 	class EventLog;
 	class PlaySession;
+	class ScriptErrorStream;
 	class TypeRegistry;
 	class VirtualFileSystem;
 	struct RenderSnapshot;
+	struct PlayStartOptions;
 	struct ViewportScreenshotRequest;
 
 	struct RuntimeAutomationServerSpecification
@@ -78,6 +82,16 @@ namespace Engine {
 		// M12: the game's audio engine (AutomationMethodContext::GetAudioEngine: audio.stats), a documented back-reference that
 		// outlives the server; null makes audio.stats Unsupported.
 		AudioEngine* Audio = nullptr;
+		// M13 application services. Borrowed state/captures outlive the server. A successful restart replaces
+		// the current session and returns its new borrowed pointer; failures leave the old pointer valid.
+		ScriptErrorStream* ScriptErrors = nullptr;
+		std::function<Result<PlaySession*>(const PlayStartOptions& options, bool restart)> StartRecordingSession{};
+		std::function<Result<PlaySession*>(const ReplayHeader& header)> RestartForReplay{};
+		std::function<void(uint64_t sessionSerial)> ReleaseReplayInput{};
+		std::function<Result<ReplayHeader>()> DescribeReplayHeader{};
+		std::function<Result<AssetRef<ReplayData>>(std::string_view path)> LoadReplay{};
+		std::function<Result<std::string>(std::string_view path)> ValidateReplayOutput{};
+		std::function<Result<std::string>(std::string_view path, const ReplayDocument& document)> WriteReplay{};
 	};
 
 	// Main thread only (its ProtocolServer's I/O thread is internal); not copyable or movable.
@@ -102,7 +116,9 @@ namespace Engine {
 		// Builds the method registry over `registry` (on which RegisterAutomationSharedTypes and RegisterSharedMethodTypes
 		// ran before it froze: the Runtime's EngineContextSpecification::RegisterTypes), the Dispatcher and, with Listen, the
 		// transport and the session file. `registry`, `events`, `vfs` (user:// for output files) and `session` are documented
-		// back-references that outlive the server. Errors: those of GenerateAuthToken, ProtocolServer::Start (AlreadyExists for
+		// back-references that outlive the server. The session may be replaced by the specification's restart callbacks;
+		// each callback returns the replacement's pointer and preserves the original on failure.
+		// Errors: those of GenerateAuthToken, ProtocolServer::Start (AlreadyExists for
 		// a port in use) and SessionFile::Write, with nothing left running.
 		[[nodiscard]] static Result<Scope<RuntimeAutomationServer>> Create(const TypeRegistry& registry, EventLog& events, VirtualFileSystem& vfs,
 			PlaySession& session, const RuntimeAutomationServerSpecification& specification);

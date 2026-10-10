@@ -74,7 +74,7 @@ namespace Engine {
 		// Findings are 1-based source ranges, sorted by (File, Line, Column, Code) with deterministic ties/deduplication.
 		// End positions are exclusive. Required-module errors name that module. No I/O, callbacks or views outlive return.
 		// InternalCompilerError (including timeout/cancellation) becomes an Error diagnostic; malformed requests/read
-		// failures are findings too. A failed check never returns an empty success. The contract stub reports Unsupported.
+		// failures are findings too. A failed check never returns an empty success.
 		[[nodiscard]] std::vector<ScriptDiagnostic> CheckScript(const ScriptCheckRequest& request) override;
 	private:
 		struct State;

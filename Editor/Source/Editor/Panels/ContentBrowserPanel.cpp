@@ -79,8 +79,8 @@ namespace Engine {
 		ImGui::BeginDisabled(editor.IsReadOnly());
 		if (ImGui::CollapsingHeader("Create or import"))
 		{
-			constexpr const char* Types[] = { "Folder", "Scene", "Material", "Prefab", "SoundEffect" };
-			constexpr const char* Extensions[] = { "", ".scene", ".material", ".prefab", ".sfx" };
+			constexpr const char* Types[] = { "Folder", "Scene", "Material", "Prefab", "SoundEffect", "Behaviour script", "Module script", "Test script" };
+			constexpr const char* Extensions[] = { "", ".scene", ".material", ".prefab", ".sfx", ".luau", ".luau", ".test.luau" };
 			ImGui::Combo("Type", &m_CreateType, Types, static_cast<int>(std::size(Types)));
 			ImGui::InputText("Name", m_CreateName.data(), m_CreateName.size());
 			if (ImGui::Button("Create"))
@@ -90,15 +90,22 @@ namespace Engine {
 				{
 					if (!name.ends_with(Extensions[m_CreateType]))
 						name += Extensions[m_CreateType];
-					Json params{ { "type", Types[m_CreateType] }, { "path", m_Directory + "/" + name } };
-					if (std::string_view(Types[m_CreateType]) == "SoundEffect")
-						params["values"] = Json{ { "Layers", Json::array({ Json{ { "Duration", 0.1 } } }) } };
-					submit("asset.create", params);
+					if (m_CreateType >= 5)
+					{
+						constexpr const char* Templates[] = { "Behaviour", "Module", "Test" };
+						submit("script.create", Json{ { "path", m_Directory + "/" + name }, { "template", Templates[m_CreateType - 5] } });
+					}
+					else
+					{
+						Json params{ { "type", Types[m_CreateType] }, { "path", m_Directory + "/" + name } };
+						if (std::string_view(Types[m_CreateType]) == "SoundEffect")
+							params["values"] = Json{ { "Layers", Json::array({ Json{ { "Duration", 0.1 } } }) } };
+						submit("asset.create", params);
+					}
 				}
 				else
 					showError(Error(ErrorCode::InvalidArgument, "enter a non-empty filename, without directory separators"));
 			}
-			ImGui::TextDisabled("Script templates become available in M13.");
 			ImGui::InputText("Import source path", m_ImportSource.data(), m_ImportSource.size());
 			if (ImGui::Button("Import"))
 				submit("asset.import", Json{ { "source", m_ImportSource.data() }, { "destDir", m_Directory } });

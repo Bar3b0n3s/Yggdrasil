@@ -31,9 +31,10 @@ namespace Engine {
 			// directory. A test that needs types of its own (a component with an EntityRef field) passes a function that calls
 			// RegisterEditorMethodTypes and adds them. `audio` gives the engine context an AudioEngine (M12; tests pass a device-less,
 			// deterministic one), so the editor has an audio preview and its play sessions and audio.stats have audio; without it
-			// they have none.
+			// they have none. `engineResources` mounts the repository's read-only resources plus a per-test cooked cache,
+			// for tests using shipped templates or file-backed built-ins.
 			explicit EditorTestFixture(std::string_view label = "Editor", CommandHistoryLimits historyLimits = {},
-				RegisterTypesFunction registerTypes = nullptr, std::optional<AudioEngineSpecification> audio = std::nullopt);
+				RegisterTypesFunction registerTypes = nullptr, std::optional<AudioEngineSpecification> audio = std::nullopt, bool engineResources = false);
 			~EditorTestFixture();
 
 			EditorTestFixture(const EditorTestFixture&) = delete;

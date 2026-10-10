@@ -78,6 +78,12 @@
 //      refresh's Io) with its own code, each located at its value. A std::string asset param (asset.*, prefab.*) is
 //      resolved by the handler with Utils::ResolveAssetParam (EditorCore Automation/Private/AssetMethodSupport.h), the
 //      same rule.
+//      If a supplied Variant needs external field schemas, Invoke acquires the host's immutable request snapshot after
+//      resolving ordinary asset paths, then canonicalizes schema-defined enums/assets and uses that same source for
+//      ValidateJson and FromJson. Snapshot acquisition errors keep their host error code; the handler does not run.
+//      Registry-only params never request a snapshot (MethodContext::GetFieldSchemaSnapshot).
+//      For partial patches the host may complete absent schema owner discriminators from the addressed object first
+//      (CompleteParameterOwners); explicit values always win and all completed params still undergo strict validation.
 
 namespace Engine {
 

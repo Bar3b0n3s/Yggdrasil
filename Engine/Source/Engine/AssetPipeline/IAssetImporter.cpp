@@ -82,7 +82,7 @@ namespace Engine {
 
 		auto existing = std::ranges::find_if(m_Lookups, [&path](const ImportAssetLookup& lookup)
 		{
-			return lookup.Path == path;
+			return !lookup.RequestedHandle.IsValid() && lookup.Path == path;
 		});
 		if (existing == m_Lookups.end())
 		{
@@ -98,21 +98,30 @@ namespace Engine {
 		return *entry;
 	}
 
-	std::optional<ImportAssetLookupEntry> ImportContext::FindAsset(AssetHandle /*handle*/)
+	std::optional<ImportAssetLookupEntry> ImportContext::FindAsset(AssetHandle handle)
 	{
-		ENGINE_CONTRACT_STUB();
-		return std::nullopt;
+		if (!handle.IsValid())
+			return std::nullopt;
+		const auto found = std::ranges::find(m_Specification.Assets, handle, &ImportAssetLookupEntry::Handle);
+		std::optional<ImportAssetLookupEntry> entry;
+		if (found != m_Specification.Assets.end())
+			entry = *found;
+		const auto existing = std::ranges::find(m_Lookups, handle, &ImportAssetLookup::RequestedHandle);
+		if (existing == m_Lookups.end())
+			m_Lookups.push_back({ .Found = entry, .RequestedHandle = handle });
+		else
+			existing->Found = entry;
+		return entry;
 	}
 
-	void ImportContext::SetScriptCheck(ScriptImportCheck /*result*/)
+	void ImportContext::SetScriptCheck(ScriptImportCheck result)
 	{
-		ENGINE_CONTRACT_STUB();
+		m_ScriptCheck = std::move(result);
 	}
 
 	std::optional<ScriptImportCheck> ImportContext::GetScriptCheck() const
 	{
-		ENGINE_CONTRACT_STUB();
-		return std::nullopt;
+		return m_ScriptCheck;
 	}
 
 	std::vector<ImportDependencyRead> ImportContext::GetDependencyReads() const
@@ -125,7 +134,12 @@ namespace Engine {
 	std::vector<ImportAssetLookup> ImportContext::GetLookups() const
 	{
 		std::vector<ImportAssetLookup> lookups = m_Lookups;
-		std::ranges::sort(lookups, std::less<>(), &ImportAssetLookup::Path);
+		std::ranges::sort(lookups, [](const ImportAssetLookup& left, const ImportAssetLookup& right)
+		{
+			if (left.RequestedHandle.IsValid() != right.RequestedHandle.IsValid())
+				return !left.RequestedHandle.IsValid();
+			return left.RequestedHandle.IsValid() ? left.RequestedHandle < right.RequestedHandle : left.Path < right.Path;
+		});
 		return lookups;
 	}
 

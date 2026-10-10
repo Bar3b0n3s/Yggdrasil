@@ -43,6 +43,8 @@ namespace Engine {
 	class EditorDryRunScope;
 	class EditorPlayController;
 	class EditorScriptService;
+	class ScriptTypeChecker;
+	class ScriptFieldSchemaSource;
 	class EditorTransaction;
 	class EngineContext;
 	class IEnvironmentBaker;
@@ -146,6 +148,14 @@ namespace Engine {
 		// and shares that provider with imports. Before replacing configuration, drain jobs, then recreate both borrowed
 		// references; the provider outlives every job and service. The pointer expires at project/configuration changes.
 		[[nodiscard]] EditorScriptService* GetScriptService();
+		// Refreshes the checker configuration and preserves infrastructure errors for operations that require checking.
+		[[nodiscard]] Result<EditorScriptService*> AcquireScriptService();
+		// Observes the service initialized by OpenProject; never creates or replaces state through a const editor.
+		// Configuration snapshots are refreshed by Update and the mutable accessor before mutable host operations.
+		[[nodiscard]] const EditorScriptService* GetScriptService() const;
+		// Pinned current cooked schemas; caller retains this snapshot through reflection/UI work. Failed imports
+		// preserve their last good artifact; unknown scripts remain unresolved instead of inventing descriptors.
+		[[nodiscard]] Result<Ref<const ScriptFieldSchemaSource>> GetScriptSchemaSnapshot() const;
 		// M12: the asset browser's audio preview (EditorCore/Audio/AudioPreview.h) over the engine context's AudioEngine;
 		// nullptr when the engine context has none (most in-process tests). Valid for the editor's lifetime; CloseProject
 		// stops it.
@@ -369,6 +379,8 @@ namespace Engine {
 		// EditorAssetManager::OpenProject on the open project's project://Assets (created first when a writable project lacks
 		// it) and cache://, read-only for a read-only project, with hot reload. Errors: those of the creation and of OpenProject.
 		[[nodiscard]] Result<AssetRefreshReport> OpenProjectAssets();
+		[[nodiscard]] Status RefreshScriptServices();
+		[[nodiscard]] Status ReimportScriptForTest(AssetHandle script);
 	private:
 		EngineContext* m_Engine = nullptr; // documented back-reference: outlives the editor
 		EditorContextSpecification m_Specification;
@@ -378,6 +390,12 @@ namespace Engine {
 		Scope<ImporterRegistry> m_Importers;
 		Scope<AssetLoaderRegistry> m_Loaders;
 		Scope<EditorAssetManager> m_Assets;
+		Scope<ScriptTypeChecker> m_ScriptChecker;
+		Scope<EditorScriptService> m_ScriptService;
+		uint64_t m_ScriptConfigurationHash = 0;
+		double m_NextScriptConfigurationCheck = 0.0;
+		std::string m_ScriptConfigurationError{};
+		bool m_TestImportActive = false;
 		Scope<AudioPreview> m_AudioPreview; // M12: after the manager it loads clips through, so it is destroyed first
 		bool m_SceneChangedOnDisk = false;  // IsSceneChangedOnDisk
 		Scope<LoadedProject> m_Project;
@@ -410,7 +428,8 @@ namespace Engine {
 		// Last, so it is destroyed first: a play session refers to the asset manager and the type registry (M7).
 		Scope<EditorPlayController> m_Play;
 	private:
-		friend class CommandHistory; // reads GetRevisionBeforeCommand
+		friend class CommandHistory;        // reads GetRevisionBeforeCommand
+		friend class EditorFeatureTestHost; // synchronous, guarded Test.ReloadScript import only
 		friend class EditorDryRunScope;
 		friend class EditorTransaction;
 		friend class ProjectSettingsCommand; // the one caller of ApplyProjectSettings

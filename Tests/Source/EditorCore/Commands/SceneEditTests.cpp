@@ -4,12 +4,24 @@
 
 #include "EditorCore/EditorContext.h"
 #include "EditorCore/Play/EditorPlayController.h"
+#include "EditorCore/Scripting/EditorScriptService.h"
+#include "Engine/Asset/ScriptData.h"
+#include "Engine/AssetPipeline/EditorAssetManager.h"
+#include "Engine/Core/Buffer.h"
+#include "Engine/Core/VfsPath.h"
+#include "Engine/Scene/Components/PrefabInstanceComponent.h"
+#include "Engine/Scene/Components/PrefabLinkComponent.h"
+#include "Engine/Scene/Components/ScriptComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Entity.h"
+#include "Engine/Scene/Prefab.h"
+#include "Engine/Scene/PrefabAsset.h"
 #include "Engine/Scene/SceneSerializer.h"
 #include "Engine/Session/PlaySession.h"
 #include "Support/DeathTest.h"
 #include "Support/EditorTestFixture.h"
+
+#include <nlohmann/json.hpp>
 
 namespace Engine {
 
@@ -18,6 +30,56 @@ namespace Engine {
 		const Result<std::string> text = SceneSerializer::SaveToString(scene);
 		REQUIRE_MESSAGE(text.has_value(), text.error().ToString());
 		return *text;
+	}
+
+	// A real imported script and prefab, independent of the automation handlers that also edit prefab instances.
+	static Entity CreateTrackedScriptPrefab(EditorContext& editor)
+	{
+		const auto scriptPath = VfsPath::Create("project", "Assets/Links.luau");
+		REQUIRE(scriptPath.has_value());
+		REQUIRE(editor.GetScriptService() != nullptr);
+		const auto written = editor.GetScriptService()->Write(*scriptPath,
+			"return Script.Define(\"Links\", { Fields = { Target = Field.Entity(), Targets = Field.Array(Field.Entity()), Amount = Field.Number(1) } })");
+		REQUIRE_MESSAGE(written.has_value(), (written ? std::string() : written.error().ToString()));
+		const auto schemas = editor.GetScriptSchemaSnapshot();
+		REQUIRE(schemas.has_value());
+		REQUIRE((*schemas)->FindSchema(written->Script, "Target").has_value());
+
+		Scope<Scene> source = editor.CreateScene("PrefabSource");
+		const Entity root = source->CreateEntity("Links");
+		const UUID first = source->CreateEntity("First", root).GetUUID();
+		const UUID second = source->CreateEntity("Second", root).GetUUID();
+		ScriptComponent script;
+		script.Script.SetHandle(written->Script);
+		script.Fields["Target"] = VariantValue(Json(first.ToString()));
+		script.Fields["Targets"] = VariantValue(Json::array({ first.ToString(), second.ToString() }));
+		script.Fields["Amount"] = VariantValue(Json(1.0f));
+		root.AddComponent<ScriptComponent>(script);
+		const auto prefab = Prefab::CreateFromEntity(root, "Links");
+		REQUIRE(prefab.has_value());
+		const auto text = prefab->SaveToString();
+		REQUIRE(text.has_value());
+		const auto path = VfsPath::Create("project", "Assets/Links.prefab");
+		REQUIRE(path.has_value());
+		REQUIRE(editor.WriteProjectFile(*path, AsBytes(*text)).has_value());
+		REQUIRE(editor.GetAssets().Refresh().has_value());
+		const auto handle = editor.GetAssets().Resolve("Assets/Links.prefab");
+		REQUIRE(handle.has_value());
+		LoadReport report;
+		const auto instance = InstantiatePrefabAsset(editor.GetScene(), editor.GetAssets(),
+			PrefabInstantiateOptions{ .PrefabHandle = *handle, .RootID = UUID(0x1234a), .Parent = {}, .SiblingIndex = {}, .RootTransform = {} },
+			PrefabOptions{ .Schemas = schemas->get() }, report);
+		REQUIRE_MESSAGE(instance.has_value(), (instance ? std::string() : instance.error().ToString()));
+		editor.GetHistory().Clear();
+		return *instance;
+	}
+
+	static Json TrackedScriptField(ConstEntity entity, std::string_view name)
+	{
+		const auto& fields = entity.GetComponent<ScriptComponent>().Fields;
+		const auto field = fields.find(std::string(name));
+		REQUIRE(field != fields.end());
+		return field->second.Get();
 	}
 
 	ENGINE_DEATH_TEST("EditorCore/NestedSceneEditAsserts")
@@ -31,6 +93,128 @@ namespace Engine {
 
 	TEST_SUITE("EditorCore")
 	{
+		TEST_CASE("SceneEdit: script entity overrides use prefab-local IDs and undo with their values")
+		{
+			Test::EditorTestFixture fixture("SceneEditScriptPrefab");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			EditorContext& editor = fixture.GetEditor();
+			Scene& scene = editor.GetScene();
+			const UUID rootID = CreateTrackedScriptPrefab(editor).GetUUID();
+			const Entity first = scene.FindEntityByPath("/Links/First");
+			const Entity second = scene.FindEntityByPath("/Links/Second");
+			REQUIRE(first.IsValid());
+			REQUIRE(second.IsValid());
+			const UUID firstID = first.GetUUID();
+			const UUID secondID = second.GetUUID();
+			const UUID prefabFirst = first.GetComponent<PrefabLinkComponent>().PrefabEntityID;
+			const UUID prefabSecond = second.GetComponent<PrefabLinkComponent>().PrefabEntityID;
+			bool playing = false;
+			SUBCASE("edit mode")
+			{
+			}
+			SUBCASE("paused play session")
+			{
+				playing = true;
+			}
+			if (playing)
+				REQUIRE(editor.GetPlay().Start(PlayStartOptions{ .Lockstep = true, .Paused = true }).has_value());
+
+			// Touching only an implicit root override must not mistake remapped script references for authored changes.
+			{
+				SceneEdit edit(editor, "Rename instance");
+				scene.FindEntityByID(rootID).SetName("Renamed");
+				REQUIRE(edit.Commit().has_value());
+			}
+			REQUIRE(scene.FindEntityByID(rootID).GetComponent<PrefabInstanceComponent>().Overrides.empty());
+			const std::string before = SaveTrackedScene(scene);
+			{
+				SceneEdit edit(editor, "Change script targets");
+				scene.FindEntityByID(rootID).Patch<ScriptComponent>([firstID, secondID](ScriptComponent& script)
+				{
+					script.Fields["Target"] = VariantValue(Json(secondID.ToString()));
+					script.Fields["Targets"] = VariantValue(Json::array({ secondID.ToString(), firstID.ToString(), secondID.ToString() }));
+				});
+				REQUIRE(edit.Commit().has_value());
+			}
+			const auto overrides = scene.FindEntityByID(rootID).GetComponent<PrefabInstanceComponent>().Overrides;
+			REQUIRE(overrides.size() == 1);
+			CHECK(overrides[0].Kind == PrefabOverrideKind::Field);
+			CHECK(overrides[0].Component == "Script");
+			CHECK(overrides[0].Field == "Fields");
+			CHECK(overrides[0].Value.Get() == Json{ { "Target", prefabSecond.ToString() }, { "Targets", Json::array({ prefabSecond.ToString(), prefabFirst.ToString(), prefabSecond.ToString() }) } });
+			const std::string after = SaveTrackedScene(scene);
+			REQUIRE(editor.GetHistory().Undo(editor).has_value());
+			CHECK(SaveTrackedScene(scene) == before);
+			REQUIRE(editor.GetHistory().Redo(editor).has_value());
+			CHECK(SaveTrackedScene(scene) == after);
+
+			if (playing)
+			{
+				Scene& play = editor.GetPlay().GetSession()->GetScene();
+				CHECK(TrackedScriptField(play.FindEntityByID(rootID), "Target") == Json(firstID.ToString()));
+				const size_t undoCount = editor.GetHistory().GetUndoCount();
+				{
+					SceneEdit edit(editor, "Transient script target");
+					play.FindEntityByID(rootID).Patch<ScriptComponent>([secondID](ScriptComponent& script)
+					{
+						script.Fields["Target"] = VariantValue(Json(secondID.ToString()));
+					});
+					const auto committed = edit.Commit();
+					REQUIRE(committed.has_value());
+					CHECK(*committed == 0);
+				}
+				CHECK(editor.GetHistory().GetUndoCount() == undoCount);
+				CHECK(play.FindEntityByID(rootID).GetComponent<PrefabInstanceComponent>().Overrides.empty());
+				CHECK(SaveTrackedScene(scene) == after);
+				REQUIRE(editor.GetPlay().Stop().has_value());
+			}
+		}
+
+		TEST_CASE("SceneEdit: prefab rebuilds within and outside an edit retain script references and authored overrides")
+		{
+			Test::EditorTestFixture fixture("EditorScriptPrefabRebuild");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			EditorContext& editor = fixture.GetEditor();
+			Scene& scene = editor.GetScene();
+			const UUID rootID = CreateTrackedScriptPrefab(editor).GetUUID();
+			const UUID first = scene.FindEntityByPath("/Links/First").GetUUID();
+			const UUID second = scene.FindEntityByPath("/Links/Second").GetUUID();
+			{
+				SceneEdit edit(editor, "Change amount");
+				scene.FindEntityByID(rootID).Patch<ScriptComponent>([](ScriptComponent& script)
+				{
+					script.Fields["Amount"] = VariantValue(Json(2.0f));
+				});
+				REQUIRE(edit.Commit().has_value());
+			}
+			const std::string before = SaveTrackedScene(scene);
+			SUBCASE("without an active edit")
+			{
+				const auto rebuilt = editor.UpdatePrefabInstances(scene, {});
+				REQUIRE_MESSAGE(rebuilt.has_value(), (rebuilt ? std::string() : rebuilt.error().ToString()));
+				CHECK_FALSE(*rebuilt);
+			}
+			SUBCASE("inside an active edit")
+			{
+				SceneEdit edit(editor, "Rebuild instances");
+				const auto rebuilt = editor.UpdatePrefabInstances(scene, {});
+				REQUIRE_MESSAGE(rebuilt.has_value(), (rebuilt ? std::string() : rebuilt.error().ToString()));
+				CHECK_FALSE(*rebuilt);
+				const auto committed = edit.Commit();
+				REQUIRE(committed.has_value());
+			}
+			CHECK(SaveTrackedScene(scene) == before);
+			const Entity root = scene.FindEntityByID(rootID);
+			CHECK(TrackedScriptField(root, "Target") == Json(first.ToString()));
+			CHECK(TrackedScriptField(root, "Targets") == Json::array({ first.ToString(), second.ToString() }));
+			CHECK(TrackedScriptField(root, "Amount") == Json(2));
+			const auto& overrides = root.GetComponent<PrefabInstanceComponent>().Overrides;
+			REQUIRE(overrides.size() == 1);
+			CHECK(overrides[0].Value.Get() == Json{ { "Amount", 2 } });
+		}
+
 		TEST_CASE("SceneEdit: commit records one command and returns its undo index")
 		{
 			Test::EditorTestFixture fixture("SceneEditCommit");

@@ -4,9 +4,11 @@
 #include "EditorCore/EditorContext.h"
 #include "EditorCore/Play/EditorPlayController.h"
 #include "EditorCore/Viewport/GizmoController.h"
+#include "Engine/App/EngineContext.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/Graphics/RenderContext.h"
 #include "Engine/ImGui/ImGuiRenderer.h"
+#include "Engine/Platform/Window.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/RenderAnnotations.h"
 #include "Engine/Scene/Scene.h"
@@ -328,8 +330,13 @@ namespace Engine {
 	void EditorHostViewports::SetGameInputFocused(bool focused)
 	{
 		if (m_GameFocused && !focused)
-			if (PlaySession* session = m_Editor.GetPlay().GetSession())
+		{
+			const EditorPlayController& play = m_Editor.GetPlay();
+			if (Window* window = m_Editor.GetEngine().GetWindow(); window != nullptr && play.IsPlaying())
+				window->SetCursorMode(CursorMode::Normal);
+			if (PlaySession* session = play.GetSession(); session != nullptr && !play.IsLiveInputSuppressed())
 				session->GetInput().QueueReleaseAll(session->GetTick());
+		}
 		m_GameFocused = focused;
 	}
 

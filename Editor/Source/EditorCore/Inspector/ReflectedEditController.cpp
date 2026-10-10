@@ -8,8 +8,10 @@
 #include "EditorCore/EditorContext.h"
 #include "EditorCore/Play/EditorPlayController.h"
 #include "EditorCore/Private/PrefabInstances.h"
+#include "EditorCore/Scripting/EditorScriptService.h"
 #include "Engine/Asset/AssetMetadata.h"
 #include "Engine/Asset/MaterialData.h"
+#include "Engine/Asset/ScriptData.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/AssetPipeline/ImporterRegistry.h"
 #include "Engine/AssetPipeline/Importers/SoundEffectImporter.h"
@@ -18,6 +20,7 @@
 #include "Engine/Reflection/MergePatch.h"
 #include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Scene/ComponentAccess.h"
+#include "Engine/Scene/Components/ScriptComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/LoadReport.h"
 #include "Engine/Scene/PrefabAsset.h"
@@ -55,6 +58,12 @@ namespace Engine {
 			VfsPath Path{};
 			std::string Bytes{};
 			AssetMetadata Metadata{};
+			Ref<const ScriptFieldSchemaSource> Schemas{};
+			AssetHandle Script{};
+			uint64_t ScriptVersion = 0;
+			Json StoredFields{};
+			Json EffectiveFields{};
+			std::string EditedScriptField{};
 		};
 
 		static Result<std::vector<std::string>> SplitInspectorPath(std::string_view path)
@@ -148,7 +157,8 @@ namespace Engine {
 			}
 			if (type.GetKind() == FieldType::Map || type.GetKind() == FieldType::Array)
 			{
-				FieldInfo element({ .Name = key, .Description = field.GetDescription(), .Type = type.GetElement(), .Meta = field.GetMeta(), .Accessor = {}, .Resolver = field.GetResolver() });
+				const FieldInfo& descriptor = type.GetElementSchema() == nullptr ? field : *type.GetElementSchema();
+				FieldInfo element({ .Name = key, .Description = descriptor.GetDescription(), .Type = type.GetElement(), .Meta = descriptor.GetMeta(), .Accessor = {}, .Resolver = descriptor.GetResolver() });
 				if (type.GetKind() == FieldType::Map)
 				{
 					auto found = node.find(key);
@@ -192,6 +202,30 @@ namespace Engine {
 					return MakeError(ErrorCode::Unsupported, "component is maintained by the engine");
 				result.Type = component;
 				ENGINE_TRY_ASSIGN(result.Object, ComponentAccess::GetComponentJson(entity, target.Component));
+				if (target.Component == "Script" && (target.FieldPath == "Fields" || target.FieldPath.starts_with("Fields[") || target.FieldPath.starts_with("Fields.")))
+				{
+					result.Script = entity.GetComponent<ScriptComponent>().Script.GetHandle();
+					EditorScriptService* service = editor.GetScriptService();
+					if (service == nullptr)
+						return MakeError(ErrorCode::InvalidState, "script schemas are unavailable");
+					ENGINE_TRY_ASSIGN(auto script, service->GetFields(result.Script));
+					if (script->Kind != ScriptKind::Behaviour)
+						return MakeError(ErrorCode::Validation, "SCRIPT_NOT_A_BEHAVIOUR: only Behaviour scripts expose component fields");
+					result.ScriptVersion = editor.GetAssets().GetVersion(result.Script);
+					ENGINE_TRY_ASSIGN(result.Schemas, ScriptFieldSchemaSource::Create({ { result.Script, script } }));
+					result.StoredFields = result.Object["Fields"];
+					for (const auto& declaration : script->Fields)
+					{
+						ENGINE_TRY_ASSIGN(const FieldInfo* descriptor, result.Schemas->FindField(result.Script, declaration.Name));
+						auto stored = result.Object["Fields"].find(declaration.Name);
+						ValidationContext validation;
+						if (stored != result.Object["Fields"].end())
+							descriptor->ValidateJson(JsonReader(*stored), {}, validation);
+						if (stored == result.Object["Fields"].end() || validation.HasErrors())
+							result.Object["Fields"][declaration.Name] = declaration.DefaultValue.Get();
+					}
+					result.EffectiveFields = result.Object["Fields"];
+				}
 				for (const auto& field : component->GetFields())
 				{
 					if (!field->IsVirtual())
@@ -247,6 +281,77 @@ namespace Engine {
 			return result;
 		}
 
+		// Only the edited effective values become overrides. In particular, displaying defaults must never persist them,
+		// and editing one field must preserve unrelated unknown or malformed authored values verbatim.
+		static Json StoredInspectorField(const InspectorValueSnapshot& snapshot, std::string_view field)
+		{
+			const Json& proposed = snapshot.Object.find(std::string(field)).value();
+			if (field != "Fields" || snapshot.Schemas == nullptr)
+				return proposed;
+			Json stored = snapshot.StoredFields;
+			for (auto entry = proposed.begin(); entry != proposed.end(); ++entry)
+			{
+				const auto previous = snapshot.EffectiveFields.find(entry.key());
+				const auto original = snapshot.StoredFields.find(entry.key());
+				if (previous == snapshot.EffectiveFields.end() || *previous != entry.value()
+					|| (entry.key() == snapshot.EditedScriptField && original != snapshot.StoredFields.end() && *original != entry.value()))
+					stored[entry.key()] = entry.value();
+			}
+			for (auto entry = snapshot.EffectiveFields.begin(); entry != snapshot.EffectiveFields.end(); ++entry)
+			{
+				if (!proposed.contains(entry.key()))
+					stored.erase(entry.key());
+			}
+			return stored;
+		}
+
+		static bool InspectorSnapshotChanged(const InspectorValueSnapshot& before, const InspectorValueSnapshot& after)
+		{
+			return before.Object != after.Object || (after.Schemas != nullptr && StoredInspectorField(after, "Fields") != before.StoredFields);
+		}
+
+		// Existing invalid and unknown overrides survive an unrelated edit. Only identical stored entries receive the
+		// free-form descriptor; every new or changed entry still resolves against the pinned authored schema.
+		class InspectorPreservedSchemas final : public IFieldSchemaSource
+		{
+		public:
+			InspectorPreservedSchemas(const InspectorValueSnapshot& snapshot, const Json& fields)
+				: m_Snapshot(snapshot), m_Fields(fields), m_Preserved({ .Name = "Fields", .Description = "Unchanged stored script override.", .Type = snapshot.Type->FindField("Fields")->GetType().GetElement(), .Meta = {}, .Accessor = {}, .Getter = nullptr, .Setter = nullptr, .Resolver = nullptr })
+			{
+			}
+
+			Result<const FieldInfo*> FindField(UUID owner, std::string_view name) const override
+			{
+				const auto previous = m_Snapshot.StoredFields.find(name);
+				const auto proposed = m_Fields.find(name);
+				if (owner == m_Snapshot.Script && previous != m_Snapshot.StoredFields.end() && proposed != m_Fields.end() && *previous == *proposed)
+					return &m_Preserved;
+				return m_Snapshot.Schemas->FindField(owner, name);
+			}
+
+			std::vector<std::string> GetFieldNames(UUID owner) const override
+			{
+				return m_Snapshot.Schemas->GetFieldNames(owner);
+			}
+		private:
+			const InspectorValueSnapshot& m_Snapshot; // Borrowed for one synchronous component write.
+			const Json& m_Fields;
+			FieldInfo m_Preserved;
+		};
+
+		static Status SetInspectorComponentField(Entity entity, std::string_view component, const FieldInfo& field,
+			const InspectorValueSnapshot& snapshot)
+		{
+			const Json stored = StoredInspectorField(snapshot, field.GetName());
+			ENGINE_TRY_ASSIGN(Value value, ValueFromJson(JsonReader(stored), field.GetType()));
+			if (snapshot.Schemas != nullptr && field.GetName() == "Fields")
+			{
+				const InspectorPreservedSchemas schemas(snapshot, stored);
+				return ComponentAccess::SetFieldValue(entity, component, field.GetName(), value, &schemas);
+			}
+			return ComponentAccess::SetFieldValue(entity, component, field.GetName(), value, snapshot.Schemas.get());
+		}
+
 		static Status ChangeInspectorSnapshot(InspectorValueSnapshot& snapshot, std::span<const std::string> path,
 			const Value* replacement, Value& selected, Json& schema)
 		{
@@ -257,9 +362,12 @@ namespace Engine {
 			const Json owner = snapshot.Object;
 			const JsonReader ownerReader(owner);
 			ResolveContext resolve{ .Registry = &snapshot.Type->GetRegistry(), .OwnerType = snapshot.Type, .OwnerJson = &ownerReader, .Key = {} };
+			resolve.Schemas = snapshot.Schemas.get();
 			ENGINE_TRY(WalkInspectorValue(*field, *found, path.subspan(1), resolve, replacement, selected, schema));
 			if (replacement != nullptr)
 			{
+				if (snapshot.Schemas != nullptr && path.front() == "Fields" && path.size() > 1)
+					snapshot.EditedScriptField = path[1];
 				ValidationContext validation;
 				field->ValidateJson(JsonReader(*found), resolve, validation);
 				ENGINE_TRY(validation.ToStatus(field->GetName()));
@@ -272,7 +380,7 @@ namespace Engine {
 							stored.erase(member->GetName());
 					}
 					ObjectPtr object = snapshot.Type->CreateDefault();
-					ENGINE_TRY(snapshot.Type->FromJson(object.get(), JsonReader(stored), {}));
+					ENGINE_TRY(snapshot.Type->FromJson(object.get(), JsonReader(stored), { .Schemas = snapshot.Schemas.get() }));
 				}
 			}
 			return {};
@@ -292,11 +400,21 @@ namespace Engine {
 			for (size_t i = 0; i < target.Entities.size(); ++i)
 			{
 				const auto& snapshot = snapshots[i];
-				if (snapshot.Object == before[i].Object)
+				if (!InspectorSnapshotChanged(before[i], snapshot))
 					continue;
 				const FieldInfo* field = snapshot.Type->FindField(fieldName);
-				ENGINE_TRY_ASSIGN(Value value, ValueFromJson(JsonReader(snapshot.Object.find(field->GetName()).value()), field->GetType()));
-				ENGINE_TRY(ComponentAccess::SetFieldValue(copy->FindEntityByID(target.Entities[i]), target.Component, field->GetName(), value));
+				const Json stored = StoredInspectorField(snapshot, field->GetName());
+				ENGINE_TRY_ASSIGN(Value value, ValueFromJson(JsonReader(stored), field->GetType()));
+				if (target.Component == "Script" && fieldName == "Script" && value.AsUUID().IsValid())
+				{
+					EditorScriptService* service = editor.GetScriptService();
+					if (service == nullptr)
+						return MakeError(ErrorCode::InvalidState, "script schemas are unavailable");
+					ENGINE_TRY_ASSIGN(auto script, service->GetFields(value.AsUUID()));
+					if (script->Kind != ScriptKind::Behaviour)
+						return MakeError(ErrorCode::Validation, "SCRIPT_NOT_A_BEHAVIOUR: Script requires a Behaviour asset");
+				}
+				ENGINE_TRY(SetInspectorComponentField(copy->FindEntityByID(target.Entities[i]), target.Component, *field, snapshot));
 			}
 			return {};
 		}
@@ -413,7 +531,8 @@ namespace Engine {
 		{
 			ENGINE_TRY_ASSIGN(auto current, Utils::ReadInspectorSnapshot(editor, target, target.Kind == InspectorTargetKind::Component ? target.Entities[i] : UUID{}));
 			const auto& before = m_State->Before[i];
-			if (current.Type != before.Type || current.Object != before.Object || current.Bytes != before.Bytes || current.Path != before.Path)
+			if (current.Type != before.Type || current.Object != before.Object || current.Bytes != before.Bytes || current.Path != before.Path
+				|| current.Script != before.Script || current.ScriptVersion != before.ScriptVersion || current.StoredFields != before.StoredFields)
 				return MakeError(ErrorCode::Conflict, "the inspector target changed during this edit");
 		}
 		const std::string label = std::format("Set {}", target.FieldPath);
@@ -426,12 +545,11 @@ namespace Engine {
 			SceneEdit edit(editor, label);
 			for (size_t i = 0; i < target.Entities.size(); ++i)
 			{
-				if (m_State->Before[i].Object == m_State->After[i].Object)
+				if (!Utils::InspectorSnapshotChanged(m_State->Before[i], m_State->After[i]))
 					continue;
 				const auto& after = m_State->After[i];
 				const FieldInfo* field = after.Type->FindField(m_State->Path.front());
-				ENGINE_TRY_ASSIGN(Value value, ValueFromJson(JsonReader(after.Object.find(field->GetName()).value()), field->GetType()));
-				ENGINE_TRY(ComponentAccess::SetFieldValue(scene->FindEntityByID(target.Entities[i]), target.Component, field->GetName(), value));
+				ENGINE_TRY(Utils::SetInspectorComponentField(scene->FindEntityByID(target.Entities[i]), target.Component, *field, after));
 			}
 			ENGINE_TRY_ASSIGN(index, edit.Commit());
 		}

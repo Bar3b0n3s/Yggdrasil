@@ -22,7 +22,7 @@ namespace Engine {
 		AutomationTestClient::AutomationTestClient(EditorContext& editor, AutomationServerSpecification specification, bool offloadLargeResults)
 		{
 			Result<Scope<AutomationServer>> server = AutomationServer::Create(editor, specification);
-			REQUIRE_MESSAGE(server.has_value(), server.error().ToString());
+			REQUIRE_MESSAGE(server.has_value(), (server ? "" : server.error().ToString()));
 			m_Server = std::move(*server);
 			m_Client = m_Server->ConnectInProcess("test", offloadLargeResults);
 			REQUIRE(m_Client != NoClient);
@@ -63,8 +63,8 @@ namespace Engine {
 			return Json();
 		}
 
-		AutomationFixture::AutomationFixture(std::string_view label, bool openScene, std::optional<AudioEngineSpecification> audio)
-			: m_Fixture(label, {}, nullptr, audio)
+		AutomationFixture::AutomationFixture(std::string_view label, bool openScene, std::optional<AudioEngineSpecification> audio, bool engineResources)
+			: m_Fixture(label, {}, nullptr, audio, engineResources)
 		{
 			m_Fixture.CreateAndOpenProject();
 			if (openScene)

@@ -5,6 +5,8 @@
 #include "Engine/Automation/Protocol/MethodRegistry.h"
 #include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Renderer/RenderStats.h"
+#include "Engine/Scripting/ScriptEngine.h"
+#include "Engine/Session/PlaySession.h"
 
 #include <limits>
 
@@ -21,6 +23,14 @@ namespace Engine {
 	Result<StatsGetResult> Automation::StatsGet(AutomationMethodContext& context, const StatsGetParams&)
 	{
 		ENGINE_TRY_ASSIGN(StatsGetResult result, context.GetHostStatistics());
+		if (const PlaySession* session = context.GetPlaySession(); session != nullptr && session->GetScripts() != nullptr)
+		{
+			const ScriptMemoryState memory = session->GetScripts()->GetMemoryState();
+			result.ScriptAvailable = true;
+			result.ScriptHeapBytes = ToStatsTelemetry(static_cast<double>(memory.UsedBytes));
+			result.ScriptSoftLimitBytes = ToStatsTelemetry(static_cast<double>(memory.SoftLimitBytes));
+			result.ScriptHardLimitBytes = ToStatsTelemetry(static_cast<double>(memory.HardLimitBytes));
+		}
 		result.Fps = ToStatsTelemetry(result.Fps);
 		result.CpuMilliseconds = ToStatsTelemetry(result.CpuMilliseconds);
 		result.DroppedSeconds = ToStatsTelemetry(result.DroppedSeconds);

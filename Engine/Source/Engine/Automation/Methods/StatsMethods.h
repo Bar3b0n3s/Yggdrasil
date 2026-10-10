@@ -58,7 +58,7 @@ namespace Engine {
 		uint32_t Entities = 0;
 		uint32_t Bodies = 0;
 		uint32_t Voices = 0;
-		bool ScriptAvailable = false; // M13 supplies heap usage; false is not "zero memory used"
+		bool ScriptAvailable = false; // false means there is no live script VM, not "zero memory used"
 		float ScriptHeapBytes = 0.0f;
 		float ScriptSoftLimitBytes = 0.0f;
 		float ScriptHardLimitBytes = 0.0f;

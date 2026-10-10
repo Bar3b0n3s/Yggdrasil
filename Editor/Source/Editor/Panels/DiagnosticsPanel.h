@@ -14,7 +14,7 @@ namespace Engine {
 	struct EditorPanelContext;
 
 	// Asset/validation/type diagnostics with stable IDs and severity filters. Auto-fix submits project.validate
-	// for the chosen IDs as one undo step. M13 script type-check diagnostics remain unavailable until that service exists.
+	// for the chosen IDs as one undo step. Latest import checks and the active play session's script errors update live.
 	// Main thread inside ImGui. Retains only UI presentation state, no entity/component/asset pointers across frames.
 	class DiagnosticsPanel
 	{

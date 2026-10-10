@@ -1,6 +1,7 @@
 #include "EditorPCH.h"
 #include "Editor/Drawers/ReflectedDrawers.h"
 
+#include "Engine/Asset/ScriptData.h"
 #include "Engine/Reflection/EnumInfo.h"
 #include "Engine/Reflection/StructInfo.h"
 #include "Engine/Reflection/TypeRegistry.h"
@@ -31,8 +32,10 @@ namespace Engine {
 			return { .Activated = ImGui::IsItemActivated(), .Changed = changed, .Committed = ImGui::IsItemDeactivatedAfterEdit() || (changed && immediate), .Cancelled = ImGui::IsItemActive() && ImGui::IsKeyPressed(ImGuiKey_Escape) };
 		}
 
-		static Result<Value> DefaultDrawerValue(const TypeInfo& type)
+		static Result<Value> DefaultDrawerValue(const TypeInfo& type, const ScriptFieldSchema* schema)
 		{
+			if (schema != nullptr)
+				return ValueFromJson(JsonReader(schema->DefaultValue.Get()), type);
 			if (!type.HasOps())
 				return MakeError(ErrorCode::Unsupported, "this field has no default value");
 			ObjectPtr object = type.GetOps().Create();
@@ -151,6 +154,7 @@ namespace Engine {
 				const std::string key = isStruct || isMap ? keys[i] : std::to_string(i);
 				ImGui::PushID(key.c_str());
 				ReflectedDrawerContext child = context;
+				child.ScriptSchema = context.ScriptSchema == nullptr ? nullptr : context.ScriptSchema->Element.get();
 				child.Path += isStruct ? "." + key : "[" + key + "]";
 				Scope<FieldInfo> synthetic;
 				const FieldInfo* childField = nullptr;
@@ -164,11 +168,13 @@ namespace Engine {
 				}
 				else
 				{
-					FieldMeta childMeta = field.GetMeta();
+					const FieldInfo* elementSchema = field.GetType().GetElementSchema();
+					const FieldInfo& descriptor = elementSchema != nullptr ? *elementSchema : field;
+					FieldMeta childMeta = descriptor.GetMeta();
 					const TypeInfo* elementType = field.GetType().GetElement();
 					if (elementType->GetKind() == FieldType::AssetRef)
 						childMeta.AssetFilter = elementType->GetAssetTypeName();
-					synthetic = CreateScope<FieldInfo>(FieldInfo::Specification{ .Name = key, .Description = field.GetDescription(), .Type = elementType, .Meta = std::move(childMeta), .Accessor = {}, .Resolver = field.GetResolver() });
+					synthetic = CreateScope<FieldInfo>(FieldInfo::Specification{ .Name = key, .Description = descriptor.GetDescription(), .Type = elementType, .Meta = std::move(childMeta), .Accessor = {}, .Resolver = descriptor.GetResolver() });
 					childField = synthetic.get();
 					if (isMap)
 						child.Resolve.Key = key;
@@ -215,7 +221,7 @@ namespace Engine {
 			}
 			if (!isStruct && ImGui::SmallButton(isMap ? "Add key" : "Add element"))
 			{
-				auto added = DefaultDrawerValue(*field.GetType().GetElement());
+				auto added = DefaultDrawerValue(*field.GetType().GetElement(), context.ScriptSchema == nullptr ? nullptr : context.ScriptSchema->Element.get());
 				if (!added)
 					status = std::unexpected(std::move(added).error());
 				else

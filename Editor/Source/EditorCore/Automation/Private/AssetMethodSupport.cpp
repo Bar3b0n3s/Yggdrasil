@@ -8,6 +8,7 @@
 #include "EditorCore/Private/PrefabInstances.h"
 #include "Engine/Asset/AssetMetadata.h"
 #include "Engine/Asset/AssetReference.h"
+#include "Engine/Asset/ScriptData.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/Core/VirtualFileSystem.h"
 #include "Engine/Reflection/FuzzySuggest.h"
@@ -126,8 +127,9 @@ namespace Engine {
 			const std::vector<std::pair<UUID, AssetHandle>> instances = FindPrefabInstances(scene, std::span<const AssetHandle>(&prefab, 1));
 			if (instances.empty())
 				return {};
+			ENGINE_TRY_ASSIGN(const auto schemas, editor.GetScriptSchemaSnapshot());
 			SceneEdit edit(editor, "Record Prefab Overrides");
-			const PrefabOptions options{ .Schemas = nullptr };
+			const PrefabOptions options{ .Schemas = schemas.get() };
 			for (const std::pair<UUID, AssetHandle>& instance : instances)
 			{
 				const Entity root = scene.FindEntityByID(instance.first);

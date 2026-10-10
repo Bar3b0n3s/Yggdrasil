@@ -15,7 +15,7 @@ namespace Engine {
 
 	TEST_SUITE("Scripting")
 	{
-		TEST_CASE("ScriptCompiler: identical input preserves bytecode and exact source coordinates" * doctest::skip())
+		TEST_CASE("ScriptCompiler: identical input preserves bytecode and exact source coordinates")
 		{
 			auto path = VfsPath::Parse("project://Assets/Scripts/Compile.luau");
 			REQUIRE(path.has_value());
@@ -35,7 +35,7 @@ namespace Engine {
 			CHECK(first->SourceMap.SourceHash == XXH64(Source));
 		}
 
-		TEST_CASE("ScriptCompiler: malformed source is a located failure rather than loadable error bytecode" * doctest::skip())
+		TEST_CASE("ScriptCompiler: malformed source is a located failure rather than loadable error bytecode")
 		{
 			auto path = VfsPath::Parse("project://Assets/Syntax.luau");
 			REQUIRE(path.has_value());
@@ -47,13 +47,13 @@ namespace Engine {
 			CHECK_FALSE(result.error().GetMessageText().empty());
 		}
 
-		TEST_CASE("ScriptCompiler: fileless evaluation keeps synthetic labels separate from diagnostic origins" * doctest::skip())
+		TEST_CASE("ScriptCompiler: fileless evaluation keeps synthetic labels separate from diagnostic origins")
 		{
 			for (const std::string_view label : { "=eval", "=waitFor" })
 			{
 				CAPTURE(label);
 				const auto compiled = ScriptCompiler::Compile({ .Source = "return true", .ChunkName = label, .JsonPointer = "/code" });
-				REQUIRE(compiled.has_value());
+				REQUIRE_MESSAGE(compiled.has_value(), (compiled ? "" : compiled.error().ToString()));
 				CHECK(compiled->SourceMap.Path.empty());
 				CHECK(compiled->SourceMap.ChunkName == label);
 				CHECK(compiled->SourceMap.JsonPointer == "/code");
@@ -63,7 +63,7 @@ namespace Engine {
 			}
 		}
 
-		TEST_CASE("ScriptCompiler: embedded compile errors retain document pointer and chunk-relative coordinates" * doctest::skip())
+		TEST_CASE("ScriptCompiler: embedded compile errors retain document pointer and chunk-relative coordinates")
 		{
 			auto path = VfsPath::Parse("project://Assets/Tests/X.replay");
 			REQUIRE(path.has_value());
@@ -76,7 +76,7 @@ namespace Engine {
 			CHECK(compiled.error().GetLocation().Column == 8);
 		}
 
-		TEST_CASE("ScriptCompiler: replay diagnostics map wrapped expressions and return chunks to authored lines" * doctest::skip())
+		TEST_CASE("ScriptCompiler: replay diagnostics map wrapped expressions and return chunks to authored lines")
 		{
 			auto path = VfsPath::Parse("project://Assets/Tests/X.replay");
 			REQUIRE(path.has_value());
@@ -89,7 +89,7 @@ namespace Engine {
 			{
 				CAPTURE(source);
 				const auto compiled = ScriptCompiler::Compile({ .Path = *path, .Source = source, .Mode = ScriptCompileMode::ExpressionOrChunk, .ChunkName = "=replay/0000000000000001/Expect/3", .JsonPointer = "/Expect/3/Luau" });
-				REQUIRE(compiled.has_value());
+				REQUIRE_MESSAGE(compiled.has_value(), (compiled ? "" : compiled.error().ToString()));
 				CHECK(compiled->SourceMap.ChunkName == "=replay/0000000000000001/Expect/3");
 				CHECK(compiled->SourceMap.Path == "Assets/Tests/X.replay");
 				CHECK(compiled->SourceMap.JsonPointer == "/Expect/3/Luau");
@@ -109,18 +109,18 @@ namespace Engine {
 			}
 		}
 
-		TEST_CASE("ScriptCompiler: expression-first parsing requires complete input and preserves authored metadata" * doctest::skip())
+		TEST_CASE("ScriptCompiler: expression-first parsing requires complete input and preserves authored metadata")
 		{
 			Random random(67);
 			SandboxSpecification specification{};
 			specification.RandomStream = &random;
 			auto sandbox = Sandbox::Create(specification);
 			REQUIRE(sandbox.has_value());
-			for (const std::string_view source : { "math.abs(-7)", "return 7", "print('once'); return 7", "(\n7\n) -- tail comment" })
+			for (const std::string_view source : { "math.abs(-7)", "return 7", "print('once'); return 7", "(\n7\n) -- tail comment", "7 --[[ tail block comment ]]" })
 			{
 				CAPTURE(source);
 				const auto compiled = ScriptCompiler::Compile({ .Source = source, .Mode = ScriptCompileMode::ExpressionOrChunk, .ChunkName = "=eval" });
-				REQUIRE(compiled.has_value());
+				REQUIRE_MESSAGE(compiled.has_value(), (compiled ? "" : compiled.error().ToString()));
 				CHECK(compiled->SourceMap.SourceHash == XXH64(source));
 				CHECK(compiled->SourceMap.SourceByteCount == source.size());
 				CHECK(compiled->SourceMap.GeneratedPrefixLines == (source.starts_with("return") || source.starts_with("print") ? 0u : 1u));
@@ -141,13 +141,13 @@ namespace Engine {
 			CHECK(expression->SourceMap.GeneratedPrefixLines == 1);
 		}
 
-		TEST_CASE("ScriptCompiler: compiled and source execution share the sandbox math policy" * doctest::skip())
+		TEST_CASE("ScriptCompiler: compiled and source execution share the sandbox math policy")
 		{
 			auto path = VfsPath::Parse("project://Assets/Alias.luau");
 			REQUIRE(path.has_value());
 			constexpr std::string_view Source = "local m = math; local f = m.sin; return { math.sin(0.731), m.sin(0.731), f(0.731) }";
 			const auto compiled = ScriptCompiler::Compile({ .Path = *path, .Source = Source });
-			REQUIRE(compiled.has_value());
+			REQUIRE_MESSAGE(compiled.has_value(), (compiled ? "" : compiled.error().ToString()));
 			ScriptData script;
 			script.Bytecode = compiled->Bytecode;
 			script.SourceMap = compiled->SourceMap;
@@ -163,7 +163,7 @@ namespace Engine {
 			CHECK(source->Value == bytecode->Value);
 		}
 
-		TEST_CASE("ScriptCompiler: nontrivial power exponents retain one expectation across configurations" * doctest::skip())
+		TEST_CASE("ScriptCompiler: nontrivial power exponents retain one expectation across configurations")
 		{
 			auto path = VfsPath::Parse("project://Assets/Powers.luau");
 			REQUIRE(path.has_value());
@@ -171,7 +171,7 @@ namespace Engine {
 				"local base = tonumber('2'); local exponent = tonumber('1.5'); "
 				"return { base ^ exponent, 2 ^ 1.5, 16 ^ 1.25, 16 ^ 0.25 }";
 			const auto compiled = ScriptCompiler::Compile({ .Path = *path, .Source = Source });
-			REQUIRE(compiled.has_value());
+			REQUIRE_MESSAGE(compiled.has_value(), (compiled ? "" : compiled.error().ToString()));
 			ScriptData script;
 			script.Bytecode = compiled->Bytecode;
 			script.SourceMap = compiled->SourceMap;
@@ -183,8 +183,8 @@ namespace Engine {
 			const auto result = (*sandbox)->ExecuteBytecode(script);
 			REQUIRE(result.has_value());
 			CHECK(result->Value.Get() == Json::array({ 2.8284271247461903, 2.8284271247461903, 32.0, 2.0 }));
-			// Keep this same expectation in Debug/Release and exported Dist FeatureTest. The determinism owner also
-			// records/verifies a seeded nontrivial-power corpus across configs; no per-config constants or ^ rewriting.
+			// test_script_modes.py exercises these same expectations and a seeded power corpus through cooked exported
+			// runtimes, comparing their final state hashes with the editor without per-configuration constants.
 		}
 	}
 

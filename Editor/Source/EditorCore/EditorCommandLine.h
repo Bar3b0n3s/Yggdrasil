@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <optional>
 #include <span>
+#include <string>
 
 // The editor's own command-line options (Architecture §12.1, §13.9), the M4 subset and M6's --bake-engine-assets and
 // --engine-cache-dir:
@@ -40,6 +41,10 @@ namespace Engine {
 		std::optional<std::filesystem::path> BatchFile{};
 		// --upgrade: run project.upgrade on --project, with transcript lines (client "cli"), and exit (§13.12).
 		bool Upgrade = false;
+		// One-shot M13 modes; require --project and share the automation implementations and result schemas.
+		bool CheckScripts = false;
+		bool RunTests = false;
+		std::string TestFilter{};
 		// --dump-reference <dir>: write <dir>/Methods.json (MethodRegistry::BuildMethodCatalog) and <dir>/catalog.json
 		// (BuildToolCatalog, the MCP catalogue, ADR 0008 decision 9), creating <dir>, and exit with 0 (§2.3 GenerateDocs.py).
 		std::optional<std::filesystem::path> DumpReferenceDirectory{};
@@ -57,7 +62,7 @@ namespace Engine {
 		// until shutdown.
 		[[nodiscard]] bool IsOneShot() const
 		{
-			return BatchFile.has_value() || Upgrade || DumpReferenceDirectory.has_value() || BakeEngineAssets;
+			return BatchFile.has_value() || Upgrade || DumpReferenceDirectory.has_value() || BakeEngineAssets || CheckScripts || RunTests;
 		}
 
 		// Whether the automation server listens on TCP and writes a session file (AutomationServerSpecification::Listen):

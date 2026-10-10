@@ -34,6 +34,9 @@ namespace Engine {
 		// Returns Asset's ScriptData: engine bytecode + source map + authenticated Behaviour/Module/TestSuite kind,
 		// name/field descriptors and canonical require edges (handles unset for the importer to resolve). No VM data
 		// survives. Pure module tables/functions need not be serializable; only persistent metadata is extracted.
+		// Field constructors and each complete registration/extraction use the native conversion allowance shared with
+		// Lua marshalling (min(4 MiB, VM soft limit)), counting repeated descriptors and polling the same graph deadline.
+		// String bytes and a conservative parse-tree reservation are admitted before decoding authenticated metadata.
 		// Errors are located: CompileFailed, Script (cycle/API misuse/invalid schema/memory), Timeout, reader errors,
 		// InvalidArgument for missing reader/invalid limits, InvalidState before process startup. Import failure closes
 		// the whole throwaway VM. Dist returns Unsupported without reading or compiling source.

@@ -12,7 +12,7 @@ namespace Engine {
 
 	TEST_SUITE("Scripting")
 	{
-		TEST_CASE("Watchdog: infinite loop raises timeout" * doctest::skip())
+		TEST_CASE("Watchdog: infinite loop raises timeout")
 		{
 			Random random(19);
 			double now = 0.0;
@@ -37,7 +37,7 @@ namespace Engine {
 			CHECK(error->Message.find("possible infinite loop") != std::string::npos);
 		}
 
-		TEST_CASE("ScriptWatchdog: caught timeout stays latched and message text cannot spoof the error kind" * doctest::skip())
+		TEST_CASE("ScriptWatchdog: caught timeout stays latched and message text cannot spoof the error kind")
 		{
 			Random random(59);
 			double now = 0.0;
@@ -66,7 +66,7 @@ namespace Engine {
 			CHECK_FALSE((*sandbox)->GetLastError().has_value());
 		}
 
-		TEST_CASE("Watchdog: no error raised from a GC interrupt" * doctest::skip())
+		TEST_CASE("Watchdog: no error raised from a GC interrupt")
 		{
 			ScriptWatchdog watchdog;
 			REQUIRE(watchdog.Enter(250, 1.0).has_value());
@@ -77,7 +77,7 @@ namespace Engine {
 			watchdog.Leave();
 		}
 
-		TEST_CASE("Watchdog: OnCreate inside Instantiate inherits the outer deadline" * doctest::skip())
+		TEST_CASE("Watchdog: OnCreate inside Instantiate inherits the outer deadline")
 		{
 			ScriptWatchdog watchdog;
 			REQUIRE(watchdog.Enter(1000, 10.0).has_value());
@@ -94,7 +94,7 @@ namespace Engine {
 			// ScriptEngine's Instantiate callback test exercises the same nested ScriptCall scopes with real entities.
 		}
 
-		TEST_CASE("ScriptWatchdog: independent resumes restart the deadline and invalid entries do not alter depth" * doctest::skip())
+		TEST_CASE("ScriptWatchdog: independent resumes restart the deadline and invalid entries do not alter depth")
 		{
 			ScriptWatchdog watchdog;
 			REQUIRE(watchdog.Enter(250, 1.0).has_value());
@@ -109,7 +109,7 @@ namespace Engine {
 			watchdog.Leave();
 		}
 
-		TEST_CASE("ScriptWatchdog: callback budgets enforce the minimum and preserve exact test overrides" * doctest::skip())
+		TEST_CASE("ScriptWatchdog: callback budgets enforce the minimum and preserve exact test overrides")
 		{
 			const auto invalid = ScriptWatchdog::ResolveCallbackBudget(9, true);
 			REQUIRE_FALSE(invalid.has_value());

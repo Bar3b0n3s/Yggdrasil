@@ -108,8 +108,8 @@ namespace Engine {
 		class VirtualComponentFieldSplitter
 		{
 		public:
-			VirtualComponentFieldSplitter(const TypeRegistry& types, ValidationContext& validation)
-				: m_Types(&types), m_Validation(&validation)
+			VirtualComponentFieldSplitter(const TypeRegistry& types, ValidationContext& validation, const IFieldSchemaSource* schemas)
+				: m_Types(&types), m_Validation(&validation), m_Schemas(schemas)
 			{
 			}
 
@@ -188,6 +188,7 @@ namespace Engine {
 						{
 							ResolveContext resolve;
 							resolve.Registry = m_Types;
+							resolve.Schemas = m_Schemas;
 							resolve.OwnerType = component;
 							field->ValidateJson(JsonReader(*member), resolve, *m_Validation);
 						}
@@ -200,6 +201,7 @@ namespace Engine {
 		private:
 			const TypeRegistry* m_Types = nullptr;
 			ValidationContext* m_Validation = nullptr;
+			const IFieldSchemaSource* m_Schemas = nullptr; // borrowed for one validation pass
 			size_t m_SplitCount = 0;
 		};
 
@@ -307,8 +309,8 @@ namespace Engine {
 		class ParamsCanonicalizer
 		{
 		public:
-			ParamsCanonicalizer(const TypeRegistry& types, IAssetReferenceResolver* assets)
-				: m_Types(&types), m_Assets(assets)
+			ParamsCanonicalizer(const TypeRegistry& types, IAssetReferenceResolver* assets, const IFieldSchemaSource* schemas = nullptr)
+				: m_Types(&types), m_Assets(assets), m_Schemas(schemas)
 			{
 			}
 
@@ -319,6 +321,7 @@ namespace Engine {
 				const JsonReader ownerJson(object);
 				ResolveContext owner;
 				owner.Registry = m_Types;
+				owner.Schemas = m_Schemas;
 				owner.OwnerType = &type;
 				owner.OwnerJson = &ownerJson;
 				for (const Scope<FieldInfo>& field : type.GetFields())
@@ -340,6 +343,7 @@ namespace Engine {
 			// The first resolver error of another code (InvalidState without a project, a refresh's Io), located at its value;
 			// Invoke returns it unchanged, so the code is the one the host gave.
 			[[nodiscard]] std::optional<Error> TakeHostError() { return std::move(m_HostError); }
+			[[nodiscard]] bool NeedsFieldSchemas() const { return m_NeedsFieldSchemas; }
 		private:
 			void CanonicalizeValue(const TypeInfo& type, const FieldInfo& field, Json& value, const ResolveContext& owner,
 				uint32_t variantDepth, const std::string& pointer)
@@ -359,8 +363,9 @@ namespace Engine {
 					case FieldType::Array:
 						if (value.is_array() && type.GetElement() != nullptr)
 						{
+							const FieldInfo* elementSchema = type.GetElementSchema();
 							for (size_t index = 0; index < value.size(); ++index)
-								CanonicalizeValue(*type.GetElement(), field, value[index], owner, variantDepth, JsonReader::AppendPointer(pointer, index));
+								CanonicalizeValue(*type.GetElement(), elementSchema != nullptr ? *elementSchema : field, value[index], owner, variantDepth, JsonReader::AppendPointer(pointer, index));
 						}
 						break;
 					case FieldType::Map:
@@ -440,7 +445,10 @@ namespace Engine {
 					return;
 				const Result<const FieldInfo*> schema = field.ResolveVariant(owner);
 				if (!schema.has_value() || *schema == nullptr)
+				{
+					m_NeedsFieldSchemas = true;
 					return; // the strict reader reports what cannot be resolved
+				}
 				const FieldInfo& resolved = **schema;
 				ResolveContext nested;
 				nested.Registry = m_Types;
@@ -449,10 +457,12 @@ namespace Engine {
 			}
 		private:
 			const TypeRegistry* m_Types = nullptr;
-			IAssetReferenceResolver* m_Assets = nullptr; // documented back-reference for one Invoke (convention 13); null in PrepareParams
+			IAssetReferenceResolver* m_Assets = nullptr;   // documented back-reference for one Invoke (convention 13); null in PrepareParams
+			const IFieldSchemaSource* m_Schemas = nullptr; // borrowed from the invocation's pinned snapshot
 			std::vector<ErrorIssue> m_Issues;
 			std::optional<Error> m_HostError;
 			bool m_AllNotFound = true;
+			bool m_NeedsFieldSchemas = false;
 		};
 
 		// Replaces every {"$ref": "#/$defs/<Name>"} inside `node` by the definition from `definitions` (keeping the referring
@@ -715,27 +725,50 @@ namespace Engine {
 
 		// Convention 13: asset references become handles before anything reads the params. This runs after the host admitted
 		// the request, so a refresh the resolver makes for a dry run stays in the dry run's sandbox.
-		if (IAssetReferenceResolver* assets = context.GetAssetReferenceResolver(); assets != nullptr)
+		const auto canonicalize = [this, &context, &method](const IFieldSchemaSource* schemas) -> Result<bool>
 		{
 			Json resolved = context.GetParams();
-			Utils::ParamsCanonicalizer canonicalizer(*m_Types, assets);
+			Utils::ParamsCanonicalizer canonicalizer(*m_Types, context.GetAssetReferenceResolver(), schemas);
 			canonicalizer.CanonicalizeStruct(*method.Params, resolved, 0, std::string());
 			// A host's own error (InvalidState, Io) keeps its code; it outranks the references' NotFound and InvalidParams.
 			if (std::optional<Error> hostError = canonicalizer.TakeHostError(); hostError.has_value())
-				return std::move(*hostError);
+				return std::unexpected(std::move(*hostError));
 			std::vector<ErrorIssue> unresolved = canonicalizer.TakeIssues();
 			if (!unresolved.empty() && canonicalizer.AllNotFound())
 			{
 				// A reference that names no asset is NotFound, as for an asset param (§13.3), located at its value.
 				const Error notFound = Utils::MakeParamsError(method.Specification.Name, std::move(unresolved));
-				return Error(ErrorCode::NotFound, notFound.GetMessageText())
-					.WithHint(notFound.GetHint())
-					.WithLocation(notFound.GetLocation())
-					.WithIssues(notFound.GetIssues());
+				return std::unexpected(Error(ErrorCode::NotFound, notFound.GetMessageText())
+						.WithHint(notFound.GetHint())
+						.WithLocation(notFound.GetLocation())
+						.WithIssues(notFound.GetIssues()));
 			}
 			if (!unresolved.empty())
-				return Utils::MakeParamsError(method.Specification.Name, std::move(unresolved));
+				return std::unexpected(Utils::MakeParamsError(method.Specification.Name, std::move(unresolved)));
 			context.m_Request.Params = std::move(resolved);
+			return canonicalizer.NeedsFieldSchemas();
+		};
+		const Result<bool> needsSchemas = canonicalize(nullptr);
+		if (!needsSchemas)
+			return needsSchemas.error();
+		Ref<const IFieldSchemaSource> schemas;
+		if (*needsSchemas)
+		{
+			const Status owners = context.CompleteParameterOwners(context.m_Request.Params);
+			if (!owners)
+				return owners.error();
+			// Asset path resolution may import the script that declares these fields. Acquire only afterwards and pin the
+			// exact same immutable source through both reads and the handler, even if a resolver publishes newer assets.
+			const auto acquired = context.GetFieldSchemaSnapshot();
+			if (!acquired)
+				return acquired.error();
+			schemas = *acquired;
+			if (schemas)
+			{
+				const auto canonical = canonicalize(schemas.get());
+				if (!canonical)
+					return canonical.error();
+			}
 		}
 
 		// Pass 1: every problem, with the messages of §13.3.
@@ -744,12 +777,13 @@ namespace Engine {
 		ValidationContext validation;
 		ResolveContext resolve;
 		resolve.Registry = m_Types;
+		resolve.Schemas = schemas.get();
 		bool hasVirtualFields = false;
 		if (Utils::HasComponentMap(type, 0))
 		{
 			// Virtual component fields are checked on their own, the stored component JSON by the struct validation.
 			Json stored = params;
-			Utils::VirtualComponentFieldSplitter splitter(*m_Types, validation);
+			Utils::VirtualComponentFieldSplitter splitter(*m_Types, validation, schemas.get());
 			validation.PushKey(type.GetSelfField().GetName());
 			splitter.SplitStruct(type, stored);
 			validation.PopKey();
@@ -783,7 +817,7 @@ namespace Engine {
 		// Variant values keep them verbatim for the handler.
 		ObjectPtr object = type.CreateDefault();
 		const Status read =
-			type.FromJson(object.get(), JsonReader(params), ReadContext{ .Schemas = nullptr, .Strict = !hasVirtualFields, .Diagnostics = nullptr });
+			type.FromJson(object.get(), JsonReader(params), ReadContext{ .Schemas = schemas.get(), .Strict = !hasVirtualFields, .Diagnostics = nullptr });
 		if (!read)
 			return Utils::MakeParamsError(method.Specification.Name, Utils::PrefixIssues(read.error(), ""));
 

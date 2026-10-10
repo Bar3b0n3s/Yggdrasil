@@ -27,9 +27,9 @@
 // WindowSettings and SimulationSettings with every field (Window carries Resizable too, which §14.1's example omits) and
 // the project loader's rules. Paths are relative to the manifest's directory, forward slashes, VfsPath rules (no "..", no
 // absolute paths, no reserved names); Paks holds exactly two entries, Engine.pak then Game.pak (§14.1). Hashes and the
-// start scene are 16 lowercase hex digits (§4.8: never JSON numbers). "Testing": true marks a testing export, which
-// arrives with M15: until then the serializer refuses it rather than accept a manifest the Runtime would ignore
-// (Docs/Decisions/0012-m7-decisions.md decision 16).
+// start scene are 16 lowercase hex digits (§4.8: never JSON numbers). "Testing": true admits the M13 Runtime's
+// --feature-test runner over cooked suites and replays. Both boolean values round-trip; enabling the exporter to assemble
+// testing exports remains M15. The flag does not expose automation or a source compiler in Dist.
 
 namespace Engine {
 
@@ -64,14 +64,14 @@ namespace Engine {
 	class GameManifestSerializer
 	{
 	public:
-		// The canonical text. Errors: Validation or Unsupported for a manifest that LoadFromString would reject (located at
+		// The canonical text. Errors: Validation for a manifest that LoadFromString would reject (located at
 		// its JSON pointer), so a written manifest always reads back equal.
 		[[nodiscard]] static Result<std::string> SaveToString(const GameManifest& manifest);
 
 		// Reads a manifest strictly: unknown keys, wrong types and out-of-range values are Validation errors located at their
 		// JSON pointer ("/Simulation/FixedHz"); a wrong Format, a Version below 1, an empty or invalid Name, an invalid
 		// StartScene, a Paks array that does not hold exactly two entries (located at /Paks), an invalid pak path or hash are
-		// Validation errors; "Testing": true is Unsupported located at /Testing (testing exports, M15); a newer Version is
+		// Validation errors; Testing accepts only a boolean (both true and false); a newer Version is
 		// UnsupportedVersion naming both versions; invalid JSON is Parse (line and column).
 		[[nodiscard]] static Result<GameManifest> LoadFromString(std::string_view text);
 

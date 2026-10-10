@@ -201,6 +201,10 @@ class Runner:
             steps.append(self.script(f"build {config}", "Build.py", ["--config", config], TIMEOUTS["build"]))
             if steps[-1].failed:
                 return steps
+            if config != "Dist":
+                steps.append(self.script(f"references {config}", "GenerateDocs.py", ["--check", "--config", config], 180.0))
+                if steps[-1].failed:
+                    return steps
             if config == "Debug":
                 steps.append(self.done(self.shader_up_to_date_check(config)))
                 if steps[-1].failed:

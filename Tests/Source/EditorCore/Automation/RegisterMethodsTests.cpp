@@ -26,11 +26,12 @@ namespace Engine {
 			"asset.import", "asset.info", "asset.list", "asset.move", "asset.reimport", "asset.setImportSettings", "asset.setProperties",
 			"audio.stats", "component.list", "component.schema", "docs.get", "edit.batch", "edit.getSelection", "edit.history", "edit.redo", "edit.select",
 			"edit.undo", "editor.screenshot", "editor.state", "entity.bounds", "entity.create", "entity.destroy", "entity.duplicate", "entity.get",
-			"entity.reparent", "entity.update", "events.read", "input.inject", "log.read", "physics.bodyInfo", "play.pause", "play.resume",
-			"play.setTimeScale", "play.start", "play.state", "play.step", "play.stop", "prefab.apply", "prefab.create", "prefab.instantiate", "prefab.revert",
+			"entity.reparent", "entity.update", "events.read", "input.inject", "input.record", "input.replay", "log.read", "physics.bodyInfo", "play.pause", "play.resume",
+			"play.setTimeScale", "play.start", "play.state", "play.step", "play.stop", "play.waitFor", "prefab.apply", "prefab.create", "prefab.instantiate", "prefab.revert",
 			"prefab.unpack", "project.create", "project.export", "project.getSettings", "project.info", "project.open", "project.refreshAssets",
 			"project.save", "project.setSettings", "project.upgrade", "project.validate", "rpc.discover", "scene.diff", "scene.get", "scene.new", "scene.open",
-			"scene.query", "scene.raycast", "scene.save", "scene.tree", "session.hello", "session.info", "session.shutdown", "stats.get", "viewport.camera", "viewport.frame",
+			"scene.query", "scene.raycast", "scene.save", "scene.tree", "script.check", "script.create", "script.errors", "script.eval", "script.fields", "script.read", "script.write",
+			"session.hello", "session.info", "session.shutdown", "stats.get", "test.list", "test.run", "viewport.camera", "viewport.frame",
 			"viewport.pick", "viewport.screenshot", "viewport.setOptions" };
 		return ExpectedNames;
 	}
@@ -110,10 +111,10 @@ namespace Engine {
 			const std::vector<std::string> tools = { "asset.create", "asset.delete", "asset.import", "asset.list", "asset.move",
 				"asset.setProperties", "component.list", "component.schema", "docs.get", "edit.batch", "edit.redo", "edit.undo", "editor.screenshot",
 				"entity.bounds", "entity.create", "entity.destroy", "entity.duplicate", "entity.get", "entity.reparent", "entity.update", "input.inject",
-				"log.read", "play.start", "play.step", "play.stop", "prefab.apply", "prefab.create", "prefab.instantiate", "project.create",
+				"input.record", "input.replay", "log.read", "play.start", "play.step", "play.stop", "play.waitFor", "prefab.apply", "prefab.create", "prefab.instantiate", "project.create",
 				"project.export", "project.getSettings", "project.open", "project.save", "project.setSettings", "project.validate", "scene.diff",
 				"scene.new", "scene.open", "scene.query", "scene.save", "scene.tree",
-				"viewport.screenshot" };
+				"script.check", "script.create", "script.errors", "script.eval", "script.read", "script.write", "test.run", "viewport.screenshot" };
 			// The edit.batch ops (ADR 0008 decision 8): pure reads and methods whose effects all go through Execute. asset.import and
 			// asset.reimport are pending operations; project.refreshAssets writes outside a command (ADR 0010 decision 20).
 			const std::vector<std::string> batchable = { "asset.create", "asset.delete", "asset.getImportSettings", "asset.getProperties",
@@ -121,7 +122,8 @@ namespace Engine {
 				"docs.get", "edit.getSelection", "edit.history", "editor.state", "entity.bounds", "entity.create", "entity.destroy", "entity.duplicate", "entity.get",
 				"entity.reparent", "entity.update", "events.read", "log.read", "physics.bodyInfo", "prefab.apply", "prefab.create", "prefab.instantiate",
 				"prefab.revert", "prefab.unpack", "project.getSettings", "project.info", "project.setSettings", "project.validate", "rpc.discover", "scene.diff",
-				"scene.get", "scene.query", "scene.raycast", "scene.tree", "session.info", "stats.get", "viewport.pick" };
+				"scene.get", "scene.query", "scene.raycast", "scene.tree", "script.check", "script.create", "script.errors", "script.fields", "script.read", "script.write",
+				"session.info", "stats.get", "viewport.pick" };
 			for (const MethodDescriptor* method : methods.GetMethods())
 			{
 				const MethodSpecification& specification = method->Specification;
@@ -267,8 +269,8 @@ namespace Engine {
 			Json catalog = methods.BuildToolCatalog();
 			// The 25 M4 tools, viewport_screenshot and editor_screenshot, and M6's asset_list, asset_import, asset_create,
 			// asset_set_properties, asset_move, asset_delete, prefab_create, prefab_instantiate, prefab_apply and entity_bounds, and
-			// M7's play_start, play_stop, play_step, input_inject and project_export.
-			CHECK(catalog["Tools"].size() == 42);
+			// M7's play_start, play_stop, play_step, input_inject and project_export, plus M13's ten script/replay/test tools.
+			CHECK(catalog["Tools"].size() == 52);
 			for (Json& tool : catalog["Tools"])
 			{
 				INFO(tool["name"].dump());

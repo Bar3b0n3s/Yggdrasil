@@ -12,7 +12,7 @@ namespace Engine {
 	struct EditorPanelContext;
 
 	// Project folder tree/grid, type icons, cached thumbnails and import-error badges. Create folder/scene/material/
-	// prefab/sound effect through existing asset/prefab methods; script creation is explicitly unavailable until M13.
+	// prefab/sound effect through existing asset/prefab methods, and scripts through the registered templates.
 	// Rename/move preserve handles; delete uses undoable trash. OS drops use asset.import, preview audio uses AudioPreview.
 	// Main thread inside ImGui. Retains only UI presentation state, no entity/component/asset pointers across frames.
 	class ContentBrowserPanel

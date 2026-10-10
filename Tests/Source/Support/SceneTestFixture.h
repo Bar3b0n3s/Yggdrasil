@@ -32,6 +32,7 @@ namespace Engine {
 			SceneTestFixture& operator=(SceneTestFixture&&) = delete;
 
 			[[nodiscard]] TypeRegistry& GetRegistry() { return *m_Registry; }
+			[[nodiscard]] const TypeRegistry& GetRegistry() const { return *m_Registry; }
 			[[nodiscard]] UUIDGenerator& GetGenerator() { return m_Generator; }
 			[[nodiscard]] Scene& GetScene() { return *m_Scene; }
 

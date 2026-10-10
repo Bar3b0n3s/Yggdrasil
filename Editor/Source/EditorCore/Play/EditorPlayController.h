@@ -1,10 +1,13 @@
 #pragma once
 
+#include "Engine/Asset/ReplayData.h"
 #include "Engine/Automation/Protocol/JsonRpc.h"
 #include "Engine/Core/Base.h"
 #include "Engine/Core/FixedStepScheduler.h"
 #include "Engine/Core/Result.h"
 #include "Engine/Core/Time.h"
+#include "Engine/Platform/Events.h"
+#include "Engine/Session/PlaySession.h"
 
 #include <cstdint>
 #include <optional>
@@ -21,6 +24,8 @@
 namespace Engine {
 
 	class EditorContext;
+	class EditorFeatureTestHost;
+	class ScriptApiRegistry;
 	class PlaySession;
 	struct PlayStartOptions;
 
@@ -38,7 +43,8 @@ namespace Engine {
 		// Starts a session (§5.6, §13.5 play.start): the scene `options.ScenePath` names (strictly loaded from project://), or
 		// the open edit scene copied through SceneSerializer::ToJson; the PlaySessionSpecification with a copy of the project's
 		// settings (PlaySessionSpecification::Project), options.Mode and the seed (options.Seed, else
-		// PlaySession::ComputeSessionSeed(Simulation.Seed, the scene's Seed)); then the run state: paused when options.Paused,
+		// PlaySession::ComputeSessionSeed(Simulation.Seed, the scene's Seed)); then the run state: paused when options.Paused
+		// or initialization requested a pause (script error, Debug.Break or fatal stop),
 		// options.TimeScale, and lockstep owned by options.LockstepOwner when options.Lockstep. While a session is in lockstep
 		// the editor defers asset and script reloads until it ends (§7.5 race rule 4, EditorAssetManager); a reload during
 		// ordinary play marks the session modified. Appends PlayStateChanged ("Play" or "Simulate", or "Paused"). Errors:
@@ -53,6 +59,19 @@ namespace Engine {
 		// PlayStateChanged ("Edit"). The edit scene was never touched. Errors: InvalidState "not playing".
 		[[nodiscard]] Status Stop();
 
+		// M13 host state outlives every VM and is retained across Stop/Scene.Load.
+		[[nodiscard]] ScriptErrorStream& GetScriptErrors();
+		[[nodiscard]] Result<ScriptApiRegistry*> GetScriptApi();
+		[[nodiscard]] Status StartRecording(const PlayStartOptions& options, bool restart);
+		[[nodiscard]] Status StartReplay(const ReplayHeader& header, ClientId owner);
+		[[nodiscard]] Result<ReplayHeader> DescribeReplayHeader() const;
+		void ReleaseReplayInput(uint64_t sessionSerial);
+		[[nodiscard]] bool IsLiveInputSuppressed() const;
+		[[nodiscard]] bool IsTestRunActive() const;
+		// Fallback state for hosts without a window. A borrowed engine window supplies live focus/size/headless state.
+		void SetScriptEnvironment(ScriptEnvironment environment);
+		[[nodiscard]] ScriptEnvironment GetScriptEnvironment() const;
+
 		[[nodiscard]] bool IsPlaying() const;
 		// The running session; nullptr in Edit mode. Valid until Stop.
 		[[nodiscard]] PlaySession* GetSession() const;
@@ -61,6 +80,14 @@ namespace Engine {
 		// OnUpdate once per frame (PlaySession::AdvanceLoopFrame) after the steps. No effect in Edit mode.
 		void OnFixedStep();
 		void OnUpdate(const FrameTime& frame);
+		// After UI dispatch, automation handlers and pending-operation polls have returned. Applies queued ordinary-play
+		// script reloads and consumes Quit through Stop; deterministic drivers keep ownership of their sessions.
+		void OnSafePoint();
+		// Asset publication only queues work: never enters a VM or drains further imports from a publication callback.
+		void OnAssetReload(AssetHandle source);
+		// The editor's physical-input ingress. Test/replay ownership and lockstep suppress device input; injected
+		// simulation input uses PlayInput directly. Losing window focus releases the play cursor.
+		void OnInputEvent(const Event& event, bool gameFocused);
 
 		// The time scale the editor's frame loop applies (Application::SetFrameTimeScale): the session's, 1 in Edit mode.
 		[[nodiscard]] double GetFrameTimeScale() const;
@@ -82,6 +109,26 @@ namespace Engine {
 		// playing (nullopt in Edit mode).
 		[[nodiscard]] std::string GetPlayStateName() const;
 		[[nodiscard]] std::optional<uint64_t> GetTick() const;
+	private:
+		struct PreparedSession
+		{
+			Scope<PlaySession> Session{};
+			ReplayHeader Header{};
+			bool PausedDuringStartup = false; // During ordinary startup, before the launch pause option applies.
+		};
+		// The feature host builds scratch sessions without audio or publication; the real run acquires its lease first.
+		// With activate false, returns an unactivated candidate with the launch flags configured; the replacement owner
+		// retires its old session, installs and activates the candidate, then preserves pauses requested by startup callbacks.
+		[[nodiscard]] Result<PreparedSession> PrepareSession(const PlayStartOptions& options, ProjectSettings project,
+			bool emptyScene = false, IPlaySessionTestHook* hook = nullptr, IScriptTestHost* testHost = nullptr,
+			bool ownsAudio = false, bool scratch = false, ScriptApiRegistry* api = nullptr, bool activate = true);
+		[[nodiscard]] Status CheckTestAdmission(ClientId client) const;
+		[[nodiscard]] Status CheckPlayScripts(const ProjectSettings& project);
+		[[nodiscard]] Status ReplaceSession(const PlayStartOptions& options, ProjectSettings project);
+		[[nodiscard]] Status AcquireTestRun(EditorFeatureTestHost& owner, ClientId client);
+		void PublishTestSession(EditorFeatureTestHost& owner, PlaySession* session);
+		void ReleaseTestRun(EditorFeatureTestHost& owner);
+		friend class EditorFeatureTestHost;
 	private:
 		// The editor (a documented back-reference that owns the controller), the session and the deferral of reloads
 		// (EditorPlayController.cpp).

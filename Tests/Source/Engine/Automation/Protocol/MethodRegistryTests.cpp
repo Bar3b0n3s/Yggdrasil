@@ -2,9 +2,13 @@
 
 #include "Engine/Automation/Protocol/MethodRegistry.h"
 
+#include "Engine/Asset/ScriptData.h"
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Reflection/JsonSchema.h"
 #include "Support/ProtocolTestTypes.h"
+
+#include <array>
+#include <utility>
 
 namespace Engine {
 
@@ -68,6 +72,11 @@ namespace Engine {
 				{
 					return MakeError(ErrorCode::InvalidState, "asset reference '{}' needs an open project", reference);
 				}
+				else if (reference == "Assets/Fields.luau")
+				{
+					type = "Script";
+					handle = UUID(0x515);
+				}
 				else
 				{
 					return std::unexpected(Error(ErrorCode::NotFound, std::format("no asset '{}'", reference)).WithHint("did you mean 'Assets/Red.material'?"));
@@ -78,6 +87,107 @@ namespace Engine {
 			}
 
 			std::vector<std::string> Calls;
+		};
+
+		struct SchemaRequestState
+		{
+			FakeAssetReferences Assets{};
+			Ref<const IFieldSchemaSource> Published{};
+			std::vector<std::string> AssetsBeforeSnapshot{};
+			uint32_t SnapshotRequests = 0;
+			uint32_t HandlerCalls = 0;
+			bool FailSnapshot = false;
+			Json ReadScript{};
+		};
+
+		class SchemaRequestContext final : public MethodContext
+		{
+		public:
+			SchemaRequestContext(SchemaRequestState& state, MethodRequest request)
+				: MethodContext(TypeKeyOf<SchemaRequestContext>(), std::move(request)), m_State(&state)
+			{
+			}
+			Scope<MethodContext> CreateNested(MethodRequest request) const override
+			{
+				return CreateScope<SchemaRequestContext>(*m_State, std::move(request));
+			}
+			IAssetReferenceResolver* GetAssetReferenceResolver() const override { return &m_State->Assets; }
+			Result<Ref<const IFieldSchemaSource>> GetFieldSchemaSnapshot() override
+			{
+				++m_State->SnapshotRequests;
+				m_State->AssetsBeforeSnapshot = m_State->Assets.Calls;
+				if (m_State->FailSnapshot)
+					return std::unexpected(Error(ErrorCode::Io, "schema acquisition failed").WithHint("retry the source read"));
+				if (!m_Schemas)
+					m_Schemas = std::exchange(m_State->Published, {});
+				return m_Schemas;
+			}
+			SchemaRequestState& GetState() const { return *m_State; }
+		private:
+			SchemaRequestState* m_State = nullptr; // borrowed for the test request's lifetime
+			Ref<const IFieldSchemaSource> m_Schemas{};
+		};
+
+		Ref<const IFieldSchemaSource> MakeRequestFieldSchemas()
+		{
+			auto script = CreateRef<ScriptData>();
+			script->Kind = ScriptKind::Behaviour;
+			script->Name = "Fields";
+			ScriptFieldSchema material;
+			material.Type = FieldType::AssetRef;
+			material.Meta.AssetFilter = "Material";
+			ScriptFieldSchema choices;
+			choices.Type = FieldType::Enum;
+			choices.EnumValues = { "Idle", "Moving" };
+			choices.DefaultValue = VariantValue(Json("Idle"));
+			ScriptFieldSchema numbers;
+			numbers.Type = FieldType::Float;
+			numbers.DefaultValue = VariantValue(Json(0.0f));
+			numbers.Meta.Min = 0;
+			numbers.Meta.Max = 1;
+			for (const auto& [name, element] : std::array{
+					 std::pair{ "Assets", material }, std::pair{ "Modes", choices }, std::pair{ "Weights", numbers } })
+			{
+				ScriptFieldSchema field;
+				field.Name = name;
+				field.Type = FieldType::Array;
+				field.DefaultValue = VariantValue(Json::array());
+				field.Element = CreateRef<ScriptFieldSchema>(element);
+				script->Fields.push_back(std::move(field));
+			}
+			const auto schemas = ScriptFieldSchemaSource::Create({ { UUID(0x515), AssetRef<ScriptData>(script) } });
+			REQUIRE_MESSAGE(schemas.has_value(), (schemas ? std::string() : schemas.error().ToString()));
+			return *schemas;
+		}
+
+		struct SchemaRegistrySetup
+		{
+			Scope<TypeRegistry> Types = Test::CreateProtocolTestTypes();
+			MethodRegistry Methods{ *Types };
+			SchemaRequestState State{};
+
+			SchemaRegistrySetup()
+			{
+				State.Published = MakeRequestFieldSchemas();
+				Methods.Add<SchemaRequestContext, Test::EchoParams, Test::EchoResult>(
+					{ .Name = "test.schema", .Description = "Reads schema-dependent components.", .RequiredParams = { "text" }, .Examples = { MethodExample{ .Description = "Read no components.", .Params = Json{ { "text", "example" } } } } },
+					[](SchemaRequestContext& context, const Test::EchoParams& params) -> Result<Test::EchoResult>
+				{
+					++context.GetState().HandlerCalls;
+					if (const auto script = params.Components.find("Script"); script != params.Components.end())
+						context.GetState().ReadScript = script->second.Get();
+					return Test::EchoResult{ .Text = params.Text };
+				});
+				Methods.Freeze();
+			}
+
+			Scope<SchemaRequestContext> Context(const Json& params)
+			{
+				const auto& method = RequireMethod(Methods, "test.schema");
+				const auto prepared = Methods.PrepareParams(method, params);
+				REQUIRE(prepared.has_value());
+				return CreateScope<SchemaRequestContext>(State, MethodRequest{ .Info = { .Client = 1, .ClientName = "test", .Id = Json(1), .Method = "test.schema", .TranscriptLine = std::nullopt }, .Options = prepared->Options, .Method = &method, .Params = prepared->Params, .Registry = &Methods });
+			}
 		};
 
 	}
@@ -99,6 +209,65 @@ namespace Engine {
 
 	TEST_SUITE("Automation")
 	{
+		TEST_CASE("MethodRegistry: script schemas are pinned after asset resolution through canonicalization and typed reads")
+		{
+			SchemaRegistrySetup setup;
+			auto context = setup.Context(ParseRegistryJson(R"({"text":"fields","components":{"Script":{"Script":"Assets/Fields.luau",
+				"Fields":{"Modes":["mOvInG"],"Assets":["Assets/Red.material"],"Weights":[0.25]}}}})"));
+			const MethodResult result = setup.Methods.Invoke(*context);
+			REQUIRE_MESSAGE(std::holds_alternative<Json>(result), (std::holds_alternative<Error>(result) ? std::get<Error>(result).ToString() : std::string()));
+			CHECK(setup.State.SnapshotRequests == 1);
+			CHECK(setup.State.AssetsBeforeSnapshot == std::vector<std::string>{ "Assets/Fields.luau" });
+			CHECK(setup.State.Assets.Calls == std::vector<std::string>{ "Assets/Fields.luau", "Assets/Red.material" });
+			CHECK(setup.State.Published == nullptr); // the request owns the only remaining published reference
+			CHECK(setup.State.HandlerCalls == 1);
+			CHECK(setup.State.ReadScript["Script"] == Json("0000000000000515"));
+			CHECK(setup.State.ReadScript["Fields"]["Modes"] == Json::array({ "Moving" }));
+			CHECK(setup.State.ReadScript["Fields"]["Assets"] == Json::array({ "0000000000abcdef" }));
+			CHECK(setup.State.ReadScript == context->GetParams()["components"]["Script"]);
+			const auto retained = context->GetFieldSchemaSnapshot();
+			REQUIRE(retained.has_value());
+			REQUIRE(*retained != nullptr);
+			CHECK((*retained)->FindField(UUID(0x515), "Modes").has_value());
+		}
+
+		TEST_CASE("MethodRegistry: script schema failures preserve their host error and prevent the handler")
+		{
+			SchemaRegistrySetup setup;
+			setup.State.FailSnapshot = true;
+			auto context = setup.Context(ParseRegistryJson(R"({"text":"fields","components":{"Script":{"Script":"Assets/Fields.luau","Fields":{"Weights":[0.25]}}}})"));
+			const MethodResult result = setup.Methods.Invoke(*context);
+			REQUIRE(std::holds_alternative<Error>(result));
+			CHECK(std::get<Error>(result).GetCode() == ErrorCode::Io);
+			CHECK(std::get<Error>(result).GetHint() == "retry the source read");
+			CHECK(setup.State.AssetsBeforeSnapshot == std::vector<std::string>{ "Assets/Fields.luau" });
+			CHECK(setup.State.HandlerCalls == 0);
+		}
+
+		TEST_CASE("MethodRegistry: script array element bounds are validated at their complete parameter pointer")
+		{
+			SchemaRegistrySetup setup;
+			auto context = setup.Context(ParseRegistryJson(R"({"text":"fields","components":{"Script":{"Script":"0000000000000515","Fields":{"Weights":[2]}}}})"));
+			const MethodResult result = setup.Methods.Invoke(*context);
+			REQUIRE(std::holds_alternative<Error>(result));
+			CHECK(std::get<Error>(result).GetCode() == ErrorCode::InvalidArgument);
+			const auto& issues = std::get<Error>(result).GetIssues();
+			REQUIRE_FALSE(issues.empty());
+			CHECK(issues[0].JsonPointer == "/components/Script/Fields/Weights/0");
+			CHECK(setup.State.HandlerCalls == 0);
+		}
+
+		TEST_CASE("MethodRegistry: registry-only parameters do not acquire external field schemas")
+		{
+			SchemaRegistrySetup setup;
+			setup.State.FailSnapshot = true;
+			auto context = setup.Context(ParseRegistryJson(R"({"text":"plain","components":{"RigidBody":{"Type":"kinematic"}}})"));
+			const MethodResult result = setup.Methods.Invoke(*context);
+			REQUIRE(std::holds_alternative<Json>(result));
+			CHECK(setup.State.SnapshotRequests == 0);
+			CHECK(setup.State.HandlerCalls == 1);
+		}
+
 		TEST_CASE("MethodRegistry: registered methods are found by name and listed in name order")
 		{
 			RegistrySetup setup;

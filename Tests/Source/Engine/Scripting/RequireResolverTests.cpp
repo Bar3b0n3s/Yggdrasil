@@ -28,7 +28,7 @@ namespace Engine {
 
 	TEST_SUITE("Scripting")
 	{
-		TEST_CASE("RequireResolver: relative modules normalize inside Assets and record canonical unique edges" * doctest::skip())
+		TEST_CASE("RequireResolver: relative modules normalize inside Assets and record canonical unique edges")
 		{
 			auto root = VfsPath::Parse("project://Assets/Scripts/Game.luau");
 			REQUIRE(root.has_value());
@@ -48,7 +48,7 @@ namespace Engine {
 			CHECK_FALSE(dependencies[1].Handle.IsValid());
 		}
 
-		TEST_CASE("RequireResolver: compilation labels and replay origins do not relax module path validation" * doctest::skip())
+		TEST_CASE("RequireResolver: compilation labels and replay origins do not relax module path validation")
 		{
 			RequireResolver resolver;
 			for (const std::string_view identity : { "project://Assets/Tests/X.replay",
@@ -65,7 +65,7 @@ namespace Engine {
 			}
 		}
 
-		TEST_CASE("RequireResolver: rejects escapes schemes aliases and invalid path spellings before reading" * doctest::skip())
+		TEST_CASE("RequireResolver: rejects escapes schemes aliases and invalid path spellings before reading")
 		{
 			auto root = VfsPath::Parse("project://Assets/Scripts/Game.luau");
 			REQUIRE(root.has_value());
@@ -86,7 +86,7 @@ namespace Engine {
 			CHECK(resolver.GetRequires().empty());
 		}
 
-		TEST_CASE("RequireResolver: reads source only through the dependency reader with exact case" * doctest::skip())
+		TEST_CASE("RequireResolver: reads source only through the dependency reader with exact case")
 		{
 			RequireResolver resolver;
 			RecordingModuleReader reader;
@@ -99,7 +99,7 @@ namespace Engine {
 			CHECK(reader.Reads.front() == path->ToString());
 		}
 
-		TEST_CASE("RequireResolver: cycles report the complete chain and failed entry preserves the active stack" * doctest::skip())
+		TEST_CASE("RequireResolver: cycles report the complete chain and failed entry preserves the active stack")
 		{
 			auto first = VfsPath::Parse("project://Assets/A.luau");
 			auto second = VfsPath::Parse("project://Assets/B.luau");

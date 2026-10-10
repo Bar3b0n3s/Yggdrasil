@@ -65,7 +65,8 @@ namespace Engine {
 		class AutomationFixture
 		{
 		public:
-			explicit AutomationFixture(std::string_view label, bool openScene = true, std::optional<AudioEngineSpecification> audio = std::nullopt);
+			explicit AutomationFixture(std::string_view label, bool openScene = true, std::optional<AudioEngineSpecification> audio = std::nullopt,
+				bool engineResources = false);
 
 			AutomationFixture(const AutomationFixture&) = delete;
 			AutomationFixture& operator=(const AutomationFixture&) = delete;

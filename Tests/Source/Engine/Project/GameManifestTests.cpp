@@ -171,15 +171,24 @@ namespace Engine {
 			CHECK(invalid.error().GetIssues().front().JsonPointer == "/Window/Width");
 		}
 
-		TEST_CASE("GameManifest: a testing manifest is refused until testing exports exist")
+		TEST_CASE("GameManifest: testing manifests round trip for the cooked Runtime harness")
 		{
-			// "Testing": true needs the testing runner of M15; the M7 Runtime would ignore it (ADR 0012 decision 16).
+			// M13 consumes Testing through --feature-test; the exporter's testing switch remains separate.
 			GameManifest manifest = MakeManifest();
 			manifest.Testing = true;
 			const Result<std::string> written = GameManifestSerializer::SaveToString(manifest);
-			REQUIRE_FALSE(written.has_value());
-			CHECK(written.error().GetCode() == ErrorCode::Unsupported);
+			REQUIRE_MESSAGE(written.has_value(), (written ? "" : written.error().ToString()));
+			const auto roundTrip = GameManifestSerializer::LoadFromString(*written);
+			REQUIRE_MESSAGE(roundTrip.has_value(), (roundTrip ? "" : roundTrip.error().ToString()));
+			CHECK(roundTrip->Testing);
+			CHECK(roundTrip->Name == manifest.Name);
+			CHECK(roundTrip->StartScene == manifest.StartScene);
+			CHECK(roundTrip->Paks == manifest.Paks);
+			const auto canonical = GameManifestSerializer::SaveToString(*roundTrip);
+			REQUIRE(canonical);
+			CHECK(*canonical == *written);
 
+			// The reader also admits a fixture flag flip without going through the testing writer first.
 			const Result<std::string> text = GameManifestSerializer::SaveToString(MakeManifest());
 			REQUIRE(text.has_value());
 			std::string testing = *text;
@@ -187,10 +196,28 @@ namespace Engine {
 			REQUIRE(flag != std::string::npos);
 			testing.replace(flag, std::string_view("\"Testing\": false").size(), "\"Testing\": true");
 			const Result<GameManifest> read = GameManifestSerializer::LoadFromString(testing);
-			REQUIRE_FALSE(read.has_value());
-			CHECK(read.error().GetCode() == ErrorCode::Unsupported);
-			REQUIRE_FALSE(read.error().GetIssues().empty());
-			CHECK(read.error().GetIssues().front().JsonPointer == "/Testing");
+			REQUIRE_MESSAGE(read.has_value(), (read ? "" : read.error().ToString()));
+			CHECK(read->Testing);
+			CHECK(testing == *written);
+		}
+
+		TEST_CASE("GameManifest: the testing flag still rejects non boolean values with a located error")
+		{
+			const auto text = GameManifestSerializer::SaveToString(MakeManifest());
+			REQUIRE(text);
+			for (const std::string_view value : { "0", "\"true\"", "null" })
+			{
+				CAPTURE(value);
+				std::string invalid = *text;
+				const size_t flag = invalid.find("\"Testing\": false");
+				REQUIRE(flag != std::string::npos);
+				invalid.replace(flag, std::string_view("\"Testing\": false").size(), "\"Testing\": " + std::string(value));
+				const auto read = GameManifestSerializer::LoadFromString(invalid);
+				REQUIRE_FALSE(read);
+				CHECK(read.error().GetCode() == ErrorCode::Validation);
+				REQUIRE_FALSE(read.error().GetIssues().empty());
+				CHECK(read.error().GetIssues().front().JsonPointer == "/Testing");
+			}
 		}
 	}
 

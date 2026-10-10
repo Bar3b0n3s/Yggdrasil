@@ -246,17 +246,16 @@ namespace Engine {
 			CHECK(unknown.error().GetCode() == ErrorCode::NotFound);
 			CHECK(manager.GetDiagnostics().empty());
 
-			// A type this build has no loader for (scripts arrive with M13; audio clips load since M12) is served and fails when
-			// loaded, once.
+			// The script loader rejects this payload's unsupported compiler ABI. The failed load is remembered and logged once.
 			CHECK(manager.GetAssetType(PlayerScript) == AssetType::Script);
 			Test::ExpectLog expected(LogLevel::Error, "Assets/Scripts/Player.luau");
 			Result<AssetRef<Asset>> script = manager.Load(PlayerScript);
 			REQUIRE_FALSE(script.has_value());
-			CHECK(script.error().GetCode() == ErrorCode::Unsupported);
+			CHECK(script.error().GetCode() == ErrorCode::UnsupportedVersion);
 			CHECK(script.error().ToString().contains(PlayerScript.ToString()));
 			Result<AssetRef<Asset>> remembered = manager.Load(PlayerScript);
 			REQUIRE_FALSE(remembered.has_value());
-			CHECK(remembered.error().GetCode() == ErrorCode::Unsupported);
+			CHECK(remembered.error().GetCode() == ErrorCode::UnsupportedVersion);
 			CHECK(manager.GetState(PlayerScript) == AssetState::Failed);
 			CHECK(expected.GetMatchCount() == 1);
 			REQUIRE(manager.GetDiagnostics().size() == 1);

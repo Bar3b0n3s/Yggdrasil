@@ -17,7 +17,27 @@ namespace Engine {
 
 	TEST_SUITE("EditorCore")
 	{
-		TEST_CASE("EditorCommandLine: the option table names every M4 and M6 editor option")
+		TEST_CASE("EditorCommandLine: script checking and test runs are exclusive project one-shots")
+		{
+			const auto check = ParseEditorArguments({ "--project", "Game", "--check-scripts" });
+			REQUIRE(check);
+			CHECK(check->CheckScripts);
+			CHECK(check->IsOneShot());
+			CHECK_FALSE(check->ListensForAutomation(true));
+			const auto tests = ParseEditorArguments({ "--project", "Game", "--run-tests", "--filter", "Movement/*" });
+			REQUIRE(tests);
+			CHECK(tests->RunTests);
+			CHECK(tests->TestFilter == "Movement/*");
+			CHECK(tests->IsOneShot());
+			CHECK_FALSE(ParseEditorArguments({ "--check-scripts" }));
+			CHECK_FALSE(ParseEditorArguments({ "--run-tests" }));
+			CHECK_FALSE(ParseEditorArguments({ "--project", "Game", "--check-scripts", "--run-tests" }));
+			CHECK_FALSE(ParseEditorArguments({ "--project", "Game", "--check-scripts", "--automation" }));
+			CHECK_FALSE(ParseEditorArguments({ "--project", "Game", "--run-tests", "--batch", "run.jsonl" }));
+			CHECK_FALSE(ParseEditorArguments({ "--project", "Game", "--filter", "Movement" }));
+		}
+
+		TEST_CASE("EditorCommandLine: the option table names every editor launch option")
 		{
 			// --renderer is an engine option (GetEngineCommandLineOptions), which the Runtime takes too (ADR 0009 decisions 3 and 33).
 			std::vector<std::string_view> names;
@@ -27,7 +47,7 @@ namespace Engine {
 				CHECK_FALSE(option.Description.empty());
 			}
 			const std::vector<std::string_view> expected = { "--project", "--read-only", "--automation", "--automation-test-hooks", "--batch",
-				"--upgrade", "--dump-reference", "--bake-engine-assets", "--engine-cache-dir" };
+				"--upgrade", "--dump-reference", "--bake-engine-assets", "--engine-cache-dir", "--check-scripts", "--run-tests", "--filter" };
 			CHECK(names == expected);
 		}
 

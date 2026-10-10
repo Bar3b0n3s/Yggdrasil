@@ -13,8 +13,8 @@
 
 // The runtime executable as a whole process (Architecture §14.3; Roadmap M2, M6, M7) on test games written like exported
 // ones (Support/TestGame.h) and given with --manifest (Docs/Decisions/0012-m7-decisions.md decision 10). Runs that need no
-// GPU pass --renderer none; the Vulkan renderer is covered in the GPU suite. Every run gets --user-data-dir, so nothing is
-// written into the real user-data folder.
+// GPU pass --renderer none; the Vulkan renderer is covered in the GPU suite. Runs get --user-data-dir, except the
+// feature-test fallback regression whose Testing:true manifest confines user data beside its temporary export.
 
 namespace Engine {
 
@@ -58,7 +58,7 @@ namespace Engine {
 		void EditFile(const std::filesystem::path& path, std::string_view from, std::string_view to)
 		{
 			Result<std::string> text = FileSystem::ReadText(path);
-			REQUIRE_MESSAGE(text.has_value(), text.error().ToString());
+			REQUIRE_MESSAGE(text.has_value(), (text ? "" : text.error().ToString()));
 			const size_t position = text->find(from);
 			REQUIRE_MESSAGE(position != std::string::npos, std::string(from));
 			text->replace(position, from.size(), to);
@@ -139,6 +139,9 @@ namespace Engine {
 				{ { "--automation=0" }, "--automation" },
 				{ { "--paused" }, "--paused" },
 				{ { "--manifest=" }, "--manifest" },
+				{ { "--filter", "one" }, "--filter" },
+				{ { "--verify" }, "--verify" },
+				{ { "--replay=" }, "--replay" },
 			};
 			for (const Case& usage : cases)
 			{
@@ -152,6 +155,51 @@ namespace Engine {
 				INFO("runtime stderr: ", result->StandardError);
 				CHECK(result->ExitCode == ExitCode::UsageError);
 				CHECK(result->StandardError.contains(usage.Named));
+			}
+		}
+
+		TEST_CASE("RuntimeApp: feature-test stays inert for an ordinary exported game")
+		{
+			Test::TempDirectory userData("RuntimeTestGate");
+			const auto manifest = Test::WriteTestGame(userData / "Game");
+			REQUIRE_MESSAGE(manifest.has_value(), manifest.error().ToString());
+			const auto result = RunRuntime(userData, { "--headless", "--renderer", "none", "--feature-test", ManifestArgument(*manifest) });
+			REQUIRE_MESSAGE(result.has_value(), result.error().ToString());
+			CHECK(result->ExitCode == ExitCode::UsageError);
+			CHECK(result->StandardError.contains("--feature-test requires a testing export"));
+		}
+
+		TEST_CASE("RuntimeApp: feature-test user data stays beside its manifest unless explicitly overridden")
+		{
+			for (const bool explicitRoot : { false, true })
+			{
+				CAPTURE(explicitRoot);
+				Test::TempDirectory directory("RuntimeTestUserData");
+				Test::TestGameSpecification specification;
+				specification.Name = "IsolatedTests";
+				const auto manifest = Test::WriteTestGame(directory / "Game", specification);
+				REQUIRE_MESSAGE(manifest.has_value(), (manifest ? "" : manifest.error().ToString()));
+				EditFile(*manifest, "\"Testing\": false", "\"Testing\": true");
+				const auto executable = Test::GetBuiltExecutablePath("Runtime");
+				REQUIRE_MESSAGE(executable.has_value(), (executable ? "" : executable.error().ToString()));
+				std::vector<std::string> arguments = { "--headless", "--renderer", "none", "--feature-test", ManifestArgument(*manifest) };
+				if (explicitRoot)
+					arguments.push_back("--user-data-dir=" + Test::PathToUtf8(directory / "Explicit"));
+				ProcessSpecification process;
+				process.Executable = *executable;
+				process.Arguments = std::move(arguments);
+				process.WorkingDirectory = directory.GetPath();
+				const auto result = Process::Run(process, std::chrono::seconds(120));
+				REQUIRE_MESSAGE(result.has_value(), (result ? "" : result.error().ToString()));
+				INFO("runtime stderr: ", result->StandardError);
+				CHECK(result->ExitCode == ExitCode::Success);
+				const auto fallback = directory / "Game/bin/TestUserData/IsolatedTests/Logs/Runtime.log";
+				const auto overridePath = directory / "Explicit/IsolatedTests/Logs/Runtime.log";
+				std::error_code error;
+				CHECK(std::filesystem::is_regular_file(explicitRoot ? overridePath : fallback, error));
+				CHECK_FALSE(error);
+				CHECK_FALSE(std::filesystem::exists(explicitRoot ? fallback : overridePath, error));
+				CHECK_FALSE(error);
 			}
 		}
 

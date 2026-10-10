@@ -132,6 +132,7 @@ namespace Engine {
 		Specification m_Specification;
 		std::vector<ImportDependencyRead> m_Reads; // recorded by ReadDependency
 		std::vector<ImportAssetLookup> m_Lookups;  // recorded by FindAsset
+		std::optional<ScriptImportCheck> m_ScriptCheck{};
 	};
 
 	// One cooked artifact an import produced.

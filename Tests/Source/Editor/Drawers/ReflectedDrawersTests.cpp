@@ -3,6 +3,7 @@
 
 #include "Editor/PanelInteractionFixture.h"
 #include "Engine/Asset/BuiltinAssets.h"
+#include "Engine/Asset/ScriptData.h"
 #include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Scene/Components/MeshRendererComponent.h"
 
@@ -70,6 +71,64 @@ namespace Engine {
 
 	TEST_SUITE("Editor")
 	{
+		TEST_CASE("ReflectedDrawers: new script array elements use authored defaults recursively")
+		{
+			TypeRegistry types;
+			RegisterDrawerInteractionTypes(types);
+			auto number = CreateRef<ScriptFieldSchema>();
+			number->Type = FieldType::Float;
+			number->DefaultValue = VariantValue(Json(4));
+			number->Meta.Min = 3;
+			number->Meta.Max = 5;
+			auto row = CreateRef<ScriptFieldSchema>();
+			row->Type = FieldType::Array;
+			row->DefaultValue = VariantValue(Json::array({ 4 }));
+			row->Element = number;
+			auto script = CreateRef<ScriptData>();
+			script->Kind = ScriptKind::Behaviour;
+			script->Name = "Rows";
+			ScriptFieldSchema rows;
+			rows.Name = "Rows";
+			rows.Type = FieldType::Array;
+			rows.DefaultValue = VariantValue(Json::array());
+			rows.Element = row;
+			script->Fields.push_back(rows);
+			const AssetHandle handle(7);
+			const auto schemas = ScriptFieldSchemaSource::Create({ { handle, script } });
+			REQUIRE(schemas);
+			const auto field = (*schemas)->FindField(handle, "Rows");
+			REQUIRE(field);
+			Test::PanelInteractionUi ui;
+			Value value = Value::FromArray({});
+			Result<ReflectedDrawerResult> result;
+			ImVec2 add{};
+			const auto draw = [&types, &rows, &field, &value, &result, &add]() -> Status
+			{
+				result = DrawReflectedValue(**field, value, { .Types = types, .Path = "Fields.Rows", .ScriptSchema = &rows });
+				add = Test::PanelInteractionUi::LastItemCenter();
+				return result ? Status{} : Status(std::unexpected(result.error()));
+			};
+			REQUIRE(ui.Frame(draw));
+			REQUIRE(ui.Click(draw, add));
+			REQUIRE(value.GetElements().size() == 1);
+			REQUIRE(value.GetElements()[0].GetElements().size() == 1);
+			CHECK(value.GetElements()[0].GetElements()[0].AsFloat() == 4.0f);
+			// Draw the inner array with the exact descriptor/context that recursive descent uses.
+			const FieldInfo* inner = (*field)->GetType().GetElementSchema();
+			REQUIRE(inner != nullptr);
+			Value innerValue = Value::FromArray({});
+			const auto drawInner = [&types, &row, inner, &innerValue, &add]() -> Status
+			{
+				const auto drawn = DrawReflectedValue(*inner, innerValue, { .Types = types, .Path = "Fields.Rows[0]", .ScriptSchema = row.get() });
+				add = Test::PanelInteractionUi::LastItemCenter();
+				return drawn ? Status{} : Status(std::unexpected(drawn.error()));
+			};
+			REQUIRE(ui.Frame(drawInner));
+			REQUIRE(ui.Click(drawInner, add));
+			REQUIRE(innerValue.GetElements().size() == 1);
+			CHECK(innerValue.GetElements()[0].AsFloat() == 4.0f);
+		}
+
 		TEST_CASE("ReflectedDrawers: map key entry rejects duplicates atomically and sorts successful renames")
 		{
 			TypeRegistry types;

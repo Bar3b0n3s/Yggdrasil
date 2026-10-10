@@ -60,6 +60,8 @@ namespace Engine {
 			VariantValue Settings{}; // the .meta's settings the import used
 			std::vector<ImportDependencyRead> Reads{};
 			std::vector<ImportAssetLookup> Lookups{};
+			std::optional<ScriptImportCheck> ScriptCheck{};
+			bool RecheckPending = false;
 			std::vector<AssetHandle> Artifacts{}; // of the last successful import, main first
 			std::vector<AssetHandle> LookedUp{};  // standalone assets the last successful import found by path, sorted
 			// A remembered failure (§7.2): Load returns it without importing again until an input changes.
@@ -197,6 +199,14 @@ namespace Engine {
 		{
 			const auto found = std::ranges::lower_bound(snapshot, path, std::less<>(), &ImportAssetLookupEntry::SourcePath);
 			return found != snapshot.end() && found->SourcePath == path ? &*found : nullptr;
+		}
+
+		static const ImportAssetLookupEntry* FindLookupEntry(std::span<const ImportAssetLookupEntry> snapshot, const ImportAssetLookup& lookup)
+		{
+			if (!lookup.RequestedHandle.IsValid())
+				return FindLookupEntry(snapshot, lookup.Path);
+			const auto found = std::ranges::find(snapshot, lookup.RequestedHandle, &ImportAssetLookupEntry::Handle);
+			return found != snapshot.end() ? &*found : nullptr;
 		}
 
 		// The checks an import's result must pass before anything is stored (importers are trusted to be pure, not to be
@@ -364,18 +374,21 @@ namespace Engine {
 					output.CacheWarning = cached.error().ToString();
 				}
 				else if (cached->has_value() && IsManifestCurrent(*request.Vfs, (*cached)->Reads, (*cached)->Lookups, request.Assets)
+					&& (request.Metadata.Type != AssetType::Script || (IsScriptCheckCurrent((*cached)->ScriptCheck, request.ScriptDiagnostics) && (!(*cached)->ScriptCheck.has_value() || (*cached)->ScriptCheck->SourceHash == output.SourceHash)))
 					&& ValidateImportResult((*cached)->Import, request.Metadata, request.Importer->GetId()).has_value())
 				{
 					Result<std::vector<AssetRef<Asset>>> decoded = decodeAll((*cached)->Import);
 					if (decoded.has_value())
 					{
 						output.Import = std::move(**cached);
-						// A manifest does not record a dependency's owner (AssetCache.h). IsManifestCurrent has just matched every
+						if (request.Metadata.Type == AssetType::Script && !output.Import.ScriptCheck.has_value())
+							output.Import.ScriptCheck = ScriptImportCheck{ .SourceHash = output.SourceHash };
+						// Legacy path records omit a dependency's owner (AssetCache.h). IsManifestCurrent has just matched every
 						// lookup with this snapshot's entry, so the entry is what a fresh import would have found, owner included;
 						// ProcessChanges compares the lookups with the registry in full, so they must read the same.
 						for (ImportAssetLookup& lookup : output.Import.Lookups)
 						{
-							if (const ImportAssetLookupEntry* entry = FindLookupEntry(request.Assets, lookup.Path); entry != nullptr && lookup.Found.has_value())
+							if (const ImportAssetLookupEntry* entry = FindLookupEntry(request.Assets, lookup); entry != nullptr && lookup.Found.has_value())
 								lookup.Found = *entry;
 						}
 						output.Decoded = std::move(*decoded);
@@ -417,6 +430,7 @@ namespace Engine {
 			Result<ImportResult> imported = request.Importer->Import(context, request.Metadata);
 			output.Import.Reads = context.GetDependencyReads();
 			output.Import.Lookups = context.GetLookups();
+			output.Import.ScriptCheck = context.GetScriptCheck();
 			if (!imported.has_value())
 				return fail(std::move(imported).error());
 			if (Status valid = ValidateImportResult(*imported, request.Metadata, request.Importer->GetId()); !valid.has_value())
@@ -1050,15 +1064,17 @@ namespace Engine {
 				.SourcePath = record->SourcePath,
 				.Settings = std::move(*settings),
 				.Assets = Utils::MakeLookupSnapshot(Registry),
-				.UseCache = useCache,
+				.UseCache = useCache && (!Imports.contains(source) || !Imports.find(source)->second.RecheckPending),
 			};
 		}
 
-		void RecordFailure(AssetHandle source, const Error& error, const VfsPath& sourcePath, std::vector<ImportDependencyRead> reads)
+		void RecordFailure(AssetHandle source, const Error& error, const VfsPath& sourcePath, CachedImport attempt)
 		{
 			ImportRecord& import = Imports[source];
 			import.SourcePath = sourcePath;
 			import.Failure = error;
+			import.ScriptCheck = std::move(attempt.ScriptCheck);
+			import.RecheckPending = false;
 			// The inputs the failed import used: an unchanged .meta must not make it look stale (only a change retries it).
 			if (const AssetRecord* record = Registry.Find(source))
 			{
@@ -1066,11 +1082,16 @@ namespace Engine {
 				import.Settings = record->Metadata.Settings;
 			}
 			// The reads so far, so that a dependency file that comes back or changes ends the remembered failure.
-			for (ImportDependencyRead& read : reads)
+			for (ImportDependencyRead& read : attempt.Reads)
 			{
-				if (std::ranges::find(import.Reads, read.Path, &ImportDependencyRead::Path) == import.Reads.end())
+				const auto existing = std::ranges::find(import.Reads, read.Path, &ImportDependencyRead::Path);
+				if (existing == import.Reads.end())
 					import.Reads.push_back(std::move(read));
+				else
+					*existing = std::move(read);
 			}
+			// Preserve the failed attempt's misses as well as hits, including requires outside the source's directory.
+			import.Lookups = std::move(attempt.Lookups);
 			std::ranges::sort(import.Reads, std::less<>(), &ImportDependencyRead::Path);
 			Self->ClearDiagnostics(source, std::array<std::string_view, 1>{ AssetImportFailedCode });
 			Self->ReportDiagnostic({
@@ -1103,7 +1124,7 @@ namespace Engine {
 				LogCacheWarning(*output.CacheWarning);
 			if (output.Failure.has_value())
 			{
-				RecordFailure(source, *output.Failure, sourcePath, std::move(output.Import.Reads));
+				RecordFailure(source, *output.Failure, sourcePath, std::move(output.Import));
 				return std::unexpected(std::move(*output.Failure));
 			}
 
@@ -1158,7 +1179,7 @@ namespace Engine {
 			std::vector<AssetHandle> lookedUp;
 			for (const ImportAssetLookup& lookup : output.Import.Lookups)
 			{
-				if (lookup.Found.has_value() && lookup.Found->Kind == AssetMetaKind::Asset)
+				if (!lookup.RequestedHandle.IsValid() && lookup.Found.has_value() && lookup.Found->Kind == AssetMetaKind::Asset)
 					lookedUp.push_back(lookup.Found->Handle);
 			}
 			std::ranges::sort(lookedUp);
@@ -1184,6 +1205,8 @@ namespace Engine {
 			}
 			import.Reads = output.Import.Reads;
 			import.Lookups = output.Import.Lookups;
+			import.ScriptCheck = std::move(output.Import.ScriptCheck);
+			import.RecheckPending = false;
 			import.Artifacts = std::move(artifacts);
 			import.LookedUp = std::move(lookedUp);
 			import.Failure.reset();
@@ -1688,7 +1711,7 @@ namespace Engine {
 				const AssetRecord* record = Registry.Find(source);
 				if (record == nullptr || record->Metadata.Kind != AssetMetaKind::Asset)
 					continue;
-				bool isStale = record->Metadata.Importer != import.Importer || record->Metadata.Settings != import.Settings;
+				bool isStale = import.RecheckPending || record->Metadata.Importer != import.Importer || record->Metadata.Settings != import.Settings;
 				for (const FileChange& change : changes)
 				{
 					const bool isRead = std::ranges::find(import.Reads, change.Path, &ImportDependencyRead::Path) != import.Reads.end();
@@ -1698,7 +1721,7 @@ namespace Engine {
 				}
 				for (const ImportAssetLookup& lookup : import.Lookups)
 				{
-					const ImportAssetLookupEntry* entry = Utils::FindLookupEntry(snapshot, lookup.Path);
+					const ImportAssetLookupEntry* entry = Utils::FindLookupEntry(snapshot, lookup);
 					const bool same = entry == nullptr ? !lookup.Found.has_value() : lookup.Found.has_value() && *lookup.Found == *entry;
 					if (!same)
 						isStale = true;
@@ -2417,15 +2440,32 @@ namespace Engine {
 		RestoreSharedState();
 	}
 
-	Result<ScriptImportCheck> EditorAssetManager::GetScriptCheck(AssetHandle /*script*/) const
+	Result<ScriptImportCheck> EditorAssetManager::GetScriptCheck(AssetHandle script) const
 	{
-		ENGINE_CONTRACT_STUB();
-		return MakeError(ErrorCode::Unsupported, "Script check publication is an M13 contract stub");
+		const AssetRecord* record = m_State->Registry.Find(script);
+		const auto import = m_State->Imports.find(script);
+		if (record == nullptr || record->Metadata.Kind != AssetMetaKind::Asset || record->Metadata.Type != AssetType::Script
+			|| import == m_State->Imports.end() || !import->second.ScriptCheck.has_value())
+			return MakeError(ErrorCode::NotFound, "no script check attempt is known for {}", script.ToString());
+		return *import->second.ScriptCheck;
 	}
 
-	void EditorAssetManager::SetScriptDiagnosticsProvider(IScriptDiagnosticsProvider* /*provider*/)
+	void EditorAssetManager::SetScriptDiagnosticsProvider(IScriptDiagnosticsProvider* provider)
 	{
-		ENGINE_CONTRACT_STUB();
+		WaitIdle();
+		const bool removed = provider == nullptr && m_State->Specification.ScriptDiagnostics != nullptr;
+		m_State->Specification.ScriptDiagnostics = provider;
+		for (auto& [handle, import] : m_State->Imports)
+		{
+			const AssetRecord* record = m_State->Registry.Find(handle);
+			if (record != nullptr && record->Metadata.Type == AssetType::Script
+				&& (removed || !IsScriptCheckCurrent(import.ScriptCheck, provider)))
+			{
+				import.ScriptCheck.reset();
+				import.Failure.reset();
+				import.RecheckPending = true;
+			}
+		}
 	}
 
 	bool EditorAssetManager::IsDryRun() const

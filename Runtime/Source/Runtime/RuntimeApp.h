@@ -17,8 +17,8 @@ namespace Engine {
 	class AssetLoaderRegistry;
 	class RuntimeAssetManager;
 
-	// The Runtime executable's own options, next to the engine's (GetEngineCommandLineOptions; §13.9), all absent from Dist
-	// builds (§13.9: Dist honours only --headless, --frames, --expect-no-errors, --feature-test, --filter and --log-level):
+	// The Runtime executable's own options, next to the engine's (GetEngineCommandLineOptions; §13.9).
+	// Dist retains --feature-test and --filter; the development options below are absent from Dist:
 	//   --manifest <path>          read this Game.json (and the paks it names, relative to its directory) instead of the
 	//                              one next to the executable: the C++ tests run the built Runtime against test games
 	//                              without copying it (Docs/Decisions/0012-m7-decisions.md decision 10)
@@ -30,6 +30,8 @@ namespace Engine {
 	//                              tick: play.step advances the paused session (the paused-session rule of play.step,
 	//                              Docs/Decisions/0012-m7-decisions.md decision 8) and its state hashes match the editor's
 	//                              lockstep session of the same game and seed tick for tick; play.resume lets it run
+	//   --replay <path> [--verify] run a cooked replay or a user recording; verification checks expectations and final hash
+	//   --feature-test [--filter F] run suites and cooked replays from a testing export, write JSON/JUnit and exit
 	struct RuntimeOptions
 	{
 		struct ScreenshotAt
@@ -44,9 +46,14 @@ namespace Engine {
 		bool Automation = false;
 		uint16_t AutomationPort = 0; // 0: OS-assigned
 		bool StartPaused = false;    // --paused
+		// Testing exports only. Dist keeps this entry point and its filter, but no development replay/automation CLI.
+		bool FeatureTest = false;
+		std::string Filter{};
+		std::string Replay{};      // project replay asset or canonical user://Replays/ identity; non-Dist
+		bool VerifyReplay = false; // --verify: compiled expectations and strict terminal hash
 	};
 
-	// The options above, for CommandLine::Parse next to GetEngineCommandLineOptions (empty in Dist). Static storage.
+	// The options above, for CommandLine::Parse next to GetEngineCommandLineOptions. Static storage.
 	[[nodiscard]] std::span<const CommandLineOption> GetRuntimeCommandLineOptions();
 
 	// Reads the Runtime options of `commandLine`; `executablePath` is the running executable (the default manifest's
@@ -119,7 +126,9 @@ namespace Engine {
 
 	// The runtime's ApplicationFactory (§14.3): parses the engine options and GetRuntimeCommandLineOptions, reads the
 	// manifest (RuntimeOptions::ManifestPath) and names the application after the manifest's Name; sets the window and the
-	// loop from it and EnginePak to the manifest's first pak. Errors: InvalidArgument for a bad command line, including any
+	// loop from it and EnginePak to the manifest's first pak. For --feature-test with Testing:true, an empty UserDataRoot
+	// defaults to absolute <manifest directory>/bin/TestUserData; an explicit development root takes precedence. Ordinary
+	// runtime keeps the OS default. Errors: InvalidArgument for a bad command line, including any
 	// positional argument (the runtime declares none); NotFound, Io, Parse, Validation or UnsupportedVersion for the
 	// manifest (RunApplication maps them to ExitCode::InitFailed, 3).
 	[[nodiscard]] Result<Scope<Application>> CreateRuntimeApp(std::span<const std::string> arguments);

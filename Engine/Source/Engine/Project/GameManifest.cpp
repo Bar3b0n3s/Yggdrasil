@@ -200,13 +200,6 @@ namespace Engine {
 
 			ENGINE_TRY_ASSIGN(const JsonReader testing, root.GetMember("Testing"));
 			ENGINE_TRY_ASSIGN(manifest.Testing, testing.ReadBool());
-			if (manifest.Testing)
-			{
-				// Nothing is accepted and ignored: this Runtime has no testing runner yet (Docs/Decisions/0012-m7-decisions.md
-				// decision 16).
-				return std::unexpected(MakeManifestError(ErrorCode::Unsupported, testing.GetPointer(), "testing exports are not supported yet",
-					"export the game with testing: false"));
-			}
 			return manifest;
 		}
 

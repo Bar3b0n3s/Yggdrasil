@@ -1,7 +1,7 @@
 # 0019 — M13 scripting contract
 
-- **Status:** contract to be frozen by its reviewed contract commit. That commit requires the contract-mode gate; no M13 implementation or milestone acceptance is claimed.
-- **Date:** 2026-10-09.
+- **Status:** implemented and source-reviewed; contract frozen by reviewed commit `8c066eb`. Milestone acceptance is recorded in the implementation commit's review trailer and requires both strict local gates below.
+- **Date:** 2026-10-10.
 - **Base:** `c95862a` (M9 rendering and M10 editor UI completed).
 - **Authority:** Architecture §3–§7, §11, §13 and §15; Roadmap M13. Remote CI remains non-blocking under ADR 0011.
 
@@ -83,7 +83,40 @@ The parent owns the host, ScriptEngine, TaskScheduler and error contracts, share
 
 Only the contract commit may retain `ENGINE_CONTRACT_STUB` and skipped acceptance skeletons. Implementation must replace every one, complete all §11.5 APIs and editor/automation parity, and pass strict PreCommit plus full local Windows CI before M13 is reported complete. Existing M9/M10 behavior remains covered by the contract gate.
 
+### 9. Approved integration amendments
+
+The contract owner approved these additions while integrating the implementations:
+
+- Parameter validation pins an immutable script schema snapshot for the whole request. The method context can complete a partial entity update's missing script owner from the addressed entity before external-variant validation; supplied owners are never replaced. This permits fields-only patches while retaining range, type and script-kind validation before mutation.
+- Windows projects select x64 host tools at workspace scope. The M13 Debug Tests link exhausted the 32-bit linker's address space despite available system memory. Premake's `preferredtoolarchitecture "x86_64"` emits `PreferredToolArchitecture=x64`; CheckBuildConfig requires it and a seeded 32-bit-host fixture proves the regression is detected. See [Premake](https://premake.github.io/docs/preferredtoolarchitecture/) and [Microsoft's MSBuild properties](https://learn.microsoft.com/en-us/cpp/build/reference/msbuild-visual-cpp-overview?view=msvc-180). Target architecture and floating-point settings are unchanged.
+
+- `PlaySession::GetScriptErrors` retains a session-wide error stream across scene replacement. A new VM does not reset automation cursors or erase errors the suite still needs to classify. Quit or fatal stop raised during old-scene teardown cancels the pending replacement before the new scene starts.
+- The editor script service offers a const checking operation and immutable schema snapshots. Scene commands, prefab operations, duplication, scene loading and export pass the same schema source through reflection. Only fields declared as entity references are remapped; strings containing UUID text remain strings. Assigning a Module or TestSuite as a behaviour is rejected before mutation.
+- Export checks scripts regardless of `BlockPlayOnTypeErrors`, which controls entering Play. Script memory statistics are available through the shared editor/Runtime method only while a live VM exists.
+- Reload evaluates candidates with a fresh require cache and load-time API restrictions. Validation cannot mutate the live scene or reuse mutable live closure upvalues; failed candidates preserve the active instance and module graph.
+- `GenerateDocs.py` lands in M13 for the required scripting declarations, scripting reference, automation method schemas and MCP catalogue. The commit gate checks these outputs after building the Debug editor; CI checks them after each non-Dist build. M14 extends this generator to its remaining planned references.
+- Native extension tests use the public binding facade: an optional synchronous `RegisterBindings` configuration hook runs before freezing, and `LuaHelpers` exposes checked task handles, the borrowed engine pointer and structured error forwarding. Tests and editor tooling never include Scripting's private headers. The process initialization query is public through `Sandbox.h`; it exposes no Luau state.
+
+### 10. Implementation review amendments
+
+The contract owner approved the following corrections found during independent implementation review and integration verification. The final gate below remains required.
+
+- Native values converted from Luau use a separate allowance of `min(4 MiB, VM soft-limit bytes)`. Each expanded value and table entry costs 256 bytes, and strings and keys cost four bytes per source byte. Repeated aliases are charged on every expansion before allocation. JSON and reflected-value conversion share this policy and poll the inherited deadline; a script `pcall` cannot clear a captured safety fault. Exhausting the native allowance is a structured runtime input error and does not count as a tracked VM allocator breach. Valid subsequent calls remain usable.
+- `ScriptEngineSpecification::ClockSeconds` is an optional copied callable with the same finite, nonnegative, monotonic and capture-lifetime contract as the sandbox clock. It exists to exercise hosted watchdog boundaries deterministically; it is never simulation time and defaults to `lua_clock`.
+- Export fails when the checker cannot refresh its environment; it never treats an unavailable service as a clean type check. Script reference validation resolves effective schema defaults and overrides recursively, pins the schema version for a fix, and preserves unrelated legacy overrides during undoable repairs.
+- The runtime accepts the manifest's `Testing:true` now that its cooked-script runner exists. `--feature-test` still rejects ordinary manifests. Without an explicit development user-data root, a testing run keeps logs, crashes and `user://` below `<export>/bin/TestUserData/<game name>`, including Dist. Ordinary games retain the platform user-data location. The full testing-export option and automatic three-mode coverage gate remain M15 work; M13's integration fixture includes test assets and sets the existing manifest flag explicitly.
+- `PlaySession::Prepare` performs fallible scene, input, physics and empty-VM preparation without gameplay callbacks, voices or shared mixer/time ownership. A failed or discarded candidate preserves the original session. `Activate` runs once after retiring the previous session, acquires audio, initializes instances and runs startup callbacks, then starts PlayOnStart voices. `Create` remains Prepare followed by Activate. Startup script faults use the normal script-error path. Replacement adapters configure pause, lockstep and validated time scale before activation and preserve startup changes.
+- `AudioSystem::InitializeMix` idempotently saves Music/Sfx/Ui and resets them to one before startup scripts can read or change gains. `Start` invokes it for standalone callers without resetting an already initialized mix. Teardown restores the saved mix even if no voices started. Scene replacement follows the same ordering; Master remains host-owned.
+- Scripted-clock nonprogress uses the case's effective `TimeoutTicks` as a separate limit on consecutive completed frames with zero fixed steps. Frame callbacks run before this check, and a stepped frame resets the counter. At the limit, a still-running case times out with its source location, cancels its thread/audio capture and ends the suite. Finite pauses may recover; reported ticks and the existing tick budgets continue counting only simulation ticks. An all-zero authored clock remains invalid. A quit first observed during final teardown is classified exactly once against `ExpectQuit`, with a reported quit row even after all case bodies passed.
+- Replay playback retains future authored events in its own storage and queues only the next tick's events. Cancellation drops unconsumed events while preserving independent input and the already-applied boundary state. An applied Tap still releases on the next tick before that tick's authored events; explicitly held buttons and axes remain until subsequent input or `input.inject releaseAll`. The caller pauses and releases its own input/time lease. The complete stream is validated before playback begins.
+- Reapplying an unchanged project setting preserves byte-identical project files instead of atomically replacing them. The prior replacement changed the file fingerprint with no settings change for autosave to recognize, so the next Play could report an external-edit conflict. Write permissions, command history and revisions retain their existing behavior; genuine external fingerprint changes remain conflicts. The scripting policy regression and an autosave undo/redo regression cover this seam.
+- `EditorPlayController::OnSafePoint`, `OnAssetReload` and `OnInputEvent` connect the editor host to queued script reloads, deferred quit handling and exclusive input ownership. Reloads finish dependent publication before applying each transitive chain once; failed imports preserve running code. Ending a deferred session drains its released imports before another Start. Ordinary quit runs the normal Stop path only after UI/RPC/batch borrows unwind. Test, replay, recording and lockstep owners retain control.
+- `EditorContext::AcquireScriptService` returns the actual checker configuration or infrastructure failure, allowing configured Play checks to fail before replacing a session. The existing nullable getters remain for optional callers. Both Edit eval and Play read live environment/cursor state from the borrowed window, including the null-platform headless window; the documented no-window fallback remains. Stop, quit and replacement restore cursor ownership, and native/viewport input never overwrites an exclusive test or replay stream. These changes are covered through both real editor automation and native/headless window tests.
+- `IScriptHost::RequestSceneLoad` takes owned JSON parameters by value; the binding and host move them into pending session storage. Native conversion and push traversal use heap frames at the accepted depth boundary. This avoids recursive deep copies through the JSON library after successful conversion. A real session regression transfers a maximum-depth parameter object across scene replacement and reads it in the fresh VM, retaining isolation from later Lua table edits.
+
 ## Review follow-through
+
+The local agent environment omitted Windows' `PROCESSOR_ARCHITECTURE` and `PROCESSOR_ARCHITEW6432` variables. MSBuild therefore reverted even an explicit x64 preference to x86. The host was verified as x64 and the standard `PROCESSOR_ARCHITECTURE=AMD64` value restored in verification processes; no installed tool configuration was changed.
 
 The interface review identified and corrected missing per-expectation replay outcomes, incomplete cancellation ownership, embedded-source attribution and script-array element metadata. The generated declarations must be parsed with the pinned New solver during implementation; optional bounds returns use `(vector?, vector?)`, since an optional result tuple is not Luau syntax. Acceptance tests cover each decision above. Their contract skips are temporary and claim no implementation result.
 
@@ -110,6 +143,37 @@ The independent source review covered every new file in full and the relevant sh
 
 Checklist applicability: §0 and §8 use the explicit contract exception for marked stubs and skipped acceptance skeletons; no runtime acceptance is inferred from them. §1–§7 and §9–§10 cover the declared boundaries, ownership, determinism, errors and documentation. §11 has local compiler verification only; Linux/macOS are not claimed verified. §12 has no vendor or build-setting changes. §13 covers confined paths, read-only checks and sandbox availability; transport/authentication code is unchanged. Full implementation review and strict gates remain required before M13 completion.
 
+## Implementation review
+
+Three independent implementation reviews covered the VM/bindings, session/testing/runtime and editor/assets/reflection/automation. Each reviewer read the new files in their scope and the shared changes in context against ReviewChecklist §0–§13. The contract owner reviewed their fixes, the shared integration changes, build scripts, generated references and regression results. All fourteen concrete findings below were corrected.
+
+| Finding | Correction and regression |
+|---|---|
+| Small shared Lua tables could expand into unbounded native JSON | Shared native conversion budget and inherited deadline, including typed reflection; DAG, string/key, cycle, depth and recovery cases |
+| Zero time scale bypassed scripted-clock timeouts | Consecutive zero-step frame limit; zero-scale startup/case failures and finite-pause recovery |
+| Final teardown quit could falsely pass a suite | Classify after destruction exactly once; suite/case isolation and expected, unexpected and mismatched quit cases |
+| Replay cancellation left future input in the session | Player-owned future events; cancellation, independent input and Tap-release tests plus both host disconnect paths |
+| Startup scripts observed the preceding audio mix | Initialize the owned mix before callbacks; startup and scene-replacement mix tests |
+| Runtime restart activated a candidate before retiring its predecessor | Prepare/Activate split; failed preparation preserves the original, successful exported restart restores ownership in order |
+| Ordinary editor saves never reloaded the live VM | Safe-point reload queue with import completion, dependent-chain rollback and deterministic-owner deferral; real editor save/refresh tests |
+| Editor script quit left ordinary Play active | Consume after dispatch through normal Stop; startup, update and eval quit tests with selection/cursor restoration |
+| Configured type errors did not block editor Play | Refresh and check before admission/replacement; behaviour/module and checker-infrastructure failure tests |
+| Script environment queries ignored the editor window | Borrow live window state; actual native and headless window regressions |
+| Script cursor state was detached from window ownership | Apply to the window and restore each owner's baseline; Stop, blur, quit, test lease and replacement regressions |
+| Native input could modify an exclusively driven test | Guard both event ingress and viewport blur; ScriptedClock hashes and authored-input assertions with injected native noise |
+| Export could omit checking when the checker was unavailable | Fail validation with a located cause; invalid checker configuration regression |
+| Functional casts violated the repository's C++ rules | Explicit casts in checker/cache tests, covered by compilation and lint |
+
+Central verification also corrected stale test assumptions about offloaded reports, published asset versions and serialized entity response shape, completed the generic Script/Replay importer sweep, admitted testing manifests in the real exported runner, and fixed the identical-settings/autosave conflict. Deep conversion tests exercise the accepted nesting boundary without increasing the native stack size. No acceptance test is skipped or weakened to close these findings.
+
+The first full strict run also caught duplicated physics diagnostics: Physics logged them once, then the new scripting listener logged them again while publishing the script error. Forwarded diagnostics now retain the complete script error stream, test reporting and pause/instance policy without emitting a second log entry. The existing physics acceptance test keeps its exact log counts and additionally checks that all four refused entities appear once in the script error stream.
+
+Checklist disposition: §1–§10, §12 and §13 have source fixes and regression coverage; §0 additionally requires strict PreCommit and full local CI before the implementation commit. §11 requires the local MSVC/clang-cl matrix and generated-platform checks, while Linux/macOS execution remains remote-CI verification under ADR 0011. Vendor sources are unchanged. M14's full FeatureTest coverage gates and M15's testing-export option remain in their owning milestones.
+
 ## Verification
 
-The contract commit's `Reviewed:` trailer records the final PreCommit result and contract mode. Logs are kept under `bin/M13-Contract-*` during development. A preliminary run is never substituted for the final reviewed tree's gate. Full milestone CI and runtime acceptance follow implementation; this document does not claim them.
+The contract commit's `Reviewed:` trailer records its PreCommit result and contract mode. The implementation commit records strict PreCommit, full `CI.py --require-clang-cl`, and the exported configuration audit; a preliminary or contract-mode run never substitutes for those gates. Development logs remain under the ignored `bin/M13-*` paths.
+
+The final native-conversion regression run passed all 47 selected Sandbox, LuaHelpers, LoadTimeVm and real-session parameter-transfer cases (5,126 assertions), including maximum-depth values, aliased tables, deadline propagation and recovery after rejected input. The editor host and autosave run passed all 56 cases (1,126 assertions). These targeted runs supplement the complete suites in the gates.
+
+`Tests/Automation/test_script_modes.py` exports one authored project, executes cooked scripts through the standalone runner, and compares its final state hash with the editor. It folds 96 seeded nontrivial power expressions into visible scene state and checks known fractional powers plus fixed-step motion. The ordinary automation suite checks its own built configuration; the milestone audit invokes the same helper for Debug, Release and Dist after all three executables are built. Dist runs the cooked artifacts without development evaluation. The fixture enables the testing manifest flag without modifying either pak; the public testing-export option remains M15 work.

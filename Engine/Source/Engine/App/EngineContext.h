@@ -11,6 +11,7 @@
 #include "Engine/Platform/Input/InputState.h"
 #include "Engine/Platform/Window.h"
 #include "Engine/Reflection/TypeRegistry.h"
+#include "Engine/Scripting/ScriptApiRegistry.h"
 
 #include <cstdint>
 #include <filesystem>
@@ -148,6 +149,9 @@ namespace Engine {
 		// types (RegisterAssetTypes) and what the specification's RegisterTypes added, frozen, so every const member is
 		// thread-safe.
 		[[nodiscard]] const TypeRegistry& GetTypeRegistry() const { return m_TypeRegistry; }
+		// One frozen API per context; runtime VMs share its schema and main-thread coverage counters.
+		[[nodiscard]] ScriptApiRegistry& GetScriptApiRegistry() { return m_ScriptApiRegistry; }
+		[[nodiscard]] const ScriptApiRegistry& GetScriptApiRegistry() const { return m_ScriptApiRegistry; }
 
 		// The window; nullptr when the specification had none.
 		[[nodiscard]] Window* GetWindow() { return m_Window ? &*m_Window : nullptr; }
@@ -195,7 +199,8 @@ namespace Engine {
 		JobSystem m_JobSystem; // posts continuations to m_MainThreadQueue
 		EventLog m_EventLog;
 		InputState m_InputState;
-		TypeRegistry m_TypeRegistry; // frozen by the constructor
+		TypeRegistry m_TypeRegistry;           // frozen by the constructor
+		ScriptApiRegistry m_ScriptApiRegistry; // frozen by Create against the type registry above
 		std::optional<Window> m_Window;
 		// After the window, so they are destroyed before it (the device may present to it); the factory and the library
 		// refer to the device.

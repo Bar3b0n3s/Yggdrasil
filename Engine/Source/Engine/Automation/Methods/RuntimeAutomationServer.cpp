@@ -1,13 +1,13 @@
 #include "EnginePCH.h"
 #include "Engine/Automation/Methods/RuntimeAutomationServer.h"
 
+#include "Engine/Audio/AudioEngine.h"
 #include "Engine/Automation/Methods/AutomationMethodContext.h"
 #include "Engine/Automation/Methods/PlayMethods.h"
 #include "Engine/Automation/Methods/RegisterSharedMethods.h"
 #include "Engine/Automation/Methods/SceneMethods.h"
 #include "Engine/Automation/Methods/SessionMethods.h"
 #include "Engine/Automation/Methods/SharedMethodSupport.h"
-#include "Engine/Audio/AudioEngine.h"
 #include "Engine/Automation/Protocol/Handshake.h"
 #include "Engine/Automation/Protocol/ProtocolServer.h"
 #include "Engine/Automation/Protocol/ResultOffload.h"
@@ -23,6 +23,7 @@
 #include "Engine/Scene/PhysicsSystem.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Session/PlaySession.h"
+#include "Engine/Session/ReplayRecorder.h"
 
 #include <nlohmann/json.hpp>
 
@@ -67,6 +68,8 @@ namespace Engine {
 			uint64_t NextOutputSequence = 1;
 			bool OutputDirectoryPrepared = false;
 			std::optional<int> ShutdownRequest{};
+			ClientId RecordingOwner = NoClient;
+			uint64_t RecordingSerial = 0;
 
 			// user://Automation/Out/, created and, on first use, pruned of the files of servers that are gone.
 			[[nodiscard]] Result<VfsPath> PrepareOutputDirectory();
@@ -123,6 +126,64 @@ namespace Engine {
 			[[nodiscard]] Status StopPlay() override
 			{
 				return MakeError(ErrorCode::Unsupported, "the Runtime's play session ends with the process: call session.shutdown");
+			}
+
+			[[nodiscard]] ScriptErrorStream* GetScriptErrors() const override
+			{
+				return m_Host->Specification.ScriptErrors ? m_Host->Specification.ScriptErrors : &m_Host->Session->GetScriptErrors();
+			}
+			[[nodiscard]] Status StartRecordingSession(const PlayStartOptions& options, bool restart) override
+			{
+				const auto& start = m_Host->Specification.StartRecordingSession;
+				if (!start)
+					return AutomationMethodContext::StartRecordingSession(options, restart);
+				ENGINE_TRY_ASSIGN(auto* session, start(options, restart));
+				if (!session)
+					return MakeError(ErrorCode::InvalidState, "recording restart returned no session");
+				m_Host->Session = session;
+				m_Host->RecordingOwner = GetRequest().Client;
+				m_Host->RecordingSerial = session->GetSerial();
+				GetEventLog().Append(Utils::MakePlayStateChangedEvent(session));
+				return {};
+			}
+			[[nodiscard]] Status RestartForReplay(const ReplayHeader& header) override
+			{
+				const auto& restart = m_Host->Specification.RestartForReplay;
+				if (!restart)
+					return AutomationMethodContext::RestartForReplay(header);
+				ENGINE_TRY_ASSIGN(auto* session, restart(header));
+				if (!session)
+					return MakeError(ErrorCode::InvalidState, "replay restart returned no session");
+				m_Host->Session = session;
+				m_Host->RecordingOwner = NoClient;
+				m_Host->RecordingSerial = 0;
+				GetEventLog().Append(Utils::MakePlayStateChangedEvent(session));
+				return {};
+			}
+			void ReleaseReplayInput(uint64_t serial) override
+			{
+				if (m_Host->Specification.ReleaseReplayInput)
+					m_Host->Specification.ReleaseReplayInput(serial);
+			}
+			[[nodiscard]] Result<ReplayHeader> DescribeReplayHeader() const override
+			{
+				const auto& describe = m_Host->Specification.DescribeReplayHeader;
+				return describe ? describe() : AutomationMethodContext::DescribeReplayHeader();
+			}
+			[[nodiscard]] Result<AssetRef<ReplayData>> LoadReplay(std::string_view path) override
+			{
+				const auto& load = m_Host->Specification.LoadReplay;
+				return load ? load(path) : AutomationMethodContext::LoadReplay(path);
+			}
+			[[nodiscard]] Result<std::string> ValidateReplayOutput(std::string_view path) const override
+			{
+				const auto& validate = m_Host->Specification.ValidateReplayOutput;
+				return validate ? validate(path) : AutomationMethodContext::ValidateReplayOutput(path);
+			}
+			[[nodiscard]] Result<std::string> WriteReplay(std::string_view path, const ReplayDocument& document) override
+			{
+				const auto& write = m_Host->Specification.WriteReplay;
+				return write ? write(path, document) : AutomationMethodContext::WriteReplay(path, document);
 			}
 
 			[[nodiscard]] std::string GetClientName(ClientId client) const override
@@ -362,6 +423,19 @@ namespace Engine {
 			return;
 		Calls->RemoveClient(client);
 		PlaySession& session = *Host.Session;
+		if (Host.RecordingOwner == client)
+		{
+			if (session.GetSerial() == Host.RecordingSerial)
+				if (auto* recorder = session.GetRecorder())
+					recorder->Cancel();
+			Host.RecordingOwner = NoClient;
+			Host.RecordingSerial = 0;
+		}
+		if (session.GetLockstepOwner() == client)
+		{
+			if (Host.Specification.ReleaseReplayInput)
+				Host.Specification.ReleaseReplayInput(session.GetSerial());
+		}
 		if (const Utils::DisconnectedLockstep released = Utils::ReleaseDisconnectedLockstep(session, client); released.Released)
 		{
 			if (released.StateChanged)

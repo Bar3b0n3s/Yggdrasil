@@ -9,20 +9,20 @@
 #include "Editor/Private/EditorHostThumbnails.h"
 #include "Editor/Private/EditorHostViewports.h"
 #include "EditorCore/Audio/AudioPreview.h"
-#include "EditorCore/Autosave/Autosave.h"
-#include "EditorCore/EditorActions.h"
-#include "EditorCore/EditorPreferences.h"
-#include "EditorCore/Inspector/ReflectedEditController.h"
-#include "EditorCore/Viewport/GizmoController.h"
 #include "EditorCore/Automation/AutomationServer.h"
 #include "EditorCore/Automation/BatchRunner.h"
 #include "EditorCore/Automation/RegisterMethods.h"
+#include "EditorCore/Autosave/Autosave.h"
+#include "EditorCore/EditorActions.h"
 #include "EditorCore/EditorCommandLine.h"
 #include "EditorCore/EditorContext.h"
+#include "EditorCore/EditorPreferences.h"
 #include "EditorCore/EngineAssetGenerators.h"
+#include "EditorCore/Inspector/ReflectedEditController.h"
 #include "EditorCore/Play/EditorPlayController.h"
 #include "EditorCore/Project/ProjectManager.h"
 #include "EditorCore/ShownSceneTracker.h"
+#include "EditorCore/Viewport/GizmoController.h"
 #include "Engine/App/CommandLine.h"
 #include "Engine/App/EngineContext.h"
 #include "Engine/App/ExitCode.h"
@@ -37,6 +37,7 @@
 #include "Engine/Core/EventLog.h"
 #include "Engine/Core/FatalError.h"
 #include "Engine/Core/FileSystem.h"
+#include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Core/Json/JsonWriter.h"
 #include "Engine/Core/Log.h"
 #include "Engine/Core/Utf8.h"
@@ -58,6 +59,7 @@
 #include "Engine/Scene/RenderExtraction.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/TransformSystem.h"
+#include "Engine/Scripting/ScriptApiRegistry.h"
 #include "Engine/Session/PlaySession.h"
 
 #include <imgui.h>
@@ -250,7 +252,7 @@ namespace Engine {
 		}
 
 		// --dump-reference <dir>: Methods.json and catalog.json (ADR 0008 decision 9), from every method but the test hooks.
-		[[nodiscard]] static Status DumpReference(const TypeRegistry& types, const std::filesystem::path& directory)
+		[[nodiscard]] static Status DumpReference(const TypeRegistry& types, const ScriptApiRegistry& scripts, const std::filesystem::path& directory)
 		{
 			MethodRegistry methods(types);
 			RegisterEditorMethods(methods, EditorMethodOptions{ .TestHooks = false });
@@ -258,7 +260,11 @@ namespace Engine {
 			ENGINE_TRY(FileSystem::CreateDirectories(directory));
 			ENGINE_TRY(WriteReferenceFile(directory / "Methods.json", methods.BuildMethodCatalog()));
 			ENGINE_TRY(WriteReferenceFile(directory / "catalog.json", methods.BuildToolCatalog()));
-			ENGINE_INFO("Wrote the method catalogue ({} methods) and the MCP tool catalogue", methods.GetMethods().size());
+			ENGINE_TRY_ASSIGN(const std::string definitions, scripts.GenerateDefinitions());
+			ENGINE_TRY_ASSIGN(const std::string documentation, scripts.GenerateDocumentation());
+			ENGINE_TRY(FileSystem::WriteFileAtomic(directory / "Engine.d.luau", std::as_bytes(std::span(definitions.data(), definitions.size())), { .KeepBackup = false }));
+			ENGINE_TRY(FileSystem::WriteFileAtomic(directory / "ScriptAPI.md", std::as_bytes(std::span(documentation.data(), documentation.size())), { .KeepBackup = false }));
+			ENGINE_INFO("Wrote the method catalogue ({} methods), MCP tools and script references", methods.GetMethods().size());
 			return {};
 		}
 
@@ -280,7 +286,7 @@ namespace Engine {
 
 		if (options.DumpReferenceDirectory.has_value())
 		{
-			ENGINE_TRY(Utils::DumpReference(app.GetContext().GetTypeRegistry(), *options.DumpReferenceDirectory));
+			ENGINE_TRY(Utils::DumpReference(app.GetContext().GetTypeRegistry(), app.GetContext().GetScriptApiRegistry(), *options.DumpReferenceDirectory));
 			app.RequestExit(ExitCode::Success);
 			return {};
 		}
@@ -399,6 +405,14 @@ namespace Engine {
 		{
 			std::vector<BatchRequest> requests = { BatchRequest{ .Method = "project.upgrade", .Params = {}, .Line = 0 } };
 			state.Batch = CreateScope<BatchRunner>(std::move(requests), BatchRunOptions{ .ClientName = "cli", .WriteTranscript = true });
+		}
+		else if (options.CheckScripts || options.RunTests)
+		{
+			Json params = Json::object();
+			if (options.RunTests && !options.TestFilter.empty())
+				params["filter"] = options.TestFilter;
+			std::vector<BatchRequest> requests = { BatchRequest{ .Method = options.CheckScripts ? "script.check" : "test.run", .Params = VariantValue(std::move(params)), .Line = 0 } };
+			state.Batch = CreateScope<BatchRunner>(std::move(requests), BatchRunOptions{ .ClientName = "cli", .WriteTranscript = false });
 		}
 		return {};
 	}
@@ -735,8 +749,7 @@ namespace Engine {
 				state.Views->SetGameInputFocused(false);
 				state.Gizmos->Cancel();
 			}
-		if (PlaySession* session = state.Editor->GetPlay().GetSession(); session && state.Views->IsGameInputFocused() && !session->IsLockstep())
-			session->GetInput().QueueDeviceEvent(event);
+		state.Editor->GetPlay().OnInputEvent(event, state.Views->IsGameInputFocused());
 	}
 
 	void EditorApp::OnShutdown()
@@ -791,11 +804,27 @@ namespace Engine {
 				}
 				else
 				{
+					bool passed = true;
+					if (state.Options.CheckScripts || state.Options.RunTests)
+					{
+						const auto& results = state.Batch->GetResults();
+						passed = !results.empty() && JsonReader(results.back()).ReadMember<bool>("passed").value_or(false);
+						if (!results.empty())
+						{
+							const auto text = JsonWriter::Write(results.back(), JsonStyle::Pretty);
+							if (text)
+								ENGINE_INFO("{}", *text);
+						}
+					}
 					ENGINE_INFO("The {} run completed {} request(s)", state.Options.Upgrade ? "upgrade" : "batch", state.Batch->GetResults().size());
-					RequestExit(ExitCode::Success);
+					RequestExit(passed ? ExitCode::Success : ExitCode::Failed);
 				}
 			}
 		}
+
+		// UI/RPC handlers and pending-operation polls have released all borrowed session/VM pointers.
+		if (state.Editor)
+			state.Editor->GetPlay().OnSafePoint();
 
 		const Status services = UpdateHostServices();
 		if (!services)

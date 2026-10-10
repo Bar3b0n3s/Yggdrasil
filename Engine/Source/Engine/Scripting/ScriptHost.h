@@ -93,7 +93,9 @@ namespace Engine {
 
 		// Requests never destroy their own running VM. Scene.Load is consumed at the end of the frame, after protected
 		// calls unwind; it starts a fresh VM with the parameters and preserves the session's clock and replay owner.
-		[[nodiscard]] virtual Status RequestSceneLoad(AssetHandle scene, const Json& parameters) = 0;
+		// Takes ownership of the detached parameters. Callers and hosts move the tree into pending storage so accepted
+		// MaxJsonDepth values never require a recursive JSON copy at this boundary.
+		[[nodiscard]] virtual Status RequestSceneLoad(AssetHandle scene, Json parameters) = 0;
 		virtual void RequestQuit(int32_t exitCode) = 0;
 		virtual void RequestPause() = 0;
 		// Publish to Script logging, EventLog and host observability. fatal means second/hard memory breach; stop safely.

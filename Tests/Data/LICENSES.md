@@ -7,6 +7,10 @@ produces them (AGENTS.md "Tests"), so each one can be reproduced and checked byt
 A fixture of third-party origin (downloaded or derived from someone else's work) needs a section here before it is
 committed: its source, version or commit, license, checksum and the files it covers (AGENTS.md "Vendored code").
 
+## M13 Luau fixtures (`TypeChecker/`)
+
+All files in `Tests/Data/TypeChecker/` are original first-party test data under the repository's code license. `Tests/Data/Generate/MakeScriptFixtures.py` generates them, including expanded copies of the first-party script templates. Run the generator with `--check` to verify the committed bytes. No third-party scripts or recordings are included.
+
 ## Generated glTF fixtures (`Assets/Gltf/`)
 
 | | |

@@ -17,19 +17,19 @@
 #include <vector>
 
 // Process-level initialization (Architecture §4.1 level 1, §3 rule 5). GLFW, the logger registry, the profiler, the
-// crash handler, Jolt's process-level state (PhysicsEngine, M11), the Vulkan loader and later Luau's flags are
+// crash handler, Luau's flags and assert hook, Jolt's process-level state and the Vulkan loader are
 // process-global, so exactly one ProcessContext initializes them, created first by RunApplication or the Tests main and
 // destroyed last, after every EngineContext.
 
 namespace Engine {
 
-	// The process-level steps, in initialization order. Teardown runs them in reverse. Later milestones insert theirs at
-	// the places §4.1 gives: Luau fast flags (M13) after CrashHandler, before Physics.
+	// The process-level steps, in initialization order (§4.1). Teardown runs them in reverse.
 	enum class ProcessContextStep : uint8_t
 	{
 		Log,          // Log::Initialize: console sink and the rotating file <UserData>/<AppName>/Logs/<exe>.log (§4.4)
 		Profiler,     // Profiler::Initialize (ADR 0003 decision 6)
 		CrashHandler, // CrashHandler::Install with <UserData>/<AppName>/Crashes, and the fatal-error handler (below)
+		Scripting,    // InitializeScriptingRuntime: released flags and assert hook, before any VM or import worker
 		Physics,      // PhysicsEngine::Initialize with ProcessContextSpecification::Physics (§9.1; M11)
 		VulkanLoader, // VulkanDispatch::Initialize (§8.1); only when VulkanLoaderPolicy is not None
 		Glfw          // GlfwLibrary::Initialize with the chosen platform, handing GLFW the loader (glfwInitVulkanLoader)
@@ -183,7 +183,7 @@ namespace Engine {
 		bool m_IsVulkanLoaderAvailable = false;
 	};
 
-	// "Log", "Profiler", "CrashHandler", "Physics", "VulkanLoader" or "Glfw".
+	// "Log", "Profiler", "CrashHandler", "Scripting", "Physics", "VulkanLoader" or "Glfw".
 	[[nodiscard]] std::string_view ProcessContextStepToString(ProcessContextStep step);
 
 	// The build description written into crash reports and the startup log line: "<Debug|Release|Dist>

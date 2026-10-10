@@ -250,7 +250,8 @@ namespace Engine {
 					{
 						Json schema = Json::object();
 						schema["type"] = "array";
-						schema["items"] = TypeSchema(*type.GetElement(), nullptr);
+						const FieldInfo* elementSchema = type.GetElementSchema();
+						schema["items"] = TypeSchema(*type.GetElement(), elementSchema != nullptr ? &elementSchema->GetMeta() : nullptr);
 						return schema;
 					}
 					case FieldType::Struct:

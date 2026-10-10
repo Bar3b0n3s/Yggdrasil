@@ -4,6 +4,7 @@
 #include "Engine/Core/Error.h"
 #include "Engine/Reflection/Value.h"
 #include "Engine/Scripting/ScriptProxy.h"
+#include "Engine/Scripting/ScriptReference.h"
 
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
@@ -15,12 +16,18 @@
 namespace Engine {
 
 	class FieldInfo;
+	class ScriptEngine;
 	struct ScriptCall;
+	struct ScriptError;
 
-	// Architecture §11.4 explicitly names Lua helpers. The proposed namespace exception is limited to this facade and
+	// Architecture §11.4 explicitly names Lua helpers. The ADR 0019 namespace exception is limited to this facade and
 	// its private VM entry points; it does not permit exposing Luau types through public headers.
 	namespace Lua {
 
+		// Borrowed only for this native entry; null for load-time/hostless execution and reload candidate evaluation.
+		[[nodiscard]] ScriptEngine* GetEngine(ScriptCall& call);
+		// Copies the authenticated opaque task handle. Never exposes a VM reference integer or native address.
+		[[nodiscard]] ScriptReference CheckTaskHandle(ScriptCall& call, int index);
 		// Checks an existing stack slot without popping it. Only the explicit specializations below are supported.
 		// Wrong types/ranges, NaN and +/-Inf raise a located Luau error with the active member and argument index, e.g.
 		// "Entity:AddComponent: argument #2 expected string, got number". No string/number or boolean coercion. Integers
@@ -105,12 +112,19 @@ namespace Engine {
 		// Reflection-driven recursive marshalling; conversion does not write a component or increment proxy counters.
 		// Field validation/setters still run at WriteField. Array/map/struct/Variant schema traversal preserves canonical
 		// order, detects cycles, and rejects unsupported userdata/functions/threads instead of leaking pointers.
+		// One native allowance covers the entire conversion, including all aliases and resolved/unresolved Variants:
+		// min(4 MiB, VM soft limit), charged 256 bytes/value, 256/entry and 4/string or key byte before copying.
+		// Admission polls the inherited safety deadline; rejection raises a located error before any host write.
 		[[nodiscard]] Value CheckValue(ScriptCall& call, int index, const FieldInfo& field);
 		void PushValue(ScriptCall& call, const Value& value, const FieldInfo& field);
 		// Raises a located Luau error. The int return permits `return Lua::RaiseError(...)` in native callbacks; a real
 		// implementation never returns. Error overload preserves its context/hint/location. No first-party throw/catch.
 		int RaiseError(ScriptCall& call, std::string_view message);
 		int RaiseError(ScriptCall& call, const Error& error);
+		// Explicit child-error forwarding preserves its owned kind/location/trace/context. Raises an authenticated
+		// VM-owned value; tostring gives the message, error(value) rethrows it, unrelated failures never inherit it.
+		// Use inside a protected native entry only, after all child stack-restoration scopes have ended.
+		int RaiseError(ScriptCall& call, const ScriptError& error);
 
 	}
 

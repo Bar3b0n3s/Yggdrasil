@@ -7,7 +7,9 @@
 #include "Engine/AssetPipeline/Importers/GltfImporter.h"
 #include "Engine/AssetPipeline/Importers/MaterialImporter.h"
 #include "Engine/AssetPipeline/Importers/PrefabImporter.h"
+#include "Engine/AssetPipeline/Importers/ReplayImporter.h"
 #include "Engine/AssetPipeline/Importers/SceneImporter.h"
+#include "Engine/AssetPipeline/Importers/ScriptImporter.h"
 #include "Engine/AssetPipeline/Importers/SoundEffectImporter.h"
 #include "Engine/AssetPipeline/Importers/TextureImporter.h"
 #include "Engine/Core/Assert.h"
@@ -109,6 +111,8 @@ namespace Engine {
 		// M12 (Docs/Decisions/0015-m12-decisions.md).
 		registry.Register(CreateScope<AudioImporter>());
 		registry.Register(CreateScope<SoundEffectImporter>());
+		registry.Register(CreateScope<ScriptImporter>());
+		registry.Register(CreateScope<ReplayImporter>());
 	}
 
 	void RegisterAssetPipelineTypes(TypeRegistry& registry)

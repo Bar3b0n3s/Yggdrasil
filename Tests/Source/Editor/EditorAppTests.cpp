@@ -10,6 +10,7 @@
 #include "Engine/Platform/GlfwLibrary.h"
 #include "Engine/Platform/Process.h"
 #include "Engine/Platform/ProjectLock.h"
+#include "Engine/Project/ProjectSerializer.h"
 #include "Support/EditorTestFixture.h"
 #include "Support/HeadlessGpuFixture.h"
 #include "Support/TempDirectory.h"
@@ -79,6 +80,55 @@ namespace Engine {
 
 	TEST_SUITE("Editor")
 	{
+		TEST_CASE("EditorApp: --check-scripts exits with the static diagnostic result")
+		{
+			Test::EditorTestFixture fixture("CheckScriptsCli");
+			const auto projectFile = CreateProcessTestProject(fixture, "CheckScripts");
+			const auto script = projectFile.parent_path() / "Assets/Scripts/Check.luau";
+			WriteProcessTestFile(script, "--!strict\nlocal value: number = 3\nreturn value\n");
+			const std::vector<std::string> arguments{ "--headless", "--renderer", "none", "--project", Test::PathToUtf8(projectFile), "--check-scripts" };
+			const auto passed = RunEditor(fixture.GetDirectory(), arguments, std::chrono::seconds(120));
+			REQUIRE(passed);
+			CHECK_MESSAGE(passed->ExitCode == ExitCode::Success, passed->StandardError);
+			WriteProcessTestFile(script, "--!strict\nlocal value: number = \"wrong\"\nreturn value\n");
+			const auto failed = RunEditor(fixture.GetDirectory(), arguments, std::chrono::seconds(120));
+			REQUIRE(failed);
+			CHECK_MESSAGE(failed->ExitCode == ExitCode::Failed, failed->StandardError);
+			CHECK(failed->StandardError.contains("Check.luau"));
+		}
+
+		TEST_CASE("EditorApp: --run-tests honours the case filter and exits with the suite result")
+		{
+			Test::EditorTestFixture fixture("RunTestsCli");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			const auto projectFile = fixture.GetEditor().GetProject().GetProjectFile();
+			ProjectSettings settings = fixture.GetEditor().GetProject().GetSettings();
+			TestSuiteSettings suite;
+			suite.Script = "Assets/Tests/Cli.test.luau";
+			suite.Scene = "Assets/Scenes/Main.scene";
+			settings.Testing.Suites.push_back(std::move(suite));
+			const auto project = ProjectSerializer::SaveToString(settings, fixture.GetEngine().GetTypeRegistry());
+			REQUIRE(project);
+			REQUIRE(fixture.GetEditor().CloseProject());
+			WriteProcessTestFile(projectFile, *project);
+			WriteProcessTestFile(projectFile.parent_path() / "Assets/Tests/Cli.test.luau", R"(
+return Test.Suite("Cli", function()
+	Test.Case("passes", function() Test.WaitTicks(2) Test.Expect(true) end)
+	Test.Case("fails", function() Test.Expect(false, "CLI failure") end)
+end)
+)");
+			std::vector<std::string> arguments{ "--headless", "--renderer", "none", "--project", Test::PathToUtf8(projectFile), "--run-tests" };
+			const auto failed = RunEditor(fixture.GetDirectory(), arguments, std::chrono::seconds(120));
+			REQUIRE(failed);
+			CHECK_MESSAGE(failed->ExitCode == ExitCode::Failed, failed->StandardError);
+			CHECK(failed->StandardError.contains("CLI failure"));
+			arguments.insert(arguments.end(), { "--filter", "Cli/passes" });
+			const auto passed = RunEditor(fixture.GetDirectory(), arguments, std::chrono::seconds(120));
+			REQUIRE(passed);
+			CHECK_MESSAGE(passed->ExitCode == ExitCode::Success, passed->StandardError);
+		}
+
 		TEST_CASE("EditorApp: first save of a recovered untitled scene removes only its generation")
 		{
 			Test::EditorTestFixture fixture("HostUntitledRecovery");
@@ -139,6 +189,13 @@ namespace Engine {
 			const Result<std::string> committed = FileSystem::ReadText(Test::GetRepositoryRoot() / "Tools/MCP/catalog.json");
 			REQUIRE(committed.has_value());
 			CHECK(*committed == *catalog);
+			for (const std::string_view file : { "Engine.d.luau", "ScriptAPI.md" })
+			{
+				const auto generated = FileSystem::ReadText(out / file);
+				REQUIRE(generated);
+				CHECK(generated->contains("Script"));
+				CHECK(generated->contains("OnFixedUpdate"));
+			}
 		}
 
 		TEST_CASE("EditorApp: a second editor on a locked project exits with code 3")

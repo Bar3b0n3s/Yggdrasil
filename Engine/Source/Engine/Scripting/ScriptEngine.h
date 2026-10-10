@@ -11,6 +11,7 @@
 #include "Engine/Scripting/ScriptTestHost.h"
 
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <span>
 #include <string>
@@ -43,6 +44,9 @@ namespace Engine {
 		// Edit-context eval owns its own VM and borrowed edit-scene host. All host writes, including random-stream
 		// advancement, are rejected before a side effect. Local Color/Quat/tables/local Random values remain mutable.
 		bool ReadOnly = false;
+		// Optional safety clock forwarded to Sandbox; empty uses lua_clock. Must be finite, nonnegative and
+		// monotonic, with captures valid for the engine lifetime. Never used as simulation time.
+		std::function<double()> ClockSeconds{};
 	};
 
 	struct ScriptInstanceInfo

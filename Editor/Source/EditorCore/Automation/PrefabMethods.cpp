@@ -10,6 +10,7 @@
 #include "EditorCore/Private/EditorFileError.h"
 #include "EditorCore/Private/PrefabInstances.h"
 #include "Engine/Asset/AssetMetadata.h"
+#include "Engine/Asset/ScriptData.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/AssetPipeline/Importers/PrefabImporter.h"
 #include "Engine/Automation/Protocol/MethodRegistry.h"
@@ -35,8 +36,6 @@
 namespace Engine {
 
 	namespace {
-
-		constexpr PrefabOptions NoSchemas{ .Schemas = nullptr };
 
 		// The instance root an "instance" param names. Errors: those of ResolveEntity; InvalidArgument at "/instance" for an
 		// entity that is not an instance root.
@@ -193,6 +192,8 @@ namespace Engine {
 			ENGINE_TRY(Utils::RefreshAssets(editor));
 			VirtualFileSystem& vfs = editor.GetVfs();
 			ENGINE_TRY(Utils::CheckAssetPathFree(vfs, path, "/path"));
+			ENGINE_TRY_ASSIGN(const auto schemas, editor.GetScriptSchemaSnapshot());
+			const PrefabOptions prefabOptions{ .Schemas = schemas.get() };
 
 			// Nested instances are flattened (§5.5); the entities keep their ids as prefab-local ids.
 			const std::string name(path.GetStem());
@@ -231,7 +232,7 @@ namespace Engine {
 				SceneEdit edit(editor, std::format("Replace '{}' With a Prefab Instance", entity.GetName()));
 				scene->DestroyEntity(entity);
 				LoadReport report;
-				ENGINE_TRY_ASSIGN(const Entity instance, PrefabInstantiator::Instantiate(*scene, prefab, { .PrefabHandle = metadata.Handle, .RootID = rootID, .Parent = parent, .SiblingIndex = siblingIndex, .RootTransform = transform }, NoSchemas, report));
+				ENGINE_TRY_ASSIGN(const Entity instance, PrefabInstantiator::Instantiate(*scene, prefab, { .PrefabHandle = metadata.Handle, .RootID = rootID, .Parent = parent, .SiblingIndex = siblingIndex, .RootTransform = transform }, prefabOptions, report));
 				Utils::LogLoadDiagnostics(result.Prefab.Path, report);
 				result.Instance = context.MakeEntitySummary(instance);
 				ENGINE_TRY_ASSIGN(const uint64_t editIndex, edit.Commit());
@@ -262,6 +263,8 @@ namespace Engine {
 				return std::unexpected(Utils::MakeParamError(ErrorCode::InvalidArgument, "/name", "an entity name must not be empty"));
 
 			EditorAssetManager& assets = editor.GetAssets();
+			ENGINE_TRY_ASSIGN(const auto schemas, editor.GetScriptSchemaSnapshot());
+			const PrefabOptions prefabOptions{ .Schemas = schemas.get() };
 			SceneEdit edit(editor, std::format("Instantiate Prefab '{}'", assets.GetReferencePath(handle)));
 			LoadReport report;
 			const PrefabInstantiateOptions instance{ .PrefabHandle = handle,
@@ -269,7 +272,7 @@ namespace Engine {
 				.Parent = parent,
 				.SiblingIndex = context.HasParam("index") ? std::optional<uint32_t>(params.Index) : std::nullopt,
 				.RootTransform = std::nullopt };
-			Result<Entity> created = InstantiatePrefabAsset(*scene, assets, instance, NoSchemas, report);
+			Result<Entity> created = InstantiatePrefabAsset(*scene, assets, instance, prefabOptions, report);
 			if (!created)
 			{
 				if (created.error().GetCode() == ErrorCode::NotFound)
@@ -309,7 +312,9 @@ namespace Engine {
 					"create a prefab from the instance with prefab.create, or unpack it with prefab.unpack"));
 			}
 			const VfsPath source = record->SourcePath;
-			ENGINE_TRY_ASSIGN(const Prefab applied, PrefabInstantiator::ApplyOverrides(root, current, NoSchemas));
+			ENGINE_TRY_ASSIGN(const auto schemas, editor.GetScriptSchemaSnapshot());
+			const PrefabOptions prefabOptions{ .Schemas = schemas.get() };
+			ENGINE_TRY_ASSIGN(const Prefab applied, PrefabInstantiator::ApplyOverrides(root, current, prefabOptions));
 			ENGINE_TRY_ASSIGN(const std::string text, applied.SaveToString());
 			Result<std::string> before = editor.GetVfs().ReadText(source);
 			if (!before)
@@ -353,15 +358,17 @@ namespace Engine {
 			}
 			ENGINE_TRY(Utils::RefreshAssets(editor));
 			ENGINE_TRY_ASSIGN(const Prefab prefab, LoadInstancePrefab(editor, *scene, root));
+			ENGINE_TRY_ASSIGN(const auto schemas, editor.GetScriptSchemaSnapshot());
+			const PrefabOptions prefabOptions{ .Schemas = schemas.get() };
 
 			// The overrides the instance has now, derived by diffing (ADR 0006 decision 17), whatever was recorded before.
-			ENGINE_TRY_ASSIGN(const std::vector<PrefabOverride> overrides, PrefabInstantiator::ComputeOverrides(root, prefab, NoSchemas));
+			ENGINE_TRY_ASSIGN(const std::vector<PrefabOverride> overrides, PrefabInstantiator::ComputeOverrides(root, prefab, prefabOptions));
 			SceneEdit edit(editor, std::format("Revert Prefab Instance '{}'", root.GetName()));
 			LoadReport report;
 			size_t removed = overrides.size();
 			if (!selective)
 			{
-				ENGINE_TRY(PrefabInstantiator::Revert(*scene, root, prefab, NoSchemas, report));
+				ENGINE_TRY(PrefabInstantiator::Revert(*scene, root, prefab, prefabOptions, report));
 			}
 			else
 			{
@@ -380,7 +387,7 @@ namespace Engine {
 				{
 					instance.Overrides = std::move(kept);
 				});
-				ENGINE_TRY(PrefabInstantiator::UpdateInstance(*scene, root, prefab, NoSchemas, report));
+				ENGINE_TRY(PrefabInstantiator::UpdateInstance(*scene, root, prefab, prefabOptions, report));
 			}
 			Utils::LogLoadDiagnostics(scene->GetEntityPath(root), report);
 			ENGINE_TRY_ASSIGN(const uint64_t undoIndex, edit.Commit());

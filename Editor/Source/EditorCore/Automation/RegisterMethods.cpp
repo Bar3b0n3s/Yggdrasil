@@ -14,6 +14,8 @@
 #include "EditorCore/Automation/ProjectMethods.h"
 #include "EditorCore/Automation/SceneMethods.h"
 #include "EditorCore/Automation/ScreenshotMethods.h"
+#include "EditorCore/Automation/ScriptMethods.h"
+#include "EditorCore/Automation/TestMethods.h"
 #include "EditorCore/Automation/ViewportMethods.h"
 #include "EditorCore/Automation/ViewportPickMethods.h"
 #include "EditorCore/Project/ProjectValidator.h"
@@ -47,6 +49,8 @@ namespace Engine {
 		RegisterPrefabMethodTypes(registry);
 		RegisterExportMethodTypes(registry);
 		RegisterDebugMethodTypes(registry);
+		RegisterEditorScriptMethodTypes(registry);
+		RegisterTestMethodTypes(registry);
 	}
 
 	void RegisterEditorMethods(MethodRegistry& methods, const EditorMethodOptions& options)
@@ -65,6 +69,8 @@ namespace Engine {
 		RegisterPrefabMethods(methods);
 		RegisterExportMethods(methods);
 		RegisterSharedMethods(methods, AutomationHost::Editor);
+		RegisterEditorScriptMethods(methods);
+		RegisterTestMethods(methods);
 		if (options.TestHooks)
 			RegisterDebugMethods(methods);
 	}

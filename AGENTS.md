@@ -26,7 +26,7 @@ A production-grade C++23 3D game engine with an editor, a standalone runtime and
 | `Projects/` | FeatureTest and the demo games (M14+) |
 | `Vendor/<Lib>/` | Third-party code, each with its own `premake5.lua` and `VENDOR.md` |
 | `Docs/` | Authoritative docs, `ReviewChecklist.md`, `Decisions/` (ADRs and approvals), `Reference/` (generated) |
-| `.claude/skills/` | Agent skills: `build-and-test`, `commit-review` and `add-automation-method`; more land with their milestones |
+| `.claude/skills/` | Agent skills: `build-and-test`, `commit-review`, `add-automation-method`, `add-script-api` and `luau-gameplay` |
 | `bin/`, `bin-int/` | Build output and intermediates (gitignored) |
 
 ## Authoritative documents
@@ -63,6 +63,7 @@ Run every command from the repository root. Windows uses `python`; Linux and mac
 | Lint | `python Scripts/Lint.py` (`--self-test` proves every seeded fixture in `Tests/Data/Lint/` still fails; `--mode regex` forces the checkers that do not need clang-tidy and clang-query; `--allow-contract-stubs` is contract mode) |
 | Check build configuration (ABI defines, Jolt instruction set, FP model) | `python Scripts/CheckBuildConfig.py` |
 | Compile shaders only | `python Scripts/CompileShaders.py --config Debug` |
+| Generate scripting and automation references | `python Scripts/GenerateDocs.py --config Debug` (build the editor first; `--check` compares without rewriting) |
 | Commit gate | `python Scripts/PreCommit.py` (`--contract` only for a milestone's contract commit; `--gpu-optional` on a machine without a usable Vulkan device) |
 | Full CI | `python Scripts/CI.py` (`--stages build,unit` for a subset; `--contract` as for PreCommit; `--gpu-optional` lets the gpu, golden and automation stages pass without a device, as on the hosted Windows and macOS runners, and makes the bake stage bake without the built-in environments (`--renderer none`) and end as a warning) |
 

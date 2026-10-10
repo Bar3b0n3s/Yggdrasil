@@ -66,7 +66,9 @@ class RuntimeRenderStatsTests(AutomationTestCase):
         self.assertEqual(stats["entities"], 3)
         self.assertEqual(stats["bodies"], 0)
         self.assertEqual(stats["voices"], 0)
-        self.assertFalse(stats["scriptAvailable"])
+        self.assertTrue(stats["scriptAvailable"])
+        self.assertGreater(stats["scriptHeapBytes"], 0)
+        self.assertLessEqual(stats["scriptHeapBytes"], stats["scriptHardLimitBytes"])
         self.assertEqual(stats["memoryAllocationCount"], 0)
         self.assertEqual(stats["maxMemoryAllocationCount"], 0)
         view = stats["views"][0]

@@ -32,11 +32,13 @@ namespace Engine {
 		constexpr std::string_view ManifestExtension = ".import";
 
 		// The members of a manifest and of its records, in canonical order (AssetCache.h).
-		constexpr std::string_view ManifestMembers[] = { "Format", "Version", "Artifacts", "Dependencies", "Diagnostics", "Reads", "Lookups" };
+		constexpr std::string_view ManifestMembers[] = { "Format", "Version", "Artifacts", "Dependencies", "Diagnostics", "Reads", "Lookups", "ScriptCheck" };
 		constexpr std::string_view ArtifactMembers[] = { "Handle", "Type", "Key" };
 		constexpr std::string_view DiagnosticMembers[] = { "Severity", "Code", "Path", "Message", "Hint", "Subject" };
 		constexpr std::string_view ReadMembers[] = { "Path", "XXH64" };
-		constexpr std::string_view LookupMembers[] = { "Path", "Handle", "Type" };
+		constexpr std::string_view LookupMembers[] = { "Path", "Handle", "Type", "RequestedHandle", "FoundPath", "Owner" };
+		constexpr std::string_view ScriptCheckMembers[] = { "Performed", "EnvironmentHash", "SourceHash", "Diagnostics" };
+		constexpr std::string_view ScriptDiagnosticMembers[] = { "Severity", "Code", "File", "Line", "Column", "Message", "EndLine", "EndColumn" };
 
 		// One artifact record of a manifest: its bytes are in <root>/<Handle>/<key>.bin.
 		struct ManifestArtifact
@@ -54,6 +56,7 @@ namespace Engine {
 			std::vector<AssetDiagnostic> Diagnostics{};
 			std::vector<ImportDependencyRead> Reads{};
 			std::vector<ImportAssetLookup> Lookups{};
+			std::optional<ScriptImportCheck> ScriptCheck{};
 		};
 
 	}
@@ -172,9 +175,58 @@ namespace Engine {
 					writer.WriteNull();
 				writer.WriteKey("Type");
 				WriteLookupType(writer, lookup.Found);
+				if (lookup.RequestedHandle.IsValid())
+				{
+					writer.WriteKey("RequestedHandle");
+					writer.WriteUUID(lookup.RequestedHandle);
+					writer.WriteKey("FoundPath");
+					if (lookup.Found.has_value())
+						writer.WriteString(lookup.Found->SourcePath.ToString());
+					else
+						writer.WriteNull();
+					writer.WriteKey("Owner");
+					writer.WriteUUID(lookup.Found.has_value() ? lookup.Found->Owner : AssetHandle());
+				}
 				writer.EndObject();
 			}
 			writer.EndArray();
+			if (import.ScriptCheck.has_value())
+			{
+				const ScriptImportCheck& check = *import.ScriptCheck;
+				writer.WriteKey("ScriptCheck");
+				writer.BeginObject();
+				writer.WriteKey("Performed");
+				writer.WriteBool(check.Performed);
+				writer.WriteKey("EnvironmentHash");
+				writer.WriteString(FormatHex(check.EnvironmentHash));
+				writer.WriteKey("SourceHash");
+				writer.WriteString(FormatHex(check.SourceHash));
+				writer.WriteKey("Diagnostics");
+				writer.BeginArray();
+				for (const ScriptDiagnostic& diagnostic : check.Diagnostics)
+				{
+					writer.BeginObject();
+					writer.WriteKey("Severity");
+					writer.WriteString(SeverityToString(diagnostic.Severity));
+					writer.WriteKey("Code");
+					writer.WriteString(diagnostic.Code);
+					writer.WriteKey("File");
+					writer.WriteString(diagnostic.File);
+					writer.WriteKey("Line");
+					writer.WriteUInt(diagnostic.Line);
+					writer.WriteKey("Column");
+					writer.WriteUInt(diagnostic.Column);
+					writer.WriteKey("Message");
+					writer.WriteString(diagnostic.Message);
+					writer.WriteKey("EndLine");
+					writer.WriteUInt(diagnostic.EndLine);
+					writer.WriteKey("EndColumn");
+					writer.WriteUInt(diagnostic.EndColumn);
+					writer.EndObject();
+				}
+				writer.EndArray();
+				writer.EndObject();
+			}
 			writer.EndObject();
 			return writer.Finish();
 		}
@@ -294,18 +346,47 @@ namespace Engine {
 			ENGINE_TRY(RejectUnknownMembers(element, LookupMembers));
 			ImportAssetLookup lookup;
 			ENGINE_TRY_ASSIGN(const JsonReader path, element.GetMember("Path"));
-			ENGINE_TRY_ASSIGN(lookup.Path, ReadPath(path));
+			const std::optional<JsonReader> requested = element.FindMember("RequestedHandle");
+			if (requested.has_value())
+			{
+				ENGINE_TRY_ASSIGN(lookup.RequestedHandle, ReadValidHandle(*requested));
+				ENGINE_TRY_ASSIGN(const std::string pathText, path.ReadString());
+				if (!pathText.empty())
+					return std::unexpected(path.MakeLocatedError(ErrorCode::Validation, "a handle lookup has an empty query path"));
+			}
+			else
+			{
+				ENGINE_TRY_ASSIGN(lookup.Path, ReadPath(path));
+				const auto foundPath = element.FindMember("FoundPath");
+				const auto owner = element.FindMember("Owner");
+				if (foundPath.has_value() || owner.has_value())
+					return std::unexpected(element.MakeLocatedError(ErrorCode::Validation, "handle lookup members require RequestedHandle"));
+			}
 			ENGINE_TRY_ASSIGN(const JsonReader handle, element.GetMember("Handle"));
 			ENGINE_TRY_ASSIGN(const JsonReader type, element.GetMember("Type"));
 			if (handle.IsNull() != type.IsNull())
 				return std::unexpected(element.MakeLocatedError(ErrorCode::Validation, "a lookup has either both a handle and a type or neither"));
-			if (handle.IsNull())
-				return lookup;
-
-			// What FindAsset found at exactly this path; the owner of a dependency is not recorded.
+			// Legacy path records omit the owner; handle records preserve the complete found entry.
 			ImportAssetLookupEntry found;
 			found.SourcePath = lookup.Path;
+			if (lookup.RequestedHandle.IsValid())
+			{
+				ENGINE_TRY_ASSIGN(const JsonReader foundPath, element.GetMember("FoundPath"));
+				ENGINE_TRY_ASSIGN(found.Owner, element.ReadMember<UUID>("Owner"));
+				if (foundPath.IsNull() != handle.IsNull())
+					return std::unexpected(foundPath.MakeLocatedError(ErrorCode::Validation, "a handle lookup has a readable path exactly when it found an asset"));
+				if (!foundPath.IsNull())
+				{
+					ENGINE_TRY_ASSIGN(found.SourcePath, ReadPath(foundPath));
+				}
+				else if (found.Owner.IsValid())
+					return std::unexpected(element.MakeLocatedError(ErrorCode::Validation, "a missing lookup has no owner"));
+			}
+			if (handle.IsNull())
+				return lookup;
 			ENGINE_TRY_ASSIGN(found.Handle, ReadValidHandle(handle));
+			if (lookup.RequestedHandle.IsValid() && lookup.RequestedHandle != found.Handle)
+				return std::unexpected(handle.MakeLocatedError(ErrorCode::Validation, "a handle lookup must find the requested handle"));
 			ENGINE_TRY_ASSIGN(const std::string typeName, type.ReadString());
 			if (typeName == AssetMetadata::DependencyTypeName)
 			{
@@ -318,6 +399,39 @@ namespace Engine {
 			}
 			lookup.Found = std::move(found);
 			return lookup;
+		}
+
+		static Result<ScriptDiagnostic> ReadScriptDiagnostic(const JsonReader& element)
+		{
+			ENGINE_TRY(element.ExpectType(JsonType::Object));
+			ENGINE_TRY(RejectUnknownMembers(element, ScriptDiagnosticMembers));
+			ScriptDiagnostic diagnostic;
+			ENGINE_TRY_ASSIGN(const std::string severity, element.ReadMember<std::string>("Severity"));
+			if (severity != "Error" && severity != "Warning")
+				return std::unexpected(element.MakeLocatedError(ErrorCode::Validation, "invalid script diagnostic severity"));
+			diagnostic.Severity = severity == "Error" ? DiagnosticSeverity::Error : DiagnosticSeverity::Warning;
+			ENGINE_TRY_ASSIGN(diagnostic.Code, element.ReadMember<std::string>("Code"));
+			ENGINE_TRY_ASSIGN(diagnostic.File, element.ReadMember<std::string>("File"));
+			ENGINE_TRY_ASSIGN(diagnostic.Line, element.ReadMember<uint32_t>("Line"));
+			ENGINE_TRY_ASSIGN(diagnostic.Column, element.ReadMember<uint32_t>("Column"));
+			ENGINE_TRY_ASSIGN(diagnostic.Message, element.ReadMember<std::string>("Message"));
+			ENGINE_TRY_ASSIGN(diagnostic.EndLine, element.ReadMember<uint32_t>("EndLine"));
+			ENGINE_TRY_ASSIGN(diagnostic.EndColumn, element.ReadMember<uint32_t>("EndColumn"));
+			return diagnostic;
+		}
+
+		static Result<ScriptImportCheck> ReadScriptCheck(const JsonReader& reader)
+		{
+			ENGINE_TRY(reader.ExpectType(JsonType::Object));
+			ENGINE_TRY(RejectUnknownMembers(reader, ScriptCheckMembers));
+			ScriptImportCheck check;
+			ENGINE_TRY_ASSIGN(check.Performed, reader.ReadMember<bool>("Performed"));
+			ENGINE_TRY_ASSIGN(const JsonReader environment, reader.GetMember("EnvironmentHash"));
+			ENGINE_TRY_ASSIGN(check.EnvironmentHash, ReadHex(environment));
+			ENGINE_TRY_ASSIGN(const JsonReader source, reader.GetMember("SourceHash"));
+			ENGINE_TRY_ASSIGN(check.SourceHash, ReadHex(source));
+			ENGINE_TRY_ASSIGN(check.Diagnostics, ReadArrayMember<ScriptDiagnostic>(reader, "Diagnostics", &ReadScriptDiagnostic));
+			return check;
 		}
 
 		// Reads a manifest strictly: a cache entry is engine-written, so anything unexpected means corruption. `source` is the
@@ -349,6 +463,11 @@ namespace Engine {
 			ENGINE_TRY_ASSIGN(manifest.Diagnostics, ReadArrayMember<AssetDiagnostic>(root, "Diagnostics", readDiagnostic));
 			ENGINE_TRY_ASSIGN(manifest.Reads, ReadArrayMember<ImportDependencyRead>(root, "Reads", &ReadManifestRead));
 			ENGINE_TRY_ASSIGN(manifest.Lookups, ReadArrayMember<ImportAssetLookup>(root, "Lookups", &ReadManifestLookup));
+			const std::optional<JsonReader> check = root.FindMember("ScriptCheck");
+			if (check.has_value())
+			{
+				ENGINE_TRY_ASSIGN(manifest.ScriptCheck, ReadScriptCheck(*check));
+			}
 			return manifest;
 		}
 
@@ -517,6 +636,7 @@ namespace Engine {
 		import.Import.Diagnostics = std::move(manifest->Diagnostics);
 		import.Reads = std::move(manifest->Reads);
 		import.Lookups = std::move(manifest->Lookups);
+		import.ScriptCheck = std::move(manifest->ScriptCheck);
 		return std::optional<CachedImport>(std::move(import));
 	}
 
@@ -659,10 +779,9 @@ namespace Engine {
 		return m_State->Root;
 	}
 
-	bool IsScriptCheckCurrent(const std::optional<ScriptImportCheck>& /*check*/, const IScriptDiagnosticsProvider* /*provider*/)
+	bool IsScriptCheckCurrent(const std::optional<ScriptImportCheck>& check, const IScriptDiagnosticsProvider* provider)
 	{
-		ENGINE_CONTRACT_STUB();
-		return false;
+		return provider == nullptr || (check.has_value() && check->Performed && check->EnvironmentHash == provider->GetEnvironmentHash());
 	}
 
 	bool IsManifestCurrent(const VirtualFileSystem& vfs, std::span<const ImportDependencyRead> reads, std::span<const ImportAssetLookup> lookups,
@@ -676,12 +795,16 @@ namespace Engine {
 		}
 		for (const ImportAssetLookup& lookup : lookups)
 		{
-			const auto found = std::ranges::lower_bound(assets, lookup.Path, {}, &ImportAssetLookupEntry::SourcePath);
-			const bool present = found != assets.end() && found->SourcePath == lookup.Path;
+			const auto found = lookup.RequestedHandle.IsValid()
+				? std::ranges::find(assets, lookup.RequestedHandle, &ImportAssetLookupEntry::Handle)
+				: std::ranges::lower_bound(assets, lookup.Path, {}, &ImportAssetLookupEntry::SourcePath);
+			const bool present = found != assets.end() && (lookup.RequestedHandle.IsValid() || found->SourcePath == lookup.Path);
 			if (present != lookup.Found.has_value())
 				return false;
-			// The same registered asset: handle, kind and type (a manifest does not record a dependency's owner).
+			// Legacy path records compare identity and type. Handle records also compare their readable path and owner.
 			if (present && (found->Handle != lookup.Found->Handle || found->Kind != lookup.Found->Kind || found->Type != lookup.Found->Type))
+				return false;
+			if (present && lookup.RequestedHandle.IsValid() && (found->SourcePath != lookup.Found->SourcePath || found->Owner != lookup.Found->Owner))
 				return false;
 		}
 		return true;

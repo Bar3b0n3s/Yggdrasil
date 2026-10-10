@@ -858,6 +858,110 @@
 			"timeoutSeconds": 60
 		},
 		{
+			"name": "input_record",
+			"method": "input.record",
+			"description": "Starts a tick-zero recording or saves its validated applied inputs and expectations. Stop checks output write permission.",
+			"inputSchema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "InputRecordParams",
+				"description": "Action-dependent recording parameters; inappropriate members are refused.",
+				"type": "object",
+				"properties": {
+					"action": {
+						"description": "Start or Stop.",
+						"enum": ["Start", "Stop"]
+					},
+					"restart": {
+						"description": "Start only: explicitly replace an existing play session.",
+						"type": "boolean"
+					},
+					"scene": {
+						"description": "Start only: saved scene path; absent uses the host's current scene.",
+						"type": "string"
+					},
+					"parameters": {
+						"description": "Start only: initial scene load parameters object."
+					},
+					"seed": {
+						"description": "Start only: initial seed; absent inherits session/project policy.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"path": {
+						"description": "Stop only, required: confined replay destination (Runtime relative paths are below user://Replays).",
+						"type": "string"
+					},
+					"expect": {
+						"description": "Stop only: ordered expectations, compiled before consuming the recording.",
+						"type": "array",
+						"items": {
+							"description": "An authored replay assertion at a completed-tick boundary.",
+							"type": "object",
+							"properties": {
+								"tick": {
+									"description": "Completed ticks, including zero.",
+									"type": "integer",
+									"minimum": 0,
+									"maximum": 4294967295
+								},
+								"luau": {
+									"description": "Luau expression or chunk returning a truthy value.",
+									"type": "string"
+								}
+							},
+							"additionalProperties": false
+						}
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"required": ["action"]
+			},
+			"mutates": false,
+			"supportsDryRun": false,
+			"timeoutSeconds": 60
+		},
+		{
+			"name": "input_replay",
+			"method": "input.replay",
+			"description": "Replays recorded inputs in a fresh session; verification failures retain every expectation and hash outcome in error data.",
+			"inputSchema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "InputReplayParams",
+				"description": "Replay an asset in a fresh deterministic session.",
+				"type": "object",
+				"properties": {
+					"path": {
+						"description": "Replay asset path, or a Runtime recording's returned user://Replays identity.",
+						"type": "string"
+					},
+					"verify": {
+						"description": "Evaluate cooked expectations.",
+						"type": "boolean"
+					},
+					"strictHash": {
+						"description": "Compare the recorded final hash; requires verify.",
+						"type": "boolean"
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"required": ["path"]
+			},
+			"mutates": false,
+			"supportsDryRun": false,
+			"timeoutSeconds": 600
+		},
+		{
 			"name": "log_read",
 			"method": "log.read",
 			"description": "Reads the host's log (the editor's or the exported game's) by cursor so nothing is lost between polls, filtered by level, logger and text. Pass nextCursor to the next read; \"end\" returns only the cursor of the next entry.",
@@ -933,7 +1037,7 @@
 						"type": "string"
 					},
 					"parameters": {
-						"description": "Load parameters for scripts (M13; refused when present)."
+						"description": "Object returned by Scene.GetLoadParameters; absent means an empty object."
 					},
 					"paused": {
 						"description": "Start paused at tick 0.",
@@ -946,7 +1050,7 @@
 						"maximum": 100
 					},
 					"pauseOnError": {
-						"description": "Pause on a script error (M13; refused when present).",
+						"description": "Pause on a script error; absent inherits project settings.",
 						"type": "boolean"
 					},
 					"ifRevision": {
@@ -1100,6 +1204,39 @@
 			"mutates": false,
 			"supportsDryRun": false,
 			"timeoutSeconds": 60
+		},
+		{
+			"name": "play_wait_for",
+			"method": "play.waitFor",
+			"description": "Advances a paused or lockstep Play session until the predicate is truthy or timeoutTicks is reached.",
+			"inputSchema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "PlayWaitForParams",
+				"description": "Advance until a Luau predicate becomes truthy.",
+				"type": "object",
+				"properties": {
+					"until": {
+						"description": "Expression or chunk evaluated after every tick in the live VM.",
+						"type": "string"
+					},
+					"timeoutTicks": {
+						"description": "Maximum ticks to advance.",
+						"type": "integer",
+						"minimum": 1,
+						"maximum": 1000000
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"required": ["until", "timeoutTicks"]
+			},
+			"mutates": false,
+			"supportsDryRun": false,
+			"timeoutSeconds": 600
 		},
 		{
 			"name": "prefab_apply",
@@ -1674,6 +1811,235 @@
 			"mutates": false,
 			"supportsDryRun": false,
 			"timeoutSeconds": 60
+		},
+		{
+			"name": "script_check",
+			"method": "script.check",
+			"description": "Checks selected or all project scripts without writing or reloading code.",
+			"inputSchema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "ScriptCheckParams",
+				"description": "Check scripts without changing files or play state.",
+				"type": "object",
+				"properties": {
+					"paths": {
+						"description": "Scripts to check; omitted or empty checks all project scripts.",
+						"type": "array",
+						"items": {
+							"type": "string"
+						}
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false
+			},
+			"mutates": false,
+			"supportsDryRun": false,
+			"timeoutSeconds": 60
+		},
+		{
+			"name": "script_create",
+			"method": "script.create",
+			"description": "Creates a script from a shipped template as one undoable source/meta edit.",
+			"inputSchema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "ScriptCreateParams",
+				"description": "Create a script from a shipped template.",
+				"type": "object",
+				"properties": {
+					"path": {
+						"description": "New .luau file below Assets.",
+						"type": "string"
+					},
+					"template": {
+						"description": "Behaviour, Module or Test.",
+						"enum": ["Behaviour", "Module", "Test"]
+					},
+					"dryRun": {
+						"description": "Validate and return the would-be result without applying anything.",
+						"type": "boolean"
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"required": ["path", "template"]
+			},
+			"mutates": true,
+			"supportsDryRun": true,
+			"timeoutSeconds": 60
+		},
+		{
+			"name": "script_errors",
+			"method": "script.errors",
+			"description": "Reads retained script errors without clearing them, including updated repeat counts.",
+			"inputSchema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "ScriptErrorsParams",
+				"description": "Read errors after an exclusive cursor.",
+				"type": "object",
+				"properties": {
+					"since": {
+						"description": "Empty for the beginning, end for the current cursor, or a previous nextCursor.",
+						"type": "string"
+					},
+					"limit": {
+						"description": "Maximum returned entries.",
+						"type": "integer",
+						"minimum": 1,
+						"maximum": 1000
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false
+			},
+			"mutates": false,
+			"supportsDryRun": false,
+			"timeoutSeconds": 60
+		},
+		{
+			"name": "script_eval",
+			"method": "script.eval",
+			"description": "Evaluates Luau in Edit (read-only, editor only) or the live Play VM; Play obeys lockstep ownership.",
+			"inputSchema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "ScriptEvalParams",
+				"description": "Evaluate Luau in an explicitly selected context.",
+				"type": "object",
+				"properties": {
+					"code": {
+						"description": "UTF-8 Luau expression or chunk.",
+						"type": "string"
+					},
+					"context": {
+						"description": "Edit or Play.",
+						"enum": ["Edit", "Play"]
+					},
+					"entity": {
+						"description": "Optional behaviour entity bound as self.",
+						"type": "string"
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"required": ["code", "context"]
+			},
+			"mutates": false,
+			"supportsDryRun": false,
+			"timeoutSeconds": 60
+		},
+		{
+			"name": "script_read",
+			"method": "script.read",
+			"description": "Reads exact script source and its stable asset identity.",
+			"inputSchema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "ScriptReadParams",
+				"description": "Read a script's authored source.",
+				"type": "object",
+				"properties": {
+					"path": {
+						"description": "Existing .luau path below Assets.",
+						"type": "string"
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"required": ["path"]
+			},
+			"mutates": false,
+			"supportsDryRun": false,
+			"timeoutSeconds": 60
+		},
+		{
+			"name": "script_write",
+			"method": "script.write",
+			"description": "Writes source as one undoable edit and returns full compile/type diagnostics; invalid source remains saved.",
+			"inputSchema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "ScriptWriteParams",
+				"description": "Replace or create script source.",
+				"type": "object",
+				"properties": {
+					"path": {
+						"description": "A .luau file below Assets.",
+						"type": "string"
+					},
+					"source": {
+						"description": "Exact UTF-8 source; empty is permitted.",
+						"type": "string"
+					},
+					"dryRun": {
+						"description": "Validate and return the would-be result without applying anything.",
+						"type": "boolean"
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"required": ["path", "source"]
+			},
+			"mutates": true,
+			"supportsDryRun": true,
+			"timeoutSeconds": 60
+		},
+		{
+			"name": "test_run",
+			"method": "test.run",
+			"description": "Runs configured tests and returns every outcome plus JSON/JUnit reports. Optional recording is published only after strict replay verification.",
+			"inputSchema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "TestRunParams",
+				"description": "Run selected suites, cases and replays without altering authored scene state.",
+				"type": "object",
+				"properties": {
+					"filter": {
+						"description": "Case-insensitive substring of suite/case or replay path.",
+						"type": "string"
+					},
+					"timeoutTicks": {
+						"description": "Optional positive run-wide tick cap; omitted means no additional limit.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"record": {
+						"description": "Optional project Assets .replay output; requires one selected suite and strict reproduction.",
+						"type": "string"
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false
+			},
+			"mutates": false,
+			"supportsDryRun": false,
+			"timeoutSeconds": 900
 		},
 		{
 			"name": "viewport_screenshot",

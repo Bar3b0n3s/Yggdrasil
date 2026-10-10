@@ -40,6 +40,8 @@ namespace Engine {
 				{ ".mp3", "Audio", AssetType::AudioClip },
 				{ ".ogg", "Audio", AssetType::AudioClip },
 				{ ".sfx", "SoundEffect", AssetType::AudioClip },
+				{ ".luau", "Script", AssetType::Script },
+				{ ".replay", "Replay", AssetType::Replay },
 			};
 			for (const Expected& entry : expected)
 			{
@@ -53,8 +55,8 @@ namespace Engine {
 			}
 			CHECK(importers.FindForExtension(".GLB") == importers.FindById("Gltf"));
 			CHECK(importers.FindForExtension(".HDR") == importers.FindById("Environment"));
-			CHECK(importers.FindForExtension(".luau") == nullptr);
-			CHECK(importers.GetImporters().size() == 9);
+			CHECK(importers.FindForExtension(".unknown") == nullptr);
+			CHECK(importers.GetImporters().size() == 11);
 		}
 
 		TEST_CASE("ImporterRegistry: Describe lists ids, main types and extensions sorted by id")
@@ -62,7 +64,7 @@ namespace Engine {
 			ImporterRegistry importers;
 			RegisterBuiltinImporters(importers);
 			const std::vector<AssetImporterDescription> descriptions = importers.Describe();
-			REQUIRE(descriptions.size() == 9);
+			REQUIRE(descriptions.size() == 11);
 			CHECK(descriptions.front().Id == "Audio");
 			CHECK(descriptions.back().Id == "Texture");
 			for (size_t index = 1; index < descriptions.size(); ++index)

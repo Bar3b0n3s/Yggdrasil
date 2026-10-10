@@ -25,6 +25,8 @@
 
 namespace Engine {
 
+	class IFieldSchemaSource;
+
 	class MethodRegistry;
 	class Watchdog;
 	struct MethodDescriptor;
@@ -154,6 +156,21 @@ namespace Engine {
 		// params to handles (convention 13 of MethodRegistry.h) before it reads them; null (the default) for a host without
 		// assets, whose AssetRef values must then be handles. The pointer stays valid while the request lives.
 		[[nodiscard]] virtual IAssetReferenceResolver* GetAssetReferenceResolver() const { return nullptr; }
+
+		// Immutable external field schemas for this request; null by default for hosts without them. Invoke requests these
+		// only when a supplied Variant value cannot resolve from registry metadata alone, after ordinary asset paths have
+		// become handles. The returned reference pins the source through canonicalization, validation and the handler.
+		// Hosts retain the same snapshot for subsequent calls in this request; nested requests acquire their own snapshot.
+		// Errors from acquiring a snapshot propagate unchanged and prevent the handler from running. Main thread only.
+		[[nodiscard]] virtual Result<Ref<const IFieldSchemaSource>> GetFieldSchemaSnapshot();
+
+		// Completes missing schema-discriminating owner fields in a partial params object using the addressed host object
+		// (for example the existing Script handle for an entity.update Fields-only patch). Called only when a supplied
+		// Variant cannot yet resolve, after ordinary asset path resolution and before the request snapshot is acquired.
+		// The default does nothing. An override may add only absent owner discriminators, never overwrite supplied values,
+		// copy unrelated fields, mutate host state or relax validation. Added fields keep their existing host value when
+		// the handler applies the patch. Errors propagate unchanged and prevent invocation. Main thread only.
+		[[nodiscard]] virtual Status CompleteParameterOwners(Json& params);
 	protected:
 		// `request.Method` and `request.Registry` must be set (asserted).
 		MethodContext(TypeKey hostKey, MethodRequest request);

@@ -2,6 +2,7 @@
 
 #include "Editor/Private/EditorHostViewports.h"
 #include "EditorCore/EditorContext.h"
+#include "EditorCore/Play/EditorPlayController.h"
 #include "EditorCore/Viewport/GizmoController.h"
 #include "Engine/Asset/BuiltinAssets.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
@@ -12,13 +13,111 @@
 #include "Engine/Scene/Components/CameraComponent.h"
 #include "Engine/Scene/Components/MeshRendererComponent.h"
 #include "Engine/Scene/Entity.h"
+#include "Support/AutomationTestClient.h"
 #include "Support/EditorTestFixture.h"
 #include "Support/HeadlessGpuFixture.h"
+#include "Support/WaitUntil.h"
+
+#include <algorithm>
+#include <array>
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
+#include <string_view>
+#include <utility>
+#include <vector>
 
 namespace Engine {
 
 	TEST_SUITE("Editor")
 	{
+		TEST_CASE("EditorHostViewports: ScriptedClock suites reject physical input and focus releases while retaining Test injection")
+		{
+			std::vector<uint64_t> baseline;
+			for (const bool noise : std::array{ false, true })
+			{
+				INFO(noise);
+				Test::EditorTestFixture fixture("ScriptedClockInput");
+				fixture.CreateAndOpenProject();
+				fixture.CreateAndOpenScene();
+				auto& editor = fixture.GetEditor();
+				auto& play = editor.GetPlay();
+				GizmoController gizmos(editor);
+				EditorHostViewports host(editor, gizmos);
+				auto now = std::chrono::steady_clock::time_point{};
+				auto specification = Test::MakeTestServerSpecification();
+				specification.WallClock = [&now]()
+				{
+					now += std::chrono::milliseconds(100);
+					return now;
+				};
+				Test::AutomationTestClient client(editor, std::move(specification), false);
+				const auto call = [&client](std::string_view method, const Json& params)
+				{
+					auto result = client.Call(method, params);
+					REQUIRE_MESSAGE(result.has_value(), (result ? "" : result.error().ToString()));
+					return std::move(*result);
+				};
+				call("script.write", Json{ { "path", "Assets/Tests/Input.test.luau" }, { "source", R"(
+return Test.Suite("InputOwnership", function()
+    Test.Case("injected input survives viewport changes", function()
+        Test.InjectKey("A", "Down")
+        Test.WaitTicks(8)
+        Test.Expect(Input.IsKeyDown("A"), "viewport focus released test-owned input")
+        Test.Expect(not Input.IsKeyDown("Space"), "physical input reached the suite")
+    end)
+end)
+)" } });
+				call("project.setSettings", Json{ { "patch", Json{ { "Testing", Json{ { "Suites", Json::array({ Json{ { "Script", "Assets/Tests/Input.test.luau" }, { "Clock", Json::array({ 0.02 }) }, { "Modes", Json::array({ "Editor" }) } } }) } } } } } });
+				static_cast<void>(client.Submit("test.run", Json::object()));
+				std::vector<uint64_t> hashes;
+				std::vector<Json> responses;
+				bool observedInjected = false;
+				REQUIRE(Test::WaitUntil([&client, &play, &host, &hashes, &responses, &observedInjected, noise]()
+				{
+					client.GetServer().Pump();
+					if (PlaySession* session = play.GetSession())
+					{
+						REQUIRE(play.IsTestRunActive());
+						REQUIRE_FALSE(session->IsLockstep());
+						hashes.push_back(session->ComputeStateHash());
+						const auto input = session->GetInput().GetSummary(InputPhase::Step);
+						observedInjected = observedInjected || std::ranges::find(input.Down, "Key.A") != input.Down.end();
+						if (noise)
+						{
+							host.SetGameInputFocused(true);
+							const size_t queued = session->GetInput().GetQueuedEventCount();
+							play.OnInputEvent(KeyEvent{ .KeyCode = Key::Space }, host.IsGameInputFocused());
+							host.SetGameInputFocused(false);
+							CHECK(session->GetInput().GetQueuedEventCount() == queued);
+						}
+						play.OnSafePoint();
+						CHECK(play.GetSession() == session);
+					}
+					responses = client.GetServer().TakeInProcessResponses(client.GetClient());
+					return !responses.empty();
+				}));
+				REQUIRE(responses.size() == 1);
+				CHECK(responses.front()["result"]["passed"] == Json(true));
+				CHECK(observedInjected);
+				REQUIRE_FALSE(hashes.empty());
+				if (!noise)
+					baseline = std::move(hashes);
+				else
+					CHECK(hashes == baseline);
+				// The same native ingress remains functional for ordinary Play.
+				call("play.start", Json{ { "paused", true } });
+				host.SetGameInputFocused(true);
+				play.OnInputEvent(KeyEvent{ .KeyCode = Key::Space }, host.IsGameInputFocused());
+				play.GetSession()->Tick();
+				CHECK(call("script.eval", Json{ { "context", "play" }, { "code", "Input.IsKeyDown('Space')" } })["value"] == Json(true));
+				host.SetGameInputFocused(false);
+				play.GetSession()->Tick();
+				CHECK(call("script.eval", Json{ { "context", "play" }, { "code", "Input.IsKeyDown('Space')" } })["value"] == Json(false));
+				call("play.stop", Json::object());
+			}
+		}
+
 		TEST_CASE("EditorHostViewports: displayed images own independent extents and delayed picks cancel on hiding" * doctest::test_suite(Test::GpuSuite))
 		{
 			Test::HeadlessGpuFixture gpu;

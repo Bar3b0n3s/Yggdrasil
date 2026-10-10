@@ -192,21 +192,22 @@ namespace Engine {
 			CHECK((*state)["state"] == Json("Paused"));
 		}
 
-		TEST_CASE("PlayMethods: play.start refuses the members of later milestones at their pointer")
+		TEST_CASE("PlayMethods: play.start accepts load parameters and pauseOnError and rejects non-object parameters")
 		{
 			Test::AutomationFixture fixture("PlayMethods");
 			OpenSceneWithEntity(fixture);
-			for (const char* member : { "parameters", "pauseOnError" })
+			for (const Json& parameters : { Json(nullptr), Json(1), Json::array() })
 			{
-				Json params = Json::object();
-				params[member] = std::string(member) == "parameters" ? Json::object() : Json(true);
-				const Result<Json> refused = fixture.Call("play.start", params);
+				const Result<Json> refused = fixture.Call("play.start", Json{ { "parameters", parameters } });
 				REQUIRE_FALSE(refused.has_value());
-				CHECK(refused.error().GetCode() == ErrorCode::Unsupported);
+				CHECK(refused.error().GetCode() == ErrorCode::InvalidArgument);
 				REQUIRE_FALSE(refused.error().GetIssues().empty());
-				CHECK(refused.error().GetIssues().front().JsonPointer == std::string("/") + member);
+				CHECK(refused.error().GetIssues().front().JsonPointer == "/parameters");
 			}
 			CHECK_FALSE(fixture.GetEditor().GetPlay().IsPlaying());
+			const Json parameters{ { "Level", 3 }, { "Nested", Json{ { "ready", true } } } };
+			REQUIRE(fixture.Call("play.start", Json{ { "parameters", parameters }, { "pauseOnError", false }, { "lockstep", true } }).has_value());
+			CHECK(fixture.GetEditor().GetPlay().GetSession()->GetLoadParameters() == parameters);
 		}
 
 		TEST_CASE("PlayMethods: play.setTimeScale validates its range")
@@ -412,6 +413,32 @@ namespace Engine {
 			REQUIRE_MESSAGE(otherResponse.contains("result"), otherResponse.dump());
 			CHECK(otherResponse["result"]["tick"] == Json(6));
 			CHECK(otherResponse["result"]["ticks"] == Json(6));
+		}
+
+		TEST_CASE("PlayMethods: an unexpected tick cancels the pending step and releases extraction immediately")
+		{
+			ScriptedWallClock clock{ .Step = std::chrono::milliseconds(100) };
+			ScriptedClockSetup setup("StepUnexpectedTick", clock);
+			Test::AutomationTestClient& client = setup.GetClient();
+			REQUIRE(client.Call("play.start", Json{ { "paused", true } }).has_value());
+			const int64_t request = client.Submit("play.step", Json{ { "ticks", 1000 }, { "render", "none" } });
+			client.GetServer().Pump();
+			PlaySession* session = setup.GetEditor().GetPlay().GetSession();
+			REQUIRE(session != nullptr);
+			REQUIRE(session->IsStepping());
+			session->Tick();
+			const uint64_t tick = session->GetTick();
+			client.GetServer().Pump();
+			const std::vector<Json> responses = client.GetServer().TakeInProcessResponses(client.GetClient());
+			REQUIRE(responses.size() == 1);
+			CHECK(responses[0]["id"] == Json(request));
+			CHECK(GetErrorCode(responses[0]) == "Cancelled");
+			CHECK_FALSE(session->IsStepping());
+			CHECK(session->GetTick() == tick);
+			CHECK(session->IsPaused());
+			const uint64_t before = session->GetExtractionCount();
+			session->Tick();
+			CHECK(session->GetExtractionCount() == before + 1);
 		}
 
 		TEST_CASE("PlayMethods: play.step input lands on the tick its offset names, and offsets beyond the step are refused")

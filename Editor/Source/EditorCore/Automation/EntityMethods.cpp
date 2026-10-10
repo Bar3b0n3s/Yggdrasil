@@ -5,6 +5,7 @@
 #include "EditorCore/Automation/Private/MethodSupport.h"
 #include "EditorCore/Commands/SceneEdit.h"
 #include "EditorCore/EditorContext.h"
+#include "EditorCore/Scripting/EditorScriptService.h"
 #include "Engine/Automation/Protocol/MethodRegistry.h"
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Core/UUIDGenerator.h"
@@ -77,10 +78,34 @@ namespace Engine {
 		// Writes one component's (partial) JSON `value`: added when `add`, else merged into the existing component (RFC 7386).
 		// Stored fields go through ComponentAccess in one write; virtual fields (Transform.EulerAngles, WorldPosition) are set
 		// after it through their setters. Errors are located below `pointer`.
-		static Status WriteComponent(Entity entity, const ComponentInfo& info, const Json& value, bool add, const std::string& pointer)
+		static Status WriteComponent(EditorContext& editor, Entity entity, const ComponentInfo& info, const Json& value, bool add,
+			const std::string& pointer, const IFieldSchemaSource* schemas)
 		{
 			if (!value.is_object())
 				return std::unexpected(MakeParamError(ErrorCode::InvalidArgument, pointer, std::format("the value of '{}' must be an object of fields", info.GetName())));
+			if (info.GetName() == "Script")
+			{
+				const auto script = value.find("Script");
+				if (script != value.end() && !script->is_null())
+				{
+					const std::string scriptPointer = JsonReader::AppendPointer(pointer, "Script");
+					const auto handle = UUID::FromString(JsonReader(*script).ReadString().value_or(std::string()));
+					if (!handle.has_value())
+						return std::unexpected(MakeParamError(ErrorCode::InvalidArgument, scriptPointer, "expected a script asset handle"));
+					if (handle->IsValid())
+					{
+						EditorScriptService* service = editor.GetScriptService();
+						if (service == nullptr)
+							return std::unexpected(MakeParamError(ErrorCode::InvalidState, scriptPointer, "no project script service is available"));
+						const auto data = service->GetFields(*handle);
+						if (!data)
+							return std::unexpected(LocateAtParam(data.error(), scriptPointer));
+						if ((*data)->Kind != ScriptKind::Behaviour)
+							return std::unexpected(MakeParamError(ErrorCode::Validation, scriptPointer,
+								"SCRIPT_NOT_A_BEHAVIOUR: only a Behaviour script may be attached to an entity"));
+					}
+				}
+			}
 
 			Json stored = Json::object();
 			std::vector<std::pair<const FieldInfo*, const Json*>> virtuals;
@@ -93,8 +118,8 @@ namespace Engine {
 					stored[member.key()] = member.value();
 			}
 
-			const Status written = add ? ComponentAccess::AddComponent(entity, info.GetName(), &stored)
-									   : (stored.empty() ? Status() : ComponentAccess::PatchComponentJson(entity, info.GetName(), stored));
+			const Status written = add ? ComponentAccess::AddComponent(entity, info.GetName(), &stored, schemas)
+									   : (stored.empty() ? Status() : ComponentAccess::PatchComponentJson(entity, info.GetName(), stored, schemas));
 			if (!written)
 				return std::unexpected(PrefixPointers(written.error(), pointer));
 
@@ -104,7 +129,7 @@ namespace Engine {
 				Result<Value> fieldValue = ValueFromJson(JsonReader(*json), field->GetType());
 				if (!fieldValue)
 					return std::unexpected(PrefixPointers(fieldValue.error(), fieldPointer));
-				const Status set = ComponentAccess::SetFieldValue(entity, info.GetName(), field->GetName(), *fieldValue);
+				const Status set = ComponentAccess::SetFieldValue(entity, info.GetName(), field->GetName(), *fieldValue, schemas);
 				if (!set)
 					return std::unexpected(PrefixPointers(set.error(), pointer));
 			}
@@ -114,8 +139,13 @@ namespace Engine {
 		// Writes every component of a create or update: existing ones are merged, missing ones added once the components they
 		// require are present (so {"SphereCollider": ..., "RigidBody": ...} works in any order). A component that can never
 		// be added is attempted anyway, which reports why (ComponentAccess::AddComponent).
-		static Status WriteComponents(Entity entity, const std::map<std::string, VariantValue>& components)
+		static Status WriteComponents(EditorContext& editor, Entity entity, const std::map<std::string, VariantValue>& components)
 		{
+			Ref<const ScriptFieldSchemaSource> schemas;
+			if (components.contains("Script"))
+			{
+				ENGINE_TRY_ASSIGN(schemas, editor.GetScriptSchemaSnapshot());
+			}
 			const TypeRegistry& registry = entity.GetScene()->GetTypeRegistry();
 			std::vector<std::pair<const ComponentInfo*, const VariantValue*>> additions;
 			for (const auto& [name, value] : components)
@@ -123,7 +153,7 @@ namespace Engine {
 				const std::string pointer = JsonReader::AppendPointer("/components", name);
 				ENGINE_TRY_ASSIGN(const ComponentInfo* info, FindWritableComponent(registry, name, pointer));
 				if (info->GetHostOps()->Has(entity))
-					ENGINE_TRY(WriteComponent(entity, *info, value.Get(), false, pointer));
+					ENGINE_TRY(WriteComponent(editor, entity, *info, value.Get(), false, pointer, schemas.get()));
 				else
 					additions.emplace_back(info, &value);
 			}
@@ -148,7 +178,7 @@ namespace Engine {
 				if (ready == additions.end())
 					ready = additions.begin();
 				const std::string pointer = JsonReader::AppendPointer("/components", ready->first->GetName());
-				ENGINE_TRY(WriteComponent(entity, *ready->first, ready->second->Get(), true, pointer));
+				ENGINE_TRY(WriteComponent(editor, entity, *ready->first, ready->second->Get(), true, pointer, schemas.get()));
 				additions.erase(ready);
 			}
 			return {};
@@ -241,9 +271,10 @@ namespace Engine {
 			return subtree;
 		}
 
-		// Rewrites every EntityRef inside `value` (a JSON value of `type`) that names a key of `remap` to its value. Variant
-		// values are left alone: their schemas (script fields) arrive with M13.
-		static void RemapEntityRefs(Json& value, const TypeInfo& type, const std::map<UUID, UUID>& remap)
+		// Rewrites only typed EntityRefs. Variant schemas distinguish references from strings with identical UUID text;
+		// unresolved values remain verbatim, as they do when a scene is loaded.
+		static void RemapEntityRefs(Json& value, const TypeInfo& type, const std::map<UUID, UUID>& remap,
+			const ResolveContext& resolve, const FieldInfo* field = nullptr)
 		{
 			switch (type.GetKind())
 			{
@@ -259,24 +290,46 @@ namespace Engine {
 					if (value.is_array() && type.GetElement() != nullptr)
 					{
 						for (Json& element : value)
-							RemapEntityRefs(element, *type.GetElement(), remap);
+							RemapEntityRefs(element, *type.GetElement(), remap, resolve, type.GetElementSchema() != nullptr ? type.GetElementSchema() : field);
 					}
 					return;
 				case FieldType::Map:
 					if (value.is_object() && type.GetElement() != nullptr)
 					{
 						for (auto member = value.begin(); member != value.end(); ++member)
-							RemapEntityRefs(member.value(), *type.GetElement(), remap);
+						{
+							ResolveContext child = resolve;
+							child.Key = member.key();
+							RemapEntityRefs(member.value(), *type.GetElement(), remap, child, field);
+						}
 					}
 					return;
 				case FieldType::Struct:
 					if (value.is_object() && type.GetStruct() != nullptr)
 					{
+						const JsonReader owner(value);
+						ResolveContext child = resolve;
+						child.Owner = nullptr;
+						child.OwnerType = type.GetStruct();
+						child.OwnerJson = &owner;
+						child.Key = {};
 						for (auto member = value.begin(); member != value.end(); ++member)
 						{
-							const FieldInfo* field = type.GetStruct()->FindField(member.key());
-							if (field != nullptr)
-								RemapEntityRefs(member.value(), field->GetType(), remap);
+							const FieldInfo* memberField = type.GetStruct()->FindField(member.key());
+							if (memberField != nullptr)
+								RemapEntityRefs(member.value(), memberField->GetType(), remap, child, memberField);
+						}
+					}
+					return;
+				case FieldType::Variant:
+					if (field != nullptr && field->GetResolver() != nullptr)
+					{
+						const auto schema = field->ResolveVariant(resolve);
+						if (schema && *schema != field)
+						{
+							ResolveContext child = resolve;
+							child.Key = {};
+							RemapEntityRefs(value, (*schema)->GetType(), remap, child, *schema);
 						}
 					}
 					return;
@@ -294,13 +347,12 @@ namespace Engine {
 				case FieldType::String:
 				case FieldType::AssetRef:
 				case FieldType::Enum:
-				case FieldType::Variant:
 					return;
 			}
 		}
 
 		// Duplicate checks: prefab instances are copied by prefab.instantiate (their member ids derive from the instance root,
-		// §5.5), and a unique-per-scene component cannot exist twice. Errors: InvalidState naming the entity and component.
+		// Â§5.5), and a unique-per-scene component cannot exist twice. Errors: InvalidState naming the entity and component.
 		static Status CheckDuplicable(const std::vector<Entity>& subtree)
 		{
 			for (const Entity entity : subtree)
@@ -324,7 +376,7 @@ namespace Engine {
 
 		// Copies `root` and its subtree through the serializer with fresh ids, internal EntityRefs remapped to the copies, and
 		// inserts the copy right after `root` among its siblings. Returns the copy's root.
-		static Result<Entity> DuplicateSubtree(Scene& scene, Entity root)
+		static Result<Entity> DuplicateSubtree(Scene& scene, Entity root, const IFieldSchemaSource* schemas)
 		{
 			const std::vector<Entity> subtree = CollectSubtree(root);
 			ENGINE_TRY(CheckDuplicable(subtree));
@@ -342,6 +394,7 @@ namespace Engine {
 			}
 
 			const TypeRegistry& registry = scene.GetTypeRegistry();
+			const ResolveContext resolve{ .Registry = &registry, .Key = {}, .Schemas = schemas };
 			std::vector<Json> documents;
 			for (const Entity entity : subtree)
 			{
@@ -361,13 +414,14 @@ namespace Engine {
 					for (auto component = components->begin(); component != components->end(); ++component)
 					{
 						if (const ComponentInfo* info = registry.FindComponent(component.key()))
-							RemapEntityRefs(component.value(), info->GetType(), remap);
+							RemapEntityRefs(component.value(), info->GetType(), remap, resolve);
 					}
 				}
 				documents.push_back(std::move(document));
 			}
 
 			LoadOptions options;
+			options.Schemas = schemas;
 			LoadReport report;
 			Entity copyRoot;
 			for (size_t index = 0; index < documents.size(); ++index)
@@ -404,7 +458,7 @@ namespace Engine {
 				entity.AddTag(tag);
 			if (!params.Active)
 				entity.SetActive(false);
-			ENGINE_TRY(Utils::WriteComponents(entity, params.Components));
+			ENGINE_TRY(Utils::WriteComponents(context.GetEditor(), entity, params.Components));
 			const UUID id = entity.GetUUID();
 			ENGINE_TRY_ASSIGN(const uint64_t undoIndex, edit.Commit());
 
@@ -440,7 +494,7 @@ namespace Engine {
 					entity.AddTag(tag);
 			}
 			ENGINE_TRY(Utils::RemoveComponents(entity, params.RemoveComponents));
-			ENGINE_TRY(Utils::WriteComponents(entity, params.Components));
+			ENGINE_TRY(Utils::WriteComponents(context.GetEditor(), entity, params.Components));
 			const UUID id = entity.GetUUID();
 			ENGINE_TRY_ASSIGN(const uint64_t undoIndex, edit.Commit());
 
@@ -476,12 +530,13 @@ namespace Engine {
 			ENGINE_TRY_ASSIGN(Scene * scene, context.ResolveTargetScene(params.Target, context.HasParam("target"), true));
 			ENGINE_TRY_ASSIGN(const std::vector<Entity> roots, Utils::ResolveEntityRoots(context, *scene, params.Entities));
 			ENGINE_TRY(Utils::CheckPlayEntityCapacity(context, *scene, Utils::CountSubtreeEntities(roots)));
+			ENGINE_TRY_ASSIGN(const auto schemas, context.GetEditor().GetScriptSchemaSnapshot());
 
 			SceneEdit edit(context.GetEditor(), Utils::MakeListLabel("Duplicate", roots));
 			std::vector<UUID> copies;
 			for (const Entity root : roots)
 			{
-				ENGINE_TRY_ASSIGN(const Entity copy, Utils::DuplicateSubtree(*scene, root));
+				ENGINE_TRY_ASSIGN(const Entity copy, Utils::DuplicateSubtree(*scene, root, schemas.get()));
 				copies.push_back(copy.GetUUID());
 			}
 			ENGINE_TRY_ASSIGN(const uint64_t undoIndex, edit.Commit());

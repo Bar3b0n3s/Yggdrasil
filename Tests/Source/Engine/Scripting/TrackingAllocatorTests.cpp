@@ -13,7 +13,7 @@ namespace Engine {
 
 	TEST_SUITE("Scripting")
 	{
-		TEST_CASE("Allocator: soft limit raises a script error and the VM stays usable" * doctest::skip())
+		TEST_CASE("Allocator: soft limit raises a script error and the VM stays usable")
 		{
 			Random random(17);
 			SandboxSpecification specification{};
@@ -38,7 +38,7 @@ namespace Engine {
 			// ScriptEngine's instance tests additionally assert the faulting instance receives no later callbacks.
 		}
 
-		TEST_CASE("Allocator: second breach stops the session with a structured error" * doctest::skip())
+		TEST_CASE("Allocator: second breach stops the session with a structured error")
 		{
 			Random random(17);
 			SandboxSpecification specification{};
@@ -67,7 +67,7 @@ namespace Engine {
 			// The host integration asserts OnScriptError(error, true) requests stop after protected unwinding.
 		}
 
-		TEST_CASE("TrackingAllocator: accounting ignores new-allocation tags and counts a pending breach once" * doctest::skip())
+		TEST_CASE("TrackingAllocator: accounting ignores new-allocation tags and counts a pending breach once")
 		{
 			auto allocator = TrackingAllocator::Create(1);
 			REQUIRE(allocator.has_value());
@@ -91,7 +91,7 @@ namespace Engine {
 			CHECK((*allocator)->Reallocate(block, Soft + 1, 0) == nullptr);
 		}
 
-		TEST_CASE("TrackingAllocator: reaching hard limit refuses growth and keeps the old block accounted" * doctest::skip())
+		TEST_CASE("TrackingAllocator: reaching hard limit refuses growth and keeps the old block accounted")
 		{
 			auto allocator = TrackingAllocator::Create(1);
 			REQUIRE(allocator.has_value());
@@ -106,7 +106,7 @@ namespace Engine {
 			CHECK((*allocator)->Reallocate(block, 32, 0) == nullptr);
 		}
 
-		TEST_CASE("TrackingAllocator: failed recovery and size overflow latch terminal memory failure" * doctest::skip())
+		TEST_CASE("TrackingAllocator: failed recovery and size overflow latch terminal memory failure")
 		{
 			auto allocator = TrackingAllocator::Create(1);
 			REQUIRE(allocator.has_value());

@@ -61,7 +61,7 @@ from Lib.report import (
 )
 from Lib.scripts import CONTRACT_FLAG_HELP, mode_note, run_script, run_static_checks, test_mode_arguments
 
-TIMEOUTS = {"generate": 600.0, "build": 7200.0, "tests": 5400.0}
+TIMEOUTS = {"generate": 600.0, "build": 7200.0, "references": 180.0, "tests": 5400.0}
 
 
 def run_step(name: str, script: str, arguments: list[str], console: Console) -> Step:
@@ -108,6 +108,7 @@ def main(argv: list[str] | None = None) -> int:
     if steps[-1].status != Status.PASSED:
         steps.append(skipped("tests", "the Debug build did not pass", console))
     else:
+        steps.append(run_step("references", "GenerateDocs.py", ["--check", "--config", "Debug"], console))
         device = [] if arguments.gpu_optional else ["--require-gpu"]
         steps.append(run_step("tests", "Test.py", ["--suite", "unit,gpu,golden,feature,automation", "--config", "Debug",
                                                    *device, *test_mode_arguments(arguments.contract)], console))

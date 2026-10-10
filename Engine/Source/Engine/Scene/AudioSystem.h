@@ -126,9 +126,9 @@ namespace Engine {
 	// voice it started is released, its clips unregistered and the engine's group volumes restored (see "Mixer").
 	//
 	// Mixer (§11.5 Audio.SetGroupVolume and GetGroupVolume, bound to scripts in M13). The group volumes a game sets belong to
-	// its session: Start records the engine's Music, Sfx and Ui volumes and sets all three to 1, so every session (and every
+	// its session: InitializeMix records the engine's Music, Sfx and Ui volumes and sets all three to 1, so every session (and every
 	// FeatureTest capture) starts from the same mix whatever the editor or an earlier session left; SetGroupVolume sets the
-	// engine's group; destroying the system restores the recorded volumes (nothing when Start never ran), so Stop leaves
+	// engine's group; destroying the system restores the recorded volumes (nothing before InitializeMix), so Stop leaves
 	// the editor's mixer as it was. The Master volume is the host's (AudioEngine::SetMasterVolume) and never the session's.
 	class AudioSystem
 	{
@@ -141,9 +141,14 @@ namespace Engine {
 		AudioSystem(const AudioSystem&) = delete;
 		AudioSystem& operator=(const AudioSystem&) = delete;
 
-		// Session setup (§5.6: "PlayOnStart audio starts"): records and resets the group volumes (see "Mixer"), plays every
+		// Idempotently acquire/reset the session mix before script callbacks can read or write it. Starts no voices.
+		// Start calls this for standalone users; PlaySession calls it before OnCreate/OnStart. Destruction restores it
+		// even if startup never reaches Start. The host must retire the previous mixer owner before this call.
+		void InitializeMix();
+
+		// Session setup (§5.6: "PlayOnStart audio starts"): initializes the mix if needed, plays every
 		// PlayOnStart source of an effectively enabled entity, in canonical order, and sets the listener. Called once, at the
-		// end of PlaySession::Create.
+		// end of PlaySession::Activate (also called by Create).
 		void Start();
 
 		// §5.7 frame phase step 3 (PlaySessionPhase::AudioUpdate), after the frame's TransformSystem::Update: listener, source
@@ -178,14 +183,14 @@ namespace Engine {
 		// §11.5 Audio.SetGroupVolume(group, volume) (see "Mixer"): the engine's linear volume of `group` for the rest of the
 		// session. Errors: InvalidArgument for a volume that is not finite or below 0.
 		[[nodiscard]] Status SetGroupVolume(AudioGroup group, float volume);
-		// §11.5 Audio.GetGroupVolume(group): the engine's current volume of `group` (1 for each group after Start).
+		// §11.5 Audio.GetGroupVolume(group): the engine's current volume of `group` (1 immediately after InitializeMix).
 		[[nodiscard]] float GetGroupVolume(AudioGroup group) const;
 
 		// The listener the last Start or Update used.
 		[[nodiscard]] const AudioListenerSelection& GetListener() const;
 	private:
 		// The scene and engine back-references, the signal connections, the registered clips by (handle, version), the
-		// one-shot voices, the pause state, the group volumes Start recorded and the last listener (AudioSystem.cpp).
+		// one-shot voices, the pause state, the group volumes InitializeMix recorded and the last listener (AudioSystem.cpp).
 		struct State;
 	private:
 		Scope<State> m_State;

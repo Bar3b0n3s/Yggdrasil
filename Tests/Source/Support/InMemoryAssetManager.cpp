@@ -19,15 +19,18 @@ namespace Engine {
 
 		InMemoryAssetManager::~InMemoryAssetManager() = default;
 
-		void InMemoryAssetManager::Publish(AssetHandle handle, AssetRef<Asset> asset)
+		void InMemoryAssetManager::Publish(AssetHandle handle, AssetRef<Asset> asset, std::string path)
 		{
 			m_Assets.insert_or_assign(handle, std::move(asset));
+			if (!path.empty())
+				m_Paths.insert_or_assign(handle, std::move(path));
 			BumpVersion(handle);
 		}
 
 		void InMemoryAssetManager::Remove(AssetHandle handle)
 		{
 			m_Assets.erase(handle);
+			m_Paths.erase(handle);
 			BumpVersion(handle);
 		}
 
@@ -65,13 +68,28 @@ namespace Engine {
 			return found != m_Assets.end() ? found->second->GetAssetType() : AssetType::None;
 		}
 
-		std::optional<AssetHandle> InMemoryAssetManager::Resolve(std::string_view /*reference*/) const
+		std::optional<AssetHandle> InMemoryAssetManager::Resolve(std::string_view reference) const
 		{
+			for (const auto& [handle, path] : m_Paths)
+				if (path == reference)
+					return handle;
+			for (const auto& [handle, asset] : m_Assets)
+			{
+				static_cast<void>(asset);
+				if (handle.ToString() == reference || GetReferencePath(handle) == reference)
+					return handle;
+			}
+			for (const BuiltinAssetEntry& builtin : GetProceduralBuiltinEntries())
+				if (builtin.Path == reference || builtin.Handle.ToString() == reference)
+					return builtin.Handle;
 			return std::nullopt;
 		}
 
 		std::string InMemoryAssetManager::GetReferencePath(AssetHandle handle) const
 		{
+			const auto path = m_Paths.find(handle);
+			if (path != m_Paths.end())
+				return path->second;
 			const std::span<const BuiltinAssetEntry> builtins = GetProceduralBuiltinEntries();
 			const auto builtin = std::ranges::find(builtins, handle, &BuiltinAssetEntry::Handle);
 			return builtin != builtins.end() ? builtin->Path : std::format("Assets/Test/{}", handle);

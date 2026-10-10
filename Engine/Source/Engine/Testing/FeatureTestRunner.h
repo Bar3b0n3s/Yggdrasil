@@ -112,6 +112,10 @@ namespace Engine {
 		[[nodiscard]] Status Begin(IFeatureTestHost& host, const FeatureTestRunOptions& options = {});
 		// One bounded unit: a collection/teardown transition, one ManualClock tick, or one ScriptedClock frame (0..N
 		// fixed steps + exactly one frame phase). true means complete. Host wall budgets may partition calls only.
+		// Scripted-clock nonprogress is bounded separately: TimeoutTicks consecutive completed frames with no fixed
+		// step time out the current case and end its suite. Reset this counter at case start and after any stepped frame.
+		// Frame callbacks still run before the check; finite pauses shorter than this frame budget may recover normally.
+		// Reported ticks and the existing case/suite/run tick budgets continue counting only actual simulation ticks.
 		// Cases run in declaration order as separate resumable threads; Suite isolation shares one session, Case
 		// isolation recollects in a fresh VM and identifies the selected case by declaration identity, never a stale handle.
 		// Never start the next case until the current frame finishes, even when it contains several fixed steps. A case

@@ -59,6 +59,10 @@ workspace (WorkspaceName)
 	filter "system:not macosx"
 		architecture "x86_64"
 
+	filter "system:windows"
+		-- The test executable exceeds the 32-bit linker's address space as subsystems accumulate.
+		preferredtoolarchitecture "x86_64"
+
 	-- Workspace scope only (ODR): NDEBUG changes the layout of vulkan.hpp's dispatcher, so NVRHI and every consumer
 	-- must agree on it (Vendor/NVRHI/VENDOR.md). Never define NDEBUG in a project script.
 	filter "configurations:Dist"

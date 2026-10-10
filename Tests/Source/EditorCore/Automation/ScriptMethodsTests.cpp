@@ -8,6 +8,7 @@
 #include <nlohmann/json.hpp>
 
 #include <array>
+#include <optional>
 
 namespace Engine {
 
@@ -16,7 +17,7 @@ namespace Engine {
 		Json CallEditorScriptMethod(Test::AutomationFixture& fixture, std::string_view method, const Json& params)
 		{
 			auto result = fixture.Call(method, params);
-			REQUIRE_MESSAGE(result.has_value(), result.error().ToString());
+			REQUIRE_MESSAGE(result.has_value(), (result ? "" : result.error().ToString()));
 			return std::move(*result);
 		}
 
@@ -24,9 +25,9 @@ namespace Engine {
 
 	TEST_SUITE("EditorCore")
 	{
-		TEST_CASE("ScriptMethods: all three templates create readable typed scripts with stable handles across undo" * doctest::skip(true))
+		TEST_CASE("ScriptMethods: all three templates create readable typed scripts with stable handles across undo")
 		{
-			Test::AutomationFixture fixture("ScriptTemplates");
+			Test::AutomationFixture fixture("ScriptTemplates", true, std::nullopt, true);
 			for (const std::string_view name : std::array{ "Behaviour", "Module", "Test" })
 			{
 				const std::string path = "Assets/Scripts/" + std::string(name) + ".luau";
@@ -47,7 +48,7 @@ namespace Engine {
 			}
 		}
 
-		TEST_CASE("ScriptMethods: write preserves exact bytes and undo restores source with the same handle" * doctest::skip(true))
+		TEST_CASE("ScriptMethods: write preserves exact bytes and undo restores source with the same handle")
 		{
 			Test::AutomationFixture fixture("ScriptWriteUndo");
 			const std::string path = "Assets/Scripts/Library.luau";
@@ -61,7 +62,7 @@ namespace Engine {
 			CHECK(CallEditorScriptMethod(fixture, "script.read", Json{ { "path", path } })["source"] == Json(first));
 		}
 
-		TEST_CASE("ScriptMethods: write returns full diagnostic ranges while retaining invalid source" * doctest::skip(true))
+		TEST_CASE("ScriptMethods: write returns full diagnostic ranges while retaining invalid source")
 		{
 			Test::AutomationFixture fixture("ScriptWriteDiagnostics");
 			const std::string path = "Assets/Scripts/Mistake.luau";
@@ -80,9 +81,9 @@ namespace Engine {
 			CHECK(CallEditorScriptMethod(fixture, "script.read", Json{ { "path", path } })["source"] == Json(source));
 		}
 
-		TEST_CASE("ScriptMethods: create refuses an existing path and write accepts an empty source" * doctest::skip(true))
+		TEST_CASE("ScriptMethods: create refuses an existing path and write accepts an empty source")
 		{
-			Test::AutomationFixture fixture("ScriptCreateConflict");
+			Test::AutomationFixture fixture("ScriptCreateConflict", true, std::nullopt, true);
 			const Json params{ { "path", "Assets/Scripts/Existing.luau" }, { "template", "Module" } };
 			CallEditorScriptMethod(fixture, "script.create", params);
 			CHECK(fixture.Request("script.create", params)["error"]["data"]["errorCode"] == Json("AlreadyExists"));
@@ -90,9 +91,9 @@ namespace Engine {
 			CHECK(CallEditorScriptMethod(fixture, "script.read", Json{ { "path", "Assets/Scripts/Empty.luau" } })["source"] == Json(""));
 		}
 
-		TEST_CASE("ScriptMethods: dry runs leave no source or metadata and do not change history" * doctest::skip(true))
+		TEST_CASE("ScriptMethods: dry runs leave no source or metadata and do not change history")
 		{
-			Test::AutomationFixture fixture("ScriptDryRun");
+			Test::AutomationFixture fixture("ScriptDryRun", true, std::nullopt, true);
 			const Json before = CallEditorScriptMethod(fixture, "edit.history", Json::object());
 			const Json dry = CallEditorScriptMethod(fixture, "script.create", Json{ { "path", "Assets/Scripts/Dry.luau" }, { "template", "Behaviour" }, { "dryRun", true } });
 			CHECK(dry["dryRun"] == Json(true));
@@ -103,7 +104,7 @@ namespace Engine {
 			CHECK(after["entries"] == before["entries"]);
 		}
 
-		TEST_CASE("ScriptMethods: a failed batch rolls back script bytes and metadata" * doctest::skip(true))
+		TEST_CASE("ScriptMethods: a failed batch rolls back script bytes and metadata")
 		{
 			Test::AutomationFixture fixture("ScriptBatchRollback");
 			const Json response = fixture.Request("edit.batch", Json{ { "ops", Json::array({ Json{ { "method", "script.write" }, { "params", Json{ { "path", "Assets/Scripts/RolledBack.luau" }, { "source", "return 42" } } } }, Json{ { "method", "entity.update" }, { "params", Json{ { "entity", "/Missing" }, { "name", "Never" } } } } }) } });
@@ -114,7 +115,7 @@ namespace Engine {
 			CHECK_FALSE(fixture.Call("asset.info", Json{ { "asset", "Assets/Scripts/RolledBack.luau" } }).has_value());
 		}
 
-		TEST_CASE("ScriptMethods: script paths are confined to project Assets and use the luau extension" * doctest::skip(true))
+		TEST_CASE("ScriptMethods: script paths are confined to project Assets and use the luau extension")
 		{
 			Test::AutomationFixture fixture("ScriptPathValidation");
 			for (const std::string_view path : std::array{ "../outside.luau", "engine://outside.luau", "Library/Cache.luau", "Assets/Data.txt" })
@@ -125,7 +126,7 @@ namespace Engine {
 			}
 		}
 
-		TEST_CASE("ScriptMethods: checking all scripts reports required module locations without editing history" * doctest::skip(true))
+		TEST_CASE("ScriptMethods: checking all scripts reports required module locations without editing history")
 		{
 			Test::AutomationFixture fixture("ScriptCheckGraph");
 			CallEditorScriptMethod(fixture, "script.write", Json{ { "path", "Assets/Scripts/Dependency.luau" }, { "source", "--!strict\nlocal value: number = \"wrong\"\nreturn value" } });
@@ -139,7 +140,7 @@ namespace Engine {
 			CHECK(CallEditorScriptMethod(fixture, "edit.history", Json::object())["entries"] == before["entries"]);
 		}
 
-		TEST_CASE("ScriptMethods: fields preserves array element ranges defaults and asset types" * doctest::skip(true))
+		TEST_CASE("ScriptMethods: fields preserves array element ranges defaults and asset types")
 		{
 			Test::AutomationFixture fixture("ScriptFieldsSchema");
 			CallEditorScriptMethod(fixture, "script.write", Json{ { "path", "Assets/Scripts/Fields.luau" }, { "source", "local Fields = {}; Fields.Fields = { Values = Field.Array(Field.Number(2, { Min = 1, Max = 5 })), "

@@ -91,6 +91,7 @@ BUILD_FIXTURES_ROOT = paths.REPOSITORY_ROOT / "Tests" / "Data" / "BuildConfig"
 # Every fixture workspace under Tests/Data/BuildConfig/, with the finding that proves CheckBuildConfig.py detects its
 # defect (Roadmap M0 acceptance). A fixture directory without an entry here fails the static checks.
 BUILD_FIXTURE_FINDINGS = {
+    "HostTools32Bit": re.compile(r"Tests requires x64 host tools; PreferredToolArchitecture is x86"),
     "MismatchedJoltDefine": re.compile(r"Tests includes JoltPhysics headers but lacks JPH_PROFILE_ENABLED"),
     "MissingDeterministicDefine": re.compile(r"includes Jolt headers but does not define "
                                              r"JPH_CROSS_PLATFORM_DETERMINISTIC"),

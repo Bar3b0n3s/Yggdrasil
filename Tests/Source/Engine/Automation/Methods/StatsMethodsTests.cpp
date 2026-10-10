@@ -51,6 +51,28 @@ namespace Engine {
 
 	TEST_SUITE("Automation")
 	{
+		TEST_CASE("StatsGet: play reports the live script heap and limits without advancing time")
+		{
+			Test::AutomationFixture setup("ScriptHeapStatistics");
+			REQUIRE(setup.Call("play.start", Json{ { "lockstep", true } }));
+			const auto before = setup.Call("play.state", Json::object());
+			REQUIRE(before);
+			const auto stats = setup.Call("stats.get", Json::object());
+			REQUIRE(stats);
+			CHECK((*stats)["scriptAvailable"] == Json(true));
+			CHECK((*stats)["scriptHeapBytes"] > Json(0));
+			CHECK((*stats)["scriptSoftLimitBytes"] > (*stats)["scriptHeapBytes"]);
+			CHECK((*stats)["scriptHardLimitBytes"] > (*stats)["scriptSoftLimitBytes"]);
+			const auto after = setup.Call("play.state", Json::object());
+			REQUIRE(after);
+			CHECK((*after)["tick"] == (*before)["tick"]);
+			REQUIRE(setup.Call("play.stop", Json::object()));
+			const auto stopped = setup.Call("stats.get", Json::object());
+			REQUIRE(stopped);
+			CHECK((*stopped)["scriptAvailable"] == Json(false));
+			CHECK((*stopped)["scriptHeapBytes"] == Json(0));
+		}
+
 		TEST_CASE("StatsGet: telemetry conversion stays finite and range safe")
 		{
 			CHECK(ToStatsTelemetry(1.25) == 1.25f);

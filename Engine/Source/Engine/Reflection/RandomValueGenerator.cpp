@@ -310,8 +310,10 @@ namespace Engine {
 				ops.Resize(object, count);
 				ResolveContext elementOwner = owner;
 				elementOwner.Key = {};
+				const FieldInfo* elementSchema = type.GetElementSchema();
 				for (size_t i = 0; i < count; ++i)
-					RandomizeObject(*type.GetElement(), field, nullptr, ops.GetElement(object, i), elementOwner);
+					RandomizeObject(*type.GetElement(), elementSchema != nullptr ? *elementSchema : field,
+						elementSchema != nullptr ? &elementSchema->GetMeta() : nullptr, ops.GetElement(object, i), elementOwner);
 				return;
 			}
 			case FieldType::Map:
@@ -360,8 +362,10 @@ namespace Engine {
 				const int64_t count = m_Random.RangeInt(0, m_Options.MaxArrayLength);
 				ResolveContext elementContext = context;
 				elementContext.Key = {};
+				const FieldInfo* elementSchema = type.GetElementSchema();
 				for (int64_t i = 0; i < count; ++i)
-					array.push_back(RandomJsonOf(*type.GetElement(), field, nullptr, elementContext));
+					array.push_back(RandomJsonOf(*type.GetElement(), elementSchema != nullptr ? *elementSchema : field,
+						elementSchema != nullptr ? &elementSchema->GetMeta() : nullptr, elementContext));
 				return array;
 			}
 			case FieldType::Map:

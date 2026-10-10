@@ -8,9 +8,11 @@
 #include "Engine/Automation/Methods/PhysicsMethods.h"
 #include "Engine/Automation/Methods/PlayMethods.h"
 #include "Engine/Automation/Methods/RaycastMethods.h"
+#include "Engine/Automation/Methods/ReplayMethods.h"
 #include "Engine/Automation/Methods/RpcMethods.h"
 #include "Engine/Automation/Methods/SceneMethods.h"
 #include "Engine/Automation/Methods/ScreenshotMethods.h"
+#include "Engine/Automation/Methods/ScriptMethods.h"
 #include "Engine/Automation/Methods/SessionMethods.h"
 #include "Engine/Automation/Methods/StatsMethods.h"
 
@@ -34,6 +36,8 @@ namespace Engine {
 		RegisterAudioMethodTypes(registry);
 		RegisterRaycastMethodTypes(registry);
 		RegisterStatsMethodTypes(registry);
+		RegisterSharedScriptMethodTypes(registry);
+		RegisterReplayMethodTypes(registry);
 	}
 
 	void RegisterSharedMethods(MethodRegistry& methods, AutomationHost host)
@@ -52,6 +56,8 @@ namespace Engine {
 		RegisterAudioMethods(methods);
 		RegisterRaycastMethods(methods);
 		RegisterStatsMethods(methods);
+		RegisterSharedScriptMethods(methods);
+		RegisterReplayMethods(methods);
 	}
 
 }

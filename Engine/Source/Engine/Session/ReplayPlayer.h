@@ -74,7 +74,10 @@ namespace Engine {
 		// and predicate errors are collected as outcomes; structurally invalid playback/session failure is an outer error.
 		[[nodiscard]] Result<bool> Advance(PlaySession& session, IReplayEvaluator& evaluator);
 		[[nodiscard]] Result<ReplayPlaybackResult> GetResult() const;
-		// Idempotent; releases data and evaluator work. Caller separately pauses/releases its own time/input/audio lease.
+		// Idempotent; drops all unconsumed authored events and evaluator work. Already applied input stays at the paused
+		// boundary's state; an applied Tap retains its generated next-tick Up. Explicit held buttons/axes remain until
+		// subsequent input or input.inject releaseAll changes them. No future authored replay event enters PlayInput.
+		// Caller separately pauses/releases its own time/input/audio lease; no session pointer is retained here.
 		void Cancel();
 	private:
 		struct State;

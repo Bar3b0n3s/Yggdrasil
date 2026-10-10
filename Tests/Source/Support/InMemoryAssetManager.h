@@ -32,7 +32,8 @@ namespace Engine {
 			InMemoryAssetManager& operator=(const InMemoryAssetManager&) = delete;
 
 			// Publishes `asset` as `handle` (replacing any earlier one) and bumps its version.
-			void Publish(AssetHandle handle, AssetRef<Asset> asset);
+			// Optional readable path enables real path/require resolution in script tests. Omission retains the old path.
+			void Publish(AssetHandle handle, AssetRef<Asset> asset, std::string path = {});
 
 			// Removes `handle`: later loads fail with NotFound, as for a deleted asset.
 			void Remove(AssetHandle handle);
@@ -50,6 +51,7 @@ namespace Engine {
 			MainThreadQueue m_MainThreadQueue;
 			JobSystem m_Jobs; // inline
 			std::map<AssetHandle, AssetRef<Asset>> m_Assets;
+			std::map<AssetHandle, std::string> m_Paths;
 		};
 
 	}

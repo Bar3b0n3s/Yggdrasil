@@ -6,9 +6,12 @@
 #include "EditorCore/Commands/ProjectSettingsCommand.h"
 #include "EditorCore/Commands/SceneEdit.h"
 #include "EditorCore/EditorContext.h"
+#include "EditorCore/Scripting/EditorScriptService.h"
+#include "EditorCore/Scripting/Private/ScriptValidation.h"
 #include "Engine/App/EngineContext.h"
 #include "Engine/Asset/AssetMetadata.h"
 #include "Engine/Asset/AssetRegistry.h"
+#include "Engine/Asset/ScriptData.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/AssetPipeline/ImporterRegistry.h"
 #include "Engine/Core/Assert.h"
@@ -32,6 +35,7 @@
 #include "Engine/Scene/Components/PrefabInstanceComponent.h"
 #include "Engine/Scene/Components/RigidBodyComponent.h"
 #include "Engine/Scene/Components/RuntimeComponents.h"
+#include "Engine/Scene/Components/ScriptComponent.h"
 #include "Engine/Scene/Components/SpotLightComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/LoadReport.h"
@@ -53,6 +57,14 @@
 namespace Engine {
 
 	namespace {
+
+		constexpr std::string_view ScriptCompileErrorCode = "SCRIPT_COMPILE_ERROR";
+		constexpr std::string_view ScriptTypeErrorCode = "SCRIPT_TYPE_ERROR";
+		constexpr std::string_view ScriptNotBehaviourCode = "SCRIPT_NOT_A_BEHAVIOUR";
+		constexpr std::string_view ScriptUnknownOverrideCode = "SCRIPT_UNKNOWN_FIELD_OVERRIDE";
+		constexpr std::string_view ScriptFieldMismatchCode = "SCRIPT_FIELD_TYPE_MISMATCH";
+		constexpr std::string_view InputUnknownActionCode = "INPUT_UNKNOWN_ACTION";
+		constexpr std::string_view TestSuiteInvalidCode = "TEST_SUITE_INVALID";
 
 		constexpr std::array ValidatorCodes = {
 			SceneNoPrimaryCameraCode,
@@ -89,6 +101,12 @@ namespace Engine {
 			PhysicsNonuniformScaleCode,
 			PhysicsDynamicUnderMovingParentCode,
 			PhysicsLimitExceededCode,
+			ScriptCompileErrorCode,
+			ScriptTypeErrorCode,
+			ScriptNotBehaviourCode,
+			ScriptUnknownOverrideCode,
+			ScriptFieldMismatchCode,
+			InputUnknownActionCode,
 			// M12 (Scene/AudioSystem.h, FindAudioSceneIssues).
 			AudioNoListenerCode,
 			AudioMultiplePrimaryListenersCode,
@@ -98,6 +116,7 @@ namespace Engine {
 			RenderSpotShadowBudgetCode,
 			BuildStartSceneMissingCode,
 			BuildSceneMissingCode,
+			TestSuiteInvalidCode,
 		};
 
 		// The import diagnostics the asset manager records for an asset (the scan's come from the validator's own scan).
@@ -144,6 +163,17 @@ namespace Engine {
 			bool InArray = false; // the value is an array element (or below one)
 		};
 
+		struct ScriptReferenceFix
+		{
+			AssetHandle Script{};
+			uint64_t Version = 0;
+			std::string Field{};
+			std::optional<VariantValue> Stored{};
+			VariantValue Effective{};
+			std::vector<size_t> Indices{};
+			Ref<const ScriptFieldSchemaSource> Schemas{};
+		};
+
 		// A diagnostic with the subject its id was made from, which fixes need (ProjectDiagnostic does not carry it), for an
 		// asset scan diagnostic the registry's own diagnostic, which AssetRegistry::PlanFix identifies, and for
 		// PHYSICS_ADJACENT_STATIC_BODIES the entity its fix gives a Static RigidBody (PhysicsDiagnostic::FixTarget).
@@ -153,6 +183,7 @@ namespace Engine {
 			std::string Subject{};
 			std::optional<AssetDiagnostic> Scan{};
 			UUID FixTarget{};
+			std::optional<ScriptReferenceFix> ScriptReference{};
 		};
 
 		// What a validation found: the diagnostics, and the scan of the Assets folder that their asset fixes are planned on.
@@ -772,12 +803,153 @@ namespace Engine {
 			return {};
 		}
 
+		// The resolved descriptor carries the element's AssetFilter at every array depth. Never infer references from
+		// UUID-shaped strings or unknown overrides. Indices identify individual occurrences, including repeated handles.
+		template<typename Visit>
+		static void VisitScriptReferences(const Json& value, const FieldInfo& field, std::vector<size_t>& indices, Visit& visit)
+		{
+			if (field.GetKind() == FieldType::Array)
+			{
+				const FieldInfo* element = field.GetType().GetElementSchema();
+				if (!value.is_array() || element == nullptr)
+					return;
+				for (size_t index = 0; index < value.size(); ++index)
+				{
+					indices.push_back(index);
+					VisitScriptReferences(value[index], *element, indices, visit);
+					indices.pop_back();
+				}
+				return;
+			}
+			if ((field.GetKind() != FieldType::EntityRef && field.GetKind() != FieldType::AssetRef) || !value.is_string())
+				return;
+			const auto id = JsonReader(value).ReadUUID();
+			if (id && id->IsValid())
+				visit(field, *id, indices);
+		}
+
+		static Status CheckSceneScripts(const EditorContext& editor, const CheckedScene& checked, std::vector<CollectedDiagnostic>& diagnostics)
+		{
+			const EditorScriptService* service = editor.GetScriptService();
+			if (service == nullptr)
+				return {};
+			struct InstanceSnapshot
+			{
+				UUID Entity{};
+				std::string Path{};
+				ScriptComponent Component{};
+			};
+			struct SchemaSnapshot
+			{
+				AssetRef<ScriptData> Script{};
+				Ref<const ScriptFieldSchemaSource> Schemas{};
+				uint64_t Version = 0;
+			};
+			// Loading may drain asset publications. Copy scene values before loading, and pin one immutable schema per
+			// handle for the whole pass; fixes retain that same schema rather than resolving a later asset generation.
+			std::vector<InstanceSnapshot> instances;
+			checked.Target->ForEachCanonical([&checked, &instances](ConstEntity entity)
+			{
+				if (entity.HasComponent<ScriptComponent>())
+					instances.push_back({ entity.GetUUID(), checked.Target->GetEntityPath(entity), entity.GetComponent<ScriptComponent>() });
+			});
+			std::map<AssetHandle, std::optional<SchemaSnapshot>> snapshots;
+			for (const InstanceSnapshot& instance : instances)
+			{
+				const ScriptComponent& component = instance.Component;
+				const AssetHandle handle = component.Script.GetHandle();
+				if (!handle.IsValid() || editor.GetAssets().GetAssetType(handle) != AssetType::Script)
+					continue; // The ordinary asset reference validator reports missing or mistyped handles.
+				auto [snapshot, inserted] = snapshots.try_emplace(handle);
+				if (inserted)
+				{
+					const auto loaded = service->GetFields(handle);
+					if (loaded)
+					{
+						ENGINE_TRY_ASSIGN(auto schemas, ScriptFieldSchemaSource::Create({ { handle, *loaded } }));
+						snapshot->second = SchemaSnapshot{ *loaded, std::move(schemas), editor.GetAssets().GetVersion(handle) };
+					}
+				}
+				if (!snapshot->second)
+					continue; // Source diagnostics below report compilation/import failures once per source.
+				const SchemaSnapshot& schema = *snapshot->second;
+				DiagnosticSite site{ .File = checked.File, .Entity = instance.Entity.ToString(), .Component = "Script", .Field = "Script" };
+				if (schema.Script->Kind != ScriptKind::Behaviour)
+				{
+					auto diagnostic = MakeDiagnostic(ScriptNotBehaviourCode, DiagnosticSeverity::Error, "Script requires a Behaviour asset", site,
+						"assign a script that returns Script.Define", false);
+					diagnostic.Diagnostic.Asset = handle.ToString();
+					diagnostics.push_back(std::move(diagnostic));
+					continue;
+				}
+				std::map<std::string, VariantValue> effective;
+				for (const ScriptFieldSchema& declaration : schema.Script->Fields)
+					effective.emplace(declaration.Name, declaration.DefaultValue);
+				for (const auto& [name, value] : component.Fields)
+				{
+					site.Field = "Fields." + name;
+					site.Subject = name;
+					const auto descriptor = schema.Schemas->FindField(handle, name);
+					if (!descriptor)
+					{
+						diagnostics.push_back(MakeDiagnostic(ScriptUnknownOverrideCode, DiagnosticSeverity::Error,
+							std::format("script declares no field '{}'; the override is preserved", name), site,
+							"remove or rename the override to a declared field", false));
+						continue;
+					}
+					ValidationContext validation;
+					(*descriptor)->ValidateJson(JsonReader(value.Get()), {}, validation);
+					if (!validation.HasErrors())
+						effective[name] = value;
+					for (const auto& issue : validation.GetIssues())
+					{
+						site.Subject = name + issue.JsonPointer;
+						diagnostics.push_back(MakeDiagnostic(ScriptFieldMismatchCode, DiagnosticSeverity::Error,
+							std::format("{}{}: {}; the declared default is used", name, issue.JsonPointer, issue.Message), site,
+							"correct the override to match its declared type and constraints", false));
+					}
+				}
+				for (const auto& [name, value] : effective)
+				{
+					ENGINE_TRY_ASSIGN(const FieldInfo* descriptor, schema.Schemas->FindField(handle, name));
+					const auto visit = [&](const FieldInfo& reference, UUID target, const std::vector<size_t>& indices)
+					{
+						DiagnosticSite where = site;
+						where.Field = "Fields." + name;
+						for (const size_t index : indices)
+							where.Field += std::format("[{}]", index);
+						where.Subject = target.ToString();
+						const std::string owner = std::format("'Script.{}' of '{}'", where.Field, instance.Path);
+						if (reference.GetKind() == FieldType::AssetRef)
+						{
+							CheckAssetReference(editor, target, reference.GetMeta().AssetFilter, where, owner, diagnostics);
+							return;
+						}
+						if (checked.Target->FindEntityByID(target).IsValid())
+							return;
+						auto diagnostic = MakeDiagnostic(EntityDanglingReferenceCode, DiagnosticSeverity::Warning,
+							std::format("{} refers to {}, which is not an entity of the scene", owner, target.ToString()), where,
+							checked.IsOpenScene ? "fix it to clear this reference override, or point it at an existing entity"
+												: "open the scene (scene.open) to fix it, or point it at an existing entity",
+							checked.IsOpenScene);
+						const auto stored = component.Fields.find(name);
+						diagnostic.ScriptReference = ScriptReferenceFix{ .Script = handle, .Version = schema.Version, .Field = name, .Stored = stored == component.Fields.end() ? std::nullopt : std::optional(stored->second), .Effective = value, .Indices = indices, .Schemas = schema.Schemas };
+						diagnostics.push_back(std::move(diagnostic));
+					};
+					std::vector<size_t> indices;
+					VisitScriptReferences(value.Get(), *descriptor, indices, visit);
+				}
+			}
+			return {};
+		}
+
 		static Status CheckScene(const EditorContext& editor, const CheckedScene& checked, std::vector<CollectedDiagnostic>& diagnostics)
 		{
 			CheckCameras(checked, diagnostics);
 			CheckAudio(checked, diagnostics);
 			CheckDanglingReferences(checked, diagnostics);
 			CheckSceneAssets(editor, checked, diagnostics);
+			ENGINE_TRY(CheckSceneScripts(editor, checked, diagnostics));
 			CheckPhysics(editor, checked, diagnostics);
 			CheckLightLimit(checked, diagnostics);
 			return CheckRenderScene(editor, checked, diagnostics);
@@ -857,6 +1029,31 @@ namespace Engine {
 				diagnostics.push_back(MakeDiagnostic(BuildSceneMissingCode, DiagnosticSeverity::Error,
 					std::format("Export.BuildScenes names '{}', which is not a scene file", scene), site,
 					"fix it to remove the entry, or create the scene with scene.new", true));
+			}
+			for (size_t index = 0; index < settings.Testing.Suites.size(); ++index)
+			{
+				const auto& suite = settings.Testing.Suites[index];
+				site.Field = std::format("Testing.Suites[{}]", index);
+				site.Subject = std::to_string(index);
+				const auto path = VfsPath::Create("project", suite.Script);
+				const AssetRecord* record = path ? editor.GetAssets().GetRegistry().FindBySourcePath(*path) : nullptr;
+				bool validScript = false;
+				if (record != nullptr && record->Metadata.Type == AssetType::Script && editor.GetScriptService() != nullptr)
+				{
+					const auto script = editor.GetScriptService()->GetFields(record->Metadata.Handle);
+					validScript = script && (*script)->Kind == ScriptKind::TestSuite;
+				}
+				if (!validScript)
+					diagnostics.push_back(MakeDiagnostic(TestSuiteInvalidCode, DiagnosticSeverity::Error,
+						std::format("{} does not name a valid TestSuite script: '{}'", site.Field, suite.Script), site,
+						"assign a script that returns Test.Suite", false));
+				if (!suite.Scene.empty() && !ProjectFileExists(editor, suite.Scene))
+				{
+					site.Subject += "/Scene";
+					diagnostics.push_back(MakeDiagnostic(TestSuiteInvalidCode, DiagnosticSeverity::Error,
+						std::format("{} names a missing scene: '{}'", site.Field, suite.Scene), site,
+						"create the scene or use an empty Scene for an empty test scene", false));
+				}
 			}
 		}
 
@@ -1024,6 +1221,89 @@ namespace Engine {
 			return report;
 		}
 
+		static Status CheckScriptSources(const EditorContext& editor, ValidationScope scope, std::vector<CollectedDiagnostic>& diagnostics)
+		{
+			std::vector<VfsPath> paths;
+			if (scope == ValidationScope::Project)
+			{
+				ENGINE_TRY_ASSIGN(const VfsPath root, VfsPath::Create("project", "Assets"));
+				if (!editor.GetVfs().Exists(root))
+					return {};
+				ENGINE_TRY_ASSIGN(const auto entries, editor.GetVfs().List(root, true));
+				for (const auto& entry : entries)
+				{
+					if (!entry.Info.IsDirectory && entry.Path.GetExtension() == ".luau")
+						paths.push_back(entry.Path);
+				}
+			}
+			else if (editor.HasScene())
+			{
+				editor.GetScene().ForEachCanonical([&editor, &paths](ConstEntity entity)
+				{
+					if (!entity.HasComponent<ScriptComponent>())
+						return;
+					const auto* record = editor.GetAssets().GetRegistry().Find(entity.GetComponent<ScriptComponent>().Script.GetHandle());
+					if (record != nullptr && record->Metadata.Type == AssetType::Script)
+						paths.push_back(record->SourcePath);
+				});
+			}
+			if (paths.empty())
+				return {};
+			std::ranges::sort(paths);
+			paths.erase(std::unique(paths.begin(), paths.end()), paths.end());
+			const EditorScriptService* service = editor.GetScriptService();
+			if (service == nullptr)
+				return MakeError(ErrorCode::InvalidState, "script validation service is unavailable");
+			ENGINE_TRY_ASSIGN(const auto checked, service->Check(paths));
+			for (const auto& diagnostic : checked.Diagnostics)
+			{
+				DiagnosticSite site{ .File = diagnostic.File, .Subject = std::format("{}:{}:{}:{}:{}", diagnostic.Line, diagnostic.Column, diagnostic.EndLine, diagnostic.EndColumn, diagnostic.Message) };
+				auto finding = MakeDiagnostic(ScriptTypeErrorCode, diagnostic.Severity, diagnostic.Message, site,
+					std::format("correct the script at {}:{} (range ends at {}:{})", diagnostic.Line, diagnostic.Column, diagnostic.EndLine, diagnostic.EndColumn), false);
+				finding.Diagnostic.Line = diagnostic.Line;
+				diagnostics.push_back(std::move(finding));
+			}
+			std::vector<std::string> actions;
+			for (const auto& entry : editor.GetProject().GetSettings().Input.Actions)
+				actions.push_back(entry.first);
+			for (const VfsPath& path : paths)
+			{
+				ENGINE_TRY_ASSIGN(const std::string source, service->Read(path));
+				const auto sourceFindings = Detail::ValidateScriptSource(path.GetPath(), source, actions);
+				bool syntaxFailure = false;
+				for (const auto& diagnostic : sourceFindings)
+				{
+					syntaxFailure |= diagnostic.Code == ScriptCompileErrorCode;
+					DiagnosticSite site{ .File = diagnostic.File, .Subject = std::format("{}:{}:{}", diagnostic.Line, diagnostic.Column, diagnostic.Message) };
+					auto finding = MakeDiagnostic(diagnostic.Code, diagnostic.Severity, diagnostic.Message, site,
+						diagnostic.Code == InputUnknownActionCode ? "declare the action in Input.Actions or correct the literal" : "correct the Luau syntax", false);
+					finding.Diagnostic.Line = diagnostic.Line;
+					diagnostics.push_back(std::move(finding));
+				}
+				const auto* record = editor.GetAssets().GetRegistry().FindBySourcePath(path);
+				if (!syntaxFailure && record != nullptr)
+				{
+					const AssetHandle handle = record->Metadata.Handle;
+					const auto fields = service->GetFields(record->Metadata.Handle);
+					std::string failure = fields ? std::string() : fields.error().GetMessageText();
+					// Load may legitimately return the last good artifact after a failed reimport. That does not make the
+					// latest source valid: report the attempt's diagnostic separately from the preserved asset.
+					for (const AssetDiagnostic& attempt : editor.GetAssets().GetDiagnostics())
+					{
+						if (attempt.Asset == handle && attempt.Code == AssetImportFailedCode)
+							failure = attempt.Message;
+					}
+					if (!failure.empty())
+					{
+						DiagnosticSite site{ .File = std::string(path.GetPath()) };
+						diagnostics.push_back(MakeDiagnostic(ScriptCompileErrorCode, DiagnosticSeverity::Error, std::move(failure), site,
+							"correct the load-time script or its required modules", false));
+					}
+				}
+			}
+			return {};
+		}
+
 		// The project's physics layer table (PhysicsSettings), which the physics checks resolve layer names against; nullopt,
 		// logged, when the settings give none (a loaded project's always do: its settings passed the same rules).
 		static std::optional<PhysicsLayerTable> MakePhysicsLayers(const EditorContext& context)
@@ -1052,6 +1332,7 @@ namespace Engine {
 
 			Collection collection;
 			std::vector<CollectedDiagnostic>& diagnostics = collection.Diagnostics;
+			ENGINE_TRY(CheckScriptSources(context, scope, diagnostics));
 			const std::optional<PhysicsLayerTable> layers = MakePhysicsLayers(context);
 			const PhysicsLayerTable* physicsLayers = layers.has_value() ? &*layers : nullptr;
 			const std::optional<VfsPath>& openPath = context.GetScenePath();
@@ -1078,6 +1359,49 @@ namespace Engine {
 			}
 			SortDiagnostics(diagnostics);
 			return collection;
+		}
+
+		static Status FixScriptReferences(EditorContext& editor, Entity entity, const std::vector<const CollectedDiagnostic*>& fixes)
+		{
+			if (!entity.HasComponent<ScriptComponent>())
+				return MakeError(ErrorCode::Conflict, "script component changed after validation");
+			ScriptComponent component = entity.GetComponent<ScriptComponent>();
+			std::map<std::string, Json> replacements;
+			for (const CollectedDiagnostic* collected : fixes)
+			{
+				const ScriptReferenceFix& fix = *collected->ScriptReference;
+				if (component.Script.GetHandle() != fix.Script || editor.GetAssets().GetVersion(fix.Script) != fix.Version)
+					return MakeError(ErrorCode::Conflict, "script schema changed after validation");
+				const auto stored = component.Fields.find(fix.Field);
+				if (fix.Stored ? stored == component.Fields.end() || stored->second != *fix.Stored : stored != component.Fields.end())
+					return MakeError(ErrorCode::Conflict, "script override changed after validation");
+				auto [replacement, inserted] = replacements.try_emplace(fix.Field, fix.Effective.Get());
+				static_cast<void>(inserted);
+				Json* value = &replacement->second;
+				for (const size_t index : fix.Indices)
+				{
+					if (!value->is_array() || index >= value->size())
+						return MakeError(ErrorCode::Conflict, "script reference shape changed after validation");
+					value = &(*value)[index];
+				}
+				*value = nullptr;
+			}
+			const ScriptReferenceFix& first = *fixes.front()->ScriptReference;
+			for (auto& [name, value] : replacements)
+			{
+				ENGINE_TRY_ASSIGN(const FieldInfo* field, first.Schemas->FindField(first.Script, name));
+				ValidationContext validation;
+				field->ValidateJson(JsonReader(value), {}, validation);
+				ENGINE_TRY(validation.ToStatus("script reference fix"));
+				component.Fields.insert_or_assign(name, VariantValue(std::move(value)));
+			}
+			// Validate the changed fields through their pinned schema, then publish one tracked patch. Revalidating the
+			// whole component would reject unrelated legacy overrides that the script contract requires us to preserve.
+			entity.Patch<ScriptComponent>([&component](ScriptComponent& target)
+			{
+				target.Fields = std::move(component.Fields);
+			});
+			return {};
 		}
 
 		// The scene fixes (cameras, audio listeners, adjacent static bodies, dangling references) of the selected diagnostics,
@@ -1175,6 +1499,11 @@ namespace Engine {
 				const ComponentInfo* info = editor.GetTypeRegistry().FindComponent(key.second);
 				if (!entity.IsValid() || info == nullptr)
 					continue;
+				if (fixes.front()->ScriptReference)
+				{
+					ENGINE_TRY(FixScriptReferences(editor, entity, fixes));
+					continue;
+				}
 				ENGINE_TRY_ASSIGN(Json component, ComponentAccess::GetComponentJson(entity, key.second));
 				const auto visit = [&scene, &fixes](const EntityRefSite& site, UUID id)
 				{

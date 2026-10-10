@@ -24,12 +24,12 @@
 // documented step order. The editor creates one per Play or Simulate from the open edit scene (serializer copy, §5.6), the
 // Runtime one from the start scene of its Game.pak (§14.3): the same SceneSerializer::FromJson path, strict, so "works in
 // the editor, broken in export" cannot happen. The session owns its runtime scene, its seeded UUIDGenerator and Random
-// (§4.8, §4.12), its game input (PlayInput) and the game view's last render snapshot; physics (M11), scripts (M13) and audio
-// (M12) join it in their milestones, in the hook phases below, which are empty in M7.
+// (§4.8, §4.12), its game input (PlayInput), physics, scripts, audio and the game view's last render snapshot.
 //
 // Frozen by the M7 contract (Docs/Decisions/0012-m7-decisions.md decisions 2 to 5); the M12 contract added the audio hook
 // (PlaySessionSpecification::Audio and OwnsAudioTime, GetAudioSystem, IsAudioTimeOwned and the "Audio" paragraph below;
-// Docs/Decisions/0015-m12-decisions.md).
+// Docs/Decisions/0015-m12-decisions.md). M13 adds scripting, replay recording and frame-end scene replacement
+// (Docs/Decisions/0019-m13-contract.md).
 
 namespace Engine {
 
@@ -116,10 +116,10 @@ namespace Engine {
 	};
 
 	// Instrumentation of the step order (§5.7 "documented and tested"; "PlaySession: step order matches the documented
-	// sequence"): the session calls OnPhase at the start of every phase it runs, the empty hook phases of M7 included. The
-	// observer may change the session's scene during FixedUpdate, Update, LateUpdate and PhysicsStep, standing in for the
-	// scripts (M13) and physics (M11) that will act there ("Interpolation: script-moved entities interpolate; frame-phase
-	// writes, teleports and new entities do not"). Production code installs none. Simulate mode skips the script and audio
+	// sequence"): the session calls OnPhase at the start of every phase it runs. The observer may change the session's
+	// scene during FixedUpdate, Update, LateUpdate and PhysicsStep to exercise phase-dependent behavior
+	// ("Interpolation: script-moved entities interpolate; frame-phase writes, teleports and new entities do not").
+	// Production code installs none. Simulate mode skips the script and audio
 	// phases (StartFlush, FixedUpdate, Tasks, FrameStartFlush, Update, LateUpdate, AudioUpdate) entirely, so they are not
 	// reported there.
 	class IPlaySessionObserver
@@ -151,14 +151,13 @@ namespace Engine {
 	};
 
 	// Everything a session needs to start. The project's settings are copied in whole, so a session never reads the project
-	// again (a settings change during play takes effect at the next Play) and the systems of later milestones find theirs
-	// here (Physics in M11, Scripting in M13) without a change to this struct.
+	// again (a settings change during play takes effect at the next Play).
 	struct PlaySessionSpecification
 	{
 		// Required, frozen, outliving the session (documented back-reference, §4.7): the context's registry.
 		const TypeRegistry* Registry = nullptr;
-		// The context's asset manager, outliving the session; may be null in M7 (prefab instantiation and Scene.Load from
-		// scripts need it in M13).
+		// The context's asset manager, outliving the session; may be null for scenes without assets. Prefab instantiation
+		// and Scene.Load from scripts require it.
 		AssetManager* Assets = nullptr;
 		PlayMode Mode = PlayMode::Play;
 		// The session seed (§4.8, §4.12): ComputeSessionSeed(Project Simulation.Seed, Scene.Seed), or play.start's seed. Seeds
@@ -182,7 +181,7 @@ namespace Engine {
 		// M12: the context's audio engine (EngineContext::GetAudioEngine), outliving the session; null: a silent session (no
 		// AudioSystem). See "Audio" in PlaySession's comment.
 		AudioEngine* Audio = nullptr;
-		// M12: the session owns the engine's simulation time from its creation to its end, in lockstep or not: a test run
+		// M12: the session owns the engine's simulation time from activation to its end, in lockstep or not: a test run
 		// (§10.1 "or a test run is active"; M13's FeatureTest runner sets it for every suite, ScriptedClock suites included,
 		// §11.10). Without it the session owns audio time only while it is in lockstep. Ignored without an AudioSystem.
 		bool OwnsAudioTime = false;
@@ -241,7 +240,8 @@ namespace Engine {
 	// Audio (§5.6, §5.7, §10.1, §10.2; M12). A Play session with PlaySessionSpecification::Audio owns an AudioSystem over its
 	// scene (GetAudioSystem; none in Simulate mode and none without an engine). Scripts reach the AudioSource methods,
 	// Audio.PlayOneShot and Audio.SetGroupVolume/GetGroupVolume through it (M13), so a game's mix ends with its session.
-	//   - Start and hold. Create builds the AudioSystem with its voices held (paused) and ends with AudioSystem::Start (§5.6:
+	//   - Start and hold. Activate builds the AudioSystem with its voices held (paused), initializes its mix before scripts,
+	//     and ends with AudioSystem::Start (§5.6:
 	//     "PlayOnStart audio starts"), so PlayOnStart voices exist at tick 0 with their cursors at 0. The first AudioUpdate
 	//     phase releases the hold: whatever paused and lockstep state the host applies after Create (EditorPlayController,
 	//     the Runtime's --paused) is in force before a voice can play on a device.
@@ -250,7 +250,7 @@ namespace Engine {
 	//     paused flag, since play.step is its only clock (§10.1: "voices advance with simulation time").
 	//   - Time ownership (§10.1). The session owns the engine's simulation time (AudioEngine::BeginSimulationTime with
 	//     Simulation.FixedHz) while it is in lockstep (SetLockstep(true); lockstep owned by a client or by an in-process
-	//     driver) and for its whole life when PlaySessionSpecification::OwnsAudioTime is set (a test run). Then the device
+	//     driver) and from activation to destruction when PlaySessionSpecification::OwnsAudioTime is set (a test run). Then the device
 	//     reads nothing, and each AudioUpdate phase pulls, after AudioSystem::Update, one tick of frames
 	//     (AudioEngine::AdvanceSimulationTick) for every tick run since the last pull: exactly one per Tick, and 0 to
 	//     MaxStepsPerFrame per frame of a ScriptedClock test run. Ticks run before the session took time are never pulled.
@@ -269,14 +269,14 @@ namespace Engine {
 		// The largest time scale play.setTimeScale and play.start accept.
 		static constexpr double MaxTimeScale = 100.0;
 
-		// Restricts construction to Create; CreateScope still reaches the constructor.
+		// Restricts construction to the factories; CreateScope still reaches the constructor.
 		class ConstructionKey
 		{
 			ConstructionKey() = default;
 			friend class PlaySession;
 		};
 
-		// Use Create.
+		// Use Create or Prepare followed by Activate.
 		explicit PlaySession(ConstructionKey key);
 		~PlaySession();
 
@@ -296,6 +296,14 @@ namespace Engine {
 		// their JSON pointer, UnsupportedVersion) with the context "while starting the play session"; InvalidState
 		// "entity limit <N> reached" when the document holds more entities than MaxEntities; Validation from PlayInput::Create.
 		[[nodiscard]] static Result<Scope<PlaySession>> Create(const PlaySessionSpecification& specification, const Json& sceneDocument);
+		// The fallible part of Create: validates/loads the scene, input, physics and empty script VM, without gameplay
+		// callbacks, voices or mixer/time ownership. A rejected or discarded candidate leaves an existing session intact.
+		// Only configure run state or inspect the candidate until Activate; do not advance or invoke its script VM.
+		[[nodiscard]] static Result<Scope<PlaySession>> Prepare(const PlaySessionSpecification& specification, const Json& sceneDocument);
+		// Once, after retiring the previous session: acquire audio, initialize instances and run startup callbacks,
+		// then start PlayOnStart voices. Script faults use the normal error stream/pause/fatal-stop path, not an outer
+		// preparation error. Create is Prepare followed by Activate. Activate itself does not return a fallible result.
+		void Activate();
 
 		// The serializer copy of §5.6: SceneSerializer::ToJson(editScene) into an in-memory document, then Create. `editScene`
 		// is only read. Errors: those of ToJson and Create.
@@ -336,6 +344,9 @@ namespace Engine {
 		[[nodiscard]] const ScriptEngine* GetScripts() const;
 		[[nodiscard]] uint64_t GetSceneGeneration() const;
 		[[nodiscard]] const Json& GetLoadParameters() const;
+		// Session-owned history, including faults of scenes whose VM has been replaced. Cursors never reset on Scene.Load.
+		[[nodiscard]] ScriptErrorStream& GetScriptErrors();
+		[[nodiscard]] const ScriptErrorStream& GetScriptErrors() const;
 		// Application.Quit records the first request. The editor stops play and the Runtime exits only after returning
 		// from the current frame; a test hook also receives it for ExpectQuit. It is not a recursive destruction call.
 		[[nodiscard]] std::optional<int32_t> GetQuitRequest() const;

@@ -29,7 +29,8 @@ and configuration:
    reciprocal math, finite math only, no NaNs or infinities, no signed zeros, no trapping math, limited complex
    range, approximate functions, fast excess precision), or an effective -ffp-contract other than "off" (it must be
    explicit: GCC's C++ default is "fast", clang-cl's is "on"). C sources are checked with the C compiler's flags;
-5. the solution builds EditorCore, Editor or Tests in Dist, or does not build Engine or Runtime in Dist.
+5. the solution builds EditorCore, Editor or Tests in Dist, or does not build Engine or Runtime in Dist;
+6. a Windows project does not select x64 host tools (the 32-bit linker can exhaust its address space).
 
 --workspace runs the check on another workspace, such as the fixtures in Tests/Data/BuildConfig/, each of which is
 the real workspace with one defect and must fail.
@@ -216,6 +217,7 @@ class Project:
     sources: list[Path] = dataclasses.field(default_factory=list)
     include_dirs: dict[str, set[str]] = dataclasses.field(default_factory=dict)  # config -> normalized paths
     units: dict[str, list[CompileUnit]] = dataclasses.field(default_factory=dict)  # config -> units (first: project)
+    tool_architectures: dict[str, str] = dataclasses.field(default_factory=dict)  # MSBuild host tools, by config
 
 
 @dataclasses.dataclass
@@ -378,6 +380,10 @@ def parse_vcxproj(path: Path) -> Project:
 
     for group in root.findall("msb:PropertyGroup", MSBUILD_NAMESPACE):
         config = condition_configuration(group)
+        architecture = group.find("msb:PreferredToolArchitecture", MSBUILD_NAMESPACE)
+        if architecture is not None:
+            for name in ([config] if config is not None else CONFIGURATIONS):
+                project.tool_architectures[name] = architecture.text or ""
         if config is None:
             continue
         directories = project.include_dirs.setdefault(config, set())
@@ -995,6 +1001,13 @@ def check_solution(workspace: GeneratedWorkspace, findings: list[str]) -> None:
             findings.append(f"[{target}] project {name} is missing from the solution")
         elif not builds[name]:
             findings.append(f"[{target}] the solution does not build {name} in Dist")
+
+    for name, project in sorted(workspace.projects.items()):
+        for config in CONFIGURATIONS:
+            architecture = project.tool_architectures.get(config, "unspecified")
+            if architecture != "x64":
+                findings.append(f"[{target}] {config}: {name} requires x64 host tools; "
+                                f"PreferredToolArchitecture is {architecture}")
 
 
 def check_workspace(workspace: GeneratedWorkspace, vendored: set[str], first_party: set[str]) -> list[str]:

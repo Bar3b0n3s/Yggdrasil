@@ -34,7 +34,7 @@ namespace Engine {
 		}
 
 		EditorTestFixture::EditorTestFixture(std::string_view label, CommandHistoryLimits historyLimits, RegisterTypesFunction registerTypes,
-			std::optional<AudioEngineSpecification> audio)
+			std::optional<AudioEngineSpecification> audio, bool engineResources)
 			: m_Directory(label)
 		{
 			std::error_code error;
@@ -45,6 +45,8 @@ namespace Engine {
 			Result<Scope<EngineContext>> engine = EngineContext::Create({
 				.WorkerCount = 0,
 				.UserDataDirectory = m_Directory / "UserData",
+				.EngineResourcesDirectory = engineResources ? GetRepositoryRoot() / "Resources" : std::filesystem::path{},
+				.EngineCacheDirectory = engineResources ? m_Directory / "EngineCache" : std::filesystem::path{},
 				.RegisterTypes = registerTypes != nullptr ? registerTypes : &RegisterEditorMethodTypes,
 				.Audio = audio,
 			});

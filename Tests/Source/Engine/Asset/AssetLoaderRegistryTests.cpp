@@ -19,16 +19,16 @@ namespace Engine {
 		{
 			AssetLoaderRegistry loaders;
 			RegisterBuiltinLoaders(loaders);
-			// The M6 loaders, M8's environment loader and M12's audio clip loader, in AssetType order.
+			// Every supported asset kind, in persisted AssetType order.
 			const std::vector<AssetType> expected = { AssetType::Scene, AssetType::Prefab, AssetType::Mesh, AssetType::Material,
-				AssetType::Texture, AssetType::Environment, AssetType::AudioClip, AssetType::Font };
+				AssetType::Texture, AssetType::Environment, AssetType::AudioClip, AssetType::Script, AssetType::Font, AssetType::Replay };
 			CHECK(loaders.GetTypes() == expected);
 			for (const AssetType type : expected)
 			{
 				REQUIRE(loaders.Find(type) != nullptr);
 				CHECK(loaders.Find(type)->GetType() == type);
 			}
-			CHECK(loaders.Find(AssetType::Replay) == nullptr);
+			CHECK(loaders.Find(AssetType::None) == nullptr);
 		}
 
 		TEST_CASE("AssetLoaderRegistry: dispatches by the cooked header's type")
@@ -49,12 +49,12 @@ namespace Engine {
 		{
 			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
 			AssetLoaderRegistry loaders;
-			RegisterBuiltinLoaders(loaders);
 			const std::byte payload[4] = {};
 			const Buffer replay = WriteCookedArtifact(AssetType::Replay, 1, 1, payload);
 			Result<AssetRef<Asset>> unsupported = loaders.Load(replay, { .Registry = registry.get(), .Handle = AssetHandle(0x201) });
 			REQUIRE_FALSE(unsupported.has_value());
 			CHECK(unsupported.error().GetCode() == ErrorCode::Unsupported);
+			RegisterBuiltinLoaders(loaders);
 
 			Buffer truncated = CookMesh(GenerateBuiltinMesh(BuiltinMesh::Quad), 1);
 			truncated.resize(truncated.size() / 2);

@@ -28,6 +28,10 @@
 //           "Artifacts": [ { "Handle", "Type", "Key" } ... ],   main first, then sub-assets by key (ImportResult order)
 //           "Dependencies": [ "<handle>" ... ], "Diagnostics": [ { "Severity", "Code", "Path", "Message", "Hint",
 //           "Subject" } ... ], "Reads": [ { "Path", "XXH64" } ... ], "Lookups": [ { "Path", "Handle", "Type" } ... ] }
+// M13 extends Version 1 with optional ScriptCheck { Performed, EnvironmentHash, SourceHash, Diagnostics }, whose hashes
+// are 16 hex digits and diagnostics retain Severity, Code, File, Line, Column, Message, EndLine and EndColumn. Absence is
+// unchecked. Handle lookup records add RequestedHandle, FoundPath (null on a miss) and Owner, and have an empty Path;
+// legacy path records retain their original representation. These additions never change cooked runtime bytes.
 // The source's dependency files (a glTF's .bin and images) are not part of the key, because the key is computed before the
 // import knows them; the manifest records what the import read and looked up, and a hit is valid only while every read
 // file still hashes the same and every lookup still finds the same asset (the EditorAssetManager checks with

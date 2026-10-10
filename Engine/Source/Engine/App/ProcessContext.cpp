@@ -9,6 +9,7 @@
 #include "Engine/Platform/CrashHandler.h"
 #include "Engine/Platform/ErrorDialog.h"
 #include "Engine/Platform/Process.h"
+#include "Engine/Scripting/Sandbox.h"
 
 #include <array>
 #include <atomic>
@@ -22,10 +23,11 @@ namespace Engine {
 		// The live context, read by the fatal-error handler on whichever thread fails (process-level state, §3 rule 5).
 		static std::atomic<ProcessContext*> s_CurrentProcessContext{ nullptr };
 
-		constexpr std::array<ProcessContextStep, 6> ProcessContextSteps = {
+		constexpr std::array<ProcessContextStep, 7> ProcessContextSteps = {
 			ProcessContextStep::Log,
 			ProcessContextStep::Profiler,
 			ProcessContextStep::CrashHandler,
+			ProcessContextStep::Scripting,
 			ProcessContextStep::Physics,
 			ProcessContextStep::VulkanLoader,
 			ProcessContextStep::Glfw,
@@ -150,6 +152,11 @@ namespace Engine {
 				m_PreviousFatalErrorHandler = SetFatalErrorHandler(&ProcessContext::HandleFatalError);
 				break;
 			}
+			case ProcessContextStep::Scripting:
+			{
+				ENGINE_TRY(InitializeScriptingRuntime());
+				break;
+			}
 			case ProcessContextStep::Physics:
 			{
 				// Jolt's allocator, factory, types and job system (§9.1), after the crash handler that its asserts report to.
@@ -204,6 +211,9 @@ namespace Engine {
 			case ProcessContextStep::Physics:
 				PhysicsEngine::Shutdown();
 				break;
+			case ProcessContextStep::Scripting:
+				ShutdownScriptingRuntime();
+				break;
 			case ProcessContextStep::VulkanLoader:
 				VulkanDispatch::Shutdown();
 				m_IsVulkanLoaderAvailable = false;
@@ -256,6 +266,7 @@ namespace Engine {
 			case ProcessContextStep::Log:          return "Log";
 			case ProcessContextStep::Profiler:     return "Profiler";
 			case ProcessContextStep::CrashHandler: return "CrashHandler";
+			case ProcessContextStep::Scripting:    return "Scripting";
 			case ProcessContextStep::Physics:      return "Physics";
 			case ProcessContextStep::VulkanLoader: return "VulkanLoader";
 			case ProcessContextStep::Glfw:         return "Glfw";

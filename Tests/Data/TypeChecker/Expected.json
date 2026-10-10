@@ -1,0 +1,58 @@
+[
+	{
+		"Path": "Bounds.luau",
+		"Clean": true
+	},
+	{
+		"Path": "Cast.luau",
+		"Clean": true
+	},
+	{
+		"Path": "ComponentOverloads.luau",
+		"Clean": true
+	},
+	{
+		"Path": "Errors/ComponentOverload.luau",
+		"Clean": false
+	},
+	{
+		"Path": "Errors/GenericMethod.luau",
+		"Clean": false
+	},
+	{
+		"Path": "Errors/Optional.luau",
+		"Clean": false
+	},
+	{
+		"Path": "Errors/Sealed.luau",
+		"Clean": false
+	},
+	{
+		"Path": "Errors/Type.luau",
+		"Clean": false,
+		"Ranges": [
+			[
+				1,
+				23,
+				1,
+				28
+			]
+		]
+	},
+	{
+		"Path": "Fields.luau",
+		"Clean": true
+	},
+	{
+		"Path": "Templates/Behaviour.luau",
+		"Clean": true
+	},
+	{
+		"Path": "Templates/Module.luau",
+		"Clean": true
+	},
+	{
+		"Path": "Templates/Test.luau",
+		"Clean": true
+	}
+]

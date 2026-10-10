@@ -22,6 +22,9 @@ namespace Engine {
 		constexpr std::string_view DumpReferenceOption = "--dump-reference";
 		constexpr std::string_view BakeEngineAssetsOption = "--bake-engine-assets";
 		constexpr std::string_view EngineCacheDirectoryOption = "--engine-cache-dir";
+		constexpr std::string_view CheckScriptsOption = "--check-scripts";
+		constexpr std::string_view RunTestsOption = "--run-tests";
+		constexpr std::string_view FilterOption = "--filter";
 
 		constexpr std::array EditorOptions = {
 			CommandLineOption{ .Name = ProjectOption, .Value = CommandLineValue::Required, .ValueName = "path", .Description = "Open the project (.eproj or its directory)." },
@@ -33,6 +36,9 @@ namespace Engine {
 			CommandLineOption{ .Name = DumpReferenceOption, .Value = CommandLineValue::Required, .ValueName = "dir", .Description = "Write the method catalogues and exit." },
 			CommandLineOption{ .Name = BakeEngineAssetsOption, .Value = CommandLineValue::None, .ValueName = {}, .Description = "Bake the engine resources into the engine cooked cache and exit." },
 			CommandLineOption{ .Name = EngineCacheDirectoryOption, .Value = CommandLineValue::Required, .ValueName = "dir", .Description = "Use this engine cooked cache instead of the checkout's bin/EngineCache." },
+			CommandLineOption{ .Name = CheckScriptsOption, .Value = CommandLineValue::None, .ValueName = {}, .Description = "Check every project script and exit with failure on errors." },
+			CommandLineOption{ .Name = RunTestsOption, .Value = CommandLineValue::None, .ValueName = {}, .Description = "Run configured script suites and replays and exit with their result." },
+			CommandLineOption{ .Name = FilterOption, .Value = CommandLineValue::Required, .ValueName = "pattern", .Description = "Select script test suites/cases for --run-tests." },
 		};
 
 	}
@@ -77,6 +83,14 @@ namespace Engine {
 		options.AutomationTestHooks = commandLine.Has(TestHooksOption);
 		ENGINE_TRY_ASSIGN(options.BatchFile, Utils::ReadPathOption(commandLine, BatchOption));
 		options.Upgrade = commandLine.Has(UpgradeOption);
+		options.CheckScripts = commandLine.Has(CheckScriptsOption);
+		options.RunTests = commandLine.Has(RunTestsOption);
+		if (const auto filter = commandLine.GetValue(FilterOption))
+		{
+			if (!options.RunTests || !IsValidUtf8(*filter))
+				return MakeError(ErrorCode::InvalidArgument, "option '{}' requires '{}' and a UTF-8 pattern", FilterOption, RunTestsOption);
+			options.TestFilter = *filter;
+		}
 		ENGINE_TRY_ASSIGN(options.DumpReferenceDirectory, Utils::ReadPathOption(commandLine, DumpReferenceOption));
 		options.BakeEngineAssets = commandLine.Has(BakeEngineAssetsOption);
 		ENGINE_TRY_ASSIGN(options.EngineCacheDirectory, Utils::ReadPathOption(commandLine, EngineCacheDirectoryOption));
@@ -85,19 +99,21 @@ namespace Engine {
 			return MakeError(ErrorCode::InvalidArgument, "option '{}' needs '{}'", ReadOnlyOption, ProjectOption);
 		if (options.Upgrade && !options.Project.has_value())
 			return MakeError(ErrorCode::InvalidArgument, "option '{}' needs '{}'", UpgradeOption, ProjectOption);
+		if ((options.CheckScripts || options.RunTests) && !options.Project.has_value())
+			return MakeError(ErrorCode::InvalidArgument, "options '{}' and '{}' require '{}'", CheckScriptsOption, RunTestsOption, ProjectOption);
 		if (options.Upgrade && options.ReadOnly)
 			return MakeError(ErrorCode::InvalidArgument, "option '{}' rewrites project files, which '{}' forbids", UpgradeOption, ReadOnlyOption);
 		const int oneShotModes = (options.BatchFile.has_value() ? 1 : 0) + (options.Upgrade ? 1 : 0) + (options.DumpReferenceDirectory.has_value() ? 1 : 0)
-			+ (options.BakeEngineAssets ? 1 : 0);
+			+ (options.BakeEngineAssets ? 1 : 0) + (options.CheckScripts ? 1 : 0) + (options.RunTests ? 1 : 0);
 		if (oneShotModes > 1)
 		{
-			return MakeError(ErrorCode::InvalidArgument, "options '{}', '{}', '{}' and '{}' exclude each other", BatchOption, UpgradeOption,
-				DumpReferenceOption, BakeEngineAssetsOption);
+			return MakeError(ErrorCode::InvalidArgument, "options '{}', '{}', '{}', '{}', '{}' and '{}' exclude each other", BatchOption, UpgradeOption,
+				DumpReferenceOption, BakeEngineAssetsOption, CheckScriptsOption, RunTestsOption);
 		}
-		if ((options.Automation || options.AutomationTestHooks) && (options.DumpReferenceDirectory.has_value() || options.Upgrade || options.BakeEngineAssets))
+		if ((options.Automation || options.AutomationTestHooks) && (options.DumpReferenceDirectory.has_value() || options.Upgrade || options.BakeEngineAssets || options.CheckScripts || options.RunTests))
 		{
-			return MakeError(ErrorCode::InvalidArgument, "options '{}' and '{}' cannot be combined with '{}', '{}' or '{}'", AutomationOption,
-				TestHooksOption, DumpReferenceOption, UpgradeOption, BakeEngineAssetsOption);
+			return MakeError(ErrorCode::InvalidArgument, "options '{}' and '{}' cannot be combined with '{}', '{}', '{}', '{}' or '{}'", AutomationOption,
+				TestHooksOption, DumpReferenceOption, UpgradeOption, BakeEngineAssetsOption, CheckScriptsOption, RunTestsOption);
 		}
 		if (options.AutomationTestHooks && !options.Automation && !options.BatchFile.has_value())
 			return MakeError(ErrorCode::InvalidArgument, "option '{}' needs '{}' or '{}'", TestHooksOption, AutomationOption, BatchOption);

@@ -1,24 +1,34 @@
 #include "EnginePCH.h"
 #include "Engine/Session/PlaySession.h"
 
+#include "Engine/Asset/AssetManager.h"
+#include "Engine/Asset/DocumentData.h"
 #include "Engine/Audio/AudioEngine.h"
 #include "Engine/Core/Assert.h"
 #include "Engine/Core/FixedStepScheduler.h"
 #include "Engine/Core/Hash.h"
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Core/Log.h"
+#include "Engine/Reflection/FuzzySuggest.h"
 #include "Engine/Scene/AudioSystem.h"
 #include "Engine/Scene/Components/RuntimeComponents.h"
+#include "Engine/Scene/Components/ScriptComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/LoadReport.h"
 #include "Engine/Scene/PhysicsSystem.h"
+#include "Engine/Scene/PrefabAsset.h"
 #include "Engine/Scene/RenderExtraction.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/SceneSerializer.h"
 #include "Engine/Scene/TransformSystem.h"
+#include "Engine/Scripting/RegisterBindings.h"
+#include "Engine/Scripting/ScriptApiRegistry.h"
+#include "Engine/Scripting/ScriptEngine.h"
+#include "Engine/Session/ReplayRecorder.h"
 
 #include <cmath>
 #include <format>
+#include <limits>
 #include <utility>
 
 namespace Engine {
@@ -56,6 +66,8 @@ namespace Engine {
 		{
 			if (specification.Registry == nullptr)
 				return MakeSpecificationError("Registry", "a play session needs the context's type registry");
+			if (!specification.Parameters.IsNull() && !specification.Parameters.Get().is_object())
+				return MakeSpecificationError("Parameters", "scene parameters must be a JSON object");
 			const SimulationSettings& simulation = specification.Project.Simulation;
 			if (simulation.FixedHz < 1 || simulation.FixedHz > FrameLoopConfig::MaxFixedHz)
 			{
@@ -107,8 +119,14 @@ namespace Engine {
 
 	}
 
-	struct PlaySession::State
+	struct PlaySession::State final : IScriptHost
 	{
+		explicit State(PlaySession& session)
+			: Session(session)
+		{
+		}
+
+		PlaySession& Session; // owning session, outlives every hosted VM and subsystem
 		// The specification's back-references and settings.
 		const TypeRegistry* Registry = nullptr;
 		AssetManager* Assets = nullptr;
@@ -138,6 +156,7 @@ namespace Engine {
 		double TimeScale = 1.0;
 		bool Stepping = false;
 		bool Modified = false;
+		bool Activated = false;
 		// The game view.
 		uint32_t ViewWidth = 1;
 		uint32_t ViewHeight = 1;
@@ -160,6 +179,65 @@ namespace Engine {
 		bool AudioTimeOwned = false;
 		uint64_t AudioTick = 0;
 		bool AudioHeld = false;
+		Scope<ScriptApiRegistry> OwnedApi{};
+		ScriptApiRegistry* Api = nullptr;
+		Ref<const ScriptFieldSchemaSource> Schemas{};
+		Scope<ReplayRecorder> Recorder{};
+		Scope<ScriptEngine> Scripts{};
+		ScriptErrorStream Errors{};
+		ScriptFrameState ScriptFrame{};
+		ScriptEnvironment Environment{};
+		RunModes ScriptRunMode = RunModes::Editor;
+		bool TestMode = false;
+		IPlaySessionTestHook* TestHook = nullptr;
+		IScriptTestHost* TestHost = nullptr;
+		IPlaySessionHost* Host = nullptr;
+		uint64_t SceneGeneration = 1;
+		Json Parameters = Json::object();
+		std::optional<int32_t> QuitRequest{};
+		bool FatalStop = false;
+		bool ReplacingScene = false;
+		DebugDrawList DebugDraw{};
+		Scope<Scene> PendingScene{};
+		Json PendingParameters = Json::object();
+
+		[[nodiscard]] Scene& GetScene() override { return *RuntimeScene; }
+		[[nodiscard]] const TypeRegistry& GetTypes() const override { return *Registry; }
+		[[nodiscard]] AssetManager* GetAssets() override { return Assets; }
+		[[nodiscard]] const IFieldSchemaSource* GetFieldSchemas() const override { return Schemas.get(); }
+		[[nodiscard]] PhysicsSystem* GetPhysics() override { return Physics.get(); }
+		[[nodiscard]] AudioSystem* GetAudio() override { return SceneAudio.get(); }
+		[[nodiscard]] DebugDrawList* GetDebugDraw() override { return &DebugDraw; }
+		[[nodiscard]] Random& GetRandom() override { return Stream; }
+		[[nodiscard]] const InputState& GetInput() const override { return Input.GetDevices(); }
+		[[nodiscard]] ScriptFrameState GetFrameState() const override
+		{
+			ScriptFrameState frame = ScriptFrame;
+			frame.TimeScale = TimeScale;
+			return frame;
+		}
+		[[nodiscard]] ScriptEnvironment GetEnvironment() const override { return Host != nullptr ? Host->GetScriptEnvironment() : Environment; }
+		[[nodiscard]] uint64_t GetSceneGeneration() const override { return SceneGeneration; }
+		[[nodiscard]] const Json& GetLoadParameters() const override { return Parameters; }
+		[[nodiscard]] Result<ScriptActionState> GetAction(std::string_view name) const override;
+		[[nodiscard]] Result<UUID> CreateEntity(std::string_view name, UUID parent) override;
+		[[nodiscard]] Result<UUID> Instantiate(AssetHandle prefab, const std::optional<glm::vec3>& position,
+			const std::optional<glm::quat>& rotation, UUID parent) override;
+		void MarkTeleported(UUID entity) override;
+		[[nodiscard]] Status SetTimeScale(double scale) override { return Session.SetTimeScale(scale); }
+		[[nodiscard]] Status SetCursorMode(CursorMode mode) override;
+		[[nodiscard]] CursorMode GetCursorMode() const override { return Host != nullptr ? Host->GetScriptCursorMode() : CursorMode::Normal; }
+		[[nodiscard]] Status RequestSceneLoad(AssetHandle scene, Json parameters) override;
+		void RequestQuit(int32_t exitCode) override;
+		void RequestPause() override { Session.SetPaused(true); }
+		void OnScriptError(const ScriptError& error, bool fatal) override;
+		void OnExternalMutation(std::string_view reason) override;
+		[[nodiscard]] bool IsReloadDeferred() const override { return Lockstep || TestMode || (Recorder != nullptr && Recorder->IsRecording()); }
+		[[nodiscard]] Status PrepareScripts();
+		void StartScripts();
+		void FlushDestroyed();
+		void ConsumeRequests();
+		void ReportSessionError(const Error& error);
 
 		// The observer's notification at the start of `phase` (IPlaySessionObserver).
 		void EnterPhase(PlaySession& session, PlaySessionPhase phase, uint64_t tick) const;
@@ -188,6 +266,268 @@ namespace Engine {
 		// M12: takes (true) or gives back (false) the audio engine's simulation time, when the session has audio.
 		void SetAudioTimeOwned(bool owned);
 	};
+
+	Result<ScriptActionState> PlaySession::State::GetAction(std::string_view name) const
+	{
+		const auto action = Input.GetActions().FindAction(name);
+		if (!action.has_value())
+		{
+			std::vector<std::string_view> names;
+			for (uint32_t index = 0; index < Input.GetActions().GetActionCount(); ++index)
+				names.push_back(Input.GetActions().GetDefinition(index).Name);
+			return std::unexpected(Error(ErrorCode::NotFound, std::format("INPUT_UNKNOWN_ACTION: no action '{}'", name))
+					.WithHint(MakeDidYouMeanHint(FuzzySuggest(name, names))));
+		}
+		return ScriptActionState{ .Down = Input.IsActionDown(ScriptFrame.Phase, *action),
+			.Pressed = Input.WasActionPressed(ScriptFrame.Phase, *action),
+			.Released = Input.WasActionReleased(ScriptFrame.Phase, *action),
+			.Axis = Input.GetActionAxis(ScriptFrame.Phase, *action) };
+	}
+
+	Result<UUID> PlaySession::State::CreateEntity(std::string_view name, UUID parent)
+	{
+		const Entity parentEntity = RuntimeScene->FindEntityByID(parent);
+		if (parent.IsValid() && !parentEntity.IsValid())
+			return MakeError(ErrorCode::NotFound, "No parent entity {}", parent);
+		ENGINE_TRY_ASSIGN(const Entity entity, parentEntity ? Session.CreateEntity(name, parentEntity) : Session.CreateEntity(name));
+		return entity.GetUUID();
+	}
+
+	Result<UUID> PlaySession::State::Instantiate(AssetHandle prefab, const std::optional<glm::vec3>& position,
+		const std::optional<glm::quat>& rotation, UUID parent)
+	{
+		if (Assets == nullptr)
+			return MakeError(ErrorCode::InvalidState, "Prefab instantiation requires an asset manager");
+		const Entity parentEntity = RuntimeScene->FindEntityByID(parent);
+		if (parent.IsValid() && !parentEntity.IsValid())
+			return MakeError(ErrorCode::NotFound, "No parent entity {}", parent);
+		LoadReport report;
+		ENGINE_TRY_ASSIGN(const Prefab asset, LoadPrefabAsset(*Assets, prefab, *Registry, report));
+		ENGINE_TRY(Session.CheckEntityCapacity(asset.GetEntityIDs().size()));
+		PrefabInstantiateOptions options{};
+		options.PrefabHandle = prefab;
+		options.RootID = IdGenerator.Next();
+		options.Parent = parentEntity;
+		ENGINE_TRY_ASSIGN(const Entity root, PrefabInstantiator::Instantiate(*RuntimeScene, asset, options, { .Schemas = Schemas.get() }, report));
+		if (position.has_value())
+			TransformSystem::SetWorldPosition(root, *position);
+		if (rotation.has_value())
+			TransformSystem::SetWorldRotation(root, *rotation);
+		Session.MarkTeleported(root);
+		return root.GetUUID();
+	}
+
+	void PlaySession::State::MarkTeleported(UUID entity)
+	{
+		if (const Entity target = RuntimeScene->FindEntityByID(entity))
+			Session.MarkTeleported(target);
+	}
+
+	Status PlaySession::State::SetCursorMode(CursorMode mode)
+	{
+		if (mode != CursorMode::Normal && mode != CursorMode::Hidden && mode != CursorMode::Locked)
+			return MakeError(ErrorCode::InvalidArgument, "Invalid cursor mode");
+		if (Host == nullptr)
+			return MakeError(ErrorCode::Unsupported, "This session has no cursor host");
+		return Host->SetScriptCursorMode(mode);
+	}
+
+	Status PlaySession::State::RequestSceneLoad(AssetHandle scene, Json parameters)
+	{
+		if (ReplacingScene || PendingScene != nullptr || FatalStop || QuitRequest.has_value())
+			return MakeError(ErrorCode::InvalidState, "The session already has a pending scene transition or stop");
+		if (!parameters.is_object())
+			return MakeError(ErrorCode::Validation, "Scene.Load parameters must be an object");
+		if (Assets == nullptr)
+			return MakeError(ErrorCode::InvalidState, "Scene.Load requires an asset manager");
+		ENGINE_TRY_ASSIGN(const AssetRef<Asset> loaded, Assets->Load(scene));
+		const AssetRef<SceneData> data = AssetCast<SceneData>(loaded);
+		if (data == nullptr || data->Document == nullptr)
+			return MakeError(ErrorCode::Validation, "Scene.Load requires a valid Scene asset");
+		// Validate before accepting the request, while the caller can still receive its located error. No gameplay or
+		// teardown runs here; the active protected call continues in its original scene and VM until frame end.
+		Scope<Scene> candidate = Scene::Create({ .Name = "Play", .Seed = 0, .Registry = Registry, .IdGenerator = &IdGenerator, .Runtime = true });
+		LoadOptions options;
+		options.Schemas = Schemas.get();
+		options.SourcePath = Assets->GetReferencePath(scene);
+		LoadReport report;
+		ENGINE_TRY(SceneSerializer::FromJson(*candidate, *data->Document, options, report));
+		if (candidate->GetEntityCount() > Project.Simulation.MaxEntities)
+			return Utils::MakeSceneOverLimitError(Project.Simulation.MaxEntities, candidate->GetEntityCount());
+		PendingScene = std::move(candidate);
+		PendingParameters = std::move(parameters);
+		return {};
+	}
+
+	void PlaySession::State::RequestQuit(int32_t exitCode)
+	{
+		if (QuitRequest.has_value())
+			return;
+		QuitRequest = exitCode;
+		if (TestHook != nullptr)
+			TestHook->OnQuit(exitCode);
+	}
+
+	void PlaySession::State::OnScriptError(const ScriptError& error, bool fatal)
+	{
+		const ScriptError published = Errors.Add(error);
+		if (Host != nullptr)
+			Host->OnScriptError(published, fatal);
+		if (fatal)
+		{
+			FatalStop = true;
+			Session.SetPaused(true);
+			if (Recorder != nullptr)
+				Recorder->Invalidate("fatal script error");
+		}
+	}
+
+	void PlaySession::State::OnExternalMutation(std::string_view reason)
+	{
+		Modified = true;
+		if (Recorder != nullptr)
+			Recorder->Invalidate(reason);
+	}
+
+	Status PlaySession::State::PrepareScripts()
+	{
+		if (Mode != PlayMode::Play)
+			return {};
+		if (Api == nullptr)
+		{
+			OwnedApi = CreateScope<ScriptApiRegistry>();
+			ENGINE_TRY(RegisterBindings(*OwnedApi, *Registry));
+			Api = OwnedApi.get();
+		}
+		ENGINE_TRY_ASSIGN(auto engine, ScriptEngine::Create({ .Host = this, .Api = Api, .Settings = Project.Scripting, .Mode = ScriptRunMode, .TestMode = TestMode, .TestHost = TestHost, .ReadOnly = false, .ClockSeconds = {} }));
+		Scripts = std::move(engine);
+		Physics->SetEventListener(Scripts.get());
+		return {};
+	}
+
+	void PlaySession::State::StartScripts()
+	{
+		if (Scripts == nullptr)
+			return;
+		const Status initialized = Scripts->InitializeInstances();
+		if (!initialized)
+		{
+			ReportSessionError(initialized.error());
+			FatalStop = true;
+			return;
+		}
+		for (const PhysicsDiagnostic& diagnostic : Physics->GetDiagnostics())
+			Scripts->OnPhysicsDiagnostic(diagnostic);
+		Scripts->StartPending();
+	}
+
+	void PlaySession::State::FlushDestroyed()
+	{
+		// OnDestroy may destroy peers; synthesized exits can do the same. Each script entry is marked before invocation,
+		// so alternating these phases reaches a fixed point without rerunning a callback or using an arbitrary spin cap.
+		if (Scripts != nullptr)
+		{
+			while (Scripts->PrepareDestroyFlush() != 0)
+				Physics->FlushDestroyed(Tick);
+		}
+		Physics->FlushDestroyed(Tick);
+		if (Scripts != nullptr)
+		{
+			while (Scripts->PrepareDestroyFlush() != 0)
+				Physics->FlushDestroyed(Tick);
+			Scripts->FinishDestroyFlush();
+		}
+		RuntimeScene->FlushPendingDestroys();
+	}
+
+	void PlaySession::State::ReportSessionError(const Error& error)
+	{
+		ScriptError report{};
+		report.Script = error.GetLocation().File;
+		report.Line = error.GetLocation().Line;
+		report.Column = error.GetLocation().Column;
+		report.JsonPointer = error.GetLocation().JsonPointer.value_or("");
+		report.Message = error.ToString();
+		report.Callback = "Scene.Load";
+		report.Tick = Tick;
+		ENGINE_CORE_ERROR("Script scene transition failed: {}", error);
+		OnScriptError(report, false);
+		if (TestHost != nullptr)
+			TestHost->OnScriptError(report, false);
+		Session.SetPaused(true);
+	}
+
+	void PlaySession::State::ConsumeRequests()
+	{
+		if (QuitRequest.has_value() || FatalStop)
+		{
+			PendingScene.reset();
+			if (FatalStop && Scripts != nullptr)
+				Scripts->Stop();
+			return;
+		}
+		if (PendingScene == nullptr)
+			return;
+		// Create the new physics world before discarding the old scene. Failed setup leaves the current session intact.
+		TransformSystem::Update(*PendingScene);
+		PlaySessionSpecification specification{};
+		specification.Project = Project;
+		specification.Assets = Assets;
+		auto physics = PhysicsSystem::Create(Utils::MakePhysicsSpecification(specification, *PendingScene));
+		if (!physics)
+		{
+			ReportSessionError(physics.error());
+			PendingScene.reset();
+			return;
+		}
+		ReplacingScene = true;
+		if (Scripts != nullptr)
+			Scripts->Stop();
+		// OnDestroy may request quit or hit a fatal budget error. Do not enter another scene after either request.
+		if (QuitRequest.has_value() || FatalStop)
+		{
+			// The candidate physics system owns signal connections into PendingScene. Disconnect them while that
+			// registry still exists, just as the committed session destroys physics before its scene.
+			physics->reset();
+			PendingScene.reset();
+			PendingParameters = Json::object();
+			ReplacingScene = false;
+			return;
+		}
+		Physics->SetEventListener(nullptr);
+		Scripts.reset();
+		SceneAudio.reset();
+		Physics.reset();
+		RuntimeScene = std::move(PendingScene);
+		Physics = std::move(*physics);
+		Parameters = std::move(PendingParameters);
+		PendingParameters = Json::object();
+		ENGINE_CORE_VERIFY(SceneGeneration != std::numeric_limits<uint64_t>::max(), "Session scene generation exhausted");
+		++SceneGeneration;
+		DebugDraw.Clear();
+		LastExtraction = {};
+		ExtractionErrorLogged = false;
+		UpdateTransforms();
+		RecordReferenceTransforms();
+		if (Audio != nullptr)
+		{
+			SceneAudio = CreateScope<AudioSystem>(*RuntimeScene, AudioSystemSpecification{ .Audio = Audio, .Assets = Assets });
+			SceneAudio->InitializeMix();
+			AudioHeld = true;
+			ApplyAudioRunState();
+		}
+		ReplacingScene = false;
+		const Status prepared = PrepareScripts();
+		if (!prepared)
+		{
+			ReportSessionError(prepared.error());
+			FatalStop = true;
+		}
+		else
+			StartScripts();
+		if (SceneAudio != nullptr)
+			SceneAudio->Start();
+	}
 
 	void PlaySession::State::EnterPhase(PlaySession& session, PlaySessionPhase phase, uint64_t tick) const
 	{
@@ -245,23 +585,31 @@ namespace Engine {
 
 	void PlaySession::State::RunFramePhase(PlaySession& session, const FrameTime& frame)
 	{
+		if (FatalStop)
+		{
+			ConsumeRequests();
+			return;
+		}
 		const uint64_t tick = Tick;
 		const auto alpha = static_cast<float>(frame.Alpha);
 		Scene& scene = *RuntimeScene;
 		const bool play = Mode == PlayMode::Play;
 		scene.SetInterpolationAlpha(alpha);
+		ScriptFrame = { .Phase = InputPhase::Frame, .Tick = tick, .Frame = FrameIndex, .DeltaTime = frame.DeltaTime, .FixedDeltaTime = FixedDelta, .TimeScale = TimeScale, .InterpolationAlpha = alpha };
 
 		EnterPhase(session, PlaySessionPhase::LatchFrame, tick);
 		Input.LatchFrame();
 		if (play)
 		{
 			EnterPhase(session, PlaySessionPhase::FrameStartFlush, tick);
+			Scripts->StartPending();
 			EnterPhase(session, PlaySessionPhase::Update, tick);
+			Scripts->Update();
 			EnterPhase(session, PlaySessionPhase::LateUpdate, tick);
+			Scripts->LateUpdate();
 		}
 		EnterPhase(session, PlaySessionPhase::FrameDestroyFlush, tick);
-		Physics->FlushDestroyed(tick);
-		scene.FlushPendingDestroys();
+		FlushDestroyed();
 		EnterPhase(session, PlaySessionPhase::FrameTransformUpdate, tick);
 		UpdateTransforms();
 		TagWritesOutsideSteps(true);
@@ -277,6 +625,7 @@ namespace Engine {
 		scene.SetInterpolationAlpha(1.0f);
 		LastFrameAlpha = alpha;
 		++FrameIndex;
+		ConsumeRequests();
 	}
 
 	void PlaySession::State::ExtractGameView(float alpha)
@@ -292,6 +641,7 @@ namespace Engine {
 		Result<RenderSnapshot> snapshot = ExtractRenderSnapshot(*RuntimeScene, request);
 		if (snapshot)
 		{
+			snapshot->DebugDraw.Append(DebugDraw);
 			LastExtraction = std::move(*snapshot);
 			return;
 		}
@@ -380,12 +730,18 @@ namespace Engine {
 	}
 
 	PlaySession::PlaySession(ConstructionKey /*key*/)
-		: m_State(CreateScope<State>())
+		: m_State(CreateScope<State>(*this))
 	{
 	}
 
 	PlaySession::~PlaySession()
 	{
+		m_State->ReplacingScene = true;
+		if (m_State->Scripts != nullptr)
+			m_State->Scripts->Stop();
+		if (m_State->Physics != nullptr)
+			m_State->Physics->SetEventListener(nullptr);
+		m_State->Scripts.reset();
 		// M12 (§10.2 Stop): the AudioSystem releases its voices and restores the group volumes while the scene exists, and
 		// only then does the engine's time go back to the device, so the device never plays a voice of the ended session.
 		m_State->SceneAudio.reset();
@@ -393,6 +749,13 @@ namespace Engine {
 	}
 
 	Result<Scope<PlaySession>> PlaySession::Create(const PlaySessionSpecification& specification, const Json& sceneDocument)
+	{
+		ENGINE_TRY_ASSIGN(auto session, Prepare(specification, sceneDocument));
+		session->Activate();
+		return session;
+	}
+
+	Result<Scope<PlaySession>> PlaySession::Prepare(const PlaySessionSpecification& specification, const Json& sceneDocument)
 	{
 		ENGINE_TRY(Utils::ValidateSpecification(specification));
 		const uint32_t maxEntities = specification.Project.Simulation.MaxEntities;
@@ -424,12 +787,26 @@ namespace Engine {
 		state.Input = std::move(*input);
 		state.ViewWidth = specification.ViewWidth;
 		state.ViewHeight = specification.ViewHeight;
+		state.Api = specification.ScriptApi;
+		state.Schemas = specification.ScriptSchemas;
+		state.Parameters = specification.Parameters.IsNull() ? Json::object() : specification.Parameters.Get();
+		state.Environment = specification.Environment;
+		state.ScriptRunMode = specification.ScriptRunMode;
+		state.TestMode = specification.TestMode;
+		state.TestHook = specification.TestHook;
+		state.TestHost = specification.TestHost;
+		state.Host = specification.Host;
+		state.ScriptFrame.FixedDeltaTime = state.FixedDelta;
+		state.ScriptFrame.DeltaTime = state.FixedDelta;
+		if (state.Mode == PlayMode::Play)
+			state.Recorder = CreateScope<ReplayRecorder>();
 
 		// §5.6: the serializer path the exported Runtime uses, strict, into a runtime scene with the session's generator.
 		state.RuntimeScene = Scene::Create(
 			SceneSpecification{ .Name = "Play", .Seed = 0, .Registry = specification.Registry, .IdGenerator = &state.IdGenerator, .Runtime = true });
 		LoadOptions options;
 		options.Mode = LoadMode::Strict;
+		options.Schemas = state.Schemas.get();
 		LoadReport report;
 		Status loaded = SceneSerializer::FromJson(*state.RuntimeScene, sceneDocument, options, report);
 		if (!loaded)
@@ -446,19 +823,32 @@ namespace Engine {
 		state.Physics = std::move(*physics);
 		state.RecordReferenceTransforms();
 
-		// M12 audio hook (§5.6 session setup: "PlayOnStart audio starts"; Simulate mode has no audio). The voices start held
-		// (paused) and a test run takes the engine's time before any voice exists.
 		if (specification.Audio != nullptr && specification.Mode == PlayMode::Play)
 		{
 			state.Audio = specification.Audio;
 			state.TestRunAudioTime = specification.OwnsAudioTime;
+		}
+		ENGINE_TRY(state.PrepareScripts());
+		return session;
+	}
+
+	void PlaySession::Activate()
+	{
+		State& state = *m_State;
+		ENGINE_CORE_VERIFY(!state.Activated, "PlaySession::Activate runs once per prepared session");
+		state.Activated = true;
+		// Retire the prior session before acquiring its shared engine's mixer/time. Voices remain held until AudioUpdate.
+		if (state.Audio != nullptr)
+		{
 			state.SceneAudio = CreateScope<AudioSystem>(*state.RuntimeScene,
-				AudioSystemSpecification{ .Audio = specification.Audio, .Assets = specification.Assets });
+				AudioSystemSpecification{ .Audio = state.Audio, .Assets = state.Assets });
+			state.SceneAudio->InitializeMix();
 			state.AudioHeld = true;
 			state.ApplyAudioRunState();
-			state.SceneAudio->Start();
 		}
-		return session;
+		state.StartScripts();
+		if (state.SceneAudio != nullptr)
+			state.SceneAudio->Start();
 	}
 
 	Result<Scope<PlaySession>> PlaySession::CreateFromScene(const PlaySessionSpecification& specification, const Scene& editScene)
@@ -472,21 +862,36 @@ namespace Engine {
 	void PlaySession::FixedStep()
 	{
 		State& state = *m_State;
+		ENGINE_CORE_ASSERT(state.Activated, "Activate the prepared play session before stepping");
+		if (state.FatalStop || state.QuitRequest.has_value())
+			return;
 		const uint64_t tick = state.Tick;
 		const SimStep step = SimStep::FromTick(tick, state.FixedDelta);
-		Scene& scene = *state.RuntimeScene;
 		PhysicsSystem& physics = *state.Physics;
 		const bool play = state.Mode == PlayMode::Play;
+		state.ScriptFrame = { .Phase = InputPhase::Step, .Tick = tick, .Frame = state.FrameIndex, .DeltaTime = state.FixedDelta, .FixedDeltaTime = state.FixedDelta, .TimeScale = state.TimeScale, .InterpolationAlpha = 1.0f };
+		state.DebugDraw.Advance(static_cast<float>(state.FixedDelta));
 
 		state.EnterPhase(*this, PlaySessionPhase::InterpolationSnapshot, tick);
 		state.TakeInterpolationSnapshot();
 		state.EnterPhase(*this, PlaySessionPhase::ApplyInput, tick);
 		state.Input.ApplyTick(tick);
+		if (state.Recorder != nullptr && state.Recorder->IsRecording())
+		{
+			const Status captured = state.Recorder->CaptureAppliedInput(tick, state.Input.GetLastAppliedEvents());
+			if (!captured)
+				state.Recorder->Invalidate(captured.error().ToString());
+		}
 		if (play)
 		{
 			state.EnterPhase(*this, PlaySessionPhase::StartFlush, tick);
+			state.Scripts->StartPending();
 			state.EnterPhase(*this, PlaySessionPhase::FixedUpdate, tick);
+			state.Scripts->FixedUpdate();
 			state.EnterPhase(*this, PlaySessionPhase::Tasks, tick);
+			state.Scripts->ResumeTasks();
+			if (state.TestHook != nullptr)
+				state.TestHook->AfterTasks(*this, step);
 		}
 		state.EnterPhase(*this, PlaySessionPhase::PreStepTransformUpdate, tick);
 		state.UpdateTransforms();
@@ -497,8 +902,7 @@ namespace Engine {
 		state.EnterPhase(*this, PlaySessionPhase::PhysicsPostStep, tick);
 		physics.PostStep(step);
 		state.EnterPhase(*this, PlaySessionPhase::DestroyFlush, tick);
-		physics.FlushDestroyed(tick);
-		scene.FlushPendingDestroys();
+		state.FlushDestroyed();
 		state.EnterPhase(*this, PlaySessionPhase::PostStepTransformUpdate, tick);
 		state.UpdateTransforms();
 		// Motion made inside the fixed step interpolates: the frame phase compares with the matrices as the step left them.
@@ -508,6 +912,7 @@ namespace Engine {
 
 	void PlaySession::FrameUpdate(const FrameTime& frame)
 	{
+		ENGINE_CORE_ASSERT(m_State->Activated, "Activate the prepared play session before updating");
 		ENGINE_CORE_ASSERT(std::isfinite(frame.Alpha) && frame.Alpha >= 0.0 && frame.Alpha <= 1.0, "PlaySession::FrameUpdate: alpha {} is outside [0, 1]",
 			frame.Alpha);
 		ENGINE_CORE_ASSERT(std::isfinite(frame.DeltaTime) && frame.DeltaTime >= 0.0, "PlaySession::FrameUpdate: delta {} is not a duration",
@@ -518,6 +923,8 @@ namespace Engine {
 
 	void PlaySession::Tick()
 	{
+		if (m_State->FatalStop || m_State->QuitRequest.has_value())
+			return;
 		FixedStep();
 		State& state = *m_State;
 		state.RunFramePhase(*this,
@@ -599,45 +1006,47 @@ namespace Engine {
 
 	ScriptEngine* PlaySession::GetScripts()
 	{
-		ENGINE_CONTRACT_STUB();
-		return nullptr;
+		return m_State->Scripts.get();
 	}
 
 	const ScriptEngine* PlaySession::GetScripts() const
 	{
-		ENGINE_CONTRACT_STUB();
-		return nullptr;
+		return m_State->Scripts.get();
 	}
 
 	uint64_t PlaySession::GetSceneGeneration() const
 	{
-		ENGINE_CONTRACT_STUB();
-		return 0;
+		return m_State->SceneGeneration;
 	}
 
 	const Json& PlaySession::GetLoadParameters() const
 	{
-		ENGINE_CONTRACT_STUB();
-		static const Json EmptyParameters = Json::object();
-		return EmptyParameters;
+		return m_State->Parameters;
+	}
+
+	ScriptErrorStream& PlaySession::GetScriptErrors()
+	{
+		return m_State->Errors;
+	}
+
+	const ScriptErrorStream& PlaySession::GetScriptErrors() const
+	{
+		return m_State->Errors;
 	}
 
 	std::optional<int32_t> PlaySession::GetQuitRequest() const
 	{
-		ENGINE_CONTRACT_STUB();
-		return std::nullopt;
+		return m_State->QuitRequest;
 	}
 
 	ReplayRecorder* PlaySession::GetRecorder()
 	{
-		ENGINE_CONTRACT_STUB();
-		return nullptr;
+		return m_State->Recorder.get();
 	}
 
 	const ReplayRecorder* PlaySession::GetRecorder() const
 	{
-		ENGINE_CONTRACT_STUB();
-		return nullptr;
+		return m_State->Recorder.get();
 	}
 
 	PhysicsSystem& PlaySession::GetPhysics()
@@ -786,6 +1195,8 @@ namespace Engine {
 	void PlaySession::MarkModified()
 	{
 		m_State->Modified = true;
+		if (m_State->Recorder != nullptr)
+			m_State->Recorder->Invalidate("play scene modified externally");
 	}
 
 	void PlaySession::SetViewSize(uint32_t width, uint32_t height)
@@ -820,7 +1231,9 @@ namespace Engine {
 		m_State->RefreshViewState();
 		RenderExtractionRequest view = request;
 		view.Alpha = GetViewAlpha();
-		return ExtractRenderSnapshot(*m_State->RuntimeScene, view);
+		ENGINE_TRY_ASSIGN(auto snapshot, ExtractRenderSnapshot(*m_State->RuntimeScene, view));
+		snapshot.DebugDraw.Append(m_State->DebugDraw);
+		return snapshot;
 	}
 
 	float PlaySession::GetViewAlpha() const

@@ -25,8 +25,96 @@ namespace Engine {
 				.NestingDepth = 0 });
 	}
 
+	static void CreateContextScriptEntity(Test::AutomationFixture& setup)
+	{
+		const auto written = setup.Call("script.write", Json{ { "path", "Assets/Fields.luau" }, { "source", R"(
+local Fields = { Fields = {
+	Amount = Field.Number(1, {Min = 0, Max = 5}), Mode = Field.Enum({"Idle", "Moving"}),
+	References = Field.Array(Field.Array(Field.Asset("Script"))),
+} }
+return Script.Define("Fields", Fields)
+)" } });
+		REQUIRE_MESSAGE(written.has_value(), (written ? std::string() : written.error().ToString()));
+		const auto created = setup.Call("entity.create", Json{ { "name", "Owner" }, { "components", Json{ { "Script", Json{ { "Script", "Assets/Fields.luau" }, { "Fields", Json{ { "Amount", 1 } } } } } } } });
+		REQUIRE_MESSAGE(created.has_value(), (created ? std::string() : created.error().ToString()));
+	}
+
 	TEST_SUITE("EditorCore")
 	{
+		TEST_CASE("EditorMethodContext: fields-only script patches use the existing owner for paths enums bounds and undo")
+		{
+			Test::AutomationFixture setup("ContextScriptFields");
+			CreateContextScriptEntity(setup);
+			const auto before = setup.Call("entity.get", Json{ { "entity", "/Owner" } });
+			REQUIRE(before.has_value());
+			const Json script = (*before)["entity"]["components"]["Script"]["Script"];
+			const Json fields{ { "Amount", 3 }, { "Mode", "mOvInG" }, { "References", Json::array({ Json::array({ "Assets/Fields.luau" }) }) } };
+			const auto changed = setup.Call("entity.update", Json{ { "entity", "/Owner" }, { "components", Json{ { "Script", Json{ { "Fields", fields } } } } } });
+			REQUIRE_MESSAGE(changed.has_value(), (changed ? std::string() : changed.error().ToString()));
+			const Json component = (*changed)["entity"]["components"]["Script"];
+			CHECK(component["Script"] == script);
+			CHECK(component["Fields"]["Amount"] == Json(3));
+			CHECK(component["Fields"]["Mode"] == Json("Moving"));
+			CHECK(component["Fields"]["References"] == Json::array({ Json::array({ script }) }));
+			REQUIRE(setup.Call("edit.undo", Json::object()).has_value());
+			const auto undone = setup.Call("entity.get", Json{ { "entity", "/Owner" } });
+			REQUIRE(undone.has_value());
+			CHECK((*undone)["entity"]["components"]["Script"] == (*before)["entity"]["components"]["Script"]);
+			REQUIRE(setup.Call("edit.redo", Json::object()).has_value());
+
+			const auto rejected = setup.Call("entity.update", Json{ { "entity", "/Owner" }, { "components", Json{ { "Script", Json{ { "Fields", Json{ { "Amount", 6 } } } } } } } });
+			REQUIRE_FALSE(rejected.has_value());
+			CHECK(rejected.error().GetCode() == ErrorCode::InvalidArgument);
+			REQUIRE_FALSE(rejected.error().GetIssues().empty());
+			CHECK(rejected.error().GetIssues()[0].JsonPointer == "/components/Script/Fields/Amount");
+			CHECK_FALSE(rejected.error().ToString().contains("no script is assigned"));
+			const auto malformed = setup.Call("entity.update", Json{ { "entity", "/Owner" }, { "components", Json{ { "Script", Json{ { "Fields", Json::array({ 1 }) } } } } } });
+			REQUIRE_FALSE(malformed.has_value());
+			CHECK(malformed.error().GetCode() == ErrorCode::InvalidArgument);
+			REQUIRE_FALSE(malformed.error().GetIssues().empty());
+			CHECK(malformed.error().GetIssues()[0].JsonPointer == "/components/Script/Fields");
+			const auto after = setup.Call("entity.get", Json{ { "entity", "/Owner" } });
+			REQUIRE(after.has_value());
+			CHECK((*after)["entity"]["components"]["Script"] == component);
+		}
+
+		TEST_CASE("EditorMethodContext: fields-only script patches borrow from the addressed play scene")
+		{
+			Test::AutomationFixture setup("ContextPlayScriptFields");
+			CreateContextScriptEntity(setup);
+			REQUIRE(setup.Call("play.start", Json{ { "paused", true } }).has_value());
+			REQUIRE(setup.Call("entity.update", Json{ { "entity", "/Owner" }, { "removeComponents", Json::array({ "Script" }) } }).has_value());
+			const auto changed = setup.Call("entity.update", Json{ { "entity", "/Owner" }, { "target", "play" }, { "components", Json{ { "Script", Json{ { "Fields", Json{ { "Amount", 4 } } } } } } } });
+			REQUIRE_MESSAGE(changed.has_value(), (changed ? std::string() : changed.error().ToString()));
+			CHECK((*changed)["entity"]["components"]["Script"]["Fields"]["Amount"] == Json(4));
+			CHECK((*changed)["undoIndex"] == Json(0));
+			const auto edited = setup.Call("entity.get", Json{ { "entity", "/Owner" }, { "target", "edit" } });
+			REQUIRE(edited.has_value());
+			CHECK_FALSE((*edited)["entity"]["components"].contains("Script"));
+			REQUIRE(setup.Call("play.stop", Json::object()).has_value());
+		}
+
+		TEST_CASE("EditorMethodContext: script owner completion never replaces an explicit handle or a removed component")
+		{
+			Test::AutomationFixture setup("ContextScriptOwnerPresence");
+			CreateContextScriptEntity(setup);
+			const Json fields{ { "Amount", 2 } };
+			const Json clearedComponent{ { "Script", nullptr }, { "Fields", fields } };
+			const Json clearedParams{ { "entity", "/Owner" }, { "components", Json{ { "Script", clearedComponent } } } };
+			const auto cleared = setup.Call("entity.update", clearedParams);
+			REQUIRE_FALSE(cleared.has_value());
+			CHECK(cleared.error().GetCode() == ErrorCode::InvalidArgument);
+			const Json replacedComponent{ { "Fields", fields } };
+			const Json replacedParams{ { "entity", "/Owner" }, { "removeComponents", Json::array({ "Script" }) },
+				{ "components", Json{ { "Script", replacedComponent } } } };
+			const auto replaced = setup.Call("entity.update", replacedParams);
+			REQUIRE_FALSE(replaced.has_value());
+			CHECK(replaced.error().GetCode() == ErrorCode::InvalidArgument);
+			const auto unchanged = setup.Call("entity.get", Json{ { "entity", "/Owner" } });
+			REQUIRE(unchanged.has_value());
+			CHECK((*unchanged)["entity"]["components"]["Script"]["Fields"]["Amount"] == Json(1));
+		}
+
 		TEST_CASE("EditorMethodContext: entity references resolve by id, unique prefix and path")
 		{
 			Test::AutomationFixture setup("ContextEntities");

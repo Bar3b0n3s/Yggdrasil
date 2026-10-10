@@ -822,7 +822,9 @@ namespace Engine {
 				for (size_t i = 0; i < json.size(); ++i)
 				{
 					validation.PushKey(std::to_string(i));
-					ReadJson(element, field, false, JsonReader(json[i]), object != nullptr ? ops.GetElement(object, i) : nullptr, elementOwner, walk);
+					const FieldInfo* elementSchema = type.GetElementSchema();
+					ReadJson(element, elementSchema != nullptr ? *elementSchema : field, elementSchema != nullptr,
+						JsonReader(json[i]), object != nullptr ? ops.GetElement(object, i) : nullptr, elementOwner, walk);
 					validation.PopKey();
 				}
 				return;
@@ -931,7 +933,9 @@ namespace Engine {
 				for (size_t i = 0; i < count; ++i)
 				{
 					validation.PushKey(std::to_string(i));
-					ValidateObject(*type.GetElement(), field, false, ops.GetConstElement(object, i), elementOwner, walk);
+					const FieldInfo* elementSchema = type.GetElementSchema();
+					ValidateObject(*type.GetElement(), elementSchema != nullptr ? *elementSchema : field, elementSchema != nullptr,
+						ops.GetConstElement(object, i), elementOwner, walk);
 					validation.PopKey();
 				}
 				return;
@@ -1007,7 +1011,9 @@ namespace Engine {
 				for (size_t i = 0; i < elements.size(); ++i)
 				{
 					validation.PushKey(std::to_string(i));
-					ValidateValue(*type.GetElement(), field, false, elements[i], elementOwner, walk);
+					const FieldInfo* elementSchema = type.GetElementSchema();
+					ValidateValue(*type.GetElement(), elementSchema != nullptr ? *elementSchema : field, elementSchema != nullptr,
+						elements[i], elementOwner, walk);
 					validation.PopKey();
 				}
 				return;

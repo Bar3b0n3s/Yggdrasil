@@ -9,8 +9,11 @@
 #include "EditorCore/Private/EditorFileError.h"
 #include "EditorCore/Private/PrefabInstances.h"
 #include "EditorCore/Private/SceneEditRollback.h"
+#include "EditorCore/Scripting/EditorScriptService.h"
+#include "EditorCore/Scripting/ScriptTypeChecker.h"
 #include "Engine/App/EngineContext.h"
 #include "Engine/Asset/AssetLoaderRegistry.h"
+#include "Engine/Asset/ScriptData.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/AssetPipeline/ImporterRegistry.h"
 #include "Engine/Core/Assert.h"
@@ -219,18 +222,21 @@ namespace Engine {
 
 		// EditorContext::UpdatePrefabInstances without its atomicity: every instance of `prefabs` (any prefab when empty)
 		// rebuilt from the prefab's current version, its overrides refreshed afterwards. Returns whether anything changed.
-		static Result<bool> RebuildPrefabInstances(EditorAssetManager& assets, const TypeRegistry& registry, Scene& scene,
+		static Result<bool> RebuildPrefabInstances(EditorContext& context, Scene& scene,
 			std::span<const AssetHandle> prefabs)
 		{
 			const std::vector<std::pair<UUID, AssetHandle>> instances = Utils::FindPrefabInstances(scene, prefabs);
 			if (instances.empty())
 				return false;
+			ENGINE_TRY_ASSIGN(const Ref<const ScriptFieldSchemaSource> schemas, context.GetScriptSchemaSnapshot());
+			EditorAssetManager& assets = context.GetAssets();
+			const TypeRegistry& registry = context.GetTypeRegistry();
 
 			// Each prefab once, at its current version; a prefab that is not registered (deleted, or never imported) leaves its
 			// instances as they are (PREFAB_MISSING_ASSET, ProjectValidator).
 			std::map<AssetHandle, Prefab> loaded;
 			std::set<AssetHandle> missing;
-			const PrefabOptions options{ .Schemas = nullptr };
+			const PrefabOptions options{ .Schemas = schemas.get() };
 			LoadReport report;
 			bool changed = false;
 			for (const auto& [rootID, handle] : instances)
@@ -384,10 +390,9 @@ namespace Engine {
 		// §7.5 race rule 4: a reload during ordinary play marks the session modified, whether an external change or the
 		// editor's own write started it (a lockstep session defers reloads until it ends, EditorPlayController, so none reaches
 		// it).
-		m_Assets->SetReloadListener([this](AssetHandle /*source*/)
+		m_Assets->SetReloadListener([this](AssetHandle source)
 		{
-			if (PlaySession* session = m_Play->GetSession(); session != nullptr)
-				session->MarkModified();
+			m_Play->OnAssetReload(source);
 		});
 		m_Assets->SetExternalChangeListener([this](const AssetExternalChange& change)
 		{
@@ -418,7 +423,14 @@ namespace Engine {
 	void EditorContext::Update(double nowSeconds)
 	{
 		if (HasProject())
+		{
+			if (!m_Play->IsTestRunActive() && !IsDryRun() && nowSeconds >= m_NextScriptConfigurationCheck)
+			{
+				m_NextScriptConfigurationCheck = nowSeconds + 0.5;
+				static_cast<void>(GetScriptService());
+			}
 			m_Assets->Update(nowSeconds);
+		}
 		if (m_AudioPreview != nullptr)
 			m_AudioPreview->Update();
 	}
@@ -481,9 +493,9 @@ namespace Engine {
 		// instance it already rebuilt. CreatePrefabUpdateCommand tracks and rolls back on its own.
 		ChangeTracker& tracker = scene.GetChangeTracker();
 		if (tracker.IsTracking())
-			return Utils::RebuildPrefabInstances(*m_Assets, GetTypeRegistry(), scene, prefabs);
+			return Utils::RebuildPrefabInstances(*this, scene, prefabs);
 		tracker.Begin();
-		Result<bool> updated = Utils::RebuildPrefabInstances(*m_Assets, GetTypeRegistry(), scene, prefabs);
+		Result<bool> updated = Utils::RebuildPrefabInstances(*this, scene, prefabs);
 		const std::vector<EntityChange> tracked = tracker.End();
 		if (!updated)
 			Utils::RollBackTrackedChanges(scene, tracked, "Update Prefab Instances");
@@ -563,8 +575,98 @@ namespace Engine {
 
 	EditorScriptService* EditorContext::GetScriptService()
 	{
-		ENGINE_CONTRACT_STUB();
-		return nullptr;
+		if (!HasProject())
+			return nullptr;
+		if (const Status refreshed = RefreshScriptServices(); !refreshed)
+		{
+			const std::string message = refreshed.error().ToString();
+			if (message != m_ScriptConfigurationError)
+				ENGINE_ERROR("Cannot refresh script diagnostics: {}", message);
+			m_ScriptConfigurationError = message;
+			return nullptr;
+		}
+		m_ScriptConfigurationError.clear();
+		return m_ScriptService.get();
+	}
+
+	Result<EditorScriptService*> EditorContext::AcquireScriptService()
+	{
+		if (!HasProject())
+			return MakeError(ErrorCode::InvalidState, "no project is open");
+		ENGINE_TRY(RefreshScriptServices());
+		m_ScriptConfigurationError.clear();
+		return m_ScriptService.get();
+	}
+
+	const EditorScriptService* EditorContext::GetScriptService() const
+	{
+		return m_ScriptService.get();
+	}
+
+	Status EditorContext::RefreshScriptServices()
+	{
+		ENGINE_TRY_ASSIGN(ScriptTypeCheckerConfiguration configuration, ScriptTypeChecker::CaptureConfiguration(GetVfs()));
+		XXH64Hasher hash;
+		for (const auto& file : configuration.Files)
+		{
+			hash.UpdateU64(file.Path.ToString().size());
+			hash.Update(file.Path.ToString());
+			hash.UpdateU64(file.Source.has_value());
+			if (file.Source)
+			{
+				hash.UpdateU64(file.Source->size());
+				hash.Update(*file.Source);
+			}
+		}
+		if (m_ScriptChecker && hash.Digest() == m_ScriptConfigurationHash)
+			return {};
+		ENGINE_TRY_ASSIGN(auto checker, ScriptTypeChecker::Create(m_Engine->GetScriptApiRegistry(), std::move(configuration)));
+		m_Assets->WaitIdle();
+		m_ScriptService.reset();
+		m_Assets->SetScriptDiagnosticsProvider(checker.get());
+		m_ScriptChecker = std::move(checker);
+		m_ScriptService = CreateScope<EditorScriptService>(*this, *m_ScriptChecker);
+		m_ScriptConfigurationHash = hash.Digest();
+		return {};
+	}
+
+	Result<Ref<const ScriptFieldSchemaSource>> EditorContext::GetScriptSchemaSnapshot() const
+	{
+		std::map<AssetHandle, AssetRef<ScriptData>> scripts;
+		std::vector<AssetHandle> handles;
+		for (const AssetRecord* record : m_Assets->GetRegistry().GetRecords())
+		{
+			if (record->Metadata.Type != AssetType::Script || record->Metadata.Kind != AssetMetaKind::Asset)
+				continue;
+			handles.push_back(record->Metadata.Handle);
+		}
+		for (const AssetHandle handle : handles)
+		{
+			const auto loaded = m_Assets->Load(handle);
+			if (!loaded)
+				continue;
+			if (const auto script = AssetCast<ScriptData>(*loaded))
+				scripts.emplace(handle, script);
+		}
+		return ScriptFieldSchemaSource::Create(std::move(scripts));
+	}
+
+	Status EditorContext::ReimportScriptForTest(AssetHandle script)
+	{
+		if (!m_Play->IsTestRunActive())
+			return MakeError(ErrorCode::InvalidState, "Test.ReloadScript requires the active test lease");
+		const AssetRecord* record = m_Assets->GetRegistry().Find(script);
+		if (record == nullptr || record->Metadata.Type != AssetType::Script)
+			return MakeError(ErrorCode::InvalidArgument, "Test.ReloadScript requires a script asset");
+		// Only this synchronous import may write its sidecar while the runner owns the editor. The normal read-only and
+		// agent-policy guards still apply. End the exception before invoking any script callback.
+		ENGINE_ASSERT(!m_TestImportActive, "test imports cannot nest");
+		m_TestImportActive = true;
+		const auto imported = m_Assets->Reimport(script);
+		m_TestImportActive = false;
+		if (!imported)
+			return std::unexpected(imported.error());
+		return {};
 	}
 
 	uint64_t EditorContext::GetRevision() const
@@ -661,6 +763,9 @@ namespace Engine {
 		Result<AssetRefreshReport> assets = OpenProjectAssets();
 		if (!assets)
 		{
+			m_Assets->SetScriptDiagnosticsProvider(nullptr);
+			m_ScriptService.reset();
+			m_ScriptChecker.reset();
 			m_Provenance.reset();
 			m_Project.reset();
 			Utils::UnmountLogged(vfs, Utils::CacheScheme);
@@ -686,6 +791,7 @@ namespace Engine {
 		// Every project has an Assets folder (ProjectManager's templates); one made by hand without it gets it.
 		if (!m_Project->IsReadOnly() && !vfs.Exists(assetsRoot))
 			ENGINE_TRY(Utils::ToEditorFileStatus(vfs.CreateDirectories(assetsRoot)));
+		ENGINE_TRY(RefreshScriptServices());
 		return m_Assets->OpenProject(AssetProjectSpecification{
 			.AssetsRoot = assetsRoot,
 			.CacheRoot = cacheRoot,
@@ -706,6 +812,8 @@ namespace Engine {
 
 	Status EditorContext::CloseProject()
 	{
+		if (m_Play->IsTestRunActive())
+			return MakeError(ErrorCode::InvalidState, "a test run owns the project");
 		if (!HasProject())
 			return {};
 		ENGINE_ASSERT(m_DryRun == nullptr && m_Transaction == nullptr, "EditorContext::CloseProject inside a dry run or a transaction");
@@ -723,6 +831,9 @@ namespace Engine {
 			m_AudioPreview->Stop();
 		// The manager's jobs and hot reload use project:// and cache://: they stop before the mounts go.
 		m_Assets->CloseProject();
+		m_Assets->SetScriptDiagnosticsProvider(nullptr);
+		m_ScriptService.reset();
+		m_ScriptChecker.reset();
 		VirtualFileSystem& vfs = GetVfs();
 		Utils::UnmountLogged(vfs, Utils::CacheScheme);
 		Utils::UnmountLogged(vfs, Utils::ProjectScheme);
@@ -742,7 +853,14 @@ namespace Engine {
 		ENGINE_TRY_ASSIGN(ProjectSettings settings, ProjectSerializer::FromJson(document, registry, {}, report));
 		ENGINE_TRY_ASSIGN(const std::string text, ProjectSerializer::SaveToString(settings, registry));
 		ENGINE_TRY_ASSIGN(const VfsPath path, VfsPath::Create(Utils::ProjectScheme, FileSystem::PathToUtf8(m_Project->GetProjectFile().filename())));
-		ENGINE_TRY(WriteProjectFile(path, std::as_bytes(std::span(text.data(), text.size()))));
+		ENGINE_TRY(CheckProjectWrite(path, "write"));
+		const auto existing = GetVfs().ReadText(path);
+		if (!existing && existing.error().GetCode() != ErrorCode::NotFound)
+			return std::unexpected(existing.error());
+		// Rewriting identical settings changes the file identity without a settings change for autosave to admit.
+		// Preserve that identity, including across undo/redo of a no-op patch, while keeping command revisions intact.
+		if (!existing || *existing != text)
+			ENGINE_TRY(WriteProjectFile(path, std::as_bytes(std::span(text.data(), text.size()))));
 		m_Project->SetSettings(std::move(settings));
 		++m_RevisionBase;
 		return {};
@@ -767,6 +885,8 @@ namespace Engine {
 
 	void EditorContext::SetScene(Scope<Scene> scene, std::optional<VfsPath> path, bool dirty)
 	{
+		if (m_Play->IsTestRunActive())
+			return;
 		ENGINE_ASSERT(HasProject(), "EditorContext::SetScene needs an open project");
 		ENGINE_ASSERT(scene != nullptr, "EditorContext::SetScene needs a scene");
 		ENGINE_ASSERT(&scene->GetTypeRegistry() == &GetTypeRegistry() && &scene->GetUUIDGenerator() == &m_IdGenerator,
@@ -793,6 +913,8 @@ namespace Engine {
 
 	void EditorContext::CloseScene()
 	{
+		if (m_Play->IsTestRunActive())
+			return;
 		if (m_Scene == nullptr)
 			return;
 		ENGINE_ASSERT(m_Transaction == nullptr, "EditorContext::CloseScene inside a transaction");
@@ -899,6 +1021,8 @@ namespace Engine {
 
 	Status EditorContext::CheckMutationPermission() const
 	{
+		if (m_Play->IsTestRunActive() && !m_TestImportActive)
+			return MakeError(ErrorCode::InvalidState, "a test run owns the editor");
 		if (m_AgentMutationsDenied && GetCommandOrigin() == CommandOrigin::Agent && !IsDryRun())
 			return MakeError(ErrorCode::PermissionDenied, "agent mutations are disabled by the editor automation policy");
 		return {};

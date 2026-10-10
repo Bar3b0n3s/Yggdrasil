@@ -2,11 +2,14 @@
 
 #include "Engine/Automation/Methods/ScriptMethods.h"
 
+#include "Engine/Core/EventLog.h"
 #include "Engine/Core/Json/JsonReader.h"
 #include "Support/AutomationTestClient.h"
 #include "Support/ExpectLog.h"
 
 #include <nlohmann/json.hpp>
+
+#include <array>
 
 namespace Engine {
 
@@ -15,7 +18,7 @@ namespace Engine {
 		Json CallScriptMethod(Test::AutomationFixture& fixture, std::string_view method, const Json& params)
 		{
 			auto result = fixture.Call(method, params);
-			REQUIRE_MESSAGE(result.has_value(), result.error().ToString());
+			REQUIRE_MESSAGE(result.has_value(), (result ? "" : result.error().ToString()));
 			return std::move(*result);
 		}
 
@@ -23,7 +26,27 @@ namespace Engine {
 
 	TEST_SUITE("Automation")
 	{
-		TEST_CASE("ScriptMethods: edit evaluation returns a detached value and captured prints" * doctest::skip(true))
+		TEST_CASE("ScriptMethods: host error cursors survive play session replacement")
+		{
+			Test::AutomationFixture fixture("ScriptHostHistory");
+			Json previous = "0";
+			for (int occurrence = 1; occurrence <= 2; ++occurrence)
+			{
+				CallScriptMethod(fixture, "play.start", Json{ { "paused", true } });
+				{
+					Test::ExpectLog expected(LogLevel::Error, "persistent host fault");
+					CHECK(fixture.Request("script.eval", Json{ { "context", "play" }, { "code", "error('persistent host fault', 0)" } }).contains("error"));
+				}
+				CallScriptMethod(fixture, "play.stop", Json::object());
+				const Json errors = CallScriptMethod(fixture, "script.errors", Json{ { "since", previous } });
+				REQUIRE(errors["errors"].size() == 1);
+				CHECK(errors["errors"][0]["count"] == Json(occurrence));
+				CHECK(errors["nextCursor"] != previous);
+				previous = errors["nextCursor"];
+			}
+		}
+
+		TEST_CASE("ScriptMethods: edit evaluation returns a detached value and captured prints")
 		{
 			Test::AutomationFixture fixture("ScriptEvalValue");
 			const Json result = CallScriptMethod(fixture, "script.eval",
@@ -32,7 +55,7 @@ namespace Engine {
 			CHECK(result["prints"] == Json::array({ "first", "second" }));
 		}
 
-		TEST_CASE("ScriptMethods: edit evaluation refuses host writes before changing the scene" * doctest::skip(true))
+		TEST_CASE("ScriptMethods: edit evaluation refuses host writes before changing the scene")
 		{
 			Test::AutomationFixture fixture("ScriptEvalReadOnly");
 			CallScriptMethod(fixture, "entity.create", Json{ { "name", "Before" } });
@@ -44,12 +67,12 @@ namespace Engine {
 			}
 			const Json after = CallScriptMethod(fixture, "entity.get", Json{ { "entity", "/Before" } });
 			CHECK(after["entity"] == before["entity"]);
-			CHECK(after["components"] == before["components"]);
+			CHECK(after["entity"]["components"] == before["entity"]["components"]);
 			CHECK(fixture.Call("entity.get", Json{ { "entity", "/Before" } }).has_value());
 			CHECK_FALSE(fixture.Call("entity.get", Json{ { "entity", "/After" } }).has_value());
 		}
 
-		TEST_CASE("ScriptMethods: eval requires code and context and rejects unknown enum values" * doctest::skip(true))
+		TEST_CASE("ScriptMethods: eval requires code and context and rejects unknown enum values")
 		{
 			Test::AutomationFixture fixture("ScriptEvalParams");
 			for (const Json& params : { Json{ { "code", "return 1" } }, Json{ { "context", "edit" } },
@@ -60,14 +83,14 @@ namespace Engine {
 			}
 		}
 
-		TEST_CASE("ScriptMethods: play evaluation requires a live scripting session" * doctest::skip(true))
+		TEST_CASE("ScriptMethods: play evaluation requires a live scripting session")
 		{
 			Test::AutomationFixture fixture("ScriptEvalPlayState");
 			const Json response = fixture.Request("script.eval", Json{ { "context", "play" }, { "code", "return 1" } });
 			CHECK(response["error"]["data"]["errorCode"] == Json("InvalidState"));
 		}
 
-		TEST_CASE("ScriptMethods: eval binds self to the selected behaviour instance" * doctest::skip(true))
+		TEST_CASE("ScriptMethods: eval binds self to the selected behaviour instance")
 		{
 			Test::AutomationFixture fixture("ScriptEvalSelf");
 			CallScriptMethod(fixture, "script.write", Json{ { "path", "Assets/Scripts/State.luau" }, { "source", "local State = {}; function State.OnCreate(self: any) self.Score = 7 end; return Script.Define('State', State)" } });
@@ -79,9 +102,10 @@ namespace Engine {
 			CallScriptMethod(fixture, "play.stop", Json::object());
 		}
 
-		TEST_CASE("ScriptMethods: errors expose locations and tracebacks and advance an exclusive cursor" * doctest::skip(true))
+		TEST_CASE("ScriptMethods: errors expose locations and tracebacks and advance an exclusive cursor")
 		{
 			Test::AutomationFixture fixture("ScriptErrorCursor");
+			const auto eventCursor = fixture.GetEditor().GetEngine().GetEventLog().GetNextSeq();
 			const Json start = CallScriptMethod(fixture, "script.errors", Json{ { "since", "end" } });
 			REQUIRE(start["errors"].empty());
 			const std::string cursor = JsonReader(start["nextCursor"]).ReadString().value_or(std::string());
@@ -90,6 +114,7 @@ namespace Engine {
 				const Json response = fixture.Request("script.eval",
 					Json{ { "context", "edit" }, { "code", "local function fail() error('contract error') end\nfail()" } });
 				CHECK(response.contains("error"));
+				CHECK(expected.GetMatchCount() == 1);
 			}
 			const Json errors = CallScriptMethod(fixture, "script.errors", Json{ { "since", cursor }, { "limit", 1 } });
 			REQUIRE(errors["errors"].size() == 1);
@@ -98,11 +123,14 @@ namespace Engine {
 			CHECK(error["line"] != Json(0));
 			CHECK_FALSE(error["traceback"].empty());
 			CHECK(error["count"] == Json(1));
+			const auto raised = fixture.GetEditor().GetEngine().GetEventLog().Read(eventCursor, std::array{ EngineEventType::ScriptErrorRaised });
+			REQUIRE(raised.Events.size() == 1);
+			CHECK(Json(raised.Events[0].Message) == error["message"]);
 			const Json next = CallScriptMethod(fixture, "script.errors", Json{ { "since", errors["nextCursor"] } });
 			CHECK(next["errors"].empty());
 		}
 
-		TEST_CASE("ScriptMethods: errors preserve distinct embedded expectation pointers across RPC cursor pages" * doctest::skip(true))
+		TEST_CASE("ScriptMethods: errors preserve distinct embedded expectation pointers across RPC cursor pages")
 		{
 			Test::AutomationFixture fixture("ScriptEmbeddedErrorCursor");
 			CallScriptMethod(fixture, "input.record", Json{ { "action", "start" } });
@@ -123,7 +151,8 @@ namespace Engine {
 			REQUIRE(second["errors"].size() == 1);
 			CHECK(first["errors"][0]["jsonPointer"] == Json("/Expect/0/Luau"));
 			CHECK(second["errors"][0]["jsonPointer"] == Json("/Expect/1/Luau"));
-			CHECK(first["errors"][0]["message"] == second["errors"][0]["message"]);
+			CHECK(first["errors"][0]["message"] == Json("/Expect/0/Luau: embedded expectation error"));
+			CHECK(second["errors"][0]["message"] == Json("/Expect/1/Luau: embedded expectation error"));
 			CHECK(first["nextCursor"] != second["nextCursor"]);
 			for (const Json& page : { first, second })
 			{
@@ -135,7 +164,7 @@ namespace Engine {
 			CHECK(after["errors"].empty());
 		}
 
-		TEST_CASE("ScriptMethods: errors rejects malformed cursors and limits with located errors" * doctest::skip(true))
+		TEST_CASE("ScriptMethods: errors rejects malformed cursors and limits with located errors")
 		{
 			Test::AutomationFixture fixture("ScriptErrorsInvalid");
 			for (const Json& params : { Json{ { "since", "-1" } }, Json{ { "since", "18446744073709551616" } },
@@ -147,7 +176,7 @@ namespace Engine {
 			}
 		}
 
-		TEST_CASE("ScriptMethods: eval refuses dry runs and atomic batches before execution" * doctest::skip(true))
+		TEST_CASE("ScriptMethods: eval refuses dry runs and atomic batches before execution")
 		{
 			Test::AutomationFixture fixture("ScriptEvalFlags");
 			const Json params{ { "context", "edit" }, { "code", "return 1" }, { "dryRun", true } };

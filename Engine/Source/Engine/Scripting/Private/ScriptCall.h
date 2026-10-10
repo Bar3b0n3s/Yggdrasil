@@ -32,6 +32,11 @@ namespace Engine {
 	{
 		ScriptExecutionOrigin Origin = ScriptExecutionOrigin::Pure;
 		bool ExternalMutationNotified = false;
+		// Synchronous native wrapper slot. Nested wrappers save/restore it; never retained by deferred work or Lua.
+		ScriptNativeFunction NativeEntry = nullptr;
+		// First located safety failure in this execution slice. A caught timeout/memory error remains fatal, even
+		// after its child frame unwinds; a later slice starts empty and cannot inherit an unrelated last diagnostic.
+		std::optional<ScriptError> SafetyFailure{};
 	};
 
 	// Private, synchronous stack facade. State borrows the active main state or resumed coroutine; Sandbox borrows its
@@ -62,6 +67,8 @@ namespace Engine {
 		// Borrowed for this entry from the outer protected slice; required for runtime dispatch. Never stored in Lua,
 		// a task or a deferred lambda. The VM/engine access bridge supplies it from its private execution-context stack.
 		ScriptExecutionContext* Execution = nullptr;
+		// Immutable metadata borrowed only during registry dispatch, for enum validation and reflected conversion.
+		const ScriptApiMember* Member = nullptr;
 	};
 
 	// A VM execution outcome, not yet published. Failure owns traceback and source strings before the thread/stack

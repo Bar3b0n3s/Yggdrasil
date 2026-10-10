@@ -34,6 +34,16 @@ namespace Engine {
 
 	MethodContext::~MethodContext() = default;
 
+	Result<Ref<const IFieldSchemaSource>> MethodContext::GetFieldSchemaSnapshot()
+	{
+		return Ref<const IFieldSchemaSource>{};
+	}
+
+	Status MethodContext::CompleteParameterOwners(Json& /*params*/)
+	{
+		return {};
+	}
+
 	bool MethodContext::IsHostType(TypeKey key) const
 	{
 		return key == m_HostKey || key == TypeKeyOf<MethodContext>();

@@ -10,6 +10,7 @@
 #include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/Core/Hash.h"
 #include "Engine/Core/Json/JsonReader.h"
+#include "Engine/Core/Json/JsonWriter.h"
 #include "Engine/Core/RingBufferSink.h"
 #include "Support/AssetTestFixture.h"
 #include "Support/ExpectLog.h"
@@ -72,6 +73,54 @@ namespace Engine {
 
 	TEST_SUITE("AssetPipeline")
 	{
+		TEST_CASE("AssetCache: legacy manifests remain unchecked and typed metadata corruption is discarded")
+		{
+			Test::AssetTestFixture fixture;
+			AssetCache cache(fixture.GetVfs(), Test::ParseVfsPath("cache://"));
+			CachedImport import = MakeImport();
+			REQUIRE(cache.Store(Wood, 7, import).has_value());
+			const auto legacy = cache.Find(Wood, 7);
+			REQUIRE(legacy.has_value());
+			REQUIRE(legacy->has_value());
+			CHECK_FALSE((**legacy).ScriptCheck.has_value());
+			import.ScriptCheck = ScriptImportCheck{ .Performed = true, .EnvironmentHash = 0xffffffffffffffffull, .SourceHash = 0xabcdef0123456789ull, .Diagnostics = { { .Code = "SCRIPT_TYPE_ERROR", .File = "Assets/Main.luau", .Line = 3, .Column = 4, .Message = "bad value", .EndLine = 4, .EndColumn = 5 } } };
+			REQUIRE(cache.Store(Wood, 7, import).has_value());
+			const auto roundTrip = cache.Find(Wood, 7);
+			REQUIRE(roundTrip.has_value());
+			REQUIRE(roundTrip->has_value());
+			REQUIRE((**roundTrip).ScriptCheck.has_value());
+			CHECK((**roundTrip).ScriptCheck->EnvironmentHash == import.ScriptCheck->EnvironmentHash);
+			CHECK((**roundTrip).ScriptCheck->SourceHash == import.ScriptCheck->SourceHash);
+			CHECK((**roundTrip).ScriptCheck->Diagnostics == import.ScriptCheck->Diagnostics);
+			CHECK((**roundTrip).Import.Artifacts.front().Cooked == import.Import.Artifacts.front().Cooked);
+
+			const auto text = fixture.GetVfs().ReadText(CacheFile(Wood, 7, ".import"));
+			REQUIRE(text.has_value());
+			auto document = JsonReader::Parse(*text);
+			REQUIRE(document.has_value());
+			SUBCASE("fingerprints are exact hex strings")
+			{
+				(*document)["ScriptCheck"]["EnvironmentHash"] = 1.0;
+			}
+			SUBCASE("range endpoints are never silently dropped")
+			{
+				(*document)["ScriptCheck"]["Diagnostics"][0].erase("EndColumn");
+			}
+			SUBCASE("range endpoints must fit their public integer type")
+			{
+				(*document)["ScriptCheck"]["Diagnostics"][0]["EndLine"] = static_cast<uint64_t>(0x100000000ull);
+			}
+			SUBCASE("unknown metadata is not accepted")
+			{
+				(*document)["ScriptCheck"]["Extra"] = true;
+			}
+			const auto malformed = JsonWriter::Write(*document);
+			REQUIRE(malformed.has_value());
+			REQUIRE(fixture.GetVfs().WriteFileAtomic(CacheFile(Wood, 7, ".import"), AsBytes(*malformed)).has_value());
+			Test::ExpectLog discarded(LogLevel::Warn, "corrupted");
+			CHECK(IsMiss(cache.Find(Wood, 7)));
+		}
+
 		TEST_CASE("AssetCache: keys change with every input and never with the settings' spelling")
 		{
 			const std::string source = "source bytes";

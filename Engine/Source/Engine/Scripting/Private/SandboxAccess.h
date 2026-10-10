@@ -1,7 +1,10 @@
 #pragma once
 
+#include "Engine/Core/Json/Json.h"
 #include "Engine/Scripting/Private/ScriptCall.h"
 #include "Engine/Scripting/Sandbox.h"
+
+#include <span>
 
 namespace Engine {
 
@@ -9,6 +12,8 @@ namespace Engine {
 	class ScriptWatchdog;
 
 	namespace Detail {
+
+		[[nodiscard]] bool IsScriptingRuntimeInitialized() noexcept;
 
 		// Copied per-entry metadata, never an entity/component reference. Push before dispatch and capture errors before
 		// PopContext. Nested requires retain caller entity/tick/callback while changing the source path as appropriate.
@@ -28,6 +33,61 @@ namespace Engine {
 		// own stack guards and traceback capture through public Luau APIs; ScriptEngine alone publishes runtime errors.
 		struct SandboxAccess
 		{
+			// Shared evaluation/binding conversion. Protected entry only; leaves the stack unchanged. Rejects cycles,
+			// non-JSON values and depth > MaxJsonDepth. Repeated aliases count on every expansion: the native allowance
+			// is min(4 MiB, VM soft limit), charged 256 bytes per value/entry and four per string/key byte. This bounds
+			// temporary/output storage separately from VM allocations. Limit rejection is Script (Runtime), not a VM
+			// allocator breach; the caller may continue after cleanup. Polls the inherited safety deadline throughout.
+			[[nodiscard]] static Result<Json> ReadJson(ScriptCall& call, int index);
+
+			// Appends to the active evaluation's ordered print sink; otherwise a no-op. Never writes a log entry.
+			// The registered Log.Info/print callback owns logging, so forwarding here cannot duplicate its output.
+			static void CapturePrint(Sandbox& sandbox, std::string_view message);
+			// Synchronous native operation through B's protected trampoline. The callable is borrowed for this call only.
+			// Results remain on the main stack; callers restore/pop them. Uses the already active outer origin if any.
+			[[nodiscard]] static Result<ScriptCallResult> RunNative(Sandbox& sandbox, const std::function<int(ScriptCall&)>& operation);
+			// Process-wide nonzero VM identity (ADR0019), never a host/session serial and never reset on reinitialization.
+			[[nodiscard]] static uint64_t GetGeneration(const Sandbox& sandbox) noexcept;
+			// Live states only. Owner data is installed by Sandbox on the root and every child; null for foreign states.
+			// Sandbox owns callback userdata and thread-data slots. Binding code must not overwrite them.
+			[[nodiscard]] static Sandbox* FromState(lua_State* state) noexcept;
+			// Protected entry only. Leaves one thread object rooted on call.State's stack; caller must pin before popping.
+			// Installs owner data, private globals and safeenv=false. Returned state borrows the same VM.
+			[[nodiscard]] static Result<lua_State*> CreateThread(ScriptCall& call);
+			// Protected entry only. Loads once or pushes the cached return of this canonical ScriptData origin.
+			// Success always leaves exactly ONE value, including nil. Failure leaves the caller stack unchanged.
+			[[nodiscard]] static Status PushModule(ScriptCall& call, const ScriptData& script);
+			// Cache-only lookup: NotFound is distinct from cached nil. Same single-value/unchanged-failure stack rule.
+			[[nodiscard]] static Status PushModuleReturn(ScriptCall& call, const VfsPath& path);
+			// Canonically ordered authored module paths in the live cache (never the provisional candidate cache).
+			// Protected entry only. Includes modules loaded by evaluation, and entries whose return is nil.
+			[[nodiscard]] static Result<std::vector<std::string>> GetLoadedModulePaths(ScriptCall& call);
+			// Staged-cache inventory and live-cache lookup, independent of the cache selected for candidate execution.
+			[[nodiscard]] static Result<std::vector<std::string>> GetReloadModulePaths(ScriptCall& call);
+			[[nodiscard]] static Status PushLiveModuleReturn(ScriptCall& call, const VfsPath& path);
+			// One private cache transaction. Candidates are pinned for its lifetime; canonical paths must be unique.
+			// Starts EMPTY: even unchanged dependencies re-execute privately, with no live closures/upvalues shared.
+			// Candidate execution uses load-time API availability and a private seed-0 RNG, under the inherited runtime
+			// deadline/allocator. Live cache and resolver stay untouched. The owner canonicalizes exports after evaluation.
+			[[nodiscard]] static Status BeginReload(ScriptCall& call, std::span<const Ref<const ScriptData>> candidates);
+			[[nodiscard]] static Status EvaluateReloadModule(ScriptCall& call, const ScriptData& script);
+			// Registry dispatch must select LoadTime availability while true, before any callback/counter. ThreadCall
+			// supplies a null Engine in this scope. It ends before patch/commit; retained code later has normal runtime APIs.
+			[[nodiscard]] static bool IsReloadEvaluating(const Sandbox& sandbox) noexcept;
+			// Parent owns in-place class/table patching after all candidate evaluations succeed. This replaces a staged
+			// cache result with the parent's preserved table identity, without changing the live cache yet.
+			[[nodiscard]] static Status SetReloadModule(ScriptCall& call, const ScriptData& script, int valueIndex);
+			// For unchanged dependencies, replace the privately evaluated return with its live canonical value after
+			// reconnecting candidate references. New dependencies keep their new return. No script executes during sealing.
+			[[nodiscard]] static Status SetReloadModuleReturn(ScriptCall& call, const VfsPath& path, int valueIndex);
+			// Provisionally publishes only after every candidate succeeded, retaining the old cache for rollback even
+			// after this call returns. The outer wrapper can still reject a timeout/memory latch. Never patches tables.
+			[[nodiscard]] static Status CommitReload(ScriptCall& call);
+			// Restores the old cache even after provisional commit. Never mutates module objects. Safe after protected
+			// unwinding, idempotent; parent independently restores its backed-up table fields without allocation.
+			static void RollbackReload(Sandbox& sandbox) noexcept;
+			// Releases backups only AFTER the outer protected wrapper reports success. No VM allocation or callbacks.
+			static void FinalizeReload(Sandbox& sandbox) noexcept;
 			// Stack-only facades; Engine is nullable for pure/load-time and engine-less Runtime VMs. ThreadCall accepts a live root/child state
 			// already owned by this Sandbox, checked with lua_mainthread; null/foreign states return InvalidArgument.
 			// MemberName borrows registry text until dispatch returns. No ownership or registry/thread reference escapes.
@@ -113,6 +173,8 @@ namespace Engine {
 			// Stores an owned last failure only. Does not assign stream IDs, deduplicate, log, disable instances or notify
 			// IScriptHost. The outer runtime owner publishes once; the load-time owner converts to an import Error.
 			static void RecordFailure(Sandbox& sandbox, const ScriptError& error);
+			// Starts an explicit host operation's diagnostic capture; never changes its deadline or safety latch.
+			static void ClearFailure(Sandbox& sandbox) noexcept;
 			// After protected unwinding and owner instance-disable/discard, with no active deadline. Full GC then allocator
 			// FinishRecovery; inability to return under soft latches stop. InvalidState unless first recovery is pending.
 			// No error publication here; second/hard breaches stop and are never rearmed by this operation.

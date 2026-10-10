@@ -15,7 +15,7 @@ from engine_mcp import server  # noqa: E402
 # The proxied tools of §13.8 that exist so far: M4's, M5's screenshot tools, registered at the M4/M5 merge
 # (Docs/Decisions/0009-m5-decisions.md decision 33), and M6's asset, prefab and entity_bounds tools
 # (Docs/Decisions/0010-m6-decisions.md decision 20), and M7's play, input and export tools
-# (Docs/Decisions/0012-m7-decisions.md decisions 4, 8 and 14). Script and test tools arrive with their milestones.
+# (Docs/Decisions/0012-m7-decisions.md decisions 4, 8 and 14), plus M13's script, replay and test tools.
 PROXIED_TOOLS = {
     "project_create", "project_open", "project_save", "project_get_settings", "project_set_settings",
     "project_validate", "project_export",
@@ -24,7 +24,8 @@ PROXIED_TOOLS = {
     "component_schema", "edit_batch", "edit_undo", "edit_redo", "log_read", "docs_get", "viewport_screenshot",
     "editor_screenshot", "asset_list", "asset_import", "asset_create", "asset_set_properties", "asset_move",
     "asset_delete", "prefab_create", "prefab_instantiate", "prefab_apply", "play_start", "play_stop", "play_step",
-    "input_inject",
+    "input_inject", "input_record", "input_replay", "play_wait_for", "script_create", "script_read",
+    "script_write", "script_check", "script_errors", "script_eval", "test_run",
 }
 MAX_SCHEMA_BYTES = 4096
 

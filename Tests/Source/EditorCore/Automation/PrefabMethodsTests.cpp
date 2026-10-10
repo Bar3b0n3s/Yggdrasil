@@ -69,6 +69,44 @@ namespace Engine {
 
 	TEST_SUITE("EditorCore")
 	{
+		TEST_CASE("PrefabMethods: script references stay in instance space through create apply revert and scene reload")
+		{
+			Test::AutomationFixture setup("PrefabScriptReferences");
+			CallOrFail(setup, "script.write", Json{ { "path", "Assets/Scripts/Links.luau" }, { "source", R"(
+local Links = { Fields = { Target = Field.Entity(), Targets = Field.Array(Field.Entity()), Amount = Field.Number(1) } }
+return Script.Define("Links", Links)
+)" } });
+			CallOrFail(setup, "entity.create", Json{ { "name", "A" } });
+			const Json child = CallOrFail(setup, "entity.create", Json{ { "name", "Child" }, { "parent", "/A" } })["entity"]["id"];
+			const Json scriptFields{ { "Target", child }, { "Targets", Json::array({ child }) }, { "Amount", 1 } };
+			const Json scriptComponent{ { "Script", "Assets/Scripts/Links.luau" }, { "Fields", scriptFields } };
+			CallOrFail(setup, "entity.update", Json{ { "entity", "/A" }, { "components", Json{ { "Script", scriptComponent } } } });
+			CallOrFail(setup, "prefab.create", Json{ { "entity", "/A" }, { "path", "Assets/Prefabs/Links.prefab" }, { "replaceWithInstance", true } });
+			CallOrFail(setup, "prefab.instantiate", Json{ { "prefab", "Assets/Prefabs/Links.prefab" }, { "name", "B" } });
+			const auto check = [&setup](std::string_view root, int amount)
+			{
+				const Json entity = CallOrFail(setup, "entity.get", Json{ { "entity", root } })["entity"];
+				const Json target = CallOrFail(setup, "entity.get", Json{ { "entity", std::format("{}/Child", root) } })["entity"]["id"];
+				const Json& fields = entity["components"]["Script"]["Fields"];
+				CHECK(fields["Target"] == target);
+				CHECK(fields["Targets"] == Json::array({ target }));
+				CHECK(fields["Amount"] == Json(amount));
+			};
+			check("/A", 1);
+			check("/B", 1);
+			CallOrFail(setup, "entity.update", Json{ { "entity", "/B" }, { "components", Json{ { "Script", Json{ { "Fields", Json{ { "Amount", 2 } } } } } } } });
+			CallOrFail(setup, "prefab.apply", Json{ { "instance", "/B" } });
+			check("/A", 2);
+			check("/B", 2);
+			CallOrFail(setup, "entity.update", Json{ { "entity", "/B" }, { "components", Json{ { "Script", Json{ { "Fields", Json{ { "Amount", 3 } } } } } } } });
+			CallOrFail(setup, "prefab.revert", Json{ { "instance", "/B" } });
+			check("/B", 2);
+			CallOrFail(setup, "scene.save", Json::object());
+			CallOrFail(setup, "scene.open", Json{ { "path", "Assets/Scenes/Main.scene" }, { "reload", true } });
+			check("/A", 2);
+			check("/B", 2);
+		}
+
 		TEST_CASE("PrefabMethods: create, instantiate, apply, revert and unpack are undoable steps")
 		{
 			Test::AutomationFixture setup("PrefabLifecycle");

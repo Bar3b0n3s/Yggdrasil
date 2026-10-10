@@ -25,6 +25,83 @@ namespace Engine {
 
 	TEST_SUITE("EditorCore")
 	{
+		TEST_CASE("EntityMethods: script assignment rejects modules and suites without changing the entity or history")
+		{
+			Test::AutomationFixture setup("EntityScriptKind", true, std::nullopt, true);
+			REQUIRE(setup.Call("entity.create", Json{ { "name", "Target" } }).has_value());
+			for (const std::string_view kind : { "Module", "Test" })
+			{
+				const std::string path = std::format("Assets/Scripts/{}.luau", kind);
+				const auto created = setup.Call("script.create", Json{ { "path", path }, { "template", kind } });
+				REQUIRE_MESSAGE(created, (created ? "" : created.error().ToString()));
+				const uint64_t sequence = setup.GetEditor().GetHistory().GetCurrentSequence();
+				const Json components{ { "Script", Json{ { "Script", path } } } };
+				const Json response = setup.Request("entity.update", Json{ { "entity", "/Target" }, { "name", "Changed" }, { "components", components } });
+				CHECK(response["error"]["data"]["errorCode"] == Json("Validation"));
+				CHECK(response["error"]["data"].dump().contains("SCRIPT_NOT_A_BEHAVIOUR"));
+				CHECK(response["error"]["data"]["issues"][0]["pointer"] == Json("/components/Script/Script"));
+				CHECK(setup.GetEditor().GetHistory().GetCurrentSequence() == sequence);
+				const auto target = setup.Call("entity.get", Json{ { "entity", "/Target" } });
+				REQUIRE(target.has_value());
+				CHECK_FALSE((*target)["entity"]["components"].contains("Script"));
+				CHECK_FALSE(setup.Call("entity.create", Json{ { "name", "Rejected" }, { "components", components } }).has_value());
+				CHECK(setup.GetEditor().GetScene().GetEntityCount() == 1);
+			}
+		}
+
+		TEST_CASE("EntityMethods: duplicate remaps nested script entity fields and keeps string and external references")
+		{
+			Test::AutomationFixture setup("EntityScriptDuplicate");
+			const std::string path = "Assets/Scripts/References.luau";
+			REQUIRE(setup.Call("script.write", Json{ { "path", path }, { "source", R"(
+local References = { Fields = {
+	Target = Field.Entity(), Targets = Field.Array(Field.Array(Field.Entity())),
+	External = Field.Entity(), Label = Field.String(), Amount = Field.Number(1, {Min = 0, Max = 5}),
+} }
+return Script.Define("References", References)
+)" } })
+					.has_value());
+			auto root = setup.Call("entity.create", Json{ { "name", "Root" } });
+			REQUIRE(root.has_value());
+			auto child = setup.Call("entity.create", Json{ { "name", "Child" }, { "parent", "/Root" } });
+			REQUIRE(child.has_value());
+			auto outside = setup.Call("entity.create", Json{ { "name", "Outside" } });
+			REQUIRE(outside.has_value());
+			const std::string childID = ReadEntityId(*child);
+			const std::string outsideID = ReadEntityId(*outside);
+			const Json fields{ { "Target", childID }, { "Targets", Json::array({ Json::array({ childID, outsideID }) }) },
+				{ "External", outsideID }, { "Label", childID }, { "Amount", 3 } };
+			const auto assigned = setup.Call("entity.update", Json{ { "entity", "/Root" }, { "components", Json{ { "Script", Json{ { "Script", path }, { "Fields", fields } } } } } });
+			REQUIRE_MESSAGE(assigned.has_value(), assigned.error().ToString());
+			const auto patched = setup.Call("entity.update", Json{ { "entity", "/Root" }, { "components", Json{ { "Script", Json{ { "Fields", Json{ { "Amount", 4 } } } } } } } });
+			REQUIRE_MESSAGE(patched, (patched ? "" : patched.error().ToString()));
+			CHECK((*patched)["entity"]["components"]["Script"]["Fields"]["Amount"] == Json(4));
+			const auto invalid = setup.Call("entity.update", Json{ { "entity", "/Root" }, { "components", Json{ { "Script", Json{ { "Fields", Json{ { "Amount", 6 } } } } } } } });
+			REQUIRE_FALSE(invalid.has_value());
+			CHECK(invalid.error().GetCode() == ErrorCode::InvalidArgument);
+			REQUIRE(invalid.error().GetIssues().size() == 1);
+			CHECK(invalid.error().GetIssues()[0].JsonPointer == "/components/Script/Fields/Amount");
+			CHECK_FALSE(invalid.error().GetMessageText().contains("no script is assigned"));
+			auto copies = setup.Call("entity.duplicate", Json{ { "entities", Json::array({ "/Root" }) } });
+			REQUIRE_MESSAGE(copies.has_value(), copies.error().ToString());
+			const Json copyID = (*copies)["entities"][0]["id"];
+			const auto copy = setup.Call("entity.get", Json{ { "entity", copyID } });
+			REQUIRE(copy.has_value());
+			const Json& copiedFields = (*copy)["entity"]["components"]["Script"]["Fields"];
+			CHECK(copiedFields["Target"] != Json(childID));
+			CHECK(copiedFields["Targets"][0][0] == copiedFields["Target"]);
+			CHECK(copiedFields["Targets"][0][1] == Json(outsideID));
+			CHECK(copiedFields["External"] == Json(outsideID));
+			CHECK(copiedFields["Label"] == Json(childID));
+			CHECK(copiedFields["Amount"] == Json(4));
+			REQUIRE(setup.Call("edit.undo", Json::object()).has_value());
+			CHECK(setup.GetEditor().GetScene().GetEntityCount() == 3);
+			REQUIRE(setup.Call("edit.redo", Json::object()).has_value());
+			const auto restored = setup.Call("entity.get", Json{ { "entity", copyID } });
+			REQUIRE(restored.has_value());
+			CHECK((*restored)["entity"]["components"]["Script"]["Fields"] == copiedFields);
+		}
+
 		TEST_CASE("EntityMethods: entity.create adds an entity with components as one undo step")
 		{
 			Test::AutomationFixture setup("EntityCreate");

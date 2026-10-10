@@ -53,6 +53,8 @@ namespace Engine {
 			const TypeRegistry& registry = (*created)->GetTypeRegistry();
 
 			CHECK(registry.IsFrozen());
+			CHECK((*created)->GetScriptApiRegistry().IsFrozen());
+			CHECK_FALSE((*created)->GetScriptApiRegistry().GetModules().empty());
 			CHECK(registry.AreComponentsRegistered(BuiltinComponents{}));
 			CHECK(registry.FindStruct<ProjectSettings>() != nullptr);
 			CHECK(registry.FindStruct("ApplicationOwnedSettings") == nullptr);

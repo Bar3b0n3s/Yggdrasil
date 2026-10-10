@@ -13,6 +13,7 @@
 namespace Engine {
 
 	class TypeRegistry;
+	struct ScriptFieldSchema;
 
 	struct ReflectedReferenceCandidate
 	{
@@ -32,6 +33,9 @@ namespace Engine {
 		// AssetFilter, searches label/path/UUID, and sorts by label, path, then UUID. Empty retains typed/drop entry.
 		// Errors are displayed and returned. Neither callback nor entity/component pointers are retained by the drawer.
 		std::function<Result<std::vector<ReflectedReferenceCandidate>>(const FieldInfo&, std::string_view)> FindReferences{};
+		// Optional immutable declaration for authored array defaults. Borrowed only for the synchronous Draw call;
+		// recursive drawers may use it until Draw returns, but must never retain it or capture it for later work.
+		const ScriptFieldSchema* ScriptSchema = nullptr;
 	};
 	struct ReflectedDrawerResult
 	{

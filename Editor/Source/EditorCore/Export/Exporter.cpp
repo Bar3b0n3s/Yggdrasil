@@ -5,6 +5,7 @@
 #include "EditorCore/EngineAssetGenerators.h"
 #include "EditorCore/Export/Private/ExportPaths.h"
 #include "EditorCore/Project/ProjectManager.h"
+#include "EditorCore/Scripting/EditorScriptService.h"
 #include "Engine/App/EngineContext.h"
 #include "Engine/Asset/AssetDiagnostic.h"
 #include "Engine/Asset/AssetReference.h"
@@ -365,6 +366,16 @@ namespace Engine {
 			Settings = Editor->GetProject().GetSettings();
 
 			std::vector<ErrorIssue> issues;
+			// Static errors block export even when ordinary editor play permits them (§11.9).
+			const EditorScriptService* scripts = Editor->GetScriptService();
+			if (scripts == nullptr)
+				return MakeError(ErrorCode::InvalidState, "script diagnostics are unavailable for exporting project '{}'; repair the script checker configuration before exporting", Settings.Name);
+			ENGINE_TRY_ASSIGN(const auto checked, scripts->Check({}));
+			for (const ScriptDiagnostic& diagnostic : checked.Diagnostics)
+			{
+				if (diagnostic.Severity == DiagnosticSeverity::Error)
+					issues.push_back(MakeIssue("", std::format("{}:{}:{}: {}: {}", diagnostic.File, diagnostic.Line, diagnostic.Column, diagnostic.Code, diagnostic.Message), "fix the script diagnostics (script.check) before exporting"));
+			}
 			if (Status name = CheckGameName(Settings.Name); !name.has_value())
 				issues.push_back(MakeIssue("/Name", name.error().GetMessageText(), "set a name such as \"Tetris\" (project.setSettings)"));
 
@@ -488,9 +499,11 @@ namespace Engine {
 			specification.Registry = &Editor->GetTypeRegistry();
 			specification.IdGenerator = &ids;
 			const Scope<Scene> scene = Scene::Create(specification);
+			ENGINE_TRY_ASSIGN(const auto schemas, Editor->GetScriptSchemaSnapshot());
 			LoadOptions options;
 			options.Mode = LoadMode::Strict;
 			options.SourcePath = path;
+			options.Schemas = schemas.get();
 			return SceneSerializer::LoadFromFile(*scene, Editor->GetVfs(), sourcePath, options, report);
 		}
 

@@ -11,6 +11,27 @@ namespace Engine {
 
 	TEST_SUITE("AssetPipeline")
 	{
+		TEST_CASE("ImportContext: check snapshots own their findings and replace the preceding attempt")
+		{
+			ImportContext context(ImportContext::Specification{});
+			CHECK_FALSE(context.GetScriptCheck().has_value());
+			ScriptImportCheck checked{ .Performed = true, .EnvironmentHash = 7, .SourceHash = 8, .Diagnostics = { { .Code = "SCRIPT_TYPE_ERROR", .File = "Assets/Main.luau", .Line = 2, .Column = 3, .Message = "finding", .EndLine = 4, .EndColumn = 5 } } };
+			context.SetScriptCheck(checked);
+			checked.Diagnostics.front().Message = "changed by caller";
+			auto copy = context.GetScriptCheck();
+			REQUIRE(copy.has_value());
+			CHECK(copy->Diagnostics.front().Message == "finding");
+			CHECK(copy->Diagnostics.front().EndLine == 4);
+			copy->Diagnostics.clear();
+			REQUIRE(context.GetScriptCheck()->Diagnostics.size() == 1);
+			context.SetScriptCheck({ .SourceHash = 9 });
+			const auto unchecked = context.GetScriptCheck();
+			REQUIRE(unchecked.has_value());
+			CHECK_FALSE(unchecked->Performed);
+			CHECK(unchecked->SourceHash == 9);
+			CHECK(unchecked->Diagnostics.empty());
+		}
+
 		TEST_CASE("ImportContext: dependency reads and lookups are recorded sorted and once")
 		{
 			Test::AssetTestFixture fixture;

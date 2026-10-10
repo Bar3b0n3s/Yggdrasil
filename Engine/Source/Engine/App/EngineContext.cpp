@@ -14,6 +14,7 @@
 #include "Engine/Platform/GlfwLibrary.h"
 #include "Engine/Project/ProjectSettings.h"
 #include "Engine/Scene/Components/BuiltinComponents.h"
+#include "Engine/Scripting/RegisterBindings.h"
 
 #include <format>
 #include <string>
@@ -49,6 +50,8 @@ namespace Engine {
 	{
 		// Services: the constructor builds the infallible services in member order.
 		Scope<EngineContext> context = CreateScope<EngineContext>(ConstructionKey(), specification);
+		ENGINE_TRY(WithContext(RegisterBindings(context->m_ScriptApiRegistry, context->m_TypeRegistry),
+			"while registering the engine context's script API"));
 
 		if (!specification.UserDataDirectory.empty())
 		{

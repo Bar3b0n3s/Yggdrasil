@@ -5,6 +5,7 @@
 #include "EditorCore/EditorContext.h"
 #include "EditorCore/Play/EditorPlayController.h"
 #include "EditorCore/Private/SceneEditRollback.h"
+#include "Engine/Asset/ScriptData.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/Core/Assert.h"
 #include "Engine/Core/Log.h"
@@ -79,7 +80,15 @@ namespace Engine {
 			if (touched.empty())
 				return;
 
-			const PrefabOptions options{ .Schemas = nullptr };
+			// Only edit-scene overrides are persisted. Keep their current asset schemas alive for the whole diff, even
+			// while a play session retains an older snapshot of the same scripts.
+			const Result<Ref<const ScriptFieldSchemaSource>> schemas = context.GetScriptSchemaSnapshot();
+			if (!schemas)
+			{
+				ENGINE_WARN("'{}' keeps the recorded prefab overrides: {}", label, schemas.error().ToString());
+				return;
+			}
+			const PrefabOptions options{ .Schemas = schemas->get() };
 			std::map<AssetHandle, Prefab> loaded;
 			std::set<AssetHandle> unavailable;
 			for (const auto& [rootID, handle] : touched)

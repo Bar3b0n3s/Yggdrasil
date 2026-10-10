@@ -104,6 +104,9 @@ namespace Engine {
 		// preserve the requesting client's identity, and use a fresh session serial. Defaults are Unsupported until wired.
 		[[nodiscard]] virtual Status StartRecordingSession(const PlayStartOptions& options, bool restart);
 		[[nodiscard]] virtual Status RestartForReplay(const ReplayHeader& header);
+		// Releases replay-only live-input suppression immediately on completion, failure or disconnect. Idempotent;
+		// a replaced session (different serial) is untouched. Hosts without replay input routing need no action.
+		virtual void ReleaseReplayInput(uint64_t sessionSerial);
 		// Current session's original scene asset identity/path, initial load parameters, seed and FixedHz, plus engine
 		// version/build config. An unsaved editor scene cannot produce a reproducible asset header (InvalidState).
 		[[nodiscard]] virtual Result<ReplayHeader> DescribeReplayHeader() const;

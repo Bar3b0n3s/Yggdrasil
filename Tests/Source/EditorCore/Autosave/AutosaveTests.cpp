@@ -733,6 +733,33 @@ namespace Engine {
 			CHECK(setup.Offer().Generation == updated.Generation);
 			CHECK(AutosaveRead(setup.Root() / updated.Generation / "Metadata.json") != AutosaveRead(setup.Root() / saved.Generation / "Metadata.json"));
 		}
+
+		TEST_CASE("Autosave: identical settings patches and their undo redo preserve the admitted file")
+		{
+			AutosaveSetup setup;
+			EditorContext& editor = setup.Fixture.GetEditor();
+			const auto projectFile = editor.GetProject().GetProjectFile();
+			const auto bytes = AutosaveRead(projectFile);
+			const auto before = FileSystem::GetInfo(projectFile);
+			REQUIRE(before.has_value());
+			auto command = ProjectSettingsCommand::CreateFromPatch(editor,
+				Json{ { "Scripting", { { "BlockPlayOnTypeErrors", editor.GetProject().GetSettings().Scripting.BlockPlayOnTypeErrors } } } }, "Keep script policy");
+			REQUIRE(command.has_value());
+			REQUIRE(editor.Execute(std::move(*command)).has_value());
+			REQUIRE(setup.Service.Publish().has_value());
+			REQUIRE(editor.GetHistory().Undo(editor) == 1);
+			REQUIRE(setup.Service.Publish().has_value());
+			REQUIRE(editor.GetHistory().Redo(editor) == 1);
+			REQUIRE(setup.Service.Publish().has_value());
+			const auto after = FileSystem::GetInfo(projectFile);
+			REQUIRE(after.has_value());
+			CHECK(after->ModificationTime == before->ModificationTime);
+			CHECK(AutosaveRead(projectFile) == bytes);
+			setup.Dirty();
+			const auto saved = setup.Service.Save(AutosaveReason::BeforePlay);
+			REQUIRE(saved.has_value());
+			CHECK(saved->Written);
+		}
 	}
 
 }

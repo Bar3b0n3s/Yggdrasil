@@ -911,7 +911,7 @@ namespace Engine {
 			PlaySessionSpecification specification = Test::MakePhysicsSessionSpecification(fixture);
 			specification.Assets = &assets.GetManager();
 			Result<Scope<PlaySession>> started = Test::StartPhysicsSession(fixture, specification);
-			REQUIRE_MESSAGE(started.has_value(), started.error().ToString());
+			REQUIRE_MESSAGE(started.has_value(), (started ? "" : started.error().ToString()));
 			Scope<PlaySession> session = std::move(*started);
 			Test::RunTicks(*session, 10);
 			const PhysicsSystem& physics = session->GetPhysics();
@@ -933,6 +933,19 @@ namespace Engine {
 			CHECK(invalidShape.GetMatchCount() == 2);
 			CHECK(allLocked.GetMatchCount() == 1);
 			CHECK(dynamicTrigger.GetMatchCount() == 1);
+			// M13 forwards these diagnostics to script observers without logging them a second time.
+			const auto scriptErrors = session->GetScriptErrors().GetErrors();
+			REQUIRE(scriptErrors.size() == 4);
+			for (const auto& error : scriptErrors)
+			{
+				CHECK(error.Callback == "Physics");
+				CHECK(error.Count == 1);
+			}
+			for (const UUID refused : { mesh.GetUUID(), squat.GetUUID(), locked.GetUUID(), trigger.GetUUID() })
+				CHECK(std::ranges::any_of(scriptErrors, [refused](const ScriptError& error)
+				{
+					return error.Entity == refused;
+				}));
 			CHECK(physics.GetBodyInfo(Test::GetEntityId(session->GetScene(), "/Fine")).has_value());
 			// The bodies Jolt would have asserted on exist, without a diagnostic; the fast start was clamped to the maximum.
 			for (const UUID valid : { kinematicMesh.GetUUID(), meshTrigger.GetUUID(), lockedKinematic.GetUUID(), fast.GetUUID() })

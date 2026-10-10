@@ -12,6 +12,11 @@
 namespace Engine {
 
 	class IScriptModuleReader;
+	namespace Detail {
+
+		struct SandboxAccess;
+
+	}
 
 	// Shared runtime/load-time path policy (§11.1-11.2). Own-thread, per VM/import, no native filesystem or VFS reads.
 	// Sandbox owns cached module return values; this class owns resolution, dependency edges and the active stack.
@@ -44,6 +49,8 @@ namespace Engine {
 		// View invalidated by the next Resolve or destruction. Canonical order, independent of discovery order.
 		[[nodiscard]] std::span<const ScriptRequire> GetRequires() const;
 	private:
+		friend struct Detail::SandboxAccess;
+		[[nodiscard]] bool HasActiveModules() const noexcept;
 		struct State;
 		Scope<State> m_State{};
 	};

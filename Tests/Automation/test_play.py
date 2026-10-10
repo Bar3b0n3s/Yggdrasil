@@ -155,15 +155,38 @@ class PlayTests(AutomationTestCase):
         self.assertEqual(after["_meta"]["revision"], before["_meta"]["revision"])
         self.assertEqual(client.call("play.state")["state"], "Edit")
 
-    def test_play_methods_refuse_members_of_later_milestones(self) -> None:
+    def test_play_start_rejects_invalid_script_options_before_starting(self) -> None:
         client, _ = self.open_editor_with_scene()
-        for params, pointer in (({"parameters": {}}, "/parameters"), ({"pauseOnError": False}, "/pauseOnError")):
+        for params, pointer in (({"parameters": []}, "/parameters"),
+                                ({"pauseOnError": "false"}, "/pauseOnError")):
             with self.subTest(params=params):
                 with self.assertRaises(engine_client.EngineError) as raised:
                     client.call("play.start", params)
-                self.assert_engine_error(raised.exception, engine_client.UNSUPPORTED, "Unsupported")
+                self.assertEqual(raised.exception.code, engine_client.INVALID_PARAMS)
                 self.assertEqual(raised.exception.issues[0]["pointer"], pointer)
+                self.assertEqual(client.call("play.state")["state"], "Edit")
         self.assertEqual(client.call("play.state")["state"], "Edit")
+
+    def test_play_start_applies_parameters_and_pause_on_error(self) -> None:
+        client, _ = self.open_editor_with_scene()
+        client.call("script.write", {"path": "Assets/Scripts/StartupError.luau", "source": '''
+return Script.Define("StartupError", {
+    OnStart = function() error("expected startup policy failure") end,
+})
+'''})
+        client.call("entity.create", {"name": "Fault", "components": {
+            "Script": {"Script": "Assets/Scripts/StartupError.luau"}}})
+        parameters = {"level": 7, "options": {"enabled": True}}
+        for pause in (False, True):
+            with self.subTest(pause_on_error=pause):
+                started = client.call("play.start", {"lockstep": True, "parameters": parameters,
+                                                      "pauseOnError": pause})
+                self.assertEqual(started["state"], "Paused" if pause else "Play")
+                self.assertEqual(client.call("script.eval", {"context": "play",
+                                                            "code": "Scene.GetLoadParameters()"})["value"], parameters)
+                errors = client.call("script.errors")["errors"]
+                self.assertTrue(any("expected startup policy failure" in row["message"] for row in errors))
+                client.call("play.stop")
 
     def test_pause_set_time_scale_and_resume_report_the_state(self) -> None:
         client, _ = self.open_editor_with_scene()

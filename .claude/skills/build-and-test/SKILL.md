@@ -9,6 +9,8 @@ This skill gives the commands, configurations, output locations and failure diag
 
 ## Toolchain
 
+Windows uses x64 compiler and linker host tools through the workspace's `PreferredToolArchitecture=x64`. If a link reports LNK1102 or mentions `HostX86`, verify the effective host property and the standard `PROCESSOR_ARCHITECTURE` environment variable. MSBuild falls back to x86 when an agent's environment omits both Windows architecture variables, even when x64 is requested; restore the verified host architecture in that process environment (ADR 0019 decision 9).
+
 | | Windows | Linux | macOS |
 |---|---|---|---|
 | Compiler | VS 2026, toolset v145, MSVC 14.51 | GCC 14 (`CC=gcc-14 CXX=g++-14`) or Clang 19+ | Xcode 26+ (Apple Clang), arm64 |
@@ -45,6 +47,7 @@ python Scripts/Test.py --suite gpu --config Debug --junit --require-gpu   # both
 python Scripts/Test.py --suite golden --config Release --junit --require-gpu   # --update-golden writes candidates
 python Scripts/Test.py --suite automation --junit          # Python suites against the Release editor, then method coverage; --require-gpu as for gpu
 python Scripts/CompileShaders.py --config Debug            # --program P, --force, --verbose
+python Scripts/GenerateDocs.py --config Debug               # rebuild Editor first; --check verifies definitions, script reference, method schemas and MCP catalogue
 python Scripts/CheckBuildConfig.py                         # ABI defines, JPH_CROSS_PLATFORM_DETERMINISTIC, Jolt ISA, FP model, Dist solution
 python Scripts/Format.py --check                           # without --check it rewrites files
 python Scripts/Lint.py                                     # --self-test: every seeded Tests/Data/Lint fixture fails as expected; --mode clang|regex; --allow-contract-stubs: contract mode

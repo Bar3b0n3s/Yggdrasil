@@ -182,7 +182,8 @@ namespace Engine {
 		std::vector<AudioVoiceHandle> OneShots;
 		// SetPaused (play-mode pause).
 		bool Paused = false;
-		// Start ran: the group volumes it recorded are restored at destruction.
+		// Mix initialization can precede voice startup; either path restores the captured host mix on destruction.
+		bool MixInitialized = false;
 		bool Started = false;
 		std::array<float, AudioGroupCount> RecordedGroupVolumes{ 1.0f, 1.0f, 1.0f };
 		// Without an asset manager: the silent clip every source plays, and the clips already warned about (one warning each).
@@ -550,7 +551,7 @@ namespace Engine {
 			if (const Status unregistered = state.Audio->UnregisterClip(clip); !unregistered)
 				ENGINE_CORE_WARN("AudioSystem: unregistering audio clip {} failed: {}", key.first.ToString(), unregistered.error().ToString());
 		}
-		if (state.Started)
+		if (state.MixInitialized)
 		{
 			for (const AudioGroup group : AllAudioGroups)
 			{
@@ -560,10 +561,11 @@ namespace Engine {
 		}
 	}
 
-	void AudioSystem::Start()
+	void AudioSystem::InitializeMix()
 	{
 		State& state = *m_State;
-		ENGINE_CORE_ASSERT(!state.Started, "AudioSystem::Start runs once per session");
+		if (state.MixInitialized)
+			return;
 		// The session's mix (see "Mixer"): the engine's group volumes are recorded and every session starts from 1.
 		for (const AudioGroup group : AllAudioGroups)
 		{
@@ -571,6 +573,14 @@ namespace Engine {
 			if (const Status reset = state.Audio->SetGroupVolume(group, 1.0f); !reset)
 				ENGINE_CORE_WARN("AudioSystem: resetting the {} volume failed: {}", AudioGroupToString(group), reset.error().ToString());
 		}
+		state.MixInitialized = true;
+	}
+
+	void AudioSystem::Start()
+	{
+		State& state = *m_State;
+		ENGINE_CORE_ASSERT(!state.Started, "AudioSystem::Start runs once per session");
+		InitializeMix();
 		state.Started = true;
 		state.UpdateListener(0.0);
 
