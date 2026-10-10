@@ -1,7 +1,7 @@
 #include "TestsPCH.h"
 #include "Editor/Panels/ProjectSettingsPanel.h"
 
-#include "Editor/Panels/UtilityPanelFixture.h"
+#include "Editor/SupportingPanelTestUi.h"
 #include "Support/ExpectLog.h"
 
 namespace Engine {
@@ -14,7 +14,7 @@ namespace Engine {
 			fixture.OpenProject();
 			ProjectSettingsPanel panel;
 			fixture.Draw(panel);
-			fixture.ClickAt(panel, 100.0f, 35.0f);
+			Test::SupportingPanelTestUi::ClickText(fixture, panel, fixture.GetEditor().GetProject().GetSettings().Name);
 			fixture.ReplaceFocusedText(panel, "Uncommitted draft");
 			REQUIRE(fixture.GetClient().Call("project.setSettings", Json{ { "patch", Json{ { "Name", "Agent setting" } } } }));
 			const uint64_t revision = fixture.GetEditor().GetRevision();
@@ -36,8 +36,7 @@ namespace Engine {
 			const auto before = fixture.GetEditor().GetProject().GetSettings();
 			const uint64_t revision = fixture.GetEditor().GetRevision();
 			const size_t history = fixture.GetEditor().GetHistory().GetUndoCount();
-			// Name is the first reflected text input below the root tree header.
-			fixture.ClickAt(panel, 100.0f, 35.0f);
+			Test::SupportingPanelTestUi::ClickText(fixture, panel, before.Name);
 			fixture.ReplaceFocusedText(panel, "Human settings name");
 			CHECK(fixture.GetEditor().GetProject().GetSettings().Name == before.Name);
 			CHECK(fixture.GetEditor().GetRevision() == revision);
@@ -64,7 +63,9 @@ namespace Engine {
 			REQUIRE(before);
 			const uint64_t revision = fixture.GetEditor().GetRevision();
 			const std::string text = fixture.Draw(panel);
-			CHECK(text.contains("ProjectSettings"));
+			CHECK(text.contains("General"));
+			CHECK(text.contains("Name"));
+			CHECK(text.contains("Start Scene"));
 			fixture.Pump();
 			fixture.Draw(panel);
 			CHECK(fixture.GetEditor().GetRevision() == revision);

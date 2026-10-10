@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Editor/FolderPicker.h"
+#include "Engine/Asset/AssetHandle.h"
 #include "Engine/Core/Result.h"
 
 #include <array>
@@ -26,9 +28,15 @@ namespace Engine {
 		std::array<char, 256> m_CreateName{};
 		std::array<char, 4096> m_ImportSource{};
 		std::array<char, 4096> m_MovePath{};
+		FolderPicker m_ImportPicker{};
+		std::string m_ImportDirectory{};
+		std::string m_ActionDirectory{};
+		AssetHandle m_ActionAsset{};
 		std::vector<uint64_t> m_Tickets{};
 		std::string m_Error{};
 		int m_CreateType = 0;
+		int m_AssetDialog = 0;
+		bool m_ReopenImport = false;
 	};
 
 }

@@ -1,7 +1,7 @@
 #include "TestsPCH.h"
 #include "Editor/Panels/ConsolePanel.h"
 
-#include "Editor/Panels/UtilityPanelFixture.h"
+#include "Editor/SupportingPanelTestUi.h"
 #include "Engine/Core/Log.h"
 
 namespace Engine {
@@ -29,14 +29,14 @@ namespace Engine {
 			ConsolePanel panel;
 			Log::GetRingBuffer().Append(LogEntry{ .Tick = {}, .Message = "UtilityNavigationOnly", .File = "Native.cpp", .Line = 9, .EntityId = *id, .ScriptFile = "Source with spaces.luau", .ScriptLine = 42 });
 			fixture.Draw(panel);
-			fixture.ClickAt(panel, 100.0f, 62.0f);
+			Test::SupportingPanelTestUi::ClickText(fixture, panel, "Search messages");
 			ImGui::GetIO().AddInputCharactersUTF8("UtilityNavigationOnly");
 			REQUIRE(fixture.Draw(panel).contains("Source with spaces.luau:42"));
-			fixture.ClickAt(panel, 50.0f, 122.0f);
+			Test::SupportingPanelTestUi::ClickText(fixture, panel, "Open source");
 			CHECK(opened == std::filesystem::path("Source with spaces.luau"));
 			CHECK(openedLine == 42);
 			fixture.GetEditor().SetSelection({});
-			fixture.ClickAt(panel, 40.0f, 140.0f);
+			Test::SupportingPanelTestUi::ClickText(fixture, panel, "Select entity");
 			CHECK(fixture.GetEditor().GetSelection().empty());
 			fixture.Pump();
 			fixture.Draw(panel);
@@ -55,18 +55,18 @@ namespace Engine {
 			ring.Append(LogEntry{ .Tick = {}, .Level = LogLevel::Info, .Logger = LogChannel::Engine, .Message = "UtilityEngine", .File = {}, .EntityId = {}, .ScriptFile = {} });
 			ring.Append(LogEntry{ .Tick = {}, .Level = LogLevel::Info, .Logger = LogChannel::Script, .Message = "UtilityScript", .File = {}, .EntityId = {}, .ScriptFile = {} });
 			fixture.Draw(panel);
-			fixture.ClickAt(panel, 80.0f, 16.0f);
+			Test::SupportingPanelTestUi::ClickText(fixture, panel, "All levels");
 			fixture.Press(panel, ImGuiKey_Home);
 			fixture.Press(panel, ImGuiKey_DownArrow);
 			fixture.Press(panel, ImGuiKey_Enter);
-			fixture.ClickAt(panel, 80.0f, 39.0f);
+			Test::SupportingPanelTestUi::ClickText(fixture, panel, "All sources");
 			fixture.Press(panel, ImGuiKey_End);
 			fixture.Press(panel, ImGuiKey_Enter);
 			const std::string filtered = fixture.Draw(panel);
 			CHECK(filtered.contains("UtilityScript"));
 			CHECK_FALSE(filtered.contains("UtilityTrace"));
 			CHECK_FALSE(filtered.contains("UtilityEngine"));
-			fixture.ClickAt(panel, 165.0f, 85.0f);
+			Test::SupportingPanelTestUi::ClickText(fixture, panel, "Clear view");
 			CHECK_FALSE(fixture.Draw(panel).contains("UtilityScript"));
 			const auto retained = ring.Read(LogQuery{ .Cursor = first, .Channels = {}, .Contains = "Utility" });
 			CHECK(retained.Entries.size() == 3);
@@ -79,7 +79,7 @@ namespace Engine {
 			Log::GetRingBuffer().Append(LogEntry{ .Tick = {}, .Message = "UtilityConsoleVisible", .File = "Example.cpp", .Line = 42, .EntityId = {}, .ScriptFile = {} });
 			Log::GetRingBuffer().Append(LogEntry{ .Tick = {}, .Message = "UtilityConsoleHidden", .File = {}, .EntityId = {}, .ScriptFile = {} });
 			fixture.Draw(panel);
-			fixture.ClickAt(panel, 100.0f, 62.0f);
+			Test::SupportingPanelTestUi::ClickText(fixture, panel, "Search messages");
 			ImGui::GetIO().AddInputCharactersUTF8("UtilityConsoleVisible");
 			const std::string text = fixture.Draw(panel);
 			CHECK(text.contains("UtilityConsoleVisible"));

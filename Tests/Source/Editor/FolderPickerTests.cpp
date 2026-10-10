@@ -1,6 +1,7 @@
 #include "TestsPCH.h"
 #include "Editor/FolderPicker.h"
 
+#include "Editor/AssetDesignInteraction.h"
 #include "Engine/Core/FileSystem.h"
 #include "Support/TempDirectory.h"
 
@@ -10,6 +11,26 @@ namespace Engine {
 
 	TEST_SUITE("Editor")
 	{
+		TEST_CASE("FolderPicker: transient instances do not enter saved workspace settings")
+		{
+			Test::TempDirectory directory("FolderPickerSettings");
+			FolderPicker first;
+			FolderPicker second;
+			REQUIRE(first.Open("First picker", directory.GetPath()));
+			REQUIRE(second.Open("Second picker", directory.GetPath()));
+			Test::AssetDesignInteraction ui(false);
+			const auto draw = [&first, &second]() -> Status
+			{
+				ENGINE_TRY(first.Draw());
+				ENGINE_TRY(second.Draw());
+				return {};
+			};
+			REQUIRE(ui.Frame(draw));
+			CHECK(ui.Window("First picker")->ID != ui.Window("Second picker")->ID);
+			const std::string_view settings(ImGui::SaveIniSettingsToMemory());
+			CHECK_FALSE(settings.contains("FolderPicker"));
+		}
+
 		TEST_CASE("FolderPicker: a failed open preserves the active dialog and cancel is idempotent")
 		{
 			Test::TempDirectory directory("FolderPicker");
@@ -39,18 +60,17 @@ namespace Engine {
 			REQUIRE_FALSE(error);
 			FolderPicker picker;
 			REQUIRE(picker.Open("Choose folder", directory.GetPath()));
-			ImGuiContext* context = ImGui::CreateContext();
-			ImGuiIO& io = ImGui::GetIO();
-			io.DisplaySize = ImVec2(800.0f, 600.0f);
-			io.DeltaTime = 1.0f / 60.0f;
-			io.IniFilename = nullptr;
-			io.BackendFlags |= ImGuiBackendFlags_RendererHasTextures;
-			const auto frame = [&picker]()
+			Test::AssetDesignInteraction ui(false);
+			ImGui::GetIO().DisplaySize = ImVec2(800.0f, 600.0f);
+			Result<std::optional<std::filesystem::path>> result;
+			const auto draw = [&picker, &result]() -> Status
 			{
-				ImGui::NewFrame();
-				ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
-				auto result = picker.Draw();
-				ImGui::Render();
+				result = picker.Draw();
+				return result ? Status{} : std::unexpected(result.error());
+			};
+			const auto frame = [&ui, &draw, &result]()
+			{
+				REQUIRE(ui.Frame(draw));
 				return result;
 			};
 			const auto pending = frame();
@@ -61,18 +81,11 @@ namespace Engine {
 			CHECK_FALSE(error);
 			CHECK(picker.Open("Not a directory", directory / "file.txt").error().GetCode() == ErrorCode::NotFound);
 			CHECK(picker.IsOpen());
-			// Navigate into the first folder in the 660x440 picker, then accept; public input events only.
-			io.AddMousePosEvent(50.0f, 112.0f);
-			io.AddMouseButtonEvent(ImGuiMouseButton_Left, true);
-			REQUIRE(frame());
-			io.AddMouseButtonEvent(ImGuiMouseButton_Left, false);
-			REQUIRE(frame());
-			io.AddMousePosEvent(50.0f, 375.0f);
-			io.AddMouseButtonEvent(ImGuiMouseButton_Left, true);
-			REQUIRE(frame());
-			io.AddMouseButtonEvent(ImGuiMouseButton_Left, false);
-			const auto accepted = frame();
-			ImGui::DestroyContext(context);
+			auto* window = ui.Window("###FolderPicker");
+			auto* folders = ui.Child(window, window->GetID("Entries"));
+			ui.Click(draw, folders, ImHashStr("##Entry", 0, Test::AssetDesignInteraction::AuthoredScope(folders->ID, "Child")));
+			ui.Click(draw, window, "Select folder");
+			const auto accepted = result;
 			REQUIRE(accepted);
 			REQUIRE(accepted->has_value());
 			CHECK(**accepted == std::filesystem::canonical(directory / "Child", error));

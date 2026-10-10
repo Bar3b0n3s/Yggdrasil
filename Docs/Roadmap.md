@@ -243,6 +243,8 @@ Tests support (`Tests/Source/Support/`): recording assert handler, death-test re
 
 **Parallelization**: A dockspace + hierarchy + inspector, B viewport + camera + gizmo, C content browser + thumbnails + launcher + templates, D console/diagnostics/settings/automation/undo panels, E autosave/recovery + methods.
 
+**Product design refinement (ADR 0020, before M14).** The product owner requested a full UI redesign after the functional M10 delivery. Apply Architecture §12.5: shared typography and style, a deliberate workspace, human-readable property editing, scene/asset browsing and consistent supporting panels. Review actual populated, empty and play states at multiple sizes/scales, exercise their editing flows and deliberately review golden candidates. The existing functionality, undo and automation gates remain required; UI code may be replaced to satisfy the design.
+
 ---
 
 ## M11 — Physics

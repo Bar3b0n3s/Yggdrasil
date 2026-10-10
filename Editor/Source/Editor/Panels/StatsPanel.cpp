@@ -2,6 +2,7 @@
 #include "Editor/Panels/StatsPanel.h"
 
 #include "Editor/EditorPanelContext.h"
+#include "Editor/Ui/EditorStyle.h"
 #include "EditorCore/EditorActions.h"
 #include "EditorCore/EditorContext.h"
 #include "Engine/Core/Json/JsonReader.h"
@@ -12,12 +13,35 @@
 
 namespace Engine {
 
+	namespace Utils {
+
+		static void DrawSupportingMetric(std::string_view label, std::string_view value)
+		{
+			ImGui::TableNextRow();
+			ImGui::TableNextColumn();
+			ImGui::TextWrapped("%.*s", static_cast<int>(label.size()), label.data());
+			ImGui::TableNextColumn();
+			ImGui::TextWrapped("%.*s", static_cast<int>(value.size()), value.data());
+		}
+
+		static std::string SupportingMemoryLabel(float bytes)
+		{
+			if (bytes >= 1024.0f * 1024.0f)
+				return std::format("{:.1f} MiB", bytes / (1024.0f * 1024.0f));
+			if (bytes >= 1024.0f)
+				return std::format("{:.1f} KiB", bytes / 1024.0f);
+			return std::format("{:.0f} B", bytes);
+		}
+
+	}
+
 	Status StatsPanel::Draw(EditorPanelContext& context)
 	{
 		const auto report = [this](const Error& error)
 		{
 			m_Error = error.ToString();
 			m_Refresh = false;
+			m_Live = false;
 			m_HasSample = false;
 			ENGINE_ERROR("Stats: {}", error);
 		};
@@ -37,7 +61,7 @@ namespace Engine {
 		}
 		if (project.empty())
 		{
-			ImGui::TextUnformatted("Open a project to view statistics");
+			Utils::EditorEmptyState("No project open", "Open a project to inspect frame timings, rendering and memory use.");
 			return {};
 		}
 		if (m_Ticket != 0)
@@ -68,10 +92,16 @@ namespace Engine {
 				}
 			}
 		}
-		if (ImGui::Button("Refresh"))
+		ImGui::BeginDisabled(m_Ticket != 0);
+		if (Utils::EditorToolbarButton("Refresh", "Request a fresh statistics sample without advancing the simulation."))
 			m_Refresh = true;
-		if (m_Refresh && m_Ticket == 0)
+		ImGui::EndDisabled();
+		ImGui::SameLine();
+		ImGui::Checkbox("Live", &m_Live);
+		ImGui::SetItemTooltip("Update as samples arrive. Turn off to inspect the most recent sample.");
+		if ((m_Refresh || m_Live) && m_Ticket == 0)
 		{
+			m_Refresh = false;
 			auto ticket = context.Actions.Submit("stats.get", Json::object());
 			if (ticket)
 				m_Ticket = *ticket;
@@ -82,33 +112,80 @@ namespace Engine {
 			ImGui::TextWrapped("%s", m_Error.c_str());
 		if (!m_HasSample)
 		{
-			ImGui::TextUnformatted("Statistics unavailable");
+			Utils::EditorEmptyState("Statistics unavailable", m_Ticket != 0 ? "Waiting for the editor's first sample." : "Use Refresh to request a new sample.");
 			return {};
 		}
-		ImGui::TextUnformatted(std::format("FPS {:.1f} | CPU {:.3f} ms | Dropped {:.3f} s", m_Stats.Fps, m_Stats.CpuMilliseconds, m_Stats.DroppedSeconds).c_str());
-		ImGui::TextUnformatted(std::format("Entities {} | Bodies {} | Voices {}", m_Stats.Entities, m_Stats.Bodies, m_Stats.Voices).c_str());
-		ImGui::TextUnformatted(std::format("Device memory allocations {} / {}", m_Stats.MemoryAllocationCount, m_Stats.MaxMemoryAllocationCount).c_str());
-		if (m_Stats.ScriptAvailable)
-			ImGui::TextUnformatted(std::format("Luau heap {:.0f} bytes | Soft limit {:.0f} | Hard limit {:.0f}", m_Stats.ScriptHeapBytes, m_Stats.ScriptSoftLimitBytes, m_Stats.ScriptHardLimitBytes).c_str());
-		else
-			ImGui::TextUnformatted("Luau heap unavailable");
+		ImGui::TextDisabled("%s", m_Live ? "Live sample" : "Updates paused");
+		Utils::EditorSectionHeading("Frame & simulation");
+		if (ImGui::BeginTable("FrameMetrics", 2, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp))
+		{
+			Utils::DrawSupportingMetric("Frame rate", std::format("{:.1f} fps", m_Stats.Fps));
+			Utils::DrawSupportingMetric("CPU frame", std::format("{:.2f} ms", m_Stats.CpuMilliseconds));
+			Utils::DrawSupportingMetric("Dropped simulation time", std::format("{:.3f} s", m_Stats.DroppedSeconds));
+			Utils::DrawSupportingMetric("Entities", std::to_string(m_Stats.Entities));
+			Utils::DrawSupportingMetric("Physics bodies", std::to_string(m_Stats.Bodies));
+			Utils::DrawSupportingMetric("Audio voices", std::to_string(m_Stats.Voices));
+			ImGui::EndTable();
+		}
+		Utils::EditorSectionHeading("Memory");
+		if (ImGui::BeginTable("MemoryMetrics", 2, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp))
+		{
+			Utils::DrawSupportingMetric("Device allocations", m_Stats.MaxMemoryAllocationCount == 0 ? "Unavailable" : std::format("{} / {}", m_Stats.MemoryAllocationCount, m_Stats.MaxMemoryAllocationCount));
+			if (m_Stats.ScriptAvailable)
+			{
+				Utils::DrawSupportingMetric("Script heap", Utils::SupportingMemoryLabel(m_Stats.ScriptHeapBytes));
+				Utils::DrawSupportingMetric("Script soft limit", Utils::SupportingMemoryLabel(m_Stats.ScriptSoftLimitBytes));
+				Utils::DrawSupportingMetric("Script hard limit", Utils::SupportingMemoryLabel(m_Stats.ScriptHardLimitBytes));
+			}
+			else
+				Utils::DrawSupportingMetric("Script heap", "Unavailable (no active script VM)");
+			ImGui::EndTable();
+		}
+		Utils::EditorSectionHeading("Rendering");
+		if (m_Stats.Views.empty())
+			ImGui::TextWrapped("Render statistics unavailable. No renderer samples have been reported.");
 		for (const StatsViewSummary& view : m_Stats.Views)
 		{
-			ImGui::SeparatorText(view.Name.c_str());
+			ImGui::PushID(view.Name.c_str());
+			ImGui::TextUnformatted(view.Name == "scene" ? "Scene view" : view.Name == "game" ? "Game view"
+																							 : Utils::EditorLabel(view.Name).c_str());
 			if (!view.Available)
 			{
-				ImGui::TextUnformatted("Render statistics unavailable");
+				ImGui::TextWrapped("Render statistics unavailable. Display this view with a renderer to collect samples.");
+				ImGui::PopID();
 				continue;
 			}
-			ImGui::TextUnformatted(std::format("{} x {} | Frame {} | CPU {:.3f} ms", view.Width, view.Height, view.Frame, view.CpuMilliseconds).c_str());
-			ImGui::TextUnformatted(view.GpuAvailable ? std::format("GPU frame {}", view.GpuFrame).c_str() : "GPU timings unavailable");
-			ImGui::TextUnformatted(std::format("Shadow draws {} | Spots {} | Dropped {}", view.ShadowDraws, view.ShadowedSpotLights, view.DroppedSpotShadows).c_str());
+			if (ImGui::BeginTable("ViewMetrics", 2, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp))
+			{
+				Utils::DrawSupportingMetric("Resolution", std::format("{} x {} px", view.Width, view.Height));
+				Utils::DrawSupportingMetric("CPU preparation", std::format("{:.2f} ms", view.CpuMilliseconds));
+				Utils::DrawSupportingMetric("CPU frame", view.Frame);
+				Utils::DrawSupportingMetric("GPU frame", view.GpuAvailable ? view.GpuFrame : "Unavailable");
+				Utils::DrawSupportingMetric("Shadow draws", std::to_string(view.ShadowDraws));
+				Utils::DrawSupportingMetric("Shadowed spot lights", std::to_string(view.ShadowedSpotLights));
+				Utils::DrawSupportingMetric("Dropped spot shadows", std::to_string(view.DroppedSpotShadows));
+				ImGui::EndTable();
+			}
 			for (const StatsPassSummary& pass : view.Passes)
 			{
-				ImGui::TextUnformatted(std::format("{} | CPU {:.3f} ms | GPU {} | {} draws | {} dispatches | {} triangles", pass.Name, pass.CpuMilliseconds,
-					pass.GpuAvailable ? std::format("{:.3f} ms", pass.GpuMilliseconds) : "unavailable", pass.DrawCalls, pass.Dispatches, pass.Triangles)
-						.c_str());
+				ImGui::PushID(pass.Name.c_str());
+				const std::string label = Utils::EditorLabel(pass.Name);
+				if (ImGui::TreeNodeEx("Pass", ImGuiTreeNodeFlags_SpanAvailWidth, "%s", label.c_str()))
+				{
+					if (ImGui::BeginTable("PassMetrics", 2, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp))
+					{
+						Utils::DrawSupportingMetric("CPU", std::format("{:.3f} ms", pass.CpuMilliseconds));
+						Utils::DrawSupportingMetric("GPU", pass.GpuAvailable ? std::format("{:.3f} ms", pass.GpuMilliseconds) : "Unavailable");
+						Utils::DrawSupportingMetric("Draw calls", std::to_string(pass.DrawCalls));
+						Utils::DrawSupportingMetric("Dispatches", std::to_string(pass.Dispatches));
+						Utils::DrawSupportingMetric("Triangles", std::to_string(pass.Triangles));
+						ImGui::EndTable();
+					}
+					ImGui::TreePop();
+				}
+				ImGui::PopID();
 			}
+			ImGui::PopID();
 		}
 		return {};
 	}

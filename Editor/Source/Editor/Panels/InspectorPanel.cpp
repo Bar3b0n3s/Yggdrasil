@@ -3,14 +3,18 @@
 
 #include "Editor/Drawers/ReflectedDrawers.h"
 #include "Editor/EditorPanelContext.h"
+#include "Editor/Ui/EditorStyle.h"
 #include "EditorCore/EditorActions.h"
 #include "EditorCore/EditorContext.h"
 #include "EditorCore/Play/EditorPlayController.h"
 #include "EditorCore/Scripting/EditorScriptService.h"
+#include "EditorCore/Thumbnails/ThumbnailCache.h"
 #include "Engine/Asset/MaterialData.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/AssetPipeline/ImporterRegistry.h"
 #include "Engine/AssetPipeline/Importers/SoundEffectImporter.h"
+#include "Engine/Core/FileSystem.h"
+#include "Engine/Core/Hash.h"
 #include "Engine/Core/Log.h"
 #include "Engine/Core/VirtualFileSystem.h"
 #include "Engine/Reflection/TypeRegistry.h"
@@ -31,6 +35,25 @@
 namespace Engine {
 
 	namespace Utils {
+
+		static std::string InspectorOwnerIdentity(const EditorPanelContext& context, bool asset, SceneTarget target)
+		{
+			const EditorContext& editor = context.Editor;
+			std::string identity = editor.HasProject() ? FileSystem::PathToUtf8(editor.GetProject().GetProjectFile()) : std::string{};
+			// The host's project binding also distinguishes closing and reopening the same project path.
+			identity += ":" + std::to_string(context.Thumbnails.GetProjectGeneration());
+			if (asset)
+				return identity + ":Asset";
+			if (target == SceneTarget::Play)
+			{
+				const PlaySession* session = editor.GetPlay().GetSession();
+				return identity + ":Play:" + std::to_string(session == nullptr ? 0 : session->GetSerial())
+					+ ":" + std::to_string(session == nullptr ? 0 : session->GetSceneGeneration());
+			}
+			// GetRevision's documented scene base advances on replacement, but not on ordinary entity edits.
+			const uint64_t sceneEpoch = editor.GetRevision() - (editor.HasScene() ? editor.GetScene().GetRevision() : 0);
+			return identity + ":Edit:" + std::to_string(sceneEpoch);
+		}
 
 		static bool InspectorReferenceMatches(std::string_view text, std::string_view query)
 		{
@@ -104,6 +127,55 @@ namespace Engine {
 			return candidates;
 		}
 
+		static std::optional<ReflectedReferenceCandidate> DescribeInspectorReference(const EditorContext& editor,
+			SceneTarget target, const FieldInfo& field, UUID id)
+		{
+			if (field.GetKind() == FieldType::EntityRef)
+			{
+				const Scene* scene = target == SceneTarget::Edit ? (editor.HasScene() ? &editor.GetScene() : nullptr)
+					: editor.GetPlay().GetSession() != nullptr   ? &editor.GetPlay().GetSession()->GetScene()
+																 : nullptr;
+				if (scene != nullptr)
+				{
+					const ConstEntity entity = scene->FindEntityByID(id);
+					if (entity.IsValid())
+						return ReflectedReferenceCandidate{ id, entity.GetName(), scene->GetEntityPath(entity) };
+				}
+			}
+			else if (editor.HasProject())
+			{
+				const auto& assets = editor.GetAssets();
+				const auto& registry = assets.GetRegistry();
+				if (const auto location = registry.Locate(id))
+				{
+					std::string label(location->Record->SourcePath.GetFileName());
+					if (!location->SubAssetKey.empty())
+						label += " / " + location->SubAssetKey;
+					return ReflectedReferenceCandidate{ id, std::move(label), registry.GetReferencePath(id) };
+				}
+				if (const auto* entry = assets.GetBuiltins().Find(id))
+				{
+					const size_t slash = entry->Path.find_last_of('/');
+					return ReflectedReferenceCandidate{ id, entry->Path.substr(slash == std::string::npos ? 0 : slash + 1), entry->Path };
+				}
+			}
+			return std::nullopt;
+		}
+
+		static std::string InspectorFieldLabel(std::string_view component, std::string_view field)
+		{
+			if (component == "Transform")
+			{
+				if (field == "Translation")
+					return "Position";
+				if (field == "EulerAngles")
+					return "Rotation";
+				if (field == "Rotation")
+					return "Quaternion";
+			}
+			return EditorLabel(field);
+		}
+
 	}
 
 	void InspectorPanel::ReportFailure(const Error& error)
@@ -118,6 +190,11 @@ namespace Engine {
 	{
 		if (!m_CommitQueued)
 			return {};
+		if (m_ActiveTarget && m_OwnerIdentity != Utils::InspectorOwnerIdentity(context, m_ActiveTarget->Kind != InspectorTargetKind::Component, m_ActiveTarget->Target))
+		{
+			CancelEdit(context);
+			return {};
+		}
 		m_CommitQueued = false;
 		auto committed = context.InspectorEdits.Commit();
 		if (!committed)
@@ -157,12 +234,22 @@ namespace Engine {
 		const std::vector<UUID> selection(editor.GetSelection().begin(), editor.GetSelection().end());
 		const AssetHandle asset = editor.GetUiState().GetSelectedAsset();
 		const SceneTarget sceneTarget = editor.GetSelectionTarget();
-		if (m_ActiveTarget && (ImGui::IsKeyPressed(ImGuiKey_Escape) || (!ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !m_CommitQueued) || m_ActiveTarget->Asset != asset || (m_ActiveTarget->Kind == InspectorTargetKind::Component && (m_ActiveTarget->Entities != selection || m_ActiveTarget->Target != sceneTarget))))
+		const std::string ownerIdentity = Utils::InspectorOwnerIdentity(context, asset.IsValid(), sceneTarget);
+		if (m_OwnerIdentity != ownerIdentity)
+		{
+			CancelEdit(context);
+			m_OwnerIdentity = ownerIdentity;
+		}
+		const bool escape = ImGui::IsKeyPressed(ImGuiKey_Escape);
+		if (m_ActiveTarget && (editor.IsReadOnly() || escape || (!ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !m_CommitQueued) || m_ActiveTarget->Asset != asset || (m_ActiveTarget->Kind == InspectorTargetKind::Component && (m_ActiveTarget->Entities != selection || m_ActiveTarget->Target != sceneTarget))))
 			CancelEdit(context);
 		if (!m_Error.empty())
 			ImGui::TextWrapped("%s", m_Error.c_str());
 		if (sceneTarget == SceneTarget::Play && !selection.empty())
-			ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.3f, 1.0f), "Runtime values - changes end on Stop");
+			ImGui::TextWrapped("Runtime values - Changes end when you stop play.");
+		if (editor.IsReadOnly())
+			ImGui::TextDisabled("Read only");
+		bool activeFieldDrawn = false;
 		auto queue = [this, &context](std::string_view method, const Json& params)
 		{
 			auto submitted = context.Actions.Submit(method, params);
@@ -171,31 +258,44 @@ namespace Engine {
 			else
 				ReportFailure(submitted.error());
 		};
-		auto drawField = [this, &context, &editor](const FieldInfo& field, Value value, InspectorEditTarget target,
+		auto drawField = [this, &context, &editor, &activeFieldDrawn, escape](const FieldInfo& field, Value value, InspectorEditTarget target,
 							 const ResolveContext& resolve, bool mixed, const ScriptFieldSchema* scriptSchema = nullptr)
 		{
 			if (field.GetMeta().Hidden)
 				return;
 			const bool active = m_ActiveTarget && m_ActiveTarget->Kind == target.Kind && m_ActiveTarget->Component == target.Component
 				&& m_ActiveTarget->FieldPath == target.FieldPath;
+			activeFieldDrawn |= active;
 			if (active && context.InspectorEdits.IsEditing())
 			{
 				auto preview = context.InspectorEdits.GetPreview();
 				if (preview)
 					value = std::move(*preview);
 			}
-			// Keep the mixed-value row until commit so activation cannot move the widget away from a held pointer.
-			auto result = DrawReflectedValue(field, value, { .Types = editor.GetTypeRegistry(), .Resolve = resolve, .Path = target.Component + "." + target.FieldPath, .ReadOnly = editor.IsReadOnly(), .Mixed = mixed, .FindReferences = [&editor, addressedTarget = target.Target](const FieldInfo& referenceField, std::string_view query)
+			// Selection and lifecycle identity prevent ImGui buffers from carrying over to replacement owners with the same UUID.
+			std::string path = std::to_string(static_cast<int>(target.Kind)) + ":" + target.Asset.ToString() + ":" + target.Component + "." + target.FieldPath;
+			for (const UUID id : target.Entities)
+				path += ":" + id.ToString();
+			path += target.Target == SceneTarget::Play ? ":Play" : ":Edit";
+			path += ":" + m_OwnerIdentity;
+			auto result = DrawReflectedValue(field, value, { .Types = editor.GetTypeRegistry(), .Resolve = resolve, .Path = std::move(path), .ReadOnly = editor.IsReadOnly(), .Mixed = mixed, .FindReferences = [&editor, addressedTarget = target.Target](const FieldInfo& referenceField, std::string_view query)
 			{
 				return Utils::FindInspectorReferenceCandidates(editor, addressedTarget, referenceField, query);
 			},
-															   .ScriptSchema = scriptSchema });
+															   .ScriptSchema = scriptSchema,
+															   .DisplayLabel = Utils::InspectorFieldLabel(target.Component, field.GetName()),
+															   .DescribeReference = [&editor, addressedTarget = target.Target](const FieldInfo& referenceField, UUID id)
+			{
+				return Utils::DescribeInspectorReference(editor, addressedTarget, referenceField, id);
+			} });
 			if (!result)
 			{
 				ReportFailure(result.error());
+				if (active)
+					CancelEdit(context);
 				return;
 			}
-			if (result->Cancelled)
+			if (escape || result->Cancelled || (active && !m_CommitQueued && !result->Active && !result->Activated && !result->Changed && !result->Committed))
 			{
 				CancelEdit(context);
 				return;
@@ -210,6 +310,7 @@ namespace Engine {
 					return;
 				}
 				m_ActiveTarget = std::move(target);
+				activeFieldDrawn = true;
 			}
 			if (result->Changed && context.InspectorEdits.IsEditing())
 			{
@@ -228,10 +329,15 @@ namespace Engine {
 			const AssetRecord* record = editor.GetAssets().GetRegistry().Find(asset);
 			if (record == nullptr)
 			{
-				ImGui::TextDisabled("The selected asset is no longer available.");
+				CancelEdit(context);
+				Utils::EditorEmptyState("No editable source", "This resource is built in, imported as part of another asset, or no longer available. Select its source asset to inspect import settings.");
 				return {};
 			}
+			Utils::EditorSectionHeading(record->SourcePath.GetFileName());
+			ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
 			ImGui::TextWrapped("%s", record->SourcePath.ToString().c_str());
+			ImGui::PopStyleColor();
+			ImGui::Spacing();
 			const TypeRegistry& types = editor.GetTypeRegistry();
 			auto drawObject = [&drawField, &types, asset](const StructInfo& type, const Json& json, InspectorTargetKind kind)
 			{
@@ -249,6 +355,7 @@ namespace Engine {
 			};
 			if (record->Metadata.Type == AssetType::Material || record->Metadata.Importer == SoundEffectImporter::Id)
 			{
+				Utils::EditorSectionHeading("Properties");
 				ENGINE_TRY_ASSIGN(std::string text, editor.GetVfs().ReadText(record->SourcePath));
 				if (record->Metadata.Type == AssetType::Material)
 				{
@@ -279,6 +386,8 @@ namespace Engine {
 					ImGui::PopID();
 				}
 			}
+			if (m_ActiveTarget && !activeFieldDrawn)
+				CancelEdit(context);
 			return {};
 		}
 		Scene* scene = sceneTarget == SceneTarget::Play ? (editor.GetPlay().GetSession() == nullptr ? nullptr : &editor.GetPlay().GetSession()->GetScene())
@@ -286,17 +395,47 @@ namespace Engine {
 														: nullptr;
 		if (scene == nullptr || selection.empty())
 		{
-			ImGui::TextDisabled("Select an entity or asset to inspect.");
+			CancelEdit(context);
+			Utils::EditorEmptyState("Nothing selected", "Select an object in the Hierarchy or a resource in Assets to view and edit its properties.");
 			return {};
 		}
 		for (const UUID id : selection)
 		{
 			if (!scene->FindEntityByID(id).IsValid())
+			{
+				CancelEdit(context);
 				return {};
+			}
 		}
 		Entity first = scene->FindEntityByID(selection.front());
-		ImGui::Text("%zu selected", selection.size());
 		const char* targetName = sceneTarget == SceneTarget::Play ? "Play" : "Edit";
+		ImGui::BeginDisabled(editor.IsReadOnly());
+		if (selection.size() == 1)
+		{
+			ImGui::PushID(static_cast<int>(FNV1a32(first.GetUUID().ToString() + ":" + m_OwnerIdentity)));
+			bool enabled = first.IsActiveSelf();
+			if (ImGui::Checkbox("##EntityActive", &enabled))
+				queue("entity.update", Json{ { "entity", first.GetUUID().ToString() }, { "active", enabled }, { "target", targetName } });
+			if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+				ImGui::SetTooltip("Active in the scene");
+			ImGui::SameLine();
+			std::string name = first.GetName();
+			ImGui::SetNextItemWidth(-1.0f);
+			const bool entered = ImGui::InputText("##EntityName", &name, ImGuiInputTextFlags_EnterReturnsTrue);
+			if (entered && name != first.GetName())
+				queue("entity.update", Json{ { "entity", first.GetUUID().ToString() }, { "name", name }, { "target", targetName } });
+			if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+				ImGui::SetTooltip("Object name - Enter to rename");
+			ImGui::PopID();
+			ImGui::TextDisabled("%s", first.HasComponent<PrefabLinkComponent>() ? "Prefab instance" : "Scene object");
+		}
+		else
+		{
+			ImGui::Text("%zu objects selected", selection.size());
+			ImGui::TextWrapped("Edit shared components together. Mixed properties show Multiple values.");
+		}
+		ImGui::EndDisabled();
+		ImGui::Spacing();
 		for (const ComponentInfo* component : editor.GetTypeRegistry().GetComponents())
 		{
 			const ComponentHostOps* ops = component->GetHostOps();
@@ -309,13 +448,69 @@ namespace Engine {
 			});
 			if (!shared)
 				continue;
-			ImGui::PushID(component->GetName().c_str());
-			if (ImGui::CollapsingHeader(component->GetName().c_str(), ImGuiTreeNodeFlags_DefaultOpen))
+			ImGui::PushID(static_cast<int>(FNV1a32(component->GetName())));
+			bool expanded = false;
+			bool openOptions = false;
+			if (ImGui::BeginTable("ComponentHeader", 2, ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_NoSavedSettings | ImGuiTableFlags_NoPadOuterX))
+			{
+				ImGui::TableSetupColumn("Title", ImGuiTableColumnFlags_WidthStretch);
+				ImGui::TableSetupColumn("Options", ImGuiTableColumnFlags_WidthFixed, ImGui::GetFrameHeight());
+				ImGui::TableNextRow();
+				ImGui::TableNextColumn();
+				expanded = ImGui::TreeNodeEx("##Component", ImGuiTreeNodeFlags_CollapsingHeader | ImGuiTreeNodeFlags_DefaultOpen,
+					"%s", Utils::EditorLabel(component->GetName()).c_str());
+				if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
+					openOptions = true;
+				ImGui::TableNextColumn();
+				if (ImGui::Button("...##Options", ImVec2(ImGui::GetFrameHeight(), ImGui::GetFrameHeight())))
+					openOptions = true;
+				if (ImGui::IsItemHovered())
+					ImGui::SetTooltip("Component options");
+				ImGui::EndTable();
+			}
+			if (openOptions)
+				ImGui::OpenPopup("ComponentOptions");
+			if (ImGui::BeginPopup("ComponentOptions"))
+			{
+				ImGui::TextUnformatted(Utils::EditorLabel(component->GetName()).c_str());
+				ImGui::Separator();
+				if (ImGui::MenuItem("Remove component", nullptr, false, !editor.IsReadOnly() && component->HasFlag(ComponentFlags::Removable)))
+				{
+					CancelEdit(context);
+					Json commands = Json::array();
+					for (const UUID id : selection)
+						commands.push_back(Json{ { "method", "entity.update" }, { "params", Json{ { "entity", id.ToString() }, { "removeComponents", Json::array({ component->GetName() }) }, { "target", targetName } } } });
+					queue("edit.batch", Json{ { "label", "Remove component" }, { "ops", std::move(commands) } });
+				}
+				ImGui::EndPopup();
+			}
+			if (expanded)
 			{
 				const void* object = ops->GetConst(first);
 				ResolveContext resolve{ .Registry = &editor.GetTypeRegistry(), .Owner = object, .OwnerType = component, .Key = {} };
+				std::vector<const FieldInfo*> fields;
+				const bool transform = component->GetName() == "Transform";
+				if (transform)
+				{
+					for (const char* name : { "Translation", "EulerAngles", "Scale" })
+					{
+						if (const FieldInfo* field = component->FindField(name))
+							fields.push_back(field);
+					}
+				}
+				const size_t primaryFields = fields.size();
 				for (const auto& field : component->GetFields())
 				{
+					if (std::find(fields.begin(), fields.end(), field.get()) == fields.end())
+						fields.push_back(field.get());
+				}
+				for (size_t fieldIndex = 0; fieldIndex < fields.size(); ++fieldIndex)
+				{
+					if (transform && fieldIndex == primaryFields && !ImGui::CollapsingHeader("Advanced transform"))
+						break;
+					const FieldInfo* field = fields[fieldIndex];
+					if (field->GetMeta().Hidden)
+						continue;
 					if (component->GetName() == "Script" && field->GetName() == "Fields")
 					{
 						const auto& attached = first.GetComponent<ScriptComponent>();
@@ -329,7 +524,7 @@ namespace Engine {
 						}
 						if ((*script)->Kind != ScriptKind::Behaviour)
 						{
-							ImGui::TextWrapped("SCRIPT_NOT_A_BEHAVIOUR: assign a Behaviour script.");
+							ImGui::TextWrapped("Assign a Behaviour script to edit its exposed properties.");
 							continue;
 						}
 						auto schemas = ScriptFieldSchemaSource::Create({ { attached.Script.GetHandle(), *script } });
@@ -343,7 +538,7 @@ namespace Engine {
 							sameScript &= scene->FindEntityByID(id).GetComponent<ScriptComponent>().Script == attached.Script;
 						if (!sameScript)
 						{
-							ImGui::TextDisabled("Select entities with the same Behaviour to edit script fields together.");
+							ImGui::TextWrapped("Select objects with the same Behaviour to edit script fields together.");
 							continue;
 						}
 						ResolveContext scriptResolve = resolve;
@@ -371,7 +566,7 @@ namespace Engine {
 							for (const UUID id : selection)
 								mixed |= effective(scene->FindEntityByID(id).GetComponent<ScriptComponent>(), invalid).Get() != initial.Get();
 							if (invalid)
-								ImGui::TextWrapped("SCRIPT_FIELD_TYPE_MISMATCH: %s uses its default until the override is corrected.", declaration.Name.c_str());
+								ImGui::TextWrapped("%s uses its default until its saved value is corrected.", Utils::EditorLabel(declaration.Name).c_str());
 							FieldInfo variant({ .Name = declaration.Name, .Description = (*descriptor)->GetDescription(), .Type = field->GetType().GetElement(), .Meta = declaration.Meta, .Accessor = {}, .Resolver = field->GetResolver() });
 							scriptResolve.Key = declaration.Name;
 							drawField(variant, Value::FromVariant(initial), { .Entities = selection, .Component = "Script", .FieldPath = "Fields[" + declaration.Name + "]", .Target = sceneTarget },
@@ -380,7 +575,7 @@ namespace Engine {
 						for (const auto& [name, value] : attached.Fields)
 						{
 							if (!(*schemas)->FindField(attached.Script.GetHandle(), name))
-								ImGui::TextWrapped("SCRIPT_UNKNOWN_FIELD_OVERRIDE: %s = %s (preserved)", name.c_str(), value.Get().dump().c_str());
+								ImGui::TextWrapped("Saved field not in this script: %s = %s (preserved)", name.c_str(), value.Get().dump().c_str());
 						}
 					}
 					else
@@ -403,9 +598,10 @@ namespace Engine {
 						if (root.IsValid() && root.HasComponent<PrefabInstanceComponent>())
 						{
 							const auto& overrides = root.GetComponent<PrefabInstanceComponent>().Overrides;
-							const bool overridden = std::any_of(overrides.begin(), overrides.end(), [&link, component, &field](const PrefabOverride& item)
+							const std::string prefabField = transform && field->GetName() == "EulerAngles" ? "Rotation" : field->GetName();
+							const bool overridden = std::any_of(overrides.begin(), overrides.end(), [&link, component, &prefabField](const PrefabOverride& item)
 							{
-								return item.PrefabEntityID == link.PrefabEntityID && item.Component == component->GetName() && item.Field == field->GetName();
+								return item.PrefabEntityID == link.PrefabEntityID && item.Component == component->GetName() && item.Field == prefabField;
 							});
 							if (overridden)
 							{
@@ -414,56 +610,89 @@ namespace Engine {
 								ImGui::SameLine();
 								ImGui::BeginDisabled(editor.IsReadOnly());
 								if (ImGui::SmallButton("Revert"))
-									queue("prefab.revert", Json{ { "instance", link.InstanceRoot.ToString() }, { "overrides", Json::array({ Json{ { "prefabEntityId", link.PrefabEntityID.ToString() }, { "kind", "Field" }, { "component", component->GetName() }, { "field", field->GetName() } } }) } });
+								{
+									CancelEdit(context);
+									queue("prefab.revert", Json{ { "instance", link.InstanceRoot.ToString() }, { "overrides", Json::array({ Json{ { "prefabEntityId", link.PrefabEntityID.ToString() }, { "kind", "Field" }, { "component", component->GetName() }, { "field", prefabField } } }) } });
+								}
 								ImGui::EndDisabled();
 								ImGui::PopID();
 							}
 						}
 					}
 				}
-				ImGui::BeginDisabled(editor.IsReadOnly() || !component->HasFlag(ComponentFlags::Removable));
-				if (ImGui::Button("Remove component"))
-				{
-					Json commands = Json::array();
-					for (const UUID id : selection)
-						commands.push_back(Json{ { "method", "entity.update" }, { "params", Json{ { "entity", id.ToString() }, { "removeComponents", Json::array({ component->GetName() }) }, { "target", targetName } } } });
-					queue("edit.batch", Json{ { "label", "Remove component" }, { "ops", std::move(commands) } });
-				}
-				ImGui::EndDisabled();
 			}
 			ImGui::PopID();
 		}
+		ImGui::Spacing();
 		ImGui::BeginDisabled(editor.IsReadOnly());
-		if (ImGui::Button("Add Component"))
+		if (ImGui::Button("Add component", ImVec2(-1.0f, 0.0f)))
+		{
+			m_ComponentSearch.clear();
 			ImGui::OpenPopup("AddComponent");
+		}
+		ImGui::SetNextWindowSize(ImVec2(std::min(ImGui::GetFontSize() * 24.0f, ImGui::GetIO().DisplaySize.x - 32.0f), 0.0f), ImGuiCond_Appearing);
 		if (ImGui::BeginPopup("AddComponent"))
 		{
-			std::string category;
+			if (ImGui::IsWindowAppearing())
+				ImGui::SetKeyboardFocusHere();
+			ImGui::SetNextItemWidth(-1.0f);
+			ImGui::InputTextWithHint("##ComponentSearch", "Search components", &m_ComponentSearch);
+			std::vector<const ComponentInfo*> available;
 			for (const ComponentInfo* component : editor.GetTypeRegistry().GetComponents())
 			{
-				if (!component->HasFlag(ComponentFlags::EditorVisible) || component->HasFlag(ComponentFlags::Hidden) || component->HasFlag(ComponentFlags::EntityLevel))
+				const ComponentHostOps* ops = component->GetHostOps();
+				if (!component->HasFlag(ComponentFlags::EditorVisible) || component->HasFlag(ComponentFlags::Hidden)
+					|| component->HasFlag(ComponentFlags::EntityLevel) || ops == nullptr)
 					continue;
-				if (category != component->GetCategory())
+				if (!Utils::InspectorReferenceMatches(Utils::EditorLabel(component->GetName()), m_ComponentSearch)
+					&& !Utils::InspectorReferenceMatches(component->GetName(), m_ComponentSearch)
+					&& !Utils::InspectorReferenceMatches(component->GetCategory(), m_ComponentSearch))
+					continue;
+				if (std::all_of(selection.begin(), selection.end(), [scene, ops](UUID id)
 				{
-					category = component->GetCategory();
-					ImGui::SeparatorText(category.c_str());
-				}
-				if (ImGui::Selectable(component->GetName().c_str()))
+					return ops->Has(scene->FindEntityByID(id));
+				}))
+					continue;
+				available.push_back(component);
+			}
+			std::sort(available.begin(), available.end(), [](const auto* left, const auto* right)
+			{
+				return std::tie(left->GetCategory(), left->GetName()) < std::tie(right->GetCategory(), right->GetName());
+			});
+			if (available.empty())
+				ImGui::TextWrapped("No matching components to add.");
+			if (ImGui::BeginChild("Components", ImVec2(0.0f, ImGui::GetTextLineHeightWithSpacing() * 14.0f)))
+			{
+				std::string category;
+				for (const ComponentInfo* component : available)
 				{
-					Json commands = Json::array();
-					for (const UUID id : selection)
+					if (category != component->GetCategory())
 					{
-						if (component->GetHostOps()->Has(scene->FindEntityByID(id)))
-							continue;
-						commands.push_back(Json{ { "method", "entity.update" }, { "params", Json{ { "entity", id.ToString() }, { "components", Json{ { component->GetName(), Json::object() } } }, { "target", targetName } } } });
+						category = component->GetCategory();
+						Utils::EditorSectionHeading(Utils::EditorLabel(category));
 					}
-					if (!commands.empty())
+					ImGui::PushID(static_cast<int>(FNV1a32(component->GetName())));
+					if (ImGui::Selectable(Utils::EditorLabel(component->GetName()).c_str()))
+					{
+						CancelEdit(context);
+						Json commands = Json::array();
+						for (const UUID id : selection)
+						{
+							if (!component->GetHostOps()->Has(scene->FindEntityByID(id)))
+								commands.push_back(Json{ { "method", "entity.update" }, { "params", Json{ { "entity", id.ToString() }, { "components", Json{ { component->GetName(), Json::object() } } }, { "target", targetName } } } });
+						}
 						queue("edit.batch", Json{ { "label", "Add component" }, { "ops", std::move(commands) } });
+						ImGui::CloseCurrentPopup();
+					}
+					ImGui::PopID();
 				}
 			}
+			ImGui::EndChild();
 			ImGui::EndPopup();
 		}
 		ImGui::EndDisabled();
+		if (m_ActiveTarget && !activeFieldDrawn)
+			CancelEdit(context);
 		return {};
 	}
 

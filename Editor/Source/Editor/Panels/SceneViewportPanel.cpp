@@ -2,6 +2,7 @@
 #include "Editor/Panels/SceneViewportPanel.h"
 
 #include "Editor/EditorPanelContext.h"
+#include "Editor/Ui/EditorStyle.h"
 #include "Editor/Viewport/EditorViewportHost.h"
 #include "Editor/Viewport/GizmoOverlay.h"
 #include "EditorCore/EditorActions.h"
@@ -146,9 +147,8 @@ namespace Engine {
 				status = std::unexpected(std::move(next).error());
 		};
 		EditorViewportState& state = context.Editor.GetViewportState();
-		const std::string title(EditorPanelToString(EditorPanel::SceneViewport));
 		bool open = true;
-		const bool visible = ImGui::Begin(title.c_str(), &open, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+		const bool visible = ImGui::Begin(Utils::EditorWindowTitle(EditorPanel::SceneViewport), &open, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
 		if (!visible || !open)
 		{
 			context.Viewports.SetRectangle(ViewportView::Scene, {});
@@ -161,7 +161,52 @@ namespace Engine {
 		}
 		const ImGuiIO& io = ImGui::GetIO();
 		EditorViewportOptions options = state.GetOptions();
-		if (ImGui::Button("View"))
+		const float scale = Utils::EditorUiScale();
+		const float toolbarRight = ImGui::GetCursorScreenPos().x + ImGui::GetContentRegionAvail().x;
+		const auto nextTool = [toolbarRight](float width)
+		{
+			if (ImGui::GetItemRectMax().x + ImGui::GetStyle().ItemSpacing.x + width <= toolbarRight)
+				ImGui::SameLine();
+		};
+		const auto buttonWidth = [](const char* label)
+		{
+			return ImGui::CalcTextSize(label).x + ImGui::GetStyle().FramePadding.x * 2.0f;
+		};
+		const bool draggingAtStart = context.Gizmos.IsDragging();
+		const bool playing = context.Editor.GetPlay().IsPlaying();
+		ImGui::BeginDisabled(draggingAtStart || context.Editor.IsReadOnly() || !options.Gizmos);
+		if (Utils::EditorToolbarButton("Move", "Move selection (W)", m_GizmoSettings.Operation == GizmoOperation::Translate))
+			m_GizmoSettings.Operation = GizmoOperation::Translate;
+		nextTool(buttonWidth("Rotate"));
+		if (Utils::EditorToolbarButton("Rotate", "Rotate selection (E)", m_GizmoSettings.Operation == GizmoOperation::Rotate))
+			m_GizmoSettings.Operation = GizmoOperation::Rotate;
+		nextTool(buttonWidth("Scale"));
+		if (Utils::EditorToolbarButton("Scale", "Scale selection (R)", m_GizmoSettings.Operation == GizmoOperation::Scale))
+			m_GizmoSettings.Operation = GizmoOperation::Scale;
+		nextTool(buttonWidth("World"));
+		const bool local = m_GizmoSettings.Space == GizmoSpace::Local;
+		if (Utils::EditorToolbarButton(local ? "Local###GizmoSpace" : "World###GizmoSpace", "Switch coordinate space (X)", local))
+			m_GizmoSettings.Space = local ? GizmoSpace::World : GizmoSpace::Local;
+		ImGui::EndDisabled();
+		nextTool(buttonWidth("Snap"));
+		if (Utils::EditorToolbarButton("Snap", "Snap to 0.5 m, 15 degrees or 0.1 scale. Hold Ctrl for temporary snapping.", m_GizmoSettings.Snap))
+			m_GizmoSettings.Snap = !m_GizmoSettings.Snap;
+		nextTool(112.0f * scale);
+		ImGui::SetNextItemWidth(112.0f * scale);
+		const std::string debugLabel = Utils::EditorLabel(RenderDebugViewToString(state.GetDebugView()));
+		if (ImGui::BeginCombo("##SceneDebugView", debugLabel.c_str()))
+		{
+			for (uint32_t index = 0; index < RenderDebugViewCount; ++index)
+			{
+				const auto view = static_cast<RenderDebugView>(index);
+				const std::string label = Utils::EditorLabel(RenderDebugViewToString(view));
+				if (ImGui::Selectable(label.c_str(), view == state.GetDebugView()))
+					record(state.SetDebugView(view));
+			}
+			ImGui::EndCombo();
+		}
+		nextTool(buttonWidth("Overlays"));
+		if (Utils::EditorToolbarButton("Overlays", "Grid, gizmos, collision shapes and projection"))
 			ImGui::OpenPopup("SceneViewOptions");
 		if (ImGui::BeginPopup("SceneViewOptions"))
 		{
@@ -181,43 +226,12 @@ namespace Engine {
 			}
 			ImGui::EndPopup();
 		}
-		ImGui::SameLine();
-		ImGui::SetNextItemWidth(145.0f);
-		const std::string debugLabel(RenderDebugViewToString(state.GetDebugView()));
-		if (ImGui::BeginCombo("##SceneDebugView", debugLabel.c_str()))
-		{
-			for (uint32_t index = 0; index < RenderDebugViewCount; ++index)
-			{
-				const auto view = static_cast<RenderDebugView>(index);
-				const std::string label(RenderDebugViewToString(view));
-				if (ImGui::Selectable(label.c_str(), view == state.GetDebugView()))
-					record(state.SetDebugView(view));
-			}
-			ImGui::EndCombo();
-		}
-		const bool draggingAtStart = context.Gizmos.IsDragging();
-		const bool playing = context.Editor.GetPlay().IsPlaying();
-		ImGui::SameLine();
-		ImGui::BeginDisabled(draggingAtStart);
-		if (ImGui::Button("Frame (F)"))
+		nextTool(buttonWidth("Frame"));
+		ImGui::BeginDisabled(draggingAtStart || context.Editor.GetSelection().empty());
+		if (Utils::EditorToolbarButton("Frame", "Frame the selected objects (F)"))
 			record(FrameSelection(context));
 		ImGui::EndDisabled();
-		ImGui::BeginDisabled(draggingAtStart || context.Editor.IsReadOnly() || !options.Gizmos);
-		if (ImGui::RadioButton("Move (W)", m_GizmoSettings.Operation == GizmoOperation::Translate))
-			m_GizmoSettings.Operation = GizmoOperation::Translate;
-		ImGui::SameLine();
-		if (ImGui::RadioButton("Rotate (E)", m_GizmoSettings.Operation == GizmoOperation::Rotate))
-			m_GizmoSettings.Operation = GizmoOperation::Rotate;
-		ImGui::SameLine();
-		if (ImGui::RadioButton("Scale (R)", m_GizmoSettings.Operation == GizmoOperation::Scale))
-			m_GizmoSettings.Operation = GizmoOperation::Scale;
-		ImGui::SameLine();
-		bool local = m_GizmoSettings.Space == GizmoSpace::Local;
-		if (ImGui::Checkbox("Local (X)", &local))
-			m_GizmoSettings.Space = local ? GizmoSpace::Local : GizmoSpace::World;
-		ImGui::EndDisabled();
-		ImGui::SameLine();
-		ImGui::Checkbox("Snap (Ctrl)", &m_GizmoSettings.Snap);
+		ImGui::Separator();
 		if (playing)
 			ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.25f, 1.0f), "Runtime scene: changes are discarded on Stop");
 		if (!m_LastError.empty())

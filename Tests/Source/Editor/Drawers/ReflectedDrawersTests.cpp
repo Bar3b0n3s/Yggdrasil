@@ -4,8 +4,11 @@
 #include "Editor/PanelInteractionFixture.h"
 #include "Engine/Asset/BuiltinAssets.h"
 #include "Engine/Asset/ScriptData.h"
+#include "Engine/Core/Hash.h"
 #include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Scene/Components/MeshRendererComponent.h"
+
+#include <imgui_internal.h>
 
 #include <array>
 #include <cstring>
@@ -40,26 +43,60 @@ namespace Engine {
 		types.Freeze();
 	}
 
+	// Read the rectangle recorded by ImGui's navigation pass; the action itself is always real mouse/keyboard input.
+	static ImRect LocateDrawerItem(Test::PanelInteractionUi& ui, const std::function<Status()>& draw, ImGuiID id, const char* windowName = nullptr)
+	{
+		ImRect rectangle;
+		const auto locate = [&draw, id, windowName, &rectangle]() -> Status
+		{
+			ImGui::SetNavWindow(windowName == nullptr ? ImGui::GetCurrentWindow() : ImGui::FindWindowByName(windowName));
+			ImGui::SetNavID(id, ImGuiNavLayer_Main, ImGui::GetCurrentFocusScope(), ImRect());
+			ImGui::GetCurrentContext()->NavIdIsAlive = false;
+			ENGINE_TRY(draw());
+			const auto& gui = *ImGui::GetCurrentContext();
+			REQUIRE(gui.NavIdIsAlive);
+			REQUIRE(gui.NavId == id);
+			rectangle = ImGui::WindowRectRelToAbs(gui.NavWindow, gui.NavWindow->NavRectRel[gui.NavLayer]);
+			return {};
+		};
+		REQUIRE(ui.Frame(locate));
+		return rectangle;
+	}
+
+	static ImGuiID DrawerControlId(std::string_view path, const char* label, bool variant = false)
+	{
+		ImGui::PushID(static_cast<int>(FNV1a32(path)));
+		if (variant)
+			ImGui::PushID(static_cast<int>(FNV1a32(path)));
+		ImGui::PushID("Property");
+		const ImGuiID id = ImGui::GetID(label);
+		ImGui::PopID();
+		if (variant)
+			ImGui::PopID();
+		ImGui::PopID();
+		return id;
+	}
+
 	static Result<ReflectedDrawerResult> DeliverInspectorAssetPayload(Test::PanelInteractionUi& ui, const FieldInfo& field, Value& value,
 		const ReflectedDrawerContext& context, std::span<const std::byte> bytes)
 	{
 		Result<ReflectedDrawerResult> result;
 		bool drag = false;
-		const auto draw = [&drag, bytes, &field, &value, &context, &result]() -> Status
+		ImGuiID target = 0;
+		const auto draw = [&drag, bytes, &field, &value, &context, &result, &target]() -> Status
 		{
 			if (drag && ImGui::BeginDragDropSource(ImGuiDragDropFlags_SourceExtern))
 			{
 				ImGui::SetDragDropPayload("ENGINE_ASSET", bytes.data(), bytes.size());
 				ImGui::EndDragDropSource();
 			}
-			ImGui::SetCursorScreenPos(ImVec2(40.0f, 100.0f));
-			ImGui::SetNextItemWidth(200.0f);
+			target = DrawerControlId(context.Path, "##Reference");
 			result = DrawReflectedValue(field, value, context);
 			return {};
 		};
 		ENGINE_TRY(ui.Frame(draw));
-		const float targetY = 108.0f + (context.Mixed ? ImGui::GetTextLineHeightWithSpacing() : 0.0f);
-		ImGui::GetIO().AddMousePosEvent(100.0f, targetY);
+		const ImVec2 center = LocateDrawerItem(ui, draw, target).GetCenter();
+		ImGui::GetIO().AddMousePosEvent(center.x, center.y);
 		ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, true);
 		drag = true;
 		ENGINE_TRY(ui.Frame(draw));
@@ -141,15 +178,21 @@ namespace Engine {
 				Value value = Value::FromMap({ "First", "Second" }, { Value::FromFloat(1.0f), Value::FromFloat(2.0f) });
 				const Value original = value;
 				Result<ReflectedDrawerResult> result;
-				ImVec2 origin{};
-				const auto draw = [&types, field, &value, &result, &origin]() -> Status
+				ImGuiID keyId = 0;
+				const auto draw = [&types, field, &value, &result, &keyId]() -> Status
 				{
-					origin = ImGui::GetCursorScreenPos();
+					ImGui::PushID(static_cast<int>(FNV1a32("Weights")));
+					ImGui::PushID("##Container");
+					ImGui::PushID(static_cast<int>(FNV1a32("First")));
+					keyId = ImGui::GetID("##Key");
+					ImGui::PopID();
+					ImGui::PopID();
+					ImGui::PopID();
 					result = DrawReflectedValue(*field, value, { .Types = types, .Path = "Weights" });
 					return {};
 				};
 				REQUIRE(ui.Frame(draw));
-				REQUIRE(ui.Click(draw, ImVec2(origin.x + ImGui::GetStyle().IndentSpacing + 40.0f, origin.y + ImGui::GetTextLineHeightWithSpacing() + 8.0f)));
+				REQUIRE(ui.Click(draw, LocateDrawerItem(ui, draw, keyId).GetCenter()));
 				ImGui::GetIO().AddKeyEvent(ImGuiMod_Ctrl, true);
 				ImGui::GetIO().AddKeyEvent(ImGuiKey_A, true);
 				REQUIRE(ui.Frame(draw));
@@ -192,15 +235,16 @@ namespace Engine {
 				Test::PanelInteractionUi ui;
 				Value value = Value::FromVariant(owner.Choice);
 				Result<ReflectedDrawerResult> result;
-				ImVec2 checkbox{};
+				ImGuiID checkbox = 0;
 				const auto draw = [&types, &owner, ownerType, field, resolved, &value, &result, &checkbox]() -> Status
 				{
 					result = DrawReflectedValue(*field, value, { .Types = types, .Resolve = { .Owner = resolved ? &owner : nullptr, .OwnerType = ownerType, .Key = {} }, .Path = "Choice" });
-					checkbox = Test::PanelInteractionUi::LastItemCenter();
+					checkbox = DrawerControlId("Choice", "##Value", true);
 					return {};
 				};
 				REQUIRE(ui.Frame(draw));
-				REQUIRE(ui.Click(draw, checkbox));
+				if (resolved)
+					REQUIRE(ui.Click(draw, LocateDrawerItem(ui, draw, checkbox).GetCenter()));
 				REQUIRE(result);
 				CHECK(result->Changed == resolved);
 				CHECK(result->Committed == resolved);
@@ -216,31 +260,31 @@ namespace Engine {
 			const auto* field = types.FindComponent<MeshRendererComponent>()->FindField("Mesh");
 			Value value = Value::FromAssetRef(BuiltinAssetHandles::CubeMesh);
 			std::string query;
-			ImVec2 candidate{};
+			ImGuiID candidateId = 0;
+			std::string candidateWindow;
 			uint32_t searches = 0;
-			ReflectedDrawerContext context{ .Types = types, .Path = "MeshRenderer.Mesh", .Mixed = true, .FindReferences = [&query, &candidate, &searches](const FieldInfo& requested, std::string_view text) -> Result<std::vector<ReflectedReferenceCandidate>>
+			ReflectedDrawerContext context{ .Types = types, .Path = "MeshRenderer.Mesh", .Mixed = true, .FindReferences = [&query, &searches](const FieldInfo& requested, std::string_view text) -> Result<std::vector<ReflectedReferenceCandidate>>
 			{
 				CHECK(requested.GetKind() == FieldType::AssetRef);
 				CHECK(requested.GetMeta().AssetFilter == "Mesh");
 				query = text;
 				++searches;
-				candidate = ImGui::GetCursorScreenPos();
 				if (text.empty() || text == "sphere")
 					return std::vector<ReflectedReferenceCandidate>{ { BuiltinAssetHandles::SphereMesh, "Sphere##owned label", "engine://Meshes/Sphere" } };
 				return std::vector<ReflectedReferenceCandidate>{};
 			} };
 			Test::PanelInteractionUi ui;
 			Result<ReflectedDrawerResult> result;
-			ImVec2 browse{};
+			ImGuiID browse = 0;
 			const auto draw = [&field, &value, &context, &result, &browse]() -> Status
 			{
 				result = DrawReflectedValue(*field, value, context);
-				browse = Test::PanelInteractionUi::LastItemCenter();
+				browse = DrawerControlId(context.Path, "...##Browse");
 				return {};
 			};
 			REQUIRE(ui.Frame(draw));
 			CHECK(searches == 0);
-			REQUIRE(ui.Click(draw, browse));
+			REQUIRE(ui.Click(draw, LocateDrawerItem(ui, draw, browse).GetCenter()));
 			REQUIRE(ui.Frame(draw));
 			CHECK(searches > 0);
 			ImGui::GetIO().AddInputCharactersUTF8("sphere");
@@ -249,7 +293,17 @@ namespace Engine {
 			REQUIRE(ui.Frame(draw));
 			CHECK(query == "sphere");
 			CHECK(value.AsUUID() == BuiltinAssetHandles::CubeMesh);
-			REQUIRE(ui.Click(draw, ImVec2(candidate.x + 30.0f, candidate.y + 8.0f)));
+			for (ImGuiWindow* window : ImGui::GetCurrentContext()->Windows)
+			{
+				if (window->Active && std::string_view(window->Name).contains("/Results_"))
+				{
+					candidateWindow = window->Name;
+					const ImGuiID owner = ImHashStr(BuiltinAssetHandles::SphereMesh.ToString().c_str(), 0, window->ID);
+					candidateId = ImHashStr("##Candidate", 0, owner);
+				}
+			}
+			REQUIRE(candidateId != 0);
+			REQUIRE(ui.Click(draw, LocateDrawerItem(ui, draw, candidateId, candidateWindow.c_str()).GetCenter()));
 			REQUIRE(result);
 			CHECK(result->Activated);
 			CHECK(result->Changed);
@@ -269,15 +323,15 @@ namespace Engine {
 			} };
 			Test::PanelInteractionUi ui;
 			Result<ReflectedDrawerResult> result;
-			ImVec2 browse{};
+			ImGuiID browse = 0;
 			const auto draw = [&field, &value, &context, &result, &browse]() -> Status
 			{
 				result = DrawReflectedValue(*field, value, context);
-				browse = Test::PanelInteractionUi::LastItemCenter();
+				browse = DrawerControlId(context.Path, "...##Browse");
 				return {};
 			};
 			REQUIRE(ui.Frame(draw));
-			REQUIRE(ui.Click(draw, browse));
+			REQUIRE(ui.Click(draw, LocateDrawerItem(ui, draw, browse).GetCenter()));
 			REQUIRE_FALSE(result);
 			CHECK(result.error().GetCode() == ErrorCode::InvalidState);
 			CHECK(result.error().GetMessageText() == "the addressed project is unavailable");

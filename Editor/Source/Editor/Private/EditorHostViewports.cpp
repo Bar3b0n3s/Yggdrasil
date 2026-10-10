@@ -329,6 +329,15 @@ namespace Engine {
 	}
 	void EditorHostViewports::SetGameInputFocused(bool focused)
 	{
+		// Game keys must not also navigate ImGui, which can move focus away and synthesize game-key releases.
+		// This also restores editor navigation when the view closes, the native window blurs or Play stops.
+		if (ImGui::GetCurrentContext() != nullptr)
+		{
+			if (focused)
+				ImGui::GetIO().ConfigFlags &= ~ImGuiConfigFlags_NavEnableKeyboard;
+			else
+				ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+		}
 		if (m_GameFocused && !focused)
 		{
 			const EditorPlayController& play = m_Editor.GetPlay();

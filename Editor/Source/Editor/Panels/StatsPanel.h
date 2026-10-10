@@ -24,6 +24,7 @@ namespace Engine {
 		uint64_t m_Ticket = 0;
 		bool m_HasSample = false;
 		bool m_Refresh = true;
+		bool m_Live = true;
 		std::string m_Error{};
 	};
 

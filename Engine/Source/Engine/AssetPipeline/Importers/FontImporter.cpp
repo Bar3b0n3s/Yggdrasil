@@ -216,6 +216,11 @@ namespace Engine {
 		return result;
 	}
 
+	Status FontImporter::ValidateSource(std::span<const std::byte> source)
+	{
+		return Utils::ValidateTrueTypeTables(source);
+	}
+
 	void FontImporter::RegisterTypes(TypeRegistry& registry)
 	{
 		registry.Struct<FontImportSettings>("FontImportSettings", "How a TTF or OTF font is baked into a signed-distance-field atlas.")

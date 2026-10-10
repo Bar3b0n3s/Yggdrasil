@@ -1,7 +1,7 @@
 #pragma once
 
-#include "Engine/Core/Result.h"
 #include "EditorCore/Inspector/ReflectedEditController.h"
+#include "Engine/Core/Result.h"
 
 #include <cstdint>
 #include <optional>
@@ -25,8 +25,10 @@ namespace Engine {
 		[[nodiscard]] Status ApplyQueuedEdit(EditorPanelContext& context);
 		void CancelEdit(EditorPanelContext& context);
 		std::optional<InspectorEditTarget> m_ActiveTarget{};
+		std::string m_OwnerIdentity{};
 		std::string m_Error{};
 		std::vector<uint64_t> m_Tickets{};
+		std::string m_ComponentSearch{};
 		bool m_CommitQueued = false;
 		friend class EditorLayer;
 	};

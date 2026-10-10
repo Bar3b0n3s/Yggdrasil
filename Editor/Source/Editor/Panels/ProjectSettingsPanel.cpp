@@ -3,12 +3,15 @@
 
 #include "Editor/Drawers/ReflectedDrawers.h"
 #include "Editor/EditorPanelContext.h"
+#include "Editor/Ui/EditorStyle.h"
 #include "EditorCore/EditorActions.h"
 #include "EditorCore/EditorContext.h"
 #include "Engine/Core/Log.h"
 #include "Engine/Reflection/TypeRegistry.h"
 
 #include <imgui.h>
+
+#include <vector>
 
 namespace Engine {
 
@@ -42,6 +45,30 @@ namespace Engine {
 			return patch;
 		}
 
+		static Result<ReflectedDrawerResult> DrawSettingsSection(const StructInfo& type, Value& value,
+			const ReflectedDrawerContext& drawer, std::string_view section)
+		{
+			std::vector<std::string> keys(value.GetKeys().begin(), value.GetKeys().end());
+			std::vector<Value> values(value.GetElements().begin(), value.GetElements().end());
+			ReflectedDrawerResult result;
+			for (size_t index = 0; index < keys.size(); ++index)
+			{
+				const FieldInfo* field = type.FindField(keys[index]);
+				if (!field || (section.empty() ? field->GetKind() == FieldType::Struct : keys[index] != section))
+					continue;
+				ReflectedDrawerContext child = drawer;
+				child.Path += "." + keys[index];
+				ENGINE_TRY_ASSIGN(const auto edit, DrawReflectedValue(*field, values[index], child));
+				result.Activated |= edit.Activated;
+				result.Changed |= edit.Changed;
+				result.Committed |= edit.Committed;
+				result.Cancelled |= edit.Cancelled;
+			}
+			if (result.Changed)
+				value = Value::FromStruct(std::move(keys), std::move(values));
+			return result;
+		}
+
 	}
 
 	Status ProjectSettingsPanel::Draw(EditorPanelContext& context)
@@ -67,10 +94,12 @@ namespace Engine {
 			m_Ticket = 0;
 			m_Value = {};
 			m_Editing = false;
+			m_Section.clear();
+			m_Error.clear();
 		}
 		if (project.empty())
 		{
-			ImGui::TextUnformatted("Open a project to edit settings");
+			Utils::EditorEmptyState("No project open", "Open a project to configure its window, simulation, input and export settings.");
 			return {};
 		}
 		if (m_Ticket != 0)
@@ -105,8 +134,26 @@ namespace Engine {
 			m_Revision = context.Editor.GetRevision();
 			m_Editing = false;
 		}
-		if (context.Editor.IsReadOnly())
-			ImGui::TextUnformatted("Project is read-only");
+		std::string nextSection = m_Section;
+		const std::string sectionLabel = m_Section.empty() ? "General" : Utils::EditorLabel(m_Section);
+		ImGui::SetNextItemWidth(-1.0f);
+		if (ImGui::BeginCombo("##SettingsCategory", sectionLabel.c_str()))
+		{
+			if (ImGui::Selectable("General", m_Section.empty()))
+				nextSection.clear();
+			for (const auto& field : type->GetFields())
+			{
+				if (field->GetKind() != FieldType::Struct)
+					continue;
+				if (ImGui::Selectable(Utils::EditorLabel(field->GetName()).c_str(), m_Section == field->GetName()))
+					nextSection = field->GetName();
+			}
+			ImGui::EndCombo();
+		}
+		ImGui::SetItemTooltip("Choose a settings category. Each completed edit is saved and can be undone.");
+		ImGui::TextWrapped("%s", context.Editor.IsReadOnly() ? "Read-only project. Settings cannot be changed." : m_Ticket != 0 ? "Saving settings..."
+																																: "Changes save automatically and can be undone.");
+		Utils::EditorSectionHeading(sectionLabel);
 		const ReflectedDrawerContext drawer{
 			.Types = registry,
 			.Resolve = { .Registry = &registry, .Owner = &m_Draft, .OwnerType = type, .Key = {} },
@@ -114,8 +161,12 @@ namespace Engine {
 			.ReadOnly = context.Editor.IsReadOnly() || m_Ticket != 0
 		};
 		ImGui::PushID(std::to_string(m_DraftEpoch).c_str());
-		const auto edit = DrawReflectedValue(type->GetSelfField(), m_Value, drawer);
+		auto edit = Utils::DrawSettingsSection(*type, m_Value, drawer, m_Section);
 		ImGui::PopID();
+		// Navigation deactivates the old category's controls before replacing them. Finish the same validated edit
+		// path, including Map/Variant merge semantics, instead of losing a draft when its widgets disappear.
+		if (edit && nextSection != m_Section && m_Editing)
+			edit->Committed = true;
 		if (!edit)
 			report(edit.error());
 		else if (edit->Cancelled)
@@ -155,6 +206,8 @@ namespace Engine {
 				}
 			}
 		}
+		if (!m_Editing)
+			m_Section = std::move(nextSection);
 		if (!m_Error.empty())
 			ImGui::TextWrapped("%s", m_Error.c_str());
 		return {};

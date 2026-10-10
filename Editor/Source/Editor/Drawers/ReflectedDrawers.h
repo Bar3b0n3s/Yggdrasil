@@ -6,6 +6,7 @@
 #include "Engine/Reflection/Value.h"
 
 #include <functional>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -36,6 +37,10 @@ namespace Engine {
 		// Optional immutable declaration for authored array defaults. Borrowed only for the synchronous Draw call;
 		// recursive drawers may use it until Draw returns, but must never retain it or capture it for later work.
 		const ScriptFieldSchema* ScriptSchema = nullptr;
+		// Presentation aliases never change reflected paths. Authored map keys are supplied verbatim here.
+		std::string DisplayLabel{};
+		// Optional memory-only lookup for the current reference; independent of the searchable picker.
+		std::function<std::optional<ReflectedReferenceCandidate>(const FieldInfo&, UUID)> DescribeReference{};
 	};
 	struct ReflectedDrawerResult
 	{
@@ -43,6 +48,7 @@ namespace Engine {
 		bool Changed = false;
 		bool Committed = false;
 		bool Cancelled = false;
+		bool Active = false; // any submitted child owns the gesture; false when its container closes
 	};
 
 	// Main thread inside an ImGui frame. Draw every FieldType (Map and Variant included), metadata range/unit/tooltips,

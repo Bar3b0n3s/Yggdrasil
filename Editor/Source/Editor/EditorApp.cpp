@@ -8,6 +8,7 @@
 #include "Editor/Private/EditorHostSource.h"
 #include "Editor/Private/EditorHostThumbnails.h"
 #include "Editor/Private/EditorHostViewports.h"
+#include "Editor/Ui/EditorStyle.h"
 #include "EditorCore/Audio/AudioPreview.h"
 #include "EditorCore/Automation/AutomationServer.h"
 #include "EditorCore/Automation/BatchRunner.h"
@@ -111,6 +112,7 @@ namespace Engine {
 		uint64_t CaptureReadyFrame = 0;
 		bool ScreenshotsWritten = false;
 		bool FinalFrame = false;
+		float UiScale = 0.0f;
 		std::optional<uint64_t> TimingSession{};
 		double TimingDroppedBase = 0.0;
 		std::string LastHostError{};
@@ -514,6 +516,8 @@ namespace Engine {
 		State& state = *m_State;
 		if (!state.Editor)
 			return {};
+		if (GetImGuiLayer() != nullptr)
+			ENGINE_TRY(Utils::LoadEditorFont(state.Editor->GetVfs()));
 		ENGINE_TRY_ASSIGN(const EditorPreferences preferences, ReadEditorPreferences(state.Editor->GetVfs()));
 		state.Preference.Allowed = preferences.AllowAiAutomation;
 		ENGINE_TRY(state.Server->SetPreferenceListening(preferences.AllowAiAutomation));
@@ -783,6 +787,19 @@ namespace Engine {
 	void EditorApp::OnSafePoint()
 	{
 		State& state = *m_State;
+		if (GetImGuiLayer() != nullptr && GetContext().GetWindow() != nullptr)
+		{
+			const Window& window = *GetContext().GetWindow();
+			const float framebufferScale = window.GetWidth() != 0 && window.GetFramebufferWidth() != 0
+				? static_cast<float>(window.GetFramebufferWidth()) / static_cast<float>(window.GetWidth())
+				: 1.0f;
+			const float scale = Utils::EditorDisplayScale(window.GetContentScale().x, framebufferScale);
+			if (state.UiScale != scale)
+			{
+				Utils::ApplyEditorStyle(scale);
+				state.UiScale = scale;
+			}
+		}
 		if (state.Layer)
 		{
 			const Status ui = state.Layer->OnSafePoint(state.ElapsedSeconds);

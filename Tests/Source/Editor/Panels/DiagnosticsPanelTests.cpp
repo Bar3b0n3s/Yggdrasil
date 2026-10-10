@@ -1,7 +1,7 @@
 #include "TestsPCH.h"
 #include "Editor/Panels/DiagnosticsPanel.h"
 
-#include "Editor/Panels/UtilityPanelFixture.h"
+#include "Editor/SupportingPanelTestUi.h"
 #include "EditorCore/Play/EditorPlayController.h"
 #include "EditorCore/Scripting/EditorScriptService.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
@@ -14,6 +14,63 @@ namespace Engine {
 
 	TEST_SUITE("Editor")
 	{
+		TEST_CASE("DiagnosticsPanel: script findings retain independent details with matching hash suffixes")
+		{
+			Test::UtilityPanelFixture fixture;
+			fixture.OpenProject();
+			EditorContext& editor = fixture.GetEditor();
+			REQUIRE(editor.GetScriptService() != nullptr);
+			for (const char* name : { "First###same.luau", "Second###same.luau" })
+			{
+				const auto path = VfsPath::Create("project", std::string("Assets/") + name);
+				REQUIRE(path);
+				const auto written = editor.GetScriptService()->Write(*path, "--!strict\nlocal value: number = \"type failure\"\nreturn value");
+				REQUIRE_MESSAGE(written.has_value(), (written ? "" : written.error().ToString()));
+				// Write returns findings directly; loading publishes the import check consumed by the panel.
+				const auto loaded = editor.GetScriptService()->GetFields(written->Script);
+				REQUIRE_MESSAGE(loaded.has_value(), (loaded ? "" : loaded.error().ToString()));
+				const auto check = editor.GetAssets().GetScriptCheck(written->Script);
+				REQUIRE_MESSAGE(check.has_value(), (check ? "" : check.error().ToString()));
+				REQUIRE(check->Diagnostics.size() == 1);
+			}
+			std::filesystem::path opened;
+			uint32_t line = 0;
+			fixture.GetContext().OpenSource = [&opened, &line](const std::filesystem::path& path, uint32_t sourceLine) -> Status
+			{
+				opened = path;
+				line = sourceLine;
+				return {};
+			};
+			struct DiagnosticDetails
+			{
+				DiagnosticsPanel Panel{};
+				[[nodiscard]] Status Draw(EditorPanelContext& context)
+				{
+					ImGui::LogFinish(); // Keep the real collapsed/expanded state instead of logging's auto-expansion.
+					return Panel.Draw(context);
+				}
+			} panel;
+			Test::SupportingPanelTestUi::ClickText(fixture, panel, "Search messages, files or codes");
+			fixture.ReplaceFocusedText(panel, "-Second");
+			CHECK_FALSE(Test::SupportingPanelTestUi::FindText(fixture, panel, "Code: SCRIPT_TYPE_ERROR").has_value());
+			Test::SupportingPanelTestUi::ClickText(fixture, panel, "Details");
+			CHECK(Test::SupportingPanelTestUi::FindText(fixture, panel, "Code: SCRIPT_TYPE_ERROR").has_value());
+			Test::SupportingPanelTestUi::ClickText(fixture, panel, "Open source");
+			CHECK(opened == editor.GetProject().GetRoot() / "Assets/First###same.luau");
+			CHECK(line == 2);
+			Test::SupportingPanelTestUi::ClickText(fixture, panel, "-Second");
+			fixture.ReplaceFocusedText(panel, "-First");
+			CHECK_FALSE(Test::SupportingPanelTestUi::FindText(fixture, panel, "Code: SCRIPT_TYPE_ERROR").has_value());
+			Test::SupportingPanelTestUi::ClickText(fixture, panel, "Open source");
+			CHECK(opened == editor.GetProject().GetRoot() / "Assets/Second###same.luau");
+			CHECK(line == 2);
+			Test::SupportingPanelTestUi::ClickText(fixture, panel, "Details");
+			CHECK(Test::SupportingPanelTestUi::FindText(fixture, panel, "Code: SCRIPT_TYPE_ERROR").has_value());
+			Test::SupportingPanelTestUi::ClickText(fixture, panel, "-First");
+			fixture.ReplaceFocusedText(panel, "-Second");
+			CHECK(Test::SupportingPanelTestUi::FindText(fixture, panel, "Code: SCRIPT_TYPE_ERROR").has_value());
+		}
+
 		TEST_CASE("DiagnosticsPanel: latest failed import findings replace old type ranges while retaining the last good asset")
 		{
 			Test::UtilityPanelFixture fixture;
@@ -41,9 +98,7 @@ namespace Engine {
 			const std::string initial = fixture.Draw(panel);
 			CHECK(initial.contains("SCRIPT_TYPE_ERROR"));
 			CHECK(initial.contains("Assets/Diagnostic.luau:2:"));
-			// The first current finding appears immediately below the common filter controls.
-			const float openY = 8.0f + 2.0f * ImGui::GetTextLineHeightWithSpacing() + 4.0f * ImGui::GetFrameHeightWithSpacing() + ImGui::GetFrameHeight() * 0.5f;
-			fixture.ClickAt(panel, 40.0f, openY);
+			Test::SupportingPanelTestUi::ClickText(fixture, panel, "Open source");
 			CHECK(opened == editor.GetProject().GetRoot() / "Assets/Diagnostic.luau");
 			CHECK(line == 2);
 			REQUIRE(editor.GetVfs().WriteFileAtomic(*path, AsBytes("return function(\n")));
@@ -94,15 +149,15 @@ namespace Engine {
 			fixture.Draw(panel);
 			fixture.Pump();
 			REQUIRE(fixture.Draw(panel).contains("BUILD_START_SCENE_MISSING"));
-			fixture.ClickAt(panel, 100.0f, 79.0f);
+			Test::SupportingPanelTestUi::ClickText(fixture, panel, "Search messages, files or codes");
 			ImGui::GetIO().AddInputCharactersUTF8("BUILD_SCENE_MISSING");
 			const auto filtered = fixture.Draw(panel);
 			REQUIRE(filtered.contains("BUILD_SCENE_MISSING"));
 			CHECK_FALSE(filtered.contains("BUILD_START_SCENE_MISSING"));
 			const uint64_t revision = fixture.GetEditor().GetRevision();
 			fixture.GetContext().AutomationControls.SetPolicy({ .DenyMutations = true });
-			fixture.ClickAt(panel, 16.0f, 140.0f);
-			fixture.ClickAt(panel, 50.0f, 102.0f);
+			Test::SupportingPanelTestUi::ClickText(fixture, panel, "Include in fix");
+			Test::SupportingPanelTestUi::ClickText(fixture, panel, "Fix selected");
 			CHECK(fixture.GetEditor().GetRevision() == revision);
 			CHECK(fixture.GetEditor().GetProject().GetSettings().Export.BuildScenes.size() == 1);
 			fixture.Pump();
@@ -126,7 +181,7 @@ namespace Engine {
 			fixture.Pump();
 			const std::string first = fixture.Draw(panel);
 			CHECK(first.contains("BUILD_SCENE_MISSING"));
-			CHECK(first.contains("Project and script diagnostics"));
+			CHECK(first.contains("Project validation:"));
 			CHECK(fixture.Draw(panel) == first);
 			CHECK(fixture.GetEditor().GetRevision() == revision);
 		}

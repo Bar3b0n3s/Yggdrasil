@@ -3,6 +3,7 @@
 #include "Engine/AssetPipeline/IAssetImporter.h"
 #include "Engine/Core/Base.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <span>
 #include <string_view>
@@ -38,6 +39,11 @@ namespace Engine {
 		[[nodiscard]] std::string_view GetSettingsTypeName() const override { return "FontImportSettings"; }
 
 		[[nodiscard]] Result<ImportResult> Import(ImportContext& context, const AssetMetadata& metadata) const override;
+
+		// Bounds-check the sfnt structure before an external font rasterizer reads the same source bytes. Reuses the
+		// importer's checks without baking an atlas. Pure and thread-safe; retains no bytes. ImportFailed for invalid data.
+		// This checks table structure, not arbitrary glyph programs; callers still use trusted font resources.
+		[[nodiscard]] static Status ValidateSource(std::span<const std::byte> source);
 
 		// Registers FontImportSettings.
 		static void RegisterTypes(TypeRegistry& registry);

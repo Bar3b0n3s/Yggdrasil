@@ -3,13 +3,83 @@
 
 #include "Editor/EditorLayer.h"
 #include "Editor/PanelInteractionFixture.h"
+#include "Editor/Ui/EditorStyle.h"
+#include "EditorCore/Play/EditorPlayController.h"
 #include "EditorCore/Scripting/EditorScriptService.h"
+#include "Engine/Core/FileSystem.h"
+#include "Engine/Core/Hash.h"
 #include "Engine/Scene/ComponentAccess.h"
 #include "Engine/Scene/Components/MeshRendererComponent.h"
 #include "Engine/Scene/Components/ScriptComponent.h"
 #include "Engine/Scene/Entity.h"
 
+#include <imgui_internal.h>
+
 namespace Engine {
+
+	static ImGuiID InspectorPanelTestScope(ImGuiID parent, std::string_view key)
+	{
+		const int hash = static_cast<int>(FNV1a32(key));
+		return ImHashData(&hash, sizeof(hash), parent);
+	}
+
+	static ImGuiID InspectorPanelTestField(const EditorPanelContext& context, std::string_view component, std::string_view field, bool variant = false)
+	{
+		const auto& editor = context.Editor;
+		const auto* window = ImGui::FindWindowByName(Utils::EditorWindowTitle(EditorPanel::Inspector));
+		REQUIRE(window != nullptr);
+		std::string path = "0:0000000000000000:" + std::string(component) + "." + std::string(field);
+		for (const UUID id : editor.GetSelection())
+			path += ":" + id.ToString();
+		path += editor.GetSelectionTarget() == SceneTarget::Play ? ":Play" : ":Edit";
+		path += ":" + FileSystem::PathToUtf8(editor.GetProject().GetProjectFile()) + ":" + std::to_string(context.Thumbnails.GetProjectGeneration());
+		if (editor.GetSelectionTarget() == SceneTarget::Play)
+		{
+			const auto* session = editor.GetPlay().GetSession();
+			REQUIRE(session != nullptr);
+			path += ":Play:" + std::to_string(session->GetSerial()) + ":" + std::to_string(session->GetSceneGeneration());
+		}
+		else
+			path += ":Edit:" + std::to_string(editor.GetRevision() - editor.GetScene().GetRevision());
+		ImGuiID scope = InspectorPanelTestScope(InspectorPanelTestScope(window->ID, component), path);
+		if (variant)
+			scope = InspectorPanelTestScope(scope, path);
+		return ImHashStr("##Value", 0, ImHashStr("Property", 0, scope));
+	}
+
+	static ImVec2 InspectorPanelTestItem(Test::PanelInteractionUi& ui, const std::function<Status()>& draw, const char* windowName, ImGuiID id, ImGuiNavLayer layer = ImGuiNavLayer_Main)
+	{
+		ImRect rectangle;
+		const auto locate = [&draw, windowName, id, layer, &rectangle]() -> Status
+		{
+			ImGuiWindow* window = ImGui::FindWindowByName(windowName);
+			REQUIRE(window != nullptr);
+			ImGui::SetNavWindow(window);
+			ImGui::SetNavID(id, layer, window->NavRootFocusScopeId, ImRect());
+			ImGui::GetCurrentContext()->NavIdIsAlive = false;
+			ENGINE_TRY(draw());
+			const auto& gui = *ImGui::GetCurrentContext();
+			REQUIRE(gui.NavIdIsAlive);
+			REQUIRE(gui.NavId == id);
+			REQUIRE(gui.NavLayer == layer);
+			rectangle = ImGui::WindowRectRelToAbs(gui.NavWindow, gui.NavWindow->NavRectRel[gui.NavLayer]);
+			REQUIRE(rectangle.GetWidth() > 0.0f);
+			REQUIRE(rectangle.GetHeight() > 0.0f);
+			return {};
+		};
+		REQUIRE(ui.Frame(locate));
+		return rectangle.GetCenter();
+	}
+
+	static ImGuiWindow* InspectorPanelTestPopup()
+	{
+		for (ImGuiWindow* window : ImGui::GetCurrentContext()->Windows)
+		{
+			if (window->Active && (window->Flags & ImGuiWindowFlags_Popup) != 0)
+				return window;
+		}
+		return nullptr;
+	}
 
 	TEST_SUITE("Editor")
 	{
@@ -33,20 +103,15 @@ namespace Engine {
 				REQUIRE(context.Editor.GetUiState().SetPanelOpen(static_cast<EditorPanel>(index), static_cast<EditorPanel>(index) == EditorPanel::Inspector));
 			Test::PanelInteractionUi ui(false);
 			ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_DockingEnable;
-			ImVec2 add{};
-			const auto draw = [&layer, &add]()
+			const auto draw = [&layer]()
 			{
-				const auto status = layer.OnImGuiRender();
-				ImGui::Begin("Inspector");
-				add = ImGui::GetCursorScreenPos();
-				ImGui::End();
-				return status;
+				return layer.OnImGuiRender();
 			};
 			REQUIRE(ui.Frame(draw));
 			REQUIRE(ui.Frame(draw));
 			CHECK(entity.GetComponent<ScriptComponent>().Fields.empty());
 			const auto history = context.Editor.GetHistory().GetUndoCount();
-			REQUIRE(ui.Click(draw, ImVec2(add.x + 8.0f, add.y - 4.0f * ImGui::GetFrameHeightWithSpacing() + ImGui::GetFrameHeight() * 0.5f)));
+			REQUIRE(ui.Click(draw, InspectorPanelTestItem(ui, draw, Utils::EditorWindowTitle(EditorPanel::Inspector), InspectorPanelTestField(context, "Script", "Fields[Enabled]", true))));
 			CHECK(entity.GetComponent<ScriptComponent>().Fields.empty());
 			REQUIRE(context.InspectorEdits.IsEditing());
 			REQUIRE(layer.OnSafePoint(0.0));
@@ -74,19 +139,13 @@ namespace Engine {
 				REQUIRE(context.Editor.GetUiState().SetPanelOpen(static_cast<EditorPanel>(index), static_cast<EditorPanel>(index) == EditorPanel::Inspector));
 			Test::PanelInteractionUi ui(false);
 			ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_DockingEnable;
-			ImVec2 end{};
-			const auto draw = [&layer, &end]()
+			const auto draw = [&layer]()
 			{
-				const auto status = layer.OnImGuiRender();
-				ImGui::Begin("Inspector");
-				end = ImGui::GetCursorScreenPos();
-				ImGui::End();
-				return status;
+				return layer.OnImGuiRender();
 			};
 			REQUIRE(ui.Frame(draw));
 			REQUIRE(ui.Frame(draw));
-			const float visibleY = end.y - 3.0f * ImGui::GetFrameHeightWithSpacing() + ImGui::GetFrameHeight() * 0.5f;
-			REQUIRE(ui.Click(draw, ImVec2(end.x + 8.0f, visibleY)));
+			REQUIRE(ui.Click(draw, InspectorPanelTestItem(ui, draw, Utils::EditorWindowTitle(EditorPanel::Inspector), InspectorPanelTestField(context, "MeshRenderer", "Visible"))));
 			CHECK(scene.FindEntityByID(first).GetComponent<MeshRendererComponent>().Visible);
 			CHECK_FALSE(scene.FindEntityByID(second).GetComponent<MeshRendererComponent>().Visible);
 			CHECK(context.Editor.GetHistory().GetUndoCount() == 0);
@@ -100,8 +159,15 @@ namespace Engine {
 			CHECK(history.front().Origin == CommandOrigin::User);
 			REQUIRE(layer.OnSafePoint(0.0));
 			CHECK(context.Editor.GetHistory().GetUndoCount() == 1);
-			REQUIRE(ui.Click(draw, ImVec2(60.0f, 10.0f)));                                                              // Edit menu
-			REQUIRE(ui.Click(draw, ImVec2(70.0f, ImGui::GetFrameHeight() + ImGui::GetStyle().WindowPadding.y + 6.0f))); // Undo
+			auto* menuBar = ImGui::FindWindowByName("##MainMenuBar");
+			REQUIRE(menuBar != nullptr);
+			// BeginMenuBar adds this ID scope and submits its entries on the menu navigation layer.
+			const ImGuiID editMenu = ImHashStr("Edit", 0, menuBar->GetID("##MenuBar"));
+			REQUIRE(ui.Click(draw, InspectorPanelTestItem(ui, draw, menuBar->Name, editMenu, ImGuiNavLayer_Menu)));
+			REQUIRE(ui.Frame(draw));
+			auto* menu = InspectorPanelTestPopup();
+			REQUIRE(menu != nullptr);
+			REQUIRE(ui.Click(draw, InspectorPanelTestItem(ui, draw, menu->Name, menu->GetID("Undo"))));
 			CHECK_FALSE(scene.FindEntityByID(first).GetComponent<MeshRendererComponent>().Visible);
 			REQUIRE(layer.OnSafePoint(0.0));
 			CHECK(scene.FindEntityByID(first).GetComponent<MeshRendererComponent>().Visible);
@@ -125,15 +191,21 @@ namespace Engine {
 			REQUIRE(context.Editor.SetSelection({ first, second }, SceneTarget::Edit));
 			InspectorPanel panel;
 			Test::PanelInteractionUi ui;
-			ImVec2 add{};
-			const auto draw = [&panel, &context, &add]()
+			const auto draw = [&panel, &context]()
 			{
-				const auto status = panel.Draw(context);
-				add = Test::PanelInteractionUi::LastItemCenter();
-				return status;
+				return panel.Draw(context);
 			};
 			REQUIRE(ui.Frame(draw));
-			REQUIRE(ui.Click(draw, ImVec2(add.x, add.y - ImGui::GetFrameHeightWithSpacing())));
+			REQUIRE(ui.Frame(draw));
+			const auto* window = ImGui::FindWindowByName("Panel interaction");
+			REQUIRE(window != nullptr);
+			const ImGuiID component = InspectorPanelTestScope(window->ID, "MeshRenderer");
+			const ImGuiID options = ImHashStr("...##Options", 0, ImHashStr("ComponentHeader", 0, component));
+			REQUIRE(ui.Click(draw, InspectorPanelTestItem(ui, draw, window->Name, options)));
+			REQUIRE(ui.Frame(draw));
+			const auto* popup = InspectorPanelTestPopup();
+			REQUIRE(popup != nullptr);
+			REQUIRE(ui.Click(draw, InspectorPanelTestItem(ui, draw, popup->Name, ImHashStr("Remove component", 0, popup->ID))));
 			for (const UUID id : { first, second })
 				CHECK(scene.FindEntityByID(id).HasComponent<MeshRendererComponent>());
 			CHECK(context.Editor.GetHistory().GetUndoCount() == 0);

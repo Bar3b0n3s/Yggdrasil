@@ -23,8 +23,10 @@ namespace Engine {
 		// Apply queued injected recovery decisions only after rechecking offer/project/revision; cancellation or Conflict
 		// never overwrites intervening edits. No ImGui calls, so safe in headless/renderer-none mode.
 		[[nodiscard]] Status OnSafePoint(double nowSeconds);
-		// Inside ImGui BeginFrame/EndFrame. Dockspace first, menu/toolbar, SceneChangedOnDisk reload banner, panels.
-		// A first-run layout is deterministic; user layout loads through existing ImGuiLayer::SetIniFilePath.
+		// Inside ImGui BeginFrame/EndFrame. Menu, playback toolbar and status reserve space around the docked panels.
+		// First-run docking initializes once per ini path. ImGui 1.92.6+ keeps the original IDs with friendly ### titles,
+		// so saved window geometry and selected tabs remain intact without migration.
+		// Scene browsing reads the whole project on opening/refresh; create/open/save choices queue existing user actions.
 		// The already-open project recovery modal reads EditorPanelContext::Recovery.GetOffer and queues Accept/Decline;
 		// it remains available after ProjectLauncher closes. Errors propagate to the host. No file writes or destructive
 		// scene iteration from a drawing callback.

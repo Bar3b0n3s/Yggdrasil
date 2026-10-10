@@ -6,6 +6,7 @@
 #include "Editor/Private/EditorHostRecovery.h"
 #include "Editor/Private/EditorHostThumbnails.h"
 #include "Editor/Private/EditorHostViewports.h"
+#include "Editor/Ui/EditorStyle.h"
 #include "EditorCore/Automation/EditorAutomationControls.h"
 #include "EditorCore/EditorActions.h"
 #include "EditorCore/EditorPreferences.h"
@@ -38,8 +39,8 @@
 #include "Support/WindowedChild.h"
 
 #include <doctest/doctest.h>
-#include <ImGuizmo.h>
 #include <imgui_internal.h>
+#include <ImGuizmo.h>
 
 #include <algorithm>
 #include <functional>
@@ -220,7 +221,7 @@ namespace Engine {
 			REQUIRE(Ui.SafePoint());
 			Ui.OnlyPanel(EditorPanel::ProjectLauncher);
 			Ui.Draw();
-			CHECK(Ui.Draw().contains("Recent projects"));
+			CHECK(Ui.Draw().contains("Build your next world."));
 			OpenOriginalProject();
 			Ui.Panels.Recovery.GetOffer = [this]()
 			{
@@ -600,17 +601,17 @@ namespace Engine {
 				LayerUiHarness ui;
 				ui.Draw();
 				ui.Draw();
-				CHECK(ui.IsVisible("SceneViewport"));
-				CHECK(ui.IsVisible("ContentBrowser"));
-				CHECK_FALSE(ui.IsVisible("GameViewport"));
-				CHECK_FALSE(ui.IsVisible("Console"));
-				ui.ClickTab("GameViewport");
-				ui.ClickTab("Console");
-				CHECK(ui.IsVisible("GameViewport"));
-				CHECK(ui.IsVisible("Console"));
+				CHECK(ui.IsVisible("Scene###SceneViewport"));
+				CHECK(ui.IsVisible("Assets###ContentBrowser"));
+				CHECK_FALSE(ui.IsVisible("Game###GameViewport"));
+				CHECK_FALSE(ui.IsVisible("Console###Console"));
+				ui.ClickTab("Game###GameViewport");
+				ui.ClickTab("Console###Console");
+				CHECK(ui.IsVisible("Game###GameViewport"));
+				CHECK(ui.IsVisible("Console###Console"));
 				ui.Draw();
-				CHECK_FALSE(ui.IsVisible("SceneViewport"));
-				CHECK_FALSE(ui.IsVisible("ContentBrowser"));
+				CHECK_FALSE(ui.IsVisible("Scene###SceneViewport"));
+				CHECK_FALSE(ui.IsVisible("Assets###ContentBrowser"));
 				saved = ImGui::SaveIniSettingsToMemory();
 			}
 			{
@@ -618,8 +619,8 @@ namespace Engine {
 				ImGui::LoadIniSettingsFromMemory(saved.data(), saved.size());
 				ui.Draw();
 				ui.Draw();
-				CHECK(ui.IsVisible("GameViewport"));
-				CHECK(ui.IsVisible("Console"));
+				CHECK(ui.IsVisible("Game###GameViewport"));
+				CHECK(ui.IsVisible("Console###Console"));
 				// Open the real Window menu and click its final item, Reset layout.
 				const auto& style = ImGui::GetStyle();
 				const float x = style.DisplaySafeAreaPadding.x + ImGui::CalcTextSize("File").x + ImGui::CalcTextSize("Edit").x + 2 * style.ItemSpacing.x + ImGui::CalcTextSize("Window").x / 2;
@@ -631,10 +632,10 @@ namespace Engine {
 				ui.Click({ menu->Pos.x + menu->Size.x / 2, menu->DC.CursorPosPrevLine.y + ImGui::GetTextLineHeight() / 2 });
 				ui.Draw();
 				ui.Draw();
-				CHECK(ui.IsVisible("SceneViewport"));
-				CHECK(ui.IsVisible("ContentBrowser"));
-				CHECK_FALSE(ui.IsVisible("GameViewport"));
-				CHECK_FALSE(ui.IsVisible("Console"));
+				CHECK(ui.IsVisible("Scene###SceneViewport"));
+				CHECK(ui.IsVisible("Assets###ContentBrowser"));
+				CHECK_FALSE(ui.IsVisible("Game###GameViewport"));
+				CHECK_FALSE(ui.IsVisible("Console###Console"));
 			}
 		}
 
@@ -676,13 +677,13 @@ namespace Engine {
 				ui.Draw();
 				ui.Draw();
 				const std::string settings = ImGui::SaveIniSettingsToMemory();
-				CHECK(settings.contains("[Window][" + std::string(EditorPanelToString(panel)) + "]"));
+				CHECK(settings.contains("[Window][" + std::string(ImHashSkipUncontributingPrefix(Utils::EditorWindowTitle(panel))) + "]"));
 			}
 			CHECK(std::string(ImGui::SaveIniSettingsToMemory()).contains("[Docking][Data]"));
 			REQUIRE(ui.Environment.GetEditor().CloseProject());
 			REQUIRE(ui.Layer.OnSafePoint(0));
 			ui.Draw(); // the launcher's first Begin measures its contents
-			CHECK(ui.Draw().contains("Recent projects"));
+			CHECK(ui.Draw().contains("Build your next world."));
 		}
 		TEST_CASE("EditorLayer: scene changes on disk offer reload without silently discarding edits")
 		{
@@ -728,13 +729,14 @@ namespace Engine {
 			ENGINE_REQUIRE_GPU(gpu);
 			LayerGpuHarness test(gpu);
 			test.Ui.OnlyPanel(EditorPanel::GameViewport);
+			ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
 			REQUIRE(test.Ui.Client.Call("play.start", Json{ { "lockstep", true } }));
 			auto& session = *test.Ui.Environment.GetEditor().GetPlay().GetSession();
 			test.Advance(0);
 			test.Ui.Draw();
 			test.Ui.Draw();
-			ImGui::SetWindowFocus("GameViewport");
-			const auto* window = ImGui::FindWindowByName("GameViewport");
+			ImGui::SetWindowFocus("Game###GameViewport");
+			const auto* window = ImGui::FindWindowByName("Game###GameViewport");
 			REQUIRE(window != nullptr);
 			const ImVec2 inside = window->InnerRect.GetCenter();
 			ImGui::GetIO().AddMousePosEvent(inside.x, inside.y);
@@ -745,16 +747,34 @@ namespace Engine {
 			REQUIRE(session.GetInput().Queue(session.GetTick(), { .KeyCode = Key::Space }));
 			REQUIRE(test.Ui.Client.Call("play.step", Json{ { "ticks", 1 } }));
 			CHECK(session.GetInput().GetSummary(InputPhase::Step).Down == std::vector<std::string>{ "Key.Space" });
+			// Route the same held arrow to ImGui and game input. Navigation must not steal focus from the game
+			// over subsequent frames or enqueue a release while the physical key is still held.
+			ImGui::GetIO().AddKeyEvent(ImGuiKey_DownArrow, true);
+			REQUIRE(session.GetInput().Queue(session.GetTick(), { .KeyCode = Key::Down }));
+			constexpr uint32_t HeldFrames = 30;
+			for (uint32_t frame = 0; frame < HeldFrames; ++frame)
+			{
+				test.Ui.Draw();
+				CHECK(ImGui::GetCurrentContext()->NavWindow == window);
+				CHECK(test.Ui.Views.IsGameInputFocused());
+				CHECK(ImGui::IsKeyDown(ImGuiKey_DownArrow));
+				REQUIRE(test.Ui.Client.Call("play.step", Json{ { "ticks", 1 } }));
+				CHECK(session.GetInput().GetSummary(InputPhase::Step).Down == std::vector<std::string>{ "Key.Down", "Key.Space" });
+				CHECK(session.GetInput().GetSummary(InputPhase::Step).Released.empty());
+			}
 			ImGui::SetWindowFocus(nullptr);
 			ImGui::GetIO().AddMousePosEvent(-100, -100);
 			test.Ui.Draw();
 			CHECK_FALSE(test.Ui.Views.IsGameInputFocused());
+			CHECK((ImGui::GetIO().ConfigFlags & ImGuiConfigFlags_NavEnableKeyboard) != 0);
 			// Blur queues releases; it must not advance an agent-owned session itself.
-			CHECK(session.GetTick() == 1);
-			CHECK(session.GetInput().GetSummary(InputPhase::Step).Down == std::vector<std::string>{ "Key.Space" });
+			CHECK(session.GetTick() == 1 + HeldFrames);
+			CHECK(session.GetInput().GetSummary(InputPhase::Step).Down == std::vector<std::string>{ "Key.Down", "Key.Space" });
 			REQUIRE(test.Ui.Client.Call("play.step", Json{ { "ticks", 1 } }));
 			CHECK(session.GetInput().GetSummary(InputPhase::Step).Down.empty());
-			CHECK(session.GetInput().GetSummary(InputPhase::Step).Released == std::vector<std::string>{ "Key.Space" });
+			CHECK(session.GetInput().GetSummary(InputPhase::Step).Released == std::vector<std::string>{ "Key.Down", "Key.Space" });
+			ImGui::GetIO().AddKeyEvent(ImGuiKey_DownArrow, false);
+			test.Ui.Draw();
 		}
 
 		TEST_CASE("EditorLayer: editor.screenshot waits for a frame constructed after the request" * doctest::test_suite(Test::GpuSuite))
@@ -1200,12 +1220,12 @@ namespace Engine {
 			REQUIRE(test.Ui.Environment.GetEditor().SetSelection({ test.Left, test.Right }, SceneTarget::Edit));
 			test.Advance(0);
 			test.Ui.Draw();
-			ImGui::SetWindowFocus("SceneViewport");
+			ImGui::SetWindowFocus("Scene###SceneViewport");
 			test.Ui.Draw();
 			test.Advance(1);
 			test.Ui.Draw();
 			const auto image = test.Ui.Views.GetImage(ViewportView::Scene);
-			const auto* window = ImGui::FindWindowByName("SceneViewport");
+			const auto* window = ImGui::FindWindowByName("Scene###SceneViewport");
 			REQUIRE(window != nullptr);
 			const ImVec2 center{ window->DC.CursorPos.x + static_cast<float>(image.Width) / 2,
 				window->DC.CursorPos.y - ImGui::GetStyle().ItemSpacing.y - static_cast<float>(image.Height) / 2 };

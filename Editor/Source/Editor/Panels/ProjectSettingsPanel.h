@@ -30,6 +30,7 @@ namespace Engine {
 		uint64_t m_Ticket = 0;
 		uint64_t m_DraftEpoch = 0; // invalidates active ImGui text buffers when a draft is discarded
 		bool m_Editing = false;
+		std::string m_Section{}; // empty selects the scalar general settings; other keys come from reflection
 		std::string m_Error{};
 	};
 

@@ -2,6 +2,7 @@
 #include "Editor/Panels/GameViewportPanel.h"
 
 #include "Editor/EditorPanelContext.h"
+#include "Editor/Ui/EditorStyle.h"
 #include "Editor/Viewport/EditorViewportHost.h"
 #include "EditorCore/EditorContext.h"
 #include "EditorCore/EditorUiState.h"
@@ -24,9 +25,8 @@ namespace Engine {
 	Status GameViewportPanel::Draw(EditorPanelContext& context)
 	{
 		EditorViewportState& state = context.Editor.GetViewportState();
-		const std::string title(EditorPanelToString(EditorPanel::GameViewport));
 		bool open = true;
-		const bool visible = ImGui::Begin(title.c_str(), &open, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+		const bool visible = ImGui::Begin(Utils::EditorWindowTitle(EditorPanel::GameViewport), &open, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
 		if (!visible || !open)
 		{
 			context.Viewports.SetRectangle(ViewportView::Game, {});
@@ -37,7 +37,8 @@ namespace Engine {
 		Status result;
 		const glm::uvec2 resolution = state.GetGameResolution();
 		const std::string resolutionLabel = resolution.x == 0 ? "Free resolution" : std::format("{} x {}", resolution.x, resolution.y);
-		ImGui::SetNextItemWidth(170.0f);
+		const float toolbarRight = ImGui::GetCursorScreenPos().x + ImGui::GetContentRegionAvail().x;
+		ImGui::SetNextItemWidth(std::min(180.0f * Utils::EditorUiScale(), ImGui::GetContentRegionAvail().x));
 		if (ImGui::BeginCombo("##GameResolution", resolutionLabel.c_str()))
 		{
 			constexpr std::array<glm::uvec2, 5> Resolutions{ { { 0, 0 }, { 640, 360 }, { 1280, 720 }, { 1920, 1080 }, { 1080, 1920 } } };
@@ -50,8 +51,16 @@ namespace Engine {
 			ImGui::EndCombo();
 		}
 		const PlaySession* session = context.Editor.GetPlay().GetSession();
+		const char* inputHint = session ? "Click the view to send game input" : "Camera preview - press Play to interact";
+		if (ImGui::GetItemRectMax().x + ImGui::GetStyle().ItemSpacing.x + ImGui::CalcTextSize(inputHint).x <= toolbarRight)
+		{
+			ImGui::SameLine();
+			ImGui::AlignTextToFramePadding();
+			ImGui::TextDisabled("%s", inputHint);
+		}
 		if (session && session->IsLockstep())
 			ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.25f, 1.0f), "Agent controls time (owner %llu)", static_cast<unsigned long long>(session->GetLockstepOwner()));
+		ImGui::Separator();
 		const ImVec2 available = ImGui::GetContentRegionAvail();
 		const ImVec2 minimum = ImGui::GetCursorScreenPos();
 		EditorViewportRect rectangle;

@@ -1286,6 +1286,16 @@ Continuous edits begin on `IsItemActivated` or gizmo mouse-down and commit on re
 - New-project templates write the folder skeleton `Assets/{Scenes,Scripts,Prefabs,Materials,Models,Textures,Audio,Fonts,Tests}`, `.luaurc`, `.gitignore` (`Library/`), an `AGENTS.md` stub and, for Basic3D, a scene with camera, sun, environment, post-process and ground. Script templates: `Behaviour` (the class pattern of §11.2), `Module` (a plain table module), `Test` (a suite, §11.10); each is type-checked by a fixture.
 - `SceneChangedOnDisk` (§7.5) shows a banner offering reload; it never reloads silently.
 
+### 12.5 Editor design quality
+
+The editor's functional gates and its product design are separate acceptance obligations (ADR 0020). Editor changes must be reviewed in actual rendered, populated screens and exercised through the corresponding editing workflow. Screenshot comparisons guard a reviewed design against regressions; an unchanged screenshot alone is not a design approval.
+
+- Use the committed Inter font, shared `Editor/Ui` style and a restrained dark palette. Size controls from font/style metrics, keep keyboard focus visible and apply display scaling to both text and spacing without compounding it across monitor changes. Account for framebuffer scaling so Retina displays do not apply the monitor scale twice. Game input ownership suspends UI keyboard navigation until focus returns to the editor.
+- Distinguish the menu, primary toolbar, panel tools and status. The project, current scene, unsaved state and play mode must be understandable without opening a diagnostic panel. Friendly panel titles are presentation names; automation names remain stable, and existing saved layouts are migrated when their ImGui IDs change.
+- Inspector labels precede their controls in aligned rows. Ordinary transforms expose position, Euler rotation and scale; raw quaternion and derived values remain available under advanced disclosure. Show readable entity and asset names with paths/identifiers on demand. Removal and other occasional actions belong in component menus rather than competing with every editable field.
+- Browsing scenes, importing assets and opening projects must have discoverable selection flows. Import and project-opening pickers also accept typed paths. Empty, busy, failed, read-only and agent-controlled states explain what happened and what the user can do next.
+- Review populated and empty screens at 1280×720 and 1600×900, and at a larger display scale. Required controls must remain reachable at narrow widths through wrapping or scrolling. Review selection, property editing and undo, asset browsing, scene opening and Play/Stop with the production command paths.
+
 ---
 
 ## 13. AI automation

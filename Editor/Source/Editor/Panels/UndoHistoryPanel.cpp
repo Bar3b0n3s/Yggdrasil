@@ -2,6 +2,7 @@
 #include "Editor/Panels/UndoHistoryPanel.h"
 
 #include "Editor/EditorPanelContext.h"
+#include "Editor/Ui/EditorStyle.h"
 #include "EditorCore/EditorActions.h"
 #include "EditorCore/EditorContext.h"
 #include "Engine/Core/Log.h"
@@ -42,29 +43,52 @@ namespace Engine {
 				report(ticket.error());
 		};
 		ImGui::BeginDisabled(m_Ticket != 0 || !history.CanUndo() || context.Editor.IsReadOnly());
-		if (ImGui::Button("Undo"))
+		if (Utils::EditorToolbarButton("Undo", history.CanUndo() ? history.GetUndoLabel().c_str() : "There are no applied changes to undo."))
 			submit("edit.undo");
 		ImGui::EndDisabled();
 		ImGui::SameLine();
 		ImGui::BeginDisabled(m_Ticket != 0 || !history.CanRedo() || context.Editor.IsReadOnly());
-		if (ImGui::Button("Redo"))
+		if (Utils::EditorToolbarButton("Redo", history.CanRedo() ? history.GetRedoLabel().c_str() : "There are no undone changes to restore."))
 			submit("edit.redo");
 		ImGui::EndDisabled();
 		if (!m_Error.empty())
 			ImGui::TextWrapped("%s", m_Error.c_str());
-		ImGui::TextUnformatted(std::format("{} applied, {} redo; {} bytes", history.GetUndoCount(), history.GetRedoCount(), history.GetMemorySize()).c_str());
+		if (context.Editor.HasScene())
+			ImGui::TextWrapped("%s", context.Editor.IsSceneDirty() ? "Unsaved scene changes" : "Scene matches the saved state");
+		ImGui::TextDisabled("%zu applied  /  %zu to redo", history.GetUndoCount(), history.GetRedoCount());
+		ImGui::SetItemTooltip("History uses %.1f KiB of its %.0f MiB limit.", static_cast<double>(history.GetMemorySize()) / 1024.0,
+			static_cast<double>(history.GetLimits().MaxBytes) / (1024.0 * 1024.0));
+		if (context.Editor.IsReadOnly())
+			ImGui::TextWrapped("Read-only project. Undo and redo are unavailable.");
+		if (m_Ticket != 0)
+			ImGui::TextDisabled("Applying change...");
 		const auto entries = history.GetEntries(history.GetLimits().MaxEntries);
-		for (size_t index = 0; index < entries.size(); ++index)
+		if (entries.empty())
 		{
-			if (index == history.GetUndoCount())
-				ImGui::SeparatorText("Current position");
-			const CommandHistoryEntry& entry = entries[index];
-			ImGui::TextUnformatted(std::format("{} {}", entry.Sequence, entry.Label).c_str());
-			if (ImGui::IsItemHovered())
-				ImGui::SetTooltip("%s", std::format("{}; revision {} -> {}; {} bytes", entry.Origin == CommandOrigin::Agent ? "Agent" : "User", entry.RevisionBefore, entry.RevisionAfter, entry.MemorySize).c_str());
+			Utils::EditorEmptyState("No changes yet", "Project and scene edits appear here. Changes made by agents carry an [agent] label.");
+			return {};
 		}
-		if (history.GetUndoCount() == entries.size())
-			ImGui::SeparatorText("Current position");
+		if (ImGui::BeginChild("HistoryEntries", ImVec2(0.0f, 0.0f)))
+		{
+			for (size_t index = 0; index < entries.size(); ++index)
+			{
+				if (index == history.GetUndoCount())
+					Utils::EditorSectionHeading("Current position");
+				const CommandHistoryEntry& entry = entries[index];
+				const bool applied = index < history.GetUndoCount();
+				ImGui::PushID(std::to_string(entry.Sequence).c_str());
+				ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(applied ? ImGuiCol_Text : ImGuiCol_TextDisabled));
+				ImGui::TextWrapped("%s", entry.Label.c_str());
+				ImGui::PopStyleColor();
+				ImGui::SetItemTooltip("%s", std::format("{}; revision {} -> {}; {} bytes", entry.Origin == CommandOrigin::Agent ? "Agent" : "User", entry.RevisionBefore, entry.RevisionAfter, entry.MemorySize).c_str());
+				ImGui::TextDisabled("%s / %s", entry.Origin == CommandOrigin::Agent ? "Agent" : "You", applied ? "Applied" : "Undone");
+				ImGui::Separator();
+				ImGui::PopID();
+			}
+			if (history.GetUndoCount() == entries.size())
+				Utils::EditorSectionHeading("Current position");
+		}
+		ImGui::EndChild();
 		return {};
 	}
 

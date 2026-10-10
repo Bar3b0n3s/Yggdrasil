@@ -2,6 +2,7 @@
 
 #include "Engine/Core/Result.h"
 
+#include <array>
 #include <string>
 
 namespace Engine {
@@ -17,6 +18,8 @@ namespace Engine {
 	public:
 		[[nodiscard]] Status Draw(EditorPanelContext& context);
 	private:
+		std::array<char, 256> m_Search{};
+		int m_RequestState = 0;
 		std::string m_Error{};
 	};
 
