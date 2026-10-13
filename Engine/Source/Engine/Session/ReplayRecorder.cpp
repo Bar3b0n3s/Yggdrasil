@@ -6,6 +6,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <format>
 #include <limits>
 
 namespace Engine {
@@ -81,7 +82,12 @@ namespace Engine {
 		if (session.GetSerial() != m_State->Serial || session.GetTick() != m_State->NextTick)
 			Invalidate("session or applied input timeline changed");
 		if (!m_State->InvalidReason.empty())
-			return MakeError(ErrorCode::InvalidState, "recording invalidated: {}", m_State->InvalidReason);
+		{
+			// An invalidated recording can never be finished: end it, so the owner can record again (§13.6 restart).
+			Error invalidated(ErrorCode::InvalidState, std::format("recording invalidated: {}", m_State->InvalidReason));
+			Cancel();
+			return std::unexpected(std::move(invalidated).WithHint("start a new recording with input.record {action: \"start\", restart: true}"));
+		}
 		ReplayDocument candidate = m_State->Document;
 		candidate.Expect.assign(expectations.begin(), expectations.end());
 		candidate.FinalTick = session.GetTick();

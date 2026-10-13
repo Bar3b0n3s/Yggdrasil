@@ -118,6 +118,12 @@ namespace Engine {
 	[[nodiscard]] Result<ReplayDocument> ReplayFromText(std::string_view text, ReplayLoadReport& report, bool strictUnknowns = false);
 	[[nodiscard]] Result<Json> ReplayToJson(const ReplayDocument& document);
 	[[nodiscard]] Result<std::string> ReplayToText(const ReplayDocument& document);
+	// Header Parameters as a replay stores them (§6.7): the object a .replay file and a cooked replay read back, every
+	// float rounded to float like every authored file (JsonWriter, §6), integers exact. A recording (input.record start,
+	// test.run record) starts its session from this form, so the recorded run and every replay of it see the same
+	// Scene.GetLoadParameters values and the strict hash can match. Errors: Validation located below `pointer` for a
+	// non-object, a float outside the float range, invalid UTF-8 or nesting deeper than MaxJsonDepth.
+	[[nodiscard]] Result<Json> CanonicalizeReplayParameters(const Json& parameters, std::string_view pointer = "/Parameters");
 
 	// Cooked FormatVersion 1 uses the standard ECKD header. Payload, little-endian: u32 source version; scene UUID
 	// u64; length-prefixed UTF-8 scene path and canonical Parameters JSON; seed u64; FixedHz u32; length-prefixed

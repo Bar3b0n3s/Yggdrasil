@@ -7,10 +7,10 @@
 #include <string>
 #include <vector>
 
-// The editor's observe method (Architecture §13.5, §13.10): docs.get. The reads the Runtime shares (log.read,
-// events.read; stats.get, physics.bodyInfo and audio.stats in later milestones) are
-// Engine/Automation/Methods/ObserveMethods.h's (M7, Docs/Decisions/0012-m7-decisions.md decision 12). Conventions as in
-// MethodRegistry.h.
+// The editor's observe method (Architecture §13.5, §13.10): docs.get. The reads the Runtime shares live in
+// Engine/Automation/Methods: log.read and events.read in ObserveMethods.h (M7, Docs/Decisions/0012-m7-decisions.md
+// decision 12), stats.get in StatsMethods.h, physics.bodyInfo in PhysicsMethods.h and audio.stats in AudioMethods.h.
+// Conventions as in MethodRegistry.h.
 
 namespace Engine {
 

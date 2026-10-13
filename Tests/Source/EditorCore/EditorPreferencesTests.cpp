@@ -70,6 +70,26 @@ namespace Engine {
 			}
 		}
 
+		TEST_CASE("EditorPreferences: the shared writer keeps every number exactly and rejects text that is not UTF-8")
+		{
+			const auto document = JsonReader::Parse(R"({"Format":"EditorPreferences","Version":1,"Future":{"Exact":9007199254740993,"Fraction":1.23456789012345,"Large":1e200,"Tiny":5e-324}})");
+			REQUIRE(document);
+			const auto text = SerializeEditorPreferences(*document);
+			REQUIRE(text);
+			CHECK(text->ends_with("\n"));
+			const auto reparsed = JsonReader::Parse(*text);
+			REQUIRE(reparsed);
+			CHECK(*reparsed == *document);
+			Json invalid = *document;
+			invalid["Future"]["Name"] = std::string(1, static_cast<char>(0xff));
+			const auto rejected = SerializeEditorPreferences(invalid);
+			REQUIRE_FALSE(rejected);
+			CHECK(rejected.error().GetCode() == ErrorCode::Validation);
+			Json invalidKey = *document;
+			invalidKey["Future"][std::string(1, static_cast<char>(0xfe))] = 1;
+			CHECK(SerializeEditorPreferences(invalidKey).error().GetCode() == ErrorCode::Validation);
+		}
+
 		TEST_CASE("EditorPreferences: malformed preferences do not get overwritten")
 		{
 			VirtualFileSystem vfs;
@@ -130,7 +150,11 @@ namespace Engine {
 			REQUIRE(specification);
 			REQUIRE(specification->Arguments.size() == preferences.ExternalEditorArguments.size());
 			CHECK(specification->Arguments.back() == "--child-argument=" + FileSystem::PathToUtf8(source) + ":42");
-			const auto child = Process::Run(*specification, std::chrono::seconds(60));
+			// An external editor's output is never kept (it may run for hours); this test captures it to see the argv.
+			CHECK_FALSE(specification->CaptureOutput);
+			ProcessSpecification observed = *specification;
+			observed.CaptureOutput = true;
+			const auto child = Process::Run(observed, std::chrono::seconds(60));
 			REQUIRE(child);
 			CHECK(child->ExitCode == 0);
 			CHECK(child->StandardError.contains("Source argv: [" + FileSystem::PathToUtf8(source) + ":42]"));

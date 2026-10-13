@@ -12,7 +12,9 @@
 #include "Engine/Scene/ComponentAccess.h"
 #include "Engine/Scene/ComponentRegistration.h"
 #include "Engine/Scene/Components/ScriptComponent.h"
+#include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Entity.h"
+#include "Engine/Scene/SceneSerializer.h"
 #include "Engine/Session/PlaySession.h"
 #include "Support/AssetTestFixture.h"
 #include "Support/AutomationTestClient.h"
@@ -21,6 +23,7 @@
 #include <doctest/doctest.h>
 
 #include <algorithm>
+#include <limits>
 #include <map>
 
 namespace Engine {
@@ -308,20 +311,105 @@ namespace Engine {
 			CHECK(ReadInspectorFixture(editor, id, "Weights").FindMember("First") != nullptr);
 		}
 
-		TEST_CASE("ReflectedEditController: duplicate map keys are rejected")
+		TEST_CASE("ReflectedEditController: a map rename onto an existing key replaces the whole map without a duplicate")
 		{
 			Test::EditorTestFixture fixture("InspectorDuplicateKeys", {}, &RegisterInspectorFixtureTypes);
 			const UUID id = AddInspectorFixture(fixture);
-			ReflectedEditController edits(fixture.GetEditor());
+			auto& editor = fixture.GetEditor();
+			REQUIRE(ComponentAccess::SetFieldValue(editor.GetScene().FindEntityByID(id), "InspectorFixture", "Weights",
+				Value::FromMap({ "First", "Second" }, { Value::FromFloat(1.0f), Value::FromFloat(2.0f) })));
+			ReflectedEditController edits(editor);
 			REQUIRE(edits.Begin({ .Entities = { id }, .Component = "InspectorFixture", .FieldPath = "Weights" }));
-			const auto before = edits.GetPreview();
-			REQUIRE(before);
-			// Value::FromMap requires unique sorted keys; the strict JSON boundary rejects duplicates before conversion.
-			const auto duplicate = JsonReader::Parse(R"({"First":1,"First":2})");
-			REQUIRE_FALSE(duplicate);
-			CHECK(duplicate.error().GetCode() == ErrorCode::Parse);
-			CHECK(edits.GetPreview().value() == *before);
-			CHECK(fixture.GetEditor().GetHistory().GetUndoCount() == 0);
+			// A map Value cannot hold a key twice (Value::FromMap asserts unique keys; a JSON object cannot repeat one), so
+			// renaming "First" onto "Second" reaches the controller as the whole resulting map. The controller must replace
+			// the stored map with it rather than merge, or the old key would survive next to the renamed one.
+			REQUIRE(edits.Preview(Value::FromMap({ "Second" }, { Value::FromFloat(1.0f) })));
+			REQUIRE(edits.Commit());
+			const Value renamed = ReadInspectorFixture(editor, id, "Weights");
+			REQUIRE(renamed.GetKeys().size() == 1);
+			CHECK(renamed.GetKeys().front() == "Second");
+			REQUIRE(renamed.FindMember("Second") != nullptr);
+			CHECK(renamed.FindMember("Second")->AsFloat() == 1.0f);
+			CHECK(renamed.FindMember("First") == nullptr);
+			CHECK(editor.GetHistory().GetUndoCount() == 1);
+			REQUIRE(editor.GetHistory().Undo(editor));
+			const Value restored = ReadInspectorFixture(editor, id, "Weights");
+			REQUIRE(restored.GetKeys().size() == 2);
+			CHECK(restored.FindMember("First")->AsFloat() == 1.0f);
+			CHECK(restored.FindMember("Second")->AsFloat() == 2.0f);
+		}
+
+		TEST_CASE("ReflectedEditController: a component mask keeps each target's untouched vector components")
+		{
+			Test::EditorTestFixture fixture("InspectorComponentMask");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			auto& editor = fixture.GetEditor();
+			const Entity first = editor.GetScene().CreateEntity("First");
+			const Entity second = editor.GetScene().CreateEntity("Second");
+			REQUIRE(ComponentAccess::SetFieldValue(second, "Transform", "Translation", Value::FromVec3({ 0.0f, 5.0f, 0.0f })));
+			const auto translation = [&editor](UUID id)
+			{
+				auto value = ComponentAccess::GetFieldValue(editor.GetScene().FindEntityByID(id), "Transform", "Translation");
+				REQUIRE(value);
+				return value->AsVec3();
+			};
+			ReflectedEditController edits(editor);
+			const InspectorEditTarget target{ .Entities = { first.GetUUID(), second.GetUUID() }, .Component = "Transform", .FieldPath = "Translation" };
+			REQUIRE(edits.Begin(target));
+			// The drawn value starts from the first target's; only its X changed.
+			REQUIRE(edits.Preview(Value::FromVec3({ 1.0f, 0.0f, 0.0f }), 0b001u));
+			REQUIRE(edits.Commit());
+			CHECK(translation(first.GetUUID()) == glm::vec3(1.0f, 0.0f, 0.0f));
+			CHECK(translation(second.GetUUID()) == glm::vec3(1.0f, 5.0f, 0.0f));
+			CHECK(editor.GetHistory().GetUndoCount() == 1);
+			REQUIRE(editor.GetHistory().Undo(editor));
+			CHECK(translation(second.GetUUID()) == glm::vec3(0.0f, 5.0f, 0.0f));
+			// Owner-dependent virtual vectors merge the same way, per target.
+			REQUIRE(ComponentAccess::SetFieldValue(second, "Transform", "EulerAngles", Value::FromVec3({ 0.0f, 90.0f, 0.0f })));
+			REQUIRE(edits.Begin({ .Entities = target.Entities, .Component = "Transform", .FieldPath = "EulerAngles" }));
+			REQUIRE(edits.Preview(Value::FromVec3({ 30.0f, 0.0f, 0.0f }), 0b001u));
+			REQUIRE(edits.Commit());
+			auto euler = ComponentAccess::GetFieldValue(editor.GetScene().FindEntityByID(second.GetUUID()), "Transform", "EulerAngles");
+			REQUIRE(euler);
+			CHECK(euler->AsVec3().x == doctest::Approx(30.0f).epsilon(1e-4));
+			CHECK(euler->AsVec3().y == doctest::Approx(90.0f).epsilon(1e-4));
+			// Without a mask the edited value replaces every target's whole vector.
+			REQUIRE(edits.Begin(target));
+			REQUIRE(edits.Preview(Value::FromVec3({ 2.0f, 0.0f, 0.0f })));
+			REQUIRE(edits.Commit());
+			CHECK(translation(second.GetUUID()) == glm::vec3(2.0f, 0.0f, 0.0f));
+		}
+
+		TEST_CASE("ReflectedEditController: previews copy only the edited entities and their ancestors")
+		{
+			Test::EditorTestFixture fixture("InspectorPreviewCopy");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			auto& editor = fixture.GetEditor();
+			Scene& scene = editor.GetScene();
+			const Entity parent = scene.CreateEntity("Parent");
+			const Entity child = scene.CreateEntity("Child");
+			REQUIRE(scene.SetParent(child, parent));
+			REQUIRE(ComponentAccess::SetFieldValue(parent, "Transform", "Translation", Value::FromVec3({ 5.0f, 0.0f, 0.0f })));
+			// An unrelated entity that no scene copy can serialize: a non-finite position written past validation.
+			const Entity unrelated = scene.CreateEntity("Unrelated");
+			unrelated.GetComponent<TransformComponent>().Translation.x = std::numeric_limits<float>::quiet_NaN();
+			REQUIRE_FALSE(SceneSerializer::ToJson(scene));
+			ReflectedEditController edits(editor);
+			REQUIRE(edits.Begin({ .Entities = { child.GetUUID() }, .Component = "Transform", .FieldPath = "WorldPosition" }));
+			// Every drag frame previews: the owner-dependent setter runs on a copy of the child and its parent only.
+			REQUIRE(edits.Preview(Value::FromVec3({ 7.0f, 0.0f, 0.0f })));
+			CHECK(child.GetComponent<TransformComponent>().Translation == glm::vec3(0.0f));
+			// Commit checks the whole scene once before the live write; it still holds the unserializable entity.
+			const auto blocked = edits.Commit();
+			REQUIRE_FALSE(blocked);
+			CHECK(child.GetComponent<TransformComponent>().Translation == glm::vec3(0.0f));
+			CHECK(editor.GetHistory().GetUndoCount() == 0);
+			unrelated.GetComponent<TransformComponent>().Translation.x = 0.0f;
+			REQUIRE(edits.Commit());
+			CHECK(child.GetComponent<TransformComponent>().Translation.x == doctest::Approx(2.0f));
+			CHECK(editor.GetHistory().GetUndoCount() == 1);
 		}
 
 		TEST_CASE("ReflectedEditController: resolved variants use the owner and map key")
@@ -413,6 +501,46 @@ namespace Engine {
 			CHECK(conflict.error().GetCode() == ErrorCode::Conflict);
 			CHECK(ReadInspectorFixture(editor, id, "Limit").AsFloat() == 2.0f);
 			CHECK(editor.GetHistory().GetUndoCount() == 0);
+		}
+
+		TEST_CASE("ReflectedEditController: a project-settings change rejects only a project-settings gesture")
+		{
+			Test::AutomationFixture fixture("InspectorSettingsChange");
+			auto& editor = fixture.GetEditor();
+			const UUID id = editor.GetScene().CreateEntity("Moved").GetUUID();
+			const Json patch{ { "patch", Json{ { "Rendering", Json{ { "ShadowMapSize", 512 } } } } } };
+			const InspectorEditTarget translation{ .Entities = { id }, .Component = "Transform", .FieldPath = "Translation" };
+			ReflectedEditController edits(editor);
+			// Installing settings, and undoing that, advances the editor's revision but leaves the scene document alone.
+			REQUIRE(edits.Begin(translation));
+			REQUIRE(edits.Preview(Value::FromVec3(glm::vec3(1.0f, 2.0f, 3.0f))));
+			const uint64_t revision = editor.GetRevision();
+			REQUIRE(fixture.Call("project.setSettings", patch));
+			REQUIRE(fixture.Call("edit.undo", Json::object()));
+			REQUIRE(editor.GetRevision() != revision);
+			const size_t undoCount = editor.GetHistory().GetUndoCount();
+			REQUIRE(edits.Commit());
+			CHECK(editor.GetScene().FindEntityByID(id).GetComponent<TransformComponent>().Translation == glm::vec3(1.0f, 2.0f, 3.0f));
+			CHECK(editor.GetHistory().GetUndoCount() == undoCount + 1);
+
+			// A project-settings gesture still rejects any settings installation made meanwhile.
+			REQUIRE(edits.Begin({ .Kind = InspectorTargetKind::ProjectSettings, .FieldPath = "Simulation.FixedHz" }));
+			REQUIRE(edits.Preview(Value::FromUInt32(120)));
+			REQUIRE(fixture.Call("project.setSettings", patch));
+			const auto staleSettings = edits.Commit();
+			REQUIRE_FALSE(staleSettings);
+			CHECK(staleSettings.error().GetCode() == ErrorCode::Conflict);
+			CHECK(editor.GetProject().GetSettings().Simulation.FixedHz != 120);
+			edits.Cancel();
+
+			// And a scene edit made meanwhile still rejects a scene gesture.
+			REQUIRE(edits.Begin(translation));
+			REQUIRE(edits.Preview(Value::FromVec3(glm::vec3(4.0f, 5.0f, 6.0f))));
+			REQUIRE(fixture.Call("entity.create", Json{ { "name", "Other" } }));
+			const auto staleScene = edits.Commit();
+			REQUIRE_FALSE(staleScene);
+			CHECK(staleScene.error().GetCode() == ErrorCode::Conflict);
+			CHECK(editor.GetScene().FindEntityByID(id).GetComponent<TransformComponent>().Translation == glm::vec3(1.0f, 2.0f, 3.0f));
 		}
 
 		TEST_CASE("ReflectedEditController: an asset replacement rejects the captured version and preserves agent edits")

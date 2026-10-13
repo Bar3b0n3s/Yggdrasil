@@ -2,6 +2,7 @@
 #include "Engine/Scripting/Private/ScriptEngineState.h"
 
 #include "Engine/Asset/AssetManager.h"
+#include "Engine/Core/Assert.h"
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Core/Log.h"
 #include "Engine/Reflection/FieldInfo.h"
@@ -12,50 +13,141 @@
 #include "Engine/Scripting/Private/BindingRegistration.h"
 #include "Engine/Scripting/Private/SandboxAccess.h"
 #include "Engine/Scripting/ScriptApiRegistry.h"
+#include "Engine/Scripting/Watchdog.h"
 
 #include <algorithm>
 #include <optional>
+#include <utility>
+#include <vector>
 
 namespace Engine {
 
 	Status ScriptEngine::State::CreateInstances(std::span<const UUID> entities)
 	{
-		RefreshLifecycleOrder();
-		std::set<UUID> selected(entities.begin(), entities.end());
-		std::vector<UUID> created;
-		const auto canonical = Engine.GetHost().GetScene().GetCanonicalOrder();
-		const std::vector<UUID> snapshot(canonical.begin(), canonical.end());
-		for (const UUID id : snapshot)
+		if (entities.empty())
+			return {};
+		Scene& scene = Engine.GetHost().GetScene();
+		std::vector<UUID> ordered;
+		if (entities.size() == 1)
+			ordered.push_back(entities.front());
+		else
 		{
-			if (!selected.contains(id) || Instances.contains(id))
+			// Visit the requested entities in canonical order without copying the whole scene's order per creation.
+			std::vector<UUID> selected(entities.begin(), entities.end());
+			std::sort(selected.begin(), selected.end());
+			for (const UUID id : scene.GetCanonicalOrder())
+			{
+				if (std::binary_search(selected.begin(), selected.end(), id))
+					ordered.push_back(id);
+			}
+		}
+		struct Created
+		{
+			int32_t Order = 0;
+			UUID Entity{};
+			uint64_t Serial = 0;
+		};
+		std::vector<Created> created;
+		for (const UUID id : ordered)
+		{
+			if (Instances.contains(id))
 				continue;
-			const Entity entity = Engine.GetHost().GetScene().FindEntityByID(id);
+			const Entity entity = scene.FindEntityByID(id);
 			if (!entity || !entity.HasComponent<ScriptComponent>() || !entity.GetComponent<ScriptComponent>().Script.IsValid())
 				continue;
-			const Status result = CreateInstance(id);
+			// Every later entry of a faulted slice fails with the latched fault, so the remaining entities stay uncreated
+			// until the next synchronization after recovery creates them.
+			if (IsSliceFaulted())
+				break;
+			const Result<bool> result = CreateInstance(id);
 			if (!result)
 				Publish(result.error(), id, "OnCreate");
-			else
-				created.push_back(id);
+			else if (*result)
+			{
+				// Capture the identity before later user code runs: a module top can remove or replace any instance.
+				const auto current = Instances.find(id);
+				created.push_back({ current->second.Order, id, current->second.Serial });
+			}
 			if (Engine.IsStopped())
 				break;
 		}
-		std::stable_sort(created.begin(), created.end(), [this](UUID left, UUID right)
+		std::stable_sort(created.begin(), created.end(), [](const Created& left, const Created& right)
 		{
-			return Instances.find(left)->second.Order < Instances.find(right)->second.Order;
+			return left.Order < right.Order;
 		});
 		if (!Engine.IsReadOnly())
 		{
-			for (const UUID id : created)
+			for (const Created& entry : created)
 			{
-				if (Engine.GetHost().GetScene().FindEntityByID(id))
-					Invoke(id, "OnCreate", nullptr, true);
+				// Skip instances erased or recreated (with their own OnCreate) by an earlier callback in this batch.
+				const auto current = Instances.find(entry.Entity);
+				if (current == Instances.end() || current->second.Serial != entry.Serial || !scene.FindEntityByID(entry.Entity))
+					continue;
+				// An earlier OnCreate latched a memory or timeout fault: this one would be aborted at its first call and leave
+				// a half-initialized instance with no error of its own, so it runs after recovery instead (M13 review F08).
+				if (IsSliceFaulted())
+				{
+					current->second.CreateDeferred = true;
+					HasDeferredCreates = true;
+				}
+				else
+					Invoke(entry.Entity, "OnCreate", nullptr, true);
 			}
 		}
 		return {};
 	}
 
-	Status ScriptEngine::State::CreateInstance(UUID id)
+	bool ScriptEngine::State::IsSliceFaulted() const
+	{
+		if (Vm == nullptr || Detail::SandboxAccess::GetWatchdog(*Vm)->GetDepth() == 0)
+			return false;
+		const ScriptMemoryState memory = Vm->GetMemoryState();
+		return PendingSafetyFailure.has_value() || memory.NeedsRecovery || memory.MustStop;
+	}
+
+	void ScriptEngine::State::InvokeDeferredCreates()
+	{
+		if (!HasDeferredCreates || Engine.IsStopped() || Engine.IsReadOnly() || IsSliceFaulted())
+			return;
+		HasDeferredCreates = false;
+		RefreshLifecycleOrder();
+		struct Deferred
+		{
+			int32_t Order = 0;
+			UUID Entity{};
+			uint64_t Serial = 0;
+		};
+		std::vector<Deferred> deferred;
+		for (const UUID id : LifecycleOrder)
+		{
+			const auto found = Instances.find(id);
+			if (found != Instances.end() && found->second.CreateDeferred)
+				deferred.push_back({ found->second.Order, id, found->second.Serial });
+		}
+		// LifecycleOrder is canonical, so a stable sort gives (ExecutionOrder, canonical), the order of the original batch.
+		std::stable_sort(deferred.begin(), deferred.end(), [](const Deferred& left, const Deferred& right)
+		{
+			return left.Order < right.Order;
+		});
+		Scene& scene = Engine.GetHost().GetScene();
+		for (const Deferred& entry : deferred)
+		{
+			const auto current = Instances.find(entry.Entity);
+			if (current == Instances.end() || current->second.Serial != entry.Serial || !current->second.CreateDeferred)
+				continue;
+			if (IsSliceFaulted())
+			{
+				// A deferred OnCreate latched a new fault; the rest wait for the next recovery again.
+				HasDeferredCreates = true;
+				return;
+			}
+			current->second.CreateDeferred = false;
+			if (scene.FindEntityByID(entry.Entity))
+				Invoke(entry.Entity, "OnCreate", nullptr, true);
+		}
+	}
+
+	Result<bool> ScriptEngine::State::CreateInstance(UUID id)
 	{
 		const Entity entity = Engine.GetHost().GetScene().FindEntityByID(id);
 		if (!entity || !entity.HasComponent<ScriptComponent>())
@@ -65,9 +157,13 @@ namespace Engine {
 		instance.Handle = component.Script.GetHandle();
 		instance.Name = entity.GetName();
 		instance.Order = component.ExecutionOrder;
+		instance.Serial = NextInstanceSerial++;
 		instance.Active = entity.IsActive();
 		instance.Overrides = component.Fields;
+		const uint64_t serial = instance.Serial;
 		Instances.emplace(id, std::move(instance));
+		LifecycleOrder.push_back(id);
+		LifecycleDirty = true;
 		AssetManager* assets = Engine.GetHost().GetAssets();
 		if (assets == nullptr)
 			return MakeError(ErrorCode::NotFound, "A script instance needs an asset manager");
@@ -77,7 +173,7 @@ namespace Engine {
 			return MakeError(ErrorCode::Validation, "SCRIPT_NOT_A_BEHAVIOUR: an entity needs a Behaviour script");
 		Instances.find(id)->second.Script = script;
 		ENGINE_TRY_ASSIGN(auto schemas, ScriptFieldSchemaSource::Create({ { component.Script.GetHandle(), script } }));
-		const auto operation = [this, id, script, schemas, component](ScriptCall& call) -> int
+		const auto operation = [this, id, serial, script, schemas, component](ScriptCall& call) -> int
 		{
 			const Status loaded = Detail::SandboxAccess::PushModule(call, *script);
 			if (!loaded)
@@ -127,16 +223,22 @@ namespace Engine {
 			}
 			lua_pushvalue(call.State, classIndex);
 			lua_setmetatable(call.State, table);
+			// The module top ran user code that may have removed this instance, or replaced it with one that already
+			// owns its table. Either way nothing remains to create; the unreferenced table is collected.
 			const auto current = Instances.find(id);
-			if (current == Instances.end())
-				return Lua::RaiseError(call, "The script instance disappeared while loading its class");
-			current->second.Table = lua_ref(call.State, table);
+			if (current != Instances.end() && current->second.Serial == serial)
+				current->second.Table = lua_ref(call.State, table);
 			return 0;
 		};
 		ENGINE_TRY_ASSIGN(auto result, RunNative(operation, ScriptExecutionOrigin::Gameplay, { .Entity = id, .Case = CurrentOwner.Case }, "OnCreate"));
 		if (result.Failure)
+		{
 			Publish(*result.Failure, { .Entity = id, .Case = CurrentOwner.Case });
-		return {};
+			return false;
+		}
+		// The module top may have removed this instance (or replaced it under the same entity) through the runtime API.
+		const auto current = Instances.find(id);
+		return current != Instances.end() && current->second.Serial == serial && current->second.Table != LUA_NOREF;
 	}
 
 	void ScriptEngine::State::Invoke(UUID id, std::string_view callback, const PhysicsEvent* event, bool destroying)
@@ -150,9 +252,16 @@ namespace Engine {
 		const Entity entity = Engine.GetHost().GetScene().FindEntityByID(id);
 		if (!destroying && (!entity || !entity.IsActive()))
 			return;
+		if (callback == "OnCreate")
+			found->second.Created = true;
+		else if (!found->second.Created)
+			return;
 		// The table stays on the protected call's stack even when nested user code removes the instance.
 		const int tableReference = found->second.Table;
-		const ScriptTaskOwner owner{ id, !CurrentOwner.Case.IsNull() ? CurrentOwner.Case : ActiveCase };
+		// Lifecycle callbacks are instance work (§11.3): their tasks belong to the instance and survive test-case
+		// boundaries. The active case still receives their errors and test signals as attribution only.
+		const ScriptTaskOwner owner{ .Entity = id, .Case = {} };
+		const bool outerSignal = std::exchange(TestSignalRaised, false);
 		std::optional<ScriptError> callbackFailure;
 		const auto operation = [this, tableReference, callback, event, &callbackFailure](ScriptCall& call) -> int
 		{
@@ -202,13 +311,14 @@ namespace Engine {
 			return 0;
 		};
 		const auto result = RunNative(operation, ScriptExecutionOrigin::Gameplay, owner, callback);
-		const auto caseThread = References.find(owner.Case.Index);
-		const bool terminalCase = !owner.Case.IsNull() && caseThread != References.end() && caseThread->second.Terminal.has_value();
+		// Nested callbacks consume their own signals, so an outer callback only sees a Fail/Skip it raised itself.
+		const bool testSignal = std::exchange(TestSignalRaised, outerSignal);
 		const bool safetyFailure = (!result && result.error().GetCode() == ErrorCode::Timeout)
 			|| (result && result->Failure && (result->Failure->Kind == ScriptErrorKind::Timeout || result->Failure->Kind == ScriptErrorKind::Memory))
 			|| (callbackFailure && (callbackFailure->Kind == ScriptErrorKind::Timeout || callbackFailure->Kind == ScriptErrorKind::Memory));
-		// Fail/Skip is a test control outcome, including when a nested callback belongs to the running case.
-		if (terminalCase && !safetyFailure)
+		// Fail/Skip raised by this callback is a test control outcome that ends the running case, never an instance fault.
+		// Other failures publish normally even while the case is already terminal.
+		if (testSignal && !safetyFailure)
 			return;
 		if (!result)
 			Publish(result.error(), id, callback);
@@ -216,6 +326,44 @@ namespace Engine {
 			Publish(*result->Failure, owner);
 		else if (callbackFailure)
 			Publish(*callbackFailure, owner);
+	}
+
+	void ScriptEngine::State::InvokePhysics(const PhysicsEvent& event)
+	{
+		switch (event.Type)
+		{
+			case PhysicsEventType::CollisionEnter: Invoke(event.Self, "OnCollisionEnter", &event); return;
+			case PhysicsEventType::CollisionExit:  Invoke(event.Self, "OnCollisionExit", &event); return;
+			case PhysicsEventType::TriggerEnter:   Invoke(event.Self, "OnTriggerEnter", &event); return;
+			case PhysicsEventType::TriggerExit:    Invoke(event.Self, "OnTriggerExit", &event); return;
+		}
+		ENGINE_CORE_ASSERT(false, "Unknown physics event");
+	}
+
+	void ScriptEngine::State::DeliverPendingPhysics()
+	{
+		if (std::none_of(Instances.begin(), Instances.end(), [](const auto& entry)
+		{
+			return !entry.second.PendingPhysics.empty();
+		}))
+			return;
+		for (const UUID id : OrderedInstances(false))
+		{
+			const auto found = Instances.find(id);
+			if (found == Instances.end() || !found->second.Started || found->second.PendingPhysics.empty())
+				continue;
+			const uint64_t serial = found->second.Serial;
+			const std::vector<PhysicsEvent> events = std::exchange(found->second.PendingPhysics, {});
+			for (const PhysicsEvent& event : events)
+			{
+				// A callback may remove, replace or fault this instance; its remaining held events are then discarded.
+				const auto current = Instances.find(id);
+				if (Engine.IsStopped() || current == Instances.end() || current->second.Serial != serial || current->second.FaultDisabled
+					|| current->second.DestroyPrepared)
+					break;
+				InvokePhysics(event);
+			}
+		}
 	}
 
 	void ScriptEngine::State::Phase(std::string_view callback)

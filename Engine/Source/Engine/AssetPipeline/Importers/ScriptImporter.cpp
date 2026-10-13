@@ -61,6 +61,35 @@ namespace Engine {
 			std::set<AssetHandle> m_Dependencies{};
 		};
 
+		constexpr std::string_view ScriptCompileErrorCode = "SCRIPT_COMPILE_ERROR";
+
+		// Script content failures (compile, load-time extraction, unresolved requires) become one located compile finding,
+		// unless the checker already reported a compile error there. Infrastructure failures are not script findings.
+		static void AppendScriptImportFailure(ScriptImportCheck& check, const Error& error, const VfsPath& source)
+		{
+			const ErrorCode code = error.GetCode();
+			if (code == ErrorCode::Io || code == ErrorCode::PermissionDenied || code == ErrorCode::InvalidState || code == ErrorCode::Unsupported)
+				return;
+			const ErrorLocation& location = error.GetLocation();
+			ScriptDiagnostic finding{ .Severity = DiagnosticSeverity::Error,
+				.Code = std::string(ScriptCompileErrorCode),
+				.File = location.File.empty() ? std::string(source.GetPath()) : location.File,
+				.Line = location.Line != 0 ? location.Line : 1,
+				.Column = location.Line != 0 && location.Column != 0 ? location.Column : 1,
+				.Message = error.GetMessageText() };
+			if (std::ranges::any_of(check.Diagnostics, [&finding](const ScriptDiagnostic& existing)
+			{
+				return existing.Code == finding.Code && existing.File == finding.File && existing.Line == finding.Line;
+			}))
+				return;
+			check.Diagnostics.push_back(std::move(finding));
+			std::ranges::sort(check.Diagnostics, [](const ScriptDiagnostic& left, const ScriptDiagnostic& right)
+			{
+				return std::tie(left.File, left.Line, left.Column, left.Code, left.Message, left.EndLine, left.EndColumn, left.Severity)
+					< std::tie(right.File, right.Line, right.Column, right.Code, right.Message, right.EndLine, right.EndColumn, right.Severity);
+			});
+		}
+
 	}
 
 	std::span<const std::string_view> ScriptImporter::GetExtensions() const
@@ -81,13 +110,28 @@ namespace Engine {
 			check.EnvironmentHash = provider->GetEnvironmentHash();
 			check.Diagnostics = provider->CheckScript(request);
 		}
-		context.SetScriptCheck(std::move(check));
-		ENGINE_TRY_ASSIGN(const auto extracted, LoadTimeVm::Extract(request));
-		ScriptData script = *extracted;
+		context.SetScriptCheck(check);
+		// A failed attempt records its own located failure with the findings, so hosts (hot reload, script.write) report
+		// the faulting line instead of only an unlocated import message.
+		const auto fail = [&context, &check](Error error) -> Result<ImportResult>
+		{
+			Utils::AppendScriptImportFailure(check, error, context.GetSourcePath());
+			context.SetScriptCheck(check);
+			return std::unexpected(std::move(error));
+		};
+		auto extracted = LoadTimeVm::Extract(request);
+		if (!extracted)
+			return fail(std::move(extracted).error());
+		ScriptData script = **extracted;
 		for (auto& edge : script.Requires)
 		{
-			ENGINE_TRY_ASSIGN(const auto path, VfsPath::Create("project", edge.Path));
-			ENGINE_TRY_ASSIGN(edge.Handle, modules.ResolveHandle(path));
+			auto path = VfsPath::Create("project", edge.Path);
+			if (!path)
+				return fail(std::move(path).error());
+			auto handle = modules.ResolveHandle(*path);
+			if (!handle)
+				return fail(std::move(handle).error());
+			edge.Handle = *handle;
 		}
 		std::sort(script.Requires.begin(), script.Requires.end(), [](const ScriptRequire& left, const ScriptRequire& right)
 		{

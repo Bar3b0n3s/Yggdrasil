@@ -54,6 +54,8 @@ namespace Engine {
 		// Optional paths in use (each false under --vulkan-api=1.3 when it is a 1.4 capability).
 		bool HostImageCopy = false;
 		bool DeviceFault = false;
+		// Directional shadow casters nearer the light than the cascade's near plane are pancaked per fragment (ShadowPass;
+		// emulated in the shader, no Vulkan feature): true unless GraphicsSpecification::DisableDepthClamp.
 		bool DepthClamp = false;
 		bool FillModeNonSolid = false;
 		bool PortabilitySubset = false;

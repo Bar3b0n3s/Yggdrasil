@@ -232,6 +232,65 @@ namespace Engine {
 			return pressed;
 		}
 
+		static constexpr ImVec4 PlayAccent(0.95f, 0.62f, 0.22f, 1.0f);
+
+		static ImVec4 MixWithPlayAccent(ImGuiCol color, float amount)
+		{
+			const ImVec4 base = ImGui::GetStyleColorVec4(color);
+			return ImVec4(base.x + (PlayAccent.x - base.x) * amount, base.y + (PlayAccent.y - base.y) * amount,
+				base.z + (PlayAccent.z - base.z) * amount, base.w);
+		}
+
+		// BeginEditorPlayTint pushes exactly these colours; EndEditorPlayTint pops the same count.
+		static constexpr int PlayTintColorCount = 8;
+
+		uint32_t EditorPlayAccentColor()
+		{
+			return ImGui::ColorConvertFloat4ToU32(PlayAccent);
+		}
+
+		void BeginEditorPlayTint()
+		{
+			const ImVec4 colors[PlayTintColorCount] = {
+				MixWithPlayAccent(ImGuiCol_FrameBg, 0.22f),
+				MixWithPlayAccent(ImGuiCol_FrameBgHovered, 0.30f),
+				MixWithPlayAccent(ImGuiCol_FrameBgActive, 0.40f),
+				MixWithPlayAccent(ImGuiCol_Header, 0.25f),
+				MixWithPlayAccent(ImGuiCol_HeaderHovered, 0.32f),
+				MixWithPlayAccent(ImGuiCol_HeaderActive, 0.42f),
+				PlayAccent,
+				PlayAccent,
+			};
+			constexpr ImGuiCol Targets[PlayTintColorCount] = { ImGuiCol_FrameBg, ImGuiCol_FrameBgHovered, ImGuiCol_FrameBgActive,
+				ImGuiCol_Header, ImGuiCol_HeaderHovered, ImGuiCol_HeaderActive, ImGuiCol_CheckMark, ImGuiCol_SliderGrab };
+			for (int index = 0; index < PlayTintColorCount; ++index)
+				ImGui::PushStyleColor(Targets[index], colors[index]);
+		}
+
+		void EndEditorPlayTint()
+		{
+			ImGui::PopStyleColor(PlayTintColorCount);
+		}
+
+		void EditorPlayNotice(std::string_view text)
+		{
+			ImGui::PushStyleColor(ImGuiCol_Text, PlayAccent);
+			ImGui::PushTextWrapPos(0.0f);
+			ImGui::TextUnformatted(text.data(), text.data() + text.size());
+			ImGui::PopTextWrapPos();
+			ImGui::PopStyleColor();
+		}
+
+		bool EditorErrorNotice(std::string_view message)
+		{
+			ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.48f, 0.48f, 1.0f));
+			ImGui::PushTextWrapPos(0.0f);
+			ImGui::TextUnformatted(message.data(), message.data() + message.size());
+			ImGui::PopTextWrapPos();
+			ImGui::PopStyleColor();
+			return ImGui::SmallButton("Dismiss##EditorError");
+		}
+
 	}
 
 }

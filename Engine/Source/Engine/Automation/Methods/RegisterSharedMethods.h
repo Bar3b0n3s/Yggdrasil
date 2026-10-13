@@ -17,7 +17,7 @@ namespace Engine {
 	class TypeRegistry;
 
 	// Which host registers: the editor registers every shared method; the Runtime only those of its subset (play.start and
-	// play.stop are editor only, and so are the later milestones' editor-side members of shared domains).
+	// play.stop are editor only, and so are the editor-side members of other shared domains).
 	enum class AutomationHost : uint8_t
 	{
 		Editor,
@@ -27,8 +27,10 @@ namespace Engine {
 	// The types of every shared domain, in dependency order: input (RegisterInputMethodTypes), play
 	// (RegisterPlayMethodTypes), viewport.screenshot (RegisterViewportScreenshotMethodTypes), then the domains moved from
 	// EditorCore with M7: session (RegisterSessionMethodTypes), rpc (RegisterRpcMethodTypes), the scene and entity reads
-	// (RegisterSceneMethodTypes, RegisterEntityMethodTypes) and the observe reads (RegisterObserveMethodTypes); then the
-	// later milestones' domains: physics (RegisterPhysicsMethodTypes, M11) and audio.stats (RegisterAudioMethodTypes, M12).
+	// (RegisterSceneMethodTypes, RegisterEntityMethodTypes) and the observe reads (RegisterObserveMethodTypes); then
+	// physics (RegisterPhysicsMethodTypes, M11), audio.stats (RegisterAudioMethodTypes, M12), scene.raycast
+	// (RegisterRaycastMethodTypes), stats.get (RegisterStatsMethodTypes), the shared script methods
+	// (RegisterSharedScriptMethodTypes) and input.record/input.replay (RegisterReplayMethodTypes).
 	// RegisterAutomationSharedTypes must have run on the registry first (the editor's RegisterAutomationCommonTypes runs it;
 	// the Runtime calls it itself).
 	void RegisterSharedMethodTypes(TypeRegistry& registry);

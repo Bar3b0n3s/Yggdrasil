@@ -23,10 +23,11 @@ namespace Engine {
 			CHECK_FALSE(VulkanApiVersionFromString("1.2").has_value());
 			CHECK_FALSE(VulkanApiVersionFromString("1.3.0").has_value());
 
-			for (const GpuFault fault : { GpuFault::None, GpuFault::DeviceLost, GpuFault::OomTexture, GpuFault::Hang })
+			for (const GpuFault fault : { GpuFault::None, GpuFault::DeviceLost, GpuFault::OomTexture, GpuFault::Hang, GpuFault::OomSpecialization })
 				CHECK(GpuFaultFromString(GpuFaultToString(fault)) == fault);
 			CHECK(GpuFaultToString(GpuFault::DeviceLost) == "device-lost");
 			CHECK(GpuFaultToString(GpuFault::OomTexture) == "oom-texture");
+			CHECK(GpuFaultToString(GpuFault::OomSpecialization) == "oom-specialization");
 			CHECK_FALSE(GpuFaultFromString("Device-Lost").has_value());
 		}
 

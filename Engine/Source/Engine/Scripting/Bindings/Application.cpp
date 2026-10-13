@@ -68,7 +68,7 @@ namespace Engine {
 				.Function("IsFocused", &Utils::ApplicationFocused, "() -> boolean", "Returns the current native-window focus state.", read)
 				.Function("GetPlatform", &Utils::ApplicationPlatform, "() -> string", "Returns the host platform name.", read)
 				.Function("GetVersion", &Utils::ApplicationVersion, "() -> string", "Returns the running engine version.", read)
-				.Function("GetWindowSize", &Utils::ApplicationWindow, "() -> vector", "Returns window coordinates as vector(width, height, 0).", read);
+				.Function("GetWindowSize", &Utils::ApplicationWindow, "() -> vector", "Returns the size of the session's view in view coordinates as vector(width, height, 0): the game view's image in ordinary play, the project's Window.Width x Window.Height in lockstep, recording, replay and test sessions.", read);
 			return {};
 		}
 

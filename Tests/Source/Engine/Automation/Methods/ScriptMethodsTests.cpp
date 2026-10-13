@@ -2,14 +2,20 @@
 
 #include "Engine/Automation/Methods/ScriptMethods.h"
 
+#include "EditorCore/EditorContext.h"
+#include "EditorCore/Play/EditorPlayController.h"
 #include "Engine/Core/EventLog.h"
 #include "Engine/Core/Json/JsonReader.h"
+#include "Engine/Scripting/ScriptError.h"
+#include "Engine/Scripting/ScriptLimits.h"
 #include "Support/AutomationTestClient.h"
 #include "Support/ExpectLog.h"
 
 #include <nlohmann/json.hpp>
 
 #include <array>
+#include <format>
+#include <string>
 
 namespace Engine {
 
@@ -183,6 +189,47 @@ namespace Engine {
 			CHECK(fixture.Request("script.eval", params)["error"]["data"]["errorCode"] == Json("Unsupported"));
 			const Json batch = fixture.Request("edit.batch", Json{ { "ops", Json::array({ Json{ { "method", "script.eval" }, { "params", Json{ { "context", "edit" }, { "code", "return 1" } } } } }) } });
 			CHECK(batch.contains("error"));
+		}
+
+		TEST_CASE("ScriptMethods: errors keep bounded messages and report evictions to older cursors")
+		{
+			Test::AutomationFixture fixture("ScriptErrorBounds");
+			const std::string marker = " [truncated: 20000 bytes]";
+			{
+				Test::ExpectLog expected(LogLevel::Error, marker);
+				const Json response = fixture.Request("script.eval", Json{ { "context", "edit" }, { "code", "error(string.rep('x', 20000), 0)" } });
+				REQUIRE(response.contains("error"));
+				const Json& data = response["error"]["data"];
+				CHECK(data["errorCode"] == Json("Script"));
+				REQUIRE_MESSAGE(data.contains("scriptError"), data.dump().substr(0, 512));
+				CHECK(data["scriptError"]["message"] == Json(std::string(MaxScriptLogMessageBytes - marker.size(), 'x') + marker));
+				CHECK(expected.GetMatchCount() == 1);
+			}
+			const Json first = CallScriptMethod(fixture, "script.errors", Json::object());
+			REQUIRE(first["errors"].size() == 1);
+			CHECK(first["errors"][0]["message"] == Json(std::string(MaxScriptLogMessageBytes - marker.size(), 'x') + marker));
+			CHECK(first["evicted"] == Json(false));
+			// The editor's history keeps the newest distinct errors: one more than it retains evicts the evaluation's error.
+			ScriptErrorStream& history = fixture.GetEditor().GetPlay().GetScriptErrors();
+			for (size_t index = 0; index < MaxScriptErrorEntries; ++index)
+				static_cast<void>(history.Add({ .Script = "Assets/Scripts/Spam.luau", .Line = 1, .Message = std::format("fault {}", index) }));
+			CHECK(history.GetErrors().size() == MaxScriptErrorEntries);
+			CHECK(history.GetEvictedCount() == 1);
+			// Pages stay small enough to be answered inline.
+			const Json oldest = CallScriptMethod(fixture, "script.errors", Json{ { "limit", 1 } });
+			CHECK(oldest["evicted"] == Json(true));
+			REQUIRE(oldest["errors"].size() == 1);
+			CHECK(oldest["errors"][0]["message"] == Json("fault 0"));
+			// A reader that already saw the evicted error missed nothing; its next page starts at the oldest retained one.
+			const Json seen = CallScriptMethod(fixture, "script.errors", Json{ { "since", first["nextCursor"] }, { "limit", 1 } });
+			CHECK(seen["evicted"] == Json(false));
+			REQUIRE(seen["errors"].size() == 1);
+			CHECK(seen["errors"][0]["message"] == Json("fault 0"));
+			CHECK(seen["nextCursor"] == oldest["nextCursor"]);
+			const Json rest = CallScriptMethod(fixture, "script.errors", Json{ { "since", std::to_string(history.GetCursor()) } });
+			CHECK(rest["evicted"] == Json(false));
+			CHECK(rest["errors"].empty());
+			CHECK(CallScriptMethod(fixture, "script.errors", Json{ { "since", "end" } })["evicted"] == Json(false));
 		}
 	}
 

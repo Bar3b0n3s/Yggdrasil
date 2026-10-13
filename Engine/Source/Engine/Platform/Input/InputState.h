@@ -91,7 +91,10 @@ namespace Engine {
 		[[nodiscard]] bool WasMouseButtonPressed(InputPhase phase, MouseButton button) const;
 		[[nodiscard]] bool WasMouseButtonReleased(InputPhase phase, MouseButton button) const;
 
-		// The cursor position at the phase's last latch (window coordinates).
+		// The cursor position at the phase's last latch, in the coordinates of the events given to it: window coordinates
+		// for the context's InputState; in a play session, view coordinates (PlaySession.h): the pixels of the session's
+		// view, origin top-left, which is the game view's image in ordinary play and the project's Window.Width x
+		// Window.Height in lockstep, recording, replay and test sessions.
 		[[nodiscard]] glm::vec2 GetMousePosition(InputPhase phase) const;
 		// The cursor motion between the phase's last two latches.
 		[[nodiscard]] glm::vec2 GetMouseDelta(InputPhase phase) const;

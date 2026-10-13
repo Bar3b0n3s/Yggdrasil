@@ -1,11 +1,16 @@
 #include "TestsPCH.h"
-
 #include "EditorCore/Automation/TestMethods.h"
-#include "EditorCore/Play/EditorPlayController.h"
 
+#include "EditorCore/Automation/ScreenshotMethods.h"
+#include "EditorCore/Play/EditorPlayController.h"
+#include "Engine/Audio/AudioEngine.h"
+#include "Engine/Automation/Methods/ScreenshotMethods.h"
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Core/VirtualFileSystem.h"
+#include "Engine/Graphics/Image.h"
+#include "Engine/Renderer/RenderSnapshot.h"
+#include "Engine/Renderer/ViewportCapture.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/SceneSerializer.h"
@@ -15,6 +20,7 @@
 
 #include <array>
 #include <chrono>
+#include <optional>
 #include <utility>
 
 namespace Engine {
@@ -98,8 +104,15 @@ namespace Engine {
 				const auto responses = server.TakeInProcessResponses(observer);
 				REQUIRE(responses.size() == 1);
 				CHECK(responses.front()["error"]["data"]["errorCode"] == Json("InvalidState"));
+				CHECK(responses.front()["error"]["message"].dump().contains("a test run owns the editor"));
 				REQUIRE(editor.GetPlay().IsTestRunActive());
 			}
+			// The observation subset UI actions share (EditorContext::CheckTestRunAdmission) stays available.
+			server.SubmitInProcess(observer, RpcRequest{ .Id = Json(2), .IsNotification = false, .Method = "scene.tree", .Params = Json::object(), .TranscriptLine = std::nullopt });
+			server.Pump();
+			const auto reads = server.TakeInProcessResponses(observer);
+			REQUIRE(reads.size() == 1);
+			CHECK(reads.front().contains("result"));
 			server.DisconnectInProcess(observer);
 			editor.GetPlay().OnFixedStep();
 			CHECK(original->GetTick() == tick);
@@ -245,6 +258,51 @@ namespace Engine {
 			const Json replay = CallTestMethod(fixture, "input.replay", Json{ { "path", path }, { "verify", true }, { "strictHash", true } });
 			REQUIRE(result["suites"].size() == 1);
 			CHECK(replay["stateHash"] == result["suites"][0]["finalStateHash"]);
+		}
+
+		TEST_CASE("TestMethods: the editor host's suite sessions own simulation audio time")
+		{
+			// A ScriptedClock suite runs without lockstep, so only PlaySessionSpecification::OwnsAudioTime gives its session the
+			// engine's simulation time; Test.CaptureAudio and the runner's own check both require it (ADR 0015 decision 5).
+			Test::AutomationFixture fixture("TestRunAudioTime", true, AudioEngineSpecification{ .Device = AudioDeviceKind::None, .Decoding = AudioDecoding::Deterministic });
+			CallTestMethod(fixture, "script.write", Json{ { "path", "Assets/Tests/Audio.test.luau" }, { "source", "return Test.Suite('Audio', function() Test.Case('capture', function() local levels = Test.CaptureAudio(2); Test.Expect(levels.Peak == 0) end) end)" } });
+			CallTestMethod(fixture, "project.setSettings", Json{ { "patch", Json{ { "Testing", Json{ { "Suites", Json::array({ Json{ { "Script", "Assets/Tests/Audio.test.luau" }, { "Scene", "" }, { "Clock", Json::array({ 5.0 / 60.0 }) }, { "Modes", Json::array({ "Editor" }) } } }) } } } } } });
+			AudioEngine* audio = fixture.GetEditor().GetEngine().GetAudioEngine();
+			REQUIRE(audio != nullptr);
+			const uint64_t pulled = audio->GetStats().PulledFrames;
+			const Json result = CallTestMethod(fixture, "test.run", Json::object());
+			CHECK(result["passed"] == Json(true));
+			REQUIRE(result["cases"].size() == 1);
+			CHECK(result["cases"][0]["status"] == Json("passed"));
+			CHECK(audio->GetStats().PulledFrames > pulled);
+			CHECK_FALSE(audio->IsSimulationTimeOwned());
+		}
+
+		TEST_CASE("TestMethods: a script test screenshot renders with the project's rendering quality")
+		{
+			Test::EditorTestFixture fixture("TestRunScreenshotQuality");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			std::optional<RenderSnapshot> captured;
+			auto specification = Test::MakeTestServerSpecification();
+			specification.RendererName = "vulkan";
+			specification.Screenshots.View = [&captured](const RenderSnapshot& snapshot, const ViewportScreenshotRequest& request) -> Result<Image>
+			{
+				captured = snapshot;
+				Image image;
+				image.Width = request.Width;
+				image.Height = request.Height;
+				image.Pixels.resize(static_cast<size_t>(request.Width) * request.Height * 4, std::byte{ 0x80 });
+				return image;
+			};
+			Test::AutomationTestClient client(fixture.GetEditor(), std::move(specification));
+			CallTestMethod(client, "project.setSettings", Json{ { "patch", Json{ { "Rendering", Json{ { "ShadowMapSize", 512 }, { "SsaoHalfResolution", true } } } } } });
+			WriteSuite(client, "return Test.Suite('Shot', function() Test.Case('capture', function() Test.Screenshot('Shot') end) end)");
+			const Json result = CallTestMethod(client, "test.run", Json::object());
+			CHECK(result["passed"] == Json(true));
+			REQUIRE(captured.has_value());
+			CHECK(captured->Quality.ShadowMapSize == 512);
+			CHECK(captured->Quality.SsaoHalfResolution);
 		}
 
 		TEST_CASE("TestMethods: run rejects dry runs and invalid limits without starting a suite")

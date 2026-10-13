@@ -8,6 +8,7 @@
 #include <doctest/doctest.h>
 
 #include <algorithm>
+#include <vector>
 
 namespace Engine {
 
@@ -31,6 +32,22 @@ namespace Engine {
 			state.ResetLayout(true);
 			CHECK(state.GetOpenPanels().size() == 6);
 			CHECK(std::find(state.GetOpenPanels().begin(), state.GetOpenPanels().end(), EditorPanel::ProjectLauncher) == state.GetOpenPanels().end());
+		}
+
+		TEST_CASE("EditorUiState: a saved panel set is restored in stable order and the launcher follows the project")
+		{
+			EditorUiState state;
+			const std::vector<EditorPanel> saved = { EditorPanel::Automation, EditorPanel::Inspector, static_cast<EditorPanel>(200),
+				EditorPanel::Inspector, EditorPanel::ProjectLauncher };
+			state.SetOpenPanels(saved, true);
+			REQUIRE(state.GetOpenPanels().size() == 2);
+			CHECK(state.GetOpenPanels()[0] == EditorPanel::Inspector);
+			CHECK(state.GetOpenPanels()[1] == EditorPanel::Automation);
+			state.SetOpenPanels(saved, false);
+			REQUIRE(state.GetOpenPanels().size() == 3);
+			CHECK(state.GetOpenPanels().back() == EditorPanel::ProjectLauncher);
+			state.SetOpenPanels({}, true);
+			CHECK(state.GetOpenPanels().empty());
 		}
 
 		TEST_CASE("EditorUiState: completed frames increase after UI construction")

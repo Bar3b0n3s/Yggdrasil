@@ -5,6 +5,7 @@
 #include "Engine/Core/Base.h"
 #include "Engine/Core/Result.h"
 #include "Engine/Project/ProjectSettings.h"
+#include "Engine/Scene/RenderExtraction.h"
 #include "Engine/Session/PlaySession.h"
 #include "Engine/Session/ReplayPlayer.h"
 #include "Engine/Testing/TestResults.h"
@@ -53,6 +54,8 @@ namespace Engine {
 		uint64_t TimeoutTicks = 0;
 		// Exactly one selected suite. Publication requires fresh ordinary playback with Verify and StrictHash; there is
 		// no unverified-record option. The adapter, not this class, owns the destination path and atomic file write.
+		// The recorded suite runs with its Parameters in the replay header's form (CanonicalizeReplayParameters; Begin
+		// fails with its located Validation error for a float out of the float range).
 		bool Record = false;
 	};
 
@@ -76,10 +79,15 @@ namespace Engine {
 		// suites are lockstep; Clock suites use ScriptedClock. Install testHost before OnCreate/OnStart and retain it
 		// through replacement-VM setup and teardown. Audio decoding is Deterministic from engine construction, including
 		// windowed Editor and a Runtime launched for tests; Device is independent. The caller owns the session exclusively.
+		// The runner verifies that the returned session owns simulation audio time whenever GetAudioEngine is non-null and
+		// fails the suite's setup otherwise. Each suite and replay session starts from the host's test-run cursor baseline
+		// (CursorMode::Normal): a cursor mode a previous suite set never leaks into the next.
 		[[nodiscard]] virtual Result<Scope<PlaySession>> CreateSuiteSession(const TestSuiteSettings& suite,
 			TestSuiteSettings::Mode mode, IPlaySessionTestHook& testHook, IScriptTestHost& testHost) = 0;
 		// Fresh ordinary gameplay VM: no suite collection, test driver or TestHost. OwnsAudioTime=true, lockstep and
-		// live input suppressed. Verification cannot exit the application on Quit; the host retains that request.
+		// live input suppressed, cursor at the test-run baseline. Verification cannot exit the application on Quit; the
+		// host retains that request. A replay that cannot load, start or play becomes failed replay:<path> rows, and a
+		// quit or fatal stop before its FinalTick a failed replay (ReplayPlaybackResult::StopReason); the run continues.
 		[[nodiscard]] virtual Result<Scope<PlaySession>> CreateReplaySession(const ReplayHeader& header, TestSuiteSettings::Mode mode) = 0;
 		// Publishes a borrowed view for UI/automation reads. Null before destruction; the host never advances it from
 		// its ordinary frame loop or lets another writer/driver take over during the runner's exclusive lease.
@@ -91,6 +99,11 @@ namespace Engine {
 		// M14 gates as passes. The host adapts the parent's ScriptApiRegistry snapshot plus other coverage producers.
 		[[nodiscard]] virtual Result<TestCoverageReport> GetCoverage() const = 0;
 	};
+
+	// The view a script test's screenshot (IFeatureTestHost::CaptureScreenshot) extracts from `session` at `width` x `height`:
+	// the primary camera with the session's project rendering quality (ProjectSettings.Rendering; ADR 0017: every capture
+	// path observes it), so the capture matches the game view and viewport.screenshot. Shared by the Editor and Runtime.
+	[[nodiscard]] RenderExtractionRequest MakeTestScreenshotRequest(const PlaySession& session, uint32_t width, uint32_t height);
 
 	// Shared runner core (§11.10), present in Dist. Owns sessions and clocks; uses ScriptEngine opaque references only.
 	// The host adapter supplies exclusivity, disconnect handling and file output. No shell, compiler or RPC dependency.

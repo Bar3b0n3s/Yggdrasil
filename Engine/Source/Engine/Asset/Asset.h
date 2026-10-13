@@ -11,7 +11,7 @@
 namespace Engine {
 
 	// The common base of every loaded asset type (MeshData, TextureData, MaterialData, FontData, SceneData, PrefabData,
-	// EnvironmentData, AudioClipData; the script and replay types join with M13). It records only the asset's AssetType, so
+	// EnvironmentData, AudioClipData, and M13's ScriptData and ReplayData). It records only the asset's AssetType, so
 	// AssetCast can tell the concrete type without RTTI (first-party code never uses dynamic_cast or typeid, §3 rule 5).
 	//
 	// Each derived type declares `static constexpr AssetType StaticType` and passes it to this constructor. The destructor

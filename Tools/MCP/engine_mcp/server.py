@@ -2,7 +2,8 @@
 server API (dynamic tool registration).
 
 Tools:
-  - bridge-local: editor_launch {project, create?, template?, headless?, renderer?}, editor_attach {project?, pid?},
+  - bridge-local: editor_launch {project, create?, template?, headless?, renderer?, recover?} (template: the catalogue's
+    project_create templates), editor_attach {project?, pid?},
     editor_status, editor_shutdown, engine_methods {domain?}, engine_call {method, params} (the escape hatch to every
     method, including project.upgrade);
   - proxied: every method of Tools/MCP/catalog.json (methods flagged exposeAsTool, named domain_verb), listed before any
@@ -116,16 +117,33 @@ def _object_schema(properties: dict[str, Any], required: tuple[str, ...] = ()) -
     return schema
 
 
-def local_tool_schemas() -> dict[str, dict[str, Any]]:
-    """The inputSchema of each bridge-local tool, by name."""
+def project_templates(catalog: list[CatalogTool]) -> list[str]:
+    """The templates project.create accepts, read from the catalogue's project_create schema, so editor_launch's template
+    can never disagree with the editor's; ["Empty"] for a catalogue without that tool."""
+    tool = next((tool for tool in catalog if tool.method == "project.create"), None)
+    template = tool.input_schema.get("properties", {}).get("template") if tool is not None else None
+    values = template.get("enum") if isinstance(template, dict) else None
+    names = [value for value in values if isinstance(value, str)] if isinstance(values, list) else []
+    return names or ["Empty"]
+
+
+def local_tool_schemas(templates: list[str] | None = None) -> dict[str, dict[str, Any]]:
+    """The inputSchema of each bridge-local tool, by name; `templates` are editor_launch's (project_templates of the
+    committed catalogue when omitted)."""
+    if templates is None:
+        templates = project_templates(load_catalog())
     return {
         "editor_launch": _object_schema({
             "project": {"type": "string", "description": "The project directory or its .eproj file"},
             "create": {"type": "boolean", "description": "Create the project first when it does not exist"},
-            "template": {"type": "string", "enum": ["Empty"], "description": "The template of a created project"},
+            "template": {"type": "string", "enum": list(templates), "description": "The template of a created project"},
             "headless": {"type": "boolean", "description": "Run without a window (default true)"},
             "renderer": {"type": "string", "enum": ["vulkan", "none"],
                          "description": "Default none; vulkan for the screenshot tools (needs a GPU)"},
+            "recover": {"type": "boolean",
+                        "description": "Adopt the project's newest valid autosave (project.open {recover: true}), as "
+                                       "after EditorCrashed with autosaveAvailable; the result reports "
+                                       "recoveryAvailable and recovered"},
         }, ("project",)),
         "editor_attach": _object_schema({
             "project": {"type": "string", "description": "Attach to the editor serving this project"},
@@ -148,7 +166,7 @@ def local_tool_schemas() -> dict[str, dict[str, Any]]:
 
 _LOCAL_TOOL_DESCRIPTIONS = {
     "editor_launch": "Starts a headless editor on a project, or attaches to the editor already serving it; creates the "
-                     "project first with create: true.",
+                     "project first with create: true; reports an available autosave and adopts it with recover: true.",
     "editor_attach": "Attaches to a running editor with automation, by project or process id.",
     "editor_status": "Reports the connected editor: process, project, versions and whether it crashed.",
     "editor_shutdown": "Shuts down an editor this bridge launched (an attached editor is only disconnected).",
@@ -294,11 +312,18 @@ class Bridge:
         request = LaunchRequest(project=Path(project), create=bool(arguments.get("create", False)),
                                 template=str(arguments.get("template", "Empty")),
                                 headless=bool(arguments.get("headless", True)),
-                                renderer=str(arguments.get("renderer", "none")))
+                                renderer=str(arguments.get("renderer", "none")),
+                                recover=bool(arguments.get("recover", False)))
         self.connection = self.launcher.launch(request)
         status = self.connection.describe()
         verb = "Launched" if self.connection.supervised else "Attached to the running"
-        return status, f"{verb} editor (pid {status['pid']}) on {status['project'] or 'no project'}", False
+        text = f"{verb} editor (pid {status['pid']}) on {status['project'] or 'no project'}"
+        if status.get("recovered"):
+            text += "; recovered its autosave as an unsaved scene"
+        elif status.get("recoveryAvailable"):
+            text += ("; an autosave is available: call editor_shutdown, then editor_launch with recover: true to adopt "
+                     "it")
+        return status, text, False
 
     def editor_attach(self, arguments: dict[str, Any]) -> tuple[dict[str, Any], str, bool]:
         if self.connection is not None and self.connection.is_alive():
@@ -414,7 +439,7 @@ def _build_server(bridge: Bridge) -> tuple[Any, Bridge]:
     import mcp_types as types
     from mcp.server import Server, ServerRequestContext
 
-    schemas = local_tool_schemas()
+    schemas = local_tool_schemas(project_templates(list(bridge.catalog.values())))
     tools = [types.Tool(name=name, description=_LOCAL_TOOL_DESCRIPTIONS[name], input_schema=schemas[name])
              for name in LOCAL_TOOL_NAMES]
     tools += [types.Tool(name=tool.name, description=tool.description, input_schema=tool.input_schema)

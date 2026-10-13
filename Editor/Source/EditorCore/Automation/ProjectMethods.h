@@ -13,7 +13,7 @@
 #include <vector>
 
 // project.* (Architecture §13.5): create, open, save, info, getSettings, setSettings, validate, upgrade (M4) and
-// refreshAssets (M6); project.export arrives with M7. Conventions as in MethodRegistry.h (JSON key = member
+// refreshAssets (M6); project.export (M7) is in ExportMethods.h. Conventions as in MethodRegistry.h (JSON key = member
 // name with a lower-case first letter unless commented).
 
 namespace Engine {

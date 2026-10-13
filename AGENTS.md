@@ -20,7 +20,7 @@ A production-grade C++23 3D game engine with an editor, a standalone runtime and
 | `Editor/` | `EditorCore` (UI-free static library) and `Editor` (executable); include root `Editor/Source` |
 | `Runtime/` | The exported-game executable |
 | `Tests/` | doctest executable (`Source/` mirrors the include roots), fixtures in `Data/` (asset fixtures in `Data/Assets/`, their generators in `Data/Generate/`), goldens, Python automation tests |
-| `Resources/` | Engine resources: `Shaders/` (Slang and `Shaders.json`), environments, fonts, templates |
+| `Resources/` | Engine resources: `Shaders/` (Slang and `Shaders.json`), `Scripting/Engine.d.luau` (generated Luau declarations, `GenerateDocs.py`), environments, fonts, templates |
 | `Scripts/` | Python entry points and shared helpers in `Lib/`. Toolchain pins: `Lib/Toolchain.json` (Vulkan SDK, slangc), `Lib/toolchain.py` (MSVC, GCC, Clang, Xcode, clang-format and clang-tidy versions), `Lib/premake.py` (premake release and SHA-256) |
 | `Tools/` | `Automation/engine_client.py` (the standard-library Python client of the automation protocol, Architecture §13.2) and `MCP/` (the MCP bridge, §13.8: `run.py`, `engine_mcp/`, `catalog.json` regenerated with `Editor --headless --renderer none --dump-reference <dir>`, the hash-pinned `requirements.lock` and `tests/`; `Setup.py` creates its `.venv`) |
 | `Projects/` | FeatureTest and the demo games (M14+) |
@@ -63,7 +63,7 @@ Run every command from the repository root. Windows uses `python`; Linux and mac
 | Lint | `python Scripts/Lint.py` (`--self-test` proves every seeded fixture in `Tests/Data/Lint/` still fails; `--mode regex` forces the checkers that do not need clang-tidy and clang-query; `--allow-contract-stubs` is contract mode) |
 | Check build configuration (ABI defines, Jolt instruction set, FP model) | `python Scripts/CheckBuildConfig.py` |
 | Compile shaders only | `python Scripts/CompileShaders.py --config Debug` |
-| Generate scripting and automation references | `python Scripts/GenerateDocs.py --config Debug` (build the editor first; `--check` compares without rewriting) |
+| Generate scripting and automation references | `python Scripts/GenerateDocs.py --config Debug` (build the editor first; writes `Docs/Reference/*`, `Resources/Scripting/Engine.d.luau` and `Tools/MCP/catalog.json`; `--check` compares without rewriting and is part of the commit gate) |
 | Commit gate | `python Scripts/PreCommit.py` (`--contract` only for a milestone's contract commit; `--gpu-optional` on a machine without a usable Vulkan device) |
 | Full CI | `python Scripts/CI.py` (`--stages build,unit` for a subset; `--contract` as for PreCommit; `--gpu-optional` lets the gpu, golden and automation stages pass without a device, as on the hosted Windows and macOS runners, and makes the bake stage bake without the built-in environments (`--renderer none`) and end as a warning) |
 
@@ -98,7 +98,7 @@ Run every command from the repository root. Windows uses `python`; Linux and mac
 
 ## Commit gate (Architecture §15.9)
 
-1. `python Scripts/PreCommit.py` is green: generate, the static checks (`CheckBuildConfig.py` on the workspace and its fixtures, `Lint.py`, `Lint.py --self-test`, the format check, the fixture generators' `--check` and `FetchAssets.py defaults --check`; the same list as `CI.py`'s lint stage), Debug build, and the unit, gpu, golden, feature and automation suites in Debug (the automation suite drives the Debug editor from the MCP virtual environment that `Setup.py` creates). The gpu, golden and automation suites require a Vulkan device (`--require-gpu`); only a machine without one passes `--gpu-optional`.
+1. `python Scripts/PreCommit.py` is green: generate, the static checks (`CheckBuildConfig.py` on the workspace and its fixtures, `Lint.py`, `Lint.py --self-test`, the format check, the fixture generators' `--check` and `FetchAssets.py defaults --check`; the same list as `CI.py`'s lint stage), Debug build, the references check (`GenerateDocs.py --check --config Debug`: `Docs/Reference/*`, `Resources/Scripting/Engine.d.luau` and `Tools/MCP/catalog.json` must match the built editor), and the unit, gpu, golden, feature and automation suites in Debug (the automation suite drives the Debug editor from the MCP virtual environment that `Setup.py` creates). The gpu, golden and automation suites require a Vulkan device (`--require-gpu`); only a machine without one passes `--gpu-optional`.
    - **Strict by default.** Lint rejects `ENGINE_CONTRACT_STUB` and any `doctest::skip` outside the child-process targets (`Test::ChildTargetSuite`), and the unit suite fails on, and names, any other skipped test case.
    - **Contract mode.** Only the commit of a milestone's contract task runs `python Scripts/PreCommit.py --contract`, which allows both and says so in its summary. Every other commit is strict.
 2. **Recorded review.** Run the `commit-review` skill on the staged diff against `Docs/ReviewChecklist.md`. Any of these blocks the commit:
@@ -122,7 +122,7 @@ Milestone commits also need the full `python Scripts/CI.py` green. Push to `orig
   - camelCase: locals and parameters.
   - Macros start with `ENGINE_`.
   - Files are PascalCase after their primary type; test files are named `<Unit>Tests.cpp`.
-- **Namespaces:** `namespace Engine` everywhere, including Editor, Runtime and Tests. Sub-namespaces are limited to `Utils`, `Detail`, `Automation`, `ScriptBindings`, `Lua` (checked Scripting helpers only, ADR 0019) and `Test`.
+- **Namespaces:** `namespace Engine` everywhere, including Editor, Runtime and Tests. Sub-namespaces are limited to `Utils`, `Detail`, `Automation`, `ScriptBindings`, `Lua` (checked Scripting helpers and protected VM entry points only, `Docs/Decisions/0021-review-fixes.md`) and `Test`.
 - **Includes:**
   - Order: `EnginePCH.h` (first line, Engine `.cpp` files only), then the file's own header, then repository headers (quoted, full path from the include root), then third-party `<...>`, then standard `<...>`.
   - Headers are self-contained, never include a PCH, and never use relative paths.
@@ -182,7 +182,7 @@ The same inputs and seed must give the same state hash in Debug, Release and Dis
   - Tests use doctest, in `Tests/Source/<path of the unit>Tests.cpp`, inside `namespace Engine`.
   - Each file wraps its cases in `TEST_SUITE("<Module>")`.
   - Case names have the form `TEST_CASE("<Unit>: <present-tense behaviour>")`. Roadmap acceptance names are used verbatim.
-- **Deterministic:** no sleeps or wall-clock timing, fixed seeds, no network, files only in a per-test temporary directory, and no dependence on test order. The wall-clock exceptions are the windowed child "FrameLoop: a minimized window uses little CPU time per second" (ADR 0005 decision 13) and, in the Python suite, `test_busy_watchdog_reports_phase` (ADR 0008 decision 15) and `test_headless_play_without_lockstep_is_throttled` (ADR 0012 decision 3). Bounded waits are not timing (ADR 0008 decision 15): waiting for another thread's or process's state with a generous deadline that only bounds a failure (`Test::WaitUntil`, a Python poll of another process), or a client timeout whose peer never answers, as long as no passing outcome depends on how long anything takes. A spin count never bounds a wait.
+- **Deterministic:** no sleeps or wall-clock timing, fixed seeds, no network, files only in a per-test temporary directory, and no dependence on test order. The wall-clock exceptions are the windowed child "FrameLoop: a minimized window uses little CPU time per second" (ADR 0005 decision 13) and, in the Python suite, `test_busy_watchdog_reports_phase` (ADR 0008 decision 15), `test_headless_play_without_lockstep_is_throttled` (ADR 0012 decision 3) and `test_runaway_script_busy_watchdog` (`Docs/Decisions/0021-review-fixes.md`). Bounded waits are not timing (ADR 0008 decision 15): waiting for another thread's or process's state with a generous deadline that only bounds a failure (`Test::WaitUntil`, a Python poll of another process), or a client timeout whose peer never answers, as long as no passing outcome depends on how long anything takes. A spin count never bounds a wait.
 - **Windowed children** (`--windowed-child`) need a display; on Linux without a desktop, run the unit suite inside Xvfb with a window manager, as the `build-and-test` skill shows.
 - **No audio device.** Every Editor or Runtime process a test starts is headless or passes `--audio-device none` (`Test::WithoutAudioDevice` in C++), and in-process contexts have an `AudioEngine` only when a test asks for one, without a device; only miniaudio's Null backend runs as a device, in the device tests (`Docs/Decisions/0015-m12-decisions.md` decision 23).
 - **Public API only.** Expected error logs are declared with `Test::ExpectLog`. Expected asserts are death tests (`ENGINE_DEATH_TEST`).

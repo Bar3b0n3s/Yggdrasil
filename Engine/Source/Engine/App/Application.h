@@ -117,7 +117,8 @@ namespace Engine {
 	//   --expect-no-gpu-errors  ExpectNoGpuErrors = true
 	//   --vulkan-api <version>  Graphics.MaxApiVersion: "1.3" or "1.4" (§8.1)
 	//   --gpu <index|name>      Graphics.GpuOverride (§8.1; ENGINE_GPU when absent)
-	//   --gpu-inject-fault <f>  Graphics.InjectFault: "device-lost", "oom-texture" or "hang" (§8.14 item 8)
+	//   --gpu-inject-fault <f>  Graphics.InjectFault: "device-lost", "oom-texture", "hang" or "oom-specialization" (§8.14
+	//                           item 8)
 	//   --audio-device <kind>   Audio = GetDefaultAudioSpecification(Window) with Device System for "system", Null for
 	//                           "null" or None for "none" (M12: windowed processes that tests start never open the
 	//                           machine's audio device, §15.1 T1); the decoding mode stays the window mode's

@@ -57,6 +57,19 @@ namespace Engine {
 		REQUIRE(FileSystem::WriteFileAtomic(path, std::as_bytes(std::span(text.data(), text.size()))).has_value());
 	}
 
+	// The open-panel line ("Panels=...") of the imgui.ini at `layout`. Dear ImGui writes the file in text mode, so its lines
+	// end in CRLF on Windows.
+	static std::string ReadSavedLayoutPanels(const std::filesystem::path& layout)
+	{
+		const std::string text = FileSystem::ReadText(layout).value_or("");
+		constexpr std::string_view Section = "[EnginePanels][Open]";
+		const size_t section = text.find(Section);
+		REQUIRE_MESSAGE(section != std::string::npos, text);
+		const size_t line = text.find_first_not_of("\r\n", section + Section.size());
+		REQUIRE(line != std::string::npos);
+		return text.substr(line, text.find_first_of("\r\n", line) - line);
+	}
+
 	// RunEditor for a rendering editor started by a GPU test: with Test::GetGpuApplicationArguments (validation and
 	// --expect-no-gpu-errors).
 	static Result<ProcessResult> RunRenderingEditor(const Test::TempDirectory& userData, std::vector<std::string> arguments)
@@ -127,6 +140,35 @@ end)
 			const auto passed = RunEditor(fixture.GetDirectory(), arguments, std::chrono::seconds(120));
 			REQUIRE(passed);
 			CHECK_MESSAGE(passed->ExitCode == ExitCode::Success, passed->StandardError);
+		}
+
+		TEST_CASE("EditorApp: --run-tests runs in a windowed editor")
+		{
+			// ADR 0019 decision 6: the normal windowed editor constructs its AudioEngine with deterministic decoding, so
+			// test.run (behind --run-tests), test.list and an attached agent's runs work there, not only headless.
+			Test::EditorTestFixture fixture("RunTestsWindowed");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			const auto projectFile = fixture.GetEditor().GetProject().GetProjectFile();
+			ProjectSettings settings = fixture.GetEditor().GetProject().GetSettings();
+			TestSuiteSettings suite;
+			suite.Script = "Assets/Tests/Windowed.test.luau";
+			settings.Testing.Suites.push_back(std::move(suite));
+			const auto project = ProjectSerializer::SaveToString(settings, fixture.GetEngine().GetTypeRegistry());
+			REQUIRE(project);
+			REQUIRE(fixture.GetEditor().CloseProject());
+			WriteProcessTestFile(projectFile, *project);
+			WriteProcessTestFile(projectFile.parent_path() / "Assets/Tests/Windowed.test.luau", R"(
+return Test.Suite("Windowed", function()
+	Test.Case("runs", function() Test.WaitTicks(2) Test.Expect(true) end)
+end)
+)");
+			const auto result = RunEditor(fixture.GetDirectory(), { "--renderer", "none", "--project", Test::PathToUtf8(projectFile), "--run-tests" }, std::chrono::seconds(120));
+			REQUIRE_MESSAGE(result.has_value(), result.error().ToString());
+			INFO("editor stderr: ", result->StandardError);
+			CHECK(result->StandardError.contains("Process context ready: Windowed"));
+			CHECK(result->ExitCode == ExitCode::Success);
+			CHECK_FALSE(result->StandardError.contains("deterministic audio decoding"));
 		}
 
 		TEST_CASE("EditorApp: first save of a recovered untitled scene removes only its generation")
@@ -384,8 +426,9 @@ end)
 			// The frame loop never throttles a windowed run; presenting paces it (M5).
 			CHECK(result->StandardError.contains("Frame loop started: System clock, 60 Hz, unthrottled"));
 			// The audio engine runs without a device by configuration: it neither opened one nor tried to (AudioEngine::Create
-			// logs all three at startup).
-			CHECK(result->StandardError.contains("Audio engine: no device, Threaded decoding"));
+			// logs all three at startup). Every editor decodes deterministically from startup, the windowed one included
+			// (ADR 0019 decision 6), so its test runs need no other resource manager.
+			CHECK(result->StandardError.contains("Audio engine: no device, Deterministic decoding"));
 			CHECK_FALSE(result->StandardError.contains("Audio engine: device"));
 			CHECK_FALSE(result->StandardError.contains("No audio device could be created"));
 		}
@@ -474,6 +517,63 @@ end)
 			CHECK(FileSystem::ReadText(library / "Editor").value_or("") == "Preserve this file");
 			// The partially initialized host released its project lock as well as UI/GPU resources.
 			CHECK(ProjectLock::Acquire(library / "Editor.lock").has_value());
+		}
+
+		TEST_CASE("EditorApp: shutdown stores the project layout with its open panels before releasing the project and leaves the user-data layout alone"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			if (!Test::ProbeGpuForProcess())
+				return;
+			Test::EditorTestFixture fixture("EditorLayoutShutdown");
+			const auto projectFile = CreateProcessTestProject(fixture, "LayoutShutdown");
+			const auto projectLayout = projectFile.parent_path() / "Library" / "Editor" / "imgui.ini";
+			const auto userLayout = fixture.GetDirectory() / ENGINE_PRODUCT_NAME / "Editor" / "imgui.ini";
+			// The launcher's layout. The project's layout replaces it before the first frame, so it is never loaded or saved.
+			const std::string launcherLayout = "[EnginePanels][Open]\nPanels=Stats\n\n";
+			REQUIRE(FileSystem::CreateDirectories(userLayout.parent_path()).has_value());
+			WriteProcessTestFile(userLayout, launcherLayout);
+			const auto runEditor = [&fixture, &projectFile]()
+			{
+				const auto result = RunRenderingEditor(fixture.GetDirectory(), { "--headless", "--project", Test::PathToUtf8(projectFile), "--frames", "3" });
+				REQUIRE_MESSAGE(result.has_value(), result.error().ToString());
+				INFO("editor stderr: ", result->StandardError);
+				CHECK(result->ExitCode == ExitCode::Success);
+				CHECK(Test::FindGpuMessageLines(result->StandardError).empty());
+			};
+			runEditor();
+			CHECK(FileSystem::ReadText(projectLayout).value_or("").contains("[Window]"));
+			const std::string saved = ReadSavedLayoutPanels(projectLayout);
+			CHECK(saved == "Panels=SceneHierarchy,Inspector,SceneViewport,GameViewport,ContentBrowser,Console");
+			// Nothing after the project's layout is saved anywhere: the launcher's layout is unchanged.
+			CHECK(FileSystem::ReadText(userLayout).value_or("") == launcherLayout);
+			CHECK(ProjectLock::Acquire(projectFile.parent_path() / "Library" / "Editor.lock").has_value());
+
+			// The next session opens the saved panels and saves them again at its shutdown.
+			std::string layout = FileSystem::ReadText(projectLayout).value_or("");
+			const size_t panels = layout.find(saved);
+			REQUIRE(panels != std::string::npos);
+			layout.replace(panels, saved.size(), "Panels=Automation,Console");
+			WriteProcessTestFile(projectLayout, layout);
+			runEditor();
+			CHECK(ReadSavedLayoutPanels(projectLayout) == "Panels=Console,Automation");
+			CHECK(FileSystem::ReadText(userLayout).value_or("") == launcherLayout);
+		}
+
+		TEST_CASE("EditorApp: a launcher-state editor keeps its open panels in the user-data layout across a restart"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			if (!Test::ProbeGpuForProcess())
+				return;
+			Test::TempDirectory userData("EditorLauncherLayout");
+			const auto userLayout = userData / ENGINE_PRODUCT_NAME / "Editor" / "imgui.ini";
+			REQUIRE(FileSystem::CreateDirectories(userLayout.parent_path()).has_value());
+			WriteProcessTestFile(userLayout, "[EnginePanels][Open]\nPanels=Stats,Console\n\n");
+			const auto result = RunRenderingEditor(userData, { "--headless", "--frames", "3" });
+			REQUIRE_MESSAGE(result.has_value(), result.error().ToString());
+			INFO("editor stderr: ", result->StandardError);
+			CHECK(result->ExitCode == ExitCode::Success);
+			CHECK(Test::FindGpuMessageLines(result->StandardError).empty());
+			CHECK(ReadSavedLayoutPanels(userLayout) == "Panels=Console,Stats");
 		}
 	}
 

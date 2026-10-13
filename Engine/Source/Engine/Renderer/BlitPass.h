@@ -9,8 +9,8 @@
 // The blit of §8.3 pass 15 ("ImGui or blit"): draws a texture (the SceneRenderer's LdrColor, RGBA8_UNORM with
 // display-encoded values) into a framebuffer of another format and size, the swapchain's BGRA8_UNORM or an RGBA8_UNORM
 // offscreen target, with one fullscreen triangle sampled through LinearClamp, values copied unconverted (both sides hold
-// display-encoded values, §8.9). The Runtime presents its game view with it (Dist has no ImGui), and the editor draws the
-// play session's game view under its UI until the viewport panels arrive (M10). Frozen by the M7 contract
+// display-encoded values, §8.9). The Runtime presents its game view with it (Dist has no ImGui); the editor shows its
+// views as ImGui images in the viewport panels (M10) instead. Frozen by the M7 contract
 // (Docs/Decisions/0012-m7-decisions.md decision 7).
 //
 // The pipeline is created for one framebuffer format at Create (§8.12: pipelines at startup); the Runtime's swapchain

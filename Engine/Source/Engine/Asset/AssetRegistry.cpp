@@ -9,6 +9,7 @@
 #include <format>
 #include <set>
 #include <tuple>
+#include <utility>
 
 namespace Engine {
 
@@ -324,7 +325,7 @@ namespace Engine {
 		{
 			return candidates[left].MetaPath < candidates[right].MetaPath;
 		});
-		m_Records.clear();
+		const std::map<AssetHandle, AssetRecord> previous = std::exchange(m_Records, {});
 		m_SourcePaths.clear();
 		m_SubAssets.clear();
 		for (const size_t index : keepers)
@@ -353,6 +354,8 @@ namespace Engine {
 			}
 			Insert(std::move(record));
 		}
+		if (m_Records != previous)
+			++m_Revision.Value;
 
 		// Type/importer mismatches (registered all the same: the handle stays valid) and orphan dependencies.
 		for (const auto& [handle, record] : m_Records)
@@ -555,6 +558,7 @@ namespace Engine {
 	{
 		ENGINE_TRY(CheckInsertable(record, AssetHandle()));
 		Insert(std::move(record));
+		++m_Revision.Value;
 		return {};
 	}
 
@@ -566,6 +570,7 @@ namespace Engine {
 		ENGINE_TRY(CheckInsertable(record, handle));
 		Erase(handle);
 		Insert(std::move(record));
+		++m_Revision.Value;
 		return {};
 	}
 
@@ -574,6 +579,7 @@ namespace Engine {
 		if (Find(handle) == nullptr)
 			return MakeError(ErrorCode::NotFound, "no registered .meta has handle {}", handle.ToString());
 		Erase(handle);
+		++m_Revision.Value;
 		return {};
 	}
 
@@ -594,6 +600,7 @@ namespace Engine {
 		record.SourcePath = newSourcePath;
 		record.MetaPath = std::move(*metaPath);
 		m_SourcePaths.emplace(newSourcePath, handle);
+		++m_Revision.Value;
 		return {};
 	}
 

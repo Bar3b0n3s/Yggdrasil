@@ -805,7 +805,7 @@
 									"type": "string"
 								},
 								"position": {
-									"description": "mouseMove (required), mouseButton (optional): [x, y] in window coordinates.",
+									"description": "mouseMove (required), mouseButton (optional): [x, y] in view coordinates, the pixels of the session's view (the game view's image in ordinary play; the project's Window.Width x Window.Height in lockstep, recording, replay and test sessions), origin top-left.",
 									"type": "array",
 									"prefixItems": [
 										{
@@ -1131,7 +1131,7 @@
 									"type": "string"
 								},
 								"position": {
-									"description": "mouseMove (required), mouseButton (optional): [x, y] in window coordinates.",
+									"description": "mouseMove (required), mouseButton (optional): [x, y] in view coordinates, the pixels of the session's view (the game view's image in ordinary play; the project's Window.Width x Window.Height in lockstep, recording, replay and test sessions), origin top-left.",
 									"type": "array",
 									"prefixItems": [
 										{

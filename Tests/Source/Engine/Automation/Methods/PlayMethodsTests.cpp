@@ -11,11 +11,13 @@
 #include "Engine/Session/PlaySession.h"
 #include "Support/AutomationTestClient.h"
 #include "Support/EditorTestFixture.h"
+#include "Support/ExpectLog.h"
 
 #include <nlohmann/json.hpp>
 
 #include <array>
 #include <chrono>
+#include <format>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -153,6 +155,49 @@ namespace Engine {
 			const Result<Json> edit = fixture.Call("play.state", Json::object());
 			REQUIRE(edit.has_value());
 			CHECK((*edit)["state"] == Json("Edit"));
+		}
+
+		TEST_CASE("PlayMethods: play.state reports the structured memory stop of a second breach")
+		{
+			// §11.1: a second soft breach stops the session with a structured memory error that play.state reports, and
+			// play.step and play.resume then say why instead of failing obscurely.
+			Test::AutomationFixture fixture("PlayStateMemoryStop");
+			const std::string leak = "local Leak = {}\nfunction Leak:OnFixedUpdate()\n\tlocal retained = string.rep(\"x\", 2 * 1024 * 1024)\n\twhile true do retained = retained end\nend\nreturn Script.Define(\"Leak\", Leak)\n";
+			for (const std::string_view name : { "First", "Second" })
+			{
+				const std::string path = std::format("Assets/Scripts/Leak{}.luau", name);
+				REQUIRE(fixture.Call("script.write", Json{ { "path", path }, { "source", leak } }).has_value());
+				REQUIRE(fixture.Call("entity.create", Json{ { "name", name }, { "components", Json{ { "Script", Json{ { "Script", path } } } } } }).has_value());
+			}
+			REQUIRE(fixture.Call("project.setSettings", Json{ { "patch", Json{ { "Scripting", Json{ { "MemoryLimitMB", 1 }, { "PauseOnError", false } } } } } }).has_value());
+			REQUIRE(fixture.Call("play.start", Json{ { "lockstep", true } }).has_value());
+			const Result<Json> running = fixture.Call("play.state", Json::object());
+			REQUIRE(running.has_value());
+			CHECK((*running)["stopped"] == Json(false));
+			CHECK((*running)["stopError"].is_null());
+			{
+				Test::ExpectLog breach(LogLevel::Error, "memory limit");
+				const Result<Json> stepped = fixture.Call("play.step", Json{ { "ticks", 1 }, { "render", "none" } });
+				REQUIRE_MESSAGE(stepped.has_value(), stepped.error().ToString());
+			}
+			const Result<Json> state = fixture.Call("play.state", Json::object());
+			REQUIRE(state.has_value());
+			CHECK((*state)["state"] == Json("Paused"));
+			CHECK((*state)["stopped"] == Json(true));
+			const Json& error = (*state)["stopError"];
+			CHECK(error["kind"] == Json("memory"));
+			CHECK(error["script"] == Json("Assets/Scripts/LeakSecond.luau"));
+			CHECK(error["entity"]["name"] == Json("Second"));
+			CHECK(error["callback"] == Json("OnFixedUpdate"));
+			const Json step = fixture.Request("play.step", Json{ { "ticks", 1 } });
+			CHECK(GetErrorCode(step) == "InvalidState");
+			CHECK(step.dump().find("fatal memory script error") != std::string::npos);
+			REQUIRE(fixture.Call("play.pause", Json::object()).has_value());
+			CHECK(GetErrorCode(fixture.Request("play.resume", Json::object())) == "InvalidState");
+			const Result<Json> after = fixture.Call("play.state", Json::object());
+			REQUIRE(after.has_value());
+			CHECK((*after)["tick"] == (*state)["tick"]);
+			REQUIRE(fixture.Call("play.stop", Json::object()).has_value());
 		}
 
 		TEST_CASE("PlayMethods: play.step runs its ticks and reports the tick and the state hash")

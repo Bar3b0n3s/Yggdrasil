@@ -99,7 +99,6 @@ namespace Engine {
 			DeviceCandidate integrated = MakeAcceptableCandidate(1, "Integrated", GpuDeviceType::Integrated);
 			integrated.HostImageCopy = true;
 			integrated.B10G11R11StorageSupported = true;
-			integrated.DepthClamp = true;
 			integrated.DeviceFault = true;
 			integrated.FillModeNonSolid = true;
 			const DeviceCandidate cpu = MakeAcceptableCandidate(2, "Cpu", GpuDeviceType::Cpu);
@@ -114,17 +113,14 @@ namespace Engine {
 
 			const std::optional<int32_t> hostCopyScore = ScoreDevice(WithFeature(base, &DeviceCandidate::HostImageCopy));
 			const std::optional<int32_t> storageScore = ScoreDevice(WithFeature(base, &DeviceCandidate::B10G11R11StorageSupported));
-			const std::optional<int32_t> depthClampScore = ScoreDevice(WithFeature(base, &DeviceCandidate::DepthClamp));
 			const std::optional<int32_t> deviceFaultScore = ScoreDevice(WithFeature(base, &DeviceCandidate::DeviceFault));
 			const std::optional<int32_t> wireframeScore = ScoreDevice(WithFeature(base, &DeviceCandidate::FillModeNonSolid));
 			REQUIRE(hostCopyScore.has_value());
 			REQUIRE(storageScore.has_value());
-			REQUIRE(depthClampScore.has_value());
 			REQUIRE(deviceFaultScore.has_value());
 			REQUIRE(wireframeScore.has_value());
 			CHECK(*hostCopyScore > *storageScore);
-			CHECK(*storageScore > *depthClampScore);
-			CHECK(*depthClampScore > *deviceFaultScore);
+			CHECK(*storageScore > *deviceFaultScore);
 			CHECK(*deviceFaultScore > *wireframeScore);
 			CHECK(*wireframeScore > *discreteScore);
 

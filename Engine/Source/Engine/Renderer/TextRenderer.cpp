@@ -1,6 +1,5 @@
 #include "EnginePCH.h"
 #include "Engine/Renderer/TextRenderer.h"
-#include "Engine/Renderer/RenderStats.h"
 
 #include "Engine/Asset/AssetDiagnostic.h"
 #include "Engine/Asset/AssetManager.h"
@@ -10,6 +9,7 @@
 #include "Engine/Core/Log.h"
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Graphics/HostImageUpload.h"
+#include "Engine/Renderer/RenderStats.h"
 #include "Engine/Renderer/SceneTargetFormats.h"
 #include "Engine/Renderer/TextLayout.h"
 #include "Shared/TextVertex.h"

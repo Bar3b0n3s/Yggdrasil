@@ -280,6 +280,100 @@ namespace Engine {
 			server.DisconnectInProcess(resumed);
 		}
 
+		TEST_CASE("ReplayMethods: a recording starts from its parameters as the replay stores them, so the strict hash reproduces")
+		{
+			Test::AutomationFixture fixture("RecordParameterForm");
+			CallReplayMethod(fixture, "script.write", Json{ { "path", "Assets/Scripts/Namer.luau" }, { "source", "local Namer = {}\nfunction Namer:OnCreate() self.Entity.Name = \"ratio=\" .. tostring(Scene.GetLoadParameters().ratio) end\nreturn Script.Define(\"Namer\", Namer)\n" } });
+			CallReplayMethod(fixture, "entity.create", Json{ { "name", "Namer" }, { "components", Json{ { "Script", Json{ { "Script", "Assets/Scripts/Namer.luau" } } } } } });
+			CallReplayMethod(fixture, "scene.save");
+			// 0.123456789 is not a float; the header stores the float form, which the recorded session must use too.
+			CallReplayMethod(fixture, "input.record", Json{ { "action", "start" }, { "parameters", Json{ { "ratio", 0.123456789 } } } });
+			CallReplayMethod(fixture, "play.step", Json{ { "ticks", 2 }, { "render", "none" } });
+			const Json saved = CallReplayMethod(fixture, "input.record", Json{ { "action", "stop" }, { "path", "Assets/Tests/Ratio.replay" } });
+			const Json recordedName = CallReplayMethod(fixture, "script.eval", Json{ { "context", "play" }, { "code", "return Scene.FindByName('ratio=0.12345679') ~= nil" } });
+			CHECK(recordedName["value"] == Json(true));
+			const Json replayed = CallReplayMethod(fixture, "input.replay", Json{ { "path", "Assets/Tests/Ratio.replay" }, { "verify", true }, { "strictHash", true } });
+			CHECK(replayed["passed"] == Json(true));
+			CHECK(replayed["hashMatched"] == Json(true));
+			CHECK(replayed["stateHash"] == saved["stateHash"]);
+			const ReplayDocument replay = ReadRecordedReplay(fixture.GetEditor(), "Assets/Tests/Ratio.replay");
+			CHECK(replay.Header.Parameters.Get() == JsonReader::Parse(R"({"ratio":0.12345679})").value_or(Json()));
+
+			// A float the replay header cannot store is refused before the recording starts, located at its member.
+			const Json refused = fixture.Request("input.record", Json{ { "action", "start" }, { "restart", true }, { "parameters", Json{ { "big", 1e39 } } } });
+			REQUIRE_MESSAGE(refused.contains("error"), refused.dump());
+			CHECK(refused["error"]["data"]["errorCode"] == Json("InvalidArgument"));
+			CHECK(refused.dump().find("/parameters/big") != std::string::npos);
+			CHECK(CallReplayMethod(fixture, "play.state")["recording"] == Json(false));
+		}
+
+		TEST_CASE("ReplayMethods: a play-scene edit during a recording invalidates it and Stop writes nothing")
+		{
+			Test::AutomationFixture fixture("RecordPlaySceneEdit");
+			CallReplayMethod(fixture, "entity.create", Json{ { "name", "Ball" } });
+			CallReplayMethod(fixture, "scene.save");
+			CallReplayMethod(fixture, "input.record", Json{ { "action", "start" } });
+			CallReplayMethod(fixture, "entity.update", Json{ { "entity", "/Ball" }, { "target", "play" }, { "name", "Moved" } });
+			CallReplayMethod(fixture, "play.step", Json{ { "ticks", 3 }, { "render", "none" } });
+			const Json stopped = fixture.Request("input.record", Json{ { "action", "stop" }, { "path", "Assets/Tests/Edited.replay" } });
+			REQUIRE_MESSAGE(stopped.contains("error"), stopped.dump());
+			CHECK(stopped["error"]["data"]["errorCode"] == Json("InvalidState"));
+			CHECK(stopped.dump().find("play scene was edited") != std::string::npos);
+			const auto output = VfsPath::Create("project", "Assets/Tests/Edited.replay");
+			REQUIRE(output.has_value());
+			CHECK_FALSE(fixture.GetEditor().GetVfs().Exists(*output));
+			// A dry run takes its edit back, so it never invalidates a recording.
+			CallReplayMethod(fixture, "input.record", Json{ { "action", "start" }, { "restart", true } });
+			CallReplayMethod(fixture, "entity.update", Json{ { "entity", "/Ball" }, { "target", "play" }, { "name", "Preview" }, { "dryRun", true } });
+			CallReplayMethod(fixture, "play.step", Json{ { "ticks", 1 }, { "render", "none" } });
+			CallReplayMethod(fixture, "input.record", Json{ { "action", "stop" }, { "path", "Assets/Tests/DryRun.replay" } });
+		}
+
+		TEST_CASE("ReplayMethods: the recording owner restarts an active or invalidated recording")
+		{
+			Test::AutomationFixture fixture("RecordOwnerRestart");
+			CallReplayMethod(fixture, "input.record", Json{ { "action", "start" } });
+			CallReplayMethod(fixture, "play.step", Json{ { "ticks", 2 }, { "render", "none" } });
+			// §13.6: while playing, start with restart:true restarts at tick 0, also over the owner's own active recording.
+			const Json restarted = CallReplayMethod(fixture, "input.record", Json{ { "action", "start" }, { "restart", true } });
+			CHECK(restarted["tick"] == Json(0));
+			CHECK(CallReplayMethod(fixture, "play.state")["recording"] == Json(true));
+			// An invalidated Stop ends the recording, so admission recovers without play.stop.
+			CallReplayMethod(fixture, "script.eval", Json{ { "context", "play" }, { "code", "Scene.CreateEntity('External'); return true" } });
+			CHECK(fixture.Request("input.record", Json{ { "action", "stop" }, { "path", "Assets/Tests/Invalid.replay" } })["error"]["data"]["errorCode"] == Json("InvalidState"));
+			const Json state = CallReplayMethod(fixture, "play.state");
+			CHECK(state["recording"] == Json(false));
+			CallReplayMethod(fixture, "input.record", Json{ { "action", "start" }, { "restart", true } });
+			CallReplayMethod(fixture, "play.step", Json{ { "ticks", 1 }, { "render", "none" } });
+			const Json saved = CallReplayMethod(fixture, "input.record", Json{ { "action", "stop" }, { "path", "Assets/Tests/Again.replay" } });
+			CHECK(saved["tick"] == Json(1));
+		}
+
+		TEST_CASE("ReplayMethods: a replay whose game quits before its final tick fails with its complete outcome")
+		{
+			Test::AutomationFixture fixture("ReplayQuitsEarly");
+			CallReplayMethod(fixture, "input.record", Json{ { "action", "start" } });
+			CallReplayMethod(fixture, "play.step", Json{ { "ticks", 6 }, { "render", "none" } });
+			CallReplayMethod(fixture, "input.record", Json{ { "action", "stop" }, { "path", "Assets/Tests/Quits.replay" }, { "expect", Json::array({ Json{ { "tick", 2 }, { "luau", "Application.Quit(3); return true" } }, Json{ { "tick", 5 }, { "luau", "true" } } }) } });
+			const Json response = fixture.Request("input.replay", Json{ { "path", "Assets/Tests/Quits.replay" }, { "verify", true }, { "strictHash", true } });
+			REQUIRE_MESSAGE(response.contains("error"), response.dump());
+			CHECK(response["error"]["data"]["errorCode"] == Json("Validation"));
+			REQUIRE_MESSAGE(response["error"]["data"].contains("replay"), response.dump());
+			const Json& outcome = response["error"]["data"]["replay"];
+			CHECK(outcome["passed"] == Json(false));
+			CHECK(outcome["finalTick"] == Json(2));
+			CHECK(outcome["hashMatched"] == Json(false));
+			CHECK(JsonReader(outcome).ReadMember<std::string>("stopReason").value_or(std::string()).find("quit with exit code 3 at tick 2") != std::string::npos);
+			REQUIRE(outcome["expect"].size() == 2);
+			CHECK(outcome["expect"][0]["satisfied"] == Json(true));
+			CHECK(outcome["expect"][1]["evaluated"] == Json(false));
+			CHECK(outcome["expect"][1]["jsonPointer"] == Json("/Expect/1/Luau"));
+			const PlaySession* session = fixture.GetEditor().GetPlay().GetSession();
+			REQUIRE(session != nullptr);
+			CHECK_FALSE(session->IsStepping());
+			CHECK_FALSE(session->IsLockstep());
+		}
+
 		TEST_CASE("ReplayMethods: stop validates its destination and predicates before consuming the recording")
 		{
 			Test::AutomationFixture fixture("RecordStopPreflight");

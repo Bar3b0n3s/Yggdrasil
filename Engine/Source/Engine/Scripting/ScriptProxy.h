@@ -4,6 +4,8 @@
 #include "Engine/Core/UUID.h"
 #include "Engine/Reflection/Value.h"
 
+#include <glm/glm.hpp>
+
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -12,6 +14,7 @@
 
 namespace Engine {
 
+	class ConstEntity;
 	class IScriptHost;
 	struct ScriptCall;
 
@@ -64,6 +67,14 @@ namespace Engine {
 		[[nodiscard]] static Result<Value> ReadField(ScriptCall& call, ScriptProxyIdentity proxy, std::string_view field);
 		[[nodiscard]] static Status WriteField(ScriptCall& call, ScriptProxyIdentity proxy, std::string_view field,
 			const Value& value);
+
+		// Whether TransformSystem::SetWorldPosition can store `position` for a child of `parent`: the translation relative to
+		// the parent, computed exactly as SetWorldPosition computes it, must be finite. It is not when the position lies
+		// beyond what the parent chain expresses in float (a tiny parent scale, a huge parent translation) or the parent's
+		// world matrix cannot be inverted. Validation for that or a non-finite position; an invalid parent (a root) accepts
+		// every finite position. Hosts and writers call this before any mutation, so script input never reaches
+		// SetWorldPosition's assertion or stores Inf (WorldPosition writes, Scene.Instantiate's position).
+		[[nodiscard]] static Status ValidateWorldPosition(ConstEntity parent, const glm::vec3& position);
 	};
 
 }

@@ -6,15 +6,24 @@
 #include "EditorCore/EditorPreferences.h"
 #include "Engine/Automation/Protocol/SessionFile.h"
 #include "Engine/Core/FileSystem.h"
+#include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Core/VirtualFileSystem.h"
+#include "Engine/Graphics/Image.h"
 #include "Engine/Platform/Process.h"
 #include "Engine/Platform/Socket.h"
+#include "Engine/Renderer/RenderSnapshot.h"
+#include "Engine/Renderer/ViewportCapture.h"
+#include "Engine/Scene/Entity.h"
+#include "Engine/Scene/Scene.h"
 #include "Support/AutomationTestClient.h"
 
 #include <doctest/doctest.h>
 
 #include <cmath>
 #include <set>
+#include <string_view>
+#include <utility>
+#include <vector>
 
 namespace Engine {
 
@@ -115,6 +124,106 @@ namespace Engine {
 			CHECK(editor.GetRevision() == revision);
 			REQUIRE(editor.WriteProjectFile(*file, std::as_bytes(std::span(bytes.data(), bytes.size()))));
 			CHECK(editor.GetVfs().Exists(*file));
+		}
+
+		TEST_CASE("EditorAutomationControls: denied mutations keep the human's unsaved scene and undo history")
+		{
+			Test::AutomationFixture fixture("ControlsDenyDiscard");
+			EditorContext& editor = fixture.GetEditor();
+			AutomationServer& server = fixture.GetClient().GetServer();
+			REQUIRE(fixture.Call("scene.new", Json{ { "path", "Assets/Scenes/Other.scene" } }));
+			REQUIRE(fixture.Call("scene.open", Json{ { "path", "Assets/Scenes/Main.scene" } }));
+			EditorAutomationControls controls(editor, server);
+			EditorActions actions(editor, server);
+			const auto complete = [&actions](std::string_view method, const Json& params)
+			{
+				const auto ticket = actions.Submit(method, params);
+				REQUIRE_MESSAGE(ticket.has_value(), ticket.error().ToString());
+				actions.Pump();
+				const auto result = actions.TakeResult(*ticket);
+				REQUIRE(result.has_value());
+				REQUIRE(result->has_value());
+				REQUIRE_MESSAGE(result->value().has_value(), result->value().error().ToString());
+			};
+			complete("entity.create", Json{ { "name", "HumanEdit" } });
+			REQUIRE(editor.IsSceneDirty());
+			controls.SetPolicy({ .DenyMutations = true });
+			const uint64_t revision = editor.GetRevision();
+			const size_t undoCount = editor.GetHistory().GetUndoCount();
+			REQUIRE(undoCount > 0);
+			for (const auto& [method, params] : std::vector<std::pair<std::string, Json>>{
+					 { "scene.open", Json{ { "path", "Assets/Scenes/Other.scene" }, { "discardChanges", true } } },
+					 { "scene.open", Json{ { "path", "Assets/Scenes/Main.scene" }, { "reload", true }, { "discardChanges", true } } },
+					 { "session.shutdown", Json{ { "force", true } } } })
+			{
+				INFO(method, " ", params.dump());
+				const auto denied = fixture.Call(method, params);
+				REQUIRE_FALSE(denied);
+				CHECK(denied.error().GetCode() == ErrorCode::PermissionDenied);
+			}
+			CHECK(editor.GetScenePath()->GetPath() == "Assets/Scenes/Main.scene");
+			CHECK(editor.IsSceneDirty());
+			CHECK(editor.GetRevision() == revision);
+			CHECK(editor.GetHistory().GetUndoCount() == undoCount);
+			CHECK(editor.GetScene().FindEntityByPath("/HumanEdit").IsValid());
+			CHECK_FALSE(editor.GetShutdownRequest().has_value());
+			// Inspection stays available, and the human may still drop their own changes.
+			CHECK(fixture.Call("scene.tree", Json::object()));
+			complete("scene.open", Json{ { "path", "Assets/Scenes/Other.scene" }, { "discardChanges", true } });
+			CHECK(editor.GetScenePath()->GetPath() == "Assets/Scenes/Other.scene");
+			// Opening another scene discards nothing when the open one is clean.
+			CHECK(fixture.Call("scene.open", Json{ { "path", "Assets/Scenes/Main.scene" } }));
+			CHECK(editor.GetScenePath()->GetPath() == "Assets/Scenes/Main.scene");
+		}
+
+		TEST_CASE("EditorAutomationControls: denied mutations still deliver screenshots and test reports")
+		{
+			Test::EditorTestFixture fixture("ControlsDenyOutputs");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			EditorContext& editor = fixture.GetEditor();
+			auto specification = Test::MakeTestServerSpecification();
+			specification.RendererName = "vulkan";
+			specification.Screenshots.View = [](const RenderSnapshot& /*snapshot*/, const ViewportScreenshotRequest& request) -> Result<Image>
+			{
+				return CreateImage(request.Width, request.Height, nvrhi::Format::RGBA8_UNORM);
+			};
+			Test::AutomationTestClient client(editor, std::move(specification));
+			REQUIRE(client.Call("script.write", Json{ { "path", "Assets/Tests/Inspect.test.luau" }, { "source", "return Test.Suite('Inspect', function() Test.Case('passes', function() Test.WaitTicks(2) Test.Expect(true) end) end)" } }));
+			REQUIRE(client.Call("project.setSettings", Json{ { "patch", Json{ { "Testing", Json{ { "Suites", Json::array({ Json{ { "Script", "Assets/Tests/Inspect.test.luau" }, { "Modes", Json::array({ "Editor" }) } } }) } } } } } }));
+			// Every source has its .meta, as in a project the editor has indexed: the run's refresh then writes nothing (a
+			// refresh that must create a .meta is a project write, which the policy refuses).
+			REQUIRE(client.Call("project.refreshAssets", Json::object()));
+			EditorAutomationControls controls(editor, client.GetServer());
+			controls.SetPolicy({ .DenyMutations = true });
+			const uint64_t revision = editor.GetRevision();
+			const auto output = [](const Json& result, std::string_view member)
+			{
+				return FileSystem::PathFromUtf8(JsonReader(result).ReadMember<std::string>(member).value_or(std::string()));
+			};
+			const auto shot = client.Call("viewport.screenshot", Json{ { "view", "scene" } });
+			REQUIRE_MESSAGE(shot.has_value(), shot.error().ToString());
+			const auto shotPath = output(*shot, "path");
+			CHECK(FileSystem::Exists(shotPath));
+			CHECK(shotPath.parent_path() == fixture.GetProjectRoot() / "Library" / "Automation" / "Out");
+			auto run = client.Call("test.run", Json::object());
+			REQUIRE_MESSAGE(run.has_value(), run.error().ToString());
+			// The report's coverage can exceed the inline limit: read the offloaded result, which is itself method output.
+			if (JsonReader(*run).ReadMember<bool>("truncated").value_or(false))
+			{
+				const auto text = FileSystem::ReadText(output(*run, "path"));
+				REQUIRE(text.has_value());
+				run = JsonReader::Parse(*text);
+				REQUIRE(run.has_value());
+			}
+			CHECK(JsonReader(*run).ReadMember<bool>("passed").value_or(false));
+			CHECK(FileSystem::Exists(output(*run, "junitPath")));
+			CHECK(FileSystem::Exists(output(*run, "jsonPath")));
+			// Project writes stay refused.
+			const auto denied = client.Call("entity.create", Json{ { "name", "Blocked" } });
+			REQUIRE_FALSE(denied);
+			CHECK(denied.error().GetCode() == ErrorCode::PermissionDenied);
+			CHECK(editor.GetRevision() == revision);
 		}
 
 		TEST_CASE("EditorAutomationControls: listener preference preserves explicit launch intent")

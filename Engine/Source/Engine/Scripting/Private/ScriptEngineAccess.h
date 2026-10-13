@@ -65,7 +65,8 @@ namespace Engine {
 			// the number of immediate results when already satisfied, or -1 when the caller must lua_yield(state, 0).
 			// Expected-error patterns are validated here. Audio starts here after validation, never in the binding.
 			[[nodiscard]] static Result<int> ArmTestWait(ScriptCall& call, const ScriptTestWait& wait);
-			// Publishes the report and latches Fail/Skip so pcall cannot swallow a terminal test outcome.
+			// Publishes the report and latches Fail/Skip so pcall cannot swallow a terminal test outcome. A yieldable task
+			// the ended case does not own (gameplay work) is cancelled too, so the caller's yield ends its flow for good.
 			[[nodiscard]] static Status EndTestCase(ScriptCall& call, const ScriptTestReport& report);
 			[[nodiscard]] static Status ArmTaskWait(ScriptCall& call, uint64_t ticks);
 

@@ -5,6 +5,7 @@
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Renderer/DepthPyramidPass.h"
 #include "Engine/Renderer/Private/DepthGtaoValidation.h"
+#include "Engine/Renderer/SceneTargetFormats.h"
 #include "Shared/GtaoConstants.h"
 
 #include <cmath>
@@ -54,7 +55,7 @@ namespace Engine {
 				nvrhi::BindingLayoutItem::Texture_UAV(0) };
 			if (entry == "CSDenoise")
 				layout.bindings.push_back(nvrhi::BindingLayoutItem::Texture_SRV(2));
-			descriptions.push_back({ .Name = "Gtao." + entry, .Program = "Gtao", .Entries = { entry }, .BindingLayouts = { layout }, .StorageImages = { { .Set = 0, .Register = 0, .Format = nvrhi::Format::R8_UNORM } } });
+			descriptions.push_back({ .Name = "Gtao." + entry, .Program = "Gtao", .Entries = { entry }, .BindingLayouts = { layout }, .StorageImages = { { .Set = 0, .Register = 0, .Format = AmbientOcclusionFormat } } });
 		}
 		return descriptions;
 	}
@@ -91,7 +92,7 @@ namespace Engine {
 		nvrhi::TextureDesc desc;
 		desc.width = halfResolution ? width / 2 + width % 2 : width;
 		desc.height = halfResolution ? height / 2 + height % 2 : height;
-		desc.format = nvrhi::Format::R8_UNORM;
+		desc.format = AmbientOcclusionFormat;
 		desc.isShaderResource = true;
 		desc.isUAV = true;
 		desc.initialState = nvrhi::ResourceStates::ShaderResource;
@@ -147,7 +148,7 @@ namespace Engine {
 			desc.bindings = { nvrhi::BindingSetItem::PushConstants(0, sizeof(constants)),
 				nvrhi::BindingSetItem::Texture_SRV(0, inputs.ViewDepth),
 				nvrhi::BindingSetItem::Texture_SRV(1, inputs.SceneNormals),
-				nvrhi::BindingSetItem::Texture_UAV(0, destination, nvrhi::Format::R8_UNORM) };
+				nvrhi::BindingSetItem::Texture_UAV(0, destination, AmbientOcclusionFormat) };
 			if (source != nullptr)
 				desc.bindings.push_back(nvrhi::BindingSetItem::Texture_SRV(2, source));
 			ENGINE_TRY_ASSIGN(nvrhi::IBindingSet * set, bindings.GetOrCreate(*state.Device, desc, *pipeline.BindingLayouts.front()));

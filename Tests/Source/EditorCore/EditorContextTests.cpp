@@ -2,9 +2,9 @@
 
 #include "EditorCore/EditorContext.h"
 
+#include "EditorCore/Automation/Private/MethodSupport.h"
 #include "EditorCore/Commands/ProjectSettingsCommand.h"
 #include "EditorCore/Commands/SceneEdit.h"
-#include "EditorCore/Automation/Private/MethodSupport.h"
 #include "Engine/App/EngineContext.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/Core/FileSystem.h"
@@ -815,7 +815,7 @@ namespace Engine {
 			REQUIRE(failures == 1);
 			editor.Update(0.0);
 
-			// project:// keeps the replaced content as Red.material.bak (Â§4.10): written by the editor, never an external
+			// project:// keeps the replaced content as Red.material.bak (§4.10): written by the editor, never an external
 			// change, neither for the polls nor for a refresh.
 			for (const std::string_view metallic : { "1", "0.5" })
 			{
@@ -869,7 +869,7 @@ namespace Engine {
 				REQUIRE(entry != nullptr);
 				CHECK(entry->Method == "project.refreshAssets");
 			}
-			// Â§13.12 rule 1: every recorded hash is the hash of the file as it is now (the .meta rewritten with the glTF's
+			// §13.12 rule 1: every recorded hash is the hash of the file as it is now (the .meta rewritten with the glTF's
 			// sub-assets included).
 			for (const ProvenanceEntry& entry : provenance->GetEntries())
 			{

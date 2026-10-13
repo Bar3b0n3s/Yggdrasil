@@ -5,16 +5,27 @@
 #include "Engine/Asset/BuiltinAssets.h"
 #include "Engine/Asset/MaterialData.h"
 #include "Engine/Asset/MeshData.h"
+#include "Engine/Renderer/RenderPrepare.h"
 
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <limits>
 #include <numbers>
+#include <span>
 
 namespace Engine {
 
 	namespace Utils {
+
+		// The grid (OverlayGrid): a cell spans a tenth of the view's scale, rounded up to a power of ten. A perspective grid
+		// covers GridHalfLines cells on each side of its centre; an orthographic grid covers the frustum's footprint, at most
+		// GridOrthographicHalfLines cells on each side. Each line is drawn as GridSegmentsPerLine segments so its fade follows
+		// distance.
+		constexpr double GridScalePerCell = 10.0;
+		constexpr double GridHalfLines = 40.0;
+		constexpr double GridOrthographicHalfLines = 100.0;
+		constexpr int GridSegmentsPerLine = 16;
 
 		static bool OverlayFinite(const glm::dvec3& value)
 		{
@@ -42,6 +53,38 @@ namespace Engine {
 			return {};
 		}
 
+		// The distance from `point` to the convex polygon whose vertices are `vertices`, given in any order (they are sorted in
+		// place): 0 inside a polygon with area; otherwise the distance to its nearest edge.
+		static double OverlayDistanceToConvexPolygon(const glm::dvec2& point, std::span<glm::dvec2> vertices)
+		{
+			glm::dvec2 centroid(0.0);
+			for (const glm::dvec2& vertex : vertices)
+				centroid += vertex;
+			centroid /= static_cast<double>(vertices.size());
+			std::sort(vertices.begin(), vertices.end(), [&centroid](const glm::dvec2& a, const glm::dvec2& b)
+			{
+				return std::atan2(a.y - centroid.y, a.x - centroid.x) < std::atan2(b.y - centroid.y, b.x - centroid.x);
+			});
+			bool inside = true;
+			double area = 0.0;
+			double distance = std::numeric_limits<double>::max();
+			for (size_t index = 0; index < vertices.size(); ++index)
+			{
+				const glm::dvec2 a = vertices[index];
+				const glm::dvec2 b = vertices[(index + 1) % vertices.size()];
+				const glm::dvec2 edge = b - a;
+				const glm::dvec2 offset = point - a;
+				area += a.x * b.y - b.x * a.y;
+				// Counter-clockwise vertices keep the inside on each edge's left.
+				if (edge.x * offset.y - edge.y * offset.x < 0.0)
+					inside = false;
+				const double length = glm::dot(edge, edge);
+				const double t = length > 0.0 ? std::clamp(glm::dot(offset, edge) / length, 0.0, 1.0) : 0.0;
+				distance = std::min(distance, glm::length(offset - edge * t));
+			}
+			return inside && area > 0.0 ? 0.0 : distance;
+		}
+
 		static Status OverlayGrid(const CameraData& camera, DebugDrawList& output)
 		{
 			const glm::dmat4 inverse = glm::inverse(glm::dmat4(camera.Projection) * glm::dmat4(camera.View));
@@ -56,9 +99,12 @@ namespace Engine {
 					return MakeError(ErrorCode::InvalidArgument, "Overlay camera frustum overflows world coordinates");
 				corners[static_cast<size_t>(index)] = glm::dvec3(world) / world.w;
 			}
+			// The part of the plane y = 0 the frustum can see (its footprint): the convex polygon of its edges' intersections with
+			// the plane, and their XZ bounds.
 			glm::dvec3 minimum(std::numeric_limits<double>::max());
 			glm::dvec3 maximum(-std::numeric_limits<double>::max());
-			bool intersects = false;
+			std::array<glm::dvec2, 12> footprint{};
+			size_t footprintCount = 0;
 			for (size_t index = 0; index < corners.size(); ++index)
 			{
 				for (size_t bit = 1; bit <= 4; bit <<= 1)
@@ -72,37 +118,94 @@ namespace Engine {
 					const glm::dvec3 point = a + (b - a) * t;
 					minimum = glm::min(minimum, point);
 					maximum = glm::max(maximum, point);
-					intersects = true;
+					footprint[footprintCount++] = glm::dvec2(point.x, point.z);
 				}
 			}
-			if (!intersects)
+			if (footprintCount == 0)
 				return {};
-			const double extent = std::max(maximum.x - minimum.x, maximum.z - minimum.z);
-			if (extent <= 0.0)
-				return {};
-			const double spacing = std::pow(10.0, std::ceil(std::log10(extent / 80.0)));
+
+			// Spacing in powers of ten from the view's scale, never from the far plane: a tenth of a cell's span, rounded up, so a
+			// camera 3 m up or a view 20 m tall gets 1 m cells. In orthographic the scale is half the view height. In perspective
+			// it is the camera's height above the plane, but at least half the distance from the camera's ground point to the
+			// nearest ground the frustum sees, so a view that sees only distant ground (a narrow field of view, a grazing view)
+			// still reaches it: the grid then extends at least twice that distance, where the fade keeps at least half.
 			const glm::dvec3 cameraPosition(camera.Position);
-			double fadeDistance = 0.0;
-			for (double x : { minimum.x, maximum.x })
-				for (double z : { minimum.z, maximum.z })
-					fadeDistance = std::max(fadeDistance, glm::length(glm::dvec3(x, 0.0, z) - cameraPosition));
+			const bool perspective = camera.ProjectionKind == RenderProjection::Perspective;
+			const double orthographicHalfHeight = 1.0 / std::abs(static_cast<double>(camera.Projection[1][1]));
+			const glm::dvec2 groundPoint(cameraPosition.x, cameraPosition.z);
+			const double scale = perspective ? std::max({ std::abs(cameraPosition.y), static_cast<double>(camera.NearClip),
+												   0.5 * OverlayDistanceToConvexPolygon(groundPoint, std::span(footprint.data(), footprintCount)) })
+											 : orthographicHalfHeight;
+			if (!std::isfinite(scale) || scale <= 0.0)
+				return MakeError(ErrorCode::InvalidArgument, "Overlay camera has no grid scale");
+			const double spacing = std::pow(10.0, std::ceil(std::log10(scale / GridScalePerCell)));
+			// A perspective grid covers GridHalfLines cells on each side of the camera's ground point, within the footprint, and
+			// fades with the distance on the plane from that point, reaching zero at the grid's extent. An orthographic grid is
+			// centred on the view axis's intersection with the plane (the camera's position for a horizontal axis) and fades
+			// with the distance in the view plane (ignoring depth along the view axis, which an orthographic image does not
+			// show), reaching zero at twice the view's half diagonal, so the view's corners keep a quarter of the alpha. Its
+			// region is the whole footprint, where that fade never reaches zero, so the grid shows no edge. Only when the
+			// footprint reaches more than GridOrthographicHalfLines cells from the centre (a view at a very shallow pitch) does
+			// the fade range shrink until the part of the plane where the fade is not zero fits within that many cells, and the
+			// region is cut to that part.
+			const glm::dvec3 forward = -glm::normalize(glm::dvec3(glm::inverse(glm::dmat4(camera.View))[2]));
+			glm::dvec3 centre(cameraPosition.x, 0.0, cameraPosition.z);
+			if (!perspective && forward.y != 0.0)
+			{
+				const double distance = -cameraPosition.y / forward.y;
+				centre = cameraPosition + forward * distance;
+			}
+			const double orthographicHalfWidth = 1.0 / std::abs(static_cast<double>(camera.Projection[0][0]));
+			double fadeRange = 0.0;
+			if (perspective)
+			{
+				fadeRange = GridHalfLines * spacing;
+				minimum = glm::max(minimum, centre - fadeRange);
+				maximum = glm::min(maximum, centre + fadeRange);
+			}
+			else
+			{
+				fadeRange = 2.0 * std::sqrt(orthographicHalfHeight * orthographicHalfHeight + orthographicHalfWidth * orthographicHalfWidth);
+				const double limit = GridOrthographicHalfLines * spacing;
+				const glm::dvec3 reached = glm::max(centre - minimum, maximum - centre);
+				if (reached.x > limit || reached.z > limit)
+				{
+					// The plane points within view-plane distance r of the centre form an ellipse whose XZ bounds reach
+					// r * sqrt(1 - forward.z^2) / |forward.y| along x and r * sqrt(1 - forward.x^2) / |forward.y| along z.
+					const glm::dvec2 reach(std::sqrt(std::max(0.0, 1.0 - forward.z * forward.z)), std::sqrt(std::max(0.0, 1.0 - forward.x * forward.x)));
+					fadeRange = std::min(fadeRange, limit * std::abs(forward.y) / std::max(reach.x, reach.y));
+					if (!(fadeRange > 0.0))
+						return {}; // the plane is seen edge-on
+					const glm::dvec3 bounds(fadeRange * reach.x / std::abs(forward.y), 0.0, fadeRange * reach.y / std::abs(forward.y));
+					minimum = glm::max(minimum, centre - bounds);
+					maximum = glm::min(maximum, centre + bounds);
+				}
+			}
+			if (maximum.x < minimum.x || maximum.z < minimum.z)
+				return {};
+			const auto fadeDistance = [perspective, &centre, &forward](const glm::dvec3& point)
+			{
+				const glm::dvec3 offset = point - centre;
+				return perspective ? glm::length(glm::dvec2(offset.x, offset.z)) : glm::length(offset - forward * glm::dot(offset, forward));
+			};
+			const double maxHalfLines = perspective ? GridHalfLines : GridOrthographicHalfLines;
 			for (int axis : { 0, 2 })
 			{
 				const int along = axis == 0 ? 2 : 0;
 				const double first = std::ceil(minimum[axis] / spacing);
 				const double last = std::floor(maximum[axis] / spacing);
-				const int lineCount = static_cast<int>(std::min(82.0, std::max(0.0, last - first + 1.0)));
+				const int lineCount = static_cast<int>(std::min(2.0 * maxHalfLines + 2.0, std::max(0.0, last - first + 1.0)));
 				for (int line = 0; line < lineCount; ++line)
 				{
 					const double coordinate = (first + line) * spacing;
 					const bool worldAxis = coordinate == 0.0;
-					for (int segment = 0; segment < 16; ++segment)
+					for (int segment = 0; segment < GridSegmentsPerLine; ++segment)
 					{
 						glm::dvec3 from(0.0), to(0.0);
 						from[axis] = to[axis] = coordinate;
-						from[along] = minimum[along] + (maximum[along] - minimum[along]) * segment / 16.0;
-						to[along] = minimum[along] + (maximum[along] - minimum[along]) * (segment + 1) / 16.0;
-						const double fade = std::clamp(1.0 - glm::length((from + to) * 0.5 - cameraPosition) / fadeDistance, 0.0, 1.0);
+						from[along] = minimum[along] + (maximum[along] - minimum[along]) * segment / GridSegmentsPerLine;
+						to[along] = minimum[along] + (maximum[along] - minimum[along]) * (segment + 1) / GridSegmentsPerLine;
+						const double fade = std::clamp(1.0 - fadeDistance((from + to) * 0.5) / fadeRange, 0.0, 1.0);
 						const glm::vec3 rgb = worldAxis ? (along == 0 ? glm::vec3(0.9f, 0.12f, 0.08f) : glm::vec3(0.08f, 0.25f, 0.9f)) : glm::vec3(0.35f);
 						output.AddLine(glm::vec3(from), glm::vec3(to), glm::vec4(rgb, static_cast<float>(fade * fade) * (worldAxis ? 0.8f : 0.4f)));
 					}
@@ -244,6 +347,10 @@ namespace Engine {
 					materialHandle = item.Materials[submesh.MaterialSlot];
 				else if (submesh.MaterialSlot < mesh->Slots.size() && mesh->Slots[submesh.MaterialSlot].DefaultMaterial.IsValid())
 					materialHandle = mesh->Slots[submesh.MaterialSlot].DefaultMaterial;
+				// The solid passes' culling, FarClip included: an edge of a submesh they do not draw would show where Lit shows
+				// nothing and spend the command budget before visible meshes later in canonical order.
+				if (IsOutsideView(submesh.Bounds, item.World, snapshot.Camera))
+					continue;
 				const auto material = assets.GetOrPlaceholder<MaterialData>(materialHandle);
 				for (uint32_t offset = 0; offset < submesh.IndexCount; offset += 3)
 				{

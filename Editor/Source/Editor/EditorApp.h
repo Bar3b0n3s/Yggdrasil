@@ -32,8 +32,11 @@ namespace Engine {
 	};
 
 	// Editor host: owns EditorCore services, launcher/panels, independent scene/game images and automation.
-	// Autosave publishes owned CPU snapshots after commands and before GPU work. Fatal worker callbacks only claim
-	// published bytes. Shutdown quiesces the hook, resets the writer lease, retires UI textures and releases the project.
+	// Autosave publishes owned CPU snapshots once per safe point, after commands and before the frame's GPU work, and
+	// before request-driven captures. Fatal worker callbacks only claim published bytes. A window close with unsaved
+	// scene changes asks Save / Don't save / Cancel first (EditorHostClose), or closes at once, keeping a final recovery, when
+	// no UI can show the prompt. Shutdown saves the UI layout (open panels included) while the project's lock is held and
+	// then stops saving it, quiesces the hook, resets the writer lease, retires UI textures and releases the project.
 	// Render geometry measured in UI frame N applies to N+1. Picking copies the displayed identity after submission.
 	class EditorApp final : public Application
 	{
@@ -59,7 +62,10 @@ namespace Engine {
 		[[nodiscard]] Status BeforePlay();
 		[[nodiscard]] Status AfterSceneSaved();
 		[[nodiscard]] Status UpdateHostServices();
+		// Autosave::Publish, its failure logged once per distinct error (ReportAutosave).
 		void PublishAutosave();
+		void ReportAutosave(const Status& status);
+		// Publishes the current committed scene before FatalError, whose installed hook writes it once.
 		void RefreshFatalSnapshot();
 		void NoteShownScene();
 		void CollectStaleMirrors();

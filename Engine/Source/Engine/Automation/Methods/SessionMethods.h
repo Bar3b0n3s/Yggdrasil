@@ -3,6 +3,7 @@
 #include "Engine/Automation/Methods/AutomationTypes.h"
 #include "Engine/Core/Base.h"
 #include "Engine/Core/Result.h"
+#include "Engine/Reflection/VariantValue.h"
 
 #include <cstdint>
 #include <string>
@@ -78,6 +79,11 @@ namespace Engine {
 		// The names of "_meta".playState (PlayMethods.h PlayRunState): "Edit" without a play session, "Paused" for a paused
 		// one, else "Play" or "Simulate" by its mode.
 		std::string PlayState = "Edit";
+		// As play.state's (PlayStateResult::Stopped and StopError): a fatal script error stopped the play session
+		// (PlaySession::GetFatalError), which stays Paused with ticks no longer advancing; StopError is that error in the
+		// §11.7 form (ScriptErrorToJson), null without a stopped session.
+		bool Stopped = false;
+		VariantValue StopError{};
 		std::string Renderer{};      // "vulkan" or "none" (--renderer)
 		std::string LockstepOwner{}; // the client name owning lockstep; empty: none (or an in-process driver)
 		bool ReadOnly = false;

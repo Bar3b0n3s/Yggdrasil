@@ -26,6 +26,7 @@
 #include <map>
 #include <set>
 #include <tuple>
+#include <vector>
 
 namespace Engine {
 
@@ -242,10 +243,22 @@ namespace Engine {
 				if (!path)
 					return m_Default;
 				Luau::Config config = m_Default;
+				// Luau inheritance: the root's config first, then each nested directory's, so the nearest one wins. Files
+				// are sorted by path bytes, where a child named "-Legacy" sorts before its parent's ".luaurc"; apply the
+				// ancestors by depth instead (every ancestor of one module has a distinct depth).
+				std::vector<const ScriptTypeCheckerConfigFile*> ancestors;
 				for (const auto& file : m_Configuration.Files)
 				{
-					if (!file.Source || !path->IsUnder(file.Path.GetParent()))
-						continue;
+					if (file.Source && path->IsUnder(file.Path.GetParent()))
+						ancestors.push_back(&file);
+				}
+				std::sort(ancestors.begin(), ancestors.end(), [](const ScriptTypeCheckerConfigFile* left, const ScriptTypeCheckerConfigFile* right)
+				{
+					return DirectoryDepth(left->Path.GetParent()) < DirectoryDepth(right->Path.GetParent());
+				});
+				for (const ScriptTypeCheckerConfigFile* ancestor : ancestors)
+				{
+					const auto& file = *ancestor;
 					Luau::Config next = config;
 					if (const auto error = Luau::parseConfig(*file.Source, next))
 						m_Findings.push_back(CheckerError(file.Path.ToString(), "invalid .luaurc: " + *error));
@@ -256,6 +269,11 @@ namespace Engine {
 				return m_Configs.emplace(name, std::move(config)).first->second;
 			}
 		private:
+			static size_t DirectoryDepth(const VfsPath& directory)
+			{
+				return directory.IsRoot() ? 0 : static_cast<size_t>(std::ranges::count(directory.GetPath(), '/')) + 1;
+			}
+
 			const ScriptTypeCheckerConfiguration& m_Configuration; // owned by the checker, borrowed for this call
 			std::vector<ScriptDiagnostic>& m_Findings;
 			Luau::Config m_Default{};
@@ -415,6 +433,9 @@ namespace Engine {
 			for (const auto& error : result.errors)
 			{
 				auto diagnostic = Utils::CheckerError(error.moduleName.empty() ? root : error.moduleName, Luau::toString(error, { &files }));
+				// The frontend merges parse errors into its type errors; they are compile errors (§13.7), like the importer's.
+				if (Luau::get<Luau::SyntaxError>(error) != nullptr)
+					diagnostic.Code = "SCRIPT_COMPILE_ERROR";
 				Utils::SetCheckerRange(diagnostic, error.location);
 				findings.push_back(std::move(diagnostic));
 			}

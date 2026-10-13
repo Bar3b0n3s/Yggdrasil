@@ -3,6 +3,7 @@
 #include "Engine/Testing/TestResults.h"
 
 #include "Engine/Core/Json/JsonReader.h"
+#include "Engine/Core/Json/JsonWriter.h"
 #include "Engine/Project/ProjectSettings.h"
 #include "Engine/Reflection/TypeRegistry.h"
 
@@ -164,6 +165,34 @@ namespace Engine {
 			result.Coverage.Gates[0].Passed = true;
 			CHECK_FALSE(TestRunResultToJson(result, registry));
 			CHECK_FALSE(TestRunResultToJUnit(result));
+		}
+
+		TEST_CASE("TestResults: sanitized report text is valid in every format and keeps valid text unchanged")
+		{
+			CHECK(SanitizeTestReportText("plain\ttext\r\nsnow ☃") == "plain\ttext\r\nsnow ☃");
+			CHECK(SanitizeTestReportText(std::string("nul\0end", 7)) == "nul\\u0000end");
+			CHECK(SanitizeTestReportText("\x1b[31mred") == "\\u001B[31mred");
+			CHECK(SanitizeTestReportText("bad byte \xff!") == "bad byte \xEF\xBF\xBD!");
+			CHECK(SanitizeTestReportText("cut \xE2\x82") == "cut \xEF\xBF\xBD\xEF\xBF\xBD");
+			CHECK(SanitizeTestReportText("non\xEF\xBF\xBE"
+										 "char\xEF\xBF\xBF")
+				== "non\xEF\xBF\xBD"
+				   "char\xEF\xBF\xBD");
+			TypeRegistry registry;
+			RegisterProjectSettingsTypes(registry);
+			RegisterTestResultTypes(registry);
+			registry.Freeze();
+			TestRunResult result;
+			for (const std::string& text : { std::string(1, '\0'), std::string("\x1b[0m"), std::string("\xef\xbf\xbe"), std::string(1, static_cast<char>(0xff)) })
+			{
+				TestCaseResult row{ .Suite = SanitizeTestReportText(text), .Case = "case", .Status = "failed", .Message = SanitizeTestReportText(text) };
+				row.Failures.push_back({ SanitizeTestReportText(text), "Assets/Tests/A.luau", 1, {} });
+				result.Cases.push_back(std::move(row));
+			}
+			CHECK(TestRunResultToJUnit(result));
+			const auto json = TestRunResultToJson(result, registry);
+			REQUIRE(json);
+			CHECK(JsonWriter::Write(*json));
 		}
 
 		TEST_CASE("TestResults: JUnit rejects invalid XML characters and preserves Unicode")

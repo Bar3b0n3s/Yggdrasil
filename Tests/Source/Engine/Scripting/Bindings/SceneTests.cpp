@@ -11,7 +11,6 @@
 #include <doctest/doctest.h>
 
 #include <format>
-
 #include <vector>
 
 namespace Engine {
@@ -179,6 +178,36 @@ return Scene.GetEntityCount() == 0
 			CHECK(result->Value.Get() == Json(true));
 			CHECK_FALSE(fixture.RequestedScene.IsValid());
 			CHECK(fixture.ExternalMutations.empty());
+		}
+
+		TEST_CASE("SceneBindings: an instantiation position that the parent cannot represent fails before anything is created")
+		{
+			Test::ScriptTestFixture fixture;
+			PublishSceneBindingPrefab(fixture, AssetHandle(100));
+			REQUIRE(fixture.Start().has_value());
+			// Finite inputs whose local translation overflows float: under a tiny parent scale, and against a huge parent
+			// translation. TransformSystem::SetWorldPosition would assert (Debug, Release) or store Inf (Dist).
+			const auto result = fixture.Evaluate(R"(
+local prefab = Assets.Load("Assets/ScriptPrefab.prefab")
+local tiny = Scene.CreateEntity("Tiny")
+tiny.Transform.Scale = vector.create(0.00011, 0.00011, 0.00011)
+local far = Scene.CreateEntity("Far")
+far.Transform.Translation = vector.create(3e38, 0, 0)
+local before = Scene.GetEntityCount()
+local ok, message = pcall(Scene.Instantiate, prefab, vector.create(1e36, 0, 0), nil, tiny)
+assert(not ok and string.find(message, "Scene.Instantiate", 1, true) and string.find(message, "cannot be represented relative to parent", 1, true), message)
+ok, message = pcall(Scene.Instantiate, prefab, vector.create(-3e38, 0, 0), Quat.Identity(), far)
+assert(not ok and string.find(message, "cannot be represented relative to parent", 1, true), message)
+assert(Scene.GetEntityCount() == before)
+local child = Scene.Instantiate(prefab, vector.create(0.01, 0, 0), nil, tiny)
+assert(child:GetParent() == tiny)
+local root = Scene.Instantiate(prefab, vector.create(1e36, 0, 0))
+assert(root.Transform.Translation == vector.create(1e36, 0, 0))
+return true
+)");
+			REQUIRE_MESSAGE(result.has_value(), (result ? "" : result.error().ToString()));
+			CHECK(result->Value.Get() == Json(true));
+			CHECK(fixture.Errors.empty());
 		}
 
 		TEST_CASE("SceneBindings: read-only mutations are refused before effects")

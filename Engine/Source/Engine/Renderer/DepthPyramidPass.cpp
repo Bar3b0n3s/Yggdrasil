@@ -4,6 +4,7 @@
 #include "Engine/Core/Assert.h"
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Renderer/Private/DepthGtaoValidation.h"
+#include "Engine/Renderer/SceneTargetFormats.h"
 #include "Shared/DepthPyramidConstants.h"
 
 #include <algorithm>
@@ -89,7 +90,7 @@ namespace Engine {
 			layout.registerSpaceIsDescriptorSet = true;
 			layout.bindings = { nvrhi::BindingLayoutItem::PushConstants(0, sizeof(DepthPyramidConstants)),
 				nvrhi::BindingLayoutItem::Texture_SRV(0), nvrhi::BindingLayoutItem::Texture_UAV(0) };
-			descriptions.push_back({ .Name = "DepthPyramid." + entry, .Program = "DepthPyramid", .Entries = { entry }, .BindingLayouts = { layout }, .StorageImages = { { .Set = 0, .Register = 0, .Format = nvrhi::Format::R16_FLOAT } } });
+			descriptions.push_back({ .Name = "DepthPyramid." + entry, .Program = "DepthPyramid", .Entries = { entry }, .BindingLayouts = { layout }, .StorageImages = { { .Set = 0, .Register = 0, .Format = ViewDepthFormat } } });
 		}
 		return descriptions;
 	}
@@ -128,7 +129,7 @@ namespace Engine {
 		desc.mipLevels = 1;
 		for (uint32_t extent = std::max(width, height); extent > 1 && desc.mipLevels < MaxMipCount; extent /= 2)
 			++desc.mipLevels;
-		desc.format = nvrhi::Format::R16_FLOAT;
+		desc.format = ViewDepthFormat;
 		desc.isShaderResource = true;
 		desc.isUAV = true;
 		desc.initialState = nvrhi::ResourceStates::ShaderResource;
@@ -146,7 +147,7 @@ namespace Engine {
 		const uint32_t width = inputs.Camera.ViewportWidth;
 		const uint32_t height = inputs.Camera.ViewportHeight;
 		const nvrhi::TextureDesc expected = GetTargetDesc(width, height);
-		if (!Detail::IsDepthGtaoTexture2D(inputs.SceneDepth->getDesc(), width, height, nvrhi::Format::D32, 1)
+		if (!Detail::IsDepthGtaoTexture2D(inputs.SceneDepth->getDesc(), width, height, SceneDepthFormat, 1)
 			|| !Detail::IsDepthGtaoTarget(inputs.ViewDepth->getDesc(), expected))
 			return std::unexpected(Error(ErrorCode::InvalidArgument, "Depth pyramid texture descriptors do not match the camera"));
 
@@ -170,7 +171,7 @@ namespace Engine {
 					nvrhi::BindingSetItem::PushConstants(0, sizeof(constants)),
 					nvrhi::BindingSetItem::Texture_SRV(0, mip == 0 ? inputs.SceneDepth : inputs.ViewDepth,
 						nvrhi::Format::UNKNOWN, nvrhi::TextureSubresourceSet(sourceMip, 1, 0, 1)),
-					nvrhi::BindingSetItem::Texture_UAV(0, inputs.ViewDepth, nvrhi::Format::R16_FLOAT, nvrhi::TextureSubresourceSet(mip, 1, 0, 1)),
+					nvrhi::BindingSetItem::Texture_UAV(0, inputs.ViewDepth, ViewDepthFormat, nvrhi::TextureSubresourceSet(mip, 1, 0, 1)),
 				};
 				ENGINE_TRY_ASSIGN(nvrhi::IBindingSet * set, bindings.GetOrCreate(*state.Device, desc, *pipeline.BindingLayouts.front()));
 				nvrhi::ComputeState compute;

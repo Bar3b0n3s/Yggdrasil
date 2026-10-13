@@ -15,8 +15,11 @@
 
 #include <algorithm>
 #include <array>
+#include <format>
 #include <latch>
 #include <map>
+#include <set>
+#include <string>
 #include <thread>
 
 namespace Engine {
@@ -105,11 +108,14 @@ namespace Engine {
 			Test::CheckerModuleReader scriptModuleSources;
 			const auto files = Test::ListTestDataFiles("TypeChecker", { ".luau" });
 			REQUIRE(files);
+			std::set<std::string> unlisted;
 			for (const auto& file : *files)
 			{
 				const auto source = Test::ReadTestDataText(file);
 				REQUIRE(source);
-				scriptModuleSources.Sources.emplace(Test::ParseVfsPath("project://Assets/" + file.substr(std::string("TypeChecker/").size())), *source);
+				const std::string relative = file.substr(std::string("TypeChecker/").size());
+				scriptModuleSources.Sources.emplace(Test::ParseVfsPath("project://Assets/" + relative), *source);
+				unlisted.insert(relative);
 			}
 			const auto manifest = Test::ReadTestDataText("TypeChecker/Expected.json");
 			REQUIRE(manifest);
@@ -127,10 +133,15 @@ namespace Engine {
 				REQUIRE(path);
 				REQUIRE(clean);
 				CAPTURE(*path);
+				unlisted.erase(*path);
 				const auto vfsPath = Test::ParseVfsPath("project://Assets/" + *path);
 				const auto source = scriptModuleSources.Sources.find(vfsPath);
 				REQUIRE(source != scriptModuleSources.Sources.end());
 				const auto findings = checker->CheckScript({ vfsPath, source->second, &scriptModuleSources });
+				std::string actual;
+				for (const auto& finding : findings)
+					actual += std::format("{} {}:{}:{}-{}:{} {}\n", finding.Code, finding.File, finding.Line, finding.Column, finding.EndLine, finding.EndColumn, finding.Message);
+				INFO(actual);
 				CHECK(Test::HasCheckerErrors(findings) == !*clean);
 				for (const auto& finding : findings)
 				{
@@ -139,24 +150,84 @@ namespace Engine {
 					CHECK(finding.Column > 0);
 					CHECK_FALSE(finding.Message.empty());
 				}
-				if (const auto ranges = row->FindMember("Ranges"))
+				// Every seeded mistake pins its exact findings, so a fixture failing for an unrelated reason cannot pass.
+				const auto expected = row->FindMember("Diagnostics");
+				REQUIRE(expected.has_value() == !*clean);
+				if (!expected)
+					continue;
+				const auto size = expected->GetArraySize();
+				REQUIRE(size);
+				REQUIRE(findings.size() == *size);
+				for (size_t d = 0; d < *size; ++d)
 				{
-					const auto size = ranges->GetArraySize();
-					REQUIRE(size);
-					REQUIRE(findings.size() == *size);
-					for (size_t r = 0; r < *size; ++r)
+					const auto diagnostic = expected->GetElement(d);
+					REQUIRE(diagnostic);
+					CAPTURE(d);
+					CHECK(diagnostic->ReadMember<std::string>("Code") == findings[d].Code);
+					CHECK(diagnostic->ReadMember<std::string>("File") == findings[d].File);
+					const auto range = diagnostic->FindMember("Range");
+					REQUIRE(range);
+					const std::array actualRange{ findings[d].Line, findings[d].Column, findings[d].EndLine, findings[d].EndColumn };
+					for (size_t p = 0; p < actualRange.size(); ++p)
 					{
-						const auto expected = ranges->GetElement(r);
-						REQUIRE(expected);
-						const std::array actual{ findings[r].Line, findings[r].Column, findings[r].EndLine, findings[r].EndColumn };
-						for (size_t p = 0; p < actual.size(); ++p)
-						{
-							const auto coordinate = expected->GetElement(p);
-							REQUIRE(coordinate);
-							CHECK(coordinate->ReadUInt32() == actual[p]);
-						}
+						const auto coordinate = range->GetElement(p);
+						REQUIRE(coordinate);
+						CHECK(coordinate->ReadUInt32() == actualRange[p]);
 					}
+					const auto message = diagnostic->ReadMember<std::string>("MessageContains");
+					REQUIRE(message);
+					CHECK(findings[d].Message.find(*message) != std::string::npos);
 				}
+			}
+			// A fixture missing from the manifest would never be checked.
+			CHECK(unlisted.empty());
+		}
+
+		TEST_CASE("ScriptTypeChecker: syntax errors are compile findings, also in required modules")
+		{
+			const auto checker = Test::PrimitiveChecker();
+			Test::CheckerModuleReader scriptModuleSources;
+			const auto root = Test::ParseVfsPath("project://Assets/Root.luau");
+			const auto findings = checker->CheckScript({ root, "-- first\nreturn )\n", &scriptModuleSources });
+			REQUIRE(findings.size() == 1);
+			CHECK(findings[0].Code == "SCRIPT_COMPILE_ERROR");
+			CHECK(findings[0].File == "Assets/Root.luau");
+			CHECK(findings[0].Line == 2);
+			CHECK(findings[0].Column == 8);
+			scriptModuleSources.Sources[Test::ParseVfsPath("project://Assets/Broken.luau")] = "return )";
+			const auto required = checker->CheckScript({ root, "return require('./Broken')", &scriptModuleSources });
+			CHECK(std::ranges::any_of(required, [](const ScriptDiagnostic& finding)
+			{
+				return finding.Code == "SCRIPT_COMPILE_ERROR" && finding.File == "Assets/Broken.luau";
+			}));
+			// Type errors keep their own code.
+			const auto typed = checker->CheckScript({ root, "local value: number = 'wrong'\nreturn value", &scriptModuleSources });
+			REQUIRE(typed.size() == 1);
+			CHECK(typed[0].Code == "SCRIPT_TYPE_ERROR");
+		}
+
+		TEST_CASE("ScriptTypeChecker: nested configurations override their parents whatever the directory names")
+		{
+			Test::AssetTestFixture fixture;
+			fixture.WriteProjectText("Assets/.luaurc", "{\"languageMode\":\"strict\"}");
+			fixture.WriteProjectText("Assets/Probe.luau", "return {}");
+			// '-', '(' and the like sort below '.', so these children's .luaurc precede their parent's in path order.
+			const std::array directories{ std::string("-Prototypes"), std::string("(WIP)"), std::string("Nested") };
+			for (const auto& directory : directories)
+			{
+				fixture.WriteProjectText("Assets/" + directory + "/.luaurc", "{\"languageMode\":\"nocheck\"}");
+				fixture.WriteProjectText("Assets/" + directory + "/Probe.luau", "return {}");
+			}
+			const auto configuration = ScriptTypeChecker::CaptureConfiguration(fixture.GetVfs());
+			REQUIRE(configuration);
+			const auto checker = Test::PrimitiveChecker(*configuration);
+			Test::CheckerModuleReader scriptModuleSources;
+			const std::string source = "local n: number = 'wrong'\nreturn n";
+			CHECK(Test::HasCheckerErrors(checker->CheckScript({ fixture.ProjectPath("Assets/Probe.luau"), source, &scriptModuleSources })));
+			for (const auto& directory : directories)
+			{
+				CAPTURE(directory);
+				CHECK_FALSE(Test::HasCheckerErrors(checker->CheckScript({ fixture.ProjectPath("Assets/" + directory + "/Probe.luau"), source, &scriptModuleSources })));
 			}
 		}
 

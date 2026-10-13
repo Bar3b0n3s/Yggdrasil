@@ -29,7 +29,10 @@
 // PHYSICS_ADJACENT_STATIC_BODIES of the open scene is fixed by adding a Static RigidBody to the two bodies' nearest common
 // ancestor (PhysicsDiagnostic::FixTarget), inside the one undoable fix command. M12 adds AUDIO_NO_LISTENER and
 // AUDIO_MULTIPLE_PRIMARY_LISTENERS (Scene/AudioSystem.h's FindAudioSceneIssues); the extra primary listeners of the open
-// scene are fixed by clearing their Primary. Script, input, the other render and test codes arrive with M13, M9 and M13.
+// scene are fixed by clearing their Primary. M9 adds RENDER_NO_LIGHTING (Scene/RenderAnnotations.h) and
+// RENDER_SPOT_SHADOW_BUDGET (Renderer/SpotShadowAtlas.h). M13 adds the script codes (SCRIPT_COMPILE_ERROR,
+// SCRIPT_TYPE_ERROR, SCRIPT_NOT_A_BEHAVIOUR, SCRIPT_UNKNOWN_FIELD_OVERRIDE, SCRIPT_FIELD_TYPE_MISMATCH),
+// INPUT_UNKNOWN_ACTION and TEST_SUITE_INVALID. GetCodes lists every code in §13.7 order.
 
 namespace Engine {
 

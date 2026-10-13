@@ -8,6 +8,8 @@
 #include "Engine/Core/Result.h"
 #include "Engine/Core/VfsPath.h"
 
+#include <algorithm>
+#include <cstdint>
 #include <map>
 #include <optional>
 #include <span>
@@ -170,6 +172,12 @@ namespace Engine {
 		// The dependency records whose Owner is `owner`, sorted by source path.
 		[[nodiscard]] std::vector<const AssetRecord*> GetDependencyRecords(AssetHandle owner) const;
 		[[nodiscard]] size_t GetRecordCount() const { return m_Records.size(); }
+		// Advances whenever the registered records change (a Scan that registers different records, Add, Update, Remove, a
+		// Rename that moves a record) and whenever another registry is assigned to this one (a restored dry-run snapshot, a
+		// closed project's empty registry); a copy starts at its source's revision. It never goes back, so a revision an
+		// observer cached never names other records: the content browser rebuilds its listing when it changes, which also
+		// catches a file and its .meta renamed or moved outside the editor (the same handle and record count).
+		[[nodiscard]] uint64_t GetRevision() const { return m_Revision.Value; }
 		// Every registered handle (main assets and dependencies) with its source path, sorted by handle: what the
 		// EditorAssetManager writes to <CacheRoot>/AssetLocations.json after each scan, for the next cold open's Scan.
 		[[nodiscard]] std::vector<AssetKnownLocation> GetKnownLocations() const;
@@ -229,12 +237,27 @@ namespace Engine {
 			VfsPath SourcePath{};     // RenameMetaToSourceCase: the source's own spelling
 			AssetMetadata Metadata{}; // AssignNewHandle: the duplicate .meta; RewriteImporter: the rewritten .meta
 		};
+		// GetRevision's counter: a copy keeps the value, while an assignment (copy or move) moves past both revisions.
+		struct RevisionCounter
+		{
+			uint64_t Value = 0;
+
+			RevisionCounter() = default;
+			RevisionCounter(const RevisionCounter&) = default;
+			RevisionCounter& operator=(const RevisionCounter& other)
+			{
+				Value = std::max(Value, other.Value) + 1;
+				return *this;
+			}
+			~RevisionCounter() = default;
+		};
 	private:
 		std::map<AssetHandle, AssetRecord> m_Records;   // by the .meta's handle (main assets and dependencies)
 		std::map<VfsPath, AssetHandle> m_SourcePaths;   // source path -> handle
 		std::map<AssetHandle, AssetHandle> m_SubAssets; // sub-asset handle -> its source's handle
 		std::vector<AssetDiagnostic> m_ScanDiagnostics;
 		std::vector<ScanFixSource> m_ScanFixes; // the auto-fixable diagnostics of the last scan
+		RevisionCounter m_Revision{};
 	};
 
 }

@@ -143,7 +143,7 @@ export type TestIsolation = "Suite" | "Case"
 -- A run mode a test suite runs in.
 export type TestMode = "Editor" | "Release" | "Dist"
 
--- Whether a script error pauses one test suite.
+-- A suite's PauseOnError override. A script error never pauses a test run, so no value changes the run's time.
 export type TestPauseOnError = "Inherit" | "Pause" | "Continue"
 
 -- How the lines of a text element are aligned to each other.
@@ -196,6 +196,8 @@ export type TestSuiteOptions = {CaseTimeoutTicks: number?}
 
 -- An opaque immutable asset handle; resolve metadata through Assets.
 declare extern type AssetRef with
+	-- Compares asset handles, so two references to the same asset are equal. [All modes; LoadTime|Runtime|Test; pure/read]
+	__eq: (self: AssetRef, other: AssetRef) -> boolean
 end
 
 -- Hears the scene from the entity's position and orientation.
@@ -334,7 +336,7 @@ declare extern type CharacterController with
 	Height: number
 	-- Whether the last character update found supporting ground. [All modes; Runtime|Test; pure/read]
 	IsGrounded: (self: CharacterController) -> boolean
-	-- Physics layer name from project settings. [All modes; Runtime|Test; pure/read; setter mutates]
+	-- Physics layer name from project settings. A value a script writes holds at most 4096 bytes of text. [All modes; Runtime|Test; pure/read; setter mutates]
 	Layer: string
 	-- The character's mass in kilograms, used when it pushes bodies. [All modes; Runtime|Test; pure/read; setter mutates]
 	Mass: number
@@ -350,6 +352,8 @@ end
 
 -- A local linear RGBA float value. Channels are finite and unclamped, allowing HDR values.
 declare extern type Color with
+	-- Compares the four channels exactly, like vector equality. [All modes; LoadTime|Runtime|Test; pure/read]
+	__eq: (self: Color, other: Color) -> boolean
 	-- The local alpha channel, finite and unclamped. [All modes; LoadTime|Runtime|Test; pure/read; local setter]
 	a: number
 	-- The local linear blue channel, finite and unclamped. [All modes; LoadTime|Runtime|Test; pure/read; local setter]
@@ -393,9 +397,9 @@ end
 
 -- A UUID and scene generation identifying an entity; no native address is exposed.
 declare extern type Entity with
-	-- Validate and add a component; Script instances are synchronized before returning. [All modes; Runtime|Test; mutates]
+	-- Validate and add a component and return its proxy; Script instances are synchronized before returning, and nil is returned when the new Script's OnCreate destroyed the entity. Each value holds at most 4096 bytes of text (strings, map keys and Variant text together). [All modes; Runtime|Test; mutates]
 	AddComponent: (self: Entity, name: string, values: {[string]: any}?) -> any
-	-- Add a nonempty tag if absent. [All modes; Runtime|Test; mutates]
+	-- Add a nonempty tag of at most 256 bytes if absent; an entity carries at most 256 tags. [All modes; Runtime|Test; mutates]
 	AddTag: (self: Entity, tag: string) -> ()
 	-- The entity's AudioListener component, or nil when absent. [All modes; Runtime|Test; pure/read]
 	AudioListener: AudioListener?
@@ -462,7 +466,7 @@ declare extern type Entity with
 	MeshCollider: MeshCollider?
 	-- The entity's MeshRenderer component, or nil when absent. [All modes; Runtime|Test; pure/read]
 	MeshRenderer: MeshRenderer?
-	-- The entity name. [All modes; Runtime|Test; pure/read; setter mutates]
+	-- The entity name; a written name is UTF-8 without NUL and at most 256 bytes. [All modes; Runtime|Test; pure/read; setter mutates]
 	Name: string
 	-- The entity's PointLight component, or nil when absent. [All modes; Runtime|Test; pure/read]
 	PointLight: PointLight?
@@ -582,6 +586,8 @@ declare extern type Quat with
 	Rotate: (self: Quat, value: vector) -> vector
 	-- Returns Z-X-Y Euler degrees with X in [-90, 90] and Y/Z in (-180, 180], matching the inspector. [All modes; LoadTime|Runtime|Test; pure/read]
 	ToEuler: (self: Quat) -> vector
+	-- Compares the four components exactly, like vector equality; q and -q are the same rotation but compare unequal. [All modes; LoadTime|Runtime|Test; pure/read]
+	__eq: (self: Quat, other: Quat) -> boolean
 	-- Composes quaternions (right operand applied first), or rotates a vector as Rotate does. [All modes; LoadTime|Runtime|Test; pure/read]
 	function __mul(self, b: Quat): Quat
 	function __mul(self, value: vector): vector
@@ -662,7 +668,7 @@ declare extern type RigidBody with
 	InitialLinearVelocity: vector
 	-- Whether the body is sleeping. [All modes; Runtime|Test; pure/read]
 	IsSleeping: (self: RigidBody) -> boolean
-	-- Physics layer name from project settings. [All modes; Runtime|Test; pure/read; setter mutates]
+	-- Physics layer name from project settings. A value a script writes holds at most 4096 bytes of text. [All modes; Runtime|Test; pure/read; setter mutates]
 	Layer: string
 	-- How quickly linear velocity decays, per second. [All modes; Runtime|Test; pure/read; setter mutates]
 	LinearDamping: number
@@ -698,7 +704,7 @@ end
 declare extern type Script with
 	-- The script's place in callback order: lower values run first, ties in canonical entity order. [All modes; Runtime|Test; pure/read; setter mutates]
 	ExecutionOrder: number
-	-- Overrides of the script's declared fields by name, each checked against the field's declared type; an unknown or mismatching override is kept and reported, and the field uses its declared default. [All modes; Runtime|Test; pure/read; setter mutates]
+	-- Overrides of the script's declared fields by name, each checked against the field's declared type; an unknown or mismatching override is kept and reported, and the field uses its declared default. A value a script writes holds at most 4096 bytes of text. [All modes; Runtime|Test; pure/read; setter mutates]
 	Fields: {[string]: any}
 	-- The Behaviour script to run. [All modes; Runtime|Test; pure/read; setter mutates]
 	Script: AssetRef?
@@ -756,7 +762,7 @@ declare extern type Text with
 	Size: number
 	-- Whether the text is placed on the screen or in the world. [All modes; Runtime|Test; pure/read; setter mutates]
 	Space: TextSpace
-	-- The UTF-8 text; a line feed starts a new line. [All modes; Runtime|Test; pure/read; setter mutates]
+	-- The UTF-8 text; a line feed starts a new line. A value a script writes holds at most 4096 bytes of text. [All modes; Runtime|Test; pure/read; setter mutates]
 	Text: string
 end
 
@@ -808,7 +814,7 @@ declare Application: {
 	GetPlatform: () -> string,
 	-- Returns the running engine version. [All modes; Runtime|Test; pure/read]
 	GetVersion: () -> string,
-	-- Returns window coordinates as vector(width, height, 0). [All modes; Runtime|Test; pure/read]
+	-- Returns the size of the session's view in view coordinates as vector(width, height, 0): the game view's image in ordinary play, the project's Window.Width x Window.Height in lockstep, recording, replay and test sessions. [All modes; Runtime|Test; pure/read]
 	GetWindowSize: () -> vector,
 	-- True in the editor; false in the standalone Runtime. [All modes; Runtime|Test; pure/read]
 	IsEditor: () -> boolean,
@@ -836,7 +842,7 @@ declare Assets: {
 declare Audio: {
 	-- Read the session group gain. [All modes; Runtime|Test; pure/read]
 	GetGroupVolume: (group: AudioGroup) -> number,
-	-- Play a non-spatial one-shot when position is nil, otherwise spatial; volume defaults 1 and group Sfx. [All modes; Runtime|Test; mutates]
+	-- Play a non-spatial one-shot when position is nil, otherwise spatial; volume defaults 1 and group Sfx. At most 1024 one-shots start per frame; a later call in the frame raises an error. [All modes; Runtime|Test; mutates]
 	PlayOneShot: (clip: AssetRef, position: vector?, volume: number?, group: AudioGroup?) -> (),
 	-- Set nonnegative session group gain; the prior mix is restored when the audio system stops. [All modes; Runtime|Test; mutates]
 	SetGroupVolume: (group: AudioGroup, volume: number) -> (),
@@ -856,7 +862,7 @@ declare Debug: {
 	DrawRay: (origin: vector, direction: vector, color: Color?, duration: number?) -> (),
 	-- Adds a sphere with positive radius. [All modes; Runtime|Test; mutates]
 	DrawSphere: (center: vector, radius: number, color: Color?, duration: number?) -> (),
-	-- Adds UTF-8 text at a world position with the default 16-pixel size. [All modes; Runtime|Test; mutates]
+	-- Adds UTF-8 text of at most 1024 bytes at a world position with the default 16-pixel size. [All modes; Runtime|Test; mutates]
 	DrawText: (position: vector, text: string, color: Color?, duration: number?) -> (),
 }
 
@@ -896,7 +902,7 @@ declare Input: {
 	GetGamepadAxis: (index: number, axis: GamepadAxis) -> number,
 	-- Returns accumulated cursor movement in this phase. [All modes; Runtime|Test; pure/read]
 	GetMouseDelta: () -> vector,
-	-- Returns cursor window coordinates as vector(x, y, 0). [All modes; Runtime|Test; pure/read]
+	-- Returns the cursor position in view coordinates as vector(x, y, 0): the pixels of the session's view, origin top-left (the game view's image in ordinary play, the project's Window.Width x Window.Height in lockstep, recording, replay and test sessions). [All modes; Runtime|Test; pure/read]
 	GetMousePosition: () -> vector,
 	-- Returns accumulated scroll, right-positive and up-positive. [All modes; Runtime|Test; pure/read]
 	GetScrollDelta: () -> vector,
@@ -926,7 +932,7 @@ declare Input: {
 	SetCursorMode: (mode: CursorMode) -> (),
 }
 
--- Script-channel logging with authored source, line, entity and simulation tick; arguments use tostring and tab separators.
+-- Script-channel logging with authored source, line, entity and simulation tick; arguments use tostring and tab separators. An entry keeps at most 8192 bytes (longer text is truncated and marked), and one VM writes at most 1024 entries per frame, dropping and counting the rest.
 declare Log: {
 	-- Writes an Error entry without throwing or disabling the script instance. [All modes; Runtime|Test; pure/read]
 	Error: (...any) -> (),
@@ -1022,7 +1028,7 @@ declare Random: {
 
 -- Active-scene operations; searches return canonical order and never expose pending destruction.
 declare Scene: {
-	-- Creates immediately with a seeded ID and default name Entity. Runs OnCreate before returning; use IsValid if it may destroy itself. [All modes; Runtime|Test; mutates]
+	-- Creates immediately with a seeded ID and default name Entity (a name is at most 256 bytes). Runs OnCreate before returning; use IsValid if it may destroy itself. [All modes; Runtime|Test; mutates]
 	CreateEntity: (name: string?, parent: Entity?) -> Entity,
 	-- Marks the entity and descendants immediately; the session performs lifecycle teardown and destruction at its safe point. [All modes; Runtime|Test; mutates]
 	Destroy: (entity: Entity) -> (),
@@ -1048,7 +1054,7 @@ declare Scene: {
 	GetName: () -> string,
 	-- Returns the first active Primary camera in canonical order, or nil. [All modes; Runtime|Test; pure/read]
 	GetPrimaryCamera: () -> Entity?,
-	-- Instantiates through the shared prefab path and invokes OnCreate for the complete subtree before returning. [All modes; Runtime|Test; mutates]
+	-- Instantiates through the shared prefab path and invokes OnCreate for the complete subtree before returning. A position that cannot be represented under the parent raises a located error before anything is created. [All modes; Runtime|Test; mutates]
 	Instantiate: (prefab: AssetRef, position: vector?, rotation: Quat?, parent: Entity?) -> Entity,
 	-- Requests a scene/VM replacement at the end of the frame with copied JSON parameters; never destroys the calling VM inline. [All modes; Runtime|Test; mutates]
 	Load: (scene: AssetRef, parameters: {[string]: any}?) -> (),
@@ -1074,11 +1080,11 @@ declare Task: {
 	WaitTicks: (ticks: number) -> (),
 }
 
--- Feature test suites, assertions, waits and deterministic input.
+-- Feature test suites, assertions, waits and deterministic input. A reported message shows authored locations and keeps at most 8192 bytes, truncated and marked like a log entry. A case's report keeps at most 32 failures for expectations and unexpected script errors, the last then counting any further ones as [truncated: <n> more failures], and a suite at most 1024 such failures. Test.Inject* queues at most 1024 events per input tick.
 declare Test: {
 	-- Capture exactly the requested current-and-following ticks; yield until grouped audio is ready. [All modes; Test; mutates]
 	CaptureAudio: (ticks: number) -> TestAudioLevels,
-	-- Register a case while collecting the suite body. [All modes; Test; pure/read]
+	-- Register a case while collecting the suite body; the name is nonempty, unique in the suite and at most 256 bytes, and a suite has at most 4096 cases. [All modes; Test; pure/read]
 	Case: (name: string, fn: () -> (), options: TestCaseOptions?) -> (),
 	-- Record a failed condition and continue the case. [All modes; Test; pure/read]
 	Expect: (condition: boolean, message: string?) -> (),
@@ -1086,33 +1092,33 @@ declare Test: {
 	ExpectEqual: (a: any, b: any, message: string?) -> (),
 	-- Compare finite numbers or vector components with an absolute epsilon, default 0.00001. [All modes; Test; pure/read]
 	ExpectNear: (a: number | vector, b: number | vector, epsilon: number?, message: string?) -> (),
-	-- Claim one nonfatal error occurrence in the current case using a Luau message pattern. [All modes; Test; pure/read]
+	-- Claim one nonfatal error occurrence in the current case using a Luau message pattern of at most 1024 bytes; the case keeps at most 256 unclaimed errors to claim. [All modes; Test; pure/read]
 	ExpectScriptError: (pattern: string, withinTicks: number) -> (),
-	-- End this case as failed, even inside pcall. [All modes; Test; pure/read]
+	-- End this case as failed. A case thread, or a task a behaviour spawned (which is cancelled), never runs past the call, even inside pcall; a lifecycle callback cannot yield, so there the call raises a script error that unwinds to the nearest pcall. The outcome stays latched either way. [All modes; Test; pure/read]
 	Fail: (message: string) -> (),
 	-- Read an entity's position in the last render snapshot. [All modes; Test; pure/read]
 	GetExtractedPosition: (entity: Entity) -> vector?,
 	-- Read the last completed render extraction. [All modes; Test; pure/read]
 	GetLastExtraction: () -> TestExtraction,
-	-- Read occurrences newer than an exclusive error cursor; claimed errors remain visible. [All modes; Test; pure/read]
+	-- Read occurrences newer than an exclusive error cursor; claimed errors remain visible. The VM keeps the 256 distinct errors with the latest occurrences. [All modes; Test; pure/read]
 	GetScriptErrors: (since: number?) -> {ScriptError},
 	-- Read the canonical simulated state hash. [All modes; Test; pure/read]
 	GetStateHash: () -> string,
-	-- Queue a named button state or analog value for the next unapplied input tick. [All modes; Test; mutates]
-	InjectAction: (name: string, state: string?, value: number?) -> (),
-	-- Queue a gamepad button state or engine-convention axis value. [All modes; Test; mutates]
-	InjectGamepad: (index: number, buttonOrAxis: string, stateOrValue: string | number) -> (),
+	-- Queue a named button state or analog value (with a nil or Down state) for the next unapplied input tick. [All modes; Test; mutates]
+	InjectAction: (name: string, state: InputEventState?, value: number?) -> (),
+	-- Queue a gamepad button state, or an engine-convention axis value when the third argument is a number. [All modes; Test; mutates]
+	InjectGamepad: ((index: number, button: GamepadButton, state: InputEventState) -> ()) & ((index: number, axis: GamepadAxis, value: number) -> ()),
 	-- Queue a key state for the next unapplied input tick. [All modes; Test; mutates]
-	InjectKey: (key: string, state: string) -> (),
+	InjectKey: (key: Key, state: InputEventState) -> (),
 	-- Queue a mouse button and optional finite XY position. [All modes; Test; mutates]
-	InjectMouse: (button: string, state: string, position: vector?) -> (),
+	InjectMouse: (button: MouseButton, state: InputEventState, position: vector?) -> (),
 	-- Synchronously reload a script in an editor test. [EditorOnly; Test; mutates]
 	ReloadScript: (asset: AssetRef) -> (),
-	-- Capture a screenshot through the owning host. [All modes; Test; mutates]
+	-- Capture a screenshot through the owning host; a suite takes at most 256 screenshots, and a later call raises an error without capturing. [All modes; Test; mutates]
 	Screenshot: (name: string) -> (),
-	-- End this case as skipped without erasing earlier failures. [All modes; Test; pure/read]
+	-- End this case as skipped without erasing earlier failures; it stops its caller the way Test.Fail does, and the outcome stays latched. [All modes; Test; pure/read]
 	Skip: (reason: string) -> (),
-	-- Construct a suite without executing its body. [All modes; LoadTime|Runtime|Test; pure/read]
+	-- Construct a suite without executing its body; the name is UTF-8 without NUL and at most 256 bytes. [All modes; LoadTime|Runtime|Test; pure/read]
 	Suite: (name: string, body: () -> (), options: TestSuiteOptions?) -> TestSuite,
 	-- Yield a test thread for simulation ticks. [All modes; Test; pure/read]
 	WaitTicks: (ticks: number) -> (),

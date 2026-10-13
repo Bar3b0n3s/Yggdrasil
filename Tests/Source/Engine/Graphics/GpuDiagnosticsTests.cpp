@@ -161,6 +161,14 @@ namespace Engine {
 			GpuDiagnostics hang(GpuFault::Hang);
 			CHECK(hang.ShouldInjectHang());
 			CHECK_FALSE(hang.ShouldFailTextureCreation(sampled));
+			CHECK_FALSE(hang.ShouldFailShaderSpecialization());
+
+			// oom-specialization: only shader specializations (the lazily created debug-view pipelines) fail.
+			GpuDiagnostics specialization(GpuFault::OomSpecialization);
+			CHECK(specialization.ShouldFailShaderSpecialization());
+			CHECK_FALSE(specialization.ShouldFailTextureCreation(sampled));
+			CHECK_FALSE(specialization.ShouldInjectHang());
+			CHECK_FALSE(oom.ShouldFailShaderSpecialization());
 
 			// No fault: nothing is forced.
 			GpuDiagnostics none;
@@ -168,6 +176,7 @@ namespace Engine {
 			CHECK_FALSE(none.IsDeviceLost());
 			CHECK_FALSE(none.ShouldFailTextureCreation(sampled));
 			CHECK_FALSE(none.ShouldInjectHang());
+			CHECK_FALSE(none.ShouldFailShaderSpecialization());
 		}
 
 		TEST_CASE("GpuDiagnostics: Vulkan results map to fatal-error kinds")

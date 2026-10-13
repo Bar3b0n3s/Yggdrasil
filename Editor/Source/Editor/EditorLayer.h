@@ -1,5 +1,6 @@
 #pragma once
 
+#include "EditorCore/EditorUiState.h"
 #include "Engine/Core/Result.h"
 
 #include <cstdint>
@@ -14,6 +15,10 @@ namespace Engine {
 	class EditorLayer
 	{
 	public:
+		// Registers the open-panel settings handler ([EnginePanels][Open] in imgui.ini) in the current Dear ImGui context, if
+		// any (OnImGuiRender registers it in a context created later), so construct the layer before that context first
+		// loads its ini. The destructor saves the ini once more while it has a file, then unregisters the handler; any later
+		// save drops the entry, so the owner stops the ini before destroying the layer (EditorApp::OnShutdown).
 		explicit EditorLayer(EditorPanelContext& context);
 		~EditorLayer();
 		EditorLayer(const EditorLayer&) = delete;
@@ -35,6 +40,10 @@ namespace Engine {
 		// UI frame, not stale draw data; serial completed after the request is required before capture.
 		void RequestFrame();
 		[[nodiscard]] bool IsFrameRequested() const;
+		// Opens `panel` (EditorUiState) and gives its window focus on the next frame, selecting its dock tab; the host
+		// calls it for feedback outside ImGui traversal, such as files dropped on the window. InvalidArgument for an
+		// unknown panel.
+		[[nodiscard]] Status RevealPanel(EditorPanel panel);
 	private:
 		struct State;
 		Scope<State> m_State;

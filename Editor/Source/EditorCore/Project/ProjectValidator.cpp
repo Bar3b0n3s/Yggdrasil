@@ -49,6 +49,7 @@
 #include <map>
 #include <set>
 #include <tuple>
+#include <utility>
 
 // The validator (Architecture §13.7, ADR 0008 decision 17; the asset checks of M6, ADR 0010 decision 5; the physics checks
 // of M11, ADR 0014 decision 15; the audio checks of M12, ADR 0015 decision 12; the light limit of M8, ADR 0013 decision 7).
@@ -1255,10 +1256,16 @@ namespace Engine {
 			if (service == nullptr)
 				return MakeError(ErrorCode::InvalidState, "script validation service is unavailable");
 			ENGINE_TRY_ASSIGN(const auto checked, service->Check(paths));
+			// The checker's syntax errors (SCRIPT_COMPILE_ERROR) by file and line: ValidateScriptSource finds the same ones.
+			std::set<std::pair<std::string, uint32_t>> checkerCompileErrors;
 			for (const auto& diagnostic : checked.Diagnostics)
 			{
+				// The checker's own code: SCRIPT_COMPILE_ERROR for syntax errors, SCRIPT_TYPE_ERROR for type findings.
+				const bool compile = diagnostic.Code == ScriptCompileErrorCode;
+				if (compile)
+					checkerCompileErrors.emplace(diagnostic.File, diagnostic.Line);
 				DiagnosticSite site{ .File = diagnostic.File, .Subject = std::format("{}:{}:{}:{}:{}", diagnostic.Line, diagnostic.Column, diagnostic.EndLine, diagnostic.EndColumn, diagnostic.Message) };
-				auto finding = MakeDiagnostic(ScriptTypeErrorCode, diagnostic.Severity, diagnostic.Message, site,
+				auto finding = MakeDiagnostic(compile ? ScriptCompileErrorCode : ScriptTypeErrorCode, diagnostic.Severity, diagnostic.Message, site,
 					std::format("correct the script at {}:{} (range ends at {}:{})", diagnostic.Line, diagnostic.Column, diagnostic.EndLine, diagnostic.EndColumn), false);
 				finding.Diagnostic.Line = diagnostic.Line;
 				diagnostics.push_back(std::move(finding));
@@ -1274,6 +1281,9 @@ namespace Engine {
 				for (const auto& diagnostic : sourceFindings)
 				{
 					syntaxFailure |= diagnostic.Code == ScriptCompileErrorCode;
+					// One syntax error is one finding: the checker already reported it at this line.
+					if (diagnostic.Code == ScriptCompileErrorCode && checkerCompileErrors.contains({ diagnostic.File, diagnostic.Line }))
+						continue;
 					DiagnosticSite site{ .File = diagnostic.File, .Subject = std::format("{}:{}:{}", diagnostic.Line, diagnostic.Column, diagnostic.Message) };
 					auto finding = MakeDiagnostic(diagnostic.Code, diagnostic.Severity, diagnostic.Message, site,
 						diagnostic.Code == InputUnknownActionCode ? "declare the action in Input.Actions or correct the literal" : "correct the Luau syntax", false);

@@ -21,8 +21,8 @@
 // in PascalCase; "tap" is down on its tick and up on the next, so both edges are observed. Every event is validated before
 // any is queued (all or nothing).
 //
-// Deferred to later milestones: input.record and input.replay (§13.6) need the replay format with Luau expectations and
-// the cooked replay player (M13 and M14); they are not registered in M7.
+// input.record and input.replay (§13.6), which use the replay format with Luau expectations and the replay player, are
+// Engine/Automation/Methods/ReplayMethods.h's (M13).
 
 namespace Engine {
 
@@ -35,13 +35,15 @@ namespace Engine {
 	// Which members a type reads (PlayInputEvent):
 	//   action        name, and either state (a button use) or value (an axis value in [-1, 1]); both is InvalidParams
 	//   key           key (a KeyCodes.h key name, "Space", "A", "Escape"), state
-	//   mouseButton   button ("Left", "Right", "Middle", ...), state, position? ([x, y] window coordinates)
-	//   mouseMove     position
+	//   mouseButton   button ("Left", "Right", "Middle", ...), state, position? ([x, y] in view coordinates)
+	//   mouseMove     position ([x, y] in view coordinates)
 	//   mouseDelta    delta
 	//   scroll        delta
 	//   gamepadButton gamepad?, button (a gamepad button name, "South", "Start", ...), state
 	//   gamepadAxis   gamepad?, axis ("LeftX", "LeftY", "RightTrigger", ...), value
 	//   text          text (UTF-8)
+	// View coordinates (PlaySession.h) are the pixels of the session's view, origin top-left: the game view's image in
+	// ordinary play, the project's Window.Width x Window.Height in lockstep, recording, replay and test sessions.
 	// Members a type does not read must be absent (InvalidParams at /events/<i>/<member>); "state" defaults to "down" for
 	// the types that read it. Presence is read from the request's params (MethodContext::GetParams), because a nested
 	// struct's members have no HasParam.

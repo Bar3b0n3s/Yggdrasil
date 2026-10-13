@@ -69,6 +69,8 @@ namespace Engine {
 		// Undoes up to `steps` (>= 1, asserted) commands, newest first; returns how many were undone (fewer when the history
 		// runs out). Stops at the first command whose Undo fails (Command::Undo) and returns its error with the number
 		// already undone in the error's context; the failed command and everything older stay applied (mirroring Redo).
+		// Undo and Redo change the scene like Execute: InvalidState while a test run owns the editor, PermissionDenied for
+		// an agent while agent mutations are denied (EditorContext::CheckMutationPermission); nothing changes then.
 		[[nodiscard]] Result<size_t> Undo(EditorContext& context, size_t steps = 1);
 
 		// Redoes up to `steps` (>= 1, asserted) undone commands, oldest first, by executing them again. Stops at the first

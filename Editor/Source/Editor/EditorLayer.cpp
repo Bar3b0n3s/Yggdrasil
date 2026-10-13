@@ -35,6 +35,8 @@
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <string_view>
+#include <utility>
 #include <vector>
 
 namespace Engine {
@@ -58,6 +60,86 @@ namespace Engine {
 				return true;
 		}
 		return false;
+	}
+
+	namespace Utils {
+
+		// The open-panel set, persisted in imgui.ini next to the dock layout (Dear ImGui never saves a window's open flag).
+		// Callbacks run inside Dear ImGui's settings load and save; the layer applies a loaded set before its next frame.
+		struct WorkspacePanelSettings
+		{
+			const EditorUiState* Ui = nullptr;                // borrowed for WriteAll while the handler is registered
+			std::optional<std::vector<EditorPanel>> Loaded{}; // from the last loaded ini; nullopt: the ini holds no set
+			bool Pending = false;                             // an ini was cleared or loaded since the set was applied
+		};
+
+		constexpr const char* WorkspacePanelSettingsType = "EnginePanels";
+
+		static void ClearWorkspacePanels(ImGuiContext* /*context*/, ImGuiSettingsHandler* handler)
+		{
+			auto& settings = *static_cast<WorkspacePanelSettings*>(handler->UserData);
+			settings.Loaded.reset();
+			settings.Pending = true;
+		}
+
+		static void* OpenWorkspacePanels(ImGuiContext* /*context*/, ImGuiSettingsHandler* handler, const char* name)
+		{
+			return std::string_view(name) == "Open" ? handler->UserData : nullptr;
+		}
+
+		static void ReadWorkspacePanels(ImGuiContext* /*context*/, ImGuiSettingsHandler* /*handler*/, void* entry, const char* line)
+		{
+			constexpr std::string_view Key = "Panels=";
+			const std::string_view text(line);
+			if (!text.starts_with(Key))
+				return;
+			auto& settings = *static_cast<WorkspacePanelSettings*>(entry);
+			std::vector<EditorPanel> panels;
+			std::string_view names = text.substr(Key.size());
+			while (!names.empty())
+			{
+				const size_t comma = names.find(',');
+				const std::string_view name = names.substr(0, comma);
+				names = comma == std::string_view::npos ? std::string_view{} : names.substr(comma + 1);
+				// Unknown names (a newer editor's panels) are ignored rather than failing the whole layout.
+				for (uint8_t index = 0; index <= static_cast<uint8_t>(EditorPanel::ProjectLauncher); ++index)
+				{
+					if (EditorPanelToString(static_cast<EditorPanel>(index)) == name)
+						panels.push_back(static_cast<EditorPanel>(index));
+				}
+			}
+			settings.Loaded = std::move(panels);
+		}
+
+		static void ApplyWorkspacePanels(ImGuiContext* /*context*/, ImGuiSettingsHandler* handler)
+		{
+			static_cast<WorkspacePanelSettings*>(handler->UserData)->Pending = true;
+		}
+
+		static void WriteWorkspacePanels(ImGuiContext* /*context*/, ImGuiSettingsHandler* handler, ImGuiTextBuffer* buffer)
+		{
+			const auto& settings = *static_cast<const WorkspacePanelSettings*>(handler->UserData);
+			buffer->appendf("[%s][Open]\nPanels=", handler->TypeName);
+			bool first = true;
+			for (const EditorPanel panel : settings.Ui->GetOpenPanels())
+			{
+				// The launcher's visibility follows the project state, never the saved layout.
+				if (panel == EditorPanel::ProjectLauncher)
+					continue;
+				const std::string_view name = EditorPanelToString(panel);
+				buffer->appendf("%s%.*s", first ? "" : ",", static_cast<int>(name.size()), name.data());
+				first = false;
+			}
+			buffer->append("\n\n");
+		}
+
+		static std::vector<EditorPanel> SavedWorkspacePanels(const EditorUiState& ui)
+		{
+			std::vector<EditorPanel> panels(ui.GetOpenPanels().begin(), ui.GetOpenPanels().end());
+			std::erase(panels, EditorPanel::ProjectLauncher);
+			return panels;
+		}
+
 	}
 
 	static void WorkspaceIdentity(std::string_view text, float width)
@@ -110,7 +192,35 @@ namespace Engine {
 		bool CancelGesture = false;
 		bool FrameRequested = false;
 		bool HadProject = false;
+		std::optional<EditorPanel> FocusRequest{}; // RevealPanel: the window that takes focus on the next frame
 		uint64_t RequestedAfter = 0;
+		Utils::WorkspacePanelSettings PanelSettings{};
+		ImGuiContext* SettingsContext = nullptr;  // the Dear ImGui context holding the panel settings handler
+		std::vector<EditorPanel> WrittenPanels{}; // the persisted set the ini last saw; a change marks the ini dirty
+
+		// Registers the panel settings handler in the current Dear ImGui context, once per context. Called before the first
+		// frame when a context exists (so the first ini load restores the panels) and again from each UI frame.
+		void RegisterPanelSettings()
+		{
+			ImGuiContext* current = ImGui::GetCurrentContext();
+			if (current == nullptr || current == SettingsContext)
+				return;
+			// The newest layer owns the handler; an older layer's destructor then leaves it alone.
+			ImGui::RemoveSettingsHandler(Utils::WorkspacePanelSettingsType);
+			ImGuiSettingsHandler handler;
+			handler.TypeName = Utils::WorkspacePanelSettingsType;
+			handler.TypeHash = ImHashStr(Utils::WorkspacePanelSettingsType);
+			handler.ClearAllFn = &Utils::ClearWorkspacePanels;
+			handler.ReadInitFn = &Utils::ClearWorkspacePanels;
+			handler.ReadOpenFn = &Utils::OpenWorkspacePanels;
+			handler.ReadLineFn = &Utils::ReadWorkspacePanels;
+			handler.ApplyAllFn = &Utils::ApplyWorkspacePanels;
+			handler.WriteAllFn = &Utils::WriteWorkspacePanels;
+			handler.UserData = &PanelSettings;
+			ImGui::AddSettingsHandler(&handler);
+			SettingsContext = current;
+			WrittenPanels = Utils::SavedWorkspacePanels(Context.Editor.GetUiState());
+		}
 
 		void RefreshScenes()
 		{
@@ -153,9 +263,24 @@ namespace Engine {
 		m_State->HadProject = context.Editor.HasProject();
 		if (context.Editor.GetUiState().GetOpenPanels().empty())
 			context.Editor.GetUiState().ResetLayout(context.Editor.HasProject());
+		m_State->PanelSettings.Ui = &context.Editor.GetUiState();
+		m_State->RegisterPanelSettings();
 	}
 
-	EditorLayer::~EditorLayer() = default;
+	EditorLayer::~EditorLayer()
+	{
+		ImGuiContext* current = ImGui::GetCurrentContext();
+		if (current == nullptr || current != m_State->SettingsContext)
+			return;
+		const ImGuiSettingsHandler* handler = ImGui::FindSettingsHandler(Utils::WorkspacePanelSettingsType);
+		if (handler == nullptr || handler->UserData != &m_State->PanelSettings)
+			return;
+		// Write the panels now, while this layer can still describe them. A save after the handler is gone drops them, which
+		// the owner prevents by stopping the ini first (EditorApp::OnShutdown).
+		if (current->SettingsLoaded && ImGui::GetIO().IniFilename != nullptr)
+			ImGui::SaveIniSettingsToDisk(ImGui::GetIO().IniFilename);
+		ImGui::RemoveSettingsHandler(Utils::WorkspacePanelSettingsType);
+	}
 
 	Status EditorLayer::OnSafePoint(double nowSeconds)
 	{
@@ -169,6 +294,8 @@ namespace Engine {
 		}
 		ENGINE_TRY(m_State->Inspector.ApplyQueuedEdit(context));
 		context.Actions.Pump();
+		// Destroyed entities and replaced runtime scenes leave the selection before panels draw it.
+		context.Editor.PruneSelection();
 		for (auto ticket = m_State->Tickets.begin(); ticket != m_State->Tickets.end();)
 		{
 			auto result = context.Actions.TakeResult(*ticket);
@@ -202,7 +329,8 @@ namespace Engine {
 		if (context.Thumbnails.GetProjectGeneration() != 0)
 		{
 			const Status thumbnails = context.Thumbnails.Pump();
-			// Loading a queued asset can advance version zero to one. The next Draw queues its current version.
+			// Pump drops work for deleted assets and follows version changes itself; Conflict only reports a binding or
+			// cache root that is no longer current, which the host's project-close reset replaces.
 			if (!thumbnails && thumbnails.error().GetCode() != ErrorCode::Conflict)
 				return thumbnails;
 		}
@@ -219,6 +347,21 @@ namespace Engine {
 		const PlaySession* session = editor.GetPlay().GetSession();
 		const bool agentTime = session != nullptr && session->IsLockstep() && session->GetLockstepOwner() != NoClient;
 		const float scale = Utils::EditorUiScale();
+		m_State->RegisterPanelSettings();
+		if (std::exchange(m_State->PanelSettings.Pending, false))
+		{
+			// A freshly loaded imgui.ini decides which panels are open; one without a saved set uses the defaults.
+			if (m_State->PanelSettings.Loaded)
+				ui.SetOpenPanels(*m_State->PanelSettings.Loaded, editor.HasProject());
+			else
+				ui.ResetLayout(editor.HasProject());
+			m_State->WrittenPanels = Utils::SavedWorkspacePanels(ui);
+		}
+		// A test run owns the editor: its lease rejects these actions, so their controls are disabled too.
+		const bool testRun = editor.GetPlay().IsTestRunActive();
+		const bool canSave = editor.HasScene() && !editor.IsReadOnly() && !testRun;
+		const bool canUndo = !editor.IsReadOnly() && !testRun && editor.GetHistory().CanUndo();
+		const bool canRedo = !editor.IsReadOnly() && !testRun && editor.GetHistory().CanRedo();
 		auto queue = [this, &context](std::string_view method, const Json& params, bool cancelGesture = false)
 		{
 			auto submitted = context.Actions.Submit(method, params);
@@ -244,7 +387,7 @@ namespace Engine {
 					m_State->ShowNewScene = true;
 					m_State->CreateScene = false;
 				}
-				if (ImGui::MenuItem("Save scene", "Ctrl+S", false, editor.HasScene() && !editor.IsReadOnly()))
+				if (ImGui::MenuItem("Save scene", "Ctrl+S", false, canSave))
 					queue("scene.save", Json::object(), true);
 				if (ImGui::MenuItem("Project launcher", nullptr, false, !editor.HasProject()))
 				{
@@ -255,9 +398,9 @@ namespace Engine {
 			}
 			if (ImGui::BeginMenu("Edit"))
 			{
-				if (ImGui::MenuItem("Undo", "Ctrl+Z", false, !editor.IsReadOnly() && editor.GetHistory().CanUndo()))
+				if (ImGui::MenuItem("Undo", "Ctrl+Z", false, canUndo))
 					queue("edit.undo", Json::object(), true);
-				if (ImGui::MenuItem("Redo", "Ctrl+Y", false, !editor.IsReadOnly() && editor.GetHistory().CanRedo()))
+				if (ImGui::MenuItem("Redo", "Ctrl+Y", false, canRedo))
 					queue("edit.redo", Json::object(), true);
 				ImGui::EndMenu();
 			}
@@ -308,7 +451,7 @@ namespace Engine {
 				ImGui::SetTooltip("%s\n%s", identity.c_str(), editor.GetScenePath()->ToString().c_str());
 			if (!stackedToolbar)
 				ImGui::SameLine();
-			ImGui::BeginDisabled(!editor.HasScene() || agentTime);
+			ImGui::BeginDisabled(!editor.HasScene() || agentTime || testRun);
 			ImGui::BeginDisabled(session != nullptr);
 			if (Utils::EditorToolbarButton("Play", "Run the scene with scripts and audio", session && session->GetMode() == PlayMode::Play))
 				queue("play.start", Json{ { "mode", "Play" } }, true);
@@ -573,12 +716,18 @@ namespace Engine {
 			ImGui::EndDisabled();
 			ImGui::EndPopup();
 		}
-		if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_S) && editor.HasScene() && !editor.IsReadOnly())
-			queue("scene.save", Json::object(), true);
-		if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_Z) && !editor.IsReadOnly() && editor.GetHistory().CanUndo())
-			queue("edit.undo", Json::object(), true);
-		if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_Y) && !editor.IsReadOnly() && editor.GetHistory().CanRedo())
-			queue("edit.redo", Json::object(), true);
+		// These run outside every panel window, so they route globally: they work whichever panel has focus, while an active
+		// text field keeps its own Ctrl+Z and Ctrl+Y (InputText claims them through a higher-priority focused route).
+		// A modal dialog owns the keyboard, so they wait until it closes.
+		if (ImGui::GetTopMostPopupModal() == nullptr)
+		{
+			if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_S, ImGuiInputFlags_RouteGlobal) && canSave)
+				queue("scene.save", Json::object(), true);
+			if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_Z, ImGuiInputFlags_RouteGlobal) && canUndo)
+				queue("edit.undo", Json::object(), true);
+			if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_Y, ImGuiInputFlags_RouteGlobal) && canRedo)
+				queue("edit.redo", Json::object(), true);
+		}
 		if (editor.IsSceneChangedOnDisk() || !m_State->ErrorMessage.empty())
 		{
 			ImGui::Begin("Notifications", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
@@ -608,7 +757,18 @@ namespace Engine {
 				ImGui::SetNextWindowSize(ImVec2(std::min(920.0f * scale, work.GetWidth() * 0.9f), std::min(640.0f * scale, work.GetHeight() * 0.9f)), ImGuiCond_FirstUseEver);
 				ImGui::SetNextWindowPos(work.GetCenter(), ImGuiCond_FirstUseEver, ImVec2(0.5f, 0.5f));
 			}
-			const bool visible = ImGui::Begin(Utils::EditorWindowTitle(panel), &open);
+			if (m_State->FocusRequest == panel)
+			{
+				ImGui::SetNextWindowFocus();
+				m_State->FocusRequest.reset();
+			}
+			// The viewport panels draw into this window and name its flags; the other panels use the defaults.
+			ImGuiWindowFlags windowFlags = ImGuiWindowFlags_None;
+			if (panel == EditorPanel::SceneViewport)
+				windowFlags = SceneViewportPanel::GetWindowFlags();
+			else if (panel == EditorPanel::GameViewport)
+				windowFlags = GameViewportPanel::GetWindowFlags();
+			const bool visible = ImGui::Begin(Utils::EditorWindowTitle(panel), &open, windowFlags);
 			Status drawn;
 			if (visible)
 			{
@@ -667,6 +827,12 @@ namespace Engine {
 		}
 		if (!sceneDrawn)
 			context.Viewports.SetRectangle(ViewportView::Scene, {});
+		if (std::vector<EditorPanel> persisted = Utils::SavedWorkspacePanels(ui); persisted != m_State->WrittenPanels)
+		{
+			// Menu toggles, close buttons and resets all reach the ini through Dear ImGui's delayed save.
+			ImGui::MarkIniSettingsDirty();
+			m_State->WrittenPanels = std::move(persisted);
+		}
 		if (context.Recovery.GetOffer)
 		{
 			const auto offer = context.Recovery.GetOffer();
@@ -710,6 +876,13 @@ namespace Engine {
 	{
 		m_State->FrameRequested = true;
 		m_State->RequestedAfter = m_State->Context.Editor.GetUiState().GetCompletedFrame();
+	}
+
+	Status EditorLayer::RevealPanel(EditorPanel panel)
+	{
+		ENGINE_TRY(m_State->Context.Editor.GetUiState().SetPanelOpen(panel, true));
+		m_State->FocusRequest = panel;
+		return {};
 	}
 
 	bool EditorLayer::IsFrameRequested() const

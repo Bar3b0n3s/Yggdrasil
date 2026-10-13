@@ -42,4 +42,19 @@ namespace Engine {
 			m_OpenPanels.push_back(EditorPanel::ProjectLauncher);
 	}
 
+	void EditorUiState::SetOpenPanels(std::span<const EditorPanel> panels, bool hasProject)
+	{
+		m_OpenPanels.clear();
+		for (const EditorPanel panel : panels)
+		{
+			if (panel != EditorPanel::ProjectLauncher && !EditorPanelToString(panel).empty()
+				&& std::find(m_OpenPanels.begin(), m_OpenPanels.end(), panel) == m_OpenPanels.end())
+				m_OpenPanels.push_back(panel);
+		}
+		std::sort(m_OpenPanels.begin(), m_OpenPanels.end());
+		// The launcher is the last enumerator, so appending it keeps the stable order.
+		if (!hasProject)
+			m_OpenPanels.push_back(EditorPanel::ProjectLauncher);
+	}
+
 }

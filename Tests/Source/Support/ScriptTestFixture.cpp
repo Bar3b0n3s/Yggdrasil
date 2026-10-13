@@ -8,6 +8,7 @@
 #include "Engine/Scene/TransformSystem.h"
 #include "Engine/Scripting/LoadTimeVm.h"
 #include "Engine/Scripting/RegisterBindings.h"
+#include "Engine/Scripting/ScriptProxy.h"
 
 #include <cmath>
 #include <utility>
@@ -119,6 +120,8 @@ namespace Engine {
 
 		Result<UUID> ScriptTestFixture::CreateEntity(std::string_view name, UUID parent)
 		{
+			if (OnHostRequest)
+				OnHostRequest("CreateEntity");
 			if (GetScene().GetEntityCount() >= EntityLimit)
 				return MakeError(ErrorCode::Validation, "The fixture entity limit is reached");
 			Entity parentEntity = GetScene().FindEntityByID(parent);
@@ -130,9 +133,14 @@ namespace Engine {
 		Result<UUID> ScriptTestFixture::Instantiate(AssetHandle prefab, const std::optional<glm::vec3>& position,
 			const std::optional<glm::quat>& rotation, UUID parent)
 		{
+			if (OnHostRequest)
+				OnHostRequest("Instantiate");
 			Entity parentEntity = GetScene().FindEntityByID(parent);
 			if (parent.IsValid() && !parentEntity.IsValid())
 				return MakeError(ErrorCode::NotFound, "No parent entity {}", parent);
+			// The same pre-instantiation guard as PlaySession: SetWorldPosition below asserts representability.
+			if (position.has_value())
+				ENGINE_TRY(ScriptProxy::ValidateWorldPosition(parentEntity, *position));
 			LoadReport report;
 			ENGINE_TRY_ASSIGN(const Prefab asset, LoadPrefabAsset(m_Assets, prefab, GetTypes(), report));
 			const size_t existing = GetScene().GetEntityCount();

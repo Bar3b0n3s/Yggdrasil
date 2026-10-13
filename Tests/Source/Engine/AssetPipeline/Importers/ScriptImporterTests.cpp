@@ -11,10 +11,14 @@
 #include <doctest/doctest.h>
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <array>
 #include <functional>
 #include <latch>
+#include <string>
+#include <string_view>
 #include <thread>
+#include <vector>
 
 namespace Engine {
 
@@ -224,8 +228,15 @@ namespace Engine {
 				const auto check = context.GetScriptCheck();
 				REQUIRE(check);
 				CHECK(check->SourceHash == XXH64(source));
-				REQUIRE(check->Diagnostics.size() == 1);
-				CHECK(check->Diagnostics[0].Message == "latest attempt");
+				// The attempt keeps the checker's findings and adds its own located failure once.
+				REQUIRE(check->Diagnostics.size() == 2);
+				CHECK(std::ranges::count(check->Diagnostics, std::string("latest attempt"), &ScriptDiagnostic::Message) == 1);
+				const auto failure = std::ranges::find(check->Diagnostics, std::string("SCRIPT_COMPILE_ERROR"), &ScriptDiagnostic::Code);
+				REQUIRE(failure != check->Diagnostics.end());
+				CHECK(failure->Severity == DiagnosticSeverity::Error);
+				CHECK(failure->File == result.error().GetLocation().File);
+				CHECK(failure->Line == std::max(result.error().GetLocation().Line, 1u));
+				CHECK(failure->Message == result.error().GetMessageText());
 				if (source.find("Missing") != std::string::npos)
 					CHECK_FALSE(context.GetLookups().empty());
 			}
@@ -243,6 +254,44 @@ namespace Engine {
 			const auto retained = fixture.GetManager().Load(*handle);
 			REQUIRE(retained);
 			CHECK(AssetCast<ScriptData>(*retained)->Bytecode == AssetCast<ScriptData>(*good)->Bytecode);
+		}
+
+		TEST_CASE("ScriptImporter: a failed attempt locates its failure beside the checker's findings without duplicating them")
+		{
+			Test::AssetTestFixture fixture;
+			Test::ImportCheckProvider provider;
+			std::vector<ScriptDiagnostic> reported;
+			provider.Check = [&reported](const ScriptCheckRequest&)
+			{
+				return reported;
+			};
+			const auto import = [&fixture, &provider](std::string_view source) -> ScriptImportCheck
+			{
+				ImportContext context({ .Vfs = &fixture.GetVfs(), .SourcePath = fixture.ProjectPath("Assets/Probe.luau"), .SourceBytes = AsBytes(source), .Registry = &fixture.GetRegistry(), .ScriptDiagnostics = &provider });
+				REQUIRE_FALSE(ScriptImporter().Import(context, Test::ScriptMetadata()));
+				const auto check = context.GetScriptCheck();
+				REQUIRE(check);
+				return *check;
+			};
+			// A load-time failure on line 3 is located there (the checker cannot see it).
+			const auto loadTime = import("local T = {}\n\nT.Axis = Input.GetAxis('Move')\nreturn Script.Define('Probe', T)\n");
+			REQUIRE(loadTime.Diagnostics.size() == 1);
+			CHECK(loadTime.Diagnostics[0].Code == "SCRIPT_COMPILE_ERROR");
+			CHECK(loadTime.Diagnostics[0].File == "Assets/Probe.luau");
+			CHECK(loadTime.Diagnostics[0].Line == 3);
+			CHECK(loadTime.Diagnostics[0].Column >= 1);
+			CHECK(loadTime.Diagnostics[0].Message.find("not available at load time") != std::string::npos);
+			// A syntax error on line 3 without a checker finding is located by the compiler.
+			const std::string syntax = "-- first\n-- second\nlocal = 1\n";
+			const auto compiled = import(syntax);
+			REQUIRE(compiled.Diagnostics.size() == 1);
+			CHECK(compiled.Diagnostics[0].Code == "SCRIPT_COMPILE_ERROR");
+			CHECK(compiled.Diagnostics[0].Line == 3);
+			CHECK(compiled.Diagnostics[0].Column == 7);
+			// When the checker already reported that syntax error, the attempt keeps only the checker's finding.
+			reported = { { .Code = "SCRIPT_COMPILE_ERROR", .File = "Assets/Probe.luau", .Line = 3, .Column = 7, .Message = "Syntax error from the checker", .EndLine = 3, .EndColumn = 8 } };
+			const auto deduplicated = import(syntax);
+			CHECK(deduplicated.Diagnostics == reported);
 		}
 
 		TEST_CASE("ScriptImporter: independent worker imports produce identical artifacts")

@@ -9,6 +9,7 @@
 #include "Engine/Core/Jobs/JobSystem.h"
 #include "Engine/Core/Result.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <span>
@@ -34,6 +35,17 @@ namespace Engine {
 
 	// "Unloaded", "Loading", "Loaded" or "Failed".
 	[[nodiscard]] std::string_view AssetStateToString(AssetState state);
+
+	// Distinct handles one manager keeps AssetMissingCode reference diagnostics for (GetOrPlaceholder, ReportDiagnostic).
+	// An AssetRef may name a handle no registry knows (§7.1: scripts and automation pass references through, and
+	// Assets.IsValid tells), so without a bound every new unknown handle would add a diagnostic and a log line for good.
+	// While this many are recorded, a use of another unknown handle is neither recorded nor logged: the summary diagnostic
+	// (AssetMissingCode, Severity Error, no asset, no path, Subject AssetMissingSuppressedSubject) counts those uses
+	// instead; it is logged once, when it appears, and its message is updated in place after that. Counting uses rather
+	// than distinct handles keeps the summary bounded too. A recorded handle that loads frees its place for the next
+	// unknown one; a registry scan removes the summary and its count, like the reference type mismatches.
+	inline constexpr size_t MaxAssetMissingDiagnostics = 1024;
+	inline constexpr std::string_view AssetMissingSuppressedSubject = "suppressed";
 
 	// The common interface and the shared failure policy of both managers (§7.2):
 	//   - Loaded assets are immutable AssetRef<T>, safe to share across threads. A hot reload replaces the manager's entry
@@ -106,7 +118,8 @@ namespace Engine {
 
 		// The asset `handle` as a T, or T's placeholder (never null) when it is missing, failed to load or is of another type.
 		// The first failure of each (handle, problem) is logged (Error) and recorded as a diagnostic: AssetMissingCode for an
-		// unknown handle, AssetTypeMismatchCode for an asset of another type, AssetImportFailedCode for a failed load. A null
+		// unknown handle (for at most MaxAssetMissingDiagnostics handles, the summary counting the uses of any others),
+		// AssetTypeMismatchCode for an asset of another type, AssetImportFailedCode for a failed load. A null
 		// handle yields the placeholder without a diagnostic (callers that treat null as "nothing" check it first). T must
 		// have a placeholder (GetPlaceholderHandle(T::StaticType) is valid).
 		//
@@ -157,6 +170,7 @@ namespace Engine {
 
 		// Records `diagnostic` (replacing an equal one) and logs it once per (Code, Asset, Subject): Error severity at Error,
 		// Warning at Warn, through the Engine logger. Renderer/GpuResourceCache reports upload failures here (§8.14 item 7).
+		// An AssetMissingCode diagnostic of a new handle past MaxAssetMissingDiagnostics only counts in the summary.
 		void ReportDiagnostic(AssetDiagnostic diagnostic);
 	protected:
 		AssetManager();
@@ -168,7 +182,8 @@ namespace Engine {
 		// import diagnostics) and allows those problems to be logged again.
 		void ClearDiagnostics(AssetHandle handle, std::span<const std::string_view> codes);
 
-		// Replaces the registry's scan diagnostics (the editor, after each scan), which GetDiagnostics merges in.
+		// Replaces the registry's scan diagnostics (the editor, after each scan), which GetDiagnostics merges in. Removes the
+		// reference type mismatches and the missing-handle summary (MaxAssetMissingDiagnostics).
 		void SetScanDiagnostics(std::vector<AssetDiagnostic> diagnostics);
 
 		// The procedural built-in `handle`, created once and cached (CreateProceduralBuiltinAsset). Errors: NotFound when it is
@@ -187,8 +202,8 @@ namespace Engine {
 		// a failed load, logged once.
 		void ReportUnavailable(AssetHandle handle, AssetType expectedType, const Error* error);
 	private:
-		// Versions, diagnostics, the logged-once set, the procedural built-in cache and the dry run's saved copy
-		// (AssetManager.cpp).
+		// Versions, diagnostics (with the count of the missing-handle summary), the logged-once set, the procedural built-in
+		// cache and the dry run's saved copy (AssetManager.cpp).
 		struct State;
 	private:
 		Scope<State> m_State;

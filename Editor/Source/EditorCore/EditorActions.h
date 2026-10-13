@@ -18,7 +18,8 @@ namespace Engine {
 	// Main-thread queue, owned by EditorLayer; context and server are back-references that outlive it. Never TCP.
 	// A request is validated before enqueue; effects happen at the next safe point, outside ImGui traversal.
 	// Pending methods retain their own MethodContext and are polled once per Pump; Cancel invokes their cancellation.
-	// Agent pause/deny switches do not deny user actions. Read-only, launcher, revision, dry-run and param rules still hold.
+	// Agent pause/deny switches do not deny user actions. Read-only, launcher, revision, dry-run and param rules still hold,
+	// and so does a test run's lease (EditorContext::CheckTestRunAdmission), at Submit and again when the action runs.
 	class EditorActions
 	{
 	public:
@@ -32,7 +33,11 @@ namespace Engine {
 		// Moves out one completion; nullopt pending. NotFound unknown/already-consumed ticket.
 		[[nodiscard]] Result<std::optional<Result<Json>>> TakeResult(uint64_t ticket);
 		// NotFound unknown ticket; queued cancellation has no side effects, pending cancellation follows the handler.
+		// The Cancelled completion stays until TakeResult consumes it.
 		[[nodiscard]] Status Cancel(uint64_t ticket);
+		// Cancel for a caller that abandons the ticket (a panel whose project changed): the entry, its method context and
+		// any completion are released at once, and the ticket becomes unknown. NotFound unknown ticket.
+		[[nodiscard]] Status Discard(uint64_t ticket);
 	private:
 		struct State;
 		Scope<State> m_State;

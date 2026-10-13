@@ -289,6 +289,11 @@ class ConnectionTests(BridgeTestCase):
         lines = self.read_lines(connection.transcript.path) if connection.transcript else []
         self.assertEqual(lines[-1]["error"]["errorCode"], "EditorCrashed")
 
+    def test_a_crash_with_an_autosave_points_to_recovery(self) -> None:
+        crashed = EditorCrashed(exit_code=4, last_log_lines=[], crash_report_path="", autosave_available=True)
+        self.assertIn("editor_launch with recover: true", crashed.to_json()["hint"])
+        self.assertNotIn("recover", EditorCrashed(4, [], "", False).to_json()["hint"])
+
 
 class EngineMethodsTests(BridgeTestCase):
     def test_engine_methods_reads_an_offloaded_catalogue(self) -> None:
@@ -355,6 +360,67 @@ class LauncherTests(BridgeTestCase):
             self.assertIn(str(holder.pid), str(lookup.exception))
         finally:
             fake_editor.release_project_lock(holder)
+
+    def test_recover_never_attaches_to_an_editor_serving_the_project(self) -> None:
+        root = self.make_project()
+        editor = self.start_server({"session.info": lambda params: {"pid": os.getpid()}})
+        launcher, sessions = self.make_launcher()
+        editor.write_session_file(sessions, project_path=(root / "Game.eproj").as_posix())
+        with self.assertRaises(RuntimeError) as raised:
+            launcher.launch(LaunchRequest(project=root, recover=True))
+        self.assertIn("Recover prompt", str(raised.exception))
+        self.assertEqual(editor.requests, [])
+
+    def test_open_project_reports_recovery_and_a_refused_recovery_shuts_the_editor_down(self) -> None:
+        root = self.make_project()
+        opened: list[dict[str, Any]] = []
+
+        def open_project(params: dict[str, Any]) -> dict[str, Any]:
+            opened.append(params)
+            if len(opened) > 1:
+                raise fake_editor.FakeError(engine_client.CONFLICT, "Conflict", "the scene changed after its autosave")
+            return {"project": {"name": "Game", "root": root.as_posix()}, "warnings": [], "recoveryAvailable": True,
+                    "recovered": params["recover"]}
+
+        editor = self.start_server({"project.open": open_project})
+        connection = EditorConnection(None, supervised=False, client=self.connect(editor))
+        Launcher.open_project(connection, root / "Game.eproj", True)
+        self.assertEqual((opened[0]["path"], opened[0]["recover"]), (str(root / "Game.eproj"), True))
+        self.assertEqual(connection.recovery, {"recoveryAvailable": True, "recovered": True})
+        self.assertTrue(connection.describe()["recovered"])
+        refused = EditorConnection(None, supervised=False, client=self.connect(editor))
+        with self.assertRaises(RuntimeError) as raised:
+            Launcher.open_project(refused, root / "Game.eproj", True)
+        self.assertIn("Conflict", str(raised.exception))
+        self.assertIsNone(refused.recovery)
+        self.assertIsNone(refused.client)
+
+    def test_editor_launch_passes_recover_and_reports_the_outcome(self) -> None:
+        root = self.make_project()
+        editor = self.start_server({})
+        launcher, _ = self.make_launcher()
+        bridge = server.Bridge(REPOSITORY_ROOT, [], launcher)
+        requests: list[LaunchRequest] = []
+        for recovery, expected in (({"recoveryAvailable": True, "recovered": True}, "recovered its autosave"),
+                                   ({"recoveryAvailable": True, "recovered": False}, "recover: true")):
+            with self.subTest(recovered=recovery["recovered"]):
+                connection = EditorConnection(root, supervised=True, client=self.connect(editor))
+                connection.recovery = recovery
+
+                def launch(request: LaunchRequest, launched: EditorConnection = connection) -> EditorConnection:
+                    requests.append(request)
+                    return launched
+
+                with mock.patch.object(launcher, "launch", side_effect=launch):
+                    structured, text, is_error = bridge.call_tool(
+                        "editor_launch", {"project": str(root), "recover": recovery["recovered"]})
+                self.assertFalse(is_error, text)
+                self.assertEqual(requests[-1].recover, recovery["recovered"])
+                self.assertEqual(structured["recovered"], recovery["recovered"])
+                self.assertTrue(structured["recoveryAvailable"])
+                self.assertIn(expected, text)
+                bridge.connection = None
+                connection.disconnect()
 
     def test_missing_projects_and_binaries_are_reported(self) -> None:
         launcher, _ = self.make_launcher()

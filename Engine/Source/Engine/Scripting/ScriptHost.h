@@ -106,6 +106,11 @@ namespace Engine {
 		virtual void OnExternalMutation(std::string_view reason) = 0;
 		// True in lockstep, recording, replay or test runs. Explicit Test.ReloadScript uses the tested synchronous override.
 		[[nodiscard]] virtual bool IsReloadDeferred() const = 0;
+		// §13.2 watchdog phase: the innermost gameplay script entry of the main thread changed. `script` is its authored
+		// source path (empty for a test case body) and `callback` the callback, "Task" or "Test.Case"; both are empty once no
+		// gameplay entry is running (one-shot evaluations never report one). Called on every protected entry and exit, so
+		// implementations must be cheap; hosts without a phase marker keep the default, which ignores it.
+		virtual void OnScriptPhase(std::string_view /*script*/, std::string_view /*callback*/) {}
 	};
 
 }

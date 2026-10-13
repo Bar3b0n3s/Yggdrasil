@@ -8,12 +8,14 @@
 #include "Engine/Automation/Protocol/MethodRegistry.h"
 #include "Engine/Platform/Process.h"
 #include "Engine/Reflection/TypeRegistry.h"
+#include "Engine/Scripting/ScriptError.h"
 #include "Engine/Session/PlaySession.h"
 
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
 #include <format>
+#include <optional>
 #include <utility>
 
 namespace Engine {
@@ -82,6 +84,12 @@ namespace Engine {
 			result.Project = std::move(host.Project);
 			const PlaySession* session = context.GetPlaySession();
 			result.PlayState = std::string(PlayRunStateToString(GetPlayRunState(session)));
+			if (session != nullptr)
+				if (const std::optional<ScriptError>& fatal = session->GetFatalError())
+				{
+					result.Stopped = true;
+					result.StopError = VariantValue(ScriptErrorToJson(*fatal));
+				}
 			result.Renderer = std::move(host.Renderer);
 			if (session != nullptr && session->IsLockstep())
 				result.LockstepOwner = context.GetClientName(session->GetLockstepOwner());
@@ -140,6 +148,8 @@ namespace Engine {
 			.Field("capabilities", &SessionInfoResult::Capabilities, "The optional protocol features the server offers.")
 			.Field("project", &SessionInfoResult::Project, "The open project.")
 			.Field("playState", &SessionInfoResult::PlayState, "\"Edit\", \"Play\", \"Simulate\" or \"Paused\".")
+			.Field("stopped", &SessionInfoResult::Stopped, "A fatal script error stopped the play session, as play.state's stopped: it stays Paused and ticks no longer advance.")
+			.Field("stopError", &SessionInfoResult::StopError, "The script error that stopped the play session (§11.7 form, as play.state's stopError); null otherwise.")
 			.Field("renderer", &SessionInfoResult::Renderer, "\"vulkan\" or \"none\" (--renderer).")
 			.Field("lockstepOwner", &SessionInfoResult::LockstepOwner, "The name of the client that owns lockstep; empty when none.")
 			.Field("readOnly", &SessionInfoResult::ReadOnly, "Whether the host denies mutations: the editor with --read-only, the Runtime always.")

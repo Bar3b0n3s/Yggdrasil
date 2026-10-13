@@ -34,6 +34,13 @@ namespace Engine {
 	inline constexpr int32_t AudioSystemEffectPriority = 0; // Sfx and Ui sources, and every one-shot
 	inline constexpr int32_t AudioSystemMusicPriority = 1;  // sources in the Music group
 
+	// One-shot requests (AudioSystem::PlayOneShot) one system admits between two Updates, that is in one frame (§5.7: the
+	// frame's fixed steps, Update and LateUpdate all run before its AudioUpdate phase; requests made while no frame runs,
+	// such as evaluations in a paused session, count toward the next frame). A later request in the frame fails with
+	// InvalidState before any voice starts; a script gets it as a located error (Scripting/ScriptLimits.h). The voice pool
+	// itself never holds more than MaxAudioVoices voices, and the system keeps only the handles of live one-shot voices.
+	inline constexpr uint32_t MaxAudioOneShotsPerFrame = 1024;
+
 	// The validation codes of the audio system (§13.7), reported by EditorCore's ProjectValidator through
 	// FindAudioSceneIssues.
 	// Warning, not fixable: spatial AudioSources in a scene without a primary AudioListener and without a primary camera
@@ -120,6 +127,8 @@ namespace Engine {
 	//
 	// One-shots (§11.5 Audio.PlayOneShot). Non-spatial without a position, spatial at the position (default
 	// AudioSpatialization) otherwise; group Sfx unless one is given; priority AudioSystemEffectPriority; released when they end.
+	// At most MaxAudioOneShotsPerFrame requests per frame. The handles of one-shot voices that ended or were stolen are
+	// dropped at every request and every Update, so the system tracks at most MaxAudioVoices of them.
 	//
 	// Pause and stop (§10.2). SetPaused(true) pauses every voice of the system (sources and one-shots; new voices start
 	// paused) and SetPaused(false) resumes them where they were; both are idempotent. Destroying the system is Stop: every
@@ -174,9 +183,10 @@ namespace Engine {
 		[[nodiscard]] bool IsPlaying(ConstEntity entity) const;
 
 		// §11.5 Audio.PlayOneShot(clip, position?, volume?, group?) (see "One-shots"). Errors: InvalidArgument for a null clip
-		// handle, a volume that is not finite or below 0, or a non-finite position; the engine's errors (a full pool of
-		// higher-priority voices). A missing clip, or an asset of another type, plays the silent clip and records its
-		// diagnostic once (§7.2).
+		// handle, a volume that is not finite or below 0, or a non-finite position; InvalidState once MaxAudioOneShotsPerFrame
+		// requests with valid arguments were admitted since the last Update (each counts, whether or not its voice started);
+		// the engine's errors (a full pool of higher-priority voices). A missing clip, or an asset of another type, plays the
+		// silent clip and records its diagnostic once (§7.2).
 		[[nodiscard]] Result<AudioVoiceHandle> PlayOneShot(AssetHandle clip, const std::optional<glm::vec3>& position, float volume = 1.0f,
 			AudioGroup group = AudioGroup::Sfx);
 
@@ -190,7 +200,8 @@ namespace Engine {
 		[[nodiscard]] const AudioListenerSelection& GetListener() const;
 	private:
 		// The scene and engine back-references, the signal connections, the registered clips by (handle, version), the
-		// one-shot voices, the pause state, the group volumes InitializeMix recorded and the last listener (AudioSystem.cpp).
+		// one-shot voices and this frame's request count, the pause state, the group volumes InitializeMix recorded and the
+		// last listener (AudioSystem.cpp).
 		struct State;
 	private:
 		Scope<State> m_State;

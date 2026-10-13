@@ -1,8 +1,9 @@
 """Launch or attach (Docs/Architecture.md §13.8 "Launch or attach", §4.13): two processes never write the same project.
 
-editor_launch {project, create?, template?, headless?, renderer?}:
+editor_launch {project, create?, template?, headless?, renderer?, recover?}:
   1. A live session file whose projectPath names the project (engine_client.find_session): attach to that editor, whose
-     automation server is listening (it runs with --automation or "Allow AI automation"). Nothing is spawned.
+     automation server is listening (it runs with --automation or "Allow AI automation"). Nothing is spawned. With
+     recover this is an error: that editor has the project open, and only its own Recover prompt can adopt the autosave.
   2. Otherwise, when <Project>/Library/Editor.lock is held (an editor without automation): fail with
      EditorAlreadyOpen {pid} (the pid from the lock file) and the hint "enable Allow AI automation in the editor's
      Automation panel, then call editor_attach".
@@ -10,7 +11,12 @@ editor_launch {project, create?, template?, headless?, renderer?}:
      "python Scripts/Build.py --config Release --project Editor") with --automation --project <path> (headless:
      --headless; renderer: --renderer none by default, so a launch needs no GPU; "vulkan" serves viewport_screenshot and
      editor_screenshot, which a --renderer none editor answers with Unsupported), and supervise it. With create, the
-     project is created first through project.create on a launcher-state editor.
+     project is created first through project.create on a launcher-state editor (template: one of project.create's,
+     Empty or Basic3D). An existing project with recover, or with a published autosave candidate
+     (autosave.has_published_autosave, as after EditorCrashed {autosaveAvailable: true}), opens instead through
+     project.open {path, recover} on a launcher-state editor, the one path that can adopt a recovery (§13.8
+     "Resilience"): the launch then reports the editor's recoveryAvailable and recovered, and recover: true installs
+     the autosave as a dirty scene. Without recover a candidate is only reported, never adopted.
 editor_attach {project? | pid?}: attaches explicitly to a live session. The bridge never supervises or kills an editor
 it attached to; editor_shutdown on an attached editor only disconnects.
 
@@ -25,6 +31,7 @@ from pathlib import Path
 from typing import Any
 
 import engine_client
+from engine_mcp.autosave import has_published_autosave
 from engine_mcp.connection import EditorConnection
 from engine_mcp.transcript import CLIENT_NAME
 
@@ -56,6 +63,7 @@ class LaunchRequest:
     template: str = "Empty"
     headless: bool = True
     renderer: str = "none"
+    recover: bool = False
 
 
 def find_project_file(project: Path) -> Path | None:
@@ -94,23 +102,32 @@ class Launcher:
     def launch(self, request: LaunchRequest) -> EditorConnection:
         """editor_launch (see the module comment). Raises EditorAlreadyOpen, FileNotFoundError for a missing binary, or
         RuntimeError when the spawned editor exits before it listens (with its exit code: 3 for a locked or invalid
-        project)."""
+        project), when project.create or project.open fails, or when recover asks to adopt an autosave that an
+        editor already serving the project holds."""
         if request.renderer not in RENDERERS:
             raise ValueError(f"renderer must be one of {', '.join(RENDERERS)} (got '{request.renderer}')")
         project = request.project.expanduser().resolve()
         project_file = find_project_file(project)
         if project_file is None and not request.create:
             raise FileNotFoundError(f"no project at {project}: pass create: true to create one")
+        if project_file is None and request.recover:
+            raise ValueError(f"no project at {project} to recover: recover opens an existing project")
         if project_file is not None:
             session = engine_client.find_session(self.sessions_directory(), project_file)
             if session is not None:
+                if request.recover:
+                    raise RuntimeError(f"an editor (pid {session.pid}) already has {project_file} open; only its Recover "
+                                       "prompt can adopt the autosave (attach without recover to use that editor)")
                 return self.connect(session, supervised=False, editor=None)
             holder = engine_client.read_lock_holder(project_file.parent)
             if holder is not None:
                 raise EditorAlreadyOpen(holder)
+        # project.open {recover} adopts a recovery only in the launcher state, so an existing project with a recovery to
+        # adopt or report opens through it; any other existing project opens directly with --project.
+        open_with_recovery = project_file is not None and (request.recover or has_published_autosave(project_file.parent))
         executable = engine_client.find_editor_executable(self.repository_root, self.configurations)
         arguments = ["--automation", "--renderer", request.renderer, *(["--headless"] if request.headless else [])]
-        if project_file is not None:
+        if project_file is not None and not open_with_recovery:
             arguments += ["--project", str(project_file)]
         editor = engine_client.launch_editor(executable, arguments, self.user_data_directory(), self.app_name)
         assert editor.session is not None
@@ -121,6 +138,8 @@ class Launcher:
             raise
         if project_file is None:
             self.create_project(connection, project, request.template)
+        elif open_with_recovery:
+            self.open_project(connection, project_file, request.recover)
         return connection
 
     def attach(self, project: Path | None = None, pid: int | None = None) -> EditorConnection:
@@ -167,3 +186,18 @@ class Launcher:
             error = engine_client.error_from_response("project.create", response)
             connection.shutdown(force=True)
             raise RuntimeError(f"project.create failed: {error.detail} ({error.error_code})")
+
+    @staticmethod
+    def open_project(connection: EditorConnection, project_file: Path, recover: bool) -> None:
+        """project.open {path, recover} on the launcher-state editor just spawned; records the editor's recoveryAvailable
+        and recovered on the connection (EditorConnection.recovery). A failure (a stale or corrupt recovery with
+        recover: Conflict, Parse or Validation) shuts the editor down again and is raised as RuntimeError; the project
+        files are unchanged."""
+        response = connection.call("project.open", {"path": str(project_file), "recover": recover})
+        if "error" in response:
+            error = engine_client.error_from_response("project.open", response)
+            connection.shutdown(force=True)
+            raise RuntimeError(f"project.open failed: {error.detail} ({error.error_code})")
+        result = response.get("result", {})
+        connection.recovery = {"recoveryAvailable": result.get("recoveryAvailable") is True,
+                               "recovered": result.get("recovered") is True}

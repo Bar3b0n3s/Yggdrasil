@@ -127,12 +127,14 @@ namespace Engine {
 
 	bool ScriptEngine::State::ClaimError(ScriptCall& call, ScriptReference caseThread, std::string_view pattern)
 	{
-		for (auto& observed : ObservedErrors)
+		for (auto observed = ObservedErrors.begin(); observed != ObservedErrors.end(); ++observed)
 		{
-			if (observed.Case == caseThread && observed.Claimable && !observed.Claimed && MatchError(call, pattern, observed.Error.Message))
+			if (observed->Case == caseThread && MatchError(call, pattern, observed->Error.Message))
 			{
-				observed.Claimed = true;
-				TestHost->OnExpectedScriptError(observed.Error);
+				// A claimed occurrence is never claimed again, so it is released at once and frees its place under the cap.
+				const ScriptError claimed = std::move(observed->Error);
+				ObservedErrors.erase(observed);
+				TestHost->OnExpectedScriptError(claimed);
 				return true;
 			}
 		}

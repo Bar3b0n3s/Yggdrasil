@@ -5,23 +5,28 @@
 #include "Engine/Core/DetMath.h"
 #include "Engine/Core/Json/Json.h"
 #include "Engine/Core/Random.h"
+#include "Engine/Core/Utf8.h"
 #include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Scene/Components/ScriptComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scripting/LuaHelpers.h"
 #include "Engine/Scripting/ScriptApiRegistry.h"
 #include "Engine/Scripting/ScriptCompiler.h"
+#include "Engine/Scripting/ScriptLimits.h"
 #include "Support/ExpectLog.h"
 #include "Support/ScriptTestFixture.h"
 
 #include <doctest/doctest.h>
+#include <glm/glm.hpp>
 #include <nlohmann/json.hpp>
 
 #include <array>
+#include <cmath>
 #include <format>
 #include <map>
 #include <string>
 #include <string_view>
+#include <utility>
 
 namespace Engine {
 
@@ -155,6 +160,9 @@ namespace Engine {
 			const std::array sources{
 				"assert(io == nil and package == nil and loadfile == nil and dofile == nil and loadstring == nil)",
 				"assert(os == nil or next(os) == nil); assert(string.dump == nil)",
+				// The GC-paced heap size is wall-clock driven: no timing-dependent value may reach a gameplay branch.
+				"assert(collectgarbage == nil and gcinfo == nil)",
+				"assert(not pcall(function() vector.angle = function() return 0 end end))",
 				"assert(debug == nil or (debug.getregistry == nil and debug.getupvalue == nil and debug.setupvalue == nil))",
 				"assert(getfenv == nil and setfenv == nil)",
 				"assert(not pcall(function() math.sin = function() return 0 end end))",
@@ -225,6 +233,264 @@ namespace Engine {
 				DetMath::ATan2(1.23456789, 0.731), DetMath::ATan2(1.23456789, 0.731));
 			CHECK((*sandbox)->Evaluate(binary, *path).has_value());
 			CHECK((*sandbox)->Evaluate("--!optimize 2\n" + binary, *path).has_value());
+		}
+
+		TEST_CASE("Sandbox: vector.angle uses DetMath in direct aliased and optimized calls")
+		{
+			Random random(30);
+			SandboxSpecification specification{};
+			specification.RandomStream = &random;
+			auto sandbox = Sandbox::Create(specification);
+			REQUIRE_MESSAGE(sandbox.has_value(), (sandbox ? "" : sandbox.error().ToString()));
+			auto path = VfsPath::Parse("project://Assets/Angle.luau");
+			REQUIRE(path.has_value());
+			struct AngleProbe
+			{
+				glm::vec3 A{};
+				glm::vec3 B{};
+				glm::vec3 Axis{};
+			};
+			// Components with long float mantissas: Luau's lveclib forms the cross product in float and calls the C runtime's
+			// atan2, so its result differs from the engine's double, DetMath evaluation.
+			const std::array<AngleProbe, 4> probes{
+				AngleProbe{ { 0.1f, 0.2f, 0.3f }, { 0.7f, 0.11f, 0.13f }, { 0.0f, 0.0f, 1.0f } },
+				AngleProbe{ { 1.0f, 0.0f, 0.0f }, { 0.0f, 1.0f, 0.0f }, { 0.0f, 0.0f, -1.0f } },
+				AngleProbe{ { 3.3f, -1.7f, 0.9f }, { -2.1f, 0.4f, 5.5f }, { 0.3f, 0.3f, 0.3f } },
+				AngleProbe{ { 0.123456f, 9.87654f, -4.4f }, { 7.25f, -0.003f, 1.0e-3f }, { -1.0f, 2.0f, 0.5f } },
+			};
+			for (const AngleProbe& probe : probes)
+			{
+				const glm::dvec3 a(probe.A), b(probe.B);
+				const glm::dvec3 cross(a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x);
+				const double magnitude = DetMath::ATan2(std::sqrt(cross.x * cross.x + cross.y * cross.y + cross.z * cross.z), a.x * b.x + a.y * b.y + a.z * b.z);
+				const double sign = cross.x * probe.Axis.x + cross.y * probe.Axis.y + cross.z * probe.Axis.z < 0.0 ? -1.0 : 1.0;
+				const std::string vectors = std::format("local a = vector.create({:.9g}, {:.9g}, {:.9g}); local b = vector.create({:.9g}, {:.9g}, {:.9g}); local axis = vector.create({:.9g}, {:.9g}, {:.9g}); ",
+					probe.A.x, probe.A.y, probe.A.z, probe.B.x, probe.B.y, probe.B.z, probe.Axis.x, probe.Axis.y, probe.Axis.z);
+				const std::string source = vectors + "local alias = vector.angle; local v = vector; return { vector.angle(a, b), alias(a, b), v.angle(a, b, axis) }";
+				for (const std::string_view directive : { "", "--!optimize 2\n", "--!native\n" })
+				{
+					CAPTURE(source);
+					CAPTURE(directive);
+					const auto result = (*sandbox)->Evaluate(std::string(directive) + source, *path);
+					REQUIRE_MESSAGE(result.has_value(), (result ? "" : result.error().ToString()));
+					CHECK(result->Value.Get() == Json::array({ magnitude, magnitude, sign * magnitude }));
+				}
+			}
+		}
+
+		TEST_CASE("Sandbox: repeated execution of identical bytecode reuses one source map")
+		{
+			Random random(32);
+			SandboxSpecification specification{};
+			specification.RandomStream = &random;
+			specification.MemoryLimitMB = 1;
+			specification.ClockSeconds = []
+			{
+				return 0.0;
+			};
+			auto sandbox = Sandbox::Create(specification);
+			REQUIRE_MESSAGE(sandbox.has_value(), (sandbox ? "" : sandbox.error().ToString()));
+			const auto path = VfsPath::Parse("project://Assets/Tests/Predicate.replay");
+			REQUIRE(path.has_value());
+			const auto compiled = ScriptCompiler::Compile({ .Path = *path, .Source = "1 + 1 == 2", .Mode = ScriptCompileMode::Expression, .ChunkName = "=replay/Predicate/Expect/0", .JsonPointer = "/Expect/0/Luau" });
+			REQUIRE_MESSAGE(compiled.has_value(), (compiled ? "" : compiled.error().ToString()));
+			ScriptData predicate;
+			predicate.Bytecode = compiled->Bytecode;
+			predicate.SourceMap = compiled->SourceMap;
+			// play.waitFor runs its predicate once per tick. One new private map per execution (about 130 bytes before
+			// interning) would cross this 1 MiB limit long before 20,000 ticks and stop the VM with a memory error.
+			for (int tick = 0; tick < 20000; ++tick)
+			{
+				const auto value = (*sandbox)->ExecuteBytecode(predicate);
+				REQUIRE_MESSAGE(value.has_value(), (value ? "" : value.error().ToString()));
+				REQUIRE(value->Value.Get() == Json(true));
+			}
+			CHECK((*sandbox)->GetMemoryState().SoftBreachCount == 0);
+			// Interning keeps the exact map: a failing copy of the same predicate still reports its authored location.
+			const auto failing = ScriptCompiler::Compile({ .Path = *path, .Source = "error('expected failure')", .Mode = ScriptCompileMode::Chunk, .ChunkName = "=replay/Predicate/Expect/0", .JsonPointer = "/Expect/0/Luau" });
+			REQUIRE(failing.has_value());
+			ScriptData broken;
+			broken.Bytecode = failing->Bytecode;
+			broken.SourceMap = failing->SourceMap;
+			for (int attempt = 0; attempt < 2; ++attempt)
+			{
+				CHECK_FALSE((*sandbox)->ExecuteBytecode(broken).has_value());
+				const auto error = (*sandbox)->GetLastError();
+				REQUIRE(error.has_value());
+				CHECK(error->Script == "Assets/Tests/Predicate.replay");
+				CHECK(error->JsonPointer == "/Expect/0/Luau");
+				CHECK(error->Line == 1);
+				CHECK(error->Message.find("engine/") == std::string::npos);
+			}
+		}
+
+		TEST_CASE("Sandbox: error locations raised for another frame name the authored file")
+		{
+			Random random(34);
+			SandboxModuleReader reader;
+			reader.Sources.emplace("project://Assets/Board.luau", "local Board = {}\nfunction Board.Place(x)\n\tif x < 0 then\n\t\terror(\"bad column\", 2)\n\tend\nend\nreturn Board");
+			SandboxSpecification specification{};
+			specification.RandomStream = &random;
+			specification.SourceModules = &reader;
+			auto sandbox = Sandbox::Create(specification);
+			REQUIRE_MESSAGE(sandbox.has_value(), (sandbox ? "" : sandbox.error().ToString()));
+			const auto path = VfsPath::Parse("project://Assets/Game.luau");
+			REQUIRE(path.has_value());
+			// Level 2 names the caller (Game.luau line 2), another chunk than the raising frame (Board.luau line 4).
+			CHECK_FALSE((*sandbox)->RunSource(*path, "local Board = require('./Board')\nBoard.Place(-1)\nreturn {}").has_value());
+			auto error = (*sandbox)->GetLastError();
+			REQUIRE(error.has_value());
+			CHECK(error->Script == "Assets/Board.luau");
+			CHECK(error->Line == 4);
+			CHECK(error->Message == "Assets/Game.luau:2: bad column");
+			// A caught VM error string rethrown without a position keeps the location of its origin, never a private name.
+			const auto eval = VfsPath::Parse("project://Assets/Rethrow.luau");
+			REQUIRE(eval.has_value());
+			CHECK_FALSE((*sandbox)->Evaluate("local ok, message = pcall(function()\n\tlocal t = nil\n\treturn t.x\nend)\nerror(message, 0)", *eval).has_value());
+			error = (*sandbox)->GetLastError();
+			REQUIRE(error.has_value());
+			CHECK(error->Line == 5);
+			CHECK(error->Message.find("engine/") == std::string::npos);
+			CHECK(error->Message.starts_with("Assets/Rethrow.luau:3: attempt to index nil"));
+			// The same rewrite applies to print, so captured output never names a private chunk either.
+			const auto printed = (*sandbox)->Evaluate("local ok, message = pcall(function() local t = nil; return t.x end)\nprint(message)\nreturn true", *eval);
+			REQUIRE(printed.has_value());
+			REQUIRE(printed->Prints.size() == 1);
+			CHECK(printed->Prints[0].starts_with("Assets/Rethrow.luau:1: attempt to index nil"));
+		}
+
+		TEST_CASE("Sandbox: a cooked runtime require cycle is detected instead of recursing")
+		{
+			Random random(35);
+			std::map<std::string, Ref<const ScriptData>> cooked;
+			for (const auto& [path, source] : { std::pair<std::string_view, std::string_view>{ "Assets/A.luau", "return require('./B')" }, std::pair<std::string_view, std::string_view>{ "Assets/B.luau", "return require('./A')" } })
+			{
+				const auto origin = VfsPath::Create("project", path);
+				REQUIRE(origin.has_value());
+				const auto compiled = ScriptCompiler::Compile({ .Path = *origin, .Source = source });
+				REQUIRE(compiled.has_value());
+				auto data = CreateRef<ScriptData>();
+				data->Bytecode = compiled->Bytecode;
+				data->SourceMap = compiled->SourceMap;
+				cooked.emplace(std::string(path), data);
+			}
+			SandboxSpecification specification{};
+			specification.RandomStream = &random;
+			specification.CookedModules = [&cooked](const VfsPath& path) -> Result<Ref<const ScriptData>>
+			{
+				const auto found = cooked.find(std::string(path.GetPath()));
+				if (found == cooked.end())
+					return MakeError(ErrorCode::NotFound, "no cooked module '{}'", path);
+				return found->second;
+			};
+			auto sandbox = Sandbox::Create(specification);
+			REQUIRE_MESSAGE(sandbox.has_value(), (sandbox ? "" : sandbox.error().ToString()));
+			const Status result = (*sandbox)->RunModule(*cooked.at("Assets/A.luau"));
+			REQUIRE_FALSE(result.has_value());
+			CAPTURE(result.error().ToString());
+			CHECK(result.error().ToString().find("require cycle: Assets/A.luau -> Assets/B.luau -> Assets/A.luau") != std::string::npos);
+			CHECK_FALSE((*sandbox)->IsStopped());
+		}
+
+		TEST_CASE("Sandbox: print joins at most the log message limit however its arguments alias one string")
+		{
+			Random random(36);
+			SandboxSpecification specification{};
+			specification.RandomStream = &random;
+			specification.MemoryLimitMB = 8;
+			auto sandbox = Sandbox::Create(specification);
+			REQUIRE_MESSAGE(sandbox.has_value(), (sandbox ? "" : sandbox.error().ToString()));
+			const auto path = VfsPath::Parse("project://Assets/PrintLimit.luau");
+			REQUIRE(path.has_value());
+			// About 1 MiB of VM memory names a 7 GB message through 7,000 aliases; the host assembles only the capped prefix,
+			// and the line keeps at most the cap, its truncation marker included.
+			const auto marker = [](uint64_t bytes)
+			{
+				return std::format(" [truncated: {} bytes]", bytes);
+			};
+			const size_t straddle = MaxScriptLogMessageBytes - marker(MaxScriptLogMessageBytes).size() - 1;
+			const std::string source = std::format("local s = string.rep('x', 2^20); local t = table.create(7000, s); print(table.unpack(t))\n"
+												   "print(string.rep('y', {}) .. '\xC3\xA9' .. string.rep('z', 100)); print('short', 2); return true",
+				straddle);
+			const auto result = (*sandbox)->Evaluate(source, *path);
+			REQUIRE_MESSAGE(result.has_value(), (result ? "" : result.error().ToString()));
+			REQUIRE(result->Prints.size() == 3);
+			const uint64_t total = 7000ull * 1048576ull + 6999ull;
+			CHECK(result->Prints[0] == std::string(MaxScriptLogMessageBytes - marker(total).size(), 'x') + marker(total));
+			CHECK(result->Prints[0].size() == MaxScriptLogMessageBytes);
+			// The two-byte sequence straddles the cut before the marker: truncation drops it whole instead of splitting it.
+			const uint64_t straddleTotal = straddle + 2 + 100;
+			REQUIRE(straddleTotal > MaxScriptLogMessageBytes);
+			REQUIRE(marker(straddleTotal).size() == marker(MaxScriptLogMessageBytes).size());
+			CHECK(result->Prints[1] == std::string(straddle, 'y') + marker(straddleTotal));
+			CHECK(result->Prints[2] == "short\t2");
+			CHECK_FALSE((*sandbox)->IsStopped());
+		}
+
+		TEST_CASE("Sandbox: a raised error keeps a bounded message and its innermost traceback frames")
+		{
+			Random random(37);
+			SandboxSpecification specification{};
+			specification.RandomStream = &random;
+			specification.MemoryLimitMB = 8;
+			auto sandbox = Sandbox::Create(specification);
+			REQUIRE_MESSAGE(sandbox.has_value(), (sandbox ? "" : sandbox.error().ToString()));
+			const auto path = VfsPath::Parse("project://Assets/Deep.luau");
+			REQUIRE(path.has_value());
+			// A 600,000-byte message of two-byte sequences, raised 101 calls deep (102 authored frames with the chunk).
+			const std::string source = "local function descend(n)\n"
+									   "\tif n == 0 then\n"
+									   "\t\terror(string.rep('\xC3\xA9', 300000))\n"
+									   "\tend\n"
+									   "\treturn descend(n - 1) + 1\n"
+									   "end\n"
+									   "return descend(100)";
+			CHECK_FALSE((*sandbox)->Evaluate(source, *path).has_value());
+			const auto error = (*sandbox)->GetLastError();
+			REQUIRE(error.has_value());
+			CHECK(error->Script == "Assets/Deep.luau");
+			CHECK(error->Line == 3);
+			const std::string marker = " [truncated: 600000 bytes]";
+			CHECK(error->Message.size() <= MaxScriptLogMessageBytes);
+			CHECK(error->Message.size() > MaxScriptLogMessageBytes - marker.size() - 2);
+			CHECK(error->Message.ends_with(marker));
+			CHECK(error->Message.starts_with("\xC3\xA9\xC3\xA9"));
+			CHECK(IsValidUtf8(error->Message));
+			REQUIRE(error->Traceback.size() == MaxScriptErrorTracebackFrames);
+			for (size_t index = 0; index + 1 < error->Traceback.size(); ++index)
+			{
+				CHECK(error->Traceback[index].Script == "Assets/Deep.luau");
+				CHECK(error->Traceback[index].Function == "descend");
+			}
+			CHECK(error->Traceback.front().Line == 3);
+			CHECK(error->Traceback[1].Line == 5);
+			CHECK(error->Traceback.back().Script.empty());
+			CHECK(error->Traceback.back().Line == 0);
+			CHECK(error->Traceback.back().Function == std::format("[truncated: {} more frames]", 102 - (MaxScriptErrorTracebackFrames - 1)));
+			CHECK_FALSE((*sandbox)->IsStopped());
+		}
+
+		TEST_CASE("Sandbox: a require request longer than its limit is refused before it is recorded")
+		{
+			Random random(38);
+			SandboxModuleReader reader;
+			reader.Sources.emplace("project://Assets/Board.luau", "return {}");
+			SandboxSpecification specification{};
+			specification.RandomStream = &random;
+			specification.SourceModules = &reader;
+			auto sandbox = Sandbox::Create(specification);
+			REQUIRE_MESSAGE(sandbox.has_value(), (sandbox ? "" : sandbox.error().ToString()));
+			const auto path = VfsPath::Parse("project://Assets/Game.luau");
+			REQUIRE(path.has_value());
+			// 551 "./" segments and the module name: 1,107 bytes naming Assets/Board.luau, which resolves at 1,023 bytes.
+			CHECK_FALSE((*sandbox)->RunSource(*path, "require(string.rep('./', 551) .. 'Board')\nreturn {}").has_value());
+			const auto error = (*sandbox)->GetLastError();
+			REQUIRE(error.has_value());
+			CHECK(error->Message.find(std::format("is 1107 bytes; the limit is {}", MaxScriptRequireBytes)) != std::string::npos);
+			CHECK(error->Line == 1);
+			const auto within = (*sandbox)->RunSource(*path, "local board = require(string.rep('./', 509) .. 'Board')\nreturn {}");
+			CHECK_MESSAGE(within.has_value(), (within ? std::string() : within.error().ToString()));
+			CHECK_FALSE((*sandbox)->IsStopped());
 		}
 
 		TEST_CASE("Sandbox: math random shares the injected session stream")

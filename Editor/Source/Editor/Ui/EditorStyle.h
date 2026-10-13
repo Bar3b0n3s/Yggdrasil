@@ -2,6 +2,7 @@
 
 #include "EditorCore/EditorUiState.h"
 
+#include <cstdint>
 #include <string>
 #include <string_view>
 
@@ -28,6 +29,16 @@ namespace Engine {
 		void EditorEmptyState(std::string_view title, std::string_view description);
 		// Call inside a window. Tooltip also explains disabled actions when supplied.
 		[[nodiscard]] bool EditorToolbarButton(const char* label, const char* tooltip, bool active = false);
+		// The play-state accent (§5.6: edits made during play are transient and visibly tinted), as a packed ImGui colour.
+		[[nodiscard]] uint32_t EditorPlayAccentColor();
+		// Tints field frames, headers, selected rows and check marks with the play accent until the matching End, so
+		// runtime values never look like the edit scene's. Pair each Begin with an End inside the same window.
+		void BeginEditorPlayTint();
+		void EndEditorPlayTint();
+		// The accent-coloured, wrapped notice that heads runtime content.
+		void EditorPlayNotice(std::string_view text);
+		// A wrapped error line with a Dismiss button under it; true when the user dismissed it this frame.
+		[[nodiscard]] bool EditorErrorNotice(std::string_view message);
 
 	}
 

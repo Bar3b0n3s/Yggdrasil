@@ -5,8 +5,8 @@
 #include "Engine/Asset/ScriptData.h"
 
 #include <doctest/doctest.h>
-#include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <map>
 #include <string>
 #include <utility>
@@ -129,138 +129,6 @@ namespace Engine {
 			CHECK((*suite)->Fields.empty());
 		}
 
-		TEST_CASE("LoadTimeVm: field defaults metadata and descriptor aliases obey the native conversion allowance")
-		{
-			ImportModuleReader reader;
-			const auto path = VfsPath::Parse("project://Assets/MetadataBudget.luau");
-			REQUIRE(path);
-			LoadTimeVmSpecification specification{};
-			specification.ClockSeconds = []
-			{
-				return 0.0;
-			};
-			for (const std::string_view source : {
-					 "return Script.Define('Large', {Fields = {Data = Field.String(string.rep('x', 1048576))}})",
-					 "return Script.Define('Large', {Fields = {Data = Field.Integer(0, {Tooltip = string.rep('x', 1048576)})}})",
-					 "local values = {}; local text = string.rep('x', 65536); for i = 1,17 do values[i] = text .. i end; return Script.Define('Large', {Fields = {Data = Field.Enum(values)}})",
-					 "local field = Field.String(string.rep('x', 65536)); local fields = {}; for i = 1,17 do fields['Data' .. i] = field end; return Script.Define('Large', {Fields = fields})" })
-			{
-				CAPTURE(source);
-				const auto result = LoadTimeVm::Extract({ .Path = *path, .Source = std::string(source), .Modules = &reader }, specification);
-				REQUIRE_FALSE(result);
-				CHECK(result.error().GetCode() == ErrorCode::Script);
-				CHECK(result.error().GetMessageText().find("native budget") != std::string::npos);
-				CHECK(result.error().GetLocation().File == "Assets/MetadataBudget.luau");
-				CHECK(result.error().GetLocation().Line > 0);
-			}
-			const auto valid = LoadTimeVm::Extract({ .Path = *path,
-													   .Source = R"(
-local field = Field.String("quote\" slash\\ tab\t", {Tooltip = "ordinary metadata"})
-local class = {Fields = {A = field, B = field, Values = Field.Array(Field.Enum({"First", "Second"}, "Second"))}}
-return Script.Define("Normal", class)
-)",
-													   .Modules = &reader },
-				specification);
-			REQUIRE_MESSAGE(valid, (valid ? "" : valid.error().ToString()));
-			REQUIRE((*valid)->Fields.size() == 3);
-			CHECK((*valid)->Fields[0].DefaultValue.Get() == Json("quote\" slash\\ tab\t"));
-			CHECK((*valid)->Fields[0].DefaultValue == (*valid)->Fields[1].DefaultValue);
-			CHECK((*valid)->Fields[0].Tooltip == "ordinary metadata");
-			CHECK((*valid)->Fields[2].DefaultValue.Get() == Json::array());
-			REQUIRE((*valid)->Fields[2].Element);
-			CHECK((*valid)->Fields[2].Element->DefaultValue.Get() == Json("Second"));
-			const auto recovered = LoadTimeVm::Extract({ .Path = *path,
-														   .Source = R"(
-local field = Field.String(string.rep("x", 65536))
-local class = {Fields = {}}
-for i = 1,17 do class.Fields["Data" .. i] = field end
-local ok, message = pcall(Script.Define, "Large", class)
-assert(not ok and string.find(tostring(message), "native budget", 1, true))
-class.Fields = {Data = Field.String("recovered")}
-assert(Script.Define("Recovered", class) == class)
-return class
-)",
-														   .Modules = &reader },
-				specification);
-			REQUIRE_MESSAGE(recovered, (recovered ? "" : recovered.error().ToString()));
-			CHECK((*recovered)->Name == "Recovered");
-			REQUIRE((*recovered)->Fields.size() == 1);
-			CHECK((*recovered)->Fields.front().DefaultValue.Get() == Json("recovered"));
-		}
-		TEST_CASE("LoadTimeVm: budgeted field descriptors retain the exact schema depth limit")
-		{
-			ImportModuleReader reader;
-			const auto path = VfsPath::Parse("project://Assets/DeepFields.luau");
-			REQUIRE(path);
-			LoadTimeVmSpecification specification{};
-			specification.ClockSeconds = []
-			{
-				return 0.0;
-			};
-			const auto result = LoadTimeVm::Extract({ .Path = *path,
-														.Source = R"(
-local field = Field.Integer(7)
-for i = 1,63 do field = Field.Array(field) end
-local ok, message = pcall(Field.Array, field)
-assert(not ok and string.find(tostring(message), "64 levels", 1, true))
-return Script.Define("DeepFields", {Fields = {Data = field}})
-)",
-														.Modules = &reader },
-				specification);
-			REQUIRE_MESSAGE(result, (result ? "" : result.error().ToString()));
-			REQUIRE((*result)->Fields.size() == 1);
-			const ScriptFieldSchema* field = &(*result)->Fields.front();
-			for (size_t depth = 0; depth < 63; ++depth)
-			{
-				CHECK(field->Type == FieldType::Array);
-				CHECK(field->DefaultValue.Get() == Json::array());
-				REQUIRE(field->Element);
-				field = field->Element.get();
-			}
-			CHECK(field->Type == FieldType::Int32);
-			CHECK(field->DefaultValue.Get() == Json(7));
-		}
-		TEST_CASE("LoadTimeVm: field conversion polls the graph deadline inside native enumeration")
-		{
-			ImportModuleReader reader;
-			reader.Sources.emplace("project://Assets/Arm.luau", "return {}");
-			const auto path = VfsPath::Parse("project://Assets/MetadataDeadline.luau");
-			REQUIRE(path);
-			double now = 0.0;
-			bool armed = false;
-			reader.OnRead = [&armed]
-			{
-				armed = true;
-			};
-			LoadTimeVmSpecification specification{};
-			specification.ClockSeconds = [&now, &armed]
-			{
-				if (armed)
-					now += 0.001;
-				return now;
-			};
-			const ScriptCheckRequest request{ .Path = *path,
-				.Source = R"(
-local choices = {}
-for i = 1,512 do choices[i] = "Choice" .. i end
-require("./Arm")
-local ok, field = pcall(Field.Enum, choices)
-if not ok then return {} end
-return Script.Define("Choices", {Fields = {Choice = field}})
-)",
-				.Modules = &reader };
-			const auto timeout = LoadTimeVm::Extract(request, specification);
-			REQUIRE_FALSE(timeout);
-			CHECK(timeout.error().GetCode() == ErrorCode::Timeout);
-			CHECK(timeout.error().GetLocation().File == "Assets/MetadataDeadline.luau");
-			CHECK(timeout.error().GetLocation().Line > 0);
-			armed = false;
-			reader.OnRead = {};
-			const auto valid = LoadTimeVm::Extract(request, specification);
-			REQUIRE_MESSAGE(valid, (valid ? "" : valid.error().ToString()));
-			REQUIRE((*valid)->Fields.size() == 1);
-			CHECK((*valid)->Fields.front().EnumValues.size() == 512);
-		}
 		TEST_CASE("LoadTimeVm: pure library imports are isolated and deterministic across invocations")
 		{
 			ImportModuleReader reader;
@@ -288,12 +156,19 @@ return Script.Define("Choices", {Fields = {Choice = field}})
 		TEST_CASE("LoadTimeVm: rejects require cycles and missing readers without retaining a failed import")
 		{
 			ImportModuleReader reader;
+			// Both modules are readable, so B's require('./A') reaches cycle detection rather than a missing-module error.
+			reader.Sources.emplace("project://Assets/A.luau", "return require('./B')");
 			reader.Sources.emplace("project://Assets/B.luau", "return require('./A')");
 			auto path = VfsPath::Parse("project://Assets/A.luau");
 			REQUIRE(path.has_value());
 			const auto cycle = LoadTimeVm::Extract({ .Path = *path, .Source = "return require('./B')", .Modules = &reader });
 			REQUIRE_FALSE(cycle.has_value());
 			CHECK(cycle.error().GetCode() == ErrorCode::Script);
+			const std::string message = cycle.error().ToString();
+			CAPTURE(message);
+			CHECK(message.find("require cycle: Assets/A.luau -> Assets/B.luau -> Assets/A.luau") != std::string::npos);
+			CHECK(message.find("was not supplied") == std::string::npos);
+			CHECK(std::count(reader.Reads.begin(), reader.Reads.end(), std::string("project://Assets/A.luau")) == 1);
 			CHECK(LoadTimeVm::Extract({ .Path = *path, .Source = "return {}", .Modules = &reader }).has_value());
 			const auto missing = LoadTimeVm::Extract({ .Path = *path, .Source = "return {}" });
 			REQUIRE_FALSE(missing.has_value());

@@ -59,6 +59,16 @@ Build settings mirrored from upstream `CMakeLists.txt` / `Makefile`:
   Linux: `pic "On"`.
 - `NDEBUG` in Release and Dist (upstream optimized builds define it), which compiles out `LUAU_ASSERT`. Debug keeps
   Luau's internal assertions on.
+- Engine addition (determinism, Architecture §2.2 and §9.1), project `Luau` only: the precise floating-point model
+  without FMA contraction, as for first-party code, JoltPhysics and MikkTSpace. MSVC: `floatingpoint "Default"`
+  (`/fp:precise`). GCC and Clang: `-fno-fast-math -ffp-contract=off` (filter `toolset:gcc or clang`, `action:not vs*`);
+  `-fno-fast-math` also cancels the `-ffast-math` that premake's xcode4 generator adds for `optimize "Full"` (Dist).
+  clang-cl: `/clang:-fno-fast-math /clang:-ffp-contract=off`. Scripts' gameplay arithmetic runs in this library (the
+  interpreter, `luai_nummod`, the `vector` and `math` libraries), so Debug, Release and Dist must evaluate it alike.
+  Upstream's `-fno-math-errno` stays: it only drops `errno` updates and changes no value. `LuauAnalysis` (editor type
+  checking, no simulation arithmetic) keeps the compiler defaults. `Scripts/CheckBuildConfig.py` checks `Luau` like
+  JoltPhysics and MikkTSpace, and the fixture `Tests/Data/BuildConfig/LuauContraction` proves the check (M13 review
+  F01).
 - Not mirrored on purpose: `/we4018 /we4388` and `LUAU_WERROR` (warnings-as-errors is not used for vendor code),
   `-Wall` (warnings stay at default level for vendor code).
 - No `/bigobj` is needed (upstream does not use it; verified with MSVC 14.51).

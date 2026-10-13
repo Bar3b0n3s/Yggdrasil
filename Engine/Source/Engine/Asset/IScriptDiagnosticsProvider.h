@@ -13,16 +13,17 @@
 // Static type diagnostics for scripts (Architecture §3 rule 4, §7.4 ScriptImporter, §11.9). Asset defines the interface;
 // EditorCore implements it with the Luau type checker (EditorCore/Scripting/ScriptTypeChecker.cpp, M13) and registers it
 // with the EditorAssetManager (EditorAssetManagerSpecification::ScriptDiagnostics). Tools without it import scripts
-// without type diagnostics. ScriptImporter and the checker's details arrive with M13, which may add members here through
-// its contract.
+// without type diagnostics. ScriptImporter records each import attempt's findings in a ScriptImportCheck.
 
 namespace Engine {
 
-	// One type-check finding, located in a script.
+	// One static finding, located in a script.
 	struct ScriptDiagnostic
 	{
 		DiagnosticSeverity Severity = DiagnosticSeverity::Error;
-		std::string Code{};  // "SCRIPT_TYPE_ERROR" (§13.7)
+		// §13.7: "SCRIPT_TYPE_ERROR" for a type finding; "SCRIPT_COMPILE_ERROR" for a syntax error (the checker's Luau
+		// SyntaxError) and for a failed import attempt's compile, load-time or unresolved-require failure (ScriptImporter).
+		std::string Code{};
 		std::string File{};  // project-relative path of the script the finding is in (a required module's, too)
 		uint32_t Line = 0;   // 1-based
 		uint32_t Column = 0; // 1-based

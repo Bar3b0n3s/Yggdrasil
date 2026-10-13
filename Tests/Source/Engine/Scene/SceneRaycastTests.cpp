@@ -20,36 +20,37 @@
 #include <limits>
 
 namespace Engine {
-	namespace {
 
-		constexpr AssetHandle QueryMesh{ 1001 };
-		Ref<MeshData> MakeQueryMesh()
-		{
-			auto mesh = CreateRef<MeshData>();
-			mesh->Vertices = { { .Position = { -1, -1, 0 } }, { .Position = { 1, -1, 0 } }, { .Position = { 0, 1, 0 } } };
-			mesh->Indices = { 0, 1, 2 };
-			for (const auto& vertex : mesh->Vertices)
-				mesh->Bounds.Extend(vertex.Position);
-			mesh->Submeshes = { { .IndexCount = 3, .Bounds = mesh->Bounds } };
-			mesh->Slots = { { .Name = "Default" } };
-			return mesh;
-		}
-		Entity AddQueryMesh(Scene& scene, UUID id, float z = 0)
-		{
-			Entity entity = scene.CreateEntityWithID(id, "Triangle");
-			entity.AddComponent<MeshRendererComponent>().Mesh.SetHandle(QueryMesh);
-			entity.Patch<TransformComponent>([z](TransformComponent& t)
-			{
-				t.Translation.z = z;
-			});
-			return entity;
-		}
-		SceneRaycastRequest ForwardQuery()
-		{
-			return { .Ray = { { 0, 0, 5 }, { 0, 0, -2 } }, .MaxDistance = 10 };
-		}
+	constexpr AssetHandle QueryMesh{ 1001 };
 
+	static Ref<MeshData> MakeQueryMesh()
+	{
+		auto mesh = CreateRef<MeshData>();
+		mesh->Vertices = { { .Position = { -1, -1, 0 } }, { .Position = { 1, -1, 0 } }, { .Position = { 0, 1, 0 } } };
+		mesh->Indices = { 0, 1, 2 };
+		for (const auto& vertex : mesh->Vertices)
+			mesh->Bounds.Extend(vertex.Position);
+		mesh->Submeshes = { { .IndexCount = 3, .Bounds = mesh->Bounds } };
+		mesh->Slots = { { .Name = "Default" } };
+		return mesh;
 	}
+
+	static Entity AddQueryMesh(Scene& scene, UUID id, float z = 0)
+	{
+		Entity entity = scene.CreateEntityWithID(id, "Triangle");
+		entity.AddComponent<MeshRendererComponent>().Mesh.SetHandle(QueryMesh);
+		entity.Patch<TransformComponent>([z](TransformComponent& t)
+		{
+			t.Translation.z = z;
+		});
+		return entity;
+	}
+
+	static SceneRaycastRequest ForwardQuery()
+	{
+		return { .Ray = { { 0, 0, 5 }, { 0, 0, -2 } }, .MaxDistance = 10 };
+	}
+
 	TEST_SUITE("Scene")
 	{
 		TEST_CASE("Raycast: a cold CPU mesh loads synchronously without a graphics device")

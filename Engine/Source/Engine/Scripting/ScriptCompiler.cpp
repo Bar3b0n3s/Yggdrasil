@@ -19,9 +19,9 @@
 namespace Engine {
 
 #if !defined(ENGINE_DIST)
-	namespace {
+	namespace Utils {
 
-		ErrorLocation CompileLocation(const ScriptSourceMap& map, uint32_t line, uint32_t column)
+		static ErrorLocation CompileLocation(const ScriptSourceMap& map, uint32_t line, uint32_t column)
 		{
 			ErrorLocation location{};
 			location.File = map.Path.empty() ? map.ChunkName.substr(1) : map.Path;
@@ -40,7 +40,7 @@ namespace Engine {
 			return location;
 		}
 
-		Status ValidateCompileRequest(const ScriptCompileRequest& request)
+		static Status ValidateCompileRequest(const ScriptCompileRequest& request)
 		{
 			if (!request.Path.IsEmpty() && (request.Path.GetScheme() != "project" || !request.Path.GetPath().starts_with("Assets/")))
 				return MakeError(ErrorCode::Validation, "script diagnostic origin must be below project://Assets");
@@ -76,7 +76,7 @@ namespace Engine {
 			return {};
 		}
 
-		bool IsCompleteExpression(std::string_view source, const ScriptSourceMap& map)
+		static bool IsCompleteExpression(std::string_view source, const ScriptSourceMap& map)
 		{
 			Luau::Allocator allocator;
 			Luau::AstNameTable names(allocator);
@@ -107,7 +107,7 @@ namespace Engine {
 #else
 		if (!Detail::IsScriptingRuntimeInitialized())
 			return MakeError(ErrorCode::InvalidState, "scripting runtime must be initialized before compilation");
-		ENGINE_TRY(ValidateCompileRequest(request));
+		ENGINE_TRY(Utils::ValidateCompileRequest(request));
 		ScriptCompilation result{};
 		auto& map = result.SourceMap;
 		map.Path = request.Path.GetPath();
@@ -121,7 +121,7 @@ namespace Engine {
 				map.LineOffsets.push_back(static_cast<uint32_t>(index + 1));
 		bool expression = false;
 		if (request.Mode != ScriptCompileMode::Chunk)
-			expression = IsCompleteExpression(request.Source, map);
+			expression = Utils::IsCompleteExpression(request.Source, map);
 		if (!expression && request.Mode == ScriptCompileMode::Expression)
 		{
 			// Parsing the wrapped form supplies an authored location even when parseExpr only consumed a prefix.
@@ -139,12 +139,12 @@ namespace Engine {
 			const auto position = error.getLocation().begin;
 			const bool generatedSuffix = position.line + 1 > map.GeneratedPrefixLines + map.LineOffsets.size();
 			return std::unexpected(Error(ErrorCode::CompileFailed, error.getMessage())
-					.WithLocation(CompileLocation(map, position.line + 1, position.column + 1))
+					.WithLocation(Utils::CompileLocation(map, position.line + 1, position.column + 1))
 					.WithContext(generatedSuffix ? "at authored EOF in the generated expression wrapper" : "while compiling script source"));
 		}
 		if (!expression && request.Mode == ScriptCompileMode::Expression)
 			return std::unexpected(Error(ErrorCode::CompileFailed, "expected exactly one complete expression")
-					.WithLocation(CompileLocation(map, map.GeneratedPrefixLines + 1, 1)));
+					.WithLocation(Utils::CompileLocation(map, map.GeneratedPrefixLines + 1, 1)));
 		const char* const mutableGlobals[] = { "math", nullptr };
 		Luau::CompileOptions options{};
 		options.optimizationLevel = 1;
@@ -182,7 +182,7 @@ namespace Engine {
 				if (parsedLine.ec == std::errc{} && parsedLine.ptr != message.data() + message.size() && *parsedLine.ptr == ':')
 					message.remove_prefix(static_cast<size_t>(parsedLine.ptr - message.data()) + 1);
 			}
-			return std::unexpected(Error(ErrorCode::CompileFailed, std::string(message)).WithLocation(CompileLocation(map, line, 0)));
+			return std::unexpected(Error(ErrorCode::CompileFailed, std::string(message)).WithLocation(Utils::CompileLocation(map, line, 0)));
 		}
 		const auto bytes = AsBytes(bytecode);
 		result.Bytecode.assign(bytes.begin(), bytes.end());

@@ -3,23 +3,25 @@
 
 #include "Engine/Asset/IScriptDiagnosticsProvider.h"
 #include "Engine/Core/Assert.h"
+#include "Engine/Scripting/ScriptLimits.h"
 
 #include <algorithm>
+#include <format>
 #include <tuple>
 #include <vector>
 
 namespace Engine {
 
-	namespace {
+	namespace Utils {
 
-		ErrorLocation ModuleLocation(const VfsPath& path)
+		static ErrorLocation ModuleLocation(const VfsPath& path)
 		{
 			ErrorLocation location{};
 			location.File = path.GetPath();
 			return location;
 		}
 
-		Status ValidateModulePath(const VfsPath& path)
+		static Status ValidateModulePath(const VfsPath& path)
 		{
 			if (path.GetScheme() != "project" || !path.GetPath().starts_with("Assets/") || path.GetExtension() != ".luau")
 				return std::unexpected(Error(ErrorCode::Validation, "require origin must be a .luau file below project://Assets")
@@ -44,11 +46,11 @@ namespace Engine {
 
 	Result<VfsPath> RequireResolver::Resolve(const VfsPath& importer, std::string_view request)
 	{
-		ENGINE_TRY(ValidateModulePath(importer));
+		ENGINE_TRY(Utils::ValidateModulePath(importer));
 		const auto invalid = [&importer, request](std::string_view reason)
 		{
 			return std::unexpected(Error(ErrorCode::Validation, std::format("invalid require '{}': {}", request, reason))
-					.WithLocation(ModuleLocation(importer)));
+					.WithLocation(Utils::ModuleLocation(importer)));
 		};
 		if ((!request.starts_with("./") && !request.starts_with("../")) || request.find_first_of("\\:") != std::string_view::npos)
 			return invalid("only relative forward-slash paths are accepted");
@@ -98,7 +100,7 @@ namespace Engine {
 			ENGINE_TRY_ASSIGN(auto withExtension, VfsPath::Create("project", path));
 			resolved = std::move(withExtension);
 		}
-		if (const auto valid = ValidateModulePath(resolved); !valid)
+		if (const auto valid = Utils::ValidateModulePath(resolved); !valid)
 			return invalid(valid.error().GetMessageText());
 		ScriptRequire edge{ .From = std::string(importer.GetPath()), .Request = std::string(request), .Path = std::string(resolved.GetPath()) };
 		const auto less = [](const ScriptRequire& left, const ScriptRequire& right)
@@ -107,7 +109,11 @@ namespace Engine {
 		};
 		auto position = std::lower_bound(m_State->Requires.begin(), m_State->Requires.end(), edge, less);
 		if (position == m_State->Requires.end() || *position != edge)
+		{
+			if (m_State->Requires.size() >= MaxScriptRequireEdges)
+				return invalid(std::format("a script VM records at most {} distinct require edges", MaxScriptRequireEdges));
 			m_State->Requires.insert(position, std::move(edge));
+		}
 		return resolved;
 	}
 
@@ -118,24 +124,24 @@ namespace Engine {
 		static_cast<void>(path);
 		return MakeError(ErrorCode::Unsupported, "source modules are unavailable in Dist");
 #else
-		ENGINE_TRY(ValidateModulePath(path));
+		ENGINE_TRY(Utils::ValidateModulePath(path));
 		auto source = reader.ReadModule(path);
 		if (!source)
-			return std::unexpected(std::move(source).error().WithLocation(ModuleLocation(path)).WithContext("while reading a required script module"));
+			return std::unexpected(std::move(source).error().WithLocation(Utils::ModuleLocation(path)).WithContext("while reading a required script module"));
 		return source;
 #endif
 	}
 
 	Status RequireResolver::EnterModule(const VfsPath& path)
 	{
-		ENGINE_TRY(ValidateModulePath(path));
+		ENGINE_TRY(Utils::ValidateModulePath(path));
 		if (std::find(m_State->Active.begin(), m_State->Active.end(), path) != m_State->Active.end())
 		{
 			std::string chain;
 			for (const auto& active : m_State->Active)
 				chain += std::string(active.GetPath()) + " -> ";
 			chain += path.GetPath();
-			return std::unexpected(Error(ErrorCode::Script, "require cycle: " + chain).WithLocation(ModuleLocation(path)));
+			return std::unexpected(Error(ErrorCode::Script, "require cycle: " + chain).WithLocation(Utils::ModuleLocation(path)));
 		}
 		m_State->Active.push_back(path);
 		return {};

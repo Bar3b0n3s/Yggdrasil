@@ -1,8 +1,10 @@
 #include "TestsPCH.h"
 #include "Engine/Scripting/ScriptTestHost.h"
 
+#include "Engine/Platform/Input/KeyCodes.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scripting/ScriptEngine.h"
+#include "Engine/Scripting/ScriptLimits.h"
 #include "Engine/Scripting/TaskScheduler.h"
 #include "Support/ExpectLog.h"
 #include "Support/ScriptTestFixture.h"
@@ -11,7 +13,9 @@
 
 #include <algorithm>
 #include <array>
+#include <format>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace Engine {
@@ -154,7 +158,8 @@ end, {CaseTimeoutTicks=6}))");
 			CHECK(services.Reports[0].Line == 2);
 			fixture.GetEngine()->CancelCase(thread);
 			fixture.GetEngine()->EndSuite();
-			CheckTrue(fixture, "return not pcall(Test.Case, 'outside', function() end)");
+			// §11.10's documented text.
+			CheckTrue(fixture, "local ok, message = pcall(Test.Case, 'outside', function() end); return not ok and string.find(message, 'Test.Case outside Test.Suite', 1, true) ~= nil");
 			CaptureCoverage(fixture, mode, snapshots);
 		}
 
@@ -273,6 +278,37 @@ return true
 			CHECK(services.Inputs[4] == Json{ { "type", "gamepadButton" }, { "gamepad", 3 }, { "button", "South" }, { "state", "Tap" } });
 			CHECK(services.Inputs[5] == Json{ { "type", "gamepadAxis" }, { "gamepad", 2 }, { "axis", "LeftX" }, { "value", -0.5f } });
 			CHECK(services.Screenshots == std::vector<std::string>{ "frame" });
+			// Every value of each enum slot with at most 16 values, through each overload, so per-value counters exist and run.
+			std::string names[3];
+			const auto list = [](std::string& target, std::string_view name)
+			{
+				if (!name.empty())
+					target += std::format("\"{}\",", name);
+			};
+			for (size_t i = 0; i < MouseButtonCount; ++i)
+				list(names[0], MouseButtonToString(static_cast<MouseButton>(i)));
+			for (size_t i = 0; i < GamepadButtonCount; ++i)
+				list(names[1], GamepadButtonToString(static_cast<GamepadButton>(i)));
+			for (size_t i = 0; i < GamepadAxisCount; ++i)
+				list(names[2], GamepadAxisToString(static_cast<GamepadAxis>(i)));
+			CheckTrue(fixture, std::format(R"(
+for _, state in {{"Down", "up", "TAP"}} do
+	Test.InjectAction("Jump", state)
+	Test.InjectKey("Space", state)
+	Test.InjectMouse("Left", state)
+	Test.InjectGamepad(0, "South", state)
+end
+for _, button in {{{0}}} do Test.InjectMouse(button, "Tap") end
+for _, button in {{{1}}} do Test.InjectGamepad(1, button, "Down") end
+for _, axis in {{{2}}} do Test.InjectGamepad(1, axis, 0.5) end
+Test.InjectAction("Move", "Down", 0.75)
+return true
+)",
+								   names[0], names[1], names[2]));
+			CHECK(services.Inputs[6] == Json{ { "type", "action" }, { "name", "Jump" }, { "state", "Down" } });
+			// Case-insensitive input reaches the host in canonical spelling.
+			CHECK(services.Inputs[10] == Json{ { "type", "action" }, { "name", "Jump" }, { "state", "Up" } });
+			CHECK(services.Inputs[17] == Json{ { "type", "gamepadButton" }, { "gamepad", 0 }, { "button", "South" }, { "state", "Tap" } });
 			if (mode == RunModes::Editor)
 			{
 				CheckTrue(fixture, "Test.ReloadScript(Assets.Load(\"Assets/Scripts/Reload.luau\")); return true");
@@ -382,10 +418,104 @@ return not called
 			RunInputScenario(RunModes::Editor, snapshots);
 		}
 
+		TEST_CASE("TestBindings: input injection enums are declared typed and validated before the host")
+		{
+			TestServices services;
+			Test::ScriptTestFixture fixture({ .TestMode = true, .TestHost = &services });
+			REQUIRE(fixture.Start());
+			CheckTrue(fixture, R"(
+for _, fn in {
+	function() Test.InjectKey("Spcae", "Down") end,
+	function() Test.InjectKey("Space", "Hold") end,
+	function() Test.InjectMouse("Thumb", "Tap") end,
+	function() Test.InjectMouse("Left", "Pressed") end,
+	function() Test.InjectAction("Jump", "Held") end,
+	function() Test.InjectAction("Jump") end,
+	function() Test.InjectAction("Move", "Up", 0.5) end,
+	function() Test.InjectGamepad(0, "LeftX", "Down") end,
+	function() Test.InjectGamepad(0, "South", 0.5) end,
+	function() Test.InjectGamepad(0, "South", "Sideways") end,
+	function() Test.InjectGamepad(0, "South") end,
+} do
+	local ok, message = pcall(fn)
+	assert(not ok, "accepted an invalid input")
+end
+local ok, message = pcall(Test.InjectKey, "Spcae", "Down")
+assert(string.find(message, "unknown Key 'Spcae'", 1, true), message)
+return true
+)");
+			CHECK(services.Inputs.empty());
+			std::string declarations;
+			{
+				const auto generated = fixture.GetApi().GenerateDefinitions();
+				REQUIRE(generated.has_value());
+				declarations = *generated;
+			}
+			CHECK(declarations.find("export type InputEventState = \"Down\" | \"Up\" | \"Tap\"") != std::string::npos);
+			CHECK(declarations.find("InjectKey: (key: Key, state: InputEventState) -> ()") != std::string::npos);
+			CHECK(declarations.find("InjectMouse: (button: MouseButton, state: InputEventState, position: vector?) -> ()") != std::string::npos);
+			CHECK(declarations.find("InjectAction: (name: string, state: InputEventState?, value: number?) -> ()") != std::string::npos);
+			CHECK(declarations.find("InjectGamepad: ((index: number, button: GamepadButton, state: InputEventState) -> ()) & ((index: number, axis: GamepadAxis, value: number) -> ())") != std::string::npos);
+			// Each slot with at most 16 values has one counter per value and overload.
+			const auto coverage = fixture.GetApi().GetCoverage(RunModes::Editor);
+			REQUIRE(coverage.has_value());
+			const auto counter = std::ranges::find_if(coverage->Members, [](const ScriptApiCounter& entry)
+			{
+				return entry.Owner == "Test" && entry.Member == "InjectGamepad";
+			});
+			REQUIRE(counter != coverage->Members.end());
+			const auto* buttons = fixture.GetApi().FindEnum("GamepadButton");
+			const auto* axes = fixture.GetApi().FindEnum("GamepadAxis");
+			REQUIRE(buttons != nullptr);
+			REQUIRE(axes != nullptr);
+			CHECK(counter->EnumValues.size() == buttons->Values.size() + 3 + axes->Values.size());
+		}
+
 		TEST_CASE("TestBindings: expected error patterns claim individual occurrences without hiding their counts")
 		{
 			std::vector<ScriptApiCoverage> snapshots;
 			RunClaimsScenario(RunModes::Editor, snapshots);
+		}
+
+		TEST_CASE("TestBindings: reported messages show authored locations and the text the runner keeps is bounded")
+		{
+			TestServices services;
+			Test::ScriptTestFixture fixture({ .TestMode = true, .TestHost = &services });
+			auto suite = Collect(fixture, services, std::format(R"(return Test.Suite("Bounded", function()
+	assert(not pcall(Test.Suite, string.rep("s", {0} + 1), function() end))
+	assert(not pcall(Test.Case, string.rep("n", {0} + 1), function() end))
+	Test.Case(string.rep("n", {0}), function()
+		local ok, caught = pcall(function() local t = nil; return t.x end)
+		Test.Expect(ok, caught)
+		Test.ExpectEqual(1, 2, caught)
+		Test.Expect(false, string.rep("m", 2^20))
+		local accepted, message = pcall(Test.ExpectScriptError, string.rep("p", {1} + 1), 1)
+		assert(not accepted and string.find(message, "the limit is {1}", 1, true), message)
+		Test.Fail(caught)
+	end)
+end))",
+														MaxScriptTestNameBytes, MaxScriptErrorPatternBytes));
+			REQUIRE(suite.Cases.size() == 1);
+			CHECK(suite.Cases[0].Name == std::string(MaxScriptTestNameBytes, 'n'));
+			const auto thread = StartCase(fixture, suite.Cases[0]);
+			const auto result = Resume(fixture, thread, 0);
+			CHECK(result.State == ScriptCaseState::Failed);
+			REQUIRE(services.Reports.size() == 4);
+			for (const auto& report : services.Reports)
+			{
+				CAPTURE(report.Message);
+				CHECK(report.Message.find("engine/") == std::string::npos);
+				CHECK(report.Message.size() <= MaxScriptLogMessageBytes);
+			}
+			// A VM error a script caught keeps its authored location in every reported message, never the private chunk name.
+			CHECK(services.Reports[0].Message.starts_with("Assets/Tests/Bindings.luau:5: attempt to index nil"));
+			CHECK(services.Reports[1].Message == services.Reports[0].Message);
+			const std::string marker = std::format(" [truncated: {} bytes]", 1048576);
+			CHECK(services.Reports[2].Message == std::string(MaxScriptLogMessageBytes - marker.size(), 'm') + marker);
+			CHECK(services.Reports[3].Signal == ScriptTestSignal::Fail);
+			CHECK(services.Reports[3].Message == services.Reports[0].Message);
+			CHECK(result.Message == services.Reports[0].Message);
+			fixture.GetEngine()->CancelCase(thread);
 		}
 
 		TEST_CASE("TestBindings: cancellation stops a pending capture and its case owned tasks")

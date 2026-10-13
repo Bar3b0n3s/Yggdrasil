@@ -71,6 +71,27 @@ namespace Engine {
 		std::function<Status(bool)> QueueChange{};
 	};
 
+	// The external source editor preference (EditorPreferences::ExternalEditorExecutable and ExternalEditorArguments in
+	// user://Editor.json), as the host last loaded or wrote it.
+	struct EditorExternalEditorState
+	{
+		std::string Executable{};             // empty: no external editor configured
+		std::vector<std::string> Arguments{}; // argv entries; {path} and {line} are substituted at launch, never by a shell
+		bool Pending = false;                 // a queued change waits for the next safe point
+		std::optional<Error> Failure{};       // the last change's failure, until another change is queued
+	};
+
+	struct EditorExternalEditorServices
+	{
+		// Memory-only snapshot; no I/O in Draw.
+		std::function<EditorExternalEditorState()> GetState{};
+		// Queue only, no I/O in Draw. The host writes the preference at the next safe point (ReadEditorPreferences, then
+		// WriteEditorPreferences, so RecentProjects and unknown members survive) and publishes the new snapshot or Failure.
+		// InvalidState while a change is pending; InvalidArgument for text that is not valid UTF-8 or holds NUL, and for
+		// arguments without a {path} entry (BuildEditorSourceProcessSpecification's rule).
+		std::function<Status(std::string, std::vector<std::string>)> QueueChange{};
+	};
+
 	// The host owns this service bundle for EditorLayer's lifetime. Its references are documented back-references to
 	// services that outlive it; individual panels borrow it only for Draw. CPU models live in EditorCore, and no panel
 	// owns the scene or retains a component/asset pointer. Errors remain visible in the initiating panel and Console.
@@ -87,13 +108,20 @@ namespace Engine {
 		// Memory-only lookup of the registered thumbnail texture for this exact bound request; 0 when absent.
 		// The host pumps/uploads outside Draw and retires registrations before the cache binding is reset.
 		std::function<uint64_t(const ThumbnailRequest&)> FindThumbnailTexture{};
-		// Drain copied OS-drop paths for the current project epoch. No I/O; the panel queues asset.import.
+		// Drain copied OS-drop paths for the current project epoch. No I/O; the panel queues asset.import. A drop with a
+		// project open also opens and focuses the Content panel (EditorLayer::RevealPanel), so it gives immediate feedback:
+		// the panel imports into its shown folder or asks for a destination when it was not drawn on the previous frame.
 		std::function<std::vector<std::filesystem::path>()> TakeContentDrops{};
 		// Queue only: valid handle plays via AudioPreview; null stops. The host checks the project epoch at execution,
 		// calls Play/Stop at a safe point, and publishes asynchronous failures in Console. No asset loading in Draw.
 		std::function<Status(AssetHandle)> QueueAudioPreview{};
 		EditorRecoveryServices Recovery{};
 		EditorAutomationPreferenceServices AutomationPreferences{};
+		EditorExternalEditorServices ExternalEditor{};
+		// Memory-only copy of the recent projects (ProjectManager::ReadRecentProjects of user://Editor.json): the host reads
+		// it at startup and again at the safe point after each project open or close, never while a panel draws; the error
+		// of that read when it failed. Unset: no recent projects.
+		std::function<Result<std::vector<std::filesystem::path>>()> GetRecentProjects{};
 		// OS drops are copied as native paths; asset.import validates them and writes/provenance through existing commands.
 		// External editor launch uses Process with argument lists, never a shell, and propagates Io/NotFound.
 		std::function<Status(const std::filesystem::path&, uint32_t)> OpenSource{};

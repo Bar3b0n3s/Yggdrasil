@@ -31,6 +31,10 @@ namespace Engine {
 		bool GpuAvailable = false;
 		uint32_t Width = 0;
 		uint32_t Height = 0;
+		// The snapshot's RenderQualitySettings this frame rendered with (RenderSnapshot::Quality: the project's
+		// ProjectSettings.Rendering in every host); 0 and false while unavailable.
+		uint32_t ShadowMapSize = 0;
+		bool SsaoHalfResolution = false;
 		double CpuMilliseconds = 0.0;
 		std::vector<RenderPassStats> Passes{};
 		uint32_t VisibleMeshes = 0;
@@ -86,7 +90,8 @@ namespace Engine {
 		// available older frames are ignored. Match by pass name, summing repeated scopes; absent names stay unavailable.
 		// PublishCpu retains source-tagged GPU values only for matching names, never invents timing for newly enabled passes.
 		void PublishGpu(const GpuTimingFrame& frame);
-		// Owns this value; reference valid until the next Publish/Reset. Reset on scene replacement, not screenshot capture.
+		// Owns this value; reference valid until the next Publish/Reset. A renderer keeps one history for its lifetime (a scene
+		// replacement does not reset it: rows carry their frame indices); Reset returns it to the unavailable state.
 		[[nodiscard]] const RenderStats& GetLatest() const;
 		void Reset();
 	private:

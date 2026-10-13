@@ -3,7 +3,6 @@
 
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Json/JsonReader.h"
-#include "Engine/Core/Json/JsonWriter.h"
 #include "Engine/Core/Utf8.h"
 #include "Engine/Core/VirtualFileSystem.h"
 
@@ -63,6 +62,58 @@ namespace Engine {
 			return preferences;
 		}
 
+		// Validation unless every string and member name below `value` is valid UTF-8, which the lossless serializer
+		// needs (nlohmann's dump rejects anything else by throwing). Parsed documents are bounded by MaxJsonDepth.
+		[[nodiscard]] static Status CheckPreferencesText(const JsonReader& value, size_t depth)
+		{
+			if (depth > MaxJsonDepth)
+				return std::unexpected(value.MakeLocatedError(ErrorCode::Validation, "editor preferences nest too deeply"));
+			switch (value.GetType())
+			{
+				case JsonType::String:
+				{
+					ENGINE_TRY_ASSIGN(const std::string text, value.ReadString());
+					if (!IsValidUtf8(text))
+						return std::unexpected(value.MakeLocatedError(ErrorCode::Validation, "editor preferences hold text that is not valid UTF-8"));
+					return {};
+				}
+				case JsonType::Array:
+				{
+					ENGINE_TRY_ASSIGN(const size_t count, value.GetArraySize());
+					for (size_t index = 0; index < count; ++index)
+					{
+						ENGINE_TRY_ASSIGN(const JsonReader element, value.GetElement(index));
+						ENGINE_TRY(CheckPreferencesText(element, depth + 1));
+					}
+					return {};
+				}
+				case JsonType::Object:
+				{
+					ENGINE_TRY_ASSIGN(const std::vector<std::string> names, value.GetMemberNames());
+					for (const std::string& name : names)
+					{
+						if (!IsValidUtf8(name))
+							return std::unexpected(value.MakeLocatedError(ErrorCode::Validation, "editor preferences hold a member name that is not valid UTF-8"));
+						ENGINE_TRY_ASSIGN(const JsonReader member, value.GetMember(name));
+						ENGINE_TRY(CheckPreferencesText(member, depth + 1));
+					}
+					return {};
+				}
+				case JsonType::Null:
+				case JsonType::Bool:
+				case JsonType::Integer:
+				case JsonType::Float:   return {};
+			}
+			return {};
+		}
+
+	}
+
+	Result<std::string> SerializeEditorPreferences(const Json& document)
+	{
+		ENGINE_TRY(Utils::CheckPreferencesText(JsonReader(document), 0));
+		// JSON's own serializer prints the shortest text that parses back to the same double, unlike JsonWriter.
+		return document.dump(1, '\t') + '\n';
 	}
 
 	Result<EditorPreferences> ReadEditorPreferences(const VirtualFileSystem& vfs)
@@ -77,13 +128,10 @@ namespace Engine {
 			return MakeError(ErrorCode::InvalidState, "editor preferences require a user:// mount");
 		ENGINE_TRY_ASSIGN(Json document, Utils::ReadUtilityPreferencesDocument(vfs));
 		ENGINE_TRY(Utils::DecodeUtilityPreferences(document));
-		// Validate new strings before using JSON's lossless double serializer. JsonWriter rounds floats to float32,
-		// which would silently alter unknown preference members belonging to a future editor version.
-		ENGINE_TRY(JsonWriter::Write(Json{ { "Executable", preferences.ExternalEditorExecutable }, { "Arguments", preferences.ExternalEditorArguments } }));
 		document["AllowAiAutomation"] = preferences.AllowAiAutomation;
 		document["ExternalEditorExecutable"] = preferences.ExternalEditorExecutable;
 		document["ExternalEditorArguments"] = preferences.ExternalEditorArguments;
-		const std::string text = document.dump(1, '\t') + '\n';
+		ENGINE_TRY_ASSIGN(const std::string text, SerializeEditorPreferences(document));
 		ENGINE_TRY_ASSIGN(const VfsPath path, VfsPath::Parse("user://Editor.json"));
 		return vfs.WriteFileAtomic(path, std::as_bytes(std::span(text.data(), text.size())));
 	}
@@ -102,6 +150,7 @@ namespace Engine {
 			return MakeError(ErrorCode::InvalidArgument, "source path and editor executable must be nonempty UTF-8 without NUL");
 		ProcessSpecification process;
 		process.Executable = FileSystem::PathFromUtf8(preferences.ExternalEditorExecutable);
+		process.CaptureOutput = false;
 		const std::string lineText = std::to_string(line == 0 ? 1 : line);
 		if (preferences.ExternalEditorArguments.empty())
 		{

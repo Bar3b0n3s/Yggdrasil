@@ -16,9 +16,9 @@
 
 namespace Engine {
 
-	namespace {
+	namespace Utils {
 
-		Status ValidateScriptPath(const EditorContext& editor, const VfsPath& path)
+		static Status ValidateScriptPath(const EditorContext& editor, const VfsPath& path)
 		{
 			if (!editor.HasProject())
 				return MakeError(ErrorCode::InvalidState, "no project is open");
@@ -27,7 +27,7 @@ namespace Engine {
 			return {};
 		}
 
-		void SortScriptDiagnostics(std::vector<ScriptDiagnostic>& diagnostics)
+		static void SortScriptDiagnostics(std::vector<ScriptDiagnostic>& diagnostics)
 		{
 			std::ranges::sort(diagnostics, [](const ScriptDiagnostic& left, const ScriptDiagnostic& right)
 			{
@@ -37,27 +37,14 @@ namespace Engine {
 			diagnostics.erase(std::unique(diagnostics.begin(), diagnostics.end()), diagnostics.end());
 		}
 
-		class ScriptCheckReader final : public IScriptModuleReader
+		// Infrastructure failures abort a check or write; every other failure is a located finding of the script.
+		static bool IsInfrastructureFailure(const Error& error)
 		{
-		public:
-			explicit ScriptCheckReader(const EditorScriptService& service)
-				: m_Service(service)
-			{
-			}
-			Result<std::string> ReadModule(const VfsPath& path) override
-			{
-				auto source = m_Service.Read(path);
-				if (!source && !m_Failure.has_value())
-					m_Failure = source.error();
-				return source;
-			}
-			[[nodiscard]] const std::optional<Error>& GetFailure() const { return m_Failure; }
-		private:
-			const EditorScriptService& m_Service; // Borrowed by one synchronous Check invocation.
-			std::optional<Error> m_Failure{};
-		};
+			const ErrorCode code = error.GetCode();
+			return code == ErrorCode::Io || code == ErrorCode::PermissionDenied || code == ErrorCode::InvalidState || code == ErrorCode::Unsupported;
+		}
 
-		Result<std::vector<ScriptDiagnostic>> CheckWrittenScript(EditorContext& editor, IScriptDiagnosticsProvider& diagnostics,
+		static Result<std::vector<ScriptDiagnostic>> CheckWrittenScript(EditorContext& editor, IScriptDiagnosticsProvider& diagnostics,
 			const VfsPath& path, std::string_view source, const AssetMetadata& metadata)
 		{
 			std::vector<ImportAssetLookupEntry> assets;
@@ -68,17 +55,18 @@ namespace Engine {
 			// schedules the manager's normal import/publication; this validation never replaces a live artifact.
 			ImportContext context({ .Vfs = &editor.GetVfs(), .SourcePath = path, .SourceBytes = AsBytes(source), .Registry = &editor.GetTypeRegistry(), .Assets = assets, .ScriptDiagnostics = &diagnostics });
 			const Result<ImportResult> imported = ScriptImporter{}.Import(context, metadata);
+			if (!imported && IsInfrastructureFailure(imported.error()))
+				return std::unexpected(imported.error());
+			// The attempt's findings already hold the importer's located failure (SCRIPT_COMPILE_ERROR, §13.7) once, without
+			// repeating a syntax error the checker reported on the same line.
 			std::vector<ScriptDiagnostic> findings;
 			if (const auto check = context.GetScriptCheck(); check.has_value())
 				findings = check->Diagnostics;
-			if (!imported)
+			else if (!imported)
 			{
 				const Error& error = imported.error();
-				if (error.GetCode() == ErrorCode::Io || error.GetCode() == ErrorCode::PermissionDenied || error.GetCode() == ErrorCode::InvalidState
-					|| error.GetCode() == ErrorCode::Unsupported)
-					return std::unexpected(error);
 				findings.push_back({ .Severity = DiagnosticSeverity::Error,
-					.Code = error.GetCode() == ErrorCode::CompileFailed ? "SCRIPT_COMPILE_ERROR" : "SCRIPT_IMPORT_ERROR",
+					.Code = "SCRIPT_COMPILE_ERROR",
 					.File = error.GetLocation().File.empty() ? std::string(path.GetPath()) : error.GetLocation().File,
 					.Line = error.GetLocation().Line,
 					.Column = error.GetLocation().Column,
@@ -87,6 +75,44 @@ namespace Engine {
 			SortScriptDiagnostics(findings);
 			return findings;
 		}
+
+		// A Lua string literal body for a suite name derived from a file stem.
+		static std::string EscapeLuaString(std::string_view text)
+		{
+			std::string escaped;
+			for (const char character : text)
+			{
+				if (character == '\\' || character == '"')
+					escaped.push_back('\\');
+				escaped.push_back(character);
+			}
+			return escaped;
+		}
+
+	}
+
+	namespace {
+
+		class ScriptCheckReader final : public IScriptModuleReader
+		{
+		public:
+			explicit ScriptCheckReader(const EditorScriptService& service)
+				: m_Service(service)
+			{
+			}
+			Result<std::string> ReadModule(const VfsPath& path) override
+			{
+				// A missing or misspelled require is the checker's located finding (as in import), not a failed check.
+				auto source = m_Service.Read(path);
+				if (!source && Utils::IsInfrastructureFailure(source.error()) && !m_Failure.has_value())
+					m_Failure = source.error();
+				return source;
+			}
+			[[nodiscard]] const std::optional<Error>& GetFailure() const { return m_Failure; }
+		private:
+			const EditorScriptService& m_Service; // Borrowed by one synchronous Check invocation.
+			std::optional<Error> m_Failure{};
+		};
 
 	}
 
@@ -97,7 +123,7 @@ namespace Engine {
 
 	Result<EditorScriptWriteResult> EditorScriptService::Create(const VfsPath& path, ScriptTemplate scriptTemplate)
 	{
-		ENGINE_TRY(ValidateScriptPath(*m_Editor, path));
+		ENGINE_TRY(Utils::ValidateScriptPath(*m_Editor, path));
 		if (m_Editor->IsReadOnly() && !m_Editor->IsDryRun())
 			return MakeError(ErrorCode::PermissionDenied, "the project is read-only");
 		const auto existing = m_Editor->GetVfs().GetInfo(path);
@@ -116,12 +142,27 @@ namespace Engine {
 			return MakeError(ErrorCode::InvalidArgument, "unknown script template");
 		ENGINE_TRY_ASSIGN(const VfsPath templatePath, VfsPath::Create("engine", std::format("Templates/Scripts/{}", templateName)));
 		ENGINE_TRY_ASSIGN(std::string source, m_Editor->GetVfs().ReadText(templatePath));
-		std::string name = "Script_";
-		for (const char character : path.GetStem())
-			name.push_back((character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z')
-						|| (character >= '0' && character <= '9') || character == '_'
-					? character
-					: '_');
+		std::string name;
+		if (scriptTemplate == ScriptTemplate::Test)
+		{
+			// The suite name only appears in a string literal and is what results and filters show ("Tetris/<case>"):
+			// the file stem without its ".test" suffix, never a mangled identifier.
+			std::string_view stem = path.GetStem();
+			constexpr std::string_view TestSuffix = ".test";
+			if (stem.size() > TestSuffix.size() && stem.ends_with(TestSuffix))
+				stem.remove_suffix(TestSuffix.size());
+			name = Utils::EscapeLuaString(stem);
+		}
+		else
+		{
+			// Behaviour and Module names are identifiers, prefixed so they never collide with engine type names.
+			name = "Script_";
+			for (const char character : path.GetStem())
+				name.push_back((character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z')
+							|| (character >= '0' && character <= '9') || character == '_'
+						? character
+						: '_');
+		}
 		constexpr std::string_view Placeholder = "{{Name}}";
 		for (size_t position = source.find(Placeholder); position != std::string::npos; position = source.find(Placeholder, position + name.size()))
 			source.replace(position, Placeholder.size(), name);
@@ -130,13 +171,13 @@ namespace Engine {
 
 	Result<std::string> EditorScriptService::Read(const VfsPath& path) const
 	{
-		ENGINE_TRY(ValidateScriptPath(*m_Editor, path));
+		ENGINE_TRY(Utils::ValidateScriptPath(*m_Editor, path));
 		return m_Editor->GetVfs().ReadText(path);
 	}
 
 	Result<EditorScriptWriteResult> EditorScriptService::Write(const VfsPath& path, std::string_view source)
 	{
-		ENGINE_TRY(ValidateScriptPath(*m_Editor, path));
+		ENGINE_TRY(Utils::ValidateScriptPath(*m_Editor, path));
 		if (m_Editor->IsReadOnly() && !m_Editor->IsDryRun())
 			return MakeError(ErrorCode::PermissionDenied, "the project is read-only");
 		if (!IsValidUtf8(source))
@@ -190,7 +231,7 @@ namespace Engine {
 			ENGINE_TRY_ASSIGN(const uint64_t index, m_Editor->Execute(CreateScope<AssetEditCommand>(label, std::move(edits))));
 			static_cast<void>(index);
 		}
-		ENGINE_TRY_ASSIGN(std::vector<ScriptDiagnostic> findings, CheckWrittenScript(*m_Editor, *m_Diagnostics, path, source, metadata));
+		ENGINE_TRY_ASSIGN(std::vector<ScriptDiagnostic> findings, Utils::CheckWrittenScript(*m_Editor, *m_Diagnostics, path, source, metadata));
 		return EditorScriptWriteResult{ .Script = metadata.Handle, .Path = std::string(path.GetPath()), .UndoIndex = transaction.Commit(), .Diagnostics = std::move(findings) };
 	}
 
@@ -212,7 +253,7 @@ namespace Engine {
 		std::vector<std::string> sources;
 		for (const VfsPath& path : selected)
 		{
-			ENGINE_TRY(ValidateScriptPath(*m_Editor, path));
+			ENGINE_TRY(Utils::ValidateScriptPath(*m_Editor, path));
 			ENGINE_TRY_ASSIGN(std::string source, Read(path));
 			sources.push_back(std::move(source));
 		}
@@ -226,7 +267,7 @@ namespace Engine {
 				return std::unexpected(*reader.GetFailure());
 			result.Diagnostics.insert(result.Diagnostics.end(), findings.begin(), findings.end());
 		}
-		SortScriptDiagnostics(result.Diagnostics);
+		Utils::SortScriptDiagnostics(result.Diagnostics);
 		return result;
 	}
 

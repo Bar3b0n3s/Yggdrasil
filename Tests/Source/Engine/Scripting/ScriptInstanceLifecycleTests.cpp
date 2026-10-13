@@ -5,6 +5,8 @@
 #include "Engine/Scene/Components/ScriptComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scripting/LuaHelpers.h"
+#include "Engine/Scripting/ScriptError.h"
+#include "Engine/Scripting/TaskScheduler.h"
 #include "Engine/Session/PlaySession.h"
 #include "Support/ExpectLog.h"
 #include "Support/PhysicsTestScene.h"
@@ -13,6 +15,8 @@
 #include <doctest/doctest.h>
 
 #include <algorithm>
+#include <cstddef>
+#include <format>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -167,6 +171,109 @@ return Script.Define("BehaviourCoverage", T)
 				if (entry.starts_with(prefix))
 					result.push_back(entry.substr(prefix.size()));
 			return result;
+		}
+
+		// Records through Scene.CreateEntity, so it runs unchanged in a real PlaySession with its own registry.
+		static constexpr std::string_view SessionLifecycleSource = R"(
+local T = {}
+local function record(self, phase)
+	Scene.CreateEntity("Trace:" .. self.Label .. ":" .. phase)
+end
+function T:OnCreate()
+	self.Label = self.Entity.Name
+	self.Fixed = 0
+	record(self, "create")
+end
+function T:OnStart() record(self, "start") end
+function T:OnFixedUpdate(dt)
+	self.Fixed += 1
+	record(self, "fixed")
+	if self.Label == "Spawner" and self.Fixed == 1 then
+		local spawned = Scene.CreateEntity("Spawned")
+		spawned:AddComponent("Script", {Script = Assets.Load("Assets/Scripts/SessionLifecycle.luau")})
+	elseif self.Label == "Survivor" and self.Fixed == 2 then
+		Scene.Destroy(Scene.FindByName("Doomed") :: Entity)
+	end
+end
+function T:OnUpdate(dt) record(self, "update") end
+function T:OnLateUpdate(dt) record(self, "late") end
+function T:OnDestroy() record(self, "destroy") end
+function T:OnTriggerEnter(other) record(self, "trigger-enter") end
+function T:OnTriggerExit(other) record(self, "trigger-exit") end
+return Script.Define("SessionLifecycle", T)
+)";
+
+		// A trigger probe: every contact must reach a started instance, and every exit must close a recorded enter.
+		static constexpr std::string_view ContactProbeSource = R"(
+local T = {}
+local function record(self, phase)
+	Scene.CreateEntity("Trace:" .. self.Label .. ":" .. phase)
+end
+function T:OnCreate()
+	self.Label = self.Entity.Name
+	self.Inside = {}
+	self.Fixed = 0
+	record(self, "create")
+end
+function T:OnStart()
+	self.Started = true
+	record(self, "start")
+end
+function T:OnFixedUpdate()
+	self.Fixed += 1
+	record(self, "fixed")
+	if self.Label == "Spawner" and self.Fixed == 1 then
+		local coin = Scene.CreateEntity("Coin")
+		coin.Transform.Translation = vector.create(10, 0, 0)
+		coin:AddComponent("BoxCollider", {HalfExtents = vector.create(1, 1, 1), IsTrigger = true})
+		coin:AddComponent("RigidBody", {Type = "Static"})
+		coin:AddComponent("Script", {Script = Assets.Load("Assets/Scripts/ContactProbe.luau")})
+	end
+end
+function T:OnTriggerEnter(other)
+	assert(self.Started, "a contact reached an instance before its OnStart")
+	assert(not self.Inside[other.ID], "a second enter without an exit")
+	self.Inside[other.ID] = true
+	record(self, "trigger-enter")
+end
+function T:OnTriggerExit(other)
+	assert(self.Inside[other.ID], "an exit without a matching enter")
+	self.Inside[other.ID] = nil
+	record(self, "trigger-exit")
+end
+return Script.Define("ContactProbe", T)
+)";
+
+		static Scope<PlaySession> StartScriptSession(ScriptTestFixture& fixture, bool testMode = false, const ScriptEnvironment& environment = {})
+		{
+			PlaySessionSpecification specification{};
+			specification.Registry = &fixture.GetTypes();
+			specification.Assets = &fixture.GetAssetManager();
+			specification.Seed = 719;
+			specification.Project.Physics.Gravity = glm::vec3(0.0f);
+			specification.ScriptSchemas = fixture.GetSchemaSnapshot();
+			specification.ScriptRunMode = RunModes::Editor;
+			specification.TestMode = testMode;
+			specification.Environment = environment;
+			auto started = PlaySession::CreateFromScene(specification, fixture.GetScene());
+			REQUIRE_MESSAGE(started, (started ? "" : started.error().ToString()));
+			(*started)->SetExtractionEnabled(false);
+			return std::move(*started);
+		}
+
+		static std::string DescribeScriptErrors(const ScriptErrorStream& errors)
+		{
+			std::string result;
+			for (const ScriptError& error : errors.GetErrors())
+				result += std::format("{}:{} {}\n", error.Script, error.Line, error.Message);
+			return result;
+		}
+
+		static ptrdiff_t TracePosition(const std::vector<std::string>& trace, std::string_view entry)
+		{
+			const auto found = std::ranges::find(trace, entry);
+			REQUIRE_MESSAGE(found != trace.end(), entry);
+			return found - trace.begin();
 		}
 
 		static void RunBehaviourSessionCoverage(RunModes mode, std::vector<ScriptApiCoverage>& snapshots)
@@ -334,38 +441,69 @@ return Script.Define("ReloadCoverage", T)
 
 		TEST_CASE("Callbacks: order and phases match §5.7")
 		{
-			Test::ScriptTestFixture fixture(Test::LifecycleSpecification());
+			// Driven only through PlaySession::Tick, so the session's phase order and flushes are what is observed.
+			Test::ScriptTestFixture fixture({ .TestMode = true });
 			const AssetHandle script(0x200001);
-			REQUIRE(fixture.AddScript(script, "Assets/Scripts/Lifecycle.luau", std::string(Test::LifecycleSource)));
-			Scene& scene = fixture.GetScene();
-			const Entity root = scene.CreateEntityWithID(UUID(90), "Root");
-			const Entity child = scene.CreateEntityWithID(UUID(20), "Child", root);
-			const Entity early = scene.CreateEntityWithID(UUID(70), "Early");
-			Test::AttachLifecycleScript(root, script);
-			Test::AttachLifecycleScript(child, script);
+			REQUIRE(fixture.AddScript(script, "Assets/Scripts/SessionLifecycle.luau", std::string(Test::SessionLifecycleSource)));
+			Scene& editScene = fixture.GetScene();
+			const Entity root = editScene.CreateEntityWithID(UUID(90), "Root");
+			const Entity child = editScene.CreateEntityWithID(UUID(20), "Child", root);
+			const Entity early = editScene.CreateEntityWithID(UUID(70), "Early");
+			const Entity spawner = editScene.CreateEntity("Spawner");
+			const Entity doomed = Test::AddBoxBody(editScene, "Doomed", glm::vec3(10.0f, 0.0f, 0.0f), glm::vec3(1.0f), BodyType::Static);
+			doomed.Patch<BoxColliderComponent>([](BoxColliderComponent& collider)
+			{
+				collider.IsTrigger = true;
+			});
+			const Entity survivor = Test::AddSphereBody(editScene, "Survivor", glm::vec3(10.0f, 0.0f, 0.0f), 0.5f, BodyType::Dynamic);
+			Test::PatchRigidBody(survivor, [](RigidBodyComponent& body)
+			{
+				body.AllowSleeping = false;
+			});
+			for (const Entity entity : { root, child, spawner, doomed, survivor })
+				Test::AttachLifecycleScript(entity, script);
 			Test::AttachLifecycleScript(early, script, -5);
-			REQUIRE(fixture.Start());
-			CHECK(Test::ScriptLifecycleTrace(scene) == std::vector<std::string>{ "Early:create", "Root:create", "Child:create", "Early:start", "Root:start", "Child:start" });
-			fixture.Frame.DeltaTime = 0.02;
-			fixture.Frame.Tick = 1;
-			fixture.GetEngine()->FixedUpdate();
-			fixture.GetEngine()->Update();
-			fixture.GetEngine()->LateUpdate();
-			const auto updated = Test::ScriptLifecycleTrace(scene);
-			REQUIRE(updated.size() == 15);
-			CHECK(std::vector<std::string>(updated.begin() + 6, updated.end()) == std::vector<std::string>{ "Early:fixed", "Root:fixed", "Child:fixed", "Early:update", "Root:update", "Child:update", "Early:late", "Root:late", "Child:late" });
-			scene.DestroyEntity(root);
-			CHECK(fixture.GetEngine()->PrepareDestroyFlush() == 2);
-			CHECK(fixture.GetEngine()->PrepareDestroyFlush() == 0);
-			const auto destroyed = Test::ScriptLifecycleTrace(scene);
-			REQUIRE(destroyed.size() == 17);
-			CHECK(destroyed[15] == "Child:destroy");
-			CHECK(destroyed[16] == "Root:destroy");
-			fixture.GetEngine()->FinishDestroyFlush();
-			scene.FlushPendingDestroys();
-			fixture.Stop();
-			CHECK(Test::ScriptLifecycleTrace(scene).back() == "Early:destroy");
-			CHECK(fixture.Errors.empty());
+			auto session = Test::StartScriptSession(fixture, true);
+			Scene& scene = session->GetScene();
+			// Every instance is created before any starts, both in (ExecutionOrder, canonical) order.
+			CHECK(Test::ScriptLifecycleTrace(scene) == std::vector<std::string>{ "Early:create", "Root:create", "Child:create", "Spawner:create", "Doomed:create", "Survivor:create", "Early:start", "Root:start", "Child:start", "Spawner:start", "Doomed:start", "Survivor:start" });
+			session->Tick();
+			session->Tick();
+			REQUIRE_MESSAGE(session->GetScriptErrors().GetErrors().empty(), Test::DescribeScriptErrors(session->GetScriptErrors()));
+			for (const char* label : { "Early", "Root", "Child", "Spawner" })
+			{
+				CAPTURE(label);
+				CHECK(Test::BehaviourTrace(scene, label) == std::vector<std::string>{ "create", "start", "fixed", "update", "late", "fixed", "update", "late" });
+			}
+			// Created during tick 1's fixed phase: not visited by it, started by the next start flush before its first update.
+			CHECK(Test::BehaviourTrace(scene, "Spawned") == std::vector<std::string>{ "create", "start", "update", "late", "fixed", "update", "late" });
+			// Destroyed during tick 2's fixed phase: OnDestroy in the destroy flush and no exit of its own.
+			CHECK(Test::BehaviourTrace(scene, "Doomed") == std::vector<std::string>{ "create", "start", "fixed", "trigger-enter", "update", "late", "fixed", "destroy" });
+			CHECK(Test::BehaviourTrace(scene, "Survivor") == std::vector<std::string>{ "create", "start", "fixed", "trigger-enter", "update", "late", "fixed", "trigger-exit", "update", "late" });
+			const auto trace = Test::ScriptLifecycleTrace(scene);
+			const auto at = [&trace](std::string_view entry)
+			{
+				return Test::TracePosition(trace, entry);
+			};
+			// The fixed phase follows its snapshot; creation inside it is immediate (OnCreate before the call returns).
+			CHECK(at("Early:fixed") < at("Root:fixed"));
+			CHECK(at("Root:fixed") < at("Child:fixed"));
+			CHECK(at("Child:fixed") < at("Spawner:fixed"));
+			CHECK(at("Spawner:fixed") < at("Spawned:create"));
+			CHECK(at("Spawned:create") < at("Doomed:fixed"));
+			// The fixed step that created it does not start it (its physics already ran); the frame's start flush does,
+			// before the Update phase.
+			CHECK(at("Survivor:trigger-enter") < at("Spawned:start"));
+			CHECK(at("Doomed:trigger-enter") < at("Spawned:start"));
+			CHECK(at("Spawned:start") < at("Early:update"));
+			// §5.7 step 8: OnDestroy runs before the synthesized exit to the surviving contact partner.
+			CHECK(at("Doomed:destroy") < at("Survivor:trigger-exit"));
+			// Stop tears down every remaining instance in reverse canonical order: children before parents.
+			session->GetScripts()->Stop();
+			const auto stopped = Test::ScriptLifecycleTrace(scene);
+			CHECK(std::vector<std::string>(stopped.begin() + static_cast<ptrdiff_t>(trace.size()), stopped.end())
+				== std::vector<std::string>{ "Spawned:destroy", "Survivor:destroy", "Spawner:destroy", "Early:destroy", "Child:destroy", "Root:destroy" });
+			CHECK(session->GetScriptErrors().GetErrors().empty());
 		}
 
 		TEST_CASE("ScriptEngine: deactivation tears down children first and reactivation recreates instances")
@@ -507,23 +645,51 @@ return Script.Define("Fault", T)
 		TEST_CASE("Errors: location, traceback and instance disabling")
 		{
 			Test::ExpectLog expected(LogLevel::Error, "callback failure");
-			Test::ScriptTestFixture fixture(Test::LifecycleSpecification());
+			Test::ExpectLog expectedTask(LogLevel::Error, "task failure");
+			// Ordinary editor play (test runs never pause, see the PauseOnError case below).
+			auto specification = Test::LifecycleSpecification();
+			specification.TestMode = false;
+			Test::ScriptTestFixture fixture(specification);
 			const AssetHandle badScript(0x200003);
 			const AssetHandle goodScript(0x200004);
+			const AssetHandle taskScript(0x20000f);
 			REQUIRE(fixture.AddScript(badScript, "Assets/Scripts/Fail.luau", R"(local T = {}
 local function broken() error("callback failure") end
 function T:OnFixedUpdate() broken() end
 return Script.Define("Fail", T))"));
 			REQUIRE(fixture.AddScript(goodScript, "Assets/Scripts/Lifecycle.luau", std::string(Test::LifecycleSource)));
+			// Resumed threads: a task faults after a wait, while a sibling task of the same instance keeps waiting.
+			REQUIRE(fixture.AddScript(taskScript, "Assets/Scripts/TaskFail.luau", R"(local T = {}
+local function fail() error("task failure") end
+function T:OnStart()
+	Task.Spawn(function()
+		while true do
+			Task.WaitTicks(1)
+			Probe.Record("TaskBad:sibling")
+		end
+	end)
+	Task.Spawn(function()
+		Task.WaitTicks(1)
+		fail()
+	end)
+end
+function T:OnFixedUpdate() Probe.Record("TaskBad:fixed") end
+return Script.Define("TaskFail", T))"));
 			const Entity bad = fixture.GetScene().CreateEntity("Bad");
 			const Entity good = fixture.GetScene().CreateEntity("Good");
+			const Entity taskBad = fixture.GetScene().CreateEntity("TaskBad");
 			Test::AttachLifecycleScript(bad, badScript);
 			Test::AttachLifecycleScript(good, goodScript);
+			Test::AttachLifecycleScript(taskBad, taskScript);
 			REQUIRE(fixture.Start());
+			REQUIRE(fixture.GetEngine()->GetTaskScheduler()->GetCount() == 2);
 			fixture.Frame.Tick = 17;
 			fixture.GetEngine()->FixedUpdate();
+			fixture.GetEngine()->ResumeTasks();
+			fixture.Frame.Tick = 18;
 			fixture.GetEngine()->FixedUpdate();
-			REQUIRE(fixture.Errors.size() == 1);
+			fixture.GetEngine()->ResumeTasks();
+			REQUIRE(fixture.Errors.size() == 2);
 			const ScriptError& error = fixture.Errors.front();
 			CHECK(error.Entity == bad.GetUUID());
 			CHECK(error.EntityName == "Bad");
@@ -533,13 +699,235 @@ return Script.Define("Fail", T))"));
 			CHECK(error.Tick == 17);
 			CHECK(error.Message.find("callback failure") != std::string::npos);
 			CHECK_FALSE(error.Traceback.empty());
+			const ScriptError& taskError = fixture.Errors.back();
+			CHECK(taskError.Entity == taskBad.GetUUID());
+			CHECK(taskError.EntityName == "TaskBad");
+			CHECK(taskError.Callback == "Task");
+			CHECK(taskError.Script == "Assets/Scripts/TaskFail.luau");
+			CHECK(taskError.Line == 2);
+			CHECK(taskError.Tick == 17);
+			CHECK(taskError.Message.find("task failure") != std::string::npos);
+			REQUIRE(taskError.Traceback.size() >= 2);
+			CHECK(taskError.Traceback[0].Script == "Assets/Scripts/TaskFail.luau");
+			CHECK(taskError.Traceback[0].Line == 2);
+			CHECK(taskError.Traceback[1].Line == 12);
 			CHECK(fixture.PauseRequested);
 			CHECK_FALSE(fixture.FatalError);
+			// Both faulting instances are disabled; the task fault also cancelled its owner's waiting sibling task.
 			const auto instances = fixture.GetEngine()->GetInstances();
-			REQUIRE(instances.size() == 2);
+			REQUIRE(instances.size() == 3);
 			CHECK(instances[0].Disabled);
 			CHECK_FALSE(instances[1].Disabled);
-			CHECK(Test::ScriptLifecycleTrace(fixture.GetScene()) == std::vector<std::string>{ "Good:create", "Good:start", "Good:fixed", "Good:fixed" });
+			CHECK(instances[2].Disabled);
+			CHECK(fixture.GetEngine()->GetTaskScheduler()->GetCount() == 0);
+			CHECK(Test::ScriptLifecycleTrace(fixture.GetScene()) == std::vector<std::string>{ "Good:create", "Good:start", "Good:fixed", "TaskBad:fixed", "TaskBad:sibling", "Good:fixed" });
+		}
+
+		TEST_CASE("ScriptEngine: test runs record script errors without pausing the session")
+		{
+			Test::ExpectLog expected(LogLevel::Error, "suite fault");
+			for (const bool testMode : { false, true })
+			{
+				CAPTURE(testMode);
+				Test::ScriptTestFixture fixture({ .TestMode = testMode });
+				const AssetHandle handle(0x200010);
+				REQUIRE(fixture.AddScript(handle, "Assets/Scripts/SuiteFault.luau", R"(
+local T = {}
+function T:OnFixedUpdate() error("suite fault") end
+return Script.Define("SuiteFault", T)
+)"));
+				Test::AttachLifecycleScript(fixture.GetScene().CreateEntity("Faulty"), handle);
+				REQUIRE(fixture.Start());
+				REQUIRE(fixture.GetEngine()->GetSettings().PauseOnError);
+				REQUIRE(fixture.Environment.IsEditor);
+				fixture.GetEngine()->FixedUpdate();
+				REQUIRE(fixture.Errors.size() == 1);
+				// The runner owns a test run's time: Editor, Release and Dist runs must observe the same audio and alpha.
+				CHECK(fixture.PauseRequested == !testMode);
+			}
+			// The same holds for a real editor-environment test session, whose pause would silence non-lockstep audio.
+			Test::ScriptTestFixture fixture({ .TestMode = true });
+			const AssetHandle handle(0x200011);
+			REQUIRE(fixture.AddScript(handle, "Assets/Scripts/SuiteFault.luau", R"(
+local T = {}
+function T:OnFixedUpdate() error("suite fault") end
+return Script.Define("SuiteFault", T)
+)"));
+			Test::AttachLifecycleScript(fixture.GetScene().CreateEntity("Faulty"), handle);
+			auto session = Test::StartScriptSession(fixture, true, ScriptEnvironment{ .IsEditor = true });
+			session->Tick();
+			REQUIRE(session->GetScriptErrors().GetErrors().size() == 1);
+			CHECK_FALSE(session->IsPaused());
+		}
+
+		TEST_CASE("ScriptEngine: a failing evaluation never disables the addressed behaviour or cancels its tasks")
+		{
+			Test::ExpectLog compileFailure(LogLevel::Error, "compile:");
+			Test::ExpectLog runtimeFailure(LogLevel::Error, "attempt to index nil");
+			Test::ScriptTestFixture fixture;
+			const AssetHandle handle(0x200012);
+			REQUIRE(fixture.AddScript(handle, "Assets/Scripts/Ball.luau", R"(
+local T = { Fields = { Speed = Field.Number(3) } }
+function T:OnStart()
+	self.Fixed = 0
+	self.Waits = 0
+	Task.Spawn(function()
+		while true do
+			Task.WaitTicks(1)
+			self.Waits += 1
+		end
+	end)
+end
+function T:OnFixedUpdate() self.Fixed += 1 end
+return Script.Define("Ball", T)
+)"));
+			const Entity ball = fixture.GetScene().CreateEntity("Ball");
+			Test::AttachLifecycleScript(ball, handle);
+			REQUIRE(fixture.Start());
+			const auto typo = fixture.Evaluate("retrun self.Speed", ball.GetUUID());
+			REQUIRE_FALSE(typo);
+			const auto missing = fixture.Evaluate("return self.Missing.x", ball.GetUUID());
+			REQUIRE_FALSE(missing);
+			REQUIRE(fixture.Errors.size() == 2);
+			// Reported to the caller and the error stream, never against the behaviour's file or as its fault.
+			CHECK(fixture.Errors[0].Kind == ScriptErrorKind::Compile);
+			CHECK(fixture.Errors[0].Script != "Assets/Scripts/Ball.luau");
+			CHECK(fixture.Errors[0].Entity == ball.GetUUID());
+			CHECK(fixture.Errors[1].Message.find("attempt to index nil") != std::string::npos);
+			CHECK_FALSE(fixture.PauseRequested);
+			const auto instances = fixture.GetEngine()->GetInstances();
+			REQUIRE(instances.size() == 1);
+			CHECK_FALSE(instances[0].Disabled);
+			REQUIRE(fixture.GetEngine()->GetTaskScheduler()->GetCount() == 1);
+			for (uint64_t tick = 1; tick <= 3; ++tick)
+			{
+				fixture.Frame.Tick = tick;
+				fixture.GetEngine()->FixedUpdate();
+				fixture.GetEngine()->ResumeTasks();
+			}
+			const auto state = fixture.Evaluate("return {self.Fixed, self.Waits}", ball.GetUUID());
+			REQUIRE(state);
+			CHECK(state->Value.Get() == Json::array({ 3, 3 }));
+			CHECK(fixture.Errors.size() == 2);
+		}
+
+		TEST_CASE("ScriptInstanceLifecycle: a module top that removes an instance never leaves a callback on it")
+		{
+			Test::ScriptTestFixture fixture(Test::LifecycleSpecification());
+			const AssetHandle bee(0x200013), ay(0x200014), selfRemoving(0x200015);
+			REQUIRE(fixture.AddScript(bee, "Assets/Scripts/Bee.luau", R"(
+local T = {}
+function T:OnCreate() Probe.Record("B:create") end
+function T:OnStart() Probe.Record("B:start") end
+function T:OnDisable() Probe.Record("B:disable") end
+function T:OnDestroy() Probe.Record("B:destroy") end
+return Script.Define("Bee", T)
+)"));
+			// The load-time VM rejects Scene inside the pcall, so import succeeds; the runtime top then removes B.
+			REQUIRE(fixture.AddScript(ay, "Assets/Scripts/Ay.luau", R"(
+pcall(function()
+	local b = Scene.FindByName("B") :: Entity
+	b:RemoveComponent("Script")
+	b:SetActive(not b:IsActiveSelf())
+end)
+local T = {}
+function T:OnCreate() Probe.Record("A:create") end
+function T:OnStart() Probe.Record("A:start") end
+return Script.Define("Ay", T)
+)"));
+			REQUIRE(fixture.AddScript(selfRemoving, "Assets/Scripts/SelfRemoving.luau", R"(
+pcall(function()
+	local owner = Scene.FindByName("Self") :: Entity
+	owner:RemoveComponent("Script")
+	owner:SetActive(false)
+end)
+local T = {}
+function T:OnCreate() Probe.Record("Self:create") end
+function T:OnDestroy() Probe.Record("Self:destroy") end
+return Script.Define("SelfRemoving", T)
+)"));
+			// Canonical order B, A, Self: B's table exists (its OnCreate is pending) when A's module top removes it.
+			const Entity b = fixture.GetScene().CreateEntity("B");
+			const Entity a = fixture.GetScene().CreateEntity("A");
+			const Entity removed = fixture.GetScene().CreateEntity("Self");
+			Test::AttachLifecycleScript(b, bee);
+			Test::AttachLifecycleScript(a, ay);
+			Test::AttachLifecycleScript(removed, selfRemoving);
+			REQUIRE(fixture.Start());
+			CHECK(Test::ScriptLifecycleTrace(fixture.GetScene()) == std::vector<std::string>{ "A:create", "A:start" });
+			CHECK(fixture.Errors.empty());
+			const auto instances = fixture.GetEngine()->GetInstances();
+			REQUIRE(instances.size() == 1);
+			CHECK(instances[0].Entity == a.GetUUID());
+			CHECK_FALSE(b.HasComponent<ScriptComponent>());
+			CHECK_FALSE(removed.HasComponent<ScriptComponent>());
+		}
+
+		TEST_CASE("ScriptInstanceLifecycle: an instance destroyed before the next lifecycle refresh still receives OnDestroy")
+		{
+			Test::ScriptTestFixture fixture(Test::LifecycleSpecification());
+			const AssetHandle handle(0x200016);
+			REQUIRE(fixture.AddScript(handle, "Assets/Scripts/Ephemeral.luau", R"(
+local T = {}
+function T:OnCreate()
+	self.Label = self.Entity.Name
+	Probe.Record(self.Label .. ":create")
+	if self.Label == "Ephemeral" then Scene.Destroy(self.Entity) end
+end
+function T:OnFixedUpdate()
+	if self.Label == "Spawner" and not self.Spawned then
+		self.Spawned = true
+		local spawned = Scene.CreateEntity("Ephemeral")
+		-- The add succeeds; the new instance's OnCreate destroys its entity before the call returns.
+		pcall(function()
+			spawned:AddComponent("Script", {Script = Assets.Load("Assets/Scripts/Ephemeral.luau")})
+		end)
+	end
+end
+function T:OnDestroy() Probe.Record(self.Label .. ":destroy") end
+return Script.Define("Ephemeral", T)
+)"));
+			Test::AttachLifecycleScript(fixture.GetScene().CreateEntity("Spawner"), handle);
+			REQUIRE(fixture.Start());
+			fixture.Frame.Tick = 1;
+			fixture.GetEngine()->FixedUpdate();
+			// Created and destroyed inside one phase, between two refreshes of the lifecycle order.
+			CHECK(fixture.GetEngine()->PrepareDestroyFlush() == 1);
+			CHECK(fixture.GetEngine()->PrepareDestroyFlush() == 0);
+			fixture.GetEngine()->FinishDestroyFlush();
+			fixture.GetScene().FlushPendingDestroys();
+			CHECK(Test::ScriptLifecycleTrace(fixture.GetScene()) == std::vector<std::string>{ "Spawner:create", "Ephemeral:create", "Ephemeral:destroy" });
+			fixture.Stop();
+			CHECK(Test::ScriptLifecycleTrace(fixture.GetScene()) == std::vector<std::string>{ "Spawner:create", "Ephemeral:create", "Ephemeral:destroy", "Spawner:destroy" });
+			CHECK(fixture.Errors.empty());
+		}
+
+		TEST_CASE("ScriptEngine: contacts that begin before OnStart reach the script after it, in enter and exit pairs")
+		{
+			Test::ScriptTestFixture fixture;
+			const AssetHandle handle(0x200017);
+			REQUIRE(fixture.AddScript(handle, "Assets/Scripts/ContactProbe.luau", std::string(Test::ContactProbeSource)));
+			Scene& editScene = fixture.GetScene();
+			const Entity player = Test::AddSphereBody(editScene, "Player", glm::vec3(10.0f, 0.0f, 0.0f), 0.5f, BodyType::Dynamic);
+			Test::PatchRigidBody(player, [](RigidBodyComponent& body)
+			{
+				body.AllowSleeping = false;
+			});
+			Test::AttachLifecycleScript(player, handle);
+			Test::AttachLifecycleScript(editScene.CreateEntity("Spawner"), handle);
+			auto session = Test::StartScriptSession(fixture);
+			Scene& scene = session->GetScene();
+			// Tick 1: Spawner creates the scripted trigger Coin in OnFixedUpdate; its new body overlaps Player at PostStep,
+			// before Coin's OnStart. Tick 2: the held enter reaches Coin after OnStart, before its first OnFixedUpdate.
+			session->Tick();
+			REQUIRE(scene.FindEntityByPath("/Coin"));
+			session->Tick();
+			REQUIRE(session->GetPhysics().Teleport(player.GetUUID(), glm::vec3(100.0f, 0.0f, 0.0f), glm::quat(1.0f, 0.0f, 0.0f, 0.0f)));
+			session->Tick();
+			REQUIRE_MESSAGE(session->GetScriptErrors().GetErrors().empty(), Test::DescribeScriptErrors(session->GetScriptErrors()));
+			CHECK(Test::BehaviourTrace(scene, "Coin") == std::vector<std::string>{ "create", "start", "trigger-enter", "fixed", "fixed", "trigger-exit" });
+			CHECK(Test::BehaviourTrace(scene, "Player") == std::vector<std::string>{ "create", "start", "fixed", "trigger-enter", "fixed", "fixed", "trigger-exit" });
+			CHECK(session->GetPhysics().GetDiagnostics().empty());
 		}
 
 		TEST_CASE("ScriptEngine: read-only evaluation resolves fields without running lifecycle or mutating the host")

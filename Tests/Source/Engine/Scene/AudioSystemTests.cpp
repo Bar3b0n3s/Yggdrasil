@@ -554,6 +554,40 @@ namespace Engine {
 			CHECK_FALSE(fixture.GetEngine().IsVoiceAlive(*flat));
 		}
 
+		TEST_CASE("AudioSystem: one-shot requests are bounded per frame and the next frame admits them again")
+		{
+			AudioSceneFixture fixture;
+			const AssetHandle clip = fixture.AddToneClip(0xa001, 0.1);
+			fixture.AddListener();
+			AudioSystem system(fixture.GetScene(), fixture.GetSpecification());
+			system.Start();
+			// Each request starts a voice, stealing the oldest one-shot once the pool is full.
+			for (uint32_t index = 0; index < MaxAudioOneShotsPerFrame; ++index)
+			{
+				const Result<AudioVoiceHandle> started = system.PlayOneShot(clip, std::nullopt);
+				REQUIRE_MESSAGE(started.has_value(), started.error().ToString());
+			}
+			CHECK(fixture.GetEngine().GetStats().StartedVoices == MaxAudioOneShotsPerFrame);
+			CHECK(fixture.GetEngine().GetStats().LiveVoices == MaxAudioVoices);
+
+			// Arguments are checked first; a valid request past the limit starts nothing and names the limit.
+			const Result<AudioVoiceHandle> invalid = system.PlayOneShot(clip, std::nullopt, -1.0f);
+			REQUIRE_FALSE(invalid.has_value());
+			CHECK(invalid.error().GetCode() == ErrorCode::InvalidArgument);
+			const Result<AudioVoiceHandle> refused = system.PlayOneShot(clip, glm::vec3(1.0f, 0.0f, 0.0f));
+			REQUIRE_FALSE(refused.has_value());
+			CHECK(refused.error().GetCode() == ErrorCode::InvalidState);
+			CHECK(refused.error().ToString().find(std::format("at most {} one-shots start per frame", MaxAudioOneShotsPerFrame)) != std::string::npos);
+			CHECK(fixture.GetEngine().GetStats().StartedVoices == MaxAudioOneShotsPerFrame);
+
+			// The next frame's Update opens a new window.
+			fixture.Frame(system);
+			const Result<AudioVoiceHandle> next = system.PlayOneShot(clip, std::nullopt);
+			REQUIRE_MESSAGE(next.has_value(), next.error().ToString());
+			CHECK(fixture.GetEngine().GetStats().StartedVoices == MaxAudioOneShotsPerFrame + 1);
+			CHECK(fixture.GetEngine().GetStats().LiveVoices == MaxAudioVoices);
+		}
+
 		TEST_CASE("AudioSystem: sources created during play with PlayOnStart start at the next update")
 		{
 			AudioSceneFixture fixture;

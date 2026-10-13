@@ -39,7 +39,8 @@ namespace Engine {
 		Action,             // Name with State (a button use) or Value (an axis value)
 		KeyInput,           // KeyCode with State
 		MouseButtonInput,   // Button with State; Position when HasPosition (a MouseMove at Position first)
-		MouseMove,          // Position (window coordinates)
+		MouseMove,          // Position in view coordinates (PlaySession.h): the pixels of the session's view, origin top-left (the game
+							//   view's image in ordinary play, Window.Width x Window.Height in lockstep, recording, replay and test sessions)
 		MouseDelta,         // Delta: a MouseMove to the current position + Delta
 		Scroll,             // Delta (x right-positive, y up-positive)
 		GamepadButtonInput, // Gamepad, GamepadButtonCode with State

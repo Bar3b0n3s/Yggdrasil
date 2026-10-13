@@ -433,6 +433,66 @@ namespace Engine {
 			CHECK(accumulator != 0);
 		}
 
+		TEST_CASE("Process: a child spawned without output capture keeps no output")
+		{
+			ProcessSpecification specification = Test::MakeTestsChildSpecification({ "--death-test=Platform/PrintsWorkingDirectory" });
+			const Result<ProcessResult> captured = Process::Run(specification, std::chrono::seconds(60));
+			REQUIRE(captured.has_value());
+			CHECK(captured->StandardError.contains("Working directory: ["));
+
+			specification.CaptureOutput = false;
+			Result<Process> spawned = Process::Spawn(specification);
+			REQUIRE(spawned.has_value());
+			const Status waited = spawned->WaitForOutput(ProcessStream::StandardError, "Working directory: [", std::chrono::seconds(60));
+			REQUIRE_FALSE(waited.has_value());
+			CHECK(waited.error().GetCode() == ErrorCode::InvalidState);
+			const Result<ProcessResult> uncaptured = spawned->Wait(std::chrono::seconds(60));
+			REQUIRE(uncaptured.has_value());
+			CHECK(uncaptured->ExitCode == captured->ExitCode);
+			CHECK(uncaptured->StandardOutput.empty());
+			CHECK(uncaptured->StandardError.empty());
+		}
+
+		TEST_CASE("Process: a detached child keeps running after its Process is destroyed")
+		{
+			Result<SocketListener> listener = SocketListener::Listen(0);
+			REQUIRE_MESSAGE(listener.has_value(), listener.error().ToString());
+			ProcessSpecification specification = Test::MakeTestsChildSpecification({
+				"--death-test=Platform/HoldsOutputUntilReleased",
+				"--child-argument=" + std::to_string(listener->GetPort()),
+			});
+			specification.CaptureOutput = false;
+			std::optional<Process> child;
+			{
+				Result<Process> spawned = Process::Spawn(specification);
+				REQUIRE(spawned.has_value());
+				child.emplace(std::move(*spawned));
+			}
+			const uint32_t id = child->GetId();
+			// The child connects once it runs; it then waits until this test closes the connection, and exits on its own.
+			Result<Socket> connection = listener->Accept(std::chrono::seconds(60));
+			REQUIRE_MESSAGE(connection.has_value(), connection.error().ToString());
+			REQUIRE(child->Detach().has_value());
+			child.reset();
+			CHECK(Process::IsRunning(id));
+			connection->Close();
+		}
+
+		TEST_CASE("Process: a child whose output is captured is not detached")
+		{
+			Result<Process> spawned = Process::Spawn(Test::MakeTestsChildSpecification({ "--death-test=Platform/AnnouncesAndHangs" }));
+			REQUIRE(spawned.has_value());
+			REQUIRE(spawned->WaitForOutput(ProcessStream::StandardError, "Process test child is ready", std::chrono::seconds(60)).has_value());
+			const Status detached = spawned->Detach();
+			REQUIRE_FALSE(detached.has_value());
+			CHECK(detached.error().GetCode() == ErrorCode::InvalidState);
+			// The Process still owns its child after the refusal.
+			REQUIRE(spawned->Kill().has_value());
+			const Result<ProcessResult> result = spawned->Wait(std::chrono::seconds(10));
+			REQUIRE(result.has_value());
+			CHECK(result->ExitCode == 128 + 9);
+		}
+
 		TEST_CASE("Process: a child started by Process has no debugger attached")
 		{
 			// This process may run under a debugger; a child it starts never does.

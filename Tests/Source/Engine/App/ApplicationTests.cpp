@@ -16,8 +16,10 @@
 #include "Support/Utf8Path.h"
 #include "Support/WindowedChild.h"
 
+#include <algorithm>
 #include <cmath>
 #include <format>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -641,6 +643,34 @@ namespace Engine {
 				const std::string optionName = spelled.substr(0, spelled.find('='));
 				CHECK(applied.error().GetMessageText().contains(optionName));
 			}
+		}
+
+		TEST_CASE("ApplyEngineCommandLine: --gpu-inject-fault accepts and documents every fault")
+		{
+			const std::span<const CommandLineOption> options = GetEngineCommandLineOptions();
+			const auto option = std::ranges::find(options, std::string_view("--gpu-inject-fault"), &CommandLineOption::Name);
+			REQUIRE(option != options.end());
+			for (const GpuFault fault : { GpuFault::DeviceLost, GpuFault::OomTexture, GpuFault::Hang, GpuFault::OomSpecialization })
+			{
+				const std::string spelled(GpuFaultToString(fault));
+				CAPTURE(spelled);
+				CHECK(option->ValueName.contains(spelled));
+				const std::vector<std::string> arguments = { "--gpu-inject-fault", spelled };
+				const Result<CommandLine> commandLine = CommandLine::Parse(arguments, options);
+				REQUIRE_MESSAGE(commandLine.has_value(), commandLine.error().ToString());
+				ApplicationSpecification specification;
+				REQUIRE(ApplyEngineCommandLine(*commandLine, specification).has_value());
+				CHECK(specification.Graphics.InjectFault == fault);
+			}
+
+			// The refusal names every accepted spelling.
+			const std::vector<std::string> invalid = { "--gpu-inject-fault", "crash" };
+			const Result<CommandLine> commandLine = CommandLine::Parse(invalid, options);
+			REQUIRE_MESSAGE(commandLine.has_value(), commandLine.error().ToString());
+			ApplicationSpecification specification;
+			const Status applied = ApplyEngineCommandLine(*commandLine, specification);
+			REQUIRE_FALSE(applied.has_value());
+			CHECK(applied.error().GetMessageText().contains("'oom-specialization'"));
 		}
 
 		TEST_CASE("ApplyEngineCommandLine: --user-data-dir sets an absolute user-data root")

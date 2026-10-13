@@ -1,14 +1,18 @@
 #include "TestsPCH.h"
-
 #include "EditorCore/Scripting/EditorScriptService.h"
+
 #include "Engine/Asset/ScriptData.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/Core/VirtualFileSystem.h"
-
 #include "Support/EditorTestFixture.h"
 
 #include <algorithm>
 #include <array>
+#include <format>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <vector>
 
 namespace Engine {
 
@@ -158,6 +162,81 @@ namespace Engine {
 			const auto source = service.Read(path);
 			REQUIRE(source.has_value());
 			CHECK(*source == "return 42\n");
+		}
+
+		TEST_CASE("EditorScriptService: a missing or misspelled required module is a located finding, not a failed check")
+		{
+			Test::EditorTestFixture fixture("ScriptServiceMissingRequire");
+			fixture.CreateAndOpenProject();
+			auto& editor = fixture.GetEditor();
+			REQUIRE(editor.GetScriptService() != nullptr);
+			WriteScriptServiceFile(fixture, "Assets/Scripts/Board.luau", "return { Value = 1 }\n");
+			WriteScriptServiceFile(fixture, "Assets/Scripts/Clean.luau", "return { Value = 2 }\n");
+			for (const std::string_view request : std::array{ "./Missing", "./Bord" })
+			{
+				CAPTURE(request);
+				WriteScriptServiceFile(fixture, "Assets/Scripts/Game.luau", std::format("local Board = require(\"{}\")\nreturn Script.Define(\"Game\", {{}})\n", request));
+				// Checking every project script still reports every file, the unresolved require among the findings.
+				const auto checked = editor.GetScriptService()->Check({});
+				REQUIRE_MESSAGE(checked.has_value(), (checked ? std::string() : checked.error().ToString()));
+				CHECK(checked->Paths == std::vector<std::string>{ "Assets/Scripts/Board.luau", "Assets/Scripts/Clean.luau", "Assets/Scripts/Game.luau" });
+				CHECK(std::ranges::any_of(checked->Diagnostics, [](const ScriptDiagnostic& finding)
+				{
+					return finding.Severity == DiagnosticSeverity::Error && finding.File.starts_with("Assets/Scripts/");
+				}));
+			}
+			// A missing requested path is still NotFound.
+			const std::array missing{ ScriptServicePath("Assets/Scripts/Absent.luau") };
+			const auto absent = editor.GetScriptService()->Check(missing);
+			REQUIRE_FALSE(absent.has_value());
+			CHECK(absent.error().GetCode() == ErrorCode::NotFound);
+		}
+
+		TEST_CASE("EditorScriptService: a syntax error is one compile finding and load-time failures use the compile code")
+		{
+			Test::EditorTestFixture fixture("ScriptServiceCompileCodes");
+			fixture.CreateAndOpenProject();
+			auto& editor = fixture.GetEditor();
+			REQUIRE(editor.GetScriptService() != nullptr);
+			const auto syntax = editor.GetScriptService()->Write(ScriptServicePath("Assets/Syntax.luau"), "-- first\n-- second\nlocal = 1\n");
+			REQUIRE(syntax.has_value());
+			const auto errors = std::ranges::count_if(syntax->Diagnostics, [](const ScriptDiagnostic& finding)
+			{
+				return finding.Severity == DiagnosticSeverity::Error;
+			});
+			CHECK(errors == 1);
+			REQUIRE_FALSE(syntax->Diagnostics.empty());
+			CHECK(syntax->Diagnostics[0].Code == "SCRIPT_COMPILE_ERROR");
+			CHECK(syntax->Diagnostics[0].File == "Assets/Syntax.luau");
+			CHECK(syntax->Diagnostics[0].Line == 3);
+			CHECK(syntax->Diagnostics[0].Column == 7);
+			const auto loadTime = editor.GetScriptService()->Write(ScriptServicePath("Assets/LoadTime.luau"), "local T = {}\n\nT.Axis = Input.GetAxis(\"Move\")\nreturn Script.Define(\"LoadTime\", T)\n");
+			REQUIRE(loadTime.has_value());
+			REQUIRE(loadTime->Diagnostics.size() == 1);
+			CHECK(loadTime->Diagnostics[0].Code == "SCRIPT_COMPILE_ERROR");
+			CHECK(loadTime->Diagnostics[0].File == "Assets/LoadTime.luau");
+			CHECK(loadTime->Diagnostics[0].Line == 3);
+			CHECK(loadTime->Diagnostics[0].Message.find("load time") != std::string::npos);
+		}
+
+		TEST_CASE("EditorScriptService: the Test template names its suite after the file stem")
+		{
+			Test::EditorTestFixture fixture("ScriptServiceSuiteName", {}, nullptr, std::nullopt, true);
+			fixture.CreateAndOpenProject();
+			auto& editor = fixture.GetEditor();
+			REQUIRE(editor.GetScriptService() != nullptr);
+			const auto suite = editor.GetScriptService()->Create(ScriptServicePath("Assets/Tests/Tetris.test.luau"), ScriptTemplate::Test);
+			REQUIRE_MESSAGE(suite.has_value(), (suite ? std::string() : suite.error().ToString()));
+			CHECK(suite->Diagnostics.empty());
+			const auto source = editor.GetScriptService()->Read(ScriptServicePath("Assets/Tests/Tetris.test.luau"));
+			REQUIRE(source.has_value());
+			CHECK(source->find("Test.Suite(\"Tetris\",") != std::string::npos);
+			// Behaviour and Module names stay prefixed identifiers.
+			const auto behaviour = editor.GetScriptService()->Create(ScriptServicePath("Assets/Scripts/Player-Controller.luau"), ScriptTemplate::Behaviour);
+			REQUIRE(behaviour.has_value());
+			const auto behaviourSource = editor.GetScriptService()->Read(ScriptServicePath("Assets/Scripts/Player-Controller.luau"));
+			REQUIRE(behaviourSource.has_value());
+			CHECK(behaviourSource->find("Script.Define(\"Script_Player_Controller\", Script_Player_Controller)") != std::string::npos);
 		}
 	}
 

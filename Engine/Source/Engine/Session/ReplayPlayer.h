@@ -40,9 +40,13 @@ namespace Engine {
 		bool HashChecked = false;
 		bool HashMatched = false;
 		std::vector<ReplayExpectationOutcome> Expect{};
-		uint64_t FinalTick = 0;
+		uint64_t FinalTick = 0; // the completed tick playback reached: the replay's FinalTick unless it stopped early
 		std::string StateHash{};
 		std::string ExpectedStateHash{};
+		// Why playback ended before the replay's FinalTick: the game quit (Application.Quit) or a fatal script error stopped
+		// the session. Empty when it reached FinalTick. A stopped playback has failed: HashMatched is false and the
+		// expectations after FinalTick (the tick reached) are reported unevaluated with a located failure.
+		std::string StopReason{};
 	};
 
 	// The adapter executes expectation.Script in the current play VM using ScriptEngine::ExecuteBytecode.
@@ -69,9 +73,11 @@ namespace Engine {
 		// anything, stores immutable replay data and the session serial. Does not step or evaluate a chunk.
 		[[nodiscard]] Status Begin(AssetRef<ReplayData> replay, const PlaySession& session, const ReplayPlaybackOptions& options = {});
 		// Runs at most one Tick (fixed + frame), then evaluates all expectations at the resulting completed-tick boundary.
-		// Checks tick-0 expectations before the first Tick, including FinalTick=0. Returns true when complete. A changed
-		// serial or unexpected tick is Cancelled. Gameplay Scene.Load preserves serial and absolute tick. False predicates
-		// and predicate errors are collected as outcomes; structurally invalid playback/session failure is an outer error.
+		// Checks tick-0 expectations before the first Tick, including FinalTick=0. Returns true when complete. A gameplay
+		// quit request or a fatal stop (PlaySession::GetFatalError) that keeps the session from reaching FinalTick completes
+		// the playback as failed (ReplayPlaybackResult::StopReason), never an outer error. Any other changed serial or
+		// unexpected tick is Cancelled. Gameplay Scene.Load preserves serial and absolute tick. False predicates and
+		// predicate errors are collected as outcomes; structurally invalid playback/session failure is an outer error.
 		[[nodiscard]] Result<bool> Advance(PlaySession& session, IReplayEvaluator& evaluator);
 		[[nodiscard]] Result<ReplayPlaybackResult> GetResult() const;
 		// Idempotent; drops all unconsumed authored events and evaluator work. Already applied input stays at the paused

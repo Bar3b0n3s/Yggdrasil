@@ -128,7 +128,7 @@ namespace Engine {
 				.Function("IsMouseButtonDown", &Utils::InputButton<MouseButton, &InputState::IsMouseButtonDown>, "(button: MouseButton) -> boolean", "Returns the held mouse-button state.", mouse)
 				.Function("IsMouseButtonPressed", &Utils::InputButton<MouseButton, &InputState::WasMouseButtonPressed>, "(button: MouseButton) -> boolean", "Returns this phase's mouse-button press edge.", mouse)
 				.Function("IsMouseButtonReleased", &Utils::InputButton<MouseButton, &InputState::WasMouseButtonReleased>, "(button: MouseButton) -> boolean", "Returns this phase's mouse-button release edge.", mouse)
-				.Function("GetMousePosition", &Utils::InputMouseVector<&InputState::GetMousePosition>, "() -> vector", "Returns cursor window coordinates as vector(x, y, 0).", read)
+				.Function("GetMousePosition", &Utils::InputMouseVector<&InputState::GetMousePosition>, "() -> vector", "Returns the cursor position in view coordinates as vector(x, y, 0): the pixels of the session's view, origin top-left (the game view's image in ordinary play, the project's Window.Width x Window.Height in lockstep, recording, replay and test sessions).", read)
 				.Function("GetMouseDelta", &Utils::InputMouseVector<&InputState::GetMouseDelta>, "() -> vector", "Returns accumulated cursor movement in this phase.", read)
 				.Function("GetScrollDelta", &Utils::InputMouseVector<&InputState::GetScrollDelta>, "() -> vector", "Returns accumulated scroll, right-positive and up-positive.", read)
 				.Function("IsActionDown", &Utils::InputAction<&ScriptActionState::Down>, "(name: string) -> boolean", "Returns a configured action's held state; an unknown name raises INPUT_UNKNOWN_ACTION.", read)

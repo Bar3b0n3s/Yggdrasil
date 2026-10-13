@@ -3,7 +3,8 @@
 
 // Child processes and current-process queries on Windows. A child starts through CreateProcessW with a command line
 // quoted for the C runtime's parser, standard input on NUL and standard output and standard error on anonymous pipes,
-// each drained by its own reader thread. The child inherits exactly those three handles (PROC_THREAD_ATTRIBUTE_HANDLE_LIST).
+// each drained by its own reader thread (or both on NUL when the output is not captured). The child inherits exactly
+// those standard handles (PROC_THREAD_ATTRIBUTE_HANDLE_LIST).
 
 #if defined(ENGINE_PLATFORM_WINDOWS)
 
@@ -305,6 +306,7 @@ namespace Engine {
 		ScopedHandle ProcessHandle;
 		uint32_t Id = 0;
 		std::string ExecutableText{}; // for messages
+		bool CapturesOutput = true;   // false: the child writes to NUL and no reader thread runs
 		ScopedHandle OutputRead;
 		ScopedHandle ErrorRead;
 		Utils::ProcessOutput Output;
@@ -389,20 +391,33 @@ namespace Engine {
 		ScopedHandle outputWrite;
 		ScopedHandle errorRead;
 		ScopedHandle errorWrite;
-		ENGINE_TRY(Utils::CreateOutputPipe(outputRead, outputWrite));
-		ENGINE_TRY(Utils::CreateOutputPipe(errorRead, errorWrite));
-
 		SECURITY_ATTRIBUTES inheritable{};
 		inheritable.nLength = sizeof(inheritable);
 		inheritable.bInheritHandle = TRUE;
+		if (specification.CaptureOutput)
+		{
+			ENGINE_TRY(Utils::CreateOutputPipe(outputRead, outputWrite));
+			ENGINE_TRY(Utils::CreateOutputPipe(errorRead, errorWrite));
+		}
+		else
+		{
+			// Uncaptured output goes to NUL; one inheritable handle serves both streams.
+			outputWrite.Reset(CreateFileW(L"NUL", GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, &inheritable, OPEN_EXISTING,
+				FILE_ATTRIBUTE_NORMAL, nullptr));
+			if (!outputWrite.IsValid())
+				return Utils::MakeLastError("Opening NUL for the child's standard output");
+		}
+
 		ScopedHandle input(CreateFileW(L"NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, &inheritable, OPEN_EXISTING,
 			FILE_ATTRIBUTE_NORMAL, nullptr));
 		if (!input.IsValid())
 			return Utils::MakeLastError("Opening NUL for the child's standard input");
 
-		// The child inherits exactly its three standard handles, not every inheritable handle of this process, so pipes
-		// created concurrently for another child never stay open in this one (which would delay their end of file).
+		// The child inherits exactly its standard handles, not every inheritable handle of this process, so pipes created
+		// concurrently for another child never stay open in this one (which would delay their end of file). Each handle is
+		// listed once.
 		std::array<HANDLE, 3> inherited = { input.Get(), outputWrite.Get(), errorWrite.Get() };
+		const size_t inheritedCount = specification.CaptureOutput ? inherited.size() : 2;
 		SIZE_T attributeListSize = 0;
 		InitializeProcThreadAttributeList(nullptr, 1, 0, &attributeListSize); // fails by design: it reports the size
 		std::vector<std::byte> attributeListStorage(attributeListSize);
@@ -411,7 +426,7 @@ namespace Engine {
 			return Utils::MakeLastError("InitializeProcThreadAttributeList");
 		const ScopedAttributeList attributeListGuard(attributeList);
 		const BOOL isListUpdated = UpdateProcThreadAttribute(attributeList, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST, inherited.data(),
-			inherited.size() * sizeof(HANDLE), nullptr, nullptr);
+			inheritedCount * sizeof(HANDLE), nullptr, nullptr);
 		if (!isListUpdated)
 			return Utils::MakeLastError("UpdateProcThreadAttribute");
 
@@ -420,7 +435,7 @@ namespace Engine {
 		startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
 		startup.StartupInfo.hStdInput = input.Get();
 		startup.StartupInfo.hStdOutput = outputWrite.Get();
-		startup.StartupInfo.hStdError = errorWrite.Get();
+		startup.StartupInfo.hStdError = specification.CaptureOutput ? errorWrite.Get() : outputWrite.Get();
 		startup.lpAttributeList = attributeList;
 
 		// CREATE_NO_WINDOW: the child's standard handles are the pipes, so it needs no console of its own.
@@ -447,6 +462,13 @@ namespace Engine {
 		impl->ProcessHandle.Reset(information.hProcess);
 		impl->Id = information.dwProcessId;
 		impl->ExecutableText = executableText;
+		impl->CapturesOutput = specification.CaptureOutput;
+		if (!specification.CaptureOutput)
+		{
+			impl->Output.MarkEnded(ProcessStream::StandardOutput);
+			impl->Output.MarkEnded(ProcessStream::StandardError);
+			return Process(std::move(impl));
+		}
 		impl->OutputRead.Reset(outputRead.Release());
 		impl->ErrorRead.Reset(errorRead.Release());
 		Impl* state = impl.get();
@@ -508,7 +530,20 @@ namespace Engine {
 	Status Process::WaitForOutput(ProcessStream stream, std::string_view text, std::chrono::milliseconds timeout)
 	{
 		ENGINE_CORE_ASSERT(m_Impl != nullptr, "WaitForOutput called on a moved-from Process");
+		if (!m_Impl->CapturesOutput)
+			return MakeError(ErrorCode::InvalidState, "the output of '{}' is not captured", m_Impl->ExecutableText);
 		return m_Impl->Output.WaitForText(stream, text, Utils::MakeProcessDeadline(timeout));
+	}
+
+	Status Process::Detach()
+	{
+		ENGINE_CORE_ASSERT(m_Impl != nullptr, "Detach called on a moved-from Process");
+		if (m_Impl->CapturesOutput)
+			return MakeError(ErrorCode::InvalidState, "'{}' writes into captured pipes and cannot be detached", m_Impl->ExecutableText);
+		// Closing the handle releases the child without ending it; no reader thread runs for an uncaptured child.
+		m_Impl->ProcessHandle.Reset();
+		m_Impl.reset();
+		return {};
 	}
 
 	Status Process::Kill()

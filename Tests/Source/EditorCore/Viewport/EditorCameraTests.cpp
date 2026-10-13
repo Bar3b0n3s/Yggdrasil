@@ -1,7 +1,10 @@
 #include "TestsPCH.h"
 #include "EditorCore/Viewport/EditorCamera.h"
 
+#include "EditorCore/EditorContext.h"
 #include "EditorCore/Viewport/EditorViewportState.h"
+#include "Engine/Scene/RenderExtraction.h"
+#include "Support/EditorTestFixture.h"
 
 #include <doctest/doctest.h>
 #include <glm/gtc/matrix_transform.hpp>
@@ -97,6 +100,64 @@ namespace Engine {
 					}
 				}
 			}
+		}
+
+		TEST_CASE("EditorCamera: framing only widens the clip range, so the surrounding scene and a later zoom-out stay visible")
+		{
+			const ExplicitRenderCamera camera; // the default range: 0.1 to 1000 m
+			const glm::vec3 minimum(-0.5f);
+			const glm::vec3 maximum(0.5f);
+			const auto fitted = EditorCamera::FrameBounds(camera, minimum, maximum, 16.0f / 9.0f);
+			REQUIRE(fitted.has_value());
+			CHECK(fitted->NearClip <= camera.NearClip);
+			CHECK(fitted->FarClip >= camera.FarClip);
+			// A ground plane or another object 50 m behind the framed cube is still inside the range.
+			const glm::vec3 forward = glm::normalize(fitted->Target - fitted->Position);
+			const float behind = glm::dot((fitted->Target + forward * 50.0f) - fitted->Position, forward);
+			CHECK(behind > fitted->NearClip);
+			CHECK(behind < fitted->FarClip);
+			// Zooming out (wheel away) never pushes the framed cube beyond the far plane.
+			ExplicitRenderCamera zoomed = *fitted;
+			for (int notch = 0; notch < 20; ++notch)
+			{
+				const auto next = EditorCamera::Navigate(zoomed, { .Wheel = -1.0f });
+				REQUIRE(next.has_value());
+				zoomed = *next;
+			}
+			const glm::vec3 direction = glm::normalize(zoomed.Target - zoomed.Position);
+			for (int corner = 0; corner < 8; ++corner)
+			{
+				const glm::vec3 point((corner & 1) ? maximum.x : minimum.x, (corner & 2) ? maximum.y : minimum.y, (corner & 4) ? maximum.z : minimum.z);
+				const float depth = glm::dot(point - zoomed.Position, direction);
+				CHECK(depth > zoomed.NearClip);
+				CHECK(depth < zoomed.FarClip);
+			}
+			// A range that cannot hold the framed bounds still grows to hold them.
+			ExplicitRenderCamera tight = camera;
+			tight.Position = { 0.0f, 300.0f, 2000.0f };
+			tight.FarClip = 1.0f;
+			const auto distant = EditorCamera::FrameBounds(tight, glm::vec3(-100.0f), glm::vec3(100.0f), 1.0f);
+			REQUIRE(distant.has_value());
+			CHECK(distant->FarClip > glm::length(distant->Target - distant->Position) + 100.0f);
+			CHECK(distant->NearClip == tight.NearClip);
+		}
+
+		TEST_CASE("EditorCamera: pan follows the rendered image's axes for steep accepted cameras")
+		{
+			Test::EditorTestFixture fixture("EditorCameraBasis");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			// Just outside the renderer's degenerate band around -Y: |forward x +Y| = 2e-5.
+			ExplicitRenderCamera camera;
+			camera.Position = { 0.0002f, 10.0f, 0.0f };
+			camera.Target = glm::vec3(0.0f);
+			const auto snapshot = ExtractRenderSnapshot(fixture.GetEditor().GetScene(), { .Camera = RenderCameraSource::Explicit, .ExplicitCamera = camera, .Width = 160, .Height = 90 });
+			REQUIRE(snapshot.has_value());
+			const glm::vec3 renderedRight(snapshot->Camera.View[0][0], snapshot->Camera.View[1][0], snapshot->Camera.View[2][0]);
+			const auto panned = EditorCamera::Navigate(camera, { .PointerDelta = { 10.0f, 0.0f }, .Pan = true });
+			REQUIRE(panned.has_value());
+			// Dragging the image to the right moves the camera along the image's left: the axes agree.
+			CHECK(glm::dot(glm::normalize(panned->Position - camera.Position), renderedRight) == doctest::Approx(-1.0f).epsilon(1e-3));
 		}
 
 		TEST_CASE("EditorCamera: a point bound and a vertical view are handled without nonfinite output")

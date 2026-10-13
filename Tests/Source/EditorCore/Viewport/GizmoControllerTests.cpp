@@ -4,15 +4,19 @@
 #include "EditorCore/Commands/SceneEdit.h"
 #include "EditorCore/EditorContext.h"
 #include "EditorCore/Play/EditorPlayController.h"
+#include "Engine/AssetPipeline/EditorAssetManager.h"
+#include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/SceneSerializer.h"
 #include "Engine/Scene/TransformSystem.h"
 #include "Engine/Session/PlaySession.h"
+#include "Support/AutomationTestClient.h"
 #include "Support/EditorTestFixture.h"
 
 #include <doctest/doctest.h>
 #include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/quaternion.hpp>
 
 #include <array>
 #include <limits>
@@ -159,8 +163,14 @@ namespace Engine {
 
 		TEST_CASE("GizmoController: local and world manipulation preserve parent transforms")
 		{
+			// The parent is rotated 30 degrees about Z and scaled non-uniformly. The pivot is the child's world matrix, so
+			// a local-space gizmo snaps along the rotated axes (rotation only, never the parent's scale) and a world-space one
+			// along the world axes; the same drag therefore lands on different snapped positions.
+			const glm::vec3 drag = glm::mat3_cast(TransformSystem::QuaternionFromEulerDegrees({ 0.0f, 0.0f, 30.0f })) * glm::vec3(0.74f, 0.26f, 0.0f);
+			std::array<glm::vec3, 2> landed{};
 			for (const GizmoSpace space : { GizmoSpace::Local, GizmoSpace::World })
 			{
+				CAPTURE(static_cast<int>(space));
 				Test::EditorTestFixture fixture("GizmoParentSpace");
 				fixture.CreateAndOpenProject();
 				fixture.CreateAndOpenScene();
@@ -169,19 +179,67 @@ namespace Engine {
 				parent.Patch<TransformComponent>([](TransformComponent& transform)
 				{
 					transform.Translation = { 7.0f, 2.0f, 1.0f };
-					transform.Rotation = TransformSystem::QuaternionFromEulerDegrees({ 0.0f, 0.0f, 90.0f });
+					transform.Rotation = TransformSystem::QuaternionFromEulerDegrees({ 0.0f, 0.0f, 30.0f });
 					transform.Scale = { 2.0f, 3.0f, 1.0f };
 				});
 				const Entity child = editor.GetScene().CreateEntity("Child", parent);
 				const glm::mat4 before = TransformSystem::ComputeWorldMatrix(parent);
+				const glm::mat4 pivot = TransformSystem::ComputeWorldMatrix(child);
 				const std::array selected{ child.GetUUID() };
 				GizmoController gizmo(editor);
-				REQUIRE(gizmo.Begin(selected, glm::mat4(1.0f), { .Space = space }).has_value());
-				REQUIRE(gizmo.Update(Utils::ViewportTestTranslation(4.0f, 1.0f)).has_value());
+				REQUIRE(gizmo.Begin(selected, pivot, { .Space = space, .Snap = true }).has_value());
+				REQUIRE(gizmo.Update(glm::translate(glm::mat4(1.0f), drag) * pivot).has_value());
 				REQUIRE(gizmo.End().has_value());
 				CHECK(TransformSystem::ComputeWorldMatrix(parent) == before);
-				Utils::ViewportTestNear(TransformSystem::GetWorldPosition(child), { 11.0f, 3.0f, 1.0f });
+				landed[space == GizmoSpace::Local ? 0 : 1] = TransformSystem::GetWorldPosition(child) - glm::vec3(7.0f, 2.0f, 1.0f);
 			}
+			// Local: (0.74, 0.26) along the rotated axes snaps to (0.5, 0.5) there. World: the same drag measures
+			// (0.511, 0.595) along the world axes and snaps to (0.5, 0.5) in world space.
+			Utils::ViewportTestNear(landed[0], glm::mat3_cast(TransformSystem::QuaternionFromEulerDegrees({ 0.0f, 0.0f, 30.0f })) * glm::vec3(0.5f, 0.5f, 0.0f));
+			Utils::ViewportTestNear(landed[1], glm::vec3(0.5f, 0.5f, 0.0f));
+			CHECK(glm::length(landed[0] - landed[1]) > 0.2f);
+		}
+
+		TEST_CASE("GizmoController: replacing the runtime scene during a drag causes Conflict")
+		{
+			Test::EditorTestFixture fixture("GizmoSceneLoad");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			EditorContext& editor = fixture.GetEditor();
+			Test::AutomationTestClient client(editor);
+			const auto created = client.Call("entity.create", Json{ { "name", "Track" } });
+			REQUIRE(created.has_value());
+			const auto id = JsonReader((*created)["entity"]["id"]).ReadUUID();
+			REQUIRE(id.has_value());
+			REQUIRE(client.Call("scene.save", Json::object()).has_value());
+			// Index the saved scene so gameplay can load it by path.
+			REQUIRE(client.Call("project.refreshAssets", Json::object()).has_value());
+			editor.GetAssets().WaitIdle();
+			REQUIRE(client.Call("play.start", Json{ { "lockstep", true } }).has_value());
+			PlaySession& session = *editor.GetPlay().GetSession();
+			const uint64_t serial = session.GetSerial();
+			const uint64_t generation = session.GetSceneGeneration();
+			const std::array selected{ *id };
+			GizmoController gizmo(editor);
+			REQUIRE(gizmo.Begin(selected, glm::mat4(1.0f), {}).has_value());
+			REQUIRE(gizmo.Update(Utils::ViewportTestTranslation(3.0f)).has_value());
+			const uint64_t revision = session.GetScene().GetRevision();
+			// Gameplay reloads the same level within the session: same serial, a fresh runtime scene.
+			REQUIRE(client.Call("script.eval", Json{ { "context", "play" }, { "code", "Scene.Load(Assets.Load('Assets/Scenes/Main.scene'), {})" } }).has_value());
+			REQUIRE(client.Call("play.step", Json{ { "ticks", 1 } }).has_value());
+			REQUIRE(session.GetSerial() == serial);
+			REQUIRE(session.GetSceneGeneration() > generation);
+			const ConstEntity replacement = session.GetScene().FindEntityByID(*id);
+			REQUIRE(replacement.IsValid());
+			// The replacement is indistinguishable by revision and pose: only the scene generation tells the scenes apart.
+			CHECK(session.GetScene().GetRevision() == revision);
+			CHECK(replacement.GetComponent<TransformComponent>().Translation == glm::vec3(0.0f));
+			CHECK(gizmo.GetPreviewScene() == nullptr);
+			const auto conflict = gizmo.End();
+			REQUIRE_FALSE(conflict.has_value());
+			CHECK(conflict.error().GetCode() == ErrorCode::Conflict);
+			CHECK(replacement.GetComponent<TransformComponent>().Translation == glm::vec3(0.0f));
+			REQUIRE(client.Call("play.stop", Json::object()).has_value());
 		}
 
 		TEST_CASE("GizmoController: noninvertible parents and shear fail before any write")

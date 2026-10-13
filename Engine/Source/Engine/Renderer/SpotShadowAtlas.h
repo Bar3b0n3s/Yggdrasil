@@ -35,12 +35,15 @@ namespace Engine {
 	{
 		std::vector<SpotShadowTile> Tiles{}; // at most 8, descending importance then UUID
 		uint32_t Dropped = 0;                // excess visible shadow-casting spots; host warns once per view under the code above
+		uint32_t Rejected = 0;               // visible shadow-casting spots whose data cannot be shadowed; still lit, unshadowed
 	};
 
 	// Pure/thread-safe. Takes indices from CullLights.Visible, filters shadowed spots, uses CullLights' importance,
 	// tie by UUID then snapshot index. Tiles in row-major order, no temporal allocation cache or point-light shadows.
 	// Perspective reverse-Z maps the cone; filter reads clamp to the interior, never the adjacent tile.
-	// InvalidArgument for out-of-range/duplicate indices, invalid camera or candidate light data.
+	// A candidate whose light data cannot be shadowed (non-finite values, a cone outside (0, 90) degrees or Inner > Outer,
+	// an unrepresentable projection) is left out and counted in Rejected; it never costs the other spots their shadows.
+	// InvalidArgument only for out-of-range/duplicate indices or an invalid camera.
 	[[nodiscard]] Result<SpotShadowAtlas> AllocateSpotShadowAtlas(std::span<const LightData> lights,
 		std::span<const uint32_t> visibleLightIndices, const CameraData& camera);
 

@@ -34,6 +34,8 @@ namespace Engine {
 		{
 			if (!editor.HasProject() && !method.Specification.AvailableInLauncher)
 				return MakeError(ErrorCode::InvalidState, "no project open; call project.create or project.open");
+			// A test run owns the editor for humans as well as agents (AutomationServer::AdmitRequest uses the same rule).
+			ENGINE_TRY(editor.CheckTestRunAdmission(method.Specification.Name, options.DryRun));
 			if (method.Specification.Mutates && !options.DryRun && editor.IsReadOnly())
 				return MakeError(ErrorCode::PermissionDenied, "the editor is read-only (--read-only)");
 			if (options.IfRevision && *options.IfRevision != editor.GetRevision())
@@ -150,6 +152,13 @@ namespace Engine {
 		auto completion = std::move(found->second.Completion);
 		m_State->Actions.erase(found);
 		return completion;
+	}
+
+	Status EditorActions::Discard(uint64_t ticket)
+	{
+		ENGINE_TRY(Cancel(ticket));
+		m_State->Actions.erase(ticket);
+		return {};
 	}
 
 	Status EditorActions::Cancel(uint64_t ticket)

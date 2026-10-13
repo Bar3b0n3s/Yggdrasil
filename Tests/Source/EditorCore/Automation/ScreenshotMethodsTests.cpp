@@ -15,8 +15,8 @@
 #include "Support/AutomationTestClient.h"
 #include "Support/EditorTestFixture.h"
 
-#include <string>
 #include <chrono>
+#include <string>
 #include <utility>
 
 // editor.screenshot, and how the editor offers both screenshot methods (without a renderer, with failing captures, in the
@@ -65,9 +65,10 @@ namespace Engine {
 			{
 				return record->CompletedFrame;
 			};
-			specification.Screenshots.RequestUiFrame = [record]()
+			specification.Screenshots.RequestUiFrame = [record]() -> Status
 			{
 				++record->FrameRequests;
+				return {};
 			};
 			return specification;
 		}
@@ -340,7 +341,10 @@ namespace Engine {
 			{
 				return completedFrame;
 			};
-			specification.Screenshots.RequestUiFrame = []() {};
+			specification.Screenshots.RequestUiFrame = []() -> Status
+			{
+				return {};
+			};
 			Test::AutomationTestClient client(fixture.GetEditor(), specification);
 
 			const Json viewport = client.Request("viewport.screenshot", Json{ { "view", "scene" } });

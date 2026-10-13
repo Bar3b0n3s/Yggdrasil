@@ -4,6 +4,8 @@
 #include "Engine/Asset/ScriptData.h"
 #include "Engine/Core/Assert.h"
 #include "Engine/Core/DetMath.h"
+#include "Engine/Core/Hash.h"
+#include "Engine/Core/Log.h"
 #include "Engine/Core/Random.h"
 #include "Engine/Core/Utf8.h"
 #include "Engine/Reflection/TypeRegistry.h"
@@ -12,6 +14,7 @@
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scripting/LoadTimeVm.h"
 #include "Engine/Scripting/LuaHelpers.h"
+#include "Engine/Scripting/Private/BindingRegistration.h"
 #include "Engine/Scripting/Private/SandboxAccess.h"
 #include "Engine/Scripting/Private/ScriptEngineAccess.h"
 #include "Engine/Scripting/RegisterBindings.h"
@@ -19,16 +22,19 @@
 #include "Engine/Scripting/ScriptCompiler.h"
 #include "Engine/Scripting/ScriptEngine.h"
 #include "Engine/Scripting/ScriptHost.h"
+#include "Engine/Scripting/ScriptLimits.h"
 #include "Engine/Scripting/Watchdog.h"
 
 #include <Luau/Common.h>
 #include <Luau/ExperimentalFlags.h>
 #include <Luau/Require.h>
+#include <glm/glm.hpp>
 #include <lualib.h>
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <cstring>
 #include <exception>
 #include <limits>
@@ -44,32 +50,6 @@ namespace Engine {
 		std::atomic<bool> s_RuntimeInitialized{ false };
 		std::atomic<uint64_t> s_NextVmIdentity{ 1 };
 		Luau::AssertHandler s_PreviousAssertHandler = nullptr;
-
-		int ScriptAssert(const char* expression, const char* file, int line, const char* function)
-		{
-			GetAssertHandler()({ .Kind = AssertKind::Assert, .Expression = expression ? expression : "", .Message = "Luau assertion failed", .File = file ? file : "", .Line = line > 0 ? static_cast<uint32_t>(line) : 0, .Function = function ? function : "" });
-			return 1;
-		}
-
-		Error ExecutionError(const ScriptError& error)
-		{
-			ErrorLocation location{};
-			location.File = error.Script;
-			location.Line = error.Line;
-			location.Column = error.Column;
-			location.Entity = error.Entity;
-			if (!error.JsonPointer.empty())
-				location.JsonPointer = error.JsonPointer;
-			const auto code = error.Kind == ScriptErrorKind::Timeout ? ErrorCode::Timeout : error.Kind == ScriptErrorKind::Compile ? ErrorCode::CompileFailed
-																																   : ErrorCode::Script;
-			return Error(code, error.Message).WithLocation(std::move(location));
-		}
-
-		struct ProtectedEntry
-		{
-			Sandbox& Owner;
-			~ProtectedEntry() { Detail::SandboxAccess::LeaveProtected(Owner); }
-		};
 
 		struct StackRestore
 		{
@@ -90,7 +70,31 @@ namespace Engine {
 			~ContextRestore() { Detail::SandboxAccess::PopContext(Owner); }
 		};
 
-		Status CheckOutcome(const Result<ScriptCallResult>& outcome)
+	}
+
+	namespace Utils {
+
+		static int ScriptAssert(const char* expression, const char* file, int line, const char* function)
+		{
+			GetAssertHandler()({ .Kind = AssertKind::Assert, .Expression = expression ? expression : "", .Message = "Luau assertion failed", .File = file ? file : "", .Line = line > 0 ? static_cast<uint32_t>(line) : 0, .Function = function ? function : "" });
+			return 1;
+		}
+
+		static Error ExecutionError(const ScriptError& error)
+		{
+			ErrorLocation location{};
+			location.File = error.Script;
+			location.Line = error.Line;
+			location.Column = error.Column;
+			location.Entity = error.Entity;
+			if (!error.JsonPointer.empty())
+				location.JsonPointer = error.JsonPointer;
+			const auto code = error.Kind == ScriptErrorKind::Timeout ? ErrorCode::Timeout : error.Kind == ScriptErrorKind::Compile ? ErrorCode::CompileFailed
+																																   : ErrorCode::Script;
+			return Error(code, error.Message).WithLocation(std::move(location));
+		}
+
+		static Status CheckOutcome(const Result<ScriptCallResult>& outcome)
 		{
 			if (!outcome)
 				return std::unexpected(outcome.error());
@@ -99,6 +103,72 @@ namespace Engine {
 			if (outcome->Yielded)
 				return MakeError(ErrorCode::Script, "module evaluation cannot yield");
 			return {};
+		}
+
+		// The engine's vector.angle (§4.12, M13 review F02): Luau's lveclib computes atan2 through the C runtime, whose
+		// results differ between C runtimes and CPU code paths. Same contract as upstream (the signed angle between a and b,
+		// negated when cross(a, b) points against the optional axis), evaluated in double with exact operations only and
+		// DetMath's ATan2, so every configuration and platform returns the same value.
+		static int VectorAngle(lua_State* vm)
+		{
+			const float* a = luaL_checkvector(vm, 1);
+			const float* b = luaL_checkvector(vm, 2);
+			const float* axis = luaL_optvector(vm, 3, nullptr);
+			const glm::dvec3 from(a[0], a[1], a[2]);
+			const glm::dvec3 to(b[0], b[1], b[2]);
+			const glm::dvec3 cross(from.y * to.z - from.z * to.y, from.z * to.x - from.x * to.z, from.x * to.y - from.y * to.x);
+			const double sine = std::sqrt(cross.x * cross.x + cross.y * cross.y + cross.z * cross.z);
+			const double cosine = from.x * to.x + from.y * to.y + from.z * to.z;
+			double angle = DetMath::ATan2(sine, cosine);
+			if (axis != nullptr && cross.x * axis[0] + cross.y * axis[1] + cross.z * axis[2] < 0.0)
+				angle = -angle;
+			lua_pushnumber(vm, angle);
+			return 1;
+		}
+
+		// `text` with every "engine/<n>:<line>:" location prefix of a record this VM loaded (raised by the VM or by
+		// error(message, level)) replaced by the authored "<file>[#<jsonPointer>][:<line>]:" location; other text is
+		// unchanged. Stops once the result is longer than maximumBytes: the caller then cuts it, so no later text could be
+		// kept anyway.
+		static std::string RewriteLocations(const Sandbox& sandbox, std::string_view text, size_t maximumBytes)
+		{
+			// A VM-raised error or error(message, level) prefixes the message with luaO_chunkid's "engine/<n>:<line>: ", the
+			// private identity without its '='. Replace every such prefix of a loaded record with its authored location.
+			constexpr std::string_view Marker = "engine/";
+			std::string result;
+			size_t copied = 0;
+			for (size_t found = text.find(Marker); found != std::string_view::npos && result.size() <= maximumBytes; found = text.find(Marker, found + 1))
+			{
+				size_t end = found + Marker.size();
+				const size_t digits = end;
+				while (end < text.size() && text[end] >= '0' && text[end] <= '9')
+					++end;
+				if (end == digits || end >= text.size() || text[end] != ':')
+					continue;
+				const std::string_view identity = text.substr(found, end - found);
+				const size_t lineStart = ++end;
+				uint64_t line = 0;
+				while (end < text.size() && text[end] >= '0' && text[end] <= '9' && line <= std::numeric_limits<uint32_t>::max())
+					line = line * 10 + static_cast<uint64_t>(text[end++] - '0');
+				if (end == lineStart || end >= text.size() || text[end] != ':' || line > std::numeric_limits<uint32_t>::max())
+					continue;
+				const auto location = Detail::SandboxAccess::Locate(sandbox, std::string("=").append(identity), static_cast<uint32_t>(line));
+				if (location.File.empty())
+					continue;
+				result.append(text.substr(copied, found - copied));
+				result += location.File;
+				if (location.JsonPointer)
+					result += '#' + *location.JsonPointer;
+				if (location.Line != 0)
+					result += std::format(":{}", location.Line);
+				copied = end; // keeps the ':' that ends the prefix
+				found = end;
+			}
+			if (copied == 0)
+				return std::string(text);
+			if (result.size() <= maximumBytes)
+				result.append(text.substr(copied));
+			return result;
 		}
 
 	}
@@ -113,15 +183,22 @@ namespace Engine {
 			size_t Bytes = 0;
 			~PrintSink() { static_cast<void>(Allocator.Reallocate(Reservation, Bytes, 0)); }
 		};
-		// One allocator block holds the complete immutable source map, including its lookup record and strings.
+		// One allocator block holds the complete immutable source map, including its lookup record, strings and the exact
+		// bytecode bytes that identity reuse compares (§11.1, ADR 0019 decision 4).
 		struct LoadedMap
 		{
 			LoadedMap* Next = nullptr;
 			size_t AllocationBytes = 0;
+			uint64_t BytecodeHash = 0;
+			std::span<const std::byte> Bytecode{};
 			std::string_view Identity{};
+			std::string_view ChunkName{};
+			std::string_view Path{};
 			std::string_view File{};
 			std::string_view Pointer{};
 			std::span<const uint32_t> Offsets{};
+			uint64_t SourceHash = 0;
+			uint32_t SourceByteCount = 0;
 			uint32_t Prefix = 0;
 		};
 
@@ -157,6 +234,8 @@ namespace Engine {
 		std::optional<ScriptErrorKind> SafetyFault{};
 		std::optional<ScriptError> LastError{};
 		ScriptExecutionContext Execution{};
+		uint64_t Slice = 0; // serial of the current outermost execution slice
+		Detail::ScriptLogWindow LogWindow{};
 		std::vector<Detail::SandboxExecutionContext> Contexts{};
 		// Synchronous borrows, scoped around a protected entry; never retained in the VM.
 		const std::function<int(ScriptCall&)>* NativeOperation = nullptr;
@@ -164,6 +243,7 @@ namespace Engine {
 
 		~State()
 		{
+			Detail::SandboxAccess::ReportDroppedLogEntries(LogWindow);
 			if (Vm)
 				lua_close(Vm);
 			while (Maps)
@@ -179,6 +259,18 @@ namespace Engine {
 		void AssertThread() const
 		{
 			ENGINE_CORE_VERIFY(OwnerThread == std::this_thread::get_id(), "Sandbox used outside its owner thread");
+		}
+
+		// §13.2: the host's watchdog phase names the innermost gameplay entry. One-shot evaluations keep the phase of
+		// the automation request that runs them, so they report none.
+		void PublishScriptPhase() const
+		{
+			if (Specification.Host == nullptr)
+				return;
+			if (Contexts.empty() || Watchdog.GetDepth() == 0 || Execution.Origin == ScriptExecutionOrigin::Eval)
+				Specification.Host->OnScriptPhase({}, {});
+			else
+				Specification.Host->OnScriptPhase(Contexts.back().Script, Contexts.back().Callback);
 		}
 
 		static State& From(lua_State* vm)
@@ -396,7 +488,8 @@ namespace Engine {
 			auto call = Detail::SandboxAccess::ThreadCall(*state.Owner, vm, "require");
 			if (!call)
 				luaL_error(vm, "%s", call.error().GetMessageText().c_str());
-			const auto request = Lua::Check<std::string>(*call, 1);
+			// The request becomes a recorded require edge (RequireResolver), so its length is checked before any copy.
+			const auto request = Lua::CheckBoundedString(*call, 1, MaxScriptRequireBytes);
 			lua_Debug frame{};
 			int level = 1;
 			while (lua_getinfo(vm, level++, "s", &frame) && frame.what[0] == 'C')
@@ -498,30 +591,28 @@ namespace Engine {
 		static int Print(lua_State* vm)
 		{
 			auto& state = From(vm);
-			std::string text;
-			const int count = lua_gettop(vm);
-			for (int index = 1; index <= count; ++index)
-			{
-				size_t length = 0;
-				const char* value = luaL_tolstring(vm, index, &length);
-				if (index != 1)
-					text += '\t';
-				text.append(value, length);
-				lua_pop(vm, 1);
-			}
-			Detail::SandboxAccess::CapturePrint(*state.Owner, text);
+			Detail::SandboxAccess::CapturePrint(*state.Owner, Detail::SandboxAccess::FormatPrintArguments(*state.Owner, vm));
 			return 0;
 		}
 
 		int Initialize(ScriptCall& call)
 		{
 			luaL_openlibs(call.State);
-			// Environment reflection can expose another module's private globals through an exported closure.
-			for (const char* name : { "os", "io", "package", "debug", "loadfile", "dofile", "loadstring", "collectgarbage", "getfenv", "setfenv" })
+			// Environment reflection can expose another module's private globals through an exported closure. gcinfo reports
+			// the heap size, which Luau's GC paces by wall-clock allocation rates (lua_clock), so a branch on it would make
+			// simulation depend on timing (§4.12, M13 review F03), like collectgarbage("count").
+			for (const char* name : { "os", "io", "package", "debug", "loadfile", "dofile", "loadstring", "collectgarbage", "gcinfo", "getfenv", "setfenv" })
 			{
 				lua_pushnil(call.State);
 				lua_setglobal(call.State, name);
 			}
+			// vector.angle is the only vector or math library function that reaches a C runtime transcendental (atan2); the
+			// others use exact operations (sqrt, floor, ceil, comparisons, + - * /) or are rebound below. safeenv is cleared
+			// after sandboxing, so compiled fast calls dispatch through these tables too.
+			lua_getglobal(call.State, "vector");
+			lua_pushcfunction(call.State, Utils::VectorAngle, "vector.angle");
+			lua_setfield(call.State, -2, "angle");
+			lua_pop(call.State, 1);
 			lua_getglobal(call.State, "math");
 			const luaL_Reg functions[] = {
 				{ "sin", MathUnary<DetMath::Sin> }, { "cos", MathUnary<DetMath::Cos> }, { "tan", MathUnary<DetMath::Tan> },
@@ -583,7 +674,7 @@ namespace Engine {
 			ContextRestore contextRestore{ *Owner };
 			if (entity)
 			{
-				ENGINE_TRY(CheckOutcome(RunNative(child, [entity](ScriptCall& call)
+				ENGINE_TRY(Utils::CheckOutcome(RunNative(child, [entity](ScriptCall& call)
 				{
 					const auto pushed = Detail::ScriptEngineAccess::PushInstance(call, *entity);
 					if (!pushed)
@@ -603,13 +694,13 @@ namespace Engine {
 				error.Message = lua_type(child, -1) == LUA_TSTRING ? lua_tostring(child, -1) : "unable to load trusted script bytecode";
 				Detail::SandboxAccess::RecordFailure(*Owner, error);
 				Lua::RaiseError(caller, error);
-				return std::unexpected(ExecutionError(error));
+				return std::unexpected(Utils::ExecutionError(error));
 			}
 			ENGINE_TRY_ASSIGN(auto call, Detail::SandboxAccess::ThreadCall(*Owner, child));
 			const auto outcome = Lua::ProtectedCall(call, 0, LUA_MULTRET);
 			if (outcome && outcome->Failure)
 				Lua::RaiseError(caller, *outcome->Failure);
-			ENGINE_TRY(CheckOutcome(outcome));
+			ENGINE_TRY(Utils::CheckOutcome(outcome));
 			if (module && outcome->ResultCount > 1)
 				return MakeError(ErrorCode::Script, "a required module must return at most one value");
 			if (outcome->ResultCount == 0)
@@ -636,12 +727,6 @@ namespace Engine {
 			diagnostic.Message = error.GetMessageText();
 			Detail::SandboxAccess::RecordFailure(*Owner, diagnostic);
 		}
-
-		void RecoverPublicFailure()
-		{
-			if (!Specification.Engine && Watchdog.GetDepth() == 0 && Allocator->GetState().NeedsRecovery && !Allocator->GetState().MustStop)
-				static_cast<void>(Detail::SandboxAccess::RecoverMemory(*Owner));
-		}
 	};
 
 	Status InitializeScriptingRuntime()
@@ -652,7 +737,7 @@ namespace Engine {
 			if (std::string_view(flag->name).starts_with("Luau") && !Luau::isAnalysisFlagExperimental(flag->name))
 				flag->value = true;
 		s_PreviousAssertHandler = Luau::assertHandler();
-		Luau::assertHandler() = ScriptAssert;
+		Luau::assertHandler() = Utils::ScriptAssert;
 		s_RuntimeInitialized.store(true, std::memory_order_release);
 		return {};
 	}
@@ -723,7 +808,7 @@ namespace Engine {
 		lua_callbacks(state.Vm)->userdata = sandbox.get();
 		lua_callbacks(state.Vm)->userthread = State::ThreadLifecycle;
 		lua_callbacks(state.Vm)->interrupt = State::Interrupt;
-		ENGINE_TRY(CheckOutcome(state.RunNative(state.Vm, [&state](ScriptCall& call)
+		ENGINE_TRY(Utils::CheckOutcome(state.RunNative(state.Vm, [&state](ScriptCall& call)
 		{
 			return state.Initialize(call);
 		})));
@@ -783,7 +868,7 @@ namespace Engine {
 			operation = script.SourceMap.Path.ends_with(".luau") ? Detail::SandboxAccess::PushModule(call, script) : m_State->Execute(call, script, std::nullopt);
 			return 0;
 		});
-		ENGINE_TRY(CheckOutcome(outcome));
+		ENGINE_TRY(Utils::CheckOutcome(outcome));
 		if (!operation)
 		{
 			if (!m_State->LastError)
@@ -876,7 +961,7 @@ namespace Engine {
 				evaluation.Value = VariantValue(std::move(*json));
 			return 0;
 		});
-		ENGINE_TRY(CheckOutcome(outcome));
+		ENGINE_TRY(Utils::CheckOutcome(outcome));
 		if (!operation)
 		{
 			if (!m_State->LastError)
@@ -982,7 +1067,7 @@ namespace Engine {
 				}
 				return 0;
 			});
-			const auto status = CheckOutcome(outcome);
+			const auto status = Utils::CheckOutcome(outcome);
 			if (!status)
 			{
 				lua_settop(call.State, top);
@@ -1348,14 +1433,19 @@ namespace Engine {
 			auto& state = *sandbox.m_State;
 			state.AssertThread();
 			const auto memory = state.Allocator->GetState();
-			if (memory.MustStop || memory.NeedsRecovery)
-				return MakeError(ErrorCode::InvalidState, "Sandbox requires memory recovery or has stopped");
 			const bool outermost = state.Watchdog.GetDepth() == 0;
+			// Only a new slice is refused. A nested entry inside the slice whose allocation crossed the limit (instances that
+			// one Scene.Instantiate creates, OnDisable from SetActive) inherits the latched memory fault, so its failure is
+			// classified as that one Memory fault and attributed to the faulting owner instead of a bogus Runtime error
+			// that would disable an innocent instance (M13 review F08).
+			if (outermost && (memory.MustStop || memory.NeedsRecovery))
+				return MakeError(ErrorCode::InvalidState, "Sandbox requires memory recovery or has stopped");
 			ENGINE_TRY(state.Watchdog.Enter(state.Budget, SampleClock(sandbox)));
 			if (outermost)
 			{
 				state.SafetyFault.reset();
 				state.Execution = { .Origin = origin };
+				++state.Slice;
 			}
 			return {};
 		}
@@ -1379,6 +1469,7 @@ namespace Engine {
 		{
 			sandbox.m_State->AssertThread();
 			sandbox.m_State->Contexts.push_back(context);
+			sandbox.m_State->PublishScriptPhase();
 			return {};
 		}
 
@@ -1387,6 +1478,7 @@ namespace Engine {
 			auto& contexts = sandbox.m_State->Contexts;
 			ENGINE_CORE_VERIFY(!contexts.empty(), "unmatched Sandbox context pop");
 			contexts.pop_back();
+			sandbox.m_State->PublishScriptPhase();
 		}
 
 		SandboxExecutionContext SandboxAccess::GetContext(const Sandbox& sandbox)
@@ -1417,10 +1509,23 @@ namespace Engine {
 			for (size_t i = 0; i < map.LineOffsets.size(); ++i)
 				if (map.LineOffsets[i] > map.SourceByteCount || (i && map.LineOffsets[i] <= map.LineOffsets[i - 1]))
 					return MakeError(ErrorCode::Validation, "invalid authored script line offsets");
+			// Identical bytecode bytes with an identical complete source map reuse their interned identity, so repeated
+			// executions of one ScriptData (a play.waitFor predicate each tick, a replay Expect) retain one record instead
+			// of charging a new one to the allocator every time (M13 review F05). The hash only filters candidates.
+			const auto bytecode = std::span<const std::byte>(script.Bytecode);
+			const uint64_t hash = XXH64(bytecode);
+			for (const auto* existing = state.Maps; existing; existing = existing->Next)
+				if (existing->BytecodeHash == hash && std::ranges::equal(existing->Bytecode, bytecode) && existing->ChunkName == map.ChunkName && existing->Path == map.Path
+					&& existing->Pointer == map.JsonPointer && existing->SourceHash == map.SourceHash && existing->SourceByteCount == map.SourceByteCount
+					&& existing->Prefix == map.GeneratedPrefixLines && std::ranges::equal(existing->Offsets, map.LineOffsets))
+				{
+					ENGINE_TRY(state.Poll());
+					return existing->Identity;
+				}
 			if (state.NextChunk == std::numeric_limits<uint64_t>::max())
 				return MakeError(ErrorCode::InvalidState, "VM chunk identity space exhausted");
 			const auto identity = std::format("=engine/{}", state.NextChunk++);
-			const uint64_t bytes = sizeof(Sandbox::State::LoadedMap) + static_cast<uint64_t>(map.LineOffsets.size()) * sizeof(uint32_t) + identity.size() + map.ChunkName.size() + map.Path.size() + map.JsonPointer.size() + 4;
+			const uint64_t bytes = sizeof(Sandbox::State::LoadedMap) + static_cast<uint64_t>(map.LineOffsets.size()) * sizeof(uint32_t) + bytecode.size() + identity.size() + map.ChunkName.size() + map.Path.size() + map.JsonPointer.size() + 4;
 			if (bytes > std::numeric_limits<size_t>::max())
 				return MakeError(ErrorCode::Validation, "script map exceeds native address space");
 			void* memory = state.Allocator->Reallocate(nullptr, 0, static_cast<size_t>(bytes));
@@ -1429,11 +1534,17 @@ namespace Engine {
 			auto* record = std::construct_at(static_cast<Sandbox::State::LoadedMap*>(memory));
 			record->Next = state.Maps;
 			record->AllocationBytes = static_cast<size_t>(bytes);
+			record->BytecodeHash = hash;
+			record->SourceHash = map.SourceHash;
+			record->SourceByteCount = map.SourceByteCount;
 			record->Prefix = map.GeneratedPrefixLines;
 			auto* offsets = reinterpret_cast<uint32_t*>(record + 1);
 			std::memcpy(offsets, map.LineOffsets.data(), map.LineOffsets.size() * sizeof(uint32_t));
 			record->Offsets = { offsets, map.LineOffsets.size() };
-			char* storage = reinterpret_cast<char*>(offsets + map.LineOffsets.size());
+			auto* code = reinterpret_cast<std::byte*>(offsets + map.LineOffsets.size());
+			std::memcpy(code, bytecode.data(), bytecode.size());
+			record->Bytecode = { code, bytecode.size() };
+			char* storage = reinterpret_cast<char*>(code + bytecode.size());
 			const auto copy = [&storage](std::string_view text)
 			{
 				const auto result = std::string_view(storage, text.size());
@@ -1443,13 +1554,65 @@ namespace Engine {
 				return result;
 			};
 			record->Identity = copy(identity);
-			const auto authored = copy(map.ChunkName);
-			const auto path = copy(map.Path);
-			record->File = path.empty() ? authored.substr(1) : path;
+			record->ChunkName = copy(map.ChunkName);
+			record->Path = copy(map.Path);
+			record->File = record->Path.empty() ? record->ChunkName.substr(1) : record->Path;
 			record->Pointer = copy(map.JsonPointer);
 			state.Maps = record;
 			ENGINE_TRY(state.Poll());
 			return record->Identity;
+		}
+
+		std::string SandboxAccess::BoundScriptText(const Sandbox& sandbox, std::string_view text, uint64_t fullBytes)
+		{
+			// Rewrite first: an authored location is usually longer than the private identity it replaces, so the cap must
+			// hold for the text that is kept. The rewrite stops once nothing more of it could be kept.
+			std::string result = Utils::RewriteLocations(sandbox, text, MaxScriptLogMessageBytes);
+			if (result.size() <= MaxScriptLogMessageBytes && fullBytes <= text.size())
+				return result;
+			const std::string marker = std::format(" [truncated: {} bytes]", std::max<uint64_t>(fullBytes, text.size()));
+			const size_t keep = MaxScriptLogMessageBytes - marker.size();
+			if (result.size() > keep)
+				result.resize(keep);
+			result.resize(CompleteUtf8Prefix(result));
+			return result + marker;
+		}
+
+		std::string SandboxAccess::FormatPrintArguments(const Sandbox& sandbox, lua_State* state)
+		{
+			std::string text;
+			uint64_t total = 0;
+			const int count = lua_gettop(state);
+			for (int index = 1; index <= count; ++index)
+			{
+				size_t length = 0;
+				const char* value = luaL_tolstring(state, index, &length);
+				const std::string_view piece = index != 1 ? "\t" : "";
+				total += piece.size() + length;
+				// Never assemble more than the cap, however many arguments alias one VM string.
+				for (const std::string_view part : { piece, std::string_view(value, length) })
+					if (text.size() < MaxScriptLogMessageBytes)
+						text.append(part.substr(0, MaxScriptLogMessageBytes - text.size()));
+				lua_pop(state, 1);
+			}
+			return BoundScriptText(sandbox, text, total);
+		}
+
+		ScriptLogWindow& SandboxAccess::GetLogWindow(Sandbox& sandbox)
+		{
+			sandbox.m_State->AssertThread();
+			return sandbox.m_State->LogWindow;
+		}
+
+		void SandboxAccess::ReportDroppedLogEntries(const ScriptLogWindow& window)
+		{
+			if (window.Dropped != 0)
+				LogWrite(LogChannel::Script, LogLevel::Warn, "", 0, "", "{} script log entries were dropped in tick {} frame {}: more than {} entries in one frame", window.Dropped, window.Tick, window.Frame, MaxScriptLogEntriesPerFrame);
+		}
+
+		uint64_t SandboxAccess::GetSlice(const Sandbox& sandbox) noexcept
+		{
+			return sandbox.m_State->Slice;
 		}
 
 		ErrorLocation SandboxAccess::Locate(const Sandbox& sandbox, std::string_view vmChunkName, uint32_t line, uint32_t column)

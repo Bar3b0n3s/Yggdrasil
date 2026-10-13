@@ -11,12 +11,15 @@
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scripting/ScriptEngine.h"
 #include "Engine/Scripting/ScriptHost.h"
+#include "Engine/Scripting/ScriptLimits.h"
 
 #include <lua.h>
 #include <nlohmann/json.hpp>
 
 #include <array>
 #include <cmath>
+#include <format>
+#include <string>
 #include <vector>
 
 namespace Engine {
@@ -64,7 +67,14 @@ namespace Engine {
 
 		static int SceneCreate(ScriptCall& call)
 		{
-			const auto name = Lua::IsNoneOrNil(call, 1) ? std::string("Entity") : SceneText(call, 1);
+			std::string name("Entity");
+			if (!Lua::IsNoneOrNil(call, 1))
+			{
+				// The entity retains its name in host memory (F17).
+				name = Lua::CheckBoundedString(call, 1, MaxScriptEntityNameBytes);
+				if (!IsValidUtf8(name) || name.find('\0') != std::string::npos)
+					return Lua::RaiseError(call, "expected UTF-8 without embedded NULs");
+			}
 			const auto parent = SceneParent(call, 2);
 			const auto permission = call.PrepareHostMutation();
 			if (!permission)
@@ -262,8 +272,8 @@ namespace Engine {
 		{
 			const ScriptMemberOptions read{ .Mutates = false };
 			api.Module("Scene", "Active-scene operations; searches return canonical order and never expose pending destruction.")
-				.Function("CreateEntity", &Utils::SceneCreate, "(name: string?, parent: Entity?) -> Entity", "Creates immediately with a seeded ID and default name Entity. Runs OnCreate before returning; use IsValid if it may destroy itself.")
-				.Function("Instantiate", &Utils::SceneInstantiate, "(prefab: AssetRef, position: vector?, rotation: Quat?, parent: Entity?) -> Entity", "Instantiates through the shared prefab path and invokes OnCreate for the complete subtree before returning.")
+				.Function("CreateEntity", &Utils::SceneCreate, "(name: string?, parent: Entity?) -> Entity", std::format("Creates immediately with a seeded ID and default name Entity (a name is at most {} bytes). Runs OnCreate before returning; use IsValid if it may destroy itself.", MaxScriptEntityNameBytes))
+				.Function("Instantiate", &Utils::SceneInstantiate, "(prefab: AssetRef, position: vector?, rotation: Quat?, parent: Entity?) -> Entity", "Instantiates through the shared prefab path and invokes OnCreate for the complete subtree before returning. A position that cannot be represented under the parent raises a located error before anything is created.")
 				.Function("Destroy", &Utils::SceneDestroy, "(entity: Entity) -> ()", "Marks the entity and descendants immediately; the session performs lifecycle teardown and destruction at its safe point.")
 				.Function("FindByID", &Utils::SceneFindID, "(id: string) -> Entity?", "Finds an exact 16-digit hexadecimal UUID; malformed IDs error, absent entities return nil.", read)
 				.Function("FindByName", &Utils::SceneFind<false, false>, "(name: string) -> Entity?", "Returns the first matching name in canonical scene order, or nil.", read)

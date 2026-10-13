@@ -44,8 +44,8 @@ inline constexpr uint32_t SceneDebugViewEmissive = 5;
 #endif
 
 	// The per-draw push constants of every pipeline that draws meshes (§8.4): the item's world matrix (its rendered,
-	// interpolated pose; the shaders derive the normal matrix from its cofactor), the entity id of the pick buffer (the
-	// snapshot-local index + 1; the EntityId target arrives with M9) and the DrawFlag bits above. Declared in Slang as
+	// interpolated pose; the shaders derive the normal matrix from its cofactor), the entity id the picking prepass writes
+	// into EntityId (MeshDrawItem::PickId: the snapshot-local index + 1, 0 not pickable) and the DrawFlag bits above. Declared in Slang as
 	// [[vk::push_constant]] ConstantBuffer<DrawConstants> Draw.
 	struct DrawConstants
 	{

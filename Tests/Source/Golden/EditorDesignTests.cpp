@@ -10,12 +10,14 @@
 #include "EditorCore/EngineAssetGenerators.h"
 #include "EditorCore/Inspector/ReflectedEditController.h"
 #include "EditorCore/Viewport/GizmoController.h"
+#include "Engine/App/EngineContext.h"
 #include "Engine/Asset/BuiltinAssets.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/AssetPipeline/EngineAssetBaker.h"
 #include "Engine/AssetPipeline/ImporterRegistry.h"
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Hash.h"
+#include "Engine/Core/Jobs/MainThreadQueue.h"
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Core/Log.h"
 #include "Engine/Core/VirtualFileSystem.h"
@@ -172,6 +174,8 @@ namespace Engine {
 				// Fixed frames settle docking, dynamic font textures and queued thumbnails. GPU completion is a fence,
 				// never a timing assertion; no wall clock or sleeping influences the UI or scene.
 				Device.WaitForIdle();
+				// As FrameLoop does each frame: asynchronous asset loads (the thumbnails' LoadAsync) publish here.
+				static_cast<void>(Environment.GetEngine().GetMainThreadQueue().Drain());
 				ENGINE_TRY(Layer.OnSafePoint(static_cast<double>(FrameIndex) / 60.0));
 				ENGINE_TRY(Thumbnails.Pump());
 				NativeWindow->PollEvents();

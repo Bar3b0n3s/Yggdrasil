@@ -8,6 +8,7 @@
 #include "Engine/Scripting/Private/NativeConversionBudget.h"
 #include "Engine/Scripting/ScriptApiRegistry.h"
 #include "Engine/Scripting/ScriptHost.h"
+#include "Engine/Scripting/ScriptLimits.h"
 
 #include <lualib.h>
 #include <nlohmann/json.hpp>
@@ -503,7 +504,7 @@ namespace Engine {
 
 		int CreateTestSuite(ScriptCall& call)
 		{
-			const auto name = Lua::Check<std::string>(call, 1);
+			const auto name = Lua::CheckBoundedString(call, 1, MaxScriptTestNameBytes);
 			Utils::CheckText(call, name);
 			if (!lua_isfunction(call.State, 2))
 				return Lua::RaiseError(call, "suite body must be a function");

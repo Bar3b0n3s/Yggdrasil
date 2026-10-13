@@ -5,6 +5,7 @@
 
 #include <array>
 #include <cstdint>
+#include <filesystem>
 #include <optional>
 #include <string>
 #include <vector>
@@ -13,7 +14,14 @@ namespace Engine {
 
 	struct EditorPanelContext;
 
-	// Recent projects, New Empty/Basic3D, Open, and recovery offers; shown only without an open project.
+	// Where the launcher's folder browsers start when no location is typed and no recent project is known: the user's
+	// home folder (HOME, else USERPROFILE, when it names an existing absolute directory), else the current directory.
+	// Never the engine's own resource tree. Empty when none of them can be determined.
+	[[nodiscard]] std::filesystem::path GetDefaultProjectLocation();
+
+	// Recent projects, New Empty/Basic3D, Open, and recovery offers; shown only without an open project. The recent list
+	// is the host's memory snapshot (EditorPanelContext::GetRecentProjects), taken again each time the launcher reappears;
+	// drawing never reads user://Editor.json.
 	// Main thread in ImGui. Native paths come from the ImGui folder picker, no per-OS dialog library.
 	// Opens once with recover=false. After open, EditorLayer shows the injected recovery offer for that held project;
 	// acceptance uses Autosave::Recover at a safe point, not another project.open. Decline only dismisses the offer.

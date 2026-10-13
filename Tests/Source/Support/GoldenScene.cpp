@@ -158,18 +158,25 @@ namespace Engine {
 				ENGINE_TRY_ASSIGN(const Scope<SceneRendererPipelines> pipelines, SceneRendererPipelines::Create(device, gpu.GetPipelines()));
 				ENGINE_TRY_ASSIGN(const Scope<ViewportCapture> capture, ViewportCapture::CreateForScenes(device, *pipelines, cache, assets.GetManager()));
 
-				// The game view at the requested size, as viewport.screenshot {view: "game"} extracts it.
-				ENGINE_TRY_ASSIGN(RenderSnapshot snapshot, ExtractRenderSnapshot(*scene, { .Width = options.Width, .Height = options.Height }));
-				if (!snapshot.HasCamera)
-					return MakeError(ErrorCode::Validation, "the golden scene '{}' has no primary camera", name);
-				if (options.EditSnapshot)
-					options.EditSnapshot(snapshot);
-				// Use the actual loaded scene and assets, as the screenshot host does. No borrowed scene state escapes.
+				// The project's settings, strictly: their rendering quality reaches the snapshot as every host's does.
 				ENGINE_TRY_ASSIGN(const VfsPath projectPath, VfsPath::Create("project", "FeatureTest.eproj"));
 				ProjectLoadReport projectReport;
 				ENGINE_TRY_ASSIGN(const ProjectSettings settings, ProjectSerializer::LoadFromFile(vfs, projectPath, assets.GetRegistry(), { .StrictUnknowns = true, .SourcePath = {} }, projectReport));
 				if (!projectReport.Diagnostics.empty())
 					return MakeError(ErrorCode::Validation, "the golden project settings load with diagnostics");
+
+				// The game view at the requested size, as viewport.screenshot {view: "game"} extracts it.
+				const RenderExtractionRequest request{
+					.Width = options.Width,
+					.Height = options.Height,
+					.Quality = { .ShadowMapSize = settings.Rendering.ShadowMapSize, .SsaoHalfResolution = settings.Rendering.SsaoHalfResolution },
+				};
+				ENGINE_TRY_ASSIGN(RenderSnapshot snapshot, ExtractRenderSnapshot(*scene, request));
+				if (!snapshot.HasCamera)
+					return MakeError(ErrorCode::Validation, "the golden scene '{}' has no primary camera", name);
+				if (options.EditSnapshot)
+					options.EditSnapshot(snapshot);
+				// Use the actual loaded scene and assets, as the screenshot host does. No borrowed scene state escapes.
 				ENGINE_TRY_ASSIGN(const PhysicsLayerTable layers, PhysicsLayerTable::Create(settings.Physics.Layers, settings.Physics.Collisions));
 				ENGINE_TRY(AppendRenderAnnotations(*scene, assets.GetManager(), layers, nullptr, snapshot));
 				if (options.InspectSnapshot)

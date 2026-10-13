@@ -24,8 +24,10 @@
 #include "Engine/Scripting/RegisterBindings.h"
 #include "Engine/Scripting/ScriptApiRegistry.h"
 #include "Engine/Scripting/ScriptEngine.h"
+#include "Engine/Scripting/ScriptProxy.h"
 #include "Engine/Session/ReplayRecorder.h"
 
+#include <algorithm>
 #include <cmath>
 #include <format>
 #include <limits>
@@ -196,6 +198,7 @@ namespace Engine {
 		Json Parameters = Json::object();
 		std::optional<int32_t> QuitRequest{};
 		bool FatalStop = false;
+		std::optional<ScriptError> FatalError{}; // set with FatalStop (GetFatalError)
 		bool ReplacingScene = false;
 		DebugDrawList DebugDraw{};
 		Scope<Scene> PendingScene{};
@@ -216,7 +219,13 @@ namespace Engine {
 			frame.TimeScale = TimeScale;
 			return frame;
 		}
-		[[nodiscard]] ScriptEnvironment GetEnvironment() const override { return Host != nullptr ? Host->GetScriptEnvironment() : Environment; }
+		// The host supplies the application facts; the session owns the view its scripts' screen coordinates refer to.
+		[[nodiscard]] ScriptEnvironment GetEnvironment() const override
+		{
+			ScriptEnvironment environment = Host != nullptr ? Host->GetScriptEnvironment() : Environment;
+			environment.WindowSize = glm::vec2(static_cast<float>(ViewWidth), static_cast<float>(ViewHeight));
+			return environment;
+		}
 		[[nodiscard]] uint64_t GetSceneGeneration() const override { return SceneGeneration; }
 		[[nodiscard]] const Json& GetLoadParameters() const override { return Parameters; }
 		[[nodiscard]] Result<ScriptActionState> GetAction(std::string_view name) const override;
@@ -233,6 +242,18 @@ namespace Engine {
 		void OnScriptError(const ScriptError& error, bool fatal) override;
 		void OnExternalMutation(std::string_view reason) override;
 		[[nodiscard]] bool IsReloadDeferred() const override { return Lockstep || TestMode || (Recorder != nullptr && Recorder->IsRecording()); }
+		void OnScriptPhase(std::string_view script, std::string_view callback) override
+		{
+			if (Host != nullptr)
+				Host->OnScriptPhase(script, callback);
+		}
+		// FatalStop with the session error that caused it, already published (ReportSessionError).
+		void StopAfterSessionError()
+		{
+			FatalStop = true;
+			if (!Errors.GetErrors().empty())
+				FatalError = Errors.GetErrors().back();
+		}
 		[[nodiscard]] Status PrepareScripts();
 		void StartScripts();
 		void FlushDestroyed();
@@ -301,6 +322,10 @@ namespace Engine {
 		const Entity parentEntity = RuntimeScene->FindEntityByID(parent);
 		if (parent.IsValid() && !parentEntity.IsValid())
 			return MakeError(ErrorCode::NotFound, "No parent entity {}", parent);
+		// SetWorldPosition below asserts that the position is representable under the parent; script input never reaches
+		// that assertion. Validate before the prefab subtree exists, since the position cannot be checked after it.
+		if (position.has_value())
+			ENGINE_TRY(ScriptProxy::ValidateWorldPosition(parentEntity, *position));
 		LoadReport report;
 		ENGINE_TRY_ASSIGN(const Prefab asset, LoadPrefabAsset(*Assets, prefab, *Registry, report));
 		ENGINE_TRY(Session.CheckEntityCapacity(asset.GetEntityIDs().size()));
@@ -376,6 +401,8 @@ namespace Engine {
 		if (fatal)
 		{
 			FatalStop = true;
+			if (!FatalError.has_value())
+				FatalError = published;
 			Session.SetPaused(true);
 			if (Recorder != nullptr)
 				Recorder->Invalidate("fatal script error");
@@ -413,7 +440,7 @@ namespace Engine {
 		if (!initialized)
 		{
 			ReportSessionError(initialized.error());
-			FatalStop = true;
+			StopAfterSessionError();
 			return;
 		}
 		for (const PhysicsDiagnostic& diagnostic : Physics->GetDiagnostics())
@@ -521,7 +548,7 @@ namespace Engine {
 		if (!prepared)
 		{
 			ReportSessionError(prepared.error());
-			FatalStop = true;
+			StopAfterSessionError();
 		}
 		else
 			StartScripts();
@@ -727,6 +754,28 @@ namespace Engine {
 
 		ENGINE_CORE_ASSERT(false, "Unknown PlaySessionPhase {}", std::to_underlying(phase));
 		return "Unknown";
+	}
+
+	std::optional<glm::vec2> MapToViewCoordinates(const glm::vec2& position, const glm::vec2& displayMin, const glm::vec2& displaySize,
+		const glm::uvec2& viewSize)
+	{
+		if (viewSize.x == 0 || viewSize.y == 0)
+			return std::nullopt;
+		glm::dvec2 mapped(0.0);
+		for (int axis = 0; axis < 2; ++axis)
+		{
+			if (!std::isfinite(position[axis]) || !std::isfinite(displayMin[axis]) || !std::isfinite(displaySize[axis]) || !(displaySize[axis] > 0.0f))
+				return std::nullopt;
+			mapped[axis] = (static_cast<double>(position[axis]) - displayMin[axis]) / displaySize[axis] * viewSize[axis];
+			if (!std::isfinite(mapped[axis]) || std::abs(mapped[axis]) > static_cast<double>(std::numeric_limits<float>::max()))
+				return std::nullopt;
+		}
+		return glm::vec2(mapped);
+	}
+
+	glm::uvec2 GetDeterministicViewSize(const WindowSettings& window)
+	{
+		return { std::max(window.Width, 1u), std::max(window.Height, 1u) };
 	}
 
 	PlaySession::PlaySession(ConstructionKey /*key*/)
@@ -1039,6 +1088,11 @@ namespace Engine {
 		return m_State->QuitRequest;
 	}
 
+	const std::optional<ScriptError>& PlaySession::GetFatalError() const
+	{
+		return m_State->FatalError;
+	}
+
 	ReplayRecorder* PlaySession::GetRecorder()
 	{
 		return m_State->Recorder.get();
@@ -1104,6 +1158,17 @@ namespace Engine {
 		const size_t count = m_State->RuntimeScene->GetEntityCount();
 		if (count > limit || additional > limit - count)
 			return Utils::MakeEntityLimitError(limit, count, additional);
+		// Destroyed entities stay in the registry until the end-of-tick flush, so creating and destroying in a loop would
+		// otherwise grow it without bound within one tick: live, new and pending entities together stay within twice the
+		// limit. count + additional is at most the limit here, so the subtraction cannot wrap.
+		const size_t pending = m_State->RuntimeScene->GetPendingDestroyCount();
+		if (pending > 2 * static_cast<size_t>(limit) - (count + additional))
+		{
+			return std::unexpected(Error(ErrorCode::InvalidState,
+				std::format("entity limit {} reached: {} entities destroyed this tick still wait for the end-of-tick flush beside {} live ones, and {} more were asked for",
+					limit, pending, count, additional))
+					.WithHint("destroy and create fewer entities in one tick, or raise the project setting Simulation.MaxEntities"));
+		}
 		return {};
 	}
 
@@ -1204,6 +1269,11 @@ namespace Engine {
 		ENGINE_CORE_ASSERT(width >= 1 && height >= 1, "PlaySession::SetViewSize needs at least 1 x 1 pixels (got {} x {})", width, height);
 		m_State->ViewWidth = width;
 		m_State->ViewHeight = height;
+	}
+
+	glm::uvec2 PlaySession::GetViewSize() const
+	{
+		return { m_State->ViewWidth, m_State->ViewHeight };
 	}
 
 	void PlaySession::SetExtractionEnabled(bool enabled)

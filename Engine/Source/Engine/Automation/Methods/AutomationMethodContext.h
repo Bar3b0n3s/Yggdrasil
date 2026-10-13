@@ -193,9 +193,11 @@ namespace Engine {
 		// Copies CPU/session counts plus independent scene/game RenderStats histories. Never initiates a GPU wait/render.
 		// Unsupported until host service is injected; renderer none must still return CPU/session counts when integrated.
 		[[nodiscard]] virtual Result<StatsGetResult> GetHostStatistics() const;
-		// Copy of the editor selection for capture-only "selected" annotations; Runtime returns an empty vector. The
-		// snapshot filters ids against its target scene, so selection cannot retain an entity/component reference.
-		[[nodiscard]] virtual std::vector<UUID> GetSelectedEntities() const;
+		// Copy of the editor selection for capture-only "selected" annotations when the selection refers to `scene` (the
+		// capture's resolved target scene), else empty: the play scene keeps the edit scene's UUIDs, so a selection made in one
+		// must not label the other. Runtime returns an empty vector. The snapshot filters ids against its target scene, so
+		// selection cannot retain an entity/component reference.
+		[[nodiscard]] virtual std::vector<UUID> GetSelectedEntities(const Scene& scene) const;
 	protected:
 		// `hostKey` is the most-derived context's TypeKeyOf, as for MethodContext.
 		AutomationMethodContext(TypeKey hostKey, MethodRequest request);

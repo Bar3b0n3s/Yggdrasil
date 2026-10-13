@@ -18,8 +18,8 @@
 
 #include <glm/gtc/quaternion.hpp>
 
-#include <cmath>
 #include <algorithm>
+#include <cmath>
 #include <optional>
 
 // Simulation path (§4.12): only + - * /, sqrt (glm's normalize, cross, inverse and mat4_cast are built from them) and

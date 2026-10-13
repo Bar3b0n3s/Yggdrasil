@@ -139,10 +139,16 @@ namespace Engine {
 			recorder.Invalidate("hot reload");
 			auto document = recorder.Finish(*session);
 			REQUIRE_FALSE(document);
+			CHECK(document.error().GetCode() == ErrorCode::InvalidState);
 			CHECK(document.error().GetMessageText().find("external edit") != std::string::npos);
 			CHECK(document.error().GetMessageText().find("hot reload") == std::string::npos);
-			CHECK(recorder.IsRecording());
-			recorder.Cancel();
+			// An invalidated recording can never finish, so the failed Finish ends it: the owner can begin again.
+			CHECK_FALSE(recorder.IsRecording());
+			CHECK_FALSE(recorder.Finish(*session));
+			auto restarted = f.Create(92);
+			REQUIRE(recorder.Begin(f.Header, *restarted));
+			f.Step(recorder, *restarted);
+			CHECK(recorder.Finish(*restarted));
 		}
 
 		TEST_CASE("ReplayRecorder: cancellation discards unwritten data without a later poll")

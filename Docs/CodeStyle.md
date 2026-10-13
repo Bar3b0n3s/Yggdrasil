@@ -757,6 +757,7 @@ The Tests project is a doctest executable. The quality bar is that every public 
   - Floating-point values are compared with `doctest::Approx`. Helpers for `glm` types are **[Architecture]**.
 - **Determinism:**
   - No sleeps or wall-clock timing. A bounded wait is not timing: a deadline that only bounds the failure of a wait for another thread or process (`Test::WaitUntil`), or a timeout whose peer never answers, never asserted on (ADR 0008 decision 15); a spin count never bounds a wait.
+  - The documented wall-clock exceptions are the windowed child "FrameLoop: a minimized window uses little CPU time per second" (ADR 0005 decision 13) and the Python `test_busy_watchdog_reports_phase` (ADR 0008 decision 15), `test_headless_play_without_lockstep_is_throttled` (ADR 0012 decision 3) and `test_runaway_script_busy_watchdog` (`Docs/Decisions/0021-review-fixes.md`). Any other needs its own ADR entry.
   - No dependence on test order.
   - No network.
   - Random numbers use fixed seeds.

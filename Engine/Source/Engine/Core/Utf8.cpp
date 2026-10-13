@@ -84,4 +84,23 @@ namespace Engine {
 		return text.size();
 	}
 
+	size_t CompleteUtf8Prefix(std::string_view text)
+	{
+		size_t start = text.size();
+		for (size_t back = 0; back < 4 && start > 0; ++back)
+		{
+			const auto byte = static_cast<unsigned char>(text[start - 1]);
+			if ((byte & 0xC0) != 0x80)
+			{
+				const size_t length = byte < 0x80 ? 1 : (byte & 0xE0) == 0xC0 ? 2
+					: (byte & 0xF0) == 0xE0                                   ? 3
+					: (byte & 0xF8) == 0xF0                                   ? 4
+																			  : 1;
+				return start - 1 + length <= text.size() ? text.size() : start - 1;
+			}
+			--start;
+		}
+		return text.size();
+	}
+
 }

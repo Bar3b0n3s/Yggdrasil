@@ -37,6 +37,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <map>
 #include <set>
 #include <utility>
@@ -430,6 +431,7 @@ namespace Engine {
 				static_cast<void>(GetScriptService());
 			}
 			m_Assets->Update(nowSeconds);
+			PruneSelection();
 		}
 		if (m_AudioPreview != nullptr)
 			m_AudioPreview->Update();
@@ -756,6 +758,8 @@ namespace Engine {
 		m_History.Clear();
 		m_Selection.clear();
 		m_SelectionTarget = SceneTarget::Edit;
+		m_SelectionSession = 0;
+		m_SelectionSceneGeneration = 0;
 		m_UiState.SetSelectedAsset({});
 
 		// The project's assets (M6): scan, .meta files for new sources (recorded in provenance through the write observer,
@@ -897,12 +901,16 @@ namespace Engine {
 		const uint64_t nextBase = GetRevision() + 1;
 		m_Scene = std::move(scene);
 		m_RevisionBase = nextBase;
+		if (!IsDryRun())
+			++m_SceneDocumentEpoch;
 		m_ScenePath = std::move(path);
 		m_SceneDirty = dirty;
 		m_SceneChangedOnDisk = false;
 		m_History.Clear();
 		m_Selection.clear();
 		m_SelectionTarget = SceneTarget::Edit;
+		m_SelectionSession = 0;
+		m_SelectionSceneGeneration = 0;
 		m_UiState.SetSelectedAsset({});
 
 		const std::string pathText = m_ScenePath.has_value() ? std::string(m_ScenePath->GetPath()) : std::string();
@@ -921,12 +929,16 @@ namespace Engine {
 		const uint64_t nextBase = GetRevision() + 1;
 		m_Scene.reset();
 		m_RevisionBase = nextBase;
+		if (!IsDryRun())
+			++m_SceneDocumentEpoch;
 		m_ScenePath.reset();
 		m_SceneDirty = false;
 		m_SceneChangedOnDisk = false;
 		m_History.Clear();
 		m_Selection.clear();
 		m_SelectionTarget = SceneTarget::Edit;
+		m_SelectionSession = 0;
+		m_SelectionSceneGeneration = 0;
 		m_UiState.SetSelectedAsset({});
 	}
 
@@ -996,6 +1008,8 @@ namespace Engine {
 		}
 		m_Selection = std::move(kept);
 		m_SelectionTarget = session != nullptr ? SceneTarget::Play : SceneTarget::Edit;
+		m_SelectionSession = session != nullptr ? session->GetSerial() : 0;
+		m_SelectionSceneGeneration = session != nullptr ? session->GetSceneGeneration() : 0;
 		m_UiState.SetSelectedAsset({});
 	}
 
@@ -1017,6 +1031,20 @@ namespace Engine {
 	{
 		m_HasRequestAttribution = attribution.has_value();
 		m_Attribution = attribution.has_value() ? std::move(*attribution) : WriteAttribution{};
+	}
+
+	Status EditorContext::CheckTestRunAdmission(std::string_view method, bool dryRun) const
+	{
+		if (!m_Play->IsTestRunActive())
+			return {};
+		// A test session is published for observation only. Some unflagged methods (play, eval, open, refresh, selection
+		// and validation fixes) still mutate live host state, so admission is an explicit read subset.
+		constexpr std::string_view Reads[] = { "session.hello", "session.info", "rpc.discover", "docs.get", "scene.tree", "scene.query",
+			"scene.get", "entity.get", "entity.bounds", "log.read", "events.read", "play.state", "physics.bodyInfo", "audio.stats",
+			"stats.get", "script.errors", "viewport.screenshot", "editor.screenshot" };
+		if (dryRun || std::ranges::find(Reads, method) == std::end(Reads))
+			return MakeError(ErrorCode::InvalidState, "a test run owns the editor; '{}' is unavailable until it finishes", method);
+		return {};
 	}
 
 	Status EditorContext::CheckMutationPermission() const
@@ -1236,6 +1264,8 @@ namespace Engine {
 		uint64_t RealRevisionBase = 0;
 		std::vector<UUID> RealSelection{};
 		SceneTarget RealSelectionTarget = SceneTarget::Edit;
+		uint64_t RealSelectionSession = 0;
+		uint64_t RealSelectionSceneGeneration = 0;
 		AssetHandle RealSelectedAsset{};
 		std::optional<ProjectSettings> RealSettings{};
 	};
@@ -1295,6 +1325,8 @@ namespace Engine {
 		state.RealRevisionBase = context.m_RevisionBase;
 		state.RealSelection = context.m_Selection;
 		state.RealSelectionTarget = context.m_SelectionTarget;
+		state.RealSelectionSession = context.m_SelectionSession;
+		state.RealSelectionSceneGeneration = context.m_SelectionSceneGeneration;
 		state.RealSelectedAsset = context.m_UiState.GetSelectedAsset();
 		state.RealSettings = context.m_Project->GetSettings();
 		const bool realDirty = context.IsSceneDirty();
@@ -1335,6 +1367,8 @@ namespace Engine {
 		context.m_RevisionBase = state.RealRevisionBase;
 		context.m_Selection = std::move(state.RealSelection);
 		context.m_SelectionTarget = state.RealSelectionTarget;
+		context.m_SelectionSession = state.RealSelectionSession;
+		context.m_SelectionSceneGeneration = state.RealSelectionSceneGeneration;
 		context.m_UiState.SetSelectedAsset(state.RealSelectedAsset);
 		if (context.m_Project != nullptr)
 			context.m_Project->SetSettings(std::move(*state.RealSettings));

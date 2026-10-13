@@ -4,6 +4,7 @@
 #include "Engine/Core/Assert.h"
 #include "Engine/Scripting/Private/ScriptEngineAccess.h"
 #include "Engine/Scripting/ScriptEngine.h"
+#include "Engine/Scripting/ScriptTime.h"
 
 #include <algorithm>
 #include <cmath>
@@ -92,7 +93,8 @@ namespace Engine {
 		const ScriptFrameState frame = m_State->Engine.GetHost().GetFrameState();
 		if (!std::isfinite(seconds) || seconds < 0.0 || !std::isfinite(frame.FixedDeltaTime) || frame.FixedDeltaTime <= 0.0)
 			return MakeError(ErrorCode::InvalidArgument, "Task.Delay requires finite nonnegative seconds and a positive fixed delta");
-		const double delay = std::max(1.0, std::ceil(seconds / frame.FixedDeltaTime));
+		// Decimal-safe, as Task.Wait: 0.14 s at 50 Hz is 7 ticks, not 8 (ScriptTime.h).
+		const double delay = std::max(1.0, ScriptSecondsToTicks(seconds, frame.FixedDeltaTime));
 		// 2^64 is exactly representable; converting it or infinity to uint64_t would be undefined.
 		if (!std::isfinite(delay) || delay >= 18446744073709551616.0)
 			return MakeError(ErrorCode::InvalidArgument, "Task.Delay exceeds the simulation tick range");

@@ -105,8 +105,9 @@ namespace Engine {
 			CommandLineOption{
 				.Name = GpuInjectFaultOption,
 				.Value = CommandLineValue::Required,
-				.ValueName = "device-lost|oom-texture|hang",
-				.Description = "Force a GPU fault path for tests: device loss, texture out-of-memory or a GPU hang.",
+				.ValueName = "device-lost|oom-texture|hang|oom-specialization",
+				.Description = "Force a GPU fault path for tests: device loss, texture out-of-memory, a GPU hang or "
+							   "shader-specialization out-of-memory.",
 			},
 			CommandLineOption{
 				.Name = AudioDeviceOption,
@@ -290,7 +291,7 @@ namespace Engine {
 			const std::optional<GpuFault> injected = GpuFaultFromString(*fault);
 			if (!injected.has_value() || *injected == GpuFault::None)
 			{
-				return MakeError(ErrorCode::InvalidArgument, "option '{}' takes 'device-lost', 'oom-texture' or 'hang', got '{}'",
+				return MakeError(ErrorCode::InvalidArgument, "option '{}' takes 'device-lost', 'oom-texture', 'hang' or 'oom-specialization', got '{}'",
 					Utils::GpuInjectFaultOption, *fault);
 			}
 			specification.Graphics.InjectFault = *injected;

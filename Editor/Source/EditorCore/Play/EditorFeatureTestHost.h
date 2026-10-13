@@ -34,6 +34,9 @@ namespace Engine {
 		[[nodiscard]] Result<TestCoverageReport> GetCoverage() const override;
 		[[nodiscard]] Result<Json> Evaluate(PlaySession& session, const ReplayBytecodeExpectation& expectation) override;
 	private:
+		// The test-run cursor baseline (Normal) for the next suite or replay session of an acquired run.
+		void ResetTestCursor();
+	private:
 		EditorMethodContext& m_Context; // request context outlives its pending operation and this adapter
 		EditorContext& m_Editor;        // owns controller and assets; outlives server/requests
 		ProjectSettings m_Project{};

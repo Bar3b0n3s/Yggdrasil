@@ -7,7 +7,14 @@ from pathlib import Path
 from typing import Any
 
 from harness import EXIT_SUCCESS, AutomationTestCase, engine_client
+from test_environment import png_pixels
 from tiny_game import TINY_GAME_NAME, build_tiny_game, export_tiny_game, exported_executable
+
+
+def white_pixels(path: Path) -> int:
+    """The number of pure white (255, 255, 255) pixels of a screenshot: the wireframe's edge colour."""
+    _, _, pixels = png_pixels(path)
+    return sum(1 for index in range(0, len(pixels), 4) if pixels[index:index + 3] == b"\xff\xff\xff")
 
 
 class RendererIITests(AutomationTestCase):
@@ -42,13 +49,19 @@ class RendererIITests(AutomationTestCase):
             return
         rendered, _ = self.open_editor_with_scene(name="RenderedProject", renderer="vulkan")
         self.make_scene(rendered)
+        rendered.call("project.setSettings", {"patch": {"Rendering": {
+            "ShadowMapSize": 512, "SsaoHalfResolution": True}}})
         deadline = time.monotonic() + 60
         while True:
             observed = rendered.call("stats.get")
             ready = [view for view in observed["views"] if view["gpuAvailable"]]
-            if ready or time.monotonic() >= deadline:
+            # The project's Rendering settings reach the displayed views from their next frame on.
+            current = [view for view in ready if view["shadowMapSize"] == 512]
+            if current or time.monotonic() >= deadline:
                 break
-        self.assertTrue(ready, observed)
+        self.assertTrue(current, observed)
+        for view in current:
+            self.assertTrue(view["ssaoHalfResolution"], view)
         for view in ready:
             self.assertTrue(view["frame"].isdigit())
             self.assertTrue(view["gpuFrame"].isdigit())
@@ -177,6 +190,15 @@ class RendererIITests(AutomationTestCase):
         self.assert_engine_error(raised.exception, engine_client.NOT_FOUND)
         self.assertEqual(raised.exception.issues[0]["pointer"], "/annotate/labels/1")
         self.assertEqual(client.call("edit.getSelection")["selection"], selection)
+        # play.start carries the selection into the play scene (M10-F31). The play scene keeps the edit scene's UUIDs, so
+        # labels come only from the selection's own target, as the scene view outlines only that target: the play copy is
+        # labelled, the edit scene is not. (The C++ ScreenshotMethods test covers an edit selection during play.)
+        client.call("play.start", {"lockstep": True, "paused": True})
+        play_clean = self.shoot(client, target="play")
+        edit_clean = self.shoot(client, target="edit")
+        self.assertNotEqual(self.shoot(client, target="play", annotate={"labels": "selection"}), play_clean)
+        self.assertEqual(self.shoot(client, target="edit", annotate={"labels": "selection"}), edit_clean)
+        client.call("play.stop")
 
     def test_render_validation_warnings(self) -> None:
         client, _ = self.open_editor_with_scene()
@@ -218,8 +240,16 @@ class RendererIITests(AutomationTestCase):
             image = self.shoot(rendered, debugView=mode)
             self.assertNotEqual(image, lit)
             self.assertEqual(self.shoot(rendered, debugView=mode), image)
+        # The wireframe option changes the live scene view (white triangle edges over the clear colour, seen in the editor's
+        # own screenshot), never picking, which stays geometric, nor viewport.screenshot, a clean capture of the view.
         before = rendered.call("viewport.pick", {"view": "scene", "x": 320, "y": 180})["raycast"]
+        solid = white_pixels(Path(rendered.call("editor.screenshot", {"maxDimension": 4096})["path"]))
         rendered.call("viewport.setOptions", {"wireframe": True})
+        edges = white_pixels(Path(rendered.call("editor.screenshot", {"maxDimension": 4096})["path"]))
+        self.assertGreater(edges, solid + 100, (solid, edges))
         self.assertEqual(rendered.call("viewport.pick", {"view": "scene", "x": 320, "y": 180})["raycast"], before)
+        self.assertEqual(self.shoot(rendered), lit)
         rendered.call("viewport.setOptions", {"wireframe": False})
+        restored = white_pixels(Path(rendered.call("editor.screenshot", {"maxDimension": 4096})["path"]))
+        self.assertLess(restored, solid + 100, (solid, restored))
         self.assertEqual(self.shoot(rendered), lit)

@@ -7,6 +7,7 @@
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Renderer/GpuResourceCache.h"
 #include "Engine/Renderer/Private/ForwardPipelines.h"
+#include "Engine/Renderer/SceneTargetFormats.h"
 #include "Shared/DrawConstants.h"
 #include "Shared/MaterialConstants.h"
 #include "Shared/ShadowCasterConstants.h"
@@ -15,6 +16,7 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <cstring>
 #include <format>
 
 namespace Engine {
@@ -86,6 +88,10 @@ namespace Engine {
 			});
 		}
 
+	}
+
+	namespace {
+
 		struct ShadowDraw
 		{
 			nvrhi::BufferHandle Vertices{};
@@ -112,12 +118,11 @@ namespace Engine {
 		std::array<GraphicsPipeline, PipelineCount> Pipelines{};
 		nvrhi::SamplerHandle AnisoWrap{};
 
-		[[nodiscard]] Result<std::vector<Utils::ShadowDraw>> ResolveCasters(PassBindingCache& bindings, GpuResourceCache& cache,
+		[[nodiscard]] Result<std::vector<ShadowDraw>> ResolveCasters(PassBindingCache& bindings, GpuResourceCache& cache,
 			std::span<const MeshDrawItem> casters);
-		[[nodiscard]] Status RecordView(nvrhi::ICommandList& commandList, PassBindingCache& bindings,
-			std::span<const Utils::ShadowDraw> draws, nvrhi::ITexture& target, uint32_t slice,
-			const nvrhi::Viewport& viewport, const ShadowCasterConstants& constants,
-			RenderPassCounters& counters);
+		[[nodiscard]] Status RecordView(nvrhi::ICommandList& commandList, PassBindingCache& bindings, std::span<const ShadowDraw> draws,
+			nvrhi::IFramebuffer& framebuffer, const nvrhi::Viewport& viewport, nvrhi::IBuffer& casterConstants, uint32_t slot,
+			const ShadowCasterConstants& constants, RenderPassCounters& counters);
 	};
 
 	ShadowPass::ShadowPass(ConstructionKey /*key*/)
@@ -151,12 +156,12 @@ namespace Engine {
 					.setOffset(offsetof(MeshVertex, TexCoord))
 					.setElementStride(Stride),
 			};
-			specification.Framebuffer.setDepthFormat(nvrhi::Format::D32);
+			specification.Framebuffer.setDepthFormat(ShadowDepthFormat);
 			constexpr std::array<nvrhi::RasterCullMode, 3> Modes{ nvrhi::RasterCullMode::Back, nvrhi::RasterCullMode::Front,
 				nvrhi::RasterCullMode::None };
 			specification.RenderState.rasterState.setCullMode(Modes[variant % 3])
 				.setFrontCounterClockwise(true)
-				.setDepthClipEnable(true); // near pancaking is explicit in the shader: NVRHI does not expose Vulkan depth clamp
+				.setDepthClipEnable(true); // pancaking is per fragment in the shader: NVRHI does not expose Vulkan depth clamp
 			specification.RenderState.depthStencilState.setDepthTestEnable(true).setDepthWriteEnable(true).setDepthFunc(
 				nvrhi::ComparisonFunc::GreaterOrEqual);
 			ENGINE_TRY_ASSIGN(state.Pipelines[variant], pipelines.CreateGraphicsPipeline(specification));
@@ -183,7 +188,7 @@ namespace Engine {
 		desc.width = desc.height = shadowMapSize;
 		desc.arraySize = MaxShadowCascades;
 		desc.dimension = nvrhi::TextureDimension::Texture2DArray;
-		desc.format = nvrhi::Format::D32;
+		desc.format = ShadowDepthFormat;
 		desc.isRenderTarget = true;
 		desc.isShaderResource = true;
 		desc.initialState = nvrhi::ResourceStates::DepthWrite;
@@ -201,10 +206,35 @@ namespace Engine {
 		return desc;
 	}
 
-	Result<std::vector<Utils::ShadowDraw>> ShadowPass::State::ResolveCasters(PassBindingCache& bindings, GpuResourceCache& cache,
+	nvrhi::BufferDesc ShadowPass::GetCasterConstantsDesc()
+	{
+		nvrhi::BufferDesc desc;
+		desc.byteSize = static_cast<uint64_t>(ShadowCasterSlotCount) * ShadowCasterSlotStride;
+		desc.isConstantBuffer = true;
+		desc.initialState = nvrhi::ResourceStates::ConstantBuffer;
+		desc.keepInitialState = true;
+		desc.debugName = "ShadowCasterConstants";
+		return desc;
+	}
+
+	Result<std::vector<nvrhi::FramebufferHandle>> ShadowPass::CreateFramebuffers(GraphicsDevice& device, nvrhi::ITexture& target)
+	{
+		const nvrhi::TextureDesc& desc = target.getDesc();
+		std::vector<nvrhi::FramebufferHandle> framebuffers;
+		framebuffers.reserve(desc.arraySize);
+		for (uint32_t slice = 0; slice < desc.arraySize; ++slice)
+		{
+			ENGINE_TRY_ASSIGN(nvrhi::FramebufferHandle framebuffer,
+				device.CreateFramebuffer(nvrhi::FramebufferDesc().setDepthAttachment(&target, nvrhi::TextureSubresourceSet(0, 1, slice, 1))));
+			framebuffers.push_back(std::move(framebuffer));
+		}
+		return framebuffers;
+	}
+
+	Result<std::vector<ShadowDraw>> ShadowPass::State::ResolveCasters(PassBindingCache& bindings, GpuResourceCache& cache,
 		std::span<const MeshDrawItem> casters)
 	{
-		std::vector<Utils::ShadowDraw> draws;
+		std::vector<ShadowDraw> draws;
 		for (const MeshDrawItem& item : casters)
 		{
 			if (!item.CastShadows || !item.Mesh.IsValid())
@@ -249,39 +279,31 @@ namespace Engine {
 		return draws;
 	}
 
-	Status ShadowPass::State::RecordView(nvrhi::ICommandList& commandList, PassBindingCache& bindings,
-		std::span<const Utils::ShadowDraw> draws, nvrhi::ITexture& target, uint32_t slice,
-		const nvrhi::Viewport& viewport, const ShadowCasterConstants& constants,
-		RenderPassCounters& counters)
+	Status ShadowPass::State::RecordView(nvrhi::ICommandList& commandList, PassBindingCache& bindings, std::span<const ShadowDraw> draws,
+		nvrhi::IFramebuffer& framebuffer, const nvrhi::Viewport& viewport, nvrhi::IBuffer& casterConstants, uint32_t slot,
+		const ShadowCasterConstants& constants, RenderPassCounters& counters)
 	{
-		ENGINE_TRY_ASSIGN(
-			auto framebuffer,
-			Device->CreateFramebuffer(nvrhi::FramebufferDesc().setDepthAttachment(&target, nvrhi::TextureSubresourceSet(0, 1, slice, 1))));
-		nvrhi::BufferDesc bufferDesc;
-		bufferDesc.byteSize = sizeof(constants);
-		bufferDesc.isConstantBuffer = true;
-		bufferDesc.initialState = nvrhi::ResourceStates::ConstantBuffer;
-		bufferDesc.keepInitialState = true;
-		bufferDesc.debugName = "ShadowCasterConstants";
-		ENGINE_TRY_ASSIGN(auto buffer, Device->CreateBuffer(bufferDesc));
-		commandList.writeBuffer(buffer, &constants, sizeof(constants));
+		// The slot's range of the caller's buffer (NVRHI binds constant-buffer ranges in whole 256-byte units): the same desc
+		// every frame, so the caller's cache keeps the sets.
+		static_assert(sizeof(ShadowCasterConstants) <= ShadowCasterSlotStride && ShadowCasterSlotStride % 256 == 0);
+		const nvrhi::BufferRange range(static_cast<uint64_t>(slot) * ShadowCasterSlotStride, ShadowCasterSlotStride);
 		std::array<nvrhi::IBindingSet*, 2> viewSets{};
 		for (uint32_t mask = 0; mask < 2; ++mask)
 		{
 			nvrhi::BindingSetDesc desc;
-			desc.bindings = { nvrhi::BindingSetItem::ConstantBuffer(0, buffer),
+			desc.bindings = { nvrhi::BindingSetItem::ConstantBuffer(0, &casterConstants, range),
 				nvrhi::BindingSetItem::PushConstants(Utils::DrawConstantsSlot, sizeof(DrawConstants)) };
 			if (mask != 0)
 				desc.bindings.push_back(nvrhi::BindingSetItem::Sampler(2, AnisoWrap));
 			ENGINE_TRY_ASSIGN(viewSets[mask], bindings.GetOrCreate(*Device, desc, *Pipelines[mask * 3].BindingLayouts[0]));
 		}
-		for (const Utils::ShadowDraw& draw : draws)
+		for (const ShadowDraw& draw : draws)
 		{
 			if (Utils::IsOutsideShadow(draw.Submesh.Bounds, constants.ViewProjection * draw.World, constants.Bias.z != 0.0f))
 				continue;
 			nvrhi::GraphicsState state;
 			state.pipeline = Pipelines[draw.Variant].Pipeline;
-			state.framebuffer = framebuffer;
+			state.framebuffer = &framebuffer;
 			state.viewport.addViewportAndScissorRect(viewport);
 			state.bindings = { viewSets[draw.Variant / 3] };
 			if (draw.Material != nullptr)
@@ -311,52 +333,89 @@ namespace Engine {
 		ENGINE_CORE_ASSERT(std::isfinite(inputs.DepthBias) && inputs.DepthBias >= 0 && std::isfinite(inputs.NormalBias)
 				&& inputs.NormalBias >= 0,
 			"Invalid shadow bias");
+		ENGINE_CORE_ASSERT(inputs.CasterConstants && inputs.CasterConstants->getDesc().isConstantBuffer
+				&& inputs.CasterConstants->getDesc().byteSize >= GetCasterConstantsDesc().byteSize,
+			"Shadow caster constants must be a buffer of GetCasterConstantsDesc()");
 		ENGINE_TRY_ASSIGN(auto draws, m_State->ResolveCasters(bindings, cache, inputs.Casters));
-		ShadowRenderResult result;
+
+		// Every slot this record uses, written with one command before any draw: cascades in slots [0, 4), spot tiles from
+		// slot MaxShadowCascades. Each slot is ShadowCasterSlotStride bytes, so its binding offset is aligned on every device.
+		std::array<std::array<std::byte, ShadowCasterSlotStride>, ShadowCasterSlotCount> slots{};
+		std::array<ShadowCasterConstants, ShadowCasterSlotCount> constants{};
+		uint32_t usedSlots = 0;
 		if (directional)
 		{
-			ENGINE_CORE_ASSERT(inputs.CascadeTarget && inputs.Cascades->Count <= MaxShadowCascades,
-				"Directional shadow target/cascade count is invalid");
-			const nvrhi::TextureDesc& desc = inputs.CascadeTarget->getDesc();
-			ENGINE_CORE_ASSERT(desc.format == nvrhi::Format::D32 && desc.arraySize == MaxShadowCascades && desc.width == desc.height,
-				"Invalid cascade target");
-			recording.BeginPass("DirectionalShadows", &commandList);
-			Utils::ShadowRecordingScope scope{ recording };
-			commandList.clearDepthStencilTexture(inputs.CascadeTarget, nvrhi::AllSubresources, true, 0, false, 0);
+			ENGINE_CORE_ASSERT(inputs.Cascades->Count <= MaxShadowCascades, "Directional shadow cascade count is invalid");
 			for (uint32_t index = 0; index < inputs.Cascades->Count; ++index)
 			{
 				const ShadowCascade& cascade = inputs.Cascades->Cascades[index];
-				ShadowCasterConstants constants{};
-				constants.ViewProjection = cascade.ViewProjection;
-				constants.Bias = glm::vec4(inputs.DepthBias, cascade.TexelWorldSize / (cascade.LightFar - cascade.LightNear),
+				constants[index].ViewProjection = cascade.ViewProjection;
+				constants[index].Bias = glm::vec4(inputs.DepthBias, cascade.TexelWorldSize / (cascade.LightFar - cascade.LightNear),
 					m_State->Device->GetInfo().DepthClamp ? 1.0f : 0.0f, 0);
-				ENGINE_TRY(m_State->RecordView(commandList, bindings, draws, *inputs.CascadeTarget, index,
-					nvrhi::Viewport(static_cast<float>(desc.width), static_cast<float>(desc.height)), constants,
-					scope.Counters));
+				usedSlots = index + 1;
+			}
+		}
+		if (spots)
+		{
+			ENGINE_CORE_ASSERT(inputs.Spots->Tiles.size() <= MaxSpotShadowLights, "Spot shadow tile count is invalid");
+			for (size_t index = 0; index < inputs.Spots->Tiles.size(); ++index)
+			{
+				const uint32_t slot = MaxShadowCascades + static_cast<uint32_t>(index);
+				constants[slot].ViewProjection = inputs.Spots->Tiles[index].ViewProjection;
+				constants[slot].Bias = glm::vec4(1, 0, 0, 0);
+				usedSlots = slot + 1;
+			}
+		}
+		for (uint32_t slot = 0; slot < usedSlots; ++slot)
+			std::memcpy(slots[slot].data(), &constants[slot], sizeof(ShadowCasterConstants));
+		commandList.writeBuffer(inputs.CasterConstants, slots.data(), static_cast<size_t>(usedSlots) * ShadowCasterSlotStride);
+
+		ShadowRenderResult result;
+		if (directional)
+		{
+			ENGINE_CORE_ASSERT(inputs.CascadeTarget && inputs.CascadeFramebuffers.size() >= inputs.Cascades->Count,
+				"Directional shadow target or framebuffers are missing");
+			const nvrhi::TextureDesc& desc = inputs.CascadeTarget->getDesc();
+			ENGINE_CORE_ASSERT(desc.format == ShadowDepthFormat && desc.arraySize == MaxShadowCascades && desc.width == desc.height,
+				"Invalid cascade target");
+			recording.BeginPass("DirectionalShadows", &commandList);
+			ShadowRecordingScope scope{ recording };
+			commandList.clearDepthStencilTexture(inputs.CascadeTarget, nvrhi::AllSubresources, true, 0, false, 0);
+			for (uint32_t index = 0; index < inputs.Cascades->Count; ++index)
+			{
+				nvrhi::IFramebuffer* framebuffer = inputs.CascadeFramebuffers[index];
+				ENGINE_CORE_ASSERT(framebuffer && framebuffer->getDesc().depthAttachment.texture == inputs.CascadeTarget
+						&& framebuffer->getDesc().depthAttachment.subresources.baseArraySlice == index,
+					"Cascade framebuffer {} does not attach slice {} of the cascade target", index, index);
+				ENGINE_TRY(m_State->RecordView(commandList, bindings, draws, *framebuffer,
+					nvrhi::Viewport(static_cast<float>(desc.width), static_cast<float>(desc.height)), *inputs.CasterConstants, index,
+					constants[index], scope.Counters));
 			}
 			result.DrawCalls += scope.Counters.DrawCalls;
 			result.Triangles += scope.Counters.Triangles;
 		}
 		if (spots)
 		{
-			ENGINE_CORE_ASSERT(inputs.AtlasTarget, "Spot shadow target is missing");
+			ENGINE_CORE_ASSERT(inputs.AtlasTarget && inputs.AtlasFramebuffer
+					&& inputs.AtlasFramebuffer->getDesc().depthAttachment.texture == inputs.AtlasTarget,
+				"Spot shadow target or framebuffer is missing");
 			const nvrhi::TextureDesc& desc = inputs.AtlasTarget->getDesc();
-			ENGINE_CORE_ASSERT(desc.format == nvrhi::Format::D32 && desc.width == SpotShadowAtlasSize && desc.height == SpotShadowAtlasSize
+			ENGINE_CORE_ASSERT(desc.format == ShadowDepthFormat && desc.width == SpotShadowAtlasSize && desc.height == SpotShadowAtlasSize
 					&& desc.arraySize == 1,
 				"Invalid spot shadow target");
 			recording.BeginPass("SpotShadows", &commandList);
-			Utils::ShadowRecordingScope scope{ recording };
+			ShadowRecordingScope scope{ recording };
 			commandList.clearDepthStencilTexture(inputs.AtlasTarget, nvrhi::AllSubresources, true, 0, false, 0);
-			for (const SpotShadowTile& tile : inputs.Spots->Tiles)
+			for (size_t index = 0; index < inputs.Spots->Tiles.size(); ++index)
 			{
+				const SpotShadowTile& tile = inputs.Spots->Tiles[index];
+				const uint32_t slot = MaxShadowCascades + static_cast<uint32_t>(index);
 				const float left = static_cast<float>(tile.X + SpotShadowGuardTexels);
 				const float top = static_cast<float>(tile.Y + SpotShadowGuardTexels);
 				const float size = static_cast<float>(tile.Size - 2 * SpotShadowGuardTexels);
-				ShadowCasterConstants constants{};
-				constants.ViewProjection = tile.ViewProjection;
-				constants.Bias = glm::vec4(1, 0, 0, 0);
-				ENGINE_TRY(m_State->RecordView(commandList, bindings, draws, *inputs.AtlasTarget, 0,
-					nvrhi::Viewport(left, left + size, top, top + size, 0, 1), constants, scope.Counters));
+				ENGINE_TRY(m_State->RecordView(commandList, bindings, draws, *inputs.AtlasFramebuffer,
+					nvrhi::Viewport(left, left + size, top, top + size, 0, 1), *inputs.CasterConstants, slot, constants[slot],
+					scope.Counters));
 			}
 			result.DrawCalls += scope.Counters.DrawCalls;
 			result.Triangles += scope.Counters.Triangles;

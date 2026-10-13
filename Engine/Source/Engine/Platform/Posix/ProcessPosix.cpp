@@ -2,9 +2,9 @@
 #include "Engine/Platform/Process.h"
 
 // Child processes and current-process queries on Linux and macOS. A child starts through posix_spawn with standard input
-// on /dev/null and standard output and standard error on close-on-exec pipes. One I/O thread per child polls both pipes,
-// a wake-up pipe that stops it, and the child's exit (a pidfd on Linux, a kqueue NOTE_EXIT on macOS; a 10 ms poll where
-// neither is available), and reaps the child when it exits.
+// on /dev/null and standard output and standard error on close-on-exec pipes (or on /dev/null when the output is not
+// captured). One I/O thread per child polls both pipes, a wake-up pipe that stops it, and the child's exit (a pidfd on
+// Linux, a kqueue NOTE_EXIT on macOS; a 10 ms poll where neither is available), and reaps the child when it exits.
 
 #if defined(ENGINE_PLATFORM_LINUX) || defined(ENGINE_PLATFORM_MACOS)
 
@@ -290,6 +290,7 @@ namespace Engine {
 	{
 		pid_t Pid = -1;
 		std::string ExecutableText{}; // for messages
+		bool CapturesOutput = true;   // false: the child writes to /dev/null and only its exit is watched
 		ScopedDescriptor OutputRead;
 		ScopedDescriptor ErrorRead;
 		ScopedDescriptor WakeRead; // the destructor writes to WakeWrite to stop the I/O thread
@@ -306,23 +307,28 @@ namespace Engine {
 
 		~Impl()
 		{
-			// No child outlives its Process.
+			// No child outlives its Process, unless it was detached (Pid is -1 then).
 			if (Pid > 0)
 				static_cast<void>(KillAndReap());
-			if (IoThread.joinable())
-			{
-				const char wake = 1;
-				while (write(WakeWrite.Get(), &wake, 1) < 0 && errno == EINTR)
-				{
-				}
-				IoThread.join();
-			}
+			StopIo();
 		}
 
 		Impl(const Impl&) = delete;
 		Impl& operator=(const Impl&) = delete;
 		Impl(Impl&&) = delete;
 		Impl& operator=(Impl&&) = delete;
+
+		// Wakes the I/O thread through the wake-up pipe and waits for it to return.
+		void StopIo()
+		{
+			if (!IoThread.joinable())
+				return;
+			const char wake = 1;
+			while (write(WakeWrite.Get(), &wake, 1) < 0 && errno == EINTR)
+			{
+			}
+			IoThread.join();
+		}
 
 		// Reaps the child if it has exited, without blocking. True once it is reaped.
 		[[nodiscard]] bool TryReap()
@@ -369,7 +375,7 @@ namespace Engine {
 		// and returns when both are done or the wake-up pipe is written.
 		void RunIo()
 		{
-			std::array<bool, 2> isOpen = { true, true };
+			std::array<bool, 2> isOpen = { CapturesOutput, CapturesOutput };
 			const std::array<int, 2> pipes = { OutputRead.Get(), ErrorRead.Get() };
 			constexpr std::array<ProcessStream, 2> Streams = { ProcessStream::StandardOutput, ProcessStream::StandardError };
 			std::array<char, 4096> buffer{};
@@ -483,8 +489,11 @@ namespace Engine {
 		ScopedDescriptor errorWrite;
 		ScopedDescriptor wakeRead;
 		ScopedDescriptor wakeWrite;
-		ENGINE_TRY(Utils::CreateCloseOnExecPipe(outputRead, outputWrite));
-		ENGINE_TRY(Utils::CreateCloseOnExecPipe(errorRead, errorWrite));
+		if (specification.CaptureOutput)
+		{
+			ENGINE_TRY(Utils::CreateCloseOnExecPipe(outputRead, outputWrite));
+			ENGINE_TRY(Utils::CreateCloseOnExecPipe(errorRead, errorWrite));
+		}
 		ENGINE_TRY(Utils::CreateCloseOnExecPipe(wakeRead, wakeWrite));
 
 		ScopedFileActions actions;
@@ -493,11 +502,18 @@ namespace Engine {
 		// dup2 clears close-on-exec on the duplicate, so these three descriptors survive the exec. Every other descriptor
 		// of the parent is closed, including those a library opened without close-on-exec (spdlog's log file): on Linux
 		// with closefrom (glibc 2.34), on macOS with POSIX_SPAWN_CLOEXEC_DEFAULT below.
+		// Uncaptured output goes to /dev/null instead of the pipes.
 		int setupError = posix_spawn_file_actions_addopen(actions.Get(), STDIN_FILENO, "/dev/null", O_RDONLY, 0);
 		if (setupError == 0)
-			setupError = posix_spawn_file_actions_adddup2(actions.Get(), outputWrite.Get(), STDOUT_FILENO);
+		{
+			setupError = specification.CaptureOutput ? posix_spawn_file_actions_adddup2(actions.Get(), outputWrite.Get(), STDOUT_FILENO)
+													 : posix_spawn_file_actions_addopen(actions.Get(), STDOUT_FILENO, "/dev/null", O_WRONLY, 0);
+		}
 		if (setupError == 0)
-			setupError = posix_spawn_file_actions_adddup2(actions.Get(), errorWrite.Get(), STDERR_FILENO);
+		{
+			setupError = specification.CaptureOutput ? posix_spawn_file_actions_adddup2(actions.Get(), errorWrite.Get(), STDERR_FILENO)
+													 : posix_spawn_file_actions_addopen(actions.Get(), STDERR_FILENO, "/dev/null", O_WRONLY, 0);
+		}
 	#if defined(ENGINE_PLATFORM_LINUX)
 		if (setupError == 0)
 			setupError = posix_spawn_file_actions_addclosefrom_np(actions.Get(), STDERR_FILENO + 1);
@@ -550,6 +566,12 @@ namespace Engine {
 		Scope<Impl> impl = CreateScope<Impl>();
 		impl->Pid = pid;
 		impl->ExecutableText = std::move(executableText);
+		impl->CapturesOutput = specification.CaptureOutput;
+		if (!specification.CaptureOutput)
+		{
+			impl->Output.MarkEnded(ProcessStream::StandardOutput);
+			impl->Output.MarkEnded(ProcessStream::StandardError);
+		}
 		impl->OutputRead.Reset(outputRead.Release());
 		impl->ErrorRead.Reset(errorRead.Release());
 		impl->WakeRead.Reset(wakeRead.Release());
@@ -602,7 +624,22 @@ namespace Engine {
 	Status Process::WaitForOutput(ProcessStream stream, std::string_view text, std::chrono::milliseconds timeout)
 	{
 		ENGINE_CORE_ASSERT(m_Impl != nullptr, "WaitForOutput called on a moved-from Process");
+		if (!m_Impl->CapturesOutput)
+			return MakeError(ErrorCode::InvalidState, "the output of '{}' is not captured", m_Impl->ExecutableText);
 		return m_Impl->Output.WaitForText(stream, text, Utils::MakeProcessDeadline(timeout));
+	}
+
+	Status Process::Detach()
+	{
+		ENGINE_CORE_ASSERT(m_Impl != nullptr, "Detach called on a moved-from Process");
+		Impl& impl = *m_Impl;
+		if (impl.CapturesOutput)
+			return MakeError(ErrorCode::InvalidState, "'{}' writes into captured pipes and cannot be detached", impl.ExecutableText);
+		// The I/O thread stops first, so it never reaps or signals the pid after the child was released.
+		impl.StopIo();
+		impl.Pid = -1;
+		m_Impl.reset();
+		return {};
 	}
 
 	Status Process::Kill()

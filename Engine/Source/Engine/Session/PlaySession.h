@@ -14,6 +14,8 @@
 #include "Engine/Scripting/ScriptHost.h"
 #include "Engine/Session/PlayInput.h"
 
+#include <glm/glm.hpp>
+
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -89,6 +91,24 @@ namespace Engine {
 	// The phase's enumerator name ("InterpolationSnapshot" ...).
 	[[nodiscard]] std::string_view PlaySessionPhaseToString(PlaySessionPhase phase);
 
+	// View coordinates: the pixels of the session's view (SetViewSize), origin at the top-left corner, +x right, +y down.
+	// Ordinary live play follows the host's game view, the image its game camera renders into: the Runtime's window
+	// framebuffer, the editor's Game panel image (a fixed resolution or the panel's extent times the framebuffer scale,
+	// letterbox bars excluded). A deterministic session (a test run's suites and replays, the verification of a test-run
+	// recording, input.record and input.replay sessions, the Runtime's --replay, and every session started in lockstep)
+	// keeps GetDeterministicViewSize for its whole life in every host, whatever the panel, the window or the display's scale,
+	// so its results and state hashes never depend on them. Scripts see cursor positions, Application.GetWindowSize and
+	// Camera:ScreenToWorldRay/WorldToScreen in view coordinates; hosts map device cursor positions into the session's view
+	// before PlayInput::QueueDeviceEvent, while injected input (input.inject, play.step, replays, Test.Inject*) already
+	// uses them. This maps `position`, given in the coordinates of a display rectangle at `displayMin` of `displaySize`
+	// that shows the whole view stretched over it, to the view's pixels: linear and unclamped, so a cursor beyond the image
+	// keeps moving continuously. nullopt for a non-finite position, a rectangle without area or an empty view. Pure.
+	[[nodiscard]] std::optional<glm::vec2> MapToViewCoordinates(const glm::vec2& position, const glm::vec2& displayMin,
+		const glm::vec2& displaySize, const glm::uvec2& viewSize);
+	// The fixed view of a deterministic session (see MapToViewCoordinates): the project's window size in logical pixels,
+	// at least 1 x 1. Pure.
+	[[nodiscard]] glm::uvec2 GetDeterministicViewSize(const WindowSettings& window);
+
 	class PlaySession;
 
 	// Optional production test driver, distinct from the phase-entry instrumentation below. Borrowed main-thread
@@ -104,7 +124,8 @@ namespace Engine {
 
 	// Optional application-facing services of scripts; Session does not include App or editor code. Outlives the
 	// session. A missing host uses the specification's Environment, rejects cursor changes and exposes quit intent
-	// through GetQuitRequest. Error publication is still retained in ScriptEngine's owned error stream.
+	// through GetQuitRequest. Error publication is still retained in ScriptEngine's owned error stream. Either way the
+	// environment's WindowSize that scripts see is the session's view size (view coordinates, see MapToViewCoordinates).
 	class IPlaySessionHost
 	{
 	public:
@@ -113,6 +134,9 @@ namespace Engine {
 		[[nodiscard]] virtual Status SetScriptCursorMode(CursorMode mode) = 0;
 		[[nodiscard]] virtual CursorMode GetScriptCursorMode() const = 0;
 		virtual void OnScriptError(const ScriptError& error, bool fatal) = 0;
+		// IScriptHost::OnScriptPhase of the session's VM, forwarded for the host's automation watchdog (§13.2 Busy names
+		// "Script:<Script>.<Callback>"). Called on every protected script entry and exit: keep it cheap.
+		virtual void OnScriptPhase(std::string_view script, std::string_view callback) = 0;
 	};
 
 	// Instrumentation of the step order (§5.7 "documented and tested"; "PlaySession: step order matches the documented
@@ -168,8 +192,9 @@ namespace Engine {
 		// the project loader does), Simulation.MaxStepsPerFrame (the editor's loop, EditorPlayController::GetFrameLoopConfig),
 		// Simulation.MaxEntities (>= 1, checked) and Input.Actions (PlayInput::Create); Simulation.Seed only through Seed below.
 		ProjectSettings Project{};
-		// The game view's size in pixels for its extraction (the window's framebuffer; the editor's game viewport from M10;
-		// SetViewSize changes it). Both >= 1.
+		// The session's view in pixels, for its extraction and its scripts' view coordinates (see MapToViewCoordinates: the
+		// host's game view for ordinary live play, GetDeterministicViewSize for a deterministic session; SetViewSize changes
+		// it). Both >= 1.
 		uint32_t ViewWidth = 1600;
 		uint32_t ViewHeight = 900;
 		// Test instrumentation (see IPlaySessionObserver); null in production. Outlives the session.
@@ -229,8 +254,10 @@ namespace Engine {
 	//
 	// Entity cap (§5.7). A session holds at most Simulation.MaxEntities entities. CreateEntity and the hosts' creation paths
 	// (CheckEntityCapacity: automation's entity.create and entity.duplicate with target "play"; scripts in M13) fail with
-	// InvalidState "entity limit <N> reached" instead of creating more; nothing crashes. prefab.instantiate only creates in
-	// the edit scene.
+	// InvalidState "entity limit <N> reached" instead of creating more; nothing crashes. Entities destroyed in the current
+	// tick stay in the registry until the end-of-tick flush (§5.7), so live, new and pending-destroy entities together stay
+	// within twice the limit as well, however many a script creates and destroys in one tick. prefab.instantiate only
+	// creates in the edit scene.
 	//
 	// Run state (§5.6, §13.6): Running or Paused; lockstep (owned by one automation client, or by none for in-process
 	// drivers such as the FeatureTest runner); a time scale the host applies to its frame loop; a stepping flag while a
@@ -350,6 +377,10 @@ namespace Engine {
 		// Application.Quit records the first request. The editor stops play and the Runtime exits only after returning
 		// from the current frame; a test hook also receives it for ExpectQuit. It is not a recursive destruction call.
 		[[nodiscard]] std::optional<int32_t> GetQuitRequest() const;
+		// The structured error of a fatal stop (§11.1: a second soft memory breach or the hard limit, or a script VM that
+		// could not start), as published to GetScriptErrors; nullopt while the session runs. Once it is set, FixedStep and
+		// Tick do nothing and the session stays paused until the host ends it (play.state reports it).
+		[[nodiscard]] const std::optional<ScriptError>& GetFatalError() const;
 		// One recorder for this session's absolute input timeline, owned by the session. Null in Simulate. Session
 		// feeds it every ApplyInput result before scripts run, and MarkModified invalidates it. It survives Scene.Load.
 		[[nodiscard]] ReplayRecorder* GetRecorder();
@@ -381,8 +412,8 @@ namespace Engine {
 
 		// The entity cap (see the class comment).
 		[[nodiscard]] uint32_t GetMaxEntities() const;
-		// OK when `additional` more entities fit under MaxEntities; InvalidState "entity limit <N> reached" (with the hint to
-		// raise Simulation.MaxEntities or destroy entities) otherwise.
+		// OK when `additional` more entities fit under MaxEntities, and live, new and pending-destroy entities together under
+		// twice that; InvalidState "entity limit <N> reached" (with a hint) otherwise.
 		[[nodiscard]] Status CheckEntityCapacity(size_t additional) const;
 		// A runtime spawn (§4.8, §5.7): CheckEntityCapacity(1), then Scene::CreateEntity with the next deterministic id, as the
 		// last root or the last child of `parent` (valid and in this session's scene, asserted). The entity renders without
@@ -418,8 +449,12 @@ namespace Engine {
 
 		// The game view (§5.7 frame phase step 4). RenderExtraction extracts the scene through its primary camera at the view
 		// size and the frame's alpha into the session's last snapshot, unless extraction is disabled (play.step's render
-		// "last" and "none" disable it for the ticks they do not render). The host renders the last snapshot.
+		// "last" and "none" disable it for the ticks they do not render). The host renders the last snapshot. The view size
+		// is also the extent of the scripts' view coordinates (Application.GetWindowSize, Camera:ScreenToWorldRay and
+		// WorldToScreen; see MapToViewCoordinates). Hosts resize only ordinary live play; a deterministic session keeps
+		// the view it was created with.
 		void SetViewSize(uint32_t width, uint32_t height);
+		[[nodiscard]] glm::uvec2 GetViewSize() const;
 		void SetExtractionEnabled(bool enabled);
 		[[nodiscard]] bool IsExtractionEnabled() const;
 		// The snapshot of the last RenderExtraction phase (HasCamera false before the first one, and when the scene has no

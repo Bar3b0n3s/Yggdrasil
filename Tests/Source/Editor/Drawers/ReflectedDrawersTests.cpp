@@ -2,17 +2,27 @@
 #include "Editor/Drawers/ReflectedDrawers.h"
 
 #include "Editor/PanelInteractionFixture.h"
+#include "Editor/Ui/EditorStyle.h"
 #include "Engine/Asset/BuiltinAssets.h"
 #include "Engine/Asset/ScriptData.h"
 #include "Engine/Core/Hash.h"
 #include "Engine/Reflection/TypeRegistry.h"
+#include "Engine/Scene/Components/BoxColliderComponent.h"
+#include "Engine/Scene/Components/DirectionalLightComponent.h"
 #include "Engine/Scene/Components/MeshRendererComponent.h"
+#include "Engine/Scene/Components/TransformComponent.h"
+#include "Engine/Scene/TransformSystem.h"
+#include "Support/EditorTestFixture.h"
 
 #include <imgui_internal.h>
 
 #include <array>
+#include <cmath>
 #include <cstring>
+#include <format>
+#include <functional>
 #include <map>
+#include <string>
 
 namespace Engine {
 
@@ -105,6 +115,127 @@ namespace Engine {
 		ENGINE_TRY(ui.Frame(draw));
 		return result;
 	}
+
+	static ImGuiID DrawerIntId(ImGuiID parent, int key)
+	{
+		return ImHashData(&key, sizeof(key), parent);
+	}
+
+	// ImGui records this rectangle when it submits the requested navigation item in the named window. Tests then click
+	// the real geometry; they never toggle storage or synthesize a successful widget result.
+	static ImRect LocateDrawerWindowItem(Test::PanelInteractionUi& ui, const std::function<Status()>& draw, const char* windowName, ImGuiID id)
+	{
+		ImRect rectangle;
+		const auto locate = [&draw, windowName, id, &rectangle]() -> Status
+		{
+			ImGuiWindow* window = ImGui::FindWindowByName(windowName);
+			REQUIRE(window != nullptr);
+			ImGui::SetNavWindow(window);
+			ImGui::SetNavID(id, ImGuiNavLayer_Main, window->NavRootFocusScopeId, ImRect());
+			ImGui::GetCurrentContext()->NavIdIsAlive = false;
+			ENGINE_TRY(draw());
+			const auto& gui = *ImGui::GetCurrentContext();
+			REQUIRE(gui.NavIdIsAlive);
+			REQUIRE(gui.NavId == id);
+			rectangle = ImGui::WindowRectRelToAbs(gui.NavWindow, gui.NavWindow->NavRectRel[gui.NavLayer]);
+			CHECK(rectangle.GetWidth() > 0.0f);
+			CHECK(rectangle.GetHeight() > 0.0f);
+			return {};
+		};
+		REQUIRE(ui.Frame(locate));
+		return rectangle;
+	}
+
+	static ImGuiWindow* DrawerPopup()
+	{
+		for (ImGuiWindow* window : ImGui::GetCurrentContext()->Windows)
+		{
+			if (window->Active && (window->Flags & ImGuiWindowFlags_Popup) != 0)
+				return window;
+		}
+		return nullptr;
+	}
+
+	static void ReplaceDrawerText(Test::PanelInteractionUi& ui, const std::function<Status()>& draw, const char* text)
+	{
+		ImGui::GetIO().AddKeyEvent(ImGuiMod_Ctrl, true);
+		ImGui::GetIO().AddKeyEvent(ImGuiKey_A, true);
+		REQUIRE(ui.Frame(draw));
+		ImGui::GetIO().AddKeyEvent(ImGuiKey_A, false);
+		ImGui::GetIO().AddKeyEvent(ImGuiMod_Ctrl, false);
+		REQUIRE(ui.Frame(draw));
+		ImGui::GetIO().AddInputCharactersUTF8(text);
+		REQUIRE(ui.Frame(draw));
+	}
+
+	// One axis of a vector drawer, or of a rotation's raw components under their disclosure.
+	static ImGuiID DrawerAxisId(std::string_view path, int axis, bool components = false)
+	{
+		ImGui::PushID(static_cast<int>(FNV1a32(path)));
+		ImGui::PushID("Property");
+		if (components)
+			ImGui::PushID("##Components");
+		ImGui::PushID(axis);
+		const ImGuiID id = ImGui::GetID("##Axis");
+		ImGui::PopID();
+		if (components)
+			ImGui::PopID();
+		ImGui::PopID();
+		ImGui::PopID();
+		return id;
+	}
+
+	// A real drag with no drag threshold or double click: each pixel moves a float by one step of the field's speed.
+	static void DragDrawerItem(Test::PanelInteractionUi& ui, const std::function<Status()>& draw, ImVec2 from, float pixels)
+	{
+		ImGui::GetIO().MouseDragThreshold = 0.0f;
+		// Consecutive drags from one point must not read as a double click, which opens the text entry instead.
+		ImGui::GetIO().MouseDoubleClickTime = 0.0f;
+		ImGui::GetIO().AddMousePosEvent(from.x, from.y);
+		REQUIRE(ui.Frame(draw));
+		ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+		REQUIRE(ui.Frame(draw));
+		ImGui::GetIO().AddMousePosEvent(from.x + pixels, from.y);
+		REQUIRE(ui.Frame(draw));
+		ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+		REQUIRE(ui.Frame(draw));
+	}
+
+	// Ctrl+click turns a drag into its text entry; the typed text applies on Enter.
+	static void TypeIntoDrawerItem(Test::PanelInteractionUi& ui, const std::function<Status()>& draw, ImVec2 at, const char* text)
+	{
+		ImGui::GetIO().AddKeyEvent(ImGuiMod_Ctrl, true);
+		REQUIRE(ui.Click(draw, at));
+		ImGui::GetIO().AddKeyEvent(ImGuiMod_Ctrl, false);
+		REQUIRE(ui.Frame(draw));
+		ReplaceDrawerText(ui, draw, text);
+		ImGui::GetIO().AddKeyEvent(ImGuiKey_Enter, true);
+		REQUIRE(ui.Frame(draw));
+		ImGui::GetIO().AddKeyEvent(ImGuiKey_Enter, false);
+		REQUIRE(ui.Frame(draw));
+	}
+
+	// Draws `field` into `value` every frame, keeps the last result and the rendered text; a drawer error fails the frame.
+	struct DrawerFrame
+	{
+		const FieldInfo& Field;
+		Value& Edited;
+		ReflectedDrawerContext Context;
+		ReflectedDrawerResult Last{};
+		std::string Text{};
+
+		Status operator()()
+		{
+			ImGui::LogToBuffer(0);
+			auto result = DrawReflectedValue(Field, Edited, Context);
+			Text = ImGui::GetCurrentContext()->LogBuffer.c_str();
+			ImGui::LogFinish();
+			if (!result)
+				return std::unexpected(std::move(result).error());
+			Last = *result;
+			return {};
+		}
+	};
 
 	TEST_SUITE("Editor")
 	{
@@ -403,6 +534,330 @@ namespace Engine {
 				CHECK_FALSE(result->Committed);
 				CHECK(value.AsUUID() == BuiltinAssetHandles::CubeMesh);
 			}
+		}
+
+		TEST_CASE("ReflectedDrawers: vector axes fit narrow and scaled property columns")
+		{
+			Test::EditorTestFixture fixture("InspectorVectorWidths");
+			const auto& types = fixture.GetEditor().GetTypeRegistry();
+			const FieldInfo* field = types.FindComponent<TransformComponent>()->FindField("Translation");
+			REQUIRE(field != nullptr);
+			for (const float scale : { 1.0f, 1.5f })
+			{
+				for (const float width : { 220.0f, 320.0f, 420.0f })
+				{
+					INFO(scale, " at ", width);
+					Test::PanelInteractionUi ui(false);
+					Utils::ApplyEditorStyle(scale);
+					Value value = Value::FromVec3(glm::vec3(12.5f, -24.25f, 123.0f));
+					const Value original = value;
+					ImGuiID property = 0;
+					const auto draw = [&types, field, &value, width, &property]() -> Status
+					{
+						ImGui::SetNextWindowSize(ImVec2(width, 700.0f));
+						ImGui::Begin("Vector design");
+						ImGui::PushID(static_cast<int>(FNV1a32("Transform.Translation")));
+						property = ImGui::GetID("Property");
+						ImGui::PopID();
+						const auto result = DrawReflectedValue(*field, value, { .Types = types, .Path = "Transform.Translation", .DisplayLabel = "Position" });
+						ImGui::End();
+						return result ? Status{} : Status(std::unexpected(result.error()));
+					};
+					REQUIRE(ui.Frame(draw));
+					REQUIRE(ui.Frame(draw));
+					std::array<ImRect, 3> axes;
+					for (int axis = 0; axis < 3; ++axis)
+					{
+						axes[static_cast<size_t>(axis)] = LocateDrawerWindowItem(ui, draw, "Vector design", ImHashStr("##Axis", 0, DrawerIntId(property, axis)));
+						const ImGuiWindow* window = ImGui::FindWindowByName("Vector design");
+						const auto& rectangle = axes[static_cast<size_t>(axis)];
+						CHECK(rectangle.Min.x >= window->InnerRect.Min.x);
+						CHECK(rectangle.Max.x <= window->InnerRect.Max.x);
+						CHECK(rectangle.GetWidth() >= ImGui::CalcTextSize("X -1.23").x);
+					}
+					CHECK_FALSE(axes[0].Overlaps(axes[1]));
+					CHECK_FALSE(axes[1].Overlaps(axes[2]));
+					CHECK(value == original);
+				}
+			}
+		}
+
+		TEST_CASE("ReflectedDrawers: authored hash markers keep controls distinct and read-only values unchanged")
+		{
+			Test::EditorTestFixture fixture("InspectorAuthoredIds");
+			const auto& types = fixture.GetEditor().GetTypeRegistry();
+			const FieldInfo* field = types.FindComponent<MeshRendererComponent>()->FindField("Visible");
+			REQUIRE(field != nullptr);
+			for (const bool readOnly : { false, true })
+			{
+				Test::PanelInteractionUi ui;
+				Value first = Value::FromBool(true);
+				Value second = Value::FromBool(true);
+				std::array<ImGuiID, 2> ids{};
+				std::array<ReflectedDrawerResult, 2> results{};
+				const auto draw = [&types, field, readOnly, &first, &second, &ids, &results]() -> Status
+				{
+					for (int index = 0; index < 2; ++index)
+					{
+						const std::string path = index == 0 ? "Fields[First###Enabled]" : "Fields[Second###Enabled]";
+						ImGui::PushID(static_cast<int>(FNV1a32(path)));
+						ImGui::PushID("Property");
+						ids[static_cast<size_t>(index)] = ImGui::GetID("##Value");
+						ImGui::PopID();
+						ImGui::PopID();
+						ENGINE_TRY_ASSIGN(results[static_cast<size_t>(index)], DrawReflectedValue(*field, index == 0 ? first : second, { .Types = types, .Path = path, .ReadOnly = readOnly, .DisplayLabel = index == 0 ? "First###Enabled" : "Second###Enabled" }));
+					}
+					return {};
+				};
+				REQUIRE(ui.Frame(draw));
+				CHECK(ids[0] != ids[1]);
+				const auto item = LocateDrawerWindowItem(ui, draw, "Panel interaction", ids[0]);
+				REQUIRE(ui.Click(draw, item.GetCenter()));
+				CHECK(first.AsBool() == readOnly);
+				CHECK(second.AsBool());
+				CHECK(results[0].Changed == !readOnly);
+				CHECK(results[0].Committed == !readOnly);
+				CHECK_FALSE(results[1].Changed);
+			}
+		}
+
+		TEST_CASE("ReflectedDrawers: narrow references preserve paste and clear with readable lookup")
+		{
+			Test::EditorTestFixture fixture("InspectorReferenceDesign");
+			const auto& types = fixture.GetEditor().GetTypeRegistry();
+			const FieldInfo* field = types.FindComponent<MeshRendererComponent>()->FindField("Mesh");
+			REQUIRE(field != nullptr);
+			Test::PanelInteractionUi ui(false);
+			Utils::ApplyEditorStyle();
+			Value value = Value::FromAssetRef(BuiltinAssetHandles::CubeMesh);
+			Result<ReflectedDrawerResult> result;
+			ImGuiID property = 0;
+			UUID described{};
+			const auto draw = [&types, field, &value, &result, &property, &described]() -> Status
+			{
+				ImGui::SetNextWindowSize(ImVec2(220.0f, 600.0f));
+				ImGui::Begin("Reference design");
+				ImGui::PushID(static_cast<int>(FNV1a32("Mesh")));
+				property = ImGui::GetID("Property");
+				ImGui::PopID();
+				result = DrawReflectedValue(*field, value, { .Types = types, .Path = "Mesh", .DescribeReference = [&described](const FieldInfo&, UUID id)
+				{
+					described = id;
+					return std::optional(ReflectedReferenceCandidate{ id, "Readable###resource name", "engine://Meshes/Cube" });
+				} });
+				ImGui::End();
+				return result ? Status{} : Status(std::unexpected(result.error()));
+			};
+			REQUIRE(ui.Frame(draw));
+			REQUIRE(ui.Frame(draw));
+			CHECK(described == BuiltinAssetHandles::CubeMesh);
+			const ImRect browse = LocateDrawerWindowItem(ui, draw, "Reference design", ImHashStr("...##Browse", 0, property));
+			const auto* window = ImGui::FindWindowByName("Reference design");
+			CHECK(browse.Max.x <= window->InnerRect.Max.x);
+			REQUIRE(ui.Click(draw, browse.GetCenter()));
+			REQUIRE(ui.Frame(draw));
+			ImGuiWindow* popup = DrawerPopup();
+			REQUIRE(popup != nullptr);
+			const ImRect input = LocateDrawerWindowItem(ui, draw, popup->Name, ImHashStr("##ReferenceId", 0, popup->ID));
+			REQUIRE(ui.Click(draw, input.GetCenter()));
+			ReplaceDrawerText(ui, draw, BuiltinAssetHandles::SphereMesh.ToString().c_str());
+			CHECK(value.AsUUID() == BuiltinAssetHandles::CubeMesh);
+			ImGui::GetIO().AddKeyEvent(ImGuiKey_Enter, true);
+			REQUIRE(ui.Frame(draw));
+			REQUIRE(result);
+			CHECK(result->Committed);
+			CHECK(value.AsUUID() == BuiltinAssetHandles::SphereMesh);
+			ImGui::GetIO().AddKeyEvent(ImGuiKey_Enter, false);
+			REQUIRE(ui.Frame(draw));
+			const ImRect clear = LocateDrawerWindowItem(ui, draw, "Reference design", ImHashStr("x##Clear", 0, property));
+			CHECK(clear.Max.x <= window->InnerRect.Max.x);
+			REQUIRE(ui.Click(draw, clear.GetCenter()));
+			REQUIRE(result);
+			CHECK(result->Committed);
+			CHECK_FALSE(value.AsUUID().IsValid());
+		}
+
+		TEST_CASE("ReflectedDrawers: dragging a float never rounds the stored value to its display format")
+		{
+			Test::EditorTestFixture fixture("DrawerFloatPrecision");
+			const auto& types = fixture.GetEditor().GetTypeRegistry();
+			const FieldInfo* translation = types.FindComponent<TransformComponent>()->FindField("Translation");
+			const FieldInfo* intensity = types.FindComponent<DirectionalLightComponent>()->FindField("Intensity");
+			REQUIRE(translation != nullptr);
+			REQUIRE(intensity != nullptr);
+			for (const float start : { 123.45f, 1234.5f })
+			{
+				CAPTURE(start);
+				Test::PanelInteractionUi ui;
+				Value value = Value::FromVec3({ start, -0.0f, 2.5f });
+				DrawerFrame frame{ *translation, value, { .Types = types, .Path = "Translation" } };
+				const std::function<Status()> draw = std::ref(frame);
+				REQUIRE(ui.Frame(draw));
+				// -0 shows as one zero; drawing never changes the stored value.
+				CHECK(frame.Text.contains(std::format("X {}", start)));
+				CHECK(frame.Text.contains("Y 0"));
+				CHECK_FALSE(frame.Text.contains("-0"));
+				CHECK(frame.Text.contains("Z 2.5"));
+				CHECK(std::signbit(value.AsVec3().y));
+				ImGuiID axis = 0;
+				const std::function<Status()> locate = [&frame, &axis]()
+				{
+					axis = DrawerAxisId("Translation", 0);
+					return frame();
+				};
+				REQUIRE(ui.Frame(locate));
+				DragDrawerItem(ui, draw, LocateDrawerItem(ui, draw, axis).GetCenter(), 1.0f);
+				// One pixel moves by exactly one step of the default speed, never to a value rounded for display.
+				CHECK(value.AsVec3().x == start + 0.05f);
+				CHECK(value.AsVec3().z == 2.5f);
+			}
+			Test::PanelInteractionUi ui;
+			Value value = Value::FromFloat(0.0004f);
+			DrawerFrame frame{ *intensity, value, { .Types = types, .Path = "Intensity" } };
+			ImGuiID control = 0;
+			const std::function<Status()> draw = [&frame, &control]()
+			{
+				control = DrawerControlId("Intensity", "##Value");
+				return frame();
+			};
+			REQUIRE(ui.Frame(draw));
+			CHECK(frame.Text.contains("0.0004"));
+			DragDrawerItem(ui, draw, LocateDrawerItem(ui, draw, control).GetCenter(), 1.0f);
+			CHECK(value.AsFloat() == 0.0004f + 0.05f);
+		}
+
+		TEST_CASE("ReflectedDrawers: numeric edits clamp to the field range and step over the minimum magnitude")
+		{
+			Test::EditorTestFixture fixture("DrawerNumericRange");
+			const auto& types = fixture.GetEditor().GetTypeRegistry();
+			const auto* light = types.FindComponent<DirectionalLightComponent>();
+			const FieldInfo* cascades = light->FindField("CascadeCount");
+			const FieldInfo* angle = light->FindField("LightAngle");
+			const FieldInfo* scale = types.FindComponent<TransformComponent>()->FindField("Scale");
+			REQUIRE(cascades != nullptr);
+			REQUIRE(angle != nullptr);
+			REQUIRE(scale != nullptr);
+			SUBCASE("an integer drag stops at Min and Max")
+			{
+				Test::PanelInteractionUi ui;
+				Value value = Value::FromUInt32(4);
+				DrawerFrame frame{ *cascades, value, { .Types = types, .Path = "CascadeCount" } };
+				ImGuiID control = 0;
+				const std::function<Status()> draw = [&frame, &control]()
+				{
+					control = DrawerControlId("CascadeCount", "##Value");
+					return frame();
+				};
+				REQUIRE(ui.Frame(draw));
+				const ImVec2 center = LocateDrawerItem(ui, draw, control).GetCenter();
+				DragDrawerItem(ui, draw, center, 40.0f);
+				CHECK(value.AsUInt32() == 4u);
+				DragDrawerItem(ui, draw, center, -200.0f);
+				CHECK(value.AsUInt32() == 1u);
+			}
+			SUBCASE("typed text clamps to Max")
+			{
+				Test::PanelInteractionUi ui;
+				Value value = Value::FromFloat(10.0f);
+				DrawerFrame frame{ *angle, value, { .Types = types, .Path = "LightAngle" } };
+				ImGuiID control = 0;
+				const std::function<Status()> draw = [&frame, &control]()
+				{
+					control = DrawerControlId("LightAngle", "##Value");
+					return frame();
+				};
+				REQUIRE(ui.Frame(draw));
+				TypeIntoDrawerItem(ui, draw, LocateDrawerItem(ui, draw, control).GetCenter(), "500");
+				CHECK(value.AsFloat() == 90.0f);
+			}
+			SUBCASE("a drag through zero steps over the excluded magnitudes")
+			{
+				Test::PanelInteractionUi ui;
+				Value value = Value::FromVec3({ 0.05f, 1.0f, 1.0f });
+				DrawerFrame frame{ *scale, value, { .Types = types, .Path = "Scale" } };
+				ImGuiID axis = 0;
+				const std::function<Status()> draw = [&frame, &axis]()
+				{
+					axis = DrawerAxisId("Scale", 0);
+					return frame();
+				};
+				REQUIRE(ui.Frame(draw));
+				const ImVec2 center = LocateDrawerItem(ui, draw, axis).GetCenter();
+				DragDrawerItem(ui, draw, center, -1.0f);
+				CHECK(value.AsVec3().x == MinTransformScaleMagnitude);
+				DragDrawerItem(ui, draw, center, -3.0f);
+				CHECK(value.AsVec3().x == doctest::Approx(MinTransformScaleMagnitude - 0.15f));
+				CHECK(value.AsVec3().y == 1.0f);
+			}
+		}
+
+		TEST_CASE("ReflectedDrawers: a rotation edits as Euler degrees or renormalized components and stays a unit quaternion")
+		{
+			Test::EditorTestFixture fixture("DrawerRotation");
+			const auto& types = fixture.GetEditor().GetTypeRegistry();
+			const FieldInfo* rotation = types.FindComponent<BoxColliderComponent>()->FindField("Rotation");
+			REQUIRE(rotation != nullptr);
+			Test::PanelInteractionUi ui;
+			Value value = Value::FromQuat(glm::quat(1.0f, 0.0f, 0.0f, 0.0f));
+			DrawerFrame frame{ *rotation, value, { .Types = types, .Path = "Rotation" } };
+			ImGuiID yaw = 0;
+			ImGuiID components = 0;
+			ImGuiID componentX = 0;
+			const std::function<Status()> draw = [&frame, &yaw, &components, &componentX]()
+			{
+				yaw = DrawerAxisId("Rotation", 1);
+				components = DrawerControlId("Rotation", "##Components");
+				componentX = DrawerAxisId("Rotation", 0, true);
+				return frame();
+			};
+			REQUIRE(ui.Frame(draw));
+			CHECK(frame.Text.contains("Quaternion components"));
+			TypeIntoDrawerItem(ui, draw, LocateDrawerItem(ui, draw, yaw).GetCenter(), "30");
+			const glm::quat expected = TransformSystem::QuaternionFromEulerDegrees({ 0.0f, 30.0f, 0.0f });
+			CHECK(std::fabs(glm::dot(value.AsQuat(), expected)) == doctest::Approx(1.0f));
+			CHECK(glm::length(value.AsQuat()) == doctest::Approx(1.0f));
+			REQUIRE(ui.Click(draw, LocateDrawerItem(ui, draw, components).GetCenter()));
+			REQUIRE(ui.Frame(draw));
+			const glm::quat before = value.AsQuat();
+			DragDrawerItem(ui, draw, LocateDrawerItem(ui, draw, componentX).GetCenter(), 5.0f);
+			CHECK(frame.Last.ChangedComponents == 0u);
+			CHECK(glm::length(value.AsQuat()) == doctest::Approx(1.0f).epsilon(1e-5));
+			CHECK(value.AsQuat().x > before.x);
+		}
+
+		TEST_CASE("ReflectedDrawers: a mixed vector marks only differing axes and reports the axes an edit changed")
+		{
+			Test::EditorTestFixture fixture("DrawerMixedAxes");
+			const auto& types = fixture.GetEditor().GetTypeRegistry();
+			const FieldInfo* translation = types.FindComponent<TransformComponent>()->FindField("Translation");
+			REQUIRE(translation != nullptr);
+			Test::PanelInteractionUi ui;
+			Value value = Value::FromVec3({ 1.0f, 2.0f, 3.0f });
+			DrawerFrame frame{ *translation, value, { .Types = types, .Path = "Translation", .Mixed = true, .MixedComponents = 0b010u } };
+			ImGuiID axis = 0;
+			const std::function<Status()> draw = [&frame, &axis]()
+			{
+				axis = DrawerAxisId("Translation", 2);
+				return frame();
+			};
+			REQUIRE(ui.Frame(draw));
+			CHECK(frame.Text.contains("X 1"));
+			CHECK(frame.Text.contains("--"));
+			CHECK_FALSE(frame.Text.contains("Y 2"));
+			CHECK(frame.Text.contains("Z 3"));
+			ImGui::GetIO().MouseDragThreshold = 0.0f;
+			const ImVec2 center = LocateDrawerItem(ui, draw, axis).GetCenter();
+			ImGui::GetIO().AddMousePosEvent(center.x, center.y);
+			REQUIRE(ui.Frame(draw));
+			ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+			REQUIRE(ui.Frame(draw));
+			ImGui::GetIO().AddMousePosEvent(center.x + 1.0f, center.y);
+			REQUIRE(ui.Frame(draw));
+			CHECK(frame.Last.Changed);
+			CHECK(frame.Last.ChangedComponents == 0b100u);
+			ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+			REQUIRE(ui.Frame(draw));
+			CHECK(value.AsVec3() == glm::vec3(1.0f, 2.0f, 3.0f + 0.05f));
 		}
 	}
 

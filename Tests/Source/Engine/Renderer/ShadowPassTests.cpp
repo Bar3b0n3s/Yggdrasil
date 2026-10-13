@@ -4,6 +4,7 @@
 #include "Engine/Asset/MaterialData.h"
 #include "Engine/Asset/MeshData.h"
 #include "Engine/Asset/TextureData.h"
+#include "Engine/Graphics/GpuResourceTracker.h"
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Graphics/Readback.h"
 #include "Engine/Renderer/GpuResourceCache.h"
@@ -19,6 +20,8 @@
 #include <array>
 #include <cmath>
 #include <cstring>
+#include <numbers>
+#include <vector>
 
 namespace Engine {
 
@@ -27,6 +30,7 @@ namespace Engine {
 		constexpr AssetHandle ShadowQuadHandle{ 0x9a1001 };
 		constexpr AssetHandle ShadowMaterialHandle{ 0x9a1002 };
 		constexpr AssetHandle ShadowTextureHandle{ 0x9a1003 };
+		constexpr AssetHandle ShadowRoofHandle{ 0x9a1004 };
 
 		void PublishShadowQuad(Test::InMemoryAssetManager& assets)
 		{
@@ -61,6 +65,22 @@ namespace Engine {
 			return result;
 		}
 
+		[[nodiscard]] ShadowConstants MakeCascadeConstants(const ShadowCascadeSet& cascades)
+		{
+			ShadowConstants shadows{};
+			shadows.Counts.x = cascades.Count;
+			for (uint32_t index = 0; index < cascades.Count; ++index)
+			{
+				const ShadowCascade& cascade = cascades.Cascades[index];
+				shadows.CascadeViewProjection[index] = cascade.ViewProjection;
+				shadows.CascadeSplits[index] = cascade.SplitFar;
+				shadows.CascadeBlendStarts[index] = cascade.BlendStart;
+				shadows.CascadeDepthRanges[index] = glm::vec4(cascade.LightNear, cascade.LightFar, cascade.PenumbraUvPerMetre, 0.05f);
+				shadows.CascadeTexelWorldSizes[index] = cascade.TexelWorldSize;
+			}
+			return shadows;
+		}
+
 		class ShadowSetup
 		{
 		public:
@@ -79,6 +99,17 @@ namespace Engine {
 				REQUIRE(atlas);
 				m_Cascades = *cascade;
 				m_Atlas = *atlas;
+				auto cascadeFramebuffers = ShadowPass::CreateFramebuffers(m_Device, *m_Cascades);
+				auto atlasFramebuffers = ShadowPass::CreateFramebuffers(m_Device, *m_Atlas);
+				auto casterConstants = m_Device.CreateBuffer(ShadowPass::GetCasterConstantsDesc());
+				REQUIRE(cascadeFramebuffers);
+				REQUIRE(atlasFramebuffers);
+				REQUIRE(casterConstants);
+				REQUIRE(cascadeFramebuffers->size() == MaxShadowCascades);
+				REQUIRE(atlasFramebuffers->size() == 1);
+				m_CascadeFramebuffers = std::move(*cascadeFramebuffers);
+				m_AtlasFramebuffer = atlasFramebuffers->front();
+				m_CasterConstants = *casterConstants;
 
 				nvrhi::BindingLayoutDesc layout;
 				layout.visibility = nvrhi::ShaderType::Compute;
@@ -136,6 +167,9 @@ namespace Engine {
 						.Spots = spots,
 						.CascadeTarget = m_Cascades,
 						.AtlasTarget = m_Atlas,
+						.CascadeFramebuffers = m_CascadeFramebuffers,
+						.AtlasFramebuffer = m_AtlasFramebuffer,
+						.CasterConstants = m_CasterConstants,
 						.DepthBias = depthBias });
 				(*command)->close();
 				m_Device.ExecuteCommandList(**command);
@@ -197,6 +231,9 @@ namespace Engine {
 			PassBindingCache m_Bindings{};
 			nvrhi::TextureHandle m_Cascades{};
 			nvrhi::TextureHandle m_Atlas{};
+			std::vector<nvrhi::FramebufferHandle> m_CascadeFramebuffers{};
+			nvrhi::FramebufferHandle m_AtlasFramebuffer{};
+			nvrhi::BufferHandle m_CasterConstants{};
 			ComputePipeline m_Probe{};
 			nvrhi::SamplerHandle m_Comparison{};
 			RenderStats m_Stats{};
@@ -325,6 +362,20 @@ namespace Engine {
 				CHECK(setup.Render(std::span(&item, 1), *cascades).DrawCalls == 1);
 				CHECK(ShadowPixel(setup.Probe(0), 128, 128).x > 0);
 				CHECK(ShadowPixel(setup.Probe(3, 256, 256, shadows, receiver), 128, 128).x == 0);
+				// Beyond the fitted sphere's box (its light-facing end is at world z = centre + R) but inside the extension of
+				// ShadowDistance toward the light: only the near extension keeps this caster, on both paths, below depth 1.
+				// The light looks down -Z, so light depth grows with world z; the box spans depths [0, 2R / LightFar].
+				const float boxDepth = 2.0f * cascade.Radius / cascade.LightFar;
+				const float boxEnd = (glm::inverse(cascade.ViewProjection) * glm::vec4(0, 0, boxDepth, 1)).z;
+				item.World[3][2] = 100;
+				REQUIRE(boxEnd < 100.0f);
+				REQUIRE(boxEnd + light.ShadowDistance > 100.0f);
+				CHECK(setup.Render(std::span(&item, 1), *cascades).DrawCalls == 1);
+				const float extended = ShadowPixel(setup.Probe(0), 128, 128).x;
+				CHECK(extended > boxDepth);
+				CHECK(extended < 1);
+				CHECK(extended == doctest::Approx((cascade.ViewProjection * glm::vec4(0, 0, 100, 1)).z).epsilon(1.0e-4));
+				CHECK(ShadowPixel(setup.Probe(3, 256, 256, shadows, receiver), 128, 128).x == 0);
 				// Beyond even the extended near plane: the capable path pancakes, while the forced fallback clips.
 				// Check the actual receiver as well as depth, so a cleared/stale map cannot masquerade as coverage.
 				item.World[3][2] = 10000;
@@ -344,6 +395,121 @@ namespace Engine {
 				CHECK(setup.Render(std::span(&item, 1), *cascades).DrawCalls == 0);
 				CHECK(ShadowPixel(setup.Probe(3, 256, 256, shadows, receiver), 128, 128).x == 1);
 			}
+		}
+
+		TEST_CASE("Shadows: a caster crossing the near plane keeps its exact depth per fragment")
+		{
+			// The review's light-leak replay (M9-F01): a 160 m roof 8 m above a receiver 2 m in front of the camera, lit at 30
+			// degrees elevation. Two roof vertices lie beyond the cascade's near plane; clamping them per vertex tilted the whole
+			// triangle away from the light and let light through to the receiver.
+			for (const bool disableDepthClamp : { false, true })
+			{
+				CAPTURE(disableDepthClamp);
+				Test::HeadlessGpuFixture gpu({ .DisableDepthClamp = disableDepthClamp });
+				ENGINE_REQUIRE_GPU(gpu);
+				ShadowSetup setup(gpu);
+				auto roof = CreateRef<MeshData>();
+				for (const glm::vec3& position : { glm::vec3(-80, 8, -80), glm::vec3(80, 8, -80), glm::vec3(-80, 8, 80) })
+					roof->Vertices.push_back({ .Position = position, .Normal = glm::vec3(0, 1, 0), .Tangent = glm::vec4(1, 0, 0, 1) });
+				roof->Indices = { 0, 1, 2 };
+				roof->Bounds = { .Min = glm::vec3(-80, 8, -80), .Max = glm::vec3(80, 8, 80) };
+				roof->Submeshes = { { .IndexOffset = 0, .IndexCount = 3, .MaterialSlot = 0, .Bounds = roof->Bounds } };
+				roof->Slots = { { .Name = "Default", .DefaultMaterial = ShadowMaterialHandle } };
+				setup.GetAssets().Publish(ShadowRoofHandle, roof);
+				MaterialData material;
+				material.DoubleSided = true;
+				setup.GetAssets().Publish(ShadowMaterialHandle, CreateRef<MaterialData>(material));
+
+				CameraData camera; // at the origin, looking down -Z
+				camera.ViewportWidth = 1600;
+				camera.ViewportHeight = 900;
+				camera.Projection = ComputeReverseZProjection(RenderProjection::Perspective, 60, 10, camera.NearClip, camera.FarClip, 1600, 900);
+				LightData light;
+				const float elevation = std::numbers::pi_v<float> / 6.0f;
+				light.Direction = glm::vec3(std::cos(elevation), -std::sin(elevation), 0);
+				light.ShadowDistance = 40;
+				light.CascadeSplitLambda = 0.65f;
+				auto cascades = BuildShadowCascades(camera, light, 0, 256);
+				REQUIRE(cascades);
+				const glm::vec3 receiver(0, 0, -2);
+				uint32_t layer = 0;
+				while (layer + 1 < cascades->Count && cascades->Cascades[layer].SplitFar < 2.0f)
+					++layer;
+				const glm::mat4& viewProjection = cascades->Cascades[layer].ViewProjection;
+				bool crossesNearPlane = false;
+				for (const MeshVertex& vertex : roof->Vertices)
+					crossesNearPlane |= (viewProjection * glm::vec4(vertex.Position, 1)).z > 1.0f;
+				REQUIRE(crossesNearPlane);
+
+				MeshDrawItem item;
+				item.Mesh = ShadowRoofHandle;
+				CHECK(setup.Render(std::span(&item, 1), *cascades).DrawCalls >= 1);
+
+				// The roof's exact depth along the light ray through the receiver's texel centre.
+				const glm::vec4 receiverClip = viewProjection * glm::vec4(receiver, 1);
+				const glm::vec2 uv = glm::vec2(receiverClip) * glm::vec2(0.5f, -0.5f) + 0.5f;
+				const glm::uvec2 texel(uv * 256.0f);
+				const glm::vec2 centre = (glm::vec2(texel) + 0.5f) / 256.0f;
+				const glm::vec2 ndc = (centre - 0.5f) * glm::vec2(2.0f, -2.0f);
+				const glm::mat4 inverse = glm::inverse(viewProjection);
+				const glm::vec4 base = inverse * glm::vec4(ndc, 0, 1);
+				const glm::vec4 step = inverse * glm::vec4(0, 0, 1, 0);
+				const float roofDepth = (8.0f - base.y) / step.y;
+				REQUIRE(roofDepth > receiverClip.z);
+				REQUIRE(roofDepth < 1.0f);
+				const float stored = ShadowPixel(setup.Probe(0, 256, 256, {}, glm::vec4(0), layer), texel.x, texel.y).x;
+				CHECK(stored == doctest::Approx(roofDepth).epsilon(1.0e-4));
+				// The receiver under the roof is fully shadowed.
+				const Image visibility = setup.Probe(3, 1, 1, MakeCascadeConstants(*cascades), glm::vec4(0, 2, receiver.z, 0));
+				CHECK(ShadowPixel(visibility, 0, 0).x == 0);
+			}
+		}
+
+		TEST_CASE("ShadowPass: steady-state records create no GPU objects")
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			ShadowSetup setup(gpu);
+			CameraData camera;
+			camera.ViewportWidth = camera.ViewportHeight = 256;
+			camera.Projection = ComputeReverseZProjection(RenderProjection::Perspective, 60, 10, 0.1f, 100, 256, 256);
+			LightData sun;
+			auto cascades = BuildShadowCascades(camera, sun, 0, 256);
+			REQUIRE(cascades);
+			REQUIRE(cascades->Count == 4);
+			std::array<LightData, 2> spots{};
+			for (uint32_t index = 0; index < spots.size(); ++index)
+			{
+				spots[index].Type = RenderLightType::Spot;
+				spots[index].CastShadows = true;
+				spots[index].Entity = UUID(index + 1);
+				spots[index].Position.x = static_cast<float>(index);
+			}
+			auto atlas = AllocateSpotShadowAtlas(spots, std::array<uint32_t, 2>{ 0, 1 }, camera);
+			REQUIRE(atlas);
+			REQUIRE(atlas->Tiles.size() == 2);
+			MeshDrawItem item;
+			item.Mesh = ShadowQuadHandle;
+			item.World = glm::translate(glm::mat4(1), glm::vec3(0, 0, -2));
+			// The first record creates the view's binding sets; every later one must reuse them, the caller's caster constants
+			// and framebuffers (M9-F07: a buffer, a framebuffer and two binding sets per cascade and tile per frame).
+			setup.Render(std::span(&item, 1), *cascades, &*atlas);
+			const GpuResourceTracker& tracker = gpu.GetDevice().GetResourceTracker();
+			const auto created = [&tracker]()
+			{
+				return std::array<uint64_t, 3>{ tracker.GetCounts(GpuResourceType::GpuBuffer).Created,
+					tracker.GetCounts(GpuResourceType::BindingSet).Created, tracker.GetCounts(GpuResourceType::Framebuffer).Created };
+			};
+			const std::array<uint64_t, 3> before = created();
+			for (uint32_t frame = 0; frame < 3; ++frame)
+			{
+				const ShadowRenderResult result = setup.Render(std::span(&item, 1), *cascades, &*atlas);
+				CHECK(result.DrawCalls >= 2);
+			}
+			if (GpuResourceTracker::IsEnabled())
+				CHECK(created() == before);
+			// The record still writes each slot: the first spot tile has the quad's depth.
+			CHECK(ShadowPixel(setup.Probe(1, 2048, 1024), 512, 512).x > 0);
 		}
 
 		TEST_CASE("DebugViews: cascades show exact colors with the shadow blend and distance fade")

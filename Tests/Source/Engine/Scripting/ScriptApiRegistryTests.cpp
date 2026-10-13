@@ -26,6 +26,8 @@ namespace Engine {
 	namespace Test {
 
 		void RunEntityBindingsCoverage(RunModes mode, std::vector<ScriptApiCoverage>& snapshots);
+		void RunScriptBindingsCoverage(RunModes mode, std::vector<ScriptApiCoverage>& snapshots);
+		void RunComponentsBindingsCoverage(RunModes mode, std::vector<ScriptApiCoverage>& snapshots);
 		void RunReflectedFieldCoverage(RunModes mode, std::vector<ScriptApiCoverage>& snapshots);
 		void RunPhysicsBindingsCoverage(RunModes mode, std::vector<ScriptApiCoverage>& snapshots);
 		void RunAudioBindingsCoverage(RunModes mode, std::vector<ScriptApiCoverage>& snapshots);
@@ -43,6 +45,16 @@ namespace Engine {
 		void RunApplicationBindingsCoverage(RunModes mode, std::vector<ScriptApiCoverage>& snapshots);
 		void RunTestBindingsCoverage(RunModes mode, std::vector<ScriptApiCoverage>& snapshots);
 		void RunBehaviourCallbacksCoverage(RunModes mode, std::vector<ScriptApiCoverage>& snapshots);
+
+	}
+
+	namespace {
+
+		enum class RegistryProbeState : uint8_t
+		{
+			On,
+			Off
+		};
 
 	}
 
@@ -130,6 +142,8 @@ namespace Engine {
 			// no earlier doctest case needs to run, and adding an API immediately adds an unobserved requirement.
 			constexpr std::array Scenarios{
 				&Test::RunEntityBindingsCoverage,
+				&Test::RunScriptBindingsCoverage,
+				&Test::RunComponentsBindingsCoverage,
 				&Test::RunReflectedFieldCoverage,
 				&Test::RunPhysicsBindingsCoverage,
 				&Test::RunAudioBindingsCoverage,
@@ -266,6 +280,116 @@ namespace Engine {
 			CHECK(coverage->Members[0].EnumValues[1].ValueName == "Second");
 			CHECK(coverage->Members[0].EnumValues[0].Count == 0);
 			CHECK_FALSE(api.GetCoverage(RunModes::All));
+		}
+		TEST_CASE("ScriptApiRegistry: method errors use the colon prefix while functions properties and constructors use the dot")
+		{
+			Test::ScriptTestFixture fixture;
+			REQUIRE(fixture.Start());
+			CheckRegistryScript(fixture, R"(
+local e = Scene.CreateEntity("Prefixed")
+local function message(fn) local ok, text = pcall(fn); assert(not ok); return text end
+local method = message(function() e:AddComponent(5) end)
+assert(string.find(method, "Entity:AddComponent: argument #2 expected string, got number", 1, true), method)
+local proxyMethod = message(function() e.Transform:Translate(5) end)
+assert(string.find(proxyMethod, "Transform:Translate: argument #2", 1, true), proxyMethod)
+local property = message(function() e.Name = 5 end)
+assert(string.find(property, "Entity.Name: argument #2 expected string, got number", 1, true), property)
+local constructor = message(function() Quat.New("x", 0, 0, 1) end)
+assert(string.find(constructor, "Quat.New: argument #1 expected number, got string", 1, true), constructor)
+local functionError = message(function() Scene.CreateEntity(1) end)
+assert(string.find(functionError, "Scene.CreateEntity: argument #1 expected string, got number", 1, true), functionError)
+return true
+)");
+		}
+		TEST_CASE("ScriptApiRegistry: overload selectors give one slot an enum per overload with separate counters")
+		{
+			TypeRegistry types;
+			types.Freeze();
+			EnumInfo shapes("ProbeShape", "Probe shapes.");
+			shapes.AddEntry({ "Round", 0, "A round shape." });
+			shapes.AddEntry({ "Square", 1, "A square shape." });
+			EnumInfo axes("ProbeAxis", "Probe axes.");
+			axes.AddEntry({ "Horizontal", 0, "Left to right." });
+			axes.AddEntry({ "Vertical", 1, "Bottom to top." });
+			const auto registerProbe = [&shapes, &axes](ScriptApiRegistry& api, std::vector<ScriptEnumParameter> parameters)
+			{
+				REQUIRE(api.RegisterEnum(shapes));
+				REQUIRE(api.RegisterEnum(axes));
+				api.Module("Probe", "Overload probe.").Function("Pick", RegistryProbe, "((choice: ProbeShape, label: string) -> number) & ((choice: ProbeAxis, amount: number) -> number)", "Picks by overload.", { .Mutates = false, .EnumParameters = std::move(parameters) });
+			};
+			{
+				ScriptApiRegistry api;
+				registerProbe(api, { { .ArgumentIndex = 1, .EnumName = "ProbeShape", .SelectorIndex = 2, .Selector = ScriptArgumentType::String }, { .ArgumentIndex = 1, .EnumName = "ProbeAxis", .SelectorIndex = 2, .Selector = ScriptArgumentType::Number } });
+				REQUIRE(api.Freeze(types));
+				const auto coverage = api.GetCoverage(RunModes::Editor);
+				REQUIRE(coverage);
+				REQUIRE(coverage->Members.size() == 1);
+				CHECK(coverage->Members[0].EnumValues.size() == 4);
+				const auto documentation = api.GenerateDocumentation();
+				REQUIRE(documentation);
+				CHECK(documentation->find("Argument 1: ProbeShape when argument 2 is a string.") != std::string::npos);
+				CHECK(documentation->find("Argument 1: ProbeAxis when argument 2 is a number.") != std::string::npos);
+			}
+			// The same slot twice for one overload, or a selector without its argument, is a registration error.
+			for (const auto& invalid : std::vector<std::vector<ScriptEnumParameter>>{
+					 { { .ArgumentIndex = 1, .EnumName = "ProbeShape", .SelectorIndex = 2, .Selector = ScriptArgumentType::String }, { .ArgumentIndex = 1, .EnumName = "ProbeAxis", .SelectorIndex = 2, .Selector = ScriptArgumentType::String } },
+					 { { .ArgumentIndex = 1, .EnumName = "ProbeShape", .Selector = ScriptArgumentType::String } },
+					 { { .ArgumentIndex = 1, .EnumName = "ProbeShape", .SelectorIndex = 2 } },
+				 })
+			{
+				ScriptApiRegistry api;
+				registerProbe(api, invalid);
+				CHECK_FALSE(api.Freeze(types));
+			}
+			// Dispatch: each overload validates and counts its own enum before the callback.
+			Test::ScriptTestFixture fixture({ .TestMode = true, .ConfigureApi = [&shapes, &axes](ScriptApiRegistry& api) -> Status
+			{
+				ENGINE_TRY(api.RegisterEnum(shapes));
+				ENGINE_TRY(api.RegisterEnum(axes));
+				api.Module("Probe", "Overload probe.").Function("Pick", RegistryProbe, "((choice: ProbeShape, label: string) -> number) & ((choice: ProbeAxis, amount: number) -> number)", "Picks by overload.", { .Mutates = false, .EnumParameters = { { .ArgumentIndex = 1, .EnumName = "ProbeShape", .SelectorIndex = 2, .Selector = ScriptArgumentType::String }, { .ArgumentIndex = 1, .EnumName = "ProbeAxis", .SelectorIndex = 2, .Selector = ScriptArgumentType::Number } } });
+				return {};
+			} });
+			REQUIRE(fixture.Start());
+			CheckRegistryScript(fixture, R"(
+assert(Probe.Pick("round", "a") == 7 and Probe.Pick("Vertical", 1) == 7)
+assert(not pcall(Probe.Pick, "Vertical", "a") and not pcall(Probe.Pick, "Round", 1))
+return true
+)");
+			const auto coverage = fixture.GetApi().GetCoverage(RunModes::Editor);
+			REQUIRE(coverage);
+			const auto pick = std::ranges::find_if(coverage->Members, [](const ScriptApiCounter& counter)
+			{
+				return counter.Owner == "Probe" && counter.Member == "Pick";
+			});
+			REQUIRE(pick != coverage->Members.end());
+			for (const auto& value : pick->EnumValues)
+			{
+				CAPTURE(value.EnumName);
+				CAPTURE(value.ValueName);
+				const bool used = (value.EnumName == "ProbeShape" && value.ValueName == "Round") || (value.EnumName == "ProbeAxis" && value.ValueName == "Vertical");
+				CHECK(value.Count == (used ? 1u : 0u));
+			}
+		}
+		TEST_CASE("ScriptApiRegistry: a binding enum identical to a reflected enum is one enum and a different one conflicts")
+		{
+			for (const bool identical : { true, false })
+			{
+				CAPTURE(identical);
+				TypeRegistry types;
+				types.Enum<RegistryProbeState>("ProbeState", "Reflected probe states.").Entry(RegistryProbeState::On, "On", "On.").Entry(RegistryProbeState::Off, identical ? "Off" : "Idle", "Off.");
+				types.Freeze();
+				ScriptApiRegistry api;
+				EnumInfo states("ProbeState", "Binding probe states.");
+				states.AddEntry({ "On", 0, "On." });
+				states.AddEntry({ "Off", 1, "Off." });
+				REQUIRE(api.RegisterEnum(states));
+				CHECK(api.Freeze(types).has_value() == identical);
+				if (identical)
+				{
+					REQUIRE(api.FindEnum("ProbeState") != nullptr);
+					CHECK(api.GetEnums().size() == 1);
+				}
+			}
 		}
 		TEST_CASE("ScriptApiRegistry: freeze rejects incomplete metadata and shortcut collisions")
 		{

@@ -65,6 +65,18 @@ class SchemaTests(unittest.TestCase):
                 self.assertIn(name, server.LOCAL_TOOL_NAMES)
                 self.assertEqual(schema["type"], "object")
 
+    def test_editor_launch_offers_every_project_template_and_recovery(self) -> None:
+        # editor_launch {create} is the bridge's way to create a project, so it accepts exactly project.create's templates.
+        tools = server.load_catalog()
+        project_create = next(tool for tool in tools if tool.name == "project_create")
+        templates = project_create.input_schema["properties"]["template"]["enum"]
+        self.assertIn("Basic3D", templates)
+        launch = server.local_tool_schemas()["editor_launch"]["properties"]
+        self.assertEqual(launch["template"]["enum"], templates)
+        self.assertEqual(server.local_tool_schemas(server.project_templates(tools)), server.local_tool_schemas())
+        self.assertEqual(launch["recover"]["type"], "boolean")
+        self.assertEqual(server.project_templates([]), ["Empty"])
+
 
 if __name__ == "__main__":
     unittest.main()

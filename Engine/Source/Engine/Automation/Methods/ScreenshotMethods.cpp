@@ -14,8 +14,8 @@
 #include "Engine/Renderer/ViewportCapture.h"
 #include "Engine/Scene/Components/CameraComponent.h"
 #include "Engine/Scene/Entity.h"
-#include "Engine/Scene/RenderExtraction.h"
 #include "Engine/Scene/RenderAnnotations.h"
+#include "Engine/Scene/RenderExtraction.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/TransformSystem.h"
 #include "Engine/Session/PlaySession.h"
@@ -192,7 +192,7 @@ namespace Engine {
 			if (settings == nullptr)
 				return MakeError(ErrorCode::Unsupported, "viewport.screenshot needs the host's project rendering settings");
 			request.Quality = { .ShadowMapSize = settings->Rendering.ShadowMapSize, .SsaoHalfResolution = settings->Rendering.SsaoHalfResolution };
-			request.SelectedEntities = context.GetSelectedEntities();
+			request.SelectedEntities = context.GetSelectedEntities(*scene);
 			ENGINE_TRY_ASSIGN(request.Annotations, ResolveViewportAnnotations(context, *scene, annotations));
 			request.Flags = annotations.Colliders ? RenderViewFlags::Colliders : RenderViewFlags::None;
 			EntitySummary cameraSummary;
@@ -214,9 +214,7 @@ namespace Engine {
 			}
 			snapshot.DebugView = debugView;
 			snapshot.SceneRevision = scene->GetRevision();
-			// Data views admit only the annotations this call requests, never ordinary session debug primitives.
-			if (debugView == RenderDebugView::AO || debugView == RenderDebugView::ShadowCascades || debugView == RenderDebugView::Overdraw)
-				snapshot.DebugDraw.Clear();
+			// The annotations go to the snapshot's AnnotationDraw: data views show them, never the session's debug primitives.
 			if (annotations.Colliders || request.Annotations.Labels != RenderAnnotationLabels::None || request.Annotations.Bounds || request.Annotations.Axes)
 			{
 				AssetManager* assets = context.GetAssets();

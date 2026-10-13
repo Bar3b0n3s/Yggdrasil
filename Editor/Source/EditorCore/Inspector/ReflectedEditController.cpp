@@ -386,37 +386,129 @@ namespace Engine {
 			return {};
 		}
 
+		// A Script component accepts only a Behaviour asset.
+		static Status CheckInspectorScriptAssignment(EditorContext& editor, const InspectorEditTarget& target, std::string_view fieldName,
+			const InspectorValueSnapshot& snapshot)
+		{
+			if (target.Component != "Script" || fieldName != "Script")
+				return {};
+			const FieldInfo* field = snapshot.Type->FindField(fieldName);
+			ENGINE_TRY_ASSIGN(Value value, ValueFromJson(JsonReader(StoredInspectorField(snapshot, field->GetName())), field->GetType()));
+			if (!value.AsUUID().IsValid())
+				return {};
+			EditorScriptService* service = editor.GetScriptService();
+			if (service == nullptr)
+				return MakeError(ErrorCode::InvalidState, "script schemas are unavailable");
+			ENGINE_TRY_ASSIGN(auto script, service->GetFields(value.AsUUID()));
+			if (script->Kind != ScriptKind::Behaviour)
+				return MakeError(ErrorCode::Validation, "SCRIPT_NOT_A_BEHAVIOUR: Script requires a Behaviour asset");
+			return {};
+		}
+
+		// Which part of the live scene the isolated setter check copies.
+		enum class InspectorCopyScope : uint8_t
+		{
+			Targets, // the edited entities and their ancestors: every Preview (a drag frame or keystroke)
+			Scene    // everything: once per Commit, right before the live write
+		};
+
+		// The edited entities with their ancestor chains, parents first, through the serializer's entity path. Owner-dependent
+		// setters (world-space transforms, owner-guarded fields) see the same parent chain as in the live scene, at a cost
+		// independent of the scene's size.
+		static Status CopyInspectorTargets(const Scene& live, std::span<const UUID> targets, Scene& copy)
+		{
+			std::vector<ConstEntity> order;
+			for (const UUID id : targets)
+			{
+				std::vector<ConstEntity> chain;
+				for (ConstEntity entity = live.FindEntityByID(id); entity.IsValid(); entity = entity.GetParent())
+					chain.push_back(entity);
+				for (auto entity = chain.rbegin(); entity != chain.rend(); ++entity)
+				{
+					if (std::none_of(order.begin(), order.end(), [entity](ConstEntity added)
+					{
+						return added.GetUUID() == entity->GetUUID();
+					}))
+						order.push_back(*entity);
+				}
+			}
+			LoadReport report;
+			for (const ConstEntity entity : order)
+			{
+				ENGINE_TRY_ASSIGN(const Json json, SceneSerializer::EntityToJson(entity));
+				ENGINE_TRY(SceneSerializer::EntityFromJson(copy, JsonReader(json), std::nullopt, {}, report));
+			}
+			return {};
+		}
+
 		// Run the real setters against an isolated scene first, including virtual fields whose validation depends on
 		// their owning entity. A failing later target must never trigger a live patch, event or revision increment.
-		static Status ValidateInspectorComponentBatch(EditorContext& editor, const InspectorEditTarget& target,
-			std::string_view fieldName, std::span<const InspectorValueSnapshot> snapshots, std::span<const InspectorValueSnapshot> before)
+		static Status ValidateInspectorComponentBatch(EditorContext& editor, const InspectorEditTarget& target, std::string_view fieldName,
+			std::span<const InspectorValueSnapshot> snapshots, std::span<const InspectorValueSnapshot> before, InspectorCopyScope scope)
 		{
 			ENGINE_TRY_ASSIGN(Scene * live, InspectorScene(editor, target.Target));
-			ENGINE_TRY_ASSIGN(Json serialized, SceneSerializer::ToJson(*live));
 			UUIDGenerator ids = UUIDGenerator::CreateDeterministic(0);
 			auto copy = Scene::Create({ .Registry = &editor.GetTypeRegistry(), .IdGenerator = &ids });
-			LoadReport report;
-			ENGINE_TRY(SceneSerializer::FromJson(*copy, serialized, {}, report));
+			if (scope == InspectorCopyScope::Scene)
+			{
+				ENGINE_TRY_ASSIGN(Json serialized, SceneSerializer::ToJson(*live));
+				LoadReport report;
+				ENGINE_TRY(SceneSerializer::FromJson(*copy, serialized, {}, report));
+			}
+			else
+				ENGINE_TRY(CopyInspectorTargets(*live, target.Entities, *copy));
 			for (size_t i = 0; i < target.Entities.size(); ++i)
 			{
 				const auto& snapshot = snapshots[i];
 				if (!InspectorSnapshotChanged(before[i], snapshot))
 					continue;
+				ENGINE_TRY(CheckInspectorScriptAssignment(editor, target, fieldName, snapshot));
 				const FieldInfo* field = snapshot.Type->FindField(fieldName);
-				const Json stored = StoredInspectorField(snapshot, field->GetName());
-				ENGINE_TRY_ASSIGN(Value value, ValueFromJson(JsonReader(stored), field->GetType()));
-				if (target.Component == "Script" && fieldName == "Script" && value.AsUUID().IsValid())
-				{
-					EditorScriptService* service = editor.GetScriptService();
-					if (service == nullptr)
-						return MakeError(ErrorCode::InvalidState, "script schemas are unavailable");
-					ENGINE_TRY_ASSIGN(auto script, service->GetFields(value.AsUUID()));
-					if (script->Kind != ScriptKind::Behaviour)
-						return MakeError(ErrorCode::Validation, "SCRIPT_NOT_A_BEHAVIOUR: Script requires a Behaviour asset");
-				}
 				ENGINE_TRY(SetInspectorComponentField(copy->FindEntityByID(target.Entities[i]), target.Component, *field, snapshot));
 			}
 			return {};
+		}
+
+		// A multi-edit of a vector changes only the components the gesture touched: each target keeps its own others.
+		// Script fields carry the same vectors as Variant JSON arrays.
+		static Value MergeInspectorComponents(const Value& current, const Value& replacement, uint32_t components)
+		{
+			if (components == 0 || current.IsNull() || replacement.IsNull() || current.GetKind() != replacement.GetKind())
+				return replacement;
+			const auto selected = [components](size_t index)
+			{
+				return index < 32 && (components & (1u << static_cast<uint32_t>(index))) != 0;
+			};
+			const auto merge = [&selected](auto mine, const auto& theirs)
+			{
+				for (glm::length_t index = 0; index < mine.length(); ++index)
+				{
+					if (selected(static_cast<size_t>(index)))
+						mine[index] = theirs[index];
+				}
+				return mine;
+			};
+			switch (current.GetKind())
+			{
+				case FieldType::Vec2:  return Value::FromVec2(merge(current.AsVec2(), replacement.AsVec2()));
+				case FieldType::Vec3:  return Value::FromVec3(merge(current.AsVec3(), replacement.AsVec3()));
+				case FieldType::Vec4:  return Value::FromVec4(merge(current.AsVec4(), replacement.AsVec4()));
+				case FieldType::Bool3: return Value::FromBool3(merge(current.AsBool3(), replacement.AsBool3()));
+				case FieldType::Variant:
+				{
+					Json mine = current.AsVariant().Get();
+					const Json& theirs = replacement.AsVariant().Get();
+					if (!mine.is_array() || !theirs.is_array() || mine.size() != theirs.size())
+						return replacement;
+					for (size_t index = 0; index < mine.size(); ++index)
+					{
+						if (selected(index))
+							mine[index] = theirs[index];
+					}
+					return Value::FromVariant(VariantValue(std::move(mine)));
+				}
+				default: return replacement;
+			}
 		}
 
 	}
@@ -429,7 +521,9 @@ namespace Engine {
 		std::vector<Utils::InspectorValueSnapshot> Before{};
 		std::vector<Utils::InspectorValueSnapshot> After{};
 		Value Preview{};
-		uint64_t Revision = 0;
+		uint64_t Revision = 0;      // EditorContext::GetRevision, for a project-settings target
+		uint64_t SceneEpoch = 0;    // EditorContext::GetSceneDocumentEpoch, for every other target
+		uint64_t SceneRevision = 0; // and the open scene's own revision
 		uint64_t PlaySerial = 0;
 		uint64_t PlayRevision = 0;
 		uint64_t AssetVersion = 0;
@@ -480,6 +574,8 @@ namespace Engine {
 		m_State->After = m_State->Before;
 		m_State->Preview = std::move(initial);
 		m_State->Revision = editor.GetRevision();
+		m_State->SceneEpoch = editor.GetSceneDocumentEpoch();
+		m_State->SceneRevision = editor.HasScene() ? editor.GetScene().GetRevision() : 0;
 		const PlaySession* session = editor.GetPlay().GetSession();
 		m_State->PlaySerial = session == nullptr ? 0 : session->GetSerial();
 		m_State->PlayRevision = session == nullptr ? 0 : session->GetScene().GetRevision();
@@ -488,19 +584,32 @@ namespace Engine {
 		return {};
 	}
 
-	Status ReflectedEditController::Preview(const Value& value)
+	Status ReflectedEditController::Preview(const Value& value, uint32_t components)
 	{
 		if (!IsEditing())
 			return MakeError(ErrorCode::InvalidState, "no inspector edit is active");
 		auto proposed = m_State->Before;
-		for (auto& snapshot : proposed)
+		for (size_t i = 0; i < proposed.size(); ++i)
 		{
+			auto& snapshot = proposed[i];
 			Value selected;
 			Json schema;
-			ENGINE_TRY(Utils::ChangeInspectorSnapshot(snapshot, m_State->Path, &value, selected, schema));
+			Value replacement = value;
+			if (components != 0)
+			{
+				Value current;
+				ENGINE_TRY(Utils::ChangeInspectorSnapshot(snapshot, m_State->Path, nullptr, current, schema));
+				replacement = Utils::MergeInspectorComponents(current, value, components);
+			}
+			ENGINE_TRY(Utils::ChangeInspectorSnapshot(snapshot, m_State->Path, &replacement, selected, schema));
 		}
+		// Every drag frame or keystroke previews: the setters run against a copy of the edited entities only. Commit
+		// checks against a copy of the whole scene once, before the live write.
 		if (m_State->Target.Kind == InspectorTargetKind::Component)
-			ENGINE_TRY(Utils::ValidateInspectorComponentBatch(m_State->Editor, m_State->Target, m_State->Path.front(), proposed, m_State->Before));
+		{
+			ENGINE_TRY(Utils::ValidateInspectorComponentBatch(m_State->Editor, m_State->Target, m_State->Path.front(), proposed, m_State->Before,
+				Utils::InspectorCopyScope::Targets));
+		}
 		m_State->After = std::move(proposed);
 		m_State->Preview = value;
 		return {};
@@ -520,7 +629,13 @@ namespace Engine {
 		EditorContext& editor = m_State->Editor;
 		const auto& target = m_State->Target;
 		const PlaySession* session = editor.GetPlay().GetSession();
-		if (!editor.HasProject() || editor.GetRevision() != m_State->Revision
+		// A project-settings installation advances GetRevision but leaves the scene document and its entities alone, so it
+		// conflicts only with a project-settings edit. The commit below re-validates the edited values against the current
+		// scene (a serialized copy and the script schemas); project settings never constrain component values on these paths.
+		const bool sceneChanged = editor.GetSceneDocumentEpoch() != m_State->SceneEpoch
+			|| (editor.HasScene() ? editor.GetScene().GetRevision() : 0) != m_State->SceneRevision;
+		const bool targetChanged = target.Kind == InspectorTargetKind::ProjectSettings ? editor.GetRevision() != m_State->Revision : sceneChanged;
+		if (!editor.HasProject() || targetChanged
 			|| (session == nullptr ? 0 : session->GetSerial()) != m_State->PlaySerial
 			|| (target.Target == SceneTarget::Play && session != nullptr && session->GetScene().GetRevision() != m_State->PlayRevision)
 			|| editor.GetAssets().GetVersion(target.Asset) != m_State->AssetVersion)
@@ -540,7 +655,8 @@ namespace Engine {
 		uint64_t index = 0;
 		if (target.Kind == InspectorTargetKind::Component)
 		{
-			ENGINE_TRY(Utils::ValidateInspectorComponentBatch(editor, target, m_State->Path.front(), m_State->After, m_State->Before));
+			ENGINE_TRY(Utils::ValidateInspectorComponentBatch(editor, target, m_State->Path.front(), m_State->After, m_State->Before,
+				Utils::InspectorCopyScope::Scene));
 			ENGINE_TRY_ASSIGN(Scene * scene, Utils::InspectorScene(editor, target.Target));
 			SceneEdit edit(editor, label);
 			for (size_t i = 0; i < target.Entities.size(); ++i)

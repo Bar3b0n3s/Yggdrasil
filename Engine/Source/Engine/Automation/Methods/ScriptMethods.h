@@ -59,6 +59,9 @@ namespace Engine {
 	{
 		std::vector<ScriptErrorSummary> Errors{};
 		std::string NextCursor{}; // Always a decimal cursor, including when no entries remain; reuse as since.
+		// The stream evicted an error whose latest occurrence is newer than since (it keeps MaxScriptErrorEntries distinct
+		// errors, ScriptLimits.h), so no read can return it any more; the retained errors still follow in cursor order.
+		bool Evicted = false;
 	};
 
 	struct ScriptEvalParams

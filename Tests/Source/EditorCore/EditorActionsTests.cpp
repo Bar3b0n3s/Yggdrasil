@@ -2,10 +2,16 @@
 #include "EditorCore/EditorActions.h"
 
 #include "EditorCore/Automation/ProvenanceRecorder.h"
+#include "EditorCore/Play/EditorPlayController.h"
 #include "Engine/Core/VirtualFileSystem.h"
+#include "Engine/Scene/Entity.h"
 #include "Support/AutomationTestClient.h"
+#include "Support/ExpectLog.h"
 
 #include <doctest/doctest.h>
+
+#include <chrono>
+#include <string_view>
 
 namespace Engine {
 
@@ -108,6 +114,96 @@ namespace Engine {
 			REQUIRE(log);
 			CHECK((*log)["entries"].size() == 1);
 			CHECK_FALSE(actions.Cancel(*ticket));
+		}
+
+		TEST_CASE("EditorActions: discarding a ticket releases its entry and cancels its work")
+		{
+			Test::AutomationFixture fixture("PanelDiscard");
+			EditorContext& editor = fixture.GetEditor();
+			EditorActions actions(editor, fixture.GetClient().GetServer());
+			auto queued = actions.Submit("entity.create", Json{ { "name", "Discarded" } });
+			REQUIRE(queued);
+			REQUIRE(actions.Discard(*queued));
+			const auto forgotten = actions.TakeResult(*queued);
+			REQUIRE_FALSE(forgotten);
+			CHECK(forgotten.error().GetCode() == ErrorCode::NotFound);
+			actions.Pump();
+			CHECK(editor.GetScene().GetRootEntities().empty());
+			auto pending = actions.Submit("debug.pend", Json{ { "frames", 0 } });
+			REQUIRE(pending);
+			actions.Pump();
+			actions.Pump();
+			const Test::ExpectLog cancelled(LogLevel::Info, "Cancelled debug.pend of client 'ui'");
+			REQUIRE(actions.Discard(*pending));
+			CHECK(cancelled.GetMatchCount() == 1);
+			CHECK(actions.TakeResult(*pending).error().GetCode() == ErrorCode::NotFound);
+			const auto unknown = actions.Discard(*pending);
+			REQUIRE_FALSE(unknown);
+			CHECK(unknown.error().GetCode() == ErrorCode::NotFound);
+		}
+
+		TEST_CASE("EditorActions: a test run rejects UI edits, undo and redo until it finishes")
+		{
+			Test::EditorTestFixture fixture("PanelTestRunLease");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			auto now = std::chrono::steady_clock::time_point{};
+			auto specification = Test::MakeTestServerSpecification();
+			specification.WallClock = [&now]()
+			{
+				now += std::chrono::milliseconds(100);
+				return now;
+			};
+			Test::AutomationTestClient client(fixture.GetEditor(), std::move(specification));
+			REQUIRE(client.Call("script.write", Json{ { "path", "Assets/Tests/Lease.test.luau" }, { "source", "return Test.Suite('Lease', function() Test.Case('long', function() Test.WaitTicks(1000) end) end)" } }));
+			REQUIRE(client.Call("project.setSettings", Json{ { "patch", Json{ { "Testing", Json{ { "Suites", Json::array({ Json{ { "Script", "Assets/Tests/Lease.test.luau" }, { "Scene", "" }, { "Modes", Json::array({ "Editor" }) } } }) } } } } } }));
+			EditorContext& editor = fixture.GetEditor();
+			EditorActions actions(editor, client.GetServer());
+			REQUIRE(CompletePanelAction(actions, "entity.create", Json{ { "name", "Created" } }));
+			REQUIRE(CompletePanelAction(actions, "entity.create", Json{ { "name", "Undone" } }));
+			REQUIRE(CompletePanelAction(actions, "edit.undo", Json::object()));
+			const UUID created = editor.GetScene().FindEntityByPath("/Created").GetUUID();
+			REQUIRE(editor.SetSelection({ created }, SceneTarget::Edit));
+			const auto undo = editor.GetHistory().GetUndoCount();
+			const auto redo = editor.GetHistory().GetRedoCount();
+			const uint64_t revision = editor.GetRevision();
+			// Queued before the run starts: rejected when the run already owns the editor at the safe point.
+			auto queuedUndo = actions.Submit("edit.undo", Json::object());
+			REQUIRE(queuedUndo);
+			static_cast<void>(client.Submit("test.run", Json::object()));
+			client.GetServer().Pump();
+			REQUIRE(editor.GetPlay().IsTestRunActive());
+			actions.Pump();
+			auto queuedResult = actions.TakeResult(*queuedUndo);
+			REQUIRE(queuedResult);
+			REQUIRE(queuedResult->has_value());
+			REQUIRE_FALSE(**queuedResult);
+			CHECK((**queuedResult).error().GetCode() == ErrorCode::InvalidState);
+			for (const std::string_view method : { "edit.undo", "edit.redo", "entity.create", "edit.select" })
+			{
+				CAPTURE(method);
+				const Json params = method == "entity.create" ? Json{ { "name", "Rejected" } } : method == "edit.select" ? Json{ { "entities", Json::array() } }
+																														 : Json::object();
+				const auto rejected = actions.Submit(method, params);
+				REQUIRE_FALSE(rejected);
+				CHECK(rejected.error().GetCode() == ErrorCode::InvalidState);
+				CHECK(rejected.error().GetMessageText().contains("a test run owns the editor"));
+			}
+			// Observation stays available, and the history itself refuses to move under the lease.
+			CHECK(CompletePanelAction(actions, "scene.tree", Json::object()));
+			const auto direct = editor.GetHistory().Undo(editor);
+			REQUIRE_FALSE(direct);
+			CHECK(direct.error().GetCode() == ErrorCode::InvalidState);
+			CHECK(editor.GetHistory().GetUndoCount() == undo);
+			CHECK(editor.GetHistory().GetRedoCount() == redo);
+			CHECK(editor.GetRevision() == revision);
+			CHECK(editor.GetScene().FindEntityByID(created).IsValid());
+			client.GetServer().DisconnectInProcess(client.GetClient());
+			REQUIRE_FALSE(editor.GetPlay().IsTestRunActive());
+			REQUIRE(editor.GetSelection().size() == 1);
+			CHECK(editor.GetSelection().front() == created);
+			REQUIRE(CompletePanelAction(actions, "edit.redo", Json::object()));
+			CHECK(editor.GetScene().FindEntityByPath("/Undone").IsValid());
 		}
 
 		TEST_CASE("EditorActions: pending contexts survive independent requests and poll once per pump")

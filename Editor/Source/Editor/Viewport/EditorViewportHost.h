@@ -26,6 +26,7 @@ namespace Engine {
 		uint64_t FrameIndex = 0;    // actual RenderSnapshot/RenderContext source frame, never EditorUiState UI serial
 		uint64_t SceneRevision = 0; // revision of the scene from which this image and its PickTable were extracted
 		CameraData Camera{};        // camera copied from the same render snapshot as the displayed image
+		bool Picking = false;       // rendered with RenderViewFlags::Picking: only such an image accepts RequestPick
 	};
 
 	struct EditorViewportClick
@@ -65,9 +66,14 @@ namespace Engine {
 		// M9 RenderQualitySettings remains owned by project rendering settings, not a new UI shadow setting.
 		[[nodiscard]] virtual Status ConfigureSceneSnapshot(RenderSnapshot& snapshot, const EditorViewportOptions& options,
 			std::span<const UUID> selection) = 0;
-		// Input is accepted only in focused Game view and while no ImGui/gizmo consumes it; losing focus releases held
-		// game inputs. Lockstep shows owner banner and rejects human time-control actions owned by another client.
+		// Whether the Game view owns game input (captured). The Game panel captures it with a click on its image and keeps
+		// it while its window is focused, the image is held or the cursor is Locked; the panel releases it on Escape, focus
+		// loss or hiding, and the host on native window blur, Play stop or invalidation. Losing it releases the held game
+		// inputs of an ordinary session (never of a lockstep session, whose input only its owner injects) and restores the
+		// Normal cursor. Lockstep shows the owner banner and rejects human time-control actions owned by another client.
 		virtual void SetGameInputFocused(bool focused) = 0;
+		// The state SetGameInputFocused last established, including a release by the host; false for hosts without game input.
+		[[nodiscard]] virtual bool IsGameInputFocused() const { return false; }
 	};
 
 }

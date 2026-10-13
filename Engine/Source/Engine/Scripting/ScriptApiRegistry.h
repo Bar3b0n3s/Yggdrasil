@@ -60,15 +60,28 @@ namespace Engine {
 		ProxyField
 	};
 
+	// The Lua type of an overload-selecting argument (ScriptEnumParameter::Selector).
+	enum class ScriptArgumentType : uint8_t
+	{
+		Any,
+		String,
+		Number
+	};
+
 	// ArgumentIndex is the positive VM stack slot: functions start at 1; methods include self in slot 1. The named enum
 	// is registered once (or imported from TypeRegistry). Optional nil/absent arguments use DefaultValue when nonempty;
 	// their canonical default is counted. Otherwise omitted optional arguments do not count any value. No parallel table.
+	// An overloaded member selects a slot by another argument's Lua type: the slot applies only when argument
+	// SelectorIndex has type Selector (Any applies always), so one stack slot can carry a different enum per overload,
+	// each validated and counted per value. Within one member, (ArgumentIndex, SelectorIndex, Selector) is unique.
 	struct ScriptEnumParameter
 	{
 		int ArgumentIndex = 0;
 		std::string EnumName{};
 		bool Optional = false;
 		std::string DefaultValue{};
+		int SelectorIndex = 0;
+		ScriptArgumentType Selector = ScriptArgumentType::Any;
 	};
 
 	struct ScriptMemberOptions
@@ -189,7 +202,8 @@ namespace Engine {
 		[[nodiscard]] Status RegisterAlias(std::string_view name, std::string_view definition, std::string_view description);
 
 		// Imports scriptable, nonhidden fields, eligible Entity shortcuts, GetComponent literal overloads and reflected
-		// enums. Validates signatures, descriptions, callbacks, enum slots/defaults, modes and mutation policies before
+		// enums; a reflected enum identical in names and values to a binding-registered one is the same enum, any other
+		// name collision is Validation. Validates signatures, descriptions, callbacks, enum slots/defaults, modes and mutation policies before
 		// publishing anything. Failures return Validation (or InvalidState for an unfrozen types registry). Duplicate
 		// members and Entity/shortcut collisions are startup programmer errors (assert plus Validation fallback).
 		// Read-only reflected fields never require writes. Field RunModes are inherited. Repeating a successful Freeze

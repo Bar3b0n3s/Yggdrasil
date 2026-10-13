@@ -88,6 +88,30 @@ namespace Engine {
 			CHECK(editor.GetHistory().GetUndoCount() == 0);
 		}
 
+		TEST_CASE("EditorViewportState: cameras inside the renderer's degenerate up band are refused")
+		{
+			EditorViewportState state;
+			const ExplicitRenderCamera before = state.GetCamera();
+			// |forward x +Y| = 5e-7: the renderer would switch its up vector to -Z while EditorCamera keeps +Y.
+			for (const glm::vec3 position : { glm::vec3(0.000005f, 10.0f, 0.0f), glm::vec3(0.0f, -10.0f, 0.000004f), glm::vec3(0.0f, 10.0f, 0.0f) })
+			{
+				CAPTURE(position.x);
+				CAPTURE(position.z);
+				ExplicitRenderCamera camera;
+				camera.Position = position;
+				camera.Target = glm::vec3(0.0f);
+				const Status refused = state.SetCamera(camera);
+				REQUIRE_FALSE(refused.has_value());
+				CHECK(refused.error().GetCode() == ErrorCode::InvalidArgument);
+				CHECK(state.GetCamera().Position == before.Position);
+			}
+			// Steeper than the band is still a camera the editor and renderer agree on.
+			ExplicitRenderCamera steep;
+			steep.Position = { 0.0002f, 10.0f, 0.0f };
+			steep.Target = glm::vec3(0.0f);
+			CHECK(state.SetCamera(steep).has_value());
+		}
+
 		TEST_CASE("EditorViewportState: options persist without a renderer")
 		{
 			EditorViewportState state;

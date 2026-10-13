@@ -4,12 +4,14 @@
 #include "EditorCore/Automation/EditorMethodContext.h"
 #include "EditorCore/Automation/Private/MethodSupport.h"
 #include "EditorCore/EditorContext.h"
+#include "EditorCore/Play/EditorPlayController.h"
 #include "Engine/Automation/Protocol/JsonReference.h"
 #include "Engine/Automation/Protocol/MethodRegistry.h"
 #include "Engine/Reflection/FuzzySuggest.h"
 #include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/Scene.h"
+#include "Engine/Session/PlaySession.h"
 
 #include <nlohmann/json.hpp>
 
@@ -113,8 +115,7 @@ namespace Engine {
 		{
 			std::vector<EntitySummary> selection;
 			const EditorContext& editor = context.GetEditor();
-			if (!editor.HasScene())
-				return selection;
+			// The recorded target's own scene: a Play selection resolves without an open edit scene (play.start {scene}).
 			const auto scene = context.ResolveTargetScene(editor.GetSelectionTarget(), true, false);
 			if (!scene)
 				return selection;
@@ -256,7 +257,9 @@ namespace Engine {
 		{
 			EditorContext& editor = context.GetEditor();
 			std::vector<UUID> selection;
-			if (editor.HasScene() || !params.Entities.empty())
+			// The shown scene: the play scene while a session runs (even without an open edit scene), else the edit scene.
+			const PlaySession* session = editor.GetPlay().GetSession();
+			if (editor.HasScene() || session != nullptr || !params.Entities.empty())
 			{
 				ENGINE_TRY_ASSIGN(Scene * scene, context.ResolveTargetScene(SceneTarget::Edit, false, false));
 				for (size_t index = 0; index < params.Entities.size(); ++index)
@@ -264,7 +267,7 @@ namespace Engine {
 					ENGINE_TRY_ASSIGN(const Entity entity, context.ResolveEntity(*scene, params.Entities[index], std::format("/entities/{}", index)));
 					selection.push_back(entity.GetUUID());
 				}
-				const SceneTarget target = scene == &editor.GetScene() ? SceneTarget::Edit : SceneTarget::Play;
+				const SceneTarget target = session != nullptr && scene == &session->GetScene() ? SceneTarget::Play : SceneTarget::Edit;
 				ENGINE_TRY(editor.SetSelection(std::move(selection), target));
 			}
 

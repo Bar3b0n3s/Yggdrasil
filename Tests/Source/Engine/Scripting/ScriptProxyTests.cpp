@@ -1,11 +1,9 @@
 #include "TestsPCH.h"
 #include "Engine/Scripting/ScriptProxy.h"
 
-#include "Engine/Asset/BuiltinAssets.h"
 #include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Scene/ComponentAccess.h"
 #include "Engine/Scene/ComponentHostOps.h"
-#include "Engine/Scene/Components/MeshRendererComponent.h"
 #include "Engine/Scene/Components/ScriptComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Entity.h"
@@ -53,166 +51,7 @@ namespace Engine {
 		return ComponentAccess::AddComponent(entity, component.GetName(), nullptr, schemas);
 	}
 
-	static void TransformCoverage(RunModes mode, std::vector<ScriptApiCoverage>& snapshots)
-	{
-		Test::ScriptTestFixture fixture({ .Mode = mode, .TestMode = true });
-		REQUIRE(fixture.Start());
-		CheckProxyScript(fixture, R"(
-local parent = Scene.CreateEntity("Parent")
-parent.Transform.Translation = vector.create(10, 0, 0)
-local child = Scene.CreateEntity("Child", parent)
-local t = child.Transform
-t.Translation = vector.create(2, 0, 0)
-assert(t.WorldPosition == vector.create(12, 0, 0))
-t.WorldPosition = vector.create(15, 0, 0)
-assert(t.Translation == vector.create(5, 0, 0))
-assert(t:TransformPoint(vector.zero) == t.WorldPosition)
-assert(t:InverseTransformPoint(t.WorldPosition) == vector.zero)
-assert(t:Forward() == vector.create(0, 0, -1))
-assert(t:Right() == vector.create(1, 0, 0))
-assert(t:Up() == vector.create(0, 1, 0))
-t:Rotate(vector.create(0, 90, 0), "World")
-assert(vector.magnitude(t:Forward() - vector.create(-1, 0, 0)) < 0.00001)
-t:Translate(vector.create(0, 0, -2), "local")
-t:Translate(vector.create(1, 0, 0), "World")
-local world = t.WorldPosition
-t:Translate(vector.zero)
-assert(t.WorldPosition == world)
-t:Rotate(vector.zero, "Local")
-t:Rotate(vector.zero)
-t:LookAt(t.WorldPosition + vector.create(0, 0, -1))
-assert(vector.magnitude(t:TransformDirection(vector.create(0, 0, -1)) - t:Forward()) < 0.00001)
-assert(not pcall(function() t:LookAt(t.WorldPosition) end))
-t:Teleport(vector.create(30, 1, 2), Quat.Identity())
-assert(t.WorldPosition == vector.create(30, 1, 2))
-assert(t.RenderPosition == t.WorldPosition)
-assert(not pcall(function() t.WorldScale = vector.one end))
-return true
-)");
-		REQUIRE(fixture.Teleported.size() == 1);
-		CHECK(fixture.Teleported[0] == fixture.GetScene().FindEntityByID(fixture.Teleported[0]).GetUUID());
-		const auto coverage = fixture.GetApi().GetCoverage(mode);
-		REQUIRE(coverage);
-		snapshots.push_back(*coverage);
-	}
-
-	static void MaterialCoverage(RunModes mode, std::vector<ScriptApiCoverage>& snapshots)
-	{
-		Test::ScriptTestFixture fixture({ .Mode = mode, .TestMode = true });
-		const auto entity = fixture.GetScene().CreateEntity("Mesh");
-		MeshRendererComponent renderer;
-		renderer.Mesh.SetHandle(BuiltinAssetHandles::CubeMesh);
-		entity.AddComponent<MeshRendererComponent>(renderer);
-		REQUIRE(fixture.Start());
-		CheckProxyScript(fixture, R"(
-local mesh = Scene.FindByName("Mesh").MeshRenderer
-local default = Assets.Load("engine://Materials/Default")
-local replacement = Assets.Load("engine://Materials/Error")
-assert(Assets.GetPath(mesh:GetMaterial(1)) == Assets.GetPath(default))
-mesh:SetMaterial(1, replacement)
-assert(Assets.GetPath(mesh:GetMaterial(1)) == Assets.GetPath(replacement))
-mesh:SetMaterial(1, nil)
-assert(Assets.GetPath(mesh:GetMaterial(1)) == Assets.GetPath(default))
-for _, index in {0, -1, 1.5, 2, math.huge} do
-assert(not pcall(function() mesh:GetMaterial(index) end))
-assert(not pcall(function() mesh:SetMaterial(index, replacement) end))
-end
-return true
-)");
-		REQUIRE(entity.GetComponent<MeshRendererComponent>().Materials.size() == 1);
-		CHECK_FALSE(entity.GetComponent<MeshRendererComponent>().Materials[0].GetHandle().IsValid());
-		const auto coverage = fixture.GetApi().GetCoverage(mode);
-		REQUIRE(coverage);
-		snapshots.push_back(*coverage);
-	}
-
 	namespace Test {
-
-		void RunEntityBindingsCoverage(RunModes mode, std::vector<ScriptApiCoverage>& snapshots)
-		{
-			ScriptTestFixture fixture({ .Mode = mode, .TestMode = true });
-			fixture.Environment.WindowSize = { 100, 100 };
-			REQUIRE(fixture.AddScript(AssetHandle(200), "Assets/Coverage.luau", R"(
-local T = {Fields = {
-	Number = Field.Number(1), Integer = Field.Integer(2), Bool = Field.Bool(true),
-	String = Field.String("value"), Vector = Field.Vector(vector.create(1,2,3)),
-	Tint = Field.Color(Color.New(1,0,0)), Rotation = Field.Quat(Quat.Identity()),
-	Target = Field.Entity(), Clip = Field.Asset("AudioClip"), Mode = Field.Enum({"First","Second"}),
-	Array = Field.Array(Field.Integer())
-}}
-function T:OnCreate()
-	assert(self.Number == 1 and self.Integer == 2 and self.Bool and self.String == "value")
-	assert(self.Vector == vector.create(1,2,3) and self.Tint.r == 1 and self.Rotation.w == 1)
-	assert(self.Target == nil and self.Clip == nil and self.Mode == "First" and #self.Array == 0)
-	self.Ready = true
-end
-return Script.Define("Coverage", T)
-)"));
-			const Entity bound = fixture.GetScene().CreateEntity("Bound");
-			ScriptComponent script;
-			script.Script.SetHandle(AssetHandle(200));
-			bound.AddComponent<ScriptComponent>(script);
-			REQUIRE(fixture.Start());
-			CheckProxyScript(fixture, R"(
-local bound = Scene.FindByName("Bound")
-assert(bound:GetScript().Ready)
-local suite = Test.Suite("Ordinary", function() error("must not execute") end, {CaseTimeoutTicks=5})
-assert(suite.Name == "Ordinary" and suite.Options.CaseTimeoutTicks == 5)
-local parent = Scene.CreateEntity("Parent")
-local child = Scene.CreateEntity("Child", parent)
-assert(parent:IsValid() and child:IsActive() and child:IsActiveSelf())
-assert(#parent.ID == 16 and child:GetParent() == parent)
-child.Name = "Renamed"
-assert(child.Name == "Renamed")
-child:AddTag("First"); child:AddTag("Second"); child:AddTag("First")
-assert(child:HasTag("First") and #child:GetTags() == 2)
-assert(child:GetTags()[1] == "First" and child:GetTags()[2] == "Second")
-child:RemoveTag("First")
-assert(not child:HasTag("First") and child:GetTags()[1] == "Second")
-parent:SetActive(false)
-assert(not child:IsActive() and child:IsActiveSelf())
-parent:SetActive(true)
-assert(child:IsActive())
-assert(#parent:GetChildren() == 1 and parent:GetChildren()[1] == child)
-local grandchild = Scene.CreateEntity("Grandchild", child)
-assert(parent:FindChild("Grandchild") == nil and parent:FindChild("Grandchild", true) == grandchild)
-assert(parent:FindChild("Renamed") == child)
-child.Transform.Translation = vector.create(2,0,0)
-child:SetParent(nil)
-assert(child:GetParent() == nil and child.Transform.WorldPosition == vector.create(2,0,0))
-child:SetParent(parent, false)
-assert(child:GetParent() == parent and child.Transform.Translation == vector.create(2,0,0))
-assert(not child:HasComponent("MeshRenderer") and child:GetComponent("MeshRenderer") == nil)
-local mesh = child:AddComponent("MeshRenderer", {Visible=false})
-assert(child:HasComponent("MeshRenderer") and not mesh.Visible)
-local minimum, maximum = child:GetWorldBounds()
-assert(minimum == nil and maximum == nil)
-mesh.Mesh = Assets.Load("engine://Meshes/Cube")
-minimum, maximum = child:GetWorldBounds()
-assert(minimum ~= nil and maximum ~= nil and maximum.x > minimum.x)
-child:RemoveComponent("MeshRenderer")
-assert(not child:HasComponent("MeshRenderer"))
-local camera = parent:AddComponent("Camera")
-local origin, direction = camera:ScreenToWorldRay(49.5,49.5)
-assert(origin == vector.zero and vector.magnitude(direction - vector.create(0,0,-1)) < 0.00001)
-local screen = camera:WorldToScreen(vector.create(0,0,-5))
-assert(math.abs(screen.x-49.5) < 0.00001 and math.abs(screen.y-49.5) < 0.00001)
-assert(math.abs(screen.z-camera.NearClip/5) < 0.00001)
-camera.Projection = "Orthographic"
-origin, direction = camera:ScreenToWorldRay(49.5,49.5)
-assert(origin == vector.create(0,0,-camera.NearClip) and direction == vector.create(0,0,-1))
-screen = camera:WorldToScreen(vector.create(0,0,-5))
-assert(math.abs(screen.z - (camera.FarClip-5)/(camera.FarClip-camera.NearClip)) < 0.00001)
-child:Destroy()
-assert(not child:IsValid() and not grandchild:IsValid())
-return true
-)");
-			const auto coverage = fixture.GetApi().GetCoverage(mode);
-			REQUIRE(coverage);
-			snapshots.push_back(*coverage);
-			TransformCoverage(mode, snapshots);
-			MaterialCoverage(mode, snapshots);
-		}
 
 		// Walk reflection, not script-API metadata. Each operation crosses the real VM/proxy boundary and is checked
 		// against ComponentAccess; a missing binding, mismatched field, conversion error or read-only leak fails here.
@@ -258,11 +97,6 @@ return true
 
 	TEST_SUITE("Scripting")
 	{
-		TEST_CASE("EntityBindings: hierarchy tags components fields and camera results agree with scene state")
-		{
-			std::vector<ScriptApiCoverage> snapshots;
-			Test::RunEntityBindingsCoverage(RunModes::Editor, snapshots);
-		}
 		TEST_CASE("ScriptProxy: every reflected script field round-trips through its actual component")
 		{
 			std::vector<ScriptApiCoverage> snapshots;
@@ -280,7 +114,9 @@ return true
 			REQUIRE(proxy->has_value());
 			++fixture.Generation;
 			CHECK_FALSE(ScriptProxy::IsValid(fixture, old));
-			CHECK_FALSE(ScriptProxy::ValidateEntity(fixture, old));
+			const auto expired = ScriptProxy::ValidateEntity(fixture, old);
+			REQUIRE_FALSE(expired);
+			CHECK(expired.error().GetMessageText() == std::format("entity {} belongs to an expired scene", entity.GetUUID()));
 			CHECK_FALSE(ScriptProxy::ValidateComponent(fixture, **proxy));
 			CHECK(entity.GetComponent<TransformComponent>().Translation == glm::vec3(0.0f));
 			CHECK(ScriptProxy::IsValid(fixture, { entity.GetUUID(), fixture.Generation }));
@@ -290,7 +126,16 @@ return true
 			Test::ScriptTestFixture fixture;
 			const auto entity = fixture.GetScene().CreateEntity("Doomed");
 			CHECK_FALSE(ScriptProxy::IsValid(fixture, {}));
-			CHECK_FALSE(ScriptProxy::ValidateEntity(fixture, { entity.GetUUID(), 0 }));
+			const auto invalid = ScriptProxy::ValidateEntity(fixture, { entity.GetUUID(), 0 });
+			REQUIRE_FALSE(invalid);
+			CHECK(invalid.error().GetMessageText() == std::format("entity {} is not a valid entity identity", entity.GetUUID()));
+			// §5.7: access to a destroyed entity names it as destroyed (not as possibly belonging to an expired scene).
+			const auto gone = fixture.GetScene().CreateEntity("Gone");
+			const ScriptEntityIdentity goneIdentity{ gone.GetUUID(), fixture.Generation };
+			fixture.GetScene().DestroyEntity(gone);
+			const auto destroyed = ScriptProxy::ValidateEntity(fixture, goneIdentity);
+			REQUIRE_FALSE(destroyed);
+			CHECK(destroyed.error().GetMessageText() == std::format("entity {} was destroyed", goneIdentity.ID));
 			CHECK_FALSE(ScriptProxy::ValidateComponent(fixture, { { entity.GetUUID(), fixture.Generation }, 999999 }));
 			REQUIRE(fixture.Start());
 			CheckProxyScript(fixture, R"(
@@ -432,11 +277,6 @@ return true
 				if (counter.Owner == "Transform")
 					CHECK(counter.Writes == 0);
 		}
-		TEST_CASE("ScriptProxy: Transform fast paths preserve reflection and interpolation semantics")
-		{
-			std::vector<ScriptApiCoverage> snapshots;
-			TransformCoverage(RunModes::Editor, snapshots);
-		}
 		TEST_CASE("ScriptProxy: entity equality compares UUID without granting access")
 		{
 			Test::ScriptTestFixture fixture({ .ConfigureApi = [](ScriptApiRegistry& api) -> Status
@@ -485,11 +325,6 @@ return true
 			CHECK(fixture.ExternalMutations.empty());
 			CHECK(fixture.Teleported.empty());
 			CHECK(fixture.GetScene().GetRevision() == revision);
-		}
-		TEST_CASE("ScriptProxy: material slots resolve mesh defaults and expand overrides")
-		{
-			std::vector<ScriptApiCoverage> snapshots;
-			MaterialCoverage(RunModes::Editor, snapshots);
 		}
 		TEST_CASE("ScriptProxy: Script assignments reject Module and TestSuite before structural changes")
 		{

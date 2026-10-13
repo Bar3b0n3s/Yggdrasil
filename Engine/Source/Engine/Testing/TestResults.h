@@ -7,6 +7,7 @@
 
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace Engine {
@@ -23,7 +24,9 @@ namespace Engine {
 
 	// Architecture §11.10, identical in RPC, editor CLI and exported FeatureTest. Status is deliberately a constrained
 	// string: the specified wire spellings are lowercase, unlike ordinary reflected enum names. Exactly one of
-	// passed, failed, error, timeout, skipped, quit. Failures retains every Expect* issue; the flat fields summarize the
+	// passed, failed, error, timeout, skipped, quit. Failures retains every Expect* issue and unexpected script error within
+	// MaxScriptTestFailuresPerCase per row and MaxScriptTestFailuresPerSuite per suite (Scripting/ScriptLimits.h); a row
+	// past a cap ends with a "[truncated: <n> more failures]" failure counting the rest. The flat fields summarize the
 	// first, including its JsonPointer. Embedded locations retain the real replay File and decoded Luau Line, never
 	// a generated wrapper location. A quit row carries QuitCode and QuitExpected, decided against the suite's ExpectQuit.
 	struct TestCaseResult
@@ -93,6 +96,12 @@ namespace Engine {
 		std::string JunitPath{};
 		std::string RecordingPath{};
 	};
+
+	// Report text made safe for every result format (JSON, JUnit XML, the RPC result): each invalid UTF-8 byte and the
+	// XML noncharacters U+FFFE/U+FFFF become U+FFFD, and each C0 control character other than tab, line feed and carriage
+	// return becomes the visible text \u00XX. Valid text without those is returned unchanged. The FeatureTestRunner applies
+	// it to every row it reports, because names and messages come from scripts (Test.Fail, error(), Test.Case names).
+	[[nodiscard]] std::string SanitizeTestReportText(std::string_view text);
 
 	// Registers the result structs with camelCase keys and mandatory descriptions before TypeRegistry::Freeze.
 	// No global registration: host owners explicitly add this call. Counts/ticks use saturated uint32 for the existing

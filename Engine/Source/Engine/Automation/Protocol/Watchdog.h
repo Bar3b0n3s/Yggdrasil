@@ -22,6 +22,12 @@ namespace Engine {
 	// call blocks for longer than copying a short string. Time is passed in by the caller (steady clock in production), so
 	// tests are exact and nothing here reads a clock (CodeStyle §14). Wall-clock time is right here: the watchdog measures
 	// how long the process has been unresponsive, never simulated time.
+	//
+	// Two phases are kept. The base phase belongs to the automation layers (the pump, a request, a pending operation:
+	// SetPhase and WatchdogPhaseScope). The script phase (M13) names the gameplay script entry the main thread is running
+	// ("Script:<Script>.<Callback>", FormatScriptPhase); hosts set it from their play sessions around every protected script
+	// entry, wherever the session is advanced from (the editor's frame hooks, a play.step, a test run). While it is set it is
+	// the reported phase; clearing it reveals the base phase again, so neither owner has to save or restore the other's.
 	class Watchdog
 	{
 	public:
@@ -39,10 +45,15 @@ namespace Engine {
 		// steps of a long pump).
 		void Heartbeat(std::chrono::steady_clock::time_point now);
 
-		// Main thread: what the main thread is doing; empty means "Idle". The text is copied.
+		// Main thread: what the automation layers are doing (the base phase); empty means "Idle". The text is copied.
 		void SetPhase(std::string_view phase);
+		// Main thread: sets the base phase and returns the previous one ("" for Idle), for WatchdogPhaseScope.
+		[[nodiscard]] std::string ExchangePhase(std::string_view phase);
+		// Main thread: the running gameplay script entry (see the class comment); empty clears it. Called on every protected
+		// script entry and exit, so it reuses its storage and never allocates once the text fits.
+		void SetScriptPhase(std::string_view phase);
 
-		// Any thread: the current phase ("Idle" when none is set).
+		// Any thread: the current phase: the script phase while one is set, else the base phase ("Idle" when none is set).
 		[[nodiscard]] std::string GetPhase() const;
 
 		// Any thread: how long the main thread has not beaten when that exceeds the stall threshold; nullopt while alive.
@@ -50,14 +61,20 @@ namespace Engine {
 
 		[[nodiscard]] std::chrono::milliseconds GetStallThreshold() const { return m_StallThreshold; }
 	private:
-		struct State; // the heartbeat and the phase text under their lock (Watchdog.cpp)
+		struct State; // the heartbeat and the phase texts under their lock (Watchdog.cpp)
 	private:
 		std::chrono::milliseconds m_StallThreshold = DefaultWatchdogStallThreshold;
 		Scope<State> m_State;
 	};
 
-	// Sets a phase for the lifetime of the scope and restores the previous one afterwards (main thread). `watchdog` may be
-	// null (in-process calls without a server), which makes the scope do nothing.
+	// Writes the script phase of a gameplay entry into `out` (reusing its storage): "Script:<stem>.<callback>", where <stem>
+	// is the file name of `script` without its extension ("Assets/Scripts/Board.luau" -> "Board"), so a runaway
+	// OnFixedUpdate of Board.luau reads "Script:Board.OnFixedUpdate" (§13.2). Without a script it is "Script:<callback>"
+	// (a test case body: "Script:Test.Case"), without a callback "Script:<stem>".
+	void FormatScriptPhase(std::string& out, std::string_view script, std::string_view callback);
+
+	// Sets a base phase for the lifetime of the scope and restores the previous one afterwards (main thread). `watchdog` may
+	// be null (in-process calls without a server), which makes the scope do nothing.
 	class WatchdogPhaseScope
 	{
 	public:
@@ -68,7 +85,7 @@ namespace Engine {
 		WatchdogPhaseScope& operator=(const WatchdogPhaseScope&) = delete;
 	private:
 		Watchdog* m_Watchdog = nullptr; // documented back-reference: outlives the scope; null for none
-		std::string m_PreviousPhase;    // restored by the destructor
+		std::string m_PreviousPhase;    // restored by the destructor; empty for Idle
 	};
 
 }

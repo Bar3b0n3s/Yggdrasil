@@ -71,6 +71,12 @@ namespace Engine {
 			return 1;
 		}
 
+		static int ColorEqual(ScriptCall& call)
+		{
+			Lua::Push(call, Lua::Check<glm::vec4>(call, 1) == Lua::Check<glm::vec4>(call, 2));
+			return 1;
+		}
+
 		template<int Channel>
 		static int ColorGet(ScriptCall& call)
 		{
@@ -102,6 +108,7 @@ namespace Engine {
 					"Reads #RRGGBB or #RRGGBBAA, case-insensitively, as linear channel bytes divided by 255; absent alpha is one.", pure)
 				.Constructor("Lerp", &Utils::ColorLerp, "(a: Color, b: Color, t: number) -> Color",
 					"Interpolates all four linear channels with t clamped to [0, 1], producing a new color.", pure)
+				.Operator("__eq", &Utils::ColorEqual, "(self: Color, other: Color) -> boolean", "Compares the four channels exactly, like vector equality.", pure)
 				.Property("r", &Utils::ColorGet<0>, &Utils::ColorSet<0>, "number", "The local linear red channel, finite and unclamped.", pure)
 				.Property("g", &Utils::ColorGet<1>, &Utils::ColorSet<1>, "number", "The local linear green channel, finite and unclamped.", pure)
 				.Property("b", &Utils::ColorGet<2>, &Utils::ColorSet<2>, "number", "The local linear blue channel, finite and unclamped.", pure)

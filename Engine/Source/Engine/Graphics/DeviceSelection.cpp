@@ -42,10 +42,8 @@ namespace Engine {
 		{
 			int32_t bits = 0;
 			if (candidate.HostImageCopy)
-				bits += 16;
-			if (candidate.B10G11R11StorageSupported)
 				bits += 8;
-			if (candidate.DepthClamp)
+			if (candidate.B10G11R11StorageSupported)
 				bits += 4;
 			if (candidate.DeviceFault)
 				bits += 2;

@@ -51,9 +51,13 @@ namespace Engine {
 	}
 	Status ScriptProxy::ValidateEntity(IScriptHost& host, ScriptEntityIdentity entity)
 	{
-		if (!IsValid(host, entity))
-			return MakeError(ErrorCode::NotFound, "entity {} is destroyed or belongs to an expired scene", entity.ID);
-		return {};
+		if (IsValid(host, entity))
+			return {};
+		if (!entity.ID.IsValid() || entity.SceneGeneration == 0)
+			return MakeError(ErrorCode::NotFound, "entity {} is not a valid entity identity", entity.ID);
+		if (entity.SceneGeneration != host.GetSceneGeneration())
+			return MakeError(ErrorCode::NotFound, "entity {} belongs to an expired scene", entity.ID);
+		return MakeError(ErrorCode::NotFound, "entity {} was destroyed", entity.ID);
 	}
 	Status ScriptProxy::ValidateComponent(IScriptHost& host, ScriptProxyIdentity proxy)
 	{
@@ -114,16 +118,9 @@ namespace Engine {
 		ENGINE_TRY(Utils::StrictValidation(validation));
 		if (info.GetName() == "Script" && field == "Script")
 			ENGINE_TRY(Detail::ValidateBehaviourAssignment(host, value.AsUUID()));
+		// The reflection setter also checks this, but validation must precede recording invalidation.
 		if (info.GetName() == "Transform" && field == "WorldPosition")
-		{
-			// The reflection setter also checks this, but validation must precede recording invalidation.
-			if (const Entity parent = entity.GetParent(); parent)
-			{
-				const glm::vec3 local(glm::affineInverse(TransformSystem::ComputeWorldMatrix(parent)) * glm::vec4(value.AsVec3(), 1));
-				if (glm::any(glm::isnan(local)) || glm::any(glm::isinf(local)))
-					return MakeError(ErrorCode::Validation, "world position cannot be represented relative to this parent");
-			}
-		}
+			ENGINE_TRY(ValidateWorldPosition(entity.GetParent(), value.AsVec3()));
 		if (!descriptor->IsVirtual())
 		{
 			auto copy = info.CreateDefault();
@@ -137,6 +134,19 @@ namespace Engine {
 		ENGINE_TRY(ComponentAccess::SetFieldValue(entity, info.GetName(), field, value, host.GetFieldSchemas()));
 		ENGINE_TRY(call.Engine->GetApi().RecordProxyAccess(call, proxy.ComponentTypeIndex, field, true));
 		return {};
+	}
+
+	Status ScriptProxy::ValidateWorldPosition(ConstEntity parent, const glm::vec3& position)
+	{
+		if (glm::any(glm::isnan(position)) || glm::any(glm::isinf(position)))
+			return MakeError(ErrorCode::Validation, "world position contains NaN or infinity");
+		if (!parent.IsValid())
+			return {};
+		const glm::vec3 local(glm::affineInverse(TransformSystem::ComputeWorldMatrix(parent)) * glm::vec4(position, 1.0f));
+		if (!glm::any(glm::isnan(local)) && !glm::any(glm::isinf(local)))
+			return {};
+		return MakeError(ErrorCode::Validation, "world position ({}, {}, {}) cannot be represented relative to parent {}: its local translation is not finite",
+			position.x, position.y, position.z, parent.GetUUID());
 	}
 
 }

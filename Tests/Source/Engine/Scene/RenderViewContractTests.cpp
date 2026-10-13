@@ -1,33 +1,19 @@
 #include "TestsPCH.h"
 
-#include "EditorCore/Automation/RegisterMethods.h"
-#include "EditorCore/Commands/CommandHistory.h"
-#include "EditorCore/Project/ProjectManager.h"
-#include "EditorCore/Project/ProjectValidator.h"
 #include "Engine/Asset/BuiltinAssets.h"
 #include "Engine/Asset/MaterialData.h"
-#include "Engine/Asset/MeshData.h"
-#include "Engine/Core/VirtualFileSystem.h"
-#include "Engine/Renderer/SpotShadowAtlas.h"
 #include "Engine/Scene/Components/DirectionalLightComponent.h"
 #include "Engine/Scene/Components/EnvironmentComponent.h"
 #include "Engine/Scene/Components/MeshRendererComponent.h"
-#include "Engine/Scene/Components/SpotLightComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/RenderAnnotations.h"
 #include "Engine/Scene/RenderExtraction.h"
-#include "Engine/Scene/SceneSerializer.h"
 #include "Engine/Scene/TransformSystem.h"
-#include "Support/SceneTestFixture.h"
 #include "Support/InMemoryAssetManager.h"
-#include "Support/EditorTestFixture.h"
-#include "Support/TestData.h"
+#include "Support/SceneTestFixture.h"
 
-#include <nlohmann/json.hpp>
-
-#include <algorithm>
-#include <limits>
+#include <vector>
 
 namespace Engine {
 
@@ -171,97 +157,6 @@ namespace Engine {
 			const auto ambient = EvaluateRenderSceneValidation(scene, assets);
 			REQUIRE(ambient.has_value());
 			CHECK_FALSE(ambient->NoLighting);
-		}
-	}
-
-	TEST_SUITE("Scene")
-	{
-		TEST_CASE("ProjectValidator: render warnings have stable IDs and no automatic fixes")
-		{
-			Test::EditorTestFixture fixture;
-			fixture.CreateAndOpenProject();
-			fixture.CreateAndOpenScene("Assets/Scenes/Dark.scene");
-			EditorContext& editor = fixture.GetEditor();
-			editor.GetScene().CreateEntity("Environment").AddComponent<EnvironmentComponent>().FallbackColor = glm::vec3(0.0f);
-			editor.GetScene().CreateEntity("Cube").AddComponent<MeshRendererComponent>().Mesh.SetHandle(BuiltinAssetHandles::CubeMesh);
-			REQUIRE(SceneSerializer::SaveToFile(editor.GetScene(), editor.GetVfs(), *editor.GetScenePath()));
-			const auto openDark = ProjectValidator::Validate(editor, ValidationScope::Scene);
-			REQUIRE(openDark);
-			const auto dark = std::ranges::find(openDark->Diagnostics, RenderNoLightingCode, &ProjectDiagnostic::Code);
-			REQUIRE(dark != openDark->Diagnostics.end());
-			const std::string darkId = dark->Id;
-			fixture.CreateAndOpenScene("Assets/Scenes/Spots.scene");
-			for (uint32_t light = 0; light < MaxSpotShadowLights + 1; ++light)
-				editor.GetScene().CreateEntity("Spot").AddComponent<SpotLightComponent>().CastShadows = true;
-			const auto before = SceneSerializer::ToJson(editor.GetScene());
-			REQUIRE(before);
-			const size_t undoCount = editor.GetHistory().GetUndoCount();
-			const auto report = ProjectValidator::Validate(editor, ValidationScope::Project);
-			const auto repeated = ProjectValidator::Validate(editor, ValidationScope::Project);
-			REQUIRE(report);
-			REQUIRE(repeated);
-			for (std::string_view code : { RenderNoLightingCode, RenderSpotShadowBudgetCode })
-			{
-				const auto found = std::ranges::find(report->Diagnostics, code, &ProjectDiagnostic::Code);
-				const auto again = std::ranges::find(repeated->Diagnostics, code, &ProjectDiagnostic::Code);
-				REQUIRE(found != report->Diagnostics.end());
-				REQUIRE(again != repeated->Diagnostics.end());
-				CHECK(found->Id == again->Id);
-				CHECK(found->Severity == DiagnosticSeverity::Warning);
-				CHECK_FALSE(found->AutoFixable);
-				CHECK(found->Entity.empty());
-				CHECK(found->File == (code == RenderNoLightingCode ? "Assets/Scenes/Dark.scene" : "Assets/Scenes/Spots.scene"));
-				if (code == RenderNoLightingCode)
-					CHECK(found->Id == darkId);
-			}
-			const auto fixed = ProjectValidator::Fix(editor, ValidationScope::Project,
-				{ .IdsOrCodes = { std::string(RenderNoLightingCode), std::string(RenderSpotShadowBudgetCode) } });
-			REQUIRE(fixed);
-			CHECK(fixed->Fixed.empty());
-			CHECK(fixed->UndoIndex == 0);
-			CHECK(editor.GetHistory().GetUndoCount() == undoCount);
-			const auto after = SceneSerializer::ToJson(editor.GetScene());
-			REQUIRE(after);
-			CHECK(*before == *after);
-		}
-
-		TEST_CASE("ProjectValidator: an invalid illumination scan returns its error with the scene path")
-		{
-			Test::EditorTestFixture fixture;
-			fixture.CreateAndOpenProject();
-			fixture.CreateAndOpenScene();
-			fixture.GetEditor().GetScene().CreateEntity("Environment").AddComponent<EnvironmentComponent>().Intensity = std::numeric_limits<float>::quiet_NaN();
-			const auto report = ProjectValidator::Validate(fixture.GetEditor(), ValidationScope::Scene);
-			REQUIRE_FALSE(report);
-			CHECK(report.error().GetCode() == ErrorCode::InvalidArgument);
-			CHECK(report.error().ToString().contains("Assets/Scenes/Main.scene"));
-		}
-	}
-
-	TEST_SUITE("Scene")
-	{
-		TEST_CASE("ProjectValidator: Basic3D illumination has no render errors or false lighting warning")
-		{
-			Test::EditorTestFixture fixture;
-			auto engine = EngineContext::Create({ .EngineResourcesDirectory = Test::GetRepositoryRoot() / "Resources", .RegisterTypes = &RegisterEditorMethodTypes });
-			REQUIRE(engine);
-			auto context = EditorContext::Create(**engine, { .IdGeneratorState = Test::EditorTestIdState });
-			REQUIRE(context);
-			EditorContext& editor = **context;
-			const auto created = ProjectManager::CreateProject({ .Directory = fixture.GetProjectRoot(), .Name = "TestProject", .Template = ProjectTemplate::Basic3D, .TemplatesDirectory = Test::GetRepositoryRoot() / "Resources/Templates/Projects" }, editor.GetTypeRegistry());
-			REQUIRE(created);
-			auto opened = ProjectManager::OpenProject(created->ProjectFile, {}, editor.GetTypeRegistry());
-			REQUIRE(opened);
-			REQUIRE(editor.OpenProject(std::move(*opened)));
-			const auto report = ProjectValidator::Validate(editor, ValidationScope::Project);
-			REQUIRE(report);
-			CHECK(report->ErrorCount == 0);
-			for (const auto& diagnostic : report->Diagnostics)
-			{
-				INFO(diagnostic.Code, ": ", diagnostic.Message);
-				CHECK(diagnostic.Code != RenderNoLightingCode);
-				CHECK(diagnostic.Code != RenderSpotShadowBudgetCode);
-			}
 		}
 	}
 

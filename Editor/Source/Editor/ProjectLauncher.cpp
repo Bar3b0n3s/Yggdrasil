@@ -6,16 +6,34 @@
 #include "Editor/Ui/EditorStyle.h"
 #include "EditorCore/EditorActions.h"
 #include "EditorCore/EditorContext.h"
-#include "EditorCore/Project/ProjectManager.h"
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Hash.h"
 #include "Engine/Core/Log.h"
+#include "Engine/Core/Utf8.h"
+#include "Engine/Platform/Environment.h"
 
 #include <imgui.h>
 
 #include <algorithm>
 
 namespace Engine {
+
+	std::filesystem::path GetDefaultProjectLocation()
+	{
+		for (const std::string_view variable : { "HOME", "USERPROFILE" })
+		{
+			const std::optional<std::string> value = ReadEnvironmentVariable(variable);
+			if (!value || value->empty() || !IsValidUtf8(*value))
+				continue;
+			const std::filesystem::path home = FileSystem::PathFromUtf8(*value);
+			std::error_code error;
+			if (home.is_absolute() && std::filesystem::is_directory(home, error) && !error)
+				return home;
+		}
+		std::error_code error;
+		std::filesystem::path current = std::filesystem::current_path(error);
+		return error ? std::filesystem::path{} : current;
+	}
 
 	Status ProjectLauncher::Draw(EditorPanelContext& context)
 	{
@@ -43,15 +61,22 @@ namespace Engine {
 		if (context.Editor.HasProject())
 		{
 			m_Picker.Cancel();
+			// The host refreshes its recent-project snapshot after each open and close; take it again when shown next.
+			m_RecentLoaded = false;
 			return {};
 		}
 		if (!m_RecentLoaded)
 		{
-			auto recent = ProjectManager::ReadRecentProjects(context.Editor.GetVfs());
-			if (recent)
-				m_Recent = std::move(*recent);
-			else
-				showError(recent.error());
+			// The host's memory snapshot of user://Editor.json; drawing never reads the file.
+			m_Recent.clear();
+			if (context.GetRecentProjects)
+			{
+				auto recent = context.GetRecentProjects();
+				if (recent)
+					m_Recent = std::move(*recent);
+				else
+					showError(recent.error());
+			}
 			m_RecentLoaded = true;
 		}
 		const auto submit = [this, &context, &showError](std::string_view method, const Json& params)
@@ -149,7 +174,7 @@ namespace Engine {
 					ImGui::SameLine();
 					if (ImGui::Button("Browse..."))
 					{
-						const auto initial = m_Location[0] ? FileSystem::PathFromUtf8(m_Location.data()) : context.Editor.GetSpecification().TemplatesDirectory.parent_path();
+						const auto initial = m_Location[0] ? FileSystem::PathFromUtf8(m_Location.data()) : GetDefaultProjectLocation();
 						if (const Status opened = m_Picker.Open("Choose a location for your project", initial); !opened)
 							showError(opened.error());
 						else
@@ -187,7 +212,7 @@ namespace Engine {
 								directory = parent;
 							}
 						};
-						const auto fallback = context.Editor.GetSpecification().TemplatesDirectory.parent_path();
+						const auto fallback = GetDefaultProjectLocation();
 						const auto initial = m_Recent.empty() ? fallback : m_Recent.front().parent_path();
 						Status opened = browse(initial);
 						if (!opened && initial != fallback)

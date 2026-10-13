@@ -7,15 +7,20 @@
 #include "Engine/Reflection/EnumInfo.h"
 #include "Engine/Reflection/StructInfo.h"
 #include "Engine/Reflection/TypeRegistry.h"
+#include "Engine/Scene/TransformSystem.h"
 
 #include <imgui.h>
+#include <imgui_internal.h>
 #include <misc/cpp/imgui_stdlib.h>
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstring>
 #include <limits>
+#include <type_traits>
+#include <utility>
 
 namespace Engine {
 
@@ -47,8 +52,65 @@ namespace Engine {
 					field.GetMeta().Unit.c_str(), field.IsReadOnly() ? "\nRead only" : "");
 		}
 
+		// Seven significant digits show any authored float without float noise, and typed text round-trips what is shown.
+		// Drags never round the stored value to this format (ImGuiSliderFlags_NoRoundToFormat) and clamp typed entries.
+		constexpr const char* InspectorFloatFormat = "%.7g";
+		constexpr ImGuiSliderFlags InspectorFloatFlags = ImGuiSliderFlags_NoRoundToFormat | ImGuiSliderFlags_AlwaysClamp;
+
+		static bool IsComponentMixed(bool mixed, uint32_t mixedComponents, int component)
+		{
+			return mixed && (mixedComponents == 0 || (mixedComponents & (1u << static_cast<uint32_t>(component))) != 0);
+		}
+
+		// -0 equals 0: show one zero. Only the drawn copy changes, so nothing is written without an edit.
+		static float DisplayedZero(float value)
+		{
+			return value == 0.0f ? 0.0f : value;
+		}
+
+		// FieldMeta::MinMagnitude excludes (-m, m): an edit that lands inside it steps to the bound on its side, or on the
+		// previous value's side when it lands on zero exactly, so dragging through zero never produces an invalid value.
+		static float StepOverMinMagnitude(float value, float previous, const FieldMeta& meta)
+		{
+			if (!meta.MinMagnitude.has_value())
+				return value;
+			const float magnitude = static_cast<float>(*meta.MinMagnitude);
+			if (!(std::fabs(value) < magnitude))
+				return value;
+			const bool negative = value != 0.0f ? value < 0.0f : previous < 0.0f;
+			return negative ? -magnitude : magnitude;
+		}
+
+		template<typename TInteger>
+		static TInteger StepOverMinMagnitude(TInteger value, TInteger previous, const FieldMeta& meta)
+		{
+			if (!meta.MinMagnitude.has_value())
+				return value;
+			const double magnitude = std::ceil(*meta.MinMagnitude);
+			if (!(std::fabs(static_cast<double>(value)) < magnitude))
+				return value;
+			const bool negative = value != 0 ? value < 0 : previous < 0;
+			if constexpr (std::is_signed_v<TInteger>)
+			{
+				if (negative)
+					return static_cast<TInteger>(std::max(-magnitude, static_cast<double>(std::numeric_limits<TInteger>::min())));
+			}
+			return static_cast<TInteger>(std::min(magnitude, static_cast<double>(std::numeric_limits<TInteger>::max())));
+		}
+
+		// The integer bounds that FieldMeta's inclusive Min and Max admit, within the type's range.
+		template<typename TInteger>
+		static std::pair<TInteger, TInteger> IntegerRange(const FieldMeta& meta)
+		{
+			constexpr double Lowest = static_cast<double>(std::numeric_limits<TInteger>::min());
+			constexpr double Highest = static_cast<double>(std::numeric_limits<TInteger>::max());
+			const double low = meta.Min.has_value() ? std::clamp(std::ceil(*meta.Min), Lowest, Highest) : Lowest;
+			const double high = meta.Max.has_value() ? std::clamp(std::floor(*meta.Max), Lowest, Highest) : Highest;
+			return { static_cast<TInteger>(low), static_cast<TInteger>(high) };
+		}
+
 		static ReflectedDrawerResult DrawInspectorVector(float* values, int count, float speed, float minimum, float maximum,
-			const FieldInfo& field, bool mixed)
+			const FieldInfo& field, bool mixed, uint32_t mixedComponents)
 		{
 			ReflectedDrawerResult result;
 			const float spacing = ImGui::GetStyle().ItemInnerSpacing.x;
@@ -56,7 +118,7 @@ namespace Engine {
 			const float minimumAxisWidth = ImGui::CalcTextSize("X -1.23").x + ImGui::GetStyle().FramePadding.x * 2.0f;
 			const bool inlineAxes = available >= minimumAxisWidth * static_cast<float>(count) + spacing * static_cast<float>(count - 1);
 			const float width = inlineAxes ? (available - spacing * static_cast<float>(count - 1)) / static_cast<float>(count) : available;
-			constexpr std::array<const char*, 4> Formats{ "X %.3g", "Y %.3g", "Z %.3g", "W %.3g" };
+			constexpr std::array<const char*, 4> Formats{ "X %.7g", "Y %.7g", "Z %.7g", "W %.7g" };
 			ImGui::BeginGroup();
 			for (int axis = 0; axis < count; ++axis)
 			{
@@ -64,13 +126,70 @@ namespace Engine {
 					ImGui::SameLine(0.0f, spacing);
 				ImGui::PushID(axis);
 				ImGui::SetNextItemWidth(std::max(1.0f, width));
+				const float previous = values[axis];
+				values[axis] = DisplayedZero(values[axis]);
 				const bool changed = ImGui::DragFloat("##Axis", &values[axis], speed, minimum, maximum,
-					mixed ? "--" : Formats[static_cast<size_t>(axis)], ImGuiSliderFlags_AlwaysClamp);
+					IsComponentMixed(mixed, mixedComponents, axis) ? "--" : Formats[static_cast<size_t>(axis)], InspectorFloatFlags);
+				if (changed)
+				{
+					values[axis] = StepOverMinMagnitude(values[axis], previous, field.GetMeta());
+					result.ChangedComponents |= 1u << static_cast<uint32_t>(axis);
+				}
 				MergeDrawerResult(result, DrawerItemResult(changed));
 				DrawerTooltip(field);
 				ImGui::PopID();
 			}
 			ImGui::EndGroup();
+			return result;
+		}
+
+		static bool IsUsableRotation(const glm::quat& rotation)
+		{
+			const float lengthSquared = glm::dot(rotation, rotation);
+			return std::isfinite(lengthSquared) && lengthSquared > 0.0f;
+		}
+
+		// A rotation edits as Euler degrees in Transform.EulerAngles' convention (TransformSystem, X in [-90, 90]), the way
+		// people author it; the raw components stay available under a disclosure and are renormalized after an edit.
+		// Either edit produces a unit quaternion, so it passes the field's unit-length validation. The whole rotation is the
+		// edited value, also in a multi-edit.
+		static Result<ReflectedDrawerResult> DrawInspectorRotation(const FieldInfo& field, Value& value, const ReflectedDrawerContext& context)
+		{
+			const glm::quat current = value.AsQuat();
+			const float eulerSpeed = static_cast<float>(field.GetMeta().Step.value_or(0.5));
+			// While a gesture owns the angles, keep the angles being edited: re-deriving them from the quaternion every frame
+			// would flip X past +-90 degrees mid-drag. A kept value is used only while it still describes the rotation.
+			ImGuiStorage* storage = ImGui::GetStateStorage();
+			const std::array<ImGuiID, 4> keys{ ImGui::GetID("##EulerGesture"), ImGui::GetID("##EulerX"), ImGui::GetID("##EulerY"), ImGui::GetID("##EulerZ") };
+			glm::vec3 euler = IsUsableRotation(current) ? TransformSystem::EulerDegreesFromQuaternion(glm::normalize(current)) : glm::vec3(0.0f);
+			if (storage->GetBool(keys[0]))
+			{
+				const glm::vec3 kept(storage->GetFloat(keys[1]), storage->GetFloat(keys[2]), storage->GetFloat(keys[3]));
+				if (IsUsableRotation(current) && std::fabs(glm::dot(TransformSystem::QuaternionFromEulerDegrees(kept), glm::normalize(current))) > 1.0f - 1e-5f)
+					euler = kept;
+			}
+			ReflectedDrawerResult result = DrawInspectorVector(&euler.x, 3, eulerSpeed, -std::numeric_limits<float>::max(),
+				std::numeric_limits<float>::max(), field, context.Mixed, 0);
+			result.ChangedComponents = 0;
+			if (result.Changed)
+				value = Value::FromQuat(TransformSystem::QuaternionFromEulerDegrees(euler));
+			storage->SetBool(keys[0], result.Active);
+			for (size_t axis = 0; axis < 3; ++axis)
+				storage->SetFloat(keys[axis + 1], euler[static_cast<glm::length_t>(axis)]);
+			if (ImGui::TreeNodeEx("##Components", ImGuiTreeNodeFlags_SpanAvailWidth, "Quaternion components"))
+			{
+				std::array components{ current.x, current.y, current.z, current.w };
+				ReflectedDrawerResult raw = DrawInspectorVector(components.data(), 4, 0.01f, -1.0f, 1.0f, field, context.Mixed, 0);
+				ImGui::TreePop();
+				if (raw.Changed)
+				{
+					const glm::quat edited(components[3], components[0], components[1], components[2]);
+					if (!IsUsableRotation(edited))
+						return MakeError(ErrorCode::Validation, "a rotation must be a non-zero, finite quaternion");
+					value = Value::FromQuat(glm::normalize(edited));
+				}
+				MergeDrawerResult(result, raw);
+			}
 			return result;
 		}
 
@@ -219,6 +338,8 @@ namespace Engine {
 				const std::string key = isStruct || isMap ? keys[i] : std::to_string(i);
 				ImGui::PushID(static_cast<int>(FNV1a32(key)));
 				ReflectedDrawerContext child = context;
+				// A container replaces its whole value; a parent's component mask never describes a child.
+				child.MixedComponents = 0;
 				child.DisplayLabel = isStruct ? "" : isMap ? key
 														   : "Element " + std::to_string(i + 1);
 				child.ScriptSchema = context.ScriptSchema == nullptr ? nullptr : context.ScriptSchema->Element.get();
@@ -348,36 +469,49 @@ namespace Engine {
 				case FieldType::Bool:
 				{
 					bool candidate = value.AsBool();
+					ImGui::PushItemFlag(ImGuiItemFlags_MixedValue, context.Mixed);
 					changed = ImGui::Checkbox(Label, &candidate);
+					ImGui::PopItemFlag();
 					value = Value::FromBool(candidate);
 					immediate = true;
 					break;
 				}
 				case FieldType::Int32:
 				{
-					int32_t candidate = value.AsInt32();
-					changed = ImGui::DragScalar(Label, ImGuiDataType_S32, &candidate, speed);
+					const int32_t previous = value.AsInt32();
+					int32_t candidate = previous;
+					const auto [low, high] = IntegerRange<int32_t>(field.GetMeta());
+					changed = ImGui::DragScalar(Label, ImGuiDataType_S32, &candidate, speed, &low, &high, nullptr, ImGuiSliderFlags_AlwaysClamp);
+					if (changed)
+						candidate = StepOverMinMagnitude(candidate, previous, field.GetMeta());
 					value = Value::FromInt32(candidate);
 					break;
 				}
 				case FieldType::UInt32:
 				{
-					uint32_t candidate = value.AsUInt32();
-					changed = ImGui::DragScalar(Label, ImGuiDataType_U32, &candidate, speed);
+					const uint32_t previous = value.AsUInt32();
+					uint32_t candidate = previous;
+					const auto [low, high] = IntegerRange<uint32_t>(field.GetMeta());
+					changed = ImGui::DragScalar(Label, ImGuiDataType_U32, &candidate, speed, &low, &high, nullptr, ImGuiSliderFlags_AlwaysClamp);
+					if (changed)
+						candidate = StepOverMinMagnitude(candidate, previous, field.GetMeta());
 					value = Value::FromUInt32(candidate);
 					break;
 				}
 				case FieldType::Float:
 				{
-					float candidate = value.AsFloat();
-					changed = ImGui::DragFloat(Label, &candidate, speed, minimum, maximum);
+					const float previous = value.AsFloat();
+					float candidate = DisplayedZero(previous);
+					changed = ImGui::DragFloat(Label, &candidate, speed, minimum, maximum, InspectorFloatFormat, InspectorFloatFlags);
+					if (changed)
+						candidate = StepOverMinMagnitude(candidate, previous, field.GetMeta());
 					value = Value::FromFloat(candidate);
 					break;
 				}
 				case FieldType::Vec2:
 				{
 					glm::vec2 candidate = value.AsVec2();
-					const auto result = DrawInspectorVector(&candidate.x, 2, speed, minimum, maximum, field, context.Mixed);
+					const auto result = DrawInspectorVector(&candidate.x, 2, speed, minimum, maximum, field, context.Mixed, context.MixedComponents);
 					value = Value::FromVec2(candidate);
 					return result;
 				}
@@ -387,7 +521,7 @@ namespace Engine {
 					glm::vec3 candidate = value.AsVec3();
 					if (kind == FieldType::Vec3)
 					{
-						const auto result = DrawInspectorVector(&candidate.x, 3, speed, minimum, maximum, field, context.Mixed);
+						const auto result = DrawInspectorVector(&candidate.x, 3, speed, minimum, maximum, field, context.Mixed, context.MixedComponents);
 						value = Value::FromVec3(candidate);
 						return result;
 					}
@@ -401,7 +535,7 @@ namespace Engine {
 					glm::vec4 candidate = value.AsVec4();
 					if (kind == FieldType::Vec4)
 					{
-						const auto result = DrawInspectorVector(&candidate.x, 4, speed, minimum, maximum, field, context.Mixed);
+						const auto result = DrawInspectorVector(&candidate.x, 4, speed, minimum, maximum, field, context.Mixed, context.MixedComponents);
 						value = Value::FromVec4(candidate);
 						return result;
 					}
@@ -410,13 +544,7 @@ namespace Engine {
 					break;
 				}
 				case FieldType::Quat:
-				{
-					const glm::quat current = value.AsQuat();
-					std::array candidate{ current.x, current.y, current.z, current.w };
-					const auto result = DrawInspectorVector(candidate.data(), 4, speed, minimum, maximum, field, context.Mixed);
-					value = Value::FromQuat(glm::quat(candidate[3], candidate[0], candidate[1], candidate[2]));
-					return result;
-				}
+					return DrawInspectorRotation(field, value, context);
 				case FieldType::Bool3:
 				{
 					glm::bvec3 candidate = value.AsBool3();
@@ -426,9 +554,13 @@ namespace Engine {
 						if (i > 0 && ImGui::GetContentRegionAvail().x > ImGui::GetFrameHeight() + ImGui::GetFontSize() * 2.0f)
 							ImGui::SameLine();
 						ImGui::PushID(i);
+						ImGui::PushItemFlag(ImGuiItemFlags_MixedValue, IsComponentMixed(context.Mixed, context.MixedComponents, i));
 						const bool toggled = ImGui::Checkbox(i == 0 ? "X" : i == 1 ? "Y"
 																				   : "Z",
 							&candidate[i]);
+						ImGui::PopItemFlag();
+						if (toggled)
+							result.ChangedComponents |= 1u << static_cast<uint32_t>(i);
 						MergeDrawerResult(result, DrawerItemResult(toggled, true));
 						ImGui::PopID();
 					}

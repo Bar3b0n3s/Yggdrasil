@@ -117,8 +117,12 @@ namespace Engine {
 		candidate.Target = glm::vec3(center);
 		candidate.Position = glm::vec3(center - forward * distance);
 		candidate.OrthographicSize = static_cast<float>(halfHeight);
-		candidate.NearClip = static_cast<float>(std::max(0.00001, (distance - depthExtent) * 0.5));
-		candidate.FarClip = static_cast<float>(distance + depthExtent + depthPadding);
+		// Widen the clip range just enough to contain the framed bounds and keep the rest of the user's range: framing
+		// must never clip the surrounding scene, and later zooming out must not clip the framed bounds either.
+		const double fittedNear = std::max(0.00001, (distance - depthExtent) * 0.5);
+		const double fittedFar = distance + depthExtent + depthPadding;
+		candidate.NearClip = static_cast<float>(std::min(static_cast<double>(camera.NearClip), fittedNear));
+		candidate.FarClip = static_cast<float>(std::max(static_cast<double>(camera.FarClip), fittedFar));
 		ENGINE_TRY(validator.SetCamera(candidate));
 		return candidate;
 	}

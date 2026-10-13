@@ -5,6 +5,7 @@
 #include "Engine/Asset/MeshData.h"
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Renderer/GpuResourceCache.h"
+#include "Engine/Renderer/SceneTargetFormats.h"
 #include "Shared/MaterialConstants.h"
 #include "Shared/Private/SelectionPassConstants.h"
 
@@ -95,7 +96,7 @@ namespace Engine {
 				.Program = composite ? "SelectionComposite" : "SelectionDilate",
 				.Entries = { composite ? "CSComposite" : "CSDilate" },
 				.BindingLayouts = { layout },
-				.StorageImages = { { .Set = 0, .Register = composite ? 1u : 0u, .Format = composite ? nvrhi::Format::RGBA8_UNORM : nvrhi::Format::R8_UNORM } }
+				.StorageImages = { { .Set = 0, .Register = composite ? 1u : 0u, .Format = composite ? LdrColorFormat : SelectionMaskFormat } }
 			};
 		}
 
@@ -110,9 +111,9 @@ namespace Engine {
 				return desc.format == format && desc.dimension == nvrhi::TextureDimension::Texture2D && desc.sampleCount == 1
 					&& desc.arraySize == 1 && desc.width == mask.width && desc.height == mask.height && desc.isShaderResource;
 			};
-			if (mask.width == 0 || mask.height == 0 || !valid(mask, nvrhi::Format::R8_UNORM) || !mask.isUAV || !mask.isRenderTarget
-				|| !valid(inputs.Scratch->getDesc(), nvrhi::Format::R8_UNORM) || !inputs.Scratch->getDesc().isUAV
-				|| !valid(inputs.SceneDepth->getDesc(), nvrhi::Format::D32)
+			if (mask.width == 0 || mask.height == 0 || !valid(mask, SelectionMaskFormat) || !mask.isUAV || !mask.isRenderTarget
+				|| !valid(inputs.Scratch->getDesc(), SelectionMaskFormat) || !inputs.Scratch->getDesc().isUAV
+				|| !valid(inputs.SceneDepth->getDesc(), SceneDepthFormat)
 				|| !valid(inputs.LdrColor->getDesc(), nvrhi::Format::RGBA8_UNORM) || !inputs.LdrColor->getDesc().isUAV)
 				return MakeError(ErrorCode::InvalidArgument, "Selection target formats, extents or usage flags do not match");
 			for (int component = 0; component < 4; ++component)
@@ -153,7 +154,7 @@ namespace Engine {
 		{
 			GraphicsPipelineSpecification specification;
 			specification.Layout = Utils::SelectionMaskLayout(variant);
-			specification.Framebuffer.colorFormats = { nvrhi::Format::R8_UNORM };
+			specification.Framebuffer.colorFormats = { SelectionMaskFormat };
 			specification.VertexAttributes = {
 				nvrhi::VertexAttributeDesc().setName("POSITION").setFormat(nvrhi::Format::RGB32_FLOAT).setOffset(offsetof(MeshVertex, Position)).setElementStride(sizeof(MeshVertex)),
 				nvrhi::VertexAttributeDesc().setName("TEXCOORD").setFormat(nvrhi::Format::RG32_FLOAT).setOffset(offsetof(MeshVertex, TexCoord)).setElementStride(sizeof(MeshVertex))
@@ -189,7 +190,7 @@ namespace Engine {
 		nvrhi::TextureDesc desc;
 		desc.width = width;
 		desc.height = height;
-		desc.format = nvrhi::Format::R8_UNORM;
+		desc.format = SelectionMaskFormat;
 		desc.isShaderResource = true;
 		desc.isRenderTarget = true;
 		desc.isUAV = true;

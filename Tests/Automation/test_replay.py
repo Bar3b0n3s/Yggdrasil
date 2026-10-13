@@ -94,6 +94,45 @@ class ReplayTests(AutomationTestCase):
         self.assertEqual(state["state"], "Paused")
         self.assertEqual(list((root / "Assets").rglob("*.replay")), [])
 
+    def test_replay_disconnect_releases_session(self) -> None:
+        # §13.2 "Disconnect" over the real transport: a client killed during a pending input.replay leaves no lockstep,
+        # stepping hold or replay input suppression behind; the session waits paused where the replay stopped.
+        client, root = self.open_editor_with_scene()
+        path = "Assets/Tests/Long.replay"
+        self.record(client, path)
+        source = root / path
+        document = json.loads(source.read_text(encoding="utf-8"))
+        final_tick = 50_000_000  # far more ticks than the test can run, so the disconnect always lands mid-replay
+        document["FinalTick"] = final_tick
+        document["Expect"] = []
+        source.write_text(json.dumps(document), encoding="utf-8")
+        client.call("asset.reimport", {"asset": path})
+        client.call("play.stop")  # the recording client owns lockstep until then
+        editor = self.editors[-1]
+        observer = self.connect(editor, "replay-observer")
+        assert editor.session is not None
+        doomed = engine_client.EngineClient.connect_session(editor.session, client_name="replay-doomed")
+        doomed.connection.sendall(engine_client.encode_frame(json.dumps(
+            {"jsonrpc": "2.0", "id": 1, "method": "input.replay", "params": {"path": path}}).encode("utf-8")))
+        # Requests of different clients have no order: wait (bounded) until the replay owns and advances the session.
+        deadline = time.monotonic() + 30.0
+        state = observer.call("play.state")
+        while not (state["lockstepOwner"] == "replay-doomed" and state["tick"] > 0) and time.monotonic() < deadline:
+            state = observer.call("play.state")
+        self.assertEqual(state["lockstepOwner"], "replay-doomed", state)
+        doomed.connection.close()
+        deadline = time.monotonic() + 30.0
+        while state["lockstep"] and time.monotonic() < deadline:
+            state = observer.call("play.state")
+        self.assertFalse(state["lockstep"], state)
+        self.assertEqual(state["state"], "Paused")
+        self.assertLess(state["tick"], final_tick)
+        # Nothing of the replay holds the session: another client steps it and injects input.
+        stepped = observer.call("play.step", {"ticks": 1, "render": "none"})
+        self.assertEqual(stepped["tick"], state["tick"] + 1)
+        observer.call("input.inject", {"events": [{"type": "key", "key": "Space", "state": "tap"}]})
+        self.assertFalse(observer.call("play.state")["lockstep"])
+
     def test_recording_invalidates_before_external_predicate_mutation(self) -> None:
         client, root = self.open_editor_with_scene()
         client.call("entity.create", {"name": "Target"})

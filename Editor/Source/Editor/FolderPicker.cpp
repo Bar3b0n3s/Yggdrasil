@@ -36,10 +36,15 @@ namespace Engine {
 		ENGINE_TRY_ASSIGN(const auto entries, FileSystem::ListDirectory(canonical));
 		std::vector<std::filesystem::path> directories;
 		std::vector<std::filesystem::path> files;
+		size_t unreadable = 0;
 		for (const auto& entry : entries)
 		{
-			ENGINE_TRY_ASSIGN(const FileInfo entryInfo, FileSystem::GetInfo(entry));
-			if (entryInfo.IsDirectory)
+			// One entry that cannot be queried (a dangling link, a file removed since the listing, no permission) never
+			// makes the folder unbrowsable: it is left out and counted.
+			const Result<FileInfo> entryInfo = FileSystem::GetInfo(entry);
+			if (!entryInfo)
+				++unreadable;
+			else if (entryInfo->IsDirectory)
 				directories.push_back(entry);
 			else
 				files.push_back(entry);
@@ -52,6 +57,7 @@ namespace Engine {
 		m_Directory = std::move(canonical);
 		m_Directories = std::move(directories);
 		m_Files = std::move(files);
+		m_Unreadable = unreadable;
 		m_SelectedFile.clear();
 		m_Error.clear();
 		return {};
@@ -223,6 +229,8 @@ namespace Engine {
 						row(file, false);
 				if (visible == 0)
 					Utils::EditorEmptyState(filter.empty() ? "This folder is empty" : "No matches", "Choose another folder or clear the search.");
+				if (m_Unreadable != 0)
+					ImGui::TextDisabled("%zu %s could not be read and %s not listed.", m_Unreadable, m_Unreadable == 1 ? "entry" : "entries", m_Unreadable == 1 ? "is" : "are");
 			}
 			ImGui::EndChild();
 			if (next)

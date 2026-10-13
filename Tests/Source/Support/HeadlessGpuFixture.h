@@ -53,7 +53,8 @@ namespace Engine {
 			// GraphicsSpecification::InjectFault, for the in-process fault tests.
 			GpuFault InjectFault = GpuFault::None;
 			uint32_t FramesInFlight = 2;
-			// GraphicsSpecification::DisableDepthClamp; forces the real device feature and capability off.
+			// GraphicsSpecification::DisableDepthClamp: turns shadow pancaking off (GraphicsDeviceInfo::DepthClamp false), so
+			// shadow casters take the extended-near fallback. No Vulkan device feature is involved.
 			bool DisableDepthClamp = false;
 		};
 

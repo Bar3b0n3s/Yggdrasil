@@ -169,7 +169,12 @@ namespace Engine {
 			CHECK(Test::FindProblemLogLines(result->StandardError).empty());
 		}
 
-		TEST_CASE("EditorApp: --gpu-inject-fault=device-lost exits 4 with a crash report after the fatal-error hook"
+		// The command-line faults strike at the first submissions, before any request could open or edit a scene, so these
+		// two runs prove the exit code and the crash report only. The editor's autosave on those faults is proven by
+		// "EditorApp: its fatal hook preserves a published dirty scene through device loss and hang" above (the production
+		// hook, MakeEditorAutosaveFatalHook, under both real faults) and, through the real EditorApp, by the Python
+		// test_device_loss_autosaves_current_dirty_scene (debug.deviceLost after a dirty edit, then recover: true).
+		TEST_CASE("EditorApp: --gpu-inject-fault=device-lost exits 4 with a crash report"
 			* doctest::test_suite(Test::GpuSuite))
 		{
 			if (!Test::ProbeGpuForProcess())
@@ -183,8 +188,6 @@ namespace Engine {
 			const Result<std::string> report = Test::ReadOnlyCrashReport(userData.GetPath());
 			REQUIRE_MESSAGE(report.has_value(), report.error().ToString());
 			CHECK(report->contains("Reason: Fatal error (DeviceLost)"));
-			// Startup injection has no open scene. Dirty-snapshot persistence uses the same production hook above.
-			CHECK_FALSE(FileSystem::Exists(userData / "Library/Autosave/Manifest.json"));
 			CHECK(Test::FindGpuMessageLines(result->StandardError).empty());
 		}
 
@@ -205,7 +208,6 @@ namespace Engine {
 			const Result<std::string> report = Test::ReadOnlyCrashReport(userData.GetPath());
 			REQUIRE_MESSAGE(report.has_value(), report.error().ToString());
 			CHECK(report->contains("Reason: Fatal error (GpuHang)"));
-			CHECK_FALSE(FileSystem::Exists(userData / "Library/Autosave/Manifest.json"));
 			CHECK(report->contains("FramePhase: Render"));
 			CHECK(Test::FindGpuMessageLines(result->StandardError).empty());
 		}

@@ -37,6 +37,25 @@ Callback bodies cannot yield. Start a task from the callback with `Task.Spawn(fu
 
 For a follow camera, use `OnLateUpdate` and the target's `Transform.RenderPosition`/`RenderRotation`, which reflect interpolation. Move the camera's world pose or use `LookAt`; keep gameplay decisions in the fixed phase. Teleports use `Transform:Teleport` or the body's teleport method so interpolation does not sweep across the jump.
 
+## Idioms
+
+- **State machines.** Keep the state in a field (`self.State = "Falling"`) and dispatch in `OnFixedUpdate` through a table of per-state functions; change state only there, so transitions happen on ticks and replay exactly.
+- **Grid logic.** Store a board as a flat array indexed `(row - 1) * width + column`, or as rows of arrays; iterate with numeric `for` loops in a fixed order. Convert to world positions only when placing entities.
+- **DAS/ARR input** (delayed auto-shift and auto-repeat, as in falling-block games). On `Input.IsActionPressed` move once and reset a tick counter; while `Input.IsActionDown`, count ticks and move again after the delay ticks, then every repeat-interval ticks. Count ticks, never seconds or wall time.
+- **Pooling.** Create a fixed set of entities once (for example in `OnStart`), then reuse them with `SetActive(true/false)` and `Transform:Teleport` instead of creating and destroying every tick. `OnEnable`/`OnDisable` run on each toggle.
+- **Typing.** Annotate callbacks with the exported instance alias (`function Ball.OnStart(self: Ball)`), so strict mode checks `self` fields. An optional field (`Goal: Entity?`, `Field.Asset`) can be nil: test it (`if self.Goal then`) or cast after checking before using it.
+
+## Determinism pitfalls
+
+- Write non-trivial powers with `math.pow(x, y)`, which uses the engine's deterministic math. The `^` operator is exact only for the exponents 2, 3 and 0.5; any other exponent calls the platform's C runtime and may differ between machines. `math.sin` and the other `math` functions and `vector.angle` are already deterministic.
+- `pairs`/`next` over a table keyed by entities, components, asset references, tables or functions visits keys in heap-address order, which differs between runs. Key sets by `entity.ID` and sort, or keep an array; iterate with `ipairs`. One entity is the same value as a key while any reference to it is alive, so `inside[other] = true` in `OnTriggerEnter` and `inside[other] = nil` in `OnTriggerExit` work, but never base gameplay on the visiting order.
+- Weak tables (`__mode`) lose entries when the garbage collector runs, which is not tied to ticks; never let their contents decide gameplay. `collectgarbage` and `gcinfo` do not exist.
+- `Task.Wait(seconds)` and `Task.Delay` wait `ceil(seconds / fixedDelta)` ticks, with decimal multiples of the tick counted exactly (0.14 s at 50 Hz is 7 ticks). Prefer `Task.WaitTicks` when you mean ticks.
+
+## Limits
+
+Log entries and `print` keep at most 8 KiB each (longer text is truncated and marked) and one VM writes at most 1024 entries per frame (the rest are counted and dropped); evaluation output still captures every line. `Debug.DrawText` text is at most 1024 bytes, entity names 256 bytes, and an entity carries at most 256 tags of at most 256 bytes each; one component field value a script writes (for example `Text.Text`, or a value passed to `AddComponent`) holds at most 4096 bytes of text; `Audio.PlayOneShot` starts at most 1024 one-shots per frame. Larger values raise a located error before any change. Test scripts have their own limits: suite and case names at most 256 bytes, `Test.ExpectScriptError` patterns at most 1 KiB, at most 4096 cases per suite, 1024 `Test.Inject*` events per input tick and 256 `Test.Screenshot` calls per suite; a row keeps 32 failures (the last counts the rest) and a suite 1024, and a case keeps at most 256 unclaimed script errors. `script.errors` keeps 256 distinct errors with 8 KiB messages and 32 traceback frames, and reports `evicted` when older ones were dropped.
+
 ## Testing and diagnosis
 
 Create test scripts with `Test.Suite` and register `Test.Case` inside the suite body; the body registers cases, while the cases perform runtime work. Use `Test.Inject*` and `Test.WaitTicks` for deterministic input. `Test.Expect` records a failure and continues; `Test.Fail` ends the case. Configure suites in `Testing.Suites` with their scene, parameters and supported modes. Run with `test.run` or `Editor --headless --project <project> --run-tests`; `--filter` selects a suite/case.

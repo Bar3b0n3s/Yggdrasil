@@ -14,6 +14,7 @@
 #include "Engine/Scripting/Private/SandboxAccess.h"
 #include "Engine/Scripting/Private/ScriptEngineAccess.h"
 #include "Engine/Scripting/ScriptEngine.h"
+#include "Engine/Scripting/ScriptLimits.h"
 
 #include <lualib.h>
 #include <nlohmann/json.hpp>
@@ -80,6 +81,53 @@ namespace Engine {
 			std::construct_at(static_cast<T*>(lua_newuserdatataggedwithmetatable(call.State, sizeof(T), tag)), value);
 		}
 
+		// Immutable identity values (Entity, component proxies, AssetRef) are interned per VM: while any reference to the
+		// userdata for an identity is alive, every push of that identity returns the same userdata. Table keys and
+		// rawequal therefore see one identity, so a set filled from OnTriggerEnter's `other` can be cleared from
+		// OnTriggerExit (M13 review F36). The cache's values are weak, so it never keeps an identity alive, and a script can
+		// only tell a fresh userdata from a collected one by keeping it, which keeps it cached. `key` is the payload's
+		// canonical field bytes (never struct padding).
+		template<typename T>
+		static void PushInternedPayload(ScriptCall& call, const T& value, int tag, std::string_view key)
+		{
+			lua_State* state = call.State;
+			if (!lua_checkstack(state, 4))
+				Lua::RaiseError(call, "identity push exceeds the VM stack limit");
+			lua_rawgetfield(state, LUA_REGISTRYINDEX, "Engine.Interned");
+			if (!lua_istable(state, -1))
+			{
+				lua_pop(state, 1);
+				lua_newtable(state);
+				lua_newtable(state);
+				lua_pushliteral(state, "v");
+				lua_rawsetfield(state, -2, "__mode");
+				lua_setmetatable(state, -2);
+				lua_pushvalue(state, -1);
+				lua_rawsetfield(state, LUA_REGISTRYINDEX, "Engine.Interned");
+			}
+			const int cache = lua_gettop(state);
+			lua_pushlstring(state, key.data(), key.size());
+			lua_pushvalue(state, -1);
+			lua_rawget(state, cache);
+			if (lua_touserdatatagged(state, -1, tag) != nullptr)
+			{
+				lua_replace(state, cache);
+				lua_settop(state, cache);
+				return;
+			}
+			lua_pop(state, 1);
+			PushPayload(call, value, tag); // [cache, key, userdata]
+			lua_pushvalue(state, -1);
+			lua_insert(state, cache);     // [userdata, cache, key, userdata]
+			lua_rawset(state, cache + 1); // cache[key] = userdata
+			lua_settop(state, cache);     // [userdata]
+		}
+		static void AppendKeyBytes(std::string& key, uint64_t value)
+		{
+			for (int shift = 0; shift < 64; shift += 8)
+				key += static_cast<char>((value >> shift) & 0xFF);
+		}
+
 		static ScriptApiRegistry& Api(ScriptCall& call)
 		{
 			return *Detail::SandboxAccess::GetApi(*call.Sandbox);
@@ -92,6 +140,7 @@ namespace Engine {
 			size_t length = 0;
 			const char* text = lua_tolstring(call.State, index, &length);
 			// Charge before either scanning or copying a script-owned string, including object keys.
+			ENGINE_TRY(budget.ChargeRetainedText(length));
 			ENGINE_TRY(budget.Charge(length, Detail::NativeConversionBudget::StringByteCopies));
 			if (!IsValidUtf8(std::string_view(text, length)))
 				return MakeError(ErrorCode::Script, "JSON string or object key is not valid UTF-8");
@@ -383,7 +432,7 @@ namespace Engine {
 				case FieldType::Quat:   return Value::FromQuat(Lua::Check<glm::quat>(call, index));
 				case FieldType::Color3: return Value::FromColor3(glm::vec3(Lua::Check<glm::vec4>(call, index)));
 				case FieldType::Color4: return Value::FromColor4(Lua::Check<glm::vec4>(call, index));
-				case FieldType::String: return Value::FromString(budget.ReadString(index));
+				case FieldType::String: return Value::FromString(budget.ReadRetainedString(index));
 				case FieldType::EntityRef:
 				{
 					if (Lua::IsNoneOrNil(call, index))
@@ -460,7 +509,8 @@ namespace Engine {
 			while (lua_next(state, index))
 			{
 				budget.Check(Detail::NativeConversionBudget::EntryBytes);
-				frame.Keys.push_back(budget.ReadString(-2));
+				// Map keys are kept with the value; struct keys only select declared members.
+				frame.Keys.push_back(type.GetKind() == FieldType::Map ? budget.ReadRetainedString(-2) : budget.ReadString(-2));
 				lua_pop(state, 1);
 			}
 			std::ranges::sort(frame.Keys);
@@ -771,13 +821,20 @@ namespace Engine {
 			ENGINE_TRY_ASSIGN(const auto bytes, reader.ReadBytes(static_cast<size_t>(size)));
 			return std::string(AsStringView(bytes));
 		}
-		static Result<ScriptError> ReadForwardedError(lua_State* state, int index)
+		struct ForwardedErrorRecord
+		{
+			ScriptError Error{};
+			uint64_t Slice = 0; // the execution slice that raised it (SandboxAccess::GetSlice)
+		};
+		static Result<ForwardedErrorRecord> ReadForwardedError(lua_State* state, int index)
 		{
 			const void* bytes = lua_touserdatatagged(state, index, std::to_underlying(Detail::ScriptValueTag::ForwardedError));
 			if (!bytes)
 				return MakeError(ErrorCode::NotFound, "not a forwarded script error");
 			BinaryReader reader({ static_cast<const std::byte*>(bytes), static_cast<size_t>(lua_objlen(state, index)) });
-			ScriptError error;
+			ForwardedErrorRecord forwarded;
+			ENGINE_TRY_ASSIGN(forwarded.Slice, reader.ReadU64());
+			ScriptError& error = forwarded.Error;
 			ENGINE_TRY_ASSIGN(error.ID, reader.ReadU64());
 			ENGINE_TRY_ASSIGN(const auto kind, reader.ReadU8());
 			if (kind > std::to_underlying(ScriptErrorKind::Memory))
@@ -807,13 +864,13 @@ namespace Engine {
 			}
 			if (!reader.IsAtEnd())
 				return MakeError(ErrorCode::Parse, "trailing forwarded script error bytes");
-			return error;
+			return forwarded;
 		}
 		static int ForwardedErrorText(lua_State* state)
 		{
-			const auto error = ReadForwardedError(state, 1);
-			if (error)
-				lua_pushlstring(state, error->Message.data(), error->Message.size());
+			const auto forwarded = ReadForwardedError(state, 1);
+			if (forwarded)
+				lua_pushlstring(state, forwarded->Error.Message.data(), forwarded->Error.Message.size());
 			else
 				lua_pushliteral(state, "invalid forwarded script error");
 			return 1;
@@ -821,6 +878,7 @@ namespace Engine {
 		static void PushForwardedError(ScriptCall& call, const ScriptError& error)
 		{
 			BinaryWriter writer;
+			writer.WriteU64(Detail::SandboxAccess::GetSlice(*call.Sandbox));
 			writer.WriteU64(error.ID);
 			writer.WriteU8(std::to_underlying(error.Kind));
 			WriteErrorText(writer, error.Script);
@@ -859,13 +917,31 @@ namespace Engine {
 			void* payload = lua_newuserdatataggedwithmetatable(call.State, writer.GetSize(), Tag);
 			std::memcpy(payload, writer.GetData().data(), writer.GetSize());
 		}
+		// "<script stem>.<callback>" for safety messages (Architecture §11.1: "... in Board.OnFixedUpdate ..."). A module top
+		// level (load-time import, require, RunModule) has no callback and reads "<stem>.<module top>".
+		static std::string SafetyLabel(const Detail::SandboxExecutionContext& context)
+		{
+			std::string_view stem = context.Script;
+			if (const size_t slash = stem.rfind('/'); slash != std::string_view::npos)
+				stem.remove_prefix(slash + 1);
+			if (const size_t dot = stem.rfind('.'); dot != std::string_view::npos && dot != 0)
+				stem = stem.substr(0, dot);
+			return std::format("{}.{}", stem.empty() ? std::string_view("script") : stem, context.Callback.empty() ? std::string_view("<module top>") : std::string_view(context.Callback));
+		}
+
 		static ScriptError CaptureFailure(ScriptCall& call, ScriptErrorKind kind)
 		{
+			std::optional<std::string> staleForwardedMessage;
 			if (lua_userdatatag(call.State, -1) == std::to_underlying(Detail::ScriptValueTag::ForwardedError))
 			{
 				auto forwarded = ReadForwardedError(call.State, -1);
-				if (forwarded && (kind == ScriptErrorKind::Runtime || kind == forwarded->Kind))
-					return std::move(*forwarded);
+				// A forwarded record is authoritative only in the slice that raised it. A script may catch one with pcall,
+				// keep it and raise it again later: that later fault belongs to the raising frame and current owner, with a
+				// runtime kind, never to the stale kind/entity of the original child (M13 review F09).
+				if (forwarded && forwarded->Slice == Detail::SandboxAccess::GetSlice(*call.Sandbox) && (kind == ScriptErrorKind::Runtime || kind == forwarded->Error.Kind))
+					return std::move(forwarded->Error);
+				if (forwarded)
+					staleForwardedMessage = std::move(forwarded->Error.Message);
 			}
 			const auto context = Detail::SandboxAccess::GetContext(*call.Sandbox);
 			ScriptError error;
@@ -875,14 +951,19 @@ namespace Engine {
 			error.Entity = context.Entity;
 			error.EntityName = context.EntityName;
 			error.Tick = context.Tick;
+			// The raised value stays on the stack while it is read, so the message is viewed in place: the host never copies
+			// more of it than the retained error keeps (MaxScriptLogMessageBytes, ScriptLimits.h).
+			std::string_view message = "script raised a non-string error";
 			if (lua_type(call.State, -1) == LUA_TSTRING)
 			{
 				size_t length = 0;
-				const char* message = lua_tolstring(call.State, -1, &length);
-				error.Message.assign(message, length);
+				const char* raised = lua_tolstring(call.State, -1, &length);
+				message = std::string_view(raised, length);
 			}
-			else
-				error.Message = "script raised a non-string error";
+			else if (staleForwardedMessage)
+				message = *staleForwardedMessage;
+			// Frames past the cap are only counted; the retained traceback ends with a frame saying how many were left out.
+			uint64_t omittedFrames = 0;
 			for (int level = 0; level < lua_stackdepth(call.State); ++level)
 			{
 				lua_Debug frame{};
@@ -898,15 +979,24 @@ namespace Engine {
 					error.Column = location.Column;
 					error.JsonPointer = location.JsonPointer.value_or("");
 					const std::string prefix = std::format("{}:{}: ", frame.source[0] == '@' || frame.source[0] == '=' ? frame.source + 1 : frame.source, frame.currentline);
-					if (error.Message.starts_with(prefix))
-						error.Message.erase(0, prefix.size());
+					if (message.starts_with(prefix))
+						message.remove_prefix(prefix.size());
 				}
-				error.Traceback.push_back({ location.File, location.Line, frame.name ? frame.name : "" });
+				if (error.Traceback.size() < MaxScriptErrorTracebackFrames)
+					error.Traceback.push_back({ location.File, location.Line, frame.name ? frame.name : "" });
+				else
+					++omittedFrames;
 			}
+			if (omittedFrames != 0)
+				error.Traceback.back() = { .Script = {}, .Line = 0, .Function = std::format("[truncated: {} more frames]", omittedFrames + 1) };
+			// error(message, 2) and VM errors carry the location of another frame, often in another chunk, under its
+			// private identity. Show it as the authored location instead (ADR 0019 decision 4, M13 review F06); longer text
+			// is cut with the diagnostic marker.
+			error.Message = Detail::SandboxAccess::BoundScriptText(*call.Sandbox, message.substr(0, MaxScriptLogMessageBytes), message.size());
 			if (kind == ScriptErrorKind::Timeout)
-				error.Message = std::format("script exceeded {} ms in {} (possible infinite loop)", Detail::SandboxAccess::GetBudgetMs(*call.Sandbox), context.Callback);
+				error.Message = std::format("script exceeded {} ms in {} (possible infinite loop)", Detail::SandboxAccess::GetBudgetMs(*call.Sandbox), SafetyLabel(context));
 			if (kind == ScriptErrorKind::Memory)
-				error.Message = std::format("script exceeded memory limit {} MB in {}", call.Sandbox->GetMemoryState().SoftLimitBytes / (1024 * 1024), context.Callback);
+				error.Message = std::format("script exceeded memory limit {} MB in {}", call.Sandbox->GetMemoryState().SoftLimitBytes / (1024 * 1024), SafetyLabel(context));
 			return error;
 		}
 
@@ -1059,6 +1149,32 @@ namespace Engine {
 			return std::string(text, length);
 		}
 
+		void NativeConversionBudget::LimitRetainedText(uint64_t maximumBytes, std::string_view fieldName)
+		{
+			m_RetainedLimit = maximumBytes;
+			m_RetainedField = fieldName;
+		}
+
+		Status NativeConversionBudget::ChargeRetainedText(uint64_t length)
+		{
+			if (length > m_RetainedLimit - m_RetainedBytes)
+				return MakeError(ErrorCode::Script, "field '{}' holds more than the {} bytes of text a script may write into a component "
+													"(strings, map keys and Variant text together)",
+					m_RetainedField, m_RetainedLimit);
+			m_RetainedBytes += length;
+			return {};
+		}
+
+		std::string NativeConversionBudget::ReadRetainedString(int index)
+		{
+			Utils::RequireType(m_Call, index, LUA_TSTRING);
+			size_t length = 0;
+			static_cast<void>(lua_tolstring(m_Call.State, index, &length));
+			if (const auto status = ChargeRetainedText(length); !status)
+				Lua::RaiseError(m_Call, status.error());
+			return ReadString(index);
+		}
+
 		Result<Json> SandboxAccess::ReadJson(ScriptCall& call, int index)
 		{
 			std::vector<const void*> ancestors;
@@ -1134,6 +1250,22 @@ namespace Engine {
 			size_t length = 0;
 			const char* value = lua_tolstring(call.State, index, &length);
 			return std::string(value, length);
+		}
+		std::string CheckBoundedString(ScriptCall& call, int index, size_t maximumBytes)
+		{
+			Utils::RequireType(call, index, LUA_TSTRING);
+			size_t length = 0;
+			const char* value = lua_tolstring(call.State, index, &length);
+			if (length > maximumBytes)
+				RaiseError(call, std::format("argument #{} is {} bytes; the limit is {}", index, length, maximumBytes));
+			return std::string(value, length);
+		}
+		std::string CheckDiagnosticText(ScriptCall& call, int index)
+		{
+			Utils::RequireType(call, index, LUA_TSTRING);
+			size_t length = 0;
+			const char* value = lua_tolstring(call.State, index, &length);
+			return Detail::SandboxAccess::BoundScriptText(*call.Sandbox, std::string_view(value, std::min(length, MaxScriptLogMessageBytes)), length);
 		}
 		template<>
 		glm::vec3 Check<glm::vec3>(ScriptCall& call, int index)
@@ -1273,17 +1405,28 @@ namespace Engine {
 		void Push<AssetHandle>(ScriptCall& call, const AssetHandle& value)
 		{
 			if (!value.IsValid())
+			{
 				PushNil(call);
-			else
-				Utils::PushPayload(call, value, std::to_underlying(Detail::ScriptValueTag::AssetRef));
+				return;
+			}
+			constexpr int Tag = std::to_underlying(Detail::ScriptValueTag::AssetRef);
+			std::string key(1, static_cast<char>(Tag));
+			Utils::AppendKeyBytes(key, value.GetValue());
+			Utils::PushInternedPayload(call, value, Tag, key);
 		}
 		template<>
 		void Push<ScriptEntityIdentity>(ScriptCall& call, const ScriptEntityIdentity& value)
 		{
 			if (!value.ID.IsValid() || value.SceneGeneration == 0)
+			{
 				PushNil(call);
-			else
-				Utils::PushPayload(call, value, std::to_underlying(Detail::ScriptValueTag::Entity));
+				return;
+			}
+			constexpr int Tag = std::to_underlying(Detail::ScriptValueTag::Entity);
+			std::string key(1, static_cast<char>(Tag));
+			Utils::AppendKeyBytes(key, value.ID.GetValue());
+			Utils::AppendKeyBytes(key, value.SceneGeneration);
+			Utils::PushInternedPayload(call, value, Tag, key);
 		}
 		template<>
 		void Push<ScriptProxyIdentity>(ScriptCall& call, const ScriptProxyIdentity& value)
@@ -1298,7 +1441,12 @@ namespace Engine {
 				RaiseError(call, "invalid component type");
 				return;
 			}
-			Utils::PushPayload(call, value, Detail::GetScriptValueTag(Utils::Api(call), call.Engine->GetHost().GetTypes().GetComponents()[value.ComponentTypeIndex]->GetName()));
+			const int tag = Detail::GetScriptValueTag(Utils::Api(call), call.Engine->GetHost().GetTypes().GetComponents()[value.ComponentTypeIndex]->GetName());
+			std::string key(1, static_cast<char>(std::to_underlying(Detail::ScriptValueTag::ComponentBegin)));
+			Utils::AppendKeyBytes(key, value.Entity.ID.GetValue());
+			Utils::AppendKeyBytes(key, value.Entity.SceneGeneration);
+			Utils::AppendKeyBytes(key, value.ComponentTypeIndex);
+			Utils::PushInternedPayload(call, value, tag, key);
 		}
 		Random& CheckRandomStorage(ScriptCall& call, int index)
 		{
@@ -1419,6 +1567,9 @@ namespace Engine {
 		{
 			std::vector<const void*> ancestors;
 			Detail::NativeConversionBudget budget(call);
+			// A component keeps the value outside the VM allocator, and one VM string could fill any number of them.
+			if (resolve.OwnerType != nullptr)
+				budget.LimitRetainedText(MaxScriptComponentStringBytes, field.GetName());
 			auto value = Utils::ReadValue(call, index, field.GetType(), &field, resolve, ancestors, budget);
 			budget.CheckDeadline();
 			return value;

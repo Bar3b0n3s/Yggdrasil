@@ -6,16 +6,20 @@
 #include "Engine/Asset/EnvironmentData.h"
 #include "Engine/Asset/MaterialData.h"
 #include "Engine/Asset/TextureData.h"
+#include "Engine/Core/Log.h"
+#include "Engine/Graphics/GpuResourceTracker.h"
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Graphics/Image.h"
 #include "Engine/Graphics/Readback.h"
 #include "Engine/Renderer/BrdfLut.h"
 #include "Engine/Renderer/GpuResourceCache.h"
-#include "Engine/Renderer/RenderPrepare.h"
 #include "Engine/Renderer/Private/SceneRendererIntegrationFixture.h"
+#include "Engine/Renderer/RenderPrepare.h"
 #include "Engine/Renderer/RenderSnapshot.h"
+#include "Engine/Renderer/SpotShadowAtlas.h"
 #include "Engine/Renderer/ViewportCapture.h"
 #include "Support/AssetTestFixture.h"
+#include "Support/DeathTest.h"
 #include "Support/ExpectLog.h"
 #include "Support/HeadlessGpuFixture.h"
 #include "Support/InMemoryAssetManager.h"
@@ -33,7 +37,9 @@
 #include <cstdlib>
 #include <cstring>
 #include <limits>
+#include <string_view>
 #include <utility>
+#include <vector>
 
 // The scene renderer (Architecture §8.2 to §8.6; Roadmap M7 and M8): the walking skeleton's cases
 // (Docs/Decisions/0012-m7-decisions.md decision 7) and M8's PBR forward passes, IBL, light list, debug views and normal maps
@@ -130,6 +136,64 @@ namespace Engine {
 			// Y00 = 0.282095: c00 * Y00 = radiance.
 			environment.IrradianceSH9[0] = glm::vec3(static_cast<float>(radiance / 0.28209479177387814));
 			return CreateRef<EnvironmentData>(std::move(environment));
+		}
+
+		// A directional light along -Z with hard, unbiased shadows over ShadowDistance 10 in one cascade.
+		LightData MakeShadowingSun(float intensity)
+		{
+			LightData sun;
+			sun.Direction = glm::vec3(0.0f, 0.0f, -1.0f);
+			sun.Intensity = intensity;
+			sun.CastShadows = true;
+			sun.ShadowDistance = 10.0f;
+			sun.CascadeCount = 1;
+			sun.DepthBias = sun.NormalBias = 0.0f;
+			sun.LightAngle = 0.0f;
+			sun.Entity = UUID(22);
+			return sun;
+		}
+
+		// A shadow-casting spot at `position` shining down -Z.
+		LightData MakeShadowingSpot(const glm::vec3& position, float intensity, UUID entity)
+		{
+			LightData spot;
+			spot.Type = RenderLightType::Spot;
+			spot.Position = position;
+			spot.Direction = glm::vec3(0.0f, 0.0f, -1.0f);
+			spot.Intensity = intensity;
+			spot.Range = 6.0f;
+			spot.InnerConeAngle = 8.0f;
+			spot.OuterConeAngle = 12.0f;
+			spot.SourceRadius = 0.0f;
+			spot.CastShadows = true;
+			spot.Entity = entity;
+			return spot;
+		}
+
+		// The fixture's snapshot with its quad as a receiver filling the view at z = -5 (casting no shadow), no ambient light,
+		// and a second quad of half extent `blockerScale` at `blocker` that casts.
+		RenderSnapshot MakeShadowScene(Test::SceneRendererIntegrationFixture& fixture, const glm::vec3& blocker, float blockerScale)
+		{
+			RenderSnapshot snapshot = fixture.Snapshot();
+			snapshot.Environment.FallbackColor = glm::vec3(0.0f);
+			snapshot.Meshes[0].World = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, -5.0f)) * glm::scale(glm::mat4(1.0f), glm::vec3(4.0f, 4.0f, 1.0f));
+			snapshot.Meshes[0].CastShadows = false;
+			MeshDrawItem caster = snapshot.Meshes[0];
+			caster.Entity = UUID(40);
+			caster.PickId = 2;
+			caster.CastShadows = true;
+			caster.World = glm::translate(glm::mat4(1.0f), blocker) * glm::scale(glm::mat4(1.0f), glm::vec3(blockerScale));
+			snapshot.Meshes.push_back(caster);
+			return snapshot;
+		}
+
+		// The names of `stats`' pass rows, in order.
+		std::vector<std::string> GetPassNames(const RenderStats& stats)
+		{
+			std::vector<std::string> names;
+			for (const RenderPassStats& pass : stats.Passes)
+				names.push_back(pass.Name);
+			return names;
 		}
 
 		// The pipelines, a cache and a renderer of `width` x `height` over the fixture's device and asset manager.
@@ -1162,7 +1226,9 @@ namespace Engine {
 			light.CascadeSplitLambda = 0;
 			light.ShadowDistance = 10;
 			snapshot.Lights = { light };
-			for (const auto& [distance, expected] : std::array<std::pair<float, glm::ivec3>, 5>{ { { 3.0f, { 255, 0, 0 } }, { 7.0f, { 0, 255, 0 } }, { 4.8025f, { 128, 128, 0 } }, { 9.7525f, { 0, 128, 0 } }, { 11.0f, { 0, 0, 0 } } } })
+			// Splits 0.1, 5.05 and 10: cascade 0 blends into cascade 1 over [4.555, 5.05], and the shadows fade out over the last
+			// tenth of the shadow distance, [9, 10], so 9.7525 keeps a weight of 0.2475 (M9-F04).
+			for (const auto& [distance, expected] : std::array<std::pair<float, glm::ivec3>, 5>{ { { 3.0f, { 255, 0, 0 } }, { 7.0f, { 0, 255, 0 } }, { 4.8025f, { 128, 128, 0 } }, { 9.7525f, { 0, 63, 0 } }, { 11.0f, { 0, 0, 0 } } } })
 			{
 				CAPTURE(distance);
 				snapshot.Meshes[0].World[3].z = -distance;
@@ -1215,8 +1281,328 @@ namespace Engine {
 		}
 	}
 
+	// The child of "SceneRenderer: an out-of-memory debug-view pipeline is fatal": the first Albedo render creates the view's
+	// pipelines, whose shader specializations fail as if the device were out of memory.
+	ENGINE_DEATH_TEST("Renderer/DebugViewPipelineOutOfMemory")
+	{
+		Test::HeadlessGpuFixture gpu({ .InjectFault = GpuFault::OomSpecialization });
+		if (!gpu.IsAvailable())
+		{
+			ENGINE_CORE_ERROR("The death test needs a GPU");
+			return;
+		}
+		Test::InMemoryAssetManager assets;
+		GpuResourceCache cache(gpu.GetDevice(), assets);
+		Result<Scope<SceneRendererPipelines>> pipelines = SceneRendererPipelines::Create(gpu.GetDevice(), gpu.GetPipelines());
+		if (!pipelines.has_value())
+		{
+			ENGINE_CORE_ERROR("Cannot create the pipelines: {}", pipelines.error());
+			return;
+		}
+		Result<Scope<SceneRenderer>> renderer = SceneRenderer::Create(gpu.GetDevice(), **pipelines, cache, assets, { .Width = 8, .Height = 8 });
+		Result<nvrhi::CommandListHandle> commandList = gpu.GetDevice().CreateCommandList();
+		if (!renderer.has_value() || !commandList.has_value())
+		{
+			ENGINE_CORE_ERROR("Cannot create the renderer or a command list");
+			return;
+		}
+		RenderSnapshot snapshot;
+		snapshot.DebugView = RenderDebugView::Albedo;
+		(*commandList)->open();
+		const Status rendered = (*renderer)->Render(**commandList, snapshot);
+		ENGINE_CORE_ERROR("Render returned instead of failing: {}", rendered.has_value() ? std::string("success") : rendered.error().ToString());
+	}
+
 	TEST_SUITE(Test::GpuSuite)
 	{
+		TEST_CASE("SceneRenderer: an out-of-memory debug-view pipeline is fatal")
+		{
+			// §8.14 item 7: a pipeline creation failure is FatalError(OutOfMemory), including the debug views' lazily created
+			// pipelines (M9-F39: M9 had turned it into an ordinary error, which the Runtime's screenshot path only returned).
+			if (!Test::ProbeGpuForProcess())
+				return;
+			ENGINE_CHECK_DEATH("Renderer/DebugViewPipelineOutOfMemory", "Cannot create the Albedo debug view's pipelines");
+		}
+
+		TEST_CASE("SceneRenderer: an out-of-range debug view is an invalid argument")
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::SceneRendererIntegrationFixture fixture(gpu);
+			RenderSnapshot snapshot = fixture.Snapshot();
+			snapshot.DebugView = static_cast<RenderDebugView>(RenderDebugViewCount);
+			auto list = gpu.GetDevice().CreateCommandList();
+			REQUIRE(list);
+			(*list)->open();
+			const Status rendered = fixture.Renderer().Render(**list, snapshot);
+			(*list)->close();
+			fixture.Renderer().OnSubmitted(snapshot.FrameIndex, gpu.GetDevice().ExecuteCommandList(**list));
+			REQUIRE_FALSE(rendered.has_value());
+			CHECK(rendered.error().GetCode() == ErrorCode::InvalidArgument);
+		}
+
+		TEST_CASE("SceneRenderer: transparent surfaces ignore the GTAO of the opaque surface behind them")
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::SceneRendererIntegrationFixture fixture(gpu);
+			// An inner corner (a wall at z = -4 meeting a floor at y = -1) lit only by the constant ambient (indirect light),
+			// with an opaque-looking Blend quad (alpha 1, red) 0.5 m in front of the corner: its colour is its own shading only.
+			MaterialData glass;
+			glass.AlphaMode = AlphaMode::Blend;
+			glass.BaseColor = glm::vec4(1.0f, 0.25f, 0.25f, 1.0f);
+			const AssetHandle glassMaterial{ 8912 };
+			fixture.Assets().Publish(glassMaterial, CreateRef<MaterialData>(glass));
+			RenderSnapshot snapshot = fixture.Snapshot();
+			snapshot.Environment.FallbackColor = glm::vec3(0.5f);
+			snapshot.Post.SsaoIntensity = 4.0f;
+			snapshot.Meshes[0].World = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, -4.0f)) * glm::scale(glm::mat4(1.0f), glm::vec3(3.0f, 3.0f, 1.0f));
+			MeshDrawItem floor = snapshot.Meshes[0];
+			floor.Entity = UUID(40);
+			floor.PickId = 2;
+			floor.World = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, -1.0f, -2.5f)) * glm::rotate(glm::mat4(1.0f), -glm::half_pi<float>(), glm::vec3(1.0f, 0.0f, 0.0f))
+				* glm::scale(glm::mat4(1.0f), glm::vec3(3.0f, 1.5f, 1.0f));
+			snapshot.Meshes.push_back(floor);
+			MeshDrawItem pane = snapshot.Meshes[0];
+			pane.Entity = UUID(700);
+			pane.PickId = 3;
+			pane.Materials = { glassMaterial };
+			pane.World = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, -0.875f, -3.5f)) * glm::scale(glm::mat4(1.0f), glm::vec3(0.6f, 0.3f, 1.0f));
+			snapshot.Post.SsaoEnabled = false;
+			const Image cornerOff = fixture.Render(snapshot);
+			snapshot.Post.SsaoEnabled = true;
+			const Image cornerOn = fixture.Render(snapshot);
+			snapshot.Meshes.push_back(pane);
+			const Image paneOn = fixture.Render(snapshot);
+			snapshot.Post.SsaoEnabled = false;
+			const Image paneOff = fixture.Render(snapshot);
+			size_t covered = 0;
+			size_t occludedBehind = 0;
+			for (size_t pixel = 0; pixel < paneOff.Pixels.size(); pixel += 4)
+			{
+				// The pane's pixels: red now where the white corner was.
+				if (paneOff.Pixels[pixel + 1] == cornerOff.Pixels[pixel + 1])
+					continue;
+				++covered;
+				if (std::to_integer<int>(cornerOn.Pixels[pixel]) + 2 < std::to_integer<int>(cornerOff.Pixels[pixel]))
+					++occludedBehind;
+				for (size_t channel = 0; channel < 3; ++channel)
+					CHECK(paneOn.Pixels[pixel + channel] == paneOff.Pixels[pixel + channel]);
+			}
+			CHECK(covered > 50);
+			CHECK(occludedBehind > 10); // GTAO darkens the corner behind the pane, which must not reach the pane's own shading
+		}
+
+		TEST_CASE("SceneRenderer: a caster outside the camera frustum still shadows a visible receiver")
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::SceneRendererIntegrationFixture fixture(gpu);
+			// The blocker is behind the camera (z = +2), outside every frustum plane, on the light ray of the receiver's centre.
+			RenderSnapshot snapshot = MakeShadowScene(fixture, glm::vec3(0.0f, 0.0f, 2.0f), 0.5f);
+			snapshot.Lights = { MakeShadowingSun(0.5f) };
+			const Image shadowed = fixture.Render(snapshot);
+			const RenderStats stats = fixture.Renderer().GetRenderStats();
+			CHECK(stats.VisibleMeshes == 1);
+			const RenderPassStats* shadows = Test::SceneRendererIntegrationFixture::FindPass(stats, "DirectionalShadows");
+			REQUIRE(shadows != nullptr);
+			CHECK(shadows->DrawCalls == 1);
+			snapshot.Meshes[1].CastShadows = false;
+			const Image lit = fixture.Render(snapshot);
+			CAPTURE(Test::SceneRendererIntegrationFixture::Channel(shadowed, 32, 32));
+			CAPTURE(Test::SceneRendererIntegrationFixture::Channel(lit, 32, 32));
+			CHECK(Test::SceneRendererIntegrationFixture::Channel(lit, 32, 32) > Test::SceneRendererIntegrationFixture::Channel(shadowed, 32, 32) + 100);
+			CHECK(std::abs(Test::SceneRendererIntegrationFixture::Channel(lit, 2, 2) - Test::SceneRendererIntegrationFixture::Channel(shadowed, 2, 2)) <= 1);
+		}
+
+		TEST_CASE("SceneRenderer: a light the shadow planners reject stays lit and leaves the others their shadows")
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::SceneRendererIntegrationFixture fixture(gpu);
+			Test::ExpectLog warning(LogLevel::Warn, "cannot be shadowed");
+			// The blocker at x = 1 throws its shadow along the slanted light onto the receiver's centre (x = 0 at z = -5).
+			RenderSnapshot snapshot = MakeShadowScene(fixture, glm::vec3(1.0f, 0.0f, -3.0f), 0.3f);
+			const glm::vec3 slanted = glm::normalize(glm::vec3(-0.5f, 0.0f, -1.0f));
+			// Schema-valid data the cascade planner rejects: a ShadowDistance within the camera's near plane (0.1).
+			LightData rejected = MakeShadowingSun(0.25f);
+			rejected.Direction = slanted;
+			rejected.ShadowDistance = 0.05f;
+			rejected.Entity = UUID(21);
+			LightData valid = MakeShadowingSun(0.5f);
+			valid.Direction = slanted;
+			snapshot.Lights = { rejected, valid };
+			const Image shadowed = fixture.Render(snapshot);
+			++snapshot.FrameIndex;
+			const Image again = fixture.Render(snapshot);
+			CHECK(again.Pixels == shadowed.Pixels);
+			CHECK(warning.GetMatchCount() == 1);
+			snapshot.Meshes[1].CastShadows = false;
+			const Image uncast = fixture.Render(snapshot);
+			const int dark = Test::SceneRendererIntegrationFixture::Channel(shadowed, 32, 32);
+			CAPTURE(dark);
+			CHECK(dark > 20); // the rejected light still lights the receiver, unshadowed
+			CHECK(Test::SceneRendererIntegrationFixture::Channel(uncast, 32, 32) > dark + 20);
+
+			// A spot whose cone the atlas cannot project (Inner > Outer) is left unshadowed; the valid spot keeps its tile. The
+			// valid spot sits on the line from the receiver's centre through the blocker.
+			LightData invalid = MakeShadowingSpot(glm::vec3(-2.0f, 0.0f, 0.0f), 4.0f, UUID(31));
+			invalid.InnerConeAngle = 40.0f;
+			invalid.OuterConeAngle = 30.0f;
+			LightData spot = MakeShadowingSpot(glm::vec3(2.5f, 0.0f, 0.0f), 40.0f, UUID(32));
+			spot.Direction = glm::normalize(glm::vec3(-2.5f, 0.0f, -5.0f));
+			spot.Range = 8.0f;
+			snapshot.Lights = { invalid, spot };
+			snapshot.Meshes[1].CastShadows = true;
+			const Image spotShadowed = fixture.Render(snapshot);
+			CHECK(fixture.Renderer().GetRenderStats().ShadowedSpotLights == 1);
+			snapshot.Meshes[1].CastShadows = false;
+			const Image spotUncast = fixture.Render(snapshot);
+			CHECK(Test::SceneRendererIntegrationFixture::Channel(spotUncast, 32, 32) > Test::SceneRendererIntegrationFixture::Channel(spotShadowed, 32, 32) + 20);
+		}
+
+		TEST_CASE("SceneRenderer: more visible shadowed spots than the budget warn once and stay lit")
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::SceneRendererIntegrationFixture fixture(gpu);
+			RenderSnapshot snapshot = MakeShadowScene(fixture, glm::vec3(0.0f, 0.0f, -3.0f), 0.1f);
+			// Eight bright spots on the left half and a ninth, the least important, on the right: it loses its shadow only.
+			for (uint32_t index = 0; index < MaxSpotShadowLights; ++index)
+				snapshot.Lights.push_back(MakeShadowingSpot(glm::vec3(-1.5f, -0.6f + 0.15f * static_cast<float>(index), 0.0f), 40.0f, UUID(100 + index)));
+			snapshot.Lights.push_back(MakeShadowingSpot(glm::vec3(1.5f, 0.0f, 0.0f), 4.0f, UUID(200)));
+			Test::ExpectLog warning(LogLevel::Warn, std::string(RenderSpotShadowBudgetCode));
+			const Image first = fixture.Render(snapshot);
+			++snapshot.FrameIndex;
+			const Image second = fixture.Render(snapshot);
+			CHECK(warning.GetMatchCount() == 1);
+			const RenderStats stats = fixture.Renderer().GetRenderStats();
+			CHECK(stats.ShadowedSpotLights == MaxSpotShadowLights);
+			CHECK(stats.DroppedSpotShadows == 1);
+			CHECK(fixture.Renderer().GetLastStats().Lights == MaxSpotShadowLights + 1);
+			// The dropped spot still lights its receiver (x = 1.5 at z = -5 is pixel 32 + 1.5 / (5 tan 30) * 32 = 48.6).
+			CHECK(Test::SceneRendererIntegrationFixture::Channel(second, 49, 32) > 20);
+			CHECK(second.Pixels == first.Pixels);
+		}
+
+		TEST_CASE("SceneRenderer: steady-state shadowed renders create no GPU objects")
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::SceneRendererIntegrationFixture fixture(gpu);
+			RenderSnapshot snapshot = MakeShadowScene(fixture, glm::vec3(0.0f, 0.0f, -3.0f), 0.3f);
+			LightData sun = MakeShadowingSun(0.5f);
+			sun.CascadeCount = 4;
+			snapshot.Lights = { sun, MakeShadowingSpot(glm::vec3(0.5f, 0.0f, 0.0f), 20.0f, UUID(31)), MakeShadowingSpot(glm::vec3(-0.5f, 0.0f, 0.0f), 20.0f, UUID(32)) };
+			for (uint32_t frame = 0; frame < 2; ++frame, ++snapshot.FrameIndex)
+				fixture.Submit(snapshot);
+			const GpuResourceTracker& tracker = gpu.GetDevice().GetResourceTracker();
+			const auto created = [&tracker]()
+			{
+				return std::array<uint64_t, 3>{ tracker.GetCounts(GpuResourceType::GpuBuffer).Created,
+					tracker.GetCounts(GpuResourceType::BindingSet).Created, tracker.GetCounts(GpuResourceType::Framebuffer).Created };
+			};
+			const std::array<uint64_t, 3> before = created();
+			for (uint32_t frame = 0; frame < 3; ++frame, ++snapshot.FrameIndex)
+				fixture.Submit(snapshot);
+			const RenderStats stats = fixture.Renderer().GetRenderStats();
+			CHECK(stats.ShadowedSpotLights == 2);
+			REQUIRE(Test::SceneRendererIntegrationFixture::FindPass(stats, "DirectionalShadows") != nullptr);
+			if (GpuResourceTracker::IsEnabled())
+				CHECK(created() == before);
+		}
+
+		TEST_CASE("SceneRenderer: statistics list the enabled passes in the fixed pass order")
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::SceneRendererIntegrationFixture fixture(gpu);
+			RenderSnapshot snapshot = fixture.Snapshot();
+			snapshot.Post.SsaoEnabled = true;
+			snapshot.Post.BloomEnabled = true;
+			snapshot.Post.FxaaEnabled = true;
+			snapshot.Flags = RenderViewFlags::EditorOverlays | RenderViewFlags::Selection;
+			snapshot.SelectedEntities = { UUID(900) };
+			snapshot.DebugDraw.AddLine({ -1, 0, -2 }, { 1, 0, -2 }, { 1, 0, 0, 1 });
+			fixture.Submit(snapshot);
+			CHECK(GetPassNames(fixture.Renderer().GetRenderStats())
+				== std::vector<std::string>{ "Prepare", "DepthNormal", "DepthPyramid", "GTAO", "GTAODenoiseHorizontal", "GTAODenoiseVertical",
+					"ForwardOpaque", "Bloom", "Tonemap", "FXAA", "SelectionMask", "SelectionDilateHorizontal", "SelectionDilateVertical",
+					"SelectionComposite", "Overlays" });
+			// Wireframe is recorded before the selection composite (so the selected edge stays visible) but is listed after it.
+			snapshot.Flags |= RenderViewFlags::Wireframe;
+			++snapshot.FrameIndex;
+			fixture.Submit(snapshot);
+			CHECK(GetPassNames(fixture.Renderer().GetRenderStats())
+				== std::vector<std::string>{ "Prepare", "DepthNormal", "Tonemap", "SelectionMask", "SelectionDilateHorizontal", "SelectionDilateVertical",
+					"SelectionComposite", "Wireframe", "Overlays" });
+		}
+
+		TEST_CASE("SceneRenderer: statistics report the quality settings the frame rendered with")
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::SceneRendererIntegrationFixture fixture(gpu);
+			RenderSnapshot snapshot = fixture.Snapshot();
+			CHECK(fixture.Renderer().GetRenderStats().ShadowMapSize == 0);
+			fixture.Submit(snapshot);
+			CHECK(fixture.Renderer().GetRenderStats().ShadowMapSize == snapshot.Quality.ShadowMapSize);
+			CHECK(fixture.Renderer().GetRenderStats().SsaoHalfResolution == snapshot.Quality.SsaoHalfResolution);
+			snapshot.Quality = { .ShadowMapSize = snapshot.Quality.ShadowMapSize == 512 ? 1024u : 512u, .SsaoHalfResolution = !snapshot.Quality.SsaoHalfResolution };
+			++snapshot.FrameIndex;
+			fixture.Submit(snapshot);
+			const RenderStats stats = fixture.Renderer().GetRenderStats();
+			CHECK(stats.ShadowMapSize == snapshot.Quality.ShadowMapSize);
+			CHECK(stats.SsaoHalfResolution == snapshot.Quality.SsaoHalfResolution);
+		}
+
+		TEST_CASE("SceneRenderer: more than 2000 native allocations warn once per renderer")
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			GraphicsDevice& device = gpu.GetDevice();
+			Test::SceneRendererIntegrationFixture fixture(gpu);
+			RenderSnapshot snapshot = fixture.Snapshot();
+			Test::ExpectLog warning(LogLevel::Warn, "native memory allocations");
+			fixture.Submit(snapshot);
+			REQUIRE(device.GetMemoryAllocationCount() < 1900);
+			// Vulkan guarantees maxMemoryAllocationCount >= 4096, so 2,040 allocations are always possible.
+			REQUIRE(device.GetInfo().MaxMemoryAllocationCount >= 4096);
+			std::vector<nvrhi::BufferHandle> buffers;
+			const auto allocateUntil = [&device, &buffers](uint32_t count)
+			{
+				nvrhi::BufferDesc desc;
+				desc.byteSize = 256;
+				desc.isConstantBuffer = true;
+				desc.initialState = nvrhi::ResourceStates::ConstantBuffer;
+				desc.keepInitialState = true;
+				desc.debugName = "AllocationWarningTest";
+				while (device.GetMemoryAllocationCount() < count)
+				{
+					auto buffer = device.CreateBuffer(desc);
+					REQUIRE(buffer);
+					buffers.push_back(*buffer);
+				}
+			};
+			// Below the threshold, with room for the render's own transient allocations: no warning.
+			allocateUntil(1980);
+			++snapshot.FrameIndex;
+			fixture.Submit(snapshot);
+			CHECK(fixture.Renderer().GetRenderStats().MemoryAllocationCount <= 2000);
+			CHECK(warning.GetMatchCount() == 0);
+			// Above it: one warning, latched for the renderer's later renders.
+			allocateUntil(2020);
+			for (uint32_t frame = 0; frame < 2; ++frame)
+			{
+				++snapshot.FrameIndex;
+				fixture.Submit(snapshot);
+				CHECK(fixture.Renderer().GetRenderStats().MemoryAllocationCount > 2000);
+				CHECK(warning.GetMatchCount() == 1);
+			}
+			buffers.clear();
+			device.WaitForIdle();
+		}
+
 		TEST_CASE("SceneRenderer: scene game and capture views keep independent extents picks and timing frames")
 		{
 			Test::HeadlessGpuFixture gpu;
@@ -1307,10 +1693,19 @@ namespace Engine {
 			const auto data = fixture.Render(snapshot);
 			for (size_t pixel = 0; pixel < data.Pixels.size(); ++pixel)
 				CHECK(data.Pixels[pixel] == std::byte{ 255 });
-			// Capture-only annotations deliberately survive data-view suppression.
-			snapshot.Annotations.Axes = true;
+			// The view's ordinary debug primitives (a session's script lines) stay out of data views even with the Colliders
+			// option, which only brings annotations (M9-F23); the annotations survive data-view suppression.
+			snapshot.Flags |= RenderViewFlags::Colliders;
 			snapshot.DebugDraw.AddLine({ -1, 0, -1 }, { 1, 0, -1 }, { 1, 0, 0, 1 }, 0, DebugDepthMode::OnTop);
+			CHECK(fixture.Render(snapshot).Pixels == data.Pixels);
+			snapshot.AnnotationDraw.AddLine({ -1, 0, -1 }, { 1, 0, -1 }, { 1, 0, 0, 1 }, 0, DebugDepthMode::OnTop);
 			CHECK(fixture.Render(snapshot).Pixels != data.Pixels);
+			// A material view keeps the ordinary list.
+			snapshot.AnnotationDraw.Clear();
+			snapshot.DebugView = RenderDebugView::Albedo;
+			const auto albedo = fixture.Render(snapshot);
+			snapshot.DebugDraw.Clear();
+			CHECK(fixture.Render(snapshot).Pixels != albedo.Pixels);
 		}
 
 		TEST_CASE("SceneRenderer: partial error submissions retire targets and preserve valid picking work")

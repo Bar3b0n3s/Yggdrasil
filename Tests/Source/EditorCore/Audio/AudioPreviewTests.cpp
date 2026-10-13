@@ -10,7 +10,7 @@
 
 #include <vector>
 
-// The asset browser's audio preview (Architecture Â§10.2, Â§12.2; Docs/Decisions/0015-m12-decisions.md decision 17): an
+// The asset browser's audio preview (Architecture §10.2, §12.2; Docs/Decisions/0015-m12-decisions.md decision 17): an
 // editor without an audio engine has no preview; the others run over a device-less, deterministic AudioEngine.
 
 namespace Engine {

@@ -114,7 +114,7 @@ namespace Engine {
 	// context's normal EntityRef resolver; NotFound/ambiguity/invalid refs retain /annotate/labels/index locations.
 	// All references must succeed, then sort/deduplicate copied UUIDs into Annotations.LabelEntities. Explicit IDs work
 	// in Runtime. All/None/Selected retain empty LabelEntities: the screenshot host separately fills SelectedEntities
-	// from context.GetSelectedEntities, filtered to target (empty in Runtime), before extraction. Reject inconsistent
+	// from context.GetSelectedEntities(target scene): empty when the selection refers to the other scene (and in Runtime). Reject inconsistent
 	// options with InvalidArgument; borrow inputs for this call only, return owns values. No scene/editor mutation.
 	[[nodiscard]] Result<RenderAnnotations> ResolveViewportAnnotations(AutomationMethodContext& context, Scene& scene,
 		const ViewportAnnotationOptions& options);

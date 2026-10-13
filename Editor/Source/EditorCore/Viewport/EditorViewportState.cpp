@@ -85,6 +85,14 @@ namespace Engine {
 		const glm::dvec3 direction = glm::dvec3(camera.Target) - glm::dvec3(camera.Position);
 		if (glm::length(direction) == 0.0 || (direction.x == 0.0 && direction.z == 0.0))
 			return MakeError(ErrorCode::InvalidArgument, "Camera direction must be nonzero and not parallel to +Y");
+		// The renderer's look-at basis (RenderExtraction) switches its up vector to -Z/+Z when |forward x +Y| falls below
+		// this length, computed in float. EditorCamera's pan and framing always use forward x +Y, so a camera inside that
+		// band would pan and frame along axes rotated against the displayed image: refuse it like an exactly vertical one.
+		constexpr float RendererDegenerateAxisLength = 1e-6f;
+		const glm::vec3 forward = glm::normalize(camera.Target - camera.Position);
+		if (!(glm::length(glm::cross(forward, glm::vec3(0.0f, 1.0f, 0.0f))) >= RendererDegenerateAxisLength))
+			return std::unexpected(Error(ErrorCode::InvalidArgument, "Camera direction must not be within 1e-6 of +Y or -Y")
+					.WithHint("move the camera position or target horizontally"));
 		if ((camera.Projection != RenderProjection::Perspective && camera.Projection != RenderProjection::Orthographic)
 			|| !std::isfinite(camera.VerticalFov) || camera.VerticalFov <= 0.0f || camera.VerticalFov >= 180.0f
 			|| !std::isfinite(camera.OrthographicSize) || camera.OrthographicSize <= 0.0f

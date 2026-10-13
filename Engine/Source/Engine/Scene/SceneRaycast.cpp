@@ -17,14 +17,14 @@
 
 namespace Engine {
 
-	namespace {
+	namespace Utils {
 
-		bool IsFiniteRayVector(const glm::vec3& value)
+		static bool IsFiniteRayVector(const glm::vec3& value)
 		{
 			return std::isfinite(value.x) && std::isfinite(value.y) && std::isfinite(value.z);
 		}
 
-		uint32_t GetVisualRayLayer(ConstEntity entity, const PhysicsLayerTable& layers)
+		static uint32_t GetVisualRayLayer(ConstEntity entity, const PhysicsLayerTable& layers)
 		{
 			for (ConstEntity current = entity; current.IsValid(); current = current.GetParent())
 				if (current.IsActive())
@@ -35,7 +35,7 @@ namespace Engine {
 			return 0;
 		}
 
-		bool IntersectsRayBounds(const Aabb& bounds, const glm::dmat4& transform, const glm::dvec3& origin, const glm::dvec3& direction, double minimum, double maximum)
+		static bool IntersectsRayBounds(const Aabb& bounds, const glm::dmat4& transform, const glm::dvec3& origin, const glm::dvec3& direction, double minimum, double maximum)
 		{
 			if (bounds.IsEmpty() || !IsFiniteRayVector(bounds.Min) || !IsFiniteRayVector(bounds.Max))
 				return false;
@@ -74,7 +74,7 @@ namespace Engine {
 	Result<std::optional<SceneRaycastHit>> RaycastScene(const Scene& scene, AssetManager& assets, const PhysicsLayerTable& layers,
 		const SceneRaycastRequest& request)
 	{
-		if (!IsFiniteRayVector(request.Ray.Origin) || !IsFiniteRayVector(request.Ray.Direction))
+		if (!Utils::IsFiniteRayVector(request.Ray.Origin) || !Utils::IsFiniteRayVector(request.Ray.Direction))
 			return MakeError(ErrorCode::InvalidArgument, "ray origin and direction must be finite");
 		const double length = glm::length(glm::dvec3(request.Ray.Direction));
 		if (length == 0 || !std::isfinite(length))
@@ -97,7 +97,7 @@ namespace Engine {
 				continue;
 			const auto* renderer = entity.TryGetComponent<MeshRendererComponent>();
 			if (renderer == nullptr || !renderer->Visible || !renderer->Mesh.IsValid()
-				|| !PhysicsLayerTable::MaskContains(request.LayerMask, GetVisualRayLayer(entity, layers)))
+				|| !PhysicsLayerTable::MaskContains(request.LayerMask, Utils::GetVisualRayLayer(entity, layers)))
 				continue;
 			const glm::mat4 world = ComputeRenderedWorldMatrix(entity, request.Alpha);
 			const double determinant = glm::determinant(glm::dmat4(world));
@@ -105,12 +105,12 @@ namespace Engine {
 				continue;
 			const AssetRef<MeshData> mesh = assets.GetOrPlaceholder<MeshData>(renderer->Mesh.GetHandle());
 			const glm::dmat4 transform(world);
-			if (!IntersectsRayBounds(mesh->Bounds, transform, origin, direction, request.MinDistance, bestDistance))
+			if (!Utils::IntersectsRayBounds(mesh->Bounds, transform, origin, direction, request.MinDistance, bestDistance))
 				continue;
 			for (uint32_t submeshIndex = 0; submeshIndex < mesh->Submeshes.size(); ++submeshIndex)
 			{
 				const MeshSubmesh& submesh = mesh->Submeshes[submeshIndex];
-				if (!IntersectsRayBounds(submesh.Bounds, transform, origin, direction, request.MinDistance, bestDistance))
+				if (!Utils::IntersectsRayBounds(submesh.Bounds, transform, origin, direction, request.MinDistance, bestDistance))
 					continue;
 				for (uint32_t offset = 0; offset + 2 < submesh.IndexCount; offset += 3)
 				{

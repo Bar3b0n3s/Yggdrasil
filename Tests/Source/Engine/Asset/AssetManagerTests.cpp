@@ -13,7 +13,9 @@
 #include "Support/ExpectLog.h"
 
 #include <algorithm>
+#include <format>
 #include <map>
+#include <tuple>
 
 namespace Engine {
 
@@ -270,6 +272,94 @@ namespace Engine {
 			manager.SetScanDiagnostics({});
 			CHECK(manager.GetDiagnostics().empty());
 			CHECK_FALSE(manager.HasErrorDiagnostics());
+		}
+
+		TEST_CASE("AssetManager: missing-asset diagnostics are kept for a bounded number of handles and one summary counts the other uses")
+		{
+			MainThreadQueue queue;
+			JobSystem jobs(0, queue);
+			FixedAssetManager manager(jobs);
+			const AssetRef<TextureData> placeholder = AssetCast<TextureData>(manager.GetPlaceholder(AssetType::Texture));
+			constexpr uint64_t FirstHandle = 0x5a5a000000000000ull;
+			const auto handleAt = [](uint64_t index)
+			{
+				return AssetHandle(FirstHandle + index);
+			};
+			const auto findSummary = [&manager]() -> const AssetDiagnostic*
+			{
+				const auto found = std::ranges::find_if(manager.GetDiagnostics(), [](const AssetDiagnostic& diagnostic)
+				{
+					return diagnostic.Code == AssetMissingCode && !diagnostic.Asset.IsValid();
+				});
+				return found == manager.GetDiagnostics().end() ? nullptr : &*found;
+			};
+
+			Test::ExpectLog recorded(LogLevel::Error, "is missing; the Texture placeholder stands in");
+			Test::ExpectLog summarized(LogLevel::Error, "of missing assets");
+			// The first MaxAssetMissingDiagnostics unknown handles behave as before: each is recorded and logged once.
+			for (uint64_t index = 0; index < MaxAssetMissingDiagnostics; ++index)
+				CHECK(manager.GetOrPlaceholder<TextureData>(handleAt(index)) == placeholder);
+			static_cast<void>(manager.GetOrPlaceholder<TextureData>(handleAt(0)));
+			CHECK(recorded.GetMatchCount() == MaxAssetMissingDiagnostics);
+			CHECK(summarized.GetMatchCount() == 0);
+			REQUIRE(manager.GetDiagnostics().size() == MaxAssetMissingDiagnostics);
+			CHECK(findSummary() == nullptr);
+
+			// Later unknown handles still get the placeholder, but add neither a diagnostic nor a log line: one summary,
+			// logged once, counts their uses (a repeated use counts again; distinct handles would need unbounded memory).
+			const AssetHandle beyond = handleAt(MaxAssetMissingDiagnostics);
+			CHECK(manager.GetOrPlaceholder<TextureData>(beyond) == placeholder);
+			for (uint64_t index = MaxAssetMissingDiagnostics; index < MaxAssetMissingDiagnostics + 40; ++index)
+				static_cast<void>(manager.GetOrPlaceholder<TextureData>(handleAt(index)));
+			CHECK(recorded.GetMatchCount() == MaxAssetMissingDiagnostics);
+			CHECK(summarized.GetMatchCount() == 1);
+			CHECK(CountDiagnostics(manager, AssetMissingCode, beyond) == 0);
+			REQUIRE(manager.GetDiagnostics().size() == MaxAssetMissingDiagnostics + 1);
+			const AssetDiagnostic* summary = findSummary();
+			REQUIRE(summary != nullptr);
+			CHECK(summary->Severity == DiagnosticSeverity::Error);
+			CHECK(summary->Subject == AssetMissingSuppressedSubject);
+			CHECK(summary->Path.empty());
+			CHECK(summary->Message == std::format("41 more uses of missing assets were not recorded: diagnostics are kept for at most {} missing assets", MaxAssetMissingDiagnostics));
+			// The summary sorts first (no path) and the recorded handles are the first ones, in handle order.
+			CHECK(std::ranges::is_sorted(manager.GetDiagnostics(), {}, [](const AssetDiagnostic& diagnostic)
+			{
+				return std::tie(diagnostic.Path, diagnostic.Code, diagnostic.Subject);
+			}));
+			CHECK(&manager.GetDiagnostics().front() == summary);
+			CHECK(manager.GetDiagnostics()[1].Asset == handleAt(0));
+			CHECK(manager.GetDiagnostics().back().Asset == handleAt(MaxAssetMissingDiagnostics - 1));
+			// Reference diagnostics, the summary included, never gate play or export.
+			CHECK_FALSE(manager.HasErrorDiagnostics());
+
+			// A recorded handle that loads frees its place: the next unknown handle is recorded and logged again.
+			manager.Add(handleAt(0), CreateRef<TextureData>());
+			CHECK(CountDiagnostics(manager, AssetMissingCode, handleAt(0)) == 0);
+			const AssetHandle admitted(0x5b5b000000000000ull);
+			static_cast<void>(manager.GetOrPlaceholder<TextureData>(admitted));
+			CHECK(CountDiagnostics(manager, AssetMissingCode, admitted) == 1);
+			CHECK(recorded.GetMatchCount() == MaxAssetMissingDiagnostics + 1);
+			static_cast<void>(manager.GetOrPlaceholder<TextureData>(AssetHandle(0x5c5c000000000000ull)));
+			CHECK(recorded.GetMatchCount() == MaxAssetMissingDiagnostics + 1);
+			REQUIRE(findSummary() != nullptr);
+			CHECK(findSummary()->Message.starts_with("42 more uses"));
+
+			// A dry run's suppressed uses are undone with the rest of its diagnostics.
+			manager.SaveSharedState();
+			static_cast<void>(manager.GetOrPlaceholder<TextureData>(beyond));
+			CHECK(findSummary()->Message.starts_with("43 more uses"));
+			manager.RestoreSharedState();
+			REQUIRE(findSummary() != nullptr);
+			CHECK(findSummary()->Message.starts_with("42 more uses"));
+
+			// A registry scan removes the summary and its count; a use that is still unrecorded starts a new one.
+			manager.SetScanDiagnostics({});
+			CHECK(findSummary() == nullptr);
+			CHECK(manager.GetDiagnostics().size() == MaxAssetMissingDiagnostics);
+			static_cast<void>(manager.GetOrPlaceholder<TextureData>(beyond));
+			REQUIRE(findSummary() != nullptr);
+			CHECK(findSummary()->Message.starts_with("1 more use of missing assets was not recorded"));
+			CHECK(summarized.GetMatchCount() == 2);
 		}
 
 		TEST_CASE("AssetManager: diagnostics are sorted by path, code and subject and cleared per handle")

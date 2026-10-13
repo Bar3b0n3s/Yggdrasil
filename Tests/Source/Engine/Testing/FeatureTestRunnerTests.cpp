@@ -4,6 +4,7 @@
 #include "Engine/Asset/AudioClipData.h"
 #include "Engine/Asset/DocumentData.h"
 #include "Engine/Core/Json/JsonReader.h"
+#include "Engine/Core/Json/JsonWriter.h"
 #include "Engine/Core/VirtualFileSystem.h"
 #include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Scene/Components/AudioSourceComponent.h"
@@ -11,6 +12,7 @@
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/SceneSerializer.h"
 #include "Engine/Scripting/ScriptCompiler.h"
+#include "Engine/Scripting/ScriptLimits.h"
 #include "Engine/Session/PlayInputEventCodec.h"
 #include "Support/AudioTestData.h"
 #include "Support/ExpectLog.h"
@@ -21,6 +23,8 @@
 #include <algorithm>
 #include <format>
 #include <map>
+#include <string>
+#include <string_view>
 
 namespace Engine {
 
@@ -41,11 +45,13 @@ namespace Engine {
 			std::vector<uint64_t> Generations{};
 			std::vector<std::string> PlayedReplays{};
 			std::vector<StampedPlayInputEvent> VerifiedInputs{};
+			std::vector<std::string> Screenshots{}; // the names CaptureScreenshot received, in order
 			PlaySession* Active = nullptr;
 			uint64_t Serial = 1;
 			uint32_t CoverageReads = 0;
 			uint32_t ReplaySessions = 0;
 			bool DivergentReplay = false;
+			bool OwnAudioTime = true; // false: a host that forgets PlaySessionSpecification::OwnsAudioTime
 			ReplayDocument Candidate{};
 			Json SceneDocument{};
 			Ref<const ScriptFieldSchemaSource> Schemas{};
@@ -81,7 +87,7 @@ namespace Engine {
 			{
 				const AssetHandle handle(500 + Scripts.size());
 				auto script = Compiler.AddScript(handle, std::move(path), std::move(source));
-				REQUIRE(script);
+				REQUIRE_MESSAGE(script, (script ? std::string() : script.error().ToString()));
 				Scripts.emplace(handle, *script);
 				auto schemas = ScriptFieldSchemaSource::Create(Scripts);
 				REQUIRE(schemas);
@@ -175,7 +181,7 @@ namespace Engine {
 				spec.TestHook = &hook;
 				spec.TestHost = &host;
 				spec.Audio = Audio.get();
-				spec.OwnsAudioTime = true;
+				spec.OwnsAudioTime = OwnAudioTime;
 				spec.Observer = this;
 				spec.Environment.IsEditor = mode == TestSuiteSettings::Mode::Editor;
 				spec.Environment.IsHeadless = false;
@@ -203,7 +209,7 @@ namespace Engine {
 				spec.Project.Simulation.FixedHz = header.FixedHz;
 				spec.Parameters = header.Parameters;
 				spec.Audio = Audio.get();
-				spec.OwnsAudioTime = true;
+				spec.OwnsAudioTime = OwnAudioTime;
 				spec.ScriptRunMode = mode == TestSuiteSettings::Mode::Editor ? RunModes::Editor : mode == TestSuiteSettings::Mode::Release ? RunModes::Release
 																																		   : RunModes::Dist;
 				spec.Observer = this;
@@ -217,7 +223,11 @@ namespace Engine {
 			}
 			void SetActiveTestSession(PlaySession* session) override { Active = session; }
 			AudioEngine* GetAudioEngine() const override { return Audio.get(); }
-			Status CaptureScreenshot(PlaySession&, std::string_view) override { return {}; }
+			Status CaptureScreenshot(PlaySession&, std::string_view name) override
+			{
+				Screenshots.emplace_back(name);
+				return {};
+			}
 			Status ReloadScript(PlaySession& session, AssetHandle asset) override
 			{
 				auto result = session.GetScripts()->Reload(asset, true);
@@ -641,10 +651,17 @@ end))")
 			host.Suite(R"(return Test.Suite("Audio",function() Test.Case("capture",function() local levels=Test.CaptureAudio(2); Test.Expect(levels.Peak>0) end) end))").Clock = { 5.0f / 60.0f };
 			auto result = host.Run();
 			CHECK(result.Passed);
-			for (const auto& spec : host.Created)
-				CHECK(spec.OwnsAudioTime);
 			CHECK(host.Audio->GetStats().PulledFrames > 0);
 			CHECK(host.Audio->GetVoices().empty());
+			// The runner checks the session the host returned, not the host's word: one that does not own audio time fails
+			// its setup (a ScriptedClock suite runs without lockstep, so only OwnsAudioTime keeps the time).
+			host.OwnAudioTime = false;
+			result = host.Run();
+			CHECK_FALSE(result.Passed);
+			REQUIRE_FALSE(result.Cases.empty());
+			CHECK(result.Cases[0].Case == "<setup>");
+			CHECK(result.Cases[0].Message.find("does not own simulation audio time") != std::string::npos);
+			CHECK_FALSE(host.Audio->IsSimulationTimeOwned());
 		}
 
 		TEST_CASE("TestRunner: startup audio mix is isolated across suites and restores the host")
@@ -673,8 +690,10 @@ end))");
 			CHECK(host.Audio->GetVoices().empty());
 		}
 
-		TEST_CASE("TestRunner: windowed streamed audio is decoded deterministically")
+		TEST_CASE("TestRunner: streamed audio captures identically across runs with deterministic decoding")
 		{
+			// Whether every editor really decodes deterministically is checked against the editor itself (EditorAppTests:
+			// "--run-tests runs in a windowed editor"); this case proves capture of a streamed clip given such an engine.
 			RunnerHost host;
 			host.EnableAudio(true);
 			host.Suite(R"(return Test.Suite("Stream",function() Test.Case("samples",function() local levels=Test.CaptureAudio(3); Test.Expect(levels.RmsLeft>0.1); Test.ExpectNear(levels.RmsLeft,levels.RmsRight,0.000001) end) end))");
@@ -682,8 +701,6 @@ end))");
 			auto second = host.Run();
 			CHECK(first.Passed);
 			CHECK(second.Passed);
-			CHECK(host.Audio->GetSpecification().Decoding == AudioDecoding::Deterministic);
-			CHECK_FALSE(host.Created.back().Environment.IsHeadless);
 			CHECK(first.Suites[0].FinalStateHash == second.Suites[0].FinalStateHash);
 		}
 
@@ -760,6 +777,230 @@ end))");
 			CHECK(result.Cases[0].Failures.size() == 2);
 			CHECK(result.Cases[0].Failures[0].Line > 0);
 			CHECK_FALSE(result.Passed);
+		}
+
+		TEST_CASE("TestRunner: a case keeps a bounded number of failures and counts the rest")
+		{
+			RunnerHost host;
+			host.Suite(R"(return Test.Suite("Flood",function() Test.Case("misses",function()
+				for index = 1, 100 do Test.Expect(false, "miss " .. index) end
+			end) end))");
+			auto result = host.Run();
+			REQUIRE(result.Cases.size() == 1);
+			const TestCaseResult& row = result.Cases[0];
+			CHECK(row.Status == "failed");
+			REQUIRE(row.Failures.size() == MaxScriptTestFailuresPerCase);
+			CHECK(row.Message == "miss 1");
+			for (size_t index = 0; index + 1 < row.Failures.size(); ++index)
+				CHECK(row.Failures[index].Message == std::format("miss {}", index + 1));
+			CHECK(row.Failures.back().Message == std::format("[truncated: {} more failures]", 100 - (MaxScriptTestFailuresPerCase - 1)));
+			CHECK(row.Failures.back().File.empty());
+			CHECK_FALSE(result.Passed);
+		}
+
+		TEST_CASE("TestRunner: a suite keeps a bounded number of failures across its cases")
+		{
+			RunnerHost host;
+			host.Suite(R"(return Test.Suite("Floods",function()
+				for case = 1, 40 do
+					Test.Case("misses " .. case, function() for index = 1, 40 do Test.Expect(false, "miss") end end)
+				end
+			end))");
+			auto result = host.Run();
+			REQUIRE(result.Cases.size() == 40);
+			size_t kept = 0;
+			uint64_t counted = 0;
+			for (const TestCaseResult& row : result.Cases)
+			{
+				CHECK(row.Status == "failed");
+				REQUIRE_FALSE(row.Failures.empty());
+				CHECK(row.Failures.size() <= MaxScriptTestFailuresPerCase);
+				const std::string& last = row.Failures.back().Message;
+				REQUIRE(last.starts_with("[truncated: "));
+				kept += row.Failures.size() - 1;
+				counted += std::stoull(last.substr(std::string_view("[truncated: ").size()));
+			}
+			CHECK(kept == MaxScriptTestFailuresPerSuite);
+			CHECK(kept + counted == 40 * 40);
+			// The suite's budget ran out during the 34th case: the later ones keep only the count.
+			CHECK(result.Cases[32].Failures.size() == MaxScriptTestFailuresPerCase);
+			CHECK(result.Cases[39].Failures.size() == 1);
+		}
+
+		TEST_CASE("TestRunner: claimed script errors free their place and unclaimed ones past the cap fail the case")
+		{
+			RunnerHost host;
+			// Two batches of claims, together more than a case keeps unclaimed: each claim releases its error at once.
+			host.Suite(R"(return Test.Suite("Errors",function()
+				Test.Case("claims",function()
+					for batch = 1, 2 do
+						for index = 1, 200 do Task.Spawn(function() error("expected " .. index, 0) end) end
+						Test.WaitTicks(2)
+						for index = 1, 200 do Test.ExpectScriptError("^expected %d+$", 1) end
+					end
+				end)
+				Test.Case("floods",function()
+					for index = 1, 300 do Task.Spawn(function() error("unexpected " .. index, 0) end) end
+					Test.WaitTicks(2)
+				end)
+			end))");
+			const Test::ExpectLog expected(LogLevel::Error, "expected ");
+			auto result = host.Run();
+			REQUIRE(result.Cases.size() == 2);
+			CHECK(result.Cases[0].Status == "passed");
+			CHECK(result.Cases[0].Failures.empty());
+			const TestCaseResult& flooded = result.Cases[1];
+			CHECK(flooded.Status == "error");
+			REQUIRE(flooded.Failures.size() == MaxScriptTestFailuresPerCase);
+			CHECK(flooded.Failures.front().Message == "unexpected 1");
+			CHECK(flooded.Failures.back().Message == std::format("[truncated: {} more failures]", 300 - (MaxScriptTestFailuresPerCase - 1)));
+			CHECK(result.Suites[0].ScriptErrors == 700);
+		}
+
+		TEST_CASE("TestRunner: a script error past the unclaimed-error cap cannot be claimed and still fails the case")
+		{
+			RunnerHost host;
+			// No error is claimed before the newest one, which arrives with the case's unclaimed places all taken.
+			host.Suite(std::format(R"(return Test.Suite("Overflow",function()
+				Test.Case("claims the newest",function()
+					for index = 1, {0} do Task.Spawn(function() error("fault " .. index, 0) end) end
+					Test.WaitTicks(2)
+					Test.ExpectScriptError("^fault {0}$", 1)
+				end)
+			end))",
+				MaxScriptTestUnclaimedErrors + 1));
+			const Test::ExpectLog expected(LogLevel::Error, "fault ");
+			auto result = host.Run();
+			REQUIRE(result.Cases.size() == 1);
+			const TestCaseResult& row = result.Cases[0];
+			CHECK(row.Status == "error");
+			// The claim found nothing, so the case failed at it; then its unclaimed errors joined the row, oldest first, and
+			// every error is counted, the one past the cap included.
+			REQUIRE(row.Failures.size() == MaxScriptTestFailuresPerCase);
+			CHECK(row.Failures.front().Message == "No matching script error was observed within the tick limit");
+			CHECK(row.Failures.front().File == "Assets/Tests/Suite0.luau");
+			CHECK(row.Failures.front().Line == 5);
+			CHECK(row.Failures[1].Message == "fault 1");
+			CHECK(row.Failures.back().Message == std::format("[truncated: {} more failures]", MaxScriptTestUnclaimedErrors + 1 - (MaxScriptTestFailuresPerCase - 2)));
+			CHECK(result.Suites[0].ScriptErrors == MaxScriptTestUnclaimedErrors + 1);
+		}
+
+		TEST_CASE("TestRunner: a claim frees one place under the unclaimed-error cap, and an error that arrived past it stays unclaimable")
+		{
+			RunnerHost host;
+			host.Suite(std::format(R"(return Test.Suite("Places",function()
+				Test.Case("arrived past the cap",function()
+					for index = 1, {0} do Task.Spawn(function() error("fault " .. index, 0) end) end
+					Test.WaitTicks(2)
+					for index = 1, {1} do Test.ExpectScriptError("^fault " .. index .. "$", 1) end
+					Test.ExpectScriptError("^fault {0}$", 1)
+				end)
+				Test.Case("arrives after a claim",function()
+					for index = 1, {1} do Task.Spawn(function() error("fault " .. index, 0) end) end
+					Test.WaitTicks(2)
+					Test.ExpectScriptError("^fault 1$", 1)
+					Task.Spawn(function() error("fault {0}", 0) end)
+					Test.ExpectScriptError("^fault {0}$", 1)
+					for index = 2, {1} do Test.ExpectScriptError("^fault " .. index .. "$", 1) end
+				end)
+			end))",
+				MaxScriptTestUnclaimedErrors + 1, MaxScriptTestUnclaimedErrors));
+			const Test::ExpectLog expected(LogLevel::Error, "fault ");
+			auto result = host.Run();
+			REQUIRE(result.Cases.size() == 2);
+			// Every kept error was claimed, the last at the cap's last place, but the one that arrived past the cap was never
+			// kept: the VM cannot claim it, and the row counts it without listing it.
+			const TestCaseResult& overflow = result.Cases[0];
+			CHECK(overflow.Status == "error");
+			REQUIRE(overflow.Failures.size() == 2);
+			CHECK(overflow.Failures[0].Message == "No matching script error was observed within the tick limit");
+			CHECK(overflow.Failures[0].Line == 6);
+			CHECK(overflow.Failures[1].Message == "[truncated: 1 more failures]");
+			// With the cap full, one claim releases one place, which the next error takes; it can be claimed.
+			const TestCaseResult& released = result.Cases[1];
+			CAPTURE(released.Message);
+			CHECK(released.Status == "passed");
+			CHECK(released.Failures.empty());
+			CHECK(result.Suites[0].ScriptErrors == 2 * (MaxScriptTestUnclaimedErrors + 1));
+		}
+
+		TEST_CASE("TestRunner: a suite registers a bounded number of cases")
+		{
+			RunnerHost host;
+			host.Suite(std::format(R"(return Test.Suite("Many",function() for index = 1, {} do Test.Case("case " .. index, function() end) end end))", MaxScriptTestCasesPerSuite));
+			auto inventory = FeatureTestRunner::Discover(host, TestSuiteSettings::Mode::Editor);
+			REQUIRE_MESSAGE(inventory, (inventory ? std::string() : inventory.error().ToString()));
+			REQUIRE(inventory->Suites.size() == 1);
+			CHECK(inventory->Suites[0].Cases.size() == MaxScriptTestCasesPerSuite);
+			RunnerHost tooMany;
+			tooMany.Suite(std::format(R"(return Test.Suite("TooMany",function() for index = 1, {} do Test.Case("case " .. index, function() end) end end))", MaxScriptTestCasesPerSuite + 1));
+			const Test::ExpectLog expected(LogLevel::Error, std::format("at most {} cases", MaxScriptTestCasesPerSuite));
+			const auto refused = FeatureTestRunner::Discover(tooMany, TestSuiteSettings::Mode::Editor);
+			REQUIRE_FALSE(refused);
+			CHECK(refused.error().ToString().find(std::format("at most {} cases", MaxScriptTestCasesPerSuite)) != std::string::npos);
+		}
+
+		TEST_CASE("TestRunner: Test.Inject queues a bounded number of events per input tick")
+		{
+			RunnerHost host;
+			host.Suite(std::format(R"(return Test.Suite("Inputs",function() Test.Case("floods",function()
+				for index = 1, {0} do Test.InjectAction("Jump", "Down") end
+				local ok, message = pcall(Test.InjectAction, "Jump", "Down")
+				Test.Expect(not ok, "the event past the cap was queued")
+				Test.Expect(type(message) == "string" and string.find(message, "at most {0} events per input tick", 1, true) ~= nil, tostring(message))
+				Test.WaitTicks(1)
+				Test.InjectAction("Jump", "Up")
+				Test.WaitTicks(1)
+				Test.Expect(not Input.IsActionDown("Jump"), "the next tick's event was not applied")
+			end) end))",
+				MaxScriptInjectedInputsPerTick));
+			auto result = host.Run();
+			REQUIRE(result.Cases.size() == 1);
+			CAPTURE(result.Cases[0].Message);
+			CHECK(result.Cases[0].Status == "passed");
+			CHECK(result.Passed);
+		}
+
+		TEST_CASE("TestRunner: Test.Screenshot takes a bounded number of screenshots per suite and the report is still published")
+		{
+			RunnerHost host;
+			// Each capture may write a new file, so a loop within the watchdog budget may not write files without bound.
+			host.Suite(std::format(R"(return Test.Suite("Shots",function()
+				Test.Case("floods",function()
+					for index = 1, {0} do Test.Screenshot("shot" .. index) end
+					for _ = 1, 10 do
+						local ok, message = pcall(function() Test.Screenshot("refused") end)
+						Test.Expect(not ok, "the screenshot past the cap was taken")
+						Test.Expect(type(message) == "string" and string.find(message, "at most {0} screenshots per suite", 1, true) ~= nil, tostring(message))
+					end
+				end)
+				Test.Case("unprotected",function()
+					Test.Screenshot("later")
+				end)
+			end))",
+				MaxScriptTestScreenshotsPerSuite));
+			// The next suite starts with a new allowance.
+			host.Suite(R"(return Test.Suite("Again",function() Test.Case("one",function() Test.Screenshot("again") end) end))");
+			const Test::ExpectLog refusal(LogLevel::Error, std::format("at most {} screenshots per suite", MaxScriptTestScreenshotsPerSuite));
+			auto result = host.Run();
+			REQUIRE(result.Cases.size() == 3);
+			CAPTURE(result.Cases[0].Message);
+			CHECK(result.Cases[0].Status == "passed");
+			// Unprotected, the refusal fails its case with a located error; the run goes on and its report is complete.
+			CHECK(result.Cases[1].Status == "error");
+			CHECK(result.Cases[1].Message.find(std::format("at most {} screenshots per suite", MaxScriptTestScreenshotsPerSuite)) != std::string::npos);
+			CHECK(result.Cases[1].File == "Assets/Tests/Suite0.luau");
+			CHECK(result.Cases[1].Line == 11);
+			CHECK(result.Cases[2].Status == "passed");
+			CHECK_FALSE(result.Passed);
+			REQUIRE(result.Suites.size() == 2);
+			CHECK_FALSE(result.Suites[0].Passed);
+			CHECK(result.Suites[1].Passed);
+			// Refused calls never reach the host.
+			REQUIRE(host.Screenshots.size() == MaxScriptTestScreenshotsPerSuite + 1);
+			CHECK(host.Screenshots.front() == "shot1");
+			CHECK(host.Screenshots[MaxScriptTestScreenshotsPerSuite - 1] == std::format("shot{}", MaxScriptTestScreenshotsPerSuite));
+			CHECK(host.Screenshots.back() == "again");
 		}
 
 		TEST_CASE("TestRunner: setup quit and debug breaks are reported without exiting the host")
@@ -1066,6 +1307,178 @@ end))");
 			CHECK(result.Suites[0].Suite == "First");
 			CHECK(result.Suites[1].Suite == "replay:Assets/A.replay");
 			CHECK(host.PlayedReplays == std::vector<std::string>{ "Assets/A.replay", "Assets/B.replay" });
+		}
+
+		TEST_CASE("TestRunner: a replay that quits early or cannot load fails its own rows and the run continues")
+		{
+			RunnerHost host;
+			host.Behaviour(R"(local Driver={}
+function Driver.OnFixedUpdate(self) if Scene.GetLoadParameters().quit and Time.GetTick() == 2 then Application.Quit(5) end end
+return Script.Define("Driver",Driver))");
+			ReplayHeader header;
+			header.Scene = { UUID(401), "Assets/Scenes/Start.scene" };
+			header.Seed = host.Settings.Simulation.Seed;
+			header.EngineVersion = "1";
+			header.Config = "Debug";
+			auto reference = host.CreateReplaySession(header, TestSuiteSettings::Mode::Editor);
+			REQUIRE(reference);
+			for (uint32_t tick = 0; tick < 6; ++tick)
+				(*reference)->Tick();
+			auto good = CreateRef<ReplayData>();
+			good->Header = header;
+			good->FinalTick = 6;
+			good->FinalStateHash = UUID((*reference)->ComputeStateHash()).ToString();
+			reference->reset();
+			auto quits = CreateRef<ReplayData>();
+			quits->Header = header;
+			quits->Header.Parameters.Set(Json{ { "quit", true } });
+			quits->FinalTick = good->FinalTick;
+			quits->FinalStateHash = good->FinalStateHash;
+			host.ReplayAssets["Assets/A.replay"] = quits;
+			host.ReplayAssets["Assets/C.replay"] = good;
+			host.ReplayGlobs = { "Assets/A.replay", "Assets/B.replay", "Assets/C.replay" }; // B is missing
+			const auto result = host.Run();
+			CHECK_FALSE(result.Passed);
+			REQUIRE(result.Suites.size() == 3);
+			CHECK(result.Suites[0].Suite == "replay:Assets/A.replay");
+			CHECK_FALSE(result.Suites[0].Passed);
+			CHECK(result.Suites[0].Ticks == 3);
+			CHECK(result.Suites[1].Suite == "replay:Assets/B.replay");
+			CHECK_FALSE(result.Suites[1].Passed);
+			CHECK(result.Suites[2].Suite == "replay:Assets/C.replay");
+			CHECK(result.Suites[2].Passed);
+			const auto row = [&result](std::string_view suite, std::string_view name) -> const TestCaseResult*
+			{
+				const auto found = std::ranges::find_if(result.Cases, [suite, name](const TestCaseResult& item)
+				{
+					return item.Suite == suite && item.Case == name;
+				});
+				return found == result.Cases.end() ? nullptr : &*found;
+			};
+			const TestCaseResult* stopped = row("replay:Assets/A.replay", "<stopped>");
+			REQUIRE(stopped != nullptr);
+			CHECK(stopped->Status == "error");
+			CHECK(stopped->Message.find("quit with exit code 5 at tick 3") != std::string::npos);
+			CHECK(row("replay:Assets/A.replay", "FinalStateHash") == nullptr);
+			const TestCaseResult* missing = row("replay:Assets/B.replay", "<replay>");
+			REQUIRE(missing != nullptr);
+			CHECK(missing->Status == "error");
+			CHECK(missing->Message.find("missing replay") != std::string::npos);
+			CHECK(row("replay:Assets/C.replay", "FinalStateHash") != nullptr);
+			CHECK(host.PlayedReplays == std::vector<std::string>{ "Assets/A.replay", "Assets/B.replay", "Assets/C.replay" });
+		}
+
+		TEST_CASE("TestRunner: a script test screenshot extracts the view with the project's rendering quality")
+		{
+			// The Editor and Runtime test hosts both build their capture through this request (ADR 0017: every capture path
+			// observes ProjectSettings.Rendering, like the game view and viewport.screenshot).
+			RunnerHost host;
+			host.Settings.Rendering.ShadowMapSize = 512;
+			host.Settings.Rendering.SsaoHalfResolution = true;
+			ReplayHeader header;
+			header.Scene.Handle = UUID(401);
+			header.Seed = host.Settings.Simulation.Seed;
+			auto session = host.CreateReplaySession(header, TestSuiteSettings::Mode::Editor);
+			REQUIRE(session);
+			const RenderExtractionRequest request = MakeTestScreenshotRequest(**session, 320, 180);
+			CHECK(request.Camera == RenderCameraSource::Primary);
+			CHECK(request.Width == 320);
+			CHECK(request.Height == 180);
+			CHECK(request.Quality.ShadowMapSize == 512);
+			CHECK(request.Quality.SsaoHalfResolution);
+			const auto snapshot = (*session)->ExtractView(request);
+			REQUIRE(snapshot);
+			CHECK(snapshot->Quality.ShadowMapSize == 512);
+			CHECK(snapshot->Quality.SsaoHalfResolution);
+		}
+
+		TEST_CASE("TestRunner: a suite that must not quit fails on Application.Quit(-1)")
+		{
+			RunnerHost host;
+			host.Suite(R"(return Test.Suite("NoQuit",function() Test.Case("quits",function() Application.Quit(-1) end) end))");
+			const auto result = host.Run();
+			CHECK_FALSE(result.Passed);
+			REQUIRE(result.Cases.size() == 1);
+			CHECK(result.Cases[0].Status == "quit");
+			CHECK(result.Cases[0].QuitCode == -1);
+			CHECK_FALSE(result.Cases[0].QuitExpected);
+			REQUIRE(result.Suites.size() == 1);
+			CHECK_FALSE(result.Suites[0].Passed);
+		}
+
+		TEST_CASE("TestRunner: script control characters and invalid UTF-8 keep every report format writable")
+		{
+			TypeRegistry registry;
+			RegisterProjectSettingsTypes(registry);
+			RegisterTestResultTypes(registry);
+			registry.Freeze();
+			RunnerHost host;
+			host.Suite(R"(return Test.Suite("Bytes",function()
+				Test.Case("fails" .. string.char(7),function() Test.Fail("bad byte " .. string.char(255)) end)
+				Test.Case("raises",function() error("\27[31mred") end)
+			end))");
+			Test::ExpectLog expected(LogLevel::Error, "red");
+			const auto result = host.Run();
+			CHECK_FALSE(result.Passed);
+			REQUIRE(result.Cases.size() == 2);
+			CHECK(result.Cases[0].Case == "fails\\u0007");
+			CHECK(result.Cases[0].Message == "bad byte \xEF\xBF\xBD");
+			CHECK(result.Cases[1].Message.find("\\u001B[31mred") != std::string::npos);
+			const auto junit = TestRunResultToJUnit(result);
+			CHECK_MESSAGE(junit, (junit ? "" : junit.error().ToString()));
+			const auto json = TestRunResultToJson(result, registry);
+			REQUIRE(json);
+			const auto text = JsonWriter::Write(*json);
+			CHECK_MESSAGE(text, (text ? "" : text.error().ToString()));
+		}
+
+		TEST_CASE("TestRunner: the tick limit after a finished case keeps its result and reports the cases left unrun")
+		{
+			// A ScriptedClock frame of five steps: the case returns at tick 6 and the limit of 8 stops the frame afterwards.
+			RunnerHost host;
+			host.Settings.Testing.SuiteTickLimit = 8;
+			host.Suite(R"(return Test.Suite("Limit",function() Test.Case("waits",function() Test.WaitTicks(6) end) end))").Clock = { 5.0f / 60.0f };
+			auto result = host.Run();
+			CHECK(result.Passed);
+			REQUIRE(result.Cases.size() == 1);
+			CHECK(result.Cases[0].Status == "passed");
+			CHECK(result.Cases[0].Failures.empty());
+			CHECK(result.Suites[0].Ticks == 8);
+			// With a case still selected, the limit is reported once as a suite row; the passed case keeps its status.
+			RunnerHost remaining;
+			remaining.Settings.Testing.SuiteTickLimit = 8;
+			remaining.Suite(R"(return Test.Suite("Limit",function()
+				Test.Case("waits",function() Test.WaitTicks(6) end)
+				Test.Case("never",function() Test.Fail("must not run") end)
+			end))")
+				.Clock = { 5.0f / 60.0f };
+			result = remaining.Run();
+			CHECK_FALSE(result.Passed);
+			REQUIRE(result.Cases.size() == 2);
+			CHECK(result.Cases[0].Status == "passed");
+			CHECK(result.Cases[1].Case == "<tick limit>");
+			CHECK(result.Cases[1].Status == "timeout");
+			CHECK(result.Cases[1].Message.find("1 more selected case") != std::string::npos);
+		}
+
+		TEST_CASE("TestRunner: a recorded suite starts from its parameters in the replay header form")
+		{
+			RunnerHost host;
+			auto& suite = host.Suite(R"(return Test.Suite("Params",function()
+				Test.Case("reads",function() Test.ExpectEqual(tostring(Scene.GetLoadParameters().ratio), "0.12345679"); Test.WaitTicks(1) end)
+			end))");
+			suite.Parameters.Set(Json{ { "ratio", 0.123456789 } });
+			auto result = host.Run({ .Record = true });
+			CHECK(result.Passed);
+			const auto stored = CanonicalizeReplayParameters(Json{ { "ratio", 0.123456789 } });
+			REQUIRE(stored);
+			CHECK(host.Candidate.Header.Parameters.Get() == *stored);
+			// A float the replay format cannot store fails before anything runs, located at the suite's parameter.
+			host.Settings.Testing.Suites.back().Parameters.Set(Json{ { "big", 1e39 } });
+			FeatureTestRunner runner;
+			const auto begun = runner.Begin(host, { .Record = true });
+			REQUIRE_FALSE(begun);
+			CHECK(begun.error().GetLocation().JsonPointer == std::optional<std::string>("/Testing/Suites/0/Parameters/big"));
 		}
 	}
 

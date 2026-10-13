@@ -26,8 +26,10 @@
 //
 // Frozen by the M7 contract (Docs/Decisions/0012-m7-decisions.md decision 6) with the members the walking skeleton
 // extracts. The M8 contract added the texts, the debug draw list and the debug view (Docs/Decisions/0013-m8-decisions.md
-// decision 5); M9 adds the pick table and the view flags. Additions are frozen-header changes reviewed by their contract
-// owner; no member here changes meaning. A plain value type: copyable, movable, thread-compatible.
+// decision 5); M9 added the pick table, the view flags, the selected entities, the annotations and their draw list, the
+// quality settings, the icons and the frame and scene revision stamps (ADR 0017). Additions are frozen-header changes
+// reviewed by their contract owner; no member here changes meaning. A plain value type: copyable, movable,
+// thread-compatible.
 
 namespace Engine {
 
@@ -316,10 +318,14 @@ namespace Engine {
 		// M8: every effectively enabled TextComponent with non-empty Text, in canonical entity order (screen and world texts
 		// together; the text pass draws the world ones, depth-tested, then the screen ones, §8.3 pass 14).
 		std::vector<TextItem> Texts{};
-		// M8: the debug primitives of this view (DebugDrawList.h). Extraction leaves it empty; its producers append to it (M11's
-		// collider visualization, M13's scripts through the session's persistent list, the editor's gizmos).
+		// M8: the ordinary debug primitives of this view (DebugDrawList.h): M13's scripts through the session's persistent list,
+		// the editor's gizmos. Extraction leaves it empty; its producers append to it. The AO, ShadowCascades and Overdraw data
+		// views leave it out (ADR 0017).
 		DebugDrawList DebugDraw{};
-		// M8: what the forward passes output; Lit for every view except a viewport.screenshot with "debugView".
+		// M9: the view's annotations (Scene/RenderAnnotations.h: entity labels, bounds, axes and collider outlines, for a capture
+		// or the editor's viewport options). Drawn in every debug view after DebugDraw, data views included.
+		DebugDrawList AnnotationDraw{};
+		// M8: what the forward passes output; Lit except a viewport.screenshot with "debugView" or the editor's debug view.
 		RenderDebugView DebugView = RenderDebugView::Lit;
 		// M9: assigned once in canonical mesh-entity order before visibility culling; no duplicate or invalid UUIDs.
 		std::vector<UUID> PickTable{};

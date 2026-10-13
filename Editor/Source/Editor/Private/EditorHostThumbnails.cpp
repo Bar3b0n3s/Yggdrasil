@@ -12,8 +12,8 @@
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Graphics/HostImageUpload.h"
 #include "Engine/ImGui/ImGuiRenderer.h"
-#include "Engine/Scene/Components/EnvironmentComponent.h"
 #include "Engine/Scene/Components/DirectionalLightComponent.h"
+#include "Engine/Scene/Components/EnvironmentComponent.h"
 #include "Engine/Scene/Components/MeshRendererComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/EntityBounds.h"
@@ -24,6 +24,7 @@
 
 #include <algorithm>
 #include <limits>
+#include <optional>
 
 namespace Engine {
 
@@ -61,22 +62,21 @@ namespace Engine {
 			return 0;
 		if (m_Editor.GetAssets().GetVersion(request.Asset) != request.Version || m_Editor.GetAssets().GetAssetType(request.Asset) == AssetType::None)
 			return 0;
-		const Key key{ request.ProjectGeneration, request.Asset, request.Version, request.Size };
+		const Key key{ request.ProjectGeneration, request.Asset, request.Size };
 		if (!m_Entries.contains(key) && m_Entries.size() >= 256)
 			return 0;
 		Entry& entry = m_Entries.try_emplace(key, Entry{ .Request = request }).first->second;
+		entry.Request = request;
 		entry.LastUse = ++m_Use;
 		return entry.Texture;
 	}
 	Status EditorHostThumbnails::Pump()
 	{
-		// Hot reload/deletion retires old registrations after the previous UI frame was submitted. A normal version
-		// change is not an error; Draw will request the replacement version and never reuse the old texture key.
+		// Deletion and project changes retire registrations after the previous UI frame was submitted.
 		for (auto item = m_Entries.begin(); item != m_Entries.end();)
 		{
 			const auto& request = item->second.Request;
-			if (request.ProjectGeneration != m_Cache.GetProjectGeneration() || m_Editor.GetAssets().GetVersion(request.Asset) != request.Version
-				|| m_Editor.GetAssets().GetAssetType(request.Asset) == AssetType::None)
+			if (request.ProjectGeneration != m_Cache.GetProjectGeneration() || m_Editor.GetAssets().GetAssetType(request.Asset) == AssetType::None)
 			{
 				if (m_Renderer && item->second.Texture != 0)
 					m_Renderer->RemoveTexture(item->second.Texture);
@@ -98,41 +98,57 @@ namespace Engine {
 				m_Renderer->RemoveTexture(oldest->second.Texture);
 			m_Entries.erase(oldest);
 		}
+		std::optional<Error> failure;
+		bool uploaded = false;
 		for (auto& [key, entry] : m_Entries)
 		{
 			(void)key;
-			if (entry.Texture != 0 || entry.Failed)
+			// The asset may have changed version since Draw asked; the cache answers for the version it has now.
+			ThumbnailRequest current = entry.Request;
+			current.Version = m_Editor.GetAssets().GetVersion(current.Asset);
+			const auto found = m_Cache.Find(current);
+			if (!found || (found->has_value() && (**found).TypeIcon))
+			{
+				// A remembered failure or a type icon draws the vector icon: release the image.
+				if (entry.Texture != 0)
+					m_Renderer->RemoveTexture(entry.Texture);
+				entry.Texture = 0;
+				entry.Path.clear();
 				continue;
-			auto found = m_Cache.Find(entry.Request);
-			if (!found)
-			{
-				entry.Failed = true;
-				return std::unexpected(std::move(found).error());
 			}
-			if (!found->has_value() || (**found).TypeIcon)
+			// Pending regeneration keeps the previous image; an unchanged path or a failed upload is not uploaded again.
+			if (!found->has_value() || (**found).Path == entry.Path || (**found).Path == entry.FailedPath || uploaded)
 				continue;
-			auto image = ReadPng(FileSystem::PathFromUtf8((**found).Path));
-			if (!image)
+			const std::string path = (**found).Path;
+			auto image = ReadPng(FileSystem::PathFromUtf8(path));
+			Result<uint64_t> texture = [this, &image]() -> Result<uint64_t>
 			{
-				entry.Failed = true;
-				return std::unexpected(std::move(image).error());
-			}
-			nvrhi::TextureDesc desc;
-			desc.width = image->Width;
-			desc.height = image->Height;
-			desc.format = nvrhi::Format::RGBA8_UNORM;
-			desc.debugName = "Editor thumbnail";
-			const TextureSubresourceData data{ .Data = image->Pixels, .RowPitch = image->GetRowPitch() };
-			auto uploaded = m_Device->GetHostImageUpload().CreateTexture(desc, std::span(&data, 1));
-			if (!uploaded)
+				if (!image)
+					return std::unexpected(std::move(image).error());
+				nvrhi::TextureDesc desc;
+				desc.width = image->Width;
+				desc.height = image->Height;
+				desc.format = nvrhi::Format::RGBA8_UNORM;
+				desc.debugName = "Editor thumbnail";
+				const TextureSubresourceData data{ .Data = image->Pixels, .RowPitch = image->GetRowPitch() };
+				ENGINE_TRY_ASSIGN(auto created, m_Device->GetHostImageUpload().CreateTexture(desc, std::span(&data, 1)));
+				return m_Renderer->AddTexture(*created.Texture);
+			}();
+			if (!texture)
 			{
-				entry.Failed = true;
-				return std::unexpected(std::move(uploaded).error());
+				entry.FailedPath = path;
+				if (!failure)
+					failure = std::move(texture).error();
+				continue;
 			}
-			entry.Texture = m_Renderer->AddTexture(*uploaded->Texture);
-			break;
+			if (entry.Texture != 0)
+				m_Renderer->RemoveTexture(entry.Texture);
+			entry.Texture = *texture;
+			entry.Path = path;
+			entry.FailedPath.clear();
+			uploaded = true; // one upload per safe point
 		}
-		return {};
+		return failure ? Status(std::unexpected(std::move(*failure))) : Status{};
 	}
 	Result<Image> EditorHostThumbnails::Render(const ThumbnailRequest& request)
 	{
@@ -216,7 +232,16 @@ namespace Engine {
 		{
 			ENGINE_TRY_ASSIGN(camera, EditorCamera::FrameBounds(camera, minimum, maximum, 1.0f));
 		}
-		ENGINE_TRY_ASSIGN(const RenderSnapshot snapshot, ExtractRenderSnapshot(scene, { .Camera = RenderCameraSource::Explicit, .ExplicitCamera = camera, .Width = request.Size, .Height = request.Size }));
+		// Thumbnails are a capture path: they render with the open project's quality settings, like every view, as the
+		// cache reports them, since it keys captured images by that quality.
+		const RenderExtractionRequest extraction{
+			.Camera = RenderCameraSource::Explicit,
+			.ExplicitCamera = camera,
+			.Width = request.Size,
+			.Height = request.Size,
+			.Quality = m_Cache.GetRenderQuality(),
+		};
+		ENGINE_TRY_ASSIGN(const RenderSnapshot snapshot, ExtractRenderSnapshot(scene, extraction));
 		return m_Capture(snapshot, request.Size);
 	}
 

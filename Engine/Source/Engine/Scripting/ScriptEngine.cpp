@@ -3,6 +3,7 @@
 
 #include "Engine/Asset/AssetManager.h"
 #include "Engine/Core/Assert.h"
+#include "Engine/Scene/Components/IDComponent.h"
 #include "Engine/Scene/Components/ScriptComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scripting/Private/SandboxAccess.h"
@@ -10,6 +11,8 @@
 #include "Engine/Scripting/ScriptApiRegistry.h"
 
 #include <algorithm>
+#include <utility>
+#include <vector>
 
 namespace Engine {
 
@@ -104,8 +107,35 @@ namespace Engine {
 			return MakeError(ErrorCode::InvalidState, "Script instances are not running");
 		Scene& scene = GetHost().GetScene();
 		m_State->RefreshLifecycleOrder();
-		const auto order = scene.GetCanonicalOrder();
-		const std::vector<UUID> snapshot(order.begin(), order.end());
+		// Only entities with a Script component and existing instances can change, so only those are visited, in canonical
+		// order. The refreshed lifecycle order already lists every instance canonically; a scene walk is needed only when
+		// a scripted entity may need a new instance. Large scenes with few scripts therefore cost no per-entity work.
+		entt::registry& registry = scene.GetRegistry();
+		std::vector<UUID> unplaced;
+		for (const entt::entity handle : registry.view<const ScriptComponent>())
+		{
+			const UUID id = registry.get<const IDComponent>(handle).ID;
+			if (m_State->Instances.contains(id) || !registry.get<const ScriptComponent>(handle).Script.IsValid())
+				continue;
+			const Entity entity = scene.FindEntityByID(id);
+			if (entity && (entity.IsActive() || !m_State->DisabledHistory.contains(id)))
+				unplaced.push_back(id);
+		}
+		std::vector<UUID> snapshot;
+		if (unplaced.empty())
+			snapshot = m_State->LifecycleOrder; // removed instances in it are skipped below, as before
+		else
+		{
+			std::vector<UUID> candidates = m_State->SortedInstanceIDs();
+			candidates.insert(candidates.end(), unplaced.begin(), unplaced.end());
+			std::sort(candidates.begin(), candidates.end());
+			candidates.erase(std::unique(candidates.begin(), candidates.end()), candidates.end());
+			for (const UUID id : scene.GetCanonicalOrder())
+			{
+				if (std::binary_search(candidates.begin(), candidates.end(), id))
+					snapshot.push_back(id);
+			}
+		}
 		struct ActiveTransition
 		{
 			UUID Entity{};
@@ -140,6 +170,7 @@ namespace Engine {
 					if (found->second.Table != LUA_NOREF)
 						lua_unref(Detail::SandboxAccess::MainCall(*m_State->Vm).State, found->second.Table);
 					m_State->Instances.erase(found);
+					m_State->LifecycleDirty = true;
 				}
 				found = m_State->Instances.end();
 			}
@@ -180,6 +211,8 @@ namespace Engine {
 					m_State->Invoke(transition.Entity, transition.Active ? "OnEnable" : "OnDisable", nullptr, true);
 			}
 		}
+		// OnCreate callbacks a faulted slice deferred run first, as members of the earlier batch they belong to.
+		m_State->InvokeDeferredCreates();
 		ENGINE_TRY(m_State->CreateInstances(missing));
 		for (const UUID id : enabled)
 		{
@@ -238,6 +271,11 @@ namespace Engine {
 			found->second.Started = true;
 			m_State->Invoke(id, "OnStart");
 		}
+		// Physics callbacks belong to the fixed step. Contacts that began before an instance's OnStart follow the whole
+		// start flush of the next fixed step (frame-rate independent), before FixedUpdate, so each side sees its enter
+		// before the matching exit (§9.4).
+		if (GetHost().GetFrameState().Phase == InputPhase::Step)
+			m_State->DeliverPendingPhysics();
 	}
 
 	void ScriptEngine::FixedUpdate()
@@ -312,6 +350,7 @@ namespace Engine {
 			if (!GetHost().GetScene().FindEntityByID(current->first))
 				m_State->DisabledHistory.erase(current->first);
 			current = m_State->Instances.erase(current);
+			m_State->LifecycleDirty = true;
 		}
 	}
 
@@ -319,16 +358,18 @@ namespace Engine {
 	{
 		m_State->AssertOwner();
 		const auto found = m_State->Instances.find(event.Self);
-		if (found == m_State->Instances.end() || !found->second.Started)
+		if (found == m_State->Instances.end())
 			return;
-		switch (event.Type)
+		if (!found->second.Started || !found->second.PendingPhysics.empty())
 		{
-			case PhysicsEventType::CollisionEnter: m_State->Invoke(event.Self, "OnCollisionEnter", &event); return;
-			case PhysicsEventType::CollisionExit:  m_State->Invoke(event.Self, "OnCollisionExit", &event); return;
-			case PhysicsEventType::TriggerEnter:   m_State->Invoke(event.Self, "OnTriggerEnter", &event); return;
-			case PhysicsEventType::TriggerExit:    m_State->Invoke(event.Self, "OnTriggerExit", &event); return;
+			// Physics marks this side entered whether or not a script observes it, so dropping the event would leave a
+			// later exit unpaired. Hold it (behind any earlier held event) until the instance has started; a removed or
+			// faulted instance discards its queue.
+			if (!IsStopped() && !IsReadOnly() && !found->second.FaultDisabled && !found->second.DestroyPrepared && found->second.Table != LUA_NOREF)
+				found->second.PendingPhysics.push_back(event);
+			return;
 		}
-		ENGINE_CORE_ASSERT(false, "Unknown physics event");
+		m_State->InvokePhysics(event);
 	}
 
 	void ScriptEngine::OnPhysicsDiagnostic(const PhysicsDiagnostic& diagnostic)
@@ -372,14 +413,14 @@ namespace Engine {
 		m_State->AssertOwner();
 		if (IsStopped())
 			return MakeError(ErrorCode::InvalidState, "The script engine has stopped");
-		Utils::ScriptEvaluationOwnerScope owner(m_State->CurrentOwner,
-			{ entity.value_or(UUID{}), !m_State->CurrentOwner.Case.IsNull() ? m_State->CurrentOwner.Case : m_State->ActiveCase });
+		// Tasks the evaluation spawns belong to its entity, and to a case only when evaluated from that case's work.
+		Utils::ScriptEvaluationOwnerScope owner(m_State->CurrentOwner, { entity.value_or(UUID{}), m_State->CurrentOwner.Case });
 		auto result = m_State->Vm->Evaluate(source, path, entity);
 		if (!result)
 		{
 			const auto failure = m_State->Vm->GetLastError();
 			if (failure)
-				m_State->Publish(*failure, { .Entity = entity.value_or(UUID{}), .Case = m_State->ActiveCase });
+				m_State->Publish(*failure, { .Entity = entity.value_or(UUID{}), .Case = m_State->ActiveCase }, false, false, State::FaultPolicy::ReportOnly);
 		}
 		return result;
 	}
@@ -389,14 +430,13 @@ namespace Engine {
 		m_State->AssertOwner();
 		if (IsStopped())
 			return MakeError(ErrorCode::InvalidState, "The script engine has stopped");
-		Utils::ScriptEvaluationOwnerScope owner(m_State->CurrentOwner,
-			{ entity.value_or(UUID{}), !m_State->CurrentOwner.Case.IsNull() ? m_State->CurrentOwner.Case : m_State->ActiveCase });
+		Utils::ScriptEvaluationOwnerScope owner(m_State->CurrentOwner, { entity.value_or(UUID{}), m_State->CurrentOwner.Case });
 		auto result = m_State->Vm->ExecuteBytecode(script, entity);
 		if (!result)
 		{
 			const auto failure = m_State->Vm->GetLastError();
 			if (failure)
-				m_State->Publish(*failure, { .Entity = entity.value_or(UUID{}), .Case = m_State->ActiveCase });
+				m_State->Publish(*failure, { .Entity = entity.value_or(UUID{}), .Case = m_State->ActiveCase }, false, false, State::FaultPolicy::ReportOnly);
 		}
 		return result;
 	}

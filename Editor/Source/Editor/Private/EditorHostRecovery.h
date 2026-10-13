@@ -26,13 +26,14 @@ namespace Engine {
 		// Owned, memory-only copy for the UI. A failed queued decision remains here with Failure set and Pending false.
 		[[nodiscard]] std::optional<EditorRecoveryOffer> GetOffer() const;
 		// Memory-only enqueue. InvalidArgument for zero ID/unknown decision; NotFound for an obsolete offer;
-		// InvalidState if already pending. Accept returns Conflict for changed epoch/project/revision and
-		// PermissionDenied for read-only acceptance. Decline of the matching offer remains valid after binding changes.
+		// InvalidState if already pending. Accept returns Conflict for changed epoch/project/revision, InvalidState while
+		// a test run owns the editor and PermissionDenied for read-only acceptance. Decline of the matching offer remains
+		// valid after binding changes.
 		// Only the host-owned offer bytes are used; caller-provided Recovery/Failure fields cannot replace them.
 		// Binding/read-only refusals remain in the matching offer's Failure. Bad/obsolete requests never change it;
 		// an already-pending refusal preserves the original queued decision, and a successful enqueue clears Failure.
 		[[nodiscard]] Status QueueDecision(const EditorRecoveryOffer& offer, EditorRecoveryDecision decision);
-		// Consume at the next safe point, rechecking epoch/project/revision before any recovery. Accept uses the real
+		// Consume at the next safe point, rechecking epoch/project/revision and test-run ownership before any recovery. Accept uses the real
 		// Autosave::Recover on the existing lock/mounts; Decline only dismisses the matching offer in memory, even when
 		// its binding became stale. Decline never reads/writes current or durable state. Failure stays observable in
 		// GetOffer; success dismisses. With no pending decision, succeeds without I/O or state changes.

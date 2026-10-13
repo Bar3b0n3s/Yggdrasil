@@ -204,18 +204,24 @@ namespace Engine {
 			AssetManager& assets, const SceneRendererSpecification& specification);
 
 		// Recreates the size-dependent targets for `width` x `height` (both >= 1, asserted) and clears the renderer's binding
-		// sets (which reference the old targets); no effect at the current size. Errors: those of the target creation (Gpu:
-		// FatalError(OutOfMemory) for the caller, §8.14 item 7).
+		// sets (which reference the old targets); no effect at the current size. Errors: InvalidState while a Render awaits its
+		// OnSubmitted (also asserted); those of the target creation (Gpu: FatalError(OutOfMemory) for the caller, §8.14 item 7).
 		[[nodiscard]] Status Resize(uint32_t width, uint32_t height);
 
 		// Records the pass list for `snapshot` into `commandList` (open, asserted). The snapshot's camera viewport should
 		// match the renderer's size; a different one renders at the renderer's size with the snapshot's projection. Uploads
 		// the assets it needs through the GpuResourceCache first, and creates a debug view's pipelines the first time it is
-		// asked for (SceneRendererPipelines::EnsureDebugView; a failure there is FatalError(OutOfMemory), §8.14 item 7).
+		// asked for (SceneRendererPipelines::EnsureDebugView; a Gpu error there is FatalError(OutOfMemory), §8.14 item 7).
 		// Afterwards GetFinalTexture holds the image.
-		// Errors: none from rendering itself (a missing asset draws its placeholder, a missing environment the fallback
-		// ambient); InvalidArgument for a non-finite matrix in the snapshot (the draw is skipped and the error names the
-		// entity); Gpu when a per-frame binding set cannot be created.
+		// Errors returned before recording (nothing recorded, no OnSubmitted needed): InvalidState while the previous Render
+		// awaits its OnSubmitted (also asserted); InvalidArgument for a debug view outside RenderDebugView or a
+		// Quality.ShadowMapSize that is not a power of two in [256, 8192]; a debug view's pipeline error other than Gpu (an
+		// invalid shader). Partial errors (the view is still recorded, the first error is returned): InvalidArgument for a
+		// non-finite camera matrix (the view clears as without a camera) or world matrix (that draw is skipped, the error
+		// names the entity), or invalid wireframe, overlay or selection data; Gpu when a binding set or a lazily created
+		// target cannot be created. Data the schemas accept is never a render error: a missing asset draws its placeholder, a
+		// missing environment the fallback ambient, and a shadow-casting light the shadow planners reject stays lit without
+		// shadows (warned once per renderer).
 		[[nodiscard]] Status Render(nvrhi::ICommandList& commandList, const RenderSnapshot& snapshot);
 
 		// The LDR target holding the last Render's image (RGBA8_UNORM, display-encoded values, §8.9): LdrColor, or its FXAA

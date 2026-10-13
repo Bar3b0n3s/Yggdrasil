@@ -32,7 +32,8 @@ namespace Engine {
 		// segments without ever escaping Assets and append .luau when extensionless. Explicit .luau is accepted.
 		// Reject schemes, absolute paths, backslashes, aliases, other extensions and invalid VfsPath spellings with
 		// Validation, located at importer. No directory/init or case-insensitive fallback. Does not read the module.
-		// Records the edge even on a module-cache hit; Requires are unique/sorted (From, Request, Path, Handle).
+		// Records the edge even on a module-cache hit; Requires are unique/sorted (From, Request, Path, Handle), at most
+		// MaxScriptRequireEdges of them (ScriptLimits.h): a request that would add another fails with Validation.
 		// From/Path are Assets/...; Request keeps the supplied spelling. Handle is unset until the importer resolves it.
 		[[nodiscard]] Result<VfsPath> Resolve(const VfsPath& importer, std::string_view request);
 

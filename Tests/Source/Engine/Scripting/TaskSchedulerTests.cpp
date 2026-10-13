@@ -4,10 +4,16 @@
 #include "Engine/Scene/Components/ScriptComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scripting/LuaHelpers.h"
+#include "Engine/Scripting/ScriptEngine.h"
+#include "Engine/Scripting/ScriptTestHost.h"
 #include "Support/ExpectLog.h"
 #include "Support/ScriptTestFixture.h"
 
 #include <doctest/doctest.h>
+
+#include <optional>
+#include <string>
+#include <vector>
 
 namespace Engine {
 
@@ -73,6 +79,40 @@ return "inner result"
 			if (!result)
 				return Lua::RaiseError(call, result.error());
 			return 0;
+		}
+
+		// Records test outcomes for the case-boundary task tests; screenshots, input and audio are unused.
+		class TaskCaseHost final : public IScriptTestHost
+		{
+		public:
+			void Report(const ScriptTestReport& report) override { Reports.push_back(report); }
+			void OnScriptError(const ScriptError& error, bool /*fatal*/) override { Errors.push_back(error); }
+			void OnExpectedScriptError(const ScriptError& /*error*/) override {}
+			Status InjectInput(const Json& /*event*/) override { return MakeError(ErrorCode::Unsupported, "input is unused by task tests"); }
+			Status CaptureScreenshot(std::string_view /*name*/) override { return MakeError(ErrorCode::Unsupported, "screenshots are unused by task tests"); }
+			Status BeginAudioCapture(uint32_t /*ticks*/) override { return MakeError(ErrorCode::Unsupported, "audio is unused by task tests"); }
+			bool IsAudioCaptureReady() const override { return false; }
+			Result<AudioLevels> EndAudioCapture() override { return MakeError(ErrorCode::Unsupported, "audio is unused by task tests"); }
+			void CancelAudioCapture() override {}
+			Status ReloadScript(AssetHandle /*script*/) override { return MakeError(ErrorCode::Unsupported, "reload is unused by task tests"); }
+			uint64_t ComputeStateHash() const override { return 0; }
+			ScriptExtractionState GetLastExtraction() const override { return {}; }
+			std::optional<glm::vec3> GetExtractedPosition(UUID /*entity*/) const override { return std::nullopt; }
+			void OnDebugBreak() override {}
+
+			std::vector<ScriptTestReport> Reports{};
+			std::vector<ScriptError> Errors{};
+		};
+
+		static ScriptCollectedSuite CollectTaskCases(ScriptTestFixture& fixture, TaskCaseHost& host, std::string source)
+		{
+			const AssetHandle handle(0x2100ff);
+			const auto asset = fixture.AddScript(handle, "Assets/Tests/TaskCases.luau", std::move(source));
+			REQUIRE_MESSAGE(asset, (asset ? "" : asset.error().ToString()));
+			REQUIRE(fixture.Start());
+			const auto suite = fixture.GetEngine()->CollectSuite(handle, host);
+			REQUIRE_MESSAGE(suite, (suite ? "" : suite.error().ToString()));
+			return *suite;
 		}
 
 	}
@@ -340,6 +380,122 @@ return true
 			REQUIRE(evaluated);
 			CHECK(evaluated->Value.Get() == Json(true));
 			CHECK(fixture.GetEngine()->GetTaskScheduler()->GetCount() == 0);
+		}
+
+		TEST_CASE("TaskScheduler: behaviour tasks survive the end of the test case they were spawned in")
+		{
+			Test::TaskCaseHost host;
+			Test::ScriptTestFixture fixture({ .TestMode = true, .TestHost = &host });
+			REQUIRE(fixture.AddScript(AssetHandle(0x210001), "Assets/Scripts/Game.luau", R"(
+local T = {}
+function T:OnFixedUpdate()
+	self.Calls = (self.Calls or 0) + 1
+	if self.Calls == 1 then
+		Task.Spawn(function()
+			Task.WaitTicks(3)
+			self.Spawned = true
+		end)
+	end
+end
+return Script.Define("Game", T)
+)"));
+			const Entity game = fixture.GetScene().CreateEntity("Game");
+			ScriptComponent component{};
+			component.Script.SetHandle(AssetHandle(0x210001));
+			game.AddComponent<ScriptComponent>(component);
+			// Suite isolation: both cases share this scene, so gameplay continuations must cross the case boundary.
+			const auto suite = Test::CollectTaskCases(fixture, host, R"(
+return Test.Suite("Cases", function()
+	Test.Case("First", function() Test.WaitTicks(1) end)
+	Test.Case("Second", function()
+		Test.WaitUntil(function() return (Scene.FindByName("Game") :: Entity):GetScript().Spawned == true end, 10)
+	end)
+end)
+)");
+			REQUIRE(suite.Cases.size() == 2);
+			const auto first = fixture.GetEngine()->StartCase(suite.Cases[0].Function);
+			REQUIRE(first);
+			REQUIRE(fixture.GetEngine()->ResumeCase(*first));
+			fixture.GetEngine()->FixedUpdate(); // the behaviour spawns its task while the first case is running
+			fixture.Frame.Tick = 1;
+			fixture.GetEngine()->ResumeTasks();
+			const auto passed = fixture.GetEngine()->ResumeCase(*first);
+			REQUIRE(passed);
+			CHECK(passed->State == ScriptCaseState::Completed);
+			fixture.GetEngine()->CancelCase(*first); // the runner ends every case like this, passed or failed
+			CHECK(fixture.GetEngine()->GetTaskScheduler()->GetCount() == 1);
+			const auto second = fixture.GetEngine()->StartCase(suite.Cases[1].Function);
+			REQUIRE(second);
+			ScriptCaseState state = ScriptCaseState::Yielded;
+			for (uint64_t tick = 1; tick <= 4 && state == ScriptCaseState::Yielded; ++tick)
+			{
+				fixture.Frame.Tick = tick;
+				fixture.GetEngine()->ResumeTasks();
+				const auto resumed = fixture.GetEngine()->ResumeCase(*second);
+				REQUIRE(resumed);
+				state = resumed->State;
+			}
+			CHECK(state == ScriptCaseState::Completed);
+			CHECK(Test::TaskValue(fixture, game.GetUUID(), "return self.Spawned") == Json(true));
+			fixture.GetEngine()->CancelCase(*second);
+			CHECK(host.Reports.empty());
+			CHECK(host.Errors.empty());
+		}
+
+		TEST_CASE("TaskScheduler: a case ended by its own task never suppresses another entity's gameplay")
+		{
+			Test::TaskCaseHost host;
+			Test::ScriptTestFixture fixture({ .TestMode = true, .TestHost = &host });
+			REQUIRE(fixture.AddScript(AssetHandle(0x210002), "Assets/Scripts/Shooter.luau", R"(
+local T = {}
+function T:OnFixedUpdate()
+	self.Calls = (self.Calls or 0) + 1
+	if self.Calls == 1 then
+		Task.Spawn(function()
+			Task.WaitTicks(1)
+			Scene.CreateEntity("Bullet")
+		end)
+	elseif self.Calls == 2 then
+		Scene.CreateEntity("AfterLatch")
+	end
+end
+return Script.Define("Shooter", T)
+)"));
+			const Entity shooter = fixture.GetScene().CreateEntity("Shooter");
+			ScriptComponent component{};
+			component.Script.SetHandle(AssetHandle(0x210002));
+			shooter.AddComponent<ScriptComponent>(component);
+			const auto suite = Test::CollectTaskCases(fixture, host, R"(
+return Test.Suite("Cases", function()
+	Test.Case("Helper", function()
+		Task.Spawn(function()
+			Test.WaitTicks(1)
+			Test.Fail("helper failed")
+		end)
+		Test.WaitTicks(5)
+	end)
+end)
+)");
+			const auto thread = fixture.GetEngine()->StartCase(suite.Cases[0].Function);
+			REQUIRE(thread);
+			REQUIRE(fixture.GetEngine()->ResumeCase(*thread));
+			fixture.GetEngine()->FixedUpdate(); // gameplay task created after the case's helper: resumed after it
+			fixture.Frame.Tick = 1;
+			// The helper latches the case terminal; the gameplay task resumed next in the same loop still takes effect.
+			fixture.GetEngine()->ResumeTasks();
+			CHECK(fixture.GetScene().FindEntityByPath("/Bullet"));
+			// So does a gameplay callback before the runner ends the latched case.
+			fixture.GetEngine()->FixedUpdate();
+			CHECK(fixture.GetScene().FindEntityByPath("/AfterLatch"));
+			const auto failed = fixture.GetEngine()->ResumeCase(*thread);
+			REQUIRE(failed);
+			CHECK(failed->State == ScriptCaseState::Failed);
+			CHECK(failed->Message == "helper failed");
+			fixture.GetEngine()->CancelCase(*thread);
+			REQUIRE(host.Reports.size() == 1);
+			CHECK(host.Reports[0].Message == "helper failed");
+			CHECK(host.Errors.empty());
+			CHECK(fixture.Errors.empty());
 		}
 	}
 

@@ -3,6 +3,7 @@
 
 #include "Engine/Asset/DocumentData.h"
 #include "Engine/Audio/AudioEngine.h"
+#include "Engine/Automation/Protocol/Watchdog.h"
 #include "Engine/Core/Json/Json.h"
 #include "Engine/Core/VirtualFileSystem.h"
 #include "Engine/Scene/AudioSystem.h"
@@ -16,8 +17,10 @@
 
 #include <doctest/doctest.h>
 
+#include <algorithm>
 #include <format>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace Engine {
@@ -54,6 +57,29 @@ namespace Engine {
 			return names;
 		}
 
+		// Records the script phases and fatal errors a session reports to its host.
+		class PhaseRecordingHost final : public IPlaySessionHost
+		{
+		public:
+			ScriptEnvironment GetScriptEnvironment() const override { return {}; }
+			Status SetScriptCursorMode(CursorMode) override { return {}; }
+			CursorMode GetScriptCursorMode() const override { return CursorMode::Normal; }
+			void OnScriptError(const ScriptError& error, bool fatal) override
+			{
+				if (fatal)
+					FatalErrors.push_back(error);
+			}
+			void OnScriptPhase(std::string_view script, std::string_view callback) override
+			{
+				std::string phase;
+				if (!script.empty() || !callback.empty())
+					FormatScriptPhase(phase, script, callback);
+				Phases.push_back(std::move(phase));
+			}
+			std::vector<std::string> Phases{};
+			std::vector<ScriptError> FatalErrors{};
+		};
+
 		class ScriptPhaseHook final : public IPlaySessionTestHook
 		{
 		public:
@@ -71,6 +97,94 @@ namespace Engine {
 
 	TEST_SUITE("Session")
 	{
+		TEST_CASE("PlaySession: the host receives each running gameplay entry as its script phase")
+		{
+			// §13.2: a Busy answer names the gameplay entry the main thread is stuck in; the session forwards every
+			// protected entry and exit of its VM to the host, and one-shot evaluations report none.
+			Test::ScriptTestFixture fixture;
+			const AssetHandle script(0x710031);
+			REQUIRE(fixture.AddScript(script, "Assets/Scripts/Board.luau", R"(
+local Board = {}
+function Board:OnFixedUpdate() Task.Spawn(function() Task.WaitTicks(1) end) end
+return Script.Define("Board", Board)
+)"));
+			Test::AttachSessionScript(fixture.GetScene().CreateEntity("Board"), script);
+			Test::PhaseRecordingHost host;
+			auto specification = Test::ScriptSessionSpecification(fixture);
+			specification.Host = &host;
+			auto created = PlaySession::CreateFromScene(specification, fixture.GetScene());
+			REQUIRE(created);
+			auto session = std::move(*created);
+			session->SetExtractionEnabled(false);
+			session->Tick();
+			host.Phases.clear();
+			session->Tick();
+			const auto& phases = host.Phases;
+			CHECK(std::ranges::find(phases, "Script:Board.OnFixedUpdate") != phases.end());
+			CHECK(std::ranges::find(phases, "Script:Board.Task") != phases.end());
+			REQUIRE_FALSE(phases.empty());
+			// Every entry is closed again: the phase is cleared once no gameplay script runs.
+			CHECK(phases.back().empty());
+			host.Phases.clear();
+			REQUIRE(session->GetScripts()->Evaluate("return 1 + 2", {}));
+			CHECK(std::ranges::none_of(host.Phases, [](const std::string& phase)
+			{
+				return !phase.empty();
+			}));
+		}
+
+		TEST_CASE("PlaySession: a second memory breach stops the session with a structured error")
+		{
+			// §11.1 through a hosted session: the first soft breach disables the faulting instance and the VM recovers; the
+			// second stops the session with a structured memory error the host and play.state see (GetFatalError).
+			Test::ScriptTestFixture fixture;
+			constexpr std::string_view Leak = R"(
+local Leak = {}
+function Leak:OnFixedUpdate()
+	local retained = string.rep("x", 2 * 1024 * 1024)
+	while true do retained = retained end
+end
+return Script.Define("Leak", Leak)
+)";
+			// Two files, so the two breaches stay two entries of the error stream (it merges repeats of one location).
+			const AssetHandle first(0x710032), second(0x710033);
+			REQUIRE(fixture.AddScript(first, "Assets/Scripts/LeakFirst.luau", std::string(Leak)));
+			REQUIRE(fixture.AddScript(second, "Assets/Scripts/LeakSecond.luau", std::string(Leak)));
+			Test::AttachSessionScript(fixture.GetScene().CreateEntity("First"), first);
+			Test::AttachSessionScript(fixture.GetScene().CreateEntity("Second"), second);
+			Test::PhaseRecordingHost host;
+			auto specification = Test::ScriptSessionSpecification(fixture);
+			specification.Host = &host;
+			specification.Project.Scripting.MemoryLimitMB = 1;
+			specification.Project.Scripting.PauseOnError = false;
+			auto created = PlaySession::CreateFromScene(specification, fixture.GetScene());
+			REQUIRE(created);
+			auto session = std::move(*created);
+			session->SetExtractionEnabled(false);
+			CHECK_FALSE(session->GetFatalError().has_value());
+			{
+				Test::ExpectLog breach(LogLevel::Error, "memory limit");
+				session->Tick();
+			}
+			const auto& errors = session->GetScriptErrors().GetErrors();
+			REQUIRE(errors.size() == 2);
+			CHECK(errors[0].Kind == ScriptErrorKind::Memory);
+			CHECK(errors[0].EntityName == "First");
+			REQUIRE(session->GetFatalError().has_value());
+			const ScriptError& fatal = *session->GetFatalError();
+			CHECK(fatal.Kind == ScriptErrorKind::Memory);
+			CHECK(fatal.EntityName == "Second");
+			CHECK(fatal.Script == "Assets/Scripts/LeakSecond.luau");
+			CHECK(fatal.ID == errors[1].ID);
+			REQUIRE(host.FatalErrors.size() == 1);
+			CHECK(host.FatalErrors[0].ID == fatal.ID);
+			CHECK(session->IsPaused());
+			CHECK(session->GetScripts()->IsStopped());
+			const uint64_t tick = session->GetTick();
+			session->Tick();
+			CHECK(session->GetTick() == tick);
+		}
+
 		TEST_CASE("PlaySession: scene load transfers maximum-depth parameters into the replacement VM")
 		{
 			Test::ScriptTestFixture fixture;

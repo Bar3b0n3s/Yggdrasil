@@ -8,12 +8,14 @@
 #include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scripting/ScriptEngine.h"
+#include "Engine/Scripting/ScriptLimits.h"
 #include "Engine/Session/PlaySession.h"
 
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
 #include <charconv>
+#include <format>
 #include <optional>
 
 namespace Engine {
@@ -40,6 +42,7 @@ namespace Engine {
 				result.NextCursor = std::to_string(stream->GetCursor());
 				return result;
 			}
+			result.Evicted = stream->HasEvictedAfter(since);
 			for (const ScriptError& error : stream->Read(since, params.Limit))
 			{
 				ScriptErrorSummary entry;
@@ -136,19 +139,20 @@ namespace Engine {
 			.Field("script", &ScriptErrorSummary::Script, "Authored source path.")
 			.Field("line", &ScriptErrorSummary::Line, "One-based authored line, zero when unknown.")
 			.Field("column", &ScriptErrorSummary::Column, "One-based UTF-8 byte column, zero when unknown.")
-			.Field("message", &ScriptErrorSummary::Message, "Error message.")
+			.Field("message", &ScriptErrorSummary::Message, std::format("Error message of at most {} bytes; longer text is cut and ends with [truncated: <n> bytes].", MaxScriptLogMessageBytes))
 			.Field("callback", &ScriptErrorSummary::Callback, "Callback that failed.")
 			.Field("entity", &ScriptErrorSummary::Entity, "Detached entity identity and name.")
 			.Field("tick", &ScriptErrorSummary::Tick, "Simulation tick of the latest occurrence.")
 			.Field("count", &ScriptErrorSummary::Count, "Number of occurrences.")
-			.Field("traceback", &ScriptErrorSummary::Traceback, "Authored traceback frames.")
+			.Field("traceback", &ScriptErrorSummary::Traceback, std::format("Authored traceback frames, innermost first: at most {}, the last a [truncated: <n> more frames] function without a script when deeper frames were left out.", MaxScriptErrorTracebackFrames))
 			.Field("jsonPointer", &ScriptErrorSummary::JsonPointer, "Embedded source location, empty for standalone scripts.");
 		registry.Struct<ScriptErrorsParams>("ScriptErrorsParams", "Read errors after an exclusive cursor.")
 			.Field("since", &ScriptErrorsParams::Since, "Empty for the beginning, end for the current cursor, or a previous nextCursor.")
 			.Field("limit", &ScriptErrorsParams::Limit, "Maximum returned entries.", { .Min = 1.0, .Max = 1000.0 });
 		registry.Struct<ScriptErrorsResult>("ScriptErrorsResult", "Errors and a full precision decimal cursor.")
 			.Field("errors", &ScriptErrorsResult::Errors, "Updated errors in cursor order.")
-			.Field("nextCursor", &ScriptErrorsResult::NextCursor, "Exclusive sequence to reuse as since, also for an empty page.");
+			.Field("nextCursor", &ScriptErrorsResult::NextCursor, "Exclusive sequence to reuse as since, also for an empty page.")
+			.Field("evicted", &ScriptErrorsResult::Evicted, std::format("True when an error newer than since was evicted before this read: the stream keeps the {} distinct errors with the latest occurrences, and the retained ones still follow.", MaxScriptErrorEntries));
 		registry.Struct<ScriptEvalParams>("ScriptEvalParams", "Evaluate Luau in an explicitly selected context.")
 			.Field("code", &ScriptEvalParams::Code, "UTF-8 Luau expression or chunk.")
 			.Field("context", &ScriptEvalParams::Context, "Edit or Play.")

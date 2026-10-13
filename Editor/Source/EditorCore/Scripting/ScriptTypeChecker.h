@@ -73,6 +73,8 @@ namespace Engine {
 		// the reader and RequireResolver. Default mode Strict, inherited .luaurc and source directives applied.
 		// Findings are 1-based source ranges, sorted by (File, Line, Column, Code) with deterministic ties/deduplication.
 		// End positions are exclusive. Required-module errors name that module. No I/O, callbacks or views outlive return.
+		// Syntax errors use SCRIPT_COMPILE_ERROR (as import does); every other finding uses SCRIPT_TYPE_ERROR. Nested
+		// .luaurc files apply from the project root down, so the nearest directory's configuration wins.
 		// InternalCompilerError (including timeout/cancellation) becomes an Error diagnostic; malformed requests/read
 		// failures are findings too. A failed check never returns an empty success.
 		[[nodiscard]] std::vector<ScriptDiagnostic> CheckScript(const ScriptCheckRequest& request) override;

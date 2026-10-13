@@ -5,6 +5,7 @@
 #include "Editor/Ui/EditorStyle.h"
 #include "EditorCore/EditorActions.h"
 #include "EditorCore/EditorContext.h"
+#include "EditorCore/Play/EditorPlayController.h"
 #include "Engine/Core/Log.h"
 
 #include <imgui.h>
@@ -42,12 +43,14 @@ namespace Engine {
 			else
 				report(ticket.error());
 		};
-		ImGui::BeginDisabled(m_Ticket != 0 || !history.CanUndo() || context.Editor.IsReadOnly());
+		// A test run owns the editor; its lease rejects undo and redo, so the buttons wait for the run to finish.
+		const bool testRun = context.Editor.GetPlay().IsTestRunActive();
+		ImGui::BeginDisabled(m_Ticket != 0 || !history.CanUndo() || context.Editor.IsReadOnly() || testRun);
 		if (Utils::EditorToolbarButton("Undo", history.CanUndo() ? history.GetUndoLabel().c_str() : "There are no applied changes to undo."))
 			submit("edit.undo");
 		ImGui::EndDisabled();
 		ImGui::SameLine();
-		ImGui::BeginDisabled(m_Ticket != 0 || !history.CanRedo() || context.Editor.IsReadOnly());
+		ImGui::BeginDisabled(m_Ticket != 0 || !history.CanRedo() || context.Editor.IsReadOnly() || testRun);
 		if (Utils::EditorToolbarButton("Redo", history.CanRedo() ? history.GetRedoLabel().c_str() : "There are no undone changes to restore."))
 			submit("edit.redo");
 		ImGui::EndDisabled();
@@ -60,6 +63,8 @@ namespace Engine {
 			static_cast<double>(history.GetLimits().MaxBytes) / (1024.0 * 1024.0));
 		if (context.Editor.IsReadOnly())
 			ImGui::TextWrapped("Read-only project. Undo and redo are unavailable.");
+		else if (testRun)
+			ImGui::TextWrapped("Tests are running. Undo and redo are available when they finish.");
 		if (m_Ticket != 0)
 			ImGui::TextDisabled("Applying change...");
 		const auto entries = history.GetEntries(history.GetLimits().MaxEntries);

@@ -56,6 +56,33 @@ class EditorUiTests(AutomationTestCase):
         self.assertEqual(editor.wait(), 0, editor.output())
         self.assertFalse(engine_client.list_sessions(engine_client.sessions_directory(app_name(), self.user_data)))
 
+    def test_attach_to_headless_editor_with_automation_allowed(self) -> None:
+        """The headless null-platform editor with the preference set. A headless editor listens whatever the preference
+        says (MCP launches rely on it, ADR 0008 decision 14), so this proves attachment and that startup leaves the saved
+        preference alone; only the windowed test above can prove that the preference itself opts an editor in."""
+        for allowed in (True, False):
+            with self.subTest(allowed=allowed):
+                preferences = self.write_automation_preference(allowed)
+                editor = engine_client.launch_editor(
+                    editor_executable(), ["--headless", "--renderer", "none", "--audio-device", "none",
+                                          self.engine_cache_argument()], self.user_data, app_name())
+                self.editors.append(editor)
+                client = self.connect(editor)
+                self.assertIsNotNone(editor.session)
+                self.assertEqual(editor.session.pid, editor.process.pid)
+                self.assertTrue(client.call("session.info")["headless"])
+                self.create_project(client, f"Headless{allowed}")
+                client.call("scene.new", {"path": "Assets/Scenes/Attached.scene"})
+                created = client.call("entity.create", {"name": "AttachedToHeadlessEditor"})
+                self.assertEqual(created["entity"]["name"], "AttachedToHeadlessEditor")
+                saved = json.loads(preferences.read_text(encoding="utf-8"))
+                self.assertEqual(saved["AllowAiAutomation"], allowed)
+                self.assertEqual(saved["FuturePreference"], {"Keep": 23})
+                client.call("session.shutdown", {"force": True})
+                self.assertEqual(editor.wait(), 0, editor.output())
+                self.assertFalse(engine_client.list_sessions(engine_client.sessions_directory(app_name(),
+                                                                                             self.user_data)))
+
     def test_explicit_automation_overrides_disabled_preference(self) -> None:
         preferences = self.write_automation_preference(False)
         editor = engine_client.launch_editor(
@@ -107,6 +134,9 @@ class EditorUiTests(AutomationTestCase):
         created = client.call("entity.create", {"name": "Selected"})
         client.call("edit.select", {"entities": [created["entity"]["id"]]})
         state = client.call("editor.state")
+        # The default layout of an open project, in stable panel order; the launcher closed when the project opened.
+        default_panels = ["SceneHierarchy", "Inspector", "SceneViewport", "GameViewport", "ContentBrowser", "Console"]
+        self.assertEqual(state["openPanels"], default_panels)
         self.assertEqual(state["selection"][0]["name"], "Selected")
         self.assertEqual(state["selectionTarget"], "Edit")
         self.assertEqual(state["uiFrame"], 0)
@@ -115,6 +145,7 @@ class EditorUiTests(AutomationTestCase):
         playing = client.call("editor.state")
         self.assertEqual(playing["mode"], "Play")
         self.assertTrue(playing["lockstepOwner"])
+        self.assertEqual(playing["openPanels"], default_panels)
         client.call("play.stop")
         before = client.call("viewport.camera")
         changed = client.call("viewport.camera", {"position": [6, 4, 8]})
@@ -167,7 +198,8 @@ class EditorUiTests(AutomationTestCase):
         screenshot = responses[91002]["result"]
         self.assertNotEqual(Path(screenshot["path"]).read_bytes(), prior_pixels)
 
-    def test_scene_changed_on_disk_banner_requires_reload(self) -> None:
+    def test_scene_changed_on_disk_flag_holds_until_reload(self) -> None:
+        """The flag the SceneChangedOnDisk banner shows; the banner itself is drawn in EditorLayerTests."""
         client, root = self.open_editor_with_scene()
         source = root / "Assets/Scenes/Main.scene"
         document = json.loads(source.read_text(encoding="utf-8"))

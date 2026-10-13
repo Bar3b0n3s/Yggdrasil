@@ -6,6 +6,8 @@
 #include "EditorCore/EditorContext.h"
 #include "Support/EditorTestFixture.h"
 
+#include <nlohmann/json.hpp>
+
 namespace Engine {
 
 	namespace {
@@ -209,6 +211,34 @@ namespace Engine {
 			REQUIRE(entries.size() == 1);
 			CHECK(entries[0].Origin == CommandOrigin::Agent);
 			CHECK(entries[0].Label == "[agent] Add 1");
+		}
+
+		TEST_CASE("CommandHistory: an agent cannot undo or redo while agent mutations are denied")
+		{
+			Test::EditorTestFixture fixture("HistoryAgentDenied");
+			EditorContext& editor = fixture.GetEditor();
+			CommandHistory history;
+			int counter = 0;
+			REQUIRE(history.Execute(CreateScope<CounterCommand>(counter, 1), editor).has_value());
+			REQUIRE(history.Execute(CreateScope<CounterCommand>(counter, 10), editor).has_value());
+			REQUIRE(history.Undo(editor).has_value());
+			REQUIRE(counter == 1);
+			editor.SetAgentMutationsDenied(true);
+			editor.SetWriteAttribution(WriteAttribution{ .Method = "edit.undo", .RequestId = VariantValue(Json(7)), .Client = "agent", .TranscriptLine = std::nullopt });
+			REQUIRE(editor.GetCommandOrigin() == CommandOrigin::Agent);
+			const Result<size_t> undone = history.Undo(editor);
+			REQUIRE_FALSE(undone);
+			CHECK(undone.error().GetCode() == ErrorCode::PermissionDenied);
+			const Result<size_t> redone = history.Redo(editor);
+			REQUIRE_FALSE(redone);
+			CHECK(redone.error().GetCode() == ErrorCode::PermissionDenied);
+			CHECK(counter == 1);
+			CHECK(history.GetUndoCount() == 1);
+			CHECK(history.GetRedoCount() == 1);
+			// The human keeps undo and redo: the policy denies agents only.
+			editor.SetWriteAttribution(std::nullopt);
+			REQUIRE(history.Redo(editor).has_value());
+			CHECK(counter == 11);
 		}
 
 		TEST_CASE("CommandHistory: undo stops at a command whose Undo fails and leaves it applied")

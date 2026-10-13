@@ -3,6 +3,7 @@
 
 #include "Engine/Core/Utf8.h"
 #include "Engine/Reflection/TypeRegistry.h"
+#include "Engine/Scripting/ScriptLimits.h"
 
 #include <nlohmann/json.hpp>
 
@@ -70,6 +71,37 @@ namespace Engine {
 
 	}
 
+	std::string SanitizeTestReportText(std::string_view text)
+	{
+		constexpr std::string_view Replacement = "\xEF\xBF\xBD"; // U+FFFD
+		std::string result;
+		result.reserve(text.size());
+		while (!text.empty())
+		{
+			const size_t valid = FindInvalidUtf8(text);
+			const std::string_view prefix = text.substr(0, valid);
+			for (size_t index = 0; index < prefix.size(); ++index)
+			{
+				const auto byte = static_cast<unsigned char>(prefix[index]);
+				if (byte < 0x20 && byte != '\t' && byte != '\n' && byte != '\r')
+					result += std::format("\\u{:04X}", static_cast<unsigned int>(byte));
+				else if (byte == 0xEF && (prefix.substr(index, 3) == "\xEF\xBF\xBE" || prefix.substr(index, 3) == "\xEF\xBF\xBF"))
+				{
+					result += Replacement;
+					index += 2;
+				}
+				else
+					result += prefix[index];
+			}
+			if (valid == text.size())
+				break;
+			// One replacement per invalid byte; the next byte starts a new attempt.
+			result += Replacement;
+			text.remove_prefix(valid + 1);
+		}
+		return result;
+	}
+
 	void RegisterTestResultTypes(TypeRegistry& registry)
 	{
 		registry.Struct<TestFailureResult>("TestFailureResult", "TestFailureResult shared test report.")
@@ -86,7 +118,7 @@ namespace Engine {
 			.Field("line", &TestCaseResult::Line, "Line of the test report.")
 			.Field("jsonPointer", &TestCaseResult::JsonPointer, "JsonPointer of the test report.")
 			.Field("ticks", &TestCaseResult::Ticks, "Ticks of the test report.")
-			.Field("failures", &TestCaseResult::Failures, "Failures of the test report.")
+			.Field("failures", &TestCaseResult::Failures, std::format("Failures of the test report: at most {} for expectations and unexpected script errors, the last then counting any further ones as [truncated: <n> more failures], and at most {} such failures per suite.", MaxScriptTestFailuresPerCase, MaxScriptTestFailuresPerSuite))
 			.Field("quitCode", &TestCaseResult::QuitCode, "QuitCode of the test report.")
 			.Field("quitExpected", &TestCaseResult::QuitExpected, "QuitExpected of the test report.");
 		registry.Struct<TestSuiteResult>("TestSuiteResult", "TestSuiteResult shared test report.")

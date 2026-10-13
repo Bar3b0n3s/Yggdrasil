@@ -217,6 +217,20 @@ namespace Engine {
 
 	}
 
+	namespace Utils {
+
+		// §11.1: a session a fatal script error stopped no longer advances; play.step and play.resume say so up front.
+		static Status CheckNotStopped(const PlaySession& session)
+		{
+			const std::optional<ScriptError>& fatal = session.GetFatalError();
+			if (!fatal.has_value())
+				return {};
+			return std::unexpected(Error(ErrorCode::InvalidState, std::format("a fatal {} script error stopped the play session at tick {}: {}", ScriptErrorKindToString(fatal->Kind), fatal->Tick, fatal->Message))
+					.WithHint("play.state reports it as stopError; end the session with play.stop (or input.record/input.replay restart it)"));
+		}
+
+	}
+
 	PlayRunState GetPlayRunState(const PlaySession* session)
 	{
 		if (session == nullptr)
@@ -262,6 +276,11 @@ namespace Engine {
 			result.TimeScale = static_cast<float>(session->GetTimeScale());
 			result.Modified = session->IsModified();
 			result.Recording = session->GetRecorder() != nullptr && session->GetRecorder()->IsRecording();
+			if (const std::optional<ScriptError>& fatal = session->GetFatalError())
+			{
+				result.Stopped = true;
+				result.StopError = VariantValue(ScriptErrorToJson(*fatal));
+			}
 			result.EntityCount = ToAutomationCounter(session->GetScene().GetEntityCount());
 			result.MaxEntities = session->GetMaxEntities();
 			result.Input = session->GetInput().GetSummary(InputPhase::Step);
@@ -325,6 +344,7 @@ namespace Engine {
 				return std::unexpected(
 					Error(ErrorCode::InvalidState, "a play.step is running on the paused session").WithHint("resume once its play.step has finished"));
 			}
+			ENGINE_TRY(Utils::CheckNotStopped(*session));
 			const bool wasPaused = session->IsPaused();
 			session->SetPaused(false);
 			if (wasPaused)
@@ -346,6 +366,7 @@ namespace Engine {
 				return std::unexpected(
 					Error(ErrorCode::InvalidState, "a play.step is already running on this play session").WithHint("wait for it to finish, then step again"));
 			}
+			ENGINE_TRY(Utils::CheckNotStopped(*session));
 			if (params.Ticks < 1 || params.Ticks > MaxPlayStepTicks)
 			{
 				return std::unexpected(Utils::MakeParamError(ErrorCode::InvalidArgument, "/ticks",
@@ -449,6 +470,8 @@ namespace Engine {
 			.Field("timeScale", &PlayStateResult::TimeScale, "The time scale (1 is real time).")
 			.Field("modified", &PlayStateResult::Modified, "An asset or script reloaded during play (§7.5).")
 			.Field("recording", &PlayStateResult::Recording, "An input recording is active.")
+			.Field("stopped", &PlayStateResult::Stopped, "A fatal script error (such as a second memory-limit breach) stopped the session: ticks no longer advance.")
+			.Field("stopError", &PlayStateResult::StopError, "The script error that stopped the session (§11.7 form, as scriptError error data); null while it runs.")
 			.Field("entityCount", &PlayStateResult::EntityCount, "The entities of the play scene.")
 			.Field("maxEntities", &PlayStateResult::MaxEntities, "The project's entity cap of a session (Simulation.MaxEntities).")
 			.Field("input", &PlayStateResult::Input, "The game input as the last tick's step view saw it.");

@@ -2,12 +2,13 @@
 #include "Engine/Scripting/ScriptApiRegistry.h"
 
 #include "Engine/Renderer/DebugDrawList.h"
+#include "Engine/Scripting/ScriptLimits.h"
 #include "Support/ScriptTestFixture.h"
 
 #include <doctest/doctest.h>
 
+#include <format>
 #include <variant>
-
 #include <vector>
 
 namespace Engine {
@@ -107,6 +108,31 @@ return true
 			REQUIRE(fixture.GetDebugDraw() != nullptr);
 			CHECK(fixture.GetDebugDraw()->IsEmpty());
 			CHECK(fixture.ExternalMutations.empty());
+		}
+
+		TEST_CASE("DebugBindings: text longer than the retained text limit is rejected before the draw list copies it")
+		{
+			Test::ScriptTestFixture fixture;
+			REQUIRE(fixture.Start().has_value());
+			// One 64 MiB VM string drawn many times with a long duration would otherwise be copied into every command.
+			const auto result = fixture.Evaluate(std::format(R"(
+local exact = string.rep("t", {0})
+Debug.DrawText(vector.zero, exact, nil, 1e30)
+local long = string.rep("t", 2^26)
+for _ = 1, 25 do
+	local ok, message = pcall(Debug.DrawText, vector.zero, long, nil, 1e30)
+	assert(not ok and string.find(message, "Debug.DrawText: argument #2 is 67108864 bytes; the limit is {0}", 1, true), message)
+end
+local ok = pcall(Debug.DrawText, vector.zero, exact .. "t")
+assert(not ok)
+return true
+)",
+				MaxScriptDebugTextBytes));
+			REQUIRE_MESSAGE(result.has_value(), (result ? "" : result.error().ToString()));
+			REQUIRE(fixture.GetDebugDraw() != nullptr);
+			const auto commands = fixture.GetDebugDraw()->GetCommands();
+			REQUIRE(commands.size() == 1);
+			CHECK(std::get<DebugText>(commands[0].Shape).Text.size() == MaxScriptDebugTextBytes);
 		}
 
 		TEST_CASE("DebugBindings: break pauses the editor and is harmless in both runtime modes")

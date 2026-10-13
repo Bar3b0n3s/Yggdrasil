@@ -15,42 +15,48 @@
 
 namespace Engine {
 
-	TEST_CASE("StatsGet: renderer summaries preserve exact frame identifiers and hide unavailable samples" * doctest::test_suite("Automation"))
-	{
-		RenderStats stats;
-		stats.Available = true;
-		stats.FrameIndex = std::numeric_limits<uint64_t>::max();
-		stats.GpuAvailable = true;
-		stats.GpuFrameIndex = stats.FrameIndex - 2;
-		stats.Width = 320;
-		stats.Height = 240;
-		stats.Passes.push_back({ .Name = "Prepare", .CpuMilliseconds = 2.5, .GpuMilliseconds = 7.0, .GpuAvailable = false });
-		stats.Passes.push_back({ .Name = "Opaque", .CpuMilliseconds = 1.5, .GpuMilliseconds = 3.0, .GpuAvailable = true, .DrawCalls = 9 });
-		const auto summary = MakeStatsViewSummary("scene", stats);
-		CHECK(summary.Frame == "18446744073709551615");
-		CHECK(summary.GpuFrame == "18446744073709551613");
-		CHECK(summary.Width == 320);
-		REQUIRE(summary.Passes.size() == 2);
-		CHECK_FALSE(summary.Passes[0].GpuAvailable);
-		CHECK(summary.Passes[0].GpuMilliseconds == 0.0f);
-		CHECK(summary.Passes[1].GpuMilliseconds == 3.0f);
-		CHECK(summary.Passes[1].DrawCalls == 9);
-		stats.GpuAvailable = false;
-		const auto cpuOnly = MakeStatsViewSummary("game", stats);
-		CHECK(cpuOnly.GpuFrame.empty());
-		CHECK_FALSE(cpuOnly.Passes[1].GpuAvailable);
-		CHECK(cpuOnly.Passes[1].GpuMilliseconds == 0.0f);
-		stats.Available = false;
-		const auto unavailable = MakeStatsViewSummary("game", stats);
-		CHECK(unavailable.Name == "game");
-		CHECK_FALSE(unavailable.Available);
-		CHECK(unavailable.Passes.empty());
-		CHECK(unavailable.Frame.empty());
-		CHECK(unavailable.Width == 0);
-	}
-
 	TEST_SUITE("Automation")
 	{
+		TEST_CASE("StatsGet: renderer summaries preserve exact frame identifiers and hide unavailable samples")
+		{
+			RenderStats stats;
+			stats.Available = true;
+			stats.FrameIndex = std::numeric_limits<uint64_t>::max();
+			stats.GpuAvailable = true;
+			stats.GpuFrameIndex = stats.FrameIndex - 2;
+			stats.Width = 320;
+			stats.Height = 240;
+			stats.ShadowMapSize = 1024;
+			stats.SsaoHalfResolution = true;
+			stats.Passes.push_back({ .Name = "Prepare", .CpuMilliseconds = 2.5, .GpuMilliseconds = 7.0, .GpuAvailable = false });
+			stats.Passes.push_back({ .Name = "Opaque", .CpuMilliseconds = 1.5, .GpuMilliseconds = 3.0, .GpuAvailable = true, .DrawCalls = 9 });
+			const auto summary = MakeStatsViewSummary("scene", stats);
+			CHECK(summary.Frame == "18446744073709551615");
+			CHECK(summary.GpuFrame == "18446744073709551613");
+			CHECK(summary.Width == 320);
+			CHECK(summary.ShadowMapSize == 1024);
+			CHECK(summary.SsaoHalfResolution);
+			REQUIRE(summary.Passes.size() == 2);
+			CHECK_FALSE(summary.Passes[0].GpuAvailable);
+			CHECK(summary.Passes[0].GpuMilliseconds == 0.0f);
+			CHECK(summary.Passes[1].GpuMilliseconds == 3.0f);
+			CHECK(summary.Passes[1].DrawCalls == 9);
+			stats.GpuAvailable = false;
+			const auto cpuOnly = MakeStatsViewSummary("game", stats);
+			CHECK(cpuOnly.GpuFrame.empty());
+			CHECK_FALSE(cpuOnly.Passes[1].GpuAvailable);
+			CHECK(cpuOnly.Passes[1].GpuMilliseconds == 0.0f);
+			stats.Available = false;
+			const auto unavailable = MakeStatsViewSummary("game", stats);
+			CHECK(unavailable.Name == "game");
+			CHECK_FALSE(unavailable.Available);
+			CHECK(unavailable.Passes.empty());
+			CHECK(unavailable.Frame.empty());
+			CHECK(unavailable.Width == 0);
+			CHECK(unavailable.ShadowMapSize == 0);
+			CHECK_FALSE(unavailable.SsaoHalfResolution);
+		}
+
 		TEST_CASE("StatsGet: play reports the live script heap and limits without advancing time")
 		{
 			Test::AutomationFixture setup("ScriptHeapStatistics");
@@ -125,7 +131,7 @@ namespace Engine {
 			Test::RenderQueryTestContext context(fixture.GetScene(), assets, settings, { .Method = method, .Params = Json::object(), .Registry = &methods });
 			context.Statistics.Fps = ToStatsTelemetry(59.123456789);
 			context.Statistics.Views = { { .Name = "scene", .Available = true, .Frame = "9007199254740997", .GpuFrame = "9007199254740993", .GpuAvailable = true, .Width = 640, .Height = 360, .CpuMilliseconds = 1.25, .Passes = { { .Name = "Forward", .CpuMilliseconds = 0.25, .GpuMilliseconds = 1.75, .GpuAvailable = true, .DrawCalls = 2, .Triangles = 24 } } },
-				{ .Name = "game", .Available = true, .Frame = "42", .GpuFrame = "40", .GpuAvailable = true, .Width = 320, .Height = 180 } };
+				{ .Name = "game", .Available = true, .Frame = "42", .GpuFrame = "40", .GpuAvailable = true, .Width = 320, .Height = 180, .ShadowMapSize = 512, .SsaoHalfResolution = true } };
 			const auto result = methods.Invoke(context);
 			REQUIRE(std::holds_alternative<Json>(result));
 			const auto& json = std::get<Json>(result);
@@ -133,6 +139,10 @@ namespace Engine {
 			CHECK(json["views"][0]["frame"] == Json("9007199254740997"));
 			CHECK(json["views"][0]["gpuFrame"] == Json("9007199254740993"));
 			CHECK(json["views"][1]["frame"] == Json("42"));
+			CHECK(json["views"][0]["shadowMapSize"] == Json(0));
+			CHECK(json["views"][0]["ssaoHalfResolution"] == Json(false));
+			CHECK(json["views"][1]["shadowMapSize"] == Json(512));
+			CHECK(json["views"][1]["ssaoHalfResolution"] == Json(true));
 			CHECK(json["views"][0]["passes"][0]["gpuMilliseconds"] == Json(1.75));
 			CHECK(context.StatisticsReads == 1);
 			CHECK(method->Specification.SupportsDryRun);

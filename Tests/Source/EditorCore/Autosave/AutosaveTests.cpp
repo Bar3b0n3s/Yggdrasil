@@ -9,8 +9,9 @@
 #include "Engine/Core/Hash.h"
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Core/Json/JsonWriter.h"
-#include "Engine/Platform/ProjectLock.h"
 #include "Engine/Platform/Process.h"
+#include "Engine/Platform/ProjectLock.h"
+#include "Engine/Project/ProjectSerializer.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/SceneSerializer.h"
 #include "Support/EditorTestFixture.h"
@@ -20,7 +21,9 @@
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
+#include <filesystem>
 #include <limits>
+#include <map>
 #include <semaphore>
 #include <thread>
 
@@ -50,6 +53,16 @@ namespace Engine {
 			const auto text = JsonWriter::Write(json);
 			REQUIRE(text.has_value());
 			AutosaveWrite(path, *text);
+		}
+		// Moves a file's write time ten seconds on, as a later rewrite of the same bytes would: the change is then
+		// observable however coarse the file system's timestamps are.
+		void AutosaveTouch(const std::filesystem::path& path)
+		{
+			std::error_code error;
+			const auto time = std::filesystem::last_write_time(path, error);
+			REQUIRE_MESSAGE(!error, error.message());
+			std::filesystem::last_write_time(path, time + std::chrono::seconds(10), error);
+			REQUIRE_MESSAGE(!error, error.message());
 		}
 		struct AutosaveSetup
 		{
@@ -491,6 +504,9 @@ namespace Engine {
 			AutosaveSetup setup(barrier.Specification());
 			setup.Dirty();
 			const auto first = setup.Save();
+			// A newer published revision, so the fatal claim has a generation to write (it never duplicates the newest).
+			setup.Dirty("AfterFirstGeneration");
+			REQUIRE(setup.Service.Publish().has_value());
 			barrier.Fail = true;
 			barrier.Armed.store(true);
 			AutosaveFatalResult result{};
@@ -759,6 +775,207 @@ namespace Engine {
 			const auto saved = setup.Service.Save(AutosaveReason::BeforePlay);
 			REQUIRE(saved.has_value());
 			CHECK(saved->Written);
+		}
+
+		TEST_CASE("Autosave: the editor's own project rewrites keep autosave and play available")
+		{
+			AutosaveSetup setup;
+			EditorContext& editor = setup.Fixture.GetEditor();
+			const auto projectFile = editor.GetProject().GetProjectFile();
+			const std::string canonical = AutosaveRead(projectFile);
+			SUBCASE("a settings change undone before the next publication")
+			{
+				// An edit.batch rollback or a multi-step undo: A, X and A again, each a real write.
+				auto command = ProjectSettingsCommand::CreateFromPatch(editor, Json{ { "Window", { { "Title", "Interim" } } } }, "Interim");
+				REQUIRE(command.has_value());
+				REQUIRE(editor.Execute(std::move(*command)).has_value());
+				REQUIRE(editor.GetHistory().Undo(editor) == 1);
+			}
+			SUBCASE("a rewrite of the unchanged canonical settings")
+			{
+				// What project.upgrade writes for settings that were already loaded.
+				const auto path = VfsPath::Create("project", FileSystem::PathToUtf8(projectFile.filename()));
+				REQUIRE(path.has_value());
+				const auto text = ProjectSerializer::SaveToString(editor.GetProject().GetSettings(), editor.GetTypeRegistry());
+				REQUIRE(text.has_value());
+				REQUIRE(editor.WriteProjectFile(*path, std::as_bytes(std::span(text->data(), text->size()))).has_value());
+			}
+			AutosaveTouch(projectFile);
+			REQUIRE(AutosaveRead(projectFile) == canonical);
+			const Status published = setup.Service.Publish();
+			REQUIRE_MESSAGE(published.has_value(), published.error().ToString());
+			setup.Dirty("AfterRewrite");
+			const auto saved = setup.Service.Save(AutosaveReason::BeforePlay);
+			REQUIRE_MESSAGE(saved.has_value(), saved.error().ToString());
+			CHECK(saved->Written);
+			CHECK(setup.Offer().Generation == saved->Generation);
+		}
+
+		TEST_CASE("Autosave: a settings change keeps the loaded baseline of an externally changed scene")
+		{
+			AutosaveSetup setup;
+			EditorContext& editor = setup.Fixture.GetEditor();
+			setup.Dirty("DerivedFromTheLoadedFile");
+			REQUIRE(setup.Service.Publish().has_value());
+			// A pull rewrites the source under the dirty scene: its edits no longer derive from the file on disk.
+			AutosaveWrite(setup.Source(), AutosaveRead(setup.Source()) + "\n");
+			const Status conflict = setup.Service.Publish();
+			REQUIRE_FALSE(conflict.has_value());
+			CHECK(conflict.error().GetCode() == ErrorCode::Conflict);
+			auto command = ProjectSettingsCommand::CreateFromPatch(editor, Json{ { "Window", { { "Title", "After the pull" } } } }, "Title");
+			REQUIRE(command.has_value());
+			REQUIRE(editor.Execute(std::move(*command)).has_value());
+			const auto saved = setup.Service.Save(AutosaveReason::Periodic);
+			REQUIRE_FALSE(saved.has_value());
+			CHECK(saved.error().GetCode() == ErrorCode::Conflict);
+			CHECK_FALSE(FileSystem::Exists(setup.Root() / "Manifest.json"));
+		}
+
+		TEST_CASE("Autosave: a scene that changed on disk before its first publication never becomes its baseline")
+		{
+			AutosaveSetup setup;
+			EditorContext& editor = setup.Fixture.GetEditor();
+			setup.Fixture.CreateAndOpenScene("Assets/Scenes/Other.scene");
+			const auto other = setup.Fixture.GetProjectRoot() / "Assets/Scenes/Other.scene";
+			editor.Update(0.0);
+			AutosaveWrite(other, AutosaveRead(other) + "\n\n");
+			for (double seconds = 0.5; seconds <= 2.0; seconds += 0.5)
+			{
+				editor.Update(seconds);
+				static_cast<void>(editor.GetEngine().GetMainThreadQueue().Drain());
+			}
+			REQUIRE(editor.IsSceneChangedOnDisk());
+			setup.Dirty("DerivedFromTheLoadedFile");
+			const auto refused = setup.Service.Save(AutosaveReason::Periodic);
+			REQUIRE_FALSE(refused.has_value());
+			CHECK(refused.error().GetCode() == ErrorCode::Conflict);
+			CHECK_FALSE(FileSystem::Exists(setup.Root() / "Manifest.json"));
+			// Reloading adopts the file on disk as the document's baseline again.
+			const auto path = editor.GetScenePath();
+			auto reloaded = editor.CreateScene("Other");
+			LoadReport report;
+			REQUIRE(SceneSerializer::LoadFromString(*reloaded, AutosaveRead(other), {}, report).has_value());
+			editor.SetScene(std::move(reloaded), path, false);
+			setup.Dirty("AfterReload");
+			CHECK(setup.Save().Files == std::vector<std::string>{ "Assets/Scenes/Other.scene" });
+		}
+
+		TEST_CASE("Autosave: unchanged publications read no file bytes and a write verifies its sources once")
+		{
+			std::map<std::string, uint32_t> reads;
+			AutosaveSpecification specification;
+			specification.ReadObserver = [&reads](const std::filesystem::path& path)
+			{
+				++reads[FileSystem::PathToUtf8(path.filename())];
+			};
+			AutosaveSetup setup(specification);
+			const std::string project = FileSystem::PathToUtf8(setup.Fixture.GetEditor().GetProject().GetProjectFile().filename());
+			reads.clear();
+			// Edits and the safe points of the frames between them: no source or project bytes are read.
+			setup.Dirty("First");
+			for (int frame = 0; frame < 4; ++frame)
+				REQUIRE(setup.Service.Publish().has_value());
+			setup.Dirty("Second");
+			REQUIRE(setup.Service.Publish().has_value());
+			CHECK(reads.empty());
+			setup.Save();
+			CHECK(reads["Main.scene"] == 1);
+			CHECK(reads[project] == 1);
+			reads.clear();
+			REQUIRE(setup.Service.Publish().has_value());
+			CHECK(reads.empty());
+			// An external change shows in the source's size and write time: one read of the changed file, after which the
+			// conflict is kept without reading anything again.
+			AutosaveWrite(setup.Source(), AutosaveRead(setup.Source()) + "\n");
+			for (int frame = 0; frame < 3; ++frame)
+				CHECK(setup.Service.Publish().error().GetCode() == ErrorCode::Conflict);
+			CHECK(reads == std::map<std::string, uint32_t>{ { "Main.scene", 1 } });
+		}
+
+		TEST_CASE("Autosave: explicit save cleanup keeps foreign and unreadable generations")
+		{
+			AutosaveSetup setup;
+			EditorContext& editor = setup.Fixture.GetEditor();
+			setup.Dirty("Foreign");
+			const auto foreign = setup.Save();
+			// A generation of the same files under another canonical project path: the project was moved or renamed.
+			Json metadata = AutosaveReadJson(setup.Root() / foreign.Generation / "Metadata.json");
+			metadata["ProjectFile"] = FileSystem::PathToUtf8(setup.Fixture.GetDirectory().GetPath() / "Moved" / "Autosave.eproj");
+			AutosaveWriteJson(setup.Root() / foreign.Generation / "Metadata.json", metadata);
+			setup.Dirty("Corrupt");
+			const auto corrupt = setup.Save();
+			AutosaveWrite(setup.Root() / corrupt.Generation / "Scene.json", "{}");
+			setup.Dirty("Matching");
+			const auto matching = setup.Save();
+			const auto bytes = SceneSerializer::SaveToString(editor.GetScene());
+			REQUIRE(bytes.has_value());
+			AutosaveWrite(setup.Source(), *bytes);
+			REQUIRE(editor.MarkSceneSaved(*editor.GetScenePath()).has_value());
+			const Status discarded = setup.Service.DiscardSavedRecovery();
+			REQUIRE_MESSAGE(discarded.has_value(), discarded.error().ToString());
+			CHECK_FALSE(FileSystem::Exists(setup.Root() / matching.Generation));
+			CHECK(FileSystem::Exists(setup.Root() / foreign.Generation));
+			CHECK(FileSystem::Exists(setup.Root() / corrupt.Generation));
+			const Json manifest = AutosaveReadJson(setup.Root() / "Manifest.json");
+			REQUIRE(manifest["Generations"].size() == 2);
+			CHECK(manifest["Generations"][0]["Generation"] == corrupt.Generation);
+			CHECK(manifest["Generations"][1]["Generation"] == foreign.Generation);
+		}
+
+		TEST_CASE("Autosave: a retired generation that cannot be removed never fails the write and is swept later")
+		{
+			SUBCASE("already removed")
+			{
+				AutosaveSetup setup({ .RetainedGenerations = 1 });
+				setup.Dirty("First");
+				const auto first = setup.Save();
+				REQUIRE(FileSystem::Remove(setup.Root() / first.Generation).has_value());
+				setup.Dirty("Second");
+				const auto second = setup.Save();
+				CHECK(setup.Offer().Generation == second.Generation);
+			}
+			SUBCASE("left behind after an earlier publication")
+			{
+				AutosaveSetup setup;
+				setup.Dirty("First");
+				const auto first = setup.Save();
+				setup.Dirty("Second");
+				const auto second = setup.Save();
+				// The manifest retired `first`, but its directory could not be removed then.
+				Json manifest = AutosaveReadJson(setup.Root() / "Manifest.json");
+				REQUIRE(manifest["Generations"][0]["Generation"] == second.Generation);
+				manifest["Generations"] = Json::array({ manifest["Generations"][0] });
+				AutosaveWriteJson(setup.Root() / "Manifest.json", manifest);
+				setup.Dirty("Third");
+				const auto third = setup.Save();
+				CHECK_FALSE(FileSystem::Exists(setup.Root() / first.Generation));
+				CHECK(FileSystem::Exists(setup.Root() / second.Generation));
+				CHECK(FileSystem::Exists(setup.Root() / third.Generation));
+			}
+		}
+
+		TEST_CASE("Autosave: a final write never duplicates the newest generation of the same snapshot")
+		{
+			AutosaveSetup setup;
+			setup.Dirty("Durable");
+			// A main-thread GPU failure's refresh, then the fatal hook on the same published revision.
+			const auto refreshed = setup.Service.Save(AutosaveReason::FatalError);
+			REQUIRE(refreshed.has_value());
+			REQUIRE(refreshed->Written);
+			CHECK(setup.Service.WriteFatalSnapshot() == AutosaveFatalResult::Saved);
+			const auto exit = setup.Service.Save(AutosaveReason::Exit);
+			REQUIRE(exit.has_value());
+			CHECK_FALSE(exit->Written);
+			Json manifest = AutosaveReadJson(setup.Root() / "Manifest.json");
+			CHECK(manifest["Generations"].size() == 1);
+			CHECK(manifest["Sequence"] == 1);
+			// A newer committed revision is written.
+			setup.Dirty("Newer");
+			REQUIRE(setup.Service.Publish().has_value());
+			CHECK(setup.Service.WriteFatalSnapshot() == AutosaveFatalResult::Saved);
+			manifest = AutosaveReadJson(setup.Root() / "Manifest.json");
+			CHECK(manifest["Generations"].size() == 2);
+			CHECK(AutosaveRead(setup.Root() / setup.Offer().Generation / "Scene.json").contains("Newer"));
 		}
 	}
 

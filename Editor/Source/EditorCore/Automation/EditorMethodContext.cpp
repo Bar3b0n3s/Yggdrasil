@@ -50,11 +50,12 @@ namespace Engine {
 					const auto* component = GetScene().FindEntityByID(id).TryGetComponent<ScriptComponent>();
 					if (component && component->Script.IsValid())
 					{
-						ENGINE_TRY_ASSIGN(const AssetRef<Asset> asset, m_Editor.GetAssets().Load(component->Script.GetHandle()));
-						const auto script = AssetCast<ScriptData>(asset);
-						if (!script)
-							return MakeError(ErrorCode::Validation, "a behaviour refers to a non-script asset");
-						scripts.emplace(component->Script.GetHandle(), script);
+						// A dangling, failed or non-script reference must not make every evaluation fail: leave it out of the
+						// schema snapshot, and its instance creation reports the problem for that entity only.
+						const auto asset = m_Editor.GetAssets().Load(component->Script.GetHandle());
+						const auto script = asset ? AssetCast<ScriptData>(*asset) : AssetRef<ScriptData>{};
+						if (script)
+							scripts.emplace(component->Script.GetHandle(), script);
 					}
 				}
 				ENGINE_TRY_ASSIGN(m_Schemas, ScriptFieldSchemaSource::Create(std::move(scripts)));
@@ -90,8 +91,8 @@ namespace Engine {
 			void RequestPause() override {}
 			void OnScriptError(const ScriptError& error, bool /*fatal*/) override
 			{
-				static_cast<void>(m_Editor.GetPlay().GetScriptErrors().Add(error));
-				m_Editor.AppendEvent({ .Tick = error.Tick, .Type = EngineEventType::ScriptErrorRaised, .Id = error.Entity, .Path = error.Script, .Name = {}, .Message = error.Message });
+				const ScriptError& retained = m_Editor.GetPlay().GetScriptErrors().Add(error);
+				m_Editor.AppendEvent({ .Tick = retained.Tick, .Type = EngineEventType::ScriptErrorRaised, .Id = retained.Entity, .Path = retained.Script, .Name = {}, .Message = retained.Message });
 			}
 			void OnExternalMutation(std::string_view) override {}
 			bool IsReloadDeferred() const override { return true; }
@@ -123,8 +124,15 @@ namespace Engine {
 		return m_Editor->HasProject() ? &m_Editor->GetProject().GetSettings() : nullptr;
 	}
 
-	std::vector<UUID> EditorMethodContext::GetSelectedEntities() const
+	std::vector<UUID> EditorMethodContext::GetSelectedEntities(const Scene& scene) const
 	{
+		// The selection refers to its target's scene only (EditorContext::GetSelectionTarget), as the scene view's outline does.
+		PlaySession* session = m_Editor->GetPlay().GetSession();
+		const Scene* selected = m_Editor->GetSelectionTarget() == SceneTarget::Play ? (session != nullptr ? &session->GetScene() : nullptr)
+			: m_Editor->HasScene()                                                  ? &m_Editor->GetScene()
+																					: nullptr;
+		if (selected != &scene)
+			return {};
 		const auto selection = m_Editor->GetSelection();
 		return { selection.begin(), selection.end() };
 	}
@@ -220,7 +228,7 @@ namespace Engine {
 
 	Result<Scene*> EditorMethodContext::ResolveTargetScene(SceneTarget target, bool given, bool mutation) const
 	{
-		// Reads default to the play scene while playing and mutations to the edit scene (Â§13.4); an explicit "play" needs a
+		// Reads default to the play scene while playing and mutations to the edit scene (§13.4); an explicit "play" needs a
 		// running session.
 		PlaySession* session = m_Editor->GetPlay().GetSession();
 		if (given && target == SceneTarget::Play)

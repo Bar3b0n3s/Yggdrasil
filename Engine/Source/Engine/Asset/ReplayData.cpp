@@ -470,6 +470,16 @@ namespace Engine {
 		return JsonWriter::Write(value);
 	}
 
+	Result<Json> CanonicalizeReplayParameters(const Json& parameters, std::string_view pointer)
+	{
+		const JsonReader reader(parameters, std::string(pointer));
+		ENGINE_TRY(reader.ExpectType(JsonType::Object));
+		ENGINE_TRY(CheckTree(reader));
+		// Exactly the text ReplayToText and CookReplay write, read back as ReplayFromJson and LoadCookedReplay read it.
+		ENGINE_TRY_ASSIGN(const std::string text, JsonWriter::Write(parameters, JsonStyle::Minified));
+		return JsonReader::Parse(text);
+	}
+
 	Result<Buffer> CookReplay(const ReplayDocument& d, std::span<const ReplayBytecodeExpectation> expectations, uint32_t importerVersion)
 	{
 		ENGINE_TRY(ValidateReplayDocument(d));

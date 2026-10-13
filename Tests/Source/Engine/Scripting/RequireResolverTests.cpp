@@ -2,9 +2,11 @@
 #include "Engine/Scripting/RequireResolver.h"
 
 #include "Engine/Asset/IScriptDiagnosticsProvider.h"
+#include "Engine/Scripting/ScriptLimits.h"
 
 #include <doctest/doctest.h>
 
+#include <format>
 #include <string>
 #include <vector>
 
@@ -46,6 +48,25 @@ namespace Engine {
 			CHECK(dependencies[0].Request == "../Shared/Utility.luau");
 			CHECK(dependencies[1].Path == "Assets/Scripts/Board.luau");
 			CHECK_FALSE(dependencies[1].Handle.IsValid());
+		}
+
+		TEST_CASE("RequireResolver: a resolver records a bounded number of distinct edges")
+		{
+			auto root = VfsPath::Parse("project://Assets/Scripts/Game.luau");
+			REQUIRE(root.has_value());
+			RequireResolver resolver;
+			size_t resolved = 0;
+			for (size_t index = 0; index < MaxScriptRequireEdges; ++index)
+				resolved += resolver.Resolve(*root, std::format("./Module{:05}", index)).has_value() ? 1 : 0;
+			CHECK(resolved == MaxScriptRequireEdges);
+			CHECK(resolver.GetRequires().size() == MaxScriptRequireEdges);
+			// A recorded edge resolves again; a new one is refused before it is recorded.
+			CHECK(resolver.Resolve(*root, "./Module00000").has_value());
+			const auto refused = resolver.Resolve(*root, "./Another");
+			REQUIRE_FALSE(refused.has_value());
+			CHECK(refused.error().GetCode() == ErrorCode::Validation);
+			CHECK(refused.error().GetMessageText().find(std::format("at most {} distinct require edges", MaxScriptRequireEdges)) != std::string::npos);
+			CHECK(resolver.GetRequires().size() == MaxScriptRequireEdges);
 		}
 
 		TEST_CASE("RequireResolver: compilation labels and replay origins do not relax module path validation")

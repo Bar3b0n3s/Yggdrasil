@@ -37,7 +37,11 @@ namespace Engine {
 		for (View& view : m_Views)
 		{
 			ENGINE_TRY_ASSIGN(view.Renderer, SceneRenderer::Create(device, pipelines, cache, m_Editor.GetAssets(), { .Width = 640, .Height = 360 }));
+			view.HoldsSceneResources = false;
 		}
+		m_Device = &device;
+		m_Pipelines = &pipelines;
+		m_Cache = &cache;
 		m_ImGui = &imgui;
 		return {};
 	}
@@ -64,26 +68,41 @@ namespace Engine {
 		{
 			Cancel(view);
 			if (m_ImGui && view.Image.Texture != 0)
+			{
 				m_ImGui->RemoveTexture(view.Image.Texture);
+				++m_Withdrawals;
+			}
 			view.Image = {};
 			view.RegisteredTexture = nullptr;
 			view.Renderer.reset();
+			view.HoldsSceneResources = false;
 		}
 		m_ImGui = nullptr;
+		m_Device = nullptr;
+		m_Pipelines = nullptr;
+		m_Cache = nullptr;
 	}
 	void EditorHostViewports::SetUnavailable()
 	{
 		Invalidate();
+		m_Unavailable = true;
 		for (size_t i = 0; i < m_Views.size(); ++i)
 		{
 			View& view = m_Views[i];
 			if (m_ImGui && view.Image.Texture != 0)
+			{
 				m_ImGui->RemoveTexture(view.Image.Texture);
+				++m_Withdrawals;
+			}
 			view.Image = {};
 			view.RegisteredTexture = nullptr;
 			const Status status = m_Editor.GetViewportState().SetPixelSize(i == 0 ? ViewportView::Scene : ViewportView::Game, glm::uvec2(0));
 			ENGINE_VERIFY(status.has_value(), "valid viewport extent");
 		}
+	}
+	void EditorHostViewports::SetAvailable()
+	{
+		m_Unavailable = false;
 	}
 	bool EditorHostViewports::IsLayoutReady() const
 	{
@@ -112,7 +131,7 @@ namespace Engine {
 	void EditorHostViewports::SetRectangle(ViewportView view, const EditorViewportRect& rectangle)
 	{
 		glm::uvec2 size(0);
-		const ImVec2 scale = ImGui::GetIO().DisplayFramebufferScale;
+		const ImVec2 scale = ImGui::GetCurrentContext() != nullptr ? ImGui::GetIO().DisplayFramebufferScale : ImVec2(1.0f, 1.0f);
 		if (std::isfinite(rectangle.Size.x) && std::isfinite(rectangle.Size.y) && rectangle.Size.x > 0 && rectangle.Size.y > 0
 			&& std::isfinite(scale.x) && std::isfinite(scale.y) && scale.x > 0 && scale.y > 0)
 		{
@@ -121,6 +140,11 @@ namespace Engine {
 			if (view == ViewportView::Game && m_Editor.GetViewportState().GetGameResolution().x != 0)
 				size = m_Editor.GetViewportState().GetGameResolution();
 		}
+		if (view == ViewportView::Game)
+			m_GameRectangle = rectangle;
+		// A view without area is not interactive (ADR 0018): a gizmo drag in it ends without writing anything.
+		if (view == ViewportView::Scene && size == glm::uvec2(0) && m_Gizmos.IsDragging())
+			m_Gizmos.Cancel();
 		View& state = m_Views[Index(view)];
 		if (state.RequestedSize != size)
 			Cancel(state);
@@ -155,7 +179,8 @@ namespace Engine {
 			.ExplicitCamera = m_Editor.GetSceneViewCamera(),
 			.Width = width,
 			.Height = height };
-		request.Flags = RenderViewFlags::Picking;
+		// Only the scene view picks (SceneViewportPanel); the game view renders like the game, without an EntityId target.
+		request.Flags = RenderViewFlags::None;
 		RenderSnapshot options;
 		if (view == ViewportView::Scene)
 		{
@@ -189,7 +214,7 @@ namespace Engine {
 		if (click.View != ViewportView::Scene && click.View != ViewportView::Game)
 			return MakeError(ErrorCode::InvalidArgument, "Unknown viewport");
 		View& view = m_Views[Index(click.View)];
-		if (!view.Renderer || view.Image.Texture == 0)
+		if (!view.Renderer || view.Image.Texture == 0 || !view.Image.Picking)
 			return MakeError(ErrorCode::Unsupported, "This viewport has no picking image");
 		const EditorViewportImage& image = view.Image;
 		if (click.FrameIndex != image.FrameIndex || click.SceneRevision != image.SceneRevision || click.ViewGeneration != image.Generation
@@ -245,61 +270,93 @@ namespace Engine {
 	}
 	Status EditorHostViewports::Render(RenderContext& context)
 	{
+		if (m_Device == nullptr)
+			return {};
+		PlaySession* session = m_Editor.GetPlay().GetSession();
+		const bool sceneChanged = m_ShownScenes.Update(m_Editor.HasScene() ? &m_Editor.GetScene() : nullptr,
+			session ? &session->GetScene() : nullptr, m_Editor.GetEngine().GetEventLog());
+		// One view's failure (a partial render error, an extraction or pick failure) never keeps the other from rendering.
+		std::optional<Error> failure;
 		for (size_t i = 0; i < m_Views.size(); ++i)
 		{
-			View& view = m_Views[i];
-			if (!view.Renderer)
+			Status rendered = RenderView(i, context, sceneChanged);
+			if (rendered)
 				continue;
-			const ViewportView kind = i == 0 ? ViewportView::Scene : ViewportView::Game;
-			const auto panel = i == 0 ? EditorPanel::SceneViewport : EditorPanel::GameViewport;
-			const glm::uvec2 size = m_Editor.HasProject() && std::ranges::find(m_Editor.GetUiState().GetOpenPanels(), panel) != m_Editor.GetUiState().GetOpenPanels().end() ? view.RequestedSize : glm::uvec2(0);
-			if (size.x == 0 || size.y == 0)
-			{
-				if (view.Image.Texture != 0)
-				{
-					m_ImGui->RemoveTexture(view.Image.Texture);
-					Cancel(view);
-				}
-				view.Image = {};
-				view.RegisteredTexture = nullptr;
-				ENGINE_TRY(m_Editor.GetViewportState().SetPixelSize(kind, glm::uvec2(0)));
-				continue;
-			}
-			ENGINE_TRY_ASSIGN(RenderSnapshot snapshot, Extract(kind, size.x, size.y));
-			PlaySession* session = m_Editor.GetPlay().GetSession();
-			const Scene* source = session ? &session->GetScene() : m_Editor.HasScene() ? &m_Editor.GetScene()
-																					   : nullptr;
-			// Cancel before polling: a proportional resize keeps the camera matrices equal, but the old pixel no longer
-			// identifies the image about to be rendered. Resize increments the renderer generation only after this point.
-			if (view.Image.Width != size.x || view.Image.Height != size.y
-				|| view.Source != source || view.Image.SceneRevision != snapshot.SceneRevision || view.Image.Camera.View != snapshot.Camera.View
-				|| view.Image.Camera.Projection != snapshot.Camera.Projection || view.Flags != snapshot.Flags || m_Gizmos.IsDragging())
-				Cancel(view);
-			view.Source = source;
-			view.Flags = snapshot.Flags;
-			ENGINE_TRY(Poll(view, context.FrameIndex));
-			ENGINE_TRY(view.Renderer->Resize(size.x, size.y));
-			snapshot.FrameIndex = context.FrameIndex;
-			view.Recorded = true;
-			const Status rendered = view.Renderer->Render(*context.CommandList, snapshot);
-			nvrhi::ITexture* texture = view.Renderer->GetFinalTexture();
-			if (texture != view.RegisteredTexture)
-			{
-				if (view.Image.Texture != 0)
-					m_ImGui->RemoveTexture(view.Image.Texture);
-				view.Image.Texture = m_ImGui->AddTexture(*texture);
-				view.RegisteredTexture = texture;
-			}
-			view.Image.Width = size.x;
-			view.Image.Height = size.y;
-			view.Image.Generation = view.Renderer->GetViewGeneration();
-			view.Image.FrameIndex = context.FrameIndex;
-			view.Image.SceneRevision = snapshot.SceneRevision;
-			view.Image.Camera = snapshot.Camera;
-			ENGINE_TRY(m_Editor.GetViewportState().SetPixelSize(kind, size));
-			ENGINE_TRY(rendered);
+			if (rendered.error().GetCode() == ErrorCode::Gpu)
+				return rendered;
+			if (!failure)
+				failure = std::move(rendered).error();
 		}
-		return {};
+		return failure ? Status(std::unexpected(std::move(*failure))) : Status{};
+	}
+	Status EditorHostViewports::RenderView(size_t index, RenderContext& context, bool sceneChanged)
+	{
+		View& view = m_Views[index];
+		const ViewportView kind = index == 0 ? ViewportView::Scene : ViewportView::Game;
+		const auto panel = index == 0 ? EditorPanel::SceneViewport : EditorPanel::GameViewport;
+		const glm::uvec2 size = m_Editor.HasProject() && std::ranges::find(m_Editor.GetUiState().GetOpenPanels(), panel) != m_Editor.GetUiState().GetOpenPanels().end() ? view.RequestedSize : glm::uvec2(0);
+		if (size.x == 0 || size.y == 0)
+		{
+			if (view.Image.Texture != 0)
+			{
+				m_ImGui->RemoveTexture(view.Image.Texture);
+				Cancel(view);
+			}
+			view.Image = {};
+			view.RegisteredTexture = nullptr;
+			// A hidden view renders nothing, so its renderer would never drop the bindings that keep the previous scene's
+			// textures alive (they go one render after their last use): release it and recreate it when displayed again.
+			if (sceneChanged && view.HoldsSceneResources)
+			{
+				Cancel(view);
+				view.Renderer.reset();
+				view.HoldsSceneResources = false;
+				view.Source = nullptr;
+			}
+			return m_Editor.GetViewportState().SetPixelSize(kind, glm::uvec2(0));
+		}
+		if (!view.Renderer)
+		{
+			ENGINE_TRY_ASSIGN(view.Renderer, SceneRenderer::Create(*m_Device, *m_Pipelines, *m_Cache, m_Editor.GetAssets(), { .Width = size.x, .Height = size.y }));
+		}
+		ENGINE_TRY_ASSIGN(RenderSnapshot snapshot, Extract(kind, size.x, size.y));
+		PlaySession* session = m_Editor.GetPlay().GetSession();
+		const Scene* source = session ? &session->GetScene() : m_Editor.HasScene() ? &m_Editor.GetScene()
+																				   : nullptr;
+		// Cancel before polling: a proportional resize keeps the camera matrices equal, but the old pixel no longer
+		// identifies the image about to be rendered. Resize increments the renderer generation only after this point.
+		if (view.Image.Width != size.x || view.Image.Height != size.y
+			|| view.Source != source || view.Image.SceneRevision != snapshot.SceneRevision || view.Image.Camera.View != snapshot.Camera.View
+			|| view.Image.Camera.Projection != snapshot.Camera.Projection || view.Flags != snapshot.Flags || m_Gizmos.IsDragging())
+			Cancel(view);
+		view.Source = source;
+		view.Flags = snapshot.Flags;
+		ENGINE_TRY(Poll(view, context.FrameIndex));
+		ENGINE_TRY(view.Renderer->Resize(size.x, size.y));
+		snapshot.FrameIndex = context.FrameIndex;
+		view.Recorded = true;
+		view.HoldsSceneResources = true;
+		const Status rendered = view.Renderer->Render(*context.CommandList, snapshot);
+		nvrhi::ITexture* texture = view.Renderer->GetFinalTexture();
+		if (texture != view.RegisteredTexture)
+		{
+			if (view.Image.Texture != 0)
+				m_ImGui->RemoveTexture(view.Image.Texture);
+			view.Image.Texture = m_ImGui->AddTexture(*texture);
+			view.RegisteredTexture = texture;
+		}
+		view.Image.Width = size.x;
+		view.Image.Height = size.y;
+		view.Image.Generation = view.Renderer->GetViewGeneration();
+		view.Image.FrameIndex = context.FrameIndex;
+		view.Image.SceneRevision = snapshot.SceneRevision;
+		view.Image.Camera = snapshot.Camera;
+		view.Image.Picking = HasFlag(snapshot.Flags, RenderViewFlags::Picking);
+		// A frame forced while minimized renders the images for the UI capture only (ADR 0018: screenshot captures do not
+		// publish viewport extents); the views stay unavailable until the window is restored.
+		if (!m_Unavailable)
+			ENGINE_TRY(m_Editor.GetViewportState().SetPixelSize(kind, size));
+		return rendered;
 	}
 	Status EditorHostViewports::Submitted(uint64_t frameIndex, uint64_t submissionId)
 	{
@@ -327,26 +384,75 @@ namespace Engine {
 		}
 		return failure ? Status(std::unexpected(*failure)) : Status{};
 	}
+	bool EditorHostViewports::IsCursorLocked() const
+	{
+		const Window* window = m_Editor.GetEngine().GetWindow();
+		return window != nullptr && window->GetCursorMode() == CursorMode::Locked;
+	}
+	std::optional<Event> EditorHostViewports::ToGameEvent(const Event& event)
+	{
+		if (const auto* move = std::get_if<MouseMoveEvent>(&event))
+			m_Pointer = move->Position;
+		if (!m_GameFocused)
+			return std::nullopt;
+		if (const auto* move = std::get_if<MouseMoveEvent>(&event))
+		{
+			const std::optional<glm::vec2> position = MapToViewCoordinates(move->Position, m_GameRectangle.Min, m_GameRectangle.Size, m_GameRectangle.ImageSize);
+			if (!position)
+				return std::nullopt;
+			return Event(MouseMoveEvent{ .Position = *position });
+		}
+		if (const auto* button = std::get_if<MouseButtonEvent>(&event))
+		{
+			// A press in the letterbox bars, or anywhere off the game image, is not a press on the game.
+			if (button->Action == ButtonAction::Pressed && !IsCursorLocked() && (!m_Pointer || !ToViewportPixel(m_GameRectangle, *m_Pointer)))
+				return std::nullopt;
+			return event;
+		}
+		if (std::holds_alternative<KeyEvent>(event) || std::holds_alternative<CharEvent>(event) || std::holds_alternative<MouseScrollEvent>(event)
+			|| std::holds_alternative<GamepadEvent>(event))
+			return event;
+		return std::nullopt;
+	}
 	void EditorHostViewports::SetGameInputFocused(bool focused)
 	{
 		// Game keys must not also navigate ImGui, which can move focus away and synthesize game-key releases.
 		// This also restores editor navigation when the view closes, the native window blurs or Play stops.
 		if (ImGui::GetCurrentContext() != nullptr)
 		{
+			ImGuiIO& io = ImGui::GetIO();
 			if (focused)
-				ImGui::GetIO().ConfigFlags &= ~ImGuiConfigFlags_NavEnableKeyboard;
+				io.ConfigFlags &= ~ImGuiConfigFlags_NavEnableKeyboard;
 			else
-				ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+				io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+			// A Locked cursor's unbounded virtual position means nothing to the UI: presses must not land on other panels.
+			if (focused && IsCursorLocked())
+				io.ConfigFlags |= ImGuiConfigFlags_NoMouse;
+			else
+				io.ConfigFlags &= ~ImGuiConfigFlags_NoMouse;
 		}
+		const bool captured = focused && !m_GameFocused;
 		if (m_GameFocused && !focused)
 		{
 			const EditorPlayController& play = m_Editor.GetPlay();
 			if (Window* window = m_Editor.GetEngine().GetWindow(); window != nullptr && play.IsPlaying())
 				window->SetCursorMode(CursorMode::Normal);
-			if (PlaySession* session = play.GetSession(); session != nullptr && !play.IsLiveInputSuppressed())
+			// Native input never reaches a lockstep session (its owner injects all of its input), so a UI focus change
+			// must not inject releases into it either.
+			if (PlaySession* session = play.GetSession(); session != nullptr && !play.IsLiveInputSuppressed() && !session->IsLockstep())
 				session->GetInput().QueueReleaseAll(session->GetTick());
 		}
 		m_GameFocused = focused;
+		if (!captured)
+			return;
+		// The capturing press itself is not game input; the game's cursor starts where that press happened.
+		std::optional<glm::vec2> pointer = m_Pointer;
+		if (!pointer && ImGui::GetCurrentContext() != nullptr && ImGui::IsMousePosValid())
+			pointer = glm::vec2(ImGui::GetIO().MousePos.x, ImGui::GetIO().MousePos.y);
+		if (!pointer)
+			return;
+		if (const std::optional<Event> move = ToGameEvent(MouseMoveEvent{ .Position = *pointer }))
+			m_Editor.GetPlay().OnInputEvent(*move, true);
 	}
 
 }

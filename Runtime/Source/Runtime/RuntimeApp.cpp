@@ -64,6 +64,7 @@
 #include <format>
 #include <limits>
 #include <map>
+#include <optional>
 #include <system_error>
 #include <utility>
 #include <vector>
@@ -191,7 +192,8 @@ namespace Engine {
 			return std::unexpected(std::move(created).error().WithContext(std::format("while creating {}", what)));
 		}
 
-		// The game view's size: the window's framebuffer, at least 1 x 1.
+		// The game view's size: the window's framebuffer, at least 1 x 1. Ordinary live play's view; a deterministic session
+		// keeps GetDeterministicViewSize (PlaySession.h, view coordinates).
 		static std::pair<uint32_t, uint32_t> GetViewSize(const Window& window)
 		{
 			return { std::max(window.GetFramebufferWidth(), 1u), std::max(window.GetFramebufferHeight(), 1u) };
@@ -273,8 +275,9 @@ namespace Engine {
 		ScriptApiCoverage CoverageStart{};
 		bool TestsComplete = false;
 		bool ReplayComplete = false;
-		uint32_t ViewWidth = 0; // the size last given to PlaySession::SetViewSize
+		uint32_t ViewWidth = 0; // the game view (the framebuffer) last seen: ordinary live play's view
 		uint32_t ViewHeight = 0;
+		bool SessionViewFixed = false; // Session is deterministic and keeps its fixed view (PrepareSession)
 		// With a device: the renderer of the game view, its blit into the frame target (created for the target's format at
 		// the first rendered frame, when the swapchain's format is known), and the capture of screenshots.
 		Scope<GpuResourceCache> GpuCache;
@@ -290,14 +293,28 @@ namespace Engine {
 		StaleMirrorSchedule Mirrors{};
 		bool Running = false; // OnInitialize succeeded: the frames ran
 		bool ScreenshotWritten = false;
+		// stats.get's droppedSeconds is per session (FrameLoop.h: hosts subtract a baseline taken at session start); the
+		// loop's total keeps growing across recording and replay restarts.
+		uint64_t TimingSession = 0;
+		double TimingDroppedBase = 0.0;
 #if !defined(ENGINE_DIST)
 		Scope<RuntimeAutomationServer> Server;
+		std::string PhaseText{}; // reused for every script phase (OnScriptPhase)
 #endif
 		[[nodiscard]] PlaySession* ActiveSession() const { return Options.FeatureTest ? TestSession : Session.get(); }
 		[[nodiscard]] ScriptEnvironment GetScriptEnvironment() const override;
 		[[nodiscard]] Status SetScriptCursorMode(CursorMode mode) override;
 		[[nodiscard]] CursorMode GetScriptCursorMode() const override;
 		void OnScriptError(const ScriptError& error, bool fatal) override;
+		void OnScriptPhase(std::string_view script, std::string_view callback) override;
+		// The droppedSeconds baseline of the session just installed (TimingSession).
+		void BeginSessionTiming()
+		{
+			TimingSession = Session != nullptr ? Session->GetSerial() : 0;
+			TimingDroppedBase = App.GetFrameStatistics().DroppedSeconds;
+		}
+		// Each suite and replay session of a test run starts from the cursor baseline, never a previous suite's mode.
+		void ResetTestCursor() { App.GetContext().GetWindow()->SetCursorMode(CursorMode::Normal); }
 		[[nodiscard]] const ProjectSettings& GetProjectSettings() const override { return Project; }
 		[[nodiscard]] Result<AssetHandle> ResolveTestScript(std::string_view path) override;
 		[[nodiscard]] Result<std::vector<std::string>> ExpandReplayPaths(std::span<const std::string> globs) override;
@@ -316,8 +333,11 @@ namespace Engine {
 		[[nodiscard]] Status ReloadScript(PlaySession&, AssetHandle) override { return MakeError(ErrorCode::Unsupported, "exported scripts cannot be reloaded"); }
 		[[nodiscard]] Result<TestCoverageReport> GetCoverage() const override;
 		[[nodiscard]] Result<Json> Evaluate(PlaySession& session, const ReplayBytecodeExpectation& expectation) override;
+		// The session keeps the fixed deterministic view (PlaySession.h, view coordinates) with `fixedView`, a test host or
+		// options.Lockstep; otherwise it starts with the framebuffer, which OnUpdate keeps it at.
 		[[nodiscard]] Result<Scope<PlaySession>> PrepareSession(AssetHandle scene, ProjectSettings project, const PlayStartOptions& options,
-			bool ownsAudio = false, IPlaySessionTestHook* hook = nullptr, IScriptTestHost* testHost = nullptr, bool deferActivation = false);
+			bool ownsAudio = false, IPlaySessionTestHook* hook = nullptr, IScriptTestHost* testHost = nullptr, bool deferActivation = false,
+			bool fixedView = false);
 		[[nodiscard]] Result<PlaySession*> Restart(const ReplayHeader& header, const PlayStartOptions& options, bool replay);
 		[[nodiscard]] Result<std::string> ValidateReplayOutput(std::string_view path) const;
 		[[nodiscard]] Result<std::string> WriteReplay(std::string_view path, const ReplayDocument& document);
@@ -336,7 +356,10 @@ namespace Engine {
 		environment.IsHeadless = App.GetSpecification().Window == WindowMode::Headless;
 		environment.IsFocused = window.IsFocused();
 		environment.Version = Manifest.EngineVersion;
-		environment.WindowSize = { static_cast<float>(window.GetWidth()), static_cast<float>(window.GetHeight()) };
+		// The game view (PlaySession.h, view coordinates): the framebuffer the game renders into, which a session also
+		// reports itself; never the window's screen-coordinate size, which differs on scaled (Retina) displays.
+		const auto [viewWidth, viewHeight] = Utils::GetViewSize(window);
+		environment.WindowSize = { static_cast<float>(viewWidth), static_cast<float>(viewHeight) };
 #if defined(ENGINE_PLATFORM_WINDOWS)
 		environment.Platform = "Windows";
 #elif defined(ENGINE_PLATFORM_LINUX)
@@ -358,8 +381,28 @@ namespace Engine {
 	}
 	void RuntimeApp::State::OnScriptError(const ScriptError& error, bool /*fatal*/)
 	{
-		static_cast<void>(Errors.Add(error));
-		App.GetContext().GetEventLog().Append({ .Seq = 0, .Tick = error.Tick, .Type = EngineEventType::ScriptErrorRaised, .Id = error.Entity, .Path = error.Script, .Name = {}, .Message = error.Message, .Dirty = false });
+		// The event carries the bounded message the history keeps.
+		const ScriptError& retained = Errors.Add(error);
+		App.GetContext().GetEventLog().Append({ .Seq = 0, .Tick = retained.Tick, .Type = EngineEventType::ScriptErrorRaised, .Id = retained.Entity, .Path = retained.Script, .Name = {}, .Message = retained.Message, .Dirty = false });
+	}
+
+	void RuntimeApp::State::OnScriptPhase(std::string_view script, std::string_view callback)
+	{
+#if !defined(ENGINE_DIST)
+		// §13.2: a Busy answer of the automation subset names the running gameplay entry.
+		if (Server == nullptr)
+			return;
+		if (script.empty() && callback.empty())
+		{
+			Server->GetWatchdog().SetScriptPhase({});
+			return;
+		}
+		FormatScriptPhase(PhaseText, script, callback);
+		Server->GetWatchdog().SetScriptPhase(PhaseText);
+#else
+		static_cast<void>(script);
+		static_cast<void>(callback);
+#endif
 	}
 
 	Result<AssetHandle> RuntimeApp::State::ResolveTestScript(std::string_view path)
@@ -455,7 +498,7 @@ namespace Engine {
 	}
 
 	Result<Scope<PlaySession>> RuntimeApp::State::PrepareSession(AssetHandle scene, ProjectSettings project, const PlayStartOptions& options,
-		bool ownsAudio, IPlaySessionTestHook* hook, IScriptTestHost* testHost, bool deferActivation)
+		bool ownsAudio, IPlaySessionTestHook* hook, IScriptTestHost* testHost, bool deferActivation, bool fixedView)
 	{
 		Json document;
 		if (scene.IsValid())
@@ -484,8 +527,13 @@ namespace Engine {
 		spec.Serial = NextSerial++;
 		spec.Seed = options.Seed.value_or(PlaySession::ComputeSessionSeed(spec.Project.Simulation.Seed, sceneSeed));
 		spec.Parameters = options.Parameters;
-		spec.ViewWidth = ViewWidth;
-		spec.ViewHeight = ViewHeight;
+		// A deterministic session (a test suite, a replay, a recording, every lockstep session) keeps the project's window
+		// size whatever the window or the display's scale, as the editor's do, so its results and hashes match theirs;
+		// ordinary live play follows the framebuffer (OnUpdate).
+		fixedView = fixedView || testHost != nullptr || options.Lockstep;
+		const glm::uvec2 view = fixedView ? GetDeterministicViewSize(spec.Project.Window) : glm::uvec2(ViewWidth, ViewHeight);
+		spec.ViewWidth = view.x;
+		spec.ViewHeight = view.y;
 		spec.Audio = GetAudioEngine();
 		spec.OwnsAudioTime = ownsAudio;
 		spec.Host = this;
@@ -542,6 +590,7 @@ namespace Engine {
 		PlayStartOptions options;
 		options.Parameters = suite.Parameters;
 		options.Lockstep = suite.Clock.empty();
+		ResetTestCursor();
 		return PrepareSession(scene, std::move(project), options, true, &hook, &testHost);
 	}
 
@@ -555,6 +604,7 @@ namespace Engine {
 		options.Seed = header.Seed;
 		options.Parameters = header.Parameters;
 		options.Lockstep = true;
+		ResetTestCursor();
 		return PrepareSession(header.Scene.Handle, std::move(project), options, true);
 	}
 
@@ -571,12 +621,15 @@ namespace Engine {
 		// Preparation has no callbacks or audio effects. Failure preserves the old session, including its run state.
 		ProjectSettings project = Project;
 		project.Simulation.FixedHz = header.FixedHz;
-		ENGINE_TRY_ASSIGN(auto prepared, PrepareSession(header.Scene.Handle, std::move(project), options, false, nullptr, nullptr, true));
+		// Recording and replay sessions are deterministic: they keep the fixed view, lockstep or not.
+		ENGINE_TRY_ASSIGN(auto prepared, PrepareSession(header.Scene.Handle, std::move(project), options, false, nullptr, nullptr, true, true));
 		Session.reset();
 		Session = std::move(prepared);
+		SessionViewFixed = true;
 		Session->Activate();
 		ReplayInputSerial = replay ? Session->GetSerial() : 0;
 		Mirrors.NoteSceneChange();
+		BeginSessionTiming();
 		return Session.get();
 	}
 
@@ -620,11 +673,11 @@ namespace Engine {
 		if (!Capture)
 			return MakeError(ErrorCode::Unsupported, "test screenshots require a renderer");
 		App.m_Assets->WaitIdle();
-		RenderExtractionRequest request;
-		request.Width = ViewWidth;
-		request.Height = ViewHeight;
+		// At the session's fixed view, the project's window size, as the editor takes test screenshots.
+		const glm::uvec2 view = session.GetViewSize();
+		const RenderExtractionRequest request = MakeTestScreenshotRequest(session, view.x, view.y);
 		ENGINE_TRY_ASSIGN(auto snapshot, session.ExtractView(request));
-		ENGINE_TRY_ASSIGN(auto image, Capture->Capture({ .Width = ViewWidth, .Height = ViewHeight, .MaxDimension = 0 }, snapshot));
+		ENGINE_TRY_ASSIGN(auto image, Capture->Capture({ .Width = view.x, .Height = view.y, .MaxDimension = 0 }, snapshot));
 		ENGINE_TRY_ASSIGN(auto png, EncodePng(image));
 		auto& vfs = App.GetContext().GetVfs();
 		ENGINE_TRY(vfs.CreateDirectories(file.GetParent()));
@@ -859,6 +912,7 @@ namespace Engine {
 			PlayStartOptions start;
 			start.Paused = state.Options.StartPaused;
 			ENGINE_TRY_ASSIGN(state.Session, state.PrepareSession(manifest.StartScene, state.Project, start));
+			state.BeginSessionTiming();
 			ENGINE_INFO("Runtime: '{}' started with scene '{}' ({} entities, seed {}){}", manifest.Name, m_Assets->GetReferencePath(manifest.StartScene),
 				state.Session->GetScene().GetEntityCount(), state.Session->GetSeed(), state.Options.StartPaused ? ", paused at tick 0" : "");
 		}
@@ -874,6 +928,8 @@ namespace Engine {
 		{
 			ENGINE_TRY_ASSIGN(auto replay, state.LoadReplay(state.Options.Replay));
 			ENGINE_TRY_ASSIGN(state.Session, state.CreateReplaySession(replay->Header, RuntimeTestMode));
+			state.SessionViewFixed = true;
+			state.BeginSessionTiming();
 			state.ReplayInputSerial = state.Session->GetSerial();
 			ENGINE_TRY(state.Player.Begin(std::move(replay), *state.Session, { state.Options.VerifyReplay, state.Options.VerifyReplay }));
 		}
@@ -944,7 +1000,9 @@ namespace Engine {
 				const FrameLoopStatistics frame = GetFrameStatistics();
 				result.Fps = ToStatsTelemetry(frame.Fps);
 				result.CpuMilliseconds = ToStatsTelemetry(frame.CpuMilliseconds);
-				result.DroppedSeconds = ToStatsTelemetry(frame.DroppedSeconds);
+				// Dropped in this session only: a recording or replay restart starts a new count.
+				const bool timed = m_State->Session != nullptr && m_State->TimingSession == m_State->Session->GetSerial();
+				result.DroppedSeconds = ToStatsTelemetry(timed ? std::max(0.0, frame.DroppedSeconds - m_State->TimingDroppedBase) : 0.0);
 				if (const GraphicsDevice* device = GetContext().GetGraphicsDevice())
 				{
 					result.MemoryAllocationCount = device->GetMemoryAllocationCount();
@@ -1026,8 +1084,23 @@ namespace Engine {
 	void RuntimeApp::OnEvent(Event& event)
 	{
 		// Every game input goes through the session's tick-stamped queue: real devices reach the next tick (§13.6).
-		if (m_State->Session != nullptr && !m_State->Options.FeatureTest && m_State->ReplayInputSerial == 0)
-			m_State->Session->GetInput().QueueDeviceEvent(event);
+		if (m_State->Session == nullptr || m_State->Options.FeatureTest || m_State->ReplayInputSerial != 0)
+			return;
+		// Cursor positions arrive in window coordinates; the game reads view coordinates (PlaySession.h). The view fills the
+		// window: live play's view is the framebuffer, so the mapping is its scale (identity unless scaled), and a
+		// deterministic session's fixed view (a recording its owner resumed) is stretched over the window.
+		if (const auto* move = std::get_if<MouseMoveEvent>(&event))
+		{
+			const Window& window = *GetContext().GetWindow();
+			const auto [viewWidth, viewHeight] = Utils::GetViewSize(window);
+			const glm::uvec2 view = m_State->SessionViewFixed ? m_State->Session->GetViewSize() : glm::uvec2(viewWidth, viewHeight);
+			const std::optional<glm::vec2> position = MapToViewCoordinates(move->Position, glm::vec2(0.0f),
+				glm::vec2(static_cast<float>(window.GetWidth()), static_cast<float>(window.GetHeight())), view);
+			if (position)
+				m_State->Session->GetInput().QueueDeviceEvent(MouseMoveEvent{ .Position = *position });
+			return;
+		}
+		m_State->Session->GetInput().QueueDeviceEvent(event);
 	}
 
 	void RuntimeApp::OnSafePoint()
@@ -1093,6 +1166,8 @@ namespace Engine {
 						const bool passed = result && result->Passed && state.Session->GetScriptErrors().GetCursor() == 0;
 						if (passed)
 							ENGINE_INFO("Replay passed at tick {} with state hash {}", result->FinalTick, result->StateHash);
+						else if (result && !result->StopReason.empty())
+							ENGINE_ERROR("Replay failed: {}", result->StopReason);
 						else if (result)
 							ENGINE_ERROR("Replay verification failed at tick {}: expected {}, observed {}", result->FinalTick, result->ExpectedStateHash, result->StateHash);
 						else
@@ -1148,14 +1223,16 @@ namespace Engine {
 		if (state.Session == nullptr)
 			return;
 
-		// The game view follows the window's framebuffer; a minimized window keeps the last size.
+		// Live play's view follows the window's framebuffer; a minimized window keeps the last size, and a deterministic
+		// session (a recording or a replay the automation subset started) keeps its fixed view.
 		const Window& window = *GetContext().GetWindow();
 		if (!window.IsMinimized())
 		{
 			const auto [width, height] = Utils::GetViewSize(window);
 			if (width != state.ViewWidth || height != state.ViewHeight)
 			{
-				state.Session->SetViewSize(width, height);
+				if (!state.SessionViewFixed)
+					state.Session->SetViewSize(width, height);
 				state.ViewWidth = width;
 				state.ViewHeight = height;
 			}

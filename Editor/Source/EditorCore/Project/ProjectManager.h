@@ -154,8 +154,9 @@ namespace Engine {
 		// or one without user:// mounted gives an empty list. Errors: Parse or Validation for a malformed file.
 		[[nodiscard]] static Result<std::vector<std::filesystem::path>> ReadRecentProjects(const VirtualFileSystem& vfs);
 
-		// Moves `projectFile` to the front of the recent list (keeping at most MaxRecentProjects) and writes user://Editor.json.
-		// Errors: InvalidState without user://; Parse or Validation for a malformed existing file; the write errors.
+		// Moves `projectFile` to the front of the recent list (keeping at most MaxRecentProjects) and writes user://Editor.json
+		// with the shared lossless preferences writer (SerializeEditorPreferences), so every other member keeps its exact
+		// value. Errors: InvalidState without user://; Parse or Validation for a malformed existing file; the write errors.
 		[[nodiscard]] static Status AddRecentProject(VirtualFileSystem& vfs, const std::filesystem::path& projectFile);
 	};
 

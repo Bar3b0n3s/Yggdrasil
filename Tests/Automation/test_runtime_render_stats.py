@@ -14,6 +14,10 @@ from harness import EXIT_SUCCESS, GPU_EDITOR_ARGUMENTS, AutomationTestCase, engi
 from tiny_game import (TINY_GAME_NAME, WINDOW_HEIGHT, WINDOW_WIDTH, build_tiny_game,
                        export_tiny_game, exported_executable)
 
+# Non-default ProjectSettings.Rendering, exported into Game.pak; the Runtime's stats.get reports what its game view
+# rendered with.
+EXPORTED_RENDERING = {"ShadowMapSize": 512, "SsaoHalfResolution": True}
+
 
 class RuntimeRenderStatsTests(AutomationTestCase):
     """Export through the editor, then observe the actual Runtime rather than an injected statistics source."""
@@ -24,8 +28,7 @@ class RuntimeRenderStatsTests(AutomationTestCase):
         client = self.connect(editor)
         self.create_project(client, TINY_GAME_NAME)
         build_tiny_game(client)
-        client.call("project.setSettings", {"patch": {"Rendering": {
-            "ShadowMapSize": 512, "SsaoHalfResolution": True}}})
+        client.call("project.setSettings", {"patch": {"Rendering": EXPORTED_RENDERING}})
         executable = exported_executable(export_tiny_game(client))
         client.call("session.shutdown")
         self.assertEqual(editor.wait(), EXIT_SUCCESS, editor.output())
@@ -77,9 +80,32 @@ class RuntimeRenderStatsTests(AutomationTestCase):
         self.assertEqual(view["frame"], "")
         self.assertEqual(view["gpuFrame"], "")
         self.assertEqual(view["passes"], [])
+        self.assertEqual(view["shadowMapSize"], 0)
+        self.assertFalse(view["ssaoHalfResolution"])
         after = client.call("play.state")
         self.assertEqual(after["tick"], before["tick"])
         self.assertEqual(after["stateHash"], before["stateHash"])
+        client.call("session.shutdown")
+        self.assertEqual(game.wait(), EXIT_SUCCESS, game.output())
+
+    def test_runtime_dropped_seconds_start_again_with_each_session(self) -> None:
+        # FrameLoop counts dropped simulation time for the whole process; stats.get reports the current session's only
+        # (FrameLoop.h: hosts subtract a baseline taken at session start), so a recording or replay restart starts at 0.
+        game, client = self.start_game(rendering=False)
+        client.call("play.resume")
+        # At 100x a ManualClock frame asks for 100 steps and runs MaxStepsPerFrame of them: every frame drops time.
+        client.call("play.setTimeScale", {"scale": 100})
+        deadline = time.monotonic() + 60.0  # a bounded observation wait, never asserted on
+        stats = client.call("stats.get")
+        while stats["droppedSeconds"] <= 0 and time.monotonic() < deadline:
+            stats = client.call("stats.get")
+        self.assertGreater(stats["droppedSeconds"], 0, stats)
+        # The restarted session runs at the default time scale, so nothing is dropped in it.
+        client.call("input.record", {"action": "start", "restart": True})
+        restarted = client.call("stats.get")
+        self.assertEqual(restarted["droppedSeconds"], 0, restarted)
+        client.call("play.step", {"ticks": 3, "render": "none"})
+        self.assertEqual(client.call("stats.get")["droppedSeconds"], 0)
         client.call("session.shutdown")
         self.assertEqual(game.wait(), EXIT_SUCCESS, game.output())
 
@@ -103,6 +129,10 @@ class RuntimeRenderStatsTests(AutomationTestCase):
         self.assertLessEqual(stats["memoryAllocationCount"], stats["maxMemoryAllocationCount"])
         view = stats["views"][0]
         self.assertEqual((view["width"], view["height"]), (WINDOW_WIDTH, WINDOW_HEIGHT))
+        # The game view renders with the exported project's quality settings, not the defaults (2048, full-resolution
+        # AO).
+        self.assertEqual(view["shadowMapSize"], EXPORTED_RENDERING["ShadowMapSize"])
+        self.assertEqual(view["ssaoHalfResolution"], EXPORTED_RENDERING["SsaoHalfResolution"])
         self.assertTrue(view["frame"].isdigit())
         self.assertTrue(view["gpuFrame"].isdigit())
         self.assertLessEqual(int(view["gpuFrame"]), int(view["frame"]))
@@ -117,6 +147,7 @@ class RuntimeRenderStatsTests(AutomationTestCase):
         following = self.wait_for_stats(client, gpu=True, after_frame=int(view["frame"]))
         game_view = following["views"][0]
         self.assertEqual((game_view["width"], game_view["height"]), (WINDOW_WIDTH, WINDOW_HEIGHT))
+        self.assertEqual(game_view["shadowMapSize"], EXPORTED_RENDERING["ShadowMapSize"])
         self.assertGreaterEqual(int(game_view["gpuFrame"]), int(view["gpuFrame"]))
         self.assertLessEqual(int(game_view["gpuFrame"]), int(game_view["frame"]))
         after = client.call("play.state")

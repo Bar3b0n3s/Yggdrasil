@@ -5,6 +5,7 @@
 #include "Engine/Core/Log.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scripting/Private/SandboxAccess.h"
+#include "Engine/Scripting/ScriptLimits.h"
 #include "Engine/Scripting/Watchdog.h"
 
 #include <algorithm>
@@ -47,36 +48,86 @@ namespace Engine {
 
 	void ScriptEngine::State::RefreshLifecycleOrder()
 	{
-		const auto canonical = Engine.GetHost().GetScene().GetCanonicalOrder();
-		std::map<UUID, size_t> positions;
-		for (size_t index = 0; index < canonical.size(); ++index)
-			positions.emplace(canonical[index], index);
-		// Scene destruction removes lookup/hierarchy entries immediately. Keep those tombstones at their last
-		// canonical anchor, while refreshing all surviving entities and any newly instantiated subtree.
-		std::vector<std::vector<UUID>> pending(canonical.size() + 1);
-		size_t anchor = canonical.size();
+		const Scene& scene = Engine.GetHost().GetScene();
+		const uint64_t revision = scene.GetRevision();
+		if (Instances.empty())
+		{
+			LifecycleOrder.clear();
+			LifecycleRevision = revision;
+			LifecycleDirty = false;
+			return;
+		}
+		// Every structural scene change increments the revision, and membership changes mark the order dirty.
+		if (!LifecycleDirty && revision == LifecycleRevision)
+			return;
+		const std::vector<UUID> members = SortedInstanceIDs();
+		std::vector<UUID> alive;
+		for (const UUID id : scene.GetCanonicalOrder())
+		{
+			if (std::binary_search(members.begin(), members.end(), id))
+				alive.push_back(id);
+		}
+		std::vector<UUID> aliveSorted = alive;
+		std::sort(aliveSorted.begin(), aliveSorted.end());
+		// Scene destruction removes lookup/hierarchy entries immediately. Keep each removed instance at its last anchor
+		// (the next surviving instance after it in the previous order, or the end), preserving their relative order.
+		std::map<UUID, std::vector<UUID>> anchored;
+		std::set<UUID> placed;
+		UUID anchor{};
 		for (auto current = LifecycleOrder.rbegin(); current != LifecycleOrder.rend(); ++current)
 		{
-			const auto position = positions.find(*current);
-			if (position != positions.end())
-				anchor = position->second;
-			else if (Instances.contains(*current))
-				pending[anchor].push_back(*current);
+			if (std::binary_search(aliveSorted.begin(), aliveSorted.end(), *current))
+				anchor = *current;
+			else if (std::binary_search(members.begin(), members.end(), *current) && placed.insert(*current).second)
+				anchored[anchor].push_back(*current);
 		}
-		LifecycleOrder.clear();
-		for (size_t index = 0; index <= canonical.size(); ++index)
+		std::vector<std::pair<uint64_t, UUID>> unanchored;
+		for (const auto& [id, instance] : Instances)
 		{
-			LifecycleOrder.insert(LifecycleOrder.end(), pending[index].rbegin(), pending[index].rend());
-			if (index < canonical.size())
-				LifecycleOrder.push_back(canonical[index]);
+			if (!std::binary_search(aliveSorted.begin(), aliveSorted.end(), id) && !placed.contains(id))
+				unanchored.emplace_back(instance.Serial, id);
 		}
+		std::sort(unanchored.begin(), unanchored.end());
+		LifecycleOrder.clear();
+		const auto emitAnchored = [this, &anchored](UUID key)
+		{
+			const auto found = anchored.find(key);
+			if (found != anchored.end())
+				LifecycleOrder.insert(LifecycleOrder.end(), found->second.rbegin(), found->second.rend());
+		};
+		for (const UUID id : alive)
+		{
+			emitAnchored(id);
+			LifecycleOrder.push_back(id);
+		}
+		emitAnchored(UUID{});
+		for (const auto& [serial, id] : unanchored)
+		{
+			static_cast<void>(serial);
+			LifecycleOrder.push_back(id);
+		}
+		LifecycleRevision = revision;
+		LifecycleDirty = false;
 	}
 
-	std::vector<UUID> ScriptEngine::State::OrderedInstances(bool startedOnly) const
+	std::vector<UUID> ScriptEngine::State::SortedInstanceIDs() const
 	{
 		std::vector<UUID> result;
+		result.reserve(Instances.size());
+		for (const auto& [id, instance] : Instances)
+		{
+			static_cast<void>(instance);
+			result.push_back(id); // std::map iterates in key order
+		}
+		return result;
+	}
+
+	std::vector<UUID> ScriptEngine::State::OrderedInstances(bool startedOnly)
+	{
+		RefreshLifecycleOrder();
 		Scene& scene = Engine.GetHost().GetScene();
-		for (const UUID id : scene.GetCanonicalOrder())
+		std::vector<std::pair<int32_t, UUID>> eligible;
+		for (const UUID id : LifecycleOrder)
 		{
 			const auto instance = Instances.find(id);
 			if (instance == Instances.end() || instance->second.FaultDisabled || instance->second.DestroyPrepared || !instance->second.Active
@@ -84,12 +135,20 @@ namespace Engine {
 				continue;
 			const Entity entity = scene.FindEntityByID(id);
 			if (entity && entity.IsActive())
-				result.push_back(id);
+				eligible.emplace_back(instance->second.Order, id);
 		}
-		std::stable_sort(result.begin(), result.end(), [this](UUID left, UUID right)
+		// LifecycleOrder lists surviving instances in canonical order, so a stable sort gives (ExecutionOrder, canonical).
+		std::stable_sort(eligible.begin(), eligible.end(), [](const auto& left, const auto& right)
 		{
-			return Instances.find(left)->second.Order < Instances.find(right)->second.Order;
+			return left.first < right.first;
 		});
+		std::vector<UUID> result;
+		result.reserve(eligible.size());
+		for (const auto& [order, id] : eligible)
+		{
+			static_cast<void>(order);
+			result.push_back(id);
+		}
 		return result;
 	}
 
@@ -144,14 +203,14 @@ namespace Engine {
 		return Lua::ProtectedCall(call, &State::InvokeNative);
 	}
 
-	void ScriptEngine::State::Publish(ScriptError error, ScriptTaskOwner owner, bool caseBody, bool alreadyLogged)
+	void ScriptEngine::State::Publish(ScriptError error, ScriptTaskOwner owner, bool caseBody, bool alreadyLogged, FaultPolicy policy)
 	{
 		const bool nested = Vm != nullptr && Detail::SandboxAccess::GetWatchdog(*Vm)->GetDepth() != 0;
 		if (nested && (error.Kind == ScriptErrorKind::Timeout || error.Kind == ScriptErrorKind::Memory))
 		{
 			// Safety faults remain latched across nested protected entries. The outer owner publishes once after unwind.
 			if (!PendingSafetyFailure.has_value())
-				PendingSafetyFailure = PendingFailure{ std::move(error), owner, caseBody };
+				PendingSafetyFailure = PendingFailure{ std::move(error), owner, caseBody, policy };
 			return;
 		}
 		if (!nested && PendingSafetyFailure.has_value())
@@ -159,6 +218,7 @@ namespace Engine {
 			error = std::move(PendingSafetyFailure->Error);
 			owner = PendingSafetyFailure->Owner;
 			caseBody = PendingSafetyFailure->CaseBody;
+			policy = PendingSafetyFailure->Policy;
 			PendingSafetyFailure.reset();
 			alreadyLogged = false;
 		}
@@ -168,11 +228,17 @@ namespace Engine {
 		const auto instance = Instances.find(error.Entity);
 		if (instance != Instances.end())
 		{
-			if (error.Script.empty() && instance->second.Script != nullptr)
-				error.Script = instance->second.Script->SourceMap.Path;
 			if (error.EntityName.empty())
 				error.EntityName = instance->second.Name;
+		}
+		// An external evaluation is not a callback of the addressed instance (§11.7 disables only the faulting instance).
+		// Its failure is recorded and logged, but never attributed to the behaviour's file, disables it or cancels its tasks.
+		if (instance != Instances.end() && policy == FaultPolicy::DisableInstance)
+		{
+			if (error.Script.empty() && instance->second.Script != nullptr)
+				error.Script = instance->second.Script->SourceMap.Path;
 			instance->second.FaultDisabled = true;
+			instance->second.PendingPhysics.clear();
 			if (Scheduler != nullptr)
 				Scheduler->CancelEntity(error.Entity);
 			if (error.Kind == ScriptErrorKind::Memory && instance->second.Table != LUA_NOREF && !nested)
@@ -203,13 +269,18 @@ namespace Engine {
 			const int line = static_cast<int>(std::min(occurrence.Line, static_cast<uint32_t>(std::numeric_limits<int>::max())));
 			Detail::LogWrite(LogChannel::Script, LogLevel::Error, occurrence.Script.c_str(), line, occurrence.Callback.c_str(), "{}", message);
 		}
+		// Only a nonfatal error outside the case body can be claimed. Past the cap it cannot, and the runner reports it as
+		// an unexpected error of the case.
 		const ScriptReference currentCase = !owner.Case.IsNull() ? owner.Case : ActiveCase;
-		if (!currentCase.IsNull())
-			ObservedErrors.push_back({ currentCase, occurrence, !fatal && !caseBody, false });
+		if (!currentCase.IsNull() && !fatal && !caseBody && ObservedErrors.size() < MaxScriptTestUnclaimedErrors)
+			ObservedErrors.push_back({ currentCase, occurrence });
 		Engine.GetHost().OnScriptError(occurrence, fatal);
 		if (TestHost != nullptr)
 			TestHost->OnScriptError(occurrence, fatal);
-		if (Engine.m_Specification.Settings.PauseOnError && Engine.GetHost().GetEnvironment().IsEditor)
+		// Test runs never pause: the runner owns time, so Editor, Release and Dist runs observe the same audio and alpha.
+		// External evaluations report their failure to the caller and leave the running game's time untouched.
+		if (Engine.m_Specification.Settings.PauseOnError && Engine.GetHost().GetEnvironment().IsEditor && !Engine.IsTestMode()
+			&& policy == FaultPolicy::DisableInstance)
 			Engine.GetHost().RequestPause();
 		if (fatal)
 		{

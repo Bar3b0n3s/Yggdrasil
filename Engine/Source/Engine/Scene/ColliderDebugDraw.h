@@ -19,9 +19,10 @@
 // The shapes are renderer-agnostic records in the vocabulary of the renderer's DebugDrawList (§8.10: Box, Sphere, Capsule,
 // Line), so the render snapshot's debug draw list (M8) takes them one to one through AppendColliderDebugDraw: Box, Sphere
 // and Capsule records become the list's Box, Sphere and Capsule entries, Lines records one Line per vertex pair, each with
-// the record's colour, duration 0 (this frame) and DepthMode Tested. The view that asks for colliders appends them to its
-// snapshot's DebugDraw (the screenshot annotation "colliders" and the editor's viewport option, with the snapshot's
-// RenderViewFlags, arrive with M9 and M10; Docs/Decisions/0016-m8-m11-m12-integration.md decision 3).
+// the record's colour, duration 0 (this frame) and DepthMode Tested. A view that shows colliders (the screenshot
+// annotation "colliders", the editor's viewport option: RenderViewFlags::Colliders) gets them through
+// AppendRenderAnnotations (Scene/RenderAnnotations.h), which appends them to the snapshot's AnnotationDraw at the
+// snapshot's alpha (Docs/Decisions/0016-m8-m11-m12-integration.md decision 3; ADR 0017).
 //
 // Frozen by the M11 contract (Docs/Decisions/0014-m11-decisions.md decision 16); the integration of M8 and M11 added
 // AppendColliderDebugDraw (decision 16's adapter) and ColliderDebugDrawOptions::Alpha.

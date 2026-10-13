@@ -32,8 +32,10 @@ namespace Engine {
 		// Ordinary gameplay writes and gameplay Scene.Load do not invalidate a recording.
 		void Invalidate(std::string_view reason);
 		// A validated snapshot, not an I/O operation: on success ends recording and returns the document. InvalidState
-		// for invalidation/serial mismatch; InvalidArgument for bad expectation ticks. The host compiles all supplied
-		// expectations before Finish and writes atomically afterwards. No partial file is published on any failure.
+		// for invalidation/serial mismatch, which also ends the recording (it can never succeed, and the owner must be able
+		// to restart: input.record start with restart:true, test.run and input.replay are then admitted again);
+		// InvalidArgument for bad expectation ticks, which keeps it so a corrected Stop can retry. The host compiles all
+		// supplied expectations before Finish and writes atomically afterwards. No partial file is published on any failure.
 		// Finish proves structural validity only. FeatureTestRunner additionally verifies the candidate in fresh ordinary
 		// gameplay before making it available for publication; it never replaces this observed hash with the verifier's.
 		[[nodiscard]] Result<ReplayDocument> Finish(const PlaySession& session, std::span<const ReplayExpectation> expectations = {});

@@ -66,6 +66,7 @@ namespace Engine {
 		uint32_t FinalTick = 0; // ToAutomationCounter, as play.state; persistent replay ticks remain uint64_t
 		std::string StateHash{};
 		std::string ExpectedStateHash{};
+		std::string StopReason{}; // ReplayPlaybackResult::StopReason: why playback ended before the replay's final tick
 		struct Expectation
 		{
 			uint32_t Tick = 0;
@@ -83,8 +84,10 @@ namespace Engine {
 	namespace Automation {
 
 		// Recording owns lockstep from tick zero and observes every applied input, including test/device events.
-		// Validates the complete request before replacing a session. A mutation/reload invalidates the recording;
-		// Stop then returns its reason and writes nothing. Another lockstep owner's call is InvalidState. Writes use
+		// Validates the complete request before replacing a session; Start's parameters become the session's in the replay
+		// header's form (CanonicalizeReplayParameters: floats as float; out of range is InvalidArgument at /parameters/...).
+		// A mutation/reload invalidates the recording; Stop then returns its reason, writes nothing and ends the recording,
+		// so the owner can start again (restart:true). Another lockstep owner's call is InvalidState. Writes use
 		// the host's confined replay-output path and normal provenance, with no dry-run/batch promise. Stop validates
 		// write authorization before consuming the recording. The host cancels the immediate Start's recorder on client
 		// disconnect, without needing a pending Poll, and writes no partial/invalid recording.
@@ -95,7 +98,9 @@ namespace Engine {
 		// suppression, stepping, audio/time and temporary lockstep ownership without another Poll. Check session serial
 		// before cleanup, so a replacement session is untouched. Verification uses cooked Expect bytecode; Dist never
 		// compiles a predicate. Errors identify replay/expectation/tick. A strict hash or expectation failure returns
-		// Validation with the complete outcome in error data, preserving all locations and hash status.
+		// Validation with the complete outcome in error data, preserving all locations and hash status; so does gameplay
+		// that quits or stops fatally before the replay's final tick (stopReason, the tick reached, unevaluated later
+		// expectations), which is a failed replay, never Cancelled.
 		[[nodiscard]] Result<Scope<PendingOperation>> InputReplay(AutomationMethodContext& context, const InputReplayParams& params);
 
 	}

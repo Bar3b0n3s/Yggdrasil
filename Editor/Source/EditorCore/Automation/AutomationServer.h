@@ -98,7 +98,9 @@ namespace Engine {
 	//     "no project open; call project.create or project.open", §12.1), before the params are read;
 	//   - creates EditorMethodContexts;
 	//   - in AdmitRequest refuses, in this order: Mutates methods in a read-only editor unless the call is a dry run
-	//     (PermissionDenied "the editor is read-only (--read-only)"); a stale ifRevision, compared with
+	//     (PermissionDenied "the editor is read-only (--read-only)"); with the DenyMutations policy, Mutates methods and
+	//     the requests that would discard the open scene's unsaved changes (scene.open {discardChanges}, session.shutdown
+	//     {force} without save), unless the call is a dry run (PermissionDenied); a stale ifRevision, compared with
 	//     EditorContext::GetRevision (Conflict, data.currentRevision); then, for a dry run, opens an EditorDryRunScope that
 	//     the context holds;
 	//   - in EnterInvocation sets the write attribution {method, request id, client name, transcript line} on the
@@ -183,7 +185,8 @@ namespace Engine {
 		// native path, which results name like offloaded ones. `extension` is lowercase letters and digits without the dot
 		// ("png"). Unlike offloaded results, output files outlive the server, so the screenshots of a --batch run can be read
 		// after it exits; the first write of a later server to the directory removes them with the other leftovers of
-		// servers that are gone. Errors: those of the VFS writes.
+		// servers that are gone. Method output is not project content, so the DenyMutations policy allows it, as it does
+		// offloaded results. Errors: those of the VFS writes.
 		[[nodiscard]] Result<std::string> WriteOutputFile(std::string_view extension, std::span<const std::byte> bytes);
 	private:
 		[[nodiscard]] Status CheckAvailability(const MethodDescriptor& method) const override;

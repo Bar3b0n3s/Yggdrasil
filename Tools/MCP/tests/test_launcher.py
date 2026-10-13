@@ -114,6 +114,48 @@ class LauncherTests(unittest.TestCase):
         self.assertIn("AlreadyExists", str(raised.exception))
         self.assertEqual(sorted(path.name for path in occupied.iterdir()), ["notes.txt"])
 
+    def test_launch_creates_a_basic3d_project(self) -> None:
+        launcher = Launcher(REPOSITORY_ROOT, self.user_data, engine_client.configurations_from_environment())
+        connection = launcher.launch(LaunchRequest(project=self.directory / "Basic", create=True, template="Basic3D"))
+        try:
+            self.assertIn("result", connection.call("scene.open", {"path": "Assets/Scenes/Main.scene"}))
+            camera = connection.call("entity.get", {"entity": "/Camera"})
+            self.assertEqual(camera["result"]["entity"]["name"], "Camera")
+        finally:
+            self.assertTrue(connection.shutdown(force=True)["shutDown"])
+
+    def test_launch_offers_and_performs_recovery_after_a_crash(self) -> None:
+        editor, project_file = self.start_project_editor([])
+        source = project_file.parent / "Assets/Scenes/Main.scene"
+        with editor.connect() as client:
+            client.call("scene.new", {"path": "Assets/Scenes/Main.scene"})
+            client.call("entity.create", {"name": "RecoveredThroughTheBridge"})
+            # Entering play writes the autosave generation synchronously (BeforePlay).
+            client.call("play.start", {"lockstep": True})
+            before = source.read_bytes()
+        editor.kill()
+        launcher = Launcher(REPOSITORY_ROOT, self.user_data, engine_client.configurations_from_environment())
+        # Without recover the candidate is reported, never adopted.
+        offered = launcher.launch(LaunchRequest(project=project_file))
+        try:
+            status = offered.describe()
+            self.assertTrue(status["recoveryAvailable"])
+            self.assertFalse(status["recovered"])
+            self.assertFalse(offered.call("project.info", {})["result"]["scene"]["open"])
+        finally:
+            self.assertTrue(offered.shutdown(force=True)["shutDown"])
+        recovered = launcher.launch(LaunchRequest(project=project_file, recover=True))
+        try:
+            status = recovered.describe()
+            self.assertTrue(status["recoveryAvailable"])
+            self.assertTrue(status["recovered"])
+            query = recovered.call("scene.query", {"where": {"name": "RecoveredThroughTheBridge"}})
+            self.assertEqual(query["result"]["total"], 1)
+            self.assertTrue(recovered.call("session.info", {})["result"]["_meta"]["dirty"])
+            self.assertEqual(source.read_bytes(), before)
+        finally:
+            self.assertTrue(recovered.shutdown(force=True)["shutDown"])
+
 
 if __name__ == "__main__":
     unittest.main()

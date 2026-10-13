@@ -51,6 +51,21 @@ namespace Engine {
 			CHECK_FALSE(IsValidUtf8("\xe2\x28\xac"));     // bad continuation byte
 			CHECK(FindInvalidUtf8("\xc3\xa9\xc3\xa9\xff") == 4);
 		}
+
+		TEST_CASE("Utf8: a complete prefix drops only an incomplete trailing sequence")
+		{
+			CHECK(CompleteUtf8Prefix("") == 0);
+			CHECK(CompleteUtf8Prefix("abc") == 3);
+			CHECK(CompleteUtf8Prefix("ab\xc3") == 2);
+			CHECK(CompleteUtf8Prefix("ab\xc3\xa9") == 4);
+			CHECK(CompleteUtf8Prefix("\xe2\x82") == 0);
+			CHECK(CompleteUtf8Prefix("\xe2\x82\xac") == 3);
+			CHECK(CompleteUtf8Prefix("a\xf0\x9f\x98") == 1);
+			CHECK(CompleteUtf8Prefix("a\xf0\x9f\x98\x80") == 5);
+			// Bytes that cannot start an incomplete sequence are kept as they are.
+			CHECK(CompleteUtf8Prefix("a\x80") == 2);
+			CHECK(CompleteUtf8Prefix("\xff") == 1);
+		}
 	}
 
 }

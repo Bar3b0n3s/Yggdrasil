@@ -11,16 +11,14 @@
 #include "Engine/Renderer/BloomPass.h"
 #include "Engine/Renderer/BrdfLut.h"
 #include "Engine/Renderer/DebugRenderer.h"
+#include "Engine/Renderer/EditorOverlay.h"
 #include "Engine/Renderer/FxaaPass.h"
 #include "Engine/Renderer/GpuResourceCache.h"
 #include "Engine/Renderer/PassBindingCache.h"
 #include "Engine/Renderer/Private/ForwardPipelines.h"
 #include "Engine/Renderer/Private/LightingInputs.h"
-#include "Engine/Renderer/Private/SceneRendererState.h"
-#include "Engine/Renderer/EditorOverlay.h"
-#include "Shared/ShadowConstants.h"
-#include "Shared/Private/SceneDataViewConstants.h"
 #include "Engine/Renderer/Private/MaterialBindingCache.h"
+#include "Engine/Renderer/Private/SceneRendererState.h"
 #include "Engine/Renderer/RenderPrepare.h"
 #include "Engine/Renderer/SceneTargetFormats.h"
 #include "Engine/Renderer/SkyboxPass.h"
@@ -28,23 +26,25 @@
 #include "Engine/Renderer/TonemapPass.h"
 #include "Shared/DrawConstants.h"
 #include "Shared/EnvironmentConstants.h"
+#include "Shared/Private/SceneDataViewConstants.h"
 #include "Shared/ShaderLight.h"
+#include "Shared/ShadowConstants.h"
 #include "Shared/ViewConstants.h"
 
 #include <glm/matrix.hpp>
 
 #include <algorithm>
 #include <array>
-#include <cmath>
 #include <chrono>
-#include <limits>
-#include <numbers>
-#include <set>
+#include <cmath>
 #include <cstddef>
 #include <format>
 #include <iterator>
+#include <limits>
 #include <map>
+#include <numbers>
 #include <optional>
+#include <set>
 #include <span>
 #include <string>
 #include <utility>
@@ -245,7 +245,7 @@ namespace Engine {
 			ENGINE_TRY_ASSIGN(nvrhi::TextureHandle texture, device.CreateTexture(desc));
 			ENGINE_TRY_ASSIGN(const nvrhi::CommandListHandle list, device.CreateCommandList(nvrhi::CommandListParameters().setEnableImmediateExecution(false)));
 			list->open();
-			if (format == nvrhi::Format::D32)
+			if (format == ShadowDepthFormat)
 				list->clearDepthStencilTexture(texture, nvrhi::AllSubresources, true, value, false, 0);
 			else
 				list->clearTextureFloat(texture, nvrhi::AllSubresources, nvrhi::Color(value));
@@ -304,10 +304,10 @@ namespace Engine {
 			device.CreateSampler(nvrhi::SamplerDesc().setAllFilters(true).setAllAddressModes(nvrhi::SamplerAddressMode::Clamp)));
 		ENGINE_TRY_ASSIGN(state.AnisoWrap, device.CreateSampler(nvrhi::SamplerDesc().setAllFilters(true).setAllAddressModes(nvrhi::SamplerAddressMode::Wrap).setMaxAnisotropy(Utils::MaxSamplerAnisotropy)));
 		ENGINE_TRY_ASSIGN(state.BlackCube, Utils::CreateBlackCube(device));
-		ENGINE_TRY_ASSIGN(state.EmptyCascades, Utils::CreateSceneNeutralTexture(device, nvrhi::Format::D32, true, 0.0f));
-		ENGINE_TRY_ASSIGN(state.EmptyAtlas, Utils::CreateSceneNeutralTexture(device, nvrhi::Format::D32, false, 0.0f));
-		ENGINE_TRY_ASSIGN(state.WhiteAo, Utils::CreateSceneNeutralTexture(device, nvrhi::Format::R8_UNORM, false, 1.0f));
-		ENGINE_TRY_ASSIGN(state.FarDepth, Utils::CreateSceneNeutralTexture(device, nvrhi::Format::R16_FLOAT, false, 65504.0f));
+		ENGINE_TRY_ASSIGN(state.EmptyCascades, Utils::CreateSceneNeutralTexture(device, ShadowDepthFormat, true, 0.0f));
+		ENGINE_TRY_ASSIGN(state.EmptyAtlas, Utils::CreateSceneNeutralTexture(device, ShadowDepthFormat, false, 0.0f));
+		ENGINE_TRY_ASSIGN(state.WhiteAo, Utils::CreateSceneNeutralTexture(device, AmbientOcclusionFormat, false, 1.0f));
+		ENGINE_TRY_ASSIGN(state.FarDepth, Utils::CreateSceneNeutralTexture(device, ViewDepthFormat, false, 65504.0f));
 		ENGINE_TRY_ASSIGN(state.ShadowCompare, device.CreateSampler(nvrhi::SamplerDesc().setAllFilters(true).setAllAddressModes(nvrhi::SamplerAddressMode::Clamp).setReductionType(nvrhi::SamplerReductionType::Comparison)));
 		ENGINE_TRY_ASSIGN(state.Shadows, ShadowPass::Create(device, pipelines));
 		ENGINE_TRY_ASSIGN(state.DepthPyramid, DepthPyramidPass::Create(device, pipelines));
@@ -415,7 +415,7 @@ namespace Engine {
 		const uint32_t height = Targets.Height;
 		if (picking && Targets.EntityId == nullptr)
 		{
-			ENGINE_TRY_ASSIGN(Targets.EntityId, Utils::CreateTarget(*TargetPool, width, height, nvrhi::Format::R32_UINT, Utils::TargetUsage::Attachment, "EntityId"));
+			ENGINE_TRY_ASSIGN(Targets.EntityId, Utils::CreateTarget(*TargetPool, width, height, EntityIdFormat, Utils::TargetUsage::Attachment, "EntityId"));
 		}
 		if (picking && Targets.PickingFramebuffer == nullptr)
 		{
@@ -440,11 +440,17 @@ namespace Engine {
 		if (shadowSize != 0 && (Targets.Cascades == nullptr || Targets.Cascades->getDesc().width != shadowSize))
 		{
 			ClearTargetBindings();
-			ENGINE_TRY_ASSIGN(Targets.Cascades, TargetPool->Acquire(ShadowPass::GetCascadeTargetDesc(shadowSize)));
+			ENGINE_TRY_ASSIGN(nvrhi::TextureHandle cascades, TargetPool->Acquire(ShadowPass::GetCascadeTargetDesc(shadowSize)));
+			ENGINE_TRY_ASSIGN(std::vector<nvrhi::FramebufferHandle> framebuffers, ShadowPass::CreateFramebuffers(*Device, *cascades));
+			Targets.Cascades = std::move(cascades);
+			Targets.CascadeFramebuffers = std::move(framebuffers);
 		}
 		if (spots && Targets.SpotAtlas == nullptr)
 		{
-			ENGINE_TRY_ASSIGN(Targets.SpotAtlas, TargetPool->Acquire(ShadowPass::GetAtlasTargetDesc()));
+			ENGINE_TRY_ASSIGN(nvrhi::TextureHandle atlas, TargetPool->Acquire(ShadowPass::GetAtlasTargetDesc()));
+			ENGINE_TRY_ASSIGN(std::vector<nvrhi::FramebufferHandle> framebuffers, ShadowPass::CreateFramebuffers(*Device, *atlas));
+			Targets.SpotAtlas = std::move(atlas);
+			Targets.SpotAtlasFramebuffer = std::move(framebuffers.front());
 		}
 		if (selection && Targets.SelectionMask == nullptr)
 		{
@@ -709,6 +715,7 @@ namespace Engine {
 		state.Profiler = CreateScope<GpuProfiler>(device, device.GetFramesInFlight());
 		state.TimingSubmissions.resize(device.GetFramesInFlight(), 0);
 		ENGINE_TRY_ASSIGN(state.ShadowConstantsBuffer, Utils::CreateViewBuffer(device, sizeof(ShadowConstants), 0, "SceneRenderer.ShadowConstants"));
+		ENGINE_TRY_ASSIGN(state.ShadowCasterConstantsBuffer, device.CreateBuffer(ShadowPass::GetCasterConstantsDesc()));
 		ENGINE_TRY_ASSIGN(state.Targets, state.CreateTargets(specification.Width, specification.Height));
 		return renderer;
 	}
@@ -742,7 +749,19 @@ namespace Engine {
 			return MakeError(ErrorCode::InvalidState, "Render requires OnSubmitted for the prior Render");
 		const double started = Utils::SceneRendererNowSeconds();
 		const RenderDebugView debugView = snapshot.DebugView;
-		ENGINE_TRY(state.PipelineSet->EnsureDebugView(debugView));
+		if (static_cast<size_t>(debugView) >= RenderDebugViewCount)
+			return MakeError(ErrorCode::InvalidArgument, "debug view {} has no pipelines", std::to_underlying(debugView));
+		// A debug view's pipelines are created the first time it is asked for. A Gpu error there is an out-of-memory pipeline
+		// creation, fatal like every pipeline creation failure (§8.14 item 7); any other error (an invalid shader) is returned.
+		if (const Status ensured = state.PipelineSet->EnsureDebugView(debugView); !ensured.has_value())
+		{
+			if (ensured.error().GetCode() == ErrorCode::Gpu)
+			{
+				FatalError(FatalErrorKind::OutOfMemory,
+					std::format("Cannot create the {} debug view's pipelines: {}", RenderDebugViewToString(debugView), ensured.error().ToString()));
+			}
+			return std::unexpected(ensured.error());
+		}
 		if (snapshot.Quality.ShadowMapSize < 256 || snapshot.Quality.ShadowMapSize > 8192
 			|| (snapshot.Quality.ShadowMapSize & (snapshot.Quality.ShadowMapSize - 1)) != 0)
 			return MakeError(ErrorCode::InvalidArgument, "shadow map size must be a power of two in [256,8192]");
@@ -777,7 +796,7 @@ namespace Engine {
 		const bool halfAo = snapshot.Quality.SsaoHalfResolution || post.SsaoQuality == RenderSsaoQuality::Low;
 		const bool shadows = hasCamera && ((isLit && !wireframe) || debugView == RenderDebugView::ShadowCascades);
 
-		RenderStats stats{ .Available = true, .FrameIndex = snapshot.FrameIndex, .Width = state.Targets.Width, .Height = state.Targets.Height };
+		RenderStats stats{ .Available = true, .FrameIndex = snapshot.FrameIndex, .Width = state.Targets.Width, .Height = state.Targets.Height, .ShadowMapSize = snapshot.Quality.ShadowMapSize, .SsaoHalfResolution = snapshot.Quality.SsaoHalfResolution };
 		GpuProfiler* profiler = nullptr;
 		const uint32_t slot = state.NextTimingSlot;
 		state.NextTimingSlot = (slot + 1) % static_cast<uint32_t>(state.TimingSubmissions.size());
@@ -815,7 +834,11 @@ namespace Engine {
 		ShadowConstants shadowConstants{};
 		if (shadows)
 		{
-			// Choose in snapshot order, independently of CullLights' importance ordering. Uploaded indices are remapped.
+			// Choose in snapshot order, independently of CullLights' importance ordering. Uploaded indices are remapped. A light
+			// the planner rejects (data the schemas accept that cannot be shadowed, such as a ShadowDistance within the camera's
+			// near plane) stays lit without shadows and the next eligible light is tried; it is not a render error.
+			uint32_t rejectedLights = 0;
+			std::string rejection;
 			for (uint32_t index = 0; index < snapshot.Lights.size(); ++index)
 			{
 				const LightData& light = snapshot.Lights[index];
@@ -824,30 +847,44 @@ namespace Engine {
 					continue;
 				auto planned = BuildShadowCascades(camera, light, index, snapshot.Quality.ShadowMapSize);
 				if (!planned)
-					keepFirstError(std::unexpected(std::move(planned).error()));
-				else
 				{
-					cascades = *planned;
-					shadowConstants.Counts.x = cascades.Count;
-					shadowConstants.Counts.z = static_cast<uint32_t>(visible - culled.Visible.begin());
-					shadowConstants.Directional = glm::vec4(light.LightAngle * std::numbers::pi_v<float> / 180.0f, light.DepthBias, light.NormalBias, light.ShadowDistance);
-					for (uint32_t cascade = 0; cascade < cascades.Count; ++cascade)
-					{
-						const ShadowCascade& plan = cascades.Cascades[cascade];
-						shadowConstants.CascadeViewProjection[cascade] = plan.ViewProjection;
-						shadowConstants.CascadeSplits[cascade] = plan.SplitFar;
-						shadowConstants.CascadeBlendStarts[cascade] = plan.BlendStart;
-						shadowConstants.CascadeTexelWorldSizes[cascade] = plan.TexelWorldSize;
-						shadowConstants.CascadeDepthRanges[cascade] = glm::vec4(plan.LightNear, plan.LightFar, plan.PenumbraUvPerMetre, 0.05f);
-					}
+					if (rejection.empty())
+						rejection = std::format("directional light {}: {}", light.Entity, planned.error().GetMessageText());
+					++rejectedLights;
+					continue;
+				}
+				cascades = *planned;
+				shadowConstants.Counts.x = cascades.Count;
+				shadowConstants.Counts.z = static_cast<uint32_t>(visible - culled.Visible.begin());
+				shadowConstants.Directional = glm::vec4(light.LightAngle * std::numbers::pi_v<float> / 180.0f, light.DepthBias, light.NormalBias, light.ShadowDistance);
+				for (uint32_t cascade = 0; cascade < cascades.Count; ++cascade)
+				{
+					const ShadowCascade& plan = cascades.Cascades[cascade];
+					shadowConstants.CascadeViewProjection[cascade] = plan.ViewProjection;
+					shadowConstants.CascadeSplits[cascade] = plan.SplitFar;
+					shadowConstants.CascadeBlendStarts[cascade] = plan.BlendStart;
+					shadowConstants.CascadeTexelWorldSizes[cascade] = plan.TexelWorldSize;
+					shadowConstants.CascadeDepthRanges[cascade] = glm::vec4(plan.LightNear, plan.LightFar, plan.PenumbraUvPerMetre, 0.05f);
 				}
 				break;
 			}
+			// Spots are validated one at a time: one that cannot be shadowed is rejected alone (SpotShadowAtlas.h).
 			auto allocated = AllocateSpotShadowAtlas(snapshot.Lights, culled.Visible, camera);
 			if (!allocated)
 				keepFirstError(std::unexpected(std::move(allocated).error()));
 			else
+			{
 				spots = std::move(*allocated);
+				if (spots.Rejected > 0 && rejection.empty())
+					rejection = "a spot light's cone, range or values cannot be projected";
+				rejectedLights += spots.Rejected;
+			}
+			if (rejectedLights > 0 && !state.ShadowRejectionLogged)
+			{
+				state.ShadowRejectionLogged = true;
+				ENGINE_CORE_WARN("{} shadow-casting light(s) cannot be shadowed and are lit without shadows (first: {}; logged once per view)",
+					rejectedLights, rejection);
+			}
 			shadowConstants.Counts.y = static_cast<uint32_t>(spots.Tiles.size());
 			for (size_t index = 0; index < spots.Tiles.size(); ++index)
 			{
@@ -918,6 +955,9 @@ namespace Engine {
 				.Spots = !spots.Tiles.empty() ? &spots : nullptr,
 				.CascadeTarget = cascades.Count != 0 ? targets.Cascades.Get() : nullptr,
 				.AtlasTarget = !spots.Tiles.empty() ? targets.SpotAtlas.Get() : nullptr,
+				.CascadeFramebuffers = targets.CascadeFramebuffers,
+				.AtlasFramebuffer = !spots.Tiles.empty() ? targets.SpotAtlasFramebuffer.Get() : nullptr,
+				.CasterConstants = state.ShadowCasterConstantsBuffer,
 				.DepthBias = cascades.Count != 0 ? snapshot.Lights[cascades.LightIndex].DepthBias : 1.0f,
 				.NormalBias = cascades.Count != 0 ? snapshot.Lights[cascades.LightIndex].NormalBias : 1.0f,
 			};
@@ -1007,10 +1047,27 @@ namespace Engine {
 				}
 				if (!state.TransparentDraws.empty())
 				{
-					recording.BeginPass("ForwardTransparent", &commandList);
-					RenderPassCounters counters;
-					state.RecordMeshPass(commandList, Detail::SceneRendererMeshPass::ForwardTransparent, state.TransparentDraws, **forwardSet, debugView, counters);
-					recording.EndPass(counters);
+					// GTAO and its depth-aware upsample describe the prepass (Opaque and Mask) surface at each pixel, not the
+					// Blend surface in front of it: the transparent pass binds the neutral white AO and far depth instead, so
+					// a transparent surface's indirect light uses its material AO only.
+					nvrhi::BindingSetDesc transparentDesc = desc;
+					for (nvrhi::BindingSetItem& item : transparentDesc.bindings)
+					{
+						if (item.type == nvrhi::ResourceType::Texture_SRV && item.slot == Utils::AmbientOcclusionRegister)
+							item.resourceHandle = pipelines.WhiteAo;
+						else if (item.type == nvrhi::ResourceType::Texture_SRV && item.slot == Utils::ViewDepthRegister)
+							item.resourceHandle = pipelines.FarDepth;
+					}
+					auto transparentSet = state.ViewBindings.GetOrCreate(*state.Device, transparentDesc, *pipelines.Layouts.ForwardView);
+					if (!transparentSet)
+						keepFirstError(std::unexpected(std::move(transparentSet).error()));
+					else
+					{
+						recording.BeginPass("ForwardTransparent", &commandList);
+						RenderPassCounters counters;
+						state.RecordMeshPass(commandList, Detail::SceneRendererMeshPass::ForwardTransparent, state.TransparentDraws, **transparentSet, debugView, counters);
+						recording.EndPass(counters);
+					}
 				}
 			}
 		}
@@ -1114,15 +1171,21 @@ namespace Engine {
 		{
 			DebugDrawList edges;
 			keepFirstError(AppendWireframeOverlay(overlaySnapshot, *state.Assets, edges));
+			if (edges.GetDroppedCount() > 0 && !state.WireframeBudgetLogged)
+			{
+				state.WireframeBudgetLogged = true;
+				ENGINE_CORE_WARN("The wireframe left out {} triangle edge(s) beyond the debug draw budget of {} commands per view (logged once per view)",
+					edges.GetDroppedCount(), DebugDrawList::MaxCommands);
+			}
 			drawLines("Wireframe", edges);
 		}
 		if (hasCamera && selection)
 			keepFirstError(pipelines.Selection->Record(commandList, recording, state.SelectionBindings, *state.Cache, *state.Assets, { .Snapshot = &snapshot, .SceneDepth = targets.SceneDepth, .Mask = targets.SelectionMask, .Scratch = targets.SelectionScratch, .LdrColor = targets.Ldr[state.FinalTarget] }));
-		const bool annotations = snapshot.Annotations.Labels != RenderAnnotationLabels::None || snapshot.Annotations.Bounds || snapshot.Annotations.Axes
-			|| HasFlag(snapshot.Flags, RenderViewFlags::Colliders);
+		// The data views show no ordinary debug primitives (a session's script lines among them), only the view's annotations.
 		DebugDrawList overlays;
-		if (!dataView || annotations)
+		if (!dataView)
 			overlays.Append(snapshot.DebugDraw);
+		overlays.Append(snapshot.AnnotationDraw);
 		if (hasCamera && !dataView)
 			keepFirstError(AppendEditorOverlay(overlaySnapshot, overlays));
 		if (hasCamera)

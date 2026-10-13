@@ -178,8 +178,10 @@ namespace Engine {
 		// The clips this system registered with the engine, by (handle, version); each holds one registration reference,
 		// dropped when the system is destroyed.
 		std::map<std::pair<AssetHandle, uint64_t>, AudioClipHandle> Clips;
-		// The one-shot voices started and not yet seen to end.
+		// The one-shot voices started and not yet seen to end (at most MaxAudioVoices: PruneOneShots runs before each one is
+		// added), and the one-shot requests admitted since the last Update (MaxAudioOneShotsPerFrame).
 		std::vector<AudioVoiceHandle> OneShots;
+		uint32_t OneShotRequests = 0;
 		// SetPaused (play-mode pause).
 		bool Paused = false;
 		// Mix initialization can precede voice startup; either path restores the captured host mix on destruction.
@@ -200,6 +202,8 @@ namespace Engine {
 
 		// Stops `voice` when it is alive and nulls it.
 		void ReleaseVoice(AudioVoiceHandle& voice);
+		// Drops the handles of one-shot voices that ended or were stolen, keeping the others in start order.
+		void PruneOneShots();
 		// The clip `handle` as the voice plays it (see AudioSystemSpecification::Assets).
 		[[nodiscard]] ResolvedAudioClip ResolveClip(AssetHandle handle);
 		// The engine registration of `handle`'s current version, registered on first use.
@@ -250,6 +254,14 @@ namespace Engine {
 				ENGINE_CORE_WARN("AudioSystem: stopping a voice failed: {}", stopped.error().ToString());
 		}
 		voice = AudioVoiceHandle();
+	}
+
+	void AudioSystem::State::PruneOneShots()
+	{
+		std::erase_if(OneShots, [this](AudioVoiceHandle voice)
+		{
+			return !Audio->IsVoiceAlive(voice);
+		});
 	}
 
 	ResolvedAudioClip AudioSystem::State::ResolveClip(AssetHandle handle)
@@ -613,10 +625,8 @@ namespace Engine {
 		ENGINE_CORE_ASSERT(std::isfinite(deltaSeconds) && deltaSeconds >= 0.0, "AudioSystem::Update needs a finite delta >= 0, got {}", deltaSeconds);
 		State& state = *m_State;
 		state.UpdateListener(deltaSeconds);
-		std::erase_if(state.OneShots, [&state](AudioVoiceHandle voice)
-		{
-			return !state.Audio->IsVoiceAlive(voice);
-		});
+		state.PruneOneShots();
+		state.OneShotRequests = 0;
 		state.TargetScene->ForEachCanonical([&state, deltaSeconds](Entity entity)
 		{
 			if (AudioSourceComponent* source = entity.TryGetComponent<AudioSourceComponent>())
@@ -723,6 +733,10 @@ namespace Engine {
 			return MakeError(ErrorCode::InvalidArgument, "the one-shot's position must be finite");
 		if (!Utils::IsValidAudioGroup(group))
 			return MakeError(ErrorCode::InvalidArgument, "unknown audio group {}", std::to_underlying(group));
+		// A request costs a voice start (and usually a steal) whatever its outcome, so every admitted one counts.
+		if (state.OneShotRequests >= MaxAudioOneShotsPerFrame)
+			return MakeError(ErrorCode::InvalidState, "at most {} one-shots start per frame; this frame's further requests are refused", MaxAudioOneShotsPerFrame);
+		++state.OneShotRequests;
 
 		ENGINE_TRY_ASSIGN(const AudioClipHandle registered, state.AcquireClip(clip));
 		AudioVoiceDescription description;
@@ -735,6 +749,8 @@ namespace Engine {
 		description.Priority = AudioSystemEffectPriority;
 		description.StartPaused = state.Paused;
 		ENGINE_TRY_ASSIGN(const AudioVoiceHandle voice, state.Audio->PlayVoice(description));
+		// The new voice may have stolen a tracked one-shot; ended and stolen voices leave the list before it grows.
+		state.PruneOneShots();
 		state.OneShots.push_back(voice);
 		return voice;
 	}

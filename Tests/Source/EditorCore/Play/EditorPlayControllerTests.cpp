@@ -1,16 +1,20 @@
 #include "TestsPCH.h"
 
-#include "EditorCore/Play/EditorPlayController.h"
-
+#include "EditorCore/Automation/AutomationServer.h"
 #include "EditorCore/Automation/RegisterMethods.h"
 #include "EditorCore/Commands/ProjectSettingsCommand.h"
 #include "EditorCore/EditorContext.h"
+#include "EditorCore/Play/EditorPlayController.h"
 #include "EditorCore/Scripting/EditorScriptService.h"
+#include "EditorCore/Viewport/EditorViewportState.h"
 #include "Engine/Asset/ScriptData.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
+#include "Engine/Automation/Methods/ScreenshotMethods.h"
+#include "Engine/Automation/Protocol/Watchdog.h"
 #include "Engine/Core/EventLog.h"
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Json/JsonReader.h"
+#include "Engine/Core/Log.h"
 #include "Engine/Core/VfsPath.h"
 #include "Engine/Core/VirtualFileSystem.h"
 #include "Engine/Platform/GlfwLibrary.h"
@@ -40,7 +44,7 @@
 #include <string_view>
 #include <utility>
 
-// The editor's play mode (Architecture Â§5.6, Â§12.4; Docs/Decisions/0012-m7-decisions.md decisions 3 and 11).
+// The editor's play mode (Architecture §5.6, §12.4; Docs/Decisions/0012-m7-decisions.md decisions 3 and 11).
 
 namespace Engine {
 
@@ -66,6 +70,13 @@ namespace Engine {
 		ScriptComponent script;
 		script.Script.SetHandle(written->Script);
 		entity.AddComponent<ScriptComponent>(script);
+		// A recording starts from the saved scene its replay names (§13.6), so the attached script is saved with it.
+		if (const std::optional<VfsPath>& scenePath = editor.GetScenePath())
+		{
+			const Result<std::string> text = SceneSerializer::SaveToString(editor.GetScene());
+			REQUIRE_MESSAGE(text.has_value(), (text ? std::string() : text.error().ToString()));
+			REQUIRE(editor.WriteProjectFile(*scenePath, std::as_bytes(std::span(text->data(), text->size()))).has_value());
+		}
 		// Recording resolves the saved scene's asset handle before replacing the session.
 		REQUIRE(editor.GetAssets().Refresh().has_value());
 		return entity.GetUUID();
@@ -100,15 +111,21 @@ namespace Engine {
 			REQUIRE_MESSAGE(result->contains("value"), result->dump());
 			return (*result)["value"];
 		};
-		const auto checkEnvironment = [&eval, window](std::string_view context)
+		// Scripts measure their view, never the editor window, even after it is resized (PlaySession.h, view coordinates):
+		// the edit context the Game panel's image, a recording the fixed deterministic view of the project's window size.
+		const auto gameImage = (*editor)->GetViewportState().GetPixelSize(ViewportView::Game);
+		REQUIRE(gameImage.has_value());
+		const glm::uvec2 deterministicView = GetDeterministicViewSize((*editor)->GetProject().GetSettings().Window);
+		REQUIRE(deterministicView != *gameImage);
+		const auto checkEnvironment = [&eval, window](std::string_view context, const glm::uvec2& view)
 		{
 			CHECK(eval(context, "Application.IsEditor()") == Json(true));
 			CHECK(eval(context, "Application.IsHeadless()") == Json(GlfwLibrary::GetMode() == WindowMode::Headless));
 			CHECK(eval(context, "Application.IsFocused()") == Json(window->IsFocused()));
-			CHECK(eval(context, std::format("Application.GetWindowSize() == vector.create({}, {}, 0)", window->GetWidth(), window->GetHeight())) == Json(true));
+			CHECK(eval(context, std::format("Application.GetWindowSize() == vector.create({}, {}, 0)", view.x, view.y)) == Json(true));
 			CHECK(eval(context, "Application.GetPlatform() ~= '' and Application.GetVersion() ~= ''") == Json(true));
 		};
-		checkEnvironment("edit");
+		checkEnvironment("edit", *gameImage);
 		static_cast<void>(AttachStartupScript(**editor, "OnStart", R"(
 local instance: any = self
 instance.StartCount = (instance.StartCount or 0) + 1
@@ -183,15 +200,15 @@ end)
 		window->InjectEvent(WindowFocusEvent{ .Focused = false });
 		window->PollEvents();
 		CHECK(window->GetCursorMode() == CursorMode::Normal);
-		checkEnvironment("play"); // An injected focus notification must not replace the window's actual focus state.
+		checkEnvironment("play", deterministicView); // An injected focus notification must not replace the window's actual focus state.
 		window->SetSize(800, 450);
 		REQUIRE(Test::WaitUntil([window]()
 		{
 			window->PollEvents();
 			return window->GetWidth() == 800 && window->GetHeight() == 450;
 		}));
-		checkEnvironment("edit");
-		checkEnvironment("play");
+		checkEnvironment("edit", *gameImage);
+		checkEnvironment("play", deterministicView);
 		if (GlfwLibrary::GetMode() == WindowMode::Windowed)
 		{
 			window->Minimize();
@@ -207,7 +224,7 @@ end)
 				window->PollEvents();
 				return !window->IsMinimized();
 			}));
-			checkEnvironment("play");
+			checkEnvironment("play", deterministicView);
 		}
 		CHECK(eval("play", "Input.SetCursorMode('Hidden'); return Input.GetCursorMode()") == Json("Hidden"));
 		REQUIRE(play.Stop());
@@ -300,8 +317,9 @@ return Script.Define("Host", Host)
 			REQUIRE_FALSE(errors.empty());
 			CHECK(errors.front().Kind == ScriptErrorKind::Compile);
 			CHECK(errors.front().Script == behaviour);
+			// The importer's own location of the error: '=' where "local =" expects a name (1-based column 7).
 			CHECK(errors.front().Line == 1);
-			CHECK(errors.front().Column > 0);
+			CHECK(errors.front().Column == 7);
 			write(behaviour, changed);
 			fixture.GetEditor().GetAssets().WaitIdle();
 			CHECK(state() == Json::array({ 44, 2 }));
@@ -397,6 +415,7 @@ return Script.Define("Host", Host)
 			CallEditorHost(fixture, "script.write", module);
 			CallEditorHost(fixture, "script.write", Json{ { "path", "Assets/Scripts/TypedHost.luau" }, { "source", "local M = require('./BadType'); return Script.Define('TypedHost', {})" } });
 			CallEditorHost(fixture, "entity.create", Json{ { "name", "TypedHost" }, { "components", Json{ { "Script", Json{ { "Script", "Assets/Scripts/TypedHost.luau" } } } } } });
+			CallEditorHost(fixture, "scene.save"); // a recording starts from the saved scene
 			CallEditorHost(fixture, "project.setSettings", Json{ { "patch", Json{ { "Scripting", Json{ { "BlockPlayOnTypeErrors", false } } } } } });
 			CallEditorHost(fixture, "play.start", Json{ { "paused", true } });
 			PlaySession* original = play.GetSession();
@@ -593,6 +612,187 @@ return Script.Define("Host", Host)
 			editor.SetLifecycleCallbacks({});
 		}
 
+		TEST_CASE("EditorPlayController: an invalid play request runs no before-play preparation")
+		{
+			// The lifecycle rule: PrepareForPlay (gesture cancellation, the recovery save) runs only after the request validated.
+			Test::EditorTestFixture fixture;
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			EditorContext& editor = fixture.GetEditor();
+			uint32_t calls = 0;
+			editor.SetLifecycleCallbacks({ .BeforePlay = [&calls]() -> Status
+			{
+				++calls;
+				return {};
+			} });
+			EditorPlayController& play = editor.GetPlay();
+			PlayStartOptions missing;
+			missing.ScenePath = "Assets/Scenes/Missing.scene";
+			const Status missingStart = play.Start(missing);
+			REQUIRE_FALSE(missingStart);
+			CHECK(missingStart.error().GetCode() == ErrorCode::NotFound);
+			PlayStartOptions outside;
+			outside.ScenePath = "../Outside.scene";
+			CHECK_FALSE(play.Start(outside));
+			PlayStartOptions scale;
+			scale.TimeScale = PlaySession::MaxTimeScale * 2.0;
+			CHECK_FALSE(play.Start(scale));
+			PlayStartOptions parameters;
+			parameters.Parameters = VariantValue(Json::array());
+			CHECK_FALSE(play.Start(parameters));
+			CHECK_FALSE(play.StartRecording(missing, false));
+			CHECK(calls == 0);
+			CHECK_FALSE(play.IsPlaying());
+			REQUIRE(play.Start({}));
+			CHECK(calls == 1);
+			REQUIRE(play.Stop());
+			editor.SetLifecycleCallbacks({});
+		}
+
+		TEST_CASE("EditorPlayController: input.replay runs the before-play preparation like play.start")
+		{
+			Test::AutomationFixture fixture("ReplayBeforePlay");
+			uint32_t calls = 0;
+			fixture.GetEditor().SetLifecycleCallbacks({ .BeforePlay = [&calls]() -> Status
+			{
+				++calls;
+				return {};
+			} });
+			CallEditorHost(fixture, "input.record", Json{ { "action", "start" } });
+			CHECK(calls == 1);
+			CallEditorHost(fixture, "play.step", Json{ { "ticks", 2 }, { "render", "none" } });
+			CallEditorHost(fixture, "input.record", Json{ { "action", "stop" }, { "path", "Assets/Tests/Prepared.replay" } });
+			CallEditorHost(fixture, "input.replay", Json{ { "path", "Assets/Tests/Prepared.replay" }, { "verify", true } });
+			CHECK(calls == 2);
+			fixture.GetEditor().SetLifecycleCallbacks({});
+		}
+
+		TEST_CASE("EditorPlayController: a recording starts from the saved scene and refuses unsaved changes")
+		{
+			Test::AutomationFixture fixture("RecordSavedScene");
+			EditorContext& editor = fixture.GetEditor();
+			CallEditorHost(fixture, "entity.create", Json{ { "name", "Unsaved" } });
+			REQUIRE(editor.IsSceneDirty());
+			const Json refused = fixture.Request("input.record", Json{ { "action", "start" } });
+			REQUIRE_MESSAGE(refused.contains("error"), refused.dump());
+			CHECK(refused["error"]["data"]["errorCode"] == Json("InvalidState"));
+			CHECK(refused.dump().find("unsaved changes") != std::string::npos);
+			CHECK_FALSE(editor.GetPlay().IsPlaying());
+			CallEditorHost(fixture, "scene.save");
+			// The replay header names the saved asset, so the recording plays exactly that file: the saved entity is in it.
+			CallEditorHost(fixture, "input.record", Json{ { "action", "start" } });
+			PlaySession* session = editor.GetPlay().GetSession();
+			REQUIRE(session != nullptr);
+			CHECK(session->GetScene().FindEntityByPath("/Unsaved").IsValid());
+			const auto header = editor.GetPlay().DescribeReplayHeader();
+			REQUIRE(header.has_value());
+			CHECK(header->Scene.Path == "Assets/Scenes/Main.scene");
+		}
+
+		TEST_CASE("EditorPlayController: deterministic sessions keep the project's window size while ordinary play follows the Game view")
+		{
+			// Fix review R01: an input.record or input.replay session took the Game panel's size (640x360 headless) and followed
+			// it, while test runs and the Runtime used the project's window, so view-dependent replays diverged across hosts.
+			Test::AutomationFixture fixture("FixedSessionView");
+			EditorContext& editor = fixture.GetEditor();
+			EditorPlayController& play = editor.GetPlay();
+			EditorViewportState& viewport = editor.GetViewportState();
+			CallEditorHost(fixture, "project.setSettings", Json{ { "patch", Json{ { "Window", Json{ { "Width", 320 }, { "Height", 180 } } } } } });
+			const glm::uvec2 project(320, 180);
+			const auto resizeGamePanel = [&viewport, &play](const glm::uvec2& size)
+			{
+				REQUIRE(viewport.SetPixelSize(ViewportView::Game, size).has_value());
+				play.SyncGameView(); // what EditorApp does every frame
+			};
+			const auto scriptsSee = [&fixture](const glm::uvec2& size)
+			{
+				const std::string code = std::format("Application.GetWindowSize() == vector.create({}, {}, 0)", size.x, size.y);
+				return CallEditorHost(fixture, "script.eval", Json{ { "context", "play" }, { "code", code } })["value"] == Json(true);
+			};
+			resizeGamePanel({ 800, 450 });
+			// Ordinary live play starts at the Game panel's image and follows it.
+			CallEditorHost(fixture, "play.start", Json{ { "paused", true } });
+			CHECK(play.GetSession()->GetViewSize() == glm::uvec2(800, 450));
+			resizeGamePanel({ 1024, 576 });
+			CHECK(play.GetSession()->GetViewSize() == glm::uvec2(1024, 576));
+			CHECK(scriptsSee({ 1024, 576 }));
+			CallEditorHost(fixture, "play.stop");
+			// A lockstep session keeps the project's window size through any panel resize.
+			CallEditorHost(fixture, "play.start", Json{ { "lockstep", true } });
+			CHECK(play.GetSession()->GetViewSize() == project);
+			resizeGamePanel({ 640, 360 });
+			CHECK(play.GetSession()->GetViewSize() == project);
+			CHECK(scriptsSee(project));
+			CallEditorHost(fixture, "play.stop");
+			// So does a recording, through its ticks.
+			CallEditorHost(fixture, "input.record", Json{ { "action", "start" } });
+			CHECK(play.GetSession()->GetViewSize() == project);
+			resizeGamePanel({ 700, 400 });
+			CallEditorHost(fixture, "play.step", Json{ { "ticks", 2 }, { "render", "none" } });
+			CHECK(play.GetSession()->GetViewSize() == project);
+			CHECK(scriptsSee(project));
+			const auto header = play.DescribeReplayHeader();
+			REQUIRE(header.has_value());
+			CallEditorHost(fixture, "input.record", Json{ { "action", "stop" }, { "path", "Assets/Tests/View.replay" } });
+			CallEditorHost(fixture, "play.stop");
+			// And a lockstep replay (here owned in process, so only its view is observed), whatever the Game panel does.
+			REQUIRE(play.StartReplay(*header, NoClient).has_value());
+			CHECK(play.GetSession()->GetViewSize() == project);
+			resizeGamePanel({ 1280, 720 });
+			CHECK(play.GetSession()->GetViewSize() == project);
+			REQUIRE(play.Stop().has_value());
+		}
+
+		TEST_CASE("EditorPlayController: live cursor positions reach a fixed-view session in its own view coordinates")
+		{
+			Test::AutomationFixture fixture("FixedViewInput");
+			EditorContext& editor = fixture.GetEditor();
+			EditorPlayController& play = editor.GetPlay();
+			CallEditorHost(fixture, "project.setSettings", Json{ { "patch", Json{ { "Window", Json{ { "Width", 320 }, { "Height", 180 } } } } } });
+			REQUIRE(editor.GetViewportState().SetPixelSize(ViewportView::Game, { 800, 450 }).has_value());
+			const auto mouseAt = [&fixture](float x, float y)
+			{
+				return CallEditorHost(fixture, "script.eval", Json{ { "context", "play" }, { "code", std::format("Input.GetMousePosition() == vector.create({}, {}, 0)", x, y) } })["value"] == Json(true);
+			};
+			// The cursor at the centre of the 800x450 Game image is the centre of an ordinary session's view, the image.
+			CallEditorHost(fixture, "play.start", Json{ { "paused", true } });
+			play.OnInputEvent(MouseMoveEvent{ .Position = { 400.0f, 225.0f } }, true);
+			play.GetSession()->Tick();
+			CHECK(mouseAt(400.0f, 225.0f));
+			CallEditorHost(fixture, "play.stop");
+			// A lockstep session its owner left (play.pause) takes live input, scaled into its fixed 320x180 view.
+			CallEditorHost(fixture, "play.start", Json{ { "lockstep", true } });
+			CallEditorHost(fixture, "play.pause");
+			REQUIRE_FALSE(play.GetSession()->IsLockstep());
+			play.OnInputEvent(MouseMoveEvent{ .Position = { 400.0f, 225.0f } }, true);
+			play.GetSession()->Tick();
+			CHECK(mouseAt(160.0f, 90.0f));
+			REQUIRE(play.Stop().has_value());
+		}
+
+		TEST_CASE("EditorPlayController: a running gameplay callback is the automation watchdog's phase")
+		{
+			// §13.2: a Busy answer names "Script:<Script>.<Callback>". The probe reads the phase marker while the callback runs.
+			Test::AutomationFixture fixture("ScriptWatchdogPhase");
+			CallEditorHost(fixture, "script.write", Json{ { "path", "Assets/Scripts/Probe.luau" }, { "source", "local Probe = {}\nfunction Probe:OnFixedUpdate() Log.Info(\"phase probe\") end\nreturn Script.Define(\"Probe\", Probe)\n" } });
+			CallEditorHost(fixture, "entity.create", Json{ { "name", "Probe" }, { "components", Json{ { "Script", Json{ { "Script", "Assets/Scripts/Probe.luau" } } } } } });
+			CallEditorHost(fixture, "play.start", Json{ { "paused", true } });
+			Watchdog& watchdog = fixture.GetClient().GetServer().GetWatchdog();
+			std::vector<std::string> observed;
+			const uint64_t listener = Log::AddListener([&observed, &watchdog](const LogEntry& entry)
+			{
+				if (entry.Message.find("phase probe") != std::string::npos)
+					observed.push_back(watchdog.GetPhase());
+			});
+			PlaySession* session = fixture.GetEditor().GetPlay().GetSession();
+			REQUIRE(session != nullptr);
+			session->Tick();
+			Log::RemoveListener(listener);
+			REQUIRE(observed.size() == 1);
+			CHECK(observed[0] == "Script:Probe.OnFixedUpdate");
+			CHECK(watchdog.GetPhase() == "Idle");
+		}
+
 		TEST_CASE("EditorPlayController: play then stop leaves the edit scene, its revision and its history untouched")
 		{
 			Test::EditorTestFixture fixture;
@@ -781,7 +981,7 @@ return Script.Define("Host", Host)
 
 		TEST_CASE("EditorPlayController: a reload during ordinary play marks the session modified, whatever started it")
 		{
-			// Â§7.5 race rule 4: the editor's own write of an asset (asset.setProperties, asset.import) reloads it in the running
+			// §7.5 race rule 4: the editor's own write of an asset (asset.setProperties, asset.import) reloads it in the running
 			// game as an external change does, and both mark the session modified; a lockstep session defers both.
 			Test::EditorTestFixture fixture("PlayReloadModified");
 			fixture.CreateAndOpenProject();

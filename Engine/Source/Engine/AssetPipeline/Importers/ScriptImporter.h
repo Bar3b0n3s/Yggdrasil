@@ -36,7 +36,9 @@ namespace Engine {
 		// exact root SourceHash, the provider's GetEnvironmentHash fingerprint and complete diagnostic ranges. A missing
 		// provider records Performed=false. The manager reads context.GetScriptCheck for latest-attempt admission and
 		// cache metadata, independently retaining the previous artifact after a failed import. Import itself never
-		// mutates the registry or live VM.
+		// mutates the registry or live VM. A failed attempt also records its own script failure (compile, load-time
+		// extraction or an unresolved require) as one located SCRIPT_COMPILE_ERROR finding, unless the checker already
+		// reported a compile error on that line; infrastructure failures (Io, PermissionDenied) add no finding.
 		// Errors: located CompileFailed/Script/Timeout from extraction, VFS errors, NotFound for unresolved handles,
 		// Validation for a non-Script dependency or invalid schema, and cooked-format errors. No partial artifact.
 		[[nodiscard]] Result<ImportResult> Import(ImportContext& context, const AssetMetadata& metadata) const override;

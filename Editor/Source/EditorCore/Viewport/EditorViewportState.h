@@ -72,7 +72,8 @@ namespace Engine {
 		[[nodiscard]] Status SetGameResolution(const glm::uvec2& size);
 
 		// Validate the whole candidate before replacing state. InvalidArgument for non-finite numbers, coincident position
-		// and target, vertical viewing direction parallel to +Y, invalid projection/FOV/clip range or nonpositive ortho size.
+		// and target, a viewing direction within the renderer's degenerate band around +Y/-Y (|forward x +Y| < 1e-6 in float,
+		// where the rendered basis would disagree with EditorCamera's), invalid projection/FOV/clip range or nonpositive ortho size.
 		[[nodiscard]] Status SetCamera(const ExplicitRenderCamera& camera);
 		// A full replacement; viewport.setOptions merges only the members present in the request before calling this.
 		void SetOptions(const EditorViewportOptions& options);

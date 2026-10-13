@@ -270,6 +270,33 @@ namespace Engine {
 			CHECK_FALSE(ProjectManager::AddRecentProject(vfs, fixture.GetDirectory() / "B/B.eproj").has_value());
 		}
 
+		TEST_CASE("ProjectManager: the recent list keeps the exact values of members it does not know")
+		{
+			Test::EditorTestFixture fixture("ProjectRecentLossless");
+			VirtualFileSystem& vfs = fixture.GetEngine().GetVfs();
+			const std::filesystem::path preferences = fixture.GetDirectory() / "UserData" / "Editor.json";
+			// A newer editor's members: a double that float32 would round and one outside float32's range.
+			const std::string_view existing = R"({"Format":"EditorPreferences","Version":1,"RecentProjects":[],"Future":{"Fraction":1.23456789012345,"Large":1e200,"Exact":9007199254740993}})";
+			REQUIRE(FileSystem::WriteFileAtomic(preferences, std::as_bytes(std::span(existing.data(), existing.size()))).has_value());
+			const Result<Json> before = JsonReader::Parse(existing);
+			REQUIRE(before.has_value());
+			for (const char* project : { "A/A.eproj", "B/B.eproj" })
+			{
+				INFO(project);
+				const Status added = ProjectManager::AddRecentProject(vfs, fixture.GetDirectory() / project);
+				REQUIRE_MESSAGE(added.has_value(), added.error().ToString());
+				const Result<std::string> written = FileSystem::ReadText(preferences);
+				REQUIRE(written.has_value());
+				const Result<Json> after = JsonReader::Parse(*written);
+				REQUIRE(after.has_value());
+				CHECK((*after)["Future"] == (*before)["Future"]);
+			}
+			const Result<std::vector<std::filesystem::path>> recent = ProjectManager::ReadRecentProjects(vfs);
+			REQUIRE(recent.has_value());
+			REQUIRE(recent->size() == 2);
+			CHECK(recent->front() == fixture.GetDirectory() / "B/B.eproj");
+		}
+
 		TEST_CASE("ProjectManager: without user:// the recent list is empty and cannot be saved")
 		{
 			VirtualFileSystem vfs;

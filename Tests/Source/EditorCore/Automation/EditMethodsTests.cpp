@@ -1,8 +1,7 @@
 #include "TestsPCH.h"
-
 #include "EditorCore/Automation/EditMethods.h"
-#include "EditorCore/Play/EditorPlayController.h"
 
+#include "EditorCore/Play/EditorPlayController.h"
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/SceneSerializer.h"
@@ -42,6 +41,32 @@ namespace Engine {
 			CHECK(editor.GetSelectionTarget() == SceneTarget::Play);
 			REQUIRE(editor.GetPlay().Stop());
 			CHECK(editor.GetSelectionTarget() == SceneTarget::Edit);
+		}
+
+		TEST_CASE("EditMethods: a scene played by path selects runtime entities without an open edit scene")
+		{
+			Test::AutomationFixture setup("EditSelectPathPlay");
+			auto& editor = setup.GetEditor();
+			REQUIRE(setup.Call("entity.create", Json{ { "name", "Player" } }));
+			REQUIRE(setup.Call("scene.save", Json::object()));
+			editor.CloseScene();
+			REQUIRE_FALSE(editor.HasScene());
+			REQUIRE(setup.Call("play.start", Json{ { "scene", "Assets/Scenes/Main.scene" }, { "lockstep", true } }));
+			auto selected = setup.Call("edit.select", Json{ { "entities", Json::array({ "/Player" }) } });
+			REQUIRE(selected);
+			REQUIRE((*selected)["selection"].size() == 1);
+			CHECK((*selected)["selection"][0]["name"] == Json("Player"));
+			CHECK(editor.GetSelectionTarget() == SceneTarget::Play);
+			auto current = setup.Call("edit.getSelection", Json::object());
+			REQUIRE(current);
+			CHECK((*current)["selection"] == (*selected)["selection"]);
+			auto cleared = setup.Call("edit.select", Json{ { "entities", Json::array() } });
+			REQUIRE(cleared);
+			CHECK((*cleared)["selection"].empty());
+			CHECK(editor.GetSelection().empty());
+			CHECK(editor.GetSelectionTarget() == SceneTarget::Play);
+			REQUIRE(setup.Call("play.stop", Json::object()));
+			CHECK(editor.GetSelection().empty());
 		}
 
 		TEST_CASE("EditMethods: edit.batch runs atomically with $ref substitution as one undo step")

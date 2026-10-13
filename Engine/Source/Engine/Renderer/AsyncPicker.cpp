@@ -2,6 +2,7 @@
 #include "Engine/Renderer/AsyncPicker.h"
 
 #include "Engine/Graphics/GraphicsDevice.h"
+#include "Engine/Renderer/SceneTargetFormats.h"
 
 #include <algorithm>
 #include <array>
@@ -76,7 +77,7 @@ namespace Engine {
 		State& state = *m_State;
 		state.CollectCancelled();
 		const nvrhi::TextureDesc& desc = entityIds.getDesc();
-		if (desc.format != nvrhi::Format::R32_UINT || desc.dimension != nvrhi::TextureDimension::Texture2D
+		if (desc.format != EntityIdFormat || desc.dimension != nvrhi::TextureDimension::Texture2D
 			|| desc.sampleCount != 1 || desc.arraySize != 1 || desc.depth != 1)
 			return MakeError(ErrorCode::InvalidArgument, "Picking needs a single-sample two-dimensional R32_UINT image");
 		if (request.X >= desc.width || request.Y >= desc.height)
@@ -114,7 +115,7 @@ namespace Engine {
 			nvrhi::TextureDesc staging;
 			staging.width = 1;
 			staging.height = 1;
-			staging.format = nvrhi::Format::R32_UINT;
+			staging.format = EntityIdFormat;
 			staging.debugName = "AsyncPicker.Pixel";
 			ENGINE_TRY_ASSIGN(slot.Staging, state.Device->CreateStagingTexture(staging, nvrhi::CpuAccessMode::Read));
 		}

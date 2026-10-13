@@ -113,6 +113,12 @@ namespace Engine {
 		float TimeScale = 1.0f;
 		bool Modified = false;  // §7.5 race rule 4
 		bool Recording = false; // Whether the session recorder is active.
+		// §11.1: a fatal script error (a second soft memory breach, the hard memory limit, a script VM that could not start)
+		// stopped the session (PlaySession::GetFatalError): it stays Paused and ticks no longer advance until play.stop or a
+		// restart. StopError is that error in the §11.7 form (ScriptErrorToJson, as "scriptError" error data); null while
+		// the session runs.
+		bool Stopped = false;
+		VariantValue StopError{};
 		uint32_t EntityCount = 0;
 		uint32_t MaxEntities = 0;
 		// The game input as the last tick's step view saw it (PlayInput::GetSummary(InputPhase::Step)).
@@ -173,10 +179,12 @@ namespace Engine {
 		[[nodiscard]] Result<PlayStopResult> PlayStop(AutomationMethodContext& context, const NoParams& params);
 		// play.pause. Errors: InvalidState "not playing"; InvalidState naming the owner for another client of a lockstep session.
 		[[nodiscard]] Result<PlayStateResult> PlayPause(AutomationMethodContext& context, const NoParams& params);
-		// play.resume. Errors: InvalidState "not playing"; InvalidState for a lockstep session.
+		// play.resume. Errors: InvalidState "not playing"; InvalidState for a lockstep session and for a session a fatal
+		// script error stopped (PlayStateResult::Stopped).
 		[[nodiscard]] Result<PlayStateResult> PlayResume(AutomationMethodContext& context, const NoParams& params);
 		// play.step (pending). Errors, before anything runs: InvalidState "not playing", for a running session without
-		// lockstep, for another client of a lockstep session and while another play.step runs; InvalidParams for ticks out of
+		// lockstep, for another client of a lockstep session, while another play.step runs and for a session a fatal script
+		// error stopped (naming the error, PlayStateResult::Stopped); InvalidParams for ticks out of
 		// range and for an event whose tick is >= ticks (located at /input/<i>/tick); the event errors of input.inject.
 		[[nodiscard]] Result<Scope<PendingOperation>> PlayStep(AutomationMethodContext& context, const PlayStepParams& params);
 		// play.state; Edit without a session.

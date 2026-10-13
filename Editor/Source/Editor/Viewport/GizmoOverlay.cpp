@@ -8,10 +8,11 @@
 #include "Engine/Scene/TransformSystem.h"
 #include "Engine/Session/PlaySession.h"
 
-#include <imgui.h>
-#include <ImGuizmo.h>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
+// ImGuizmo.h uses Dear ImGui's types (ImDrawList, ImGuiContext) without including imgui.h, which must come first.
+#include <imgui.h>
+#include <ImGuizmo.h>
 
 #include <cmath>
 
@@ -41,16 +42,18 @@ namespace Engine {
 	}
 
 	Status DrawGizmoOverlay(EditorContext& context, GizmoController& controller, const CameraData& camera,
-		const EditorViewportRect& rectangle, GizmoSettings& settings)
+		const EditorViewportRect& rectangle, GizmoSettings& settings, bool& ownsPointer)
 	{
+		ownsPointer = false;
 		const ViewportGizmoIdScope idScope;
 		const ImGuiIO& io = ImGui::GetIO();
 		const bool inputCaptured = io.WantTextInput || ImGui::GetDragDropPayload() != nullptr
 			|| ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel)
 			|| io.KeyAlt || ImGui::IsMouseDown(ImGuiMouseButton_Right) || ImGui::IsMouseDown(ImGuiMouseButton_Middle);
-		if (!rectangle.Focused || rectangle.Size.x <= 0.0f || rectangle.Size.y <= 0.0f || rectangle.ImageSize.x == 0
+		// An unfocused view still shows the gizmo of its selection; only an active drag ends when focus moves elsewhere.
+		if (rectangle.Size.x <= 0.0f || rectangle.Size.y <= 0.0f || rectangle.ImageSize.x == 0
 			|| rectangle.ImageSize.y == 0 || !context.GetViewportState().GetOptions().Gizmos || context.IsReadOnly()
-			|| ImGui::IsKeyPressed(ImGuiKey_Escape) || (controller.IsDragging() && inputCaptured))
+			|| ImGui::IsKeyPressed(ImGuiKey_Escape) || (controller.IsDragging() && (inputCaptured || !rectangle.Focused)))
 		{
 			Utils::CancelViewportGizmo(controller);
 			return {};
@@ -73,7 +76,7 @@ namespace Engine {
 				return MakeError(ErrorCode::Conflict, "The scene changed during the gizmo drag");
 			}
 		}
-		if (!inputCaptured && rectangle.Hovered && !ImGui::IsAnyItemActive() && !controller.IsDragging())
+		if (!inputCaptured && rectangle.Focused && rectangle.Hovered && !ImGui::IsAnyItemActive() && !controller.IsDragging())
 		{
 			if (ImGui::IsKeyPressed(ImGuiKey_W))
 				settings.Operation = GizmoOperation::Translate;
@@ -123,8 +126,9 @@ namespace Engine {
 		ImGuizmo::SetDrawlist();
 		ImGuizmo::SetRect(rectangle.Min.x, rectangle.Min.y, rectangle.Size.x, rectangle.Size.y);
 		ImGuizmo::SetOrthographic(camera.ProjectionKind == RenderProjection::Orthographic);
-		ImGuizmo::Enable(!inputCaptured && (!ImGui::IsAnyItemActive() || controller.IsDragging())
-			&& (controller.IsDragging() || rectangle.Hovered));
+		const bool interactive = !inputCaptured && (!ImGui::IsAnyItemActive() || controller.IsDragging())
+			&& (controller.IsDragging() || rectangle.Hovered);
+		ImGuizmo::Enable(interactive);
 		ImDrawList* drawList = ImGui::GetWindowDrawList();
 		const int clipDepth = drawList->_ClipRectStack.Size;
 		const float step = settings.Operation == GizmoOperation::Translate ? settings.TranslationSnap
@@ -138,6 +142,9 @@ namespace Engine {
 		while (drawList->_ClipRectStack.Size > clipDepth)
 			drawList->PopClipRect();
 		const bool usingGizmo = ImGuizmo::IsUsing();
+		// Evaluated inside the gizmo's ID scope, for this frame's pointer: a disabled gizmo (Alt orbit, RMB fly) never
+		// claims the press, so navigation that starts over a handle still reaches the view.
+		ownsPointer = ImGuizmo::IsUsingAny() || (interactive && ImGuizmo::IsOver(operation));
 		if (usingGizmo && !controller.IsDragging())
 		{
 			GizmoSettings gesture = settings;

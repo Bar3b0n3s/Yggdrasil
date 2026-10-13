@@ -23,7 +23,8 @@ namespace Engine {
 	class MethodRegistry;
 	class TypeRegistry;
 
-	// Registry enum "SceneTemplate". Basic3D (camera, sun, environment, post-process, ground) arrives with M10.
+	// Registry enum "SceneTemplate": an empty scene. A ready-to-edit 3D scene comes with a new project, through
+	// project.create {template: "Basic3D"} (ProjectMethods.h, EditorCore/Project/Basic3DTemplate.h).
 	enum class SceneTemplate : uint8_t
 	{
 		Empty

@@ -407,6 +407,61 @@ namespace Engine {
 			CHECK_FALSE(registry.Resolve("Assets/Textures/Oak.png").has_value());
 		}
 
+		TEST_CASE("AssetRegistry: the revision advances with every change of the records and never goes back")
+		{
+			Test::AssetTestFixture fixture;
+			const AssetHandle handle(0x5000000000000001ull);
+			fixture.WriteProjectFile("Assets/Textures/Wood.png", Test::MakeTestPng(4, 4));
+			fixture.WriteProjectText("Assets/Textures/Wood.png.meta", MakeTextureMeta(handle));
+			const std::vector<AssetImporterDescription> importers = MakeImporterDescriptions();
+			AssetRegistry registry;
+			CHECK(registry.GetRevision() == 0);
+			REQUIRE(registry.Scan(fixture.GetVfs(), fixture.ProjectPath("Assets"), importers).has_value());
+			const uint64_t scanned = registry.GetRevision();
+			CHECK(scanned > 0);
+			// A rescan that finds the same records changes nothing.
+			REQUIRE(registry.Scan(fixture.GetVfs(), fixture.ProjectPath("Assets"), importers).has_value());
+			CHECK(registry.GetRevision() == scanned);
+			// The pair moved outside the editor: the same handle and record count, at another path.
+			REQUIRE(fixture.GetVfs().Move(fixture.ProjectPath("Assets/Textures/Wood.png"), fixture.ProjectPath("Assets/Textures/Oak.png")).has_value());
+			REQUIRE(fixture.GetVfs().Move(fixture.ProjectPath("Assets/Textures/Wood.png.meta"), fixture.ProjectPath("Assets/Textures/Oak.png.meta")).has_value());
+			REQUIRE(registry.Scan(fixture.GetVfs(), fixture.ProjectPath("Assets"), importers).has_value());
+			REQUIRE(registry.GetRecordCount() == 1);
+			const uint64_t moved = registry.GetRevision();
+			CHECK(moved > scanned);
+
+			// Each edit advances it; a rename to the current path does not.
+			REQUIRE(registry.Rename(handle, fixture.ProjectPath("Assets/Textures/Oak.png")).has_value());
+			CHECK(registry.GetRevision() == moved);
+			REQUIRE(registry.Rename(handle, fixture.ProjectPath("Assets/Oak.png")).has_value());
+			const uint64_t renamed = registry.GetRevision();
+			CHECK(renamed > moved);
+			AssetRecord record = *registry.Find(handle);
+			record.Metadata.ImporterVersion = 2;
+			REQUIRE(registry.Update(record).has_value());
+			const uint64_t updated = registry.GetRevision();
+			CHECK(updated > renamed);
+			REQUIRE(registry.Remove(handle).has_value());
+			const uint64_t removed = registry.GetRevision();
+			CHECK(removed > updated);
+			REQUIRE(registry.Add(record).has_value());
+			const uint64_t added = registry.GetRevision();
+			CHECK(added > removed);
+
+			// A copy keeps the revision (a dry-run snapshot); assigning one back, or an empty registry, moves past both.
+			const AssetRegistry snapshot = registry;
+			CHECK(snapshot.GetRevision() == added);
+			REQUIRE(registry.Remove(handle).has_value());
+			const uint64_t changed = registry.GetRevision();
+			registry = snapshot;
+			CHECK(registry.GetRevision() > changed);
+			CHECK(registry.Find(handle) != nullptr);
+			const uint64_t restored = registry.GetRevision();
+			registry = AssetRegistry();
+			CHECK(registry.GetRevision() > restored);
+			CHECK(registry.GetRecordCount() == 0);
+		}
+
 		TEST_CASE("AssetRegistry: a meta whose importer disagrees with its extension is ASSET_TYPE_MISMATCH")
 		{
 			Test::AssetTestFixture fixture;

@@ -28,6 +28,16 @@ namespace Engine {
 			uint64_t Tick = 0;
 		};
 
+		// Per-VM admission window of script log entries (ScriptLimits.h): one host (simulation tick, frame index) pair.
+		struct ScriptLogWindow
+		{
+			uint64_t Tick = 0;
+			uint64_t Frame = 0;
+			uint32_t Entries = 0;
+			uint64_t Dropped = 0;
+			bool Started = false;
+		};
+
 		// Private bridge to the ONE state owned by Sandbox. All calls are on its owner thread, borrow a successfully
 		// created Sandbox, and never create another VM. No VM/src headers are required. ProtectedCall/ProtectedResume
 		// own stack guards and traceback capture through public Luau APIs; ScriptEngine alone publishes runtime errors.
@@ -43,6 +53,25 @@ namespace Engine {
 			// Appends to the active evaluation's ordered print sink; otherwise a no-op. Never writes a log entry.
 			// The registered Log.Info/print callback owns logging, so forwarding here cannot duplicate its output.
 			static void CapturePrint(Sandbox& sandbox, std::string_view message);
+			// tostring of every argument on state's frame, tab-separated, as one diagnostic entry (BoundScriptText). At most
+			// MaxScriptLogMessageBytes argument bytes are ever assembled, whatever the argument count or the aliasing of one VM
+			// string. Leaves the stack unchanged. __tostring metamethods may run (and raise) as for print.
+			[[nodiscard]] static std::string FormatPrintArguments(const Sandbox& sandbox, lua_State* state);
+			// One diagnostic entry (a log or print line, a Test.Fail/Skip/Expect* message, a captured script error message)
+			// from text, a prefix of a script's message of fullBytes bytes. Every "engine/<n>:<line>:" location prefix of a
+			// record this VM loaded (raised by the VM or by error(message, level)) is first replaced by the authored
+			// "<file>[#<jsonPointer>][:<line>]:" location, so private identities never reach published errors, logs, captured
+			// print output or test reports; an entry that is then longer than MaxScriptLogMessageBytes, or a prefix shorter than
+			// fullBytes, is cut at a UTF-8 boundary and ends with " [truncated: <fullBytes> bytes]", the marker included in the
+			// limit (ScriptLimits.h). Never fails on length.
+			[[nodiscard]] static std::string BoundScriptText(const Sandbox& sandbox, std::string_view text, uint64_t fullBytes);
+			// The VM's log admission window; owner thread only. Policy lives with the Log binding.
+			[[nodiscard]] static ScriptLogWindow& GetLogWindow(Sandbox& sandbox);
+			// Writes the Script-channel warning summarizing a finished window's dropped entries; nothing when none were.
+			static void ReportDroppedLogEntries(const ScriptLogWindow& window);
+			// Serial of the current (or last) outermost protected execution slice; each outermost entry increments it.
+			// Forwarded child errors record it, so a value stashed by a script and raised in a later slice is not trusted.
+			[[nodiscard]] static uint64_t GetSlice(const Sandbox& sandbox) noexcept;
 			// Synchronous native operation through B's protected trampoline. The callable is borrowed for this call only.
 			// Results remain on the main stack; callers restore/pop them. Uses the already active outer origin if any.
 			[[nodiscard]] static Result<ScriptCallResult> RunNative(Sandbox& sandbox, const std::function<int(ScriptCall&)>& operation);
@@ -121,8 +150,10 @@ namespace Engine {
 			// immediately before changing the stream. A standalone hostless stream cannot invalidate a recording.
 			[[nodiscard]] static Status CheckRandomWritable(const Sandbox& sandbox);
 
-			// Every protected wrapper (and the import owner's outer require-graph scope) enters/leaves here. Entry rejects
-			// terminal/pending recovery with InvalidState, validates the clock, and enters the watchdog's inherited deadline.
+			// Every protected wrapper (and the import owner's outer require-graph scope) enters/leaves here. An outermost entry
+			// rejects terminal/pending recovery with InvalidState; a nested entry inherits the slice's latched memory fault, so
+			// its failure is classified as that fault rather than as a separate error. Entry validates the clock and enters the
+			// watchdog's inherited deadline.
 			// An idle-to-active entry owns a fresh ScriptExecutionContext {origin, false}; nested entries INHERIT the same
 			// context regardless of their origin argument. Only outer entry resets safety/mutation latches and deadline.
 			// Owners choose Gameplay for frame/lifecycle, TestDriver for suite/case, Eval for evaluation, Pure for hostless
@@ -144,8 +175,9 @@ namespace Engine {
 			[[nodiscard]] static SandboxExecutionContext GetContext(const Sandbox& sandbox); // empty when no context
 			// Inside a protected entry, BEFORE luau_load: owns/interns an immutable copy of the source map and returns its private
 			// VM-loaded name (borrowed, stable until Sandbox destruction). The loader MUST use this name, never the
-			// authored SourceMap.ChunkName. Distinct loads get distinct identities; optional deduplication requires exact
-			// bytecode bytes and equality of EVERY source-map field, not only a label/path/hash. No old identity is rebound.
+			// authored SourceMap.ChunkName. A load whose exact bytecode bytes and EVERY source-map field equal a loaded
+			// record's reuses that identity (the record keeps a copy of the bytes for the comparison; a hash only filters);
+			// any other load gets a new identity. No old identity is rebound.
 			// Map/index allocations and any retained equality-comparison bytes use the VM's TrackingAllocator budget;
 			// metadata remains charged until VM teardown, including after failed loads or collection of old closures.
 			// Validation for malformed metadata; Script for budget failure under the same memory recovery/stop policy.

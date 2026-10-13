@@ -27,6 +27,7 @@ namespace Engine {
 	class EditorFeatureTestHost;
 	class ScriptApiRegistry;
 	class PlaySession;
+	class Watchdog;
 	struct PlayStartOptions;
 
 	class EditorPlayController
@@ -62,13 +63,25 @@ namespace Engine {
 		// M13 host state outlives every VM and is retained across Stop/Scene.Load.
 		[[nodiscard]] ScriptErrorStream& GetScriptErrors();
 		[[nodiscard]] Result<ScriptApiRegistry*> GetScriptApi();
+		// input.record start (§13.6): a lockstep session owned by options.LockstepOwner, recording from tick 0. Without
+		// options.ScenePath it records the open scene's saved asset, the scene its replay header names: InvalidState for an
+		// unsaved scene or one with unsaved changes (save it first). While playing, restart must be true; the recording's
+		// own owner may restart its active recording. Validates the request before EditorContext::PrepareForPlay.
 		[[nodiscard]] Status StartRecording(const PlayStartOptions& options, bool restart);
+		// input.replay: a fresh paused lockstep session of the header's scene, parameters, seed and FixedHz, entered like
+		// every RPC path into play (validation, then EditorContext::PrepareForPlay, then the session).
 		[[nodiscard]] Status StartReplay(const ReplayHeader& header, ClientId owner);
+		// The automation server's watchdog (AutomationServer sets it for its lifetime): play sessions report the running
+		// gameplay script entry to it, so a Busy answer names "Script:<Script>.<Callback>" (§13.2). ClearPhaseMarker removes
+		// `marker` (clearing its script phase) unless another server has replaced it since.
+		void SetPhaseMarker(Watchdog& marker);
+		void ClearPhaseMarker(const Watchdog& marker);
 		[[nodiscard]] Result<ReplayHeader> DescribeReplayHeader() const;
 		void ReleaseReplayInput(uint64_t sessionSerial);
 		[[nodiscard]] bool IsLiveInputSuppressed() const;
 		[[nodiscard]] bool IsTestRunActive() const;
-		// Fallback state for hosts without a window. A borrowed engine window supplies live focus/size/headless state.
+		// Fallback state for hosts without a window. A borrowed engine window supplies live focus/headless state; WindowSize
+		// is the game view's (the Game panel's image when available, else the project's window size; PlaySession.h).
 		void SetScriptEnvironment(ScriptEnvironment environment);
 		[[nodiscard]] ScriptEnvironment GetScriptEnvironment() const;
 
@@ -86,8 +99,15 @@ namespace Engine {
 		// Asset publication only queues work: never enters a VM or drains further imports from a publication callback.
 		void OnAssetReload(AssetHandle source);
 		// The editor's physical-input ingress. Test/replay ownership and lockstep suppress device input; injected
-		// simulation input uses PlayInput directly. Losing window focus releases the play cursor.
+		// simulation input uses PlayInput directly. Losing window focus releases the play cursor. Cursor positions arrive in
+		// the Game image's pixels (EditorHostViewports::ToGameEvent); a session with a fixed view (SyncGameView) gets them
+		// scaled into its own view.
 		void OnInputEvent(const Event& event, bool gameFocused);
+		// The session's view (scripts' view coordinates, PlaySession.h; EditorApp calls this once per frame). Ordinary live
+		// play follows the Game panel's image while the panel has one. A deterministic session keeps the fixed view
+		// (GetDeterministicViewSize of the project's window) it was created with for its whole life, matching the Runtime's:
+		// a test run's sessions, input.record and input.replay sessions, and every session started in lockstep.
+		void SyncGameView();
 
 		// The time scale the editor's frame loop applies (Application::SetFrameTimeScale): the session's, 1 in Edit mode.
 		[[nodiscard]] double GetFrameTimeScale() const;
@@ -115,14 +135,22 @@ namespace Engine {
 			Scope<PlaySession> Session{};
 			ReplayHeader Header{};
 			bool PausedDuringStartup = false; // During ordinary startup, before the launch pause option applies.
+			bool FixedView = false;           // A deterministic session's fixed view (SyncGameView never resizes it).
 		};
 		// The feature host builds scratch sessions without audio or publication; the real run acquires its lease first.
 		// With activate false, returns an unactivated candidate with the launch flags configured; the replacement owner
 		// retires its old session, installs and activates the candidate, then preserves pauses requested by startup callbacks.
+		// The session gets the fixed deterministic view (SyncGameView) with `fixedView`, a test host, `scratch` or
+		// options.Lockstep, else the Game view's image.
 		[[nodiscard]] Result<PreparedSession> PrepareSession(const PlayStartOptions& options, ProjectSettings project,
 			bool emptyScene = false, IPlaySessionTestHook* hook = nullptr, IScriptTestHost* testHost = nullptr,
-			bool ownsAudio = false, bool scratch = false, ScriptApiRegistry* api = nullptr, bool activate = true);
-		[[nodiscard]] Status CheckTestAdmission(ClientId client) const;
+			bool ownsAudio = false, bool scratch = false, ScriptApiRegistry* api = nullptr, bool activate = true, bool fixedView = false);
+		// With `ownerRestart`, an active recording owned by `client` does not block it (input.record restart:true).
+		[[nodiscard]] Status CheckTestAdmission(ClientId client, bool ownerRestart = false) const;
+		// The checks of a play request that have no side effect (the lifecycle rule: PrepareForPlay runs only after the
+		// requested session is validated): a project, the time scale, parameters that are an object, and the scene: an open
+		// one, or ScenePath resolved, read and parsed. Nothing changes on error.
+		[[nodiscard]] Status ValidatePlayRequest(const PlayStartOptions& options) const;
 		[[nodiscard]] Status CheckPlayScripts(const ProjectSettings& project);
 		[[nodiscard]] Status ReplaceSession(const PlayStartOptions& options, ProjectSettings project);
 		[[nodiscard]] Status AcquireTestRun(EditorFeatureTestHost& owner, ClientId client);

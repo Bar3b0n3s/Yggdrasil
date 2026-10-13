@@ -8,7 +8,6 @@
 
 #include <string>
 #include <string_view>
-
 #include <vector>
 
 namespace Engine {
@@ -38,6 +37,9 @@ assert(half.r == 2 and half.g == 3 and half.b == 4 and half.a == 0.75)
 local hex = Color.FromHex("#FF000080")
 assert(hex.r == 1 and hex.g == 0 and hex.b == 0)
 assert(math.abs(hex.a - 128/255) < 1e-7)
+-- Value equality on all four channels, never userdata identity.
+assert(Color.New(0.25, 0.5, 1) ~= Color.FromHex("#4080FF"))
+assert(Color.New(1, 0, 0, 1) == Color.FromHex("#FF0000") and Color.New(1, 0, 0) ~= Color.New(1, 0, 0, 0.5))
 return true
 )");
 			const auto coverage = fixture.GetApi().GetCoverage(mode);
@@ -57,7 +59,7 @@ return true
 					CHECK(counter.Calls > 0);
 				++members;
 			}
-			CHECK(members == 7);
+			CHECK(members == 8);
 			const auto snapshot = fixture.GetApi().GetCoverage(mode);
 			REQUIRE(snapshot);
 			snapshots.push_back(*snapshot);

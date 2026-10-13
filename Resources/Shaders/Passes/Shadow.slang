@@ -24,17 +24,25 @@ struct VertexOutput
 {
 	float4 Position : SV_Position;
 	float2 TexCoord : TEXCOORD0;
+	// The caster's light-space depth, interpolated linearly in screen space exactly as the rasterizer interpolates
+	// SV_Position.z. Read only when Caster.Bias.z pancakes (orthographic directional maps, w = 1).
+	noperspective float Depth : TEXCOORD1;
 };
 
 [shader("vertex")]
 VertexOutput VSMain(VertexInput input)
 {
 	VertexOutput output;
-	output.Position = mul(Caster.ViewProjection, mul(Draw.World, float4(input.Position, 1.0)));
-	// NVRHI's Vulkan backend does not expose depth clamp. Pancake directional casters before clipping, while
-	// the extended-near fallback leaves their homogeneous position unchanged. Spot maps always use clipping.
+	float4 clip = mul(Caster.ViewProjection, mul(Draw.World, float4(input.Position, 1.0)));
+	output.Position = clip;
+	output.Depth = clip.z / clip.w;
+	// Pancaking is per fragment, as hardware depth clamp does it (NVRHI's Vulkan backend does not expose depth clamp): the
+	// rasterizer sees a constant mid-range depth, so no caster triangle is clipped at the near or far plane, and the
+	// fragment shader clamps the exactly interpolated depth. Clamping clip z per vertex would tilt every triangle that
+	// crosses the near plane and move its interior away from the light. The extended-near fallback and the perspective
+	// spot maps keep their homogeneous position and its clipping.
 	if (Caster.Bias.z != 0.0)
-		output.Position.z = min(output.Position.z, output.Position.w);
+		output.Position.z = 0.5 * clip.w;
 	output.TexCoord = input.TexCoord;
 	return output;
 }
@@ -56,7 +64,9 @@ ShadowPixel PSMain(VertexOutput input)
 	// Match Scene.slang's coverage mask without requiring shader-demote support.
 	output.Coverage = alpha < Material.AlphaCutoff ? 0 : 1;
 #endif
-	float slope = max(abs(ddx(input.Position.z)), abs(ddy(input.Position.z)));
-	output.Depth = saturate(input.Position.z - Caster.Bias.x * (slope + Caster.Bias.y));
+	float depth = Caster.Bias.z != 0.0 ? input.Depth : input.Position.z;
+	float slope = max(abs(ddx(depth)), abs(ddy(depth)));
+	// saturate is the pancake: a caster nearer the light than the map's near plane is stored at depth 1.
+	output.Depth = saturate(depth - Caster.Bias.x * (slope + Caster.Bias.y));
 	return output;
 }

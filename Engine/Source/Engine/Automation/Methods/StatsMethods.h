@@ -48,6 +48,10 @@ namespace Engine {
 		uint32_t ShadowDraws = 0;
 		uint32_t ShadowedSpotLights = 0;
 		uint32_t DroppedSpotShadows = 0;
+		// The quality settings the recorded frame rendered with (RenderStats; the project's ProjectSettings.Rendering, in
+		// the Editor and in an exported Runtime alike); 0 and false while unavailable.
+		uint32_t ShadowMapSize = 0;
+		bool SsaoHalfResolution = false;
 	};
 
 	struct StatsGetResult

@@ -60,6 +60,37 @@ namespace Engine {
 			CHECK(watchdog.GetPhase() == "Pump");
 			const WatchdogPhaseScope noWatchdog(nullptr, "ignored");
 		}
+
+		TEST_CASE("Watchdog: a script phase is reported over the base phase until it is cleared")
+		{
+			Watchdog watchdog(DefaultWatchdogStallThreshold, std::chrono::steady_clock::time_point{});
+			watchdog.SetScriptPhase("Script:Board.OnFixedUpdate");
+			CHECK(watchdog.GetPhase() == "Script:Board.OnFixedUpdate");
+			{
+				// A play.step's pending-operation scope around the callback neither hides nor erases the script phase.
+				const WatchdogPhaseScope scope(&watchdog, "Play:step 3/600");
+				CHECK(watchdog.GetPhase() == "Script:Board.OnFixedUpdate");
+				watchdog.SetScriptPhase({});
+				CHECK(watchdog.GetPhase() == "Play:step 3/600");
+				watchdog.SetScriptPhase("Script:Board.OnUpdate");
+			}
+			CHECK(watchdog.GetPhase() == "Script:Board.OnUpdate");
+			watchdog.SetScriptPhase({});
+			CHECK(watchdog.GetPhase() == "Idle");
+		}
+
+		TEST_CASE("FormatScriptPhase: names the script file stem and the callback")
+		{
+			std::string phase;
+			FormatScriptPhase(phase, "Assets/Scripts/Board.luau", "OnFixedUpdate");
+			CHECK(phase == "Script:Board.OnFixedUpdate");
+			FormatScriptPhase(phase, "Assets/Spin.v2.luau", "Task");
+			CHECK(phase == "Script:Spin.v2.Task");
+			FormatScriptPhase(phase, {}, "Test.Case");
+			CHECK(phase == "Script:Test.Case");
+			FormatScriptPhase(phase, "Assets/Scripts/Board.luau", {});
+			CHECK(phase == "Script:Board");
+		}
 	}
 
 }

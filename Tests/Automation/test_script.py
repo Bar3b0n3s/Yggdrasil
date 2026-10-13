@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import threading
 import time
 import unittest
 
@@ -116,6 +115,32 @@ return Script.Define("Owner", Owner)
         self.assertFalse(client.call("script.errors", {"since": errors["nextCursor"]})["errors"])
         self.assertEqual(client.call("script.errors", {"since": cursor})["errors"], errors["errors"])
 
+    def test_script_errors_keep_bounded_messages_and_report_evictions(self) -> None:
+        client, _ = self.open_editor_with_scene()
+        path = "Assets/Scripts/Fault.luau"
+        client.call("script.write", {"path": path, "source": (
+            'local Fault = {}\n'
+            'function Fault:OnStart() error(self.Entity.Name .. string.rep("x", 20000), 0) end\n'
+            'return Script.Define("Fault", Fault)\n')})
+        # More distinct errors than the editor's history keeps (MaxScriptErrorEntries, 256), each far over 8 KiB.
+        client.call("edit.batch", {"label": "Faults", "ops": [
+            {"method": "entity.create", "params": {"name": f"Fault{index}", "components": {"Script": {"Script": path}}}}
+            for index in range(300)]})
+        cursor = client.call("script.errors", {"since": "end"})["nextCursor"]
+        client.call("play.start", {"lockstep": True, "pauseOnError": False})
+        client.call("play.step", {"ticks": 1})
+        # The page is larger than the inline result limit, so the editor offloads it to a file.
+        errors = engine_client.load_offloaded(client.call("script.errors", {"since": cursor, "limit": 1000}))
+        client.call("play.stop")
+        self.assertTrue(errors["evicted"])
+        self.assertEqual(len(errors["errors"]), 256)
+        for error in errors["errors"]:
+            self.assertLessEqual(len(error["message"].encode("utf-8")), 8192)
+            self.assertRegex(error["message"], r"^Fault\d+x+ \[truncated: 2000\d bytes\]$")
+        follow = client.call("script.errors", {"since": errors["nextCursor"]})
+        self.assertFalse(follow["evicted"])
+        self.assertFalse(follow["errors"])
+
     def test_wait_for_predicate(self) -> None:
         client, _ = self.open_editor_with_scene()
         client.call("play.start", {"lockstep": True, "parameters": {"level": 4}, "pauseOnError": False})
@@ -143,48 +168,154 @@ return Script.Define("Owner", Owner)
         self.assertIn("SCRIPT_NOT_A_BEHAVIOUR", str(rejected.exception.data))
         self.assertNotIn("Script", client.call("entity.get", {"entity": "/Target"})["entity"]["components"])
 
+    def test_missing_required_module_is_a_located_finding(self) -> None:
+        client, _ = self.open_editor_with_scene()
+        client.call("script.write", {"path": "Assets/Scripts/Board.luau", "source": "return {Value = 1}"})
+        for request in ("./Missing", "./Bord"):
+            with self.subTest(request=request):
+                source = f'local Board = require("{request}")\nreturn Script.Define("Game", {{}})\n'
+                written = client.call("script.write", {"path": "Assets/Scripts/Game.luau", "source": source})
+                self.assertTrue(any(row["severity"] == "Error" for row in written["diagnostics"]), written)
+                # Checking the whole project reports every script with the unresolved require among the findings.
+                checked = client.call("script.check", {})
+                self.assertFalse(checked["passed"])
+                self.assertEqual(checked["paths"], ["Assets/Scripts/Board.luau", "Assets/Scripts/Game.luau"])
+                self.assertTrue(any(row["file"].startswith("Assets/Scripts/") and row["severity"] == "Error"
+                                    for row in checked["diagnostics"]), checked)
+                report = client.call("project.validate", {})
+                self.assertIn("diagnostics", report, report)
+
+    def test_script_create_names_test_suites_after_the_file(self) -> None:
+        client, _ = self.open_editor_with_scene()
+        path = "Assets/Tests/Tetris.test.luau"
+        created = client.call("script.create", {"path": path, "template": "Test"})
+        self.assertFalse(created["diagnostics"], created)
+        self.assertIn('Test.Suite("Tetris",', client.call("script.read", {"path": path})["source"])
+
+    def test_edit_eval_ignores_a_dangling_script_reference(self) -> None:
+        client, _ = self.open_editor_with_scene()
+        path = "Assets/Scripts/Ball.luau"
+        client.call("script.write", {"path": path, "source": 'return Script.Define("Ball", {})'})
+        client.call("entity.create", {"name": "Ball", "components": {"Script": {"Script": path}}})
+        client.call("asset.delete", {"asset": path})
+        # The trashed behaviour only affects its own entity; every other evaluation still runs.
+        self.assertEqual(client.call("script.eval", {"context": "edit", "code": "1 + 2"})["value"], 3)
+        self.assertEqual(client.call("script.eval", {"context": "edit", "code": 'Scene.FindByName("Ball") ~= nil'})["value"],
+                         True)
+
+    def test_hot_reload_locates_failures_and_ignores_unloaded_failed_suites(self) -> None:
+        client, _ = self.open_editor_with_scene()
+        module = "Assets/Scripts/Board.luau"
+        path = "Assets/Scripts/Game.luau"
+        suite = "Assets/Tests/Board.test.luau"
+        source = '''local Board = require("./Board")
+local Game = { Fields = { Reloads = Field.Number(0) } }
+function Game:Value() return Board.Value end
+function Game:OnHotReload() self.Reloads += 1 end
+return Script.Define("Game", Game)
+'''
+        suite_source = ('local Board = require("../Scripts/Board")\n'
+                        'return Test.Suite("Board", function()\n'
+                        '\tTest.Case("value", function() Test.Expect(Board.Value > 0) end)\n'
+                        'end)\n')
+        client.call("script.write", {"path": module, "source": "return {Value = 1}"})
+        client.call("script.write", {"path": path, "source": source})
+        client.call("script.write", {"path": suite, "source": suite_source})
+        client.call("entity.create", {"name": "Game", "components": {"Script": {"Script": path}}})
+        client.call("play.start", {"paused": True})
+        probe = 'local s = Scene.FindByName("Game"):GetScript(); return {s:Value(), s.Reloads}'
+        self.assertEqual(self.eval_play(client, probe), [1, 0])
+        # The suite requires Board, but it is neither loaded in play nor attached: its failed import is not live.
+        cursor = client.call("script.errors", {"since": "end"})["nextCursor"]
+        client.call("script.write", {"path": suite, "source": suite_source.replace("Test.Expect(Board.Value > 0)", "local = 1")})
+        self.wait_for_compile_error(client, cursor, suite)
+        client.call("script.write", {"path": module, "source": "return {Value = 10}"})
+        self.wait_for_play_value(client, probe, [10, 1])
+        # A syntax error on line 3 and a load-time failure on line 4 are reported where they are; old code keeps running.
+        for broken, line, column in (
+                ('local Board = require("./Board")\n-- edited\nlocal = 1\n', 3, 7),
+                ('local Board = require("./Board")\nlocal Game = {}\n\nGame.Tick = Time.GetTick()\n'
+                 'return Script.Define("Game", Game)\n', 4, None)):
+            with self.subTest(line=line):
+                cursor = client.call("script.errors", {"since": "end"})["nextCursor"]
+                client.call("script.write", {"path": path, "source": broken})
+                error = self.wait_for_compile_error(client, cursor, path)
+                self.assertEqual(error["line"], line)
+                if column is not None:
+                    self.assertEqual(error["column"], column)
+                self.assertGreater(error["column"], 0)
+                self.assertEqual(self.eval_play(client, probe), [10, 1])
+
+    def eval_play(self, client: engine_client.EngineClient, code: str) -> object:
+        return client.call("script.eval", {"context": "play", "code": code})["value"]
+
+    def wait_for_play_value(self, client: engine_client.EngineClient, code: str, expected: object) -> None:
+        # Polls the editor's safe-point publication; the deadline only bounds a failure.
+        deadline = time.monotonic() + 30.0
+        while True:
+            value = self.eval_play(client, code)
+            if value == expected:
+                return
+            if time.monotonic() >= deadline:
+                self.fail(f"editor never published {expected!r}; last value was {value!r}")
+
+    def wait_for_compile_error(self, client: engine_client.EngineClient, cursor: object, script: str) -> dict:
+        deadline = time.monotonic() + 30.0
+        while True:
+            errors = client.call("script.errors", {"since": cursor})["errors"]
+            compile_errors = [row for row in errors if row["kind"] == "compile" and row["script"] == script]
+            if compile_errors:
+                return compile_errors[0]
+            if time.monotonic() >= deadline:
+                self.fail("the failed script import never reached script.errors")
+
+    def poll_until_answered(self, client: engine_client.EngineClient, method: str,
+                            deadline: float) -> tuple[dict | None, engine_client.EngineError | None]:
+        """`method`'s result once the editor answers it, or the first Busy error; short bounded requests until `deadline`
+        (a bound on a failure only, never asserted on)."""
+        while time.monotonic() < deadline:
+            try:
+                return client.call(method, timeout=0.25), None
+            except TimeoutError:
+                continue
+            except engine_client.EngineError as error:
+                if error.code != engine_client.BUSY:
+                    raise
+                return None, error
+        return None, None
+
     def test_runaway_script_busy_watchdog(self) -> None:
-        # A raised callback budget deliberately lets the independent automation watchdog observe the spin.
-        # Short bounded requests poll for Busy; no passing outcome depends on a sleep or exact elapsed duration.
+        # §13.2: a gameplay callback that never returns freezes the editor's frame loop outside any request; the I/O thread
+        # then answers Busy naming the callback from the phase marker. The watchdog's threshold is 5 s of wall-clock time
+        # without a pump, so the spin must outlive it: the raised 10 s callback budget arranges that. Like
+        # test_busy_watchdog_reports_phase (ADR 0008 decision 15) this is a documented wall-clock exception; it has no
+        # sleep, and its other waits are short bounded requests whose deadline only bounds a failure.
         client, _ = self.open_editor_with_scene()
         client.call("project.setSettings", {"patch": {"Scripting": {"CallbackBudgetMs": 10000}}})
-        client.call("play.start", {"lockstep": True})
+        client.call("script.write", {"path": "Assets/Scripts/Spin.luau", "source":
+                                     "local Spin = {}\nfunction Spin:OnFixedUpdate() while true do end end\n"
+                                     "return Script.Define(\"Spin\", Spin)\n"})
+        client.call("entity.create", {"name": "Spinner", "components": {
+            "Script": {"Script": "Assets/Scripts/Spin.luau"}}})
         observer = self.connect(self.editors[-1], "watchdog-observer")
-        finished = threading.Event()
-        outcome: list[Exception] = []
-
-        def spin() -> None:
-            try:
-                client.call("script.eval", {"context": "play", "code": "while true do end"}, timeout=60.0)
-            except Exception as error:
-                outcome.append(error)
-            finally:
-                finished.set()
-
-        thread = threading.Thread(target=spin)
-        thread.start()
-        busy = None
+        # Ordinary play: the editor's own loop runs OnFixedUpdate after this request returns.
+        client.call("play.start")
         deadline = time.monotonic() + 45.0
-        try:
-            while busy is None and not finished.is_set() and time.monotonic() < deadline:
-                try:
-                    observer.call("session.info", timeout=0.25)
-                except TimeoutError:
-                    continue
-                except engine_client.EngineError as error:
-                    if error.code != engine_client.BUSY:
-                        raise
-                    busy = error
-        finally:
-            thread.join(timeout=60.0)
-        self.assertFalse(thread.is_alive(), "script watchdog did not terminate the callback")
+        busy: engine_client.EngineError | None = None
+        while busy is None and time.monotonic() < deadline:
+            _, busy = self.poll_until_answered(observer, "session.info", deadline)
         self.assertIsNotNone(busy, "automation watchdog never reported Busy during the raised-budget callback")
-        self.assertEqual(len(outcome), 1, outcome)
-        self.assertIsInstance(outcome[0], engine_client.EngineError)
-        self.assertEqual(outcome[0].code, engine_client.SCRIPT_ERROR)
-        self.assertEqual(outcome[0].data["scriptError"]["kind"], "timeout")
+        assert busy is not None
+        self.assertEqual(busy.data["phase"], "Script:Spin.OnFixedUpdate")
+        self.assertGreaterEqual(busy.data["stalledMilliseconds"], 5000)
+        # The script watchdog ends the callback at its budget and disables the instance; the editor answers again.
+        errors: list[dict] = []
+        while not errors and time.monotonic() < deadline:
+            answered, _ = self.poll_until_answered(observer, "script.errors", deadline)
+            errors = [row for row in (answered or {}).get("errors", []) if row["kind"] == "timeout"]
+        self.assertTrue(errors, "the runaway callback was not stopped by its budget")
+        self.assertEqual((errors[0]["script"], errors[0]["callback"]), ("Assets/Scripts/Spin.luau", "OnFixedUpdate"))
         self.assertTrue(observer.call("session.info"))
-        self.assertTrue(any(row["kind"] == "timeout" for row in observer.call("script.errors")["errors"]))
 
 
 if __name__ == "__main__":

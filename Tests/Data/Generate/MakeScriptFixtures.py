@@ -15,6 +15,32 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[3]
 OUTPUT = ROOT / "Tests" / "Data" / "TypeChecker"
 
+# Every seeded mistake pins its exact findings: (code, (line, column, endLine, endColumn), message substring), in the
+# checker's (File, Line, Column, Code) order. A fixture failing for an unrelated reason cannot match these.
+DIAGNOSTICS: dict[str, list[tuple[str, tuple[int, int, int, int], str]]] = {
+    "Errors/ComponentOverload.luau": [
+        ("SCRIPT_TYPE_ERROR", (3, 2, 3, 41), "Expected this to be 'Transform?', but got 'RigidBody?'"),
+    ],
+    "Errors/GenericMethod.luau": [
+        ("SCRIPT_TYPE_ERROR", (3, 2, 3, 33), "Expected this to be 'string', but got 'number'"),
+    ],
+    "Errors/Optional.luau": [
+        ("SCRIPT_TYPE_ERROR", (2, 1, 5, 4), "Consider annotating the return with number"),
+        ("SCRIPT_TYPE_ERROR", (2, 1, 5, 4), "Operator '-' could not be applied to operands of types vector? and vector?"),
+        ("SCRIPT_TYPE_ERROR", (4, 9, 4, 19), "Operator '-' could not be applied to operands of types vector? and vector?"),
+    ],
+    # §11.9's seeded mistake: an optional passed to a non-optional parameter.
+    "Errors/OptionalArgument.luau": [
+        ("SCRIPT_TYPE_ERROR", (7, 16, 7, 19), "Expected this to be 'vector', but got 'vector?'"),
+    ],
+    "Errors/Sealed.luau": [
+        ("SCRIPT_TYPE_ERROR", (6, 1, 6, 12), "Cannot add property 'Added' to table"),
+    ],
+    "Errors/Type.luau": [
+        ("SCRIPT_TYPE_ERROR", (1, 23, 1, 28), "Expected this to be 'number', but got 'string'"),
+    ],
+}
+
 
 def fixtures() -> dict[str, str]:
     """Return deterministic UTF-8/LF sources and their expected diagnostics."""
@@ -104,11 +130,24 @@ local value = make()
 value.Added = true
 return value
 '''
+    sources["Errors/OptionalArgument.luau"] = '''--!strict
+local function length(value: vector): number
+\treturn vector.magnitude(value)
+end
+local function bad(entity: Entity): number
+\tlocal low = entity:GetWorldBounds()
+\treturn length(low)
+end
+return bad
+'''
     expectations = []
     for path in sorted(sources):
         expected: dict[str, object] = {"Path": path, "Clean": not path.startswith("Errors/")}
-        if path == "Errors/Type.luau":
-            expected["Ranges"] = [[1, 23, 1, 28]]
+        if path in DIAGNOSTICS:
+            expected["Diagnostics"] = [
+                {"Code": code, "File": f"Assets/{path}", "Range": list(extent), "MessageContains": message}
+                for code, extent, message in DIAGNOSTICS[path]
+            ]
         expectations.append(expected)
     sources["Expected.json"] = json.dumps(expectations, indent="\t", ensure_ascii=False) + "\n"
     return sources

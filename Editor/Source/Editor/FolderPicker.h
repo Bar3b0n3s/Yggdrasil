@@ -3,6 +3,7 @@
 #include "Engine/Core/Result.h"
 
 #include <array>
+#include <cstddef>
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -13,6 +14,7 @@ namespace Engine {
 
 	// Portable ImGui folder/file picker. Main thread, one instance per dialog, owns path/filter state only.
 	// No shell, cwd mutation or OS UI dependency. Enumeration uses FileSystem, byte-wise stable directories-first order.
+	// Entries that cannot be queried (dangling links, entries removed meanwhile, no permission) are left out and counted.
 	class FolderPicker
 	{
 	public:
@@ -38,6 +40,7 @@ namespace Engine {
 		std::array<char, 4096> m_PathInput{};
 		std::array<char, 256> m_Filter{};
 		std::string m_Error{};
+		size_t m_Unreadable = 0;
 		bool m_Open = false;
 		bool m_FileMode = false;
 		bool m_Appearing = false;

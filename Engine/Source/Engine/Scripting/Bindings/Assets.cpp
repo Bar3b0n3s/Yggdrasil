@@ -59,6 +59,12 @@ namespace Engine {
 			return 1;
 		}
 
+		static int AssetsEqual(ScriptCall& call)
+		{
+			Lua::Push(call, Lua::Check<AssetHandle>(call, 1) == Lua::Check<AssetHandle>(call, 2));
+			return 1;
+		}
+
 	}
 
 	namespace ScriptBindings {
@@ -66,7 +72,9 @@ namespace Engine {
 		Status RegisterAssets(ScriptApiRegistry& api)
 		{
 			const ScriptMemberOptions read{ .Mutates = false };
-			static_cast<void>(api.Type("AssetRef", "An opaque immutable asset handle; resolve metadata through Assets."));
+			const ScriptMemberOptions pure{ .Environments = ScriptApiEnvironment::All, .Mutates = false };
+			api.Type("AssetRef", "An opaque immutable asset handle; resolve metadata through Assets.")
+				.Operator("__eq", &Utils::AssetsEqual, "(self: AssetRef, other: AssetRef) -> boolean", "Compares asset handles, so two references to the same asset are equal.", pure);
 			api.Module("Assets", "Resolves and loads project or built-in assets through the active asset manager.")
 				.Function("Load", &Utils::AssetsLoad, "(reference: string) -> AssetRef?", "Loads a path or hexadecimal reference; missing references return nil and loading failures raise a located error.", read)
 				.Function("IsValid", &Utils::AssetsValid, "(asset: AssetRef?) -> boolean", "Returns whether the handle is currently registered; nil is false.", read)

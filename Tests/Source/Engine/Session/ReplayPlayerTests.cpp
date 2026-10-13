@@ -226,6 +226,42 @@ namespace Engine {
 			CHECK(f.Generations[1] > f.Generations[0]);
 		}
 
+		TEST_CASE("ReplayPlayer: a quit before the final tick completes as a failed playback with its reason")
+		{
+			// The session refuses to advance after the game quits; that is a failed replay with its outcome, never Cancelled.
+			PlaybackFixture f;
+			auto replay = f.Data(5);
+			replay->Expect = { f.Predicate(1, "Application.Quit(3); return true", "/Expect/0/Luau"), f.Predicate(4, "true", "/Expect/1/Luau") };
+			auto session = f.Create();
+			ReplayPlayer player;
+			REQUIRE(player.Begin(replay, *session, { true, true }));
+			bool complete = false;
+			for (uint32_t i = 0; i < 10 && !complete; ++i)
+			{
+				const auto advanced = player.Advance(*session, f);
+				REQUIRE_MESSAGE(advanced, (advanced ? "" : advanced.error().ToString()));
+				complete = *advanced;
+			}
+			REQUIRE(complete);
+			const auto result = player.GetResult();
+			REQUIRE(result);
+			CHECK_FALSE(result->Passed);
+			CHECK(result->FinalTick == 1);
+			CHECK(result->StopReason.find("quit with exit code 3 at tick 1") != std::string::npos);
+			CHECK(result->HashChecked);
+			CHECK_FALSE(result->HashMatched);
+			CHECK(result->StateHash == UUID(session->ComputeStateHash()).ToString());
+			REQUIRE(result->Expect.size() == 2);
+			CHECK(result->Expect[0].Satisfied);
+			CHECK_FALSE(result->Expect[1].Evaluated);
+			CHECK_FALSE(result->Expect[1].Satisfied);
+			CHECK(result->Expect[1].Tick == 4);
+			REQUIRE(result->Expect[1].Failure);
+			CHECK(result->Expect[1].Failure->GetLocation().JsonPointer == "/Expect/1/Luau");
+			CHECK(result->Expect[1].Failure->GetMessageText().find("stopped at tick 1") != std::string::npos);
+			CHECK(session->GetTick() == 1);
+		}
+
 		TEST_CASE("ReplayPlayer: session replacement cancels without touching the new session")
 		{
 			PlaybackFixture f;

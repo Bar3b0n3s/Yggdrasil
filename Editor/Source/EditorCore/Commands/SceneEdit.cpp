@@ -19,6 +19,7 @@
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/SceneSerializer.h"
 #include "Engine/Session/PlaySession.h"
+#include "Engine/Session/ReplayRecorder.h"
 
 #include <nlohmann/json.hpp>
 
@@ -313,6 +314,10 @@ namespace Engine {
 		// run or a transaction must still be able to take them back, with the ids they drew (see the class comment).
 		PlaySession* session = m_PlayIdsBefore.has_value() ? Utils::FindPlaySession(*m_Context, m_PlaySerial) : nullptr;
 		const bool drewIds = session != nullptr && session->GetIdGenerator().GetDrawCount() != m_PlayIdsBefore->GetDrawCount();
+		// §13.6: a play-scene edit (automation target "play", the inspector, gizmos) during an input recording is state the
+		// recorded input cannot reproduce, so it invalidates the recording; its Stop then fails with this reason.
+		if (session != nullptr && (!playChanges.empty() || drewIds) && !m_Context->IsDryRun() && session->GetRecorder() != nullptr)
+			session->GetRecorder()->Invalidate(std::format("the play scene was edited ({})", m_Label));
 		if ((!playChanges.empty() || drewIds) && (m_Context->IsDryRun() || m_Context->GetTransaction() != nullptr))
 		{
 			m_Context->m_TransientPlayUndos.push_back(

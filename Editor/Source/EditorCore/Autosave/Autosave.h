@@ -21,7 +21,8 @@ namespace Engine {
 	{
 		Periodic,
 		BeforePlay,
-		FatalError
+		FatalError,
+		Exit // the final generation when the user closes the editor without saving its scene
 	};
 	enum class AutosaveFatalResult : uint8_t
 	{
@@ -41,6 +42,9 @@ namespace Engine {
 		// access editor/ECS/VFS/GPU state, wait on an application lock, or log. Captures must outlive this service.
 		// Expected failures return Status. An exception on the fatal path becomes IoFailure without logging.
 		std::function<Status(const std::filesystem::path&, std::span<const std::byte>)> WriteFile{};
+		// Optional observer of every native file whose bytes the service reads, called before the read with the same
+		// thread and lifetime rules as WriteFile (tests count reads). It cannot change the read.
+		std::function<void(const std::filesystem::path&)> ReadObserver{};
 	};
 
 	struct AutosaveRecoveryInfo
@@ -93,8 +97,16 @@ namespace Engine {
 		// Read-only/dry-run/no-project return Written=false without logging; autosave is off in these states.
 		// Errors propagate (Io/Validation); a failed attempt does not mark the scene saved or remove older recoveries.
 		[[nodiscard]] Result<AutosaveWriteResult> Update(double nowSeconds);
-		// Refresh immutable bytes when revision/path/project fingerprint/dirty state changed. Called after automation/UI commits and
-		// before GPU work; clean/read-only/dry-run/no-project withdraw publication and succeed without logging/writing.
+		// Refresh immutable bytes when revision/path/project fingerprint/dirty state changed. Called once per host safe point
+		// (through Update) and before request-driven GPU work; clean/read-only/dry-run/no-project withdraw publication and
+		// succeed without logging/writing. Cheap when nothing changed: the scene document, revision, dirty and on-disk
+		// flags plus the project and source files' size and opaque write time key the last outcome (success or Conflict),
+		// which is returned again without canonicalizing paths, serializing or reading file bytes. A file whose size and
+		// write time are unchanged since its last read keeps its hash; each generation write verifies the bytes once.
+		// The document is EditorContext::GetSceneDocumentEpoch plus the scene path: settings changes keep its baseline. A
+		// new document's baseline is the source as it is now, unless the scene already changed on disk (dirty: Conflict).
+		// The project's captured fingerprint follows any .eproj whose bytes equal the canonical serialization of the loaded
+		// settings (the editor's own writes); other changes are Conflict until the project is reopened.
 		// InvalidState while Reset is pending. After a successful Reset, the host may Publish for a newly opened project
 		// (or the same one if close was cancelled), beginning a new admission epoch; it never reuses an old claimed slot.
 		[[nodiscard]] Status Publish();
@@ -102,11 +114,15 @@ namespace Engine {
 		// PermissionDenied read-only, InvalidState dry-run, Validation serialization or invalid settings, Io.
 		// Does not clear scene dirty state, mutate history, write Assets/ or change provenance.
 		// InvalidState while Reset is pending or another disk writer is active; never contend with a fatal writer.
+		// FatalError and Exit never duplicate the newest generation this service wrote for the same published snapshot
+		// (Written=false then). Retiring old generations after the manifest is published is best effort; a later write
+		// sweeps generation directories the manifest no longer names.
 		[[nodiscard]] Result<AutosaveWriteResult> Save(AutosaveReason reason);
 		// Any thread, bounded nonblocking claim of both the published slot and sole disk writer, no state access.
 		// Disabled after Reset closes admission; Busy if the claim fails or another writer is active. Never waits/retries
 		// for Reset, another writer or a slot. An earlier successful claim may finish during Reset; its project lock stays
-		// held until Reset reports quiescence. All outcomes release the claim; normal logging is forbidden.
+		// held until Reset reports quiescence. All outcomes release the claim; normal logging is forbidden. Saved without
+		// writing when the claimed snapshot is already the manifest's newest generation written by this service.
 		[[nodiscard]] AutosaveFatalResult WriteFatalSnapshot() noexcept;
 		// Inspect only a valid complete generation for this canonical .eproj path and captured project fingerprint.
 		// The formats have no project/scene UUID: compare scene path, source hash, size and write time, plus format/version.
@@ -119,7 +135,8 @@ namespace Engine {
 		[[nodiscard]] Result<std::optional<AutosaveRecoveryInfo>> FindRecovery() const;
 		// Validate all bytes into temporary CPU objects first, then install the recovered scene once, dirty, empty history.
 		// Never overwrite source Assets files. A failure leaves current scene/project data untouched. Requires the held
-		// writer lock: PermissionDenied read-only; NotFound stale generation; Conflict source changed since offer.
+		// writer lock: PermissionDenied read-only; InvalidState while a test run owns the editor; NotFound stale
+		// generation; Conflict source changed since offer.
 		[[nodiscard]] Status Recover(const AutosaveRecoveryInfo& recovery);
 		// Main-thread launcher operation. Takes the already-locked project and preflights the recovery into temporary
 		// CPU objects, including its original source fingerprint/untitled token, before opening any editor mounts.
@@ -132,7 +149,9 @@ namespace Engine {
 		[[nodiscard]] Status OpenRecoveredProject(Scope<LoadedProject> project, const AutosaveRecoveryInfo& recovery);
 		// After successful explicit save, discard only generations whose source matches the saved canonical path and
 		// captured source fingerprint (untitled uses the captured in-session document token until first save).
-		// Never discard another scene's recovery. InvalidState dry-run; PermissionDenied read-only; Io.
+		// Never discard another scene's recovery: a generation that cannot be read or belongs to another canonical project
+		// (a moved project) is kept, never an error. Removing directories after the manifest is rewritten is best effort.
+		// InvalidState dry-run; PermissionDenied read-only; Io.
 		[[nodiscard]] Status DiscardSavedRecovery();
 		// Main thread, nonblocking close handshake: atomically stop new writer claims and withdraw publication. Returns
 		// false if a prior claim is still writing; the host retries at later safe points and MUST keep the old project/lock

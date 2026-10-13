@@ -3,11 +3,60 @@
 
 #include "Editor/AssetDesignInteraction.h"
 #include "Editor/PanelInteractionFixture.h"
+#include "EditorCore/Project/ProjectManager.h"
 #include "Engine/Core/FileSystem.h"
+#include "Engine/Core/VirtualFileSystem.h"
+#include "Support/EditorTestFixture.h"
+#include "Support/TestData.h"
 
+#include <atomic>
+#include <utility>
 #include <vector>
 
 namespace Engine {
+
+	namespace {
+
+		// Forwards to the user:// mount it wraps and counts every read, which drawing the launcher must never make.
+		class LauncherReadCounter final : public IMount
+		{
+		public:
+			explicit LauncherReadCounter(Scope<IMount> inner)
+				: m_Inner(std::move(inner))
+			{
+			}
+			[[nodiscard]] Result<Buffer> ReadFile(const VfsPath& path) const override
+			{
+				++m_Reads;
+				return m_Inner->ReadFile(path);
+			}
+			[[nodiscard]] Result<Scope<IFileStream>> Open(const VfsPath& path) const override
+			{
+				++m_Reads;
+				return m_Inner->Open(path);
+			}
+			[[nodiscard]] Status WriteFileAtomic(const VfsPath& path, std::span<const std::byte> data) override { return m_Inner->WriteFileAtomic(path, data); }
+			[[nodiscard]] Result<FileInfo> GetInfo(const VfsPath& path) const override
+			{
+				++m_Reads;
+				return m_Inner->GetInfo(path);
+			}
+			[[nodiscard]] Result<std::vector<VfsEntry>> List(const VfsPath& directory, bool recursive) const override
+			{
+				++m_Reads;
+				return m_Inner->List(directory, recursive);
+			}
+			[[nodiscard]] Status CreateDirectories(const VfsPath& directory) override { return m_Inner->CreateDirectories(directory); }
+			[[nodiscard]] Status Remove(const VfsPath& path) override { return m_Inner->Remove(path); }
+			[[nodiscard]] Status Move(const VfsPath& from, const VfsPath& to) override { return m_Inner->Move(from, to); }
+			[[nodiscard]] MountAccess GetAccess() const override { return m_Inner->GetAccess(); }
+			[[nodiscard]] uint32_t GetReads() const { return m_Reads.load(); }
+		private:
+			Scope<IMount> m_Inner;
+			mutable std::atomic<uint32_t> m_Reads{ 0 };
+		};
+
+	}
 
 	TEST_SUITE("Editor")
 	{
@@ -78,6 +127,22 @@ namespace Engine {
 			CHECK(context.Editor.GetProject().GetProjectFile() == projects[1]);
 		}
 
+		TEST_CASE("ProjectLauncher: folder browsers start outside the engine's resources")
+		{
+			const std::filesystem::path location = GetDefaultProjectLocation();
+			REQUIRE_FALSE(location.empty());
+			CHECK(location.is_absolute());
+			std::error_code error;
+			CHECK(std::filesystem::is_directory(location, error));
+			CHECK_FALSE(error);
+			// Accepting the browser as shown must never create a project inside the engine's tracked resource tree.
+			const auto resources = std::filesystem::weakly_canonical(Test::GetRepositoryRoot() / "Resources", error);
+			REQUIRE_FALSE(error);
+			const auto relative = std::filesystem::weakly_canonical(location, error).lexically_relative(resources);
+			REQUIRE_FALSE(error);
+			CHECK((relative.empty() || *relative.begin() == ".."));
+		}
+
 		TEST_CASE("ProjectLauncher: entering an Empty project queues creation until the safe point")
 		{
 			Test::PanelInteractionFixture fixture("LauncherCreate", false);
@@ -112,6 +177,89 @@ namespace Engine {
 			REQUIRE(recent);
 			REQUIRE_FALSE(recent->empty());
 			CHECK(recent->front() == directory / "UiProject.eproj");
+		}
+
+		TEST_CASE("ProjectLauncher: drawing recent projects preserves launcher and preferences")
+		{
+			Test::EditorTestFixture fixture("LauncherDraw");
+			auto& editor = fixture.GetEditor();
+			Test::AutomationTestClient client(editor);
+			auto& server = client.GetServer();
+			EditorActions actions(editor, server);
+			EditorAutomationControls controls(editor, server);
+			Test::PanelInteractionViewport viewports;
+			ReflectedEditController edits(editor);
+			GizmoController gizmos(editor);
+			ThumbnailCache thumbnails(editor, {});
+			EditorPanelContext context{ editor, server, actions, controls, viewports, edits, thumbnails, gizmos };
+			REQUIRE(ProjectManager::AddRecentProject(editor.GetVfs(), fixture.GetProjectRoot() / "Recent.eproj"));
+			const auto before = ProjectManager::ReadRecentProjects(editor.GetVfs());
+			REQUIRE(before);
+			// The host's snapshot, as EditorApp reads it at startup.
+			context.GetRecentProjects = [&before]()
+			{
+				return *before;
+			};
+			ProjectLauncher launcher;
+			Test::PanelInteractionUi ui;
+			REQUIRE(ui.Frame([&launcher, &context]()
+			{
+				return launcher.Draw(context);
+			}));
+			actions.Pump();
+			CHECK_FALSE(editor.HasProject());
+			const auto after = ProjectManager::ReadRecentProjects(editor.GetVfs());
+			REQUIRE(after);
+			CHECK(*after == *before);
+		}
+
+		TEST_CASE("ProjectLauncher: drawing shows the host's recent-project snapshot and reads no user data")
+		{
+			Test::PanelInteractionFixture fixture("LauncherSnapshot", false);
+			auto& context = fixture.GetContext();
+			REQUIRE(context.Editor.CloseProject());
+			const auto& directory = fixture.GetAutomation().GetEditorFixture().GetDirectory();
+			const auto created = ProjectManager::CreateProject({ .Directory = directory / "Snapshot", .Name = "Snapshot", .Template = ProjectTemplate::Empty, .TemplatesDirectory = context.Editor.GetSpecification().TemplatesDirectory }, context.Editor.GetTypeRegistry());
+			REQUIRE(created);
+			uint32_t snapshots = 0;
+			context.GetRecentProjects = [&snapshots, &created]() -> Result<std::vector<std::filesystem::path>>
+			{
+				++snapshots;
+				return std::vector<std::filesystem::path>{ created->ProjectFile };
+			};
+			VirtualFileSystem& vfs = context.Editor.GetVfs();
+			auto inner = vfs.Unmount("user");
+			REQUIRE(inner);
+			auto counter = CreateScope<LauncherReadCounter>(std::move(*inner));
+			const LauncherReadCounter& reads = *counter;
+			REQUIRE(vfs.Mount("user", std::move(counter)));
+			ProjectLauncher launcher;
+			Test::AssetDesignInteraction ui;
+			uint32_t drawReads = 0;
+			const auto draw = [&launcher, &context, &reads, &drawReads]()
+			{
+				const uint32_t before = reads.GetReads();
+				const Status drawn = launcher.Draw(context);
+				drawReads += reads.GetReads() - before;
+				return drawn;
+			};
+			for (int frame = 0; frame < 3; ++frame)
+				REQUIRE(ui.Frame(draw));
+			CHECK(drawReads == 0);
+			CHECK(snapshots == 1);
+			auto* root = ui.Window("Panel interaction");
+			auto* landing = ui.Child(root, root->GetID("ProjectLanding"));
+			const ImGuiID tab = ImHashStr("Recent", 0, landing->GetID("ProjectChoices"));
+			auto* entries = ui.Child(landing, ImHashStr("RecentProjects", 0, tab));
+			const ImGuiID row = ImHashStr("##RecentProject", 0, Test::AssetDesignInteraction::AuthoredScope(entries->ID, FileSystem::PathToUtf8(created->ProjectFile)));
+			static_cast<void>(ui.Locate(draw, entries, row));
+			// Hidden while a project is open, the launcher takes the host's snapshot again when it reappears.
+			REQUIRE(fixture.GetAutomation().Call("project.open", Json{ { "path", FileSystem::PathToUtf8(created->ProjectFile) } }));
+			REQUIRE(ui.Frame(draw));
+			REQUIRE(context.Editor.CloseProject());
+			REQUIRE(ui.Frame(draw));
+			CHECK(snapshots == 2);
+			CHECK(drawReads == 0);
 		}
 	}
 

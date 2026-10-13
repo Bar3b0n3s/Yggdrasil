@@ -82,7 +82,7 @@ namespace Engine {
 							Cancel(context);
 							return std::unexpected(error);
 						}
-						InputReplayResult result{ .Passed = playback->Passed, .Verified = playback->Verified, .HashChecked = playback->HashChecked, .HashMatched = playback->HashMatched, .FinalTick = ToAutomationCounter(playback->FinalTick), .StateHash = playback->StateHash, .ExpectedStateHash = playback->ExpectedStateHash };
+						InputReplayResult result{ .Passed = playback->Passed, .Verified = playback->Verified, .HashChecked = playback->HashChecked, .HashMatched = playback->HashMatched, .FinalTick = ToAutomationCounter(playback->FinalTick), .StateHash = playback->StateHash, .ExpectedStateHash = playback->ExpectedStateHash, .StopReason = playback->StopReason, .Expect = {} };
 						for (size_t index = 0; index < playback->Expect.size(); ++index)
 						{
 							const ReplayExpectationOutcome& outcome = playback->Expect[index];
@@ -100,6 +100,8 @@ namespace Engine {
 						if (!result.Passed)
 						{
 							context.SetErrorData("replay", *serialized);
+							if (!result.StopReason.empty())
+								return MakeError(ErrorCode::Validation, "replay failed: {}", result.StopReason);
 							return MakeError(ErrorCode::Validation, "replay verification failed at tick {}", result.FinalTick);
 						}
 						return *serialized;
@@ -160,11 +162,16 @@ namespace Engine {
 					return std::unexpected(Utils::MakeParamError(ErrorCode::InvalidArgument, "/parameters", "parameters must be an object", {}));
 				if (context.GetPlaySession() != nullptr && !params.Restart)
 					return MakeError(ErrorCode::InvalidState, "recording requires a fresh tick-zero session; pass restart:true to replace the current session");
+				// The recorded session starts from the parameters exactly as the replay header stores them (floats as
+				// float, §6), so every replay of it reads the same Scene.GetLoadParameters values (§6.7).
+				const Result<Json> parameters = CanonicalizeReplayParameters(context.HasParam("parameters") ? params.Parameters.Get() : Json::object(), "/parameters");
+				if (!parameters)
+					return std::unexpected(Utils::MakeParamError(ErrorCode::InvalidArgument, parameters.error().GetLocation().JsonPointer.value_or("/parameters"), parameters.error().GetMessageText(), "replay headers store numbers as float (§6.7); give values within the float range"));
 				PlayStartOptions options;
 				options.Lockstep = true;
 				options.LockstepOwner = context.GetRequest().Client;
 				options.ScenePath = params.Scene;
-				options.Parameters = params.Parameters;
+				options.Parameters = VariantValue(*parameters);
 				options.Seed = context.HasParam("seed") ? std::optional<uint64_t>(params.Seed) : std::nullopt;
 				ENGINE_TRY(context.StartRecordingSession(options, params.Restart));
 				ENGINE_TRY_ASSIGN(PlaySession * session, Utils::RequirePlaySession(context));
@@ -276,6 +283,7 @@ namespace Engine {
 			.Field("finalTick", &InputReplayResult::FinalTick, "Completed simulation ticks.")
 			.Field("stateHash", &InputReplayResult::StateHash, "Observed final hash.")
 			.Field("expectedStateHash", &InputReplayResult::ExpectedStateHash, "Recorded final hash.")
+			.Field("stopReason", &InputReplayResult::StopReason, "Why playback ended before the replay's final tick (a quit or a fatal script error); empty when it reached it.")
 			.Field("expect", &InputReplayResult::Expect, "Every expectation outcome in authored order.");
 	}
 

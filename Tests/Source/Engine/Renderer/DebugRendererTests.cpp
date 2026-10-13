@@ -5,6 +5,7 @@
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Graphics/Image.h"
 #include "Engine/Graphics/Readback.h"
+#include "Engine/Renderer/Private/SceneRendererIntegrationFixture.h"
 #include "Engine/Renderer/RenderSnapshot.h"
 #include "Engine/Renderer/SceneTargetFormats.h"
 #include "Shared/ViewConstants.h"
@@ -433,6 +434,86 @@ namespace Engine {
 				CHECK(warning.GetMatchCount() == 1);
 			}
 			device.RunGarbageCollection();
+		}
+
+		TEST_CASE("DebugRenderer: depth-tested lines on a coplanar sloped surface stay continuous"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			// A ground at y = 0 seen from the editor's default pose turned aside (so every line on it is oblique on screen): its
+			// own wireframe diagonal and the grid's world axis lie on it. Line fragments take their depth up to half a pixel
+			// from where the ground's depth is evaluated, so without an offset toward the camera about every other fragment
+			// failed the depth test (M9-F12, M9-F19).
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::SceneRendererIntegrationFixture fixture(gpu, 320, 180);
+			RenderSnapshot snapshot = fixture.Snapshot();
+			// The editor's default scene camera (60 degrees, near 0.1, far 1000) moved to (4, 3, 10), still aimed at the origin.
+			snapshot.Camera = CameraData{};
+			snapshot.Camera.Position = glm::vec3(4.0f, 3.0f, 10.0f);
+			snapshot.Camera.View = glm::lookAt(snapshot.Camera.Position, glm::vec3(0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+			snapshot.Camera.ProjectionKind = RenderProjection::Perspective;
+			snapshot.Camera.OrthographicSize = 10.0f;
+			snapshot.Camera.NearClip = 0.1f;
+			snapshot.Camera.FarClip = 1000.0f;
+			snapshot.Camera.ViewportWidth = 320;
+			snapshot.Camera.ViewportHeight = 180;
+			snapshot.Camera.Projection = ComputeReverseZProjection(RenderProjection::Perspective, 60.0f, 10.0f, 0.1f, 1000.0f, 320, 180);
+			snapshot.Camera.ClearColor = glm::vec3(0.0f);
+			snapshot.Camera.ClearToSkybox = false;
+			snapshot.Environment.FallbackColor = glm::vec3(0.5f);
+			// The quad (z = 0, local corners at +-1) laid on the ground: local (x, y) becomes world (x, 0, -y), scaled 6.
+			snapshot.Meshes[0].World = glm::rotate(glm::mat4(1.0f), -glm::half_pi<float>(), glm::vec3(1.0f, 0.0f, 0.0f)) * glm::scale(glm::mat4(1.0f), glm::vec3(6.0f));
+			const glm::mat4 viewProjection = snapshot.Camera.Projection * snapshot.Camera.View;
+			const auto toPixel = [&viewProjection](const glm::vec3& point)
+			{
+				const glm::vec4 clip = viewProjection * glm::vec4(point, 1.0f);
+				return glm::vec2((clip.x / clip.w * 0.5f + 0.5f) * 320.0f, (0.5f - clip.y / clip.w * 0.5f) * 180.0f);
+			};
+			// The fraction of steps along the projected segment from `from` to `to` (one pixel per step along its major axis,
+			// leaving out a margin at each end) with a pixel `lit` within one pixel across the line.
+			const auto continuity = [&toPixel](const Image& image, const glm::vec3& from, const glm::vec3& to, auto lit)
+			{
+				const glm::vec2 a = toPixel(from);
+				const glm::vec2 b = toPixel(to);
+				const int steps = static_cast<int>(std::max(std::abs(b.x - a.x), std::abs(b.y - a.y)));
+				const bool horizontal = std::abs(b.x - a.x) >= std::abs(b.y - a.y);
+				int covered = 0;
+				int sampled = 0;
+				for (int step = 4; step < steps - 4; ++step)
+				{
+					const glm::vec2 point = a + (b - a) * (static_cast<float>(step) / static_cast<float>(steps));
+					if (point.x < 1.0f || point.y < 1.0f || point.x > 318.0f || point.y > 178.0f)
+						continue;
+					++sampled;
+					bool found = false;
+					for (int offset = -1; offset <= 1 && !found; ++offset)
+					{
+						const int x = static_cast<int>(point.x) + (horizontal ? 0 : offset);
+						const int y = static_cast<int>(point.y) + (horizontal ? offset : 0);
+						found = lit(Test::SceneRendererIntegrationFixture::Channel(image, static_cast<uint32_t>(x), static_cast<uint32_t>(y), 0),
+							Test::SceneRendererIntegrationFixture::Channel(image, static_cast<uint32_t>(x), static_cast<uint32_t>(y), 1),
+							Test::SceneRendererIntegrationFixture::Channel(image, static_cast<uint32_t>(x), static_cast<uint32_t>(y), 2));
+					}
+					covered += found ? 1 : 0;
+				}
+				REQUIRE(sampled > 40);
+				return static_cast<double>(covered) / sampled;
+			};
+			// The wireframe diagonal (local (-1, -1) to (1, 1): world (-6, 0, 6) to (6, 0, -6)), white over the clear colour.
+			snapshot.Flags = RenderViewFlags::Wireframe;
+			const Image wireframe = fixture.Render(snapshot);
+			CHECK(continuity(wireframe, glm::vec3(-6.0f, 0.0f, 6.0f), glm::vec3(6.0f, 0.0f, -6.0f), [](int r, int g, int b)
+			{
+				return r > 200 && g > 200 && b > 200;
+			}) > 0.97);
+			// The grid's red world axis (z = 0) across the lit ground: horizontal on screen, where the ground's depth changes
+			// fastest across it.
+			snapshot.Flags = RenderViewFlags::EditorOverlays | RenderViewFlags::Grid;
+			const Image grid = fixture.Render(snapshot);
+			CHECK(continuity(grid, glm::vec3(-5.5f, 0.0f, 0.0f), glm::vec3(5.5f, 0.0f, 0.0f), [](int r, int /*g*/, int b)
+			{
+				return r > b + 40;
+			}) > 0.97);
 		}
 	}
 

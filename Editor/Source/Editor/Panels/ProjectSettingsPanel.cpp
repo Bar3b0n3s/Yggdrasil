@@ -85,9 +85,10 @@ namespace Engine {
 		{
 			if (m_Ticket != 0)
 			{
-				const Status cancelled = context.Actions.Cancel(m_Ticket);
-				if (!cancelled)
-					report(cancelled.error());
+				// The ticket is abandoned: Discard also releases its completion, which nobody will take.
+				const Status discarded = context.Actions.Discard(m_Ticket);
+				if (!discarded)
+					report(discarded.error());
 			}
 			m_Project = project;
 			++m_DraftEpoch;

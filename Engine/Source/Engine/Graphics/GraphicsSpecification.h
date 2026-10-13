@@ -34,7 +34,10 @@ namespace Engine {
 		None,
 		DeviceLost, // "device-lost": the device-lost flag is set after the next submission
 		OomTexture, // "oom-texture": creating a sampled-only texture fails as if the device were out of memory
-		Hang        // "hang": every bounded GPU wait times out until its budget is spent, so the first one ends in GpuHang
+		Hang,       // "hang": every bounded GPU wait times out until its budget is spent, so the first one ends in GpuHang
+		// "oom-specialization": creating a specialized shader fails as if the device were out of memory. Only the debug views'
+		// forward pipelines, created on first use (§8.5), specialize shaders, so startup is unaffected.
+		OomSpecialization
 	};
 
 	// Whether Vulkan and NVRHI validation is on by default in this configuration (§2.2): on in Debug, off in Release
@@ -77,9 +80,10 @@ namespace Engine {
 		// --gpu-inject-fault. Must be None in Dist builds (GpuTestHooksEnabled); GraphicsDevice::Create rejects any other
 		// value there with InvalidArgument.
 		GpuFault InjectFault = GpuFault::None;
-		// Restricts the effective DepthClamp capability and the Vulkan device feature to false. The default preserves
-		// hardware support; neither value can enable an unsupported feature. Honoured in every configuration, with no
-		// command-line option, so callers can deterministically exercise the extended-near shadow fallback.
+		// Turns GraphicsDeviceInfo::DepthClamp off: directional shadow casters are then clipped at the extended light near
+		// plane instead of pancaked per fragment (ShadowPass). Pancaking needs no device feature, so the default keeps it on
+		// every device. Honoured in every configuration, with no command-line option, so callers can deterministically
+		// exercise the extended-near shadow fallback.
 		bool DisableDepthClamp = false;
 	};
 
@@ -136,15 +140,16 @@ namespace Engine {
 		return std::nullopt;
 	}
 
-	// The --gpu-inject-fault spelling: "none", "device-lost", "oom-texture" or "hang".
+	// The --gpu-inject-fault spelling: "none", "device-lost", "oom-texture", "hang" or "oom-specialization".
 	[[nodiscard]] constexpr std::string_view GpuFaultToString(GpuFault fault)
 	{
 		switch (fault)
 		{
-			case GpuFault::None:       return "none";
-			case GpuFault::DeviceLost: return "device-lost";
-			case GpuFault::OomTexture: return "oom-texture";
-			case GpuFault::Hang:       return "hang";
+			case GpuFault::None:              return "none";
+			case GpuFault::DeviceLost:        return "device-lost";
+			case GpuFault::OomTexture:        return "oom-texture";
+			case GpuFault::Hang:              return "hang";
+			case GpuFault::OomSpecialization: return "oom-specialization";
 		}
 		return "unknown";
 	}
@@ -160,6 +165,8 @@ namespace Engine {
 			return GpuFault::OomTexture;
 		if (text == "hang")
 			return GpuFault::Hang;
+		if (text == "oom-specialization")
+			return GpuFault::OomSpecialization;
 		return std::nullopt;
 	}
 

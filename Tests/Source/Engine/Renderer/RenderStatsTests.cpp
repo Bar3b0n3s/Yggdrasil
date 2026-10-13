@@ -2,8 +2,8 @@
 
 #include "Engine/Renderer/RenderStats.h"
 
-#include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Core/Log.h"
+#include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Renderer/Private/SceneRendererIntegrationFixture.h"
 #include "Engine/Renderer/ViewportCapture.h"
 #include "Support/ExpectLog.h"

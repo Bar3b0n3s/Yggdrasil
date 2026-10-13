@@ -4,6 +4,9 @@
 #include "Editor/EditorLayer.h"
 #include "Editor/EditorPanelContext.h"
 #include "Editor/Private/EditorHostAutosave.h"
+#include "Editor/Private/EditorHostClose.h"
+#include "Editor/Private/EditorHostErrorLog.h"
+#include "Editor/Private/EditorHostPreferences.h"
 #include "Editor/Private/EditorHostRecovery.h"
 #include "Editor/Private/EditorHostSource.h"
 #include "Editor/Private/EditorHostThumbnails.h"
@@ -50,7 +53,6 @@
 #include "Engine/ImGui/ImGuiScreenshot.h"
 #include "Engine/Platform/Process.h"
 #include "Engine/Platform/Window.h"
-#include "Engine/Renderer/BlitPass.h"
 #include "Engine/Renderer/EnvironmentBaker.h"
 #include "Engine/Renderer/GpuResourceCache.h"
 #include "Engine/Renderer/RenderSnapshot.h"
@@ -97,26 +99,31 @@ namespace Engine {
 		Scope<EditorHostThumbnails> Thumbnails;
 		Scope<EditorPanelContext> Panels;
 		Scope<EditorLayer> Layer;
-		EditorAutomationPreferenceState Preference{};
-		std::optional<bool> PendingPreference{};
+		EditorHostPreferences Preferences{};
+		// The recent-project snapshot (Preferences) is read again at the next safe point: set by each project open and close.
+		bool RecentProjectsStale = false;
+		Scope<EditorHostClose> Close; // the window-close confirmation; uses Actions and Saves
 		uint64_t ProjectGeneration = 0;
 		bool DeviceLostQueued = false;
 		const LoadedProject* BoundProject = nullptr; // identity only; cleared before project close
 		std::vector<std::filesystem::path> ContentDrops{};
 		std::optional<AssetHandle> AudioRequest{};
-		std::vector<std::pair<std::filesystem::path, uint32_t>> SourceRequests{};
-		std::vector<Process> SourceProcesses{};
+		EditorSourceLauncher Sources{}; // detaches the user's external editors when the host is destroyed
 		double ProjectOpenedAt = 0.0;
 		bool UiConstructed = false;
 		bool FreshUiRequested = false;
 		uint64_t CaptureReadyFrame = 0;
+		uint64_t CaptureReadyWithdrawals = 0; // EditorHostViewports' texture withdrawals when CaptureReadyFrame completed
 		bool ScreenshotsWritten = false;
 		bool FinalFrame = false;
 		float UiScale = 0.0f;
 		std::optional<uint64_t> TimingSession{};
 		double TimingDroppedBase = 0.0;
-		std::string LastHostError{};
-		std::string LastAutosaveError{};
+		// Recurring failures are logged once per distinct error, never every frame.
+		EditorHostErrorLog HostErrors{};
+		EditorHostErrorLog AutosaveErrors{};
+		EditorHostErrorLog UiActionErrors{};
+		EditorHostErrorLog UiDrawErrors{};
 		Scope<BatchRunner> Batch;    // --batch or --upgrade
 		double ElapsedSeconds = 0.0; // the frame clock's accumulated unscaled time, for EditorContext::Update
 
@@ -335,9 +342,19 @@ namespace Engine {
 			return app.BeforeProjectClose();
 		} });
 		state.Views = CreateScope<EditorHostViewports>(*state.Editor, *state.Gizmos);
-		state.Thumbnails = CreateScope<EditorHostThumbnails>(*state.Editor, [&app](const RenderSnapshot& snapshot, uint32_t size)
+		state.Thumbnails = CreateScope<EditorHostThumbnails>(*state.Editor, [&app](const RenderSnapshot& snapshot, uint32_t size) -> Result<Image>
 		{
-			return app.CaptureView(snapshot, ViewportScreenshotRequest{ .Width = size, .Height = size });
+			// Unlike CaptureView, a thumbnail never waits for every pending load and import (AssetManager::WaitIdle): the
+			// cache renders only after its own inputs are loaded, and skips requests whose inputs are still loading.
+			if (app.m_Rendering == nullptr)
+				return MakeError(ErrorCode::Unsupported, "thumbnails need a renderer (not --renderer none)");
+			auto captured = app.m_Rendering->Capture->Capture(ViewportScreenshotRequest{ .Width = size, .Height = size }, snapshot);
+			if (!captured && captured.error().GetCode() == ErrorCode::Gpu)
+			{
+				app.RefreshFatalSnapshot();
+				FatalError(FatalErrorKind::OutOfMemory, captured.error().ToString());
+			}
+			return captured;
 		});
 		app.GetProcessContext().SetFatalErrorHook(MakeEditorAutosaveFatalHook(*state.Saves));
 
@@ -453,14 +470,16 @@ namespace Engine {
 			{
 				return m_State->CaptureReadyFrame;
 			};
-			captures.RequestUiFrame = [this]()
+			captures.RequestUiFrame = [this]() -> Status
 			{
 				m_State->FreshUiRequested = true;
 				if (m_State->Layer)
 					m_State->Layer->RequestFrame();
-				const Status requested = RequestOffscreenUiFrame();
-				if (!requested)
-					ENGINE_ERROR("Cannot request editor frame: {}", requested.error());
+				return WithContext(RequestOffscreenUiFrame(), "while requesting a fresh editor UI frame");
+			};
+			captures.IsUiFrameCurrent = [this]()
+			{
+				return m_State->Views == nullptr || m_State->Views->GetTextureWithdrawalCount() == m_State->CaptureReadyWithdrawals;
 			};
 			captures.EditorUi = [this]()
 			{
@@ -518,10 +537,19 @@ namespace Engine {
 			return {};
 		if (GetImGuiLayer() != nullptr)
 			ENGINE_TRY(Utils::LoadEditorFont(state.Editor->GetVfs()));
-		ENGINE_TRY_ASSIGN(const EditorPreferences preferences, ReadEditorPreferences(state.Editor->GetVfs()));
-		state.Preference.Allowed = preferences.AllowAiAutomation;
-		ENGINE_TRY(state.Server->SetPreferenceListening(preferences.AllowAiAutomation));
+		// A malformed or newer user://Editor.json, or a listener that cannot start, never stops the editor: the defaults
+		// apply and the Automation panel shows the failure.
+		if (const Status loaded = state.Preferences.Load(state.Editor->GetVfs()); !loaded)
+			ENGINE_WARN("Editor preferences: {}", loaded.error());
+		const Status listening = state.Preferences.StartListening([&state](bool allowed)
+		{
+			return state.Server->SetPreferenceListening(allowed);
+		});
+		if (!listening)
+			ENGINE_WARN("Editor preferences: {}", listening.error());
+		state.Preferences.RefreshRecentProjects(state.Editor->GetVfs());
 		state.Actions = CreateScope<EditorActions>(*state.Editor, *state.Server);
+		state.Close = CreateScope<EditorHostClose>(*state.Editor, *state.Actions, *state.Saves);
 		state.Controls = CreateScope<EditorAutomationControls>(*state.Editor, *state.Server);
 		state.Panels = CreateScope<EditorPanelContext>(*state.Editor, *state.Server, *state.Actions, *state.Controls,
 			*state.Views, *state.Inspector, state.Thumbnails->GetCache(), *state.Gizmos);
@@ -550,23 +578,40 @@ namespace Engine {
 		};
 		state.Panels->AutomationPreferences.GetState = [this]()
 		{
-			return m_State->Preference;
+			return m_State->Preferences.GetAutomationState();
 		};
 		state.Panels->AutomationPreferences.QueueChange = [this](bool allowed) -> Status
 		{
-			if (m_State->PendingPreference)
-				return MakeError(ErrorCode::InvalidState, "A preference change is already queued");
-			m_State->PendingPreference = allowed;
-			m_State->Preference.Pending = true;
-			m_State->Preference.Failure.reset();
-			return {};
+			return m_State->Preferences.QueueAutomationChange(allowed);
 		};
+		state.Panels->ExternalEditor.GetState = [this]()
+		{
+			return m_State->Preferences.GetExternalEditorState();
+		};
+		state.Panels->ExternalEditor.QueueChange = [this](std::string executable, std::vector<std::string> arguments) -> Status
+		{
+			return m_State->Preferences.QueueExternalEditorChange(std::move(executable), std::move(arguments));
+		};
+		state.Panels->GetRecentProjects = [this]()
+		{
+			return m_State->Preferences.GetRecentProjects();
+		};
+		// Configuration and path errors return to the clicked panel; the launch itself starts at the next safe point.
 		state.Panels->OpenSource = [this](const std::filesystem::path& path, uint32_t line) -> Status
 		{
-			m_State->SourceRequests.emplace_back(path, line);
-			return {};
+			const EditorContext& editor = *m_State->Editor;
+			ENGINE_TRY_ASSIGN(EditorPreferences preferences, ReadEditorPreferences(editor.GetVfs()));
+			return m_State->Sources.Queue({
+				.Source = path,
+				.Line = line,
+				.ProjectRoot = editor.HasProject() ? editor.GetProject().GetRoot() : std::filesystem::path{},
+				.RepositoryRoot = Utils::GetEditorRepositoryRoot(),
+				.Preferences = std::move(preferences),
+				.PreferencesFile = GetProcessContext().GetUserDataPaths().Root / "Editor.json",
+			});
 		};
-		// The layer's constructor only builds CPU models; no ImGui calls until OnImGuiRender.
+		// The layer's constructor registers its imgui.ini open-panel handler in the current Dear ImGui context (the
+		// ImGuiLayer's, before the first frame loads the ini; none with --renderer none) and otherwise builds CPU models only.
 		state.Layer = CreateScope<EditorLayer>(*state.Panels);
 		return SynchronizeProject();
 	}
@@ -595,6 +640,7 @@ namespace Engine {
 		}
 		state.BoundProject = &state.Editor->GetProject();
 		state.ProjectOpenedAt = state.ElapsedSeconds;
+		state.RecentProjectsStale = true; // project.open and project.create move the project to the front of the list
 		const Status inspected = state.Recovery->Inspect(state.ProjectGeneration);
 		if (!inspected)
 			ENGINE_WARN("Recovery is unavailable: {}", inspected.error());
@@ -625,9 +671,10 @@ namespace Engine {
 			state.Thumbnails->Reset();
 		state.ContentDrops.clear();
 		state.AudioRequest.reset();
-		state.SourceRequests.clear();
+		state.Sources.Cancel();
 		state.Recovery->Reset();
 		state.BoundProject = nullptr;
+		state.RecentProjectsStale = true; // the launcher reappears and shows the list
 		return {};
 	}
 	Status EditorApp::BeforePlay()
@@ -647,29 +694,20 @@ namespace Engine {
 	}
 	void EditorApp::PublishAutosave()
 	{
-		State& state = *m_State;
-		if (!state.Saves)
-			return;
-		const Status published = state.Saves->Publish();
-		if (!published)
-		{
-			const std::string error = published.error().ToString();
-			if (error != state.LastAutosaveError)
-			{
-				if (published.error().GetCode() == ErrorCode::Conflict)
-					ENGINE_WARN("Autosave waits for the source conflict to be resolved: {}", error);
-				else
-					ENGINE_ERROR("Cannot publish autosave: {}", error);
-			}
-			state.LastAutosaveError = error;
-		}
-		else
-			state.LastAutosaveError.clear();
+		if (m_State->Saves)
+			ReportAutosave(m_State->Saves->Publish());
+	}
+	void EditorApp::ReportAutosave(const Status& status)
+	{
+		const bool conflict = !status && status.error().GetCode() == ErrorCode::Conflict;
+		m_State->AutosaveErrors.Report(conflict ? "Autosave waits for the source conflict to be resolved" : "Cannot autosave", status,
+			conflict ? EditorHostErrorLevel::Warning : EditorHostErrorLevel::Error);
 	}
 	void EditorApp::RefreshFatalSnapshot()
 	{
-		if (m_State->Saves && m_State->Editor && !m_State->Editor->IsReadOnly() && !m_State->Editor->IsDryRun())
-			(void)m_State->Saves->Save(AutosaveReason::FatalError);
+		// Only the publication: the fatal hook that follows writes it once (Autosave::WriteFatalSnapshot). Writing here as
+		// well would duplicate the generation and evict an older one, possibly another scene's only recovery.
+		PublishAutosave();
 	}
 	Status EditorApp::UpdateHostServices()
 	{
@@ -677,22 +715,15 @@ namespace Engine {
 		if (!state.Editor)
 			return {};
 		ENGINE_TRY(SynchronizeProject());
-		if (state.PendingPreference)
+		if (std::exchange(state.RecentProjectsStale, false))
+			state.Preferences.RefreshRecentProjects(state.Editor->GetVfs());
+		ENGINE_TRY(state.Preferences.Pump([&state](bool allowed)
 		{
-			const bool allowed = *std::exchange(state.PendingPreference, std::nullopt);
-			const Status applied = state.Controls->SetAllowAiAutomation(allowed);
-			state.Preference.Pending = false;
-			if (applied)
-			{
-				state.Preference.Allowed = allowed;
-				state.Preference.Failure.reset();
-			}
-			else
-			{
-				state.Preference.Failure = applied.error();
-				return std::unexpected(applied.error());
-			}
-		}
+			return state.Controls->SetAllowAiAutomation(allowed);
+		}));
+		// The Automation panel shows a failed write; the other host services still run this safe point.
+		if (const Status written = state.Preferences.PumpExternalEditor(state.Editor->GetVfs()); !written)
+			ENGINE_ERROR("Cannot save the external editor preference: {}", written.error());
 		ENGINE_TRY(state.Recovery->Pump());
 		if (state.AudioRequest)
 		{
@@ -705,26 +736,9 @@ namespace Engine {
 			else
 				preview->Stop();
 		}
-		if (!state.SourceRequests.empty())
-		{
-			const auto requests = std::exchange(state.SourceRequests, {});
-			ENGINE_TRY_ASSIGN(const EditorPreferences preferences, ReadEditorPreferences(state.Editor->GetVfs()));
-			if (preferences.ExternalEditorExecutable.empty())
-				return MakeError(ErrorCode::Unsupported, "Configure an external source editor first");
-			for (const auto& [path, line] : requests)
-			{
-				const auto root = state.Editor->HasProject() ? state.Editor->GetProject().GetRoot() : std::filesystem::path{};
-				ENGINE_TRY_ASSIGN(const auto native, ResolveEditorSourcePath(path, root, Utils::GetEditorRepositoryRoot()));
-				ENGINE_TRY_ASSIGN(ProcessSpecification specification, BuildEditorSourceProcessSpecification(preferences, native, line));
-				specification.WorkingDirectory = root.empty() ? Utils::GetEditorRepositoryRoot() : root;
-				ENGINE_TRY_ASSIGN(Process process, Process::Spawn(specification));
-				state.SourceProcesses.push_back(std::move(process));
-			}
-		}
-		std::erase_if(state.SourceProcesses, [](Process& process)
-		{
-			return process.HasExited();
-		});
+		// Each failed launch is reported once; the other queued launches still start.
+		if (const Status launched = state.Sources.Pump(); !launched)
+			ENGINE_ERROR("Cannot open the source editor: {}", launched.error());
 
 		if (state.Thumbnails)
 			ENGINE_TRY(state.Thumbnails->Pump());
@@ -735,31 +749,61 @@ namespace Engine {
 		State& state = *m_State;
 		if (!state.Editor)
 			return;
+		// A close with unsaved scene changes waits for Save / Don't save / Cancel instead of ending the frame loop, when an
+		// ImGui layer can show that prompt (EditorHostClose closes at once otherwise). Active gestures end first, so the
+		// choice saves or records committed state only.
+		if (auto* close = std::get_if<WindowCloseEvent>(&event); close != nullptr && state.Close && state.Close->RequestClose(GetImGuiLayer() != nullptr))
+		{
+			close->Handled = true;
+			state.Gizmos->Cancel();
+			state.Inspector->Cancel();
+		}
 		if (auto* drop = std::get_if<FileDropEvent>(&event))
 		{
 			if (state.Editor->HasProject())
+			{
 				for (const auto& path : drop->Paths)
 					if (IsValidUtf8(path))
 						state.ContentDrops.push_back(FileSystem::PathFromUtf8(path));
+				// Immediate feedback: the Content panel opens and takes focus, then imports the drop or asks where it goes.
+				if (state.Layer)
+					if (const Status revealed = state.Layer->RevealPanel(EditorPanel::ContentBrowser); !revealed)
+						ENGINE_WARN("Cannot show the Content panel for dropped files: {}", revealed.error());
+			}
 			drop->Handled = true;
 			return;
 		}
 		if (const auto* resized = std::get_if<WindowResizeEvent>(&event))
+		{
 			if (resized->FramebufferWidth == 0 || resized->FramebufferHeight == 0)
 				state.Views->SetUnavailable();
+			else
+				state.Views->SetAvailable();
+		}
 		if (const auto* focused = std::get_if<WindowFocusEvent>(&event))
 			if (!focused->Focused)
 			{
 				state.Views->SetGameInputFocused(false);
 				state.Gizmos->Cancel();
 			}
-		state.Editor->GetPlay().OnInputEvent(event, state.Views->IsGameInputFocused());
+		// While the Game view owns input, device events reach the session in its view coordinates (the Game panel's image),
+		// never in editor-window coordinates; anything else still reaches the controller, which releases the play cursor on blur.
+		const std::optional<Event> game = state.Views->ToGameEvent(event);
+		state.Editor->GetPlay().OnInputEvent(game.value_or(event), game.has_value());
 	}
 
 	void EditorApp::OnShutdown()
 	{
 		// The final GPU wait can itself discover device loss. Keep the last committed snapshot claimable through it.
 		PublishAutosave();
+		// The layout's last save: the current imgui.ini (the project's, or the launcher's in user data) is written while the
+		// layer's open-panel handler is registered and this process still holds the project's lock. Dear ImGui then keeps
+		// no file, so neither the layer's destruction nor the context's saves again: a save without the handler would drop
+		// the open panels, and one after the lock is released could write into a project another editor has opened.
+		if (ImGuiLayer* imgui = GetImGuiLayer())
+			if (const Status stopped = imgui->SetIniFilePath({}); !stopped)
+				ENGINE_WARN("Cannot save the editor layout at shutdown: {}", stopped.error());
+		m_State->Close.reset();
 		m_State->Layer.reset();
 		m_State->Panels.reset();
 		m_State->Actions.reset();
@@ -801,11 +845,10 @@ namespace Engine {
 			}
 		}
 		if (state.Layer)
-		{
-			const Status ui = state.Layer->OnSafePoint(state.ElapsedSeconds);
-			if (!ui)
-				ENGINE_ERROR("Editor UI action: {}", ui.error());
-		}
+			state.UiActionErrors.Report("Editor UI action", state.Layer->OnSafePoint(state.ElapsedSeconds));
+		// After the layer pumped EditorActions: a confirmed close completes here, outside ImGui traversal.
+		if (state.Close && state.Close->Pump())
+			RequestExit(ExitCode::Success);
 		if (state.Server != nullptr)
 			state.Server->Pump();
 
@@ -844,43 +887,26 @@ namespace Engine {
 			state.Editor->GetPlay().OnSafePoint();
 
 		const Status services = UpdateHostServices();
-		if (!services)
+		if (!services && services.error().GetCode() == ErrorCode::Gpu)
 		{
-			if (services.error().GetCode() == ErrorCode::Gpu)
-			{
-				RefreshFatalSnapshot();
-				FatalError(FatalErrorKind::OutOfMemory, services.error().ToString());
-			}
-			const std::string error = services.error().ToString();
-			if (error != state.LastHostError)
-				ENGINE_ERROR("Editor host: {}", error);
-			state.LastHostError = error;
+			RefreshFatalSnapshot();
+			FatalError(FatalErrorKind::OutOfMemory, services.error().ToString());
+		}
+		state.HostErrors.Report("Editor host", services);
+		// The safe point's one publication of the post-dispatch scene, then a periodic write when its interval elapsed
+		// (Autosave::Update publishes first). A failed content action must not starve periodic recovery publication.
+		if (state.Saves && state.Editor->HasProject())
+		{
+			const auto saved = state.Saves->Update(state.ElapsedSeconds - state.ProjectOpenedAt);
+			ReportAutosave(saved ? Status() : Status(std::unexpected(saved.error())));
 		}
 		else
-			state.LastHostError.clear();
-		PublishAutosave();
+			PublishAutosave();
 		// Test-only fault intent is consumed after publishing the post-dispatch scene. The next real submission takes
 		// the normal device-loss path, so the fatal callback can recover this edit rather than a startup snapshot.
 		if (std::exchange(state.DeviceLostQueued, false))
 			if (GraphicsDevice* device = GetContext().GetGraphicsDevice())
 				device->GetDiagnostics().SetDeviceLost(true);
-		// A failed content action must not starve periodic recovery publication.
-		if (state.Saves && state.Editor->HasProject())
-		{
-			const auto saved = state.Saves->Update(state.ElapsedSeconds - state.ProjectOpenedAt);
-			if (!saved)
-			{
-				const std::string error = saved.error().ToString();
-				if (error != state.LastAutosaveError)
-				{
-					if (saved.error().GetCode() == ErrorCode::Conflict)
-						ENGINE_WARN("Cannot autosave a changed source: {}", error);
-					else
-						ENGINE_ERROR("Cannot autosave: {}", error);
-				}
-				state.LastAutosaveError = error;
-			}
-		}
 
 		if (state.Editor != nullptr)
 		{
@@ -920,12 +946,9 @@ namespace Engine {
 		if (state.Editor != nullptr)
 		{
 			EditorPlayController& play = state.Editor->GetPlay();
-			if (PlaySession* session = play.GetSession())
-			{
-				const auto size = state.Editor->GetViewportState().GetPixelSize(ViewportView::Game);
-				if (size)
-					session->SetViewSize(size->x, size->y);
-			}
+			// Ordinary live play's view (scripts' view coordinates) follows the Game panel's image; deterministic sessions
+			// (test runs, recording, replay, lockstep) keep their fixed view, so their results never depend on the panel.
+			play.SyncGameView();
 			// The play session's frame phase (§4.2 step 6, §5.7), then the editor's own frame work.
 			play.OnUpdate(frame);
 			state.Editor->Update(state.ElapsedSeconds);
@@ -933,7 +956,6 @@ namespace Engine {
 
 		if (m_Rendering)
 			NoteShownScene();
-		PublishAutosave();
 		const auto maxFrames = GetSpecification().MaxFrames;
 		state.FinalFrame = maxFrames && frame.FrameIndex + 1 == *maxFrames;
 		if (state.FinalFrame && !m_Rendering && !WriteScreenshots())
@@ -972,7 +994,7 @@ namespace Engine {
 		if (!m_Rendering)
 			return;
 		CollectStaleMirrors();
-		PublishAutosave();
+		// The frame's edit scene was published at its safe point; nothing between it and this GPU work commits edits.
 		const Status rendered = m_State->Views->Render(context);
 		m_Rendering->Mirrors.NoteRendered();
 		if (!rendered && rendered.error().GetCode() == ErrorCode::Gpu)
@@ -988,9 +1010,9 @@ namespace Engine {
 	{
 		if (!m_State->Layer)
 			return;
-		const Status drawn = m_State->Layer->OnImGuiRender();
-		if (!drawn)
-			ENGINE_ERROR("Cannot draw editor UI: {}", drawn.error());
+		m_State->UiDrawErrors.Report("Cannot draw editor UI", m_State->Layer->OnImGuiRender());
+		if (m_State->Close)
+			m_State->Close->Draw();
 		m_State->UiConstructed = true;
 	}
 	void EditorApp::OnRenderSubmitted(uint64_t frameIndex, uint64_t submissionId)
@@ -1007,6 +1029,7 @@ namespace Engine {
 			if (m_State->Views->IsLayoutReady())
 			{
 				m_State->CaptureReadyFrame = m_State->Editor->GetUiState().GetCompletedFrame();
+				m_State->CaptureReadyWithdrawals = m_State->Views->GetTextureWithdrawalCount();
 				m_State->FreshUiRequested = false;
 			}
 			else if (m_State->FreshUiRequested)
@@ -1125,6 +1148,12 @@ namespace Engine {
 		specification.EngineResourcesDirectory = Utils::GetEditorRepositoryRoot() / "Resources";
 		specification.EngineCacheDirectory = launch.EngineCacheDirectory.value_or(Utils::GetEditorRepositoryRoot() / "bin" / "EngineCache");
 		ENGINE_TRY(ApplyEngineCommandLine(commandLine, specification));
+		// ADR 0019 decision 6, §10.1: every editor constructs its AudioEngine with deterministic decoding from startup, the
+		// windowed one included (keeping its device, also one --audio-device chose), so test.run, test.list and --run-tests
+		// work in the normal editor without replacing the resource manager underneath loaded clips.
+		AudioEngineSpecification audio = specification.Audio.value_or(GetDefaultAudioSpecification(specification.Window));
+		audio.Decoding = AudioDecoding::Deterministic;
+		specification.Audio = audio;
 		// Batch runs are among §4.2's unthrottled modes (ADR 0008 decision 4).
 		if (launch.BatchFile.has_value() || launch.Upgrade)
 			specification.ThrottleHeadless = false;

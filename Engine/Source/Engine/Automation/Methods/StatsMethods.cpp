@@ -65,6 +65,8 @@ namespace Engine {
 		result.ShadowDraws = stats.ShadowDraws;
 		result.ShadowedSpotLights = stats.ShadowedSpotLights;
 		result.DroppedSpotShadows = stats.DroppedSpotShadows;
+		result.ShadowMapSize = stats.ShadowMapSize;
+		result.SsaoHalfResolution = stats.SsaoHalfResolution;
 		for (const RenderPassStats& pass : stats.Passes)
 		{
 			const bool available = stats.GpuAvailable && pass.GpuAvailable;
@@ -104,7 +106,9 @@ namespace Engine {
 			.Field("passes", &StatsViewSummary::Passes, "Pass observations in render order.")
 			.Field("shadowDraws", &StatsViewSummary::ShadowDraws, "Depth caster draw calls.")
 			.Field("shadowedSpotLights", &StatsViewSummary::ShadowedSpotLights, "Allocated spot shadow tiles.")
-			.Field("droppedSpotShadows", &StatsViewSummary::DroppedSpotShadows, "Contributing spot shadows beyond atlas capacity.");
+			.Field("droppedSpotShadows", &StatsViewSummary::DroppedSpotShadows, "Contributing spot shadows beyond atlas capacity.")
+			.Field("shadowMapSize", &StatsViewSummary::ShadowMapSize, "Shadow map size the frame rendered with (the project's Rendering.ShadowMapSize); 0 when unavailable.")
+			.Field("ssaoHalfResolution", &StatsViewSummary::SsaoHalfResolution, "Whether the frame rendered with the project's Rendering.SsaoHalfResolution set.");
 		registry.Struct<StatsGetResult>("StatsGetResult", "A nonblocking copy of host observations; unavailable services are identified explicitly.")
 			.Field("fps", &StatsGetResult::Fps, "Approximate observed host frames per second.")
 			.Field("cpuMilliseconds", &StatsGetResult::CpuMilliseconds, "Approximate observed host CPU frame time in milliseconds.")

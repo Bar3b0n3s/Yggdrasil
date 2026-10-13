@@ -5,6 +5,7 @@
 #include "Engine/Core/Clock.h"
 #include "Engine/Core/FixedStepScheduler.h"
 #include "Engine/Scripting/ScriptEngine.h"
+#include "Engine/Scripting/ScriptLimits.h"
 #include "Engine/Scripting/ScriptTestHost.h"
 #include "Engine/Session/PlayInputEventCodec.h"
 #include "Engine/Session/ReplayRecorder.h"
@@ -15,6 +16,7 @@
 #include <cmath>
 #include <format>
 #include <limits>
+#include <utility>
 
 namespace Engine {
 
@@ -70,6 +72,43 @@ namespace Engine {
 
 	}
 
+	namespace Utils {
+
+		// Script text (names, Test.Fail messages, error messages) made safe for every report format.
+		static void SanitizeFailure(TestFailureResult& failure)
+		{
+			failure.Message = SanitizeTestReportText(failure.Message);
+			failure.File = SanitizeTestReportText(failure.File);
+			failure.JsonPointer = SanitizeTestReportText(failure.JsonPointer);
+		}
+
+		static void SanitizeRow(TestCaseResult& row)
+		{
+			row.Suite = SanitizeTestReportText(row.Suite);
+			row.Case = SanitizeTestReportText(row.Case);
+			row.Message = SanitizeTestReportText(row.Message);
+			row.File = SanitizeTestReportText(row.File);
+			row.JsonPointer = SanitizeTestReportText(row.JsonPointer);
+			for (TestFailureResult& failure : row.Failures)
+				SanitizeFailure(failure);
+		}
+
+		// Ends a row whose script-driven failures went past a cap (ScriptLimits.h) with the count of those left out.
+		static void AddOmittedFailures(TestCaseResult& row, uint64_t omitted)
+		{
+			if (omitted != 0)
+				AddFailure(row, { std::format("[truncated: {} more failures]", omitted), {}, 0, {} });
+		}
+
+		static void SanitizeSuite(TestSuiteResult& suite)
+		{
+			suite.Suite = SanitizeTestReportText(suite.Suite);
+			suite.Scene = SanitizeTestReportText(suite.Scene);
+			suite.Script = SanitizeTestReportText(suite.Script);
+		}
+
+	}
+
 	struct FeatureTestRunner::State final : IPlaySessionTestHook, IScriptTestHost
 	{
 		enum class Phase : uint8_t
@@ -88,12 +127,13 @@ namespace Engine {
 			TestSuiteSettings Settings{};
 			TestSuiteDescription Description{};
 			std::vector<size_t> Cases{};
+			size_t SettingsIndex = 0; // the suite's index in Testing.Suites, for located errors
 		};
+		// An unclaimed script error of the running case; a claim (OnExpectedScriptError) releases it.
 		struct Fault
 		{
 			ScriptError Error{};
 			bool Fatal = false;
-			bool Claimed = false;
 		};
 		IFeatureTestHost* Host = nullptr; // Borrowed for the complete run, including teardown.
 		FeatureTestRunOptions Options{};
@@ -109,10 +149,19 @@ namespace Engine {
 		ScriptReference Thread{};
 		ScriptCaseResume Resume{};
 		TestCaseResult Current{};
-		std::vector<Fault> Faults{};
+		std::vector<Fault> Faults{}; // at most MaxScriptTestUnclaimedErrors
 		std::vector<TestFailureResult> OutsideFailures{};
+		// Script-driven failures past a cap (KeepScriptFailure), counted for their row's final truncation failure.
+		uint64_t OmittedCaseFailures = 0, OmittedOutsideFailures = 0;
+		bool OmittedCaseError = false;  // one of the case's omitted failures was an unexpected script error
+		size_t SuiteScriptFailures = 0; // script-driven failures the current suite's rows keep
+		// Test.Inject* events queued for the session's next input tick (MaxScriptInjectedInputsPerTick).
+		uint64_t InjectedTick = 0;
+		size_t InjectedCount = 0;
+		size_t SuiteScreenshots = 0; // Test.Screenshot calls of the current suite (MaxScriptTestScreenshotsPerSuite)
 		bool ActiveCase = false, TerminalCase = false, Teardown = false, Published = false;
 		bool SuiteFailed = false, FatalStop = false, Recollect = false, RunLimitReached = false;
+		bool LimitReached = false; // the suite or run tick limit ended the suite's stepping
 		uint64_t RunTicks = 0, SuiteTicks = 0, CaseTicks = 0, FrameIndex = 0, Generation = 0;
 		uint64_t AudioBaseline = 0, CaptureOrigin = 0, CaptureStart = 0, CaptureEnd = 0;
 		bool Capturing = false;
@@ -136,6 +185,20 @@ namespace Engine {
 			return SuiteResultIndex < ReportData.Suites.size() ? &ReportData.Suites[SuiteResultIndex] : nullptr;
 		}
 
+		// Whether a script-driven failure (Test.Expect*, an unexpected script error) joins a row that holds `kept`
+		// failures: one place stays free for the row's truncation failure, and the suite's budget must allow it
+		// (ScriptLimits.h). Otherwise it is counted in `omitted`.
+		bool KeepScriptFailure(size_t kept, uint64_t& omitted)
+		{
+			if (kept + 1 < MaxScriptTestFailuresPerCase && SuiteScriptFailures < MaxScriptTestFailuresPerSuite)
+			{
+				++SuiteScriptFailures;
+				return true;
+			}
+			++omitted;
+			return false;
+		}
+
 		void Report(const ScriptTestReport& report) override
 		{
 			if (report.Signal == ScriptTestSignal::Skip)
@@ -154,8 +217,11 @@ namespace Engine {
 			}
 			TestFailureResult failure{ report.Message, report.File, report.Line, {} };
 			if (ActiveCase)
-				AddFailure(Current, std::move(failure));
-			else
+			{
+				if (KeepScriptFailure(Current.Failures.size(), OmittedCaseFailures))
+					AddFailure(Current, std::move(failure));
+			}
+			else if (KeepScriptFailure(OutsideFailures.size(), OmittedOutsideFailures))
 				OutsideFailures.push_back(std::move(failure));
 		}
 
@@ -165,8 +231,17 @@ namespace Engine {
 				suite->ScriptErrors = Count(static_cast<uint64_t>(suite->ScriptErrors) + 1);
 			FatalStop = FatalStop || fatal;
 			if (ActiveCase && !Teardown)
-				Faults.push_back({ error, fatal, false });
-			else
+			{
+				// A claim releases its fault, so the cap bounds the unclaimed ones; a later error cannot be claimed.
+				if (Faults.size() < MaxScriptTestUnclaimedErrors)
+					Faults.push_back({ error, fatal });
+				else
+				{
+					++OmittedCaseFailures;
+					OmittedCaseError = true;
+				}
+			}
+			else if (KeepScriptFailure(OutsideFailures.size(), OmittedOutsideFailures))
 				OutsideFailures.push_back({ error.Message, error.Script, error.Line, error.JsonPointer });
 		}
 
@@ -174,12 +249,13 @@ namespace Engine {
 		{
 			if (!ActiveCase || Teardown)
 				return;
-			for (auto& fault : Faults)
-				if (!fault.Fatal && !fault.Claimed && fault.Error.ID == error.ID && fault.Error.Script == error.Script && fault.Error.JsonPointer == error.JsonPointer && fault.Error.Line == error.Line && fault.Error.Message == error.Message)
-				{
-					fault.Claimed = true;
-					return;
-				}
+			const auto claimed = std::ranges::find_if(Faults, [&error](const Fault& fault)
+			{
+				return !fault.Fatal && fault.Error.ID == error.ID && fault.Error.Script == error.Script && fault.Error.JsonPointer == error.JsonPointer
+					&& fault.Error.Line == error.Line && fault.Error.Message == error.Message;
+			});
+			if (claimed != Faults.end())
+				Faults.erase(claimed);
 		}
 
 		Status InjectInput(const Json& event) override
@@ -187,13 +263,28 @@ namespace Engine {
 			if (!Session)
 				return MakeError(ErrorCode::InvalidState, "test input needs an active session");
 			ENGINE_TRY_ASSIGN(auto decoded, ParsePlayInputEvent(event, Session->GetInput().GetActions(), {}, false));
-			return Session->GetInput().Queue(Session->GetInput().GetNextTick(), decoded.Event);
+			// The queue, the applied tick and a recording keep every injected event (ScriptLimits.h).
+			const uint64_t tick = Session->GetInput().GetNextTick();
+			if (InjectedTick != tick)
+			{
+				InjectedTick = tick;
+				InjectedCount = 0;
+			}
+			if (InjectedCount >= MaxScriptInjectedInputsPerTick)
+				return MakeError(ErrorCode::InvalidArgument, "Test.Inject* queues at most {} events per input tick", MaxScriptInjectedInputsPerTick);
+			ENGINE_TRY(Session->GetInput().Queue(tick, decoded.Event));
+			++InjectedCount;
+			return {};
 		}
 
 		Status CaptureScreenshot(std::string_view name) override
 		{
 			if (!Session)
 				return MakeError(ErrorCode::InvalidState, "test screenshot needs an active session");
+			// A capture may write a new file, so a suite's captures are bounded (ScriptLimits.h); a refused one writes nothing.
+			if (SuiteScreenshots >= MaxScriptTestScreenshotsPerSuite)
+				return MakeError(ErrorCode::InvalidState, "Test.Screenshot takes at most {} screenshots per suite", MaxScriptTestScreenshotsPerSuite);
+			++SuiteScreenshots;
 			return Host->CaptureScreenshot(*Session, name);
 		}
 
@@ -372,7 +463,7 @@ namespace Engine {
 
 		void OutsideRow(std::string_view name)
 		{
-			if (OutsideFailures.empty())
+			if (OutsideFailures.empty() && OmittedOutsideFailures == 0)
 				return;
 			TestCaseResult row;
 			row.Suite = Collected.Name.empty() ? Selected[SuiteIndex].Description.Name : Collected.Name;
@@ -381,6 +472,7 @@ namespace Engine {
 			for (auto& failure : OutsideFailures)
 				AddFailure(row, std::move(failure));
 			OutsideFailures.clear();
+			Utils::AddOmittedFailures(row, std::exchange(OmittedOutsideFailures, 0));
 			ReportData.Cases.push_back(std::move(row));
 			SuiteFailed = true;
 		}
@@ -404,6 +496,7 @@ namespace Engine {
 			Session.reset();
 			Scheduler.reset();
 			FrameClock.reset();
+			InjectedCount = 0;
 			Teardown = false;
 		}
 
@@ -434,8 +527,20 @@ namespace Engine {
 			return {};
 		}
 
+		// §10.1, ADR 0015 decision 5: every suite and replay verification owns simulation audio time for its whole
+		// lifetime (the host sets PlaySessionSpecification::OwnsAudioTime), ScriptedClock suites included, so voices never
+		// advance on device time during a run. Checked against the session the host returned, not assumed.
+		Status CheckAudioTime() const
+		{
+			if (Host->GetAudioEngine() != nullptr && !Session->IsAudioTimeOwned())
+				return std::unexpected(Error(ErrorCode::InvalidState, "the host's test session does not own simulation audio time")
+						.WithHint("IFeatureTestHost sessions set PlaySessionSpecification::OwnsAudioTime for every suite and replay"));
+			return {};
+		}
+
 		Status OpenSession()
 		{
+			InjectedCount = 0;
 			AudioBaseline = Host->GetAudioEngine() ? Host->GetAudioEngine()->GetStats().PulledFrames : 0;
 			const auto& settings = Selected[SuiteIndex].Settings;
 			ENGINE_TRY_ASSIGN(Session, Host->CreateSuiteSession(settings, Options.Mode, *this, *this));
@@ -467,10 +572,11 @@ namespace Engine {
 				{
 					return delta > 0;
 				}))
-					return std::unexpected(Error(ErrorCode::Validation, "suite Clock cannot make simulation progress").WithLocation({ .File = {}, .JsonPointer = "/Testing/Suites/" + std::to_string(SuiteIndex) + "/Clock", .Entity = {} }));
+					return std::unexpected(Error(ErrorCode::Validation, "suite Clock cannot make simulation progress").WithLocation({ .File = {}, .JsonPointer = "/Testing/Suites/" + std::to_string(Selected[SuiteIndex].SettingsIndex) + "/Clock", .Entity = {} }));
 				FrameClock = CreateScope<ScriptedClock>(std::move(clock));
 				Session->SetLockstep(false);
 			}
+			ENGINE_TRY(CheckAudioTime());
 			FrameIndex = 0;
 			if (Options.Record && RecordingError.empty())
 			{
@@ -531,18 +637,23 @@ namespace Engine {
 		void FinishCase()
 		{
 			for (const auto& fault : Faults)
-				if (!fault.Claimed)
-				{
-					Current.Status = "error";
+			{
+				Current.Status = "error";
+				if (KeepScriptFailure(Current.Failures.size(), OmittedCaseFailures))
 					AddFailure(Current, { fault.Error.Message, fault.Error.Script, fault.Error.Line, fault.Error.JsonPointer });
-				}
+			}
 			Faults.clear();
+			if (std::exchange(OmittedCaseError, false))
+				Current.Status = "error";
+			Utils::AddOmittedFailures(Current, std::exchange(OmittedCaseFailures, 0));
 			if (Quit && !QuitReported)
 			{
 				QuitReported = true;
 				Current.Status = "quit";
 				Current.QuitCode = *Quit;
-				Current.QuitExpected = Selected[SuiteIndex].Settings.ExpectQuit == *Quit;
+				// ExpectQuit < 0 means the suite must not quit at all, so even Application.Quit(-1) is unexpected.
+				const int32_t expected = Selected[SuiteIndex].Settings.ExpectQuit;
+				Current.QuitExpected = expected >= 0 && expected == *Quit;
 				if (!Current.QuitExpected)
 					AddFailure(Current, { std::format("unexpected quit({})", *Quit), Current.File, Current.Line, {} });
 			}
@@ -613,6 +724,8 @@ namespace Engine {
 			Resume.Line = descriptor.Line;
 			CaseTicks = 0;
 			Faults.clear();
+			OmittedCaseFailures = 0;
+			OmittedCaseError = false;
 			NonprogressFrames = 0;
 			ENGINE_TRY_ASSIGN(Thread, Session->GetScripts()->StartCase(descriptor.Function));
 			ActiveCase = true;
@@ -633,10 +746,17 @@ namespace Engine {
 			{
 				if (SuiteTicks >= suiteLimit || (Options.TimeoutTicks && RunTicks >= Options.TimeoutTicks))
 				{
-					Current.Status = "timeout";
-					AddFailure(Current, { "suite or run tick limit exceeded", Resume.File, Resume.Line, {} });
-					TerminalCase = true;
-					FatalStop = true;
+					// Stepping stops at the limit. A case that already finished earlier in this frame keeps its result;
+					// the cases the limit keeps from running are reported once the frame ends.
+					if (!TerminalCase)
+					{
+						Current.Status = "timeout";
+						AddFailure(Current, { "suite or run tick limit exceeded", Resume.File, Resume.Line, {} });
+						TerminalCase = true;
+						Session->GetScripts()->CancelCase(Thread);
+						CancelAudioCapture();
+					}
+					LimitReached = true;
 					RunLimitReached = Options.TimeoutTicks && RunTicks >= Options.TimeoutTicks;
 					break;
 				}
@@ -701,7 +821,19 @@ namespace Engine {
 			if (TerminalCase || Quit)
 			{
 				FinishCase();
-				if (Quit || FatalStop || CaseIndex >= Selected[SuiteIndex].Cases.size())
+				if (LimitReached && !Quit && !FatalStop && CaseIndex < Selected[SuiteIndex].Cases.size())
+				{
+					// The limit leaves selected cases unrun: report it once, as a suite-level row.
+					TestCaseResult row;
+					row.Suite = Collected.Name;
+					row.Case = "<tick limit>";
+					row.Status = "timeout";
+					row.Ticks = Count(SuiteTicks);
+					AddFailure(row, { std::format("suite or run tick limit exceeded before {} more selected case(s) ran", Selected[SuiteIndex].Cases.size() - CaseIndex), Selected[SuiteIndex].Settings.Script, 0, {} });
+					ReportData.Cases.push_back(std::move(row));
+					SuiteFailed = true;
+				}
+				if (Quit || FatalStop || LimitReached || CaseIndex >= Selected[SuiteIndex].Cases.size())
 					CurrentPhase = Phase::CloseSuite;
 				else
 				{
@@ -722,7 +854,67 @@ namespace Engine {
 				return MakeError(ErrorCode::InvalidState, "host returned an empty replay session");
 			Host->SetActiveTestSession(Session.get());
 			Published = true;
+			ENGINE_TRY(CheckAudioTime());
 			return Player.Begin(std::move(data), *Session, { true, true });
+		}
+
+		void AddReplayScriptErrorRows(const std::string& name)
+		{
+			for (const auto& error : Session->GetScriptErrors().GetErrors())
+			{
+				TestCaseResult row;
+				row.Suite = name;
+				row.Case = "<scripts>";
+				row.Status = "error";
+				row.Ticks = Count(error.Tick);
+				AddFailure(row, { error.Message, error.Script, error.Line, error.JsonPointer });
+				ReportData.Cases.push_back(std::move(row));
+			}
+		}
+
+		// A replay that could not load, start or play becomes its own failed replay:<path> rows; the run continues with
+		// the next replay (a run tick limit skips the rest, as it does for suites).
+		void FailReplay(const Error& error)
+		{
+			const auto name = "replay:" + Replays[ReplayIndex];
+			const bool runLimit = error.GetCode() == ErrorCode::Timeout && Options.TimeoutTicks && RunTicks >= Options.TimeoutTicks;
+			TestSuiteResult suite;
+			suite.Suite = name;
+			suite.Scene = PlayingHeader.Scene.Path;
+			suite.SceneId = PlayingHeader.Scene.Handle.IsValid() ? PlayingHeader.Scene.Handle.ToString() : std::string();
+			suite.Mode = Options.Mode;
+			if (Session)
+			{
+				if (auto* scripts = Session->GetScripts())
+					scripts->Stop();
+				AddReplayScriptErrorRows(name);
+				suite.Ticks = Count(Session->GetTick());
+				suite.ScriptErrors = Count(Session->GetScriptErrors().GetCursor());
+			}
+			TestCaseResult row;
+			row.Suite = name;
+			row.Case = "<replay>";
+			row.Status = runLimit ? "timeout" : "error";
+			row.Ticks = suite.Ticks;
+			AddFailure(row, Failure(error));
+			if (row.File.empty())
+				row.File = Replays[ReplayIndex];
+			ReportData.Cases.push_back(std::move(row));
+			suite.Passed = false;
+			ReportData.Suites.push_back(std::move(suite));
+			DestroySession();
+			Player.Cancel();
+			++ReplayIndex;
+			if (runLimit)
+				ReplayIndex = Replays.size();
+		}
+
+		Status StartReplay()
+		{
+			PlayingHeader = {};
+			PlayingFinalTick = 0;
+			ENGINE_TRY_ASSIGN(auto data, Host->LoadReplay(Replays[ReplayIndex]));
+			return BeginReplay(std::move(data));
 		}
 
 		Status CaptureCoverage()
@@ -735,6 +927,11 @@ namespace Engine {
 		{
 			DestroySession();
 			Player.Cancel();
+			// Rows carry script-supplied text; JSON, JUnit and the RPC result must never fail on it (§11.10).
+			for (TestCaseResult& row : ReportData.Cases)
+				Utils::SanitizeRow(row);
+			for (TestSuiteResult& suite : ReportData.Suites)
+				Utils::SanitizeSuite(suite);
 			ReportData.Passed = !ReportData.Cancelled && std::all_of(ReportData.Cases.begin(), ReportData.Cases.end(), [](const auto& row)
 			{
 				return Passed(row);
@@ -766,6 +963,8 @@ namespace Engine {
 				DestroySession();
 				if (scriptFailed)
 					return MakeError(ErrorCode::Validation, "recording ordinary-play verification reported script errors");
+				if (!playback.StopReason.empty())
+					return MakeError(ErrorCode::Validation, "recording cannot reproduce ordinary gameplay: {}", playback.StopReason);
 				if (!playback.Passed)
 					return MakeError(ErrorCode::Validation, "recording cannot reproduce ordinary gameplay at tick {}: expected {}, observed {}", playback.FinalTick, playback.ExpectedStateHash, playback.StateHash);
 				VerifiedRecording = true;
@@ -773,14 +972,16 @@ namespace Engine {
 				return {};
 			}
 			const auto name = "replay:" + Replays[ReplayIndex];
-			for (const auto& error : errors.GetErrors())
+			AddReplayScriptErrorRows(name);
+			if (!playback.StopReason.empty())
 			{
+				// Gameplay quit or stopped fatally before FinalTick: the replay failed where it ended.
 				TestCaseResult row;
 				row.Suite = name;
-				row.Case = "<scripts>";
+				row.Case = "<stopped>";
 				row.Status = "error";
-				row.Ticks = Count(error.Tick);
-				AddFailure(row, { error.Message, error.Script, error.Line, error.JsonPointer });
+				row.Ticks = Count(playback.FinalTick);
+				AddFailure(row, { playback.StopReason, Replays[ReplayIndex], 0, "/FinalTick" });
 				ReportData.Cases.push_back(std::move(row));
 			}
 			for (const auto& expectation : playback.Expect)
@@ -798,7 +999,7 @@ namespace Engine {
 				}
 				ReportData.Cases.push_back(std::move(row));
 			}
-			if (playback.Expect.empty() || !playback.HashMatched)
+			if (playback.StopReason.empty() && (playback.Expect.empty() || !playback.HashMatched))
 			{
 				TestCaseResult row;
 				row.Suite = name;
@@ -840,11 +1041,15 @@ namespace Engine {
 					}
 					SuiteFailed = false;
 					FatalStop = false;
+					LimitReached = false;
 					Quit.reset();
 					QuitReported = false;
 					SuiteTicks = 0;
 					CaseIndex = 0;
 					OutsideFailures.clear();
+					OmittedOutsideFailures = 0;
+					SuiteScriptFailures = 0;
+					SuiteScreenshots = 0;
 					Collected = {};
 					Recollect = false;
 					SuiteResultIndex = ReportData.Suites.size();
@@ -906,13 +1111,9 @@ namespace Engine {
 				{
 					if (ReplayIndex < Replays.size())
 					{
-						if (!Session)
-						{
-							ENGINE_TRY_ASSIGN(auto data, Host->LoadReplay(Replays[ReplayIndex]));
-							ENGINE_TRY(BeginReplay(std::move(data)));
-						}
-						else
-							ENGINE_TRY(ReplayStep(false));
+						const Status stepped = Session ? ReplayStep(false) : StartReplay();
+						if (!stepped)
+							FailReplay(stepped.error());
 						return false;
 					}
 					ENGINE_TRY(CaptureCoverage());
@@ -951,6 +1152,17 @@ namespace Engine {
 			return false;
 		}
 	};
+
+	RenderExtractionRequest MakeTestScreenshotRequest(const PlaySession& session, uint32_t width, uint32_t height)
+	{
+		const RenderingSettings& rendering = session.GetProjectSettings().Rendering;
+		RenderExtractionRequest request;
+		request.Camera = RenderCameraSource::Primary;
+		request.Width = width;
+		request.Height = height;
+		request.Quality = { .ShadowMapSize = rendering.ShadowMapSize, .SsaoHalfResolution = rendering.SsaoHalfResolution };
+		return request;
+	}
 
 	FeatureTestRunner::FeatureTestRunner()
 		: m_State(CreateScope<State>())
@@ -1001,12 +1213,15 @@ namespace Engine {
 		next->Options = options;
 		next->ReportData.Mode = options.Mode;
 		size_t inventoryIndex = 0;
-		for (const auto& settings : host.GetProjectSettings().Testing.Suites)
+		const auto& suites = host.GetProjectSettings().Testing.Suites;
+		for (size_t settingsIndex = 0; settingsIndex < suites.size(); ++settingsIndex)
 		{
+			const TestSuiteSettings& settings = suites[settingsIndex];
 			if (std::find(settings.Modes.begin(), settings.Modes.end(), options.Mode) == settings.Modes.end())
 				continue;
 			State::Selection selection;
 			selection.Settings = settings;
+			selection.SettingsIndex = settingsIndex;
 			selection.Description = inventory.Suites[inventoryIndex++];
 			for (size_t i = 0; i < selection.Description.Cases.size(); ++i)
 				if (Matches(selection.Description.Name + "/" + selection.Description.Cases[i].Name, options.Filter))
@@ -1019,6 +1234,15 @@ namespace Engine {
 				next->Replays.push_back(path);
 		if (options.Record && next->Selected.size() != 1)
 			return MakeError(ErrorCode::InvalidArgument, "recording requires exactly one selected suite");
+		if (options.Record)
+		{
+			// The recorded suite runs with its parameters in the replay header's form (floats as float, §6.7), so the
+			// verifying replay and every later one read exactly the values the recorded run read.
+			State::Selection& recorded = next->Selected.front();
+			const Json parameters = recorded.Settings.Parameters.IsNull() ? Json::object() : recorded.Settings.Parameters.Get();
+			ENGINE_TRY_ASSIGN(const Json canonical, CanonicalizeReplayParameters(parameters, std::format("/Testing/Suites/{}/Parameters", recorded.SettingsIndex)));
+			recorded.Settings.Parameters = VariantValue(canonical);
+		}
 		next->CurrentPhase = State::Phase::Suite;
 		m_State = std::move(next);
 		return {};

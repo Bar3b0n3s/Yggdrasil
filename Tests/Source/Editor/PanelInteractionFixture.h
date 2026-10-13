@@ -5,6 +5,7 @@
 #include "EditorCore/Automation/EditorAutomationControls.h"
 #include "EditorCore/EditorActions.h"
 #include "EditorCore/Inspector/ReflectedEditController.h"
+#include "EditorCore/Project/ProjectManager.h"
 #include "EditorCore/Thumbnails/ThumbnailCache.h"
 #include "EditorCore/Viewport/GizmoController.h"
 #include "Support/AutomationTestClient.h"
@@ -91,6 +92,12 @@ namespace Engine::Test {
 			  m_Gizmos(m_Automation.GetEditor()),
 			  m_Context{ m_Automation.GetEditor(), m_Automation.GetClient().GetServer(), m_Actions, m_Controls, m_Viewports, m_Edits, m_Thumbnails, m_Gizmos }
 		{
+			// EditorApp's snapshot is refreshed at the safe point after each project open or close. This host takes it from
+			// user://Editor.json whenever the launcher asks, so a test's own AddRecentProject calls are seen.
+			m_Context.GetRecentProjects = [this]()
+			{
+				return ProjectManager::ReadRecentProjects(m_Automation.GetEditor().GetVfs());
+			};
 		}
 
 		[[nodiscard]] AutomationFixture& GetAutomation() { return m_Automation; }

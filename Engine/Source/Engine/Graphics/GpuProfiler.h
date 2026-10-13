@@ -14,8 +14,8 @@
 // pool per frame slot. Results are read back without waiting, FramesInFlight frames later, when the slot comes round
 // again (pollTimerQuery); a query that has not finished by then is dropped for that frame instead of stalling.
 //
-// The samples feed the observability surfaces of §4.13 and §13.7 (stats.get's per-pass GPU timings, the profiler
-// timeline and its Chrome trace export), which arrive with their milestones and read GetLastFrameSamples.
+// The samples feed the observability surfaces of §4.13 and §13.7: stats.get's per-pass GPU timings read
+// GetLastFrameResult through RenderStatsHistory (Renderer/RenderStats.h), which tags each sample with its source frame.
 
 namespace Engine {
 

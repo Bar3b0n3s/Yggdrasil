@@ -10,7 +10,8 @@ namespace Engine {
 #endif
 
 	// Shadow caster set 0 b0. Bias.x is the slope factor; Bias.y converts a world texel to reverse depth.
-	// Bias.z enables near-plane pancaking for directional maps; Bias.w is padding. Receiver normal bias is separate.
+	// Bias.z enables per-fragment near-plane pancaking for directional maps (Shadow.slang); Bias.w is padding. Receiver
+	// normal bias is separate.
 	struct ShadowCasterConstants
 	{
 		Float4x4 ViewProjection;

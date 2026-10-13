@@ -54,9 +54,10 @@ namespace Engine {
 			{
 				if (*ticket != 0)
 				{
-					const Status cancelled = context.Actions.Cancel(*ticket);
-					if (!cancelled)
-						report(cancelled.error());
+					// The panel abandons the ticket, so its entry must not outlive this project.
+					const Status discarded = context.Actions.Discard(*ticket);
+					if (!discarded)
+						report(discarded.error());
 					*ticket = 0;
 				}
 			}
@@ -114,11 +115,13 @@ namespace Engine {
 				m_Fixing = false;
 			}
 		}
-		ImGui::BeginDisabled(m_Ticket != 0);
+		// A test run owns the editor and admits no validation; a requested refresh waits until the run finishes.
+		const bool testRun = context.Editor.GetPlay().IsTestRunActive();
+		ImGui::BeginDisabled(m_Ticket != 0 || testRun);
 		if (Utils::EditorToolbarButton("Validate project", "Check project assets, settings and scripts. Validation does not change the project."))
 			m_Refresh = true;
 		ImGui::EndDisabled();
-		if (m_Refresh && m_Ticket == 0)
+		if (m_Refresh && m_Ticket == 0 && !testRun)
 		{
 			m_Refresh = false;
 			m_ReportRevision = context.Editor.GetRevision();
@@ -130,7 +133,7 @@ namespace Engine {
 		}
 		if (ImGui::GetContentRegionAvail().x > ImGui::GetFontSize() * 23.0f)
 			ImGui::SameLine();
-		ImGui::BeginDisabled(m_Ticket != 0 || m_Selected.empty() || context.Editor.IsReadOnly() || m_ReportRevision != context.Editor.GetRevision());
+		ImGui::BeginDisabled(m_Ticket != 0 || testRun || m_Selected.empty() || context.Editor.IsReadOnly() || m_ReportRevision != context.Editor.GetRevision());
 		if (Utils::EditorToolbarButton("Fix selected", "Apply the checked fixes as one undoable change. Refresh stale validation before fixing."))
 		{
 			auto ticket = context.Actions.Submit("project.validate", Json{ { "scope", "Project" }, { "fix", m_Selected }, { "ifRevision", m_ReportRevision } });
@@ -293,7 +296,7 @@ namespace Engine {
 			}
 			if (!diagnostic.Entity.empty())
 			{
-				ImGui::BeginDisabled(m_SelectionTicket != 0);
+				ImGui::BeginDisabled(m_SelectionTicket != 0 || testRun);
 				if (ImGui::SmallButton("Select entity"))
 				{
 					auto ticket = context.Actions.Submit("edit.select", Json{ { "entities", Json::array({ diagnostic.Entity }) }, { "ifRevision", m_ReportRevision } });

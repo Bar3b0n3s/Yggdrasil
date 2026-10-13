@@ -350,6 +350,11 @@ namespace Engine {
 			REQUIRE(recooked);
 			CHECK(*a == *recooked);
 			CHECK(XXH64(*a) == XXH64(*b));
+			// Debug, Release and Dist editors share the configuration-independent cache, so each configuration must
+			// produce exactly these bytes (compiler output, source map and field encoding). An intended change to the
+			// compiler, the cooked format or ScriptData::CompilerAbiVersion updates this constant deliberately.
+			constexpr uint64_t CookedHash = 0x100a42b920d434f6;
+			CHECK(XXH64(*a) == CookedHash);
 		}
 
 		TEST_CASE("ScriptData: cooked source maps retain replay origins and authored expression offsets")

@@ -78,7 +78,8 @@ namespace Engine {
 		// The forward variant of a draw: Opaque and Mask in [0, 6), Blend in [6, 9).
 		[[nodiscard]] uint32_t GetForwardVariant(AlphaMode alphaMode, MeshCullMode cullMode);
 
-		// The layout descriptions of the 15 startup mesh pipelines: the 6 prepass variants, then the 9 forward variants.
+		// The layout descriptions of the 24 startup mesh pipelines (SceneRendererPipelines::MeshPipelineCount): the 6 prepass
+		// variants, the 9 forward variants, the 6 picking prepass variants, then the 3 overdraw variants.
 		[[nodiscard]] std::vector<PipelineLayoutDescription> GetMeshLayoutDescriptions();
 
 		// The binding layouts every mesh pipeline shares (see the file comment).

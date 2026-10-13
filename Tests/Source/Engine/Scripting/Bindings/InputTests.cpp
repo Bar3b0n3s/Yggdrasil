@@ -2,12 +2,20 @@
 #include "Engine/Scripting/ScriptApiRegistry.h"
 
 #include "Engine/Platform/Events.h"
+#include "Engine/Project/ProjectSettings.h"
+#include "Engine/Scene/Components/ScriptComponent.h"
+#include "Engine/Scene/Entity.h"
+#include "Engine/Scene/SceneSerializer.h"
+#include "Engine/Scripting/ScriptEngine.h"
+#include "Engine/Session/PlayInput.h"
+#include "Engine/Session/PlaySession.h"
+#include "Support/ExpectLog.h"
 #include "Support/ScriptTestFixture.h"
 
 #include <doctest/doctest.h>
+#include <nlohmann/json.hpp>
 
 #include <format>
-
 #include <vector>
 
 namespace Engine {
@@ -162,6 +170,64 @@ return Input.GetCursorMode() == "Normal"
 				CHECK(fixture.Cursor == CursorMode::Normal);
 				CHECK(fixture.ExternalMutations.empty());
 			}
+		}
+
+		TEST_CASE("InputBindings: a real play session serves configured actions by phase and names unknown actions with a hint")
+		{
+			// The production host (PlaySession::State::GetAction), not the fixture's stand-in.
+			Test::ScriptTestFixture compiler;
+			const AssetHandle script(470);
+			REQUIRE(compiler.AddScript(script, "Assets/Scripts/ActionProbe.luau", R"(local T = {}
+function T:OnCreate() self.Log = {} end
+function T:OnFixedUpdate()
+	table.insert(self.Log, string.format("fixed %d %s %s %s %.2f", Time.GetTick(), tostring(Input.IsActionDown("Jump")),
+		tostring(Input.IsActionPressed("Jump")), tostring(Input.IsActionReleased("Jump")), Input.GetAxis("Move")))
+end
+function T:OnUpdate()
+	table.insert(self.Log, string.format("frame %s %s %s", tostring(Input.IsActionDown("Jump")), tostring(Input.IsActionPressed("Jump")),
+		tostring(Input.IsActionReleased("Jump"))))
+end
+return Script.Define("ActionProbe", T))"));
+			ScriptComponent component;
+			component.Script.SetHandle(script);
+			const UUID probe = compiler.GetScene().CreateEntity("Probe").GetUUID();
+			compiler.GetScene().FindEntityByID(probe).AddComponent<ScriptComponent>(component);
+			const auto document = SceneSerializer::ToJson(compiler.GetScene());
+			REQUIRE(document.has_value());
+			PlaySessionSpecification specification;
+			specification.Registry = &compiler.GetTypes();
+			specification.Assets = &compiler.GetAssetManager();
+			specification.ScriptSchemas = compiler.GetSchemaSnapshot();
+			specification.Project.Scripting.PauseOnError = false;
+			specification.Project.Input.Actions["Jump"] = {};
+			specification.Project.Input.Actions["Move"].Type = InputActionSettings::ActionType::Axis;
+			specification.Serial = 1;
+			auto session = PlaySession::Create(specification, *document);
+			REQUIRE_MESSAGE(session.has_value(), (session ? "" : session.error().ToString()));
+			PlayInput& input = (*session)->GetInput();
+			REQUIRE(input.Queue(0, { .Type = PlayInputEventType::Action, .Name = "Jump", .State = PlayInputEventState::Down }));
+			REQUIRE(input.Queue(0, { .Type = PlayInputEventType::Action, .Name = "Move", .HasValue = true, .Value = 0.5f }));
+			REQUIRE(input.Queue(2, { .Type = PlayInputEventType::Action, .Name = "Jump", .State = PlayInputEventState::Up }));
+			for (int tick = 0; tick < 3; ++tick)
+				(*session)->Tick();
+			const auto path = VfsPath::Parse("project://Assets/Tests/ActionProbe.luau");
+			REQUIRE(path.has_value());
+			const auto log = (*session)->GetScripts()->Evaluate("return table.concat(self.Log, '|')", *path, probe);
+			REQUIRE_MESSAGE(log.has_value(), (log ? "" : log.error().ToString()));
+			CHECK(log->Value.Get() == Json("fixed 0 true true false 0.50|frame true true false|"
+										   "fixed 1 true false false 0.50|frame true false false|"
+										   "fixed 2 false false true 0.50|frame false false true"));
+			// An unknown name raises the located INPUT_UNKNOWN_ACTION error with the host's did-you-mean hint.
+			Test::ExpectLog expected(LogLevel::Error, "INPUT_UNKNOWN_ACTION: no action 'Jmup'");
+			const auto unknown = (*session)->GetScripts()->Evaluate("local value = 1\nreturn Input.IsActionDown('Jmup')", *path);
+			REQUIRE_FALSE(unknown.has_value());
+			CHECK(expected.GetMatchCount() == 1);
+			const auto errors = (*session)->GetScriptErrors().GetErrors();
+			REQUIRE_FALSE(errors.empty());
+			CHECK(errors.back().Line == 2);
+			CHECK(errors.back().Script == "Assets/Tests/ActionProbe.luau");
+			CHECK(errors.back().Message.find("Input.IsActionDown: ") != std::string::npos);
+			CHECK(errors.back().Message.find("Jump") != std::string::npos);
 		}
 	}
 

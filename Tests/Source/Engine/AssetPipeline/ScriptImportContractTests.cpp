@@ -1,12 +1,11 @@
 #include "TestsPCH.h"
 
+#include "Engine/Asset/CookedFormat.h"
+#include "Engine/Asset/ScriptData.h"
 #include "Engine/AssetPipeline/AssetCache.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/AssetPipeline/IAssetImporter.h"
 #include "Engine/AssetPipeline/Importers/ScriptImporter.h"
-
-#include "Engine/Asset/CookedFormat.h"
-#include "Engine/Asset/ScriptData.h"
 #include "Engine/Core/Hash.h"
 #include "Support/AssetTestFixture.h"
 #include "Support/ExpectLog.h"
@@ -14,6 +13,7 @@
 #include <doctest/doctest.h>
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <functional>
@@ -194,7 +194,12 @@ namespace Engine {
 			}
 			const auto failed = Test::ReadImportCheck(manager, handle);
 			CHECK(failed.SourceHash == XXH64(broken));
-			CHECK(failed.Diagnostics[0].Message == broken);
+			// The latest attempt's checker findings, plus its own located compile failure.
+			CHECK(std::ranges::count(failed.Diagnostics, broken, &ScriptDiagnostic::Message) == 1);
+			CHECK(std::ranges::any_of(failed.Diagnostics, [](const ScriptDiagnostic& finding)
+			{
+				return finding.Code == "SCRIPT_COMPILE_ERROR" && finding.File == "Assets/Main.luau" && finding.Line == 1;
+			}));
 			CHECK(manager.Load(handle).value_or(nullptr) == *original);
 			CHECK(manager.GetVersion(handle) == version);
 			fixture.WriteProjectText("Assets/Main.luau", good);

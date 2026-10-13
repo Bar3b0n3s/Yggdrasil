@@ -603,6 +603,11 @@ namespace Engine {
 		return m_State->Host.ShutdownRequest;
 	}
 
+	Watchdog& RuntimeAutomationServer::GetWatchdog()
+	{
+		return *m_State->Monitor;
+	}
+
 	ClientId RuntimeAutomationServer::ConnectInProcess(std::string name)
 	{
 		State& state = *m_State;

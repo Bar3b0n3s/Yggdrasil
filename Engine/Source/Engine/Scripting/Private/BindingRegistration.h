@@ -71,8 +71,16 @@ namespace Engine {
 		[[nodiscard]] Json CheckJson(ScriptCall& call, int index);
 		void PushJson(ScriptCall& call, const Json& value);
 
-		// Construction-time conversion before the candidate component exists in the ECS.
+		// Construction-time conversion before the candidate component exists in the ECS, with CheckValue's allowance. A
+		// resolve.OwnerType (the component) applies CheckValue's component text limit.
 		[[nodiscard]] Value CheckValueForOwner(ScriptCall& call, int index, const FieldInfo& field, const ResolveContext& resolve);
+		// Check<std::string> for text the host retains (ScriptLimits.h): the length is checked before any copy, and a string
+		// longer than maximumBytes raises "argument #<index> is <n> bytes; the limit is <maximumBytes>" before host effects.
+		[[nodiscard]] std::string CheckBoundedString(ScriptCall& call, int index, size_t maximumBytes);
+		// Check<std::string> for diagnostic text the host keeps (Test.Fail/Skip/Expect* messages): at most
+		// MaxScriptLogMessageBytes bytes of the string are copied, private chunk locations become authored ones and longer
+		// text is truncated and marked like a log entry (SandboxAccess::BoundScriptText), so length never fails the call.
+		[[nodiscard]] std::string CheckDiagnosticText(ScriptCall& call, int index);
 
 		// Borrowed for the native entry only. Setters validate their candidate before assigning. No host mutation guard:
 		// these are local value payloads. Constructors use Push<T>, ordinary reads use Check<T>.

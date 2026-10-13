@@ -6,9 +6,6 @@
 #include "EditorCore/Automation/ScreenshotMethods.h"
 #include "EditorCore/EditorContext.h"
 #include "EditorCore/Play/EditorPlayController.h"
-#include "Engine/Scene/ColliderDebugDraw.h"
-#include "Engine/Scene/Entity.h"
-#include "Engine/Session/PlaySession.h"
 #include "Engine/Asset/BuiltinAssets.h"
 #include "Engine/Automation/Protocol/MethodRegistry.h"
 #include "Engine/Core/FileSystem.h"
@@ -16,7 +13,10 @@
 #include "Engine/Graphics/Image.h"
 #include "Engine/Renderer/RenderSnapshot.h"
 #include "Engine/Renderer/ViewportCapture.h"
+#include "Engine/Scene/ColliderDebugDraw.h"
+#include "Engine/Scene/Entity.h"
 #include "Engine/Scene/RenderExtraction.h"
+#include "Engine/Session/PlaySession.h"
 #include "Support/AutomationTestClient.h"
 #include "Support/EditorTestFixture.h"
 #include "Support/GlmApprox.h"
@@ -414,7 +414,8 @@ namespace Engine {
 			CHECK(snapshot.Annotations.Labels == RenderAnnotationLabels::Selected);
 			CHECK(snapshot.Alpha == 1.0f);
 			uint32_t labels = 0, boxes = 0, axes = 0;
-			for (const auto& command : snapshot.DebugDraw.GetCommands())
+			CHECK(snapshot.DebugDraw.IsEmpty());
+			for (const auto& command : snapshot.AnnotationDraw.GetCommands())
 			{
 				if (const auto* label = std::get_if<DebugText>(&command.Shape))
 				{
@@ -431,6 +432,7 @@ namespace Engine {
 			CHECK(editor.GetHistory().GetUndoCount() == history);
 			REQUIRE(setup.Call("viewport.screenshot", Json{ { "view", "scene" }, { "width", 32 }, { "height", 24 } }));
 			CHECK(log.LastSnapshot->DebugDraw.GetCommands().empty());
+			CHECK(log.LastSnapshot->AnnotationDraw.GetCommands().empty());
 			CHECK(log.LastSnapshot->Flags == RenderViewFlags::None);
 			CHECK(log.LastSnapshot->Annotations.Labels == RenderAnnotationLabels::None);
 			CHECK(log.LastSnapshot->Quality.ShadowMapSize == 512);
@@ -452,9 +454,11 @@ namespace Engine {
 					REQUIRE(setup.Call("viewport.screenshot", params));
 					REQUIRE(log.LastSnapshot);
 					CHECK(log.LastSnapshot->DebugDraw.GetCommands().empty());
+					CHECK(log.LastSnapshot->AnnotationDraw.GetCommands().empty());
 					params["annotate"] = Json{ { "labels", Json::array({ "/Subject" }) }, { "bounds", true }, { "axes", true }, { "colliders", true } };
 					REQUIRE(setup.Call("viewport.screenshot", params));
-					const auto commands = log.LastSnapshot->DebugDraw.GetCommands();
+					CHECK(log.LastSnapshot->DebugDraw.GetCommands().empty());
+					const auto commands = log.LastSnapshot->AnnotationDraw.GetCommands();
 					CHECK(commands.size() == 6);
 					CHECK(std::ranges::count_if(commands, [](const auto& command)
 					{
@@ -472,6 +476,48 @@ namespace Engine {
 					if (std::string_view(target) == "play")
 						REQUIRE(setup.Call("play.stop", Json::object()));
 				}
+		}
+
+		TEST_CASE("ScreenshotMethods: selection labels come only from a selection of the target scene")
+		{
+			// The play scene keeps the edit scene's UUIDs: an edit-scene selection must not label the play scene's copy, nor a
+			// play-scene selection the edit scene (M9-F22), as the scene view's outline already behaves.
+			CaptureLog log;
+			ScreenshotSetup setup("ViewportSelectionTarget", log);
+			const auto created = setup.Call("entity.create", ParseJson(R"({"name":"Picked","components":{"MeshRenderer":{"Mesh":"engine://Meshes/Cube"}}})"));
+			REQUIRE(created);
+			const UUID id = JsonReader((*created)["entity"]["id"]).ReadUUID().value();
+			auto& editor = setup.GetFixture().GetEditor();
+			REQUIRE(editor.SetSelection({ id }, SceneTarget::Edit));
+			REQUIRE(setup.Call("play.start", Json{ { "lockstep", true } }));
+			// play.start retargets an Edit selection into the play scene (M10-F31); select in the edit scene again while playing.
+			CHECK(editor.GetSelectionTarget() == SceneTarget::Play);
+			REQUIRE(editor.SetSelection({ id }, SceneTarget::Edit));
+			const auto labels = [&setup, &log](std::string_view target)
+			{
+				Json params{ { "view", "scene" }, { "target", target }, { "width", 32 }, { "height", 24 } };
+				params["annotate"] = Json{ { "labels", "selection" } };
+				REQUIRE(setup.Call("viewport.screenshot", params));
+				REQUIRE(log.LastSnapshot);
+				return std::make_pair(log.LastSnapshot->SelectedEntities, static_cast<size_t>(std::ranges::count_if(log.LastSnapshot->AnnotationDraw.GetCommands(), [](const auto& command)
+				{
+					return std::holds_alternative<DebugText>(command.Shape);
+				})));
+			};
+			const auto editOnPlay = labels("play");
+			CHECK(editOnPlay.first.empty());
+			CHECK(editOnPlay.second == 0);
+			const auto editOnEdit = labels("edit");
+			CHECK(editOnEdit.first == std::vector<UUID>{ id });
+			CHECK(editOnEdit.second == 1);
+			REQUIRE(editor.SetSelection({ id }, SceneTarget::Play));
+			const auto playOnPlay = labels("play");
+			CHECK(playOnPlay.first == std::vector<UUID>{ id });
+			CHECK(playOnPlay.second == 1);
+			const auto playOnEdit = labels("edit");
+			CHECK(playOnEdit.first.empty());
+			CHECK(playOnEdit.second == 0);
+			REQUIRE(setup.Call("play.stop", Json::object()));
 		}
 
 		TEST_CASE("ScreenshotMethods: annotation validation is located and precedes capture")
@@ -520,7 +566,7 @@ namespace Engine {
 			CHECK(log.LastSnapshot->SceneRevision == editor.GetPlay().GetSession()->GetScene().GetRevision());
 			CHECK(log.LastSnapshot->Alpha == editor.GetPlay().GetSession()->GetViewAlpha());
 			bool foundBody = false;
-			for (const auto& command : log.LastSnapshot->DebugDraw.GetCommands())
+			for (const auto& command : log.LastSnapshot->AnnotationDraw.GetCommands())
 				if (const auto* box = std::get_if<DebugBox>(&command.Shape))
 				{
 					foundBody = true;

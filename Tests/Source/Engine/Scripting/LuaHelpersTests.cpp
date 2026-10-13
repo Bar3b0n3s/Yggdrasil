@@ -256,6 +256,27 @@ namespace Engine {
 			}
 		}
 
+		TEST_CASE("LuaHelpers: a forwarded child error stashed by a script and raised in a later slice is a runtime error of its raiser")
+		{
+			Test::ScriptTestFixture fixture({ .ConfigureApi = HelperProbes });
+			const auto id = HelperBehaviour(fixture, AssetHandle(161), "Assets/Stash.luau", "return Script.Define('Stash', {})", "Raiser");
+			REQUIRE(fixture.Start());
+			// The first slice catches the authenticated record and keeps it on the instance.
+			CheckHelperScript(fixture, "local ok, caught = pcall(Probe.Forwarded); assert(not ok); self.Saved = caught; return true", id);
+			CHECK(fixture.Errors.empty());
+			Test::ExpectLog expected(LogLevel::Error, "child diagnostic");
+			CHECK_FALSE(fixture.Evaluate("local saved = self.Saved\nerror(saved)", id));
+			CHECK(expected.GetMatchCount() == 1);
+			REQUIRE_FALSE(fixture.Errors.empty());
+			const auto& error = fixture.Errors.back();
+			// Not the stale Type fault of Assets/Child.luau:71 owned by entity 65: the raiser's frame, kind and owner.
+			CHECK(error.Kind == ScriptErrorKind::Runtime);
+			CHECK(error.Script != "Assets/Child.luau");
+			CHECK(error.Line == 2);
+			CHECK(error.Entity == id);
+			CHECK(error.Message == "child diagnostic");
+		}
+
 		TEST_CASE("LuaHelpers: scene parameters deeply copy JSON and reject nonserializable tables")
 		{
 			Test::ScriptTestFixture fixture;
@@ -553,7 +574,8 @@ value = 1
 for i = 1,11 do value = {value,value} end
 -- Each resolved Variant fits alone, but the whole Fields assignment must use one allowance.
 refused({A = value, B = value, C = value}, "native budget")
-refused({Text = table.create(17, string.rep("x", 65536))}, "native budget")
+-- Component text is bounded long before the allowance: the strings and keys of one value count together.
+refused({Text = table.create(17, string.rep("x", 65536))}, "bytes of text a script may write into a component")
 local direct = {}; direct[1] = direct
 local left, right = {}, {}; left[1] = right; right[1] = left
 refused({Data = direct}, "cyclic")

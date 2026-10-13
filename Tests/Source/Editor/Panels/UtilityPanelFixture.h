@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Editor/EditorPanelContext.h"
+#include "Editor/Private/EditorHostPreferences.h"
 #include "Editor/Viewport/EditorViewportHost.h"
 #include "EditorCore/Automation/EditorAutomationControls.h"
 #include "EditorCore/EditorActions.h"
@@ -14,7 +15,12 @@
 #include <doctest/doctest.h>
 #include <imgui.h>
 
+#include <chrono>
 #include <functional>
+#include <optional>
+#include <string>
+#include <utility>
+#include <vector>
 
 namespace Engine {
 
@@ -35,13 +41,21 @@ namespace Engine {
 			void SetGameInputFocused(bool) override { FAIL("utility panel changed game input focus"); }
 		};
 
-		// Real editor, server, queued human actions and ImGui. Only the renderer and host-owned preference queue are
-		// injected boundaries. Frames advance explicitly; no GPU, sleeps, or private ImGui inspection is involved.
+		// The server's wall clock: Real reads steady_clock; Stepped advances 100 ms per reading, so every Pump advances a
+		// pending test run by exactly one runner step (TestRunFrameBudget is 50 ms) in every configuration.
+		enum class UtilityPanelClock
+		{
+			Real,
+			Stepped
+		};
+
+		// Real editor, server, queued human actions, the host's preference queue (EditorHostPreferences) and ImGui. Only the
+		// renderer is an injected boundary. Frames advance explicitly; no GPU, sleeps, or private ImGui inspection is involved.
 		class UtilityPanelFixture
 		{
 		public:
-			UtilityPanelFixture()
-				: m_Environment("UtilityPanels"), m_Client(m_Environment.GetEditor(), MakeSpecification()), m_Actions(m_Environment.GetEditor(), m_Client.GetServer()), m_Controls(m_Environment.GetEditor(), m_Client.GetServer()), m_Edits(m_Environment.GetEditor()), m_Thumbnails(m_Environment.GetEditor(), {}), m_Gizmos(m_Environment.GetEditor()), m_Context{ m_Environment.GetEditor(), m_Client.GetServer(), m_Actions, m_Controls, m_Viewports, m_Edits, m_Thumbnails, m_Gizmos }
+			explicit UtilityPanelFixture(UtilityPanelClock clock = UtilityPanelClock::Real)
+				: m_Clock(clock), m_Environment("UtilityPanels"), m_Client(m_Environment.GetEditor(), MakeSpecification()), m_Actions(m_Environment.GetEditor(), m_Client.GetServer()), m_Controls(m_Environment.GetEditor(), m_Client.GetServer()), m_Edits(m_Environment.GetEditor()), m_Thumbnails(m_Environment.GetEditor(), {}), m_Gizmos(m_Environment.GetEditor()), m_Context{ m_Environment.GetEditor(), m_Client.GetServer(), m_Actions, m_Controls, m_Viewports, m_Edits, m_Thumbnails, m_Gizmos }
 			{
 				m_ImGui = ImGui::CreateContext();
 				ImGuiIO& io = ImGui::GetIO();
@@ -51,17 +65,23 @@ namespace Engine {
 				io.DeltaTime = 1.0f / 60.0f;
 				io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
 				REQUIRE(io.Fonts->Build());
+				// The production host preference queue (EditorApp's), applied by Pump as at the host's safe point.
+				REQUIRE(m_Preferences.Load(m_Environment.GetEditor().GetVfs()));
 				m_Context.AutomationPreferences.GetState = [this]()
 				{
-					return m_Preference;
+					return m_Preferences.GetAutomationState();
 				};
-				m_Context.AutomationPreferences.QueueChange = [this](bool allowed) -> Status
+				m_Context.AutomationPreferences.QueueChange = [this](bool allowed)
 				{
-					if (m_Preference.Pending)
-						return MakeError(ErrorCode::InvalidState, "preference change already pending");
-					m_Preference.Pending = true;
-					m_RequestedPreference = allowed;
-					return {};
+					return m_Preferences.QueueAutomationChange(allowed);
+				};
+				m_Context.ExternalEditor.GetState = [this]()
+				{
+					return m_Preferences.GetExternalEditorState();
+				};
+				m_Context.ExternalEditor.QueueChange = [this](std::string executable, std::vector<std::string> arguments)
+				{
+					return m_Preferences.QueueExternalEditorChange(std::move(executable), std::move(arguments));
 				};
 			}
 
@@ -79,21 +99,42 @@ namespace Engine {
 			AutomationTestClient& GetClient() { return m_Client; }
 			EditorPanelContext& GetContext() { return m_Context; }
 
+			EditorHostPreferences& GetPreferences() { return m_Preferences; }
+
+			// The host's safe point: the queued preference changes, then the queued human actions. A failed preference change
+			// stays published as its Failure, which the panel shows, as in EditorApp.
 			void Pump()
 			{
-				if (m_Preference.Pending)
+				static_cast<void>(m_Preferences.Pump([this](bool allowed)
 				{
-					const Status status = m_Controls.SetAllowAiAutomation(m_RequestedPreference);
-					m_Preference.Pending = false;
-					if (status)
-					{
-						m_Preference.Allowed = m_RequestedPreference;
-						m_Preference.Failure.reset();
-					}
-					else
-						m_Preference.Failure = status.error();
-				}
+					return m_Controls.SetAllowAiAutomation(allowed);
+				}));
+				static_cast<void>(m_Preferences.PumpExternalEditor(m_Environment.GetEditor().GetVfs()));
 				m_Actions.Pump();
+			}
+
+			// A queued human action submitted and discarded at once: every ticket a panel queues later is greater.
+			uint64_t ProbeActionTicket()
+			{
+				const Result<uint64_t> probe = m_Actions.Submit("stats.get", Json::object());
+				REQUIRE_MESSAGE(probe.has_value(), probe.error().ToString());
+				REQUIRE(m_Actions.Discard(*probe).has_value());
+				return *probe;
+			}
+
+			// The first ticket after `after` that is still queued (submitted, not yet pumped); nullopt when there is none.
+			// Never consumes a completion: a known ticket found here is still pending.
+			std::optional<uint64_t> FindPendingAction(uint64_t after)
+			{
+				for (uint64_t ticket = after + 1; ticket <= after + 16; ++ticket)
+				{
+					const auto result = m_Actions.TakeResult(ticket);
+					if (!result.has_value())
+						continue;
+					REQUIRE_FALSE(result->has_value());
+					return ticket;
+				}
+				return std::nullopt;
 			}
 
 			template<typename Panel>
@@ -155,13 +196,23 @@ namespace Engine {
 				Draw(panel);
 			}
 		private:
-			AutomationServerSpecification MakeSpecification() const
+			AutomationServerSpecification MakeSpecification()
 			{
 				auto specification = MakeTestServerSpecification();
 				specification.SessionsDirectory = m_Environment.GetDirectory() / "Sessions";
+				if (m_Clock == UtilityPanelClock::Stepped)
+				{
+					specification.WallClock = [this]()
+					{
+						m_Now += std::chrono::milliseconds(100);
+						return m_Now;
+					};
+				}
 				return specification;
 			}
 		private:
+			UtilityPanelClock m_Clock = UtilityPanelClock::Real;
+			std::chrono::steady_clock::time_point m_Now{}; // the Stepped clock's reading; read only through the server
 			EditorTestFixture m_Environment;
 			AutomationTestClient m_Client;
 			EditorActions m_Actions;
@@ -171,8 +222,7 @@ namespace Engine {
 			GizmoController m_Gizmos;
 			UtilityPanelUnusedViewport m_Viewports;
 			EditorPanelContext m_Context;
-			EditorAutomationPreferenceState m_Preference{};
-			bool m_RequestedPreference = false;
+			EditorHostPreferences m_Preferences{};
 			uint64_t m_Frame = 0;
 			ImGuiContext* m_ImGui = nullptr; // owned C API context, destroyed in the destructor
 		};

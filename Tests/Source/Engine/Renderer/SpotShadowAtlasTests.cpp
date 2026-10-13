@@ -83,32 +83,59 @@ namespace Engine {
 			CHECK(filtered->Dropped == 0);
 		}
 
-		TEST_CASE("SpotShadowAtlas: invalid indices and non-finite lights fail")
+		TEST_CASE("SpotShadowAtlas: invalid indices and cameras fail")
 		{
-			auto lights = Utils::SpotTestLights(2);
+			const auto lights = Utils::SpotTestLights(2);
 			CHECK_FALSE(AllocateSpotShadowAtlas(lights, std::array<uint32_t, 2>{ 0, 0 }, Utils::SpotTestCamera()));
 			CHECK_FALSE(AllocateSpotShadowAtlas(lights, std::array<uint32_t, 1>{ 2 }, Utils::SpotTestCamera()));
+			CameraData camera = Utils::SpotTestCamera();
+			camera.Projection = glm::mat4(0);
+			const auto result = AllocateSpotShadowAtlas({}, {}, camera);
+			REQUIRE_FALSE(result);
+			CHECK(result.error().GetCode() == ErrorCode::InvalidArgument);
+		}
+
+		TEST_CASE("SpotShadowAtlas: a spot that cannot be shadowed is rejected alone")
+		{
+			// Each kind of invalid data leaves that spot unshadowed and counted, while the valid spot keeps its tile (M9-F03:
+			// one loaded spot with Inner > Outer used to remove every spot's shadow and fail the render).
 			const std::array<uint32_t, 2> indices{ 0, 1 };
+			const auto check = [&indices](const std::vector<LightData>& lights)
+			{
+				const auto atlas = AllocateSpotShadowAtlas(lights, indices, Utils::SpotTestCamera());
+				REQUIRE_MESSAGE(atlas, atlas.error().ToString());
+				CHECK(atlas->Rejected == 1);
+				CHECK(atlas->Dropped == 0);
+				REQUIRE(atlas->Tiles.size() == 1);
+				CHECK(atlas->Tiles[0].LightIndex == 1);
+				CHECK(atlas->Tiles[0].X == 0);
+				CHECK(atlas->Tiles[0].Y == 0);
+			};
 			for (float invalid : { 0.0f, -1.0f, std::numeric_limits<float>::infinity(), std::numeric_limits<float>::quiet_NaN() })
 			{
+				CAPTURE(invalid);
+				auto lights = Utils::SpotTestLights(2);
 				lights[0].Range = invalid;
-				const auto result = AllocateSpotShadowAtlas(lights, indices, Utils::SpotTestCamera());
-				REQUIRE_FALSE(result);
-				CHECK(result.error().GetCode() == ErrorCode::InvalidArgument);
+				check(lights);
 			}
-			lights = Utils::SpotTestLights(2);
+			auto lights = Utils::SpotTestLights(2);
 			lights[0].Direction = glm::vec3(0);
-			CHECK_FALSE(AllocateSpotShadowAtlas(lights, indices, Utils::SpotTestCamera()));
+			check(lights);
 			lights = Utils::SpotTestLights(2);
 			lights[0].OuterConeAngle = 90;
-			CHECK_FALSE(AllocateSpotShadowAtlas(lights, indices, Utils::SpotTestCamera()));
-			CameraData camera = Utils::SpotTestCamera();
+			check(lights);
+			lights = Utils::SpotTestLights(2);
+			lights[0].InnerConeAngle = 40;
+			lights[0].OuterConeAngle = 30;
+			check(lights);
 			lights = Utils::SpotTestLights(2);
 			lights[0].InnerConeAngle = 0;
 			lights[0].OuterConeAngle = std::numeric_limits<float>::min();
-			CHECK_FALSE(AllocateSpotShadowAtlas(lights, indices, camera));
-			camera.Projection = glm::mat4(0);
-			CHECK_FALSE(AllocateSpotShadowAtlas({}, {}, camera));
+			check(lights);
+			lights = Utils::SpotTestLights(2);
+			lights[0].Intensity = std::numeric_limits<float>::max();
+			lights[0].Color = glm::vec3(std::numeric_limits<float>::max());
+			check(lights);
 		}
 	}
 

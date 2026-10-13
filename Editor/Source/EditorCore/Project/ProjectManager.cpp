@@ -1,6 +1,7 @@
 #include "EditorPCH.h"
 #include "EditorCore/Project/ProjectManager.h"
 
+#include "EditorCore/EditorPreferences.h"
 #include "EditorCore/Project/Basic3DTemplate.h"
 #include "Engine/Core/Assert.h"
 #include "Engine/Core/FileSystem.h"
@@ -9,10 +10,10 @@
 #include "Engine/Core/Json/JsonWriter.h"
 #include "Engine/Core/Log.h"
 #include "Engine/Core/Mounts/NativeDirectoryMount.h"
+#include "Engine/Core/UUIDGenerator.h"
 #include "Engine/Core/VirtualFileSystem.h"
 #include "Engine/Platform/Paths.h"
 #include "Engine/Platform/SecureRandom.h"
-#include "Engine/Core/UUIDGenerator.h"
 #include "Engine/Reflection/TypeRegistry.h"
 
 #include <nlohmann/json.hpp>
@@ -411,7 +412,8 @@ namespace Engine {
 			}
 		}
 		document["RecentProjects"] = std::move(recent);
-		ENGINE_TRY_ASSIGN(const std::string text, JsonWriter::Write(document));
+		// The shared lossless writer keeps the members of other preferences (and of newer editors) exactly as read.
+		ENGINE_TRY_ASSIGN(const std::string text, SerializeEditorPreferences(document));
 		return vfs.WriteFileAtomic(path, Utils::AsBytes(text));
 	}
 

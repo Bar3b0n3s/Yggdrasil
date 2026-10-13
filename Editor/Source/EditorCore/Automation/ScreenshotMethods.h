@@ -26,8 +26,10 @@
 //
 // editor.screenshot requests a UI frame after admission and waits for its completed serial before capturing its draw
 // data. This includes changes made earlier in the same automation pump. The host renders a fresh offscreen UI frame
-// while minimized, using the last usable extent. Cancellation releases the request; the registered method bounds the
-// wait to its 60-second deadline. The capture/encoding helper below does not itself request or wait for a frame.
+// while minimized, using the last usable extent. A frame whose viewport textures were withdrawn after it was built is
+// not captured: the request asks for another one. A failed frame request fails the request immediately. Cancellation
+// releases the request; the registered method bounds the wait to its 60-second deadline. The capture/encoding helper
+// below does not itself request or wait for a frame.
 
 namespace Engine {
 
@@ -52,9 +54,14 @@ namespace Engine {
 		std::function<Result<Image>()> EditorUi{};
 		// M10 pending screenshot boundary. A request remembers the current completed serial and requests a new UI frame;
 		// capture is allowed only after a later serial. Host services this while minimized, without a swapchain acquire.
-		// Both callbacks and EditorUi are required by the registered pending method.
+		// Both callbacks and EditorUi are required by the registered pending method. A RequestUiFrame error fails the
+		// request at once (at admission, or while waiting for a replacement frame) instead of waiting for its deadline.
 		std::function<uint64_t()> CompletedUiFrame{};
-		std::function<void()> RequestUiFrame{};
+		std::function<Status()> RequestUiFrame{};
+		// Optional: false while the last completed UI frame's draw data references viewport textures the host withdrew
+		// after building it (the window was minimized in between); the pending request then asks for another frame and
+		// waits for one completed after it, so it never captures blank viewports. Empty means always current.
+		std::function<bool()> IsUiFrameCurrent{};
 	};
 
 	// viewport.screenshot's params and result (ViewportView, ViewportScreenshotParams, ViewportScreenshotResult) and
@@ -81,9 +88,10 @@ namespace Engine {
 		// before the first UI frame) with the context "while rendering the editor UI"; those of DownscaleImage, EncodePng and
 		// AutomationServer::WriteOutputFile.
 		[[nodiscard]] Result<EditorScreenshotResult> EditorScreenshot(EditorMethodContext& context, const EditorScreenshotParams& params);
-		// Pending entry point, same wire params/result. Unsupported without the three UI callbacks. Poll until a fresh
-		// frame, then use the encoder/output path. Cancel releases the request; the registered wrapper enforces the method's
-		// deadline using the context's wall clock and returns Timeout if the host never publishes a fresh frame.
+		// Pending entry point, same wire params/result. Unsupported without the three UI callbacks; RequestUiFrame's error
+		// when the host cannot schedule the frame. Poll until a fresh, current frame, then use the encoder/output path.
+		// Cancel releases the request; the registered wrapper enforces the method's deadline using the context's wall clock
+		// and returns Timeout if the host never publishes a fresh frame.
 		[[nodiscard]] Result<Scope<PendingOperation>> BeginEditorScreenshot(EditorMethodContext& context, const EditorScreenshotParams& params);
 
 	}

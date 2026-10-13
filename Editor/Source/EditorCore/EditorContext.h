@@ -254,6 +254,10 @@ namespace Engine {
 		// a dry run it is the real revision plus the mutations the sandbox copy has seen, so a dry run reports what the real
 		// call would produce (EditorDryRunScope adjusts the base while it swaps the scene).
 		[[nodiscard]] uint64_t GetRevision() const;
+		// The identity of the open scene document for services keyed to it (Autosave's source baseline): SetScene and
+		// CloseScene advance it outside a dry run; edits, undo/redo and project-settings installations, which all advance
+		// GetRevision, never do. 0 before the first scene opens.
+		[[nodiscard]] uint64_t GetSceneDocumentEpoch() const { return m_SceneDocumentEpoch; }
 
 		// --- Commands (the single mutation entry point, §12.1) -----------------------------------------------------------
 
@@ -272,8 +276,10 @@ namespace Engine {
 
 		// --- Selection (§12.1 SelectionSet; edit.select, edit.getSelection) ---------------------------------------------
 
-		// The selected entities, in the order selected, without duplicates.
-		[[nodiscard]] std::span<const UUID> GetSelection() const { return m_Selection; }
+		// The selected entities, in the order selected, without duplicates. A Play selection belongs to the runtime scene it
+		// was made in (the session's serial and scene generation): once Scene.Load or a session replacement swaps that scene,
+		// it reads as empty (ADR 0018: runtime scene replacement clears its selection), and PruneSelection drops it.
+		[[nodiscard]] std::span<const UUID> GetSelection() const;
 		// Replaces the selection in the shown scene (play while running, otherwise edit), recording that target.
 		// Missing ids are dropped and duplicates removed (first kept).
 		// Selection is editor state, not a command (it is never undone).
@@ -283,6 +289,24 @@ namespace Engine {
 		// wrong scene. Stop keeps the current selection's UUIDs that still exist in the edit scene; scene replacement clears it.
 		[[nodiscard]] Status SetSelection(std::vector<UUID> selection, SceneTarget target);
 		[[nodiscard]] SceneTarget GetSelectionTarget() const { return m_SelectionTarget; }
+		// Play start and session replacement (EditorPlayController): an Edit selection follows into the new runtime scene by
+		// UUID, keeping the ids that exist there (the mirror of Stop, §5.6), and a selection of the replaced runtime scene
+		// is cleared. The target becomes Play; the selected asset is kept. No effect without a play session.
+		void RetargetSelectionToPlay();
+		// Restores a saved selection without failing: ids missing from `target`'s scene are dropped, and an absent target
+		// scene clears the selection (Edit target). The selected asset is cleared only when an entity stays selected.
+		void RestoreSelection(std::vector<UUID> selection, SceneTarget target);
+		// Drops the selected ids that no longer exist in the target scene (destroyed entities, undone creations, runtime
+		// destruction) and a selection of a replaced runtime scene. Once per frame (Update) and after UI actions; no effect
+		// while a test run owns the editor, whose ReleaseTestRun restores the saved selection.
+		void PruneSelection();
+
+		// --- Test runs (§11.10, test.run) ----------------------------------------------------------------------------------
+
+		// The one admission rule while a test run owns the editor, shared by automation requests and UI actions: only the
+		// observation subset (state, logs, screenshots) is available, never a dry run. InvalidState names the method;
+		// success when no test run is active.
+		[[nodiscard]] Status CheckTestRunAdmission(std::string_view method, bool dryRun) const;
 
 		// --- Write attribution and provenance (§13.4) ----------------------------------------------------------------------
 
@@ -401,11 +425,15 @@ namespace Engine {
 		Scope<LoadedProject> m_Project;
 		Scope<Scene> m_Scene;
 		std::optional<VfsPath> m_ScenePath;
+		// GetSceneDocumentEpoch.
+		uint64_t m_SceneDocumentEpoch = 0;
 		bool m_SceneDirty = false;   // a dirty SetScene (a repaired load) not saved since; the history tracks the rest
 		uint64_t m_RevisionBase = 0; // GetRevision's base, advanced by SetScene and CloseScene
 		CommandHistory m_History;    // the open scene's history; a dry run swaps its sandbox history in
 		std::vector<UUID> m_Selection;
 		SceneTarget m_SelectionTarget = SceneTarget::Edit;
+		uint64_t m_SelectionSession = 0;         // a Play selection's session serial (GetSelection)
+		uint64_t m_SelectionSceneGeneration = 0; // and that session's scene generation
 		WriteAttribution m_Attribution;
 		bool m_HasRequestAttribution = false;
 		bool m_AgentMutationsDenied = false;
@@ -428,7 +456,7 @@ namespace Engine {
 		// Last, so it is destroyed first: a play session refers to the asset manager and the type registry (M7).
 		Scope<EditorPlayController> m_Play;
 	private:
-		friend class CommandHistory;        // reads GetRevisionBeforeCommand
+		friend class CommandHistory;        // reads GetRevisionBeforeCommand; undo and redo check CheckMutationPermission
 		friend class EditorFeatureTestHost; // synchronous, guarded Test.ReloadScript import only
 		friend class EditorDryRunScope;
 		friend class EditorTransaction;

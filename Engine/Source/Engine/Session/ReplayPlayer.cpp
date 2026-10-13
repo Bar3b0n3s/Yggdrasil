@@ -9,6 +9,8 @@
 
 #include <algorithm>
 #include <format>
+#include <optional>
+#include <string>
 
 namespace Engine {
 
@@ -25,16 +27,22 @@ namespace Engine {
 		bool Begun = false;
 		bool Complete = false;
 
+		static ReplayExpectationOutcome MakeOutcome(const ReplayBytecodeExpectation& expectation)
+		{
+			ReplayExpectationOutcome outcome;
+			outcome.Tick = expectation.Tick;
+			outcome.File = expectation.Script.SourceMap.Path;
+			if (outcome.File.empty() && expectation.Script.SourceMap.ChunkName.size() > 1)
+				outcome.File = expectation.Script.SourceMap.ChunkName.substr(1);
+			return outcome;
+		}
+
 		void EvaluateBoundary(PlaySession& session, IReplayEvaluator& evaluator)
 		{
 			while (NextExpectation < Replay->Expect.size() && Replay->Expect[NextExpectation].Tick == Tick)
 			{
 				const auto& expectation = Replay->Expect[NextExpectation++];
-				ReplayExpectationOutcome outcome;
-				outcome.Tick = Tick;
-				outcome.File = expectation.Script.SourceMap.Path;
-				if (outcome.File.empty() && expectation.Script.SourceMap.ChunkName.size() > 1)
-					outcome.File = expectation.Script.SourceMap.ChunkName.substr(1);
+				ReplayExpectationOutcome outcome = MakeOutcome(expectation);
 				if (Options.Verify)
 				{
 					outcome.Evaluated = true;
@@ -59,6 +67,44 @@ namespace Engine {
 				}
 				ReportData.Expect.push_back(std::move(outcome));
 			}
+		}
+
+		// The completed playback at the boundary reached (Tick). `stopReason` is empty at FinalTick; otherwise playback
+		// ended early and has failed, and every expectation it never reached is reported unevaluated.
+		void Finish(const PlaySession& session, std::string stopReason)
+		{
+			auto& result = ReportData;
+			result.FinalTick = Tick;
+			result.StateHash = UUID(session.ComputeStateHash()).ToString();
+			result.ExpectedStateHash = Replay->FinalStateHash;
+			result.Verified = Options.Verify;
+			result.HashChecked = Options.StrictHash;
+			result.HashMatched = stopReason.empty() && result.StateHash == result.ExpectedStateHash;
+			while (NextExpectation < Replay->Expect.size())
+			{
+				const auto& expectation = Replay->Expect[NextExpectation++];
+				ReplayExpectationOutcome outcome = MakeOutcome(expectation);
+				outcome.Line = 1;
+				outcome.Failure = Error(ErrorCode::Validation, std::format("the replay stopped at tick {} before this expectation's tick {}: {}", Tick, expectation.Tick, stopReason))
+									  .WithLocation({ .File = outcome.File, .Line = outcome.Line, .JsonPointer = expectation.Script.SourceMap.JsonPointer, .Entity = {} });
+				result.Expect.push_back(std::move(outcome));
+			}
+			result.StopReason = std::move(stopReason);
+			result.Passed = result.StopReason.empty() && (!result.HashChecked || result.HashMatched) && (!result.Verified || std::all_of(result.Expect.begin(), result.Expect.end(), [](const auto& item)
+			{
+				return item.Satisfied;
+			}));
+			Complete = true;
+		}
+
+		// Why `session` refuses to advance before FinalTick, when gameplay ended it: a quit request or a fatal stop.
+		std::optional<std::string> GetStopReason(const PlaySession& session) const
+		{
+			if (const auto& fatal = session.GetFatalError())
+				return std::format("a fatal {} script error stopped the session at tick {}, before the replay's final tick {}: {}", ScriptErrorKindToString(fatal->Kind), Tick, Replay->FinalTick, fatal->Message);
+			if (const auto quit = session.GetQuitRequest())
+				return std::format("the game quit with exit code {} at tick {}, before the replay's final tick {}", *quit, Tick, Replay->FinalTick);
+			return std::nullopt;
 		}
 	};
 
@@ -132,29 +178,25 @@ namespace Engine {
 				++m_State->NextEvent;
 			}
 			session.Tick();
-			++m_State->Tick;
-			if (session.GetTick() != m_State->Tick)
+			if (session.GetTick() != m_State->Tick + 1)
 			{
+				// Gameplay that quits or stops fatally before FinalTick is a failed replay with its outcome, not a cancellation.
+				if (session.GetTick() == m_State->Tick)
+				{
+					if (std::optional<std::string> reason = m_State->GetStopReason(session))
+					{
+						m_State->Finish(session, std::move(*reason));
+						return true;
+					}
+				}
 				Cancel();
 				return MakeError(ErrorCode::Cancelled, "replay tick failed to advance");
 			}
+			++m_State->Tick;
 			m_State->EvaluateBoundary(session, evaluator);
 		}
 		if (m_State->Tick == m_State->Replay->FinalTick)
-		{
-			auto& result = m_State->ReportData;
-			result.FinalTick = m_State->Tick;
-			result.StateHash = UUID(session.ComputeStateHash()).ToString();
-			result.ExpectedStateHash = m_State->Replay->FinalStateHash;
-			result.Verified = m_State->Options.Verify;
-			result.HashChecked = m_State->Options.StrictHash;
-			result.HashMatched = result.StateHash == result.ExpectedStateHash;
-			result.Passed = (!result.HashChecked || result.HashMatched) && (!result.Verified || std::all_of(result.Expect.begin(), result.Expect.end(), [](const auto& item)
-			{
-				return item.Satisfied;
-			}));
-			m_State->Complete = true;
-		}
+			m_State->Finish(session, {});
 		return m_State->Complete;
 	}
 

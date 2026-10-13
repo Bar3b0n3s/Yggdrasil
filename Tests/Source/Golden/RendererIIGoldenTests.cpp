@@ -72,21 +72,18 @@ namespace Engine {
 			{
 				// A fresh project copy and extraction must produce the same pixels without temporal history.
 				CHECK(Capture(options).Pixels == image.Pixels);
-				auto settings = Test::GetRepositoryGoldenSettings();
-				if (settings.UpdateGolden)
-					settings.GoldenRoot = Test::GetGoldenOutputDirectory() / "M9Candidates";
-				const auto checked = Test::CheckGoldenImage(m_Name, image, m_Gpu.GetDevice().GetInfo().DeviceClass, {}, settings);
-				const bool passed = checked.Outcome == Test::GoldenOutcome::Matched || checked.Outcome == Test::GoldenOutcome::Updated || checked.Outcome == Test::GoldenOutcome::SmokePassed;
-				CHECK_MESSAGE(passed, checked.Message);
-				if (checked.Outcome != Test::GoldenOutcome::Matched)
-					MESSAGE(checked.Message);
+				// The repository's golden workflow, as every golden: --update-golden writes the candidate into
+				// Tests/Golden/<DeviceClass>/ for review in the diff (M9-F40).
+				ENGINE_CHECK_GOLDEN(m_Name, image, m_Gpu.GetDevice().GetInfo().DeviceClass);
 			}
 
+			// With --update-golden, the variation images a golden is compared against (not goldens themselves) are written beside
+			// the run's output for the reviewer.
 			void ReviewControl(std::string_view variation, const Image& image)
 			{
 				if (!Test::GetTestOptions().UpdateGolden)
 					return;
-				const auto directory = Test::GetGoldenOutputDirectory() / "M9Candidates" / "Controls";
+				const auto directory = Test::GetGoldenOutputDirectory() / "RendererIIControls";
 				REQUIRE(FileSystem::CreateDirectories(directory));
 				REQUIRE(WritePng(directory / Test::PathFromUtf8(std::format("{}-{}.png", m_Name, variation)), image));
 			}
@@ -218,7 +215,7 @@ namespace Engine {
 			constexpr std::array<UUID, 2> Entities{ RendererIIAnnotatedCube, RendererIIAnnotatedSphere };
 			constexpr std::array<std::string_view, 2> Names{ "Cube", "Sphere" };
 			size_t labels = 0;
-			for (const auto& command : snapshot.DebugDraw.GetCommands())
+			for (const auto& command : snapshot.AnnotationDraw.GetCommands())
 				if (const auto* text = std::get_if<DebugText>(&command.Shape))
 				{
 					REQUIRE(labels < Entities.size());

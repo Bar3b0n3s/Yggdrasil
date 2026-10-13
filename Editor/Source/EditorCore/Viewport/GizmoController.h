@@ -41,7 +41,8 @@ namespace Engine {
 	// Begin captures the base revision and scene; Update edits only the preview, used by the scene viewport's extraction.
 	// End applies the final poses with one short SceneEdit. In play/simulate it targets only the runtime scene and
 	// returns index 0 (transient, no history). No live tracker spans frames, so agent commands can interleave.
-	// An intervening agent/UI edit, undo, scene swap or play transition discards the preview with Conflict before writing.
+	// An intervening agent/UI edit, undo, scene swap, play transition or runtime scene replacement (Scene.Load: the session's
+	// serial plus scene generation identify the runtime scene) discards the preview with Conflict before writing.
 	class GizmoController
 	{
 	public:

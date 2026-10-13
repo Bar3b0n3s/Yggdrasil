@@ -8,12 +8,15 @@
 #include "Engine/Scene/Components/AudioSourceComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Support/AudioTestData.h"
+#include "Support/ExpectLog.h"
 #include "Support/ScriptTestFixture.h"
 
 #include <doctest/doctest.h>
 
 #include <algorithm>
 #include <array>
+#include <format>
+#include <string>
 
 namespace Engine {
 
@@ -197,6 +200,38 @@ return true
 )");
 			CHECK(fixture.Audio->GetStats().StartedVoices == 0);
 			CHECK(fixture.Script.ExternalMutations.empty());
+		}
+
+		TEST_CASE("AudioBindings: one-shots past the per-frame limit raise a located error")
+		{
+			AudioBindingFixture fixture;
+			REQUIRE(fixture.Start());
+			// A loop well within the watchdog budget may not grow the host's one-shot requests without bound.
+			CheckAudioBinding(fixture.Script, std::format(R"(
+local clip = Assets.Load("Assets/Tone.wav")
+for _ = 1, {0} do Audio.PlayOneShot(clip) end
+for _ = 1, 100 do
+	local ok, message = pcall(function() Audio.PlayOneShot(clip) end)
+	assert(not ok and string.find(message, "at most {0} one-shots start per frame", 1, true), message)
+end
+return true
+)",
+												  MaxAudioOneShotsPerFrame));
+			CHECK(fixture.Audio->GetStats().StartedVoices == MaxAudioOneShotsPerFrame);
+			CHECK(fixture.Audio->GetStats().LiveVoices == MaxAudioVoices);
+
+			// Unprotected, the refusal is a located script error of the calling line.
+			const Test::ExpectLog logged(LogLevel::Error, std::format("at most {} one-shots start per frame", MaxAudioOneShotsPerFrame));
+			const auto refused = fixture.Script.Evaluate("local clip = Assets.Load(\"Assets/Tone.wav\")\nAudio.PlayOneShot(clip)\nreturn true");
+			REQUIRE_FALSE(refused.has_value());
+			CAPTURE(refused.error().ToString());
+			CHECK(refused.error().ToString().find(std::format("at most {} one-shots start per frame", MaxAudioOneShotsPerFrame)) != std::string::npos);
+			CHECK(refused.error().GetLocation().Line == 2);
+
+			// The next frame admits one-shots again.
+			fixture.System->Update(0.0);
+			CheckAudioBinding(fixture.Script, "Audio.PlayOneShot(Assets.Load(\"Assets/Tone.wav\"))\nreturn true");
+			CHECK(fixture.Audio->GetStats().StartedVoices == MaxAudioOneShotsPerFrame + 1);
 		}
 
 		TEST_CASE("AudioBindings: read-only evaluation rejects playback and mix writes before effects")

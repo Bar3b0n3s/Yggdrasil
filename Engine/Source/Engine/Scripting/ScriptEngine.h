@@ -98,6 +98,7 @@ namespace Engine {
 
 		// Snapshot enabled, unstarted instances in (ExecutionOrder, canonical entity) order; invoke OnStart exactly once. Exclude
 		// pending destruction and fault-disabled owners. An instance created during this snapshot starts next phase.
+		// In the fixed step's start flush, physics callbacks held for started instances are then delivered (OnPhysicsEvent).
 		void StartPending();
 		// The session invokes these only in §5.7's matching phases. Each snapshots eligible started instances, excludes
 		// pending-destroy/disabled/unstarted entries, and never visits an entity created later in that phase. Host frame
@@ -111,20 +112,32 @@ namespace Engine {
 		// exits until no new destruction remains, then removes voices/instances/entities. Return: number handled.
 		[[nodiscard]] uint32_t PrepareDestroyFlush();
 		void FinishDestroyFlush();
+		// Started instances receive the callback at once. A created instance that has not started yet holds the event, in
+		// dispatch order, until the first fixed-step start flush after its OnStart, so physics callbacks stay in the fixed
+		// step and enter/exit pairs stay symmetric (§9.4); destruction or a fault discards held events.
 		void OnPhysicsEvent(const PhysicsEvent& event) override;
 		void OnPhysicsDiagnostic(const PhysicsDiagnostic& diagnostic) override;
 		// Idempotent. OnDestroy for all remaining instances and cancellation while host/scene/services still exist.
 		void Stop();
 
+		// A failed evaluation is published to the error stream and log, but it is not a callback of the entity's instance:
+		// the behaviour stays enabled, keeps its tasks and is not paused on (§11.7). Spawned tasks belong to the entity.
 		[[nodiscard]] Result<ScriptEvaluation> Evaluate(std::string_view source, const VfsPath& path,
 			std::optional<UUID> entity = std::nullopt);
 		// Trusted engine-produced replay predicates, including Dist. Never compiles source or creates a second VM.
+		// Failures follow Evaluate's reporting policy.
 		[[nodiscard]] Result<ScriptEvaluation> ExecuteBytecode(const ScriptData& script,
 			std::optional<UUID> entity = std::nullopt);
 		// EditorOnly: resolve the complete dependency closure, execute candidates in isolation, then atomically patch
 		// tables in place and add new default fields. Failure rolls back the whole chain. Reloads defer when the host
 		// owns deterministic time, except an explicit synchronous Test.ReloadScript in a currently active test suite.
+		// Surviving instances receive OnHotReload. An instance without a table (module-top or memory fault) is recreated
+		// from defaults and overrides and restarts its lifecycle: OnCreate now, OnStart at the next start flush.
 		[[nodiscard]] Result<ScriptReloadResult> Reload(AssetHandle script, bool fromTest = false);
+		// EditorOnly: the scripts Reload(script) would re-execute now, in its dependency order: the script itself, then the
+		// loaded modules and attached behaviours that transitively require it. Unloaded project scripts that require it
+		// (for example test suites) are not part of the chain. Executes no script code and publishes nothing.
+		[[nodiscard]] Result<std::vector<AssetHandle>> GetReloadChain(AssetHandle script);
 
 		// A suite owns the installed test-host lifetime. A second collection before EndSuite is InvalidState. Executes
 		// the suite body only, under one protected entry; returns case functions in declaration order. Failure releases

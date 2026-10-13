@@ -27,15 +27,19 @@ assert(Assets.GetType(asset) == "Scene")
 assert(Assets.IsValid(Assets.Load("0000000000000065")))
 assert(Assets.Load("Assets/Missing.scene") == nil)
 assert(not Assets.IsValid(nil))
+-- Two references to one asset are equal by handle, whether or not they are the same userdata.
+local again = Assets.Load("Assets/Scenes/Test.scene")
+assert(asset == again and Assets.Load("0000000000000065") == asset)
+assert(asset ~= Assets.Load("0000000000000066") and asset ~= nil)
 return true
 )");
-			REQUIRE(result.has_value());
+			REQUIRE_MESSAGE(result.has_value(), (result ? "" : result.error().ToString()));
 			CHECK(result->Value.Get() == Json(true));
 			CHECK(fixture.ExternalMutations.empty());
 			const auto coverage = fixture.GetApi().GetCoverage(mode);
 			REQUIRE(coverage.has_value());
 			for (const auto& counter : coverage->Members)
-				if (counter.Owner == "Assets")
+				if (counter.Owner == "Assets" || counter.Owner == "AssetRef")
 				{
 					CAPTURE(counter.Member);
 					CHECK(counter.Calls > 0);
@@ -53,6 +57,26 @@ return true
 		{
 			std::vector<ScriptApiCoverage> snapshots;
 			Test::RunAssetsBindingsCoverage(RunModes::Editor, snapshots);
+		}
+
+		TEST_CASE("AssetsBindings: asset references compare by handle in Test.ExpectEqual and table lookups")
+		{
+			Test::ScriptTestFixture fixture;
+			auto asset = CreateRef<SceneData>();
+			asset->Document = CreateRef<const Json>(Json::object());
+			fixture.GetAssetManager().Publish(AssetHandle(101), asset, "Assets/Scenes/Test.scene");
+			REQUIRE(fixture.Start().has_value());
+			const auto result = fixture.Evaluate(R"(
+local a = Assets.Load("Assets/Scenes/Test.scene")
+local b = Assets.Load("0000000000000065")
+assert(a == b and rawequal(a, b))
+local seen = {[a] = true}
+assert(seen[b])
+assert(not (a == Color.New(1, 1, 1)) and not (a == Quat.Identity()))
+return true
+)");
+			REQUIRE_MESSAGE(result.has_value(), (result ? "" : result.error().ToString()));
+			CHECK(result->Value.Get() == Json(true));
 		}
 
 		TEST_CASE("AssetsBindings: invalid values never coerce to asset handles")

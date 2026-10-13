@@ -3,12 +3,15 @@
 
 #include "EditorCore/EditorContext.h"
 #include "EditorCore/Scripting/EditorScriptService.h"
+#include "EditorCore/Viewport/EditorViewportState.h"
 #include "Engine/App/EngineContext.h"
 #include "Engine/AssetPipeline/AssetDependencyGraph.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/Audio/AudioEngine.h"
 #include "Engine/Automation/Methods/PlayMethods.h"
+#include "Engine/Automation/Methods/ScreenshotMethods.h"
 #include "Engine/Automation/Methods/SharedMethodSupport.h"
+#include "Engine/Automation/Protocol/Watchdog.h"
 #include "Engine/Core/Assert.h"
 #include "Engine/Core/EventLog.h"
 #include "Engine/Core/Json/JsonReader.h"
@@ -56,7 +59,7 @@ namespace Engine {
 			}
 		}
 
-		// play.start's "scene" (the path rules of EditorMethodContext::ResolveProjectPath, Â§13.2 "Paths"): a project-relative
+		// play.start's "scene" (the path rules of EditorMethodContext::ResolveProjectPath, §13.2 "Paths"): a project-relative
 		// path or a project:// path to a .scene file. Errors: InvalidArgument located at /scene.
 		static Result<VfsPath> ResolvePlayScenePath(std::string_view path)
 		{
@@ -100,6 +103,7 @@ namespace Engine {
 		std::optional<CursorMode> CursorBaseline{};
 		CursorMode SavedTestCursor = CursorMode::Normal;
 		std::set<AssetHandle> PendingScriptReloads{};
+		bool ScriptReloadsArrived = false; // a script publication was queued since the last safe point
 		uint64_t ImportEventCursor = 0;
 		ScriptErrorStream Errors{};
 		ScriptEnvironment Environment{ .IsEditor = true, .Version = std::string(EngineVersionString) };
@@ -107,12 +111,15 @@ namespace Engine {
 		ClientId RecordingOwner = NoClient;
 		EditorFeatureTestHost* TestOwner = nullptr; // borrowed exclusive lease, released before controller destruction
 		PlaySession* TestSession = nullptr;         // runner-owned, unpublished before destruction
+		bool SessionViewFixed = false;              // Session keeps its deterministic view (PreparedSession::FixedView, SyncGameView)
 		bool SavedPaused = false;
 		bool SavedLockstep = false;
 		ClientId SavedOwner = NoClient;
 		bool TestDefersReloads = false;
 		std::vector<UUID> SavedSelection{};
 		SceneTarget SavedSelectionTarget = SceneTarget::Edit;
+		Watchdog* PhaseMarker = nullptr; // documented back-reference: the automation server's watchdog, cleared before it goes
+		std::string PhaseText{};         // reused for every script phase, so reporting one does not allocate
 
 		ScriptEnvironment GetScriptEnvironment() const override
 		{
@@ -128,9 +135,20 @@ namespace Engine {
 			{
 				result.IsHeadless = GlfwLibrary::GetMode() == WindowMode::Headless;
 				result.IsFocused = window->IsFocused();
-				result.WindowSize = { static_cast<float>(window->GetWidth()), static_cast<float>(window->GetHeight()) };
 			}
+			// Scripts measure the game view, never the editor window (PlaySession.h, view coordinates); a session replaces
+			// this with its own view: the Game panel's image for ordinary play (SyncGameView), the fixed deterministic view
+			// otherwise.
+			result.WindowSize = glm::vec2(GetGameViewSize(Editor->HasProject() ? Editor->GetProject().GetSettings().Window : WindowSettings{}));
 			return result;
+		}
+		// The editor's game view: the Game panel's rendered image when it is available, otherwise the project's window
+		// size, which a session keeps until the panel publishes an image.
+		glm::uvec2 GetGameViewSize(const WindowSettings& window) const
+		{
+			if (const Result<glm::uvec2> size = Editor->GetViewportState().GetPixelSize(ViewportView::Game))
+				return *size;
+			return { std::max(window.Width, 1u), std::max(window.Height, 1u) };
 		}
 		Status SetScriptCursorMode(CursorMode mode) override
 		{
@@ -147,20 +165,33 @@ namespace Engine {
 		}
 		void OnScriptError(const ScriptError& error, bool /*fatal*/) override
 		{
-			static_cast<void>(Errors.Add(error));
-			// The script engine logs the occurrence once; the editor only retains history and publishes the notification.
-			Editor->AppendEvent({ .Tick = error.Tick, .Type = EngineEventType::ScriptErrorRaised, .Id = error.Entity, .Path = error.Script, .Name = {}, .Message = error.Message });
+			// The script engine logs the occurrence once; the editor only retains history and publishes the notification,
+			// with the bounded message the history keeps.
+			const ScriptError& retained = Errors.Add(error);
+			Editor->AppendEvent({ .Tick = retained.Tick, .Type = EngineEventType::ScriptErrorRaised, .Id = retained.Entity, .Path = retained.Script, .Name = {}, .Message = retained.Message });
+		}
+		void OnScriptPhase(std::string_view script, std::string_view callback) override
+		{
+			if (PhaseMarker == nullptr)
+				return;
+			if (script.empty() && callback.empty())
+			{
+				PhaseMarker->SetScriptPhase({});
+				return;
+			}
+			FormatScriptPhase(PhaseText, script, callback);
+			PhaseMarker->SetScriptPhase(PhaseText);
 		}
 		// The serial of the next session (PlaySessionSpecification::Serial): sessions are counted from 1 and never share one.
 		uint64_t NextSerial = 1;
-		// True while this controller holds the asset manager's reload deferral (Â§7.5 race rule 4): from the start of a lockstep
+		// True while this controller holds the asset manager's reload deferral (§7.5 race rule 4): from the start of a lockstep
 		// session to its end.
 		bool DefersReloads = false;
 
-		// Appends PlayStateChanged with the current state (Â§4.9).
+		// Appends PlayStateChanged with the current state (§4.9).
 		void AppendStateChanged();
 		// Destroys the session and gives back what it held: deferred reloads are applied, and the selection is restored by
-		// UUID (Â§5.6: ids that are entities of the edit scene stay selected).
+		// UUID (§5.6: ids that are entities of the edit scene stay selected).
 		void EndSession();
 	};
 
@@ -172,6 +203,8 @@ namespace Engine {
 
 	void EditorPlayController::State::EndSession()
 	{
+		// A selection of a runtime scene that Scene.Load replaced is cleared while the session can still tell.
+		Editor->PruneSelection();
 		Session.reset();
 		if (CursorBaseline)
 		{
@@ -187,6 +220,7 @@ namespace Engine {
 		}
 		ReplayInputSerial = 0;
 		RecordingOwner = NoClient;
+		SessionViewFixed = false;
 		Header = {};
 		if (DefersReloads)
 		{
@@ -213,7 +247,8 @@ namespace Engine {
 	}
 
 	Result<EditorPlayController::PreparedSession> EditorPlayController::PrepareSession(const PlayStartOptions& options, ProjectSettings project,
-		bool emptyScene, IPlaySessionTestHook* hook, IScriptTestHost* testHost, bool ownsAudio, bool scratch, ScriptApiRegistry* api, bool activate)
+		bool emptyScene, IPlaySessionTestHook* hook, IScriptTestHost* testHost, bool ownsAudio, bool scratch, ScriptApiRegistry* api, bool activate,
+		bool fixedView)
 	{
 		EditorContext& editor = *m_State->Editor;
 		if (!editor.HasProject())
@@ -254,8 +289,13 @@ namespace Engine {
 		specification.Mode = options.Mode;
 		specification.Seed = options.Seed.value_or(PlaySession::ComputeSessionSeed(project.Simulation.Seed, Utils::ReadSceneSeed(document)));
 		specification.Project = project;
-		specification.ViewWidth = project.Window.Width;
-		specification.ViewHeight = project.Window.Height;
+		// A deterministic session (a test run's suites and replays, recording, replay, lockstep) keeps the project's window
+		// size for its whole life, as the Runtime's do and as test screenshots are taken, so its results and hashes never
+		// depend on the panel; ordinary live play starts with the Game view's image, which SyncGameView keeps it at.
+		fixedView = fixedView || testHost != nullptr || scratch || options.Lockstep;
+		const glm::uvec2 view = fixedView ? GetDeterministicViewSize(project.Window) : m_State->GetGameViewSize(project.Window);
+		specification.ViewWidth = view.x;
+		specification.ViewHeight = view.y;
 		specification.Serial = m_State->NextSerial++;
 		specification.Audio = scratch ? nullptr : editor.GetEngine().GetAudioEngine();
 		specification.OwnsAudioTime = ownsAudio;
@@ -269,6 +309,7 @@ namespace Engine {
 		specification.TestHost = testHost;
 		specification.Host = scratch ? nullptr : m_State.get();
 		PreparedSession result;
+		result.FixedView = fixedView;
 		result.Header.Parameters = options.Parameters.Get().is_null() ? VariantValue(Json::object()) : options.Parameters;
 		result.Header.Seed = specification.Seed;
 		result.Header.FixedHz = project.Simulation.FixedHz;
@@ -299,6 +340,28 @@ namespace Engine {
 		return result;
 	}
 
+	Status EditorPlayController::ValidatePlayRequest(const PlayStartOptions& options) const
+	{
+		EditorContext& editor = *m_State->Editor;
+		if (!editor.HasProject())
+			return MakeError(ErrorCode::InvalidState, "no project is open");
+		if (!std::isfinite(options.TimeScale) || options.TimeScale < 0.0 || options.TimeScale > PlaySession::MaxTimeScale)
+			return MakeError(ErrorCode::InvalidArgument, "timeScale is outside the supported range");
+		if (!options.Parameters.IsNull() && !options.Parameters.Get().is_object())
+			return MakeError(ErrorCode::InvalidArgument, "play parameters must be an object");
+		if (options.ScenePath.empty())
+		{
+			if (!editor.HasScene())
+				return MakeError(ErrorCode::InvalidState, "no scene is open");
+			return {};
+		}
+		ENGINE_TRY_ASSIGN(const VfsPath path, Utils::ResolvePlayScenePath(options.ScenePath));
+		ENGINE_TRY_ASSIGN(const std::string text, editor.GetVfs().ReadText(path));
+		ENGINE_TRY_ASSIGN(const Json document, JsonReader::Parse(text));
+		static_cast<void>(document);
+		return {};
+	}
+
 	Status EditorPlayController::CheckPlayScripts(const ProjectSettings& project)
 	{
 		if (!project.Scripting.BlockPlayOnTypeErrors)
@@ -325,6 +388,7 @@ namespace Engine {
 			return MakeError(ErrorCode::InvalidState, "no project is open");
 		if (editor.GetAssets().HasErrorDiagnostics())
 			return std::unexpected(Error(ErrorCode::InvalidState, "the project has asset errors: fix them first").WithHint("project.validate lists the failures"));
+		ENGINE_TRY(ValidatePlayRequest(options));
 		ENGINE_TRY(CheckPlayScripts(editor.GetProject().GetSettings()));
 		ENGINE_TRY(editor.PrepareForPlay());
 		std::optional<Utils::MixerVolumes> mixer;
@@ -338,11 +402,14 @@ namespace Engine {
 		state.MixerBaseline = mixer;
 		state.Header = std::move(prepared.Header);
 		state.Session = std::move(prepared.Session);
+		state.SessionViewFixed = prepared.FixedView;
 		if (options.Lockstep && !editor.GetAssets().AreReloadsDeferred())
 		{
 			editor.GetAssets().SetReloadsDeferred(true);
 			state.DefersReloads = true;
 		}
+		// The selection follows into the runtime copy by UUID, so panels inspect and edit the running scene (§5.6).
+		editor.RetargetSelectionToPlay();
 		state.AppendStateChanged();
 		return {};
 	}
@@ -383,6 +450,16 @@ namespace Engine {
 			m_State->Session->AdvanceLoopFrame(frame);
 	}
 
+	void EditorPlayController::SyncGameView()
+	{
+		// A test run's sessions and every other deterministic session keep their fixed view (PrepareSession).
+		State& state = *m_State;
+		if (state.TestOwner != nullptr || state.Session == nullptr || state.SessionViewFixed)
+			return;
+		if (const Result<glm::uvec2> size = state.Editor->GetViewportState().GetPixelSize(ViewportView::Game))
+			state.Session->SetViewSize(size->x, size->y);
+	}
+
 	void EditorPlayController::OnAssetReload(AssetHandle source)
 	{
 		if (PlaySession* session = GetSession())
@@ -391,7 +468,10 @@ namespace Engine {
 			return;
 		const AssetRecord* record = m_State->Editor->GetAssets().GetRegistry().Find(source);
 		if (record != nullptr && record->Metadata.Type == AssetType::Script)
+		{
 			m_State->PendingScriptReloads.insert(source);
+			m_State->ScriptReloadsArrived = true;
+		}
 	}
 
 	void EditorPlayController::OnSafePoint()
@@ -412,7 +492,9 @@ namespace Engine {
 		EditorAssetManager& assets = state.Editor->GetAssets();
 		// Publication may have scheduled dependent imports after invoking OnAssetReload. Finish the whole batch before
 		// entering Reload, which loads its complete closure. Never drain from inside the publication callback itself.
-		if (!state.PendingScriptReloads.empty())
+		// Only new notifications drain: a chain kept pending by a failed import never blocks later frames on unrelated work.
+		const bool arrived = std::exchange(state.ScriptReloadsArrived, false);
+		if (arrived && !state.PendingScriptReloads.empty())
 			assets.WaitIdle();
 		EventLog& events = state.Editor->GetEngine().GetEventLog();
 		const auto failures = events.Read(state.ImportEventCursor, std::array{ EngineEventType::AssetImportFailed }, events.GetCapacity());
@@ -479,7 +561,11 @@ namespace Engine {
 			if (!state.PendingScriptReloads.contains(handle))
 				continue;
 			const auto closure = graph.GetReimportOrder(std::array{ handle });
-			if (std::any_of(closure.begin(), closure.end(), [&failedImports](AssetHandle asset)
+			// Gate on the chain Reload would actually patch (loaded modules and attached behaviours), not on every project
+			// dependent: an unloaded test suite whose import failed cannot hold back the live game. A chain error is left
+			// to Reload, which reports it.
+			const auto chain = scripts->GetReloadChain(handle);
+			if (chain && std::any_of(chain->begin(), chain->end(), [&failedImports](AssetHandle asset)
 			{
 				return failedImports.contains(asset);
 			}))
@@ -507,8 +593,22 @@ namespace Engine {
 		if (const auto* focus = std::get_if<WindowFocusEvent>(&event); focus != nullptr && !focus->Focused)
 			if (Window* window = m_State->Editor->GetEngine().GetWindow(); window != nullptr && IsPlaying())
 				window->SetCursorMode(CursorMode::Normal);
-		if (PlaySession* session = GetSession(); session != nullptr && gameFocused && !IsLiveInputSuppressed() && !session->IsLockstep())
-			session->GetInput().QueueDeviceEvent(event);
+		PlaySession* session = GetSession();
+		if (session == nullptr || !gameFocused || IsLiveInputSuppressed() || session->IsLockstep())
+			return;
+		// Positions arrive in the Game image's pixels, which are an ordinary session's view; a fixed view (a recording or a
+		// lockstep session its owner has resumed) gets them scaled from the image into its own pixels.
+		if (const auto* move = std::get_if<MouseMoveEvent>(&event); move != nullptr && m_State->SessionViewFixed)
+		{
+			const Result<glm::uvec2> image = m_State->Editor->GetViewportState().GetPixelSize(ViewportView::Game);
+			if (image && *image != session->GetViewSize())
+			{
+				if (const std::optional<glm::vec2> position = MapToViewCoordinates(move->Position, glm::vec2(0.0f), glm::vec2(*image), session->GetViewSize()))
+					session->GetInput().QueueDeviceEvent(MouseMoveEvent{ .Position = *position });
+				return;
+			}
+		}
+		session->GetInput().QueueDeviceEvent(event);
 	}
 
 	double EditorPlayController::GetFrameTimeScale() const
@@ -554,7 +654,7 @@ namespace Engine {
 				recorder->Cancel();
 			ReleaseReplayInput(session->GetSerial());
 		}
-		// Â§13.2: the session never stays locked in "Agent controls time".
+		// §13.2: the session never stays locked in "Agent controls time".
 		const Utils::DisconnectedLockstep released = Utils::ReleaseDisconnectedLockstep(*session, client);
 		if (!released.Released)
 			return;
@@ -617,7 +717,7 @@ namespace Engine {
 		return m_State->Header;
 	}
 
-	Status EditorPlayController::CheckTestAdmission(ClientId client) const
+	Status EditorPlayController::CheckTestAdmission(ClientId client, bool ownerRestart) const
 	{
 		if (IsTestRunActive())
 			return MakeError(ErrorCode::InvalidState, "another test run is active");
@@ -625,9 +725,12 @@ namespace Engine {
 			return MakeError(ErrorCode::InvalidState, "no project is open");
 		if (const PlaySession* session = m_State->Session.get())
 		{
+			const bool recording = session->GetRecorder() && session->GetRecorder()->IsRecording();
+			// §13.6: the recording's owner restarts its own recording with restart:true; every other driver waits for it.
+			const bool ownRecording = recording && ownerRestart && client != NoClient && m_State->RecordingOwner == client;
 			if (session->IsStepping() || m_State->ReplayInputSerial != 0
 				|| (session->IsLockstep() && session->GetLockstepOwner() != client)
-				|| (session->GetRecorder() && session->GetRecorder()->IsRecording()))
+				|| (recording && !ownRecording))
 				return MakeError(ErrorCode::InvalidState, "another driver owns the play session");
 		}
 		return {};
@@ -680,11 +783,8 @@ namespace Engine {
 			state.Session->SetLockstep(state.SavedLockstep, state.SavedOwner);
 			state.Session->SetPaused(state.SavedPaused);
 		}
-		if (state.Editor->HasScene() || state.Session)
-		{
-			const Status restored = state.Editor->SetSelection(std::move(state.SavedSelection), state.SavedSelectionTarget);
-			ENGINE_VERIFY(restored.has_value(), "test ownership must preserve the original selection: {}", restored ? "" : restored.error().ToString());
-		}
+		// Ids that vanished while the run owned the editor are dropped; restoring a selection never aborts the editor.
+		state.Editor->RestoreSelection(std::move(state.SavedSelection), state.SavedSelectionTarget);
 		if (state.TestDefersReloads)
 			state.Editor->GetAssets().SetReloadsDeferred(false);
 		state.TestDefersReloads = false;
@@ -692,14 +792,48 @@ namespace Engine {
 
 	Status EditorPlayController::StartRecording(const PlayStartOptions& options, bool restart)
 	{
-		ENGINE_TRY(CheckTestAdmission(options.LockstepOwner));
-		if (m_State->Session && !restart)
+		State& state = *m_State;
+		EditorContext& editor = *state.Editor;
+		ENGINE_TRY(CheckTestAdmission(options.LockstepOwner, restart));
+		if (state.Session && !restart)
 			return MakeError(ErrorCode::InvalidState, "pass restart:true to replace the play session");
-		ENGINE_TRY(CheckPlayScripts(m_State->Editor->GetProject().GetSettings()));
-		ENGINE_TRY(m_State->Editor->PrepareForPlay());
-		ENGINE_TRY(ReplaceSession(options, m_State->Editor->GetProject().GetSettings()));
-		m_State->RecordingOwner = options.LockstepOwner;
+		PlayStartOptions recording = options;
+		if (recording.ScenePath.empty())
+		{
+			// The replay names the scene by its saved asset and every replay loads that file (§6.7), so the recording
+			// starts from the same file, never from unsaved edits the replay could not reproduce.
+			if (!editor.HasScene())
+				return MakeError(ErrorCode::InvalidState, "no scene is open");
+			if (!editor.GetScenePath().has_value())
+				return std::unexpected(Error(ErrorCode::InvalidState, "recording needs a saved scene asset").WithHint("save the scene with scene.save, then start the recording"));
+			if (editor.IsSceneDirty())
+			{
+				return std::unexpected(Error(ErrorCode::InvalidState, "the open scene has unsaved changes: a recording starts from the saved scene asset its replay names")
+						.WithHint("save the scene with scene.save, then start the recording"));
+			}
+			recording.ScenePath = std::string(editor.GetScenePath()->GetPath());
+		}
+		ENGINE_TRY(ValidatePlayRequest(recording));
+		ENGINE_TRY(CheckPlayScripts(editor.GetProject().GetSettings()));
+		ENGINE_TRY(editor.PrepareForPlay());
+		ENGINE_TRY(ReplaceSession(recording, editor.GetProject().GetSettings()));
+		state.RecordingOwner = options.LockstepOwner;
 		return {};
+	}
+
+	void EditorPlayController::SetPhaseMarker(Watchdog& marker)
+	{
+		if (m_State->PhaseMarker != nullptr && m_State->PhaseMarker != &marker)
+			m_State->PhaseMarker->SetScriptPhase({});
+		m_State->PhaseMarker = &marker;
+	}
+
+	void EditorPlayController::ClearPhaseMarker(const Watchdog& marker)
+	{
+		if (m_State->PhaseMarker != &marker)
+			return;
+		m_State->PhaseMarker->SetScriptPhase({});
+		m_State->PhaseMarker = nullptr;
 	}
 
 	Status EditorPlayController::ReplaceSession(const PlayStartOptions& options, ProjectSettings project)
@@ -714,7 +848,8 @@ namespace Engine {
 			: audio != nullptr                                ? std::optional(Utils::ReadMixerVolumes(*audio))
 															  : std::nullopt;
 		const CursorMode cursor = state.GetScriptCursorMode();
-		ENGINE_TRY_ASSIGN(PreparedSession prepared, PrepareSession(options, std::move(project), false, nullptr, nullptr, false, false, nullptr, false));
+		// Recording and replay sessions are deterministic: they keep the fixed view, lockstep or not.
+		ENGINE_TRY_ASSIGN(PreparedSession prepared, PrepareSession(options, std::move(project), false, nullptr, nullptr, false, false, nullptr, false, true));
 		if (!prepared.Header.Scene.Handle.IsValid())
 			return MakeError(ErrorCode::InvalidState, "recording and replay require a saved scene asset");
 		state.Session.reset();
@@ -729,6 +864,7 @@ namespace Engine {
 		state.MixerBaseline = baseline;
 		state.Header = std::move(prepared.Header);
 		state.Session = std::move(prepared.Session);
+		state.SessionViewFixed = prepared.FixedView;
 		state.ReplayInputSerial = 0;
 		state.RecordingOwner = NoClient;
 		state.Session->Activate();
@@ -739,6 +875,8 @@ namespace Engine {
 			editor.GetAssets().SetReloadsDeferred(true);
 			state.DefersReloads = true;
 		}
+		// An edit selection follows into the new runtime scene; the replaced runtime scene's selection is cleared.
+		editor.RetargetSelectionToPlay();
 		state.AppendStateChanged();
 		return {};
 	}
@@ -759,7 +897,10 @@ namespace Engine {
 		options.Paused = true;
 		ProjectSettings project = editor.GetProject().GetSettings();
 		project.Simulation.FixedHz = header.FixedHz;
+		ENGINE_TRY(ValidatePlayRequest(options));
 		ENGINE_TRY(CheckPlayScripts(project));
+		// Every RPC path into play cancels the active gestures and saves the recovery copy first (EditorApp::BeforePlay).
+		ENGINE_TRY(editor.PrepareForPlay());
 		ENGINE_TRY(ReplaceSession(options, std::move(project)));
 		m_State->ReplayInputSerial = m_State->Session->GetSerial();
 		return {};

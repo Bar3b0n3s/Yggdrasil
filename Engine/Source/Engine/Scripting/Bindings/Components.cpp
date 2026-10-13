@@ -324,6 +324,8 @@ namespace Engine {
 			ComponentChecked(call, ScriptProxy::WriteField(call, Lua::Check<ScriptProxyIdentity>(call, 1), "Materials", Value::FromArray(std::move(values))));
 			return 0;
 		}
+		// The host's game view in view coordinates (a play session reports its own view size as WindowSize, PlaySession.h),
+		// the same space as Input.GetMousePosition, so a ray through the cursor hits what the rendered image shows there.
 		static glm::dvec2 CameraSize(ScriptCall& call)
 		{
 			const glm::dvec2 size(call.Engine->GetHost().GetEnvironment().WindowSize);

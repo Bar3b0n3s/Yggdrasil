@@ -4,6 +4,7 @@
 #include "Engine/Scripting/Private/ScriptEngineAccess.h"
 #include "Engine/Scripting/ScriptEngine.h"
 #include "Engine/Scripting/ScriptHost.h"
+#include "Engine/Scripting/ScriptTime.h"
 #include "Engine/Scripting/TaskScheduler.h"
 
 #include <lua.h>
@@ -51,7 +52,7 @@ namespace Engine {
 			const double delta = call.Engine->GetHost().GetFrameState().FixedDeltaTime;
 			if (!std::isfinite(delta) || delta <= 0.0)
 				Lua::RaiseError(call, "fixed delta must be positive and finite");
-			return TaskTicks(call, std::ceil(seconds / delta));
+			return TaskTicks(call, ScriptSecondsToTicks(seconds, delta));
 		}
 
 		static int TaskWaitFor(ScriptCall& call, uint64_t ticks)

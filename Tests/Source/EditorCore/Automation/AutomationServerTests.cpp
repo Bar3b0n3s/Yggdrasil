@@ -353,7 +353,7 @@ namespace Engine {
 		TEST_CASE("AutomationServer: disconnecting a client cancels its pending operations and appends the event")
 		{
 			Test::EditorTestFixture fixture("ServerDisconnect");
-			fixture.CreateAndOpenProject(); // log.read, which checks the cancellation below, needs a project (Â§12.1)
+			fixture.CreateAndOpenProject(); // log.read, which checks the cancellation below, needs a project (§12.1)
 			Test::AutomationTestClient client(fixture.GetEditor());
 			AutomationServer& server = client.GetServer();
 			const ClientId other = server.ConnectInProcess("doomed");

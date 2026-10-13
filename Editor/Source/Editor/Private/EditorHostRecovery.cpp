@@ -3,6 +3,7 @@
 
 #include "EditorCore/Autosave/Autosave.h"
 #include "EditorCore/EditorContext.h"
+#include "EditorCore/Play/EditorPlayController.h"
 #include "Engine/Core/Assert.h"
 
 #include <limits>
@@ -53,6 +54,9 @@ namespace Engine {
 		if (!m_Editor.HasProject() || m_Project != &m_Editor.GetProject() || m_ProjectEpoch == 0
 			|| m_ProjectEpoch != m_OfferEpoch || m_Revision != m_Editor.GetRevision())
 			return MakeError(ErrorCode::Conflict, "The project or scene changed after recovery was offered");
+		// A test run leaves the binding intact but owns the edit scene until it finishes.
+		if (m_Editor.GetPlay().IsTestRunActive())
+			return MakeError(ErrorCode::InvalidState, "A test run owns the editor; recover after it finishes");
 		return {};
 	}
 

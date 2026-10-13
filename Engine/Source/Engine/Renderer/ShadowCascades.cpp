@@ -130,7 +130,10 @@ namespace Engine {
 			ShadowCascade& cascade = result.Cascades[index];
 			cascade.SplitNear = index == 0 ? camera.NearClip : splits[index - 1];
 			cascade.SplitFar = splits[index];
-			cascade.BlendStart = std::lerp(cascade.SplitFar, cascade.SplitNear, ShadowCascadeBlendFraction);
+			// Each cascade blends into the next over the last tenth of its own range; the last one fades shadows out over the
+			// last tenth of the effective shadow distance, min(FarClip, ShadowDistance), its SplitFar (§8.7).
+			cascade.BlendStart = index + 1 < result.Count ? std::lerp(cascade.SplitFar, cascade.SplitNear, ShadowCascadeBlendFraction)
+														  : std::max(cascade.SplitNear, (1.0f - ShadowCascadeBlendFraction) * cascade.SplitFar);
 			// The next cascade contains the previous cascade's blend region as well as its own logical split.
 			const float fittedNear = index == 0 ? cascade.SplitNear : result.Cascades[index - 1].BlendStart;
 			ENGINE_TRY_ASSIGN(auto corners, Utils::ShadowViewCorners(camera, fittedNear, cascade.SplitFar));

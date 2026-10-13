@@ -131,6 +131,8 @@ namespace Engine {
 		[[nodiscard]] const MethodRegistry& GetMethods() const;
 		// session.shutdown's request: the exit code the Runtime ends with after the current frame.
 		[[nodiscard]] std::optional<int> GetShutdownRequest() const;
+		// The watchdog whose phase a Busy answer reports; the Runtime sets its script phase from the play session (§13.2).
+		[[nodiscard]] Watchdog& GetWatchdog();
 
 		// In-process clients for the C++ tests, as AutomationServer's.
 		[[nodiscard]] ClientId ConnectInProcess(std::string name);

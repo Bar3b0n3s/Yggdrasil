@@ -2,6 +2,7 @@
 #include "Editor/Panels/UndoHistoryPanel.h"
 
 #include "Editor/SupportingPanelTestUi.h"
+#include "EditorCore/Play/EditorPlayController.h"
 #include "Engine/Scene/Scene.h"
 
 namespace Engine {
@@ -98,6 +99,62 @@ namespace Engine {
 			fixture.Pump();
 			CHECK(fixture.GetEditor().GetHistory().GetUndoCount() == before);
 			CHECK(fixture.GetEditor().GetHistory().GetRedoCount() == 0);
+		}
+
+		TEST_CASE("UndoHistoryPanel: history distinguishes saved applied and undone agent changes")
+		{
+			Test::UtilityPanelFixture fixture;
+			fixture.OpenProject();
+			UndoHistoryPanel panel;
+			CHECK(fixture.Draw(panel).contains("Scene matches the saved state"));
+			REQUIRE(fixture.GetClient().Call("entity.create", Json{ { "name", "Supporting history target" } }));
+			CHECK(fixture.Draw(panel).contains("Unsaved scene changes"));
+			CHECK(fixture.Draw(panel).contains("[agent]"));
+			const uint64_t revision = fixture.GetEditor().GetRevision();
+			const size_t count = fixture.GetEditor().GetHistory().GetUndoCount();
+			Test::SupportingPanelTestUi::ClickText(fixture, panel, "Undo");
+			CHECK(fixture.GetEditor().GetRevision() == revision);
+			fixture.Pump();
+			const std::string undone = fixture.Draw(panel);
+			CHECK(undone.contains("Scene matches the saved state"));
+			CHECK(undone.contains("Undone"));
+			CHECK(undone.contains("Current position"));
+			CHECK(fixture.GetEditor().GetHistory().GetUndoCount() + 1 == count);
+			Test::SupportingPanelTestUi::ClickText(fixture, panel, "Redo");
+			CHECK(fixture.GetEditor().GetHistory().GetRedoCount() == 1);
+			fixture.Pump();
+			CHECK(fixture.Draw(panel).contains("Applied"));
+			CHECK(fixture.GetEditor().GetHistory().GetUndoCount() == count);
+		}
+
+		TEST_CASE("UndoHistoryPanel: undo and redo wait while a test run owns the editor")
+		{
+			// The stepped server clock keeps the run pending for exactly one runner step per Pump, whatever the build speed.
+			Test::UtilityPanelFixture fixture(Test::UtilityPanelClock::Stepped);
+			fixture.OpenProject();
+			auto& client = fixture.GetClient();
+			REQUIRE(client.Call("script.write", Json{ { "path", "Assets/Tests/History.test.luau" }, { "source", "return Test.Suite('History', function() Test.Case('long', function() Test.WaitTicks(1000) end) end)" } }));
+			REQUIRE(client.Call("project.setSettings", Json{ { "patch", Json{ { "Testing", Json{ { "Suites", Json::array({ Json{ { "Script", "Assets/Tests/History.test.luau" }, { "Scene", "" }, { "Modes", Json::array({ "Editor" }) } } }) } } } } } }));
+			REQUIRE(client.Call("entity.create", Json{ { "name", "History target" } }));
+			UndoHistoryPanel panel;
+			fixture.Draw(panel);
+			const size_t before = fixture.GetEditor().GetHistory().GetUndoCount();
+			static_cast<void>(client.Submit("test.run", Json::object()));
+			client.GetServer().Pump();
+			REQUIRE(fixture.GetEditor().GetPlay().IsTestRunActive());
+			CHECK(fixture.Draw(panel).contains("Tests are running"));
+			// The button is disabled: nothing is queued, so no refusal is reported either.
+			Test::SupportingPanelTestUi::ClickText(fixture, panel, "Undo");
+			fixture.Pump();
+			const std::string during = fixture.Draw(panel);
+			CHECK_FALSE(during.contains("a test run owns the editor"));
+			CHECK(fixture.GetEditor().GetHistory().GetUndoCount() == before);
+			client.GetServer().DisconnectInProcess(client.GetClient());
+			REQUIRE_FALSE(fixture.GetEditor().GetPlay().IsTestRunActive());
+			CHECK_FALSE(fixture.Draw(panel).contains("Tests are running"));
+			Test::SupportingPanelTestUi::ClickText(fixture, panel, "Undo");
+			fixture.Pump();
+			CHECK(fixture.GetEditor().GetHistory().GetUndoCount() + 1 == before);
 		}
 	}
 

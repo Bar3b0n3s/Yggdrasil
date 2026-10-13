@@ -110,7 +110,8 @@ namespace Engine {
 
 	// Registry struct "TestSuiteOverrides" (§11.10 "Overrides"), applied exactly (no Dist minimum) for one suite. 0 means
 	// "use the project setting" for the two limits, and Inherit likewise for PauseOnError (ADR 0006 decision 11: the
-	// registry has no optional fields).
+	// registry has no optional fields). PauseOnError is accepted but has no effect: a test-mode ScriptEngine never pauses
+	// on a script error, because the runner owns time (§11.7).
 	struct TestSuiteOverrides
 	{
 		// Registry enum "TestPauseOnError".

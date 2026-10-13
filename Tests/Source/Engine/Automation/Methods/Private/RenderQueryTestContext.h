@@ -29,6 +29,7 @@ namespace Engine::Test {
 		bool Runtime = false;
 		mutable uint32_t StatisticsReads = 0;
 		std::vector<UUID> Selection{};
+		const Scene* SelectionScene = nullptr; // the scene Selection refers to; null: the context's scene
 		[[nodiscard]] Scope<MethodContext> CreateNested(MethodRequest request) const override
 		{
 			return CreateScope<RenderQueryTestContext>(*m_Scene, *m_Assets, *m_Settings, std::move(request));
@@ -66,7 +67,11 @@ namespace Engine::Test {
 				return AutomationMethodContext::GetHostStatistics();
 			return Statistics;
 		}
-		[[nodiscard]] std::vector<UUID> GetSelectedEntities() const override { return Selection; }
+		// The selection refers to SelectionScene (the context's scene when null).
+		[[nodiscard]] std::vector<UUID> GetSelectedEntities(const Scene& scene) const override
+		{
+			return &scene == (SelectionScene != nullptr ? SelectionScene : m_Scene) ? Selection : std::vector<UUID>();
+		}
 	private:
 		Scene* m_Scene = nullptr;
 		AssetManager* m_Assets = nullptr;

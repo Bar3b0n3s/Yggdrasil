@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Engine/Renderer/SceneRenderer.h"
+
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Graphics/RenderTargetPool.h"
 #include "Engine/Renderer/BloomPass.h"
@@ -10,13 +11,13 @@
 #include "Engine/Renderer/FxaaPass.h"
 #include "Engine/Renderer/GtaoPass.h"
 #include "Engine/Renderer/PassBindingCache.h"
+#include "Engine/Renderer/Private/ForwardPipelines.h"
+#include "Engine/Renderer/Private/MaterialBindingCache.h"
 #include "Engine/Renderer/SelectionPass.h"
 #include "Engine/Renderer/ShadowPass.h"
 #include "Engine/Renderer/SkyboxPass.h"
 #include "Engine/Renderer/TextRenderer.h"
 #include "Engine/Renderer/TonemapPass.h"
-#include "Engine/Renderer/Private/ForwardPipelines.h"
-#include "Engine/Renderer/Private/MaterialBindingCache.h"
 #include "Shared/DrawConstants.h"
 #include "Shared/ShaderLight.h"
 
@@ -82,6 +83,8 @@ namespace Engine {
 			nvrhi::TextureHandle AoScratch{};
 			nvrhi::TextureHandle Cascades{};
 			nvrhi::TextureHandle SpotAtlas{};
+			std::vector<nvrhi::FramebufferHandle> CascadeFramebuffers{}; // ShadowPass::CreateFramebuffers(Cascades)
+			nvrhi::FramebufferHandle SpotAtlasFramebuffer{};
 			nvrhi::TextureHandle SelectionMask{};
 			nvrhi::TextureHandle SelectionScratch{};
 			nvrhi::TextureHandle Overdraw{};
@@ -169,8 +172,11 @@ namespace Engine {
 		bool RecordedPicking = false;
 		bool SubmittedPicking = false;
 		bool SpotLimitLogged = false;
+		bool ShadowRejectionLogged = false; // a light the shadow planners reject is reported once per renderer
+		bool WireframeBudgetLogged = false; // wireframe edges beyond the debug draw budget are reported once per renderer
 		bool AllocationLimitLogged = false;
 		nvrhi::BufferHandle ShadowConstantsBuffer{};
+		nvrhi::BufferHandle ShadowCasterConstantsBuffer{}; // ShadowPass::GetCasterConstantsDesc
 		Utils::MaterialBindingCache Materials{};
 
 		Detail::SceneRendererTargets Targets{};

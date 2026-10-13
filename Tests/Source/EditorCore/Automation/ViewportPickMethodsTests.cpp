@@ -7,19 +7,17 @@
 #include "Support/AutomationTestClient.h"
 
 namespace Engine {
-	namespace {
 
-		void MakePickScene(Test::AutomationFixture& setup)
-		{
-			REQUIRE(setup.Call("entity.create", Json{ { "name", "Cube" }, { "components", { { "MeshRenderer", { { "Mesh", "engine://Meshes/Cube" } } } } } }));
-			REQUIRE(setup.Call("entity.create", Json{ { "name", "Camera" }, { "components", { { "Transform", { { "Translation", { 0, 0, 5 } } } }, { "Camera", { { "Primary", true } } } } } }));
-			ExplicitRenderCamera camera;
-			camera.Position = { 0, 0, 5 };
-			camera.Target = { 0, 0, 0 };
-			REQUIRE(setup.GetEditor().GetViewportState().SetCamera(camera));
-		}
-
+	static void MakePickScene(Test::AutomationFixture& setup)
+	{
+		REQUIRE(setup.Call("entity.create", Json{ { "name", "Cube" }, { "components", { { "MeshRenderer", { { "Mesh", "engine://Meshes/Cube" } } } } } }));
+		REQUIRE(setup.Call("entity.create", Json{ { "name", "Camera" }, { "components", { { "Transform", { { "Translation", { 0, 0, 5 } } } }, { "Camera", { { "Primary", true } } } } } }));
+		ExplicitRenderCamera camera;
+		camera.Position = { 0, 0, 5 };
+		camera.Target = { 0, 0, 0 };
+		REQUIRE(setup.GetEditor().GetViewportState().SetCamera(camera));
 	}
+
 	TEST_SUITE("Automation")
 	{
 		TEST_CASE("ViewportPick: scene and game rays use the current framebuffer extent")

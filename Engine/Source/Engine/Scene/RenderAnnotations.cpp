@@ -25,19 +25,19 @@
 
 namespace Engine {
 
-	namespace {
+	namespace Utils {
 
-		bool IsFiniteAnnotationVector(const glm::vec3& value)
+		static bool IsFiniteAnnotationVector(const glm::vec3& value)
 		{
 			return std::isfinite(value.x) && std::isfinite(value.y) && std::isfinite(value.z);
 		}
 
-		bool HasPositiveComponent(const glm::vec3& value)
+		static bool HasPositiveComponent(const glm::vec3& value)
 		{
 			return std::max({ value.x, value.y, value.z }) > 0;
 		}
 
-		bool IsContributingRenderLight(const LightData& light)
+		static bool IsContributingRenderLight(const LightData& light)
 		{
 			const glm::vec3 radiance = light.Color * light.Intensity;
 			if (!IsFiniteAnnotationVector(light.Color) || !std::isfinite(light.Intensity)
@@ -63,7 +63,7 @@ namespace Engine {
 			return MakeError(ErrorCode::InvalidArgument, "invalid render annotation options or alpha");
 		if (!snapshot.HasCamera)
 			return {};
-		DebugDrawList debug = snapshot.DebugDraw;
+		DebugDrawList debug = snapshot.AnnotationDraw;
 		std::vector<RenderIcon> icons = snapshot.Icons;
 		const bool addIcons = HasFlag(snapshot.Flags, RenderViewFlags::EditorOverlays) && HasFlag(snapshot.Flags, RenderViewFlags::Icons);
 		for (const UUID id : scene.GetCanonicalOrder())
@@ -73,7 +73,7 @@ namespace Engine {
 				continue;
 			const glm::mat4 world = ComputeRenderedWorldMatrix(entity, snapshot.Alpha);
 			const glm::vec3 position(world[3]);
-			if (!IsFiniteAnnotationVector(position))
+			if (!Utils::IsFiniteAnnotationVector(position))
 				continue;
 			const bool inFront = (snapshot.Camera.View * glm::vec4(position, 1)).z < 0;
 			const bool label = options.Labels == RenderAnnotationLabels::All
@@ -91,7 +91,7 @@ namespace Engine {
 				if (const auto* mesh = entity.TryGetComponent<MeshRendererComponent>(); mesh != nullptr && mesh->Visible && mesh->Mesh.IsValid())
 				{
 					const Aabb bounds = assets.GetOrPlaceholder<MeshData>(mesh->Mesh.GetHandle())->Bounds.Transformed(world);
-					if (!bounds.IsEmpty() && IsFiniteAnnotationVector(bounds.Min) && IsFiniteAnnotationVector(bounds.Max))
+					if (!bounds.IsEmpty() && Utils::IsFiniteAnnotationVector(bounds.Min) && Utils::IsFiniteAnnotationVector(bounds.Max))
 						debug.AddBox(bounds.GetCenter(), bounds.GetSize() * 0.5f, glm::quat(1, 0, 0, 0), glm::vec4(1, 1, 0, 1));
 				}
 			if (addIcons && inFront)
@@ -116,7 +116,7 @@ namespace Engine {
 		}
 		if (HasFlag(snapshot.Flags, RenderViewFlags::Colliders))
 			AppendColliderDebugDraw(BuildColliderDebugDraw(scene, layers, physics, &assets, { .Alpha = snapshot.Alpha }), debug);
-		snapshot.DebugDraw = std::move(debug);
+		snapshot.AnnotationDraw = std::move(debug);
 		snapshot.Icons = std::move(icons);
 		return {};
 	}
@@ -127,14 +127,14 @@ namespace Engine {
 		RenderSceneValidation result;
 		bool illumination = false;
 		for (const LightData& light : snapshot.Lights)
-			if (IsContributingRenderLight(light))
+			if (Utils::IsContributingRenderLight(light))
 			{
 				illumination = true;
 				if (light.Type == RenderLightType::Spot && light.CastShadows)
 					++result.ShadowedSpotLights;
 			}
 		const RenderEnvironment& environment = snapshot.Environment;
-		if (!std::isfinite(environment.Intensity) || !IsFiniteAnnotationVector(environment.FallbackColor))
+		if (!std::isfinite(environment.Intensity) || !Utils::IsFiniteAnnotationVector(environment.FallbackColor))
 			return MakeError(ErrorCode::InvalidArgument, "environment illumination must be finite");
 		glm::vec3 ambient = environment.FallbackColor;
 		if (environment.Environment.IsValid())
@@ -144,9 +144,9 @@ namespace Engine {
 				if (const auto map = AssetCast<EnvironmentData>(*loaded))
 					ambient = map->IrradianceSH9[0];
 		}
-		if (!IsFiniteAnnotationVector(ambient) || !IsFiniteAnnotationVector(ambient * environment.Intensity))
+		if (!Utils::IsFiniteAnnotationVector(ambient) || !Utils::IsFiniteAnnotationVector(ambient * environment.Intensity))
 			return MakeError(ErrorCode::InvalidArgument, "environment irradiance must be finite");
-		illumination = illumination || (environment.Intensity > 0 && HasPositiveComponent(ambient));
+		illumination = illumination || (environment.Intensity > 0 && Utils::HasPositiveComponent(ambient));
 		bool needsLighting = false;
 		for (const MeshDrawItem& item : snapshot.Meshes)
 		{
@@ -162,9 +162,9 @@ namespace Engine {
 					material = item.Materials[submesh.MaterialSlot];
 				const auto data = assets.GetOrPlaceholder<MaterialData>(material);
 				const glm::vec3 emission = data->Emissive * data->EmissiveStrength;
-				if (!IsFiniteAnnotationVector(data->Emissive) || !std::isfinite(data->EmissiveStrength) || !IsFiniteAnnotationVector(emission))
+				if (!Utils::IsFiniteAnnotationVector(data->Emissive) || !std::isfinite(data->EmissiveStrength) || !Utils::IsFiniteAnnotationVector(emission))
 					return MakeError(ErrorCode::InvalidArgument, "material emission must be finite");
-				needsLighting = needsLighting || !HasPositiveComponent(emission);
+				needsLighting = needsLighting || !Utils::HasPositiveComponent(emission);
 			}
 		}
 		result.NoLighting = needsLighting && !illumination;

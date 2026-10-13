@@ -26,7 +26,7 @@ All modes; Runtime|Test; pure/read.
 
 `() -> vector`
 
-Returns window coordinates as vector(width, height, 0).
+Returns the size of the session's view in view coordinates as vector(width, height, 0): the game view's image in ordinary play, the project's Window.Width x Window.Height in lockstep, recording, replay and test sessions.
 
 All modes; Runtime|Test; pure/read.
 
@@ -116,7 +116,7 @@ Argument 1: AudioGroup.
 
 `(clip: AssetRef, position: vector?, volume: number?, group: AudioGroup?) -> ()`
 
-Play a non-spatial one-shot when position is nil, otherwise spatial; volume defaults 1 and group Sfx.
+Play a non-spatial one-shot when position is nil, otherwise spatial; volume defaults 1 and group Sfx. At most 1024 one-shots start per frame; a later call in the frame raises an error.
 
 All modes; Runtime|Test; mutates.
 
@@ -188,7 +188,7 @@ All modes; Runtime|Test; mutates.
 
 `(position: vector, text: string, color: Color?, duration: number?) -> ()`
 
-Adds UTF-8 text at a world position with the default 16-pixel size.
+Adds UTF-8 text of at most 1024 bytes at a world position with the default 16-pixel size.
 
 All modes; Runtime|Test; mutates.
 
@@ -326,7 +326,7 @@ All modes; Runtime|Test; pure/read.
 
 `() -> vector`
 
-Returns cursor window coordinates as vector(x, y, 0).
+Returns the cursor position in view coordinates as vector(x, y, 0): the pixels of the session's view, origin top-left (the game view's image in ordinary play, the project's Window.Width x Window.Height in lockstep, recording, replay and test sessions).
 
 All modes; Runtime|Test; pure/read.
 
@@ -452,7 +452,7 @@ Argument 1: CursorMode.
 
 ## Log
 
-Script-channel logging with authored source, line, entity and simulation tick; arguments use tostring and tab separators.
+Script-channel logging with authored source, line, entity and simulation tick; arguments use tostring and tab separators. An entry keeps at most 8192 bytes (longer text is truncated and marked), and one VM writes at most 1024 entries per frame, dropping and counting the rest.
 
 ### Log.Error
 
@@ -786,7 +786,7 @@ Active-scene operations; searches return canonical order and never expose pendin
 
 `(name: string?, parent: Entity?) -> Entity`
 
-Creates immediately with a seeded ID and default name Entity. Runs OnCreate before returning; use IsValid if it may destroy itself.
+Creates immediately with a seeded ID and default name Entity (a name is at most 256 bytes). Runs OnCreate before returning; use IsValid if it may destroy itself.
 
 All modes; Runtime|Test; mutates.
 
@@ -890,7 +890,7 @@ All modes; Runtime|Test; pure/read.
 
 `(prefab: AssetRef, position: vector?, rotation: Quat?, parent: Entity?) -> Entity`
 
-Instantiates through the shared prefab path and invokes OnCreate for the complete subtree before returning.
+Instantiates through the shared prefab path and invokes OnCreate for the complete subtree before returning. A position that cannot be represented under the parent raises a located error before anything is created.
 
 All modes; Runtime|Test; mutates.
 
@@ -960,7 +960,7 @@ All modes; Runtime|Test; mutates.
 
 ## Test
 
-Feature test suites, assertions, waits and deterministic input.
+Feature test suites, assertions, waits and deterministic input. A reported message shows authored locations and keeps at most 8192 bytes, truncated and marked like a log entry. A case's report keeps at most 32 failures for expectations and unexpected script errors, the last then counting any further ones as [truncated: <n> more failures], and a suite at most 1024 such failures. Test.Inject* queues at most 1024 events per input tick.
 
 ### Test.CaptureAudio
 
@@ -974,7 +974,7 @@ All modes; Test; mutates.
 
 `(name: string, fn: () -> (), options: TestCaseOptions?) -> ()`
 
-Register a case while collecting the suite body.
+Register a case while collecting the suite body; the name is nonempty, unique in the suite and at most 256 bytes, and a suite has at most 4096 cases.
 
 All modes; Test; pure/read.
 
@@ -1006,7 +1006,7 @@ All modes; Test; pure/read.
 
 `(pattern: string, withinTicks: number) -> ()`
 
-Claim one nonfatal error occurrence in the current case using a Luau message pattern.
+Claim one nonfatal error occurrence in the current case using a Luau message pattern of at most 1024 bytes; the case keeps at most 256 unclaimed errors to claim.
 
 All modes; Test; pure/read.
 
@@ -1014,7 +1014,7 @@ All modes; Test; pure/read.
 
 `(message: string) -> ()`
 
-End this case as failed, even inside pcall.
+End this case as failed. A case thread, or a task a behaviour spawned (which is cancelled), never runs past the call, even inside pcall; a lifecycle callback cannot yield, so there the call raises a script error that unwinds to the nearest pcall. The outcome stays latched either way.
 
 All modes; Test; pure/read.
 
@@ -1038,7 +1038,7 @@ All modes; Test; pure/read.
 
 `(since: number?) -> {ScriptError}`
 
-Read occurrences newer than an exclusive error cursor; claimed errors remain visible.
+Read occurrences newer than an exclusive error cursor; claimed errors remain visible. The VM keeps the 256 distinct errors with the latest occurrences.
 
 All modes; Test; pure/read.
 
@@ -1052,35 +1052,51 @@ All modes; Test; pure/read.
 
 ### Test.InjectAction
 
-`(name: string, state: string?, value: number?) -> ()`
+`(name: string, state: InputEventState?, value: number?) -> ()`
 
-Queue a named button state or analog value for the next unapplied input tick.
+Queue a named button state or analog value (with a nil or Down state) for the next unapplied input tick.
 
 All modes; Test; mutates.
+
+Argument 2: InputEventState (optional).
 
 ### Test.InjectGamepad
 
-`(index: number, buttonOrAxis: string, stateOrValue: string | number) -> ()`
+`((index: number, button: GamepadButton, state: InputEventState) -> ()) & ((index: number, axis: GamepadAxis, value: number) -> ())`
 
-Queue a gamepad button state or engine-convention axis value.
+Queue a gamepad button state, or an engine-convention axis value when the third argument is a number.
 
 All modes; Test; mutates.
 
+Argument 2: GamepadButton when argument 3 is a string.
+
+Argument 3: InputEventState when argument 3 is a string.
+
+Argument 2: GamepadAxis when argument 3 is a number.
+
 ### Test.InjectKey
 
-`(key: string, state: string) -> ()`
+`(key: Key, state: InputEventState) -> ()`
 
 Queue a key state for the next unapplied input tick.
 
 All modes; Test; mutates.
 
+Argument 1: Key.
+
+Argument 2: InputEventState.
+
 ### Test.InjectMouse
 
-`(button: string, state: string, position: vector?) -> ()`
+`(button: MouseButton, state: InputEventState, position: vector?) -> ()`
 
 Queue a mouse button and optional finite XY position.
 
 All modes; Test; mutates.
+
+Argument 1: MouseButton.
+
+Argument 2: InputEventState.
 
 ### Test.ReloadScript
 
@@ -1094,7 +1110,7 @@ EditorOnly; Test; mutates.
 
 `(name: string) -> ()`
 
-Capture a screenshot through the owning host.
+Capture a screenshot through the owning host; a suite takes at most 256 screenshots, and a later call raises an error without capturing.
 
 All modes; Test; mutates.
 
@@ -1102,7 +1118,7 @@ All modes; Test; mutates.
 
 `(reason: string) -> ()`
 
-End this case as skipped without erasing earlier failures.
+End this case as skipped without erasing earlier failures; it stops its caller the way Test.Fail does, and the outcome stays latched.
 
 All modes; Test; pure/read.
 
@@ -1110,7 +1126,7 @@ All modes; Test; pure/read.
 
 `(name: string, body: () -> (), options: TestSuiteOptions?) -> TestSuite`
 
-Construct a suite without executing its body.
+Construct a suite without executing its body; the name is UTF-8 without NUL and at most 256 bytes.
 
 All modes; LoadTime|Runtime|Test; pure/read.
 
@@ -1209,6 +1225,14 @@ All modes; Runtime|Test; mutates.
 ## AssetRef
 
 An opaque immutable asset handle; resolve metadata through Assets.
+
+### AssetRef.__eq
+
+`(self: AssetRef, other: AssetRef) -> boolean`
+
+Compares asset handles, so two references to the same asset are equal.
+
+All modes; LoadTime|Runtime|Test; pure/read.
 
 ## AudioListener
 
@@ -1682,7 +1706,7 @@ All modes; Runtime|Test; pure/read.
 
 `string`
 
-Physics layer name from project settings.
+Physics layer name from project settings. A value a script writes holds at most 4096 bytes of text.
 
 All modes; Runtime|Test; pure/read; setter mutates.
 
@@ -1751,6 +1775,14 @@ All modes; LoadTime|Runtime|Test; pure/read.
 `(r: number, g: number, b: number, a: number?) -> Color`
 
 Creates a linear color; alpha defaults to one. Channels must fit finite engine floats.
+
+All modes; LoadTime|Runtime|Test; pure/read.
+
+### Color.__eq
+
+`(self: Color, other: Color) -> boolean`
+
+Compares the four channels exactly, like vector equality.
 
 All modes; LoadTime|Runtime|Test; pure/read.
 
@@ -1870,7 +1902,7 @@ A UUID and scene generation identifying an entity; no native address is exposed.
 
 `(self: Entity, name: string, values: {[string]: any}?) -> any`
 
-Validate and add a component; Script instances are synchronized before returning.
+Validate and add a component and return its proxy; Script instances are synchronized before returning, and nil is returned when the new Script's OnCreate destroyed the entity. Each value holds at most 4096 bytes of text (strings, map keys and Variant text together).
 
 All modes; Runtime|Test; mutates.
 
@@ -1878,7 +1910,7 @@ All modes; Runtime|Test; mutates.
 
 `(self: Entity, tag: string) -> ()`
 
-Add a nonempty tag if absent.
+Add a nonempty tag of at most 256 bytes if absent; an entity carries at most 256 tags.
 
 All modes; Runtime|Test; mutates.
 
@@ -2078,7 +2110,7 @@ All modes; Runtime|Test; pure/read.
 
 `string`
 
-The entity name.
+The entity name; a written name is UTF-8 without NUL and at most 256 bytes.
 
 All modes; Runtime|Test; pure/read; setter mutates.
 
@@ -2518,6 +2550,14 @@ Returns Z-X-Y Euler degrees with X in [-90, 90] and Y/Z in (-180, 180], matching
 
 All modes; LoadTime|Runtime|Test; pure/read.
 
+### Quat.__eq
+
+`(self: Quat, other: Quat) -> boolean`
+
+Compares the four components exactly, like vector equality; q and -q are the same rotation but compare unequal.
+
+All modes; LoadTime|Runtime|Test; pure/read.
+
 ### Quat.__mul
 
 `((a: Quat, b: Quat) -> Quat) & ((rotation: Quat, value: vector) -> vector)`
@@ -2746,7 +2786,7 @@ All modes; Runtime|Test; pure/read.
 
 `string`
 
-Physics layer name from project settings.
+Physics layer name from project settings. A value a script writes holds at most 4096 bytes of text.
 
 All modes; Runtime|Test; pure/read; setter mutates.
 
@@ -2878,7 +2918,7 @@ All modes; Runtime|Test; pure/read; setter mutates.
 
 `{[string]: any}`
 
-Overrides of the script's declared fields by name, each checked against the field's declared type; an unknown or mismatching override is kept and reported, and the field uses its declared default.
+Overrides of the script's declared fields by name, each checked against the field's declared type; an unknown or mismatching override is kept and reported, and the field uses its declared default. A value a script writes holds at most 4096 bytes of text.
 
 All modes; Runtime|Test; pure/read; setter mutates.
 
@@ -3062,7 +3102,7 @@ All modes; Runtime|Test; pure/read; setter mutates.
 
 `string`
 
-The UTF-8 text; a line feed starts a new line.
+The UTF-8 text; a line feed starts a new line. A value a script writes holds at most 4096 bytes of text.
 
 All modes; Runtime|Test; pure/read; setter mutates.
 
@@ -3542,7 +3582,7 @@ The type of an input event (§13.6).
 
 - `MouseButton`: A mouse button going down or up, optionally at a position.
 
-- `MouseMove`: The cursor moving to a position (window coordinates).
+- `MouseMove`: The cursor moving to a position in view coordinates (the session's view: the game view's image in ordinary play, Window.Width x Window.Height in lockstep, recording, replay and test sessions).
 
 - `MouseDelta`: The cursor moving by a delta.
 
@@ -4048,13 +4088,13 @@ A run mode a test suite runs in.
 
 ## TestPauseOnError
 
-Whether a script error pauses one test suite.
+A suite's PauseOnError override. A script error never pauses a test run, so no value changes the run's time.
 
-- `Inherit`: Use the project's Scripting.PauseOnError.
+- `Inherit`: Use the project's Scripting.PauseOnError, which pauses ordinary play only.
 
-- `Pause`: Pause the suite on a script error.
+- `Pause`: Accepted for compatibility; the test run still keeps running after a script error.
 
-- `Continue`: Keep running after a script error.
+- `Continue`: Keep running after a script error, as every test run does.
 
 ## TextAlignment
 

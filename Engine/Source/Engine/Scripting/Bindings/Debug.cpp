@@ -5,9 +5,12 @@
 #include "Engine/Renderer/DebugDrawList.h"
 #include "Engine/Scripting/ScriptEngine.h"
 #include "Engine/Scripting/ScriptHost.h"
+#include "Engine/Scripting/ScriptLimits.h"
 
 #include <cmath>
+#include <format>
 #include <limits>
+#include <string>
 
 namespace Engine {
 
@@ -105,7 +108,8 @@ namespace Engine {
 		static int DebugDrawText(ScriptCall& call)
 		{
 			const auto position = Lua::Check<glm::vec3>(call, 1);
-			const auto text = Lua::Check<std::string>(call, 2);
+			// The draw list retains the text for its duration and extraction copies it every frame (F17).
+			const auto text = Lua::CheckBoundedString(call, 2, MaxScriptDebugTextBytes);
 			const auto color = DebugColor(call, 3);
 			const auto duration = DebugDuration(call, 4);
 			if (!IsValidUtf8(text) || text.find('\0') != std::string::npos)
@@ -148,7 +152,7 @@ namespace Engine {
 				.Function("DrawBox", &Utils::DebugDrawBox, "(center: vector, halfExtents: vector, rotation: Quat?, color: Color?, duration: number?) -> ()", "Adds a box with positive half extents and a normalized rotation, identity by default.")
 				.Function("DrawSphere", &Utils::DebugDrawSphere, "(center: vector, radius: number, color: Color?, duration: number?) -> ()", "Adds a sphere with positive radius.")
 				.Function("DrawArrow", &Utils::DebugDrawArrow, "(from: vector, to: vector, color: Color?, duration: number?) -> ()", "Adds an arrow with a 0.1 metre head.")
-				.Function("DrawText", &Utils::DebugDrawText, "(position: vector, text: string, color: Color?, duration: number?) -> ()", "Adds UTF-8 text at a world position with the default 16-pixel size.")
+				.Function("DrawText", &Utils::DebugDrawText, "(position: vector, text: string, color: Color?, duration: number?) -> ()", std::format("Adds UTF-8 text of at most {} bytes at a world position with the default 16-pixel size.", MaxScriptDebugTextBytes))
 				.Function("Break", &Utils::DebugBreak, "() -> ()", "Pauses editor Play; Runtime does nothing; test runs count the call without pausing in every mode.");
 			return {};
 		}

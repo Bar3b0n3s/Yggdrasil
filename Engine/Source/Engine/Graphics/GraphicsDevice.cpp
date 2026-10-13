@@ -287,7 +287,6 @@ namespace Engine {
 			candidate.SamplerAnisotropy = features.features.samplerAnisotropy == VK_TRUE;
 			candidate.ImageCubeArray = features.features.imageCubeArray == VK_TRUE;
 			candidate.ShaderStorageImageExtendedFormats = features.features.shaderStorageImageExtendedFormats == VK_TRUE;
-			candidate.DepthClamp = features.features.depthClamp == VK_TRUE;
 			candidate.FillModeNonSolid = features.features.fillModeNonSolid == VK_TRUE;
 			candidate.DeviceFault = hasDeviceFaultExtension && faultFeatures.deviceFault == VK_TRUE;
 			candidate.HostImageCopy = queryVulkan14 && features14.hostImageCopy == VK_TRUE && CanHostCopyToShaderReadOnly(device);
@@ -691,7 +690,8 @@ namespace Engine {
 		m_Info.DeviceClass = GetDeviceClass(candidate.VendorID, candidate.DriverVersion, candidate.DriverID);
 		m_Info.HostImageCopy = deviceVulkan14 && candidate.HostImageCopy;
 		m_Info.DeviceFault = candidate.DeviceFault;
-		m_Info.DepthClamp = candidate.DepthClamp && !m_Specification.DisableDepthClamp;
+		// Per-fragment pancaking needs no device feature (ShadowPass, Shadow.slang): only the test restriction turns it off.
+		m_Info.DepthClamp = !m_Specification.DisableDepthClamp;
 		m_Info.FillModeNonSolid = candidate.FillModeNonSolid;
 		m_Info.PortabilitySubset = candidate.PortabilitySubset;
 		m_Info.BloomFormat = selection.BloomFormat;
@@ -726,7 +726,6 @@ namespace Engine {
 		features.features.samplerAnisotropy = VK_TRUE;
 		features.features.imageCubeArray = VK_TRUE;
 		features.features.shaderStorageImageExtendedFormats = VK_TRUE;
-		features.features.depthClamp = m_Info.DepthClamp ? VK_TRUE : VK_FALSE;
 		features.features.fillModeNonSolid = m_Info.FillModeNonSolid ? VK_TRUE : VK_FALSE;
 		void** tail = &features13.pNext;
 		if (m_Info.HostImageCopy)
@@ -831,7 +830,7 @@ namespace Engine {
 		};
 		addPath(m_Info.HostImageCopy, "host image copy");
 		addPath(m_Info.DeviceFault, "device fault");
-		addPath(m_Info.DepthClamp, "depth clamp");
+		addPath(m_Info.DepthClamp, "shadow pancaking");
 		addPath(m_Info.FillModeNonSolid, "wireframe");
 		addPath(m_Info.PortabilitySubset, "portability subset");
 		addPath(m_Info.BloomFormat == nvrhi::Format::R11G11B10_FLOAT, "B10G11R11 bloom");
@@ -942,6 +941,11 @@ namespace Engine {
 	Result<nvrhi::ShaderHandle> GraphicsDevice::CreateShaderSpecialization(nvrhi::IShader& baseShader,
 		std::span<const nvrhi::ShaderSpecialization> constants)
 	{
+		if (m_Diagnostics.ShouldFailShaderSpecialization())
+		{
+			return MakeError(ErrorCode::Gpu, "cannot create a specialization of shader '{}': out of device memory (injected by --gpu-inject-fault={})",
+				Utils::DebugNameOrUnnamed(baseShader.getDesc().debugName), GpuFaultToString(GpuFault::OomSpecialization));
+		}
 		nvrhi::ShaderHandle shader =
 			m_NvrhiDevice->createShaderSpecialization(&baseShader, constants.data(), static_cast<uint32_t>(constants.size()));
 		if (!shader)

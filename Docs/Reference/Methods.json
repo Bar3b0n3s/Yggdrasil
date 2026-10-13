@@ -6247,7 +6247,7 @@
 								"type": "string"
 							},
 							"position": {
-								"description": "mouseMove (required), mouseButton (optional): [x, y] in window coordinates.",
+								"description": "mouseMove (required), mouseButton (optional): [x, y] in view coordinates, the pixels of the session's view (the game view's image in ordinary play; the project's Window.Width x Window.Height in lockstep, recording, replay and test sessions), origin top-left.",
 								"type": "array",
 								"prefixItems": [
 									{
@@ -6539,6 +6539,10 @@
 					},
 					"expectedStateHash": {
 						"description": "Recorded final hash.",
+						"type": "string"
+					},
+					"stopReason": {
+						"description": "Why playback ended before the replay's final tick (a quit or a fatal script error); empty when it reached it.",
 						"type": "string"
 					},
 					"expect": {
@@ -7125,6 +7129,13 @@
 						"description": "An input recording is active.",
 						"type": "boolean"
 					},
+					"stopped": {
+						"description": "A fatal script error (such as a second memory-limit breach) stopped the session: ticks no longer advance.",
+						"type": "boolean"
+					},
+					"stopError": {
+						"description": "The script error that stopped the session (§11.7 form, as scriptError error data); null while it runs."
+					},
 					"entityCount": {
 						"description": "The entities of the play scene.",
 						"type": "integer",
@@ -7270,6 +7281,13 @@
 					"recording": {
 						"description": "An input recording is active.",
 						"type": "boolean"
+					},
+					"stopped": {
+						"description": "A fatal script error (such as a second memory-limit breach) stopped the session: ticks no longer advance.",
+						"type": "boolean"
+					},
+					"stopError": {
+						"description": "The script error that stopped the session (§11.7 form, as scriptError error data); null while it runs."
 					},
 					"entityCount": {
 						"description": "The entities of the play scene.",
@@ -7423,6 +7441,13 @@
 					"recording": {
 						"description": "An input recording is active.",
 						"type": "boolean"
+					},
+					"stopped": {
+						"description": "A fatal script error (such as a second memory-limit breach) stopped the session: ticks no longer advance.",
+						"type": "boolean"
+					},
+					"stopError": {
+						"description": "The script error that stopped the session (§11.7 form, as scriptError error data); null while it runs."
 					},
 					"entityCount": {
 						"description": "The entities of the play scene.",
@@ -7607,6 +7632,13 @@
 						"description": "An input recording is active.",
 						"type": "boolean"
 					},
+					"stopped": {
+						"description": "A fatal script error (such as a second memory-limit breach) stopped the session: ticks no longer advance.",
+						"type": "boolean"
+					},
+					"stopError": {
+						"description": "The script error that stopped the session (§11.7 form, as scriptError error data); null while it runs."
+					},
 					"entityCount": {
 						"description": "The entities of the play scene.",
 						"type": "integer",
@@ -7755,6 +7787,13 @@
 					"recording": {
 						"description": "An input recording is active.",
 						"type": "boolean"
+					},
+					"stopped": {
+						"description": "A fatal script error (such as a second memory-limit breach) stopped the session: ticks no longer advance.",
+						"type": "boolean"
+					},
+					"stopError": {
+						"description": "The script error that stopped the session (§11.7 form, as scriptError error data); null while it runs."
 					},
 					"entityCount": {
 						"description": "The entities of the play scene.",
@@ -7918,7 +7957,7 @@
 								"type": "string"
 							},
 							"position": {
-								"description": "mouseMove (required), mouseButton (optional): [x, y] in window coordinates.",
+								"description": "mouseMove (required), mouseButton (optional): [x, y] in view coordinates, the pixels of the session's view (the game view's image in ordinary play; the project's Window.Width x Window.Height in lockstep, recording, replay and test sessions), origin top-left.",
 								"type": "array",
 								"prefixItems": [
 									{
@@ -9431,7 +9470,7 @@
 								"maximum": 4294967295
 							},
 							"PauseOnError": {
-								"description": "Whether a script error pauses the suite; Inherit uses the project setting.",
+								"description": "Accepted for compatibility: a script error never pauses a test run, whatever this override says.",
 								"enum": ["Inherit", "Pause", "Continue"]
 							}
 						},
@@ -10336,7 +10375,7 @@
 								"maximum": 4294967295
 							},
 							"PauseOnError": {
-								"description": "Whether a script error pauses the suite; Inherit uses the project setting.",
+								"description": "Accepted for compatibility: a script error never pauses a test run, whatever this override says.",
 								"enum": ["Inherit", "Pause", "Continue"]
 							}
 						},
@@ -12077,6 +12116,10 @@
 						"description": "Exclusive sequence to reuse as since, also for an empty page.",
 						"type": "string"
 					},
+					"evicted": {
+						"description": "True when an error newer than since was evicted before this read: the stream keeps the 256 distinct errors with the latest occurrences, and the retained ones still follow.",
+						"type": "boolean"
+					},
 					"_meta": {
 						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
 						"type": "object"
@@ -12119,7 +12162,7 @@
 								"maximum": 4294967295
 							},
 							"message": {
-								"description": "Error message.",
+								"description": "Error message of at most 8192 bytes; longer text is cut and ends with [truncated: <n> bytes].",
 								"type": "string"
 							},
 							"callback": {
@@ -12143,7 +12186,7 @@
 								"maximum": 4294967295
 							},
 							"traceback": {
-								"description": "Authored traceback frames.",
+								"description": "Authored traceback frames, innermost first: at most 32, the last a [truncated: <n> more frames] function without a script when deeper frames were left out.",
 								"type": "array",
 								"items": {
 									"$ref": "#/$defs/ScriptTraceFrameSummary"
@@ -12839,6 +12882,13 @@
 						"description": "\"Edit\", \"Play\", \"Simulate\" or \"Paused\".",
 						"type": "string"
 					},
+					"stopped": {
+						"description": "A fatal script error stopped the play session, as play.state's stopped: it stays Paused and ticks no longer advance.",
+						"type": "boolean"
+					},
+					"stopError": {
+						"description": "The script error that stopped the play session (§11.7 form, as play.state's stopError); null otherwise."
+					},
 					"renderer": {
 						"description": "\"vulkan\" or \"none\" (--renderer).",
 						"type": "string"
@@ -13180,6 +13230,16 @@
 								"type": "integer",
 								"minimum": 0,
 								"maximum": 4294967295
+							},
+							"shadowMapSize": {
+								"description": "Shadow map size the frame rendered with (the project's Rendering.ShadowMapSize); 0 when unavailable.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							},
+							"ssaoHalfResolution": {
+								"description": "Whether the frame rendered with the project's Rendering.SsaoHalfResolution set.",
+								"type": "boolean"
 							}
 						},
 						"additionalProperties": false
@@ -13502,7 +13562,7 @@
 								"maximum": 4294967295
 							},
 							"failures": {
-								"description": "Failures of the test report.",
+								"description": "Failures of the test report: at most 32 for expectations and unexpected script errors, the last then counting any further ones as [truncated: <n> more failures], and at most 1024 such failures per suite.",
 								"type": "array",
 								"items": {
 									"$ref": "#/$defs/TestFailureResult"
@@ -13690,7 +13750,7 @@
 		{
 			"name": "viewport.camera",
 			"domain": "viewport",
-			"description": "Reads or patches the editor scene camera pose without changing the scene or history.",
+			"description": "Reads or patches the editor scene camera (pose, projection, field of view, orthographic size and clip range) without changing the scene or history.",
 			"exposeAsTool": false,
 			"mutates": false,
 			"supportsDryRun": false,
@@ -13702,7 +13762,7 @@
 			"params": {
 				"$schema": "https://json-schema.org/draft/2020-12/schema",
 				"title": "ViewportCameraParams",
-				"description": "An optional patch of the editor scene camera pose.",
+				"description": "An optional patch of the editor scene camera; absent members are unchanged.",
 				"type": "object",
 				"properties": {
 					"position": {
@@ -13739,6 +13799,26 @@
 						"minItems": 3,
 						"maxItems": 3
 					},
+					"projection": {
+						"description": "Perspective or Orthographic, as the scene view's Orthographic overlay toggle sets it.",
+						"enum": ["Perspective", "Orthographic"]
+					},
+					"verticalFov": {
+						"description": "Perspective vertical field of view in degrees, between 0 and 180 exclusive.",
+						"type": "number"
+					},
+					"orthographicSize": {
+						"description": "Orthographic half height in metres, positive.",
+						"type": "number"
+					},
+					"nearClip": {
+						"description": "Near clipping distance in metres, positive and below farClip.",
+						"type": "number"
+					},
+					"farClip": {
+						"description": "Far clipping and culling distance in metres, above nearClip.",
+						"type": "number"
+					},
 					"ifRevision": {
 						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
 						"type": "integer",
@@ -13751,7 +13831,7 @@
 			"result": {
 				"$schema": "https://json-schema.org/draft/2020-12/schema",
 				"title": "ViewportCameraResult",
-				"description": "The complete editor scene camera pose.",
+				"description": "The complete editor scene camera.",
 				"type": "object",
 				"properties": {
 					"position": {
@@ -13788,6 +13868,26 @@
 						"minItems": 3,
 						"maxItems": 3
 					},
+					"projection": {
+						"description": "Perspective or Orthographic.",
+						"enum": ["Perspective", "Orthographic"]
+					},
+					"verticalFov": {
+						"description": "Perspective vertical field of view in degrees.",
+						"type": "number"
+					},
+					"orthographicSize": {
+						"description": "Orthographic half height in metres.",
+						"type": "number"
+					},
+					"nearClip": {
+						"description": "Near clipping distance in metres.",
+						"type": "number"
+					},
+					"farClip": {
+						"description": "Far clipping and culling distance in metres.",
+						"type": "number"
+					},
 					"_meta": {
 						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
 						"type": "object"
@@ -13804,6 +13904,15 @@
 				{
 					"description": "Read the scene camera.",
 					"params": {}
+				},
+				{
+					"description": "Switch the scene view to an orthographic top-down camera.",
+					"params": {
+						"position": [0, 20, 0.01],
+						"target": [0, 0, 0],
+						"projection": "Orthographic",
+						"orthographicSize": 8
+					}
 				}
 			]
 		},
@@ -14302,7 +14411,7 @@
 		{
 			"name": "viewport.setOptions",
 			"domain": "viewport",
-			"description": "Patches scene viewport options; absent members remain unchanged.",
+			"description": "Patches the scene viewport's overlays and debug view and the Game view's resolution; absent members remain unchanged.",
 			"exposeAsTool": false,
 			"mutates": false,
 			"supportsDryRun": false,
@@ -14337,6 +14446,19 @@
 						"description": "Show mesh wireframes.",
 						"type": "boolean"
 					},
+					"debugView": {
+						"description": "The scene view's debug view, any ASCII case: Lit, Albedo, Normals, Roughness, Metallic, Emissive, AO, ShadowCascades or Overdraw.",
+						"type": "string"
+					},
+					"gameResolution": {
+						"description": "The Game view's resolution [width, height], each 1 to 8192, or [0, 0] for free resolution.",
+						"type": "array",
+						"items": {
+							"type": "integer",
+							"minimum": 0,
+							"maximum": 4294967295
+						}
+					},
 					"ifRevision": {
 						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
 						"type": "integer",
@@ -14349,7 +14471,7 @@
 			"result": {
 				"$schema": "https://json-schema.org/draft/2020-12/schema",
 				"title": "ViewportSetOptionsResult",
-				"description": "All current scene viewport options.",
+				"description": "All current scene and game viewport options.",
 				"type": "object",
 				"properties": {
 					"grid": {
@@ -14372,6 +14494,19 @@
 						"description": "Whether mesh wireframes are shown.",
 						"type": "boolean"
 					},
+					"debugView": {
+						"description": "The scene view's debug view (canonical name).",
+						"type": "string"
+					},
+					"gameResolution": {
+						"description": "The Game view's resolution [width, height]; [0, 0] is free resolution.",
+						"type": "array",
+						"items": {
+							"type": "integer",
+							"minimum": 0,
+							"maximum": 4294967295
+						}
+					},
 					"_meta": {
 						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
 						"type": "object"
@@ -14389,6 +14524,13 @@
 					"description": "Show colliders.",
 					"params": {
 						"colliders": true
+					}
+				},
+				{
+					"description": "Show the scene view's normals and a fixed 1280x720 game view.",
+					"params": {
+						"debugView": "Normals",
+						"gameResolution": [1280, 720]
 					}
 				}
 			]

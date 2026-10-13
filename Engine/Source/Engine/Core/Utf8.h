@@ -15,4 +15,9 @@ namespace Engine {
 	// The byte offset of the first invalid sequence in `text`, or text.size() when it is valid.
 	[[nodiscard]] size_t FindInvalidUtf8(std::string_view text);
 
+	// Byte length of the longest prefix of `text` that does not end inside a UTF-8 sequence: only an incomplete trailing
+	// lead/continuation run is dropped, and other bytes, invalid ones included, are kept as they are. Used to cut text at
+	// a byte cap without splitting a code point.
+	[[nodiscard]] size_t CompleteUtf8Prefix(std::string_view text);
+
 }

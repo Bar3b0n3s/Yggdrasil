@@ -229,10 +229,10 @@ namespace Engine {
 			.Entry(InputActionSettings::ActionType::Button, "Button", "Pressed or released, driven by the action's Bindings.")
 			.Entry(InputActionSettings::ActionType::Axis, "Axis", "A value in [-1, 1] from the Positive and Negative controls and the Gamepad axis.");
 
-		registry.Enum<TestSuiteOverrides::PauseOnErrorOverride>("TestPauseOnError", "Whether a script error pauses one test suite.")
-			.Entry(TestSuiteOverrides::PauseOnErrorOverride::Inherit, "Inherit", "Use the project's Scripting.PauseOnError.")
-			.Entry(TestSuiteOverrides::PauseOnErrorOverride::Pause, "Pause", "Pause the suite on a script error.")
-			.Entry(TestSuiteOverrides::PauseOnErrorOverride::Continue, "Continue", "Keep running after a script error.");
+		registry.Enum<TestSuiteOverrides::PauseOnErrorOverride>("TestPauseOnError", "A suite's PauseOnError override. A script error never pauses a test run, so no value changes the run's time.")
+			.Entry(TestSuiteOverrides::PauseOnErrorOverride::Inherit, "Inherit", "Use the project's Scripting.PauseOnError, which pauses ordinary play only.")
+			.Entry(TestSuiteOverrides::PauseOnErrorOverride::Pause, "Pause", "Accepted for compatibility; the test run still keeps running after a script error.")
+			.Entry(TestSuiteOverrides::PauseOnErrorOverride::Continue, "Continue", "Keep running after a script error, as every test run does.");
 
 		registry.Enum<TestSuiteSettings::IsolationMode>("TestIsolation", "How much state the cases of a test suite share.")
 			.Entry(TestSuiteSettings::IsolationMode::Suite, "Suite", "Every case of the suite runs in one play session.")
@@ -311,7 +311,7 @@ namespace Engine {
 				"Callback budget of the suite in milliseconds: 0 uses the project setting, any other value is at least 10.", { .Unit = "ms" })
 			.Field("MemoryLimitMB", &TestSuiteOverrides::MemoryLimitMB, "Script memory limit of the suite in megabytes: 0 uses the project setting.",
 				{ .Unit = "MB" })
-			.Field("PauseOnError", &TestSuiteOverrides::PauseOnError, "Whether a script error pauses the suite; Inherit uses the project setting.")
+			.Field("PauseOnError", &TestSuiteOverrides::PauseOnError, "Accepted for compatibility: a script error never pauses a test run, whatever this override says.")
 			.Validate(&Utils::ValidateOverrides)
 			.Generate(&Utils::GenerateOverrides);
 

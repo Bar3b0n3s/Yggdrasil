@@ -9,13 +9,9 @@
 
 namespace Engine {
 
-	namespace {
-
-		bool IsFiniteViewVector(const glm::dvec4& value)
-		{
-			return std::isfinite(value.x) && std::isfinite(value.y) && std::isfinite(value.z) && std::isfinite(value.w);
-		}
-
+	static bool IsFiniteViewVector(const glm::dvec4& value)
+	{
+		return std::isfinite(value.x) && std::isfinite(value.y) && std::isfinite(value.z) && std::isfinite(value.w);
 	}
 
 	Result<RenderRay> ComputeViewPixelRay(const CameraData& camera, uint32_t x, uint32_t y)

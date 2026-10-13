@@ -165,6 +165,7 @@ namespace Engine {
 		uint64_t EditorRevision = 0;
 		uint64_t SceneRevision = 0;
 		uint64_t PlaySerial = 0;
+		uint64_t PlaySceneGeneration = 0; // Scene.Load replaces the runtime scene within one session serial
 		bool Playing = false;
 	};
 
@@ -180,7 +181,7 @@ namespace Engine {
 		if (!m_Drag || m_Context->GetRevision() != m_Drag->EditorRevision || m_Context->GetPlay().IsPlaying() != m_Drag->Playing)
 			return false;
 		const PlaySession* session = m_Context->GetPlay().GetSession();
-		if (session && session->GetSerial() != m_Drag->PlaySerial)
+		if (session && (session->GetSerial() != m_Drag->PlaySerial || session->GetSceneGeneration() != m_Drag->PlaySceneGeneration))
 			return false;
 		const Scene* scene = Utils::GizmoLiveScene(*m_Context);
 		if (!scene || scene->GetRevision() != m_Drag->SceneRevision)
@@ -221,6 +222,7 @@ namespace Engine {
 		if (const PlaySession* session = m_Context->GetPlay().GetSession())
 		{
 			drag->PlaySerial = session->GetSerial();
+			drag->PlaySceneGeneration = session->GetSceneGeneration();
 		}
 		std::vector<UUID> selected(entities.begin(), entities.end());
 		std::ranges::sort(selected);

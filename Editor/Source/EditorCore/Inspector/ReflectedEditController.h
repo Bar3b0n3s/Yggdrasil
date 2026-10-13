@@ -48,12 +48,18 @@ namespace Engine {
 		// InvalidState already editing/no target; PermissionDenied read-only; NotFound missing field/entity/asset;
 		// Unsupported unresolved Variant or read-only field. Multi-edit requires equal field schemas.
 		[[nodiscard]] Status Begin(const InspectorEditTarget& target);
-		// Validate candidate with FieldInfo metadata/resolver. Validation never changes preview or target.
-		[[nodiscard]] Status Preview(const Value& value);
+		// Validate candidate with FieldInfo metadata/resolver against the owned snapshots, then run the real setters on an
+		// isolated copy of the edited entities and their ancestors (never the whole scene, so a drag frame costs the same in
+		// any scene). Validation never changes preview or target. Commit repeats the setter check on a whole-scene copy.
+		// `components`: for a Vec2, Vec3, Vec4 or Bool3 field (also as a script Variant), the components the gesture
+		// changed (bit i is component i); every target keeps its own other components. 0 replaces the whole value.
+		[[nodiscard]] Status Preview(const Value& value, uint32_t components = 0);
 		// Candidate copy; InvalidState idle.
 		[[nodiscard]] Result<Value> GetPreview() const;
 		// Exactly one undo command in Edit; runtime component edits use SceneEdit's transient path, index 0.
-		// Conflict if target revision/version/session changed since Begin, nothing then written.
+		// Conflict if the target changed since Begin, nothing then written: the scene document or its revision (the project
+		// settings for a project-settings target, so a settings change alone never rejects a scene edit), the asset version,
+		// the play session or its scene's revision, or the edited values themselves.
 		[[nodiscard]] Result<uint64_t> Commit();
 		void Cancel();
 		[[nodiscard]] bool IsEditing() const;

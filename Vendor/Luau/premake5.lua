@@ -135,6 +135,11 @@ project "Luau"
 		LuauIncludeDirs
 	}
 
+	-- Determinism (Docs/Architecture.md §2.2, §9.1): script arithmetic runs in this library's interpreter, vector library
+	-- and number helpers on the simulation path, so the VM uses the precise floating-point model without FMA contraction,
+	-- like first-party code, JoltPhysics and MikkTSpace. MSVC: /fp:precise (premake "Default"), which never contracts.
+	floatingpoint "Default"
+
 	filter "system:windows"
 		systemversion "latest"
 		multiprocessorcompile "On"
@@ -159,6 +164,16 @@ project "Luau"
 
 	filter "system:macosx"
 		buildoptions { "-fno-math-errno" }
+
+	-- GCC and Clang: precise without contraction (GCC's C++ default is -ffp-contract=fast). premake's xcode4 generator adds
+	-- -ffast-math for optimize "Full" (Dist); -fno-fast-math comes after it and turns it back off. Upstream's
+	-- -fno-math-errno above is not a value-changing fast-math component (errno only), so it stays.
+	filter { "toolset:gcc or clang", "action:not vs*" }
+		buildoptions { "-fno-fast-math", "-ffp-contract=off" }
+
+	-- clang-cl (the portability build of Architecture §15.8): the same options through /clang:.
+	filter { "toolset:clang", "action:vs*" }
+		buildoptions { "/clang:-fno-fast-math", "/clang:-ffp-contract=off" }
 
 	filter "configurations:Debug"
 		runtime "Debug"

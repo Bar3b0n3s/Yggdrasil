@@ -16,6 +16,7 @@
 #include "Engine/Session/PlaySession.h"
 
 #include <imgui.h>
+#include <imgui_internal.h>
 #include <ImGuizmo.h>
 
 #include <algorithm>
@@ -25,6 +26,11 @@
 #include <utility>
 
 namespace Engine {
+
+	int SceneViewportPanel::GetWindowFlags()
+	{
+		return ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse;
+	}
 
 	Status SceneViewportPanel::QueueAction(EditorPanelContext& context, std::string_view method, const Json& params)
 	{
@@ -147,18 +153,9 @@ namespace Engine {
 				status = std::unexpected(std::move(next).error());
 		};
 		EditorViewportState& state = context.Editor.GetViewportState();
-		bool open = true;
-		const bool visible = ImGui::Begin(Utils::EditorWindowTitle(EditorPanel::SceneViewport), &open, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
-		if (!visible || !open)
-		{
-			context.Viewports.SetRectangle(ViewportView::Scene, {});
-			record(DrawGizmoOverlay(context.Editor, context.Gizmos, {}, {}, m_GizmoSettings));
-			m_DragSelection.clear();
-			ImGui::End();
-			if (!open)
-				record(context.Editor.GetUiState().SetPanelOpen(EditorPanel::SceneViewport, false));
-			return status;
-		}
+		// Drawn into the caller's window (EditorLayer's Begin with GetWindowFlags). Only its title bar or tab moves it: a
+		// press on the image, a gizmo handle included, belongs to the view and never drags a floating window along.
+		ImGui::GetCurrentWindow()->BgClickFlags = ImGuiWindowBgClickFlags_None;
 		const ImGuiIO& io = ImGui::GetIO();
 		EditorViewportOptions options = state.GetOptions();
 		const float scale = Utils::EditorUiScale();
@@ -244,37 +241,35 @@ namespace Engine {
 		const EditorViewportImage image = context.Viewports.GetImage(ViewportView::Scene);
 		const ImVec2 available = ImGui::GetContentRegionAvail();
 		const ImVec2 minimum = ImGui::GetCursorScreenPos();
+		const ImVec2 maximum(minimum.x + available.x, minimum.y + available.y);
+		// Without a scene the view shows its placeholder: an empty image has no picking image to click.
+		const bool hasScene = context.Editor.HasScene() || playing;
+		const bool hasRegion = std::isfinite(available.x) && std::isfinite(available.y) && available.x > 0.0f && available.y > 0.0f;
+		const bool imageShown = hasRegion && hasScene && image.Texture != 0 && image.Width != 0 && image.Height != 0;
 		EditorViewportRect rectangle;
-		if (std::isfinite(available.x) && std::isfinite(available.y) && available.x > 0.0f && available.y > 0.0f)
+		if (hasRegion)
 		{
 			rectangle.Min = { minimum.x, minimum.y };
 			rectangle.Size = { available.x, available.y };
-			if (image.Texture != 0 && image.Width != 0 && image.Height != 0)
-			{
-				rectangle.ImageSize = { image.Width, image.Height };
-				ImGui::Image(image.Texture, ImVec2(available.x, available.y));
-				rectangle.Hovered = ImGui::IsItemHovered();
-				if (!draggingAtStart)
-					record(AcceptAssetDrop(context));
-			}
-			else
-			{
-				ImGui::Dummy(available);
-				ImGui::GetWindowDrawList()->AddText(ImVec2(minimum.x + 12.0f, minimum.y + 12.0f), IM_COL32(220, 220, 220, 255),
-					context.Editor.HasScene() || playing ? "Scene image unavailable" : "Open a scene to begin");
-			}
 			rectangle.Focused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
 		}
-		context.Viewports.SetRectangle(ViewportView::Scene, rectangle);
+		if (imageShown)
+		{
+			rectangle.ImageSize = { image.Width, image.Height };
+			// Drawn before the gizmo, which draws over it; the image's input item follows the gizmo (below).
+			ImGui::GetWindowDrawList()->AddImage(image.Texture, minimum, maximum);
+			rectangle.Hovered = ImGui::IsWindowHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem) && ImGui::IsMouseHoveringRect(minimum, maximum);
+		}
 		// A changed selection must not redirect an already active gesture to a different set of entities.
+		bool gizmoOwnsPointer = false;
 		if (draggingAtStart && (m_DragInPlay != playing || !std::ranges::equal(m_DragSelection, context.Editor.GetSelection())))
 		{
-			record(DrawGizmoOverlay(context.Editor, context.Gizmos, image.Camera, {}, m_GizmoSettings));
+			record(DrawGizmoOverlay(context.Editor, context.Gizmos, image.Camera, {}, m_GizmoSettings, gizmoOwnsPointer));
 			record(MakeError(ErrorCode::Conflict, "The selection changed during the gizmo drag"));
 		}
 		else
 		{
-			record(DrawGizmoOverlay(context.Editor, context.Gizmos, image.Camera, rectangle, m_GizmoSettings));
+			record(DrawGizmoOverlay(context.Editor, context.Gizmos, image.Camera, rectangle, m_GizmoSettings, gizmoOwnsPointer));
 		}
 		if (context.Gizmos.IsDragging() && !draggingAtStart)
 		{
@@ -283,15 +278,63 @@ namespace Engine {
 		}
 		if (!context.Gizmos.IsDragging())
 			m_DragSelection.clear();
-		const bool inputAvailable = rectangle.Focused && rectangle.Hovered && !io.WantTextInput && !ImGui::IsAnyItemActive()
-			&& !ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel)
-			&& ImGui::GetDragDropPayload() == nullptr && !draggingAtStart && !context.Gizmos.IsDragging() && !ImGuizmo::IsUsingAny() && !ImGuizmo::IsOver();
-		if (inputAvailable)
+		// The image is one item that owns every press on it (left, right and middle), so a held button keeps the view's
+		// navigation going and never becomes a window move. ImGuizmo activates only while no item is active and none was
+		// hovered in this frame or the previous one, so over a gizmo handle the view leaves the press to ImGuizmo with an
+		// ID-less item instead. The image item also exists only in a frame with a press or while it holds one: hovered in
+		// the frame before the pointer reaches a handle, it would keep ImGuizmo from taking a press made in the first frame
+		// over that handle. Between presses an ID-less item stands in and the view claims the wheel itself.
+		bool imageActive = false;
+		bool leftPressed = false;
+		if (imageShown)
 		{
-			const bool fly = ImGui::IsMouseDown(ImGuiMouseButton_Right);
-			const bool orbit = io.KeyAlt && ImGui::IsMouseDown(ImGuiMouseButton_Left);
-			const bool pan = ImGui::IsMouseDown(ImGuiMouseButton_Middle);
-			if (fly || orbit || pan || io.MouseWheel != 0.0f)
+			const ImGuiID imageId = ImGui::GetID("##SceneImage");
+			const bool pressed = ImGui::IsMouseClicked(ImGuiMouseButton_Left) || ImGui::IsMouseClicked(ImGuiMouseButton_Right)
+				|| ImGui::IsMouseClicked(ImGuiMouseButton_Middle);
+			if (gizmoOwnsPointer || (!pressed && ImGui::GetActiveID() != imageId))
+			{
+				ImGui::Dummy(available);
+				// The wheel zooms the camera; it must never also scroll the window.
+				if (!gizmoOwnsPointer && rectangle.Hovered && ImGui::TestKeyOwner(ImGuiKey_MouseWheelY, imageId))
+					ImGui::SetKeyOwner(ImGuiKey_MouseWheelY, imageId);
+			}
+			else
+			{
+				ImGui::PushItemFlag(ImGuiItemFlags_NoNav, true);
+				ImGui::InvisibleButton("##SceneImage", available, ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight | ImGuiButtonFlags_MouseButtonMiddle);
+				ImGui::PopItemFlag();
+				imageActive = ImGui::IsItemActive();
+				leftPressed = ImGui::IsItemActivated() && ImGui::IsMouseClicked(ImGuiMouseButton_Left);
+				// The wheel zooms the camera; it must never also scroll the window.
+				ImGui::SetItemKeyOwner(ImGuiKey_MouseWheelY);
+			}
+			// A press on the image focuses the view within this frame, so the first click both focuses and picks.
+			rectangle.Focused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
+			if (!draggingAtStart)
+				record(AcceptAssetDrop(context));
+		}
+		else if (hasRegion)
+		{
+			ImGui::Dummy(available);
+			ImGui::GetWindowDrawList()->AddText(ImVec2(minimum.x + 12.0f, minimum.y + 12.0f), IM_COL32(220, 220, 220, 255),
+				hasScene ? "Scene image unavailable" : "Open a scene to begin");
+		}
+		context.Viewports.SetRectangle(ViewportView::Scene, rectangle);
+		const bool otherItemActive = ImGui::IsAnyItemActive() && !imageActive;
+		// ImGuizmo::IsOver also reports the previous frame's hover: a press that leaves a handle in that frame still
+		// belongs to the gizmo, never to a background pick.
+		const bool inputCaptured = io.WantTextInput || otherItemActive
+			|| ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel)
+			|| ImGui::GetDragDropPayload() != nullptr || draggingAtStart || context.Gizmos.IsDragging() || ImGuizmo::IsUsingAny()
+			|| ImGuizmo::IsOver() || gizmoOwnsPointer;
+		if (imageShown && !inputCaptured)
+		{
+			// Buttons navigate only while they hold the image item they pressed; the wheel zooms the hovered view.
+			const bool fly = imageActive && ImGui::IsMouseDown(ImGuiMouseButton_Right);
+			const bool orbit = imageActive && io.KeyAlt && ImGui::IsMouseDown(ImGuiMouseButton_Left);
+			const bool pan = imageActive && ImGui::IsMouseDown(ImGuiMouseButton_Middle);
+			const float wheel = rectangle.Hovered ? io.MouseWheel : 0.0f;
+			if (fly || orbit || pan || wheel != 0.0f)
 			{
 				EditorCameraInput input;
 				input.PointerDelta = { io.MouseDelta.x, io.MouseDelta.y };
@@ -300,7 +343,7 @@ namespace Engine {
 					static_cast<float>(ImGui::IsKeyDown(ImGuiKey_E)) - static_cast<float>(ImGui::IsKeyDown(ImGuiKey_Q)),
 					static_cast<float>(ImGui::IsKeyDown(ImGuiKey_W)) - static_cast<float>(ImGui::IsKeyDown(ImGuiKey_S))
 				};
-				input.Wheel = io.MouseWheel;
+				input.Wheel = wheel;
 				input.DeltaSeconds = io.DeltaTime;
 				input.MoveSpeed = io.KeyShift ? 20.0f : 5.0f;
 				input.Fly = fly;
@@ -312,7 +355,7 @@ namespace Engine {
 				else
 					record(std::unexpected(std::move(navigated).error()));
 			}
-			else if (!io.KeyAlt && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+			else if (leftPressed && !io.KeyAlt && image.Picking)
 			{
 				if (const auto pixel = ToViewportPixel(rectangle, { io.MousePos.x, io.MousePos.y }))
 				{
@@ -326,12 +369,11 @@ namespace Engine {
 					}
 				}
 			}
-			if (!fly && !orbit && !pan && ImGui::IsKeyPressed(ImGuiKey_F))
+			if (!fly && !orbit && !pan && rectangle.Focused && rectangle.Hovered && ImGui::IsKeyPressed(ImGuiKey_F))
 				record(FrameSelection(context));
 		}
 		if (!status)
 			m_LastError = status.error().ToString();
-		ImGui::End();
 		return status;
 	}
 

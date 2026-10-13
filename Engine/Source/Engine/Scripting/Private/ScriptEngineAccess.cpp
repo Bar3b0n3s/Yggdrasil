@@ -7,6 +7,7 @@
 #include "Engine/Scripting/Private/SandboxAccess.h"
 #include "Engine/Scripting/Private/ScriptEngineState.h"
 #include "Engine/Scripting/ScriptEngine.h"
+#include "Engine/Scripting/ScriptLimits.h"
 
 #include <algorithm>
 #include <limits>
@@ -57,12 +58,10 @@ namespace Engine {
 		{
 			if (call.Engine == nullptr)
 				return {};
-			ScriptTaskOwner owner = call.Engine->m_State->CurrentOwner;
 			// Engine entries set ownership explicitly, including an ownerless nested evaluation. Diagnostic contexts
 			// may still describe the outer caller and must never transfer its task ownership into that evaluation.
-			if (owner.Case.IsNull())
-				owner.Case = call.Engine->m_State->ActiveCase;
-			return owner;
+			// A case owns only its thread and the tasks it spawned; the active case is never a fallback owner.
+			return call.Engine->m_State->CurrentOwner;
 		}
 
 		lua_State* ScriptEngineAccess::ExchangeActiveThread(ScriptEngine& engine, lua_State* thread)
@@ -108,13 +107,16 @@ namespace Engine {
 			uint32_t timeoutTicks, const ErrorLocation& location)
 		{
 			if (call.Engine == nullptr || !call.Engine->IsTestMode() || !call.Engine->m_State->Collecting)
-				return MakeError(ErrorCode::InvalidState, "Test.Case is only available while collecting a suite");
+				return MakeError(ErrorCode::InvalidState, "Test.Case outside Test.Suite");
 			auto& state = *call.Engine->m_State;
 			if (name.empty() || std::any_of(state.Suite.Cases.begin(), state.Suite.Cases.end(), [name](const ScriptTestCase& test)
 			{
 				return test.Name == name;
 			}))
 				return MakeError(ErrorCode::InvalidArgument, "Test case names must be nonempty and unique within the suite");
+			// The runner keeps every case for the run's inventory and report.
+			if (state.Suite.Cases.size() >= MaxScriptTestCasesPerSuite)
+				return MakeError(ErrorCode::InvalidArgument, "A test suite registers at most {} cases", MaxScriptTestCasesPerSuite);
 			ENGINE_TRY_ASSIGN(auto function, RetainFunction(call, functionIndex));
 			state.Suite.Cases.push_back({ std::string(name), function, timeoutTicks != 0 ? timeoutTicks : state.SuiteTimeout,
 				location.File, location.Line });
@@ -133,8 +135,11 @@ namespace Engine {
 			if (call.Engine == nullptr || call.Engine->GetTestHost() == nullptr)
 				return MakeError(ErrorCode::InvalidState, "Test outcomes require an active case");
 			auto& state = *call.Engine->m_State;
-			const ScriptReference id = GetOwner(call).Case;
+			// Gameplay code owns no case but may still end the running one (attribution, not ownership).
+			const ScriptTaskOwner owner = GetOwner(call);
+			const ScriptReference id = owner.Case.IsNull() ? state.ActiveCase : owner.Case;
 			ENGINE_TRY_ASSIGN(auto thread, state.FindReference(id, ScriptEngine::State::ReferenceKind::Case));
+			state.TestSignalRaised = true;
 			if (!thread->Terminal.has_value())
 			{
 				ScriptCaseResume terminal{};
@@ -146,6 +151,14 @@ namespace Engine {
 				state.TestHost->Report(report);
 				state.Scheduler->CancelCase(id);
 			}
+			// A task the case does not own (gameplay work a behaviour spawned) ends its own flow at the signal, as a lifecycle
+			// callback does by unwinding: it is cancelled here, so the binding's yield is its last and the statement after
+			// Test.Fail or Test.Skip never runs. The case's own thread and tasks were cancelled with the case above.
+			const auto caller = state.References.find(state.CurrentThread.Index);
+			if (state.Scheduler != nullptr && lua_isyieldable(call.State) && caller != state.References.end()
+				&& caller->second.Thread == call.State && caller->second.Kind == ScriptEngine::State::ReferenceKind::Task
+				&& caller->second.Owner.Case != id)
+				ENGINE_TRY(state.Scheduler->Cancel(state.CurrentThread));
 			return {};
 		}
 

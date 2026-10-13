@@ -1,17 +1,15 @@
 #pragma once
 
 #include "Engine/Asset/AssetType.h"
-#include "Engine/Core/UUID.h"
-#include "Engine/Renderer/DebugDrawList.h"
-
-#include <imgui.h>
 
 #include <glm/glm.hpp>
+#include <imgui.h>
 
 #include <cstdint>
 
 namespace Engine {
 
+	// The UI's asset and folder glyphs (content browser, folder picker, hierarchy prefab marker, launcher).
 	enum class EditorIcon : uint8_t
 	{
 		Folder,
@@ -24,19 +22,15 @@ namespace Engine {
 		Audio,
 		Script,
 		Font,
-		Replay,
-		Camera,
-		DirectionalLight,
-		PointLight,
-		SpotLight,
-		Trigger
+		Replay
 	};
 
-	// First-party vector glyphs, no downloaded assets. Main thread. All arguments borrowed for this call.
-	// UI glyphs use ImDrawList; viewport glyphs append world-space DebugDrawList primitives, never an Engine->Editor edge.
-	// M9 screenshot annotation glyphs are independently owned by Renderer; no Engine call reaches these functions.
+	// First-party vector glyphs drawn with ImDrawList lines, no downloaded assets or icon licence. Main thread, inside an
+	// ImGui frame; all arguments borrowed for this call. The scene view's world icons (cameras, lights, audio sources,
+	// triggers) are not drawn here: with RenderViewFlags::Icons, Scene/RenderAnnotations collects them and
+	// Renderer/EditorOverlay draws them, the scene view's single icon producer (ADR 0018).
+	// Draws nothing for a non-finite or nonpositive size or position.
 	void DrawEditorIcon(ImDrawList& drawList, EditorIcon icon, const glm::vec2& minimum, float size, uint32_t color);
-	void AppendEditorIcon(DebugDrawList& drawList, EditorIcon icon, const glm::mat4& world, float size, const glm::vec4& color);
 	[[nodiscard]] EditorIcon AssetTypeToEditorIcon(AssetType type);
 
 }

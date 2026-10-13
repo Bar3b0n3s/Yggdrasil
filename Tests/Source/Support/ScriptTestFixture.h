@@ -16,6 +16,7 @@
 #include <map>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace Engine {
@@ -109,6 +110,10 @@ namespace Engine {
 			bool FatalError = false;
 			std::vector<std::string> ExternalMutations{};
 			std::vector<UUID> Teleported{};
+			// Optional observer called first in CreateEntity and Instantiate with the request's name, while the requesting
+			// script call is still running (for example to advance a test's injected safety clock). Captures outlive the
+			// fixture's engine.
+			std::function<void(std::string_view request)> OnHostRequest{};
 		private:
 			ScriptTestFixtureSpecification m_Specification{};
 			SceneTestFixture m_Scene;

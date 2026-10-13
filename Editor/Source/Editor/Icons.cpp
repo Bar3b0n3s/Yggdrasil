@@ -91,30 +91,6 @@ namespace Engine {
 					circle({ 0.5f, 0.5f }, 0.35f);
 					path({ { 0.41f, 0.31f }, { 0.7f, 0.5f }, { 0.41f, 0.69f }, { 0.41f, 0.31f } });
 					break;
-				case EditorIcon::Camera:
-					path({ { 0.1f, 0.3f }, { 0.64f, 0.3f }, { 0.64f, 0.7f }, { 0.1f, 0.7f }, { 0.1f, 0.3f } });
-					path({ { 0.64f, 0.43f }, { 0.9f, 0.25f }, { 0.9f, 0.75f }, { 0.64f, 0.57f } });
-					break;
-				case EditorIcon::DirectionalLight:
-				case EditorIcon::PointLight:
-					circle({ 0.5f, 0.5f }, 0.2f);
-					for (int ray = 0; ray < 8; ++ray)
-					{
-						const float angle = static_cast<float>(ray) * std::numbers::pi_v<float> / 4.0f;
-						const glm::vec2 direction(std::cos(angle), std::sin(angle));
-						segments.push_back({ glm::vec2(0.5f) + direction * 0.29f, glm::vec2(0.5f) + direction * 0.43f });
-					}
-					if (icon == EditorIcon::DirectionalLight)
-						path({ { 0.42f, 0.45f }, { 0.5f, 0.6f }, { 0.58f, 0.45f } });
-					break;
-				case EditorIcon::SpotLight:
-					path({ { 0.42f, 0.15f }, { 0.58f, 0.15f }, { 0.6f, 0.32f }, { 0.4f, 0.32f }, { 0.42f, 0.15f } });
-					path({ { 0.45f, 0.4f }, { 0.15f, 0.85f }, { 0.85f, 0.85f }, { 0.55f, 0.4f } });
-					break;
-				case EditorIcon::Trigger:
-					path({ { 0.5f, 0.1f }, { 0.9f, 0.5f }, { 0.5f, 0.9f }, { 0.1f, 0.5f }, { 0.5f, 0.1f } });
-					path({ { 0.57f, 0.29f }, { 0.4f, 0.53f }, { 0.6f, 0.53f }, { 0.43f, 0.75f } });
-					break;
 			}
 			return segments;
 		}
@@ -130,25 +106,6 @@ namespace Engine {
 			const glm::vec2 from = minimum + segment.From * size;
 			const glm::vec2 to = minimum + segment.To * size;
 			drawList.AddLine(ImVec2(from.x, from.y), ImVec2(to.x, to.y), color, 1.5f);
-		}
-	}
-
-	void AppendEditorIcon(DebugDrawList& drawList, EditorIcon icon, const glm::mat4& world, float size, const glm::vec4& color)
-	{
-		if (!std::isfinite(size) || size <= 0.0f)
-			return;
-		for (const EditorIconSegment& segment : Utils::EditorIconSegments(icon))
-		{
-			const glm::vec2 from = (segment.From - glm::vec2(0.5f)) * size;
-			const glm::vec2 to = (segment.To - glm::vec2(0.5f)) * size;
-			drawList.AddLine(glm::vec3(world * glm::vec4(from.x, -from.y, 0.0f, 1.0f)),
-				glm::vec3(world * glm::vec4(to.x, -to.y, 0.0f, 1.0f)), color);
-		}
-		if (icon == EditorIcon::Camera || icon == EditorIcon::SpotLight || icon == EditorIcon::DirectionalLight)
-		{
-			const glm::vec3 origin(world[3]);
-			const glm::vec3 end(world * glm::vec4(0.0f, 0.0f, -size, 1.0f));
-			drawList.AddArrow(origin, end, size * 0.15f, color);
 		}
 	}
 

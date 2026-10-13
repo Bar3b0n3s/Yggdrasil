@@ -286,7 +286,7 @@ namespace Engine {
 			.Entry(PlayInputEventType::Action, "Action", "A project action: a button use (state) or an axis value (value).")
 			.Entry(PlayInputEventType::KeyInput, "Key", "A keyboard key going down or up.")
 			.Entry(PlayInputEventType::MouseButtonInput, "MouseButton", "A mouse button going down or up, optionally at a position.")
-			.Entry(PlayInputEventType::MouseMove, "MouseMove", "The cursor moving to a position (window coordinates).")
+			.Entry(PlayInputEventType::MouseMove, "MouseMove", "The cursor moving to a position in view coordinates (the session's view: the game view's image in ordinary play, Window.Width x Window.Height in lockstep, recording, replay and test sessions).")
 			.Entry(PlayInputEventType::MouseDelta, "MouseDelta", "The cursor moving by a delta.")
 			.Entry(PlayInputEventType::Scroll, "Scroll", "Scrolling by a delta (x right-positive, y up-positive).")
 			.Entry(PlayInputEventType::GamepadButtonInput, "GamepadButton", "A gamepad button going down or up.")
@@ -312,7 +312,7 @@ namespace Engine {
 			.Field("gamepad", &InputEventParams::Gamepad, "gamepadButton, gamepadAxis: the gamepad, 0 to 3.",
 				{ .Min = 0.0, .Max = static_cast<double>(MaxGamepads - 1) })
 			.Field("axis", &InputEventParams::AxisName, "gamepadAxis: \"LeftX\", \"LeftY\", \"RightX\", \"RightY\", \"LeftTrigger\" or \"RightTrigger\".")
-			.Field("position", &InputEventParams::Position, "mouseMove (required), mouseButton (optional): [x, y] in window coordinates.")
+			.Field("position", &InputEventParams::Position, "mouseMove (required), mouseButton (optional): [x, y] in view coordinates, the pixels of the session's view (the game view's image in ordinary play; the project's Window.Width x Window.Height in lockstep, recording, replay and test sessions), origin top-left.")
 			.Field("delta", &InputEventParams::Delta, "mouseDelta: the cursor motion [x, y]; scroll: [x, y], y up-positive.")
 			.Field("text", &InputEventParams::Text, "text: the typed text (UTF-8).");
 

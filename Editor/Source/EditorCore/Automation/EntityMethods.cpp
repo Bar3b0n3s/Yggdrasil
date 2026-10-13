@@ -352,7 +352,7 @@ namespace Engine {
 		}
 
 		// Duplicate checks: prefab instances are copied by prefab.instantiate (their member ids derive from the instance root,
-		// Â§5.5), and a unique-per-scene component cannot exist twice. Errors: InvalidState naming the entity and component.
+		// §5.5), and a unique-per-scene component cannot exist twice. Errors: InvalidState naming the entity and component.
 		static Status CheckDuplicable(const std::vector<Entity>& subtree)
 		{
 			for (const Entity entity : subtree)

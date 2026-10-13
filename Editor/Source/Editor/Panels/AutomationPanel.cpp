@@ -11,9 +11,22 @@
 
 #include <imgui.h>
 
+#include <algorithm>
+
 namespace Engine {
 
 	namespace Utils {
+
+		// Copies `text` into a fixed ImGui text buffer, cut at the last whole UTF-8 sequence that fits.
+		template<size_t Size>
+		static void CopyAutomationText(std::array<char, Size>& buffer, std::string_view text)
+		{
+			size_t length = std::min(text.size(), Size - 1);
+			while (length > 0 && length < text.size() && (static_cast<unsigned char>(text[length]) & 0xC0) == 0x80)
+				--length;
+			std::copy_n(text.data(), length, buffer.data());
+			buffer[length] = '\0';
+		}
 
 		static std::string AutomationRequestLabel(std::string_view method)
 		{
@@ -32,29 +45,31 @@ namespace Engine {
 
 	}
 
+	void AutomationPanel::Report(std::string& channel, const Error& error)
+	{
+		// Each preference keeps its own last error, so two persistent failures never alternate and log every frame.
+		std::string text = error.ToString();
+		if (text != channel)
+			ENGINE_ERROR("Automation: {}", error);
+		channel = std::move(text);
+	}
+
 	Status AutomationPanel::Draw(EditorPanelContext& context)
 	{
-		const auto report = [this](const Error& error)
-		{
-			const std::string text = error.ToString();
-			if (text != m_Error)
-				ENGINE_ERROR("Automation: {}", error);
-			m_Error = text;
-		};
 		if (!context.AutomationPreferences.GetState || !context.AutomationPreferences.QueueChange)
 			return MakeError(ErrorCode::InvalidState, "automation preference safe-point services are not configured");
 		const auto preference = context.AutomationPreferences.GetState();
 		if (preference.Failure)
-			report(*preference.Failure);
+			Report(m_AutomationError, *preference.Failure);
 		bool allowed = preference.Allowed;
 		ImGui::BeginDisabled(preference.Pending);
 		if (ImGui::Checkbox("Allow AI automation", &allowed))
 		{
 			const Status changed = context.AutomationPreferences.QueueChange(allowed);
 			if (!changed)
-				report(changed.error());
+				Report(m_AutomationError, changed.error());
 			else
-				m_Error.clear();
+				m_AutomationError.clear();
 		}
 		ImGui::EndDisabled();
 		ImGui::SetItemTooltip("Allow local agents to connect to this editor. This preference is saved for future sessions.");
@@ -64,7 +79,7 @@ namespace Engine {
 		bool changed = ImGui::Checkbox("Pause agent requests", &policy.Paused);
 		ImGui::SetItemTooltip("Reject new agent work. Already running requests may finish. Human editor actions remain available.");
 		changed = ImGui::Checkbox("Deny agent mutations", &policy.DenyMutations) || changed;
-		ImGui::SetItemTooltip("Allow agents to inspect the project while preventing changes to its scene, assets and settings.");
+		ImGui::SetItemTooltip("Allow agents to inspect the project, take screenshots and run tests while preventing changes to its scene, assets and settings, including discarding unsaved edits.");
 		if (changed)
 			context.AutomationControls.SetPolicy(policy);
 		Utils::EditorSectionHeading("Agent access");
@@ -74,8 +89,10 @@ namespace Engine {
 		ImGui::TextDisabled("%s", port == 0 ? "Local connections disabled" : std::format("Listening on localhost:{}", port).c_str());
 		if (context.Automation.GetSpecification().Listen)
 			ImGui::TextWrapped("This launch explicitly enables automation. The saved preference applies to subsequent normal launches.");
-		if (!m_Error.empty())
-			ImGui::TextWrapped("%s", m_Error.c_str());
+		ENGINE_TRY(DrawExternalEditor(context));
+		for (const std::string* error : { &m_AutomationError, &m_ExternalEditorError })
+			if (!error->empty())
+				ImGui::TextWrapped("%s", error->c_str());
 		Utils::EditorSectionHeading("Connected clients");
 		const auto clients = context.Automation.GetClients();
 		if (clients.empty())
@@ -132,6 +149,75 @@ namespace Engine {
 					requests.empty() ? "Agent activity and execution times appear here as requests arrive." : "Adjust the search or outcome filter to see more requests.");
 		}
 		ImGui::EndChild();
+		return {};
+	}
+
+	std::vector<std::string> AutomationPanel::SplitEditorArguments(std::string_view text)
+	{
+		std::vector<std::string> arguments;
+		while (!text.empty())
+		{
+			const size_t end = text.find('\n');
+			std::string_view line = text.substr(0, end);
+			if (line.ends_with('\r'))
+				line.remove_suffix(1);
+			if (!line.empty())
+				arguments.emplace_back(line);
+			if (end == std::string_view::npos)
+				break;
+			text.remove_prefix(end + 1);
+		}
+		return arguments;
+	}
+
+	Status AutomationPanel::DrawExternalEditor(EditorPanelContext& context)
+	{
+		if (!context.ExternalEditor.GetState || !context.ExternalEditor.QueueChange)
+			return MakeError(ErrorCode::InvalidState, "external editor preference safe-point services are not configured");
+		const EditorExternalEditorState saved = context.ExternalEditor.GetState();
+		if (saved.Failure)
+			Report(m_ExternalEditorError, *saved.Failure);
+		if (!m_EditorEdited && !saved.Pending)
+		{
+			std::string arguments;
+			for (const std::string& argument : saved.Arguments)
+				arguments += (arguments.empty() ? "" : "\n") + argument;
+			Utils::CopyAutomationText(m_EditorExecutable, saved.Executable);
+			Utils::CopyAutomationText(m_EditorArguments, arguments);
+		}
+		Utils::EditorSectionHeading("External source editor");
+		ImGui::BeginDisabled(saved.Pending);
+		ImGui::SetNextItemWidth(-1.0f);
+		bool edited = ImGui::InputTextWithHint("##EditorExecutable", "Executable, such as code", m_EditorExecutable.data(), m_EditorExecutable.size());
+		ImGui::SetItemTooltip("The program Open source actions start with a script. Leave it and the arguments empty to turn them off.");
+		edited = ImGui::InputTextMultiline("##EditorArguments", m_EditorArguments.data(), m_EditorArguments.size(),
+					 ImVec2(-1.0f, ImGui::GetTextLineHeight() * 3.0f + ImGui::GetStyle().FramePadding.y * 2.0f))
+			|| edited;
+		ImGui::SetItemTooltip("One argument per line, passed without a shell. {path} becomes the script's path and {line} its line; "
+							  "with no arguments the path is the only one.");
+		if (edited)
+			m_EditorEdited = true;
+		ImGui::BeginDisabled(!m_EditorEdited);
+		if (ImGui::Button("Save editor"))
+		{
+			const Status queued = context.ExternalEditor.QueueChange(std::string(m_EditorExecutable.data()), SplitEditorArguments(m_EditorArguments.data()));
+			if (!queued)
+				Report(m_ExternalEditorError, queued.error());
+			else
+			{
+				m_EditorEdited = false;
+				m_ExternalEditorError.clear();
+			}
+		}
+		ImGui::SetItemTooltip("Save the external editor for this and future sessions.");
+		ImGui::SameLine();
+		if (ImGui::Button("Revert"))
+			m_EditorEdited = false;
+		ImGui::SetItemTooltip("Discard the edits and show the saved external editor.");
+		ImGui::EndDisabled();
+		ImGui::EndDisabled();
+		if (saved.Pending)
+			ImGui::TextUnformatted("Saving the external editor");
 		return {};
 	}
 

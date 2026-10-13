@@ -185,6 +185,58 @@ namespace Engine {
 			CHECK(fixture.Draw(panel) == first);
 			CHECK(fixture.GetEditor().GetRevision() == revision);
 		}
+
+		TEST_CASE("DiagnosticsPanel: filtered diagnostic fixes remain queued human commands")
+		{
+			Test::UtilityPanelFixture fixture;
+			fixture.OpenProject();
+			REQUIRE(fixture.GetClient().Call("project.setSettings", Json{ { "patch", Json{ { "StartScene", "Assets/Scenes/OtherMissing.scene" }, { "Export", Json{ { "BuildScenes", Json::array({ "Assets/Scenes/Absent.scene" }) } } } } } }));
+			DiagnosticsPanel panel;
+			fixture.Draw(panel);
+			fixture.Pump();
+			Test::SupportingPanelTestUi::ClickText(fixture, panel, "Search messages, files or codes");
+			ImGui::GetIO().AddInputCharactersUTF8("build_scene_missing");
+			const std::string filtered = fixture.Draw(panel);
+			CHECK(filtered.contains("BUILD_SCENE_MISSING"));
+			CHECK_FALSE(filtered.contains("BUILD_START_SCENE_MISSING"));
+			const uint64_t revision = fixture.GetEditor().GetRevision();
+			fixture.GetContext().AutomationControls.SetPolicy({ .DenyMutations = true });
+			Test::SupportingPanelTestUi::ClickText(fixture, panel, "Include in fix");
+			Test::SupportingPanelTestUi::ClickText(fixture, panel, "Fix selected");
+			CHECK(fixture.GetEditor().GetRevision() == revision);
+			CHECK(fixture.GetEditor().GetProject().GetSettings().Export.BuildScenes.size() == 1);
+			fixture.Pump();
+			fixture.Draw(panel);
+			CHECK(fixture.GetEditor().GetProject().GetSettings().Export.BuildScenes.empty());
+			const auto entries = fixture.GetEditor().GetHistory().GetEntries(1);
+			REQUIRE(entries.size() == 1);
+			CHECK(entries.front().Origin == CommandOrigin::User);
+			fixture.Pump();
+			CHECK_FALSE(fixture.Draw(panel).contains("Export.BuildScenes names"));
+		}
+
+		TEST_CASE("DiagnosticsPanel: a project change releases its abandoned validation action")
+		{
+			Test::UtilityPanelFixture fixture;
+			fixture.OpenProject();
+			auto& actions = fixture.GetContext().Actions;
+			// Tickets are sequential, so the action the panel queues next is the one after this probe.
+			const auto probe = actions.Submit("scene.tree", Json::object());
+			REQUIRE(probe);
+			actions.Pump();
+			REQUIRE(actions.TakeResult(*probe));
+			DiagnosticsPanel panel;
+			fixture.Draw(panel);
+			const uint64_t validation = *probe + 1;
+			const auto queued = actions.TakeResult(validation);
+			REQUIRE(queued);
+			CHECK_FALSE(queued->has_value());
+			REQUIRE(fixture.GetEditor().CloseProject());
+			fixture.Draw(panel);
+			const auto released = actions.TakeResult(validation);
+			REQUIRE_FALSE(released);
+			CHECK(released.error().GetCode() == ErrorCode::NotFound);
+		}
 	}
 
 }

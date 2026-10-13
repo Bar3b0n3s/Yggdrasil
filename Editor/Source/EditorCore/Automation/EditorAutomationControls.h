@@ -13,8 +13,11 @@ namespace Engine {
 
 	struct EditorAutomationPolicy
 	{
-		bool Paused = false;        // reject new agent work with Busy; already admitted operations finish/cancel normally
-		bool DenyMutations = false; // all agent scene/project writes, including non-Mutates methods' optional fix/write paths
+		bool Paused = false; // reject new agent work with Busy; already admitted operations finish/cancel normally
+		// All agent scene/project writes, including non-Mutates methods' optional fix/write paths, and requests that would
+		// discard the open scene's unsaved changes (scene.open {discardChanges}, session.shutdown {force}). Inspection
+		// stays available, including its outputs under Library/Automation/Out (screenshots, test reports, offloaded results).
+		bool DenyMutations = false;
 	};
 
 	struct EditorRequestActivity

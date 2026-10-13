@@ -166,6 +166,8 @@ namespace Engine {
 
 		// The number of entities, pending-destroy ones excluded.
 		[[nodiscard]] size_t GetEntityCount() const;
+		// Runtime scenes: the entities destroyed since the last FlushPendingDestroys, which still occupy the registry.
+		[[nodiscard]] size_t GetPendingDestroyCount() const { return m_PendingDestroys.size(); }
 
 		[[nodiscard]] const std::string& GetName() const { return m_Specification.Name; }
 		void SetName(std::string name);

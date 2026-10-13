@@ -40,10 +40,12 @@ class EditorCrashed(Exception):
         return f"the editor exited unexpectedly with code {self.exit_code}{report}"
 
     def to_json(self) -> dict[str, Any]:
-        """{"error": "EditorCrashed", "exitCode", "lastLogLines", "crashReportPath", "autosaveAvailable"}."""
+        """{"error": "EditorCrashed", "exitCode", "lastLogLines", "crashReportPath", "autosaveAvailable", "hint"}."""
+        hint = ("call editor_launch with recover: true to start the editor again and adopt the autosave"
+                if self.autosave_available else "call editor_launch to start the editor again")
         return {"error": "EditorCrashed", "exitCode": self.exit_code, "lastLogLines": list(self.last_log_lines),
                 "crashReportPath": self.crash_report_path, "autosaveAvailable": self.autosave_available,
-                "hint": "call editor_launch to start the editor again"}
+                "hint": hint}
 
 
 class EditorConnection:
@@ -63,6 +65,9 @@ class EditorConnection:
         self.app_name = app_name
         self.shutdown_requested = False
         self.crashed: EditorCrashed | None = None
+        # The editor's {recoveryAvailable, recovered} when editor_launch opened the project through project.open (§13.8
+        # "Resilience"); None when it opened another way.
+        self.recovery: dict[str, bool] | None = None
 
     def call(self, method: str, params: dict[str, Any] | None,
              timeout: float = DEFAULT_TIMEOUT_SECONDS) -> dict[str, Any]:
@@ -144,6 +149,8 @@ class EditorConnection:
         if self.client is not None and self.client.hello:
             status["engineVersion"] = self.client.hello.get("engineVersion", "")
             status["protocolVersion"] = self.client.hello.get("protocolVersion", "")
+        if self.recovery is not None:
+            status.update(self.recovery)
         if self.crashed is not None:
             status["crashed"] = self.crashed.to_json()
         return status

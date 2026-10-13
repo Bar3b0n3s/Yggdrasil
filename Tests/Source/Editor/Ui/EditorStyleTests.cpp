@@ -8,9 +8,11 @@
 
 #include <doctest/doctest.h>
 #include <imgui.h>
+#include <imgui_internal.h>
 
 #include <filesystem>
 #include <limits>
+#include <string_view>
 
 namespace Engine {
 
@@ -100,6 +102,20 @@ namespace Engine {
 				CHECK(ImGui::CalcTextSize("WWW").x > ImGui::CalcTextSize("iii").x);
 				return {};
 			}));
+		}
+
+		TEST_CASE("EditorStyle: every friendly panel title preserves its legacy settings and tab identity")
+		{
+			for (uint8_t index = 0; index <= static_cast<uint8_t>(EditorPanel::ProjectLauncher); ++index)
+			{
+				const auto panel = static_cast<EditorPanel>(index);
+				const auto legacyName = EditorPanelToString(panel);
+				const char* title = Utils::EditorWindowTitle(panel);
+				CAPTURE(legacyName);
+				CHECK(ImHashStr(title) == ImHashStr(legacyName.data()));
+				CHECK(ImHashStr("#TAB", 0, ImHashStr(title)) == ImHashStr("#TAB", 0, ImHashStr(legacyName.data())));
+				CHECK(std::string_view(ImHashSkipUncontributingPrefix(title)) == legacyName);
+			}
 		}
 	}
 

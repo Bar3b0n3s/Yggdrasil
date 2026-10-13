@@ -49,7 +49,8 @@ namespace Engine {
 		// All paths must name .luau files below project://Assets. Reject escaping paths, embedded NUL and invalid UTF-8
 		// with InvalidArgument before any write; InvalidState without a project. Reads and dependency checks see dry-run
 		// overlays. Create/Write refuse a read-only project (except an active dry-run overlay) with PermissionDenied.
-		// Create uses the shipped template, with a valid class/suite name derived from the filename; AlreadyExists for
+		// Create uses the shipped template: Behaviour/Module get a "Script_"-prefixed identifier derived from the filename;
+		// Test names its suite after the file stem without ".test" ("Tetris.test.luau" -> "Tetris"). AlreadyExists for
 		// an existing source. Source and .meta are one AssetEditCommand, so undo removes both and redo keeps the handle.
 		[[nodiscard]] Result<EditorScriptWriteResult> Create(const VfsPath& path, ScriptTemplate scriptTemplate);
 		[[nodiscard]] Result<std::string> Read(const VfsPath& path) const;
@@ -59,8 +60,9 @@ namespace Engine {
 		// diagnostics correspond to these bytes; any ordinary-play hot reload follows the existing asset notification path.
 		[[nodiscard]] Result<EditorScriptWriteResult> Write(const VfsPath& path, std::string_view source);
 		// Empty paths checks all project scripts; validates every requested path before checking any. Never writes or
-		// reloads code. Required modules use the same confined module reader as import. Missing files return NotFound;
-		// syntax/type errors are findings. Infrastructure errors retain their ErrorCode and file context.
+		// reloads code. Required modules use the same confined module reader as import. A missing requested path returns
+		// NotFound; a missing or invalid required module, syntax and type errors are located findings. Infrastructure
+		// errors (Io, PermissionDenied) retain their ErrorCode and file context.
 		[[nodiscard]] Result<EditorScriptCheckResult> Check(std::span<const VfsPath> paths) const;
 		// Pins the current immutable cooked schema. NotFound for a missing handle; InvalidArgument for a non-Script;
 		// ImportFailed with findings when no valid schema exists. Module/TestSuite legitimately expose zero fields.

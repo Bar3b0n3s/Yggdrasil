@@ -3,11 +3,17 @@
 #include "Editor/Private/EditorHostRecovery.h"
 #include "EditorCore/Autosave/Autosave.h"
 #include "EditorCore/Commands/SceneEdit.h"
+#include "EditorCore/Play/EditorPlayController.h"
 #include "EditorCore/Project/ProjectManager.h"
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/SceneSerializer.h"
+#include "Support/AutomationTestClient.h"
 #include "Support/EditorTestFixture.h"
+
+#include <nlohmann/json.hpp>
+
+#include <chrono>
 
 namespace Engine {
 
@@ -282,6 +288,73 @@ namespace Engine {
 			CHECK_FALSE(setup.Host.GetOffer());
 			CHECK_FALSE(editor.IsSceneDirty());
 			CHECK(FileSystem::ReadText(setup.Fixture.GetProjectRoot() / "Assets/Scenes/Main.scene").value_or("") == setup.Original);
+		}
+
+		TEST_CASE("EditorHostRecovery: acceptance while a test run owns the editor is refused and stays visible")
+		{
+			Test::EditorTestFixture fixture("HostRecoveryTestRun");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			EditorContext& editor = fixture.GetEditor();
+			// Every clock reading advances 100 ms, past TestRunFrameBudget, so one Pump advances the run by exactly one runner
+			// step in every configuration: the run is still pending after the Pump below however fast the build is.
+			auto now = std::chrono::steady_clock::time_point{};
+			auto specification = Test::MakeTestServerSpecification();
+			specification.WallClock = [&now]()
+			{
+				now += std::chrono::milliseconds(100);
+				return now;
+			};
+			Test::AutomationTestClient client(editor, std::move(specification));
+			// A suite whose single case outlasts this test, so the run keeps owning the editor until the client leaves.
+			REQUIRE(client.Call("script.write", Json{ { "path", "Assets/Tests/Long.test.luau" }, { "source", "return Test.Suite('Long', function() Test.Case('waits', function() Test.WaitTicks(100000) end) end)" } }));
+			REQUIRE(client.Call("project.setSettings", Json{ { "patch", Json{ { "Testing", Json{ { "Suites", Json::array({ Json{ { "Script", "Assets/Tests/Long.test.luau" }, { "Modes", Json::array({ "Editor" }) } } }) } } } } } }));
+			const auto path = editor.GetScenePath();
+			const auto original = SceneSerializer::SaveToString(editor.GetScene());
+			REQUIRE(original.has_value());
+			Autosave saves(editor);
+			EditorHostRecovery host(editor, saves);
+			{
+				SceneEdit edit(editor, "Recover this edit");
+				(void)editor.GetScene().CreateEntity("RecoverThisEntity");
+				REQUIRE(edit.Commit().has_value());
+			}
+			REQUIRE(saves.Save(AutosaveReason::BeforePlay).value_or(AutosaveWriteResult{}).Written);
+			REQUIRE(saves.Reset());
+			auto clean = editor.CreateScene("Main");
+			LoadReport report;
+			REQUIRE(SceneSerializer::LoadFromString(*clean, *original, {}, report).has_value());
+			editor.SetScene(std::move(clean), path);
+			REQUIRE(host.Inspect(1).has_value());
+			REQUIRE(host.GetOffer().has_value());
+			const auto offer = *host.GetOffer();
+
+			REQUIRE(host.QueueDecision(offer, EditorRecoveryDecision::Accept).has_value());
+			static_cast<void>(client.Submit("test.run", Json::object()));
+			client.GetServer().Pump();
+			REQUIRE(editor.GetPlay().IsTestRunActive());
+			// A decision queued before the run started is refused at the safe point, and the refusal stays in the offer.
+			const Status applied = host.Pump();
+			REQUIRE_FALSE(applied.has_value());
+			CHECK(applied.error().GetCode() == ErrorCode::InvalidState);
+			REQUIRE(host.GetOffer().has_value());
+			REQUIRE(host.GetOffer()->Failure.has_value());
+			CHECK(host.GetOffer()->Failure->GetCode() == ErrorCode::InvalidState);
+			CHECK(editor.GetScene().GetEntityCount() == 0);
+			CHECK_FALSE(editor.IsSceneDirty());
+			// Enqueueing during the run is refused at once, and the service itself refuses as well.
+			CHECK(host.QueueDecision(offer, EditorRecoveryDecision::Accept).error().GetCode() == ErrorCode::InvalidState);
+			CHECK(saves.Recover(offer.Recovery).error().GetCode() == ErrorCode::InvalidState);
+			CHECK(editor.GetScene().GetEntityCount() == 0);
+
+			// Once the run is over the same offer recovers the scene.
+			client.GetServer().DisconnectInProcess(client.GetClient());
+			REQUIRE_FALSE(editor.GetPlay().IsTestRunActive());
+			REQUIRE(host.QueueDecision(offer, EditorRecoveryDecision::Accept).has_value());
+			REQUIRE(host.Pump().has_value());
+			CHECK_FALSE(host.GetOffer());
+			CHECK(editor.GetScene().GetEntityCount() == 1);
+			CHECK(editor.IsSceneDirty());
 		}
 	}
 

@@ -67,7 +67,6 @@ namespace Engine {
 			CHECK(RenderDebugViewToString(RenderDebugView::Albedo) == "Albedo");
 			CHECK(ParseRenderDebugView("NORMALS") == RenderDebugView::Normals);
 			CHECK(ParseRenderDebugView("emissive") == RenderDebugView::Emissive);
-			// Names are available to contract consumers before their rendering passes are implemented.
 			CHECK(ParseRenderDebugView("AO") == RenderDebugView::AO);
 			CHECK(ParseRenderDebugView("ShadowCascades") == RenderDebugView::ShadowCascades);
 			CHECK(ParseRenderDebugView("overdraw") == RenderDebugView::Overdraw);
@@ -80,6 +79,7 @@ namespace Engine {
 			const RenderSnapshot snapshot;
 			CHECK(snapshot.Texts.empty());
 			CHECK(snapshot.DebugDraw.IsEmpty());
+			CHECK(snapshot.AnnotationDraw.IsEmpty());
 			CHECK(snapshot.DebugView == RenderDebugView::Lit);
 			const TextItem text;
 			CHECK(text.Size == 32.0f);

@@ -32,7 +32,8 @@ namespace Engine {
 		[[nodiscard]] static Result<ExplicitRenderCamera> Navigate(const ExplicitRenderCamera& camera, const EditorCameraInput& input);
 		// Fit all corners of the world-space bounds with 10% padding at the supplied aspect, retaining view direction.
 		// A zero-size bound gets a 0.5 m radius; adjusts ortho size in orthographic mode. InvalidArgument for reversed/
-		// non-finite bounds, invalid camera or aspect <= 0. Never clips the result against the old near/far interval.
+		// non-finite bounds, invalid camera or aspect <= 0. The clip range only widens (near = min(old, fitted), far =
+		// max(old, fitted)): the bounds always fit inside it and nothing the old range showed is clipped.
 		[[nodiscard]] static Result<ExplicitRenderCamera> FrameBounds(const ExplicitRenderCamera& camera,
 			const glm::vec3& minimum, const glm::vec3& maximum, float aspect);
 	};

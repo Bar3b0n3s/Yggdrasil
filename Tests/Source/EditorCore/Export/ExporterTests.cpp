@@ -46,7 +46,7 @@
 #include <utility>
 #include <vector>
 
-// The exporter v0 (Architecture Â§14.1, Â§14.2; Docs/Decisions/0012-m7-decisions.md decision 14) against a fake build output
+// The exporter v0 (Architecture §14.1, §14.2; Docs/Decisions/0012-m7-decisions.md decision 14) against a fake build output
 // directory: a Runtime "executable" the export only copies (never runs), the app-local CRT on Windows and a few shader
 // files. The exports of the real Runtime, the smoke test per configuration and the exported game's run are tested by
 // Tests/Automation/test_export.py and test_runtime.py against the built binaries.
@@ -719,7 +719,7 @@ namespace Engine {
 			CHECK(ExportPhaseToString(ExportPhase::Done) == "Done");
 		}
 
-		// M8 (Â§7.5, Â§7.6; Docs/Decisions/0013-m8-decisions.md decision 9): the built-in environments in Engine.pak.
+		// M8 (§7.5, §7.6; Docs/Decisions/0013-m8-decisions.md decision 9): the built-in environments in Engine.pak.
 
 		TEST_CASE("Exporter: without a bake or a GPU the built-in environments are left out of Engine.pak with a warning")
 		{

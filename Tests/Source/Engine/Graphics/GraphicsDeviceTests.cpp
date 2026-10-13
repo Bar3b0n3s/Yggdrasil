@@ -96,23 +96,20 @@ namespace Engine {
 			CHECK_FALSE(gpu.IsAvailable());
 		}
 
-		TEST_CASE("GraphicsDevice: disabling depth clamp restricts the capability without changing hardware support"
-			* doctest::test_suite(Test::GpuSuite))
+		TEST_CASE("GraphicsDevice: disabling depth clamp turns shadow pancaking off on any device" * doctest::test_suite(Test::GpuSuite))
 		{
 			CHECK_FALSE(GraphicsSpecification{}.DisableDepthClamp);
 			CHECK_FALSE(Test::HeadlessGpuOptions{}.DisableDepthClamp);
 			// Recreate the real logical device with the restriction, then without it: it must not change process-level
-			// dispatch state or the physical-device feature. This also covers hardware that has no depth clamp support.
+			// dispatch state. Pancaking is emulated per fragment, so it does not depend on the hardware depthClamp feature.
 			for (const bool disableDepthClamp : { false, true, false })
 			{
 				CAPTURE(disableDepthClamp);
 				Test::HeadlessGpuFixture gpu({ .DisableDepthClamp = disableDepthClamp });
 				ENGINE_REQUIRE_GPU(gpu);
 				GraphicsDevice& device = gpu.GetDevice();
-				VkPhysicalDeviceFeatures supported{};
-				VULKAN_HPP_DEFAULT_DISPATCHER.vkGetPhysicalDeviceFeatures(device.GetVulkanPhysicalDevice(), &supported);
 				CHECK(device.GetSpecification().DisableDepthClamp == disableDepthClamp);
-				CHECK(device.GetInfo().DepthClamp == (supported.depthClamp == VK_TRUE && !disableDepthClamp));
+				CHECK(device.GetInfo().DepthClamp == !disableDepthClamp);
 				CHECK(device.GetVulkanDevice() != VK_NULL_HANDLE);
 				CHECK(device.GetInfo().Validation);
 				CHECK(device.GetInfo().SynchronizationValidation);

@@ -15,6 +15,7 @@
 #include "Engine/Core/Hash.h"
 #include "Engine/Core/VirtualFileSystem.h"
 #include "Engine/Graphics/Image.h"
+#include "Engine/Platform/Window.h"
 #include "Engine/Renderer/ViewportCapture.h"
 #include "Engine/Scripting/RegisterBindings.h"
 #include "Engine/Scripting/ScriptEngine.h"
@@ -151,6 +152,7 @@ namespace Engine {
 		options.ScenePath = suite.Scene;
 		options.Parameters = suite.Parameters;
 		options.Lockstep = suite.Clock.empty();
+		ResetTestCursor();
 		ENGINE_TRY_ASSIGN(auto prepared, m_Editor.GetPlay().PrepareSession(options, std::move(project), suite.Scene.empty(), &hook, &testHost, true, !m_Acquired, &m_Api));
 		m_Headers[prepared.Session->GetSerial()] = std::move(prepared.Header);
 		return std::move(prepared.Session);
@@ -170,9 +172,20 @@ namespace Engine {
 		options.Lockstep = true;
 		ProjectSettings project = m_Project;
 		project.Simulation.FixedHz = header.FixedHz;
+		ResetTestCursor();
 		ENGINE_TRY_ASSIGN(auto prepared, m_Editor.GetPlay().PrepareSession(options, std::move(project), false, nullptr, nullptr, true, !m_Acquired, &m_Api));
 		m_Headers[prepared.Session->GetSerial()] = std::move(prepared.Header);
 		return std::move(prepared.Session);
+	}
+
+	void EditorFeatureTestHost::ResetTestCursor()
+	{
+		// Only the acquired run's sessions reach the window (scratch sessions have no host); AcquireTestRun saved the user's
+		// cursor and ReleaseTestRun restores it. Each suite and replay starts from the run baseline, never a previous suite's.
+		if (!m_Acquired)
+			return;
+		if (Window* window = m_Editor.GetEngine().GetWindow())
+			window->SetCursorMode(CursorMode::Normal);
 	}
 
 	void EditorFeatureTestHost::SetActiveTestSession(PlaySession* session)
@@ -189,9 +202,7 @@ namespace Engine {
 	Status EditorFeatureTestHost::CaptureScreenshot(PlaySession& session, std::string_view name)
 	{
 		ENGINE_TRY(VfsPath::Create("project", name));
-		RenderExtractionRequest request;
-		request.Width = m_Project.Window.Width;
-		request.Height = m_Project.Window.Height;
+		const RenderExtractionRequest request = MakeTestScreenshotRequest(session, m_Project.Window.Width, m_Project.Window.Height);
 		ENGINE_TRY_ASSIGN(const RenderSnapshot snapshot, session.ExtractView(request));
 		ViewportScreenshotRequest capture;
 		capture.Width = request.Width;

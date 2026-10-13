@@ -521,6 +521,96 @@ return C
 			REQUIRE_MESSAGE(retried.has_value(), (retried ? "" : retried.error().ToString()));
 			CHECK(fixture.Errors.size() == 1);
 		}
+
+		TEST_CASE("HotReload: an instance without a table restarts its lifecycle with OnCreate and OnStart")
+		{
+			Test::ScriptTestFixture fixture;
+			const AssetHandle handle(920);
+			const std::string good = R"(
+local Board = { Fields = { Width = Field.Integer(10) } }
+function Board:OnCreate()
+	self.Grid = {}
+	self.Created = (self.Created or 0) + 1
+	Scene.CreateEntity("Trace:create")
+end
+function Board:OnStart()
+	assert(self.Grid ~= nil, "OnStart ran without OnCreate")
+	Scene.CreateEntity("Trace:start")
+end
+function Board:OnHotReload() Scene.CreateEntity("Trace:hot-reload") end
+return Script.Define("Board", Board)
+)";
+			const auto declaration = fixture.AddScript(handle, "Assets/Board.luau", good);
+			REQUIRE(declaration.has_value());
+			// Import succeeded, but the module top faults in the live VM: the instance never gets a table.
+			REQUIRE(PublishReloadBody(fixture, handle, **declaration, "error('runtime top fault')").has_value());
+			const Entity entity = fixture.GetScene().CreateEntity("Board");
+			entity.AddComponent<ScriptComponent>().Script.SetHandle(handle);
+			{
+				Test::ExpectLog expectedFailure(LogLevel::Error, "runtime top fault");
+				REQUIRE(fixture.Start().has_value());
+			}
+			REQUIRE(fixture.Errors.size() == 1);
+			REQUIRE(fixture.GetEngine()->GetInstances().size() == 1);
+			CHECK(fixture.GetEngine()->GetInstances().front().Disabled);
+			REQUIRE(fixture.AddScript(handle, "Assets/Board.luau", good).has_value());
+			REQUIRE(fixture.GetEngine()->Reload(handle).has_value());
+			fixture.GetEngine()->StartPending();
+			const auto instances = fixture.GetEngine()->GetInstances();
+			REQUIRE(instances.size() == 1);
+			CHECK_FALSE(instances[0].Disabled);
+			CHECK(instances[0].Started);
+			std::vector<std::string> trace;
+			for (const UUID id : fixture.GetScene().GetCanonicalOrder())
+			{
+				const Entity traced = fixture.GetScene().FindEntityByID(id);
+				if (traced.GetName().starts_with("Trace:"))
+					trace.push_back(traced.GetName().substr(6));
+			}
+			CHECK(trace == std::vector<std::string>{ "create", "start" });
+			const auto state = EvaluateReload(fixture, "return {self.Created, self.Width, self.Grid ~= nil}", entity.GetUUID());
+			REQUIRE(state.has_value());
+			CHECK(state->Value.Get() == Json::array({ 1, 10, true }));
+			CHECK(fixture.Errors.size() == 1);
+		}
+
+		TEST_CASE("HotReload: the reload chain holds only loaded modules and attached behaviours that require the script")
+		{
+			Test::ScriptTestFixture fixture;
+			const AssetHandle leaf(930), behaviour(931), suite(932), unrelated(933);
+			REQUIRE(fixture.AddScript(leaf, "Assets/ChainLeaf.luau", "return { Value = 1 }").has_value());
+			REQUIRE(fixture.AddScript(behaviour, "Assets/ChainBehaviour.luau", R"(
+local Leaf = require("./ChainLeaf")
+local C = {}
+function C:Value() return Leaf.Value end
+return Script.Define("ChainBehaviour", C)
+)")
+					.has_value());
+			// Requires the leaf but is neither loaded by the VM nor attached, like a project test suite.
+			REQUIRE(fixture.AddScript(suite, "Assets/Tests/Chain.test.luau", R"(
+local Leaf = require("../ChainLeaf")
+return Test.Suite("Chain", function() Test.Case("value", function() Test.Expect(Leaf.Value == 1) end) end)
+)")
+					.has_value());
+			REQUIRE(fixture.AddScript(unrelated, "Assets/Unrelated.luau", "return {}").has_value());
+			const Entity entity = fixture.GetScene().CreateEntity("Chain");
+			entity.AddComponent<ScriptComponent>().Script.SetHandle(behaviour);
+			REQUIRE(fixture.Start().has_value());
+			const auto chain = fixture.GetEngine()->GetReloadChain(leaf);
+			REQUIRE_MESSAGE(chain.has_value(), (chain ? "" : chain.error().ToString()));
+			CHECK(*chain == std::vector<AssetHandle>{ leaf, behaviour });
+			const auto own = fixture.GetEngine()->GetReloadChain(behaviour);
+			REQUIRE(own.has_value());
+			CHECK(*own == std::vector<AssetHandle>{ behaviour });
+			// The chain is what Reload patches, and planning it executed nothing.
+			const auto reloaded = fixture.GetEngine()->Reload(leaf);
+			REQUIRE(reloaded.has_value());
+			CHECK(reloaded->Scripts == *chain);
+			const auto invalid = fixture.GetEngine()->GetReloadChain(AssetHandle{});
+			REQUIRE_FALSE(invalid.has_value());
+			CHECK(invalid.error().GetCode() == ErrorCode::InvalidArgument);
+			CHECK(fixture.Errors.empty());
+		}
 	}
 
 }

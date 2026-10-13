@@ -3,11 +3,15 @@
 #include "EditorCore/Project/ProjectValidator.h"
 
 #include "EditorCore/Automation/RegisterMethods.h"
+#include "EditorCore/Commands/CommandHistory.h"
 #include "EditorCore/Commands/ProjectSettingsCommand.h"
 #include "EditorCore/Commands/SceneEdit.h"
 #include "EditorCore/EditorContext.h"
+#include "EditorCore/Project/ProjectManager.h"
 #include "EditorCore/Scripting/EditorScriptService.h"
+#include "Engine/App/EngineContext.h"
 #include "Engine/Asset/AssetMetadata.h"
+#include "Engine/Asset/BuiltinAssets.h"
 #include "Engine/Asset/ScriptData.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/Core/Hash.h"
@@ -16,13 +20,18 @@
 #include "Engine/Physics/PhysicsDiagnostics.h"
 #include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Renderer/RenderPrepare.h"
+#include "Engine/Renderer/SpotShadowAtlas.h"
 #include "Engine/Scene/AudioSystem.h"
 #include "Engine/Scene/ComponentAccess.h"
 #include "Engine/Scene/ComponentRegistration.h"
+#include "Engine/Scene/Components/EnvironmentComponent.h"
+#include "Engine/Scene/Components/MeshRendererComponent.h"
 #include "Engine/Scene/Components/RigidBodyComponent.h"
 #include "Engine/Scene/Components/ScriptComponent.h"
+#include "Engine/Scene/Components/SpotLightComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/LoadReport.h"
+#include "Engine/Scene/RenderAnnotations.h"
 #include "Engine/Scene/SceneSerializer.h"
 #include "Support/AssetTestFixture.h"
 #include "Support/EditorTestFixture.h"
@@ -32,6 +41,7 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <limits>
 #include <map>
 
 namespace Engine {
@@ -488,11 +498,43 @@ end
 			REQUIRE(type != nullptr);
 			CHECK(compile->Line > 0);
 			CHECK(type->Line == 2);
+			// The checker's syntax error keeps its own code and is reported once, not again by the source scan.
+			CHECK(FindFileDiagnostic(*report, "Assets/Syntax.luau", "SCRIPT_TYPE_ERROR") == nullptr);
+			CHECK(std::ranges::count_if(report->Diagnostics, [](const ProjectDiagnostic& diagnostic)
+			{
+				return diagnostic.File == "Assets/Syntax.luau" && diagnostic.Code == "SCRIPT_COMPILE_ERROR";
+			}) == 1);
 			CHECK(std::ranges::count_if(report->Diagnostics, [](const ProjectDiagnostic& diagnostic)
 			{
 				return diagnostic.Code == "TEST_SUITE_INVALID";
 			}) == 2);
 			CHECK(std::ranges::find(ProjectValidator::GetCodes(), std::string_view("SCRIPT_NOT_A_BEHAVIOUR")) != ProjectValidator::GetCodes().end());
+		}
+
+		TEST_CASE("ProjectValidator: missing and misspelled requires are located findings, not a failed validation")
+		{
+			Test::EditorTestFixture fixture("ValidatorRequires");
+			fixture.CreateAndOpenProject();
+			auto& editor = fixture.GetEditor();
+			REQUIRE(editor.GetScriptService() != nullptr);
+			WriteValidatorFile(editor, "Assets/Board.luau", "return { Value = 1 }\n");
+			WriteValidatorFile(editor, "Assets/Requires.luau", "local Missing = require(\"./Missing\")\nlocal Board = require(\"./Bord\")\nreturn Script.Define(\"Requires\", {})\n");
+			const auto report = ProjectValidator::Validate(editor, ValidationScope::Project);
+			REQUIRE_MESSAGE(report.has_value(), (report ? std::string() : report.error().ToString()));
+			INFO(DescribeDiagnostics(*report));
+			for (const uint32_t line : { 1u, 2u })
+			{
+				CAPTURE(line);
+				CHECK(std::ranges::any_of(report->Diagnostics, [line](const ProjectDiagnostic& diagnostic)
+				{
+					return diagnostic.File == "Assets/Requires.luau" && diagnostic.Line == line && diagnostic.Severity == DiagnosticSeverity::Error
+						&& (diagnostic.Code == "SCRIPT_TYPE_ERROR" || diagnostic.Code == "SCRIPT_COMPILE_ERROR");
+				}));
+			}
+			CHECK(std::ranges::none_of(report->Diagnostics, [](const ProjectDiagnostic& diagnostic)
+			{
+				return diagnostic.File == "Assets/Board.luau";
+			}));
 		}
 
 		TEST_CASE("ProjectValidator: multiple primary cameras are reported and fixed keeping the first")
@@ -1170,6 +1212,91 @@ end
 			report = ProjectValidator::Validate(editor, ValidationScope::Scene);
 			REQUIRE(report.has_value());
 			CHECK(FindDiagnostic(*report, RenderLightLimitExceededCode) == nullptr);
+		}
+
+		TEST_CASE("ProjectValidator: render warnings have stable IDs and no automatic fixes")
+		{
+			Test::EditorTestFixture fixture;
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene("Assets/Scenes/Dark.scene");
+			EditorContext& editor = fixture.GetEditor();
+			editor.GetScene().CreateEntity("Environment").AddComponent<EnvironmentComponent>().FallbackColor = glm::vec3(0.0f);
+			editor.GetScene().CreateEntity("Cube").AddComponent<MeshRendererComponent>().Mesh.SetHandle(BuiltinAssetHandles::CubeMesh);
+			REQUIRE(SceneSerializer::SaveToFile(editor.GetScene(), editor.GetVfs(), *editor.GetScenePath()));
+			const auto openDark = ProjectValidator::Validate(editor, ValidationScope::Scene);
+			REQUIRE(openDark);
+			const auto dark = std::ranges::find(openDark->Diagnostics, RenderNoLightingCode, &ProjectDiagnostic::Code);
+			REQUIRE(dark != openDark->Diagnostics.end());
+			const std::string darkId = dark->Id;
+			fixture.CreateAndOpenScene("Assets/Scenes/Spots.scene");
+			for (uint32_t light = 0; light < MaxSpotShadowLights + 1; ++light)
+				editor.GetScene().CreateEntity("Spot").AddComponent<SpotLightComponent>().CastShadows = true;
+			const auto before = SceneSerializer::ToJson(editor.GetScene());
+			REQUIRE(before);
+			const size_t undoCount = editor.GetHistory().GetUndoCount();
+			const auto report = ProjectValidator::Validate(editor, ValidationScope::Project);
+			const auto repeated = ProjectValidator::Validate(editor, ValidationScope::Project);
+			REQUIRE(report);
+			REQUIRE(repeated);
+			for (std::string_view code : { RenderNoLightingCode, RenderSpotShadowBudgetCode })
+			{
+				const auto found = std::ranges::find(report->Diagnostics, code, &ProjectDiagnostic::Code);
+				const auto again = std::ranges::find(repeated->Diagnostics, code, &ProjectDiagnostic::Code);
+				REQUIRE(found != report->Diagnostics.end());
+				REQUIRE(again != repeated->Diagnostics.end());
+				CHECK(found->Id == again->Id);
+				CHECK(found->Severity == DiagnosticSeverity::Warning);
+				CHECK_FALSE(found->AutoFixable);
+				CHECK(found->Entity.empty());
+				CHECK(found->File == (code == RenderNoLightingCode ? "Assets/Scenes/Dark.scene" : "Assets/Scenes/Spots.scene"));
+				if (code == RenderNoLightingCode)
+					CHECK(found->Id == darkId);
+			}
+			const auto fixed = ProjectValidator::Fix(editor, ValidationScope::Project,
+				{ .IdsOrCodes = { std::string(RenderNoLightingCode), std::string(RenderSpotShadowBudgetCode) } });
+			REQUIRE(fixed);
+			CHECK(fixed->Fixed.empty());
+			CHECK(fixed->UndoIndex == 0);
+			CHECK(editor.GetHistory().GetUndoCount() == undoCount);
+			const auto after = SceneSerializer::ToJson(editor.GetScene());
+			REQUIRE(after);
+			CHECK(*before == *after);
+		}
+
+		TEST_CASE("ProjectValidator: an invalid illumination scan returns its error with the scene path")
+		{
+			Test::EditorTestFixture fixture;
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			fixture.GetEditor().GetScene().CreateEntity("Environment").AddComponent<EnvironmentComponent>().Intensity = std::numeric_limits<float>::quiet_NaN();
+			const auto report = ProjectValidator::Validate(fixture.GetEditor(), ValidationScope::Scene);
+			REQUIRE_FALSE(report);
+			CHECK(report.error().GetCode() == ErrorCode::InvalidArgument);
+			CHECK(report.error().ToString().contains("Assets/Scenes/Main.scene"));
+		}
+
+		TEST_CASE("ProjectValidator: Basic3D illumination has no render errors or false lighting warning")
+		{
+			Test::EditorTestFixture fixture;
+			auto engine = EngineContext::Create({ .EngineResourcesDirectory = Test::GetRepositoryRoot() / "Resources", .RegisterTypes = &RegisterEditorMethodTypes });
+			REQUIRE(engine);
+			auto context = EditorContext::Create(**engine, { .IdGeneratorState = Test::EditorTestIdState });
+			REQUIRE(context);
+			EditorContext& editor = **context;
+			const auto created = ProjectManager::CreateProject({ .Directory = fixture.GetProjectRoot(), .Name = "TestProject", .Template = ProjectTemplate::Basic3D, .TemplatesDirectory = Test::GetRepositoryRoot() / "Resources/Templates/Projects" }, editor.GetTypeRegistry());
+			REQUIRE(created);
+			auto opened = ProjectManager::OpenProject(created->ProjectFile, {}, editor.GetTypeRegistry());
+			REQUIRE(opened);
+			REQUIRE(editor.OpenProject(std::move(*opened)));
+			const auto report = ProjectValidator::Validate(editor, ValidationScope::Project);
+			REQUIRE(report);
+			CHECK(report->ErrorCount == 0);
+			for (const auto& diagnostic : report->Diagnostics)
+			{
+				INFO(diagnostic.Code, ": ", diagnostic.Message);
+				CHECK(diagnostic.Code != RenderNoLightingCode);
+				CHECK(diagnostic.Code != RenderSpotShadowBudgetCode);
+			}
 		}
 
 		TEST_CASE("ProjectValidator: GetCodes lists the M11 physics codes right after PREFAB_MISSING_ASSET")

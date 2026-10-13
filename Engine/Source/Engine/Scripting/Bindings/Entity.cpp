@@ -11,11 +11,13 @@
 #include "Engine/Scene/TransformSystem.h"
 #include "Engine/Scripting/Private/ScriptEngineAccess.h"
 #include "Engine/Scripting/ScriptEngine.h"
+#include "Engine/Scripting/ScriptLimits.h"
 
 #include <glm/gtc/matrix_inverse.hpp>
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <format>
 
 namespace Engine {
 
@@ -44,7 +46,7 @@ namespace Engine {
 		}
 		static std::string Tag(ScriptCall& call)
 		{
-			auto name = Lua::Check<std::string>(call, 2);
+			auto name = Lua::CheckBoundedString(call, 2, MaxScriptTagBytes);
 			if (name.empty() || !IsValidUtf8(name) || name.find('\0') != std::string::npos)
 				Lua::RaiseError(call, "tag must be nonempty UTF-8 without NUL");
 			return name;
@@ -62,7 +64,7 @@ namespace Engine {
 		static int EntitySetName(ScriptCall& call)
 		{
 			const Entity entity = EntitySelf(call);
-			const auto name = Lua::Check<std::string>(call, 2);
+			const auto name = Lua::CheckBoundedString(call, 2, MaxScriptEntityNameBytes);
 			if (!IsValidUtf8(name) || name.find('\0') != std::string::npos)
 				return Lua::RaiseError(call, "name must be UTF-8 without NUL");
 			EntityMutation(call);
@@ -108,6 +110,8 @@ namespace Engine {
 			const auto tag = Tag(call);
 			if (!entity.HasTag(tag))
 			{
+				if (entity.GetTags().size() >= MaxScriptEntityTags)
+					return Lua::RaiseError(call, std::format("entity already has the maximum of {} tags", MaxScriptEntityTags));
 				EntityMutation(call);
 				entity.AddTag(tag);
 			}
@@ -227,7 +231,15 @@ namespace Engine {
 			EntityChecked(call, ComponentAccess::AddComponent(entity, name, &*json, context.Schemas));
 			if (name == "Script")
 				EntityChecked(call, call.Engine->SynchronizeInstances());
-			auto proxy = ScriptProxy::GetComponent(call.Engine->GetHost(), Lua::Check<ScriptEntityIdentity>(call, 1), name);
+			// The new Script's OnCreate may destroy its entity, as Scene.CreateEntity's may; the add succeeded, so this
+			// returns nil instead of raising for the now-stale identity (M13 review F24).
+			const auto identity = Lua::Check<ScriptEntityIdentity>(call, 1);
+			if (!ScriptProxy::IsValid(call.Engine->GetHost(), identity))
+			{
+				Lua::PushNil(call);
+				return 1;
+			}
+			auto proxy = ScriptProxy::GetComponent(call.Engine->GetHost(), identity, name);
 			if (!proxy)
 				return Lua::RaiseError(call, proxy.error());
 			if (*proxy)
@@ -368,20 +380,24 @@ namespace Engine {
 		{
 			const ScriptMemberOptions read{ .Mutates = false };
 			const ScriptMemberOptions write{};
+			const std::string addComponent = std::format("Validate and add a component and return its proxy; Script instances are synchronized before returning, and nil is "
+														 "returned when the new Script's OnCreate destroyed the entity. Each value holds at most {} bytes of text (strings, "
+														 "map keys and Variant text together).",
+				MaxScriptComponentStringBytes);
 			api.Type("Entity", "A UUID and scene generation identifying an entity; no native address is exposed.")
 				.Property("ID", Utils::EntityID, nullptr, "string", "The immutable 16-digit hexadecimal UUID.", read)
-				.Property("Name", Utils::EntityName, Utils::EntitySetName, "string", "The entity name.", read)
+				.Property("Name", Utils::EntityName, Utils::EntitySetName, "string", std::format("The entity name; a written name is UTF-8 without NUL and at most {} bytes.", MaxScriptEntityNameBytes), read)
 				.Method("IsValid", Utils::EntityValid, "(self: Entity) -> boolean", "Whether this identity still names a live entity in this scene.", read)
 				.Method("IsActive", Utils::EntityActive, "(self: Entity) -> boolean", "The effective active state including every ancestor.", read)
 				.Method("IsActiveSelf", Utils::EntityActiveSelf, "(self: Entity) -> boolean", "The entity's local active state.", read)
 				.Method("SetActive", Utils::EntitySetActive, "(self: Entity, active: boolean) -> ()", "Change local active state and dispatch effective lifecycle transitions before returning.", write)
 				.Method("HasTag", Utils::EntityHasTag, "(self: Entity, tag: string) -> boolean", "Check an exact tag.", read)
-				.Method("AddTag", Utils::EntityAddTag, "(self: Entity, tag: string) -> ()", "Add a nonempty tag if absent.", write)
+				.Method("AddTag", Utils::EntityAddTag, "(self: Entity, tag: string) -> ()", std::format("Add a nonempty tag of at most {} bytes if absent; an entity carries at most {} tags.", MaxScriptTagBytes, MaxScriptEntityTags), write)
 				.Method("RemoveTag", Utils::EntityRemoveTag, "(self: Entity, tag: string) -> ()", "Remove a tag if present.", write)
 				.Method("GetTags", Utils::EntityTags, "(self: Entity) -> {string}", "Copy tags in insertion order.", read)
 				.Method("HasComponent", Utils::EntityHasComponent, "(self: Entity, name: string) -> boolean", "Check an exposed component by its exact registry name.", read)
 				.Method("GetComponent", Utils::EntityComponent, "(self: Entity, name: string) -> any", "Get a component proxy, or nil when absent.", read)
-				.Method("AddComponent", Utils::EntityAddComponent, "(self: Entity, name: string, values: {[string]: any}?) -> any", "Validate and add a component; Script instances are synchronized before returning.", write)
+				.Method("AddComponent", Utils::EntityAddComponent, "(self: Entity, name: string, values: {[string]: any}?) -> any", addComponent, write)
 				.Method("RemoveComponent", Utils::EntityRemoveComponent, "(self: Entity, name: string) -> ()", "Remove a removable component when no present component requires it.", write)
 				.Method("GetScript", Utils::EntityScript, "(self: Entity) -> any", "Get the existing behaviour instance or nil; cast to the module's exported instance type.", read)
 				.Method("GetParent", Utils::EntityParent, "(self: Entity) -> Entity?", "Get the parent, or nil for a root.", read)

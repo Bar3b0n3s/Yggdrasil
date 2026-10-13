@@ -4,11 +4,15 @@
 #include "Editor/EditorPanelContext.h"
 #include "Editor/Icons.h"
 #include "Editor/Ui/EditorStyle.h"
+#include "EditorCore/Commands/CommandHistory.h"
 #include "EditorCore/EditorActions.h"
 #include "EditorCore/EditorContext.h"
+#include "EditorCore/Play/EditorPlayController.h"
 #include "EditorCore/Thumbnails/ThumbnailCache.h"
+#include "Engine/App/EngineContext.h"
 #include "Engine/Asset/AssetRegistry.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
+#include "Engine/Core/EventLog.h"
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Hash.h"
 #include "Engine/Core/Log.h"
@@ -18,6 +22,7 @@
 
 #include <algorithm>
 #include <functional>
+#include <optional>
 
 namespace Engine {
 
@@ -54,6 +59,100 @@ namespace Engine {
 
 	}
 
+	void ContentBrowserPanel::DetectChanges(EditorContext& editor)
+	{
+		// Constant-time signals only: nothing here walks the project.
+		const CommandHistory& history = editor.GetHistory();
+		const EditorAssetManager& assets = editor.GetAssets();
+		const uint64_t sequence = history.GetCurrentSequence();
+		const size_t undo = history.GetUndoCount();
+		const size_t redo = history.GetRedoCount();
+		// The registry's revision also moves for a file and its .meta renamed or moved outside the editor, which the rescan
+		// registers under the same handle (the same record count, no command and no AssetReloaded event).
+		const uint64_t registry = assets.GetRegistry().GetRevision();
+		const size_t diagnostics = assets.GetDiagnostics().size();
+		if (!m_HasSignals || sequence != m_HistorySequence || undo != m_HistoryUndoCount || redo != m_HistoryRedoCount || registry != m_RegistryRevision)
+			m_ListingStale = true;
+		if (diagnostics != m_DiagnosticCount)
+			m_TilesStale = true;
+		m_HistorySequence = sequence;
+		m_HistoryUndoCount = undo;
+		m_HistoryRedoCount = redo;
+		m_RegistryRevision = registry;
+		m_DiagnosticCount = diagnostics;
+		m_HasSignals = true;
+		const EventLog& events = editor.GetEngine().GetEventLog();
+		if (m_EventCursor == events.GetNextSeq())
+			return;
+		constexpr std::array AssetEvents{ EngineEventType::AssetReloaded, EngineEventType::AssetImportFailed };
+		const EventReadResult read = events.Read(m_EventCursor, AssetEvents, 1);
+		if (read.Events.empty() && read.DroppedCount == 0)
+		{
+			m_EventCursor = read.NextCursor;
+			return;
+		}
+		m_TilesStale = true;
+		m_EventCursor = events.GetNextSeq();
+	}
+
+	void ContentBrowserPanel::RefreshListing(EditorContext& editor)
+	{
+		m_Folders.clear();
+		m_Subfolders.clear();
+		m_ListingError.clear();
+		m_ListingStale = false;
+		m_TilesStale = true;
+		const auto root = VfsPath::Create("project", "Assets");
+		const auto entries = root ? editor.GetVfs().List(*root, true) : Result<std::vector<VfsEntry>>(std::unexpected(root.error()));
+		if (!entries)
+		{
+			m_ListingError = entries.error().GetMessageText();
+			return;
+		}
+		for (const VfsEntry& entry : *entries)
+		{
+			if (!entry.Info.IsDirectory)
+				continue;
+			m_Folders.emplace_back(entry.Path.GetPath());
+			m_Subfolders[std::string(entry.Path.GetParent().GetPath())].emplace_back(entry.Path.GetPath());
+		}
+	}
+
+	void ContentBrowserPanel::RefreshTiles(EditorContext& editor)
+	{
+		m_Tiles.clear();
+		m_TilesDirectory = m_Directory;
+		m_TilesStale = false;
+		const EditorAssetManager& assets = editor.GetAssets();
+		const std::span<const AssetDiagnostic> diagnostics = assets.GetDiagnostics(); // sorted by (Path, Code, Subject)
+		for (const AssetHandle handle : assets.GetRegistry().GetHandles())
+		{
+			const auto location = assets.GetRegistry().Locate(handle);
+			if (!location || location->Record->SourcePath.GetParent().GetPath() != m_Directory)
+				continue;
+			Tile tile;
+			tile.Handle = handle;
+			tile.Type = location->Type;
+			tile.Label = location->SubAssetKey.empty() ? std::string(location->Record->SourcePath.GetFileName()) : location->SubAssetKey;
+			tile.TypeLabel = Utils::EditorLabel(AssetTypeToString(location->Type));
+			tile.Path = assets.GetReferencePath(handle);
+			tile.SearchKey = Utils::AssetSearchKey(tile.Path + " " + tile.TypeLabel);
+			tile.SubAsset = !location->SubAssetKey.empty();
+			const std::string_view source = location->Record->SourcePath.GetPath();
+			const auto issue = std::ranges::lower_bound(diagnostics, source, {}, [](const AssetDiagnostic& diagnostic)
+			{
+				return std::string_view(diagnostic.Path);
+			});
+			if (issue != diagnostics.end() && issue->Path == source)
+				tile.Issue = issue->Message;
+			m_Tiles.push_back(std::move(tile));
+		}
+		std::ranges::sort(m_Tiles, [](const Tile& left, const Tile& right)
+		{
+			return left.Path == right.Path ? left.Handle < right.Handle : left.Path < right.Path;
+		});
+	}
+
 	Status ContentBrowserPanel::Draw(EditorPanelContext& context)
 	{
 		auto& editor = context.Editor;
@@ -78,8 +177,19 @@ namespace Engine {
 			m_ActionAsset = {};
 			m_ReopenImport = false;
 			m_Error.clear();
+			m_ListingStale = true;
+			m_HasSignals = false;
+			m_Drops.clear();
+			m_OpenDropPrompt = false;
+			m_PendingScene.clear();
+			m_OpenScenePrompt = false;
 		}
-		std::erase_if(m_Tickets, [&context, &showError](uint64_t ticket)
+		const int frame = ImGui::GetFrameCount();
+		// Drops that arrived while this panel was not drawn (another tab selected, the panel closed) never import into
+		// whatever folder happens to be current: their destination is confirmed first.
+		const bool wasHidden = m_LastDrawFrame < 0 || frame - m_LastDrawFrame > 1;
+		m_LastDrawFrame = frame;
+		std::erase_if(m_Tickets, [this, &context, &showError](uint64_t ticket)
 		{
 			auto completion = context.Actions.TakeResult(ticket);
 			if (!completion)
@@ -91,6 +201,7 @@ namespace Engine {
 				return false;
 			if (!**completion && (**completion).error().GetCode() != ErrorCode::Cancelled)
 				showError((**completion).error());
+			m_ListingStale = true; // a finished operation (or Refresh) may have changed folders and assets
 			return true;
 		});
 		if (!editor.HasProject())
@@ -98,6 +209,11 @@ namespace Engine {
 			Utils::EditorEmptyState("Your assets live here", "Open or create a project to browse scenes, materials, models and audio.");
 			return {};
 		}
+		DetectChanges(editor);
+		if (m_ListingStale)
+			RefreshListing(editor);
+		if (m_TilesStale || m_TilesDirectory != m_Directory)
+			RefreshTiles(editor);
 		// Project identity scopes transient popups as well as their input state.
 		ImGui::PushID(static_cast<int>(FNV1a32(m_Project)));
 		const auto submit = [this, &context, &showError](std::string_view method, const Json& params) -> bool
@@ -114,10 +230,38 @@ namespace Engine {
 		};
 		if (context.TakeContentDrops)
 		{
-			for (const auto& source : context.TakeContentDrops())
-				if (!editor.IsReadOnly())
+			std::vector<std::filesystem::path> drops = context.TakeContentDrops();
+			if (!drops.empty() && editor.IsReadOnly())
+			{
+				m_Error = std::format("This project is read-only, so {} dropped file(s) were not imported.", drops.size());
+				ENGINE_WARN("Content browser: {}", m_Error);
+			}
+			else if (!drops.empty() && !wasHidden && m_Drops.empty())
+			{
+				for (const auto& source : drops)
 					submit("asset.import", Json{ { "source", FileSystem::PathToUtf8(source) }, { "destDir", m_Directory } });
+			}
+			else if (!drops.empty())
+			{
+				if (m_Drops.empty())
+					m_DropDirectory = m_Directory;
+				m_Drops.insert(m_Drops.end(), drops.begin(), drops.end());
+				m_OpenDropPrompt = true;
+			}
 		}
+		const bool previewRunning = editor.GetPlay().GetSession() != nullptr;
+		const auto openScene = [this, &editor, &submit, previewRunning](const std::string& path)
+		{
+			if (previewRunning)
+				m_Error = "Stop the preview before changing scenes.";
+			else if (editor.IsSceneDirty())
+			{
+				m_PendingScene = path;
+				m_OpenScenePrompt = true;
+			}
+			else
+				submit("scene.open", Json{ { "path", path } });
+		};
 		const float scale = Utils::EditorUiScale();
 		ImGui::BeginDisabled(editor.IsReadOnly());
 		if (Utils::EditorToolbarButton("Create", "Create an asset in the current folder"))
@@ -135,7 +279,11 @@ namespace Engine {
 		ImGui::EndDisabled();
 		ImGui::SameLine();
 		if (Utils::EditorToolbarButton("Refresh", "Scan project assets for changes"))
+		{
+			// Thumbnails also recheck their files: an input edited outside the editor while it was unloaded is caught here.
+			context.Thumbnails.Revalidate();
 			submit("project.refreshAssets", Json::object());
+		}
 		if (ImGui::GetContentRegionAvail().x > 200.0f * scale)
 			ImGui::SameLine();
 		ImGui::SetNextItemWidth(-1.0f);
@@ -167,13 +315,6 @@ namespace Engine {
 			start = end + 1;
 		}
 
-		const auto root = VfsPath::Create("project", "Assets");
-		if (!root)
-		{
-			ImGui::PopID();
-			return std::unexpected(root.error());
-		}
-		const auto folders = editor.GetVfs().List(*root, true);
 		const auto moveDrop = [&editor, &submit](std::string_view target)
 		{
 			if (!editor.IsReadOnly() && ImGui::BeginDragDropTarget())
@@ -203,6 +344,29 @@ namespace Engine {
 			m_MovePath.fill(0);
 			std::copy_n(path.begin(), std::min(path.size(), m_MovePath.size() - 1), m_MovePath.begin());
 		};
+		// The folder choices of the move and drop dialogs: Assets and every cached folder.
+		const auto drawDestinations = [this](std::string& selected)
+		{
+			const auto destination = [&selected](std::string_view path)
+			{
+				const std::string text(path);
+				// Hash every authored byte separately: ## and ### are valid path characters.
+				ImGui::PushID(static_cast<int>(FNV1a32(path)));
+				const ImVec2 minimum = ImGui::GetCursorScreenPos();
+				if (ImGui::Selectable("##Destination", path == selected, ImGuiSelectableFlags_None, ImVec2(0.0f, ImGui::GetFrameHeight())))
+					selected = text;
+				const ImVec2 maximum = ImGui::GetItemRectMax();
+				const ImVec2 padding = ImGui::GetStyle().FramePadding;
+				const std::string label = Utils::AssetTileLabel(text, std::max(1.0f, maximum.x - minimum.x - padding.x * 2.0f));
+				ImGui::GetWindowDrawList()->AddText(ImVec2(minimum.x + padding.x, minimum.y + padding.y), ImGui::GetColorU32(ImGuiCol_Text), label.c_str());
+				if (ImGui::IsItemHovered())
+					ImGui::SetTooltip("%s", text.c_str());
+				ImGui::PopID();
+			};
+			destination("Assets");
+			for (const std::string& folder : m_Folders)
+				destination(folder);
+		};
 		size_t visibleAssets = 0;
 		const float footer = ImGui::GetFrameHeightWithSpacing() + (!m_Error.empty() ? 2.0f * ImGui::GetTextLineHeightWithSpacing() : 0.0f)
 			+ (!m_Tickets.empty() ? ImGui::GetFrameHeightWithSpacing() : 0.0f);
@@ -221,21 +385,18 @@ namespace Engine {
 				if (ImGui::BeginChild("FolderTree", ImVec2(0.0f, bodyHeight), ImGuiChildFlags_None, ImGuiWindowFlags_HorizontalScrollbar))
 				{
 					ImGui::TextDisabled("Folders");
-					if (!folders)
-						ImGui::TextWrapped("%s", folders.error().GetMessageText().c_str());
+					if (!m_ListingError.empty())
+						ImGui::TextWrapped("%s", m_ListingError.c_str());
 					else
 					{
-						std::function<void(std::string_view)> drawFolder;
-						drawFolder = [this, &folders, &drawFolder, &moveDrop](std::string_view path)
+						std::function<void(const std::string&)> drawFolder;
+						drawFolder = [this, &drawFolder, &moveDrop](const std::string& path)
 						{
-							const std::string owned(path);
 							const auto slash = path.rfind('/');
-							const std::string label(path.substr(slash == std::string_view::npos ? 0 : slash + 1));
-							const bool hasChildren = std::any_of(folders->begin(), folders->end(), [path](const auto& entry)
-							{
-								return entry.Info.IsDirectory && entry.Path.GetParent().GetPath() == path;
-							});
-							ImGui::PushID(static_cast<int>(FNV1a32(owned)));
+							const std::string label = path.substr(slash == std::string::npos ? 0 : slash + 1);
+							const auto children = m_Subfolders.find(path);
+							const bool hasChildren = children != m_Subfolders.end() && !children->second.empty();
+							ImGui::PushID(static_cast<int>(FNV1a32(path)));
 							ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_SpanAvailWidth;
 							if (path == "Assets")
 								flags |= ImGuiTreeNodeFlags_DefaultOpen;
@@ -254,9 +415,9 @@ namespace Engine {
 							moveDrop(path);
 							if (expanded)
 							{
-								for (const auto& entry : *folders)
-									if (entry.Info.IsDirectory && entry.Path.GetParent().GetPath() == path)
-										drawFolder(entry.Path.GetPath());
+								if (hasChildren)
+									for (const std::string& child : children->second)
+										drawFolder(child);
 								ImGui::TreePop();
 							}
 							ImGui::PopID();
@@ -279,6 +440,7 @@ namespace Engine {
 				const float labelOffset = compact ? 4.0f * scale : previewSize + 8.0f * scale;
 				const float tileHeight = labelOffset + textHeight + 4.0f * scale;
 				std::optional<std::string> nextDirectory;
+				std::optional<std::string> sceneToOpen;
 				size_t visibleFolders = 0;
 				if (ImGui::BeginTable("AssetGrid", columns, ImGuiTableFlags_SizingStretchSame))
 				{
@@ -309,109 +471,106 @@ namespace Engine {
 							draw->AddCircleFilled(ImVec2(maximum.x - 9.0f * scale, minimum.y + 9.0f * scale), 4.0f * scale, IM_COL32(224, 161, 83, 255));
 						draw->PopClipRect();
 					};
-					if (folders)
-						for (const auto& entry : *folders)
+					if (const auto folders = m_Subfolders.find(m_Directory); folders != m_Subfolders.end())
+						for (const std::string& folder : folders->second)
 						{
-							if (!entry.Info.IsDirectory || entry.Path.GetParent().GetPath() != m_Directory || !Utils::AssetSearchKey(std::string(entry.Path.GetFileName())).contains(search))
+							const std::string_view name = std::string_view(folder).substr(folder.rfind('/') + 1);
+							if (!Utils::AssetSearchKey(std::string(name)).contains(search))
 								continue;
 							++visibleFolders;
 							ImGui::TableNextColumn();
-							ImGui::PushID(static_cast<int>(FNV1a32(entry.Path.GetPath())));
+							ImGui::PushID(static_cast<int>(FNV1a32(folder)));
 							const ImVec2 minimum = ImGui::GetCursorScreenPos();
 							if (ImGui::Selectable("##FolderTile", false, ImGuiSelectableFlags_AllowDoubleClick, ImVec2(0.0f, tileHeight)) && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
-								nextDirectory = entry.Path.GetPath();
+								nextDirectory = folder;
 							const bool hovered = ImGui::IsItemHovered();
-							drawTile(entry.Path.GetFileName(), "Folder", EditorIcon::Folder, 0, minimum, false, hovered, false);
-							moveDrop(entry.Path.GetPath());
+							drawTile(name, "Folder", EditorIcon::Folder, 0, minimum, false, hovered, false);
+							moveDrop(folder);
 							if (hovered)
-								ImGui::SetTooltip("%s\nDouble-click to open", std::string(entry.Path.GetPath()).c_str());
+								ImGui::SetTooltip("%s\nDouble-click to open", folder.c_str());
 							ImGui::PopID();
 						}
-					std::vector<AssetHandle> handles = editor.GetAssets().GetRegistry().GetHandles();
-					std::sort(handles.begin(), handles.end(), [&editor](AssetHandle left, AssetHandle right)
+					const uint64_t generation = context.Thumbnails.GetProjectGeneration();
+					for (const Tile& tile : m_Tiles)
 					{
-						const auto leftPath = editor.GetAssets().GetReferencePath(left);
-						const auto rightPath = editor.GetAssets().GetReferencePath(right);
-						return leftPath == rightPath ? left < right : leftPath < rightPath;
-					});
-					for (const AssetHandle handle : handles)
-					{
-						const auto location = editor.GetAssets().GetRegistry().Locate(handle);
-						if (!location || location->Record->SourcePath.GetParent().GetPath() != m_Directory)
-							continue;
-						const std::string path = editor.GetAssets().GetReferencePath(handle);
-						const std::string type = Utils::EditorLabel(AssetTypeToString(location->Type));
-						if (!Utils::AssetSearchKey(path + " " + type).contains(search))
+						const auto location = editor.GetAssets().GetRegistry().Locate(tile.Handle);
+						if (!location || !tile.SearchKey.contains(search))
 							continue;
 						++visibleAssets;
 						ImGui::TableNextColumn();
-						const std::string id = handle.ToString();
+						const std::string id = tile.Handle.ToString();
 						ImGui::PushID(id.c_str());
 						const ImVec2 minimum = ImGui::GetCursorScreenPos();
-						if (ImGui::Selectable("##Asset", editor.GetUiState().GetSelectedAsset() == handle, ImGuiSelectableFlags_AllowDoubleClick, ImVec2(0.0f, tileHeight)))
+						if (ImGui::Selectable("##Asset", editor.GetUiState().GetSelectedAsset() == tile.Handle, ImGuiSelectableFlags_AllowDoubleClick, ImVec2(0.0f, tileHeight)))
 						{
 							editor.SetSelection({});
-							editor.GetUiState().SetSelectedAsset(handle);
-							if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && location->Type == AssetType::Scene)
-								submit("scene.open", Json{ { "path", path } });
+							editor.GetUiState().SetSelectedAsset(tile.Handle);
+							if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && tile.Type == AssetType::Scene)
+								sceneToOpen = tile.Path;
 						}
 						const bool hovered = ImGui::IsItemHovered();
-						const auto diagnostic = std::find_if(editor.GetAssets().GetDiagnostics().begin(), editor.GetAssets().GetDiagnostics().end(), [&location](const auto& issue)
-						{
-							return issue.Path == location->Record->SourcePath.GetPath();
-						});
-						const bool hasIssue = diagnostic != editor.GetAssets().GetDiagnostics().end();
+						// Preview failures belong to their tile (type icon and tooltip), not to the panel's operation errors.
 						uint64_t texture = 0;
-						const ThumbnailRequest request{ context.Thumbnails.GetProjectGeneration(), handle, editor.GetAssets().GetVersion(handle), 128 };
-						if (request.ProjectGeneration != 0)
+						std::string previewIssue;
+						if (generation != 0)
 						{
+							const ThumbnailRequest request{ generation, tile.Handle, editor.GetAssets().GetVersion(tile.Handle), 128 };
 							const auto cached = context.Thumbnails.Find(request);
 							if (!cached)
-								m_Error = cached.error().GetMessageText();
-							else if (!*cached)
+								previewIssue = cached.error().GetMessageText();
+							else
 							{
-								if (const Status queued = context.Thumbnails.Queue(request); !queued)
-									m_Error = queued.error().GetMessageText();
+								if (!*cached || (*cached)->Stale)
+								{
+									if (const Status queued = context.Thumbnails.Queue(request); !queued)
+										previewIssue = queued.error().GetMessageText();
+								}
+								if (*cached && !(*cached)->TypeIcon && context.FindThumbnailTexture)
+									texture = context.FindThumbnailTexture(request);
 							}
-							else if (!(*cached)->TypeIcon && context.FindThumbnailTexture)
-								texture = context.FindThumbnailTexture(request);
 						}
-						const std::string label = location->SubAssetKey.empty() ? std::string(location->Record->SourcePath.GetFileName()) : location->SubAssetKey;
-						drawTile(label, type, AssetTypeToEditorIcon(location->Type), texture, minimum, editor.GetUiState().GetSelectedAsset() == handle, hovered, hasIssue);
+						drawTile(tile.Label, tile.TypeLabel, AssetTypeToEditorIcon(tile.Type), texture, minimum, editor.GetUiState().GetSelectedAsset() == tile.Handle, hovered, !tile.Issue.empty());
 						if (hovered)
 						{
 							ImGui::BeginTooltip();
-							ImGui::TextUnformatted(label.c_str());
-							ImGui::TextDisabled("%s", type.c_str());
-							ImGui::TextUnformatted(path.c_str());
-							if (hasIssue)
-								ImGui::TextWrapped("Import issue: %s", diagnostic->Message.c_str());
+							ImGui::TextUnformatted(tile.Label.c_str());
+							ImGui::TextDisabled("%s", tile.TypeLabel.c_str());
+							ImGui::TextUnformatted(tile.Path.c_str());
+							if (!tile.Issue.empty())
+								ImGui::TextWrapped("Import issue: %s", tile.Issue.c_str());
+							if (!previewIssue.empty())
+								ImGui::TextWrapped("Preview unavailable: %s", previewIssue.c_str());
 							ImGui::EndTooltip();
 						}
 						if (ImGui::BeginDragDropSource())
 						{
 							ImGui::SetDragDropPayload("ENGINE_ASSET", id.c_str(), id.size() + 1);
-							ImGui::TextUnformatted(label.c_str());
+							ImGui::TextUnformatted(tile.Label.c_str());
 							ImGui::EndDragDropSource();
 						}
 						if (ImGui::BeginPopupContextItem("AssetActions"))
 						{
 							editor.SetSelection({});
-							editor.GetUiState().SetSelectedAsset(handle);
-							ImGui::TextUnformatted(label.c_str());
+							editor.GetUiState().SetSelectedAsset(tile.Handle);
+							ImGui::TextUnformatted(tile.Label.c_str());
 							ImGui::Separator();
-							if (location->Type == AssetType::Scene && ImGui::MenuItem("Open scene"))
-								submit("scene.open", Json{ { "path", path } });
-							ImGui::BeginDisabled(editor.IsReadOnly() || !location->SubAssetKey.empty());
+							if (tile.Type == AssetType::Scene)
+							{
+								ImGui::BeginDisabled(previewRunning);
+								if (ImGui::MenuItem("Open scene"))
+									sceneToOpen = tile.Path;
+								ImGui::EndDisabled();
+							}
+							ImGui::BeginDisabled(editor.IsReadOnly() || tile.SubAsset);
 							if (ImGui::MenuItem("Rename..."))
-								requestDialog(handle, 1);
+								requestDialog(tile.Handle, 1);
 							if (ImGui::MenuItem("Move to folder..."))
-								requestDialog(handle, 2);
+								requestDialog(tile.Handle, 2);
 							if (ImGui::MenuItem("Reimport"))
 								submit("asset.reimport", Json{ { "asset", id } });
 							ImGui::Separator();
 							if (ImGui::MenuItem("Move to trash..."))
-								requestDialog(handle, 3);
+								requestDialog(tile.Handle, 3);
 							ImGui::EndDisabled();
 							ImGui::EndPopup();
 						}
@@ -423,6 +582,8 @@ namespace Engine {
 					Utils::EditorEmptyState(search.empty() ? "Make room for your ideas" : "No matching assets", search.empty() ? "Create an asset or import a file to get started. You can also drop files here." : "Try a different name or asset type, or clear the search.");
 				if (nextDirectory)
 					m_Directory = *nextDirectory;
+				if (sceneToOpen)
+					openScene(*sceneToOpen);
 			}
 			ImGui::EndChild();
 			ImGui::EndTable();
@@ -572,6 +733,68 @@ namespace Engine {
 				ImGui::CloseCurrentPopup();
 			ImGui::EndPopup();
 		}
+		if (m_OpenDropPrompt)
+		{
+			ImGui::OpenPopup("Import dropped files");
+			m_OpenDropPrompt = false;
+		}
+		ImGui::SetNextWindowSizeConstraints(ImVec2(popupWidth, 0.0f), ImVec2(popupWidth, ImGui::GetMainViewport()->WorkSize.y * 0.9f));
+		if (ImGui::BeginPopup("Import dropped files"))
+		{
+			Utils::EditorSectionHeading("Import dropped files");
+			constexpr size_t ListedDrops = 6;
+			for (size_t index = 0; index < std::min(m_Drops.size(), ListedDrops); ++index)
+				ImGui::TextWrapped("%s", FileSystem::PathToUtf8(m_Drops[index].filename()).c_str());
+			if (m_Drops.size() > ListedDrops)
+				ImGui::TextDisabled("and %zu more", m_Drops.size() - ListedDrops);
+			ImGui::TextUnformatted("Destination folder");
+			if (ImGui::BeginChild("DropDestinations", ImVec2(0.0f, ImGui::GetFrameHeightWithSpacing() * 6.0f), ImGuiChildFlags_Borders))
+				drawDestinations(m_DropDirectory);
+			ImGui::EndChild();
+			ImGui::BeginDisabled(m_Drops.empty() || editor.IsReadOnly());
+			if (ImGui::Button("Import files"))
+			{
+				for (const auto& source : std::exchange(m_Drops, {}))
+					submit("asset.import", Json{ { "source", FileSystem::PathToUtf8(source) }, { "destDir", m_DropDirectory } });
+				ImGui::CloseCurrentPopup();
+			}
+			ImGui::EndDisabled();
+			ImGui::SameLine();
+			if (ImGui::Button("Discard"))
+			{
+				m_Drops.clear();
+				ImGui::CloseCurrentPopup();
+			}
+			ImGui::EndPopup();
+		}
+		if (m_OpenScenePrompt)
+		{
+			ImGui::OpenPopup("Open scene with unsaved changes");
+			m_OpenScenePrompt = false;
+		}
+		ImGui::SetNextWindowSizeConstraints(ImVec2(popupWidth, 0.0f), ImVec2(popupWidth, ImGui::GetMainViewport()->WorkSize.y * 0.9f));
+		if (ImGui::BeginPopup("Open scene with unsaved changes"))
+		{
+			Utils::EditorSectionHeading("Open scene");
+			ImGui::TextWrapped("%s", m_PendingScene.c_str());
+			ImGui::TextWrapped("The current scene has unsaved changes.");
+			const bool canSave = !editor.IsReadOnly() && editor.GetScenePath().has_value();
+			if (!canSave)
+				ImGui::TextDisabled("%s", editor.IsReadOnly() ? "This project is read-only." : "Save the untitled scene from File first to keep its changes.");
+			ImGui::BeginDisabled(previewRunning);
+			ImGui::BeginDisabled(!canSave);
+			if (ImGui::Button("Save and open") && submit("scene.open", Json{ { "path", m_PendingScene }, { "save", true } }))
+				ImGui::CloseCurrentPopup();
+			ImGui::EndDisabled();
+			ImGui::SameLine();
+			if (ImGui::Button("Discard and open") && submit("scene.open", Json{ { "path", m_PendingScene }, { "discardChanges", true } }))
+				ImGui::CloseCurrentPopup();
+			ImGui::EndDisabled();
+			ImGui::SameLine();
+			if (ImGui::Button("Cancel"))
+				ImGui::CloseCurrentPopup();
+			ImGui::EndPopup();
+		}
 		if (m_AssetDialog != 0)
 		{
 			ImGui::OpenPopup(m_AssetDialog == 1 ? "Rename asset" : m_AssetDialog == 2 ? "Move asset"
@@ -602,30 +825,13 @@ namespace Engine {
 				}
 				else if (ImGui::BeginChild("Destinations", ImVec2(0.0f, ImGui::GetFrameHeightWithSpacing() * 6.0f), ImGuiChildFlags_Borders))
 				{
-					const auto destination = [this](std::string_view path)
+					std::string chosen = m_MovePath.data();
+					drawDestinations(chosen);
+					if (chosen != m_MovePath.data())
 					{
-						const std::string text(path);
-						// Hash every authored byte separately: ## and ### are valid path characters.
-						ImGui::PushID(static_cast<int>(FNV1a32(path)));
-						const ImVec2 minimum = ImGui::GetCursorScreenPos();
-						if (ImGui::Selectable("##Destination", path == m_MovePath.data(), ImGuiSelectableFlags_None, ImVec2(0.0f, ImGui::GetFrameHeight())))
-						{
-							m_MovePath.fill(0);
-							std::copy_n(text.begin(), std::min(text.size(), m_MovePath.size() - 1), m_MovePath.begin());
-						}
-						const ImVec2 maximum = ImGui::GetItemRectMax();
-						const ImVec2 padding = ImGui::GetStyle().FramePadding;
-						const std::string label = Utils::AssetTileLabel(text, std::max(1.0f, maximum.x - minimum.x - padding.x * 2.0f));
-						ImGui::GetWindowDrawList()->AddText(ImVec2(minimum.x + padding.x, minimum.y + padding.y), ImGui::GetColorU32(ImGuiCol_Text), label.c_str());
-						if (ImGui::IsItemHovered())
-							ImGui::SetTooltip("%s", text.c_str());
-						ImGui::PopID();
-					};
-					destination("Assets");
-					if (folders)
-						for (const auto& entry : *folders)
-							if (entry.Info.IsDirectory)
-								destination(entry.Path.GetPath());
+						m_MovePath.fill(0);
+						std::copy_n(chosen.begin(), std::min(chosen.size(), m_MovePath.size() - 1), m_MovePath.begin());
+					}
 				}
 				if (dialog == 2)
 					ImGui::EndChild();

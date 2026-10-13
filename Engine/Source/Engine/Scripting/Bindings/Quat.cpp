@@ -173,6 +173,14 @@ namespace Engine {
 			return 1;
 		}
 
+		static int QuatEqual(ScriptCall& call)
+		{
+			const glm::quat left = Lua::Check<glm::quat>(call, 1);
+			const glm::quat right = Lua::Check<glm::quat>(call, 2);
+			Lua::Push(call, left.x == right.x && left.y == right.y && left.z == right.z && left.w == right.w);
+			return 1;
+		}
+
 		template<int Component>
 		static int QuatGet(ScriptCall& call)
 		{
@@ -220,6 +228,8 @@ namespace Engine {
 				.Operator("__mul", &Utils::QuatMultiply,
 					"((a: Quat, b: Quat) -> Quat) & ((rotation: Quat, value: vector) -> vector)",
 					"Composes quaternions (right operand applied first), or rotates a vector as Rotate does.", pure)
+				.Operator("__eq", &Utils::QuatEqual, "(self: Quat, other: Quat) -> boolean",
+					"Compares the four components exactly, like vector equality; q and -q are the same rotation but compare unequal.", pure)
 				.Property("x", &Utils::QuatGet<0>, &Utils::QuatSet<0>, "number", "The local x component; writes preserve a nonzero finite quaternion.", pure)
 				.Property("y", &Utils::QuatGet<1>, &Utils::QuatSet<1>, "number", "The local y component; writes preserve a nonzero finite quaternion.", pure)
 				.Property("z", &Utils::QuatGet<2>, &Utils::QuatSet<2>, "number", "The local z component; writes preserve a nonzero finite quaternion.", pure)

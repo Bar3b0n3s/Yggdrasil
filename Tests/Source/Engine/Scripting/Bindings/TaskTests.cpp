@@ -1,14 +1,17 @@
 #include "TestsPCH.h"
-#include "Engine/Scripting/TaskScheduler.h"
 
 #include "Engine/Scene/Components/ScriptComponent.h"
 #include "Engine/Scene/Entity.h"
+#include "Engine/Scripting/ScriptTime.h"
+#include "Engine/Scripting/TaskScheduler.h"
 #include "Support/ScriptTestFixture.h"
 
 #include <doctest/doctest.h>
+#include <nlohmann/json.hpp>
 
+#include <cmath>
+#include <cstdint>
 #include <limits>
-
 #include <vector>
 
 namespace Engine {
@@ -69,6 +72,74 @@ return true
 
 	TEST_SUITE("Scripting")
 	{
+		TEST_CASE("TaskBindings: waits of exact decimal multiples of the tick do not add a tick")
+		{
+			// 0.14 / (1 / 50) evaluates to 7.000000000000001 and 4.15 / (1 / 60) to 249.00000000000003 in double.
+			CHECK(ScriptSecondsToTicks(0.14, 1.0 / 50.0) == 7.0);
+			CHECK(ScriptSecondsToTicks(4.15, 1.0 / 60.0) == 249.0);
+			// Every millisecond value below 10 s at common rates is the ceiling of its exact decimal quotient.
+			for (const int hz : { 30, 50, 60, 120 })
+				for (int milliseconds = 0; milliseconds <= 10000; ++milliseconds)
+				{
+					CAPTURE(hz);
+					CAPTURE(milliseconds);
+					const double expected = static_cast<double>((static_cast<int64_t>(milliseconds) * hz + 999) / 1000);
+					CHECK(ScriptSecondsToTicks(milliseconds / 1000.0, 1.0 / hz) == expected);
+				}
+			// A quotient really above an integer still rounds up; non-finite quotients are left for the caller to reject.
+			CHECK(ScriptSecondsToTicks(0.1401, 1.0 / 50.0) == 8.0);
+			CHECK(std::isinf(ScriptSecondsToTicks(std::numeric_limits<double>::max(), 1e-300)));
+
+			Test::ScriptTestFixture fixture;
+			fixture.Frame.FixedDeltaTime = 1.0 / 50.0;
+			const Entity target = fixture.GetScene().CreateEntity("Target");
+			REQUIRE(fixture.Start());
+			const auto result = fixture.Evaluate(R"(
+local target = Scene.FindByName("Target")
+Task.Spawn(function()
+	Task.Wait(0.14)
+	target.Name = "Resumed"
+end)
+return true
+)");
+			REQUIRE_MESSAGE(result.has_value(), (result ? "" : result.error().ToString()));
+			for (uint64_t tick = 1; tick <= 6; ++tick)
+			{
+				fixture.Frame.Tick = tick;
+				fixture.GetEngine()->ResumeTasks();
+				CHECK(target.GetName() == "Target");
+			}
+			fixture.Frame.Tick = 7;
+			fixture.GetEngine()->ResumeTasks();
+			CHECK(target.GetName() == "Resumed");
+			CHECK(fixture.Errors.empty());
+		}
+
+		TEST_CASE("TaskBindings: delays of exact decimal multiples of the tick do not add a tick")
+		{
+			Test::ScriptTestFixture fixture;
+			fixture.Frame.FixedDeltaTime = 1.0 / 50.0;
+			const Entity target = fixture.GetScene().CreateEntity("Target");
+			REQUIRE(fixture.Start());
+			const auto result = fixture.Evaluate(R"(
+local target = Scene.FindByName("Target")
+Task.Delay(0.14, function() target.Name = "Delayed" end)
+return true
+)");
+			REQUIRE_MESSAGE(result.has_value(), (result ? "" : result.error().ToString()));
+			for (uint64_t tick = 1; tick <= 6; ++tick)
+			{
+				fixture.Frame.Tick = tick;
+				fixture.GetEngine()->ResumeTasks();
+				CHECK(target.GetName() == "Target");
+			}
+			fixture.Frame.Tick = 7;
+			fixture.GetEngine()->ResumeTasks();
+			CHECK(target.GetName() == "Delayed");
+			CHECK(fixture.GetEngine()->GetTaskScheduler()->GetCount() == 0);
+			CHECK(fixture.Errors.empty());
+		}
+
 		TEST_CASE("TaskBindings: spawn is immediate while waits and delays follow simulation ticks")
 		{
 			std::vector<ScriptApiCoverage> snapshots;

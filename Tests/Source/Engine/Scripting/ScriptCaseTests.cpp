@@ -300,6 +300,61 @@ return Script.Define("CaseFailure", T)
 			CHECK(host.Reports[0].Message == "callback ended the case");
 		}
 
+		TEST_CASE("ScriptCases: Fail and Skip in a behaviour's task end that task before its next statement")
+		{
+			// The tasks belong to the instance, not the case, so the case's cancellation does not reach them; the signal itself
+			// must end their flow, as unwinding ends a callback's.
+			Test::ScriptCaseObserver host;
+			Test::ScriptTestFixture fixture({ .TestMode = true, .TestHost = &host });
+			const AssetHandle behaviour(0x220002);
+			REQUIRE(fixture.AddScript(behaviour, "Assets/Scripts/TaskFailure.luau", R"(
+local T = {}
+function T:OnFixedUpdate()
+	if self.Spawned then return end
+	self.Spawned = true
+	Task.Spawn(function()
+		Task.WaitTicks(1)
+		pcall(function() Test.Fail("task ended the case") end)
+		Scene.CreateEntity("AfterFail")
+	end)
+	Task.Spawn(function()
+		Task.WaitTicks(1)
+		Test.Skip("task skipped an ended case")
+		Scene.CreateEntity("AfterSkip")
+	end)
+end
+return Script.Define("TaskFailure", T)
+)"));
+			const Entity entity = fixture.GetScene().CreateEntity("Driver");
+			ScriptComponent component{};
+			component.Script.SetHandle(behaviour);
+			entity.AddComponent<ScriptComponent>(component);
+			const auto suite = Test::CollectCaseFixture(fixture, host,
+				"return Test.Suite('Cases', function() Test.Case('Task', function() Test.WaitTicks(10) end) end)");
+			const auto thread = fixture.GetEngine()->StartCase(suite.Cases[0].Function);
+			REQUIRE(thread);
+			const auto pending = fixture.GetEngine()->ResumeCase(*thread);
+			REQUIRE(pending);
+			REQUIRE(pending->State == ScriptCaseState::Yielded);
+			fixture.GetEngine()->FixedUpdate();
+			REQUIRE(fixture.GetEngine()->GetTaskScheduler()->GetCount() == 2);
+			for (uint64_t tick = 1; tick <= 3; ++tick)
+			{
+				fixture.Frame.Tick = tick;
+				fixture.GetEngine()->ResumeTasks();
+			}
+			// Both tasks are gone and neither statement after a signal ran.
+			CHECK(fixture.GetEngine()->GetTaskScheduler()->GetCount() == 0);
+			CHECK(fixture.GetScene().GetEntityCount() == 1);
+			const auto result = fixture.GetEngine()->ResumeCase(*thread);
+			REQUIRE(result);
+			CHECK(result->State == ScriptCaseState::Failed);
+			CHECK(result->Message == "task ended the case");
+			CHECK(host.Errors.empty());
+			REQUIRE(host.Reports.size() == 1);
+			CHECK(host.Reports[0].Message == "task ended the case");
+		}
+
 		TEST_CASE("ScriptCases: expected errors claim individual occurrences without removing them from diagnostics")
 		{
 			Test::ExpectLog expected(LogLevel::Error, "expected fault");

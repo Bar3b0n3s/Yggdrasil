@@ -678,12 +678,28 @@ namespace Engine {
 					for (size_t i = 0; i < zeroAo.Pixels.size(); i += 4)
 						CHECK(zeroAo.Pixels[i] == std::byte{ 0 });
 				}
+				// Direct light with the default material (occlusion 1), so occlusion = GTAO wherever GTAO darkened the ambient: a
+				// light loop scaled by occlusion would darken exactly those pixels (M9-F16: with material AO 0 both images were
+				// black and equal whatever the light loop did).
+				for (MeshDrawItem& mesh : snapshot.Meshes)
+					mesh.Materials.clear();
 				snapshot.Environment.Intensity = 0.0f;
 				snapshot.Lights.push_back({ .Type = RenderLightType::Directional, .Intensity = 0.25f, .Direction = glm::vec3(0, 0, -1), .CastShadows = false });
+				snapshot.Post.SsaoEnabled = true;
 				const Image directOn = RenderGtaoScene(gpu.GetDevice(), **renderer, snapshot);
 				snapshot.Post.SsaoEnabled = false;
 				const Image directOff = RenderGtaoScene(gpu.GetDevice(), **renderer, snapshot);
 				CHECK(directOn.Pixels == directOff.Pixels);
+				size_t occludedLit = 0;
+				for (size_t i = 0; i < directOn.Pixels.size(); i += 4)
+				{
+					if (std::to_integer<int>(ambientOn.Pixels[i]) + 1 < std::to_integer<int>(ambientOff.Pixels[i]))
+					{
+						CHECK(directOn.Pixels[i] != std::byte{ 0 });
+						++occludedLit;
+					}
+				}
+				CHECK(occludedLit > 10);
 			}
 			gpu.GetDevice().RunGarbageCollection();
 		}
@@ -721,6 +737,81 @@ namespace Engine {
 				const Image disabled = RenderGtaoScene(gpu.GetDevice(), **renderer, snapshot);
 				for (const std::byte value : disabled.Pixels)
 					CHECK(value == std::byte{ 255 });
+			}
+			gpu.GetDevice().RunGarbageCollection();
+		}
+
+		TEST_CASE("DebugViews: AO shows the GTAO pass's denoised and depth-aware upsampled output per pixel")
+		{
+			// The oracle runs GtaoPass on the view depth and normals the prepass and depth pyramid produce for this scene
+			// (orthographic, head-on: a slab whose front face is at view depth 3.95 and a block in front of it at 3.2), then
+			// SampleGtao through the shader's test entry. The AO view must show exactly that value, so binding the scratch target,
+			// skipping the depth-aware upsample or sampling the half-resolution target directly all fail (M9-F15).
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			{
+				Test::InMemoryAssetManager assets;
+				GpuResourceCache cache(gpu.GetDevice(), assets);
+				Result<Scope<SceneRendererPipelines>> pipelines = SceneRendererPipelines::Create(gpu.GetDevice(), gpu.GetPipelines());
+				REQUIRE_MESSAGE(pipelines.has_value(), pipelines.error().ToString());
+				Result<Scope<SceneRenderer>> renderer = SceneRenderer::Create(gpu.GetDevice(), **pipelines, cache, assets, { .Width = 65, .Height = 49 });
+				REQUIRE(renderer.has_value());
+				Result<Scope<GtaoPass>> pass = GtaoPass::Create(gpu.GetDevice(), gpu.GetPipelines());
+				REQUIRE_MESSAGE(pass.has_value(), pass.error().ToString());
+				// Flat shading normals: without the normal map's byte-quantization tilt the prepass normal is exactly +Z.
+				MaterialData flat;
+				flat.NormalScale = 0.0f;
+				const AssetHandle flatMaterial{ 0x6a7001 };
+				assets.Publish(flatMaterial, CreateRef<MaterialData>(flat));
+				RenderSnapshot snapshot = MakeGtaoScene();
+				for (MeshDrawItem& mesh : snapshot.Meshes)
+					mesh.Materials = { flatMaterial };
+				snapshot.DebugView = RenderDebugView::AO;
+				const CameraData camera = MakeGtaoCamera(RenderProjection::Orthographic);
+				const uint32_t width = camera.ViewportWidth;
+				const uint32_t height = camera.ViewportHeight;
+				// Pixel centres within the block's front face (x and y in [-0.5, 0.5]); 8 m of view height over 49 pixels.
+				const double pixelSize = 2.0 * camera.OrthographicSize / height;
+				std::vector<float> depths(static_cast<size_t>(width) * height, 3.95f);
+				for (uint32_t y = 0; y < height; ++y)
+				{
+					for (uint32_t x = 0; x < width; ++x)
+					{
+						const double centreX = (x + 0.5 - width * 0.5) * pixelSize;
+						const double centreY = (height * 0.5 - y - 0.5) * pixelSize;
+						if (std::abs(centreX) < 0.5 && std::abs(centreY) < 0.5)
+							depths[static_cast<size_t>(y) * width + x] = 3.2f;
+					}
+				}
+				for (const bool half : { false, true })
+				{
+					CAPTURE(half);
+					snapshot.Quality.SsaoHalfResolution = half;
+					const Image view = RenderGtaoScene(gpu.GetDevice(), **renderer, snapshot);
+					GtaoTestTargets targets = MakeGtaoTargets(gpu, camera, depths, std::vector<glm::vec2>(depths.size(), glm::vec2(0.0f)), half);
+					RunGtao(gpu, **pass, camera, targets, snapshot.Post, half);
+					Result<nvrhi::TextureHandle> expected = gpu.GetDevice().CreateTexture(GtaoPass::GetTargetDesc(width, height, false));
+					REQUIRE(expected.has_value());
+					GtaoConstants constants;
+					constants.FullSize = glm::uvec2(width, height);
+					constants.OutputSize = glm::uvec2(targets.Occlusion->getDesc().width, targets.Occlusion->getDesc().height);
+					DispatchGtaoKernel(gpu, "CSTestUpsample", constants, targets, targets.Occlusion, *expected);
+					const Image oracle = ReadGtao(gpu.GetDevice(), **expected);
+					uint32_t occluded = 0;
+					for (uint32_t y = 0; y < height; ++y)
+					{
+						for (uint32_t x = 0; x < width; ++x)
+						{
+							const uint32_t shown = std::to_integer<uint32_t>(view.Pixels[(static_cast<size_t>(y) * width + x) * 4]);
+							const uint32_t value = GtaoByte(oracle, x, y);
+							CAPTURE(x);
+							CAPTURE(y);
+							CHECK(std::abs(static_cast<int>(shown) - static_cast<int>(value)) <= 1);
+							occluded += value < 250 ? 1U : 0U;
+						}
+					}
+					CHECK(occluded > 10); // the contact around the block is darker than the open slab
+				}
 			}
 			gpu.GetDevice().RunGarbageCollection();
 		}

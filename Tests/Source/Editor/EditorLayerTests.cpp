@@ -3,13 +3,14 @@
 
 #include "Editor/EditorPanelContext.h"
 #include "Editor/PanelInteractionFixture.h"
+#include "Editor/Private/EditorHostPreferences.h"
 #include "Editor/Private/EditorHostRecovery.h"
 #include "Editor/Private/EditorHostThumbnails.h"
 #include "Editor/Private/EditorHostViewports.h"
 #include "Editor/Ui/EditorStyle.h"
+#include "Editor/WorkspaceTestUi.h"
 #include "EditorCore/Automation/EditorAutomationControls.h"
 #include "EditorCore/EditorActions.h"
-#include "EditorCore/EditorPreferences.h"
 #include "EditorCore/Inspector/ReflectedEditController.h"
 #include "EditorCore/Play/EditorPlayController.h"
 #include "EditorCore/Project/ProjectManager.h"
@@ -72,8 +73,7 @@ namespace Engine {
 		EditorPanelContext Panels{ Environment.GetEditor(), Client.GetServer(), Actions, Controls, Views, Edits, Thumbnails.GetCache(), Gizmos };
 		EditorLayer Layer{ Panels };
 		uint64_t Frame = 0;
-		EditorAutomationPreferenceState Preference{};
-		std::optional<bool> PendingPreference{};
+		EditorHostPreferences Preferences{}; // the production host preference queue, applied by SafePoint
 
 		LayerUiHarness()
 		{
@@ -83,20 +83,27 @@ namespace Engine {
 			Environment.GetEditor().GetUiState().ResetLayout(true);
 			ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_DockingEnable;
 			ImGui::GetIO().DisplaySize = ImVec2(1200, 900);
-			const auto preferences = ReadEditorPreferences(Environment.GetEditor().GetVfs());
-			REQUIRE(preferences);
-			Preference.Allowed = preferences->AllowAiAutomation;
+			REQUIRE(Preferences.Load(Environment.GetEditor().GetVfs()));
+			Preferences.RefreshRecentProjects(Environment.GetEditor().GetVfs());
 			Panels.AutomationPreferences.GetState = [this]()
 			{
-				return Preference;
+				return Preferences.GetAutomationState();
 			};
-			Panels.AutomationPreferences.QueueChange = [this](bool allowed) -> Status
+			Panels.AutomationPreferences.QueueChange = [this](bool allowed)
 			{
-				if (PendingPreference)
-					return MakeError(ErrorCode::InvalidState, "preference is pending");
-				PendingPreference = allowed;
-				Preference.Pending = true;
-				return {};
+				return Preferences.QueueAutomationChange(allowed);
+			};
+			Panels.ExternalEditor.GetState = [this]()
+			{
+				return Preferences.GetExternalEditorState();
+			};
+			Panels.ExternalEditor.QueueChange = [this](std::string executable, std::vector<std::string> arguments)
+			{
+				return Preferences.QueueExternalEditorChange(std::move(executable), std::move(arguments));
+			};
+			Panels.GetRecentProjects = [this]()
+			{
+				return Preferences.GetRecentProjects();
 			};
 		}
 
@@ -108,20 +115,11 @@ namespace Engine {
 
 		Status SafePoint()
 		{
-			if (PendingPreference)
+			ENGINE_TRY(Preferences.Pump([this](bool allowed)
 			{
-				const bool allowed = *PendingPreference;
-				const auto changed = Controls.SetAllowAiAutomation(allowed);
-				PendingPreference.reset();
-				Preference.Pending = false;
-				if (!changed)
-				{
-					Preference.Failure = changed.error();
-					return changed;
-				}
-				Preference.Allowed = allowed;
-				Preference.Failure.reset();
-			}
+				return Controls.SetAllowAiAutomation(allowed);
+			}));
+			ENGINE_TRY(Preferences.PumpExternalEditor(Environment.GetEditor().GetVfs()));
 			return Layer.OnSafePoint(0);
 		}
 
@@ -492,10 +490,10 @@ namespace Engine {
 			{
 				return m_Fixture.GetEditor().GetUiState().GetCompletedFrame();
 			};
-			specification.Screenshots.RequestUiFrame = [this]()
+			specification.Screenshots.RequestUiFrame = [this]() -> Status
 			{
 				m_Ui->Layer.RequestFrame();
-				REQUIRE(RequestOffscreenUiFrame());
+				return RequestOffscreenUiFrame();
 			};
 			specification.Screenshots.EditorUi = [this]() -> Result<Image>
 			{
@@ -685,6 +683,517 @@ namespace Engine {
 			ui.Draw(); // the launcher's first Begin measures its contents
 			CHECK(ui.Draw().contains("Build your next world."));
 		}
+
+		TEST_CASE("EditorLayer: the viewport windows use their panels' flags and never scroll")
+		{
+			LayerUiHarness ui;
+			ui.Draw();
+			ui.Draw();
+			// Scene is the selected tab and Game a hidden one: Begin applies the flags either way.
+			for (const char* name : { "Scene###SceneViewport", "Game###GameViewport" })
+			{
+				CAPTURE(name);
+				const ImGuiWindow* window = ImGui::FindWindowByName(name);
+				REQUIRE(window != nullptr);
+				CHECK((window->Flags & ImGuiWindowFlags_NoScrollWithMouse) != 0);
+				CHECK((window->Flags & ImGuiWindowFlags_NoScrollbar) != 0);
+			}
+			const ImGuiWindow* content = ImGui::FindWindowByName("Assets###ContentBrowser");
+			REQUIRE(content != nullptr);
+			CHECK((content->Flags & (ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoScrollbar)) == 0);
+		}
+
+		TEST_CASE("EditorLayer: revealing a panel opens it and gives its window focus")
+		{
+			LayerUiHarness ui;
+			ui.Draw();
+			ui.Draw();
+			EditorUiState& state = ui.Environment.GetEditor().GetUiState();
+			// Hide the Content panel behind the Console tab, then close it, as before files are dropped on the window.
+			ui.ClickTab("Console###Console");
+			REQUIRE(state.SetPanelOpen(EditorPanel::ContentBrowser, false));
+			ui.Draw();
+			const ImGuiWindow* closed = ImGui::FindWindowByName("Assets###ContentBrowser");
+			CHECK((closed == nullptr || !closed->Active)); // the layer no longer submits it
+			REQUIRE(ui.Layer.RevealPanel(EditorPanel::ContentBrowser));
+			CHECK(std::ranges::find(state.GetOpenPanels(), EditorPanel::ContentBrowser) != state.GetOpenPanels().end());
+			ui.Draw();
+			ui.Draw();
+			CHECK(ui.IsVisible("Assets###ContentBrowser"));
+			CHECK_FALSE(ui.IsVisible("Console###Console"));
+			const ImGuiWindow* content = ImGui::FindWindowByName("Assets###ContentBrowser");
+			REQUIRE(content != nullptr);
+			const ImGuiWindow* focused = ImGui::GetCurrentContext()->NavWindow;
+			REQUIRE(focused != nullptr);
+			CHECK(focused->RootWindow == content);
+			const Status unknown = ui.Layer.RevealPanel(static_cast<EditorPanel>(200));
+			REQUIRE_FALSE(unknown);
+			CHECK(unknown.error().GetCode() == ErrorCode::InvalidArgument);
+		}
+
+		TEST_CASE("EditorLayer: the default workspace reserves chrome and usable dock widths at supported sizes")
+		{
+			Test::WorkspaceTestUi test;
+			float scale = 1.0f;
+			SUBCASE("1280 by 720")
+			{
+			}
+			SUBCASE("1600 by 900")
+			{
+				ImGui::GetIO().DisplaySize = ImVec2(1600, 900);
+			}
+			SUBCASE("scaled 1920 by 1080")
+			{
+				scale = 1.5f;
+				Utils::ApplyEditorStyle(scale);
+				ImGui::GetIO().DisplaySize = ImVec2(1920, 1080);
+			}
+			float layoutScale = 0.0f;
+			test.Draw([&layoutScale]()
+			{
+				// Capture at the same point as EditorLayer: Render() restores the unscaled font afterward.
+				layoutScale = Utils::EditorUiScale();
+			});
+			test.Draw();
+			REQUIRE(layoutScale > 0.0f);
+			auto* hierarchy = test.Window(Utils::EditorWindowTitle(EditorPanel::SceneHierarchy));
+			auto* inspector = test.Window(Utils::EditorWindowTitle(EditorPanel::Inspector));
+			auto* scene = test.Window(Utils::EditorWindowTitle(EditorPanel::SceneViewport));
+			auto* assets = test.Window(Utils::EditorWindowTitle(EditorPanel::ContentBrowser));
+			auto* toolbar = test.Window("##EditorToolbar");
+			auto* menu = test.Window("##MainMenuBar");
+			auto* status = test.Window("##EditorStatus");
+			for (const auto panel : test.Environment.GetEditor().GetUiState().GetOpenPanels())
+			{
+				auto* window = test.Window(Utils::EditorWindowTitle(panel));
+				REQUIRE(window->DockNode != nullptr);
+				CHECK(window->DockIsActive);
+			}
+			CHECK(hierarchy->Size.x / layoutScale >= 220.0f);
+			CHECK(hierarchy->Size.x / layoutScale <= 235.0f);
+			CHECK(inspector->Size.x / layoutScale >= 350.0f);
+			CHECK(inspector->Size.x / layoutScale <= 365.0f);
+			CHECK(scene->Size.x / scale >= 660.0f);
+			CHECK(scene->Size.y / scale >= 340.0f);
+			if (ImGui::GetIO().DisplaySize.y / scale >= 900.0f)
+				CHECK(assets->Size.y / scale >= 250.0f);
+			CHECK(assets->Size.y <= (status->Pos.y - toolbar->Pos.y - toolbar->Size.y) * 0.32f + 2.0f);
+			CHECK(scene->Pos.x == doctest::Approx(assets->Pos.x));
+			CHECK(scene->Size.x == doctest::Approx(assets->Size.x));
+			CHECK(scene->Pos.y >= toolbar->Pos.y + toolbar->Size.y);
+			CHECK(toolbar->Pos.y >= menu->Pos.y + menu->Size.y);
+			CHECK(assets->Pos.y + assets->Size.y <= status->Pos.y);
+			CHECK(assets->DockNode->SelectedTabId == assets->TabId);
+			CHECK(scene->DockNode->SelectedTabId == scene->TabId);
+			CHECK(toolbar->ScrollMax.x == 0.0f);
+			for (const char* label : { "Play", "Simulate", "Pause###PauseResume", "Step", "Stop" })
+			{
+				const auto rectangle = test.Locate("##EditorToolbar", label);
+				CHECK(rectangle.Min.x >= toolbar->InnerRect.Min.x);
+				CHECK(rectangle.Max.x <= toolbar->InnerRect.Max.x);
+				CHECK(rectangle.Max.y <= toolbar->InnerRect.Max.y);
+			}
+		}
+
+		TEST_CASE("EditorLayer: serialized legacy layouts preserve window geometry and selected tabs")
+		{
+			std::string saved;
+			ImGuiID sceneDock = 0;
+			ImGuiID assetsDock = 0;
+			{
+				Test::PanelInteractionUi legacy{ false };
+				ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+				ImGui::GetIO().DisplaySize = ImVec2(1280, 720);
+				const auto draw = [&sceneDock, &assetsDock]() -> Status
+				{
+					const ImGuiID dock = ImGui::DockSpaceOverViewport();
+					if (sceneDock == 0)
+					{
+						ImGui::DockBuilderRemoveNode(dock);
+						ImGui::DockBuilderAddNode(dock, ImGuiDockNodeFlags_DockSpace);
+						ImGui::DockBuilderSetNodeSize(dock, ImGui::GetIO().DisplaySize);
+						assetsDock = ImGui::DockBuilderSplitNode(dock, ImGuiDir_Down, 0.40f, nullptr, &sceneDock);
+						ImGui::DockBuilderDockWindow("SceneViewport", sceneDock);
+						ImGui::DockBuilderDockWindow("GameViewport", sceneDock);
+						ImGui::DockBuilderDockWindow("ContentBrowser", assetsDock);
+						ImGui::DockBuilderDockWindow("Console", assetsDock);
+						ImGui::DockBuilderFinish(dock);
+					}
+					for (const char* name : { "SceneViewport", "GameViewport", "ContentBrowser", "Console" })
+					{
+						ImGui::Begin(name);
+						ImGui::End();
+					}
+					ImGui::SetNextWindowPos(ImVec2(830, 130), ImGuiCond_Once);
+					ImGui::SetNextWindowSize(ImVec2(330, 450), ImGuiCond_Once);
+					ImGui::Begin("Inspector");
+					ImGui::End();
+					return {};
+				};
+				REQUIRE(legacy.Frame(draw));
+				REQUIRE(legacy.Frame(draw));
+				ImGui::SetWindowFocus("GameViewport");
+				REQUIRE(legacy.Frame(draw));
+				ImGui::SetWindowFocus("Console");
+				REQUIRE(legacy.Frame(draw));
+				saved = ImGui::SaveIniSettingsToMemory();
+				REQUIRE(saved.contains("[Window][SceneViewport]"));
+			}
+			std::string resaved;
+			{
+				Test::WorkspaceTestUi test;
+				REQUIRE(test.Environment.GetEditor().GetUiState().SetPanelOpen(EditorPanel::SceneHierarchy, false));
+				ImGui::LoadIniSettingsFromMemory(saved.data(), saved.size());
+				test.Draw();
+				test.Draw();
+				auto* scene = test.Window(Utils::EditorWindowTitle(EditorPanel::SceneViewport));
+				auto* game = test.Window(Utils::EditorWindowTitle(EditorPanel::GameViewport));
+				auto* console = test.Window(Utils::EditorWindowTitle(EditorPanel::Console));
+				auto* inspector = test.Window(Utils::EditorWindowTitle(EditorPanel::Inspector));
+				CHECK(scene->ID == ImHashStr(Utils::EditorWindowTitle(EditorPanel::SceneViewport)));
+				CHECK(scene->ID == ImHashStr("SceneViewport")); // Pinned ImGui 1.92.6+ skips the ### bytes.
+				CHECK(scene->DockId == sceneDock);
+				CHECK(console->DockId == assetsDock);
+				CHECK(game->DockNode->SelectedTabId == game->TabId);
+				CHECK(console->DockNode->SelectedTabId == console->TabId);
+				CHECK(inspector->DockId == 0);
+				CHECK(inspector->Pos.x == 830);
+				CHECK(inspector->Pos.y == 130);
+				CHECK(inspector->Size.x == 330);
+				CHECK(inspector->Size.y == 450);
+				auto* tabs = scene->DockNode->TabBar;
+				const auto* tab = ImGui::TabBarFindTabByID(tabs, scene->TabId);
+				REQUIRE(tab != nullptr);
+				test.Click(ImVec2(tabs->BarRect.Min.x + tab->Offset + tab->Width * 0.5f, tabs->BarRect.GetCenter().y));
+				test.Draw();
+				CHECK(scene->DockNode->SelectedTabId == scene->TabId);
+				resaved = ImGui::SaveIniSettingsToMemory();
+				CHECK(resaved.contains("[Window][" + std::string(ImHashSkipUncontributingPrefix(Utils::EditorWindowTitle(EditorPanel::SceneViewport))) + "]"));
+			}
+			{
+				Test::WorkspaceTestUi test;
+				ImGui::LoadIniSettingsFromMemory(resaved.data(), resaved.size());
+				test.Draw();
+				test.Draw();
+				auto* scene = test.Window(Utils::EditorWindowTitle(EditorPanel::SceneViewport));
+				CHECK(scene->DockId == sceneDock);
+				CHECK(scene->DockNode->SelectedTabId == scene->TabId);
+				CHECK(test.Window(Utils::EditorWindowTitle(EditorPanel::Inspector))->DockId == 0);
+			}
+		}
+
+		TEST_CASE("EditorLayer: switching from the launcher to a fresh project restores every default dock")
+		{
+			Test::WorkspaceTestUi test(false);
+			test.Draw();
+			test.Draw();
+			CHECK(test.Text().contains("Build your next world."));
+			test.Environment.CreateAndOpenProject();
+			test.Environment.CreateAndOpenScene();
+			REQUIRE(test.Layer.OnSafePoint(0));
+			// ImGuiLayer::SetIniFilePath clears the launcher's ini when the project is bound, even when its file is new.
+			test.IniFile = FileSystem::PathToUtf8(test.Environment.GetDirectory() / "FreshProjectLayout.ini");
+			ImGui::GetIO().IniFilename = test.IniFile.c_str();
+			ImGui::ClearIniSettings();
+			test.Draw();
+			test.Draw();
+			auto* scene = test.Window(Utils::EditorWindowTitle(EditorPanel::SceneViewport));
+			auto* game = test.Window(Utils::EditorWindowTitle(EditorPanel::GameViewport));
+			auto* assets = test.Window(Utils::EditorWindowTitle(EditorPanel::ContentBrowser));
+			auto* console = test.Window(Utils::EditorWindowTitle(EditorPanel::Console));
+			auto* hierarchy = test.Window(Utils::EditorWindowTitle(EditorPanel::SceneHierarchy));
+			auto* inspector = test.Window(Utils::EditorWindowTitle(EditorPanel::Inspector));
+			for (auto* window : { scene, game, assets, console, hierarchy, inspector })
+			{
+				REQUIRE(window->DockNode != nullptr);
+				CHECK(window->DockIsActive);
+			}
+			CHECK(scene->DockNode == game->DockNode);
+			CHECK(assets->DockNode == console->DockNode);
+			CHECK(scene->DockNode->SelectedTabId == scene->TabId);
+			CHECK(assets->DockNode->SelectedTabId == assets->TabId);
+			CHECK(scene->DockTabIsVisible);
+			CHECK_FALSE(game->DockTabIsVisible);
+			CHECK(assets->DockTabIsVisible);
+			CHECK_FALSE(console->DockTabIsVisible);
+			CHECK(hierarchy->Pos.x + hierarchy->Size.x <= scene->Pos.x);
+			CHECK(scene->Pos.x + scene->Size.x <= inspector->Pos.x);
+			CHECK(scene->Pos.y + scene->Size.y <= assets->Pos.y);
+			CHECK(scene->Size.x >= 660.0f);
+		}
+
+		TEST_CASE("EditorLayer: the scene browser selects project scenes and requires an explicit unsaved-edit choice")
+		{
+			Test::WorkspaceTestUi test;
+			auto& editor = test.Environment.GetEditor();
+			test.Environment.CreateAndOpenScene("Assets/Scenes/Another level.scene");
+			REQUIRE(test.Client.Call("scene.open", Json{ { "path", "Assets/Scenes/Main.scene" } }));
+			REQUIRE(test.Client.Call("entity.create", Json{ { "name", "Keep this edit" } }));
+			test.Draw();
+			test.Draw();
+			test.OpenSceneDialog(false);
+			test.Click("Open scene", "##SceneSearch");
+			ImGui::GetIO().AddInputCharactersUTF8("ANOTHER");
+			test.Draw();
+			test.SelectScene("Assets/Scenes/Another level.scene");
+			test.Click("Open scene", "Open scene");
+			REQUIRE(test.Layer.OnSafePoint(0));
+			CHECK(editor.GetScenePath()->GetFileName() == "Main.scene");
+			CHECK(editor.IsSceneDirty());
+			test.Click("Open scene", "Save changes first");
+			test.Click("Open scene", "Open scene");
+			CHECK(editor.GetScenePath()->GetFileName() == "Main.scene");
+			REQUIRE(test.Layer.OnSafePoint(0));
+			CHECK(editor.GetScenePath()->GetFileName() == "Another level.scene");
+			CHECK_FALSE(editor.IsSceneDirty());
+			test.Draw();
+			REQUIRE(test.Client.Call("scene.open", Json{ { "path", "Assets/Scenes/Main.scene" } }));
+			CHECK(editor.GetScene().GetEntityCount() == 1);
+		}
+
+		TEST_CASE("EditorLayer: the scene browser opens scenes outside Assets with distinct literal path identities")
+		{
+			Test::WorkspaceTestUi test;
+			auto& editor = test.Environment.GetEditor();
+			for (const char* path : { "Levels/Main.scene", "Levels###Shared/Main.scene", "Other###Shared/Main.scene", "Main.scene" })
+				test.Environment.CreateAndOpenScene(path);
+			std::string path;
+			SUBCASE("project level folder")
+			{
+				path = "Levels/Main.scene";
+			}
+			SUBCASE("first authored hash folder")
+			{
+				path = "Levels###Shared/Main.scene";
+			}
+			SUBCASE("second authored hash folder")
+			{
+				path = "Other###Shared/Main.scene";
+			}
+			SUBCASE("project root")
+			{
+				path = "Main.scene";
+			}
+			REQUIRE(test.Client.Call("scene.open", Json{ { "path", "Assets/Scenes/Main.scene" } }));
+			test.Draw();
+			test.Draw();
+			test.OpenSceneDialog(false);
+			if (path.contains("###"))
+			{
+				test.ReplaceText("Open scene", "##SceneSearch", "###Shared");
+				CHECK(test.FindText("Levels###Shared").has_value());
+				CHECK(test.FindText("Other###Shared").has_value());
+			}
+			test.SelectScene(path);
+			test.Click("Open scene", "Open scene");
+			CHECK(editor.GetScenePath()->GetPath() == "Assets/Scenes/Main.scene");
+			REQUIRE(test.Layer.OnSafePoint(0));
+			CHECK(editor.GetScenePath()->GetPath() == path);
+			CHECK_FALSE(editor.IsSceneDirty());
+		}
+
+		TEST_CASE("EditorLayer: new scene folders display authored hash text and keep distinct selection identities")
+		{
+			Test::WorkspaceTestUi test;
+			test.Environment.CreateAndOpenScene("A###Shared/Main.scene");
+			test.Environment.CreateAndOpenScene("AA###Shared/Main.scene");
+			std::string folder;
+			SUBCASE("first folder")
+			{
+				folder = "A###Shared";
+			}
+			SUBCASE("second folder")
+			{
+				folder = "AA###Shared";
+			}
+			test.Draw();
+			test.Draw();
+			test.OpenSceneDialog(true);
+			test.ReplaceText("New scene", "##SceneName", "New level");
+			test.Click("New scene", "##SceneFolder");
+			const auto choice = test.FindText(folder);
+			REQUIRE(choice.has_value());
+			test.Click(*choice);
+			CHECK(test.FindText(folder).has_value());
+			test.Click("New scene", "Create scene");
+			REQUIRE(test.Layer.OnSafePoint(0));
+			CHECK(test.Environment.GetEditor().GetScenePath()->GetPath() == folder + "/New level.scene");
+		}
+
+		TEST_CASE("EditorLayer: new scenes use a name and folder and cannot escape the project")
+		{
+			Test::WorkspaceTestUi test;
+			test.Draw();
+			test.Draw();
+			test.OpenSceneDialog(true);
+			test.Click("New scene", "##SceneName");
+			ImGui::GetIO().AddKeyEvent(ImGuiMod_Ctrl, true);
+			ImGui::GetIO().AddKeyEvent(ImGuiKey_A, true);
+			test.Draw();
+			ImGui::GetIO().AddKeyEvent(ImGuiKey_A, false);
+			ImGui::GetIO().AddKeyEvent(ImGuiMod_Ctrl, false);
+			ImGui::GetIO().AddInputCharactersUTF8("../Outside");
+			test.Draw();
+			test.Click("New scene", "Create scene");
+			REQUIRE(test.Layer.OnSafePoint(0));
+			CHECK(test.Environment.GetEditor().GetScenePath()->GetFileName() == "Main.scene");
+			test.Click("New scene", "##SceneName");
+			ImGui::GetIO().AddKeyEvent(ImGuiMod_Ctrl, true);
+			ImGui::GetIO().AddKeyEvent(ImGuiKey_A, true);
+			test.Draw();
+			ImGui::GetIO().AddKeyEvent(ImGuiKey_A, false);
+			ImGui::GetIO().AddKeyEvent(ImGuiMod_Ctrl, false);
+			ImGui::GetIO().AddInputCharactersUTF8("First level");
+			test.Draw();
+			test.Click("New scene", "Create scene");
+			CHECK(test.Environment.GetEditor().GetScenePath()->GetFileName() == "Main.scene");
+			REQUIRE(test.Layer.OnSafePoint(0));
+			CHECK(test.Environment.GetEditor().GetScenePath()->GetPath() == "Assets/Scenes/First level.scene");
+			CHECK(test.Environment.GetEditor().GetScene().GetName() == "First level");
+			CHECK_FALSE(test.Environment.GetEditor().IsSceneDirty());
+		}
+
+		TEST_CASE("EditorLayer: toolbar playback queues human commands and respects lockstep ownership")
+		{
+			Test::WorkspaceTestUi test;
+			auto& editor = test.Environment.GetEditor();
+			test.Draw();
+			test.Draw();
+			test.Click("##EditorToolbar", "Simulate");
+			CHECK(editor.GetPlay().GetSession() == nullptr);
+			REQUIRE(test.Layer.OnSafePoint(0));
+			REQUIRE(editor.GetPlay().GetSession() != nullptr);
+			CHECK(editor.GetPlay().GetSession()->GetMode() == PlayMode::Simulate);
+			test.Draw();
+			test.Click("##EditorToolbar", "Pause###PauseResume");
+			const ImGuiID pauseId = ImGui::GetCurrentContext()->NavId;
+			CHECK(pauseId == test.Window("##EditorToolbar")->GetID("Pause###PauseResume"));
+			REQUIRE(test.Layer.OnSafePoint(0));
+			CHECK(editor.GetPlay().GetSession()->IsPaused());
+			test.Draw();
+			CHECK(ImGui::GetCurrentContext()->NavId == pauseId);
+			CHECK(ImGui::GetCurrentContext()->NavIdIsAlive);
+			test.Click("##EditorToolbar", "Resume###PauseResume");
+			REQUIRE(test.Layer.OnSafePoint(0));
+			CHECK_FALSE(editor.GetPlay().GetSession()->IsPaused());
+			test.Draw();
+			CHECK(ImGui::GetCurrentContext()->NavId == pauseId);
+			CHECK(ImGui::GetCurrentContext()->NavIdIsAlive);
+			test.Click("##EditorToolbar", "Stop");
+			REQUIRE(test.Layer.OnSafePoint(0));
+			CHECK(editor.GetPlay().GetSession() == nullptr);
+			REQUIRE(test.Client.Call("play.start", Json{ { "mode", "Simulate" }, { "lockstep", true } }));
+			test.Draw();
+			test.Click("##EditorToolbar", "Stop");
+			REQUIRE(test.Layer.OnSafePoint(0));
+			REQUIRE(editor.GetPlay().GetSession() != nullptr);
+			CHECK(editor.GetPlay().GetSession()->IsLockstep());
+			CHECK(test.Text().contains("Agent controls time"));
+			REQUIRE(test.Client.Call("play.stop", Json::object()));
+		}
+		TEST_CASE("EditorLayer: Ctrl+Z, Ctrl+Y and Ctrl+S work from any focused panel and leave text undo to text fields")
+		{
+			Test::WorkspaceTestUi test;
+			auto& editor = test.Environment.GetEditor();
+			REQUIRE(test.Client.Call("entity.create", Json{ { "name", "Shortcut target" } }));
+			REQUIRE(editor.GetScene().GetEntityCount() == 1);
+			test.Draw();
+			test.Draw();
+			const auto press = [&test](const char* panelTitle, ImGuiKey key)
+			{
+				ImGui::SetWindowFocus(panelTitle);
+				test.Draw();
+				ImGui::GetIO().AddKeyEvent(ImGuiMod_Ctrl, true);
+				ImGui::GetIO().AddKeyEvent(key, true);
+				test.Draw();
+				ImGui::GetIO().AddKeyEvent(key, false);
+				ImGui::GetIO().AddKeyEvent(ImGuiMod_Ctrl, false);
+				test.Draw();
+				REQUIRE(test.Layer.OnSafePoint(0));
+			};
+			press(Utils::EditorWindowTitle(EditorPanel::Inspector), ImGuiKey_Z);
+			CHECK(editor.GetScene().GetEntityCount() == 0);
+			press(Utils::EditorWindowTitle(EditorPanel::SceneHierarchy), ImGuiKey_Y);
+			CHECK(editor.GetScene().GetEntityCount() == 1);
+			REQUIRE(editor.IsSceneDirty());
+			press(Utils::EditorWindowTitle(EditorPanel::ContentBrowser), ImGuiKey_S);
+			CHECK_FALSE(editor.IsSceneDirty());
+			// While a text field is active, Ctrl+Z belongs to that field.
+			const char* hierarchy = Utils::EditorWindowTitle(EditorPanel::SceneHierarchy);
+			test.Click(hierarchy, "##Search");
+			ImGui::GetIO().AddInputCharactersUTF8("abc");
+			test.Draw();
+			ImGui::GetIO().AddKeyEvent(ImGuiMod_Ctrl, true);
+			ImGui::GetIO().AddKeyEvent(ImGuiKey_Z, true);
+			test.Draw();
+			ImGui::GetIO().AddKeyEvent(ImGuiKey_Z, false);
+			ImGui::GetIO().AddKeyEvent(ImGuiMod_Ctrl, false);
+			test.Draw();
+			REQUIRE(test.Layer.OnSafePoint(0));
+			CHECK(editor.GetScene().GetEntityCount() == 1);
+		}
+
+		TEST_CASE("EditorLayer: open panels persist in the workspace layout and a layout without them uses the defaults")
+		{
+			Test::WorkspaceTestUi test;
+			auto& ui = test.Environment.GetEditor().GetUiState();
+			test.IniFile = FileSystem::PathToUtf8(test.Environment.GetDirectory() / "WorkspaceLayout.ini");
+			ImGui::GetIO().IniFilename = test.IniFile.c_str();
+			ImGui::GetIO().IniSavingRate = 0.01f;
+			for (int frame = 0; frame < 3; ++frame)
+				test.Draw();
+			// Toggling panels marks the layout dirty, so Dear ImGui's delayed save writes the new set.
+			REQUIRE(ui.SetPanelOpen(EditorPanel::UndoHistory, true));
+			REQUIRE(ui.SetPanelOpen(EditorPanel::GameViewport, false));
+			test.Draw();
+			test.Draw();
+			const auto saved = FileSystem::ReadText(FileSystem::PathFromUtf8(test.IniFile));
+			REQUIRE(saved);
+			REQUIRE(saved->contains("[EnginePanels][Open]"));
+			const std::string section = saved->substr(saved->find("[EnginePanels][Open]"));
+			const std::string panels = section.substr(0, section.find("\n\n"));
+			CHECK(panels.contains("UndoHistory"));
+			CHECK_FALSE(panels.contains("GameViewport"));
+			const auto open = [&ui](EditorPanel panel)
+			{
+				return std::find(ui.GetOpenPanels().begin(), ui.GetOpenPanels().end(), panel) != ui.GetOpenPanels().end();
+			};
+			// The next session starts from the defaults; loading the saved layout restores the user's panels.
+			ImGui::GetIO().IniSavingRate = 1000.0f;
+			ui.ResetLayout(true);
+			ImGui::LoadIniSettingsFromMemory(saved->data(), saved->size());
+			test.Draw();
+			test.Draw();
+			CHECK(open(EditorPanel::UndoHistory));
+			CHECK_FALSE(open(EditorPanel::GameViewport));
+			CHECK(open(EditorPanel::Inspector));
+			CHECK_FALSE(open(EditorPanel::ProjectLauncher));
+			// A layout that never saved panels (a fresh project) opens the defaults.
+			ImGui::ClearIniSettings();
+			test.Draw();
+			CHECK_FALSE(open(EditorPanel::UndoHistory));
+			CHECK(open(EditorPanel::GameViewport));
+			// A layer that goes away while Dear ImGui keeps an ini writes its panels first. Its owner then stops the ini, as
+			// EditorApp's shutdown does (EditorAppTests), because a save without the handler would drop them.
+			REQUIRE(ui.SetPanelOpen(EditorPanel::Console, false));
+			test.Draw();
+			{
+				EditorLayer replacement(test.Panels);
+				REQUIRE(test.Ui.Frame([&replacement]()
+				{
+					return replacement.OnImGuiRender();
+				}));
+			}
+			ImGui::GetIO().IniFilename = nullptr;
+			const auto written = FileSystem::ReadText(FileSystem::PathFromUtf8(test.IniFile));
+			REQUIRE(written);
+			REQUIRE(written->contains("[EnginePanels][Open]"));
+			const std::string finalSection = written->substr(written->find("[EnginePanels][Open]"));
+			const std::string finalPanels = finalSection.substr(0, finalSection.find("\n\n"));
+			CHECK(finalPanels.contains("GameViewport"));
+			CHECK_FALSE(finalPanels.contains("Console"));
+		}
+
 		TEST_CASE("EditorLayer: scene changes on disk offer reload without silently discarding edits")
 		{
 			LayerUiHarness ui;
@@ -723,7 +1232,7 @@ namespace Engine {
 			CHECK_FALSE(editor.IsSceneChangedOnDisk());
 			CHECK(editor.GetHistory().GetUndoCount() == 0);
 		}
-		TEST_CASE("EditorLayer: the game panel shows the lockstep owner and releases input on blur" * doctest::test_suite(Test::GpuSuite))
+		TEST_CASE("EditorLayer: the game panel shows the lockstep owner and its blur leaves agent input alone" * doctest::test_suite(Test::GpuSuite))
 		{
 			Test::HeadlessGpuFixture gpu;
 			ENGINE_REQUIRE_GPU(gpu);
@@ -743,6 +1252,9 @@ namespace Engine {
 			test.Ui.Draw();
 			const std::string drawn = test.Ui.Draw();
 			CHECK(drawn.contains(std::format("Agent controls time (owner {})", session.GetLockstepOwner())));
+			// Focus and hover alone do not capture game input; a click on the image does.
+			CHECK_FALSE(test.Ui.Views.IsGameInputFocused());
+			test.Ui.Click(inside);
 			REQUIRE(test.Ui.Views.IsGameInputFocused());
 			REQUIRE(session.GetInput().Queue(session.GetTick(), { .KeyCode = Key::Space }));
 			REQUIRE(test.Ui.Client.Call("play.step", Json{ { "ticks", 1 } }));
@@ -767,12 +1279,13 @@ namespace Engine {
 			test.Ui.Draw();
 			CHECK_FALSE(test.Ui.Views.IsGameInputFocused());
 			CHECK((ImGui::GetIO().ConfigFlags & ImGuiConfigFlags_NavEnableKeyboard) != 0);
-			// Blur queues releases; it must not advance an agent-owned session itself.
+			// Native input never reaches a lockstep session, so everything held there is its owner's: a UI blur neither
+			// advances the session nor injects releases into it (the agent's state hash stays independent of the UI).
 			CHECK(session.GetTick() == 1 + HeldFrames);
-			CHECK(session.GetInput().GetSummary(InputPhase::Step).Down == std::vector<std::string>{ "Key.Down", "Key.Space" });
+			CHECK(session.GetInput().GetQueuedEventCount() == 0);
 			REQUIRE(test.Ui.Client.Call("play.step", Json{ { "ticks", 1 } }));
-			CHECK(session.GetInput().GetSummary(InputPhase::Step).Down.empty());
-			CHECK(session.GetInput().GetSummary(InputPhase::Step).Released == std::vector<std::string>{ "Key.Down", "Key.Space" });
+			CHECK(session.GetInput().GetSummary(InputPhase::Step).Down == std::vector<std::string>{ "Key.Down", "Key.Space" });
+			CHECK(session.GetInput().GetSummary(InputPhase::Step).Released.empty());
 			ImGui::GetIO().AddKeyEvent(ImGuiKey_DownArrow, false);
 			test.Ui.Draw();
 		}
@@ -1218,6 +1731,14 @@ namespace Engine {
 			LayerGpuHarness test(gpu);
 			test.Ui.OnlyPanel(EditorPanel::SceneViewport);
 			REQUIRE(test.Ui.Environment.GetEditor().SetSelection({ test.Left, test.Right }, SceneTarget::Edit));
+			auto& editor = test.Ui.Environment.GetEditor();
+			const auto translation = [&editor](UUID id)
+			{
+				return editor.GetScene().FindEntityByID(id).GetComponent<TransformComponent>().Translation;
+			};
+			const glm::vec3 left = translation(test.Left);
+			const glm::vec3 right = translation(test.Right);
+			const size_t history = editor.GetHistory().GetUndoCount();
 			test.Advance(0);
 			test.Ui.Draw();
 			ImGui::SetWindowFocus("Scene###SceneViewport");
@@ -1270,9 +1791,18 @@ namespace Engine {
 			ImGui::GetIO().AddMouseButtonEvent(0, false);
 			test.Ui.Draw();
 			CHECK_FALSE(test.Ui.Gizmos.IsDragging());
+			// The release committed the whole gesture as one undo step that moved both entities by one world delta.
+			CHECK(editor.GetHistory().GetUndoCount() == history + 1);
+			CHECK(editor.GetHistory().GetUndoLabel() == "Transform selection");
+			const glm::vec3 delta = translation(test.Left) - left;
+			CHECK(glm::length(delta) > 0.01f);
+			CHECK(glm::length((translation(test.Right) - right) - delta) < 1.0e-5f);
 			test.Advance(6);
 			test.Advance(7);
 			test.CheckSelection({ test.Left, test.Right });
+			REQUIRE(editor.GetHistory().Undo(editor).has_value());
+			CHECK(translation(test.Left) == left);
+			CHECK(translation(test.Right) == right);
 		}
 
 		TEST_CASE("EditorViewportHost: queued clicks drain only against the exact submitted image and table" * doctest::test_suite(Test::GpuSuite))

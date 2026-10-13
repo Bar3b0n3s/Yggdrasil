@@ -102,6 +102,10 @@ namespace Engine {
 		// working while every asset-style texture creation, through either upload path, fails (§8.14 item 8).
 		[[nodiscard]] bool ShouldFailTextureCreation(const nvrhi::TextureDesc& desc) const;
 
+		// GpuFault::OomSpecialization: whether creating a specialized shader must fail as if out of device memory, so a debug
+		// view's first render reaches its pipeline-creation failure path (§8.14 items 7 and 8).
+		[[nodiscard]] bool ShouldFailShaderSpecialization() const { return m_InjectedFault == GpuFault::OomSpecialization; }
+
 		// GpuFault::Hang: whether bounded GPU waits must hang (FramePacer.h): WaitForSubmission skips its completed-submission
 		// early return, FramePacer::BeginFrame skips pollEventQuery once its slot has a recorded submission, and every wait
 		// slice reports VK_TIMEOUT without waiting, so the first wait ends the process with FatalError(GpuHang) whatever the

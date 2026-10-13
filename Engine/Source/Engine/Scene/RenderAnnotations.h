@@ -17,7 +17,7 @@ namespace Engine {
 	// Asset-dependent view overlays (§8.13), after ExtractRenderSnapshot/PlaySession::ExtractView. Main thread.
 	// Uses snapshot.Flags, Annotations, SelectedEntities and Alpha; does not alter scene, editor selection or options.
 	// Appends label text (name plus first six UUID hex digits), transformed mesh AABBs and unit RGB world axes to
-	// DebugDraw, plus procedural icon records. Colliders use BuildColliderDebugDraw with options.Alpha = snapshot.Alpha,
+	// AnnotationDraw (never the view's ordinary DebugDraw, which data views leave out), plus procedural icon records. Colliders use BuildColliderDebugDraw with options.Alpha = snapshot.Alpha,
 	// physics for play (null in edit), then AppendColliderDebugDraw. No camera -> no world overlays.
 	// Canonical entity order; labels skip disabled/pending-destruction entities and positions behind the camera.
 	// Selected uses SelectedEntities; Explicit uses LabelEntities; unknown UUIDs are ignored. All labels eligible entities.

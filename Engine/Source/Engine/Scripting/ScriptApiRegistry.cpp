@@ -7,6 +7,7 @@
 #include "Engine/Scripting/Private/SandboxAccess.h"
 #include "Engine/Scripting/Private/ScriptEngineAccess.h"
 #include "Engine/Scripting/ScriptEngine.h"
+#include "Engine/Scripting/ScriptLimits.h"
 
 #include <Luau/Allocator.h>
 #include <Luau/Ast.h>
@@ -122,6 +123,23 @@ namespace Engine {
 			}
 			return "unknown";
 		}
+		// Whether a value of the type can carry text a script writes (strings, map keys or Variant JSON).
+		static bool HoldsText(const TypeInfo& type)
+		{
+			switch (type.GetKind())
+			{
+				case FieldType::String:
+				case FieldType::Map:
+				case FieldType::Variant: return true;
+				case FieldType::Array:   return HoldsText(*type.GetElement());
+				case FieldType::Struct:
+					return std::ranges::any_of(type.GetStruct()->GetFields(), [](const auto& field)
+					{
+						return HoldsText(field->GetType());
+					});
+				default: return false;
+			}
+		}
 		class TypeNames final : public Luau::AstVisitor
 		{
 		public:
@@ -205,6 +223,17 @@ namespace Engine {
 		{
 			return call.Engine && call.Engine->IsTestMode();
 		}
+		// Whether an enum slot applies to this call's overload (ScriptEnumParameter::Selector).
+		static bool SelectsOverload(const ScriptCall& call, const ScriptEnumParameter& parameter)
+		{
+			switch (parameter.Selector)
+			{
+				case ScriptArgumentType::Any:    return true;
+				case ScriptArgumentType::String: return lua_type(call.State, parameter.SelectorIndex) == LUA_TSTRING;
+				case ScriptArgumentType::Number: return lua_type(call.State, parameter.SelectorIndex) == LUA_TNUMBER;
+			}
+			return false;
+		}
 
 	}
 
@@ -222,11 +251,13 @@ namespace Engine {
 					luaL_error(state, "%s", call.error().GetMessageText().c_str());
 				return *call;
 			}
-			static int Invoke(ScriptCall& call, const ScriptApiGroup& group, const ScriptApiMember& member, bool write)
+			static int Invoke(ScriptCall& call, const ScriptApiGroup& group, const ScriptApiMember& member, bool type, bool write)
 			{
 				auto& api = *SandboxAccess::GetApi(*call.Sandbox);
 				auto& storage = *api.m_Storage;
-				const std::string qualified = group.Name + "." + member.Name;
+				// Methods are called with ':' (Architecture §11.4: "Entity:AddComponent: argument #2 ..."); module functions,
+				// constructors, properties and operators keep '.'.
+				const std::string qualified = group.Name + (type && member.Kind == ScriptApiMemberKind::Method ? ":" : ".") + member.Name;
 				call.MemberName = qualified;
 				call.Member = &member;
 				if (call.Engine)
@@ -257,12 +288,14 @@ namespace Engine {
 					if (!writable)
 						return Lua::RaiseError(call, writable.error());
 				}
-				std::vector<std::pair<int, int64_t>> enumValues;
+				std::vector<std::tuple<int, std::string_view, int64_t>> enumValues;
 				for (const auto& parameter : member.Options.EnumParameters)
 				{
+					if (!Utils::SelectsOverload(call, parameter))
+						continue;
 					if (parameter.Optional && parameter.DefaultValue.empty() && Lua::IsNoneOrNil(call, parameter.ArgumentIndex))
 						continue;
-					enumValues.emplace_back(parameter.ArgumentIndex, Lua::CheckEnum(call, parameter.ArgumentIndex, parameter.EnumName));
+					enumValues.emplace_back(parameter.ArgumentIndex, parameter.EnumName, Lua::CheckEnum(call, parameter.ArgumentIndex, parameter.EnumName));
 				}
 				ScriptApiCounter* counter = Utils::Count(call) ? Utils::Counter(storage, mode, group.Name, member.Name) : nullptr;
 				if (counter)
@@ -270,8 +303,8 @@ namespace Engine {
 					if (member.Kind != ScriptApiMemberKind::Property && member.Kind != ScriptApiMemberKind::ProxyField)
 						++counter->Calls;
 					for (auto& hit : counter->EnumValues)
-						for (const auto& [slot, value] : enumValues)
-							if (slot == hit.ArgumentIndex)
+						for (const auto& [slot, enumName, value] : enumValues)
+							if (slot == hit.ArgumentIndex && enumName == hit.EnumName)
 								for (const auto& entry : api.FindEnum(hit.EnumName)->Values)
 									if (entry.Value == value && entry.Name == hit.ValueName)
 										++hit.Count;
@@ -339,7 +372,7 @@ namespace Engine {
 				const auto& storage = *SandboxAccess::GetApi(*call.Sandbox)->m_Storage;
 				const bool type = lua_toboolean(state, lua_upvalueindex(1)) != 0;
 				const auto& group = (type ? storage.Types : storage.Modules)[static_cast<size_t>(lua_tointeger(state, lua_upvalueindex(2)))];
-				return Invoke(call, group, group.Members[static_cast<size_t>(lua_tointeger(state, lua_upvalueindex(3)))], false);
+				return Invoke(call, group, group.Members[static_cast<size_t>(lua_tointeger(state, lua_upvalueindex(3)))], type, false);
 			}
 			static void PushDispatch(lua_State* state, bool type, size_t group, size_t member)
 			{
@@ -369,14 +402,14 @@ namespace Engine {
 						if (namecall)
 							return Lua::RaiseError(call, "property cannot be called as a method");
 						lua_remove(state, 2);
-						return Invoke(call, group, member, write);
+						return Invoke(call, group, member, true, write);
 					}
 					if (member.Kind == ScriptApiMemberKind::Method || member.Kind == ScriptApiMemberKind::Operator)
 					{
 						if (write)
 							return Lua::RaiseError(call, "methods are read-only");
 						if (namecall)
-							return Invoke(call, group, member, false);
+							return Invoke(call, group, member, true, false);
 						PushDispatch(state, true, groupIndex, i);
 						return 1;
 					}
@@ -520,9 +553,19 @@ namespace Engine {
 		candidate.Reflection = &types;
 		for (const auto* enumeration : types.GetEnums())
 		{
-			for (const auto& item : candidate.Enums)
-				if (item.Name == enumeration->GetName())
+			const auto existing = std::ranges::find(candidate.Enums, enumeration->GetName(), &ScriptApiEnum::Name);
+			if (existing != candidate.Enums.end())
+			{
+				// A binding may register a vocabulary that a host also reflects (Test.Inject*'s InputEventState is the
+				// automation enum in the Editor and Runtime registries). Identical names and values are one enum; any
+				// difference is a conflict.
+				if (!std::ranges::equal(existing->Values, enumeration->GetEntries(), [](const EnumEntry& a, const EnumEntry& b)
+				{
+					return a.Name == b.Name && a.Value == b.Value;
+				}))
 					return MakeError(ErrorCode::Validation, "duplicate reflected enum '{}'", enumeration->GetName());
+				continue;
+			}
 			candidate.Enums.push_back({ enumeration->GetName(), enumeration->GetDescription(), { enumeration->GetEntries().begin(), enumeration->GetEntries().end() } });
 		}
 		for (const auto* component : types.GetComponents())
@@ -546,6 +589,8 @@ namespace Engine {
 				member.Options.Mutates = false;
 				member.Readable = true;
 				member.Writable = !field->IsReadOnly();
+				if (member.Writable && Utils::HoldsText(field->GetType()))
+					member.Description += std::format(" A value a script writes holds at most {} bytes of text.", MaxScriptComponentStringBytes);
 				member.ComponentTypeIndex = component->GetIndex();
 				Utils::Append(candidate, true, groupIndex, std::move(member));
 			}
@@ -631,10 +676,13 @@ namespace Engine {
 					}
 					if (member.Kind != ScriptApiMemberKind::Constant && member.Kind != ScriptApiMemberKind::Callback && !member.ComponentTypeIndex && !member.Function)
 						return MakeError(ErrorCode::Validation, "missing callback for {}.{}", group.Name, member.Name);
-					std::set<int> slots;
+					std::set<std::tuple<int, int, ScriptArgumentType>> slots;
 					for (const auto& parameter : member.Options.EnumParameters)
 					{
-						if (parameter.ArgumentIndex <= 0 || !slots.insert(parameter.ArgumentIndex).second)
+						const bool selected = parameter.Selector != ScriptArgumentType::Any;
+						const bool validSelector = !selected ? parameter.SelectorIndex == 0
+															 : parameter.SelectorIndex > 0 && (parameter.Selector == ScriptArgumentType::String || parameter.Selector == ScriptArgumentType::Number);
+						if (parameter.ArgumentIndex <= 0 || !validSelector || !slots.insert({ parameter.ArgumentIndex, parameter.SelectorIndex, parameter.Selector }).second)
 							return MakeError(ErrorCode::Validation, "invalid enum slot for {}.{}", group.Name, member.Name);
 						const ScriptApiEnum* enumeration = nullptr;
 						for (const auto& item : candidate.Enums)
@@ -972,7 +1020,11 @@ namespace Engine {
 				{
 					result += "\n### " + group.Name + "." + member.Name + "\n\n`" + member.Signature + "`\n\n" + member.Description + "\n\n" + Utils::Policy(member) + ".\n";
 					for (const auto& parameter : member.Options.EnumParameters)
-						result += std::format("\nArgument {}: {}{}{}.\n", parameter.ArgumentIndex, parameter.EnumName, parameter.Optional ? " (optional)" : "", parameter.DefaultValue.empty() ? "" : "; default " + parameter.DefaultValue);
+					{
+						const std::string selector = parameter.Selector == ScriptArgumentType::Any ? std::string{}
+																								   : std::format(" when argument {} is a {}", parameter.SelectorIndex, parameter.Selector == ScriptArgumentType::String ? "string" : "number");
+						result += std::format("\nArgument {}: {}{}{}{}.\n", parameter.ArgumentIndex, parameter.EnumName, parameter.Optional ? " (optional)" : "", parameter.DefaultValue.empty() ? "" : "; default " + parameter.DefaultValue, selector);
+					}
 				}
 			}
 		for (const auto& item : m_Storage->Enums)

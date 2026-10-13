@@ -31,6 +31,15 @@ namespace Engine {
 					return MakeError(ErrorCode::Cancelled, "editor UI frame sequence changed while a screenshot was pending");
 				if (completed == m_AdmittedFrame)
 					return std::nullopt;
+				if (captures.IsUiFrameCurrent && !captures.IsUiFrameCurrent())
+				{
+					// Its viewport textures were withdrawn after it was built: wait for a frame completed after this one.
+					m_AdmittedFrame = completed;
+					const Status requested = captures.RequestUiFrame();
+					if (!requested)
+						return std::unexpected(requested.error());
+					return std::nullopt;
+				}
 				const Result<EditorScreenshotResult> result = Automation::EditorScreenshot(editorContext, m_Params);
 				if (!result)
 					return std::unexpected(result.error());
@@ -60,7 +69,8 @@ namespace Engine {
 			return MakeError(ErrorCode::Unsupported, "editor.screenshot needs a renderer and a fresh UI frame provider");
 		const uint64_t admittedFrame = captures.CompletedUiFrame();
 		Scope<PendingOperation> operation = CreateScope<Utils::FreshEditorScreenshot>(admittedFrame, params);
-		captures.RequestUiFrame();
+		// A host that cannot schedule the frame answers now, not with a Timeout at the method's deadline.
+		ENGINE_TRY(captures.RequestUiFrame());
 		return operation;
 	}
 

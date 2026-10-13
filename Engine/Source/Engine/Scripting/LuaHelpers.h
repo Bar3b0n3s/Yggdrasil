@@ -20,8 +20,8 @@ namespace Engine {
 	struct ScriptCall;
 	struct ScriptError;
 
-	// Architecture §11.4 explicitly names Lua helpers. The ADR 0019 namespace exception is limited to this facade and
-	// its private VM entry points; it does not permit exposing Luau types through public headers.
+	// Architecture §11.4 explicitly names Lua helpers. The namespace exception of Docs/Decisions/0021-review-fixes.md is
+	// limited to this facade and its private VM entry points; it does not permit exposing Luau types through public headers.
 	namespace Lua {
 
 		// Borrowed only for this native entry; null for load-time/hostless execution and reload candidate evaluation.
@@ -40,7 +40,10 @@ namespace Engine {
 		[[nodiscard]] T Check(ScriptCall& call, int index);
 
 		// Pushes one value, copying owned data. Unsupported T has no generic definition. Finite/type validation is the
-		// same as Check. Invalid asset/entity identities push nil; valid identities never carry C++ pointers. A vec2
+		// same as Check. Invalid asset/entity identities push nil; valid identities never carry C++ pointers. Entity,
+		// component proxy and AssetRef identities are interned per VM: while any reference to the userdata of an
+		// identity is alive, pushing that identity again returns the same userdata (a weak cache never keeps it alive),
+		// so table keys and rawequal agree with ==. Color and Quat are mutable values and are never shared. A vec2
 		// pushes a native vector with z = 0. Native callbacks call these only while a protected entry is active.
 		template<typename T>
 		void Push(ScriptCall& call, const T& value);
@@ -113,8 +116,10 @@ namespace Engine {
 		// Field validation/setters still run at WriteField. Array/map/struct/Variant schema traversal preserves canonical
 		// order, detects cycles, and rejects unsupported userdata/functions/threads instead of leaking pointers.
 		// One native allowance covers the entire conversion, including all aliases and resolved/unresolved Variants:
-		// min(4 MiB, VM soft limit), charged 256 bytes/value, 256/entry and 4/string or key byte before copying.
-		// Admission polls the inherited safety deadline; rejection raises a located error before any host write.
+		// min(4 MiB, VM soft limit), charged 256 bytes/value, 256/entry and 4/string or key byte before copying. A value for
+		// a component (a component proxy at argument 1) holds at most MaxScriptComponentStringBytes of text in its strings,
+		// map keys and Variant text together (ScriptLimits.h). Admission polls the inherited safety deadline; rejection
+		// raises a located error before any host write.
 		[[nodiscard]] Value CheckValue(ScriptCall& call, int index, const FieldInfo& field);
 		void PushValue(ScriptCall& call, const Value& value, const FieldInfo& field);
 		// Raises a located Luau error. The int return permits `return Lua::RaiseError(...)` in native callbacks; a real
@@ -122,7 +127,9 @@ namespace Engine {
 		int RaiseError(ScriptCall& call, std::string_view message);
 		int RaiseError(ScriptCall& call, const Error& error);
 		// Explicit child-error forwarding preserves its owned kind/location/trace/context. Raises an authenticated
-		// VM-owned value; tostring gives the message, error(value) rethrows it, unrelated failures never inherit it.
+		// VM-owned value; tostring gives the message, error(value) rethrows it within the execution slice that raised it,
+		// unrelated failures never inherit it, and a copy kept by a script and raised in a later slice becomes a runtime
+		// error of the raising frame and current owner carrying only the message.
 		// Use inside a protected native entry only, after all child stack-restoration scopes have ended.
 		int RaiseError(ScriptCall& call, const ScriptError& error);
 

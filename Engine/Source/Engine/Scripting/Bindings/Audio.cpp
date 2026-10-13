@@ -4,6 +4,8 @@
 #include "Engine/Scene/AudioSystem.h"
 #include "Engine/Scripting/ScriptEngine.h"
 
+#include <format>
+
 namespace Engine {
 
 	namespace Utils {
@@ -62,7 +64,9 @@ namespace Engine {
 		Status RegisterAudio(ScriptApiRegistry& api)
 		{
 			api.Module("Audio", "Session-scoped mixing and one-shot playback.")
-				.Function("PlayOneShot", Utils::AudioPlayOneShot, "(clip: AssetRef, position: vector?, volume: number?, group: AudioGroup?) -> ()", "Play a non-spatial one-shot when position is nil, otherwise spatial; volume defaults 1 and group Sfx.", { .EnumParameters = { { 4, "AudioGroup", true, "Sfx" } } })
+				.Function("PlayOneShot", Utils::AudioPlayOneShot, "(clip: AssetRef, position: vector?, volume: number?, group: AudioGroup?) -> ()",
+					std::format("Play a non-spatial one-shot when position is nil, otherwise spatial; volume defaults 1 and group Sfx. At most {} one-shots start per frame; a later call in the frame raises an error.", MaxAudioOneShotsPerFrame),
+					{ .EnumParameters = { { 4, "AudioGroup", true, "Sfx" } } })
 				.Function("SetGroupVolume", Utils::AudioSetGroupVolume, "(group: AudioGroup, volume: number) -> ()", "Set nonnegative session group gain; the prior mix is restored when the audio system stops.", { .EnumParameters = { { 1, "AudioGroup", false, {} } } })
 				.Function("GetGroupVolume", Utils::AudioGetGroupVolume, "(group: AudioGroup) -> number", "Read the session group gain.", { .Mutates = false, .EnumParameters = { { 1, "AudioGroup", false, {} } } });
 			return {};

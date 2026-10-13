@@ -15,7 +15,7 @@ namespace Engine {
 		return std::unexpected(Error(ErrorCode::Unsupported, "this host does not provide statistics"));
 	}
 
-	std::vector<UUID> AutomationMethodContext::GetSelectedEntities() const
+	std::vector<UUID> AutomationMethodContext::GetSelectedEntities(const Scene& /*scene*/) const
 	{
 		return {};
 	}

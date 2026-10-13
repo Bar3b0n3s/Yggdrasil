@@ -400,7 +400,121 @@ namespace Engine {
 
 	}
 
+	Result<ScriptEngine::State::ReloadPlan> ScriptEngine::State::PlanReload(AssetHandle changed, std::span<const std::string> loadedModules)
+	{
+		AssetManager* assets = Engine.GetHost().GetAssets();
+		if (!assets)
+			return MakeError(ErrorCode::InvalidState, "reload requires an asset manager");
+		ReloadPlan plan;
+		std::map<std::string, AssetHandle> handles;
+		const auto add = [&plan, &handles, assets](AssetHandle handle) -> Status
+		{
+			if (plan.Scripts.contains(handle))
+				return {};
+			ENGINE_TRY_ASSIGN(auto asset, assets->Load(handle));
+			auto data = AssetCast<ScriptData>(asset);
+			if (!data)
+				return MakeError(ErrorCode::Validation, "reload target is not a script");
+			handles.emplace(data->SourceMap.Path, handle);
+			plan.Scripts.emplace(handle, std::move(data));
+			return {};
+		};
+		ENGINE_TRY(add(changed));
+		for (const auto& path : loadedModules)
+			if (const auto handle = assets->Resolve(path))
+				ENGINE_TRY(add(*handle));
+		for (const auto& [entity, instance] : Instances)
+		{
+			static_cast<void>(entity);
+			ENGINE_TRY(add(instance.Handle));
+		}
+		std::map<AssetHandle, std::set<AssetHandle>> dependencies;
+		for (const auto& [handle, data] : plan.Scripts)
+			for (const auto& edge : data->Requires)
+				if (edge.From == data->SourceMap.Path)
+				{
+					const auto dependency = edge.Handle.IsValid() ? std::optional<AssetHandle>(edge.Handle) : assets->Resolve(edge.Path);
+					if (dependency)
+						dependencies[handle].insert(*dependency);
+				}
+		for (const auto& edge : Detail::SandboxAccess::GetResolver(*Vm)->GetRequires())
+		{
+			const auto from = handles.find(edge.From);
+			const auto to = handles.find(edge.Path);
+			if (from != handles.end() && to != handles.end())
+				dependencies[from->second].insert(to->second);
+		}
+		std::set<AssetHandle> affected{ changed };
+		for (bool expanded = true; expanded;)
+		{
+			expanded = false;
+			for (const auto& [handle, required] : dependencies)
+				if (!affected.contains(handle) && std::ranges::any_of(required, [&affected](AssetHandle dependency)
+				{
+					return affected.contains(dependency);
+				}))
+					expanded = affected.insert(handle).second || expanded;
+		}
+		std::map<AssetHandle, uint8_t> visits;
+		const auto visit = [&dependencies, &affected, &visits, &plan](auto&& self, AssetHandle handle) -> Status
+		{
+			if (visits[handle] == 2)
+				return {};
+			if (visits[handle] == 1)
+				return MakeError(ErrorCode::Script, "reload dependency graph contains a cycle");
+			visits[handle] = 1;
+			for (AssetHandle dependency : dependencies[handle])
+				if (affected.contains(dependency))
+					ENGINE_TRY(self(self, dependency));
+			visits[handle] = 2;
+			plan.Ordered.push_back(handle);
+			return {};
+		};
+		for (AssetHandle handle : affected)
+			ENGINE_TRY(visit(visit, handle));
+		for (AssetHandle handle : plan.Ordered)
+		{
+			if (!plan.Scripts.contains(handle))
+				return MakeError(ErrorCode::NotFound, "reload dependency has no published script asset");
+		}
+		return plan;
+	}
+
 #endif
+
+	Result<std::vector<AssetHandle>> ScriptEngine::GetReloadChain(AssetHandle changed)
+	{
+		m_State->AssertOwner();
+#if defined(ENGINE_DIST)
+		static_cast<void>(changed);
+		return MakeError(ErrorCode::Unsupported, "script reload is unavailable in Dist");
+#else
+		if (!changed.IsValid())
+			return MakeError(ErrorCode::InvalidArgument, "reload requires a script asset");
+		if (IsStopped() || !m_State->Vm || IsReadOnly())
+			return MakeError(ErrorCode::InvalidState, "reload requires a writable running script engine");
+		if (GetRunMode() != RunModes::Editor)
+			return MakeError(ErrorCode::Unsupported, "script reload is EditorOnly");
+		std::vector<std::string> loaded;
+		Status inventory{};
+		const auto inventoried = m_State->RunNative([&loaded, &inventory](ScriptCall& call)
+		{
+			auto paths = Detail::SandboxAccess::GetLoadedModulePaths(call);
+			if (!paths)
+				inventory = std::unexpected(paths.error());
+			else
+				loaded = std::move(*paths);
+			return 0;
+		}, ScriptExecutionOrigin::Eval, {}, "Reload");
+		if (!inventoried)
+			return std::unexpected(inventoried.error());
+		if (inventoried->Failure)
+			return std::unexpected(ReloadError(*inventoried->Failure));
+		ENGINE_TRY(std::move(inventory));
+		ENGINE_TRY_ASSIGN(auto plan, m_State->PlanReload(changed, loaded));
+		return std::move(plan.Ordered);
+#endif
+	}
 
 	Result<ScriptReloadResult> ScriptEngine::Reload(AssetHandle changed, bool fromTest)
 	{
@@ -459,86 +573,20 @@ namespace Engine {
 			return status;
 		};
 		ENGINE_TRY(publishFailure(std::move(preparation)));
-		std::map<AssetHandle, Ref<const ScriptData>> scripts;
-		std::map<std::string, AssetHandle> handles;
-		const auto add = [&scripts, &handles, assets](AssetHandle handle) -> Status
+		auto plan = m_State->PlanReload(changed, loaded);
+		if (!plan)
 		{
-			if (scripts.contains(handle))
-				return {};
-			ENGINE_TRY_ASSIGN(auto asset, assets->Load(handle));
-			auto data = AssetCast<ScriptData>(asset);
-			if (!data)
-				return MakeError(ErrorCode::Validation, "reload target is not a script");
-			handles.emplace(data->SourceMap.Path, handle);
-			scripts.emplace(handle, std::move(data));
-			return {};
-		};
-		ENGINE_TRY(publishFailure(add(changed)));
-		for (const auto& path : loaded)
-			if (const auto handle = assets->Resolve(path))
-				ENGINE_TRY(publishFailure(add(*handle)));
-		for (const auto& [entity, instance] : m_State->Instances)
-		{
-			static_cast<void>(entity);
-			ENGINE_TRY(publishFailure(add(instance.Handle)));
+			m_State->Publish(plan.error(), {}, "Reload");
+			return std::unexpected(plan.error());
 		}
-		std::map<AssetHandle, std::set<AssetHandle>> dependencies;
-		for (const auto& [handle, data] : scripts)
-			for (const auto& edge : data->Requires)
-				if (edge.From == data->SourceMap.Path)
-				{
-					const auto dependency = edge.Handle.IsValid() ? std::optional<AssetHandle>(edge.Handle) : assets->Resolve(edge.Path);
-					if (dependency)
-						dependencies[handle].insert(*dependency);
-				}
-		for (const auto& edge : Detail::SandboxAccess::GetResolver(sandbox)->GetRequires())
-		{
-			const auto from = handles.find(edge.From);
-			const auto to = handles.find(edge.Path);
-			if (from != handles.end() && to != handles.end())
-				dependencies[from->second].insert(to->second);
-		}
-		std::set<AssetHandle> affected{ changed };
-		for (bool expanded = true; expanded;)
-		{
-			expanded = false;
-			for (const auto& [handle, required] : dependencies)
-				if (!affected.contains(handle) && std::ranges::any_of(required, [&affected](AssetHandle dependency)
-				{
-					return affected.contains(dependency);
-				}))
-					expanded = affected.insert(handle).second || expanded;
-		}
-		std::vector<AssetHandle> ordered;
-		std::map<AssetHandle, uint8_t> visits;
-		const auto visit = [&dependencies, &affected, &visits, &ordered](auto&& self, AssetHandle handle) -> Status
-		{
-			if (visits[handle] == 2)
-				return {};
-			if (visits[handle] == 1)
-				return MakeError(ErrorCode::Script, "reload dependency graph contains a cycle");
-			visits[handle] = 1;
-			for (AssetHandle dependency : dependencies[handle])
-				if (affected.contains(dependency))
-					ENGINE_TRY(self(self, dependency));
-			visits[handle] = 2;
-			ordered.push_back(handle);
-			return {};
-		};
-		for (AssetHandle handle : affected)
-			ENGINE_TRY(publishFailure(visit(visit, handle)));
+		std::vector<AssetHandle> ordered = std::move(plan->Ordered);
 		std::vector<Ref<const ScriptData>> candidates;
 		std::vector<ReloadModule> reloadModules;
 		std::map<AssetHandle, AssetRef<ScriptData>> schemaScripts;
 		for (AssetHandle handle : ordered)
 		{
-			const auto data = scripts.find(handle);
-			if (data == scripts.end())
-			{
-				const Error error(ErrorCode::NotFound, "reload dependency has no published script asset");
-				m_State->Publish(error, {}, "Reload");
-				return std::unexpected(error);
-			}
+			const auto data = plan->Scripts.find(handle);
+			ENGINE_CORE_VERIFY(data != plan->Scripts.end(), "a reload plan names a script it did not load");
 			candidates.push_back(data->second);
 			reloadModules.push_back({ handle, data->second });
 			schemaScripts.emplace(handle, data->second);
@@ -794,6 +842,10 @@ namespace Engine {
 			if (update.Recreated)
 			{
 				found->second.Table = update.Table;
+				// A table that never existed (module-top fault) or was dropped (memory fault) holds no state to keep:
+				// it restarts the lifecycle, so OnCreate runs now and OnStart at the next start flush (§5.7).
+				found->second.Started = false;
+				found->second.PendingPhysics.clear();
 				// Transfer the new instance's root to State; every other transaction root remains scoped here.
 				const auto reference = std::ranges::find(roots.References, update.Table);
 				ENGINE_CORE_VERIFY(reference != roots.References.end(), "missing reload instance root");
@@ -801,11 +853,41 @@ namespace Engine {
 			}
 		}
 		roots.Release();
-		for (UUID id : m_State->OrderedInstances(false))
-			if (std::ranges::any_of(instances, [id](const auto& item)
+		const auto reloaded = [&instances](UUID id, bool recreated)
+		{
+			return std::ranges::any_of(instances, [id, recreated](const auto& item)
 			{
-				return item.Entity == id;
-			}))
+				return item.Entity == id && item.Recreated == recreated;
+			});
+		};
+		// Recreated instances receive OnCreate in (ExecutionOrder, canonical) order, inactive ones included, exactly as
+		// at creation; surviving instances then receive OnHotReload with every recreated peer already initialized.
+		m_State->RefreshLifecycleOrder();
+		struct Recreated
+		{
+			int32_t Order = 0;
+			UUID Entity{};
+			uint64_t Serial = 0;
+		};
+		std::vector<Recreated> recreated;
+		for (const UUID id : m_State->LifecycleOrder)
+		{
+			const auto found = m_State->Instances.find(id);
+			if (found != m_State->Instances.end() && reloaded(id, true) && GetHost().GetScene().FindEntityByID(id))
+				recreated.push_back({ found->second.Order, id, found->second.Serial });
+		}
+		std::stable_sort(recreated.begin(), recreated.end(), [](const Recreated& left, const Recreated& right)
+		{
+			return left.Order < right.Order;
+		});
+		for (const Recreated& entry : recreated)
+		{
+			const auto found = m_State->Instances.find(entry.Entity);
+			if (found != m_State->Instances.end() && found->second.Serial == entry.Serial)
+				m_State->Invoke(entry.Entity, "OnCreate", nullptr, true);
+		}
+		for (UUID id : m_State->OrderedInstances(false))
+			if (reloaded(id, false))
 				m_State->Invoke(id, "OnHotReload");
 		return ScriptReloadResult{ .Scripts = std::move(ordered) };
 #endif

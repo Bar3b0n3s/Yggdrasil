@@ -2,7 +2,13 @@
 #include "Editor/Panels/AutomationPanel.h"
 
 #include "Editor/SupportingPanelTestUi.h"
+#include "EditorCore/EditorPreferences.h"
+#include "Engine/Core/Log.h"
 #include "Engine/Core/VirtualFileSystem.h"
+#include "Support/ExpectLog.h"
+
+#include <string>
+#include <vector>
 
 namespace Engine {
 
@@ -83,6 +89,114 @@ namespace Engine {
 			CHECK(preferences->AllowAiAutomation);
 			CHECK(fixture.GetClient().GetServer().GetPort() != 0);
 			CHECK(fixture.Draw(panel).contains("Listening on localhost:"));
+		}
+
+		TEST_CASE("AutomationPanel: outcome and method filters compose")
+		{
+			Test::UtilityPanelFixture fixture;
+			fixture.OpenProject();
+			REQUIRE(fixture.GetClient().Call("project.info", Json::object()));
+			REQUIRE(fixture.GetClient().Call("entity.create", Json{ { "name", "Allowed" } }));
+			AutomationPanel panel;
+			Test::SupportingPanelTestUi::ClickText(fixture, panel, "Deny agent mutations");
+			CHECK(fixture.GetContext().AutomationControls.GetPolicy().DenyMutations);
+			const auto denied = fixture.GetClient().Call("entity.create", Json{ { "name", "Denied" } });
+			REQUIRE_FALSE(denied);
+			CHECK(denied.error().GetCode() == ErrorCode::PermissionDenied);
+			Test::SupportingPanelTestUi::ClickText(fixture, panel, "Search client or method");
+			ImGui::GetIO().AddInputCharactersUTF8("ENTITY.CREATE");
+			fixture.Draw(panel);
+			Test::SupportingPanelTestUi::ClickText(fixture, panel, "All requests");
+			Test::SupportingPanelTestUi::ClickText(fixture, panel, "Failed");
+			const std::string failures = fixture.Draw(panel);
+			CHECK(failures.contains("entity.create"));
+			CHECK_FALSE(failures.contains("project.info"));
+			CHECK_FALSE(failures.contains("Completed"));
+		}
+
+		TEST_CASE("AutomationPanel: the external editor setting queues one preference write for the safe point")
+		{
+			Test::UtilityPanelFixture fixture;
+			fixture.OpenProject();
+			AutomationPanel panel;
+			Test::SupportingPanelTestUi::ClickText(fixture, panel, "Executable, such as code");
+			fixture.ReplaceFocusedText(panel, "code");
+			fixture.Press(panel, ImGuiKey_Tab); // the arguments field: one argument per line
+			ImGui::GetIO().AddInputCharactersUTF8("--goto");
+			fixture.Draw(panel);
+			fixture.Press(panel, ImGuiKey_Enter);
+			ImGui::GetIO().AddInputCharactersUTF8("{path}:{line}");
+			fixture.Draw(panel);
+			Test::SupportingPanelTestUi::ClickText(fixture, panel, "Save editor");
+			CHECK(fixture.GetPreferences().GetExternalEditorState().Pending);
+			CHECK(fixture.Draw(panel).contains("Saving the external editor"));
+			// Drawing and clicking never write the preference; the host's safe point does.
+			const auto queued = ReadEditorPreferences(fixture.GetEditor().GetVfs());
+			REQUIRE(queued);
+			CHECK(queued->ExternalEditorExecutable.empty());
+			fixture.Pump();
+			const auto saved = ReadEditorPreferences(fixture.GetEditor().GetVfs());
+			REQUIRE(saved);
+			CHECK(saved->ExternalEditorExecutable == "code");
+			CHECK(saved->ExternalEditorArguments == std::vector<std::string>{ "--goto", "{path}:{line}" });
+			const EditorExternalEditorState state = fixture.GetPreferences().GetExternalEditorState();
+			CHECK_FALSE(state.Pending);
+			CHECK_FALSE(state.Failure.has_value());
+			CHECK_FALSE(fixture.Draw(panel).contains("Saving the external editor"));
+		}
+
+		TEST_CASE("AutomationPanel: an external editor without {path} is refused and explained in the panel")
+		{
+			Test::UtilityPanelFixture fixture;
+			fixture.OpenProject();
+			AutomationPanel panel;
+			Test::SupportingPanelTestUi::ClickText(fixture, panel, "Executable, such as code");
+			fixture.ReplaceFocusedText(panel, "code");
+			fixture.Press(panel, ImGuiKey_Tab);
+			ImGui::GetIO().AddInputCharactersUTF8("--new-window");
+			fixture.Draw(panel);
+			const Test::ExpectLog refused(LogLevel::Error, "{path}");
+			Test::SupportingPanelTestUi::ClickText(fixture, panel, "Save editor");
+			CHECK_FALSE(fixture.GetPreferences().GetExternalEditorState().Pending);
+			CHECK(fixture.Draw(panel).contains("must contain {path}"));
+			CHECK(refused.GetMatchCount() == 1);
+			fixture.Pump();
+			const auto stored = ReadEditorPreferences(fixture.GetEditor().GetVfs());
+			REQUIRE(stored);
+			CHECK(stored->ExternalEditorExecutable.empty());
+		}
+
+		TEST_CASE("AutomationPanel: two different preference failures are each logged once and both shown")
+		{
+			Test::UtilityPanelFixture fixture;
+			fixture.OpenProject();
+			// Both host failures persist until another change of their preference is queued.
+			fixture.GetContext().AutomationPreferences.GetState = []()
+			{
+				return EditorAutomationPreferenceState{ .Allowed = false, .Pending = false, .Failure = Error(ErrorCode::Io, "listener port unavailable") };
+			};
+			fixture.GetContext().ExternalEditor.GetState = []()
+			{
+				return EditorExternalEditorState{ .Executable = {}, .Arguments = {}, .Pending = false, .Failure = Error(ErrorCode::Io, "Editor.json is read-only") };
+			};
+			AutomationPanel panel;
+			const Test::ExpectLog listener(LogLevel::Error, "listener port unavailable");
+			const Test::ExpectLog preferences(LogLevel::Error, "Editor.json is read-only");
+			std::string text;
+			for (int frame = 0; frame < 5; ++frame)
+				text = fixture.Draw(panel);
+			CHECK(listener.GetMatchCount() == 1);
+			CHECK(preferences.GetMatchCount() == 1);
+			CHECK(text.contains("listener port unavailable"));
+			CHECK(text.contains("Editor.json is read-only"));
+		}
+
+		TEST_CASE("AutomationPanel: editor arguments are split one per line without a shell")
+		{
+			CHECK(AutomationPanel::SplitEditorArguments("").empty());
+			CHECK(AutomationPanel::SplitEditorArguments("--goto\r\n{path}:{line}\n\n\"quoted words\" & ;")
+				== std::vector<std::string>{ "--goto", "{path}:{line}", "\"quoted words\" & ;" });
+			CHECK(AutomationPanel::SplitEditorArguments("{path}\n") == std::vector<std::string>{ "{path}" });
 		}
 	}
 

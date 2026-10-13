@@ -31,6 +31,7 @@
 
 #include <algorithm>
 #include <tuple>
+#include <utility>
 
 namespace Engine {
 
@@ -50,9 +51,9 @@ namespace Engine {
 				return identity + ":Play:" + std::to_string(session == nullptr ? 0 : session->GetSerial())
 					+ ":" + std::to_string(session == nullptr ? 0 : session->GetSceneGeneration());
 			}
-			// GetRevision's documented scene base advances on replacement, but not on ordinary entity edits.
-			const uint64_t sceneEpoch = editor.GetRevision() - (editor.HasScene() ? editor.GetScene().GetRevision() : 0);
-			return identity + ":Edit:" + std::to_string(sceneEpoch);
+			// Replacing or closing the scene document advances its epoch; edits, undo/redo and project-settings installations,
+			// which all advance GetRevision, keep it, so they never discard a pending gesture or name edit.
+			return identity + ":Edit:" + std::to_string(editor.GetSceneDocumentEpoch());
 		}
 
 		static bool InspectorReferenceMatches(std::string_view text, std::string_view query)
@@ -176,6 +177,57 @@ namespace Engine {
 			return EditorLabel(field);
 		}
 
+		static bool IsSameInspectorField(const InspectorEditTarget& left, const InspectorEditTarget& right)
+		{
+			return left.Kind == right.Kind && left.Component == right.Component && left.FieldPath == right.FieldPath;
+		}
+
+		// Every component of a value: a scalar, struct, container or rotation differs as a whole.
+		constexpr uint32_t AllInspectorComponents = ~0u;
+
+		// The components in which two values of one vector kind differ (bit i is component i); script vectors arrive as
+		// Variant JSON arrays. AllInspectorComponents for differing values of every other kind.
+		static uint32_t InspectorComponentDifferences(const Value& first, const Value& other)
+		{
+			if (first.IsNull() || other.IsNull() || first.GetKind() != other.GetKind())
+				return AllInspectorComponents;
+			const auto differences = [](const auto& left, const auto& right)
+			{
+				uint32_t mask = 0;
+				for (glm::length_t index = 0; index < left.length(); ++index)
+				{
+					if (left[index] != right[index])
+						mask |= 1u << static_cast<uint32_t>(index);
+				}
+				return mask;
+			};
+			switch (first.GetKind())
+			{
+				case FieldType::Vec2:  return differences(first.AsVec2(), other.AsVec2());
+				case FieldType::Vec3:  return differences(first.AsVec3(), other.AsVec3());
+				case FieldType::Vec4:  return differences(first.AsVec4(), other.AsVec4());
+				case FieldType::Bool3: return differences(first.AsBool3(), other.AsBool3());
+				case FieldType::Variant:
+				{
+					const Json& left = first.AsVariant().Get();
+					const Json& right = other.AsVariant().Get();
+					if (!left.is_array() || !right.is_array() || left.size() != right.size() || left.size() > 4)
+						return left == right ? 0u : AllInspectorComponents;
+					uint32_t mask = 0;
+					for (size_t index = 0; index < left.size(); ++index)
+					{
+						if (left[index] != right[index])
+							mask |= 1u << static_cast<uint32_t>(index);
+					}
+					return mask;
+				}
+				default: return first == other ? 0u : AllInspectorComponents;
+			}
+		}
+
+		// Asset files are re-read at least this often while selected, so an external edit shows without a re-selection.
+		constexpr double AssetPropertiesRefreshSeconds = 0.5;
+
 	}
 
 	void InspectorPanel::ReportFailure(const Error& error)
@@ -186,15 +238,8 @@ namespace Engine {
 		m_Error = message;
 	}
 
-	Status InspectorPanel::ApplyQueuedEdit(EditorPanelContext& context)
+	Status InspectorPanel::CommitActiveEdit(EditorPanelContext& context)
 	{
-		if (!m_CommitQueued)
-			return {};
-		if (m_ActiveTarget && m_OwnerIdentity != Utils::InspectorOwnerIdentity(context, m_ActiveTarget->Kind != InspectorTargetKind::Component, m_ActiveTarget->Target))
-		{
-			CancelEdit(context);
-			return {};
-		}
 		m_CommitQueued = false;
 		auto committed = context.InspectorEdits.Commit();
 		if (!committed)
@@ -204,19 +249,169 @@ namespace Engine {
 			return std::unexpected(std::move(committed).error());
 		}
 		m_ActiveTarget.reset();
+		m_ActiveComponents = 0;
+		m_ActiveMixed = false;
+		m_Error.clear();
 		return {};
 	}
 
-	void InspectorPanel::CancelEdit(EditorPanelContext& context)
+	Status InspectorPanel::ApplyQueuedEdit(EditorPanelContext& context)
+	{
+		const auto replaced = [this, &context](const InspectorEditTarget& target)
+		{
+			return m_OwnerIdentity != Utils::InspectorOwnerIdentity(context, target.Kind != InspectorTargetKind::Component, target.Target);
+		};
+		if ((m_ActiveTarget && replaced(*m_ActiveTarget)) || (m_Pending && replaced(m_Pending->Target)))
+		{
+			CancelEdit(context);
+			return {};
+		}
+		if (m_CommitQueued)
+			ENGINE_TRY(CommitActiveEdit(context));
+		// A gesture that started while the previous one was releasing begins now, against the committed state.
+		if (!m_ActiveTarget && m_Pending)
+		{
+			BeginPendingEdit(context, *std::exchange(m_Pending, std::nullopt));
+			if (m_CommitQueued)
+				ENGINE_TRY(CommitActiveEdit(context));
+		}
+		return {};
+	}
+
+	void InspectorPanel::EndActiveEdit(EditorPanelContext& context)
 	{
 		context.InspectorEdits.Cancel();
 		m_CommitQueued = false;
 		m_ActiveTarget.reset();
+		m_ActiveComponents = 0;
+		m_ActiveMixed = false;
+	}
+
+	void InspectorPanel::CancelEdit(EditorPanelContext& context)
+	{
+		EndActiveEdit(context);
+		m_Pending.reset();
+	}
+
+	void InspectorPanel::BeginPendingEdit(EditorPanelContext& context, PendingEdit pending)
+	{
+		auto began = context.InspectorEdits.Begin(pending.Target);
+		if (!began)
+		{
+			ReportFailure(began.error());
+			return;
+		}
+		m_ActiveTarget = std::move(pending.Target);
+		m_ActiveComponents = pending.Components;
+		m_ActiveMixed = pending.Mixed;
+		if (pending.Changed)
+		{
+			auto previewed = context.InspectorEdits.Preview(pending.Candidate, pending.Mixed ? pending.Components : 0);
+			if (!previewed)
+			{
+				ReportFailure(previewed.error());
+				if (pending.Committed)
+					EndActiveEdit(context);
+				return;
+			}
+		}
+		m_CommitQueued = pending.Committed;
+	}
+
+	const InspectorPanel::AssetProperties& InspectorPanel::ReadAssetProperties(EditorPanelContext& context, AssetHandle asset)
+	{
+		EditorContext& editor = context.Editor;
+		const double now = ImGui::GetTime();
+		AssetProperties properties;
+		properties.Asset = asset;
+		properties.ProjectGeneration = context.Thumbnails.GetProjectGeneration();
+		properties.Version = editor.GetAssets().GetVersion(asset);
+		properties.HistorySequence = editor.GetHistory().GetCurrentSequence();
+		properties.HistoryUndoCount = editor.GetHistory().GetUndoCount();
+		properties.Revision = editor.GetRevision();
+		if (m_AssetProperties && m_AssetProperties->Asset == properties.Asset && m_AssetProperties->ProjectGeneration == properties.ProjectGeneration
+			&& m_AssetProperties->Version == properties.Version && m_AssetProperties->HistorySequence == properties.HistorySequence
+			&& m_AssetProperties->HistoryUndoCount == properties.HistoryUndoCount && m_AssetProperties->Revision == properties.Revision
+			&& now < m_AssetProperties->RefreshAt)
+			return *m_AssetProperties;
+		properties.RefreshAt = now + Utils::AssetPropertiesRefreshSeconds;
+		const AssetRecord* record = editor.GetAssets().GetRegistry().Find(asset);
+		if (record != nullptr)
+		{
+			const TypeRegistry& types = editor.GetTypeRegistry();
+			ImporterRegistry importers;
+			RegisterBuiltinImporters(importers);
+			if (const IAssetImporter* importer = importers.FindById(record->Metadata.Importer))
+				properties.Settings = types.FindStruct(importer->GetSettingsTypeName());
+			const bool material = record->Metadata.Type == AssetType::Material;
+			if (material || record->Metadata.Importer == SoundEffectImporter::Id)
+			{
+				const Status read = [&]() -> Status
+				{
+					ENGINE_TRY_ASSIGN(const std::string text, editor.GetVfs().ReadText(record->SourcePath));
+					if (material)
+					{
+						MaterialLoadReport report;
+						ENGINE_TRY_ASSIGN(const MaterialData data, MaterialFromText(text, types, report));
+						properties.Type = types.FindStruct<MaterialData>();
+						ENGINE_TRY_ASSIGN(properties.Values, properties.Type->ToJson(&data));
+					}
+					else
+					{
+						SoundEffectLoadReport report;
+						ENGINE_TRY_ASSIGN(const SoundEffectDescription data, SoundEffectFromText(text, types, report));
+						properties.Type = types.FindStruct<SoundEffectDescription>();
+						ENGINE_TRY_ASSIGN(properties.Values, properties.Type->ToJson(&data));
+					}
+					return {};
+				}();
+				if (!read)
+				{
+					properties.Type = nullptr;
+					properties.Error = read.error().GetMessageText();
+					// Logged once per failure, not once per re-read; the inspector shows it inline meanwhile.
+					if (!m_AssetProperties || m_AssetProperties->Asset != asset || m_AssetProperties->Error != properties.Error)
+						ENGINE_WARN("InspectorPanel: cannot read the properties of '{}': {}", record->SourcePath.ToString(), read.error().ToString());
+				}
+			}
+		}
+		m_AssetProperties = std::move(properties);
+		return *m_AssetProperties;
 	}
 
 	Status InspectorPanel::Draw(EditorPanelContext& context)
 	{
 		EditorContext& editor = context.Editor;
+		const AssetHandle asset = editor.GetUiState().GetSelectedAsset();
+		const SceneTarget sceneTarget = editor.GetSelectionTarget();
+		Scene* scene = sceneTarget == SceneTarget::Play ? (editor.GetPlay().GetSession() == nullptr ? nullptr : &editor.GetPlay().GetSession()->GetScene())
+			: editor.HasScene()                         ? &editor.GetScene()
+														: nullptr;
+		// Ids missing from the target scene (destroyed since the last safe point) are skipped; the others stay inspectable.
+		std::vector<UUID> selection;
+		if (scene != nullptr)
+		{
+			for (const UUID id : editor.GetSelection())
+			{
+				if (scene->FindEntityByID(id).IsValid())
+					selection.push_back(id);
+			}
+		}
+		const std::string ownerIdentity = Utils::InspectorOwnerIdentity(context, asset.IsValid(), sceneTarget);
+		if (m_OwnerIdentity != ownerIdentity)
+		{
+			CancelEdit(context);
+			m_OwnerIdentity = ownerIdentity;
+			m_Error.clear();
+		}
+		if (selection != m_ErrorSelection || asset != m_ErrorAsset)
+		{
+			// An error describes the inspected objects; it does not follow the user to another selection.
+			m_Error.clear();
+			m_ErrorSelection = selection;
+			m_ErrorAsset = asset;
+		}
+		// Results arrive after the selection check, so a failure stays visible even when the selection changed meanwhile.
 		for (auto ticket = m_Tickets.begin(); ticket != m_Tickets.end();)
 		{
 			auto result = context.Actions.TakeResult(*ticket);
@@ -226,30 +421,31 @@ namespace Engine {
 					ReportFailure(result.error());
 				else if (!**result)
 					ReportFailure((**result).error());
+				else
+					m_Error.clear();
 				ticket = m_Tickets.erase(ticket);
 			}
 			else
 				++ticket;
 		}
-		const std::vector<UUID> selection(editor.GetSelection().begin(), editor.GetSelection().end());
-		const AssetHandle asset = editor.GetUiState().GetSelectedAsset();
-		const SceneTarget sceneTarget = editor.GetSelectionTarget();
-		const std::string ownerIdentity = Utils::InspectorOwnerIdentity(context, asset.IsValid(), sceneTarget);
-		if (m_OwnerIdentity != ownerIdentity)
-		{
-			CancelEdit(context);
-			m_OwnerIdentity = ownerIdentity;
-		}
 		const bool escape = ImGui::IsKeyPressed(ImGuiKey_Escape);
-		if (m_ActiveTarget && (editor.IsReadOnly() || escape || (!ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !m_CommitQueued) || m_ActiveTarget->Asset != asset || (m_ActiveTarget->Kind == InspectorTargetKind::Component && (m_ActiveTarget->Entities != selection || m_ActiveTarget->Target != sceneTarget))))
+		const bool focused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
+		const auto retargeted = [&selection, asset, sceneTarget](const InspectorEditTarget& target)
+		{
+			return target.Asset != asset || (target.Kind == InspectorTargetKind::Component && (target.Entities != selection || target.Target != sceneTarget));
+		};
+		if ((m_ActiveTarget || m_Pending)
+			&& (editor.IsReadOnly() || escape || (!focused && !m_CommitQueued) || (m_ActiveTarget && retargeted(*m_ActiveTarget)) || (m_Pending && retargeted(m_Pending->Target))))
 			CancelEdit(context);
-		if (!m_Error.empty())
-			ImGui::TextWrapped("%s", m_Error.c_str());
-		if (sceneTarget == SceneTarget::Play && !selection.empty())
-			ImGui::TextWrapped("Runtime values - Changes end when you stop play.");
+		if (!m_Error.empty() && Utils::EditorErrorNotice(m_Error))
+			m_Error.clear();
+		const bool runtime = sceneTarget == SceneTarget::Play && !selection.empty();
+		if (runtime)
+			Utils::EditorPlayNotice("Runtime values - Changes end when you stop play.");
 		if (editor.IsReadOnly())
 			ImGui::TextDisabled("Read only");
 		bool activeFieldDrawn = false;
+		bool pendingFieldDrawn = false;
 		auto queue = [this, &context](std::string_view method, const Json& params)
 		{
 			auto submitted = context.Actions.Submit(method, params);
@@ -258,27 +454,31 @@ namespace Engine {
 			else
 				ReportFailure(submitted.error());
 		};
-		auto drawField = [this, &context, &editor, &activeFieldDrawn, escape](const FieldInfo& field, Value value, InspectorEditTarget target,
-							 const ResolveContext& resolve, bool mixed, const ScriptFieldSchema* scriptSchema = nullptr)
+		auto drawField = [this, &context, &editor, &activeFieldDrawn, &pendingFieldDrawn, escape](const FieldInfo& field, Value value,
+							 InspectorEditTarget target, const ResolveContext& resolve, bool mixed, uint32_t mixedComponents,
+							 const ScriptFieldSchema* scriptSchema = nullptr)
 		{
 			if (field.GetMeta().Hidden)
 				return;
-			const bool active = m_ActiveTarget && m_ActiveTarget->Kind == target.Kind && m_ActiveTarget->Component == target.Component
-				&& m_ActiveTarget->FieldPath == target.FieldPath;
+			const bool active = m_ActiveTarget && Utils::IsSameInspectorField(*m_ActiveTarget, target);
+			const bool pending = !active && m_Pending && Utils::IsSameInspectorField(m_Pending->Target, target);
 			activeFieldDrawn |= active;
+			pendingFieldDrawn |= pending;
 			if (active && context.InspectorEdits.IsEditing())
 			{
 				auto preview = context.InspectorEdits.GetPreview();
 				if (preview)
 					value = std::move(*preview);
 			}
+			else if (pending && m_Pending->Changed)
+				value = m_Pending->Candidate;
 			// Selection and lifecycle identity prevent ImGui buffers from carrying over to replacement owners with the same UUID.
 			std::string path = std::to_string(static_cast<int>(target.Kind)) + ":" + target.Asset.ToString() + ":" + target.Component + "." + target.FieldPath;
 			for (const UUID id : target.Entities)
 				path += ":" + id.ToString();
 			path += target.Target == SceneTarget::Play ? ":Play" : ":Edit";
 			path += ":" + m_OwnerIdentity;
-			auto result = DrawReflectedValue(field, value, { .Types = editor.GetTypeRegistry(), .Resolve = resolve, .Path = std::move(path), .ReadOnly = editor.IsReadOnly(), .Mixed = mixed, .FindReferences = [&editor, addressedTarget = target.Target](const FieldInfo& referenceField, std::string_view query)
+			auto result = DrawReflectedValue(field, value, { .Types = editor.GetTypeRegistry(), .Resolve = resolve, .Path = std::move(path), .ReadOnly = editor.IsReadOnly(), .Mixed = mixed, .MixedComponents = mixedComponents == Utils::AllInspectorComponents ? 0u : mixedComponents, .FindReferences = [&editor, addressedTarget = target.Target](const FieldInfo& referenceField, std::string_view query)
 			{
 				return Utils::FindInspectorReferenceCandidates(editor, addressedTarget, referenceField, query);
 			},
@@ -292,37 +492,77 @@ namespace Engine {
 			{
 				ReportFailure(result.error());
 				if (active)
-					CancelEdit(context);
+					EndActiveEdit(context);
+				if (pending)
+					m_Pending.reset();
 				return;
 			}
-			if (escape || result->Cancelled || (active && !m_CommitQueued && !result->Active && !result->Activated && !result->Changed && !result->Committed))
+			if (escape || result->Cancelled)
 			{
 				CancelEdit(context);
 				return;
 			}
-			if ((result->Activated || result->Changed) && !active)
+			// A text entry that another item's activation released earlier in the frame applies its text after it stopped
+			// being active, without ImGui's deactivated-after-edit flag. That is a release all the same.
+			const bool released = result->Committed || (result->Changed && !result->Active);
+			if (active)
 			{
-				CancelEdit(context);
-				auto began = context.InspectorEdits.Begin(target);
-				if (!began)
+				if (!m_CommitQueued && !result->Active && !result->Activated && !result->Changed && !result->Committed)
 				{
-					ReportFailure(began.error());
+					EndActiveEdit(context);
 					return;
 				}
-				m_ActiveTarget = std::move(target);
-				activeFieldDrawn = true;
-			}
-			if (result->Changed && context.InspectorEdits.IsEditing())
-			{
-				auto previewed = context.InspectorEdits.Preview(value);
-				if (!previewed)
+				if (result->Changed && context.InspectorEdits.IsEditing())
 				{
-					ReportFailure(previewed.error());
-					return;
+					m_ActiveComponents |= result->ChangedComponents;
+					auto previewed = context.InspectorEdits.Preview(value, m_ActiveMixed ? m_ActiveComponents : 0);
+					if (!previewed)
+					{
+						ReportFailure(previewed.error());
+						return;
+					}
 				}
+				// Only the active field's release commits its gesture.
+				if (released && context.InspectorEdits.IsEditing())
+					m_CommitQueued = true;
+				return;
 			}
-			if (result->Committed && context.InspectorEdits.IsEditing())
-				m_CommitQueued = true;
+			if (pending)
+			{
+				if (result->Changed)
+				{
+					m_Pending->Candidate = value;
+					m_Pending->Changed = true;
+					m_Pending->Components |= result->ChangedComponents;
+				}
+				m_Pending->Committed |= released;
+				if (!result->Active && !result->Activated && !result->Changed && !result->Committed && !m_Pending->Changed)
+					m_Pending.reset();
+				return;
+			}
+			if (!result->Activated && !result->Changed)
+				return;
+			PendingEdit edit{ .Target = std::move(target), .Candidate = value, .Components = result->ChangedComponents, .Mixed = mixed, .Changed = result->Changed, .Committed = released };
+			if (m_ActiveTarget)
+			{
+				// The previous gesture still owns the controller: it was released this frame, or its field releases later in
+				// this frame. This one begins once that edit is committed or ended, so neither is lost.
+				m_Pending = std::move(edit);
+				pendingFieldDrawn = true;
+				return;
+			}
+			BeginPendingEdit(context, std::move(edit));
+			activeFieldDrawn |= m_ActiveTarget.has_value();
+		};
+		const auto finishFrame = [this, &context, &activeFieldDrawn, &pendingFieldDrawn]()
+		{
+			// A released edit waits for the safe point even when its field is not drawn (a collapsed header).
+			if (m_ActiveTarget && !activeFieldDrawn && !m_CommitQueued)
+				EndActiveEdit(context);
+			if (m_Pending && !pendingFieldDrawn)
+				m_Pending.reset();
+			if (!m_ActiveTarget && m_Pending)
+				BeginPendingEdit(context, *std::exchange(m_Pending, std::nullopt));
 		};
 		if (asset.IsValid())
 		{
@@ -339,6 +579,7 @@ namespace Engine {
 			ImGui::PopStyleColor();
 			ImGui::Spacing();
 			const TypeRegistry& types = editor.GetTypeRegistry();
+			const AssetProperties& properties = ReadAssetProperties(context, asset);
 			auto drawObject = [&drawField, &types, asset](const StructInfo& type, const Json& json, InspectorTargetKind kind)
 			{
 				const JsonReader reader(json);
@@ -350,65 +591,42 @@ namespace Engine {
 					auto value = ValueFromJson(JsonReader(*found), field->GetType());
 					if (value)
 						drawField(*field, std::move(*value), { .Kind = kind, .Asset = asset, .FieldPath = field->GetName() },
-							{ .Registry = &types, .OwnerType = &type, .OwnerJson = &reader, .Key = {} }, false);
+							{ .Registry = &types, .OwnerType = &type, .OwnerJson = &reader, .Key = {} }, false, 0u);
 				}
 			};
 			if (record->Metadata.Type == AssetType::Material || record->Metadata.Importer == SoundEffectImporter::Id)
 			{
 				Utils::EditorSectionHeading("Properties");
-				ENGINE_TRY_ASSIGN(std::string text, editor.GetVfs().ReadText(record->SourcePath));
-				if (record->Metadata.Type == AssetType::Material)
+				if (!properties.Error.empty())
 				{
-					MaterialLoadReport report;
-					ENGINE_TRY_ASSIGN(MaterialData material, MaterialFromText(text, types, report));
-					const StructInfo* type = types.FindStruct<MaterialData>();
-					ENGINE_TRY_ASSIGN(Json json, type->ToJson(&material));
-					drawObject(*type, json, InspectorTargetKind::AssetProperties);
+					ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.48f, 0.48f, 1.0f));
+					ImGui::TextWrapped("These properties cannot be read: %s", properties.Error.c_str());
+					ImGui::PopStyleColor();
+					ImGui::TextDisabled("Fix the file, or reimport it from Assets.");
 				}
-				else
-				{
-					SoundEffectLoadReport report;
-					ENGINE_TRY_ASSIGN(SoundEffectDescription sound, SoundEffectFromText(text, types, report));
-					const StructInfo* type = types.FindStruct<SoundEffectDescription>();
-					ENGINE_TRY_ASSIGN(Json json, type->ToJson(&sound));
-					drawObject(*type, json, InspectorTargetKind::AssetProperties);
-				}
+				else if (properties.Type != nullptr)
+					drawObject(*properties.Type, properties.Values, InspectorTargetKind::AssetProperties);
 			}
-			ImporterRegistry importers;
-			RegisterBuiltinImporters(importers);
-			if (const IAssetImporter* importer = importers.FindById(record->Metadata.Importer))
+			if (properties.Settings != nullptr && ImGui::CollapsingHeader("Import settings"))
 			{
-				const StructInfo* settings = types.FindStruct(importer->GetSettingsTypeName());
-				if (settings != nullptr && ImGui::CollapsingHeader("Import settings"))
-				{
-					ImGui::PushID("ImportSettings");
-					drawObject(*settings, record->Metadata.Settings.Get(), InspectorTargetKind::AssetImportSettings);
-					ImGui::PopID();
-				}
+				ImGui::PushID("ImportSettings");
+				drawObject(*properties.Settings, record->Metadata.Settings.Get(), InspectorTargetKind::AssetImportSettings);
+				ImGui::PopID();
 			}
-			if (m_ActiveTarget && !activeFieldDrawn)
-				CancelEdit(context);
+			finishFrame();
 			return {};
 		}
-		Scene* scene = sceneTarget == SceneTarget::Play ? (editor.GetPlay().GetSession() == nullptr ? nullptr : &editor.GetPlay().GetSession()->GetScene())
-			: editor.HasScene()                         ? &editor.GetScene()
-														: nullptr;
 		if (scene == nullptr || selection.empty())
 		{
 			CancelEdit(context);
 			Utils::EditorEmptyState("Nothing selected", "Select an object in the Hierarchy or a resource in Assets to view and edit its properties.");
 			return {};
 		}
-		for (const UUID id : selection)
-		{
-			if (!scene->FindEntityByID(id).IsValid())
-			{
-				CancelEdit(context);
-				return {};
-			}
-		}
 		Entity first = scene->FindEntityByID(selection.front());
 		const char* targetName = sceneTarget == SceneTarget::Play ? "Play" : "Edit";
+		// Runtime content carries the play accent, so transient edits never look like edit-scene ones (§5.6).
+		if (runtime)
+			Utils::BeginEditorPlayTint();
 		ImGui::BeginDisabled(editor.IsReadOnly());
 		if (selection.size() == 1)
 		{
@@ -563,14 +781,22 @@ namespace Engine {
 							};
 							const VariantValue initial = effective(attached, invalid);
 							bool mixed = false;
+							uint32_t mixedComponents = 0;
 							for (const UUID id : selection)
-								mixed |= effective(scene->FindEntityByID(id).GetComponent<ScriptComponent>(), invalid).Get() != initial.Get();
+							{
+								const VariantValue other = effective(scene->FindEntityByID(id).GetComponent<ScriptComponent>(), invalid);
+								if (other.Get() != initial.Get())
+								{
+									mixed = true;
+									mixedComponents |= Utils::InspectorComponentDifferences(Value::FromVariant(initial), Value::FromVariant(other));
+								}
+							}
 							if (invalid)
 								ImGui::TextWrapped("%s uses its default until its saved value is corrected.", Utils::EditorLabel(declaration.Name).c_str());
 							FieldInfo variant({ .Name = declaration.Name, .Description = (*descriptor)->GetDescription(), .Type = field->GetType().GetElement(), .Meta = declaration.Meta, .Accessor = {}, .Resolver = field->GetResolver() });
 							scriptResolve.Key = declaration.Name;
 							drawField(variant, Value::FromVariant(initial), { .Entities = selection, .Component = "Script", .FieldPath = "Fields[" + declaration.Name + "]", .Target = sceneTarget },
-								scriptResolve, mixed, &declaration);
+								scriptResolve, mixed, mixedComponents, &declaration);
 						}
 						for (const auto& [name, value] : attached.Fields)
 						{
@@ -584,12 +810,17 @@ namespace Engine {
 						if (!value)
 							continue;
 						bool mixed = false;
+						uint32_t mixedComponents = 0;
 						for (const UUID id : selection)
 						{
 							auto other = ComponentAccess::GetFieldValue(scene->FindEntityByID(id), component->GetName(), field->GetName());
-							mixed |= !other || *other != *value;
+							if (!other || *other != *value)
+							{
+								mixed = true;
+								mixedComponents |= other ? Utils::InspectorComponentDifferences(*value, *other) : Utils::AllInspectorComponents;
+							}
 						}
-						drawField(*field, std::move(*value), { .Entities = selection, .Component = component->GetName(), .FieldPath = field->GetName(), .Target = sceneTarget }, resolve, mixed);
+						drawField(*field, std::move(*value), { .Entities = selection, .Component = component->GetName(), .FieldPath = field->GetName(), .Target = sceneTarget }, resolve, mixed, mixedComponents);
 					}
 					if (selection.size() == 1 && first.HasComponent<PrefabLinkComponent>() && sceneTarget == SceneTarget::Edit)
 					{
@@ -691,8 +922,9 @@ namespace Engine {
 			ImGui::EndPopup();
 		}
 		ImGui::EndDisabled();
-		if (m_ActiveTarget && !activeFieldDrawn)
-			CancelEdit(context);
+		if (runtime)
+			Utils::EndEditorPlayTint();
+		finishFrame();
 		return {};
 	}
 

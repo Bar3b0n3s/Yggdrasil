@@ -247,7 +247,7 @@ namespace Engine {
 			ENGINE_CORE_ASSERT(variant < PrepassVariantCount, "prepass variant {} out of range", variant);
 			auto specification = MakeMeshPipelineSpecification(MakePrepassDescription(variant, picking), layouts, true, variant);
 			if (picking)
-				specification.Framebuffer.addColorFormat(nvrhi::Format::R32_UINT);
+				specification.Framebuffer.addColorFormat(EntityIdFormat);
 			return pipelines.CreateGraphicsPipeline(specification);
 		}
 

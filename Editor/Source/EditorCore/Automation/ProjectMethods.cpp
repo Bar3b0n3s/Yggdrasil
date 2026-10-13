@@ -1,12 +1,12 @@
 #include "EditorPCH.h"
 #include "EditorCore/Automation/ProjectMethods.h"
 
-#include "EditorCore/Autosave/Private/AutosaveRecoveryData.h"
 #include "EditorCore/Automation/EditorMethodContext.h"
 #include "EditorCore/Automation/Private/MethodSupport.h"
 #include "EditorCore/Automation/ProvenanceRecorder.h"
 #include "EditorCore/Automation/RecoveryMethods.h"
 #include "EditorCore/Automation/SceneMethods.h"
+#include "EditorCore/Autosave/Private/AutosaveRecoveryData.h"
 #include "EditorCore/Commands/ProjectSettingsCommand.h"
 #include "EditorCore/EditorContext.h"
 #include "EditorCore/Private/EditorFileError.h"

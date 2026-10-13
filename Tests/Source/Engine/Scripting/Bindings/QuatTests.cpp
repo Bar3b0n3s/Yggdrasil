@@ -8,7 +8,6 @@
 
 #include <string>
 #include <string_view>
-
 #include <vector>
 
 namespace Engine {
@@ -52,6 +51,9 @@ local halfway = Quat.Slerp(identity, quarter, 0.5)
 near(halfway:Rotate(vector.create(0, 0, -1)), vector.create(-0.7071067811865475, 0, -0.7071067811865475))
 local look = Quat.LookRotation(vector.create(1, 0, 0))
 near(look * vector.create(0, 0, -1), vector.create(1, 0, 0))
+-- Component-wise value equality, never userdata identity; q and -q compare unequal.
+assert(Quat.New(0, 0, 0, 1) == Quat.Identity() and Quat.New(2, 3, 4, 5) == q)
+assert(Quat.New(0, 0, 0, -1) ~= Quat.Identity())
 return true
 )");
 			const auto coverage = fixture.GetApi().GetCoverage(mode);
@@ -71,7 +73,7 @@ return true
 					CHECK(counter.Calls > 0);
 				++members;
 			}
-			CHECK(members == 15);
+			CHECK(members == 16);
 			const auto snapshot = fixture.GetApi().GetCoverage(mode);
 			REQUIRE(snapshot);
 			snapshots.push_back(*snapshot);

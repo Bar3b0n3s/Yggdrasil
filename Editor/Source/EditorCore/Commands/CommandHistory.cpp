@@ -151,6 +151,8 @@ namespace Engine {
 	Result<size_t> CommandHistory::Undo(EditorContext& context, size_t steps)
 	{
 		ENGINE_ASSERT(steps >= 1, "CommandHistory::Undo needs at least one step");
+		// Undo rewrites the scene like any command: a test run's lease and the agent mutation policy apply to it too.
+		ENGINE_TRY(context.CheckMutationPermission());
 		State& state = *m_State;
 		size_t undone = 0;
 		while (undone < steps && state.Position > 0)
@@ -170,6 +172,7 @@ namespace Engine {
 	Result<size_t> CommandHistory::Redo(EditorContext& context, size_t steps)
 	{
 		ENGINE_ASSERT(steps >= 1, "CommandHistory::Redo needs at least one step");
+		ENGINE_TRY(context.CheckMutationPermission());
 		State& state = *m_State;
 		size_t redone = 0;
 		while (redone < steps && state.Position < state.Records.size())

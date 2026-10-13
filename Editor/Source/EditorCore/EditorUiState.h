@@ -43,8 +43,12 @@ namespace Engine {
 		void SetSelectedAsset(AssetHandle asset);
 		// Called exactly once after constructing a complete UI frame, including a forced headless screenshot frame.
 		void CompleteFrame();
-		// Reset docking/panel defaults on explicit user request only, never every frame; ProjectLauncher open iff no project.
+		// Reset docking/panel defaults on explicit user request, or when the loaded workspace layout (imgui.ini) holds no
+		// saved panel set; never every frame. ProjectLauncher open iff no project.
 		void ResetLayout(bool hasProject);
+		// Restores a saved open-panel set (the workspace layout's): unknown values are dropped, the order stays stable and
+		// duplicates collapse; ProjectLauncher is open iff no project, whatever the saved set says.
+		void SetOpenPanels(std::span<const EditorPanel> panels, bool hasProject);
 	private:
 		std::vector<EditorPanel> m_OpenPanels{};
 		AssetHandle m_SelectedAsset{};

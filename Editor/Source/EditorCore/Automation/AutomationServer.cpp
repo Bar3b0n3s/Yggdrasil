@@ -14,6 +14,7 @@
 #include "Engine/Automation/Protocol/ResultOffload.h"
 #include "Engine/Automation/Protocol/SessionFile.h"
 #include "Engine/Core/FileSystem.h"
+#include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Core/Log.h"
 #include "Engine/Core/VfsPath.h"
 #include "Engine/Core/VirtualFileSystem.h"
@@ -33,10 +34,10 @@
 // callers (numbered here) must never collide, so the server gives every client its own id and maps TCP connections onto
 // them.
 //
-// Offloaded results. A writable project keeps them in project://Library/Automation/Out/ (gitignored, Â§2.1); without a
+// Offloaded results. A writable project keeps them in project://Library/Automation/Out/ (gitignored, §2.1); without a
 // project, and for read-only editors, which write nothing under the project, they go to user://Automation/Out/. The
 // response names the file's absolute native path (ADR 0008 decision 22): the project root is known, and user://Automation is
-// the parent of the sessions directory (<UserData>/<AppName>/Automation, Â§13.2). A server without a sessions directory (an
+// the parent of the sessions directory (<UserData>/<AppName>/Automation, §13.2). A server without a sessions directory (an
 // in-process server of the Tests) names the user:// path instead, the only one it knows.
 //
 // Offloaded results are transient: an agent reads one right after its response. So that the directories do not grow
@@ -85,6 +86,25 @@ namespace Engine {
 			if (parsed.ec != std::errc() || parsed.ptr == fileName.data() || *parsed.ptr != '-')
 				return std::nullopt;
 			return processId;
+		}
+
+		// Whether a request that is not flagged Mutates would still drop the open scene's unsaved changes and its undo
+		// history: scene.open {discardChanges} and session.shutdown {force} without save. Only those booleans are read;
+		// malformed params are left to the handler's validation.
+		[[nodiscard]] static bool DiscardsUnsavedScene(const EditorContext& editor, std::string_view method, const Json& params)
+		{
+			if (!editor.HasScene() || !editor.IsSceneDirty())
+				return false;
+			const JsonReader reader(params);
+			const auto flag = [&reader](std::string_view name)
+			{
+				return reader.ReadMember<bool>(name).value_or(false);
+			};
+			if (method == "scene.open")
+				return flag("discardChanges");
+			if (method == "session.shutdown")
+				return flag("force") && !flag("save");
+			return false;
 		}
 
 		// Removes the files of `directory` whose names `selects` accepts, logging failures (a file another process removed
@@ -152,7 +172,7 @@ namespace Engine {
 		const MethodContext* DryRunRequest = nullptr;
 
 		// Removes `client` like a disconnect: its pending operations are cancelled and one AutomationClientDisconnected
-		// event is appended (Â§13.2 "Disconnect").
+		// event is appended (§13.2 "Disconnect").
 		void RemoveClient(ClientId client, EditorContext& editor);
 		// Writes the session file when the project it names changed since the last successful write (or it was never
 		// written). A failed write is tried again at most once per specification.SessionFileRetryInterval and reported once per project:
@@ -184,6 +204,7 @@ namespace Engine {
 		if (m_State->Transport != nullptr)
 			m_State->Transport->Stop();
 		m_State->Calls.reset();
+		m_Editor->GetPlay().ClearPhaseMarker(m_Watchdog);
 		m_Editor->SetAgentMutationsDenied(m_State->PreviousMutationPolicy);
 		m_State->Transport.reset();
 		m_State->RemoveOwnOffloadFiles(m_Editor->GetVfs());
@@ -240,6 +261,8 @@ namespace Engine {
 			return DispatcherRequestRejection{ .Code = RpcErrorCode::Busy, .Failure = Error(ErrorCode::InvalidState, "agent automation is paused") };
 		} });
 
+		// §13.2: a stalled play session's Busy answer names the running gameplay script entry.
+		editor.GetPlay().SetPhaseMarker(server->m_Watchdog);
 		ENGINE_TRY(server->SetPreferenceListening(false));
 		return server;
 	}
@@ -450,20 +473,15 @@ namespace Engine {
 	Status AutomationServer::AdmitRequest(MethodContext& context)
 	{
 		const MethodSpecification& specification = context.GetMethod().Specification;
-		if (m_Editor->GetPlay().IsTestRunActive())
-		{
-			// A test session is published for observation only. Some unflagged methods (play, eval, open, refresh,
-			// selection and validation fixes) still mutate live host state, so admission is an explicit read subset.
-			constexpr std::string_view Reads[] = { "session.hello", "session.info", "rpc.discover", "docs.get",
-				"scene.tree", "scene.query", "scene.get", "entity.get", "entity.bounds", "log.read", "events.read",
-				"play.state", "physics.bodyInfo", "audio.stats", "stats.get", "script.errors", "viewport.screenshot", "editor.screenshot" };
-			if (std::ranges::find(Reads, specification.Name) == std::end(Reads) || context.IsDryRun())
-				return MakeError(ErrorCode::InvalidState, "a test run owns the editor; '{}' is unavailable until it finishes", specification.Name);
-		}
+		// The rule UI actions share (EditorActions): while a test run owns the editor, only its observation subset.
+		ENGINE_TRY(m_Editor->CheckTestRunAdmission(specification.Name, context.IsDryRun()));
 		if (specification.Mutates && !context.IsDryRun() && m_Editor->IsReadOnly())
 			return MakeError(ErrorCode::PermissionDenied, "the editor is read-only (--read-only): '{}' changes the project", specification.Name);
 		if (specification.Mutates && !context.IsDryRun() && m_State->Policy.DenyMutations)
 			return MakeError(ErrorCode::PermissionDenied, "agent mutations are disabled: '{}' changes the project", specification.Name);
+		// Discarding the human's unsaved edits writes no file and runs no command, so no write boundary sees it.
+		if (!context.IsDryRun() && m_State->Policy.DenyMutations && Utils::DiscardsUnsavedScene(*m_Editor, specification.Name, context.GetParams()))
+			return MakeError(ErrorCode::PermissionDenied, "agent mutations are disabled: '{}' would discard the open scene's unsaved changes", specification.Name);
 
 		if (const std::optional<uint64_t> expected = context.GetOptions().IfRevision)
 		{
@@ -557,8 +575,8 @@ namespace Engine {
 
 	Result<std::string> AutomationServer::WriteOutputFile(std::string_view extension, std::span<const std::byte> bytes)
 	{
-		if (m_State->Policy.DenyMutations && m_Editor->GetCommandOrigin() == CommandOrigin::Agent && !m_Editor->IsDryRun())
-			return MakeError(ErrorCode::PermissionDenied, "agent mutations are disabled: cannot write a method output file");
+		// Method output (screenshots, test reports) is not project content: like offloaded results, it stays available to
+		// agents whose mutations are denied (EditorAutomationPolicy).
 		ENGINE_ASSERT(!extension.empty() && std::ranges::all_of(extension, [](char character)
 		{
 			return (character >= 'a' && character <= 'z') || (character >= '0' && character <= '9');
@@ -577,7 +595,7 @@ namespace Engine {
 		const auto record = Clients.find(client);
 		if (record == Clients.end())
 			return;
-		// Cancelling the client's pending operations first lets a running play.step release what it holds (Â§13.2); then the
+		// Cancelling the client's pending operations first lets a running play.step release what it holds (§13.2); then the
 		// play controller releases the client's lockstep and pauses play (M7).
 		Calls->RemoveClient(client);
 		editor.GetPlay().OnClientDisconnected(client);

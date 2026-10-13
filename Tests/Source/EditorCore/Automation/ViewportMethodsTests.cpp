@@ -3,9 +3,13 @@
 
 #include "EditorCore/Automation/Private/M10MethodFixture.h"
 #include "EditorCore/Commands/SceneEdit.h"
+#include "EditorCore/EditorContext.h"
+#include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Scene/Entity.h"
 
 #include <limits>
+#include <optional>
+#include <string>
 
 namespace Engine {
 
@@ -83,6 +87,114 @@ namespace Engine {
 			CHECK(setup.Fixture.GetEditor().GetRevision() == revision);
 			CHECK(setup.Fixture.GetEditor().GetHistory().GetCurrentSequence() == history);
 			CHECK_FALSE(setup.Fixture.GetEditor().IsSceneDirty());
+		}
+
+		TEST_CASE("ViewportMethods: camera reads and sets the projection, field of view, orthographic size and clip range")
+		{
+			Test::M10MethodFixture setup;
+			const auto initial = setup.Call("viewport.camera");
+			REQUIRE(initial.has_value());
+			CHECK((*initial)["projection"] == "Perspective");
+			CHECK((*initial)["verticalFov"] == 60);
+			CHECK(JsonReader((*initial)["nearClip"]).ReadFloat().value_or(0.0f) == 0.1f);
+			CHECK((*initial)["farClip"] == 1000);
+			// What the scene view's Orthographic overlay toggle does, observed and reverted through automation.
+			EditorViewportState& state = setup.Fixture.GetEditor().GetViewportState();
+			ExplicitRenderCamera toggled = state.GetCamera();
+			toggled.Projection = RenderProjection::Orthographic;
+			REQUIRE(state.SetCamera(toggled).has_value());
+			CHECK((*setup.Call("viewport.camera"))["projection"] == "Orthographic");
+			const auto changed = setup.Call("viewport.camera", Json{ { "projection", "perspective" }, { "verticalFov", 45 }, { "orthographicSize", 4 }, { "nearClip", 0.5 }, { "farClip", 250 } });
+			REQUIRE_MESSAGE(changed.has_value(), (changed ? std::string() : changed.error().ToString()));
+			CHECK((*changed)["projection"] == "Perspective");
+			CHECK((*changed)["verticalFov"] == 45);
+			CHECK((*changed)["orthographicSize"] == 4);
+			CHECK((*changed)["nearClip"] == 0.5);
+			CHECK((*changed)["farClip"] == 250);
+			CHECK((*changed)["position"] == (*initial)["position"]);
+			CHECK(state.GetCamera().Projection == RenderProjection::Perspective);
+			CHECK(state.GetCamera().VerticalFov == 45.0f);
+			CHECK(state.GetCamera().FarClip == 250.0f);
+			// Invalid members are located and change nothing.
+			for (const auto& [params, pointer] : { std::pair{ Json{ { "verticalFov", 180 } }, "/verticalFov" }, std::pair{ Json{ { "orthographicSize", 0 } }, "/orthographicSize" },
+					 std::pair{ Json{ { "nearClip", 300 } }, "/nearClip" }, std::pair{ Json{ { "farClip", 0.25 } }, "/farClip" } })
+			{
+				CAPTURE(pointer);
+				const auto refused = setup.Call("viewport.camera", params);
+				REQUIRE_FALSE(refused.has_value());
+				CHECK(refused.error().GetCode() == ErrorCode::InvalidArgument);
+				CHECK(refused.error().ToString().contains(pointer));
+				CHECK(setup.Call("viewport.camera")->dump() == changed->dump());
+			}
+		}
+
+		TEST_CASE("ViewportMethods: setOptions reads and sets the scene debug view and the game resolution")
+		{
+			Test::M10MethodFixture setup;
+			EditorViewportState& state = setup.Fixture.GetEditor().GetViewportState();
+			const auto initial = setup.Call("viewport.setOptions");
+			REQUIRE(initial.has_value());
+			CHECK((*initial)["debugView"] == "Lit");
+			CHECK((*initial)["gameResolution"] == Json::array({ 0, 0 }));
+			// The panel's dropdowns change the same state the method reports.
+			REQUIRE(state.SetDebugView(RenderDebugView::Overdraw).has_value());
+			REQUIRE(state.SetGameResolution({ 640, 360 }).has_value());
+			const auto observed = setup.Call("viewport.setOptions");
+			CHECK((*observed)["debugView"] == "Overdraw");
+			CHECK((*observed)["gameResolution"] == Json::array({ 640, 360 }));
+			const auto changed = setup.Call("viewport.setOptions", Json{ { "debugView", "normals" }, { "gameResolution", { 1920, 1080 } } });
+			REQUIRE_MESSAGE(changed.has_value(), (changed ? std::string() : changed.error().ToString()));
+			CHECK((*changed)["debugView"] == "Normals");
+			CHECK((*changed)["gameResolution"] == Json::array({ 1920, 1080 }));
+			CHECK(state.GetDebugView() == RenderDebugView::Normals);
+			CHECK(state.GetGameResolution() == glm::uvec2(1920, 1080));
+			REQUIRE(setup.Call("viewport.setOptions", Json{ { "gameResolution", { 0, 0 } } }).has_value());
+			CHECK(state.GetGameResolution() == glm::uvec2(0));
+			// A failing member leaves every member, the valid ones included, unchanged.
+			for (const auto& [params, pointer] : { std::pair{ Json{ { "grid", false }, { "debugView", "Sepia" } }, "/debugView" },
+					 std::pair{ Json{ { "grid", false }, { "gameResolution", { 0, 720 } } }, "/gameResolution" },
+					 std::pair{ Json{ { "grid", false }, { "gameResolution", { 8193, 720 } } }, "/gameResolution" },
+					 std::pair{ Json{ { "grid", false }, { "gameResolution", { 1280 } } }, "/gameResolution" } })
+			{
+				CAPTURE(pointer);
+				const auto refused = setup.Call("viewport.setOptions", params);
+				REQUIRE_FALSE(refused.has_value());
+				CHECK(refused.error().GetCode() == ErrorCode::InvalidArgument);
+				CHECK(refused.error().ToString().contains(pointer));
+				CHECK(state.GetOptions().Grid);
+				CHECK(state.GetDebugView() == RenderDebugView::Normals);
+				CHECK(state.GetGameResolution() == glm::uvec2(0));
+			}
+		}
+
+		TEST_CASE("ViewportMethods: a camera inside the renderer's degenerate up band is refused")
+		{
+			Test::M10MethodFixture setup;
+			const auto before = setup.Call("viewport.camera");
+			const auto refused = setup.Call("viewport.camera", Json{ { "position", { 0.000005, 10, 0 } }, { "target", { 0, 0, 0 } } });
+			REQUIRE_FALSE(refused.has_value());
+			CHECK(refused.error().GetCode() == ErrorCode::InvalidArgument);
+			CHECK(refused.error().ToString().contains("/target"));
+			CHECK(setup.Call("viewport.camera")->dump() == before->dump());
+		}
+
+		TEST_CASE("ViewportMethods: a refused pose is located at the pose even when projection members follow it")
+		{
+			Test::M10MethodFixture setup;
+			const auto before = setup.Call("viewport.camera");
+			REQUIRE(before.has_value());
+			// The method's own orthographic example, made exactly vertical: the pose is wrong, never the size or the clip range.
+			const Json vertical{ { "position", { 0, 20, 0 } }, { "target", { 0, 0, 0 } }, { "projection", "Orthographic" }, { "orthographicSize", 8 },
+				{ "nearClip", 0.5 }, { "farClip", 100 } };
+			const auto refused = setup.Call("viewport.camera", vertical);
+			REQUIRE_FALSE(refused.has_value());
+			CHECK(refused.error().GetCode() == ErrorCode::InvalidArgument);
+			CHECK(refused.error().GetLocation().JsonPointer == std::optional<std::string>("/target"));
+			// Without a target the position is the member at fault; the current target stays.
+			const auto byPosition = setup.Call("viewport.camera", Json{ { "position", (*before)["target"] }, { "verticalFov", 40 } });
+			REQUIRE_FALSE(byPosition.has_value());
+			CHECK(byPosition.error().GetLocation().JsonPointer == std::optional<std::string>("/position"));
+			CHECK(setup.Call("viewport.camera")->dump() == before->dump());
 		}
 
 		TEST_CASE("ViewportMethods: nonfinite camera and empty frame requests return located errors")

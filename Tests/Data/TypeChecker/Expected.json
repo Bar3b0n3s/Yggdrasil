@@ -13,30 +13,126 @@
 	},
 	{
 		"Path": "Errors/ComponentOverload.luau",
-		"Clean": false
+		"Clean": false,
+		"Diagnostics": [
+			{
+				"Code": "SCRIPT_TYPE_ERROR",
+				"File": "Assets/Errors/ComponentOverload.luau",
+				"Range": [
+					3,
+					2,
+					3,
+					41
+				],
+				"MessageContains": "Expected this to be 'Transform?', but got 'RigidBody?'"
+			}
+		]
 	},
 	{
 		"Path": "Errors/GenericMethod.luau",
-		"Clean": false
+		"Clean": false,
+		"Diagnostics": [
+			{
+				"Code": "SCRIPT_TYPE_ERROR",
+				"File": "Assets/Errors/GenericMethod.luau",
+				"Range": [
+					3,
+					2,
+					3,
+					33
+				],
+				"MessageContains": "Expected this to be 'string', but got 'number'"
+			}
+		]
 	},
 	{
 		"Path": "Errors/Optional.luau",
-		"Clean": false
+		"Clean": false,
+		"Diagnostics": [
+			{
+				"Code": "SCRIPT_TYPE_ERROR",
+				"File": "Assets/Errors/Optional.luau",
+				"Range": [
+					2,
+					1,
+					5,
+					4
+				],
+				"MessageContains": "Consider annotating the return with number"
+			},
+			{
+				"Code": "SCRIPT_TYPE_ERROR",
+				"File": "Assets/Errors/Optional.luau",
+				"Range": [
+					2,
+					1,
+					5,
+					4
+				],
+				"MessageContains": "Operator '-' could not be applied to operands of types vector? and vector?"
+			},
+			{
+				"Code": "SCRIPT_TYPE_ERROR",
+				"File": "Assets/Errors/Optional.luau",
+				"Range": [
+					4,
+					9,
+					4,
+					19
+				],
+				"MessageContains": "Operator '-' could not be applied to operands of types vector? and vector?"
+			}
+		]
+	},
+	{
+		"Path": "Errors/OptionalArgument.luau",
+		"Clean": false,
+		"Diagnostics": [
+			{
+				"Code": "SCRIPT_TYPE_ERROR",
+				"File": "Assets/Errors/OptionalArgument.luau",
+				"Range": [
+					7,
+					16,
+					7,
+					19
+				],
+				"MessageContains": "Expected this to be 'vector', but got 'vector?'"
+			}
+		]
 	},
 	{
 		"Path": "Errors/Sealed.luau",
-		"Clean": false
+		"Clean": false,
+		"Diagnostics": [
+			{
+				"Code": "SCRIPT_TYPE_ERROR",
+				"File": "Assets/Errors/Sealed.luau",
+				"Range": [
+					6,
+					1,
+					6,
+					12
+				],
+				"MessageContains": "Cannot add property 'Added' to table"
+			}
+		]
 	},
 	{
 		"Path": "Errors/Type.luau",
 		"Clean": false,
-		"Ranges": [
-			[
-				1,
-				23,
-				1,
-				28
-			]
+		"Diagnostics": [
+			{
+				"Code": "SCRIPT_TYPE_ERROR",
+				"File": "Assets/Errors/Type.luau",
+				"Range": [
+					1,
+					23,
+					1,
+					28
+				],
+				"MessageContains": "Expected this to be 'number', but got 'string'"
+			}
 		]
 	},
 	{

@@ -34,8 +34,13 @@ namespace Engine {
 		// Environment variables set for the child on top of the parent's environment, in order (a later entry for the same
 		// name wins); the parent's other variables are inherited unchanged. Names and values are UTF-8; an empty value sets
 		// the variable to the empty string. Names compare as the host does (case-insensitively on Windows). Process tests
-		// use it for the environment overrides of later milestones (ENGINE_VULKAN_LOADER=missing, ENGINE_GPU, §8.1).
+		// use it for the engine's environment overrides (ENGINE_VULKAN_LOADER=missing, ENGINE_GPU, §8.1).
 		std::vector<std::pair<std::string, std::string>> Environment{};
+		// True: standard output and standard error are captured in full (see Process). False: both go to the null device
+		// and nothing is kept, so a long-lived child that writes output (an external source editor) never grows this
+		// process's memory; Wait then returns empty text and WaitForOutput fails with InvalidState. Only such a child can
+		// be detached (Process::Detach).
+		bool CaptureOutput = true;
 	};
 
 	struct ProcessResult
@@ -44,18 +49,20 @@ namespace Engine {
 		// ended by an unhandled exception reports the exception code (0xC0000005 for an access violation) as an int. A
 		// child ended by Kill, by Run's timeout or by destroying its Process reports 137 on every host (128 + SIGKILL).
 		int ExitCode = 0;
-		std::string StandardOutput{}; // everything the child wrote, in full
+		std::string StandardOutput{}; // everything the child wrote, in full (empty when the output is not captured)
 		std::string StandardError{};
 	};
 
 	// A child process. Its standard input is the null device; its standard output and standard error are captured in
 	// full by reader threads that run until the child closes them, so a child that fills one pipe while the parent waits
-	// for the other can never block. The child inherits no other handle or descriptor of the parent, so pipes created
-	// concurrently for another child never stay open in this one.
+	// for the other can never block (unless ProcessSpecification::CaptureOutput is false: both then go to the null
+	// device). The child inherits no other handle or descriptor of the parent, so pipes created concurrently for another
+	// child never stay open in this one.
 	//
 	// A movable value; a moved-from Process may only be destroyed or assigned to. One thread at a time per Process;
 	// different Processes may be used from different threads. Destroying a Process whose child still runs kills the child
-	// and waits for it, so no child outlives its Process (a killed lock holder releases its lock, §4.13).
+	// and waits for it, so no child outlives its Process (a killed lock holder releases its lock, §4.13), unless the
+	// child was detached (Detach): a program the user works in, such as an external source editor, survives its parent.
 	class Process
 	{
 	public:
@@ -89,12 +96,22 @@ namespace Engine {
 
 		// Waits up to `timeout` until the captured `stream` contains `text` (output written before this call counts), for
 		// example a child announcing that it holds a lock. Errors: Timeout; NotFound when the stream reached end of file
-		// without it (the child closed it or exited); InvalidState after a successful Wait.
+		// without it (the child closed it or exited); InvalidState after a successful Wait or when the output is not
+		// captured (ProcessSpecification::CaptureOutput false).
 		[[nodiscard]] Status WaitForOutput(ProcessStream stream, std::string_view text, std::chrono::milliseconds timeout);
 
 		// Ends the child forcibly (TerminateProcess, SIGKILL) and waits until it is gone; the captured output stays readable
 		// through Wait, whose exit code is then the forced one. Succeeds when the child had already exited. Errors: Io.
 		[[nodiscard]] Status Kill();
+
+		// Releases the child without ending it: this Process then is like a moved-from one (it may only be destroyed or
+		// assigned to), destroying it neither kills nor waits for the child, and the child keeps running after this process
+		// exits. A child that already exited is released the same way. Only a child spawned with CaptureOutput false can be
+		// detached, since closing its output pipes would make its next write fail (and end it with SIGPIPE on POSIX).
+		// On POSIX nothing reaps a detached child, so one that exits before this process stays a zombie until this process
+		// exits (it is reparented then); hosts therefore detach only when they stop supervising, at shutdown. Errors:
+		// InvalidState when the output is captured (the Process keeps its child then).
+		[[nodiscard]] Status Detach();
 
 		// The current process's ID.
 		[[nodiscard]] static uint32_t GetCurrentId();

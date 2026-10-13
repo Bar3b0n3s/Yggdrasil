@@ -10,6 +10,9 @@
 
 #include <array>
 #include <limits>
+#include <optional>
+#include <string>
+#include <string_view>
 
 namespace Engine {
 
@@ -55,6 +58,55 @@ namespace Engine {
 
 	TEST_SUITE("Asset")
 	{
+		TEST_CASE("ReplayData: recorded parameters in the header form read back unchanged from text and cooked replays")
+		{
+			// 0.123456789 and 1/3 are not floats: a recording that started from them would replay with other values.
+			const Json raw = { { "ratio", 0.123456789 }, { "third", 1.0 / 3.0 }, { "level", 123456789012 }, { "nested", Json{ { "half", 0.5 } } } };
+			const auto canonical = CanonicalizeReplayParameters(raw);
+			REQUIRE_MESSAGE(canonical, (canonical ? "" : canonical.error().ToString()));
+			const auto number = [&canonical](std::string_view name)
+			{
+				const auto member = JsonReader(*canonical).GetMember(name);
+				REQUIRE(member);
+				const auto value = member->ReadDouble();
+				REQUIRE(value);
+				return *value;
+			};
+			// Floats are stored as float (§6): each reads back as the float nearest the requested value.
+			CHECK(static_cast<float>(number("ratio")) == 0.123456789f);
+			CHECK(number("ratio") != 0.123456789);
+			CHECK(static_cast<float>(number("third")) == 1.0f / 3.0f);
+			CHECK(JsonReader(*canonical).ReadMember<uint64_t>("level").value_or(0) == 123456789012u);
+			// The members keep their order; each float reads back as its shortest float text.
+			CHECK(*canonical == JsonReader::Parse(R"({"ratio":0.12345679,"third":0.33333334,"level":123456789012,"nested":{"half":0.5}})").value_or(Json()));
+			const auto again = CanonicalizeReplayParameters(*canonical);
+			REQUIRE(again);
+			CHECK(*again == *canonical);
+
+			ReplayDocument d = Document();
+			d.Header.Parameters.Set(*canonical);
+			const auto text = ReplayToText(d);
+			REQUIRE(text);
+			ReplayLoadReport report;
+			const auto loaded = ReplayFromText(*text, report, true);
+			REQUIRE_MESSAGE(loaded, (loaded ? "" : loaded.error().ToString()));
+			CHECK(loaded->Header.Parameters.Get() == *canonical);
+			const auto cooked = CookReplay(d, {}, 1);
+			REQUIRE_MESSAGE(cooked, (cooked ? "" : cooked.error().ToString()));
+			const auto decoded = LoadCookedReplay(*cooked);
+			REQUIRE_MESSAGE(decoded, (decoded ? "" : decoded.error().ToString()));
+			CHECK((*decoded)->Header.Parameters.Get() == *canonical);
+
+			// A value the format cannot store fails when the recording starts, located at its member.
+			const auto huge = CanonicalizeReplayParameters(Json{ { "big", 1e39 } }, "/parameters");
+			REQUIRE_FALSE(huge);
+			CHECK(huge.error().GetCode() == ErrorCode::Validation);
+			CHECK(huge.error().GetLocation().JsonPointer == std::optional<std::string>("/parameters/big"));
+			const auto array = CanonicalizeReplayParameters(Json::array({ 1 }), "/parameters");
+			REQUIRE_FALSE(array);
+			CHECK(array.error().GetLocation().JsonPointer == std::optional<std::string>("/parameters"));
+		}
+
 		TEST_CASE("ReplayData: canonical source round trips every input event and header parameter")
 		{
 			const auto d = Document();

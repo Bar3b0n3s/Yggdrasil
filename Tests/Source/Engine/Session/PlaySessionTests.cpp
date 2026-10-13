@@ -11,12 +11,15 @@
 #include "Engine/Scene/RenderExtraction.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/SceneSerializer.h"
+#include "Engine/Scripting/ScriptEngine.h"
 #include "Support/PhysicsTestScene.h"
 #include "Support/SceneTestFixture.h"
+#include "Support/ScriptTestFixture.h"
 
 #include <iterator>
 #include <limits>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -81,6 +84,19 @@ namespace Engine {
 				const auto pending = scene.GetRegistry().view<PendingDestroyTag>();
 				return static_cast<size_t>(std::distance(pending.begin(), pending.end()));
 			}
+		};
+
+		// An application host whose script environment reports its own window, as the editor's borrowed window does.
+		class WindowHost final : public IPlaySessionHost
+		{
+		public:
+			[[nodiscard]] ScriptEnvironment GetScriptEnvironment() const override { return Environment; }
+			[[nodiscard]] Status SetScriptCursorMode(CursorMode /*mode*/) override { return MakeError(ErrorCode::Unsupported, "the test host has no cursor"); }
+			[[nodiscard]] CursorMode GetScriptCursorMode() const override { return CursorMode::Normal; }
+			void OnScriptError(const ScriptError& /*error*/, bool /*fatal*/) override {}
+			void OnScriptPhase(std::string_view /*script*/, std::string_view /*callback*/) override {}
+
+			ScriptEnvironment Environment{ .IsEditor = true, .IsHeadless = false, .IsFocused = true, .Platform = "Test", .Version = "1" };
 		};
 
 		// The specification of a session over the fixture's registry.
@@ -295,6 +311,35 @@ namespace Engine {
 			const Result<Scope<PlaySession>> tooMany = PlaySession::CreateFromScene(specification, fixture.GetScene());
 			REQUIRE_FALSE(tooMany.has_value());
 			CHECK(tooMany.error().GetCode() == ErrorCode::InvalidState);
+		}
+
+		TEST_CASE("PlaySession: entities destroyed in a tick count toward twice the cap until the flush")
+		{
+			Test::SceneTestFixture fixture;
+			PopulateScene(fixture.GetScene()); // 3 entities
+			PlaySessionSpecification specification = MakeSpecification(fixture);
+			specification.Project.Simulation.MaxEntities = 4;
+			Result<Scope<PlaySession>> session = PlaySession::CreateFromScene(specification, fixture.GetScene());
+			REQUIRE_MESSAGE(session.has_value(), session.error().ToString());
+			PlaySession& play = **session;
+			// Each create-and-destroy pair leaves one more entity in the registry until the end-of-tick flush: live, new
+			// and pending entities together stay within 2 * 4.
+			for (int pair = 0; pair < 5; ++pair)
+			{
+				const Result<Entity> created = play.CreateEntity("Transient");
+				REQUIRE_MESSAGE(created.has_value(), created.error().ToString());
+				play.GetScene().DestroyEntity(*created);
+			}
+			CHECK(play.GetScene().GetEntityCount() == 3);
+			CHECK(play.GetScene().GetPendingDestroyCount() == 5);
+			const Result<Entity> refused = play.CreateEntity("Refused");
+			REQUIRE_FALSE(refused.has_value());
+			CHECK(refused.error().GetCode() == ErrorCode::InvalidState);
+			CHECK(refused.error().GetMessageText().find("end-of-tick flush") != std::string::npos);
+			CHECK(play.GetScene().GetEntityCount() == 3);
+			play.Tick();
+			CHECK(play.GetScene().GetPendingDestroyCount() == 0);
+			CHECK(play.CreateEntity("After the flush").has_value());
 		}
 
 		TEST_CASE("PlaySession: identical sessions report identical state hashes, different seeds different ones")
@@ -587,6 +632,78 @@ namespace Engine {
 			CHECK(PlaySessionPhaseToString(PlaySessionPhase::InterpolationSnapshot) == "InterpolationSnapshot");
 			CHECK(PlaySessionPhaseToString(PlaySessionPhase::PreStepTransformUpdate) == "PreStepTransformUpdate");
 			CHECK(PlaySessionPhaseToString(PlaySessionPhase::RenderExtraction) == "RenderExtraction");
+		}
+
+		TEST_CASE("PlaySession: scripts measure screen coordinates in the session's view, never the host's window")
+		{
+			Test::ScriptTestFixture fixture;
+			fixture.GetScene().CreateEntity("Camera").AddComponent<CameraComponent>(CameraComponent{ .Primary = true });
+			// An editor host: its window is much larger than, and differently shaped from, the game view it renders into.
+			WindowHost host;
+			host.Environment.WindowSize = glm::vec2(1920.0f, 1080.0f);
+			PlaySessionSpecification specification{};
+			specification.Registry = &fixture.GetTypes();
+			specification.Assets = &fixture.GetAssetManager();
+			specification.ScriptSchemas = fixture.GetSchemaSnapshot();
+			specification.Seed = 47;
+			specification.Serial = 3;
+			specification.Host = &host;
+			specification.ViewWidth = 800;
+			specification.ViewHeight = 600;
+			auto created = PlaySession::CreateFromScene(specification, fixture.GetScene());
+			REQUIRE_MESSAGE(created.has_value(), (created ? std::string() : created.error().ToString()));
+			PlaySession& session = **created;
+			const auto evaluate = [&session](std::string_view code)
+			{
+				const auto result = session.GetScripts()->Evaluate(code, {});
+				REQUIRE_MESSAGE(result.has_value(), (result ? std::string() : result.error().ToString()));
+				return result->Value.Get();
+			};
+			CHECK(session.GetViewSize() == glm::uvec2(800, 600));
+			CHECK(evaluate("return Application.GetWindowSize() == vector.create(800, 600, 0)") == Json(true));
+			CHECK(evaluate("return Application.IsFocused()") == Json(true)); // the host still supplies the application facts
+			// The centre pixel of the 800x600 view looks straight ahead; against the host's window it would not.
+			CHECK(evaluate(R"(
+local origin, direction = Scene.FindByName("Camera"):GetComponent("Camera"):ScreenToWorldRay(399.5, 299.5)
+return vector.magnitude(direction - vector.create(0, 0, -1)) < 0.00001)")
+				== Json(true));
+			CHECK(evaluate(R"(
+local screen = Scene.FindByName("Camera"):GetComponent("Camera"):WorldToScreen(vector.create(0, 0, -5))
+return math.abs(screen.x - 399.5) < 0.0001 and math.abs(screen.y - 299.5) < 0.0001)")
+				== Json(true));
+			session.SetViewSize(320, 180);
+			CHECK(session.GetViewSize() == glm::uvec2(320, 180));
+			CHECK(evaluate("return Application.GetWindowSize() == vector.create(320, 180, 0)") == Json(true));
+			CHECK(evaluate(R"(
+local origin, direction = Scene.FindByName("Camera"):GetComponent("Camera"):ScreenToWorldRay(159.5, 89.5)
+return vector.magnitude(direction - vector.create(0, 0, -1)) < 0.00001)")
+				== Json(true));
+		}
+
+		TEST_CASE("PlaySession: view coordinates map a display rectangle linearly onto the view's pixels")
+		{
+			// A 1920x1080 view shown letterboxed at (400, 80), 800x450 logical units.
+			const glm::vec2 minimum(400.0f, 80.0f);
+			const glm::vec2 size(800.0f, 450.0f);
+			const glm::uvec2 view(1920, 1080);
+			CHECK(MapToViewCoordinates({ 400.0f, 80.0f }, minimum, size, view) == glm::vec2(0.0f, 0.0f));
+			CHECK(MapToViewCoordinates({ 800.0f, 305.0f }, minimum, size, view) == glm::vec2(960.0f, 540.0f));
+			CHECK(MapToViewCoordinates({ 1200.0f, 530.0f }, minimum, size, view) == glm::vec2(1920.0f, 1080.0f));
+			// Unclamped: a cursor beyond the image, in the bars or past the window, keeps moving continuously.
+			CHECK(MapToViewCoordinates({ 300.0f, 40.0f }, minimum, size, view) == glm::vec2(-240.0f, -96.0f));
+			// The Runtime's view fills its window: the mapping is the framebuffer scale.
+			CHECK(MapToViewCoordinates({ 10.0f, 20.0f }, glm::vec2(0.0f), { 640.0f, 360.0f }, { 1280, 720 }) == glm::vec2(20.0f, 40.0f));
+			CHECK_FALSE(MapToViewCoordinates({ 1.0f, 1.0f }, minimum, { 0.0f, 450.0f }, view).has_value());
+			CHECK_FALSE(MapToViewCoordinates({ 1.0f, 1.0f }, minimum, size, { 0, 1080 }).has_value());
+			CHECK_FALSE(MapToViewCoordinates({ std::numeric_limits<float>::infinity(), 1.0f }, minimum, size, view).has_value());
+			CHECK_FALSE(MapToViewCoordinates({ 1.0f, 1.0f }, { std::numeric_limits<float>::quiet_NaN(), 0.0f }, size, view).has_value());
+		}
+
+		TEST_CASE("PlaySession: a deterministic session's view is the project's window size in logical pixels")
+		{
+			CHECK(GetDeterministicViewSize(WindowSettings{}) == glm::uvec2(1600, 900));
+			CHECK(GetDeterministicViewSize(WindowSettings{ .Width = 320, .Height = 180 }) == glm::uvec2(320, 180));
+			CHECK(GetDeterministicViewSize(WindowSettings{ .Width = 0, .Height = 0 }) == glm::uvec2(1, 1));
 		}
 	}
 
