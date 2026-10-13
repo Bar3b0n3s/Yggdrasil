@@ -1,0 +1,233 @@
+{
+	"Format": "Replay",
+	"Version": 1,
+	"Scene": {
+		"Handle": "6a795a5b2cab3e74",
+		"Path": "Assets/Scenes/Input.scene"
+	},
+	"Parameters": {},
+	"Seed": 1414,
+	"FixedHz": 64,
+	"EngineVersion": "0.1.0",
+	"Config": "Editor",
+	"Events": [
+		{
+			"Tick": 2,
+			"Type": "Key",
+			"State": "Down",
+			"Key": "Space"
+		},
+		{
+			"Tick": 3,
+			"Type": "Key",
+			"State": "Up",
+			"Key": "Space"
+		},
+		{
+			"Tick": 4,
+			"Type": "Key",
+			"State": "Down",
+			"Key": "D"
+		},
+		{
+			"Tick": 6,
+			"Type": "MouseMove",
+			"Position": [320, 180]
+		},
+		{
+			"Tick": 7,
+			"Type": "MouseButton",
+			"State": "Down",
+			"Button": "Left",
+			"Position": [330, 190]
+		},
+		{
+			"Tick": 8,
+			"Type": "Key",
+			"State": "Up",
+			"Key": "D"
+		},
+		{
+			"Tick": 9,
+			"Type": "MouseButton",
+			"State": "Up",
+			"Button": "Left"
+		},
+		{
+			"Tick": 10,
+			"Type": "MouseDelta",
+			"Delta": [5, -3]
+		},
+		{
+			"Tick": 11,
+			"Type": "Scroll",
+			"Delta": [0, 2]
+		},
+		{
+			"Tick": 12,
+			"Type": "Scroll",
+			"Delta": [-1, 0.5]
+		},
+		{
+			"Tick": 13,
+			"Type": "GamepadButton",
+			"State": "Down",
+			"Button": "South",
+			"Gamepad": 0
+		},
+		{
+			"Tick": 14,
+			"Type": "GamepadButton",
+			"State": "Up",
+			"Button": "South",
+			"Gamepad": 0
+		},
+		{
+			"Tick": 14,
+			"Type": "GamepadAxis",
+			"Value": 0.75,
+			"Gamepad": 0,
+			"Axis": "LeftY"
+		},
+		{
+			"Tick": 15,
+			"Type": "GamepadAxis",
+			"Value": -0.5,
+			"Gamepad": 0,
+			"Axis": "LeftX"
+		},
+		{
+			"Tick": 16,
+			"Type": "GamepadAxis",
+			"Value": 1,
+			"Gamepad": 0,
+			"Axis": "RightTrigger"
+		},
+		{
+			"Tick": 18,
+			"Type": "GamepadAxis",
+			"Value": 0,
+			"Gamepad": 0,
+			"Axis": "LeftY"
+		},
+		{
+			"Tick": 18,
+			"Type": "GamepadAxis",
+			"Value": 0,
+			"Gamepad": 0,
+			"Axis": "LeftX"
+		},
+		{
+			"Tick": 18,
+			"Type": "GamepadAxis",
+			"Value": 0,
+			"Gamepad": 0,
+			"Axis": "RightTrigger"
+		},
+		{
+			"Tick": 20,
+			"Type": "Action",
+			"Name": "Jump",
+			"State": "Down"
+		},
+		{
+			"Tick": 21,
+			"Type": "Action",
+			"Name": "Jump",
+			"State": "Up"
+		},
+		{
+			"Tick": 21,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.4
+		},
+		{
+			"Tick": 22,
+			"Type": "Action",
+			"Name": "Fire",
+			"State": "Down"
+		},
+		{
+			"Tick": 23,
+			"Type": "Action",
+			"Name": "Fire",
+			"State": "Up"
+		},
+		{
+			"Tick": 24,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0
+		},
+		{
+			"Tick": 25,
+			"Type": "Text",
+			"Text": "Hi!"
+		},
+		{
+			"Tick": 26,
+			"Type": "MouseButton",
+			"State": "Down",
+			"Button": "Right"
+		},
+		{
+			"Tick": 27,
+			"Type": "MouseButton",
+			"State": "Up",
+			"Button": "Right"
+		}
+	],
+	"Expect": [
+		{
+			"Tick": 3,
+			"Luau": "local p = Scene.FindByName(\"InputProbe\"):GetScript()\nreturn p.Steps[3].SpacePressed and p.Steps[3].SpaceDown and p.Steps[3].JumpPressed and p.Frames[3].SpacePressed"
+		},
+		{
+			"Tick": 5,
+			"Luau": "local p = Scene.FindByName(\"InputProbe\"):GetScript()\nreturn p.Steps[4].SpaceReleased and not p.Steps[4].SpaceDown and p.Frames[4].SpaceReleased and p.Steps[5].DDown and p.Steps[5].MoveX == 1"
+		},
+		{
+			"Tick": 9,
+			"Luau": "local p = Scene.FindByName(\"InputProbe\"):GetScript()\nreturn p.Steps[7].MousePosition == vector.create(320, 180, 0) and p.Steps[9].MoveX == 0 and not p.Steps[9].DDown"
+		},
+		{
+			"Tick": 9,
+			"Luau": "local p = Scene.FindByName(\"InputProbe\"):GetScript()\nreturn p.Steps[8].LeftPressed and p.Steps[8].FirePressed and p.Steps[8].MousePosition == vector.create(330, 190, 0) and p.Frames[8].LeftPressed"
+		},
+		{
+			"Tick": 11,
+			"Luau": "local p = Scene.FindByName(\"InputProbe\"):GetScript()\nreturn p.Steps[10].LeftReleased and p.Steps[10].FireReleased and p.Steps[11].MouseDelta == vector.create(5, -3, 0) and p.Frames[11].MouseDelta == vector.create(5, -3, 0) and p.Steps[12] == nil"
+		},
+		{
+			"Tick": 14,
+			"Luau": "local p = Scene.FindByName(\"InputProbe\"):GetScript()\nreturn p.Steps[12].Scroll == vector.create(0, 2, 0) and p.Steps[13].Scroll == vector.create(-1, 0.5, 0) and p.Steps[14].Scroll == vector.zero and p.Frames[12].Scroll == vector.create(0, 2, 0)"
+		},
+		{
+			"Tick": 15,
+			"Luau": "local p = Scene.FindByName(\"InputProbe\"):GetScript()\nreturn p.Steps[14].SouthDown and p.Steps[14].JumpPressed and p.Steps[14].PadConnected and not p.Steps[15].SouthDown"
+		},
+		{
+			"Tick": 17,
+			"Luau": "local p = Scene.FindByName(\"InputProbe\"):GetScript()\nreturn p.Steps[15].LeftY == 0.75 and math.abs(p.Steps[15].MoveY + 0.6 / 0.85) < 1e-6 and p.Steps[16].LeftX == -0.5 and math.abs(p.Steps[16].MoveX + 0.35 / 0.85) < 1e-6 and p.Steps[17].RightTrigger == 1"
+		},
+		{
+			"Tick": 19,
+			"Luau": "local p = Scene.FindByName(\"InputProbe\"):GetScript()\nreturn p.Steps[19].LeftX == 0 and p.Steps[19].LeftY == 0 and p.Steps[19].MoveX == 0 and p.Steps[19].MoveY == 0 and p.Steps[19].RightTrigger == 0"
+		},
+		{
+			"Tick": 25,
+			"Luau": "local p = Scene.FindByName(\"InputProbe\"):GetScript()\nreturn p.Steps[21].JumpPressed and p.Steps[22].JumpReleased and math.abs(p.Steps[22].MoveX - 0.4) < 1e-6 and p.Steps[23].FirePressed and p.Steps[24].FireReleased and p.Steps[25].MoveX == 0"
+		},
+		{
+			"Tick": 28,
+			"Luau": "local p = Scene.FindByName(\"InputProbe\"):GetScript()\nreturn p.Steps[27].RightDown and not p.Steps[28].RightDown and p.Frames[27].RightDown"
+		},
+		{
+			"Tick": 40,
+			"Luau": "local p = Scene.FindByName(\"InputProbe\"):GetScript()\nreturn #p.Steps == 40 and #p.Frames == 40"
+		}
+	],
+	"FinalTick": 40,
+	"FinalStateHash": "ff0e3f70e3200f86"
+}

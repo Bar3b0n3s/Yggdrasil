@@ -1,0 +1,22 @@
+[
+	{
+		"Kind": "field",
+		"Name": "Camera.Projection",
+		"Description": "Perspective or orthographic projection."
+	},
+	{
+		"Kind": "method",
+		"Name": "scene.tree",
+		"Description": "The open scene's hierarchy as structured entries or as a text outline."
+	},
+	{
+		"Kind": "script member",
+		"Name": "Physics.Raycast",
+		"Description": " \t"
+	},
+	{
+		"Kind": "type",
+		"Name": "Camera",
+		"Description": "A view into the scene."
+	}
+]

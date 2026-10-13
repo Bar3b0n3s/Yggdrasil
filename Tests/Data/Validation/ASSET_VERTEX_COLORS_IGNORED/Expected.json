@@ -1,0 +1,9 @@
+{
+	"Format": "ValidationFixture",
+	"Version": 1,
+	"Scope": "Project",
+	"Codes": ["ASSET_VERTEX_COLORS_IGNORED"],
+	"TestComponents": false,
+	"Expand": [],
+	"NonCanonical": []
+}

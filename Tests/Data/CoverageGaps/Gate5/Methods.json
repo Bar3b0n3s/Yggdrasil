@@ -1,0 +1,31 @@
+{
+	"Format": "MethodCatalog",
+	"Version": 1,
+	"ProtocolVersion": "1.0",
+	"Methods": [
+		{
+			"name": "entity.create",
+			"description": "The entity.create method of the seeded gap."
+		},
+		{
+			"name": "entity.destroy",
+			"description": "The entity.destroy method of the seeded gap."
+		},
+		{
+			"name": "physics.raycast",
+			"description": "The physics.raycast method of the seeded gap."
+		},
+		{
+			"name": "play.start",
+			"description": "The play.start method of the seeded gap."
+		},
+		{
+			"name": "scene.save",
+			"description": "The scene.save method of the seeded gap."
+		},
+		{
+			"name": "scene.tree",
+			"description": "The scene.tree method of the seeded gap."
+		}
+	]
+}

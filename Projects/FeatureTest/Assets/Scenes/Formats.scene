@@ -1,0 +1,537 @@
+{
+	"Format": "Scene",
+	"Version": 1,
+	"Name": "Formats",
+	"Seed": 0,
+	"ComponentVersions": {
+		"Transform": 1,
+		"Prefab": 1,
+		"PrefabLink": 1,
+		"MeshRenderer": 1,
+		"Camera": 1,
+		"DirectionalLight": 1,
+		"Environment": 1,
+		"Text": 1,
+		"AudioSource": 1,
+		"AudioListener": 1
+	},
+	"Entities": [
+		{
+			"ID": "3d87f0e42f5e6b5f",
+			"Name": "Camera",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 2.5, 9],
+					"Rotation": [-0.104528464, 0, 0, 0.9945219],
+					"Scale": [1, 1, 1]
+				},
+				"Camera": {
+					"Projection": "Perspective",
+					"VerticalFov": 55,
+					"OrthographicSize": 10,
+					"NearClip": 0.1,
+					"FarClip": 1000,
+					"Primary": true,
+					"Clear": "Skybox",
+					"ClearColor": [0.05, 0.05, 0.06]
+				},
+				"AudioListener": {
+					"Primary": true
+				}
+			}
+		},
+		{
+			"ID": "98d2f80b4166f186",
+			"Name": "Sun",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [-0.33036608, 0.24321035, 0.088521324, 0.90767336],
+					"Scale": [1, 1, 1]
+				},
+				"DirectionalLight": {
+					"Color": [1, 1, 1],
+					"Intensity": 2.5,
+					"CastShadows": false,
+					"ShadowDistance": 100,
+					"CascadeCount": 4,
+					"CascadeSplitLambda": 0.75,
+					"LightAngle": 1,
+					"DepthBias": 1,
+					"NormalBias": 1
+				}
+			}
+		},
+		{
+			"ID": "c9eb416f1f40a237",
+			"Name": "Environment",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Environment": {
+					"Environment": "5ef219b299d80323",
+					"Intensity": 1.2,
+					"Rotation": 0,
+					"ShowSkybox": true,
+					"SkyboxBlur": 0,
+					"FallbackColor": [0.2, 0.22, 0.25]
+				}
+			}
+		},
+		{
+			"ID": "ad3ee526faf55b67",
+			"Name": "Floor",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, -0.05, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [14, 0.1, 8]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["91d0f1586a7e7653"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "623f7a24081144c9",
+			"Name": "GlyphsText",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-2, 0.5, 2],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Text": {
+					"Text": "AOV VOA",
+					"Font": "5c938f62648f0414",
+					"Size": 96,
+					"Color": [1, 1, 1, 1],
+					"Space": "World",
+					"Anchor": [0.5, 0.5],
+					"Pivot": [0.5, 0.5],
+					"Offset": [0, 0],
+					"Alignment": "Center",
+					"Billboard": false
+				}
+			}
+		},
+		{
+			"ID": "c8639b6573418fa4",
+			"Name": "InterText",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Text": {
+					"Text": "Inter OTF",
+					"Font": "b561ff12ccbe15c0",
+					"Size": 48,
+					"Color": [1, 1, 1, 1],
+					"Space": "Screen",
+					"Anchor": [0.5, 0.9],
+					"Pivot": [0.5, 0.5],
+					"Offset": [0, 0],
+					"Alignment": "Center",
+					"Billboard": false
+				}
+			}
+		},
+		{
+			"ID": "6d538914ccf7cd1a",
+			"Name": "Clips",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				}
+			}
+		},
+		{
+			"ID": "6a2af8b15d3ed5ad",
+			"Name": "Wav",
+			"Parent": "6d538914ccf7cd1a",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"AudioSource": {
+					"Clip": "ddd4db084d58fc15",
+					"Volume": 1,
+					"Pitch": 1,
+					"Loop": false,
+					"PlayOnStart": false,
+					"Spatial": false,
+					"MinDistance": 1,
+					"MaxDistance": 50,
+					"Attenuation": "Inverse",
+					"Rolloff": 1,
+					"DopplerFactor": 1,
+					"Group": "Sfx"
+				}
+			}
+		},
+		{
+			"ID": "922e1e41ed0f6f76",
+			"Name": "Flac",
+			"Parent": "6d538914ccf7cd1a",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"AudioSource": {
+					"Clip": "8f1728e5e04e701c",
+					"Volume": 1,
+					"Pitch": 1,
+					"Loop": false,
+					"PlayOnStart": false,
+					"Spatial": false,
+					"MinDistance": 1,
+					"MaxDistance": 50,
+					"Attenuation": "Inverse",
+					"Rolloff": 1,
+					"DopplerFactor": 1,
+					"Group": "Sfx"
+				}
+			}
+		},
+		{
+			"ID": "4d41156a9a4b99e4",
+			"Name": "Mp3",
+			"Parent": "6d538914ccf7cd1a",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"AudioSource": {
+					"Clip": "73fcc82f972530de",
+					"Volume": 1,
+					"Pitch": 1,
+					"Loop": false,
+					"PlayOnStart": false,
+					"Spatial": false,
+					"MinDistance": 1,
+					"MaxDistance": 50,
+					"Attenuation": "Inverse",
+					"Rolloff": 1,
+					"DopplerFactor": 1,
+					"Group": "Sfx"
+				}
+			}
+		},
+		{
+			"ID": "15cbf92e761c15b0",
+			"Name": "Ogg",
+			"Parent": "6d538914ccf7cd1a",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"AudioSource": {
+					"Clip": "a06d0a5c58c9c793",
+					"Volume": 1,
+					"Pitch": 1,
+					"Loop": false,
+					"PlayOnStart": false,
+					"Spatial": false,
+					"MinDistance": 1,
+					"MaxDistance": 50,
+					"Attenuation": "Inverse",
+					"Rolloff": 1,
+					"DopplerFactor": 1,
+					"Group": "Sfx"
+				}
+			}
+		},
+		{
+			"ID": "986748c65ca86ca4",
+			"Name": "Chime",
+			"Parent": "6d538914ccf7cd1a",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"AudioSource": {
+					"Clip": "d6f8014cd8720661",
+					"Volume": 1,
+					"Pitch": 1,
+					"Loop": false,
+					"PlayOnStart": false,
+					"Spatial": false,
+					"MinDistance": 1,
+					"MaxDistance": 50,
+					"Attenuation": "Inverse",
+					"Rolloff": 1,
+					"DopplerFactor": 1,
+					"Group": "Sfx"
+				}
+			}
+		},
+		{
+			"ID": "8029a5f5e2837409",
+			"Name": "Blip",
+			"Parent": "6d538914ccf7cd1a",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"AudioSource": {
+					"Clip": "d6cba742a1178762",
+					"Volume": 1,
+					"Pitch": 1,
+					"Loop": false,
+					"PlayOnStart": false,
+					"Spatial": false,
+					"MinDistance": 1,
+					"MaxDistance": 50,
+					"Attenuation": "Inverse",
+					"Rolloff": 1,
+					"DopplerFactor": 1,
+					"Group": "Sfx"
+				}
+			}
+		},
+		{
+			"ID": "3937542b2353aa57",
+			"Name": "BoxGlb",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-3, 0.5, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Prefab": {
+					"Prefab": "e62ad3e409163857",
+					"Overrides": []
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "63fd2642893c06ff",
+					"InstanceRoot": "3937542b2353aa57"
+				}
+			}
+		},
+		{
+			"ID": "b94e77b1e68def36",
+			"Name": "Box",
+			"Parent": "3937542b2353aa57",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "c626e9bedc5bd600",
+					"InstanceRoot": "3937542b2353aa57"
+				},
+				"MeshRenderer": {
+					"Mesh": "32aa86302a978e05",
+					"Materials": [],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "406ca19cd060ea6e",
+			"Name": "BoxGltf",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-1, 0.5, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Prefab": {
+					"Prefab": "2a68836c6e412aca",
+					"Overrides": []
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "a1a17b536cd9ff6d",
+					"InstanceRoot": "406ca19cd060ea6e"
+				}
+			}
+		},
+		{
+			"ID": "96cd93c2b05327a6",
+			"Name": "Box",
+			"Parent": "406ca19cd060ea6e",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "5a4875dddd3ccf43",
+					"InstanceRoot": "406ca19cd060ea6e"
+				},
+				"MeshRenderer": {
+					"Mesh": "c0b53b9e6c17ff3f",
+					"Materials": [],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "bcd0da5e263e54e8",
+			"Name": "DataUri",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [1, 0.5, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Prefab": {
+					"Prefab": "630ec0c721d9d0f6",
+					"Overrides": []
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "d24b233101cc0a41",
+					"InstanceRoot": "bcd0da5e263e54e8"
+				}
+			}
+		},
+		{
+			"ID": "205283caf63eb088",
+			"Name": "Quad",
+			"Parent": "bcd0da5e263e54e8",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "fb753d0b2d38c32a",
+					"InstanceRoot": "bcd0da5e263e54e8"
+				},
+				"MeshRenderer": {
+					"Mesh": "c6337a3111505f8e",
+					"Materials": [],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "4c4f170fb61c7af0",
+			"Name": "Textured",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [3, 0.5, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Prefab": {
+					"Prefab": "e6b695f4b5fb8f95",
+					"Overrides": []
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "f9b6865d0c8f42f5",
+					"InstanceRoot": "4c4f170fb61c7af0"
+				}
+			}
+		},
+		{
+			"ID": "ea98ce15b6cb0289",
+			"Name": "TexturedCube",
+			"Parent": "4c4f170fb61c7af0",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "1eccc9c78a2173b5",
+					"InstanceRoot": "4c4f170fb61c7af0"
+				},
+				"MeshRenderer": {
+					"Mesh": "82722167a5c22e65",
+					"Materials": [],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		}
+	]
+}

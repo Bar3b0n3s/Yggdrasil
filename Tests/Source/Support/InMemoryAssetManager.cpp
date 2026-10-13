@@ -41,7 +41,10 @@ namespace Engine {
 			const auto found = m_Assets.find(handle);
 			if (found == m_Assets.end())
 				return MakeError(ErrorCode::NotFound, "no asset {}", handle);
-			return found->second;
+			// Like both production managers (AssetManager::NotifyLoaded): every successful load of a published asset.
+			AssetRef<Asset> asset = found->second;
+			NotifyLoaded(handle);
+			return asset;
 		}
 
 		JobHandle<AssetRef<Asset>> InMemoryAssetManager::LoadAsync(AssetHandle handle)

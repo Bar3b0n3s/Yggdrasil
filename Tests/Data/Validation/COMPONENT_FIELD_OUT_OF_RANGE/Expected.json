@@ -1,0 +1,9 @@
+{
+	"Format": "ValidationFixture",
+	"Version": 1,
+	"Scope": "Project",
+	"Codes": ["COMPONENT_FIELD_OUT_OF_RANGE"],
+	"TestComponents": false,
+	"Expand": [],
+	"NonCanonical": []
+}

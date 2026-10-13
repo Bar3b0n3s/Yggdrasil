@@ -1,0 +1,7 @@
+{
+	"Format": "CoverageGap",
+	"Version": 1,
+	"Gate": "9",
+	"Mode": "Release",
+	"Missing": ["format:Audio/.mp3", "format:Texture/.jpeg"]
+}

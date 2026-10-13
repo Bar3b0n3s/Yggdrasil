@@ -1,0 +1,17 @@
+{
+	"Format": "Replay",
+	"Version": 1,
+	"Scene": {
+		"Handle": "0b5e0000000000a1",
+		"Path": "Assets/Scenes/Main.scene"
+	},
+	"Parameters": {},
+	"Seed": 0,
+	"FixedHz": 120,
+	"EngineVersion": "0.1.0",
+	"Config": "Editor",
+	"Events": [],
+	"Expect": [],
+	"FinalTick": 1,
+	"FinalStateHash": "0000000000000001"
+}

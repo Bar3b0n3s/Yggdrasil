@@ -1,0 +1,7 @@
+{
+	"Format": "CoverageGap",
+	"Version": 1,
+	"Gate": "4",
+	"Mode": "Release",
+	"Missing": ["proxy:RigidBody.Mass/write"]
+}

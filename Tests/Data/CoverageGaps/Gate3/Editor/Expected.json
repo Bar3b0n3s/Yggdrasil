@@ -1,0 +1,7 @@
+{
+	"Format": "CoverageGap",
+	"Version": 1,
+	"Gate": "3",
+	"Mode": "Editor",
+	"Missing": ["callback:Behaviour.OnHotReload"]
+}

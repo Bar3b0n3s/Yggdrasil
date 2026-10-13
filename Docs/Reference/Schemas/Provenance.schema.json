@@ -1,0 +1,56 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"title": "Provenance",
+	"description": "A project's file provenance, Automation/Provenance.json (§13.4).",
+	"type": "object",
+	"properties": {
+		"Format": {
+			"description": "The file's format name; first key of the file.",
+			"enum": ["Provenance"]
+		},
+		"Version": {
+			"description": "The format version this build writes; older versions are migrated when read.",
+			"enum": [1]
+		},
+		"Entries": {
+			"description": "One entry per recorded file, sorted by Path.",
+			"type": "array",
+			"items": {
+				"description": "One recorded file.",
+				"type": "object",
+				"properties": {
+					"Path": {
+						"description": "The project-relative path of the file.",
+						"type": "string"
+					},
+					"XXH64": {
+						"description": "XXH64 (seed 0) of the bytes written: 16 lowercase hex digits.",
+						"type": "string",
+						"pattern": "^[0-9a-fA-F]{16}$"
+					},
+					"Method": {
+						"description": "The automation method that wrote the file, \"ui\" for the windowed UI or \"project.upgrade\".",
+						"type": "string"
+					},
+					"RequestId": {
+						"description": "The JSON-RPC id as sent; null for ui and cli writes.",
+						"type": ["integer", "string", "null"]
+					},
+					"Client": {
+						"description": "The client: session.hello's client name, \"batch\", \"cli\", \"test\" or \"ui\".",
+						"type": "string"
+					},
+					"TranscriptLine": {
+						"description": "The request's 1-based line in Automation/BuildLog.jsonl, or null.",
+						"type": ["integer", "null"],
+						"minimum": 1
+					}
+				},
+				"required": ["Path", "XXH64", "Method", "RequestId", "Client", "TranscriptLine"],
+				"additionalProperties": false
+			}
+		}
+	},
+	"required": ["Format", "Version", "Entries"],
+	"additionalProperties": false
+}

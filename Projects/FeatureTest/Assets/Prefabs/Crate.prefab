@@ -1,0 +1,124 @@
+{
+	"Format": "Prefab",
+	"Version": 1,
+	"Name": "Crate",
+	"Root": "12ebd362e68c8fbe",
+	"ComponentVersions": {
+		"Transform": 1,
+		"MeshRenderer": 1,
+		"Text": 1,
+		"RigidBody": 1,
+		"BoxCollider": 1,
+		"Script": 1
+	},
+	"Entities": [
+		{
+			"ID": "12ebd362e68c8fbe",
+			"Name": "Crate",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-3, 0.5, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": [],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"RigidBody": {
+					"Type": "Dynamic",
+					"Mass": 1,
+					"Friction": 0.5,
+					"Restitution": 0,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				},
+				"Script": {
+					"Script": "cdca1d8d3f05d703",
+					"Fields": {
+						"Lid": "6d8e2bb074da88d3",
+						"Tag": "Crate"
+					},
+					"ExecutionOrder": 0
+				}
+			}
+		},
+		{
+			"ID": "6d8e2bb074da88d3",
+			"Name": "Lid",
+			"Parent": "12ebd362e68c8fbe",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0.55, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 0.1, 1]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": [],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"Script": {
+					"Script": "cdca1d8d3f05d703",
+					"Fields": {
+						"Tag": "Lid"
+					},
+					"ExecutionOrder": 0
+				}
+			}
+		},
+		{
+			"ID": "a8530e1895e5ea5a",
+			"Name": "Label",
+			"Parent": "12ebd362e68c8fbe",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0.51],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Text": {
+					"Text": "Crate",
+					"Font": null,
+					"Size": 24,
+					"Color": [1, 1, 1, 1],
+					"Space": "World",
+					"Anchor": [0.5, 0.5],
+					"Pivot": [0.5, 0.5],
+					"Offset": [0, 0],
+					"Alignment": "Center",
+					"Billboard": false
+				}
+			}
+		}
+	]
+}

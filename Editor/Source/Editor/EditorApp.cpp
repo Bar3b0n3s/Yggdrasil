@@ -54,6 +54,7 @@
 #include "Engine/ImGui/ImGuiScreenshot.h"
 #include "Engine/Platform/Process.h"
 #include "Engine/Platform/Window.h"
+#include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Renderer/EnvironmentBaker.h"
 #include "Engine/Renderer/GpuResourceCache.h"
 #include "Engine/Renderer/RenderSnapshot.h"
@@ -65,14 +66,18 @@
 #include "Engine/Scene/TransformSystem.h"
 #include "Engine/Scripting/ScriptApiRegistry.h"
 #include "Engine/Session/PlaySession.h"
+#include "Engine/Testing/TestResults.h"
 
 #include <imgui.h>
 
 #include <algorithm>
 #include <array>
+#include <filesystem>
 #include <format>
 #include <limits>
 #include <optional>
+#include <span>
+#include <system_error>
 #include <utility>
 #include <vector>
 
@@ -252,6 +257,95 @@ namespace Engine {
 			}
 			ENGINE_INFO("Engine assets: {} baked, {} up to date, {} not baked", report->Baked.size(), report->UpToDate.size(), report->Skipped.size());
 			return failed ? ExitCode::Failed : ExitCode::Success;
+		}
+
+		// The console summary of a --run-tests result: the totals, every failure of every row that did not pass (with its
+		// location) and each coverage gate's outcome. The reports hold everything else; a full FeatureTest result lists
+		// thousands of coverage counters, which the console never repeats.
+		static void LogTestRunSummary(const TestRunResult& result)
+		{
+			size_t failed = 0, skipped = 0;
+			for (const TestCaseResult& row : result.Cases)
+			{
+				skipped += row.Status == "skipped" ? 1 : 0;
+				const bool passed = row.Failures.empty() && (row.Status == "passed" || row.Status == "skipped" || (row.Status == "quit" && row.QuitExpected));
+				if (passed)
+					continue;
+				++failed;
+				if (row.Failures.empty())
+					ENGINE_WARN("Test {} {}/{}: {}:{}: {}", row.Status, row.Suite, row.Case, row.File, row.Line, row.Message);
+				for (const TestFailureResult& failure : row.Failures)
+					ENGINE_WARN("Test {} {}/{}: {}:{}: {}", row.Status, row.Suite, row.Case, failure.File, failure.Line, failure.Message);
+			}
+			for (const TestCoverageGateResult& gate : result.Coverage.Gates)
+			{
+				if (!gate.Evaluated)
+					ENGINE_INFO("Coverage gate {}: not evaluated (only an unfiltered, non-recording run that completes evaluates it)", gate.Gate);
+				else if (gate.Passed)
+					ENGINE_INFO("Coverage gate {}: passed", gate.Gate);
+				else
+					ENGINE_WARN("Coverage gate {}: {} uncovered (first: {})", gate.Gate, gate.Missing.size(), gate.Missing.empty() ? std::string() : gate.Missing.front());
+			}
+			ENGINE_INFO("Test run {}: {} case(s), {} not passed, {} skipped, {} suite(s) and replay(s)", result.Passed ? "passed" : "failed", result.Cases.size(), failed,
+				skipped, result.Suites.size());
+		}
+
+		// --run-tests' reports (ADR 0022 decision 7): the JUnit report at --junit, else <working directory>/bin/TestResults/
+		// FeatureTest-Editor.xml, and the JSON report beside it with the extension replaced by .json, both written from the
+		// run's result, so they never depend on the automation server's offload directory or its cleanup at exit. Their
+		// jsonPath and junitPath name these files. Logs the run's summary first.
+		[[nodiscard]] static Status WriteTestRunReportFiles(TestRunResult result, const std::optional<std::filesystem::path>& junitOption,
+			const TypeRegistry& registry)
+		{
+			LogTestRunSummary(result);
+			std::filesystem::path junit = junitOption.value_or(std::filesystem::path("bin") / "TestResults" / "FeatureTest-Editor.xml");
+			std::error_code error;
+			if (std::filesystem::path absolute = std::filesystem::absolute(junit, error); !error)
+				junit = std::move(absolute);
+			std::filesystem::path json = junit;
+			json.replace_extension(".json");
+			result.JunitPath = FileSystem::PathToUtf8(junit);
+			result.JsonPath = FileSystem::PathToUtf8(json);
+			ENGINE_TRY_ASSIGN(const std::string xml, TestRunResultToJUnit(result));
+			ENGINE_TRY_ASSIGN(const Json document, TestRunResultToJson(result, registry));
+			ENGINE_TRY_ASSIGN(const std::string text, JsonWriter::Write(document));
+			ENGINE_TRY(FileSystem::CreateDirectories(junit.parent_path()));
+			ENGINE_TRY(FileSystem::WriteFileAtomic(junit, std::as_bytes(std::span(xml.data(), xml.size()))));
+			ENGINE_TRY(FileSystem::WriteFileAtomic(json, std::as_bytes(std::span(text.data(), text.size()))));
+			ENGINE_INFO("Test reports: '{}' and '{}'", result.JunitPath, result.JsonPath);
+			return {};
+		}
+
+		// The reports of a test.run result (the RPC result, or the "testRun" member of an error's data).
+		[[nodiscard]] static Status WriteTestRunReports(const JsonReader& response, const std::optional<std::filesystem::path>& junitOption,
+			const TypeRegistry& registry)
+		{
+			const StructInfo* type = registry.FindStruct<TestRunResult>();
+			if (type == nullptr)
+				return MakeError(ErrorCode::InvalidState, "TestRunResult is not registered");
+			TestRunResult result;
+			ENGINE_TRY(WithContext(type->FromJson(&result, response, {}), "while reading the test.run result"));
+			return WriteTestRunReportFiles(std::move(result), junitOption, registry);
+		}
+
+		// The reports of a --run-tests run whose test.run failed ("Written whatever the outcome", EditorCommandLine.h): the
+		// result test.run published with its error when its cases ran (error.data.testRun: a recording verification or
+		// coverage capture failed after them, TestMethods.cpp), otherwise a failed run naming `failure`
+		// (MakeFailedTestRunResult: a preflight error such as script type errors, a refused admission or a failed Begin).
+		// Either way the files at the report paths describe this run, so a report of an earlier run never survives there.
+		[[nodiscard]] static Status WriteFailedTestRunReports(const Json& failedResponse, const Error& failure,
+			const std::optional<std::filesystem::path>& junitOption, const TypeRegistry& registry)
+		{
+			const JsonReader response(failedResponse);
+			if (const std::optional<JsonReader> error = response.FindMember("error"))
+			{
+				if (const std::optional<JsonReader> data = error->FindMember("data"))
+				{
+					if (const std::optional<JsonReader> run = data->FindMember("testRun"))
+						return WriteTestRunReports(*run, junitOption, registry);
+				}
+			}
+			return WriteTestRunReportFiles(MakeFailedTestRunResult(TestSuiteSettings::Mode::Editor, failure.ToString()), junitOption, registry);
 		}
 
 	}
@@ -841,6 +935,13 @@ namespace Engine {
 				if (const std::optional<Error>& failure = state.Batch->GetFailure())
 				{
 					ENGINE_ERROR("The {} run failed: {}", state.Options.Upgrade ? "upgrade" : "batch", failure->ToString());
+					if (state.Options.RunTests)
+					{
+						const Status written = Utils::WriteFailedTestRunReports(state.Batch->GetFailedResponse(), *failure, state.Options.TestJunitPath,
+							GetContext().GetTypeRegistry());
+						if (!written)
+							ENGINE_ERROR("Cannot write the test reports: {}", written.error().ToString());
+					}
 					RequestExit(ExitCode::Failed);
 				}
 				else
@@ -850,7 +951,16 @@ namespace Engine {
 					{
 						const auto& results = state.Batch->GetResults();
 						passed = !results.empty() && JsonReader(results.back()).ReadMember<bool>("passed").value_or(false);
-						if (!results.empty())
+						if (state.Options.RunTests && !results.empty())
+						{
+							const Status written = Utils::WriteTestRunReports(JsonReader(results.back()), state.Options.TestJunitPath, GetContext().GetTypeRegistry());
+							if (!written)
+							{
+								ENGINE_ERROR("Cannot write the test reports: {}", written.error().ToString());
+								passed = false;
+							}
+						}
+						else if (!results.empty())
 						{
 							const auto text = JsonWriter::Write(results.back(), JsonStyle::Pretty);
 							if (text)

@@ -26,6 +26,7 @@ namespace Engine {
 		constexpr std::string_view RunTestsOption = "--run-tests";
 		constexpr std::string_view FilterOption = "--filter";
 		constexpr std::string_view IdSeedOption = "--id-seed";
+		constexpr std::string_view JunitOption = "--junit";
 
 		constexpr std::array EditorOptions = {
 			CommandLineOption{ .Name = ProjectOption, .Value = CommandLineValue::Required, .ValueName = "path", .Description = "Open the project (.eproj or its directory)." },
@@ -34,13 +35,14 @@ namespace Engine {
 			CommandLineOption{ .Name = TestHooksOption, .Value = CommandLineValue::None, .ValueName = {}, .Description = "Register the debug.* test hooks." },
 			CommandLineOption{ .Name = BatchOption, .Value = CommandLineValue::Required, .ValueName = "file.jsonl", .Description = "Run the automation requests of a batch file and exit." },
 			CommandLineOption{ .Name = UpgradeOption, .Value = CommandLineValue::None, .ValueName = {}, .Description = "Run project.upgrade on the project and exit." },
-			CommandLineOption{ .Name = DumpReferenceOption, .Value = CommandLineValue::Required, .ValueName = "dir", .Description = "Write the method catalogues and exit." },
+			CommandLineOption{ .Name = DumpReferenceOption, .Value = CommandLineValue::Required, .ValueName = "dir", .Description = "Write the generated reference (method catalogues, Markdown references, schemas, Engine.d.luau) into dir and exit." },
 			CommandLineOption{ .Name = BakeEngineAssetsOption, .Value = CommandLineValue::None, .ValueName = {}, .Description = "Bake the engine resources into the engine cooked cache and exit." },
 			CommandLineOption{ .Name = EngineCacheDirectoryOption, .Value = CommandLineValue::Required, .ValueName = "dir", .Description = "Use this engine cooked cache instead of the checkout's bin/EngineCache." },
 			CommandLineOption{ .Name = CheckScriptsOption, .Value = CommandLineValue::None, .ValueName = {}, .Description = "Check every project script and exit with failure on errors." },
 			CommandLineOption{ .Name = RunTestsOption, .Value = CommandLineValue::None, .ValueName = {}, .Description = "Run configured script suites and replays and exit with their result." },
 			CommandLineOption{ .Name = FilterOption, .Value = CommandLineValue::Required, .ValueName = "pattern", .Description = "Select script test suites/cases for --run-tests." },
 			CommandLineOption{ .Name = IdSeedOption, .Value = CommandLineValue::Required, .ValueName = "n", .Description = "Seed the entity id and asset handle generator of a --batch run (0 to 2^64-1)." },
+			CommandLineOption{ .Name = JunitOption, .Value = CommandLineValue::Required, .ValueName = "file.xml", .Description = "Write the --run-tests JUnit report here and its JSON report beside it (.json)." },
 		};
 
 	}
@@ -93,6 +95,9 @@ namespace Engine {
 				return MakeError(ErrorCode::InvalidArgument, "option '{}' requires '{}' and a UTF-8 pattern", FilterOption, RunTestsOption);
 			options.TestFilter = *filter;
 		}
+		ENGINE_TRY_ASSIGN(options.TestJunitPath, Utils::ReadPathOption(commandLine, JunitOption));
+		if (options.TestJunitPath.has_value() && !options.RunTests)
+			return MakeError(ErrorCode::InvalidArgument, "option '{}' requires '{}'", JunitOption, RunTestsOption);
 		ENGINE_TRY_ASSIGN(options.IdSeed, commandLine.GetUnsigned(IdSeedOption, std::numeric_limits<uint64_t>::max()));
 		ENGINE_TRY_ASSIGN(options.DumpReferenceDirectory, Utils::ReadPathOption(commandLine, DumpReferenceOption));
 		options.BakeEngineAssets = commandLine.Has(BakeEngineAssetsOption);

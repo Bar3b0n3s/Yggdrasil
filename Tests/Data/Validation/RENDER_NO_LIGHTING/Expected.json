@@ -1,0 +1,9 @@
+{
+	"Format": "ValidationFixture",
+	"Version": 1,
+	"Scope": "Project",
+	"Codes": ["RENDER_NO_LIGHTING"],
+	"TestComponents": false,
+	"Expand": [],
+	"NonCanonical": []
+}

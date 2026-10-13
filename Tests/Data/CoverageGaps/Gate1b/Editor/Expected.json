@@ -1,0 +1,7 @@
+{
+	"Format": "CoverageGap",
+	"Version": 1,
+	"Gate": "1b",
+	"Mode": "Editor",
+	"Missing": ["enum:ProjectionType/Perspective"]
+}

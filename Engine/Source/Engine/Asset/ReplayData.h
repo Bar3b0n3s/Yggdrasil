@@ -38,7 +38,9 @@ namespace Engine {
 		uint64_t Seed = 0;
 		uint32_t FixedHz = 60;
 		std::string EngineVersion{};
-		std::string Config{}; // Informational; never a reason to select a different expected hash.
+		// The run mode that recorded the replay ("Editor", "Release" or "Dist"), never the build configuration, so a replay's
+		// bytes do not depend on it (§9.1). Informational; never a reason to select a different expected hash.
+		std::string Config{};
 	};
 
 	// Asset-owned wire vocabulary, not Session's PlayInputEvent (§3). Type/State/control names use canonical file

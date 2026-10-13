@@ -12,7 +12,9 @@ The stages, with the configurations of the §15.8 matrix:
                                      fails with exactly its expected findings); Scripts/Format.py --check; every
                                      fixture generator under Tests/Data/Generate/ with --check (the committed fixtures
                                      are byte-identical to a fresh generation); Scripts/FetchAssets.py defaults --check
-                                     (the committed engine resources match their SHA-256 pins, offline)
+                                     (the committed engine resources match their SHA-256 pins, offline) and
+                                     FetchAssets.py fixture --check (the pinned third-party test fixtures match their
+                                     pins and Tests/Data/LICENSES.md, offline)
   build        Debug, Release, Dist  Scripts/Build.py per configuration, plus, after Debug, the Roadmap M0 acceptance
                                      check "Shaders: slang-only change is not skipped by the up-to-date check":
                                      touching only a .slang file re-runs the shader rule, the next build does not
@@ -34,12 +36,22 @@ The stages, with the configurations of the §15.8 matrix:
   golden       Release               Scripts/Test.py --suite golden --junit --require-gpu: the golden images of this
                                      machine's device class (§15.4); smoke mode, a warning, where it has none (always
                                      so on Lavapipe: no software-rasterizer goldens); --gpu-optional as for gpu
+  feature      Debug, Release        Scripts/Test.py --suite feature --junit --require-gpu: Editor --headless --project
+                                     Projects/FeatureTest --run-tests (FeatureTest in editor mode, §15.5) with the six
+                                     per-mode coverage gates evaluated and green, no skipped case row and the project
+                                     unchanged outside Library/ (Docs/Decisions/0022-m14-contract.md decision 7); an
+                                     .hdr import needs the GPU baker, so --gpu-optional applies as for gpu
   automation   Release               Scripts/Test.py --suite automation --junit --require-gpu: the Python suites
                                      Tests/Automation and Tools/MCP/tests against the headless editor, in the MCP
                                      bridge's virtual environment (the setup stage creates it), and the method coverage
                                      gate (§15.6, §15.7); on Linux it needs a display with a window manager, like
                                      unit. Its screenshot tests start rendering editors, so --gpu-optional applies as
                                      for gpu
+  determinism  Debug, Release        Scripts/Test.py --suite determinism --config Debug,Release --junit: every
+                                     Testing.Replays file of FeatureTest verified with input.replay {verify, strictHash}
+                                     in the --renderer none editor of each configuration, against its committed
+                                     FinalStateHash and across the two configurations (§15.1 T3d; M15 adds the exported
+                                     Release and Dist runs); CPU only
   portability  n/a                   premake --os=linux gmake, --os=linux ninja, --os=macosx xcode4 (and the vs2026
                                      reference) into bin-int/Portability/, each checked against the expected file list
                                      and project/configuration set; the xcode4 projects' precompiled headers
@@ -49,18 +61,19 @@ The stages, with the configurations of the §15.8 matrix:
                                      and of every Dist project (asserts compiled out), warnings tolerated only in
                                      vendored code, when Visual Studio's C++ Clang component
                                      is installed, otherwise reported as skipped (a failure with --require-clang-cl)
-Later stages of §15.8 (feature, export, determinism, games, hardening) are accepted by --stages and reported as
-"not-available" until their milestone.
+Later stages of §15.8 (export, games, hardening) are accepted by --stages and reported as "not-available" until their
+milestone.
 
 Modes (Roadmap rule 3, Docs/Decisions/0004-contract-stub-gate.md): strict by default, so a milestone cannot end with a
 contract stub (ENGINE_CONTRACT_STUB) or a skipped test case outside the child-process targets. --contract passes
---allow-contract-stubs to Lint.py (lint) and --allow-skips to Test.py (unit, gpu, golden, automation), like PreCommit.py
---contract (Scripts/Lib/scripts.py); the run prints which mode it is in at the start and in the summary.
+--allow-contract-stubs to Lint.py (lint) and --allow-skips to Test.py (unit, gpu, golden, feature, automation,
+determinism), like PreCommit.py --contract (Scripts/Lib/scripts.py); the run prints which mode it is in at the start
+and in the summary.
 
 Results: each stage's own output, a summary table, bin/TestResults/CI.xml (JUnit, one test case per step; another
-path with --summary-junit, so separate runs of one CI job keep separate summaries), the unit, gpu, golden and
-automation JUnit files in bin/TestResults/, and the actual, expected and diff images of failed golden comparisons in
-bin/TestResults/Golden/.
+path with --summary-junit, so separate runs of one CI job keep separate summaries), the unit, gpu, golden, feature
+(with the editor's JSON report beside it), automation and determinism JUnit files in bin/TestResults/, and the actual,
+expected and diff images of failed golden comparisons in bin/TestResults/Golden/.
 
 Exit codes (§4.1): 0 every selected stage passed, otherwise the code of the first failing step: 1 failed,
 2 usage error, 3 a required tool or file is missing, 5 timeout.
@@ -129,7 +142,9 @@ TIMEOUTS = {
     "unit": 1800.0,
     "gpu": 3600.0,
     "golden": 1800.0,
+    "feature": 3600.0,
     "automation": 3600.0,
+    "determinism": 3600.0,
     "portability": 600.0,
     "clang-cl": 7200.0,
 }
@@ -153,10 +168,10 @@ STAGES = (
     Stage("unit", ("Debug", "Release"), True),
     Stage("gpu", ("Debug", "Release"), True),
     Stage("golden", ("Release",), True),
-    Stage("feature", ("Debug", "Release"), False, "M14 (FeatureTest)"),
+    Stage("feature", ("Debug", "Release"), True),
     Stage("automation", ("Release",), True),
     Stage("export", ("Release", "Dist"), False, "M7 (Exporter v0) / M15 (testing exports)"),
-    Stage("determinism", ("Debug", "Release"), False, "M14 (determinism stage)"),
+    Stage("determinism", ("Debug", "Release"), True),
     Stage("games", ("Release",), False, "M16-M18 (demo games)"),
     Stage("portability", None, True),
     Stage("hardening", ("Release",), False, "M15 (ASan, soak, fuzz; milestone gates)"),
@@ -202,7 +217,8 @@ class Runner:
             if steps[-1].failed:
                 return steps
             if config != "Dist":
-                steps.append(self.script(f"references {config}", "GenerateDocs.py", ["--check", "--config", config], 180.0))
+                steps.append(self.script(f"references {config}", "GenerateDocs.py", ["--check", "--config", config],
+                                         180.0))
                 if steps[-1].failed:
                     return steps
             if config == "Debug":
@@ -320,10 +336,10 @@ class Runner:
                             TIMEOUTS["unit"]) for config in configs]
 
     def device_suite(self, suite: str, configs: list[str]) -> list[Step]:
-        """The gpu, golden and automation stages (§15.8): with --require-gpu, so a test case without a device (a GPU
-        test case, or an automation test that starts a rendering editor) fails instead of passing without running
-        (§15.2), unless --gpu-optional says this machine may have no usable device. The gpu suite runs both API caps
-        per configuration (Test.py)."""
+        """The gpu, golden, feature and automation stages (§15.8): with --require-gpu, so a test case without a device
+        (a GPU test case, the FeatureTest run, or an automation test that starts a rendering editor) fails instead of
+        passing without running (§15.2), unless --gpu-optional says this machine may have no usable device. The gpu
+        suite runs both API caps per configuration (Test.py)."""
         mode = test_mode_arguments(self.arguments.contract)
         device = [] if self.arguments.gpu_optional else ["--require-gpu"]
         steps: list[Step] = []
@@ -334,6 +350,14 @@ class Runner:
             if steps[-1].failed:
                 return steps
         return steps
+
+    def determinism(self, configs: list[str]) -> list[Step]:
+        """§15.8 determinism (M14: the editor configurations): one Test.py run over all of them, which compares their
+        hashes with the committed ones and with each other. It needs no GPU."""
+        mode = test_mode_arguments(self.arguments.contract)
+        return [self.script(f"determinism {', '.join(configs)}", "Test.py",
+                            ["--suite", "determinism", "--config", ",".join(configs), "--junit", *mode],
+                            TIMEOUTS["determinism"])]
 
     # ----------------------------------------------------------------------------------------------------------------
 
@@ -535,12 +559,12 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
                         help="portability: fail (exit code 3) instead of skipping the clang-cl build when Visual "
                              "Studio's C++ Clang component is missing (CI runners that must have it)")
     parser.add_argument("--gpu-optional", action="store_true",
-                        help="gpu, golden and automation: run without --require-gpu, so on a machine without a usable "
-                             "Vulkan device the GPU test cases and the rendering automation tests pass without "
-                             "running, naming the reason, and the steps end as warnings (the GitHub-hosted Windows and "
-                             "macOS runners, which have no GPU); bake: without a usable device, bake without the "
-                             "environments (--renderer none) and end as a warning; by default a missing device fails "
-                             "them")
+                        help="gpu, golden, feature and automation: run without --require-gpu, so on a machine without "
+                             "a usable Vulkan device the GPU test cases, the FeatureTest run and the rendering "
+                             "automation tests pass without running, naming the reason, and the steps end as warnings "
+                             "(the GitHub-hosted Windows and macOS runners, which have no GPU); bake: without a usable "
+                             "device, bake without the environments (--renderer none) and end as a warning; by default "
+                             "a missing device fails them")
     parser.add_argument("--contract", action="store_true", help=CONTRACT_FLAG_HELP)
     parser.add_argument("--summary-junit", type=Path, default=SUMMARY_JUNIT,
                         help=f"JUnit summary of this run (default: {paths.display_path(SUMMARY_JUNIT)})")
@@ -580,7 +604,9 @@ def run_stage(runner: Runner, stage: Stage, configs: list[str]) -> list[Step]:
         "unit": lambda: runner.unit(stage_configs),
         "gpu": lambda: runner.device_suite("gpu", stage_configs),
         "golden": lambda: runner.device_suite("golden", stage_configs),
+        "feature": lambda: runner.device_suite("feature", stage_configs),
         "automation": lambda: runner.device_suite("automation", stage_configs),
+        "determinism": lambda: runner.determinism(stage_configs),
         "portability": runner.portability,
     }
     return handlers[stage.name]()

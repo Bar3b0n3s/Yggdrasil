@@ -3,6 +3,7 @@
 
 #include "EditorCore/EditorContext.h"
 #include "EditorCore/EngineAssetGenerators.h"
+#include "EditorCore/Export/ExecutableResources.h"
 #include "EditorCore/Export/Private/ExportPaths.h"
 #include "EditorCore/Project/ProjectManager.h"
 #include "EditorCore/Scripting/EditorScriptService.h"
@@ -299,6 +300,9 @@ namespace Engine {
 		// Validate's results.
 		ProjectSettings Settings{};
 		AssetHandle StartScene{};
+		// The executable's icon, version and company (ResolveExecutableResources), which M15's resource patcher writes into the
+		// copied Runtime.
+		ExecutableResources Resources{};
 		std::vector<AssetHandle> Sources{}; // the included main assets, sorted
 		std::filesystem::path BinaryDirectory{};
 		std::filesystem::path RuntimeExecutable{};
@@ -378,6 +382,13 @@ namespace Engine {
 			}
 			if (Status name = CheckGameName(Settings.Name); !name.has_value())
 				issues.push_back(MakeIssue("/Name", name.error().GetMessageText(), "set a name such as \"Tetris\" (project.setSettings)"));
+			// Export.Icon, Version and Company label the executable (§14.2; ADR 0022 decision 12), checked before anything is written.
+			if (Result<ExecutableResources> resources = ResolveExecutableResources(*Editor, Settings.Export); resources.has_value())
+				Resources = std::move(*resources);
+			else if (resources.error().GetCode() == ErrorCode::Validation)
+				issues.push_back(MakeIssue(resources.error().GetLocation().JsonPointer.value_or(std::string()), resources.error().GetMessageText(), resources.error().GetHint()));
+			else
+				return std::unexpected(std::move(resources).error());
 
 			std::vector<std::pair<AssetHandle, std::string>> scenes; // (handle, project-relative path) of every build scene
 			if (Settings.StartScene.empty())

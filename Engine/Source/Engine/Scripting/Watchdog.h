@@ -7,9 +7,12 @@
 
 namespace Engine {
 
-	// Separate from Engine::Watchdog in Automation/Protocol. Own-thread deadline policy (§11.1); samples are seconds
-	// from the private VM adapter's monotonic clock, lua_clock in production. Explicit samples make tests exact.
-	// Wall time bounds unsafe execution only; it never supplies simulation time or advances a simulation tick.
+	// Separate from Engine::Watchdog in Automation/Protocol. Own-thread deadline policy (§11.1, §11.2); samples are
+	// seconds from the clock of the VM that owns the watchdog: lua_clock (wall time) for the runtime VMs, whose budget
+	// bounds hitches the player sees, and the import thread's CPU time (ThreadClock::GetCpuSeconds, passed as
+	// LoadTimeVmSpecification::ClockSeconds by ScriptImporter) for the load-time VMs, so another thread's load never times
+	// an import out. Explicit samples make tests exact. The clock bounds unsafe execution only; it never supplies
+	// simulation time or advances a simulation tick.
 	class ScriptWatchdog
 	{
 	public:
@@ -26,6 +29,17 @@ namespace Engine {
 		// LIFO, after the protected call/resume unwinds. Asserts on unmatched Leave. The final Leave ends the deadline;
 		// the next task/test resume starts fresh. A nested call may never reset the outer timeout latch.
 		void Leave();
+
+		// Host operations inside a protected call (ADR 0022 "Integration"): a binding that blocks in host code which runs no
+		// Luau, such as Test.Screenshot's capture or Test.ReloadScript's reimport and type check, brackets it with these, and
+		// the deadline moves later by the seconds between the two samples, so host time never counts toward the callback
+		// budget while the script's own Luau time does. A protected entry inside the period (Luau the host operation ran
+		// after all) ends the excluded time there: only the time before it is credited, so Luau time always counts.
+		// Periods nest (only the outermost one credits). Idle (depth zero), a latched timeout, or a non-finite or backwards
+		// sample credits nothing; a latched timeout stays latched. Each BeginHostTime needs one EndHostTime, in the same
+		// protected scope.
+		void BeginHostTime(double nowSeconds) noexcept;
+		void EndHostTime(double nowSeconds) noexcept;
 
 		// gc >= 0 returns false immediately, without changing state, even for expired/invalid samples. Otherwise
 		// true at or beyond the deadline, latched until the outermost Leave. Invalid/backwards samples fail closed.

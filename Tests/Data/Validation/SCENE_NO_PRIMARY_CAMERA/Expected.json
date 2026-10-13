@@ -1,0 +1,9 @@
+{
+	"Format": "ValidationFixture",
+	"Version": 1,
+	"Scope": "Project",
+	"Codes": ["SCENE_NO_PRIMARY_CAMERA"],
+	"TestComponents": false,
+	"Expand": [],
+	"NonCanonical": []
+}

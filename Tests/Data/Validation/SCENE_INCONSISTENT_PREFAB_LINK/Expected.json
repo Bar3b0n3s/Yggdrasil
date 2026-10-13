@@ -1,0 +1,9 @@
+{
+	"Format": "ValidationFixture",
+	"Version": 1,
+	"Scope": "Project",
+	"Codes": ["SCENE_INCONSISTENT_PREFAB_LINK"],
+	"TestComponents": false,
+	"Expand": [],
+	"NonCanonical": []
+}

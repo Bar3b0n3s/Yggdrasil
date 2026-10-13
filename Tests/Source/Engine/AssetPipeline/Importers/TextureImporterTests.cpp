@@ -290,11 +290,45 @@ namespace Engine {
 			CHECK(texel[1] == texel[2]);
 		}
 
+		TEST_CASE("TextureImporter: a .jpeg source imports through the importer like a .jpg")
+		{
+			// Baseline.jpeg (ADR 0022 decision 16, its own source format row): the left 8 x 8 block is a warm horizontal ramp
+			// (200 + 3x, 64 + 12x, 32), the right one a cool vertical ramp (40, 96 + 16y, 160 + 10y).
+			Test::AssetTestFixture fixture;
+			fixture.WriteProjectFile("Assets/Textures/Baseline.jpeg", ReadTextureFixture("Baseline.jpeg"));
+			Result<ImportResult> imported = ImportTexture(fixture, "Assets/Textures/Baseline.jpeg", "Color");
+			REQUIRE_MESSAGE(imported.has_value(), imported.error().ToString());
+			CHECK(imported->Diagnostics.empty());
+			const AssetRef<TextureData> texture = LoadMainTexture(*imported);
+			CHECK(texture->Format == TextureFormat::RGBA8Srgb);
+			CHECK(texture->Width == 16);
+			CHECK(texture->Height == 8);
+			CHECK(texture->Mips.size() == 5);
+			const auto near = [](uint8_t actual, int expected)
+			{
+				return std::abs(static_cast<int>(actual) - expected) <= 12;
+			};
+			const std::array<uint8_t, 4> warm = GetTexel(*texture, 0, 3, 4);
+			CHECK(near(warm[0], 209));
+			CHECK(near(warm[1], 100));
+			CHECK(near(warm[2], 32));
+			CHECK(warm[3] == 255);
+			const std::array<uint8_t, 4> cool = GetTexel(*texture, 0, 12, 2);
+			CHECK(near(cool[0], 40));
+			CHECK(near(cool[1], 128));
+			CHECK(near(cool[2], 180));
+			CHECK(cool[3] == 255);
+			// The extension changes nothing about the decode: the same bytes cook identically from memory.
+			const Result<Buffer> fromMemory = TextureImporter::ImportTextureFromMemory(ReadTextureFixture("Baseline.jpeg"), ColorSettings, "Baseline.jpg");
+			REQUIRE_MESSAGE(fromMemory.has_value(), fromMemory.error().ToString());
+			CHECK(*fromMemory == imported->Artifacts.front().Cooked);
+		}
+
 		TEST_CASE("TextureImporter: every texture fixture imports identically twice in every usage")
 		{
-			Result<std::vector<std::string>> fixtures = Test::ListTestDataFiles("Assets/Textures", { ".png", ".jpg", ".bmp", ".tga" });
+			Result<std::vector<std::string>> fixtures = Test::ListTestDataFiles("Assets/Textures", { ".png", ".jpg", ".jpeg", ".bmp", ".tga" });
 			REQUIRE(fixtures.has_value());
-			CHECK(fixtures->size() >= 12);
+			CHECK(fixtures->size() >= 14);
 			for (const std::string& path : *fixtures)
 			{
 				if (path.ends_with("Truncated.png"))

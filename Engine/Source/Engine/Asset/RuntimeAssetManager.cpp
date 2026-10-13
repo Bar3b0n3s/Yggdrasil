@@ -83,20 +83,21 @@ namespace Engine {
 
 		// Records the outcome of loading `handle` (§7.2): the first success publishes version 1 (`bumpVersion`), the first
 		// failure is remembered and reported once as an asset diagnostic. An outcome for a handle that is already loaded or
-		// failed (an earlier Load or LoadAsync published first) changes nothing.
+		// failed (an earlier Load or LoadAsync published first) changes nothing. True when this outcome published a success,
+		// which the caller then reports to the load observer (AssetManager::NotifyLoaded) once the slot is no longer in use.
 		template<typename ManagerState, typename BumpVersion>
-		static void PublishLoad(ManagerState& state, AssetManager& manager, AssetHandle handle, const Result<AssetRef<Asset>>& result,
+		static bool PublishLoad(ManagerState& state, AssetManager& manager, AssetHandle handle, const Result<AssetRef<Asset>>& result,
 			BumpVersion&& bumpVersion)
 		{
 			LoadSlot& slot = state.Slots[handle];
 			if (slot.State == AssetState::Loaded || slot.State == AssetState::Failed)
-				return;
+				return false;
 			if (result.has_value())
 			{
 				slot.State = AssetState::Loaded;
 				slot.Loaded = *result;
 				bumpVersion(handle);
-				return;
+				return true;
 			}
 			slot.State = AssetState::Failed;
 			slot.Failure = result.error();
@@ -111,6 +112,7 @@ namespace Engine {
 				.Subject = {},
 				.AutoFixable = false,
 			});
+			return false;
 		}
 
 	}
@@ -189,7 +191,12 @@ namespace Engine {
 		if (const auto existing = state.Slots.find(handle); existing != state.Slots.end())
 		{
 			if (existing->second.State == AssetState::Loaded)
-				return existing->second.Loaded;
+			{
+				// Every successful Load of a registered asset is observed, an asset already loaded included (gate 9).
+				AssetRef<Asset> asset = existing->second.Loaded;
+				NotifyLoaded(handle);
+				return asset;
+			}
 			if (existing->second.State == AssetState::Failed)
 				return std::unexpected(*existing->second.Failure);
 		}
@@ -200,6 +207,8 @@ namespace Engine {
 		{
 			BumpVersion(published);
 		});
+		if (loaded.has_value())
+			NotifyLoaded(handle);
 		return loaded;
 	}
 
@@ -238,10 +247,11 @@ namespace Engine {
 					return;
 				State& owner = *manager->m_State;
 				--owner.PendingPublications;
-				Utils::PublishLoad(owner, *manager, handle, published, [manager](AssetHandle bumped)
+				if (Utils::PublishLoad(owner, *manager, handle, published, [manager](AssetHandle bumped)
 				{
 					manager->BumpVersion(bumped);
-				});
+				}))
+					manager->NotifyLoaded(handle);
 			});
 			return result;
 		});

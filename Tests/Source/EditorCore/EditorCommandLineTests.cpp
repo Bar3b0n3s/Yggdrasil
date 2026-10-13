@@ -38,7 +38,7 @@ namespace Engine {
 		}
 
 		// ADR 0022 decision 7: --run-tests reports go to bin/TestResults/FeatureTest-Editor.{xml,json} or beside --junit.
-		TEST_CASE("EditorCommandLine: --junit names the reports of a test run" * doctest::skip(true))
+		TEST_CASE("EditorCommandLine: --junit names the reports of a test run")
 		{
 			const auto tests = ParseEditorArguments({ "--project", "Game", "--run-tests", "--junit", "bin/TestResults/FeatureTest-Editor-Debug.xml" });
 			REQUIRE_MESSAGE(tests.has_value(), tests.error().ToString());
@@ -79,7 +79,7 @@ namespace Engine {
 				CHECK_FALSE(option.Description.empty());
 			}
 			const std::vector<std::string_view> expected = { "--project", "--read-only", "--automation", "--automation-test-hooks", "--batch",
-				"--upgrade", "--dump-reference", "--bake-engine-assets", "--engine-cache-dir", "--check-scripts", "--run-tests", "--filter", "--id-seed" };
+				"--upgrade", "--dump-reference", "--bake-engine-assets", "--engine-cache-dir", "--check-scripts", "--run-tests", "--filter", "--id-seed", "--junit" };
 			CHECK(names == expected);
 		}
 

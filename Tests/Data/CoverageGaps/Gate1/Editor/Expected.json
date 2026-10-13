@@ -1,0 +1,7 @@
+{
+	"Format": "CoverageGap",
+	"Version": 1,
+	"Gate": "1",
+	"Mode": "Editor",
+	"Missing": ["component:Text", "field:Camera/EditorPreview"]
+}

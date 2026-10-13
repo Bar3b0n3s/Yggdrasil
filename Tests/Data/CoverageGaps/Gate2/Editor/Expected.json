@@ -1,0 +1,7 @@
+{
+	"Format": "CoverageGap",
+	"Version": 1,
+	"Gate": "2",
+	"Mode": "Editor",
+	"Missing": ["api:Input.SetCursorMode/argument1/CursorMode/Locked", "api:Test.ReloadScript"]
+}

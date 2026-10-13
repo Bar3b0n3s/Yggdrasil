@@ -15,7 +15,7 @@ namespace Engine {
 	{
 		// ADR 0022 decision 5: the Asset-layer table equals RegisterBuiltinImporters, so gate 9 knows the importable source
 		// formats in exported Release and Dist runs, where AssetPipeline does not exist.
-		TEST_CASE("SourceFormats: the table equals the built-in importers and marks only refused extensions" * doctest::skip(true))
+		TEST_CASE("SourceFormats: the table equals the built-in importers and marks only refused extensions")
 		{
 			ImporterRegistry importers;
 			RegisterBuiltinImporters(importers);

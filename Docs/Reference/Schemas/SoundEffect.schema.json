@@ -1,0 +1,134 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"title": "SoundEffect",
+	"description": "A sound effect file (§6.6).",
+	"type": "object",
+	"properties": {
+		"Format": {
+			"description": "The file's format name; first key of the file.",
+			"enum": ["SoundEffect"]
+		},
+		"Version": {
+			"description": "The format version this build writes; older versions are migrated when read.",
+			"enum": [1]
+		},
+		"Seed": {
+			"description": "The seed of the noise layers' generators.",
+			"type": "integer",
+			"minimum": 0,
+			"maximum": 4294967295
+		},
+		"Volume": {
+			"description": "The sound's linear volume, from 0 to 1.",
+			"type": "number",
+			"minimum": 0,
+			"maximum": 1
+		},
+		"Layers": {
+			"description": "The layers, summed.",
+			"type": "array",
+			"items": {
+				"$ref": "#/$defs/SoundLayer"
+			}
+		}
+	},
+	"required": ["Format", "Version"],
+	"additionalProperties": false,
+	"$defs": {
+		"SoundLayer": {
+			"description": "One oscillator of a sound effect: a note sequence or a frequency sweep.",
+			"type": "object",
+			"properties": {
+				"Wave": {
+					"description": "The oscillator's waveform.",
+					"enum": ["Sine", "Square", "Triangle", "Saw", "Noise"]
+				},
+				"DutyCycle": {
+					"description": "Square waves only: the fraction of each period spent high.",
+					"type": "number",
+					"minimum": 0.01,
+					"maximum": 0.99
+				},
+				"Notes": {
+					"description": "Notes played back to back, such as \"C5:0.06\" (name, octave, seconds) or \"R:0.1\" (a rest).",
+					"type": "array",
+					"items": {
+						"type": "string"
+					}
+				},
+				"Duration": {
+					"description": "Without notes: the sweep's length in seconds.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 10
+				},
+				"StartFrequency": {
+					"description": "Without notes: the sweep's first frequency.",
+					"type": "number",
+					"minimum": 20,
+					"maximum": 20000
+				},
+				"EndFrequency": {
+					"description": "Without notes: the sweep's last frequency (an exponential glide).",
+					"type": "number",
+					"minimum": 20,
+					"maximum": 20000
+				},
+				"Volume": {
+					"description": "The layer's linear volume, from 0 to 1.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 1
+				},
+				"Envelope": {
+					"description": "The volume envelope of each note.",
+					"$ref": "#/$defs/SoundEnvelope"
+				},
+				"LowPass": {
+					"description": "The cutoff of a one-pole low-pass filter in Hz; 0 leaves the layer unfiltered.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 20000
+				},
+				"Delay": {
+					"description": "Seconds from the sound's start until the layer starts.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 10
+				}
+			},
+			"additionalProperties": false
+		},
+		"SoundEnvelope": {
+			"description": "The ADSR volume envelope every note of a layer plays with.",
+			"type": "object",
+			"properties": {
+				"Attack": {
+					"description": "Seconds from silence to full level at the note's start.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 10
+				},
+				"Decay": {
+					"description": "Seconds from full level down to the sustain level.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 10
+				},
+				"Sustain": {
+					"description": "The level held until the note ends, from 0 to 1.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 1
+				},
+				"Release": {
+					"description": "Seconds from the sustain level to silence after the note ends.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 10
+				}
+			},
+			"additionalProperties": false
+		}
+	}
+}

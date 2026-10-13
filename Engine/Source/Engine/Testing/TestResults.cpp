@@ -102,6 +102,15 @@ namespace Engine {
 		return result;
 	}
 
+	TestRunResult MakeFailedTestRunResult(TestSuiteSettings::Mode mode, std::string_view message)
+	{
+		TestRunResult result;
+		result.Mode = mode;
+		result.Passed = false;
+		result.Cases.push_back(TestCaseResult{ .Suite = "FeatureTest", .Case = "run", .Status = "error", .Message = SanitizeTestReportText(message) });
+		return result;
+	}
+
 	void RegisterTestResultTypes(TypeRegistry& registry)
 	{
 		registry.Struct<TestFailureResult>("TestFailureResult", "TestFailureResult shared test report.")
@@ -177,8 +186,16 @@ namespace Engine {
 			errors += row.Status == "error" || row.Status == "timeout" ? 1 : 0;
 			skipped += row.Status == "skipped" ? 1 : 0;
 		}
+		// The coverage gates (ADR 0022 decision 3) form a suite of their own, counted in the document's totals.
+		size_t gateFailures = 0, gatesSkipped = 0;
+		for (const auto& gate : result.Coverage.Gates)
+		{
+			gateFailures += gate.Evaluated && !gate.Passed ? 1 : 0;
+			gatesSkipped += gate.Evaluated ? 0 : 1;
+		}
+		const size_t gates = result.Coverage.Gates.size();
 		std::string xml = std::format("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<testsuites tests=\"{}\" failures=\"{}\" errors=\"{}\" skipped=\"{}\">\n<testsuite name=\"FeatureTest\" tests=\"{}\" failures=\"{}\" errors=\"{}\" skipped=\"{}\">\n",
-			result.Cases.size(), failures, errors, skipped, result.Cases.size(), failures, errors, skipped);
+			result.Cases.size() + gates, failures + gateFailures, errors, skipped + gatesSkipped, result.Cases.size(), failures, errors, skipped);
 		for (const auto& row : result.Cases)
 		{
 			ENGINE_TRY_ASSIGN(auto suite, Escape(row.Suite));
@@ -204,7 +221,33 @@ namespace Engine {
 			}
 			xml += "</testcase>\n";
 		}
-		xml += "</testsuite>\n</testsuites>\n";
+		xml += "</testsuite>\n";
+		if (gates != 0)
+		{
+			xml += std::format("<testsuite name=\"FeatureTest.coverage\" tests=\"{}\" failures=\"{}\" errors=\"0\" skipped=\"{}\">\n", gates, gateFailures, gatesSkipped);
+			for (const auto& gate : result.Coverage.Gates)
+			{
+				ENGINE_TRY_ASSIGN(auto name, Escape(gate.Gate));
+				xml += std::format("<testcase name=\"gate {}\" classname=\"FeatureTest.coverage\">", name);
+				if (!gate.Evaluated)
+					xml += "<skipped message=\"only an unfiltered, non-recording run that completes evaluates the coverage gates\"/>";
+				else if (!gate.Passed)
+				{
+					std::string missing;
+					for (const auto& id : gate.Missing)
+					{
+						ENGINE_TRY_ASSIGN(auto escaped, Escape(id));
+						if (!missing.empty())
+							missing += '\n';
+						missing += escaped;
+					}
+					xml += std::format("<failure message=\"{} uncovered {}\">{}</failure>", gate.Missing.size(), gate.Missing.size() == 1 ? "entry" : "entries", missing);
+				}
+				xml += "</testcase>\n";
+			}
+			xml += "</testsuite>\n";
+		}
+		xml += "</testsuites>\n";
 		return xml;
 	}
 

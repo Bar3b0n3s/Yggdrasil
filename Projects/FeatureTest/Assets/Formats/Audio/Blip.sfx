@@ -1,0 +1,25 @@
+{
+	"Format": "SoundEffect",
+	"Version": 1,
+	"Seed": 3,
+	"Volume": 1,
+	"Layers": [
+		{
+			"Wave": "Square",
+			"DutyCycle": 0.25,
+			"Notes": ["A4:0.05", "A5:0.05"],
+			"Duration": 0.1,
+			"StartFrequency": 440,
+			"EndFrequency": 440,
+			"Volume": 0.6,
+			"Envelope": {
+				"Attack": 0.002,
+				"Decay": 0.01,
+				"Sustain": 0.9,
+				"Release": 0.01
+			},
+			"LowPass": 0,
+			"Delay": 0
+		}
+	]
+}

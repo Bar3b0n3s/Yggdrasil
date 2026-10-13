@@ -1,0 +1,69 @@
+{
+	"Format": "Project",
+	"Version": 1,
+	"Name": "Validation",
+	"StartScene": "Assets/Scenes/Main.scene",
+	"Window": {
+		"Title": "Game",
+		"Width": 1600,
+		"Height": 900,
+		"VSync": true,
+		"Fullscreen": false,
+		"Resizable": true
+	},
+	"Simulation": {
+		"FixedHz": 60,
+		"MaxStepsPerFrame": 5,
+		"Seed": 0,
+		"MaxEntities": 65536
+	},
+	"Physics": {
+		"Gravity": [0, -9.81, 0],
+		"Layers": ["Default"],
+		"Collisions": [
+			["Default", "Default"]
+		]
+	},
+	"Input": {
+		"Actions": {}
+	},
+	"Rendering": {
+		"ShadowMapSize": 2048,
+		"SsaoHalfResolution": false
+	},
+	"Scripting": {
+		"MemoryLimitMB": 256,
+		"CallbackBudgetMs": 1000,
+		"PauseOnError": true,
+		"BlockPlayOnTypeErrors": false
+	},
+	"Export": {
+		"BuildScenes": ["Assets/Scenes/Main.scene"],
+		"Exclude": ["Assets/Tests/**"],
+		"Icon": "",
+		"Version": "1.0.0",
+		"Company": ""
+	},
+	"Testing": {
+		"Suites": [
+			{
+				"Script": "Assets/Tests/Missing.test.luau",
+				"Scene": "",
+				"Parameters": null,
+				"Isolation": "Suite",
+				"Clock": [],
+				"Overrides": {
+					"CallbackBudgetMs": 0,
+					"MemoryLimitMB": 0,
+					"PauseOnError": "Inherit"
+				},
+				"ExpectQuit": -1,
+				"Modes": ["Editor", "Release", "Dist"]
+			}
+		],
+		"Replays": [],
+		"CaseTimeoutTicks": 600,
+		"SuiteTickLimit": 36000,
+		"CoverageGates": false
+	}
+}

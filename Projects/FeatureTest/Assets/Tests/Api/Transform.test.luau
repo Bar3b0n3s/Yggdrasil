@@ -1,0 +1,97 @@
+--!strict
+-- The Transform proxy (§5.2, §11.5): local and world poses, Euler angles, directions, point transforms, Translate and
+-- Rotate in both spaces, LookAt, Teleport and the interpolated render pose.
+local Support = require("./Support")
+
+local FIXED = 1 / 64
+
+return Test.Suite("Api.Transform", function()
+	Test.Case("local and world poses follow the parent", function()
+		local holder = Support.Find("Holder")
+		local item = Support.Find("Item")
+		local t = item.Transform
+		Test.ExpectEqual(t.Translation, vector.create(0, 1, 0), "the scene's local position")
+		Test.ExpectEqual(t.WorldPosition, vector.create(3, 1, 3), "under Holder at [3, 0, 3]")
+		t.Translation = vector.create(1, 1, 0)
+		Test.ExpectEqual(t.WorldPosition, vector.create(4, 1, 3))
+		t.WorldPosition = vector.create(5, 2, 3)
+		Test.ExpectEqual(t.Translation, vector.create(2, 2, 0))
+		Test.ExpectEqual(t.Scale, vector.one)
+		holder.Transform.Scale = vector.create(2, 2, 2)
+		Test.ExpectNear(t.WorldScale, vector.create(2, 2, 2), 1e-6)
+		t.Scale = vector.create(0.5, 1, 1)
+		Test.ExpectNear(t.WorldScale, vector.create(1, 2, 2), 1e-6)
+		Test.Expect(not pcall(function()
+			(t :: any).WorldScale = vector.one
+		end), "WorldScale is read-only")
+		holder.Transform.Scale = vector.one
+		t.Scale = vector.one
+	end)
+
+	Test.Case("rotations read and write as quaternions and Euler degrees", function()
+		local t = Scene.CreateEntity("Spinner").Transform
+		Support.ExpectQuatNear(t.Rotation, Quat.Identity(), 0, "no rotation")
+		t.EulerAngles = vector.create(0, 90, 0)
+		Test.ExpectNear(t.EulerAngles, vector.create(0, 90, 0), 1e-4)
+		Support.ExpectQuatNear(t.Rotation, Quat.FromEuler(0, 90, 0), 1e-6, "Euler angles set the rotation")
+		t.Rotation = Quat.AngleAxis(90, vector.create(1, 0, 0))
+		Test.ExpectNear(t.EulerAngles, vector.create(90, 0, 0), 1e-3)
+		t.WorldRotation = Quat.Identity()
+		Support.ExpectQuatNear(t.WorldRotation, Quat.Identity(), 1e-6, "WorldRotation")
+		Test.ExpectNear(t:Forward(), vector.create(0, 0, -1), 1e-6)
+		Test.ExpectNear(t:Right(), vector.create(1, 0, 0), 1e-6)
+		Test.ExpectNear(t:Up(), vector.create(0, 1, 0), 1e-6)
+	end)
+
+	Test.Case("translation and rotation take a local or world space", function()
+		local t = Scene.CreateEntity("Mover").Transform
+		t.EulerAngles = vector.create(0, 90, 0)
+		t:Translate(vector.create(0, 0, -2))
+		Test.ExpectNear(t.WorldPosition, vector.create(-2, 0, 0), 1e-5, "local by default: along the turned forward axis")
+		t:Translate(vector.create(0, 0, -2), "Local")
+		Test.ExpectNear(t.WorldPosition, vector.create(-4, 0, 0), 1e-5)
+		t:Translate(vector.create(1, 0, 0), "World")
+		Test.ExpectNear(t.WorldPosition, vector.create(-3, 0, 0), 1e-5)
+		t:Rotate(vector.create(0, 90, 0))
+		Test.ExpectNear(t:Forward(), vector.create(0, 0, 1), 1e-5, "local by default")
+		t:Rotate(vector.create(0, 90, 0), "World")
+		Test.ExpectNear(t:Forward(), vector.create(1, 0, 0), 1e-5)
+		t:Rotate(vector.create(90, 0, 0), "Local")
+		Test.ExpectNear(t:Up(), vector.create(-1, 0, 0), 1e-5, "pitching about the local right axis")
+	end)
+
+	Test.Case("points and directions convert between local and world space", function()
+		local t = Support.Find("Item").Transform
+		local p = vector.create(0.5, 0, 0)
+		local world = t:TransformPoint(p)
+		Test.ExpectNear(world, t.WorldPosition + vector.create(0.5, 0, 0), 1e-5)
+		Test.ExpectNear(t:InverseTransformPoint(world), p, 1e-5)
+		Test.ExpectNear(t:TransformDirection(vector.create(0, 0, -1)), t:Forward(), 1e-5)
+		t:LookAt(t.WorldPosition + vector.create(1, 0, 0))
+		Test.ExpectNear(t:Forward(), vector.create(1, 0, 0), 1e-5)
+		t:LookAt(t.WorldPosition + vector.create(0, 0, 1), vector.create(0, 1, 0))
+		Test.ExpectNear(t:Forward(), vector.create(0, 0, 1), 1e-5)
+		Test.Expect(not pcall(function()
+			t:LookAt(t.WorldPosition)
+		end), "looking at its own position is refused")
+	end)
+
+	Test.Case("a moved entity renders interpolated and a teleported one renders at once", function()
+		local entity = Scene.CreateEntity("Glider")
+		entity:AddComponent("MeshRenderer", { Mesh = Assets.Load("engine://Meshes/Cube") })
+		local t = entity.Transform
+		Test.WaitTicks(1)
+		t.Translation = vector.create(1, 0, 0)
+		Test.WaitTicks(1)
+		Test.ExpectNear(t.RenderPosition, vector.create(1, 0, 0), 1e-6, "lockstep renders the whole step")
+		Support.ExpectQuatNear(t.RenderRotation, Quat.Identity(), 1e-6, "and its rotation")
+		t:Teleport(vector.create(7, 1, 0), Quat.FromEuler(0, 45, 0))
+		Test.ExpectEqual(t.WorldPosition, vector.create(7, 1, 0))
+		Test.ExpectEqual(t.RenderPosition, vector.create(7, 1, 0), "a teleport resets interpolation")
+		t:Teleport()
+		Test.ExpectEqual(t.WorldPosition, vector.create(7, 1, 0), "a teleport without a pose keeps it")
+		Test.WaitTicks(1)
+		Test.ExpectNear(Test.GetExtractedPosition(entity) :: vector, vector.create(7, 1, 0), 1e-6)
+		Test.ExpectEqual(Time.GetFixedDeltaTime(), FIXED)
+	end)
+end)

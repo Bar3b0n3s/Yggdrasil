@@ -38,6 +38,9 @@ namespace Engine {
 			// Removes `handle`: later loads fail with NotFound, as for a deleted asset.
 			void Remove(AssetHandle handle);
 
+			// Load notifies the load observer (AssetManager::SetLoadObserver) for every published asset it returns, as the
+			// editor and runtime managers do; procedural built-ins and failures never.
+
 			[[nodiscard]] Result<AssetRef<Asset>> Load(AssetHandle handle) override;
 			[[nodiscard]] JobHandle<AssetRef<Asset>> LoadAsync(AssetHandle handle) override;
 			[[nodiscard]] AssetState GetState(AssetHandle handle) const override;

@@ -186,10 +186,15 @@ namespace Engine {
 		using LoadObserver = std::function<void(AssetHandle handle)>;
 
 		// Installs `observer` (an empty function removes it); one observer at a time, replacing the previous one. The
-		// FeatureTestRunner installs it for the duration of a coverage run and removes it whenever that run ends: on
-		// completion, on cancellation, when Begin fails after installing it, and in ~FeatureTestRunner, so the stored function
-		// never outlives what it captures (FeatureTestRunner.h). Main thread.
+		// FeatureTestRunner installs it for the duration of a coverage run, counts only the loads made inside its Advance
+		// calls, and removes it whenever that run ends: on completion, on cancellation, when Begin fails after installing it,
+		// and in ~FeatureTestRunner, so the stored function never outlives what it captures (FeatureTestRunner.h). Main
+		// thread.
 		void SetLoadObserver(LoadObserver observer);
+
+		// Whether an observer is installed: what a test of the observer's lifetime checks, since an installed observer
+		// may ignore a load (the FeatureTestRunner counts only the loads inside its Advance calls). Main thread.
+		[[nodiscard]] bool HasLoadObserver() const;
 	protected:
 		AssetManager();
 

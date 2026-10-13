@@ -1,0 +1,9 @@
+{
+	"Format": "ValidationFixture",
+	"Version": 1,
+	"Scope": "Project",
+	"Codes": ["SCENE_NONCANONICAL_ORDER"],
+	"TestComponents": false,
+	"Expand": [],
+	"NonCanonical": []
+}

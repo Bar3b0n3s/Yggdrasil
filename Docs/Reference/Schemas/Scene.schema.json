@@ -1,0 +1,1281 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"title": "Scene",
+	"description": "A scene file (§6.2).",
+	"type": "object",
+	"properties": {
+		"Format": {
+			"description": "The file's format name; first key of the file.",
+			"enum": ["Scene"]
+		},
+		"Version": {
+			"description": "The format version this build writes; older versions are migrated when read.",
+			"enum": [1]
+		},
+		"Name": {
+			"description": "The document's name.",
+			"type": "string"
+		},
+		"Seed": {
+			"description": "The scene half of each play session's seed (Project Seed ^ Scene Seed).",
+			"type": "integer",
+			"minimum": 0,
+			"maximum": 4294967295
+		},
+		"ComponentVersions": {
+			"description": "The version of every component type present, by registry name.",
+			"type": "object",
+			"additionalProperties": {
+				"type": "integer",
+				"minimum": 1,
+				"maximum": 4294967295
+			}
+		},
+		"Entities": {
+			"description": "The entities in canonical order.",
+			"type": "array",
+			"items": {
+				"$ref": "#/$defs/Entity"
+			}
+		}
+	},
+	"required": ["Format", "Version"],
+	"additionalProperties": false,
+	"$defs": {
+		"ID": {
+			"description": "The entity's persistent identity, written as the entity key \"ID\".",
+			"type": "object",
+			"properties": {
+				"ID": {
+					"description": "The entity's UUID; set at creation and never changed.",
+					"type": ["string", "null"],
+					"pattern": "^[0-9a-fA-F]{16}$"
+				}
+			},
+			"additionalProperties": false
+		},
+		"Name": {
+			"description": "The entity's display name, written as the entity key \"Name\".",
+			"type": "object",
+			"properties": {
+				"Name": {
+					"description": "The display name used by entity paths; names need not be unique.",
+					"type": "string"
+				}
+			},
+			"additionalProperties": false
+		},
+		"Tags": {
+			"description": "The entity's gameplay tags, written as the entity key \"Tags\".",
+			"type": "object",
+			"properties": {
+				"Tags": {
+					"description": "Free-form tags such as \"Player\"; non-empty, unique, in insertion order.",
+					"type": "array",
+					"items": {
+						"type": "string"
+					}
+				}
+			},
+			"additionalProperties": false
+		},
+		"Relationship": {
+			"description": "The entity's place in the hierarchy; its parent is written as the entity key \"Parent\".",
+			"type": "object",
+			"properties": {
+				"Parent": {
+					"description": "The parent entity; null for a root entity.",
+					"type": ["string", "null"],
+					"pattern": "^[0-9a-fA-F]{16}$"
+				}
+			},
+			"additionalProperties": false
+		},
+		"Transform": {
+			"description": "Positions, rotates and scales the entity relative to its parent.",
+			"type": "object",
+			"properties": {
+				"Translation": {
+					"description": "Position relative to the parent, in metres.",
+					"type": "array",
+					"prefixItems": [
+						{
+							"type": "number"
+						},
+						{
+							"type": "number"
+						},
+						{
+							"type": "number"
+						}
+					],
+					"minItems": 3,
+					"maxItems": 3
+				},
+				"Rotation": {
+					"description": "Rotation relative to the parent: a unit quaternion written [x, y, z, w].",
+					"type": "array",
+					"prefixItems": [
+						{
+							"type": "number"
+						},
+						{
+							"type": "number"
+						},
+						{
+							"type": "number"
+						},
+						{
+							"type": "number"
+						}
+					],
+					"minItems": 4,
+					"maxItems": 4
+				},
+				"Scale": {
+					"description": "Scale along the local axes; each component's magnitude is at least 0.0001.",
+					"type": "array",
+					"prefixItems": [
+						{
+							"type": "number",
+							"not": {
+								"exclusiveMinimum": -1e-04,
+								"exclusiveMaximum": 1e-04
+							}
+						},
+						{
+							"type": "number",
+							"not": {
+								"exclusiveMinimum": -1e-04,
+								"exclusiveMaximum": 1e-04
+							}
+						},
+						{
+							"type": "number",
+							"not": {
+								"exclusiveMinimum": -1e-04,
+								"exclusiveMaximum": 1e-04
+							}
+						}
+					],
+					"minItems": 3,
+					"maxItems": 3
+				}
+			},
+			"additionalProperties": false
+		},
+		"Prefab": {
+			"description": "Marks the root of a prefab instance and records its overrides.",
+			"type": "object",
+			"properties": {
+				"Prefab": {
+					"description": "The prefab asset the instance was created from.",
+					"type": ["string", "null"],
+					"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+					"x-assetType": "Prefab"
+				},
+				"Overrides": {
+					"description": "The instance's differences from the prefab, sorted by prefab entity, component, kind and field.",
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/PrefabOverride"
+					}
+				}
+			},
+			"additionalProperties": false
+		},
+		"PrefabLink": {
+			"description": "Links a prefab instance member, the root included, to its prefab entity.",
+			"type": "object",
+			"properties": {
+				"PrefabEntityID": {
+					"description": "The prefab-local ID of the entity this member was created from.",
+					"type": ["string", "null"],
+					"pattern": "^[0-9a-fA-F]{16}$"
+				},
+				"InstanceRoot": {
+					"description": "The root entity of the instance, which has the Prefab component.",
+					"type": ["string", "null"],
+					"pattern": "^[0-9a-fA-F]{16}$"
+				}
+			},
+			"additionalProperties": false
+		},
+		"MeshRenderer": {
+			"description": "Draws a mesh asset with one material per submesh.",
+			"type": "object",
+			"properties": {
+				"Mesh": {
+					"description": "The mesh to draw; null draws nothing.",
+					"type": ["string", "null"],
+					"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+					"x-assetType": "Mesh"
+				},
+				"Materials": {
+					"description": "One material per submesh; an empty list or a null slot uses the mesh's default material for that submesh.",
+					"type": "array",
+					"items": {
+						"type": ["string", "null"],
+						"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+						"x-assetType": "Material"
+					}
+				},
+				"CastShadows": {
+					"description": "Whether the mesh casts shadows.",
+					"type": "boolean"
+				},
+				"ReceiveShadows": {
+					"description": "Whether shadows fall on the mesh.",
+					"type": "boolean"
+				},
+				"Visible": {
+					"description": "Whether the mesh is drawn at all.",
+					"type": "boolean"
+				}
+			},
+			"additionalProperties": false
+		},
+		"Camera": {
+			"description": "Renders the scene from the entity, looking down its local -Z axis.",
+			"type": "object",
+			"properties": {
+				"Projection": {
+					"description": "Perspective or orthographic projection.",
+					"enum": ["Perspective", "Orthographic"]
+				},
+				"VerticalFov": {
+					"description": "The vertical field of view of the perspective projection, in degrees.",
+					"type": "number",
+					"minimum": 1,
+					"maximum": 179
+				},
+				"OrthographicSize": {
+					"description": "Half the visible height of the orthographic projection, in metres.",
+					"type": "number",
+					"minimum": 0.001
+				},
+				"NearClip": {
+					"description": "The near clipping distance, in metres; below FarClip.",
+					"type": "number",
+					"minimum": 0.001
+				},
+				"FarClip": {
+					"description": "The far clipping distance, in metres; beyond it nothing is drawn or culled in.",
+					"type": "number",
+					"minimum": 0.001
+				},
+				"Primary": {
+					"description": "Whether this is the scene's primary camera (exactly one active camera should be).",
+					"type": "boolean"
+				},
+				"Clear": {
+					"description": "What the camera draws behind the scene.",
+					"enum": ["Skybox", "Color"]
+				},
+				"ClearColor": {
+					"description": "The linear background colour when Clear is Color.",
+					"type": "array",
+					"prefixItems": [
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						},
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						},
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						}
+					],
+					"minItems": 3,
+					"maxItems": 3
+				}
+			},
+			"additionalProperties": false
+		},
+		"DirectionalLight": {
+			"description": "A sun-like light shining down the entity's local -Z axis.",
+			"type": "object",
+			"properties": {
+				"Color": {
+					"description": "The linear light colour.",
+					"type": "array",
+					"prefixItems": [
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						},
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						},
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						}
+					],
+					"minItems": 3,
+					"maxItems": 3
+				},
+				"Intensity": {
+					"description": "The unitless brightness multiplied with Color.",
+					"type": "number",
+					"minimum": 0
+				},
+				"CastShadows": {
+					"description": "Whether the light casts cascaded soft shadows.",
+					"type": "boolean"
+				},
+				"ShadowDistance": {
+					"description": "How far from the camera shadows reach, in metres.",
+					"type": "number",
+					"minimum": 0.001
+				},
+				"CascadeCount": {
+					"description": "The number of shadow cascades, from 1 to 4.",
+					"type": "integer",
+					"minimum": 1,
+					"maximum": 4
+				},
+				"CascadeSplitLambda": {
+					"description": "The cascade split blend from uniform (0) to logarithmic (1).",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 1
+				},
+				"LightAngle": {
+					"description": "The angular diameter of the light source, in degrees; larger values soften shadow penumbrae.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 90
+				},
+				"DepthBias": {
+					"description": "The shadow depth bias, in shadow-map texels.",
+					"type": "number",
+					"minimum": 0
+				},
+				"NormalBias": {
+					"description": "The shadow normal-offset bias, in shadow-map texels.",
+					"type": "number",
+					"minimum": 0
+				}
+			},
+			"additionalProperties": false
+		},
+		"PointLight": {
+			"description": "A light shining in every direction from the entity (no shadows).",
+			"type": "object",
+			"properties": {
+				"Color": {
+					"description": "The linear light colour.",
+					"type": "array",
+					"prefixItems": [
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						},
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						},
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						}
+					],
+					"minItems": 3,
+					"maxItems": 3
+				},
+				"Intensity": {
+					"description": "The unitless brightness multiplied with Color.",
+					"type": "number",
+					"minimum": 0
+				},
+				"Range": {
+					"description": "The distance at which the light's falloff reaches zero, in metres.",
+					"type": "number",
+					"minimum": 0.001
+				},
+				"SourceRadius": {
+					"description": "The radius of the emitting sphere, in metres; widens highlights.",
+					"type": "number",
+					"minimum": 0
+				}
+			},
+			"additionalProperties": false
+		},
+		"SpotLight": {
+			"description": "A cone of light shining down the entity's local -Z axis.",
+			"type": "object",
+			"properties": {
+				"Color": {
+					"description": "The linear light colour.",
+					"type": "array",
+					"prefixItems": [
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						},
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						},
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						}
+					],
+					"minItems": 3,
+					"maxItems": 3
+				},
+				"Intensity": {
+					"description": "The unitless brightness multiplied with Color.",
+					"type": "number",
+					"minimum": 0
+				},
+				"Range": {
+					"description": "The distance at which the light's falloff reaches zero, in metres.",
+					"type": "number",
+					"minimum": 0.001
+				},
+				"InnerConeAngle": {
+					"description": "The angle from the axis inside which the light is at full strength, in degrees; below OuterConeAngle.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 89
+				},
+				"OuterConeAngle": {
+					"description": "The angle from the axis at which the light fades to zero, in degrees.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 89
+				},
+				"CastShadows": {
+					"description": "Whether the light casts soft shadows (shadow atlas budget applies).",
+					"type": "boolean"
+				},
+				"SourceRadius": {
+					"description": "The radius of the emitting disc, in metres; widens highlights and shadow penumbrae.",
+					"type": "number",
+					"minimum": 0
+				}
+			},
+			"additionalProperties": false
+		},
+		"Environment": {
+			"description": "The scene's image-based lighting and skybox (one per scene).",
+			"type": "object",
+			"properties": {
+				"Environment": {
+					"description": "The environment map; null lights the scene with FallbackColor.",
+					"type": ["string", "null"],
+					"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+					"x-assetType": "Environment"
+				},
+				"Intensity": {
+					"description": "The unitless strength of the image-based lighting.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 65504
+				},
+				"Rotation": {
+					"description": "The rotation of the environment about the +Y axis, in degrees.",
+					"type": "number"
+				},
+				"ShowSkybox": {
+					"description": "Whether cameras that clear to the skybox show the environment map.",
+					"type": "boolean"
+				},
+				"SkyboxBlur": {
+					"description": "How blurred the visible skybox is, from sharp (0) to fully blurred (1).",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 1
+				},
+				"FallbackColor": {
+					"description": "The linear ambient colour used when no environment map is assigned.",
+					"type": "array",
+					"prefixItems": [
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						},
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						},
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						}
+					],
+					"minItems": 3,
+					"maxItems": 3
+				}
+			},
+			"additionalProperties": false
+		},
+		"PostProcess": {
+			"description": "The scene's exposure, tone mapping, ambient occlusion, bloom and anti-aliasing (one per scene).",
+			"type": "object",
+			"properties": {
+				"ExposureEV": {
+					"description": "The exposure compensation in stops: the image is multiplied by 2^EV.",
+					"type": "number",
+					"minimum": -16,
+					"maximum": 16
+				},
+				"Tonemap": {
+					"description": "The tone mapping curve.",
+					"enum": ["AgX", "ACES", "PbrNeutral", "Linear"]
+				},
+				"SsaoEnabled": {
+					"description": "Whether screen-space ambient occlusion (GTAO) is applied.",
+					"type": "boolean"
+				},
+				"SsaoRadius": {
+					"description": "The world-space radius within which ambient occlusion is sampled, in metres.",
+					"type": "number",
+					"minimum": 0.01
+				},
+				"SsaoIntensity": {
+					"description": "The strength of the ambient occlusion.",
+					"type": "number",
+					"minimum": 0
+				},
+				"SsaoQuality": {
+					"description": "The ambient occlusion sample count.",
+					"enum": ["Low", "Medium", "High"]
+				},
+				"BloomEnabled": {
+					"description": "Whether bright areas bloom.",
+					"type": "boolean"
+				},
+				"BloomIntensity": {
+					"description": "How much of the bloom is blended into the image.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 1
+				},
+				"FxaaEnabled": {
+					"description": "Whether FXAA anti-aliasing is applied.",
+					"type": "boolean"
+				}
+			},
+			"additionalProperties": false
+		},
+		"Text": {
+			"description": "Draws a text string on the screen or in the world.",
+			"type": "object",
+			"properties": {
+				"Text": {
+					"description": "The UTF-8 text; a line feed starts a new line.",
+					"type": "string"
+				},
+				"Font": {
+					"description": "The font; null uses the default font.",
+					"type": ["string", "null"],
+					"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+					"x-assetType": "Font"
+				},
+				"Size": {
+					"description": "The text height in pixels at the 1080p reference resolution.",
+					"type": "number",
+					"minimum": 1,
+					"maximum": 100000
+				},
+				"Color": {
+					"description": "The linear text colour with opacity in the fourth component.",
+					"type": "array",
+					"prefixItems": [
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						},
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						},
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						},
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						}
+					],
+					"minItems": 4,
+					"maxItems": 4
+				},
+				"Space": {
+					"description": "Whether the text is placed on the screen or in the world.",
+					"enum": ["Screen", "World"]
+				},
+				"Anchor": {
+					"description": "The screen point the text is placed at, normalized to the viewport (Screen space).",
+					"type": "array",
+					"prefixItems": [
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						},
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						}
+					],
+					"minItems": 2,
+					"maxItems": 2
+				},
+				"Pivot": {
+					"description": "The point of the text block that sits on the anchor, normalized to the block.",
+					"type": "array",
+					"prefixItems": [
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						},
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						}
+					],
+					"minItems": 2,
+					"maxItems": 2
+				},
+				"Offset": {
+					"description": "A further offset from the anchor, in pixels at the 1080p reference resolution.",
+					"type": "array",
+					"prefixItems": [
+						{
+							"type": "number"
+						},
+						{
+							"type": "number"
+						}
+					],
+					"minItems": 2,
+					"maxItems": 2
+				},
+				"Alignment": {
+					"description": "How the lines are aligned to each other.",
+					"enum": ["Left", "Center", "Right"]
+				},
+				"Billboard": {
+					"description": "Whether world-space text always faces the camera.",
+					"type": "boolean"
+				}
+			},
+			"additionalProperties": false
+		},
+		"RigidBody": {
+			"description": "Simulates the entity with Jolt physics.",
+			"type": "object",
+			"properties": {
+				"Type": {
+					"description": "Static never moves; Kinematic is moved by script; Dynamic is simulated.",
+					"enum": ["Static", "Kinematic", "Dynamic"]
+				},
+				"Mass": {
+					"description": "Mass in kilograms (Dynamic only).",
+					"type": "number",
+					"minimum": 0.001,
+					"maximum": 1000000000
+				},
+				"Friction": {
+					"description": "The friction coefficient of the body's surfaces.",
+					"type": "number",
+					"minimum": 0
+				},
+				"Restitution": {
+					"description": "Bounciness, from no bounce (0) to a perfectly elastic bounce (1).",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 1
+				},
+				"LinearDamping": {
+					"description": "How quickly linear velocity decays, per second.",
+					"type": "number",
+					"minimum": 0
+				},
+				"AngularDamping": {
+					"description": "How quickly angular velocity decays, per second.",
+					"type": "number",
+					"minimum": 0
+				},
+				"GravityFactor": {
+					"description": "The multiplier of the project's gravity for this body (0 floats).",
+					"type": "number"
+				},
+				"MotionQuality": {
+					"description": "Discrete or continuous (LinearCast) collision detection.",
+					"enum": ["Discrete", "LinearCast"]
+				},
+				"AllowSleeping": {
+					"description": "Whether the body may sleep when it comes to rest.",
+					"type": "boolean"
+				},
+				"LockTranslation": {
+					"description": "Per world axis: whether the body cannot move along it.",
+					"type": "array",
+					"prefixItems": [
+						{
+							"type": "boolean"
+						},
+						{
+							"type": "boolean"
+						},
+						{
+							"type": "boolean"
+						}
+					],
+					"minItems": 3,
+					"maxItems": 3
+				},
+				"LockRotation": {
+					"description": "Per world axis: whether the body cannot rotate about it.",
+					"type": "array",
+					"prefixItems": [
+						{
+							"type": "boolean"
+						},
+						{
+							"type": "boolean"
+						},
+						{
+							"type": "boolean"
+						}
+					],
+					"minItems": 3,
+					"maxItems": 3
+				},
+				"Layer": {
+					"description": "Physics layer name from project settings.",
+					"type": "string"
+				},
+				"MaxLinearVelocity": {
+					"description": "The speed the body is clamped to, in metres per second.",
+					"type": "number",
+					"minimum": 0
+				},
+				"MaxAngularVelocity": {
+					"description": "The angular speed the body is clamped to, in radians per second; raise it for fast rolling balls.",
+					"type": "number",
+					"minimum": 0
+				},
+				"EnhancedInternalEdgeRemoval": {
+					"description": "Removes ghost collisions with internal edges of compound shapes; set it on rolling bodies.",
+					"type": "boolean"
+				},
+				"InitialLinearVelocity": {
+					"description": "The world-space velocity the body starts with, in metres per second.",
+					"type": "array",
+					"prefixItems": [
+						{
+							"type": "number"
+						},
+						{
+							"type": "number"
+						},
+						{
+							"type": "number"
+						}
+					],
+					"minItems": 3,
+					"maxItems": 3
+				},
+				"InitialAngularVelocity": {
+					"description": "The world-space angular velocity the body starts with, in radians per second.",
+					"type": "array",
+					"prefixItems": [
+						{
+							"type": "number"
+						},
+						{
+							"type": "number"
+						},
+						{
+							"type": "number"
+						}
+					],
+					"minItems": 3,
+					"maxItems": 3
+				}
+			},
+			"additionalProperties": false
+		},
+		"BoxCollider": {
+			"description": "A box-shaped collider in the entity's space.",
+			"type": "object",
+			"properties": {
+				"HalfExtents": {
+					"description": "Half the box's size along each local axis, in metres; at least 1 mm.",
+					"type": "array",
+					"prefixItems": [
+						{
+							"type": "number",
+							"minimum": 0.001
+						},
+						{
+							"type": "number",
+							"minimum": 0.001
+						},
+						{
+							"type": "number",
+							"minimum": 0.001
+						}
+					],
+					"minItems": 3,
+					"maxItems": 3
+				},
+				"Offset": {
+					"description": "The box centre relative to the entity, in metres.",
+					"type": "array",
+					"prefixItems": [
+						{
+							"type": "number"
+						},
+						{
+							"type": "number"
+						},
+						{
+							"type": "number"
+						}
+					],
+					"minItems": 3,
+					"maxItems": 3
+				},
+				"Rotation": {
+					"description": "The box rotation relative to the entity: a unit quaternion.",
+					"type": "array",
+					"prefixItems": [
+						{
+							"type": "number"
+						},
+						{
+							"type": "number"
+						},
+						{
+							"type": "number"
+						},
+						{
+							"type": "number"
+						}
+					],
+					"minItems": 4,
+					"maxItems": 4
+				},
+				"IsTrigger": {
+					"description": "Whether the collider only detects overlaps instead of colliding.",
+					"type": "boolean"
+				}
+			},
+			"additionalProperties": false
+		},
+		"SphereCollider": {
+			"description": "A sphere-shaped collider in the entity's space.",
+			"type": "object",
+			"properties": {
+				"Radius": {
+					"description": "The sphere radius, in metres; at least 1 mm.",
+					"type": "number",
+					"minimum": 0.001
+				},
+				"Offset": {
+					"description": "The sphere centre relative to the entity, in metres.",
+					"type": "array",
+					"prefixItems": [
+						{
+							"type": "number"
+						},
+						{
+							"type": "number"
+						},
+						{
+							"type": "number"
+						}
+					],
+					"minItems": 3,
+					"maxItems": 3
+				},
+				"IsTrigger": {
+					"description": "Whether the collider only detects overlaps instead of colliding.",
+					"type": "boolean"
+				}
+			},
+			"additionalProperties": false
+		},
+		"CapsuleCollider": {
+			"description": "A capsule-shaped collider along the local Y axis.",
+			"type": "object",
+			"properties": {
+				"Radius": {
+					"description": "The radius of the capsule's hemispheres and cylinder, in metres; at least 1 mm.",
+					"type": "number",
+					"minimum": 0.001
+				},
+				"HalfHeight": {
+					"description": "Half the height of the cylinder between the hemispheres, in metres; at least 1 mm.",
+					"type": "number",
+					"minimum": 0.001
+				},
+				"Offset": {
+					"description": "The capsule centre relative to the entity, in metres.",
+					"type": "array",
+					"prefixItems": [
+						{
+							"type": "number"
+						},
+						{
+							"type": "number"
+						},
+						{
+							"type": "number"
+						}
+					],
+					"minItems": 3,
+					"maxItems": 3
+				},
+				"Rotation": {
+					"description": "The capsule rotation relative to the entity: a unit quaternion.",
+					"type": "array",
+					"prefixItems": [
+						{
+							"type": "number"
+						},
+						{
+							"type": "number"
+						},
+						{
+							"type": "number"
+						},
+						{
+							"type": "number"
+						}
+					],
+					"minItems": 4,
+					"maxItems": 4
+				},
+				"IsTrigger": {
+					"description": "Whether the collider only detects overlaps instead of colliding.",
+					"type": "boolean"
+				}
+			},
+			"additionalProperties": false
+		},
+		"MeshCollider": {
+			"description": "A collider shaped like a mesh: its convex hull, or the exact triangles for Static and Kinematic bodies.",
+			"type": "object",
+			"properties": {
+				"Mesh": {
+					"description": "The collision mesh; null uses the entity's MeshRenderer mesh.",
+					"type": ["string", "null"],
+					"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+					"x-assetType": "Mesh"
+				},
+				"Convex": {
+					"description": "Whether the convex hull is used; a non-convex mesh collider needs a Static or Kinematic body.",
+					"type": "boolean"
+				},
+				"IsTrigger": {
+					"description": "Whether the collider only detects overlaps instead of colliding.",
+					"type": "boolean"
+				}
+			},
+			"additionalProperties": false
+		},
+		"CharacterController": {
+			"description": "Moves the entity as a walking character that climbs steps and slopes and collides with the world.",
+			"type": "object",
+			"properties": {
+				"Height": {
+					"description": "The character's total height, in metres.",
+					"type": "number",
+					"minimum": 0.001
+				},
+				"Radius": {
+					"description": "The radius of the character's capsule, in metres.",
+					"type": "number",
+					"minimum": 0.001
+				},
+				"MaxSlopeAngle": {
+					"description": "The steepest slope the character can walk up, in degrees.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 90
+				},
+				"StepHeight": {
+					"description": "The highest step the character climbs without jumping, in metres.",
+					"type": "number",
+					"minimum": 0
+				},
+				"Mass": {
+					"description": "The character's mass in kilograms, used when it pushes bodies.",
+					"type": "number",
+					"minimum": 0.001,
+					"maximum": 1000000000
+				},
+				"GravityFactor": {
+					"description": "The multiplier of the project's gravity for the character.",
+					"type": "number"
+				},
+				"Layer": {
+					"description": "Physics layer name from project settings.",
+					"type": "string"
+				}
+			},
+			"additionalProperties": false
+		},
+		"AudioSource": {
+			"description": "Plays an audio clip, optionally positioned at the entity.",
+			"type": "object",
+			"properties": {
+				"Clip": {
+					"description": "The audio clip to play; null plays nothing.",
+					"type": ["string", "null"],
+					"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+					"x-assetType": "AudioClip"
+				},
+				"Volume": {
+					"description": "The linear volume multiplier (1 is the clip's own level).",
+					"type": "number",
+					"minimum": 0
+				},
+				"Pitch": {
+					"description": "The playback speed and pitch multiplier (1 is unchanged).",
+					"type": "number",
+					"minimum": 0.01
+				},
+				"Loop": {
+					"description": "Whether the clip restarts when it ends.",
+					"type": "boolean"
+				},
+				"PlayOnStart": {
+					"description": "Whether the clip starts playing when the play session starts.",
+					"type": "boolean"
+				},
+				"Spatial": {
+					"description": "Whether the sound is positioned at the entity and attenuated with distance.",
+					"type": "boolean"
+				},
+				"MinDistance": {
+					"description": "The distance within which the sound plays at full volume, in metres.",
+					"type": "number",
+					"minimum": 0.01
+				},
+				"MaxDistance": {
+					"description": "The distance beyond which the sound stops getting quieter, in metres.",
+					"type": "number",
+					"minimum": 0.01
+				},
+				"Attenuation": {
+					"description": "The distance attenuation model of a spatial sound.",
+					"enum": ["None", "Inverse", "Linear", "Exponential"]
+				},
+				"Rolloff": {
+					"description": "How quickly the attenuation model falls off (1 is the model's own rate).",
+					"type": "number",
+					"minimum": 0
+				},
+				"DopplerFactor": {
+					"description": "The strength of the Doppler pitch shift (0 disables it).",
+					"type": "number",
+					"minimum": 0
+				},
+				"Group": {
+					"description": "The mixer group the sound plays in.",
+					"enum": ["Music", "Sfx", "Ui"]
+				}
+			},
+			"additionalProperties": false
+		},
+		"AudioListener": {
+			"description": "Hears the scene from the entity's position and orientation.",
+			"type": "object",
+			"properties": {
+				"Primary": {
+					"description": "Whether this listener is used; with several primaries the first in canonical order wins, without any the primary camera listens.",
+					"type": "boolean"
+				}
+			},
+			"additionalProperties": false
+		},
+		"Script": {
+			"description": "Attaches a Behaviour script to the entity (one per entity).",
+			"type": "object",
+			"properties": {
+				"Script": {
+					"description": "The Behaviour script to run.",
+					"type": ["string", "null"],
+					"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+					"x-assetType": "Script"
+				},
+				"Fields": {
+					"description": "Overrides of the script's declared fields by name, each checked against the field's declared type; an unknown or mismatching override is kept and reported, and the field uses its declared default.",
+					"type": "object",
+					"additionalProperties": {}
+				},
+				"ExecutionOrder": {
+					"description": "The script's place in callback order: lower values run first, ties in canonical entity order.",
+					"type": "integer",
+					"minimum": -2147483648,
+					"maximum": 2147483647
+				}
+			},
+			"additionalProperties": false
+		},
+		"PrefabOverride": {
+			"description": "One recorded difference between a prefab instance and its prefab.",
+			"type": "object",
+			"properties": {
+				"PrefabEntityID": {
+					"description": "The prefab-local ID of the entity the override applies to (never the derived instance ID).",
+					"type": ["string", "null"],
+					"pattern": "^[0-9a-fA-F]{16}$"
+				},
+				"Kind": {
+					"description": "What the override changes: a field, an added or removed component, or an entity key.",
+					"enum": ["Field", "AddComponent", "RemoveComponent", "EntityKey"]
+				},
+				"Component": {
+					"description": "The registry name of the component for Field, AddComponent and RemoveComponent; empty for EntityKey.",
+					"type": "string"
+				},
+				"Field": {
+					"description": "The field name for Field; Name, Active or Tags for EntityKey; empty otherwise.",
+					"type": "string"
+				},
+				"Value": {
+					"description": "The overriding value, checked against the schema of its target: the field, the whole component, or the entity key."
+				}
+			},
+			"additionalProperties": false
+		},
+		"Entity": {
+			"description": "One entity: its entity keys, then its components.",
+			"type": "object",
+			"properties": {
+				"ID": {
+					"description": "The entity's id: 16 hex digits, unique within the file.",
+					"type": "string",
+					"pattern": "^[0-9a-fA-F]{16}$"
+				},
+				"Name": {
+					"description": "The entity's name.",
+					"type": "string"
+				},
+				"Parent": {
+					"description": "The parent entity's id, or null for a root.",
+					"type": ["string", "null"],
+					"pattern": "^[0-9a-fA-F]{16}$"
+				},
+				"Active": {
+					"description": "Whether the entity itself is active.",
+					"type": "boolean"
+				},
+				"Tags": {
+					"description": "The entity's tags.",
+					"type": "array",
+					"items": {
+						"type": "string"
+					}
+				},
+				"Components": {
+					"description": "The entity's components keyed by registry name; unknown components are preserved verbatim (§6), so they are allowed.",
+					"type": "object",
+					"properties": {
+						"Transform": {
+							"$ref": "#/$defs/Transform"
+						},
+						"Prefab": {
+							"$ref": "#/$defs/Prefab"
+						},
+						"PrefabLink": {
+							"$ref": "#/$defs/PrefabLink"
+						},
+						"MeshRenderer": {
+							"$ref": "#/$defs/MeshRenderer"
+						},
+						"Camera": {
+							"$ref": "#/$defs/Camera"
+						},
+						"DirectionalLight": {
+							"$ref": "#/$defs/DirectionalLight"
+						},
+						"PointLight": {
+							"$ref": "#/$defs/PointLight"
+						},
+						"SpotLight": {
+							"$ref": "#/$defs/SpotLight"
+						},
+						"Environment": {
+							"$ref": "#/$defs/Environment"
+						},
+						"PostProcess": {
+							"$ref": "#/$defs/PostProcess"
+						},
+						"Text": {
+							"$ref": "#/$defs/Text"
+						},
+						"RigidBody": {
+							"$ref": "#/$defs/RigidBody"
+						},
+						"BoxCollider": {
+							"$ref": "#/$defs/BoxCollider"
+						},
+						"SphereCollider": {
+							"$ref": "#/$defs/SphereCollider"
+						},
+						"CapsuleCollider": {
+							"$ref": "#/$defs/CapsuleCollider"
+						},
+						"MeshCollider": {
+							"$ref": "#/$defs/MeshCollider"
+						},
+						"CharacterController": {
+							"$ref": "#/$defs/CharacterController"
+						},
+						"AudioSource": {
+							"$ref": "#/$defs/AudioSource"
+						},
+						"AudioListener": {
+							"$ref": "#/$defs/AudioListener"
+						},
+						"Script": {
+							"$ref": "#/$defs/Script"
+						}
+					},
+					"additionalProperties": true
+				}
+			},
+			"required": ["ID"],
+			"additionalProperties": false
+		}
+	}
+}

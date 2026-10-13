@@ -1,0 +1,9 @@
+{
+	"Format": "ValidationFixture",
+	"Version": 1,
+	"Scope": "Project",
+	"Codes": ["SCENE_INVALID_HIERARCHY"],
+	"TestComponents": false,
+	"Expand": [],
+	"NonCanonical": []
+}

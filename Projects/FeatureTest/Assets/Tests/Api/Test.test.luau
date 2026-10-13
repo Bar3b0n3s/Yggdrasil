@@ -1,0 +1,111 @@
+--!strict
+-- The Test module (§11.10). Test.Fail and Test.Skip are called in this suite body, where no case is active: they raise
+-- a catchable error and end nothing, so FeatureTest, which allows no failed or skipped row, still calls them
+-- (ADR 0022 decision 4). Test.ReloadScript is EditorOnly and runs in Api.EditorOnly.
+local Support = require("./Support")
+
+return Test.Suite("Api.Test", function()
+	local failCaught, failMessage = pcall(Test.Fail, "Test.Fail outside a case")
+	local skipCaught, skipMessage = pcall(Test.Skip, "Test.Skip outside a case")
+
+	Test.Case("Test.Fail and Test.Skip outside a case raise a catchable error", function()
+		Test.ExpectEqual(failCaught, false)
+		Test.ExpectEqual(skipCaught, false)
+		Test.ExpectEqual(type(failMessage), "string")
+		Test.ExpectEqual(type(skipMessage), "string")
+	end)
+
+	Test.Case("Test.Suite is a pure constructor and cases take a timeout", function()
+		local suite = Test.Suite("Constructed", function()
+			error("a constructed suite's body never runs")
+		end, { CaseTimeoutTicks = 5 })
+		Test.ExpectEqual(suite.Name, "Constructed")
+		Test.ExpectEqual(suite.Options.CaseTimeoutTicks, 5)
+		Test.Expect(not pcall(function()
+			Test.Case("late", function() end)
+		end), "Test.Case outside a suite body is an error")
+	end, { TimeoutTicks = 30 })
+
+	Test.Case("expectations that hold record nothing", function()
+		Test.Expect(true)
+		Test.Expect(1 < 2, "ordered")
+		Test.ExpectEqual("a", "a")
+		Test.ExpectEqual(Support.Find("Crate"), Support.Find("Crate"), "entities compare by identity")
+		Test.ExpectNear(1, 1.000001)
+		Test.ExpectNear(0.1 + 0.2, 0.3, 1e-12, "within an absolute epsilon")
+		Test.ExpectNear(vector.create(1, 2, 3), vector.create(1, 2, 3.001), 0.01)
+	end)
+
+	Test.Case("waits advance simulation ticks", function()
+		local start = Time.GetTick()
+		Test.WaitTicks(3)
+		Test.ExpectEqual(Time.GetTick(), start + 3)
+		Test.WaitUntil(function(): boolean
+			return Time.GetTick() >= start + 5
+		end, 10)
+		Test.ExpectEqual(Time.GetTick(), start + 5)
+	end)
+
+	Test.Case("script errors of the case are listed and claimed", function()
+		local before = Test.GetScriptErrors()
+		local cursor = if #before > 0 then before[#before].id else nil
+		Task.Spawn(function()
+			error("a claimed occurrence")
+		end)
+		Test.ExpectScriptError("claimed occurrence", 0)
+		local errors = Test.GetScriptErrors(cursor)
+		Test.ExpectEqual(#errors, 1)
+		Test.ExpectEqual(errors[1].kind, "runtime")
+		Test.ExpectEqual(errors[1].script, "Assets/Tests/Api/Test.test.luau")
+		Test.ExpectEqual(#Test.GetScriptErrors(errors[1].id), 0, "nothing after the newest error")
+	end)
+
+	Test.Case("the state hash is stable within a tick and follows the simulation", function()
+		Test.WaitTicks(1)
+		local hash = Test.GetStateHash()
+		Test.Expect(#hash == 16 and string.match(hash, "^%x+$") ~= nil, "16 hexadecimal digits")
+		Test.ExpectEqual(Test.GetStateHash(), hash, "reading the hash changes nothing")
+		Test.WaitTicks(1)
+		Test.Expect(Test.GetStateHash() ~= hash, "the falling ball changes the state")
+	end)
+
+	Test.Case("the last extraction renders entities where their transforms are", function()
+		Test.WaitTicks(1)
+		local extraction = Test.GetLastExtraction()
+		Test.ExpectEqual(extraction.Alpha, 1, "lockstep renders whole steps")
+		Test.Expect(extraction.Frame >= 1, "a frame was extracted")
+		local crate = Support.Find("Crate")
+		Test.ExpectNear(Test.GetExtractedPosition(crate) :: vector, crate.Transform.RenderPosition, 0.0001)
+		Test.ExpectNear(Test.GetExtractedPosition(Support.Find("Camera")) :: vector, Support.Find("Camera").Transform.WorldPosition, 0.0001)
+		Test.ExpectEqual(Test.GetExtractedPosition(Support.Find("Holder")), nil, "an entity that renders nothing")
+	end)
+
+	Test.Case("injected input applies at the next tick", function()
+		Test.InjectAction("Jump", "Tap")
+		Test.InjectKey("D", "Down")
+		Test.InjectMouse("Right", "Down", vector.create(10, 20, 0))
+		Test.InjectGamepad(1, "East", "Down")
+		Test.InjectGamepad(1, "RightTrigger", 0.5)
+		Test.WaitTicks(1)
+		Test.Expect(Input.IsActionPressed("Jump"), "the action")
+		Test.Expect(Input.IsKeyDown("D"), "the key")
+		Test.Expect(Input.IsMouseButtonDown("Right"), "the mouse button")
+		Test.ExpectEqual(Input.GetMousePosition(), vector.create(10, 20, 0))
+		Test.Expect(Input.IsGamepadButtonDown(1, "East"), "the gamepad button")
+		Test.ExpectEqual(Input.GetGamepadAxis(1, "RightTrigger"), 0.5)
+	end)
+
+	Test.Case("audio capture hears a one-shot", function()
+		local clip = Assets.Load("Assets/Audio/Beep.sfx") :: AssetRef
+		Audio.PlayOneShot(clip)
+		local levels = Test.CaptureAudio(6)
+		Test.Expect(levels.Peak > 0 and levels.Peak <= 1, "the beep is heard")
+		Test.Expect(levels.RmsLeft > 0 and levels.RmsRight > 0, "in both channels")
+	end)
+
+	Test.Case("a screenshot is taken through the host", function()
+		-- Every FeatureTest run renders (the feature stage needs a Vulkan device, ADR 0022 decision 7), so the capture must
+		-- succeed: a host that refuses it, as Unsupported or otherwise, fails the case with its error.
+		Test.Screenshot("ApiTest")
+	end)
+end)

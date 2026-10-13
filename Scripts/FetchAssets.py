@@ -15,7 +15,15 @@ Commands:
       as Resources/Fonts/Inter-Regular.ttf, each verified against the SHA-256 and size pinned below (DEFAULT_RESOURCES),
       which Resources/LICENSES.md mirrors (a pin missing there, or different, fails the command). --check downloads
       nothing: it verifies the committed files and the mirror only.
-The `fixture` command (the pinned FLAC, MP3 and OTF format fixtures, Architecture §15.5) joins with Roadmap M14.
+  fixture [--check]
+      The pinned format fixtures that are not generated first-party (Architecture §15.5,
+      Docs/Decisions/0022-m14-contract.md decision 16): Inter-Regular.otf (the member extras/otf/Inter-Regular.otf of
+      the pinned Inter release archive) as Tests/Data/Assets/Fonts/Inter-Regular.otf, and the public-domain Tone.mp3
+      and Tone.ogg from upload.wikimedia.org as Tests/Data/Assets/Audio/, each verified against the SHA-256 and size
+      pinned below (FIXTURE_FILES), which Tests/Data/LICENSES.md mirrors (a pin missing there, or different, fails the
+      command). Only a file that is missing or does not match its pin is downloaded. --check downloads nothing: it
+      verifies the committed files and the mirror only. The other format fixtures (WAV, FLAC, TTF, HDR, the textures
+      and glTF) are generated first-party by Tests/Data/Generate/.
 
 Downloads need operator approval, which Roadmap M0 collects up front; the items this script fetches are the ones
 recorded in Docs/Decisions/0001-approvals.md. Files are written to a temporary name and renamed into place only after
@@ -70,10 +78,18 @@ INTER_ARCHIVE_MEMBER = "extras/ttf/Inter-Regular.ttf"
 INTER_FONT_NAME = "Inter-Regular.ttf"
 INTER_FONT_SHA256 = "40d692fce188e4471e2b3cba937be967878f631ad3ebbbdcd587687c7ebe0c82"
 INTER_FONT_SIZE = 411640
+# The static CFF-outline OpenType font of the same archive (an 'OTTO' sfnt with a 'CFF ' table and no 'CFF2' or 'fvar'),
+# the OTF format fixture (ADR 0022 decision 16); its digest was computed from the pinned archive's member.
+INTER_OTF_MEMBER = "extras/otf/Inter-Regular.otf"
+INTER_OTF_SHA256 = "d4f2b9e148059a15f014cb0f0b8fea8cd11bfa447dd483bedf1b0adc0e2ba799"
+INTER_OTF_SIZE = 609600
 # github.com answers a release download with a redirect to its asset host.
 GITHUB_RELEASE_HOSTS = frozenset(
     {"github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com"}
 )
+
+# Wikimedia Commons serves its uploads from this host; each fixture's Commons page names its exact file URL.
+WIKIMEDIA_UPLOAD_HOST = "upload.wikimedia.org"
 
 USER_AGENT = "Engine-FetchAssets/1.0"
 DOWNLOAD_ATTEMPTS = 3
@@ -84,6 +100,9 @@ MAXIMUM_DOWNLOAD_BYTES = 512 * 1024 * 1024
 LICENSES_PATH = paths.REPOSITORY_ROOT / "Resources" / "LICENSES.md"
 # A pin in Resources/LICENSES.md: a table row naming the repository path and the SHA-256, both in backticks.
 LICENSE_PIN_PATTERN = re.compile(r"`(Resources/[^`]+)`.*?`([0-9a-f]{64})`")
+FIXTURE_LICENSES_PATH = paths.REPOSITORY_ROOT / "Tests" / "Data" / "LICENSES.md"
+# A pin in Tests/Data/LICENSES.md: a table row naming the repository path and the SHA-256, both in backticks.
+FIXTURE_PIN_PATTERN = re.compile(r"`(Tests/Data/[^`]+)`.*?`([0-9a-f]{64})`")
 
 
 class FetchError(Exception):
@@ -93,11 +112,13 @@ class FetchError(Exception):
 @dataclasses.dataclass(frozen=True)
 class PinnedResource:
     destination: str  # repository-relative path of the committed file
-    kind: str  # "hdri" or "font"
+    kind: str  # "hdri", "font" (a member of the pinned Inter archive) or "commons" (a Wikimedia Commons upload)
     sha256: str
     size: int
     asset_id: str = ""  # kind "hdri": the Poly Haven id
     resolution: str = ""  # kind "hdri": one of HDRI_RESOLUTIONS
+    member: str = INTER_ARCHIVE_MEMBER  # kind "font": the member of the Inter release archive
+    url: str = ""  # kind "commons": the file's https URL on WIKIMEDIA_UPLOAD_HOST
 
     @property
     def path(self) -> Path:
@@ -105,7 +126,11 @@ class PinnedResource:
 
     @property
     def label(self) -> str:
-        return f"{self.asset_id} {self.resolution}" if self.kind == "hdri" else f"Inter {INTER_VERSION}"
+        if self.kind == "hdri":
+            return f"{self.asset_id} {self.resolution}"
+        if self.kind == "commons":
+            return self.url
+        return f"Inter {INTER_VERSION} {self.member}"
 
 
 # The committed engine resources (Resources/EngineAssets.json names them). The HDRI digests were computed from the
@@ -136,6 +161,34 @@ DEFAULT_RESOURCES = (
 )
 
 
+# The pinned format fixtures; Tests/Data/LICENSES.md names their sources and licenses. The Commons digests were computed
+# from the unmodified downloads when the files were first committed (Roadmap M12, ADR 0015 decision 25), the OTF's from
+# the pinned Inter archive (Roadmap M14, ADR 0022 decision 16).
+FIXTURE_FILES = (
+    PinnedResource(
+        destination="Tests/Data/Assets/Audio/Tone.mp3",
+        kind="commons",
+        sha256="84ab44b58396913c75ba0d8f5c29b18bca382269a10527bcf90a39c5c1460215",
+        size=70272,
+        url=f"https://{WIKIMEDIA_UPLOAD_HOST}/wikipedia/commons/7/75/Sputnik_-_Beep.mp3",
+    ),
+    PinnedResource(
+        destination="Tests/Data/Assets/Audio/Tone.ogg",
+        kind="commons",
+        sha256="f6d213190ddd88313ea689fadcbce10083932fa2779243ca28d0bafb30d3ba8f",
+        size=5490,
+        url=f"https://{WIKIMEDIA_UPLOAD_HOST}/wikipedia/commons/1/17/1000Hz.ogg",
+    ),
+    PinnedResource(
+        destination="Tests/Data/Assets/Fonts/Inter-Regular.otf",
+        kind="font",
+        sha256=INTER_OTF_SHA256,
+        size=INTER_OTF_SIZE,
+        member=INTER_OTF_MEMBER,
+    ),
+)
+
+
 def parse_arguments(arguments: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Download the approved third-party assets from official sources.",
@@ -151,6 +204,10 @@ def parse_arguments(arguments: list[str] | None) -> argparse.Namespace:
     font.add_argument("--dest", type=Path, required=True, help="the destination directory")
     defaults = commands.add_parser("defaults", help="the committed engine resources under Resources/")
     defaults.add_argument(
+        "--check", action="store_true", help="verify the committed files against their pins; download nothing"
+    )
+    fixture = commands.add_parser("fixture", help="the pinned format fixtures under Tests/Data/Assets/")
+    fixture.add_argument(
         "--check", action="store_true", help="verify the committed files against their pins; download nothing"
     )
     return parser.parse_args(arguments)
@@ -264,6 +321,12 @@ def download_hdri(asset_id: str, resolution: str, log: Callable[[str], None]) ->
 
 def download_font(log: Callable[[str], None]) -> bytes:
     """The pinned Inter-Regular.ttf, extracted from the pinned release archive; both verified against their SHA-256."""
+    return download_inter_member(INTER_ARCHIVE_MEMBER, INTER_FONT_SIZE, INTER_FONT_SHA256, log)
+
+
+def download_inter_member(member: str, size: int, sha256: str, log: Callable[[str], None]) -> bytes:
+    """The member `member` of the pinned Inter release archive; the archive and the member are verified against their
+    pinned size and SHA-256."""
     log(f"downloading {INTER_ARCHIVE_URL}")
     archive = download(INTER_ARCHIVE_URL, GITHUB_RELEASE_HOSTS, INTER_ARCHIVE_SIZE, log)
     digest = sha256_bytes(archive)
@@ -274,22 +337,32 @@ def download_font(log: Callable[[str], None]) -> bytes:
         )
     try:
         with zipfile.ZipFile(io.BytesIO(archive)) as bundle:
-            info = bundle.getinfo(INTER_ARCHIVE_MEMBER)
-            if info.is_dir() or info.file_size != INTER_FONT_SIZE:
-                raise FetchError(
-                    f"{INTER_ARCHIVE_MEMBER} in the Inter archive is not the pinned {INTER_FONT_SIZE}-byte file"
-                )
+            info = bundle.getinfo(member)
+            if info.is_dir() or info.file_size != size:
+                raise FetchError(f"{member} in the Inter archive is not the pinned {size}-byte file")
             font = bundle.read(info)
     except KeyError:
-        raise FetchError(f"the Inter archive does not contain {INTER_ARCHIVE_MEMBER}") from None
+        raise FetchError(f"the Inter archive does not contain {member}") from None
     except (zipfile.BadZipFile, OSError) as error:
         raise FetchError(f"the Inter archive is not a valid zip file: {error}") from None
     font_digest = sha256_bytes(font)
-    if font_digest != INTER_FONT_SHA256:
-        raise FetchError(
-            f"SHA-256 mismatch for {INTER_ARCHIVE_MEMBER}: expected {INTER_FONT_SHA256}, got {font_digest}"
-        )
+    if font_digest != sha256:
+        raise FetchError(f"SHA-256 mismatch for {member}: expected {sha256}, got {font_digest}")
     return font
+
+
+def download_commons(url: str, size: int, sha256: str, log: Callable[[str], None]) -> bytes:
+    """The Wikimedia Commons upload at `url` (https on WIKIMEDIA_UPLOAD_HOST only), verified against its pinned size and
+    SHA-256."""
+    log(f"downloading {url}")
+    data = download(url, frozenset({WIKIMEDIA_UPLOAD_HOST}), size, log)
+    digest = sha256_bytes(data)
+    if len(data) != size or digest != sha256:
+        raise FetchError(
+            f"SHA-256 mismatch for {url}: expected {sha256} ({size} bytes), got {digest} ({len(data)} bytes); the file "
+            "changed on Commons or the download is corrupt"
+        )
+    return data
 
 
 def ignore_progress(message: str) -> None:
@@ -314,27 +387,29 @@ def fetch_font(destination: Path, log: Callable[[str], None] = ignore_progress) 
     return target
 
 
-def mirrored_pins() -> dict[str, str]:
-    """The SHA-256 pins Resources/LICENSES.md lists, by repository path."""
+def mirrored_pins(licenses: Path = LICENSES_PATH, pattern: re.Pattern[str] = LICENSE_PIN_PATTERN) -> dict[str, str]:
+    """The SHA-256 pins `licenses` lists (one table row per file, naming its path and digest), by repository path."""
     try:
-        text = LICENSES_PATH.read_text(encoding="utf-8")
+        text = licenses.read_text(encoding="utf-8")
     except OSError as error:
-        raise FetchError(f"cannot read {paths.display_path(LICENSES_PATH)}: {error}") from None
+        raise FetchError(f"cannot read {paths.display_path(licenses)}: {error}") from None
     pins: dict[str, str] = {}
     for line in text.splitlines():
-        match = LICENSE_PIN_PATTERN.search(line)
+        match = pattern.search(line)
         if match:
             pins[match.group(1)] = match.group(2)
     return pins
 
 
-def check_mirror(resource: PinnedResource, pins: dict[str, str]) -> None:
+def check_mirror(
+    resource: PinnedResource, pins: dict[str, str], licenses: Path = LICENSES_PATH, table: str = "DEFAULT_RESOURCES"
+) -> None:
     mirrored = pins.get(resource.destination)
     if mirrored != resource.sha256:
         listed = f"lists {mirrored}" if mirrored else "does not list it"
         raise FetchError(
-            f"{paths.display_path(LICENSES_PATH)} {listed} for {resource.destination}; the pin is {resource.sha256} "
-            "(DEFAULT_RESOURCES in Scripts/FetchAssets.py)"
+            f"{paths.display_path(licenses)} {listed} for {resource.destination}; the pin is {resource.sha256} "
+            f"({table} in Scripts/FetchAssets.py)"
         )
 
 
@@ -362,14 +437,47 @@ def fetch_defaults(check_only: bool = False, log: Callable[[str], None] = ignore
                 raise FetchError(f"cannot read {resource.destination}: {error}") from None
             verify_pinned(resource, data)
         else:
-            if resource.kind == "hdri":
-                data = download_hdri(resource.asset_id, resource.resolution, log)
-            else:
-                data = download_font(log)
-            verify_pinned(resource, data)
-            write_atomically(resource.path, data)
+            write_atomically(resource.path, download_pinned(resource, log))
         written.append(resource.path)
     return written
+
+
+def download_pinned(resource: PinnedResource, log: Callable[[str], None]) -> bytes:
+    """The bytes of `resource` downloaded from its official source and verified against its pin."""
+    if resource.kind == "hdri":
+        data = download_hdri(resource.asset_id, resource.resolution, log)
+    elif resource.kind == "commons":
+        data = download_commons(resource.url, resource.size, resource.sha256, log)
+    else:
+        data = download_inter_member(resource.member, resource.size, resource.sha256, log)
+    verify_pinned(resource, data)
+    return data
+
+
+def fetch_fixtures(
+    check_only: bool = False, log: Callable[[str], None] = ignore_progress
+) -> tuple[list[Path], list[Path]]:
+    """Verifies the pinned format fixtures under Tests/Data/Assets and, unless `check_only`, downloads each one that is
+    missing or does not match its pin. Returns the committed files that verified and the files written."""
+    pins = mirrored_pins(FIXTURE_LICENSES_PATH, FIXTURE_PIN_PATTERN)
+    for resource in FIXTURE_FILES:
+        check_mirror(resource, pins, FIXTURE_LICENSES_PATH, "FIXTURE_FILES")
+    verified: list[Path] = []
+    written: list[Path] = []
+    for resource in FIXTURE_FILES:
+        try:
+            verify_pinned(resource, resource.path.read_bytes())
+            verified.append(resource.path)
+            continue
+        except OSError as error:
+            if check_only:
+                raise FetchError(f"cannot read {resource.destination}: {error}") from None
+        except FetchError:
+            if check_only:
+                raise
+        write_atomically(resource.path, download_pinned(resource, log))
+        written.append(resource.path)
+    return verified, written
 
 
 def run_command(options: argparse.Namespace, console: Console) -> tuple[list[Step], list[Path]]:
@@ -379,20 +487,28 @@ def run_command(options: argparse.Namespace, console: Console) -> tuple[list[Ste
     elif options.command == "font":
         name = f"font Inter {INTER_VERSION}"
     else:
-        name = "defaults --check" if options.check else "defaults"
-    files: list[Path] = []
+        name = f"{options.command} --check" if options.check else options.command
+    written: list[Path] = []
+    verified: list[Path] = []
     try:
         if options.command == "hdri":
-            files = [fetch_hdri(options.id, options.res, options.dest, console.print)]
+            written = [fetch_hdri(options.id, options.res, options.dest, console.print)]
         elif options.command == "font":
-            files = [fetch_font(options.dest, console.print)]
+            written = [fetch_font(options.dest, console.print)]
+        elif options.command == "fixture":
+            verified, written = fetch_fixtures(options.check, console.print)
+        elif options.check:
+            verified = fetch_defaults(True, console.print)
         else:
-            files = fetch_defaults(options.check, console.print)
+            written = fetch_defaults(False, console.print)
     except (FetchError, OSError) as error:
         return [Step(name, Status.FAILED, str(error), time.perf_counter() - start)], []
-    verb = "verified" if options.command == "defaults" and options.check else "wrote"
-    detail = f"{verb} " + ", ".join(paths.display_path(file) for file in files)
-    return [Step(name, Status.PASSED, detail, time.perf_counter() - start)], files
+    details = []
+    if verified:
+        details.append("verified " + ", ".join(paths.display_path(file) for file in verified))
+    if written:
+        details.append("wrote " + ", ".join(paths.display_path(file) for file in written))
+    return [Step(name, Status.PASSED, "; ".join(details), time.perf_counter() - start)], verified + written
 
 
 def main(arguments: list[str] | None = None) -> int:

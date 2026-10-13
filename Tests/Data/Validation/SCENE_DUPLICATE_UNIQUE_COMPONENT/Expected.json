@@ -1,0 +1,9 @@
+{
+	"Format": "ValidationFixture",
+	"Version": 1,
+	"Scope": "Project",
+	"Codes": ["SCENE_DUPLICATE_UNIQUE_COMPONENT"],
+	"TestComponents": false,
+	"Expand": [],
+	"NonCanonical": []
+}

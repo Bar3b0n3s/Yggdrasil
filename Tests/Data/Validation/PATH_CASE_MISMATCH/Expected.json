@@ -1,0 +1,9 @@
+{
+	"Format": "ValidationFixture",
+	"Version": 1,
+	"Scope": "Project",
+	"Codes": ["PATH_CASE_MISMATCH"],
+	"TestComponents": false,
+	"Expand": [],
+	"NonCanonical": []
+}

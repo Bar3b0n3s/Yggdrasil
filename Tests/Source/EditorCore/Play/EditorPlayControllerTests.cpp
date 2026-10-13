@@ -36,7 +36,9 @@
 #include <nlohmann/json.hpp>
 
 #include <array>
+#include <chrono>
 #include <cstddef>
+#include <filesystem>
 #include <format>
 #include <optional>
 #include <span>
@@ -51,6 +53,13 @@ namespace Engine {
 	static Json CallEditorHost(Test::AutomationFixture& fixture, std::string_view method, const Json& params = Json::object())
 	{
 		auto result = fixture.Call(method, params);
+		REQUIRE_MESSAGE(result.has_value(), (result ? "" : result.error().ToString()));
+		return std::move(*result);
+	}
+
+	static Json CallEditorHost(Test::AutomationTestClient& client, std::string_view method, const Json& params = Json::object())
+	{
+		auto result = client.Call(method, params);
 		REQUIRE_MESSAGE(result.has_value(), (result ? "" : result.error().ToString()));
 		return std::move(*result);
 	}
@@ -1094,15 +1103,141 @@ return Script.Define("Host", Host)
 		// finding's location and Callback "Reload"; without the setting the reload proceeds as before. CheckReloadTypes is the
 		// shared gate: an ordinary session applies it only with the setting, a test session always (type errors always block
 		// test runs, §11.9), which is how Test.ReloadScript takes "the same path".
-		TEST_CASE("EditorPlayController: a reload refused for type errors keeps the running code and reports a type error" * doctest::skip(true))
+		TEST_CASE("EditorPlayController: a reload refused for type errors keeps the running code and reports a type error")
 		{
 			const auto source = Test::ReadTestDataText("Scripts/Errors/TypeReload.luau");
 			REQUIRE_MESSAGE(source.has_value(), source.error().ToString());
-			Test::EditorTestFixture fixture("ReloadTypeGate");
-			fixture.CreateAndOpenProject();
-			CHECK(fixture.GetEditor().GetPlay().CheckReloadTypes(AssetHandle(0x7e57)).has_value());
-			FAIL("contract skeleton: play a behaviour, rewrite it with the fixture's type error, check CheckReloadTypes in an ordinary "
-				 "session with and without the setting and in a test session, then reload and check the Type script error");
+			// Where the fixture's type error is (Tests/Data/Scripts/Errors/Expected.json).
+			const auto expectedText = Test::ReadTestDataText("Scripts/Errors/Expected.json");
+			REQUIRE_MESSAGE(expectedText.has_value(), expectedText.error().ToString());
+			const auto expected = JsonReader::Parse(*expectedText);
+			REQUIRE(expected.has_value());
+			uint32_t errorLine = 0;
+			uint32_t errorColumn = 0;
+			for (const Json& entry : *expected)
+			{
+				if (entry["File"] == Json("TypeReload.luau"))
+				{
+					errorLine = JsonReader(entry).ReadMember<uint32_t>("Line").value_or(0u);
+					errorColumn = JsonReader(entry).ReadMember<uint32_t>("Column").value_or(0u);
+				}
+			}
+			REQUIRE(errorLine != 0);
+			const std::string broken = *source;
+			std::string clean = broken;
+			const size_t literal = clean.find("\"two\"");
+			REQUIRE(literal != std::string::npos);
+			clean.replace(literal, std::string_view("\"two\"").size(), "1"); // the same behaviour before the edit
+
+			Test::EditorTestFixture setup("ReloadTypeGate");
+			setup.CreateAndOpenProject();
+			setup.CreateAndOpenScene();
+			EditorContext& editor = setup.GetEditor();
+			// A stepping server clock gives test.run one runner step per poll, so the run below is observable between its ticks
+			// however fast the build runs (the real clock let a Release build finish the whole run within one poll).
+			auto now = std::chrono::steady_clock::time_point{};
+			auto specification = Test::MakeTestServerSpecification();
+			specification.WallClock = [&now]()
+			{
+				now += std::chrono::milliseconds(100);
+				return now;
+			};
+			Test::AutomationTestClient fixture(editor, std::move(specification));
+			auto& play = editor.GetPlay();
+			const std::string path = "Assets/Scripts/TypeReload.luau";
+			const auto write = [&fixture, &editor, &path](const std::string& text)
+			{
+				CallEditorHost(fixture, "script.write", Json{ { "path", path }, { "source", text } });
+				editor.GetAssets().WaitIdle();
+			};
+			const auto current = [&fixture]()
+			{
+				return CallEditorHost(fixture, "script.eval", Json{ { "context", "play" }, { "code", "return Scene.FindByName('Typed'):GetScript():Current()" } })["value"];
+			};
+			const auto blockOnTypeErrors = [&fixture](bool block)
+			{
+				CallEditorHost(fixture, "project.setSettings", Json{ { "patch", Json{ { "Scripting", Json{ { "BlockPlayOnTypeErrors", block } } } } } });
+			};
+			write(clean);
+			CallEditorHost(fixture, "entity.create", Json{ { "name", "Typed" }, { "components", Json{ { "Script", Json{ { "Script", path } } } } } });
+			const std::optional<AssetHandle> script = editor.GetAssets().Resolve(path);
+			REQUIRE(script.has_value());
+			// Without a session there is nothing to keep.
+			CHECK(play.CheckReloadTypes(*script).has_value());
+
+			// Without Scripting.BlockPlayOnTypeErrors an ordinary session's reload proceeds as before.
+			blockOnTypeErrors(false);
+			CallEditorHost(fixture, "play.start", Json{ { "paused", true } });
+			CHECK(current() == Json(1));
+			uint64_t cursor = play.GetScriptErrors().GetCursor();
+			write(broken);
+			CHECK(play.CheckReloadTypes(*script).has_value());
+			play.OnSafePoint();
+			CHECK(current() == Json("two"));
+			CHECK(play.GetScriptErrors().Read(cursor).empty());
+			CallEditorHost(fixture, "play.stop");
+
+			// With it, the reload is refused: the running code stays and one `type` error is published at the finding.
+			write(clean);
+			blockOnTypeErrors(true);
+			CallEditorHost(fixture, "play.start", Json{ { "paused", true } });
+			CHECK(current() == Json(1));
+			cursor = play.GetScriptErrors().GetCursor();
+			write(broken);
+			play.OnSafePoint();
+			CHECK(current() == Json(1));
+			const auto refusedErrors = play.GetScriptErrors().Read(cursor);
+			REQUIRE(refusedErrors.size() == 1);
+			CHECK(refusedErrors.front().Kind == ScriptErrorKind::Type);
+			CHECK(refusedErrors.front().Callback == "Reload");
+			CHECK(refusedErrors.front().Script == path);
+			CHECK(refusedErrors.front().Line == errorLine);
+			CHECK(refusedErrors.front().Column == errorColumn);
+			CHECK(refusedErrors.front().Tick == play.GetSession()->GetTick());
+			CHECK(ScriptErrorKindToString(refusedErrors.front().Kind) == "type");
+			// The gate itself names the location; the next safe point does not retry the refused publication.
+			const Status refused = play.CheckReloadTypes(*script);
+			REQUIRE_FALSE(refused.has_value());
+			CHECK(refused.error().GetCode() == ErrorCode::Script);
+			CHECK(refused.error().GetLocation().File == path);
+			CHECK(refused.error().GetLocation().Line == errorLine);
+			play.OnSafePoint();
+			CHECK(current() == Json(1));
+			CallEditorHost(fixture, "play.stop");
+
+			// A test session always applies the gate (type errors always block test runs, §11.9), whatever the setting:
+			// Test.ReloadScript takes this path once the runner's host calls it before reloading.
+			write(clean);
+			blockOnTypeErrors(false);
+			CallEditorHost(fixture, "scene.save", Json::object());
+			CallEditorHost(fixture, "script.write", Json{ { "path", "Assets/Tests/Gate.test.luau" }, { "source", "return Test.Suite(\"Gate\", function()\n\tTest.Case(\"waits\", function()\n\t\tTest.WaitTicks(500)\n\tend)\nend)\n" } });
+			CallEditorHost(fixture, "project.setSettings",
+				Json{ { "patch", Json{ { "Testing", Json{ { "Suites", Json::array({ Json{ { "Script", "Assets/Tests/Gate.test.luau" }, { "Scene", "Assets/Scenes/Main.scene" }, { "Modes", Json::array({ "Editor" }) } } }) } } } } } });
+			editor.GetAssets().WaitIdle();
+			Test::AutomationTestClient& client = fixture;
+			static_cast<void>(client.Submit("test.run", Json::object()));
+			REQUIRE(Test::WaitUntil([&client, &play]()
+			{
+				client.GetServer().Pump();
+				const PlaySession* session = play.GetSession();
+				return play.IsTestRunActive() && session != nullptr && session->GetScripts() != nullptr && session->GetTick() > 0;
+			}));
+			CHECK(play.CheckReloadTypes(*script).has_value()); // the test VM runs the clean script
+			// What Test.ReloadScript's reimport sees: the source changed on disk during the run.
+			const std::filesystem::path file = setup.GetProjectRoot() / "Assets" / "Scripts" / "TypeReload.luau";
+			REQUIRE(FileSystem::WriteFileAtomic(file, std::as_bytes(std::span(broken.data(), broken.size())), { .KeepBackup = false }).has_value());
+			REQUIRE(editor.GetAssets().Reimport(*script).has_value());
+			cursor = play.GetScriptErrors().GetCursor();
+			const Status inTest = play.CheckReloadTypes(*script);
+			REQUIRE_FALSE(inTest.has_value());
+			CHECK(inTest.error().GetCode() == ErrorCode::Script);
+			CHECK(inTest.error().GetLocation().Line == errorLine);
+			const auto testErrors = play.GetScriptErrors().Read(cursor);
+			REQUIRE(testErrors.size() == 1);
+			CHECK(testErrors.front().Kind == ScriptErrorKind::Type);
+			CHECK(testErrors.front().Callback == "Reload");
+			client.GetServer().DisconnectInProcess(client.GetClient());
+			CHECK_FALSE(play.IsTestRunActive());
 		}
 	}
 

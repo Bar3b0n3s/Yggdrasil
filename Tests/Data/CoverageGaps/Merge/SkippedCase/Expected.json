@@ -1,0 +1,5 @@
+{
+	"Format": "CoverageGap",
+	"Version": 1,
+	"Failures": ["merge: skipped: Editor Api.Physics/sweeps"]
+}

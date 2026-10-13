@@ -37,6 +37,7 @@
 #include "Support/EditorTestFixture.h"
 #include "Support/ExpectLog.h"
 #include "Support/TestData.h"
+#include "Support/ValidatorTestTypes.h"
 
 #include <nlohmann/json.hpp>
 
@@ -45,39 +46,6 @@
 #include <map>
 
 namespace Engine {
-
-	namespace Test {
-
-		// Registry component "ValidatorTarget": a user component with an EntityRef field. M4's built-in components have none
-		// outside the prefab components, whose references the structural checks own.
-		struct ValidatorTargetComponent
-		{
-			UUID Target;
-		};
-
-		// Registry component "ValidatorFollower": requires ValidatorTarget. Every built-in requirement in M4 is Transform,
-		// which every entity has, so a missing requirement needs a component of the test's own.
-		struct ValidatorFollowerComponent
-		{
-			float Speed = 1.0f;
-		};
-
-	}
-
-	// The editor's types plus ValidatorTarget and ValidatorFollower (EditorTestFixture's registration hook).
-	static void RegisterValidatorTestTypes(TypeRegistry& registry)
-	{
-		RegisterEditorMethodTypes(registry);
-		RegisterComponent<Test::ValidatorTargetComponent>(registry, "ValidatorTarget", "Refers to another entity of the scene (validator tests).")
-			.Category("Tests")
-			.Version(1)
-			.Field("Target", &Test::ValidatorTargetComponent::Target, "The entity it refers to.");
-		RegisterComponent<Test::ValidatorFollowerComponent>(registry, "ValidatorFollower", "Follows its ValidatorTarget (validator tests).")
-			.Category("Tests")
-			.Version(1)
-			.Requires<Test::ValidatorTargetComponent>()
-			.Field("Speed", &Test::ValidatorFollowerComponent::Speed, "How fast it follows, in metres per second.", { .Min = 0.0, .Unit = "m/s" });
-	}
 
 	static Json ParseValidatorJson(std::string_view text)
 	{
@@ -767,7 +735,7 @@ end
 
 		TEST_CASE("ProjectValidator: a reference to an entity that is gone is reported, and the fix clears it in one undo step")
 		{
-			Test::EditorTestFixture fixture("ValidatorDangling", {}, &RegisterValidatorTestTypes);
+			Test::EditorTestFixture fixture("ValidatorDangling", {}, &Test::RegisterValidatorTestTypes);
 			fixture.CreateAndOpenProject();
 			fixture.CreateAndOpenScene();
 			EditorContext& editor = fixture.GetEditor();
@@ -825,7 +793,7 @@ end
 
 		TEST_CASE("ProjectValidator: scene files report order, prefab links, component problems and unloadable files under the validator codes")
 		{
-			Test::EditorTestFixture fixture("ValidatorFileCodes", {}, &RegisterValidatorTestTypes);
+			Test::EditorTestFixture fixture("ValidatorFileCodes", {}, &Test::RegisterValidatorTestTypes);
 			fixture.CreateAndOpenProject();
 			fixture.CreateAndOpenScene();
 			EditorContext& editor = fixture.GetEditor();
@@ -1557,7 +1525,7 @@ end
 			CHECK_FALSE(noListener->Hint.empty());
 		}
 
-		TEST_CASE("ProjectValidator: every code has a severity, a description and a fix statement" * doctest::skip(true))
+		TEST_CASE("ProjectValidator: every code has a severity, a description and a fix statement")
 		{
 			const auto codes = ProjectValidator::GetCodes();
 			const auto infos = ProjectValidator::GetCodeInfos();

@@ -342,6 +342,79 @@ namespace Engine {
 			}
 		}
 
+		// ADR 0022 "Integration": the checker used Luau's one-second wall-clock module limit, so a long script on a loaded
+		// machine reported "script analysis exceeded its safety limit" as a type error and blocked test discovery. Analysis
+		// now has no time limit: a module whose analysis takes several seconds in Debug (well over the old limit) reports
+		// exactly its real finding, and the same findings every time.
+		TEST_CASE("ScriptTypeChecker: findings do not depend on how long the analysis takes")
+		{
+			const auto checker = Test::PrimitiveChecker();
+			constexpr int Functions = 600;
+			std::string source = "--!strict\nlocal M = {}\ntype Point = { X: number, Y: number, Z: vector }\n";
+			for (int i = 0; i < Functions; ++i)
+			{
+				source += std::format("function M.F{0}(a: Point, b: number): Point\n\tlocal t = {{ X = a.X + b, Y = a.Y * {0}, Z = a.Z + vector.create(b, {0}, 1) }}\n"
+									  "\tif t.X > {0} then return M.F{1}(t, b - 1) end\n\treturn t\nend\n",
+					i, i > 0 ? i - 1 : 0);
+			}
+			const uint32_t errorLine = 3 + 5 * Functions + 1;
+			source += "local wrong: number = \"text\"\nM.Wrong = wrong\nreturn M\n";
+			Test::CheckerModuleReader reader;
+			const auto path = Test::ParseVfsPath("project://Assets/Long.luau");
+			const auto findings = checker->CheckScript({ path, source, &reader });
+			REQUIRE(findings.size() == 1);
+			CHECK(findings[0].Code == "SCRIPT_TYPE_ERROR");
+			CHECK(findings[0].Line == errorLine);
+			CHECK(findings[0].Message.find("safety limit") == std::string::npos);
+			CHECK(checker->CheckScript({ path, source, &reader }) == findings);
+		}
+
+		// Review finding M23 (ADR 0022 "Integration"): Luau evaluates a user-defined type function's body in its analysis VM,
+		// whose only interrupt checks a time limit or a cancellation token, and the checker sets neither (findings must not
+		// depend on machine load), so a looping body never returned and hung every import, script.check and test run. The
+		// checker refuses type functions before analysis, at each declaration, in the root and in required modules. Without
+		// the refusal the first check below never returns, and the case's timeout ends the run instead of a hang.
+		TEST_CASE("ScriptTypeChecker: a user-defined type function is refused before analysis, so a looping one cannot hang a check"
+			* doctest::timeout(120.0))
+		{
+			const auto checker = Test::PrimitiveChecker();
+			Test::CheckerModuleReader reader;
+			const auto root = Test::ParseVfsPath("project://Assets/Spin.luau");
+			const auto looping = checker->CheckScript({ root,
+				"--!strict\ntype function Spin(t)\n\twhile true do end\n\treturn t\nend\nlocal value: Spin<number> = 1\nreturn value\n", &reader });
+			REQUIRE(looping.size() == 1);
+			CHECK(looping[0].Severity == DiagnosticSeverity::Error);
+			CHECK(looping[0].Code == "SCRIPT_TYPE_ERROR");
+			CHECK(looping[0].File == "Assets/Spin.luau");
+			CHECK(looping[0].Line == 2);
+			CHECK(looping[0].Column == 15);
+			CHECK(looping[0].EndColumn == 19);
+			CHECK(looping[0].Message.contains("type function 'Spin' is not supported"));
+
+			// A body that would raise when evaluated is refused without running, and syntax errors are still reported.
+			const auto raising = checker->CheckScript({ root, "--!strict\ntype function Boom(t)\n\terror(\"evaluated\")\nend\nreturn )\n", &reader });
+			REQUIRE(raising.size() == 2);
+			CHECK(raising[0].Code == "SCRIPT_TYPE_ERROR");
+			CHECK(raising[0].Line == 2);
+			CHECK_FALSE(raising[0].Message.contains("evaluated"));
+			CHECK(raising[1].Code == "SCRIPT_COMPILE_ERROR");
+			CHECK(raising[1].Line == 5);
+
+			// An exported type function in a required module refuses that module, so the frontend never evaluates it.
+			const auto types = Test::ParseVfsPath("project://Assets/Types.luau");
+			reader.Sources[types] = "--!strict\nexport type function Spin(t)\n\twhile true do end\n\treturn t\nend\nreturn {}\n";
+			const auto required = checker->CheckScript({ root, "--!strict\nlocal Types = require(\"./Types\")\nreturn Types\n", &reader });
+			CHECK(Test::HasCheckerErrors(required));
+			CHECK(std::ranges::any_of(required, [](const ScriptDiagnostic& finding)
+			{
+				return finding.File == "Assets/Types.luau" && finding.Code == "SCRIPT_TYPE_ERROR" && finding.Line == 2
+					&& finding.Message.contains("type function 'Spin' is not supported");
+			}));
+
+			// A plain type alias is unaffected.
+			CHECK(checker->CheckScript({ root, "--!strict\ntype Pair = { number }\nlocal pair: Pair = { 1 }\nreturn pair\n", &reader }).empty());
+		}
+
 		TEST_CASE("ScriptTypeChecker: simultaneous checks are deterministic and failures never appear clean")
 		{
 			const auto checker = Test::PrimitiveChecker();

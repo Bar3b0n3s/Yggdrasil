@@ -1,0 +1,27 @@
+{
+	"Format": "DocExampleSeed",
+	"Version": 1,
+	"Document": "Seeded.md",
+	"Checked": 3,
+	"Skipped": 1,
+	"Findings": [
+		{
+			"Line": 7,
+			"Elsewhere": "",
+			"Code": "SCRIPT_TYPE_ERROR",
+			"MessageContains": "string"
+		},
+		{
+			"Line": 16,
+			"Elsewhere": "",
+			"Code": "SCRIPT_TYPE_ERROR",
+			"MessageContains": "string"
+		},
+		{
+			"Line": 0,
+			"Elsewhere": "Tests/Data/TypeChecker/DocExamples/Preludes/Behaviour.luau:15:8",
+			"Code": "SCRIPT_TYPE_ERROR",
+			"MessageContains": "number"
+		}
+	]
+}

@@ -1,0 +1,7 @@
+{
+	"Format": "CoverageGap",
+	"Version": 1,
+	"Gate": "9",
+	"Mode": "Editor",
+	"Missing": ["format:Font/.otf"]
+}

@@ -139,7 +139,7 @@ namespace Engine {
 			registry.Freeze();
 			TestRunResult result;
 			result.Coverage.RegistryFingerprint = "stable";
-			result.Coverage.Counters.push_back({ "Test.ReloadScript", "function", { TestSuiteSettings::Mode::Editor }, 7 });
+			result.Coverage.Counters.push_back({ "api:Test.ReloadScript", "function", { TestSuiteSettings::Mode::Editor }, 7 });
 			auto json = TestRunResultToJson(result, registry);
 			REQUIRE(json);
 			auto coverage = JsonReader(*json).GetMember("coverage");
@@ -149,7 +149,8 @@ namespace Engine {
 			REQUIRE(counters);
 			auto row = counters->GetElement(0);
 			REQUIRE(row);
-			CHECK(row->ReadMember<std::string>("id").value_or("") == "Test.ReloadScript");
+			CHECK(row->ReadMember<std::string>("id").value_or("") == "api:Test.ReloadScript");
+			CHECK(row->ReadMember<std::string>("kind").value_or("") == "function");
 			CHECK(row->ReadMember<uint32_t>("count").value_or(0) == 7);
 		}
 
@@ -160,7 +161,7 @@ namespace Engine {
 			RegisterTestResultTypes(registry);
 			registry.Freeze();
 			TestRunResult result;
-			result.Coverage.Gates.push_back({ "M14", false, false, {} });
+			result.Coverage.Gates.push_back({ "1", false, false, {} });
 			CHECK(TestRunResultToJson(result, registry));
 			result.Coverage.Gates[0].Passed = true;
 			CHECK_FALSE(TestRunResultToJson(result, registry));
@@ -209,7 +210,7 @@ namespace Engine {
 			}
 		}
 
-		TEST_CASE("TestResults: the JUnit report lists every coverage gate in a FeatureTest.coverage suite" * doctest::skip(true))
+		TEST_CASE("TestResults: the JUnit report lists every coverage gate in a FeatureTest.coverage suite")
 		{
 			TestRunResult result;
 			result.Passed = false;

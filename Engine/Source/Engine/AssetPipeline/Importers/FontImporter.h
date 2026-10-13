@@ -25,11 +25,13 @@ namespace Engine {
 	// translation unit only (Appendix C), so it never clashes with Dear ImGui's copy. Glyphs are packed deterministically
 	// (sorted by codepoint, a fixed shelf packer into the smallest power-of-two square that fits). Cooked as one FontData
 	// (CookFont). A font stb_truetype cannot read, or one without any glyph of the character set, is ImportFailed.
+	// Version 2: CFF (.otf) outlines keep their cubic segments in the distance field (ADR 0022 "Integration"); TrueType
+	// atlases are byte-identical to version 1's.
 	class FontImporter final : public IAssetImporter
 	{
 	public:
 		static constexpr std::string_view Id = "Font";
-		static constexpr uint32_t Version = 1;
+		static constexpr uint32_t Version = 2;
 
 		[[nodiscard]] std::string_view GetId() const override { return Id; }
 		[[nodiscard]] uint32_t GetVersion() const override { return Version; }

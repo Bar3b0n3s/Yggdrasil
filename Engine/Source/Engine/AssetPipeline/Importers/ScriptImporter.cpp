@@ -3,6 +3,7 @@
 
 #include "Engine/Asset/ScriptData.h"
 #include "Engine/Core/Hash.h"
+#include "Engine/Platform/ThreadClock.h"
 #include "Engine/Scripting/LoadTimeVm.h"
 
 #include <algorithm>
@@ -119,7 +120,10 @@ namespace Engine {
 			context.SetScriptCheck(check);
 			return std::unexpected(std::move(error));
 		};
-		auto extracted = LoadTimeVm::Extract(request);
+		// The load-time VM's 250 ms budget counts this import thread's own CPU time, not wall time, so an import never fails
+		// because other threads kept the machine busy or the thread waited (ADR 0022 "Integration"): importers are pure
+		// functions of their inputs (Architecture §7.4).
+		auto extracted = LoadTimeVm::Extract(request, LoadTimeVmSpecification{ .ClockSeconds = &ThreadClock::GetCpuSeconds });
 		if (!extracted)
 			return fail(std::move(extracted).error());
 		ScriptData script = **extracted;

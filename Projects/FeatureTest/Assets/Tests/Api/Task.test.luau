@@ -1,0 +1,48 @@
+--!strict
+-- The Task module (§11.3): spawned and delayed tasks resume at the ticks their waits name, and cancelled tasks never
+-- run. A wait of s seconds lasts ceil(s / fixed delta) ticks, at least one.
+return Test.Suite("Api.Task", function()
+	Test.Case("spawned tasks run at once and resume after their waits", function()
+		local start = Time.GetTick()
+		local log: { string } = {}
+		Task.Spawn(function()
+			table.insert(log, "spawned@" .. (Time.GetTick() - start))
+			Task.Wait(0)
+			table.insert(log, "waited@" .. (Time.GetTick() - start))
+			Task.WaitTicks(2)
+			table.insert(log, "ticks@" .. (Time.GetTick() - start))
+			Task.Wait(3 / 64)
+			table.insert(log, "seconds@" .. (Time.GetTick() - start))
+		end)
+		Test.ExpectEqual(table.concat(log, ","), "spawned@0", "a spawned task runs to its first wait at once")
+		Test.WaitTicks(7)
+		Test.ExpectEqual(table.concat(log, ","), "spawned@0,waited@1,ticks@3,seconds@6")
+	end)
+
+	Test.Case("delays run when due and cancelled tasks never run", function()
+		local start = Time.GetTick()
+		local fired: { number } = {}
+		Task.Delay(0, function()
+			table.insert(fired, Time.GetTick() - start)
+		end)
+		local later = Task.Delay(0.1, function()
+			table.insert(fired, Time.GetTick() - start)
+		end)
+		local cancelled = Task.Delay(0.05, function()
+			table.insert(fired, -1)
+		end)
+		Task.Cancel(cancelled)
+		Task.Cancel(cancelled)
+		Test.WaitTicks(10)
+		Test.ExpectEqual(table.concat(fired, ","), "1,7", "0 s waits one tick and 0.1 s waits ceil(6.4) = 7 ticks")
+		Task.Cancel(later) -- cancelling a finished task succeeds
+	end)
+
+	Test.Case("a case waits with Task.Wait like a task", function()
+		local start = Time.GetTick()
+		Task.Wait(2 / 64)
+		Test.ExpectEqual(Time.GetTick() - start, 2)
+		Task.WaitTicks(1)
+		Test.ExpectEqual(Time.GetTick() - start, 3)
+	end)
+end)

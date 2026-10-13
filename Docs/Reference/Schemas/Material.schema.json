@@ -1,0 +1,169 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"title": "Material",
+	"description": "A material file (§6.5).",
+	"type": "object",
+	"properties": {
+		"Format": {
+			"description": "The file's format name; first key of the file.",
+			"enum": ["Material"]
+		},
+		"Version": {
+			"description": "The format version this build writes; older versions are migrated when read.",
+			"enum": [1]
+		},
+		"BaseColor": {
+			"description": "The linear base colour and alpha, multiplied with BaseColorMap.",
+			"type": "array",
+			"prefixItems": [
+				{
+					"type": "number",
+					"minimum": 0,
+					"maximum": 1
+				},
+				{
+					"type": "number",
+					"minimum": 0,
+					"maximum": 1
+				},
+				{
+					"type": "number",
+					"minimum": 0,
+					"maximum": 1
+				},
+				{
+					"type": "number",
+					"minimum": 0,
+					"maximum": 1
+				}
+			],
+			"minItems": 4,
+			"maxItems": 4
+		},
+		"BaseColorMap": {
+			"description": "The sRGB base colour texture; null for none (White is bound).",
+			"type": ["string", "null"],
+			"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+			"x-assetType": "Texture"
+		},
+		"Metallic": {
+			"description": "How metallic the surface is: 0 dielectric, 1 metal; multiplied with the map's blue channel.",
+			"type": "number",
+			"minimum": 0,
+			"maximum": 1
+		},
+		"Roughness": {
+			"description": "The perceptual roughness: 0 mirror-like, 1 fully rough; multiplied with the map's green channel.",
+			"type": "number",
+			"minimum": 0,
+			"maximum": 1
+		},
+		"MetallicRoughnessMap": {
+			"description": "The linear texture holding roughness in green and metalness in blue (glTF); null for none.",
+			"type": ["string", "null"],
+			"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+			"x-assetType": "Texture"
+		},
+		"NormalMap": {
+			"description": "The tangent-space normal map; null for none (FlatNormal is bound).",
+			"type": ["string", "null"],
+			"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+			"x-assetType": "Texture"
+		},
+		"NormalScale": {
+			"description": "The strength of the normal map's X and Y deflection.",
+			"type": "number",
+			"minimum": 0
+		},
+		"OcclusionMap": {
+			"description": "The linear ambient occlusion texture (red channel); null for none.",
+			"type": ["string", "null"],
+			"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+			"x-assetType": "Texture"
+		},
+		"OcclusionStrength": {
+			"description": "How much the occlusion map darkens ambient light: 0 none, 1 fully.",
+			"type": "number",
+			"minimum": 0,
+			"maximum": 1
+		},
+		"Emissive": {
+			"description": "The linear emitted colour, multiplied with EmissiveMap and EmissiveStrength.",
+			"type": "array",
+			"prefixItems": [
+				{
+					"type": "number",
+					"minimum": 0,
+					"maximum": 1
+				},
+				{
+					"type": "number",
+					"minimum": 0,
+					"maximum": 1
+				},
+				{
+					"type": "number",
+					"minimum": 0,
+					"maximum": 1
+				}
+			],
+			"minItems": 3,
+			"maxItems": 3
+		},
+		"EmissiveStrength": {
+			"description": "The emission multiplier for HDR emission (KHR_materials_emissive_strength).",
+			"type": "number",
+			"minimum": 0
+		},
+		"EmissiveMap": {
+			"description": "The sRGB emission texture; null for none (Black is bound).",
+			"type": ["string", "null"],
+			"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+			"x-assetType": "Texture"
+		},
+		"AlphaMode": {
+			"description": "How the base colour alpha is used.",
+			"enum": ["Opaque", "Mask", "Blend"]
+		},
+		"AlphaCutoff": {
+			"description": "The alpha below which Mask discards a pixel.",
+			"type": "number",
+			"minimum": 0,
+			"maximum": 1
+		},
+		"DoubleSided": {
+			"description": "Whether back faces are drawn (and lit with flipped normals).",
+			"type": "boolean"
+		},
+		"UVScale": {
+			"description": "The scale applied to texture coordinates before UVOffset (KHR_texture_transform).",
+			"type": "array",
+			"prefixItems": [
+				{
+					"type": "number"
+				},
+				{
+					"type": "number"
+				}
+			],
+			"minItems": 2,
+			"maxItems": 2
+		},
+		"UVOffset": {
+			"description": "The offset added to scaled texture coordinates (KHR_texture_transform).",
+			"type": "array",
+			"prefixItems": [
+				{
+					"type": "number"
+				},
+				{
+					"type": "number"
+				}
+			],
+			"minItems": 2,
+			"maxItems": 2
+		}
+	},
+	"required": ["Format", "Version"],
+	"additionalProperties": false
+}

@@ -11,16 +11,15 @@
 #include <string>
 
 // The editor's own command-line options (Architecture §12.1, §13.9), the M4 subset, M6's --bake-engine-assets and
-// --engine-cache-dir, M13's --check-scripts, --run-tests and --filter, and M14's --id-seed:
+// --engine-cache-dir, M13's --check-scripts, --run-tests and --filter, and M14's --id-seed and --junit:
 //   Editor [--project <path>] [--read-only] [--automation[=port]] [--automation-test-hooks] [--batch <file.jsonl>
 //          [--id-seed <n>]] [--upgrade] [--dump-reference <dir>] [--bake-engine-assets] [--engine-cache-dir <dir>]
-//          [--check-scripts] [--run-tests [--filter <pattern>]]
+//          [--check-scripts] [--run-tests [--filter <pattern>] [--junit <file.xml>]]
 // plus the engine options every application takes (GetEngineCommandLineOptions: --headless, --frames N,
 // --user-data-dir, --renderer vulkan|none and the graphics options) and the Editor executable's screenshot options
 // (Editor/EditorApp.h). --renderer is an engine option because the Runtime takes it too (§13.9; ADR 0009 decision 3:
-// one definition after the M4/M5 merge, decision 33). --junit (stream A of M14), --validate, --export and --timeout
-// arrive with their milestones. Parsed in EditorCore so the rules are unit-tested;
-// EditorApp applies them.
+// one definition after the M4/M5 merge, decision 33). --validate, --export and --timeout arrive with their milestones.
+// Parsed in EditorCore so the rules are unit-tested; EditorApp applies them.
 
 namespace Engine {
 
@@ -50,15 +49,19 @@ namespace Engine {
 		// --run-tests, names the JUnit report --run-tests writes; the JSON report goes beside it with the extension replaced
 		// by .json. Without it the reports are <working directory>/bin/TestResults/FeatureTest-Editor.xml and .json. Native,
 		// absolute or relative to the working directory; parent directories are created. Written whatever the outcome,
-		// independent of the automation server's offload directory and its cleanup.
+		// independent of the automation server's offload directory and its cleanup: from the run's result, from the result
+		// test.run published with its error when its cases ran, or, when the run failed before a result existed (a preflight
+		// error such as script type errors), as a failed run naming the error (MakeFailedTestRunResult), so a report of an
+		// earlier run never survives at these paths.
 		std::optional<std::filesystem::path> TestJunitPath{};
 		// M14 (decision 8; implemented by the contract, so streams B and C can check their scaffolds from the start): --id-seed
 		// <n>, only with --batch: a decimal 64-bit seed whose Random(n).GetState() becomes the editor's id generator state
 		// (EditorContextSpecification::IdGeneratorState), so a committed scaffold run gives the same entity ids and asset
 		// handles on every machine. Without it the state comes from the OS CSPRNG.
 		std::optional<uint64_t> IdSeed{};
-		// --dump-reference <dir>: write <dir>/Methods.json (MethodRegistry::BuildMethodCatalog) and <dir>/catalog.json
-		// (BuildToolCatalog, the MCP catalogue, ADR 0008 decision 9), creating <dir>, and exit with 0 (§2.3 GenerateDocs.py).
+		// --dump-reference <dir>: write the whole generated reference into <dir> (DumpReferences, ReferenceGenerator.h: the
+		// method and MCP catalogues Methods.json and catalog.json, the Markdown references, Schemas/, Engine.d.luau and
+		// ScriptAPI.md), creating <dir>, and exit with 0 (§2.3 GenerateDocs.py, ADR 0022 decision 13).
 		std::optional<std::filesystem::path> DumpReferenceDirectory{};
 		// --bake-engine-assets (§7.5): fill the engine cooked cache bin/EngineCache (BakeEngineAssets over
 		// engine://EngineAssets.json, with the device's environment baker from M8) and exit: 0 when every entry is baked or up

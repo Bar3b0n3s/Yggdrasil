@@ -31,6 +31,7 @@
 #include <initializer_list>
 #include <map>
 #include <mutex>
+#include <vector>
 
 namespace Engine {
 
@@ -390,7 +391,7 @@ namespace Engine {
 
 		// ADR 0022 decision 5 (stream A): every successful Load of a registered asset notifies the load observer, an asset
 		// already loaded included; built-ins and failures never do.
-		TEST_CASE("EditorAssetManager: the load observer sees each successful load of a registered asset" * doctest::skip(true))
+		TEST_CASE("EditorAssetManager: the load observer sees each successful load of a registered asset")
 		{
 			Test::AssetTestFixture fixture;
 			fixture.WriteProjectFile("Assets/Wood.png", Test::MakeTestPng(8, 8));
@@ -974,6 +975,38 @@ namespace Engine {
 			// Loading a loaded asset completes at once.
 			CHECK(fixture.GetManager().LoadAsync(leaf).Take().has_value());
 			CHECK(counts.Get("project://Assets/A.leaf") == 1);
+		}
+
+		// ADR 0022 decision 5: a LoadAsync publication is observed when the main thread publishes it; scans and other
+		// imports that no LoadAsync requested are not loads and are never observed.
+		TEST_CASE("EditorAssetManager: the load observer sees a LoadAsync publication when the main thread publishes it")
+		{
+			ImportCounts counts;
+			Test::AssetTestFixture fixture;
+			RegisterTestImporters(fixture, counts);
+			fixture.WriteProjectText("Assets/A.leaf", MakeLeafText(4));
+			fixture.WriteProjectText("Assets/B.leaf", MakeLeafText(5));
+			fixture.OpenProject(false);
+			const AssetHandle leaf = fixture.GetManager().Resolve("Assets/A.leaf").value_or(AssetHandle());
+			std::vector<AssetHandle> seen;
+			fixture.GetManager().SetLoadObserver([&seen](AssetHandle loaded)
+			{
+				seen.push_back(loaded);
+			});
+
+			JobHandle<AssetRef<Asset>> job = fixture.GetManager().LoadAsync(leaf);
+			CHECK(seen.empty());
+			static_cast<void>(fixture.GetMainThreadQueue().Drain());
+			CHECK(seen == std::vector<AssetHandle>{ leaf });
+			CHECK(job.Take().has_value());
+			// A loaded asset completes through Load, which observes it again.
+			CHECK(fixture.GetManager().LoadAsync(leaf).Take().has_value());
+			CHECK(seen == std::vector<AssetHandle>{ leaf, leaf });
+			// A refresh imports nothing that was not requested by a load, so nothing new is observed.
+			REQUIRE(fixture.GetManager().Refresh().has_value());
+			fixture.GetManager().WaitIdle();
+			fixture.GetManager().SetLoadObserver({});
+			CHECK(seen == std::vector<AssetHandle>{ leaf, leaf });
 		}
 
 		TEST_CASE("EditorAssetManager: an older asynchronous reimport's completion is dropped")

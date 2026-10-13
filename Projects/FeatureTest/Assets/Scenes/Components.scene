@@ -1,0 +1,847 @@
+{
+	"Format": "Scene",
+	"Version": 1,
+	"Name": "Components",
+	"Seed": 0,
+	"ComponentVersions": {
+		"Transform": 1,
+		"MeshRenderer": 1,
+		"Camera": 1,
+		"DirectionalLight": 1,
+		"PointLight": 1,
+		"SpotLight": 1,
+		"Environment": 1,
+		"PostProcess": 1,
+		"Text": 1,
+		"RigidBody": 1,
+		"BoxCollider": 1,
+		"SphereCollider": 1,
+		"CapsuleCollider": 1,
+		"MeshCollider": 1,
+		"CharacterController": 1,
+		"AudioSource": 1,
+		"AudioListener": 1
+	},
+	"Entities": [
+		{
+			"ID": "7eea666af5b18048",
+			"Name": "Camera",
+			"Parent": null,
+			"Active": true,
+			"Tags": ["MainCamera"],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 4, 14],
+					"Rotation": [-0.104528464, 0, 0, 0.9945219],
+					"Scale": [1, 1, 1]
+				},
+				"Camera": {
+					"Projection": "Perspective",
+					"VerticalFov": 50,
+					"OrthographicSize": 10,
+					"NearClip": 0.2,
+					"FarClip": 400,
+					"Primary": true,
+					"Clear": "Color",
+					"ClearColor": [0.1, 0.12, 0.16]
+				},
+				"AudioListener": {
+					"Primary": true
+				}
+			}
+		},
+		{
+			"ID": "3b45b9cfba98f9ad",
+			"Name": "OrthoCamera",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 20, 0],
+					"Rotation": [-0.70710677, 0, 0, 0.70710677],
+					"Scale": [1, 1, 1]
+				},
+				"Camera": {
+					"Projection": "Orthographic",
+					"VerticalFov": 60,
+					"OrthographicSize": 6,
+					"NearClip": 0.1,
+					"FarClip": 1000,
+					"Primary": false,
+					"Clear": "Skybox",
+					"ClearColor": [0.05, 0.05, 0.06]
+				},
+				"AudioListener": {
+					"Primary": false
+				}
+			}
+		},
+		{
+			"ID": "db98ac7530a9dc6d",
+			"Name": "Sun",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 10, 0],
+					"Rotation": [-0.4030582, 0.27253202, 0.12708376, 0.8643611],
+					"Scale": [1, 1, 1]
+				},
+				"DirectionalLight": {
+					"Color": [1, 0.95, 0.85],
+					"Intensity": 2.5,
+					"CastShadows": true,
+					"ShadowDistance": 60,
+					"CascadeCount": 3,
+					"CascadeSplitLambda": 0.6,
+					"LightAngle": 2,
+					"DepthBias": 0.5,
+					"NormalBias": 0.75
+				}
+			}
+		},
+		{
+			"ID": "25dc79aa19e055ca",
+			"Name": "Environment",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Environment": {
+					"Environment": "0000000000000202",
+					"Intensity": 0.8,
+					"Rotation": 45,
+					"ShowSkybox": false,
+					"SkyboxBlur": 0.3,
+					"FallbackColor": [0.3, 0.25, 0.2]
+				}
+			}
+		},
+		{
+			"ID": "656a010ac3869084",
+			"Name": "PostProcess",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"PostProcess": {
+					"ExposureEV": 0.5,
+					"Tonemap": "AgX",
+					"SsaoEnabled": false,
+					"SsaoRadius": 0.8,
+					"SsaoIntensity": 1.5,
+					"SsaoQuality": "High",
+					"BloomEnabled": false,
+					"BloomIntensity": 0.1,
+					"FxaaEnabled": false
+				}
+			}
+		},
+		{
+			"ID": "47d4021dd996f56c",
+			"Name": "Ground",
+			"Parent": null,
+			"Active": true,
+			"Tags": ["Level", "Floor"],
+			"Components": {
+				"Transform": {
+					"Translation": [0, -0.1, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"RigidBody": {
+					"Type": "Static",
+					"Mass": 1,
+					"Friction": 0.8,
+					"Restitution": 0.1,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Track",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"BoxCollider": {
+					"HalfExtents": [15, 0.1, 15],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				}
+			}
+		},
+		{
+			"ID": "ec00706797a43842",
+			"Name": "GroundMesh",
+			"Parent": "47d4021dd996f56c",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0.1, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [30, 1, 30]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000103",
+					"Materials": ["d31facacf6bb6908"],
+					"CastShadows": false,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "462cd6e08e431a40",
+			"Name": "Crate",
+			"Parent": null,
+			"Active": true,
+			"Tags": ["Physics"],
+			"Components": {
+				"Transform": {
+					"Translation": [-4, 1.5, 0],
+					"Rotation": [0, 0.25881904, 0, 0.9659258],
+					"Scale": [1, 1, 1]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["9016817dbe7d2c7a"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"RigidBody": {
+					"Type": "Dynamic",
+					"Mass": 2.5,
+					"Friction": 0.6,
+					"Restitution": 0.3,
+					"LinearDamping": 0.1,
+					"AngularDamping": 0.2,
+					"GravityFactor": 0.5,
+					"MotionQuality": "LinearCast",
+					"AllowSleeping": false,
+					"LockTranslation": [false, false, true],
+					"LockRotation": [true, false, true],
+					"Layer": "Debris",
+					"MaxLinearVelocity": 40,
+					"MaxAngularVelocity": 60,
+					"EnhancedInternalEdgeRemoval": true,
+					"InitialLinearVelocity": [1, 0, 0],
+					"InitialAngularVelocity": [0, 2, 0]
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0.05],
+					"Rotation": [0, 0.08715574, 0, 0.9961947],
+					"IsTrigger": false
+				}
+			}
+		},
+		{
+			"ID": "009c9775d0243a28",
+			"Name": "Ball",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-2, 1, 1],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.8, 0.8, 0.8]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000102",
+					"Materials": ["103291d13c7ad4df"],
+					"CastShadows": true,
+					"ReceiveShadows": false,
+					"Visible": true
+				},
+				"RigidBody": {
+					"Type": "Dynamic",
+					"Mass": 1,
+					"Friction": 0.5,
+					"Restitution": 0,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Ball",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"SphereCollider": {
+					"Radius": 0.5,
+					"Offset": [0, 0.02, 0],
+					"IsTrigger": false
+				}
+			}
+		},
+		{
+			"ID": "eea002e7daa9ee11",
+			"Name": "Pillar",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [2, 0, -2],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["103291d13c7ad4df"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"RigidBody": {
+					"Type": "Static",
+					"Mass": 1,
+					"Friction": 0.5,
+					"Restitution": 0,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"CapsuleCollider": {
+					"Radius": 0.4,
+					"HalfHeight": 1.2,
+					"Offset": [0, 1.6, 0],
+					"Rotation": [0, 0, 0.01745241, 0.9998477],
+					"IsTrigger": false
+				}
+			}
+		},
+		{
+			"ID": "3ec91386ef2a8f30",
+			"Name": "Hull",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [4, 2, 1],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["9016817dbe7d2c7a"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"RigidBody": {
+					"Type": "Dynamic",
+					"Mass": 1,
+					"Friction": 0.5,
+					"Restitution": 0,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Debris",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"MeshCollider": {
+					"Mesh": "0000000000000101",
+					"Convex": true,
+					"IsTrigger": false
+				}
+			}
+		},
+		{
+			"ID": "d71f38868639a685",
+			"Name": "Platform",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0.5, -5],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [3, 0.25, 2]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["103291d13c7ad4df"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"RigidBody": {
+					"Type": "Kinematic",
+					"Mass": 1,
+					"Friction": 0.5,
+					"Restitution": 0,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Track",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				}
+			}
+		},
+		{
+			"ID": "d553889a3a2f54df",
+			"Name": "Triggers",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [6, 0, -4],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				}
+			}
+		},
+		{
+			"ID": "f8d4fbf1a135d0d8",
+			"Name": "BoxTrigger",
+			"Parent": "d553889a3a2f54df",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 1, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": true
+				}
+			}
+		},
+		{
+			"ID": "9fcfa766385c1648",
+			"Name": "SphereTrigger",
+			"Parent": "d553889a3a2f54df",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [2, 1, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"SphereCollider": {
+					"Radius": 0.75,
+					"Offset": [0, 0, 0],
+					"IsTrigger": true
+				}
+			}
+		},
+		{
+			"ID": "8a337185050ec068",
+			"Name": "CapsuleTrigger",
+			"Parent": "d553889a3a2f54df",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [4, 1, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"CapsuleCollider": {
+					"Radius": 0.5,
+					"HalfHeight": 0.5,
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": true
+				}
+			}
+		},
+		{
+			"ID": "d9d58e0e077d9eab",
+			"Name": "MeshTrigger",
+			"Parent": "d553889a3a2f54df",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [6, 1, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"MeshCollider": {
+					"Mesh": "0000000000000102",
+					"Convex": false,
+					"IsTrigger": true
+				}
+			}
+		},
+		{
+			"ID": "abf2395b00cdab05",
+			"Name": "Character",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-6, 1, 3],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"CharacterController": {
+					"Height": 1.6,
+					"Radius": 0.35,
+					"MaxSlopeAngle": 50,
+					"StepHeight": 0.4,
+					"Mass": 80,
+					"GravityFactor": 1.5,
+					"Layer": "Character"
+				}
+			}
+		},
+		{
+			"ID": "2df17a8a38aca861",
+			"Name": "Lamp",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-3, 3, 3],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"PointLight": {
+					"Color": [1, 0.6, 0.3],
+					"Intensity": 25,
+					"Range": 8,
+					"SourceRadius": 0.2
+				}
+			}
+		},
+		{
+			"ID": "0c3e167255200200",
+			"Name": "Spot",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [3, 6, 4],
+					"Rotation": [-0.49240386, 0.15038373, 0.08682409, 0.85286856],
+					"Scale": [1, 1, 1]
+				},
+				"SpotLight": {
+					"Color": [0.6, 0.8, 1],
+					"Intensity": 40,
+					"Range": 20,
+					"InnerConeAngle": 15,
+					"OuterConeAngle": 35,
+					"CastShadows": true,
+					"SourceRadius": 0.1
+				}
+			}
+		},
+		{
+			"ID": "8aac30556209c4f8",
+			"Name": "Beacon",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-1, 0.5, 4],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.5, 0.5, 0.5]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000102",
+					"Materials": ["00ccaf2a32599084"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "f678451be170aa68",
+			"Name": "Hidden",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, -5, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["9016817dbe7d2c7a"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": false
+				}
+			}
+		},
+		{
+			"ID": "e7f7362b451859db",
+			"Name": "Title",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Text": {
+					"Text": "Components",
+					"Font": null,
+					"Size": 48,
+					"Color": [1, 0.9, 0.4, 1],
+					"Space": "Screen",
+					"Anchor": [0.04, 0.05],
+					"Pivot": [0, 0],
+					"Offset": [8, 8],
+					"Alignment": "Left",
+					"Billboard": false
+				}
+			}
+		},
+		{
+			"ID": "a5195de0e143fa05",
+			"Name": "Caption",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Text": {
+					"Text": "every field\nevery enum value",
+					"Font": null,
+					"Size": 24,
+					"Color": [1, 1, 1, 1],
+					"Space": "Screen",
+					"Anchor": [0.5, 0.96],
+					"Pivot": [0.5, 1],
+					"Offset": [0, 0],
+					"Alignment": "Center",
+					"Billboard": false
+				}
+			}
+		},
+		{
+			"ID": "c94ae1c9f89be3e9",
+			"Name": "Label",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-4, 3, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Text": {
+					"Text": "VOA\nAVO",
+					"Font": "5c938f62648f0414",
+					"Size": 64,
+					"Color": [0.4, 1, 0.6, 0.9],
+					"Space": "World",
+					"Anchor": [0.5, 0.5],
+					"Pivot": [0.5, 0.5],
+					"Offset": [0, 0],
+					"Alignment": "Right",
+					"Billboard": true
+				}
+			}
+		},
+		{
+			"ID": "bb1e87ec6a99309f",
+			"Name": "Speakers",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 1, 6],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				}
+			}
+		},
+		{
+			"ID": "cccf4f6dc84110ea",
+			"Name": "Music",
+			"Parent": "bb1e87ec6a99309f",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"AudioSource": {
+					"Clip": "a06d0a5c58c9c793",
+					"Volume": 0.5,
+					"Pitch": 1.25,
+					"Loop": true,
+					"PlayOnStart": true,
+					"Spatial": true,
+					"MinDistance": 2,
+					"MaxDistance": 30,
+					"Attenuation": "Linear",
+					"Rolloff": 0.8,
+					"DopplerFactor": 0.5,
+					"Group": "Music"
+				}
+			}
+		},
+		{
+			"ID": "b67842e5edfefc1b",
+			"Name": "Jingle",
+			"Parent": "bb1e87ec6a99309f",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"AudioSource": {
+					"Clip": "d6f8014cd8720661",
+					"Volume": 1,
+					"Pitch": 1,
+					"Loop": false,
+					"PlayOnStart": false,
+					"Spatial": false,
+					"MinDistance": 1,
+					"MaxDistance": 50,
+					"Attenuation": "None",
+					"Rolloff": 1,
+					"DopplerFactor": 1,
+					"Group": "Ui"
+				}
+			}
+		},
+		{
+			"ID": "97ed9b5d371b111f",
+			"Name": "Hum",
+			"Parent": "bb1e87ec6a99309f",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"AudioSource": {
+					"Clip": "ddd4db084d58fc15",
+					"Volume": 1,
+					"Pitch": 1,
+					"Loop": false,
+					"PlayOnStart": false,
+					"Spatial": true,
+					"MinDistance": 1,
+					"MaxDistance": 50,
+					"Attenuation": "Exponential",
+					"Rolloff": 1,
+					"DopplerFactor": 1,
+					"Group": "Sfx"
+				}
+			}
+		},
+		{
+			"ID": "2c26fff3d0d1a241",
+			"Name": "Buzz",
+			"Parent": "bb1e87ec6a99309f",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"AudioSource": {
+					"Clip": "8f1728e5e04e701c",
+					"Volume": 1,
+					"Pitch": 1,
+					"Loop": false,
+					"PlayOnStart": false,
+					"Spatial": true,
+					"MinDistance": 1,
+					"MaxDistance": 50,
+					"Attenuation": "Inverse",
+					"Rolloff": 1,
+					"DopplerFactor": 1,
+					"Group": "Sfx"
+				}
+			}
+		}
+	]
+}

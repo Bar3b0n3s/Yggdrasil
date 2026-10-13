@@ -1,0 +1,15 @@
+{
+	"Format": "ValidationFixture",
+	"Version": 1,
+	"Scope": "Project",
+	"Codes": ["RENDER_LIGHT_LIMIT_EXCEEDED"],
+	"TestComponents": false,
+	"Expand": [
+		{
+			"Path": "Assets/Scenes/Main.scene",
+			"Entity": "e000000000000003",
+			"Count": 256
+		}
+	],
+	"NonCanonical": []
+}

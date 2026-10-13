@@ -18,6 +18,7 @@ The fixtures (paths relative to Tests/Data/Assets/Textures), each exercising one
   Normal.png     8 x 8, 8-bit RGB tangent-space normal map of a dome (for the NormalMap usage)
   Photo.jpg      16 x 16, baseline JPEG, YCbCr 4:4:4, quality 90
   GreyPhoto.jpg  8 x 8, baseline JPEG, one greyscale component
+  Baseline.jpeg  16 x 8, baseline JPEG, YCbCr 4:4:4, quality 90, with the .jpeg extension (its own source format row)
   Solid.bmp      5 x 3, 24-bit BMP (bottom-up rows padded to 4 bytes)
   Alpha.tga      3 x 2, uncompressed 32-bit TGA with a bottom-left origin
   Rle.tga        4 x 2, run-length encoded 24-bit TGA with a top-left origin
@@ -368,6 +369,19 @@ def make_grey_photo() -> bytes:
     return jpeg(8, 8, [[float((x * 32 + y * 8) % 256) - 128.0 for y in range(8) for x in range(8)]])
 
 
+def make_baseline_jpeg() -> bytes:
+    """Two 8 x 8 blocks: a warm horizontal ramp on the left, a cool vertical ramp on the right."""
+    width, height = 16, 8
+    planes: list[list[float]] = [[], [], []]
+    for y in range(height):
+        for x in range(width):
+            red, green, blue = (200 + x * 3, 64 + x * 12, 32) if x < 8 else (40, 96 + y * 16, 160 + y * 10)
+            planes[0].append(0.299 * red + 0.587 * green + 0.114 * blue - 128.0)
+            planes[1].append(-0.168736 * red - 0.331264 * green + 0.5 * blue)
+            planes[2].append(0.5 * red - 0.418688 * green - 0.081312 * blue)
+    return jpeg(width, height, planes)
+
+
 # ---------------------------------------------------------------------------------------------------------------------
 # BMP and TGA
 # ---------------------------------------------------------------------------------------------------------------------
@@ -423,6 +437,7 @@ FIXTURES: dict[str, Callable[[], bytes]] = {
     "Normal.png": make_normal,
     "Photo.jpg": make_photo,
     "GreyPhoto.jpg": make_grey_photo,
+    "Baseline.jpeg": make_baseline_jpeg,
     "Solid.bmp": make_bmp,
     "Alpha.tga": make_alpha_tga,
     "Rle.tga": make_rle_tga,

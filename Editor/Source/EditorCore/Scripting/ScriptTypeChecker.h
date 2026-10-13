@@ -76,7 +76,10 @@ namespace Engine {
 		// Syntax errors use SCRIPT_COMPILE_ERROR (as import does); every other finding uses SCRIPT_TYPE_ERROR. Nested
 		// .luaurc files apply from the project root down, so the nearest directory's configuration wins.
 		// InternalCompilerError (including timeout/cancellation) becomes an Error diagnostic; malformed requests/read
-		// failures are findings too. A failed check never returns an empty success.
+		// failures are findings too. A failed check never returns an empty success. No time limit or cancellation token is
+		// set, so findings never depend on machine load; a root or required module that declares a user-defined type
+		// function (`type function`) is refused before analysis with a SCRIPT_TYPE_ERROR at each declaration's name, so the
+		// unbounded type-function VM never runs (§11.9).
 		[[nodiscard]] std::vector<ScriptDiagnostic> CheckScript(const ScriptCheckRequest& request) override;
 	private:
 		struct State;

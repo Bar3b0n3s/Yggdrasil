@@ -3,11 +3,14 @@
 
 #include "Engine/Asset/AudioClipData.h"
 #include "Engine/Asset/DocumentData.h"
+#include "Engine/Core/Jobs/JobSystem.h"
+#include "Engine/Core/Jobs/MainThreadQueue.h"
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Core/Json/JsonWriter.h"
 #include "Engine/Core/VirtualFileSystem.h"
 #include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Scene/Components/AudioSourceComponent.h"
+#include "Engine/Scene/Components/PointLightComponent.h"
 #include "Engine/Scene/Components/ScriptComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/SceneSerializer.h"
@@ -26,8 +29,10 @@
 #include <algorithm>
 #include <format>
 #include <map>
+#include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace Engine {
 
@@ -54,8 +59,10 @@ namespace Engine {
 			uint32_t CoverageReads = 0;
 			uint32_t ReplaySessions = 0;
 			bool DivergentReplay = false;
-			bool OwnAudioTime = true;               // false: a host that forgets PlaySessionSpecification::OwnsAudioTime
-			ScriptApiRegistry* ScriptApi = nullptr; // a frozen registry the suite sessions share (null: each session owns one)
+			bool OwnAudioTime = true;                          // false: a host that forgets PlaySessionSpecification::OwnsAudioTime
+			ScriptApiRegistry* ScriptApi = nullptr;            // a frozen registry the suite sessions share (null: each session owns one)
+			AssetManager* ObservedAssets = nullptr;            // GetAssetManager: the manager a coverage run observes (null: none)
+			std::vector<TestCoverageCounter> ScriptCounters{}; // GetCoverage's counters
 			ReplayDocument Candidate{};
 			Json SceneDocument{};
 			Ref<const ScriptFieldSchemaSource> Schemas{};
@@ -228,7 +235,7 @@ namespace Engine {
 			}
 			void SetActiveTestSession(PlaySession* session) override { Active = session; }
 			AudioEngine* GetAudioEngine() const override { return Audio.get(); }
-			AssetManager* GetAssetManager() const override { return nullptr; }
+			AssetManager* GetAssetManager() const override { return ObservedAssets; }
 			Status CaptureScreenshot(PlaySession&, std::string_view name) override
 			{
 				Screenshots.emplace_back(name);
@@ -245,6 +252,7 @@ namespace Engine {
 			{
 				TestCoverageReport report;
 				report.RegistryFingerprint = "fixture";
+				report.Counters = ScriptCounters;
 				return report;
 			}
 			Result<Json> Evaluate(PlaySession& session, const ReplayBytecodeExpectation& expectation) override
@@ -292,6 +300,61 @@ namespace Engine {
 			}
 		};
 
+		// An asset manager that tells whether a load observer is installed (HasLoadObserver) and whether it records a load
+		// made now: NotifyLoaded reaches the runner's observer, whose FormatCoverageRecorder asks GetReferencePath about every
+		// handle it has not seen.
+		class ObserverProbe final : public AssetManager
+		{
+		public:
+			ObserverProbe()
+				: m_Jobs(0, m_MainThreadQueue)
+			{
+			}
+
+			[[nodiscard]] bool IsObserved() const
+			{
+				return HasLoadObserver();
+			}
+
+			// Whether a load made now, outside the runner's Advance, is recorded.
+			[[nodiscard]] bool RecordsLoadNow()
+			{
+				const uint64_t before = m_Queries;
+				NotifyLoaded(AssetHandle(++m_Next));
+				return m_Queries != before;
+			}
+
+			Result<AssetRef<Asset>> Load(AssetHandle handle) override { return MakeError(ErrorCode::NotFound, "the probe holds no asset {}", handle); }
+			JobHandle<AssetRef<Asset>> LoadAsync(AssetHandle handle) override
+			{
+				return m_Jobs.Submit([result = Load(handle)]()
+				{
+					return result;
+				});
+			}
+			AssetState GetState(AssetHandle) const override { return AssetState::Unloaded; }
+			const AssetMetadata* GetMetadata(AssetHandle) const override { return nullptr; }
+			AssetType GetAssetType(AssetHandle) const override { return AssetType::None; }
+			std::optional<AssetHandle> Resolve(std::string_view) const override { return std::nullopt; }
+			std::string GetReferencePath(AssetHandle) const override
+			{
+				++m_Queries;
+				return "Assets/Probe.png";
+			}
+			void WaitIdle() override {}
+		private:
+			MainThreadQueue m_MainThreadQueue{};
+			JobSystem m_Jobs; // inline
+			uint64_t m_Next = 0x9000;
+			mutable uint64_t m_Queries = 0;
+		};
+
+		const TestCoverageCounter* FindCounter(const TestRunResult& result, std::string_view id)
+		{
+			const auto found = std::ranges::find(result.Coverage.Counters, id, &TestCoverageCounter::Id);
+			return found == result.Coverage.Counters.end() ? nullptr : &*found;
+		}
+
 		const std::string InputSuite = R"(return Test.Suite("Pilot", function()
 			Test.Case("drive", function()
 				Test.InjectKey("Space", "Tap")
@@ -306,7 +369,7 @@ namespace Engine {
 	TEST_SUITE("Testing")
 	{
 		// ADR 0022 decision 3: Testing.CoverageGates opts a project in; only an unfiltered, non-recording run evaluates.
-		TEST_CASE("TestRunner: a coverage project evaluates every per-mode gate and a gap fails the run" * doctest::skip(true))
+		TEST_CASE("TestRunner: a coverage project evaluates every per-mode gate and a gap fails the run")
 		{
 			RunnerHost host;
 			host.Settings.Testing.CoverageGates = true;
@@ -343,6 +406,173 @@ namespace Engine {
 			const TestRunResult plain = host.Run();
 			CHECK(plain.Passed);
 			CHECK(plain.Coverage.Gates.empty());
+		}
+
+		// ADR 0022 decision 5: the observer exists exactly for the life of a coverage run and is removed at every end of it,
+		// so the stored function never outlives the recorder it captures.
+		TEST_CASE("TestRunner: a coverage run observes loads only while it runs and removes the observer at every end")
+		{
+			ObserverProbe probe;
+			RunnerHost host;
+			host.ObservedAssets = &probe;
+			host.Settings.Testing.CoverageGates = true;
+			host.Suite(R"(return Test.Suite("Observed",function()
+				Test.Case("waits",function() Test.WaitTicks(2) Test.Expect(true) end)
+			end))");
+			{
+				FeatureTestRunner runner;
+				REQUIRE(runner.Begin(host));
+				CHECK(probe.IsObserved());
+				// Installed, but a load between two Advance calls is never recorded (review finding M03).
+				CHECK_FALSE(probe.RecordsLoadNow());
+				host.Finish(runner);
+				CHECK_FALSE(probe.IsObserved());
+			}
+			{
+				FeatureTestRunner runner;
+				REQUIRE(runner.Begin(host));
+				REQUIRE(runner.Advance());
+				CHECK(probe.IsObserved());
+				runner.Cancel();
+				CHECK_FALSE(probe.IsObserved());
+				const auto result = runner.GetResult();
+				REQUIRE(result);
+				CHECK(result->Cancelled);
+				REQUIRE(result->Coverage.Gates.size() == PerModeCoverageGates.size());
+				CHECK(std::ranges::none_of(result->Coverage.Gates, &TestCoverageGateResult::Evaluated));
+			}
+			{
+				{
+					FeatureTestRunner runner;
+					REQUIRE(runner.Begin(host));
+					CHECK(probe.IsObserved());
+				}
+				CHECK_FALSE(probe.IsObserved());
+			}
+			// A filtered or recording run of a coverage project, and any run of another project, records no loads.
+			for (const FeatureTestRunOptions& options : { FeatureTestRunOptions{ .Filter = "Observed" }, FeatureTestRunOptions{ .Record = true } })
+			{
+				FeatureTestRunner runner;
+				REQUIRE(runner.Begin(host, options));
+				CHECK_FALSE(probe.IsObserved());
+				runner.Cancel();
+			}
+			host.Settings.Testing.CoverageGates = false;
+			{
+				FeatureTestRunner runner;
+				REQUIRE(runner.Begin(host));
+				CHECK_FALSE(probe.IsObserved());
+				runner.Cancel();
+			}
+			// A Begin that fails leaves nothing installed.
+			host.Settings.Testing.CoverageGates = true;
+			host.Settings.Testing.CaseTimeoutTicks = 0;
+			FeatureTestRunner refused;
+			CHECK_FALSE(refused.Begin(host));
+			CHECK_FALSE(probe.IsObserved());
+		}
+
+		// ADR 0022 decisions 4 and 5: the scene is recorded after setup and again after a replacement, so a component only
+		// the loaded scene holds counts; the suite's own script and the loaded scene count for gate 9.
+		TEST_CASE("TestRunner: a coverage run counts the scenes it simulates and the formats its sessions load")
+		{
+			RunnerHost host;
+			host.ObservedAssets = &host.Compiler.GetAssetManager();
+			host.Settings.Testing.CoverageGates = true;
+			Entity lamp = host.Compiler.GetScene().CreateEntity("Lamp");
+			lamp.AddComponent<PointLightComponent>();
+			const auto next = SceneSerializer::ToJson(host.Compiler.GetScene());
+			REQUIRE(next);
+			host.PublishScene("Assets/Scenes/Next.scene", UUID(402), *next);
+			host.Compiler.GetScene().DestroyEntity(lamp);
+			host.RefreshScene();
+			host.Suite(R"(return Test.Suite("Covered",function()
+				Test.Case("replace",function() Scene.Load(Assets.Load("Assets/Scenes/Next.scene")) end)
+				Test.Case("after",function() Test.Expect(true) end)
+			end))");
+
+			const TestRunResult result = host.Run();
+			REQUIRE(result.Cases.size() == 2);
+			CHECK(result.Cases[0].Status == "passed");
+			CHECK(result.Cases[1].Status == "passed");
+			const TestCoverageCounter* light = FindCounter(result, "component:PointLight");
+			REQUIRE(light != nullptr);
+			CHECK(light->Count >= 1);
+			const TestCoverageCounter* script = FindCounter(result, "format:Script/.luau");
+			REQUIRE(script != nullptr);
+			CHECK(script->Count >= 1);
+			const TestCoverageCounter* scene = FindCounter(result, "format:Scene/.scene");
+			REQUIRE(scene != nullptr);
+			CHECK(scene->Count == 1);
+			CHECK(std::ranges::is_sorted(result.Coverage.Counters, {}, &TestCoverageCounter::Id));
+			REQUIRE(result.Coverage.Gates.size() == PerModeCoverageGates.size());
+			CHECK(std::ranges::all_of(result.Coverage.Gates, &TestCoverageGateResult::Evaluated));
+			// Most of the registry is uncovered here, so the run fails on its gates alone.
+			CHECK_FALSE(result.Passed);
+			const auto gates = EvaluateCoverageGates(result.Coverage.Counters, TestSuiteSettings::Mode::Editor);
+			REQUIRE(gates);
+			CHECK(gates->size() == result.Coverage.Gates.size());
+		}
+
+		// Review finding M03 (ADR 0022 decision 5): the observer sits on the host's shared asset manager, and the editor renders
+		// the published test session in its viewports in host frames between two Advance calls, whose number depends on the
+		// wall-clock budget that partitions the run. Only the loads made inside Advance count, so a load between two calls
+		// (the "viewport" below) never counts, however many host frames ran.
+		TEST_CASE("TestRunner: gate 9 counts the loads of the run's own work and never a load between two Advance calls")
+		{
+			RunnerHost host;
+			Test::InMemoryAssetManager& assets = host.Compiler.GetAssetManager();
+			host.ObservedAssets = &assets;
+			host.Settings.Testing.CoverageGates = true;
+			const auto document = SceneSerializer::ToJson(host.Compiler.GetScene());
+			REQUIRE(document);
+			host.PublishScene("Assets/Scenes/Loaded.scene", UUID(411), *document);
+			host.PublishScene("Assets/Scenes/Viewport.scene", UUID(412), *document);
+			host.RefreshScene();
+			host.Suite(R"(return Test.Suite("Frames",function()
+				Test.Case("loads",function() Test.Expect(Assets.Load("Assets/Scenes/Loaded.scene") ~= nil) Test.WaitTicks(3) end)
+			end))");
+
+			FeatureTestRunner runner;
+			REQUIRE(runner.Begin(host));
+			uint32_t hostFrames = 0;
+			for (; hostFrames < 1000 && runner.IsRunning(); ++hostFrames)
+			{
+				// A host frame: the editor's viewport renders the published session's scene through the same manager.
+				REQUIRE(assets.Load(UUID(412)));
+				const Result<bool> advanced = runner.Advance();
+				REQUIRE_MESSAGE(advanced.has_value(), advanced.error().ToString());
+			}
+			CHECK(hostFrames > 1);
+			const auto result = runner.GetResult();
+			REQUIRE(result);
+			REQUIRE(result->Cases.size() == 1);
+			CHECK(result->Cases[0].Status == "passed");
+			const TestCoverageCounter* scene = FindCounter(*result, "format:Scene/.scene");
+			REQUIRE(scene != nullptr);
+			// Loaded.scene only: Viewport.scene was loaded before every Advance call and never inside one.
+			CHECK(scene->Count == 1);
+		}
+
+		// ADR 0022 decision 3: an evaluation error fails the run with unevaluated gates and an Error naming the mode.
+		TEST_CASE("TestRunner: a coverage counter the gates refuse fails the run with unevaluated gates")
+		{
+			RunnerHost host;
+			host.Settings.Testing.CoverageGates = true;
+			host.ScriptCounters.push_back(TestCoverageCounter{ .Id = "api:Legacy.Call", .Kind = "call", .Modes = { TestSuiteSettings::Mode::Editor }, .Count = 1 });
+			host.Suite(R"(return Test.Suite("Refused",function()
+				Test.Case("passes",function() Test.Expect(true) end)
+			end))");
+			Test::ExpectLog expected(LogLevel::Error, "coverage gates of the Editor test run could not be evaluated");
+			const TestRunResult result = host.Run();
+			REQUIRE(result.Cases.size() == 1);
+			CHECK(result.Cases[0].Status == "passed");
+			CHECK_FALSE(result.Passed);
+			REQUIRE(result.Coverage.Gates.size() == PerModeCoverageGates.size());
+			CHECK(std::ranges::none_of(result.Coverage.Gates, [](const TestCoverageGateResult& gate)
+			{
+				return gate.Evaluated || gate.Passed;
+			}));
 		}
 
 		// ADR 0022 decision 4 (gate 2): FeatureTest covers Test.Fail and Test.Skip without a failed or skipped case row by

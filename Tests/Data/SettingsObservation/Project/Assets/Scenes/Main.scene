@@ -1,0 +1,94 @@
+{
+	"Format": "Scene",
+	"Version": 1,
+	"Name": "Main",
+	"Seed": 7,
+	"ComponentVersions": {
+		"Transform": 1,
+		"Camera": 1,
+		"DirectionalLight": 1,
+		"RigidBody": 1,
+		"SphereCollider": 1,
+		"AudioListener": 1,
+		"Script": 1
+	},
+	"Entities": [
+		{
+			"ID": "0b5e000000000001",
+			"Name": "Camera",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 2, 10],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Camera": {
+					"Primary": true
+				},
+				"AudioListener": {
+					"Primary": true
+				}
+			}
+		},
+		{
+			"ID": "0b5e000000000002",
+			"Name": "Sun",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 10, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"DirectionalLight": {
+					"Intensity": 3
+				}
+			}
+		},
+		{
+			"ID": "0b5e000000000003",
+			"Name": "Ball",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 5, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"RigidBody": {
+					"Type": "Dynamic",
+					"Layer": "Ball"
+				},
+				"SphereCollider": {
+					"Radius": 0.5
+				}
+			}
+		},
+		{
+			"ID": "0b5e000000000004",
+			"Name": "Probe",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Script": {
+					"Script": "0b5e0000000000a3",
+					"Fields": {},
+					"ExecutionOrder": 0
+				}
+			}
+		}
+	]
+}

@@ -1,0 +1,12 @@
+{
+	"Format": "AssetMeta",
+	"Version": 1,
+	"Handle": "ddd4db084d58fc15",
+	"Type": "AudioClip",
+	"Importer": "Audio",
+	"ImporterVersion": 1,
+	"Settings": {
+		"Stream": "Auto"
+	},
+	"SubAssets": []
+}

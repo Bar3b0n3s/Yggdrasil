@@ -185,6 +185,25 @@ return Script.Define("Owner", Owner)
                 report = client.call("project.validate", {})
                 self.assertIn("diagnostics", report, report)
 
+    def test_looping_type_function_is_refused_and_never_hangs_the_editor(self) -> None:
+        # Review finding M23 (Architecture §11.9): Luau ran a user-defined type function's body in its analysis VM with
+        # no bound, so this script.write never returned and its import hung the editor. The type checker refuses the
+        # declaration before analysis, located at its name, in the written script and in a module it requires.
+        client, _ = self.open_editor_with_scene()
+        spin = "type function Spin(t)\n\twhile true do end\n\treturn t\nend\n"
+        client.call("script.write", {"path": "Assets/Scripts/Types.luau",
+                                     "source": "--!strict\nexport " + spin + "return {}\n"})
+        written = client.call("script.write", {"path": "Assets/Scripts/Spin.luau", "source": "--!strict\n" + spin
+                                               + "local value: Spin<number> = 1\nreturn value\n"})
+        refusal = next(row for row in written["diagnostics"] if row["severity"] == "Error")
+        self.assertEqual((refusal["file"], refusal["line"], refusal["column"], refusal["code"]),
+                         ("Assets/Scripts/Spin.luau", 2, 15, "SCRIPT_TYPE_ERROR"), written)
+        self.assertIn("type function 'Spin' is not supported", refusal["message"])
+        checked = client.call("script.check", {})
+        self.assertFalse(checked["passed"])
+        self.assertTrue(any(row["file"] == "Assets/Scripts/Types.luau" and row["line"] == 2
+                            and row["code"] == "SCRIPT_TYPE_ERROR" for row in checked["diagnostics"]), checked)
+
     def test_script_create_names_test_suites_after_the_file(self) -> None:
         client, _ = self.open_editor_with_scene()
         path = "Assets/Tests/Tetris.test.luau"

@@ -60,13 +60,11 @@ namespace Engine {
 	// Errors: Io naming the file.
 	[[nodiscard]] Status WriteReferences(std::span<const GeneratedReferenceFile> files, const std::filesystem::path& directory);
 
-	// `Editor --dump-reference <dir>` (EditorApp calls only this; ADR 0022 decision 13 and its ownership section): builds the
-	// method registry (RegisterEditorMethods without test hooks, frozen) over `types`, then writes the reference into
-	// `directory`. The M14 contract moved the M13 behaviour here unchanged: Methods.json, catalog.json, Engine.d.luau and
-	// ScriptAPI.md. Stream D replaces the body with GenerateReferences (adding the built-in ImporterRegistry) and
-	// WriteReferences, so the dump writes the whole file set without another EditorApp change. `types` is the editor's frozen
-	// registry with the editor method types registered and `scripts` its frozen script API. Errors: those of generating and
-	// writing, naming the file.
+	// `Editor --dump-reference <dir>` (EditorApp calls only this; ADR 0022 decision 13): builds the method registry
+	// (RegisterEditorMethods without test hooks, frozen) over `types` and the built-in ImporterRegistry, then writes every
+	// file of GenerateReferences into `directory` with WriteReferences: the method and MCP catalogues, the Markdown
+	// references, Schemas/, Engine.d.luau and ScriptAPI.md. `types` is the editor's frozen registry with the editor method
+	// types registered and `scripts` its frozen script API. Errors: those of generating and writing, naming the file.
 	[[nodiscard]] Status DumpReferences(const TypeRegistry& types, const ScriptApiRegistry& scripts, const std::filesystem::path& directory);
 
 }

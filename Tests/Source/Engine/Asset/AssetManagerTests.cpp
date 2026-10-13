@@ -107,7 +107,7 @@ namespace Engine {
 
 		// ADR 0022 decision 5: the observer mechanism of the base class; the managers' own notifications are tested with
 		// EditorAssetManager and RuntimeAssetManager.
-		TEST_CASE("AssetManager: the load observer receives each notified load until it is replaced or removed" * doctest::skip(true))
+		TEST_CASE("AssetManager: the load observer receives each notified load until it is replaced or removed")
 		{
 			MainThreadQueue queue;
 			JobSystem jobs(0, queue);
@@ -116,10 +116,12 @@ namespace Engine {
 			const AssetHandle second(0x2222000022220000ull);
 			std::vector<AssetHandle> seen;
 			std::vector<AssetHandle> replaced;
+			CHECK_FALSE(manager.HasLoadObserver());
 			manager.SetLoadObserver([&seen](AssetHandle handle)
 			{
 				seen.push_back(handle);
 			});
+			CHECK(manager.HasLoadObserver());
 			manager.NotifyLoaded(first);
 			manager.NotifyLoaded(first);
 			manager.SetLoadObserver([&replaced](AssetHandle handle)
@@ -128,6 +130,7 @@ namespace Engine {
 			});
 			manager.NotifyLoaded(second);
 			manager.SetLoadObserver({});
+			CHECK_FALSE(manager.HasLoadObserver());
 			manager.NotifyLoaded(second);
 			CHECK(seen == std::vector<AssetHandle>{ first, first });
 			CHECK(replaced == std::vector<AssetHandle>{ second });

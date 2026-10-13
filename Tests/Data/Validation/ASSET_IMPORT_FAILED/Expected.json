@@ -1,0 +1,9 @@
+{
+	"Format": "ValidationFixture",
+	"Version": 1,
+	"Scope": "Project",
+	"Codes": ["ASSET_IMPORT_FAILED"],
+	"TestComponents": false,
+	"Expand": [],
+	"NonCanonical": ["Assets/Textures/Unreadable.png.meta"]
+}

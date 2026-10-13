@@ -2,10 +2,26 @@
 
 #include "EditorCore/Scripting/ScriptTypeChecker.h"
 
+#include "EditorCore/Automation/ObserveMethods.h"
+#include "Engine/Automation/Protocol/ResultOffload.h"
+#include "Engine/Core/FileSystem.h"
+#include "Engine/Core/Json/JsonReader.h"
+#include "Engine/Reflection/StructInfo.h"
+#include "Engine/Reflection/TypeRegistry.h"
+#include "Support/DocExamples.h"
 #include "Support/TestData.h"
 
+#include <nlohmann/json.hpp>
+
+#include <algorithm>
 #include <filesystem>
+#include <format>
+#include <optional>
+#include <string>
+#include <string_view>
 #include <system_error>
+#include <utility>
+#include <vector>
 
 namespace Engine {
 
@@ -13,7 +29,80 @@ namespace Engine {
 
 		// ADR 0022 decision 14: at least this many blocks must be checked, so a broken extractor cannot pass vacuously. Stream
 		// D sets it to the count at completion; it is raised as documents grow and lowered only with a reason in the review.
-		constexpr size_t MinimumCheckedBlocks = 1;
+		constexpr size_t MinimumCheckedBlocks = 5;
+
+		// The size the dispatcher compares with its offload threshold (DefaultOffloadThresholdBytes, §13.10) for the docs.get
+		// result of the skill `name` with the text `content`: the minified JSON of the serialized result without "_meta"
+		// (Dispatcher.cpp), so every newline, tab, quote and backslash of the text counts as its escape, and the topic and
+		// path members count too. §13.11 step 1 fetches the game-building skill inline, which needs it below the threshold.
+		size_t MeasureDocsGetResult(std::string_view name, const std::string& content)
+		{
+			TypeRegistry types;
+			RegisterEditorObserveMethodTypes(types);
+			types.Freeze();
+			const StructInfo* type = types.FindStruct<DocsGetResult>();
+			REQUIRE(type != nullptr);
+			DocsGetResult result;
+			result.Topic = std::format("skills/{}", name);
+			result.Content = content;
+			result.Path = std::format(".claude/skills/{}/SKILL.md", name);
+			const Result<Json> serialized = type->ToJson(&result);
+			REQUIRE_MESSAGE(serialized.has_value(), serialized.error().ToString());
+			return serialized->dump(-1, ' ', false, Json::error_handler_t::replace).size();
+		}
+
+		// The documents whose Luau blocks are checked, repository-relative and sorted: Docs/*.md, Docs/Reference/*.md,
+		// AGENTS.md, Projects/*/AGENTS.md, Resources/Templates/**/*.md and .claude/skills/*/SKILL.md (Docs/Decisions/ is
+		// history and is not checked).
+		std::vector<std::string> ListCheckedDocuments()
+		{
+			const std::filesystem::path root = Test::GetRepositoryRoot();
+			std::vector<std::string> documents;
+			const auto relative = [&root](const std::filesystem::path& path)
+			{
+				std::string text = FileSystem::PathToUtf8(path.lexically_relative(root));
+				std::ranges::replace(text, '\\', '/');
+				return text;
+			};
+			const auto addMarkdown = [&](const std::filesystem::path& directory, bool recursive)
+			{
+				const auto files = FileSystem::ListDirectory(directory, recursive);
+				REQUIRE_MESSAGE(files.has_value(), (files ? std::string() : files.error().ToString()));
+				for (const std::filesystem::path& file : *files)
+				{
+					std::error_code error;
+					if (file.extension() == std::filesystem::path(".md") && std::filesystem::is_regular_file(file, error))
+						documents.push_back(relative(file));
+				}
+			};
+			const auto addFile = [&](const std::filesystem::path& file)
+			{
+				std::error_code error;
+				if (std::filesystem::is_regular_file(file, error))
+					documents.push_back(relative(file));
+			};
+			addMarkdown(root / "Docs", false);
+			addMarkdown(root / "Docs" / "Reference", false);
+			addFile(root / "AGENTS.md");
+			addMarkdown(root / "Resources" / "Templates", true);
+			for (const std::string_view directory : { "Projects", ".claude/skills" })
+			{
+				const auto entries = FileSystem::ListDirectory(root / FileSystem::PathFromUtf8(directory), false);
+				REQUIRE_MESSAGE(entries.has_value(), (entries ? std::string() : entries.error().ToString()));
+				for (const std::filesystem::path& entry : *entries)
+					addFile(entry / (directory == "Projects" ? "AGENTS.md" : "SKILL.md"));
+			}
+			std::ranges::sort(documents);
+			documents.erase(std::unique(documents.begin(), documents.end()), documents.end());
+			return documents;
+		}
+
+		std::string DescribeFinding(std::string_view document, const Test::DocExampleFinding& finding)
+		{
+			const std::string where = finding.DocumentLine != 0 ? std::format("{}:{}", document, finding.DocumentLine)
+																: std::format("{} (from {})", finding.Elsewhere, document);
+			return std::format("{}: {}: {}", where, finding.Diagnostic.Code, finding.Diagnostic.Message);
+		}
 
 	}
 
@@ -25,22 +114,167 @@ namespace Engine {
 		// (default Assets/Scripts/DocExample.luau), wrapped by its prelude= stub, unless it carries skip="<reason>". Stub
 		// modules and preludes live in Tests/Data/TypeChecker/DocExamples/. Zero Error findings pass; at least
 		// MinimumCheckedBlocks blocks must be checked.
-		TEST_CASE("DocExamples: every Luau example in the docs type-checks" * doctest::skip(true))
+		TEST_CASE("DocExamples: every Luau example in the docs type-checks")
 		{
 			std::error_code error;
 			REQUIRE(std::filesystem::is_directory(Test::GetTestDataPath("TypeChecker/DocExamples/Assets"), error));
-			const size_t checked = 0;
+			const Test::DocExampleChecker checker(Test::GetTestDataPath("TypeChecker/DocExamples"));
+			size_t checked = 0;
+			std::vector<std::string> failures;
+			for (const std::string& document : ListCheckedDocuments())
+			{
+				const Result<std::string> text = FileSystem::ReadText(Test::GetRepositoryRoot() / FileSystem::PathFromUtf8(document));
+				REQUIRE_MESSAGE(text.has_value(), (text ? std::string() : text.error().ToString()));
+				const auto blocks = Test::ExtractDocExamples(*text);
+				if (!blocks)
+				{
+					failures.push_back(std::format("{}:{}: {}", document, blocks.error().GetLocation().Line, blocks.error().GetMessageText()));
+					continue;
+				}
+				for (const Test::DocExampleBlock& block : *blocks)
+				{
+					if (block.Skip.has_value())
+						continue;
+					const auto findings = checker.Check(block);
+					if (!findings)
+					{
+						failures.push_back(std::format("{}:{}: {}", document, block.FenceLine, findings.error().ToString()));
+						continue;
+					}
+					++checked;
+					for (const Test::DocExampleFinding& finding : *findings)
+						failures.push_back(DescribeFinding(document, finding));
+				}
+			}
+			std::string report;
+			for (const std::string& failure : failures)
+				report += failure + "\n";
+			INFO(report);
+			CHECK(failures.empty());
+			CAPTURE(checked);
 			CHECK(checked >= MinimumCheckedBlocks);
-			FAIL("contract skeleton: extract every Luau block of the documents above and check it with ScriptTypeChecker::CheckScript");
 		}
 
-		// Tests/Data/TypeChecker/DocExamples/Seeded/Seeded.md holds one example with a type error; the finding is reported at
-		// the document's line, through the fence and prelude offsets.
-		TEST_CASE("DocExamples: a seeded mistake is reported at its document line" * doctest::skip(true))
+		// Tests/Data/TypeChecker/DocExamples/Seeded/Seeded.md holds three examples with a type error each: one wrapped by the
+		// Behaviour prelude, reported at its document line through the fence and prelude offsets; one without a prelude,
+		// through the fence offset alone; and one whose mistake surfaces in the prelude's epilogue (after its marker),
+		// reported at that line of the prelude file (review finding M16: the prelude arithmetic was never exercised).
+		TEST_CASE("DocExamples: a seeded mistake is reported at its document line")
 		{
 			const auto seeded = Test::ReadTestDataText("TypeChecker/DocExamples/Seeded/Seeded.md");
 			REQUIRE_MESSAGE(seeded.has_value(), seeded.error().ToString());
-			FAIL("contract skeleton: check the seeded document and compare the finding's line with its Expected.json");
+			const auto expectedText = Test::ReadTestDataText("TypeChecker/DocExamples/Seeded/Expected.json");
+			REQUIRE_MESSAGE(expectedText.has_value(), expectedText.error().ToString());
+			const auto expectedDocument = JsonReader::Parse(*expectedText);
+			REQUIRE(expectedDocument.has_value());
+			const JsonReader expected(*expectedDocument);
+			REQUIRE(expected.ReadFormatHeader("DocExampleSeed", 1, 1).has_value());
+
+			const auto blocks = Test::ExtractDocExamples(*seeded);
+			REQUIRE_MESSAGE(blocks.has_value(), blocks.error().ToString());
+			const Test::DocExampleChecker checker(Test::GetTestDataPath("TypeChecker/DocExamples"));
+			size_t checked = 0;
+			size_t skipped = 0;
+			std::vector<Test::DocExampleFinding> findings;
+			for (const Test::DocExampleBlock& block : *blocks)
+			{
+				if (block.Skip.has_value())
+				{
+					++skipped;
+					continue;
+				}
+				const auto blockFindings = checker.Check(block);
+				REQUIRE_MESSAGE(blockFindings.has_value(), blockFindings.error().ToString());
+				++checked;
+				findings.insert(findings.end(), blockFindings->begin(), blockFindings->end());
+			}
+			CHECK(expected.ReadMember<uint32_t>("Checked") == static_cast<uint32_t>(checked));
+			CHECK(expected.ReadMember<uint32_t>("Skipped") == static_cast<uint32_t>(skipped));
+			const auto expectedFindings = expected.GetMember("Findings");
+			REQUIRE(expectedFindings.has_value());
+			std::string actual;
+			for (const Test::DocExampleFinding& finding : findings)
+				actual += DescribeFinding("Seeded.md", finding) + "\n";
+			INFO(actual);
+			REQUIRE(expectedFindings->GetArraySize() == findings.size());
+			for (size_t index = 0; index < findings.size(); ++index)
+			{
+				const auto entry = expectedFindings->GetElement(index);
+				REQUIRE(entry.has_value());
+				CHECK(entry->ReadMember<uint32_t>("Line") == findings[index].DocumentLine);
+				CHECK(entry->ReadMember<std::string>("Elsewhere") == findings[index].Elsewhere);
+				CHECK(entry->ReadMember<std::string>("Code") == findings[index].Diagnostic.Code);
+				const auto message = entry->ReadMember<std::string>("MessageContains");
+				REQUIRE(message.has_value());
+				CHECK(findings[index].Diagnostic.Message.find(*message) != std::string::npos);
+			}
+		}
+
+		TEST_CASE("DocExamples: fence attributes are parsed and malformed ones are located")
+		{
+			const auto blocks = Test::ExtractDocExamples(
+				"Text\n\n  ```luau path=Assets/Tests/A.test.luau prelude=Behaviour\n  local a = 1\n    local b = 2\n  ```\n"
+				"````markdown\n```lua\nnot = an example\n```\n````\n~~~lua skip=\"an excerpt\"\nlocal = 1\n~~~\n```c++\nint x;\n```\n");
+			REQUIRE_MESSAGE(blocks.has_value(), blocks.error().ToString());
+			REQUIRE(blocks->size() == 2);
+			CHECK((*blocks)[0].FenceLine == 3);
+			CHECK((*blocks)[0].Path == "Assets/Tests/A.test.luau");
+			CHECK((*blocks)[0].Prelude == "Behaviour");
+			CHECK_FALSE((*blocks)[0].Skip.has_value());
+			CHECK((*blocks)[0].Source == "local a = 1\n  local b = 2\n");
+			CHECK((*blocks)[1].FenceLine == 12);
+			CHECK((*blocks)[1].Path == Test::DefaultDocExamplePath);
+			CHECK((*blocks)[1].Skip == std::optional<std::string>("an excerpt"));
+
+			for (const auto& [text, line] : { std::pair{ "a\n```luau unknown=1\n```\n", 2u }, std::pair{ "```luau path\n```\n", 1u },
+					 std::pair{ "```luau skip=\"\"\n```\n", 1u }, std::pair{ "```luau path=Scripts/A.luau\n```\n", 1u },
+					 std::pair{ "```luau path=Assets/A.lua\n```\n", 1u }, std::pair{ "x\ny\n```luau\nlocal a = 1\n", 3u },
+					 std::pair{ "```luau skip=\"unclosed\n```\n", 1u } })
+			{
+				CAPTURE(std::string(text));
+				const auto malformed = Test::ExtractDocExamples(text);
+				REQUIRE_FALSE(malformed.has_value());
+				CHECK(malformed.error().GetCode() == ErrorCode::Validation);
+				CHECK(malformed.error().GetLocation().Line == line);
+			}
+		}
+
+		// ADR 0022 decision 17: every skill opens with the frontmatter the docs.get parser reads (name equal to its directory,
+		// a single-line description) and is small enough for docs.get to return inline: its serialized result, which the
+		// dispatcher measures, stays within the offload threshold (review finding M21: the raw text's size is not it).
+		TEST_CASE("DocExamples: every skill document has the docs.get frontmatter and fits inline")
+		{
+			// A text below the threshold in raw bytes whose characters JSON escapes is still offloaded, so the raw size
+			// cannot stand in for the measure.
+			const std::string escaped(DefaultOffloadThresholdBytes - 1024, '\n');
+			CHECK(MeasureDocsGetResult("game-building", escaped) > DefaultOffloadThresholdBytes);
+			const std::filesystem::path skills = Test::GetRepositoryRoot() / ".claude" / "skills";
+			const auto entries = FileSystem::ListDirectory(skills, false);
+			REQUIRE_MESSAGE(entries.has_value(), (entries ? std::string() : entries.error().ToString()));
+			std::vector<std::string> names;
+			for (const std::filesystem::path& entry : *entries)
+			{
+				std::error_code error;
+				if (std::filesystem::is_directory(entry, error))
+					names.push_back(FileSystem::PathToUtf8(entry.filename()));
+			}
+			std::ranges::sort(names);
+			for (const std::string_view required : { "add-automation-method", "add-component", "add-script-api", "build-and-test",
+					 "commit-review", "game-building", "game-debugging", "golden-images", "luau-gameplay" })
+				CHECK_MESSAGE(std::ranges::binary_search(names, required), required);
+			for (const std::string& name : names)
+			{
+				CAPTURE(name);
+				const Result<std::string> text = FileSystem::ReadText(skills / FileSystem::PathFromUtf8(name) / "SKILL.md");
+				REQUIRE_MESSAGE(text.has_value(), (text ? std::string() : text.error().ToString()));
+				CHECK(MeasureDocsGetResult(name, *text) <= DefaultOffloadThresholdBytes);
+				const std::string header = std::format("---\nname: {}\ndescription: ", name);
+				REQUIRE(text->starts_with(header));
+				const size_t end = text->find('\n', header.size());
+				REQUIRE(end != std::string::npos);
+				CHECK(end > header.size());
+				CHECK(std::string_view(*text).substr(end + 1).starts_with("---\n"));
+			}
 		}
 	}
 

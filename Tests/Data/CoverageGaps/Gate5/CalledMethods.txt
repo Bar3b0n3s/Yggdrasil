@@ -1,0 +1,5 @@
+entity.create
+play.start
+entity.create
+scene.tree
+debug.stall

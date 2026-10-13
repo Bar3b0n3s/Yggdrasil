@@ -119,6 +119,12 @@ namespace Engine {
 			project.Simulation.FixedHz = specification.FixedHz;
 			project.Simulation.Seed = specification.Seed;
 			project.Export.BuildScenes = { std::string(StartScenePath) };
+			for (const std::string& script : specification.TestSuiteScripts)
+			{
+				TestSuiteSettings suite;
+				suite.Script = script;
+				project.Testing.Suites.push_back(std::move(suite));
+			}
 
 			const std::filesystem::path data = directory / "Data";
 			ENGINE_TRY(FileSystem::CreateDirectories(data));

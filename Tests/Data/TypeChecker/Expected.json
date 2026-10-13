@@ -12,6 +12,26 @@
 		"Clean": true
 	},
 	{
+		"Path": "DocExamples/Assets/Scripts/Ball.luau",
+		"Clean": true
+	},
+	{
+		"Path": "DocExamples/Assets/Scripts/Board.luau",
+		"Clean": true
+	},
+	{
+		"Path": "DocExamples/Assets/Scripts/Game.luau",
+		"Clean": true
+	},
+	{
+		"Path": "DocExamples/Preludes/Behaviour.luau",
+		"Clean": true
+	},
+	{
+		"Path": "DocExamples/Preludes/TetrisGame.luau",
+		"Clean": true
+	},
+	{
 		"Path": "Errors/ComponentOverload.luau",
 		"Clean": false,
 		"Diagnostics": [

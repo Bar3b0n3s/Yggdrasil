@@ -1,0 +1,375 @@
+{
+	"Format": "Scene",
+	"Version": 1,
+	"Name": "Audio",
+	"Seed": 0,
+	"ComponentVersions": {
+		"Transform": 1,
+		"Camera": 1,
+		"DirectionalLight": 1,
+		"AudioSource": 1,
+		"AudioListener": 1
+	},
+	"Entities": [
+		{
+			"ID": "185758b4cfd16e8c",
+			"Name": "Listener",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Camera": {
+					"Projection": "Perspective",
+					"VerticalFov": 60,
+					"OrthographicSize": 10,
+					"NearClip": 0.1,
+					"FarClip": 1000,
+					"Primary": true,
+					"Clear": "Color",
+					"ClearColor": [0.05, 0.05, 0.06]
+				},
+				"AudioListener": {
+					"Primary": true
+				}
+			}
+		},
+		{
+			"ID": "732fb7a7b7e562c8",
+			"Name": "Light",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [-0.38268343, 0, 0, 0.9238795],
+					"Scale": [1, 1, 1]
+				},
+				"DirectionalLight": {
+					"Color": [1, 1, 1],
+					"Intensity": 3,
+					"CastShadows": true,
+					"ShadowDistance": 100,
+					"CascadeCount": 4,
+					"CascadeSplitLambda": 0.75,
+					"LightAngle": 1,
+					"DepthBias": 1,
+					"NormalBias": 1
+				}
+			}
+		},
+		{
+			"ID": "733afa3a4a8eed20",
+			"Name": "Intro",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"AudioSource": {
+					"Clip": "d6cba742a1178762",
+					"Volume": 1,
+					"Pitch": 1,
+					"Loop": false,
+					"PlayOnStart": true,
+					"Spatial": false,
+					"MinDistance": 1,
+					"MaxDistance": 50,
+					"Attenuation": "Inverse",
+					"Rolloff": 1,
+					"DopplerFactor": 1,
+					"Group": "Sfx"
+				}
+			}
+		},
+		{
+			"ID": "a32c10f5fceecdfa",
+			"Name": "Music",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"AudioSource": {
+					"Clip": "8f1728e5e04e701c",
+					"Volume": 1,
+					"Pitch": 1,
+					"Loop": false,
+					"PlayOnStart": false,
+					"Spatial": false,
+					"MinDistance": 1,
+					"MaxDistance": 50,
+					"Attenuation": "Inverse",
+					"Rolloff": 1,
+					"DopplerFactor": 1,
+					"Group": "Music"
+				}
+			}
+		},
+		{
+			"ID": "cc84daf8ea31b2dc",
+			"Name": "Interface",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"AudioSource": {
+					"Clip": "8f1728e5e04e701c",
+					"Volume": 1,
+					"Pitch": 1,
+					"Loop": false,
+					"PlayOnStart": false,
+					"Spatial": false,
+					"MinDistance": 1,
+					"MaxDistance": 50,
+					"Attenuation": "Inverse",
+					"Rolloff": 1,
+					"DopplerFactor": 1,
+					"Group": "Ui"
+				}
+			}
+		},
+		{
+			"ID": "54bf691b190aaf87",
+			"Name": "Effect",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"AudioSource": {
+					"Clip": "8f1728e5e04e701c",
+					"Volume": 1,
+					"Pitch": 1,
+					"Loop": false,
+					"PlayOnStart": false,
+					"Spatial": false,
+					"MinDistance": 1,
+					"MaxDistance": 50,
+					"Attenuation": "Inverse",
+					"Rolloff": 1,
+					"DopplerFactor": 1,
+					"Group": "Sfx"
+				}
+			}
+		},
+		{
+			"ID": "7c0ada5f7ad3423d",
+			"Name": "Left",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-4, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"AudioSource": {
+					"Clip": "a06d0a5c58c9c793",
+					"Volume": 1,
+					"Pitch": 1,
+					"Loop": false,
+					"PlayOnStart": false,
+					"Spatial": true,
+					"MinDistance": 1,
+					"MaxDistance": 50,
+					"Attenuation": "Inverse",
+					"Rolloff": 1,
+					"DopplerFactor": 1,
+					"Group": "Sfx"
+				}
+			}
+		},
+		{
+			"ID": "9e8ab3854f9d3476",
+			"Name": "Right",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [4, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"AudioSource": {
+					"Clip": "a06d0a5c58c9c793",
+					"Volume": 1,
+					"Pitch": 1,
+					"Loop": false,
+					"PlayOnStart": false,
+					"Spatial": true,
+					"MinDistance": 1,
+					"MaxDistance": 50,
+					"Attenuation": "Inverse",
+					"Rolloff": 1,
+					"DopplerFactor": 1,
+					"Group": "Sfx"
+				}
+			}
+		},
+		{
+			"ID": "63b615a8a99daec7",
+			"Name": "Near",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, -2],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"AudioSource": {
+					"Clip": "a06d0a5c58c9c793",
+					"Volume": 1,
+					"Pitch": 1,
+					"Loop": false,
+					"PlayOnStart": false,
+					"Spatial": true,
+					"MinDistance": 1,
+					"MaxDistance": 10,
+					"Attenuation": "Linear",
+					"Rolloff": 1,
+					"DopplerFactor": 1,
+					"Group": "Sfx"
+				}
+			}
+		},
+		{
+			"ID": "026ea0fc81acdf08",
+			"Name": "Far",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, -15],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"AudioSource": {
+					"Clip": "a06d0a5c58c9c793",
+					"Volume": 1,
+					"Pitch": 1,
+					"Loop": false,
+					"PlayOnStart": false,
+					"Spatial": true,
+					"MinDistance": 1,
+					"MaxDistance": 10,
+					"Attenuation": "Linear",
+					"Rolloff": 1,
+					"DopplerFactor": 1,
+					"Group": "Sfx"
+				}
+			}
+		},
+		{
+			"ID": "88b2566b2d32e300",
+			"Name": "Streamed",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"AudioSource": {
+					"Clip": "73fcc82f972530de",
+					"Volume": 1,
+					"Pitch": 1,
+					"Loop": false,
+					"PlayOnStart": false,
+					"Spatial": false,
+					"MinDistance": 1,
+					"MaxDistance": 50,
+					"Attenuation": "Inverse",
+					"Rolloff": 1,
+					"DopplerFactor": 1,
+					"Group": "Sfx"
+				}
+			}
+		},
+		{
+			"ID": "eb2ef911576f7b57",
+			"Name": "Slow",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"AudioSource": {
+					"Clip": "8f1728e5e04e701c",
+					"Volume": 1,
+					"Pitch": 0.5,
+					"Loop": false,
+					"PlayOnStart": false,
+					"Spatial": false,
+					"MinDistance": 1,
+					"MaxDistance": 50,
+					"Attenuation": "Inverse",
+					"Rolloff": 1,
+					"DopplerFactor": 1,
+					"Group": "Sfx"
+				}
+			}
+		},
+		{
+			"ID": "5d313abfb8f43663",
+			"Name": "Synth",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"AudioSource": {
+					"Clip": "d6cba742a1178762",
+					"Volume": 0.5,
+					"Pitch": 1,
+					"Loop": false,
+					"PlayOnStart": false,
+					"Spatial": false,
+					"MinDistance": 1,
+					"MaxDistance": 50,
+					"Attenuation": "Inverse",
+					"Rolloff": 1,
+					"DopplerFactor": 1,
+					"Group": "Sfx"
+				}
+			}
+		}
+	]
+}

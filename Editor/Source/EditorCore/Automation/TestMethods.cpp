@@ -149,6 +149,8 @@ namespace Engine {
 			ENGINE_TRY(host->Preflight());
 			EditorFeatureTestHost* adapter = host.get();
 			auto operation = CreateScope<TestRunOperation>(std::move(host), params.Record);
+			// The script API baseline immediately before Begin, whose suite collection counts (ADR 0022 decision 4).
+			ENGINE_TRY(adapter->CaptureCoverageBaseline());
 			const Status begun = operation->Begin(params);
 			if (!begun)
 			{

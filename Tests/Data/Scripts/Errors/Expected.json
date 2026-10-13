@@ -1,0 +1,58 @@
+[
+	{
+		"File": "EngineCallAtTop.luau",
+		"Kind": "compile",
+		"Code": "SCRIPT_COMPILE_ERROR",
+		"Line": 2,
+		"Column": 1,
+		"Message": "Scene.FindByName: is not available at load time"
+	},
+	{
+		"File": "LoadTimeBudget.luau",
+		"Kind": "compile",
+		"Code": "SCRIPT_COMPILE_ERROR",
+		"Line": 3,
+		"Column": 1,
+		"Message": "exceeded 250 ms"
+	},
+	{
+		"File": "RuntimeErrorAtTop.luau",
+		"Kind": "compile",
+		"Code": "SCRIPT_COMPILE_ERROR",
+		"Line": 4,
+		"Column": 1,
+		"Message": "module setup failed on purpose"
+	},
+	{
+		"File": "Syntax.luau",
+		"Kind": "compile",
+		"Code": "SCRIPT_COMPILE_ERROR",
+		"Line": 4,
+		"Column": 8,
+		"Message": "Expected identifier"
+	},
+	{
+		"File": "TypeMismatch.luau",
+		"Kind": "type",
+		"Code": "SCRIPT_TYPE_ERROR",
+		"Line": 2,
+		"Column": 23,
+		"Message": "Expected this to be 'number', but got 'string'"
+	},
+	{
+		"File": "TypeReload.luau",
+		"Kind": "type",
+		"Code": "SCRIPT_TYPE_ERROR",
+		"Line": 5,
+		"Column": 9,
+		"Message": "number"
+	},
+	{
+		"File": "UnresolvedRequire.luau",
+		"Kind": "compile",
+		"Code": "SCRIPT_COMPILE_ERROR",
+		"Line": 2,
+		"Column": 1,
+		"Message": "required script has no standalone asset"
+	}
+]

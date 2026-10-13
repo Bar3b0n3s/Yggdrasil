@@ -2,12 +2,14 @@
 # "Repository remote and CI"). A platform counts as verified once its job here is green.
 #
 # Every job runs Scripts/CI.py, the single CI entry point (Architecture §15.8), with every stage a hosted runner can
-# run: setup, generate, lint, build, bake, unit, gpu, golden, automation and portability. The setup stage creates the MCP
+# run: setup, generate, lint, build, bake, unit, gpu, golden, automation and portability, and on windows the CPU-only
+# determinism stage (Docs/Decisions/0022-m14-contract.md decision 7). The setup stage creates the MCP
 # bridge's virtual environment from Tools/MCP/requirements.lock (hash-checked wheels from PyPI), which the automation
 # stage runs in. The bake stage (Editor --headless --renderer vulkan --bake-engine-assets, ADR 0010 decision 13) bakes the
 # built-in environments on the GPU (ADR 0013 decision 9): linux bakes them on Lavapipe; with --gpu-optional (windows and
 # macos) a runner without a device reruns it with --renderer none, leaving the environments out with a warning.
-# - windows: one CI.py run over all of them (the local gate is the full CI.py).
+# - windows: one CI.py run over all of them (the local gate is the full CI.py), determinism included: it verifies every
+#   FeatureTest replay in the --renderer none Debug and Release editors, which needs no GPU.
 # - linux:   gmake, once with GCC 14 and once with Clang 19 (Architecture §15.8).
 # - macos:   arm64 with the xcode4 generator and xcodebuild.
 #
@@ -24,6 +26,8 @@
 #   (no driver on the Windows image; MoltenVK's loader is not on the macOS library path) the bake leaves the built-in
 #   environments out of the engine cache, and every GPU test case, and every automation test that starts a rendering
 #   editor, passes without running, naming the reason, and the steps end as warnings.
+# The feature stage (FeatureTest in editor mode) needs a real Vulkan device for its .hdr import and stays with the local
+# gate (Remote CI is non-blocking, ADR 0011); running it on the linux Lavapipe job joins the ADR 0011 batch.
 # On linux and macos, CI.py runs once per step below: setup + generate, then the static checks, then build + unit per
 # configuration with the GPU tests (the Release step adds the bake, golden and automation stages), then portability. Each later step
 # runs whenever generation succeeded, even when an earlier step failed, so one run reports every configuration (CI.py
@@ -185,15 +189,16 @@ jobs:
 
       # Stages a hosted runner can run: setup, generate, lint (which includes CheckBuildConfig.py on the workspace and
       # its fixtures, Lint.py, Lint.py --self-test and the format check), build, bake, unit, gpu, golden and automation
-      # (the Python suites against the headless editor, M4) and portability (which includes the clang-cl Release and
-      # Dist builds; this image has the VS C++ Clang component, so --require-clang-cl turns a missing component into a
+      # (the Python suites against the headless editor, M4), determinism (every FeatureTest replay in the --renderer
+      # none Debug and Release editors, M14: CPU only) and portability (which includes the clang-cl Release and Dist
+      # builds; this image has the VS C++ Clang component, so --require-clang-cl turns a missing component into a
       # failure instead of a skip). With --gpu-optional: this image has no Vulkan device, so the bake leaves the
       # built-in environments out with a warning, and the GPU test cases and the automation tests that start a
       # rendering editor report the reason and pass without running. Add each later CPU-only stage here when it lands.
-      # The stages that need a real GPU (feature, export, determinism, games, and the environment bakes) stay with the
-      # local gate on a machine with a Vulkan device.
+      # The stages that need a real GPU (feature, export, games, and the environment bakes) stay with the local gate on
+      # a machine with a Vulkan device.
       - name: Run CI.py
-        run: python Scripts/CI.py --stages setup,generate,lint,build,bake,unit,gpu,golden,automation,portability --require-clang-cl --gpu-optional
+        run: python Scripts/CI.py --stages setup,generate,lint,build,bake,unit,gpu,golden,automation,determinism,portability --require-clang-cl --gpu-optional
 
       - name: Upload test results
         if: ${{ !cancelled() }}

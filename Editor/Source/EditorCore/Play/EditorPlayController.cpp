@@ -314,11 +314,9 @@ namespace Engine {
 		result.Header.Seed = specification.Seed;
 		result.Header.FixedHz = project.Simulation.FixedHz;
 		result.Header.EngineVersion = std::string(EngineVersionString);
-#if defined(ENGINE_DEBUG)
-		result.Header.Config = "Debug";
-#else
-		result.Header.Config = "Release";
-#endif
+		// The run mode that recorded it, never the build configuration: a Debug and a Release editor record the same bytes
+		// (§9.1, ADR 0022 "Integration").
+		result.Header.Config = "Editor";
 		if (scenePath.has_value())
 		{
 			result.Header.Scene.Path = std::string(scenePath->GetPath());
@@ -460,10 +458,47 @@ namespace Engine {
 			state.Session->SetViewSize(size->x, size->y);
 	}
 
-	Status EditorPlayController::CheckReloadTypes(AssetHandle /*script*/)
+	Status EditorPlayController::CheckReloadTypes(AssetHandle script)
 	{
-		ENGINE_CONTRACT_STUB();
-		return std::unexpected(Error(ErrorCode::Unsupported, "M14 reload type gate contract"));
+		State& state = *m_State;
+		PlaySession* session = GetSession();
+		ScriptEngine* scripts = session != nullptr ? session->GetScripts() : nullptr;
+		if (scripts == nullptr || !state.Editor->HasProject())
+			return {};
+		// Type errors always block test runs (§11.9); an ordinary session follows the project's setting.
+		if (!scripts->IsTestMode() && !state.Editor->GetProject().GetSettings().Scripting.BlockPlayOnTypeErrors)
+			return {};
+		// A chain error is Reload's to report, with the running code kept.
+		const Result<std::vector<AssetHandle>> chain = scripts->GetReloadChain(script);
+		if (!chain)
+			return {};
+		const EditorAssetManager& assets = state.Editor->GetAssets();
+		for (const AssetHandle member : *chain)
+		{
+			const Result<ScriptImportCheck> check = assets.GetScriptCheck(member);
+			if (!check || !check->Performed)
+				continue;
+			const auto finding = std::ranges::find_if(check->Diagnostics, [](const ScriptDiagnostic& diagnostic)
+			{
+				return diagnostic.Code == "SCRIPT_TYPE_ERROR" && diagnostic.Severity == DiagnosticSeverity::Error;
+			});
+			if (finding == check->Diagnostics.end())
+				continue;
+			ScriptError error;
+			error.Kind = ScriptErrorKind::Type;
+			error.Script = finding->File;
+			error.Line = finding->Line;
+			error.Column = finding->Column;
+			error.Message = finding->Message;
+			error.Callback = "Reload";
+			error.Tick = session->GetTick();
+			state.OnScriptError(error, false);
+			return std::unexpected(Error(ErrorCode::Script, std::format("type errors block the reload, so the running code is kept: {}", finding->Message))
+					.WithLocation({ .File = finding->File, .Line = finding->Line, .Column = finding->Column, .JsonPointer = std::nullopt, .Entity = {} })
+					.WithHint(scripts->IsTestMode() ? std::string("fix the script's type errors (script.check); type errors always block test runs")
+													: std::string("fix the script's type errors (script.check) or disable Scripting.BlockPlayOnTypeErrors")));
+		}
+		return {};
 	}
 
 	void EditorPlayController::OnAssetReload(AssetHandle source)
@@ -576,6 +611,19 @@ namespace Engine {
 				return failedImports.contains(asset);
 			}))
 				continue; // Keep the entire live chain until its next successful import; never install a partial chain.
+			// The type gate (ADR 0022 decision 15): with Scripting.BlockPlayOnTypeErrors, a chain whose latest import check has
+			// type errors keeps its running code and publishes one `type` error; a new source publication retries.
+			if (!CheckReloadTypes(handle).has_value())
+			{
+				for (const AssetHandle affected : closure)
+					state.PendingScriptReloads.erase(affected);
+				if (chain)
+				{
+					for (const AssetHandle affected : *chain)
+						state.PendingScriptReloads.erase(affected);
+				}
+				continue;
+			}
 			const auto reloaded = scripts->Reload(handle);
 			if (reloaded && reloaded->Deferred)
 				continue;

@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <string>
+#include <vector>
 
 // A game laid out the way project.export packages one (Architecture §14.1; EditorCore/Export/Exporter.h), written by the
 // Tests themselves, so the Runtime's tests run against exported data without the editor: Game.json, Data/Engine.pak and
@@ -28,6 +29,9 @@ namespace Engine {
 			// Engine.pak with this configuration's compiled shaders (every .spv and .refl.json of ENGINE_SHADER_DIRECTORY under
 			// "Shaders/", as the exporter writes them), for runs that render; without, a pak with no files.
 			bool Shaders = false;
+			// The project's Testing.Suites, one entry per script path (no scene). The pak holds no script, so a --feature-test
+			// run of such a game cannot begin: its runner does not find the suites' scripts.
+			std::vector<std::string> TestSuiteScripts{};
 		};
 
 		// The start scene of a test game: "Main", a primary perspective camera at (0, 1.5, 5), a directional light and the

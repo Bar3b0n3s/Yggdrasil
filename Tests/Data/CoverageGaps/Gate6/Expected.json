@@ -1,0 +1,7 @@
+{
+	"Format": "CoverageGap",
+	"Version": 1,
+	"Gate": "6",
+	"Exclude": ["TEST_SUITE_INVALID"],
+	"Missing": ["TEST_SUITE_INVALID"]
+}

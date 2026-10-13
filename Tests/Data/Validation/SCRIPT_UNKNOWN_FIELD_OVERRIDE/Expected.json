@@ -1,0 +1,9 @@
+{
+	"Format": "ValidationFixture",
+	"Version": 1,
+	"Scope": "Project",
+	"Codes": ["SCRIPT_UNKNOWN_FIELD_OVERRIDE"],
+	"TestComponents": false,
+	"Expand": [],
+	"NonCanonical": []
+}

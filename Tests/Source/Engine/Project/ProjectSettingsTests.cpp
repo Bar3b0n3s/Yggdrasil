@@ -40,7 +40,7 @@ namespace Engine {
 	{
 		// ADR 0022 decision 9: the §15.5 Timing clock [0.004, 0.016, 0.0334, 0.083, 0.5, 0.0] ends with a zero-length frame,
 		// so a frame delta may be 0; an all-zero clock stays invalid (ADR 0019 decision 10), now already in the project file.
-		TEST_CASE("ProjectSettings: a scripted clock may hold zero deltas but not only zeros" * doctest::skip(true))
+		TEST_CASE("ProjectSettings: a scripted clock may hold zero deltas but not only zeros")
 		{
 			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
 			const auto reload = [&registry](const std::vector<float>& clock) -> Result<ProjectSettings>
@@ -54,11 +54,18 @@ namespace Engine {
 				ProjectLoadReport report;
 				return ProjectSerializer::FromJson(document, *registry, ProjectLoadOptions{}, report);
 			};
-			const Result<ProjectSettings> timing = reload({ 0.004f, 0.016f, 0.0334f, 0.083f, 0.5f, 0.0f });
+			const std::vector<float> clock = { 0.004f, 0.016f, 0.0334f, 0.083f, 0.5f, 0.0f };
+			const Result<ProjectSettings> timing = reload(clock);
 			REQUIRE_MESSAGE(timing.has_value(), timing.error().ToString());
-			CHECK(timing->Testing.Suites[0].Clock.size() == 6);
+			CHECK(timing->Testing.Suites[0].Clock == clock);
+			for (const std::vector<float>& valid : { std::vector<float>{ 0.0f, 0.0f, 0.25f }, std::vector<float>{ 0.016f } })
+			{
+				const Result<ProjectSettings> accepted = reload(valid);
+				REQUIRE_MESSAGE(accepted.has_value(), accepted.error().ToString());
+				CHECK(accepted->Testing.Suites[0].Clock == valid);
+			}
 
-			for (const std::vector<float>& invalid : { std::vector<float>{ 0.0f, 0.0f }, std::vector<float>{ 0.016f, -0.004f } })
+			for (const std::vector<float>& invalid : { std::vector<float>{ 0.0f, 0.0f }, std::vector<float>{ 0.0f }, std::vector<float>{ 0.016f, -0.004f } })
 			{
 				const Result<ProjectSettings> rejected = reload(invalid);
 				REQUIRE_FALSE(rejected.has_value());
@@ -236,7 +243,7 @@ namespace Engine {
 			CHECK(pointers[0].starts_with("/Gravity"));
 		}
 
-		TEST_CASE("ProjectSettings: test suites need positive frame deltas, unique modes, object parameters and a budget of 0 or at least 10")
+		TEST_CASE("ProjectSettings: test suites need non-negative frame deltas with one positive, unique modes, object parameters and a budget of 0 or at least 10")
 		{
 			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
 			CHECK(ValidationErrorPointers(*registry, TestSuiteSettings{}).empty());
@@ -245,7 +252,14 @@ namespace Engine {
 			suite.Clock = { 0.016f, 0.0f, -1.0f };
 			suite.Modes = { TestSuiteSettings::Mode::Editor, TestSuiteSettings::Mode::Editor };
 			suite.Parameters = VariantValue(Json::array({ 1, 2 }));
-			CHECK(ValidationErrorPointers(*registry, suite) == std::vector<std::string>{ "/Clock/1", "/Clock/2", "/Modes/1", "/Parameters" });
+			CHECK(ValidationErrorPointers(*registry, suite) == std::vector<std::string>{ "/Clock/2", "/Modes/1", "/Parameters" });
+
+			// A zero frame is valid (the §15.5 Timing clock ends with one); a clock of zero frames only never steps.
+			TestSuiteSettings zeros;
+			zeros.Clock = { 0.0f, 0.0f };
+			CHECK(ValidationErrorPointers(*registry, zeros) == std::vector<std::string>{ "/Clock" });
+			zeros.Clock = { 0.0f, 0.004f, 0.0f };
+			CHECK(ValidationErrorPointers(*registry, zeros).empty());
 
 			// A suite's own rules run only once its fields, the nested Overrides struct included, are valid (type-level
 			// validators assume valid fields), so an invalid budget is reported alone.
@@ -314,8 +328,20 @@ namespace Engine {
 			registry->FindStruct<TestSuiteOverrides>()->Generate(&suite.Overrides, random);
 			registry->FindStruct<TestSuiteSettings>()->Generate(&suite, random);
 			CHECK(ValidationErrorPointers(*registry, suite).empty());
-			CHECK(suite.Clock[1] == 0.5f);
+			CHECK(suite.Clock == std::vector<float>{ 0.0f, 0.5f });
 			CHECK(suite.Modes == std::vector<TestSuiteSettings::Mode>{ TestSuiteSettings::Mode::Dist });
+
+			TestSuiteSettings stalled;
+			stalled.Clock = { 0.0f, -2.0f };
+			registry->FindStruct<TestSuiteSettings>()->Generate(&stalled, random);
+			CHECK(ValidationErrorPointers(*registry, stalled).empty());
+			CHECK(stalled.Clock[0] == 0.0f);
+			CHECK(stalled.Clock[1] > 0.0f);
+			stalled.Clock = { 0.0f, 0.0f };
+			registry->FindStruct<TestSuiteSettings>()->Generate(&stalled, random);
+			CHECK(ValidationErrorPointers(*registry, stalled).empty());
+			CHECK(stalled.Clock[0] > 0.0f);
+			CHECK(stalled.Clock[1] == 0.0f);
 
 			TestSuiteSettings noModes;
 			noModes.Modes.clear();

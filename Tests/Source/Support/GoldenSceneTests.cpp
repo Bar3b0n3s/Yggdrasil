@@ -152,32 +152,134 @@ namespace Engine {
 
 		TEST_CASE("GoldenScene: the scaffold's sources and their imported copies are the Tests/Data fixtures")
 		{
-			// Projects/FeatureTest/Scaffold/Sources holds the files Golden.jsonl imports (asset.import takes project paths or
-			// absolute ones, so the committed scaffold imports from inside the project); they and the copies the import made
-			// under Assets/ must stay byte-identical to the generated fixtures (Tests/Data/Generate).
+			// Projects/FeatureTest/Scaffold/Sources holds the files Golden.jsonl and Formats.jsonl import (asset.import takes
+			// project paths or absolute ones, so the committed scaffolds import from inside the project): a subset mirror of
+			// Tests/Data/Assets, never a deliberately invalid fixture (ADR 0022 decision 16). Every source and every copy the
+			// imports made under Assets/ must stay byte-identical to its generated or pinned fixture (Tests/Data/Generate,
+			// FetchAssets.py fixture).
+			const std::filesystem::path sources = GetFeatureTestPath("Scaffold/Sources");
+			const Result<std::vector<std::filesystem::path>> entries = FileSystem::ListDirectory(sources, true);
+			REQUIRE_MESSAGE(entries.has_value(), entries.error().ToString());
+			std::vector<std::string> mirrored;
+			for (const std::filesystem::path& entry : *entries)
+			{
+				const Result<FileInfo> info = FileSystem::GetInfo(entry);
+				REQUIRE(info.has_value());
+				if (info->IsDirectory)
+					continue;
+				const std::string relative = FileSystem::PathToUtf8(entry.lexically_relative(sources));
+				CAPTURE(relative);
+				const Result<Buffer> fixture = FileSystem::ReadFile(Test::GetTestDataPath("Assets/" + relative));
+				const Result<Buffer> source = FileSystem::ReadFile(entry);
+				REQUIRE_MESSAGE(fixture.has_value(), "every source mirrors a file of Tests/Data/Assets");
+				REQUIRE(source.has_value());
+				CHECK(*source == *fixture);
+				mirrored.push_back(relative);
+			}
+
+			// The golden imports keep their M8 destinations; Formats.jsonl imports into Assets/Formats/<same relative path>.
 			struct SourceCopy
 			{
 				std::string_view Fixture;  // below Tests/Data/Assets
 				std::string_view Imported; // below Projects/FeatureTest/Assets
 			};
-			constexpr std::array<SourceCopy, 5> Copies = { {
+			constexpr std::array<SourceCopy, 5> GoldenCopies = { {
 				{ "Gltf/NormalMapped.gltf", "Models/Golden/NormalMapped.gltf" },
 				{ "Gltf/Textured.bin", "Models/Golden/Textured.bin" },
 				{ "Gltf/Textured.gltf", "Models/Golden/Textured.gltf" },
 				{ "Gltf/Textures/Checker.png", "Models/Golden/Textures/Checker.png" },
 				{ "Textures/Rgba.png", "Textures/Golden/Rgba.png" },
 			} };
-			for (const SourceCopy& copy : Copies)
+			std::vector<std::string> imported;
+			for (const SourceCopy& copy : GoldenCopies)
 			{
 				CAPTURE(std::string(copy.Fixture));
 				const Result<Buffer> fixture = FileSystem::ReadFile(Test::GetTestDataPath("Assets/" + std::string(copy.Fixture)));
-				const Result<Buffer> source = FileSystem::ReadFile(GetFeatureTestPath("Scaffold/Sources/" + std::string(copy.Fixture)));
-				const Result<Buffer> imported = FileSystem::ReadFile(GetFeatureTestPath("Assets/" + std::string(copy.Imported)));
+				const Result<Buffer> copied = FileSystem::ReadFile(GetFeatureTestPath("Assets/" + std::string(copy.Imported)));
 				REQUIRE(fixture.has_value());
-				REQUIRE(source.has_value());
-				REQUIRE(imported.has_value());
-				CHECK(*source == *fixture);
-				CHECK(*imported == *fixture);
+				REQUIRE(copied.has_value());
+				CHECK(*copied == *fixture);
+				imported.emplace_back(copy.Fixture);
+			}
+			const std::filesystem::path formats = GetFeatureTestPath("Assets/Formats");
+			const Result<std::vector<std::filesystem::path>> copies = FileSystem::ListDirectory(formats, true);
+			REQUIRE_MESSAGE(copies.has_value(), copies.error().ToString());
+			for (const std::filesystem::path& entry : *copies)
+			{
+				const Result<FileInfo> info = FileSystem::GetInfo(entry);
+				REQUIRE(info.has_value());
+				const std::string extension = FileSystem::PathToUtf8(entry.extension());
+				// The scaffold authors the native formats itself; .meta files are the editor's.
+				if (info->IsDirectory || extension == ".meta" || extension == ".bak" || extension == ".material" || extension == ".sfx")
+					continue;
+				const std::string relative = FileSystem::PathToUtf8(entry.lexically_relative(formats));
+				CAPTURE(relative);
+				const Result<Buffer> fixture = FileSystem::ReadFile(Test::GetTestDataPath("Assets/" + relative));
+				const Result<Buffer> copied = FileSystem::ReadFile(entry);
+				REQUIRE_MESSAGE(fixture.has_value(), "every imported format file comes from Scaffold/Sources");
+				REQUIRE(copied.has_value());
+				CHECK(*copied == *fixture);
+				CHECK(std::ranges::find(mirrored, relative) != mirrored.end());
+				imported.push_back(relative);
+			}
+			// No source is unused.
+			for (const std::string& relative : mirrored)
+			{
+				CAPTURE(relative);
+				CHECK(std::ranges::find(imported, relative) != imported.end());
+			}
+		}
+
+		TEST_CASE("GoldenScene: the component, physics, audio and format scenes load strictly and re-save byte for byte")
+		{
+			// The scenes of stream B's scaffolds (Formats, Components, Physics and Audio .jsonl; ADR 0022 decision 9), opened
+			// read-only on the CPU like the golden scenes: they load without a diagnostic, reference only assets the project
+			// or the engine has, and re-save to exactly their committed bytes (the round trip of Architecture §6), so a
+			// scaffold change that writes a non-canonical or unloadable scene fails here before the feature stage.
+			constexpr std::array<std::string_view, 7> Scenes = { "Components", "Components/TonemapAces", "Components/TonemapPbrNeutral",
+				"Components/TonemapLinear", "Physics", "Audio", "Formats" };
+			Test::AssetTestFixture assets({ .EngineResources = true });
+			VirtualFileSystem& vfs = assets.GetVfs();
+			REQUIRE(vfs.Unmount("project").has_value());
+			REQUIRE(vfs.Mount("project", CreateScope<NativeDirectoryMount>(GetFeatureTestRoot(), MountAccess::ReadOnly)).has_value());
+			const Result<AssetRefreshReport> refresh = assets.GetManager().OpenProject(
+				{ .AssetsRoot = assets.ProjectPath("Assets"), .CacheRoot = Test::ParseVfsPath("cache://"), .ReadOnly = true, .HotReload = false });
+			REQUIRE_MESSAGE(refresh.has_value(), refresh.error().ToString());
+			CHECK(refresh->Diagnostics.empty());
+			CHECK(refresh->CreatedMetas.empty());
+
+			const AssetManager& manager = assets.GetManager();
+			for (const std::string_view name : Scenes)
+			{
+				CAPTURE(std::string(name));
+				const std::string relative = "Assets/Scenes/" + std::string(name) + ".scene";
+				const Result<std::string> committed = FileSystem::ReadText(GetFeatureTestPath(relative));
+				REQUIRE_MESSAGE(committed.has_value(), committed.error().ToString());
+				SceneSpecification specification;
+				specification.Name = std::string(name);
+				specification.Registry = &assets.GetRegistry();
+				specification.IdGenerator = &assets.GetGenerator();
+				const Scope<Scene> scene = Scene::Create(specification);
+				LoadReport report;
+				const Status loaded = SceneSerializer::LoadFromFile(*scene, vfs, assets.ProjectPath(relative), { .StrictUnknowns = true, .SourcePath = relative }, report);
+				REQUIRE_MESSAGE(loaded.has_value(), loaded.error().ToString());
+				CHECK(report.Diagnostics.empty());
+				const Result<std::string> saved = SceneSerializer::SaveToString(*scene);
+				REQUIRE_MESSAGE(saved.has_value(), saved.error().ToString());
+				CHECK(*saved == *committed);
+
+				TransformSystem::Update(*scene);
+				const Result<RenderSnapshot> snapshot = ExtractRenderSnapshot(*scene, { .Width = 640, .Height = 360 });
+				REQUIRE_MESSAGE(snapshot.has_value(), snapshot.error().ToString());
+				CHECK(snapshot->HasCamera);
+				for (const MeshDrawItem& item : snapshot->Meshes)
+				{
+					CHECK(manager.GetAssetType(item.Mesh) == AssetType::Mesh);
+					for (const AssetHandle material : item.Materials)
+						CHECK((!material.IsValid() || manager.GetAssetType(material) == AssetType::Material));
+				}
+				if (snapshot->Environment.Environment.IsValid())
+					CHECK(manager.GetAssetType(snapshot->Environment.Environment) == AssetType::Environment);
 			}
 		}
 

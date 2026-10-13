@@ -1,0 +1,132 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"title": "GameManifest",
+	"description": "The exported game's manifest, Game.json (§14.1).",
+	"type": "object",
+	"properties": {
+		"Format": {
+			"description": "The file's format name; first key of the file.",
+			"enum": ["GameManifest"]
+		},
+		"Version": {
+			"description": "The format version this build writes; older versions are migrated when read.",
+			"enum": [1]
+		},
+		"Name": {
+			"description": "The game's name: the executable's and the user-data folder's name.",
+			"type": "string"
+		},
+		"EngineVersion": {
+			"description": "The exporting engine's version.",
+			"type": "string"
+		},
+		"StartScene": {
+			"description": "The Scene asset the game starts with.",
+			"type": "string",
+			"pattern": "^[0-9a-fA-F]{16}$"
+		},
+		"Paks": {
+			"description": "Engine.pak, then Game.pak.",
+			"type": "array",
+			"items": {
+				"description": "One pak.",
+				"type": "object",
+				"properties": {
+					"Path": {
+						"description": "The pak's path relative to the manifest, forward slashes.",
+						"type": "string"
+					},
+					"XXH64": {
+						"description": "XXH64 (seed 0) of the whole pak file.",
+						"type": "string",
+						"pattern": "^[0-9a-fA-F]{16}$"
+					}
+				},
+				"required": ["Path", "XXH64"],
+				"additionalProperties": false
+			},
+			"minItems": 2,
+			"maxItems": 2
+		},
+		"Window": {
+			"$ref": "#/$defs/WindowSettings"
+		},
+		"Simulation": {
+			"$ref": "#/$defs/SimulationSettings"
+		},
+		"Testing": {
+			"description": "Whether the export admits --feature-test.",
+			"type": "boolean"
+		}
+	},
+	"required": ["Format", "Version", "Name", "EngineVersion", "StartScene", "Paks", "Window", "Simulation", "Testing"],
+	"additionalProperties": false,
+	"$defs": {
+		"WindowSettings": {
+			"description": "The window of the exported game.",
+			"type": "object",
+			"properties": {
+				"Title": {
+					"description": "Title of the game window.",
+					"type": "string"
+				},
+				"Width": {
+					"description": "Initial client width of the window in pixels.",
+					"type": "integer",
+					"minimum": 1,
+					"maximum": 4294967295
+				},
+				"Height": {
+					"description": "Initial client height of the window in pixels.",
+					"type": "integer",
+					"minimum": 1,
+					"maximum": 4294967295
+				},
+				"VSync": {
+					"description": "Synchronizes presentation with the display's refresh.",
+					"type": "boolean"
+				},
+				"Fullscreen": {
+					"description": "Starts the game in fullscreen.",
+					"type": "boolean"
+				},
+				"Resizable": {
+					"description": "Lets the player resize the window.",
+					"type": "boolean"
+				}
+			},
+			"additionalProperties": false
+		},
+		"SimulationSettings": {
+			"description": "The fixed-step simulation of play sessions.",
+			"type": "object",
+			"properties": {
+				"FixedHz": {
+					"description": "Fixed simulation steps per second.",
+					"type": "integer",
+					"minimum": 1,
+					"maximum": 100000
+				},
+				"MaxStepsPerFrame": {
+					"description": "Most fixed steps one frame runs; beyond it the simulation slows down instead of falling further behind.",
+					"type": "integer",
+					"minimum": 1,
+					"maximum": 4294967295
+				},
+				"Seed": {
+					"description": "The project half of each play session's random seed (Project Seed ^ Scene Seed).",
+					"type": "integer",
+					"minimum": 0,
+					"maximum": 4294967295
+				},
+				"MaxEntities": {
+					"description": "Most entities one play session may hold.",
+					"type": "integer",
+					"minimum": 1,
+					"maximum": 4294967295
+				}
+			},
+			"additionalProperties": false
+		}
+	}
+}

@@ -1,0 +1,9 @@
+{
+	"Format": "ValidationFixture",
+	"Version": 1,
+	"Scope": "Project",
+	"Codes": ["ASSET_CONTENT_SKIPPED"],
+	"TestComponents": false,
+	"Expand": [],
+	"NonCanonical": []
+}

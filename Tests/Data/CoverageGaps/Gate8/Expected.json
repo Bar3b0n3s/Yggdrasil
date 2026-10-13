@@ -1,0 +1,6 @@
+{
+	"Format": "CoverageGap",
+	"Version": 1,
+	"Gate": "8",
+	"Missing": ["/Rendering/SsaoHalfResolution"]
+}

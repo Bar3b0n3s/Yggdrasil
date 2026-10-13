@@ -1,0 +1,9 @@
+{
+	"Format": "ValidationFixture",
+	"Version": 1,
+	"Scope": "Project",
+	"Codes": ["PREFAB_MISSING_ASSET"],
+	"TestComponents": false,
+	"Expand": [],
+	"NonCanonical": []
+}

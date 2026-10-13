@@ -21,7 +21,7 @@ namespace Engine {
 	{
 		// Architecture §15.6 gate 7, mode-independent and editor-only (ADR 0022 decision 6): the editor's registries are the
 		// superset of every mode's types, script API and automation methods.
-		TEST_CASE("Descriptions: every type, field, function, method, property and automation method has a non-empty description" * doctest::skip(true))
+		TEST_CASE("Descriptions: every type, field, function, method, property and automation method has a non-empty description")
 		{
 			Test::EditorTestFixture fixture("DescriptionGate");
 			MethodRegistry methods(fixture.GetEngine().GetTypeRegistry());
@@ -47,7 +47,7 @@ namespace Engine {
 
 		// Tests/Data/CoverageGaps/Gate7/Descriptions.json is a DescriptionEntry list ({"Kind", "Name", "Description"}) with
 		// exactly one empty description; Expected.json's Missing names it.
-		TEST_CASE("Descriptions: the gate 7 seeded-gap fixture names exactly its empty description" * doctest::skip(true))
+		TEST_CASE("Descriptions: the gate 7 seeded-gap fixture names exactly its empty description")
 		{
 			const auto descriptions = Test::ReadTestDataText("CoverageGaps/Gate7/Descriptions.json");
 			const auto expected = Test::ReadTestDataText("CoverageGaps/Gate7/Expected.json");
@@ -73,14 +73,18 @@ namespace Engine {
 			REQUIRE(missing.size() == 1);
 			const auto expectedDocument = JsonReader::Parse(*expected);
 			REQUIRE(expectedDocument.has_value());
-			const auto names = JsonReader(*expectedDocument).GetMember("Missing");
+			const JsonReader expectedReader(*expectedDocument);
+			REQUIRE(expectedReader.ReadFormatHeader("CoverageGap", 1, 1).has_value());
+			CHECK(expectedReader.ReadMember<std::string>("Gate") == std::string("7"));
+			const auto names = expectedReader.GetMember("Missing");
 			REQUIRE(names.has_value());
+			REQUIRE(names->GetArraySize() == static_cast<size_t>(1));
 			const auto first = names->GetElement(0);
 			REQUIRE(first.has_value());
 			CHECK(first->ReadString() == missing.front());
 		}
 
-		TEST_CASE("Descriptions: an empty or whitespace-only description is named by gate 7" * doctest::skip(true))
+		TEST_CASE("Descriptions: an empty or whitespace-only description is named by gate 7")
 		{
 			const std::vector<DescriptionEntry> entries = {
 				DescriptionEntry{ .Kind = "field", .Name = "Camera.Projection", .Description = "Perspective or orthographic projection." },

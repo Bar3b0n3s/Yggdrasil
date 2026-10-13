@@ -173,6 +173,35 @@ namespace Engine {
 			}
 			gpu.GetDevice().RunGarbageCollection();
 		}
+
+		TEST_CASE("EnvironmentImporter: the generated flat-RGBE Gradient.hdr bakes a sky brighter above than below" * doctest::test_suite(Test::GpuSuite))
+		{
+			// Tests/Data/Assets/Environments/Gradient.hdr (MakeFormatFixtures.py): 32 x 16 flat RGBE scanlines, a blue sky over a
+			// dark brown ground, the Formats.scene environment of Projects/FeatureTest.
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			{
+				Result<Scope<EnvironmentBaker>> baker = EnvironmentBaker::Create(gpu.GetDevice(), gpu.GetPipelines());
+				REQUIRE_MESSAGE(baker.has_value(), baker.error().ToString());
+				Test::AssetTestFixture fixture;
+				Result<Buffer> gradient = FileSystem::ReadFile(Test::GetTestDataPath("Assets/Environments/Gradient.hdr"));
+				REQUIRE_MESSAGE(gradient.has_value(), gradient.error().ToString());
+				const Result<ImportResult> imported = ImportEnvironment(fixture, "Gradient.hdr", *gradient, DefaultSettings(), baker->get());
+				REQUIRE_MESSAGE(imported.has_value(), imported.error().ToString());
+				const Result<AssetRef<EnvironmentData>> environment = LoadCookedEnvironment(imported->Artifacts.front().Cooked);
+				REQUIRE_MESSAGE(environment.has_value(), environment.error().ToString());
+				CHECK((*environment)->Skybox.FaceSize == 8); // min(1024, 32 / 4)
+				// The band 0 coefficient is the mean radiance; the (1, -1) coefficient grows with +Y, the sky's side.
+				for (int channel = 0; channel < 3; ++channel)
+				{
+					CAPTURE(channel);
+					CHECK((*environment)->IrradianceSH9[0][channel] > 0.0f);
+					CHECK((*environment)->IrradianceSH9[1][channel] > 0.0f);
+				}
+				CHECK((*environment)->IrradianceSH9[1].z > (*environment)->IrradianceSH9[1].x);
+			}
+			gpu.GetDevice().RunGarbageCollection();
+		}
 	}
 
 }

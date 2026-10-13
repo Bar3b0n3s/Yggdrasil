@@ -1,0 +1,6 @@
+{
+	"Format": "CoverageGap",
+	"Version": 1,
+	"Gate": "5",
+	"Missing": ["entity.destroy", "physics.raycast", "scene.save"]
+}

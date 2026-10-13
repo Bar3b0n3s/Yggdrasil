@@ -93,6 +93,8 @@ namespace Engine {
 		// The Font placeholder when the Default font cannot be loaded: an empty font, created once.
 		AssetRef<FontData> EmptyFont;
 		std::optional<SharedState> Saved;
+		// SetLoadObserver's observer (empty: none). Not part of a dry run's saved state: the FeatureTestRunner owns it.
+		LoadObserver Observer;
 
 		void RebuildMerged()
 		{
@@ -386,14 +388,20 @@ namespace Engine {
 		ReportDiagnostic(std::move(diagnostic));
 	}
 
-	void AssetManager::SetLoadObserver(LoadObserver /*observer*/)
+	void AssetManager::SetLoadObserver(LoadObserver observer)
 	{
-		ENGINE_CONTRACT_STUB();
+		m_State->Observer = std::move(observer);
 	}
 
-	void AssetManager::NotifyLoaded(AssetHandle /*handle*/) const
+	bool AssetManager::HasLoadObserver() const
 	{
-		ENGINE_CONTRACT_STUB();
+		return static_cast<bool>(m_State->Observer);
+	}
+
+	void AssetManager::NotifyLoaded(AssetHandle handle) const
+	{
+		if (m_State->Observer)
+			m_State->Observer(handle);
 	}
 
 }

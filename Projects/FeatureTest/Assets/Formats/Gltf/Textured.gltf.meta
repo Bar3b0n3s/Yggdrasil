@@ -1,0 +1,36 @@
+{
+	"Format": "AssetMeta",
+	"Version": 1,
+	"Handle": "e6b695f4b5fb8f95",
+	"Type": "Prefab",
+	"Importer": "Gltf",
+	"ImporterVersion": 1,
+	"Settings": {
+		"Scale": 1,
+		"GenerateMissingTangents": true,
+		"ImportMaterials": true,
+		"MergeMeshes": false
+	},
+	"SubAssets": [
+		{
+			"Key": "material:0:Checker",
+			"Handle": "af7e948a508d37e5",
+			"Type": "Material"
+		},
+		{
+			"Key": "material:1:Trim",
+			"Handle": "545ee5cc6d8b8154",
+			"Type": "Material"
+		},
+		{
+			"Key": "mesh:0:TexturedCube",
+			"Handle": "82722167a5c22e65",
+			"Type": "Mesh"
+		},
+		{
+			"Key": "texture:0",
+			"Handle": "a31976f5727b6521",
+			"Type": "Texture"
+		}
+	]
+}

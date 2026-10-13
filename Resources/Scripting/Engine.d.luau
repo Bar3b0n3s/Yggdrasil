@@ -185,7 +185,7 @@ export type TestAudioLevels = {RmsLeft: number, RmsRight: number, Peak: number}
 -- Positive tick timeout overriding the suite default.
 export type TestCaseOptions = {TimeoutTicks: number?}
 
--- Last completed render extraction interpolation and frame.
+-- The last completed render extraction: its interpolation Alpha, and Frame, the number of extractions completed so far.
 export type TestExtraction = {Alpha: number, Frame: number}
 
 -- Authenticated suite constructor result.
@@ -1128,7 +1128,7 @@ declare Test: {
 
 -- Phase-aware simulation time; use fixed time for deterministic gameplay.
 declare Time: {
-	-- Returns scaled delta seconds for the current fixed or frame phase. [All modes; Runtime|Test; pure/read]
+	-- Returns the fixed step in the fixed phase (the time scale changes how many steps a frame runs, not their length) and the scaled frame delta in seconds in the frame phase. [All modes; Runtime|Test; pure/read]
 	GetDeltaTime: () -> number,
 	-- Returns the session's fixed step in seconds. [All modes; Runtime|Test; pure/read]
 	GetFixedDeltaTime: () -> number,

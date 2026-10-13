@@ -1,0 +1,9 @@
+{
+	"Format": "ValidationFixture",
+	"Version": 1,
+	"Scope": "Project",
+	"Codes": ["AUDIO_MULTIPLE_PRIMARY_LISTENERS"],
+	"TestComponents": false,
+	"Expand": [],
+	"NonCanonical": []
+}

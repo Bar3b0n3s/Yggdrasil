@@ -1,0 +1,5 @@
+{
+	"Format": "CoverageGap",
+	"Version": 1,
+	"Failures": ["merge: passed: Editor", "merge: passed: Release", "merge: passed: Dist", "merge: gate: Editor 2", "merge: gate: Editor 3", "merge: gate: Release 2", "merge: gate: Dist 2", "merge: uncovered: api:Physics.Overlap", "merge: uncovered: callback:Behaviour.OnHotReload"]
+}

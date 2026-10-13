@@ -107,6 +107,14 @@ namespace Engine {
 	// it to every row it reports, because names and messages come from scripts (Test.Fail, error(), Test.Case names).
 	[[nodiscard]] std::string SanitizeTestReportText(std::string_view text);
 
+	// The result a report is written from when a run ends before the runner produced one (a preflight error such as script
+	// type errors blocking discovery, a refused admission or a failed Begin), so the report files always describe the run
+	// that was asked for and never stay absent or stale (--run-tests and --feature-test, ADR 0022 decision 7 and
+	// "Integration"): mode `mode`, Passed false, one error row (Suite "FeatureTest", Case "run", Message the sanitized
+	// `message`), no suites and no coverage. Every reader sees a failed run: JUnit an <error>, the feature suite and the
+	// merge's `passed` rule a report that did not pass.
+	[[nodiscard]] TestRunResult MakeFailedTestRunResult(TestSuiteSettings::Mode mode, std::string_view message);
+
 	// Registers the result structs with camelCase keys and mandatory descriptions before TypeRegistry::Freeze.
 	// No global registration: host owners explicitly add this call. Counts/ticks use saturated uint32 for the existing
 	// registry; runner deadlines and replay files keep uint64. Canonical hashes are 16 lowercase hexadecimal digits.

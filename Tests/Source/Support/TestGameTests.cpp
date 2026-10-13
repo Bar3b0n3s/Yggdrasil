@@ -44,7 +44,7 @@ namespace Engine {
 		TEST_CASE("TestGame: writes a manifest that reads back, names both paks with their hashes and carries the project")
 		{
 			const Test::TempDirectory directory("TestGame");
-			const Test::TestGameSpecification specification{ .Name = "TestGameCheck", .Width = 64, .Height = 48, .FixedHz = 30, .Seed = 11, .Shaders = false };
+			const Test::TestGameSpecification specification{ .Name = "TestGameCheck", .Width = 64, .Height = 48, .FixedHz = 30, .Seed = 11, .Shaders = false, .TestSuiteScripts = { "Assets/Tests/Listed.test.luau" } };
 			const Result<std::filesystem::path> written = Test::WriteTestGame(directory.GetPath(), specification);
 			REQUIRE_MESSAGE(written.has_value(), written.error().ToString());
 			CHECK(*written == directory / std::string(GameManifest::FileName));
@@ -87,6 +87,9 @@ namespace Engine {
 			CHECK(project->Simulation.Seed == manifest->Simulation.Seed);
 			CHECK(project->Window.Width == manifest->Window.Width);
 			CHECK(project->Window.Height == manifest->Window.Height);
+			REQUIRE(project->Testing.Suites.size() == 1);
+			CHECK(project->Testing.Suites[0].Script == "Assets/Tests/Listed.test.luau");
+			CHECK(project->Testing.Suites[0].Scene.empty());
 
 			// Without Shaders, Engine.pak holds no file.
 			const Result<Ref<const PakReader>> enginePak = PakReader::Open(directory / "Data" / "Engine.pak");

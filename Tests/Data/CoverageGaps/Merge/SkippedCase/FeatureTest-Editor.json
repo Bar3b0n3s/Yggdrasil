@@ -1,0 +1,153 @@
+{
+	"mode": "Editor",
+	"passed": true,
+	"cancelled": false,
+	"cases": [
+		{
+			"suite": "Api.Physics",
+			"case": "raycasts",
+			"status": "passed",
+			"message": "",
+			"file": "Assets/Tests/Api/Physics.test.luau",
+			"line": 2,
+			"jsonPointer": "",
+			"ticks": 4,
+			"failures": [],
+			"quitCode": 0,
+			"quitExpected": false
+		},
+		{
+			"suite": "Api.Physics",
+			"case": "sweeps",
+			"status": "skipped",
+			"message": "not on this platform",
+			"file": "Assets/Tests/Api/Physics.test.luau",
+			"line": 3,
+			"jsonPointer": "",
+			"ticks": 4,
+			"failures": [],
+			"quitCode": 0,
+			"quitExpected": false
+		}
+	],
+	"suites": [
+		{
+			"suite": "Api.Physics",
+			"scene": "Assets/Scenes/Scripting.scene",
+			"sceneId": "5d2c8a7e41b09f63",
+			"script": "Assets/Tests/Api/Physics.test.luau",
+			"mode": "Editor",
+			"ticks": 4,
+			"breaks": 0,
+			"scriptErrors": 0,
+			"finalStateHash": "93b4c2f07a1e6d58",
+			"passed": true
+		}
+	],
+	"coverage": {
+		"registryFingerprint": "a1f3c9e2d4b60718",
+		"counters": [
+			{
+				"id": "api:Physics.Raycast",
+				"kind": "function",
+				"modes": ["Editor", "Release", "Dist"],
+				"count": 3
+			},
+			{
+				"id": "api:Test.ReloadScript",
+				"kind": "function",
+				"modes": ["Editor"],
+				"count": 1
+			},
+			{
+				"id": "callback:Behaviour.OnHotReload",
+				"kind": "callback",
+				"modes": ["Editor"],
+				"count": 1
+			},
+			{
+				"id": "callback:Behaviour.OnStart",
+				"kind": "callback",
+				"modes": ["Editor", "Release", "Dist"],
+				"count": 1
+			},
+			{
+				"id": "callback:Behaviour.OnUpdate",
+				"kind": "callback",
+				"modes": ["Editor", "Release", "Dist"],
+				"count": 6
+			},
+			{
+				"id": "component:Camera",
+				"kind": "component",
+				"modes": ["Editor", "Release", "Dist"],
+				"count": 2
+			},
+			{
+				"id": "enum:ProjectionType/Orthographic",
+				"kind": "enum-value",
+				"modes": ["Editor", "Release", "Dist"],
+				"count": 1
+			},
+			{
+				"id": "field:Camera/Projection",
+				"kind": "field",
+				"modes": ["Editor", "Release", "Dist"],
+				"count": 1
+			},
+			{
+				"id": "format:Texture/.png",
+				"kind": "format",
+				"modes": ["Editor", "Release", "Dist"],
+				"count": 1
+			},
+			{
+				"id": "proxy:Camera.Primary/read",
+				"kind": "proxy-read",
+				"modes": ["Editor", "Release", "Dist"],
+				"count": 4
+			}
+		],
+		"gates": [
+			{
+				"gate": "1",
+				"evaluated": true,
+				"passed": true,
+				"missing": []
+			},
+			{
+				"gate": "1b",
+				"evaluated": true,
+				"passed": true,
+				"missing": []
+			},
+			{
+				"gate": "2",
+				"evaluated": true,
+				"passed": true,
+				"missing": []
+			},
+			{
+				"gate": "3",
+				"evaluated": true,
+				"passed": true,
+				"missing": []
+			},
+			{
+				"gate": "4",
+				"evaluated": true,
+				"passed": true,
+				"missing": []
+			},
+			{
+				"gate": "9",
+				"evaluated": true,
+				"passed": true,
+				"missing": []
+			}
+		]
+	},
+	"jsonPath": "bin/TestResults/FeatureTest-Editor.json",
+	"junitPath": "bin/TestResults/FeatureTest-Editor.xml",
+	"recordingPath": ""
+}

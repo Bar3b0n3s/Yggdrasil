@@ -22,7 +22,9 @@ namespace Engine {
 	// One documented thing.
 	struct DescriptionEntry
 	{
-		std::string Kind{};        // "type", "field", "enum value", "script module", "script member", "method"
+		// "type", "field", "enum value" (TypeRegistry); "script module", "script type", "script enum", "script enum value",
+		// "script alias", "script member" (ScriptApiRegistry); "method" (MethodRegistry)
+		std::string Kind{};
 		std::string Name{};        // "Transform", "Transform.Position", "Tonemapper.AgX", "Physics.Raycast", "scene.tree"
 		std::string Description{}; // as registered
 	};

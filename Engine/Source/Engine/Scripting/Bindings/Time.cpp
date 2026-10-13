@@ -83,7 +83,7 @@ namespace Engine {
 		{
 			const ScriptMemberOptions read{ .Mutates = false };
 			api.Module("Time", "Phase-aware simulation time; use fixed time for deterministic gameplay.")
-				.Function("GetDeltaTime", &Utils::TimeDelta, "() -> number", "Returns scaled delta seconds for the current fixed or frame phase.", read)
+				.Function("GetDeltaTime", &Utils::TimeDelta, "() -> number", "Returns the fixed step in the fixed phase (the time scale changes how many steps a frame runs, not their length) and the scaled frame delta in seconds in the frame phase.", read)
 				.Function("GetFixedDeltaTime", &Utils::TimeFixedDelta, "() -> number", "Returns the session's fixed step in seconds.", read)
 				.Function("GetTime", &Utils::TimeSimulation, "() -> number", "Returns simulation seconds: tick multiplied by fixed delta.", read)
 				.Function("GetTick", &Utils::TimeTick, "() -> number", "Returns the current simulation tick.", read)

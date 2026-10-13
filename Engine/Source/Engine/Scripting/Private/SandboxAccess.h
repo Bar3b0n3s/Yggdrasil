@@ -134,6 +134,11 @@ namespace Engine {
 			[[nodiscard]] static Random* GetRandom(Sandbox& sandbox);
 			[[nodiscard]] static uint32_t GetBudgetMs(const Sandbox& sandbox); // effective runtime budget, or load-time 250
 			[[nodiscard]] static double SampleClock(Sandbox& sandbox);
+			// Bracket a host operation that runs no Luau inside a protected call (ScriptWatchdog::BeginHostTime and
+			// EndHostTime with SampleClock samples), so its wall time never counts toward the callback budget. No effect when
+			// idle. ScriptEngine::RunHostOperation is the public form.
+			static void BeginHostTime(Sandbox& sandbox);
+			static void EndHostTime(Sandbox& sandbox);
 			// Configured mode, never the effective API-availability subset. Engine-less Runtime still returns Runtime;
 			// registry dispatch permits only members that are Runtime eligible and LoadTime available, rejecting others before callbacks with a located
 			// "<API> requires an active script engine" rejection. Do not borrow LoadTime's 250 ms policy or error text.

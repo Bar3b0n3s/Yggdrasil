@@ -1,0 +1,54 @@
+{
+	"Format": "Prefab",
+	"Version": 1,
+	"Name": "Wheel",
+	"Root": "f1b29596cea5868d",
+	"ComponentVersions": {
+		"Transform": 1,
+		"MeshRenderer": 1
+	},
+	"Entities": [
+		{
+			"ID": "f1b29596cea5868d",
+			"Name": "Wheel",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0.3, 4],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.6, 0.6, 0.6]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000102",
+					"Materials": [],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "cc69313b582ada20",
+			"Name": "Hub",
+			"Parent": "f1b29596cea5868d",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.4, 0.4, 1.2]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": [],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		}
+	]
+}

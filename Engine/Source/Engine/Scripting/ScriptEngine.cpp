@@ -461,6 +461,15 @@ namespace Engine {
 	{
 		return m_Specification.TestMode;
 	}
+	Status ScriptEngine::RunHostOperation(const std::function<Status()>& operation)
+	{
+		ENGINE_CORE_ASSERT(operation, "RunHostOperation needs an operation");
+		ENGINE_CORE_ASSERT(m_State->Vm != nullptr, "the engine's Sandbox exists from Create on");
+		Detail::SandboxAccess::BeginHostTime(*m_State->Vm);
+		Status result = operation();
+		Detail::SandboxAccess::EndHostTime(*m_State->Vm);
+		return result;
+	}
 	bool ScriptEngine::IsReadOnly() const
 	{
 		return m_Specification.ReadOnly;

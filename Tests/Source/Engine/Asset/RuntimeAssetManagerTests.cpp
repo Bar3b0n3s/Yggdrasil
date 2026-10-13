@@ -17,6 +17,8 @@
 #include "Support/ExpectLog.h"
 #include "Support/SceneTestFixture.h"
 
+#include <vector>
+
 namespace Engine {
 
 	namespace {
@@ -115,7 +117,7 @@ namespace Engine {
 
 		// ADR 0022 decision 5 (stream A): the Runtime notifies the load observer exactly as the editor does, so gate 9 counts
 		// cooked loads by their pak table-of-contents path.
-		TEST_CASE("RuntimeAssetManager: the load observer sees each successful load of a registered asset" * doctest::skip(true))
+		TEST_CASE("RuntimeAssetManager: the load observer sees each successful load of a registered asset")
 		{
 			RuntimeEnvironment environment;
 			RuntimeAssetManager manager(environment.GetSpecification());
@@ -190,6 +192,29 @@ namespace Engine {
 			REQUIRE(second.has_value());
 			CHECK(first->get() == second->get());
 			CHECK(manager.GetVersion(TrackMesh) == 1);
+		}
+
+		// ADR 0022 decision 5: a LoadAsync publication is observed on the main thread when it publishes, not when the job
+		// decodes; a LoadAsync of a loaded asset completes through Load, which observes it too.
+		TEST_CASE("RuntimeAssetManager: the load observer sees a LoadAsync publication when the main thread publishes it")
+		{
+			RuntimeEnvironment environment;
+			RuntimeAssetManager manager(environment.GetSpecification());
+			REQUIRE(manager.AddPak(OpenPak(MakeGamePak(false), "Game.pak")).has_value());
+			std::vector<AssetHandle> seen;
+			manager.SetLoadObserver([&seen](AssetHandle loaded)
+			{
+				seen.push_back(loaded);
+			});
+			JobHandle<AssetRef<Asset>> job = manager.LoadAsync(TrackMesh);
+			CHECK(seen.empty());
+			CHECK(environment.Queue.Drain() == 1);
+			CHECK(seen == std::vector<AssetHandle>{ TrackMesh });
+			CHECK(manager.LoadAsync(TrackMesh).Take().has_value());
+			CHECK(manager.LoadAsync(BuiltinAssetHandles::CubeMesh).Take().has_value());
+			manager.SetLoadObserver({});
+			CHECK(job.Take().has_value());
+			CHECK(seen == std::vector<AssetHandle>{ TrackMesh, TrackMesh });
 		}
 
 		TEST_CASE("RuntimeAssetManager: Engine.pak and Game.pak are served together, and Resolve accepts every spelling")

@@ -2,6 +2,7 @@
 #include "EditorCore/Scripting/ScriptTypeChecker.h"
 
 #include "EditorCore/Scripting/Private/ScriptValidation.h"
+#include "Engine/Core/Assert.h"
 #include "Engine/Core/BinaryWriter.h"
 #include "Engine/Core/Hash.h"
 #include "Engine/Core/Utf8.h"
@@ -123,6 +124,65 @@ namespace Engine {
 			std::vector<ScriptDiagnostic>& m_Diagnostics; // Borrowed output of this synchronous visit.
 		};
 
+		// Collects every user-defined type function declaration (`type function`, `export type function`) of a parsed module.
+		class TypeFunctionVisitor final : public Luau::AstVisitor
+		{
+		public:
+			explicit TypeFunctionVisitor(std::vector<const Luau::AstStatTypeFunction*>& found)
+				: m_Found(found)
+			{
+			}
+
+			bool visit(Luau::AstStatTypeFunction* declaration) override
+			{
+				m_Found.push_back(declaration);
+				return false; // the body is refused with its declaration
+			}
+		private:
+			std::vector<const Luau::AstStatTypeFunction*>& m_Found; // Borrowed output of this synchronous visit.
+		};
+
+		// User-defined type functions are refused before analysis (§11.9). Luau evaluates their bodies as Luau in its analysis
+		// VM, whose only interrupt checks a time limit or a cancellation token; the checker sets neither, because findings
+		// must never depend on how loaded the machine is, so a looping body would never return. Parses `source` and appends
+		// one located SCRIPT_TYPE_ERROR per declaration, plus the syntax errors as SCRIPT_COMPILE_ERROR when
+		// `reportSyntaxErrors` (the frontend, which would report them, does not run on a refused root). Returns whether
+		// `source` declares a type function; nothing of it is evaluated either way.
+		static bool RefuseTypeFunctions(std::string_view file, std::string_view source, std::vector<ScriptDiagnostic>& findings, bool reportSyntaxErrors)
+		{
+			Luau::Allocator allocator;
+			Luau::AstNameTable names(allocator);
+			const Luau::ParseResult parsed = Luau::Parser::parse(source.data(), source.size(), names, allocator);
+			std::vector<const Luau::AstStatTypeFunction*> declarations;
+			if (parsed.root != nullptr)
+			{
+				TypeFunctionVisitor visitor(declarations);
+				parsed.root->visit(&visitor);
+			}
+			if (declarations.empty())
+				return false;
+			for (const Luau::AstStatTypeFunction* declaration : declarations)
+			{
+				const std::string_view name = declaration->name.value != nullptr ? std::string_view(declaration->name.value) : std::string_view();
+				ScriptDiagnostic finding = CheckerError(file, std::format("type function '{}' is not supported: project scripts cannot declare user-defined type "
+																		  "functions, whose bodies the type checker would run without a bound",
+																  name));
+				SetCheckerRange(finding, declaration->nameLocation);
+				findings.push_back(std::move(finding));
+			}
+			if (reportSyntaxErrors)
+			{
+				for (const auto& error : parsed.errors)
+				{
+					ScriptDiagnostic finding = CheckerError(file, error.getMessage());
+					finding.Code = "SCRIPT_COMPILE_ERROR";
+					SetCheckerRange(finding, error.getLocation());
+					findings.push_back(std::move(finding));
+				}
+			}
+			return true;
+		}
+
 		class CheckerFileResolver final : public Luau::FileResolver
 		{
 		public:
@@ -152,6 +212,13 @@ namespace Engine {
 				if (!source || !IsValidUtf8(*source))
 				{
 					m_Findings.push_back(CheckerError(name, source ? "required source is not UTF-8" : source.error().GetMessageText()));
+					m_Sources.emplace(name, std::nullopt);
+					return std::nullopt;
+				}
+				// A required module that declares a type function is refused like the root (RefuseTypeFunctions): the frontend
+				// never sees its source, so nothing of it is evaluated, and its syntax errors are reported with the refusal.
+				if (RefuseTypeFunctions(name, *source, m_Findings, true))
+				{
 					m_Sources.emplace(name, std::nullopt);
 					return std::nullopt;
 				}
@@ -418,12 +485,23 @@ namespace Engine {
 		const std::string root = request.Path.ToString();
 		if (!IsScriptingRuntimeInitialized() || request.Modules == nullptr || request.Path.GetScheme() != "project" || !request.Path.GetPath().starts_with("Assets/") || request.Path.GetExtension() != ".luau" || !IsValidUtf8(request.Source) || request.Source.size() > std::numeric_limits<uint32_t>::max())
 			return { Utils::CheckerError(root, "invalid script check request or scripting runtime is not initialized") };
+		// A script that declares a type function is refused before the frontend parses it (RefuseTypeFunctions); its required
+		// modules are refused as the frontend reads them (CheckerFileResolver::readSource).
+		if (Utils::RefuseTypeFunctions(root, request.Source, findings, true))
+		{
+			Utils::CanonicalizeCheckerFindings(findings);
+			return findings;
+		}
 		Utils::CheckerFileResolver files(request, findings);
 		Utils::CheckerConfigResolver configs(m_State->Configuration, findings);
 		try
 		{
+			// No wall-clock limit and no cancellation token (moduleTimeLimitSec and cancellationToken stay unset): a check's
+			// findings must never depend on how loaded the machine is (§11.9, ADR 0022 "Integration"). User-defined type
+			// functions, the only user code analysis would run (and the only work no complexity limit bounds), never reach the
+			// frontend (RefuseTypeFunctions). Luau's complexity limits, which count work instead of time, bound the rest of
+			// every analysis; what they cut short is reported deterministically as a type error at the offending location.
 			Luau::FrontendOptions options;
-			options.moduleTimeLimitSec = 1.0;
 			options.runLintChecks = true;
 			Luau::Frontend frontend(Luau::SolverMode::New, &files, &configs, options);
 			const auto definitions = Utils::LoadCheckerDefinitions(frontend, m_State->Definitions);
@@ -439,8 +517,8 @@ namespace Engine {
 				Utils::SetCheckerRange(diagnostic, error.location);
 				findings.push_back(std::move(diagnostic));
 			}
-			for (const auto& name : result.timeoutHits)
-				findings.push_back(Utils::CheckerError(name, "script analysis exceeded its safety limit"));
+			// Only a time limit or a cancellation token makes Luau report a timeout, and the checker sets neither.
+			ENGINE_ASSERT(result.timeoutHits.empty(), "script analysis without a time limit reported a timeout");
 			for (const auto& warning : result.lintResult.errors)
 			{
 				auto diagnostic = Utils::CheckerError(root, warning.text);

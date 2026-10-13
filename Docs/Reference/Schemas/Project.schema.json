@@ -1,0 +1,410 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"title": "Project",
+	"description": "A project file (§6.1).",
+	"type": "object",
+	"properties": {
+		"Format": {
+			"description": "The file's format name; first key of the file.",
+			"enum": ["Project"]
+		},
+		"Version": {
+			"description": "The format version this build writes; older versions are migrated when read.",
+			"enum": [1]
+		},
+		"Name": {
+			"description": "Display name of the game; exported games name their user-data folder after it.",
+			"type": "string"
+		},
+		"StartScene": {
+			"description": "Project-relative scene the game starts with; empty while none is chosen.",
+			"type": "string"
+		},
+		"Window": {
+			"description": "The window of the exported game.",
+			"$ref": "#/$defs/WindowSettings"
+		},
+		"Simulation": {
+			"description": "The fixed-step simulation.",
+			"$ref": "#/$defs/SimulationSettings"
+		},
+		"Physics": {
+			"description": "Gravity and collision layers.",
+			"$ref": "#/$defs/PhysicsSettings"
+		},
+		"Input": {
+			"description": "Named input actions.",
+			"$ref": "#/$defs/InputSettings"
+		},
+		"Rendering": {
+			"description": "Rendering quality.",
+			"$ref": "#/$defs/RenderingSettings"
+		},
+		"Scripting": {
+			"description": "Script VM limits and error behaviour.",
+			"$ref": "#/$defs/ScriptingSettings"
+		},
+		"Export": {
+			"description": "Contents and labelling of exported games.",
+			"$ref": "#/$defs/ExportSettings"
+		},
+		"Testing": {
+			"description": "Test suites and replays.",
+			"$ref": "#/$defs/TestingSettings"
+		}
+	},
+	"required": ["Format", "Version"],
+	"additionalProperties": false,
+	"$defs": {
+		"WindowSettings": {
+			"description": "The window of the exported game.",
+			"type": "object",
+			"properties": {
+				"Title": {
+					"description": "Title of the game window.",
+					"type": "string"
+				},
+				"Width": {
+					"description": "Initial client width of the window in pixels.",
+					"type": "integer",
+					"minimum": 1,
+					"maximum": 4294967295
+				},
+				"Height": {
+					"description": "Initial client height of the window in pixels.",
+					"type": "integer",
+					"minimum": 1,
+					"maximum": 4294967295
+				},
+				"VSync": {
+					"description": "Synchronizes presentation with the display's refresh.",
+					"type": "boolean"
+				},
+				"Fullscreen": {
+					"description": "Starts the game in fullscreen.",
+					"type": "boolean"
+				},
+				"Resizable": {
+					"description": "Lets the player resize the window.",
+					"type": "boolean"
+				}
+			},
+			"additionalProperties": false
+		},
+		"SimulationSettings": {
+			"description": "The fixed-step simulation of play sessions.",
+			"type": "object",
+			"properties": {
+				"FixedHz": {
+					"description": "Fixed simulation steps per second.",
+					"type": "integer",
+					"minimum": 1,
+					"maximum": 100000
+				},
+				"MaxStepsPerFrame": {
+					"description": "Most fixed steps one frame runs; beyond it the simulation slows down instead of falling further behind.",
+					"type": "integer",
+					"minimum": 1,
+					"maximum": 4294967295
+				},
+				"Seed": {
+					"description": "The project half of each play session's random seed (Project Seed ^ Scene Seed).",
+					"type": "integer",
+					"minimum": 0,
+					"maximum": 4294967295
+				},
+				"MaxEntities": {
+					"description": "Most entities one play session may hold.",
+					"type": "integer",
+					"minimum": 1,
+					"maximum": 4294967295
+				}
+			},
+			"additionalProperties": false
+		},
+		"PhysicsSettings": {
+			"description": "World gravity and the collision layers of physics bodies.",
+			"type": "object",
+			"properties": {
+				"Gravity": {
+					"description": "World gravity in metres per second squared; each component at most 1e12 in magnitude.",
+					"type": "array",
+					"prefixItems": [
+						{
+							"type": "number",
+							"minimum": -999999995904,
+							"maximum": 999999995904
+						},
+						{
+							"type": "number",
+							"minimum": -999999995904,
+							"maximum": 999999995904
+						},
+						{
+							"type": "number",
+							"minimum": -999999995904,
+							"maximum": 999999995904
+						}
+					],
+					"minItems": 3,
+					"maxItems": 3
+				},
+				"Layers": {
+					"description": "Collision layer names, unique and non-empty: 1 to 16, the first one \"Default\".",
+					"type": "array",
+					"items": {
+						"type": "string"
+					}
+				},
+				"Collisions": {
+					"description": "Pairs of declared layer names whose bodies collide; unlisted pairs do not.",
+					"type": "array",
+					"items": {
+						"type": "array",
+						"items": {
+							"type": "string"
+						}
+					}
+				}
+			},
+			"additionalProperties": false
+		},
+		"InputSettings": {
+			"description": "The input actions that scripts read by name.",
+			"type": "object",
+			"properties": {
+				"Actions": {
+					"description": "Input actions by non-empty name, written sorted by name.",
+					"type": "object",
+					"additionalProperties": {
+						"$ref": "#/$defs/InputAction"
+					}
+				}
+			},
+			"additionalProperties": false
+		},
+		"RenderingSettings": {
+			"description": "Project-wide rendering quality settings.",
+			"type": "object",
+			"properties": {
+				"ShadowMapSize": {
+					"description": "Shadow map resolution in texels: a power of two from 256 to 8192.",
+					"type": "integer",
+					"minimum": 256,
+					"maximum": 8192
+				},
+				"SsaoHalfResolution": {
+					"description": "Computes ambient occlusion at half resolution.",
+					"type": "boolean"
+				}
+			},
+			"additionalProperties": false
+		},
+		"ScriptingSettings": {
+			"description": "Limits and error behaviour of the script VM.",
+			"type": "object",
+			"properties": {
+				"MemoryLimitMB": {
+					"description": "Soft memory limit of the script VM in megabytes (plus 16 MB headroom).",
+					"type": "integer",
+					"minimum": 1,
+					"maximum": 4294967295
+				},
+				"CallbackBudgetMs": {
+					"description": "Longest one script callback may run, in milliseconds; Dist raises a budget below 5000 ms to 5000 ms outside test runs.",
+					"type": "integer",
+					"minimum": 10,
+					"maximum": 4294967295
+				},
+				"PauseOnError": {
+					"description": "Pauses the play session when a script raises an error.",
+					"type": "boolean"
+				},
+				"BlockPlayOnTypeErrors": {
+					"description": "Refuses to start play while the type checker reports errors.",
+					"type": "boolean"
+				}
+			},
+			"additionalProperties": false
+		},
+		"ExportSettings": {
+			"description": "What an exported game contains and how its executable is labelled.",
+			"type": "object",
+			"properties": {
+				"BuildScenes": {
+					"description": "Project-relative scenes packed into the export.",
+					"type": "array",
+					"items": {
+						"type": "string"
+					}
+				},
+				"Exclude": {
+					"description": "Project-relative globs of assets left out of the export.",
+					"type": "array",
+					"items": {
+						"type": "string"
+					}
+				},
+				"Icon": {
+					"description": "Project-relative PNG used as the executable's icon, at least 256 x 256 pixels.",
+					"type": "string"
+				},
+				"Version": {
+					"description": "Version of the exported game, in the form major.minor.patch.",
+					"type": "string"
+				},
+				"Company": {
+					"description": "Company name written into the executable's resources.",
+					"type": "string"
+				}
+			},
+			"additionalProperties": false
+		},
+		"TestingSettings": {
+			"description": "The project's test suites and recorded replays.",
+			"type": "object",
+			"properties": {
+				"Suites": {
+					"description": "Test suites in run order.",
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/TestSuite"
+					}
+				},
+				"Replays": {
+					"description": "Project-relative globs of the .replay files the test runner verifies.",
+					"type": "array",
+					"items": {
+						"type": "string"
+					}
+				},
+				"CaseTimeoutTicks": {
+					"description": "Ticks after which a test case fails with a timeout.",
+					"type": "integer",
+					"minimum": 1,
+					"maximum": 4294967295
+				},
+				"SuiteTickLimit": {
+					"description": "Ticks after which a whole test suite fails with a timeout.",
+					"type": "integer",
+					"minimum": 1,
+					"maximum": 4294967295
+				},
+				"CoverageGates": {
+					"description": "Whether unfiltered test runs record coverage and fail on any gap of the per-mode coverage gates (FeatureTest).",
+					"type": "boolean"
+				}
+			},
+			"additionalProperties": false
+		},
+		"InputAction": {
+			"description": "One named input action and the controls that drive it.",
+			"type": "object",
+			"properties": {
+				"Type": {
+					"description": "Button or Axis.",
+					"enum": ["Button", "Axis"]
+				},
+				"Bindings": {
+					"description": "Controls of a Button action, such as \"Key.Space\" or \"Gamepad.South\".",
+					"type": "array",
+					"items": {
+						"type": "string"
+					}
+				},
+				"Positive": {
+					"description": "Controls that push an Axis action towards +1.",
+					"type": "array",
+					"items": {
+						"type": "string"
+					}
+				},
+				"Negative": {
+					"description": "Controls that push an Axis action towards -1.",
+					"type": "array",
+					"items": {
+						"type": "string"
+					}
+				},
+				"Gamepad": {
+					"description": "Gamepad axis of an Axis action, such as \"Gamepad.LeftX\"; empty for none.",
+					"type": "string"
+				},
+				"Invert": {
+					"description": "Flips the sign of an Axis action.",
+					"type": "boolean"
+				}
+			},
+			"additionalProperties": false
+		},
+		"TestSuite": {
+			"description": "One suite of the test runner.",
+			"type": "object",
+			"properties": {
+				"Script": {
+					"description": "Project-relative test script.",
+					"type": "string"
+				},
+				"Scene": {
+					"description": "Project-relative scene the suite runs in; empty runs it in an empty scene.",
+					"type": "string"
+				},
+				"Parameters": {
+					"description": "Scene.Load parameters of the suite's scene: a JSON object, or null for none."
+				},
+				"Isolation": {
+					"description": "Whether the cases share one play session or each gets a fresh one.",
+					"enum": ["Suite", "Case"]
+				},
+				"Clock": {
+					"description": "Frame deltas in seconds that select ScriptedClock, each >= 0 and at least one > 0; empty runs lockstep with ManualClock.",
+					"type": "array",
+					"items": {
+						"type": "number"
+					}
+				},
+				"Overrides": {
+					"description": "Scripting limits that apply to this suite only.",
+					"$ref": "#/$defs/TestSuiteOverrides"
+				},
+				"ExpectQuit": {
+					"description": "Exit code the suite must end with through Application.Quit; -1: it must not quit.",
+					"type": "integer",
+					"minimum": -1,
+					"maximum": 2147483647
+				},
+				"Modes": {
+					"description": "Run modes the suite runs in, unique and non-empty.",
+					"type": "array",
+					"items": {
+						"enum": ["Editor", "Release", "Dist"]
+					}
+				}
+			},
+			"additionalProperties": false
+		},
+		"TestSuiteOverrides": {
+			"description": "Scripting limits of one test suite, applied exactly (no Dist minimum).",
+			"type": "object",
+			"properties": {
+				"CallbackBudgetMs": {
+					"description": "Callback budget of the suite in milliseconds: 0 uses the project setting, any other value is at least 10.",
+					"type": "integer",
+					"minimum": 0,
+					"maximum": 4294967295
+				},
+				"MemoryLimitMB": {
+					"description": "Script memory limit of the suite in megabytes: 0 uses the project setting.",
+					"type": "integer",
+					"minimum": 0,
+					"maximum": 4294967295
+				},
+				"PauseOnError": {
+					"description": "Accepted for compatibility: a script error never pauses a test run, whatever this override says.",
+					"enum": ["Inherit", "Pause", "Continue"]
+				}
+			},
+			"additionalProperties": false
+		}
+	}
+}

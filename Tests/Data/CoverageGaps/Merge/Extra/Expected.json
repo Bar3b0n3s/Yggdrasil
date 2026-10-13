@@ -1,0 +1,5 @@
+{
+	"Format": "CoverageGap",
+	"Version": 1,
+	"Failures": ["merge: extra: Release callback:Behaviour.OnHotReload", "merge: extra: Dist api:Debug.DrawLine"]
+}

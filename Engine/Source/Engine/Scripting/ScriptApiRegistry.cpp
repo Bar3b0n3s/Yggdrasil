@@ -21,6 +21,7 @@
 #include <limits>
 #include <set>
 #include <tuple>
+#include <utility>
 
 namespace Engine {
 
@@ -209,15 +210,22 @@ namespace Engine {
 					return MakeError(ErrorCode::Validation, "unknown script type '{}' in '{}'", name, text);
 			return {};
 		}
+		// The counter of (owner, member) in `mode`, found by binary search: Freeze sorts each mode's members by (Owner,
+		// Member, Kind), so equal names are adjacent and the first of them is the one a scan would find. Dispatch looks a
+		// counter up on every counted call of a test run (ADR 0022 decision 18), so the lookup must not grow with the API.
 		static ScriptApiCounter* Counter(auto& storage, RunModes mode, std::string_view owner, std::string_view member)
 		{
 			const int index = ModeIndex(mode);
 			if (index < 0)
 				return nullptr;
-			for (auto& counter : storage.Coverage[static_cast<size_t>(index)].Members)
-				if (counter.Owner == owner && counter.Member == member)
-					return &counter;
-			return nullptr;
+			auto& members = storage.Coverage[static_cast<size_t>(index)].Members;
+			const auto found = std::ranges::lower_bound(members, std::pair(owner, member), {}, [](const ScriptApiCounter& counter)
+			{
+				return std::pair<std::string_view, std::string_view>(counter.Owner, counter.Member);
+			});
+			if (found == members.end() || found->Owner != owner || found->Member != member)
+				return nullptr;
+			return &*found;
 		}
 		static bool Count(const ScriptCall& call)
 		{

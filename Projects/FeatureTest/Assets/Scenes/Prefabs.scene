@@ -1,0 +1,573 @@
+{
+	"Format": "Scene",
+	"Version": 1,
+	"Name": "Prefabs",
+	"Seed": 0,
+	"ComponentVersions": {
+		"Transform": 1,
+		"Prefab": 1,
+		"PrefabLink": 1,
+		"MeshRenderer": 1,
+		"Camera": 1,
+		"DirectionalLight": 1,
+		"PointLight": 1,
+		"Text": 1,
+		"RigidBody": 1,
+		"BoxCollider": 1,
+		"AudioListener": 1,
+		"Script": 1
+	},
+	"Entities": [
+		{
+			"ID": "e21bb3029348c0f3",
+			"Name": "Camera",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 4, 14],
+					"Rotation": [-0.104528464, 0, 0, 0.9945219],
+					"Scale": [1, 1, 1]
+				},
+				"Camera": {
+					"Projection": "Perspective",
+					"VerticalFov": 50,
+					"OrthographicSize": 10,
+					"NearClip": 0.1,
+					"FarClip": 1000,
+					"Primary": true,
+					"Clear": "Skybox",
+					"ClearColor": [0.05, 0.05, 0.06]
+				},
+				"AudioListener": {
+					"Primary": true
+				}
+			}
+		},
+		{
+			"ID": "a9f27d7e66e4b730",
+			"Name": "Sun",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [-0.4030582, 0.27253202, 0.12708376, 0.8643611],
+					"Scale": [1, 1, 1]
+				},
+				"DirectionalLight": {
+					"Color": [1, 1, 1],
+					"Intensity": 3,
+					"CastShadows": false,
+					"ShadowDistance": 100,
+					"CascadeCount": 4,
+					"CascadeSplitLambda": 0.75,
+					"LightAngle": 1,
+					"DepthBias": 1,
+					"NormalBias": 1
+				}
+			}
+		},
+		{
+			"ID": "e4b5f2498c1433b2",
+			"Name": "Ground",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, -0.5, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": [],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"RigidBody": {
+					"Type": "Static",
+					"Mass": 1,
+					"Friction": 0.5,
+					"Restitution": 0,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"BoxCollider": {
+					"HalfExtents": [10, 0.5, 10],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				}
+			}
+		},
+		{
+			"ID": "12ebd362e68c8fbe",
+			"Name": "Crate",
+			"Parent": null,
+			"Active": true,
+			"Tags": ["Editor"],
+			"Components": {
+				"Transform": {
+					"Translation": [-3, 0.5, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Prefab": {
+					"Prefab": "4751cc3abde45d4f",
+					"Overrides": [
+						{
+							"PrefabEntityID": "12ebd362e68c8fbe",
+							"Kind": "EntityKey",
+							"Component": "",
+							"Field": "Tags",
+							"Value": ["Editor"]
+						},
+						{
+							"PrefabEntityID": "6d8e2bb074da88d3",
+							"Kind": "EntityKey",
+							"Component": "",
+							"Field": "Name",
+							"Value": "Cover"
+						},
+						{
+							"PrefabEntityID": "6d8e2bb074da88d3",
+							"Kind": "Field",
+							"Component": "MeshRenderer",
+							"Field": "Visible",
+							"Value": false
+						},
+						{
+							"PrefabEntityID": "6d8e2bb074da88d3",
+							"Kind": "AddComponent",
+							"Component": "PointLight",
+							"Field": "",
+							"Value": {
+								"Color": [1, 1, 1],
+								"Intensity": 4,
+								"Range": 3,
+								"SourceRadius": 0.05
+							}
+						},
+						{
+							"PrefabEntityID": "a8530e1895e5ea5a",
+							"Kind": "RemoveComponent",
+							"Component": "Text",
+							"Field": "",
+							"Value": null
+						}
+					]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "12ebd362e68c8fbe",
+					"InstanceRoot": "12ebd362e68c8fbe"
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": [],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"RigidBody": {
+					"Type": "Dynamic",
+					"Mass": 1,
+					"Friction": 0.5,
+					"Restitution": 0,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				},
+				"Script": {
+					"Script": "cdca1d8d3f05d703",
+					"Fields": {
+						"Lid": "1d9d503850ff6365",
+						"Tag": "Crate"
+					},
+					"ExecutionOrder": 0
+				}
+			}
+		},
+		{
+			"ID": "1d9d503850ff6365",
+			"Name": "Cover",
+			"Parent": "12ebd362e68c8fbe",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0.55, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 0.1, 1]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "6d8e2bb074da88d3",
+					"InstanceRoot": "12ebd362e68c8fbe"
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": [],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": false
+				},
+				"PointLight": {
+					"Color": [1, 1, 1],
+					"Intensity": 4,
+					"Range": 3,
+					"SourceRadius": 0.05
+				},
+				"Script": {
+					"Script": "cdca1d8d3f05d703",
+					"Fields": {
+						"Tag": "Lid"
+					},
+					"ExecutionOrder": 0
+				}
+			}
+		},
+		{
+			"ID": "7f182071db654500",
+			"Name": "Label",
+			"Parent": "12ebd362e68c8fbe",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0.51],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "a8530e1895e5ea5a",
+					"InstanceRoot": "12ebd362e68c8fbe"
+				}
+			}
+		},
+		{
+			"ID": "656b4d2b8368e3a0",
+			"Name": "Cart",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [3, 0.8, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Prefab": {
+					"Prefab": "227a073ef515ca5d",
+					"Overrides": []
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "656b4d2b8368e3a0",
+					"InstanceRoot": "656b4d2b8368e3a0"
+				}
+			}
+		},
+		{
+			"ID": "0fbbee278ead29dc",
+			"Name": "Body",
+			"Parent": "656b4d2b8368e3a0",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [2, 0.5, 1]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "ec65c7d15f038f74",
+					"InstanceRoot": "656b4d2b8368e3a0"
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": [],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "ff75a21cc81932a7",
+			"Name": "FrontWheel",
+			"Parent": "656b4d2b8368e3a0",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0.6, -0.3, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.6, 0.6, 0.6]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "2797dfc642ed43c5",
+					"InstanceRoot": "656b4d2b8368e3a0"
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000102",
+					"Materials": [],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "1b77a0f4745ed931",
+			"Name": "Hub",
+			"Parent": "ff75a21cc81932a7",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.4, 0.4, 1.2]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "f6c63ec82c2f32c0",
+					"InstanceRoot": "656b4d2b8368e3a0"
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": [],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "501804b971f8bf9e",
+			"Name": "BackWheel",
+			"Parent": "656b4d2b8368e3a0",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-0.6, -0.3, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.6, 0.6, 0.6]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "934bbdfb2c014767",
+					"InstanceRoot": "656b4d2b8368e3a0"
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000102",
+					"Materials": [],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "c8bab68b945f90a8",
+			"Name": "Hub",
+			"Parent": "501804b971f8bf9e",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.4, 0.4, 1.2]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "3d58a8b25988479a",
+					"InstanceRoot": "656b4d2b8368e3a0"
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": [],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "122db8f04a3feaea",
+			"Name": "CrateB",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0.5, -3],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Prefab": {
+					"Prefab": "4751cc3abde45d4f",
+					"Overrides": []
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "12ebd362e68c8fbe",
+					"InstanceRoot": "122db8f04a3feaea"
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": [],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"RigidBody": {
+					"Type": "Dynamic",
+					"Mass": 1,
+					"Friction": 0.5,
+					"Restitution": 0,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				},
+				"Script": {
+					"Script": "cdca1d8d3f05d703",
+					"Fields": {
+						"Lid": "6b31210422515746",
+						"Tag": "Crate"
+					},
+					"ExecutionOrder": 0
+				}
+			}
+		},
+		{
+			"ID": "6b31210422515746",
+			"Name": "Lid",
+			"Parent": "122db8f04a3feaea",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0.55, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 0.1, 1]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "6d8e2bb074da88d3",
+					"InstanceRoot": "122db8f04a3feaea"
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": [],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"Script": {
+					"Script": "cdca1d8d3f05d703",
+					"Fields": {
+						"Tag": "Lid"
+					},
+					"ExecutionOrder": 0
+				}
+			}
+		},
+		{
+			"ID": "8efbac905ca0600f",
+			"Name": "Label",
+			"Parent": "122db8f04a3feaea",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0.51],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "a8530e1895e5ea5a",
+					"InstanceRoot": "122db8f04a3feaea"
+				},
+				"Text": {
+					"Text": "Crate",
+					"Font": null,
+					"Size": 24,
+					"Color": [1, 1, 1, 1],
+					"Space": "World",
+					"Anchor": [0.5, 0.5],
+					"Pivot": [0.5, 0.5],
+					"Offset": [0, 0],
+					"Alignment": "Center",
+					"Billboard": false
+				}
+			}
+		},
+		{
+			"ID": "d98a5219589e9568",
+			"Name": "Inspector",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Script": {
+					"Script": "4e82919435a15290",
+					"Fields": {
+						"Crate": "122db8f04a3feaea",
+						"Spawnable": "4751cc3abde45d4f",
+						"Target": "6b31210422515746"
+					},
+					"ExecutionOrder": 0
+				}
+			}
+		}
+	]
+}

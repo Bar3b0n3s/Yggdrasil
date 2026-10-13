@@ -1,0 +1,5 @@
+{
+	"Format": "CoverageGap",
+	"Version": 1,
+	"Failures": ["merge: mismatch: Release api:Physics.Raycast", "merge: mismatch: Dist field:Camera/Projection"]
+}

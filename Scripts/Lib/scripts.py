@@ -127,8 +127,9 @@ def run_static_checks(console: Console, finished: Callable[[Step], Step], contra
     """The static checks of §15.8 (T0 of §15.1), shared by CI.py's lint stage and PreCommit.py so the two gates cannot
     drift apart: CheckBuildConfig.py on the workspace and on every fixture workspace (each must fail with its own
     defect), Lint.py, Lint.py --self-test, Format.py --check, every fixture generator under Tests/Data/Generate/ with
-    --check (the committed fixtures are byte-identical to a fresh generation) and FetchAssets.py defaults --check (the
-    committed engine resources match their pins, offline). Each runs even after an earlier one failed, so one run
+    --check (the committed fixtures are byte-identical to a fresh generation), FetchAssets.py defaults --check (the
+    committed engine resources match their pins, offline) and FetchAssets.py fixture --check (the pinned format fixtures
+    under Tests/Data/Assets match their pins, offline). Each runs even after an earlier one failed, so one run
     reports every problem. `finished` receives every step as soon as it is known (to print it) and returns it.
     `contract` selects contract mode: Lint.py allows contract stubs and skipped tests (its self-test stays strict)."""
 
@@ -146,6 +147,7 @@ def run_static_checks(console: Console, finished: Callable[[Step], Step], contra
         steps.append(script(f"fixtures {generator.stem}", generator.name, ["--check"],
                             STATIC_CHECK_TIMEOUTS["fixtures"], root=FIXTURE_GENERATORS_ROOT))
     steps.append(script("resources", "FetchAssets.py", ["defaults", "--check"], STATIC_CHECK_TIMEOUTS["resources"]))
+    steps.append(script("test fixtures", "FetchAssets.py", ["fixture", "--check"], STATIC_CHECK_TIMEOUTS["resources"]))
     return steps
 
 

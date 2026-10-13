@@ -1,0 +1,9 @@
+{
+	"Format": "ValidationFixture",
+	"Version": 1,
+	"Scope": "Project",
+	"Codes": ["BUILD_SCENE_MISSING"],
+	"TestComponents": false,
+	"Expand": [],
+	"NonCanonical": []
+}

@@ -138,6 +138,13 @@ namespace Engine {
 		// loaded modules and attached behaviours that transitively require it. Unloaded project scripts that require it
 		// (for example test suites) are not part of the chain. Executes no script code and publishes nothing.
 		[[nodiscard]] Result<std::vector<AssetHandle>> GetReloadChain(AssetHandle script);
+		// Runs `operation`, host work that executes no Luau (Test.Screenshot's capture; Test.ReloadScript's reimport and type
+		// check), with its wall time excluded from the callback budget of the protected call it runs in (§11.1, ADR 0022
+		// "Integration"): the watchdog's deadline moves later by the time the operation took, sampled from this engine's
+		// safety clock. Luau that runs before or after it still counts, and so does any protected call the operation makes
+		// after all (the excluded time ends there). Outside a protected call it only runs the operation. Returns the
+		// operation's result. Main thread.
+		[[nodiscard]] Status RunHostOperation(const std::function<Status()>& operation);
 
 		// A suite owns the installed test-host lifetime. A second collection before EndSuite is InvalidState. Executes
 		// the suite body only, under one protected entry; returns case functions in declaration order. Failure releases

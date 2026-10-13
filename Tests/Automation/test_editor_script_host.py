@@ -121,11 +121,14 @@ return Script.Define("Host", Host)
         self.assertIn(".luaurc", str(unavailable.exception.data))
         self.assertEqual(client.call("play.state")["state"], "Edit")
 
-    @unittest.skip("contract stub: ADR 0022 decision 15 (stream D)")
     def test_reload_refused_for_type_errors_reports_a_type_error(self) -> None:
+        # Architecture §11.7 `type` kind, §11.8 (ADR 0022 decision 15): with Scripting.BlockPlayOnTypeErrors, the safe
+        # point's hot reload of a script whose new source has type errors keeps the running code and reports the
+        # finding.
         client, _ = self.open_editor_with_scene()
         path = "Assets/Scripts/Typed.luau"
-        source = '--!strict\nlocal Typed = {}\nfunction Typed:Value(): number return 1 end\nreturn Script.Define("Typed", Typed)'
+        source = ('--!strict\nlocal Typed = {}\nfunction Typed:Value(): number return 1 end\n'
+                  'return Script.Define("Typed", Typed)')
         client.call("script.write", {"path": path, "source": source})
         client.call("entity.create", {"name": "Typed", "components": {"Script": {"Script": path}}})
         client.call("project.setSettings", {"patch": {"Scripting": {"BlockPlayOnTypeErrors": True}}})
@@ -154,7 +157,8 @@ return Script.Define("Host", Host)
         client.call("play.start", {"paused": True})
         self.assertEqual(self.eval_play(client, probe), expected)
         for mode in ("Hidden", "Locked", "Normal"):
-            self.assertEqual(self.eval_play(client, f'Input.SetCursorMode("{mode}"); return Input.GetCursorMode()'), mode)
+            self.assertEqual(self.eval_play(client, f'Input.SetCursorMode("{mode}"); return Input.GetCursorMode()'),
+                             mode)
         self.eval_play(client, 'Input.SetCursorMode("Locked")')
         client.call("play.stop")
         client.call("play.start", {"paused": True})

@@ -1154,7 +1154,7 @@ Phase-aware simulation time; use fixed time for deterministic gameplay.
 
 `() -> number`
 
-Returns scaled delta seconds for the current fixed or frame phase.
+Returns the fixed step in the fixed phase (the time scale changes how many steps a frame runs, not their length) and the scaled frame delta in seconds in the frame phase.
 
 All modes; Runtime|Test; pure/read.
 
@@ -4198,7 +4198,7 @@ Positive tick timeout overriding the suite default.
 
 `{Alpha: number, Frame: number}`
 
-Last completed render extraction interpolation and frame.
+The last completed render extraction: its interpolation Alpha, and Frame, the number of extractions completed so far.
 
 ## TestSuite
 

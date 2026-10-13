@@ -1,0 +1,9 @@
+{
+	"Format": "ValidationFixture",
+	"Version": 1,
+	"Scope": "Project",
+	"Codes": ["RENDER_SPOT_SHADOW_BUDGET"],
+	"TestComponents": false,
+	"Expand": [],
+	"NonCanonical": []
+}

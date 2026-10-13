@@ -175,13 +175,20 @@ namespace Engine {
 			if (!parameters.is_null() && !parameters.is_object())
 				context.Error("Parameters", "must be a JSON object, or null for none");
 
+			// A scripted frame may be empty (the §15.5 Timing clock ends with 0), but a clock of only empty frames never
+			// steps, so it is rejected here, at load (ADR 0019 decision 10, ADR 0022 decision 9).
+			bool anyPositive = false;
 			context.PushKey("Clock");
 			for (size_t index = 0; index < suite.Clock.size(); ++index)
 			{
-				if (!(suite.Clock[index] > 0.0f))
-					context.Error(std::to_string(index), std::format("a frame delta must be > 0 (got {})", suite.Clock[index]));
+				if (!(suite.Clock[index] >= 0.0f))
+					context.Error(std::to_string(index), std::format("a frame delta must be >= 0 (got {})", suite.Clock[index]));
+				else if (suite.Clock[index] > 0.0f)
+					anyPositive = true;
 			}
 			context.PopKey();
+			if (!suite.Clock.empty() && !anyPositive)
+				context.Error("Clock", "needs at least one frame delta > 0 (a clock of only zero deltas never steps)");
 
 			if (suite.Modes.empty())
 				context.Error("Modes", "must list at least one run mode");
@@ -204,11 +211,15 @@ namespace Engine {
 				suite.Parameters.Set(std::move(parameters));
 			}
 
+			bool anyPositive = false;
 			for (float& delta : suite.Clock)
 			{
-				if (!(delta > 0.0f))
+				if (!(delta >= 0.0f))
 					delta = static_cast<float>(random.RangeDouble(0.001, 0.1));
+				anyPositive = anyPositive || delta > 0.0f;
 			}
+			if (!suite.Clock.empty() && !anyPositive)
+				suite.Clock.front() = static_cast<float>(random.RangeDouble(0.001, 0.1));
 
 			std::vector<TestSuiteSettings::Mode> modes;
 			for (const TestSuiteSettings::Mode mode : suite.Modes)
@@ -320,7 +331,7 @@ namespace Engine {
 			.Field("Scene", &TestSuiteSettings::Scene, "Project-relative scene the suite runs in; empty runs it in an empty scene.")
 			.Field("Parameters", &TestSuiteSettings::Parameters, "Scene.Load parameters of the suite's scene: a JSON object, or null for none.")
 			.Field("Isolation", &TestSuiteSettings::Isolation, "Whether the cases share one play session or each gets a fresh one.")
-			.Field("Clock", &TestSuiteSettings::Clock, "Frame deltas in seconds that select ScriptedClock; empty runs lockstep with ManualClock.",
+			.Field("Clock", &TestSuiteSettings::Clock, "Frame deltas in seconds that select ScriptedClock, each >= 0 and at least one > 0; empty runs lockstep with ManualClock.",
 				{ .Unit = "s" })
 			.Field("Overrides", &TestSuiteSettings::Overrides, "Scripting limits that apply to this suite only.")
 			.Field("ExpectQuit", &TestSuiteSettings::ExpectQuit, "Exit code the suite must end with through Application.Quit; -1: it must not quit.",

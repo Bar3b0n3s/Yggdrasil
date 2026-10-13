@@ -1,0 +1,70 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"title": "AssetMeta",
+	"description": "An asset sidecar (§6.4): an asset meta (Importer, ImporterVersion, Settings, SubAssets) or a dependency meta (Owner).",
+	"type": "object",
+	"properties": {
+		"Format": {
+			"description": "The file's format name; first key of the file.",
+			"enum": ["AssetMeta"]
+		},
+		"Version": {
+			"description": "The format version this build writes; older versions are migrated when read.",
+			"enum": [1]
+		},
+		"Handle": {
+			"description": "The asset's handle: 16 hex digits, unique in the project.",
+			"type": "string",
+			"pattern": "^[0-9a-fA-F]{16}$"
+		},
+		"Type": {
+			"description": "The asset's main type, or \"Dependency\" for a file a glTF references.",
+			"enum": ["Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "Dependency"]
+		},
+		"Importer": {
+			"description": "The importer that cooks the source (asset metas only).",
+			"enum": ["Audio", "Environment", "Font", "Gltf", "Material", "Prefab", "Replay", "Scene", "Script", "SoundEffect", "Texture"]
+		},
+		"ImporterVersion": {
+			"description": "The version of that importer when it last wrote the meta (asset metas only).",
+			"type": "integer",
+			"minimum": 0
+		},
+		"Settings": {
+			"description": "The importer's settings object (its *ImportSettings struct; asset.getImportSettings shows the schema), or null.",
+			"type": ["object", "null"]
+		},
+		"SubAssets": {
+			"description": "The sub-assets the source produces, sorted by Key (asset metas only).",
+			"type": "array",
+			"items": {
+				"description": "One sub-asset.",
+				"type": "object",
+				"properties": {
+					"Key": {
+						"description": "The stable identity of the sub-asset in its source (kind, index, name), such as \"mesh:0:Straight\".",
+						"type": "string"
+					},
+					"Handle": {
+						"description": "The sub-asset's handle: Hash64 of the source handle and the key.",
+						"type": "string",
+						"pattern": "^[0-9a-fA-F]{16}$"
+					},
+					"Type": {
+						"description": "The sub-asset's asset type.",
+						"enum": ["Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay"]
+					}
+				},
+				"required": ["Key", "Handle", "Type"],
+				"additionalProperties": false
+			}
+		},
+		"Owner": {
+			"description": "The handle of the glTF that references this file (dependency metas only).",
+			"type": "string",
+			"pattern": "^[0-9a-fA-F]{16}$"
+		}
+	},
+	"required": ["Format", "Version", "Handle", "Type"],
+	"additionalProperties": false
+}

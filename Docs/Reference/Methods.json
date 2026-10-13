@@ -9431,7 +9431,7 @@
 								"enum": ["Suite", "Case"]
 							},
 							"Clock": {
-								"description": "Frame deltas in seconds that select ScriptedClock; empty runs lockstep with ManualClock.",
+								"description": "Frame deltas in seconds that select ScriptedClock, each >= 0 and at least one > 0; empty runs lockstep with ManualClock.",
 								"type": "array",
 								"items": {
 									"type": "number"
@@ -10340,7 +10340,7 @@
 								"enum": ["Suite", "Case"]
 							},
 							"Clock": {
-								"description": "Frame deltas in seconds that select ScriptedClock; empty runs lockstep with ManualClock.",
+								"description": "Frame deltas in seconds that select ScriptedClock, each >= 0 and at least one > 0; empty runs lockstep with ManualClock.",
 								"type": "array",
 								"items": {
 									"type": "number"

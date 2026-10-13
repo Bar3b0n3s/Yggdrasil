@@ -33,6 +33,11 @@ namespace Engine {
 			uint32_t AudioBegins = 0, AudioEnds = 0, AudioCancels = 0, AudioTicks = 0, Breaks = 0;
 			bool AudioReady = false, Capturing = false;
 			UUID PositionedEntity{};
+			// Slow host work: a capture or a reload advances the safety clock by HostSeconds, and a reload runs through
+			// ReloadEngine->RunHostOperation as the editor host's reimport and type check do.
+			double* Clock = nullptr;
+			double HostSeconds = 0.0;
+			ScriptEngine* ReloadEngine = nullptr;
 
 			void Report(const ScriptTestReport& report) override { Reports.push_back(report); }
 			void OnScriptError(const ScriptError& error, bool) override { Errors.push_back(error); }
@@ -45,6 +50,8 @@ namespace Engine {
 			Status CaptureScreenshot(std::string_view name) override
 			{
 				Screenshots.emplace_back(name);
+				if (Clock != nullptr)
+					*Clock += HostSeconds;
 				return {};
 			}
 			Status BeginAudioCapture(uint32_t ticks) override
@@ -69,7 +76,14 @@ namespace Engine {
 			Status ReloadScript(AssetHandle script) override
 			{
 				Reloads.push_back(script);
-				return {};
+				if (ReloadEngine == nullptr)
+					return {};
+				return ReloadEngine->RunHostOperation([this]() -> Status
+				{
+					if (Clock != nullptr)
+						*Clock += HostSeconds;
+					return {};
+				});
 			}
 			uint64_t ComputeStateHash() const override { return 0x1234; }
 			ScriptExtractionState GetLastExtraction() const override { return { 0.25f, 19 }; }
@@ -410,6 +424,68 @@ return not called
 			CHECK(services.AudioBegins == 0);
 			CHECK(services.Claims.empty());
 			CHECK(services.Reports.empty());
+		}
+
+		// ADR 0022 "Integration": Test.Screenshot and Test.ReloadScript block in host code (rendering and encoding a capture; a
+		// reimport with its type check), which ran inside the case's callback budget, so suites timed out on a loaded machine.
+		// Host work that runs no Luau is now excluded from the budget, while the script's own Luau time still counts.
+		TEST_CASE("TestBindings: slow host work inside a case stays out of the callback budget while a Luau spin still times out")
+		{
+			double now = 0.0;
+			bool spinning = false;
+			TestServices services;
+			services.Clock = &now;
+			services.HostSeconds = 10.0;
+			Test::ScriptTestFixtureSpecification specification{ .Mode = RunModes::Editor, .TestMode = true, .TestHost = &services };
+			specification.Settings.CallbackBudgetMs = 500;
+			specification.ClockSeconds = [&now, &spinning]
+			{
+				if (spinning)
+					now += 0.02;
+				return now;
+			};
+			Test::ScriptTestFixture fixture(specification);
+			REQUIRE(fixture.AddScript(UUID(733), "Assets/Scripts/Reload.luau", "return {}"));
+			auto suite = Collect(fixture, services, R"(return Test.Suite("Host", function()
+	Test.Case("screenshot", function()
+		Test.Screenshot("slow")
+		for _ = 1, 3 do Test.Expect(true) end
+	end)
+	Test.Case("reload", function()
+		Test.ReloadScript(Assets.Load("Assets/Scripts/Reload.luau"))
+		for _ = 1, 3 do Test.Expect(true) end
+	end)
+	Test.Case("spin", function()
+		while true do end
+	end)
+end))");
+			services.ReloadEngine = fixture.GetEngine();
+			REQUIRE(suite.Cases.size() == 3);
+			for (size_t index = 0; index < 2; ++index)
+			{
+				CAPTURE(suite.Cases[index].Name);
+				const auto thread = StartCase(fixture, suite.Cases[index]);
+				const ScriptCaseResume result = Resume(fixture, thread, 0);
+				CHECK(result.State == ScriptCaseState::Completed);
+				CHECK_FALSE(result.Error.has_value());
+				fixture.GetEngine()->CancelCase(thread);
+			}
+			// Each host call took 10 s of the safety clock, twenty times the 500 ms budget.
+			CHECK(now == doctest::Approx(20.0));
+			CHECK(services.Screenshots == std::vector<std::string>{ "slow" });
+			CHECK(services.Reloads == std::vector<AssetHandle>{ UUID(733) });
+			CHECK(services.Reports.empty());
+			CHECK(fixture.Errors.empty());
+			Test::ExpectLog expected(LogLevel::Error, "script exceeded 500 ms in");
+			spinning = true;
+			const auto thread = StartCase(fixture, suite.Cases[2]);
+			const ScriptCaseResume spin = Resume(fixture, thread, 0);
+			CHECK(spin.State == ScriptCaseState::Failed);
+			REQUIRE(spin.Error.has_value());
+			CHECK(spin.Error->Kind == ScriptErrorKind::Timeout);
+			CHECK(expected.GetMatchCount() >= 1);
+			fixture.GetEngine()->CancelCase(thread);
+			fixture.GetEngine()->EndSuite();
 		}
 
 		TEST_CASE("TestBindings: input and observation APIs cross only the declared test host boundary")

@@ -1398,6 +1398,18 @@ namespace Engine {
 		{
 			return sandbox.m_State->Specification.ClockSeconds ? sandbox.m_State->Specification.ClockSeconds() : lua_clock();
 		}
+		void SandboxAccess::BeginHostTime(Sandbox& sandbox)
+		{
+			sandbox.m_State->AssertThread();
+			if (sandbox.m_State->Watchdog.GetDepth() != 0)
+				sandbox.m_State->Watchdog.BeginHostTime(SampleClock(sandbox));
+		}
+		void SandboxAccess::EndHostTime(Sandbox& sandbox)
+		{
+			sandbox.m_State->AssertThread();
+			if (sandbox.m_State->Watchdog.GetDepth() != 0)
+				sandbox.m_State->Watchdog.EndHostTime(SampleClock(sandbox));
+		}
 		SandboxMode SandboxAccess::GetMode(const Sandbox& sandbox)
 		{
 			return sandbox.m_State->Specification.Mode;

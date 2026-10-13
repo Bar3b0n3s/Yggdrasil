@@ -1,0 +1,89 @@
+{
+	"Format": "Replay",
+	"Version": 1,
+	"Scene": {
+		"Handle": "1913ebcc36a006ad",
+		"Path": "Assets/Scenes/Determinism.scene"
+	},
+	"Parameters": {},
+	"Seed": 1414,
+	"FixedHz": 64,
+	"EngineVersion": "0.1.0",
+	"Config": "Editor",
+	"Events": [
+		{
+			"Tick": 30,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.5
+		},
+		{
+			"Tick": 100,
+			"Type": "Action",
+			"Name": "Jump",
+			"State": "Down"
+		},
+		{
+			"Tick": 101,
+			"Type": "Action",
+			"Name": "Jump",
+			"State": "Up"
+		},
+		{
+			"Tick": 200,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.3
+		},
+		{
+			"Tick": 250,
+			"Type": "Action",
+			"Name": "Jump",
+			"State": "Down"
+		},
+		{
+			"Tick": 251,
+			"Type": "Action",
+			"Name": "Jump",
+			"State": "Up"
+		},
+		{
+			"Tick": 320,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0
+		},
+		{
+			"Tick": 400,
+			"Type": "Action",
+			"Name": "Jump",
+			"State": "Down"
+		},
+		{
+			"Tick": 401,
+			"Type": "Action",
+			"Name": "Jump",
+			"State": "Up"
+		}
+	],
+	"Expect": [
+		{
+			"Tick": 300,
+			"Luau": "local d = Scene.FindByName(\"Director\"):GetScript()\nreturn d.Steps == 300 and d.Jumps == 2"
+		},
+		{
+			"Tick": 600,
+			"Luau": "local d = Scene.FindByName(\"Director\"):GetScript()\nreturn d.Steps == 600 and d.Jumps == 3 and d.Work > 0"
+		},
+		{
+			"Tick": 600,
+			"Luau": "local y = Scene.FindByName(\"Ball\").Transform.WorldPosition.y\nreturn y < 2.4 and y > 0 and #Scene.FindAllWithComponent(\"RigidBody\") == 54"
+		},
+		{
+			"Tick": 600,
+			"Luau": "for _, e in Scene.FindAllWithComponent(\"RigidBody\") do\n\tif string.find(e.Name, \"^Box\") and e.Transform.WorldPosition.y < 0 then return false end\nend\nreturn true"
+		}
+	],
+	"FinalTick": 600,
+	"FinalStateHash": "2a75dca847e98e59"
+}

@@ -1,0 +1,9 @@
+{
+	"Format": "ValidationFixture",
+	"Version": 1,
+	"Scope": "Project",
+	"Codes": ["PHYSICS_ADJACENT_STATIC_BODIES"],
+	"TestComponents": false,
+	"Expand": [],
+	"NonCanonical": []
+}

@@ -1,0 +1,9 @@
+{
+	"Format": "ValidationFixture",
+	"Version": 1,
+	"Scope": "Project",
+	"Codes": ["ASSET_IMPORT_FAILED", "ASSET_TYPE_MISMATCH"],
+	"TestComponents": false,
+	"Expand": [],
+	"NonCanonical": []
+}

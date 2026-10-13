@@ -15,15 +15,39 @@ Declare editable data in `.Fields` with `Field.Number`, `Integer`, `Bool`, `Stri
 
 Module top levels run during import in a restricted load-time VM. They may construct pure tables, schemas and functions, and `require` other modules inside `Assets/`; they may not query input, create entities or otherwise use runtime engine services. Put such work in callbacks. `require` paths are relative to the script, never paths outside `Assets/`.
 
-For typed access to another behaviour, require its module for the exported alias, then cast the instance:
+For typed access to another behaviour, require its module for the exported alias, then cast the instance. To call a behaviour's own methods with `self:Method()` in strict mode, list them in its exported alias with `self` as their first parameter; the class table defines them:
 
-```luau
+```luau path=Assets/Scripts/Goal.luau
+--!strict
 local BallScript = require("./Ball")
-local ball = other:GetScript() :: BallScript.Ball?
-if ball then
+
+export type Goal = ScriptInstance & {
+	Hits: number,
+	Celebrate: (self: Goal, ball: BallScript.Ball) -> (),
+}
+
+local Goal = {}
+
+Goal.Fields = {
+	Hits = Field.Integer(0, { Min = 0 }),
+}
+
+function Goal.Celebrate(self: Goal, ball: BallScript.Ball)
+	self.Hits += 1
 	ball.ReachedGoal = true
 end
+
+function Goal.OnTriggerEnter(self: Goal, other: Entity)
+	local ball = other:GetScript() :: BallScript.Ball?
+	if ball then
+		self:Celebrate(ball)
+	end
+end
+
+return Script.Define("Goal", Goal)
 ```
+
+Examples in this file and every other document are type-checked by the unit suite ("DocExamples: every Luau example in the docs type-checks"); `./Ball` resolves to a stub of the rolling-ball behaviour there.
 
 `GetScript()` returns the instance; `GetComponent("Script")` returns the component proxy. There is no `.Script` shortcut. Other eligible component shortcuts can be nil: narrow or cast after checking the component exists.
 
@@ -54,11 +78,11 @@ For a follow camera, use `OnLateUpdate` and the target's `Transform.RenderPositi
 
 ## Limits
 
-Log entries and `print` keep at most 8 KiB each (longer text is truncated and marked) and one VM writes at most 1024 entries per frame (the rest are counted and dropped); evaluation output still captures every line. `Debug.DrawText` text is at most 1024 bytes, entity names 256 bytes, and an entity carries at most 256 tags of at most 256 bytes each; one component field value a script writes (for example `Text.Text`, or a value passed to `AddComponent`) holds at most 4096 bytes of text; `Audio.PlayOneShot` starts at most 1024 one-shots per frame. Larger values raise a located error before any change. Test scripts have their own limits: suite and case names at most 256 bytes, `Test.ExpectScriptError` patterns at most 1 KiB, at most 4096 cases per suite, 1024 `Test.Inject*` events per input tick and 256 `Test.Screenshot` calls per suite; a row keeps 32 failures (the last counts the rest) and a suite 1024, and a case keeps at most 256 unclaimed script errors. `script.errors` keeps 256 distinct errors with 8 KiB messages and 32 traceback frames, and reports `evicted` when older ones were dropped.
+Log entries and `print` keep at most 8 KiB each (longer text is truncated and marked) and one VM writes at most 1024 entries per frame (the rest are counted and dropped); evaluation output still captures every line. `Debug.DrawText` text is at most 1024 bytes, entity names 256 bytes, and an entity carries at most 256 tags of at most 256 bytes each; one component field value a script writes (for example `Text.Text`, or a value passed to `AddComponent`) holds at most 4096 bytes of text; `Audio.PlayOneShot` starts at most 1024 one-shots per frame. Larger values raise a located error before any change. Test scripts have their own limits: suite and case names at most 256 bytes, `Test.ExpectScriptError` patterns at most 1 KiB, at most 4096 cases per suite, 1024 `Test.Inject*` events per input tick and 256 `Test.Screenshot` calls per suite; a row keeps 32 failures (the last counts the rest) and a suite 1024, and a case keeps at most 256 unclaimed script errors. `script.errors` keeps 256 distinct errors with 8 KiB messages and 32 traceback frames, and reports `evicted` when older ones were dropped. User-defined type functions (`type function`) are not supported: the type checker refuses each declaration with a `SCRIPT_TYPE_ERROR` (it would run their bodies without a bound), so write ordinary type aliases instead.
 
 ## Testing and diagnosis
 
-Create test scripts with `Test.Suite` and register `Test.Case` inside the suite body; the body registers cases, while the cases perform runtime work. Use `Test.Inject*` and `Test.WaitTicks` for deterministic input. `Test.Expect` records a failure and continues; `Test.Fail` ends the case. Configure suites in `Testing.Suites` with their scene, parameters and supported modes. Run with `test.run` or `Editor --headless --project <project> --run-tests`; `--filter` selects a suite/case.
+Create test scripts with `Test.Suite` and register `Test.Case` inside the suite body; the body registers cases, while the cases perform runtime work. Use `Test.Inject*` and `Test.WaitTicks` for deterministic input. `Test.Expect` records a failure and continues; `Test.Fail` ends the case. Configure suites in `Testing.Suites` with their scene, parameters and supported modes. Run with `test.run` or `Editor --headless --project <project> --run-tests`; `--filter` selects a suite/case. `Projects/FeatureTest/Assets/Tests/` holds working suites for every API module (`Api/`), callback (`Callbacks/`), input (`Input/`), timing (`Timing/`), prefab, scene-load and error case to copy from.
 
 Use `script.errors`, diagnostics and the structured test results to find authored file/line, traceback, callback, entity and tick. A failing behaviour is disabled; in the editor `PauseOnError` may pause the session. Fix the source and confirm the fresh run rather than assuming an old disabled instance restarted. Ordinary editor play supports transactional hot reload; deterministic lockstep/replay/recording/test sessions defer it except explicit test reload.
 

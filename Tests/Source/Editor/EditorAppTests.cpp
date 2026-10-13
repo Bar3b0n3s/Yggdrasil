@@ -136,7 +136,9 @@ return Test.Suite("Cli", function()
 	Test.Case("fails", function() Test.Expect(false, "CLI failure") end)
 end)
 )");
-			std::vector<std::string> arguments{ "--headless", "--renderer", "none", "--project", Test::PathToUtf8(projectFile), "--run-tests" };
+			// The reports go to the test's directory (ADR 0022 decision 7), never the repository's bin/TestResults.
+			std::vector<std::string> arguments{ "--headless", "--renderer", "none", "--project", Test::PathToUtf8(projectFile), "--run-tests", "--junit",
+				Test::PathToUtf8(fixture.GetDirectory() / "Reports" / "Cli.xml") };
 			const auto failed = RunEditor(fixture.GetDirectory(), arguments, std::chrono::seconds(120));
 			REQUIRE(failed);
 			CHECK_MESSAGE(failed->ExitCode == ExitCode::Failed, failed->StandardError);
@@ -168,7 +170,9 @@ return Test.Suite("Windowed", function()
 	Test.Case("runs", function() Test.WaitTicks(2) Test.Expect(true) end)
 end)
 )");
-			const auto result = RunEditor(fixture.GetDirectory(), { "--renderer", "none", "--project", Test::PathToUtf8(projectFile), "--run-tests" }, std::chrono::seconds(120));
+			const auto result = RunEditor(fixture.GetDirectory(),
+				{ "--renderer", "none", "--project", Test::PathToUtf8(projectFile), "--run-tests", "--junit", Test::PathToUtf8(fixture.GetDirectory() / "Reports" / "Windowed.xml") },
+				std::chrono::seconds(120));
 			REQUIRE_MESSAGE(result.has_value(), result.error().ToString());
 			INFO("editor stderr: ", result->StandardError);
 			CHECK(result->StandardError.contains("Process context ready: Windowed"));
@@ -330,7 +334,7 @@ end)
 		// ADR 0022 decision 7 (stream A): --run-tests writes the JUnit report to --junit and the JSON report beside it, or both
 		// to <working directory>/bin/TestResults/FeatureTest-Editor.{xml,json}, from the run's result whatever its outcome,
 		// independent of the automation server's offload directory (which the server removes at exit).
-		TEST_CASE("EditorApp: --run-tests writes its JUnit and JSON reports to --junit or below the working directory" * doctest::skip(true))
+		TEST_CASE("EditorApp: --run-tests writes its JUnit and JSON reports to --junit or below the working directory")
 		{
 			Test::EditorTestFixture fixture("RunTestsReports");
 			const std::filesystem::path projectFile = CreateProcessTestProject(fixture, "Reports");
@@ -363,6 +367,46 @@ end)
 			CHECK(defaultPath->ExitCode == ExitCode::Failed);
 			CHECK(FileSystem::Exists(workingDirectory / "bin/TestResults/FeatureTest-Editor.xml"));
 			CHECK(FileSystem::Exists(workingDirectory / "bin/TestResults/FeatureTest-Editor.json"));
+		}
+
+		// Review finding M01 (ADR 0022 decision 7, EditorCommandLine.h "Written whatever the outcome"): a --run-tests run whose
+		// test.run fails before any result exists (type errors block discovery, §11.9) still writes both reports, as a failed
+		// run naming the error, over the passing reports an earlier run left at the same paths.
+		TEST_CASE("EditorApp: --run-tests writes failed reports over stale ones when the run fails before a result exists")
+		{
+			Test::EditorTestFixture fixture("RunTestsPreflightReports");
+			const std::filesystem::path projectFile = CreateProcessTestProject(fixture, "Preflight");
+			WriteProcessTestFile(projectFile.parent_path() / "Assets/Tests/Typed.test.luau",
+				"--!strict\nlocal wrong: number = \"text\"\nreturn Test.Suite(\"Typed\", function() Test.Case(\"passes\", function() Test.Expect(wrong == wrong) end) end)\n");
+			const Json suites = Json::array({ Json{ { "Script", "Assets/Tests/Typed.test.luau" } } });
+			const std::string patch = Json{ { "method", "project.setSettings" }, { "params", Json{ { "patch", Json{ { "Testing", Json{ { "Suites", suites } } } } } } } }.dump();
+			const std::string open = Json{ { "method", "project.open" }, { "params", Json{ { "path", Test::PathToUtf8(projectFile) } } } }.dump();
+			WriteProcessTestFile(fixture.GetDirectory() / "Suites.jsonl", open + "\n" + patch + "\n");
+			const Result<ProcessResult> configured =
+				RunEditor(fixture.GetDirectory(), { "--headless", "--renderer", "none", "--batch", Test::PathToUtf8(fixture.GetDirectory() / "Suites.jsonl") }, std::chrono::seconds(60));
+			REQUIRE(configured.has_value());
+			REQUIRE_MESSAGE(configured->ExitCode == ExitCode::Success, configured->StandardError);
+
+			const std::filesystem::path junit = fixture.GetDirectory() / "Reports" / "Preflight.xml";
+			const std::filesystem::path json = fixture.GetDirectory() / "Reports" / "Preflight.json";
+			REQUIRE(FileSystem::CreateDirectories(junit.parent_path()));
+			WriteProcessTestFile(junit, "<testsuites stale=\"true\"/>\n");
+			WriteProcessTestFile(json, R"({"mode": "Editor", "passed": true, "stale": true})");
+			const Result<ProcessResult> run = RunEditor(fixture.GetDirectory(),
+				{ "--headless", "--renderer", "none", "--project", Test::PathToUtf8(projectFile), "--run-tests", "--junit", Test::PathToUtf8(junit) }, std::chrono::seconds(120));
+			REQUIRE(run.has_value());
+			CHECK_MESSAGE(run->ExitCode == ExitCode::Failed, run->StandardError);
+			const Result<std::string> xml = FileSystem::ReadText(junit);
+			REQUIRE_MESSAGE(xml.has_value(), xml.error().ToString());
+			CHECK_FALSE(xml->contains("stale"));
+			CHECK(xml->contains("<error message="));
+			CHECK(xml->contains("script type errors block test discovery"));
+			const Result<std::string> report = FileSystem::ReadText(json);
+			REQUIRE_MESSAGE(report.has_value(), report.error().ToString());
+			CHECK_FALSE(report->contains("stale"));
+			CHECK(report->contains(R"("mode": "Editor")"));
+			CHECK(report->contains(R"("passed": false)"));
+			CHECK(report->contains("script type errors block test discovery"));
 		}
 
 		TEST_CASE("EditorApp: --upgrade appends its transcript lines and records provenance")

@@ -1,0 +1,5 @@
+{
+	"Format": "CoverageGap",
+	"Version": 1,
+	"Failures": ["merge: gate: Editor 1", "merge: gate: Editor 1b", "merge: gate: Editor 2", "merge: gate: Editor 3", "merge: gate: Editor 4", "merge: gate: Editor 9"]
+}

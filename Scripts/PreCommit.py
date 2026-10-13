@@ -16,16 +16,22 @@ Steps, in order:
                                 fixtures are byte-identical to a fresh generation)
               resources         Scripts/FetchAssets.py defaults --check (the committed engine resources match their
                                 SHA-256 pins, offline)
+              test fixtures     Scripts/FetchAssets.py fixture --check (the pinned third-party test fixtures match
+                                their SHA-256 pins and the Tests/Data/LICENSES.md table, offline)
   build     Scripts/Build.py --config Debug (skipped when generate failed)
   tests     Scripts/Test.py --suite unit,gpu,golden,feature,automation --config Debug --require-gpu (skipped when the
             build failed): T0 + T1, and T2 on this machine's GPU (§15.1: the GPU tests and golden images gate every
             commit), with validation and synchronization validation, under both API caps; the golden images run in
-            Debug, which must match the Release goldens exactly (§15.8). The automation suite (Tests/Automation and
-            Tools/MCP/tests against the Debug editor, with the method coverage gate) runs in the MCP bridge's virtual
-            environment, which Scripts/Setup.py creates; without it the step fails with exit code 3. A suite that does
-            not exist yet is reported as not available by Test.py and does not fail the gate. --gpu-optional, for a
-            machine without a usable Vulkan device, drops --require-gpu: the GPU test cases and the automation tests
-            that render then pass without running, naming the reason, as a warning
+            Debug, which must match the Release goldens exactly (§15.8). The feature suite runs FeatureTest in the Debug
+            editor (Editor --headless --project Projects/FeatureTest --run-tests) and fails on any failed case, on a
+            per-mode coverage gate that is not evaluated and green, on a skipped case row and on any change to
+            Projects/FeatureTest outside Library/ (Docs/Decisions/0022-m14-contract.md decision 7). The automation suite
+            (Tests/Automation and Tools/MCP/tests against the Debug editor, with the method coverage gate) runs in the
+            MCP bridge's virtual environment, which Scripts/Setup.py creates; without it the step fails with exit code
+            3. A suite that does not exist yet is reported as not available by Test.py and does not fail the gate.
+            --gpu-optional, for a machine without a usable Vulkan device, drops --require-gpu: the GPU test cases, the
+            FeatureTest run and the automation tests that render then pass without running, naming the reason, as a
+            warning
 The static checks run even after an earlier failure, so one run reports every problem. A missing script fails its
 step.
 
@@ -86,9 +92,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--contract", action="store_true", help=CONTRACT_FLAG_HELP)
     parser.add_argument("--gpu-optional", action="store_true",
-                        help="gpu, golden and automation suites without --require-gpu, for a machine without a usable "
-                             "Vulkan device: their GPU test cases and the automation tests that start a rendering "
-                             "editor pass without running, naming the reason (a warning)")
+                        help="gpu, golden, feature and automation suites without --require-gpu, for a machine without "
+                             "a usable Vulkan device: their GPU test cases, the FeatureTest run and the automation "
+                             "tests that start a rendering editor pass without running, naming the reason (a warning)")
     parser.add_argument("--json", action="store_true", help="print a machine-readable result on stdout")
     arguments = parser.parse_args(sys.argv[1:] if argv is None else argv)
     console = Console(arguments.json)

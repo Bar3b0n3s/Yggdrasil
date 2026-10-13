@@ -128,6 +128,9 @@ class RuntimeScriptTests(AutomationTestCase):
         self.assertEqual(local.returncode, EXIT_SUCCESS, local.stderr.decode("utf-8", errors="replace"))
         recording = user_data / TINY_GAME_NAME / "Replays/Nested/Local.replay"
         document = json.loads(recording.read_text(encoding="utf-8"))
+        # The header names the run mode that recorded it, never the build configuration (Architecture §9.1, ADR 0022
+        # "Integration"), so a Debug and a Release Runtime record the same bytes.
+        self.assertEqual(document["Config"], "Release")
         document["FinalStateHash"] = "ffffffffffffffff" if document["FinalStateHash"] != "ffffffffffffffff" else "0000000000000000"
         recording.write_text(json.dumps(document), encoding="utf-8")
         mismatch = self.run_runtime(executable, ["--replay", recorded["path"], "--verify"], user_data)

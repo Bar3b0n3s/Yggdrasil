@@ -4,6 +4,7 @@
 #include "Engine/App/EngineContext.h"
 #include "Engine/App/ExitCode.h"
 #include "Engine/App/ProcessContext.h"
+#include "Engine/App/ProjectSettingsApplication.h"
 #include "Engine/Asset/Asset.h"
 #include "Engine/Asset/AssetLoaderRegistry.h"
 #include "Engine/Asset/BuiltinAssets.h"
@@ -44,6 +45,7 @@
 #include "Engine/Scripting/ScriptEngine.h"
 #include "Engine/Session/PlaySession.h"
 #include "Engine/Session/ReplayPlayer.h"
+#include "Engine/Testing/CoverageGates.h"
 #include "Engine/Testing/FeatureTestRunner.h"
 
 #if !defined(ENGINE_DIST)
@@ -347,7 +349,10 @@ namespace Engine {
 			if (ReplayInputSerial == serial)
 				ReplayInputSerial = 0;
 		}
+		// The run's reports from the runner's result (WriteTestReports).
 		[[nodiscard]] Status WriteTestResults();
+		// <working directory>/bin/TestResults/FeatureTest-<Mode>.{json,xml} from `report`.
+		[[nodiscard]] Status WriteTestReports(TestRunResult report);
 	};
 
 	ScriptEnvironment RuntimeApp::State::GetScriptEnvironment() const
@@ -556,13 +561,9 @@ namespace Engine {
 		header.Seed = spec.Seed;
 		header.FixedHz = spec.Project.Simulation.FixedHz;
 		header.EngineVersion = Manifest.EngineVersion;
-#if defined(ENGINE_DIST)
-		header.Config = "Dist";
-#elif defined(ENGINE_DEBUG)
-		header.Config = "Debug";
-#else
-		header.Config = "Release";
-#endif
+		// The run mode that recorded it (Release, or Dist), never the build configuration: Debug and Release Runtimes record
+		// the same bytes (§9.1, ADR 0022 "Integration").
+		header.Config = RuntimeTestMode == TestSuiteSettings::Mode::Dist ? "Dist" : "Release";
 		Headers[session->GetSerial()] = std::move(header);
 		return session;
 	}
@@ -582,12 +583,7 @@ namespace Engine {
 			scene = *found;
 		}
 		ProjectSettings project = Project;
-		if (suite.Overrides.CallbackBudgetMs)
-			project.Scripting.CallbackBudgetMs = suite.Overrides.CallbackBudgetMs;
-		if (suite.Overrides.MemoryLimitMB)
-			project.Scripting.MemoryLimitMB = suite.Overrides.MemoryLimitMB;
-		if (suite.Overrides.PauseOnError != TestSuiteOverrides::PauseOnErrorOverride::Inherit)
-			project.Scripting.PauseOnError = suite.Overrides.PauseOnError == TestSuiteOverrides::PauseOnErrorOverride::Pause;
+		project.Scripting = ApplyTestSuiteOverrides(Project.Scripting, suite.Overrides);
 		PlayStartOptions options;
 		options.Parameters = suite.Parameters;
 		options.Lockstep = suite.Clock.empty();
@@ -687,8 +683,7 @@ namespace Engine {
 
 	AssetManager* RuntimeApp::State::GetAssetManager() const
 	{
-		ENGINE_CONTRACT_STUB();
-		return nullptr;
+		return App.m_Assets.get();
 	}
 
 	Result<TestCoverageReport> RuntimeApp::State::GetCoverage() const
@@ -698,57 +693,22 @@ namespace Engine {
 		ENGINE_TRY_ASSIGN(auto definitions, api.GenerateDefinitions());
 		TestCoverageReport report;
 		report.RegistryFingerprint = std::format("{:016x}", XXH64(definitions));
-		for (auto counter : coverage.Members)
-		{
-			const auto previous = std::ranges::find_if(CoverageStart.Members, [&counter](const auto& old)
-			{
-				return old.Owner == counter.Owner && old.Member == counter.Member && old.Kind == counter.Kind;
-			});
-			if (previous != CoverageStart.Members.end())
-			{
-				counter.Calls -= std::min(counter.Calls, previous->Calls);
-				counter.Reads -= std::min(counter.Reads, previous->Reads);
-				counter.Writes -= std::min(counter.Writes, previous->Writes);
-				for (auto& value : counter.EnumValues)
-				{
-					const auto old = std::ranges::find_if(previous->EnumValues, [&value](const auto& item)
-					{
-						return item.ArgumentIndex == value.ArgumentIndex && item.EnumName == value.EnumName && item.ValueName == value.ValueName;
-					});
-					if (old != previous->EnumValues.end())
-						value.Count -= std::min(value.Count, old->Count);
-				}
-			}
-			std::vector<TestSuiteSettings::Mode> modes;
-			if (HasFlag(counter.Modes, RunModes::Editor))
-				modes.push_back(TestSuiteSettings::Mode::Editor);
-			if (HasFlag(counter.Modes, RunModes::Release))
-				modes.push_back(TestSuiteSettings::Mode::Release);
-			if (HasFlag(counter.Modes, RunModes::Dist))
-				modes.push_back(TestSuiteSettings::Mode::Dist);
-			const auto count = [](uint64_t value)
-			{
-				return static_cast<uint32_t>(std::min<uint64_t>(value, std::numeric_limits<uint32_t>::max()));
-			};
-			const std::string id = counter.Owner + "." + counter.Member;
-			if (counter.RequiresRead)
-				report.Counters.push_back({ .Id = id + "/read", .Kind = "read", .Modes = modes, .Count = count(counter.Reads) });
-			if (counter.RequiresWrite)
-				report.Counters.push_back({ .Id = id + "/write", .Kind = "write", .Modes = modes, .Count = count(counter.Writes) });
-			if (!counter.RequiresRead && !counter.RequiresWrite && counter.Kind != ScriptApiMemberKind::Constant)
-				report.Counters.push_back({ .Id = id, .Kind = counter.Kind == ScriptApiMemberKind::Callback ? "callback" : "call", .Modes = modes, .Count = count(counter.Calls) });
-			for (const auto& value : counter.EnumValues)
-				report.Counters.push_back({ .Id = std::format("{}/argument{}/{}/{}", id, value.ArgumentIndex, value.EnumName, value.ValueName), .Kind = "enum", .Modes = modes, .Count = count(value.Count) });
-		}
-		std::ranges::sort(report.Counters, {}, &TestCoverageCounter::Id);
+		ENGINE_TRY_ASSIGN(report.Counters, MakeScriptApiCoverageCounters(coverage, CoverageStart));
 		return report;
 	}
 
 	Status RuntimeApp::State::WriteTestResults()
 	{
-		ENGINE_TRY_ASSIGN(auto report, Runner.GetResult());
+		ENGINE_TRY_ASSIGN(TestRunResult report, Runner.GetResult());
+		return WriteTestReports(std::move(report));
+	}
+
+	Status RuntimeApp::State::WriteTestReports(TestRunResult report)
+	{
+		// <working directory>/bin/TestResults/FeatureTest-<Mode>.{json,xml}: fixed names, which M15's export stage reads
+		// (Docs/Decisions/0022-m14-contract.md decision 7).
 		const auto directory = std::filesystem::path("bin") / "TestResults";
-		const std::string name = std::format("Runtime-{}", Process::GetCurrentId());
+		const std::string name = RuntimeTestMode == TestSuiteSettings::Mode::Dist ? "FeatureTest-Dist" : "FeatureTest-Release";
 		const auto jsonPath = directory / (name + ".json");
 		const auto junitPath = directory / (name + ".xml");
 		report.JsonPath = FileSystem::PathToUtf8(jsonPath);
@@ -928,8 +888,22 @@ namespace Engine {
 			ENGINE_TRY(CreateRenderers());
 		if (state.Options.FeatureTest)
 		{
-			ENGINE_TRY_ASSIGN(state.CoverageStart, context.GetScriptApiRegistry().GetCoverage(RuntimeScriptMode));
-			ENGINE_TRY(state.Runner.Begin(state, { .Mode = RuntimeTestMode, .Filter = state.Options.Filter }));
+			const Status begun = [&state, &context]() -> Status
+			{
+				// The script API baseline immediately before Begin, whose suite collection counts (ADR 0022 decision 4).
+				ENGINE_TRY_ASSIGN(state.CoverageStart, context.GetScriptApiRegistry().GetCoverage(RuntimeScriptMode));
+				return state.Runner.Begin(state, { .Mode = RuntimeTestMode, .Filter = state.Options.Filter });
+			}();
+			if (!begun)
+			{
+				// The reports describe this run whatever its outcome (ADR 0022 decision 7): a run that cannot begin (a missing
+				// suite script, a suite that fails to collect) writes a failed run naming the error, so a report of an earlier
+				// run never survives at the fixed paths M15's export stage reads.
+				const Status written = state.WriteTestReports(MakeFailedTestRunResult(RuntimeTestMode, begun.error().ToString()));
+				if (!written)
+					ENGINE_ERROR("Cannot write feature test results: {}", written.error());
+				return std::unexpected(begun.error());
+			}
 		}
 		else if (!state.Options.Replay.empty())
 		{
@@ -1426,17 +1400,7 @@ namespace Engine {
 			specification.ThrottleHeadless = false;
 		}
 
-		specification.Name = manifest->Name;
-		specification.WindowSettings = WindowSpecification{
-			.Title = manifest->Window.Title,
-			.Width = manifest->Window.Width,
-			.Height = manifest->Window.Height,
-			.Resizable = manifest->Window.Resizable,
-			.Fullscreen = manifest->Window.Fullscreen,
-		};
-		specification.Graphics.VSync = manifest->Window.VSync;
-		specification.Loop.FixedHz = manifest->Simulation.FixedHz;
-		specification.Loop.MaxStepsPerFrame = manifest->Simulation.MaxStepsPerFrame;
+		ApplyGameSettings(specification, manifest->Name, manifest->Window, manifest->Simulation);
 		specification.EnginePak = runtime.ManifestPath.parent_path() / FileSystem::PathFromUtf8(manifest->Paks[0].Path);
 		specification.RegisterTypes = &Utils::RegisterRuntimeTypes;
 		return CreateScope<RuntimeApp>(std::move(specification), std::move(runtime), std::move(*manifest));

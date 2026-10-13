@@ -1300,7 +1300,8 @@ namespace Engine {
 
 		// Starts an import of `source` on a job; its publication runs at a later MainThreadQueue::Drain. Returns the job, which
 		// resolves with the loaded artifact `artifact` (the main asset when null). Importers that need the main thread
-		// import now instead (§4.11).
+		// import now instead (§4.11). A valid `artifact` is a LoadAsync request: its successful publication is reported to
+		// the load observer (AssetManager::NotifyLoaded); the imports of scans and hot reloads (null `artifact`) are not.
 		JobHandle<AssetRef<Asset>> StartAsyncImport(AssetHandle source, bool useCache, AssetHandle artifact, bool reload)
 		{
 			const AssetHandle requested = artifact.IsValid() ? artifact : source;
@@ -1315,6 +1316,8 @@ namespace Engine {
 						return MakeError(ErrorCode::NotFound, "the import of {} did not produce {}", source.ToString(), requested.ToString());
 					return loaded->second.Value;
 				}();
+				if (artifact.IsValid() && value.has_value())
+					Self->NotifyLoaded(artifact);
 				return Specification.Jobs->Submit([value = std::move(value)]() -> Result<AssetRef<Asset>>
 				{
 					return value;
@@ -1329,7 +1332,7 @@ namespace Engine {
 			std::weak_ptr<bool> alive = Alive;
 			const uint64_t serial = ProjectSerial;
 			State* state = this;
-			return Specification.Jobs->Submit([shared, requested, ticket, queue, alive, serial, state, reload]() -> Result<AssetRef<Asset>>
+			return Specification.Jobs->Submit([shared, requested, ticket, queue, alive, serial, state, reload, observed = artifact]() -> Result<AssetRef<Asset>>
 			{
 				ImportOutput output = Utils::RunImport(*shared);
 				Result<AssetRef<Asset>> value = MakeError(ErrorCode::NotFound, "the import of {} did not produce {}", shared->Metadata.Handle.ToString(),
@@ -1346,17 +1349,19 @@ namespace Engine {
 							value = output.Decoded[index];
 					}
 				}
-				queue->Post([output = std::move(output), ticket, alive, serial, state, reload]() mutable
+				queue->Post([output = std::move(output), ticket, alive, serial, state, reload, observed]() mutable
 				{
 					if (alive.expired())
 						return;
-					state->FinishAsyncImport(ticket, std::move(output), serial, reload);
+					state->FinishAsyncImport(ticket, std::move(output), serial, reload, observed);
 				});
 				return value;
 			});
 		}
 
-		void FinishAsyncImport(const AssetReimportTicket& ticket, ImportOutput output, uint64_t serial, bool reload)
+		// Publishes an asynchronous import. `observed` is the LoadAsync request's artifact (null for scans and hot
+		// reloads): once it is loaded, its publication is reported to the load observer, after the tables are updated.
+		void FinishAsyncImport(const AssetReimportTicket& ticket, ImportOutput output, uint64_t serial, bool reload, AssetHandle observed)
 		{
 			--OutstandingTasks;
 			if (const auto inFlight = InFlight.find(ticket.Handle); inFlight != InFlight.end() && --inFlight->second == 0)
@@ -1364,6 +1369,10 @@ namespace Engine {
 			if (serial != ProjectSerial)
 				return;
 			static_cast<void>(ApplyImport(ticket.Handle, ticket, std::move(output), reload, reload));
+			if (!observed.IsValid())
+				return;
+			if (const auto loaded = Loaded.find(observed); loaded != Loaded.end() && loaded->second.Value != nullptr)
+				Self->NotifyLoaded(observed);
 		}
 
 		// --- Built-ins --------------------------------------------------------------------------------------------------
@@ -1957,8 +1966,14 @@ namespace Engine {
 			return MakeError(ErrorCode::NotFound, "no asset has handle {}", handle.ToString());
 		}
 
+		// Every successful Load of a registered asset is observed (gate 9), an asset already loaded included; built-ins and
+		// failures never are. The observer runs after the value is taken, outside any use of the tables.
 		if (const auto loaded = m_State->Loaded.find(handle); loaded != m_State->Loaded.end() && loaded->second.Value != nullptr)
-			return loaded->second.Value;
+		{
+			AssetRef<Asset> value = loaded->second.Value;
+			NotifyLoaded(handle);
+			return value;
+		}
 
 		const AssetHandle source = location->Record->Metadata.Handle;
 		const std::string path = GetReferencePath(handle);
@@ -1975,7 +1990,9 @@ namespace Engine {
 		const auto loaded = m_State->Loaded.find(handle);
 		if (loaded == m_State->Loaded.end() || loaded->second.Value == nullptr)
 			return describe(Error(ErrorCode::NotFound, std::format("the import of '{}' no longer produces this asset", path)));
-		return loaded->second.Value;
+		AssetRef<Asset> value = loaded->second.Value;
+		NotifyLoaded(handle);
+		return value;
 	}
 
 	JobHandle<AssetRef<Asset>> EditorAssetManager::LoadAsync(AssetHandle handle)
@@ -2293,7 +2310,7 @@ namespace Engine {
 			{
 				if (alive.expired())
 					return;
-				state->FinishAsyncImport(ticket, std::move(output), serial, reload);
+				state->FinishAsyncImport(ticket, std::move(output), serial, reload, AssetHandle());
 			});
 			return outcome;
 		});

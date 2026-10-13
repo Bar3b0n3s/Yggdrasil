@@ -251,7 +251,13 @@ namespace Engine {
 
 		static int Screenshot(ScriptCall& call)
 		{
-			Checked(call, Host(call).CaptureScreenshot(Lua::Check<std::string>(call, 1)));
+			IScriptTestHost& host = Host(call);
+			const std::string name = Lua::Check<std::string>(call, 1);
+			// Rendering and encoding the capture is host time, not the script's (ScriptEngine::RunHostOperation).
+			Checked(call, call.Engine->RunHostOperation([&host, &name]()
+			{
+				return host.CaptureScreenshot(name);
+			}));
 			return 0;
 		}
 		static int ReloadScript(ScriptCall& call)
@@ -353,7 +359,7 @@ namespace Engine {
 			ENGINE_TRY(api.RegisterAlias("TestCaseOptions", "{TimeoutTicks: number?}", "Positive tick timeout overriding the suite default."));
 			ENGINE_TRY(api.RegisterAlias("TestSuite", "{Name: string, Body: () -> (), Options: TestSuiteOptions}", "Authenticated suite constructor result."));
 			ENGINE_TRY(api.RegisterAlias("TestAudioLevels", "{RmsLeft: number, RmsRight: number, Peak: number}", "Stereo RMS and absolute peak of the requested simulation sample interval."));
-			ENGINE_TRY(api.RegisterAlias("TestExtraction", "{Alpha: number, Frame: number}", "Last completed render extraction interpolation and frame."));
+			ENGINE_TRY(api.RegisterAlias("TestExtraction", "{Alpha: number, Frame: number}", "The last completed render extraction: its interpolation Alpha, and Frame, the number of extractions completed so far."));
 			ENGINE_TRY(api.RegisterAlias("ScriptError", "{id: number, kind: string, script: string, line: number, column: number, message: string, callback: string, entity: string, entityName: string, tick: number, count: number, jsonPointer: string, traceback: {{script: string, line: number, [\"function\"]: string}}}", "Owned script diagnostic with exclusive occurrence cursor."));
 			ScriptMemberOptions pure;
 			pure.Environments = ScriptApiEnvironment::Test;

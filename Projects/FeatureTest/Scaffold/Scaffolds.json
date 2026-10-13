@@ -1,0 +1,86 @@
+{
+	"Format": "FeatureTestScaffolds",
+	"Version": 1,
+	"Scaffolds": [
+		{
+			"File": "Settings.jsonl",
+			"IdSeed": 1501,
+			"Renderer": "none"
+		},
+		{
+			"File": "Formats.jsonl",
+			"IdSeed": 1502,
+			"Renderer": "vulkan"
+		},
+		{
+			"File": "Components.jsonl",
+			"IdSeed": 1503,
+			"Renderer": "none"
+		},
+		{
+			"File": "Physics.jsonl",
+			"IdSeed": 1504,
+			"Renderer": "none"
+		},
+		{
+			"File": "Audio.jsonl",
+			"IdSeed": 1505,
+			"Renderer": "none"
+		},
+		{
+			"File": "Scripting.jsonl",
+			"IdSeed": 1506,
+			"Renderer": "none"
+		},
+		{
+			"File": "Callbacks.jsonl",
+			"IdSeed": 1507,
+			"Renderer": "none"
+		},
+		{
+			"File": "Prefabs.jsonl",
+			"IdSeed": 1508,
+			"Renderer": "none"
+		},
+		{
+			"File": "SceneLoad.jsonl",
+			"IdSeed": 1509,
+			"Renderer": "none"
+		},
+		{
+			"File": "Input.jsonl",
+			"IdSeed": 1510,
+			"Renderer": "none"
+		},
+		{
+			"File": "Timing.jsonl",
+			"IdSeed": 1511,
+			"Renderer": "none"
+		},
+		{
+			"File": "Errors.jsonl",
+			"IdSeed": 1512,
+			"Renderer": "none"
+		},
+		{
+			"File": "QuitApp.jsonl",
+			"IdSeed": 1513,
+			"Renderer": "none"
+		},
+		{
+			"File": "Determinism.jsonl",
+			"IdSeed": 1514,
+			"Renderer": "none"
+		},
+		{
+			"File": "Suites.jsonl",
+			"IdSeed": 1515,
+			"Renderer": "none"
+		},
+		{
+			"File": "Replays.jsonl",
+			"IdSeed": 1516,
+			"Renderer": "none"
+		}
+	]
+}

@@ -1,0 +1,9 @@
+{
+	"Format": "ValidationFixture",
+	"Version": 1,
+	"Scope": "Project",
+	"Codes": ["SCRIPT_TYPE_ERROR"],
+	"TestComponents": false,
+	"Expand": [],
+	"NonCanonical": []
+}

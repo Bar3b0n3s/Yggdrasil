@@ -9,6 +9,7 @@
 #include "EditorCore/Play/EditorPlayController.h"
 #include "EditorCore/Scripting/EditorScriptService.h"
 #include "Engine/App/EngineContext.h"
+#include "Engine/App/ProjectSettingsApplication.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/Audio/AudioEngine.h"
 #include "Engine/Automation/Methods/ScreenshotMethods.h"
@@ -19,6 +20,7 @@
 #include "Engine/Renderer/ViewportCapture.h"
 #include "Engine/Scripting/RegisterBindings.h"
 #include "Engine/Scripting/ScriptEngine.h"
+#include "Engine/Testing/CoverageGates.h"
 
 #include <algorithm>
 #include <format>
@@ -66,9 +68,14 @@ namespace Engine {
 		return {};
 	}
 
-	Status EditorFeatureTestHost::Acquire()
+	Status EditorFeatureTestHost::CaptureCoverageBaseline()
 	{
 		ENGINE_TRY_ASSIGN(m_CoverageStart, m_Api.GetCoverage(RunModes::Editor));
+		return {};
+	}
+
+	Status EditorFeatureTestHost::Acquire()
+	{
 		ENGINE_TRY(m_Editor.GetPlay().AcquireTestRun(*this, m_Context.GetRequest().Client));
 		m_Acquired = true;
 		m_Headers.clear();
@@ -142,12 +149,7 @@ namespace Engine {
 		if (mode != TestSuiteSettings::Mode::Editor)
 			return MakeError(ErrorCode::InvalidArgument, "the editor adapter serves Editor suites only");
 		ProjectSettings project = m_Project;
-		if (suite.Overrides.CallbackBudgetMs != 0)
-			project.Scripting.CallbackBudgetMs = suite.Overrides.CallbackBudgetMs;
-		if (suite.Overrides.MemoryLimitMB != 0)
-			project.Scripting.MemoryLimitMB = suite.Overrides.MemoryLimitMB;
-		if (suite.Overrides.PauseOnError != TestSuiteOverrides::PauseOnErrorOverride::Inherit)
-			project.Scripting.PauseOnError = suite.Overrides.PauseOnError == TestSuiteOverrides::PauseOnErrorOverride::Pause;
+		project.Scripting = ApplyTestSuiteOverrides(m_Project.Scripting, suite.Overrides);
 		PlayStartOptions options;
 		options.ScenePath = suite.Scene;
 		options.Parameters = suite.Parameters;
@@ -219,7 +221,15 @@ namespace Engine {
 			return MakeError(ErrorCode::InvalidState, "only the active test session may reload scripts");
 		if (!session.GetScripts())
 			return MakeError(ErrorCode::InvalidState, "no script VM is active");
-		ENGINE_TRY(m_Editor.ReimportScriptForTest(script));
+		// The reimport (with its type check) and the type gate are host time, not the case's: they run no Luau, so they stay out
+		// of the callback budget (ScriptEngine::RunHostOperation). The type gate of every play-mode reload (§11.8, ADR 0022
+		// decision 15) keeps the running code on a type error, publishes a `type` ScriptError and fails Test.ReloadScript in
+		// the case with its located Script error. The reload itself runs the new code, which counts.
+		ENGINE_TRY(session.GetScripts()->RunHostOperation([this, script]() -> Status
+		{
+			ENGINE_TRY(m_Editor.ReimportScriptForTest(script));
+			return m_Editor.GetPlay().CheckReloadTypes(script);
+		}));
 		ENGINE_TRY(session.GetScripts()->Reload(script, true));
 		return {};
 	}
@@ -238,52 +248,13 @@ namespace Engine {
 		ENGINE_TRY_ASSIGN(const std::string definitions, m_Api.GenerateDefinitions());
 		TestCoverageReport report;
 		report.RegistryFingerprint = std::format("{:016x}", XXH64(definitions));
-		for (ScriptApiCounter counter : coverage.Members)
-		{
-			const auto before = std::ranges::find_if(m_CoverageStart.Members, [&counter](const ScriptApiCounter& item)
-			{
-				return item.Owner == counter.Owner && item.Member == counter.Member && item.Kind == counter.Kind;
-			});
-			if (before != m_CoverageStart.Members.end())
-			{
-				counter.Calls -= std::min(counter.Calls, before->Calls);
-				counter.Reads -= std::min(counter.Reads, before->Reads);
-				counter.Writes -= std::min(counter.Writes, before->Writes);
-				for (auto& value : counter.EnumValues)
-				{
-					const auto old = std::ranges::find_if(before->EnumValues, [&value](const ScriptEnumCounter& item)
-					{
-						return item.ArgumentIndex == value.ArgumentIndex && item.EnumName == value.EnumName && item.ValueName == value.ValueName;
-					});
-					if (old != before->EnumValues.end())
-						value.Count -= std::min(value.Count, old->Count);
-				}
-			}
-			std::vector<TestSuiteSettings::Mode> modes;
-			if (HasFlag(counter.Modes, RunModes::Editor))
-				modes.push_back(TestSuiteSettings::Mode::Editor);
-			if (HasFlag(counter.Modes, RunModes::Release))
-				modes.push_back(TestSuiteSettings::Mode::Release);
-			if (HasFlag(counter.Modes, RunModes::Dist))
-				modes.push_back(TestSuiteSettings::Mode::Dist);
-			const std::string id = std::format("{}.{}", counter.Owner, counter.Member);
-			if (counter.RequiresRead)
-				report.Counters.push_back({ .Id = id + "/read", .Kind = "read", .Modes = modes, .Count = ToAutomationCounter(counter.Reads) });
-			if (counter.RequiresWrite)
-				report.Counters.push_back({ .Id = id + "/write", .Kind = "write", .Modes = modes, .Count = ToAutomationCounter(counter.Writes) });
-			if (!counter.RequiresRead && !counter.RequiresWrite && counter.Kind != ScriptApiMemberKind::Constant)
-				report.Counters.push_back({ .Id = id, .Kind = counter.Kind == ScriptApiMemberKind::Callback ? "callback" : "call", .Modes = modes, .Count = ToAutomationCounter(counter.Calls) });
-			for (const ScriptEnumCounter& value : counter.EnumValues)
-				report.Counters.push_back({ .Id = std::format("{}/argument{}/{}/{}", id, value.ArgumentIndex, value.EnumName, value.ValueName), .Kind = "enum", .Modes = modes, .Count = ToAutomationCounter(value.Count) });
-		}
-		std::ranges::sort(report.Counters, {}, &TestCoverageCounter::Id);
+		ENGINE_TRY_ASSIGN(report.Counters, MakeScriptApiCoverageCounters(coverage, m_CoverageStart));
 		return report;
 	}
 
 	AssetManager* EditorFeatureTestHost::GetAssetManager() const
 	{
-		ENGINE_CONTRACT_STUB();
-		return nullptr;
+		return &m_Editor.GetAssets();
 	}
 
 }

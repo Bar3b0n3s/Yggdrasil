@@ -1,0 +1,9 @@
+{
+	"Format": "ValidationFixture",
+	"Version": 1,
+	"Scope": "Project",
+	"Codes": ["PHYSICS_ALL_DOFS_LOCKED"],
+	"TestComponents": false,
+	"Expand": [],
+	"NonCanonical": []
+}

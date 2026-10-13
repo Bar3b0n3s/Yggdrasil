@@ -3,6 +3,7 @@
 
 #include "EditorCore/Automation/ScreenshotMethods.h"
 #include "EditorCore/Play/EditorPlayController.h"
+#include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/Audio/AudioEngine.h"
 #include "Engine/Automation/Methods/ScreenshotMethods.h"
 #include "Engine/Core/FileSystem.h"
@@ -14,7 +15,12 @@
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/SceneSerializer.h"
+#include "Engine/Scripting/ScriptEngine.h"
+#include "Engine/Scripting/ScriptError.h"
+#include "Engine/Session/PlaySession.h"
 #include "Support/AutomationTestClient.h"
+#include "Support/ExpectLog.h"
+#include "Support/WaitUntil.h"
 
 #include <nlohmann/json.hpp>
 
@@ -43,6 +49,23 @@ namespace Engine {
 				REQUIRE_MESSAGE(result, (result ? "" : result.error().ToString()));
 			}
 			return std::move(*result);
+		}
+
+		// The result of a test.run response that arrived without waiting (Submit), read from its offloaded report when it
+		// was too large to send inline, as CallTestMethod does.
+		Json ReadRunResult(const Json& response)
+		{
+			REQUIRE_MESSAGE(response.contains("result"), response.dump());
+			const Json& result = response["result"];
+			if (!JsonReader(result).ReadMember<bool>("truncated").value_or(false))
+				return result;
+			const auto path = JsonReader(result).ReadMember<std::string>("path");
+			REQUIRE(path);
+			const auto text = FileSystem::ReadText(FileSystem::PathFromUtf8(*path));
+			REQUIRE_MESSAGE(text, (text ? "" : text.error().ToString()));
+			auto parsed = JsonReader::Parse(*text);
+			REQUIRE_MESSAGE(parsed, (parsed ? "" : parsed.error().ToString()));
+			return std::move(*parsed);
 		}
 
 		template<typename TClient>
@@ -205,7 +228,7 @@ namespace Engine {
 		// ADR 0022 decisions 3 and 5 (stream A): a coverage run of the editor host observes loads through the editor's asset
 		// manager (IFeatureTestHost::GetAssetManager), so the suite script's own load counts for gate 9, and it reports the
 		// six evaluated per-mode gates.
-		TEST_CASE("TestMethods: a coverage run counts the formats the editor's asset manager loads" * doctest::skip(true))
+		TEST_CASE("TestMethods: a coverage run counts the formats the editor's asset manager loads")
 		{
 			Test::AutomationFixture fixture("TestRunFormats");
 			WriteSuite(fixture, "return Test.Suite('Contract', function()\nTest.Case('passes', function() Test.Expect(true) end)\nend)");
@@ -219,6 +242,20 @@ namespace Engine {
 			});
 			REQUIRE(script != counters.end());
 			CHECK((*script)["count"] != Json(0));
+			// The script API counters carry the gate 2 vocabulary of CoverageGates.h (ADR 0022 decision 2).
+			const auto expect = std::ranges::find_if(counters, [](const Json& counter)
+			{
+				return counter["id"] == Json("api:Test.Expect");
+			});
+			REQUIRE(expect != counters.end());
+			CHECK((*expect)["kind"] == Json("function"));
+			CHECK((*expect)["count"] != Json(0));
+			// Most of the registry is uncovered by one suite, so the gates evaluate and fail the run.
+			CHECK(std::ranges::all_of(result["coverage"]["gates"], [](const Json& gate)
+			{
+				return gate["evaluated"] == Json(true);
+			}));
+			CHECK(result["passed"] == Json(false));
 		}
 
 		TEST_CASE("TestMethods: failed expectations return structured locations and continue the case")
@@ -277,6 +314,13 @@ namespace Engine {
 			const Json replay = CallTestMethod(fixture, "input.replay", Json{ { "path", path }, { "verify", true }, { "strictHash", true } });
 			REQUIRE(result["suites"].size() == 1);
 			CHECK(replay["stateHash"] == result["suites"][0]["finalStateHash"]);
+			// The header names the run mode that recorded it, never the build configuration (§9.1, ADR 0022 "Integration"),
+			// so a Debug and a Release editor record the same bytes.
+			const auto text = FileSystem::ReadText(fixture.GetEditorFixture().GetProjectRoot() / "Assets/Tests/Replays/Recorded.replay");
+			REQUIRE_MESSAGE(text.has_value(), (text ? "" : text.error().ToString()));
+			const auto document = JsonReader::Parse(*text);
+			REQUIRE(document.has_value());
+			CHECK((*document)["Config"] == Json("Editor"));
 		}
 
 		TEST_CASE("TestMethods: the editor host's suite sessions own simulation audio time")
@@ -322,6 +366,138 @@ namespace Engine {
 			REQUIRE(captured.has_value());
 			CHECK(captured->Quality.ShadowMapSize == 512);
 			CHECK(captured->Quality.SsaoHalfResolution);
+		}
+
+		// ADR 0022 decision 15 and "Integration": Test.ReloadScript takes the play-mode reload's type gate
+		// (EditorPlayController::CheckReloadTypes) between its reimport and the reload, so a script whose new source has type
+		// errors keeps its running code, publishes a `type` error and fails the call in the case with a located Script error.
+		TEST_CASE("TestMethods: Test.ReloadScript refuses new source with type errors and keeps the running code")
+		{
+			Test::EditorTestFixture setup("TestReloadTypeGate");
+			setup.CreateAndOpenProject();
+			setup.CreateAndOpenScene();
+			EditorContext& editor = setup.GetEditor();
+			// One runner step per poll, so the run is observable between its ticks.
+			auto now = std::chrono::steady_clock::time_point{};
+			auto specification = Test::MakeTestServerSpecification();
+			specification.WallClock = [&now]()
+			{
+				now += std::chrono::milliseconds(100);
+				return now;
+			};
+			Test::AutomationTestClient fixture(editor, std::move(specification));
+			const std::string path = "Assets/Scripts/Typed.luau";
+			const std::string clean = "--!strict\nlocal Typed = {}\nfunction Typed:Value(): number\n\treturn 1\nend\nreturn Script.Define(\"Typed\", Typed)\n";
+			std::string broken = clean;
+			broken.replace(broken.find("return 1"), std::string_view("return 1").size(), "return \"two\"");
+			CallTestMethod(fixture, "script.write", Json{ { "path", path }, { "source", clean } });
+			CallTestMethod(fixture, "entity.create", Json{ { "name", "Typed" }, { "components", Json{ { "Script", Json{ { "Script", path } } } } } });
+			CallTestMethod(fixture, "scene.save", Json::object());
+			CallTestMethod(fixture, "script.write", Json{ { "path", "Assets/Tests/Reload.test.luau" }, { "source", "return Test.Suite(\"Reload\", function()\n"
+																												   "\tTest.Case(\"refused\", function()\n"
+																												   "\t\tTest.WaitTicks(400)\n"
+																												   "\t\tlocal entity = Scene.FindByName(\"Typed\")\n"
+																												   "\t\tlocal script = Assets.Load(\"Assets/Scripts/Typed.luau\")\n"
+																												   "\t\tassert(entity and script, \"the scripted entity and its script exist\")\n"
+																												   "\t\tlocal typed = entity:GetScript()\n"
+																												   "\t\tlocal ok, message = pcall(Test.ReloadScript, script)\n"
+																												   "\t\tTest.Expect(not ok, \"the reload is refused\")\n"
+																												   "\t\tTest.Expect(string.find(tostring(message), \"type errors block the reload\", 1, true) ~= nil, tostring(message))\n"
+																												   "\t\tTest.ExpectEqual(typed:Value(), 1, \"the running code is kept\")\n"
+																												   "\t\tTest.ReloadScript(script)\n"
+																												   "\tend)\n"
+																												   "end)\n" } });
+			CallTestMethod(fixture, "project.setSettings", Json{ { "patch", Json{ { "Testing", Json{ { "Suites", Json::array({ Json{ { "Script", "Assets/Tests/Reload.test.luau" }, { "Scene", "Assets/Scenes/Main.scene" }, { "Modes", Json::array({ "Editor" }) } } }) } } } } } });
+			editor.GetAssets().WaitIdle();
+			const uint64_t cursor = editor.GetPlay().GetScriptErrors().GetCursor();
+			Test::ExpectLog refused(LogLevel::Error, "type errors block the reload, so the running code is kept");
+			Test::AutomationTestClient& client = fixture;
+			static_cast<void>(client.Submit("test.run", Json::object()));
+			// While the case waits, its script's source changes on disk; Test.ReloadScript's reimport then sees it.
+			REQUIRE(Test::WaitUntil([&client, &editor]()
+			{
+				client.GetServer().Pump();
+				const PlaySession* session = editor.GetPlay().GetSession();
+				return editor.GetPlay().IsTestRunActive() && session != nullptr && session->GetScripts() != nullptr && session->GetTick() > 0;
+			}));
+			const std::filesystem::path file = setup.GetProjectRoot() / "Assets" / "Scripts" / "Typed.luau";
+			REQUIRE(FileSystem::WriteFileAtomic(file, std::as_bytes(std::span(broken.data(), broken.size())), { .KeepBackup = false }).has_value());
+			std::optional<Json> run;
+			REQUIRE(Test::WaitUntil([&client, &run]()
+			{
+				client.GetServer().Pump();
+				for (Json& response : client.GetServer().TakeInProcessResponses(client.GetClient()))
+					run = std::move(response);
+				return run.has_value();
+			}));
+			const Json result = ReadRunResult(*run);
+			CHECK(result["passed"] == Json(false));
+			REQUIRE(result["cases"].size() == 1);
+			const Json& row = result["cases"][0];
+			INFO(row.dump());
+			// The pcall checks passed (no failed expectation); the unprotected call failed the case with the gate's located error.
+			CHECK(row["status"] == Json("error"));
+			CHECK(JsonReader(row).ReadMember<std::string>("message").value_or("").contains("Assets/Scripts/Typed.luau:4:9: type errors block the reload"));
+			REQUIRE(row["failures"].size() == 1);
+			CHECK(row["failures"][0]["message"] == row["message"]);
+			const auto errors = editor.GetPlay().GetScriptErrors().Read(cursor);
+			const auto typeError = std::ranges::find_if(errors, [](const ScriptError& error)
+			{
+				return error.Kind == ScriptErrorKind::Type;
+			});
+			REQUIRE(typeError != errors.end());
+			CHECK(typeError->Callback == "Reload");
+			CHECK(typeError->Script == path);
+			CHECK(typeError->Line == 4);
+			CHECK_FALSE(editor.GetPlay().IsTestRunActive());
+		}
+
+		// ADR 0022 decision 12: the editor host gives a suite's session the project's scripting settings with the suite's
+		// Overrides applied (ApplyTestSuiteOverrides), so its live VM enforces the overridden budget and memory limit.
+		TEST_CASE("TestMethods: a suite's overrides set the budget and memory limit of its session")
+		{
+			Test::EditorTestFixture setup("TestRunOverrides");
+			setup.CreateAndOpenProject();
+			setup.CreateAndOpenScene();
+			EditorContext& editor = setup.GetEditor();
+			// One runner step per poll, so the run is observable between its ticks.
+			auto now = std::chrono::steady_clock::time_point{};
+			auto specification = Test::MakeTestServerSpecification();
+			specification.WallClock = [&now]()
+			{
+				now += std::chrono::milliseconds(100);
+				return now;
+			};
+			Test::AutomationTestClient fixture(editor, std::move(specification));
+			CallTestMethod(fixture, "project.setSettings", Json{ { "patch", Json{ { "Scripting", Json{ { "CallbackBudgetMs", 700 }, { "MemoryLimitMB", 96 } } } } } });
+			CallTestMethod(fixture, "script.write", Json{ { "path", "Assets/Tests/Limits.test.luau" }, { "source", "return Test.Suite(\"Limits\", function() Test.Case(\"waits\", function() Test.WaitTicks(400) end) end)" } });
+			CallTestMethod(fixture, "project.setSettings", Json{ { "patch", Json{ { "Testing", Json{ { "Suites", Json::array({ Json{ { "Script", "Assets/Tests/Limits.test.luau" }, { "Scene", "" }, { "Modes", Json::array({ "Editor" }) }, { "Overrides", Json{ { "CallbackBudgetMs", 40 }, { "MemoryLimitMB", 24 } } } } }) } } } } } });
+			editor.GetAssets().WaitIdle();
+			Test::AutomationTestClient& client = fixture;
+			static_cast<void>(client.Submit("test.run", Json::object()));
+			std::optional<ScriptingSettings> applied;
+			std::optional<uint64_t> softLimit;
+			std::optional<Json> run;
+			REQUIRE(Test::WaitUntil([&client, &editor, &applied, &softLimit, &run]()
+			{
+				client.GetServer().Pump();
+				if (const PlaySession* session = editor.GetPlay().GetSession(); session != nullptr && session->GetScripts() != nullptr && editor.GetPlay().IsTestRunActive() && !applied)
+				{
+					applied = session->GetScripts()->GetSettings();
+					softLimit = session->GetScripts()->GetMemoryState().SoftLimitBytes;
+				}
+				for (Json& response : client.GetServer().TakeInProcessResponses(client.GetClient()))
+					run = std::move(response);
+				return run.has_value();
+			}));
+			CHECK(ReadRunResult(*run)["passed"] == Json(true));
+			REQUIRE(applied.has_value());
+			CHECK(applied->CallbackBudgetMs == 40u);
+			CHECK(applied->MemoryLimitMB == 24u);
+			CHECK(softLimit == std::optional<uint64_t>(24ull * 1024 * 1024));
+			// The project's own values are untouched.
+			CHECK(editor.GetProject().GetSettings().Scripting.CallbackBudgetMs == 700u);
+			CHECK(editor.GetProject().GetSettings().Scripting.MemoryLimitMB == 96u);
 		}
 
 		TEST_CASE("TestMethods: run rejects dry runs and invalid limits without starting a suite")

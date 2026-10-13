@@ -1,20 +1,25 @@
 #include "EnginePCH.h"
 #include "Engine/Testing/FeatureTestRunner.h"
 
+#include "Engine/Asset/AssetManager.h"
 #include "Engine/Audio/AudioEngine.h"
 #include "Engine/Core/Clock.h"
 #include "Engine/Core/FixedStepScheduler.h"
+#include "Engine/Core/Log.h"
+#include "Engine/Scene/Scene.h"
 #include "Engine/Scripting/ScriptEngine.h"
 #include "Engine/Scripting/ScriptLimits.h"
 #include "Engine/Scripting/ScriptTestHost.h"
 #include "Engine/Session/PlayInputEventCodec.h"
 #include "Engine/Session/ReplayRecorder.h"
+#include "Engine/Testing/CoverageGates.h"
 
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
 #include <cmath>
 #include <format>
+#include <iterator>
 #include <limits>
 #include <utility>
 
@@ -60,6 +65,17 @@ namespace Engine {
 		TestFailureResult Failure(const Error& error)
 		{
 			return { error.ToString(), error.GetLocation().File, error.GetLocation().Line, error.GetLocation().JsonPointer.value_or("") };
+		}
+
+		std::string_view RunModeName(TestSuiteSettings::Mode mode)
+		{
+			switch (mode)
+			{
+				case TestSuiteSettings::Mode::Editor:  return "Editor";
+				case TestSuiteSettings::Mode::Release: return "Release";
+				case TestSuiteSettings::Mode::Dist:    return "Dist";
+			}
+			return "Editor";
 		}
 
 		Result<uint64_t> SampleBoundary(uint64_t tick, uint32_t hz)
@@ -177,8 +193,89 @@ namespace Engine {
 		std::optional<ReplayDocument> Recording{};
 		std::string RecordingError{};
 		bool VerifiedRecording = false;
+		// Coverage (FeatureTestRunner.h; Docs/Decisions/0022-m14-contract.md decisions 3 to 5). CoverageProject: the
+		// project's Testing.CoverageGates. CoverageRun: also unfiltered and not recording, so scenes and loads are recorded
+		// and a completed run evaluates the gates.
+		bool CoverageProject = false, CoverageRun = false;
+		Scope<SceneCoverageRecorder> SceneCoverage{}; // created at the first recorded scene, from its type registry
+		Scope<FormatCoverageRecorder> FormatCoverage{};
+		AssetManager* ObservedAssets = nullptr; // the host's manager while this run's load observer is installed
+		// True only while FeatureTestRunner::Advance runs: the observer counts the loads of the run's own work and ignores
+		// those between two calls (an editor viewport rendering the published session in a host frame), whose number
+		// depends on how many host frames ran (decision 5).
+		bool CountingLoads = false;
+		std::optional<Error> CoverageError{}; // the first recording failure: the run fails with unevaluated gates
+		uint64_t ReplayGeneration = 0;        // the replay session's scene generation last recorded
 
-		~State() override { DestroySession(); }
+		~State() override
+		{
+			DestroySession();
+			RemoveLoadObserver();
+		}
+
+		// Removes the load observer Begin installed on the host's asset manager (every end of a run, FeatureTestRunner.h).
+		void RemoveLoadObserver()
+		{
+			if (ObservedAssets != nullptr)
+				ObservedAssets->SetLoadObserver({});
+			ObservedAssets = nullptr;
+		}
+
+		// Records the active session's scene for gates 1 and 1b (after setup, after each scene replacement and before
+		// teardown). The recording-verification session never counts; after a failure nothing more is recorded.
+		void RecordScene()
+		{
+			if (!CoverageRun || !Session || CoverageError || ReportData.Cancelled || CurrentPhase == Phase::Verify)
+				return;
+			const Scene& scene = Session->GetScene();
+			if (!SceneCoverage)
+				SceneCoverage = CreateScope<SceneCoverageRecorder>(scene.GetTypeRegistry());
+			const Status recorded = SceneCoverage->Record(scene);
+			if (!recorded)
+				CoverageError = recorded.error();
+		}
+
+		// The gates of a completed run (`evaluate`) of a coverage project: the host's script counters plus the scene and
+		// format counters, evaluated for the run's mode; MakeUnevaluatedCoverageGates for a filtered, recording, cancelled or
+		// failed run. A recording or evaluation error fails the run and is logged.
+		void FinishCoverage(bool evaluate)
+		{
+			if (!CoverageRun || !evaluate || ReportData.Cancelled)
+			{
+				ReportData.Coverage.Gates = MakeUnevaluatedCoverageGates();
+				return;
+			}
+			const Status evaluated = [this]() -> Status
+			{
+				if (CoverageError)
+					return std::unexpected(*CoverageError);
+				std::vector<TestCoverageCounter>& counters = ReportData.Coverage.Counters;
+				if (SceneCoverage)
+					std::ranges::move(SceneCoverage->GetCounters(), std::back_inserter(counters));
+				std::ranges::move(FormatCoverage->GetCounters(), std::back_inserter(counters));
+				// A report lists only the entries of its own mode: never an EditorOnly one outside the editor. A counter that
+				// breaks the mode rules stays, so the evaluation below reports it.
+				std::erase_if(counters, [mode = Options.Mode](const TestCoverageCounter& counter)
+				{
+					const auto has = [&counter](TestSuiteSettings::Mode wanted)
+					{
+						return std::ranges::find(counter.Modes, wanted) != counter.Modes.end();
+					};
+					return has(TestSuiteSettings::Mode::Editor) && !has(mode);
+				});
+				std::ranges::sort(counters, {}, &TestCoverageCounter::Id);
+				ENGINE_TRY_ASSIGN(ReportData.Coverage.Gates, EvaluateCoverageGates(counters, Options.Mode));
+				return {};
+			}();
+			if (!evaluated)
+			{
+				ReportData.Coverage.Gates = MakeUnevaluatedCoverageGates();
+				ReportData.Passed = false;
+				ENGINE_CORE_ERROR("The coverage gates of the {} test run could not be evaluated: {}", RunModeName(Options.Mode), evaluated.error().ToString());
+				return;
+			}
+			ReportData.Passed = ReportData.Passed && std::ranges::all_of(ReportData.Coverage.Gates, &TestCoverageGateResult::Passed);
+		}
 
 		TestSuiteResult* SuiteResult()
 		{
@@ -482,6 +579,7 @@ namespace Engine {
 			CancelAudioCapture();
 			if (!Session)
 				return;
+			RecordScene();
 			Teardown = true;
 			if (auto* scripts = Session->GetScripts())
 			{
@@ -596,6 +694,7 @@ namespace Engine {
 			if (auto quit = Session->GetQuitRequest())
 				OnQuit(*quit);
 			OutsideRow("<setup>");
+			RecordScene();
 			return {};
 		}
 
@@ -791,6 +890,8 @@ namespace Engine {
 				OnQuit(*quit);
 			if (Session->GetSceneGeneration() != Generation)
 			{
+				if (!Recollect)
+					RecordScene();
 				Recollect = true;
 				Thread = {};
 				if (!TerminalCase && !Quit)
@@ -855,7 +956,10 @@ namespace Engine {
 			Host->SetActiveTestSession(Session.get());
 			Published = true;
 			ENGINE_TRY(CheckAudioTime());
-			return Player.Begin(std::move(data), *Session, { true, true });
+			ENGINE_TRY(Player.Begin(std::move(data), *Session, { true, true }));
+			ReplayGeneration = Session->GetSceneGeneration();
+			RecordScene();
+			return {};
 		}
 
 		void AddReplayScriptErrorRows(const std::string& name)
@@ -923,10 +1027,12 @@ namespace Engine {
 			return {};
 		}
 
-		void Complete()
+		// Ends the run. `evaluate`: it completed normally, so a coverage run evaluates its gates (FinishCoverage).
+		void Complete(bool evaluate = false)
 		{
 			DestroySession();
 			Player.Cancel();
+			RemoveLoadObserver();
 			// Rows carry script-supplied text; JSON, JUnit and the RPC result must never fail on it (§11.10).
 			for (TestCaseResult& row : ReportData.Cases)
 				Utils::SanitizeRow(row);
@@ -939,6 +1045,8 @@ namespace Engine {
 			{
 				return suite.Passed;
 			});
+			if (CoverageProject)
+				FinishCoverage(evaluate);
 			CurrentPhase = Phase::Done;
 		}
 
@@ -949,6 +1057,11 @@ namespace Engine {
 			const auto tick = Session->GetTick();
 			ENGINE_TRY_ASSIGN(bool complete, Player.Advance(*Session, *Host));
 			RunTicks += Session->GetTick() - tick;
+			if (Session->GetSceneGeneration() != ReplayGeneration)
+			{
+				ReplayGeneration = Session->GetSceneGeneration();
+				RecordScene();
+			}
 			if (!complete)
 				return {};
 			ENGINE_TRY_ASSIGN(auto playback, Player.GetResult());
@@ -1119,7 +1232,7 @@ namespace Engine {
 					ENGINE_TRY(CaptureCoverage());
 					if (!Options.Record)
 					{
-						Complete();
+						Complete(true);
 						return true;
 					}
 					if (!RecordingError.empty())
@@ -1243,6 +1356,22 @@ namespace Engine {
 			ENGINE_TRY_ASSIGN(const Json canonical, CanonicalizeReplayParameters(parameters, std::format("/Testing/Suites/{}/Parameters", recorded.SettingsIndex)));
 			recorded.Settings.Parameters = VariantValue(canonical);
 		}
+		next->CoverageProject = host.GetProjectSettings().Testing.CoverageGates;
+		next->CoverageRun = next->CoverageProject && options.Filter.empty() && !options.Record;
+		if (next->CoverageRun)
+		{
+			// Installed last, so nothing in Begin can fail after it; a State that ends any other way removes it.
+			next->FormatCoverage = CreateScope<FormatCoverageRecorder>();
+			if (AssetManager* assets = host.GetAssetManager())
+			{
+				assets->SetLoadObserver([recorder = next->FormatCoverage.get(), assets, counting = &next->CountingLoads](AssetHandle handle)
+				{
+					if (*counting)
+						recorder->RecordLoad(*assets, handle);
+				});
+				next->ObservedAssets = assets;
+			}
+		}
 		next->CurrentPhase = State::Phase::Suite;
 		m_State = std::move(next);
 		return {};
@@ -1250,7 +1379,12 @@ namespace Engine {
 
 	Result<bool> FeatureTestRunner::Advance()
 	{
+		// Gate 9 counts only the loads made inside this call: a host frame between two calls (the editor's viewports render
+		// the published session, its thumbnails load) never counts, so no format count depends on the wall-clock budget
+		// that partitions the calls into host frames (FeatureTestRunner.h).
+		m_State->CountingLoads = true;
 		auto result = m_State->Advance();
+		m_State->CountingLoads = false;
 		if (!result && m_State->CurrentPhase != State::Phase::Idle)
 		{
 			m_State->VerifiedRecording = false;

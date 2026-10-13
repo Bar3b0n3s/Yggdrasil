@@ -2,15 +2,20 @@
 
 #include "Engine/App/ProjectSettingsApplication.h"
 
+#include <cstdint>
+#include <optional>
+
 namespace Engine {
 
 	TEST_SUITE("App")
 	{
 		// ADR 0022 decision 12: the Runtime's factory applies its manifest through this function, so gate 8 observes it.
-		TEST_CASE("ProjectSettingsApplication: a game's name, window and loop settings reach the application specification" * doctest::skip(true))
+		TEST_CASE("ProjectSettingsApplication: a game's name, window and loop settings reach the application specification")
 		{
 			ApplicationSpecification specification;
 			specification.Graphics.VSync = true;
+			specification.MaxFrames = 7;
+			specification.Loop.MaxFrameDelta = 0.5;
 			const WindowSettings window{ .Title = "All Settings", .Width = 1280, .Height = 720, .VSync = false, .Fullscreen = true, .Resizable = false };
 			const SimulationSettings simulation{ .FixedHz = 120, .MaxStepsPerFrame = 8, .Seed = 1337, .MaxEntities = 4096 };
 			ApplyGameSettings(specification, "AllSettings", window, simulation);
@@ -23,9 +28,12 @@ namespace Engine {
 			CHECK_FALSE(specification.Graphics.VSync);
 			CHECK(specification.Loop.FixedHz == 120);
 			CHECK(specification.Loop.MaxStepsPerFrame == 8);
+			// Every other member is left alone.
+			CHECK(specification.MaxFrames == std::optional<uint64_t>(7));
+			CHECK(specification.Loop.MaxFrameDelta == doctest::Approx(0.5));
 		}
 
-		TEST_CASE("ProjectSettingsApplication: suite overrides replace exactly the overridden scripting settings" * doctest::skip(true))
+		TEST_CASE("ProjectSettingsApplication: suite overrides replace exactly the overridden scripting settings")
 		{
 			const ScriptingSettings project{ .MemoryLimitMB = 128, .CallbackBudgetMs = 250, .PauseOnError = false, .BlockPlayOnTypeErrors = true };
 			const ScriptingSettings inherited = ApplyTestSuiteOverrides(project, TestSuiteOverrides{});

@@ -6,7 +6,7 @@ import json
 import subprocess
 import unittest
 
-from harness import EXIT_SUCCESS, AutomationTestCase, automation_config, engine_client
+from harness import EXIT_FAILED, EXIT_SUCCESS, AutomationTestCase, automation_config, engine_client
 from tiny_game import TINY_GAME_NAME, TINY_SCENE, build_tiny_game, export_tiny_game, exported_executable
 
 
@@ -86,11 +86,13 @@ class ScriptModeTests(AutomationTestCase):
                                          capture_output=True, timeout=120.0, check=False)
                 self.assertEqual(process.returncode, EXIT_SUCCESS,
                                  process.stderr.decode("utf-8", errors="replace"))
-                reports = list((working / "bin/TestResults").glob("Runtime-*.json"))
-                self.assertEqual(len(reports), 1)
+                # The exported runner's reports have fixed names below the working directory (ADR 0022 decision 7).
+                mode = "Dist" if config == "Dist" else "Release"
+                reports = sorted((working / "bin/TestResults").glob("*.json"))
+                self.assertEqual(reports, [working / "bin/TestResults" / f"FeatureTest-{mode}.json"])
                 result = json.loads(reports[0].read_text(encoding="utf-8"))
                 self.assertTrue(result["passed"], result)
-                self.assertEqual(result["mode"], "Dist" if config == "Dist" else "Release")
+                self.assertEqual(result["mode"], mode)
                 self.assertEqual(len(result["cases"]), 1)
                 self.assertEqual(result["cases"][0]["status"], "passed")
                 self.assertEqual(len(result["suites"]), 1)
@@ -99,17 +101,17 @@ class ScriptModeTests(AutomationTestCase):
                 self.assertTrue(reports[0].with_suffix(".xml").is_file())
         return hashes
 
-    @unittest.skip("contract stub: ADR 0022 decisions 5 and 7 (stream A)")
     def test_exported_coverage_run_counts_cooked_loads_in_its_mode_report(self) -> None:
         # The Runtime host observes loads through its RuntimeAssetManager (IFeatureTestHost::GetAssetManager), so an
-        # unfiltered --feature-test of a project with Testing.CoverageGates counts the cooked suite script by its pak path and
-        # evaluates the six per-mode gates; the report is <working directory>/bin/TestResults/FeatureTest-Release.json.
+        # unfiltered --feature-test of a project with Testing.CoverageGates counts the cooked suite script by its pak
+        # path and evaluates the six per-mode gates; the report is
+        # <working directory>/bin/TestResults/FeatureTest-Release.json.
         client = self.connect(self.start_editor())
         self.create_project(client, TINY_GAME_NAME)
         build_tiny_game(client)
         client.call("script.write", {"path": "Assets/Tests/Cooked.test.luau", "source": POWER_SUITE})
-        client.call("project.setSettings", {"patch": {"Export": {"Exclude": []}, "Testing": {"CoverageGates": True, "Suites": [{
-            "Script": "Assets/Tests/Cooked.test.luau", "Scene": TINY_SCENE}]}}})
+        client.call("project.setSettings", {"patch": {"Export": {"Exclude": []}, "Testing": {
+            "CoverageGates": True, "Suites": [{"Script": "Assets/Tests/Cooked.test.luau", "Scene": TINY_SCENE}]}}})
         client.call("scene.save")
         executable = exported_executable(export_tiny_game(client, automation_config()))
         manifest_path = executable.parent / "Game.json"
@@ -120,9 +122,17 @@ class ScriptModeTests(AutomationTestCase):
         working.mkdir()
         arguments = [str(executable), "--headless", "--feature-test", "--renderer", "none", "--user-data-dir",
                      str(working / "UserData")]
-        subprocess.run(arguments, cwd=working, stdin=subprocess.DEVNULL, capture_output=True, timeout=120.0, check=False)
+        process = subprocess.run(arguments, cwd=working, stdin=subprocess.DEVNULL, capture_output=True, timeout=120.0,
+                                 check=False)
+        # The tiny game covers a sliver of the registry, so its gates fail and so does the run.
+        self.assertEqual(process.returncode, EXIT_FAILED, process.stderr.decode("utf-8", errors="replace"))
         result = json.loads((working / "bin/TestResults/FeatureTest-Release.json").read_text(encoding="utf-8"))
+        self.assertEqual(result["mode"], "Release")
         self.assertEqual([gate["gate"] for gate in result["coverage"]["gates"]], ["1", "1b", "2", "3", "4", "9"])
+        self.assertTrue(all(gate["evaluated"] for gate in result["coverage"]["gates"]))
+        self.assertFalse(result["passed"])
+        # A Release report lists only the entries of its mode: no EditorOnly counter.
+        self.assertTrue(all("Release" in counter["modes"] for counter in result["coverage"]["counters"]))
         script = next(counter for counter in result["coverage"]["counters"] if counter["id"] == "format:Script/.luau")
         self.assertGreaterEqual(script["count"], 1)
         self.assertTrue((working / "bin/TestResults/FeatureTest-Release.xml").is_file())

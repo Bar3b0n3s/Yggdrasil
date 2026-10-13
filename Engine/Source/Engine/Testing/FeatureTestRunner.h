@@ -117,7 +117,12 @@ namespace Engine {
 	// Coverage (§15.5, §15.6; Docs/Decisions/0022-m14-contract.md decisions 2 to 6). When the host's project has
 	// Testing.CoverageGates true, Begin selects every suite and replay (empty Filter) and Record is false, the run records
 	// coverage: Begin resets a FormatCoverageRecorder and installs the load observer on host.GetAssetManager() (none for a
-	// null manager); the SceneCoverageRecorder is created at the first recorded scene from its Scene::GetTypeRegistry()
+	// null manager). The observer records only the loads made inside Advance, the run's own work (session setup, ticks,
+	// frames, captures, reloads, scene replacement); loads between two Advance calls, such as an editor viewport rendering
+	// the published session or a thumbnail in a host frame, never count, because their number depends on how many host
+	// frames the wall-clock budget lets run. No session path loads asynchronously (the script API's Assets.Load is
+	// synchronous), so a LoadAsync publication, which happens at the host's main-thread drain, never counts either.
+	// The SceneCoverageRecorder is created at the first recorded scene from its Scene::GetTypeRegistry()
 	// (CoverageGates.h). Every suite and replay session's scene is recorded after setup, after each scene replacement and
 	// before teardown (the recording-verification session is not). The observer is removed whenever the run ends: on
 	// completion, on Cancel, when Begin fails after installing it, and in the destructor. The result's Coverage.Counters

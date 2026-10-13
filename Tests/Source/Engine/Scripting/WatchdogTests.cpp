@@ -244,6 +244,58 @@ return Script.Define("Spawner", Spawner))"));
 			watchdog.Leave();
 		}
 
+		// ADR 0022 "Integration": host work inside a protected call (a screenshot capture, a test reimport) moves the deadline
+		// later by its duration; Luau the host work runs after all, and Luau before and after it, still counts.
+		TEST_CASE("ScriptWatchdog: host time moves the deadline while Luau time and latched timeouts still count")
+		{
+			ScriptWatchdog watchdog;
+			// Idle: nothing to move.
+			watchdog.BeginHostTime(0.0);
+			watchdog.EndHostTime(9.0);
+			CHECK(watchdog.GetDeadlineSeconds() == 0.0);
+
+			// 0.4 s of Luau, 5 s of host work, then 0.1 s of Luau reach the 0.5 s budget.
+			REQUIRE(watchdog.Enter(500, 10.0).has_value());
+			CHECK_FALSE(watchdog.CheckInterrupt(-1, 10.4));
+			watchdog.BeginHostTime(10.4);
+			CHECK_FALSE(watchdog.CheckInterrupt(-1, 13.0)); // inside the host work the deadline moves with the clock
+			watchdog.EndHostTime(15.4);
+			CHECK(watchdog.GetDeadlineSeconds() == doctest::Approx(15.5));
+			CHECK_FALSE(watchdog.CheckInterrupt(-1, 15.45));
+			CHECK(watchdog.CheckInterrupt(-1, 15.5));
+			watchdog.Leave();
+
+			// Nested periods credit once; a protected entry inside a period ends the excluded time.
+			REQUIRE(watchdog.Enter(500, 20.0).has_value());
+			watchdog.BeginHostTime(20.1);
+			watchdog.BeginHostTime(20.2);
+			watchdog.EndHostTime(21.1);
+			CHECK(watchdog.GetDeadlineSeconds() == doctest::Approx(20.5)); // the inner end credits nothing
+			REQUIRE(watchdog.Enter(500, 22.1).has_value());                // Luau the host work ran: 2 s were host time
+			CHECK(watchdog.GetDeadlineSeconds() == doctest::Approx(22.5));
+			CHECK_FALSE(watchdog.CheckInterrupt(-1, 22.4));
+			watchdog.Leave();
+			watchdog.EndHostTime(30.0); // the rest of the period counts
+			CHECK(watchdog.GetDeadlineSeconds() == doctest::Approx(22.5));
+			CHECK(watchdog.CheckInterrupt(-1, 30.0));
+			watchdog.Leave();
+
+			// A latched timeout stays latched, and host work that starts after the deadline cannot hide it.
+			REQUIRE(watchdog.Enter(500, 40.0).has_value());
+			CHECK(watchdog.CheckInterrupt(-1, 41.0));
+			watchdog.BeginHostTime(41.0);
+			watchdog.EndHostTime(50.0);
+			CHECK(watchdog.CheckInterrupt(-1, 50.0));
+			watchdog.Leave();
+			REQUIRE(watchdog.Enter(500, 60.0).has_value());
+			watchdog.BeginHostTime(61.0);
+			CHECK(watchdog.CheckInterrupt(-1, 62.0));
+			watchdog.EndHostTime(63.0);
+			CHECK(watchdog.CheckInterrupt(-1, 63.0));
+			watchdog.Leave();
+			CHECK(watchdog.GetDepth() == 0);
+		}
+
 		TEST_CASE("ScriptWatchdog: callback budgets enforce the minimum and preserve exact test overrides")
 		{
 			const auto invalid = ScriptWatchdog::ResolveCallbackBudget(9, true);

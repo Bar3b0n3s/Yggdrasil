@@ -120,6 +120,168 @@ namespace Engine {
 			TestSuiteInvalidCode,
 		};
 
+		// The documentation of every code, in ValidatorCodes order (M14, ADR 0022 decision 10): Docs/Reference/Validation.md, the
+		// game-debugging skill's error-code table and gate 6 read it. Severity and AutoFixable state what the checks below
+		// report; a code is AutoFixable when project.validate {fix} can fix at least some of its diagnostics.
+		constexpr std::array ValidatorCodeInfos = {
+			ValidationCodeInfo{ SceneNoPrimaryCameraCode, "Warning", true,
+				"A scene that has entities has no Primary camera, so it renders through none.",
+				"Set Primary on the camera the scene renders through or add one with entity.create {components: {Camera: {Primary: true}}}; the fix makes a scene's only camera Primary." },
+			ValidationCodeInfo{ SceneMultiplePrimaryCamerasCode, "Error", true,
+				"Several cameras of one scene are Primary, but a scene renders through exactly one.",
+				"Clear Primary on all but one camera; the fix keeps the first Primary camera in scene order." },
+			ValidationCodeInfo{ SceneDuplicateUniqueComponentCode, "Error", false,
+				"A scene file holds more than one component that is unique per scene (Environment, PostProcess).",
+				"Open the scene with scene.open {repair: true}, which keeps the first in canonical order, then scene.save." },
+			ValidationCodeInfo{ SceneNonCanonicalOrderCode, "Warning", false,
+				"A scene file lists a child entity before its parent, which is not the canonical order.",
+				"Open the scene with scene.open {repair: true}, which normalizes the order, then scene.save." },
+			ValidationCodeInfo{ SceneInvalidHierarchyCode, "Error", false,
+				"A scene file has an entity whose Parent names no entity of the scene or forms a parent cycle.",
+				"Open the scene with scene.open {repair: true}, which reparents orphans to the root and cuts cycles, then scene.save." },
+			ValidationCodeInfo{ SceneInconsistentPrefabLinkCode, "Error", false,
+				"A scene file has a prefab instance member whose PrefabLink does not match its instance root.",
+				"Open the scene with scene.open {repair: true}, which unpacks the member, then scene.save, or re-instantiate the prefab." },
+			ValidationCodeInfo{ EntityDuplicateIdCode, "Error", false,
+				"Two entities of a scene file carry the same ID.",
+				"Open the scene with scene.open {repair: true}, which gives the later duplicate a fresh ID, then scene.save." },
+			ValidationCodeInfo{ EntityDanglingReferenceCode, "Warning", true,
+				"An entity reference field (a component field or a script field override) names no entity of its scene.",
+				"Point the reference at an existing entity; the fix in the open scene clears it." },
+			ValidationCodeInfo{ ComponentFieldOutOfRangeCode, "Error", false,
+				"A component value in a scene file fails the registry's checks: a value out of range, of the wrong type or not finite.",
+				"Correct the value in the file, or load it with scene.open {repair: true}, which drops the component, and scene.save." },
+			ValidationCodeInfo{ ComponentMissingRequirementCode, "Error", false,
+				"A component in a scene file lacks a component it requires on the same entity.",
+				"Add the required component to the entity in the file, or load it with scene.open {repair: true}, which drops the component." },
+			ValidationCodeInfo{ ComponentConflictCode, "Error", false,
+				"A component in a scene file shares its entity with a component it excludes.",
+				"Remove one of the two components in the file, or load it with scene.open {repair: true}, which drops the later one." },
+			ValidationCodeInfo{ AssetMissingCode, "Error", false,
+				"A reference in a scene, material or prefab names an asset handle that no asset has; the type's placeholder stands in.",
+				"Restore the asset (edit.undo of its deletion, or from version control) or assign another asset." },
+			ValidationCodeInfo{ AssetTypeMismatchCode, "Error", true,
+				"A reference names an asset of another type than its field accepts, or a .meta's type or importer disagrees with its source's extension.",
+				"Assign an asset of the accepted type; the fix rewrites a mismatching .meta for the importer that takes the source, keeping its handle "
+				"(with that importer's default settings)." },
+			ValidationCodeInfo{ AssetImportFailedCode, "Error", false,
+				"Importing, loading or reading an asset or its .meta failed, or a scene file cannot be loaded at all.",
+				"Correct the source file (the message names the failure and its location) or restore it from version control." },
+			ValidationCodeInfo{ AssetOrphanMetaCode, "Warning", true,
+				"A .meta file has no source file beside it.",
+				"Restore the source, or let the fix move the .meta to the trash." },
+			ValidationCodeInfo{ AssetDuplicateHandleCode, "Error", true,
+				"Several .meta files whose sources exist carry the same asset handle, typically a copied file pair.",
+				"Let the fix give every copy but the original a fresh handle." },
+			ValidationCodeInfo{ AssetOrphanDependencyCode, "Warning", true,
+				"A dependency .meta names an owner asset that is not registered.",
+				"Restore the owner asset, or let the fix move the dependency .meta to the trash." },
+			ValidationCodeInfo{ AssetTangentsApproximatedCode, "Warning", false,
+				"A glTF primitive needs tangents but has no TEXCOORD_0, so its tangents are an arbitrary basis.",
+				"Export the model with texture coordinates or with its own tangents." },
+			ValidationCodeInfo{ AssetUnsupportedUvSetCode, "Warning", false,
+				"A glTF texture is bound to TEXCOORD_1, which the engine ignores because meshes have one UV set.",
+				"Bind the texture to TEXCOORD_0 in the model, or bake it into the first UV set." },
+			ValidationCodeInfo{ AssetVertexColorsIgnoredCode, "Warning", false,
+				"A glTF primitive has vertex colours, which the engine ignores.",
+				"Bake the colours into a texture or a material, or remove COLOR_0 from the model." },
+			ValidationCodeInfo{ AssetContentSkippedCode, "Warning", false,
+				"A glTF file holds content the engine does not import: points or lines, skins, animations, cameras or lights.",
+				"Remove the content from the model, or rebuild it with engine components (Camera, lights) in the scene." },
+			ValidationCodeInfo{ PathCaseMismatchCode, "Error", true,
+				"A .meta or a path matches a file only when letter case is ignored, which resolves differently on other systems.",
+				"Use the file's exact spelling; the fix renames a .meta to its source's case." },
+			ValidationCodeInfo{ PrefabMissingAssetCode, "Warning", false,
+				"A prefab instance names a prefab asset that is not registered; the instance stays fully expanded.",
+				"Restore the prefab asset, or unpack the instance (prefab.unpack)." },
+			ValidationCodeInfo{ PhysicsNonconvexDynamicCode, "Error", false,
+				"A non-convex MeshCollider is on a Dynamic RigidBody, so the body is not created.",
+				"Set Convex on the MeshCollider, or make the body Static or Kinematic." },
+			ValidationCodeInfo{ PhysicsMixedTriggerCode, "Error", false,
+				"The colliders gathered by one RigidBody disagree on IsTrigger, so the body is not created.",
+				"Make all of the body's colliders triggers or none, moving triggers to a child entity with its own RigidBody." },
+			ValidationCodeInfo{ PhysicsDynamicTriggerCode, "Error", false,
+				"A Dynamic RigidBody has only trigger colliders, so the body is not created.",
+				"Make the body Kinematic or Static, or clear IsTrigger on its colliders." },
+			ValidationCodeInfo{ PhysicsAllDofsLockedCode, "Error", false,
+				"A Dynamic RigidBody has all six degrees of freedom locked, so the body is not created.",
+				"Unlock at least one axis, or make the body Kinematic or Static." },
+			ValidationCodeInfo{ PhysicsInvalidShapeCode, "Error", false,
+				"A collider's shape cannot be created (a degenerate hull or mesh, or a scale the shape does not allow), so the body is not created.",
+				"Correct the collider's size or scale, or use a mesh with a valid volume." },
+			ValidationCodeInfo{ PhysicsAdjacentStaticBodiesCode, "Warning", true,
+				"Two static bodies touch or nearly touch, so a rolling body bumps at their seam.",
+				"Join them into one static compound; the fix adds a Static RigidBody to their nearest common ancestor." },
+			ValidationCodeInfo{ PhysicsUnknownLayerCode, "Error", false,
+				"A RigidBody or CharacterController names a layer that Physics.Layers does not declare; it uses layer Default.",
+				"Declare the layer in Physics.Layers with project.setSettings, or name a declared layer." },
+			ValidationCodeInfo{ PhysicsNonuniformScaleCode, "Warning", false,
+				"A sphere or capsule collider is under a non-uniform world scale and uses its largest axis.",
+				"Give the entity and its ancestors a uniform scale, or use a box or convex mesh collider." },
+			ValidationCodeInfo{ PhysicsDynamicUnderMovingParentCode, "Warning", false,
+				"A Dynamic RigidBody is below an ancestor that moves on its own, and it simulates in world space without following it.",
+				"Move the dynamic body out from under the moving ancestor, or make it Kinematic." },
+			ValidationCodeInfo{ PhysicsLimitExceededCode, "Warning; Error at the limit", false,
+				"A scene would create more physics bodies than the world's limit, or more than 90 % of it.",
+				"Merge colliders into compound bodies or remove bodies so the count stays below the limit." },
+			ValidationCodeInfo{ ScriptCompileErrorCode, "Error", false,
+				"A script does not compile, its load-time module code fails, or a require does not resolve.",
+				"Correct the script at the reported line (script.check reports the same finding)." },
+			ValidationCodeInfo{ ScriptTypeErrorCode, "Error", false,
+				"The strict type checker reports a finding in a script.",
+				"Correct the script at the reported range (script.check reports the same finding)." },
+			ValidationCodeInfo{ ScriptNotBehaviourCode, "Error", false,
+				"A Script component names a script that is a Module or a TestSuite rather than a Behaviour.",
+				"Assign a script that returns Script.Define." },
+			ValidationCodeInfo{ ScriptUnknownOverrideCode, "Error", false,
+				"A Script component overrides a field its script does not declare; the override is preserved.",
+				"Remove the override, or rename it to a declared field." },
+			ValidationCodeInfo{ ScriptFieldMismatchCode, "Error", false,
+				"A Script component's field override does not match the declared type or constraints; the declared default is used.",
+				"Correct the override to match its declared type and constraints." },
+			ValidationCodeInfo{ InputUnknownActionCode, "Error", false,
+				"A string literal passed to an Input action function names no action of Input.Actions.",
+				"Declare the action in Input.Actions with project.setSettings, or correct the literal." },
+			ValidationCodeInfo{ AudioNoListenerCode, "Warning", false,
+				"A scene has spatial AudioSources but no primary AudioListener and no primary camera, so they are heard from the origin.",
+				"Add an AudioListener with Primary to the camera or the player." },
+			ValidationCodeInfo{ AudioMultiplePrimaryListenersCode, "Warning", true,
+				"Several active AudioListeners are Primary; the first in canonical order is used.",
+				"Clear Primary on all but one AudioListener; the fix clears it on every later one." },
+			ValidationCodeInfo{ RenderNoLightingCode, "Warning", false,
+				"A scene has non-emissive meshes but no light or ambient illumination, so they render black.",
+				"Add a light, or raise the environment's effective illumination." },
+			ValidationCodeInfo{ RenderLightLimitExceededCode, "Warning", false,
+				"A scene has more than 256 enabled lights, more than one view shades.",
+				"Disable or remove lights, or keep fewer of them in view at once." },
+			ValidationCodeInfo{ RenderSpotShadowBudgetCode, "Warning", false,
+				"A scene has more than 8 shadow-casting spot lights, more than one view shadows.",
+				"Turn off shadows on less important spot lights, or keep fewer of them in view at once." },
+			ValidationCodeInfo{ BuildStartSceneMissingCode, "Error", false,
+				"StartScene names no scene file.",
+				"Create the scene with scene.new, or set StartScene to an existing scene with project.setSettings." },
+			ValidationCodeInfo{ BuildSceneMissingCode, "Error", true,
+				"An Export.BuildScenes entry names no scene file.",
+				"Create the scene with scene.new; the fix removes the entry." },
+			ValidationCodeInfo{ TestSuiteInvalidCode, "Error", false,
+				"A Testing.Suites entry names a script that is not a TestSuite, or a scene that does not exist.",
+				"Assign a script that returns Test.Suite, and create the scene or leave Scene empty for an empty test scene." },
+		};
+
+		// The code documentation lists exactly the codes, in order.
+		consteval bool CodeInfosMatchCodes()
+		{
+			if (ValidatorCodeInfos.size() != ValidatorCodes.size())
+				return false;
+			for (size_t index = 0; index < ValidatorCodes.size(); ++index)
+			{
+				if (ValidatorCodeInfos[index].Code != ValidatorCodes[index])
+					return false;
+			}
+			return true;
+		}
+		static_assert(CodeInfosMatchCodes(), "ValidatorCodeInfos must document every code of ValidatorCodes, in the same order");
+
 		// The import diagnostics the asset manager records for an asset (the scan's come from the validator's own scan).
 		constexpr std::array ImportDiagnosticCodes = {
 			AssetImportFailedCode,
@@ -662,8 +824,11 @@ namespace Engine {
 
 		// ASSET_MISSING for a reference no registry knows, ASSET_TYPE_MISMATCH for one of another type than `acceptedType`
 		// (empty: any type) or one that cannot be loaded at all (a dependency file). The manager knows the built-ins too.
+		// `describe` names the referencing place for the message; it runs only when there is a diagnostic, because an entity
+		// path costs a walk over the entity's same-named siblings.
+		template<typename Describe>
 		static void CheckAssetReference(const EditorContext& editor, AssetHandle handle, std::string_view acceptedType, const DiagnosticSite& site,
-			std::string_view where, std::vector<CollectedDiagnostic>& diagnostics)
+			const Describe& describe, std::vector<CollectedDiagnostic>& diagnostics)
 		{
 			const EditorAssetManager& assets = editor.GetAssets();
 			const AssetType actual = assets.GetAssetType(handle);
@@ -672,7 +837,7 @@ namespace Engine {
 			if (actual == AssetType::None && assets.GetMetadata(handle) == nullptr)
 			{
 				collected = MakeDiagnostic(AssetMissingCode, DiagnosticSeverity::Error,
-					std::format("{} refers to the {} {}, which no asset has", where, expected, handle.ToString()), site,
+					std::format("{} refers to the {} {}, which no asset has", describe(), expected, handle.ToString()), site,
 					"restore the asset (edit.undo of its deletion, or from version control), or assign another one", false);
 			}
 			else if (actual == AssetType::None || (!acceptedType.empty() && AssetTypeToString(actual) != acceptedType))
@@ -680,7 +845,7 @@ namespace Engine {
 				const std::string what = actual == AssetType::None ? std::string("a dependency file, which is never loaded on its own")
 																   : std::format("a {}", AssetTypeToString(actual));
 				collected = MakeDiagnostic(AssetTypeMismatchCode, DiagnosticSeverity::Error,
-					std::format("{} refers to {} ({}), but takes a {}", where, handle.ToString(), what, expected), site,
+					std::format("{} refers to {} ({}), but takes a {}", describe(), handle.ToString(), what, expected), site,
 					std::format("assign an asset of type {}", expected), false);
 			}
 			else
@@ -692,9 +857,12 @@ namespace Engine {
 		}
 
 		// The asset references of one component (by its JSON), and of a prefab instance its prefab (PREFAB_MISSING_ASSET when
-		// it is not registered: the scene still loads, fully expanded, §5.5).
+		// it is not registered: the scene still loads, fully expanded, §5.5). `owner` names the component's entity for messages,
+		// called only when there is a diagnostic (an entity path walks the entity's same-named siblings, so computing it for
+		// every component of a large scene would cost time quadratic in its entities).
+		template<typename Owner>
 		static void CheckComponentAssets(const EditorContext& editor, const ComponentInfo& info, const Json& component, const DiagnosticSite& at,
-			std::string_view owner, std::vector<CollectedDiagnostic>& diagnostics)
+			const Owner& owner, std::vector<CollectedDiagnostic>& diagnostics)
 		{
 			const TypeRegistry& registry = editor.GetTypeRegistry();
 			if (&info == registry.FindComponent<PrefabInstanceComponent>())
@@ -711,14 +879,18 @@ namespace Engine {
 				if (editor.GetAssets().GetAssetType(*handle) == AssetType::None && editor.GetAssets().GetMetadata(*handle) == nullptr)
 				{
 					CollectedDiagnostic collected = MakeDiagnostic(PrefabMissingAssetCode, DiagnosticSeverity::Warning,
-						std::format("'{}' is an instance of the prefab {}, which is not registered; it stays as it is, fully expanded", owner,
+						std::format("'{}' is an instance of the prefab {}, which is not registered; it stays as it is, fully expanded", owner(),
 							handle->ToString()),
 						site, "restore the prefab asset, or unpack the instance (prefab.unpack)", false);
 					collected.Diagnostic.Asset = handle->ToString();
 					diagnostics.push_back(std::move(collected));
 					return;
 				}
-				CheckAssetReference(editor, *handle, AssetTypeToString(AssetType::Prefab), site, std::format("the instance '{}'", owner), diagnostics);
+				const auto describe = [&owner]()
+				{
+					return std::format("the instance '{}'", owner());
+				};
+				CheckAssetReference(editor, *handle, AssetTypeToString(AssetType::Prefab), site, describe, diagnostics);
 				return;
 			}
 
@@ -728,8 +900,11 @@ namespace Engine {
 				site.Component = info.GetName();
 				site.Field = reference.Field;
 				site.Subject = MakeReferenceSubject(reference, handle);
-				CheckAssetReference(editor, handle, acceptedType, site, std::format("'{}.{}' of '{}'", info.GetName(), reference.Field, owner),
-					diagnostics);
+				const auto describe = [&info, &reference, &owner]()
+				{
+					return std::format("'{}.{}' of '{}'", info.GetName(), reference.Field, owner());
+				};
+				CheckAssetReference(editor, handle, acceptedType, site, describe, diagnostics);
 			};
 			VisitFieldAssetRefs(component, info.GetFields(), visit);
 		}
@@ -759,7 +934,11 @@ namespace Engine {
 					DiagnosticSite site;
 					site.File = checked.File;
 					site.Entity = entity.GetUUID().ToString();
-					CheckComponentAssets(editor, *info, *component, site, scene.GetEntityPath(entity), diagnostics);
+					const auto owner = [&scene, entity]()
+					{
+						return scene.GetEntityPath(entity);
+					};
+					CheckComponentAssets(editor, *info, *component, site, owner, diagnostics);
 				}
 			});
 		}
@@ -923,7 +1102,11 @@ namespace Engine {
 						const std::string owner = std::format("'Script.{}' of '{}'", where.Field, instance.Path);
 						if (reference.GetKind() == FieldType::AssetRef)
 						{
-							CheckAssetReference(editor, target, reference.GetMeta().AssetFilter, where, owner, diagnostics);
+							const auto describe = [&owner]()
+							{
+								return owner;
+							};
+							CheckAssetReference(editor, target, reference.GetMeta().AssetFilter, where, describe, diagnostics);
 							return;
 						}
 						if (checked.Target->FindEntityByID(target).IsValid())
@@ -1155,7 +1338,11 @@ namespace Engine {
 						site.File = file;
 						site.Field = reference.Field;
 						site.Subject = MakeReferenceSubject(reference, handle);
-						CheckAssetReference(editor, handle, acceptedType, site, std::format("'{}' of the material", reference.Field), diagnostics);
+						const auto describe = [&reference]()
+						{
+							return std::format("'{}' of the material", reference.Field);
+						};
+						CheckAssetReference(editor, handle, acceptedType, site, describe, diagnostics);
 					};
 					VisitFieldAssetRefs(*document, material->GetFields(), visit);
 					continue;
@@ -1180,7 +1367,11 @@ namespace Engine {
 						const ComponentInfo* info = registry.FindComponent(component.key());
 						if (info == nullptr || !component.value().is_object())
 							continue;
-						CheckComponentAssets(editor, *info, component.value(), site, std::format("entity {} of the prefab", site.Entity), diagnostics);
+						const auto owner = [&site]()
+						{
+							return std::format("entity {} of the prefab", site.Entity);
+						};
+						CheckComponentAssets(editor, *info, component.value(), site, owner, diagnostics);
 					}
 				}
 			}
@@ -1737,8 +1928,7 @@ namespace Engine {
 
 	std::span<const ValidationCodeInfo> ProjectValidator::GetCodeInfos()
 	{
-		ENGINE_CONTRACT_STUB();
-		return {};
+		return ValidatorCodeInfos;
 	}
 
 	std::string_view ProjectValidator::MapLoadCode(std::string_view loadCode)

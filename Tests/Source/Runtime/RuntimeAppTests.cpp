@@ -21,13 +21,15 @@ namespace Engine {
 	namespace {
 
 		// The Runtime with `arguments`, its user data in `userData`; a windowed run gets --audio-device none
-		// (Test::WithoutAudioDevice).
-		Result<ProcessResult> RunRuntime(const Test::TempDirectory& userData, std::vector<std::string> arguments)
+		// (Test::WithoutAudioDevice). `workingDirectory` empty: the test process's. A --feature-test run writes its reports
+		// below its working directory (ADR 0022 decision 7), so such a run passes a temporary one.
+		Result<ProcessResult> RunRuntime(const Test::TempDirectory& userData, std::vector<std::string> arguments, std::filesystem::path workingDirectory = {})
 		{
 			ENGINE_TRY_ASSIGN(std::filesystem::path runtime, Test::GetBuiltExecutablePath("Runtime"));
 			arguments = Test::WithoutAudioDevice(std::move(arguments));
 			arguments.push_back("--user-data-dir=" + Test::PathToUtf8(userData.GetPath()));
-			return Process::Run({ .Executable = std::move(runtime), .Arguments = std::move(arguments) }, std::chrono::seconds(120));
+			return Process::Run({ .Executable = std::move(runtime), .Arguments = std::move(arguments), .WorkingDirectory = std::move(workingDirectory) },
+				std::chrono::seconds(120));
 		}
 
 		// A headless runtime rendering with the Vulkan renderer, validated like every GPU test's process
@@ -163,7 +165,7 @@ namespace Engine {
 			Test::TempDirectory userData("RuntimeTestGate");
 			const auto manifest = Test::WriteTestGame(userData / "Game");
 			REQUIRE_MESSAGE(manifest.has_value(), manifest.error().ToString());
-			const auto result = RunRuntime(userData, { "--headless", "--renderer", "none", "--feature-test", ManifestArgument(*manifest) });
+			const auto result = RunRuntime(userData, { "--headless", "--renderer", "none", "--feature-test", ManifestArgument(*manifest) }, userData.GetPath());
 			REQUIRE_MESSAGE(result.has_value(), result.error().ToString());
 			CHECK(result->ExitCode == ExitCode::UsageError);
 			CHECK(result->StandardError.contains("--feature-test requires a testing export"));
@@ -201,6 +203,76 @@ namespace Engine {
 				CHECK_FALSE(std::filesystem::exists(explicitRoot ? fallback : overridePath, error));
 				CHECK_FALSE(error);
 			}
+		}
+
+		// ADR 0022 decision 7: the exported runner's reports have fixed names, which M15's export stage reads, below the
+		// working directory: FeatureTest-Release in development builds (FeatureTest-Dist in Dist).
+		TEST_CASE("RuntimeApp: feature-test writes FeatureTest-Release reports below its working directory")
+		{
+			Test::TempDirectory directory("RuntimeTestReports");
+			Test::TestGameSpecification specification;
+			specification.Name = "ReportedTests";
+			const auto manifest = Test::WriteTestGame(directory / "Game", specification);
+			REQUIRE_MESSAGE(manifest.has_value(), (manifest ? "" : manifest.error().ToString()));
+			EditFile(*manifest, "\"Testing\": false", "\"Testing\": true");
+			const auto executable = Test::GetBuiltExecutablePath("Runtime");
+			REQUIRE_MESSAGE(executable.has_value(), (executable ? "" : executable.error().ToString()));
+			ProcessSpecification process;
+			process.Executable = *executable;
+			process.Arguments = { "--headless", "--renderer", "none", "--feature-test", ManifestArgument(*manifest), "--user-data-dir=" + Test::PathToUtf8(directory / "UserData") };
+			process.WorkingDirectory = directory.GetPath();
+			const auto result = Process::Run(process, std::chrono::seconds(120));
+			REQUIRE_MESSAGE(result.has_value(), (result ? "" : result.error().ToString()));
+			INFO("runtime stderr: ", result->StandardError);
+			CHECK(result->ExitCode == ExitCode::Success);
+			const auto json = FileSystem::ReadText(directory / "bin/TestResults/FeatureTest-Release.json");
+			REQUIRE_MESSAGE(json.has_value(), json.error().ToString());
+			CHECK(json->contains(R"("mode": "Release")"));
+			CHECK(json->contains(R"("passed": true)"));
+			std::error_code error;
+			CHECK(std::filesystem::is_regular_file(directory / "bin/TestResults/FeatureTest-Release.xml", error));
+			// The development report name of M13 is gone.
+			size_t reports = 0;
+			for (std::filesystem::directory_iterator entry(directory / "bin/TestResults", error); !error && entry != std::filesystem::directory_iterator(); entry.increment(error))
+			{
+				CHECK(entry->path().filename().string().starts_with("FeatureTest-Release."));
+				++reports;
+			}
+			CHECK_FALSE(error);
+			CHECK(reports == 2);
+		}
+
+		// Review finding M01 (ADR 0022 decision 7): a --feature-test run that cannot begin (here its suite's script is not in
+		// the pak) still writes its reports, as a failed run naming the error, over a passing report an earlier run left at
+		// the fixed paths M15's export stage reads.
+		TEST_CASE("RuntimeApp: feature-test writes failed reports over stale ones when the run cannot begin")
+		{
+			Test::TempDirectory directory("RuntimeTestReportsBegin");
+			Test::TestGameSpecification specification;
+			specification.Name = "UnstartableTests";
+			specification.TestSuiteScripts = { "Assets/Tests/Missing.test.luau" };
+			const auto manifest = Test::WriteTestGame(directory / "Game", specification);
+			REQUIRE_MESSAGE(manifest.has_value(), (manifest ? "" : manifest.error().ToString()));
+			EditFile(*manifest, "\"Testing\": false", "\"Testing\": true");
+			const std::filesystem::path reports = directory / "bin/TestResults";
+			REQUIRE(FileSystem::CreateDirectories(reports));
+			const std::string stale = R"({"mode": "Release", "passed": true, "stale": true})";
+			REQUIRE(FileSystem::WriteFileAtomic(reports / "FeatureTest-Release.json", std::as_bytes(std::span(stale.data(), stale.size()))));
+			REQUIRE(FileSystem::WriteFileAtomic(reports / "FeatureTest-Release.xml", std::as_bytes(std::span(stale.data(), stale.size()))));
+			const auto result = RunRuntime(directory, { "--headless", "--renderer", "none", "--feature-test", ManifestArgument(*manifest) }, directory.GetPath());
+			REQUIRE_MESSAGE(result.has_value(), (result ? "" : result.error().ToString()));
+			INFO("runtime stderr: ", result->StandardError);
+			CHECK(result->ExitCode != ExitCode::Success);
+			const auto json = FileSystem::ReadText(reports / "FeatureTest-Release.json");
+			REQUIRE_MESSAGE(json.has_value(), json.error().ToString());
+			CHECK_FALSE(json->contains("stale"));
+			CHECK(json->contains(R"("mode": "Release")"));
+			CHECK(json->contains(R"("passed": false)"));
+			CHECK(json->contains("Missing.test.luau"));
+			const auto junit = FileSystem::ReadText(reports / "FeatureTest-Release.xml");
+			REQUIRE_MESSAGE(junit.has_value(), junit.error().ToString());
+			CHECK(junit->contains("<error message="));
+			CHECK(junit->contains("Missing.test.luau"));
 		}
 
 		TEST_CASE("RuntimeApp: --headless --frames 10 runs the game with ManualClock and exits 0")

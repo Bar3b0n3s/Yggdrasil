@@ -1,0 +1,7 @@
+{
+	"Format": "CoverageGap",
+	"Version": 1,
+	"Gate": "4",
+	"Mode": "Editor",
+	"Missing": ["proxy:Camera.EditorPreview/read", "proxy:Camera.Primary/write"]
+}

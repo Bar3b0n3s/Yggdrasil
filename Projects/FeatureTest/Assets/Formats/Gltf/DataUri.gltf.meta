@@ -1,0 +1,31 @@
+{
+	"Format": "AssetMeta",
+	"Version": 1,
+	"Handle": "630ec0c721d9d0f6",
+	"Type": "Prefab",
+	"Importer": "Gltf",
+	"ImporterVersion": 1,
+	"Settings": {
+		"Scale": 1,
+		"GenerateMissingTangents": true,
+		"ImportMaterials": true,
+		"MergeMeshes": false
+	},
+	"SubAssets": [
+		{
+			"Key": "material:0:Embedded",
+			"Handle": "bd322edba5f4c946",
+			"Type": "Material"
+		},
+		{
+			"Key": "mesh:0:Quad",
+			"Handle": "c6337a3111505f8e",
+			"Type": "Mesh"
+		},
+		{
+			"Key": "texture:0",
+			"Handle": "2270674ec7dbaf91",
+			"Type": "Texture"
+		}
+	]
+}

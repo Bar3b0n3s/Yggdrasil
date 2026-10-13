@@ -5,6 +5,8 @@
 #include "Engine/Asset/TextureData.h"
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Scene/Components/CameraComponent.h"
+#include "Engine/Scene/Components/MeshRendererComponent.h"
+#include "Engine/Scene/Components/PrefabInstanceComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scripting/ScriptApiRegistry.h"
 #include "Support/InMemoryAssetManager.h"
@@ -16,6 +18,8 @@
 #include <algorithm>
 #include <array>
 #include <format>
+#include <limits>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -156,7 +160,7 @@ namespace Engine {
 		// and Expected.json {"Format": "CoverageGap", "Version": 1, "Gate", "Mode", "Missing"} (ADR 0022 decision 6). The
 		// report's own coverage.gates must equal the evaluation of its counters, so the Python feature suite, which reads the
 		// gates, and this test, which re-evaluates the counters, judge the same fixture.
-		TEST_CASE("CoverageGates: each seeded-gap fixture makes exactly its gate (and mode) fail and names the gap" * doctest::skip(true))
+		TEST_CASE("CoverageGates: each seeded-gap fixture makes exactly its gate (and mode) fail and names the gap")
 		{
 			size_t fixtures = 0;
 			for (const CoverageGate gate : PerModeCoverageGates)
@@ -210,7 +214,7 @@ namespace Engine {
 			CHECK(fixtures == PerModeCoverageGates.size() * AllModes.size());
 		}
 
-		TEST_CASE("CoverageGates: an EditorOnly entry counts only in the editor run" * doctest::skip(true))
+		TEST_CASE("CoverageGates: an EditorOnly entry counts only in the editor run")
 		{
 			std::vector<TestCoverageCounter> counters = CoveredCounters();
 			counters.push_back(Counter("api:Test.ReloadScript", CoverageKindFunction, { TestSuiteSettings::Mode::Editor }, 0));
@@ -243,7 +247,7 @@ namespace Engine {
 			CHECK(distApi->Missing == std::vector<std::string>{ "api:Physics.Raycast/argument3/QueryMode/All" });
 		}
 
-		TEST_CASE("CoverageGates: a gate without counters fails instead of passing vacuously" * doctest::skip(true))
+		TEST_CASE("CoverageGates: a gate without counters fails instead of passing vacuously")
 		{
 			std::vector<TestCoverageCounter> counters = CoveredCounters();
 			std::erase_if(counters, [](const TestCoverageCounter& counter)
@@ -259,7 +263,7 @@ namespace Engine {
 			CHECK(formats->Missing == std::vector<std::string>{ "<no counters>" });
 		}
 
-		TEST_CASE("CoverageGates: an unknown kind, an invalid mode list, a duplicate id or a foreign prefix is rejected" * doctest::skip(true))
+		TEST_CASE("CoverageGates: an unknown kind, an invalid mode list, a duplicate id or a foreign prefix is rejected")
 		{
 			const std::vector<TestSuiteSettings::Mode> all(AllModes.begin(), AllModes.end());
 			const std::array<TestCoverageCounter, 7> invalid = {
@@ -284,7 +288,7 @@ namespace Engine {
 			}
 		}
 
-		TEST_CASE("CoverageGates: unevaluated gates never pass" * doctest::skip(true))
+		TEST_CASE("CoverageGates: unevaluated gates never pass")
 		{
 			const std::vector<TestCoverageGateResult> gates = MakeUnevaluatedCoverageGates();
 			REQUIRE(gates.size() == PerModeCoverageGates.size());
@@ -297,7 +301,7 @@ namespace Engine {
 			}
 		}
 
-		TEST_CASE("CoverageGates: gate names, counter kinds and run modes map as documented" * doctest::skip(true))
+		TEST_CASE("CoverageGates: gate names, counter kinds and run modes map as documented")
 		{
 			constexpr std::array<std::pair<CoverageGate, std::string_view>, 10> Names = { {
 				{ CoverageGate::Components, "1" },
@@ -345,7 +349,7 @@ namespace Engine {
 			CHECK(ToRunModes(TestSuiteSettings::Mode::Release) == RunModes::Release);
 		}
 
-		TEST_CASE("CoverageGates: script API counters keep distinct kinds for gates 2, 3 and 4" * doctest::skip(true))
+		TEST_CASE("CoverageGates: script API counters keep distinct kinds for gates 2, 3 and 4")
 		{
 			ScriptApiCoverage baseline{ .Mode = RunModes::Editor, .Members = {} };
 			baseline.Members.push_back(ScriptApiCounter{ .Owner = "Behaviour", .Member = "OnHotReload", .Kind = ScriptApiMemberKind::Callback, .Modes = RunModes::EditorOnly, .Calls = 0, .Reads = 0, .Writes = 0, .RequiresRead = false, .RequiresWrite = false, .EnumValues = {} });
@@ -387,7 +391,7 @@ namespace Engine {
 			CHECK(mismatch.error().GetCode() == ErrorCode::InvalidArgument);
 		}
 
-		TEST_CASE("SceneCoverage: components, non-default fields and enum values of simulated scenes are counted" * doctest::skip(true))
+		TEST_CASE("SceneCoverage: components, non-default fields and enum values of simulated scenes are counted")
 		{
 			Test::SceneTestFixture fixture;
 			SceneCoverageRecorder recorder(fixture.GetRegistry());
@@ -425,9 +429,126 @@ namespace Engine {
 			}));
 		}
 
+		// ADR 0022 decision 4: a leaf inside an array element compares with the element struct's default (the component's
+		// default has no elements), each element counts, and arrays of non-structs are leaves compared whole.
+		TEST_CASE("SceneCoverage: array element fields compare with the element default and containers of values compare whole")
+		{
+			Test::SceneTestFixture fixture;
+			SceneCoverageRecorder recorder(fixture.GetRegistry());
+			PrefabInstanceComponent prefab;
+			prefab.Overrides.push_back(PrefabOverride{ .PrefabEntityID = UUID(0x71), .Kind = PrefabOverrideKind::RemoveComponent, .Component = "Camera", .Field = {}, .Value = {} });
+			prefab.Overrides.push_back(PrefabOverride{ .PrefabEntityID = UUID(0x72), .Kind = PrefabOverrideKind::RemoveComponent, .Component = "Text", .Field = {}, .Value = {} });
+			fixture.GetScene().CreateEntity("Instance").AddComponent<PrefabInstanceComponent>(prefab);
+			MeshRendererComponent renderer;
+			renderer.Materials.emplace_back();
+			renderer.Materials.back().SetHandle(UUID(0x81));
+			fixture.GetScene().CreateEntity("Renderer").AddComponent<MeshRendererComponent>(renderer);
+			fixture.GetScene().CreateEntity("Default").AddComponent<MeshRendererComponent>();
+			REQUIRE(recorder.Record(fixture.GetScene()).has_value());
+
+			const auto counters = recorder.GetCounters();
+			const auto find = [&counters](std::string_view id) -> const TestCoverageCounter*
+			{
+				const auto found = std::ranges::find(counters, id, &TestCoverageCounter::Id);
+				return found == counters.end() ? nullptr : &*found;
+			};
+			const auto count = [&find](std::string_view id) -> std::optional<uint32_t>
+			{
+				const TestCoverageCounter* counter = find(id);
+				return counter == nullptr ? std::nullopt : std::optional<uint32_t>(counter->Count);
+			};
+			CHECK(count("component:Prefab") == 1u);
+			CHECK(count("field:Prefab/Overrides/*/Kind") == 2u);
+			CHECK(count("field:Prefab/Overrides/*/Component") == 2u);
+			CHECK(count("field:Prefab/Overrides/*/Field") == 0u);
+			CHECK(count("field:Prefab/Overrides/*/PrefabEntityID") == 2u);
+			CHECK(count("field:Prefab/Prefab") == 0u);
+			CHECK_FALSE(count("field:Prefab/Overrides").has_value());
+			CHECK(count("enum:PrefabOverrideKind/RemoveComponent") == 2u);
+			CHECK(count("enum:PrefabOverrideKind/Field") == 0u);
+			CHECK(count("component:MeshRenderer") == 2u);
+			CHECK(count("field:MeshRenderer/Materials") == 1u);
+			CHECK_FALSE(count("field:MeshRenderer/Materials/*").has_value());
+			// Kinds and modes follow decision 2: fields follow FieldMeta::Modes, enum values exist in every mode.
+			const TestCoverageCounter* kind = find("field:Prefab/Overrides/*/Kind");
+			REQUIRE(kind != nullptr);
+			CHECK(kind->Kind == CoverageKindField);
+			CHECK(kind->Modes == std::vector<TestSuiteSettings::Mode>(AllModes.begin(), AllModes.end()));
+			const TestCoverageCounter* value = find("enum:PrefabOverrideKind/EntityKey");
+			REQUIRE(value != nullptr);
+			CHECK(value->Kind == CoverageKindEnumValue);
+			CHECK(value->Modes == std::vector<TestSuiteSettings::Mode>(AllModes.begin(), AllModes.end()));
+			// Every counter of a recorder is valid input for the evaluation in every mode.
+			for (const TestSuiteSettings::Mode mode : AllModes)
+				CHECK(EvaluateCoverageGates(counters, mode).has_value());
+		}
+
+		TEST_CASE("CoverageGates: a mode listed twice or an id that names no entry after its prefix is rejected")
+		{
+			const std::array<TestCoverageCounter, 2> invalid = {
+				Counter("api:Physics.Overlap", CoverageKindFunction, { TestSuiteSettings::Mode::Editor, TestSuiteSettings::Mode::Editor }, 1),
+				Counter("callback:", CoverageKindCallback, std::vector<TestSuiteSettings::Mode>(AllModes.begin(), AllModes.end()), 1),
+			};
+			for (const TestCoverageCounter& counter : invalid)
+			{
+				CAPTURE(counter.Id);
+				std::vector<TestCoverageCounter> counters = CoveredCounters();
+				counters.push_back(counter);
+				const auto results = EvaluateCoverageGates(counters, TestSuiteSettings::Mode::Release);
+				REQUIRE_FALSE(results.has_value());
+				CHECK(results.error().GetCode() == ErrorCode::Validation);
+				CHECK(results.error().ToString().find(counter.Id) != std::string::npos);
+			}
+		}
+
+		TEST_CASE("SceneCoverage: a scene of another type registry is refused")
+		{
+			Test::SceneTestFixture first;
+			Test::SceneTestFixture second;
+			SceneCoverageRecorder recorder(first.GetRegistry());
+			const Status recorded = recorder.Record(second.GetScene());
+			REQUIRE_FALSE(recorded.has_value());
+			CHECK(recorded.error().GetCode() == ErrorCode::InvalidState);
+		}
+
+		TEST_CASE("CoverageGates: script API snapshots of different registries or a count going backwards are refused")
+		{
+			ScriptApiCoverage baseline{ .Mode = RunModes::Release, .Members = {} };
+			baseline.Members.push_back(ScriptApiCounter{ .Owner = "Physics", .Member = "Raycast", .Kind = ScriptApiMemberKind::Function, .Modes = RunModes::All, .Calls = 4, .Reads = 0, .Writes = 0, .RequiresRead = false, .RequiresWrite = false, .EnumValues = {} });
+			baseline.Members.push_back(ScriptApiCounter{ .Owner = "Math", .Member = "Pi", .Kind = ScriptApiMemberKind::Constant, .Modes = RunModes::All, .Calls = 0, .Reads = 0, .Writes = 0, .RequiresRead = false, .RequiresWrite = false, .EnumValues = {} });
+			ScriptApiCoverage current = baseline;
+			current.Members[0].Calls = 9;
+			const auto counters = MakeScriptApiCoverageCounters(current, baseline);
+			REQUIRE(counters.has_value());
+			// Constants are not call targets: no counter.
+			REQUIRE(counters->size() == 1);
+			CHECK((*counters)[0].Id == "api:Physics.Raycast");
+			CHECK((*counters)[0].Count == 5u);
+
+			ScriptApiCoverage backwards = baseline;
+			backwards.Members[0].Calls = 3;
+			const auto decreased = MakeScriptApiCoverageCounters(backwards, baseline);
+			REQUIRE_FALSE(decreased.has_value());
+			CHECK(decreased.error().GetCode() == ErrorCode::InvalidArgument);
+
+			ScriptApiCoverage other = current;
+			other.Members[0].Member = "Overlap";
+			CHECK_FALSE(MakeScriptApiCoverageCounters(other, baseline).has_value());
+			ScriptApiCoverage shorter = current;
+			shorter.Members.pop_back();
+			CHECK_FALSE(MakeScriptApiCoverageCounters(shorter, baseline).has_value());
+
+			// Counts saturate to uint32 (TestResults.h).
+			ScriptApiCoverage huge = current;
+			huge.Members[0].Calls = 1ull << 40;
+			const auto saturated = MakeScriptApiCoverageCounters(huge, baseline);
+			REQUIRE(saturated.has_value());
+			CHECK((*saturated)[0].Count == std::numeric_limits<uint32_t>::max());
+		}
+
 		// ADR 0022 decision 5: each loaded handle counts once, by the extension of its reference path before '#', ASCII
 		// case-folded; engine assets, unknown handles and extensions without a source format are ignored.
-		TEST_CASE("FormatCoverage: each loaded handle counts once by its source extension" * doctest::skip(true))
+		TEST_CASE("FormatCoverage: each loaded handle counts once by its source extension")
 		{
 			Test::InMemoryAssetManager assets;
 			const AssetHandle photo(0x5101);

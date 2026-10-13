@@ -1,0 +1,15 @@
+{
+	"Format": "ValidationFixture",
+	"Version": 1,
+	"Scope": "Project",
+	"Codes": ["PHYSICS_LIMIT_EXCEEDED"],
+	"TestComponents": false,
+	"Expand": [
+		{
+			"Path": "Assets/Scenes/Main.scene",
+			"Entity": "e000000000000003",
+			"Count": 16385
+		}
+	],
+	"NonCanonical": []
+}
