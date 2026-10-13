@@ -48,6 +48,7 @@
 		"Suites": [],
 		"Replays": [],
 		"CaseTimeoutTicks": 600,
-		"SuiteTickLimit": 36000
+		"SuiteTickLimit": 36000,
+		"CoverageGates": false
 	}
 }

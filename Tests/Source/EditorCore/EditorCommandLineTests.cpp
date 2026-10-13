@@ -37,6 +37,38 @@ namespace Engine {
 			CHECK_FALSE(ParseEditorArguments({ "--project", "Game", "--filter", "Movement" }));
 		}
 
+		// ADR 0022 decision 7: --run-tests reports go to bin/TestResults/FeatureTest-Editor.{xml,json} or beside --junit.
+		TEST_CASE("EditorCommandLine: --junit names the reports of a test run" * doctest::skip(true))
+		{
+			const auto tests = ParseEditorArguments({ "--project", "Game", "--run-tests", "--junit", "bin/TestResults/FeatureTest-Editor-Debug.xml" });
+			REQUIRE_MESSAGE(tests.has_value(), tests.error().ToString());
+			CHECK(tests->TestJunitPath == std::filesystem::path("bin/TestResults/FeatureTest-Editor-Debug.xml"));
+			const auto plain = ParseEditorArguments({ "--project", "Game", "--run-tests" });
+			REQUIRE(plain);
+			CHECK_FALSE(plain->TestJunitPath.has_value());
+			CHECK_FALSE(ParseEditorArguments({ "--project", "Game", "--junit", "out.xml" }));
+			CHECK_FALSE(ParseEditorArguments({ "--project", "Game", "--check-scripts", "--junit", "out.xml" }));
+		}
+
+		// ADR 0022 decision 8 (implemented by the contract): committed scaffolds run with a fixed id seed, so their output is
+		// byte-identical on every machine; EditorAppTests proves two seeded batch runs write identical ids.
+		TEST_CASE("EditorCommandLine: --id-seed seeds the ids of a batch run")
+		{
+			const auto batch = ParseEditorArguments({ "--project", "Projects/FeatureTest", "--batch", "Scaffold/Formats.jsonl", "--id-seed", "1401" });
+			REQUIRE_MESSAGE(batch.has_value(), batch.error().ToString());
+			CHECK(batch->IdSeed == std::optional<uint64_t>(1401));
+			const auto largest = ParseEditorArguments({ "--batch", "s.jsonl", "--id-seed", "18446744073709551615" });
+			REQUIRE(largest);
+			CHECK(largest->IdSeed == std::optional<uint64_t>(18446744073709551615ull));
+			CHECK_FALSE(ParseEditorArguments({ "--project", "Game", "--id-seed", "1" }));
+			CHECK_FALSE(ParseEditorArguments({ "--project", "Game", "--run-tests", "--id-seed", "1" }));
+			for (const char* invalid : { "-1", "abc", "0x10", "18446744073709551616", "" })
+			{
+				CAPTURE(invalid);
+				CHECK_FALSE(ParseEditorArguments({ "--batch", "s.jsonl", "--id-seed", invalid }));
+			}
+		}
+
 		TEST_CASE("EditorCommandLine: the option table names every editor launch option")
 		{
 			// --renderer is an engine option (GetEngineCommandLineOptions), which the Runtime takes too (ADR 0009 decisions 3 and 33).
@@ -47,7 +79,7 @@ namespace Engine {
 				CHECK_FALSE(option.Description.empty());
 			}
 			const std::vector<std::string_view> expected = { "--project", "--read-only", "--automation", "--automation-test-hooks", "--batch",
-				"--upgrade", "--dump-reference", "--bake-engine-assets", "--engine-cache-dir", "--check-scripts", "--run-tests", "--filter" };
+				"--upgrade", "--dump-reference", "--bake-engine-assets", "--engine-cache-dir", "--check-scripts", "--run-tests", "--filter", "--id-seed" };
 			CHECK(names == expected);
 		}
 

@@ -39,6 +39,17 @@ namespace Engine {
 	class EditorContext;
 	class TypeRegistry;
 
+	// The documentation of one validation code (M14: Docs/Reference/Validation.md, the game-debugging skill's error-code
+	// table and gate 6 read it; Docs/Decisions/0022-m14-contract.md decision 10). Static text, valid for the process.
+	struct ValidationCodeInfo
+	{
+		std::string_view Code{};        // "SCENE_NO_PRIMARY_CAMERA"
+		std::string_view Severity{};    // "Error", "Warning", or "Warning; Error at the limit" (§13.7)
+		bool AutoFixable = false;       // project.validate {fix} can fix at least some of its diagnostics
+		std::string_view Description{}; // one sentence: what the code reports
+		std::string_view Fix{};         // one sentence: how an author or agent fixes it
+	};
+
 	// The codes the M4 validator reports (§13.7 spelling), with their severity and whether a fix exists.
 	// Warning, fixable when the scene has exactly one camera (it becomes Primary).
 	inline constexpr std::string_view SceneNoPrimaryCameraCode = "SCENE_NO_PRIMARY_CAMERA";
@@ -158,6 +169,9 @@ namespace Engine {
 
 		// The codes this build reports, in §13.7 order.
 		[[nodiscard]] static std::span<const std::string_view> GetCodes();
+
+		// M14: one entry per code of GetCodes, in the same order, each with a non-empty severity, description and fix.
+		[[nodiscard]] static std::span<const ValidationCodeInfo> GetCodeInfos();
 
 		// The validator code of a scene-load diagnostic code (ADR 0006 decision 35); empty for load codes the validator does
 		// not report (unknown keys and components, which stay load warnings).

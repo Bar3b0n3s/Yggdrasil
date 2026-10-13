@@ -58,9 +58,10 @@ namespace Engine {
 		bool Passed = false;
 	};
 
-	// Stable registry identity, never a VM pointer or registration index. Kind distinguishes function, method,
-	// property read/write, operator, constructor, enum value, callback and component field read/write counters.
-	// Other coverage producers use the same envelope in M14. Counts are the run's delta, not lifetime totals.
+	// Stable registry identity, never a VM pointer or registration index. Id and Kind follow the table of
+	// Testing/CoverageGates.h (Docs/Decisions/0022-m14-contract.md decision 2): every kind belongs to exactly one gate and
+	// every id starts with its gate's prefix. Modes are the run modes the entry exists in. Counts are the run's delta, not
+	// lifetime totals, saturated to uint32. A report lists every counter of its producers, covered or not, sorted by id.
 	struct TestCoverageCounter
 	{
 		std::string Id{};
@@ -69,6 +70,9 @@ namespace Engine {
 		uint32_t Count = 0;
 	};
 
+	// One per-mode gate of a coverage run (§15.6): Gate is CoverageGateName ("1", "1b", "2", "3", "4", "9"); Missing the
+	// uncovered counter ids, sorted. Evaluated is false for a filtered, recording or cancelled run, and an unevaluated gate
+	// never passes. An evaluated gate passes exactly when Missing is empty.
 	struct TestCoverageGateResult
 	{
 		std::string Gate{};
@@ -114,6 +118,9 @@ namespace Engine {
 	// skipped -> skipped; quit uses QuitExpected and its accumulated Failures. Includes all diagnostic locations.
 	// Diagnostic text uses File#JsonPointer:Line for embedded source, otherwise File:Line, retaining every failure.
 	// It never reads wall time; reported duration is simulated time supplied by the result producer if added later.
+	// M14 (ADR 0022 decision 3): when Coverage.Gates is not empty, a last <testsuite name="FeatureTest.coverage"> holds one
+	// <testcase name="gate <Gate>"> per entry: a passed gate has no child, a failed one a <failure> whose message counts the
+	// gaps and whose text lists every Missing id on its own line, an unevaluated one <skipped/>.
 	[[nodiscard]] Result<std::string> TestRunResultToJUnit(const TestRunResult& result);
 
 }

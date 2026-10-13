@@ -332,6 +332,7 @@ namespace Engine {
 		[[nodiscard]] Status CaptureScreenshot(PlaySession& session, std::string_view name) override;
 		[[nodiscard]] Status ReloadScript(PlaySession&, AssetHandle) override { return MakeError(ErrorCode::Unsupported, "exported scripts cannot be reloaded"); }
 		[[nodiscard]] Result<TestCoverageReport> GetCoverage() const override;
+		[[nodiscard]] AssetManager* GetAssetManager() const override;
 		[[nodiscard]] Result<Json> Evaluate(PlaySession& session, const ReplayBytecodeExpectation& expectation) override;
 		// The session keeps the fixed deterministic view (PlaySession.h, view coordinates) with `fixedView`, a test host or
 		// options.Lockstep; otherwise it starts with the framebuffer, which OnUpdate keeps it at.
@@ -682,6 +683,12 @@ namespace Engine {
 		auto& vfs = App.GetContext().GetVfs();
 		ENGINE_TRY(vfs.CreateDirectories(file.GetParent()));
 		return vfs.WriteFileAtomic(file, png);
+	}
+
+	AssetManager* RuntimeApp::State::GetAssetManager() const
+	{
+		ENGINE_CONTRACT_STUB();
+		return nullptr;
 	}
 
 	Result<TestCoverageReport> RuntimeApp::State::GetCoverage() const

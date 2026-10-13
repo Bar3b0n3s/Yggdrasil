@@ -113,6 +113,29 @@ namespace Engine {
 			CHECK(added.error().GetCode() == ErrorCode::AlreadyExists);
 		}
 
+		// ADR 0022 decision 5 (stream A): the Runtime notifies the load observer exactly as the editor does, so gate 9 counts
+		// cooked loads by their pak table-of-contents path.
+		TEST_CASE("RuntimeAssetManager: the load observer sees each successful load of a registered asset" * doctest::skip(true))
+		{
+			RuntimeEnvironment environment;
+			RuntimeAssetManager manager(environment.GetSpecification());
+			Result<Ref<const PakReader>> pak = PakReader::OpenMemory(MakeGamePak(false), "Game.pak");
+			REQUIRE(pak.has_value());
+			REQUIRE(manager.AddPak(*pak).has_value());
+			std::vector<AssetHandle> seen;
+			manager.SetLoadObserver([&seen, &manager](AssetHandle loaded)
+			{
+				CHECK(manager.GetReferencePath(loaded) == "Assets/Models/Track.glb#mesh:0:Straight");
+				seen.push_back(loaded);
+			});
+			REQUIRE(manager.Load(TrackMesh).has_value());
+			REQUIRE(manager.Load(BuiltinAssetHandles::CubeMesh).has_value());
+			CHECK_FALSE(manager.Load(AssetHandle(0x0bad0bad0bad0badull)).has_value());
+			REQUIRE(manager.Load(TrackMesh).has_value());
+			manager.SetLoadObserver({});
+			CHECK(seen == std::vector<AssetHandle>{ TrackMesh, TrackMesh });
+		}
+
 		TEST_CASE("RuntimeAssetManager: a corrupted entry yields the placeholder and one diagnostic")
 		{
 			RuntimeEnvironment environment;

@@ -1556,6 +1556,27 @@ end
 			CHECK(noListener->File == "Assets/Scenes/Main.scene");
 			CHECK_FALSE(noListener->Hint.empty());
 		}
+
+		TEST_CASE("ProjectValidator: every code has a severity, a description and a fix statement" * doctest::skip(true))
+		{
+			const auto codes = ProjectValidator::GetCodes();
+			const auto infos = ProjectValidator::GetCodeInfos();
+			REQUIRE(infos.size() == codes.size());
+			for (size_t index = 0; index < codes.size(); ++index)
+			{
+				CAPTURE(codes[index]);
+				CHECK(infos[index].Code == codes[index]);
+				CHECK((infos[index].Severity == "Error" || infos[index].Severity == "Warning" || infos[index].Severity == "Warning; Error at the limit"));
+				CHECK(infos[index].Description.find_first_not_of(" \t") != std::string_view::npos);
+				CHECK(infos[index].Fix.find_first_not_of(" \t") != std::string_view::npos);
+			}
+			const auto limit = std::ranges::find(infos, std::string_view("PHYSICS_LIMIT_EXCEEDED"), &ValidationCodeInfo::Code);
+			REQUIRE(limit != infos.end());
+			CHECK(limit->Severity == "Warning; Error at the limit");
+			const auto adjacent = std::ranges::find(infos, std::string_view("PHYSICS_ADJACENT_STATIC_BODIES"), &ValidationCodeInfo::Code);
+			REQUIRE(adjacent != infos.end());
+			CHECK(adjacent->AutoFixable);
+		}
 	}
 
 }

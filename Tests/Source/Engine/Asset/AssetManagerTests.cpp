@@ -16,6 +16,7 @@
 #include <format>
 #include <map>
 #include <tuple>
+#include <vector>
 
 namespace Engine {
 
@@ -28,6 +29,7 @@ namespace Engine {
 		public:
 			// The dry-run and scan hooks, public for the tests.
 			using AssetManager::ClearDiagnostics;
+			using AssetManager::NotifyLoaded;
 			using AssetManager::RestoreSharedState;
 			using AssetManager::SaveSharedState;
 			using AssetManager::SetScanDiagnostics;
@@ -101,6 +103,34 @@ namespace Engine {
 			CHECK(AssetStateToString(AssetState::Loading) == "Loading");
 			CHECK(AssetStateToString(AssetState::Loaded) == "Loaded");
 			CHECK(AssetStateToString(AssetState::Failed) == "Failed");
+		}
+
+		// ADR 0022 decision 5: the observer mechanism of the base class; the managers' own notifications are tested with
+		// EditorAssetManager and RuntimeAssetManager.
+		TEST_CASE("AssetManager: the load observer receives each notified load until it is replaced or removed" * doctest::skip(true))
+		{
+			MainThreadQueue queue;
+			JobSystem jobs(0, queue);
+			FixedAssetManager manager(jobs);
+			const AssetHandle first(0x1111000011110000ull);
+			const AssetHandle second(0x2222000022220000ull);
+			std::vector<AssetHandle> seen;
+			std::vector<AssetHandle> replaced;
+			manager.SetLoadObserver([&seen](AssetHandle handle)
+			{
+				seen.push_back(handle);
+			});
+			manager.NotifyLoaded(first);
+			manager.NotifyLoaded(first);
+			manager.SetLoadObserver([&replaced](AssetHandle handle)
+			{
+				replaced.push_back(handle);
+			});
+			manager.NotifyLoaded(second);
+			manager.SetLoadObserver({});
+			manager.NotifyLoaded(second);
+			CHECK(seen == std::vector<AssetHandle>{ first, first });
+			CHECK(replaced == std::vector<AssetHandle>{ second });
 		}
 
 		TEST_CASE("AssetManager: missing texture yields the Missing placeholder and logs once")

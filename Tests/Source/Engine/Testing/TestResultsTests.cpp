@@ -208,6 +208,32 @@ namespace Engine {
 				CHECK_FALSE(TestRunResultToJUnit(result));
 			}
 		}
+
+		TEST_CASE("TestResults: the JUnit report lists every coverage gate in a FeatureTest.coverage suite" * doctest::skip(true))
+		{
+			TestRunResult result;
+			result.Passed = false;
+			result.Coverage.Gates.push_back({ "1", true, true, {} });
+			result.Coverage.Gates.push_back({ "1b", true, false, { "enum:Tonemapper/AgX", "enum:Tonemapper/Linear" } });
+			result.Coverage.Gates.push_back({ "9", false, false, {} });
+			const auto junit = TestRunResultToJUnit(result);
+			REQUIRE(junit);
+			const size_t suite = junit->find("<testsuite name=\"FeatureTest.coverage\"");
+			REQUIRE(suite != std::string::npos);
+			const size_t passed = junit->find("<testcase name=\"gate 1\"", suite);
+			const size_t failed = junit->find("<testcase name=\"gate 1b\"", suite);
+			const size_t skipped = junit->find("<testcase name=\"gate 9\"", suite);
+			REQUIRE((passed != std::string::npos && failed != std::string::npos && skipped != std::string::npos));
+			CHECK(junit->find("<failure", failed) < skipped);
+			CHECK(junit->find(std::string("enum:Tonemapper/AgX") + '\n' + "enum:Tonemapper/Linear", failed) != std::string::npos);
+			CHECK(junit->find("<skipped", skipped) != std::string::npos);
+			CHECK(junit->substr(passed, failed - passed).find("<failure") == std::string::npos);
+
+			result.Coverage.Gates.clear();
+			const auto plain = TestRunResultToJUnit(result);
+			REQUIRE(plain);
+			CHECK(plain->find("FeatureTest.coverage") == std::string::npos);
+		}
 	}
 
 }

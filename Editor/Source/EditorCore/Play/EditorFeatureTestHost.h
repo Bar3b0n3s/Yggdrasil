@@ -32,6 +32,7 @@ namespace Engine {
 		[[nodiscard]] Status CaptureScreenshot(PlaySession& session, std::string_view name) override;
 		[[nodiscard]] Status ReloadScript(PlaySession& session, AssetHandle script) override;
 		[[nodiscard]] Result<TestCoverageReport> GetCoverage() const override;
+		[[nodiscard]] AssetManager* GetAssetManager() const override;
 		[[nodiscard]] Result<Json> Evaluate(PlaySession& session, const ReplayBytecodeExpectation& expectation) override;
 	private:
 		// The test-run cursor baseline (Normal) for the next suite or replay session of an acquired run.

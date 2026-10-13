@@ -202,6 +202,25 @@ namespace Engine {
 			CHECK_FALSE(result["junitPath"].empty());
 		}
 
+		// ADR 0022 decisions 3 and 5 (stream A): a coverage run of the editor host observes loads through the editor's asset
+		// manager (IFeatureTestHost::GetAssetManager), so the suite script's own load counts for gate 9, and it reports the
+		// six evaluated per-mode gates.
+		TEST_CASE("TestMethods: a coverage run counts the formats the editor's asset manager loads" * doctest::skip(true))
+		{
+			Test::AutomationFixture fixture("TestRunFormats");
+			WriteSuite(fixture, "return Test.Suite('Contract', function()\nTest.Case('passes', function() Test.Expect(true) end)\nend)");
+			CallTestMethod(fixture, "project.setSettings", Json{ { "patch", Json{ { "Testing", Json{ { "CoverageGates", true } } } } } });
+			const Json result = CallTestMethod(fixture, "test.run", Json::object());
+			REQUIRE(result["coverage"]["gates"].size() == 6);
+			const Json& counters = result["coverage"]["counters"];
+			const auto script = std::ranges::find_if(counters, [](const Json& counter)
+			{
+				return counter["id"] == Json("format:Script/.luau");
+			});
+			REQUIRE(script != counters.end());
+			CHECK((*script)["count"] != Json(0));
+		}
+
 		TEST_CASE("TestMethods: failed expectations return structured locations and continue the case")
 		{
 			Test::AutomationFixture fixture("TestRunLocations");

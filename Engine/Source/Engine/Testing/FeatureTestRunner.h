@@ -18,6 +18,7 @@
 
 namespace Engine {
 
+	class AssetManager;
 	class AudioEngine;
 	class IPlaySessionTestHook;
 	class IScriptTestHost;
@@ -95,9 +96,17 @@ namespace Engine {
 		[[nodiscard]] virtual AudioEngine* GetAudioEngine() const = 0;
 		[[nodiscard]] virtual Status CaptureScreenshot(PlaySession& session, std::string_view name) = 0;
 		[[nodiscard]] virtual Status ReloadScript(PlaySession& session, AssetHandle script) = 0;
-		// Run-local counter snapshot/delta, preserving stable ids and mode availability. M13 must not report unevaluated
-		// M14 gates as passes. The host adapts the parent's ScriptApiRegistry snapshot plus other coverage producers.
+		// The script API counters of gates 2, 3 and 4 for this run (Docs/Decisions/0022-m14-contract.md decision 4):
+		// MakeScriptApiCoverageCounters over the parent's ScriptApiRegistry snapshot in the run's mode against the baseline
+		// the host took immediately before FeatureTestRunner::Begin, identically in the Editor and the Runtime, with
+		// RegistryFingerprint the XXH64 of the registry's generated declarations. Gates stays empty: the runner adds the
+		// scene and format counters and evaluates the gates (see FeatureTestRunner).
 		[[nodiscard]] virtual Result<TestCoverageReport> GetCoverage() const = 0;
+		// M14: the asset manager every suite and replay session of this host loads through (the editor's
+		// EditorAssetManager, the Runtime's RuntimeAssetManager), for the run's load observer (gate 9,
+		// AssetManager::SetLoadObserver); a documented back-reference that outlives the runner. Null only for a host without
+		// assets (unit-test hosts), in which case every format counter stays 0.
+		[[nodiscard]] virtual AssetManager* GetAssetManager() const = 0;
 	};
 
 	// The view a script test's screenshot (IFeatureTestHost::CaptureScreenshot) extracts from `session` at `width` x `height`:
@@ -105,6 +114,20 @@ namespace Engine {
 	// path observes it), so the capture matches the game view and viewport.screenshot. Shared by the Editor and Runtime.
 	[[nodiscard]] RenderExtractionRequest MakeTestScreenshotRequest(const PlaySession& session, uint32_t width, uint32_t height);
 
+	// Coverage (§15.5, §15.6; Docs/Decisions/0022-m14-contract.md decisions 2 to 6). When the host's project has
+	// Testing.CoverageGates true, Begin selects every suite and replay (empty Filter) and Record is false, the run records
+	// coverage: Begin resets a FormatCoverageRecorder and installs the load observer on host.GetAssetManager() (none for a
+	// null manager); the SceneCoverageRecorder is created at the first recorded scene from its Scene::GetTypeRegistry()
+	// (CoverageGates.h). Every suite and replay session's scene is recorded after setup, after each scene replacement and
+	// before teardown (the recording-verification session is not). The observer is removed whenever the run ends: on
+	// completion, on Cancel, when Begin fails after installing it, and in the destructor. The result's Coverage.Counters
+	// are then the host's script counters plus the scene and format counters, sorted by id, and Coverage.Gates holds
+	// EvaluateCoverageGates for options.Mode; Passed additionally requires every gate to pass. If recording or evaluating
+	// fails (a recorder error, or EvaluateCoverageGates' Validation), the run fails: Gates is MakeUnevaluatedCoverageGates,
+	// Passed is false and the error is logged at Error through the Engine logger, naming the mode. A filtered, recording or
+	// cancelled run of such a project reports MakeUnevaluatedCoverageGates and its Passed ignores them. Without
+	// Testing.CoverageGates, Counters holds the script counters only and Gates is empty.
+	//
 	// Shared runner core (§11.10), present in Dist. Owns sessions and clocks; uses ScriptEngine opaque references only.
 	// The host adapter supplies exclusivity, disconnect handling and file output. No shell, compiler or RPC dependency.
 	// Test capture uses existing AudioEngine capture/PulledFrames, anchored when the suite takes audio time. A capture

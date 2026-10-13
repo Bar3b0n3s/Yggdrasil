@@ -9363,6 +9363,10 @@
 								"type": "integer",
 								"minimum": 1,
 								"maximum": 4294967295
+							},
+							"CoverageGates": {
+								"description": "Whether unfiltered test runs record coverage and fail on any gap of the per-mode coverage gates (FeatureTest).",
+								"type": "boolean"
 							}
 						},
 						"additionalProperties": false
@@ -10268,6 +10272,10 @@
 								"type": "integer",
 								"minimum": 1,
 								"maximum": 4294967295
+							},
+							"CoverageGates": {
+								"description": "Whether unfiltered test runs record coverage and fail on any gap of the per-mode coverage gates (FeatureTest).",
+								"type": "boolean"
 							}
 						},
 						"additionalProperties": false

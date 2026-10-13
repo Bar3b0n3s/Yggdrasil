@@ -25,6 +25,7 @@ namespace Engine {
 		constexpr std::string_view CheckScriptsOption = "--check-scripts";
 		constexpr std::string_view RunTestsOption = "--run-tests";
 		constexpr std::string_view FilterOption = "--filter";
+		constexpr std::string_view IdSeedOption = "--id-seed";
 
 		constexpr std::array EditorOptions = {
 			CommandLineOption{ .Name = ProjectOption, .Value = CommandLineValue::Required, .ValueName = "path", .Description = "Open the project (.eproj or its directory)." },
@@ -39,6 +40,7 @@ namespace Engine {
 			CommandLineOption{ .Name = CheckScriptsOption, .Value = CommandLineValue::None, .ValueName = {}, .Description = "Check every project script and exit with failure on errors." },
 			CommandLineOption{ .Name = RunTestsOption, .Value = CommandLineValue::None, .ValueName = {}, .Description = "Run configured script suites and replays and exit with their result." },
 			CommandLineOption{ .Name = FilterOption, .Value = CommandLineValue::Required, .ValueName = "pattern", .Description = "Select script test suites/cases for --run-tests." },
+			CommandLineOption{ .Name = IdSeedOption, .Value = CommandLineValue::Required, .ValueName = "n", .Description = "Seed the entity id and asset handle generator of a --batch run (0 to 2^64-1)." },
 		};
 
 	}
@@ -91,6 +93,7 @@ namespace Engine {
 				return MakeError(ErrorCode::InvalidArgument, "option '{}' requires '{}' and a UTF-8 pattern", FilterOption, RunTestsOption);
 			options.TestFilter = *filter;
 		}
+		ENGINE_TRY_ASSIGN(options.IdSeed, commandLine.GetUnsigned(IdSeedOption, std::numeric_limits<uint64_t>::max()));
 		ENGINE_TRY_ASSIGN(options.DumpReferenceDirectory, Utils::ReadPathOption(commandLine, DumpReferenceOption));
 		options.BakeEngineAssets = commandLine.Has(BakeEngineAssetsOption);
 		ENGINE_TRY_ASSIGN(options.EngineCacheDirectory, Utils::ReadPathOption(commandLine, EngineCacheDirectoryOption));
@@ -117,6 +120,8 @@ namespace Engine {
 		}
 		if (options.AutomationTestHooks && !options.Automation && !options.BatchFile.has_value())
 			return MakeError(ErrorCode::InvalidArgument, "option '{}' needs '{}' or '{}'", TestHooksOption, AutomationOption, BatchOption);
+		if (options.IdSeed.has_value() && !options.BatchFile.has_value())
+			return MakeError(ErrorCode::InvalidArgument, "option '{}' needs '{}'", IdSeedOption, BatchOption);
 		return options;
 	}
 

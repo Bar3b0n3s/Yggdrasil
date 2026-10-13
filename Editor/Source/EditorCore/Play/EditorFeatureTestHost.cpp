@@ -280,4 +280,10 @@ namespace Engine {
 		return report;
 	}
 
+	AssetManager* EditorFeatureTestHost::GetAssetManager() const
+	{
+		ENGINE_CONTRACT_STUB();
+		return nullptr;
+	}
+
 }

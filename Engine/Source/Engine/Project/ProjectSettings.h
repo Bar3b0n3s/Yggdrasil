@@ -160,13 +160,16 @@ namespace Engine {
 	};
 
 	// Registry struct "TestingSettings" (§6.1 "Testing", §11.10). Replays are project-relative globs of .replay files;
-	// CaseTimeoutTicks and SuiteTickLimit >= 1.
+	// CaseTimeoutTicks and SuiteTickLimit >= 1. CoverageGates (M14, §15.6; Docs/Decisions/0022-m14-contract.md decision 3)
+	// makes every unfiltered, non-recording test run of the project record coverage and evaluate the per-mode coverage
+	// gates, failing the run on a gap; Projects/FeatureTest sets it, games leave it false.
 	struct TestingSettings
 	{
 		std::vector<TestSuiteSettings> Suites;
 		std::vector<std::string> Replays;
 		uint32_t CaseTimeoutTicks = 600;
 		uint32_t SuiteTickLimit = 36000;
+		bool CoverageGates = false;
 	};
 
 	// Registry struct "ProjectSettings": the whole .eproj below its "Format"/"Version" header (§6.1). Name is the game's

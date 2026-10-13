@@ -11,9 +11,12 @@
 #include "Engine/Scene/Components/ScriptComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/SceneSerializer.h"
+#include "Engine/Scripting/RegisterBindings.h"
+#include "Engine/Scripting/ScriptApiRegistry.h"
 #include "Engine/Scripting/ScriptCompiler.h"
 #include "Engine/Scripting/ScriptLimits.h"
 #include "Engine/Session/PlayInputEventCodec.h"
+#include "Engine/Testing/CoverageGates.h"
 #include "Support/AudioTestData.h"
 #include "Support/ExpectLog.h"
 #include "Support/ScriptTestFixture.h"
@@ -51,7 +54,8 @@ namespace Engine {
 			uint32_t CoverageReads = 0;
 			uint32_t ReplaySessions = 0;
 			bool DivergentReplay = false;
-			bool OwnAudioTime = true; // false: a host that forgets PlaySessionSpecification::OwnsAudioTime
+			bool OwnAudioTime = true;               // false: a host that forgets PlaySessionSpecification::OwnsAudioTime
+			ScriptApiRegistry* ScriptApi = nullptr; // a frozen registry the suite sessions share (null: each session owns one)
 			ReplayDocument Candidate{};
 			Json SceneDocument{};
 			Ref<const ScriptFieldSchemaSource> Schemas{};
@@ -180,6 +184,7 @@ namespace Engine {
 				spec.TestMode = true;
 				spec.TestHook = &hook;
 				spec.TestHost = &host;
+				spec.ScriptApi = ScriptApi;
 				spec.Audio = Audio.get();
 				spec.OwnsAudioTime = OwnAudioTime;
 				spec.Observer = this;
@@ -223,6 +228,7 @@ namespace Engine {
 			}
 			void SetActiveTestSession(PlaySession* session) override { Active = session; }
 			AudioEngine* GetAudioEngine() const override { return Audio.get(); }
+			AssetManager* GetAssetManager() const override { return nullptr; }
 			Status CaptureScreenshot(PlaySession&, std::string_view name) override
 			{
 				Screenshots.emplace_back(name);
@@ -299,6 +305,87 @@ namespace Engine {
 
 	TEST_SUITE("Testing")
 	{
+		// ADR 0022 decision 3: Testing.CoverageGates opts a project in; only an unfiltered, non-recording run evaluates.
+		TEST_CASE("TestRunner: a coverage project evaluates every per-mode gate and a gap fails the run" * doctest::skip(true))
+		{
+			RunnerHost host;
+			host.Settings.Testing.CoverageGates = true;
+			host.Suite(R"(return Test.Suite("Covered",function()
+				Test.Case("passes",function() Test.Expect(true) end)
+			end))");
+
+			const TestRunResult result = host.Run();
+			REQUIRE(result.Cases.size() == 1);
+			CHECK(result.Cases[0].Status == "passed");
+			REQUIRE(result.Coverage.Gates.size() == PerModeCoverageGates.size());
+			for (size_t index = 0; index < PerModeCoverageGates.size(); ++index)
+			{
+				CHECK(result.Coverage.Gates[index].Gate == CoverageGateName(PerModeCoverageGates[index]));
+				CHECK(result.Coverage.Gates[index].Evaluated);
+			}
+			CHECK_FALSE(result.Passed);
+			const auto& counters = result.Coverage.Counters;
+			CHECK(std::ranges::is_sorted(counters, {}, &TestCoverageCounter::Id));
+			CHECK(std::ranges::find(counters, "component:Camera", &TestCoverageCounter::Id) != counters.end());
+			CHECK(std::ranges::find(counters, "format:Texture/.png", &TestCoverageCounter::Id) != counters.end());
+
+			FeatureTestRunOptions filteredOptions;
+			filteredOptions.Filter = "Covered";
+			const TestRunResult filtered = host.Run(filteredOptions);
+			CHECK(filtered.Passed);
+			REQUIRE(filtered.Coverage.Gates.size() == PerModeCoverageGates.size());
+			CHECK(std::ranges::none_of(filtered.Coverage.Gates, [](const TestCoverageGateResult& gate)
+			{
+				return gate.Evaluated || gate.Passed;
+			}));
+
+			host.Settings.Testing.CoverageGates = false;
+			const TestRunResult plain = host.Run();
+			CHECK(plain.Passed);
+			CHECK(plain.Coverage.Gates.empty());
+		}
+
+		// ADR 0022 decision 4 (gate 2): FeatureTest covers Test.Fail and Test.Skip without a failed or skipped case row by
+		// calling them through pcall where no case is active (here the suite body, which collects the cases). Each raises a
+		// catchable script error and still counts as called, because dispatch counts calls on entry
+		// (ScriptApiRegistry::GetCoverage); the runner executes a suite body more than once (collection, then the run), so the
+		// count only has to grow. A change to either rule would silently break gate 2, so it is pinned here.
+		TEST_CASE("TestRunner: Test.Fail and Test.Skip outside an active case raise a catchable error and still count as called")
+		{
+			RunnerHost host;
+			ScriptApiRegistry api;
+			REQUIRE(RegisterBindings(api, host.Compiler.GetTypes()));
+			host.ScriptApi = &api;
+			const auto calls = [&api](std::string_view member) -> uint64_t
+			{
+				const Result<ScriptApiCoverage> coverage = api.GetCoverage(RunModes::Editor);
+				REQUIRE_MESSAGE(coverage.has_value(), coverage.error().ToString());
+				const auto found = std::ranges::find_if(coverage->Members, [member](const ScriptApiCounter& counter)
+				{
+					return counter.Owner == "Test" && counter.Member == member;
+				});
+				REQUIRE(found != coverage->Members.end());
+				return found->Calls;
+			};
+			const uint64_t fails = calls("Fail");
+			const uint64_t skips = calls("Skip");
+			host.Suite(R"(return Test.Suite("Terminal",function()
+				local failed, failure = pcall(Test.Fail, "outside a case")
+				local skipped, skip = pcall(Test.Skip, "outside a case")
+				Test.Case("observes",function()
+					Test.Expect(not failed and type(failure) == "string", "Test.Fail raised a catchable error")
+					Test.Expect(not skipped and type(skip) == "string", "Test.Skip raised a catchable error")
+				end)
+			end))");
+
+			const TestRunResult result = host.Run();
+			REQUIRE(result.Cases.size() == 1);
+			CHECK_MESSAGE(result.Cases[0].Status == "passed", result.Cases[0].Message);
+			CHECK(result.Passed);
+			CHECK(calls("Fail") > fails);
+			CHECK(calls("Skip") > skips);
+		}
+
 		TEST_CASE("TestRunner: a case body fault produces one failure and cannot be claimed")
 		{
 			RunnerHost host;

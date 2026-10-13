@@ -386,4 +386,14 @@ namespace Engine {
 		ReportDiagnostic(std::move(diagnostic));
 	}
 
+	void AssetManager::SetLoadObserver(LoadObserver /*observer*/)
+	{
+		ENGINE_CONTRACT_STUB();
+	}
+
+	void AssetManager::NotifyLoaded(AssetHandle /*handle*/) const
+	{
+		ENGINE_CONTRACT_STUB();
+	}
+
 }

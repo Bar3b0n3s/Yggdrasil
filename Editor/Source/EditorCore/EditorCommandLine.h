@@ -10,14 +10,15 @@
 #include <span>
 #include <string>
 
-// The editor's own command-line options (Architecture §12.1, §13.9), the M4 subset and M6's --bake-engine-assets and
-// --engine-cache-dir:
-//   Editor [--project <path>] [--read-only] [--automation[=port]] [--automation-test-hooks] [--batch <file.jsonl>]
-//          [--upgrade] [--dump-reference <dir>] [--bake-engine-assets] [--engine-cache-dir <dir>]
+// The editor's own command-line options (Architecture §12.1, §13.9), the M4 subset, M6's --bake-engine-assets and
+// --engine-cache-dir, M13's --check-scripts, --run-tests and --filter, and M14's --id-seed:
+//   Editor [--project <path>] [--read-only] [--automation[=port]] [--automation-test-hooks] [--batch <file.jsonl>
+//          [--id-seed <n>]] [--upgrade] [--dump-reference <dir>] [--bake-engine-assets] [--engine-cache-dir <dir>]
+//          [--check-scripts] [--run-tests [--filter <pattern>]]
 // plus the engine options every application takes (GetEngineCommandLineOptions: --headless, --frames N,
 // --user-data-dir, --renderer vulkan|none and the graphics options) and the Editor executable's screenshot options
 // (Editor/EditorApp.h). --renderer is an engine option because the Runtime takes it too (§13.9; ADR 0009 decision 3:
-// one definition after the M4/M5 merge, decision 33). --run-tests, --check-scripts, --validate, --export and --timeout
+// one definition after the M4/M5 merge, decision 33). --junit (stream A of M14), --validate, --export and --timeout
 // arrive with their milestones. Parsed in EditorCore so the rules are unit-tested;
 // EditorApp applies them.
 
@@ -45,6 +46,17 @@ namespace Engine {
 		bool CheckScripts = false;
 		bool RunTests = false;
 		std::string TestFilter{};
+		// M14 (Architecture §12.1, §15.5; Docs/Decisions/0022-m14-contract.md decision 7): --junit <file.xml>, only with
+		// --run-tests, names the JUnit report --run-tests writes; the JSON report goes beside it with the extension replaced
+		// by .json. Without it the reports are <working directory>/bin/TestResults/FeatureTest-Editor.xml and .json. Native,
+		// absolute or relative to the working directory; parent directories are created. Written whatever the outcome,
+		// independent of the automation server's offload directory and its cleanup.
+		std::optional<std::filesystem::path> TestJunitPath{};
+		// M14 (decision 8; implemented by the contract, so streams B and C can check their scaffolds from the start): --id-seed
+		// <n>, only with --batch: a decimal 64-bit seed whose Random(n).GetState() becomes the editor's id generator state
+		// (EditorContextSpecification::IdGeneratorState), so a committed scaffold run gives the same entity ids and asset
+		// handles on every machine. Without it the state comes from the OS CSPRNG.
+		std::optional<uint64_t> IdSeed{};
 		// --dump-reference <dir>: write <dir>/Methods.json (MethodRegistry::BuildMethodCatalog) and <dir>/catalog.json
 		// (BuildToolCatalog, the MCP catalogue, ADR 0008 decision 9), creating <dir>, and exit with 0 (§2.3 GenerateDocs.py).
 		std::optional<std::filesystem::path> DumpReferenceDirectory{};

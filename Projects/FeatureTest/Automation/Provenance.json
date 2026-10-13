@@ -1044,9 +1044,9 @@
 		},
 		{
 			"Path": "FeatureTest.eproj",
-			"XXH64": "d663c7e6173b360c",
-			"Method": "project.create",
-			"RequestId": 1,
+			"XXH64": "a86116a4b9a07e46",
+			"Method": "project.setSettings",
+			"RequestId": 2,
 			"Client": "batch",
 			"TranscriptLine": null
 		}

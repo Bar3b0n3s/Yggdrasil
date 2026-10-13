@@ -460,6 +460,12 @@ namespace Engine {
 			state.Session->SetViewSize(size->x, size->y);
 	}
 
+	Status EditorPlayController::CheckReloadTypes(AssetHandle /*script*/)
+	{
+		ENGINE_CONTRACT_STUB();
+		return std::unexpected(Error(ErrorCode::Unsupported, "M14 reload type gate contract"));
+	}
+
 	void EditorPlayController::OnAssetReload(AssetHandle source)
 	{
 		if (PlaySession* session = GetSession())

@@ -30,16 +30,21 @@
 
 namespace Engine {
 
-	// A windowed run gets --audio-device none (Test::WithoutAudioDevice).
+	// A windowed run gets --audio-device none (Test::WithoutAudioDevice). `workingDirectory` empty: the test process's. A
+	// --run-tests run without --junit writes its reports below its working directory (ADR 0022 decision 7), so such a run
+	// passes --junit into its temporary directory or runs there.
 	static Result<ProcessResult> RunEditor(const Test::TempDirectory& userData, std::vector<std::string> arguments,
-		std::chrono::milliseconds timeout, std::vector<std::pair<std::string, std::string>> environment = {})
+		std::chrono::milliseconds timeout, std::vector<std::pair<std::string, std::string>> environment = {}, std::filesystem::path workingDirectory = {})
 	{
 		ENGINE_TRY_ASSIGN(std::filesystem::path editor, Test::GetBuiltExecutablePath("Editor"));
 		arguments = Test::WithoutAudioDevice(std::move(arguments));
 		arguments.push_back("--user-data-dir=" + Test::PathToUtf8(userData.GetPath()));
 		arguments.push_back("--engine-cache-dir=" + Test::PathToUtf8(userData / "EngineCache"));
-		return Process::Run(
-			{ .Executable = std::move(editor), .Arguments = std::move(arguments), .Environment = std::move(environment) }, timeout);
+		return Process::Run({ .Executable = std::move(editor),
+								.Arguments = std::move(arguments),
+								.WorkingDirectory = std::move(workingDirectory),
+								.Environment = std::move(environment) },
+			timeout);
 	}
 
 	// Creates the project <directory>/<name> (Empty template) for an editor process to open.
@@ -288,6 +293,76 @@ end)
 			REQUIRE(failed.has_value());
 			CHECK(failed->ExitCode == ExitCode::Failed);
 			CHECK(failed->StandardError.contains("line 1"));
+		}
+
+		// ADR 0022 decision 8 (implemented by the contract): a committed scaffold's batch run with --id-seed writes the same entity
+		// ids and asset handles every time and on every machine, and another seed gives other ids. Like every scaffold it ends
+		// with project.refreshAssets, so the new scene's .meta (its handle) is written inside the seeded run.
+		TEST_CASE("EditorApp: --id-seed makes a batch run's entity ids and asset handles reproducible")
+		{
+			Test::EditorTestFixture fixture("EditorIdSeed");
+			const auto run = [&fixture](std::string_view name, std::string_view seed)
+			{
+				const std::filesystem::path projectFile = CreateProcessTestProject(fixture, name);
+				const std::string open = Json{ { "method", "project.open" }, { "params", Json{ { "path", Test::PathToUtf8(projectFile) } } } }.dump();
+				const std::string batch = open + "\n" + R"({"method":"scene.new","params":{"path":"Assets/Scenes/Main.scene"}})" + "\n" + R"({"method":"entity.create","params":{"name":"Board"}})" + "\n" + R"({"method":"scene.save","params":{}})" + "\n" + R"({"method":"project.refreshAssets","params":{}})" + "\n";
+				const std::filesystem::path batchPath = fixture.GetDirectory() / (std::string(name) + ".jsonl");
+				WriteProcessTestFile(batchPath, batch);
+				const Result<ProcessResult> result = RunEditor(fixture.GetDirectory(),
+					{ "--headless", "--renderer", "none", "--batch", Test::PathToUtf8(batchPath), "--id-seed", std::string(seed) }, std::chrono::seconds(60));
+				REQUIRE_MESSAGE(result.has_value(), result.error().ToString());
+				REQUIRE_MESSAGE(result->ExitCode == ExitCode::Success, result->StandardError);
+				const Result<std::string> scene = FileSystem::ReadText(projectFile.parent_path() / "Assets/Scenes/Main.scene");
+				const Result<std::string> meta = FileSystem::ReadText(projectFile.parent_path() / "Assets/Scenes/Main.scene.meta");
+				REQUIRE((scene.has_value() && meta.has_value()));
+				return std::pair<std::string, std::string>{ *scene, *meta };
+			};
+			const auto first = run("SeedA", "1401");
+			const auto second = run("SeedB", "1401");
+			CHECK(first.first.contains(R"("Board")"));
+			CHECK(first.first == second.first);
+			CHECK(first.second == second.second);
+			const auto other = run("SeedC", "1402");
+			CHECK(other.first != first.first);
+			CHECK(other.second != first.second);
+		}
+
+		// ADR 0022 decision 7 (stream A): --run-tests writes the JUnit report to --junit and the JSON report beside it, or both
+		// to <working directory>/bin/TestResults/FeatureTest-Editor.{xml,json}, from the run's result whatever its outcome,
+		// independent of the automation server's offload directory (which the server removes at exit).
+		TEST_CASE("EditorApp: --run-tests writes its JUnit and JSON reports to --junit or below the working directory" * doctest::skip(true))
+		{
+			Test::EditorTestFixture fixture("RunTestsReports");
+			const std::filesystem::path projectFile = CreateProcessTestProject(fixture, "Reports");
+			WriteProcessTestFile(projectFile.parent_path() / "Assets/Tests/Reports.test.luau",
+				"return Test.Suite(\"Reports\", function() Test.Case(\"fails\", function() Test.Expect(false, \"report failure\") end) end)\n");
+			const Json suites = Json::array({ Json{ { "Script", "Assets/Tests/Reports.test.luau" } } });
+			const std::string patch = Json{ { "method", "project.setSettings" }, { "params", Json{ { "patch", Json{ { "Testing", Json{ { "Suites", suites } } } } } } } }.dump();
+			const std::string open = Json{ { "method", "project.open" }, { "params", Json{ { "path", Test::PathToUtf8(projectFile) } } } }.dump();
+			WriteProcessTestFile(fixture.GetDirectory() / "Suites.jsonl", open + "\n" + patch + "\n");
+			const Result<ProcessResult> configured =
+				RunEditor(fixture.GetDirectory(), { "--headless", "--renderer", "none", "--batch", Test::PathToUtf8(fixture.GetDirectory() / "Suites.jsonl") }, std::chrono::seconds(60));
+			REQUIRE(configured.has_value());
+			REQUIRE_MESSAGE(configured->ExitCode == ExitCode::Success, configured->StandardError);
+
+			const std::filesystem::path junit = fixture.GetDirectory() / "Reports" / "Run.xml";
+			const Result<ProcessResult> explicitPath = RunEditor(fixture.GetDirectory(),
+				{ "--headless", "--renderer", "none", "--project", Test::PathToUtf8(projectFile), "--run-tests", "--junit", Test::PathToUtf8(junit) }, std::chrono::seconds(120));
+			REQUIRE(explicitPath.has_value());
+			CHECK_MESSAGE(explicitPath->ExitCode == ExitCode::Failed, explicitPath->StandardError);
+			CHECK(FileSystem::ReadText(junit).value_or("").contains("report failure"));
+			const Result<std::string> json = FileSystem::ReadText(fixture.GetDirectory() / "Reports" / "Run.json");
+			REQUIRE_MESSAGE(json.has_value(), json.error().ToString());
+			CHECK(json->contains("report failure"));
+
+			const std::filesystem::path workingDirectory = fixture.GetDirectory() / "Cwd";
+			REQUIRE(FileSystem::CreateDirectories(workingDirectory));
+			const Result<ProcessResult> defaultPath = RunEditor(fixture.GetDirectory(),
+				{ "--headless", "--renderer", "none", "--project", Test::PathToUtf8(projectFile), "--run-tests" }, std::chrono::seconds(120), {}, workingDirectory);
+			REQUIRE(defaultPath.has_value());
+			CHECK(defaultPath->ExitCode == ExitCode::Failed);
+			CHECK(FileSystem::Exists(workingDirectory / "bin/TestResults/FeatureTest-Editor.xml"));
+			CHECK(FileSystem::Exists(workingDirectory / "bin/TestResults/FeatureTest-Editor.json"));
 		}
 
 		TEST_CASE("EditorApp: --upgrade appends its transcript lines and records provenance")

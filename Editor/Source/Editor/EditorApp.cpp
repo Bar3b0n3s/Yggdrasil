@@ -25,6 +25,7 @@
 #include "EditorCore/Inspector/ReflectedEditController.h"
 #include "EditorCore/Play/EditorPlayController.h"
 #include "EditorCore/Project/ProjectManager.h"
+#include "EditorCore/Reference/ReferenceGenerator.h"
 #include "EditorCore/ShownSceneTracker.h"
 #include "EditorCore/Viewport/GizmoController.h"
 #include "Engine/App/CommandLine.h"
@@ -37,13 +38,13 @@
 #include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/AssetPipeline/EngineAssetBaker.h"
 #include "Engine/AssetPipeline/ImporterRegistry.h"
-#include "Engine/Automation/Protocol/MethodRegistry.h"
 #include "Engine/Core/EventLog.h"
 #include "Engine/Core/FatalError.h"
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Core/Json/JsonWriter.h"
 #include "Engine/Core/Log.h"
+#include "Engine/Core/Random.h"
 #include "Engine/Core/Utf8.h"
 #include "Engine/Graphics/GpuProfiler.h"
 #include "Engine/Graphics/GraphicsDevice.h"
@@ -207,13 +208,6 @@ namespace Engine {
 			return std::filesystem::path(ENGINE_REPO_ROOT);
 		}
 
-		// Writes `document` canonically (JsonWriter, pretty) to `file`.
-		[[nodiscard]] static Status WriteReferenceFile(const std::filesystem::path& file, const Json& document)
-		{
-			ENGINE_TRY_ASSIGN(const std::string text, JsonWriter::Write(document, JsonStyle::Pretty));
-			return FileSystem::WriteFileAtomic(file, std::as_bytes(std::span(text.data(), text.size())), { .KeepBackup = false });
-		}
-
 		// --bake-engine-assets (§7.5, ADR 0010 decision 13): bakes every File and Generated entry of engine://EngineAssets.json
 		// into enginecache:// with the built-in importers, the editor's generators (EditorCore/EngineAssetGenerators.h) and,
 		// with a device, the GPU environment baker (M8); without one (--renderer none, no Vulkan device) the environments are
@@ -260,23 +254,6 @@ namespace Engine {
 			return failed ? ExitCode::Failed : ExitCode::Success;
 		}
 
-		// --dump-reference <dir>: Methods.json and catalog.json (ADR 0008 decision 9), from every method but the test hooks.
-		[[nodiscard]] static Status DumpReference(const TypeRegistry& types, const ScriptApiRegistry& scripts, const std::filesystem::path& directory)
-		{
-			MethodRegistry methods(types);
-			RegisterEditorMethods(methods, EditorMethodOptions{ .TestHooks = false });
-			methods.Freeze();
-			ENGINE_TRY(FileSystem::CreateDirectories(directory));
-			ENGINE_TRY(WriteReferenceFile(directory / "Methods.json", methods.BuildMethodCatalog()));
-			ENGINE_TRY(WriteReferenceFile(directory / "catalog.json", methods.BuildToolCatalog()));
-			ENGINE_TRY_ASSIGN(const std::string definitions, scripts.GenerateDefinitions());
-			ENGINE_TRY_ASSIGN(const std::string documentation, scripts.GenerateDocumentation());
-			ENGINE_TRY(FileSystem::WriteFileAtomic(directory / "Engine.d.luau", std::as_bytes(std::span(definitions.data(), definitions.size())), { .KeepBackup = false }));
-			ENGINE_TRY(FileSystem::WriteFileAtomic(directory / "ScriptAPI.md", std::as_bytes(std::span(documentation.data(), documentation.size())), { .KeepBackup = false }));
-			ENGINE_INFO("Wrote the method catalogue ({} methods), MCP tools and script references", methods.GetMethods().size());
-			return {};
-		}
-
 	}
 
 	EditorApp::EditorApp(ApplicationSpecification specification, EditorAppOptions options)
@@ -295,7 +272,7 @@ namespace Engine {
 
 		if (options.DumpReferenceDirectory.has_value())
 		{
-			ENGINE_TRY(Utils::DumpReference(app.GetContext().GetTypeRegistry(), app.GetContext().GetScriptApiRegistry(), *options.DumpReferenceDirectory));
+			ENGINE_TRY(DumpReferences(app.GetContext().GetTypeRegistry(), app.GetContext().GetScriptApiRegistry(), *options.DumpReferenceDirectory));
 			app.RequestExit(ExitCode::Success);
 			return {};
 		}
@@ -324,6 +301,10 @@ namespace Engine {
 		editorSpecification.TemplatesDirectory = repository / "Resources" / "Templates" / "Projects";
 		editorSpecification.ReadOnlyCacheRoot = userData.Root / "ReadOnlyCache";
 		editorSpecification.EnvironmentBaker = state.Baker.get();
+		// --id-seed (ADR 0022 decision 8): a committed scaffold's batch run writes the same entity ids and asset handles on
+		// every machine; without it the generator is seeded from the OS CSPRNG.
+		if (options.IdSeed.has_value())
+			editorSpecification.IdGeneratorState = Random(*options.IdSeed).GetState();
 		ENGINE_TRY_ASSIGN(state.Editor, EditorContext::Create(app.GetContext(), editorSpecification));
 		state.Saves = CreateScope<Autosave>(*state.Editor);
 		state.Recovery = CreateScope<EditorHostRecovery>(*state.Editor, *state.Saves);

@@ -1088,6 +1088,22 @@ return Script.Define("Host", Host)
 			CHECK_FALSE(editor.GetPlay().IsPlaying());
 			CHECK_FALSE(editor.GetAssets().AreReloadsDeferred());
 		}
+
+		// Architecture §11.7 `type` kind and §11.8 (ADR 0022 decision 15): with Scripting.BlockPlayOnTypeErrors, a hot reload
+		// whose import check reports SCRIPT_TYPE_ERROR keeps the running code and publishes one ScriptError of kind Type with the
+		// finding's location and Callback "Reload"; without the setting the reload proceeds as before. CheckReloadTypes is the
+		// shared gate: an ordinary session applies it only with the setting, a test session always (type errors always block
+		// test runs, §11.9), which is how Test.ReloadScript takes "the same path".
+		TEST_CASE("EditorPlayController: a reload refused for type errors keeps the running code and reports a type error" * doctest::skip(true))
+		{
+			const auto source = Test::ReadTestDataText("Scripts/Errors/TypeReload.luau");
+			REQUIRE_MESSAGE(source.has_value(), source.error().ToString());
+			Test::EditorTestFixture fixture("ReloadTypeGate");
+			fixture.CreateAndOpenProject();
+			CHECK(fixture.GetEditor().GetPlay().CheckReloadTypes(AssetHandle(0x7e57)).has_value());
+			FAIL("contract skeleton: play a behaviour, rewrite it with the fixture's type error, check CheckReloadTypes in an ordinary "
+				 "session with and without the setting and in a test session, then reload and check the Type script error");
+		}
 	}
 
 }

@@ -99,6 +99,34 @@ class ScriptModeTests(AutomationTestCase):
                 self.assertTrue(reports[0].with_suffix(".xml").is_file())
         return hashes
 
+    @unittest.skip("contract stub: ADR 0022 decisions 5 and 7 (stream A)")
+    def test_exported_coverage_run_counts_cooked_loads_in_its_mode_report(self) -> None:
+        # The Runtime host observes loads through its RuntimeAssetManager (IFeatureTestHost::GetAssetManager), so an
+        # unfiltered --feature-test of a project with Testing.CoverageGates counts the cooked suite script by its pak path and
+        # evaluates the six per-mode gates; the report is <working directory>/bin/TestResults/FeatureTest-Release.json.
+        client = self.connect(self.start_editor())
+        self.create_project(client, TINY_GAME_NAME)
+        build_tiny_game(client)
+        client.call("script.write", {"path": "Assets/Tests/Cooked.test.luau", "source": POWER_SUITE})
+        client.call("project.setSettings", {"patch": {"Export": {"Exclude": []}, "Testing": {"CoverageGates": True, "Suites": [{
+            "Script": "Assets/Tests/Cooked.test.luau", "Scene": TINY_SCENE}]}}})
+        client.call("scene.save")
+        executable = exported_executable(export_tiny_game(client, automation_config()))
+        manifest_path = executable.parent / "Game.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["Testing"] = True
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+        working = self.directory / "Coverage"
+        working.mkdir()
+        arguments = [str(executable), "--headless", "--feature-test", "--renderer", "none", "--user-data-dir",
+                     str(working / "UserData")]
+        subprocess.run(arguments, cwd=working, stdin=subprocess.DEVNULL, capture_output=True, timeout=120.0, check=False)
+        result = json.loads((working / "bin/TestResults/FeatureTest-Release.json").read_text(encoding="utf-8"))
+        self.assertEqual([gate["gate"] for gate in result["coverage"]["gates"]], ["1", "1b", "2", "3", "4", "9"])
+        script = next(counter for counter in result["coverage"]["counters"] if counter["id"] == "format:Script/.luau")
+        self.assertGreaterEqual(script["count"], 1)
+        self.assertTrue((working / "bin/TestResults/FeatureTest-Release.xml").is_file())
+
     def test_exported_feature_test_runs_cooked_scripts_with_the_editor_state_hash(self) -> None:
         # PreCommit supplies Debug; the CI automation stage supplies Release. The milestone's configuration audit
         # additionally calls check_modes with Debug, Release and Dist after building all three.

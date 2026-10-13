@@ -1735,6 +1735,12 @@ namespace Engine {
 		return ValidatorCodes;
 	}
 
+	std::span<const ValidationCodeInfo> ProjectValidator::GetCodeInfos()
+	{
+		ENGINE_CONTRACT_STUB();
+		return {};
+	}
+
 	std::string_view ProjectValidator::MapLoadCode(std::string_view loadCode)
 	{
 		// ADR 0006 decision 35. SCENE_INVALID_COMPONENT has no single validator code: the validator runs its own registry

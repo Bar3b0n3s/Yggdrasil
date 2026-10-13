@@ -335,7 +335,9 @@ namespace Engine {
 			.Field("CaseTimeoutTicks", &TestingSettings::CaseTimeoutTicks, "Ticks after which a test case fails with a timeout.",
 				{ .Min = 1.0, .Unit = "ticks" })
 			.Field("SuiteTickLimit", &TestingSettings::SuiteTickLimit, "Ticks after which a whole test suite fails with a timeout.",
-				{ .Min = 1.0, .Unit = "ticks" });
+				{ .Min = 1.0, .Unit = "ticks" })
+			.Field("CoverageGates", &TestingSettings::CoverageGates,
+				"Whether unfiltered test runs record coverage and fail on any gap of the per-mode coverage gates (FeatureTest).");
 
 		registry.Struct<ProjectSettings>("ProjectSettings", "The settings of a project: the .eproj file below its header.")
 			.Field("Name", &ProjectSettings::Name, "Display name of the game; exported games name their user-data folder after it.")

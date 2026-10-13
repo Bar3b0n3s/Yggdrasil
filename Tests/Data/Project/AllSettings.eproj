@@ -85,6 +85,7 @@
 		],
 		"Replays": ["Assets/Tests/Replays/*.replay"],
 		"CaseTimeoutTicks": 1200,
-		"SuiteTickLimit": 72000
+		"SuiteTickLimit": 72000,
+		"CoverageGates": true
 	}
 }

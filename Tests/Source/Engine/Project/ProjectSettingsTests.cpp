@@ -8,65 +8,13 @@
 #include "Engine/Physics/PhysicsTypes.h"
 #include "Engine/Project/ProjectSerializer.h"
 #include "Engine/Reflection/TypeRegistry.h"
+#include "Support/DefaultFields.h"
 #include "Support/SceneTestFixture.h"
 #include "Support/TestData.h"
 
 #include <nlohmann/json.hpp>
 
 namespace Engine {
-
-	// Collects the JSON pointer of every field below `type` that does not hold a non-default value anywhere in `actual`
-	// (gate 8, §15.6). Struct fields recurse; arrays and maps of structs count a field as covered when any element has a
-	// non-default value for it; other arrays and maps count as covered when they differ from the default.
-	static void CollectDefaultFields(const StructInfo& type, const std::vector<const Json*>& actuals, const Json& defaults,
-		const std::string& pointer, std::vector<std::string>& uncovered)
-	{
-		for (const Scope<FieldInfo>& field : type.GetFields())
-		{
-			if (!field->GetMeta().Serialized)
-				continue;
-			const std::string& name = field->GetName();
-			const std::string fieldPointer = JsonReader::AppendPointer(pointer, name);
-			const TypeInfo& fieldType = field->GetType();
-
-			if (fieldType.GetKind() == FieldType::Struct)
-			{
-				std::vector<const Json*> nested;
-				for (const Json* actual : actuals)
-				{
-					if (actual->contains(name))
-						nested.push_back(&(*actual)[name]);
-				}
-				CollectDefaultFields(*fieldType.GetStruct(), nested, defaults[name], fieldPointer, uncovered);
-				continue;
-			}
-
-			const TypeInfo* element = fieldType.GetElement();
-			if (element != nullptr && element->GetKind() == FieldType::Struct)
-			{
-				std::vector<const Json*> elements;
-				for (const Json* actual : actuals)
-				{
-					if (!actual->contains(name))
-						continue;
-					for (const Json& value : (*actual)[name])
-						elements.push_back(&value);
-				}
-				if (elements.empty())
-					uncovered.push_back(fieldPointer);
-				else
-					CollectDefaultFields(*element->GetStruct(), elements, element->GetStruct()->MakeDefaultJson(), fieldPointer + "/*", uncovered);
-				continue;
-			}
-
-			const bool covered = std::any_of(actuals.begin(), actuals.end(), [&](const Json* actual)
-			{
-				return actual->contains(name) && (*actual)[name] != defaults[name];
-			});
-			if (!covered)
-				uncovered.push_back(fieldPointer);
-		}
-	}
 
 	// The sorted pointers of the errors Validate reports for `object`, an object of a registered struct.
 	template<typename T>
@@ -90,6 +38,35 @@ namespace Engine {
 
 	TEST_SUITE("Project")
 	{
+		// ADR 0022 decision 9: the §15.5 Timing clock [0.004, 0.016, 0.0334, 0.083, 0.5, 0.0] ends with a zero-length frame,
+		// so a frame delta may be 0; an all-zero clock stays invalid (ADR 0019 decision 10), now already in the project file.
+		TEST_CASE("ProjectSettings: a scripted clock may hold zero deltas but not only zeros" * doctest::skip(true))
+		{
+			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
+			const auto reload = [&registry](const std::vector<float>& clock) -> Result<ProjectSettings>
+			{
+				ProjectSettings settings;
+				TestSuiteSettings suite;
+				suite.Script = "Assets/Tests/Timing/Timing.test.luau";
+				suite.Clock = clock;
+				settings.Testing.Suites.push_back(suite);
+				ENGINE_TRY_ASSIGN(const Json document, ProjectSerializer::ToJson(settings, *registry));
+				ProjectLoadReport report;
+				return ProjectSerializer::FromJson(document, *registry, ProjectLoadOptions{}, report);
+			};
+			const Result<ProjectSettings> timing = reload({ 0.004f, 0.016f, 0.0334f, 0.083f, 0.5f, 0.0f });
+			REQUIRE_MESSAGE(timing.has_value(), timing.error().ToString());
+			CHECK(timing->Testing.Suites[0].Clock.size() == 6);
+
+			for (const std::vector<float>& invalid : { std::vector<float>{ 0.0f, 0.0f }, std::vector<float>{ 0.016f, -0.004f } })
+			{
+				const Result<ProjectSettings> rejected = reload(invalid);
+				REQUIRE_FALSE(rejected.has_value());
+				CHECK(rejected.error().GetCode() == ErrorCode::Validation);
+				CHECK(rejected.error().ToString().find("Clock") != std::string::npos);
+			}
+		}
+
 		TEST_CASE("ProjectSettings: AllSettings.eproj sets every field to a non-default value")
 		{
 			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
@@ -107,7 +84,7 @@ namespace Engine {
 			REQUIRE(actual.has_value());
 
 			std::vector<std::string> uncovered;
-			CollectDefaultFields(*type, { &*actual }, type->MakeDefaultJson(), "", uncovered);
+			Test::CollectDefaultFields(*type, { &*actual }, type->MakeDefaultJson(), "", uncovered);
 			std::string listing;
 			for (const std::string& pointer : uncovered)
 				listing += pointer + " ";

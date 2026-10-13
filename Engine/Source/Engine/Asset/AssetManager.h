@@ -11,6 +11,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <span>
 #include <string>
@@ -172,8 +173,30 @@ namespace Engine {
 		// Warning at Warn, through the Engine logger. Renderer/GpuResourceCache reports upload failures here (§8.14 item 7).
 		// An AssetMissingCode diagnostic of a new handle past MaxAssetMissingDiagnostics only counts in the summary.
 		void ReportDiagnostic(AssetDiagnostic diagnostic);
+
+		// --- Load observation (M14: coverage gate 9, Architecture §15.6; Docs/Decisions/0022-m14-contract.md decision 5) --
+
+		// Called with the handle of every successful load of a registered asset: each Load that returns a value (an asset
+		// already loaded included) and each LoadAsync publication of one, on the main thread, after the asset is published.
+		// Never for a procedural built-in, a placeholder or a failure. The observer may make const queries of this manager
+		// (GetReferencePath, GetAssetType, GetMetadata, GetState); it must not load, unload, publish, reimport or install
+		// another observer, and it must not throw. Calls are cheap when no observer is installed (one empty check) and may
+		// repeat for one handle (every frame's Load of a rendered asset), so an observer that records coverage keeps the
+		// handles it has seen (FormatCoverageRecorder).
+		using LoadObserver = std::function<void(AssetHandle handle)>;
+
+		// Installs `observer` (an empty function removes it); one observer at a time, replacing the previous one. The
+		// FeatureTestRunner installs it for the duration of a coverage run and removes it whenever that run ends: on
+		// completion, on cancellation, when Begin fails after installing it, and in ~FeatureTestRunner, so the stored function
+		// never outlives what it captures (FeatureTestRunner.h). Main thread.
+		void SetLoadObserver(LoadObserver observer);
 	protected:
 		AssetManager();
+
+		// Calls the observer SetLoadObserver installed, if any, with `handle`. EditorAssetManager and RuntimeAssetManager call
+		// it after each successful Load return and LoadAsync publication of a registered asset (see SetLoadObserver), with no
+		// internal lock held and outside any iteration over their own tables, so the observer's const queries are safe.
+		void NotifyLoaded(AssetHandle handle) const;
 
 		// Marks a new version of `handle` published (a hot-reload swap, or its first load).
 		void BumpVersion(AssetHandle handle);

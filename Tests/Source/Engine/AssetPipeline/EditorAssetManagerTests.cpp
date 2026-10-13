@@ -388,6 +388,29 @@ namespace Engine {
 			CHECK(AssetCast<TextureData>(*second)->Pixels == texture->Pixels);
 		}
 
+		// ADR 0022 decision 5 (stream A): every successful Load of a registered asset notifies the load observer, an asset
+		// already loaded included; built-ins and failures never do.
+		TEST_CASE("EditorAssetManager: the load observer sees each successful load of a registered asset" * doctest::skip(true))
+		{
+			Test::AssetTestFixture fixture;
+			fixture.WriteProjectFile("Assets/Wood.png", Test::MakeTestPng(8, 8));
+			fixture.OpenProject(false);
+			const std::optional<AssetHandle> handle = fixture.GetManager().Resolve("Assets/Wood.png");
+			REQUIRE(handle.has_value());
+			std::vector<AssetHandle> seen;
+			fixture.GetManager().SetLoadObserver([&seen](AssetHandle loaded)
+			{
+				seen.push_back(loaded);
+			});
+			REQUIRE(fixture.GetManager().Load(*handle).has_value());
+			REQUIRE(fixture.GetManager().Load(*handle).has_value());
+			REQUIRE(fixture.GetManager().Load(BuiltinAssetHandles::CubeMesh).has_value());
+			CHECK_FALSE(fixture.GetManager().Load(AssetHandle(0x0bad0bad0bad0badull)).has_value());
+			fixture.GetManager().SetLoadObserver({});
+			REQUIRE(fixture.GetManager().Load(*handle).has_value());
+			CHECK(seen == std::vector<AssetHandle>{ *handle, *handle });
+		}
+
 		TEST_CASE("EditorAssetManager: refresh reimports a changed source and bumps its version")
 		{
 			Test::AssetTestFixture fixture;

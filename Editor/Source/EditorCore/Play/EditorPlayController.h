@@ -98,6 +98,16 @@ namespace Engine {
 		void OnSafePoint();
 		// Asset publication only queues work: never enters a VM or drains further imports from a publication callback.
 		void OnAssetReload(AssetHandle source);
+		// M14 (Docs/Decisions/0022-m14-contract.md decision 15): the type gate of a play-mode reload of `script`, shared by
+		// OnSafePoint's hot reload and Test.ReloadScript (§11.8 "the same path"; EditorFeatureTestHost::ReloadScript calls it
+		// before reloading). It applies to an ordinary session when Scripting.BlockPlayOnTypeErrors is set and to every test
+		// session, because type errors always block test runs (§11.9). When it applies and the latest import check
+		// (EditorAssetManager::GetScriptCheck) of any script in the active session's ScriptEngine::GetReloadChain(script)
+		// reports a SCRIPT_TYPE_ERROR finding, it publishes one ScriptError of kind Type (Callback "Reload", the first such
+		// finding's file, line, column and message, the session's tick) and returns ErrorCode::Script naming that location;
+		// the caller then keeps the running code. Success without an active session or script VM, or when the gate does not
+		// apply or finds nothing. Main thread, outside VM callbacks.
+		[[nodiscard]] Status CheckReloadTypes(AssetHandle script);
 		// The editor's physical-input ingress. Test/replay ownership and lockstep suppress device input; injected
 		// simulation input uses PlayInput directly. Losing window focus releases the play cursor. Cursor positions arrive in
 		// the Game image's pixels (EditorHostViewports::ToGameEvent); a session with a fixed view (SyncGameView) gets them

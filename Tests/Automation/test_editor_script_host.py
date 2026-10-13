@@ -121,6 +121,29 @@ return Script.Define("Host", Host)
         self.assertIn(".luaurc", str(unavailable.exception.data))
         self.assertEqual(client.call("play.state")["state"], "Edit")
 
+    @unittest.skip("contract stub: ADR 0022 decision 15 (stream D)")
+    def test_reload_refused_for_type_errors_reports_a_type_error(self) -> None:
+        client, _ = self.open_editor_with_scene()
+        path = "Assets/Scripts/Typed.luau"
+        source = '--!strict\nlocal Typed = {}\nfunction Typed:Value(): number return 1 end\nreturn Script.Define("Typed", Typed)'
+        client.call("script.write", {"path": path, "source": source})
+        client.call("entity.create", {"name": "Typed", "components": {"Script": {"Script": path}}})
+        client.call("project.setSettings", {"patch": {"Scripting": {"BlockPlayOnTypeErrors": True}}})
+        client.call("play.start", {"paused": True})
+        probe = 'return Scene.FindByName("Typed"):GetScript():Value()'
+        self.assertEqual(self.eval_play(client, probe), 1)
+        cursor = client.call("script.errors", {"since": "end"})["nextCursor"]
+        client.call("script.write", {"path": path, "source": source.replace("return 1", 'return "two"')})
+        deadline = time.monotonic() + 30.0
+        errors: list[dict] = []
+        while not any(row["kind"] == "type" for row in errors):
+            errors += client.call("script.errors", {"since": cursor})["errors"]
+            if time.monotonic() >= deadline:
+                self.fail(f"the refused reload never published a type error: {errors}")
+        error = next(row for row in errors if row["kind"] == "type")
+        self.assertEqual((error["script"], error["callback"], error["line"]), (path, "Reload", 3))
+        self.assertEqual(self.eval_play(client, probe), 1)
+
     def test_headless_environment_and_cursor_use_real_editor_window(self) -> None:
         client, _ = self.open_editor_with_scene()
         platform = {"win32": "Windows", "linux": "Linux", "darwin": "macOS"}[sys.platform]
