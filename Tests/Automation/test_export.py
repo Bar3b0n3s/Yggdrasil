@@ -183,9 +183,9 @@ class ExportTests(AutomationTestCase):
         self.assert_engine_error(raised.exception, engine_client.VALIDATION_FAILED)
         self.assertEqual([issue["pointer"] for issue in raised.exception.issues], ["/StartScene"])
         self.assertFalse((root / "Build").exists())
+        # The testing param's checks are test_testing_export.py's (stream B, Docs/Decisions/0024-m15-contract.md).
         refusals = (({"config": "Release", "outDir": "Assets/Game"}, engine_client.INVALID_PARAMS, "/outDir"),
-                    ({"config": "Release", "outDir": "Build"}, engine_client.INVALID_PARAMS, "/outDir"),
-                    ({"config": "Release", "testing": True}, engine_client.UNSUPPORTED, "/testing"))
+                    ({"config": "Release", "outDir": "Build"}, engine_client.INVALID_PARAMS, "/outDir"))
         for params, code, pointer in refusals:
             with self.subTest(params=params):
                 with self.assertRaises(engine_client.EngineError) as refused:

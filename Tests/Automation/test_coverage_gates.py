@@ -66,6 +66,26 @@ class FeatureReportTests(unittest.TestCase):
                     fixtures += 1
         self.assertEqual(fixtures, len(coverage.PER_MODE_GATES) * len(coverage.MODES))
 
+    def test_exported_reports_are_evaluated_against_their_mode(self) -> None:
+        # The export suite's evaluation (ADR 0024 decision 9): each exported run's report is checked against the mode
+        # of its configuration, so a Release report never passes for Dist, and every per-mode gap fixture names its
+        # uncovered entries with its own mode.
+        for gate in coverage.PER_MODE_GATES:
+            for mode in ("Release", "Dist"):
+                with self.subTest(gate=gate, mode=mode):
+                    directory = GAPS / f"Gate{gate}" / mode
+                    expected = json.loads((directory / "Expected.json").read_text(encoding="utf-8"))
+                    report = coverage.read_feature_report(directory / f"FeatureTest-{mode}.json")
+                    failures = coverage.evaluate_feature_report(report, expected_mode=mode)
+                    self.assertEqual(
+                        sorted(line for line in failures if line.startswith("UNCOVERED")),
+                        [f"UNCOVERED gate {gate} ({mode}): {entry}" for entry in expected["Missing"]],
+                    )
+                    self.assertFalse(any(line.startswith("the report's mode") for line in failures), failures)
+                    other = "Dist" if mode == "Release" else "Release"
+                    mismatched = coverage.evaluate_feature_report(report, expected_mode=other)
+                    self.assertEqual(mismatched[0], f"the report's mode is {mode}, not {other}")
+
     def test_unevaluated_gates_and_skipped_cases_fail_the_feature_suite(self) -> None:
         report = coverage.read_feature_report(GAPS / "Merge" / "Unevaluated" / "FeatureTest-Editor.json")
         failures = coverage.evaluate_feature_report(report)
@@ -220,6 +240,17 @@ class FeatureSuiteTests(unittest.TestCase):
             self.assertEqual(expand(root, ["Assets/Tests/?nput.replay"]), [])
             with self.assertRaises(ValueError):
                 expand(root, ["Assets/Missing.replay"])
+
+    def test_replay_globs_agree_with_the_shared_path_glob_cases(self) -> None:
+        # Tests/Data/PathGlob/Cases.json, which the C++ MatchesPathGlob test runs too (ADR 0024 decision 7): the
+        # determinism suite expands Testing.Replays exactly as the editor, the Runtime and testing exports do.
+        document = json.loads((REPOSITORY_ROOT / "Tests" / "Data" / "PathGlob" / "Cases.json").read_text(encoding="utf-8"))
+        self.assertEqual((document["Format"], document["Version"]), ("PathGlobCases", 1))
+        self.assertTrue(document["Cases"])
+        for case in document["Cases"]:
+            with self.subTest(pattern=case["Pattern"], path=case["Path"]):
+                matched = test_script.glob_regex(case["Pattern"]).match(case["Path"]) is not None
+                self.assertEqual(matched, case["Matches"])
 
     def test_replay_hashes_must_match_the_committed_hash_and_agree_across_configurations(self) -> None:
         outcome = test_script.ReplayOutcome

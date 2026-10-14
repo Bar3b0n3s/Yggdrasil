@@ -207,6 +207,63 @@ namespace Engine {
 			REQUIRE_FALSE(empty.has_value());
 			CHECK(empty.error().GetCode() == ErrorCode::InvalidArgument);
 		}
+
+		// M15 (§12.1, §13.4; Docs/Decisions/0024-m15-contract.md decision 3, stream A).
+		TEST_CASE("EditorCommandLine: --export parses the directory, configuration, testing, smoke-test and report options" * doctest::skip(true))
+		{
+			const Result<EditorLaunchOptions> full = ParseEditorArguments({ "--headless", "--project", "Game", "--export", "Out/Game", "--config", "Dist",
+				"--testing", "--smoke-test", "--export-report", "Out/Report.json" });
+			REQUIRE_MESSAGE(full.has_value(), full.error().ToString());
+			CHECK(full->ExportDirectory == std::filesystem::path("Out/Game"));
+			CHECK(full->ExportConfig == ExportConfiguration::Dist);
+			CHECK(full->ExportTesting);
+			CHECK(full->ExportSmokeTest);
+			CHECK(full->ExportReportPath == std::filesystem::path("Out/Report.json"));
+			CHECK(full->IsOneShot());
+			CHECK_FALSE(full->ListensForAutomation(true));
+
+			const Result<EditorLaunchOptions> plain = ParseEditorArguments({ "--project", "Game", "--export", "Out", "--config", "Release" });
+			REQUIRE_MESSAGE(plain.has_value(), plain.error().ToString());
+			CHECK(plain->ExportConfig == ExportConfiguration::Release);
+			CHECK_FALSE(plain->ExportTesting);
+			CHECK_FALSE(plain->ExportSmokeTest);
+			CHECK_FALSE(plain->ExportReportPath.has_value());
+
+			for (const std::vector<std::string>& refused : std::vector<std::vector<std::string>>{
+					 { "--export", "Out", "--config", "Release" },                       // no project
+					 { "--project", "Game", "--export", "Out" },                         // no configuration
+					 { "--project", "Game", "--export", "Out", "--config", "Shipping" }, // unknown configuration
+					 { "--project", "Game", "--config", "Release" },                     // --config without --export
+					 { "--project", "Game", "--testing" },                               // --testing without --export
+					 { "--project", "Game", "--smoke-test" },                            // --smoke-test without --export
+					 { "--project", "Game", "--export-report", "r.json" },               // --export-report without --export
+					 { "--project", "Game", "--read-only", "--export", "Out", "--config", "Release" },
+					 { "--project", "Game", "--export", "Out", "--config", "Release", "--run-tests" },
+					 { "--project", "Game", "--export", "Out", "--config", "Release", "--automation" },
+					 { "--project", "Game", "--export", "Out", "--config", "Release", "--export-root", "Root" } })
+			{
+				std::string joined;
+				for (const std::string& argument : refused)
+					joined += argument + " ";
+				CAPTURE(joined);
+				const Result<EditorLaunchOptions> options = ParseEditorArguments(refused);
+				REQUIRE_FALSE(options.has_value());
+				CHECK(options.error().GetCode() == ErrorCode::InvalidArgument);
+			}
+		}
+
+		TEST_CASE("EditorCommandLine: --export-root names the root project.export writes under" * doctest::skip(true))
+		{
+			const Result<EditorLaunchOptions> serving = ParseEditorArguments({ "--headless", "--project", "Game", "--export-root", "Exports" });
+			REQUIRE_MESSAGE(serving.has_value(), serving.error().ToString());
+			REQUIRE(serving->ExportRoot.has_value());
+			CHECK(serving->ExportRoot->is_absolute());
+			CHECK(serving->ExportRoot->filename() == "Exports");
+			CHECK_FALSE(serving->IsOneShot());
+			const Result<EditorLaunchOptions> empty = ParseEditorArguments({ "--export-root=" });
+			REQUIRE_FALSE(empty.has_value());
+			CHECK(empty.error().GetCode() == ErrorCode::InvalidArgument);
+		}
 	}
 
 }

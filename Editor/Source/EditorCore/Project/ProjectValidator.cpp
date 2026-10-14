@@ -1948,6 +1948,12 @@ namespace Engine {
 		return {};
 	}
 
+	Result<std::vector<ProjectDiagnostic>> ProjectValidator::CheckTestSuites(const EditorContext& /*context*/)
+	{
+		ENGINE_CONTRACT_STUB();
+		return std::unexpected(Error(ErrorCode::Unsupported, "M15 test suite check contract (stream B)"));
+	}
+
 	void RegisterProjectValidatorTypes(TypeRegistry& registry)
 	{
 		registry.Enum<ValidationScope>("ValidationScope", "What project.validate checks.")

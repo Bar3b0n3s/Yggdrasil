@@ -137,11 +137,15 @@ def read_feature_report(path: Path) -> FeatureReport:
     return FeatureReport(path, mode, passed, tuple(skipped), tuple(counters), tuple(gates))
 
 
-def evaluate_feature_report(report: FeatureReport) -> list[str]:
-    """The failures of one editor run for the feature suite, empty when it passes: the run did not pass; a gate of
-    PER_MODE_GATES is absent, unevaluated or failed (one "UNCOVERED gate <gate> (<mode>): <id>" line per missing id); a
-    case row was skipped (FeatureTest allows no skipped case, decision 7)."""
+def evaluate_feature_report(report: FeatureReport, expected_mode: str | None = None) -> list[str]:
+    """The failures of one run for the feature suite (the Editor run) or the export suite (the exported Release and Dist
+    runs, Docs/Decisions/0024-m15-contract.md decision 9), empty when it passes: the report's mode is not
+    `expected_mode` when one is given (first, so an exported report can never stand in for another mode's); the run did
+    not pass; a gate of PER_MODE_GATES is absent, unevaluated or failed (one "UNCOVERED gate <gate> (<mode>): <id>" line
+    per missing id); a case row was skipped (FeatureTest allows no skipped case, decision 7)."""
     failures: list[str] = []
+    if expected_mode is not None and report.mode != expected_mode:
+        failures.append(f"the report's mode is {report.mode}, not {expected_mode}")
     if not report.passed:
         failures.append(f"the {report.mode} run did not pass")
     gates = {gate.gate: gate for gate in report.gates}

@@ -1,0 +1,29 @@
+{
+	"Format": "PathGlobCases",
+	"Version": 1,
+	"Cases": [
+		{ "Pattern": "Assets/Tests/**", "Path": "Assets/Tests/Level.scene", "Matches": true },
+		{ "Pattern": "Assets/Tests/**", "Path": "Assets/Tests/Deep/Er/Module.luau", "Matches": true },
+		{ "Pattern": "Assets/Tests/**", "Path": "Assets/TestsOther/Level.scene", "Matches": false },
+		{ "Pattern": "Assets/Tests/Replays/*.replay", "Path": "Assets/Tests/Replays/Input.replay", "Matches": true },
+		{ "Pattern": "Assets/Tests/Replays/*.replay", "Path": "Assets/Tests/Replays/Old/Input.replay", "Matches": false },
+		{ "Pattern": "Assets/Tests/Replays/*.replay", "Path": "Assets/Tests/Replays/Input.replay.meta", "Matches": false },
+		{ "Pattern": "Assets/**/Old.png", "Path": "Assets/Old.png", "Matches": true },
+		{ "Pattern": "Assets/**/Old.png", "Path": "Assets/A/B/Old.png", "Matches": true },
+		{ "Pattern": "Assets/**/Old.png", "Path": "Assets/AOld.png", "Matches": false },
+		{ "Pattern": "Assets/**/*.replay", "Path": "Assets/Tests/Replays/Deep/Determinism.replay", "Matches": true },
+		{ "Pattern": "Assets/Level?.scene", "Path": "Assets/Level1.scene", "Matches": true },
+		{ "Pattern": "Assets/Level?.scene", "Path": "Assets/Level10.scene", "Matches": false },
+		{ "Pattern": "Assets/?", "Path": "Assets//", "Matches": false },
+		{ "Pattern": "Assets/Tests/?nput.replay", "Path": "Assets/Tests/Replays/Input.replay", "Matches": false },
+		{ "Pattern": "Assets/level1.scene", "Path": "Assets/Level1.scene", "Matches": false },
+		{ "Pattern": "Assets/Exact.scene", "Path": "Assets/Exact.scene", "Matches": true },
+		{ "Pattern": "Assets/Exact.scene", "Path": "Assets/Exact.scene.meta", "Matches": false },
+		{ "Pattern": "", "Path": "Assets/Exact.scene", "Matches": false },
+		{ "Pattern": "**", "Path": "Assets/Any/Thing.png", "Matches": true },
+		{ "Pattern": "Assets/Drafts/**", "Path": "Assets/Drafts/Sketch.scene", "Matches": true },
+		{ "Pattern": "Assets/Te.ts/*", "Path": "Assets/Tests/Level.scene", "Matches": false },
+		{ "Pattern": "Assets/[a]/*", "Path": "Assets/a/Level.scene", "Matches": false },
+		{ "Pattern": "Assets/[a]/*", "Path": "Assets/[a]/Level.scene", "Matches": true }
+	]
+}

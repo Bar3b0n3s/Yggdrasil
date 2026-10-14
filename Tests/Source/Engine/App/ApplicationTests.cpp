@@ -22,6 +22,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace Engine {
@@ -569,6 +570,34 @@ namespace Engine {
 			CHECK_FALSE(defaults.MaxFrames.has_value());
 			CHECK(defaults.UserDataRoot.empty());
 			CHECK(defaults.ThrottleHeadless);
+		}
+
+		// M15 (§13.9; Docs/Decisions/0024-m15-contract.md decision 17, stream D).
+		TEST_CASE("ApplyEngineCommandLine: --log-level sets the minimum level of every logger" * doctest::skip(true))
+		{
+			const std::span<const CommandLineOption> options = GetEngineCommandLineOptions();
+			REQUIRE(std::ranges::any_of(options, [](const CommandLineOption& option)
+			{
+				return option.Name == "--log-level";
+			}));
+			for (const auto& [text, level] : std::vector<std::pair<std::string, LogLevel>>{
+					 { "trace", LogLevel::Trace }, { "info", LogLevel::Info }, { "warn", LogLevel::Warn }, { "error", LogLevel::Error }, { "critical", LogLevel::Critical } })
+			{
+				CAPTURE(text);
+				const std::vector<std::string> arguments = { "--headless", "--log-level", text };
+				const Result<CommandLine> commandLine = CommandLine::Parse(arguments, options);
+				REQUIRE(commandLine.has_value());
+				ApplicationSpecification specification;
+				REQUIRE(ApplyEngineCommandLine(*commandLine, specification).has_value());
+				CHECK(specification.MinimumLogLevel == std::optional<LogLevel>(level));
+			}
+			const std::vector<std::string> invalid = { "--log-level", "verbose" };
+			const Result<CommandLine> commandLine = CommandLine::Parse(invalid, options);
+			REQUIRE(commandLine.has_value());
+			ApplicationSpecification specification;
+			const Status applied = ApplyEngineCommandLine(*commandLine, specification);
+			REQUIRE_FALSE(applied.has_value());
+			CHECK(applied.error().GetCode() == ErrorCode::InvalidArgument);
 		}
 
 		TEST_CASE("ApplyEngineCommandLine: the graphics options set the renderer and the graphics specification")

@@ -103,6 +103,9 @@ namespace Engine {
 			specification.Configuration = params.Config;
 			specification.OutputDirectory = params.OutDir;
 			specification.BinaryRoot = binaryRoot;
+			// Editor --export-root (§13.4; M15, ADR 0024 decision 3; wired by the contract): empty unless the editor was started
+			// with it.
+			specification.ExportRoot = context.GetServer().GetSpecification().ExportRoot;
 			specification.SmokeTest = params.SmokeTest;
 			ENGINE_TRY_ASSIGN(Scope<Exporter> exporter, Exporter::Start(context.GetEditor(), specification));
 			return Scope<PendingOperation>(CreateScope<ProjectExportOperation>(std::move(exporter)));

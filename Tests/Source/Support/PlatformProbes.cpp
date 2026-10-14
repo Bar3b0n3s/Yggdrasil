@@ -169,6 +169,12 @@ namespace Engine {
 			text.Text = std::string_view(unreadable - readableBytes, readableBytes + unreadableBytes);
 			return text;
 		}
+
+		Result<ExecutableResourceProbe> ProbeExecutableResources(const std::filesystem::path& /*executable*/)
+		{
+			ENGINE_CONTRACT_STUB();
+			return MakeError(ErrorCode::Unsupported, "M15 executable resource probe contract (stream A)");
+		}
 #elif defined(ENGINE_PLATFORM_LINUX) || defined(ENGINE_PLATFORM_MACOS)
 		Status StartProcessInheritingOutput(const std::filesystem::path& executable, std::span<const std::string> arguments)
 		{

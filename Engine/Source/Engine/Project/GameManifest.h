@@ -28,8 +28,9 @@
 // the project loader's rules. Paths are relative to the manifest's directory, forward slashes, VfsPath rules (no "..", no
 // absolute paths, no reserved names); Paks holds exactly two entries, Engine.pak then Game.pak (§14.1). Hashes and the
 // start scene are 16 lowercase hex digits (§4.8: never JSON numbers). "Testing": true admits the M13 Runtime's
-// --feature-test runner over cooked suites and replays. Both boolean values round-trip; enabling the exporter to assemble
-// testing exports remains M15. The flag does not expose automation or a source compiler in Dist.
+// --feature-test runner over cooked suites and replays. Both boolean values round-trip; the exporter writes true for a
+// testing export (ExportSpecification::Testing, M15; Docs/Decisions/0024-m15-contract.md decision 6). The flag does not
+// expose automation or a source compiler in Dist.
 
 namespace Engine {
 
@@ -80,5 +81,11 @@ namespace Engine {
 		// path as the location's file.
 		[[nodiscard]] static Result<GameManifest> LoadFromFile(const std::filesystem::path& path);
 	};
+
+	// The user-data root of a --feature-test run of a testing export without an explicit root (§14.3; ADR 0024 decision 6):
+	// "<export>/bin/TestUserData", where <export> is the directory of `manifestPath` (an absolute Game.json path), or, for
+	// the manifest of a macOS bundle (".../<Name>.app/Contents/Resources/Game.json"), the directory that holds the .app, so
+	// a test run never writes into the signed bundle. ProcessContext appends the manifest's Name. Pure (no file access).
+	[[nodiscard]] std::filesystem::path GetTestingUserDataRoot(const std::filesystem::path& manifestPath);
 
 }

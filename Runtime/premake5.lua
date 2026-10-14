@@ -53,4 +53,10 @@ project "Runtime"
 	filter "system:macosx"
 		linkoptions { "-Wl,-rpath,@executable_path/../Frameworks" }
 
+	-- Exported Linux games look for shared libraries next to the executable first (§14.1, §16: RPATH $ORIGIN). The single
+	-- quotes keep the shell from expanding it; make and ninja both turn $$ into $ (the portability stage checks the
+	-- generated link lines, Docs/Decisions/0024-m15-contract.md decision 18).
+	filter "system:linux"
+		linkoptions { "-Wl,-rpath,'$$ORIGIN'" }
+
 	filter {}

@@ -5,6 +5,7 @@
 #include "EditorCore/EngineAssetGenerators.h"
 #include "EditorCore/Export/ExecutableResources.h"
 #include "EditorCore/Export/Private/ExportPaths.h"
+#include "EditorCore/Export/TestingExport.h"
 #include "EditorCore/Project/ProjectManager.h"
 #include "EditorCore/Scripting/EditorScriptService.h"
 #include "Engine/App/EngineContext.h"
@@ -286,6 +287,17 @@ namespace Engine {
 			return std::nullopt;
 		}
 
+		// M15 stream A (ADR 0024 decision 3): Editor --export's absolute package directory (ExportSpecification::OutputPath)
+		// and its refusal rules (relative, a root, or the project, BinaryRoot, the working directory or the user-data root or
+		// an ancestor of one). Until it lands, a specification that sets it is refused; every other export is unaffected.
+		[[nodiscard]] Status CheckOutputPath(const ExportSpecification& specification)
+		{
+			ENGINE_CONTRACT_STUB();
+			if (specification.OutputPath.empty())
+				return {};
+			return MakeError(ErrorCode::Unsupported, "an absolute output path (Editor --export) arrives with M15 stream A");
+		}
+
 	}
 
 	struct Exporter::State
@@ -304,6 +316,8 @@ namespace Engine {
 		// copied Runtime.
 		ExecutableResources Resources{};
 		std::vector<AssetHandle> Sources{}; // the included main assets, sorted
+		// A testing export's forced content (CollectTestingExportContent; empty for a plain export).
+		TestingExportContent TestingContent{};
 		std::filesystem::path BinaryDirectory{};
 		std::filesystem::path RuntimeExecutable{};
 		std::vector<std::filesystem::path> Redist{}; // the app-local CRT (Windows)
@@ -340,14 +354,16 @@ namespace Engine {
 			ENGINE_TRY(CheckProject());
 			switch (Phase)
 			{
-				case ExportPhase::Validate:      return Validate();
-				case ExportPhase::Cook:          return Cook();
-				case ExportPhase::WritePaks:     return WritePakFiles();
-				case ExportPhase::CopyRuntime:   return CopyRuntime();
-				case ExportPhase::WriteManifest: return WriteManifest();
-				case ExportPhase::SmokeTest:     return RunSmokeTest();
-				case ExportPhase::MoveToOutput:  return MoveToOutput();
-				case ExportPhase::Done:          return true;
+				case ExportPhase::Validate:       return Validate();
+				case ExportPhase::Cook:           return Cook();
+				case ExportPhase::WritePaks:      return WritePakFiles();
+				case ExportPhase::CopyRuntime:    return CopyRuntime();
+				case ExportPhase::PatchResources: return PatchResources();
+				case ExportPhase::WriteManifest:  return WriteManifest();
+				case ExportPhase::Sign:           return Sign();
+				case ExportPhase::SmokeTest:      return RunSmokeTest();
+				case ExportPhase::MoveToOutput:   return MoveToOutput();
+				case ExportPhase::Done:           return true;
 			}
 			ENGINE_ASSERT(false, "Unknown ExportPhase {}", std::to_underlying(Phase));
 			return MakeError(ErrorCode::InvalidState, "unknown export phase");
@@ -418,6 +434,22 @@ namespace Engine {
 					continue;
 				}
 				issues.push_back(MakeIssue("", AssetDiagnosticToString(diagnostic), diagnostic.Hint));
+			}
+			// A testing export's suites and replays (§14.2 step 1; ADR 0024 decision 6). Its suite scenes load strictly with the
+			// build scenes below, because the export packages them and the Runtime loads them.
+			if (Specification.Testing)
+			{
+				ENGINE_TRY_ASSIGN(TestingContent, CollectTestingExportContent(*Editor, Settings, issues));
+				Report.Testing = true;
+				Report.TestSuiteCount = TestingContent.SuiteCount;
+				Report.ReplayCount = static_cast<uint32_t>(TestingContent.Replays.size());
+				for (const std::string& path : TestingContent.SuiteScenes)
+				{
+					const Result<VfsPath> sourcePath = VfsPath::Create(ProjectScheme, path);
+					const AssetRecord* record = sourcePath.has_value() ? Editor->GetAssets().GetRegistry().FindBySourcePath(*sourcePath) : nullptr;
+					if (record != nullptr && record->Metadata.Kind == AssetMetaKind::Asset && record->Metadata.Type == AssetType::Scene)
+						scenes.emplace_back(record->Metadata.Handle, path);
+				}
 			}
 			if (!issues.empty())
 				return std::unexpected(ValidationFailure(std::move(issues)));
@@ -527,7 +559,8 @@ namespace Engine {
 				.WithIssues(std::move(issues));
 		}
 
-		// Every registered main asset under Assets/ that no Export.Exclude glob leaves out (§7.6).
+		// Every registered main asset under Assets/ that no Export.Exclude glob leaves out (§7.6), and for a testing export
+		// also every asset IsForcedByTestingExport names, whatever Export.Exclude says.
 		void CollectSources()
 		{
 			Sources.clear();
@@ -535,7 +568,9 @@ namespace Engine {
 			{
 				if (record->Metadata.Kind != AssetMetaKind::Asset)
 					continue;
-				if (FindExcludingGlob(record->SourcePath.GetPath()).has_value())
+				const std::string_view path = record->SourcePath.GetPath();
+				const bool forced = Specification.Testing && IsForcedByTestingExport(path, TestingContent);
+				if (!forced && FindExcludingGlob(path).has_value())
 					continue;
 				Sources.push_back(record->Metadata.Handle);
 			}
@@ -586,7 +621,7 @@ namespace Engine {
 		// and the smoke test's user-data directory.
 		[[nodiscard]] Status LocateOutput()
 		{
-			const std::string defaultDirectory = GetDefaultOutputDirectory(Settings.Name, Specification.Configuration);
+			const std::string defaultDirectory = GetDefaultOutputDirectory(Settings.Name, Specification.Configuration, Specification.Testing);
 			if (!Specification.ExportRoot.empty())
 			{
 				// --export-root (M15) replaces the project's Build/ directory.
@@ -919,6 +954,16 @@ namespace Engine {
 			return true;
 		}
 
+		// --- 4a. Patch resources (M15) -------------------------------------------------------------------------------------
+
+		// Stream A (ADR 0024 decision 4): BuildExecutableResourceSet, then ResourcePatcher::Patch on Windows, Info.plist and
+		// AppIcon.icns on macOS. A pass-through until then, so exports keep the v0 behaviour.
+		[[nodiscard]] Result<bool> PatchResources()
+		{
+			ENGINE_CONTRACT_STUB();
+			return true;
+		}
+
 		// --- 5. Write Game.json ------------------------------------------------------------------------------------------
 
 		[[nodiscard]] Result<bool> WriteManifest()
@@ -933,9 +978,19 @@ namespace Engine {
 			};
 			manifest.Window = Settings.Window;
 			manifest.Simulation = Settings.Simulation;
-			manifest.Testing = false;
+			manifest.Testing = Specification.Testing;
 			ENGINE_TRY_ASSIGN(const std::string text, GameManifestSerializer::SaveToString(manifest));
 			ENGINE_TRY(FileSystem::WriteFileAtomic(StagingDirectory / GameManifest::FileName, AsBytes(text), { .KeepBackup = false }));
+			return true;
+		}
+
+		// --- 5a. Sign (M15) ----------------------------------------------------------------------------------------------
+
+		// Stream A (ADR 0024 decision 5): macOS ad-hoc signs the bundle (codesign); nothing on Windows and Linux. A
+		// pass-through until then.
+		[[nodiscard]] Result<bool> Sign()
+		{
+			ENGINE_CONTRACT_STUB();
 			return true;
 		}
 
@@ -1133,6 +1188,7 @@ namespace Engine {
 			return MakeError(ErrorCode::InvalidArgument, "the export needs the directory of the build outputs (BinaryRoot, <repository>/bin)");
 		if (specification.SmokeTestFrames == 0)
 			return MakeError(ErrorCode::InvalidArgument, "the smoke test needs at least one frame");
+		ENGINE_TRY(CheckOutputPath(specification));
 
 		Scope<Exporter> exporter = CreateScope<Exporter>(ConstructionKey());
 		State& state = *exporter->m_State;
@@ -1187,9 +1243,16 @@ namespace Engine {
 		return m_State->Phase;
 	}
 
-	std::string Exporter::GetDefaultOutputDirectory(std::string_view projectName, ExportConfiguration configuration)
+	std::string Exporter::GetDefaultOutputDirectory(std::string_view projectName, ExportConfiguration configuration, bool testing)
 	{
-		return std::format("{}/{}-{}/{}", Utils::ExportBuildDirectory, GetPlatformName(), ExportConfigurationToString(configuration), projectName);
+		return std::format("{}/{}-{}{}/{}", Utils::ExportBuildDirectory, GetPlatformName(), ExportConfigurationToString(configuration),
+			testing ? "-Testing" : "", projectName);
+	}
+
+	bool Exporter::IsMissingBuildOutput(const Error& /*error*/)
+	{
+		ENGINE_CONTRACT_STUB();
+		return false;
 	}
 
 	std::string_view Exporter::GetPlatformName()
@@ -1233,14 +1296,16 @@ namespace Engine {
 	{
 		switch (phase)
 		{
-			case ExportPhase::Validate:      return "Validate";
-			case ExportPhase::Cook:          return "Cook";
-			case ExportPhase::WritePaks:     return "WritePaks";
-			case ExportPhase::CopyRuntime:   return "CopyRuntime";
-			case ExportPhase::WriteManifest: return "WriteManifest";
-			case ExportPhase::SmokeTest:     return "SmokeTest";
-			case ExportPhase::MoveToOutput:  return "MoveToOutput";
-			case ExportPhase::Done:          return "Done";
+			case ExportPhase::Validate:       return "Validate";
+			case ExportPhase::Cook:           return "Cook";
+			case ExportPhase::WritePaks:      return "WritePaks";
+			case ExportPhase::CopyRuntime:    return "CopyRuntime";
+			case ExportPhase::PatchResources: return "PatchResources";
+			case ExportPhase::WriteManifest:  return "WriteManifest";
+			case ExportPhase::Sign:           return "Sign";
+			case ExportPhase::SmokeTest:      return "SmokeTest";
+			case ExportPhase::MoveToOutput:   return "MoveToOutput";
+			case ExportPhase::Done:           return "Done";
 		}
 
 		ENGINE_ASSERT(false, "Unknown ExportPhase {}", std::to_underlying(phase));

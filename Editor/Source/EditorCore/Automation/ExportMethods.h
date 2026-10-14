@@ -59,8 +59,8 @@ namespace Engine {
 
 	namespace Automation {
 
-		// project.export (pending): Exporter::Start with the params and AutomationServerSpecification::ExportBinaryRoot, polled
-		// once per frame; a disconnect cancels it (Exporter::Cancel). Errors: Unsupported at /testing when present;
+		// project.export (pending): Exporter::Start with the params, AutomationServerSpecification::ExportBinaryRoot and (M15,
+		// `Editor --export-root`) AutomationServerSpecification::ExportRoot, polled once per frame; a disconnect cancels it (Exporter::Cancel). Errors: Unsupported at /testing when present;
 		// InvalidParams for an outDir outside "Build/"; those of Exporter::Start and Exporter::Poll.
 		[[nodiscard]] Result<Scope<PendingOperation>> ProjectExport(EditorMethodContext& context, const ProjectExportParams& params);
 

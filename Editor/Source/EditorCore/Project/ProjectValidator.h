@@ -176,6 +176,14 @@ namespace Engine {
 		// The validator code of a scene-load diagnostic code (ADR 0006 decision 35); empty for load codes the validator does
 		// not report (unknown keys and components, which stay load warnings).
 		[[nodiscard]] static std::string_view MapLoadCode(std::string_view loadCode);
+
+		// M15 (Docs/Decisions/0024-m15-contract.md decision 6): the TEST_SUITE_INVALID diagnostics of the open project's
+		// Testing.Suites, the one rule Validate and the exporter's testing validation (TestingExport.h) share. Entry i is
+		// invalid when its Script is not a registered Script asset whose kind is TestSuite (Field "Testing.Suites[i]",
+		// subject "<i>"), or when its non-empty Scene is not a registered Scene asset (subject "<i>/Scene"; M15 tightens the
+		// file-exists rule of M13, since a testing export packages the scene). Sorted by entry, the script's before the
+		// scene's. Errors: InvalidState without an open project.
+		[[nodiscard]] static Result<std::vector<ProjectDiagnostic>> CheckTestSuites(const EditorContext& context);
 	};
 
 	// Registers ValidationScope and ProjectDiagnostic (DiagnosticSeverity comes from RegisterAutomationCommonTypes).

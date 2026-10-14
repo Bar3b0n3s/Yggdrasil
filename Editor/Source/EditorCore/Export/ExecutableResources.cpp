@@ -120,4 +120,11 @@ namespace Engine {
 		return resources;
 	}
 
+	Result<ExecutableResourceSet> BuildExecutableResourceSet(const EditorContext& /*editor*/, const ExecutableResources& /*resources*/,
+		std::string_view /*gameName*/)
+	{
+		ENGINE_CONTRACT_STUB();
+		return std::unexpected(Error(ErrorCode::Unsupported, "M15 executable resource set contract (stream A)"));
+	}
+
 }

@@ -25,6 +25,19 @@ newoption
 	description = "Write the generated workspace and project files to this directory"
 }
 
+-- The hardening stage's AddressSanitizer workspace (Architecture §15.1 T6; Docs/Decisions/0024-m15-contract.md decision
+-- 12): Scripts/Generate.py --sanitize address --to bin-int/Asan. Release only, at workspace scope so every project,
+-- vendored ones included, is instrumented alike. Without the option nothing changes.
+newoption
+{
+	trigger = "sanitize",
+	value = "kind",
+	description = "Instrument the Release configuration of every project with a sanitizer",
+	allowed = {
+		{ "address", "AddressSanitizer (MSVC /fsanitize=address, -fsanitize=address elsewhere)" }
+	}
+}
+
 include "Dependencies.lua"
 
 -- The workspace name, defined here only (Architecture: the display name appears in the workspace name,
@@ -67,6 +80,12 @@ workspace (WorkspaceName)
 	-- must agree on it (Vendor/NVRHI/VENDOR.md). Never define NDEBUG in a project script.
 	filter "configurations:Dist"
 		defines { "NDEBUG" }
+
+	-- Workspace scope only, like NDEBUG: MSVC's STL marks translation units that use its AddressSanitizer container
+	-- annotations, so instrumented and uninstrumented C++ must never be linked together (ADR 0024 decision 12;
+	-- Scripts/CheckBuildConfig.py checks the windows-asan target).
+	filter { "options:sanitize=address", "configurations:Release" }
+		sanitize { "Address" }
 
 	filter {}
 

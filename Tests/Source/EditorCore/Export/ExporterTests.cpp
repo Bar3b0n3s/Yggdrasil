@@ -31,6 +31,7 @@
 #include "Engine/Scene/SceneSerializer.h"
 #include "Support/EditorTestFixture.h"
 #include "Support/ExpectLog.h"
+#include "Support/ExportBinaryRoot.h"
 #include "Support/HeadlessGpuFixture.h"
 #include "Support/TempDirectory.h"
 #include "Support/TestData.h"
@@ -106,6 +107,18 @@ namespace Engine {
 #else
 			WriteTestFile(output / "Runtime" / "Runtime", FakeRuntimeBytes);
 #endif
+			WriteTestFile(output / "Shaders" / "Test" / "VSMain.spv", "spirv");
+			WriteTestFile(output / "Shaders" / "Test" / "VSMain.refl.json", "{}");
+			WriteTestFile(output / "Shaders" / "Test" / "VSMain.d", "dependencies");
+			return root;
+		}
+
+		// A bin directory with this build's real Runtime output as Scripts/Build.py leaves it (Support/ExportBinaryRoot.h: the
+		// executable, its Redist on Windows, its frameworks on macOS, the notices file) and MakeBinaryRoot's shader files.
+		std::filesystem::path MakeRealBinaryRoot(const Test::TempDirectory& directory, const Test::ExportBinaryRootOptions& options = {})
+		{
+			const std::filesystem::path root = Test::MakeExportBinaryRoot(directory, options);
+			const std::filesystem::path output = root / Exporter::GetBuildOutputDirectoryName(options.Configuration);
 			WriteTestFile(output / "Shaders" / "Test" / "VSMain.spv", "spirv");
 			WriteTestFile(output / "Shaders" / "Test" / "VSMain.refl.json", "{}");
 			WriteTestFile(output / "Shaders" / "Test" / "VSMain.d", "dependencies");
@@ -714,6 +727,8 @@ namespace Engine {
 			CHECK(ExportConfigurationToString(ExportConfiguration::Release) == "Release");
 			CHECK(ExportConfigurationToString(ExportConfiguration::Dist) == "Dist");
 			CHECK(ExportPhaseToString(ExportPhase::Validate) == "Validate");
+			CHECK(ExportPhaseToString(ExportPhase::PatchResources) == "PatchResources");
+			CHECK(ExportPhaseToString(ExportPhase::Sign) == "Sign");
 			CHECK(ExportPhaseToString(ExportPhase::SmokeTest) == "SmokeTest");
 			CHECK(ExportPhaseToString(ExportPhase::MoveToOutput) == "MoveToOutput");
 			CHECK(ExportPhaseToString(ExportPhase::Done) == "Done");
@@ -819,6 +834,297 @@ namespace Engine {
 				CheckSoundPresets(**enginePak);
 			}
 			gpu.GetDevice().RunGarbageCollection();
+		}
+
+		// M15 (Docs/Decisions/0024-m15-contract.md decisions 2 to 8, stream A). These cases export from this build's real
+		// Runtime output (MakeRealBinaryRoot, Support/ExportBinaryRoot.h), because PatchResources needs a real executable,
+		// the notices file becomes required and macOS signs real frameworks. Stream A moves the M7 to M14 cases above from
+		// MakeBinaryRoot's fake executable to it in the same change that makes those steps real.
+
+		TEST_CASE("Exporter: the package carries THIRD_PARTY_NOTICES.txt from the build output" * doctest::skip(true))
+		{
+			Test::EditorTestFixture fixture("ExportNotices");
+			MakeExportableProject(fixture);
+			const Test::TempDirectory binaries("ExportBinaries");
+			constexpr std::string_view Notices = "Third-party notices of this build\n";
+			const std::filesystem::path root = MakeRealBinaryRoot(binaries, { .Notices = std::string(Notices) });
+			Result<Scope<Exporter>> exporter = Exporter::Start(fixture.GetEditor(), MakeSpecification(root));
+			REQUIRE(exporter.has_value());
+			const std::optional<Result<ExportReport>> outcome = RunToEnd(**exporter);
+			REQUIRE(outcome.has_value());
+			REQUIRE_MESSAGE(outcome->has_value(), outcome->error().ToString());
+#if defined(ENGINE_PLATFORM_MACOS)
+			const std::filesystem::path notices = (*outcome)->OutputDirectory / "TestProject.app" / "Contents" / "Resources" / "THIRD_PARTY_NOTICES.txt";
+#else
+			const std::filesystem::path notices = (*outcome)->OutputDirectory / "THIRD_PARTY_NOTICES.txt";
+#endif
+			const Result<std::string> text = FileSystem::ReadText(notices);
+			REQUIRE_MESSAGE(text.has_value(), text.error().ToString());
+			CHECK(*text == Notices);
+			CHECK(std::ranges::any_of((*outcome)->Files, [](const ExportedFile& file)
+			{
+				return file.Path.ends_with("THIRD_PARTY_NOTICES.txt");
+			}));
+		}
+
+		TEST_CASE("Exporter: a missing notices file is NotFound naming the build command" * doctest::skip(true))
+		{
+			Test::EditorTestFixture fixture("ExportNoNotices");
+			MakeExportableProject(fixture);
+			const Test::TempDirectory binaries("ExportBinaries");
+			Result<Scope<Exporter>> exporter = Exporter::Start(fixture.GetEditor(), MakeSpecification(MakeRealBinaryRoot(binaries, { .Notices = std::nullopt })));
+			REQUIRE(exporter.has_value());
+			const std::optional<Result<ExportReport>> outcome = RunToEnd(**exporter);
+			REQUIRE(outcome.has_value());
+			REQUIRE_FALSE(outcome->has_value());
+			const Error& error = outcome->error();
+			INFO(error.ToString());
+			CHECK(error.GetCode() == ErrorCode::NotFound);
+			CHECK(error.GetMessageText().find("THIRD_PARTY_NOTICES.txt") != std::string::npos);
+			CHECK(error.GetMessageText().find("python Scripts/Build.py --config Release --project Runtime") != std::string::npos);
+			CHECK(Exporter::IsMissingBuildOutput(error));
+			CHECK(error.GetLocation().File.ends_with("THIRD_PARTY_NOTICES.txt"));
+		}
+
+		TEST_CASE("Exporter: only a missing build output counts as one" * doctest::skip(true))
+		{
+			// Editor --export exits 3 for these and 1 for every other failure (ADR 0024 decision 3, review finding n3).
+			Test::EditorTestFixture fixture("ExportMissingOutput");
+			MakeExportableProject(fixture);
+			const Test::TempDirectory binaries("ExportBinaries");
+			const std::filesystem::path root = MakeRealBinaryRoot(binaries);
+			const std::filesystem::path runtime = root / Exporter::GetBuildOutputDirectoryName(ExportConfiguration::Release) / "Runtime";
+			const Result<std::vector<std::filesystem::path>> files = FileSystem::ListDirectory(runtime, false);
+			REQUIRE(files.has_value());
+			for (const std::filesystem::path& file : *files)
+			{
+				if (file.stem() == "Runtime")
+					REQUIRE(FileSystem::Remove(file).has_value());
+			}
+			Result<Scope<Exporter>> exporter = Exporter::Start(fixture.GetEditor(), MakeSpecification(root));
+			REQUIRE(exporter.has_value());
+			const std::optional<Result<ExportReport>> outcome = RunToEnd(**exporter);
+			REQUIRE(outcome.has_value());
+			REQUIRE_FALSE(outcome->has_value());
+			INFO(outcome->error().ToString());
+			CHECK(outcome->error().GetCode() == ErrorCode::NotFound);
+			CHECK(Exporter::IsMissingBuildOutput(outcome->error()));
+
+			// A validation failure, and a NotFound that names no build output, are not.
+			CHECK_FALSE(Exporter::IsMissingBuildOutput(Error(ErrorCode::NotFound, "the asset 'Assets/Gone.png' does not exist")));
+			CHECK_FALSE(Exporter::IsMissingBuildOutput(Error(ErrorCode::Validation, "the project does not export")));
+		}
+
+		TEST_CASE("Exporter: an editor without a GPU refuses a project environment without a cooked bake at validation, with the GPU hint" * doctest::skip(true))
+		{
+			// A project .hdr that nothing loaded yet: no asset diagnostic exists, so before M15 the export failed in Cook with
+			// Unsupported. Validation now names the asset (§14.2 step 1). A check that imports the asset to find out also logs
+			// the import failure, which the implementation then declares here with Test::ExpectLog.
+			Test::EditorTestFixture fixture("ExportProjectEnvironment");
+			MakeExportableProject(fixture);
+			EditorContext& editor = fixture.GetEditor();
+			const Result<Buffer> hdr = FileSystem::ReadFile(Test::GetTestDataPath("Assets/Environments/Gradient.hdr"));
+			REQUIRE_MESSAGE(hdr.has_value(), hdr.error().ToString());
+			const Result<VfsPath> path = VfsPath::Create("project", "Assets/Sky.hdr");
+			REQUIRE(path.has_value());
+			REQUIRE(editor.WriteProjectFile(*path, *hdr).has_value());
+			REQUIRE(editor.GetAssets().Refresh().has_value());
+			const Test::TempDirectory binaries("ExportBinaries");
+			Result<Scope<Exporter>> exporter = Exporter::Start(editor, MakeSpecification(MakeRealBinaryRoot(binaries)));
+			REQUIRE(exporter.has_value());
+			const std::optional<Result<ExportReport>> outcome = RunToEnd(**exporter);
+			REQUIRE(outcome.has_value());
+			REQUIRE_FALSE(outcome->has_value());
+			const Error& error = outcome->error();
+			INFO(error.ToString());
+			CHECK(error.GetCode() == ErrorCode::Validation);
+			CHECK((*exporter)->GetPhase() == ExportPhase::Validate);
+			REQUIRE(error.GetIssues().size() == 1);
+			CHECK(error.GetIssues().front().Message.find("Assets/Sky.hdr") != std::string::npos);
+			CHECK(error.GetIssues().front().Hint == EnvironmentImporter::GpuHint);
+		}
+
+		TEST_CASE("Exporter: an editor without a GPU exports a project environment from the bake a GPU editor cooked" * doctest::test_suite(Test::GpuSuite))
+		{
+			// §14.2 step 1 "using cooked environment bakes" (ADR 0024 decision 2): the bake a GPU editor stored in Library/Cache
+			// is what a --renderer none editor exports. The device-less editor gets the project's Assets/Sky.hdr, its .meta and
+			// Library/Cache from the GPU editor's project. The M7 exporter already cooks from that bake, so the contract adds
+			// this case unskipped: it keeps the behaviour while stream A moves validation ahead of Cook.
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			const Result<Buffer> hdr = FileSystem::ReadFile(Test::GetTestDataPath("Assets/Environments/Gradient.hdr"));
+			REQUIRE_MESSAGE(hdr.has_value(), hdr.error().ToString());
+			const std::vector<std::string_view> carried = { "Assets/Sky.hdr", "Assets/Sky.hdr.meta", "Library/Cache" };
+			const Test::TempDirectory baked("ExportBakedProject");
+			{
+				Result<Scope<EnvironmentBaker>> baker = EnvironmentBaker::Create(gpu.GetDevice(), gpu.GetPipelines());
+				REQUIRE_MESSAGE(baker.has_value(), baker.error().ToString());
+				EngineResourcesEditor fixture(baker->get());
+				EditorContext& editor = fixture.GetEditor();
+				const Result<VfsPath> path = VfsPath::Create("project", "Assets/Sky.hdr");
+				REQUIRE(path.has_value());
+				REQUIRE(editor.WriteProjectFile(*path, *hdr).has_value());
+				REQUIRE(editor.GetAssets().Refresh().has_value());
+				SaveScene(editor);
+				const Test::TempDirectory binaries("ExportBinaries");
+				Result<Scope<Exporter>> exporter = Exporter::Start(editor, MakeSpecification(MakeRealBinaryRoot(binaries)));
+				REQUIRE(exporter.has_value());
+				const std::optional<Result<ExportReport>> outcome = RunToEnd(**exporter);
+				REQUIRE(outcome.has_value());
+				REQUIRE_MESSAGE(outcome->has_value(), outcome->error().ToString());
+				for (const std::string_view relative : carried)
+				{
+					const std::filesystem::path target = baked / relative;
+					REQUIRE(FileSystem::CreateDirectories(target.parent_path()).has_value());
+					std::error_code error;
+					std::filesystem::copy(fixture.GetProjectRoot() / FileSystem::PathFromUtf8(relative), target, std::filesystem::copy_options::recursive, error);
+					REQUIRE_MESSAGE(!error, relative, ": ", error.message());
+				}
+			}
+			gpu.GetDevice().RunGarbageCollection();
+
+			EngineResourcesEditor fixture;
+			EditorContext& editor = fixture.GetEditor();
+			for (const std::string_view relative : carried)
+			{
+				const std::filesystem::path target = fixture.GetProjectRoot() / FileSystem::PathFromUtf8(relative);
+				REQUIRE(FileSystem::CreateDirectories(target.parent_path()).has_value());
+				std::error_code error;
+				std::filesystem::copy(baked / relative, target, std::filesystem::copy_options::recursive | std::filesystem::copy_options::overwrite_existing, error);
+				REQUIRE_MESSAGE(!error, relative, ": ", error.message());
+			}
+			REQUIRE(editor.GetAssets().Refresh().has_value());
+			SaveScene(editor);
+			const Test::TempDirectory binaries("ExportBinaries");
+			Result<Scope<Exporter>> exporter = Exporter::Start(editor, MakeSpecification(MakeRealBinaryRoot(binaries)));
+			REQUIRE(exporter.has_value());
+			const std::optional<Result<ExportReport>> outcome = RunToEnd(**exporter);
+			REQUIRE(outcome.has_value());
+			REQUIRE_MESSAGE(outcome->has_value(), outcome->error().ToString());
+			const Result<Ref<const PakReader>> gamePak = PakReader::Open((*outcome)->OutputDirectory / "Data" / "Game.pak");
+			REQUIRE_MESSAGE(gamePak.has_value(), gamePak.error().ToString());
+			CHECK(std::ranges::any_of((*gamePak)->GetEntries(), [](const PakEntry& entry)
+			{
+				return entry.Type == "Environment" && entry.Path == "Assets/Sky.hdr";
+			}));
+		}
+
+		TEST_CASE("Exporter: OutputPath exports into an absolute package directory and ExportRoot keeps OutputDirectory below it" * doctest::skip(true))
+		{
+			Test::EditorTestFixture fixture("ExportOutputPath");
+			MakeExportableProject(fixture);
+			const Test::TempDirectory binaries("ExportBinaries");
+			const std::filesystem::path root = MakeRealBinaryRoot(binaries);
+			const Test::TempDirectory target("ExportTarget");
+
+			ExportSpecification direct = MakeSpecification(root);
+			direct.OutputPath = target / "Packages" / "Game";
+			Result<Scope<Exporter>> exporter = Exporter::Start(fixture.GetEditor(), direct);
+			REQUIRE_MESSAGE(exporter.has_value(), exporter.error().ToString());
+			std::optional<Result<ExportReport>> outcome = RunToEnd(**exporter);
+			REQUIRE(outcome.has_value());
+			REQUIRE_MESSAGE(outcome->has_value(), outcome->error().ToString());
+			CHECK((*outcome)->OutputDirectory == target / "Packages" / "Game");
+			std::error_code exists;
+			CHECK_FALSE(std::filesystem::exists(fixture.GetProjectRoot() / "Build", exists));
+
+			// The earlier export there is replaced by the next one.
+			exporter = Exporter::Start(fixture.GetEditor(), direct);
+			REQUIRE_MESSAGE(exporter.has_value(), exporter.error().ToString());
+			outcome = RunToEnd(**exporter);
+			REQUIRE(outcome.has_value());
+			REQUIRE_MESSAGE(outcome->has_value(), outcome->error().ToString());
+
+			ExportSpecification rooted = MakeSpecification(root);
+			rooted.ExportRoot = target / "Root";
+			rooted.OutputDirectory = "Build/Custom/Game";
+			exporter = Exporter::Start(fixture.GetEditor(), rooted);
+			REQUIRE_MESSAGE(exporter.has_value(), exporter.error().ToString());
+			outcome = RunToEnd(**exporter);
+			REQUIRE(outcome.has_value());
+			REQUIRE_MESSAGE(outcome->has_value(), outcome->error().ToString());
+			CHECK((*outcome)->OutputDirectory == target / "Root" / "Custom" / "Game");
+		}
+
+		TEST_CASE("Exporter: OutputPath never replaces a source tree, a profile or a directory that holds no earlier export" * doctest::skip(true))
+		{
+			// Review finding M1 (ADR 0024 decision 3): a typo such as "Editor --export ." must never delete a tree.
+			Test::EditorTestFixture fixture("ExportOutputPathGuards");
+			MakeExportableProject(fixture);
+			const Test::TempDirectory binaries("ExportBinaries");
+			const std::filesystem::path root = MakeRealBinaryRoot(binaries);
+			std::error_code error;
+			const std::filesystem::path workingDirectory = std::filesystem::current_path(error);
+			REQUIRE_FALSE(error);
+			const Result<std::filesystem::path> userData = Paths::GetUserDataRoot();
+			REQUIRE_MESSAGE(userData.has_value(), userData.error().ToString());
+			const std::vector<std::filesystem::path> refused = {
+				"Packages/Game",                        // relative
+				fixture.GetProjectRoot(),               // the project
+				fixture.GetProjectRoot().parent_path(), // an ancestor of the project
+				root,                                   // BinaryRoot
+				binaries.GetPath(),                     // an ancestor of BinaryRoot
+				workingDirectory,                       // the working directory
+				*userData,                              // the user-data root
+				fixture.GetProjectRoot().root_path(),   // a file-system root
+			};
+			for (const std::filesystem::path& outputPath : refused)
+			{
+				CAPTURE(FileSystem::PathToUtf8(outputPath));
+				ExportSpecification specification = MakeSpecification(root);
+				specification.OutputPath = outputPath;
+				const Result<Scope<Exporter>> exporter = Exporter::Start(fixture.GetEditor(), specification);
+				REQUIRE_FALSE(exporter.has_value());
+				CHECK(exporter.error().GetCode() == ErrorCode::InvalidArgument);
+			}
+
+			// An existing directory that holds files but no earlier export is refused before anything is written, and kept.
+			const Test::TempDirectory target("ExportGuardTarget");
+			const std::filesystem::path occupied = target / "Notes";
+			WriteTestFile(occupied / "Todo.txt", "keep me");
+			ExportSpecification specification = MakeSpecification(root);
+			specification.OutputPath = occupied;
+			Result<Scope<Exporter>> exporter = Exporter::Start(fixture.GetEditor(), specification);
+			REQUIRE_MESSAGE(exporter.has_value(), exporter.error().ToString());
+			const std::optional<Result<ExportReport>> outcome = RunToEnd(**exporter);
+			REQUIRE(outcome.has_value());
+			REQUIRE_FALSE(outcome->has_value());
+			CHECK(outcome->error().GetCode() == ErrorCode::InvalidArgument);
+			CHECK(outcome->error().GetMessageText().find(FileSystem::PathToUtf8(occupied)) != std::string::npos);
+			const Result<std::string> kept = FileSystem::ReadText(occupied / "Todo.txt");
+			REQUIRE(kept.has_value());
+			CHECK(*kept == "keep me");
+
+			// An empty existing directory is fine.
+			REQUIRE(FileSystem::CreateDirectories(target / "Empty").has_value());
+			specification.OutputPath = target / "Empty";
+			exporter = Exporter::Start(fixture.GetEditor(), specification);
+			REQUIRE_MESSAGE(exporter.has_value(), exporter.error().ToString());
+			const std::optional<Result<ExportReport>> exported = RunToEnd(**exporter);
+			REQUIRE(exported.has_value());
+			REQUIRE_MESSAGE(exported->has_value(), exported->error().ToString());
+		}
+
+		TEST_CASE("Exporter: the report times every phase entered, in order" * doctest::skip(true))
+		{
+			Test::EditorTestFixture fixture("ExportTimings");
+			MakeExportableProject(fixture);
+			const Test::TempDirectory binaries("ExportBinaries");
+			Result<Scope<Exporter>> exporter = Exporter::Start(fixture.GetEditor(), MakeSpecification(MakeRealBinaryRoot(binaries)));
+			REQUIRE(exporter.has_value());
+			const std::optional<Result<ExportReport>> outcome = RunToEnd(**exporter);
+			REQUIRE(outcome.has_value());
+			REQUIRE_MESSAGE(outcome->has_value(), outcome->error().ToString());
+			std::vector<ExportPhase> phases;
+			double total = 0.0;
+			for (const ExportPhaseTiming& timing : (*outcome)->PhaseTimings)
+			{
+				phases.push_back(timing.Phase);
+				CHECK(timing.Seconds >= 0.0);
+				total += timing.Seconds;
+			}
+			CHECK(phases == std::vector<ExportPhase>{ ExportPhase::Validate, ExportPhase::Cook, ExportPhase::WritePaks, ExportPhase::CopyRuntime, ExportPhase::PatchResources, ExportPhase::WriteManifest, ExportPhase::Sign, ExportPhase::SmokeTest, ExportPhase::MoveToOutput });
+			CHECK(total <= (*outcome)->Seconds + 1e-6);
 		}
 	}
 

@@ -275,4 +275,10 @@ namespace Engine {
 		return manifest;
 	}
 
+	std::filesystem::path GetTestingUserDataRoot(const std::filesystem::path& /*manifestPath*/)
+	{
+		ENGINE_CONTRACT_STUB();
+		return {};
+	}
+
 }

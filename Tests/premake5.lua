@@ -55,6 +55,14 @@ project "Tests"
 		"Engine"
 	}
 
+	-- Support/PlatformProbes.cpp reads an exported executable's version resource back with the OS's own parser
+	-- (GetFileVersionInfoW, VerQueryValueW), the independent oracle of the resource patcher's acceptance test
+	-- (Docs/Decisions/0024-m15-contract.md decision 4).
+	filter "system:windows"
+		links { "version" }
+
+	filter {}
+
 	-- Tests spawn the Editor and Runtime executables of the same configuration (Test::GetBuiltExecutablePath), so building
 	-- Tests builds them too.
 	dependson

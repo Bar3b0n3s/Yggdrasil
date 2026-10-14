@@ -9,6 +9,7 @@
 #include "Engine/Core/Clock.h"
 #include "Engine/Core/FixedStepScheduler.h"
 #include "Engine/Core/Result.h"
+#include "Engine/Core/RingBufferSink.h"
 #include "Engine/Core/Time.h"
 #include "Engine/Graphics/GraphicsSpecification.h"
 #include "Engine/Platform/Events.h"
@@ -99,6 +100,13 @@ namespace Engine {
 		// Window. Every application has an engine; tests that start windowed applications in-process ask for
 		// AudioDeviceKind::None, and windowed Editor and Runtime processes that tests start pass --audio-device none.
 		std::optional<AudioEngineSpecification> Audio{};
+		// M15, --log-level <trace|info|warn|error|critical> (§13.9: Dist honours it; Docs/Decisions/0024-m15-contract.md
+		// decision 17, stream D): the minimum level of the output sinks, the console and the log file, for the whole run, like
+		// LogSpecification::ConsoleLevel; nullopt: the configuration's default (§4.4). It filters output only: the loggers
+		// keep their level, so --expect-no-errors (which counts every Error and Critical entry), the ring buffer that log.read
+		// serves, log listeners and expected-log capture see every entry whatever this says. In Dist, where Trace logging is
+		// compiled out, "trace" behaves as "info".
+		std::optional<LogLevel> MinimumLogLevel{};
 	};
 
 	// The audio engine an application gets by default (§10.1): windowed runs play through the system's default device with
@@ -122,8 +130,10 @@ namespace Engine {
 	//   --audio-device <kind>   Audio = GetDefaultAudioSpecification(Window) with Device System for "system", Null for
 	//                           "null" or None for "none" (M12: windowed processes that tests start never open the
 	//                           machine's audio device, §15.1 T1); the decoding mode stays the window mode's
-	// Every option except --headless, --frames and --expect-no-errors is absent from Dist builds, where it is an unknown
-	// option (§13.9 lists the options Dist honours).
+	//   --log-level <level>     MinimumLogLevel: "trace", "info", "warn", "error" or "critical", the output sinks' minimum
+	//                           (M15, stream D; also in Dist)
+	// Every option except --headless, --frames, --expect-no-errors and --log-level is absent from Dist builds, where it is an
+	// unknown option (§13.9 lists the options Dist honours).
 	// An application parses its command line with these plus its own options (CommandLine::Parse). The returned options
 	// refer to static storage.
 	[[nodiscard]] std::span<const CommandLineOption> GetEngineCommandLineOptions();

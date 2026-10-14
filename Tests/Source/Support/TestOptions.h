@@ -4,7 +4,9 @@
 #include "Engine/Graphics/GraphicsSpecification.h"
 #include "Engine/Platform/Process.h"
 
+#include <cstdint>
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -82,6 +84,20 @@ namespace Engine {
 			// --update-golden: golden tests write their image as the new golden candidate instead of comparing (§15.4,
 			// GoldenImage.h).
 			bool UpdateGolden = false;
+			// M15 (Support/Fuzz.h; Docs/Decisions/0024-m15-contract.md decisions 13 and 14; stream C parses them):
+			//   --fuzz-iterations=<n>: every fuzz case runs exactly n iterations (n >= 1; 0 here: its own count);
+			//   --fuzz-scale=<s>: otherwise each case runs round(acceptance * s) iterations, at least its minimum (0 < s <= 1);
+			//   --fuzz-shard=<k>/<n>: this process runs the k-th (0-based) of n contiguous slices (0 <= k < n);
+			//   --fuzz-index=<i>: this process runs iteration i alone of the case's total (i below it), the reproduction of a
+			//     reported failure; not with --fuzz-shard;
+			//   --test-timeout-scale=<s>: multiplies every per-test-case limit, decorated (doctest::timeout) and default
+			//     alike (s >= 1), for the sanitizer and long fuzz runs (TestTimeout.h).
+			uint64_t FuzzIterations = 0;
+			double FuzzScale = 1.0;
+			uint32_t FuzzShardIndex = 0;
+			uint32_t FuzzShardCount = 1;
+			std::optional<uint64_t> FuzzIndex{};
+			double TimeoutScale = 1.0;
 
 			// True for --death-test, --windowed-child and --crash-child.
 			[[nodiscard]] bool IsChildMode() const { return !DeathTest.empty() || !WindowedChild.empty() || CrashChild; }

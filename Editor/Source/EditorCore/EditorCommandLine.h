@@ -1,5 +1,6 @@
 #pragma once
 
+#include "EditorCore/Export/ExportConfiguration.h"
 #include "Engine/App/CommandLine.h"
 #include "Engine/Core/Base.h"
 #include "Engine/Core/Result.h"
@@ -18,8 +19,9 @@
 // plus the engine options every application takes (GetEngineCommandLineOptions: --headless, --frames N,
 // --user-data-dir, --renderer vulkan|none and the graphics options) and the Editor executable's screenshot options
 // (Editor/EditorApp.h). --renderer is an engine option because the Runtime takes it too (§13.9; ADR 0009 decision 3:
-// one definition after the M4/M5 merge, decision 33). --validate, --export and --timeout arrive with their milestones.
-// Parsed in EditorCore so the rules are unit-tested; EditorApp applies them.
+// one definition after the M4/M5 merge, decision 33). M15 adds --export with --config, --testing, --smoke-test and
+// --export-report, and --export-root (Docs/Decisions/0024-m15-contract.md decision 3; stream A parses them, EditorApp
+// applies them). Parsed in EditorCore so the rules are unit-tested; EditorApp applies them.
 
 namespace Engine {
 
@@ -72,12 +74,33 @@ namespace Engine {
 		// <repo>/bin/EngineCache (ApplicationSpecification::EngineCacheDirectory, created when missing); native, absolute or
 		// relative to the working directory. Tests pass a temporary directory, so they never write the checkout's cache.
 		std::optional<std::filesystem::path> EngineCacheDirectory{};
+		// M15 (§12.1, §14.2; ADR 0024 decision 3): --export <dir> --config Debug|Release|Dist [--testing] [--smoke-test]
+		// [--export-report <file.json>], with --project and without --read-only: export the project into the package
+		// directory <dir> (native, absolute or relative to the working directory; ExportSpecification::OutputPath, whose
+		// refusal rules protect the project, the checkout, the working directory and the user-data root; replaced as a whole
+		// only when it is empty or holds an earlier export) from bin/ of the checkout (ENGINE_REPO_ROOT), then exit 0 when it
+		// exported, 1 when the export failed, 3 when the project does not open, its lock is held, or a build output is missing
+		// (Exporter::IsMissingBuildOutput; any other NotFound is 1). The export runs headless or windowed, polled once per
+		// frame like project.export.
+		std::optional<std::filesystem::path> ExportDirectory{};
+		std::optional<ExportConfiguration> ExportConfig{}; // --config, required with --export and only with it
+		bool ExportTesting = false;                        // --testing, only with --export (ExportSpecification::Testing)
+		bool ExportSmokeTest = false;                      // --smoke-test, only with --export (ExportSpecification::SmokeTest)
+		// --export-report <file.json>, only with --export: written whatever the outcome, canonical JSON
+		// {"success": true, "result": <project.export's result>} or {"success": false, "error": <the error as the automation
+		// protocol reports it: code, message, issues>}; parent directories are created.
+		std::optional<std::filesystem::path> ExportReportPath{};
+		// --export-root <dir>, not with --export: the directory project.export writes under instead of <Project>/Build/
+		// (§13.4; AutomationServerSpecification::ExportRoot, ExportSpecification::ExportRoot); made absolute against the
+		// working directory.
+		std::optional<std::filesystem::path> ExportRoot{};
 
-		// True when the editor runs a task and exits (batch, upgrade, dump-reference, bake-engine-assets) instead of running
-		// until shutdown.
+		// True when the editor runs a task and exits (batch, upgrade, dump-reference, bake-engine-assets, export) instead of
+		// running until shutdown.
 		[[nodiscard]] bool IsOneShot() const
 		{
-			return BatchFile.has_value() || Upgrade || DumpReferenceDirectory.has_value() || BakeEngineAssets || CheckScripts || RunTests;
+			return BatchFile.has_value() || Upgrade || DumpReferenceDirectory.has_value() || BakeEngineAssets || CheckScripts || RunTests
+				|| ExportDirectory.has_value();
 		}
 
 		// Whether the automation server listens on TCP and writes a session file (AutomationServerSpecification::Listen):

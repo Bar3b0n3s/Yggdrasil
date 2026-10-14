@@ -146,6 +146,12 @@ function ApplyFirstPartySettings()
 	filter { "system:windows", "configurations:Debug", "kind:ConsoleApp or WindowedApp" }
 		linkoptions { "/STACK:2097152" }
 
+	-- AddressSanitizer's stack redzones enlarge the Release frames of the hardening stage's workspace the same way
+	-- (premake5.lua --sanitize=address; Docs/Decisions/0024-m15-contract.md decision 12, risk 12). Without the option nothing
+	-- changes.
+	filter { "system:windows", "configurations:Release", "options:sanitize=address", "kind:ConsoleApp or WindowedApp" }
+		linkoptions { "/STACK:2097152" }
+
 	filter "configurations:Debug"
 		defines { "ENGINE_DEBUG" }
 		runtime "Debug"

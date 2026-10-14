@@ -1,11 +1,11 @@
 ---
 name: commit-review
-description: Use this skill before every commit in this repository (the commit gate, Architecture §15.9), and whenever asked to review a change, diff or task result. It runs the one gate (PreCommit.py, or CI.py alone for a milestone commit), reviews the staged diff against Docs/ReviewChecklist.md, reports findings with file, line and fix, blocks the commit on any failure, and writes the commit message's "Reviewed" trailer.
+description: Use this skill before every commit in this repository (the commit gate, Architecture §15.9), and whenever asked to review a change, diff or task result. It runs the one gate (PreCommit.py, or CI.py alone for a milestone commit: CI.py --milestone for the commit that completes a milestone), reviews the staged diff against Docs/ReviewChecklist.md, reports findings with file, line and fix, blocks the commit on any failure, and writes the commit message's "Reviewed" trailer.
 ---
 
 # Commit review (commit gate)
 
-This is the repository's recorded review of Architecture §15.9 (which calls it the `code-review` skill; it is named `commit-review` so it never collides with the generic `code-review` skill that ships with Claude Code, `Docs/Decisions/0002-m0-deviations.md`). A commit happens only after one strict gate run on the final tree is green (`python Scripts/PreCommit.py`, or `python Scripts/CI.py` instead of it for a milestone commit; never both, `Docs/Decisions/0023-verification-without-duplicate-work.md`) and this review records no unresolved blocking finding. Review first and fix, then run the gate once. The checklist is `Docs/ReviewChecklist.md`; read it in full at the start of every review, because it changes over time. Review what is actually in the tree, and run the checks yourself rather than trusting a summary of what was run.
+This is the repository's recorded review of Architecture §15.9 (which calls it the `code-review` skill; it is named `commit-review` so it never collides with the generic `code-review` skill that ships with Claude Code, `Docs/Decisions/0002-m0-deviations.md`). A commit happens only after one strict gate run on the final tree is green (`python Scripts/PreCommit.py`, or `python Scripts/CI.py` instead of it for a milestone commit, with `--milestone` for the commit that completes a milestone; never both, `Docs/Decisions/0023-verification-without-duplicate-work.md`, `Docs/Decisions/0024-m15-contract.md` decision 19) and this review records no unresolved blocking finding. Review first and fix, then run the gate once. The checklist is `Docs/ReviewChecklist.md`; read it in full at the start of every review, because it changes over time. Review what is actually in the tree, and run the checks yourself rather than trusting a summary of what was run.
 
 ## 1. Collect the change
 
@@ -36,7 +36,7 @@ python Scripts/PreCommit.py
 - **Mode.** PreCommit is strict by default. Run `python Scripts/PreCommit.py --contract` only when the task statement says the change is a milestone's contract commit (Roadmap rule 3, `Docs/Decisions/0004-contract-stub-gate.md`); the summary prints the mode it ran in. A strict run fails on any `ENGINE_CONTRACT_STUB` (Lint `contract-stub`) and on any test case skipped outside the child-process targets (Lint `test-skip`, and Test.py's `UNEXPECTED SKIP` lines). Contract mode on any other commit is a blocking finding.
 - A red PreCommit is a blocking finding on its own. Report the first failing step and its error output, and do not continue to sign-off.
 - For a build or test failure, use the `build-and-test` skill to diagnose it.
-- A milestone commit runs `python Scripts/CI.py` instead of PreCommit (it covers every PreCommit stage), whose determinism stage replays every FeatureTest replay in the Debug and Release editors and compares the hashes.
+- A milestone commit runs `python Scripts/CI.py` instead of PreCommit (it covers every PreCommit stage), whose determinism stage replays every FeatureTest replay in the Debug and Release editors and compares the hashes with the exported Release and Dist runs. The commit that completes a milestone runs `python Scripts/CI.py --milestone`, which adds the hardening stage (ASan unit and feature suites, long fuzz, soak, perf capture) and requires the clang-cl builds; an integration commit runs plain `CI.py`, which reports hardening as not run (ADR 0024 decision 19).
 - Steps that guard generated and shared content: `references` (`GenerateDocs.py --check`: the whole `Docs/Reference/`, `Resources/Scripting/Engine.d.luau` and `Tools/MCP/catalog.json` match the registries, with no extra file), the unit test "DocExamples: every Luau example in the docs type-checks" (every `lua`/`luau` fence in the documentation and skills), and the feature suite (`Test.py --suite feature`: all six coverage gates of `Projects/FeatureTest` evaluated and passing, no skipped row, and the project left byte-identical).
 
 ## 3. Walk the checklist
@@ -97,6 +97,6 @@ Rank findings most severe first. Use the host's findings-reporting tool if the h
   Reviewed: approved; 3 findings (3 fixed); PreCommit green (generate, checkbuildconfig, lint, lint self-test, format, Debug build, unit 42/42)
   ```
 
-  A contract commit names its mode: `PreCommit green, contract mode (...)`. A milestone commit names its CI run: `CI green (<stages>)`.
+  A contract commit names its mode: `PreCommit green, contract mode (...)`. A milestone commit names its CI run: `CI green (<stages>)`, with `--milestone` for the commit that completes a milestone.
 
 - **Commit and push** only when the task includes committing. Push only after the gate has passed (`AGENTS.md`, Commit gate).

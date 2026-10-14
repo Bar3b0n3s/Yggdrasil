@@ -1,15 +1,20 @@
 #pragma once
 
 #include "Engine/Core/Base.h"
+#include "Engine/Core/Buffer.h"
 #include "Engine/Core/Result.h"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <map>
 #include <memory>
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
+#include <vector>
 
 // OS facilities that platform tests need and the engine deliberately does not offer: they reproduce a fault, or an
 // observer, that engine code must cope with. PlatformProbes.cpp is the only Tests file with OS headers (its own rule in
@@ -63,6 +68,24 @@ namespace Engine {
 		// PAGE_NOACCESS), so only the OS's access check sets them apart from ordinary memory. For a crash child that hands
 		// the text to code that reads it. Errors: InvalidArgument when `unreadableBytes` is 0 or more than a page; Io.
 		[[nodiscard]] Result<UnreadableText> AllocateTextEndingInUnreadableBytes(size_t readableBytes, size_t unreadableBytes);
+
+		// An executable's resources as Windows itself reads them: the independent oracle of the resource patcher's acceptance
+		// test (Engine/Platform/ResourcePatcher.h; Docs/Decisions/0024-m15-contract.md decision 4).
+		struct ExecutableResourceProbe
+		{
+			std::array<uint16_t, 4> FileVersion{};            // VS_FIXEDFILEINFO dwFileVersionMS/LS, most significant first
+			std::array<uint16_t, 4> ProductVersion{};         // dwProductVersionMS/LS
+			std::map<std::string, std::string> Strings{};     // every present key of \StringFileInfo\040904B0, UTF-8
+			std::vector<std::pair<uint16_t, Buffer>> Icons{}; // RT_GROUP_ICON 1's entries in order: size (0 read as 256), RT_ICON bytes
+			bool HasManifest = false;                         // an RT_MANIFEST resource with id 1
+		};
+
+		// Reads `executable`'s version resource with GetFileVersionInfoW and VerQueryValueW (for the keys CompanyName,
+		// FileDescription, FileVersion, InternalName, OriginalFilename, ProductName and ProductVersion), and its icon group
+		// and manifest with LoadLibraryExW(LOAD_LIBRARY_AS_DATAFILE | LOAD_LIBRARY_AS_IMAGE_RESOURCE), FindResourceW and
+		// LoadResource. A missing version resource leaves the versions zero and Strings empty; a missing icon group leaves
+		// Icons empty. Errors: Io naming the failing call.
+		[[nodiscard]] Result<ExecutableResourceProbe> ProbeExecutableResources(const std::filesystem::path& executable);
 #else
 		// Opens `file` for reading without close-on-exec, as a library that calls fopen does, and returns the descriptor:
 		// `minimum` or the lowest free one above it, so that a child process is unlikely to reuse the number for a

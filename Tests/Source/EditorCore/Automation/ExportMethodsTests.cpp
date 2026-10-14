@@ -7,6 +7,7 @@
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Json/JsonReader.h"
 #include "Support/AutomationTestClient.h"
+#include "Support/ExportBinaryRoot.h"
 #include "Support/TempDirectory.h"
 #include "Support/WaitUntil.h"
 
@@ -29,18 +30,12 @@ namespace Engine {
 			REQUIRE(FileSystem::WriteFileAtomic(path, AsBytes(text), { .KeepBackup = false }).has_value());
 		}
 
-		// A bin directory with a Release Runtime the export copies (never runs), its CRT on Windows and one shader.
+		// A bin directory with this build's real Runtime as Scripts/Build.py stages it, the notices file
+		// (Support/ExportBinaryRoot.h, so M15's exporter requirements hold) and one shader. The exports here never run it.
 		std::filesystem::path MakeBinaryRoot(const Test::TempDirectory& directory)
 		{
-			const std::filesystem::path root = directory / "bin";
-			const std::filesystem::path output = root / Exporter::GetBuildOutputDirectoryName(ExportConfiguration::Release);
-#if defined(ENGINE_PLATFORM_WINDOWS)
-			WriteTestFile(output / "Runtime" / "Runtime.exe", "runtime");
-			WriteTestFile(output / "Runtime" / "Redist" / "vcruntime140.dll", "crt");
-#else
-			WriteTestFile(output / "Runtime" / "Runtime", "runtime");
-#endif
-			WriteTestFile(output / "Shaders" / "Test" / "VSMain.spv", "spirv");
+			const std::filesystem::path root = Test::MakeExportBinaryRoot(directory);
+			WriteTestFile(root / Exporter::GetBuildOutputDirectoryName(ExportConfiguration::Release) / "Shaders" / "Test" / "VSMain.spv", "spirv");
 			return root;
 		}
 
@@ -64,13 +59,19 @@ namespace Engine {
 
 	TEST_SUITE("EditorCore")
 	{
-		TEST_CASE("ExportMethods: project.export refuses testing exports and output directories outside Build")
+		TEST_CASE("ExportMethods: project.export refuses testing exports until M15 stream B lands them")
 		{
+			// Stream B replaces this case with its acceptance (ADR 0024 decision 6): testing true and false are accepted, and
+			// a testing export resolves with testing true and its suite and replay counts.
 			Test::AutomationFixture fixture("ExportMethods");
 			const Json testing = fixture.Request("project.export", Json{ { "config", "release" }, { "testing", true } });
 			CHECK(testing["error"]["code"] == Json(-32009));
 			CHECK(testing["error"]["data"]["issues"][0]["pointer"] == Json("/testing"));
+		}
 
+		TEST_CASE("ExportMethods: project.export refuses output directories outside Build")
+		{
+			Test::AutomationFixture fixture("ExportMethods");
 			const Json outside = fixture.Request("project.export", Json{ { "config", "release" }, { "outDir", "Assets/Game" } });
 			CHECK(outside["error"]["code"] == Json(-32602));
 			CHECK(outside["error"]["data"]["issues"][0]["pointer"] == Json("/outDir"));
@@ -144,6 +145,63 @@ namespace Engine {
 			CHECK(listsManifest);
 			std::error_code error;
 			CHECK(std::filesystem::is_regular_file(output / "Game.json", error));
+		}
+
+		TEST_CASE("ExportMethods: project.export writes under the export root the editor was started with")
+		{
+			// Editor --export-root (§13.4; ADR 0024 decision 3): AutomationServerSpecification::ExportRoot replaces the project's
+			// Build/ directory, and nothing is written under the project.
+			Test::EditorTestFixture fixture("ExportMethods");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			MakeExportable(fixture.GetEditor());
+			const Test::TempDirectory binaries("ExportBinaries");
+			const Test::TempDirectory exports("ExportRoot");
+			AutomationServerSpecification specification = MakeExportServerSpecification(MakeBinaryRoot(binaries));
+			specification.ExportRoot = exports.GetPath();
+			Test::AutomationTestClient client(fixture.GetEditor(), specification);
+			const Result<Json> result = client.Call("project.export", Json{ { "config", "release" } });
+			REQUIRE_MESSAGE(result.has_value(), result.error().ToString());
+			const std::filesystem::path output = exports.GetPath() / (std::string(Exporter::GetPlatformName()) + "-Release") / "TestProject";
+			CHECK((*result)["outputDirectory"] == Json(FileSystem::PathToUtf8(output)));
+			const Result<std::string> executable = JsonReader((*result)["executable"]).ReadString();
+			REQUIRE(executable.has_value());
+			std::error_code error;
+			CHECK(std::filesystem::is_regular_file(FileSystem::PathFromUtf8(*executable), error));
+			CHECK_FALSE(std::filesystem::exists(fixture.GetProjectRoot() / "Build", error));
+		}
+
+		TEST_CASE("ExportMethods: project.export reports the testing, resource and phase-timing fields" * doctest::skip(true))
+		{
+			// M15 (ADR 0024 decisions 2, 4 and 6; stream B adds the fields to ProjectExportResult with their descriptions).
+			Test::EditorTestFixture fixture("ExportMethods");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			MakeExportable(fixture.GetEditor());
+			const Test::TempDirectory binaries("ExportBinaries");
+			Test::AutomationTestClient client(fixture.GetEditor(), MakeExportServerSpecification(MakeBinaryRoot(binaries)));
+			const Result<Json> result = client.Call("project.export", Json{ { "config", "release" }, { "testing", false } });
+			REQUIRE_MESSAGE(result.has_value(), result.error().ToString());
+			for (const char* member : { "testing", "testSuiteCount", "replayCount", "resourcesPatched", "phaseTimings" })
+			{
+				CAPTURE(member);
+				REQUIRE(result->contains(member));
+			}
+			CHECK((*result)["testing"] == Json(false));
+			CHECK((*result)["testSuiteCount"] == Json(0));
+			CHECK((*result)["replayCount"] == Json(0));
+			CHECK((*result)["resourcesPatched"].is_boolean());
+			const Json& timings = (*result)["phaseTimings"];
+			REQUIRE(timings.is_array());
+			for (const Json& timing : timings)
+			{
+				REQUIRE(timing.contains("phase"));
+				REQUIRE(timing.contains("seconds"));
+				CHECK(timing["phase"].is_string());
+				CHECK(timing["seconds"].is_number());
+			}
+			if (!timings.empty())
+				CHECK(timings.front()["phase"] == Json("Validate"));
 		}
 
 		TEST_CASE("ExportMethods: a disconnect cancels project.export and removes what it wrote")

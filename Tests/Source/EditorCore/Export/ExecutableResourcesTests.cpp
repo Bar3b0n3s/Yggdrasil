@@ -191,6 +191,76 @@ namespace Engine {
 				iconPointers.push_back(issue.JsonPointer);
 			CHECK(iconPointers == std::vector<std::string>{ "/Export/Icon", "/StartScene" });
 		}
+
+		// M15 (Docs/Decisions/0024-m15-contract.md decision 4, stream A): icon images are square, so a non-square Export.Icon
+		// is refused rather than padded. The 256 x 300 icon the case above accepts joins its refused list when this lands.
+		TEST_CASE("ExecutableResources: a non-square icon fails validation at /Export/Icon" * doctest::skip(true))
+		{
+			Test::EditorTestFixture fixture("ExecutableSquareIcon");
+			fixture.CreateAndOpenProject();
+			EditorContext& editor = fixture.GetEditor();
+			WriteIconPng(editor, "Assets/Tall.png", 256, 300);
+			WriteIconPng(editor, "Assets/Square.png", 512, 512);
+			ExportSettings settings;
+			settings.Icon = "Assets/Tall.png";
+			CheckRefusedAt(ResolveExecutableResources(editor, settings), "/Export/Icon");
+			settings.Icon = "Assets/Square.png";
+			const auto square = ResolveExecutableResources(editor, settings);
+			REQUIRE_MESSAGE(square.has_value(), square.error().ToString());
+			CHECK(square->Icon == "Assets/Square.png");
+		}
+
+		TEST_CASE("ExecutableResources: the resource set holds every icon size reduced from Export.Icon and the version strings" * doctest::skip(true))
+		{
+			Test::EditorTestFixture fixture("ExecutableResourceSet");
+			fixture.CreateAndOpenProject();
+			EditorContext& editor = fixture.GetEditor();
+			WriteIconPng(editor, "Assets/Icon.png", 512, 512);
+			ExportSettings settings;
+			settings.Icon = "Assets/Icon.png";
+			settings.Version = "2.3.4";
+			settings.Company = "Fixture Studio";
+			const auto resources = ResolveExecutableResources(editor, settings);
+			REQUIRE_MESSAGE(resources.has_value(), resources.error().ToString());
+
+			const Result<ExecutableResourceSet> set = BuildExecutableResourceSet(editor, *resources, "Tetromino");
+			REQUIRE_MESSAGE(set.has_value(), set.error().ToString());
+			REQUIRE(set->Icons.size() == ExecutableIconSizes.size());
+			const Result<VfsPath> iconPath = VfsPath::Create("project", "Assets/Icon.png");
+			REQUIRE(iconPath.has_value());
+			const Result<Buffer> iconBytes = editor.GetVfs().ReadFile(*iconPath);
+			REQUIRE(iconBytes.has_value());
+			const Result<Image> decoded = DecodePng(*iconBytes);
+			REQUIRE(decoded.has_value());
+			for (size_t index = 0; index < ExecutableIconSizes.size(); ++index)
+			{
+				CAPTURE(ExecutableIconSizes[index]);
+				CHECK(set->Icons[index].Size == ExecutableIconSizes[index]);
+				const Result<Image> expected = DownscaleImage(*decoded, ExecutableIconSizes[index]);
+				REQUIRE(expected.has_value());
+				const Result<Buffer> png = EncodePng(*expected);
+				REQUIRE(png.has_value());
+				CHECK(set->Icons[index].Png == *png);
+			}
+			CHECK(set->Version.Major == 2);
+			CHECK(set->Version.Minor == 3);
+			CHECK(set->Version.Patch == 4);
+			CHECK(set->Version.CompanyName == "Fixture Studio");
+			CHECK(set->Version.ProductName == "Tetromino");
+#if defined(ENGINE_PLATFORM_WINDOWS)
+			CHECK(set->Version.OriginalFilename == "Tetromino.exe");
+#else
+			CHECK(set->Version.OriginalFilename == "Tetromino");
+#endif
+
+			// Without an icon: no images, the same version.
+			ExecutableResources unlabelled = *resources;
+			unlabelled.Icon.clear();
+			const Result<ExecutableResourceSet> plain = BuildExecutableResourceSet(editor, unlabelled, "Tetromino");
+			REQUIRE(plain.has_value());
+			CHECK(plain->Icons.empty());
+			CHECK(plain->Version.CompanyName == "Fixture Studio");
+		}
 	}
 
 }

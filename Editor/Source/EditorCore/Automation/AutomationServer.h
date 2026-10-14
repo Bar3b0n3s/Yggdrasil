@@ -64,6 +64,9 @@ namespace Engine {
 		// The repository's bin directory for project.export (ExportSpecification::BinaryRoot: the target configuration's
 		// Runtime and shaders, §14.2; M7). The editor passes ENGINE_REPO_ROOT/bin; empty: project.export is Unsupported.
 		std::filesystem::path ExportBinaryRoot{};
+		// M15 (§13.4; ADR 0024 decision 3): Editor --export-root, the absolute directory project.export writes under instead
+		// of <Project>/Build/ (ExportSpecification::ExportRoot); empty: under the project.
+		std::filesystem::path ExportRoot{};
 		// §4.2 step 3: "AutomationServer::Pump(budget 4 ms)".
 		std::chrono::microseconds PumpBudget{ 4000 };
 		std::chrono::milliseconds WatchdogStallThreshold = DefaultWatchdogStallThreshold;

@@ -55,7 +55,7 @@ python Scripts/CheckBuildConfig.py                         # ABI defines, JPH_CR
 python Scripts/Format.py --check                           # without --check it rewrites files
 python Scripts/Lint.py                                     # --self-test: every seeded Tests/Data/Lint fixture fails as expected; --mode clang|regex; --allow-contract-stubs: contract mode
 python Scripts/PreCommit.py                                # the commit gate for ordinary commits (a milestone commit runs CI.py instead, never both: ADR 0023), strict (generate, static checks, Debug build, unit + gpu + golden + feature + automation against the Debug editor); --contract only for a milestone's contract commit; --gpu-optional without a Vulkan device
-python Scripts/CI.py                                       # all stages; --stages build,unit for a subset; --contract as for PreCommit; --gpu-optional as for PreCommit
+python Scripts/CI.py                                       # all stages; --stages build,unit for a subset; --contract as for PreCommit; --gpu-optional as for PreCommit; --milestone (from M15's integration, ADR 0024 decision 19) for the commit that completes a milestone: every stage plus hardening, clang-cl required, combined with no other selection or mode option
 ```
 
 **CI stages** run in order and fail fast: `setup → generate → lint → build → bake → unit → gpu → golden → feature → automation → determinism → portability`. M15 adds the export and hardening stages and M16 to M18 the games stage. The configurations follow the §15.8 matrix:

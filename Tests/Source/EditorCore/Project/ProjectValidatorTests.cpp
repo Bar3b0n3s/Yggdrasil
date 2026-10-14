@@ -1545,6 +1545,47 @@ end
 			REQUIRE(adjacent != infos.end());
 			CHECK(adjacent->AutoFixable);
 		}
+
+		// M15 (Docs/Decisions/0024-m15-contract.md decision 6, stream B): the suite rule Validate and testing exports share.
+		TEST_CASE("ProjectValidator: CheckTestSuites reports a non-suite script and a scene that is not a registered scene" * doctest::skip(true))
+		{
+			Test::EditorTestFixture fixture("ValidatorSuites");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene("Assets/Scenes/Main.scene");
+			auto& editor = fixture.GetEditor();
+			REQUIRE(editor.GetScriptService() != nullptr);
+			WriteValidatorFile(editor, "Assets/Tests/Main.test.luau",
+				"--!strict\nreturn Test.Suite(\"Main\", function()\n\tTest.Case(\"passes\", function() end)\nend)\n");
+			WriteValidatorFile(editor, "Assets/Plain.luau", "--!strict\nlocal Plain = {}\nreturn Script.Define(\"Plain\", Plain)\n");
+			WriteValidatorFile(editor, "Assets/Notes.txt", "not a scene");
+			REQUIRE(editor.GetAssets().Refresh().has_value());
+			const Json suite = Json{ { "Script", "Assets/Tests/Main.test.luau" }, { "Scene", "Assets/Scenes/Main.scene" } };
+			const Json plain = Json{ { "Script", "Assets/Plain.luau" }, { "Scene", "Assets/Scenes/Main.scene" } };
+			const Json notAScene = Json{ { "Script", "Assets/Tests/Main.test.luau" }, { "Scene", "Assets/Notes.txt" } };
+			const Json emptyScene = Json{ { "Script", "Assets/Tests/Main.test.luau" }, { "Scene", "" } };
+			auto settings = ProjectSettingsCommand::CreateFromPatch(editor,
+				Json{ { "Testing", Json{ { "Suites", Json::array({ suite, plain, notAScene, emptyScene }) } } } }, "Suites");
+			REQUIRE(settings);
+			REQUIRE(editor.Execute(std::move(*settings)));
+
+			const auto diagnostics = ProjectValidator::CheckTestSuites(editor);
+			REQUIRE_MESSAGE(diagnostics.has_value(), diagnostics.error().ToString());
+			REQUIRE(diagnostics->size() == 2);
+			CHECK((*diagnostics)[0].Code == "TEST_SUITE_INVALID");
+			CHECK((*diagnostics)[0].Field == "Testing.Suites[1]");
+			CHECK((*diagnostics)[0].Severity == DiagnosticSeverity::Error);
+			CHECK((*diagnostics)[1].Code == "TEST_SUITE_INVALID");
+			CHECK((*diagnostics)[1].Field == "Testing.Suites[2]");
+			CHECK((*diagnostics)[1].Message.find("Assets/Notes.txt") != std::string::npos);
+
+			// Validate reports exactly these suite diagnostics.
+			const auto report = ProjectValidator::Validate(editor, ValidationScope::Project);
+			REQUIRE(report.has_value());
+			CHECK(std::ranges::count_if(report->Diagnostics, [](const ProjectDiagnostic& diagnostic)
+			{
+				return diagnostic.Code == "TEST_SUITE_INVALID";
+			}) == 2);
+		}
 	}
 
 }

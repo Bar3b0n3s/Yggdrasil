@@ -219,6 +219,18 @@ namespace Engine {
 				CHECK(read.error().GetIssues().front().JsonPointer == "/Testing");
 			}
 		}
+
+		// M15 (§14.3; Docs/Decisions/0024-m15-contract.md decision 6, stream B).
+		TEST_CASE("GameManifest: a testing run's user data sits beside the package, outside a macOS bundle" * doctest::skip(true))
+		{
+			Test::TempDirectory directory("TestingUserDataRoot");
+			const std::filesystem::path package = directory / "Exports" / "Tetris";
+			CHECK(GetTestingUserDataRoot(package / "Game.json") == package / "bin" / "TestUserData");
+			CHECK(GetTestingUserDataRoot(package / "Tetris.app" / "Contents" / "Resources" / "Game.json") == package / "bin" / "TestUserData");
+			// Only the exact bundle layout counts as a bundle.
+			CHECK(GetTestingUserDataRoot(package / "Contents" / "Resources" / "Game.json") == package / "Contents" / "Resources" / "bin" / "TestUserData");
+			CHECK(GetTestingUserDataRoot(package / "Tetris.app" / "Game.json") == package / "Tetris.app" / "bin" / "TestUserData");
+		}
 	}
 
 }

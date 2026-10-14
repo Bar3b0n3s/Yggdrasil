@@ -236,3 +236,20 @@ def run_streamed(
         "\n".join(tail),
         collected,
     )
+
+
+@dataclasses.dataclass(frozen=True)
+class ProcessMemory:
+    """The memory of a running process (Docs/Decisions/0024-m15-contract.md decision 15): the soak stage's rule and the
+    perf capture read it from outside the process, so no engine interface changes."""
+
+    private_bytes: int  # Windows: PrivateUsage; Linux: RssAnon of /proc/<pid>/status; macOS: the resident size
+    resident_bytes: int  # Windows: WorkingSetSize; Linux: VmRSS; macOS: ps -o rss (KiB * 1024)
+    peak_resident_bytes: int  # Windows: PeakWorkingSetSize; Linux: VmHWM; macOS: equal to resident_bytes
+
+
+def query_process_memory(pid: int) -> ProcessMemory:
+    """The memory of the running process `pid`: on Windows K32GetProcessMemoryInfo with PROCESS_MEMORY_COUNTERS_EX
+    through ctypes (PROCESS_QUERY_LIMITED_INFORMATION), on Linux /proc/<pid>/status, on macOS `ps -o rss= -p <pid>`.
+    Raises ProcessLookupError when the process has exited, OSError when the query fails. Stream C implements it."""
+    raise NotImplementedError("contract stub: process memory (ADR 0024 decision 15, stream C)")
