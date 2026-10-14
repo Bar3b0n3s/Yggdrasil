@@ -313,13 +313,13 @@ Tests support (`Tests/Source/Support/`): recording assert handler, death-test re
 
 ## M16 — Breakout dry run (time-boxed)
 
-**Scope.** Exercise the agent workflow before the required demos. Time box: this milestone ends after at most 4 working sessions, whatever the polish of the game. Before it starts, the Linux and macOS catch-up fixes the GitHub Actions failures of the M15 milestone commit in one batch, a macOS run of an exported bundle (signature, loader lookup) included, together with the catch-up items `Docs/Decisions/0025-m15-completion-review.md` lists (ADR 0011; ADR 0024 decision 20).
+**Scope.** Exercise the agent workflow before the required demos. Time box: this milestone ends after at most 4 working sessions, whatever the polish of the game. The Linux and macOS catch-up that ADR 0024 decision 20 scheduled before M16 (the GitHub Actions failures of the M15 milestone commit, a macOS run of an exported bundle, the catch-up items of `Docs/Decisions/0025-m15-completion-review.md` decision 15) is deferred until the product owner asks for it; remote CI stays informational and non-blocking, and first-party code stays portable (ADR 0011; `Docs/Decisions/0026-m16-contract.md` decision 1).
 
 **Deliverables**: `Scripts/AuditProvenance.py` (Architecture §13.12, §2.3), and the `games` suite of `Scripts/Test.py` and stage of `Scripts/CI.py` (§15.1 T5, §15.8), both listed as not available until then; M16's acceptance and M17's and M18's run them (ADR 0025). `Tests/Projects/Breakout` built by an agent through the MCP bridge only (paddle, ball with physics, brick grid from a prefab, score text, lives, synthesized sounds, win/lose); its committed `Automation/BuildLog.jsonl` and `Automation/Provenance.json`; one test suite and one replay recorded from tick 0; a friction list resolved as engine changes (methods, hints, docs, skills), each with tests. The dry run also exercises the operational rules once: attaching to an already-open editor, one `project.upgrade` after an engine change that alters canonical output, and one replay re-recording.
 
 **Acceptance**: `AuditProvenance.py --project Tests/Projects/Breakout` passes from a fresh clone (nothing read from `Library/`); its suites and replay pass in `Test.py --suite games`, and the replay's final hash is identical in the editor and the Dist export; `project.validate` clean; Dist export smoke exits 0; every friction item is closed or recorded as an ADR.
 
-**Parallelization**: one agent builds the game; engineers fix friction items in parallel in their owning modules.
+**Parallelization**: one agent builds the game; engineers fix friction items in parallel in their owning modules. The contract, the audit, games-suite and editor-gap streams that precede the build, the friction list, the time box and the record of the operational rules are in `Docs/Decisions/0026-m16-contract.md`.
 
 ---
 

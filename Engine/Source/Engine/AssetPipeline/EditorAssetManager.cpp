@@ -2377,6 +2377,11 @@ namespace Engine {
 		m_State->Observer = std::move(observer);
 	}
 
+	void EditorAssetManager::SetWriteContext(Ref<const AssetWriteContext> /*context*/)
+	{
+		ENGINE_CONTRACT_STUB();
+	}
+
 	void EditorAssetManager::Update(double nowSeconds)
 	{
 		if (!m_State->OpenProject.has_value() || m_State->OpenProject->HotReloader == nullptr)

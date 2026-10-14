@@ -805,6 +805,18 @@ namespace Engine {
 		return {};
 	}
 
+	bool EditorContext::IsAssetScanDeferred() const
+	{
+		ENGINE_CONTRACT_STUB();
+		return false;
+	}
+
+	Result<AssetRefreshReport> EditorContext::OpenDeferredAssets()
+	{
+		ENGINE_CONTRACT_STUB();
+		return MakeError(ErrorCode::Unsupported, "deferred asset scans arrive with M16 stream C (Docs/Decisions/0026-m16-contract.md decision 11)");
+	}
+
 	Result<AssetRefreshReport> EditorContext::OpenProjectAssets()
 	{
 		ENGINE_TRY_ASSIGN(const VfsPath assetsRoot, VfsPath::Create(Utils::ProjectScheme, "Assets"));

@@ -137,6 +137,17 @@ namespace Engine {
 		bool FromCache = false;                     // served by a valid cache entry instead of the importer
 	};
 
+	// The write context of an import (§13.12 rule 2; Docs/Decisions/0026-m16-contract.md decision 10): an immutable token the
+	// editor makes current with EditorAssetManager::SetWriteContext, one per attribution. An import takes the context
+	// current when it starts, and the manager holds it with the import until the import is published, superseded or
+	// dropped; every write of the publication carries its Id (AssetWriteEvent::WriteContextId). The editor keeps what an Id
+	// means for as long as the token is current or an import holds it (a weak reference to it expires afterwards); the
+	// asset pipeline reads nothing but the Id.
+	struct AssetWriteContext
+	{
+		uint64_t Id = 0; // non-zero, and unique among the contexts one editor hands out
+	};
+
 	// An external change of an asset file, as a poll of the hot reloader or a Refresh detected it (never the editor's own
 	// writes, race rule 1). Each change is published once, by whichever of the two sees it first. EditorContext raises
 	// SceneChangedOnDisk when it is the open scene or a prefab the open scene uses (race rule 3).
@@ -273,9 +284,27 @@ namespace Engine {
 		// (EditorContext::WriteProjectFile, MoveProjectFile, RemoveProjectFile, CreateProjectDirectory) and the manager's own
 		// writes (the .meta files OpenProject, Refresh and hot reload write for new sources, the dependency metas from import
 		// reads, and the .meta rewrite after an import changes the sub-assets). EditorContext keeps provenance with it
-		// (§13.12 rule 1): Record with the current attribution for a written or moved-in file under Assets/, Remove for a
-		// removed or moved-out one; nothing during a dry run or in a read-only editor. Empty: none.
+		// (§13.12 rule 1): Record for a written or moved-in file under Assets/, with the attribution of the event's write
+		// context (AssetWriteEvent::WriteContextId, SetWriteContext) when it has one, else the current attribution; Remove for
+		// a removed or moved-out one; nothing during a dry run or in a read-only editor. Empty: none.
 		void SetWriteObserver(WriteObserver observer);
+
+		// Deferred-write attribution (§13.12 rule 2; Docs/Decisions/0026-m16-contract.md decision 10): makes `context` the
+		// current write context; null (the default) clears it. Main thread only. EditorContext calls it from
+		// SetWriteAttribution with one token per attribution, the UI's reset included. Whenever the manager begins an import's
+		// ticket (Load, LoadAsync, Refresh and a poll's batch, Reimport, ReimportAsync, a reimport its writer's events
+		// schedule, the end of a deferral of reloads, where a held reimport starts), the import keeps the context current
+		// then. A ticket begun while a publication runs keeps that publication's context instead (none when it has none):
+		// a dependent its changed artifacts reimport, a main-thread importer that runs inline, a load from the reload
+		// listener, a reimport the publication's own writes schedule, nested publications included; the manager holds the
+		// publishing context for the whole of the publication. So the work an import causes is attributed to whatever started
+		// that import. Every write an import's publication makes (WriteDependencyMetas' dependency metas, the source's .meta
+		// rewritten with its sub-assets) reaches the write observer with AssetWriteEvent::WriteContextId = its context's Id,
+		// wherever the publication runs: inside the call, in a WaitIdle, or at a later frame's MainThreadQueue::Drain outside any
+		// request; 0 without a context. The manager holds a context only while it is current or an import holds it, and never
+		// calls back into the editor for it. So asset.import and asset.reimport attribute the .meta rewrites their imports
+		// publish after the request returned to themselves.
+		void SetWriteContext(Ref<const AssetWriteContext> context);
 
 		// --- Hot reload (§7.5) -----------------------------------------------------------------------------------------
 

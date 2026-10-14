@@ -40,6 +40,14 @@ namespace Engine {
 		// Written: "<Path>.bak", the copy of the replaced file that a mount keeping backups made (§4.10; project:// does),
 		// which the write produced too and marked known; empty otherwise (a new file, or a mount without backups).
 		VfsPath Backup{};
+		// The Id of the write context (EditorAssetManager.h, AssetWriteContext) of the import whose publication made this write:
+		// the dependency metas of its reads and the source's .meta rewritten with its sub-assets. The editor records such a
+		// write with the attribution that was current when the import started (a request, or the UI), or, for an import
+		// started while another import's publication ran, with that publication's, also when the publication runs after the
+		// request returned (§13.12 rule 2; Docs/Decisions/0026-m16-contract.md decision 10). 0 for every other write (the
+		// writer's callers, the .meta batches of a scan or a poll) and for an import without a write context. The AssetWriter
+		// itself always reports 0: the EditorAssetManager sets it on the events it forwards to its write observer.
+		uint64_t WriteContextId = 0;
 	};
 
 	// The writer of one editor. Main thread only (§4.11). Not copyable.

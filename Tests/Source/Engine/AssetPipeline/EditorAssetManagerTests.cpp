@@ -1063,6 +1063,121 @@ namespace Engine {
 			CHECK(events[2].second == XXH64(fixture.ReadProjectFile("Assets/Kit.pack.meta")));
 		}
 
+		TEST_CASE("EditorAssetManager: the writes an import's publication makes carry the write context taken when the import started"
+			* doctest::skip(true))
+		{
+			ImportCounts counts;
+			Test::AssetTestFixture fixture;
+			RegisterTestImporters(fixture, counts);
+			std::vector<AssetWriteEvent> events;
+			fixture.GetManager().SetWriteObserver([&events](const AssetWriteEvent& event)
+			{
+				events.push_back(event);
+			});
+			const auto makeContext = [](uint64_t id)
+			{
+				return CreateRef<const AssetWriteContext>(AssetWriteContext{ .Id = id });
+			};
+			const auto checkContexts = [&events](uint64_t id)
+			{
+				for (const AssetWriteEvent& event : events)
+				{
+					CAPTURE(event.Path.ToString());
+					CHECK(event.WriteContextId == id);
+				}
+			};
+			// Context 7 is current, as EditorContext::SetWriteAttribution makes a request's token current.
+			Ref<const AssetWriteContext> seven = makeContext(7);
+			const std::weak_ptr<const AssetWriteContext> sevenHeld = seven;
+			fixture.GetManager().SetWriteContext(seven);
+			fixture.WriteProjectText("Assets/Kit.pack", R"({"Files": ["Data.bin"]})");
+			fixture.WriteProjectText("Assets/Data.bin", "data");
+			fixture.WriteProjectText("Assets/Ref.leaf", MakeLeafText(1));
+			fixture.OpenProject(false);
+			// The open's batch writes Data.bin.meta, Kit.pack.meta and Ref.leaf.meta itself: no import's publication.
+			REQUIRE(events.size() == 3);
+			checkContexts(0);
+			const AssetHandle pack = fixture.GetManager().Resolve("Assets/Kit.pack").value_or(AssetHandle());
+			const AssetHandle leaf = fixture.GetManager().Resolve("Assets/Ref.leaf").value_or(AssetHandle());
+			REQUIRE(pack.IsValid());
+			REQUIRE(leaf.IsValid());
+			REQUIRE(fixture.GetManager().Load(leaf).has_value());
+			events.clear();
+
+			// The pack now reads a second file that has no .meta and references the standalone leaf by handle. Its reimport
+			// starts under context 7; context 9 is current before the publication (inline jobs: the import has run, its
+			// publication waits for the main-thread queue), and the import holds context 7 until then.
+			fixture.WriteProjectText("Assets/More.bin", "more");
+			fixture.WriteProjectText("Assets/Kit.pack", R"({"Files": ["Data.bin", "More.bin", "Ref.leaf"]})");
+			JobHandle<AssetImportOutcome> reimport = fixture.GetManager().ReimportAsync(pack);
+			fixture.GetManager().SetWriteContext(makeContext(9));
+			seven.reset();
+			CHECK_FALSE(sevenHeld.expired());
+			REQUIRE(events.empty());
+			static_cast<void>(fixture.GetMainThreadQueue().Drain());
+			const Result<AssetImportOutcome> outcome = reimport.Take();
+			REQUIRE_MESSAGE(outcome.has_value(), outcome.error().ToString());
+			// The publication's two writes, the dependency meta of More.bin and the pack's .meta rewritten with its sub-assets
+			// (it was never imported, so its .meta had none), carry the context the import started with, which nothing holds
+			// once the import is published (EditorContext's Id -> attribution entry is pruned then).
+			REQUIRE(events.size() == 2);
+			CHECK(events[0].Path == fixture.ProjectPath("Assets/More.bin.meta"));
+			CHECK(events[1].Path == fixture.ProjectPath("Assets/Kit.pack.meta"));
+			checkContexts(7);
+			CHECK(sevenHeld.expired());
+
+			// A ticket begun while a publication runs keeps that publication's context: the leaf's reimport starts under
+			// context 11 and is published at a Drain while context 12 is current; its changed artifact reimports the pack that
+			// references it, which now also reads Extra.bin, and the pack's publication at the next Drain writes under 11.
+			events.clear();
+			Ref<const AssetWriteContext> eleven = makeContext(11);
+			const std::weak_ptr<const AssetWriteContext> elevenHeld = eleven;
+			fixture.GetManager().SetWriteContext(std::move(eleven));
+			fixture.WriteProjectText("Assets/Ref.leaf", MakeLeafText(2));
+			fixture.WriteProjectText("Assets/Extra.bin", "extra");
+			fixture.WriteProjectText("Assets/Kit.pack", R"({"Files": ["Data.bin", "More.bin", "Ref.leaf", "Extra.bin"]})");
+			JobHandle<AssetImportOutcome> leafReimport = fixture.GetManager().ReimportAsync(leaf);
+			fixture.GetManager().SetWriteContext(makeContext(12));
+			static_cast<void>(fixture.GetMainThreadQueue().Drain());
+			static_cast<void>(fixture.GetMainThreadQueue().Drain());
+			const Result<AssetImportOutcome> leafOutcome = leafReimport.Take();
+			REQUIRE_MESSAGE(leafOutcome.has_value(), leafOutcome.error().ToString());
+			REQUIRE(events.size() == 2);
+			CHECK(events[0].Path == fixture.ProjectPath("Assets/Extra.bin.meta"));
+			CHECK(events[1].Path == fixture.ProjectPath("Assets/Kit.pack.meta"));
+			checkContexts(11);
+			CHECK(elevenHeld.expired());
+
+			// A superseded import's context is released with its dropped completion: two overlapping reimports (inline jobs:
+			// both have imported before either is published) under contexts 13 and 14; only the newer one publishes.
+			events.clear();
+			Ref<const AssetWriteContext> thirteen = makeContext(13);
+			const std::weak_ptr<const AssetWriteContext> thirteenHeld = thirteen;
+			fixture.GetManager().SetWriteContext(std::move(thirteen));
+			JobHandle<AssetImportOutcome> older = fixture.GetManager().ReimportAsync(pack);
+			fixture.GetManager().SetWriteContext(makeContext(14));
+			fixture.WriteProjectText("Assets/Last.bin", "last");
+			fixture.WriteProjectText("Assets/Kit.pack", R"({"Files": ["Data.bin", "More.bin", "Ref.leaf", "Extra.bin", "Last.bin"]})");
+			JobHandle<AssetImportOutcome> newer = fixture.GetManager().ReimportAsync(pack);
+			fixture.GetManager().SetWriteContext(nullptr);
+			CHECK(older.Take().has_value());
+			CHECK(newer.Take().has_value());
+			fixture.GetManager().WaitIdle();
+			CHECK(thirteenHeld.expired());
+			REQUIRE(events.size() == 2);
+			CHECK(events[0].Path == fixture.ProjectPath("Assets/Last.bin.meta"));
+			CHECK(events[1].Path == fixture.ProjectPath("Assets/Kit.pack.meta"));
+			checkContexts(14);
+
+			// A write through the writer is no import's publication, whatever context is current.
+			events.clear();
+			fixture.GetManager().SetWriteContext(makeContext(15));
+			const std::string notes = MakeLeafText(1);
+			REQUIRE(fixture.GetManager().GetWriter().Write(fixture.ProjectPath("Assets/Notes.leaf"), AsBytes(notes)).has_value());
+			REQUIRE_FALSE(events.empty());
+			CHECK(events.front().WriteContextId == 0);
+		}
+
 		TEST_CASE("EditorAssetManager: a read-only project registers transient metas and writes nothing")
 		{
 			ImportCounts counts;

@@ -146,6 +146,8 @@ Outside the Architecture: Roadmap M16 (decision 10, and the catch-up of decision
 
 Remote CI stays non-blocking (ADR 0011). These are fixed in the Linux and macOS catch-up that Roadmap M16 schedules before M16 starts (ADR 0024 decision 20), together with the failures of the M15 milestone commit's Actions runs and a macOS run of an exported bundle (signature, loader lookup):
 
+> **Superseded in its scheduling** by `Docs/Decisions/0026-m16-contract.md` decision 1 (the product owner, 2026-10-14): the catch-up is deferred until the product owner asks for it, and M16 starts without it. The items below stay listed here for that catch-up.
+
 - **M29:** off Windows, "RuntimeApp: F1 toggles the stats overlay in a windowed run and the game still receives F1" returns after its device probe, because synthesizing a keystroke for another process's window, and the test's Runtime automation connection, are Windows-only. Port the Runtime automation connection to POSIX so the windowed-Runtime overlay path (ImGui enabled, the overlay's GPU objects, a clean exit) runs on Linux and macOS, keeping only the keystroke Windows-only. The toggle, the drawing and the cursor rule are covered there by the device-less `StatsOverlay` cases meanwhile.
 - **M30:** verify the map check against a real GCC LTO Dist map. GCC's linker plugin internalizes first-party symbols and GNU ld's map lists only global ones, so the Linux GCC job may miss `FeatureTestRunner`, `ReplayPlayer` or a forbidden symbol; if confirmed, read the executable's ELF symbols beside the map. ADR 0024 decision 11 records the limitation.
 - **ADR 0013 decision 25's third limit:** GCC 14, Clang 19 with libstdc++ and Apple Clang still build only in GitHub Actions; the catch-up is where their failures are fixed.

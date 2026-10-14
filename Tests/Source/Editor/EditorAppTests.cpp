@@ -1,5 +1,6 @@
 #include "TestsPCH.h"
 
+#include "EditorCore/Automation/ProvenanceRecorder.h"
 #include "EditorCore/Autosave/Autosave.h"
 #include "EditorCore/Project/ProjectManager.h"
 #include "Engine/App/ExitCode.h"
@@ -475,6 +476,107 @@ end)
 			REQUIRE(provenance.has_value());
 			CHECK(provenance->contains(R"("Method": "project.upgrade")"));
 			CHECK(provenance->contains(R"("TranscriptLine": 1)"));
+		}
+
+		TEST_CASE("EditorApp: --upgrade defers the asset scan to a transcribed project.refreshAssets before project.upgrade"
+			* doctest::skip(true))
+		{
+			Test::EditorTestFixture fixture("EditorUpgradeDeferredScan");
+			const std::filesystem::path projectFile = CreateProcessTestProject(fixture, "Deferred");
+			const std::filesystem::path root = projectFile.parent_path();
+			// A source without a .meta, as an engine change or a hand copy leaves one (the open-time scan writes its .meta),
+			// and a scene in an old format (project.upgrade rewrites it).
+			const Result<Buffer> png = FileSystem::ReadFile(Test::GetTestDataPath("Assets/Gltf/Textures/Checker.png"));
+			REQUIRE(png.has_value());
+			REQUIRE(FileSystem::CreateDirectories(root / "Assets/Textures").has_value());
+			REQUIRE(FileSystem::WriteFileAtomic(root / "Assets/Textures/Checker.png", *png).has_value());
+			const Result<std::string> v0 = Test::ReadTestDataText("Formats/Scene/v0.scene");
+			REQUIRE(v0.has_value());
+			WriteProcessTestFile(root / "Assets/Scenes/Old.scene", *v0);
+
+			const Result<ProcessResult> result = RunEditor(fixture.GetDirectory(),
+				{ "--headless", "--renderer", "none", "--project", Test::PathToUtf8(projectFile), "--upgrade" }, std::chrono::seconds(60));
+			REQUIRE_MESSAGE(result.has_value(), result.error().ToString());
+			CHECK_MESSAGE(result->ExitCode == ExitCode::Success, result->StandardError);
+
+			// The cli batch [project.refreshAssets, project.upgrade]: lines 1 and 3 are its requests, 2 and 4 their responses.
+			const auto readTranscript = [&root]()
+			{
+				const Result<std::string> transcript = FileSystem::ReadText(root / "Automation/BuildLog.jsonl");
+				REQUIRE(transcript.has_value());
+				std::vector<Json> read;
+				for (size_t begin = 0; begin < transcript->size();)
+				{
+					const size_t end = transcript->find('\n', begin);
+					REQUIRE(end != std::string::npos);
+					Result<Json> line = JsonReader::Parse(std::string_view(*transcript).substr(begin, end - begin));
+					REQUIRE_MESSAGE(line.has_value(), line.error().ToString());
+					read.push_back(std::move(*line));
+					begin = end + 1;
+				}
+				return read;
+			};
+			std::vector<Json> lines = readTranscript();
+			REQUIRE(lines.size() == 4);
+			const std::pair<const char*, int> requests[] = { { "project.refreshAssets", 1 }, { "project.upgrade", 3 } };
+			for (const auto& [method, line] : requests)
+			{
+				CAPTURE(std::string(method));
+				Json& request = lines[static_cast<size_t>(line - 1)];
+				Json& response = lines[static_cast<size_t>(line)];
+				CHECK(request["type"] == Json("request"));
+				CHECK(request["method"] == Json(method));
+				CHECK(request["client"] == Json("cli"));
+				CHECK(response["type"] == Json("response"));
+				CHECK(response["requestLine"] == Json(line));
+				CHECK(response["ok"] == Json(true));
+			}
+
+			// The scan's .meta writes belong to project.refreshAssets at line 1, the scene's rewrite to project.upgrade at line
+			// 3, and no entry is "ui" (§13.12 rule 2).
+			const Result<std::string> provenance = FileSystem::ReadText(root / "Automation/Provenance.json");
+			REQUIRE(provenance.has_value());
+			const Result<std::vector<ProvenanceEntry>> entries = ProvenanceRecorder::FromText(*provenance);
+			REQUIRE_MESSAGE(entries.has_value(), entries.error().ToString());
+			for (const ProvenanceEntry& entry : *entries)
+			{
+				CAPTURE(entry.Path);
+				CHECK(entry.Method != "ui");
+				CHECK(entry.Client != "ui");
+			}
+			const auto find = [&entries](std::string_view path) -> const ProvenanceEntry*
+			{
+				const auto found = std::ranges::find(*entries, path, &ProvenanceEntry::Path);
+				return found == entries->end() ? nullptr : &*found;
+			};
+			const ProvenanceEntry* meta = find("Assets/Textures/Checker.png.meta");
+			REQUIRE(meta != nullptr);
+			CHECK(meta->Method == "project.refreshAssets");
+			CHECK(meta->Client == "cli");
+			CHECK(meta->TranscriptLine == std::optional<uint64_t>(1));
+			const ProvenanceEntry* scene = find("Assets/Scenes/Old.scene");
+			REQUIRE(scene != nullptr);
+			CHECK(scene->Method == "project.upgrade");
+			CHECK(scene->TranscriptLine == std::optional<uint64_t>(3));
+
+			// A failing project.refreshAssets (here a .luaurc the type checker cannot read) leaves the project open until the
+			// batch ends, so its response line is transcribed and the run fails with the request's own error, not with a
+			// transcript error.
+			const Buffer invalidLuaurc = { std::byte{ 0xff } };
+			REQUIRE(FileSystem::WriteFileAtomic(root / ".luaurc", invalidLuaurc, { .KeepBackup = false }).has_value());
+			const Result<ProcessResult> failed = RunEditor(fixture.GetDirectory(),
+				{ "--headless", "--renderer", "none", "--project", Test::PathToUtf8(projectFile), "--upgrade" }, std::chrono::seconds(60));
+			REQUIRE_MESSAGE(failed.has_value(), failed.error().ToString());
+			CHECK_MESSAGE(failed->ExitCode == ExitCode::Failed, failed->StandardError);
+			CHECK(failed->StandardError.contains(".luaurc"));
+			CHECK_FALSE(failed->StandardError.contains("writing the transcript"));
+			lines = readTranscript();
+			REQUIRE(lines.size() == 6);
+			CHECK(lines[4]["type"] == Json("request"));
+			CHECK(lines[4]["method"] == Json("project.refreshAssets"));
+			CHECK(lines[5]["type"] == Json("response"));
+			CHECK(lines[5]["requestLine"] == Json(5));
+			CHECK(lines[5]["ok"] == Json(false));
 		}
 
 		TEST_CASE("EditorApp: --dump-reference writes both catalogues in their formats without test hooks")

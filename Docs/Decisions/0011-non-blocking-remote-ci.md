@@ -1,6 +1,6 @@
 # 0011 — Remote CI is non-blocking
 
-- **Status:** accepted
+- **Status:** accepted; the batching rule amended by `Docs/Decisions/0026-m16-contract.md` decision 1
 - **Date:** 2026-10-07
 - **Decided by:** product owner
 - **Context:** Up to M6, every milestone waited until all four GitHub Actions jobs were green (Windows, Linux GCC 14, Linux Clang 19, macOS arm64) before the next one started. One CI round takes 35–100 minutes, and a failure costs at least another round. The waiting roughly doubled the wall-clock time of several milestones.
@@ -26,7 +26,7 @@ Remote CI stays enabled, but no step waits for it.
 
 - **Done means the local gate.** A milestone, or any change, is done when the full local Windows gate is green: strict `python Scripts/PreCommit.py`, then `python Scripts/CI.py` with every stage. The portability stage includes clang-cl builds in Release and in Dist (asserts compiled out). Those builds catch the most common class of Clang-only error before a push. The change is then merged into `main` and pushed straight away.
 - **GitHub Actions runs in the background.** Its results are read occasionally through the public annotations API.
-- **Linux and macOS failures are fixed in batches.** A dedicated catch-up task runs every few milestones, and always before the demo games (Roadmap M16–M18). The demo games must be built on a tree that is green on every platform.
+- **Linux and macOS failures are fixed in batches.** A dedicated catch-up task runs every few milestones, and always before the demo games (Roadmap M16–M18). The demo games must be built on a tree that is green on every platform. *Amended by `Docs/Decisions/0026-m16-contract.md` decision 1 (the product owner, 2026-10-14): the catch-up runs when the product owner asks for it and no longer has to precede the demo games; Linux and macOS stay unverified until their jobs are green.*
 - **Design-level failures are raised at once.** Examples: a Vulkan feature that Lavapipe or MoltenVK lacks, or an API that cannot work on POSIX. The same applies to anything that would force a finished milestone to be reworked.
 - **"Verified" keeps its meaning.** A platform counts as verified only once its CI job is green (Architecture §1.1 G6). Between catch-up tasks, Linux and macOS may be temporarily unverified, and status reports say so.
 

@@ -93,6 +93,14 @@ namespace Engine {
 		// scene loads) are strict too. Off: unknown keys, fields and components are warnings, and the scenes and prefabs are
 		// not loaded when the project opens.
 		bool StrictUnknowns = false;
+		// --upgrade (Docs/Decisions/0026-m16-contract.md decision 11): OpenProject mounts project:// and cache://, loads the
+		// provenance and stops before the asset scan, so opening the project writes nothing. The script services, creating
+		// Assets/, EditorAssetManager::OpenProject (the scan and the .meta files it writes for new sources), the --strict
+		// document check and the recent-list entry wait for OpenDeferredAssets, which project.refreshAssets, the first request
+		// of --upgrade's cli batch [project.refreshAssets, project.upgrade], runs under its own attribution and transcript line
+		// (§13.12 rule 2). Until then the asset manager has no project, and nothing but that request is served. Off (the
+		// default): OpenProject opens the assets at once.
+		bool DeferAssetScan = false;
 	};
 
 	// The editor state of one editor process (or one test). Not copyable or movable; main thread only (§4.11), like the scene.
@@ -174,7 +182,8 @@ namespace Engine {
 
 		// Once per frame (EditorApp::OnUpdate) with a monotonic time in seconds (the frame clock's accumulated unscaled time,
 		// so headless editors on a ManualClock are deterministic); tests pass chosen times: drives asset hot reload
-		// (EditorAssetManager::Update; nothing without a project) and the audio preview (AudioPreview::Update, M12).
+		// (EditorAssetManager::Update; nothing without a project, nor while the asset scan is deferred, when the asset manager
+		// has no project) and the audio preview (AudioPreview::Update, M12).
 		void Update(double nowSeconds);
 
 		// --- Project -------------------------------------------------------------------------------------------------------
@@ -191,10 +200,33 @@ namespace Engine {
 		// (EditorAssetManager::OpenProject on project://Assets, which is created first when a writable project lacks it) and
 		// starts with no open scene and an empty history. A --strict editor (EditorContextSpecification::StrictUnknowns) then
 		// loads every scene and prefab under Assets/ strictly. Errors: InvalidState when a project is already open; the mount
-		// errors, ProvenanceRecorder::Load errors, the errors of creating Assets/ and EditorAssetManager::OpenProject errors;
-		// with StrictUnknowns, a Validation error naming every scene and prefab that does not load strictly (one issue per
-		// file: its path, its first problem and pointer); after any of them the project stays closed.
+		// errors, ProvenanceRecorder::Load errors, the script services' errors (Validation for a .luaurc the type checker
+		// cannot read), the errors of creating Assets/ and EditorAssetManager::OpenProject errors; with StrictUnknowns, a
+		// Validation error naming every scene and prefab that does not load strictly (one issue per file: its path, its first
+		// problem and pointer); after any of them the project stays closed.
+		// With EditorContextSpecification::DeferAssetScan (Docs/Decisions/0026-m16-contract.md decision 11) it stops after
+		// loading the provenance, with no open scene and an empty history, and IsAssetScanDeferred() is then true: the script
+		// services, creating Assets/, the asset scan, the strict check and the recent-list entry wait for OpenDeferredAssets,
+		// whose errors theirs become, and OpenProject's own errors are InvalidState, the mount errors and
+		// ProvenanceRecorder::Load errors.
 		[[nodiscard]] Status OpenProject(Scope<LoadedProject> project);
+
+		// True from an OpenProject that deferred the asset scan (EditorContextSpecification::DeferAssetScan) until
+		// OpenDeferredAssets ran it successfully or the project closed; false without a project
+		// (Docs/Decisions/0026-m16-contract.md decision 11).
+		[[nodiscard]] bool IsAssetScanDeferred() const;
+
+		// Runs the part of OpenProject that DeferAssetScan held back, with the current attribution: the script services,
+		// creating Assets/, EditorAssetManager::OpenProject on project://Assets (the scan, and the .meta files it writes for
+		// new sources, which provenance records with that attribution), for a --strict editor the strict document check, and
+		// then the recent-list entry. project.refreshAssets calls it before its refresh while the scan is deferred and reports
+		// both, so every write of --upgrade's open is attributed to that cli request and its transcript line (§13.12 rule 2).
+		// Returns the scan's report. Errors: InvalidState without a project or when no scan is deferred; else the errors
+		// OpenProject documents for that part. A failure undoes only that part (the asset manager's project and the script
+		// services) and leaves the project open, with project:// and cache:// mounted and IsAssetScanDeferred() still true, so
+		// the failing request's response line is still transcribed and its error is reported as its own; the caller closes the
+		// project (EditorApp exits non-zero after the failed batch and closes it as usual).
+		[[nodiscard]] Result<AssetRefreshReport> OpenDeferredAssets();
 
 		// Closes the open scene and the project (unmounts project:// and cache://, releases the lock). Unsaved changes are
 		// discarded: callers ask IsSceneDirty first. No effect without a project. BeforeProjectClose runs before stopping

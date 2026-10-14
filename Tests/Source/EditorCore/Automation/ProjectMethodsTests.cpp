@@ -199,6 +199,56 @@ namespace Engine {
 			CHECK((*again)["changedFiles"] == Json::array());
 		}
 
+		TEST_CASE("ProjectMethods: project.upgrade rewrites .meta, .material, .sfx and .replay files canonically and records them"
+			* doctest::skip(true))
+		{
+			Test::AutomationFixture setup("ProjectUpgradeAssetFormats", false);
+			REQUIRE(setup.Call("asset.create", ParseProjectJson(R"({"type": "material", "path": "Assets/Materials/Red.material", "values": {"Roughness": 0.45}})"))
+					.has_value());
+			REQUIRE(setup.Call("asset.create", ParseProjectJson(R"({"type": "SoundEffect", "path": "Assets/Audio/Blip.sfx",
+				"values": {"Seed": 3, "Layers": [{"Wave": "Square", "Notes": ["A3:0.05"]}]}})"))
+					.has_value());
+			const Result<std::string> replay = Test::ReadTestDataText("SettingsObservation/Project/Assets/Tests/Replays/Main.replay");
+			REQUIRE(replay.has_value());
+			const std::filesystem::path root = setup.GetEditor().GetProject().GetRoot();
+			REQUIRE(FileSystem::CreateDirectories(root / "Assets/Replays").has_value());
+			REQUIRE(FileSystem::WriteFileAtomic(root / "Assets/Replays/Main.replay", AsBytes(*replay), { .KeepBackup = false }).has_value());
+
+			// Each file as another writer leaves it: the same document, minified, so only a canonical rewrite restores the bytes
+			// the editor wrote (§6; Docs/Decisions/0026-m16-contract.md decision 12).
+			const std::string_view files[] = { "Assets/Audio/Blip.sfx", "Assets/Audio/Blip.sfx.meta", "Assets/Materials/Red.material",
+				"Assets/Materials/Red.material.meta", "Assets/Replays/Main.replay" };
+			std::vector<std::string> canonical;
+			for (const std::string_view file : files)
+			{
+				const Result<std::string> text = FileSystem::ReadText(root / file);
+				REQUIRE(text.has_value());
+				canonical.push_back(*text);
+				const Json document = ParseProjectJson(*text);
+				const std::string minified = document.dump();
+				REQUIRE(FileSystem::WriteFileAtomic(root / file, AsBytes(minified), { .KeepBackup = false }).has_value());
+			}
+
+			Result<Json> upgraded = setup.Call("project.upgrade", Json::object());
+			REQUIRE_MESSAGE(upgraded.has_value(), upgraded.error().ToString());
+			CHECK((*upgraded)["changedFiles"] == ParseProjectJson(R"(["Assets/Audio/Blip.sfx", "Assets/Audio/Blip.sfx.meta", "Assets/Materials/Red.material",
+				"Assets/Materials/Red.material.meta", "Assets/Replays/Main.replay"])"));
+			const ProvenanceRecorder* provenance = setup.GetEditor().GetProvenance();
+			REQUIRE(provenance != nullptr);
+			for (size_t index = 0; index < std::size(files); ++index)
+			{
+				CAPTURE(std::string(files[index]));
+				CHECK(FileSystem::ReadText(root / files[index]).value_or("") == canonical[index]);
+				const ProvenanceEntry* entry = provenance->Find(files[index]);
+				REQUIRE(entry != nullptr);
+				CHECK(entry->Method == "project.upgrade");
+			}
+
+			Result<Json> again = setup.Call("project.upgrade", Json::object());
+			REQUIRE(again.has_value());
+			CHECK((*again)["changedFiles"] == Json::array());
+		}
+
 		TEST_CASE("ProjectMethods: project.refreshAssets registers an externally written file")
 		{
 			Test::AutomationFixture setup("ProjectRefreshAssets", false);

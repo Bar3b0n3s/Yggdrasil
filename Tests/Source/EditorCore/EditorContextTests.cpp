@@ -969,6 +969,154 @@ namespace Engine {
 			}
 		}
 
+		TEST_CASE("EditorContext: a glTF's .meta rewritten with its sub-assets after asset.import returned is attributed to asset.import"
+			* doctest::skip(true))
+		{
+			Test::EditorTestFixture fixture("DeferredImportProvenance");
+			fixture.CreateAndOpenProject();
+			EditorContext& editor = fixture.GetEditor();
+			EditorAssetManager& assets = editor.GetAssets();
+			// A request like asset.import (its request id and transcript line as the bridge sends them) writes the glTF, its
+			// closure files and the glTF's own .meta, then starts the import (ReimportAsync, as the method's pending operation
+			// starts it). Unlike the real handler, it writes no closure metas, so the publication writes the closure files'
+			// dependency metas as well as the glTF .meta's sub-asset rewrite.
+			editor.SetWriteAttribution(WriteAttribution{
+				.Method = "asset.import",
+				.RequestId = VariantValue(Json(7)),
+				.Client = "engine-mcp",
+				.TranscriptLine = 12,
+			});
+			for (const char* file : { "Textured.gltf", "Textured.bin", "Textures/Checker.png" })
+			{
+				Result<Buffer> bytes = FileSystem::ReadFile(Test::GetTestDataPath(std::string("Assets/Gltf/") + file));
+				REQUIRE(bytes.has_value());
+				const VfsPath path = MakeEditorPath(std::string("project://Assets/Models/") + file);
+				REQUIRE(editor.WriteProjectFile(path, *bytes).has_value());
+			}
+			const VfsPath gltf = MakeEditorPath("project://Assets/Models/Textured.gltf");
+			const Result<AssetMetadata> metadata = assets.CreateMetadata(gltf);
+			REQUIRE_MESSAGE(metadata.has_value(), metadata.error().ToString());
+			REQUIRE(editor.WriteProjectFile(MakeEditorPath("project://Assets/Models/Textured.gltf.meta"), AsEditorBytes(SerializeAssetMetadata(*metadata)))
+					.has_value());
+			JobHandle<AssetImportOutcome> imported = assets.ReimportAsync(metadata->Handle);
+
+			// The request returned. With inline jobs the import has run, and its publication waits for the main-thread queue,
+			// which the next frame drains outside any request.
+			editor.SetWriteAttribution(std::nullopt);
+			static_cast<void>(fixture.GetEngine().GetMainThreadQueue().Drain());
+			const Result<AssetImportOutcome> outcome = imported.Take();
+			REQUIRE_MESSAGE(outcome.has_value(), outcome.error().ToString());
+			REQUIRE_FALSE(outcome->SubAssets.empty());
+
+			// The source's .meta, rewritten with its sub-assets by the publication, and the dependency metas of the files the
+			// import read: attributed to the request that scheduled the import (§13.12 rule 2), never to "ui".
+			const ProvenanceRecorder* provenance = editor.GetProvenance();
+			REQUIRE(provenance != nullptr);
+			for (const char* meta : { "Assets/Models/Textured.gltf.meta", "Assets/Models/Textured.bin.meta", "Assets/Models/Textures/Checker.png.meta" })
+			{
+				CAPTURE(std::string(meta));
+				const ProvenanceEntry* entry = provenance->Find(meta);
+				REQUIRE(entry != nullptr);
+				CHECK(entry->Method == "asset.import");
+				CHECK(entry->RequestId == VariantValue(Json(7)));
+				CHECK(entry->Client == "engine-mcp");
+				CHECK(entry->TranscriptLine == std::optional<uint64_t>(12));
+				Result<Buffer> bytes = editor.GetVfs().ReadFile(MakeEditorPath(std::string("project://") + meta));
+				REQUIRE(bytes.has_value());
+				CHECK(XXH64(*bytes) == entry->Hash);
+			}
+		}
+
+		TEST_CASE("EditorContext: a deferred asset scan writes nothing at open and runs under the attribution of OpenDeferredAssets"
+			* doctest::skip(true))
+		{
+			Test::TempDirectory directory("DeferredAssetScan");
+			REQUIRE(FileSystem::CreateDirectories(directory / "UserData").has_value());
+			Result<Scope<EngineContext>> engine = EngineContext::Create({ .WorkerCount = 0, .UserDataDirectory = directory / "UserData", .RegisterTypes = &RegisterEditorMethodTypes });
+			REQUIRE_MESSAGE(engine.has_value(), engine.error().ToString());
+			Result<Scope<EditorContext>> created = EditorContext::Create(**engine, {
+																					   .IdGeneratorState = Test::EditorTestIdState,
+																					   .TemplatesDirectory = Test::GetRepositoryRoot() / "Resources" / "Templates" / "Projects",
+																					   .ReadOnlyCacheRoot = directory / "ReadOnlyCache",
+																					   .HistoryLimits = {},
+																					   .EnvironmentBaker = nullptr,
+																					   .StrictUnknowns = false,
+																					   .DeferAssetScan = true,
+																				   });
+			REQUIRE_MESSAGE(created.has_value(), created.error().ToString());
+			// Declared after the engine context, so the editor (its project lock and mounts) goes first.
+			Scope<EditorContext> editor = std::move(*created);
+
+			const Result<CreatedProject> project = ProjectManager::CreateProject(
+				{
+					.Directory = directory / "Deferred",
+					.Name = "Deferred",
+					.Template = ProjectTemplate::Empty,
+					.TemplatesDirectory = editor->GetSpecification().TemplatesDirectory,
+				},
+				editor->GetTypeRegistry());
+			REQUIRE_MESSAGE(project.has_value(), project.error().ToString());
+			// A source without a .meta, as an engine change or a hand copy leaves one: the scan writes its .meta. The project's
+			// .luaurc is not UTF-8 at first, which the script services refuse (Validation).
+			const std::filesystem::path root = project->ProjectFile.parent_path();
+			const Result<Buffer> png = FileSystem::ReadFile(Test::GetTestDataPath("Assets/Gltf/Textures/Checker.png"));
+			REQUIRE(png.has_value());
+			REQUIRE(FileSystem::CreateDirectories(root / "Assets" / "Textures").has_value());
+			REQUIRE(FileSystem::WriteFileAtomic(root / "Assets" / "Textures" / "Checker.png", *png, { .KeepBackup = false }).has_value());
+			const Result<Buffer> luaurc = FileSystem::ReadFile(root / ".luaurc");
+			REQUIRE(luaurc.has_value());
+			const Buffer invalidLuaurc = { std::byte{ 0xff } };
+			REQUIRE(FileSystem::WriteFileAtomic(root / ".luaurc", invalidLuaurc, { .KeepBackup = false }).has_value());
+			Result<Scope<LoadedProject>> loaded = ProjectManager::OpenProject(project->ProjectFile, {}, editor->GetTypeRegistry());
+			REQUIRE_MESSAGE(loaded.has_value(), loaded.error().ToString());
+
+			// The open mounts the project and loads its provenance, reads no .luaurc and writes nothing.
+			REQUIRE(editor->OpenProject(std::move(*loaded)).has_value());
+			CHECK(editor->HasProject());
+			CHECK(editor->IsAssetScanDeferred());
+			CHECK_FALSE(editor->GetAssets().HasProject());
+			CHECK_FALSE(FileSystem::Exists(root / "Assets" / "Textures" / "Checker.png.meta"));
+
+			// project.refreshAssets of --upgrade's cli batch runs the scan.
+			editor->SetWriteAttribution(WriteAttribution{
+				.Method = "project.refreshAssets",
+				.RequestId = VariantValue(Json(1)),
+				.Client = "cli",
+				.TranscriptLine = 1,
+			});
+			// Its failure is its own error and leaves the project open with the scan still deferred, so the request's response
+			// can still be transcribed through project:// (BatchRunner) and the caller closes the project.
+			const Result<AssetRefreshReport> failed = editor->OpenDeferredAssets();
+			REQUIRE_FALSE(failed.has_value());
+			CHECK(failed.error().GetCode() == ErrorCode::Validation);
+			CHECK(failed.error().ToString().find(".luaurc") != std::string::npos);
+			CHECK(editor->HasProject());
+			CHECK(editor->IsAssetScanDeferred());
+			CHECK(editor->GetVfs().IsMounted("project"));
+			CHECK_FALSE(editor->GetAssets().HasProject());
+			CHECK_FALSE(FileSystem::Exists(root / "Assets" / "Textures" / "Checker.png.meta"));
+
+			// Repaired, the scan runs: its .meta write is that request's.
+			REQUIRE(FileSystem::WriteFileAtomic(root / ".luaurc", *luaurc, { .KeepBackup = false }).has_value());
+			const Result<AssetRefreshReport> scanned = editor->OpenDeferredAssets();
+			editor->SetWriteAttribution(std::nullopt);
+			REQUIRE_MESSAGE(scanned.has_value(), scanned.error().ToString());
+			CHECK_FALSE(editor->IsAssetScanDeferred());
+			CHECK(editor->GetAssets().HasProject());
+			REQUIRE(scanned->CreatedMetas.size() == 1);
+			CHECK(scanned->CreatedMetas[0] == MakeEditorPath("project://Assets/Textures/Checker.png.meta"));
+			const ProvenanceEntry* entry = editor->GetProvenance()->Find("Assets/Textures/Checker.png.meta");
+			REQUIRE(entry != nullptr);
+			CHECK(entry->Method == "project.refreshAssets");
+			CHECK(entry->Client == "cli");
+			CHECK(entry->TranscriptLine == std::optional<uint64_t>(1));
+
+			// Nothing is deferred any more.
+			const Result<AssetRefreshReport> again = editor->OpenDeferredAssets();
+			REQUIRE_FALSE(again.has_value());
+			CHECK(again.error().GetCode() == ErrorCode::InvalidState);
+		}
+
 		TEST_CASE("EditorContext: the asset manager is injected into the engine context and opened with the project")
 		{
 			Test::EditorTestFixture fixture("EditorAssets");

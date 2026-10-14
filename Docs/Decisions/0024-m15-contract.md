@@ -310,7 +310,7 @@ ADR 0023 left "moving the long Debug fuzz iterations to the hardening stage" to 
 - **Windows job:** keeps its stage list, so the determinism stage's exported half warns under `--gpu-optional`. Its comments are updated.
 - **Local only:** export and hardening stay with the local gate. Hosted perf numbers mean nothing, and ASan is MSVC's.
 - **Map check:** runs in every job's build stage after the Dist build, non-blocking on Linux and macOS (ADR 0011).
-- **Catch-up:** Linux and macOS have not been checked remotely since ADR 0011 (M6). The lead checks the Actions runs of the M15 milestone commit and fixes failures in one batch before M16 starts (ADR 0011: "always before the demo games"; the product owner's standing instruction is to finish a milestone on the local Windows gate and not wait for Actions). The review's suggestion to fold the catch-up into M15 before its milestone commit is declined for that reason; its concern (macOS code no local check compiles) is met by decision 5's host-independent assembly, which leaves only `codesign` macOS-only. Anything that points to a design problem is raised at once.
+- **Catch-up** (deferred by `Docs/Decisions/0026-m16-contract.md` decision 1 until the product owner asks for it; the scheduling below no longer holds): Linux and macOS have not been checked remotely since ADR 0011 (M6). The lead checks the Actions runs of the M15 milestone commit and fixes failures in one batch before M16 starts (ADR 0011: "always before the demo games"; the product owner's standing instruction is to finish a milestone on the local Windows gate and not wait for Actions). The review's suggestion to fold the catch-up into M15 before its milestone commit is declined for that reason; its concern (macOS code no local check compiles) is met by decision 5's host-independent assembly, which leaves only `codesign` macOS-only. Anything that points to a design problem is raised at once.
 
 ### 21. Completion review (lead)
 
@@ -521,7 +521,7 @@ Anything else that needs the operator goes to the lead; decision 14 is such an i
 - [ ] Notices are generated on every OS and packaged; `bin/Symbols` holds the Dist symbols; the Linux RPATH and the macOS settings pass the portability check; the `0001-approvals.md` row for the macOS redistribution exists.
 - [ ] The references are regenerated (`project.export`'s schema), and the AGENTS.md command table, the build-and-test, commit-review and game-building skills and Architecture §2.3, §12.1, §13.4, §13.9, §14, §15.1, §15.8 and §16 describe what landed.
 - [ ] The completion review (ADR 0025) has a disposition for every Architecture subsection and every item of decision 21, and each deviation is recorded.
-- [ ] The Linux and macOS catch-up, including a macOS run of an exported bundle (signature, loader lookup), is scheduled before M16 (decision 20).
+- [ ] The Linux and macOS catch-up, including a macOS run of an exported bundle (signature, loader lookup), is scheduled before M16 (decision 20). *Deferred by `Docs/Decisions/0026-m16-contract.md` decision 1 until the product owner asks for it.*
 - [x] Decision 14 carries the product owner's answer, and `Test.py` matches it.
 
 ## Architecture and Roadmap amendments
