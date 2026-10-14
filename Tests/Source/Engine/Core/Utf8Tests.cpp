@@ -52,6 +52,21 @@ namespace Engine {
 			CHECK(FindInvalidUtf8("\xc3\xa9\xc3\xa9\xff") == 4);
 		}
 
+		TEST_CASE("Utf8: the sequence length at an offset is that of a well-formed sequence, or 0")
+		{
+			const std::string_view text = "a\xc3\xa9\xe2\x82\xac\xf0\x9f\x98\x80/"; // a, U+00E9, U+20AC, U+1F600, '/'
+			CHECK(GetUtf8SequenceLength(text, 0) == 1);
+			CHECK(GetUtf8SequenceLength(text, 1) == 2);
+			CHECK(GetUtf8SequenceLength(text, 2) == 0); // inside U+00E9
+			CHECK(GetUtf8SequenceLength(text, 3) == 3);
+			CHECK(GetUtf8SequenceLength(text, 6) == 4);
+			CHECK(GetUtf8SequenceLength(text, 10) == 1);
+			CHECK(GetUtf8SequenceLength("\xff", 0) == 0);
+			CHECK(GetUtf8SequenceLength("\xc0\xaf", 0) == 0);     // overlong
+			CHECK(GetUtf8SequenceLength("\xed\xa0\x80", 0) == 0); // surrogate
+			CHECK(GetUtf8SequenceLength("\xe2\x82", 0) == 0);     // truncated
+		}
+
 		TEST_CASE("Utf8: a complete prefix drops only an incomplete trailing sequence")
 		{
 			CHECK(CompleteUtf8Prefix("") == 0);

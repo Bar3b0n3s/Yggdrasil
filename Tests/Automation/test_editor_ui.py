@@ -58,8 +58,8 @@ class EditorUiTests(AutomationTestCase):
 
     def test_attach_to_headless_editor_with_automation_allowed(self) -> None:
         """The headless null-platform editor with the preference set. A headless editor listens whatever the preference
-        says (MCP launches rely on it, ADR 0008 decision 14), so this proves attachment and that startup leaves the saved
-        preference alone; only the windowed test above can prove that the preference itself opts an editor in."""
+        says (MCP launches rely on it, ADR 0008 decision 14), so this proves attachment and that startup leaves the
+        saved preference alone; only the windowed test above can prove that the preference itself opts an editor in."""
         for allowed in (True, False):
             with self.subTest(allowed=allowed):
                 preferences = self.write_automation_preference(allowed)
@@ -186,7 +186,8 @@ class EditorUiTests(AutomationTestCase):
             {"jsonrpc": "2.0", "id": 91001, "method": "entity.create", "params": {"name": "VisibleInThisFrame"}},
             {"jsonrpc": "2.0", "id": 91002, "method": "editor.screenshot", "params": {}},
         ]
-        client.send_raw(b"".join(engine_client.encode_frame(json.dumps(message).encode("utf-8")) for message in messages))
+        client.send_raw(b"".join(engine_client.encode_frame(json.dumps(message).encode("utf-8"))
+                                 for message in messages))
         responses = {}
         while len(responses) < 2:
             response = client.receive_message()

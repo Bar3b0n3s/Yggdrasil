@@ -641,6 +641,18 @@ namespace Engine {
 			INFO("child stderr: ", standardError);
 			CHECK(child->Result.ExitCode == ExitCode::Crash);
 			CHECK(standardError.contains(std::format("Crash: {}", SimulatedCrashReason)));
+	#if defined(__SANITIZE_ADDRESS__)
+			// The hardening stage's AddressSanitizer build (Docs/Decisions/0024-m15-contract.md decision 12): its runtime
+			// replaces the C runtime's heap with its own allocator, so the process heap's lock blocks nothing the reporter
+			// needs and the report is written completely.
+			const std::filesystem::path written = Test::PathFromUtf8(FindLineValue(standardError, "; report written to "));
+			REQUIRE(Test::ListCrashFiles(reports, ".txt") == std::vector<std::filesystem::path>{ written });
+			const Result<std::string> complete = FileSystem::ReadText(written);
+			REQUIRE(complete.has_value());
+			CHECK(complete->starts_with(std::format("Crash report\nReason: {}", SimulatedCrashReason)));
+			CHECK(complete->contains("\nBreadcrumbs:\n"));
+			CHECK(complete->contains("\nLast log lines:\n"));
+	#else
 			CHECK_FALSE(standardError.contains("; report written to "));
 
 			// Where the reporter blocks depends on what the OS allocates: once the file exists (on current Windows it does,
@@ -661,6 +673,7 @@ namespace Engine {
 				CHECK(report->contains("\nBreadcrumbs:\n"));
 				CHECK_FALSE(report->contains("\nLast log lines:\n"));
 			}
+	#endif
 		}
 
 		TEST_CASE("CrashHandler: an invalid parameter passed to the C runtime is a crash with exit code 4")

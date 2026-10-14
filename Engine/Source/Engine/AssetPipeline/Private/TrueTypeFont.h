@@ -66,18 +66,22 @@ namespace Engine {
 		// True when `glyph` has no outline.
 		[[nodiscard]] bool IsGlyphEmpty(int32_t glyph) const;
 
+		// The largest distance field RenderGlyphSdf makes, in pixels on a side: more than the importer's largest glyph (128
+		// pixels per em plus a 32-pixel spread on each side) needs for any glyph less than 15 em across.
+		static constexpr int32_t MaxGlyphBitmapSide = 2048;
+
 		// The distance field of `glyph` rasterized at `pixelsPerEm` (> 0) with `padding` (>= 0) pixels around the outline's
 		// bounding box: 128 on the outline, changing by `valuePerPixel` (> 0) per pixel of distance, larger inside, clamped
 		// to 0..255. Empty for a glyph without an outline. Errors: ImportFailed when a glyph with an outline yields no
-		// bitmap.
+		// bitmap, or when its padded bounding box is wider or taller than MaxGlyphBitmapSide pixels.
 		[[nodiscard]] Result<TrueTypeGlyphSdf> RenderGlyphSdf(int32_t glyph, float pixelsPerEm, int32_t padding, float valuePerPixel) const;
 
-		// Checks the sfnt structure stb_truetype trusts without bounds checks (ValidateTrueTypeTables: the table directory,
-		// the tables it reads at fixed offsets, the selected cmap subtable and the glyph locations), then opens the font,
-		// which keeps pointing into `data`: `data` must outlive it. stb_truetype itself is not hardened against hostile
-		// input beyond these checks (the same policy as stb_image, Vendor/stb/VENDOR.md): import only trusted font files.
-		// Errors: ImportFailed naming the first problem (not a font, a truncated or inconsistent table, a font collection,
-		// no Unicode cmap).
+		// Checks everything the methods of this class make stb_truetype read without bounds checks or assert on
+		// (ValidateTrueTypeTables: the table directory, the tables it reads at fixed offsets, the selected cmap subtable, and
+		// every TrueType glyph outline or the CFF table and every glyph's charstring), then opens the font, which keeps
+		// pointing into `data`: `data` must outlive it. Errors: ImportFailed naming the first problem (not a font, a
+		// truncated or inconsistent table, a font collection, no Unicode cmap, a glyph outline or charstring stb_truetype
+		// cannot read safely).
 		[[nodiscard]] static Result<TrueTypeFont> Open(std::span<const std::byte> data);
 	private:
 		struct State; // the stbtt_fontinfo (TrueTypeRasterizer.cpp)

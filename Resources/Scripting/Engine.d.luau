@@ -47,6 +47,9 @@ export type EngineEventType = "EntityCreated" | "EntityDestroyed" | "ComponentCh
 -- The build configuration an export targets (§2.2).
 export type ExportConfiguration = "Debug" | "Release" | "Dist"
 
+-- A step of an export (§14.2), in the order the steps run.
+export type ExportPhase = "Validate" | "Cook" | "WritePaks" | "CopyRuntime" | "PatchResources" | "WriteManifest" | "Sign" | "SmokeTest" | "MoveToOutput" | "Done"
+
 -- The underlying reflected value kind.
 export type FieldType = "Bool" | "Int32" | "UInt32" | "Float" | "Vec2" | "Vec3" | "Vec4" | "Quat" | "Color3" | "Color4" | "Bool3" | "String" | "EntityRef" | "AssetRef" | "Enum" | "Array" | "Struct" | "Map" | "Variant"
 

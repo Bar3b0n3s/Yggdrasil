@@ -40,7 +40,8 @@ class LauncherTests(unittest.TestCase):
         """An editor on a new project (created through a launcher-state editor first). A headless editor serves
         automation unless the run is one-shot (§13.2, ADR 0008 decision 14); a windowed editor without --automation
         does not. The windowed case needs a display (Xvfb with a window manager on Linux CI, as the unit suite)."""
-        executable = engine_client.find_editor_executable(REPOSITORY_ROOT, engine_client.configurations_from_environment())
+        executable = engine_client.find_editor_executable(REPOSITORY_ROOT,
+                                                          engine_client.configurations_from_environment())
         creator = engine_client.launch_editor(executable, ["--headless", "--renderer", "none", "--automation"],
                                               self.user_data, self.app_name)
         self.editors.append(creator)
@@ -86,9 +87,10 @@ class LauncherTests(unittest.TestCase):
         self.assertIn("Allow AI automation", payload["hint"])
 
     def test_launch_creates_a_project_in_an_existing_empty_directory_and_a_refused_create_writes_nothing(self) -> None:
-        # The real transcript (no ENGINE_MCP_TRANSCRIPT): the bridge must create nothing in the target directory before the
-        # editor accepts it, since project.create takes only a new or empty directory (§13.8, §6.1).
-        environment = {key: value for key, value in os.environ.items() if key != transcript.TRANSCRIPT_ENVIRONMENT_VARIABLE}
+        # The real transcript (no ENGINE_MCP_TRANSCRIPT): the bridge must create nothing in the target directory before
+        # the editor accepts it, since project.create takes only a new or empty directory (§13.8, §6.1).
+        environment = {key: value for key, value in os.environ.items()
+                       if key != transcript.TRANSCRIPT_ENVIRONMENT_VARIABLE}
         patch = mock.patch.dict(os.environ, environment, clear=True)
         patch.start()
         self.addCleanup(patch.stop)

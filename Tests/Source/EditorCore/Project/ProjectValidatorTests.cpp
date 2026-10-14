@@ -1547,7 +1547,7 @@ end
 		}
 
 		// M15 (Docs/Decisions/0024-m15-contract.md decision 6, stream B): the suite rule Validate and testing exports share.
-		TEST_CASE("ProjectValidator: CheckTestSuites reports a non-suite script and a scene that is not a registered scene" * doctest::skip(true))
+		TEST_CASE("ProjectValidator: CheckTestSuites reports a non-suite script and a scene that is not a registered scene")
 		{
 			Test::EditorTestFixture fixture("ValidatorSuites");
 			fixture.CreateAndOpenProject();

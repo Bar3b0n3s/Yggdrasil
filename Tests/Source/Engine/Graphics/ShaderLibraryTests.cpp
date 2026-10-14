@@ -85,7 +85,7 @@ namespace Engine {
 			CHECK(unknownPermutation.error().ToString().contains("Smoke/CSMain.SMOKE_SATURATE-2"));
 		}
 
-		TEST_CASE("ShaderLibrary: reads under any VFS root and Clear reloads from it")
+		TEST_CASE("ShaderLibrary: reads under any VFS root and keeps what it read")
 		{
 			// The library sees only its root: here a directory of a memory mount instead of the compiled output.
 			VirtualFileSystem vfs;
@@ -101,16 +101,14 @@ namespace Engine {
 			REQUIRE_MESSAGE(first.has_value(), first.error().ToString());
 			CHECK((*first)->Stage == nvrhi::ShaderType::Vertex);
 
-			// A changed file is not seen until Clear (shader hot reload clears the library, §8.12).
+			// A file changed after the first read is not seen: the library keeps the reflection it parsed, at the same address
+			// (shaders change only with a rebuild of the engine, and there is no shader hot reload).
 			WriteText(mount, "Pak/Shaders/Probe/VSMain.refl.json",
 				R"({ "entryPoints": [ { "name": "VSMain", "stage": "fragment" } ] })");
 			const Result<const ShaderReflection*> cached = library.GetReflection("Probe", "VSMain");
 			REQUIRE(cached.has_value());
+			CHECK(*cached == *first);
 			CHECK((*cached)->Stage == nvrhi::ShaderType::Vertex);
-			library.Clear();
-			const Result<const ShaderReflection*> reloaded = library.GetReflection("Probe", "VSMain");
-			REQUIRE_MESSAGE(reloaded.has_value(), reloaded.error().ToString());
-			CHECK((*reloaded)->Stage == nvrhi::ShaderType::Pixel);
 		}
 
 		TEST_CASE("ShaderLibrary: a malformed reflection is an error naming the file")
@@ -137,7 +135,7 @@ namespace Engine {
 			CHECK(shape.error().ToString().contains("mesh"));
 		}
 
-		TEST_CASE("ShaderLibrary: Get creates each shader once and Clear drops the cache" * doctest::test_suite(Test::GpuSuite))
+		TEST_CASE("ShaderLibrary: Get creates each shader once" * doctest::test_suite(Test::GpuSuite))
 		{
 			Test::HeadlessGpuFixture gpu;
 			ENGINE_REQUIRE_GPU(gpu);
@@ -149,10 +147,6 @@ namespace Engine {
 			const Result<nvrhi::ShaderHandle> second = library.Get("Triangle", "VSMain");
 			REQUIRE(second.has_value());
 			CHECK(second->Get() == first->Get());
-			library.Clear();
-			const Result<nvrhi::ShaderHandle> reloaded = library.Get("Triangle", "VSMain");
-			REQUIRE(reloaded.has_value());
-			CHECK(reloaded->Get() != nullptr);
 
 			// A missing variant is NotFound naming the .spv it expected.
 			const Result<nvrhi::ShaderHandle> missing = library.Get("Triangle", "GSMain");

@@ -11,9 +11,15 @@ Steps, in order:
                                 model, the Dist solution) and on every fixture workspace under Tests/Data/BuildConfig/,
                                 each of which must fail
               lint              Scripts/Lint.py, and Lint.py --self-test
+              runtime map       Scripts/CheckRuntimeMap.py --self-test (every seeded map under Tests/Data/MapFiles/
+                                gives exactly its expected findings; the real Dist map is checked by CI.py, because
+                                PreCommit builds no Dist)
               format            Scripts/Format.py --check
               fixtures          every fixture generator under Tests/Data/Generate/ with --check (the committed
                                 fixtures are byte-identical to a fresh generation)
+              detmath reference Scripts/GenerateDetMathReference.py --check (its self-test, then the committed
+                                DetMath oracle Tests/Source/Engine/Core/DetMathReferenceData.h is byte-identical to a
+                                fresh generation)
               resources         Scripts/FetchAssets.py defaults --check (the committed engine resources match their
                                 SHA-256 pins, offline)
               test fixtures     Scripts/FetchAssets.py fixture --check (the pinned third-party test fixtures match
@@ -23,9 +29,10 @@ Steps, in order:
             build failed): T0 + T1, and T2 on this machine's GPU (§15.1: the GPU tests and golden images gate every
             commit), with validation and synchronization validation, under both API caps; the golden images run in
             Debug, which must match the Release goldens exactly (§15.8). The feature suite runs FeatureTest in the Debug
-            editor (Editor --headless --project Projects/FeatureTest --run-tests) and fails on any failed case, on a
-            per-mode coverage gate that is not evaluated and green, on a skipped case row and on any change to
-            Projects/FeatureTest outside Library/ (Docs/Decisions/0022-m14-contract.md decision 7). The automation suite
+            editor (Editor --headless --project Projects/FeatureTest --run-tests --strict, so an unknown field or
+            component in the committed project is an error, §6) and fails on any failed case, on a per-mode coverage
+            gate that is not evaluated and green, on a skipped case row and on any change to Projects/FeatureTest
+            outside Library/ (Docs/Decisions/0022-m14-contract.md decision 7). The automation suite
             (Tests/Automation and Tools/MCP/tests against the Debug editor, with the method coverage gate) runs in the
             MCP bridge's virtual environment, which Scripts/Setup.py creates; without it the step fails with exit code
             3. A suite that does not exist yet is reported as not available by Test.py and does not fail the gate.
@@ -85,7 +92,8 @@ def skipped(name: str, reason: str, console: Console) -> Step:
 def main(argv: list[str] | None = None) -> int:
     configure_stdio()
     parser = argparse.ArgumentParser(
-        description="Commit gate: generate, the static checks (CheckBuildConfig, Lint, Lint self-test, format check), "
+        description="Commit gate: generate, the static checks (CheckBuildConfig, Lint, Lint self-test, runtime map "
+        "self-test, format check, fixture generators, DetMath reference check, pinned resources and fixtures), "
         "Debug build, unit, gpu, golden, feature and automation suites (§15.9).",
         epilog="Exit codes: 0 every step passed, else the first failing step's code (1 failed, 2 usage, 3 missing "
                "tool or file, 5 timeout).",

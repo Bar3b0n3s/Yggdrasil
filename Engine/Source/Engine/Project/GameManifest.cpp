@@ -275,10 +275,16 @@ namespace Engine {
 		return manifest;
 	}
 
-	std::filesystem::path GetTestingUserDataRoot(const std::filesystem::path& /*manifestPath*/)
+	std::filesystem::path GetTestingUserDataRoot(const std::filesystem::path& manifestPath)
 	{
-		ENGINE_CONTRACT_STUB();
-		return {};
+		// The package directory: the manifest's, or the directory that holds the bundle for the exact macOS layout
+		// "<Name>.app/Contents/Resources/Game.json" (§14.1), so a test run never writes into the signed bundle (§14.3).
+		std::filesystem::path package = manifestPath.parent_path();
+		const std::filesystem::path contents = package.parent_path();
+		const std::filesystem::path bundle = contents.parent_path();
+		if (package.filename() == "Resources" && contents.filename() == "Contents" && bundle.extension() == ".app")
+			package = bundle.parent_path();
+		return package / "bin" / "TestUserData";
 	}
 
 }

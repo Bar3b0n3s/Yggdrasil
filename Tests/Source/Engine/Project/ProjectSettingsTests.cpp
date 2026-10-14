@@ -183,6 +183,49 @@ namespace Engine {
 			CHECK(validate(shadow));
 		}
 
+		// The M15 review's M02: one host-independent rule for Export.Company, reported at /Export/Company by the settings
+		// validation (project.setSettings, the .eproj loader) instead of by one OS's resource writer after cooking.
+		TEST_CASE("ProjectSettings: Export.Company is valid UTF-8 without control characters, U+FFFE or U+FFFF and at most MaxCompanyBytes bytes")
+		{
+			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
+			ExportSettings settings;
+			// U+FFFD, the noncharacters U+FDD0 and U+1FFFE and U+10FFFF are XML 1.0 characters, so Info.plist carries them.
+			for (const std::string& company : { std::string(), std::string("Fixture Studio"), std::string("Soci\xC3\xA9t\xC3\xA9 \xE2\x9C\x93 \xF0\x9F\x8E\xAE"),
+					 std::string("Acme \xEF\xBF\xBD \xEF\xB7\x90 \xF0\x9F\xBF\xBE \xF4\x8F\xBF\xBF"), std::string(ExportSettings::MaxCompanyBytes, 'a') })
+			{
+				CAPTURE(company.size());
+				settings.Company = company;
+				CHECK(ValidationErrorPointers(*registry, settings).empty());
+				CHECK_FALSE(FindExportCompanyProblem(company).has_value());
+			}
+			// The M15 fix review's C7: U+FFFE and U+FFFF, which XML 1.0 excludes, are refused like the control characters.
+			for (const std::string& company : { std::string("Acme\tGames"), std::string("Acme\nGames"), std::string("Acme\0Games", 10), std::string("Acme\x7FGames"),
+					 std::string("Acme\x1F"), std::string("Acme \xC3\x28"), std::string("\xED\xA0\x80"), std::string("Acme \xEF\xBF\xBE"),
+					 std::string("\xEF\xBF\xBF Games"), std::string(ExportSettings::MaxCompanyBytes + 1, 'a') })
+			{
+				CAPTURE(company.size());
+				settings.Company = company;
+				CHECK(ValidationErrorPointers(*registry, settings) == std::vector<std::string>{ "/Company" });
+				CHECK(FindExportCompanyProblem(company).has_value());
+			}
+			CHECK(FindExportCompanyProblem("Acme\tGames").value_or("").contains("U+0009 at byte 4"));
+			CHECK(FindExportCompanyProblem("Acme \xEF\xBF\xBE").value_or("").contains("U+FFFE at byte 5"));
+			CHECK(FindExportCompanyProblem("\xEF\xBF\xBF Games").value_or("").contains("U+FFFF at byte 0"));
+			CHECK(FindExportTextProblem("Caf\xC3\xA9\x01").value_or("").contains("U+0001 at byte 5"));
+			CHECK_FALSE(FindExportTextProblem("\xEF\xBF\xBD").has_value());
+
+			// A project file that holds such a Company does not load, and the error names the setting.
+			ProjectSettings project;
+			Result<Json> document = ProjectSerializer::ToJson(project, *registry);
+			REQUIRE(document.has_value());
+			(*document)["Export"]["Company"] = "Acme\tGames";
+			ProjectLoadReport report;
+			const Result<ProjectSettings> loaded = ProjectSerializer::FromJson(*document, *registry, {}, report);
+			REQUIRE_FALSE(loaded.has_value());
+			CHECK(loaded.error().GetCode() == ErrorCode::Validation);
+			CHECK(loaded.error().ToString().contains("/Export/Company"));
+		}
+
 		TEST_CASE("ProjectSettings: physics layers are 1 to 16 unique names starting with Default, and collisions pair declared layers")
 		{
 			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
@@ -317,6 +360,7 @@ namespace Engine {
 
 			ExportSettings exportSettings;
 			exportSettings.Version = "not a version";
+			exportSettings.Company = "Acme\tGames";
 			registry->FindStruct<ExportSettings>()->Generate(&exportSettings, random);
 			CHECK(ValidationErrorPointers(*registry, exportSettings).empty());
 

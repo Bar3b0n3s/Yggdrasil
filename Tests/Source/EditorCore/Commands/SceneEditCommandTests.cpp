@@ -15,6 +15,7 @@
 #include "Engine/Scene/PrefabInstantiator.h"
 #include "Engine/Scene/SceneSerializer.h"
 #include "Support/EditorTestFixture.h"
+#include "Support/TestTimeout.h"
 
 #include <nlohmann/json.hpp>
 
@@ -133,8 +134,9 @@ namespace Engine {
 	{
 		// Debug builds check every untouched entity after each of the 10,000 edits (SceneEdit), which takes far longer than a
 		// typical test on slow CI machines, hence the generous limit.
-		TEST_CASE("SceneEditCommand: 10,000 random operations undo to byte-identical JSON and redo to the final state" * doctest::timeout(600.0))
+		TEST_CASE("SceneEditCommand: 10,000 random operations undo to byte-identical JSON and redo to the final state")
 		{
+			Test::SetTestCaseTimeLimit(600.0);
 			Test::EditorTestFixture fixture("SceneEditProperty", CommandHistoryLimits{ .MaxEntries = 20000, .MaxBytes = 1ull << 34 });
 			fixture.CreateAndOpenProject();
 			fixture.CreateAndOpenScene();

@@ -3,6 +3,7 @@
 #include "Engine/Graphics/Image.h"
 
 #include "Engine/Core/Random.h"
+#include "Support/Fuzz.h"
 #include "Support/TempDirectory.h"
 
 namespace Engine {
@@ -126,28 +127,32 @@ namespace Engine {
 			CHECK(ErrorCodeOf(EncodePng(floats)) == ErrorCode::InvalidArgument);
 		}
 
-		TEST_CASE("Image: malformed and mutated PNG data is a Parse error, never a crash")
+		TEST_CASE("Image: empty and non-PNG data is a Parse error")
 		{
 			CHECK(ErrorCodeOf(DecodePng({})) == ErrorCode::Parse);
 			const std::array<std::byte, 8> notPng = {};
 			CHECK(ErrorCodeOf(DecodePng(notPng)) == ErrorCode::Parse);
+		}
 
+		TEST_CASE("Image: 2,000 seeded mutations of a PNG decode to a valid image or are Parse errors" * doctest::test_suite(Test::FuzzSuite))
+		{
 			const Result<Buffer> valid = EncodePng(MakeGradient(16, 16));
 			REQUIRE(valid.has_value());
-			Random random(0xC0FFEEu);
-			for (int iteration = 0; iteration < 2000; ++iteration)
+			const Test::FuzzRun run = Test::RunFuzzCase(0xC0FFEEu, 2000, [&valid](Random& random, uint64_t /*index*/)
 			{
 				Buffer mutated = *valid;
-				if (iteration % 3 == 0)
-					mutated.resize(random.NextU32() % mutated.size());
-				else
-					mutated[random.NextU32() % mutated.size()] = static_cast<std::byte>(random.NextU32() & 0xFF);
+				Test::MutateBytes(mutated, random);
 				const Result<Image> decoded = DecodePng(mutated);
 				if (decoded.has_value())
+				{
 					CHECK(decoded->IsValid());
-				else
-					CHECK(decoded.error().GetCode() == ErrorCode::Parse);
-			}
+					return true;
+				}
+				CHECK(decoded.error().GetCode() == ErrorCode::Parse);
+				return false;
+			});
+			if (Test::IsFuzzSample(run.Range))
+				CHECK(run.Counts.Rejected > 0);
 		}
 
 		TEST_CASE("Image: DecodePng accepts PNG only and rejects a header declaring more pixels than the file holds")

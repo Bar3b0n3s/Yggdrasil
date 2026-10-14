@@ -101,3 +101,17 @@ configuration.
 3. Check the `IMGUI_VERSION_NUM` conditionals in `ImGuizmo.cpp` cover the vendored Dear ImGui version; rebuild
    Debug/Release/Dist and exercise the editor gizmo (translate/rotate/scale, local/world, snapping).
 4. Re-check whether the known issue above is fixed, then update this file (commit, date, notes).
+
+## Notices
+
+The row `Scripts/Lib/notices.py` reads for `THIRD_PARTY_NOTICES.txt` (Docs/Decisions/0024-m15-contract.md decision 8).
+
+| Field | Value |
+|---|---|
+| Name | ImGuizmo |
+| Upstream | https://github.com/CedricGuillemet/ImGuizmo |
+| Version | master 18cef5e031d8c6973d80284c67f60549fafd78c1 |
+| License | MIT |
+| Shipped | yes |
+| Projects | ImGuizmo |
+| License files | LICENSE |

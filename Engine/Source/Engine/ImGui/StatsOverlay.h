@@ -41,6 +41,12 @@ namespace Engine {
 	// focus, no saved settings). Main thread, between ImGui::NewFrame and ImGui::Render (Application::OnImGuiRender).
 	void DrawStatsOverlay(const StatsOverlayData& data);
 
+	// Prepares the current Dear ImGui context for an overlay over a game, once, after the ImGuiLayer exists (the Runtime's
+	// OnInitialize): Dear ImGui never changes the OS cursor's shape or mode (ImGuiConfigFlags_NoMouseCursorChange). Its GLFW
+	// backend would otherwise reset a hidden or captured cursor to the normal arrow every frame, so the game's cursor mode
+	// (Window::SetCursorMode, the script Cursor API) holds as in a Dist build, which has no ImGui. Main thread.
+	void ConfigureStatsOverlayContext();
+
 	// Whether the overlay shows: hidden at start; each press of F1 that is not a key repeat toggles it, and nothing else
 	// does. The Runtime hands it every KeyPressed event and consumes none.
 	class StatsOverlayToggle

@@ -3,6 +3,7 @@
 
 #include "EditorCore/EditorContext.h"
 #include "EditorCore/EngineAssetGenerators.h"
+#include "EditorCore/Export/AppBundle.h"
 #include "EditorCore/Export/ExecutableResources.h"
 #include "EditorCore/Export/Private/ExportPaths.h"
 #include "EditorCore/Export/TestingExport.h"
@@ -31,6 +32,7 @@
 #include "Engine/Core/VirtualFileSystem.h"
 #include "Engine/Platform/Paths.h"
 #include "Engine/Platform/Process.h"
+#include "Engine/Platform/ResourcePatcher.h"
 #include "Engine/Project/GameManifest.h"
 #include "Engine/Project/ProjectSerializer.h"
 #include "Engine/Scene/Scene.h"
@@ -39,13 +41,16 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <array>
 #include <charconv>
 #include <chrono>
+#include <filesystem>
 #include <format>
 #include <map>
 #include <set>
 #include <system_error>
 #include <utility>
+#include <vector>
 
 namespace Engine {
 
@@ -76,6 +81,20 @@ namespace Engine {
 		constexpr std::chrono::seconds SmokeTestDrainTimeout{ 10 };
 		// How much of the smoke test's output a failure quotes.
 		constexpr size_t SmokeTestOutputLines = 20;
+		// The notices file Scripts/Build.py writes next to the Runtime and every package carries (ADR 0024 decision 8).
+		constexpr std::string_view NoticesFileName = "THIRD_PARTY_NOTICES.txt";
+#if defined(ENGINE_PLATFORM_MACOS)
+		// What Scripts/Build.py stages beside the macOS Runtime from the pinned Vulkan SDK (AppBundle.h, ADR 0024 decision 5).
+		constexpr std::string_view FrameworksDirectoryName = "Frameworks";
+		constexpr std::array<std::string_view, 2> BundledFrameworks = { "libvulkan.1.dylib", "libMoltenVK.dylib" };
+		constexpr std::string_view MoltenVkIcdPath = "Vulkan/icd.d/MoltenVK_icd.json";
+		// The bound of one codesign run (macOS Sign), a failure bound only.
+		constexpr std::chrono::seconds SignTimeout{ 120 };
+		// codesign's absolute path: Process runs no PATH search, and every macOS has it there.
+		constexpr std::string_view CodesignExecutable = "/usr/bin/codesign";
+#endif
+		// What every missing-build-output error names (IsMissingBuildOutput).
+		constexpr std::string_view BuildScriptCommand = "python Scripts/Build.py";
 
 		// One pak as written: the XXH64 of the whole file and its entry count.
 		struct WrittenPak
@@ -121,7 +140,7 @@ namespace Engine {
 
 		[[nodiscard]] std::string BuildCommand(ExportConfiguration configuration)
 		{
-			return std::format("python Scripts/Build.py --config {} --project {}", ExportConfigurationToString(configuration), RuntimeProjectName);
+			return std::format("{} --config {} --project {}", BuildScriptCommand, ExportConfigurationToString(configuration), RuntimeProjectName);
 		}
 
 		// The project setting's name is the executable's and the user-data folder's name (§14.1): the rule the Runtime reads
@@ -287,15 +306,97 @@ namespace Engine {
 			return std::nullopt;
 		}
 
-		// M15 stream A (ADR 0024 decision 3): Editor --export's absolute package directory (ExportSpecification::OutputPath)
-		// and its refusal rules (relative, a root, or the project, BinaryRoot, the working directory or the user-data root or
-		// an ancestor of one). Until it lands, a specification that sets it is refused; every other export is unaffected.
-		[[nodiscard]] Status CheckOutputPath(const ExportSpecification& specification)
+		// `path` made comparable with another path: absolute, its existing part resolved (symbolic links, and the stored
+		// spelling of names on case-insensitive volumes), lexically normal and without a trailing separator.
+		[[nodiscard]] std::filesystem::path MakeComparablePath(const std::filesystem::path& path)
 		{
-			ENGINE_CONTRACT_STUB();
+			std::error_code error;
+			std::filesystem::path resolved = std::filesystem::weakly_canonical(path, error);
+			if (error)
+			{
+				resolved = std::filesystem::absolute(path, error);
+				if (error)
+					resolved = path;
+			}
+			resolved = resolved.lexically_normal();
+			if (!resolved.has_filename() && resolved.has_relative_path())
+				resolved = resolved.parent_path();
+			return resolved;
+		}
+
+		// Whether two path components name the same entry: byte-equal, and on Windows also equal after folding ASCII case,
+		// as its file systems compare names.
+		[[nodiscard]] bool IsSameComponent(const std::filesystem::path& first, const std::filesystem::path& second)
+		{
+#if defined(ENGINE_PLATFORM_WINDOWS)
+			const std::wstring& left = first.native();
+			const std::wstring& right = second.native();
+			return std::ranges::equal(left, right, [](wchar_t a, wchar_t b)
+			{
+				const auto fold = [](wchar_t character)
+				{
+					return character >= L'A' && character <= L'Z' ? static_cast<wchar_t>(character - L'A' + L'a') : character;
+				};
+				return fold(a) == fold(b);
+			});
+#else
+			return first == second;
+#endif
+		}
+
+		// Whether `ancestor` is `path` or a directory above it (both MakeComparablePath'd).
+		[[nodiscard]] bool IsSameOrAncestor(const std::filesystem::path& ancestor, const std::filesystem::path& path)
+		{
+			auto component = path.begin();
+			for (const std::filesystem::path& part : ancestor)
+			{
+				if (component == path.end() || !IsSameComponent(part, *component))
+					return false;
+				++component;
+			}
+			return true;
+		}
+
+		// Editor --export's absolute package directory (ExportSpecification::OutputPath, ADR 0024 decision 3, review finding
+		// M1): refused when it is relative, a file-system root, or the project's root, BinaryRoot, the working directory or the
+		// user-data root or a directory above one of them, since an export replaces its output directory as a whole. What is
+		// below them is fine (an export into <Project>/Build/Game is the default's sibling).
+		[[nodiscard]] Status CheckOutputPath(const ExportSpecification& specification, const std::filesystem::path& projectRoot)
+		{
 			if (specification.OutputPath.empty())
 				return {};
-			return MakeError(ErrorCode::Unsupported, "an absolute output path (Editor --export) arrives with M15 stream A");
+			const std::string shown = FileSystem::PathToUtf8(specification.OutputPath);
+			constexpr std::string_view Hint = "export into a new or empty directory, or into one that holds an earlier export";
+			if (!specification.OutputPath.is_absolute())
+				return std::unexpected(Error(ErrorCode::InvalidArgument, std::format("the output path '{}' is not absolute", shown)).WithHint(std::string(Hint)));
+			const std::filesystem::path output = MakeComparablePath(specification.OutputPath);
+			if (!output.has_relative_path())
+			{
+				return std::unexpected(Error(ErrorCode::InvalidArgument, std::format("the output path '{}' is a file-system root, which an export would replace "
+																					 "as a whole",
+																			 shown))
+						.WithHint(std::string(Hint)));
+			}
+
+			std::vector<std::pair<std::string_view, std::filesystem::path>> guarded = {
+				{ "the project", projectRoot },
+				{ "the directory of the build outputs", specification.BinaryRoot },
+			};
+			std::error_code error;
+			if (std::filesystem::path workingDirectory = std::filesystem::current_path(error); !error)
+				guarded.emplace_back("the working directory", std::move(workingDirectory));
+			if (Result<std::filesystem::path> userData = Paths::GetUserDataRoot(); userData.has_value())
+				guarded.emplace_back("the user-data root", std::move(*userData));
+			for (const auto& [what, directory] : guarded)
+			{
+				if (directory.empty() || !IsSameOrAncestor(output, MakeComparablePath(directory)))
+					continue;
+				return std::unexpected(Error(ErrorCode::InvalidArgument, std::format("the output path '{}' is {} ('{}') or a directory above it, which an "
+																					 "export would replace as a whole",
+																			 shown, what, FileSystem::PathToUtf8(directory)))
+						.WithHint(std::string(Hint)));
+			}
+			return {};
 		}
 
 	}
@@ -307,7 +408,8 @@ namespace Engine {
 		ExportPhase Phase = ExportPhase::Validate;
 		bool Resolved = false; // Poll returned a value or Cancel ran
 		std::chrono::steady_clock::time_point Started{};
-		std::filesystem::path ProjectRoot{}; // the project being exported, so a project change mid-export is detected
+		std::chrono::steady_clock::time_point PhaseStarted{}; // when the current phase began: the previous one's end
+		std::filesystem::path ProjectRoot{};                  // the project being exported, so a project change mid-export is detected
 
 		// Validate's results.
 		ProjectSettings Settings{};
@@ -319,7 +421,9 @@ namespace Engine {
 		// A testing export's forced content (CollectTestingExportContent; empty for a plain export).
 		TestingExportContent TestingContent{};
 		std::filesystem::path BinaryDirectory{};
+		std::filesystem::path RuntimeDirectory{}; // bin/<OutputDir>/Runtime
 		std::filesystem::path RuntimeExecutable{};
+		std::filesystem::path NoticesFile{};         // RuntimeDirectory/THIRD_PARTY_NOTICES.txt
 		std::vector<std::filesystem::path> Redist{}; // the app-local CRT (Windows)
 		std::filesystem::path OutputDirectory{};
 		std::filesystem::path StagingDirectory{};
@@ -339,6 +443,12 @@ namespace Engine {
 		// WritePaks.
 		std::optional<JobHandle<WrittenPaks>> PakJob{};
 		WrittenPaks Paks{};
+
+		// Sign (macOS): the codesign runs still to start, in order, and the one running.
+		std::vector<std::vector<std::string>> SignRuns{};
+		bool SignRunsPrepared = false;
+		std::optional<Process> Signing{};
+		std::chrono::steady_clock::time_point SigningDeadline{};
 
 		// SmokeTest.
 		std::optional<Process> SmokeTest{};
@@ -374,6 +484,34 @@ namespace Engine {
 			if (!Editor->HasProject() || Editor->GetProject().GetRoot() != ProjectRoot)
 				return MakeError(ErrorCode::InvalidState, "the project '{}' was closed during the export", FileSystem::PathToUtf8(ProjectRoot));
 			return {};
+		}
+
+		// --- The package's layout (§14.1; AppBundle.h on macOS) --------------------------------------------------------
+
+		// "<Name>.app" below `root` (the staging or output directory) on macOS.
+		[[nodiscard]] std::filesystem::path GetBundle(const std::filesystem::path& root) const
+		{
+			return root / FileSystem::PathFromUtf8(std::format("{}.app", Settings.Name));
+		}
+
+		// Where Game.json, Data/ and the notices go below `root`: `root` itself, or the bundle's Contents/Resources.
+		[[nodiscard]] std::filesystem::path GetPackageResources(const std::filesystem::path& root) const
+		{
+#if defined(ENGINE_PLATFORM_MACOS)
+			return GetBundle(root) / FileSystem::PathFromUtf8(AppBundleResourcesDirectory);
+#else
+			return root;
+#endif
+		}
+
+		// The game's executable below `root`: "<Name>(.exe)", or the bundle's Contents/MacOS/<Name>.
+		[[nodiscard]] std::filesystem::path GetPackageExecutable(const std::filesystem::path& root) const
+		{
+#if defined(ENGINE_PLATFORM_MACOS)
+			return GetBundle(root) / FileSystem::PathFromUtf8(AppBundleExecutableDirectory) / FileSystem::PathFromUtf8(Settings.Name);
+#else
+			return root / FileSystem::PathFromUtf8(ExecutableFileName(Settings.Name));
+#endif
 		}
 
 		// --- 1. Validate -------------------------------------------------------------------------------------------------
@@ -484,9 +622,47 @@ namespace Engine {
 			}
 
 			CollectSources();
+			ENGINE_TRY(CheckEnvironmentBakes(issues));
+			if (!issues.empty())
+				return std::unexpected(ValidationFailure(std::move(issues)));
 			ENGINE_TRY(LocateBinaries());
 			ENGINE_TRY(LocateOutput());
 			return true;
+		}
+
+		// §14.2 step 1 "validation works under --renderer none, using cooked environment bakes" (ADR 0024 decision 2): an
+		// editor that cannot bake environments (no graphics device, so no environment baker) can export an included
+		// Environment source only from a current bake in Library/Cache, which a GPU editor stored. Each one without is an
+		// issue naming the asset, with the GPU hint, instead of an Unsupported import in Cook. The check reads the cache and
+		// imports nothing, so it logs nothing; a source whose asset diagnostics already report an error is reported there.
+		[[nodiscard]] Status CheckEnvironmentBakes(std::vector<ErrorIssue>& issues) const
+		{
+			if (Editor->GetSpecification().EnvironmentBaker != nullptr)
+				return {};
+			const EditorAssetManager& assets = Editor->GetAssets();
+			ImporterRegistry importers;
+			RegisterBuiltinImporters(importers);
+			const std::vector<ImportAssetLookupEntry> lookups = MakeLookupSnapshot();
+			for (const AssetHandle source : Sources)
+			{
+				const AssetRecord* record = assets.GetRegistry().Find(source);
+				if (record == nullptr || record->Metadata.Type != AssetType::Environment)
+					continue;
+				const bool diagnosed = std::ranges::any_of(assets.GetDiagnostics(), [source](const AssetDiagnostic& diagnostic)
+				{
+					return diagnostic.Asset == source && diagnostic.Severity == DiagnosticSeverity::Error;
+				});
+				if (diagnosed)
+					continue;
+				ENGINE_TRY_ASSIGN(const std::optional<CachedImport> cached, FindCached(source, importers, lookups));
+				if (cached.has_value())
+					continue;
+				issues.push_back(MakeIssue("",
+					std::format("the environment '{}' has no current cooked bake in Library/Cache, and this editor has no GPU to bake it",
+						record->SourcePath.GetPath()),
+					std::string(EnvironmentImporter::GpuHint)));
+			}
+			return {};
 		}
 
 		// The registered Scene asset `path` names (a project setting at `pointer`), or nullopt after adding the issue.
@@ -545,6 +721,7 @@ namespace Engine {
 			ENGINE_TRY_ASSIGN(const auto schemas, Editor->GetScriptSchemaSnapshot());
 			LoadOptions options;
 			options.Mode = LoadMode::Strict;
+			options.StrictUnknowns = Editor->GetSpecification().StrictUnknowns; // --strict
 			options.SourcePath = path;
 			options.Schemas = schemas.get();
 			return SceneSerializer::LoadFromFile(*scene, Editor->GetVfs(), sourcePath, options, report);
@@ -584,18 +761,26 @@ namespace Engine {
 			const ExportConfiguration configuration = Specification.Configuration;
 			const std::string_view name = ExportConfigurationToString(configuration);
 			BinaryDirectory = Specification.BinaryRoot / GetBuildOutputDirectoryName(configuration);
-			const std::filesystem::path runtimeDirectory = BinaryDirectory / RuntimeProjectName;
-			RuntimeExecutable = runtimeDirectory / ExecutableFileName(RuntimeProjectName);
+			RuntimeDirectory = BinaryDirectory / RuntimeProjectName;
+			RuntimeExecutable = RuntimeDirectory / ExecutableFileName(RuntimeProjectName);
 			std::error_code error;
 			if (!std::filesystem::is_regular_file(RuntimeExecutable, error))
-				return MissingBinary(std::format("the {} Runtime '{}' is not built", name, FileSystem::PathToUtf8(RuntimeExecutable)));
+				return MissingBinary(std::format("the {} Runtime '{}' is not built", name, FileSystem::PathToUtf8(RuntimeExecutable)), RuntimeExecutable);
 			const std::filesystem::path shaders = BinaryDirectory / ShadersDirectoryName;
 			if (!std::filesystem::is_directory(shaders, error))
-				return MissingBinary(std::format("the {} shaders '{}' are not built", name, FileSystem::PathToUtf8(shaders)));
+				return MissingBinary(std::format("the {} shaders '{}' are not built", name, FileSystem::PathToUtf8(shaders)), shaders);
+			// The notices Scripts/Build.py generates next to every Runtime it builds (ADR 0024 decision 8).
+			NoticesFile = RuntimeDirectory / NoticesFileName;
+			if (!std::filesystem::is_regular_file(NoticesFile, error))
+			{
+				return MissingBinary(std::format("the notices file '{}' of the {} Runtime is missing (Scripts/Build.py generates it)",
+										 FileSystem::PathToUtf8(NoticesFile), name),
+					NoticesFile);
+			}
 			Redist.clear();
 #if defined(ENGINE_PLATFORM_WINDOWS)
 			// The app-local CRT that Scripts/Build.py copies next to every Runtime it builds (§2.3).
-			const std::filesystem::path redistDirectory = runtimeDirectory / "Redist";
+			const std::filesystem::path redistDirectory = RuntimeDirectory / "Redist";
 			if (std::filesystem::is_directory(redistDirectory, error))
 			{
 				ENGINE_TRY_ASSIGN(const std::vector<std::filesystem::path> files, FileSystem::ListDirectory(redistDirectory, false));
@@ -606,14 +791,33 @@ namespace Engine {
 				}
 			}
 			if (Redist.empty())
-				return MissingBinary(std::format("the app-local CRT of the {} Runtime is missing ('{}' holds no DLL)", name, FileSystem::PathToUtf8(redistDirectory)));
+			{
+				return MissingBinary(std::format("the app-local CRT of the {} Runtime is missing ('{}' holds no DLL)", name, FileSystem::PathToUtf8(redistDirectory)),
+					redistDirectory);
+			}
+#elif defined(ENGINE_PLATFORM_MACOS)
+			// The bundle's loader, MoltenVK and its ICD manifest, which Scripts/Build.py stages from the pinned Vulkan SDK.
+			for (const std::string_view framework : BundledFrameworks)
+			{
+				const std::filesystem::path file = RuntimeDirectory / FrameworksDirectoryName / FileSystem::PathFromUtf8(framework);
+				if (!std::filesystem::is_regular_file(file, error))
+					return MissingBinary(std::format("the {} Runtime's bundled '{}' is missing", name, FileSystem::PathToUtf8(file)), file);
+			}
+			const std::filesystem::path icd = RuntimeDirectory / FileSystem::PathFromUtf8(MoltenVkIcdPath);
+			if (!std::filesystem::is_regular_file(icd, error))
+				return MissingBinary(std::format("the {} Runtime's MoltenVK ICD manifest '{}' is missing", name, FileSystem::PathToUtf8(icd)), icd);
 #endif
 			return {};
 		}
 
-		[[nodiscard]] std::unexpected<Error> MissingBinary(std::string what) const
+		// Step 4's NotFound for a missing build output at `file`, which IsMissingBuildOutput recognizes: the path as the
+		// error's file and the build command in its message.
+		[[nodiscard]] std::unexpected<Error> MissingBinary(std::string what, const std::filesystem::path& file) const
 		{
+			ErrorLocation location;
+			location.File = FileSystem::PathToUtf8(file);
 			return std::unexpected(Error(ErrorCode::NotFound, std::format("{}: build it with {}", what, BuildCommand(Specification.Configuration)))
+					.WithLocation(std::move(location))
 					.WithHint("exports package what Scripts/Build.py builds; the editor never builds"));
 		}
 
@@ -622,19 +826,26 @@ namespace Engine {
 		[[nodiscard]] Status LocateOutput()
 		{
 			const std::string defaultDirectory = GetDefaultOutputDirectory(Settings.Name, Specification.Configuration, Specification.Testing);
-			if (!Specification.ExportRoot.empty())
+			const std::string_view relative = Specification.OutputDirectory.empty() ? std::string_view(defaultDirectory)
+																					: std::string_view(Specification.OutputDirectory);
+			if (!Specification.OutputPath.empty())
 			{
-				// --export-root (M15) replaces the project's Build/ directory.
-				const std::string_view relative = std::string_view(defaultDirectory).substr(Utils::ExportBuildDirectory.size() + 1);
-				OutputDirectory = Specification.ExportRoot / FileSystem::PathFromUtf8(relative);
+				// Editor --export (M15): the package directory itself, checked by Start (CheckOutputPath).
+				OutputDirectory = Specification.OutputPath;
+			}
+			else if (!Specification.ExportRoot.empty())
+			{
+				// --export-root (M15) replaces the project's Build/ directory: what follows "Build/" goes below the root.
+				OutputDirectory = Specification.ExportRoot / FileSystem::PathFromUtf8(relative.substr(Utils::ExportBuildDirectory.size() + 1));
 			}
 			else
 			{
-				const std::string_view relative = Specification.OutputDirectory.empty() ? std::string_view(defaultDirectory)
-																						: std::string_view(Specification.OutputDirectory);
 				OutputDirectory = ProjectRoot / FileSystem::PathFromUtf8(relative);
 			}
 			OutputDirectory = OutputDirectory.lexically_normal();
+			if (!OutputDirectory.has_filename())
+				OutputDirectory = OutputDirectory.parent_path();
+			ENGINE_TRY(CheckOutputDirectory());
 			const std::filesystem::path parent = OutputDirectory.parent_path();
 			const std::string name = FileSystem::PathToUtf8(OutputDirectory.filename());
 			const uint32_t processId = Process::GetCurrentId();
@@ -642,6 +853,60 @@ namespace Engine {
 			PreviousDirectory = parent / FileSystem::PathFromUtf8(SiblingName(PreviousKind, processId, name));
 			SmokeTestUserData = parent / FileSystem::PathFromUtf8(SiblingName(SmokeTestKind, processId, name));
 			return {};
+		}
+
+		// The output directory rule (ADR 0024 decision 2): an export replaces its output directory as a whole, so an existing
+		// one must be an empty directory or hold an earlier export: a Game.json at its top that loads as a GameManifest, or
+		// on macOS a "<Name>.app" (any name, since the project may have been renamed) whose Contents/Resources/Game.json loads
+		// as one. A file of that name that is not a manifest proves nothing (NTFS and APFS match any spelling of the name, so
+		// an unrelated folder's "game.json" would otherwise do), and a directory whose status cannot be read for any reason
+		// other than its absence is not known to be safe to replace: both are refused (the M15 review's M01). Validate
+		// checks it before anything is written, and MoveToOutput again right before it moves the directory aside.
+		[[nodiscard]] Status CheckOutputDirectory() const
+		{
+			std::error_code error;
+			const std::filesystem::file_status status = std::filesystem::symlink_status(OutputDirectory, error);
+			if (status.type() == std::filesystem::file_type::not_found)
+				return {};
+			const std::string shown = FileSystem::PathToUtf8(OutputDirectory);
+			constexpr std::string_view Hint = "export into a new or empty directory, or into one that holds an earlier export; move what is there "
+											  "first";
+			if (error)
+			{
+				return std::unexpected(Error(ErrorCode::Io, std::format("the output directory '{}' cannot be examined: {}", shown, error.message()))
+						.WithHint(std::string(Hint)));
+			}
+			if (status.type() != std::filesystem::file_type::directory)
+			{
+				return std::unexpected(Error(ErrorCode::InvalidArgument, std::format("the output directory '{}' exists and is not a directory", shown))
+						.WithHint(std::string(Hint)));
+			}
+			ENGINE_TRY_ASSIGN(const std::vector<std::filesystem::path> entries, FileSystem::ListDirectory(OutputDirectory, false));
+			if (entries.empty())
+				return {};
+			if (HoldsGameManifest(OutputDirectory / GameManifest::FileName))
+				return {};
+#if defined(ENGINE_PLATFORM_MACOS)
+			for (const std::filesystem::path& entry : entries)
+			{
+				if (entry.extension() == ".app" && HoldsGameManifest(entry / FileSystem::PathFromUtf8(AppBundleResourcesDirectory) / GameManifest::FileName))
+					return {};
+			}
+#endif
+			return std::unexpected(Error(ErrorCode::InvalidArgument, std::format("the output directory '{}' holds files but no earlier export (no "
+																				 "Game.json that reads as a game manifest), and an export replaces its "
+																				 "output directory as a whole",
+																		 shown))
+					.WithHint(std::string(Hint)));
+		}
+
+		// Whether `manifest` is a regular file that GameManifestSerializer reads as a game manifest (any version it accepts).
+		[[nodiscard]] static bool HoldsGameManifest(const std::filesystem::path& manifest)
+		{
+			std::error_code error;
+			if (!std::filesystem::is_regular_file(manifest, error))
+				return false;
+			return GameManifestSerializer::LoadFromFile(manifest).has_value();
 		}
 
 		// --- 2. Cook -----------------------------------------------------------------------------------------------------
@@ -886,7 +1151,7 @@ namespace Engine {
 					.EngineMetadata = std::move(engineMetadata),
 					.GameMetadata = std::move(gameMetadata),
 					.ShaderDirectory = BinaryDirectory / ShadersDirectoryName,
-					.DataDirectory = StagingDirectory / DataDirectoryName,
+					.DataDirectory = GetPackageResources(StagingDirectory) / DataDirectoryName,
 				};
 				EngineEntries.clear();
 				GameEntries.clear();
@@ -947,20 +1212,41 @@ namespace Engine {
 
 		[[nodiscard]] Result<bool> CopyRuntime()
 		{
-			const std::filesystem::path executable = StagingDirectory / FileSystem::PathFromUtf8(ExecutableFileName(Settings.Name));
-			ENGINE_TRY(WithContext(CopyFile(RuntimeExecutable, executable), "while copying the Runtime"));
+#if defined(ENGINE_PLATFORM_MACOS)
+			// The bundle's executable, frameworks and ICD manifest (AppBundle.h).
+			ENGINE_TRY(WithContext(CopyAppBundleBinaries(GetBundle(StagingDirectory), Settings.Name, RuntimeExecutable, RuntimeDirectory),
+				"while assembling the application bundle"));
+#else
+			ENGINE_TRY(WithContext(CopyFile(RuntimeExecutable, GetPackageExecutable(StagingDirectory)), "while copying the Runtime"));
 			for (const std::filesystem::path& library : Redist)
 				ENGINE_TRY(WithContext(CopyFile(library, StagingDirectory / library.filename()), "while copying the app-local CRT"));
+#endif
 			return true;
 		}
 
 		// --- 4a. Patch resources (M15) -------------------------------------------------------------------------------------
 
-		// Stream A (ADR 0024 decision 4): BuildExecutableResourceSet, then ResourcePatcher::Patch on Windows, Info.plist and
-		// AppIcon.icns on macOS. A pass-through until then, so exports keep the v0 behaviour.
+		// §14.2 step 5 (ADR 0024 decision 4): the project's icon, version and company in the copied executable. Windows
+		// patches its resources (ResourcePatcher::Patch); macOS writes Info.plist and, with an icon, AppIcon.icns; Linux
+		// executables carry no resources, so the step completes with ResourcesPatched false.
 		[[nodiscard]] Result<bool> PatchResources()
 		{
-			ENGINE_CONTRACT_STUB();
+#if defined(ENGINE_PLATFORM_WINDOWS) || defined(ENGINE_PLATFORM_MACOS)
+			ENGINE_TRY_ASSIGN(const ExecutableResourceSet resources, BuildExecutableResourceSet(*Editor, Resources, Settings.Name));
+	#if defined(ENGINE_PLATFORM_WINDOWS)
+			ENGINE_TRY(WithContext(ResourcePatcher::Patch(GetPackageExecutable(StagingDirectory), resources), "while writing the executable's resources"));
+	#else
+			const AppBundleInfo info{
+				.Name = Settings.Name,
+				.Identifier = MakeBundleIdentifier(Resources.Company, Settings.Name),
+				.Version = std::format("{}.{}.{}", Resources.VersionMajor, Resources.VersionMinor, Resources.VersionPatch),
+				.Company = Resources.Company,
+				.HasIcon = !resources.Icons.empty(),
+			};
+			ENGINE_TRY(WithContext(WriteAppBundleResources(GetBundle(StagingDirectory), info, resources.Icons), "while writing the bundle's Info.plist"));
+	#endif
+			Report.ResourcesPatched = true;
+#endif
 			return true;
 		}
 
@@ -980,18 +1266,67 @@ namespace Engine {
 			manifest.Simulation = Settings.Simulation;
 			manifest.Testing = Specification.Testing;
 			ENGINE_TRY_ASSIGN(const std::string text, GameManifestSerializer::SaveToString(manifest));
-			ENGINE_TRY(FileSystem::WriteFileAtomic(StagingDirectory / GameManifest::FileName, AsBytes(text), { .KeepBackup = false }));
+			const std::filesystem::path resources = GetPackageResources(StagingDirectory);
+			ENGINE_TRY(FileSystem::WriteFileAtomic(resources / GameManifest::FileName, AsBytes(text), { .KeepBackup = false }));
+			// The notices of everything the package ships (ADR 0024 decision 8), as Scripts/Build.py generated them.
+			ENGINE_TRY(WithContext(CopyFile(NoticesFile, resources / NoticesFileName), "while copying the notices file"));
 			return true;
 		}
 
 		// --- 5a. Sign (M15) ----------------------------------------------------------------------------------------------
 
-		// Stream A (ADR 0024 decision 5): macOS ad-hoc signs the bundle (codesign); nothing on Windows and Linux. A
-		// pass-through until then.
+		// macOS (ADR 0024 decision 5): ad-hoc signs the bundled dylibs and then the bundle with codesign --force --sign -,
+		// one process at a time, polled once per frame. The signature seals Contents/Resources, so it comes after everything
+		// is written and before the smoke test runs the signed bundle. Nothing to do on Windows and Linux.
 		[[nodiscard]] Result<bool> Sign()
 		{
-			ENGINE_CONTRACT_STUB();
+#if defined(ENGINE_PLATFORM_MACOS)
+			if (!SignRunsPrepared)
+			{
+				SignRunsPrepared = true;
+				const std::filesystem::path bundle = GetBundle(StagingDirectory);
+				for (const std::string_view framework : BundledFrameworks)
+				{
+					const std::filesystem::path library = bundle / FileSystem::PathFromUtf8(AppBundleFrameworksDirectory) / FileSystem::PathFromUtf8(framework);
+					SignRuns.push_back({ "--force", "--sign", "-", FileSystem::PathToUtf8(library) });
+				}
+				SignRuns.push_back({ "--force", "--sign", "-", FileSystem::PathToUtf8(bundle) });
+			}
+			if (Signing.has_value())
+			{
+				if (!Signing->HasExited())
+				{
+					if (std::chrono::steady_clock::now() < SigningDeadline)
+						return false;
+					ENGINE_TRY(Signing->Kill());
+					Result<ProcessResult> killed = Signing->Wait(SmokeTestDrainTimeout);
+					Signing.reset();
+					return MakeError(ErrorCode::Timeout, "codesign ran longer than {} s and was killed: {}", SignTimeout.count(),
+						killed.has_value() ? TailOfOutput(*killed) : killed.error().ToString());
+				}
+				ENGINE_TRY_ASSIGN(const ProcessResult result, Signing->Wait(SignTimeout));
+				Signing.reset();
+				if (result.ExitCode != 0)
+				{
+					return std::unexpected(Error(ErrorCode::Io, std::format("codesign exited with code {}: {}", result.ExitCode, TailOfOutput(result)))
+							.WithHint("the export ad-hoc signs the bundle with /usr/bin/codesign, which the Xcode command line tools provide"));
+				}
+			}
+			if (SignRuns.empty())
+				return true;
+			ENGINE_TRY_ASSIGN(Process process, Process::Spawn({
+												   .Executable = std::filesystem::path(CodesignExecutable),
+												   .Arguments = std::move(SignRuns.front()),
+												   .WorkingDirectory = StagingDirectory,
+												   .Environment = {},
+											   }));
+			SignRuns.erase(SignRuns.begin());
+			Signing = std::move(process);
+			SigningDeadline = std::chrono::steady_clock::now() + SignTimeout;
+			return false;
+#else
 			return true;
+#endif
 		}
 
 		// --- 6. Smoke test -----------------------------------------------------------------------------------------------
@@ -1026,7 +1361,7 @@ namespace Engine {
 						arguments.push_back("none");
 					}
 				}
-				const std::filesystem::path executable = StagingDirectory / FileSystem::PathFromUtf8(ExecutableFileName(Settings.Name));
+				const std::filesystem::path executable = GetPackageExecutable(StagingDirectory);
 				ENGINE_TRY_ASSIGN(Process process, Process::Spawn({
 													   .Executable = executable,
 													   .Arguments = std::move(arguments),
@@ -1075,6 +1410,9 @@ namespace Engine {
 		[[nodiscard]] Result<bool> MoveToOutput()
 		{
 			ENGINE_TRY(ListPackage());
+			// Validate checked the output directory minutes ago, before the cook; what it holds now is what this step would
+			// move aside and remove, so the rule is checked again right before the move.
+			ENGINE_TRY(CheckOutputDirectory());
 			if (FileSystem::Exists(OutputDirectory))
 			{
 				if (FileSystem::Exists(PreviousDirectory))
@@ -1102,7 +1440,7 @@ namespace Engine {
 			StagingCreated = false;
 			CreatedDirectories.clear();
 			Report.OutputDirectory = OutputDirectory;
-			Report.Executable = OutputDirectory / FileSystem::PathFromUtf8(ExecutableFileName(Settings.Name));
+			Report.Executable = GetPackageExecutable(OutputDirectory);
 			return true;
 		}
 
@@ -1134,6 +1472,7 @@ namespace Engine {
 		// directory is never touched (the move is the last step).
 		void Release()
 		{
+			Signing.reset();
 			SmokeTest.reset();
 			for (const JobHandle<AssetRef<Asset>>& load : Loads)
 			{
@@ -1180,15 +1519,16 @@ namespace Engine {
 			return MakeError(ErrorCode::InvalidState, "no project is open: open one to export it");
 		if (editor.IsReadOnly())
 			return MakeError(ErrorCode::InvalidState, "the project is open read-only, and an export writes below its Build/ directory");
-		if (specification.ExportRoot.empty())
+		// OutputDirectory, below Build/ or below ExportRoot, applies unless OutputPath names the package directory itself.
+		if (specification.OutputPath.empty())
 			ENGINE_TRY(Utils::CheckExportOutputDirectory(specification.OutputDirectory));
-		else if (!specification.ExportRoot.is_absolute())
+		if (!specification.ExportRoot.empty() && !specification.ExportRoot.is_absolute())
 			return MakeError(ErrorCode::InvalidArgument, "the export root '{}' is not an absolute path", FileSystem::PathToUtf8(specification.ExportRoot));
 		if (specification.BinaryRoot.empty())
 			return MakeError(ErrorCode::InvalidArgument, "the export needs the directory of the build outputs (BinaryRoot, <repository>/bin)");
 		if (specification.SmokeTestFrames == 0)
 			return MakeError(ErrorCode::InvalidArgument, "the smoke test needs at least one frame");
-		ENGINE_TRY(CheckOutputPath(specification));
+		ENGINE_TRY(CheckOutputPath(specification, editor.GetProject().GetRoot()));
 
 		Scope<Exporter> exporter = CreateScope<Exporter>(ConstructionKey());
 		State& state = *exporter->m_State;
@@ -1196,6 +1536,7 @@ namespace Engine {
 		state.Specification = specification;
 		state.ProjectRoot = editor.GetProject().GetRoot();
 		state.Started = std::chrono::steady_clock::now();
+		state.PhaseStarted = state.Started;
 		state.Report.Configuration = specification.Configuration;
 		ENGINE_INFO("Exporting '{}' ({})", editor.GetProject().GetSettings().Name, ExportConfigurationToString(specification.Configuration));
 		return exporter;
@@ -1216,6 +1557,10 @@ namespace Engine {
 		}
 		if (!*stepped)
 			return std::nullopt;
+		// The phase's time runs from the previous phase's end, so the timings add up to the export's (§14.2 step 8).
+		const auto completed = std::chrono::steady_clock::now();
+		state.Report.PhaseTimings.push_back({ .Phase = phase, .Seconds = std::chrono::duration<double>(completed - state.PhaseStarted).count() });
+		state.PhaseStarted = completed;
 		state.Phase = static_cast<ExportPhase>(std::to_underlying(phase) + 1);
 		if (state.Phase != ExportPhase::Done)
 			return std::nullopt;
@@ -1249,10 +1594,11 @@ namespace Engine {
 			testing ? "-Testing" : "", projectName);
 	}
 
-	bool Exporter::IsMissingBuildOutput(const Error& /*error*/)
+	bool Exporter::IsMissingBuildOutput(const Error& error)
 	{
-		ENGINE_CONTRACT_STUB();
-		return false;
+		// Step 4's NotFound (MissingBinary, and CopyAppBundleBinaries' for an input that vanished after Validate) carries the
+		// missing path as its file and names the build script; a project asset's NotFound does neither.
+		return error.GetCode() == ErrorCode::NotFound && !error.GetLocation().File.empty() && error.GetMessageText().contains(BuildScriptCommand);
 	}
 
 	std::string_view Exporter::GetPlatformName()

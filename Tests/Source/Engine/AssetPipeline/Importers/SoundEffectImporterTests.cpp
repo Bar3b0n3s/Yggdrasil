@@ -8,6 +8,7 @@
 #include "Engine/Reflection/StructInfo.h"
 #include "Engine/Reflection/TypeRegistry.h"
 #include "Support/AssetTestFixture.h"
+#include "Support/Fuzz.h"
 #include "Support/TestData.h"
 
 #include <nlohmann/json.hpp>
@@ -119,6 +120,43 @@ namespace Engine {
 			REQUIRE(resaved.has_value());
 			CHECK(*resaved == *canonical);
 			CHECK(canonical->starts_with("{\n\t\"Format\": \"SoundEffect\",\n\t\"Version\": 1,"));
+		}
+
+		TEST_CASE("SoundEffectImporter: 1,000 seeded mutations of a .sfx document never crash" * doctest::test_suite(Test::FuzzSuite))
+		{
+			// The seed corpus: FeatureTest's .sfx files, the engine's presets and the architecture's example. A document the
+			// reader accepts writes back canonically and reads again to the same description.
+			Test::AssetTestFixture fixture;
+			std::vector<std::string> seeds = Test::ReadFuzzSeedTexts(Test::GetRepositoryRoot() / "Projects" / "FeatureTest" / "Assets", ".sfx");
+			for (std::string& preset : Test::ReadFuzzSeedTexts(Test::GetRepositoryRoot() / "Resources" / "Audio", ".sfx"))
+				seeds.push_back(std::move(preset));
+			seeds.emplace_back(LineClearText);
+			const TypeRegistry& registry = fixture.GetRegistry();
+			const Test::FuzzRun run = Test::RunFuzzCase(0x5FC, 1000, [&registry, &seeds](Random& random, uint64_t /*index*/)
+			{
+				std::string mutated = seeds[static_cast<size_t>(random.RangeInt(0, static_cast<int64_t>(seeds.size()) - 1))];
+				Test::MutateText(mutated, random);
+				SoundEffectLoadReport report;
+				const Result<SoundEffectDescription> description = SoundEffectFromText(mutated, registry, report, random.NextBool());
+				if (!description.has_value())
+				{
+					const ErrorCode code = description.error().GetCode();
+					CHECK((code == ErrorCode::Parse || code == ErrorCode::Validation || code == ErrorCode::UnsupportedVersion));
+					return false;
+				}
+				const Result<std::string> canonical = SoundEffectToText(*description, registry);
+				REQUIRE_MESSAGE(canonical.has_value(), canonical.error().ToString());
+				SoundEffectLoadReport again;
+				const Result<SoundEffectDescription> reread = SoundEffectFromText(*canonical, registry, again, true);
+				REQUIRE_MESSAGE(reread.has_value(), reread.error().ToString());
+				CHECK(*reread == *description);
+				return true;
+			});
+			if (Test::IsFuzzSample(run.Range))
+			{
+				CHECK(run.Counts.Rejected > 0);
+				CHECK(run.Counts.Accepted > 0);
+			}
 		}
 
 		TEST_CASE("SoundEffectImporter: invalid documents are located errors")

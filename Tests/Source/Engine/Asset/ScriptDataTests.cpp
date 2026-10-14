@@ -8,6 +8,7 @@
 #include "Engine/Reflection/EnumInfo.h"
 #include "Engine/Scripting/ScriptCompiler.h"
 #include "Support/AssetTestFixture.h"
+#include "Support/Fuzz.h"
 
 #include <doctest/doctest.h>
 #include <nlohmann/json.hpp>
@@ -309,22 +310,40 @@ namespace Engine {
 			const auto wrongAbi = LoadCookedScript(WriteCookedArtifact(AssetType::Script, 1, 1, payload));
 			REQUIRE_FALSE(wrongAbi);
 			CHECK(wrongAbi.error().GetCode() == ErrorCode::UnsupportedVersion);
-			Random random(314159);
-			for (size_t i = 0; i < 10000; ++i)
-			{
-				Buffer mutated = *cooked;
-				const size_t offset = CookedHeader::Size + static_cast<size_t>(random.NextU64() % (mutated.size() - CookedHeader::Size));
-				mutated[offset] ^= std::byte{ 1 };
-				CHECK_FALSE(LoadCookedScript(mutated));
-				Buffer inner(view->Payload.begin(), view->Payload.end());
-				inner[static_cast<size_t>(random.NextU64() % inner.size())] ^= std::byte{ 1 };
-				// Rehashing reaches the payload decoder. A mutation may describe another valid asset.
-				const auto decoded = LoadCookedScript(WriteCookedArtifact(AssetType::Script, 1, 1, inner));
-				if (decoded)
-					CHECK(CookScript(**decoded, 1).has_value());
-			}
 			std::reverse(script.Fields.begin(), script.Fields.end());
 			CHECK_FALSE(CookScript(script, 1));
+		}
+
+		TEST_CASE("ScriptData: 10,000 seeded mutations of a cooked script never crash" * doctest::test_suite(Test::FuzzSuite))
+		{
+			auto script = Test::CompiledAsset();
+			script.Kind = ScriptKind::Behaviour;
+			script.Name = "Probe";
+			script.Fields = Test::AllScriptFields();
+			const auto cooked = CookScript(script, 1);
+			REQUIRE(cooked);
+			const auto view = ReadCookedArtifact(*cooked);
+			REQUIRE(view);
+			const Buffer payload(view->Payload.begin(), view->Payload.end());
+			const Test::FuzzRun run = Test::RunFuzzCase(314159, 10000, [&cooked, &payload](Random& random, uint64_t /*index*/)
+			{
+				// One flipped bit after the header always fails the payload hash.
+				Buffer flipped = *cooked;
+				const size_t offset = CookedHeader::Size + static_cast<size_t>(random.NextU64() % (flipped.size() - CookedHeader::Size));
+				flipped[offset] ^= std::byte{ 1 };
+				CHECK_FALSE(LoadCookedScript(flipped));
+				// A mutated payload sealed again reaches the payload decoder. A mutation may describe another valid asset,
+				// which cooks again.
+				Buffer inner = payload;
+				Test::MutateBytes(inner, random);
+				const auto decoded = LoadCookedScript(WriteCookedArtifact(AssetType::Script, 1, 1, inner));
+				if (!decoded)
+					return false;
+				CHECK(CookScript(**decoded, 1).has_value());
+				return true;
+			});
+			if (Test::IsFuzzSample(run.Range))
+				CHECK(run.Counts.Rejected > 0);
 		}
 
 		TEST_CASE("ScriptData: identical inputs cook identically across configurations")

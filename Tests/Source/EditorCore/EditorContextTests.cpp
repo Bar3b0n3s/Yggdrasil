@@ -3,8 +3,10 @@
 #include "EditorCore/EditorContext.h"
 
 #include "EditorCore/Automation/Private/MethodSupport.h"
+#include "EditorCore/Automation/RegisterMethods.h"
 #include "EditorCore/Commands/ProjectSettingsCommand.h"
 #include "EditorCore/Commands/SceneEdit.h"
+#include "EditorCore/Project/ProjectManager.h"
 #include "Engine/App/EngineContext.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/Core/FileSystem.h"
@@ -13,8 +15,11 @@
 #include "Engine/Core/Log.h"
 #include "Engine/Core/VirtualFileSystem.h"
 #include "Engine/Scene/Entity.h"
+#include "Engine/Scene/LoadReport.h"
+#include "Engine/Scene/Scene.h"
 #include "Support/EditorTestFixture.h"
 #include "Support/ExpectLog.h"
+#include "Support/TempDirectory.h"
 #include "Support/TestData.h"
 
 #include <nlohmann/json.hpp>
@@ -80,6 +85,90 @@ namespace Engine {
 			bool ChangesScene() const override { return false; }
 			size_t GetMemorySize() const override { return 16; }
 		};
+
+		// An editor of its own engine context, with or without --strict (EditorContextSpecification::StrictUnknowns), for
+		// the projects of `directory`.
+		class StrictnessEditor
+		{
+		public:
+			StrictnessEditor(const std::filesystem::path& directory, bool strict)
+			{
+				REQUIRE(FileSystem::CreateDirectories(directory / "UserData").has_value());
+				Result<Scope<EngineContext>> engine = EngineContext::Create({ .WorkerCount = 0, .UserDataDirectory = directory / "UserData", .RegisterTypes = &RegisterEditorMethodTypes });
+				REQUIRE_MESSAGE(engine.has_value(), engine.error().ToString());
+				m_Engine = std::move(*engine);
+				Result<Scope<EditorContext>> editor = EditorContext::Create(*m_Engine, {
+																						   .IdGeneratorState = Test::EditorTestIdState,
+																						   .TemplatesDirectory = Test::GetRepositoryRoot() / "Resources" / "Templates" / "Projects",
+																						   .ReadOnlyCacheRoot = directory / "ReadOnlyCache",
+																						   .HistoryLimits = {},
+																						   .EnvironmentBaker = nullptr,
+																						   .StrictUnknowns = strict,
+																					   });
+				REQUIRE_MESSAGE(editor.has_value(), editor.error().ToString());
+				m_Editor = std::move(*editor);
+			}
+
+			~StrictnessEditor()
+			{
+				// The editor holds the project lock and the project:// mount: release both before the engine context goes.
+				m_Editor.reset();
+				m_Engine.reset();
+			}
+
+			StrictnessEditor(const StrictnessEditor&) = delete;
+			StrictnessEditor& operator=(const StrictnessEditor&) = delete;
+
+			[[nodiscard]] EditorContext& GetEditor() { return *m_Editor; }
+
+			// ProjectManager::OpenProject with the editor's strictness, as every opener passes it, then OpenProject.
+			[[nodiscard]] Status Open(const std::filesystem::path& projectFile)
+			{
+				ENGINE_TRY_ASSIGN(Scope<LoadedProject> project,
+					ProjectManager::OpenProject(projectFile, { .StrictUnknowns = m_Editor->GetSpecification().StrictUnknowns }, m_Editor->GetTypeRegistry()));
+				return m_Editor->OpenProject(std::move(project));
+			}
+		private:
+			Scope<EngineContext> m_Engine;
+			Scope<EditorContext> m_Editor;
+		};
+
+		void WriteStrictnessFile(const std::filesystem::path& path, std::string_view text)
+		{
+			REQUIRE(FileSystem::CreateDirectories(path.parent_path()).has_value());
+			REQUIRE(FileSystem::WriteFileAtomic(path, AsBytes(text), { .KeepBackup = false }).has_value());
+		}
+
+		// A prefab whose root carries "Hovercraft", a component no registry knows.
+		constexpr std::string_view UnknownComponentPrefab = R"({
+	"Format": "Prefab",
+	"Version": 1,
+	"Name": "Crate",
+	"Root": "00000000000c0001",
+	"ComponentVersions": {
+		"Transform": 1
+	},
+	"Entities": [
+		{
+			"ID": "00000000000c0001",
+			"Name": "Crate",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Hovercraft": {
+					"Lift": 3
+				}
+			}
+		}
+	]
+}
+)";
 
 	}
 
@@ -987,6 +1076,226 @@ namespace Engine {
 			REQUIRE(updated.has_value());
 			CHECK_FALSE(*updated);
 			CHECK(editor.GetRevision() == revision);
+		}
+
+		// §6 "Strict reader" and the M15 completion review's A024: Editor --strict turns unknown keys, fields and components
+		// of the project's .eproj, scenes and prefabs into errors; without it they are warnings and the project opens.
+		TEST_CASE("EditorContext: --strict refuses a project whose .eproj, scenes or prefabs hold unknown keys or components, which only warn without it")
+		{
+			const Test::TempDirectory directory("EditorStrict");
+			std::filesystem::path projectFile;
+			{
+				StrictnessEditor creator(directory / "Creator", false);
+				const Result<CreatedProject> created = ProjectManager::CreateProject(
+					{ .Directory = directory / "Game", .Name = "Game", .Template = ProjectTemplate::Empty, .TemplatesDirectory = creator.GetEditor().GetSpecification().TemplatesDirectory },
+					creator.GetEditor().GetTypeRegistry());
+				REQUIRE_MESSAGE(created.has_value(), created.error().ToString());
+				projectFile = created->ProjectFile;
+			}
+			const std::filesystem::path root = projectFile.parent_path();
+			const std::string cleanScene(ExternalMainScene);
+			std::string unknownKeyScene = cleanScene;
+			constexpr std::string_view ActiveKey = "\"Active\": true,";
+			const size_t active = unknownKeyScene.find(ActiveKey);
+			REQUIRE(active != std::string::npos);
+			unknownKeyScene.insert(active + ActiveKey.size(), "\n\t\t\t\"Colour\": \"red\",");
+			WriteStrictnessFile(root / "Assets" / "Scenes" / "Main.scene", unknownKeyScene);
+			WriteStrictnessFile(root / "Assets" / "Prefabs" / "Crate.prefab", UnknownComponentPrefab);
+			const Result<VfsPath> scenePath = VfsPath::Create("project", "Assets/Scenes/Main.scene");
+			REQUIRE(scenePath.has_value());
+
+			// Without --strict: the project opens, and scene.open's load reports the unknown key as a warning.
+			{
+				StrictnessEditor lenient(directory / "Lenient", false);
+				const Status opened = lenient.Open(projectFile);
+				REQUIRE_MESSAGE(opened.has_value(), opened.error().ToString());
+				const Scope<Scene> scene = lenient.GetEditor().CreateScene("Main");
+				LoadReport report;
+				REQUIRE(Utils::LoadSceneFile(lenient.GetEditor(), *scene, *scenePath, LoadMode::Strict, nullptr, report).has_value());
+				CHECK(std::ranges::any_of(report.Diagnostics, [](const LoadDiagnostic& diagnostic)
+				{
+					return diagnostic.Severity == DiagnosticSeverity::Warning && diagnostic.Message.contains("Colour");
+				}));
+				REQUIRE(lenient.GetEditor().CloseProject().has_value());
+			}
+
+			// With --strict: the open fails naming both files, and leaves the project closed and its lock released.
+			{
+				StrictnessEditor strict(directory / "Strict", true);
+				const Status refused = strict.Open(projectFile);
+				REQUIRE_FALSE(refused.has_value());
+				INFO(refused.error().ToString());
+				CHECK(refused.error().GetCode() == ErrorCode::Validation);
+				CHECK(refused.error().GetIssues().size() == 2);
+				CHECK(refused.error().ToString().contains("Assets/Prefabs/Crate.prefab"));
+				CHECK(refused.error().ToString().contains("Hovercraft"));
+				CHECK(refused.error().ToString().contains("Assets/Scenes/Main.scene"));
+				CHECK(refused.error().ToString().contains("Colour"));
+				CHECK_FALSE(strict.GetEditor().HasProject());
+				CHECK_FALSE(strict.GetEditor().GetVfs().IsMounted("project"));
+
+				// Clean files open (the lock was released); a scene file that gains an unknown key afterwards fails the
+				// strict editor's scene.open load.
+				WriteStrictnessFile(root / "Assets" / "Scenes" / "Main.scene", cleanScene);
+				REQUIRE(FileSystem::Remove(root / "Assets" / "Prefabs" / "Crate.prefab").has_value());
+				const Status opened = strict.Open(projectFile);
+				REQUIRE_MESSAGE(opened.has_value(), opened.error().ToString());
+				WriteStrictnessFile(root / "Assets" / "Scenes" / "Main.scene", unknownKeyScene);
+				const Scope<Scene> scene = strict.GetEditor().CreateScene("Main");
+				LoadReport report;
+				const Status loaded = Utils::LoadSceneFile(strict.GetEditor(), *scene, *scenePath, LoadMode::Strict, nullptr, report);
+				REQUIRE_FALSE(loaded.has_value());
+				CHECK(loaded.error().ToString().contains("Colour"));
+				REQUIRE(strict.GetEditor().CloseProject().has_value());
+			}
+
+			// An unknown key in the .eproj: a warning without --strict, an error located at it with --strict.
+			WriteStrictnessFile(root / "Assets" / "Scenes" / "Main.scene", cleanScene);
+			Result<std::string> projectText = FileSystem::ReadText(projectFile);
+			REQUIRE(projectText.has_value());
+			const size_t brace = projectText->find('{');
+			REQUIRE(brace != std::string::npos);
+			projectText->insert(brace + 1, "\n\t\"Theme\": \"Dark\",");
+			WriteStrictnessFile(projectFile, *projectText);
+			{
+				StrictnessEditor lenient(directory / "LenientProject", false);
+				const Status opened = lenient.Open(projectFile);
+				REQUIRE_MESSAGE(opened.has_value(), opened.error().ToString());
+				const std::vector<ValidationIssue>& diagnostics = lenient.GetEditor().GetProject().GetLoadReport().Diagnostics;
+				CHECK(std::ranges::any_of(diagnostics, [](const ValidationIssue& issue)
+				{
+					return issue.Severity == DiagnosticSeverity::Warning && issue.JsonPointer == "/Theme";
+				}));
+				REQUIRE(lenient.GetEditor().CloseProject().has_value());
+			}
+			{
+				StrictnessEditor strict(directory / "StrictProject", true);
+				const Status refused = strict.Open(projectFile);
+				REQUIRE_FALSE(refused.has_value());
+				INFO(refused.error().ToString());
+				CHECK(refused.error().GetCode() == ErrorCode::Validation);
+				CHECK(refused.error().ToString().contains("/Theme"));
+				CHECK_FALSE(strict.GetEditor().HasProject());
+			}
+		}
+
+		// The M15 fix review's C2: --strict refuses a project for every scene or prefab that does not load strictly, not only
+		// for unknown keys (CI wants every committed scene and prefab to load strictly): a structural defect, a file that is
+		// not a document and a newer Version each name their file. Without --strict the project opens, since the editor
+		// loads its scenes and prefabs only when they are opened or imported.
+		TEST_CASE("EditorContext: --strict refuses a project whose scene or prefab does not load strictly for any reason, which opens without it")
+		{
+			const Test::TempDirectory directory("EditorStrictLoad");
+			std::filesystem::path projectFile;
+			{
+				StrictnessEditor creator(directory / "Creator", false);
+				const Result<CreatedProject> created = ProjectManager::CreateProject(
+					{ .Directory = directory / "Game", .Name = "Game", .Template = ProjectTemplate::Empty, .TemplatesDirectory = creator.GetEditor().GetSpecification().TemplatesDirectory },
+					creator.GetEditor().GetTypeRegistry());
+				REQUIRE_MESSAGE(created.has_value(), created.error().ToString());
+				projectFile = created->ProjectFile;
+			}
+			const std::filesystem::path root = projectFile.parent_path();
+			// Two entities with one ID: a structural defect (§6 "Structural pre-validation"), no unknown key.
+			constexpr std::string_view DuplicateIdScene = R"({
+	"Format": "Scene",
+	"Version": 1,
+	"Name": "Main",
+	"Seed": 7,
+	"ComponentVersions": {
+		"Transform": 1
+	},
+	"Entities": [
+		{
+			"ID": "1a00000000000001",
+			"Name": "First",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				}
+			}
+		},
+		{
+			"ID": "1a00000000000001",
+			"Name": "Second",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				}
+			}
+		}
+	]
+}
+)";
+			// A prefab of a newer format version than this build reads.
+			constexpr std::string_view FuturePrefab = R"({
+	"Format": "Prefab",
+	"Version": 99,
+	"Name": "Crate",
+	"Root": "00000000000c0001",
+	"ComponentVersions": {
+		"Transform": 1
+	},
+	"Entities": [
+		{
+			"ID": "00000000000c0001",
+			"Name": "Crate",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				}
+			}
+		}
+	]
+}
+)";
+			WriteStrictnessFile(root / "Assets" / "Scenes" / "Main.scene", DuplicateIdScene);
+			WriteStrictnessFile(root / "Assets" / "Scenes" / "Truncated.scene", "{\n\t\"Format\": \"Scene\",\n\t\"Version\": 1,\n");
+			WriteStrictnessFile(root / "Assets" / "Prefabs" / "Crate.prefab", FuturePrefab);
+
+			// Without --strict: the project opens.
+			{
+				StrictnessEditor lenient(directory / "Lenient", false);
+				const Status opened = lenient.Open(projectFile);
+				REQUIRE_MESSAGE(opened.has_value(), opened.error().ToString());
+				CHECK(lenient.GetEditor().HasProject());
+				REQUIRE(lenient.GetEditor().CloseProject().has_value());
+			}
+
+			// With --strict: the open fails with one issue per file, each naming its file and its problem, and leaves the
+			// project closed.
+			{
+				StrictnessEditor strict(directory / "Strict", true);
+				const Status refused = strict.Open(projectFile);
+				REQUIRE_FALSE(refused.has_value());
+				INFO(refused.error().ToString());
+				CHECK(refused.error().GetCode() == ErrorCode::Validation);
+				const std::vector<ErrorIssue>& issues = refused.error().GetIssues();
+				REQUIRE(issues.size() == 3);
+				CHECK(issues[0].Message.starts_with("Assets/Prefabs/Crate.prefab: "));
+				CHECK(issues[0].Message.contains("newer than this build supports"));
+				CHECK(issues[1].Message.starts_with("Assets/Scenes/Main.scene: "));
+				CHECK(issues[1].Message.contains("SCENE_DUPLICATE_ID"));
+				CHECK(issues[2].Message.starts_with("Assets/Scenes/Truncated.scene: "));
+				CHECK(issues[2].Message.contains("Parse"));
+				CHECK_FALSE(strict.GetEditor().HasProject());
+				CHECK_FALSE(strict.GetEditor().GetVfs().IsMounted("project"));
+			}
 		}
 	}
 

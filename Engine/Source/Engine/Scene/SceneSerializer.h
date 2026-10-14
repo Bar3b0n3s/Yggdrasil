@@ -40,7 +40,8 @@ namespace Engine {
 	// warn; values validated; Variant values resolved or preserved), unknown components preserved with
 	// SCENE_UNKNOWN_COMPONENT, unknown keys dropped with SCENE_UNKNOWN_KEY, Children rebuilt from file order. With
 	// LoadOptions::StrictUnknowns those warnings are errors. A known component whose value the registry rejects (wrong JSON
-	// type, out of range, non-finite, failed validator) fails a Strict load with a located Validation error; a Repair load
+	// type, out of range, non-finite, failed validator), or an unknown one holding a fractional number outside float's
+	// range (which JsonWriter could not write back), fails a Strict load with a located Validation error; a Repair load
 	// drops it instead, or resets it to its defaults when it is Required (Transform), records SCENE_INVALID_COMPONENT as a
 	// warning and a LoadRepair whose Removed holds the rejected JSON, and continues; when that drops an instance root's
 	// Prefab component, the instance's members are unpacked with SCENE_INCONSISTENT_PREFAB_LINK, so a repaired scene always

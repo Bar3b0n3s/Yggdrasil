@@ -1,0 +1,26 @@
+{
+  "Clean": [],
+  "automation": [
+    "forbidden automation: Engine::ParseRpcRequest(std::basic_string_view<char, std::char_traits<char> >) (/build/bin/Dist-linux-x86_64/Engine/libEngine.a(JsonRpc.o))",
+    "forbidden automation: Engine::Watchdog::Beat() (/build/bin/Dist-linux-x86_64/Engine/libEngine.a(Watchdog.o))",
+    "forbidden automation: vtable for Engine::RuntimeAutomationServer (/build/bin/Dist-linux-x86_64/Engine/libEngine.a(RuntimeAutomationServer.o))"
+  ],
+  "Analysis": [
+    "forbidden Analysis: Luau::Frontend::check(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, std::optional<Luau::FrontendOptions>) (/build/bin/Dist-linux-x86_64/LuauAnalysis/libLuauAnalysis.a(Frontend.o))",
+    "forbidden Analysis: Luau::TypeChecker2::visit(Luau::AstStatBlock*) (/build/bin/Dist-linux-x86_64/LuauAnalysis/libLuauAnalysis.a(TypeChecker2.o))"
+  ],
+  "ImGui": [
+    "forbidden ImGui: Engine::ImGuiLayer::Render(nvrhi::ICommandList&, nvrhi::IFramebuffer&) (/build/bin/Dist-linux-x86_64/Engine/libEngine.a(ImGuiLayer.o))",
+    "forbidden ImGui: Engine::StatsOverlayToggle::OnKeyPressed(Engine::Key, bool) (/build/bin/Dist-linux-x86_64/Engine/libEngine.a(StatsOverlay.o))",
+    "forbidden ImGui: ImGui::Begin(char const*, bool*, int) (/build/bin/Dist-linux-x86_64/ImGui/libImGui.a(imgui.o))",
+    "forbidden ImGui: ImGuiContext::ImGuiContext(ImFontAtlas*) (/build/bin/Dist-linux-x86_64/ImGui/libImGui.a(imgui.o))"
+  ],
+  "AssetPipeline": [
+    "forbidden AssetPipeline: Engine::PakWriter::Write(std::filesystem::__cxx11::path const&) (/build/bin/Dist-linux-x86_64/Engine/libEngine.a(PakWriter.o))",
+    "forbidden AssetPipeline: Engine::TextureImporter::Import(Engine::ImportContext&) const (/build/bin/Dist-linux-x86_64/Engine/libEngine.a(TextureImporter.o))"
+  ],
+  "MissingRequired": [
+    "missing required symbol: FeatureTestRunner",
+    "missing required symbol: ReplayPlayer"
+  ]
+}

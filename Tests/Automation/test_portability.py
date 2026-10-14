@@ -21,19 +21,30 @@ from Lib import paths, portability, premake  # noqa: E402  (Scripts/ is on sys.p
 TARGETS = (("windows", "vs2026"), ("linux", "gmake"), ("linux", "ninja"), ("macosx", "xcode4"))
 
 
+def generate_one(directory: Path, system: str, action: str) -> dict[tuple[str, str], Path]:
+    """One portability target generated below `directory` with the pinned premake."""
+    location = directory / f"{system}-{action}"
+    subprocess.run([str(premake.find_premake()), "--fatal", f"--os={system}", f"--to={location}", action],
+                   cwd=paths.REPOSITORY_ROOT, capture_output=True, check=True, timeout=300.0)
+    return {(system, action): location}
+
+
 def generate(directory: Path) -> dict[tuple[str, str], Path]:
     """Every portability target generated below `directory` with the pinned premake."""
     generated: dict[tuple[str, str], Path] = {}
     for system, action in TARGETS:
-        location = directory / f"{system}-{action}"
-        subprocess.run([str(premake.find_premake()), "--fatal", f"--os={system}", f"--to={location}", action],
-                       cwd=paths.REPOSITORY_ROOT, capture_output=True, check=True, timeout=300.0)
-        generated[(system, action)] = location
+        generated.update(generate_one(directory, system, action))
     return generated
 
 
+def edit(path: Path, old: str, new: str) -> None:
+    text = path.read_text(encoding="utf-8")
+    if old not in text:
+        raise AssertionError(f"{path.name} does not contain {old!r}")
+    path.write_text(text.replace(old, new), encoding="utf-8")
+
+
 class RuntimeLinkSettingsTests(unittest.TestCase):
-    @unittest.skip("contract stub: portability (ADR 0024 decision 18, stream D)")
     def test_the_generated_workspaces_pass_and_each_removed_setting_is_named(self) -> None:
         with tempfile.TemporaryDirectory(prefix="Portability-") as directory:
             generated = generate(Path(directory))
@@ -47,7 +58,50 @@ class RuntimeLinkSettingsTests(unittest.TestCase):
 
             missing = dict(generated)
             shutil.rmtree(missing.pop(("macosx", "xcode4")))
-            self.assertTrue(any("macosx-xcode4" in problem for problem in portability.check_runtime_link_settings(missing)))
+            self.assertTrue(any("macosx-xcode4" in problem
+                                for problem in portability.check_runtime_link_settings(missing)))
+
+    def test_every_other_setting_the_exports_rely_on_is_checked(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="Portability-") as directory:
+            generated = generate(Path(directory))
+
+            # ninja: the rpath, and the map file of each configuration.
+            ninja = generated[("linux", "ninja")] / "Runtime.ninja"
+            edit(ninja, "Dist-linux-x86_64/Runtime/Runtime.map", "Dist-linux-x86_64/Runtime/Other.map")
+            text = ninja.read_text(encoding="utf-8")
+            ninja.write_text(text.replace(" -Wl,-rpath,'$$ORIGIN'", "", 1), encoding="utf-8")
+            problems = portability.check_runtime_link_settings(generated)
+            self.assertEqual(sorted(problem.split(":")[0] for problem in problems),
+                             ["linux-ninja Debug", "linux-ninja Dist"], problems)
+            self.assertTrue(any("ORIGIN" in problem for problem in problems))
+            self.assertTrue(any("Runtime.map" in problem for problem in problems))
+            shutil.rmtree(generated[("linux", "ninja")])
+            generated.update(generate_one(Path(directory), "linux", "ninja"))
+
+            # xcode4: the Frameworks rpath, the map, the deployment target and the product type.
+            pbxproj = generated[("macosx", "xcode4")] / "Runtime.xcodeproj" / "project.pbxproj"
+            edit(pbxproj, '"-Wl,-rpath,@executable_path/../Frameworks",', "")
+            edit(pbxproj, "MACOSX_DEPLOYMENT_TARGET = 14.0;", "MACOSX_DEPLOYMENT_TARGET = 13.0;")
+            edit(pbxproj, '"com.apple.product-type.tool"', '"com.apple.product-type.application"')
+            problems = portability.check_runtime_link_settings(generated)
+            self.assertTrue(all(problem.startswith("macosx-xcode4") for problem in problems), problems)
+            for expected in ("@executable_path/../Frameworks", "MACOSX_DEPLOYMENT_TARGET is 13.0", "product type"):
+                with self.subTest(expected=expected):
+                    self.assertTrue(any(expected in problem for problem in problems), problems)
+            shutil.rmtree(generated[("macosx", "xcode4")])
+            generated.update(generate_one(Path(directory), "macosx", "xcode4"))
+
+            # vs2026: /MAP in every configuration and the Dist subsystem.
+            vcxproj = generated[("windows", "vs2026")] / "Runtime.vcxproj"
+            edit(vcxproj, "<SubSystem>Windows</SubSystem>", "<SubSystem>Console</SubSystem>")
+            text = vcxproj.read_text(encoding="utf-8")
+            vcxproj.write_text(text.replace("/MAP %(AdditionalOptions)", "%(AdditionalOptions)", 1), encoding="utf-8")
+            problems = portability.check_runtime_link_settings(generated)
+            self.assertEqual(len(problems), 2, problems)
+            self.assertTrue(any(problem.startswith("windows-vs2026 Debug") and "/MAP" in problem
+                                for problem in problems))
+            self.assertTrue(any(problem.startswith("windows-vs2026 Dist") and "SubSystem is Console" in problem
+                                for problem in problems))
 
 
 if __name__ == "__main__":

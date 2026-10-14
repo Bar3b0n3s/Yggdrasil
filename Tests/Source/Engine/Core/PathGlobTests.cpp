@@ -16,7 +16,7 @@ namespace Engine {
 
 	TEST_SUITE("Core")
 	{
-		TEST_CASE("PathGlob: '*' and '?' stay in a segment, '**' crosses separators and '**/' also matches no directory" * doctest::skip(true))
+		TEST_CASE("PathGlob: '*' and '?' stay in a segment, '**' crosses separators and '**/' also matches no directory")
 		{
 			CHECK(MatchesPathGlob("Assets/Tests/**", "Assets/Tests/Level.scene"));
 			CHECK(MatchesPathGlob("Assets/Tests/**", "Assets/Tests/Deep/Er/Module.luau"));
@@ -39,7 +39,31 @@ namespace Engine {
 			CHECK(MatchesPathGlob("a*a*a*a*a*a*a*a*a*a*a*a/b", path));
 		}
 
-		TEST_CASE("PathGlob: the shared cases that Test.py's glob also runs" * doctest::skip(true))
+		TEST_CASE("PathGlob: '?' and '*' step over whole UTF-8 code points and an ill-formed byte counts as one")
+		{
+			// U+00F1 (2 bytes), U+20AC (3) and U+1F3B2 (4) are one character each, as Test.py's glob_regex counts them; the
+			// shared cases (Tests/Data/PathGlob/Cases.json) hold the same rule. Literal non-ASCII matches itself.
+			CHECK(MatchesPathGlob("Ni?o", "Ni\xc3\xb1o"));
+			CHECK_FALSE(MatchesPathGlob("Ni??o", "Ni\xc3\xb1o"));
+			CHECK(MatchesPathGlob("?", "\xe2\x82\xac"));
+			CHECK_FALSE(MatchesPathGlob("???", "\xe2\x82\xac"));
+			CHECK(MatchesPathGlob("?", "\xf0\x9f\x8e\xb2"));
+			CHECK_FALSE(MatchesPathGlob("*??", "\xe2\x82\xac"));
+			CHECK_FALSE(MatchesPathGlob("**??", "\xc3\xa9"));
+			CHECK(MatchesPathGlob("\xc3\xa9*", "\xc3\xa9t\xc3\xa9"));
+			// A pattern byte that splits a code point never lets a wildcard continue inside it.
+			CHECK_FALSE(MatchesPathGlob("\xc3*", "\xc3\xa9"));
+			CHECK_FALSE(MatchesPathGlob("\xc3?", "\xc3\xa9"));
+			// Bytes of ill-formed sequences (no VfsPath holds them) are one character each.
+			CHECK(MatchesPathGlob("A?", "A\xff"));
+			CHECK(MatchesPathGlob("A?", "A\x80"));
+			CHECK_FALSE(MatchesPathGlob("A?", "A\xc3("));
+			CHECK(MatchesPathGlob("A??", "A\xc3("));
+			CHECK(MatchesPathGlob("A*", "A\xe2\x82"));
+			CHECK(MatchesPathGlob("A??", "A\xe2\x82"));
+		}
+
+		TEST_CASE("PathGlob: the shared cases that Test.py's glob also runs")
 		{
 			// Tests/Data/PathGlob/Cases.json, which Tests/Automation/test_coverage_gates.py runs against Scripts/Test.py's
 			// glob_regex, so the C++ and Python matchers cannot drift apart.

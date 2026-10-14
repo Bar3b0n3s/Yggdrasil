@@ -42,6 +42,10 @@ namespace Engine {
 		bool Console = true;
 		// Entries below this level are not printed to the console; the ring buffer and the file still receive them.
 		LogLevel ConsoleLevel = LogLevel::Trace;
+		// M15 (--log-level, §13.9): entries below this level are written to neither output sink, the console (on top of
+		// ConsoleLevel) and the file; the ring buffer and the listeners still receive every entry. Log::SetOutputLevel
+		// changes it later.
+		LogLevel OutputLevel = LogLevel::Trace;
 		size_t RingBufferCapacity = RingBufferSink::DefaultCapacity;
 	};
 
@@ -74,6 +78,14 @@ namespace Engine {
 
 		// Flushes the console and file sinks (FatalError and crash paths call it).
 		static void Flush();
+
+		// M15 (--log-level, §13.9): the minimum level of the output sinks of the current initialization, the console (on top
+		// of LogSpecification::ConsoleLevel) and the file. It filters output only: the loggers keep their level, so the ring
+		// buffer and the listeners (--expect-no-errors, Test::ExpectLog) still receive every entry. Initialize starts it at
+		// LogSpecification::OutputLevel. Safe while other threads log (each sink's level is atomic); before Initialize and
+		// after Shutdown, SetOutputLevel does nothing and GetOutputLevel returns LogLevel::Trace.
+		static void SetOutputLevel(LogLevel level);
+		[[nodiscard]] static LogLevel GetOutputLevel();
 
 		// The spdlog logger of `channel`: after Initialize the registered one, otherwise the fallback logger. The reference
 		// stays valid until the next Initialize or Shutdown.

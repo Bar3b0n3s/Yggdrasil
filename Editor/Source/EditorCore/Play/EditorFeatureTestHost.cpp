@@ -5,7 +5,6 @@
 #include "EditorCore/Automation/Private/AssetMethodSupport.h"
 #include "EditorCore/Automation/ScriptMethods.h"
 #include "EditorCore/EditorContext.h"
-#include "EditorCore/Export/Private/ExportPaths.h"
 #include "EditorCore/Play/EditorPlayController.h"
 #include "EditorCore/Scripting/EditorScriptService.h"
 #include "Engine/App/EngineContext.h"
@@ -14,6 +13,7 @@
 #include "Engine/Audio/AudioEngine.h"
 #include "Engine/Automation/Methods/ScreenshotMethods.h"
 #include "Engine/Core/Hash.h"
+#include "Engine/Core/PathGlob.h"
 #include "Engine/Core/VirtualFileSystem.h"
 #include "Engine/Graphics/Image.h"
 #include "Engine/Platform/Window.h"
@@ -117,7 +117,7 @@ namespace Engine {
 				pattern.remove_prefix(10);
 			bool matched = false;
 			for (const VfsEntry& entry : entries)
-				if (!entry.Info.IsDirectory && entry.Path.GetExtension() == ".replay" && Utils::MatchesExportGlob(pattern, entry.Path.GetPath()))
+				if (!entry.Info.IsDirectory && entry.Path.GetExtension() == ".replay" && MatchesPathGlob(pattern, entry.Path.GetPath()))
 				{
 					matched = true;
 					result.emplace_back(entry.Path.GetPath());

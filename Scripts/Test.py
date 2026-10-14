@@ -17,11 +17,19 @@ Suites and the configurations the §15.8 matrix runs them in when --config is no
                                 editor bin/<OutputDir>/Editor/Editor, run by Scripts/Lib/unittest_runner.py with
                                 Tools/MCP/.venv's interpreter (Scripts/Setup.py creates it; the bridge's tests need the
                                 MCP SDK), then the method coverage gate (§15.6 gate 5, Roadmap M4)
-  determinism  Debug, Release   every Testing.Replays file of FeatureTest verified with input.replay
-                                {verify, strictHash} in the --renderer none editor of each configuration (§15.1 T3d):
-                                one step over all requested configurations, which compares their hashes (M15 adds the
-                                exported runs)
+  export       Release, Dist    FeatureTest's testing export in each configuration, run with --feature-test, its six
+                                per-mode gates, and the cross-mode union merge over the Editor, Release and Dist reports
+                                (§15.1 T3, §15.6; Docs/Decisions/0024-m15-contract.md decision 9)
+  determinism  Debug, Release,  every Testing.Replays file of FeatureTest: verified with input.replay {verify,
+               Dist             strictHash} in the --renderer none editor of Debug and Release, and read from the
+                                exported Release and Dist runs' reports (§15.1 T3d; ADR 0024 decision 10): one step
+                                over all requested configurations, which compares their hashes
   games        Release          not available yet (M16-M18)
+--config takes Debug and Release for the doctest, feature and automation suites (test executables and the editor do not
+exist in Dist), Release and Dist for the export suite, and any of the three for the determinism suite. A suite named
+in --suite must take every configuration --config names (a usage error otherwise); with the default --suite all, each
+suite runs in the requested configurations it takes and reports each other one as a "skipped" step ("not run in
+<Config>"), so `--config Debug` runs every suite that has a Debug run.
 A suite that does not exist yet is reported with the distinct status "not-available"; it neither passes nor fails.
 
 GPU and golden runs (Docs/Decisions/0009-m5-decisions.md decision 14): a test case without a usable Vulkan device passes
@@ -59,8 +67,10 @@ decision 16):
     --require-gpu (ENGINE_AUTOMATION_REQUIRE_GPU=1 for the tests) they fail instead.
 
 The feature suite (Docs/Decisions/0022-m14-contract.md decision 7) runs `Editor --headless --project
-Projects/FeatureTest --run-tests --audio-device none --expect-no-gpu-errors --junit <report>` per configuration, with
---user-data-dir in a temporary directory. With --junit the report is bin/TestResults/Feature-<Config>.xml and the
+Projects/FeatureTest --run-tests --strict --audio-device none --expect-no-gpu-errors --junit <report>` per
+configuration, with --user-data-dir in a temporary directory. --strict reads the committed project strictly: an unknown
+field or component in its .eproj, scenes or prefabs is an error, not a warning (Architecture §6); the export and
+determinism suites' editors take it too. With --junit the report is bin/TestResults/Feature-<Config>.xml and the
 editor's JSON report lands beside it as Feature-<Config>.json; without it both live in a temporary directory that is
 removed. It fails, printing one "UNCOVERED gate <g> (Editor): <id>" line per gap, when the editor exits non-zero, when
 any of the gates 1, 1b, 2, 3, 4 and 9 is absent, unevaluated or failed, when a case row is skipped, and when any file
@@ -68,17 +78,59 @@ under Projects/FeatureTest outside Library/ differs from a byte snapshot taken b
 GPU baker, so the run needs a Vulkan device: without one it prints the GPU suite's no-device line and passes without
 running, as a warning, unless --require-gpu is given (Scripts/Lib/coverage.py reads and evaluates the report).
 
-The determinism suite (decision 7, §15.1 T3d) copies Projects/FeatureTest without Library/ into a temporary directory
-for each configuration, starts `Editor --headless --renderer none --audio-device none --automation` on it and runs
-input.replay {path, verify: true, strictHash: true} for every file Testing.Replays matches (the editor's glob rules). A
-replay fails when its verification fails, when its hash differs from its committed FinalStateHash, or, when two
-configurations ran, when their hashes differ. It needs no GPU. With --junit it writes bin/TestResults/Determinism.xml,
-one test case per replay. A project whose Testing.Replays matches nothing ends as a warning.
+The export suite (Docs/Decisions/0024-m15-contract.md decision 9) needs a Vulkan device, like the feature suite: without
+one it prints the no-device line and passes without running, as a warning, unless --require-gpu is given. It copies
+Projects/FeatureTest with Library/ into a temporary directory, starts the Release editor on the copy (`--headless
+--renderer vulkan --audio-device none --automation --strict`) and, per configuration, calls project.export {config,
+testing: true}, moves the package to bin/Exports/<Config>/FeatureTest/ (Scripts/Lib/exports.py) and runs
+`<package>/FeatureTest --headless --feature-test` (Release adds --expect-no-gpu-errors). With --junit the run's working
+directory is the repository root, so its reports are bin/TestResults/FeatureTest-<Config>.{json,xml}; without it, a
+temporary directory. A configuration fails when the export or the run fails (printing the end of
+<package>/bin/TestUserData/FeatureTest/Logs/FeatureTest.log), when the run's user data is not in
+<package>/bin/TestUserData/FeatureTest or a folder named after the product exists beside it, when
+coverage.evaluate_feature_report against the configuration's own mode fails ("UNCOVERED gate <g> (<Mode>): <id>"
+lines), and when the report's Api.Debug suite row does not count exactly one break (exports.debug_break_failures:
+Debug.Break stays a counted no-op in the shipping binary, ADR 0024 decision 6). With both configurations, the "merge
+coverage" step merges the Editor report (--editor-report, default bin/TestResults/Feature-Release.json) with both
+exported ones and prints one "merge: <rule>: <subject>" line per failure; an Editor report older than the Release editor
+or a FeatureTest file outside Library/ (or missing) fails with exit code 3 naming `Test.py --suite feature --config
+Release --junit`, which is never rerun here. With --junit it writes bin/TestResults/Export.xml: "export <Config>" per
+configuration and "merge coverage".
+
+The determinism suite (ADR 0022 decision 7, ADR 0024 decision 10, §15.1 T3d) has four runs (exports.DETERMINISM_RUNS):
+Debug selects Editor Debug, Release Editor Release and Exported Release, Dist Exported Dist. Each editor run copies
+Projects/FeatureTest without Library/ into a temporary directory, starts `Editor --headless --renderer none
+--audio-device none --automation --strict` on it and runs input.replay {path, verify: true, strictHash: true} for every
+file Testing.Replays matches (the editor's glob rules); it needs no GPU. An exported run reads the "replay:<path>" rows
+of bin/TestResults/FeatureTest-<Config>.json, which the export suite of the same tree wrote, and is never rerun: a
+report older than the <Config> Runtime, the Release editor or a FeatureTest file outside Library/ (or missing) fails the
+step with exit code 3 naming `Test.py --suite export --junit` under --require-gpu, and otherwise leaves that run out of
+the comparison with the reason, as a warning. A replay fails when an editor run's verification fails, when a run has no
+hash, when a hash differs from the committed FinalStateHash, or when the runs disagree. With --junit it writes
+bin/TestResults/Determinism.xml, one test case per replay, whose failure lists each run's hash. A project whose
+Testing.Replays matches nothing ends as a warning.
 
 --merge-coverage <Editor.json> <Release.json> <Dist.json> runs only the cross-mode union merge of §15.6
 (coverage.merge_coverage, decision 6) and prints one "merge: <rule>: <subject>" line per failure; it exits 0 when the
 union covers every registered entry and every report passed, 1 otherwise. A report that does not exist or cannot be read
 is a mode without a report: "merge: report: <mode>" for its position, exit 1.
+
+Sanitized runs (the hardening stage, Docs/Decisions/0024-m15-contract.md decision 12): --build-root <dir> takes the
+executables from <dir>/<OutputDir>/ instead of bin/<OutputDir>/ (the AddressSanitizer workspace builds into
+bin-int/Asan/bin), and --sanitizer address gives every process the suite starts the AddressSanitizer environment
+(Scripts/Lib/hardening.py asan_environment: ASAN_OPTIONS and the runtime's directory first on PATH, so the sanitized
+executables and every child they start load MSVC's runtime; exit code 3 when the runtime is missing). The step names
+gain " (ASan)" and the reports the suffix -Asan (Unit-Release-Asan.xml, Feature-Release-Asan.{xml,json}); every
+"ERROR: AddressSanitizer:" line a process prints is collected into the step's detail and fails the step.
+--test-timeout-scale <s> passes --test-timeout-scale=<s> to the Tests binary, which multiplies every per-test-case
+limit. --fuzz-scale <s> passes --fuzz-scale=<s> to the unit suite's Tests runs (each fuzz case runs round(count * s)
+iterations, at least its minimum, Tests/Source/Support/Fuzz.h). Without it the Debug unit run passes --fuzz-scale=0.1,
+so it executes the first tenth of each fuzz case's sequence, and the Release unit run passes none and executes every
+count (the product owner's decision, Docs/Decisions/0024-m15-contract.md decision 14; the hardening stage runs
+1,000,000 per reader).
+--exclude-test-suites <names> leaves those doctest test suites out of the unit suite's Tests runs, besides GPU and
+Golden: the hardening stage's sanitized unit run leaves out Fuzz, whose cases its fuzz step runs over a superset of the
+same iterations.
 
 --junit writes bin/TestResults/<Suite>-<Config>[-<Cap>].xml (JUnit; test suite named "<Suite>.<Config>[.<Cap>]", where
 <Cap> is Vulkan13 or Vulkan14 for the gpu suite; the automation suite has one test suite per test directory and one for
@@ -88,8 +140,8 @@ doctest's console reporter. If the test process dies before writing it, a JUnit 
 the crash.
 
 Exit codes: 0 every requested suite that exists passed, 1 a suite failed or none of the requested suites exists
-yet, 2 usage error, 3 a test executable or the MCP virtual environment is missing (build it, or run Setup.py),
-5 timeout.
+yet, 2 usage error, 3 a test executable or the MCP virtual environment is missing (build it, or run Setup.py), or a
+report the export or determinism suite reads is missing or stale (run the suite that writes it), 5 timeout.
 """
 
 from __future__ import annotations
@@ -115,7 +167,7 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
-from Lib import coverage, paths
+from Lib import coverage, exports, hardening, paths
 from Lib.process import (
     ToolNotFoundError,
     child_environment,
@@ -135,6 +187,7 @@ from Lib.report import (
     configure_stdio,
     emit_json,
     overall_exit_code,
+    write_junit,
 )
 
 SUITE_TIMEOUT_SECONDS = 1800.0
@@ -169,9 +222,18 @@ GOLDEN_PATTERN = re.compile(
     r"Golden image '(?P<name>[^']+)' on device class '(?P<device>[^']+)'"
     r"(?::\s(?P<event>matched|goldens missing|wrote the candidate)|\s(?P<mismatch>does not match))"
 )
+# The first line of every AddressSanitizer report ("==1234==ERROR: AddressSanitizer: heap-buffer-overflow on ...").
+SANITIZER_ERROR_PATTERN = re.compile(r"ERROR: AddressSanitizer: .*$")
 REPORTED_LINES_PATTERN = re.compile(
-    f"{NO_DEVICE_PATTERN.pattern}|{HOST_COPY_SKIP_PATTERN.pattern}|{GOLDEN_PATTERN.pattern}"
+    f"{NO_DEVICE_PATTERN.pattern}|{HOST_COPY_SKIP_PATTERN.pattern}|{GOLDEN_PATTERN.pattern}|"
+    f"{SANITIZER_ERROR_PATTERN.pattern}"
 )
+# --sanitizer: the sanitizers Test.py knows, with the label of their step names and the suffix of their report stems.
+SANITIZERS = {"address": ("ASan", "Asan")}
+# The --fuzz-scale of the unit runs that pass no --fuzz-scale, by configuration (Docs/Decisions/0024-m15-contract.md
+# decision 14, approved by the product owner): Debug executes the first tenth of each fuzz case's sequence (at least its
+# minimum); Release, absent here, executes every count.
+DEFAULT_FUZZ_SCALES = {"Debug": 0.1}
 
 # The automation suite (§15.7): its test directories, the runner, and the environment the tests read.
 AUTOMATION_TEST_DIRECTORIES = (paths.REPOSITORY_ROOT / "Tests" / "Automation",
@@ -202,6 +264,28 @@ FAILURES_IN_DETAIL = 3
 DETERMINISM_REPORT_STEM = "Determinism"
 EDITOR_SHUTDOWN_TIMEOUT_SECONDS = 60.0
 
+# The export suite (Docs/Decisions/0024-m15-contract.md decision 9): its JUnit file, the options of the exporting editor
+# (a rendering one: the FeatureTest export bakes Gradient.hdr), the project lock file a copy leaves out, the Editor
+# report its merge reads by default, the name of the merge step and the lines of a failed run's log it prints.
+EXPORT_REPORT_STEM = "Export"
+# The feature, determinism and export suites read the committed FeatureTest strictly: unknown fields and components in
+# its .eproj, scenes and prefabs are errors instead of warnings (Architecture §6; the editor reads every project it
+# opens so, through --project and project.open alike).
+STRICT_EDITOR_ARGUMENT = "--strict"
+EXPORT_EDITOR_ARGUMENTS = ("--headless", "--renderer", "vulkan", "--audio-device", "none", "--automation",
+                           STRICT_EDITOR_ARGUMENT)
+DETERMINISM_EDITOR_ARGUMENTS = ("--headless", "--renderer", "none", "--audio-device", "none", "--automation",
+                                STRICT_EDITOR_ARGUMENT)
+PROJECT_LOCK_FILE = "Editor.lock"
+DEFAULT_EDITOR_REPORT = paths.TEST_RESULTS_ROOT / "Feature-Release.json"
+MERGE_STEP_NAME = "merge coverage"
+LOG_TAIL_LINES = 40
+
+
+# The configurations whose binaries the doctest, feature and automation suites run: test executables and the editor do
+# not exist in Dist (§2.2).
+DEVELOPMENT_CONFIGURATIONS = ("Debug", "Release")
+
 
 @dataclasses.dataclass(frozen=True)
 class Suite:
@@ -209,6 +293,7 @@ class Suite:
     configurations: tuple[str, ...]  # the §15.8 matrix
     available: bool
     planned: str = ""  # where an unavailable suite lands (Docs/Roadmap.md)
+    allowed: tuple[str, ...] = DEVELOPMENT_CONFIGURATIONS  # the configurations --config may name for it
 
 
 SUITES = {
@@ -219,7 +304,8 @@ SUITES = {
         Suite("golden", ("Release",), True),
         Suite("feature", ("Debug", "Release"), True),
         Suite("automation", ("Release",), True),
-        Suite("determinism", ("Debug", "Release"), True),
+        Suite("export", exports.EXPORTED_CONFIGURATIONS, True, allowed=exports.EXPORTED_CONFIGURATIONS),
+        Suite("determinism", ("Debug", "Release", "Dist"), True, allowed=paths.CONFIGURATIONS),
         Suite("games", ("Release",), False, "M16-M18 (demo games)"),
     )
 }
@@ -234,22 +320,57 @@ class TestRun:
     filters: tuple[str, ...]  # the doctest filters that select the suite's test cases
     options: tuple[str, ...] = ()  # Tests options of the run (--vulkan-api=1.3, --require-gpu, --update-golden)
     cap: str = ""  # the gpu suite's API cap ("1.3" or "1.4")
+    sanitizer: str = ""  # --sanitizer of the run ("address"), or empty
 
     @property
     def name(self) -> str:
-        return f"{self.suite} {self.config}" + (f" (Vulkan {self.cap})" if self.cap else "")
+        return (f"{self.suite} {self.config}" + (f" (Vulkan {self.cap})" if self.cap else "")
+                + sanitizer_name_suffix(self.sanitizer))
 
     @property
     def report_stem(self) -> str:
-        return "-".join([self.suite.capitalize(), self.config, *([cap_label(self.cap)] if self.cap else [])])
+        return "-".join([self.suite.capitalize(), self.config, *([cap_label(self.cap)] if self.cap else []),
+                         *([SANITIZERS[self.sanitizer][1]] if self.sanitizer else [])])
 
     @property
     def junit_suite_name(self) -> str:
-        return ".".join([self.suite.capitalize(), self.config, *([cap_label(self.cap)] if self.cap else [])])
+        return ".".join([self.suite.capitalize(), self.config, *([cap_label(self.cap)] if self.cap else []),
+                         *([SANITIZERS[self.sanitizer][1]] if self.sanitizer else [])])
 
 
 def cap_label(cap: str) -> str:
     return "Vulkan" + cap.replace(".", "")
+
+
+def sanitizer_name_suffix(sanitizer: str | None) -> str:
+    """" (ASan)" for a sanitized run's step name, empty otherwise."""
+    return f" ({SANITIZERS[sanitizer][0]})" if sanitizer else ""
+
+
+def sanitizer_stem_suffix(sanitizer: str | None) -> str:
+    """"-Asan" for a sanitized run's report stem, empty otherwise."""
+    return f"-{SANITIZERS[sanitizer][1]}" if sanitizer else ""
+
+
+def suite_environment(arguments: argparse.Namespace, extra: dict[str, str] | None = None) -> dict[str, str]:
+    """The environment of every process the suite starts: child_environment(extra), plus with --sanitizer the
+    AddressSanitizer environment (hardening.asan_environment). Raises FileNotFoundError when the runtime is missing."""
+    environment = child_environment(extra)
+    if getattr(arguments, "sanitizer", None):
+        environment = hardening.asan_environment(environment)
+    return environment
+
+
+def missing_sanitizer_runtime(name: str, error: FileNotFoundError) -> Step:
+    return Step(name, Status.FAILED, f"the AddressSanitizer runtime is missing: {error}", exit_code=EXIT_INIT_FAILED)
+
+
+def describe_sanitizer_errors(lines: list[str]) -> str:
+    """The step detail's part for the "ERROR: AddressSanitizer:" lines a run printed: their count and the first one."""
+    reports = [match.group(0) for match in map(SANITIZER_ERROR_PATTERN.search, lines) if match]
+    if not reports:
+        return ""
+    return f"{len(reports)} AddressSanitizer report(s), first: {reports[0]}"
 
 
 @dataclasses.dataclass
@@ -359,15 +480,17 @@ def describe_names(names: set[str] | list[str]) -> str:
     return shown + (f" and {more} more" if more > 0 else "")
 
 
-def list_skipped_test_cases(executable: Path, filters: list[str]) -> SkipCheck:
+def list_skipped_test_cases(executable: Path, filters: list[str],
+                            environment: dict[str, str] | None = None) -> SkipCheck:
     """Ask the Tests binary which test cases `filters` select, skipped ones included (--no-skip). doctest's XML
     reporter gives each <TestCase> its suite and its doctest::skip flag; the listing goes to a file (--out), so the log
-    on stderr never interleaves with it."""
+    on stderr never interleaves with it. `environment` is the suite's (default: child_environment())."""
     with tempfile.TemporaryDirectory(prefix="Test-SkipCheck-") as directory:
         listing = Path(directory) / "TestCases.xml"
         command = [str(executable), *filters, "--no-skip", "--list-test-cases", "--reporters=xml", f"--out={listing}"]
         try:
-            result = run_captured(command, cwd=paths.REPOSITORY_ROOT, env=child_environment(),
+            result = run_captured(command, cwd=paths.REPOSITORY_ROOT,
+                                  env=environment if environment is not None else child_environment(),
                                   timeout=LISTING_TIMEOUT_SECONDS)
         except ToolNotFoundError as error:
             raise SkipCheckError(str(error)) from error
@@ -390,8 +513,9 @@ def describe_unexpected_skips(skips: SkipCheck) -> str:
     return names + (f" and {more} more" if more > 0 else "")
 
 
-def tests_executable(config: str) -> Path:
-    return paths.output_directory(config) / "Tests" / paths.executable_name("Tests")
+def tests_executable(config: str, build_root: Path = paths.BIN_ROOT) -> Path:
+    """<build root>/<OutputDir>/Tests/Tests: the repository's bin/ by default, --build-root otherwise."""
+    return build_root / paths.output_directory_name(config) / "Tests" / paths.executable_name("Tests")
 
 
 def junit_path(report_stem: str) -> Path:
@@ -443,23 +567,46 @@ def write_crash_junit(path: Path, suite_name: str, message: str, output_tail: st
 def plan_runs(suite: str, config: str, arguments: argparse.Namespace) -> list[TestRun]:
     """The Tests runs of `suite` in `config`: one, except for the gpu suite, which runs once per API cap."""
     gpu_options = ("--require-gpu",) if arguments.require_gpu else ()
+    sanitizer = getattr(arguments, "sanitizer", None) or ""
+    timeout_scale = getattr(arguments, "test_timeout_scale", None)
+    common = (f"--test-timeout-scale={timeout_scale:g}",) if timeout_scale else ()
     if suite == "unit":
-        return [TestRun(suite, config, (f"--test-suite-exclude={UNIT_EXCLUDED_TEST_SUITES}",))]
+        fuzz_scale = getattr(arguments, "fuzz_scale", None) or DEFAULT_FUZZ_SCALES.get(config)
+        fuzz_options = (f"--fuzz-scale={fuzz_scale:g}",) if fuzz_scale else ()
+        excluded = ",".join([UNIT_EXCLUDED_TEST_SUITES, *(getattr(arguments, "exclude_test_suites", None) or [])])
+        return [TestRun(suite, config, (f"--test-suite-exclude={excluded}",), (*common, *fuzz_options),
+                        sanitizer=sanitizer)]
     if suite == "gpu":
         caps = [arguments.vulkan_api] if arguments.vulkan_api else list(VULKAN_API_CAPS)
-        return [TestRun(suite, config, (f"--test-suite={GPU_TEST_SUITE}",), (f"--vulkan-api={cap}", *gpu_options), cap)
-                for cap in caps]
+        return [TestRun(suite, config, (f"--test-suite={GPU_TEST_SUITE}",),
+                        (f"--vulkan-api={cap}", *gpu_options, *common), cap, sanitizer) for cap in caps]
     if suite == "golden":
         golden_options = ("--update-golden",) if arguments.update_golden else ()
-        return [TestRun(suite, config, (f"--test-suite={GOLDEN_TEST_SUITE}",), (*gpu_options, *golden_options))]
+        return [TestRun(suite, config, (f"--test-suite={GOLDEN_TEST_SUITE}",), (*gpu_options, *golden_options, *common),
+                        sanitizer=sanitizer)]
     raise ValueError(f"no runs for suite '{suite}'")
 
 
+def build_hint(config: str, project: str, arguments: argparse.Namespace) -> str:
+    """How to build a missing executable: Build.py for the repository's bin/, the workspace of --build-root
+    otherwise."""
+    build_root = getattr(arguments, "build_root", paths.BIN_ROOT)
+    if build_root.resolve() == paths.BIN_ROOT.resolve():
+        return f"run python Scripts/Build.py --config {config} --project {project}"
+    return (f"build the workspace whose bin/ is {paths.display_path(build_root)} (python Scripts/Build.py "
+            f"--workspace-dir {paths.display_path(build_root.parent)} --config {config})")
+
+
 def run_tests(run: TestRun, arguments: argparse.Namespace, console: Console) -> Step:
-    executable = tests_executable(run.config)
+    executable = tests_executable(run.config, arguments.build_root)
     if not executable.is_file():
-        return Step(run.name, Status.FAILED, f"{paths.display_path(executable)} not found: run python Scripts/Build.py "
-                                             f"--config {run.config} --project Tests", exit_code=EXIT_INIT_FAILED)
+        return Step(run.name, Status.FAILED, f"{paths.display_path(executable)} not found: "
+                                             f"{build_hint(run.config, 'Tests', arguments)}",
+                    exit_code=EXIT_INIT_FAILED)
+    try:
+        environment = suite_environment(arguments)
+    except FileNotFoundError as error:
+        return missing_sanitizer_runtime(run.name, error)
     filters = list(run.filters)
     if arguments.filter:
         filters.append(f"--test-case={arguments.filter}")
@@ -472,7 +619,7 @@ def run_tests(run: TestRun, arguments: argparse.Namespace, console: Console) -> 
 
     console.heading(f"{run.name}: {format_command([paths.display_path(executable), *filters, *run.options])}")
     try:
-        result = run_streamed(command, cwd=paths.REPOSITORY_ROOT, env=child_environment(), timeout=arguments.timeout,
+        result = run_streamed(command, cwd=paths.REPOSITORY_ROOT, env=environment, timeout=arguments.timeout,
                               echo=console.stream, collect=REPORTED_LINES_PATTERN)
     except ToolNotFoundError as error:
         return Step(run.name, Status.FAILED, str(error), exit_code=EXIT_INIT_FAILED)
@@ -480,6 +627,13 @@ def run_tests(run: TestRun, arguments: argparse.Namespace, console: Console) -> 
     data: dict[str, object] = {"suite": run.suite, "config": run.config, "executable": paths.display_path(executable)}
     if run.cap:
         data["vulkanApi"] = run.cap
+    if run.sanitizer:
+        data["sanitizer"] = run.sanitizer
+    sanitizer_errors = [line for line in result.collected if SANITIZER_ERROR_PATTERN.search(line)]
+    if sanitizer_errors:
+        data["sanitizerErrors"] = sanitizer_errors
+        for line in sanitizer_errors:
+            console.print(f"SANITIZER: {line.strip()}")
     counts: TestCounts | None = None
     if report is not None:
         data["junit"] = paths.display_path(report)
@@ -517,7 +671,7 @@ def run_tests(run: TestRun, arguments: argparse.Namespace, console: Console) -> 
     skips: SkipCheck | None = None
     skip_error = ""
     try:
-        skips = list_skipped_test_cases(executable, filters)
+        skips = list_skipped_test_cases(executable, filters, environment)
         data["skipCheck"] = skips.to_json(arguments.allow_skips)
         if not arguments.allow_skips:
             for skipped_case in skips.unexpected:
@@ -527,11 +681,13 @@ def run_tests(run: TestRun, arguments: argparse.Namespace, console: Console) -> 
         data["skipCheck"] = {"error": skip_error, "allowed": arguments.allow_skips}
         console.print(skip_error)
 
-    if result.exit_code != 0:
+    if result.exit_code != 0 or sanitizer_errors:
         if counts is not None and counts.failed:
             detail = f"{counts.failed} of {counts.executed} test case(s) failed"
         else:
             detail = f"Tests exited with code {describe_exit_code(result.exit_code)}"
+        if sanitizer_errors:
+            detail += f"; {describe_sanitizer_errors(sanitizer_errors)}"
         if device.mismatched:
             detail += f"; golden mismatches: {describe_names(device.mismatched)} (outputs in bin/TestResults/Golden/)"
         return Step(run.name, Status.FAILED, detail, result.duration, data=data)
@@ -570,8 +726,9 @@ def run_tests(run: TestRun, arguments: argparse.Namespace, console: Console) -> 
     return Step(run.name, Status.PASSED, detail, result.duration, data=data)
 
 
-def editor_executable(config: str) -> Path:
-    return paths.output_directory(config) / "Editor" / paths.executable_name("Editor")
+def editor_executable(config: str, build_root: Path = paths.BIN_ROOT) -> Path:
+    """<build root>/<OutputDir>/Editor/Editor: the repository's bin/ by default, --build-root otherwise."""
+    return build_root / paths.output_directory_name(config) / "Editor" / paths.executable_name("Editor")
 
 
 def venv_interpreter() -> Path:
@@ -736,13 +893,15 @@ def run_automation(config: str, arguments: argparse.Namespace, console: Console)
 # --------------------------------------------------------------------------------------------------------------------
 
 
-def probe_rendering_editor(editor: Path) -> str | None:
+def probe_rendering_editor(editor: Path, environment: dict[str, str] | None = None) -> str | None:
     """None when a headless editor can create its device here (`Editor --headless --frames 1` with the GPU test options
-    exits 0); otherwise why not: its exit code and the last error line it printed (Tests/Automation/harness.py)."""
+    exits 0); otherwise why not: its exit code and the last error line it printed (Tests/Automation/harness.py).
+    `environment` is the suite's (default: child_environment())."""
     with tempfile.TemporaryDirectory(prefix="Test-GpuProbe-") as directory:
         command = [str(editor), "--headless", "--frames", "1", *GPU_PROBE_ARGUMENTS, f"--user-data-dir={directory}"]
         try:
-            result = run_captured(command, cwd=paths.REPOSITORY_ROOT, env=child_environment(),
+            result = run_captured(command, cwd=paths.REPOSITORY_ROOT,
+                                  env=environment if environment is not None else child_environment(),
                                   timeout=GPU_PROBE_TIMEOUT_SECONDS)
         except ToolNotFoundError as error:
             return f"the editor could not run its device probe: {error}"
@@ -787,17 +946,31 @@ def describe_lines(lines: list[str]) -> str:
     return shown + (f" and {more} more" if more > 0 else "")
 
 
+def feature_command(editor: Path, report: Path, user_data: Path) -> list[str]:
+    """The feature suite's FeatureTest run: the committed project in editor mode, read strictly (Editor --strict:
+    unknown fields and components in its .eproj, scenes and prefabs are errors, Architecture §6)."""
+    return [str(editor), "--headless", "--project", str(FEATURE_PROJECT), "--run-tests", STRICT_EDITOR_ARGUMENT,
+            "--audio-device", "none", "--expect-no-gpu-errors", "--junit", str(report), f"--user-data-dir={user_data}"]
+
+
 def run_feature(config: str, arguments: argparse.Namespace, console: Console) -> Step:
     """FeatureTest in editor mode: the run, the six per-mode gates of its report, no skipped case and an unchanged
     project (ADR 0022 decision 7)."""
-    name = f"feature {config}"
-    editor = editor_executable(config)
+    sanitizer = getattr(arguments, "sanitizer", None)
+    name = f"feature {config}{sanitizer_name_suffix(sanitizer)}"
+    editor = editor_executable(config, arguments.build_root)
     if not editor.is_file():
-        return Step(name, Status.FAILED, f"{paths.display_path(editor)} not found: run python Scripts/Build.py "
-                                         f"--config {config} --project Editor", exit_code=EXIT_INIT_FAILED)
+        return Step(name, Status.FAILED, f"{paths.display_path(editor)} not found: "
+                                         f"{build_hint(config, 'Editor', arguments)}", exit_code=EXIT_INIT_FAILED)
+    try:
+        environment = suite_environment(arguments)
+    except FileNotFoundError as error:
+        return missing_sanitizer_runtime(name, error)
     data: dict[str, object] = {"suite": "feature", "config": config, "editor": paths.display_path(editor),
                                "project": paths.display_path(FEATURE_PROJECT)}
-    reason = probe_rendering_editor(editor)
+    if sanitizer:
+        data["sanitizer"] = sanitizer
+    reason = probe_rendering_editor(editor, environment)
     if reason is not None:
         data["noDevice"] = reason
         if arguments.require_gpu:
@@ -807,22 +980,23 @@ def run_feature(config: str, arguments: argparse.Namespace, console: Console) ->
                                           f"--require-gpu fails instead", data=data)
 
     with tempfile.TemporaryDirectory(prefix="Test-Feature-") as directory:
-        report = junit_path(f"Feature-{config}") if arguments.junit else Path(directory) / f"Feature-{config}.xml"
+        stem = f"Feature-{config}{sanitizer_stem_suffix(sanitizer)}"
+        report = junit_path(stem) if arguments.junit else Path(directory) / f"{stem}.xml"
         json_report = report.with_suffix(".json")
         report.parent.mkdir(parents=True, exist_ok=True)
         report.unlink(missing_ok=True)
         json_report.unlink(missing_ok=True)
-        command = [str(editor), "--headless", "--project", str(FEATURE_PROJECT), "--run-tests",
-                   "--audio-device", "none", "--expect-no-gpu-errors", "--junit", str(report),
-                   f"--user-data-dir={Path(directory) / 'UserData'}"]
+        command = feature_command(editor, report, Path(directory) / "UserData")
         console.heading(f"{name}: {format_command([paths.display_path(editor), *command[1:]])}")
         before = snapshot_project(FEATURE_PROJECT)
         try:
-            result = run_streamed(command, cwd=paths.REPOSITORY_ROOT, env=child_environment(),
-                                  timeout=arguments.timeout, echo=console.stream)
+            result = run_streamed(command, cwd=paths.REPOSITORY_ROOT, env=environment,
+                                  timeout=arguments.timeout, echo=console.stream, collect=SANITIZER_ERROR_PATTERN)
         except ToolNotFoundError as error:
             return Step(name, Status.FAILED, str(error), exit_code=EXIT_INIT_FAILED, data=data)
         changes = compare_snapshots(before, snapshot_project(FEATURE_PROJECT))
+        if result.collected:
+            data["sanitizerErrors"] = result.collected
         if arguments.junit:
             data["junit"] = paths.display_path(report)
             data["json"] = paths.display_path(json_report)
@@ -833,6 +1007,8 @@ def run_feature(config: str, arguments: argparse.Namespace, console: Console) ->
         failures: list[str] = []
         if result.exit_code != EXIT_SUCCESS:
             failures.append(f"the editor {result.describe_exit()}")
+        if result.collected:
+            failures.append(describe_sanitizer_errors(result.collected))
         try:
             feature = coverage.read_feature_report(json_report)
             data.update({"cases": len(json.loads(json_report.read_text(encoding="utf-8"))["cases"]),
@@ -858,13 +1034,265 @@ def run_feature(config: str, arguments: argparse.Namespace, console: Console) ->
 
 
 # --------------------------------------------------------------------------------------------------------------------
+# The export suite (ADR 0024 decision 9)
+# --------------------------------------------------------------------------------------------------------------------
+
+
+@dataclasses.dataclass
+class ExportedRun:
+    """One configuration of the export suite: its step and its run's report (None when none could be read)."""
+
+    step: Step
+    report: coverage.FeatureReport | None = None
+
+
+def tail_lines(path: Path, count: int) -> str:
+    """The last `count` lines of the text file `path`, or why it cannot be read."""
+    try:
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError as error:
+        return f"({paths.display_path(path)} cannot be read: {error})"
+    return "\n".join(lines[-count:])
+
+
+def describe_export_error(error: Any) -> str:
+    """An engine_client.EngineError of project.export: its detail and each issue's pointer and message."""
+    issues = [f"{issue.get('pointer', '') or '(root)'}: {issue.get('message', '')}" for issue in error.issues
+              if isinstance(issue, dict)]
+    return error.detail + (f" ({'; '.join(issues)})" if issues else "")
+
+
+def install_package(output: Path, config: str) -> Path:
+    """Moves the export in `output` to exports.package_directory(config), replacing an earlier one; returns the package
+    directory. Raises OSError when the earlier package cannot be removed or the move fails."""
+    package = exports.package_directory(config)
+    if package.exists():
+        shutil.rmtree(package)
+    package.parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(output), str(package))
+    return package
+
+
+def check_testing_user_data(package: Path, name: str = exports.FEATURE_TEST_NAME) -> list[str]:
+    """The user-data failures of a --feature-test run of the package of the game `name` in `package` (ADR 0024 decision
+    9 step 4, the Dist half of "Export: user data goes to the manifest Name folder"): its log must be in
+    exports.testing_user_data(package, name), and no folder named after the product may exist beside that one."""
+    user_data = exports.testing_user_data(package, name)
+    failures: list[str] = []
+    log = user_data / "Logs" / f"{name}.log"
+    if not log.is_file():
+        failures.append(f"the run wrote no {paths.display_path(log)}")
+    product = user_data.parent / paths.workspace_name()
+    if product.exists():
+        failures.append(f"the run wrote user data under the product's name ({paths.display_path(product)})")
+    return failures
+
+
+def run_export_configuration(client: Any, engine_client: Any, config: str, arguments: argparse.Namespace,
+                             console: Console, reports: Path) -> ExportedRun:
+    """One configuration of the export suite on the editor `client` drives: the testing export, its package moved to
+    bin/Exports/<config>/FeatureTest, the package's --feature-test run with its reports in `reports`/bin/TestResults,
+    the run's user data, the evaluation of its report against the configuration's own mode and its counted
+    Debug.Break."""
+    name = f"export {config}"
+    data: dict[str, object] = {"suite": "export", "config": config}
+    started = time.monotonic()
+    console.heading(f"{name}: project.export {{config: {config}, testing: true}}")
+    try:
+        result = client.call("project.export", {"config": config, "testing": True}, timeout=arguments.timeout)
+    except engine_client.EngineError as error:
+        return ExportedRun(Step(name, Status.FAILED, f"project.export failed: {describe_export_error(error)}",
+                                time.monotonic() - started, data=data))
+    except TimeoutError as error:
+        return ExportedRun(Step(name, Status.TIMEOUT, f"project.export did not finish: {error}",
+                                time.monotonic() - started, data=data))
+    data.update({"files": len(result.get("files", [])), "testSuites": result.get("testSuiteCount"),
+                 "replays": result.get("replayCount")})
+    try:
+        package = install_package(Path(result["outputDirectory"]), config)
+    except OSError as error:
+        destination = paths.display_path(exports.package_directory(config))
+        return ExportedRun(Step(name, Status.FAILED, f"cannot move the export to {destination}: {error}",
+                                time.monotonic() - started, data=data))
+    executable = exports.package_executable(package)
+    data["package"] = paths.display_path(package)
+    if not executable.is_file():
+        return ExportedRun(Step(name, Status.FAILED, f"the package holds no {paths.display_path(executable)}",
+                                time.monotonic() - started, data=data))
+
+    # The run's working directory decides where its reports go (ADR 0022 decision 7): <working>/bin/TestResults.
+    json_report = reports / "bin" / "TestResults" / f"{exports.FEATURE_TEST_NAME}-{config}.json"
+    json_report.unlink(missing_ok=True)
+    json_report.with_suffix(".xml").unlink(missing_ok=True)
+    command = [str(executable), "--headless", "--feature-test",
+               *(["--expect-no-gpu-errors"] if config != "Dist" else [])]
+    console.heading(f"{name}: {format_command([paths.display_path(executable), *command[1:]])}")
+    try:
+        run = run_streamed(command, cwd=reports, env=child_environment(), timeout=arguments.timeout,
+                           echo=console.stream)
+    except ToolNotFoundError as error:
+        return ExportedRun(Step(name, Status.FAILED, str(error), time.monotonic() - started, data=data))
+    data["report"] = paths.display_path(json_report)
+    log = exports.testing_user_data(package) / "Logs" / f"{exports.FEATURE_TEST_NAME}.log"
+    if run.timed_out:
+        console.print(tail_lines(log, LOG_TAIL_LINES))
+        return ExportedRun(Step(name, Status.TIMEOUT, f"the {config} FeatureTest run {run.describe_exit()}",
+                                time.monotonic() - started, data=data))
+
+    failures: list[str] = []
+    if run.exit_code != EXIT_SUCCESS:
+        failures.append(f"the {config} FeatureTest run {run.describe_exit()}")
+        console.print(f"The end of {paths.display_path(log)}:")
+        console.print(tail_lines(log, LOG_TAIL_LINES))
+    failures += check_testing_user_data(package)
+    report: coverage.FeatureReport | None = None
+    try:
+        report = coverage.read_feature_report(json_report)
+        failures += coverage.evaluate_feature_report(report, expected_mode=config)
+        failures += exports.debug_break_failures(json_report)
+    except ValueError as error:
+        failures.append(f"no readable report: {error}")
+    duration = time.monotonic() - started
+    for failure in failures:
+        console.print(failure if failure.startswith("UNCOVERED ") else f"FAILED: {failure}")
+    if failures:
+        data["failures"] = failures
+        uncovered = [line for line in failures if line.startswith("UNCOVERED ")]
+        other = [line for line in failures if not line.startswith("UNCOVERED ")]
+        parts = ([describe_lines(other)] if other else []) + ([f"{len(uncovered)} uncovered entr"
+                                                               f"{'y' if len(uncovered) == 1 else 'ies'} "
+                                                               f"({describe_lines(uncovered)})"] if uncovered else [])
+        return ExportedRun(Step(name, Status.FAILED, "; ".join(parts), duration, data=data), report)
+    return ExportedRun(Step(name, Status.PASSED, f"the testing export ({data['testSuites']} suite(s), "
+                                                 f"{data['replays']} replay(s)) passed --feature-test with the six "
+                                                 f"{config}-mode gates evaluated and green; user data in "
+                                                 f"{paths.display_path(exports.testing_user_data(package))}",
+                            duration, data=data), report)
+
+
+def run_export_merge(runs: dict[str, ExportedRun], arguments: argparse.Namespace, console: Console) -> Step:
+    """The cross-mode union merge of the Editor report and both exported runs' (coverage.merge_coverage, §15.6), or why
+    it cannot run: one configuration only (skipped), an Editor report that is missing or stale (exit code 3, never
+    rerun here, ADR 0023)."""
+    missing = [config for config in exports.EXPORTED_CONFIGURATIONS if config not in runs]
+    if missing:
+        return Step(MERGE_STEP_NAME, Status.SKIPPED, f"the merge needs the Editor, Release and Dist reports, and this "
+                                                     f"run exported no {', '.join(missing)}")
+    editor_report = arguments.editor_report or DEFAULT_EDITOR_REPORT
+    data: dict[str, object] = {"suite": "export", "editorReport": paths.display_path(editor_report)}
+    reason = exports.stale_report_reason(editor_report, exports.report_inputs("Release", "editor"))
+    if reason is not None:
+        return Step(MERGE_STEP_NAME, Status.FAILED, f"{reason}: run python Scripts/Test.py --suite feature --config "
+                                                    f"Release --junit first", exit_code=EXIT_INIT_FAILED, data=data)
+    reports: list[coverage.FeatureReport | None] = []
+    try:
+        reports.append(coverage.read_feature_report(editor_report))
+    except ValueError as error:
+        console.print(f"Test.py: the Editor report cannot be used: {error}")
+        reports.append(None)
+    reports += [runs[config].report for config in exports.EXPORTED_CONFIGURATIONS]
+    readable = [report for report in reports if report is not None]
+    failures = (unreadable_report_failures(reports) if len(readable) != len(reports)
+                else coverage.merge_coverage(readable))
+    for failure in failures:
+        console.print(failure)
+    if failures:
+        data["failures"] = failures
+        return Step(MERGE_STEP_NAME, Status.FAILED, f"{len(failures)} merge failure(s): {describe_lines(failures)}",
+                    data=data)
+    return Step(MERGE_STEP_NAME, Status.PASSED, "the union of the Editor, Release and Dist runs covers every "
+                                                "registered entry and every run passed", data=data)
+
+
+def run_export(configs: list[str], arguments: argparse.Namespace, console: Console) -> list[Step]:
+    """The export suite (ADR 0024 decision 9): FeatureTest's testing export in each of `configs` from one Release editor
+    on a copy of the project, each package's --feature-test run and evaluation, then the coverage merge."""
+    editor = editor_executable(exports.EXPORTING_EDITOR_CONFIGURATION)
+    names = [f"export {config}" for config in configs]
+    if not editor.is_file():
+        return [Step(name, Status.FAILED, f"{paths.display_path(editor)} not found: run python Scripts/Build.py "
+                                          f"--config {exports.EXPORTING_EDITOR_CONFIGURATION} --project Editor",
+                     exit_code=EXIT_INIT_FAILED) for name in names]
+    for config in configs:
+        runtime = paths.output_directory(config) / "Runtime" / paths.executable_name("Runtime")
+        if not runtime.is_file():
+            return [Step(f"export {config}", Status.FAILED, f"{paths.display_path(runtime)} not found: run python "
+                                                            f"Scripts/Build.py --config {config} --project Runtime",
+                         exit_code=EXIT_INIT_FAILED)]
+    steps: list[Step]
+    reason = probe_rendering_editor(editor)
+    if reason is not None:
+        data = {"suite": "export", "noDevice": reason}
+        if arguments.require_gpu:
+            steps = [Step(name, Status.FAILED, f"no usable Vulkan device (--require-gpu): {reason}", data=data)
+                     for name in names]
+        else:
+            console.print(f"{NO_DEVICE_TEXT}export: {reason}")
+            steps = [Step(name, Status.WARNING, f"no usable Vulkan device, so the testing export passed without "
+                                                f"running ({reason}); --require-gpu fails instead", data=data)
+                     for name in names]
+        steps.append(Step(MERGE_STEP_NAME, Status.SKIPPED, "nothing was exported"))
+    else:
+        steps = drive_exports(editor, configs, arguments, console)
+    if arguments.junit:
+        report = junit_path(EXPORT_REPORT_STEM)
+        write_junit(report, EXPORT_REPORT_STEM, steps)
+        for step in steps:
+            step.data["junit"] = paths.display_path(report)
+    return steps
+
+
+def drive_exports(editor: Path, configs: list[str], arguments: argparse.Namespace, console: Console) -> list[Step]:
+    """run_export's work with a device: the Release editor on a copy of FeatureTest with its Library/, one
+    run_export_configuration per configuration, the editor always stopped, then the merge."""
+    engine_client = import_engine_client()
+    runs: dict[str, ExportedRun] = {}
+    with tempfile.TemporaryDirectory(prefix="Test-Export-") as directory:
+        work = Path(directory)
+        # With --junit the runs write bin/TestResults/FeatureTest-<Config>.* of the repository (ADR 0022 decision 7).
+        reports = paths.REPOSITORY_ROOT if arguments.junit else work / "Reports"
+        reports.mkdir(parents=True, exist_ok=True)
+        try:
+            project_file = copy_project(FEATURE_PROJECT, work / "FeatureTest", keep_cache=True)
+            console.heading(f"export: {paths.display_path(editor)} on a copy of {paths.display_path(FEATURE_PROJECT)}")
+            process = engine_client.launch_editor(editor, list(EXPORT_EDITOR_ARGUMENTS), work / "UserData",
+                                                  paths.workspace_name(), environment=child_environment())
+        except (RuntimeError, TimeoutError, ValueError, OSError) as error:
+            return [Step(f"export {', '.join(configs)}", Status.FAILED,
+                         f"the exporting editor could not start: {error}")]
+        try:
+            client = process.connect("export", call_log=engine_client.CallLog(None))
+            with client:
+                client.call("project.open", {"path": str(project_file.parent)}, timeout=arguments.timeout)
+                for config in configs:
+                    runs[config] = run_export_configuration(client, engine_client, config, arguments, console, reports)
+                try:
+                    client.call("session.shutdown", {"force": True}, timeout=EDITOR_SHUTDOWN_TIMEOUT_SECONDS)
+                except (engine_client.EngineError, engine_client.ConnectionClosed, TimeoutError):
+                    pass  # the process is stopped below either way
+            process.wait(EDITOR_SHUTDOWN_TIMEOUT_SECONDS)
+        except (engine_client.EngineError, engine_client.ConnectionClosed, engine_client.ProtocolError, TimeoutError,
+                OSError) as error:
+            done = [run.step for run in runs.values()]
+            return done + [Step(f"export {config}", Status.FAILED, f"the exporting editor failed: {error}\n"
+                                                                   f"{process.output()}")
+                           for config in configs if config not in runs]
+        finally:
+            process.kill()
+        steps = [runs[config].step for config in configs]
+        steps.append(run_export_merge(runs, arguments, console))
+    return steps
+
+
+# --------------------------------------------------------------------------------------------------------------------
 # The determinism suite (ADR 0022 decision 7, §15.1 T3d)
 # --------------------------------------------------------------------------------------------------------------------
 
 
 def glob_regex(pattern: str) -> re.Pattern[str]:
-    """The editor's Testing.Replays glob rules (EditorCore/Export/Private/ExportPaths.h MatchesExportGlob): '*' any
-    characters but '/', '?' one character but '/', "**" any characters ("**/" also no directory at all)."""
+    """The Testing.Replays glob rules of MatchesPathGlob (Engine/Core/PathGlob.h), which the editor, the Runtime and
+    testing exports share: '*' any characters but '/', '?' one character but '/', "**" any characters ("**/" also no
+    directory at all). Both run the vectors of Tests/Data/PathGlob/Cases.json (ADR 0024 decision 7)."""
     parts: list[str] = []
     index = 0
     while index < len(pattern):
@@ -912,10 +1340,20 @@ class ReplayOutcome:
     problems: list[str] = dataclasses.field(default_factory=list)
 
 
-def copy_project(source: Path, destination: Path) -> Path:
-    """Copies the project `source` without its Library/ directory to `destination`; returns its project file."""
-    shutil.copytree(source, destination, ignore=lambda directory, names: [PROJECT_CACHE_DIRECTORY]
-                    if Path(directory) == source and PROJECT_CACHE_DIRECTORY in names else [])
+def copy_project(source: Path, destination: Path, keep_cache: bool = False) -> Path:
+    """Copies the project `source` to `destination`, without its Library/ directory unless `keep_cache` (the import
+    cache, which then saves the copy's editor the imports, without the project lock file of an editor that may hold the
+    source); returns its project file."""
+    cache = source / PROJECT_CACHE_DIRECTORY
+
+    def ignored(directory: str, names: list[str]) -> list[str]:
+        if Path(directory) == source and not keep_cache:
+            return [name for name in names if name == PROJECT_CACHE_DIRECTORY]
+        if Path(directory) == cache:
+            return [name for name in names if name == PROJECT_LOCK_FILE]
+        return []
+
+    shutil.copytree(source, destination, ignore=ignored)
     files = sorted(destination.glob("*.eproj"))
     if len(files) != 1:
         raise ValueError(f"{paths.display_path(source)} holds {len(files)} project files, not one")
@@ -924,13 +1362,12 @@ def copy_project(source: Path, destination: Path) -> Path:
 
 def verify_replays(editor: Path, project_file: Path, replays: list[str], user_data: Path,
                    timeout: float) -> list[ReplayOutcome]:
-    """Starts `editor --headless --renderer none --audio-device none --automation` on `project_file` and runs
+    """Starts `editor --headless --renderer none --audio-device none --automation --strict` on `project_file` and runs
     input.replay {path, verify: true, strictHash: true} for each of `replays`, in order. Each outcome holds the observed
     stateHash and any failure; the editor is always stopped. Raises RuntimeError when the editor cannot be started or
     reached."""
     engine_client = import_engine_client()
-    process = engine_client.launch_editor(editor, ["--headless", "--renderer", "none", "--audio-device", "none",
-                                                   "--automation", "--project", str(project_file)],
+    process = engine_client.launch_editor(editor, [*DETERMINISM_EDITOR_ARGUMENTS, "--project", str(project_file)],
                                           user_data, paths.workspace_name(), environment=child_environment())
     outcomes: list[ReplayOutcome] = []
     try:
@@ -963,25 +1400,27 @@ def verify_replays(editor: Path, project_file: Path, replays: list[str], user_da
     return outcomes
 
 
-def compare_replay_hashes(committed: dict[str, str], outcomes: dict[str, list[ReplayOutcome]]) -> dict[str, list[str]]:
-    """The problems of every replay (committed FinalStateHash by path; each configuration's outcomes), by path: its own
-    verification problems per configuration, a hash that differs from the committed one, and hashes that differ between
-    the configurations."""
-    problems: dict[str, list[str]] = {path: [] for path in committed}
-    for config, results in outcomes.items():
-        for outcome in results:
-            entry = problems.setdefault(outcome.path, [])
-            entry += [f"{config}: {problem}" for problem in outcome.problems]
-            expected = committed.get(outcome.path, "")
-            if outcome.state_hash and outcome.state_hash != expected:
-                entry.append(f"{config}: state hash {outcome.state_hash} differs from the committed FinalStateHash "
-                             f"{expected or '(none)'}")
-    for path in problems:
-        hashes = {config: outcome.state_hash for config, results in outcomes.items()
-                  for outcome in results if outcome.path == path and outcome.state_hash}
-        if len(set(hashes.values())) > 1:
-            problems[path].append("the configurations disagree: " + ", ".join(f"{config} {value}"
-                                                                              for config, value in hashes.items()))
+def determinism_problems(committed: dict[str, str], outcomes: dict[str, list[ReplayOutcome]],
+                         exported: dict[str, dict[str, str]]) -> dict[str, list[str]]:
+    """The problems of every committed replay (committed FinalStateHash by path), by path: each editor run's own
+    verification problems ("<run>: <problem>", `outcomes` by run label), then exports.compare_determinism_runs over the
+    hashes of the editor runs and the exported runs (`exported`: {run label: {path: hash}}), and for a replay with any
+    problem a last line naming every run's hash ("hashes: <run> <hash>, ..."), so a failure reads on its own."""
+    runs: dict[str, dict[str, str]] = {run: {outcome.path: outcome.state_hash for outcome in results
+                                             if outcome.state_hash}
+                                       for run, results in outcomes.items()}
+    runs.update(exported)
+    compared = exports.compare_determinism_runs(committed, runs)
+    ordered = ([run for run in exports.DETERMINISM_RUNS if run in runs]
+               + sorted(set(runs) - set(exports.DETERMINISM_RUNS)))
+    problems: dict[str, list[str]] = {}
+    for path in sorted(committed):
+        lines = [f"{run}: {problem}" for run, results in outcomes.items() for outcome in results
+                 if outcome.path == path for problem in outcome.problems]
+        lines += compared[path]
+        if lines:
+            lines.append("hashes: " + ", ".join(f"{run} {runs[run].get(path) or '(none)'}" for run in ordered))
+        problems[path] = lines
     return problems
 
 
@@ -1008,12 +1447,34 @@ def write_determinism_junit(path: Path, problems: dict[str, list[str]]) -> None:
     ElementTree.ElementTree(root).write(path, encoding="utf-8", xml_declaration=True)
 
 
+def read_exported_runs(configs: list[str]) -> tuple[dict[str, dict[str, str]], dict[str, str]]:
+    """The exported runs of `configs` (Release, Dist) that the export suite of this tree left: ({run label: {replay
+    path: hash}} of every current report, {run label: why it is not compared} for every missing, stale or unreadable
+    one; exports.stale_report_reason over exports.report_inputs, ADR 0024 decision 10)."""
+    runs: dict[str, dict[str, str]] = {}
+    reasons: dict[str, str] = {}
+    for config in configs:
+        label = f"Exported {config}"
+        report = paths.TEST_RESULTS_ROOT / f"{exports.FEATURE_TEST_NAME}-{config}.json"
+        reason = exports.stale_report_reason(report, exports.report_inputs(config, "exported"))
+        if reason is None:
+            try:
+                runs[label] = exports.read_replay_hashes(report)
+                continue
+            except ValueError as error:
+                reason = str(error)
+        reasons[label] = reason
+    return runs, reasons
+
+
 def run_determinism(configs: list[str], arguments: argparse.Namespace, console: Console) -> Step:
-    """Every FeatureTest replay in the editor of each configuration in `configs`, compared with its committed hash and
-    across the configurations (one step, ADR 0022 decision 7)."""
+    """Every FeatureTest replay in the runs `configs` select (exports.DETERMINISM_RUNS: the Debug and Release editors,
+    the exported Release and Dist runs' reports), compared with its committed hash and across the runs (one step, ADR
+    0022 decision 7, ADR 0024 decision 10)."""
     name = f"determinism {', '.join(configs)}"
     data: dict[str, object] = {"suite": "determinism", "configs": configs}
-    editors = {config: editor_executable(config) for config in configs}
+    editors = {config: editor_executable(config) for config in configs if config in DEVELOPMENT_CONFIGURATIONS}
+    exported_configs = [config for config in configs if config in exports.EXPORTED_CONFIGURATIONS]
     for config, editor in editors.items():
         if not editor.is_file():
             return Step(name, Status.FAILED, f"{paths.display_path(editor)} not found: run python Scripts/Build.py "
@@ -1039,24 +1500,38 @@ def run_determinism(configs: list[str], arguments: argparse.Namespace, console: 
         return Step(name, Status.WARNING, f"Testing.Replays of {paths.display_path(FEATURE_PROJECT_FILE)} matches no "
                                           f"replay, so nothing was verified", data=data)
 
+    # The exported runs come from the export suite's reports of this tree, never rerun (ADR 0023).
+    exported, not_compared = read_exported_runs(exported_configs)
+    if not_compared:
+        data["notCompared"] = not_compared
+        if arguments.require_gpu:
+            label, reason = next(iter(not_compared.items()))
+            return Step(name, Status.FAILED, f"{label} has no current report ({reason}): run python Scripts/Test.py "
+                                             f"--suite export --config {','.join(exported_configs)} --junit",
+                        exit_code=EXIT_INIT_FAILED, data=data)
+
     outcomes: dict[str, list[ReplayOutcome]] = {}
     for config, editor in editors.items():
-        console.heading(f"determinism {config}: {len(replays)} replay(s) in {paths.display_path(editor)} "
+        label = f"Editor {config}"
+        console.heading(f"determinism {label}: {len(replays)} replay(s) in {paths.display_path(editor)} "
                         f"(--renderer none)")
         with tempfile.TemporaryDirectory(prefix=f"Test-Determinism-{config}-") as directory:
             try:
                 project_file = copy_project(FEATURE_PROJECT, Path(directory) / "FeatureTest")
-                outcomes[config] = verify_replays(editor, project_file, replays, Path(directory) / "UserData",
-                                                  arguments.timeout)
+                outcomes[label] = verify_replays(editor, project_file, replays, Path(directory) / "UserData",
+                                                 arguments.timeout)
             except (RuntimeError, ValueError, OSError) as error:
                 return Step(name, Status.FAILED, f"the {config} editor could not verify the replays: {error}",
                             data=data)
-        for outcome in outcomes[config]:
-            console.print(f"  {config} {outcome.path}: {outcome.state_hash or '(no hash)'}"
+        for outcome in outcomes[label]:
+            console.print(f"  {label} {outcome.path}: {outcome.state_hash or '(no hash)'}"
                           + (f" ({'; '.join(outcome.problems)})" if outcome.problems else ""))
-    problems = compare_replay_hashes(committed, outcomes)
-    data["hashes"] = {config: {outcome.path: outcome.state_hash for outcome in results}
-                      for config, results in outcomes.items()}
+    for label, hashes in exported.items():
+        for replay in replays:
+            console.print(f"  {label} {replay}: {hashes.get(replay) or '(no hash)'}")
+    problems = determinism_problems(committed, outcomes, exported)
+    data["hashes"] = {**{label: {outcome.path: outcome.state_hash for outcome in results}
+                         for label, results in outcomes.items()}, **exported}
     if arguments.junit:
         report = junit_path(DETERMINISM_REPORT_STEM)
         write_determinism_junit(report, problems)
@@ -1071,9 +1546,15 @@ def run_determinism(configs: list[str], arguments: argparse.Namespace, console: 
         first = sorted(failed)[0]
         return Step(name, Status.FAILED, f"{len(failed)} of {len(replays)} replay(s) failed: {first}: "
                                          f"{failed[first][0]}", duration, data=data)
-    compared = " and agreed across the configurations" if len(configs) > 1 else ""
-    return Step(name, Status.PASSED, f"{len(replays)} replay(s) matched their committed FinalStateHash{compared}",
-                duration, data=data)
+    runs = [*outcomes, *exported]
+    compared = f" in {', '.join(runs)}" + (", which agree" if len(runs) > 1 else "")
+    detail = f"{len(replays)} replay(s) matched their committed FinalStateHash{compared}" if runs \
+        else f"no run of {len(replays)} replay(s) was compared"
+    if not_compared:
+        reasons = "; ".join(f"{label}: {reason}" for label, reason in not_compared.items())
+        return Step(name, Status.WARNING, f"{detail}; not compared ({reasons}): run python Scripts/Test.py --suite "
+                                          f"export --junit first, and --require-gpu fails instead", duration, data=data)
+    return Step(name, Status.PASSED, detail, duration, data=data)
 
 
 def unreadable_report_failures(reports: list[coverage.FeatureReport | None]) -> list[str]:
@@ -1126,6 +1607,22 @@ def run_suite(name: str, config: str, arguments: argparse.Namespace, console: Co
         yield run_tests(run, arguments, console)
 
 
+def suite_configurations(suite: Suite, configs: list[str] | None) -> tuple[list[str], list[str]]:
+    """The configurations `suite` runs in for --config `configs` (None: its §15.8 matrix), and the requested ones it
+    does not take (its `allowed` configurations), in canonical order."""
+    if configs is None:
+        return list(suite.configurations), []
+    return ([config for config in configs if config in suite.allowed],
+            [config for config in configs if config not in suite.allowed])
+
+
+def skipped_configuration_step(name: str, config: str) -> Step:
+    """The step of a configuration that --config requested and the suite `name` does not take (--suite all only)."""
+    return Step(f"{name} {config}", Status.SKIPPED,
+                f"not run in {config}: the {name} suite takes {', '.join(SUITES[name].allowed)}",
+                data={"suite": name, "config": config})
+
+
 def parse_arguments(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Run test suites in the configurations of the Architecture §15.8 matrix.",
@@ -1136,12 +1633,20 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--suite", default="all",
                         help=f"comma-separated suites: {', '.join(SUITES)} or all (default: all)")
     parser.add_argument("--config", help="comma-separated configurations, overriding the matrix (Debug, Release; "
-                                         "test executables do not exist in Dist)")
+                                         "test executables do not exist in Dist; the export suite takes Release and "
+                                         "Dist, the determinism suite any of the three); with --suite all, a suite "
+                                         "skips the ones it does not take")
     parser.add_argument("--junit", action="store_true", help="write JUnit XML into bin/TestResults/")
     parser.add_argument("--require-gpu", action="store_true",
-                        help="gpu, golden, feature and automation suites: a test case (or a Python test that starts a "
-                             "rendering editor, or the FeatureTest run) without a usable Vulkan device fails instead "
-                             "of passing without running (CI.py and PreCommit.py pass it unless --gpu-optional, §15.2)")
+                        help="gpu, golden, feature, automation and export suites: a test case (or a Python test that "
+                             "starts a rendering editor, or the FeatureTest run or export) without a usable Vulkan "
+                             "device fails instead of passing without running; determinism suite: a missing or stale "
+                             "exported report fails (exit code 3) instead of leaving that run out (CI.py and "
+                             "PreCommit.py pass it unless --gpu-optional, §15.2)")
+    parser.add_argument("--editor-report", type=Path,
+                        help="export suite: the Editor-mode FeatureTest report its coverage merge reads (default: "
+                             f"{paths.display_path(DEFAULT_EDITOR_REPORT)}, which Test.py --suite feature --config "
+                             "Release --junit writes)")
     parser.add_argument("--vulkan-api", choices=VULKAN_API_CAPS,
                         help="gpu suite: run under this API cap only (default: once under each, §8.1)")
     parser.add_argument("--update-golden", action="store_true",
@@ -1156,24 +1661,69 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
                              f"{CHILD_TARGET_SUITE} suite (unit, gpu, golden) and skipped Python tests (automation) "
                              "instead of failing the run")
     parser.add_argument("--timeout", type=float, default=SUITE_TIMEOUT_SECONDS,
-                        help=f"seconds per Tests or automation run (default: {SUITE_TIMEOUT_SECONDS:.0f})")
+                        help=f"seconds per Tests, automation or FeatureTest run, and per export of the export suite "
+                             f"(default: {SUITE_TIMEOUT_SECONDS:.0f})")
     parser.add_argument("--merge-coverage", nargs=3, metavar=("EDITOR_JSON", "RELEASE_JSON", "DIST_JSON"),
                         help="run only the cross-mode coverage merge of three FeatureTest reports (§15.6) and print "
                              "one 'merge: <rule>: <subject>' line per failure")
+    parser.add_argument("--build-root", type=Path, default=paths.BIN_ROOT,
+                        help="unit, gpu, golden and feature suites: the bin directory whose <OutputDir> holds the "
+                             "executables (default: the repository's bin/; the AddressSanitizer workspace builds into "
+                             "bin-int/Asan/bin)")
+    parser.add_argument("--sanitizer", choices=tuple(SANITIZERS),
+                        help="unit, gpu, golden and feature suites: give every process the suite starts the "
+                             "sanitizer's environment (address: ASAN_OPTIONS and MSVC's runtime first on PATH); the "
+                             "step names gain ' (ASan)' and the reports the suffix -Asan")
+    parser.add_argument("--test-timeout-scale", type=float,
+                        help="unit, gpu and golden suites: pass --test-timeout-scale=<s> (s >= 1) to the Tests binary, "
+                             "which multiplies every per-test-case limit")
+    parser.add_argument("--fuzz-scale", type=float,
+                        help="unit suite: pass --fuzz-scale=<s> (0 < s <= 1) to the Tests binary, so each fuzz case "
+                             "runs round(count * s) iterations (at least its minimum); default 0.1 for Debug, none "
+                             "(every count) for Release")
+    parser.add_argument("--exclude-test-suites", metavar="NAMES",
+                        help="unit suite: comma-separated doctest test suites to leave out besides GPU and Golden (the "
+                             "hardening stage's sanitized unit run leaves out Fuzz, which its fuzz step runs as a "
+                             "superset)")
     parser.add_argument("--json", action="store_true", help="print a machine-readable result on stdout")
     arguments = parser.parse_args(argv)
     if arguments.merge_coverage:
         return arguments
+    arguments.build_root = arguments.build_root.resolve()
     try:
         arguments.suites = paths.parse_name_list(arguments.suite, tuple(SUITES), "suite")
-        arguments.configs = paths.parse_configurations(arguments.config, ("Debug", "Release")) if arguments.config \
-            else None
+        arguments.configs = paths.parse_configurations(arguments.config) if arguments.config else None
     except ValueError as error:
         parser.error(str(error))
+    # With the default --suite all, a suite skips the requested configurations it does not take (main reports them);
+    # a suite named explicitly must take every one.
+    arguments.all_suites = [item.strip().lower() for item in arguments.suite.split(",") if item.strip()] == ["all"]
+    for name in arguments.suites:
+        suite = SUITES[name]
+        _, refused = suite_configurations(suite, arguments.configs)
+        if suite.available and refused and not arguments.all_suites:
+            parser.error(f"the {name} suite does not run in {', '.join(refused)} (it takes {', '.join(suite.allowed)})")
+    if arguments.editor_report is not None and "export" not in arguments.suites:
+        parser.error("--editor-report needs the export suite (--suite export)")
     if arguments.timeout <= 0:
         parser.error("--timeout must be positive")
     if arguments.update_golden and "golden" not in arguments.suites:
         parser.error("--update-golden needs the golden suite (--suite golden)")
+    sanitized_suites = ("unit", "gpu", "golden", "feature")
+    custom_root = arguments.build_root != paths.BIN_ROOT.resolve()
+    if (arguments.sanitizer or custom_root) and not set(arguments.suites) <= set(sanitized_suites):
+        parser.error(f"--sanitizer and --build-root apply to the {', '.join(sanitized_suites)} suites only")
+    if arguments.test_timeout_scale is not None and not 1.0 <= arguments.test_timeout_scale < float("inf"):
+        parser.error("--test-timeout-scale must be a finite number of at least 1")
+    if arguments.fuzz_scale is not None and not 0.0 < arguments.fuzz_scale <= 1.0:
+        parser.error("--fuzz-scale must be in (0, 1]")
+    if arguments.exclude_test_suites is not None:
+        names = [name.strip() for name in arguments.exclude_test_suites.split(",")]
+        if not all(names):
+            parser.error("--exclude-test-suites needs comma-separated doctest test suite names")
+        if "unit" not in arguments.suites:
+            parser.error("--exclude-test-suites applies to the unit suite only")
+        arguments.exclude_test_suites = names
     return arguments
 
 
@@ -1198,13 +1748,26 @@ def main(argv: list[str] | None = None) -> int:
             steps.append(step)
             console.result(step)
             continue
+        configs, refused = suite_configurations(suite, arguments.configs)
+        for config in refused:  # only with --suite all; parse_arguments refuses them for a named suite
+            step = skipped_configuration_step(name, config)
+            steps.append(step)
+            console.result(step)
+        if not configs:
+            continue
         if name == "determinism":
             # One step over every configuration, which compares their hashes.
-            step = run_determinism(list(arguments.configs or suite.configurations), arguments, console)
+            step = run_determinism(configs, arguments, console)
             steps.append(step)
             console.result(step)
             continue
-        for config in arguments.configs or suite.configurations:
+        if name == "export":
+            # One editor exports every configuration, and the merge needs both.
+            for step in run_export(configs, arguments, console):
+                steps.append(step)
+                console.result(step)
+            continue
+        for config in configs:
             for step in run_suite(name, config, arguments, console):
                 steps.append(step)
                 console.result(step)

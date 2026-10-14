@@ -5,9 +5,12 @@
 
 #include <glm/glm.hpp>
 
+#include <cstddef>
 #include <cstdint>
 #include <map>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 // The project settings (Architecture §6.1, §11.10): one reflected struct per section of the .eproj file, so the
@@ -97,16 +100,38 @@ namespace Engine {
 	};
 
 	// Registry struct "ExportSettings" (§6.1 "Export", §7.6, §14.2). BuildScenes and Exclude are project-relative paths and
-	// globs; Icon is a project-relative PNG (>= 256 x 256, checked at export); Version is "major.minor.patch"; Company is
-	// free text. Icon, Version and Company go into the exported executable's resources (M15).
+	// globs; Icon is a project-relative square PNG (>= 256 x 256, checked at export); Version is "major.minor.patch";
+	// Company is free text under FindExportCompanyProblem's rule. Icon, Version and Company go into the exported
+	// executable's resources (M15).
 	struct ExportSettings
 	{
+		// The longest Company in bytes. Every exported executable must be able to carry it: Windows' VS_VERSIONINFO block
+		// holds at most 65535 bytes, and with every other string at its longest (a 64-byte ASCII Name, the most UTF-16 units
+		// a Name can have, "<Name>.exe" and the version "65535.65535.65535.0") a Company of up to 32225 UTF-16 units fits.
+		// A UTF-8 byte never decodes to more than one UTF-16 unit, so a byte bound below that holds on every host;
+		// ExecutableResourcesTests builds the version resource at this bound.
+		static constexpr size_t MaxCompanyBytes = 32000;
+
 		std::vector<std::string> BuildScenes;
 		std::vector<std::string> Exclude = { "Assets/Tests/**" };
 		std::string Icon;
 		std::string Version = "1.0.0";
 		std::string Company;
 	};
+
+	// The rule of every text an exported executable's resources carry (Export.Company, and the strings of the macOS
+	// Info.plist), the same on every host: valid UTF-8, no control character (U+0000 to U+001F or U+007F) and neither U+FFFE
+	// nor U+FFFF. Info.plist is XML 1.0, whose characters exclude U+FFFE, U+FFFF and every control character but tab, line
+	// feed and carriage return; the rule refuses all of them, so that one rule holds on every host, although the Windows
+	// version resource could carry them (the M15 fix review's C7). Returns the problem as a phrase that completes "<the
+	// text> ..." (such as "holds the control character U+0009 at byte 4"), or nullopt for a valid text.
+	[[nodiscard]] std::optional<std::string> FindExportTextProblem(std::string_view text);
+
+	// Export.Company's rule, the same on every host (the M15 review's M02): at most ExportSettings::MaxCompanyBytes bytes,
+	// and FindExportTextProblem's rule. Returns the problem as a phrase that completes "Export.Company ..." (such as
+	// "holds the control character U+0009 at byte 4"), or nullopt for a valid Company. The settings validation reports it
+	// at /Export/Company (project.setSettings and the .eproj loader), and so does the exporter's validation (ResolveExecutableResources).
+	[[nodiscard]] std::optional<std::string> FindExportCompanyProblem(std::string_view company);
 
 	// Registry struct "TestSuiteOverrides" (§11.10 "Overrides"), applied exactly (no Dist minimum) for one suite. 0 means
 	// "use the project setting" for the two limits, and Inherit likewise for PauseOnError (ADR 0006 decision 11: the

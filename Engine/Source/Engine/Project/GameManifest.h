@@ -24,7 +24,7 @@
 //       "Testing": false }
 //
 // Keys in this order, written by the canonical JsonWriter (Pretty, LF, tabs; §6). Window and Simulation are the project's
-// WindowSettings and SimulationSettings with every field (Window carries Resizable too, which §14.1's example omits) and
+// WindowSettings and SimulationSettings with every field (Window's Resizable included, as §14.1's example shows) and
 // the project loader's rules. Paths are relative to the manifest's directory, forward slashes, VfsPath rules (no "..", no
 // absolute paths, no reserved names); Paks holds exactly two entries, Engine.pak then Game.pak (§14.1). Hashes and the
 // start scene are 16 lowercase hex digits (§4.8: never JSON numbers). "Testing": true admits the M13 Runtime's

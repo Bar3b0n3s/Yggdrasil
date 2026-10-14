@@ -5,6 +5,7 @@
 #include "Engine/Core/Json/JsonWriter.h"
 #include "Engine/Core/Random.h"
 #include "Engine/Core/Utf8.h"
+#include "Support/Fuzz.h"
 
 #include <nlohmann/json.hpp>
 
@@ -184,7 +185,7 @@ namespace Engine {
 
 	TEST_SUITE("Core")
 	{
-		TEST_CASE("JsonReader: 10,000 seeded mutations never crash and always return Result")
+		TEST_CASE("JsonReader: 10,000 seeded mutations never crash and always return Result" * doctest::test_suite(Test::FuzzSuite))
 		{
 			// Architecture §15.2: JsonReader is the boundary for hostile JSON from files and automation requests.
 			const std::string bom = "\xef\xbb\xbf";
@@ -192,15 +193,21 @@ namespace Engine {
 			for (const std::string& seed : seeds)
 				REQUIRE(JsonReader::Parse(seed).has_value());
 
-			Random random(0x15a7);
-			int parseFailures = 0;
-			int parsed = 0;
-			for (int iteration = 0; iteration < 10000; ++iteration)
+			uint64_t parsed = 0;
+			const Test::FuzzRun run = Test::RunFuzzCase(0x15a7, 10000, [&seeds, &parsed](Random& random, uint64_t index)
 			{
-				std::string mutated = seeds[static_cast<size_t>(iteration % 2)];
-				const int64_t edits = random.RangeInt(1, 3);
-				for (int64_t edit = 0; edit < edits; ++edit)
-					MutateJson(mutated, random);
+				std::string mutated = seeds[static_cast<size_t>(index % 2)];
+				// The JSON-aware edits, or the shared text mutations, whose byte-level edits insert NUL and control bytes.
+				if (random.NextBool())
+				{
+					const int64_t edits = random.RangeInt(1, 3);
+					for (int64_t edit = 0; edit < edits; ++edit)
+						MutateJson(mutated, random);
+				}
+				else
+				{
+					Test::MutateText(mutated, random);
+				}
 
 				// The oracle: Parse returns (a crash or an assert would end the run) a tree or a Parse error. A tree can be
 				// read without anything but Validation errors, and the canonical writer either rejects it with Validation
@@ -208,9 +215,8 @@ namespace Engine {
 				const Result<Json> document = JsonReader::Parse(mutated);
 				if (!document.has_value())
 				{
-					++parseFailures;
 					REQUIRE(document.error().GetCode() == ErrorCode::Parse);
-					continue;
+					return false;
 				}
 
 				++parsed;
@@ -219,16 +225,21 @@ namespace Engine {
 				if (!written.has_value())
 				{
 					REQUIRE(written.error().GetCode() == ErrorCode::Validation);
-					continue;
+					return true;
 				}
 				const Result<Json> reparsed = JsonReader::Parse(*written);
 				REQUIRE(reparsed.has_value());
 				const Result<std::string> rewritten = JsonWriter::Write(*reparsed);
 				REQUIRE(rewritten.has_value());
 				REQUIRE(*rewritten == *written);
+				return true;
+			});
+			CHECK(run.Counts.Accepted == parsed);
+			if (Test::IsFuzzSample(run.Range))
+			{
+				CHECK(run.Counts.Rejected > 0);
+				CHECK(run.Counts.Accepted > 0);
 			}
-			CHECK(parseFailures > 0);
-			CHECK(parsed > 0);
 		}
 
 		TEST_CASE("JsonReader: errors carry JSON pointers")
@@ -403,6 +414,28 @@ namespace Engine {
 			CHECK(parsed.error().GetCode() == ErrorCode::Parse);
 		}
 
+		TEST_CASE("JsonReader: a NUL byte after a document is a Parse error at the NUL, not the end of the text")
+		{
+			// nlohmann's lexer reads a NUL byte as the end of its input, so it accepts the document before the NUL; the text
+			// after it, unbalanced brackets included, must neither be accepted nor reach the structure scanner (found by the
+			// ScriptData fuzz case: a cooked script's field default "null\0...]" crashed the scanner).
+			const std::array<std::string, 5> texts = { std::string("null\0]", 6), std::string("{}\0}", 4), std::string("[1]\0:", 5),
+				std::string("\"a\"\0{", 5), std::string("{\"A\": 1}\0", 9) };
+			for (const std::string& text : texts)
+			{
+				CAPTURE(text.size());
+				const Result<Json> parsed = JsonReader::Parse(text);
+				REQUIRE_FALSE(parsed.has_value());
+				CHECK(parsed.error().GetCode() == ErrorCode::Parse);
+				CHECK(parsed.error().GetMessageText().contains("NUL"));
+				CHECK(parsed.error().GetLocation().Column == text.find('\0') + 1);
+			}
+			// A NUL that nlohmann already rejects inside a string keeps its syntax error.
+			const Result<Json> inString = JsonReader::Parse(std::string("[\"a\0b\"]", 7));
+			REQUIRE_FALSE(inString.has_value());
+			CHECK(inString.error().GetCode() == ErrorCode::Parse);
+		}
+
 		TEST_CASE("JsonReader: integer reads reject fractions, exponents and out-of-range values")
 		{
 			const Json document = ParseOrFail(
@@ -435,6 +468,24 @@ namespace Engine {
 			CHECK(root.ReadMember<float>("Value") == 0.25f);
 			CHECK_FALSE(root.ReadMember<float>("TooLarge").has_value());
 			CHECK(root.ReadMember<double>("Double") == 1e39);
+		}
+
+		TEST_CASE("JsonReader: ExpectWritableNumbers locates the first fractional number beyond float's range, in document order")
+		{
+			// Integers of any 64-bit size, strings and in-range fractions are writable.
+			const Json writable = ParseOrFail(R"({"Big": 18446744073709551615, "Name": "1e39", "Nested": [0.5, {"Tiny": 1e-39}]})");
+			CHECK(JsonReader(writable).ExpectWritableNumbers().has_value());
+
+			const Json document = ParseOrFail(R"({"Zeta": {"List": [1, 2.5, -1e300]}, "Alpha": 1e39})");
+			const Status checked = JsonReader(document).ExpectWritableNumbers();
+			REQUIRE_FALSE(checked.has_value());
+			CHECK(checked.error().GetCode() == ErrorCode::Validation);
+			CHECK(checked.error().GetMessageText().contains("out of range for float"));
+			REQUIRE(checked.error().GetLocation().JsonPointer.has_value());
+			CHECK(*checked.error().GetLocation().JsonPointer == "/Zeta/List/2");
+
+			const Json scalar = ParseOrFail("1e39");
+			CHECK_FALSE(JsonReader(scalar).ExpectWritableNumbers().has_value());
 		}
 
 		TEST_CASE("JsonReader: type errors name the expected and the actual type")

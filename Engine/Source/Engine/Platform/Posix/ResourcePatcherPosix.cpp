@@ -7,13 +7,18 @@
 #if defined(ENGINE_PLATFORM_LINUX) || defined(ENGINE_PLATFORM_MACOS)
 
 	#include "Engine/Core/Error.h"
+	#include "Engine/Platform/Private/PathsUtf8.h"
+
+	#include <format>
 
 namespace Engine {
 
-	Status ResourcePatcher::Patch(const std::filesystem::path& /*executable*/, const ExecutableResourceSet& /*resources*/)
+	Status ResourcePatcher::Patch(const std::filesystem::path& executable, const ExecutableResourceSet& /*resources*/)
 	{
-		ENGINE_CONTRACT_STUB();
-		return std::unexpected(Error(ErrorCode::Unsupported, "M15 resource patcher contract (stream A)"));
+		return std::unexpected(Error(ErrorCode::Unsupported,
+			std::format("'{}' cannot carry resources: only Windows executables do", Utils::NativePathToUtf8(executable)))
+				.WithHint("macOS exports write the version and icon into the bundle's Info.plist and AppIcon.icns; Linux executables carry "
+						  "none"));
 	}
 
 }

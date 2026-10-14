@@ -2,14 +2,21 @@
 # "Repository remote and CI"). A platform counts as verified once its job here is green.
 #
 # Every job runs Scripts/CI.py, the single CI entry point (Architecture §15.8), with every stage a hosted runner can
-# run: setup, generate, lint, build, bake, unit, gpu, golden, automation and portability, and on windows the CPU-only
-# determinism stage (Docs/Decisions/0022-m14-contract.md decision 7). The setup stage creates the MCP
+# run: setup, generate, lint, build, bake, unit, gpu, golden, automation and portability, and on windows the
+# determinism stage (Docs/Decisions/0022-m14-contract.md decision 7; Docs/Decisions/0024-m15-contract.md decision 10).
+# The build stage's Dist build is followed by the map check "Dist: map file contains no automation, Analysis, ImGui or
+# AssetPipeline symbols" (CheckRuntimeMap.py; ADR 0024 decisions 11 and 20) in every job; on linux and macos it is
+# non-blocking like the rest of those jobs (ADR 0011). The export and hardening stages stay with the local gate (ADR
+# 0024 decision 20): the export stage needs a real Vulkan device, and the hardening stage (CI.py --milestone) measures
+# this machine's perf and uses MSVC's AddressSanitizer. The setup stage creates the MCP
 # bridge's virtual environment from Tools/MCP/requirements.lock (hash-checked wheels from PyPI), which the automation
 # stage runs in. The bake stage (Editor --headless --renderer vulkan --bake-engine-assets, ADR 0010 decision 13) bakes the
 # built-in environments on the GPU (ADR 0013 decision 9): linux bakes them on Lavapipe; with --gpu-optional (windows and
 # macos) a runner without a device reruns it with --renderer none, leaving the environments out with a warning.
 # - windows: one CI.py run over all of them (the local gate is the full CI.py), determinism included: it verifies every
-#   FeatureTest replay in the --renderer none Debug and Release editors, which needs no GPU.
+#   FeatureTest replay in the --renderer none Debug and Release editors, which needs no GPU; its exported half (the
+#   Release and Dist runs, read from the export stage's reports) has no reports here, so with --gpu-optional it is
+#   left out with a warning.
 # - linux:   gmake, once with GCC 14 and once with Clang 19 (Architecture §15.8).
 # - macos:   arm64 with the xcode4 generator and xcodebuild.
 #
@@ -188,15 +195,17 @@ jobs:
           "$root\Bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       # Stages a hosted runner can run: setup, generate, lint (which includes CheckBuildConfig.py on the workspace and
-      # its fixtures, Lint.py, Lint.py --self-test and the format check), build, bake, unit, gpu, golden and automation
-      # (the Python suites against the headless editor, M4), determinism (every FeatureTest replay in the --renderer
-      # none Debug and Release editors, M14: CPU only) and portability (which includes the clang-cl Release and Dist
-      # builds; this image has the VS C++ Clang component, so --require-clang-cl turns a missing component into a
-      # failure instead of a skip). With --gpu-optional: this image has no Vulkan device, so the bake leaves the
-      # built-in environments out with a warning, and the GPU test cases and the automation tests that start a
-      # rendering editor report the reason and pass without running. Add each later CPU-only stage here when it lands.
-      # The stages that need a real GPU (feature, export, games, and the environment bakes) stay with the local gate on
-      # a machine with a Vulkan device.
+      # its fixtures, Lint.py, Lint.py --self-test, CheckRuntimeMap.py --self-test and the format check), build (the
+      # Dist build followed by the Dist map check), bake, unit, gpu, golden and automation (the Python suites against
+      # the headless editor, M4), determinism (every FeatureTest replay in the --renderer none Debug and Release
+      # editors, CPU only; the exported Release and Dist runs have no export-stage reports here, so they are left out
+      # with a warning, ADR 0024 decision 10) and portability (which includes the Runtime's link settings and the
+      # clang-cl Release and Dist builds; this image has the VS C++ Clang component, so --require-clang-cl turns a
+      # missing component into a failure instead of a skip). With --gpu-optional: this image has no Vulkan device, so
+      # the bake leaves the built-in environments out with a warning, and the GPU test cases and the automation tests
+      # that start a rendering editor report the reason and pass without running. Add each later CPU-only stage here
+      # when it lands. The stages that need a real GPU (feature, export, games, and the environment bakes) and the
+      # milestone-only hardening stage stay with the local gate on a machine with a Vulkan device.
       - name: Run CI.py
         run: python Scripts/CI.py --stages setup,generate,lint,build,bake,unit,gpu,golden,automation,determinism,portability --require-clang-cl --gpu-optional
 
@@ -411,7 +420,7 @@ jobs:
             done
             exec python3 Scripts/CI.py --stages build,bake,unit,gpu,golden,automation --configs Release --summary-junit bin/TestResults/CI-Release.xml'
 
-      - name: Dist (build)
+      - name: Dist (build and map check)
         if: ${{ !cancelled() && steps.generate.outcome == 'success' }}
         run: python3 Scripts/CI.py --stages build --configs Dist --summary-junit bin/TestResults/CI-Dist.xml
 
@@ -551,7 +560,7 @@ jobs:
         if: ${{ !cancelled() && steps.generate.outcome == 'success' }}
         run: python3 Scripts/CI.py --stages build,bake,unit,gpu,golden,automation --configs Release --gpu-optional --summary-junit bin/TestResults/CI-Release.xml
 
-      - name: Dist (build)
+      - name: Dist (build and map check)
         if: ${{ !cancelled() && steps.generate.outcome == 'success' }}
         run: python3 Scripts/CI.py --stages build --configs Dist --summary-junit bin/TestResults/CI-Dist.xml
 

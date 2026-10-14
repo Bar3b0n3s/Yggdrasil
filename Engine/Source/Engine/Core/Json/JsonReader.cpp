@@ -362,6 +362,9 @@ namespace Engine {
 						}
 						case '}':
 						case ']':
+							// Text nlohmann accepted is balanced; a stray bracket is reported rather than trusted.
+							if (m_Frames.empty())
+								return ScanProblem{ .Offset = offset, .Message = std::format("syntax error: unexpected '{}'", character), .Pointer = {} };
 							m_Frames.pop_back();
 							CompleteValue();
 							++offset;
@@ -372,6 +375,8 @@ namespace Engine {
 							++offset;
 							break;
 						case ':':
+							if (m_Frames.empty())
+								return ScanProblem{ .Offset = offset, .Message = "syntax error: unexpected ':'", .Pointer = {} };
 							m_Frames.back().ExpectingKey = false;
 							++offset;
 							break;
@@ -615,6 +620,11 @@ namespace Engine {
 		Json document = Json::parse(text.begin(), text.end(), nullptr, false, false);
 		if (document.is_discarded())
 			return std::unexpected(Utils::DescribeSyntaxError(text, Utils::AcceptProgress(text)));
+		// nlohmann's lexer reads a NUL byte outside a string as the end of its input, so it accepts the document before a
+		// NUL whatever follows. JSON has no raw NUL anywhere, and the document must end at the text's last byte, so the
+		// first NUL is a syntax error (the structure scanner below would otherwise walk the unbalanced text after it).
+		if (const size_t nul = text.find('\0'); nul != std::string_view::npos)
+			return std::unexpected(Utils::ParseError(text, nul, "syntax error: unexpected NUL byte (U+0000) after the document"));
 
 		// Step 3.
 		Utils::StructureScanner scanner(text);
@@ -786,6 +796,46 @@ namespace Engine {
 				std::format("index {} is out of range for an array of {} elements", index, m_Value->size())));
 		}
 		return JsonReader((*m_Value)[index], AppendPointer(m_Pointer, index));
+	}
+
+	Status JsonReader::ExpectWritableNumbers() const
+	{
+		// Depth first, members and elements pushed in reverse so the first in document order is checked first.
+		std::vector<JsonReader> pending{ *this };
+		while (!pending.empty())
+		{
+			const JsonReader current = std::move(pending.back());
+			pending.pop_back();
+			switch (current.GetType())
+			{
+				case JsonType::Float:
+					ENGINE_TRY(current.ReadFloat());
+					break;
+				case JsonType::Object:
+				{
+					ENGINE_TRY_ASSIGN(const std::vector<std::string> names, current.GetMemberNames());
+					for (auto name = names.rbegin(); name != names.rend(); ++name)
+					{
+						ENGINE_TRY_ASSIGN(JsonReader member, current.GetMember(*name));
+						pending.push_back(std::move(member));
+					}
+					break;
+				}
+				case JsonType::Array:
+				{
+					ENGINE_TRY_ASSIGN(const size_t size, current.GetArraySize());
+					for (size_t index = size; index > 0; --index)
+					{
+						ENGINE_TRY_ASSIGN(JsonReader element, current.GetElement(index - 1));
+						pending.push_back(std::move(element));
+					}
+					break;
+				}
+				default:
+					break;
+			}
+		}
+		return {};
 	}
 
 	Result<uint32_t> JsonReader::ReadFormatHeader(std::string_view expectedFormat, uint32_t minimumVersion, uint32_t supportedVersion) const

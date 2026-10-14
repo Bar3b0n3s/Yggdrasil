@@ -98,10 +98,13 @@ namespace Engine {
 	// A registered component that is entity-level or not Serializable under "Components" ("Name" put there by a hand
 	// edit or merge). Repair: dropped. Never added to the entity.
 	inline constexpr std::string_view SceneMisplacedComponentCode = "SCENE_MISPLACED_COMPONENT";
-	// A known component whose value the registry rejects (wrong JSON type, out of range, non-finite, failed validator).
-	// Repair: dropped, or reset to its defaults when it is Required.
+	// A known component whose value the registry rejects (wrong JSON type, out of range, non-finite, failed validator), or
+	// an unknown one holding a fractional number outside float's range. Repair: dropped, or reset to its defaults when it
+	// is Required.
 	inline constexpr std::string_view SceneInvalidComponentCode = "SCENE_INVALID_COMPONENT";
-	// Warning: an unknown component, preserved verbatim.
+	// Warning (an error with LoadOptions::StrictUnknowns): an unknown component, preserved on save with its numbers written
+	// as float like every authored number (§6). One holding a fractional number outside float's range, which JsonWriter
+	// could not write back, is SceneInvalidComponentCode instead.
 	inline constexpr std::string_view SceneUnknownComponentCode = "SCENE_UNKNOWN_COMPONENT";
 	// Warning: an unknown entity or document key, dropped.
 	inline constexpr std::string_view SceneUnknownKeyCode = "SCENE_UNKNOWN_KEY";

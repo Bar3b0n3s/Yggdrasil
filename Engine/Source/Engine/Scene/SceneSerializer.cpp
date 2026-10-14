@@ -639,6 +639,22 @@ namespace Engine {
 			const ComponentInfo* info = m_Registry.FindComponent(name);
 			if (info == nullptr || info->GetHostOps() == nullptr)
 			{
+				if (const Status writable = component.ExpectWritableNumbers(); !writable)
+				{
+					// Kept as written, a number JsonWriter cannot write would make the scene unsavable: the component is invalid
+					// like a known component with an invalid field.
+					if (m_Options.Mode == LoadMode::Strict)
+					{
+						AddError(writable.error(), SceneInvalidComponentCode, pending.WrittenID);
+						return;
+					}
+					const std::string repair = std::format("dropped the unknown component '{}'", name);
+					m_Report.Diagnostics.push_back(LoadDiagnostic{ DiagnosticSeverity::Warning, std::string(SceneInvalidComponentCode),
+						std::format("{} (repaired: {})", writable.error().ToString(), repair), component.GetPointer(), pending.WrittenID });
+					m_Report.Repairs.push_back(
+						LoadRepair{ std::string(SceneInvalidComponentCode), repair, component.GetPointer(), pending.ID, VariantValue(component.GetValue()) });
+					return;
+				}
 				ReportUnknown(SceneUnknownComponentCode, component.GetPointer(), std::format("unknown component '{}'; it is kept as written", name),
 					m_Registry.SuggestComponentNames(name), pending.WrittenID);
 				pending.Unknown.push_back(UnknownComponentData{ name, 0, VariantValue(component.GetValue()) });

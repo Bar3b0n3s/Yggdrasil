@@ -371,6 +371,33 @@
 			]
 		},
 		{
+			"Name": "PythonLineLength",
+			"Description": "Lines over CodeStyle's 120-column limit: a 121-column string and comment, and a 118-character line whose tab advances to the next multiple of 4, making it 121 columns. A 120-column comment and string and 120 accented characters (more than 120 bytes) are the allowed controls.",
+			"Steps": [
+				"python"
+			],
+			"Modes": [
+				"regex"
+			],
+			"Expected": [
+				{
+					"Code": "python-line-length",
+					"File": "Scripts/Lib/wide_lines.py",
+					"Line": 7
+				},
+				{
+					"Code": "python-line-length",
+					"File": "Scripts/Lib/wide_lines.py",
+					"Line": 8
+				},
+				{
+					"Code": "python-line-length",
+					"File": "Scripts/Lib/wide_lines.py",
+					"Line": 10
+				}
+			]
+		},
+		{
 			"Name": "InvalidJson",
 			"Description": "A duplicate key and a trailing comma.",
 			"Steps": [

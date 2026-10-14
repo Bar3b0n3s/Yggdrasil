@@ -144,3 +144,17 @@ Verified on Windows (MSVC 14.51 / v145, Debug/Release/Dist, C++23 consumer) by a
    `CMakeLists.txt` (the `miniaudio` target, its defines and `COMMON_LINK_LIBRARIES`). Update
    `premake5.lua` and this file to match.
 5. Rebuild Debug/Release/Dist, run the engine's audio tests, and update this file (tag, commit, date).
+
+## Notices
+
+The row `Scripts/Lib/notices.py` reads for `THIRD_PARTY_NOTICES.txt` (Docs/Decisions/0024-m15-contract.md decision 8).
+
+| Field | Value |
+|---|---|
+| Name | miniaudio |
+| Upstream | https://github.com/mackron/miniaudio |
+| Version | 0.11.25 |
+| License | Unlicense OR MIT-0 |
+| Shipped | yes |
+| Projects | miniaudio |
+| License files | LICENSE |

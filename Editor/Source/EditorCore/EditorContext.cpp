@@ -30,6 +30,7 @@
 #include "Engine/Scene/Components/PrefabInstanceComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/LoadReport.h"
+#include "Engine/Scene/Prefab.h"
 #include "Engine/Scene/PrefabAsset.h"
 #include "Engine/Scene/PrefabInstantiator.h"
 #include "Engine/Scene/SceneSerializer.h"
@@ -777,6 +778,23 @@ namespace Engine {
 			return std::unexpected(std::move(assets).error().WithContext("opening the project's assets"));
 		}
 
+		// --strict (§6 "Strict reader"): the project's scenes and prefabs, read once now, whatever the asset cache holds.
+		if (m_Specification.StrictUnknowns)
+		{
+			if (Status strict = CheckProjectDocumentsStrictly(); !strict)
+			{
+				m_Assets->CloseProject();
+				m_Assets->SetScriptDiagnosticsProvider(nullptr);
+				m_ScriptService.reset();
+				m_ScriptChecker.reset();
+				m_Provenance.reset();
+				m_Project.reset();
+				Utils::UnmountLogged(vfs, Utils::CacheScheme);
+				Utils::UnmountLogged(vfs, Utils::ProjectScheme);
+				return std::unexpected(std::move(strict).error().WithContext("opening the project with --strict"));
+			}
+		}
+
 		if (vfs.IsMounted("user"))
 		{
 			if (Status added = ProjectManager::AddRecentProject(vfs, m_Project->GetProjectFile()); !added)
@@ -802,6 +820,66 @@ namespace Engine {
 			.ReadOnly = m_Project->IsReadOnly(),
 			.HotReload = true,
 		});
+	}
+
+	Status EditorContext::CheckProjectDocumentsStrictly() const
+	{
+		ENGINE_TRY_ASSIGN(const VfsPath assetsRoot, VfsPath::Create(Utils::ProjectScheme, "Assets"));
+		const VirtualFileSystem& vfs = GetVfs();
+		if (!vfs.Exists(assetsRoot))
+			return {};
+		Result<std::vector<VfsEntry>> listed = vfs.List(assetsRoot, true);
+		if (!listed)
+			return std::unexpected(Utils::ToEditorFileError(std::move(listed).error()));
+		std::vector<VfsEntry> entries = std::move(*listed);
+		std::ranges::sort(entries, [](const VfsEntry& left, const VfsEntry& right)
+		{
+			return left.Path.GetPath() < right.Path.GetPath();
+		});
+		// Script field overrides resolve against the declared fields, as a play session's load does, so a value that does not
+		// match its declaration is an error here too, and one that merely lacks a schema (no script asset) is not mistaken
+		// for an unknown key.
+		ENGINE_TRY_ASSIGN(const Ref<const ScriptFieldSchemaSource> schemas, GetScriptSchemaSnapshot());
+		const TypeRegistry& registry = GetTypeRegistry();
+		std::vector<ErrorIssue> issues;
+		for (const VfsEntry& entry : entries)
+		{
+			const std::string_view extension = entry.Path.GetExtension();
+			if (entry.Info.IsDirectory || (extension != ".scene" && extension != ".prefab"))
+				continue;
+			LoadOptions options;
+			options.Mode = LoadMode::Strict;
+			options.StrictUnknowns = true;
+			options.Schemas = schemas.get();
+			options.SourcePath = std::string(entry.Path.GetPath());
+			LoadReport report;
+			Status loaded;
+			if (extension == ".scene")
+			{
+				UUIDGenerator scratchIds = UUIDGenerator::CreateDeterministic(0);
+				const Scope<Scene> scratch = Scene::Create({ .Name = std::string(entry.Path.GetStem()), .Seed = 0, .Registry = &registry, .IdGenerator = &scratchIds, .Runtime = false });
+				loaded = SceneSerializer::LoadFromFile(*scratch, vfs, entry.Path, options, report);
+			}
+			else if (Result<Prefab> prefab = Prefab::LoadFromFile(vfs, entry.Path, registry, options, report); !prefab)
+			{
+				loaded = std::unexpected(std::move(prefab).error());
+			}
+			if (!loaded)
+			{
+				const Error& error = loaded.error();
+				issues.push_back(ErrorIssue{ .JsonPointer = error.GetLocation().JsonPointer.value_or(std::string()),
+					.Message = std::format("{}: {}", entry.Path.GetPath(), error.ToString()),
+					.Hint = error.GetHint(),
+					.Suggestions = {} });
+			}
+		}
+		if (issues.empty())
+			return {};
+		std::string message = issues.size() == 1 ? issues.front().Message : std::format("{} scene and prefab files do not load strictly", issues.size());
+		return std::unexpected(Error(ErrorCode::Validation, std::move(message))
+				.WithIssues(std::move(issues))
+				.WithHint("--strict needs every scene and prefab to load strictly, unknown keys, fields and components being errors: correct the files "
+						  "named (project.validate and scene.open name each problem), or open the project without --strict"));
 	}
 
 	void EditorContext::SetLifecycleCallbacks(EditorLifecycleCallbacks callbacks)

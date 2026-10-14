@@ -41,8 +41,8 @@ class BatchTests(AutomationTestCase):
         self.assert_engine_error(raised.exception, engine_client.INVALID_PARAMS)
 
     def test_batch_file_scaffolds_a_project_and_names_its_failing_line(self) -> None:
-        # Editor --batch <file.jsonl> (§13.12): one request per line, "$ref" naming an earlier line's result by its 1-based
-        # line number, exit code 0, or 1 at the first failing line, which stderr names.
+        # Editor --batch <file.jsonl> (§13.12): one request per line, "$ref" naming an earlier line's result by its
+        # 1-based line number, exit code 0, or 1 at the first failing line, which stderr names.
         client = self.connect(self.start_editor())
         root = self.create_project(client)
         client.call("session.shutdown")
@@ -59,13 +59,16 @@ class BatchTests(AutomationTestCase):
         batch.write_text("".join(json.dumps(line) + "\n" for line in scaffold), encoding="utf-8")
         exit_code, stderr = self.run_editor(["--headless", "--renderer", "none", "--batch", str(batch)])
         self.assertEqual(exit_code, EXIT_SUCCESS, stderr)
-        entities = {entity["Name"]: entity for entity in read_json(root / "Assets" / "Scenes" / "Main.scene")["Entities"]}
+        entities = {entity["Name"]: entity
+                    for entity in read_json(root / "Assets" / "Scenes" / "Main.scene")["Entities"]}
         self.assertEqual(entities["Board"]["Parent"], entities["Game"]["ID"])
 
         failing = self.directory / "Failing.jsonl"
         failing.write_text(json.dumps(open_project) + "\n"
-                           + json.dumps({"method": "scene.open", "params": {"path": "Assets/Scenes/Missing.scene"}}) + "\n"
-                           + json.dumps({"method": "entity.create", "params": {"name": "Never"}}) + "\n", encoding="utf-8")
+                           + json.dumps({"method": "scene.open",
+                                         "params": {"path": "Assets/Scenes/Missing.scene"}}) + "\n"
+                           + json.dumps({"method": "entity.create", "params": {"name": "Never"}}) + "\n",
+                           encoding="utf-8")
         exit_code, stderr = self.run_editor(["--headless", "--renderer", "none", "--batch", str(failing)])
         self.assertEqual(exit_code, EXIT_FAILED, stderr)
         self.assertIn("line 2", stderr)

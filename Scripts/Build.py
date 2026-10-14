@@ -21,6 +21,18 @@ The generator is detected from the workspace files Scripts/Generate.py wrote in 
 
 Projects that do not exist in a configuration (EditorCore, Editor and Tests in Dist) are never built in it.
 
+After a build that builds the Runtime (every project, Runtime itself, or a project that depends on it, such as Tests),
+on every generator (Docs/Decisions/0024-m15-contract.md decisions 2, 5 and 8):
+  - the notices file bin/<OutputDir>/Runtime/THIRD_PARTY_NOTICES.txt is generated from Vendor/*/VENDOR.md and
+    Resources/LICENSES.md (Lib/notices.py; stage_runtime_notices), which every export packages; a missing or malformed
+    "## Notices" section fails the build, naming the file;
+  - on macOS, the Vulkan loader, MoltenVK and its ICD manifest of $VULKAN_SDK are staged into Runtime/Frameworks and
+    Runtime/Vulkan/icd.d (stage_macos_frameworks), only from the SDK version Lib/Toolchain.json pins, with each file's
+    SHA-256 in the report;
+  - a Dist build archives the Runtime's symbols (.pdb and .map on Windows, .map and any .dSYM on macOS, .map on Linux)
+    in bin/Symbols/<OutputDir>/Runtime/ (archive_dist_symbols), which exports never package.
+Each step's --json result carries what it did ("notices", "macosFrameworks", "distSymbols"), like "crtRedist".
+
 Exit codes: 0 success, 1 build failed (or produced warnings under MSBuild), 2 usage error (unknown project, a project
 absent from the configuration), 3 the toolchain or generated workspace is missing, 5 timeout.
 """
@@ -34,13 +46,14 @@ if sys.version_info < (3, 10):
     sys.exit(f"Build.py requires Python 3.10 or newer (this is Python {platform.python_version()})")
 
 import argparse
+import hashlib
 import os
 import re
 import shutil
 import time
 from pathlib import Path
 
-from Lib import paths, premake, toolchain, workspace
+from Lib import notices, paths, premake, toolchain, workspace
 from Lib.process import ProcessResult, ToolNotFoundError, child_environment, run_streamed
 from Lib.report import (
     EXIT_INIT_FAILED,
@@ -58,6 +71,9 @@ BUILD_TIMEOUT_SECONDS = 7200.0
 TOOL_LINK_ROOT = paths.BIN_INT_ROOT / "Toolchain"
 RUNTIME_PROJECT = "Runtime"
 REPORTED_DIAGNOSTICS = 30
+# What a macOS bundle carries from the Vulkan SDK (EditorCore/Export/AppBundle.h).
+MACOS_FRAMEWORKS = ("libvulkan.1.dylib", "libMoltenVK.dylib")
+MOLTENVK_ICD = "MoltenVK_icd.json"
 
 # Diagnostics in GCC/Clang/ld/xcodebuild output ("file:line:col: warning: ...", "ld: warning: ...").
 POSIX_WARNING_PATTERN = re.compile(r"(^|: )warning: ", re.IGNORECASE)
@@ -377,6 +393,153 @@ def build_xcode(xcode: workspace.XcodeWorkspace, config: str, project: str | Non
 
 
 # --------------------------------------------------------------------------------------------------------------------
+# What every build of the Runtime stages beside it (Docs/Decisions/0024-m15-contract.md decisions 2, 5 and 8)
+# --------------------------------------------------------------------------------------------------------------------
+
+
+def runtime_output(root: Path, config: str) -> Path:
+    """<workspace>/bin/<OutputDir>/Runtime of `config` on this host."""
+    return root / "bin" / paths.output_directory_name(config) / RUNTIME_PROJECT
+
+
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def write_if_changed(target: Path, data: bytes) -> bool:
+    """Writes `data` to `target` through a temporary file unless it already holds exactly that; True when written."""
+    if target.is_file() and target.read_bytes() == data:
+        return False
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temporary = target.with_name(target.name + ".tmp")
+    temporary.write_bytes(data)
+    os.replace(temporary, target)
+    return True
+
+
+def stage_runtime_notices(root: Path, config: str, system: str) -> dict[str, object]:
+    """Writes THIRD_PARTY_NOTICES.txt for exports on `system` ("windows", "linux" or "macosx") next to the `config`
+    Runtime of the workspace at `root` (bin/<OutputDir>/Runtime/), where every export takes it from (decision 8). An
+    unchanged file is not rewritten. Raises ValueError, naming the file, for a missing or malformed "## Notices"
+    section."""
+    data = notices.generate_notices(paths.REPOSITORY_ROOT, system).encode("utf-8")
+    target = runtime_output(root, config) / notices.NOTICES_FILE_NAME
+    written = write_if_changed(target, data)
+    return {"path": str(target), "written": written, "bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()}
+
+
+def archive_dist_symbols(root: Path) -> dict[str, object]:
+    """Copies the Dist Runtime's symbols of the workspace at `root` into bin/Symbols/<OutputDir>/Runtime/ (§2.2
+    "archived in bin/Symbols, never shipped"; decision 2): Runtime.map on every host, Runtime.pdb on Windows (both
+    required), and on macOS Runtime.dSYM when the generator produced one (xcodebuild does; the make-style generators
+    do not). Raises FileNotFoundError naming a required file that is missing."""
+    host = paths.host()
+    source = runtime_output(root, "Dist")
+    destination = root / "bin" / "Symbols" / paths.output_directory_name("Dist") / RUNTIME_PROJECT
+    required = [source / f"{RUNTIME_PROJECT}.map"]
+    if host.is_windows:
+        required.append(source / f"{RUNTIME_PROJECT}.pdb")
+    missing = [paths.display_path(file) for file in required if not file.is_file()]
+    if missing:
+        raise FileNotFoundError(f"the Dist Runtime's symbols are missing: {', '.join(missing)}")
+    destination.mkdir(parents=True, exist_ok=True)
+    archived: list[str] = []
+    for file in required:
+        shutil.copy2(file, destination / file.name)
+        archived.append(file.name)
+    dsym = source / f"{RUNTIME_PROJECT}.dSYM"
+    if host.is_macos and dsym.is_dir():
+        shutil.rmtree(destination / dsym.name, ignore_errors=True)
+        shutil.copytree(dsym, destination / dsym.name, symlinks=True)
+        archived.append(dsym.name)
+    return {"source": str(source), "destination": str(destination), "files": archived}
+
+
+def stage_macos_frameworks(root: Path, config: str, sdk: Path) -> dict[str, object]:
+    """Stages the macOS bundle's Vulkan loader, MoltenVK and MoltenVK's ICD manifest from the Vulkan SDK at `sdk`
+    (lib/libvulkan.1.dylib, lib/libMoltenVK.dylib, share/vulkan/icd.d/MoltenVK_icd.json, symbolic links resolved) into
+    Runtime/Frameworks/ and Runtime/Vulkan/icd.d/ next to the `config` Runtime of the workspace at `root`, where the
+    exporter's bundle assembly takes them from (decision 5). Only the pinned SDK is used: raises
+    toolchain.ToolchainError when the SDK's header version is not the one Lib/Toolchain.json pins (the check Setup.py
+    makes), or when a file is missing. The result lists each staged file with its SHA-256."""
+    pinned = toolchain.parse_version(toolchain.load_pins().vulkan_sdk_version)[:3]
+    found = toolchain.vulkan_sdk_header_version(sdk)
+    if found != pinned:
+        raise toolchain.ToolchainError(
+            f"the Vulkan SDK at {sdk} is {toolchain.version_text(found)}, but "
+            f"{paths.display_path(paths.TOOLCHAIN_PIN_PATH)} pins {toolchain.version_text(pinned)}: exports "
+            f"redistribute only the pinned SDK's loader and MoltenVK (install it and point VULKAN_SDK at it)")
+    target = runtime_output(root, config)
+    copies = [(sdk / "lib" / name, target / "Frameworks" / name) for name in MACOS_FRAMEWORKS]
+    copies.append((sdk / "share" / "vulkan" / "icd.d" / MOLTENVK_ICD, target / "Vulkan" / "icd.d" / MOLTENVK_ICD))
+    for source, _ in copies:
+        if not source.is_file():
+            raise toolchain.ToolchainError(f"the Vulkan SDK at {sdk} has no {source.relative_to(sdk).as_posix()}")
+    files: list[dict[str, object]] = []
+    for source, destination in copies:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, destination)  # follows symbolic links: the bundle carries the library itself
+        shutil.copymode(source, destination)
+        files.append({"path": str(destination), "source": str(source.resolve()), "sha256": file_sha256(destination)})
+    return {"sdk": str(sdk), "version": toolchain.version_text(found), "destination": str(target), "files": files}
+
+
+def builds_runtime_in(generated: workspace.Workspace, config: str, project: str | None, started: float,
+                      root: Path) -> bool:
+    """Whether this build of `project` (None: every project) built the `config` Runtime: directly or as a dependency
+    where the workspace records dependencies (MSBuild, Xcode); for make and ninja, which record none, when the Runtime
+    executable was written during the build."""
+    if RUNTIME_PROJECT not in generated.projects_in(config):
+        return False
+    if project is None or project == RUNTIME_PROJECT:
+        return True
+    if isinstance(generated, workspace.Solution):
+        return builds_runtime(generated, config, project)
+    if isinstance(generated, workspace.XcodeWorkspace):
+        built: set[str] = set()
+        pending = [project]
+        while pending:
+            name = pending.pop()
+            if name not in built:
+                built.add(name)
+                pending.extend(generated.dependencies.get(name, set()))
+        return RUNTIME_PROJECT in built
+    executable = runtime_output(root, config) / paths.executable_name(RUNTIME_PROJECT)
+    try:
+        return executable.stat().st_mtime >= started
+    except OSError:
+        return False
+
+
+def stage_runtime_outputs(step: Step, root: Path, config: str, host: paths.Host) -> None:
+    """After `step` built the `config` Runtime: the notices file, on macOS the bundle's SDK files, and for Dist the
+    archived symbols. A failure fails the step, naming what is wrong."""
+    try:
+        staged = stage_runtime_notices(root, config, host.system)
+        step.data["notices"] = staged
+        step.detail += f"; notices -> {paths.display_path(Path(str(staged['path'])))}"
+        if host.is_macos:
+            sdk = os.environ.get("VULKAN_SDK", "")
+            if not sdk:
+                raise toolchain.ToolchainError("VULKAN_SDK is not set: macOS builds stage the pinned SDK's loader and "
+                                               "MoltenVK beside the Runtime (see Scripts/Setup.py)")
+            frameworks = stage_macos_frameworks(root, config, Path(sdk))
+            step.data["macosFrameworks"] = frameworks
+            step.detail += f"; Vulkan SDK {frameworks['version']} frameworks staged"
+        if config == "Dist":
+            symbols = archive_dist_symbols(root)
+            step.data["distSymbols"] = symbols
+            step.detail += f"; symbols -> {paths.display_path(Path(str(symbols['destination'])))}"
+    except (ValueError, FileNotFoundError, OSError) as error:
+        step.status = Status.FAILED
+        step.detail += f"; staging beside the Runtime failed: {error}"
+
+
+# --------------------------------------------------------------------------------------------------------------------
 # Entry point
 # --------------------------------------------------------------------------------------------------------------------
 
@@ -448,6 +611,7 @@ def main(argv: list[str] | None = None) -> int:
                     for config in arguments.configs}
         for config in arguments.configs:
             console.heading(f"Build {config} ({action})" + (f": {projects[config]}" if projects[config] else ""))
+            started = time.time()
             if isinstance(generated, workspace.Solution):
                 step = build_msbuild(generated, config, projects[config], arguments, console)
             elif isinstance(generated, workspace.Makefiles):
@@ -457,6 +621,9 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 assert isinstance(generated, workspace.XcodeWorkspace)
                 step = build_xcode(generated, config, projects[config], arguments, console)
+            if not step.failed and builds_runtime_in(generated, config, projects[config], started,
+                                                     generated.path.parent):
+                stage_runtime_outputs(step, generated.path.parent, config, host)
             steps.append(step)
             console.result(step)
             if step.failed:

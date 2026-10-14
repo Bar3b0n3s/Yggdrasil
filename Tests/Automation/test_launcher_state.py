@@ -23,7 +23,8 @@ class LauncherStateTests(AutomationTestCase):
         for method in methods:
             name = method["name"]
             self.assertEqual(method["availableInLauncher"], name in LAUNCHER_METHODS, name)
-        for name in ("scene.tree", "entity.create", "project.info", "component.list", "log.read", "edit.undo", "debug.stall"):
+        for name in ("scene.tree", "entity.create", "project.info", "component.list", "log.read", "edit.undo",
+                     "debug.stall"):
             with self.assertRaises(engine_client.EngineError, msg=name) as raised:
                 client.call(name, {})
             self.assert_engine_error(raised.exception, engine_client.INVALID_STATE, "InvalidState")

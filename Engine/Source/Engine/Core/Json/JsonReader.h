@@ -104,6 +104,12 @@ namespace Engine {
 		// of range.
 		[[nodiscard]] Result<JsonReader> GetElement(size_t index) const;
 
+		// Succeeds when every fractional number of this value, at any depth, reads as a float (ReadFloat), so that
+		// JsonWriter, which writes every fractional number as a float, can write the value back. For JSON a reader keeps
+		// as read and writes again later (unknown components, import settings). Errors: ReadFloat's Validation error for
+		// the first number, in document order, that does not fit.
+		[[nodiscard]] Status ExpectWritableNumbers() const;
+
 		// Checks the header every authored file starts with (§6): "Format" must be the string `expectedFormat`
 		// (Validation otherwise) and "Version" an integer from `minimumVersion` to `supportedVersion`
 		// (minimumVersion <= supportedVersion, asserted). A version below the minimum, or not an integer, is Validation;

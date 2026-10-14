@@ -31,6 +31,7 @@
 #include "Support/ExpectLog.h"
 #include "Support/SceneTestFixture.h"
 #include "Support/TestData.h"
+#include "Support/TestTimeout.h"
 #include "Support/WaitUntil.h"
 
 #include <nlohmann/json.hpp>
@@ -147,8 +148,9 @@ namespace Engine {
 		// controller's PauseOnError and BlockPlayOnTypeErrors behaviour, the suite overrides' application and the validator's
 		// StartScene and BuildScenes checks. The test ends by comparing the observed pointers with the reflected leaf walk and
 		// naming each unobserved one.
-		TEST_CASE("ProjectSettings: every AllSettings.eproj value is observed by its consumer" * doctest::timeout(600))
+		TEST_CASE("ProjectSettings: every AllSettings.eproj value is observed by its consumer")
 		{
+			Test::SetTestCaseTimeLimit(600.0);
 			Test::EditorTestFixture fixture("SettingsObservation");
 			const std::filesystem::path project = CopyObservationProject(fixture);
 			EditorContext& editor = fixture.GetEditor();

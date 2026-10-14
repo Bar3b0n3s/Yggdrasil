@@ -6,6 +6,7 @@
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Graphics/Image.h"
 #include "Support/AssetTestFixture.h"
+#include "Support/Fuzz.h"
 #include "Support/TestData.h"
 
 #include <nlohmann/json.hpp>
@@ -100,6 +101,42 @@ namespace Engine {
 
 	TEST_SUITE("AssetPipeline")
 	{
+		TEST_CASE("TextureImporter: 200 seeded mutations of PNG, JPEG, TGA and BMP files never crash" * doctest::test_suite(Test::FuzzSuite))
+		{
+			// The seed corpus: the texture fixtures of Tests/Data/Assets (stb_image's four formats, the truncated PNG included),
+			// imported from memory with a random usage and mip choice. A texture the importer accepts loads as a valid cooked
+			// texture.
+			const std::filesystem::path assets = Test::GetTestDataPath("Assets");
+			std::vector<Buffer> seeds;
+			for (const std::string_view extension : { ".png", ".jpg", ".jpeg", ".tga", ".bmp" })
+			{
+				for (Buffer& seed : Test::ReadFuzzSeeds(assets, extension))
+					seeds.push_back(std::move(seed));
+			}
+			const Test::FuzzRun run = Test::RunFuzzCase(0x7E571, 200, [&seeds](Random& random, uint64_t /*index*/)
+			{
+				Buffer mutated = seeds[static_cast<size_t>(random.RangeInt(0, static_cast<int64_t>(seeds.size()) - 1))];
+				Test::MutateBytes(mutated, random);
+				static constexpr std::array<TextureUsage, 3> Usages = { TextureUsage::Color, TextureUsage::Linear, TextureUsage::NormalMap };
+				const TextureImportSettings settings{ .Usage = Usages[static_cast<size_t>(random.RangeInt(0, 2))], .GenerateMips = random.NextBool() };
+				const Result<Buffer> cooked = TextureImporter::ImportTextureFromMemory(mutated, settings, "Fuzz.png");
+				if (!cooked.has_value())
+				{
+					CHECK(cooked.error().GetCode() == ErrorCode::ImportFailed);
+					return false;
+				}
+				const Result<AssetRef<TextureData>> texture = LoadCookedTexture(*cooked);
+				REQUIRE_MESSAGE(texture.has_value(), texture.error().ToString());
+				CHECK(ValidateTextureData(**texture).has_value());
+				return true;
+			});
+			if (Test::IsFuzzSample(run.Range))
+			{
+				CHECK(run.Counts.Rejected > 0);
+				CHECK(run.Counts.Accepted > 0);
+			}
+		}
+
 		TEST_CASE("TextureImporter: a PNG imports with a full sRGB mip chain")
 		{
 			Test::AssetTestFixture fixture;

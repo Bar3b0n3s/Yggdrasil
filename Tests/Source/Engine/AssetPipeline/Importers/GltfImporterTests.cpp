@@ -3,6 +3,7 @@
 #include "Engine/AssetPipeline/Importers/GltfImporter.h"
 
 #include "Engine/Asset/AssetDiagnostic.h"
+#include "Engine/Asset/CookedFormat.h"
 #include "Engine/Asset/DocumentData.h"
 #include "Engine/Asset/MaterialData.h"
 #include "Engine/Asset/MeshData.h"
@@ -11,6 +12,8 @@
 #include "Engine/Core/Hash.h"
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Core/Json/JsonWriter.h"
+#include "Engine/Core/Mounts/MemoryMount.h"
+#include "Engine/Core/VirtualFileSystem.h"
 #include "Engine/Reflection/ComponentInfo.h"
 #include "Engine/Reflection/StructInfo.h"
 #include "Engine/Reflection/TypeRegistry.h"
@@ -18,6 +21,7 @@
 #include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Prefab.h"
 #include "Support/AssetTestFixture.h"
+#include "Support/Fuzz.h"
 #include "Support/TestData.h"
 
 #include <nlohmann/json.hpp>
@@ -336,6 +340,69 @@ namespace Engine {
 
 	TEST_SUITE("AssetPipeline")
 	{
+		TEST_CASE("GltfImporter: 200 seeded mutations of glTF and GLB files never crash" * doctest::test_suite(Test::FuzzSuite))
+		{
+			// The seed corpus: every .gltf and .glb fixture of Tests/Data/Assets/Gltf (the refused ones included). Their external
+			// buffers and images live in a memory mount at project://Assets/Models, so the importer's dependency reads (cgltf
+			// buffers, stb_image textures) never touch a file. An import that succeeds yields sound cooked artifacts.
+			Test::AssetTestFixture fixture;
+			VirtualFileSystem vfs;
+			REQUIRE(vfs.Mount("project", CreateScope<MemoryMount>()));
+			const Result<std::vector<std::string>> dependencies = Test::ListTestDataFiles("Assets/Gltf", { ".bin", ".png" });
+			REQUIRE_MESSAGE(dependencies.has_value(), dependencies.error().ToString());
+			for (const std::string& file : *dependencies)
+			{
+				Result<Buffer> bytes = FileSystem::ReadFile(Test::GetTestDataPath(file));
+				REQUIRE(bytes.has_value());
+				const Result<VfsPath> path = VfsPath::Create("project", "Assets/Models/" + file.substr(std::string_view("Assets/Gltf/").size()));
+				REQUIRE(path.has_value());
+				REQUIRE(vfs.CreateDirectories(path->GetParent()).has_value());
+				REQUIRE(vfs.WriteFileAtomic(*path, *bytes).has_value());
+			}
+			std::vector<Buffer> seeds = Test::ReadFuzzSeeds(Test::GetTestDataPath("Assets/Gltf"), ".gltf");
+			for (Buffer& binary : Test::ReadFuzzSeeds(Test::GetTestDataPath("Assets/Gltf"), ".glb"))
+				seeds.push_back(std::move(binary));
+			const Result<VfsPath> source = VfsPath::Create("project", "Assets/Models/Fuzz.gltf");
+			REQUIRE(source.has_value());
+			const Test::FuzzRun run = Test::RunFuzzCase(0x617F, 200, [&fixture, &vfs, &seeds, &source](Random& random, uint64_t /*index*/)
+			{
+				Buffer mutated = seeds[static_cast<size_t>(random.RangeInt(0, static_cast<int64_t>(seeds.size()) - 1))];
+				Test::MutateBytes(mutated, random);
+				Json settings = MakeDefaultSettings();
+				settings["GenerateMissingTangents"] = random.NextBool();
+				settings["ImportMaterials"] = random.NextBool();
+				settings["MergeMeshes"] = random.NextBool();
+				AssetMetadata metadata = MakeGltfMetadata(AssetHandle(0x617f000000000001ull));
+				metadata.Settings = VariantValue(settings);
+				ImportContext context({
+					.Vfs = &vfs,
+					.SourcePath = *source,
+					.SourceBytes = mutated,
+					.Settings = VariantValue(settings),
+					.Registry = &fixture.GetRegistry(),
+					.Assets = {},
+					.EnvironmentBaker = nullptr,
+					.ScriptDiagnostics = nullptr,
+				});
+				const Result<ImportResult> imported = GltfImporter().Import(context, metadata);
+				if (!imported.has_value())
+					return false;
+				CHECK_FALSE(imported->Artifacts.empty());
+				for (const ImportedArtifact& artifact : imported->Artifacts)
+				{
+					const Result<CookedArtifactView> view = ReadCookedArtifact(artifact.Cooked);
+					REQUIRE_MESSAGE(view.has_value(), view.error().ToString());
+					CHECK(view->Header.Type == artifact.Type);
+				}
+				return true;
+			});
+			if (Test::IsFuzzSample(run.Range))
+			{
+				CHECK(run.Counts.Rejected > 0);
+				CHECK(run.Counts.Accepted > 0);
+			}
+		}
+
 		TEST_CASE("GltfImporter: every fixture imports")
 		{
 			Test::AssetTestFixture fixture;

@@ -96,3 +96,17 @@ Only the X11 backend is built on Linux. Ubuntu 24.04 runs Wayland sessions with 
 3. Replace `include/GLFW/*.h`, `LICENSE.md` and the files in `src/`, excluding `wl_*`, `CMakeLists.txt`, `glfw.rc.in` and `mappings.h.in` as described above.
 4. Diff the new `src/CMakeLists.txt` against the file lists and defines in `premake5.lua`, per platform. Watch for added, removed or renamed sources and new compile definitions or link libraries. Update `premake5.lua`.
 5. Rebuild Debug, Release and Dist, run the engine's tests, and update this file (version, commit, date, notes).
+
+## Notices
+
+The row `Scripts/Lib/notices.py` reads for `THIRD_PARTY_NOTICES.txt` (Docs/Decisions/0024-m15-contract.md decision 8).
+
+| Field | Value |
+|---|---|
+| Name | GLFW |
+| Upstream | https://github.com/glfw/glfw |
+| Version | 3.5.1 |
+| License | Zlib |
+| Shipped | yes |
+| Projects | GLFW |
+| License files | LICENSE.md |

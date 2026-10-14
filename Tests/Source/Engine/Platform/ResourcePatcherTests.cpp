@@ -149,7 +149,7 @@ namespace Engine {
 
 	TEST_SUITE("Platform")
 	{
-		TEST_CASE("ResourcePatcher: VS_VERSIONINFO holds the version, company and names" * doctest::skip(true))
+		TEST_CASE("ResourcePatcher: VS_VERSIONINFO holds the version, company and names")
 		{
 			const Result<Buffer> built = ResourcePatcher::BuildVersionInfo(MakeVersionInfo());
 			REQUIRE_MESSAGE(built.has_value(), built.error().ToString());
@@ -221,7 +221,7 @@ namespace Engine {
 			CHECK(FailureCode(ResourcePatcher::BuildVersionInfo(invalid)) == ErrorCode::InvalidArgument);
 		}
 
-		TEST_CASE("ResourcePatcher: the icon group lists every size with its id" * doctest::skip(true))
+		TEST_CASE("ResourcePatcher: the icon group lists every size with its id")
 		{
 			std::vector<ExecutableIconImage> icons;
 			for (const uint16_t size : std::array<uint16_t, 4>{ 16, 32, 48, 256 })
@@ -252,10 +252,18 @@ namespace Engine {
 			std::vector<ExecutableIconImage> mislabelled = { MakeIcon(32) };
 			mislabelled.front().Size = 48;
 			CHECK(FailureCode(ResourcePatcher::BuildIconGroup(mislabelled)) == ErrorCode::InvalidArgument);
+			const std::vector<ExecutableIconImage> duplicated = { MakeIcon(32), MakeIcon(32) };
+			CHECK(FailureCode(ResourcePatcher::BuildIconGroup(duplicated)) == ErrorCode::InvalidArgument);
+			std::vector<ExecutableIconImage> notPng = { MakeIcon(16) };
+			notPng.front().Png = Buffer(64, std::byte{ 0x42 });
+			CHECK(FailureCode(ResourcePatcher::BuildIconGroup(notPng)) == ErrorCode::InvalidArgument);
+			std::vector<ExecutableIconImage> tooSmall = { MakeIcon(16) };
+			tooSmall.front().Size = 8;
+			CHECK(FailureCode(ResourcePatcher::BuildIconGroup(tooSmall)) == ErrorCode::InvalidArgument);
 		}
 
 #if defined(ENGINE_PLATFORM_WINDOWS)
-		TEST_CASE("ResourcePatcher: patching keeps the manifest and replaces the icon group and version" * doctest::skip(true))
+		TEST_CASE("ResourcePatcher: patching keeps the manifest and replaces the icon group and version")
 		{
 			const Result<std::filesystem::path> runtime = Test::GetBuiltExecutablePath("Runtime");
 			REQUIRE_MESSAGE(runtime.has_value(), runtime.error().ToString());
@@ -302,8 +310,29 @@ namespace Engine {
 			REQUIRE(probe->Icons.size() == 1);
 			CHECK(probe->Icons[0].first == 32);
 		}
+
+		TEST_CASE("ResourcePatcher: a file that is not an executable is an Io error and stays as it was")
+		{
+			Test::TempDirectory directory("ResourcePatcherInvalid");
+			const std::filesystem::path file = directory / "NotAnExecutable.exe";
+			constexpr std::string_view Text = "not a portable executable";
+			REQUIRE(FileSystem::WriteFileAtomic(file, AsBytes(Text), { .KeepBackup = false }).has_value());
+			const ExecutableResourceSet resources{ .Icons = { MakeIcon(16) }, .Version = MakeVersionInfo() };
+			const Status patched = ResourcePatcher::Patch(file, resources);
+			REQUIRE_FALSE(patched.has_value());
+			CHECK(patched.error().GetCode() == ErrorCode::Io);
+			CHECK(patched.error().GetMessageText().contains("NotAnExecutable.exe"));
+			CHECK(FileSystem::ReadText(file).value_or("") == Text);
+
+			// Invalid resources are refused before the file is opened.
+			ExecutableResourceSet invalid = resources;
+			invalid.Version.ProductName.clear();
+			const Status refused = ResourcePatcher::Patch(file, invalid);
+			REQUIRE_FALSE(refused.has_value());
+			CHECK(refused.error().GetCode() == ErrorCode::InvalidArgument);
+		}
 #else
-		TEST_CASE("ResourcePatcher: Patch is Unsupported where executables carry no resources" * doctest::skip(true))
+		TEST_CASE("ResourcePatcher: Patch is Unsupported where executables carry no resources")
 		{
 			Test::TempDirectory directory("ResourcePatcher");
 			const ExecutableResourceSet resources{ .Icons = {}, .Version = MakeVersionInfo() };

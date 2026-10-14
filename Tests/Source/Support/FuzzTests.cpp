@@ -34,7 +34,7 @@ namespace Engine {
 
 	TEST_SUITE("Support")
 	{
-		TEST_CASE("Fuzz: iteration seeds depend only on the case seed and the index" * doctest::skip(true))
+		TEST_CASE("Fuzz: iteration seeds depend only on the case seed and the index")
 		{
 			std::set<uint64_t> seeds;
 			for (uint64_t index = 0; index < 1000; ++index)
@@ -46,7 +46,7 @@ namespace Engine {
 			CHECK(Test::GetFuzzIterationSeed(0, 0) == 0xE220A8397B1DCDAFull);
 		}
 
-		TEST_CASE("Fuzz: the range honours the acceptance count, the scale, an absolute count and shards without overlap" * doctest::skip(true))
+		TEST_CASE("Fuzz: the range honours the acceptance count, the scale, an absolute count and shards without overlap")
 		{
 			Test::TestOptions options = Test::GetTestOptions();
 			options.FuzzIterations = 0;
@@ -96,9 +96,14 @@ namespace Engine {
 				CHECK(range.Begin == 777777);
 				CHECK(range.End == 777778);
 			});
+
+			// The replay command of a failure names this case with its commas escaped for doctest's filter.
+			CHECK(Test::GetFuzzReplayCommand(1000000, 777777)
+				== "Tests \"--test-case=Fuzz: the range honours the acceptance count\\, the scale\\, an absolute count and shards without overlap\" "
+				   "--fuzz-iterations=1000000 --fuzz-index=777777");
 		}
 
-		TEST_CASE("Fuzz: each run reports one line the hardening stage counts" * doctest::skip(true))
+		TEST_CASE("Fuzz: each run reports one line the hardening stage counts")
 		{
 			const Test::ExpectLog line(LogLevel::Info,
 				"Fuzz 'PakReader: 10,000 seeded mutations': iterations 0..500 of 1000 (seed 0x00000000000009a4): 12 accepted, 488 rejected");
@@ -107,9 +112,113 @@ namespace Engine {
 			CHECK(line.GetMatchCount() == 1);
 		}
 
+		TEST_CASE("Fuzz: RunFuzzCase seeds every iteration by its index alone, counts its outcomes and reports its range")
+		{
+			Test::TestOptions options = Test::GetTestOptions();
+			options.FuzzIterations = 0;
+			options.FuzzScale = 1.0;
+			options.FuzzShardIndex = 0;
+			options.FuzzShardCount = 1;
+			options.FuzzIndex.reset();
+			std::vector<uint64_t> whole;
+			WithOptions(options, [&whole]()
+			{
+				const Test::ExpectLog line(LogLevel::Info, "iterations 0..10 of 10 (seed 0x0000000000000011): 5 accepted, 5 rejected");
+				const Test::FuzzRun run = Test::RunFuzzCase(0x11, 10, [&whole](Random& random, uint64_t index)
+				{
+					whole.push_back(random.NextU64());
+					return index % 2 == 0;
+				});
+				CHECK(run.Counts.Accepted == 5);
+				CHECK(run.Counts.Rejected == 5);
+				CHECK(run.Range.Total == 10);
+				CHECK(line.GetMatchCount() == 1);
+				CHECK_FALSE(Test::IsFuzzSample(run.Range));
+				CHECK(Test::IsFuzzSample(run.Range, 10));
+			});
+			REQUIRE(whole.size() == 10);
+			CHECK(whole[3] == Random(Test::GetFuzzIterationSeed(0x11, 3)).NextU64());
+
+			// The second of two shards, and a replay of one index, draw exactly the inputs the whole run drew there.
+			options.FuzzShardIndex = 1;
+			options.FuzzShardCount = 2;
+			WithOptions(options, [&whole]()
+			{
+				std::vector<uint64_t> shard;
+				const Test::FuzzRun run = Test::RunFuzzCase(0x11, 10, [&shard](Random& random, uint64_t /*index*/)
+				{
+					shard.push_back(random.NextU64());
+					return true;
+				});
+				CHECK(run.Range.Begin == 5);
+				CHECK(shard == std::vector<uint64_t>(whole.begin() + 5, whole.end()));
+			});
+			options.FuzzShardIndex = 0;
+			options.FuzzShardCount = 1;
+			options.FuzzIndex = 7;
+			WithOptions(options, [&whole]()
+			{
+				std::vector<uint64_t> replay;
+				const Test::FuzzRun run = Test::RunFuzzCase(0x11, 10, [&replay](Random& random, uint64_t /*index*/)
+				{
+					replay.push_back(random.NextU64());
+					return true;
+				});
+				CHECK(replay == std::vector<uint64_t>{ whole[7] });
+				// A replay is never a sample, whatever its length.
+				CHECK_FALSE(Test::IsFuzzSample(run.Range, 1));
+			});
+		}
+
+		TEST_CASE("Fuzz: mutations depend only on the random stream and change the input")
+		{
+			const std::vector<std::byte> original = { std::byte{ 'E' }, std::byte{ 'C' }, std::byte{ 'K' }, std::byte{ 'D' }, std::byte{ 1 },
+				std::byte{ 0 }, std::byte{ 0 }, std::byte{ 0 }, std::byte{ 0xff }, std::byte{ 0x10 } };
+			const std::string text = R"({"Format": "Scene", "Version": 3, "Entities": [{"Name": "A", "Scale": [1, 2.5, -3]}]})";
+			uint32_t changedBytes = 0;
+			uint32_t changedText = 0;
+			for (uint64_t index = 0; index < 1000; ++index)
+			{
+				CAPTURE(index);
+				const uint64_t seed = Test::GetFuzzIterationSeed(0xF022, index);
+				std::vector<std::byte> first = original;
+				std::vector<std::byte> second = original;
+				Random firstRandom(seed);
+				Random secondRandom(seed);
+				Test::MutateBytes(first, firstRandom);
+				Test::MutateBytes(second, secondRandom);
+				CHECK(first == second);
+				changedBytes += first != original ? 1u : 0u;
+				CHECK(first.size() <= original.size() + 3 * 64);
+
+				std::string firstText = text;
+				std::string secondText = text;
+				Test::MutateText(firstText, firstRandom);
+				Test::MutateText(secondText, secondRandom);
+				CHECK(firstText == secondText);
+				changedText += firstText != text ? 1u : 0u;
+			}
+			// A mutation may restore the input by chance (a chunk copied over an equal one), but almost never.
+			CHECK(changedBytes > 950);
+			CHECK(changedText > 950);
+
+			// An empty input is first grown, so its mutations are not all empty.
+			uint32_t grown = 0;
+			for (uint64_t index = 0; index < 100; ++index)
+			{
+				std::vector<std::byte> empty;
+				Random random(Test::GetFuzzIterationSeed(1, index));
+				Test::MutateBytes(empty, random);
+				grown += empty.empty() ? 0u : 1u;
+				std::string emptyText;
+				Test::MutateText(emptyText, random);
+			}
+			CHECK(grown > 50);
+		}
+
 		// Whether every listed case exists and ran its iterations is the hardening stage's check (Lib/hardening.py
 		// evaluate_fuzz_logs), which sees the run.
-		TEST_CASE("Fuzz: Targets.json lists every required reader of external input" * doctest::skip(true))
+		TEST_CASE("Fuzz: Targets.json lists every required reader of external input")
 		{
 			const Result<std::string> text = Test::ReadTestDataText("Fuzz/Targets.json");
 			REQUIRE_MESSAGE(text.has_value(), text.error().ToString());

@@ -246,7 +246,7 @@
 					}
 				},
 				"Icon": {
-					"description": "Project-relative PNG used as the executable's icon, at least 256 x 256 pixels.",
+					"description": "Project-relative square PNG used as the executable's icon, at least 256 x 256 pixels.",
 					"type": "string"
 				},
 				"Version": {
@@ -254,7 +254,7 @@
 					"type": "string"
 				},
 				"Company": {
-					"description": "Company name written into the executable's resources.",
+					"description": "Company name written into the executable's resources: valid UTF-8 without control characters, U+FFFE or U+FFFF, at most 32000 bytes.",
 					"type": "string"
 				}
 			},

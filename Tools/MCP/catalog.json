@@ -1390,7 +1390,7 @@
 		{
 			"name": "project_export",
 			"method": "project.export",
-			"description": "Exports the open project as a standalone game below Build/: the configuration's Runtime renamed after the project, the app-local CRT, Game.json, Data/Engine.pak and Data/Game.pak, optionally smoke-tested; resolves with the report.",
+			"description": "Exports the open project as a standalone game below Build/: the configuration's Runtime renamed after the project, the app-local CRT, Game.json, Data/Engine.pak and Data/Game.pak, optionally smoke-tested, or with testing a testing export whose game runs its suites and replays with --feature-test; resolves with the report.",
 			"inputSchema": {
 				"$schema": "https://json-schema.org/draft/2020-12/schema",
 				"title": "ProjectExportParams",
@@ -1410,7 +1410,7 @@
 						"type": "boolean"
 					},
 					"testing": {
-						"description": "A testing export (M15): refused while present.",
+						"description": "A testing export: Game.json says Testing true, so the exported game runs --feature-test; Assets/Tests/** and every Testing.Suites script and scene and Testing.Replays match are packaged whatever Export.Exclude says; invalid suites (TEST_SUITE_INVALID) and replays that do not import fail validation. Its default output directory is Build/<Platform>-<Config>-Testing/<Name>.",
 						"type": "boolean"
 					},
 					"ifRevision": {

@@ -3,6 +3,7 @@
 
 #include "Engine/Core/FixedStepScheduler.h"
 #include "Engine/Core/Random.h"
+#include "Engine/Core/Utf8.h"
 #include "Engine/Reflection/TypeRegistry.h"
 
 #include <nlohmann/json.hpp>
@@ -144,6 +145,8 @@ namespace Engine {
 		{
 			if (!IsVersionText(settings.Version))
 				context.Error("Version", std::format("must have the form major.minor.patch (got '{}')", settings.Version));
+			if (const std::optional<std::string> problem = FindExportCompanyProblem(settings.Company))
+				context.Error("Company", *problem);
 		}
 
 		static void GenerateExport(ExportSettings& settings, Random& random)
@@ -152,6 +155,8 @@ namespace Engine {
 			const int64_t minor = random.RangeInt(0, 99);
 			const int64_t patch = random.RangeInt(0, 999);
 			settings.Version = std::format("{}.{}.{}", major, minor, patch);
+			if (FindExportCompanyProblem(settings.Company).has_value())
+				settings.Company.clear();
 		}
 
 		static void ValidateOverrides(const TestSuiteOverrides& overrides, ValidationContext& context)
@@ -234,8 +239,43 @@ namespace Engine {
 
 	}
 
+	std::optional<std::string> FindExportTextProblem(std::string_view text)
+	{
+		if (!IsValidUtf8(text))
+			return std::string("is not valid UTF-8");
+		size_t index = 0;
+		while (index < text.size())
+		{
+			const size_t length = GetUtf8SequenceLength(text, index);
+			const auto lead = static_cast<unsigned char>(text[index]);
+			if (length == 1 && (lead < 0x20 || lead == 0x7F))
+				return std::format("holds the control character U+{:04X} at byte {}, which an exported executable's text refuses on every host", lead, index);
+			const std::string_view sequence = text.substr(index, length);
+			if (sequence == "\xEF\xBF\xBE" || sequence == "\xEF\xBF\xBF")
+			{
+				return std::format("holds U+{} at byte {}, which XML 1.0 (the macOS Info.plist) cannot carry", sequence == "\xEF\xBF\xBE" ? "FFFE" : "FFFF",
+					index);
+			}
+			index += length;
+		}
+		return std::nullopt;
+	}
+
+	std::optional<std::string> FindExportCompanyProblem(std::string_view company)
+	{
+		if (company.size() > ExportSettings::MaxCompanyBytes)
+		{
+			return std::format("is {} bytes long; at most {} fit in every exported executable's resources", company.size(),
+				ExportSettings::MaxCompanyBytes);
+		}
+		return FindExportTextProblem(company);
+	}
+
 	void RegisterProjectSettingsTypes(TypeRegistry& registry)
 	{
+		// The Company field's description names the bound.
+		static_assert(ExportSettings::MaxCompanyBytes == 32000, "update the Company description below");
+
 		registry.Enum<InputActionSettings::ActionType>("InputActionType", "How an input action reads its controls.")
 			.Entry(InputActionSettings::ActionType::Button, "Button", "Pressed or released, driven by the action's Bindings.")
 			.Entry(InputActionSettings::ActionType::Axis, "Axis", "A value in [-1, 1] from the Positive and Negative controls and the Gamepad axis.");
@@ -311,9 +351,10 @@ namespace Engine {
 		registry.Struct<ExportSettings>("ExportSettings", "What an exported game contains and how its executable is labelled.")
 			.Field("BuildScenes", &ExportSettings::BuildScenes, "Project-relative scenes packed into the export.")
 			.Field("Exclude", &ExportSettings::Exclude, "Project-relative globs of assets left out of the export.")
-			.Field("Icon", &ExportSettings::Icon, "Project-relative PNG used as the executable's icon, at least 256 x 256 pixels.")
+			.Field("Icon", &ExportSettings::Icon, "Project-relative square PNG used as the executable's icon, at least 256 x 256 pixels.")
 			.Field("Version", &ExportSettings::Version, "Version of the exported game, in the form major.minor.patch.")
-			.Field("Company", &ExportSettings::Company, "Company name written into the executable's resources.")
+			.Field("Company", &ExportSettings::Company,
+				"Company name written into the executable's resources: valid UTF-8 without control characters, U+FFFE or U+FFFF, at most 32000 bytes.")
 			.Validate(&Utils::ValidateExport)
 			.Generate(&Utils::GenerateExport);
 

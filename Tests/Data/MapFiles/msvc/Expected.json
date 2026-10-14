@@ -1,0 +1,26 @@
+{
+  "Clean": [],
+  "automation": [
+    "forbidden automation: ??_7RuntimeAutomationServer@Engine@@6B@ (Engine:RuntimeAutomationServer.obj)",
+    "forbidden automation: ?Beat@Watchdog@Engine@@QEAAXXZ (Engine:Watchdog.obj)",
+    "forbidden automation: ?ParseRpcRequest@Engine@@YA?AV?$expected@URpcRequest@Engine@@URpcParseFailure@2@@std@@V?$basic_string_view@DU?$char_traits@D@std@@@4@@Z (Engine:JsonRpc.obj)"
+  ],
+  "Analysis": [
+    "forbidden Analysis: ?check@Frontend@Luau@@QEAA?AUCheckResult@2@AEBV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@V?$optional@UFrontendOptions@Luau@@@5@@Z (LuauAnalysis:Frontend.obj)",
+    "forbidden Analysis: ?visit@TypeChecker2@Luau@@QEAAXPEAVAstStatBlock@2@@Z (LuauAnalysis:TypeChecker2.obj)"
+  ],
+  "ImGui": [
+    "forbidden ImGui: ??0ImGuiContext@@QEAA@PEAUImFontAtlas@@@Z (ImGui:imgui.obj)",
+    "forbidden ImGui: ?Begin@ImGui@@YA_NPEBDPEA_NH@Z (ImGui:imgui.obj)",
+    "forbidden ImGui: ?OnKeyPressed@StatsOverlayToggle@Engine@@QEAAXW4Key@2@_N@Z (Engine:StatsOverlay.obj)",
+    "forbidden ImGui: ?Render@ImGuiLayer@Engine@@QEAA?AV?$expected@XVError@Engine@@@std@@AEAVICommandList@nvrhi@@AEAVIFramebuffer@5@@Z (Engine:ImGuiLayer.obj)"
+  ],
+  "AssetPipeline": [
+    "forbidden AssetPipeline: ?Import@TextureImporter@Engine@@UEBA?AV?$expected@UImportResult@Engine@@VError@2@@std@@AEAVImportContext@2@@Z (Engine:TextureImporter.obj)",
+    "forbidden AssetPipeline: ?Write@PakWriter@Engine@@QEAA?AV?$expected@XVError@Engine@@@std@@AEBVpath@filesystem@std@@@Z (Engine:PakWriter.obj)"
+  ],
+  "MissingRequired": [
+    "missing required symbol: FeatureTestRunner",
+    "missing required symbol: ReplayPlayer"
+  ]
+}

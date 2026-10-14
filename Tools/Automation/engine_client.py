@@ -526,8 +526,8 @@ def output_directory_name(config: str) -> str:
 
 
 def configurations_from_environment() -> tuple[str, ...]:
-    """The build configurations whose editor is started, in order of preference: ENGINE_AUTOMATION_CONFIG alone when set,
-    else Release, then Debug (§13.8: Release first)."""
+    """The build configurations whose editor is started, in order of preference: ENGINE_AUTOMATION_CONFIG alone when
+    set, else Release, then Debug (§13.8: Release first)."""
     config = os.environ.get(CONFIG_ENVIRONMENT_VARIABLE, "")
     return (config,) if config else DEFAULT_CONFIGURATIONS
 

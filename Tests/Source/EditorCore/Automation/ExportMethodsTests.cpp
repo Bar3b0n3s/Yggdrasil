@@ -4,8 +4,10 @@
 
 #include "EditorCore/Commands/ProjectSettingsCommand.h"
 #include "EditorCore/EditorContext.h"
+#include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Json/JsonReader.h"
+#include "Engine/Core/VfsPath.h"
 #include "Support/AutomationTestClient.h"
 #include "Support/ExportBinaryRoot.h"
 #include "Support/TempDirectory.h"
@@ -16,6 +18,7 @@
 #include <filesystem>
 #include <string>
 #include <utility>
+#include <vector>
 
 // project.export in process (Architecture §13.5, §14.2): the param checks, the pending operation and its cancellation by a
 // disconnect. The exports themselves are tested by EditorCore/Export/ExporterTests.cpp and Tests/Automation/test_export.py.
@@ -59,14 +62,48 @@ namespace Engine {
 
 	TEST_SUITE("EditorCore")
 	{
-		TEST_CASE("ExportMethods: project.export refuses testing exports until M15 stream B lands them")
+		TEST_CASE("ExportMethods: project.export accepts testing true and false, and a testing export reports its suites and replays")
 		{
-			// Stream B replaces this case with its acceptance (ADR 0024 decision 6): testing true and false are accepted, and
-			// a testing export resolves with testing true and its suite and replay counts.
-			Test::AutomationFixture fixture("ExportMethods");
-			const Json testing = fixture.Request("project.export", Json{ { "config", "release" }, { "testing", true } });
-			CHECK(testing["error"]["code"] == Json(-32009));
-			CHECK(testing["error"]["data"]["issues"][0]["pointer"] == Json("/testing"));
+			// M15 (ADR 0024 decision 6): testing is accepted either way; a testing export resolves with testing true, its suite
+			// count and its replay count, in its own default directory, and a plain export with testing false.
+			Test::EditorTestFixture fixture("ExportMethods");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			MakeExportable(fixture.GetEditor());
+			EditorContext& editor = fixture.GetEditor();
+			const Result<VfsPath> suite = VfsPath::Create("project", "Assets/Tests/Smoke.test.luau");
+			REQUIRE(suite.has_value());
+			constexpr std::string_view SuiteText = R"(--!strict
+return Test.Suite("Smoke", function()
+	Test.Case("passes", function() end)
+end)
+)";
+			REQUIRE(editor.WriteProjectFile(*suite, AsBytes(SuiteText)).has_value());
+			REQUIRE(editor.GetAssets().Refresh().has_value());
+			const Result<Json> patch = JsonReader::Parse(R"({"Testing":{"Suites":[{"Script":"Assets/Tests/Smoke.test.luau","Scene":"Assets/Scenes/Main.scene"}]}})");
+			REQUIRE(patch.has_value());
+			Result<Scope<ProjectSettingsCommand>> command = ProjectSettingsCommand::CreateFromPatch(editor, *patch, "Testing Settings");
+			REQUIRE_MESSAGE(command.has_value(), command.error().ToString());
+			REQUIRE(editor.Execute(std::move(*command)).has_value());
+
+			const Test::TempDirectory binaries("ExportBinaries");
+			Test::AutomationTestClient client(editor, MakeExportServerSpecification(MakeBinaryRoot(binaries)));
+			const Result<Json> testing = client.Call("project.export", Json{ { "config", "release" }, { "testing", true } });
+			REQUIRE_MESSAGE(testing.has_value(), testing.error().ToString());
+			CHECK((*testing)["testing"] == Json(true));
+			CHECK((*testing)["testSuiteCount"] == Json(1));
+			CHECK((*testing)["replayCount"] == Json(0));
+			const std::filesystem::path output =
+				fixture.GetProjectRoot() / FileSystem::PathFromUtf8(Exporter::GetDefaultOutputDirectory("TestProject", ExportConfiguration::Release, true));
+			CHECK((*testing)["outputDirectory"] == Json(FileSystem::PathToUtf8(output)));
+
+			const Result<Json> plain = client.Call("project.export", Json{ { "config", "release" }, { "testing", false } });
+			REQUIRE_MESSAGE(plain.has_value(), plain.error().ToString());
+			CHECK((*plain)["testing"] == Json(false));
+			CHECK((*plain)["testSuiteCount"] == Json(0));
+			CHECK((*plain)["replayCount"] == Json(0));
+			CHECK((*plain)["outputDirectory"]
+				== Json(FileSystem::PathToUtf8(fixture.GetProjectRoot() / FileSystem::PathFromUtf8(Exporter::GetDefaultOutputDirectory("TestProject", ExportConfiguration::Release)))));
 		}
 
 		TEST_CASE("ExportMethods: project.export refuses output directories outside Build")
@@ -171,7 +208,7 @@ namespace Engine {
 			CHECK_FALSE(std::filesystem::exists(fixture.GetProjectRoot() / "Build", error));
 		}
 
-		TEST_CASE("ExportMethods: project.export reports the testing, resource and phase-timing fields" * doctest::skip(true))
+		TEST_CASE("ExportMethods: project.export reports the testing, resource and phase-timing fields")
 		{
 			// M15 (ADR 0024 decisions 2, 4 and 6; stream B adds the fields to ProjectExportResult with their descriptions).
 			Test::EditorTestFixture fixture("ExportMethods");
@@ -190,18 +227,27 @@ namespace Engine {
 			CHECK((*result)["testing"] == Json(false));
 			CHECK((*result)["testSuiteCount"] == Json(0));
 			CHECK((*result)["replayCount"] == Json(0));
-			CHECK((*result)["resourcesPatched"].is_boolean());
+			// The executable's resources are written on Windows (the version resource) and macOS (Info.plist); Linux
+			// executables carry none (Exporter.h step 4a, ExportReport::ResourcesPatched).
+#if defined(ENGINE_PLATFORM_WINDOWS) || defined(ENGINE_PLATFORM_MACOS)
+			CHECK((*result)["resourcesPatched"] == Json(true));
+#else
+			CHECK((*result)["resourcesPatched"] == Json(false));
+#endif
+			// One timing per phase entered, in phase order: every phase from Validate to MoveToOutput, a phase with nothing
+			// to do for this export (Sign off macOS, SmokeTest without smokeTest) included (ADR 0024 decision 2).
 			const Json& timings = (*result)["phaseTimings"];
 			REQUIRE(timings.is_array());
+			std::vector<std::string> phases;
 			for (const Json& timing : timings)
 			{
 				REQUIRE(timing.contains("phase"));
 				REQUIRE(timing.contains("seconds"));
-				CHECK(timing["phase"].is_string());
 				CHECK(timing["seconds"].is_number());
+				CHECK(JsonReader(timing["seconds"]).ReadDouble().value_or(-1.0) >= 0.0);
+				phases.push_back(JsonReader(timing["phase"]).ReadString().value_or(std::string()));
 			}
-			if (!timings.empty())
-				CHECK(timings.front()["phase"] == Json("Validate"));
+			CHECK(phases == std::vector<std::string>{ "Validate", "Cook", "WritePaks", "CopyRuntime", "PatchResources", "WriteManifest", "Sign", "SmokeTest", "MoveToOutput" });
 		}
 
 		TEST_CASE("ExportMethods: a disconnect cancels project.export and removes what it wrote")

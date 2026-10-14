@@ -104,3 +104,17 @@ stb has no releases; pin a `master` commit.
    with the `extras/stb_vorbis.c` of the vendored miniaudio release and record any difference here.
 4. Ensure LF line endings (clone with `-c core.autocrlf=false`); note the new header version numbers from the first line of each header.
 5. Update this file (commit, versions, SHA-256 of `stb_vorbis.c`, date, warning line numbers), rebuild all configurations and run the unit tests (image import tests, and the audio decoder and importer tests for stb_vorbis).
+
+## Notices
+
+The row `Scripts/Lib/notices.py` reads for `THIRD_PARTY_NOTICES.txt` (Docs/Decisions/0024-m15-contract.md decision 8).
+
+| Field | Value |
+|---|---|
+| Name | stb |
+| Upstream | https://github.com/nothings/stb |
+| Version | master 2c980bb59875b0d32144a71867fbdebb2f77cd20 |
+| License | MIT OR Unlicense |
+| Shipped | yes |
+| Projects | - |
+| License files | LICENSE |

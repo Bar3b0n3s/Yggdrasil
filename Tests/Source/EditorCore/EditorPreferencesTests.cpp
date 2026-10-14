@@ -7,6 +7,7 @@
 #include "Engine/Core/Mounts/MemoryMount.h"
 #include "Engine/Core/VirtualFileSystem.h"
 #include "Support/ChildProcess.h"
+#include "Support/Fuzz.h"
 #include "Support/TempDirectory.h"
 #include "Support/TestOptions.h"
 
@@ -88,6 +89,52 @@ namespace Engine {
 			Json invalidKey = *document;
 			invalidKey["Future"][std::string(1, static_cast<char>(0xfe))] = 1;
 			CHECK(SerializeEditorPreferences(invalidKey).error().GetCode() == ErrorCode::Validation);
+		}
+
+		TEST_CASE("EditorPreferences: 1,000 seeded mutations of Editor.json never crash" * doctest::test_suite(Test::FuzzSuite))
+		{
+			// user://Editor.json lives in a memory mount, so no iteration touches a file. The seeds: preferences the writer
+			// stored with every member set, and a file of a newer editor with recent projects and unknown members.
+			VirtualFileSystem vfs;
+			REQUIRE(vfs.Mount("user", CreateScope<MemoryMount>()));
+			const auto path = VfsPath::Parse("user://Editor.json");
+			REQUIRE(path);
+			EditorPreferences full;
+			full.AllowAiAutomation = true;
+			full.ExternalEditorExecutable = "C:/Tools/Editor app.exe";
+			full.ExternalEditorArguments = { "--goto", "{path}:{line}" };
+			REQUIRE(WriteEditorPreferences(vfs, full));
+			const auto written = vfs.ReadText(*path);
+			REQUIRE(written);
+			const std::array<std::string, 2> seeds = { *written,
+				R"({"Format":"EditorPreferences","Version":1,"RecentProjects":["D:/A.eproj","/space name/B.eproj"],"Future":{"Exact":9007199254740993,"Fraction":1.23456789012345,"Large":1e200,"Array":[null,false,"x"]}})" };
+			const Test::FuzzRun run = Test::RunFuzzCase(0xED17, 1000, [&vfs, &path, &seeds](Random& random, uint64_t /*index*/)
+			{
+				std::string mutated = seeds[static_cast<size_t>(random.RangeInt(0, 1))];
+				Test::MutateText(mutated, random);
+				REQUIRE(vfs.WriteFileAtomic(*path, std::as_bytes(std::span(mutated.data(), mutated.size()))));
+				const auto loaded = ReadEditorPreferences(vfs);
+				if (!loaded)
+				{
+					const ErrorCode code = loaded.error().GetCode();
+					INFO("error: ", loaded.error().ToString());
+					CHECK((code == ErrorCode::Parse || code == ErrorCode::Validation || code == ErrorCode::UnsupportedVersion));
+					return false;
+				}
+				// Preferences that read write back and read again unchanged.
+				REQUIRE(WriteEditorPreferences(vfs, *loaded));
+				const auto reread = ReadEditorPreferences(vfs);
+				REQUIRE(reread);
+				CHECK(reread->AllowAiAutomation == loaded->AllowAiAutomation);
+				CHECK(reread->ExternalEditorExecutable == loaded->ExternalEditorExecutable);
+				CHECK(reread->ExternalEditorArguments == loaded->ExternalEditorArguments);
+				return true;
+			});
+			if (Test::IsFuzzSample(run.Range))
+			{
+				CHECK(run.Counts.Rejected > 0);
+				CHECK(run.Counts.Accepted > 0);
+			}
 		}
 
 		TEST_CASE("EditorPreferences: malformed preferences do not get overwritten")

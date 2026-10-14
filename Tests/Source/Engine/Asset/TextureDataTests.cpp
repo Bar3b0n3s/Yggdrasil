@@ -4,6 +4,7 @@
 
 #include "Engine/Asset/CookedFormat.h"
 #include "Engine/Core/Random.h"
+#include "Support/Fuzz.h"
 
 #include <optional>
 
@@ -174,21 +175,22 @@ namespace Engine {
 			CHECK_FALSE(LoadCookedTexture(other).has_value());
 		}
 
-		TEST_CASE("TextureData: 10,000 seeded mutations of a payload never crash")
+		TEST_CASE("TextureData: 10,000 seeded mutations of a payload never crash" * doctest::test_suite(Test::FuzzSuite))
 		{
 			const Buffer payload = SerializeTexturePayload(MakeTexture(8, 8, TextureFormat::R8Unorm));
-			Random random(0x7E47);
-			for (int iteration = 0; iteration < 10000; ++iteration)
+			const Test::FuzzRun run = Test::RunFuzzCase(0x7E47, 10000, [&payload](Random& random, uint64_t /*index*/)
 			{
 				Buffer mutated = payload;
-				const size_t index = static_cast<size_t>(random.RangeInt(0, static_cast<int64_t>(mutated.size()) - 1));
-				mutated[index] = static_cast<std::byte>(random.NextU32() & 0xFF);
-				if (random.NextBool(0.2))
-					mutated.resize(static_cast<size_t>(random.RangeInt(0, static_cast<int64_t>(mutated.size()))));
+				Test::MutateBytes(mutated, random);
+				// A payload the reader accepts is a valid texture.
 				const Result<TextureData> read = DeserializeTexturePayload(mutated);
-				if (read.has_value())
-					CHECK(ValidateTextureData(*read).has_value());
-			}
+				if (!read.has_value())
+					return false;
+				CHECK(ValidateTextureData(*read).has_value());
+				return true;
+			});
+			if (Test::IsFuzzSample(run.Range))
+				CHECK(run.Counts.Rejected > 0);
 		}
 	}
 

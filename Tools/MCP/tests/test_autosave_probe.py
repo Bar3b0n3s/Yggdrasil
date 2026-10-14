@@ -57,8 +57,10 @@ class AutosaveProbeTests(unittest.TestCase):
         directory.mkdir(exist_ok=True)
         (directory / "Scene.json").write_bytes(self.payload)
         metadata = {"Format": "AutosaveGeneration", "Version": 1, "Sequence": sequence,
-                    "ProjectFile": self.project.as_posix(), "ProjectFingerprint": self.fingerprint(self.project.read_bytes()),
-                    "SourceFingerprint": self.fingerprint(self.source.read_bytes() if source and self.source.exists() else None),
+                    "ProjectFile": self.project.as_posix(),
+                    "ProjectFingerprint": self.fingerprint(self.project.read_bytes()),
+                    "SourceFingerprint": self.fingerprint(self.source.read_bytes()
+                                                          if source and self.source.exists() else None),
                     "ScenePath": source, "SceneName": "Main", "UntitledToken": "" if source else "ab" * 16,
                     "DirtyRevision": 8, "Dirty": True, "Reason": 2,
                     "PayloadSize": len(self.payload), "PayloadHash": autosave.xxh64(self.payload)}
@@ -200,7 +202,8 @@ class AutosaveProbeTests(unittest.TestCase):
         latest, _ = self.prepare(2)
         self.publish(1, 2)
         os.utime(latest / "Metadata.json", ns=(0, 0))
-        # A clean newest generation is skipped; the retained dirty one is still available. Opaque times are not Unix times.
+        # A clean newest generation is skipped; the retained dirty one is still available. Opaque times are not Unix
+        # times.
         self.assertTrue(autosave.has_published_autosave(self.root))
         (latest / "Metadata.json").write_bytes(b"broken")
         self.assertFalse(autosave.has_published_autosave(self.root))
@@ -228,7 +231,8 @@ class AutosaveProbeTests(unittest.TestCase):
             self.assertFalse(autosave.has_published_autosave(self.root))
 
     def test_crash_diagnostic_uses_the_probe_and_attached_shutdown_only_disconnects(self) -> None:
-        editor = SimpleNamespace(process=SimpleNamespace(returncode=4), output_tail=["last log"], join_readers=mock.Mock())
+        editor = SimpleNamespace(process=SimpleNamespace(returncode=4), output_tail=["last log"],
+                                 join_readers=mock.Mock())
         supervised = EditorConnection(self.root, supervised=True, editor=editor)
         self.prepare()
         self.assertFalse(supervised.make_crashed().to_json()["autosaveAvailable"])

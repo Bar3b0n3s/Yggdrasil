@@ -9,12 +9,15 @@
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Renderer/EnvironmentBaker.h"
 #include "Support/AssetTestFixture.h"
+#include "Support/Fuzz.h"
 #include "Support/HeadlessGpuFixture.h"
 #include "Support/TestData.h"
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <format>
 #include <span>
@@ -83,6 +86,29 @@ namespace Engine {
 			return bytes;
 		}
 
+		// A baker that checks the decoded input it receives (the equirectangular shape and finite, non-negative texels) and
+		// bakes nothing: the fuzz case's oracle for what the .hdr decoder hands on.
+		class InputCheckingBaker final : public IEnvironmentBaker
+		{
+		public:
+			Result<EnvironmentData> Bake(const EnvironmentBakeInput& input) override
+			{
+				CHECK(input.Width == 2 * input.Height);
+				CHECK(input.Height > 0);
+				CHECK(input.Texels.size() == static_cast<size_t>(input.Width) * input.Height * 3);
+				CHECK(std::ranges::all_of(input.Texels, [](float texel)
+				{
+					return std::isfinite(texel) && texel >= 0.0f;
+				}));
+				++m_Bakes;
+				return std::unexpected(Error(ErrorCode::Unsupported, "the fuzz case bakes nothing"));
+			}
+
+			[[nodiscard]] uint64_t GetBakeCount() const { return m_Bakes; }
+		private:
+			uint64_t m_Bakes = 0;
+		};
+
 	}
 
 	TEST_SUITE("AssetPipeline")
@@ -147,6 +173,56 @@ namespace Engine {
 			const Result<ImportResult> invalid = ImportEnvironment(fixture, "Clamped.hdr", MakeFlatHdr(8, 4), clamped, nullptr);
 			REQUIRE_FALSE(invalid.has_value());
 			CHECK(invalid.error().GetCode() == ErrorCode::Validation);
+		}
+
+		TEST_CASE("EnvironmentImporter: 200 seeded mutations of a Radiance .hdr never crash" * doctest::test_suite(Test::FuzzSuite))
+		{
+			// The seeds: the Gradient.hdr fixture (run-length encoded) and a small flat RGBE image, decoded from memory through
+			// stbi_loadf (§8.6 step 1). A decoded image reaches the baker, which checks it; a broken one is ImportFailed.
+			Test::AssetTestFixture fixture;
+			Result<Buffer> gradient = FileSystem::ReadFile(Test::GetTestDataPath("Assets/Environments/Gradient.hdr"));
+			REQUIRE_MESSAGE(gradient.has_value(), gradient.error().ToString());
+			const std::array<Buffer, 2> seeds = { std::move(*gradient), MakeFlatHdr(16, 8) };
+			const Json settings = DefaultSettings();
+			const VfsPath sourcePath = fixture.ProjectPath("Assets/Environments/Fuzz.hdr");
+			InputCheckingBaker baker;
+			const Test::FuzzRun run = Test::RunFuzzCase(0x4D2, 200, [&fixture, &seeds, &settings, &sourcePath, &baker](Random& random, uint64_t /*index*/)
+			{
+				Buffer mutated = seeds[static_cast<size_t>(random.RangeInt(0, 1))];
+				Test::MutateBytes(mutated, random);
+				AssetMetadata metadata;
+				metadata.Handle = AssetHandle(0xe0e7000000000002ull);
+				metadata.Type = AssetType::Environment;
+				metadata.Importer = std::string(EnvironmentImporter::Id);
+				metadata.ImporterVersion = EnvironmentImporter::Version;
+				metadata.Settings = VariantValue(settings);
+				ImportContext context({
+					.Vfs = &fixture.GetVfs(),
+					.SourcePath = sourcePath,
+					.SourceBytes = mutated,
+					.Settings = VariantValue(settings),
+					.Registry = &fixture.GetRegistry(),
+					.Assets = {},
+					.EnvironmentBaker = &baker,
+					.ScriptDiagnostics = nullptr,
+				});
+				const uint64_t bakes = baker.GetBakeCount();
+				const Result<ImportResult> imported = EnvironmentImporter().Import(context, metadata);
+				REQUIRE_FALSE(imported.has_value());
+				// The decoded image reached the baker, which refused to bake it.
+				if (baker.GetBakeCount() != bakes)
+				{
+					CHECK(imported.error().GetCode() == ErrorCode::Unsupported);
+					return true;
+				}
+				CHECK(imported.error().GetCode() == ErrorCode::ImportFailed);
+				return false;
+			});
+			if (Test::IsFuzzSample(run.Range))
+			{
+				CHECK(run.Counts.Rejected > 0);
+				CHECK(run.Counts.Accepted > 0);
+			}
 		}
 
 		TEST_CASE("EnvironmentImporter: bakes and cooks the Studio HDRI deterministically" * doctest::test_suite(Test::GpuSuite))

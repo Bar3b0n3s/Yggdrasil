@@ -190,9 +190,10 @@ class RendererIITests(AutomationTestCase):
         self.assert_engine_error(raised.exception, engine_client.NOT_FOUND)
         self.assertEqual(raised.exception.issues[0]["pointer"], "/annotate/labels/1")
         self.assertEqual(client.call("edit.getSelection")["selection"], selection)
-        # play.start carries the selection into the play scene (M10-F31). The play scene keeps the edit scene's UUIDs, so
-        # labels come only from the selection's own target, as the scene view outlines only that target: the play copy is
-        # labelled, the edit scene is not. (The C++ ScreenshotMethods test covers an edit selection during play.)
+        # play.start carries the selection into the play scene (M10-F31). The play scene keeps the edit scene's UUIDs,
+        # so labels come only from the selection's own target, as the scene view outlines only that target: the play
+        # copy is labelled, the edit scene is not. (The C++ ScreenshotMethods test covers an edit selection during
+        # play.)
         client.call("play.start", {"lockstep": True, "paused": True})
         play_clean = self.shoot(client, target="play")
         edit_clean = self.shoot(client, target="edit")
@@ -240,8 +241,9 @@ class RendererIITests(AutomationTestCase):
             image = self.shoot(rendered, debugView=mode)
             self.assertNotEqual(image, lit)
             self.assertEqual(self.shoot(rendered, debugView=mode), image)
-        # The wireframe option changes the live scene view (white triangle edges over the clear colour, seen in the editor's
-        # own screenshot), never picking, which stays geometric, nor viewport.screenshot, a clean capture of the view.
+        # The wireframe option changes the live scene view (white triangle edges over the clear colour, seen in the
+        # editor's own screenshot), never picking, which stays geometric, nor viewport.screenshot, a clean capture of
+        # the view.
         before = rendered.call("viewport.pick", {"view": "scene", "x": 320, "y": 180})["raycast"]
         solid = white_pixels(Path(rendered.call("editor.screenshot", {"maxDimension": 4096})["path"]))
         rendered.call("viewport.setOptions", {"wireframe": True})

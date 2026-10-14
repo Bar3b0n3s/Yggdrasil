@@ -21,7 +21,7 @@ namespace Engine {
 		static constexpr int UsageError = 2; // bad command line
 		static constexpr int InitFailed = 3; // no Vulkan loader or device, project failed to load or is locked, file missing
 		static constexpr int Crash = 4;      // fatal error, unhandled exception, signal, assert in a non-debugger run
-		static constexpr int Timeout = 5;    // --timeout or watchdog expiry
+		static constexpr int Timeout = 5;    // watchdog expiry; scripts that stop a process at their own timeout use it too (ADR 0024 decision 3)
 	};
 
 	// FatalError (Core) exits with these values itself (ADR 0003 decision 2).

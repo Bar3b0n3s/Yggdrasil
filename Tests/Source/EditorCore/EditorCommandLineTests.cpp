@@ -79,7 +79,8 @@ namespace Engine {
 				CHECK_FALSE(option.Description.empty());
 			}
 			const std::vector<std::string_view> expected = { "--project", "--read-only", "--automation", "--automation-test-hooks", "--batch",
-				"--upgrade", "--dump-reference", "--bake-engine-assets", "--engine-cache-dir", "--check-scripts", "--run-tests", "--filter", "--id-seed", "--junit" };
+				"--upgrade", "--dump-reference", "--bake-engine-assets", "--engine-cache-dir", "--check-scripts", "--run-tests", "--filter", "--id-seed", "--junit",
+				"--export", "--config", "--testing", "--smoke-test", "--export-report", "--export-root", "--strict" };
 			CHECK(names == expected);
 		}
 
@@ -209,7 +210,7 @@ namespace Engine {
 		}
 
 		// M15 (§12.1, §13.4; Docs/Decisions/0024-m15-contract.md decision 3, stream A).
-		TEST_CASE("EditorCommandLine: --export parses the directory, configuration, testing, smoke-test and report options" * doctest::skip(true))
+		TEST_CASE("EditorCommandLine: --export parses the directory, configuration, testing, smoke-test and report options")
 		{
 			const Result<EditorLaunchOptions> full = ParseEditorArguments({ "--headless", "--project", "Game", "--export", "Out/Game", "--config", "Dist",
 				"--testing", "--smoke-test", "--export-report", "Out/Report.json" });
@@ -240,7 +241,10 @@ namespace Engine {
 					 { "--project", "Game", "--read-only", "--export", "Out", "--config", "Release" },
 					 { "--project", "Game", "--export", "Out", "--config", "Release", "--run-tests" },
 					 { "--project", "Game", "--export", "Out", "--config", "Release", "--automation" },
-					 { "--project", "Game", "--export", "Out", "--config", "Release", "--export-root", "Root" } })
+					 { "--project", "Game", "--export", "Out", "--config", "Release", "--export-root", "Root" },
+					 // --frames would end the run with exit code 0 before the export finishes (the M15 review's M03).
+					 { "--headless", "--project", "Game", "--export", "Out", "--config", "Release", "--frames", "5" },
+					 { "--project", "Game", "--export", "Out", "--config", "Release", "--frames=1" } })
 			{
 				std::string joined;
 				for (const std::string& argument : refused)
@@ -252,7 +256,36 @@ namespace Engine {
 			}
 		}
 
-		TEST_CASE("EditorCommandLine: --export-root names the root project.export writes under" * doctest::skip(true))
+		// The M15 completion review's A024: §6's --strict, an editor-process setting that every project opener honours.
+		TEST_CASE("EditorCommandLine: --strict reads every project the editor opens strictly and combines with every mode")
+		{
+			const Result<EditorLaunchOptions> defaults = ParseEditorArguments({ "--headless", "--project", "Game" });
+			REQUIRE(defaults.has_value());
+			CHECK_FALSE(defaults->Strict);
+			for (const std::vector<std::string>& arguments : std::vector<std::vector<std::string>>{
+					 { "--strict" },
+					 { "--headless", "--strict", "--automation" },
+					 { "--headless", "--project", "Game", "--strict", "--run-tests" },
+					 { "--headless", "--project", "Game", "--strict", "--automation" },
+					 { "--headless", "--project", "Game", "--strict", "--read-only" },
+					 { "--headless", "--strict", "--batch", "Scaffold.jsonl" },
+					 { "--headless", "--project", "Game", "--strict", "--export", "Out", "--config", "Release" } })
+			{
+				std::string joined;
+				for (const std::string& argument : arguments)
+					joined += argument + " ";
+				CAPTURE(joined);
+				const Result<EditorLaunchOptions> options = ParseEditorArguments(arguments);
+				REQUIRE_MESSAGE(options.has_value(), options.error().ToString());
+				CHECK(options->Strict);
+			}
+			// A flag without a value.
+			const Result<EditorLaunchOptions> valued = ParseEditorArguments({ "--strict=yes" });
+			REQUIRE_FALSE(valued.has_value());
+			CHECK(valued.error().GetCode() == ErrorCode::InvalidArgument);
+		}
+
+		TEST_CASE("EditorCommandLine: --export-root names the root project.export writes under")
 		{
 			const Result<EditorLaunchOptions> serving = ParseEditorArguments({ "--headless", "--project", "Game", "--export-root", "Exports" });
 			REQUIRE_MESSAGE(serving.has_value(), serving.error().ToString());

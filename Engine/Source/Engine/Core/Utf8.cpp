@@ -1,6 +1,8 @@
 #include "EnginePCH.h"
 #include "Engine/Core/Utf8.h"
 
+#include "Engine/Core/Assert.h"
+
 namespace Engine {
 
 	namespace Utils {
@@ -82,6 +84,12 @@ namespace Engine {
 			offset += length;
 		}
 		return text.size();
+	}
+
+	size_t GetUtf8SequenceLength(std::string_view text, size_t offset)
+	{
+		ENGINE_CORE_ASSERT(offset < text.size(), "GetUtf8SequenceLength at offset {} of {} bytes", offset, text.size());
+		return Utils::SequenceLength(text, offset);
 	}
 
 	size_t CompleteUtf8Prefix(std::string_view text)

@@ -4,6 +4,7 @@
 
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Random.h"
+#include "Support/Fuzz.h"
 
 // slangc's reflection JSON as CompileShaders.py writes it (<variant>.refl.json). The documents come from this
 // configuration's compiled shaders (ENGINE_SHADER_DIRECTORY), so the parser is tested against the slangc version the
@@ -331,7 +332,7 @@ namespace Engine {
 			CHECK(shaderLight->Size == 64);
 		}
 
-		TEST_CASE("ShaderReflection: malformed and mutated documents are errors, never crashes")
+		TEST_CASE("ShaderReflection: malformed documents are Parse or Validation errors")
 		{
 			const Result<ShaderReflection> notJson = ParseShaderReflection("{ \"parameters\": [");
 			REQUIRE_FALSE(notJson.has_value());
@@ -339,20 +340,24 @@ namespace Engine {
 			const Result<ShaderReflection> noEntry = ParseShaderReflection(R"({ "parameters": [], "entryPoints": [] })");
 			REQUIRE_FALSE(noEntry.has_value());
 			CHECK(noEntry.error().GetCode() == ErrorCode::Validation);
+		}
 
-			// Seeded byte mutations of a real document: every outcome is a value.
+		TEST_CASE("ShaderReflection: 2,000 seeded mutations of a compiled document are errors, never crashes" * doctest::test_suite(Test::FuzzSuite))
+		{
+			// Seeded mutations of a real document: every outcome is a value.
 			const std::string original = ReadCompiledReflection("Triangle/VSMain");
-			Random random(0x5EED5EEDu);
-			for (int iteration = 0; iteration < 2000; ++iteration)
+			const Test::FuzzRun run = Test::RunFuzzCase(0x5EED5EEDu, 2000, [&original](Random& random, uint64_t /*index*/)
 			{
 				std::string mutated = original;
-				const uint32_t flips = 1 + random.NextU32() % 4;
-				for (uint32_t flip = 0; flip < flips; ++flip)
-					mutated[random.NextU32() % mutated.size()] = static_cast<char>(random.NextU32() & 0xFF);
+				Test::MutateText(mutated, random);
 				const Result<ShaderReflection> parsed = ParseShaderReflection(mutated);
-				if (!parsed.has_value())
-					CHECK((parsed.error().GetCode() == ErrorCode::Parse || parsed.error().GetCode() == ErrorCode::Validation));
-			}
+				if (parsed.has_value())
+					return true;
+				CHECK((parsed.error().GetCode() == ErrorCode::Parse || parsed.error().GetCode() == ErrorCode::Validation));
+				return false;
+			});
+			if (Test::IsFuzzSample(run.Range))
+				CHECK(run.Counts.Rejected > 0);
 		}
 
 		TEST_CASE("ShaderReflection: lookups find bindings and structs by name")

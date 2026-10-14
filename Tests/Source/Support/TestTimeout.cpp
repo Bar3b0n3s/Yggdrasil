@@ -4,11 +4,13 @@
 #include "Engine/Core/Assert.h"
 #include "Engine/Core/Log.h"
 #include "Support/TestCaseTracker.h"
+#include "Support/TestOptions.h"
 
 #include <cmath>
 #include <condition_variable>
 #include <cstdio>
 #include <cstdlib>
+#include <format>
 #include <mutex>
 #include <thread>
 
@@ -34,12 +36,14 @@ namespace Engine {
 				bool IsRunning = false;
 				bool StopRequested = false;
 				double DefaultSeconds = 0.0;
+				double Scale = 1.0; // --test-timeout-scale, applied to the default limit and to SetTestCaseTimeLimit's alike
 
 				// The armed test case: set when a case starts, cleared when it ends.
 				bool IsArmed = false;
 				uint64_t ArmCount = 0; // changes with every arming, so the thread notices a new case with the same deadline
 				std::string CaseName;
-				double LimitSeconds = 0.0;
+				SteadyClock::time_point CaseStart;
+				double LimitSeconds = 0.0; // scaled
 				SteadyClock::time_point Deadline;
 			};
 
@@ -51,6 +55,18 @@ namespace Engine {
 			{
 				static WatchdogState s_State;
 				return s_State;
+			}
+
+			// Sets the armed case's deadline to its start plus `limitSeconds` (already scaled) and wakes the thread. The
+			// caller holds the state's mutex.
+			static void ArmDeadline(WatchdogState& state, double limitSeconds)
+			{
+				const std::chrono::duration<double> limit(std::min(limitSeconds, MaxLimitSeconds));
+				state.IsArmed = true;
+				++state.ArmCount;
+				state.LimitSeconds = limitSeconds;
+				state.Deadline = state.CaseStart + std::chrono::duration_cast<SteadyClock::duration>(limit);
+				state.Changed.notify_all();
 			}
 
 			// Logs the expiry, flushes the log and C stdio (doctest's report on a redirected stdout) and exits with code 5.
@@ -114,13 +130,26 @@ namespace Engine {
 
 		namespace {
 
-			// Arms the watchdog for each test case and disarms it at the end. The overrides are defined in the class: the
-			// naming lint recognizes doctest's snake_case names as overrides by their `override` declarator.
+			// Arms the watchdog for each test case and disarms it at the end, and names every listed test case that carries
+			// doctest::timeout (--list-test-cases). The overrides are defined in the class: the naming lint recognizes
+			// doctest's snake_case names as overrides by their `override` declarator.
 			class TestTimeoutListener final : public TestCaseListener
 			{
 			public:
-				explicit TestTimeoutListener(const doctest::ContextOptions& /*options*/)
+				explicit TestTimeoutListener(const doctest::ContextOptions& options)
+					: m_ListsTestCases(options.list_test_cases)
 				{
+				}
+
+				void report_query(const doctest::QueryData& data) override
+				{
+					if (!m_ListsTestCases || data.data == nullptr)
+						return;
+					for (unsigned index = 0; index < data.num_data; ++index)
+					{
+						if (const std::optional<std::string> failure = GetDoctestTimeoutFailure(*data.data[index]))
+							ENGINE_CORE_ERROR("{}", *failure);
+					}
 				}
 
 				void test_case_start(const doctest::TestCaseData& testCase) override
@@ -129,15 +158,9 @@ namespace Engine {
 					std::scoped_lock lock(state.Mutex);
 					if (!state.IsRunning)
 						return;
-
-					const double limitSeconds = testCase.m_timeout > 0.0 ? testCase.m_timeout : state.DefaultSeconds;
-					const std::chrono::duration<double> limit(std::min(limitSeconds, MaxLimitSeconds));
-					state.IsArmed = true;
-					++state.ArmCount;
 					state.CaseName = testCase.m_name;
-					state.LimitSeconds = limitSeconds;
-					state.Deadline = SteadyClock::now() + std::chrono::duration_cast<SteadyClock::duration>(limit);
-					state.Changed.notify_all();
+					state.CaseStart = SteadyClock::now();
+					Utils::ArmDeadline(state, state.DefaultSeconds * state.Scale);
 				}
 
 				void test_case_end(const doctest::CurrentTestCaseStats& /*stats*/) override
@@ -147,6 +170,8 @@ namespace Engine {
 					state.IsArmed = false;
 					state.Changed.notify_all();
 				}
+			private:
+				bool m_ListsTestCases = false;
 			};
 
 		}
@@ -155,6 +180,8 @@ namespace Engine {
 		{
 			ENGINE_CORE_ASSERT(defaultSeconds > 0.0 && std::isfinite(defaultSeconds), "The default test timeout {} s is not positive",
 				defaultSeconds);
+			const double scale = GetTestOptions().TimeoutScale;
+			ENGINE_CORE_ASSERT(scale >= 1.0 && std::isfinite(scale), "The test timeout scale {} is below 1", scale);
 
 			WatchdogState& state = Utils::GetWatchdogState();
 			std::scoped_lock lock(state.Mutex);
@@ -163,7 +190,27 @@ namespace Engine {
 			state.StopRequested = false;
 			state.IsArmed = false;
 			state.DefaultSeconds = defaultSeconds;
+			state.Scale = scale;
 			state.Thread = std::thread(&Utils::RunWatchdog);
+		}
+
+		void SetTestCaseTimeLimit(double seconds)
+		{
+			ENGINE_CORE_ASSERT(seconds > 0.0 && std::isfinite(seconds), "The test case time limit {} s is not positive", seconds);
+			WatchdogState& state = Utils::GetWatchdogState();
+			std::scoped_lock lock(state.Mutex);
+			if (!state.IsRunning || !state.IsArmed)
+				return;
+			Utils::ArmDeadline(state, seconds * state.Scale);
+		}
+
+		std::optional<std::string> GetDoctestTimeoutFailure(const doctest::TestCaseData& testCase)
+		{
+			if (testCase.m_timeout == 0.0)
+				return std::nullopt;
+			return std::format("test case '{}' carries doctest::timeout({}), which doctest checks itself after the case without "
+							   "--test-timeout-scale; call Test::SetTestCaseTimeLimit({}) first in its body instead (Support/TestTimeout.h)",
+				testCase.m_name != nullptr ? testCase.m_name : "", testCase.m_timeout, testCase.m_timeout);
 		}
 
 		void StopTestTimeoutWatchdog()

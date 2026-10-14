@@ -204,3 +204,17 @@ filters (`-fno-math-errno`, `-fPIC`, no MSVC-only flags); those platforms could 
    new inter-module dependencies (e.g. if Compiler/VM/Require gain a dependency on another directory), new compile
    definitions/options, and `Makefile` for per-module include paths.
 5. Regenerate, rebuild all configurations, run the Engine scripting tests, and update the version, commit and date above.
+
+## Notices
+
+The row `Scripts/Lib/notices.py` reads for `THIRD_PARTY_NOTICES.txt` (Docs/Decisions/0024-m15-contract.md decision 8).
+
+| Field | Value |
+|---|---|
+| Name | Luau |
+| Upstream | https://github.com/luau-lang/luau |
+| Version | 0.741 |
+| License | MIT |
+| Shipped | yes |
+| Projects | Luau |
+| License files | LICENSE.txt, lua_LICENSE.txt |

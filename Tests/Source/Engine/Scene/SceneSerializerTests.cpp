@@ -19,6 +19,7 @@
 #include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Components/UnknownComponentsComponent.h"
 #include "Engine/Scene/Entity.h"
+#include "Support/Fuzz.h"
 #include "Support/GlmApprox.h"
 #include "Support/SceneTestFixture.h"
 #include "Support/TestData.h"
@@ -126,6 +127,41 @@ namespace Engine {
 			CHECK(strictSetup.GetScene().GetEntityCount() == 0);
 		}
 
+		TEST_CASE("SceneSerializer: an unknown component holding a number beyond float's range fails a Strict load and a Repair load drops it")
+		{
+			// Found by the Prefab fuzz case (Docs/Decisions/0024-m15-contract.md decision 13): an unknown component is kept as
+			// written, but JsonWriter writes every fractional number as a float, so a scene that kept 1e307 loaded and could
+			// never be saved.
+			std::string text = ReadFixture("Scenes/UnknownComponent.scene");
+			const size_t list = text.find("\"List\": [1, 2]");
+			REQUIRE(list != std::string::npos);
+			text.replace(list, std::string_view("\"List\": [1, 2]").size(), "\"List\": [1, 1e307]");
+
+			Test::SceneTestFixture strictSetup;
+			LoadReport strictReport;
+			const Status strict = SceneSerializer::LoadFromString(strictSetup.GetScene(), text, LoadOptions{}, strictReport);
+			REQUIRE_FALSE(strict.has_value());
+			CHECK(strict.error().GetCode() == ErrorCode::Validation);
+			CHECK(strict.error().ToString().contains("out of range for float"));
+			CHECK(strict.error().GetLocation().JsonPointer == "/Entities/0/Components/FutureThing/Nested/List/1");
+			CHECK(strictSetup.GetScene().GetEntityCount() == 0);
+
+			Test::SceneTestFixture repairSetup;
+			UUIDGenerator repairIds = UUIDGenerator::CreateDeterministic(7);
+			LoadOptions repair;
+			repair.Mode = LoadMode::Repair;
+			repair.RepairIdGenerator = &repairIds;
+			LoadReport repairReport;
+			REQUIRE(SceneSerializer::LoadFromString(repairSetup.GetScene(), text, repair, repairReport).has_value());
+			REQUIRE(repairReport.Repairs.size() == 1);
+			CHECK(repairReport.Repairs[0].Code == SceneInvalidComponentCode);
+			CHECK(repairReport.Repairs[0].Description == "dropped the unknown component 'FutureThing'");
+			const Entity gadget = repairSetup.GetScene().FindEntityByID(UUID(0x3c00000000000001));
+			REQUIRE(gadget.IsValid());
+			CHECK_FALSE(gadget.HasComponent<UnknownComponentsComponent>());
+			CHECK(SceneSerializer::SaveToString(repairSetup.GetScene()).has_value());
+		}
+
 		TEST_CASE("SceneSerializer: newer Version fails with UnsupportedVersion")
 		{
 			const std::string text = ReadFixture("Formats/Scene/NewerVersion.scene");
@@ -177,42 +213,66 @@ namespace Engine {
 			CHECK(setup.GetScene().ComputeStateHash() == XXH64(*minified));
 		}
 
-		TEST_CASE("SceneSerializer: 10,000 seeded mutations of a scene file never crash")
+		TEST_CASE("SceneSerializer: 10,000 seeded mutations of a scene file never crash" * doctest::test_suite(Test::FuzzSuite))
 		{
-			const std::string original = ReadFixture("Scenes/AllComponents.scene");
-			const int64_t lastSymbol = static_cast<int64_t>(MutationAlphabet.size()) - 1;
-			Random random(0xf022);
+			// The seed corpus: the scene fixtures of Tests/Data/Scenes, the structurally invalid ones included.
+			std::vector<std::string> seeds;
+			for (const std::string_view name : { "AllComponents", "Hierarchy", "UnknownComponent", "Empty", "Invalid/ChildBeforeParent",
+					 "Invalid/DanglingParent", "Invalid/DuplicateIds", "Invalid/DuplicateUniqueComponent", "Invalid/MisplacedComponent",
+					 "Invalid/ParentCycle", "Invalid/PrefabLinkMissingRoot", "Invalid/PrefabLinkRootNotInstance", "Invalid/ZeroId" })
+				seeds.push_back(ReadFixture(std::format("Scenes/{}.scene", name)));
 			// One registry for the whole run; every iteration loads into a fresh empty scene with its own repair generator.
 			Test::SceneTestFixture setup;
-			for (int iteration = 0; iteration < 10000; ++iteration)
+			const Test::FuzzRun run = Test::RunFuzzCase(0xf022, 10000, [&seeds, &setup](Random& random, uint64_t index)
 			{
-				std::string mutated = original;
-				const int64_t edits = random.RangeInt(1, 8);
-				for (int64_t edit = 0; edit < edits; ++edit)
+				const int64_t lastSymbol = static_cast<int64_t>(MutationAlphabet.size()) - 1;
+				// AllComponents, the richest file, is the seed of half the iterations.
+				std::string mutated = random.NextBool() ? seeds[0] : seeds[static_cast<size_t>(random.RangeInt(1, static_cast<int64_t>(seeds.size()) - 1))];
+				if (random.NextBool())
 				{
-					const size_t position = static_cast<size_t>(random.RangeInt(0, static_cast<int64_t>(mutated.size()) - 1));
-					const int64_t kind = random.RangeInt(0, 3);
-					if (kind == 0)
-						mutated[position] = static_cast<char>(random.RangeInt(0, 255));
-					else if (kind == 1)
-						mutated.erase(position, 1);
-					else if (kind == 2)
-						mutated.insert(position, 1, MutationAlphabet[static_cast<size_t>(random.RangeInt(0, lastSymbol))]);
-					else
-						mutated.resize(position);
-					if (mutated.empty())
-						mutated = "{";
+					Test::MutateText(mutated, random);
+				}
+				else
+				{
+					const int64_t edits = random.RangeInt(1, 8);
+					for (int64_t edit = 0; edit < edits; ++edit)
+					{
+						const size_t position = static_cast<size_t>(random.RangeInt(0, static_cast<int64_t>(mutated.size()) - 1));
+						const int64_t kind = random.RangeInt(0, 3);
+						if (kind == 0)
+							mutated[position] = static_cast<char>(random.RangeInt(0, 255));
+						else if (kind == 1)
+							mutated.erase(position, 1);
+						else if (kind == 2)
+							mutated.insert(position, 1, MutationAlphabet[static_cast<size_t>(random.RangeInt(0, lastSymbol))]);
+						else
+							mutated.resize(position);
+						if (mutated.empty())
+							mutated = "{";
+					}
 				}
 
 				const Scope<Scene> scene = setup.CreateEmptyScene();
-				UUIDGenerator repairIds = UUIDGenerator::CreateDeterministic(static_cast<uint64_t>(iteration) + 1);
+				UUIDGenerator repairIds = UUIDGenerator::CreateDeterministic(index + 1);
 				LoadOptions options;
-				options.Mode = (iteration % 2 == 0) ? LoadMode::Strict : LoadMode::Repair;
+				options.Mode = random.NextBool() ? LoadMode::Strict : LoadMode::Repair;
 				options.RepairIdGenerator = &repairIds;
 				LoadReport report;
 				const Status loaded = SceneSerializer::LoadFromString(*scene, mutated, options, report);
 				if (!loaded)
+				{
 					CHECK(scene->GetEntityCount() == 0);
+					return false;
+				}
+				// A scene that loads saves again.
+				const Result<std::string> saved = SceneSerializer::SaveToString(*scene);
+				CHECK_MESSAGE(saved.has_value(), saved.error().ToString());
+				return true;
+			});
+			if (Test::IsFuzzSample(run.Range))
+			{
+				CHECK(run.Counts.Rejected > 0);
+				CHECK(run.Counts.Accepted > 0);
 			}
 		}
 

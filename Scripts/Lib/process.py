@@ -251,5 +251,103 @@ class ProcessMemory:
 def query_process_memory(pid: int) -> ProcessMemory:
     """The memory of the running process `pid`: on Windows K32GetProcessMemoryInfo with PROCESS_MEMORY_COUNTERS_EX
     through ctypes (PROCESS_QUERY_LIMITED_INFORMATION), on Linux /proc/<pid>/status, on macOS `ps -o rss= -p <pid>`.
-    Raises ProcessLookupError when the process has exited, OSError when the query fails. Stream C implements it."""
-    raise NotImplementedError("contract stub: process memory (ADR 0024 decision 15, stream C)")
+    Raises ProcessLookupError when the process has exited, OSError when the query fails."""
+    if pid <= 0:
+        raise ProcessLookupError(f"no process {pid}")
+    if os.name == "nt":
+        return _query_windows_process_memory(pid)
+    if sys.platform.startswith("linux"):
+        return _query_linux_process_memory(pid)
+    return _query_ps_process_memory(pid)
+
+
+_PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+_STILL_ACTIVE = 259
+_ERROR_INVALID_PARAMETER = 87  # OpenProcess's error for a process id that no process has
+
+
+def _query_windows_process_memory(pid: int) -> ProcessMemory:
+    import ctypes  # noqa: PLC0415  (Windows only)
+    from ctypes import wintypes  # noqa: PLC0415
+
+    class ProcessMemoryCountersEx(ctypes.Structure):
+        _fields_ = [
+            ("cb", wintypes.DWORD),
+            ("PageFaultCount", wintypes.DWORD),
+            ("PeakWorkingSetSize", ctypes.c_size_t),
+            ("WorkingSetSize", ctypes.c_size_t),
+            ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+            ("QuotaPagedPoolUsage", ctypes.c_size_t),
+            ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+            ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+            ("PagefileUsage", ctypes.c_size_t),
+            ("PeakPagefileUsage", ctypes.c_size_t),
+            ("PrivateUsage", ctypes.c_size_t),
+        ]
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
+    kernel32.CloseHandle.restype = wintypes.BOOL
+    kernel32.GetExitCodeProcess.argtypes = (wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD))
+    kernel32.GetExitCodeProcess.restype = wintypes.BOOL
+    kernel32.K32GetProcessMemoryInfo.argtypes = (wintypes.HANDLE, ctypes.POINTER(ProcessMemoryCountersEx),
+                                                 wintypes.DWORD)
+    kernel32.K32GetProcessMemoryInfo.restype = wintypes.BOOL
+
+    handle = kernel32.OpenProcess(_PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    if not handle:
+        error = ctypes.get_last_error()
+        if error == _ERROR_INVALID_PARAMETER:
+            raise ProcessLookupError(f"no process {pid}")
+        raise OSError(error, f"cannot open process {pid}: {ctypes.FormatError(error).strip()}")
+    try:
+        exit_code = wintypes.DWORD(0)
+        if not kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
+            error = ctypes.get_last_error()
+            raise OSError(error, f"cannot query process {pid}: {ctypes.FormatError(error).strip()}")
+        if exit_code.value != _STILL_ACTIVE:
+            raise ProcessLookupError(f"process {pid} has exited (exit code {describe_exit_code(exit_code.value)})")
+        counters = ProcessMemoryCountersEx()
+        counters.cb = ctypes.sizeof(ProcessMemoryCountersEx)
+        if not kernel32.K32GetProcessMemoryInfo(handle, ctypes.byref(counters), counters.cb):
+            error = ctypes.get_last_error()
+            raise OSError(error, f"cannot read the memory of process {pid}: {ctypes.FormatError(error).strip()}")
+        return ProcessMemory(int(counters.PrivateUsage), int(counters.WorkingSetSize), int(counters.PeakWorkingSetSize))
+    finally:
+        kernel32.CloseHandle(handle)
+
+
+def _query_linux_process_memory(pid: int) -> ProcessMemory:
+    status = Path("/proc") / str(pid) / "status"
+    try:
+        text = status.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        raise ProcessLookupError(f"no process {pid}") from None
+    if re.search(r"^State:\s+Z", text, re.MULTILINE):
+        raise ProcessLookupError(f"process {pid} has exited (a zombie)")
+    fields: dict[str, int] = {}
+    for line in text.splitlines():
+        name, _, value = line.partition(":")
+        parts = value.split()
+        if len(parts) == 2 and parts[1] == "kB" and parts[0].isdigit():
+            fields[name.strip()] = int(parts[0]) * 1024
+    try:
+        return ProcessMemory(fields["RssAnon"], fields["VmRSS"], fields["VmHWM"])
+    except KeyError as missing:
+        raise OSError(f"{status} has no {missing.args[0]} line") from None
+
+
+def _query_ps_process_memory(pid: int) -> ProcessMemory:
+    try:
+        result = run_captured(["ps", "-o", "rss=", "-p", str(pid)], timeout=30)
+    except ToolNotFoundError as error:
+        raise OSError(str(error)) from None
+    text = result.output.strip()
+    if not result.succeeded or not text:
+        raise ProcessLookupError(f"no process {pid}")
+    if not text.isdigit():
+        raise OSError(f"ps printed '{text}' for the resident size of process {pid}")
+    resident = int(text) * 1024
+    return ProcessMemory(resident, resident, resident)

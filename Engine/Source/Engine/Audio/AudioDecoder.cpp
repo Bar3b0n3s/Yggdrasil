@@ -8,12 +8,16 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
+#include <climits>
 #include <cmath>
 #include <cstring>
 #include <iterator>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
+#include <vector>
 
 namespace Engine {
 
@@ -25,6 +29,88 @@ namespace Engine {
 		constexpr uint32_t MaxSampleRate = 192000;
 		// Frames decoded per ma_decoder_read_pcm_frames call.
 		constexpr uint64_t DecodeChunkFrames = 4096;
+		// Ogg pages (RFC 3533): a 27-byte header with the flags at byte 5 and the segment count at byte 26, then the lacing
+		// values and the body.
+		constexpr size_t OggPageHeaderSize = 27;
+		constexpr uint8_t OggContinuedPacket = 0x01;
+		constexpr uint8_t OggFirstPage = 0x02;
+		constexpr uint8_t OggEndOfStream = 0x04;
+		// The Vorbis header packets (Vorbis I specification, section 4.2): a type byte and "vorbis", the identification
+		// header alone on the first page in 30 bytes, then the comment and setup headers.
+		constexpr size_t VorbisHeaderPrefixSize = 7;
+		constexpr size_t VorbisIdentificationSize = 30;
+		constexpr uint8_t VorbisCommentPacket = 3;
+		constexpr uint8_t VorbisSetupPacket = 5;
+		// stb_vorbis sizes its codebook tables (codewords, lookup multiplicands) and each residue's class data from a
+		// codebook's entries times dimensions, in int. A codebook of more values than this, far beyond any encoder's, is
+		// refused, so those tables stay within a few MiB and their sizes never overflow.
+		constexpr uint64_t MaxVorbisCodebookValues = uint64_t{ 1 } << 20;
+
+		// One page of an Ogg file: its header flags, its lacing values and its body.
+		struct OggPage
+		{
+			uint8_t Flags = 0;
+			std::span<const std::byte> Lacing{};
+			std::span<const std::byte> Body{};
+		};
+
+		// A segment of an Ogg file: a page, a segment of it and where that segment starts in the page's body.
+		struct OggPosition
+		{
+			size_t Page = 0;
+			size_t Segment = 0;
+			size_t BodyOffset = 0;
+		};
+
+		// stb_vorbis's setup-header bit reader (get_bits): bits packed from the least significant bit of each byte, reads of
+		// more than 24 bits split in two; once a read runs past the end of the packet, it and every later read return 0.
+		class VorbisBitReader
+		{
+		public:
+			explicit VorbisBitReader(std::span<const std::byte> bytes)
+				: m_Bytes(bytes)
+			{
+			}
+
+			[[nodiscard]] bool IsExhausted() const { return m_Exhausted; }
+
+			// The next `count` (0 to 32) bits; between reads at most 7 bits are buffered, so a read of more than 24 always splits.
+			[[nodiscard]] uint32_t Read(uint32_t count)
+			{
+				if (m_Exhausted)
+					return 0;
+				if (count > 24)
+				{
+					const uint32_t low = Read(24);
+					return low + (Read(count - 24) << 24);
+				}
+				if (m_ValidBits < count)
+				{
+					if (m_ValidBits == 0)
+						m_Accumulator = 0;
+					while (m_ValidBits < count)
+					{
+						if (m_Position >= m_Bytes.size())
+						{
+							m_Exhausted = true;
+							return 0;
+						}
+						m_Accumulator += std::to_integer<uint32_t>(m_Bytes[m_Position++]) << m_ValidBits;
+						m_ValidBits += 8;
+					}
+				}
+				const uint32_t value = m_Accumulator & ((uint32_t{ 1 } << count) - 1);
+				m_Accumulator >>= count;
+				m_ValidBits -= count;
+				return value;
+			}
+		private:
+			std::span<const std::byte> m_Bytes{};
+			size_t m_Position = 0;
+			uint32_t m_Accumulator = 0;
+			uint32_t m_ValidBits = 0;
+			bool m_Exhausted = false;
+		};
 
 		// An initialized ma_decoder, uninitialized on destruction. Not copyable or movable (miniaudio keeps its address).
 		class ScopedDecoder
@@ -172,39 +258,254 @@ namespace Engine {
 			return ma_encoding_format_unknown;
 		}
 
-		// An Ogg stream is complete when its pages tile the bytes exactly and the last one ends the stream (the
-		// end-of-stream flag). stb_vorbis decodes up to the last complete page of a truncated file without an error, so a
-		// file cut at a page boundary or inside a page is caught here. Errors: Parse with the byte offset.
-		static Status CheckOggPages(std::span<const std::byte> bytes)
+		// The pages of an Ogg stream, which is complete when its pages tile the bytes exactly and the last one ends the
+		// stream (the end-of-stream flag). stb_vorbis decodes up to the last complete page of a truncated file without an
+		// error, so a file cut at a page boundary or inside a page is caught here. Errors: Parse with the byte offset.
+		static Result<std::vector<OggPage>> ReadOggPages(std::span<const std::byte> bytes)
 		{
-			constexpr size_t PageHeaderSize = 27;
-			constexpr uint8_t EndOfStream = 0x04;
+			std::vector<OggPage> pages;
 			size_t offset = 0;
-			uint8_t lastFlags = 0;
 			while (offset < bytes.size())
 			{
 				if (!HasPrefix(bytes, offset, "OggS"))
 					return MakeError(ErrorCode::Parse, "corrupt Ogg file: no page starts at byte {}", offset);
-				if (bytes.size() - offset < PageHeaderSize)
+				if (bytes.size() - offset < OggPageHeaderSize)
 					return MakeError(ErrorCode::Parse, "truncated Ogg file: the page at byte {} is cut short", offset);
 				const size_t segmentCount = ByteAt(bytes, offset + 26);
-				if (bytes.size() - offset < PageHeaderSize + segmentCount)
+				if (bytes.size() - offset < OggPageHeaderSize + segmentCount)
 					return MakeError(ErrorCode::Parse, "truncated Ogg file: the page at byte {} is cut short", offset);
 				size_t bodySize = 0;
 				for (size_t segment = 0; segment < segmentCount; ++segment)
-					bodySize += ByteAt(bytes, offset + PageHeaderSize + segment);
-				const size_t pageSize = PageHeaderSize + segmentCount + bodySize;
+					bodySize += ByteAt(bytes, offset + OggPageHeaderSize + segment);
+				const size_t pageSize = OggPageHeaderSize + segmentCount + bodySize;
 				if (bytes.size() - offset < pageSize)
 				{
 					return MakeError(ErrorCode::Parse, "truncated Ogg file: the page at byte {} needs {} bytes, {} are left", offset, pageSize,
 						bytes.size() - offset);
 				}
-				lastFlags = ByteAt(bytes, offset + 5);
+				pages.push_back({ .Flags = ByteAt(bytes, offset + 5),
+					.Lacing = bytes.subspan(offset + OggPageHeaderSize, segmentCount),
+					.Body = bytes.subspan(offset + OggPageHeaderSize + segmentCount, bodySize) });
 				offset += pageSize;
 			}
-			if ((lastFlags & EndOfStream) == 0)
+			if (pages.empty() || (pages.back().Flags & OggEndOfStream) == 0)
 				return MakeError(ErrorCode::Parse, "truncated Ogg file: the last page does not end the stream");
+			return pages;
+		}
+
+		// The header packet `name` that starts at `position`, as stb_vorbis reads it: its segments up to the first lacing
+		// value below 255. A packet that starts on a new page needs a page without the continued-packet flag, and one that
+		// runs onto the next page needs that flag there (stb_vorbis would otherwise read past the packet as padding). Moves
+		// `position` past the packet. Errors: Parse for a packet that runs past the last page, breaks those flag rules or
+		// crosses a page without segments.
+		static Result<std::vector<std::byte>> ReadVorbisHeaderPacket(std::span<const OggPage> pages, OggPosition& position, std::string_view name)
+		{
+			std::vector<std::byte> packet;
+			bool started = false;
+			for (;;)
+			{
+				if (position.Page >= pages.size())
+					return MakeError(ErrorCode::Parse, "truncated Ogg Vorbis file: the {} header runs past the last page", name);
+				const OggPage& page = pages[position.Page];
+				if (position.Segment == 0 && page.Lacing.empty())
+					return MakeError(ErrorCode::Parse, "corrupt Ogg Vorbis file: a page without segments holds the {} header", name);
+				if (position.Segment >= page.Lacing.size())
+				{
+					position = OggPosition{ .Page = position.Page + 1, .Segment = 0, .BodyOffset = 0 };
+					if (position.Page < pages.size() && ((pages[position.Page].Flags & OggContinuedPacket) != 0) != started)
+					{
+						return MakeError(ErrorCode::Parse, "corrupt Ogg Vorbis file: the {} header {} a page {} the continued-packet flag", name,
+							started ? "continues on" : "starts on", started ? "without" : "with");
+					}
+					continue;
+				}
+				const size_t size = std::to_integer<size_t>(page.Lacing[position.Segment]);
+				const std::span<const std::byte> segment = page.Body.subspan(position.BodyOffset, size);
+				packet.insert(packet.end(), segment.begin(), segment.end());
+				position.BodyOffset += size;
+				++position.Segment;
+				started = true;
+				if (size < 255)
+					return packet;
+			}
+		}
+
+		// The little-endian 32-bit value at `offset` of `packet`, advancing past it; nullopt when fewer than 4 bytes are left.
+		static std::optional<uint32_t> ReadLittleEndian32(std::span<const std::byte> packet, size_t& offset)
+		{
+			if (packet.size() < offset || packet.size() - offset < 4)
+				return std::nullopt;
+			uint32_t value = 0;
+			for (size_t index = 0; index < 4; ++index)
+				value |= static_cast<uint32_t>(ByteAt(packet, offset + index)) << (8 * index);
+			offset += 4;
+			return value;
+		}
+
+		// The comment header (Vorbis I section 5): the vendor string, the comment count and each comment (a 32-bit length
+		// and its bytes) inside the packet, then the framing bit. stb_vorbis allocates every length it reads before reading
+		// the bytes, in int: a length past the packet is a huge or negative allocation, and a comment count past it wraps
+		// its list's size into a heap overflow. Errors: Parse naming the field.
+		// The vendor, comment-count and comment-length checks give those errors their precise messages; they are defense in
+		// depth, not the guard. Each only moves `offset`, and every later field is read through ReadLittleEndian32, which
+		// refuses a read past the packet, or the framing-bit check, which refuses an offset at or past its end. So any input
+		// one of them refuses is also refused, with a less precise message, without it, and none of them is individually
+		// necessary for safety: never remove the bounds-checked reads or the framing-bit check on the strength of these.
+		static Status CheckVorbisComments(std::span<const std::byte> packet)
+		{
+			if (packet.size() < VorbisHeaderPrefixSize || ByteAt(packet, 0) != VorbisCommentPacket || !HasPrefix(packet, 1, "vorbis"))
+				return MakeError(ErrorCode::Parse, "corrupt Ogg Vorbis file: the second header packet is not a comment header");
+			size_t offset = VorbisHeaderPrefixSize;
+			const std::optional<uint32_t> vendor = ReadLittleEndian32(packet, offset);
+			if (!vendor.has_value() || *vendor > packet.size() - offset)
+				return MakeError(ErrorCode::Parse, "corrupt Ogg Vorbis file: the comment header's vendor string runs past its packet");
+			offset += *vendor;
+			const std::optional<uint32_t> count = ReadLittleEndian32(packet, offset);
+			if (!count.has_value() || *count > (packet.size() - offset) / 4)
+			{
+				return MakeError(ErrorCode::Parse, "corrupt Ogg Vorbis file: the comment header declares {} comments, more than its {}-byte packet holds",
+					count.value_or(0), packet.size());
+			}
+			for (uint32_t comment = 0; comment < *count; ++comment)
+			{
+				const std::optional<uint32_t> length = ReadLittleEndian32(packet, offset);
+				if (!length.has_value() || *length > packet.size() - offset)
+					return MakeError(ErrorCode::Parse, "corrupt Ogg Vorbis file: comment {} of the comment header runs past its packet", comment);
+				offset += *length;
+			}
+			if (offset >= packet.size() || (ByteAt(packet, offset) & 0x01) == 0)
+				return MakeError(ErrorCode::Parse, "corrupt Ogg Vorbis file: the comment header has no framing bit");
 			return {};
+		}
+
+		// base^exponent, saturated at 2^62.
+		static uint64_t SaturatingPower(uint64_t base, uint32_t exponent)
+		{
+			constexpr uint64_t Limit = uint64_t{ 1 } << 62;
+			uint64_t result = 1;
+			for (uint32_t step = 0; step < exponent && result < Limit; ++step)
+				result = base != 0 && result > Limit / base ? Limit : result * base;
+			return result;
+		}
+
+		// The lookup values of a type 1 codebook: the largest r with r^dimensions <= entries (stb_vorbis's lookup1_values,
+		// whose float estimate it corrects exactly). It converts (r0 + 1)^dimensions and r^dimensions to int, with r0 its
+		// estimate (at most r + 1): when (r + 2)^dimensions exceeds INT_MAX the conversion is out of range and its result
+		// differs between platforms, so such a codebook is refused. Errors: Parse.
+		static Result<uint64_t> GetVorbisLookup1Values(uint32_t entries, uint32_t dimensions, uint32_t codebook)
+		{
+			if (entries == 0 || dimensions == 0)
+				return uint64_t{ 0 };
+			uint64_t low = 1; // 1^dimensions <= entries
+			uint64_t high = entries;
+			while (low < high)
+			{
+				const uint64_t middle = low + (high - low + 1) / 2;
+				if (SaturatingPower(middle, dimensions) <= entries)
+					low = middle;
+				else
+					high = middle - 1;
+			}
+			if (SaturatingPower(low + 2, dimensions) > static_cast<uint64_t>(INT_MAX))
+			{
+				return MakeError(ErrorCode::Parse, "unsupported Ogg Vorbis file: codebook {} has a type 1 lookup of {} entries in {} dimensions", codebook, entries,
+					dimensions);
+			}
+			return low;
+		}
+
+		// The setup header's codebooks (Vorbis I section 3.2.1), read bit for bit as stb_vorbis reads them: each one's
+		// entries times dimensions at most MaxVorbisCodebookValues, its codeword lengths and its lookup table, so the next
+		// codebook is found where stb_vorbis finds it. stb_vorbis's own checks (sync pattern, codeword lengths, lookup types)
+		// are refused here too. Errors: Parse naming the codebook.
+		static Status CheckVorbisCodebooks(std::span<const std::byte> packet)
+		{
+			if (packet.size() < VorbisHeaderPrefixSize || ByteAt(packet, 0) != VorbisSetupPacket || !HasPrefix(packet, 1, "vorbis"))
+				return MakeError(ErrorCode::Parse, "corrupt Ogg Vorbis file: the third header packet is not a setup header");
+			VorbisBitReader bits(packet.subspan(VorbisHeaderPrefixSize));
+			const uint32_t codebookCount = bits.Read(8) + 1;
+			for (uint32_t codebook = 0; codebook < codebookCount; ++codebook)
+			{
+				if (bits.Read(8) != 0x42 || bits.Read(8) != 0x43 || bits.Read(8) != 0x56)
+					return MakeError(ErrorCode::Parse, "corrupt Ogg Vorbis file: codebook {} of the setup header has no sync pattern", codebook);
+				const uint32_t dimensionsLow = bits.Read(8);
+				const uint32_t dimensions = (bits.Read(8) << 8) + dimensionsLow;
+				const uint32_t entriesLow = bits.Read(8);
+				const uint32_t entriesMiddle = bits.Read(8);
+				const uint32_t entries = (bits.Read(8) << 16) + (entriesMiddle << 8) + entriesLow;
+				const bool ordered = bits.Read(1) != 0;
+				const bool sparse = !ordered && bits.Read(1) != 0;
+				if (dimensions == 0 && entries != 0)
+					return MakeError(ErrorCode::Parse, "corrupt Ogg Vorbis file: codebook {} has {} entries of no dimensions", codebook, entries);
+				if (static_cast<uint64_t>(entries) * dimensions > MaxVorbisCodebookValues)
+				{
+					return MakeError(ErrorCode::Parse, "unsupported Ogg Vorbis file: codebook {} has {} entries of {} dimensions; at most {} values are supported",
+						codebook, entries, dimensions, MaxVorbisCodebookValues);
+				}
+
+				if (ordered)
+				{
+					// Runs of entries of one codeword length, the length growing by one per run.
+					uint32_t entry = 0;
+					uint32_t length = bits.Read(5) + 1;
+					while (entry < entries)
+					{
+						const uint32_t run = bits.Read(static_cast<uint32_t>(std::bit_width(entries - entry)));
+						if (length >= 32 || run > entries - entry)
+							return MakeError(ErrorCode::Parse, "corrupt Ogg Vorbis file: codebook {} has invalid ordered codeword lengths", codebook);
+						entry += run;
+						++length;
+					}
+				}
+				else
+				{
+					for (uint32_t entry = 0; entry < entries && !bits.IsExhausted(); ++entry)
+					{
+						if (sparse && bits.Read(1) == 0)
+							continue;
+						if (bits.Read(5) + 1 == 32)
+							return MakeError(ErrorCode::Parse, "corrupt Ogg Vorbis file: codebook {} has a 32-bit codeword length", codebook);
+					}
+				}
+
+				const uint32_t lookupType = bits.Read(4);
+				if (lookupType > 2)
+					return MakeError(ErrorCode::Parse, "corrupt Ogg Vorbis file: codebook {} has lookup type {}", codebook, lookupType);
+				if (lookupType == 0)
+					continue;
+				static_cast<void>(bits.Read(32)); // the minimum value
+				static_cast<void>(bits.Read(32)); // the delta value
+				const uint32_t valueBits = bits.Read(4) + 1;
+				static_cast<void>(bits.Read(1)); // sequence_p
+				uint64_t lookupValues = static_cast<uint64_t>(entries) * dimensions;
+				if (lookupType == 1)
+				{
+					ENGINE_TRY_ASSIGN(lookupValues, GetVorbisLookup1Values(entries, dimensions, codebook));
+				}
+				if (lookupValues == 0)
+					return MakeError(ErrorCode::Parse, "corrupt Ogg Vorbis file: codebook {} has an empty lookup table", codebook);
+				for (uint64_t value = 0; value < lookupValues && !bits.IsExhausted(); ++value)
+					static_cast<void>(bits.Read(valueBits));
+			}
+			return {};
+		}
+
+		// The header packets of an Ogg Vorbis file, before stb_vorbis reads them: the identification header alone on a first
+		// page (stb_vorbis's own rule), then the comment header from the second page (CheckVorbisComments) and the setup
+		// header after it (CheckVorbisCodebooks). Errors: Parse.
+		static Status CheckVorbisHeaders(std::span<const OggPage> pages)
+		{
+			const OggPage& first = pages.front();
+			const bool firstPage = (first.Flags & (OggFirstPage | OggContinuedPacket | OggEndOfStream)) == OggFirstPage;
+			if (!firstPage || first.Lacing.size() != 1 || std::to_integer<size_t>(first.Lacing[0]) != VorbisIdentificationSize)
+				return MakeError(ErrorCode::Parse, "corrupt Ogg Vorbis file: the first page does not hold the 30-byte identification header alone");
+			OggPosition position{ .Page = 1, .Segment = 0, .BodyOffset = 0 };
+			if (pages.size() > 1 && (pages[1].Flags & OggContinuedPacket) != 0)
+				return MakeError(ErrorCode::Parse, "corrupt Ogg Vorbis file: the comment header starts on a page with the continued-packet flag");
+			ENGINE_TRY_ASSIGN(const std::vector<std::byte> comments, ReadVorbisHeaderPacket(pages, position, "comment"));
+			ENGINE_TRY(CheckVorbisComments(comments));
+			ENGINE_TRY_ASSIGN(const std::vector<std::byte> setup, ReadVorbisHeaderPacket(pages, position, "setup"));
+			return CheckVorbisCodebooks(setup);
 		}
 
 		// The checks of ProbeEncodedAudio and DecodeEncodedAudio; keeps the samples when `samples` is set.
@@ -212,7 +513,10 @@ namespace Engine {
 		{
 			ENGINE_TRY_ASSIGN(const EncodedAudioFormat format, DetectFormat(bytes));
 			if (format == EncodedAudioFormat::Vorbis)
-				ENGINE_TRY(CheckOggPages(bytes));
+			{
+				ENGINE_TRY_ASSIGN(const std::vector<OggPage> pages, ReadOggPages(bytes));
+				ENGINE_TRY(CheckVorbisHeaders(pages));
+			}
 
 			ScopedDecoder decoder;
 			if (const ma_result result = decoder.Initialize(bytes, ToMiniaudioFormat(format)); result != MA_SUCCESS)

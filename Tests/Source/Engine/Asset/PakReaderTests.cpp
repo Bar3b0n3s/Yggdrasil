@@ -8,6 +8,7 @@
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Hash.h"
 #include "Engine/Core/Random.h"
+#include "Support/Fuzz.h"
 #include "Support/TempDirectory.h"
 
 namespace Engine {
@@ -69,27 +70,64 @@ namespace Engine {
 			CHECK_FALSE(PakReader::Open(directory / "Missing.pak").has_value());
 		}
 
-		TEST_CASE("PakReader: 10,000 seeded mutations never crash and always return Result")
+		TEST_CASE("PakReader: 10,000 seeded mutations never crash and always return Result" * doctest::test_suite(Test::FuzzSuite))
 		{
 			const Buffer pak = MakeSmallPak();
-			Random random(0x9A4);
-			for (int iteration = 0; iteration < 10000; ++iteration)
+			const Test::FuzzRun run = Test::RunFuzzCase(0x9A4, 10000, [&pak](Random& random, uint64_t /*index*/)
 			{
 				Buffer mutated = pak;
-				const int64_t flips = random.RangeInt(1, 4);
-				for (int64_t flip = 0; flip < flips; ++flip)
-				{
-					const size_t index = static_cast<size_t>(random.RangeInt(0, static_cast<int64_t>(mutated.size()) - 1));
-					mutated[index] = static_cast<std::byte>(random.NextU32() & 0xFF);
-				}
-				if (random.NextBool(0.2))
-					mutated.resize(static_cast<size_t>(random.RangeInt(0, static_cast<int64_t>(mutated.size()))));
+				Test::MutateBytes(mutated, random);
 				Result<Ref<const PakReader>> reader = PakReader::OpenMemory(std::move(mutated), "Mutated.pak");
 				if (!reader.has_value())
-					continue;
+					return false;
 				// An opened pak never crashes on reads either: entries fail their hash check instead.
 				for (const PakEntry& entry : (*reader)->GetEntries())
 					static_cast<void>((*reader)->ReadEntry(entry));
+				return true;
+			});
+			if (Test::IsFuzzSample(run.Range))
+				CHECK(run.Counts.Rejected > 0);
+		}
+
+		TEST_CASE("PakToc: 1,000 seeded mutations of a re-sealed TOC never crash" * doctest::test_suite(Test::FuzzSuite))
+		{
+			// The TOC is mutated as text and the header's TocSize and TocXXH64 are sealed again, so every mutation reaches
+			// ParsePakToc through PakReader::OpenMemory instead of failing at the TOC hash.
+			const Buffer pak = MakeSmallPak();
+			const Result<PakHeader> header = ReadPakHeader(pak);
+			REQUIRE(header.has_value());
+			const std::span<const std::byte> tocBytes = std::span<const std::byte>(pak).subspan(header->TocOffset, header->TocSize);
+			const std::string toc(AsStringView(tocBytes));
+			REQUIRE(ParsePakToc(toc, header->TocOffset).has_value());
+			// About one mutation in a hundred is a TOC the reader accepts, so a tenth of the sequence (the Debug unit run's
+			// --fuzz-scale=0.1, ADR 0024 decision 14) holds too few to check both outcomes: the minimum is the whole count.
+			constexpr uint64_t Iterations = 1000;
+			const Test::FuzzRun run = Test::RunFuzzCase(0x70C, Iterations, [&pak, &header, &toc](Random& random, uint64_t /*index*/)
+			{
+				std::string mutated = toc;
+				Test::MutateText(mutated, random);
+				const Result<PakToc> parsed = ParsePakToc(mutated, header->TocOffset);
+
+				PakHeader sealed = *header;
+				sealed.TocSize = mutated.size();
+				sealed.TocHash = XXH64(mutated);
+				Buffer bytes(pak.begin(), pak.begin() + static_cast<std::ptrdiff_t>(header->TocOffset));
+				std::ranges::copy(WritePakHeader(sealed), bytes.begin());
+				bytes.insert(bytes.end(), AsBytes(mutated).begin(), AsBytes(mutated).end());
+				Result<Ref<const PakReader>> reader = PakReader::OpenMemory(std::move(bytes), "Toc.pak");
+				if (!reader.has_value())
+					return false;
+				// The reader opened exactly the TOC the parser reads, and its entries stay safe to read.
+				REQUIRE(parsed.has_value());
+				CHECK(std::ranges::equal((*reader)->GetEntries(), parsed->Entries));
+				for (const PakEntry& entry : (*reader)->GetEntries())
+					static_cast<void>((*reader)->ReadEntry(entry));
+				return true;
+			}, Iterations);
+			if (Test::IsFuzzSample(run.Range))
+			{
+				CHECK(run.Counts.Rejected > 0);
+				CHECK(run.Counts.Accepted > 0);
 			}
 		}
 

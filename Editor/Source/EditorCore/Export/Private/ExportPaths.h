@@ -23,9 +23,8 @@ namespace Engine {
 		[[nodiscard]] Status CheckExportOutputDirectory(std::string_view directory);
 
 		// Whether the project-relative path `path` ("Assets/Tests/Level.scene") matches the Export.Exclude glob `pattern`:
-		// '*' matches any characters except '/', '?' one character except '/', "**" any characters including '/' (and "**/"
-		// also matches no directory at all, so "Assets/**/Old.png" matches "Assets/Old.png"); everything else matches itself,
-		// case-sensitively (§4.10). Pure.
+		// MatchesPathGlob (Engine/Core/PathGlob.h), the one matcher of Export.Exclude and Testing.Replays, to which this
+		// forwards (Docs/Decisions/0024-m15-contract.md decision 7). Pure.
 		[[nodiscard]] bool MatchesExportGlob(std::string_view pattern, std::string_view path);
 
 	}

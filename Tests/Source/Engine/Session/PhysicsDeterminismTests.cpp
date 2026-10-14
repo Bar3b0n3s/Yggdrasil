@@ -8,6 +8,7 @@
 #include "Engine/Scene/PhysicsSystem.h"
 #include "Engine/Scene/Scene.h"
 #include "Support/PhysicsTestScene.h"
+#include "Support/TestTimeout.h"
 
 // Physics determinism through the play session's state hash (Architecture §9.1, §9.7: "A 200-body pile stepped 600 times
 // gives the same ComputeStateHash() across repeated runs and with Jolt thread counts 0, 1 and 8. Contact-event order is
@@ -26,7 +27,7 @@ namespace Engine {
 		constexpr uint32_t PileTicks = 600;
 
 		// The time limit of one pile run: the 600 steps of a 200-body pile take about half a minute in Debug, so the cases
-		// that run several piles get a doctest::timeout of this per run instead of the default per-case limit.
+		// that run several piles set a time limit of this per run (Test::SetTestCaseTimeLimit) instead of the default.
 		constexpr double PileTimeoutSeconds = 150.0;
 
 		// 200 boxes of three sizes in a 5 x 5 footprint, 8 layers high, each layer offset and rotated a little so the pile
@@ -76,8 +77,9 @@ namespace Engine {
 
 	TEST_SUITE("Session")
 	{
-		TEST_CASE("Physics: state hash identical with 0, 1 and 8 Jolt threads" * doctest::timeout(PileTimeoutSeconds * 4.0))
+		TEST_CASE("Physics: state hash identical with 0, 1 and 8 Jolt threads")
 		{
+			Test::SetTestCaseTimeLimit(PileTimeoutSeconds * 4.0);
 			const uint64_t none = RunPile(0);
 			const uint64_t one = RunPile(1);
 			const uint64_t eight = RunPile(8);
@@ -88,16 +90,18 @@ namespace Engine {
 			CHECK(again == none);
 		}
 
-		TEST_CASE("Physics: 200-body pile hash equals the committed constant" * doctest::timeout(PileTimeoutSeconds))
+		TEST_CASE("Physics: 200-body pile hash equals the committed constant")
 		{
+			Test::SetTestCaseTimeLimit(PileTimeoutSeconds);
 			// One committed value for every configuration (§9.1: a configuration-dependent result is a bug).
 			const uint64_t hash = RunPile(PhysicsEngine::GetWorkerThreadCount());
 			INFO("pile hash: ", std::format("{:016x}", hash));
 			CHECK(hash == CommittedPileHash);
 		}
 
-		TEST_CASE("Physics: contact event order identical across runs" * doctest::timeout(PileTimeoutSeconds * 3.0))
+		TEST_CASE("Physics: contact event order identical across runs")
 		{
+			Test::SetTestCaseTimeLimit(PileTimeoutSeconds * 3.0);
 			std::vector<PhysicsEvent> first;
 			std::vector<PhysicsEvent> second;
 			std::vector<PhysicsEvent> threaded;

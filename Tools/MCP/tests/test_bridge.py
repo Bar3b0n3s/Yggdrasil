@@ -196,7 +196,8 @@ class ConnectionTests(BridgeTestCase):
             root = Path(params["path"])
             if root.exists() and any(root.iterdir()):
                 names = sorted(path.name for path in root.iterdir())
-                raise fake_editor.FakeError(engine_client.CONFLICT, "AlreadyExists", f"the directory is not empty: {names}")
+                raise fake_editor.FakeError(engine_client.CONFLICT, "AlreadyExists",
+                                            f"the directory is not empty: {names}")
             root.mkdir(exist_ok=True)
             (root / f"{params['name']}.eproj").write_text('{"Format": "Project", "Version": 1}\n', encoding="utf-8")
             return {"project": {"name": params["name"], "root": root.as_posix()}, "createdFiles": []}
@@ -297,8 +298,8 @@ class ConnectionTests(BridgeTestCase):
 
 class EngineMethodsTests(BridgeTestCase):
     def test_engine_methods_reads_an_offloaded_catalogue(self) -> None:
-        # The unfiltered rpc.discover is over the offload threshold, so the editor answers with the file it wrote (ADR 0008
-        # decision 31); a filtered one fits inline.
+        # The unfiltered rpc.discover is over the offload threshold, so the editor answers with the file it wrote
+        # (ADR 0008 decision 31); a filtered one fits inline.
         methods = [{"name": "entity.create", "description": "Creates an entity.", "mutates": True, "params": {}},
                    {"name": "scene.tree", "description": "The hierarchy.", "mutates": False, "params": {}}]
         offloaded = self.directory / "1-2-00000001.json"
@@ -307,7 +308,8 @@ class EngineMethodsTests(BridgeTestCase):
         def discover(params: dict[str, Any]) -> dict[str, Any]:
             if "domain" in params:
                 return {"methods": [method for method in methods if method["name"].startswith(params["domain"] + ".")]}
-            return {"path": offloaded.as_posix(), "truncated": True, "summary": {"methods": {"type": "array", "count": 2}}}
+            return {"path": offloaded.as_posix(), "truncated": True,
+                    "summary": {"methods": {"type": "array", "count": 2}}}
 
         editor = self.start_server({"rpc.discover": discover})
         bridge = server.Bridge(REPOSITORY_ROOT, [], Launcher(REPOSITORY_ROOT, self.directory / "UserData"))

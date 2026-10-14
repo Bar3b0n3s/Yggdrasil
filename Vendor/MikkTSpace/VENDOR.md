@@ -81,3 +81,17 @@ only MikkTSpace's internal invariants.
 3. Replace `mikktspace.c` and `mikktspace.h`; update `LICENSE` if the notice changed.
 4. Update this file (commit, date, hashes), rebuild every configuration, run `python Scripts/CheckBuildConfig.py` and the
    glTF importer tests. Bump `GltfImporter::Version` when generated tangents change, so cached meshes are rebuilt.
+
+## Notices
+
+The row `Scripts/Lib/notices.py` reads for `THIRD_PARTY_NOTICES.txt` (Docs/Decisions/0024-m15-contract.md decision 8).
+
+| Field | Value |
+|---|---|
+| Name | MikkTSpace |
+| Upstream | https://github.com/mmikk/MikkTSpace |
+| Version | master 3e895b49d05ea07e4c2133156cfa94369e19e409 |
+| License | Zlib |
+| Shipped | yes |
+| Projects | MikkTSpace |
+| License files | LICENSE |

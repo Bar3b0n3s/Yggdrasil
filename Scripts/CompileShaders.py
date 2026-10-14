@@ -504,7 +504,7 @@ def compile_variant(
 
 
 class OutputLock:
-    """Exclusive lock on an output directory, so a hot reload and an IDE build never interleave."""
+    """Exclusive lock on an output directory, so two runs (an IDE build and a command-line run) never interleave."""
 
     def __init__(self, path: Path) -> None:
         self.path = path
@@ -611,7 +611,7 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
         action="append",
         default=[],
         metavar="NAME",
-        help="compile only this program (repeatable); used by shader hot reload. Does not write the stamp file",
+        help="compile only this program (repeatable), to iterate on one shader; does not write the stamp file",
     )
     parser.add_argument("--force", action="store_true", help="recompile every selected variant")
     parser.add_argument("--jobs", type=int, default=os.cpu_count() or 1, help="parallel slangc processes")

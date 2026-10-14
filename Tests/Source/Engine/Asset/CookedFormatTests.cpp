@@ -4,6 +4,7 @@
 
 #include "Engine/Core/Hash.h"
 #include "Engine/Core/Random.h"
+#include "Support/Fuzz.h"
 
 namespace Engine {
 
@@ -72,25 +73,39 @@ namespace Engine {
 			checkParseError(std::span<const std::byte>(artifact).first(31));
 		}
 
-		TEST_CASE("CookedFormat: 10,000 seeded mutations never crash and always return Result")
+		TEST_CASE("CookedFormat: 10,000 seeded mutations never crash and always return Result" * doctest::test_suite(Test::FuzzSuite))
 		{
 			const Buffer original = WriteCookedArtifact(AssetType::Font, 1, 1, MakePayload(256));
-			Random random(0xC00CED);
-			for (int iteration = 0; iteration < 10000; ++iteration)
+			constexpr size_t HashOffset = 24; // PayloadXXH64 in the 32-byte header
+			const Test::FuzzRun run = Test::RunFuzzCase(0xC00CED, 10000, [&original](Random& random, uint64_t /*index*/)
 			{
 				Buffer mutated = original;
-				const int64_t flips = random.RangeInt(1, 8);
-				for (int64_t flip = 0; flip < flips; ++flip)
+				Test::MutateBytes(mutated, random);
+				// Half the iterations re-seal the payload hash, so mutations of the header's other fields and of the size
+				// reach their own checks instead of all failing at the hash.
+				if (mutated.size() >= CookedHeader::Size && random.NextBool())
 				{
-					const size_t index = static_cast<size_t>(random.RangeInt(0, static_cast<int64_t>(mutated.size()) - 1));
-					mutated[index] = static_cast<std::byte>(random.NextU32() & 0xFF);
+					const uint64_t hash = XXH64(std::span<const std::byte>(mutated).subspan(CookedHeader::Size));
+					std::memcpy(mutated.data() + HashOffset, &hash, sizeof(hash));
 				}
-				if (random.NextBool(0.25))
-					mutated.resize(static_cast<size_t>(random.RangeInt(0, static_cast<int64_t>(mutated.size()))));
 				// Any outcome is fine as long as it is a value: a valid view only when the bytes are still consistent.
 				const Result<CookedArtifactView> read = ReadCookedArtifact(mutated);
-				if (read.has_value())
-					CHECK(read->Header.PayloadHash == XXH64(read->Payload));
+				if (!read.has_value())
+				{
+					const ErrorCode code = read.error().GetCode();
+					CHECK((code == ErrorCode::Parse || code == ErrorCode::Validation));
+					return false;
+				}
+				CHECK(read->Header.PayloadHash == XXH64(read->Payload));
+				CHECK(read->Header.PayloadSize == read->Payload.size());
+				CHECK(read->Header.Flags == 0);
+				CHECK(read->Header.Type != AssetType::None);
+				return true;
+			});
+			if (Test::IsFuzzSample(run.Range))
+			{
+				CHECK(run.Counts.Rejected > 0);
+				CHECK(run.Counts.Accepted > 0);
 			}
 		}
 	}

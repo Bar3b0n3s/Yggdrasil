@@ -12,10 +12,13 @@
 #include <string>
 
 // The editor's own command-line options (Architecture §12.1, §13.9), the M4 subset, M6's --bake-engine-assets and
-// --engine-cache-dir, M13's --check-scripts, --run-tests and --filter, and M14's --id-seed and --junit:
-//   Editor [--project <path>] [--read-only] [--automation[=port]] [--automation-test-hooks] [--batch <file.jsonl>
+// --engine-cache-dir, M13's --check-scripts, --run-tests and --filter, M14's --id-seed and --junit, and M15's export options
+// and --strict:
+//   Editor [--project <path>] [--read-only] [--strict] [--automation[=port]] [--automation-test-hooks] [--batch <file.jsonl>
 //          [--id-seed <n>]] [--upgrade] [--dump-reference <dir>] [--bake-engine-assets] [--engine-cache-dir <dir>]
 //          [--check-scripts] [--run-tests [--filter <pattern>] [--junit <file.xml>]]
+//          [--export <dir> --config Debug|Release|Dist [--testing] [--smoke-test] [--export-report <file.json>]]
+//          [--export-root <dir>]
 // plus the engine options every application takes (GetEngineCommandLineOptions: --headless, --frames N,
 // --user-data-dir, --renderer vulkan|none and the graphics options) and the Editor executable's screenshot options
 // (Editor/EditorApp.h). --renderer is an engine option because the Runtime takes it too (§13.9; ADR 0009 decision 3:
@@ -33,6 +36,12 @@ namespace Engine {
 		std::optional<std::filesystem::path> Project{};
 		// --read-only (§4.13): open the project without the lock, mutations denied.
 		bool ReadOnly = false;
+		// --strict (§6 "Strict reader"; the M15 completion review's A024): every project this editor opens, through --project,
+		// project.open, project.create or recovery, is read strictly: unknown keys in the .eproj, and unknown keys, fields
+		// and components (and unresolvable or mismatching script field values) in its scenes and prefabs, are errors
+		// instead of warnings (EditorContextSpecification::StrictUnknowns). CI's feature, determinism and export runs pass
+		// it over the committed FeatureTest. Combines with every other option.
+		bool Strict = false;
 		// --automation[=port]: start the automation server listening (§13.2). --headless listens too, except in one-shot
 		// runs (IsOneShot; EditorApp.h, AutomationServerSpecification::Listen).
 		bool Automation = false;
@@ -81,7 +90,7 @@ namespace Engine {
 		// only when it is empty or holds an earlier export) from bin/ of the checkout (ENGINE_REPO_ROOT), then exit 0 when it
 		// exported, 1 when the export failed, 3 when the project does not open, its lock is held, or a build output is missing
 		// (Exporter::IsMissingBuildOutput; any other NotFound is 1). The export runs headless or windowed, polled once per
-		// frame like project.export.
+		// frame like project.export. --frames (an engine option) is refused with it: the export decides when the run ends.
 		std::optional<std::filesystem::path> ExportDirectory{};
 		std::optional<ExportConfiguration> ExportConfig{}; // --config, required with --export and only with it
 		bool ExportTesting = false;                        // --testing, only with --export (ExportSpecification::Testing)
@@ -114,8 +123,10 @@ namespace Engine {
 
 	// Reads the editor options of `commandLine` (parsed with both option tables). Errors: InvalidArgument naming the option
 	// for: an --automation port that is not 1 to 65535; --read-only or --upgrade without --project; --upgrade with --read-only; more than one of --batch, --upgrade,
-	// --dump-reference and --bake-engine-assets; --automation or --automation-test-hooks together with --dump-reference,
-	// --upgrade or --bake-engine-assets; and --automation-test-hooks without --automation or --batch.
+	// --dump-reference, --bake-engine-assets, --check-scripts, --run-tests and --export; --automation or --automation-test-hooks together with --dump-reference,
+	// --upgrade, --bake-engine-assets, --check-scripts, --run-tests or --export; --automation-test-hooks without --automation or --batch; --config other
+	// than Debug, Release or Dist; --config, --testing, --smoke-test or --export-report without --export; --export without --config or --project, or with
+	// --read-only, --export-root or --frames; and an --export-root that cannot be made absolute.
 	[[nodiscard]] Result<EditorLaunchOptions> ParseEditorLaunchOptions(const CommandLine& commandLine);
 
 }

@@ -75,13 +75,13 @@ namespace Engine {
 			if (!bytes)
 			{
 				return std::unexpected(MakeExportSettingError(Pointer, std::format("Export.Icon '{}' cannot be read: {}", icon, bytes.error().GetMessageText()),
-					"add the icon file, or clear Export.Icon to use the engine's default icon"));
+					"add the icon file, or clear Export.Icon to keep the platform's default application icon"));
 			}
 			const Result<Image> image = DecodePng(std::span<const std::byte>(*bytes));
 			if (!image)
 			{
 				return std::unexpected(MakeExportSettingError(Pointer, std::format("Export.Icon '{}' is not a PNG: {}", icon, image.error().GetMessageText()),
-					"save the icon as a PNG of at least 256 x 256 pixels"));
+					"save the icon as a square PNG of at least 256 x 256 pixels"));
 			}
 			if (image->Width < MinimumIconSize || image->Height < MinimumIconSize)
 			{
@@ -90,7 +90,39 @@ namespace Engine {
 						MinimumIconSize, MinimumIconSize),
 					"save a larger PNG; 256 x 256 pixels or more"));
 			}
+			// Icon images are square, and padding or cropping would change the author's picture (ADR 0024 decision 4).
+			if (image->Width != image->Height)
+			{
+				return std::unexpected(MakeExportSettingError(Pointer,
+					std::format("Export.Icon '{}' is {} x {} pixels; an executable icon is square", icon, image->Width, image->Height),
+					"save the icon as a square PNG, such as 256 x 256 or 512 x 512 pixels"));
+			}
 			return {};
+		}
+
+		// The decoded Export.Icon of the open project, as Validate checked it (CheckIcon).
+		[[nodiscard]] static Result<Image> ReadIcon(const EditorContext& editor, const std::string& icon)
+		{
+			constexpr std::string_view Pointer = "/Export/Icon";
+			const Result<VfsPath> path = VfsPath::Create("project", icon);
+			if (!path)
+			{
+				return std::unexpected(MakeExportSettingError(Pointer, std::format("Export.Icon '{}' is not a project-relative path: {}", icon, path.error().GetMessageText()),
+					"name a PNG inside the project, such as \"Assets/Icon.png\""));
+			}
+			const Result<Buffer> bytes = editor.GetVfs().ReadFile(*path);
+			if (!bytes)
+			{
+				return std::unexpected(MakeExportSettingError(Pointer, std::format("Export.Icon '{}' no longer reads: {}", icon, bytes.error().GetMessageText()),
+					"restore the icon file, or clear Export.Icon"));
+			}
+			Result<Image> image = DecodePng(std::span<const std::byte>(*bytes));
+			if (!image)
+			{
+				return std::unexpected(MakeExportSettingError(Pointer, std::format("Export.Icon '{}' no longer decodes as a PNG: {}", icon, image.error().GetMessageText()),
+					"save the icon as a square PNG of at least 256 x 256 pixels"));
+			}
+			return image;
 		}
 
 	}
@@ -110,6 +142,13 @@ namespace Engine {
 		}
 		if (!settings.Icon.empty())
 			ENGINE_TRY(Utils::CheckIcon(editor, settings.Icon));
+		// One host-independent rule (the M15 review's M02), so a Company the resource writers of one OS would refuse after
+		// cooking fails here, before anything is written, on every OS.
+		if (const std::optional<std::string> problem = FindExportCompanyProblem(settings.Company))
+		{
+			return std::unexpected(Utils::MakeExportSettingError("/Export/Company", std::format("Export.Company {}", *problem),
+				std::format("write the company name as one line of at most {} bytes, without tabs or line breaks", ExportSettings::MaxCompanyBytes)));
+		}
 
 		ExecutableResources resources;
 		resources.Icon = settings.Icon;
@@ -120,11 +159,42 @@ namespace Engine {
 		return resources;
 	}
 
-	Result<ExecutableResourceSet> BuildExecutableResourceSet(const EditorContext& /*editor*/, const ExecutableResources& /*resources*/,
-		std::string_view /*gameName*/)
+	Result<ExecutableResourceSet> BuildExecutableResourceSet(const EditorContext& editor, const ExecutableResources& resources, std::string_view gameName)
 	{
-		ENGINE_CONTRACT_STUB();
-		return std::unexpected(Error(ErrorCode::Unsupported, "M15 executable resource set contract (stream A)"));
+		if (!editor.HasProject())
+			return MakeError(ErrorCode::InvalidState, "no project open; the executable's resources come from the open project's Export settings");
+
+		ExecutableResourceSet set;
+		set.Version.Major = resources.VersionMajor;
+		set.Version.Minor = resources.VersionMinor;
+		set.Version.Patch = resources.VersionPatch;
+		set.Version.CompanyName = resources.Company;
+		set.Version.ProductName = std::string(gameName);
+#if defined(ENGINE_PLATFORM_WINDOWS)
+		set.Version.OriginalFilename = std::format("{}.exe", gameName);
+#else
+		set.Version.OriginalFilename = std::string(gameName);
+#endif
+		if (resources.Icon.empty())
+			return set;
+
+		// One image per size, each reduced from the decoded icon itself (never from a smaller image), so every size is the
+		// integer box filter's result of the author's picture and identical for identical input.
+		ENGINE_TRY_ASSIGN(const Image icon, Utils::ReadIcon(editor, resources.Icon));
+		set.Icons.reserve(ExecutableIconSizes.size());
+		for (const uint16_t size : ExecutableIconSizes)
+		{
+			ENGINE_TRY_ASSIGN(const Image reduced, DownscaleImage(icon, size));
+			if (reduced.Width != size || reduced.Height != size)
+			{
+				return std::unexpected(Utils::MakeExportSettingError("/Export/Icon",
+					std::format("Export.Icon '{}' reduces to {} x {} pixels instead of {} x {}", resources.Icon, reduced.Width, reduced.Height, size, size),
+					"save the icon as a square PNG of at least 256 x 256 pixels"));
+			}
+			ENGINE_TRY_ASSIGN(Buffer png, EncodePng(reduced));
+			set.Icons.push_back({ .Size = size, .Png = std::move(png) });
+		}
+		return set;
 	}
 
 }

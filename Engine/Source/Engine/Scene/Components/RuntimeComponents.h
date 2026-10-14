@@ -45,9 +45,4 @@ namespace Engine {
 	{
 	};
 
-	// The entity's script instance has run OnCreate but not yet OnStart; the next start flush runs it (§5.7, M13).
-	struct PendingStartTag
-	{
-	};
-
 }

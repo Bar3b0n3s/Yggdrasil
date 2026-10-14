@@ -15,6 +15,12 @@ namespace Engine {
 	// The byte offset of the first invalid sequence in `text`, or text.size() when it is valid.
 	[[nodiscard]] size_t FindInvalidUtf8(std::string_view text);
 
+	// The byte length (1 to 4) of the well-formed sequence that starts at `offset` of `text`, or 0 when the bytes there
+	// start none (a continuation byte, an overlong form, a surrogate, a code point above U+10FFFF or a truncated
+	// sequence), by the rules of IsValidUtf8. `offset` is below text.size() (asserted). Used to step through text one
+	// code point at a time (MatchesPathGlob's '?' and '*').
+	[[nodiscard]] size_t GetUtf8SequenceLength(std::string_view text, size_t offset);
+
 	// Byte length of the longest prefix of `text` that does not end inside a UTF-8 sequence: only an incomplete trailing
 	// lead/continuation run is dropped, and other bytes, invalid ones included, are kept as they are. Used to cut text at
 	// a byte cap without splitting a code point.

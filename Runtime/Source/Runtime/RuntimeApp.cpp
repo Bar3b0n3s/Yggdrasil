@@ -23,6 +23,7 @@
 #include "Engine/Core/Json/JsonWriter.h"
 #include "Engine/Core/Log.h"
 #include "Engine/Core/Mounts/NativeDirectoryMount.h"
+#include "Engine/Core/PathGlob.h"
 #include "Engine/Core/Utf8.h"
 #include "Engine/Core/VfsPath.h"
 #include "Engine/Core/VirtualFileSystem.h"
@@ -50,10 +51,13 @@
 
 #if !defined(ENGINE_DIST)
 	#include "Engine/App/VulkanErrorHandler.h"
+	#include "Engine/Audio/AudioEngine.h"
 	#include "Engine/Automation/Methods/AutomationTypes.h"
 	#include "Engine/Automation/Methods/RegisterSharedMethods.h"
 	#include "Engine/Automation/Methods/RuntimeAutomationServer.h"
 	#include "Engine/Automation/Methods/StatsMethods.h"
+	#include "Engine/ImGui/StatsOverlay.h"
+	#include "Engine/Scene/PhysicsSystem.h"
 	#include "Engine/Scripting/ScriptCompiler.h"
 #endif
 
@@ -220,36 +224,6 @@ namespace Engine {
 			return path;
 		}
 
-		bool MatchesGlob(std::string_view pattern, std::string_view text)
-		{
-			// The export vocabulary: '*' and '?' stay within a path segment; '**' crosses separators and
-			// '**/' also matches no directory. Dynamic programming avoids recursive/exponential backtracking.
-			const size_t width = text.size() + 1;
-			std::vector<uint8_t> matches((pattern.size() + 1) * width, 0);
-			matches[pattern.size() * width + text.size()] = 1;
-			for (size_t p = pattern.size(); p-- > 0;)
-			{
-				for (size_t t = width; t-- > 0;)
-				{
-					bool matched = false;
-					if (pattern[p] == '*')
-					{
-						const bool recursive = p + 1 < pattern.size() && pattern[p + 1] == '*';
-						const size_t next = p + (recursive ? 2 : 1);
-						matched = matches[next * width + t] != 0;
-						if (recursive && next < pattern.size() && pattern[next] == '/')
-							matched |= matches[(next + 1) * width + t] != 0;
-						if (t < text.size() && (recursive || text[t] != '/'))
-							matched |= matches[p * width + t + 1] != 0;
-					}
-					else if (t < text.size() && (pattern[p] == text[t] || (pattern[p] == '?' && text[t] != '/')))
-						matched = matches[(p + 1) * width + t + 1] != 0;
-					matches[p * width + t] = matched ? uint8_t{ 1 } : uint8_t{ 0 };
-				}
-			}
-			return matches.front() != 0;
-		}
-
 	}
 
 	struct RuntimeApp::State final : IPlaySessionHost, IFeatureTestHost
@@ -302,6 +276,8 @@ namespace Engine {
 #if !defined(ENGINE_DIST)
 		Scope<RuntimeAutomationServer> Server;
 		std::string PhaseText{}; // reused for every script phase (OnScriptPhase)
+		// The F1 stats overlay of a windowed run (Engine/ImGui/StatsOverlay.h): hidden at start, toggled by OnEvent.
+		StatsOverlayToggle Overlay{};
 #endif
 		[[nodiscard]] PlaySession* ActiveSession() const { return Options.FeatureTest ? TestSession : Session.get(); }
 		[[nodiscard]] ScriptEnvironment GetScriptEnvironment() const override;
@@ -438,7 +414,7 @@ namespace Engine {
 				pattern.remove_prefix(10);
 			bool matched = false;
 			for (const auto& entry : GamePak->GetEntries())
-				if (entry.Type == "Replay" && MatchesGlob(pattern, entry.Path))
+				if (entry.Type == "Replay" && MatchesPathGlob(pattern, entry.Path))
 				{
 					matched = true;
 					result.push_back(entry.Path);
@@ -809,6 +785,15 @@ namespace Engine {
 
 	Status RuntimeApp::OnInitialize()
 	{
+#if !defined(ENGINE_DIST)
+		// The overlay's ImGui never changes the OS cursor, so the game's cursor mode holds as in Dist, which has no ImGui. The
+		// line says so once per windowed run; the F1 test (RuntimeAppTests) checks that the Runtime configured its context.
+		if (GetImGuiLayer() != nullptr)
+		{
+			ConfigureStatsOverlayContext();
+			ENGINE_INFO("Runtime: stats overlay ready (F1); its ImGui context leaves the OS cursor to the game");
+		}
+#endif
 		const Status initialized = InitializeGame();
 		// Run calls OnShutdown only after a successful OnInitialize and destroys the context next, so what was built (the
 		// server, the GPU objects, the session, the asset manager) goes now, in OnShutdown's order.
@@ -1064,6 +1049,27 @@ namespace Engine {
 
 	void RuntimeApp::OnEvent(Event& event)
 	{
+#if !defined(ENGINE_DIST)
+		// F1 toggles the stats overlay of a windowed run (only it has ImGui, CreateRuntimeApp) and is never consumed: the game
+		// receives it below like every other key, so Release and Dist games see identical input (§14.4; Docs/Decisions/
+		// 0024-m15-contract.md decision 17).
+		if (const auto* key = std::get_if<KeyEvent>(&event); key != nullptr && GetImGuiLayer() != nullptr)
+		{
+			const bool visible = m_State->Overlay.IsVisible();
+			if (key->Action != ButtonAction::Released)
+			{
+				m_State->Overlay.OnKeyPressed(key->KeyCode, key->Action == ButtonAction::Repeated);
+				if (m_State->Overlay.IsVisible() != visible)
+					ENGINE_INFO("Runtime: stats overlay {} (F1)", m_State->Overlay.IsVisible() ? "shown" : "hidden");
+			}
+			else if (key->KeyCode == Key::F1)
+			{
+				// A release toggles nothing. The line marks the point where the game's input queue receives it, below, so a
+				// test that waits for it knows the next tick sees F1 up (the presses' lines serve the same purpose).
+				ENGINE_INFO("Runtime: F1 released (stats overlay {})", visible ? "shown" : "hidden");
+			}
+		}
+#endif
 		// Every game input goes through the session's tick-stamped queue: real devices reach the next tick (§13.6).
 		if (m_State->Session == nullptr || m_State->Options.FeatureTest || m_State->ReplayInputSerial != 0)
 			return;
@@ -1303,6 +1309,42 @@ namespace Engine {
 		state.RenderFailing = !drawn.has_value();
 	}
 
+#if !defined(ENGINE_DIST)
+	void RuntimeApp::OnImGuiRender()
+	{
+		State& state = *m_State;
+		if (!state.Overlay.IsVisible())
+			return;
+		StatsOverlayData data;
+		const FrameLoopStatistics frame = GetFrameStatistics();
+		data.FrameMilliseconds = frame.CpuMilliseconds;
+		data.FramesPerSecond = frame.Fps;
+		if (const PlaySession* session = state.ActiveSession())
+		{
+			data.Tick = session->GetTick();
+			data.Entities = static_cast<uint32_t>(session->GetScene().GetEntityCount());
+			data.Bodies = session->GetPhysics().GetStats().BodyCount;
+			if (const ScriptEngine* scripts = session->GetScripts())
+				data.ScriptHeapBytes = scripts->GetMemoryState().UsedBytes;
+		}
+		if (const AudioEngine* audio = GetContext().GetAudioEngine())
+			data.Voices = audio->GetStats().LiveVoices;
+		// The game view's last frame: its draws, and its GPU time when the device has completed timings.
+		data.GpuMilliseconds = -1.0;
+		if (state.Renderer != nullptr)
+		{
+			const RenderStats stats = state.Renderer->GetRenderStats();
+			for (const RenderPassStats& pass : stats.Passes)
+			{
+				data.DrawCalls += pass.DrawCalls;
+				if (pass.GpuAvailable)
+					data.GpuMilliseconds = std::max(data.GpuMilliseconds, 0.0) + pass.GpuMilliseconds;
+			}
+		}
+		DrawStatsOverlay(data);
+	}
+#endif
+
 	void RuntimeApp::OnRenderSubmitted(uint64_t frameIndex, uint64_t submissionId)
 	{
 		State& state = *m_State;
@@ -1385,10 +1427,11 @@ namespace Engine {
 			return MakeError(ErrorCode::InvalidArgument, "--feature-test requires a testing export (Game.json Testing:true)");
 		if (runtime.FeatureTest && manifest->Testing && specification.UserDataRoot.empty())
 		{
-			// Testing exports keep logs/crashes and user:// beside their manifest, including Dist without a CLI override.
-			// ProcessContext appends the manifest's game name; an explicit development root always takes precedence.
+			// Testing exports keep logs/crashes and user:// beside their package (outside a macOS bundle), including Dist
+			// without a CLI override (§14.3, GetTestingUserDataRoot). ProcessContext appends the manifest's game name; an
+			// explicit development root always takes precedence.
 			std::error_code error;
-			specification.UserDataRoot = std::filesystem::absolute(runtime.ManifestPath.parent_path() / "bin" / "TestUserData", error);
+			specification.UserDataRoot = std::filesystem::absolute(GetTestingUserDataRoot(runtime.ManifestPath), error);
 			if (error)
 				return MakeError(ErrorCode::Io, "cannot resolve testing user-data directory beside '{}': {}", FileSystem::PathToUtf8(runtime.ManifestPath), error.message());
 		}
@@ -1401,6 +1444,11 @@ namespace Engine {
 		}
 
 		ApplyGameSettings(specification, manifest->Name, manifest->Window, manifest->Simulation);
+#if !defined(ENGINE_DIST)
+		// The F1 stats overlay (§14.4; Docs/Decisions/0024-m15-contract.md decision 17) needs Dear ImGui, which a windowed
+		// Debug or Release run with a renderer enables, without an ini file; headless runs and every Dist build have none.
+		specification.EnableImGui = specification.Window == WindowMode::Windowed && specification.Renderer == RendererMode::Vulkan;
+#endif
 		specification.EnginePak = runtime.ManifestPath.parent_path() / FileSystem::PathFromUtf8(manifest->Paks[0].Path);
 		specification.RegisterTypes = &Utils::RegisterRuntimeTypes;
 		return CreateScope<RuntimeApp>(std::move(specification), std::move(runtime), std::move(*manifest));

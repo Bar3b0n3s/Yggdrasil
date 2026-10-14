@@ -2,28 +2,40 @@
 
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Core/Json/JsonWriter.h"
+#include "Engine/Core/Random.h"
 #include "Engine/Reflection/JsonSchema.h"
+#include "Engine/Reflection/MergePatch.h"
 #include "Engine/Reflection/RandomValueGenerator.h"
 #include "Engine/Reflection/TypeRegistry.h"
+#include "Engine/Scene/ComponentAccess.h"
+#include "Engine/Scene/ComponentHostOps.h"
 #include "Engine/Scene/Components/BuiltinComponents.h"
 #include "Engine/Scene/Components/PrefabInstanceComponent.h"
 #include "Engine/Scene/Components/ScriptComponent.h"
+#include "Engine/Scene/Components/TransformComponent.h"
+#include "Engine/Scene/Entity.h"
+#include "Engine/Scene/TransformSystem.h"
 #include "Support/FixtureSchemaSource.h"
 #include "Support/GlmApprox.h"
 #include "Support/ReflectionTestTypes.h"
 #include "Support/SceneTestFixture.h"
 #include "Support/TestData.h"
 
+#include <glm/glm.hpp>
+#include <glm/gtc/quaternion.hpp>
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <limits>
 
 // The registry-parametrized suite of Architecture §5.4 and Roadmap M3: for every registered component and reflected
 // struct, defaults round-trip, 200 seeded random values round-trip (Map and Variant fields included, through the fixture
 // schema source), out-of-range and non-finite values are rejected, and the generated schema validates the serialized
-// output. Script get/set (M13) and automation set/get (M4) join the suite with their milestones. The suite runs over the
-// built-in registry and over the Reflection test types, which cover every FieldType independently of the components.
+// output; every component field round-trips through the automation write and read paths (entity.update, entity.get).
+// The suite runs over the built-in registry and over the Reflection test types, which cover every FieldType
+// independently of the components. Script get/set of every scriptable field is swept over the same registry in
+// ScriptProxyTests.cpp ("ScriptProxy: every reflected script field round-trips through its actual component").
 
 namespace Engine {
 
@@ -463,6 +475,208 @@ namespace Engine {
 		}
 	}
 
+	// Adds `component` to `entity`, after the components it requires (with their defaults), as entity.create and
+	// entity.update order additions.
+	static Status AddWithRequirements(Entity entity, const ComponentInfo& component, const IFieldSchemaSource* schemas)
+	{
+		if (component.GetHostOps()->Has(entity))
+			return {};
+		for (const ComponentInfo* requirement : component.GetRequires())
+			ENGINE_TRY(AddWithRequirements(entity, *requirement, schemas));
+		return ComponentAccess::AddComponent(entity, component.GetName(), nullptr, schemas);
+	}
+
+	// True when `json` holds a null as the value of an object member at any depth, which an RFC 7386 merge patch cannot
+	// set (null deletes the member), so entity.update cannot write it either.
+	static bool HasNullMember(const Json& json)
+	{
+		if (json.is_object())
+		{
+			for (auto member = json.begin(); member != json.end(); ++member)
+			{
+				if (member->is_null() || HasNullMember(*member))
+					return true;
+			}
+		}
+		else if (json.is_array())
+		{
+			for (const Json& element : json)
+			{
+				if (HasNullMember(element))
+					return true;
+			}
+		}
+		return false;
+	}
+
+	// The bound of every float component a virtual field is written with: far enough from a field's current value to show
+	// a setter that ignores its input, and inside the range where each conversion a virtual field makes reads back what it
+	// wrote (Transform's EulerAngles reads X in [-90, 90] and Y and Z in (-180, 180], so [-80, 80] stays clear of the
+	// gimbal lock and of the wrap).
+	constexpr double VirtualFieldComponentBound = 80.0;
+
+	// A seeded value for the virtual field `field` that differs from `current`, its value now: float components drawn in
+	// [-VirtualFieldComponentBound, VirtualFieldComponentBound] narrowed to the field's Min and Max and outside
+	// (-MinMagnitude, MinMagnitude), each at least 1 away from the current one; for a quaternion, a unit quaternion whose
+	// rotation lies more than 50 degrees from the current one. Fails for any other kind, so a new kind of virtual field
+	// extends the draw.
+	static Value DrawVirtualFieldValue(Random& random, const FieldInfo& field, const Value& current)
+	{
+		constexpr int MaxAttempts = 1000;
+		const FieldType kind = field.GetType().GetKind();
+		if (kind == FieldType::Quat)
+		{
+			const glm::quat from = glm::normalize(current.AsQuat());
+			for (int attempt = 0; attempt < MaxAttempts; ++attempt)
+			{
+				const glm::quat drawn(static_cast<float>(random.RangeDouble(-1.0, 1.0)), static_cast<float>(random.RangeDouble(-1.0, 1.0)),
+					static_cast<float>(random.RangeDouble(-1.0, 1.0)), static_cast<float>(random.RangeDouble(-1.0, 1.0)));
+				const float length = glm::length(drawn);
+				if (length < 0.25f)
+					continue;
+				const glm::quat unit = drawn / length;
+				// |dot| = cos(angle / 2): below 0.9 the rotations differ by more than 51 degrees.
+				if (std::abs(glm::dot(unit, from)) < 0.9f)
+					return Value::FromQuat(unit);
+			}
+			FAIL("no quaternion far enough from the current value of ", field.GetName());
+			return current;
+		}
+		const size_t count = GetFloatComponentCount(kind);
+		REQUIRE_MESSAGE(count != 0, "DrawVirtualFieldValue draws no value of the kind of the virtual field ", field.GetName());
+		const FieldMeta& meta = field.GetMeta();
+		const double low = std::max(-VirtualFieldComponentBound, meta.Min.value_or(-VirtualFieldComponentBound));
+		const double high = std::min(VirtualFieldComponentBound, meta.Max.value_or(VirtualFieldComponentBound));
+		REQUIRE(low + 4.0 < high);
+		const glm::vec4 before = GetFloatComponents(current);
+		glm::vec4 components(0.0f);
+		for (size_t index = 0; index < count; ++index)
+		{
+			const auto component = static_cast<glm::length_t>(index);
+			bool drawn = false;
+			for (int attempt = 0; attempt < MaxAttempts && !drawn; ++attempt)
+			{
+				const auto value = static_cast<float>(random.RangeDouble(low, high));
+				drawn = std::abs(value - before[component]) >= 1.0f && (!meta.MinMagnitude || std::abs(value) >= *meta.MinMagnitude);
+				components[component] = value;
+			}
+			REQUIRE_MESSAGE(drawn, "no component far enough from the current value of ", field.GetName());
+		}
+		return MakeFloatValue(kind, components);
+	}
+
+	// Whether `read`, a virtual field's value read back, is the `written` one within what the field's conversion keeps:
+	// 1e-3 per float component (components of at most 80 through a parent's space or through Euler angles round in float)
+	// and, for a quaternion, 1e-4 per component up to its sign (q and -q are one rotation).
+	static bool VirtualFieldValueMatches(const Value& read, const Value& written)
+	{
+		if (read.GetKind() != written.GetKind())
+			return false;
+		if (written.GetKind() == FieldType::Quat)
+		{
+			const glm::quat expected = written.AsQuat();
+			return Test::ApproxEqual(read.AsQuat(), expected, 1.0e-4f) || Test::ApproxEqual(read.AsQuat(), -expected, 1.0e-4f);
+		}
+		return Test::ApproxEqual(GetFloatComponents(read), GetFloatComponents(written), 1.0e-3f);
+	}
+
+	// The automation set/get sweep of §5.4 over every serializable, non-hidden, non-entity-level component of the registry:
+	// entity.update writes a component's stored fields as one RFC 7386 merge patch (ComponentAccess::PatchComponentJson) and
+	// its virtual fields through their setters (ComponentAccess::SetFieldValue), and entity.get reads it back
+	// (ComponentAccess::GetComponentJson). Each component lives in a scene of its own (UniquePerScene and Excludes rules
+	// never meet another component's), added after what it requires, on an entity whose parent has a translation, a
+	// rotation and a uniform scale that are not the identity, so a world-space virtual field converts through the parent's
+	// space (a uniform scale keeps every world rotation representable; a non-uniform one shears). First every virtual
+	// field of the fresh component, each written with a seeded value that differs from the one it reads
+	// (DrawVirtualFieldValue): a writable one reads that value back within its conversion's tolerance
+	// (VirtualFieldValueMatches), so a setter that ignores its input, drops the parent or mixes degrees and radians fails;
+	// a read-only one refuses the write, which changes nothing. Then `iterations` seeded random values of the whole
+	// component, every stored writable field drawn within its metadata, are written as the merge patch from the current
+	// value and read back exactly.
+	static void CheckAutomationRoundTrips(const TypeRegistry& registry, int iterations)
+	{
+		const Test::FixtureSchemaSource schemas = Test::FixtureSchemaSource::CreateStandard();
+		size_t components = 0;
+		size_t writableVirtualFields = 0;
+		for (const ComponentInfo* component : registry.GetComponents())
+		{
+			if (!component->HasFlag(ComponentFlags::Serializable) || component->HasFlag(ComponentFlags::Hidden)
+				|| component->HasFlag(ComponentFlags::EntityLevel))
+				continue;
+			const std::string name(component->GetName());
+			INFO(name);
+			++components;
+			Test::SceneTestFixture fixture;
+			const Entity parent = fixture.GetScene().CreateEntity("Parent");
+			parent.Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Translation = glm::vec3(3.5f, -2.0f, 7.25f);
+				transform.Rotation = TransformSystem::QuaternionFromEulerDegrees(glm::vec3(30.0f, -45.0f, 60.0f));
+				transform.Scale = glm::vec3(2.0f);
+			});
+			const Entity entity = fixture.GetScene().CreateEntity(name, parent);
+			const Status added = AddWithRequirements(entity, *component, &schemas);
+			REQUIRE_MESSAGE(added.has_value(), added.error().ToString());
+
+			Random random(0x7a25);
+			for (const Scope<FieldInfo>& field : component->GetFields())
+			{
+				if (!field->IsVirtual())
+					continue;
+				INFO(field->GetName());
+				const Result<Value> before = ComponentAccess::GetFieldValue(entity, name, field->GetName());
+				REQUIRE_MESSAGE(before.has_value(), before.error().ToString());
+				const Value value = DrawVirtualFieldValue(random, *field, *before);
+				INFO("written: ", value.ToString());
+				const Result<Json> stored = ComponentAccess::GetComponentJson(entity, name);
+				REQUIRE(stored.has_value());
+				const Status written = ComponentAccess::SetFieldValue(entity, name, field->GetName(), value, &schemas);
+				if (field->IsReadOnly())
+				{
+					REQUIRE_FALSE(written.has_value());
+					CHECK(written.error().GetCode() == ErrorCode::InvalidState);
+					const Result<Json> unchanged = ComponentAccess::GetComponentJson(entity, name);
+					REQUIRE(unchanged.has_value());
+					CHECK(WriteCanonical(*unchanged) == WriteCanonical(*stored));
+					continue;
+				}
+				REQUIRE_MESSAGE(written.has_value(), written.error().ToString());
+				const Result<Value> after = ComponentAccess::GetFieldValue(entity, name, field->GetName());
+				REQUIRE(after.has_value());
+				CHECK_MESSAGE(VirtualFieldValueMatches(*after, value), "read back: ", after->ToString());
+				++writableVirtualFields;
+			}
+
+			RandomValueGenerator generator(registry, 0xa070, MakeSuiteOptions(schemas));
+			ResolveContext owner;
+			owner.Registry = &registry;
+			owner.OwnerType = component;
+			owner.Schemas = &schemas;
+			int writtenValues = 0;
+			for (int iteration = 0; iteration < iterations; ++iteration)
+			{
+				CAPTURE(iteration);
+				const Json target = generator.RandomJson(component->GetSelfField(), owner);
+				if (HasNullMember(target))
+					continue;
+				const Result<Json> current = ComponentAccess::GetComponentJson(entity, name);
+				REQUIRE(current.has_value());
+				const Json patch = CreateMergePatch(*current, target);
+				const Status patched = ComponentAccess::PatchComponentJson(entity, name, patch, &schemas);
+				REQUIRE_MESSAGE(patched.has_value(), patched.error().ToString());
+				const Result<Json> read = ComponentAccess::GetComponentJson(entity, name);
+				REQUIRE(read.has_value());
+				CHECK(WriteCanonical(*read) == WriteCanonical(target));
+				++writtenValues;
+			}
+			// A value an RFC 7386 patch cannot express is rare; most of the values reach the component.
+			CHECK(writtenValues * 2 > iterations);
+		}
+		CHECK(components > 0);
+		// Transform's EulerAngles, WorldPosition and WorldRotation at least.
+		CHECK(writableVirtualFields >= 3);
+	}
+
 	static Scope<TypeRegistry> CreateReflectionTestRegistry()
 	{
 		Scope<TypeRegistry> registry = CreateScope<TypeRegistry>();
@@ -529,6 +743,12 @@ namespace Engine {
 				INFO((valid.has_value() ? std::string() : valid.error().ToString()));
 				CHECK(valid.has_value());
 			}
+		}
+
+		TEST_CASE("TypeRegistry: every component field round-trips through automation set and get")
+		{
+			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
+			CheckAutomationRoundTrips(*registry, 20);
 		}
 
 		TEST_CASE("TypeRegistry: the registry suite passes for the reflection test types")

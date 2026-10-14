@@ -149,4 +149,4 @@ Every error response carries `error.data.errorCode` (the engine `ErrorCode` belo
 | `RENDER_SPOT_SHADOW_BUDGET` | Warning | More than 8 shadow-casting spot lights. | Turn off shadows on less important spot lights. |
 | `BUILD_START_SCENE_MISSING` | Error | StartScene names no scene file. | Create it with `scene.new`, or point StartScene at a scene. |
 | `BUILD_SCENE_MISSING` | Error | An Export.BuildScenes entry names no scene file. | Create the scene; the fix removes the entry. |
-| `TEST_SUITE_INVALID` | Error | A Testing.Suites entry's script is not a TestSuite, or its scene is missing. | Assign a `Test.Suite` script; create the scene or leave Scene empty. |
+| `TEST_SUITE_INVALID` | Error | A Testing.Suites entry's script is not a TestSuite, or its scene is not a registered scene asset. | Assign a `Test.Suite` script; create and save the scene (so it has its `.meta`), or leave Scene empty. |

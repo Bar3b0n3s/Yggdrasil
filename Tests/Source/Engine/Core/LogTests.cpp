@@ -182,6 +182,49 @@ namespace Engine {
 		ENGINE_CORE_ASSERT(false, "Stored {} entries without a console", stored);
 	}
 
+	// M15 (--log-level, §13.9): OutputLevel and SetOutputLevel filter both output sinks, the console on top of its
+	// ConsoleLevel. With ConsoleLevel Error and OutputLevel Warn the console prints only the error and the file the warning
+	// and the error; lowering the output level to Trace gives the file everything again and leaves the console at its
+	// ConsoleLevel. The ring buffer receives every entry. Without a log, GetOutputLevel is Trace and SetOutputLevel does
+	// nothing. The log goes back to the console alone before the temporary directory goes, and the final assert reports.
+	ENGINE_DEATH_TEST("Core/LogOutputLevelFiltersBothOutputSinks")
+	{
+		std::string report;
+		{
+			const Test::TempDirectory directory("LogOutputLevel");
+			const std::filesystem::path file = directory / "Output.log";
+			Log::Shutdown();
+			LogSpecification specification;
+			specification.FilePath = file;
+			specification.ConsoleLevel = LogLevel::Error;
+			specification.OutputLevel = LogLevel::Warn;
+			const Status initialized = Log::Initialize(specification);
+			ENGINE_CORE_ASSERT(initialized.has_value(), "Initialize failed");
+			const uint64_t cursor = Log::GetRingBuffer().GetNextSeq();
+			const LogLevel initial = Log::GetOutputLevel();
+			ENGINE_CORE_INFO("Output-filtered info");
+			ENGINE_CORE_WARN("File-only warning");
+			ENGINE_CORE_ERROR("Console and file error");
+			Log::SetOutputLevel(LogLevel::Trace);
+			ENGINE_CORE_INFO("File-only info after lowering");
+			LogQuery query;
+			query.Cursor = cursor;
+			const size_t stored = Log::GetRingBuffer().Read(query).Entries.size();
+			Log::Flush();
+			const std::string text = ReadWholeFile(file).value_or("");
+			Log::Shutdown();
+			const LogLevel withoutLog = Log::GetOutputLevel();
+			Log::SetOutputLevel(LogLevel::Critical);
+			const Status restored = Log::Initialize(LogSpecification());
+			ENGINE_CORE_ASSERT(restored.has_value(), "the console-only log could not be restored");
+			report = std::format("initial {}, without a log {}, restored {}, stored {}, file info {} warning {} error {} lowered {}",
+				LogLevelToString(initial), LogLevelToString(withoutLog), LogLevelToString(Log::GetOutputLevel()), stored,
+				text.contains("Output-filtered info"), text.contains("File-only warning"), text.contains("Console and file error"),
+				text.contains("File-only info after lowering"));
+		}
+		ENGINE_CORE_ASSERT(false, "Output level report: {}", report);
+	}
+
 	// An assertion that fails inside a listener logs its report from within the dispatch. The report is stored and
 	// printed but not dispatched again, so the process ends with code 4 instead of deadlocking or recursing.
 	ENGINE_DEATH_TEST("Core/LogAssertInsideListener")
@@ -627,6 +670,20 @@ namespace Engine {
 			CHECK(result->StandardError.contains("Console-visible warning"));
 			CHECK_FALSE(result->StandardError.contains("Console-filtered info"));
 			CHECK(result->StandardError.contains("The ring buffer stored 2 entries"));
+		}
+
+		TEST_CASE("Log: OutputLevel filters the console and the file but not the ring buffer")
+		{
+			const Result<Test::DeathTestResult> result = Test::RunDeathTest("Core/LogOutputLevelFiltersBothOutputSinks");
+			REQUIRE(result.has_value());
+			INFO("child stderr: ", result->StandardError);
+			CHECK(result->ExitCode == FatalCrashExitCode);
+			CHECK(result->StandardError.contains("Output level report: initial Warn, without a log Trace, restored Trace, stored 4, "
+												 "file info false warning true error true lowered true"));
+			CHECK(result->StandardError.contains("Console and file error"));
+			CHECK_FALSE(result->StandardError.contains("Output-filtered info"));
+			CHECK_FALSE(result->StandardError.contains("File-only warning"));
+			CHECK_FALSE(result->StandardError.contains("File-only info after lowering"));
 		}
 
 		TEST_CASE("Log: Console false writes nothing to stderr")

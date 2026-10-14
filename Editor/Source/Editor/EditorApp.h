@@ -85,7 +85,9 @@ namespace Engine {
 		// Writes the screenshots the options ask for; false when one failed (logged).
 		[[nodiscard]] bool WriteScreenshots();
 	private:
-		// The launch options, the EditorContext, the AutomationServer and a batch or upgrade run (EditorApp.cpp).
+		// The launch options, the EditorContext, the AutomationServer, a batch or upgrade run and an --export run, whose
+		// Exporter is polled once per safe point and whose outcome writes --export-report and sets the exit code
+		// (EditorApp.cpp; EditorCommandLine.h).
 		struct State;
 		// The GPU objects of the viewport and the screenshots, and the view extracted for the frame (EditorApp.cpp).
 		struct Rendering;

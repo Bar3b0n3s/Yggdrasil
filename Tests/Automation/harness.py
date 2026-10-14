@@ -53,7 +53,8 @@ EXIT_INIT_FAILED = 3
 
 
 def editor_executable() -> Path:
-    """The editor of ENGINE_AUTOMATION_CONFIG (or Release, then Debug: engine_client.configurations_from_environment)."""
+    """The editor of ENGINE_AUTOMATION_CONFIG (or Release, then Debug:
+    engine_client.configurations_from_environment)."""
     return engine_client.find_editor_executable(REPOSITORY_ROOT, engine_client.configurations_from_environment())
 
 
@@ -136,8 +137,9 @@ class AutomationTestCase(unittest.TestCase):
     def start_editor(self, arguments: list[str] | None = None, project: Path | None = None, test_hooks: bool = True,
                      wait_for_session: bool = True, renderer: str = "none") -> engine_client.EditorProcess:
         """Starts `Editor --headless --renderer none --automation [--automation-test-hooks] [--project <project>]
-        --engine-cache-dir <dir> <arguments>` with this test's user-data root and remembers it for tearDown. With renderer "vulkan" the editor
-        renders, with the GPU test options (GPU_EDITOR_ARGUMENTS); call require_gpu() first."""
+        --engine-cache-dir <dir> <arguments>` with this test's user-data root and remembers it for tearDown. With
+        renderer "vulkan" the editor renders, with the GPU test options (GPU_EDITOR_ARGUMENTS); call require_gpu()
+        first."""
         if renderer not in ("none", "vulkan"):
             raise ValueError(f"renderer must be none or vulkan, not {renderer!r}")
         command = ["--headless", "--renderer", renderer, "--automation"]
@@ -162,7 +164,8 @@ class AutomationTestCase(unittest.TestCase):
     def run_editor(self, arguments: list[str], timeout: float = 120.0) -> tuple[int, str]:
         """Runs a one-shot editor (--batch, --upgrade, --dump-reference, a locked project) to completion and returns its
         exit code and standard error."""
-        command = [str(editor_executable()), *arguments, f"--user-data-dir={self.user_data}", self.engine_cache_argument()]
+        command = [str(editor_executable()), *arguments, f"--user-data-dir={self.user_data}",
+                   self.engine_cache_argument()]
         completed = subprocess.run(command, stdin=subprocess.DEVNULL, capture_output=True, timeout=timeout,
                                    check=False)
         return completed.returncode, completed.stderr.decode("utf-8", errors="replace")

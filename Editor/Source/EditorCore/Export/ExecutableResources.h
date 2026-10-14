@@ -26,7 +26,7 @@ namespace Engine {
 		uint16_t VersionMajor = 1;
 		uint16_t VersionMinor = 0;
 		uint16_t VersionPatch = 0;
-		std::string Company{}; // free text, possibly empty
+		std::string Company{}; // free text, possibly empty, under FindExportCompanyProblem's rule (ProjectSettings.h)
 	};
 
 	// The sizes of an exported executable's icon images (§14.2 step 5: 16 to 256 px), ascending: the Windows icon group
@@ -36,8 +36,10 @@ namespace Engine {
 	// The resources of `settings` for the project open in `editor`. Version must be "major.minor.patch", three decimal
 	// numbers without signs or leading zeros, each at most 65535 (the executable's version resource). A non-empty Icon must
 	// name a project file that decodes as a square PNG of at least 256 x 256 pixels (M15 adds the square rule: icon images
-	// are square, and padding would change the author's picture; ADR 0024 decision 4). Errors: InvalidState without an open
-	// project; Validation located at /Export/Version or /Export/Icon naming the value and the rule.
+	// are square, and padding would change the author's picture; ADR 0024 decision 4). Company must pass
+	// FindExportCompanyProblem (valid UTF-8, no control characters, neither U+FFFE nor U+FFFF, at most
+	// ExportSettings::MaxCompanyBytes bytes; the M15 review's M02 and the M15 fix review's C7), the same rule on every host. Errors: InvalidState without an open project; Validation located at
+	// /Export/Version, /Export/Icon or /Export/Company naming the value and the rule.
 	[[nodiscard]] Result<ExecutableResources> ResolveExecutableResources(const EditorContext& editor, const ExportSettings& settings);
 
 	// The resource set the exporter writes for `resources` (ResolveExecutableResources' result) of the project open in

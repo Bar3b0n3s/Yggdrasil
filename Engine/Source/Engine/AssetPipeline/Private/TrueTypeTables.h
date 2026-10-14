@@ -33,10 +33,19 @@ namespace Engine {
 	namespace Utils {
 
 		// Checks what stb_truetype trusts: an sfnt signature (TrueType or CFF; collections are refused), the table directory
-		// and every table inside the file, the head, hhea, maxp and hmtx tables with the fields it reads at fixed offsets, a
-		// Unicode cmap subtable of a format it reads (0, 4, 6, 12 or 13) with every range its lookup touches inside the cmap
-		// table, and glyph locations (loca) inside the glyf table for TrueType outlines, or a CFF table otherwise (whose
-		// contents stb_truetype parses itself). Errors: ImportFailed naming the first problem.
+		// and every table inside the file, the head (units per em 16 to 16384), hhea, maxp and hmtx tables with the fields it
+		// reads at fixed offsets, a Unicode cmap subtable of a format it reads (0, 4, 6, 12 or 13) with every range its lookup
+		// touches inside the cmap table, and for TrueType outlines glyph locations (loca) inside the glyf table and every
+		// glyph outline as stbtt_GetGlyphShape reads it (each simple glyph's contour ends, instructions, flags and
+		// coordinates inside the glyph, and no final one-point off-curve contour; each composite glyph's components inside
+		// it, placed by offsets, nested at most 8 deep without cycles, expanding to at most 65,536 points), or for CFF
+		// outlines the CFF table as stbtt_InitFont and its charstring interpreter read it (at most 512 MiB; the header and
+		// the Name, Top DICT, String and Global Subr INDEXes; the first Top DICT's CharStrings, Type 2 and at least one per
+		// glyph, its Private DICT and local subroutines, and for a CID font every font dictionary's and an FDSelect naming
+		// only font dictionaries the FDArray has; every structure inside the table and every DICT operand stb_truetype reads
+		// an integer) and every glyph's charstring run as stb_truetype runs it, with no hint mask past the end of its code,
+		// no line or curve before its first moveto, and at most 65,536 operators and operands per glyph (2^26 for the whole
+		// font). Errors: ImportFailed naming the first problem.
 		[[nodiscard]] Status ValidateTrueTypeTables(std::span<const std::byte> font);
 
 		// The horizontal kerning between every ordered pair of `glyphs` (sorted by codepoint, unique): the pair adjustment

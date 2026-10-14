@@ -138,7 +138,8 @@ _ANNOTATION_LINE_LIMIT = 300  # characters per output line in an annotation
 # Compiler, linker, build-tool and test-runner failure lines: "file:1:2: error: ...", "error C2065: ...", "fatal error",
 # MSBuild "error MSB...", doctest "ERROR:", xcodebuild's failure summary and failed-command lines.
 _DIAGNOSTIC_PATTERN = re.compile(
-    r"(^|[\s:(])(fatal )?error( [A-Z]+\d+)?:|^ERROR:|\*\* BUILD FAILED \*\*|The following build commands failed|\bFAILED\b"
+    r"(^|[\s:(])(fatal )?error( [A-Z]+\d+)?:|^ERROR:|\*\* BUILD FAILED \*\*|The following build commands failed"
+    r"|\bFAILED\b"
 )
 
 

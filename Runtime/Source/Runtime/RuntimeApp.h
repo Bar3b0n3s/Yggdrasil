@@ -89,7 +89,10 @@ namespace Engine {
 	// Error level and ends the run with ExitCode::Failed); OnRender renders the session's last snapshot with the
 	// SceneRenderer and blits it into the frame target (the BlitPass is created for the target's format at the first
 	// rendered frame, when the swapchain's format is known). The run ends at window close, --frames, session.shutdown, or
-	// Application.Quit (M13). Escape does nothing by default (§14.3). OnShutdown releases, in order, the server, the
+	// Application.Quit (M13). Escape does nothing by default (§14.3). A windowed Debug or Release run enables Dear ImGui for
+	// the F1 stats overlay (Engine/ImGui/StatsOverlay.h): OnEvent toggles it on each F1 press that is not a repeat, logging
+	// "Runtime: stats overlay shown (F1)" or "hidden", and still queues the key for the game; OnImGuiRender draws it while it
+	// is visible. Headless runs and Dist builds have neither (§14.4; Docs/Decisions/0024-m15-contract.md decision 17). OnShutdown releases, in order, the server, the
 	// capture, the renderer and blit pass, the pipelines, the session, the GPU cache, then removes and destroys the asset
 	// manager, while the context still exists.
 	class RuntimeApp final : public Application
@@ -105,6 +108,11 @@ namespace Engine {
 		void OnFixedStep(const SimStep& step) override;
 		void OnUpdate(const FrameTime& frame) override;
 		void OnRender(RenderContext& context) override;
+#if !defined(ENGINE_DIST)
+		// The F1 stats overlay while it is visible (DrawStatsOverlay with the frame loop's, the session's, the audio engine's
+		// and the game view's numbers); ImGui exists only in a windowed non-Dist run (CreateRuntimeApp).
+		void OnImGuiRender() override;
+#endif
 		void OnRenderSubmitted(uint64_t frameIndex, uint64_t submissionId) override;
 	private:
 		// OnInitialize's work (see the class comment); OnInitialize releases what it built when it fails.
@@ -127,10 +135,11 @@ namespace Engine {
 	// The runtime's ApplicationFactory (§14.3): parses the engine options and GetRuntimeCommandLineOptions, reads the
 	// manifest (RuntimeOptions::ManifestPath) and names the application after the manifest's Name; sets the window and the
 	// loop from it and EnginePak to the manifest's first pak. For --feature-test with Testing:true, an empty UserDataRoot
-	// defaults to absolute <manifest directory>/bin/TestUserData; an explicit development root takes precedence. Ordinary
-	// runtime keeps the OS default. Errors: InvalidArgument for a bad command line, including any
-	// positional argument (the runtime declares none); NotFound, Io, Parse, Validation or UnsupportedVersion for the
-	// manifest (RunApplication maps them to ExitCode::InitFailed, 3).
+	// defaults to the absolute GetTestingUserDataRoot of the manifest (<package>/bin/TestUserData, beside a macOS bundle
+	// rather than inside it, §14.3); an explicit development root takes precedence. Ordinary runtime keeps the OS default.
+	// Errors: InvalidArgument for a bad command line, including any positional argument (the runtime declares none);
+	// NotFound, Io, Parse, Validation or UnsupportedVersion for the manifest (RunApplication maps them to
+	// ExitCode::InitFailed, 3).
 	[[nodiscard]] Result<Scope<Application>> CreateRuntimeApp(std::span<const std::string> arguments);
 
 }

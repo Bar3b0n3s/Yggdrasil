@@ -3,7 +3,9 @@
 #include "Engine/Asset/MaterialData.h"
 
 #include "Engine/Asset/CookedFormat.h"
+#include "Support/Fuzz.h"
 #include "Support/SceneTestFixture.h"
+#include "Support/TestData.h"
 
 #include <nlohmann/json.hpp>
 
@@ -61,6 +63,41 @@ namespace Engine {
 			Result<AssetRef<MaterialData>> loaded = LoadCookedMaterial(*cooked, *registry);
 			REQUIRE_MESSAGE(loaded.has_value(), loaded.error().ToString());
 			CHECK(MaterialToText(**loaded, *registry).value_or(std::string()) == RedMaterial);
+		}
+
+		TEST_CASE("MaterialData: 1,000 seeded mutations of a material file and of its cooked form never crash" * doctest::test_suite(Test::FuzzSuite))
+		{
+			// The seed corpus: the material fixtures of Tests/Data/Assets/Materials and this file's own. The text goes through
+			// MaterialFromText, the cooked form (the payload hash sealed again) through LoadCookedMaterial; a material either
+			// accepts writes back as text.
+			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
+			std::vector<std::string> seeds = Test::ReadFuzzSeedTexts(Test::GetRepositoryRoot() / "Tests" / "Data" / "Assets" / "Materials", ".material");
+			seeds.emplace_back(RedMaterial);
+			const Test::FuzzRun run = Test::RunFuzzCase(0x3A7E, 1000, [&registry, &seeds](Random& random, uint64_t /*index*/)
+			{
+				std::string mutated = seeds[static_cast<size_t>(random.RangeInt(0, static_cast<int64_t>(seeds.size()) - 1))];
+				Test::MutateText(mutated, random);
+				if (random.NextBool())
+				{
+					MaterialLoadReport report;
+					const Result<MaterialData> material = MaterialFromText(mutated, *registry, report, random.NextBool());
+					if (!material.has_value())
+						return false;
+					CHECK(MaterialToText(*material, *registry).has_value());
+					return true;
+				}
+				const Result<AssetRef<MaterialData>> loaded = LoadCookedMaterial(
+					WriteCookedArtifact(AssetType::Material, MaterialData::FormatVersion, 1, AsBytes(mutated)), *registry);
+				if (!loaded.has_value())
+					return false;
+				CHECK(MaterialToText(**loaded, *registry).has_value());
+				return true;
+			});
+			if (Test::IsFuzzSample(run.Range))
+			{
+				CHECK(run.Counts.Rejected > 0);
+				CHECK(run.Counts.Accepted > 0);
+			}
 		}
 
 		TEST_CASE("MaterialData: out-of-range values are located Validation errors")

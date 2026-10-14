@@ -9,6 +9,7 @@
 #include "Engine/Scripting/ScriptApiRegistry.h"
 #include "Support/AssetTestFixture.h"
 #include "Support/TestData.h"
+#include "Support/TestTimeout.h"
 
 #include <doctest/doctest.h>
 #include <nlohmann/json.hpp>
@@ -373,10 +374,10 @@ namespace Engine {
 		// whose only interrupt checks a time limit or a cancellation token, and the checker sets neither (findings must not
 		// depend on machine load), so a looping body never returned and hung every import, script.check and test run. The
 		// checker refuses type functions before analysis, at each declaration, in the root and in required modules. Without
-		// the refusal the first check below never returns, and the case's timeout ends the run instead of a hang.
-		TEST_CASE("ScriptTypeChecker: a user-defined type function is refused before analysis, so a looping one cannot hang a check"
-			* doctest::timeout(120.0))
+		// the refusal the first check below never returns, and the case's time limit ends the run instead of a hang.
+		TEST_CASE("ScriptTypeChecker: a user-defined type function is refused before analysis, so a looping one cannot hang a check")
 		{
+			Test::SetTestCaseTimeLimit(120.0);
 			const auto checker = Test::PrimitiveChecker();
 			Test::CheckerModuleReader reader;
 			const auto root = Test::ParseVfsPath("project://Assets/Spin.luau");

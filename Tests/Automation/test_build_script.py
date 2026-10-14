@@ -1,8 +1,8 @@
 """Scripts/Build.py's decision to copy the app-local CRT (Docs/Architecture.md §2.3; Docs/Decisions/0012-m7-decisions.md
 decisions 14 and 22): every build that builds the Runtime, directly or as a dependency, copies it next to the Runtime,
 where project.export takes it from; a build that does not build the Runtime copies nothing. From M15 (Docs/Decisions/
-0024-m15-contract.md, stream A owns this file) the same builds also stage the notices file and, on macOS, the bundle's SDK
-files, and a Dist build archives the Runtime's symbols.
+0024-m15-contract.md, stream A owns this file) the same builds also stage the notices file and, on macOS, the bundle's
+SDK files, and a Dist build archives the Runtime's symbols.
 
 The solution is a small .slnx written into a temporary directory with the shape premake writes (the Tests project
 depends on Runtime through a BuildDependency, Editor links EditorCore through a ProjectReference), so the test runs on
@@ -11,10 +11,12 @@ every system and needs no generated workspace.
 
 from __future__ import annotations
 
+import os
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from harness import REPOSITORY_ROOT
 
@@ -91,26 +93,56 @@ class BuildScriptTests(unittest.TestCase):
         self.assertFalse(Build.builds_runtime(self.solution, "Debug", "EditorCore"))
         self.assertFalse(Build.builds_runtime(self.solution, "Debug", "Engine"))
 
+    def test_runtime_staging_follows_the_builds_that_build_the_runtime(self) -> None:
+        # M15 (Docs/Decisions/0024-m15-contract.md decision 8): the notices and the other staged files follow the same
+        # rule as the CRT where the workspace records dependencies; make and ninja record none, so there the Runtime
+        # executable written during the build decides.
+        root = self.solution.path.parent
+        self.assertTrue(Build.builds_runtime_in(self.solution, "Debug", None, 0.0, root))
+        self.assertTrue(Build.builds_runtime_in(self.solution, "Debug", "Tests", 0.0, root))
+        self.assertFalse(Build.builds_runtime_in(self.solution, "Debug", "Editor", 0.0, root))
+        makefiles = workspace.Makefiles("gmake", root / "Makefile", ["Runtime", "Tests", "Engine"],
+                                        {"Debug": ["Runtime", "Tests", "Engine"], "Dist": ["Engine"]})
+        executable = Build.runtime_output(root, "Debug") / paths.executable_name("Runtime")
+        self.assertFalse(Build.builds_runtime_in(makefiles, "Debug", "Tests", 0.0, root))  # no Runtime built at all
+        executable.parent.mkdir(parents=True)
+        executable.write_bytes(b"runtime")
+        os.utime(executable, (1000.0, 1000.0))
+        self.assertTrue(Build.builds_runtime_in(makefiles, "Debug", "Tests", 900.0, root))
+        self.assertFalse(Build.builds_runtime_in(makefiles, "Debug", "Engine", 1100.0, root))
+        self.assertTrue(Build.builds_runtime_in(makefiles, "Debug", "Runtime", 1100.0, root))
+        self.assertFalse(Build.builds_runtime_in(makefiles, "Dist", None, 0.0, root))
+
 
 class RuntimeStagingTests(unittest.TestCase):
-    """What Build.py stages beside the Runtime from M15 (Docs/Decisions/0024-m15-contract.md decisions 2, 5 and 8, stream
-    A), with the helper names the contract freezes: the notices file after every build that builds the Runtime, the Dist
-    Runtime's symbols in bin/Symbols, and the macOS bundle's SDK files. Each helper is host-independent file work, so
-    these tests run on every system against temporary directories."""
+    """What Build.py stages beside the Runtime from M15 (Docs/Decisions/0024-m15-contract.md decisions 2, 5 and 8,
+    stream A), with the helper names the contract freezes: the notices file after every build that builds the Runtime,
+    the Dist Runtime's symbols in bin/Symbols, and the macOS bundle's SDK files. Each helper is host-independent file
+    work, so these tests run on every system against temporary directories."""
 
     def setUp(self) -> None:
         temporary = tempfile.TemporaryDirectory(prefix="EngineRuntimeStaging")
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
 
-    @unittest.skip("contract stub: Build.py notices (ADR 0024 decision 8, stream A)")
     def test_the_notices_file_is_generated_next_to_the_runtime(self) -> None:
         result = Build.stage_runtime_notices(self.root, "Release", "windows")
         target = self.root / "bin" / paths.output_directory_name("Release") / "Runtime" / notices.NOTICES_FILE_NAME
         self.assertEqual(Path(result["path"]), target)
         self.assertEqual(target.read_text(encoding="utf-8"), notices.generate_notices(REPOSITORY_ROOT, "windows"))
 
-    @unittest.skip("contract stub: Build.py symbols (ADR 0024 decision 2, stream A)")
+    def test_a_malformed_notices_section_fails_the_build_step_naming_the_file(self) -> None:
+        step = Build.Step("build Release", Build.Status.PASSED, "16 project(s) built")
+        broken = ValueError("Vendor/Example/VENDOR.md: no '## Notices' section")
+        with mock.patch.object(Build.notices, "generate_notices", side_effect=broken):
+            Build.stage_runtime_outputs(step, self.root, "Release", paths.Host("windows", "x86_64", "x86_64"))
+        self.assertTrue(step.failed)
+        self.assertIn("Vendor/Example/VENDOR.md", step.detail)
+        healthy = Build.Step("build Release", Build.Status.PASSED, "16 project(s) built")
+        Build.stage_runtime_outputs(healthy, self.root, "Release", paths.Host("windows", "x86_64", "x86_64"))
+        self.assertFalse(healthy.failed)
+        self.assertTrue(Path(str(healthy.data["notices"]["path"])).is_file())
+
     def test_dist_symbols_are_archived_and_never_beside_the_shipped_files(self) -> None:
         runtime = self.root / "bin" / paths.output_directory_name("Dist") / "Runtime"
         runtime.mkdir(parents=True)
@@ -124,7 +156,6 @@ class RuntimeStagingTests(unittest.TestCase):
         with self.assertRaises(FileNotFoundError):
             Build.archive_dist_symbols(self.root)
 
-    @unittest.skip("contract stub: Build.py macOS staging (ADR 0024 decision 5, stream A)")
     def test_the_macos_sdk_files_are_staged_from_the_pinned_sdk_only(self) -> None:
         sdk = self.root / "VulkanSDK"
         pinned = toolchain.load_pins().vulkan_sdk_version.split(".")

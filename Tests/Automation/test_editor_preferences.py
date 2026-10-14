@@ -13,7 +13,8 @@ class EditorPreferencesTests(AutomationTestCase):
         path = self.user_data / app_name() / "Editor.json"
         path.parent.mkdir(parents=True, exist_ok=True)
         # A newer editor's file (after a downgrade) and a damaged one.
-        for text in ('{"Format": "EditorPreferences", "Version": 2, "AllowAiAutomation": true}', '{"Format": "EditorPref'):
+        for text in ('{"Format": "EditorPreferences", "Version": 2, "AllowAiAutomation": true}',
+                     '{"Format": "EditorPref'):
             with self.subTest(text=text):
                 path.write_text(text, encoding="utf-8")
                 editor = self.start_editor()

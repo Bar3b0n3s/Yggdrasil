@@ -82,6 +82,17 @@ namespace Engine {
 		// device (M8); null with --renderer none, where environment imports reuse cooked bakes (§13.9). A documented
 		// back-reference that outlives the editor.
 		IEnvironmentBaker* EnvironmentBaker = nullptr;
+		// --strict (§6 "Strict reader"; the M15 completion review's A024): the projects this editor opens are read strictly.
+		// Every opener (EditorApp's --project, project.open, project.create, recovery) passes it as
+		// ProjectOpenOptions::StrictUnknowns, so unknown keys in the .eproj fail the open; OpenProject then loads every scene
+		// and prefab under Assets/ strictly (LoadMode::Strict with LoadOptions::StrictUnknowns and the script field schemas)
+		// and fails, leaving the project closed, naming every file that does not load: one with an unknown key, field or
+		// component, and equally one with a structural defect, one that cannot be read or parsed, or one whose Version is
+		// newer than this build reads, since CI wants every committed scene and prefab to load strictly (the M15 fix review's
+		// C2); and the editor's own loads of scene files (scene.open and the methods that reopen a scene file, the exporter's
+		// scene loads) are strict too. Off: unknown keys, fields and components are warnings, and the scenes and prefabs are
+		// not loaded when the project opens.
+		bool StrictUnknowns = false;
 	};
 
 	// The editor state of one editor process (or one test). Not copyable or movable; main thread only (§4.11), like the scene.
@@ -178,9 +189,11 @@ namespace Engine {
 		// for a read-only project) and cache:// at its cache directory, loads its provenance (none for read-only projects),
 		// adds it to the recent list (when user:// is mounted; a failure there is logged, not returned), opens its assets
 		// (EditorAssetManager::OpenProject on project://Assets, which is created first when a writable project lacks it) and
-		// starts with no open scene and an empty history. Errors: InvalidState when a project is already open; the mount
-		// errors, ProvenanceRecorder::Load errors, the errors of creating Assets/ and EditorAssetManager::OpenProject errors,
-		// after which the project stays closed.
+		// starts with no open scene and an empty history. A --strict editor (EditorContextSpecification::StrictUnknowns) then
+		// loads every scene and prefab under Assets/ strictly. Errors: InvalidState when a project is already open; the mount
+		// errors, ProvenanceRecorder::Load errors, the errors of creating Assets/ and EditorAssetManager::OpenProject errors;
+		// with StrictUnknowns, a Validation error naming every scene and prefab that does not load strictly (one issue per
+		// file: its path, its first problem and pointer); after any of them the project stays closed.
 		[[nodiscard]] Status OpenProject(Scope<LoadedProject> project);
 
 		// Closes the open scene and the project (unmounts project:// and cache://, releases the lock). Unsaved changes are
@@ -403,6 +416,10 @@ namespace Engine {
 		// EditorAssetManager::OpenProject on the open project's project://Assets (created first when a writable project lacks
 		// it) and cache://, read-only for a read-only project, with hot reload. Errors: those of the creation and of OpenProject.
 		[[nodiscard]] Result<AssetRefreshReport> OpenProjectAssets();
+		// OpenProject's --strict check (EditorContextSpecification::StrictUnknowns): every .scene and .prefab under
+		// project://Assets, sorted by path, loaded strictly (LoadMode::Strict, LoadOptions::StrictUnknowns and the script field
+		// schemas). Errors: Validation with one issue per file that does not load, whatever the reason, naming the file.
+		[[nodiscard]] Status CheckProjectDocumentsStrictly() const;
 		[[nodiscard]] Status RefreshScriptServices();
 		[[nodiscard]] Status ReimportScriptForTest(AssetHandle script);
 	private:

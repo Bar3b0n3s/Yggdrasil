@@ -7,7 +7,10 @@
 
 #include <algorithm>
 #include <cctype>
+#include <charconv>
+#include <climits>
 #include <cmath>
+#include <cstdint>
 #include <cstdlib>
 
 namespace Engine {
@@ -26,6 +29,11 @@ namespace Engine {
 			constexpr std::string_view RequireGpuOption = "--require-gpu";
 			constexpr std::string_view VulkanApiOption = "--vulkan-api";
 			constexpr std::string_view UpdateGoldenOption = "--update-golden";
+			constexpr std::string_view FuzzIterationsOption = "--fuzz-iterations";
+			constexpr std::string_view FuzzScaleOption = "--fuzz-scale";
+			constexpr std::string_view FuzzShardOption = "--fuzz-shard";
+			constexpr std::string_view FuzzIndexOption = "--fuzz-index";
+			constexpr std::string_view TimeoutScaleOption = "--test-timeout-scale";
 
 			// The value of `--<name>=<value>` when `argument` is that option (an empty value when the '=' is missing), or
 			// nullopt when it is another argument.
@@ -73,8 +81,8 @@ namespace Engine {
 				return index == text.size();
 			}
 
-			// A finite number of seconds > 0 in plain decimal notation.
-			static std::optional<double> ParsePositiveSeconds(std::string_view text)
+			// A finite number > 0 in plain decimal notation (seconds, scales).
+			static std::optional<double> ParsePositiveNumber(std::string_view text)
 			{
 				if (!IsDecimalNumber(text))
 					return std::nullopt;
@@ -82,6 +90,23 @@ namespace Engine {
 				char* end = nullptr;
 				const double value = std::strtod(terminated.c_str(), &end);
 				if (end != terminated.c_str() + terminated.size() || !std::isfinite(value) || !(value > 0.0))
+					return std::nullopt;
+				return value;
+			}
+
+			// Decimal digits only, without sign or spaces, that fit in 64 bits.
+			static std::optional<uint64_t> ParseUnsigned(std::string_view text)
+			{
+				if (text.empty() || !std::ranges::all_of(text, [](char character)
+				{
+					return character >= '0' && character <= '9';
+				}))
+				{
+					return std::nullopt;
+				}
+				uint64_t value = 0;
+				const std::from_chars_result parsed = std::from_chars(text.data(), text.data() + text.size(), value);
+				if (parsed.ec != std::errc() || parsed.ptr != text.data() + text.size())
 					return std::nullopt;
 				return value;
 			}
@@ -97,6 +122,7 @@ namespace Engine {
 		Result<TestOptions> ParseTestOptions(int argc, const char* const* argv)
 		{
 			TestOptions options;
+			bool shardGiven = false;
 			for (int index = 1; index < argc; ++index)
 			{
 				const std::string_view argument = argv[index] != nullptr ? std::string_view(argv[index]) : std::string_view();
@@ -154,7 +180,7 @@ namespace Engine {
 				}
 				else if (const std::optional<std::string_view> seconds = Utils::MatchOption(argument, Utils::TimeoutOption))
 				{
-					const std::optional<double> parsed = Utils::ParsePositiveSeconds(*seconds);
+					const std::optional<double> parsed = Utils::ParsePositiveNumber(*seconds);
 					if (!parsed.has_value())
 					{
 						return MakeError(ErrorCode::InvalidArgument, "{} needs a positive number of seconds, got '{}'",
@@ -181,6 +207,66 @@ namespace Engine {
 						return MakeError(ErrorCode::InvalidArgument, "{} takes no value, got '{}'", Utils::UpdateGoldenOption, *updateValue);
 					options.UpdateGolden = true;
 				}
+				else if (const std::optional<std::string_view> iterations = Utils::MatchOption(argument, Utils::FuzzIterationsOption))
+				{
+					const std::optional<uint64_t> parsed = Utils::ParseUnsigned(*iterations);
+					if (!parsed.has_value() || *parsed == 0)
+					{
+						return MakeError(ErrorCode::InvalidArgument, "{} needs a positive whole number of iterations, got '{}'",
+							Utils::FuzzIterationsOption, *iterations);
+					}
+					options.FuzzIterations = *parsed;
+				}
+				else if (const std::optional<std::string_view> scale = Utils::MatchOption(argument, Utils::FuzzScaleOption))
+				{
+					const std::optional<double> parsed = Utils::ParsePositiveNumber(*scale);
+					if (!parsed.has_value() || *parsed > 1.0)
+					{
+						return MakeError(ErrorCode::InvalidArgument, "{} needs a number in (0, 1], got '{}'", Utils::FuzzScaleOption,
+							*scale);
+					}
+					options.FuzzScale = *parsed;
+				}
+				else if (const std::optional<std::string_view> shard = Utils::MatchOption(argument, Utils::FuzzShardOption))
+				{
+					const size_t slash = shard->find('/');
+					const std::optional<uint64_t> shardIndex = slash == std::string_view::npos ? std::nullopt : Utils::ParseUnsigned(shard->substr(0, slash));
+					const std::optional<uint64_t> count = slash == std::string_view::npos ? std::nullopt : Utils::ParseUnsigned(shard->substr(slash + 1));
+					if (!shardIndex.has_value() || !count.has_value() || *count == 0 || *shardIndex >= *count || *count > UINT32_MAX)
+					{
+						return MakeError(ErrorCode::InvalidArgument, "{} needs <k>/<n> with 0 <= k < n, got '{}'", Utils::FuzzShardOption,
+							*shard);
+					}
+					options.FuzzShardIndex = static_cast<uint32_t>(*shardIndex);
+					options.FuzzShardCount = static_cast<uint32_t>(*count);
+					shardGiven = true;
+				}
+				else if (const std::optional<std::string_view> fuzzIndex = Utils::MatchOption(argument, Utils::FuzzIndexOption))
+				{
+					const std::optional<uint64_t> parsed = Utils::ParseUnsigned(*fuzzIndex);
+					if (!parsed.has_value())
+					{
+						return MakeError(ErrorCode::InvalidArgument, "{} needs the whole-number index of one iteration, got '{}'",
+							Utils::FuzzIndexOption, *fuzzIndex);
+					}
+					options.FuzzIndex = *parsed;
+				}
+				else if (const std::optional<std::string_view> timeoutScale = Utils::MatchOption(argument, Utils::TimeoutScaleOption))
+				{
+					const std::optional<double> parsed = Utils::ParsePositiveNumber(*timeoutScale);
+					if (!parsed.has_value() || *parsed < 1.0)
+					{
+						return MakeError(ErrorCode::InvalidArgument, "{} needs a number >= 1, got '{}'", Utils::TimeoutScaleOption,
+							*timeoutScale);
+					}
+					options.TimeoutScale = *parsed;
+				}
+			}
+
+			if (shardGiven && options.FuzzIndex.has_value())
+			{
+				return MakeError(ErrorCode::InvalidArgument, "{} replays one iteration of the whole run; it does not combine with {}",
+					Utils::FuzzIndexOption, Utils::FuzzShardOption);
 			}
 
 			const int childModeCount = static_cast<int>(!options.DeathTest.empty()) + static_cast<int>(!options.WindowedChild.empty())

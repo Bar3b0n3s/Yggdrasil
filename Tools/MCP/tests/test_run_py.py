@@ -48,15 +48,15 @@ def base_interpreter() -> Path:
 
 
 def same_directory(first: str | Path, second: Path) -> bool:
-    """Whether two directories are the same: both resolved (a directory is not the symbolic link at issue here; the venv's
-    bin/python is) and compared case-insensitively where the host's file names are."""
+    """Whether two directories are the same: both resolved (a directory is not the symbolic link at issue here; the
+    venv's bin/python is) and compared case-insensitively where the host's file names are."""
     return os.path.normcase(str(Path(first).resolve())) == os.path.normcase(str(second.resolve()))
 
 
 class RunPyTests(unittest.TestCase):
     def test_run_py_reexecs_into_venv(self) -> None:
-        # Started by an interpreter outside the virtual environment (the base interpreter the venv was created from stands
-        # in for "py -3"), run.py must end up inside the venv. sys.prefix tells the two apart on every host; the
+        # Started by an interpreter outside the virtual environment (the base interpreter the venv was created from
+        # stands in for "py -3"), run.py must end up inside the venv. sys.prefix tells the two apart on every host; the
         # executable path does not on POSIX, where .venv/bin/python is a symbolic link to the base interpreter.
         base = base_interpreter()
         environment = {key: value for key, value in os.environ.items() if key not in INHERITED_INTERPRETER_VARIABLES}
@@ -66,8 +66,8 @@ class RunPyTests(unittest.TestCase):
         self.assertFalse(same_directory(outside.stdout.strip(), run.VENV_DIRECTORY),
                          f"{base} runs inside the venv (sys.prefix {outside.stdout.strip()})")
 
-        result = subprocess.run([str(base), str(MCP_ROOT / "run.py"), run.PRINT_INTERPRETER_OPTION], capture_output=True,
-                                text=True, timeout=120, check=False, env=environment)
+        result = subprocess.run([str(base), str(MCP_ROOT / "run.py"), run.PRINT_INTERPRETER_OPTION],
+                                capture_output=True, text=True, timeout=120, check=False, env=environment)
         self.assertEqual(result.returncode, 0, result.stderr)
         executable, prefix = result.stdout.strip().splitlines()
         self.assertTrue(same_directory(prefix, run.VENV_DIRECTORY), f"sys.prefix after the re-exec is {prefix}")

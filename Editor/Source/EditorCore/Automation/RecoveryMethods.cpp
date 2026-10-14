@@ -24,7 +24,7 @@ namespace Engine {
 		const std::filesystem::path path = std::filesystem::absolute(FileSystem::PathFromUtf8(params.Path), error);
 		if (error)
 			return MakeError(ErrorCode::Io, "cannot resolve project path: {}", error.message());
-		ENGINE_TRY_ASSIGN(Scope<LoadedProject> project, ProjectManager::OpenProject(path.lexically_normal(), {}, editor.GetTypeRegistry()));
+		ENGINE_TRY_ASSIGN(Scope<LoadedProject> project, ProjectManager::OpenProject(path.lexically_normal(), { .StrictUnknowns = editor.GetSpecification().StrictUnknowns }, editor.GetTypeRegistry()));
 		ENGINE_TRY_ASSIGN(const auto recovery, Utils::ReadAutosaveRecovery(*project));
 		Autosave* service = context.GetServer().GetSpecification().AutosaveService;
 		if (recovery && service == nullptr)

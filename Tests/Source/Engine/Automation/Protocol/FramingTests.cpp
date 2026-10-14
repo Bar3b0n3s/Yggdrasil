@@ -3,6 +3,7 @@
 #include "Engine/Automation/Protocol/Framing.h"
 
 #include "Engine/Core/Random.h"
+#include "Support/Fuzz.h"
 
 namespace Engine {
 
@@ -46,20 +47,19 @@ namespace Engine {
 
 	TEST_SUITE("Automation")
 	{
-		TEST_CASE("Framing: random byte streams never crash the decoder")
+		TEST_CASE("Framing: random byte streams never crash the decoder" * doctest::test_suite(Test::FuzzSuite))
 		{
 			// Seeded random streams, and seeded mutations of valid frames (flipped, dropped and inserted bytes), fed in random
 			// chunk sizes. The oracle: the decoder never crashes or asserts, every result is a payload, "need more" or a
 			// failure, and a failed decoder keeps failing with the same kind.
-			Random random(0xF4A3E5u);
 			const std::string valid = EncodeFrame(R"({"jsonrpc":"2.0","id":1,"method":"session.info","params":{}})") + EncodeFrame(R"({"jsonrpc":"2.0","id":2,"method":"scene.tree","params":{"depth":2}})");
-			for (int iteration = 0; iteration < 10000; ++iteration)
+			const Test::FuzzRun run = Test::RunFuzzCase(0xF4A3E5u, 10000, [&valid](Random& random, uint64_t index)
 			{
 				std::string stream;
-				if (iteration % 2 == 0)
+				if (index % 2 == 0)
 				{
 					const size_t length = DrawFrameValue(random, 0, 512);
-					for (size_t index = 0; index < length; ++index)
+					for (size_t position = 0; position < length; ++position)
 						stream.push_back(static_cast<char>(DrawFrameValue(random, 0, 255)));
 				}
 				else
@@ -98,11 +98,16 @@ namespace Engine {
 						break;
 					}
 				}
-				if (failure.has_value())
-				{
-					CHECK_FALSE(decoder.Next().has_value());
-					CHECK(decoder.GetFailure() == failure);
-				}
+				if (!failure.has_value())
+					return true;
+				CHECK_FALSE(decoder.Next().has_value());
+				CHECK(decoder.GetFailure() == failure);
+				return false;
+			});
+			if (Test::IsFuzzSample(run.Range))
+			{
+				CHECK(run.Counts.Rejected > 0);
+				CHECK(run.Counts.Accepted > 0);
 			}
 		}
 

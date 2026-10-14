@@ -3,12 +3,14 @@
 #include "Engine/App/ProcessContext.h"
 
 #include "Engine/App/ExitCode.h"
+#include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Log.h"
 #include "Engine/Platform/GlfwLibrary.h"
 #include "Engine/Platform/Process.h"
 #include "Support/ChildOutput.h"
 #include "Support/DeathTest.h"
 #include "Support/TempDirectory.h"
+#include "Support/TestGame.h"
 #include "Support/TestOptions.h"
 #include "Support/Utf8Path.h"
 #include "Support/WindowedChild.h"
@@ -203,6 +205,42 @@ namespace Engine {
 			CHECK(child->StandardError.contains("Simulated GPU hang without a hook"));
 			CHECK_FALSE(child->StandardError.contains("The removed fatal error hook ran"));
 		}
+
+#if defined(ENGINE_PLATFORM_WINDOWS)
+		TEST_CASE("ProcessContext: an executable named with an unpaired UTF-16 surrogate starts and logs under U+FFFD")
+		{
+			// Windows lets a file name hold an unpaired surrogate, which UTF-8 cannot spell. ProcessContext named the log file
+			// after the executable through path::u8string, which throws std::system_error for such a name, so a renamed
+			// exported game ended with exit code 4 (Crash) inside ProcessContext::Create before anything ran. A copy of the
+			// Runtime under such a name (with the app-local CRT it loads from Redist/ beside it) runs a test game headless.
+			const Result<std::filesystem::path> runtime = Test::GetBuiltExecutablePath("Runtime");
+			REQUIRE_MESSAGE(runtime.has_value(), runtime.error().ToString());
+			Test::TempDirectory directory("SurrogateExecutable");
+			const std::filesystem::path binaries = directory / "Bin";
+			REQUIRE(FileSystem::CreateDirectories(binaries).has_value());
+			std::filesystem::path::string_type name = L"Game";
+			name += static_cast<std::filesystem::path::value_type>(0xd800);
+			name += L".exe";
+			const std::filesystem::path executable = binaries / name;
+			std::error_code error;
+			REQUIRE_MESSAGE(std::filesystem::copy_file(*runtime, executable, error), error.message());
+			std::filesystem::copy(runtime->parent_path() / "Redist", binaries / "Redist", std::filesystem::copy_options::recursive, error);
+			REQUIRE_MESSAGE(!error, error.message());
+			const Result<std::filesystem::path> manifest = Test::WriteTestGame(directory / "Game", { .Name = "SurrogateGame" });
+			REQUIRE_MESSAGE(manifest.has_value(), manifest.error().ToString());
+
+			const std::filesystem::path userData = directory / "UserData";
+			const Result<ProcessResult> result = Process::Run({ .Executable = executable,
+																  .Arguments = { "--headless", "--renderer", "none", "--frames", "1",
+																	  "--manifest=" + Test::PathToUtf8(*manifest), "--user-data-dir=" + Test::PathToUtf8(userData) } },
+				std::chrono::seconds(120));
+			REQUIRE_MESSAGE(result.has_value(), result.error().ToString());
+			INFO("runtime stderr: ", result->StandardError);
+			CHECK(result->ExitCode == ExitCode::Success);
+			// The log file is named after the executable, the surrogate replaced by U+FFFD.
+			CHECK(std::filesystem::is_regular_file(userData / "SurrogateGame" / "Logs" / FileSystem::PathFromUtf8("Game\xEF\xBF\xBD.log"), error));
+		}
+#endif
 
 		TEST_CASE("ProcessContext: ProcessContextStepToString names every step and GetBuildDescription names the build")
 		{

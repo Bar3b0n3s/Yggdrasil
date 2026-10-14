@@ -15,6 +15,7 @@
 #include "EditorCore/Audio/AudioPreview.h"
 #include "EditorCore/Automation/AutomationServer.h"
 #include "EditorCore/Automation/BatchRunner.h"
+#include "EditorCore/Automation/ExportMethods.h"
 #include "EditorCore/Automation/RegisterMethods.h"
 #include "EditorCore/Autosave/Autosave.h"
 #include "EditorCore/EditorActions.h"
@@ -22,6 +23,7 @@
 #include "EditorCore/EditorContext.h"
 #include "EditorCore/EditorPreferences.h"
 #include "EditorCore/EngineAssetGenerators.h"
+#include "EditorCore/Export/Exporter.h"
 #include "EditorCore/Inspector/ReflectedEditController.h"
 #include "EditorCore/Play/EditorPlayController.h"
 #include "EditorCore/Project/ProjectManager.h"
@@ -38,6 +40,7 @@
 #include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/AssetPipeline/EngineAssetBaker.h"
 #include "Engine/AssetPipeline/ImporterRegistry.h"
+#include "Engine/Automation/Protocol/JsonRpc.h"
 #include "Engine/Core/EventLog.h"
 #include "Engine/Core/FatalError.h"
 #include "Engine/Core/FileSystem.h"
@@ -54,6 +57,7 @@
 #include "Engine/ImGui/ImGuiScreenshot.h"
 #include "Engine/Platform/Process.h"
 #include "Engine/Platform/Window.h"
+#include "Engine/Reflection/StructInfo.h"
 #include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Renderer/EnvironmentBaker.h"
 #include "Engine/Renderer/GpuResourceCache.h"
@@ -131,6 +135,7 @@ namespace Engine {
 		EditorHostErrorLog UiActionErrors{};
 		EditorHostErrorLog UiDrawErrors{};
 		Scope<BatchRunner> Batch;    // --batch or --upgrade
+		Scope<Exporter> Export;      // --export: polled once per safe point until it resolves; uses Editor
 		double ElapsedSeconds = 0.0; // the frame clock's accumulated unscaled time, for EditorContext::Update
 
 		// OnInitialize's work for `app`, whose server gets `captures` and `systemErrors` (empty without a device); on
@@ -139,6 +144,15 @@ namespace Engine {
 		// Releases the run and the server, in that order (the server's pending operations are cancelled against a live
 		// editor, and it holds the captures).
 		void ReleaseServer();
+		// Starts --export's export of the open project (Exporter::Start with OutputPath); a refused start finishes the run.
+		void StartExport(EditorApp& app, const std::filesystem::path& repository);
+		// Ends --export with `outcome`: writes --export-report and requests the exit code (0 exported; 3 a missing build
+		// output, Exporter::IsMissingBuildOutput; 1 any other failure, or a report that cannot be written).
+		void FinishExport(EditorApp& app, const Result<ExportReport>& outcome);
+		// Ends a still-running --export as a failure (Cancelled, naming `reason`) with its report. Called wherever the run is
+		// about to end before the export finished, ahead of the exit that would end it: the first exit request wins, so the
+		// run exits 1, never with the 0 that means "exported" (the M15 review's M03). Nothing without a running export.
+		void AbandonExport(EditorApp& app, std::string_view reason);
 	};
 
 	struct EditorApp::Rendering
@@ -348,6 +362,57 @@ namespace Engine {
 			return WriteTestRunReportFiles(MakeFailedTestRunResult(TestSuiteSettings::Mode::Editor, failure.ToString()), junitOption, registry);
 		}
 
+		// An export's error as the automation protocol reports it (MakeErrorResponse): the JSON-RPC code, the message and the
+		// members of the error's data (errorCode, detail, hint, contexts, location and issues, each {pointer, message,
+		// hint?, suggestions?}).
+		[[nodiscard]] static Json MakeExportErrorDocument(const Error& error)
+		{
+			Json document = Json::object();
+			document["code"] = static_cast<int32_t>(ToRpcErrorCode(error.GetCode()));
+			document["message"] = error.GetMessageText();
+			const Json response = MakeErrorResponse(Json(), error, Json(), Json());
+			const auto rpcError = response.find("error");
+			if (rpcError == response.end() || !rpcError->is_object())
+				return document;
+			const auto data = rpcError->find("data");
+			if (data == rpcError->end() || !data->is_object())
+				return document;
+			for (auto member = data->begin(); member != data->end(); ++member)
+				document[member.key()] = member.value();
+			return document;
+		}
+
+		// Writes --export-report at `path` (parent directories created): {"success": true, "result": <project.export's
+		// result>} or {"success": false, "error": MakeExportErrorDocument}, canonical JSON.
+		[[nodiscard]] static Status WriteExportReport(const std::filesystem::path& path, const Result<ExportReport>& outcome, const TypeRegistry& registry)
+		{
+			Json document = Json::object();
+			document["success"] = outcome.has_value();
+			if (outcome.has_value())
+			{
+				const StructInfo* type = registry.FindStruct<ProjectExportResult>();
+				if (type == nullptr)
+					return MakeError(ErrorCode::InvalidState, "ProjectExportResult is not registered");
+				const ProjectExportResult result = MakeProjectExportResult(*outcome);
+				ENGINE_TRY_ASSIGN(Json json, type->ToJson(&result));
+				document["result"] = std::move(json);
+			}
+			else
+			{
+				document["error"] = MakeExportErrorDocument(outcome.error());
+			}
+			ENGINE_TRY_ASSIGN(const std::string text, JsonWriter::Write(document));
+			std::error_code error;
+			std::filesystem::path absolute = std::filesystem::absolute(path, error);
+			if (error)
+				absolute = path;
+			if (absolute.has_parent_path())
+				ENGINE_TRY(FileSystem::CreateDirectories(absolute.parent_path()));
+			ENGINE_TRY(FileSystem::WriteFileAtomic(absolute, AsBytes(text), { .KeepBackup = false }));
+			ENGINE_INFO("Export report: '{}'", FileSystem::PathToUtf8(absolute));
+			return {};
+		}
+
 	}
 
 	EditorApp::EditorApp(ApplicationSpecification specification, EditorAppOptions options)
@@ -399,6 +464,8 @@ namespace Engine {
 		// every machine; without it the generator is seeded from the OS CSPRNG.
 		if (options.IdSeed.has_value())
 			editorSpecification.IdGeneratorState = Random(*options.IdSeed).GetState();
+		// --strict (§6; the M15 completion review's A024): every project this editor opens is read strictly.
+		editorSpecification.StrictUnknowns = options.Strict;
 		ENGINE_TRY_ASSIGN(state.Editor, EditorContext::Create(app.GetContext(), editorSpecification));
 		state.Saves = CreateScope<Autosave>(*state.Editor);
 		state.Recovery = CreateScope<EditorHostRecovery>(*state.Editor, *state.Saves);
@@ -437,12 +504,23 @@ namespace Engine {
 		{
 			const ProjectOpenOptions openOptions{
 				.ReadOnly = options.ReadOnly,
-				.StrictUnknowns = false,
+				.StrictUnknowns = editorSpecification.StrictUnknowns,
 				.ReadOnlyCacheDirectory = options.ReadOnly ? editorSpecification.ReadOnlyCacheRoot / std::to_string(Process::GetCurrentId())
 														   : std::filesystem::path(),
 			};
-			ENGINE_TRY_ASSIGN(Scope<LoadedProject> project, ProjectManager::OpenProject(*options.Project, openOptions, app.GetContext().GetTypeRegistry()));
-			ENGINE_TRY(state.Editor->OpenProject(std::move(project)));
+			Result<Scope<LoadedProject>> project = ProjectManager::OpenProject(*options.Project, openOptions, app.GetContext().GetTypeRegistry());
+			Status opened = project.has_value() ? state.Editor->OpenProject(std::move(*project)) : Status(std::unexpected(std::move(project).error()));
+			if (!opened.has_value())
+			{
+				// --export-report is written whatever the outcome (ADR 0024 decision 3); the run then exits 3, as every editor
+				// whose project does not open or is locked does.
+				if (options.ExportReportPath.has_value())
+				{
+					if (const Status written = Utils::WriteExportReport(*options.ExportReportPath, std::unexpected(opened.error()), context.GetTypeRegistry()); !written)
+						ENGINE_ERROR("Cannot write the export report: {}", written.error());
+				}
+				return opened;
+			}
 		}
 
 		const bool listens = options.ListensForAutomation(headless);
@@ -461,6 +539,8 @@ namespace Engine {
 			serverSpecification.SessionsDirectory = userData.Root / "Automation" / "Sessions";
 			serverSpecification.DocsRoot = repository;
 			serverSpecification.ExportBinaryRoot = repository / "bin";
+			// --export-root (§13.4; ADR 0024 decision 3): project.export writes below it instead of <Project>/Build/.
+			serverSpecification.ExportRoot = options.ExportRoot.value_or(std::filesystem::path());
 			if (options.AutomationTestHooks && context.GetGraphicsDevice())
 				serverSpecification.QueueDeviceLost = [&app]() -> Status
 				{
@@ -508,6 +588,10 @@ namespace Engine {
 			std::vector<BatchRequest> requests = { BatchRequest{ .Method = options.CheckScripts ? "script.check" : "test.run", .Params = VariantValue(std::move(params)), .Line = 0 } };
 			state.Batch = CreateScope<BatchRunner>(std::move(requests), BatchRunOptions{ .ClientName = "cli", .WriteTranscript = false });
 		}
+		else if (options.ExportDirectory.has_value())
+		{
+			state.StartExport(app, repository);
+		}
 		return {};
 	}
 
@@ -515,6 +599,69 @@ namespace Engine {
 	{
 		Batch.reset();
 		Server.reset();
+	}
+
+	void EditorApp::State::StartExport(EditorApp& app, const std::filesystem::path& repository)
+	{
+		// The package directory as the user meant it, against the working directory; Exporter::Start refuses one that is
+		// the project, the checkout's bin, the working directory or the user-data root, or a directory above one of them.
+		std::error_code error;
+		std::filesystem::path output = std::filesystem::absolute(*Options.ExportDirectory, error);
+		if (error)
+		{
+			FinishExport(app, MakeError(ErrorCode::InvalidArgument, "the export directory '{}' cannot be made absolute: {}", FileSystem::PathToUtf8(*Options.ExportDirectory), error.message()));
+			return;
+		}
+		ExportSpecification specification;
+		ENGINE_ASSERT(Options.ExportConfig.has_value(), "ParseEditorLaunchOptions requires --config with --export");
+		specification.Configuration = Options.ExportConfig.value_or(ExportConfiguration::Release);
+		specification.OutputPath = output.lexically_normal();
+		specification.BinaryRoot = repository / "bin";
+		specification.Testing = Options.ExportTesting;
+		specification.SmokeTest = Options.ExportSmokeTest;
+		Result<Scope<Exporter>> exporter = Exporter::Start(*Editor, specification);
+		if (!exporter.has_value())
+		{
+			FinishExport(app, std::unexpected(std::move(exporter).error()));
+			return;
+		}
+		Export = std::move(*exporter);
+	}
+
+	void EditorApp::State::FinishExport(EditorApp& app, const Result<ExportReport>& outcome)
+	{
+		int exitCode = ExitCode::Success;
+		if (outcome.has_value())
+		{
+			ENGINE_INFO("Exported '{}' ({}, {} files, {} warnings)", FileSystem::PathToUtf8(outcome->OutputDirectory), ExportConfigurationToString(outcome->Configuration),
+				outcome->Files.size(), outcome->Warnings.size());
+			for (const std::string& warning : outcome->Warnings)
+				ENGINE_WARN("Export warning: {}", warning);
+		}
+		else
+		{
+			ENGINE_ERROR("The export failed: {}", outcome.error());
+			exitCode = Exporter::IsMissingBuildOutput(outcome.error()) ? ExitCode::InitFailed : ExitCode::Failed;
+		}
+		if (Options.ExportReportPath.has_value())
+		{
+			if (const Status written = Utils::WriteExportReport(*Options.ExportReportPath, outcome, app.GetContext().GetTypeRegistry()); !written)
+			{
+				ENGINE_ERROR("Cannot write the export report: {}", written.error());
+				if (exitCode == ExitCode::Success)
+					exitCode = ExitCode::Failed;
+			}
+		}
+		app.RequestExit(exitCode);
+	}
+
+	void EditorApp::State::AbandonExport(EditorApp& app, std::string_view reason)
+	{
+		if (Export == nullptr)
+			return;
+		// Cancelling removes the staging directory and leaves an earlier export in the output directory untouched.
+		Export.reset();
+		FinishExport(app, MakeError(ErrorCode::Cancelled, "the export was cancelled: {}", reason));
 	}
 
 	Status EditorApp::OnInitialize()
@@ -824,6 +971,14 @@ namespace Engine {
 		State& state = *m_State;
 		if (!state.Editor)
 			return;
+		// Closing the window of a running --export cancels the export: the run fails (exit 1) and the report says why, instead
+		// of the frame loop's successful exit.
+		if (auto* close = std::get_if<WindowCloseEvent>(&event); close != nullptr && state.Export != nullptr)
+		{
+			close->Handled = true;
+			state.AbandonExport(*this, "the editor window was closed before it finished");
+			return;
+		}
 		// A close with unsaved scene changes waits for Save / Don't save / Cancel instead of ending the frame loop, when an
 		// ImGui layer can show that prompt (EditorHostClose closes at once otherwise). Active gestures end first, so the
 		// choice saves or records committed state only.
@@ -883,6 +1038,14 @@ namespace Engine {
 		m_State->Panels.reset();
 		m_State->Actions.reset();
 		m_State->Controls.reset();
+		// An export still running here (every path that ends the run while exporting finishes it first, so none should be)
+		// is cancelled as a failure with its report: its staging directory goes, an earlier export in its output directory
+		// stays. The frame loop has already chosen the exit code, so the error line says what happened.
+		if (m_State->Export != nullptr)
+		{
+			ENGINE_ERROR("The editor shut down while its --export was still running");
+			m_State->AbandonExport(*this, "the editor shut down before it finished");
+		}
 		m_State->ReleaseServer();
 		if (GraphicsDevice* device = GetContext().GetGraphicsDevice())
 			device->WaitForIdle();
@@ -973,6 +1136,16 @@ namespace Engine {
 			}
 		}
 
+		// --export: one step of the export per frame, like project.export's pending operation (§13.2).
+		if (state.Export != nullptr)
+		{
+			if (std::optional<Result<ExportReport>> outcome = state.Export->Poll())
+			{
+				state.Export.reset();
+				state.FinishExport(*this, *outcome);
+			}
+		}
+
 		// UI/RPC handlers and pending-operation polls have released all borrowed session/VM pointers.
 		if (state.Editor)
 			state.Editor->GetPlay().OnSafePoint();
@@ -1009,7 +1182,10 @@ namespace Engine {
 				state.TimingDroppedBase = GetFrameStatistics().DroppedSeconds;
 			}
 			if (const std::optional<int> exitCode = state.Editor->GetShutdownRequest())
+			{
+				state.AbandonExport(*this, "the editor was asked to shut down before it finished");
 				RequestExit(*exitCode);
+			}
 
 			// The play session's loop (the project's FixedHz), its time scale and the unthrottled frames of a running
 			// play.step reach the frame loop here, after the requests that changed them (§4.2, §13.6).
@@ -1049,6 +1225,10 @@ namespace Engine {
 			NoteShownScene();
 		const auto maxFrames = GetSpecification().MaxFrames;
 		state.FinalFrame = maxFrames && frame.FrameIndex + 1 == *maxFrames;
+		// The frame loop ends after this frame with exit code 0 (--frames, which ParseEditorLaunchOptions refuses with
+		// --export; this keeps a running export from ever ending that way).
+		if (state.FinalFrame)
+			state.AbandonExport(*this, "the run reached its last frame (--frames) before it finished");
 		if (state.FinalFrame && !m_Rendering && !WriteScreenshots())
 			RequestExit(ExitCode::Failed);
 	}

@@ -4,6 +4,8 @@
 #include "Engine/Core/Hash.h"
 #include "Engine/Core/Random.h"
 #include "Engine/Scripting/Sandbox.h"
+#include "Support/Fuzz.h"
+#include "Support/TestData.h"
 
 #include <doctest/doctest.h>
 #include <nlohmann/json.hpp>
@@ -74,6 +76,36 @@ namespace Engine {
 			CHECK(compiled.error().GetLocation().JsonPointer == "/Expect/3/Luau");
 			CHECK(compiled.error().GetLocation().Line == 2);
 			CHECK(compiled.error().GetLocation().Column == 8);
+		}
+
+		TEST_CASE("ScriptCompiler: 200 seeded mutations of Luau source compile or fail located, never crash" * doctest::test_suite(Test::FuzzSuite))
+		{
+			// The seed corpus: every Luau script of Projects/FeatureTest (behaviours, modules and test suites). Cooked bytecode
+			// stays trusted after its hash (§6.8); source is the external input the compiler reads.
+			const std::vector<std::string> seeds = Test::ReadFuzzSeedTexts(Test::GetRepositoryRoot() / "Projects" / "FeatureTest" / "Assets", ".luau");
+			const auto path = VfsPath::Parse("project://Assets/Scripts/Fuzz.luau");
+			REQUIRE(path.has_value());
+			const Test::FuzzRun run = Test::RunFuzzCase(0x1A0C, 200, [&seeds, &path](Random& random, uint64_t /*index*/)
+			{
+				std::string mutated = seeds[static_cast<size_t>(random.RangeInt(0, static_cast<int64_t>(seeds.size()) - 1))];
+				Test::MutateText(mutated, random);
+				static constexpr std::array<ScriptCompileMode, 3> Modes = { ScriptCompileMode::Chunk, ScriptCompileMode::Expression,
+					ScriptCompileMode::ExpressionOrChunk };
+				const ScriptCompileMode mode = Modes[static_cast<size_t>(random.RangeInt(0, 2))];
+				const auto compiled = ScriptCompiler::Compile({ .Path = *path, .Source = mutated, .Mode = mode });
+				if (!compiled.has_value())
+				{
+					const ErrorCode code = compiled.error().GetCode();
+					CHECK((code == ErrorCode::CompileFailed || code == ErrorCode::Validation));
+					return false;
+				}
+				CHECK_FALSE(compiled->Bytecode.empty());
+				CHECK(compiled->SourceMap.SourceByteCount == mutated.size());
+				CHECK(compiled->SourceMap.SourceHash == XXH64(mutated));
+				return true;
+			});
+			if (Test::IsFuzzSample(run.Range))
+				CHECK(run.Counts.Rejected > 0);
 		}
 
 		TEST_CASE("ScriptCompiler: replay diagnostics map wrapped expressions and return chunks to authored lines")

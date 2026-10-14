@@ -1,7 +1,7 @@
 """Physics through automation (Docs/Architecture.md §5.6 Simulate, §9, §13.5 "physics.bodyInfo", §13.7
 PHYSICS_ADJACENT_STATIC_BODIES; Roadmap M11 acceptance): a Simulate session drops a ball, physics.bodyInfo reports its
-velocity, sleeping state and contacts, and project.validate reports adjacent implicit static bodies and fixes them with a
-Static RigidBody on their common parent. test_simulate_mode_ball_falls, test_body_info_reports_contacts and
+velocity, sleeping state and contacts, and project.validate reports adjacent implicit static bodies and fixes them with
+a Static RigidBody on their common parent. test_simulate_mode_ball_falls, test_body_info_reports_contacts and
 test_validate_reports_adjacent_static_bodies_and_fix_adds_parent_body are the Roadmap acceptance tests;
 test_body_info_needs_a_play_session_and_a_body covers physics.bodyInfo's errors.
 """

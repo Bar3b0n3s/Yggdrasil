@@ -109,8 +109,9 @@ namespace Engine {
 	// Reads a .meta file's text (either format above). Strict like every authored-file reader (§6): Parse errors located at
 	// line and column, Validation errors located at their JSON pointer for a wrong type, a missing or null Handle, an
 	// unknown Type, a Dependency without an Owner or with asset members, an asset meta without an Importer or with an
-	// Owner, a SubAssets entry with an empty or repeated Key, a None type or a handle other than
-	// DeriveSubAssetHandle(Handle, Key), or unsorted SubAssets; UnsupportedVersion for a Version above CurrentVersion.
+	// Owner, Settings holding a fractional number beyond float's range (which SerializeAssetMetadata could not write back),
+	// a SubAssets entry with an empty or repeated Key, a None type or a handle other than DeriveSubAssetHandle(Handle,
+	// Key), or unsorted SubAssets; UnsupportedVersion for a Version above CurrentVersion.
 	// Unknown members are a Validation error too (a .meta is engine-written; a hand edit that adds members is a mistake to
 	// report, not to preserve). `metaPath` only names the file in error locations. Pure and thread-safe.
 	[[nodiscard]] Result<AssetMetadata> ParseAssetMetadata(std::string_view text, std::string_view metaPath = {});

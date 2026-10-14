@@ -1,0 +1,29 @@
+             VMA              LMA     Size Align Out     In      Symbol
+          2002a8           2002a8       1c     1 .interp
+          2002a8           2002a8       1c     1         <internal>:(.interp)
+          201000           201000     2000    16 .text
+          201000           201000       40    16         /build/bin-int/Dist-linux-x86_64/Runtime/RuntimeMain.o:(.text.main)
+          201000           201000       40     1                 main
+          201040           201040       40    16         /build/bin/Dist-linux-x86_64/Engine/libEngine.a(Application.o):(.text._ZN6Engine11Application3RunEv)
+          201040           201040       40     1                 Engine::Application::Run()
+          201080           201080       40    16         /build/bin/Dist-linux-x86_64/Engine/libEngine.a(FeatureTestRunner.o):(.text._ZN6Engine17FeatureTestRunner3RunEv)
+          201080           201080       40     1                 Engine::FeatureTestRunner::Run()
+          2010c0           2010c0       40    16         /build/bin/Dist-linux-x86_64/Engine/libEngine.a(ReplayPlayer.o):(.text._ZN6Engine12ReplayPlayer4StepEv)
+          2010c0           2010c0       40     1                 Engine::ReplayPlayer::Step()
+          201100           201100       40    16         /build/bin/Dist-linux-x86_64/Engine/libEngine.a(Watchdog.o):(.text._ZN6Engine14ScriptWatchdogD2Ev)
+          201100           201100       40     1                 Engine::ScriptWatchdog::~ScriptWatchdog()
+          201140           201140       40    16         /build/bin/Dist-linux-x86_64/Engine/libEngine.a(SceneSerializer.o):(.text._ZN6Engine5UtilsL14PrefixPointersERKNS_5ErrorESt17basic_string_viewIcSt11char_traitsIcEE)
+          201140           201140       40     1                 Engine::Utils::PrefixPointers(Engine::Error const&, std::basic_string_view<char, std::char_traits<char> >)
+          201180           201180       40    16         /build/bin/Dist-linux-x86_64/Luau/libLuau.a(lapi.o):(.text.lua_pushnumber)
+          201180           201180       40     1                 lua_pushnumber
+          2011c0           2011c0       40    16         /build/bin/Dist-linux-x86_64/Luau/libLuau.a(Compiler.o):(.text._ZN4Luau7compileERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEERKNS_14CompileOptionsERKNS_12ParseOptionsEPNS_15BytecodeEncoderE)
+          2011c0           2011c0       40     1                 Luau::compile(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, Luau::CompileOptions const&, Luau::ParseOptions const&, Luau::BytecodeEncoder*)
+          201200           201200       40    16         /build/bin/Dist-linux-x86_64/Engine/libEngine.a(TextureImporter.o):(.text._ZNK6Engine15TextureImporter6ImportERNS_13ImportContextE)
+          201200           201200       40     1                 Engine::TextureImporter::Import(Engine::ImportContext&) const
+          201240           201240       40    16         /build/bin/Dist-linux-x86_64/Engine/libEngine.a(PakWriter.o):(.text._ZN6Engine9PakWriter5WriteERKNSt10filesystem7__cxx114pathE)
+          201240           201240       40     1                 Engine::PakWriter::Write(std::filesystem::__cxx11::path const&)
+          203000           203000     2000    16 .rodata
+          203000           203000       40    16         /build/bin/Dist-linux-x86_64/Engine/libEngine.a(Application.o):(.rodata.str1.1)
+          205000           205000     2000    16 .data.rel.ro
+          205000           205000       40    16         /build/bin/Dist-linux-x86_64/Engine/libEngine.a(CoreRegistration.o):(.data.rel.ro._ZTVN6Engine15ComponentStoreE)
+          205000           205000       40     1                 vtable for Engine::ComponentStore

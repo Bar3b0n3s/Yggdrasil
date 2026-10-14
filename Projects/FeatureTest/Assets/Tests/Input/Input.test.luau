@@ -41,7 +41,7 @@ end
 return Test.Suite("Input", function()
 	Test.Case("a key press and release are each one edge in the step and one in the next frame", function()
 		local probe = Probe()
-		local steps, frames = #probe.Steps + 1, #probe.Frames + 1
+		local steps, frames = probe.StepCount + 1, probe.FrameCount + 1
 		Test.InjectKey("Space", "Down")
 		Test.Expect(not Input.IsKeyDown("Space"), "injected input waits for the next tick")
 		Step()
@@ -71,7 +71,7 @@ return Test.Suite("Input", function()
 		end
 		local released = probe:StepAt(Time.GetTick() - 1)
 		Test.Expect(released ~= nil and released.SpaceReleased and not released.SpaceDown, "the previous step saw the tap's release")
-		local frame = probe.Frames[#probe.Frames]
+		local frame = probe:LastFrame()
 		Test.Expect(frame.SpaceReleased and frame.Tick == Time.GetTick(), "and so did the frame that followed it")
 	end)
 
@@ -79,7 +79,7 @@ return Test.Suite("Input", function()
 		Test.InjectKey("D", "Down")
 		Step()
 		Test.ExpectEqual(Input.GetAxis("MoveX"), 1)
-		Test.ExpectEqual(Probe().Steps[#Probe().Steps].DDown, true)
+		Test.ExpectEqual(Probe():LastStep().DDown, true)
 		Test.InjectKey("A", "Down")
 		Step()
 		Test.ExpectEqual(Input.GetAxis("MoveX"), 0, "opposite keys cancel")
@@ -184,7 +184,7 @@ return Test.Suite("Input", function()
 		Test.ExpectEqual(Input.GetAxis("MoveX"), 0, "inside the dead zone")
 		Test.ExpectNear(Input.GetAxis("MoveY"), DeadZone(0.4), 1e-6, "pulling the stick down moves MoveY positive")
 		local probe = Probe()
-		local reading = probe.Steps[#probe.Steps]
+		local reading = probe:LastStep()
 		Test.ExpectNear(reading.LeftY, F32(-0.4), 1e-7)
 		Test.ExpectNear(reading.RightTrigger, 1, 1e-7)
 		for _, axis in GAMEPAD_AXES do
@@ -215,7 +215,7 @@ return Test.Suite("Input", function()
 		Test.ExpectNear(Input.GetAxis("MoveY"), -0.5, 1e-7)
 		Step()
 		local probe = Probe()
-		local frame = probe.Frames[#probe.Frames]
+		local frame = probe:LastFrame()
 		Test.ExpectNear(frame.MoveX, 0.25, 1e-7, "the frame after the step saw the analog value too")
 		Test.ExpectNear(frame.MoveY, -0.5, 1e-7)
 		Test.ExpectNear(Input.GetAxis("MoveX"), 0.25, 1e-7, "an analog value holds until it changes")

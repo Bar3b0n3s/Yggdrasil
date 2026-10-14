@@ -2,6 +2,8 @@
 
 #include "Engine/Scene/Prefab.h"
 
+#include "Engine/Asset/CookedFormat.h"
+#include "Engine/Asset/DocumentData.h"
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Core/Mounts/MemoryMount.h"
 #include "Engine/Core/UUIDGenerator.h"
@@ -10,12 +12,24 @@
 #include "Engine/Scene/Components/PrefabInstanceComponent.h"
 #include "Engine/Scene/Components/PrefabLinkComponent.h"
 #include "Engine/Scene/Entity.h"
+#include "Support/Fuzz.h"
 #include "Support/SceneTestFixture.h"
 #include "Support/TestData.h"
 
 #include <nlohmann/json.hpp>
 
 namespace Engine {
+
+	namespace {
+
+		// A prefab that loaded saves again (the fuzz case's oracle), naming the error when it does not.
+		void CheckPrefabSaves(const Prefab& prefab)
+		{
+			const Result<std::string> saved = prefab.SaveToString();
+			CHECK_MESSAGE(saved.has_value(), saved.error().ToString());
+		}
+
+	}
 
 	TEST_SUITE("Scene")
 	{
@@ -104,6 +118,49 @@ namespace Engine {
 			const Json* flattened = repaired->FindEntity(UUID(0x00000000000b0002));
 			REQUIRE(flattened != nullptr);
 			CHECK_FALSE((*flattened)["Components"].contains("PrefabLink"));
+		}
+
+		TEST_CASE("Prefab: 1,000 seeded mutations of a prefab file and of its cooked form never crash" * doctest::test_suite(Test::FuzzSuite))
+		{
+			// The seed corpus: the prefab fixtures of Tests/Data. The text goes through a strict or a repair load; the cooked
+			// form (the payload hash sealed again) through LoadCookedPrefab and then Prefab::FromJson, as a Runtime loads it.
+			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
+			std::vector<std::string> seeds;
+			for (const std::string_view fixture : { "Prefabs/Block.prefab", "Assets/Prefabs/Lamp.prefab" })
+			{
+				const Result<std::string> text = Test::ReadTestDataText(fixture);
+				REQUIRE_MESSAGE(text.has_value(), text.error().ToString());
+				seeds.push_back(*text);
+			}
+			const Test::FuzzRun run = Test::RunFuzzCase(0x9EFAB, 1000, [&registry, &seeds](Random& random, uint64_t index)
+			{
+				std::string mutated = seeds[static_cast<size_t>(random.RangeInt(0, static_cast<int64_t>(seeds.size()) - 1))];
+				Test::MutateText(mutated, random);
+				UUIDGenerator repairIds = UUIDGenerator::CreateDeterministic(index + 1);
+				LoadOptions options;
+				options.Mode = random.NextBool() ? LoadMode::Strict : LoadMode::Repair;
+				options.RepairIdGenerator = &repairIds;
+				LoadReport report;
+				if (random.NextBool())
+				{
+					const Result<Prefab> loaded = Prefab::LoadFromString(mutated, *registry, options, report);
+					if (loaded.has_value())
+						CheckPrefabSaves(*loaded);
+					return loaded.has_value();
+				}
+				const Result<AssetRef<PrefabData>> cooked = LoadCookedPrefab(WriteCookedArtifact(AssetType::Prefab, PrefabData::FormatVersion, 1, AsBytes(mutated)));
+				if (!cooked.has_value())
+					return false;
+				const Result<Prefab> loaded = Prefab::FromJson(*(*cooked)->Document, *registry, options, report);
+				if (loaded.has_value())
+					CheckPrefabSaves(*loaded);
+				return loaded.has_value();
+			});
+			if (Test::IsFuzzSample(run.Range))
+			{
+				CHECK(run.Counts.Rejected > 0);
+				CHECK(run.Counts.Accepted > 0);
+			}
 		}
 
 		TEST_CASE("Prefab: an empty prefab has no document and no entities")

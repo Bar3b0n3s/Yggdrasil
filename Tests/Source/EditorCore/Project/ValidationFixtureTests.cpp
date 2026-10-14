@@ -14,6 +14,7 @@
 #include "Support/EditorTestFixture.h"
 #include "Support/ExpectLog.h"
 #include "Support/TestData.h"
+#include "Support/TestTimeout.h"
 #include "Support/ValidatorTestTypes.h"
 
 #include <nlohmann/json.hpp>
@@ -257,8 +258,9 @@ namespace Engine {
 			CHECK(FindUntriggeredCodes({}).empty());
 		}
 
-		TEST_CASE("Validation: each fixture reports exactly its expected codes" * doctest::timeout(600))
+		TEST_CASE("Validation: each fixture reports exactly its expected codes")
 		{
+			Test::SetTestCaseTimeLimit(600.0);
 			const std::vector<std::string> fixtures = ListValidationFixtures();
 			REQUIRE_FALSE(fixtures.empty());
 			std::set<std::string> fixable;

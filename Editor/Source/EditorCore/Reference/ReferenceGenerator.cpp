@@ -789,7 +789,7 @@ namespace Engine {
 			properties["Active"] = Described(Json{ { "type", "boolean" } }, "Whether the entity itself is active.");
 			properties["Tags"] = Described(Json{ { "type", "array" }, { "items", Json{ { "type", "string" } } } }, "The entity's tags.");
 			properties["Components"] = ObjectSchema(
-				"The entity's components keyed by registry name; unknown components are preserved verbatim (§6), so they are allowed.",
+				"The entity's components keyed by registry name; unknown components are preserved on save (§6), so they are allowed.",
 				componentProperties != components.end() ? *componentProperties : Json::object(), {}, true);
 			return ObjectSchema("One entity: its entity keys, then its components.", std::move(properties), { "ID" });
 		}
@@ -1023,9 +1023,12 @@ namespace Engine {
 			std::string out = std::format("# File formats\n\n{}\n\n", GeneratedNote);
 			out += "Every authored file is UTF-8 JSON with LF line ends and tabs, written by the canonical writer: `Format` and `Version` "
 				   "first, keys in registry order, PascalCase keys, floats in their shortest round-trip form and default values written "
-				   "out (Architecture §6). Unknown fields warn and unknown components are preserved verbatim; `--strict` makes both "
-				   "errors. A newer `Version` than the reader supports fails with `UnsupportedVersion`. Each format has a JSON Schema "
-				   "(draft 2020-12, the subset the engine's validator supports) in `Schemas/`.\n\n";
+				   "out (Architecture §6). Unknown fields warn; unknown components warn and are preserved on save, their numbers written "
+				   "as floats like every authored number, and one holding a fractional number outside the float range, which could not "
+				   "be written back, is `SCENE_INVALID_COMPONENT` (an error in a strict load, dropped by a repair load). `Editor "
+				   "--strict` makes unknown keys, fields and components errors and refuses a project any of whose scenes and prefabs "
+				   "does not load strictly. A newer `Version` than the reader supports fails with `UnsupportedVersion`. Each format "
+				   "has a JSON Schema (draft 2020-12, the subset the engine's validator supports) in `Schemas/`.\n\n";
 
 			out += "## Authored formats\n\n| Format | File | Version | Schema |\n|---|---|---|---|\n";
 			for (const AuthoredFormat& format : AuthoredFormats)

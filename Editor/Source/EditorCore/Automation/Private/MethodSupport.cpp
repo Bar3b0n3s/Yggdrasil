@@ -4,6 +4,7 @@
 #include "EditorCore/Automation/ProjectMethods.h"
 #include "EditorCore/EditorContext.h"
 #include "EditorCore/Private/EditorFileError.h"
+#include "Engine/Asset/ScriptData.h"
 #include "Engine/Automation/Methods/AutomationMethodContext.h"
 #include "Engine/Automation/Methods/SceneMethods.h"
 #include "Engine/Core/Assert.h"
@@ -109,6 +110,15 @@ namespace Engine {
 			options.Mode = mode;
 			options.RepairIdGenerator = mode == LoadMode::Repair ? repairIds : nullptr;
 			options.SourcePath = ToProjectRelative(path);
+			// --strict (EditorContextSpecification::StrictUnknowns): unknown keys, fields and components are errors. Script
+			// field overrides then resolve against the declared fields, so a value merely lacking a schema is not one.
+			Ref<const ScriptFieldSchemaSource> schemas;
+			if (editor.GetSpecification().StrictUnknowns)
+			{
+				ENGINE_TRY_ASSIGN(schemas, editor.GetScriptSchemaSnapshot());
+				options.StrictUnknowns = true;
+				options.Schemas = schemas.get();
+			}
 			const Status loaded = SceneSerializer::LoadFromFile(scene, editor.GetVfs(), path, options, report);
 			if (!loaded)
 				return std::unexpected(ToEditorFileError(loaded.error()));

@@ -68,3 +68,17 @@ Throwaway workspace built Debug/Release/Dist (VS 2026 v145, C++23): `"Transform"
 3. Delete `Vendor/entt/src/` and copy `<tmp>/src/entt/**/*.{h,hpp}` back preserving paths; copy `LICENSE`.
 4. Ensure LF line endings (clone with `-c core.autocrlf=false`).
 5. Update this file (tag, SHA, date, header count), rebuild all configurations and run the unit tests.
+
+## Notices
+
+The row `Scripts/Lib/notices.py` reads for `THIRD_PARTY_NOTICES.txt` (Docs/Decisions/0024-m15-contract.md decision 8).
+
+| Field | Value |
+|---|---|
+| Name | EnTT |
+| Upstream | https://github.com/skypjack/entt |
+| Version | 4.0.0 |
+| License | MIT |
+| Shipped | yes |
+| Projects | - |
+| License files | LICENSE |

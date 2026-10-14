@@ -64,7 +64,8 @@ class ReplayTests(AutomationTestCase):
         self.record(client, path)
         source = root / path
         document = json.loads(source.read_text(encoding="utf-8"))
-        document["FinalStateHash"] = "0000000000000000" if document["FinalStateHash"] != "0000000000000000" else "0000000000000001"
+        document["FinalStateHash"] = ("0000000000000000" if document["FinalStateHash"] != "0000000000000000"
+                                      else "0000000000000001")
         source.write_text(json.dumps(document), encoding="utf-8")
         client.call("asset.reimport", {"asset": path})
         with self.assertRaises(engine_client.EngineError) as mismatch:
@@ -138,7 +139,8 @@ class ReplayTests(AutomationTestCase):
         client.call("entity.create", {"name": "Target"})
         client.call("scene.save")
         client.call("input.record", {"action": "start"})
-        client.call("play.waitFor", {"until": 'Scene.FindByName("Target").Name = "Changed"; return true', "timeoutTicks": 1})
+        client.call("play.waitFor", {"until": 'Scene.FindByName("Target").Name = "Changed"; return true',
+                                     "timeoutTicks": 1})
         path = "Assets/Tests/Invalid.replay"
         with self.assertRaises(engine_client.EngineError) as invalid:
             client.call("input.record", {"action": "stop", "path": path})

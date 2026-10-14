@@ -38,13 +38,6 @@ namespace Engine {
 
 	namespace Utils {
 
-		// `path` as UTF-8, the encoding Dear ImGui's file functions take (ImFileOpen converts it on Windows).
-		static std::string PathToUtf8(const std::filesystem::path& path)
-		{
-			const std::u8string text = path.u8string();
-			return std::string(reinterpret_cast<const char*>(text.data()), text.size());
-		}
-
 		// Creates the folder imgui.ini goes in; Dear ImGui's own writes fail silently without it.
 		static Status CreateIniDirectory(const std::filesystem::path& iniFilePath)
 		{
@@ -54,7 +47,7 @@ namespace Engine {
 			const Status created = FileSystem::CreateDirectories(directory);
 			if (!created.has_value())
 			{
-				return MakeError(ErrorCode::Io, "cannot create the folder of the ImGui settings file '{}': {}", PathToUtf8(iniFilePath),
+				return MakeError(ErrorCode::Io, "cannot create the folder of the ImGui settings file '{}': {}", FileSystem::PathToUtf8(iniFilePath),
 					created.error().ToString());
 			}
 			return {};
@@ -107,7 +100,7 @@ namespace Engine {
 		Scope<ImGuiLayer> layer = CreateScope<ImGuiLayer>(ConstructionKey());
 		layer->m_Window = &window;
 		layer->m_IniFilePath = specification.IniFilePath;
-		layer->m_IniFileName = Utils::PathToUtf8(specification.IniFilePath);
+		layer->m_IniFileName = FileSystem::PathToUtf8(specification.IniFilePath);
 
 		IMGUI_CHECKVERSION();
 		layer->m_Context = ImGui::CreateContext();
@@ -183,7 +176,7 @@ namespace Engine {
 			ImGui::SaveIniSettingsToDisk(m_IniFileName.c_str());
 
 		m_IniFilePath = iniFilePath;
-		m_IniFileName = Utils::PathToUtf8(iniFilePath);
+		m_IniFileName = FileSystem::PathToUtf8(iniFilePath);
 		ImGuiIO& io = ImGui::GetIO();
 		io.IniFilename = m_IniFileName.empty() ? nullptr : m_IniFileName.c_str();
 

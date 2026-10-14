@@ -106,3 +106,17 @@ registry, async logger and thread pool.
 To go back to the bundled fmt instead of `std::format`: restore `include/spdlog/fmt/bundled/` and
 `src/bundled_fmtlib_format.cpp` from the same tag, add the source to `files`, and remove
 `SPDLOG_USE_STD_FORMAT` from both this project and every consumer.
+
+## Notices
+
+The row `Scripts/Lib/notices.py` reads for `THIRD_PARTY_NOTICES.txt` (Docs/Decisions/0024-m15-contract.md decision 8).
+
+| Field | Value |
+|---|---|
+| Name | spdlog |
+| Upstream | https://github.com/gabime/spdlog |
+| Version | 1.17.0 |
+| License | MIT |
+| Shipped | yes |
+| Projects | spdlog |
+| License files | LICENSE |

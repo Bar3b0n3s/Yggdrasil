@@ -194,7 +194,7 @@ namespace Engine {
 			ENGINE_TRY(Utils::RecordCreatedFiles(created, editor.GetWriteAttribution()));
 			ENGINE_TRY_ASSIGN(std::vector<std::string> files, Utils::ListProjectFiles(created.ProjectFile.parent_path()));
 
-			ENGINE_TRY_ASSIGN(Scope<LoadedProject> project, ProjectManager::OpenProject(created.ProjectFile, {}, editor.GetTypeRegistry()));
+			ENGINE_TRY_ASSIGN(Scope<LoadedProject> project, ProjectManager::OpenProject(created.ProjectFile, { .StrictUnknowns = editor.GetSpecification().StrictUnknowns }, editor.GetTypeRegistry()));
 			ENGINE_TRY(editor.OpenProject(std::move(project)));
 			ENGINE_INFO("Created and opened the project '{}' at '{}'", params.Name, FileSystem::PathToUtf8(created.ProjectFile));
 
@@ -211,7 +211,7 @@ namespace Engine {
 			EditorContext& editor = context.GetEditor();
 			ENGINE_TRY(Utils::RequireNoProject(editor));
 			ENGINE_TRY_ASSIGN(const std::filesystem::path path, Utils::ResolveNativeProjectPath(params.Path, "/path"));
-			ENGINE_TRY_ASSIGN(Scope<LoadedProject> project, ProjectManager::OpenProject(path, {}, editor.GetTypeRegistry()));
+			ENGINE_TRY_ASSIGN(Scope<LoadedProject> project, ProjectManager::OpenProject(path, { .StrictUnknowns = editor.GetSpecification().StrictUnknowns }, editor.GetTypeRegistry()));
 
 			ProjectOpenResult result;
 			const auto recovery = Utils::ReadAutosaveRecovery(*project);

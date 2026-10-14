@@ -10,6 +10,7 @@
 #include "Engine/Scripting/ScriptEngine.h"
 #include "Support/AutomationTestClient.h"
 #include "Support/ExpectLog.h"
+#include "Support/Fuzz.h"
 #include "Support/PhysicsTestScene.h"
 
 #include <doctest/doctest.h>
@@ -285,7 +286,10 @@ return true
 
 	TEST_SUITE("Session")
 	{
-		TEST_CASE("Bindings: 10,000 seeded play-session calls reject invalid inputs before physics" * doctest::timeout(600))
+		// The watchdog's default limit applies, scaled by --test-timeout-scale, which the sanitized unit run and the hardening
+		// stage's 1,000,000-iteration shards rely on: the Debug unit run executes the first tenth of the count (Test.py's
+		// --fuzz-scale=0.1, ADR 0024 decision 14), and a manual Debug run of the whole count passes --test-timeout-scale=2.
+		TEST_CASE("Bindings: 10,000 seeded play-session calls reject invalid inputs before physics" * doctest::test_suite(Test::FuzzSuite))
 		{
 			Test::AutomationFixture fixture("ScriptBindingFuzz");
 			Scene& edit = fixture.GetEditor().GetScene();
@@ -350,33 +354,47 @@ return Script.Define("FuzzKeeper", T)
 			auto corpus = Test::BindingFuzzCorpus();
 			for (const std::string_view method : { "AddForce", "AddImpulse", "AddTorque", "AddAngularImpulse", "SetLinearVelocity", "SetAngularVelocity" })
 				corpus.push_back({ std::format("seeded finite {}", method), std::format("dynamic:{}(vector.create(k,-k,k/2))", method), {}, true });
-			// Visit every case over both transports, then shuffle seeded rounds. This prevents random luck from omitting a boundary.
-			std::vector<size_t> order(corpus.size() * 2);
-			for (size_t index = 0; index < order.size(); ++index)
-				order[index] = index;
-			Random random(0x139af022);
-			std::vector<uint32_t> visits(order.size());
-			uint32_t accepted = 0;
-			uint32_t rejected = 0;
-			// 7,000 corpus calls with exact expectations, then 3,000 calls with seeded generated arguments.
-			constexpr uint32_t CorpusCalls = 7000;
-			constexpr uint32_t GeneratedCalls = 3000;
-			for (uint32_t iteration = 0; iteration < CorpusCalls; ++iteration)
+			// The index mapping of decision 13 (Support/Fuzz.h): iteration i is a corpus call when i % 10 < 7 and a generated
+			// call otherwise. The corpus calls, numbered in index order, form rounds of 2 x the corpus size, each a seeded
+			// permutation of every case over both transports, so every boundary is visited in each complete round.
+			constexpr uint64_t CaseSeed = 0x139af022;
+			constexpr uint64_t RoundSeed = CaseSeed ^ 0x526F756E64ull; // the permutation of corpus round r: Random(GetFuzzIterationSeed(RoundSeed, r))
+			const uint64_t roundSize = corpus.size() * 2;
+			const auto corpusCallsBelow = [](uint64_t index)
 			{
-				if (iteration % order.size() == 0)
+				return index / 10 * 7 + std::min<uint64_t>(index % 10, 7);
+			};
+			const auto generatedCallsBelow = [](uint64_t index)
+			{
+				return index / 10 * 3 + (index % 10 > 7 ? index % 10 - 7 : 0);
+			};
+			// The smallest count whose corpus calls complete the first round.
+			const uint64_t minimum = (roundSize - 1) / 7 * 10 + (roundSize - 1) % 7 + 1;
+			std::vector<size_t> order(roundSize);
+			uint64_t orderRound = UINT64_MAX;
+			const auto permutationOf = [&order, &orderRound](uint64_t round) -> const std::vector<size_t>&
+			{
+				if (round != orderRound)
+				{
+					for (size_t slot = 0; slot < order.size(); ++slot)
+						order[slot] = slot;
+					Random shuffle(Test::GetFuzzIterationSeed(RoundSeed, round));
 					for (size_t remaining = order.size(); remaining > 1; --remaining)
-						std::swap(order[remaining - 1], order[static_cast<size_t>(random.RangeInt(0, static_cast<int64_t>(remaining - 1)))]);
-				const size_t selected = order[iteration % order.size()];
-				++visits[selected];
-				const auto& item = corpus[selected / 2];
-				const bool automation = selected % 2 != 0;
-				const std::string source = Test::BindingFuzzSource(item, random.RangeInt(1, 28));
-				CAPTURE(iteration);
-				CAPTURE(item.Name);
-				CAPTURE(automation);
-				CAPTURE(source);
+						std::swap(order[remaining - 1], order[static_cast<size_t>(shuffle.RangeInt(0, static_cast<int64_t>(remaining - 1)))]);
+					orderRound = round;
+				}
+				return order;
+			};
+
+			// Every call starts from the same physics state: the corpus's bodies at rest where they began, no gravity and the
+			// normal time scale. The scene's structure is restored after every generated call (reset below), and corpus calls
+			// change none of it, so an iteration's outcome depends on its index alone. The mass a valid "Mass" case sets is
+			// observed by no check.
+			const auto resetPhysics = [session, dynamicId, kinematicId, characterId]()
+			{
 				auto& physics = session->GetPhysics();
 				const glm::quat identity(1, 0, 0, 0);
+				REQUIRE(session->SetTimeScale(1.0));
 				REQUIRE(physics.SetGravity(glm::vec3(0)));
 				REQUIRE(physics.Teleport(dynamicId, glm::vec3(10, 0, 0), identity));
 				REQUIRE(physics.SetLinearVelocity(dynamicId, glm::vec3(0)));
@@ -384,6 +402,83 @@ return Script.Define("FuzzKeeper", T)
 				REQUIRE(physics.Teleport(kinematicId, glm::vec3(20, 0, 0), identity));
 				REQUIRE(physics.Teleport(characterId, glm::vec3(30, 0, 0), identity));
 				REQUIRE(physics.MoveCharacter(characterId, glm::vec3(0)));
+			};
+			const auto reset = [session, &path]()
+			{
+				const auto restored = session->GetScripts()->Evaluate(Test::GeneratedFuzzReset, *path);
+				REQUIRE_MESSAGE(restored, (restored ? "" : restored.error().ToString()));
+				session->Tick();
+				auto& physics = session->GetPhysics();
+				for (const std::string_view name : { "/Dynamic", "/Holder/Child", "/Ball" })
+				{
+					const UUID id = Test::GetEntityId(session->GetScene(), name);
+					REQUIRE(id.IsValid());
+					if (physics.GetBodyInfo(id))
+					{
+						REQUIRE(physics.SetLinearVelocity(id, glm::vec3(0)));
+						REQUIRE(physics.SetAngularVelocity(id, glm::vec3(0)));
+					}
+				}
+			};
+			// A generated call either fails at line 6 (the bindings rejected it) or reaches line 7, which always raises. The
+			// guard in Scene.Instantiate's host path rejects an unrepresentable position before anything is created. Callers
+			// declare the published error (and any physics diagnostic an accepted extreme value causes) with ExpectLog.
+			const auto runGenerated = [&fixture, session, &path](const std::string& source, bool automation) -> uint32_t
+			{
+				const uint64_t cursor = session->GetScriptErrors().GetCursor();
+				if (automation)
+				{
+					const Json response = fixture.Request("script.eval", Json{ { "context", "play" }, { "code", source } });
+					REQUIRE_MESSAGE(response.contains("error"), response.dump());
+				}
+				else
+					CHECK_FALSE(session->GetScripts()->Evaluate(source, *path));
+				const auto errors = session->GetScriptErrors().Read(cursor);
+				REQUIRE(errors.size() == 1);
+				CHECK(errors[0].Kind == ScriptErrorKind::Runtime);
+				CHECK((errors[0].Line == 6 || errors[0].Line == 7));
+				CHECK((errors[0].Line == 7) == (errors[0].Message.find("fuzz-accepted") != std::string::npos));
+				return errors[0].Line;
+			};
+
+			// Once per process, before any call: the scene's canonical state and the three fixed generated statements.
+			reset();
+			for (const auto& [statement, expected] : { std::pair<std::string_view, std::string_view>{ "Scene.Instantiate(prefab, vector.create(1e36, 0, 0), nil, tiny)", "cannot be represented relative to parent" },
+					 std::pair<std::string_view, std::string_view>{ "Scene.Instantiate(prefab, vector.create(-3e38, 0, 0), Quat.Identity(), far)", "cannot be represented relative to parent" },
+					 std::pair<std::string_view, std::string_view>{ "child.Transform.WorldPosition = vector.create(1e36, 0, 0); tiny.Transform.Scale = vector.one", "" } })
+			{
+				CAPTURE(statement);
+				Test::ExpectLog published(LogLevel::Error, "");
+				const size_t before = session->GetScene().GetEntityCount();
+				const uint64_t cursor = session->GetScriptErrors().GetCursor();
+				CHECK(runGenerated(Test::GeneratedFuzzSource(statement), false) == (expected.empty() ? 7u : 6u));
+				const auto errors = session->GetScriptErrors().Read(cursor);
+				REQUIRE(errors.size() == 1);
+				CHECK(errors[0].Message.find(expected) != std::string::npos);
+				CHECK(session->GetScene().GetEntityCount() == before);
+				reset();
+			}
+
+			std::vector<uint32_t> visits(roundSize);
+			uint64_t accepted = 0;
+			uint64_t rejected = 0;
+			uint64_t generatedAccepted = 0;
+			uint64_t generatedRejected = 0;
+			const auto corpusCall = [&](Random& random, uint64_t index) -> bool
+			{
+				const uint64_t number = corpusCallsBelow(index);
+				const size_t selected = permutationOf(number / roundSize)[static_cast<size_t>(number % roundSize)];
+				++visits[selected];
+				const auto& item = corpus[selected / 2];
+				const bool automation = selected % 2 != 0;
+				const std::string source = Test::BindingFuzzSource(item, random.RangeInt(1, 28));
+				CAPTURE(item.Name);
+				CAPTURE(automation);
+				CAPTURE(source);
+				auto& physics = session->GetPhysics();
+				// The session keeps every physics diagnostic it raised (a generated call's extreme values may raise some): a
+				// corpus call raises none of its own.
+				const size_t diagnostics = physics.GetDiagnostics().size();
 				const uint64_t before = session->ComputeStateHash();
 				const double timeScale = session->GetTimeScale();
 				const uint64_t errorCursor = session->GetScriptErrors().GetCursor();
@@ -452,7 +547,7 @@ return Script.Define("FuzzKeeper", T)
 				CHECK_FALSE(session->GetScripts()->IsStopped());
 				CHECK_FALSE(session->GetQuitRequest());
 				CHECK(session->GetTick() == tick + 1);
-				CHECK(physics.GetDiagnostics().empty());
+				CHECK(physics.GetDiagnostics().size() == diagnostics);
 				CHECK(physics.GetStats().BodyCount == ExpectedBodies);
 				Test::CheckFuzzBody(physics, dynamicId);
 				Test::CheckFuzzBody(physics, kinematicId);
@@ -475,73 +570,12 @@ return Script.Define("FuzzKeeper", T)
 					CHECK(body->AngularVelocity == glm::vec3(0));
 					CHECK(physics.GetGravity() == glm::vec3(0));
 				}
-			}
-			CHECK(accepted + rejected == CorpusCalls);
-			CHECK(accepted > 700);
-			CHECK(rejected > 3500);
-			for (const uint32_t count : visits)
-				CHECK(count > 0);
-
-			const auto reset = [session, &path]()
-			{
-				const auto restored = session->GetScripts()->Evaluate(Test::GeneratedFuzzReset, *path);
-				REQUIRE_MESSAGE(restored, (restored ? "" : restored.error().ToString()));
-				session->Tick();
-				auto& physics = session->GetPhysics();
-				for (const std::string_view name : { "/Dynamic", "/Holder/Child", "/Ball" })
-				{
-					const UUID id = Test::GetEntityId(session->GetScene(), name);
-					REQUIRE(id.IsValid());
-					if (physics.GetBodyInfo(id))
-					{
-						REQUIRE(physics.SetLinearVelocity(id, glm::vec3(0)));
-						REQUIRE(physics.SetAngularVelocity(id, glm::vec3(0)));
-					}
-				}
+				return item.Valid;
 			};
-			// A generated call either fails at line 6 (the bindings rejected it) or reaches line 7, which always raises. The
-			// guard in Scene.Instantiate's host path rejects an unrepresentable position before anything is created. Callers
-			// declare the published error (and any physics diagnostic an accepted extreme value causes) with ExpectLog.
-			const auto runGenerated = [&fixture, session, &path](const std::string& source, bool automation) -> uint32_t
-			{
-				const uint64_t cursor = session->GetScriptErrors().GetCursor();
-				if (automation)
-				{
-					const Json response = fixture.Request("script.eval", Json{ { "context", "play" }, { "code", source } });
-					REQUIRE_MESSAGE(response.contains("error"), response.dump());
-				}
-				else
-					CHECK_FALSE(session->GetScripts()->Evaluate(source, *path));
-				const auto errors = session->GetScriptErrors().Read(cursor);
-				REQUIRE(errors.size() == 1);
-				CHECK(errors[0].Kind == ScriptErrorKind::Runtime);
-				CHECK((errors[0].Line == 6 || errors[0].Line == 7));
-				CHECK((errors[0].Line == 7) == (errors[0].Message.find("fuzz-accepted") != std::string::npos));
-				return errors[0].Line;
-			};
-			reset();
-			for (const auto& [statement, expected] : { std::pair<std::string_view, std::string_view>{ "Scene.Instantiate(prefab, vector.create(1e36, 0, 0), nil, tiny)", "cannot be represented relative to parent" },
-					 std::pair<std::string_view, std::string_view>{ "Scene.Instantiate(prefab, vector.create(-3e38, 0, 0), Quat.Identity(), far)", "cannot be represented relative to parent" },
-					 std::pair<std::string_view, std::string_view>{ "child.Transform.WorldPosition = vector.create(1e36, 0, 0); tiny.Transform.Scale = vector.one", "" } })
-			{
-				CAPTURE(statement);
-				Test::ExpectLog published(LogLevel::Error, "");
-				const size_t before = session->GetScene().GetEntityCount();
-				const uint64_t cursor = session->GetScriptErrors().GetCursor();
-				CHECK(runGenerated(Test::GeneratedFuzzSource(statement), false) == (expected.empty() ? 7u : 6u));
-				const auto errors = session->GetScriptErrors().Read(cursor);
-				REQUIRE(errors.size() == 1);
-				CHECK(errors[0].Message.find(expected) != std::string::npos);
-				CHECK(session->GetScene().GetEntityCount() == before);
-				reset();
-			}
-			uint32_t generatedAccepted = 0;
-			uint32_t generatedRejected = 0;
-			for (uint32_t iteration = 0; iteration < GeneratedCalls; ++iteration)
+			const auto generatedCall = [&](Random& random, uint64_t index) -> bool
 			{
 				const std::string statement = Test::GeneratedFuzzStatement(random);
-				const bool automation = iteration % 2 != 0;
-				CAPTURE(iteration);
+				const bool automation = generatedCallsBelow(index) % 2 != 0;
 				CAPTURE(statement);
 				CAPTURE(automation);
 				Test::ExpectLog published(LogLevel::Error, "");
@@ -556,10 +590,30 @@ return Script.Define("FuzzKeeper", T)
 				Test::CheckGeneratedFuzzScene(*session);
 				reset();
 				Test::CheckGeneratedFuzzScene(*session);
+				return line == 7;
+			};
+			const Test::FuzzRun run = Test::RunFuzzCase(CaseSeed, 10000, [&](Random& random, uint64_t index)
+			{
+				resetPhysics();
+				return index % 10 < 7 ? corpusCall(random, index) : generatedCall(random, index);
+			}, minimum);
+
+			// The thresholds are ratios of the calls this process ran, checked when they hold a complete corpus round.
+			const uint64_t firstCorpus = corpusCallsBelow(run.Range.Begin);
+			const uint64_t corpusCalls = corpusCallsBelow(run.Range.End) - firstCorpus;
+			const uint64_t generatedCalls = generatedCallsBelow(run.Range.End) - generatedCallsBelow(run.Range.Begin);
+			CHECK(accepted + rejected == corpusCalls);
+			CHECK(generatedAccepted + generatedRejected == generatedCalls);
+			const uint64_t firstCompleteRound = (firstCorpus + roundSize - 1) / roundSize * roundSize;
+			if (Test::IsFuzzSample(run.Range) && firstCompleteRound + roundSize <= firstCorpus + corpusCalls)
+			{
+				CHECK(accepted * 10 > corpusCalls);
+				CHECK(rejected * 2 > corpusCalls);
+				for (const uint32_t count : visits)
+					CHECK(count > 0);
+				CHECK(generatedAccepted * 10 > generatedCalls);
+				CHECK(generatedRejected * 2 > generatedCalls);
 			}
-			CHECK(generatedAccepted + generatedRejected == GeneratedCalls);
-			CHECK(generatedAccepted > GeneratedCalls / 10);
-			CHECK(generatedRejected > GeneratedCalls / 2);
 			const auto healthy = fixture.Call("script.eval", Json{ { "context", "play" }, { "code", "local e = Scene.CreateEntity('StillUsable'); return e:IsValid()" } });
 			REQUIRE_MESSAGE(healthy, (healthy ? "" : healthy.error().ToString()));
 			CHECK((*healthy)["value"] == Json(true));

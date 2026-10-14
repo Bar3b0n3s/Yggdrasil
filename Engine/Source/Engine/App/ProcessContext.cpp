@@ -2,6 +2,7 @@
 #include "Engine/App/ProcessContext.h"
 
 #include "Engine/Core/Assert.h"
+#include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Log.h"
 #include "Engine/Core/Profiler.h"
 #include "Engine/Graphics/VulkanDispatch.h"
@@ -48,13 +49,6 @@ namespace Engine {
 #elif defined(ENGINE_PLATFORM_MACOS)
 			" macos-arm64";
 #endif
-
-		// `path` in its native format as UTF-8, for log lines and the log file's name.
-		static std::string PathToUtf8(const std::filesystem::path& path)
-		{
-			const std::u8string text = path.u8string();
-			return std::string(reinterpret_cast<const char*>(text.data()), text.size());
-		}
 
 	}
 
@@ -123,16 +117,17 @@ namespace Engine {
 				if (m_Specification.LogToFile)
 				{
 					ENGINE_TRY_ASSIGN(const std::filesystem::path executable, Process::GetCurrentExecutablePath());
-					logFile = m_UserDataPaths.GetLogFile(Utils::PathToUtf8(executable.stem()));
+					logFile = m_UserDataPaths.GetLogFile(FileSystem::PathToUtf8(executable.stem()));
 				}
 				ENGINE_TRY(Log::Initialize({
 					.FilePath = logFile,
 					.Console = m_Specification.LogToConsole,
 					.ConsoleLevel = m_Specification.ConsoleLevel,
+					.OutputLevel = m_Specification.LogOutputLevel,
 				}));
 				m_LogFilePath = std::move(logFile);
 				ENGINE_CORE_INFO("Starting {} ({}): user data in '{}', log file '{}'", m_Specification.AppName, GetBuildDescription(),
-					Utils::PathToUtf8(m_UserDataPaths.Root), m_LogFilePath.empty() ? "none" : Utils::PathToUtf8(m_LogFilePath));
+					FileSystem::PathToUtf8(m_UserDataPaths.Root), m_LogFilePath.empty() ? "none" : FileSystem::PathToUtf8(m_LogFilePath));
 				break;
 			}
 			case ProcessContextStep::Profiler:
@@ -246,7 +241,7 @@ namespace Engine {
 		{
 			const Result<std::filesystem::path> report = CrashHandler::WriteFatalErrorReport(kind, message);
 			if (report.has_value())
-				ENGINE_CORE_WARN("Crash report written to '{}'", Utils::PathToUtf8(*report));
+				ENGINE_CORE_WARN("Crash report written to '{}'", FileSystem::PathToUtf8(*report));
 			else
 				ENGINE_CORE_ERROR("Cannot write the crash report: {}", report.error());
 		}

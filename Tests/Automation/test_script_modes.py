@@ -7,7 +7,7 @@ import subprocess
 import unittest
 
 from harness import EXIT_FAILED, EXIT_SUCCESS, AutomationTestCase, automation_config, engine_client
-from tiny_game import TINY_GAME_NAME, TINY_SCENE, build_tiny_game, export_tiny_game, exported_executable
+from tiny_game import TINY_GAME_NAME, TINY_SCENE, build_tiny_game, exported_executable
 
 
 POWER_BEHAVIOUR = '''--!strict
@@ -46,6 +46,12 @@ end)
 '''
 
 
+def export_for_testing(client: engine_client.EngineClient, config: str) -> dict:
+    """project.export {config, testing: true} of the open tiny game (Docs/Decisions/0024-m15-contract.md decision 6):
+    its Game.json admits --feature-test, and Assets/Tests/** is packaged whatever Export.Exclude says."""
+    return client.call("project.export", {"config": config, "testing": True})
+
+
 class ScriptModeTests(AutomationTestCase):
     def check_modes(self, configurations: tuple[str, ...]) -> dict[str, str]:
         """Compare one authored project in the editor and each requested, already-built runtime configuration."""
@@ -58,7 +64,7 @@ class ScriptModeTests(AutomationTestCase):
         client.call("entity.update", {"entity": "/Cube", "components": {
             "Script": {"Script": "Assets/Scripts/Powers.luau"}}})
         client.call("script.write", {"path": "Assets/Tests/Cooked.test.luau", "source": POWER_SUITE})
-        client.call("project.setSettings", {"patch": {"Export": {"Exclude": []}, "Testing": {"Suites": [{
+        client.call("project.setSettings", {"patch": {"Testing": {"Suites": [{
             "Script": "Assets/Tests/Cooked.test.luau", "Scene": TINY_SCENE,
             "Modes": ["Editor", "Release", "Dist"]}]}}})
         client.call("scene.save")
@@ -70,13 +76,9 @@ class ScriptModeTests(AutomationTestCase):
         hashes = {"Editor": expected}
         for config in configurations:
             with self.subTest(config=config):
-                executable = exported_executable(export_tiny_game(client, config))
-                # M15 adds the testing-export switch. This fixture enables the manifest admission flag
-                # without altering either pak, so the runner must load the ordinary cooked script artifacts.
-                manifest_path = executable.parent / "Game.json"
-                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-                manifest["Testing"] = True
-                manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+                # A testing export packages the suite below Assets/Tests/ although Export.Exclude leaves it out of a
+                # plain export, and the runner loads the ordinary cooked script artifacts.
+                executable = exported_executable(export_for_testing(client, config))
                 working = self.directory / f"Cooked-{config}"
                 working.mkdir()
                 arguments = [str(executable), "--headless", "--feature-test", "--filter", "Cooked/power"]
@@ -110,14 +112,10 @@ class ScriptModeTests(AutomationTestCase):
         self.create_project(client, TINY_GAME_NAME)
         build_tiny_game(client)
         client.call("script.write", {"path": "Assets/Tests/Cooked.test.luau", "source": POWER_SUITE})
-        client.call("project.setSettings", {"patch": {"Export": {"Exclude": []}, "Testing": {
+        client.call("project.setSettings", {"patch": {"Testing": {
             "CoverageGates": True, "Suites": [{"Script": "Assets/Tests/Cooked.test.luau", "Scene": TINY_SCENE}]}}})
         client.call("scene.save")
-        executable = exported_executable(export_tiny_game(client, automation_config()))
-        manifest_path = executable.parent / "Game.json"
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        manifest["Testing"] = True
-        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+        executable = exported_executable(export_for_testing(client, automation_config()))
         working = self.directory / "Coverage"
         working.mkdir()
         arguments = [str(executable), "--headless", "--feature-test", "--renderer", "none", "--user-data-dir",

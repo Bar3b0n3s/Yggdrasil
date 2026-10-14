@@ -126,3 +126,17 @@ in the draw data, 100 of them from the gizmo) and destroyed the contexts cleanly
 5. Re-verify ImGuizmo against the new version (see `Vendor/ImGuizmo/VENDOR.md`); bump it if needed.
 6. Update the version, commit SHA and date in this file, rebuild all configurations and run the editor and
    unit tests.
+
+## Notices
+
+The row `Scripts/Lib/notices.py` reads for `THIRD_PARTY_NOTICES.txt` (Docs/Decisions/0024-m15-contract.md decision 8).
+
+| Field | Value |
+|---|---|
+| Name | Dear ImGui |
+| Upstream | https://github.com/ocornut/imgui |
+| Version | 1.92.9b (docking) |
+| License | MIT |
+| Shipped | yes |
+| Projects | ImGui |
+| License files | LICENSE.txt |

@@ -1,0 +1,26 @@
+{
+  "Clean": [],
+  "automation": [
+    "forbidden automation: _ZN6Engine15ParseRpcRequestESt17basic_string_viewIcSt11char_traitsIcEE (/build/bin/Dist-linux-x86_64/Engine/libEngine.a(JsonRpc.o))",
+    "forbidden automation: _ZN6Engine8Watchdog4BeatEv (/build/bin/Dist-linux-x86_64/Engine/libEngine.a(Watchdog.o))",
+    "forbidden automation: _ZTVN6Engine23RuntimeAutomationServerE (/build/bin/Dist-linux-x86_64/Engine/libEngine.a(RuntimeAutomationServer.o))"
+  ],
+  "Analysis": [
+    "forbidden Analysis: _ZN4Luau12TypeChecker25visitEPNS_12AstStatBlockE (/build/bin/Dist-linux-x86_64/LuauAnalysis/libLuauAnalysis.a(TypeChecker2.o))",
+    "forbidden Analysis: _ZN4Luau8Frontend5checkERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEESt8optionalINS_15FrontendOptionsEE (/build/bin/Dist-linux-x86_64/LuauAnalysis/libLuauAnalysis.a(Frontend.o))"
+  ],
+  "ImGui": [
+    "forbidden ImGui: _ZN12ImGuiContextC2EP11ImFontAtlas (/build/bin/Dist-linux-x86_64/ImGui/libImGui.a(imgui.o))",
+    "forbidden ImGui: _ZN5ImGui5BeginEPKcPbi (/build/bin/Dist-linux-x86_64/ImGui/libImGui.a(imgui.o))",
+    "forbidden ImGui: _ZN6Engine10ImGuiLayer6RenderERN5nvrhi12ICommandListERNS1_12IFramebufferE (/build/bin/Dist-linux-x86_64/Engine/libEngine.a(ImGuiLayer.o))",
+    "forbidden ImGui: _ZN6Engine18StatsOverlayToggle12OnKeyPressedENS_3KeyEb (/build/bin/Dist-linux-x86_64/Engine/libEngine.a(StatsOverlay.o))"
+  ],
+  "AssetPipeline": [
+    "forbidden AssetPipeline: _ZN6Engine9PakWriter5WriteERKNSt10filesystem7__cxx114pathE (/build/bin/Dist-linux-x86_64/Engine/libEngine.a(PakWriter.o))",
+    "forbidden AssetPipeline: _ZNK6Engine15TextureImporter6ImportERNS_13ImportContextE (/build/bin/Dist-linux-x86_64/Engine/libEngine.a(TextureImporter.o))"
+  ],
+  "MissingRequired": [
+    "missing required symbol: FeatureTestRunner",
+    "missing required symbol: ReplayPlayer"
+  ]
+}

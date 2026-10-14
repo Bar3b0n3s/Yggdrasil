@@ -43,15 +43,7 @@ namespace Engine {
 			CHECK(running->Name == "TestCaseTracker: names the running test case");
 			CHECK(running->File.ends_with("TestCaseTrackerTests.cpp"));
 			CHECK(running->Line > 0);
-			CHECK(running->TimeoutSeconds == 0.0);
 			CHECK(running->Serial > 0);
-		}
-
-		TEST_CASE("TestCaseTracker: reports the timeout decorator of the running case" * doctest::timeout(90.0))
-		{
-			const std::optional<Test::RunningTestCase> running = Test::GetRunningTestCase();
-			REQUIRE(running.has_value());
-			CHECK(running->TimeoutSeconds == 90.0);
 		}
 
 		TEST_CASE("TestCaseTracker: other threads see the same running test case")

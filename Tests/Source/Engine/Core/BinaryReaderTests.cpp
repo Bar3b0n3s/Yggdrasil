@@ -4,6 +4,7 @@
 
 #include "Engine/Core/BinaryWriter.h"
 #include "Engine/Core/Random.h"
+#include "Support/Fuzz.h"
 
 #include <cmath>
 #include <limits>
@@ -101,62 +102,27 @@ namespace Engine {
 
 	TEST_SUITE("Core")
 	{
-		TEST_CASE("BinaryReader: 10,000 seeded mutations never crash and always return Result")
+		TEST_CASE("BinaryReader: 10,000 seeded mutations never crash and always return Result" * doctest::test_suite(Test::FuzzSuite))
 		{
 			const Buffer original = MakeCookedPayload();
 			REQUIRE(ParseCookedPayload(original).has_value());
 
-			Random random(0xb1a5);
-			int failures = 0;
-			for (int iteration = 0; iteration < 10000; ++iteration)
+			const Test::FuzzRun run = Test::RunFuzzCase(0xb1a5, 10000, [&original](Random& random, uint64_t /*index*/)
 			{
 				Buffer mutated = original;
-				switch (random.RangeInt(0, 3))
-				{
-					case 0: // flip random bits
-					{
-						const int64_t flips = random.RangeInt(1, 8);
-						for (int64_t flip = 0; flip < flips; ++flip)
-						{
-							const size_t offset = static_cast<size_t>(random.RangeInt(0, static_cast<int64_t>(mutated.size()) - 1));
-							mutated[offset] ^= static_cast<std::byte>(1u << random.RangeInt(0, 7));
-						}
-						break;
-					}
-					case 1: // truncate
-						mutated.resize(static_cast<size_t>(random.RangeInt(0, static_cast<int64_t>(mutated.size()) - 1)));
-						break;
-					case 2: // overwrite a 32-bit field with an extreme value
-					{
-						const size_t offset = static_cast<size_t>(random.RangeInt(0, static_cast<int64_t>(mutated.size()) - 4));
-						const uint32_t value = random.NextBool() ? 0xffffffffu : 0x80000000u;
-						std::memcpy(mutated.data() + offset, &value, sizeof(value));
-						break;
-					}
-					case 3: // insert random bytes
-					{
-						const size_t offset = static_cast<size_t>(random.RangeInt(0, static_cast<int64_t>(mutated.size())));
-						const int64_t count = random.RangeInt(1, 16);
-						for (int64_t index = 0; index < count; ++index)
-						{
-							const std::byte inserted = static_cast<std::byte>(random.NextU32() & 0xffu);
-							mutated.insert(mutated.begin() + static_cast<std::ptrdiff_t>(offset), inserted);
-						}
-						break;
-					}
-				}
+				Test::MutateBytes(mutated, random);
 
 				// The oracle: the parser returns (a crash or an assert would end the run) with a value or a Parse or
 				// Validation error.
 				const Status status = ParseCookedPayload(mutated);
-				if (!status.has_value())
-				{
-					++failures;
-					const ErrorCode code = status.error().GetCode();
-					REQUIRE((code == ErrorCode::Parse || code == ErrorCode::Validation));
-				}
-			}
-			CHECK(failures > 0);
+				if (status.has_value())
+					return true;
+				const ErrorCode code = status.error().GetCode();
+				REQUIRE((code == ErrorCode::Parse || code == ErrorCode::Validation));
+				return false;
+			});
+			if (Test::IsFuzzSample(run.Range))
+				CHECK(run.Counts.Rejected > 0);
 		}
 
 		TEST_CASE("BinaryReader: reads little-endian values written by BinaryWriter")

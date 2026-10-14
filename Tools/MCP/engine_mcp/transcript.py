@@ -16,10 +16,10 @@ exclusive OS lock on the file (the project lock's primitives: LockFileEx on one 
 counts the lines another writer added since, and only then writes.
 
 The transcript of a project that is being created or opened (editor_launch {create: true}, project.create,
-project.open) is pending until the editor confirms the project: its lines are kept in memory, numbered after the lines the
-project's transcript already holds, and written once the directory holds a project file (.eproj). The bridge creates
-nothing before that: project.create accepts only a new or empty directory, so an Automation/ folder written first would
-make it fail, and a refused call must leave nothing behind in a directory that is not a project.
+project.open) is pending until the editor confirms the project: its lines are kept in memory, numbered after the lines
+the project's transcript already holds, and written once the directory holds a project file (.eproj). The bridge
+creates nothing before that: project.create accepts only a new or empty directory, so an Automation/ folder written
+first would make it fail, and a refused call must leave nothing behind in a directory that is not a project.
 """
 
 from __future__ import annotations
@@ -124,10 +124,10 @@ class Transcript:
         return self.pending_root is not None
 
     def flush_pending(self) -> bool:
-        """Writes the kept lines once the pending project directory holds a project file, and from then on writes at once;
-        returns whether the transcript is written to its file now. The kept lines were numbered after the lines the file
-        held when the transcript was opened; a file that meanwhile got lines (the editor writes no transcript, so only
-        another bridge could) keeps them, and the kept lines follow."""
+        """Writes the kept lines once the pending project directory holds a project file, and from then on writes at
+        once; returns whether the transcript is written to its file now. The kept lines were numbered after the lines
+        the file held when the transcript was opened; a file that meanwhile got lines (the editor writes no transcript,
+        so only another bridge could) keeps them, and the kept lines follow."""
         if self.pending_root is None:
             return True
         if not _holds_project_file(self.pending_root):
@@ -149,8 +149,8 @@ class Transcript:
         return True
 
     def discard_pending(self) -> None:
-        """Drops the kept lines of a project that was never confirmed (a refused project.create or project.open): nothing
-        is written to a directory that is not a project."""
+        """Drops the kept lines of a project that was never confirmed (a refused project.create or project.open):
+        nothing is written to a directory that is not a project."""
         self.pending_lines = []
 
     def catch_up(self, file: BinaryIO) -> None:
@@ -185,8 +185,8 @@ class Transcript:
 
 
 def _count_lines(path: Path) -> int:
-    """The lines of an existing transcript as catch_up counts them (a torn last line counts as complete), without creating
-    or locking anything; 0 when there is no file."""
+    """The lines of an existing transcript as catch_up counts them (a torn last line counts as complete), without
+    creating or locking anything; 0 when there is no file."""
     try:
         data = path.read_bytes()
     except OSError:

@@ -115,6 +115,7 @@ Section references (§) point to `Docs/Architecture.md` unless marked CodeStyle 
 - [ ] Tests are deterministic: no sleeps or wall-clock time, fixed seeds, no network, temporary directories only, and no dependence on order. The wall-clock exceptions are the windowed child "FrameLoop: a minimized window uses little CPU time per second" (ADR 0005 decision 13) and the Python `test_busy_watchdog_reports_phase` (ADR 0008 decision 15), `test_headless_play_without_lockstep_is_throttled` (ADR 0012 decision 3) and `test_runaway_script_busy_watchdog` (`Docs/Decisions/0021-review-fixes.md`); another needs its own ADR entry. Bounded waits (ADR 0008 decision 15) are allowed: a generous deadline that only bounds the failure of a wait for another thread or process (`Test::WaitUntil`), or a timeout whose peer never answers, never asserted on and never deciding a passing outcome. A wait bounded by a spin count is a finding.
 - [ ] Expected error logs use `Test::ExpectLog`, and expected asserts are death tests. GPU tests skip with a reason unless `--require-gpu`.
 - [ ] Parity (Roadmap rule 5): every editor-visible capability has its automation method and a Python test. New registry entries have FeatureTest coverage once M14 has landed.
+- [ ] A scene script of FeatureTest or a demo that records something every tick or frame keeps a bounded history (a ring, as FeatureTest's `Journal` and `InputProbe` do), because the hardening soak plays every scene for 10,000 frames and fails a heap that grows (ADR 0024 "Integration"). A new reader of external input has its fuzz case and its `Tests/Data/Fuzz/Targets.json` entry (ADR 0024 decision 13).
 - [ ] Fixtures are small, committed, licensed (`Tests/Data/LICENSES.md`) and produced by a committed generator where possible.
 
 ## 9. Documentation and generated files
@@ -154,7 +155,7 @@ Section references (§) point to `Docs/Architecture.md` unless marked CodeStyle 
 
 - [ ] Automation stays loopback-only and token-authenticated, rejects HTTP probes and oversized frames, and is absent from Dist (§13.2, §14.4).
 - [ ] Every path from a request, script or asset is confined: `VfsPath` rejects `..`, absolute paths, NUL bytes and reserved names. Only `asset.import` reads an absolute source path, and only read-only.
-- [ ] No method or script API executes processes, shell commands or arbitrary files. Script sandbox escapes (§11.1) stay closed.
+- [ ] No method or script API executes request-supplied processes, shell commands or arbitrary files; the only processes a method starts are `project.export`'s smoke test and, on macOS, `codesign`, each by a fixed path with fixed arguments (§13.2). Script sandbox escapes (§11.1) stay closed.
 - [ ] Responses are size-bounded, and offloaded results stay inside the project's `Library/`.
 - [ ] Downloads (`Setup.py`, `FetchAssets.py`) use allowlisted official hosts over HTTPS, pinned versions and verified checksums.
 - [ ] CI workflows use least-privilege `permissions`, actions pinned to a commit SHA, `persist-credentials: false`, and no untrusted input interpolated into `run:` scripts.

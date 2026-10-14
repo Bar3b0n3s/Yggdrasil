@@ -1409,7 +1409,7 @@ Example: Create the Tetris project.
 
 ### project.export
 
-Exports the open project as a standalone game below Build/: the configuration's Runtime renamed after the project, the app-local CRT, Game.json, Data/Engine.pak and Data/Game.pak, optionally smoke-tested; resolves with the report.
+Exports the open project as a standalone game below Build/: the configuration's Runtime renamed after the project, the app-local CRT, Game.json, Data/Engine.pak and Data/Game.pak, optionally smoke-tested, or with testing a testing export whose game runs its suites and replays with --feature-test; resolves with the report.
 
 - Flags: tool `project_export`, mutates, pending
 - Timeout: 900 s
@@ -1420,7 +1420,7 @@ Exports the open project as a standalone game below Build/: the configuration's 
 | `config` | `ExportConfiguration` | yes | `"Release"` | The build configuration whose Runtime and shaders the export packages. |
 | `outDir` | `String` |  | `""` | The project-relative output directory below Build/; empty or absent: Build/\<Platform>-\<Config>/\<Name>. An earlier export there is replaced once the new one is complete. |
 | `smokeTest` | `Bool` |  | `false` | Run the exported game headless for 300 frames with --expect-no-errors before it replaces the output directory, and require exit code 0. |
-| `testing` | `Bool` |  | `false` | A testing export (M15): refused while present. |
+| `testing` | `Bool` |  | `false` | A testing export: Game.json says Testing true, so the exported game runs --feature-test; Assets/Tests/** and every Testing.Suites script and scene and Testing.Replays match are packaged whatever Export.Exclude says; invalid suites (TEST_SUITE_INVALID) and replays that do not import fail validation. Its default output directory is Build/\<Platform>-\<Config>-Testing/\<Name>. |
 
 | Result | Type | Description |
 |---|---|---|
@@ -1434,11 +1434,22 @@ Exports the open project as a standalone game below Build/: the configuration's 
 | `smokeTestRan` | `Bool` | Whether the smoke test ran: false without smokeTest, and for a Dist export from an editor without a graphics device. |
 | `smokeTestExitCode` | `Int32` | The smoke test's exit code; 0 when it did not run. |
 | `seconds` | `Float` | How long the export took (wall-clock time, for information). |
+| `testing` | `Bool` | Whether this was a testing export (Game.json Testing true). |
+| `testSuiteCount` | `UInt32` | A testing export's Testing.Suites entries, whatever their modes; 0 for a plain export. |
+| `replayCount` | `UInt32` | The replays a testing export packaged for Testing.Replays; 0 for a plain export. |
+| `resourcesPatched` | `Bool` | Whether the executable's resources were written: its icon and version on Windows, Info.plist on macOS. |
+| `phaseTimings` | `Array<ExportPhaseTimingSummary>` | The time of every phase the export entered, in phase order. |
 
 Example: Export a Release build and smoke-test it.
 
 ```json
 {"config":"Release","smokeTest":true}
+```
+
+Example: Export a Dist build that runs the project's test suites and replays.
+
+```json
+{"config":"Dist","testing":true}
 ```
 
 ### project.getSettings

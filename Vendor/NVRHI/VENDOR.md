@@ -165,3 +165,17 @@ premake `gmake` generation for `--os=linux` and `--os=macosx` also succeeded. Li
 4. If NVRHI's Vulkan-Headers tag changed, `git clone --depth 1 --branch <tag> https://github.com/KhronosGroup/Vulkan-Headers`. Replace `thirdparty/Vulkan-Headers/include/`, `LICENSE.md` and `LICENSES/`.
 5. Normalise line endings to LF. Update the `files` list and defines in `premake5.lua`, then update this file (SHAs, versions, date).
 6. Rebuild Debug, Release and Dist and run the GPU smoke test described above. Also rebuild the engine and run its tests.
+
+## Notices
+
+The row `Scripts/Lib/notices.py` reads for `THIRD_PARTY_NOTICES.txt` (Docs/Decisions/0024-m15-contract.md decision 8).
+
+| Field | Value |
+|---|---|
+| Name | NVRHI |
+| Upstream | https://github.com/NVIDIA-RTX/NVRHI |
+| Version | main 6b96fb03e07539f08327aea76c56d55f1de9d906 (with Vulkan-Headers 1.4.352) |
+| License | MIT AND Apache-2.0 |
+| Shipped | yes |
+| Projects | NVRHI |
+| License files | LICENSE.txt, ThirdPartyLicenses.txt, thirdparty/Vulkan-Headers/LICENSE.md, thirdparty/Vulkan-Headers/LICENSES/Apache-2.0.txt, thirdparty/Vulkan-Headers/LICENSES/MIT.txt |

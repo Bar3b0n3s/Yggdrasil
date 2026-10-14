@@ -2,10 +2,10 @@
 §13.5, §13.11 step 7; Docs/Decisions/0009-m5-decisions.md decision 33 deferred both views to M7; Roadmap M7 acceptance
 test_exported_screenshot_matches_editor).
 
-The views render the tiny game (tiny_game.py) through the scene renderer: in Edit mode the edit scene through its primary
-camera, while playing the play scene (Docs/Decisions/0012-m7-decisions.md decision 9). The PNG comparison is the C++ one
-(compare_png runs Testing/ImageCompare through the Tests executable's comparison entry point). Every test here renders, so
-each starts with require_gpu().
+The views render the tiny game (tiny_game.py) through the scene renderer: in Edit mode the edit scene through its
+primary camera, while playing the play scene (Docs/Decisions/0012-m7-decisions.md decision 9). The PNG comparison is
+the C++ one (compare_png runs Testing/ImageCompare through the Tests executable's comparison entry point). Every test
+here renders, so each starts with require_gpu().
 """
 
 from __future__ import annotations

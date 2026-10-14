@@ -12,10 +12,11 @@ Tools:
     component_schema).
 Results return as structuredContent plus a short text summary that always includes the _meta delta; text over 48 KB is
 truncated with a pointer to the offloaded file. Screenshots (viewport_screenshot, editor_screenshot: results with a
-"mimeType" of image/png and the "path" of the PNG the editor wrote, Docs/Decisions/0009-m5-decisions.md decision 33) also
-return the image as an image content block, read from that file (the bridge runs on the editor's machine) unless the
-result carries it inline ("data"); neither the text summary nor the structuredContent repeats the base64 data, and the
-summary names the file. A screenshot result is never offloaded: the editor leaves out inline data that would make it so.
+"mimeType" of image/png and the "path" of the PNG the editor wrote, Docs/Decisions/0009-m5-decisions.md decision 33)
+also return the image as an image content block, read from that file (the bridge runs on the editor's machine) unless
+the result carries it inline ("data"); neither the text summary nor the structuredContent repeats the base64 data, and
+the summary names the file. A screenshot result is never offloaded: the editor leaves out inline data that would make
+it so.
 
 Environment (all optional): ENGINE_MCP_TRANSCRIPT redirects the transcript (transcript.py); ENGINE_MCP_USER_DATA_DIR
 replaces the OS user-data root the bridge passes to the editors it launches and scans for session files (the bridge's
@@ -118,8 +119,8 @@ def _object_schema(properties: dict[str, Any], required: tuple[str, ...] = ()) -
 
 
 def project_templates(catalog: list[CatalogTool]) -> list[str]:
-    """The templates project.create accepts, read from the catalogue's project_create schema, so editor_launch's template
-    can never disagree with the editor's; ["Empty"] for a catalogue without that tool."""
+    """The templates project.create accepts, read from the catalogue's project_create schema, so editor_launch's
+    template can never disagree with the editor's; ["Empty"] for a catalogue without that tool."""
     tool = next((tool for tool in catalog if tool.method == "project.create"), None)
     template = tool.input_schema.get("properties", {}).get("template") if tool is not None else None
     values = template.get("enum") if isinstance(template, dict) else None

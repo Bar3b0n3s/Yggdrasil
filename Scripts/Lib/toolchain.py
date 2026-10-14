@@ -35,13 +35,20 @@ VC_TOOLS_COMPONENT = "Microsoft.VisualStudio.Component.VC.Tools.x86.x64"
 MINIMUM_VC_TOOLS = (14, 51)  # MSVC 14.51 (Architecture §16, CodeStyle §13)
 CRT_REDIST_FOLDER = "Microsoft.VC145.CRT"
 CRT_REDIST_FILES = ("vcruntime140.dll", "vcruntime140_1.dll", "msvcp140.dll")
+# MSVC's AddressSanitizer runtime, which the hardening stage's sanitized Release executables load (Docs/Decisions/
+# 0024-m15-contract.md decision 12). It ships with Visual Studio's "C++ AddressSanitizer" component; it is never
+# redistributed.
+ASAN_COMPONENT = "Microsoft.VisualStudio.Component.VC.ASAN"
+ASAN_COMPONENT_NAME = "C++ AddressSanitizer"
+ASAN_RUNTIME_FILES = ("clang_rt.asan_dynamic-x86_64.dll", "clang_rt.asan_dynamic-x86_64.pdb")
 
 MINIMUM_GCC = 14
 MINIMUM_CLANG = 19  # with libstdc++: Clang 18 reports __cpp_concepts 201907, so libstdc++ hides std::expected
 MINIMUM_APPLE_CLANG = 17  # Apple Clang 17 ships with Xcode 26, the minimum Xcode (Architecture §16)
 MINIMUM_XCODE = 26
 CLANG_FORMAT_MAJOR = 22  # Docs/CodeStyle.md §1
-MINIMUM_CLANG_TIDY = 19  # it parses the code with libstdc++, so it needs Clang 19 too (std::expected); Ubuntu 24.04 ships it
+# clang-tidy parses the code with libstdc++, so it needs Clang 19 too (std::expected); Ubuntu 24.04 ships it.
+MINIMUM_CLANG_TIDY = 19
 
 # Newest first: the highest installed version that meets the minimum is selected.
 _VERSIONED_CANDIDATES = range(30, 0, -1)
@@ -244,6 +251,21 @@ def find_crt_redist(visual_studio: VisualStudio) -> tuple[str, Path]:
         )
     _, name, crt = max(candidates)
     return name, crt
+
+
+def find_asan_runtime(visual_studio: VisualStudio) -> Path:
+    """The directory that holds ASAN_RUNTIME_FILES: the MSVC tools' bin/Hostx64/x64 of the selected toolset. Raises
+    ToolchainError naming Visual Studio's "C++ AddressSanitizer" component when a file is missing."""
+    directory = (visual_studio.installation_path / "VC" / "Tools" / "MSVC" / visual_studio.vc_tools_version / "bin" /
+                 "Hostx64" / "x64")
+    missing = [name for name in ASAN_RUNTIME_FILES if not (directory / name).is_file()]
+    if missing:
+        raise ToolchainError(
+            f"MSVC's AddressSanitizer runtime is missing ({', '.join(missing)} not in {directory}); install the "
+            f"\"{ASAN_COMPONENT_NAME}\" component ({ASAN_COMPONENT}) of {VISUAL_STUDIO_NAME} with the Visual Studio "
+            f"Installer (the hardening stage's sanitized build needs it)"
+        )
+    return directory
 
 
 def find_windows_sdk() -> tuple[str, Path]:

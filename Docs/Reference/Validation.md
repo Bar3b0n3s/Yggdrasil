@@ -52,4 +52,4 @@ The codes `project.validate` reports (Architecture §13.7), in report order, fro
 | `RENDER_SPOT_SHADOW_BUDGET` | Warning | no | A scene has more than 8 shadow-casting spot lights, more than one view shadows. | Turn off shadows on less important spot lights, or keep fewer of them in view at once. |
 | `BUILD_START_SCENE_MISSING` | Error | no | StartScene names no scene file. | Create the scene with scene.new, or set StartScene to an existing scene with project.setSettings. |
 | `BUILD_SCENE_MISSING` | Error | yes | An Export.BuildScenes entry names no scene file. | Create the scene with scene.new; the fix removes the entry. |
-| `TEST_SUITE_INVALID` | Error | no | A Testing.Suites entry names a script that is not a TestSuite, or a scene that does not exist. | Assign a script that returns Test.Suite, and create the scene or leave Scene empty for an empty test scene. |
+| `TEST_SUITE_INVALID` | Error | no | A Testing.Suites entry names a script that is not a TestSuite, or a scene that is not a registered Scene asset. | Assign a script that returns Test.Suite, and create the scene or leave Scene empty for an empty test scene. |

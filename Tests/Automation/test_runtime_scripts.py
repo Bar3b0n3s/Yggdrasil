@@ -12,7 +12,8 @@ from tiny_game import TINY_GAME_NAME, build_tiny_game, export_tiny_game, exporte
 
 
 class RuntimeScriptTests(AutomationTestCase):
-    def run_runtime(self, executable: Path, arguments: list[str], user_data: Path) -> subprocess.CompletedProcess[bytes]:
+    def run_runtime(self, executable: Path, arguments: list[str],
+                    user_data: Path) -> subprocess.CompletedProcess[bytes]:
         return subprocess.run(
             [str(executable), "--headless", "--renderer", "none", *arguments, f"--user-data-dir={user_data}"],
             cwd=self.directory, stdin=subprocess.DEVNULL, capture_output=True, timeout=120.0, check=False)
@@ -38,7 +39,8 @@ class RuntimeScriptTests(AutomationTestCase):
         executable = exported_executable(export_tiny_game(editor))
         editor.call("session.shutdown")
         self.editors[-1].wait()
-        process = engine_client.launch_editor(executable, ["--headless", "--renderer", "none", "--automation", "--paused"],
+        process = engine_client.launch_editor(executable,
+                                               ["--headless", "--renderer", "none", "--automation", "--paused"],
                                                self.directory / "RuntimeScripts", TINY_GAME_NAME)
         self.editors.append(process)
         runtime = self.connect(process)
@@ -131,7 +133,8 @@ class RuntimeScriptTests(AutomationTestCase):
         # The header names the run mode that recorded it, never the build configuration (Architecture §9.1, ADR 0022
         # "Integration"), so a Debug and a Release Runtime record the same bytes.
         self.assertEqual(document["Config"], "Release")
-        document["FinalStateHash"] = "ffffffffffffffff" if document["FinalStateHash"] != "ffffffffffffffff" else "0000000000000000"
+        document["FinalStateHash"] = ("ffffffffffffffff" if document["FinalStateHash"] != "ffffffffffffffff"
+                                      else "0000000000000000")
         recording.write_text(json.dumps(document), encoding="utf-8")
         mismatch = self.run_runtime(executable, ["--replay", recorded["path"], "--verify"], user_data)
         self.assertEqual(mismatch.returncode, EXIT_FAILED, mismatch.stderr.decode("utf-8", errors="replace"))

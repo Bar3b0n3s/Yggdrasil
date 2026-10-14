@@ -1,0 +1,36 @@
+{
+  "Clean": [],
+  "automation": [
+    "forbidden automation: FDE for: __ZN6Engine15ParseRpcRequestESt17basic_string_viewIcSt11char_traitsIcEE (/build/bin/Dist-macosx-AARCH64/Engine/libEngine.a[11](JsonRpc.o))",
+    "forbidden automation: FDE for: __ZN6Engine8Watchdog4BeatEv (/build/bin/Dist-macosx-AARCH64/Engine/libEngine.a[7](Watchdog.o))",
+    "forbidden automation: __ZN6Engine15ParseRpcRequestESt17basic_string_viewIcSt11char_traitsIcEE (/build/bin/Dist-macosx-AARCH64/Engine/libEngine.a[11](JsonRpc.o))",
+    "forbidden automation: __ZN6Engine8Watchdog4BeatEv (/build/bin/Dist-macosx-AARCH64/Engine/libEngine.a[7](Watchdog.o))",
+    "forbidden automation: __ZTVN6Engine23RuntimeAutomationServerE (/build/bin/Dist-macosx-AARCH64/Engine/libEngine.a[13](RuntimeAutomationServer.o))"
+  ],
+  "Analysis": [
+    "forbidden Analysis: FDE for: __ZN4Luau12TypeChecker25visitEPNS_12AstStatBlockE (/build/bin/Dist-macosx-AARCH64/LuauAnalysis/libLuauAnalysis.a[12](TypeChecker2.o))",
+    "forbidden Analysis: FDE for: __ZN4Luau8Frontend5checkERKNSt3__112basic_stringIcSt11char_traitsIcESaIcEEESt8optionalINS_15FrontendOptionsEE (/build/bin/Dist-macosx-AARCH64/LuauAnalysis/libLuauAnalysis.a[11](Frontend.o))",
+    "forbidden Analysis: __ZN4Luau12TypeChecker25visitEPNS_12AstStatBlockE (/build/bin/Dist-macosx-AARCH64/LuauAnalysis/libLuauAnalysis.a[12](TypeChecker2.o))",
+    "forbidden Analysis: __ZN4Luau8Frontend5checkERKNSt3__112basic_stringIcSt11char_traitsIcESaIcEEESt8optionalINS_15FrontendOptionsEE (/build/bin/Dist-macosx-AARCH64/LuauAnalysis/libLuauAnalysis.a[11](Frontend.o))"
+  ],
+  "ImGui": [
+    "forbidden ImGui: FDE for: __ZN12ImGuiContextC2EP11ImFontAtlas (/build/bin/Dist-macosx-AARCH64/ImGui/libImGui.a[11](imgui.o))",
+    "forbidden ImGui: FDE for: __ZN5ImGui5BeginEPKcPbi (/build/bin/Dist-macosx-AARCH64/ImGui/libImGui.a[11](imgui.o))",
+    "forbidden ImGui: FDE for: __ZN6Engine10ImGuiLayer6RenderERN5nvrhi12ICommandListERNS1_12IFramebufferE (/build/bin/Dist-macosx-AARCH64/Engine/libEngine.a[12](ImGuiLayer.o))",
+    "forbidden ImGui: FDE for: __ZN6Engine18StatsOverlayToggle12OnKeyPressedENS_3KeyEb (/build/bin/Dist-macosx-AARCH64/Engine/libEngine.a[13](StatsOverlay.o))",
+    "forbidden ImGui: __ZN12ImGuiContextC2EP11ImFontAtlas (/build/bin/Dist-macosx-AARCH64/ImGui/libImGui.a[11](imgui.o))",
+    "forbidden ImGui: __ZN5ImGui5BeginEPKcPbi (/build/bin/Dist-macosx-AARCH64/ImGui/libImGui.a[11](imgui.o))",
+    "forbidden ImGui: __ZN6Engine10ImGuiLayer6RenderERN5nvrhi12ICommandListERNS1_12IFramebufferE (/build/bin/Dist-macosx-AARCH64/Engine/libEngine.a[12](ImGuiLayer.o))",
+    "forbidden ImGui: __ZN6Engine18StatsOverlayToggle12OnKeyPressedENS_3KeyEb (/build/bin/Dist-macosx-AARCH64/Engine/libEngine.a[13](StatsOverlay.o))"
+  ],
+  "AssetPipeline": [
+    "forbidden AssetPipeline: FDE for: __ZN6Engine9PakWriter5WriteERKNSt3__14__fs10filesystem4pathE (/build/bin/Dist-macosx-AARCH64/Engine/libEngine.a[12](PakWriter.o))",
+    "forbidden AssetPipeline: FDE for: __ZNK6Engine15TextureImporter6ImportERNS_13ImportContextE (/build/bin/Dist-macosx-AARCH64/Engine/libEngine.a[11](TextureImporter.o))",
+    "forbidden AssetPipeline: __ZN6Engine9PakWriter5WriteERKNSt3__14__fs10filesystem4pathE (/build/bin/Dist-macosx-AARCH64/Engine/libEngine.a[12](PakWriter.o))",
+    "forbidden AssetPipeline: __ZNK6Engine15TextureImporter6ImportERNS_13ImportContextE (/build/bin/Dist-macosx-AARCH64/Engine/libEngine.a[11](TextureImporter.o))"
+  ],
+  "MissingRequired": [
+    "missing required symbol: FeatureTestRunner",
+    "missing required symbol: ReplayPlayer"
+  ]
+}

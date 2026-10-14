@@ -46,13 +46,15 @@ namespace Engine {
 			application = std::move(*created);
 
 			// 3. The process level (§4.1), set up as the application's specification asks: the Vulkan loader when it renders
-			//    (a missing loader is exit code 3 with NoVulkanLoaderMessage, §8.1), error dialogs when it is windowed.
+			//    (a missing loader is exit code 3 with NoVulkanLoaderMessage, §8.1), error dialogs when it is windowed, and the
+			//    output sinks' minimum level of --log-level (M15, §13.9) from the first line the process logs.
 			const ApplicationSpecification& specification = application->GetSpecification();
 			const bool windowed = specification.Window == WindowMode::Windowed;
 			Result<Scope<ProcessContext>> context = ProcessContext::Create({
 				.AppName = specification.Name,
 				.Window = specification.Window,
 				.UserDataRoot = specification.UserDataRoot,
+				.LogOutputLevel = specification.MinimumLogLevel.value_or(LogLevel::Trace),
 				.VulkanLoader = specification.Renderer == RendererMode::Vulkan ? VulkanLoaderPolicy::Required : VulkanLoaderPolicy::None,
 				.ShowErrorDialogs = windowed,
 			});

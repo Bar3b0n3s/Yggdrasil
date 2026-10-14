@@ -4,6 +4,8 @@
 
 #include "Engine/Core/Hash.h"
 #include "Support/AssetTestFixture.h"
+#include "Support/Fuzz.h"
+#include "Support/TestData.h"
 
 namespace Engine {
 
@@ -96,6 +98,39 @@ namespace Engine {
 			CHECK(SerializeAssetMetadata(*dependency) == DependencyMetaText);
 		}
 
+		TEST_CASE("AssetMetadata: 1,000 seeded mutations of a meta file never crash" * doctest::test_suite(Test::FuzzSuite))
+		{
+			// The seed corpus: every .meta of Projects/FeatureTest (every importer's settings, sub-assets and dependencies)
+			// and this file's own two. A meta the parser accepts serializes and parses again to the same value.
+			std::vector<std::string> seeds = Test::ReadFuzzSeedTexts(Test::GetRepositoryRoot() / "Projects" / "FeatureTest" / "Assets", ".meta");
+			seeds.push_back(MakeGltfMetaText());
+			seeds.emplace_back(DependencyMetaText);
+			// About one mutation in a hundred is a meta the reader accepts, so a tenth of the sequence (the Debug unit run's
+			// --fuzz-scale=0.1, ADR 0024 decision 14) holds too few to check both outcomes: the minimum is the whole count.
+			constexpr uint64_t Iterations = 1000;
+			const Test::FuzzRun run = Test::RunFuzzCase(0x3E7A, Iterations, [&seeds](Random& random, uint64_t /*index*/)
+			{
+				std::string mutated = seeds[static_cast<size_t>(random.RangeInt(0, static_cast<int64_t>(seeds.size()) - 1))];
+				Test::MutateText(mutated, random);
+				const Result<AssetMetadata> parsed = ParseAssetMetadata(mutated, "Assets/Fuzz.meta");
+				if (!parsed.has_value())
+				{
+					const ErrorCode code = parsed.error().GetCode();
+					CHECK((code == ErrorCode::Parse || code == ErrorCode::Validation || code == ErrorCode::UnsupportedVersion));
+					return false;
+				}
+				const Result<AssetMetadata> reparsed = ParseAssetMetadata(SerializeAssetMetadata(*parsed));
+				REQUIRE_MESSAGE(reparsed.has_value(), reparsed.error().ToString());
+				CHECK(SerializeAssetMetadata(*reparsed) == SerializeAssetMetadata(*parsed));
+				return true;
+			}, Iterations);
+			if (Test::IsFuzzSample(run.Range))
+			{
+				CHECK(run.Counts.Rejected > 0);
+				CHECK(run.Counts.Accepted > 0);
+			}
+		}
+
 		TEST_CASE("AssetMetadata: malformed metas are located Validation errors")
 		{
 			struct Case
@@ -118,6 +153,27 @@ namespace Engine {
 				REQUIRE(parsed.error().GetLocation().JsonPointer.has_value());
 				CHECK(*parsed.error().GetLocation().JsonPointer == testCase.Pointer);
 			}
+		}
+
+		TEST_CASE("AssetMetadata: Settings holding a number beyond float's range is a located Validation error")
+		{
+			// Found by the AssetMetadata fuzz case (Docs/Decisions/0024-m15-contract.md decision 13): Settings are kept as read
+			// and written back by SerializeAssetMetadata, whose JsonWriter writes every fractional number as a float, so a meta
+			// holding -1e308 parsed and then failed the serializer's assertion.
+			Result<AssetMetadata> parsed = ParseAssetMetadata(
+				R"({"Format": "AssetMeta", "Version": 1, "Handle": "0000000000000001", "Type": "Prefab", "Importer": "Gltf", "ImporterVersion": 1, "Settings": {"Scale": -1e308}, "SubAssets": []})",
+				"Assets/Bad.gltf.meta");
+			REQUIRE_FALSE(parsed.has_value());
+			CHECK(parsed.error().GetCode() == ErrorCode::Validation);
+			CHECK(parsed.error().GetMessageText().contains("out of range for float"));
+			REQUIRE(parsed.error().GetLocation().JsonPointer.has_value());
+			CHECK(*parsed.error().GetLocation().JsonPointer == "/Settings/Scale");
+
+			// A number within float's range parses and serializes.
+			Result<AssetMetadata> fits = ParseAssetMetadata(
+				R"({"Format": "AssetMeta", "Version": 1, "Handle": "0000000000000001", "Type": "Prefab", "Importer": "Gltf", "ImporterVersion": 1, "Settings": {"Scale": -1e38}, "SubAssets": []})");
+			REQUIRE_MESSAGE(fits.has_value(), fits.error().ToString());
+			CHECK(SerializeAssetMetadata(*fits).contains("\"Scale\""));
 		}
 
 		TEST_CASE("AssetMetadata: sub-asset entries must be sorted, unique and derived from the source handle")

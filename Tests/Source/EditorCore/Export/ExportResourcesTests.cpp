@@ -111,7 +111,7 @@ namespace Engine {
 
 	TEST_SUITE("EditorCore")
 	{
-		TEST_CASE("Export: resources carry the project icon, version and company" * doctest::skip(true))
+		TEST_CASE("Export: resources carry the project icon, version and company")
 		{
 			Test::EditorTestFixture fixture("ExportResources");
 			const Image icon = MakeLabelledProject(fixture);

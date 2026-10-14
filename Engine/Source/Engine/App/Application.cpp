@@ -15,8 +15,12 @@
 #include "Engine/Graphics/OffscreenTarget.h"
 #include "Engine/Graphics/RenderContext.h"
 #include "Engine/Graphics/Swapchain.h"
-#include "Engine/ImGui/ImGuiLayer.h"
 #include "Engine/Platform/ErrorDialog.h"
+
+// Dist builds have no ImGui (§14.4; Docs/Decisions/0024-m15-contract.md decision 11).
+#if !defined(ENGINE_DIST)
+	#include "Engine/ImGui/ImGuiLayer.h"
+#endif
 
 #include <algorithm>
 #include <array>
@@ -36,6 +40,7 @@ namespace Engine {
 		constexpr std::string_view HeadlessOption = "--headless";
 		constexpr std::string_view FramesOption = "--frames";
 		constexpr std::string_view ExpectNoErrorsOption = "--expect-no-errors";
+		constexpr std::string_view LogLevelOption = "--log-level";
 #if !defined(ENGINE_DIST)
 		constexpr std::string_view UserDataDirectoryOption = "--user-data-dir";
 		constexpr std::string_view RendererOption = "--renderer";
@@ -64,6 +69,13 @@ namespace Engine {
 			CommandLineOption{
 				.Name = ExpectNoErrorsOption,
 				.Description = "Exit with code 1 when any error was logged during the run.",
+			},
+			CommandLineOption{
+				.Name = LogLevelOption,
+				.Value = CommandLineValue::Required,
+				.ValueName = "trace|info|warn|error|critical",
+				.Description = "Write only entries of this level and above to the console and the log file (--expect-no-errors "
+							   "still counts every error).",
 			},
 #if !defined(ENGINE_DIST)
 			CommandLineOption{
@@ -133,6 +145,23 @@ namespace Engine {
 		}
 #endif
 
+		// The --log-level spellings. Trace logging is compiled out of Dist (Log.h), where "trace" stores Info, the lowest
+		// level such a build logs.
+		[[nodiscard]] static std::optional<LogLevel> LogLevelFromCommandLine(std::string_view text)
+		{
+			if (text == "trace")
+				return Detail::LogTraceEnabled ? LogLevel::Trace : LogLevel::Info;
+			if (text == "info")
+				return LogLevel::Info;
+			if (text == "warn")
+				return LogLevel::Warn;
+			if (text == "error")
+				return LogLevel::Error;
+			if (text == "critical")
+				return LogLevel::Critical;
+			return std::nullopt;
+		}
+
 		// The startup rule of §8.14 item 7 for the frame's rendering objects: a Gpu error creating one means the device is
 		// out of memory and ends the process with FatalError(OutOfMemory) (exit code 4); any other error is returned with
 		// `context`, and Run reports it as InitFailed.
@@ -157,6 +186,35 @@ namespace Engine {
 		{
 			return counts.Errors > 0 || counts.Warnings > 0;
 		}
+
+	}
+
+	namespace {
+
+		// ApplicationSpecification::MinimumLogLevel for one Run: sets the output sinks' minimum level when the run has one,
+		// and restores the previous level when the run ends.
+		class LogOutputLevelScope
+		{
+		public:
+			explicit LogOutputLevelScope(std::optional<LogLevel> level)
+				: m_Previous(Log::GetOutputLevel()), m_IsActive(level.has_value())
+			{
+				if (level.has_value())
+					Log::SetOutputLevel(*level);
+			}
+
+			~LogOutputLevelScope()
+			{
+				if (m_IsActive)
+					Log::SetOutputLevel(m_Previous);
+			}
+
+			LogOutputLevelScope(const LogOutputLevelScope&) = delete;
+			LogOutputLevelScope& operator=(const LogOutputLevelScope&) = delete;
+		private:
+			LogLevel m_Previous = LogLevel::Trace;
+			bool m_IsActive = false;
+		};
 
 	}
 
@@ -315,6 +373,17 @@ namespace Engine {
 		if (commandLine.Has(Utils::ExpectNoErrorsOption))
 			specification.ExpectNoErrors = true;
 
+		if (const std::optional<std::string_view> level = commandLine.GetValue(Utils::LogLevelOption))
+		{
+			const std::optional<LogLevel> minimum = Utils::LogLevelFromCommandLine(*level);
+			if (!minimum.has_value())
+			{
+				return MakeError(ErrorCode::InvalidArgument, "option '{}' takes 'trace', 'info', 'warn', 'error' or 'critical', got '{}'",
+					Utils::LogLevelOption, *level);
+			}
+			specification.MinimumLogLevel = *minimum;
+		}
+
 		specification.Args = commandLine;
 		return {};
 	}
@@ -336,6 +405,9 @@ namespace Engine {
 		ENGINE_CORE_ASSERT(process->GetSpecification().Window == m_Specification.Window,
 			"the application is {} but the process is {}: a process is windowed or headless, never both",
 			WindowModeToString(m_Specification.Window), WindowModeToString(process->GetSpecification().Window));
+
+		// --log-level (M15, §13.9) from here to the end of Run, the teardown and the --expect-no-errors line included.
+		const LogOutputLevelScope outputLevel(m_Specification.MinimumLogLevel);
 
 		if (m_Specification.Clock == ClockKind::Scripted)
 		{
@@ -456,10 +528,14 @@ namespace Engine {
 
 	Status Application::RequestOffscreenUiFrame()
 	{
+#if defined(ENGINE_DIST)
+		return MakeError(ErrorCode::Unsupported, "a fresh UI frame requires an ImGui layer, which Dist builds do not have");
+#else
 		if (m_Rendering == nullptr || m_ImGuiLayer == nullptr)
 			return MakeError(ErrorCode::Unsupported, "a fresh UI frame requires an active renderer and ImGui layer");
 		m_Rendering->UiFrameRequested = true;
 		return {};
+#endif
 	}
 
 	FrameLoopStatistics Application::GetFrameStatistics() const
@@ -598,6 +674,7 @@ namespace Engine {
 		};
 		OnRender(context);
 
+#if !defined(ENGINE_DIST)
 		if (m_ImGuiLayer != nullptr)
 		{
 			m_ImGuiLayer->BeginFrame(rendering.UiDeltaSeconds, frameSlot, minimized);
@@ -617,6 +694,7 @@ namespace Engine {
 				ENGINE_CORE_ERROR("Cannot render the ImGui frame: {}", rendered.error());
 			rendering.IsImGuiFailing = !rendered.has_value();
 		}
+#endif
 		commandList.close();
 
 		if (acquiredSwapchain)
@@ -677,6 +755,7 @@ namespace Engine {
 		rendering.Pacer = CreateScope<FramePacer>(*device, framesInFlight);
 		rendering.Profiler = CreateScope<GpuProfiler>(*device, framesInFlight);
 
+#if !defined(ENGINE_DIST)
 		if (m_Specification.EnableImGui)
 		{
 			// imgui.ini lives under the user-data folder (user://) while no project is open (§8.11).
@@ -696,17 +775,25 @@ namespace Engine {
 												}),
 					"Cannot create the ImGui layer", "while creating the ImGui layer"));
 		}
+#endif
 		return {};
 	}
 
 	void Application::ShutdownRendering()
 	{
+#if defined(ENGINE_DIST)
+		if (m_Rendering == nullptr)
+			return;
+#else
 		if (m_Rendering == nullptr && m_ImGuiLayer == nullptr)
 			return;
+#endif
 		// §8.14 item 4: nothing the rendering objects own may still be in use by the GPU when they go.
 		if (GraphicsDevice* device = m_Context->GetGraphicsDevice())
 			device->WaitForIdle();
+#if !defined(ENGINE_DIST)
 		m_ImGuiLayer.reset();
+#endif
 		if (m_Rendering != nullptr)
 		{
 			m_Rendering->Profiler.reset();

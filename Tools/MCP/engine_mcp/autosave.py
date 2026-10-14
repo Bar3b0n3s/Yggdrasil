@@ -195,7 +195,8 @@ def _generation(root: Path, name: str, sequence: int) -> bool:
         raise ValueError("invalid scene document")
     if not _matches(root, project, project_fingerprint):
         raise ValueError("project changed")
-    return not source_fingerprint["Exists"] or (size, checksum) != (source_fingerprint["Size"], source_fingerprint["Hash"])
+    return (not source_fingerprint["Exists"]
+            or (size, checksum) != (source_fingerprint["Size"], source_fingerprint["Hash"]))
 
 
 def has_published_autosave(project_root: Path) -> bool:

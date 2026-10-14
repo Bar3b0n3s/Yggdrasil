@@ -5,6 +5,8 @@ The workspace is generated into a temporary directory for every target the build
 premake (--fatal), and every generated project is parsed:
 
   windows        premake5 vs2026                .vcxproj files and the .slnx solution (MSVC)
+  windows-asan   premake5 --sanitize=address vs2026  the hardening stage's AddressSanitizer workspace (Docs/Decisions/
+                 0024-m15-contract.md decision 12)
   windows-clang  premake5 --cc=clang vs2026     .vcxproj files (clang-cl, the portability build of §15.8)
   linux          premake5 --os=linux gmake      per-project makefiles (GCC)
   linux-clang    premake5 --os=linux --cc=clang gmake  per-project makefiles (the Clang 19 CI job)
@@ -30,7 +32,13 @@ and configuration:
    range, approximate functions, fast excess precision), or an effective -ffp-contract other than "off" (it must be
    explicit: GCC's C++ default is "fast", clang-cl's is "on"). C sources are checked with the C compiler's flags;
 5. the solution builds EditorCore, Editor or Tests in Dist, or does not build Engine or Runtime in Dist;
-6. a Windows project does not select x64 host tools (the 32-bit linker can exhaust its address space).
+6. a Windows project does not select x64 host tools (the 32-bit linker can exhaust its address space);
+7. AddressSanitizer is not instrumented alike (MSVC's STL marks the translation units that use its container
+   annotations, so instrumented and uninstrumented C++ must never be linked together): in the windows-asan target a
+   project that is not a Utility project lacks ASan in Release (EnableASAN, or /fsanitize=address, -fsanitize=address)
+   or has it in Debug or Dist; in every other target any project has it in any configuration;
+8. _DISABLE_VECTOR_ANNOTATION or _DISABLE_STRING_ANNOTATION, which hide ASan's container checks, is defined for a
+   compile unit (premake) or named in a first-party source or header, or in a premake script.
 
 --workspace runs the check on another workspace, such as the fixtures in Tests/Data/BuildConfig/, each of which is
 the real workspace with one defect and must fail.
@@ -73,10 +81,12 @@ class Target:
     system: str
     toolset: str | None  # premake --cc; None is the generator's default (msc for vs2026, gcc for gmake)
     dialect: str  # how compiler options are read: "msvc", "clang-cl" or "gnu"
+    sanitize: str | None = None  # premake --sanitize (premake5.lua): the hardening stage's instrumented workspace
 
 
 TARGETS = (
     Target("windows", "vs2026", "windows", None, "msvc"),
+    Target("windows-asan", "vs2026", "windows", None, "msvc", "address"),
     Target("windows-clang", "vs2026", "windows", "clang", "clang-cl"),
     Target("linux", "gmake", "linux", None, "gnu"),
     Target("linux-clang", "gmake", "linux", "clang", "gnu"),
@@ -188,6 +198,18 @@ FAST_MATH_COMPONENT_OPTIONS: dict[str, tuple[str, bool]] = {
 FAST_MATH_COMPONENTS = tuple(dict.fromkeys(component for component, _ in FAST_MATH_COMPONENT_OPTIONS.values()))
 MSVC_UNSAFE_FP_OPTIONS = ("/fp:fast", "/fp:contract", "/qfast_transcendentals")
 
+# AddressSanitizer (Docs/Decisions/0024-m15-contract.md decision 12): the compiler options that enable it, the Xcode
+# settings that do, the configuration it instruments in the windows-asan target, and the STL macros that would hide its
+# container checks.
+ASAN_COMPILER_OPTIONS = ("/fsanitize=address", "-fsanitize=address")
+XCODE_ASAN_SETTINGS = ("ENABLE_ADDRESS_SANITIZER", "CLANG_ADDRESS_SANITIZER")
+ASAN_CONFIGURATION = "Release"
+BANNED_ANNOTATION_MACROS = ("_DISABLE_VECTOR_ANNOTATION", "_DISABLE_STRING_ANNOTATION")
+BANNED_MACRO_PATTERN = re.compile(r"\b(" + "|".join(BANNED_ANNOTATION_MACROS) + r")\b")
+# The first-party trees and the premake scripts the banned-macro scan reads (relative to the repository root).
+FIRST_PARTY_SOURCE_ROOTS = ("Engine/Source", "Editor/Source", "Runtime/Source", "Tests/Source")
+SOURCE_SUFFIXES = (".h", ".hpp", ".inl", ".c", ".cc", ".cpp", ".m", ".mm")
+
 
 class UsageError(Exception):
     """Bad arguments (exit code 2)."""
@@ -216,9 +238,14 @@ class CompileUnit:
 class Project:
     name: str
     sources: list[Path] = dataclasses.field(default_factory=list)
+    headers: list[Path] = dataclasses.field(default_factory=list)  # vs2026 ClInclude items
     include_dirs: dict[str, set[str]] = dataclasses.field(default_factory=dict)  # config -> normalized paths
     units: dict[str, list[CompileUnit]] = dataclasses.field(default_factory=dict)  # config -> units (first: project)
     tool_architectures: dict[str, str] = dataclasses.field(default_factory=dict)  # MSBuild host tools, by config
+    # Configurations whose build setting enables AddressSanitizer (MSBuild EnableASAN, Xcode's sanitizer settings, or
+    # -fsanitize=address in the link flags); the compile options' /fsanitize=address is read from the units.
+    asan_settings: set[str] = dataclasses.field(default_factory=set)
+    utility: bool = False  # an MSBuild Utility project (the Shaders build step) compiles nothing
 
 
 @dataclasses.dataclass
@@ -278,6 +305,8 @@ def generate(premake_executable: Path, workspace_script: Path, target: Target, o
     arguments = [f"--file={workspace_script}", "--fatal", f"--os={target.system}"]
     if target.toolset:
         arguments.append(f"--cc={target.toolset}")
+    if target.sanitize:
+        arguments.append(f"--sanitize={target.sanitize}")
     arguments += [f"--to={output}", target.action]
     result = premake.run(arguments, timeout=GENERATE_TIMEOUT_SECONDS, premake=premake_executable)
     if result.timed_out:
@@ -385,15 +414,26 @@ def parse_vcxproj(path: Path) -> Project:
         if architecture is not None:
             for name in ([config] if config is not None else CONFIGURATIONS):
                 project.tool_architectures[name] = architecture.text or ""
+        configuration_type = group.find("msb:ConfigurationType", MSBUILD_NAMESPACE)
+        if configuration_type is not None and (configuration_type.text or "").strip() == "Utility":
+            project.utility = True
+        asan = group.find("msb:EnableASAN", MSBUILD_NAMESPACE)
+        if asan is not None and (asan.text or "").strip().lower() == "true":
+            project.asan_settings.update([config] if config is not None else CONFIGURATIONS)
         if config is None:
             continue
         directories = project.include_dirs.setdefault(config, set())
         for tag in ("ExternalIncludePath", "IncludePath"):
             for element in group.findall(f"msb:{tag}", MSBUILD_NAMESPACE):
-                directories.update(normalize_path(msbuild_path(base, item)) for item in split_msbuild_list(element.text))
+                directories.update(normalize_path(msbuild_path(base, item))
+                                   for item in split_msbuild_list(element.text))
 
     for group in root.findall("msb:ItemDefinitionGroup", MSBUILD_NAMESPACE):
         config = condition_configuration(group)
+        link = group.find("msb:Link/msb:AdditionalOptions", MSBUILD_NAMESPACE)
+        if config is not None and link is not None and any(
+                option.lower() in ASAN_COMPILER_OPTIONS for option in split_msvc_options(link.text)):
+            project.asan_settings.add(config)
         compile_settings = group.find("msb:ClCompile", MSBUILD_NAMESPACE)
         if config is None or compile_settings is None:
             continue
@@ -402,11 +442,16 @@ def parse_vcxproj(path: Path) -> Project:
             element = compile_settings.find(f"msb:{tag}", MSBUILD_NAMESPACE)
             values[tag] = element.text or "" if element is not None else None
         project.include_dirs.setdefault(config, set()).update(
-            normalize_path(msbuild_path(base, item)) for item in split_msbuild_list(values["AdditionalIncludeDirectories"])
+            normalize_path(msbuild_path(base, item))
+            for item in split_msbuild_list(values["AdditionalIncludeDirectories"])
         )
         settings[config] = msbuild_settings(values, None)
         project.units.setdefault(config, []).insert(0, msbuild_unit(settings[config], None))
 
+    for item in root.iter(f"{{{MSBUILD_NAMESPACE['msb']}}}ClInclude"):
+        include = item.get("Include")
+        if include is not None:
+            project.headers.append(msbuild_path(base, include).resolve())
     for item in root.iter(f"{{{MSBUILD_NAMESPACE['msb']}}}ClCompile"):
         include = item.get("Include")
         if include is None:
@@ -465,7 +510,8 @@ def load_visual_studio(directory: Path, target: Target) -> GeneratedWorkspace:
 # --------------------------------------------------------------------------------------------------------------------
 
 MAKE_CONFIG_PATTERN = re.compile(r"^(?:else\s+)?ifeq\s+\(\$\(config\),(\w+)\)\s*$")
-MAKE_ASSIGNMENT_PATTERN = re.compile(r"^\s*(DEFINES|INCLUDES|ALL_CXXFLAGS|ALL_CFLAGS|PERFILE_FLAGS_\d+)\s*\+?=\s*(.*)$")
+MAKE_ASSIGNMENT_PATTERN = re.compile(
+    r"^\s*(DEFINES|INCLUDES|ALL_CXXFLAGS|ALL_CFLAGS|ALL_LDFLAGS|PERFILE_FLAGS_\d+)\s*\+?=\s*(.*)$")
 MAKE_CONDITIONAL_PATTERN = re.compile(r"^(?:ifeq|ifneq|ifdef|ifndef)\b")
 MAKE_SOURCE_RULE_PATTERN = re.compile(r"^\$\(OBJDIR\)/\S+\.o:\s+(\S+)")
 MAKE_VARIABLE_PATTERN = re.compile(r"^\$\((\w+)\)$")
@@ -561,6 +607,8 @@ def parse_makefile(path: Path) -> Project:
             operations = define_operations(define_flags + file_flags)
             units.append(CompileUnit(apply_define_operations(operations), file_flags, file=name))
         project.units[config] = units
+        if any(flag in ASAN_COMPILER_OPTIONS for flag in expand("ALL_LDFLAGS")):
+            project.asan_settings.add(config)
     return project
 
 
@@ -711,6 +759,9 @@ def parse_pbxproj(path: Path) -> Project:
             target_level.get(config, {}).get("GCC_FAST_MATH"),
             project_level.get(config, {}).get("GCC_FAST_MATH"),
         )
+        if any("YES" in (target_level.get(config, {}).get(setting), project_level.get(config, {}).get(setting))
+               for setting in XCODE_ASAN_SETTINGS):
+            project.asan_settings.add(config)
 
         # C++ files compile with OTHER_CPLUSPLUSFLAGS, whose default is $(OTHER_CFLAGS); C files with OTHER_CFLAGS.
         # GCC_FAST_MATH adds -ffast-math ahead of both. Xcode passes GCC_PREPROCESSOR_DEFINITIONS as -D options before
@@ -984,8 +1035,8 @@ def check_floating_point(workspace: GeneratedWorkspace, first_party: set[str], f
                 for problem in problems:
                     findings.append(
                         f"[{target.name}] {config}: {unit_location(name, unit)} uses a non-precise floating-point "
-                        f"model: {problem} (first-party projects, JoltPhysics, MikkTSpace and Luau must use the precise "
-                        "model, Docs/Architecture.md section 2.2)"
+                        f"model: {problem} (first-party projects, JoltPhysics, MikkTSpace and Luau must use the "
+                        "precise model, Docs/Architecture.md section 2.2)"
                     )
 
 
@@ -1011,12 +1062,97 @@ def check_solution(workspace: GeneratedWorkspace, findings: list[str]) -> None:
                                 f"PreferredToolArchitecture is {architecture}")
 
 
+def instrumented_configurations(project: Project) -> set[str]:
+    """The configurations in which `project` is built with AddressSanitizer: its build settings, or an ASan compiler
+    option in any compile unit."""
+    configurations = set(project.asan_settings)
+    for config, units in project.units.items():
+        for unit in units:
+            if any(flag.lower() in ASAN_COMPILER_OPTIONS for flag in unit.flags):
+                configurations.add(config)
+    return configurations
+
+
+def check_address_sanitizer(workspace: GeneratedWorkspace, findings: list[str]) -> None:
+    """Rule 7: the windows-asan target instruments every project that compiles code in Release and in no other
+    configuration; every other target instruments nothing."""
+    target = workspace.target
+    for name, project in sorted(workspace.projects.items()):
+        instrumented = instrumented_configurations(project)
+        if target.sanitize:
+            if project.utility:
+                continue
+            if ASAN_CONFIGURATION not in instrumented:
+                findings.append(f"[{target.name}] {ASAN_CONFIGURATION}: {name} is not built with AddressSanitizer "
+                                f"while the rest of the workspace is; instrumented and uninstrumented C++ must never "
+                                f"be linked together (MSVC's STL container annotations; "
+                                f"Docs/Decisions/0024-m15-contract.md decision 12)")
+            for config in sorted(instrumented - {ASAN_CONFIGURATION}):
+                findings.append(f"[{target.name}] {config}: {name} is built with AddressSanitizer, which the "
+                                f"hardening stage applies to {ASAN_CONFIGURATION} only (Debug uses /ZI and Dist LTO)")
+        else:
+            for config in sorted(instrumented):
+                findings.append(f"[{target.name}] {config}: {name} is built with AddressSanitizer in a plain "
+                                f"workspace; only premake5.lua's --sanitize=address workspace instruments code")
+
+
+def check_banned_annotation_macros(workspace: GeneratedWorkspace, findings: list[str]) -> None:
+    """Rule 8, premake half: no compile unit defines a macro that hides ASan's container checks."""
+    target = workspace.target.name
+    for name, project in sorted(workspace.projects.items()):
+        for config, units in sorted(project.units.items()):
+            for unit in units:
+                defined = sorted({define_name(define) for define in unit.defines} & set(BANNED_ANNOTATION_MACROS))
+                for macro in defined:
+                    findings.append(f"[{target}] {config}: {unit_location(name, unit)} defines {macro}, which hides "
+                                    f"AddressSanitizer's container checks (Docs/Decisions/0024-m15-contract.md "
+                                    f"decision 12)")
+
+
+def banned_macro_files(workspace_script: Path, projects: dict[str, Project], first_party: set[str]) -> list[Path]:
+    """The files the source half of rule 8 reads: every source and header of the first-party projects and of the
+    repository's first-party trees, and every premake script of the repository and of the checked workspace."""
+    files: set[Path] = set()
+    for name in first_party:
+        project = projects.get(name)
+        if project is not None:
+            files.update(path for path in project.sources + project.headers if path.suffix.lower() in SOURCE_SUFFIXES)
+    for root in FIRST_PARTY_SOURCE_ROOTS:
+        directory = REPOSITORY_ROOT / root
+        if directory.is_dir():
+            files.update(path.resolve() for path in directory.rglob("*") if path.suffix.lower() in SOURCE_SUFFIXES)
+    scripts = [REPOSITORY_ROOT / "premake5.lua", REPOSITORY_ROOT / "Dependencies.lua", workspace_script]
+    scripts += REPOSITORY_ROOT.glob("*/premake5.lua")
+    scripts += VENDOR_ROOT.glob("*/premake5.lua")
+    scripts += (REPOSITORY_ROOT / "Scripts" / "Premake").glob("*.lua")
+    files.update(path.resolve() for path in scripts)
+    return sorted(path for path in files if path.is_file())
+
+
+def check_banned_macro_sources(files: list[Path], findings: list[str]) -> None:
+    """Rule 8, source half: no first-party source, header or premake script names a banned annotation macro."""
+    for path in files:
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError as error:
+            findings.append(f"cannot read {paths.display_path(path)} for the banned-macro check: {error}")
+            continue
+        for number, line in enumerate(text.splitlines(), start=1):
+            match = BANNED_MACRO_PATTERN.search(line)
+            if match:
+                findings.append(f"{paths.display_path(path)}:{number}: names {match.group(1)}, which hides "
+                                f"AddressSanitizer's container checks (Docs/Decisions/0024-m15-contract.md "
+                                f"decision 12)")
+
+
 def check_workspace(workspace: GeneratedWorkspace, vendored: set[str], first_party: set[str]) -> list[str]:
     findings: list[str] = []
     check_abi_defines(workspace, vendored, findings)
     check_determinism_define(workspace, findings)
     check_jolt_instruction_set(workspace, findings)
     check_floating_point(workspace, first_party, findings)
+    check_address_sanitizer(workspace, findings)
+    check_banned_annotation_macros(workspace, findings)
     if workspace.dist_builds is not None:
         check_solution(workspace, findings)
     return findings
@@ -1079,6 +1215,7 @@ def run(arguments: argparse.Namespace) -> dict[str, Any]:
         findings: list[str] = []
         for workspace in loaded:
             findings += check_workspace(workspace, vendored, first_party)
+        check_banned_macro_sources(banned_macro_files(workspace_script, loaded[0].projects, first_party), findings)
         return {
             "workspace": workspace_script.as_posix(),
             "targets": [target.name for target in targets],

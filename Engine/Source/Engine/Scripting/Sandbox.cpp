@@ -49,6 +49,10 @@ namespace Engine {
 		// ProcessContext owns these hooks. VM identities are never reset, including on process-context restart.
 		std::atomic<bool> s_RuntimeInitialized{ false };
 		std::atomic<uint64_t> s_NextVmIdentity{ 1 };
+		// The VMs open in this process, on any thread (runtime VMs and isolated load-time VMs alike): incremented when
+		// lua_newstate succeeds, decremented after lua_close. ShutdownScriptingRuntime asserts it is zero, the Lua states
+		// counter of the teardown invariants (Architecture §4.1).
+		std::atomic<uint64_t> s_LiveVmCount{ 0 };
 		Luau::AssertHandler s_PreviousAssertHandler = nullptr;
 
 		struct StackRestore
@@ -245,7 +249,10 @@ namespace Engine {
 		{
 			Detail::SandboxAccess::ReportDroppedLogEntries(LogWindow);
 			if (Vm)
+			{
 				lua_close(Vm);
+				s_LiveVmCount.fetch_sub(1, std::memory_order_acq_rel);
+			}
 			while (Maps)
 			{
 				LoadedMap* next = Maps->Next;
@@ -744,6 +751,8 @@ namespace Engine {
 
 	void ShutdownScriptingRuntime()
 	{
+		const uint64_t liveVms = s_LiveVmCount.load(std::memory_order_acquire);
+		ENGINE_CORE_ASSERT(liveVms == 0, "ShutdownScriptingRuntime with {} scripting VMs still open", liveVms);
 		if (s_RuntimeInitialized.exchange(false, std::memory_order_acq_rel))
 			Luau::assertHandler() = s_PreviousAssertHandler;
 	}
@@ -804,6 +813,7 @@ namespace Engine {
 		state.Vm = lua_newstate(State::Allocate, state.Allocator.get());
 		if (!state.Vm)
 			return MakeError(ErrorCode::Script, "unable to allocate a scripting VM");
+		s_LiveVmCount.fetch_add(1, std::memory_order_acq_rel);
 		lua_setthreaddata(state.Vm, sandbox.get());
 		lua_callbacks(state.Vm)->userdata = sandbox.get();
 		lua_callbacks(state.Vm)->userthread = State::ThreadLifecycle;

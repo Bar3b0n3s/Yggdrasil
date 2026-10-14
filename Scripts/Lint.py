@@ -43,8 +43,9 @@ Steps, selected with --steps (default: all, in this order):
   headers   header self-containment: every first-party header is compiled on its own, syntax-only, with the include
             paths and defines of its project from compile_commands.json, in a temporary directory. It is included
             twice, which also proves its include guard. Headers also start with #pragma once.
-  python    syntax (also under the Python 3.10 grammar, f-strings included) and AST style checks (CodeStyle section
-            15) for Scripts/, Tools/ and Tests/.
+  python    syntax (also under the Python 3.10 grammar, f-strings included), AST style checks and the 120-column line
+            limit (python-line-length: characters, a tab counting to the next multiple of 4; CodeStyle section 15)
+            for Scripts/, Tools/ and Tests/.
   json      strict JSON validity (UTF-8 without BOM, no NaN or Infinity, no duplicate keys) of project and data files.
 
 compile_commands.json is generated into a temporary directory with `premake5 compile-commands`
@@ -1813,9 +1814,9 @@ BANNED_PATTERNS = (
         # A lambda init-capture ([value = std::move(value), ...]) makes a new closure member from the outer variable;
         # it is not a self-move, so a match right after "[" or followed by "," or "]" is skipped.
         re.compile(r"(?<![\w.>:\[])(?<!\[ )((?:\w+(?:\.|->))*\w+)\s*=\s*(?:::)?std::move\(\s*\1\s*\)(?![ \t]*[,\]])"),
-        "never move-assign a value to itself, also not through an rvalue builder (error = std::move(error).WithHint(...)):"
-        " MSVC's library keeps the value, libc++ and libstdc++ leave it empty (CodeStyle section 7). Build into a new "
-        "variable, or attach collected parts once (Error::WithIssues)",
+        "never move-assign a value to itself, also not through an rvalue builder "
+        "(error = std::move(error).WithHint(...)): MSVC's library keeps the value, libc++ and libstdc++ leave it empty "
+        "(CodeStyle section 7). Build into a new variable, or attach collected parts once (Error::WithIssues)",
     ),
     BannedPattern(
         "banned-unsupported-feature",
@@ -3595,6 +3596,12 @@ PYTHON_CLASS_NAME = re.compile(r"^_?[A-Z][A-Za-z0-9]*$")
 PYTHON_CONSTANT_NAME = re.compile(r"^_?[A-Z][A-Z0-9_]*$|^_?[A-Z][A-Za-z0-9]*$|^__[a-z][a-z0-9_]*__$")
 PYTHON_ENTRY_POINT_FILE = re.compile(r"^[A-Z][A-Za-z0-9]*\.py$")
 PYTHON_LIBRARY_FILE = re.compile(r"^[a-z_][a-z0-9_]*\.py$")
+# CodeStyle section 15: PEP 8 with a 120-column limit (Docs/Decisions/0002-m0-deviations.md). Columns are characters
+# (code points, not bytes), with a tab advancing to the next multiple of 4 as in an editor.
+PYTHON_LINE_LIMIT = 120
+PYTHON_TAB_WIDTH = 4
+# Python source lines end at \r\n, \r or \n only (other Unicode line breaks inside a string are part of its line).
+PYTHON_LINE_BREAK = re.compile(r"\r\n|\r|\n")
 # Methods whose names a standard-library base class dictates.
 PYTHON_PROTOCOL_METHODS = frozenset(
     {
@@ -3788,6 +3795,25 @@ def newer_fstring_syntax(text: str) -> list[tuple[int, str]]:
     return problems
 
 
+def python_line_length_findings(relative: str, text: str) -> list[Finding]:
+    """One python-line-length finding per line wider than PYTHON_LINE_LIMIT columns, code, comments and strings
+    alike."""
+    findings: list[Finding] = []
+    for number, line in enumerate(PYTHON_LINE_BREAK.split(text), 1):
+        width = len(line.expandtabs(PYTHON_TAB_WIDTH))
+        if width > PYTHON_LINE_LIMIT:
+            findings.append(
+                Finding(
+                    relative,
+                    number,
+                    "python-line-length",
+                    f"line is {width} columns; the limit is {PYTHON_LINE_LIMIT} (PEP 8 with CodeStyle section 15's "
+                    f"limit, a tab counting to the next multiple of {PYTHON_TAB_WIDTH})",
+                )
+            )
+    return findings
+
+
 def check_python_file(tree: Tree, relative: str, local_modules: set[str]) -> list[Finding]:
     rules = tree.rules
     findings: list[Finding] = []
@@ -3808,6 +3834,7 @@ def check_python_file(tree: Tree, relative: str, local_modules: set[str]) -> lis
         ]
     for line, message in newer_fstring_syntax(text):
         findings.append(Finding(relative, line, "python-version", f"{message} (scripts support Python 3.10+)"))
+    findings += python_line_length_findings(relative, text)
     try:
         for token in tokenize.generate_tokens(io.StringIO(text).readline):
             if token.type == tokenize.INDENT and "\t" in token.string:
@@ -4326,7 +4353,8 @@ def main(argv: list[str] | None = None) -> int:
     if os.environ.get("GITHUB_ACTIONS") == "true" and not arguments.json:
         # A notice annotation: unlike job logs, annotations are public through the check-runs API, so where a CI run
         # spends its lint time is visible to everyone.
-        durations = ", ".join(f"{report.name} {report.duration:.0f} s" for report in reports if report.status != "skipped")
+        durations = ", ".join(f"{report.name} {report.duration:.0f} s" for report in reports
+                              if report.status != "skipped")
         print(f"::notice title=Lint step durations::{durations}", flush=True)
     return EXIT_SUCCESS if success else EXIT_FINDINGS
 

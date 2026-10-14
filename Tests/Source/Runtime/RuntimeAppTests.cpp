@@ -1,15 +1,26 @@
 #include "TestsPCH.h"
 
 #include "Engine/App/ExitCode.h"
+#include "Engine/Automation/Protocol/Framing.h"
+#include "Engine/Automation/Protocol/SessionFile.h"
 #include "Engine/Core/FileSystem.h"
+#include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Graphics/Image.h"
 #include "Engine/Platform/Process.h"
+#include "Engine/Platform/Socket.h"
 #include "Support/ChildOutput.h"
 #include "Support/HeadlessGpuFixture.h"
+#include "Support/PlatformProbes.h"
 #include "Support/TempDirectory.h"
 #include "Support/TestGame.h"
 #include "Support/TestOptions.h"
 #include "Support/Utf8Path.h"
+#include "Support/WaitUntil.h"
+
+#include <nlohmann/json.hpp>
+
+#include <array>
+#include <optional>
 
 // The runtime executable as a whole process (Architecture §14.3; Roadmap M2, M6, M7) on test games written like exported
 // ones (Support/TestGame.h) and given with --manifest (Docs/Decisions/0012-m7-decisions.md decision 10). Runs that need no
@@ -55,6 +66,71 @@ namespace Engine {
 				return MakeError(ErrorCode::NotFound, "expected one crash report of '{}', found {}", name, reports.size());
 			return FileSystem::ReadText(reports.front());
 		}
+
+#if defined(ENGINE_PLATFORM_WINDOWS)
+		// A JSON-RPC client of a Runtime's automation server (--automation) over its loopback port, as Tools/Automation/
+		// engine_client.py speaks it (Architecture §13.2): the framing, session.hello with the token of its session file,
+		// then one request at a time, skipping notifications.
+		class RuntimeAutomationConnection
+		{
+		public:
+			static constexpr std::chrono::seconds Timeout{ 60 };
+
+			// Connects to the server whose session file <sessionsDirectory>/<pid>.json exists, and says hello.
+			[[nodiscard]] static Result<RuntimeAutomationConnection> Open(const std::filesystem::path& sessionsDirectory, uint32_t pid)
+			{
+				ENGINE_TRY_ASSIGN(const std::string text, FileSystem::ReadText(SessionFile::GetPath(sessionsDirectory, pid)));
+				ENGINE_TRY_ASSIGN(const SessionFileContent session, SessionFile::FromText(text));
+				ENGINE_TRY_ASSIGN(Socket socket, Socket::Connect(session.Port, Timeout));
+				RuntimeAutomationConnection connection(std::move(socket));
+				const Json client{ { "name", "engine-tests" }, { "version", "1" } };
+				ENGINE_TRY(connection.Call("session.hello", Json{ { "token", session.Token }, { "protocolVersion", "1.0" }, { "client", client } }));
+				return connection;
+			}
+
+			// The result of `method`, or an Error carrying the response.
+			[[nodiscard]] Result<Json> Call(std::string_view method, const Json& params)
+			{
+				const int64_t id = m_NextId++;
+				const std::string frame = EncodeFrame(Json{ { "jsonrpc", "2.0" }, { "id", id }, { "method", method }, { "params", params } }.dump());
+				ENGINE_TRY(m_Socket.Send(std::as_bytes(std::span(frame.data(), frame.size())), Timeout));
+				while (true)
+				{
+					ENGINE_TRY_ASSIGN(const Json message, Receive());
+					const JsonReader reader(message);
+					if (reader.ReadMember<int64_t>("id").value_or(0) != id)
+						continue; // a notification
+					if (const std::optional<JsonReader> result = reader.FindMember("result"))
+						return result->GetValue();
+					return MakeError(ErrorCode::InvalidState, "{} failed: {}", method, message.dump());
+				}
+			}
+		private:
+			explicit RuntimeAutomationConnection(Socket socket)
+				: m_Socket(std::move(socket))
+			{
+			}
+
+			[[nodiscard]] Result<Json> Receive()
+			{
+				while (true)
+				{
+					ENGINE_TRY_ASSIGN(const std::optional<std::string> payload, m_Decoder.Next());
+					if (payload.has_value())
+						return JsonReader::Parse(*payload);
+					std::array<std::byte, 4096> buffer{};
+					ENGINE_TRY_ASSIGN(const size_t received, m_Socket.Receive(buffer, Timeout));
+					if (received == 0)
+						return MakeError(ErrorCode::Io, "the Runtime closed the automation connection");
+					m_Decoder.Append(std::span(buffer.data(), received));
+				}
+			}
+
+			Socket m_Socket;
+			FrameDecoder m_Decoder{};
+			int64_t m_NextId = 1;
+		};
+#endif
 
 		// Replaces the first `from` in `path`'s text with `to`.
 		void EditFile(const std::filesystem::path& path, std::string_view from, std::string_view to)
@@ -380,6 +456,103 @@ namespace Engine {
 			CHECK(report->contains("Reason: Fatal error (DeviceLost)"));
 			CHECK(report->contains("device lost"));
 			CHECK(Test::FindGpuMessageLines(result->StandardError).empty());
+		}
+
+		TEST_CASE("RuntimeApp: F1 toggles the stats overlay in a windowed run and the game still receives F1"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			// Docs/Decisions/0024-m15-contract.md decision 17: a windowed Debug or Release Runtime enables ImGui for the overlay,
+			// each F1 press that is not a repeat toggles it, and the key still reaches the game (OnEvent consumes nothing). The
+			// keystrokes are real window messages, which only the Windows probe can post (Support/PlatformProbes.h); the
+			// paused session (--paused) applies each one at the tick that play.step runs, and script.eval reads the game's
+			// Input there.
+			if (!Test::ProbeGpuForProcess())
+				return;
+#if defined(ENGINE_PLATFORM_WINDOWS)
+			Test::TempDirectory userData("RuntimeOverlay");
+			const Result<std::filesystem::path> manifest = Test::WriteTestGame(userData / "Game", { .Name = "OverlayGame", .Shaders = true });
+			REQUIRE_MESSAGE(manifest.has_value(), manifest.error().ToString());
+			Result<std::filesystem::path> runtime = Test::GetBuiltExecutablePath("Runtime");
+			REQUIRE_MESSAGE(runtime.has_value(), runtime.error().ToString());
+			std::vector<std::string> arguments = Test::WithoutAudioDevice({ "--automation", "--paused", ManifestArgument(*manifest),
+				"--user-data-dir=" + Test::PathToUtf8(userData.GetPath()) });
+			const std::vector<std::string> gpuArguments = Test::GetGpuApplicationArguments();
+			arguments.insert(arguments.end(), gpuArguments.begin(), gpuArguments.end());
+			Result<Process> process = Process::Spawn({ .Executable = std::move(*runtime), .Arguments = std::move(arguments) });
+			REQUIRE_MESSAGE(process.has_value(), process.error().ToString());
+			const uint32_t pid = process->GetId();
+
+			const std::filesystem::path sessions = userData / "OverlayGame" / "Automation" / "Sessions";
+			REQUIRE(Test::WaitUntil([&sessions, pid]()
+			{
+				return FileSystem::Exists(SessionFile::GetPath(sessions, pid));
+			}));
+			Result<RuntimeAutomationConnection> connection = RuntimeAutomationConnection::Open(sessions, pid);
+			REQUIRE_MESSAGE(connection.has_value(), connection.error().ToString());
+
+			// One keystroke message (a press or a release of F1) to the Runtime's window.
+			const auto postF1 = [pid](bool pressed)
+			{
+				const Status posted = Test::PostKeyToProcessWindow(pid, Key::F1, pressed);
+				REQUIRE_MESSAGE(posted.has_value(), posted.error().ToString());
+			};
+			// One tick, then whether the game holds F1 down.
+			const auto stepAndReadF1 = [&connection]() -> bool
+			{
+				const Result<Json> stepped = connection->Call("play.step", Json{ { "ticks", 1 } });
+				REQUIRE_MESSAGE(stepped.has_value(), stepped.error().ToString());
+				const Result<Json> evaluated = connection->Call("script.eval", Json{ { "code", "return Input.IsKeyDown(\"F1\")" }, { "context", "Play" } });
+				REQUIRE_MESSAGE(evaluated.has_value(), evaluated.error().ToString());
+				return JsonReader(*evaluated).ReadMember<bool>("value").value_or(false);
+			};
+
+			// The Runtime configured the overlay's ImGui context so that it never changes the OS cursor (the game's cursor
+			// mode holds as in Dist; the M15 review's M33). The OS cursor of another process's window cannot be read back,
+			// so the Runtime's line after ConfigureStatsOverlayContext is the observable.
+			REQUIRE(process->WaitForOutput(ProcessStream::StandardError, "Runtime: stats overlay ready (F1); its ImGui context leaves the OS cursor to the game",
+				RuntimeAutomationConnection::Timeout));
+
+			// Every keystroke is waited for in the Runtime's output before the tick that must see it: posting is
+			// asynchronous, and a play.step read in the same frame as an unpolled message would tick without it (the M15
+			// review's M28). Each line is logged where OnEvent hands the key to the game's input queue.
+			CHECK_FALSE(stepAndReadF1());
+			// The first press shows the overlay, and the game receives it.
+			postF1(true);
+			REQUIRE(process->WaitForOutput(ProcessStream::StandardError, "Runtime: stats overlay shown (F1)", RuntimeAutomationConnection::Timeout));
+			CHECK(stepAndReadF1());
+			// A release reaches the game and toggles nothing; the next press hides the overlay, and the game receives it too.
+			postF1(false);
+			REQUIRE(process->WaitForOutput(ProcessStream::StandardError, "Runtime: F1 released (stats overlay shown)", RuntimeAutomationConnection::Timeout));
+			CHECK_FALSE(stepAndReadF1());
+			postF1(true);
+			REQUIRE(process->WaitForOutput(ProcessStream::StandardError, "Runtime: stats overlay hidden (F1)", RuntimeAutomationConnection::Timeout));
+			CHECK(stepAndReadF1());
+			postF1(false);
+			REQUIRE(process->WaitForOutput(ProcessStream::StandardError, "Runtime: F1 released (stats overlay hidden)", RuntimeAutomationConnection::Timeout));
+			CHECK_FALSE(stepAndReadF1());
+
+			REQUIRE(connection->Call("session.shutdown", Json::object()).has_value());
+			const Result<ProcessResult> result = process->Wait(std::chrono::seconds(120));
+			REQUIRE_MESSAGE(result.has_value(), result.error().ToString());
+			INFO("runtime stderr: ", result->StandardError);
+			CHECK(result->ExitCode == ExitCode::Success);
+			// One line per toggle, and nothing a clean run must not print (validation messages included).
+			const auto count = [&result](std::string_view text)
+			{
+				size_t found = 0;
+				for (size_t position = result->StandardError.find(text); position != std::string::npos; position = result->StandardError.find(text, position + 1))
+					++found;
+				return found;
+			};
+			CHECK(count("Runtime: stats overlay ready (F1)") == 1);
+			CHECK(count("Runtime: stats overlay shown (F1)") == 1);
+			CHECK(count("Runtime: stats overlay hidden (F1)") == 1);
+			CHECK(count("Runtime: F1 released") == 2);
+			CHECK(Test::FindProblemLogLines(result->StandardError).empty());
+#else
+			MESSAGE("RuntimeApp F1 overlay: posting a real keystroke to another process's window is implemented on Windows only "
+					"(Test::PostKeyToProcessWindow); the overlay's toggle, drawing and cursor rule are covered by the StatsOverlay cases");
+#endif
 		}
 
 		TEST_CASE("RuntimeApp: --gpu-inject-fault=hang exits 4 with a crash report after the bounded wait"

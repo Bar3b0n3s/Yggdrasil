@@ -112,6 +112,14 @@ Beeps: MPEG-1 Layer III, 48 kHz joint stereo, 128 kbit/s constant bit rate with 
 a TrueType font with quadratic outlines for `.notdef`, space, `A`, `O` and `V` (`.notdef`, `A` and `O` with counters), a
 format 4 Unicode character map and a legacy `kern` table that kerns `A` and `V`.
 
+## Recorded soak samples (`Hardening/`)
+
+| | |
+|---|---|
+| Files | `Tests/Data/Hardening/SoakStreamC.json`, `Tests/Data/Hardening/SoakIntegration.json` |
+| Origin | First-party: subjects copied verbatim from two `bin/TestResults/Soak.json` reports that `Scripts/Hardening.py --steps soak` wrote on the M15 reference machine: stream C's full soak, whose `Callbacks.scene` and `Input.scene` scripts still appended a record every tick (both leak), and the integration run after the scaffolds bounded those histories (Docs/Decisions/0024-m15-contract.md "The soak fix"). `SoakStreamC.json` keeps the two leaking scenes, every scene whose script heap is a sawtooth and one script-less scene (`Physics.scene`, a constant heap); `SoakIntegration.json` keeps both editor scenes of the integration run. Recorded data, so no generator reproduces it; `Tests/Automation/test_hardening.py` evaluates it with the soak rules |
+| License | First-party: the same terms as the repository's code; no third-party rights |
+
 ## OpenType font fixture (`Assets/Fonts/Inter-Regular.otf`)
 
 | | |

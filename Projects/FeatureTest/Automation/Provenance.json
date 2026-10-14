@@ -1780,7 +1780,7 @@
 		},
 		{
 			"Path": "Assets/Scripts/Callbacks/Journal.luau",
-			"XXH64": "12893098e2a62dff",
+			"XXH64": "2413c4365cacc97c",
 			"Method": "script.write",
 			"RequestId": 1,
 			"Client": "batch",
@@ -1860,7 +1860,7 @@
 		},
 		{
 			"Path": "Assets/Scripts/Input/InputProbe.luau",
-			"XXH64": "651d5a69fb3901a6",
+			"XXH64": "4cc160eba0cb5c58",
 			"Method": "script.write",
 			"RequestId": 1,
 			"Client": "batch",
@@ -2724,7 +2724,7 @@
 		},
 		{
 			"Path": "Assets/Tests/Input/Input.test.luau",
-			"XXH64": "d1d0b01af3893297",
+			"XXH64": "21b69520d471e33c",
 			"Method": "script.write",
 			"RequestId": 2,
 			"Client": "batch",
@@ -2820,7 +2820,7 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/Input.replay",
-			"XXH64": "7dd881dddf18d87a",
+			"XXH64": "642973719f3d0b0f",
 			"Method": "input.record",
 			"RequestId": 3,
 			"Client": "batch",

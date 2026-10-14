@@ -60,3 +60,17 @@ Throwaway workspace built Debug/Release/Dist (VS 2026 v145, C++23): parse (objec
 3. Replace `single_include/nlohmann/json.hpp`, `single_include/nlohmann/json_fwd.hpp`, `LICENSE.MIT`.
 4. Ensure LF line endings (clone with `-c core.autocrlf=false`); re-check SPDX identifiers in the header (`grep SPDX-License-Identifier`).
 5. Update this file (tag, SHA, date), rebuild all configurations and run the unit tests.
+
+## Notices
+
+The row `Scripts/Lib/notices.py` reads for `THIRD_PARTY_NOTICES.txt` (Docs/Decisions/0024-m15-contract.md decision 8).
+
+| Field | Value |
+|---|---|
+| Name | JSON for Modern C++ |
+| Upstream | https://github.com/nlohmann/json |
+| Version | 3.12.0 |
+| License | MIT |
+| Shipped | yes |
+| Projects | - |
+| License files | LICENSE.MIT |

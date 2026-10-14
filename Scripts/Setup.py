@@ -3,7 +3,8 @@
 
 Checks: Python, Git, the Vulkan SDK (VULKAN_SDK at least the version pinned in Scripts/Lib/Toolchain.json, slangc
 exactly at its pinned version, spirv-val), the Python interpreter the Shaders build rule invokes, and per host:
-  Windows  Visual Studio 2026 with the x64 C++ tools (vswhere), the Windows SDK, the MSVC v145 CRT redistributables
+  Windows  Visual Studio 2026 with the x64 C++ tools (vswhere), the Windows SDK, the MSVC v145 CRT redistributables,
+           and MSVC's AddressSanitizer runtime (a warning when missing: only the hardening stage needs it)
   Linux    GCC 14+ (or Clang 19+ for --toolset clang), make, the X11 development headers GLFW needs (xorg-dev)
   macOS    Xcode 26+
 clang-format 22.x is reported as a warning when missing (only Scripts/Format.py needs it).
@@ -224,10 +225,24 @@ def windows_checks(console: Console) -> tuple[list[Step], toolchain.VisualStudio
         version, directory = toolchain.find_crt_redist(instance)
         return f"app-local CRT {version} ({directory.as_posix()})"
 
+    def asan_runtime() -> str:
+        # Only the hardening stage (CI.py --milestone, Scripts/Hardening.py) needs it, so a missing runtime is a
+        # warning.
+        instance = found.get("instance")
+        if instance is None:
+            raise CheckWarning("needs Visual Studio 2026 (see above)")
+        try:
+            directory = toolchain.find_asan_runtime(instance)
+        except toolchain.ToolchainError as error:
+            raise CheckWarning(f"{error}; only the hardening stage needs it (Scripts/Hardening.py, "
+                               f"CI.py --milestone)") from None
+        return f"{toolchain.ASAN_RUNTIME_FILES[0]} ({directory.as_posix()})"
+
     steps = [
         run_check("visual-studio", visual_studio, console),
         run_check("windows-sdk", windows_sdk, console),
         run_check("crt-redistributables", crt_redist, console),
+        run_check("asan-runtime", asan_runtime, console),
     ]
     return steps, found.get("instance")
 

@@ -1,5 +1,5 @@
-"""Transport and path security (Docs/Architecture.md §13.2, §13.4, §15.7, Roadmap M4): token authentication, HTTP probes,
-frame limits, and project paths that try to escape the project."""
+"""Transport and path security (Docs/Architecture.md §13.2, §13.4, §15.7, Roadmap M4): token authentication, HTTP
+probes, frame limits, and project paths that try to escape the project."""
 
 from __future__ import annotations
 
@@ -49,11 +49,11 @@ class SecurityTests(AutomationTestCase):
 
     def test_path_escapes_are_rejected_and_write_nothing_outside_the_project(self) -> None:
         client, _ = self.open_editor_with_scene()
-        escapes = ("../Escape.scene", "Assets/../../Escape.scene", "/Escape.scene", "C:/Escape.scene", "user://Escape.scene",
-                   "project://../Escape.scene", "Assets\\..\\..\\Escape.scene")
+        escapes = ("../Escape.scene", "Assets/../../Escape.scene", "/Escape.scene", "C:/Escape.scene",
+                   "user://Escape.scene", "project://../Escape.scene", "Assets\\..\\..\\Escape.scene")
         for path in escapes:
-            for method, params in (("scene.new", {"path": path, "discardChanges": True}), ("scene.open", {"path": path}),
-                                   ("scene.save", {"path": path})):
+            for method, params in (("scene.new", {"path": path, "discardChanges": True}),
+                                   ("scene.open", {"path": path}), ("scene.save", {"path": path})):
                 with self.subTest(method=method, path=path):
                     with self.assertRaises(engine_client.EngineError) as raised:
                         client.call(method, params)

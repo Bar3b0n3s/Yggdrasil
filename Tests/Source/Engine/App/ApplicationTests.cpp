@@ -4,14 +4,17 @@
 
 #include "Engine/App/EngineContext.h"
 #include "Engine/App/ProcessContext.h"
+#include "Engine/Core/FatalError.h"
 #include "Engine/Core/Log.h"
 #include "Engine/Core/VfsPath.h"
 #include "Engine/Core/VirtualFileSystem.h"
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Graphics/RenderContext.h"
 #include "Engine/Platform/Process.h"
+#include "Support/DeathTest.h"
 #include "Support/ExpectLog.h"
 #include "Support/HeadlessGpuFixture.h"
+#include "Support/TempDirectory.h"
 #include "Support/TestOptions.h"
 #include "Support/Utf8Path.h"
 #include "Support/WindowedChild.h"
@@ -19,6 +22,8 @@
 #include <algorithm>
 #include <cmath>
 #include <format>
+#include <fstream>
+#include <iterator>
 #include <span>
 #include <string>
 #include <string_view>
@@ -301,6 +306,98 @@ namespace Engine {
 		return calls;
 	}
 
+	namespace {
+
+		// M15 (--log-level, §13.9): logs an info line, a warning and an error in each frame and records the output level the
+		// run set.
+		class LevelLoggingApplication final : public Application
+		{
+		public:
+			explicit LevelLoggingApplication(ApplicationSpecification specification)
+				: Application(std::move(specification))
+			{
+			}
+		public:
+			LogLevel OutputLevelDuringRun = LogLevel::Trace;
+		protected:
+			void OnUpdate(const FrameTime& /*frame*/) override
+			{
+				OutputLevelDuringRun = Log::GetOutputLevel();
+				ENGINE_INFO("an info line below the output level");
+				ENGINE_WARN("a warning below the output level");
+				ENGINE_ERROR("an error at the output level");
+			}
+		};
+
+	}
+
+	// The whole content of a file; empty when it cannot be read.
+	static std::string ReadTextFile(const std::filesystem::path& path)
+	{
+		std::ifstream stream(path, std::ios::binary);
+		return std::string(std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>());
+	}
+
+	// How many of `entries` contain `needle`, and how often `text` does.
+	static size_t CountContaining(const std::vector<LogEntry>& entries, std::string_view needle)
+	{
+		return static_cast<size_t>(std::ranges::count_if(entries, [needle](const LogEntry& entry)
+		{
+			return entry.Message.contains(needle);
+		}));
+	}
+
+	static size_t CountContaining(std::string_view text, std::string_view needle)
+	{
+		size_t count = 0;
+		for (size_t position = text.find(needle); position != std::string_view::npos; position = text.find(needle, position + needle.size()))
+			++count;
+		return count;
+	}
+
+	// --log-level in a process with both output sinks (M15, §13.9): the run's output level is Error, so its info line and
+	// warning reach neither stderr nor the log file, while the ring buffer keeps all three entries and --expect-no-errors
+	// fails the run; the level is restored when the run returns. The log goes back to the console alone before the
+	// temporary directory is removed, and the final assert reports what the file and the ring buffer received.
+	ENGINE_DEATH_TEST("App/LogLevelFiltersOutputSinksOnly")
+	{
+		std::string report;
+		{
+			const Test::TempDirectory directory("LogLevel");
+			const std::filesystem::path logFile = directory / "Logs/Tests.log";
+			Log::Shutdown();
+			const Status withFile = Log::Initialize({ .FilePath = logFile });
+			ENGINE_CORE_ASSERT(withFile.has_value(), "the log with a file sink could not be initialized");
+			const uint64_t cursor = Log::GetRingBuffer().GetNextSeq();
+
+			ApplicationSpecification specification = MakeHeadlessSpecification(1);
+			specification.ExpectNoErrors = true;
+			specification.MinimumLogLevel = LogLevel::Error;
+			LevelLoggingApplication application(std::move(specification));
+			const int exitCode = application.Run();
+			const LogLevel restored = Log::GetOutputLevel();
+			ENGINE_CORE_INFO("an info line after the run");
+			Log::Flush();
+
+			LogQuery query;
+			query.Cursor = cursor;
+			query.Limit = 10000;
+			const std::vector<LogEntry> entries = Log::GetRingBuffer().Read(query).Entries;
+			const std::string file = ReadTextFile(logFile);
+			Log::Shutdown();
+			const Status consoleOnly = Log::Initialize(LogSpecification());
+			ENGINE_CORE_ASSERT(consoleOnly.has_value(), "the console-only log could not be restored");
+			report = std::format("exit code {}, output level {} during the run and {} after it; ring buffer info {} warn {} error {}; "
+								 "file info {} warn {} error {} after {}",
+				exitCode, LogLevelToString(application.OutputLevelDuringRun), LogLevelToString(restored),
+				CountContaining(entries, "an info line below the output level"), CountContaining(entries, "a warning below the output level"),
+				CountContaining(entries, "an error at the output level"), CountContaining(file, "an info line below the output level"),
+				CountContaining(file, "a warning below the output level"), CountContaining(file, "an error at the output level"),
+				CountContaining(file, "an info line after the run"));
+		}
+		ENGINE_CORE_ASSERT(false, "Log level report: {}", report);
+	}
+
 	TEST_SUITE("App")
 	{
 		TEST_CASE("Application: hooks run in order and --frames ends the run with Success")
@@ -573,7 +670,7 @@ namespace Engine {
 		}
 
 		// M15 (§13.9; Docs/Decisions/0024-m15-contract.md decision 17, stream D).
-		TEST_CASE("ApplyEngineCommandLine: --log-level sets the minimum level of every logger" * doctest::skip(true))
+		TEST_CASE("ApplyEngineCommandLine: --log-level sets the output sinks' minimum level and refuses other spellings")
 		{
 			const std::span<const CommandLineOption> options = GetEngineCommandLineOptions();
 			REQUIRE(std::ranges::any_of(options, [](const CommandLineOption& option)
@@ -598,6 +695,102 @@ namespace Engine {
 			const Status applied = ApplyEngineCommandLine(*commandLine, specification);
 			REQUIRE_FALSE(applied.has_value());
 			CHECK(applied.error().GetCode() == ErrorCode::InvalidArgument);
+			CHECK(applied.error().GetMessageText().contains("--log-level"));
+			CHECK(applied.error().GetMessageText().contains("'critical'"));
+
+			// The spellings are exact, like every engine option's values; without the option nothing is set.
+			for (const std::string_view spelling : { "Error", "WARN", "warning", "debug" })
+			{
+				CAPTURE(std::string(spelling));
+				const std::vector<std::string> arguments = { std::format("--log-level={}", spelling) };
+				const Result<CommandLine> parsed = CommandLine::Parse(arguments, options);
+				REQUIRE(parsed.has_value());
+				ApplicationSpecification rejected;
+				CHECK_FALSE(ApplyEngineCommandLine(*parsed, rejected).has_value());
+				CHECK_FALSE(rejected.MinimumLogLevel.has_value());
+			}
+			const Result<CommandLine> none = CommandLine::Parse({}, options);
+			REQUIRE(none.has_value());
+			ApplicationSpecification defaults;
+			REQUIRE(ApplyEngineCommandLine(*none, defaults).has_value());
+			CHECK_FALSE(defaults.MinimumLogLevel.has_value());
+		}
+
+		TEST_CASE("Application: --log-level filters the console and file sinks only, so --expect-no-errors still counts errors")
+		{
+			// In place: the run sets the output level and restores the previous one when it returns, while the log listeners
+			// (Test::ExpectLog, the --expect-no-errors counter) receive every entry, so the filtered error still fails the run.
+			{
+				ApplicationSpecification specification = MakeHeadlessSpecification(1);
+				specification.ExpectNoErrors = true;
+				specification.MinimumLogLevel = LogLevel::Critical;
+				LevelLoggingApplication application(std::move(specification));
+				const LogLevel before = Log::GetOutputLevel();
+				Test::ExpectLog logged(LogLevel::Error, "an error at the output level");
+				Test::ExpectLog failed(LogLevel::Error, "--expect-no-errors");
+				CHECK(application.Run() == ExitCode::Failed);
+				CHECK(application.OutputLevelDuringRun == LogLevel::Critical);
+				CHECK(Log::GetOutputLevel() == before);
+			}
+
+			// In a process with a console and a log file: what each output sink and the ring buffer received.
+			const Result<Test::DeathTestResult> result = Test::RunDeathTest("App/LogLevelFiltersOutputSinksOnly");
+			REQUIRE_MESSAGE(result.has_value(), result.error().ToString());
+			INFO("child stderr: ", result->StandardError);
+			CHECK(result->ExitCode == FatalCrashExitCode);
+			CHECK(result->StandardError.contains("Log level report: exit code 1, output level Error during the run and Trace after it; "
+												 "ring buffer info 1 warn 1 error 1; file info 0 warn 0 error 1 after 1"));
+			CHECK(result->StandardError.contains("an error at the output level"));
+			CHECK(result->StandardError.contains("error(s) were logged during the run (--expect-no-errors)"));
+			CHECK(result->StandardError.contains("an info line after the run"));
+			CHECK_FALSE(result->StandardError.contains("an info line below the output level"));
+			CHECK_FALSE(result->StandardError.contains("a warning below the output level"));
+		}
+
+		TEST_CASE("Application: an executable's --log-level filters its console and log file from the process's first line")
+		{
+			// RunApplication hands MinimumLogLevel to the ProcessContext, so the process's own lines ("Starting ...", "Process
+			// context: Log initialized") follow it too. A logic-only editor of two frames, without the option, with
+			// --log-level warn and with a spelling the option refuses.
+			const Result<std::filesystem::path> editor = Test::GetBuiltExecutablePath("Editor");
+			REQUIRE_MESSAGE(editor.has_value(), editor.error().ToString());
+			const auto run = [&editor](const Test::TempDirectory& userData, std::vector<std::string> extra)
+			{
+				std::vector<std::string> arguments = {
+					"--headless",
+					"--renderer",
+					"none",
+					"--frames",
+					"2",
+					"--user-data-dir=" + Test::PathToUtf8(userData.GetPath()),
+					"--engine-cache-dir=" + Test::PathToUtf8(userData / "EngineCache"),
+				};
+				arguments.insert(arguments.end(), extra.begin(), extra.end());
+				return Process::Run({ .Executable = *editor, .Arguments = Test::WithoutAudioDevice(std::move(arguments)) }, std::chrono::seconds(120));
+			};
+			const std::string logFile = std::string(ENGINE_PRODUCT_NAME) + "/Logs/Editor.log";
+
+			const Test::TempDirectory plainData("LogLevelPlain");
+			const Result<ProcessResult> plain = run(plainData, {});
+			REQUIRE_MESSAGE(plain.has_value(), plain.error().ToString());
+			INFO("plain stderr: ", plain->StandardError);
+			CHECK(plain->ExitCode == ExitCode::Success);
+			CHECK(plain->StandardError.contains("[info] Process context: Log initialized"));
+			CHECK(ReadTextFile(plainData / logFile).contains("[info] Process context: Log initialized"));
+
+			const Test::TempDirectory warnData("LogLevelWarn");
+			const Result<ProcessResult> warn = run(warnData, { "--log-level", "warn" });
+			REQUIRE_MESSAGE(warn.has_value(), warn.error().ToString());
+			INFO("warn stderr: ", warn->StandardError);
+			CHECK(warn->ExitCode == ExitCode::Success);
+			CHECK_FALSE(warn->StandardError.contains("[info]"));
+			CHECK_FALSE(ReadTextFile(warnData / logFile).contains("[info]"));
+
+			const Test::TempDirectory refusedData("LogLevelRefused");
+			const Result<ProcessResult> refused = run(refusedData, { "--log-level=verbose" });
+			REQUIRE_MESSAGE(refused.has_value(), refused.error().ToString());
+			CHECK(refused->ExitCode == ExitCode::UsageError);
+			CHECK(refused->StandardError.contains("--log-level"));
 		}
 
 		TEST_CASE("ApplyEngineCommandLine: the graphics options set the renderer and the graphics specification")

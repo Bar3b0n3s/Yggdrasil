@@ -12,8 +12,11 @@ namespace Engine {
 	Result<uint32_t> ProjectLock::ReadHolderPid(const std::filesystem::path& lockFile)
 	{
 		ENGINE_TRY_ASSIGN(const Buffer bytes, FileSystem::ReadFile(lockFile));
-		const std::string_view text = AsStringView(bytes);
+		return ParseHolderPid(AsStringView(bytes), lockFile);
+	}
 
+	Result<uint32_t> ProjectLock::ParseHolderPid(std::string_view text, const std::filesystem::path& lockFile)
+	{
 		// The format is exact: 1 to 10 decimal digits, one LF, nothing else.
 		constexpr size_t MaxDigits = std::numeric_limits<uint32_t>::digits10 + 1;
 		const auto describe = [&lockFile]()

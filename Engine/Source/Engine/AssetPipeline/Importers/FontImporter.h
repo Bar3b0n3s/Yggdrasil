@@ -43,8 +43,10 @@ namespace Engine {
 		[[nodiscard]] Result<ImportResult> Import(ImportContext& context, const AssetMetadata& metadata) const override;
 
 		// Bounds-check the sfnt structure before an external font rasterizer reads the same source bytes. Reuses the
-		// importer's checks without baking an atlas. Pure and thread-safe; retains no bytes. ImportFailed for invalid data.
-		// This checks table structure, not arbitrary glyph programs; callers still use trusted font resources.
+		// importer's checks without baking an atlas (ValidateTrueTypeTables: the tables, every TrueType glyph outline, and
+		// the CFF table with every glyph's charstring as stb_truetype runs it). Pure and thread-safe; retains no bytes.
+		// ImportFailed for invalid data. It covers what the importer makes stb_truetype read; a rasterizer that reads more
+		// (Dear ImGui's atlas builder rasterizes and kerns with stb_truetype itself) still needs trusted font resources.
 		[[nodiscard]] static Status ValidateSource(std::span<const std::byte> source);
 
 		// Registers FontImportSettings.

@@ -7,6 +7,7 @@
 #include "Engine/Asset/MeshData.h"
 #include "Engine/Asset/TextureData.h"
 #include "Engine/Core/FileSystem.h"
+#include "Support/Fuzz.h"
 #include "Support/TestData.h"
 
 #include <algorithm>
@@ -168,6 +169,38 @@ namespace Engine {
 			REQUIRE_MESSAGE(again.has_value(), again.error().ToString());
 			CHECK(std::ranges::equal(again->GetEntries(), catalog->GetEntries()));
 			CHECK(again->ToText() == canonical);
+		}
+
+		TEST_CASE("BuiltinAssets: 1,000 seeded mutations of the catalogue never crash" * doctest::test_suite(Test::FuzzSuite))
+		{
+			// The seed: Resources/EngineAssets.json. A catalogue the parser accepts writes canonical text that parses back to the
+			// same entries.
+			const Result<std::string> seed = FileSystem::ReadText(Test::GetRepositoryRoot() / "Resources" / BuiltinAssetCatalog::FileName);
+			REQUIRE_MESSAGE(seed.has_value(), seed.error().ToString());
+			// About one mutation in a hundred is a catalogue the reader accepts, so a tenth of the sequence (the Debug unit run's
+			// --fuzz-scale=0.1, ADR 0024 decision 14) holds too few to check both outcomes: the minimum is the whole count.
+			constexpr uint64_t Iterations = 1000;
+			const Test::FuzzRun run = Test::RunFuzzCase(0xB1A55E7, Iterations, [&seed](Random& random, uint64_t /*index*/)
+			{
+				std::string mutated = *seed;
+				Test::MutateText(mutated, random);
+				const Result<BuiltinAssetCatalog> catalog = BuiltinAssetCatalog::Parse(mutated);
+				if (!catalog.has_value())
+				{
+					const ErrorCode code = catalog.error().GetCode();
+					CHECK((code == ErrorCode::Parse || code == ErrorCode::Validation || code == ErrorCode::UnsupportedVersion));
+					return false;
+				}
+				const Result<BuiltinAssetCatalog> again = BuiltinAssetCatalog::Parse(catalog->ToText());
+				REQUIRE_MESSAGE(again.has_value(), again.error().ToString());
+				CHECK(std::ranges::equal(again->GetEntries(), catalog->GetEntries()));
+				return true;
+			}, Iterations);
+			if (Test::IsFuzzSample(run.Range))
+			{
+				CHECK(run.Counts.Rejected > 0);
+				CHECK(run.Counts.Accepted > 0);
+			}
 		}
 
 		TEST_CASE("BuiltinAssets: malformed catalogues are located errors")

@@ -1,6 +1,7 @@
 #include "TestsPCH.h"
 #include "EditorCore/Autosave/Autosave.h"
 
+#include "EditorCore/Autosave/Private/AutosaveRecoveryData.h"
 #include "EditorCore/Commands/ProjectSettingsCommand.h"
 #include "EditorCore/Commands/SceneEdit.h"
 #include "EditorCore/EditorContext.h"
@@ -15,6 +16,7 @@
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/SceneSerializer.h"
 #include "Support/EditorTestFixture.h"
+#include "Support/Fuzz.h"
 
 #include <nlohmann/json.hpp>
 
@@ -344,6 +346,68 @@ namespace Engine {
 			AutosaveWrite(setup.Source(), AutosaveRead(setup.Source()) + "\n");
 			CHECK(setup.Service.Recover(offer).error().GetCode() == ErrorCode::Conflict);
 			CHECK(setup.Service.WriteFatalSnapshot() == AutosaveFatalResult::IoFailure);
+		}
+
+		TEST_CASE("Autosave: 1,000 seeded mutations of the documents of an autosave never crash" * doctest::test_suite(Test::FuzzSuite))
+		{
+			// The seeds: the manifest and the two generations a real autosave wrote, read once. Every iteration mutates one of
+			// the five documents and reads them through ParseAutosaveRecovery, ReadAutosaveRecovery's checks in memory (the
+			// files' own checks are covered by the cases above), so no iteration touches a file.
+			AutosaveSetup setup;
+			setup.Dirty("First");
+			const AutosaveWriteResult first = setup.Save();
+			setup.Dirty("Second");
+			const AutosaveWriteResult second = setup.Save();
+			Utils::AutosaveRecoveryDocuments documents;
+			documents.Manifest = AutosaveRead(setup.Root() / "Manifest.json");
+			for (const std::string& generation : { first.Generation, second.Generation })
+			{
+				documents.Generations[generation] = Utils::AutosaveGenerationDocuments{ .Metadata = AutosaveRead(setup.Root() / generation / "Metadata.json"),
+					.Scene = AutosaveRead(setup.Root() / generation / "Scene.json") };
+			}
+			const Result<std::string> identity = JsonReader(AutosaveReadJson(setup.Root() / second.Generation / "Metadata.json")).ReadMember<std::string>("ProjectFile");
+			REQUIRE(identity.has_value());
+			const std::filesystem::path projectFile = FileSystem::PathFromUtf8(*identity);
+			// Unmutated, the documents in memory give the offer the files give.
+			const auto fromFiles = Utils::ReadAutosaveRecovery(setup.Fixture.GetEditor().GetProject());
+			const auto fromMemory = Utils::ParseAutosaveRecovery(projectFile, documents);
+			REQUIRE_MESSAGE(fromFiles.has_value(), fromFiles.error().ToString());
+			REQUIRE_MESSAGE(fromMemory.has_value(), fromMemory.error().ToString());
+			REQUIRE(fromFiles->has_value());
+			REQUIRE(fromMemory->has_value());
+			CHECK((*fromMemory)->Info.Generation == (*fromFiles)->Info.Generation);
+			CHECK((*fromMemory)->SceneText == (*fromFiles)->SceneText);
+
+			const std::array<std::string, 2> generations = { first.Generation, second.Generation };
+			const Test::FuzzRun run = Test::RunFuzzCase(0xA5A7E, 1000, [&documents, &projectFile, &generations](Random& random, uint64_t /*index*/)
+			{
+				Utils::AutosaveRecoveryDocuments mutated = documents;
+				const int64_t target = random.RangeInt(0, 4);
+				if (target == 0)
+				{
+					Test::MutateText(*mutated.Manifest, random);
+				}
+				else
+				{
+					Utils::AutosaveGenerationDocuments& generation = mutated.Generations[generations[static_cast<size_t>((target - 1) / 2)]];
+					Test::MutateText(target % 2 == 1 ? generation.Metadata : generation.Scene, random);
+				}
+				const std::string_view only = random.NextBool() ? std::string_view() : std::string_view(generations[static_cast<size_t>(random.RangeInt(0, 1))]);
+				const auto recovered = Utils::ParseAutosaveRecovery(projectFile, mutated, only);
+				if (!recovered.has_value())
+					return false;
+				if (recovered->has_value())
+				{
+					CHECK(std::ranges::find(generations, (*recovered)->Info.Generation) != generations.end());
+					CHECK((*recovered)->Info.NewerThanSource);
+				}
+				return true;
+			});
+			if (Test::IsFuzzSample(run.Range))
+			{
+				CHECK(run.Counts.Rejected > 0);
+				CHECK(run.Counts.Accepted > 0);
+			}
 		}
 
 		TEST_CASE("Autosave: an untitled scene is recoverable")

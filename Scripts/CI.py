@@ -9,15 +9,23 @@ The stages, with the configurations of the §15.8 matrix:
                                      own defect, on every fixture workspace under Tests/Data/BuildConfig/;
                                      Scripts/Lint.py (header self-containment and the contract stubs and skipped tests
                                      included) and Lint.py --self-test (every seeded fixture under Tests/Data/Lint/
-                                     fails with exactly its expected findings); Scripts/Format.py --check; every
-                                     fixture generator under Tests/Data/Generate/ with --check (the committed fixtures
-                                     are byte-identical to a fresh generation); Scripts/FetchAssets.py defaults --check
+                                     fails with exactly its expected findings); Scripts/CheckRuntimeMap.py --self-test
+                                     (every seeded map under Tests/Data/MapFiles/ gives exactly its expected findings,
+                                     in every map format); Scripts/Format.py --check; every fixture generator under
+                                     Tests/Data/Generate/ with --check (the committed fixtures are byte-identical to a
+                                     fresh generation); Scripts/GenerateDetMathReference.py --check (its self-test,
+                                     then the committed DetMath oracle is byte-identical to a fresh generation);
+                                     Scripts/FetchAssets.py defaults --check
                                      (the committed engine resources match their SHA-256 pins, offline) and
                                      FetchAssets.py fixture --check (the pinned third-party test fixtures match their
                                      pins and Tests/Data/LICENSES.md, offline)
   build        Debug, Release, Dist  Scripts/Build.py per configuration, plus, after Debug, the Roadmap M0 acceptance
                                      check "Shaders: slang-only change is not skipped by the up-to-date check":
-                                     touching only a .slang file re-runs the shader rule, the next build does not
+                                     touching only a .slang file re-runs the shader rule, the next build does not; and,
+                                     right after Dist, the Roadmap M15 acceptance step "Dist: map file contains no
+                                     automation, Analysis, ImGui or AssetPipeline symbols": Scripts/CheckRuntimeMap.py
+                                     --config Dist on the Dist Runtime's linker map, which must also hold the
+                                     FeatureTest harness's required symbols (ADR 0024 decision 11)
   bake         Release               Editor --headless --renderer vulkan --bake-engine-assets (ADR 0010 decision 13,
                                      ADR 0013 decision 9): fills the configuration-independent engine cooked cache
                                      bin/EngineCache from Resources/EngineAssets.json, incrementally (up-to-date entries
@@ -37,7 +45,8 @@ The stages, with the configurations of the §15.8 matrix:
                                      machine's device class (§15.4); smoke mode, a warning, where it has none (always
                                      so on Lavapipe: no software-rasterizer goldens); --gpu-optional as for gpu
   feature      Debug, Release        Scripts/Test.py --suite feature --junit --require-gpu: Editor --headless --project
-                                     Projects/FeatureTest --run-tests (FeatureTest in editor mode, §15.5) with the six
+                                     Projects/FeatureTest --run-tests --strict (FeatureTest in editor mode, §15.5, its
+                                     unknown fields and components errors, §6) with the six
                                      per-mode coverage gates evaluated and green, no skipped case row and the project
                                      unchanged outside Library/ (Docs/Decisions/0022-m14-contract.md decision 7); an
                                      .hdr import needs the GPU baker, so --gpu-optional applies as for gpu
@@ -47,32 +56,58 @@ The stages, with the configurations of the §15.8 matrix:
                                      gate (§15.6, §15.7); on Linux it needs a display with a window manager, like
                                      unit. Its screenshot tests start rendering editors, so --gpu-optional applies as
                                      for gpu
-  determinism  Debug, Release        Scripts/Test.py --suite determinism --config Debug,Release --junit: every
-                                     Testing.Replays file of FeatureTest verified with input.replay {verify, strictHash}
-                                     in the --renderer none editor of each configuration, against its committed
-                                     FinalStateHash and across the two configurations (§15.1 T3d; M15 adds the exported
-                                     Release and Dist runs); CPU only
+  export       Release, Dist         Scripts/Test.py --suite export --config Release,Dist --junit --require-gpu: the
+                                     testing export of FeatureTest in each configuration (bin/Exports/<Config>/
+                                     FeatureTest), run with --feature-test, its six per-mode gates evaluated against
+                                     its own mode and one counted Debug.Break in its Api.Debug row, and the cross-mode
+                                     merge over the Editor (the feature stage's Feature-Release.json), Release and Dist
+                                     reports (§15.1 T3, §15.6; ADR 0024 decision 9); the exporting editor runs with
+                                     --strict; --gpu-optional as for gpu
+  determinism  Debug, Release, Dist  Scripts/Test.py --suite determinism --config Debug,Release,Dist --junit
+                                     --require-gpu: every Testing.Replays file of FeatureTest, verified with
+                                     input.replay {verify, strictHash} in the --renderer none --strict Debug and
+                                     Release editors (CPU only) and read from the export stage's current Release and
+                                     Dist reports (never rerun), against its committed FinalStateHash and across the
+                                     four runs (§15.1 T3d; ADR 0024 decision 10); a missing or stale exported report
+                                     fails it, or with --gpu-optional leaves the exported runs out with a warning
   portability  n/a                   premake --os=linux gmake, --os=linux ninja, --os=macosx xcode4 (and the vs2026
                                      reference) into bin-int/Portability/, each checked against the expected file list
                                      and project/configuration set; the xcode4 projects' precompiled headers
                                      (GCC_PREFIX_HEADER, resolved like Xcode does) and the gmake ones must exist, and
-                                     the first-party xcode4 projects must enable LTO (LLVM_LTO) in Dist; then clang-cl
+                                     the first-party xcode4 projects must enable LTO (LLVM_LTO) in Dist; the
+                                     Runtime's link settings of every target and configuration
+                                     (Scripts/Lib/portability.py: the Linux $ORIGIN RPATH, the macOS Frameworks rpath,
+                                     deployment target and tool product, the map file everywhere, the Windows
+                                     subsystems; ADR 0024 decision 18); then clang-cl
                                      builds of Tests in Release (Engine, EditorCore and the vendored libraries included)
                                      and of every Dist project (asserts compiled out), warnings tolerated only in
                                      vendored code, when Visual Studio's C++ Clang component
                                      is installed, otherwise reported as skipped (a failure with --require-clang-cl)
-Later stages of §15.8 (export, games, hardening) are accepted by --stages and reported as "not-available" until their
-milestone.
+  hardening    Release               milestone gates only (CI.py --milestone, or named in --stages):
+                                     Scripts/Hardening.py --steps perf,soak,asan-generate,asan-build,asan-unit,
+                                     asan-feature,fuzz, one step each, failing fast: the perf capture (warning-only),
+                                     the soak of every scene of every project and of the exported Release Runtime, the
+                                     AddressSanitizer workspace (bin-int/Asan) with its unit and feature suites, and the
+                                     1,000,000-iteration fuzz of every reader of Tests/Data/Fuzz/Targets.json (§15.1
+                                     T6; ADR 0024 decisions 12 to 16 and 19). A plain CI.py lists it as not run
+                                     ("milestone gates only")
+The games stage of §15.8 is accepted by --stages and reported as "not-available" until its milestone.
+
+--milestone (Roadmap rule 1, Architecture §15.9; ADR 0024 decision 19) is the gate of the commit that completes a
+milestone: every available stage plus hardening, with --require-clang-cl. It is the whole matrix on a machine with a
+device in strict mode, so combining it with --stages, --skip-stages, --configs, --toolset, --no-clang-cl,
+--gpu-optional or --contract is a usage error (exit code 2); --json and --summary-junit combine freely.
 
 Modes (Roadmap rule 3, Docs/Decisions/0004-contract-stub-gate.md): strict by default, so a milestone cannot end with a
 contract stub (ENGINE_CONTRACT_STUB) or a skipped test case outside the child-process targets. --contract passes
 --allow-contract-stubs to Lint.py (lint) and --allow-skips to Test.py (unit, gpu, golden, feature, automation,
-determinism), like PreCommit.py --contract (Scripts/Lib/scripts.py); the run prints which mode it is in at the start
-and in the summary.
+export, determinism), like PreCommit.py --contract (Scripts/Lib/scripts.py); the run prints which mode it is in at the
+start and in the summary.
 
 Results: each stage's own output, a summary table, bin/TestResults/CI.xml (JUnit, one test case per step; another
 path with --summary-junit, so separate runs of one CI job keep separate summaries), the unit, gpu, golden, feature
-(with the editor's JSON report beside it), automation and determinism JUnit files in bin/TestResults/, and the actual,
+(with the editor's JSON report beside it), automation, export (with the Runtime's FeatureTest-<Config> reports),
+determinism and hardening (Soak, Perf, Unit/Feature/Fuzz-Release-Asan) files in bin/TestResults/, and the actual,
 expected and diff images of failed golden comparisons in bin/TestResults/Golden/.
 
 Exit codes (§4.1): 0 every selected stage passed, otherwise the code of the first failing step: 1 failed,
@@ -93,13 +128,14 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import tempfile
 import time
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 
-from Lib import paths, premake, toolchain, workspace
-from Lib.process import ToolNotFoundError, child_environment, format_command, run_streamed
+from Lib import paths, portability, premake, toolchain, workspace
+from Lib.process import ToolNotFoundError, child_environment, format_command, run_streamed, terminate_tree
 from Lib.report import (
     EXIT_FAILED,
     EXIT_INIT_FAILED,
@@ -118,6 +154,11 @@ from Lib.scripts import CONTRACT_FLAG_HELP, mode_note, run_script, run_static_ch
 SHADER_MANIFEST = paths.REPOSITORY_ROOT / "Resources" / "Shaders" / "Shaders.json"
 # The Roadmap M0 acceptance name of the shader up-to-date check, used verbatim as its step name (ReviewChecklist §8).
 SHADER_ACCEPTANCE_NAME = "Shaders: slang-only change is not skipped by the up-to-date check"
+# The Roadmap M15 acceptance name of the Dist map check, used verbatim as its step name (ADR 0024 decision 11).
+RUNTIME_MAP_ACCEPTANCE_NAME = "Dist: map file contains no automation, Analysis, ImGui or AssetPipeline symbols"
+# The hardening stage's steps, in Scripts/Hardening.py's order (ADR 0024 decision 19).
+HARDENING_STEPS = ("perf", "soak", "asan-generate", "asan-build", "asan-unit", "asan-feature", "fuzz")
+MILESTONE_ONLY_NOTE = "milestone gates only: CI.py --milestone"
 PORTABILITY_ROOT = paths.BIN_INT_ROOT / "Portability"
 SUMMARY_JUNIT = paths.TEST_RESULTS_ROOT / "CI.xml"
 
@@ -144,9 +185,15 @@ TIMEOUTS = {
     "golden": 1800.0,
     "feature": 3600.0,
     "automation": 3600.0,
+    "export": 3600.0,
     "determinism": 3600.0,
     "portability": 600.0,
     "clang-cl": 7200.0,
+    "runtime-map": 600.0,
+    # Scripts/Hardening.py bounds each of its steps itself (its TIMEOUTS: perf 1200 s, soak 3600 s, asan generate
+    # 3600 s, asan build 7200 s, asan unit 3600 s, asan feature 3600 s, fuzz 5400 s, 28,200 s in all); this bounds the
+    # whole run above their sum (ADR 0024 "Integration", budgets and timeouts).
+    "hardening": 30600.0,
 }
 
 
@@ -156,6 +203,8 @@ class Stage:
     configurations: tuple[str, ...] | None  # the §15.8 matrix; None for configuration-independent stages
     available: bool
     planned: str = ""
+    # §15.8 runs it at milestone gates only: CI.py --milestone, or --stages naming it; "all" lists it as not run.
+    milestone_only: bool = False
 
 
 # §15.8 order.
@@ -170,11 +219,11 @@ STAGES = (
     Stage("golden", ("Release",), True),
     Stage("feature", ("Debug", "Release"), True),
     Stage("automation", ("Release",), True),
-    Stage("export", ("Release", "Dist"), False, "M7 (Exporter v0) / M15 (testing exports)"),
-    Stage("determinism", ("Debug", "Release"), True),
+    Stage("export", ("Release", "Dist"), True),
+    Stage("determinism", ("Debug", "Release", "Dist"), True),
     Stage("games", ("Release",), False, "M16-M18 (demo games)"),
     Stage("portability", None, True),
-    Stage("hardening", ("Release",), False, "M15 (ASan, soak, fuzz; milestone gates)"),
+    Stage("hardening", ("Release",), True, milestone_only=True),
 )
 STAGE_BY_NAME = {stage.name: stage for stage in STAGES}
 
@@ -223,6 +272,13 @@ class Runner:
                     return steps
             if config == "Debug":
                 steps.append(self.done(self.shader_up_to_date_check(config)))
+                if steps[-1].failed:
+                    return steps
+            if config == "Dist":
+                # Roadmap M15: the shipping Runtime links no automation, Luau Analysis, ImGui or AssetPipeline code and
+                # keeps the FeatureTest harness (§14.4; PreCommit builds no Dist, so the check lives here).
+                steps.append(self.script(RUNTIME_MAP_ACCEPTANCE_NAME, "CheckRuntimeMap.py", ["--config", "Dist"],
+                                         TIMEOUTS["runtime-map"]))
                 if steps[-1].failed:
                     return steps
         return steps
@@ -351,13 +407,82 @@ class Runner:
                 return steps
         return steps
 
-    def determinism(self, configs: list[str]) -> list[Step]:
-        """§15.8 determinism (M14: the editor configurations): one Test.py run over all of them, which compares their
-        hashes with the committed ones and with each other. It needs no GPU."""
+    def export(self, configs: list[str]) -> list[Step]:
+        """§15.8 export (ADR 0024 decision 9): one Test.py run over the selected configurations, which exports
+        FeatureTest for testing, runs each package with --feature-test, evaluates its per-mode gates and, with both
+        configurations, merges the Editor, Release and Dist reports. It needs a device (--require-gpu unless
+        --gpu-optional), like the feature stage whose Feature-Release.json it merges."""
         mode = test_mode_arguments(self.arguments.contract)
+        device = [] if self.arguments.gpu_optional else ["--require-gpu"]
+        return [self.script(f"export {', '.join(configs)}", "Test.py",
+                            ["--suite", "export", "--config", ",".join(configs), "--junit", *device, *mode],
+                            TIMEOUTS["export"])]
+
+    def determinism(self, configs: list[str]) -> list[Step]:
+        """§15.8 determinism (ADR 0024 decision 10): one Test.py run over all the selected configurations, which
+        compares the editor runs' hashes (CPU only) and the exported runs' hashes (read from the export stage's current
+        reports) with the committed ones and with each other. --require-gpu unless --gpu-optional: a missing or stale
+        exported report then fails the step instead of leaving those runs out with a warning."""
+        mode = test_mode_arguments(self.arguments.contract)
+        device = [] if self.arguments.gpu_optional else ["--require-gpu"]
         return [self.script(f"determinism {', '.join(configs)}", "Test.py",
-                            ["--suite", "determinism", "--config", ",".join(configs), "--junit", *mode],
+                            ["--suite", "determinism", "--config", ",".join(configs), "--junit", *device, *mode],
                             TIMEOUTS["determinism"])]
+
+    def hardening(self) -> list[Step]:
+        """§15.8 hardening (§15.1 T6; ADR 0024 decision 19): Scripts/Hardening.py with every step, run once with
+        --json, so each of its steps becomes one step here under its own name. Hardening.py fails fast and reports the
+        steps after a failed one as not run; it bounds each step itself, TIMEOUTS["hardening"] the whole run."""
+        name = "hardening"
+        script = paths.SCRIPTS_ROOT / "Hardening.py"
+        arguments = ["--steps", ",".join(HARDENING_STEPS), "--json",
+                     *(["--gpu-optional"] if self.arguments.gpu_optional else [])]
+        if not script.is_file():
+            return [Step(name, Status.FAILED, f"{paths.display_path(script)} does not exist (Architecture §2.3)",
+                         exit_code=EXIT_INIT_FAILED)]
+        shown = format_command([Path(sys.executable).name, paths.display_path(script), *arguments])
+        self.console.heading(f"{name}: {shown}")
+        started = time.monotonic()
+        try:
+            # Its progress goes to its standard error (inherited, so it streams); its standard output is the JSON
+            # result.
+            child = subprocess.Popen([sys.executable, str(script), *arguments], cwd=paths.REPOSITORY_ROOT,
+                                     stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=None,
+                                     env=child_environment())
+        except OSError as error:
+            return [Step(name, Status.FAILED, f"cannot start {paths.display_path(script)}: {error}",
+                         exit_code=EXIT_INIT_FAILED)]
+        try:
+            output, _ = child.communicate(timeout=TIMEOUTS["hardening"])
+        except subprocess.TimeoutExpired:
+            terminate_tree(child)
+            child.communicate()
+            return [Step(name, Status.TIMEOUT, f"Hardening.py ran longer than {TIMEOUTS['hardening']:.0f} s",
+                         time.monotonic() - started)]
+        except BaseException:
+            terminate_tree(child)
+            raise
+        document = parse_json_document(output.decode("utf-8", errors="replace"))
+        reported = [entry for entry in document.get("steps", []) if isinstance(entry, dict)]
+        if not reported:
+            return [Step(name, Status.FAILED, f"Hardening.py exited with code {child.returncode} without a JSON result",
+                         time.monotonic() - started, exit_code=child.returncode or EXIT_FAILED)]
+        steps: list[Step] = []
+        for entry in reported:
+            try:
+                status = Status(entry.get("status", "failed"))
+            except ValueError:
+                status = Status.FAILED
+            exit_code = entry.get("exitCode")
+            data = {key: value for key, value in entry.items()
+                    if key not in ("name", "status", "detail", "durationSeconds", "exitCode")}
+            steps.append(Step(str(entry.get("name", name)), status, str(entry.get("detail", "")),
+                              float(entry.get("durationSeconds", 0.0) or 0.0),
+                              exit_code=exit_code if isinstance(exit_code, int) else None, data=data))
+        if child.returncode != 0 and not any(step.failed for step in steps):
+            steps.append(Step(name, Status.FAILED, f"Hardening.py exited with code {child.returncode}",
+                              time.monotonic() - started, exit_code=child.returncode))
+        return steps
 
     # ----------------------------------------------------------------------------------------------------------------
 
@@ -374,6 +499,9 @@ class Runner:
         if steps[-1].failed:
             return steps
         steps.append(self.done(self.check_generated_settings(generated)))
+        if steps[-1].failed:
+            return steps
+        steps.append(self.done(self.check_link_settings(generated)))
         if steps[-1].failed:
             return steps
         steps.append(self.done(self.clang_cl_build()))
@@ -491,6 +619,19 @@ class Runner:
         return Step(name, Status.PASSED, f"{checked} precompiled-header settings resolve to existing headers; "
                                          f"{', '.join(XCODE_DIST_LTO_PROJECTS)} enable LTO in Dist (xcode4)")
 
+    @staticmethod
+    def check_link_settings(generated: dict[tuple[str, str], tuple[Path, list[str]]]) -> Step:
+        """The Runtime's generated link settings of every target and configuration (ADR 0024 decision 18,
+        portability.check_runtime_link_settings): the Linux $ORIGIN RPATH and the map file (gmake, ninja), the macOS
+        Frameworks rpath, map, deployment target and tool product type (xcode4), /MAP and the subsystems (vs2026)."""
+        name = "portability check Runtime link settings"
+        problems = portability.check_runtime_link_settings(
+            {target: location for target, (location, _) in generated.items()})
+        if problems:
+            return Step(name, Status.FAILED, "; ".join(problems))
+        targets = ", ".join(f"{system} {action}" for system, action in sorted(portability.TARGETS))
+        return Step(name, Status.PASSED, f"{targets}: every configuration's Runtime link settings as required")
+
     def clang_cl_build(self) -> Step:
         name = "portability clang-cl build (Release, Dist)"
         if self.arguments.no_clang_cl:
@@ -536,20 +677,48 @@ class Runner:
         return Step(name, Status.PASSED, f"{built.detail}; Dist: {dist.detail}", built.duration + dist.duration)
 
 
+def parse_json_document(text: str) -> dict[str, Any]:
+    """The first JSON object a child script printed with --json on its standard output (other lines before or after it,
+    such as workflow annotations, are ignored), or {} when there is none."""
+    decoder = json.JSONDecoder()
+    start = text.find("{")
+    while start != -1:
+        try:
+            document, _ = decoder.raw_decode(text, start)
+            if isinstance(document, dict):
+                return document
+        except json.JSONDecodeError:
+            pass
+        start = text.find("{", start + 1)
+    return {}
+
+
+# The options --milestone refuses (ADR 0024 decision 19): a milestone gate is the whole matrix, with a device, in strict
+# mode.
+MILESTONE_REFUSED_OPTIONS = ("--stages", "--skip-stages", "--configs", "--toolset", "--no-clang-cl", "--gpu-optional",
+                             "--contract")
+
+
 def parse_arguments(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Run the CI stages (Architecture §15.8) in order, stopping at the first failing stage.",
         epilog="Exit codes: 0 success, else the first failing step's code: 1 failed, 2 usage, 3 missing tool or file, "
                "5 timeout.",
     )
-    available = [stage.name for stage in STAGES if stage.available]
-    parser.add_argument("--stages", default="all",
-                        help=f"comma-separated stages (default: all stages that exist: {', '.join(available)}); "
-                             f"later stages ({', '.join(s.name for s in STAGES if not s.available)}) are reported "
-                             f"as not available")
+    available = [stage.name for stage in STAGES if stage.available and not stage.milestone_only]
+    milestone_only = [stage.name for stage in STAGES if stage.available and stage.milestone_only]
+    parser.add_argument("--stages", default=None,
+                        help=f"comma-separated stages (default: all stages that exist: {', '.join(available)}, with "
+                             f"{', '.join(milestone_only)} listed as not run: {MILESTONE_ONLY_NOTE}); naming "
+                             f"{', '.join(milestone_only)} runs it; later stages "
+                             f"({', '.join(s.name for s in STAGES if not s.available)}) are reported as not available")
     parser.add_argument("--skip-stages", default="", help="comma-separated stages to leave out")
-    parser.add_argument("--configs", default=",".join(paths.CONFIGURATIONS),
+    parser.add_argument("--configs", default=None,
                         help="restrict the configuration matrix (default: Debug,Release,Dist)")
+    parser.add_argument("--milestone", action="store_true",
+                        help="the gate of the commit that completes a milestone (Roadmap rule 1, §15.9): every "
+                             "available stage plus hardening, with --require-clang-cl; refused together with --stages, "
+                             "--skip-stages, --configs, --toolset, --no-clang-cl, --gpu-optional and --contract")
     parser.add_argument("--toolset", choices=("msc", "gcc", "clang"),
                         help="compiler toolset passed to Generate.py (Linux: gcc or clang)")
     parser.add_argument("--no-clang-cl", action="store_true",
@@ -559,23 +728,45 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
                         help="portability: fail (exit code 3) instead of skipping the clang-cl build when Visual "
                              "Studio's C++ Clang component is missing (CI runners that must have it)")
     parser.add_argument("--gpu-optional", action="store_true",
-                        help="gpu, golden, feature and automation: run without --require-gpu, so on a machine without "
-                             "a usable Vulkan device the GPU test cases, the FeatureTest run and the rendering "
-                             "automation tests pass without running, naming the reason, and the steps end as warnings "
-                             "(the GitHub-hosted Windows and macOS runners, which have no GPU); bake: without a usable "
-                             "device, bake without the environments (--renderer none) and end as a warning; by default "
-                             "a missing device fails them")
+                        help="gpu, golden, feature, automation and export: run without --require-gpu, so on a "
+                             "machine without a usable Vulkan device the GPU test cases, the FeatureTest runs and the "
+                             "rendering automation tests pass without running, naming the reason, and the steps end as "
+                             "warnings (the GitHub-hosted Windows and macOS runners, which have no GPU); determinism: "
+                             "a missing or stale exported report leaves the exported runs out with a warning; bake: "
+                             "without a usable device, bake without the environments (--renderer none) and end as a "
+                             "warning; by default a missing device fails them")
     parser.add_argument("--contract", action="store_true", help=CONTRACT_FLAG_HELP)
     parser.add_argument("--summary-junit", type=Path, default=SUMMARY_JUNIT,
                         help=f"JUnit summary of this run (default: {paths.display_path(SUMMARY_JUNIT)})")
     parser.add_argument("--json", action="store_true", help="print a machine-readable result on stdout")
     arguments = parser.parse_args(argv)
     names = tuple(stage.name for stage in STAGES)
+    if arguments.milestone:
+        given = {
+            "--stages": arguments.stages is not None,
+            "--skip-stages": bool(arguments.skip_stages.strip()),
+            "--configs": arguments.configs is not None,
+            "--toolset": arguments.toolset is not None,
+            "--no-clang-cl": arguments.no_clang_cl,
+            "--gpu-optional": arguments.gpu_optional,
+            "--contract": arguments.contract,
+        }
+        refused = [option for option in MILESTONE_REFUSED_OPTIONS if given[option]]
+        if refused:
+            parser.error(f"--milestone is the whole matrix on a machine with a device in strict mode, so it cannot be "
+                         f"combined with {', '.join(refused)}")
+        arguments.require_clang_cl = True
+    stages_text = "all" if arguments.stages is None or arguments.milestone else arguments.stages
     try:
-        selected = available if arguments.stages.strip().lower() == "all" else \
-            paths.parse_name_list(arguments.stages, names, "stage")
+        if stages_text.strip().lower() == "all":
+            # "all" lists the milestone-only stages too, which run_stage reports as not run without --milestone.
+            selected = available + milestone_only
+            arguments.explicit_stages = set(milestone_only) if arguments.milestone else set()
+        else:
+            selected = paths.parse_name_list(stages_text, names, "stage")
+            arguments.explicit_stages = set(selected)
         skipped = paths.parse_name_list(arguments.skip_stages, names, "stage") if arguments.skip_stages.strip() else []
-        arguments.configs = paths.parse_configurations(arguments.configs)
+        arguments.configs = paths.parse_configurations(arguments.configs or ",".join(paths.CONFIGURATIONS))
     except ValueError as error:
         parser.error(str(error))
     arguments.selected = [name for name in names if name in selected and name not in skipped]
@@ -591,6 +782,8 @@ def run_stage(runner: Runner, stage: Stage, configs: list[str]) -> list[Step]:
     if not stage.available:
         return [Step(stage.name, Status.NOT_AVAILABLE, f"the {stage.name} stage does not exist yet; planned for "
                                                        f"{stage.planned}")]
+    if stage.milestone_only and stage.name not in runner.arguments.explicit_stages:
+        return [Step(stage.name, Status.NOT_RUN, MILESTONE_ONLY_NOTE)]
     stage_configs = [config for config in (stage.configurations or ()) if config in configs]
     if stage.configurations is not None and not stage_configs:
         return [Step(stage.name, Status.SKIPPED, f"none of its configurations ({', '.join(stage.configurations)}) "
@@ -606,8 +799,10 @@ def run_stage(runner: Runner, stage: Stage, configs: list[str]) -> list[Step]:
         "golden": lambda: runner.device_suite("golden", stage_configs),
         "feature": lambda: runner.device_suite("feature", stage_configs),
         "automation": lambda: runner.device_suite("automation", stage_configs),
+        "export": lambda: runner.export(stage_configs),
         "determinism": lambda: runner.determinism(stage_configs),
         "portability": runner.portability,
+        "hardening": runner.hardening,
     }
     return handlers[stage.name]()
 
@@ -621,7 +816,8 @@ def main(argv: list[str] | None = None) -> int:
     except paths.UnsupportedHostError as error:
         console.print(f"CI.py: error: {error}")
         return EXIT_USAGE
-    console.heading(f"CI on {host.system} ({host.machine}), Python {platform.python_version()}: stages "
+    gate = "milestone gate (--milestone); " if arguments.milestone else ""
+    console.heading(f"CI on {host.system} ({host.machine}), Python {platform.python_version()}: {gate}stages "
                     f"{', '.join(arguments.selected)}; configurations {', '.join(arguments.configs)}; "
                     f"{mode_note(arguments.contract)}")
 
@@ -632,7 +828,9 @@ def main(argv: list[str] | None = None) -> int:
     for name in arguments.selected:
         stage = STAGE_BY_NAME[name]
         if failed_stage is not None:
-            results.append((name, [Step(name, Status.NOT_RUN, f"stage {failed_stage} failed")]))
+            reason = MILESTONE_ONLY_NOTE if stage.milestone_only and name not in arguments.explicit_stages \
+                else f"stage {failed_stage} failed"
+            results.append((name, [Step(name, Status.NOT_RUN, reason)]))
             continue
         stage_steps = run_stage(runner, stage, arguments.configs)
         for step in stage_steps:
@@ -660,6 +858,7 @@ def main(argv: list[str] | None = None) -> int:
             "host": {"system": host.system, "machine": host.machine},
             "configurations": arguments.configs,
             "contract": arguments.contract,
+            "milestone": arguments.milestone,
             "stages": [{"stage": name, "steps": [step.to_json() for step in stage_steps]}
                        for name, stage_steps in results],
             "junit": paths.display_path(arguments.summary_junit),

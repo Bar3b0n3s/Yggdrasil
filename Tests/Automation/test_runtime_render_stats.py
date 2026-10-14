@@ -120,7 +120,8 @@ class RuntimeRenderStatsTests(AutomationTestCase):
             return
         game, client = self.start_game(rendering=True, vulkan_api=vulkan_api)
 
-        # Extract a real game snapshot before holding the session paused. Host render frames keep advancing at this tick.
+        # Extract a real game snapshot before holding the session paused. Host render frames keep advancing at this
+        # tick.
         client.call("play.step", {"ticks": 1, "render": "last"})
         before = client.call("play.state")
         stats = self.wait_for_stats(client, gpu=True)

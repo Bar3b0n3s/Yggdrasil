@@ -63,7 +63,8 @@ namespace Engine {
 	// CFBundleInfoDictionaryVersion "6.0", CFBundleName, CFBundlePackageType "APPL", CFBundleShortVersionString,
 	// CFBundleVersion, LSMinimumSystemVersion "14.0" (§16), NSHighResolutionCapable true, NSHumanReadableCopyright (a
 	// non-empty Company only); strings XML-escaped. Errors: InvalidArgument for an empty Name, Identifier or Version, or a
-	// string that is not valid UTF-8 or holds a control character.
+	// string that FindExportTextProblem refuses (not valid UTF-8, or holding a control character, U+FFFE or U+FFFF;
+	// Project/ProjectSettings.h), naming its key and the problem.
 	[[nodiscard]] Result<std::string> WriteInfoPlist(const AppBundleInfo& info);
 
 	// The .icns file: big-endian (an Apple format, outside §16's little-endian rule) 'icns' and the total length, then one

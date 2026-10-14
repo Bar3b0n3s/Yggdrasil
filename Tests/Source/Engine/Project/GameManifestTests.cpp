@@ -3,11 +3,13 @@
 #include "Engine/Project/GameManifest.h"
 
 #include "Engine/Core/FileSystem.h"
+#include "Support/Fuzz.h"
 #include "Support/TempDirectory.h"
 
 #include <array>
 #include <string>
 #include <string_view>
+#include <vector>
 
 // Game.json (Architecture §14.1, §14.3; Docs/Decisions/0012-m7-decisions.md decision 10).
 
@@ -221,7 +223,7 @@ namespace Engine {
 		}
 
 		// M15 (§14.3; Docs/Decisions/0024-m15-contract.md decision 6, stream B).
-		TEST_CASE("GameManifest: a testing run's user data sits beside the package, outside a macOS bundle" * doctest::skip(true))
+		TEST_CASE("GameManifest: a testing run's user data sits beside the package, outside a macOS bundle")
 		{
 			Test::TempDirectory directory("TestingUserDataRoot");
 			const std::filesystem::path package = directory / "Exports" / "Tetris";
@@ -230,6 +232,50 @@ namespace Engine {
 			// Only the exact bundle layout counts as a bundle.
 			CHECK(GetTestingUserDataRoot(package / "Contents" / "Resources" / "Game.json") == package / "Contents" / "Resources" / "bin" / "TestUserData");
 			CHECK(GetTestingUserDataRoot(package / "Tetris.app" / "Game.json") == package / "Tetris.app" / "bin" / "TestUserData");
+		}
+
+		// M15 (§15.2; Docs/Decisions/0024-m15-contract.md decision 13, stream C).
+		TEST_CASE("GameManifest: 1,000 seeded mutations of a manifest never crash" * doctest::test_suite(Test::FuzzSuite))
+		{
+			// The seeds: a plain and a testing manifest as the exporter writes them. A manifest the reader accepts writes back
+			// and reads again to the same value.
+			GameManifest testing = MakeManifest();
+			testing.Testing = true;
+			std::vector<std::string> seeds;
+			for (const GameManifest& manifest : { MakeManifest(), testing })
+			{
+				const Result<std::string> text = GameManifestSerializer::SaveToString(manifest);
+				REQUIRE(text.has_value());
+				seeds.push_back(*text);
+			}
+			// About one mutation in a hundred is a manifest the reader accepts, so a tenth of the sequence (the Debug unit run's
+			// --fuzz-scale=0.1, ADR 0024 decision 14) holds too few to check both outcomes: the minimum is the whole count.
+			constexpr uint64_t Iterations = 1000;
+			const Test::FuzzRun run = Test::RunFuzzCase(0x6A3E, Iterations, [&seeds](Random& random, uint64_t /*index*/)
+			{
+				std::string mutated = seeds[static_cast<size_t>(random.RangeInt(0, 1))];
+				Test::MutateText(mutated, random);
+				const Result<GameManifest> read = GameManifestSerializer::LoadFromString(mutated);
+				if (!read.has_value())
+				{
+					const ErrorCode code = read.error().GetCode();
+					CHECK((code == ErrorCode::Parse || code == ErrorCode::Validation || code == ErrorCode::UnsupportedVersion));
+					return false;
+				}
+				const Result<std::string> written = GameManifestSerializer::SaveToString(*read);
+				REQUIRE_MESSAGE(written.has_value(), written.error().ToString());
+				const Result<GameManifest> reread = GameManifestSerializer::LoadFromString(*written);
+				REQUIRE_MESSAGE(reread.has_value(), reread.error().ToString());
+				const Result<std::string> rewritten = GameManifestSerializer::SaveToString(*reread);
+				REQUIRE(rewritten.has_value());
+				CHECK(*rewritten == *written);
+				return true;
+			}, Iterations);
+			if (Test::IsFuzzSample(run.Range))
+			{
+				CHECK(run.Counts.Rejected > 0);
+				CHECK(run.Counts.Accepted > 0);
+			}
 		}
 	}
 

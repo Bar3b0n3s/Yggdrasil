@@ -1,8 +1,8 @@
 #include "TestsPCH.h"
 
-#include "EditorCore/Export/Private/ExportPaths.h"
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Json/JsonReader.h"
+#include "Engine/Core/PathGlob.h"
 #include "Engine/Reflection/EnumInfo.h"
 #include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Scene/Components/PrefabInstanceComponent.h"
@@ -10,6 +10,7 @@
 #include "Support/EditorTestFixture.h"
 #include "Support/SceneTestFixture.h"
 #include "Support/TestData.h"
+#include "Support/TestTimeout.h"
 
 #include <nlohmann/json.hpp>
 
@@ -95,8 +96,9 @@ namespace Engine {
 		// Library cache, in every configuration of the unit suite. The filter is a case-insensitive substring of
 		// "<suite>/<case>" (and of replay paths), so "Timing/" selects exactly the Timing suite as long as no other suite name
 		// ends in "Timing" and no replay path contains "timing/" (decision 9); the run checks that.
-		TEST_CASE("FeatureTest: the Timing suite passes with 0, 1, 2 and 5 steps per frame" * doctest::timeout(ProjectRunTimeoutSeconds))
+		TEST_CASE("FeatureTest: the Timing suite passes with 0, 1, 2 and 5 steps per frame")
 		{
+			Test::SetTestCaseTimeLimit(ProjectRunTimeoutSeconds);
 			Test::EditorTestFixture fixture("FeatureTestTiming");
 			const std::filesystem::path project = CopyFeatureTestProject(fixture);
 			std::error_code error;
@@ -222,7 +224,7 @@ namespace Engine {
 			{
 				return std::ranges::any_of(globs, [path](const std::string& glob)
 				{
-					return Utils::MatchesExportGlob(glob, path);
+					return MatchesPathGlob(glob, path);
 				});
 			};
 
@@ -300,8 +302,9 @@ namespace Engine {
 
 		// Roadmap M14 acceptance (ADR 0022 decision 9): the committed FinalStateHash of Assets/Tests/Replays/Determinism.replay
 		// is reproduced by strict replay verification; the unit suite runs this in Debug and Release, without a GPU.
-		TEST_CASE("FeatureTest: Determinism.replay matches its committed hash in both editor configurations" * doctest::timeout(ProjectRunTimeoutSeconds))
+		TEST_CASE("FeatureTest: Determinism.replay matches its committed hash in both editor configurations")
 		{
+			Test::SetTestCaseTimeLimit(ProjectRunTimeoutSeconds);
 			Test::EditorTestFixture fixture("FeatureTestDeterminism");
 			const std::filesystem::path project = CopyFeatureTestProject(fixture);
 			const Result<std::string> replay = FileSystem::ReadText(project / "Assets" / "Tests" / "Replays" / "Determinism.replay");

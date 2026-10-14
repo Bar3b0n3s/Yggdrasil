@@ -42,7 +42,8 @@ return Script.Define("Links", Links)
         self.assertEqual(fields["Amount"], 3)
         client.call("edit.undo")
         client.call("edit.redo")
-        self.assertEqual(client.call("entity.get", {"entity": copy})["entity"]["components"]["Script"]["Fields"], fields)
+        self.assertEqual(client.call("entity.get", {"entity": copy})["entity"]["components"]["Script"]["Fields"],
+                         fields)
 
     def test_stats_reports_script_memory_only_with_a_live_vm(self) -> None:
         client, _ = self.open_editor_with_scene()

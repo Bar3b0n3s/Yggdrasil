@@ -244,7 +244,8 @@ class FeatureSuiteTests(unittest.TestCase):
     def test_replay_globs_agree_with_the_shared_path_glob_cases(self) -> None:
         # Tests/Data/PathGlob/Cases.json, which the C++ MatchesPathGlob test runs too (ADR 0024 decision 7): the
         # determinism suite expands Testing.Replays exactly as the editor, the Runtime and testing exports do.
-        document = json.loads((REPOSITORY_ROOT / "Tests" / "Data" / "PathGlob" / "Cases.json").read_text(encoding="utf-8"))
+        document = json.loads(
+            (REPOSITORY_ROOT / "Tests" / "Data" / "PathGlob" / "Cases.json").read_text(encoding="utf-8"))
         self.assertEqual((document["Format"], document["Version"]), ("PathGlobCases", 1))
         self.assertTrue(document["Cases"])
         for case in document["Cases"]:
@@ -255,21 +256,24 @@ class FeatureSuiteTests(unittest.TestCase):
     def test_replay_hashes_must_match_the_committed_hash_and_agree_across_configurations(self) -> None:
         outcome = test_script.ReplayOutcome
         committed = {"Assets/A.replay": "00000000000000aa", "Assets/B.replay": "00000000000000bb"}
-        agreed = {"Debug": [outcome("Assets/A.replay", "00000000000000aa"),
-                            outcome("Assets/B.replay", "00000000000000bb")],
-                  "Release": [outcome("Assets/A.replay", "00000000000000aa"),
-                              outcome("Assets/B.replay", "00000000000000bb")]}
-        self.assertEqual(test_script.compare_replay_hashes(committed, agreed), {"Assets/A.replay": [],
-                                                                               "Assets/B.replay": []})
-        diverged = {"Debug": [outcome("Assets/A.replay", "00000000000000aa"),
-                              outcome("Assets/B.replay", "00000000000000bb")],
-                    "Release": [outcome("Assets/A.replay", "00000000000000ff"),
-                                outcome("Assets/B.replay", "", ["input.replay failed: replay failed: quit"])]}
-        problems = test_script.compare_replay_hashes(committed, diverged)
-        self.assertEqual(len(problems["Assets/A.replay"]), 2)
-        self.assertIn("Release: state hash 00000000000000ff differs", problems["Assets/A.replay"][0])
-        self.assertIn("the configurations disagree", problems["Assets/A.replay"][1])
-        self.assertEqual(problems["Assets/B.replay"], ["Release: input.replay failed: replay failed: quit"])
+        agreed = {"Editor Debug": [outcome("Assets/A.replay", "00000000000000aa"),
+                                   outcome("Assets/B.replay", "00000000000000bb")],
+                  "Editor Release": [outcome("Assets/A.replay", "00000000000000aa"),
+                                     outcome("Assets/B.replay", "00000000000000bb")]}
+        self.assertEqual(test_script.determinism_problems(committed, agreed, {}), {"Assets/A.replay": [],
+                                                                                  "Assets/B.replay": []})
+        diverged = {"Editor Debug": [outcome("Assets/A.replay", "00000000000000aa"),
+                                     outcome("Assets/B.replay", "00000000000000bb")],
+                    "Editor Release": [outcome("Assets/A.replay", "00000000000000ff"),
+                                       outcome("Assets/B.replay", "", ["input.replay failed: replay failed: quit"])]}
+        problems = test_script.determinism_problems(committed, diverged, {})
+        self.assertEqual(problems["Assets/A.replay"], [
+            "Editor Release: 00000000000000ff differs from the committed 00000000000000aa",
+            "runs differ: Editor Debug 00000000000000aa, Editor Release 00000000000000ff",
+            "hashes: Editor Debug 00000000000000aa, Editor Release 00000000000000ff"])
+        self.assertEqual(problems["Assets/B.replay"], [
+            "Editor Release: input.replay failed: replay failed: quit", "Editor Release: no hash",
+            "hashes: Editor Debug 00000000000000bb, Editor Release (none)"])
 
 
 class DeterminismVerificationTests(AutomationTestCase):
@@ -294,11 +298,13 @@ class DeterminismVerificationTests(AutomationTestCase):
         self.assertEqual(outcomes[0].problems, [])
         self.assertEqual(outcomes[0].state_hash, saved["stateHash"])
         committed = json.loads((root / replays[0]).read_text(encoding="utf-8"))["FinalStateHash"]
-        self.assertEqual(test_script.compare_replay_hashes({replays[0]: committed}, {"Editor": outcomes}),
+        self.assertEqual(test_script.determinism_problems({replays[0]: committed}, {"Editor Release": outcomes}, {}),
                          {replays[0]: []})
         tampered = "0000000000000001" if committed != "0000000000000001" else "0000000000000002"
-        problems = test_script.compare_replay_hashes({replays[0]: tampered}, {"Editor": outcomes})
-        self.assertEqual(len(problems[replays[0]]), 1)
+        problems = test_script.determinism_problems({replays[0]: tampered}, {"Editor Release": outcomes}, {})
+        self.assertEqual(problems[replays[0]], [
+            f"Editor Release: {saved['stateHash']} differs from the committed {tampered}",
+            f"hashes: Editor Release {saved['stateHash']}"])
         shutil.rmtree(work, ignore_errors=True)
 
 

@@ -144,8 +144,9 @@ return Script.Define("Owner", Owner)
     def test_wait_for_predicate(self) -> None:
         client, _ = self.open_editor_with_scene()
         client.call("play.start", {"lockstep": True, "parameters": {"level": 4}, "pauseOnError": False})
-        result = client.call("play.waitFor", {"until": 'Time.GetTick() >= 3 and { level = Scene.GetLoadParameters().level }',
-                                              "timeoutTicks": 10})
+        result = client.call("play.waitFor",
+                             {"until": 'Time.GetTick() >= 3 and { level = Scene.GetLoadParameters().level }',
+                              "timeoutTicks": 10})
         self.assertEqual((result["satisfied"], result["tick"], result["value"]), (True, 3, {"level": 4}))
         timeout = client.call("play.waitFor", {"until": "false", "timeoutTicks": 2})
         self.assertEqual((timeout["satisfied"], timeout["tick"], timeout["value"]), (False, 5, False))
@@ -219,8 +220,8 @@ return Script.Define("Owner", Owner)
         client.call("asset.delete", {"asset": path})
         # The trashed behaviour only affects its own entity; every other evaluation still runs.
         self.assertEqual(client.call("script.eval", {"context": "edit", "code": "1 + 2"})["value"], 3)
-        self.assertEqual(client.call("script.eval", {"context": "edit", "code": 'Scene.FindByName("Ball") ~= nil'})["value"],
-                         True)
+        self.assertEqual(client.call("script.eval",
+                                     {"context": "edit", "code": 'Scene.FindByName("Ball") ~= nil'})["value"], True)
 
     def test_hot_reload_locates_failures_and_ignores_unloaded_failed_suites(self) -> None:
         client, _ = self.open_editor_with_scene()
@@ -246,11 +247,13 @@ return Script.Define("Game", Game)
         self.assertEqual(self.eval_play(client, probe), [1, 0])
         # The suite requires Board, but it is neither loaded in play nor attached: its failed import is not live.
         cursor = client.call("script.errors", {"since": "end"})["nextCursor"]
-        client.call("script.write", {"path": suite, "source": suite_source.replace("Test.Expect(Board.Value > 0)", "local = 1")})
+        client.call("script.write", {"path": suite,
+                                     "source": suite_source.replace("Test.Expect(Board.Value > 0)", "local = 1")})
         self.wait_for_compile_error(client, cursor, suite)
         client.call("script.write", {"path": module, "source": "return {Value = 10}"})
         self.wait_for_play_value(client, probe, [10, 1])
-        # A syntax error on line 3 and a load-time failure on line 4 are reported where they are; old code keeps running.
+        # A syntax error on line 3 and a load-time failure on line 4 are reported where they are; old code keeps
+        # running.
         for broken, line, column in (
                 ('local Board = require("./Board")\n-- edited\nlocal = 1\n', 3, 7),
                 ('local Board = require("./Board")\nlocal Game = {}\n\nGame.Tick = Time.GetTick()\n'
@@ -290,8 +293,8 @@ return Script.Define("Game", Game)
 
     def poll_until_answered(self, client: engine_client.EngineClient, method: str,
                             deadline: float) -> tuple[dict | None, engine_client.EngineError | None]:
-        """`method`'s result once the editor answers it, or the first Busy error; short bounded requests until `deadline`
-        (a bound on a failure only, never asserted on)."""
+        """`method`'s result once the editor answers it, or the first Busy error; short bounded requests until
+        `deadline` (a bound on a failure only, never asserted on)."""
         while time.monotonic() < deadline:
             try:
                 return client.call(method, timeout=0.25), None
@@ -304,11 +307,11 @@ return Script.Define("Game", Game)
         return None, None
 
     def test_runaway_script_busy_watchdog(self) -> None:
-        # §13.2: a gameplay callback that never returns freezes the editor's frame loop outside any request; the I/O thread
-        # then answers Busy naming the callback from the phase marker. The watchdog's threshold is 5 s of wall-clock time
-        # without a pump, so the spin must outlive it: the raised 10 s callback budget arranges that. Like
-        # test_busy_watchdog_reports_phase (ADR 0008 decision 15) this is a documented wall-clock exception; it has no
-        # sleep, and its other waits are short bounded requests whose deadline only bounds a failure.
+        # §13.2: a gameplay callback that never returns freezes the editor's frame loop outside any request; the I/O
+        # thread then answers Busy naming the callback from the phase marker. The watchdog's threshold is 5 s of
+        # wall-clock time without a pump, so the spin must outlive it: the raised 10 s callback budget arranges that.
+        # Like test_busy_watchdog_reports_phase (ADR 0008 decision 15) this is a documented wall-clock exception; it
+        # has no sleep, and its other waits are short bounded requests whose deadline only bounds a failure.
         client, _ = self.open_editor_with_scene()
         client.call("project.setSettings", {"patch": {"Scripting": {"CallbackBudgetMs": 10000}}})
         client.call("script.write", {"path": "Assets/Scripts/Spin.luau", "source":

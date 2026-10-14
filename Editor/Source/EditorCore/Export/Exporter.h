@@ -62,9 +62,10 @@
 //      failing in step 2 (§14.2 step 1 "validation works under --renderer none, using cooked environment bakes"). A testing
 //      export also loads every Testing.Suites scene strictly, since it packages them and the Runtime loads them. Last, the
 //      build outputs are located (step 4's NotFound, IsMissingBuildOutput) and the output directory is checked: an existing
-//      OutputDirectory must be empty or hold an earlier export (a Game.json, or on macOS a "<Name>.app" holding
-//      Contents/Resources/Game.json), otherwise the export fails with InvalidArgument naming it and writes nothing (M15,
-//      ADR 0024 decision 3: an export never replaces a directory that is not a package).
+//      OutputDirectory must be empty or hold an earlier export (a Game.json that loads as a GameManifest, or on macOS a
+//      "<Name>.app" whose Contents/Resources/Game.json does), otherwise the export fails with InvalidArgument naming it and
+//      writes nothing; a directory whose status cannot be read is refused too (Io) (M15, ADR 0024 decision 3: an export
+//      never replaces a directory that is not a package; the M15 review's M01 made the manifest load the proof).
 //   2. Cook every included asset (EditorAssetManager, incrementally from Library/Cache), on jobs. Every asset handle a
 //      packaged asset references (scenes, prefabs, materials) must resolve in Game.pak, Engine.pak or the procedural
 //      built-ins; one that does not is a Validation error of this step (for a built-in environment left out of Engine.pak,
@@ -88,7 +89,8 @@
 //          --renderer none and exits 3 without a device): the test is not run, SmokeTestRan stays false and a warning
 //          says why.
 //      A non-zero exit code fails the export, naming the code and the end of its output.
-//   7. Move the staging directory into OutputDirectory, replacing an earlier export there.
+//   7. Move the staging directory into OutputDirectory, replacing an earlier export there; step 1's output directory rule
+//      is checked again first, since the directory may have changed during the cook.
 //   8. Return the report, with the time of every phase entered (ExportReport::PhaseTimings).
 //
 // Main thread only (the asset manager and the open scene are main-thread state, §4.11); the cooking and the smoke test's
@@ -125,7 +127,8 @@ namespace Engine {
 	{
 		ExportConfiguration Configuration = ExportConfiguration::Release;
 		// The project-relative output directory, which must lie under "Build/" (§13.2: project.export writes only under
-		// <Project>/Build/); empty: GetDefaultOutputDirectory. Ignored when ExportRoot is set.
+		// <Project>/Build/); empty: GetDefaultOutputDirectory. With ExportRoot, what follows "Build/" goes below the root;
+		// ignored when OutputPath is set.
 		std::string OutputDirectory{};
 		// `Editor --export-root <dir>` (M15, §13.4): an absolute directory that replaces the project's Build/ directory:
 		// the export goes to <ExportRoot>/<OutputDirectory without its leading "Build/">, or with an empty OutputDirectory to

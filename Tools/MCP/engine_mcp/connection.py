@@ -228,8 +228,9 @@ class EditorConnection:
         result = response.get("result")
         if not isinstance(result, dict):
             if method in _PROJECT_METHODS and not had_project:
-                # The editor still has no project: the next project call chooses the transcript again. The refused request
-                # was kept in memory only and is dropped, so nothing is written to a directory that is not a project.
+                # The editor still has no project: the next project call chooses the transcript again. The refused
+                # request was kept in memory only and is dropped, so nothing is written to a directory that is not a
+                # project.
                 if self.transcript is not None:
                     self.transcript.discard_pending()
                 self.transcript = None

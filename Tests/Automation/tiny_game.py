@@ -52,3 +52,11 @@ def export_tiny_game(client: engine_client.EngineClient, config: str | None = No
 def exported_executable(report: dict[str, Any]) -> Path:
     """The exported game's executable named by an export report."""
     return Path(report["executable"])
+
+
+def exported_manifest(executable: Path) -> Path:
+    """The Game.json of the exported game whose executable is `executable`: next to it, or for a macOS bundle's
+    <Name>.app/Contents/MacOS/<Name> in Contents/Resources (Docs/Decisions/0024-m15-contract.md decision 5)."""
+    if executable.parent.name == "MacOS" and executable.parent.parent.name == "Contents":
+        return executable.parent.parent / "Resources" / "Game.json"
+    return executable.parent / "Game.json"

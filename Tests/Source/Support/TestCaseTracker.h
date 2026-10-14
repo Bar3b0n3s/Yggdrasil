@@ -21,8 +21,7 @@ namespace Engine {
 			std::string Name;
 			std::string File;
 			uint32_t Line = 0;
-			double TimeoutSeconds = 0.0; // the doctest::timeout decorator; 0 when the case has none
-			uint64_t Serial = 0;         // unique per started test case in this process, increasing from 1
+			uint64_t Serial = 0; // unique per started test case in this process, increasing from 1
 		};
 
 		// The test case doctest is running (also between the runs of its subcases), or nullopt. Thread-safe.

@@ -3,6 +3,7 @@
 #include "Support/PlatformProbes.h"
 
 #include "Engine/Core/FileSystem.h"
+#include "Engine/Platform/Process.h"
 #include "Support/TempDirectory.h"
 #include "Support/TestOptions.h"
 
@@ -65,6 +66,18 @@ namespace Engine {
 			const Result<Test::UnreadableText> tooMany = Test::AllocateTextEndingInUnreadableBytes(0, 1024 * 1024);
 			REQUIRE_FALSE(tooMany.has_value());
 			CHECK(tooMany.error().GetCode() == ErrorCode::InvalidArgument);
+		}
+
+		TEST_CASE("PlatformProbes: PostKeyToProcessWindow refuses other keys and a process without a GLFW window")
+		{
+			// The keystroke itself reaches a windowed Runtime in "RuntimeApp: F1 toggles the stats overlay in a windowed run
+			// and the game still receives F1"; this headless Tests process has no OS window.
+			const Status otherKey = Test::PostKeyToProcessWindow(Process::GetCurrentId(), Key::A, true);
+			REQUIRE_FALSE(otherKey.has_value());
+			CHECK(otherKey.error().GetCode() == ErrorCode::InvalidArgument);
+			const Status noWindow = Test::PostKeyToProcessWindow(Process::GetCurrentId(), Key::F1, true);
+			REQUIRE_FALSE(noWindow.has_value());
+			CHECK(noWindow.error().GetCode() == ErrorCode::NotFound);
 		}
 #else
 		TEST_CASE("PlatformProbes: OpenInheritableDescriptor opens at or above its minimum until closed")

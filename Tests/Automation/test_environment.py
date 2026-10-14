@@ -125,9 +125,10 @@ class EnvironmentTests(AutomationTestCase):
         hidden = client.call("viewport.screenshot", {"view": "game", "width": 64, "height": 36})
         self.assertNotEqual(Path(hidden["path"]).read_bytes(), Path(shot["path"]).read_bytes())
 
-        # The baked SH9 and specular cube light the scene: a white sphere in front of the camera, over a neutral grey clear
-        # colour, takes the environment's orange (red above green above blue, brighter than the clear colour) ...
-        client.call("entity.update", {"entity": "/Camera", "components": {"Camera": {"ClearColor": [0.05, 0.05, 0.05]}}})
+        # The baked SH9 and specular cube light the scene: a white sphere in front of the camera, over a neutral grey
+        # clear colour, takes the environment's orange (red above green above blue, brighter than the clear colour) ...
+        client.call("entity.update", {"entity": "/Camera", "components": {
+            "Camera": {"ClearColor": [0.05, 0.05, 0.05]}}})
         client.call("entity.create", {"name": "Ball", "components": {
             "Transform": {"Translation": [0, 0, -3]}, "MeshRenderer": {"Mesh": "engine://Meshes/Sphere"}}})
         lit = client.call("viewport.screenshot", {"view": "game", "width": 64, "height": 36})

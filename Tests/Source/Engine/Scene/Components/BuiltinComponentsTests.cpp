@@ -50,7 +50,6 @@ namespace Engine {
 			static_assert(!TypeListContains<InterpolationResetTag, BuiltinComponents>);
 			static_assert(!TypeListContains<HierarchyDisabledTag, BuiltinComponents>);
 			static_assert(!TypeListContains<PendingDestroyTag, BuiltinComponents>);
-			static_assert(!TypeListContains<PendingStartTag, BuiltinComponents>);
 			static_assert(!TypeListContains<DisabledTag, BuiltinComponents>);
 			static_assert(!TypeListContains<UnknownComponentsComponent, BuiltinComponents>);
 			static_assert(std::is_empty_v<DisabledTag>);

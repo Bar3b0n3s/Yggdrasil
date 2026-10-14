@@ -110,27 +110,39 @@ BUILD_FIXTURE_FINDINGS = {
                                       r"/Qfast_transcendentals"),
     "ClangOnlyContraction": re.compile(r"\[linux-clang\] .*JoltPhysics uses a non-precise floating-point model: "
                                        r"-ffp-contract is 'fast'"),
+    # One project left out of the AddressSanitizer workspace (removesanitize): instrumented and uninstrumented C++
+    # would be linked together (Docs/Decisions/0024-m15-contract.md decision 12).
+    "PartialAddressSanitizer": re.compile(r"\[windows-asan\] Release: Engine is not built with AddressSanitizer"),
 }
 
 # Lint.py takes 1.5 minutes on a 24-thread workstation but about 53 minutes on the 4-vCPU Linux runners, where
-# clang-tidy and clang-query parse every translation unit against libstdc++ (CI run 37593307176). Under GitHub Actions it
-# reports each step's duration as a notice annotation. Each of its tool processes has its own 10-minute timeout, which
-# catches a hang.
-STATIC_CHECK_TIMEOUTS = {"checkbuildconfig": 1800.0, "lint": 5400.0, "format": 1800.0, "fixtures": 600.0, "resources": 600.0}
+# clang-tidy and clang-query parse every translation unit against libstdc++ (CI run 37593307176). Under GitHub Actions
+# it reports each step's duration as a notice annotation. Each of its tool processes has its own 10-minute timeout,
+# which catches a hang.
+STATIC_CHECK_TIMEOUTS = {"checkbuildconfig": 1800.0, "lint": 5400.0, "format": 1800.0, "fixtures": 600.0,
+                         "resources": 600.0, "runtimemap": 600.0, "detmath": 600.0}
 
 # The committed fixture generators (AGENTS.md "Tests": generated fixtures come from committed generators); each one's
 # --check compares a fresh generation with the committed files and writes nothing.
 FIXTURE_GENERATORS_ROOT = paths.REPOSITORY_ROOT / "Tests" / "Data" / "Generate"
+# The generator of the committed DetMath oracle Tests/Source/Engine/Core/DetMathReferenceData.h
+# (Docs/Decisions/0007-detmath-reference-oracle.md). Its --check runs the generator's self-test first and fails on it,
+# so one step covers both; it takes about 2 s.
+DETMATH_REFERENCE_SCRIPT = "GenerateDetMathReference.py"
 
 
 def run_static_checks(console: Console, finished: Callable[[Step], Step], contract: bool = False) -> list[Step]:
     """The static checks of §15.8 (T0 of §15.1), shared by CI.py's lint stage and PreCommit.py so the two gates cannot
-    drift apart: CheckBuildConfig.py on the workspace and on every fixture workspace (each must fail with its own
-    defect), Lint.py, Lint.py --self-test, Format.py --check, every fixture generator under Tests/Data/Generate/ with
-    --check (the committed fixtures are byte-identical to a fresh generation), FetchAssets.py defaults --check (the
-    committed engine resources match their pins, offline) and FetchAssets.py fixture --check (the pinned format fixtures
-    under Tests/Data/Assets match their pins, offline). Each runs even after an earlier one failed, so one run
-    reports every problem. `finished` receives every step as soon as it is known (to print it) and returns it.
+    drift apart, in this order: CheckBuildConfig.py on the workspace and on every fixture workspace (each must fail
+    with its own defect), Lint.py, Lint.py --self-test, CheckRuntimeMap.py --self-test (every seeded map fixture under
+    Tests/Data/MapFiles/ gives exactly its expected findings, Docs/Decisions/0024-m15-contract.md decision 11),
+    Format.py --check, every fixture generator under Tests/Data/Generate/ with --check (the committed fixtures are
+    byte-identical to a fresh generation), GenerateDetMathReference.py --check (the committed DetMath oracle is
+    byte-identical to a fresh generation, after the generator's self-test; Architecture §1.3 principle 2),
+    FetchAssets.py defaults --check (the committed engine resources match their pins, offline) and FetchAssets.py
+    fixture --check (the pinned format fixtures under Tests/Data/Assets match their pins, offline). Each runs even after
+    an earlier one failed, so one run reports every problem.
+    `finished` receives every step as soon as it is known (to print it) and returns it.
     `contract` selects contract mode: Lint.py allows contract stubs and skipped tests (its self-test stays strict)."""
 
     def script(name: str, script_name: str, arguments: list[str], timeout: float, expected_exit: int = 0,
@@ -142,10 +154,13 @@ def run_static_checks(console: Console, finished: Callable[[Step], Step], contra
     steps += build_fixture_checks(script, finished)
     steps.append(script("lint", "Lint.py", lint_mode_arguments(contract), STATIC_CHECK_TIMEOUTS["lint"]))
     steps.append(script("lint self-test", "Lint.py", ["--self-test"], STATIC_CHECK_TIMEOUTS["lint"]))
+    steps.append(script("runtime map self-test", "CheckRuntimeMap.py", ["--self-test"],
+                        STATIC_CHECK_TIMEOUTS["runtimemap"]))
     steps.append(script("format", "Format.py", ["--check"], STATIC_CHECK_TIMEOUTS["format"]))
     for generator in sorted(FIXTURE_GENERATORS_ROOT.glob("*.py")):
         steps.append(script(f"fixtures {generator.stem}", generator.name, ["--check"],
                             STATIC_CHECK_TIMEOUTS["fixtures"], root=FIXTURE_GENERATORS_ROOT))
+    steps.append(script("detmath reference", DETMATH_REFERENCE_SCRIPT, ["--check"], STATIC_CHECK_TIMEOUTS["detmath"]))
     steps.append(script("resources", "FetchAssets.py", ["defaults", "--check"], STATIC_CHECK_TIMEOUTS["resources"]))
     steps.append(script("test fixtures", "FetchAssets.py", ["fixture", "--check"], STATIC_CHECK_TIMEOUTS["resources"]))
     return steps

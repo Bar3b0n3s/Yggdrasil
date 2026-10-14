@@ -34,11 +34,15 @@ project "Runtime"
 	filter "configurations:Dist"
 		kind "WindowedApp"
 
+	-- The shipped executable names its PDB by file name only, never by the build machine's path: the symbols are archived in
+	-- bin/Symbols and never shipped (§2.2, Docs/Decisions/0024-m15-contract.md decision 2). link.exe and lld-link both
+	-- expand %_PDB%.
 	filter { "configurations:Dist", "system:windows" }
 		entrypoint "mainCRTStartup"
+		linkoptions { "/PDBALTPATH:%_PDB%" }
 
 	-- Linker map in every configuration, next to the executable: crash-address lookup, and the Dist symbol test of
-	-- Architecture §14.4 ("/MAP on MSVC, -Wl,-Map elsewhere"; link.exe and lld-link both take /MAP). The path is absolute, because make and ninja run the
+	-- Architecture §14.4 (/MAP for link.exe and lld-link, -Wl,-Map for GNU ld and lld, -Wl,-map for ld64). The path is absolute, because make and ninja run the
 	-- linker from different directories.
 	filter "system:windows"
 		linkoptions { "/MAP" }

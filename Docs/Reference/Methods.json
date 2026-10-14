@@ -8892,7 +8892,7 @@
 		{
 			"name": "project.export",
 			"domain": "project",
-			"description": "Exports the open project as a standalone game below Build/: the configuration's Runtime renamed after the project, the app-local CRT, Game.json, Data/Engine.pak and Data/Game.pak, optionally smoke-tested; resolves with the report.",
+			"description": "Exports the open project as a standalone game below Build/: the configuration's Runtime renamed after the project, the app-local CRT, Game.json, Data/Engine.pak and Data/Game.pak, optionally smoke-tested, or with testing a testing export whose game runs its suites and replays with --feature-test; resolves with the report.",
 			"exposeAsTool": true,
 			"mutates": true,
 			"supportsDryRun": false,
@@ -8920,7 +8920,7 @@
 						"type": "boolean"
 					},
 					"testing": {
-						"description": "A testing export (M15): refused while present.",
+						"description": "A testing export: Game.json says Testing true, so the exported game runs --feature-test; Assets/Tests/** and every Testing.Suites script and scene and Testing.Replays match are packaged whatever Export.Exclude says; invalid suites (TEST_SUITE_INVALID) and replays that do not import fail validation. Its default output directory is Build/<Platform>-<Config>-Testing/<Name>.",
 						"type": "boolean"
 					},
 					"ifRevision": {
@@ -8991,6 +8991,33 @@
 						"description": "How long the export took (wall-clock time, for information).",
 						"type": "number"
 					},
+					"testing": {
+						"description": "Whether this was a testing export (Game.json Testing true).",
+						"type": "boolean"
+					},
+					"testSuiteCount": {
+						"description": "A testing export's Testing.Suites entries, whatever their modes; 0 for a plain export.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"replayCount": {
+						"description": "The replays a testing export packaged for Testing.Replays; 0 for a plain export.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"resourcesPatched": {
+						"description": "Whether the executable's resources were written: its icon and version on Windows, Info.plist on macOS.",
+						"type": "boolean"
+					},
+					"phaseTimings": {
+						"description": "The time of every phase the export entered, in phase order.",
+						"type": "array",
+						"items": {
+							"$ref": "#/$defs/ExportPhaseTimingSummary"
+						}
+					},
 					"_meta": {
 						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
 						"type": "object"
@@ -9022,6 +9049,21 @@
 							}
 						},
 						"additionalProperties": false
+					},
+					"ExportPhaseTimingSummary": {
+						"description": "How long one phase of an export took.",
+						"type": "object",
+						"properties": {
+							"phase": {
+								"description": "The phase.",
+								"enum": ["Validate", "Cook", "WritePaks", "CopyRuntime", "PatchResources", "WriteManifest", "Sign", "SmokeTest", "MoveToOutput", "Done"]
+							},
+							"seconds": {
+								"description": "Its wall-clock time, for information.",
+								"type": "number"
+							}
+						},
+						"additionalProperties": false
 					}
 				}
 			},
@@ -9031,6 +9073,13 @@
 					"params": {
 						"config": "Release",
 						"smokeTest": true
+					}
+				},
+				{
+					"description": "Export a Dist build that runs the project's test suites and replays.",
+					"params": {
+						"config": "Dist",
+						"testing": true
 					}
 				}
 			]
@@ -9320,7 +9369,7 @@
 								}
 							},
 							"Icon": {
-								"description": "Project-relative PNG used as the executable's icon, at least 256 x 256 pixels.",
+								"description": "Project-relative square PNG used as the executable's icon, at least 256 x 256 pixels.",
 								"type": "string"
 							},
 							"Version": {
@@ -9328,7 +9377,7 @@
 								"type": "string"
 							},
 							"Company": {
-								"description": "Company name written into the executable's resources.",
+								"description": "Company name written into the executable's resources: valid UTF-8 without control characters, U+FFFE or U+FFFF, at most 32000 bytes.",
 								"type": "string"
 							}
 						},
@@ -10229,7 +10278,7 @@
 								}
 							},
 							"Icon": {
-								"description": "Project-relative PNG used as the executable's icon, at least 256 x 256 pixels.",
+								"description": "Project-relative square PNG used as the executable's icon, at least 256 x 256 pixels.",
 								"type": "string"
 							},
 							"Version": {
@@ -10237,7 +10286,7 @@
 								"type": "string"
 							},
 							"Company": {
-								"description": "Company name written into the executable's resources.",
+								"description": "Company name written into the executable's resources: valid UTF-8 without control characters, U+FFFE or U+FFFF, at most 32000 bytes.",
 								"type": "string"
 							}
 						},

@@ -4,6 +4,7 @@
 
 #include "Engine/Core/Mounts/MemoryMount.h"
 #include "Engine/Core/VirtualFileSystem.h"
+#include "Support/Fuzz.h"
 #include "Support/SceneTestFixture.h"
 #include "Support/TestData.h"
 
@@ -25,6 +26,35 @@ namespace Engine {
 			const Result<std::string> saved = ProjectSerializer::SaveToString(*settings, *registry);
 			REQUIRE(saved.has_value());
 			CHECK(*saved == *text);
+		}
+
+		TEST_CASE("ProjectSerializer: 1,000 seeded mutations of a project file never crash" * doctest::test_suite(Test::FuzzSuite))
+		{
+			// The seed: AllSettings.eproj, which sets every project setting. A project the loader accepts saves again.
+			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
+			const Result<std::string> seed = Test::ReadTestDataText("Project/AllSettings.eproj");
+			REQUIRE(seed.has_value());
+			const Test::FuzzRun run = Test::RunFuzzCase(0xE9205, 1000, [&registry, &seed](Random& random, uint64_t /*index*/)
+			{
+				std::string mutated = *seed;
+				Test::MutateText(mutated, random);
+				const ProjectLoadOptions options{ .StrictUnknowns = random.NextBool(), .SourcePath = "Fuzz.eproj" };
+				ProjectLoadReport report;
+				const Result<ProjectSettings> settings = ProjectSerializer::LoadFromString(mutated, *registry, options, report);
+				if (!settings.has_value())
+				{
+					const ErrorCode code = settings.error().GetCode();
+					CHECK((code == ErrorCode::Parse || code == ErrorCode::Validation || code == ErrorCode::UnsupportedVersion));
+					return false;
+				}
+				CHECK(ProjectSerializer::SaveToString(*settings, *registry).has_value());
+				return true;
+			});
+			if (Test::IsFuzzSample(run.Range))
+			{
+				CHECK(run.Counts.Rejected > 0);
+				CHECK(run.Counts.Accepted > 0);
+			}
 		}
 
 		TEST_CASE("ProjectSerializer: defaults are written explicitly with action keys sorted")

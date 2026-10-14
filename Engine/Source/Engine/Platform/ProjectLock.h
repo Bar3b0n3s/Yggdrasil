@@ -5,6 +5,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <string_view>
 
 // The single-writer lock of a project (Architecture §4.13): an editor that opens a project holds an exclusive OS lock on
 // <Project>/Library/Editor.lock, and the file names the holder's process ID. The OS releases the lock when the process
@@ -33,8 +34,14 @@ namespace Engine {
 		[[nodiscard]] static Result<ProjectLock> Acquire(const std::filesystem::path& lockFile);
 
 		// The process ID written in `lockFile`, read without taking the lock (by any process, whether or not the lock is
-		// held). Errors: NotFound when the file does not exist; Parse when it does not hold the format above; Io.
+		// held): FileSystem::ReadFile, then ParseHolderPid. Errors: NotFound when the file does not exist; Parse when it does
+		// not hold the format above; Io.
 		[[nodiscard]] static Result<uint32_t> ReadHolderPid(const std::filesystem::path& lockFile);
+
+		// The process ID in `text`, a lock file's content in the format above; `lockFile` only names the file in errors.
+		// Pure (the in-memory entry point the fuzz case reads through). Errors: Parse when `text` is not 1 to 10 decimal
+		// digits of a process ID from 1 to 2^32 - 1 followed by one LF.
+		[[nodiscard]] static Result<uint32_t> ParseHolderPid(std::string_view text, const std::filesystem::path& lockFile);
 
 		// Whether some holder has the lock right now: tries to take it and releases it at once. False when the file does
 		// not exist. Errors: Io.

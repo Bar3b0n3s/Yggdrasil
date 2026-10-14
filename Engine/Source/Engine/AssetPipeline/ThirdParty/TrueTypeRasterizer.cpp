@@ -401,6 +401,13 @@ namespace Engine {
 		y1 += padding;
 		if (x1 <= x0 || y1 <= y0)
 			return MakeError(ErrorCode::ImportFailed, "glyph {} has an inverted bounding box", glyph);
+		// The glyph header's bounding box sizes the field, and the field costs work for every pixel and segment: a box no
+		// atlas could hold is refused before anything is allocated.
+		if (x1 - x0 > MaxGlyphBitmapSide || y1 - y0 > MaxGlyphBitmapSide)
+		{
+			return MakeError(ErrorCode::ImportFailed, "glyph {} would be a {}x{} pixel distance field; at most {} pixels on a side are supported", glyph,
+				x1 - x0, y1 - y0, MaxGlyphBitmapSide);
+		}
 
 		stbtt_vertex* shapeVertices = nullptr;
 		const int shapeCount = stbtt_GetGlyphShape(&m_State->Info, glyph, &shapeVertices);

@@ -63,22 +63,18 @@ namespace Engine {
 		[[nodiscard]] Result<nvrhi::ShaderHandle> Get(std::string_view program, std::string_view entry,
 			std::span<const ShaderDefine> permutation = {});
 
-		// The parsed .refl.json of a variant, cached. The pointer is never null and stays valid until Clear or the
-		// library's destruction. Errors: NotFound naming the expected path; Io; those of ParseShaderReflection, with the
+		// The parsed .refl.json of a variant, cached. The pointer is never null and stays valid until the library's
+		// destruction. Errors: NotFound naming the expected path; Io; those of ParseShaderReflection, with the
 		// file as context.
 		[[nodiscard]] Result<const ShaderReflection*> GetReflection(std::string_view program, std::string_view entry,
 			std::span<const ShaderDefine> permutation = {});
-
-		// Drops every cached shader and reflection, so the next Get reloads from the VFS (shader hot reload, §8.12; the
-		// pipelines that used the old shaders keep them alive until they are rebuilt).
-		void Clear();
 
 		[[nodiscard]] const VfsPath& GetRoot() const { return m_Root; }
 	private:
 		VfsPath m_Root;
 		GraphicsDevice* m_Device = nullptr;       // documented back-reference; null for a reflection-only library
 		const VirtualFileSystem* m_Vfs = nullptr; // documented back-reference
-		// By variant stem. std::map keeps every reflection at a stable address until Clear (GetReflection's pointers).
+		// By variant stem. std::map keeps every reflection at a stable address (GetReflection's pointers).
 		std::map<std::string, nvrhi::ShaderHandle, std::less<>> m_Shaders;
 		std::map<std::string, ShaderReflection, std::less<>> m_Reflections;
 	};

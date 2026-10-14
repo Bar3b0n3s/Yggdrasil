@@ -27,7 +27,9 @@
 
 namespace Engine {
 
+#if !defined(ENGINE_DIST)
 	class ImGuiLayer;
+#endif
 	class ProcessContext;
 	struct RenderContext;
 
@@ -81,12 +83,16 @@ namespace Engine {
 		// every Editor and Runtime process they start, so a validation message inside such a process fails the test, as it
 		// fails an in-process GPU test (§15.3). Ignored with RendererMode::None.
 		bool ExpectNoGpuErrors = false;
-		// Dear ImGui for the application's own UI (OnImGuiRender, §8.11): the editor turns it on. Needs RendererMode::Vulkan;
-		// ignored otherwise.
+#if !defined(ENGINE_DIST)
+		// Dear ImGui for the application's own UI (OnImGuiRender, §8.11): the editor turns it on, and a windowed non-Dist
+		// Runtime for its F1 stats overlay. Needs RendererMode::Vulkan; ignored otherwise. Dist builds have no ImGui at all
+		// (§14.4; Docs/Decisions/0024-m15-contract.md decision 11: the Dist map check names any ImGui symbol), so this
+		// member, ImGuiIniPath, OnImGuiRender, GetImGuiLayer and the layer itself are compiled out there.
 		bool EnableImGui = false;
 		// imgui.ini while no project is open, relative to the user-data folder (user://, §8.11): the editor's
 		// "Editor/imgui.ini". Run resolves it to the native path under ProcessContext's user-data root. Empty: no ini file.
 		std::string ImGuiIniPath{};
+#endif
 		// M7: the exported game's Engine.pak (EngineContextSpecification::EnginePak): mounted as engine:// instead of
 		// EngineResourcesDirectory, and its Shaders/ are the ShaderLibrary's root in every configuration, so an exported game
 		// renders with the target configuration's SPIR-V (§2.2, §14.1). The Runtime sets it from its manifest; empty: none.
@@ -105,7 +111,10 @@ namespace Engine {
 		// LogSpecification::ConsoleLevel; nullopt: the configuration's default (§4.4). It filters output only: the loggers
 		// keep their level, so --expect-no-errors (which counts every Error and Critical entry), the ring buffer that log.read
 		// serves, log listeners and expected-log capture see every entry whatever this says. In Dist, where Trace logging is
-		// compiled out, "trace" behaves as "info".
+		// compiled out, "trace" behaves as "info" (ApplyEngineCommandLine stores Info). RunApplication hands it to the
+		// ProcessContext (ProcessContextSpecification::LogOutputLevel), so the process's own lines are filtered from the
+		// first; Run also sets it (Log::SetOutputLevel) from its start to its end and then restores the previous level, so an
+		// application run in place, as the Tests do, is filtered alike.
 		std::optional<LogLevel> MinimumLogLevel{};
 	};
 
@@ -131,7 +140,7 @@ namespace Engine {
 	//                           "null" or None for "none" (M12: windowed processes that tests start never open the
 	//                           machine's audio device, §15.1 T1); the decoding mode stays the window mode's
 	//   --log-level <level>     MinimumLogLevel: "trace", "info", "warn", "error" or "critical", the output sinks' minimum
-	//                           (M15, stream D; also in Dist)
+	//                           (M15, stream D; also in Dist, where "trace" stores Info)
 	// Every option except --headless, --frames, --expect-no-errors and --log-level is absent from Dist builds, where it is an
 	// unknown option (§13.9 lists the options Dist honours).
 	// An application parses its command line with these plus its own options (CommandLine::Parse). The returned options
@@ -141,8 +150,8 @@ namespace Engine {
 	// Applies the engine options of `commandLine` to `specification` (see GetEngineCommandLineOptions) and stores the
 	// command line in specification.Args. Errors: InvalidArgument naming the option for a --frames value that is not an
 	// integer >= 1, a --user-data-dir value that is not an absolute path in valid UTF-8, or a --renderer, --gpu-validation,
-	// --vulkan-api, --gpu-inject-fault or --audio-device value other than the spellings listed above (the message lists
-	// them).
+	// --vulkan-api, --gpu-inject-fault, --audio-device or --log-level value other than the spellings listed above (the
+	// message lists them).
 	[[nodiscard]] Status ApplyEngineCommandLine(const CommandLine& commandLine, ApplicationSpecification& specification);
 
 	// The base of the editor and runtime applications. Not copyable or movable.
@@ -152,7 +161,7 @@ namespace Engine {
 	//      RegisterTypes function, the ProcessContext's user-data folder as user://, with RendererMode::Vulkan the
 	//      GraphicsSpecification, and the audio specification (Audio, or GetDefaultAudioSpecification; M12); then the frame's
 	//      rendering objects (a Swapchain on the window in a windowed process, an OffscreenTarget of the window's
-	//      framebuffer size in a headless one, the FramePacer, the GpuProfiler, and the
+	//      framebuffer size in a headless one, the FramePacer, the GpuProfiler, and, except in Dist, the
 	//      ImGuiLayer when EnableImGui is set, with ImGuiIniPath under the user-data folder); a clock from the
 	//      specification (SystemClock, or ManualClock with the loop's FixedDelta); then OnInitialize. A failure is logged
 	//      at Error level (and shown in an error dialog when the ProcessContext has ShowErrorDialogs), whatever was built
@@ -177,6 +186,8 @@ namespace Engine {
 	//      target, pacer), then the GPU services (EngineContext::DestroyGraphics) with the ExpectNoGpuErrors check (see the
 	//      field), then the rest of the context (reverse order), then the ExpectNoErrors check, which so counts the errors
 	//      logged during the whole teardown too. Run returns the exit code.
+	// Throughout, MinimumLogLevel (when set) is the output sinks' minimum level (Log::SetOutputLevel), and the previous level
+	// is restored when Run returns.
 	// Run may be called once per Application.
 	class Application : private IFrameLoopClient
 	{
@@ -219,10 +230,12 @@ namespace Engine {
 		// Once per rendered frame with a device, after OnUpdate: record the frame's scene work into context.CommandList
 		// (§4.1, §8.2). Not called with RendererMode::None or for a frame the swapchain skips.
 		virtual void OnRender(RenderContext& /*context*/) {}
+#if !defined(ENGINE_DIST)
 		// Once per rendered frame with ImGui (EnableImGui), after OnRender, between ImGui::NewFrame and ImGui::Render:
 		// submit the frame's widgets. Not called for a frame the swapchain skips; the next UI frame's io.DeltaTime then
-		// covers the skipped frames' time too.
+		// covers the skipped frames' time too. Not in Dist builds, which have no ImGui.
 		virtual void OnImGuiRender() {}
+#endif
 		// M9: once AFTER executing this frame's scene/UI list and BEFORE Present, with that list's actual submission ID.
 		// Main thread; never called for an unrendered/skipped frame. Notify each renderer used by this frame through
 		// SceneRenderer::OnSubmitted, then drain queued UI picks against that submitted image/table/generation before a
@@ -232,13 +245,15 @@ namespace Engine {
 		virtual void OnRenderSubmitted(uint64_t frameIndex, uint64_t submissionId);
 		// M10: request a complete offscreen scene/UI frame at the next render phase, even while minimized. No swapchain
 		// acquire/present in that case; retain the last nonzero UI size. Normal rendering consumes the request too.
-		// Main thread, while Run is active. Unsupported without a device/ImGui; does not advance simulation or render here.
-		// Forced frames invoke the same render/submission hooks, with no reuse of stale ImGui draw data.
+		// Main thread, while Run is active. Unsupported without a device/ImGui (always in Dist); does not advance simulation
+		// or render here. Forced frames invoke the same render/submission hooks, with no reuse of stale ImGui draw data.
 		[[nodiscard]] Status RequestOffscreenUiFrame();
 
+#if !defined(ENGINE_DIST)
 		// The application's ImGuiLayer (editor screenshots re-render its last frame, §8.13); nullptr without ImGui, and
-		// outside the span from rendering initialization to the end of OnShutdown.
+		// outside the span from rendering initialization to the end of OnShutdown. Not in Dist builds.
 		[[nodiscard]] ImGuiLayer* GetImGuiLayer() { return m_ImGuiLayer.get(); }
+#endif
 
 		// M7 play-session controls of the frame loop (FrameLoop::SetTimeScale, SetThrottleSuspended and SetLoopConfig), for the
 		// play session's time scale, the unthrottled frames of a running play.step and the project's Simulation.FixedHz and
@@ -278,10 +293,12 @@ namespace Engine {
 		struct LoggedErrorCounter;
 	private:
 		ApplicationSpecification m_Specification;
-		Scope<EngineContext> m_Context;           // between the start of initialization and the end of OnShutdown
-		Scope<FrameLoop> m_FrameLoop;             // while the frame loop runs
-		Scope<FrameRendering> m_Rendering;        // with a device, from InitializeRendering to ShutdownRendering
-		Scope<ImGuiLayer> m_ImGuiLayer;           // with EnableImGui, from InitializeRendering to ShutdownRendering
+		Scope<EngineContext> m_Context;    // between the start of initialization and the end of OnShutdown
+		Scope<FrameLoop> m_FrameLoop;      // while the frame loop runs
+		Scope<FrameRendering> m_Rendering; // with a device, from InitializeRendering to ShutdownRendering
+#if !defined(ENGINE_DIST)
+		Scope<ImGuiLayer> m_ImGuiLayer; // with EnableImGui, from InitializeRendering to ShutdownRendering
+#endif
 		Scope<LoggedErrorCounter> m_LoggedErrors; // with ExpectNoErrors, from the start of Run to its end
 		std::optional<int> m_PendingExitCode;     // an exit requested before the frame loop exists (during OnInitialize)
 		double m_AudioClockSeconds = 0.0;         // the frame clock's accumulated unscaled time for AudioEngine::Update (M12)

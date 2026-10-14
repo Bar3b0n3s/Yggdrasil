@@ -73,7 +73,7 @@ namespace Engine {
 			std::filesystem::path UserDataDirectory{};
 			// --child-argument=<text>: free text for the body a child mode runs, such as the lock file a child must hold.
 			std::string ChildArgument{};
-			// --test-timeout=<seconds>: the per-test-case limit for cases without a doctest::timeout decorator (> 0).
+			// --test-timeout=<seconds>: the per-test-case limit for cases that set none with SetTestCaseTimeLimit (> 0).
 			double DefaultTimeoutSeconds = 120.0;
 			// --require-gpu: a GPU test whose device cannot be created fails naming the reason, instead of passing with a
 			// "GPU test skipped" message (HeadlessGpuFixture.h). CI.py's gpu and golden stages always pass it (§15.2).
@@ -90,8 +90,10 @@ namespace Engine {
 			//   --fuzz-shard=<k>/<n>: this process runs the k-th (0-based) of n contiguous slices (0 <= k < n);
 			//   --fuzz-index=<i>: this process runs iteration i alone of the case's total (i below it), the reproduction of a
 			//     reported failure; not with --fuzz-shard;
-			//   --test-timeout-scale=<s>: multiplies every per-test-case limit, decorated (doctest::timeout) and default
-			//     alike (s >= 1), for the sanitizer and long fuzz runs (TestTimeout.h).
+			//   --test-timeout-scale=<s>: multiplies every per-test-case limit, the default (--test-timeout) and the one a
+			//     case sets with SetTestCaseTimeLimit alike (s >= 1), for the sanitizer and long fuzz runs. The watchdog is
+			//     the only per-case limit: no case carries doctest::timeout, whose post-case check this cannot scale, and a
+			//     unit test names any case that does (TestTimeout.h).
 			uint64_t FuzzIterations = 0;
 			double FuzzScale = 1.0;
 			uint32_t FuzzShardIndex = 0;
@@ -112,7 +114,9 @@ namespace Engine {
 		// ignored. Errors: InvalidArgument naming the malformed option (an empty --death-test, --windowed-child or
 		// --user-data-dir value, a relative --user-data-dir, a value given to --crash-child, --child-process,
 		// --require-gpu or --update-golden, more than one child mode, a non-positive or non-numeric --test-timeout, a
-		// --vulkan-api other than 1.3 or 1.4), Io when neither the OS nor argv[0] yields an absolute path.
+		// --vulkan-api other than 1.3 or 1.4, a --fuzz-iterations that is not a whole number >= 1, a --fuzz-scale outside
+		// (0, 1], a --fuzz-shard that is not <k>/<n> with 0 <= k < n, a --fuzz-index that is not a whole number or that comes
+		// with --fuzz-shard, a --test-timeout-scale below 1), Io when neither the OS nor argv[0] yields an absolute path.
 		[[nodiscard]] Result<TestOptions> ParseTestOptions(int argc, const char* const* argv);
 
 		// The options of this run: set once by the main before any test runs (process-level state of the Tests binary), then

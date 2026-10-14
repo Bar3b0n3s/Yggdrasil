@@ -3,6 +3,7 @@
 #include "Engine/Core/Base.h"
 #include "Engine/Core/Buffer.h"
 #include "Engine/Core/Result.h"
+#include "Engine/Platform/Input/KeyCodes.h"
 
 #include <array>
 #include <cstddef>
@@ -86,6 +87,14 @@ namespace Engine {
 		// LoadResource. A missing version resource leaves the versions zero and Strings empty; a missing icon group leaves
 		// Icons empty. Errors: Io naming the failing call.
 		[[nodiscard]] Result<ExecutableResourceProbe> ProbeExecutableResources(const std::filesystem::path& executable);
+
+		// Delivers a press (`pressed`) or a release of `key` to the visible GLFW window of the process `processId` as the OS
+		// delivers a keystroke: a WM_KEYDOWN or WM_KEYUP message (PostMessageW) carrying the key's virtual-key code and scan
+		// code, which GLFW's window procedure turns into that press or release whether or not the window has the focus. For
+		// tests of a windowed process that must receive real key events (the Runtime's F1 overlay, Docs/Decisions/
+		// 0024-m15-contract.md decision 17). Keys: F1 to F12. Errors: InvalidArgument for another key; NotFound when the
+		// process has no visible GLFW window (yet); Io when the message cannot be posted.
+		[[nodiscard]] Status PostKeyToProcessWindow(uint32_t processId, Key key, bool pressed);
 #else
 		// Opens `file` for reading without close-on-exec, as a library that calls fopen does, and returns the descriptor:
 		// `minimum` or the lowest free one above it, so that a child process is unlikely to reuse the number for a

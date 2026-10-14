@@ -9,11 +9,13 @@
 
 #include <nlohmann/json.hpp>
 
-#include <array>
 #include <algorithm>
+#include <array>
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <string_view>
+#include <utility>
 #include <vector>
 
 // The macOS bundle writers and assembly steps (Architecture §14.1, §14.2 step 5, §16; Docs/Decisions/0024-m15-contract.md
@@ -50,7 +52,7 @@ namespace Engine {
 
 	TEST_SUITE("EditorCore")
 	{
-		TEST_CASE("AppBundle: the bundle identifier is derived deterministically from the company and name" * doctest::skip(true))
+		TEST_CASE("AppBundle: the bundle identifier is derived deterministically from the company and name")
 		{
 			CHECK(MakeBundleIdentifier("Fixture Studio", "Tetris") == "com.fixture-studio.tetris");
 			CHECK(MakeBundleIdentifier("  A.B  ", "Rolling Ball 3D") == "com.a-b.rolling-ball-3d");
@@ -61,7 +63,7 @@ namespace Engine {
 			CHECK(MakeBundleIdentifier("Studio", "\xE3\x83\x86\xE3\x83\x88") == kana);
 		}
 
-		TEST_CASE("AppBundle: Info.plist carries the name, identifier, version and company" * doctest::skip(true))
+		TEST_CASE("AppBundle: Info.plist carries the name, identifier, version and company")
 		{
 			const AppBundleInfo info{
 				.Name = "Tetris & Co",
@@ -108,7 +110,48 @@ namespace Engine {
 			CHECK(unnamed.error().GetCode() == ErrorCode::InvalidArgument);
 		}
 
-		TEST_CASE("AppBundle: .icns holds every size as PNG in big-endian entries" * doctest::skip(true))
+		// Info.plist is XML 1.0, whose characters exclude U+FFFE, U+FFFF and the control characters: every string it holds
+		// passes FindExportTextProblem, the one rule Export.Company follows too (the M15 fix review's C7).
+		TEST_CASE("AppBundle: Info.plist refuses a string holding a control character, U+FFFE or U+FFFF, naming its key")
+		{
+			const AppBundleInfo valid{
+				.Name = "Game",
+				.Identifier = "com.studio.game",
+				.Version = "1.0.0",
+				.Company = "Studio \xEF\xBF\xBD \xF4\x8F\xBF\xBF",
+				.HasIcon = false,
+			};
+			REQUIRE(WriteInfoPlist(valid).has_value());
+			const std::array<std::pair<std::string_view, std::string AppBundleInfo::*>, 4> strings = { {
+				{ "CFBundleName", &AppBundleInfo::Name },
+				{ "CFBundleIdentifier", &AppBundleInfo::Identifier },
+				{ "CFBundleShortVersionString", &AppBundleInfo::Version },
+				{ "NSHumanReadableCopyright", &AppBundleInfo::Company },
+			} };
+			const std::array<std::pair<std::string_view, std::string_view>, 4> refused = { {
+				{ "U+FFFE", "A\xEF\xBF\xBE" },
+				{ "U+FFFF", "A\xEF\xBF\xBF" },
+				{ "U+0009", "A\t" },
+				{ "U+007F", "A\x7F" },
+			} };
+			for (const auto& [key, member] : strings)
+			{
+				for (const auto& [character, text] : refused)
+				{
+					CAPTURE(key);
+					CAPTURE(character);
+					AppBundleInfo info = valid;
+					info.*member = std::string(text);
+					const Result<std::string> plist = WriteInfoPlist(info);
+					REQUIRE_FALSE(plist.has_value());
+					CHECK(plist.error().GetCode() == ErrorCode::InvalidArgument);
+					CHECK(plist.error().ToString().contains(key));
+					CHECK(plist.error().ToString().contains(character));
+				}
+			}
+		}
+
+		TEST_CASE("AppBundle: .icns holds every size as PNG in big-endian entries")
 		{
 			std::vector<ExecutableIconImage> icons;
 			for (const uint16_t size : std::array<uint16_t, 7>{ 16, 24, 32, 48, 64, 128, 256 })
@@ -145,7 +188,7 @@ namespace Engine {
 			CHECK(none.error().GetCode() == ErrorCode::InvalidArgument);
 		}
 
-		TEST_CASE("AppBundle: the MoltenVK ICD manifest points into Frameworks" * doctest::skip(true))
+		TEST_CASE("AppBundle: the MoltenVK ICD manifest points into Frameworks")
 		{
 			constexpr std::string_view Sdk = R"({"file_format_version": "1.0.0", "ICD": {"library_path": "../../../lib/libMoltenVK.dylib", "api_version": "1.4.0", "is_portability_driver": true}})";
 			const Result<std::string> rewritten = RewriteMoltenVkIcd(Sdk);
@@ -165,7 +208,7 @@ namespace Engine {
 			CHECK(broken.error().GetCode() == ErrorCode::Parse);
 		}
 
-		TEST_CASE("AppBundle: the assembly steps lay out the bundle from the build output on every OS" * doctest::skip(true))
+		TEST_CASE("AppBundle: the assembly steps lay out the bundle from the build output on every OS")
 		{
 			// Review finding 19: the assembly is host-independent, so the local Windows gate builds and runs it; only codesign
 			// is macOS-only. Fake files stand in for the SDK's dylibs and the Runtime.

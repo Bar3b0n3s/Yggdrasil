@@ -48,7 +48,6 @@ namespace Engine {
 					running.Name = testCase.m_name;
 					running.File = testCase.m_file.c_str();
 					running.Line = testCase.m_line;
-					running.TimeoutSeconds = testCase.m_timeout;
 					running.Serial = ++state.LastSerial;
 					state.Running = std::move(running);
 				}

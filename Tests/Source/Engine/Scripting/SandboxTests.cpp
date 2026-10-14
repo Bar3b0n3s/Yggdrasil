@@ -4,6 +4,7 @@
 #include "Engine/Asset/IScriptDiagnosticsProvider.h"
 #include "Engine/Core/DetMath.h"
 #include "Engine/Core/Json/Json.h"
+#include "Engine/Core/Log.h"
 #include "Engine/Core/Random.h"
 #include "Engine/Core/Utf8.h"
 #include "Engine/Reflection/TypeRegistry.h"
@@ -13,6 +14,7 @@
 #include "Engine/Scripting/ScriptApiRegistry.h"
 #include "Engine/Scripting/ScriptCompiler.h"
 #include "Engine/Scripting/ScriptLimits.h"
+#include "Support/DeathTest.h"
 #include "Support/ExpectLog.h"
 #include "Support/ScriptTestFixture.h"
 
@@ -91,8 +93,28 @@ namespace Engine {
 
 	}
 
+	// Shuts the scripting runtime down while a VM is open: the Lua states counter of the teardown invariants (Architecture
+	// §4.1) must be zero by then.
+	ENGINE_DEATH_TEST("Scripting/ShutdownWithAnOpenVm")
+	{
+		SandboxSpecification specification{};
+		specification.Mode = SandboxMode::LoadTime;
+		auto sandbox = Sandbox::Create(specification);
+		if (!sandbox.has_value())
+		{
+			ENGINE_CORE_ERROR("The child cannot open a VM: {}", sandbox.error());
+			return;
+		}
+		ShutdownScriptingRuntime();
+	}
+
 	TEST_SUITE("Scripting")
 	{
+		TEST_CASE("Sandbox: shutting the scripting runtime down while a VM is open asserts")
+		{
+			ENGINE_CHECK_DEATH("Scripting/ShutdownWithAnOpenVm", "ShutdownScriptingRuntime with 1 scripting VMs still open");
+		}
+
 		TEST_CASE("Sandbox: engine-less Runtime restricts metadata availability while retaining runtime limits")
 		{
 			TypeRegistry types;

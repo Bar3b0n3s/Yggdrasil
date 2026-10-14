@@ -24,6 +24,18 @@
 		{ "Pattern": "Assets/Drafts/**", "Path": "Assets/Drafts/Sketch.scene", "Matches": true },
 		{ "Pattern": "Assets/Te.ts/*", "Path": "Assets/Tests/Level.scene", "Matches": false },
 		{ "Pattern": "Assets/[a]/*", "Path": "Assets/a/Level.scene", "Matches": false },
-		{ "Pattern": "Assets/[a]/*", "Path": "Assets/[a]/Level.scene", "Matches": true }
+		{ "Pattern": "Assets/[a]/*", "Path": "Assets/[a]/Level.scene", "Matches": true },
+		{ "Pattern": "Assets/Tests/Replays/Ni?o.replay", "Path": "Assets/Tests/Replays/Niño.replay", "Matches": true },
+		{ "Pattern": "Assets/Tests/Replays/Ni??o.replay", "Path": "Assets/Tests/Replays/Niño.replay", "Matches": false },
+		{ "Pattern": "Assets/Price?.txt", "Path": "Assets/Price€.txt", "Matches": true },
+		{ "Pattern": "Assets/Price???.txt", "Path": "Assets/Price€.txt", "Matches": false },
+		{ "Pattern": "Assets/Dice?.png", "Path": "Assets/Dice🎲.png", "Matches": true },
+		{ "Pattern": "Assets/Dice????.png", "Path": "Assets/Dice🎲.png", "Matches": false },
+		{ "Pattern": "Assets/*?.txt", "Path": "Assets/€.txt", "Matches": true },
+		{ "Pattern": "Assets/*??.txt", "Path": "Assets/€.txt", "Matches": false },
+		{ "Pattern": "Assets/**??.png", "Path": "Assets/é.png", "Matches": false },
+		{ "Pattern": "Assets/**/?.png", "Path": "Assets/A/B/é.png", "Matches": true },
+		{ "Pattern": "Assets/日本/*.scene", "Path": "Assets/日本/Level.scene", "Matches": true },
+		{ "Pattern": "Assets/É?.scene", "Path": "Assets/é1.scene", "Matches": false }
 	]
 }

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
 import sys
 import unittest
 from pathlib import Path
@@ -18,8 +19,12 @@ from harness import (EXIT_SUCCESS, GPU_EDITOR_ARGUMENTS, AutomationTestCase, aut
 from tiny_game import TINY_GAME_NAME, TINY_SCENE, WINDOW_HEIGHT, WINDOW_WIDTH, build_tiny_game, export_tiny_game
 
 CRT_FILES = ("vcruntime140.dll", "vcruntime140_1.dll", "msvcp140.dll")
+NOTICES_FILE = "THIRD_PARTY_NOTICES.txt"
 # The hint of an environment that needs a bake no cache holds (Docs/Decisions/0013-m8-decisions.md decision 9).
 ENVIRONMENT_GPU_HINT = "start the editor with a GPU once to bake this environment"
+# The version strings Windows reads from an executable's VS_VERSIONINFO (§14.2 step 5).
+VERSION_KEYS = ("CompanyName", "FileDescription", "FileVersion", "InternalName", "OriginalFilename", "ProductName",
+                "ProductVersion")
 
 
 def platform_name() -> str:
@@ -29,6 +34,44 @@ def platform_name() -> str:
     if sys.platform == "darwin":
         return "macOS"
     return "Linux"
+
+
+def package_resources(output: Path, name: str = TINY_GAME_NAME) -> Path:
+    """Where Game.json, Data/ and the notices are in the package at `output`: the bundle's Contents/Resources on macOS
+    (EditorCore/Export/AppBundle.h), the package directory elsewhere."""
+    return output / f"{name}.app" / "Contents" / "Resources" if sys.platform == "darwin" else output
+
+
+def read_version_strings(executable: Path) -> dict[str, str]:
+    """The \\StringFileInfo\\040904B0 strings of a Windows executable, read with Windows' own GetFileVersionInfoW and
+    VerQueryValueW (the resource probe of Docs/Decisions/0024-m15-contract.md decision 4); empty without a version
+    resource."""
+    import ctypes  # noqa: PLC0415  (Windows only)
+    from ctypes import wintypes  # noqa: PLC0415
+
+    version = ctypes.WinDLL("version")
+    version.GetFileVersionInfoSizeW.argtypes = (wintypes.LPCWSTR, ctypes.POINTER(wintypes.DWORD))
+    version.GetFileVersionInfoSizeW.restype = wintypes.DWORD
+    version.GetFileVersionInfoW.argtypes = (wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, ctypes.c_void_p)
+    version.GetFileVersionInfoW.restype = wintypes.BOOL
+    version.VerQueryValueW.argtypes = (ctypes.c_void_p, wintypes.LPCWSTR, ctypes.POINTER(ctypes.c_void_p),
+                                       ctypes.POINTER(wintypes.UINT))
+    version.VerQueryValueW.restype = wintypes.BOOL
+    size = version.GetFileVersionInfoSizeW(str(executable), None)
+    if size == 0:
+        return {}
+    block = ctypes.create_string_buffer(size)
+    if not version.GetFileVersionInfoW(str(executable), 0, size, block):
+        raise OSError(f"GetFileVersionInfoW failed for {executable}")
+    strings: dict[str, str] = {}
+    for key in VERSION_KEYS:
+        value = ctypes.c_void_p()
+        length = wintypes.UINT()
+        found = version.VerQueryValueW(block, f"\\StringFileInfo\\040904B0\\{key}", ctypes.byref(value),
+                                       ctypes.byref(length))
+        if found and value.value and length.value:
+            strings[key] = ctypes.wstring_at(value.value, length.value).split("\0", 1)[0]
+    return strings
 
 
 def environment_warnings(report: dict[str, Any]) -> list[str]:
@@ -53,16 +96,38 @@ class ExportTests(AutomationTestCase):
         self.assertEqual(output, root / "Build" / f"{platform_name()}-{automation_config()}" / TINY_GAME_NAME)
         self.assertEqual(report["config"], automation_config())
         executable = Path(report["executable"])
-        self.assertEqual(executable.parent, output)
+        resources = package_resources(output)
         self.assertEqual(executable.stem, TINY_GAME_NAME)
         self.assertTrue(executable.is_file())
-        self.assertEqual(executable.read_bytes(), runtime_executable(automation_config()).read_bytes())
-        self.assertTrue((output / "Data" / "Engine.pak").is_file())
-        self.assertTrue((output / "Data" / "Game.pak").is_file())
+        runtime = runtime_executable(automation_config())
         if sys.platform == "win32":
+            # The copied Runtime carries the project's version resource (§14.2 step 5; no Export.Icon, so no icon
+            # group).
+            self.assertEqual(executable.parent, output)
+            self.assertEqual(read_version_strings(executable), {
+                "FileDescription": TINY_GAME_NAME, "FileVersion": "1.0.0.0", "InternalName": TINY_GAME_NAME,
+                "OriginalFilename": f"{TINY_GAME_NAME}.exe", "ProductName": TINY_GAME_NAME,
+                "ProductVersion": "1.0.0.0"})
+            self.assertEqual(read_version_strings(runtime), {})
             for name in CRT_FILES:
                 self.assertTrue((output / name).is_file(), name)
-        manifest = json.loads((output / "Game.json").read_text(encoding="utf-8"))
+        elif sys.platform == "darwin":
+            # The output directory holds only the bundle (§14.1, AppBundle.h).
+            self.assertEqual([entry.name for entry in output.iterdir()], [f"{TINY_GAME_NAME}.app"])
+            self.assertEqual(executable, output / f"{TINY_GAME_NAME}.app" / "Contents" / "MacOS" / TINY_GAME_NAME)
+            info = (output / f"{TINY_GAME_NAME}.app" / "Contents" / "Info.plist").read_text(encoding="utf-8")
+            self.assertIn(f"<string>{TINY_GAME_NAME}</string>", info)
+            for framework in ("libvulkan.1.dylib", "libMoltenVK.dylib"):
+                self.assertTrue((output / f"{TINY_GAME_NAME}.app" / "Contents" / "Frameworks" / framework).is_file())
+        else:
+            # Linux executables carry no resources (§16): the Runtime is copied unchanged.
+            self.assertEqual(executable.parent, output)
+            self.assertEqual(executable.read_bytes(), runtime.read_bytes())
+        self.assertTrue((resources / "Data" / "Engine.pak").is_file())
+        self.assertTrue((resources / "Data" / "Game.pak").is_file())
+        # The notices Scripts/Build.py generated beside the Runtime (Docs/Decisions/0024-m15-contract.md decision 8).
+        self.assertEqual((resources / NOTICES_FILE).read_bytes(), (runtime.parent / NOTICES_FILE).read_bytes())
+        manifest = json.loads((resources / "Game.json").read_text(encoding="utf-8"))
         self.assertEqual(manifest["Format"], "GameManifest")
         self.assertEqual(manifest["Name"], TINY_GAME_NAME)
         self.assertEqual([pak["Path"] for pak in manifest["Paks"]], ["Data/Engine.pak", "Data/Game.pak"])
@@ -75,8 +140,10 @@ class ExportTests(AutomationTestCase):
         self.assertGreater(report["engineEntryCount"], 0)
         listed = {entry["path"]: entry for entry in report["files"]}
         self.assertEqual(list(listed), sorted(listed))
-        self.assertIn("Game.json", listed)
-        self.assertIn("Data/Game.pak", listed)
+        prefix = f"{TINY_GAME_NAME}.app/Contents/Resources/" if sys.platform == "darwin" else ""
+        self.assertIn(f"{prefix}Game.json", listed)
+        self.assertIn(f"{prefix}Data/Game.pak", listed)
+        self.assertIn(f"{prefix}{NOTICES_FILE}", listed)
         for path, entry in listed.items():
             self.assertEqual(entry["size"], (output / path).stat().st_size, path)
             self.assertRegex(entry["hash"], r"^[0-9a-f]{16}$")
@@ -88,26 +155,61 @@ class ExportTests(AutomationTestCase):
         client, _ = self.open_tiny_game()
         first = export_tiny_game(client)
         output = Path(first["outputDirectory"])
-        digests = {name: hashlib.sha256((output / "Data" / name).read_bytes()).hexdigest()
+        resources = package_resources(output)
+        digests = {name: hashlib.sha256((resources / "Data" / name).read_bytes()).hexdigest()
                    for name in ("Engine.pak", "Game.pak")}
-        manifest = (output / "Game.json").read_bytes()
+        manifest = (resources / "Game.json").read_bytes()
+        executable = Path(first["executable"]).read_bytes()
         second = export_tiny_game(client)
         self.assertEqual(second["outputDirectory"], first["outputDirectory"])
         for name, digest in digests.items():
-            self.assertEqual(hashlib.sha256((output / "Data" / name).read_bytes()).hexdigest(), digest, name)
-        self.assertEqual((output / "Game.json").read_bytes(), manifest)
+            self.assertEqual(hashlib.sha256((resources / "Data" / name).read_bytes()).hexdigest(), digest, name)
+        self.assertEqual((resources / "Game.json").read_bytes(), manifest)
+        # The patched executable too (§14.2 step 5 writes no timestamp).
+        self.assertEqual(Path(second["executable"]).read_bytes(), executable)
         self.assertEqual(second["files"], first["files"])
 
     def test_export_into_out_dir_replaces_the_earlier_export(self) -> None:
+        # An earlier export is a directory whose Game.json loads as a game manifest (Docs/Decisions/0024-m15-contract.md
+        # decision 2, the M15 review's M01), so the first export makes a real one there.
         client, root = self.open_tiny_game()
         output = root / "Build" / "Shipping" / TINY_GAME_NAME
-        output.mkdir(parents=True)
+        client.call("project.export", {"config": automation_config(), "outDir": "Build/Shipping/TinyGame"})
+        self.assertTrue((package_resources(output) / "Game.json").is_file())
         (output / "Old.txt").write_text("an earlier export", encoding="utf-8")
         report = client.call("project.export", {"config": automation_config(), "outDir": "Build/Shipping/TinyGame"})
         self.assertEqual(Path(report["outputDirectory"]), output)
         self.assertFalse((output / "Old.txt").exists())
         self.assertTrue(Path(report["executable"]).is_file())
         self.assertEqual([entry.name for entry in output.parent.iterdir()], [TINY_GAME_NAME])
+
+    def test_export_never_replaces_a_directory_without_an_earlier_export(self) -> None:
+        # Docs/Decisions/0024-m15-contract.md decision 2: an export replaces its output directory as a whole, so an
+        # existing one must be empty or hold an earlier export; anything else is refused before anything is written.
+        client, root = self.open_tiny_game()
+        output = root / "Build" / "Notes"
+        output.mkdir(parents=True)
+        (output / "Todo.txt").write_text("keep me", encoding="utf-8")
+        with self.assertRaises(engine_client.EngineError) as refused:
+            client.call("project.export", {"config": automation_config(), "outDir": "Build/Notes"})
+        self.assert_engine_error(refused.exception, engine_client.INVALID_PARAMS)
+        self.assertIn(output.as_posix(), refused.exception.detail.replace("\\", "/"))
+        self.assertEqual((output / "Todo.txt").read_text(encoding="utf-8"), "keep me")
+        self.assertEqual([entry.name for entry in output.parent.iterdir()], ["Notes"])
+        # A Game.json that is not a game manifest proves no earlier export (the M15 review's M01).
+        manifest = package_resources(output) / "Game.json"
+        manifest.parent.mkdir(parents=True, exist_ok=True)
+        manifest.write_text("{}", encoding="utf-8")
+        with self.assertRaises(engine_client.EngineError) as unproven:
+            client.call("project.export", {"config": automation_config(), "outDir": "Build/Notes"})
+        self.assert_engine_error(unproven.exception, engine_client.INVALID_PARAMS)
+        self.assertEqual((output / "Todo.txt").read_text(encoding="utf-8"), "keep me")
+        self.assertEqual(manifest.read_text(encoding="utf-8"), "{}")
+        # An empty directory is fine.
+        shutil.rmtree(output)
+        output.mkdir()
+        report = client.call("project.export", {"config": automation_config(), "outDir": "Build/Notes"})
+        self.assertEqual(Path(report["outputDirectory"]), output)
 
     def test_export_smoke_test_runs_the_exported_game(self) -> None:
         # The suite's editor has no device (--renderer none), so a Debug or Release smoke test passes --renderer none.
@@ -118,8 +220,12 @@ class ExportTests(AutomationTestCase):
         # The smoke test ran on the staged package: nothing it wrote is in the package, and its user-data directory is
         # gone too.
         output = Path(report["outputDirectory"])
-        self.assertEqual({entry.name for entry in output.iterdir()} - set(CRT_FILES),
-                         {Path(report["executable"]).name, "Game.json", "Data"})
+        if sys.platform == "darwin":
+            self.assertEqual({entry.name for entry in package_resources(output).iterdir()},
+                             {"Game.json", "Data", NOTICES_FILE, "vulkan"})
+        else:
+            self.assertEqual({entry.name for entry in output.iterdir()} - set(CRT_FILES),
+                             {Path(report["executable"]).name, "Game.json", "Data", NOTICES_FILE})
         self.assertEqual([entry.name for entry in output.parent.iterdir()], [TINY_GAME_NAME])
 
     def test_export_dist_smoke_test_without_a_device_is_reported_not_run(self) -> None:

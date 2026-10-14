@@ -3,6 +3,7 @@
 #include "Engine/Asset/FontData.h"
 
 #include "Engine/Core/Random.h"
+#include "Support/Fuzz.h"
 
 #include <limits>
 #include <optional>
@@ -123,21 +124,22 @@ namespace Engine {
 			CHECK(GetErrorCode(DeserializeFontPayload(hugeCount)) == ErrorCode::Parse);
 		}
 
-		TEST_CASE("FontData: 10,000 seeded mutations of a payload never crash")
+		TEST_CASE("FontData: 10,000 seeded mutations of a payload never crash" * doctest::test_suite(Test::FuzzSuite))
 		{
 			const Buffer payload = SerializeFontPayload(MakeFont());
-			Random random(0xF047);
-			for (int iteration = 0; iteration < 10000; ++iteration)
+			const Test::FuzzRun run = Test::RunFuzzCase(0xF047, 10000, [&payload](Random& random, uint64_t /*index*/)
 			{
 				Buffer mutated = payload;
-				const size_t index = static_cast<size_t>(random.RangeInt(0, static_cast<int64_t>(mutated.size()) - 1));
-				mutated[index] = static_cast<std::byte>(random.NextU32() & 0xFF);
-				if (random.NextBool(0.2))
-					mutated.resize(static_cast<size_t>(random.RangeInt(0, static_cast<int64_t>(mutated.size()))));
+				Test::MutateBytes(mutated, random);
+				// A payload the reader accepts is a valid font.
 				const Result<FontData> read = DeserializeFontPayload(mutated);
-				if (read.has_value())
-					CHECK(ValidateFontData(*read).has_value());
-			}
+				if (!read.has_value())
+					return false;
+				CHECK(ValidateFontData(*read).has_value());
+				return true;
+			});
+			if (Test::IsFuzzSample(run.Range))
+				CHECK(run.Counts.Rejected > 0);
 		}
 	}
 

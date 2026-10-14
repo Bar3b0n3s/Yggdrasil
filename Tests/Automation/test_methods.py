@@ -11,8 +11,8 @@ from harness import REPOSITORY_ROOT, AutomationTestCase, engine_client
 
 
 def euler_degrees_to_quaternion(x: float, y: float, z: float) -> tuple[float, float, float, float]:
-    """The engine's Euler convention (TransformSystem::QuaternionFromEulerDegrees): q = qY * qX * qZ, returned as [x, y, z,
-    w] like the Rotation field."""
+    """The engine's Euler convention (TransformSystem::QuaternionFromEulerDegrees): q = qY * qX * qZ, returned as
+    [x, y, z, w] like the Rotation field."""
     def about(axis: int, degrees: float) -> tuple[float, float, float, float]:
         half = math.radians(degrees) / 2.0
         vector = [0.0, 0.0, 0.0]

@@ -85,10 +85,12 @@ class ConformanceTests(unittest.TestCase):
         reason = harness.probe_rendering_editor()
         if reason is not None:
             if os.environ.get(harness.REQUIRE_GPU_VARIABLE) == "1":
-                self.fail(f"no usable Vulkan device for a rendering editor ({harness.REQUIRE_GPU_VARIABLE}=1): {reason}")
+                self.fail(f"no usable Vulkan device for a rendering editor ({harness.REQUIRE_GPU_VARIABLE}=1): "
+                          f"{reason}")
             print(f"{harness.NO_DEVICE_PREFIX}{self.id()}: {reason}", file=sys.stderr, flush=True)
             return
-        # The scene view renders the open scene (Docs/Decisions/0012-m7-decisions.md decision 9), so one is created first.
+        # The scene view renders the open scene (Docs/Decisions/0012-m7-decisions.md decision 9), so one is created
+        # first.
         results = self.run_session([
             ("editor_launch", {"project": str(self.directory / "Game"), "create": True, "renderer": "vulkan"}),
             ("scene_new", {"path": "Assets/Scenes/Main.scene"}),
@@ -190,9 +192,9 @@ class ConformanceTests(unittest.TestCase):
     def run_session(self, calls: list[tuple[str, dict[str, object]]],
                     count_coverage: bool = True) -> list[dict[str, Any]]:
         """Runs `calls` in one bridge session through the SDK client ("$kill" kills the launched editor) and returns
-        each result as {"structuredContent": ..., "text": ..., "isError": ..., "images": [{mimeType, data}]}. At the end,
-        editor_shutdown {force:
-        true} shuts down a launched editor that still runs (and only disconnects from an attached one)."""
+        each result as {"structuredContent": ..., "text": ..., "isError": ..., "images": [{mimeType, data}]}. At the
+        end, editor_shutdown {force: true} shuts down a launched editor that still runs (and only disconnects from an
+        attached one)."""
         parameters = StdioServerParameters(command=sys.executable, args=[str(MCP_ROOT / "run.py")],
                                            env=self.bridge_environment(None, count_coverage), cwd=str(REPOSITORY_ROOT))
 

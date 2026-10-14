@@ -172,6 +172,47 @@ namespace Engine {
 			CHECK(*launcherAfter == *saved);
 		}
 
+#if defined(ENGINE_PLATFORM_WINDOWS)
+		TEST_CASE("ImGuiLayer: an ini path with an unpaired UTF-16 surrogate does not stop the layer"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			// Windows lets a file name hold an unpaired surrogate, which UTF-8 cannot spell. The layer converted the ini path
+			// for Dear ImGui with path::u8string, which throws std::system_error for such a name, out of Create and
+			// SetIniFilePath. Now the name reaches Dear ImGui with U+FFFD in its place (FileSystem::PathToUtf8), so the layer
+			// works and Dear ImGui keeps its settings under that name.
+			if (!Test::ProbeGpuForProcess())
+				return;
+			Result<Scope<EngineContext>> created = CreateRenderingContext();
+			REQUIRE_MESSAGE(created.has_value(), created.error().ToString());
+			EngineContext& context = **created;
+			Test::TempDirectory directory("ImGuiSurrogateIni");
+			std::filesystem::path::string_type name = L"imgui";
+			name += static_cast<std::filesystem::path::value_type>(0xd800);
+			name += L".ini";
+			const std::filesystem::path launcherIni = directory / "User" / name;
+			const std::filesystem::path projectIni = directory / "Project" / name;
+
+			Result<Scope<ImGuiLayer>> layer = ImGuiLayer::Create(*context.GetWindow(), *context.GetGraphicsDevice(),
+				*context.GetPipelineFactory(), { .IniFilePath = launcherIni });
+			REQUIRE_MESSAGE(layer.has_value(), layer.error().ToString());
+			CHECK((*layer)->GetIniFilePath() == launcherIni);
+			(*layer)->BeginFrame(1.0 / 60.0, 0);
+			ImGui::Begin("Persisted");
+			ImGui::End();
+			(*layer)->EndFrame();
+			REQUIRE((*layer)->SetIniFilePath(projectIni).has_value());
+			CHECK((*layer)->GetIniFilePath() == projectIni);
+			context.GetGraphicsDevice()->WaitForIdle();
+			layer->reset();
+
+			const std::filesystem::path replaced = FileSystem::PathFromUtf8("imgui\xEF\xBF\xBD.ini");
+			const Result<std::string> launcherSaved = FileSystem::ReadText(directory / "User" / replaced);
+			REQUIRE_MESSAGE(launcherSaved.has_value(), launcherSaved.error().ToString());
+			CHECK(launcherSaved->contains("[Window][Persisted]"));
+			CHECK(FileSystem::Exists(directory / "Project" / replaced));
+		}
+#endif
+
 		TEST_CASE("ImGuiLayer: a second layer while one exists is InvalidState" * doctest::test_suite(Test::GpuSuite))
 		{
 			if (!Test::ProbeGpuForProcess())

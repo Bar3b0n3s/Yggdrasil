@@ -30,7 +30,10 @@ namespace Engine {
 		// directory and require exit code 0 (§14.2 step 7; Exporter.h step 6 has the per-configuration options and the Dist
 		// export from an editor without a device, which reports smokeTestRan false with a warning).
 		bool SmokeTest = false;
-		// A testing export (§7.6, M15): Unsupported at /testing when present.
+		// A testing export (§7.6, §14.1; M15, Docs/Decisions/0024-m15-contract.md decision 6): Game.json says "Testing": true,
+		// Assets/Tests/** and every Testing.Suites script and scene and Testing.Replays match are packaged whatever
+		// Export.Exclude says, and validation also refuses invalid suites and replays that do not import. The default output
+		// directory becomes Build/<Platform>-<Config>-Testing/<Name>, so it never replaces the plain export.
 		bool Testing = false;
 	};
 
@@ -40,6 +43,13 @@ namespace Engine {
 		std::string Path{}; // relative to outputDirectory
 		uint32_t Size = 0;  // bytes (ToAutomationCounter)
 		std::string Hash{}; // XXH64, 16 lowercase hex digits ("xxh64")
+	};
+
+	// How long one phase of the export took (ExportPhaseTiming).
+	struct ExportPhaseTimingSummary
+	{
+		ExportPhase Phase = ExportPhase::Validate; // registry enum "ExportPhase"
+		float Seconds = 0.0f;                      // wall-clock, for information
 	};
 
 	// The export report (§14.2 step 8).
@@ -55,18 +65,31 @@ namespace Engine {
 		bool SmokeTestRan = false;
 		int32_t SmokeTestExitCode = 0;
 		float Seconds = 0.0f;
+		// M15 (ADR 0024 decisions 2, 4 and 6): ExportReport's testing, resource and timing members.
+		bool Testing = false;
+		uint32_t TestSuiteCount = 0;
+		uint32_t ReplayCount = 0;
+		bool ResourcesPatched = false;
+		std::vector<ExportPhaseTimingSummary> PhaseTimings{};
 	};
+
+	// project.export's result for `report` (§14.2 step 8): the same document the method returns, which `Editor --export
+	// --export-report` writes too (Docs/Decisions/0024-m15-contract.md decision 3), so the two never differ.
+	[[nodiscard]] ProjectExportResult MakeProjectExportResult(const ExportReport& report);
 
 	namespace Automation {
 
-		// project.export (pending): Exporter::Start with the params, AutomationServerSpecification::ExportBinaryRoot and (M15,
-		// `Editor --export-root`) AutomationServerSpecification::ExportRoot, polled once per frame; a disconnect cancels it (Exporter::Cancel). Errors: Unsupported at /testing when present;
-		// InvalidParams for an outDir outside "Build/"; those of Exporter::Start and Exporter::Poll.
+		// project.export (pending): Exporter::Start with the params (testing included, M15), AutomationServerSpecification::
+		// ExportBinaryRoot and (M15, `Editor --export-root`) AutomationServerSpecification::ExportRoot, polled once per frame;
+		// a disconnect cancels it (Exporter::Cancel). Errors: InvalidParams for an outDir outside "Build/"; those of
+		// Exporter::Start and Exporter::Poll (a testing export's TEST_SUITE_INVALID and replay issues among the Validation
+		// issues).
 		[[nodiscard]] Result<Scope<PendingOperation>> ProjectExport(EditorMethodContext& context, const ProjectExportParams& params);
 
 	}
 
-	// Registers ExportConfiguration, ProjectExportParams, ExportedFileSummary and ProjectExportResult.
+	// Registers ExportConfiguration, ExportPhase, ProjectExportParams, ExportedFileSummary, ExportPhaseTimingSummary and
+	// ProjectExportResult.
 	void RegisterExportMethodTypes(TypeRegistry& registry);
 
 	// Registers project.export: a tool (§13.8 project_export), Mutates (it writes under the project's Build/, which read-only

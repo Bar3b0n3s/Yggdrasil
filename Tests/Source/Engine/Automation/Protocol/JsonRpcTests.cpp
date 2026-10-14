@@ -2,7 +2,9 @@
 
 #include "Engine/Automation/Protocol/JsonRpc.h"
 
+#include "Engine/Automation/Protocol/Handshake.h"
 #include "Engine/Core/Json/JsonReader.h"
+#include "Support/Fuzz.h"
 
 namespace Engine {
 
@@ -34,6 +36,42 @@ namespace Engine {
 			const auto stringId = ParseRpcRequest(R"({"jsonrpc":"2.0","id":"a-1","method":"session.info","params":{}})");
 			REQUIRE(stringId.has_value());
 			CHECK(stringId->Id == Json("a-1"));
+		}
+
+		TEST_CASE("JsonRpc: 1,000 seeded mutations of a request and of hello params never crash" * doctest::test_suite(Test::FuzzSuite))
+		{
+			// The seeds: requests of every shape a client sends, the session.hello of the Python client among them. A
+			// parsed request's params that a hello reads go through ParseHelloRequest, as the I/O thread does.
+			const std::array<std::string_view, 5> seeds = {
+				R"({"jsonrpc":"2.0","id":1,"method":"session.hello","params":{"token":"0123456789abcdef0123456789abcdef","protocolVersion":"1.0","client":{"name":"engine-tests","version":"1.2"}}})",
+				R"({"jsonrpc":"2.0","id":17,"method":"entity.create","params":{"name":"Board","_meta":{"transcriptLine":42}}})",
+				R"({"jsonrpc":"2.0","method":"session.info"})",
+				R"({"jsonrpc":"2.0","id":"a-1","method":"scene.tree","params":{"depth":2,"root":"/Game"}})",
+				R"([{"jsonrpc":"2.0","id":2,"method":"session.info"}])",
+			};
+			const Test::FuzzRun run = Test::RunFuzzCase(0x7C9C, 1000, [&seeds](Random& random, uint64_t /*index*/)
+			{
+				std::string mutated(seeds[static_cast<size_t>(random.RangeInt(0, static_cast<int64_t>(seeds.size()) - 1))]);
+				Test::MutateText(mutated, random);
+				const auto request = ParseRpcRequest(mutated);
+				if (!request.has_value())
+				{
+					CHECK((request.error().Code == RpcErrorCode::ParseError || request.error().Code == RpcErrorCode::InvalidRequest));
+					CHECK((request.error().Id.is_null() || request.error().Id.is_number_integer() || request.error().Id.is_string()));
+					return false;
+				}
+				CHECK(request->Params.is_object());
+				CHECK(request->IsNotification == request->Id.is_null());
+				const Result<HelloRequest> hello = ParseHelloRequest(request->Params);
+				if (!hello.has_value())
+					CHECK(hello.error().GetCode() == ErrorCode::InvalidArgument);
+				return true;
+			});
+			if (Test::IsFuzzSample(run.Range))
+			{
+				CHECK(run.Counts.Rejected > 0);
+				CHECK(run.Counts.Accepted > 0);
+			}
 		}
 
 		TEST_CASE("JsonRpc: invalid JSON is ParseError and a non-request is InvalidRequest with the id recovered")

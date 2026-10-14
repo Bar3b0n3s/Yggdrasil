@@ -29,8 +29,9 @@ it reads the committed tables. Before generating, the script runs its self-test:
 trips, ties, the subnormal range and overflow (and against the host's own conversions), pi's leading digits, the
 recognized exact cases, and the independently computed correctly rounded values that DetMathTests.cpp commits.
 
-Regenerate after changing the regions or the generator: `python Scripts/GenerateDetMathReference.py` (about a minute).
-`--check` compares a fresh run with the committed file and writes nothing; `--self-test` runs only the self-test.
+Regenerate after changing the regions or the generator: `python Scripts/GenerateDetMathReference.py` (about 2 s,
+like `--check`). `--check` compares a fresh run with the committed file and writes nothing; `--self-test` runs only
+the self-test.
 
 Exit codes: 0 success, 1 the self-test failed, a reference could not be decided or --check found a difference,
 2 usage error.
@@ -1237,7 +1238,8 @@ def build_table(function: str, fmt: Format, calculator: ReferenceCalculator) -> 
     return Table(function, fmt, descriptions, rows)
 
 
-HEADER_PREAMBLE = """#pragma once
+HEADER_PREAMBLE = (
+    """#pragma once
 
 // Correctly rounded references for the test "DetMath: within 1 ULP of correctly rounded references over seeded tables"
 // (Tests/Source/Engine/Core/DetMathTests.cpp, Docs/Decisions/0007-detmath-reference-oracle.md).
@@ -1267,7 +1269,8 @@ namespace Engine {{
 			Bits Expected = 0;
 		}};
 
-		// Two arguments in DetMath's parameter order (ATan2(y, x), Pow(base, exponent)) and the correctly rounded result.
+		// Two arguments in DetMath's parameter order (ATan2(y, x), Pow(base, exponent)) and the correctly """
+    """rounded result.
 		template<typename Bits>
 		struct DetMathBinaryReference
 		{{
@@ -1278,6 +1281,7 @@ namespace Engine {{
 
 		// clang-format off
 """
+)
 
 HEADER_END = """		// clang-format on
 

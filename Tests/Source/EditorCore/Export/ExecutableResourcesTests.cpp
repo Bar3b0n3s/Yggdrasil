@@ -4,11 +4,14 @@
 
 #include "EditorCore/Commands/ProjectSettingsCommand.h"
 #include "EditorCore/EditorContext.h"
+#include "EditorCore/Export/AppBundle.h"
 #include "EditorCore/Export/Exporter.h"
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Core/VfsPath.h"
 #include "Engine/Graphics/Image.h"
+#include "Engine/Platform/Paths.h"
+#include "Engine/Platform/ResourcePatcher.h"
 #include "Support/EditorTestFixture.h"
 #include "Support/WaitUntil.h"
 
@@ -104,7 +107,9 @@ namespace Engine {
 			Test::EditorTestFixture fixture("ExecutableIcon");
 			fixture.CreateAndOpenProject();
 			EditorContext& editor = fixture.GetEditor();
-			WriteIconPng(editor, "Assets/Icon.png", 256, 300);
+			WriteIconPng(editor, "Assets/Icon.png", 256, 256);
+			// M15 (ADR 0024 decision 4): a 256 x 300 icon is large enough but not square, so it is refused too.
+			WriteIconPng(editor, "Assets/Tall.png", 256, 300);
 			WriteIconPng(editor, "Assets/Narrow.png", 255, 512);
 			WriteIconPng(editor, "Assets/Short.png", 512, 128);
 			WriteProjectText(editor, "Assets/Text.png", "not a PNG");
@@ -119,7 +124,7 @@ namespace Engine {
 			CHECK(valid->VersionPatch == 0);
 			CHECK(valid->Company.empty());
 
-			for (const char* icon : { "Assets/Narrow.png", "Assets/Short.png", "Assets/Text.png", "Assets/Missing.png", "../Outside.png", "/Assets/Icon.png" })
+			for (const char* icon : { "Assets/Tall.png", "Assets/Narrow.png", "Assets/Short.png", "Assets/Text.png", "Assets/Missing.png", "../Outside.png", "/Assets/Icon.png" })
 			{
 				CAPTURE(icon);
 				settings.Icon = icon;
@@ -193,8 +198,8 @@ namespace Engine {
 		}
 
 		// M15 (Docs/Decisions/0024-m15-contract.md decision 4, stream A): icon images are square, so a non-square Export.Icon
-		// is refused rather than padded. The 256 x 300 icon the case above accepts joins its refused list when this lands.
-		TEST_CASE("ExecutableResources: a non-square icon fails validation at /Export/Icon" * doctest::skip(true))
+		// is refused rather than padded (the case above refuses a 256 x 300 icon too).
+		TEST_CASE("ExecutableResources: a non-square icon fails validation at /Export/Icon")
 		{
 			Test::EditorTestFixture fixture("ExecutableSquareIcon");
 			fixture.CreateAndOpenProject();
@@ -210,7 +215,48 @@ namespace Engine {
 			CHECK(square->Icon == "Assets/Square.png");
 		}
 
-		TEST_CASE("ExecutableResources: the resource set holds every icon size reduced from Export.Icon and the version strings" * doctest::skip(true))
+		// The M15 review's M02: Export.Company is checked at validation with one host-independent rule, located at
+		// /Export/Company, instead of being refused by one OS's resource writer (the version resource on Windows, Info.plist
+		// on macOS) after cooking.
+		TEST_CASE("ExecutableResources: Export.Company fails validation at /Export/Company unless every host's resources can carry it")
+		{
+			Test::EditorTestFixture fixture("ExecutableCompany");
+			fixture.CreateAndOpenProject();
+			EditorContext& editor = fixture.GetEditor();
+			ExportSettings settings;
+			for (const std::string& company : { std::string("Acme\tGames"), std::string("Acme\nGames"), std::string("Acme\0Games", 10), std::string("Acme\x7FGames"),
+					 std::string("Acme \xC3\x28"), std::string(ExportSettings::MaxCompanyBytes + 1, 'a') })
+			{
+				CAPTURE(company.size());
+				settings.Company = company;
+				CheckRefusedAt(ResolveExecutableResources(editor, settings), "/Export/Company");
+			}
+
+			// Every Company the rule accepts fits both writers, with every other string at its longest: a Name of the most
+			// UTF-16 units (Paths::MaxAppNameLength ASCII bytes) and the longest version.
+			const std::string longestName(Paths::MaxAppNameLength, 'N');
+			for (const std::string& company : { std::string("Soci\xC3\xA9t\xC3\xA9 \xE2\x9C\x93 \xF0\x9F\x8E\xAE"), std::string(ExportSettings::MaxCompanyBytes, 'a') })
+			{
+				CAPTURE(company.size());
+				settings.Company = company;
+				settings.Version = "65535.65535.65535";
+				const auto resources = ResolveExecutableResources(editor, settings);
+				REQUIRE_MESSAGE(resources.has_value(), resources.error().ToString());
+				CHECK(resources->Company == company);
+				const Result<ExecutableResourceSet> set = BuildExecutableResourceSet(editor, *resources, longestName);
+				REQUIRE_MESSAGE(set.has_value(), set.error().ToString());
+				ExecutableVersionInfo windows = set->Version;
+				windows.OriginalFilename = longestName + ".exe";
+				const Result<Buffer> versionInfo = ResourcePatcher::BuildVersionInfo(windows);
+				REQUIRE_MESSAGE(versionInfo.has_value(), versionInfo.error().ToString());
+				CHECK(versionInfo->size() <= 65535);
+				const Result<std::string> plist = WriteInfoPlist(
+					{ .Name = longestName, .Identifier = MakeBundleIdentifier(company, longestName), .Version = settings.Version, .Company = company, .HasIcon = false });
+				REQUIRE_MESSAGE(plist.has_value(), plist.error().ToString());
+			}
+		}
+
+		TEST_CASE("ExecutableResources: the resource set holds every icon size reduced from Export.Icon and the version strings")
 		{
 			Test::EditorTestFixture fixture("ExecutableResourceSet");
 			fixture.CreateAndOpenProject();

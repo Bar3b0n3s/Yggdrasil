@@ -59,3 +59,17 @@ Throwaway workspace: C++23 console app with `DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN`
 3. Replace `doctest/doctest.h` and `LICENSE.txt`.
 4. Ensure LF line endings (clone with `-c core.autocrlf=false`).
 5. Update this file (tag, SHA, date), rebuild the `Tests` project in all configurations and run it.
+
+## Notices
+
+The row `Scripts/Lib/notices.py` reads for `THIRD_PARTY_NOTICES.txt` (Docs/Decisions/0024-m15-contract.md decision 8).
+
+| Field | Value |
+|---|---|
+| Name | doctest |
+| Upstream | https://github.com/doctest/doctest |
+| Version | 2.5.3 |
+| License | MIT |
+| Shipped | no |
+| Projects | - |
+| License files | LICENSE.txt |

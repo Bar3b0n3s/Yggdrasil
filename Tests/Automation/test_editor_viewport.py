@@ -9,7 +9,8 @@ import unittest
 from typing import Any
 
 from harness import EXIT_SUCCESS, AutomationTestCase, engine_client
-from tiny_game import TINY_GAME_NAME, WINDOW_HEIGHT, WINDOW_WIDTH, build_tiny_game, export_tiny_game, exported_executable
+from tiny_game import (TINY_GAME_NAME, WINDOW_HEIGHT, WINDOW_WIDTH, build_tiny_game, export_tiny_game,
+                       exported_executable, exported_manifest)
 
 # What the headless editor's Game view reports before any image is rendered (EditorViewportState's default extent).
 HEADLESS_GAME_VIEW = (640, 360)
@@ -39,10 +40,11 @@ def evaluate(client: engine_client.EngineClient, code: str) -> Any:
 
 
 def view_contract(width: int, height: int) -> str:
-    """Luau that is true when scripts see a width x height view: the window size, the cursor injected at the centre pixel
-    and the camera ray through it, which must be the primary camera's forward direction."""
+    """Luau that is true when scripts see a width x height view: the window size, the cursor injected at the centre
+    pixel and the camera ray through it, which must be the primary camera's forward direction."""
     return (f"local mouse = Input.GetMousePosition(); "
-            f"local origin, direction = Scene.FindByName('Camera'):GetComponent('Camera'):ScreenToWorldRay(mouse.x, mouse.y); "
+            f"local origin, direction = "
+            f"Scene.FindByName('Camera'):GetComponent('Camera'):ScreenToWorldRay(mouse.x, mouse.y); "
             f"return Application.GetWindowSize() == vector.create({width}, {height}, 0) "
             f"and mouse == vector.create({width / 2 - 0.5}, {height / 2 - 0.5}, 0) "
             f"and vector.magnitude(direction - Scene.FindByName('Camera').Transform:Forward()) < 0.0001")
@@ -169,14 +171,15 @@ class EditorViewportTests(AutomationTestCase):
 
     def test_scripts_measure_the_game_view_in_the_editor_and_the_exported_runtime(self) -> None:
         # One coordinate contract (PlaySession.h, view coordinates): window size, cursor and camera rays are measured in
-        # the session's view, never the editor window: ordinary play's is the Game view's image, a lockstep session's the
-        # project's window size, as in the exported game.
+        # the session's view, never the editor window: ordinary play's is the Game view's image, a lockstep session's
+        # the project's window size, as in the exported game.
         editor = self.connect(self.start_editor())
         self.create_project(editor, TINY_GAME_NAME)
         build_tiny_game(editor)
         width, height = HEADLESS_GAME_VIEW
         self.assertNotEqual((width, height), (WINDOW_WIDTH, WINDOW_HEIGHT))
-        for start, view in (({"paused": True}, HEADLESS_GAME_VIEW), ({"lockstep": True}, (WINDOW_WIDTH, WINDOW_HEIGHT))):
+        for start, view in (({"paused": True}, HEADLESS_GAME_VIEW),
+                            ({"lockstep": True}, (WINDOW_WIDTH, WINDOW_HEIGHT))):
             with self.subTest(start=start):
                 editor.call("play.start", start)
                 editor.call("input.inject", {"events": [{"type": "mouseMove",
@@ -188,7 +191,8 @@ class EditorViewportTests(AutomationTestCase):
         editor.call("session.shutdown", {"force": True})
         self.editors[-1].wait()
 
-        process = engine_client.launch_editor(executable, ["--headless", "--renderer", "none", "--automation", "--paused"],
+        process = engine_client.launch_editor(executable,
+                                               ["--headless", "--renderer", "none", "--automation", "--paused"],
                                                self.directory / "RuntimeView", TINY_GAME_NAME)
         self.editors.append(process)
         runtime = self.connect(process)
@@ -201,7 +205,8 @@ class EditorViewportTests(AutomationTestCase):
 
     def test_view_dependent_recording_reproduces_in_replays_test_runs_and_the_exported_runtime(self) -> None:
         # Recording, replay and test-run sessions keep the project's window size in every host, never the Game view's
-        # image (640x360 in this headless editor), so a replay whose gameplay reads the view reproduces its hash anywhere.
+        # image (640x360 in this headless editor), so a replay whose gameplay reads the view reproduces its hash
+        # anywhere.
         editor = self.connect(self.start_editor())
         self.create_project(editor, TINY_GAME_NAME)
         build_tiny_game(editor)
@@ -213,7 +218,8 @@ class EditorViewportTests(AutomationTestCase):
         editor.call("input.record", {"action": "start"})
         editor.call("input.inject", {"events": [{"type": "mouseMove", "position": [80, 45]}]})
         editor.call("play.step", {"ticks": 3, "render": "none"})
-        self.assertTrue(evaluate(editor, f"Application.GetWindowSize() == vector.create({WINDOW_WIDTH}, {WINDOW_HEIGHT}, 0)"))
+        self.assertTrue(evaluate(editor,
+                                 f"Application.GetWindowSize() == vector.create({WINDOW_WIDTH}, {WINDOW_HEIGHT}, 0)"))
         path = "Assets/Replays/Pointer.replay"
         saved = editor.call("input.record", {"action": "stop", "path": path})
         editor.call("play.stop")
@@ -231,7 +237,7 @@ class EditorViewportTests(AutomationTestCase):
         self.editors[-1].wait()
         # The exported game's window is the project's (framebuffer = view), then twice as large, as a scaled (Retina)
         # display's framebuffer is: the replay keeps the project's window size either way.
-        manifest_path = executable.parent / "Game.json"
+        manifest_path = exported_manifest(executable)
         for scale in (1, 2):
             with self.subTest(framebuffer_scale=scale):
                 manifest = json.loads(manifest_path.read_text(encoding="utf-8"))

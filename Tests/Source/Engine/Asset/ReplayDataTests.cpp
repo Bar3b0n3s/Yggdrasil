@@ -5,14 +5,18 @@
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Core/Random.h"
 #include "Engine/Scripting/ScriptCompiler.h"
+#include "Support/Fuzz.h"
+#include "Support/TestData.h"
 
 #include <nlohmann/json.hpp>
 
 #include <array>
+#include <format>
 #include <limits>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace Engine {
 
@@ -255,26 +259,77 @@ namespace Engine {
 			CHECK_FALSE(LoadCookedReplay(WriteCookedArtifact(AssetType::Replay, 1, 1, payload)));
 		}
 
-		TEST_CASE("ReplayData: seeded source and binary mutations never assert or crash")
+		TEST_CASE("ReplayData: seeded source and binary mutations never assert or crash" * doctest::test_suite(Test::FuzzSuite))
 		{
-			auto d = Document();
-			auto text = ReplayToText(d);
-			auto cooked = CookReplay(d, {}, 1);
-			REQUIRE(text);
-			REQUIRE(cooked);
-			Random random(731);
-			for (uint32_t i = 0; i < 1000; ++i)
+			// The seed corpus (Docs/Decisions/0024-m15-contract.md decision 13): the synthetic document, which holds every
+			// event kind, and FeatureTest's committed replays (long event lists, multi-line Luau expectations), each as text
+			// and cooked with its expectations compiled as ReplayImporter compiles them. Each iteration draws its seed from its
+			// own Random.
+			struct ReplaySeed
 			{
-				auto source = *text;
-				source[random.NextU64() % source.size()] = static_cast<char>(random.NextU32() & 255);
+				std::string Text;
+				Buffer Cooked;
+				Buffer Payload;
+			};
+			const auto makeSeed = [](const ReplayDocument& document)
+			{
+				std::vector<ReplayBytecodeExpectation> expectations;
+				for (size_t index = 0; index < document.Expect.size(); ++index)
+				{
+					const std::string pointer = std::format("/Expect/{}/Luau", index);
+					auto compiled = ScriptCompiler::Compile({ .Source = document.Expect[index].Luau, .Mode = ScriptCompileMode::ExpressionOrChunk, .ChunkName = "=replay-fuzz", .JsonPointer = pointer });
+					REQUIRE_MESSAGE(compiled.has_value(), compiled.error().ToString());
+					ReplayBytecodeExpectation expectation;
+					expectation.Tick = document.Expect[index].Tick;
+					expectation.Script.Bytecode = std::move(compiled->Bytecode);
+					expectation.Script.SourceMap = std::move(compiled->SourceMap);
+					expectations.push_back(std::move(expectation));
+				}
+				auto text = ReplayToText(document);
+				auto cooked = CookReplay(document, expectations, 1);
+				REQUIRE_MESSAGE(text.has_value(), text.error().ToString());
+				REQUIRE_MESSAGE(cooked.has_value(), cooked.error().ToString());
+				const auto view = ReadCookedArtifact(*cooked);
+				REQUIRE(view.has_value());
+				return ReplaySeed{ .Text = std::move(*text), .Cooked = *cooked, .Payload = Buffer(view->Payload.begin(), view->Payload.end()) };
+			};
+			std::vector<ReplaySeed> seeds;
+			seeds.push_back(makeSeed(Document()));
+			const std::vector<std::string> featureTestReplays = Test::ReadFuzzSeedTexts(Test::GetRepositoryRoot() / "Projects/FeatureTest/Assets", ".replay");
+			REQUIRE(featureTestReplays.size() >= 2);
+			for (const std::string& replay : featureTestReplays)
+			{
 				ReplayLoadReport report;
-				auto parsed = ReplayFromText(source, report);
+				const auto parsed = ReplayFromText(replay, report);
+				REQUIRE_MESSAGE(parsed.has_value(), parsed.error().ToString());
+				REQUIRE_FALSE(parsed->Expect.empty());
+				seeds.push_back(makeSeed(*parsed));
+			}
+
+			const Test::FuzzRun run = Test::RunFuzzCase(731, 1000, [&seeds](Random& random, uint64_t /*index*/)
+			{
+				const ReplaySeed& seed = seeds[static_cast<size_t>(random.NextU64() % seeds.size())];
+				// The text form: a document the parser accepts is valid.
+				std::string source = seed.Text;
+				Test::MutateText(source, random);
+				ReplayLoadReport report;
+				const auto parsed = ReplayFromText(source, report);
 				if (parsed)
 					CHECK(ValidateReplayDocument(*parsed));
-				auto bytes = *cooked;
+				// One flipped bit after the header always fails the payload hash.
+				Buffer bytes = seed.Cooked;
 				bytes[CookedHeader::Size + random.NextU64() % (bytes.size() - CookedHeader::Size)] ^= std::byte{ 1 };
 				CHECK_FALSE(LoadCookedReplay(bytes));
-			}
+				// A mutated payload sealed again reaches the cooked decoder, which validates what it decoded.
+				Buffer inner = seed.Payload;
+				Test::MutateBytes(inner, random);
+				const auto decoded = LoadCookedReplay(WriteCookedArtifact(ReplayData::StaticType, ReplayData::FormatVersion, 1, inner));
+				if (decoded)
+					CHECK((*decoded)->FinalStateHash.size() == 16);
+				return parsed.has_value();
+			});
+			if (Test::IsFuzzSample(run.Range))
+				CHECK(run.Counts.Rejected > 0);
 		}
 	}
 

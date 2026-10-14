@@ -6,12 +6,16 @@
 #include "Engine/Graphics/GpuDiagnostics.h"
 #include "Engine/Graphics/GraphicsSpecification.h"
 #include "Engine/Platform/Environment.h"
+#include "Engine/Platform/Process.h"
 
 #include <vulkan/vulkan.hpp>
 
+#include <filesystem>
 #include <limits>
 #include <optional>
 #include <stdexcept>
+#include <string>
+#include <system_error>
 #include <thread>
 
 // The process's Vulkan loader (Architecture §4.1 level 1, §8.1). vk::detail::DynamicLoader throws std::runtime_error when
@@ -68,12 +72,35 @@ namespace Engine {
 			}
 		}
 
+#if defined(ENGINE_PLATFORM_MACOS)
+		// The loader an exported macOS bundle carries, <executable directory>/../Frameworks/libvulkan.1.dylib, when that file
+		// exists; empty otherwise, which keeps vulkan.hpp's own search (the SDK's and Homebrew's locations). dlopen of a bare
+		// leaf name does not search the executable's LC_RPATH, so the bundled loader is opened by its explicit path (ADR 0024
+		// decision 5); the loader then finds MoltenVK's ICD manifest in the bundle's Contents/Resources/vulkan/icd.d.
+		static std::string FindBundledVulkanLoader()
+		{
+			const Result<std::filesystem::path> executable = Process::GetCurrentExecutablePath();
+			if (!executable.has_value())
+				return {};
+			const std::filesystem::path loader = executable->parent_path().parent_path() / "Frameworks" / "libvulkan.1.dylib";
+			std::error_code error;
+			if (!std::filesystem::is_regular_file(loader, error))
+				return {};
+			return loader.native();
+		}
+#endif
+
 		// Loads the loader library. The one catch of this file (§4.6 item 1): the exception never leaves it.
 		static std::optional<vk::detail::DynamicLoader> LoadVulkanLibrary(std::string& failure)
 		{
+#if defined(ENGINE_PLATFORM_MACOS)
+			const std::string libraryName = FindBundledVulkanLoader();
+#else
+			const std::string libraryName;
+#endif
 			try
 			{
-				return std::optional<vk::detail::DynamicLoader>(std::in_place);
+				return std::optional<vk::detail::DynamicLoader>(std::in_place, libraryName);
 			}
 			catch (const std::runtime_error& error)
 			{

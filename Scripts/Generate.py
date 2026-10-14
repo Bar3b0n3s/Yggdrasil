@@ -7,6 +7,11 @@ gmake also on macOS. premake runs with --fatal, so a warning from the premake sc
 When generating for the host, the custom `compile-commands` action (Scripts/Premake/CompileCommands.lua, included by
 premake5.lua) then writes compile_commands.json for clang-tidy and clangd.
 
+--sanitize address passes premake's --sanitize=address, which instruments the Release configuration of every project
+with AddressSanitizer (premake5.lua; the hardening stage's workspace, Docs/Decisions/0024-m15-contract.md decision 12).
+It needs --to, so the sanitized workspace never replaces the plain one: Generate.py --sanitize address --to
+bin-int/Asan --no-compile-commands (Scripts/Hardening.py runs exactly this). Debug and Dist are never sanitized.
+
 Exit codes: 0 success, 1 premake failed, 2 usage error, 3 premake is not installed (run Scripts/Setup.py),
 5 premake timed out.
 """
@@ -39,9 +44,11 @@ from Lib.report import (
 COMPILE_COMMANDS_ACTION = "compile-commands"
 GENERATE_TIMEOUT_SECONDS = 300.0
 SYSTEMS = ("windows", "linux", "macosx")
+SANITIZERS = ("address",)  # the values of premake5.lua's --sanitize option
 
 
-def premake_arguments(action: str, target_os: str, toolset: str | None, location: Path | None) -> list[str]:
+def premake_arguments(action: str, target_os: str, toolset: str | None, location: Path | None,
+                      sanitize: str | None = None) -> list[str]:
     # Build steps (the shader rule) run this verified Python 3.10+ interpreter, not whatever the IDE's PATH finds.
     arguments = ["--fatal", f"--os={target_os}", f"--python={Path(sys.executable).resolve().as_posix()}"]
     # "msc" is the vs2026 default (msc-v145); every other toolset is selected explicitly.
@@ -49,14 +56,16 @@ def premake_arguments(action: str, target_os: str, toolset: str | None, location
         arguments.append(f"--cc={toolset}")
     if location is not None:
         arguments.append(f"--to={location}")
+    if sanitize is not None:
+        arguments.append(f"--sanitize={sanitize}")
     arguments.append(action)
     return arguments
 
 
 def generate(action: str, target_os: str, toolset: str | None, location: Path | None, console: Console,
-             verbose: bool) -> Step:
+             verbose: bool, sanitize: str | None = None) -> Step:
     """Run one premake generator action. The step's data lists the files premake wrote (it skips unchanged ones)."""
-    arguments = premake_arguments(action, target_os, toolset, location)
+    arguments = premake_arguments(action, target_os, toolset, location, sanitize)
     name = f"generate {action} ({target_os})"
     result = premake.run(arguments, timeout=GENERATE_TIMEOUT_SECONDS)
     files = premake.generated_files(result.output)
@@ -69,7 +78,9 @@ def generate(action: str, target_os: str, toolset: str | None, location: Path | 
                     result.duration, data={"output": result.tail(40)})
     where = paths.display_path(location) if location is not None else "in place"
     written = f"{len(files)} file(s) written" if files else "up to date, no file changed"
-    return Step(name, Status.PASSED, f"{written} ({where})", result.duration, data={"generatedFiles": files})
+    sanitized = f"; Release instrumented with the {sanitize} sanitizer" if sanitize is not None else ""
+    return Step(name, Status.PASSED, f"{written} ({where}){sanitized}", result.duration,
+                data={"generatedFiles": files, "sanitize": sanitize})
 
 
 def compile_commands(location: Path | None, console: Console, verbose: bool) -> Step:
@@ -106,6 +117,10 @@ def parse_arguments(argv: list[str], host: paths.Host) -> argparse.Namespace:
     parser.add_argument("--to", type=Path, help="write the generated files to this directory instead of in place")
     parser.add_argument("--no-compile-commands", action="store_true",
                         help="do not run the compile-commands action after generating")
+    parser.add_argument("--sanitize", choices=SANITIZERS,
+                        help="instrument the Release configuration of every project with this sanitizer (premake "
+                             "--sanitize); needs --to, so the sanitized workspace never replaces the plain one (the "
+                             "hardening stage generates into bin-int/Asan)")
     parser.add_argument("--verbose", action="store_true", help="print premake's output")
     parser.add_argument("--json", action="store_true", help="print a machine-readable result on stdout")
     arguments = parser.parse_args(argv)
@@ -116,6 +131,12 @@ def parse_arguments(argv: list[str], host: paths.Host) -> argparse.Namespace:
     if arguments.toolset and arguments.toolset not in premake.TOOLSETS_BY_ACTION[arguments.action]:
         parser.error(f"--toolset {arguments.toolset} is not available for {arguments.action} "
                      f"(available: {', '.join(premake.TOOLSETS_BY_ACTION[arguments.action])})")
+    if arguments.sanitize is not None:
+        if arguments.to is None:
+            parser.error("--sanitize needs --to <dir>: a sanitized workspace never replaces the plain one in place")
+        if arguments.action != "vs2026":
+            parser.error("--sanitize is supported for the vs2026 workspace only (the hardening stage runs MSVC's "
+                         "AddressSanitizer, Docs/Decisions/0024-m15-contract.md decision 12)")
     if arguments.to is not None:
         arguments.to = arguments.to.resolve()
     return arguments
@@ -144,7 +165,7 @@ def main(argv: list[str] | None = None) -> int:
 
     console.heading(f"Generate {arguments.action} ({arguments.target_os})")
     steps = [generate(arguments.action, arguments.target_os, arguments.toolset, arguments.to, console,
-                      arguments.verbose)]
+                      arguments.verbose, arguments.sanitize)]
     console.result(steps[-1])
     if not steps[-1].failed:
         if arguments.no_compile_commands:
@@ -163,6 +184,7 @@ def main(argv: list[str] | None = None) -> int:
             "action": arguments.action,
             "os": arguments.target_os,
             "toolset": arguments.toolset,
+            "sanitize": arguments.sanitize,
             "location": arguments.to.as_posix() if arguments.to else paths.REPOSITORY_ROOT.as_posix(),
             "steps": [step.to_json() for step in steps],
         })

@@ -310,6 +310,11 @@ namespace Engine {
 		{
 			Scope<RingBufferSink> RingBuffer;
 			std::array<std::shared_ptr<spdlog::logger>, LogChannelCount> Loggers;
+			// The output sinks, shared with every logger, for Log::SetOutputLevel; null when absent.
+			spdlog::sink_ptr ConsoleSink;
+			spdlog::sink_ptr FileSink;
+			LogLevel ConsoleLevel = LogLevel::Trace;              // LogSpecification::ConsoleLevel
+			std::atomic<LogLevel> OutputLevel{ LogLevel::Trace }; // Log::GetOutputLevel
 		};
 
 		// Owns the instance of the current initialization. When a process exits without calling Log::Shutdown, this
@@ -409,15 +414,26 @@ namespace Engine {
 		}
 
 #if !defined(ENGINE_DIST)
-		static spdlog::sink_ptr CreateConsoleSink(LogLevel minimumLevel)
+		static spdlog::sink_ptr CreateConsoleSink()
 		{
-			// stderr keeps stdout free for machine-readable output, and death-test parents read assert messages there.
+			// stderr keeps stdout free for machine-readable output, and death-test parents read assert messages there. Its
+			// level comes from ApplyOutputLevel.
 			spdlog::sink_ptr sink = std::make_shared<spdlog::sinks::stderr_color_sink_mt>();
 			sink->set_pattern(ConsolePattern);
-			sink->set_level(Detail::ToSpdlogLevel(minimumLevel));
 			return sink;
 		}
 #endif
+
+		// The output level of `instance` (Log::SetOutputLevel): the file sink's level, and the console's together with its
+		// ConsoleLevel, whichever is higher. The ring buffer adapters keep receiving everything.
+		static void ApplyOutputLevel(LogInstance& instance, LogLevel level)
+		{
+			if (instance.FileSink != nullptr)
+				instance.FileSink->set_level(Detail::ToSpdlogLevel(level));
+			if (instance.ConsoleSink != nullptr)
+				instance.ConsoleSink->set_level(Detail::ToSpdlogLevel(std::max(instance.ConsoleLevel, level)));
+			instance.OutputLevel.store(level, std::memory_order_relaxed);
+		}
 
 	}
 
@@ -444,18 +460,23 @@ namespace Engine {
 			return MakeError(ErrorCode::InvalidState, "the log is already initialized");
 
 		// Every fallible step comes first, so a failure replaces nothing.
+		Scope<LogInstance> instance = CreateScope<LogInstance>();
 		std::vector<spdlog::sink_ptr> outputSinks;
 		if (!specification.FilePath.empty())
 		{
-			ENGINE_TRY_ASSIGN(spdlog::sink_ptr fileSink, Utils::CreateFileSink(specification.FilePath));
-			outputSinks.push_back(std::move(fileSink));
+			ENGINE_TRY_ASSIGN(instance->FileSink, Utils::CreateFileSink(specification.FilePath));
+			outputSinks.push_back(instance->FileSink);
 		}
 #if !defined(ENGINE_DIST)
 		if (specification.Console)
-			outputSinks.push_back(Utils::CreateConsoleSink(specification.ConsoleLevel));
+		{
+			instance->ConsoleSink = Utils::CreateConsoleSink();
+			outputSinks.push_back(instance->ConsoleSink);
+		}
 #endif
+		instance->ConsoleLevel = specification.ConsoleLevel;
+		Utils::ApplyOutputLevel(*instance, specification.OutputLevel);
 
-		Scope<LogInstance> instance = CreateScope<LogInstance>();
 		instance->RingBuffer = CreateScope<RingBufferSink>(specification.RingBufferCapacity);
 		const std::chrono::steady_clock::time_point epoch = std::chrono::steady_clock::now();
 		for (size_t index = 0; index < LogChannelCount; ++index)
@@ -517,6 +538,20 @@ namespace Engine {
 		}
 		if (!flushedActiveLogger)
 			Utils::GetFallbackLog().Flush();
+	}
+
+	void Log::SetOutputLevel(LogLevel level)
+	{
+		// The instance is replaced only by Initialize and Shutdown, which never run while another thread logs or calls this.
+		if (IsInitialized() && s_LogInstanceOwner.Instance != nullptr)
+			Utils::ApplyOutputLevel(*s_LogInstanceOwner.Instance, level);
+	}
+
+	LogLevel Log::GetOutputLevel()
+	{
+		if (!IsInitialized() || s_LogInstanceOwner.Instance == nullptr)
+			return LogLevel::Trace;
+		return s_LogInstanceOwner.Instance->OutputLevel.load(std::memory_order_relaxed);
 	}
 
 	spdlog::logger& Log::GetLogger(LogChannel channel)

@@ -7,12 +7,15 @@
 #include "Engine/Platform/Process.h"
 #include "Support/ChildProcess.h"
 #include "Support/DeathTest.h"
+#include "Support/Fuzz.h"
 #include "Support/PlatformProbes.h"
 #include "Support/TempDirectory.h"
 #include "Support/TestOptions.h"
 #include "Support/Utf8Path.h"
 
 #include <fstream>
+#include <limits>
+#include <optional>
 
 namespace Engine {
 
@@ -152,6 +155,48 @@ namespace Engine {
 				const Result<uint32_t> pid = read(text);
 				REQUIRE_FALSE(pid.has_value());
 				CHECK(pid.error().GetCode() == ErrorCode::Parse);
+			}
+		}
+
+		TEST_CASE("ProjectLock: 1,000 seeded mutations of a lock file read exactly the valid process IDs" * doctest::test_suite(Test::FuzzSuite))
+		{
+			// ReadHolderPid reads the file, then ParseHolderPid the text, which is fuzzed in memory. The oracle is the format
+			// itself: 1 to 10 decimal digits of a process ID from 1 to 2^32 - 1, then one LF.
+			const std::array<std::string_view, 4> seeds = { "1\n", "4294967295\n", "0042\n", "99999999\n" };
+			const auto expected = [](std::string_view text) -> std::optional<uint32_t>
+			{
+				if (text.size() < 2 || text.size() > 11 || text.back() != '\n')
+					return std::nullopt;
+				uint64_t value = 0;
+				for (const char character : text.substr(0, text.size() - 1))
+				{
+					if (character < '0' || character > '9')
+						return std::nullopt;
+					value = value * 10 + static_cast<uint64_t>(character - '0');
+				}
+				if (value == 0 || value > std::numeric_limits<uint32_t>::max())
+					return std::nullopt;
+				return static_cast<uint32_t>(value);
+			};
+			const Test::FuzzRun run = Test::RunFuzzCase(0x10C4, 1000, [&seeds, &expected](Random& random, uint64_t /*index*/)
+			{
+				std::string mutated(seeds[static_cast<size_t>(random.RangeInt(0, static_cast<int64_t>(seeds.size()) - 1))]);
+				Test::MutateText(mutated, random);
+				const Result<uint32_t> pid = ProjectLock::ParseHolderPid(mutated, "Fuzz.lock");
+				const std::optional<uint32_t> valid = expected(mutated);
+				REQUIRE(pid.has_value() == valid.has_value());
+				if (!pid.has_value())
+				{
+					CHECK(pid.error().GetCode() == ErrorCode::Parse);
+					return false;
+				}
+				CHECK(*pid == *valid);
+				return true;
+			});
+			if (Test::IsFuzzSample(run.Range))
+			{
+				CHECK(run.Counts.Rejected > 0);
+				CHECK(run.Counts.Accepted > 0);
 			}
 		}
 

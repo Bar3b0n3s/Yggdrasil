@@ -121,6 +121,8 @@ namespace Engine {
 			if (!settings.IsNull())
 			{
 				ENGINE_TRY(settings.ExpectType(JsonType::Object));
+				// Kept as read and written back by SerializeAssetMetadata, so every number must be one JsonWriter can write.
+				ENGINE_TRY(settings.ExpectWritableNumbers());
 				metadata.Settings = VariantValue(settings.GetValue());
 			}
 			ENGINE_TRY_ASSIGN(const JsonReader subAssets, root.GetMember("SubAssets"));

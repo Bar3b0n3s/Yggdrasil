@@ -268,3 +268,17 @@ The final executable needs these. A static library does not carry link options.
    - Review new options, defines and compiler flags in `Jolt.cmake` and `Build/CMakeLists.txt`.
 5. Check `Jolt/Core/Core.h` for new `JPH_VERSION_FEATURE_BIT_*` entries, which are new ABI-relevant defines. Update the consumer define list (`Dependencies.lua`) in the same change.
 6. Rebuild all configurations, run the engine's physics unit tests and the FeatureTest scene, and update this file (version, commit, date).
+
+## Notices
+
+The row `Scripts/Lib/notices.py` reads for `THIRD_PARTY_NOTICES.txt` (Docs/Decisions/0024-m15-contract.md decision 8).
+
+| Field | Value |
+|---|---|
+| Name | Jolt Physics |
+| Upstream | https://github.com/jrouwe/JoltPhysics |
+| Version | 5.6.0 |
+| License | MIT |
+| Shipped | yes |
+| Projects | JoltPhysics |
+| License files | LICENSE |

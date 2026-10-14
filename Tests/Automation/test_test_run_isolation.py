@@ -9,8 +9,8 @@ from harness import AutomationTestCase, engine_client
 
 class TestRunIsolationTests(AutomationTestCase):
     def test_test_run_suites_start_from_the_cursor_baseline(self) -> None:
-        # Input.SetCursorMode reaches the editor's real window; a suite that locks the cursor must not leave it locked for
-        # the next suite, whatever the suite order or filter.
+        # Input.SetCursorMode reaches the editor's real window; a suite that locks the cursor must not leave it locked
+        # for the next suite, whatever the suite order or filter.
         client, _ = self.open_editor_with_scene()
         client.call("script.write", {"path": "Assets/Tests/Locks.test.luau", "source":
                                      'return Test.Suite("Locks", function()\n'
@@ -18,7 +18,8 @@ class TestRunIsolationTests(AutomationTestCase):
                                      'Test.ExpectEqual(Input.GetCursorMode(), "Locked") end)\nend)'})
         client.call("script.write", {"path": "Assets/Tests/Reads.test.luau", "source":
                                      'return Test.Suite("Reads", function()\n'
-                                     'Test.Case("default", function() Test.ExpectEqual(Input.GetCursorMode(), "Normal") end)\n'
+                                     'Test.Case("default", function() '
+                                     'Test.ExpectEqual(Input.GetCursorMode(), "Normal") end)\n'
                                      'end)'})
         client.call("project.setSettings", {"patch": {"Testing": {"Suites": [
             {"Script": "Assets/Tests/Locks.test.luau", "Scene": "", "Modes": ["Editor"]},

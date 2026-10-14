@@ -1206,7 +1206,7 @@
 					}
 				},
 				"Components": {
-					"description": "The entity's components keyed by registry name; unknown components are preserved verbatim (§6), so they are allowed.",
+					"description": "The entity's components keyed by registry name; unknown components are preserved on save (§6), so they are allowed.",
 					"type": "object",
 					"properties": {
 						"Transform": {

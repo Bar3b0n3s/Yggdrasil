@@ -78,3 +78,17 @@ Throwaway workspace built Debug/Release/Dist (VS 2026 v145, compiled as C++23): 
 3. Replace `cgltf.h`, `cgltf_write.h`, `LICENSE`.
 4. Ensure LF line endings (clone with `-c core.autocrlf=false`).
 5. Update this file (tag, SHA, date, warning line numbers), rebuild all configurations and run the unit tests (glTF import tests).
+
+## Notices
+
+The row `Scripts/Lib/notices.py` reads for `THIRD_PARTY_NOTICES.txt` (Docs/Decisions/0024-m15-contract.md decision 8).
+
+| Field | Value |
+|---|---|
+| Name | cgltf |
+| Upstream | https://github.com/jkuhlmann/cgltf |
+| Version | 1.15 |
+| License | MIT |
+| Shipped | yes |
+| Projects | - |
+| License files | LICENSE |

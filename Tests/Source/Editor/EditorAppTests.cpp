@@ -6,6 +6,7 @@
 #include "Engine/Asset/BuiltinAssets.h"
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Json/Json.h"
+#include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Graphics/VulkanDispatch.h"
 #include "Engine/Platform/GlfwLibrary.h"
 #include "Engine/Platform/Process.h"
@@ -113,6 +114,52 @@ namespace Engine {
 			REQUIRE(failed);
 			CHECK_MESSAGE(failed->ExitCode == ExitCode::Failed, failed->StandardError);
 			CHECK(failed->StandardError.contains("Check.luau"));
+		}
+
+		// §6 "Strict reader" (the M15 completion review's A024): CI's editors pass --strict, so an unknown key in a committed
+		// scene fails the run instead of warning.
+		TEST_CASE("EditorApp: --strict refuses a project whose scene holds an unknown key with exit code 3, which only warns without it")
+		{
+			Test::EditorTestFixture fixture("StrictCli");
+			const auto projectFile = CreateProcessTestProject(fixture, "Strict");
+			WriteProcessTestFile(projectFile.parent_path() / "Assets/Scenes/Main.scene", R"({
+	"Format": "Scene",
+	"Version": 1,
+	"Name": "Main",
+	"Seed": 7,
+	"ComponentVersions": {
+		"Transform": 1
+	},
+	"Entities": [
+		{
+			"ID": "1a00000000000001",
+			"Name": "Checkout",
+			"Parent": null,
+			"Active": true,
+			"Colour": "red",
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				}
+			}
+		}
+	]
+}
+)");
+			std::vector<std::string> arguments{ "--headless", "--renderer", "none", "--project", Test::PathToUtf8(projectFile), "--check-scripts" };
+			const auto lenient = RunEditor(fixture.GetDirectory(), arguments, std::chrono::seconds(120));
+			REQUIRE(lenient);
+			CHECK_MESSAGE(lenient->ExitCode == ExitCode::Success, lenient->StandardError);
+			arguments.push_back("--strict");
+			const auto strict = RunEditor(fixture.GetDirectory(), arguments, std::chrono::seconds(120));
+			REQUIRE(strict);
+			INFO("strict stderr: ", strict->StandardError);
+			CHECK(strict->ExitCode == ExitCode::InitFailed);
+			CHECK(strict->StandardError.contains("Assets/Scenes/Main.scene"));
+			CHECK(strict->StandardError.contains("Colour"));
 		}
 
 		TEST_CASE("EditorApp: --run-tests honours the case filter and exits with the suite result")
@@ -485,6 +532,122 @@ end)
 				REQUIRE(result.has_value());
 				CHECK(result->ExitCode == ExitCode::UsageError);
 			}
+		}
+
+		// M15 (§12.1, §14.2; Docs/Decisions/0024-m15-contract.md decision 3): the one-shot export. Editor --export exports from
+		// the checkout's bin directory, so it packages the Runtime of this test binary's configuration, which Build.py built
+		// with its CRT and notices beside it.
+		TEST_CASE("EditorApp: --export writes the package and its report, and a refused output directory exits 1 with the report")
+		{
+			Test::EditorTestFixture fixture("EditorExport");
+			fixture.CreateAndOpenProject("ExportGame");
+			fixture.CreateAndOpenScene();
+			const std::filesystem::path projectFile = fixture.GetEditor().GetProject().GetProjectFile();
+			ProjectSettings settings = fixture.GetEditor().GetProject().GetSettings();
+			settings.StartScene = "Assets/Scenes/Main.scene";
+			settings.Export.BuildScenes = { "Assets/Scenes/Main.scene" };
+			const Result<std::string> project = ProjectSerializer::SaveToString(settings, fixture.GetEngine().GetTypeRegistry());
+			REQUIRE(project.has_value());
+			REQUIRE(fixture.GetEditor().CloseProject().has_value());
+			WriteProcessTestFile(projectFile, *project);
+
+			const std::string outputName = Test::PathToUtf8(Test::GetTestOptions().ExecutablePath.parent_path().parent_path().filename());
+			const std::string config = outputName.substr(0, outputName.find('-'));
+			const std::filesystem::path output = fixture.GetDirectory() / "Packages" / "ExportGame";
+			const std::filesystem::path reportPath = fixture.GetDirectory() / "Reports" / "Export.json";
+			const Result<ProcessResult> exported = RunEditor(fixture.GetDirectory(),
+				{ "--headless", "--renderer", "none", "--project", Test::PathToUtf8(projectFile), "--export", Test::PathToUtf8(output), "--config", config,
+					"--export-report", Test::PathToUtf8(reportPath) },
+				std::chrono::seconds(300));
+			REQUIRE_MESSAGE(exported.has_value(), exported.error().ToString());
+			INFO("editor stderr: ", exported->StandardError);
+			CHECK(exported->ExitCode == ExitCode::Success);
+			const Result<std::string> reportText = FileSystem::ReadText(reportPath);
+			REQUIRE_MESSAGE(reportText.has_value(), reportText.error().ToString());
+			const Result<Json> report = JsonReader::Parse(*reportText);
+			REQUIRE_MESSAGE(report.has_value(), report.error().ToString());
+			const JsonReader reportReader(*report);
+			CHECK(reportReader.ReadMember<bool>("success").value_or(false));
+			const Result<JsonReader> result = reportReader.GetMember("result");
+			REQUIRE_MESSAGE(result.has_value(), *reportText);
+			CHECK(FileSystem::PathFromUtf8(result->ReadMember<std::string>("outputDirectory").value_or("")).lexically_normal() == output.lexically_normal());
+			CHECK(result->ReadMember<std::string>("config").value_or("") == config);
+			// The report's result is project.export's whole result (MakeProjectExportResult), the M15 members included.
+			CHECK_FALSE(result->ReadMember<bool>("testing").value_or(true));
+			CHECK(result->ReadMember<uint32_t>("testSuiteCount").value_or(1) == 0);
+			CHECK(result->ReadMember<uint32_t>("replayCount").value_or(1) == 0);
+			CHECK(result->HasMember("resourcesPatched"));
+			const Result<JsonReader> timings = result->GetMember("phaseTimings");
+			REQUIRE_MESSAGE(timings.has_value(), *reportText);
+			REQUIRE(timings->GetArraySize().value_or(0) > 0);
+			const Result<JsonReader> firstTiming = timings->GetElement(0);
+			REQUIRE(firstTiming.has_value());
+			CHECK(firstTiming->ReadMember<std::string>("phase").value_or("") == "Validate");
+			const Result<std::string> executable = result->ReadMember<std::string>("executable");
+			REQUIRE(executable.has_value());
+			CHECK(FileSystem::Exists(FileSystem::PathFromUtf8(*executable)));
+			// The project's Build/ directory is untouched: the package went to --export's directory.
+			CHECK_FALSE(FileSystem::Exists(projectFile.parent_path() / "Build"));
+
+			// The project itself (and a directory above it) is never an output directory: exit 1, and the report says why.
+			const Result<ProcessResult> refused = RunEditor(fixture.GetDirectory(),
+				{ "--headless", "--renderer", "none", "--project", Test::PathToUtf8(projectFile), "--export", Test::PathToUtf8(projectFile.parent_path()),
+					"--config", config, "--export-report", Test::PathToUtf8(reportPath) },
+				std::chrono::seconds(300));
+			REQUIRE_MESSAGE(refused.has_value(), refused.error().ToString());
+			INFO("refused stderr: ", refused->StandardError);
+			CHECK(refused->ExitCode == ExitCode::Failed);
+			const Result<Json> failed = JsonReader::Parse(FileSystem::ReadText(reportPath).value_or(""));
+			REQUIRE(failed.has_value());
+			const JsonReader failedReader(*failed);
+			CHECK_FALSE(failedReader.ReadMember<bool>("success").value_or(true));
+			const Result<JsonReader> error = failedReader.GetMember("error");
+			REQUIRE(error.has_value());
+			CHECK(error->ReadMember<std::string>("errorCode").value_or("") == "InvalidArgument");
+			CHECK(error->ReadMember<std::string>("message").value_or("").contains("the project"));
+			CHECK(FileSystem::Exists(projectFile));
+
+			// --export without --config is a usage error.
+			const Result<ProcessResult> usage = RunEditor(fixture.GetDirectory(),
+				{ "--headless", "--renderer", "none", "--project", Test::PathToUtf8(projectFile), "--export", Test::PathToUtf8(output) }, std::chrono::seconds(60));
+			REQUIRE(usage.has_value());
+			CHECK(usage->ExitCode == ExitCode::UsageError);
+
+			// So is --frames, which would end the run with exit code 0 before the export finished, without a package or a
+			// report (the M15 review's M03).
+			const std::filesystem::path framesOutput = fixture.GetDirectory() / "Packages" / "Frames";
+			const std::filesystem::path framesReport = fixture.GetDirectory() / "Reports" / "Frames.json";
+			const Result<ProcessResult> frames = RunEditor(fixture.GetDirectory(),
+				{ "--headless", "--renderer", "none", "--project", Test::PathToUtf8(projectFile), "--export", Test::PathToUtf8(framesOutput), "--config", config,
+					"--export-report", Test::PathToUtf8(framesReport), "--frames", "5" },
+				std::chrono::seconds(60));
+			REQUIRE(frames.has_value());
+			INFO("frames stderr: ", frames->StandardError);
+			CHECK(frames->ExitCode == ExitCode::UsageError);
+			CHECK(frames->StandardError.contains("--frames"));
+			CHECK_FALSE(FileSystem::Exists(framesOutput));
+		}
+
+		TEST_CASE("EditorApp: --export of a project that does not open exits 3 and still writes the report")
+		{
+			Test::TempDirectory userData("EditorExportMissing");
+			const std::filesystem::path reportPath = userData / "Export.json";
+			const Result<ProcessResult> result = RunEditor(userData,
+				{ "--headless", "--renderer", "none", "--project", Test::PathToUtf8(userData / "Missing" / "Missing.eproj"), "--export",
+					Test::PathToUtf8(userData / "Package"), "--config", "Release", "--export-report", Test::PathToUtf8(reportPath) },
+				std::chrono::seconds(60));
+			REQUIRE_MESSAGE(result.has_value(), result.error().ToString());
+			INFO("editor stderr: ", result->StandardError);
+			CHECK(result->ExitCode == ExitCode::InitFailed);
+			const Result<Json> report = JsonReader::Parse(FileSystem::ReadText(reportPath).value_or(""));
+			REQUIRE(report.has_value());
+			const JsonReader reader(*report);
+			CHECK_FALSE(reader.ReadMember<bool>("success").value_or(true));
+			const Result<JsonReader> error = reader.GetMember("error");
+			REQUIRE(error.has_value());
+			CHECK(error->HasMember("issues"));
+			CHECK(error->HasMember("code"));
+			CHECK_FALSE(FileSystem::Exists(userData / "Package"));
 		}
 
 		TEST_CASE("EditorApp: --bake-engine-assets fills the engine cooked cache and exits 0")

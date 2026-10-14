@@ -1,0 +1,48 @@
+# Path: /build/bin/Dist-macosx-AARCH64/Runtime/Runtime
+# Arch: arm64
+# Object files:
+[  0] linker synthesized
+[  1] /build/bin-int/Dist-macosx-AARCH64/Runtime/RuntimeMain.o
+[  2] /build/bin/Dist-macosx-AARCH64/Engine/libEngine.a[4](Application.o)
+[  3] /build/bin/Dist-macosx-AARCH64/Engine/libEngine.a[5](FeatureTestRunner.o)
+[  4] /build/bin/Dist-macosx-AARCH64/Engine/libEngine.a[6](ReplayPlayer.o)
+[  5] /build/bin/Dist-macosx-AARCH64/Engine/libEngine.a[7](Watchdog.o)
+[  6] /build/bin/Dist-macosx-AARCH64/Engine/libEngine.a[8](SceneSerializer.o)
+[  7] /build/bin/Dist-macosx-AARCH64/Luau/libLuau.a[9](lapi.o)
+[  8] /build/bin/Dist-macosx-AARCH64/Luau/libLuau.a[10](Compiler.o)
+[  9] /build/bin/Dist-macosx-AARCH64/LuauAnalysis/libLuauAnalysis.a[11](Frontend.o)
+[ 10] /build/bin/Dist-macosx-AARCH64/LuauAnalysis/libLuauAnalysis.a[12](TypeChecker2.o)
+[ 11] /build/bin/Dist-macosx-AARCH64/Engine/libEngine.a[13](CoreRegistration.o)
+[ 12] /build/bin/Dist-macosx-AARCH64/Engine/libEngine.a[14](Dispatcher.o)
+[ 13] /build/bin/Dist-macosx-AARCH64/ImGui/libImGui.a[15](imgui.o)
+# Sections:
+# Address	Size    	Segment	Section
+0x100003000	0x00002000	__TEXT	__text
+0x100005000	0x00000100	__TEXT	__cstring
+0x100008000	0x00000100	__DATA_CONST	__const
+# Symbols:
+# Address	Size    	File  Name
+0x100003000	0x00000040	[  1] _main
+0x100004000	0x00000018	[  1] FDE for: _main
+0x100003040	0x00000040	[  2] __ZN6Engine11Application3RunEv
+0x100004040	0x00000018	[  2] FDE for: __ZN6Engine11Application3RunEv
+0x100003080	0x00000040	[  3] __ZN6Engine17FeatureTestRunner3RunEv
+0x100004080	0x00000018	[  3] FDE for: __ZN6Engine17FeatureTestRunner3RunEv
+0x1000030C0	0x00000040	[  4] __ZN6Engine12ReplayPlayer4StepEv
+0x1000040C0	0x00000018	[  4] FDE for: __ZN6Engine12ReplayPlayer4StepEv
+0x100003100	0x00000040	[  5] __ZN6Engine14ScriptWatchdogD2Ev
+0x100004100	0x00000018	[  5] FDE for: __ZN6Engine14ScriptWatchdogD2Ev
+0x100003140	0x00000040	[  7] _lua_pushnumber
+0x100004140	0x00000018	[  7] FDE for: _lua_pushnumber
+0x100003180	0x00000040	[  8] __ZN4Luau7compileERKNSt3__112basic_stringIcSt11char_traitsIcESaIcEEERKNS_14CompileOptionsERKNS_12ParseOptionsEPNS_15BytecodeEncoderE
+0x100004180	0x00000018	[  8] FDE for: __ZN4Luau7compileERKNSt3__112basic_stringIcSt11char_traitsIcESaIcEEERKNS_14CompileOptionsERKNS_12ParseOptionsEPNS_15BytecodeEncoderE
+0x1000031C0	0x00000040	[  9] __ZN4Luau8Frontend5checkERKNSt3__112basic_stringIcSt11char_traitsIcESaIcEEESt8optionalINS_15FrontendOptionsEE
+0x1000041C0	0x00000018	[  9] FDE for: __ZN4Luau8Frontend5checkERKNSt3__112basic_stringIcSt11char_traitsIcESaIcEEESt8optionalINS_15FrontendOptionsEE
+0x100003200	0x00000040	[ 10] __ZN4Luau12TypeChecker25visitEPNS_12AstStatBlockE
+0x100004200	0x00000018	[ 10] FDE for: __ZN4Luau12TypeChecker25visitEPNS_12AstStatBlockE
+0x100005000	0x00000006	[  2] literal string: ImGui
+0x100008240	0x00000040	[ 11] __ZTVN6Engine15ComponentStoreE
+# Dead Stripped Symbols:
+#        	Size    	File  Name
+<<dead>> 	0x00000040	[ 12] __ZN6Engine10Dispatcher4PumpEv
+<<dead>> 	0x00000040	[ 13] __ZN5ImGui3EndEv

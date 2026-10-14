@@ -4,6 +4,8 @@
 
 #include "Engine/Asset/AssetLoaderRegistry.h"
 #include "Engine/Asset/CookedFormat.h"
+#include "Engine/Core/BinaryWriter.h"
+#include "Support/Fuzz.h"
 #include "Support/SceneTestFixture.h"
 
 #include <array>
@@ -120,6 +122,44 @@ namespace Engine {
 			const uint32_t faceSize = 1U << 30;
 			std::memcpy(huge.data(), &faceSize, sizeof(faceSize));
 			CHECK_FALSE(DeserializeEnvironmentPayload(huge).has_value());
+		}
+
+		TEST_CASE("EnvironmentData: 1,000 seeded mutations of a payload never crash" * doctest::test_suite(Test::FuzzSuite))
+		{
+			// Two seeds: a small payload (1x1 cubes of one mip, whose specular cube Validate refuses, so the parser's header
+			// and size checks see every mutation cheaply), and on every 64th iteration the full valid payload (4 MB, the
+			// accepting path). The cooked form goes through LoadCookedEnvironment with the payload hash sealed again.
+			BinaryWriter small;
+			for (const uint32_t value : { 1u, 1u, 1u, 1u })
+				small.WriteU32(value);
+			for (size_t index = 0; index < 27; ++index)
+				small.WriteF32(0.25f * static_cast<float>(index));
+			const std::array<uint16_t, 2 * 6 * 4> texels{};
+			small.WriteArray(std::span<const uint16_t>(texels));
+			const Buffer smallPayload = small.TakeBuffer();
+			const Buffer fullPayload = SerializeEnvironmentPayload(MakeEnvironment());
+			REQUIRE(DeserializeEnvironmentPayload(fullPayload).has_value());
+			const Test::FuzzRun run = Test::RunFuzzCase(0xE4F1, 1000, [&smallPayload, &fullPayload](Random& random, uint64_t index)
+			{
+				Buffer mutated = index % 64 == 0 ? fullPayload : smallPayload;
+				Test::MutateBytes(mutated, random);
+				const Result<EnvironmentData> read = random.NextBool() ? DeserializeEnvironmentPayload(mutated)
+																	   : LoadCookedEnvironment(WriteCookedArtifact(AssetType::Environment, EnvironmentData::FormatVersion, 1, mutated))
+																			 .transform([](const AssetRef<EnvironmentData>& loaded)
+				{
+					return *loaded;
+				});
+				if (!read.has_value())
+				{
+					const ErrorCode code = read.error().GetCode();
+					CHECK((code == ErrorCode::Parse || code == ErrorCode::Validation));
+					return false;
+				}
+				CHECK(ValidateEnvironmentData(*read).has_value());
+				return true;
+			});
+			if (Test::IsFuzzSample(run.Range))
+				CHECK(run.Counts.Rejected > 0);
 		}
 
 		TEST_CASE("EnvironmentData: the Environment loader reads a cooked environment")

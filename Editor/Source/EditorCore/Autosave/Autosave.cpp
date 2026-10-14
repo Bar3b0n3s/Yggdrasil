@@ -228,18 +228,21 @@ namespace Engine {
 			});
 		}
 
-		static Result<AutosaveManifest> ReadAutosaveManifest(const std::filesystem::path& root, const AutosaveReadObserver& observe)
+		// The checks ReadAutosaveBytes and ReadAutosaveText make on a document's bytes, for text held in memory.
+		static Status CheckAutosaveText(std::string_view text, uint64_t limit, std::string_view name)
 		{
-			const std::filesystem::path manifestPath = root / "Library" / "Autosave" / "Manifest.json";
-			ENGINE_TRY(CheckAutosavePath(root, manifestPath));
-			const Result<std::string> text = ReadAutosaveText(manifestPath, MaxAutosaveMetadataBytes, observe);
-			if (!text)
-			{
-				if (text.error().GetCode() == ErrorCode::NotFound)
-					return AutosaveManifest{};
-				return std::unexpected(text.error());
-			}
-			ENGINE_TRY_ASSIGN(const Json document, JsonReader::Parse(*text));
+			if (text.size() > limit)
+				return MakeError(ErrorCode::Validation, "autosave file '{}' exceeds its size limit or is a directory", name);
+			if (!IsValidUtf8(text))
+				return MakeError(ErrorCode::Validation, "autosave file '{}' is not UTF-8", name);
+			return {};
+		}
+
+		// The manifest (Library/Autosave/Manifest.json) read from its text: the format, the generation limit and each
+		// generation's identity, newest first. Pure.
+		static Result<AutosaveManifest> ParseAutosaveManifest(std::string_view text)
+		{
+			ENGINE_TRY_ASSIGN(const Json document, JsonReader::Parse(text));
 			const JsonReader reader(document);
 			ENGINE_TRY(reader.ReadFormatHeader("AutosaveManifest", 1, 1));
 			AutosaveManifest result;
@@ -267,6 +270,20 @@ namespace Engine {
 				return left.Sequence > right.Sequence;
 			});
 			return result;
+		}
+
+		static Result<AutosaveManifest> ReadAutosaveManifest(const std::filesystem::path& root, const AutosaveReadObserver& observe)
+		{
+			const std::filesystem::path manifestPath = root / "Library" / "Autosave" / "Manifest.json";
+			ENGINE_TRY(CheckAutosavePath(root, manifestPath));
+			const Result<std::string> text = ReadAutosaveText(manifestPath, MaxAutosaveMetadataBytes, observe);
+			if (!text)
+			{
+				if (text.error().GetCode() == ErrorCode::NotFound)
+					return AutosaveManifest{};
+				return std::unexpected(text.error());
+			}
+			return ParseAutosaveManifest(*text);
 		}
 
 		static Result<std::string> AutosaveManifestText(const AutosaveManifest& manifest)
@@ -311,19 +328,25 @@ namespace Engine {
 			return {};
 		}
 
-		static Result<AutosaveSnapshot> ReadAutosaveGeneration(const std::filesystem::path& projectFile, const AutosaveManifestEntry& entry,
-			const AutosaveReadObserver& observe, bool verifySource = true)
+		// A generation's Metadata.json: the snapshot it describes (without the scene text) and what its Scene.json must be.
+		struct AutosaveGenerationMetadata
 		{
-			AutosaveSnapshot snapshot;
+			AutosaveSnapshot Snapshot{};
+			uint64_t PayloadSize = 0;
+			uint64_t PayloadHash = 0;
+		};
+
+		// The generation `entry` of `projectFile`'s autosave from its Metadata.json text: the format, the identity of the
+		// project and the generation, the fingerprints, the scene's path or untitled token, the captured revision and the
+		// payload's promised size. Pure.
+		static Result<AutosaveGenerationMetadata> ParseAutosaveGenerationMetadata(const std::filesystem::path& projectFile,
+			const AutosaveManifestEntry& entry, std::string_view text)
+		{
+			AutosaveGenerationMetadata result;
+			AutosaveSnapshot& snapshot = result.Snapshot;
 			snapshot.Root = projectFile.parent_path();
 			snapshot.ProjectFile = projectFile;
 			snapshot.AutosaveRoot = snapshot.Root / "Library" / "Autosave";
-			const std::filesystem::path directory = snapshot.AutosaveRoot / FileSystem::PathFromUtf8(entry.Generation);
-			const std::filesystem::path metadata = directory / "Metadata.json";
-			const std::filesystem::path payload = directory / "Scene.json";
-			ENGINE_TRY(CheckAutosavePath(snapshot.Root, metadata));
-			ENGINE_TRY(CheckAutosavePath(snapshot.Root, payload));
-			ENGINE_TRY_ASSIGN(const std::string text, ReadAutosaveText(metadata, MaxAutosaveMetadataBytes, observe));
 			ENGINE_TRY_ASSIGN(const Json document, JsonReader::Parse(text));
 			const JsonReader reader(document);
 			ENGINE_TRY(reader.ReadFormatHeader("AutosaveGeneration", 1, 1));
@@ -342,9 +365,9 @@ namespace Engine {
 			ENGINE_TRY_ASSIGN(snapshot.UntitledToken, reader.ReadMember<std::string>("UntitledToken"));
 			ENGINE_TRY_ASSIGN(snapshot.Revision, reader.ReadMember<uint64_t>("DirtyRevision"));
 			ENGINE_TRY_ASSIGN(const bool dirty, reader.ReadMember<bool>("Dirty"));
-			ENGINE_TRY_ASSIGN(const uint64_t size, reader.ReadMember<uint64_t>("PayloadSize"));
-			ENGINE_TRY_ASSIGN(const uint64_t hash, reader.ReadMember<uint64_t>("PayloadHash"));
-			if (!dirty || snapshot.Revision == 0 || !snapshot.ProjectFingerprint.Exists || size > MaxAutosavePayloadBytes)
+			ENGINE_TRY_ASSIGN(result.PayloadSize, reader.ReadMember<uint64_t>("PayloadSize"));
+			ENGINE_TRY_ASSIGN(result.PayloadHash, reader.ReadMember<uint64_t>("PayloadHash"));
+			if (!dirty || snapshot.Revision == 0 || !snapshot.ProjectFingerprint.Exists || result.PayloadSize > MaxAutosavePayloadBytes)
 				return MakeError(ErrorCode::Validation, "autosave lacks a valid captured dirty revision or payload size");
 			if (snapshot.ScenePath.empty())
 			{
@@ -362,12 +385,34 @@ namespace Engine {
 					return MakeError(ErrorCode::Validation, "autosave scene path must be a canonical project-relative .scene path");
 				snapshot.Source = snapshot.Root / FileSystem::PathFromUtf8(snapshot.ScenePath);
 			}
-			ENGINE_TRY_ASSIGN(snapshot.Text, ReadAutosaveText(payload, MaxAutosavePayloadBytes, observe));
-			if (snapshot.Text.size() != size || XXH64(snapshot.Text) != hash)
+			return result;
+		}
+
+		// A generation's Scene.json text against its metadata's promise.
+		static Status CheckAutosavePayload(const AutosaveGenerationMetadata& metadata, std::string_view text)
+		{
+			if (text.size() != metadata.PayloadSize || XXH64(text) != metadata.PayloadHash)
 				return MakeError(ErrorCode::Validation, "autosave payload size or checksum differs from its metadata");
+			return {};
+		}
+
+		static Result<AutosaveSnapshot> ReadAutosaveGeneration(const std::filesystem::path& projectFile, const AutosaveManifestEntry& entry,
+			const AutosaveReadObserver& observe, bool verifySource = true)
+		{
+			const std::filesystem::path root = projectFile.parent_path();
+			const std::filesystem::path directory = root / "Library" / "Autosave" / FileSystem::PathFromUtf8(entry.Generation);
+			const std::filesystem::path metadataPath = directory / "Metadata.json";
+			const std::filesystem::path payload = directory / "Scene.json";
+			ENGINE_TRY(CheckAutosavePath(root, metadataPath));
+			ENGINE_TRY(CheckAutosavePath(root, payload));
+			ENGINE_TRY_ASSIGN(const std::string text, ReadAutosaveText(metadataPath, MaxAutosaveMetadataBytes, observe));
+			ENGINE_TRY_ASSIGN(AutosaveGenerationMetadata metadata, ParseAutosaveGenerationMetadata(projectFile, entry, text));
+			AutosaveSnapshot& snapshot = metadata.Snapshot;
+			ENGINE_TRY_ASSIGN(snapshot.Text, ReadAutosaveText(payload, MaxAutosavePayloadBytes, observe));
+			ENGINE_TRY(CheckAutosavePayload(metadata, snapshot.Text));
 			if (verifySource)
 				ENGINE_TRY(ValidateAutosaveSource(snapshot, observe));
-			return snapshot;
+			return std::move(snapshot);
 		}
 
 		static AutosaveRecoveryInfo MakeAutosaveRecoveryInfo(const AutosaveSnapshot& snapshot, std::string generation)
@@ -399,6 +444,37 @@ namespace Engine {
 				if (!info.NewerThanSource)
 					continue;
 				return std::optional<AutosaveRecoveryData>(AutosaveRecoveryData{ .Info = std::move(info), .SceneText = std::move(snapshot.Text) });
+			}
+			return std::optional<AutosaveRecoveryData>{};
+		}
+
+		Result<std::optional<AutosaveRecoveryData>> ParseAutosaveRecovery(const std::filesystem::path& projectFile,
+			const AutosaveRecoveryDocuments& documents, std::string_view generation)
+		{
+			if (!generation.empty() && !IsAutosaveGeneration(generation))
+				return MakeError(ErrorCode::Validation, "invalid autosave generation identifier");
+			AutosaveManifest manifest;
+			if (documents.Manifest.has_value())
+			{
+				ENGINE_TRY(CheckAutosaveText(*documents.Manifest, MaxAutosaveMetadataBytes, "Manifest.json"));
+				ENGINE_TRY_ASSIGN(manifest, ParseAutosaveManifest(*documents.Manifest));
+			}
+			for (const AutosaveManifestEntry& entry : manifest.Generations)
+			{
+				if (!generation.empty() && entry.Generation != generation)
+					continue;
+				const auto found = documents.Generations.find(entry.Generation);
+				if (found == documents.Generations.end())
+					return MakeError(ErrorCode::NotFound, "autosave generation '{}' has no documents", entry.Generation);
+				ENGINE_TRY(CheckAutosaveText(found->second.Metadata, MaxAutosaveMetadataBytes, "Metadata.json"));
+				ENGINE_TRY_ASSIGN(AutosaveGenerationMetadata metadata, ParseAutosaveGenerationMetadata(projectFile, entry, found->second.Metadata));
+				ENGINE_TRY(CheckAutosaveText(found->second.Scene, MaxAutosavePayloadBytes, "Scene.json"));
+				metadata.Snapshot.Text = found->second.Scene;
+				ENGINE_TRY(CheckAutosavePayload(metadata, metadata.Snapshot.Text));
+				AutosaveRecoveryInfo info = MakeAutosaveRecoveryInfo(metadata.Snapshot, entry.Generation);
+				if (!info.NewerThanSource)
+					continue;
+				return std::optional<AutosaveRecoveryData>(AutosaveRecoveryData{ .Info = std::move(info), .SceneText = std::move(metadata.Snapshot.Text) });
 			}
 			return std::optional<AutosaveRecoveryData>{};
 		}

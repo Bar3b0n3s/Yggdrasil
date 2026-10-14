@@ -65,3 +65,17 @@ Throwaway workspace (outside the repo) built Debug/Release/Dist with VS 2026 (v1
 3. Delete `Vendor/glm/glm/` and copy `<tmp>/glm/**/*.{h,hpp,inl}` back preserving paths (skip `glm.cppm`, `detail/glm.cpp`, `CMakeLists.txt`); copy `copying.txt`.
 4. Make sure files have LF line endings (clone with `-c core.autocrlf=false`).
 5. Update this file (tag, SHA, date, file count), rebuild all configurations and run the unit tests.
+
+## Notices
+
+The row `Scripts/Lib/notices.py` reads for `THIRD_PARTY_NOTICES.txt` (Docs/Decisions/0024-m15-contract.md decision 8).
+
+| Field | Value |
+|---|---|
+| Name | GLM |
+| Upstream | https://github.com/g-truc/glm |
+| Version | 1.0.3 |
+| License | MIT |
+| Shipped | yes |
+| Projects | - |
+| License files | copying.txt |

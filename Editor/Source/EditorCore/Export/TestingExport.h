@@ -37,6 +37,8 @@ namespace Engine {
 	//   - each ProjectValidator::CheckTestSuites diagnostic (TEST_SUITE_INVALID) as an issue at
 	//     "/Testing/Suites/<i>/Script" or "/Testing/Suites/<i>/Scene", its message starting with "TEST_SUITE_INVALID: ";
 	//   - a Testing.Replays entry without wildcards that names no registered replay, at "/Testing/Replays/<i>";
+	//   - a Testing.Replays entry that, wildcards aside, is not a project path below Assets/ (which the Runtime's
+	//     --feature-test refuses, so the exported run could not begin), at "/Testing/Replays/<i>";
 	//   - every matched replay is loaded through the editor's asset manager, which imports it with ReplayImporter and so
 	//     compiles each expectation (§14.2 step 1 "every replay compiles"); an import failure is an issue at
 	//     "/Testing/Replays/<i>" naming the replay and carrying the import error's located message.

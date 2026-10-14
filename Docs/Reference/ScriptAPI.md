@@ -3462,6 +3462,30 @@ The build configuration an export targets (§2.2).
 
 - `Dist`: The shipping configuration: asserts off, no automation server.
 
+## ExportPhase
+
+A step of an export (§14.2), in the order the steps run.
+
+- `Validate`: The project, its scenes, scripts and settings and the build outputs are checked; nothing is written.
+
+- `Cook`: Every included asset is cooked through the asset manager.
+
+- `WritePaks`: Data/Engine.pak and Data/Game.pak are written and verified.
+
+- `CopyRuntime`: The configuration's Runtime is copied, renamed after the project, with what it needs.
+
+- `PatchResources`: The executable's icon and version (Windows) or Info.plist (macOS) are written.
+
+- `WriteManifest`: Game.json and THIRD_PARTY_NOTICES.txt are written.
+
+- `Sign`: The macOS bundle is signed; nothing happens elsewhere.
+
+- `SmokeTest`: The staged game runs headless when smokeTest asks for it.
+
+- `MoveToOutput`: The staged package replaces the output directory.
+
+- `Done`: The export finished.
+
 ## FieldType
 
 The underlying reflected value kind.

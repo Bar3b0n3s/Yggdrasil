@@ -1,11 +1,15 @@
 #include "TestsPCH.h"
 #include "Engine/Session/PlayInputEventCodec.h"
 
+#include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Project/ProjectSettings.h"
+#include "Support/Fuzz.h"
 
 #include <nlohmann/json.hpp>
 
 #include <limits>
+#include <string>
+#include <vector>
 
 namespace Engine {
 
@@ -48,6 +52,53 @@ namespace Engine {
 				REQUIRE(decoded);
 				CHECK(decoded->Tick == 7);
 				CHECK(decoded->Event == parsed->Event);
+			}
+		}
+
+		TEST_CASE("PlayInputEventCodec: 1,000 seeded mutations of an input event never crash" * doctest::test_suite(Test::FuzzSuite))
+		{
+			// The seeds: one event of each of the nine kinds, as automation sends them. An event the parser accepts encodes to
+			// a replay event that decodes to the same event.
+			auto input = Input();
+			const Json events = Json::array({ { { "type", "Action" }, { "name", "Jump" }, { "state", "tap" }, { "tick", 3 } },
+				{ { "type", "Action" }, { "name", "Move" }, { "value", 0.5f } },
+				{ { "type", "key" }, { "key", "space" }, { "state", "Up" } },
+				{ { "type", "mouseButton" }, { "button", "left" }, { "position", { 2, 3 } } },
+				{ { "type", "mouseMove" }, { "position", { 4, 5 } } },
+				{ { "type", "mouseDelta" }, { "delta", { -1, 2 } } },
+				{ { "type", "scroll" }, { "delta", { 0, 2 } } },
+				{ { "type", "gamepadAxis" }, { "gamepad", 2 }, { "axis", "LeftX" }, { "value", -0.25f } },
+				{ { "type", "text" }, { "text", "snow" } } });
+			std::vector<std::string> seeds;
+			for (const Json& event : events)
+				seeds.push_back(event.dump());
+			// About one mutation in a hundred is a input event the reader accepts, so a tenth of the sequence (the Debug unit run's
+			// --fuzz-scale=0.1, ADR 0024 decision 14) holds too few to check both outcomes: the minimum is the whole count.
+			constexpr uint64_t Iterations = 1000;
+			const Test::FuzzRun run = Test::RunFuzzCase(0x1E7C, Iterations, [&input, &seeds](Random& random, uint64_t /*index*/)
+			{
+				std::string mutated = seeds[static_cast<size_t>(random.RangeInt(0, static_cast<int64_t>(seeds.size()) - 1))];
+				Test::MutateText(mutated, random);
+				const Result<Json> document = JsonReader::Parse(mutated);
+				if (!document.has_value())
+					return false;
+				const auto parsed = ParsePlayInputEvent(*document, input.GetActions(), "/event", random.NextBool());
+				if (!parsed.has_value())
+				{
+					CHECK(parsed.error().GetCode() == ErrorCode::InvalidArgument);
+					return false;
+				}
+				const auto encoded = EncodeReplayEvent(parsed->Tick, parsed->Event);
+				REQUIRE_MESSAGE(encoded.has_value(), encoded.error().ToString());
+				const auto decoded = DecodeReplayEvent(*encoded, input.GetActions());
+				REQUIRE_MESSAGE(decoded.has_value(), decoded.error().ToString());
+				CHECK(decoded->Event == parsed->Event);
+				return true;
+			}, Iterations);
+			if (Test::IsFuzzSample(run.Range))
+			{
+				CHECK(run.Counts.Rejected > 0);
+				CHECK(run.Counts.Accepted > 0);
 			}
 		}
 

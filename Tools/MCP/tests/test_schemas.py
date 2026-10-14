@@ -66,7 +66,8 @@ class SchemaTests(unittest.TestCase):
                 self.assertEqual(schema["type"], "object")
 
     def test_editor_launch_offers_every_project_template_and_recovery(self) -> None:
-        # editor_launch {create} is the bridge's way to create a project, so it accepts exactly project.create's templates.
+        # editor_launch {create} is the bridge's way to create a project, so it accepts exactly project.create's
+        # templates.
         tools = server.load_catalog()
         project_create = next(tool for tool in tools if tool.name == "project_create")
         templates = project_create.input_schema["properties"]["template"]["enum"]

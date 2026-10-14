@@ -60,6 +60,10 @@ namespace Engine {
 		// The console sink (stderr; never in Dist) and its level.
 		bool LogToConsole = true;
 		LogLevel ConsoleLevel = LogLevel::Trace;
+		// M15: the minimum level of both output sinks, the console and the log file (LogSpecification::OutputLevel):
+		// RunApplication passes ApplicationSpecification::MinimumLogLevel (--log-level, §13.9), so the process's own lines
+		// are filtered too. The ring buffer and the log listeners still receive every entry.
+		LogLevel LogOutputLevel = LogLevel::Trace;
 		// Crash reports under <UserData>/<AppName>/Crashes. Off for Tests children that were given no user-data root of
 		// their own (death tests, recording-assert-handler targets), whose deaths are expected: crashes still end the process
 		// with exit code 4, but no report is written into the user's folder.

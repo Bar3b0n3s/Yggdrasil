@@ -50,6 +50,40 @@ namespace Engine {
 			CHECK_FALSE(options->RequireGpu);
 			CHECK(options->VulkanApi == VulkanApiVersion::Vulkan14);
 			CHECK_FALSE(options->UpdateGolden);
+			CHECK(options->FuzzIterations == 0);
+			CHECK(options->FuzzScale == 1.0);
+			CHECK(options->FuzzShardIndex == 0);
+			CHECK(options->FuzzShardCount == 1);
+			CHECK_FALSE(options->FuzzIndex.has_value());
+			CHECK(options->TimeoutScale == 1.0);
+		}
+
+		TEST_CASE("TestOptions: parses the fuzz options and the timeout scale")
+		{
+			const std::array<const char*, 5> sharded = { "Tests", "--fuzz-iterations=1000000", "--fuzz-shard=3/24", "--test-timeout-scale=20",
+				"--fuzz-scale=0.1" };
+			const Result<Test::TestOptions> options = Test::ParseTestOptions(static_cast<int>(sharded.size()), sharded.data());
+			REQUIRE_MESSAGE(options.has_value(), options.error().ToString());
+			CHECK(options->FuzzIterations == 1000000);
+			CHECK(options->FuzzShardIndex == 3);
+			CHECK(options->FuzzShardCount == 24);
+			CHECK(options->TimeoutScale == 20.0);
+			CHECK(options->FuzzScale == 0.1);
+			CHECK_FALSE(options->FuzzIndex.has_value());
+
+			const std::array<const char*, 3> replay = { "Tests", "--fuzz-iterations=1000000", "--fuzz-index=0" };
+			const Result<Test::TestOptions> replayOptions = Test::ParseTestOptions(static_cast<int>(replay.size()), replay.data());
+			REQUIRE(replayOptions.has_value());
+			REQUIRE(replayOptions->FuzzIndex.has_value());
+			CHECK(*replayOptions->FuzzIndex == 0);
+
+			// A replay of one iteration is of the whole run, never of a shard.
+			const std::array<const char*, 3> both = { "Tests", "--fuzz-index=7", "--fuzz-shard=0/2" };
+			const Result<Test::TestOptions> refused = Test::ParseTestOptions(static_cast<int>(both.size()), both.data());
+			REQUIRE_FALSE(refused.has_value());
+			CHECK(refused.error().GetCode() == ErrorCode::InvalidArgument);
+			CHECK(refused.error().GetMessageText().contains("--fuzz-index"));
+			CHECK(refused.error().GetMessageText().contains("--fuzz-shard"));
 		}
 
 		TEST_CASE("TestOptions: parses the GPU and golden options")
@@ -185,7 +219,7 @@ namespace Engine {
 
 		TEST_CASE("TestOptions: malformed values are InvalidArgument")
 		{
-			const std::array<const char*, 23> malformed = {
+			const std::array<const char*, 46> malformed = {
 				"--death-test=",
 				"--death-test",
 				"--windowed-child=",
@@ -209,6 +243,29 @@ namespace Engine {
 				"--vulkan-api=",
 				"--vulkan-api",
 				"--vulkan-api=14",
+				"--fuzz-iterations=0",
+				"--fuzz-iterations=-1",
+				"--fuzz-iterations=1.5",
+				"--fuzz-iterations=1e6",
+				"--fuzz-iterations=",
+				"--fuzz-iterations",
+				"--fuzz-iterations=99999999999999999999",
+				"--fuzz-scale=0",
+				"--fuzz-scale=1.5",
+				"--fuzz-scale=tenth",
+				"--fuzz-scale",
+				"--fuzz-shard=2/2",
+				"--fuzz-shard=1",
+				"--fuzz-shard=0/0",
+				"--fuzz-shard=a/b",
+				"--fuzz-shard=/2",
+				"--fuzz-shard",
+				"--fuzz-index=-1",
+				"--fuzz-index=first",
+				"--fuzz-index",
+				"--test-timeout-scale=0.5",
+				"--test-timeout-scale=inf",
+				"--test-timeout-scale",
 			};
 			for (const char* bad : malformed)
 			{

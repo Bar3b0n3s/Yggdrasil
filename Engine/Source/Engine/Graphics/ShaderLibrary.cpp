@@ -121,10 +121,4 @@ namespace Engine {
 		return &m_Reflections.emplace(std::move(stem), std::move(*reflection)).first->second;
 	}
 
-	void ShaderLibrary::Clear()
-	{
-		m_Shaders.clear();
-		m_Reflections.clear();
-	}
-
 }

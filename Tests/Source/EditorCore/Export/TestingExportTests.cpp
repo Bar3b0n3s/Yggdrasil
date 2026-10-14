@@ -156,6 +156,21 @@ end)
 			return specification;
 		}
 
+		// The Testing.Suites entries of the project settings in a Game.pak's TOC metadata ({"Project": <ProjectSettings>}).
+		size_t CountTocSuites(const PakReader& pak)
+		{
+			const JsonReader metadata(pak.GetMetadata().Get());
+			const Result<JsonReader> project = metadata.GetMember("Project");
+			REQUIRE_MESSAGE(project.has_value(), project.error().ToString());
+			const Result<JsonReader> testing = project->GetMember("Testing");
+			REQUIRE_MESSAGE(testing.has_value(), testing.error().ToString());
+			const Result<JsonReader> suites = testing->GetMember("Suites");
+			REQUIRE_MESSAGE(suites.has_value(), suites.error().ToString());
+			const Result<size_t> count = suites->GetArraySize();
+			REQUIRE_MESSAGE(count.has_value(), count.error().ToString());
+			return *count;
+		}
+
 		std::vector<std::string> IssuePointers(const Error& error)
 		{
 			std::vector<std::string> pointers;
@@ -188,7 +203,7 @@ end)
 			CHECK(testing != plain);
 		}
 
-		TEST_CASE("TestingExport: forced content is Assets/Tests, the suite scripts and scenes and the matched replays" * doctest::skip(true))
+		TEST_CASE("TestingExport: forced content is Assets/Tests, the suite scripts and scenes and the matched replays")
 		{
 			TestingExportContent content;
 			content.SuiteScripts = { "Assets/Suites/Main.test.luau" };
@@ -204,7 +219,7 @@ end)
 			CHECK_FALSE(IsForcedByTestingExport("Assets/Recordings/Run.replay.meta", content));
 		}
 
-		TEST_CASE("Exporter: a testing export packages Assets/Tests and every suite and replay whatever Export.Exclude says, and writes Testing true" * doctest::skip(true))
+		TEST_CASE("Exporter: a testing export packages Assets/Tests and every suite and replay whatever Export.Exclude says, and writes Testing true")
 		{
 			Test::EditorTestFixture fixture("TestingExport");
 			MakeTestingProject(fixture, "Smoke", "return true");
@@ -232,6 +247,7 @@ end)
 			CHECK(std::ranges::find(paths, std::string(SuiteScript)) != paths.end());
 			CHECK(std::ranges::find(paths, std::string(ReplayPath)) != paths.end());
 			CHECK(std::ranges::find(paths, std::string("Assets/Scenes/Main.scene")) != paths.end());
+			CHECK(CountTocSuites(**pak) == 1);
 
 			// The plain export of the same project still leaves Assets/Tests out and says Testing false.
 			ExportSpecification plain = MakeTestingSpecification(MakeBinaryRoot(binaries));
@@ -245,9 +261,15 @@ end)
 			const Result<GameManifest> plainManifest = GameManifestSerializer::LoadFromFile(ManifestOf(**plainOutcome, "Smoke"));
 			REQUIRE(plainManifest.has_value());
 			CHECK_FALSE(plainManifest->Testing);
+			// §14.1: every export's TOC keeps the full project settings, Testing included; only Game.json admits --feature-test.
+			const Result<Ref<const PakReader>> plainPak = PakReader::Open(ManifestOf(**plainOutcome, "Smoke").parent_path() / "Data" / "Game.pak");
+			REQUIRE_MESSAGE(plainPak.has_value(), plainPak.error().ToString());
+			CHECK(CountTocSuites(**plainPak) == 1);
+			for (const PakEntry& entry : (*plainPak)->GetEntries())
+				CHECK_FALSE(entry.Path.starts_with(TestingExportForcedDirectory));
 		}
 
-		TEST_CASE("Exporter: a testing export refuses an invalid test suite with TEST_SUITE_INVALID at its setting" * doctest::skip(true))
+		TEST_CASE("Exporter: a testing export refuses an invalid test suite with TEST_SUITE_INVALID at its setting")
 		{
 			Test::EditorTestFixture fixture("TestingExportSuite");
 			MakeTestingProject(fixture, "Smoke", std::nullopt);
@@ -273,12 +295,14 @@ end)
 			CHECK_FALSE(std::filesystem::exists(fixture.GetProjectRoot() / "Build", exists));
 		}
 
-		TEST_CASE("Exporter: a testing export refuses a replay whose expectation does not compile, at its Testing.Replays entry" * doctest::skip(true))
+		TEST_CASE("Exporter: a testing export refuses a replay whose expectation does not compile, at its Testing.Replays entry")
 		{
 			Test::EditorTestFixture fixture("TestingExportReplay");
-			MakeTestingProject(fixture, "Smoke", "return (");
-			// Validate imports the replay through the asset manager, which logs the failed import.
+			// The asset manager imports the new replay at the project's refresh (EditorAssetManager::Refresh imports every
+			// asset never imported), which compiles its expectations with ReplayImporter and logs the failed import once; the
+			// failure is remembered, so Validate's load of the replay reports it again without importing or logging again.
 			const Test::ExpectLog importFailed(LogLevel::Error, "ASSET_IMPORT_FAILED Assets/Tests/Replays/Smoke.replay");
+			MakeTestingProject(fixture, "Smoke", "return (");
 			const Test::TempDirectory binaries("TestingExportBinaries");
 			Result<Scope<Exporter>> exporter = Exporter::Start(fixture.GetEditor(), MakeTestingSpecification(MakeBinaryRoot(binaries)));
 			REQUIRE(exporter.has_value());
@@ -288,13 +312,19 @@ end)
 			const Error& error = outcome->error();
 			INFO(error.ToString());
 			CHECK(error.GetCode() == ErrorCode::Validation);
-			REQUIRE(IssuePointers(error) == std::vector<std::string>{ "/Testing/Replays/0" });
-			CHECK(error.GetIssues().front().Message.find(std::string(ReplayPath)) != std::string::npos);
+			// Two issues: the replay's asset diagnostic, which blocks every export of the project, plain ones included (ADR 0024
+			// decision 2, "Excluded scripts"), and the testing export's own, located at the Testing.Replays entry that matched
+			// the replay, naming it with the located compile error.
+			REQUIRE(IssuePointers(error) == std::vector<std::string>{ "", "/Testing/Replays/0" });
+			CHECK(error.GetIssues().front().Message.starts_with("ASSET_IMPORT_FAILED Assets/Tests/Replays/Smoke.replay"));
+			const ErrorIssue& replayIssue = error.GetIssues().back();
+			CHECK(replayIssue.Message.find(std::string(ReplayPath)) != std::string::npos);
+			CHECK(replayIssue.Message.find("Smoke.replay:1:9 /Expect/0/Luau") != std::string::npos);
 			std::error_code exists;
 			CHECK_FALSE(std::filesystem::exists(fixture.GetProjectRoot() / "Build", exists));
 		}
 
-		TEST_CASE("Exporter: two testing exports of an unchanged project are identical file for file" * doctest::skip(true))
+		TEST_CASE("Exporter: two testing exports of an unchanged project are identical file for file")
 		{
 			Test::EditorTestFixture fixture("TestingExportTwice");
 			MakeTestingProject(fixture, "Smoke", "return true");
@@ -320,7 +350,7 @@ end)
 			}
 		}
 
-		TEST_CASE("Export: user data goes to the manifest Name folder" * doctest::skip(true))
+		TEST_CASE("Export: user data goes to the manifest Name folder")
 		{
 			// §14.1: Name decides the exported game's user-data folder, never ENGINE_PRODUCT_NAME; §14.3: a --feature-test run
 			// of a testing export without a root keeps it beside the package (the only form a Dist run can be pointed at).

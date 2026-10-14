@@ -6,8 +6,8 @@ name its path. The game and camera views of a rendering editor are covered by te
 
 The tests that render start a headless editor with the Vulkan renderer and the GPU test options (harness.require_gpu);
 the parameter checks, the view and camera errors and the --renderer none answers need no GPU. The golden images
-"LitScene" (a scene through the viewport capture) and "EditorDefaultLayout" (the editor.screenshot of a --batch run) are compared by
-the C++ golden suite (Tests/Source/Golden/GoldenTests.cpp).
+"LitScene" (a scene through the viewport capture) and "EditorDefaultLayout" (the editor.screenshot of a --batch run)
+are compared by the C++ golden suite (Tests/Source/Golden/GoldenTests.cpp).
 """
 
 from __future__ import annotations
@@ -165,12 +165,15 @@ class ScreenshotRenderingTests(AutomationTestCase):
         self.assertEqual(base64.b64decode(small["data"], validate=True), Path(small["path"]).read_bytes())
         self.assertNotEqual(small["path"], shot["path"])
 
-        # The scene view shows the scene: a cube in front of the scene-view camera changes the image, and every render of
-        # one state is identical (no temporal effects, §8.3).
-        empty = Path(client.call("viewport.screenshot", {"view": "scene", "width": 160, "height": 90})["path"]).read_bytes()
+        # The scene view shows the scene: a cube in front of the scene-view camera changes the image, and every render
+        # of one state is identical (no temporal effects, §8.3).
+        empty = Path(client.call("viewport.screenshot",
+                                 {"view": "scene", "width": 160, "height": 90})["path"]).read_bytes()
         client.call("entity.create", {"name": "Cube", "components": {"MeshRenderer": {"Mesh": "engine://Meshes/Cube"}}})
-        cube = Path(client.call("viewport.screenshot", {"view": "scene", "width": 160, "height": 90})["path"]).read_bytes()
-        again = Path(client.call("viewport.screenshot", {"view": "scene", "width": 160, "height": 90})["path"]).read_bytes()
+        cube = Path(client.call("viewport.screenshot",
+                                {"view": "scene", "width": 160, "height": 90})["path"]).read_bytes()
+        again = Path(client.call("viewport.screenshot",
+                                 {"view": "scene", "width": 160, "height": 90})["path"]).read_bytes()
         self.assertNotEqual(cube, empty)
         self.assertEqual(again, cube)
         client.call("scene.save")

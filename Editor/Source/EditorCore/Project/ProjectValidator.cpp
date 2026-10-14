@@ -264,7 +264,7 @@ namespace Engine {
 				"An Export.BuildScenes entry names no scene file.",
 				"Create the scene with scene.new; the fix removes the entry." },
 			ValidationCodeInfo{ TestSuiteInvalidCode, "Error", false,
-				"A Testing.Suites entry names a script that is not a TestSuite, or a scene that does not exist.",
+				"A Testing.Suites entry names a script that is not a TestSuite, or a scene that is not a registered Scene asset.",
 				"Assign a script that returns Test.Suite, and create the scene or leave Scene empty for an empty test scene." },
 		};
 
@@ -1187,6 +1187,54 @@ namespace Engine {
 			return info.has_value() && !info->IsDirectory;
 		}
 
+		// The registered main asset of the project-relative `path`, or null (an invalid path names none).
+		static const AssetRecord* FindRegisteredAsset(const EditorContext& editor, std::string_view path)
+		{
+			const Result<VfsPath> file = VfsPath::Create("project", path);
+			const AssetRecord* record = file ? editor.GetAssets().GetRegistry().FindBySourcePath(*file) : nullptr;
+			return record != nullptr && record->Metadata.Kind == AssetMetaKind::Asset ? record : nullptr;
+		}
+
+		// TEST_SUITE_INVALID (ProjectValidator::CheckTestSuites, the rule Validate and testing exports share; M13, tightened in
+		// M15 by Docs/Decisions/0024-m15-contract.md decision 6): per Testing.Suites entry, in entry order, a Script that is not
+		// a registered TestSuite script, then a non-empty Scene that is not a registered Scene asset (a testing export packages
+		// the scene, so a file the registry does not know is not enough).
+		static void CheckTestSuiteSettings(const EditorContext& editor, std::vector<CollectedDiagnostic>& diagnostics)
+		{
+			const ProjectSettings& settings = editor.GetProject().GetSettings();
+			DiagnosticSite site;
+			site.File = GetProjectFileName(editor);
+			for (size_t index = 0; index < settings.Testing.Suites.size(); ++index)
+			{
+				const TestSuiteSettings& suite = settings.Testing.Suites[index];
+				site.Field = std::format("Testing.Suites[{}]", index);
+				site.Subject = std::to_string(index);
+				const AssetRecord* script = FindRegisteredAsset(editor, suite.Script);
+				bool validScript = false;
+				if (script != nullptr && script->Metadata.Type == AssetType::Script && editor.GetScriptService() != nullptr)
+				{
+					const auto fields = editor.GetScriptService()->GetFields(script->Metadata.Handle);
+					validScript = fields && (*fields)->Kind == ScriptKind::TestSuite;
+				}
+				if (!validScript)
+				{
+					diagnostics.push_back(MakeDiagnostic(TestSuiteInvalidCode, DiagnosticSeverity::Error,
+						std::format("{} does not name a valid TestSuite script: '{}'", site.Field, suite.Script), site,
+						"assign a script that returns Test.Suite", false));
+				}
+				if (suite.Scene.empty())
+					continue;
+				const AssetRecord* scene = FindRegisteredAsset(editor, suite.Scene);
+				if (scene == nullptr || scene->Metadata.Type != AssetType::Scene)
+				{
+					site.Subject += "/Scene";
+					diagnostics.push_back(MakeDiagnostic(TestSuiteInvalidCode, DiagnosticSeverity::Error,
+						std::format("{} names '{}', which is not a registered scene", site.Field, suite.Scene), site,
+						"create the scene (scene.new) or use an empty Scene for an empty test scene", false));
+				}
+			}
+		}
+
 		static void CheckSettings(const EditorContext& editor, std::vector<CollectedDiagnostic>& diagnostics)
 		{
 			const ProjectSettings& settings = editor.GetProject().GetSettings();
@@ -1214,31 +1262,7 @@ namespace Engine {
 					std::format("Export.BuildScenes names '{}', which is not a scene file", scene), site,
 					"fix it to remove the entry, or create the scene with scene.new", true));
 			}
-			for (size_t index = 0; index < settings.Testing.Suites.size(); ++index)
-			{
-				const auto& suite = settings.Testing.Suites[index];
-				site.Field = std::format("Testing.Suites[{}]", index);
-				site.Subject = std::to_string(index);
-				const auto path = VfsPath::Create("project", suite.Script);
-				const AssetRecord* record = path ? editor.GetAssets().GetRegistry().FindBySourcePath(*path) : nullptr;
-				bool validScript = false;
-				if (record != nullptr && record->Metadata.Type == AssetType::Script && editor.GetScriptService() != nullptr)
-				{
-					const auto script = editor.GetScriptService()->GetFields(record->Metadata.Handle);
-					validScript = script && (*script)->Kind == ScriptKind::TestSuite;
-				}
-				if (!validScript)
-					diagnostics.push_back(MakeDiagnostic(TestSuiteInvalidCode, DiagnosticSeverity::Error,
-						std::format("{} does not name a valid TestSuite script: '{}'", site.Field, suite.Script), site,
-						"assign a script that returns Test.Suite", false));
-				if (!suite.Scene.empty() && !ProjectFileExists(editor, suite.Scene))
-				{
-					site.Subject += "/Scene";
-					diagnostics.push_back(MakeDiagnostic(TestSuiteInvalidCode, DiagnosticSeverity::Error,
-						std::format("{} names a missing scene: '{}'", site.Field, suite.Scene), site,
-						"create the scene or use an empty Scene for an empty test scene", false));
-				}
-			}
+			CheckTestSuiteSettings(editor, diagnostics);
 		}
 
 		// Every .scene file under project://Assets, sorted. Errors: the VFS errors other than a missing Assets/ directory.
@@ -1948,10 +1972,17 @@ namespace Engine {
 		return {};
 	}
 
-	Result<std::vector<ProjectDiagnostic>> ProjectValidator::CheckTestSuites(const EditorContext& /*context*/)
+	Result<std::vector<ProjectDiagnostic>> ProjectValidator::CheckTestSuites(const EditorContext& context)
 	{
-		ENGINE_CONTRACT_STUB();
-		return std::unexpected(Error(ErrorCode::Unsupported, "M15 test suite check contract (stream B)"));
+		if (!context.HasProject())
+			return MakeError(ErrorCode::InvalidState, "no project open; call project.create or project.open");
+		std::vector<CollectedDiagnostic> collected;
+		Utils::CheckTestSuiteSettings(context, collected);
+		std::vector<ProjectDiagnostic> diagnostics;
+		diagnostics.reserve(collected.size());
+		for (CollectedDiagnostic& entry : collected)
+			diagnostics.push_back(std::move(entry.Diagnostic));
+		return diagnostics;
 	}
 
 	void RegisterProjectValidatorTypes(TypeRegistry& registry)
