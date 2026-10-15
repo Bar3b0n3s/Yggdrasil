@@ -19,7 +19,8 @@
 // single-writer lock or read-only, and the recent list.
 //
 // Project layout: <Root>/<Name>.eproj, Assets/{Scenes,Scripts,Prefabs,Materials,Models,Textures,Audio,Fonts,Tests}/,
-// .luaurc, .gitignore ("Library/"), AGENTS.md (game notes), Automation/ (committed: Provenance.json, BuildLog.jsonl) and
+// .luaurc, .gitignore ("Library/", "Build/", "*.bak"), AGENTS.md (game notes), Automation/ (committed: Provenance.json,
+// BuildLog.jsonl) and
 // Library/ (gitignored: Cache/, Autosave/, Editor.lock, Automation/Out/).
 
 namespace Engine {
@@ -52,7 +53,7 @@ namespace Engine {
 		std::filesystem::path TemplatesDirectory{};
 	};
 
-	// A file CreateProject wrote that provenance records (§13.4: the .eproj and files under Assets/).
+	// A file CreateProject wrote that provenance records (§13.4: the .eproj, the root .luaurc and files under Assets/).
 	struct CreatedProjectFile
 	{
 		std::string Path{}; // project-relative, '/' separators

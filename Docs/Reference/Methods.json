@@ -37,7 +37,7 @@
 						"type": "boolean"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -67,7 +67,7 @@
 						"maximum": 4294967295
 					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {
@@ -130,7 +130,7 @@
 		{
 			"name": "asset.delete",
 			"domain": "asset",
-			"description": "Moves an asset with its .meta (and a glTF's dependency files) to Library/Trash as one undoable command; never a permanent delete.",
+			"description": "Moves an asset with its .meta (and a glTF's dependency files) to Library/Trash as one undoable command; never a permanent delete. A folder below Assets/ that holds no files (only empty folders) is removed, also undoably; a folder that holds files is refused (Validation, naming them): delete its assets first.",
 			"exposeAsTool": true,
 			"mutates": true,
 			"supportsDryRun": false,
@@ -146,11 +146,11 @@
 				"type": "object",
 				"properties": {
 					"asset": {
-						"description": "The asset to move to the trash (a source, not a sub-asset).",
+						"description": "The asset to move to the trash (a source, not a sub-asset), or a folder below Assets/ that holds no files, to remove.",
 						"type": "string"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -166,15 +166,22 @@
 				"type": "object",
 				"properties": {
 					"asset": {
-						"description": "The asset as it was.",
+						"description": "The asset as it was; for a folder its path, with an empty id and type None.",
 						"$ref": "#/$defs/AssetSummary"
 					},
 					"trashDirectory": {
-						"description": "Where its files went: \"Library/Trash/<entry>\".",
+						"description": "Where its files went: \"Library/Trash/<entry>\"; empty for a folder, which holds none.",
 						"type": "string"
 					},
 					"trashedFiles": {
 						"description": "The old paths of every file trashed, .meta files and dependency files included.",
+						"type": "array",
+						"items": {
+							"type": "string"
+						}
+					},
+					"removedFolders": {
+						"description": "A folder delete: the folder and every empty folder below it, project-relative and sorted; empty for an asset.",
 						"type": "array",
 						"items": {
 							"type": "string"
@@ -187,7 +194,7 @@
 						"maximum": 4294967295
 					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {
@@ -250,7 +257,7 @@
 						"type": "string"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -277,7 +284,7 @@
 						"description": "Every field of the importer's settings; null without settings."
 					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {
@@ -340,7 +347,7 @@
 						"type": "string"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -363,7 +370,7 @@
 						"description": "Every property, by registry name."
 					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {
@@ -433,7 +440,7 @@
 						"description": "Import settings merged over the importer's defaults; null for the defaults."
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -480,7 +487,7 @@
 						"maximum": 4294967295
 					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {
@@ -571,7 +578,7 @@
 						"type": "string"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -653,7 +660,7 @@
 						"maximum": 4294967295
 					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {
@@ -765,7 +772,7 @@
 						"type": "string"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -797,7 +804,7 @@
 						"maximum": 4294967295
 					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {
@@ -865,7 +872,7 @@
 						"type": "string"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -898,7 +905,7 @@
 						"maximum": 4294967295
 					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {
@@ -962,7 +969,7 @@
 						"type": "string"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -996,7 +1003,7 @@
 						}
 					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {
@@ -1089,7 +1096,7 @@
 						"description": "An RFC 7386 merge patch of the import settings."
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -1122,7 +1129,7 @@
 						"maximum": 4294967295
 					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {
@@ -1195,7 +1202,7 @@
 						"type": "boolean"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -1224,7 +1231,7 @@
 						"maximum": 4294967295
 					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {
@@ -1286,7 +1293,7 @@
 				"type": "object",
 				"properties": {
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -1367,7 +1374,7 @@
 						}
 					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {
@@ -1530,7 +1537,7 @@
 				"type": "object",
 				"properties": {
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -1552,7 +1559,7 @@
 						}
 					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {
@@ -1643,7 +1650,7 @@
 						"type": "string"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -1673,7 +1680,7 @@
 						"description": "The JSON Schema (2020-12) of the component's serialized object."
 					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {
@@ -1801,7 +1808,7 @@
 		{
 			"name": "docs.get",
 			"domain": "docs",
-			"description": "Serves the agent documentation: without a topic the list of skills and reference documents, with one its Markdown.",
+			"description": "Serves the agent documentation: without a topic the list of topics (skills, the generated reference and JSON schemas, the script declarations and the script templates); with one its text, one section of it (section, or \"<topic>#<section>\", by heading text or anchor), one page (offset, length) or with toc only its section list with sizes. A text too large to return inline comes back as its first page with nextOffset and its list of sections.",
 			"exposeAsTool": true,
 			"mutates": false,
 			"supportsDryRun": false,
@@ -1817,11 +1824,31 @@
 				"type": "object",
 				"properties": {
 					"topic": {
-						"description": "The topic, such as \"skills/game-building\"; empty for the list of topics.",
+						"description": "The topic, such as \"skills/game-building\", \"reference/ScriptAPI\", \"reference/Schemas/Scene\", \"scripting/Engine.d.luau\" or \"templates/Scripts/Behaviour\"; a \"#<section>\" suffix selects a section like section; empty for the list of topics.",
 						"type": "string"
 					},
+					"section": {
+						"description": "A section of the topic: a Markdown heading, or a top-level declaration of a .d.luau topic (\"Entity\"). Named by the heading's exact text (\"Test.Suite\"), by that text without a trailing parenthesized qualifier (\"TestSuite\" for \"TestSuite (type)\"), or by its anchor (the text lowercased, spaces as '-', other ASCII punctuation removed, \"-1\" added to a repeat: \"testsuite-type\"), tried in that order; a text several headings share is refused with their anchors. The result is the section with its subsections.",
+						"type": "string"
+					},
+					"offset": {
+						"description": "Where the page starts, in bytes of the topic's (or the section's) text: 0, or the previous page's nextOffset.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"length": {
+						"description": "The most bytes of text to return (the default is the most). A page ends after a line break when one falls inside it.",
+						"type": "integer",
+						"minimum": 1,
+						"maximum": 32768
+					},
+					"toc": {
+						"description": "Return no text, only the topic's section list (or the subsections of section) with each section's title, anchor, level, offset and size, down to the deepest heading level whose list fits in 40960 bytes, and totalBytes. Not with offset or length.",
+						"type": "boolean"
+					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -1832,7 +1859,7 @@
 			"result": {
 				"$schema": "https://json-schema.org/draft/2020-12/schema",
 				"title": "DocsGetResult",
-				"description": "The documentation topics, or one topic's Markdown.",
+				"description": "The documentation topics, or one topic's text, a section of it or one page.",
 				"type": "object",
 				"properties": {
 					"topics": {
@@ -1843,19 +1870,48 @@
 						}
 					},
 					"topic": {
-						"description": "The topic asked for.",
+						"description": "The topic asked for, without its \"#<section>\".",
+						"type": "string"
+					},
+					"section": {
+						"description": "The anchor of the section returned; empty for the whole topic.",
 						"type": "string"
 					},
 					"content": {
-						"description": "The topic's Markdown.",
+						"description": "The text (Markdown for skills and reference documents), or one page of it.",
 						"type": "string"
 					},
 					"path": {
 						"description": "The topic's file, relative to the repository root.",
 						"type": "string"
 					},
+					"offset": {
+						"description": "Where content starts in the topic's (or the section's) text, in bytes.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"totalBytes": {
+						"description": "The size of the topic's (or the section's) text.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"nextOffset": {
+						"description": "The offset of the next page; 0 when content reaches the end of the text.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"sections": {
+						"description": "The sections of the text: with the first page of a text that needs several pages, every heading level whose list fits in 12288 bytes; with toc, every level whose list fits in 40960 bytes.",
+						"type": "array",
+						"items": {
+							"$ref": "#/$defs/DocsSection"
+						}
+					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {
@@ -1874,8 +1930,47 @@
 								"type": "string"
 							},
 							"title": {
-								"description": "A skill's description or a reference document's first heading.",
+								"description": "A skill's description, a reference document's first heading or a schema's description.",
 								"type": "string"
+							},
+							"bytes": {
+								"description": "The size of the topic's text; a topic whose result would be over the offload threshold comes back in pages of at most 32768 bytes.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							}
+						},
+						"additionalProperties": false
+					},
+					"DocsSection": {
+						"description": "One section of a topic, as a long text's first page or toc lists it.",
+						"type": "object",
+						"properties": {
+							"title": {
+								"description": "The heading's text, or the declaration's name.",
+								"type": "string"
+							},
+							"anchor": {
+								"description": "The section's anchor: one name section accepts (after its exact heading text).",
+								"type": "string"
+							},
+							"level": {
+								"description": "1 to 6: the heading's number of '#'; 1 for a declaration.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							},
+							"offset": {
+								"description": "Where the section starts in the text the page belongs to (the topic's, or the section's), for offset.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							},
+							"bytes": {
+								"description": "The section's size, subsections included.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
 							}
 						},
 						"additionalProperties": false
@@ -1887,6 +1982,28 @@
 					"description": "Read the add-automation-method skill.",
 					"params": {
 						"topic": "skills/add-automation-method"
+					}
+				},
+				{
+					"description": "Read the Input section of the script API reference.",
+					"params": {
+						"topic": "reference/ScriptAPI",
+						"section": "Input"
+					}
+				},
+				{
+					"description": "Read the first 8 KB of the script declarations.",
+					"params": {
+						"topic": "scripting/Engine.d.luau",
+						"offset": 0,
+						"length": 8192
+					}
+				},
+				{
+					"description": "List the sections of the script API reference with their sizes.",
+					"params": {
+						"topic": "reference/ScriptAPI",
+						"toc": true
 					}
 				}
 			]
@@ -1925,7 +2042,7 @@
 						"type": "boolean"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -1967,7 +2084,7 @@
 						"maximum": 4294967295
 					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {
@@ -2023,7 +2140,7 @@
 				"type": "object",
 				"properties": {
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -2045,7 +2162,7 @@
 						}
 					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {
@@ -2108,7 +2225,7 @@
 						"maximum": 1000
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -2140,7 +2257,7 @@
 						"type": "boolean"
 					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {
@@ -2223,7 +2340,7 @@
 						"maximum": 1000
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -2258,7 +2375,7 @@
 						"type": "string"
 					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {
@@ -2302,7 +2419,7 @@
 						}
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -2325,7 +2442,7 @@
 						}
 					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {
@@ -2390,7 +2507,7 @@
 						"maximum": 1000
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -2425,7 +2542,7 @@
 						"type": "string"
 					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {
@@ -2468,7 +2585,7 @@
 						"maximum": 8192
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -2503,7 +2620,7 @@
 						"maximum": 4294967295
 					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {
@@ -2540,7 +2657,7 @@
 				"type": "object",
 				"properties": {
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -2591,7 +2708,7 @@
 						"type": "boolean"
 					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {
@@ -2663,7 +2780,7 @@
 						"enum": ["Edit", "Play"]
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -2686,7 +2803,7 @@
 						}
 					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {
@@ -2888,7 +3005,7 @@
 						"type": "boolean"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -3542,7 +3659,7 @@
 								"enum": ["Screen", "World"]
 							},
 							"Anchor": {
-								"description": "The screen point the text is placed at, normalized to the viewport (Screen space).",
+								"description": "Screen space: the point of the viewport the text is placed at, normalized: (0, 0) is the top-left corner and (1, 1) the bottom-right, X to the right and Y down; (0.5, 0.5) is the centre.",
 								"type": "array",
 								"prefixItems": [
 									{
@@ -3560,7 +3677,7 @@
 								"maxItems": 2
 							},
 							"Pivot": {
-								"description": "The point of the text block that sits on the anchor, normalized to the block.",
+								"description": "The point of the text block that sits on the anchor (Screen space) or at the entity's origin (World space), normalized to the block: (0, 0) is its top-left corner and (1, 1) its bottom-right.",
 								"type": "array",
 								"prefixItems": [
 									{
@@ -3578,7 +3695,7 @@
 								"maxItems": 2
 							},
 							"Offset": {
-								"description": "A further offset from the anchor, in pixels at the 1080p reference resolution.",
+								"description": "Screen space: a further offset from the anchor in pixels at the 1080p reference resolution (scaled with the viewport's height), X to the right and Y down.",
 								"type": "array",
 								"prefixItems": [
 									{
@@ -3617,12 +3734,12 @@
 								"maximum": 1000000000
 							},
 							"Friction": {
-								"description": "The friction coefficient of the body's surfaces.",
+								"description": "The friction coefficient of the body's surfaces. A contact uses the geometric mean of both bodies' values, so 0 on one body removes friction from all its contacts.",
 								"type": "number",
 								"minimum": 0
 							},
 							"Restitution": {
-								"description": "Bounciness, from no bounce (0) to a perfectly elastic bounce (1).",
+								"description": "Bounciness, from no bounce (0) to a perfectly elastic bounce (1). A contact uses the larger of both bodies' values, so 1 on a ball makes it bounce elastically off every surface.",
 								"type": "number",
 								"minimum": 0,
 								"maximum": 1
@@ -4104,7 +4221,7 @@
 						"maximum": 4294967295
 					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {
@@ -4188,7 +4305,7 @@
 						"type": "boolean"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -4217,7 +4334,7 @@
 						"maximum": 4294967295
 					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {
@@ -4271,7 +4388,7 @@
 						"type": "boolean"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -4300,7 +4417,7 @@
 						"maximum": 4294967295
 					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {
@@ -4374,7 +4491,7 @@
 						"enum": ["Edit", "Play"]
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -4394,7 +4511,7 @@
 						"$ref": "#/$defs/EntityDetails"
 					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {
@@ -4531,7 +4648,7 @@
 						"type": "boolean"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -4557,7 +4674,7 @@
 						"maximum": 4294967295
 					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {
@@ -4719,7 +4836,7 @@
 						"type": "boolean"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -5373,7 +5490,7 @@
 								"enum": ["Screen", "World"]
 							},
 							"Anchor": {
-								"description": "The screen point the text is placed at, normalized to the viewport (Screen space).",
+								"description": "Screen space: the point of the viewport the text is placed at, normalized: (0, 0) is the top-left corner and (1, 1) the bottom-right, X to the right and Y down; (0.5, 0.5) is the centre.",
 								"type": "array",
 								"prefixItems": [
 									{
@@ -5391,7 +5508,7 @@
 								"maxItems": 2
 							},
 							"Pivot": {
-								"description": "The point of the text block that sits on the anchor, normalized to the block.",
+								"description": "The point of the text block that sits on the anchor (Screen space) or at the entity's origin (World space), normalized to the block: (0, 0) is its top-left corner and (1, 1) its bottom-right.",
 								"type": "array",
 								"prefixItems": [
 									{
@@ -5409,7 +5526,7 @@
 								"maxItems": 2
 							},
 							"Offset": {
-								"description": "A further offset from the anchor, in pixels at the 1080p reference resolution.",
+								"description": "Screen space: a further offset from the anchor in pixels at the 1080p reference resolution (scaled with the viewport's height), X to the right and Y down.",
 								"type": "array",
 								"prefixItems": [
 									{
@@ -5448,12 +5565,12 @@
 								"maximum": 1000000000
 							},
 							"Friction": {
-								"description": "The friction coefficient of the body's surfaces.",
+								"description": "The friction coefficient of the body's surfaces. A contact uses the geometric mean of both bodies' values, so 0 on one body removes friction from all its contacts.",
 								"type": "number",
 								"minimum": 0
 							},
 							"Restitution": {
-								"description": "Bounciness, from no bounce (0) to a perfectly elastic bounce (1).",
+								"description": "Bounciness, from no bounce (0) to a perfectly elastic bounce (1). A contact uses the larger of both bodies' values, so 1 on a ball makes it bounce elastically off every surface.",
 								"type": "number",
 								"minimum": 0,
 								"maximum": 1
@@ -5935,7 +6052,7 @@
 						"maximum": 4294967295
 					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {
@@ -6066,7 +6183,7 @@
 						"maximum": 1000
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -6098,7 +6215,7 @@
 						"maximum": 4294967295
 					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {
@@ -6192,7 +6309,7 @@
 						"type": "boolean"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -6223,7 +6340,7 @@
 								"enum": ["Down", "Up", "Tap"]
 							},
 							"value": {
-								"description": "action: an axis value in [-1, 1]; gamepadAxis: [-1, 1] for sticks (up positive), [0, 1] for triggers.",
+								"description": "action: an axis value in [-1, 1]; gamepadAxis: [-1, 1] for sticks (up positive), [0, 1] for triggers. A value holds on every later tick until another value for the same action or axis (or releaseAll) changes it; 0 releases it.",
 								"type": "number",
 								"minimum": -1,
 								"maximum": 1
@@ -6302,7 +6419,7 @@
 						"maximum": 4294967295
 					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {
@@ -6332,14 +6449,14 @@
 		{
 			"name": "input.record",
 			"domain": "input",
-			"description": "Starts a tick-zero recording or saves its validated applied inputs and expectations. Stop checks output write permission.",
+			"description": "Starts a tick-zero recording or saves its validated applied inputs, expectations and state-hash checkpoints (one every 60 ticks). Stop checks output write permission. A recording with input events is first replayed without them (the input check, which replaces the play session as input.replay does and leaves it paused where it ended); when that run reproduces every checkpoint, the final hash and every expectation, whatever script errors it raises, the recording's outcome does not depend on its input and Stop refuses to write it (Validation, the check's outcome in error data inputCheck). End such a recording while the played state is still in the scene.",
 			"exposeAsTool": true,
 			"mutates": false,
 			"supportsDryRun": false,
 			"availableInRuntime": true,
 			"availableInLauncher": false,
-			"pending": false,
-			"timeoutSeconds": 60,
+			"pending": true,
+			"timeoutSeconds": 600,
 			"requiredParams": ["action"],
 			"params": {
 				"$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -6380,7 +6497,7 @@
 						}
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -6434,11 +6551,23 @@
 						"type": "string"
 					},
 					"stateHash": {
-						"description": "Observed terminal state hash; empty on Start.",
+						"description": "Observed terminal state hash, written as FinalStateHash; empty on Start. It covers the simulated world only (every entity with its serialized components, the tick, the session's Random state, the id draws and every body's physics state), never script tables, audio or input.",
 						"type": "string"
 					},
+					"checkpoints": {
+						"description": "State-hash checkpoints written, one every 60 ticks before the final tick; 0 on Start.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"inputCheckTick": {
+						"description": "Stop with input events: the tick where the input check (the recording replayed without its input) ended, at the first checkpoint that differed or at the final tick; the play session waits paused there. 0 when no check ran.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {
@@ -6468,7 +6597,7 @@
 		{
 			"name": "input.replay",
 			"domain": "input",
-			"description": "Replays recorded inputs in a fresh session; verification failures retain every expectation and hash outcome in error data.",
+			"description": "Replays recorded inputs in a fresh session; verification failures retain every expectation and hash outcome in error data. strictHash compares the state hash at each checkpoint and at the final tick and stops at the first checkpoint that differs. The state hash covers the simulated world (entities and their serialized components, the tick, Random, id draws, physics), never script tables, so expectations observe script state. withoutInput replays without the input events, the check that the replay depends on its input. Afterwards the session stays paused at the replay's last tick (or where playback stopped), so script.eval, scene.query and entity.get read its final state; play.stop ends it.",
 			"exposeAsTool": true,
 			"mutates": false,
 			"supportsDryRun": false,
@@ -6492,11 +6621,15 @@
 						"type": "boolean"
 					},
 					"strictHash": {
-						"description": "Compare the recorded final hash; requires verify.",
+						"description": "Compare the recorded state hash at every checkpoint and at the final tick; requires verify. The first checkpoint that differs ends the playback there.",
+						"type": "boolean"
+					},
+					"withoutInput": {
+						"description": "Apply none of the replay's input events: the check that its outcome depends on its input; requires verify. A replay whose verification still passes this way proves nothing about its input.",
 						"type": "boolean"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -6520,7 +6653,7 @@
 						"type": "boolean"
 					},
 					"hashChecked": {
-						"description": "The final state hash was compared.",
+						"description": "The state hashes (every checkpoint and the final one) were compared.",
 						"type": "boolean"
 					},
 					"hashMatched": {
@@ -6528,22 +6661,36 @@
 						"type": "boolean"
 					},
 					"finalTick": {
-						"description": "Completed simulation ticks.",
+						"description": "Completed simulation ticks: the replay's final tick, or where playback stopped.",
 						"type": "integer",
 						"minimum": 0,
 						"maximum": 4294967295
 					},
 					"stateHash": {
-						"description": "Observed final hash.",
+						"description": "Observed state hash at finalTick. It covers the simulated world only (every entity with its serialized components, the tick, the session's Random state, the id draws and every body's physics state), never script tables, audio or input.",
 						"type": "string"
 					},
 					"expectedStateHash": {
-						"description": "Recorded final hash.",
+						"description": "Recorded state hash at finalTick: the final hash, or the failed checkpoint's.",
 						"type": "string"
 					},
 					"stopReason": {
-						"description": "Why playback ended before the replay's final tick (a quit or a fatal script error); empty when it reached it.",
+						"description": "Why playback ended before the replay's final tick (a quit, a fatal script error or a checkpoint whose hash differed); empty when it reached it.",
 						"type": "string"
+					},
+					"checkpointsChecked": {
+						"description": "State-hash checkpoints compared (strictHash), the failed one included.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"checkpointFailed": {
+						"description": "A checkpoint's hash differed: playback stopped at its tick (finalTick), and stateHash and expectedStateHash are the observed and recorded hashes there.",
+						"type": "boolean"
+					},
+					"withoutInput": {
+						"description": "None of the replay's input events were applied.",
+						"type": "boolean"
 					},
 					"expect": {
 						"description": "Every expectation outcome in authored order.",
@@ -6553,7 +6700,7 @@
 						}
 					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {
@@ -6615,6 +6762,15 @@
 						"verify": true,
 						"strictHash": true
 					}
+				},
+				{
+					"description": "Check that a replay's verification fails without its input.",
+					"params": {
+						"path": "Assets/Tests/Recorded.replay",
+						"verify": true,
+						"strictHash": true,
+						"withoutInput": true
+					}
 				}
 			]
 		},
@@ -6662,7 +6818,7 @@
 						"maximum": 1000
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -6694,7 +6850,7 @@
 						"maximum": 4294967295
 					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {
@@ -6795,7 +6951,7 @@
 						"type": "string"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -6985,7 +7141,7 @@
 						"maximum": 4294967295
 					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {
@@ -7073,7 +7229,7 @@
 				"type": "object",
 				"properties": {
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -7102,7 +7258,7 @@
 						"maximum": 4294967295
 					},
 					"stateHash": {
-						"description": "The state hash (16 lowercase hex digits); empty in Edit.",
+						"description": "The state hash (16 lowercase hex digits); empty in Edit. It covers the simulated world (every entity with its serialized components, the tick, the session's Random state, the id draws and every body's physics state), never script tables, audio or input.",
 						"type": "string"
 					},
 					"lockstep": {
@@ -7153,7 +7309,7 @@
 						"$ref": "#/$defs/PlayInputSummary"
 					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {
@@ -7226,7 +7382,7 @@
 				"type": "object",
 				"properties": {
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -7255,7 +7411,7 @@
 						"maximum": 4294967295
 					},
 					"stateHash": {
-						"description": "The state hash (16 lowercase hex digits); empty in Edit.",
+						"description": "The state hash (16 lowercase hex digits); empty in Edit. It covers the simulated world (every entity with its serialized components, the tick, the session's Random state, the id draws and every body's physics state), never script tables, audio or input.",
 						"type": "string"
 					},
 					"lockstep": {
@@ -7306,7 +7462,7 @@
 						"$ref": "#/$defs/PlayInputSummary"
 					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {
@@ -7385,7 +7541,7 @@
 						"maximum": 100
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -7415,7 +7571,7 @@
 						"maximum": 4294967295
 					},
 					"stateHash": {
-						"description": "The state hash (16 lowercase hex digits); empty in Edit.",
+						"description": "The state hash (16 lowercase hex digits); empty in Edit. It covers the simulated world (every entity with its serialized components, the tick, the session's Random state, the id draws and every body's physics state), never script tables, audio or input.",
 						"type": "string"
 					},
 					"lockstep": {
@@ -7466,7 +7622,7 @@
 						"$ref": "#/$defs/PlayInputSummary"
 					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {
@@ -7576,7 +7732,7 @@
 						"type": "boolean"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -7605,7 +7761,7 @@
 						"maximum": 4294967295
 					},
 					"stateHash": {
-						"description": "The state hash (16 lowercase hex digits); empty in Edit.",
+						"description": "The state hash (16 lowercase hex digits); empty in Edit. It covers the simulated world (every entity with its serialized components, the tick, the session's Random state, the id draws and every body's physics state), never script tables, audio or input.",
 						"type": "string"
 					},
 					"lockstep": {
@@ -7656,7 +7812,7 @@
 						"$ref": "#/$defs/PlayInputSummary"
 					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {
@@ -7732,7 +7888,7 @@
 				"type": "object",
 				"properties": {
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -7761,7 +7917,7 @@
 						"maximum": 4294967295
 					},
 					"stateHash": {
-						"description": "The state hash (16 lowercase hex digits); empty in Edit.",
+						"description": "The state hash (16 lowercase hex digits); empty in Edit. It covers the simulated world (every entity with its serialized components, the tick, the session's Random state, the id draws and every body's physics state), never script tables, audio or input.",
 						"type": "string"
 					},
 					"lockstep": {
@@ -7812,7 +7968,7 @@
 						"$ref": "#/$defs/PlayInputSummary"
 					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {
@@ -7902,7 +8058,7 @@
 						"enum": ["Every", "Last", "None"]
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -7933,7 +8089,7 @@
 								"enum": ["Down", "Up", "Tap"]
 							},
 							"value": {
-								"description": "action: an axis value in [-1, 1]; gamepadAxis: [-1, 1] for sticks (up positive), [0, 1] for triggers.",
+								"description": "action: an axis value in [-1, 1]; gamepadAxis: [-1, 1] for sticks (up positive), [0, 1] for triggers. A value holds on every later tick until another value for the same action or axis (or releaseAll) changes it; 0 releases it.",
 								"type": "number",
 								"minimum": -1,
 								"maximum": 1
@@ -8006,7 +8162,7 @@
 						"maximum": 4294967295
 					},
 					"stateHash": {
-						"description": "The state hash after the call (16 lowercase hex digits).",
+						"description": "The state hash after the call (16 lowercase hex digits): the simulated world only (entities and their serialized components, the tick, Random, id draws, physics), never script tables, audio or input.",
 						"type": "string"
 					},
 					"ticks": {
@@ -8028,7 +8184,7 @@
 						"maximum": 4294967295
 					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {
@@ -8082,7 +8238,7 @@
 				"type": "object",
 				"properties": {
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -8107,7 +8263,7 @@
 						"type": "string"
 					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {
@@ -8154,7 +8310,7 @@
 						"maximum": 1000000
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -8183,7 +8339,7 @@
 						"description": "Last predicate value, including false or null on timeout."
 					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {
@@ -8227,7 +8383,7 @@
 						"type": "string"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -8259,7 +8415,7 @@
 						"maximum": 4294967295
 					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {
@@ -8302,7 +8458,7 @@
 		{
 			"name": "prefab.create",
 			"domain": "prefab",
-			"description": "Saves an entity's subtree as a new .prefab asset (nested instances flattened), optionally replacing the entity with an instance of it, as one undoable step.",
+			"description": "Saves an entity's subtree as a new .prefab asset (nested instances flattened), optionally replacing the entity with an instance of it, as one undoable step. The result's instance is that instance's root (empty without replaceWithInstance).",
 			"exposeAsTool": true,
 			"mutates": true,
 			"supportsDryRun": true,
@@ -8334,7 +8490,7 @@
 						"type": "boolean"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -8354,7 +8510,7 @@
 						"$ref": "#/$defs/AssetSummary"
 					},
 					"instance": {
-						"description": "The instance root with replaceWithInstance; empty otherwise.",
+						"description": "The instance root with replaceWithInstance; empty otherwise (prefab.instantiate's result calls its root entity).",
 						"$ref": "#/$defs/EntitySummary"
 					},
 					"undoIndex": {
@@ -8364,7 +8520,7 @@
 						"maximum": 4294967295
 					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {
@@ -8428,7 +8584,7 @@
 		{
 			"name": "prefab.instantiate",
 			"domain": "prefab",
-			"description": "Creates an instance of a prefab asset (a .prefab or a glTF) under a parent, with an optional transform and name, as one undoable step.",
+			"description": "Creates an instance of a prefab asset (a .prefab or a glTF) under a parent, with an optional transform, name and per-instance component values (recorded as the instance's overrides), as one undoable step. The result's entity is the new instance root.",
 			"exposeAsTool": true,
 			"mutates": true,
 			"supportsDryRun": true,
@@ -8464,19 +8620,1276 @@
 						"description": "The instance root's name; the prefab root's when absent.",
 						"type": "string"
 					},
+					"components": {
+						"type": "object",
+						"description": "Per-instance component values for the instance root by registry name, merged into the prefab's as entity.update merges them (missing components are added) and recorded as the instance's overrides; script fields go in {\"Script\": {\"Fields\": {...}}}, the Script handle defaulting to the prefab root's.",
+						"properties": {
+							"Transform": {
+								"$ref": "#/$defs/Transform"
+							},
+							"Prefab": {
+								"$ref": "#/$defs/Prefab"
+							},
+							"PrefabLink": {
+								"$ref": "#/$defs/PrefabLink"
+							},
+							"MeshRenderer": {
+								"$ref": "#/$defs/MeshRenderer"
+							},
+							"Camera": {
+								"$ref": "#/$defs/Camera"
+							},
+							"DirectionalLight": {
+								"$ref": "#/$defs/DirectionalLight"
+							},
+							"PointLight": {
+								"$ref": "#/$defs/PointLight"
+							},
+							"SpotLight": {
+								"$ref": "#/$defs/SpotLight"
+							},
+							"Environment": {
+								"$ref": "#/$defs/Environment"
+							},
+							"PostProcess": {
+								"$ref": "#/$defs/PostProcess"
+							},
+							"Text": {
+								"$ref": "#/$defs/Text"
+							},
+							"RigidBody": {
+								"$ref": "#/$defs/RigidBody"
+							},
+							"BoxCollider": {
+								"$ref": "#/$defs/BoxCollider"
+							},
+							"SphereCollider": {
+								"$ref": "#/$defs/SphereCollider"
+							},
+							"CapsuleCollider": {
+								"$ref": "#/$defs/CapsuleCollider"
+							},
+							"MeshCollider": {
+								"$ref": "#/$defs/MeshCollider"
+							},
+							"CharacterController": {
+								"$ref": "#/$defs/CharacterController"
+							},
+							"AudioSource": {
+								"$ref": "#/$defs/AudioSource"
+							},
+							"AudioListener": {
+								"$ref": "#/$defs/AudioListener"
+							},
+							"Script": {
+								"$ref": "#/$defs/Script"
+							}
+						},
+						"additionalProperties": false
+					},
 					"dryRun": {
 						"description": "Validate and return the would-be result without applying anything.",
 						"type": "boolean"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
 				},
 				"additionalProperties": false,
 				"required": ["prefab"],
-				"$defs": {}
+				"$defs": {
+					"ID": {
+						"description": "The entity's persistent identity, written as the entity key \"ID\".",
+						"type": "object",
+						"properties": {
+							"ID": {
+								"description": "The entity's UUID; set at creation and never changed.",
+								"type": ["string", "null"],
+								"pattern": "^[0-9a-fA-F]{16}$"
+							}
+						},
+						"additionalProperties": false
+					},
+					"Name": {
+						"description": "The entity's display name, written as the entity key \"Name\".",
+						"type": "object",
+						"properties": {
+							"Name": {
+								"description": "The display name used by entity paths; names need not be unique.",
+								"type": "string"
+							}
+						},
+						"additionalProperties": false
+					},
+					"Tags": {
+						"description": "The entity's gameplay tags, written as the entity key \"Tags\".",
+						"type": "object",
+						"properties": {
+							"Tags": {
+								"description": "Free-form tags such as \"Player\"; non-empty, unique, in insertion order.",
+								"type": "array",
+								"items": {
+									"type": "string"
+								}
+							}
+						},
+						"additionalProperties": false
+					},
+					"Relationship": {
+						"description": "The entity's place in the hierarchy; its parent is written as the entity key \"Parent\".",
+						"type": "object",
+						"properties": {
+							"Parent": {
+								"description": "The parent entity; null for a root entity.",
+								"type": ["string", "null"],
+								"pattern": "^[0-9a-fA-F]{16}$"
+							}
+						},
+						"additionalProperties": false
+					},
+					"Transform": {
+						"description": "Positions, rotates and scales the entity relative to its parent.",
+						"type": "object",
+						"properties": {
+							"Translation": {
+								"description": "Position relative to the parent, in metres.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number"
+									},
+									{
+										"type": "number"
+									},
+									{
+										"type": "number"
+									}
+								],
+								"minItems": 3,
+								"maxItems": 3
+							},
+							"Rotation": {
+								"description": "Rotation relative to the parent: a unit quaternion written [x, y, z, w].",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number"
+									},
+									{
+										"type": "number"
+									},
+									{
+										"type": "number"
+									},
+									{
+										"type": "number"
+									}
+								],
+								"minItems": 4,
+								"maxItems": 4
+							},
+							"Scale": {
+								"description": "Scale along the local axes; each component's magnitude is at least 0.0001.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"not": {
+											"exclusiveMinimum": -1e-04,
+											"exclusiveMaximum": 1e-04
+										}
+									},
+									{
+										"type": "number",
+										"not": {
+											"exclusiveMinimum": -1e-04,
+											"exclusiveMaximum": 1e-04
+										}
+									},
+									{
+										"type": "number",
+										"not": {
+											"exclusiveMinimum": -1e-04,
+											"exclusiveMaximum": 1e-04
+										}
+									}
+								],
+								"minItems": 3,
+								"maxItems": 3
+							},
+							"EulerAngles": {
+								"description": "Rotation relative to the parent as Euler angles in degrees, applied Z, then X, then Y.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number"
+									},
+									{
+										"type": "number"
+									},
+									{
+										"type": "number"
+									}
+								],
+								"minItems": 3,
+								"maxItems": 3
+							},
+							"WorldPosition": {
+								"description": "Position in world space, in metres; writing it moves the entity through its parent.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number"
+									},
+									{
+										"type": "number"
+									},
+									{
+										"type": "number"
+									}
+								],
+								"minItems": 3,
+								"maxItems": 3
+							},
+							"WorldRotation": {
+								"description": "Rotation in world space; writing it rotates the entity through its parent.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number"
+									},
+									{
+										"type": "number"
+									},
+									{
+										"type": "number"
+									},
+									{
+										"type": "number"
+									}
+								],
+								"minItems": 4,
+								"maxItems": 4
+							}
+						},
+						"additionalProperties": false
+					},
+					"Prefab": {
+						"description": "Marks the root of a prefab instance and records its overrides.",
+						"type": "object",
+						"properties": {
+							"Prefab": {
+								"description": "The prefab asset the instance was created from.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+								"x-assetType": "Prefab"
+							},
+							"Overrides": {
+								"description": "The instance's differences from the prefab, sorted by prefab entity, component, kind and field.",
+								"type": "array",
+								"items": {
+									"$ref": "#/$defs/PrefabOverride"
+								}
+							}
+						},
+						"additionalProperties": false
+					},
+					"PrefabLink": {
+						"description": "Links a prefab instance member, the root included, to its prefab entity.",
+						"type": "object",
+						"properties": {
+							"PrefabEntityID": {
+								"description": "The prefab-local ID of the entity this member was created from.",
+								"type": ["string", "null"],
+								"pattern": "^[0-9a-fA-F]{16}$"
+							},
+							"InstanceRoot": {
+								"description": "The root entity of the instance, which has the Prefab component.",
+								"type": ["string", "null"],
+								"pattern": "^[0-9a-fA-F]{16}$"
+							}
+						},
+						"additionalProperties": false
+					},
+					"MeshRenderer": {
+						"description": "Draws a mesh asset with one material per submesh.",
+						"type": "object",
+						"properties": {
+							"Mesh": {
+								"description": "The mesh to draw; null draws nothing.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+								"x-assetType": "Mesh"
+							},
+							"Materials": {
+								"description": "One material per submesh; an empty list or a null slot uses the mesh's default material for that submesh.",
+								"type": "array",
+								"items": {
+									"type": ["string", "null"],
+									"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+									"x-assetType": "Material"
+								}
+							},
+							"CastShadows": {
+								"description": "Whether the mesh casts shadows.",
+								"type": "boolean"
+							},
+							"ReceiveShadows": {
+								"description": "Whether shadows fall on the mesh.",
+								"type": "boolean"
+							},
+							"Visible": {
+								"description": "Whether the mesh is drawn at all.",
+								"type": "boolean"
+							}
+						},
+						"additionalProperties": false
+					},
+					"Camera": {
+						"description": "Renders the scene from the entity, looking down its local -Z axis.",
+						"type": "object",
+						"properties": {
+							"Projection": {
+								"description": "Perspective or orthographic projection.",
+								"enum": ["Perspective", "Orthographic"]
+							},
+							"VerticalFov": {
+								"description": "The vertical field of view of the perspective projection, in degrees.",
+								"type": "number",
+								"minimum": 1,
+								"maximum": 179
+							},
+							"OrthographicSize": {
+								"description": "Half the visible height of the orthographic projection, in metres.",
+								"type": "number",
+								"minimum": 0.001
+							},
+							"NearClip": {
+								"description": "The near clipping distance, in metres; below FarClip.",
+								"type": "number",
+								"minimum": 0.001
+							},
+							"FarClip": {
+								"description": "The far clipping distance, in metres; beyond it nothing is drawn or culled in.",
+								"type": "number",
+								"minimum": 0.001
+							},
+							"Primary": {
+								"description": "Whether this is the scene's primary camera (exactly one active camera should be).",
+								"type": "boolean"
+							},
+							"Clear": {
+								"description": "What the camera draws behind the scene.",
+								"enum": ["Skybox", "Color"]
+							},
+							"ClearColor": {
+								"description": "The linear background colour when Clear is Color.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									}
+								],
+								"minItems": 3,
+								"maxItems": 3
+							}
+						},
+						"additionalProperties": false
+					},
+					"DirectionalLight": {
+						"description": "A sun-like light shining down the entity's local -Z axis.",
+						"type": "object",
+						"properties": {
+							"Color": {
+								"description": "The linear light colour.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									}
+								],
+								"minItems": 3,
+								"maxItems": 3
+							},
+							"Intensity": {
+								"description": "The unitless brightness multiplied with Color.",
+								"type": "number",
+								"minimum": 0
+							},
+							"CastShadows": {
+								"description": "Whether the light casts cascaded soft shadows.",
+								"type": "boolean"
+							},
+							"ShadowDistance": {
+								"description": "How far from the camera shadows reach, in metres.",
+								"type": "number",
+								"minimum": 0.001
+							},
+							"CascadeCount": {
+								"description": "The number of shadow cascades, from 1 to 4.",
+								"type": "integer",
+								"minimum": 1,
+								"maximum": 4
+							},
+							"CascadeSplitLambda": {
+								"description": "The cascade split blend from uniform (0) to logarithmic (1).",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1
+							},
+							"LightAngle": {
+								"description": "The angular diameter of the light source, in degrees; larger values soften shadow penumbrae.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 90
+							},
+							"DepthBias": {
+								"description": "The shadow depth bias, in shadow-map texels.",
+								"type": "number",
+								"minimum": 0
+							},
+							"NormalBias": {
+								"description": "The shadow normal-offset bias, in shadow-map texels.",
+								"type": "number",
+								"minimum": 0
+							}
+						},
+						"additionalProperties": false
+					},
+					"PointLight": {
+						"description": "A light shining in every direction from the entity (no shadows).",
+						"type": "object",
+						"properties": {
+							"Color": {
+								"description": "The linear light colour.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									}
+								],
+								"minItems": 3,
+								"maxItems": 3
+							},
+							"Intensity": {
+								"description": "The unitless brightness multiplied with Color.",
+								"type": "number",
+								"minimum": 0
+							},
+							"Range": {
+								"description": "The distance at which the light's falloff reaches zero, in metres.",
+								"type": "number",
+								"minimum": 0.001
+							},
+							"SourceRadius": {
+								"description": "The radius of the emitting sphere, in metres; widens highlights.",
+								"type": "number",
+								"minimum": 0
+							}
+						},
+						"additionalProperties": false
+					},
+					"SpotLight": {
+						"description": "A cone of light shining down the entity's local -Z axis.",
+						"type": "object",
+						"properties": {
+							"Color": {
+								"description": "The linear light colour.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									}
+								],
+								"minItems": 3,
+								"maxItems": 3
+							},
+							"Intensity": {
+								"description": "The unitless brightness multiplied with Color.",
+								"type": "number",
+								"minimum": 0
+							},
+							"Range": {
+								"description": "The distance at which the light's falloff reaches zero, in metres.",
+								"type": "number",
+								"minimum": 0.001
+							},
+							"InnerConeAngle": {
+								"description": "The angle from the axis inside which the light is at full strength, in degrees; below OuterConeAngle.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 89
+							},
+							"OuterConeAngle": {
+								"description": "The angle from the axis at which the light fades to zero, in degrees.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 89
+							},
+							"CastShadows": {
+								"description": "Whether the light casts soft shadows (shadow atlas budget applies).",
+								"type": "boolean"
+							},
+							"SourceRadius": {
+								"description": "The radius of the emitting disc, in metres; widens highlights and shadow penumbrae.",
+								"type": "number",
+								"minimum": 0
+							}
+						},
+						"additionalProperties": false
+					},
+					"Environment": {
+						"description": "The scene's image-based lighting and skybox (one per scene).",
+						"type": "object",
+						"properties": {
+							"Environment": {
+								"description": "The environment map; null lights the scene with FallbackColor.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+								"x-assetType": "Environment"
+							},
+							"Intensity": {
+								"description": "The unitless strength of the image-based lighting.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 65504
+							},
+							"Rotation": {
+								"description": "The rotation of the environment about the +Y axis, in degrees.",
+								"type": "number"
+							},
+							"ShowSkybox": {
+								"description": "Whether cameras that clear to the skybox show the environment map.",
+								"type": "boolean"
+							},
+							"SkyboxBlur": {
+								"description": "How blurred the visible skybox is, from sharp (0) to fully blurred (1).",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1
+							},
+							"FallbackColor": {
+								"description": "The linear ambient colour used when no environment map is assigned.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									}
+								],
+								"minItems": 3,
+								"maxItems": 3
+							}
+						},
+						"additionalProperties": false
+					},
+					"PostProcess": {
+						"description": "The scene's exposure, tone mapping, ambient occlusion, bloom and anti-aliasing (one per scene).",
+						"type": "object",
+						"properties": {
+							"ExposureEV": {
+								"description": "The exposure compensation in stops: the image is multiplied by 2^EV.",
+								"type": "number",
+								"minimum": -16,
+								"maximum": 16
+							},
+							"Tonemap": {
+								"description": "The tone mapping curve.",
+								"enum": ["AgX", "ACES", "PbrNeutral", "Linear"]
+							},
+							"SsaoEnabled": {
+								"description": "Whether screen-space ambient occlusion (GTAO) is applied.",
+								"type": "boolean"
+							},
+							"SsaoRadius": {
+								"description": "The world-space radius within which ambient occlusion is sampled, in metres.",
+								"type": "number",
+								"minimum": 0.01
+							},
+							"SsaoIntensity": {
+								"description": "The strength of the ambient occlusion.",
+								"type": "number",
+								"minimum": 0
+							},
+							"SsaoQuality": {
+								"description": "The ambient occlusion sample count.",
+								"enum": ["Low", "Medium", "High"]
+							},
+							"BloomEnabled": {
+								"description": "Whether bright areas bloom.",
+								"type": "boolean"
+							},
+							"BloomIntensity": {
+								"description": "How much of the bloom is blended into the image.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1
+							},
+							"FxaaEnabled": {
+								"description": "Whether FXAA anti-aliasing is applied.",
+								"type": "boolean"
+							}
+						},
+						"additionalProperties": false
+					},
+					"Text": {
+						"description": "Draws a text string on the screen or in the world.",
+						"type": "object",
+						"properties": {
+							"Text": {
+								"description": "The UTF-8 text; a line feed starts a new line.",
+								"type": "string"
+							},
+							"Font": {
+								"description": "The font; null uses the default font.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+								"x-assetType": "Font"
+							},
+							"Size": {
+								"description": "The text height in pixels at the 1080p reference resolution.",
+								"type": "number",
+								"minimum": 1,
+								"maximum": 100000
+							},
+							"Color": {
+								"description": "The linear text colour with opacity in the fourth component.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									}
+								],
+								"minItems": 4,
+								"maxItems": 4
+							},
+							"Space": {
+								"description": "Whether the text is placed on the screen or in the world.",
+								"enum": ["Screen", "World"]
+							},
+							"Anchor": {
+								"description": "Screen space: the point of the viewport the text is placed at, normalized: (0, 0) is the top-left corner and (1, 1) the bottom-right, X to the right and Y down; (0.5, 0.5) is the centre.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									}
+								],
+								"minItems": 2,
+								"maxItems": 2
+							},
+							"Pivot": {
+								"description": "The point of the text block that sits on the anchor (Screen space) or at the entity's origin (World space), normalized to the block: (0, 0) is its top-left corner and (1, 1) its bottom-right.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									}
+								],
+								"minItems": 2,
+								"maxItems": 2
+							},
+							"Offset": {
+								"description": "Screen space: a further offset from the anchor in pixels at the 1080p reference resolution (scaled with the viewport's height), X to the right and Y down.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number"
+									},
+									{
+										"type": "number"
+									}
+								],
+								"minItems": 2,
+								"maxItems": 2
+							},
+							"Alignment": {
+								"description": "How the lines are aligned to each other.",
+								"enum": ["Left", "Center", "Right"]
+							},
+							"Billboard": {
+								"description": "Whether world-space text always faces the camera.",
+								"type": "boolean"
+							}
+						},
+						"additionalProperties": false
+					},
+					"RigidBody": {
+						"description": "Simulates the entity with Jolt physics.",
+						"type": "object",
+						"properties": {
+							"Type": {
+								"description": "Static never moves; Kinematic is moved by script; Dynamic is simulated.",
+								"enum": ["Static", "Kinematic", "Dynamic"]
+							},
+							"Mass": {
+								"description": "Mass in kilograms (Dynamic only).",
+								"type": "number",
+								"minimum": 0.001,
+								"maximum": 1000000000
+							},
+							"Friction": {
+								"description": "The friction coefficient of the body's surfaces. A contact uses the geometric mean of both bodies' values, so 0 on one body removes friction from all its contacts.",
+								"type": "number",
+								"minimum": 0
+							},
+							"Restitution": {
+								"description": "Bounciness, from no bounce (0) to a perfectly elastic bounce (1). A contact uses the larger of both bodies' values, so 1 on a ball makes it bounce elastically off every surface.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1
+							},
+							"LinearDamping": {
+								"description": "How quickly linear velocity decays, per second.",
+								"type": "number",
+								"minimum": 0
+							},
+							"AngularDamping": {
+								"description": "How quickly angular velocity decays, per second.",
+								"type": "number",
+								"minimum": 0
+							},
+							"GravityFactor": {
+								"description": "The multiplier of the project's gravity for this body (0 floats).",
+								"type": "number"
+							},
+							"MotionQuality": {
+								"description": "Discrete or continuous (LinearCast) collision detection.",
+								"enum": ["Discrete", "LinearCast"]
+							},
+							"AllowSleeping": {
+								"description": "Whether the body may sleep when it comes to rest.",
+								"type": "boolean"
+							},
+							"LockTranslation": {
+								"description": "Per world axis: whether the body cannot move along it.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "boolean"
+									},
+									{
+										"type": "boolean"
+									},
+									{
+										"type": "boolean"
+									}
+								],
+								"minItems": 3,
+								"maxItems": 3
+							},
+							"LockRotation": {
+								"description": "Per world axis: whether the body cannot rotate about it.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "boolean"
+									},
+									{
+										"type": "boolean"
+									},
+									{
+										"type": "boolean"
+									}
+								],
+								"minItems": 3,
+								"maxItems": 3
+							},
+							"Layer": {
+								"description": "Physics layer name from project settings.",
+								"type": "string"
+							},
+							"MaxLinearVelocity": {
+								"description": "The speed the body is clamped to, in metres per second.",
+								"type": "number",
+								"minimum": 0
+							},
+							"MaxAngularVelocity": {
+								"description": "The angular speed the body is clamped to, in radians per second; raise it for fast rolling balls.",
+								"type": "number",
+								"minimum": 0
+							},
+							"EnhancedInternalEdgeRemoval": {
+								"description": "Removes ghost collisions with internal edges of compound shapes; set it on rolling bodies.",
+								"type": "boolean"
+							},
+							"InitialLinearVelocity": {
+								"description": "The world-space velocity the body starts with, in metres per second.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number"
+									},
+									{
+										"type": "number"
+									},
+									{
+										"type": "number"
+									}
+								],
+								"minItems": 3,
+								"maxItems": 3
+							},
+							"InitialAngularVelocity": {
+								"description": "The world-space angular velocity the body starts with, in radians per second.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number"
+									},
+									{
+										"type": "number"
+									},
+									{
+										"type": "number"
+									}
+								],
+								"minItems": 3,
+								"maxItems": 3
+							}
+						},
+						"additionalProperties": false
+					},
+					"BoxCollider": {
+						"description": "A box-shaped collider in the entity's space.",
+						"type": "object",
+						"properties": {
+							"HalfExtents": {
+								"description": "Half the box's size along each local axis, in metres; at least 1 mm.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0.001
+									},
+									{
+										"type": "number",
+										"minimum": 0.001
+									},
+									{
+										"type": "number",
+										"minimum": 0.001
+									}
+								],
+								"minItems": 3,
+								"maxItems": 3
+							},
+							"Offset": {
+								"description": "The box centre relative to the entity, in metres.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number"
+									},
+									{
+										"type": "number"
+									},
+									{
+										"type": "number"
+									}
+								],
+								"minItems": 3,
+								"maxItems": 3
+							},
+							"Rotation": {
+								"description": "The box rotation relative to the entity: a unit quaternion.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number"
+									},
+									{
+										"type": "number"
+									},
+									{
+										"type": "number"
+									},
+									{
+										"type": "number"
+									}
+								],
+								"minItems": 4,
+								"maxItems": 4
+							},
+							"IsTrigger": {
+								"description": "Whether the collider only detects overlaps instead of colliding.",
+								"type": "boolean"
+							}
+						},
+						"additionalProperties": false
+					},
+					"SphereCollider": {
+						"description": "A sphere-shaped collider in the entity's space.",
+						"type": "object",
+						"properties": {
+							"Radius": {
+								"description": "The sphere radius, in metres; at least 1 mm.",
+								"type": "number",
+								"minimum": 0.001
+							},
+							"Offset": {
+								"description": "The sphere centre relative to the entity, in metres.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number"
+									},
+									{
+										"type": "number"
+									},
+									{
+										"type": "number"
+									}
+								],
+								"minItems": 3,
+								"maxItems": 3
+							},
+							"IsTrigger": {
+								"description": "Whether the collider only detects overlaps instead of colliding.",
+								"type": "boolean"
+							}
+						},
+						"additionalProperties": false
+					},
+					"CapsuleCollider": {
+						"description": "A capsule-shaped collider along the local Y axis.",
+						"type": "object",
+						"properties": {
+							"Radius": {
+								"description": "The radius of the capsule's hemispheres and cylinder, in metres; at least 1 mm.",
+								"type": "number",
+								"minimum": 0.001
+							},
+							"HalfHeight": {
+								"description": "Half the height of the cylinder between the hemispheres, in metres; at least 1 mm.",
+								"type": "number",
+								"minimum": 0.001
+							},
+							"Offset": {
+								"description": "The capsule centre relative to the entity, in metres.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number"
+									},
+									{
+										"type": "number"
+									},
+									{
+										"type": "number"
+									}
+								],
+								"minItems": 3,
+								"maxItems": 3
+							},
+							"Rotation": {
+								"description": "The capsule rotation relative to the entity: a unit quaternion.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number"
+									},
+									{
+										"type": "number"
+									},
+									{
+										"type": "number"
+									},
+									{
+										"type": "number"
+									}
+								],
+								"minItems": 4,
+								"maxItems": 4
+							},
+							"IsTrigger": {
+								"description": "Whether the collider only detects overlaps instead of colliding.",
+								"type": "boolean"
+							}
+						},
+						"additionalProperties": false
+					},
+					"MeshCollider": {
+						"description": "A collider shaped like a mesh: its convex hull, or the exact triangles for Static and Kinematic bodies.",
+						"type": "object",
+						"properties": {
+							"Mesh": {
+								"description": "The collision mesh; null uses the entity's MeshRenderer mesh.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+								"x-assetType": "Mesh"
+							},
+							"Convex": {
+								"description": "Whether the convex hull is used; a non-convex mesh collider needs a Static or Kinematic body.",
+								"type": "boolean"
+							},
+							"IsTrigger": {
+								"description": "Whether the collider only detects overlaps instead of colliding.",
+								"type": "boolean"
+							}
+						},
+						"additionalProperties": false
+					},
+					"CharacterController": {
+						"description": "Moves the entity as a walking character that climbs steps and slopes and collides with the world.",
+						"type": "object",
+						"properties": {
+							"Height": {
+								"description": "The character's total height, in metres.",
+								"type": "number",
+								"minimum": 0.001
+							},
+							"Radius": {
+								"description": "The radius of the character's capsule, in metres.",
+								"type": "number",
+								"minimum": 0.001
+							},
+							"MaxSlopeAngle": {
+								"description": "The steepest slope the character can walk up, in degrees.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 90
+							},
+							"StepHeight": {
+								"description": "The highest step the character climbs without jumping, in metres.",
+								"type": "number",
+								"minimum": 0
+							},
+							"Mass": {
+								"description": "The character's mass in kilograms, used when it pushes bodies.",
+								"type": "number",
+								"minimum": 0.001,
+								"maximum": 1000000000
+							},
+							"GravityFactor": {
+								"description": "The multiplier of the project's gravity for the character.",
+								"type": "number"
+							},
+							"Layer": {
+								"description": "Physics layer name from project settings.",
+								"type": "string"
+							}
+						},
+						"additionalProperties": false
+					},
+					"AudioSource": {
+						"description": "Plays an audio clip, optionally positioned at the entity.",
+						"type": "object",
+						"properties": {
+							"Clip": {
+								"description": "The audio clip to play; null plays nothing.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+								"x-assetType": "AudioClip"
+							},
+							"Volume": {
+								"description": "The linear volume multiplier (1 is the clip's own level).",
+								"type": "number",
+								"minimum": 0
+							},
+							"Pitch": {
+								"description": "The playback speed and pitch multiplier (1 is unchanged).",
+								"type": "number",
+								"minimum": 0.01
+							},
+							"Loop": {
+								"description": "Whether the clip restarts when it ends.",
+								"type": "boolean"
+							},
+							"PlayOnStart": {
+								"description": "Whether the clip starts playing when the play session starts.",
+								"type": "boolean"
+							},
+							"Spatial": {
+								"description": "Whether the sound is positioned at the entity and attenuated with distance.",
+								"type": "boolean"
+							},
+							"MinDistance": {
+								"description": "The distance within which the sound plays at full volume, in metres.",
+								"type": "number",
+								"minimum": 0.01
+							},
+							"MaxDistance": {
+								"description": "The distance beyond which the sound stops getting quieter, in metres.",
+								"type": "number",
+								"minimum": 0.01
+							},
+							"Attenuation": {
+								"description": "The distance attenuation model of a spatial sound.",
+								"enum": ["None", "Inverse", "Linear", "Exponential"]
+							},
+							"Rolloff": {
+								"description": "How quickly the attenuation model falls off (1 is the model's own rate).",
+								"type": "number",
+								"minimum": 0
+							},
+							"DopplerFactor": {
+								"description": "The strength of the Doppler pitch shift (0 disables it).",
+								"type": "number",
+								"minimum": 0
+							},
+							"Group": {
+								"description": "The mixer group the sound plays in.",
+								"enum": ["Music", "Sfx", "Ui"]
+							}
+						},
+						"additionalProperties": false
+					},
+					"AudioListener": {
+						"description": "Hears the scene from the entity's position and orientation.",
+						"type": "object",
+						"properties": {
+							"Primary": {
+								"description": "Whether this listener is used; with several primaries the first in canonical order wins, without any the primary camera listens.",
+								"type": "boolean"
+							}
+						},
+						"additionalProperties": false
+					},
+					"Script": {
+						"description": "Attaches a Behaviour script to the entity (one per entity).",
+						"type": "object",
+						"properties": {
+							"Script": {
+								"description": "The Behaviour script to run.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+								"x-assetType": "Script"
+							},
+							"Fields": {
+								"description": "Overrides of the script's declared fields by name, each checked against the field's declared type; an unknown or mismatching override is kept and reported, and the field uses its declared default.",
+								"type": "object",
+								"additionalProperties": {}
+							},
+							"ExecutionOrder": {
+								"description": "The script's place in callback order: lower values run first, ties in canonical entity order.",
+								"type": "integer",
+								"minimum": -2147483648,
+								"maximum": 2147483647
+							}
+						},
+						"additionalProperties": false
+					},
+					"PrefabOverride": {
+						"description": "One recorded difference between a prefab instance and its prefab.",
+						"type": "object",
+						"properties": {
+							"PrefabEntityID": {
+								"description": "The prefab-local ID of the entity the override applies to (never the derived instance ID).",
+								"type": ["string", "null"],
+								"pattern": "^[0-9a-fA-F]{16}$"
+							},
+							"Kind": {
+								"description": "What the override changes: a field, an added or removed component, or an entity key.",
+								"enum": ["Field", "AddComponent", "RemoveComponent", "EntityKey"]
+							},
+							"Component": {
+								"description": "The registry name of the component for Field, AddComponent and RemoveComponent; empty for EntityKey.",
+								"type": "string"
+							},
+							"Field": {
+								"description": "The field name for Field; Name, Active or Tags for EntityKey; empty otherwise.",
+								"type": "string"
+							},
+							"Value": {
+								"description": "The overriding value, checked against the schema of its target: the field, the whole component, or the entity key."
+							}
+						},
+						"additionalProperties": false
+					}
+				}
 			},
 			"result": {
 				"$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -8485,7 +9898,7 @@
 				"type": "object",
 				"properties": {
 					"entity": {
-						"description": "The instance root.",
+						"description": "The instance root (prefab.create's result calls it instance).",
 						"$ref": "#/$defs/EntitySummary"
 					},
 					"prefab": {
@@ -8499,7 +9912,7 @@
 						"maximum": 4294967295
 					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {
@@ -8559,6 +9972,22 @@
 							"Translation": [2, 0, 0]
 						}
 					}
+				},
+				{
+					"description": "Place a named cell that casts no shadow (an override of the instance).",
+					"params": {
+						"prefab": "Assets/Prefabs/Cell.prefab",
+						"parent": "/Board",
+						"transform": {
+							"Translation": [2, 0, 0]
+						},
+						"name": "Cell 3",
+						"components": {
+							"MeshRenderer": {
+								"CastShadows": false
+							}
+						}
+					}
 				}
 			]
 		},
@@ -8596,7 +10025,7 @@
 						"type": "boolean"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -8652,7 +10081,7 @@
 						"maximum": 4294967295
 					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {
@@ -8719,7 +10148,7 @@
 						"type": "boolean"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -8745,7 +10174,7 @@
 						"maximum": 4294967295
 					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {
@@ -8788,7 +10217,7 @@
 		{
 			"name": "project.create",
 			"domain": "project",
-			"description": "Creates a project from a template at a native path and opens it, taking its lock. Provenance records the .eproj.",
+			"description": "Creates a project from a template at a native path and opens it, taking its lock. Provenance records the .eproj, the root .luaurc and the template's files under Assets/.",
 			"exposeAsTool": true,
 			"mutates": true,
 			"supportsDryRun": false,
@@ -8816,7 +10245,7 @@
 						"enum": ["Empty", "Basic3D"]
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -8843,7 +10272,7 @@
 						}
 					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {
@@ -8924,7 +10353,7 @@
 						"type": "boolean"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -8982,10 +10411,7 @@
 						"type": "boolean"
 					},
 					"smokeTestExitCode": {
-						"description": "The smoke test's exit code; 0 when it did not run.",
-						"type": "integer",
-						"minimum": -2147483648,
-						"maximum": 2147483647
+						"description": "The smoke test's exit code, an integer; null when it did not run (smokeTestRan false)."
 					},
 					"seconds": {
 						"description": "How long the export took (wall-clock time, for information).",
@@ -9012,14 +10438,14 @@
 						"type": "boolean"
 					},
 					"phaseTimings": {
-						"description": "The time of every phase the export entered, in phase order.",
+						"description": "The time of every phase the export entered, in phase order; SmokeTest only when the smoke test ran (its time otherwise counts toward MoveToOutput).",
 						"type": "array",
 						"items": {
 							"$ref": "#/$defs/ExportPhaseTimingSummary"
 						}
 					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {
@@ -9103,7 +10529,7 @@
 				"type": "object",
 				"properties": {
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -9122,7 +10548,7 @@
 						"$ref": "#/$defs/ProjectSettings"
 					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {
@@ -9557,7 +10983,7 @@
 				"type": "object",
 				"properties": {
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -9586,7 +11012,7 @@
 						"maximum": 4294967295
 					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {
@@ -9690,7 +11116,7 @@
 						"type": "boolean"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -9725,7 +11151,7 @@
 						"type": "boolean"
 					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {
@@ -9772,7 +11198,7 @@
 		{
 			"name": "project.refreshAssets",
 			"domain": "project",
-			"description": "Rescans Assets/ now: writes .meta files for new sources, registers and unregisters assets, imports the new ones and reimports every asset whose files changed; complete when the call returns.",
+			"description": "Rescans Assets/ now: writes .meta files for new sources, registers and unregisters assets, imports the new ones and reimports every asset whose files changed; complete when the call returns. In Editor --upgrade, which defers the project's asset scan to this request, it runs that scan first and reports both.",
 			"exposeAsTool": false,
 			"mutates": false,
 			"supportsDryRun": false,
@@ -9788,7 +11214,7 @@
 				"type": "object",
 				"properties": {
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -9844,7 +11270,7 @@
 						}
 					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {
@@ -9939,7 +11365,7 @@
 				"type": "object",
 				"properties": {
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -9961,7 +11387,7 @@
 						}
 					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {
@@ -10005,7 +11431,7 @@
 						"type": "boolean"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -10031,7 +11457,7 @@
 						"maximum": 4294967295
 					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {
@@ -10457,8 +11883,8 @@
 		{
 			"name": "project.upgrade",
 			"domain": "project",
-			"description": "Applies migrations and canonical re-saves to every project file (the .eproj, scenes and prefabs), records each rewrite in provenance and reports the changed files. Not undoable; needs a saved open scene.",
-			"exposeAsTool": false,
+			"description": "Applies migrations and canonical re-saves to every project file (the .eproj, and every scene, prefab, .meta, material, sound effect and replay under Assets/), records each rewrite in provenance and reports the changed files, each with its reason (changes: \"format version 1 to 2\", \"canonical form\"). Run it after an engine change to canonical output; dryRun: true lists what it would rewrite. An unknown member in a material, sound effect or replay fails the upgrade at its file and pointer, as its importer refuses it. Not undoable; refuses an open scene with unsaved changes (save it first).",
+			"exposeAsTool": true,
 			"mutates": true,
 			"supportsDryRun": true,
 			"availableInRuntime": false,
@@ -10477,7 +11903,7 @@
 						"type": "boolean"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -10504,8 +11930,15 @@
 						"minimum": 0,
 						"maximum": 4294967295
 					},
+					"changes": {
+						"description": "Each file of changedFiles with the reason it is rewritten, in the same order.",
+						"type": "array",
+						"items": {
+							"$ref": "#/$defs/ProjectUpgradeChange"
+						}
+					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {
@@ -10514,12 +11947,34 @@
 					}
 				},
 				"additionalProperties": false,
-				"$defs": {}
+				"$defs": {
+					"ProjectUpgradeChange": {
+						"description": "One file project.upgrade rewrote (or a dry run would), with why.",
+						"type": "object",
+						"properties": {
+							"path": {
+								"description": "The file, project-relative.",
+								"type": "string"
+							},
+							"reason": {
+								"description": "Why its canonical form differs: \"format version <file> to <current>\", \"component migration\" (a scene or prefab) or \"canonical form\" (formatting, member order, defaults written out).",
+								"type": "string"
+							}
+						},
+						"additionalProperties": false
+					}
+				}
 			},
 			"examples": [
 				{
 					"description": "Rewrite every project file in the current format.",
 					"params": {}
+				},
+				{
+					"description": "List the files an upgrade would rewrite, and why, without writing.",
+					"params": {
+						"dryRun": true
+					}
 				}
 			]
 		},
@@ -10553,7 +12008,7 @@
 						"type": "boolean"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -10600,7 +12055,7 @@
 						"maximum": 4294967295
 					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {
@@ -10705,7 +12160,7 @@
 						"type": "string"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -10736,7 +12191,7 @@
 						"items": {}
 					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {
@@ -10785,7 +12240,7 @@
 						"maximum": 4294967295
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -10820,7 +12275,7 @@
 						}
 					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {
@@ -10888,7 +12343,7 @@
 						"enum": ["Edit", "Play"]
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -10906,7 +12361,7 @@
 						"description": "The document, exactly as a scene file holds it."
 					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {
@@ -10959,7 +12414,7 @@
 						"type": "boolean"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -10985,7 +12440,7 @@
 						"maximum": 4294967295
 					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {
@@ -11008,7 +12463,7 @@
 								"type": "string"
 							},
 							"revision": {
-								"description": "The host's revision (the play scene's in the Runtime), which grows with every change.",
+								"description": "The host's revision (_meta.revision; the play scene's in the Runtime): it grows with every change to the open scene or the project settings; writing an asset or script file alone leaves it unchanged.",
 								"type": "integer",
 								"minimum": 0,
 								"maximum": 4294967295
@@ -11076,7 +12531,7 @@
 						"type": "boolean"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -11114,7 +12569,7 @@
 						}
 					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {
@@ -11137,7 +12592,7 @@
 								"type": "string"
 							},
 							"revision": {
-								"description": "The host's revision (the play scene's in the Runtime), which grows with every change.",
+								"description": "The host's revision (_meta.revision; the play scene's in the Runtime): it grows with every change to the open scene or the project settings; writing an asset or script file alone leaves it unchanged.",
 								"type": "integer",
 								"minimum": 0,
 								"maximum": 4294967295
@@ -11264,7 +12719,7 @@
 						"enum": ["Edit", "Play"]
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -11321,7 +12776,7 @@
 						"type": "string"
 					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {
@@ -11443,7 +12898,7 @@
 						"type": "boolean"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -11534,7 +12989,7 @@
 						"maximum": 4294967295
 					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {
@@ -11599,7 +13054,7 @@
 						"type": "string"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -11622,7 +13077,7 @@
 						"type": "string"
 					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {
@@ -11645,7 +13100,7 @@
 								"type": "string"
 							},
 							"revision": {
-								"description": "The host's revision (the play scene's in the Runtime), which grows with every change.",
+								"description": "The host's revision (_meta.revision; the play scene's in the Runtime): it grows with every change to the open scene or the project settings; writing an asset or script file alone leaves it unchanged.",
 								"type": "integer",
 								"minimum": 0,
 								"maximum": 4294967295
@@ -11709,7 +13164,7 @@
 						"enum": ["Edit", "Play"]
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -11739,7 +13194,7 @@
 						}
 					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {
@@ -11762,7 +13217,7 @@
 								"type": "string"
 							},
 							"revision": {
-								"description": "The host's revision (the play scene's in the Runtime), which grows with every change.",
+								"description": "The host's revision (_meta.revision; the play scene's in the Runtime): it grows with every change to the open scene or the project settings; writing an asset or script file alone leaves it unchanged.",
 								"type": "integer",
 								"minimum": 0,
 								"maximum": 4294967295
@@ -11868,7 +13323,7 @@
 						}
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -11901,7 +13356,7 @@
 						"type": "boolean"
 					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {
@@ -11998,7 +13453,7 @@
 						"type": "boolean"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -12031,7 +13486,7 @@
 						"maximum": 4294967295
 					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {
@@ -12148,7 +13603,7 @@
 						"maximum": 1000
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -12178,7 +13633,7 @@
 						"type": "boolean"
 					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {
@@ -12336,7 +13791,7 @@
 						"type": "string"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -12362,7 +13817,7 @@
 						}
 					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {
@@ -12406,7 +13861,7 @@
 						"type": "string"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -12441,7 +13896,7 @@
 						}
 					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {
@@ -12529,7 +13984,7 @@
 						"type": "string"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -12553,7 +14008,7 @@
 						"type": "string"
 					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {
@@ -12624,7 +14079,7 @@
 						"type": "boolean"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -12657,7 +14112,7 @@
 						"maximum": 4294967295
 					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {
@@ -12828,7 +14283,7 @@
 						"$ref": "#/$defs/SessionProjectSummary"
 					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {
@@ -12880,7 +14335,7 @@
 		{
 			"name": "session.info",
 			"domain": "session",
-			"description": "Reports the host's session (the editor's or the exported game's): versions, capabilities, the open project, play state, renderer, lockstep owner, the read-only flag and the connected clients.",
+			"description": "Reports the host's session (the editor's or the exported game's): versions, capabilities, the open project and scene, play state, renderer, lockstep owner, the read-only flag and the connected clients.",
 			"exposeAsTool": false,
 			"mutates": false,
 			"supportsDryRun": false,
@@ -12896,7 +14351,7 @@
 				"type": "object",
 				"properties": {
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -12969,8 +14424,11 @@
 							"$ref": "#/$defs/SessionClientSummary"
 						}
 					},
+					"scene": {
+						"description": "The open scene as scene.* results report it ({path, name, revision, dirty, entityCount}; path is project-relative, empty for a scene never saved); null without one: the editor opens no scene with its project (scene.open {path} opens the project's StartScene). The Runtime reports its game scene."
+					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {
@@ -13064,7 +14522,7 @@
 						"type": "boolean"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -13090,7 +14548,7 @@
 						}
 					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {
@@ -13133,7 +14591,7 @@
 						"type": "boolean"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -13213,7 +14671,7 @@
 						}
 					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {
@@ -13370,7 +14828,7 @@
 				"type": "object",
 				"properties": {
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -13399,7 +14857,7 @@
 						}
 					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {
@@ -13481,7 +14939,7 @@
 		{
 			"name": "test.run",
 			"domain": "test",
-			"description": "Runs configured tests and returns every outcome plus JSON/JUnit reports. Optional recording is published only after strict replay verification.",
+			"description": "Runs configured tests and returns every outcome (counts, failedCases and the case rows; a replay's suite entry counts the checkpoints it compared) plus JSON/JUnit reports. The coverage object always keeps its registryFingerprint and gates; its counters are returned only with coverage: true or Testing.CoverageGates. Optional recording is published only after strict replay verification and, with input events, the input check (§13.6: refused when a run without them still passes that verification, whatever script errors it raises), and reported in the recording block (format version, ticks, events, checkpoints, final hash, where the input check diverged).",
 			"exposeAsTool": true,
 			"mutates": false,
 			"supportsDryRun": false,
@@ -13507,11 +14965,15 @@
 						"maximum": 4294967295
 					},
 					"record": {
-						"description": "Optional project Assets .replay output; requires one selected suite and strict reproduction.",
+						"description": "Optional project Assets .replay output; requires one selected suite and strict reproduction in ordinary play (every state-hash checkpoint, one every 60 ticks, and the final hash). A recording with input events is also replayed without them and refused when that run reproduces every checkpoint and the final hash too, whatever script errors it raises: its outcome does not depend on its input. The result's recording block describes the replay written.",
 						"type": "string"
 					},
+					"coverage": {
+						"description": "Return coverage.counters in the result; without it they are left out unless the project sets Testing.CoverageGates. The JSON report at jsonPath always holds them.",
+						"type": "boolean"
+					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -13537,6 +14999,17 @@
 						"description": "Cancelled of the test report.",
 						"type": "boolean"
 					},
+					"counts": {
+						"description": "The rows of cases by status.",
+						"$ref": "#/$defs/TestRunCounts"
+					},
+					"failedCases": {
+						"description": "\"<suite>/<case>\" of each row that fails the run (failed, error, timeout, or a quit that was not expected or has failures), in the order of cases, at most 20.",
+						"type": "array",
+						"items": {
+							"type": "string"
+						}
+					},
 					"cases": {
 						"description": "Cases of the test report.",
 						"type": "array",
@@ -13552,7 +15025,7 @@
 						}
 					},
 					"coverage": {
-						"description": "Coverage of the test report.",
+						"description": "The script API coverage: registryFingerprint and gates always; the counters in the JSON report always, and in test.run's result only with coverage: true or Testing.CoverageGates (left out, an empty list, otherwise).",
 						"$ref": "#/$defs/TestCoverageReport"
 					},
 					"jsonPath": {
@@ -13567,8 +15040,11 @@
 						"description": "RecordingPath of the test report.",
 						"type": "string"
 					},
+					"recording": {
+						"description": "The replay test.run {record} wrote: {path, formatVersion, ticks, events, checkpoints, finalStateHash, inputCheck: {ran, divergedAtTick}} (TestRecordingResult); null for every other run."
+					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {
@@ -13578,6 +15054,55 @@
 				},
 				"additionalProperties": false,
 				"$defs": {
+					"TestRunCounts": {
+						"description": "The rows of a test run by status.",
+						"type": "object",
+						"properties": {
+							"total": {
+								"description": "Every row of cases.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							},
+							"passed": {
+								"description": "Rows with status passed.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							},
+							"failed": {
+								"description": "Rows with status failed.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							},
+							"error": {
+								"description": "Rows with status error.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							},
+							"timeout": {
+								"description": "Rows with status timeout.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							},
+							"skipped": {
+								"description": "Rows with status skipped.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							},
+							"quit": {
+								"description": "Rows with status quit.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							}
+						},
+						"additionalProperties": false
+					},
 					"TestCaseResult": {
 						"description": "TestCaseResult shared test report.",
 						"type": "object",
@@ -13687,6 +15212,18 @@
 							"passed": {
 								"description": "Passed of the test report.",
 								"type": "boolean"
+							},
+							"checkpointsChecked": {
+								"description": "A replay suite: the state-hash checkpoints its playback compared, a checkpoint that differed included (all of them when it passed); 0 for a script suite.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							},
+							"failedCheckpointTick": {
+								"description": "A replay suite: the tick of the checkpoint whose state hash differed, where playback stopped (its Checkpoint@<tick> row); 0 when none differed.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
 							}
 						},
 						"additionalProperties": false
@@ -13801,6 +15338,12 @@
 				{
 					"description": "Run every configured test.",
 					"params": {}
+				},
+				{
+					"description": "Run every test and return the script API coverage counters.",
+					"params": {
+						"coverage": true
+					}
 				}
 			]
 		},
@@ -13877,7 +15420,7 @@
 						"type": "number"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -13946,7 +15489,7 @@
 						"type": "number"
 					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {
@@ -13999,7 +15542,7 @@
 						}
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -14056,7 +15599,7 @@
 						}
 					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {
@@ -14139,7 +15682,7 @@
 						"type": "boolean"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -14175,7 +15718,7 @@
 						"$ref": "#/$defs/SceneRaycastResult"
 					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {
@@ -14359,7 +15902,7 @@
 						"type": "boolean"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -14415,7 +15958,7 @@
 						"type": "boolean"
 					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {
@@ -14517,7 +16060,7 @@
 						}
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -14565,7 +16108,7 @@
 						}
 					},
 					"_meta": {
-						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.",
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
 					},
 					"dryRun": {

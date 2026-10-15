@@ -66,7 +66,7 @@ Example: Create a two-note coin pickup sound.
 
 ### asset.delete
 
-Moves an asset with its .meta (and a glTF's dependency files) to Library/Trash as one undoable command; never a permanent delete.
+Moves an asset with its .meta (and a glTF's dependency files) to Library/Trash as one undoable command; never a permanent delete. A folder below Assets/ that holds no files (only empty folders) is removed, also undoably; a folder that holds files is refused (Validation, naming them): delete its assets first.
 
 - Flags: tool `asset_delete`, mutates, batch
 - Timeout: 60 s
@@ -74,13 +74,14 @@ Moves an asset with its .meta (and a glTF's dependency files) to Library/Trash a
 
 | Param | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `asset` | `String` | yes | `""` | The asset to move to the trash (a source, not a sub-asset). |
+| `asset` | `String` | yes | `""` | The asset to move to the trash (a source, not a sub-asset), or a folder below Assets/ that holds no files, to remove. |
 
 | Result | Type | Description |
 |---|---|---|
-| `asset` | `AssetSummary` | The asset as it was. |
-| `trashDirectory` | `String` | Where its files went: "Library/Trash/\<entry>". |
+| `asset` | `AssetSummary` | The asset as it was; for a folder its path, with an empty id and type None. |
+| `trashDirectory` | `String` | Where its files went: "Library/Trash/\<entry>"; empty for a folder, which holds none. |
 | `trashedFiles` | `Array<String>` | The old paths of every file trashed, .meta files and dependency files included. |
+| `removedFolders` | `Array<String>` | A folder delete: the folder and every empty folder below it, project-relative and sorted; empty for an asset. |
 | `undoIndex` | `UInt32` | The command's undo index; 0 in a batch. |
 
 Example: Delete an unused material.
@@ -406,26 +407,53 @@ Example: Describe the RigidBody component.
 
 ### docs.get
 
-Serves the agent documentation: without a topic the list of skills and reference documents, with one its Markdown.
+Serves the agent documentation: without a topic the list of topics (skills, the generated reference and JSON schemas, the script declarations and the script templates); with one its text, one section of it (section, or "\<topic>#\<section>", by heading text or anchor), one page (offset, length) or with toc only its section list with sizes. A text too large to return inline comes back as its first page with nextOffset and its list of sections.
 
 - Flags: tool `docs_get`, launcher, batch
 - Timeout: 60 s
 
 | Param | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `topic` | `String` |  | `""` | The topic, such as "skills/game-building"; empty for the list of topics. |
+| `topic` | `String` |  | `""` | The topic, such as "skills/game-building", "reference/ScriptAPI", "reference/Schemas/Scene", "scripting/Engine.d.luau" or "templates/Scripts/Behaviour"; a "#\<section>" suffix selects a section like section; empty for the list of topics. |
+| `section` | `String` |  | `""` | A section of the topic: a Markdown heading, or a top-level declaration of a .d.luau topic ("Entity"). Named by the heading's exact text ("Test.Suite"), by that text without a trailing parenthesized qualifier ("TestSuite" for "TestSuite (type)"), or by its anchor (the text lowercased, spaces as '-', other ASCII punctuation removed, "-1" added to a repeat: "testsuite-type"), tried in that order; a text several headings share is refused with their anchors. The result is the section with its subsections. |
+| `offset` | `UInt32` |  | `0` | Where the page starts, in bytes of the topic's (or the section's) text: 0, or the previous page's nextOffset. |
+| `length` | `UInt32` |  | `32768` | The most bytes of text to return (the default is the most). A page ends after a line break when one falls inside it. |
+| `toc` | `Bool` |  | `false` | Return no text, only the topic's section list (or the subsections of section) with each section's title, anchor, level, offset and size, down to the deepest heading level whose list fits in 40960 bytes, and totalBytes. Not with offset or length. |
 
 | Result | Type | Description |
 |---|---|---|
 | `topics` | `Array<DocsTopic>` | Every topic, when no topic was asked for. |
-| `topic` | `String` | The topic asked for. |
-| `content` | `String` | The topic's Markdown. |
+| `topic` | `String` | The topic asked for, without its "#\<section>". |
+| `section` | `String` | The anchor of the section returned; empty for the whole topic. |
+| `content` | `String` | The text (Markdown for skills and reference documents), or one page of it. |
 | `path` | `String` | The topic's file, relative to the repository root. |
+| `offset` | `UInt32` | Where content starts in the topic's (or the section's) text, in bytes. |
+| `totalBytes` | `UInt32` | The size of the topic's (or the section's) text. |
+| `nextOffset` | `UInt32` | The offset of the next page; 0 when content reaches the end of the text. |
+| `sections` | `Array<DocsSection>` | The sections of the text: with the first page of a text that needs several pages, every heading level whose list fits in 12288 bytes; with toc, every level whose list fits in 40960 bytes. |
 
 Example: Read the add-automation-method skill.
 
 ```json
 {"topic":"skills/add-automation-method"}
+```
+
+Example: Read the Input section of the script API reference.
+
+```json
+{"topic":"reference/ScriptAPI","section":"Input"}
+```
+
+Example: Read the first 8 KB of the script declarations.
+
+```json
+{"topic":"scripting/Engine.d.luau","offset":0,"length":8192}
+```
+
+Example: List the sections of the script API reference with their sizes.
+
+```json
+{"topic":"reference/ScriptAPI","toc":true}
 ```
 
 ## edit
@@ -856,10 +884,10 @@ Example: Tap the Jump action on the next tick.
 
 ### input.record
 
-Starts a tick-zero recording or saves its validated applied inputs and expectations. Stop checks output write permission.
+Starts a tick-zero recording or saves its validated applied inputs, expectations and state-hash checkpoints (one every 60 ticks). Stop checks output write permission. A recording with input events is first replayed without them (the input check, which replaces the play session as input.replay does and leaves it paused where it ended); when that run reproduces every checkpoint, the final hash and every expectation, whatever script errors it raises, the recording's outcome does not depend on its input and Stop refuses to write it (Validation, the check's outcome in error data inputCheck). End such a recording while the played state is still in the scene.
 
-- Flags: tool `input_record`, runtime
-- Timeout: 60 s
+- Flags: tool `input_record`, runtime, pending
+- Timeout: 600 s
 - Required params: `action`
 
 | Param | Type | Required | Default | Description |
@@ -878,7 +906,9 @@ Starts a tick-zero recording or saves its validated applied inputs and expectati
 | `tick` | `UInt32` | Completed ticks. |
 | `events` | `UInt32` | Applied input events written. |
 | `path` | `String` | Canonical saved path; empty on Start. |
-| `stateHash` | `String` | Observed terminal state hash; empty on Start. |
+| `stateHash` | `String` | Observed terminal state hash, written as FinalStateHash; empty on Start. It covers the simulated world only (every entity with its serialized components, the tick, the session's Random state, the id draws and every body's physics state), never script tables, audio or input. |
+| `checkpoints` | `UInt32` | State-hash checkpoints written, one every 60 ticks before the final tick; 0 on Start. |
+| `inputCheckTick` | `UInt32` | Stop with input events: the tick where the input check (the recording replayed without its input) ended, at the first checkpoint that differed or at the final tick; the play session waits paused there. 0 when no check ran. |
 
 Example: Start a fresh recording.
 
@@ -894,7 +924,7 @@ Example: Save the recording.
 
 ### input.replay
 
-Replays recorded inputs in a fresh session; verification failures retain every expectation and hash outcome in error data.
+Replays recorded inputs in a fresh session; verification failures retain every expectation and hash outcome in error data. strictHash compares the state hash at each checkpoint and at the final tick and stops at the first checkpoint that differs. The state hash covers the simulated world (entities and their serialized components, the tick, Random, id draws, physics), never script tables, so expectations observe script state. withoutInput replays without the input events, the check that the replay depends on its input. Afterwards the session stays paused at the replay's last tick (or where playback stopped), so script.eval, scene.query and entity.get read its final state; play.stop ends it.
 
 - Flags: tool `input_replay`, runtime, pending
 - Timeout: 600 s
@@ -904,24 +934,34 @@ Replays recorded inputs in a fresh session; verification failures retain every e
 |---|---|---|---|---|
 | `path` | `String` | yes | `""` | Replay asset path, or a Runtime recording's returned user://Replays identity. |
 | `verify` | `Bool` |  | `false` | Evaluate cooked expectations. |
-| `strictHash` | `Bool` |  | `false` | Compare the recorded final hash; requires verify. |
+| `strictHash` | `Bool` |  | `false` | Compare the recorded state hash at every checkpoint and at the final tick; requires verify. The first checkpoint that differs ends the playback there. |
+| `withoutInput` | `Bool` |  | `false` | Apply none of the replay's input events: the check that its outcome depends on its input; requires verify. A replay whose verification still passes this way proves nothing about its input. |
 
 | Result | Type | Description |
 |---|---|---|
 | `passed` | `Bool` | Playback and all requested verification passed. |
 | `verified` | `Bool` | Expectation verification was requested. |
-| `hashChecked` | `Bool` | The final state hash was compared. |
+| `hashChecked` | `Bool` | The state hashes (every checkpoint and the final one) were compared. |
 | `hashMatched` | `Bool` | Compared hashes matched. |
-| `finalTick` | `UInt32` | Completed simulation ticks. |
-| `stateHash` | `String` | Observed final hash. |
-| `expectedStateHash` | `String` | Recorded final hash. |
-| `stopReason` | `String` | Why playback ended before the replay's final tick (a quit or a fatal script error); empty when it reached it. |
+| `finalTick` | `UInt32` | Completed simulation ticks: the replay's final tick, or where playback stopped. |
+| `stateHash` | `String` | Observed state hash at finalTick. It covers the simulated world only (every entity with its serialized components, the tick, the session's Random state, the id draws and every body's physics state), never script tables, audio or input. |
+| `expectedStateHash` | `String` | Recorded state hash at finalTick: the final hash, or the failed checkpoint's. |
+| `stopReason` | `String` | Why playback ended before the replay's final tick (a quit, a fatal script error or a checkpoint whose hash differed); empty when it reached it. |
+| `checkpointsChecked` | `UInt32` | State-hash checkpoints compared (strictHash), the failed one included. |
+| `checkpointFailed` | `Bool` | A checkpoint's hash differed: playback stopped at its tick (finalTick), and stateHash and expectedStateHash are the observed and recorded hashes there. |
+| `withoutInput` | `Bool` | None of the replay's input events were applied. |
 | `expect` | `Array<InputReplayExpectationResult>` | Every expectation outcome in authored order. |
 
 Example: Verify a replay.
 
 ```json
 {"path":"Assets/Tests/Recorded.replay","verify":true,"strictHash":true}
+```
+
+Example: Check that a replay's verification fails without its input.
+
+```json
+{"path":"Assets/Tests/Recorded.replay","verify":true,"strictHash":true,"withoutInput":true}
 ```
 
 ## log
@@ -1010,7 +1050,7 @@ Param: none.
 | `state` | `PlayRunState` | Edit, Play, Simulate or Paused (as _meta.playState). |
 | `mode` | `PlayMode` | Play or Simulate; tells them apart while Paused. |
 | `tick` | `UInt32` | The next tick: the ticks run so far. |
-| `stateHash` | `String` | The state hash (16 lowercase hex digits); empty in Edit. |
+| `stateHash` | `String` | The state hash (16 lowercase hex digits); empty in Edit. It covers the simulated world (every entity with its serialized components, the tick, the session's Random state, the id draws and every body's physics state), never script tables, audio or input. |
 | `lockstep` | `Bool` | Ticks advance only through the owner's play.step. |
 | `lockstepOwner` | `String` | The name of the client that owns lockstep; empty without lockstep. |
 | `ownedByCaller` | `Bool` | The requesting client owns lockstep. |
@@ -1043,7 +1083,7 @@ Param: none.
 | `state` | `PlayRunState` | Edit, Play, Simulate or Paused (as _meta.playState). |
 | `mode` | `PlayMode` | Play or Simulate; tells them apart while Paused. |
 | `tick` | `UInt32` | The next tick: the ticks run so far. |
-| `stateHash` | `String` | The state hash (16 lowercase hex digits); empty in Edit. |
+| `stateHash` | `String` | The state hash (16 lowercase hex digits); empty in Edit. It covers the simulated world (every entity with its serialized components, the tick, the session's Random state, the id draws and every body's physics state), never script tables, audio or input. |
 | `lockstep` | `Bool` | Ticks advance only through the owner's play.step. |
 | `lockstepOwner` | `String` | The name of the client that owns lockstep; empty without lockstep. |
 | `ownedByCaller` | `Bool` | The requesting client owns lockstep. |
@@ -1079,7 +1119,7 @@ Sets the time scale of the play session (0 to 100, 1 is real time). Returns the 
 | `state` | `PlayRunState` | Edit, Play, Simulate or Paused (as _meta.playState). |
 | `mode` | `PlayMode` | Play or Simulate; tells them apart while Paused. |
 | `tick` | `UInt32` | The next tick: the ticks run so far. |
-| `stateHash` | `String` | The state hash (16 lowercase hex digits); empty in Edit. |
+| `stateHash` | `String` | The state hash (16 lowercase hex digits); empty in Edit. It covers the simulated world (every entity with its serialized components, the tick, the session's Random state, the id draws and every body's physics state), never script tables, audio or input. |
 | `lockstep` | `Bool` | Ticks advance only through the owner's play.step. |
 | `lockstepOwner` | `String` | The name of the client that owns lockstep; empty without lockstep. |
 | `ownedByCaller` | `Bool` | The requesting client owns lockstep. |
@@ -1121,7 +1161,7 @@ Starts a play session of the open scene (or of scene) through the serializer cop
 | `state` | `PlayRunState` | Edit, Play, Simulate or Paused (as _meta.playState). |
 | `mode` | `PlayMode` | Play or Simulate; tells them apart while Paused. |
 | `tick` | `UInt32` | The next tick: the ticks run so far. |
-| `stateHash` | `String` | The state hash (16 lowercase hex digits); empty in Edit. |
+| `stateHash` | `String` | The state hash (16 lowercase hex digits); empty in Edit. It covers the simulated world (every entity with its serialized components, the tick, the session's Random state, the id draws and every body's physics state), never script tables, audio or input. |
 | `lockstep` | `Bool` | Ticks advance only through the owner's play.step. |
 | `lockstepOwner` | `String` | The name of the client that owns lockstep; empty without lockstep. |
 | `ownedByCaller` | `Bool` | The requesting client owns lockstep. |
@@ -1154,7 +1194,7 @@ Param: none.
 | `state` | `PlayRunState` | Edit, Play, Simulate or Paused (as _meta.playState). |
 | `mode` | `PlayMode` | Play or Simulate; tells them apart while Paused. |
 | `tick` | `UInt32` | The next tick: the ticks run so far. |
-| `stateHash` | `String` | The state hash (16 lowercase hex digits); empty in Edit. |
+| `stateHash` | `String` | The state hash (16 lowercase hex digits); empty in Edit. It covers the simulated world (every entity with its serialized components, the tick, the session's Random state, the id draws and every body's physics state), never script tables, audio or input. |
 | `lockstep` | `Bool` | Ticks advance only through the owner's play.step. |
 | `lockstepOwner` | `String` | The name of the client that owns lockstep; empty without lockstep. |
 | `ownedByCaller` | `Bool` | The requesting client owns lockstep. |
@@ -1190,7 +1230,7 @@ Runs ticks (fixed step + frame phase each) of a lockstep or paused session, as m
 | Result | Type | Description |
 |---|---|---|
 | `tick` | `UInt32` | The session's tick after the call. |
-| `stateHash` | `String` | The state hash after the call (16 lowercase hex digits). |
+| `stateHash` | `String` | The state hash after the call (16 lowercase hex digits): the simulated world only (entities and their serialized components, the tick, Random, id draws, physics), never script tables, audio or input. |
 | `ticks` | `UInt32` | The ticks this call ran. |
 | `frames` | `UInt32` | The host frames it spanned (ticks per frame fit a 50 ms budget). |
 | `rendered` | `UInt32` | The game-view extractions during the call. |
@@ -1280,7 +1320,7 @@ Example: Make the cell's edits the prefab's.
 
 ### prefab.create
 
-Saves an entity's subtree as a new .prefab asset (nested instances flattened), optionally replacing the entity with an instance of it, as one undoable step.
+Saves an entity's subtree as a new .prefab asset (nested instances flattened), optionally replacing the entity with an instance of it, as one undoable step. The result's instance is that instance's root (empty without replaceWithInstance).
 
 - Flags: tool `prefab_create`, mutates, dry run, batch
 - Timeout: 60 s
@@ -1295,7 +1335,7 @@ Saves an entity's subtree as a new .prefab asset (nested instances flattened), o
 | Result | Type | Description |
 |---|---|---|
 | `prefab` | `AssetSummary` | The new prefab asset. |
-| `instance` | `EntitySummary` | The instance root with replaceWithInstance; empty otherwise. |
+| `instance` | `EntitySummary` | The instance root with replaceWithInstance; empty otherwise (prefab.instantiate's result calls its root entity). |
 | `undoIndex` | `UInt32` | The undo index; 0 in a dry run or a batch. |
 
 Example: Turn the cell into a prefab and an instance of it.
@@ -1306,7 +1346,7 @@ Example: Turn the cell into a prefab and an instance of it.
 
 ### prefab.instantiate
 
-Creates an instance of a prefab asset (a .prefab or a glTF) under a parent, with an optional transform and name, as one undoable step.
+Creates an instance of a prefab asset (a .prefab or a glTF) under a parent, with an optional transform, name and per-instance component values (recorded as the instance's overrides), as one undoable step. The result's entity is the new instance root.
 
 - Flags: tool `prefab_instantiate`, mutates, dry run, batch
 - Timeout: 60 s
@@ -1319,10 +1359,11 @@ Creates an instance of a prefab asset (a .prefab or a glTF) under a parent, with
 | `index` | `UInt32` |  | `0` | The position among the parent's children; last when absent. |
 | `transform` | `Variant` |  | `null` | Transform fields over the prefab root's, such as {"Translation": [2, 0, 0]}. |
 | `name` | `String` |  | `""` | The instance root's name; the prefab root's when absent. |
+| `components` | `Map<Variant>` |  | `{}` | Per-instance component values for the instance root by registry name, merged into the prefab's as entity.update merges them (missing components are added) and recorded as the instance's overrides; script fields go in {"Script": {"Fields": {...}}}, the Script handle defaulting to the prefab root's. |
 
 | Result | Type | Description |
 |---|---|---|
-| `entity` | `EntitySummary` | The instance root. |
+| `entity` | `EntitySummary` | The instance root (prefab.create's result calls it instance). |
 | `prefab` | `AssetSummary` | The prefab asset. |
 | `undoIndex` | `UInt32` | The undo index; 0 in a dry run or a batch. |
 
@@ -1330,6 +1371,12 @@ Example: Place a cell on the board.
 
 ```json
 {"prefab":"Assets/Prefabs/Cell.prefab","parent":"/Board","transform":{"Translation":[2,0,0]}}
+```
+
+Example: Place a named cell that casts no shadow (an override of the instance).
+
+```json
+{"prefab":"Assets/Prefabs/Cell.prefab","parent":"/Board","transform":{"Translation":[2,0,0]},"name":"Cell 3","components":{"MeshRenderer":{"CastShadows":false}}}
 ```
 
 ### prefab.revert
@@ -1384,7 +1431,7 @@ Example: Make the cell an ordinary entity.
 
 ### project.create
 
-Creates a project from a template at a native path and opens it, taking its lock. Provenance records the .eproj.
+Creates a project from a template at a native path and opens it, taking its lock. Provenance records the .eproj, the root .luaurc and the template's files under Assets/.
 
 - Flags: tool `project_create`, mutates, launcher
 - Timeout: 60 s
@@ -1432,13 +1479,13 @@ Exports the open project as a standalone game below Build/: the configuration's 
 | `engineEntryCount` | `UInt32` | The entries of Data/Engine.pak: shader files and built-ins. |
 | `warnings` | `Array<String>` | What the export left out or could not check. |
 | `smokeTestRan` | `Bool` | Whether the smoke test ran: false without smokeTest, and for a Dist export from an editor without a graphics device. |
-| `smokeTestExitCode` | `Int32` | The smoke test's exit code; 0 when it did not run. |
+| `smokeTestExitCode` | `Variant` | The smoke test's exit code, an integer; null when it did not run (smokeTestRan false). |
 | `seconds` | `Float` | How long the export took (wall-clock time, for information). |
 | `testing` | `Bool` | Whether this was a testing export (Game.json Testing true). |
 | `testSuiteCount` | `UInt32` | A testing export's Testing.Suites entries, whatever their modes; 0 for a plain export. |
 | `replayCount` | `UInt32` | The replays a testing export packaged for Testing.Replays; 0 for a plain export. |
 | `resourcesPatched` | `Bool` | Whether the executable's resources were written: its icon and version on Windows, Info.plist on macOS. |
-| `phaseTimings` | `Array<ExportPhaseTimingSummary>` | The time of every phase the export entered, in phase order. |
+| `phaseTimings` | `Array<ExportPhaseTimingSummary>` | The time of every phase the export entered, in phase order; SmokeTest only when the smoke test ran (its time otherwise counts toward MoveToOutput). |
 
 Example: Export a Release build and smoke-test it.
 
@@ -1520,7 +1567,7 @@ Example: Open the Tetris project.
 
 ### project.refreshAssets
 
-Rescans Assets/ now: writes .meta files for new sources, registers and unregisters assets, imports the new ones and reimports every asset whose files changed; complete when the call returns.
+Rescans Assets/ now: writes .meta files for new sources, registers and unregisters assets, imports the new ones and reimports every asset whose files changed; complete when the call returns. In Editor --upgrade, which defers the project's asset scan to this request, it runs that scan first and reports both.
 
 - Flags: none
 - Timeout: 600 s
@@ -1586,9 +1633,9 @@ Example: Name the window and set the start scene.
 
 ### project.upgrade
 
-Applies migrations and canonical re-saves to every project file (the .eproj, scenes and prefabs), records each rewrite in provenance and reports the changed files. Not undoable; needs a saved open scene.
+Applies migrations and canonical re-saves to every project file (the .eproj, and every scene, prefab, .meta, material, sound effect and replay under Assets/), records each rewrite in provenance and reports the changed files, each with its reason (changes: "format version 1 to 2", "canonical form"). Run it after an engine change to canonical output; dryRun: true lists what it would rewrite. An unknown member in a material, sound effect or replay fails the upgrade at its file and pointer, as its importer refuses it. Not undoable; refuses an open scene with unsaved changes (save it first).
 
-- Flags: mutates, dry run
+- Flags: tool `project_upgrade`, mutates, dry run
 - Timeout: 600 s
 
 Param: none.
@@ -1597,11 +1644,18 @@ Param: none.
 |---|---|---|
 | `changedFiles` | `Array<String>` | The files rewritten (or that a dry run would rewrite), project-relative and sorted. |
 | `unchangedCount` | `UInt32` | The project files already canonical. |
+| `changes` | `Array<ProjectUpgradeChange>` | Each file of changedFiles with the reason it is rewritten, in the same order. |
 
 Example: Rewrite every project file in the current format.
 
 ```json
 {}
+```
+
+Example: List the files an upgrade would rewrite, and why, without writing.
+
+```json
+{"dryRun":true}
 ```
 
 ### project.validate
@@ -2072,7 +2126,7 @@ Example: Open a session as the MCP bridge.
 
 ### session.info
 
-Reports the host's session (the editor's or the exported game's): versions, capabilities, the open project, play state, renderer, lockstep owner, the read-only flag and the connected clients.
+Reports the host's session (the editor's or the exported game's): versions, capabilities, the open project and scene, play state, renderer, lockstep owner, the read-only flag and the connected clients.
 
 - Flags: runtime, launcher, batch
 - Timeout: 60 s
@@ -2094,6 +2148,7 @@ Param: none.
 | `readOnly` | `Bool` | Whether the host denies mutations: the editor with --read-only, the Runtime always. |
 | `headless` | `Bool` | Whether the host runs without a visible window (--headless). |
 | `clients` | `Array<SessionClientSummary>` | The connected clients, by id. |
+| `scene` | `Variant` | The open scene as scene.* results report it ({path, name, revision, dirty, entityCount}; path is project-relative, empty for a scene never saved); null without one: the editor opens no scene with its project (scene.open {path} opens the project's StartScene). The Runtime reports its game scene. |
 
 Example: Read the session.
 
@@ -2181,7 +2236,7 @@ Example: List configured tests.
 
 ### test.run
 
-Runs configured tests and returns every outcome plus JSON/JUnit reports. Optional recording is published only after strict replay verification.
+Runs configured tests and returns every outcome (counts, failedCases and the case rows; a replay's suite entry counts the checkpoints it compared) plus JSON/JUnit reports. The coverage object always keeps its registryFingerprint and gates; its counters are returned only with coverage: true or Testing.CoverageGates. Optional recording is published only after strict replay verification and, with input events, the input check (§13.6: refused when a run without them still passes that verification, whatever script errors it raises), and reported in the recording block (format version, ticks, events, checkpoints, final hash, where the input check diverged).
 
 - Flags: tool `test_run`, pending
 - Timeout: 900 s
@@ -2190,24 +2245,34 @@ Runs configured tests and returns every outcome plus JSON/JUnit reports. Optiona
 |---|---|---|---|---|
 | `filter` | `String` |  | `""` | Case-insensitive substring of suite/case or replay path. |
 | `timeoutTicks` | `UInt32` |  | `0` | Optional positive run-wide tick cap; omitted means no additional limit. |
-| `record` | `String` |  | `""` | Optional project Assets .replay output; requires one selected suite and strict reproduction. |
+| `record` | `String` |  | `""` | Optional project Assets .replay output; requires one selected suite and strict reproduction in ordinary play (every state-hash checkpoint, one every 60 ticks, and the final hash). A recording with input events is also replayed without them and refused when that run reproduces every checkpoint and the final hash too, whatever script errors it raises: its outcome does not depend on its input. The result's recording block describes the replay written. |
+| `coverage` | `Bool` |  | `false` | Return coverage.counters in the result; without it they are left out unless the project sets Testing.CoverageGates. The JSON report at jsonPath always holds them. |
 
 | Result | Type | Description |
 |---|---|---|
 | `mode` | `TestMode` | Mode of the test report. |
 | `passed` | `Bool` | Passed of the test report. |
 | `cancelled` | `Bool` | Cancelled of the test report. |
+| `counts` | `TestRunCounts` | The rows of cases by status. |
+| `failedCases` | `Array<String>` | "\<suite>/\<case>" of each row that fails the run (failed, error, timeout, or a quit that was not expected or has failures), in the order of cases, at most 20. |
 | `cases` | `Array<TestCaseResult>` | Cases of the test report. |
 | `suites` | `Array<TestSuiteResult>` | Suites of the test report. |
-| `coverage` | `TestCoverageReport` | Coverage of the test report. |
+| `coverage` | `TestCoverageReport` | The script API coverage: registryFingerprint and gates always; the counters in the JSON report always, and in test.run's result only with coverage: true or Testing.CoverageGates (left out, an empty list, otherwise). |
 | `jsonPath` | `String` | JsonPath of the test report. |
 | `junitPath` | `String` | JunitPath of the test report. |
 | `recordingPath` | `String` | RecordingPath of the test report. |
+| `recording` | `Variant` | The replay test.run {record} wrote: {path, formatVersion, ticks, events, checkpoints, finalStateHash, inputCheck: {ran, divergedAtTick}} (TestRecordingResult); null for every other run. |
 
 Example: Run every configured test.
 
 ```json
 {}
+```
+
+Example: Run every test and return the script API coverage counters.
+
+```json
+{"coverage":true}
 ```
 
 ## viewport

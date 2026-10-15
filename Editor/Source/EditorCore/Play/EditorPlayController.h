@@ -68,8 +68,9 @@ namespace Engine {
 		// unsaved scene or one with unsaved changes (save it first). While playing, restart must be true; the recording's
 		// own owner may restart its active recording. Validates the request before EditorContext::PrepareForPlay.
 		[[nodiscard]] Status StartRecording(const PlayStartOptions& options, bool restart);
-		// input.replay: a fresh paused lockstep session of the header's scene, parameters, seed and FixedHz, entered like
-		// every RPC path into play (validation, then EditorContext::PrepareForPlay, then the session).
+		// input.replay (and input.record stop's input check): a fresh paused lockstep session of the header's scene,
+		// parameters, seed and FixedHz, entered like every RPC path into play (validation, then EditorContext::PrepareForPlay,
+		// then the session).
 		[[nodiscard]] Status StartReplay(const ReplayHeader& header, ClientId owner);
 		// The automation server's watchdog (AutomationServer sets it for its lifetime): play sessions report the running
 		// gameplay script entry to it, so a Busy answer names "Script:<Script>.<Callback>" (§13.2). ClearPhaseMarker removes

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""The commit gate (Docs/Architecture.md §15.9): regenerate, the static checks, Debug build, unit, GPU, golden, feature
-and automation suites.
+"""The commit gate (Docs/Architecture.md §15.9): regenerate, the static checks, Debug build, unit, GPU, golden, feature,
+automation and games suites.
 
 Steps, in order:
   generate  Scripts/Generate.py, so the build sees the current premake scripts
@@ -14,6 +14,9 @@ Steps, in order:
               runtime map       Scripts/CheckRuntimeMap.py --self-test (every seeded map under Tests/Data/MapFiles/
                                 gives exactly its expected findings; the real Dist map is checked by CI.py, because
                                 PreCommit builds no Dist)
+              provenance        Scripts/AuditProvenance.py --self-test (every seeded case under
+                                Tests/Data/Provenance/ gives exactly the findings and warnings of its Expected.json,
+                                and every finding code has a case; ADR 0026 decision 9)
               format            Scripts/Format.py --check
               fixtures          every fixture generator under Tests/Data/Generate/ with --check (the committed
                                 fixtures are byte-identical to a fresh generation)
@@ -25,8 +28,8 @@ Steps, in order:
               test fixtures     Scripts/FetchAssets.py fixture --check (the pinned third-party test fixtures match
                                 their SHA-256 pins and the Tests/Data/LICENSES.md table, offline)
   build     Scripts/Build.py --config Debug (skipped when generate failed)
-  tests     Scripts/Test.py --suite unit,gpu,golden,feature,automation --config Debug --require-gpu (skipped when the
-            build failed): T0 + T1, and T2 on this machine's GPU (§15.1: the GPU tests and golden images gate every
+  tests     Scripts/Test.py --suite unit,gpu,golden,feature,automation,games --config Debug --require-gpu (skipped when
+            the build failed): T0 + T1, and T2 on this machine's GPU (§15.1: the GPU tests and golden images gate every
             commit), with validation and synchronization validation, under both API caps; the golden images run in
             Debug, which must match the Release goldens exactly (§15.8). The feature suite runs FeatureTest in the Debug
             editor (Editor --headless --project Projects/FeatureTest --run-tests --strict, so an unknown field or
@@ -35,10 +38,17 @@ Steps, in order:
             outside Library/ (Docs/Decisions/0022-m14-contract.md decision 7). The automation suite
             (Tests/Automation and Tools/MCP/tests against the Debug editor, with the method coverage gate) runs in the
             MCP bridge's virtual environment, which Scripts/Setup.py creates; without it the step fails with exit code
-            3. A suite that does not exist yet is reported as not available by Test.py and does not fail the gate.
+            3. The games suite (§15.1 T5; Docs/Decisions/0026-m16-contract.md decision 8) audits the provenance of
+            every staged demo game and runs its Debug editor half (script.check, project.validate, the canonical
+            re-save dry run and test.run with every replay at its committed FinalStateHash, checkpoints compared, in a
+            strict editor on the staged files, at least one committed replay with input events, and the input check:
+            every replay with input events must fail input.replay {verify, strictHash, withoutInput}, §13.6), so an
+            engine change that alters a demo's canonical form or replay hashes fails the commit that makes it (§13.12);
+            its exported Dist half is CI.py's, because PreCommit builds no Dist, and without a game it passes with a
+            note. A suite that does not exist yet is reported as not available by Test.py and does not fail the gate.
             --gpu-optional, for a machine without a usable Vulkan device, drops --require-gpu: the GPU test cases, the
-            FeatureTest run and the automation tests that render then pass without running, naming the reason, as a
-            warning
+            FeatureTest run, the automation tests that render and the games' editor halves then pass without running,
+            naming the reason, as a warning
 The static checks run even after an earlier failure, so one run reports every problem. A missing script fails its
 step.
 
@@ -93,16 +103,17 @@ def main(argv: list[str] | None = None) -> int:
     configure_stdio()
     parser = argparse.ArgumentParser(
         description="Commit gate: generate, the static checks (CheckBuildConfig, Lint, Lint self-test, runtime map "
-        "self-test, format check, fixture generators, DetMath reference check, pinned resources and fixtures), "
-        "Debug build, unit, gpu, golden, feature and automation suites (§15.9).",
+        "self-test, provenance audit self-test, format check, fixture generators, DetMath reference check, pinned "
+        "resources and fixtures), Debug build, unit, gpu, golden, feature, automation and games suites (§15.9).",
         epilog="Exit codes: 0 every step passed, else the first failing step's code (1 failed, 2 usage, 3 missing "
                "tool or file, 5 timeout).",
     )
     parser.add_argument("--contract", action="store_true", help=CONTRACT_FLAG_HELP)
     parser.add_argument("--gpu-optional", action="store_true",
-                        help="gpu, golden, feature and automation suites without --require-gpu, for a machine without "
-                             "a usable Vulkan device: their GPU test cases, the FeatureTest run and the automation "
-                             "tests that start a rendering editor pass without running, naming the reason (a warning)")
+                        help="gpu, golden, feature, automation and games suites without --require-gpu, for a machine "
+                             "without a usable Vulkan device: their GPU test cases, the FeatureTest run, the "
+                             "automation tests that start a rendering editor and the games' editor halves pass without "
+                             "running, naming the reason (a warning)")
     parser.add_argument("--json", action="store_true", help="print a machine-readable result on stdout")
     arguments = parser.parse_args(sys.argv[1:] if argv is None else argv)
     console = Console(arguments.json)
@@ -124,8 +135,9 @@ def main(argv: list[str] | None = None) -> int:
     else:
         steps.append(run_step("references", "GenerateDocs.py", ["--check", "--config", "Debug"], console))
         device = [] if arguments.gpu_optional else ["--require-gpu"]
-        steps.append(run_step("tests", "Test.py", ["--suite", "unit,gpu,golden,feature,automation", "--config", "Debug",
-                                                   *device, *test_mode_arguments(arguments.contract)], console))
+        steps.append(run_step("tests", "Test.py", ["--suite", "unit,gpu,golden,feature,automation,games", "--config",
+                                                   "Debug", *device, *test_mode_arguments(arguments.contract)],
+                              console))
 
     exit_code = overall_exit_code(steps)
     if exit_code == EXIT_SUCCESS and any(step.status == Status.NOT_RUN for step in steps):

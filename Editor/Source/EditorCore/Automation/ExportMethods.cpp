@@ -37,7 +37,8 @@ namespace Engine {
 		result.EngineEntryCount = report.EngineEntryCount;
 		result.Warnings = report.Warnings;
 		result.SmokeTestRan = report.SmokeTestRan;
-		result.SmokeTestExitCode = report.SmokeTestExitCode;
+		if (report.SmokeTestRan)
+			result.SmokeTestExitCode = VariantValue(Json(report.SmokeTestExitCode));
 		result.Seconds = static_cast<float>(report.Seconds);
 		result.Testing = report.Testing;
 		result.TestSuiteCount = report.TestSuiteCount;
@@ -167,7 +168,7 @@ namespace Engine {
 			.Field("warnings", &ProjectExportResult::Warnings, "What the export left out or could not check.")
 			.Field("smokeTestRan", &ProjectExportResult::SmokeTestRan,
 				"Whether the smoke test ran: false without smokeTest, and for a Dist export from an editor without a graphics device.")
-			.Field("smokeTestExitCode", &ProjectExportResult::SmokeTestExitCode, "The smoke test's exit code; 0 when it did not run.")
+			.Field("smokeTestExitCode", &ProjectExportResult::SmokeTestExitCode, "The smoke test's exit code, an integer; null when it did not run (smokeTestRan false).")
 			.Field("seconds", &ProjectExportResult::Seconds, "How long the export took (wall-clock time, for information).", { .Unit = "s" })
 			.Field("testing", &ProjectExportResult::Testing, "Whether this was a testing export (Game.json Testing true).")
 			.Field("testSuiteCount", &ProjectExportResult::TestSuiteCount,
@@ -175,7 +176,8 @@ namespace Engine {
 			.Field("replayCount", &ProjectExportResult::ReplayCount, "The replays a testing export packaged for Testing.Replays; 0 for a plain export.")
 			.Field("resourcesPatched", &ProjectExportResult::ResourcesPatched,
 				"Whether the executable's resources were written: its icon and version on Windows, Info.plist on macOS.")
-			.Field("phaseTimings", &ProjectExportResult::PhaseTimings, "The time of every phase the export entered, in phase order.");
+			.Field("phaseTimings", &ProjectExportResult::PhaseTimings,
+				"The time of every phase the export entered, in phase order; SmokeTest only when the smoke test ran (its time otherwise counts toward MoveToOutput).");
 	}
 
 	void RegisterExportMethods(MethodRegistry& methods)

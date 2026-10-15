@@ -169,6 +169,82 @@ class MethodTests(AutomationTestCase):
         skill = client.call("docs.get", {"topic": "skills/add-automation-method"})
         self.assertIn("RegisterMethods.cpp", skill["content"])
 
+    def test_docs_get_serves_sections_pages_and_the_generated_topics(self) -> None:
+        # Docs/Decisions/0026-m16-contract.md, friction S1-01: the large reference topics came back offloaded, as one
+        # line.
+        client = self.connect(self.start_editor())
+        topics = {topic["name"]: topic for topic in client.call("docs.get")["topics"]}
+        for name in ("reference/Schemas/Scene", "scripting/Engine.d.luau", "templates/Scripts/Behaviour"):
+            self.assertIn(name, topics)
+        text = (REPOSITORY_ROOT / "Docs" / "Reference" / "ScriptAPI.md").read_bytes().decode("utf-8")
+        first = client.call("docs.get", {"topic": "reference/ScriptAPI"})
+        self.assertNotIn("truncated", first)
+        self.assertIn("input", [section["anchor"] for section in first["sections"]])
+        joined, page = first["content"], first
+        while page["nextOffset"]:
+            page = client.call("docs.get", {"topic": "reference/ScriptAPI", "offset": page["nextOffset"]})
+            self.assertNotIn("truncated", page)
+            joined += page["content"]
+        self.assertEqual(joined, text)
+        section = client.call("docs.get", {"topic": "reference/ScriptAPI#Input"})
+        self.assertTrue(section["content"].startswith("## Input\n"))
+        self.assertEqual(section["section"], "input")
+        declaration = client.call("docs.get", {"topic": "scripting/Engine.d.luau", "section": "Entity"})
+        self.assertIn("declare extern type Entity with", declaration["content"])
+        page = client.call("docs.get", {"topic": "reference/Schemas/Scene", "offset": 0, "length": 100})
+        self.assertLessEqual(len(page["content"].encode("utf-8")), 100)
+        self.assertGreater(page["nextOffset"], 0)
+        with self.assertRaises(engine_client.EngineError) as missing:
+            client.call("docs.get", {"topic": "reference/ScriptAPI", "section": "no such section"})
+        self.assert_engine_error(missing.exception, engine_client.NOT_FOUND, "NotFound")
+
+    def test_docs_get_lists_sections_with_toc_and_finds_them_by_heading_text(self) -> None:
+        # Docs/Decisions/0026-m16-contract.md, friction S2-05: the section list cost a 32 KB first page, and a section
+        # asked for by its text resolved through a shared anchor to another heading ("TestSuite" gave Test.Suite).
+        client = self.connect(self.start_editor())
+        toc = client.call("docs.get", {"topic": "reference/ScriptAPI", "toc": True})
+        self.assertEqual(toc["content"], "")
+        self.assertNotIn("truncated", toc)
+        text = (REPOSITORY_ROOT / "Docs" / "Reference" / "ScriptAPI.md").read_bytes()
+        self.assertEqual(toc["totalBytes"], len(text))
+        titles = [section["title"] for section in toc["sections"]]
+        self.assertEqual(len(titles), len(set(titles)))
+        for section in toc["sections"]:
+            # The section list's offset and size are the section's bytes, which its text finds.
+            found = client.call("docs.get", {"topic": "reference/ScriptAPI", "section": section["title"]})
+            self.assertEqual(found["section"], section["anchor"])
+            self.assertEqual(found["totalBytes"], section["bytes"])
+            self.assertEqual(text[section["offset"]:section["offset"] + len(found["content"].encode("utf-8"))],
+                             found["content"].encode("utf-8"))
+        expected = {"TestSuite": "## TestSuite (type)\n", "Test.Suite": "### Test.Suite\n",
+                    "Script": "## Script\n", "Script (component)": "## Script (component)\n",
+                    "TextAlignment": "## TextAlignment (enum)\n"}
+        for name, heading in expected.items():
+            with self.subTest(section=name):
+                found = client.call("docs.get", {"topic": "reference/ScriptAPI", "section": name})
+                self.assertTrue(found["content"].startswith(heading), found["content"][:80])
+        entity = client.call("docs.get", {"topic": "reference/ScriptAPI", "section": "Entity", "toc": True})
+        self.assertIn("Entity.Name", [section["title"] for section in entity["sections"]])
+        with self.assertRaises(engine_client.EngineError) as paged:
+            client.call("docs.get", {"topic": "reference/ScriptAPI", "toc": True, "offset": 0})
+        self.assert_engine_error(paged.exception, engine_client.INVALID_PARAMS)
+
+    def test_session_info_reports_the_open_scene(self) -> None:
+        # Friction S2-03: an opened project has no open scene, and session.info (so editor_status) did not say so.
+        client, root = self.open_editor_with_scene()
+        client.call("scene.save")
+        client.call("session.shutdown")
+        self.assertEqual(self.editors[-1].wait(), 0)
+        reopened = self.connect(self.start_editor())
+        self.assertIsNone(reopened.call("session.info")["scene"])
+        reopened.call("project.open", {"path": str(root)})
+        self.assertIsNone(reopened.call("session.info")["scene"])
+        reopened.call("scene.open", {"path": "Assets/Scenes/Main.scene"})
+        scene = reopened.call("session.info")["scene"]
+        self.assertEqual((scene["path"], scene["dirty"]), ("Assets/Scenes/Main.scene", False))
+        reopened.call("entity.create", {"name": "Board"})
+        self.assertTrue(reopened.call("session.info")["scene"]["dirty"])
+
 
 if __name__ == "__main__":
     unittest.main()

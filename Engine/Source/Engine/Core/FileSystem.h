@@ -72,6 +72,13 @@ namespace Engine {
 		[[nodiscard]] static Status WriteFileAtomic(const std::filesystem::path& path, std::span<const std::byte> data,
 			const AtomicWriteOptions& options = {});
 
+		// Creates the file `path` with `data`, never replacing anything: the host creates it exclusively (std::ios::noreplace,
+		// O_EXCL / CREATE_NEW), so a name that exists, also one another process created a moment earlier, is AlreadyExists
+		// and stays untouched. Unlike WriteFileAtomic it writes in place: a reader can see the file before its data is
+		// complete, and a failed write removes the file it created. No backup is made. The parent directory must exist
+		// (NotFound otherwise). Errors: InvalidArgument (no file name), NotFound, AlreadyExists, Io.
+		[[nodiscard]] static Status WriteNewFile(const std::filesystem::path& path, std::span<const std::byte> data);
+
 		// True when a file or directory exists at `path`; false when it does not or cannot be determined.
 		[[nodiscard]] static bool Exists(const std::filesystem::path& path);
 
@@ -84,6 +91,12 @@ namespace Engine {
 
 		// Removes a file, or a directory with everything below it. Errors: NotFound, PermissionDenied, Io.
 		[[nodiscard]] static Status Remove(const std::filesystem::path& path);
+
+		// Removes the directory `path` only while it is empty, never anything below it: the host's own non-recursive removal,
+		// which refuses a directory that still holds any entry, whatever its name (also one no VfsPath can spell, which
+		// NativeDirectoryMount does not list), and leaves it unchanged. Errors: NotFound; InvalidState when the directory is
+		// not empty; Io when `path` is not a directory (a file or a symbolic link); PermissionDenied, Io.
+		[[nodiscard]] static Status RemoveEmptyDirectory(const std::filesystem::path& path);
 
 		// Renames a file or directory. A destination that differs from `from` only in letter case names the source
 		// itself on a case-insensitive host; it is renamed in place on every host (a case-only rename), never reported

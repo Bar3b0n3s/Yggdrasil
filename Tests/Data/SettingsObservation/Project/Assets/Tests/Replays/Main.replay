@@ -1,6 +1,6 @@
 {
 	"Format": "Replay",
-	"Version": 1,
+	"Version": 2,
 	"Scene": {
 		"Handle": "0b5e0000000000a1",
 		"Path": "Assets/Scenes/Main.scene"
@@ -12,6 +12,7 @@
 	"Config": "Editor",
 	"Events": [],
 	"Expect": [],
+	"Checkpoints": [],
 	"FinalTick": 1,
 	"FinalStateHash": "0000000000000001"
 }

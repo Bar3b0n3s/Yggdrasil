@@ -8,6 +8,7 @@
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Core/Log.h"
+#include "Engine/Core/VirtualFileSystem.h"
 #include "Engine/Platform/Process.h"
 #include "Engine/Platform/Socket.h"
 #include "Engine/Session/PlaySession.h"
@@ -17,7 +18,12 @@
 #include "Support/Utf8Path.h"
 #include "Support/WaitUntil.h"
 
+#include <algorithm>
+#include <array>
+#include <span>
+#include <string_view>
 #include <tuple>
+#include <vector>
 
 namespace Engine {
 
@@ -26,6 +32,66 @@ namespace Engine {
 		Result<Json> json = JsonReader::Parse(text);
 		REQUIRE(json.has_value());
 		return std::move(*json);
+	}
+
+	namespace {
+
+		// The bytes ContendedOutputMount's other writer puts in a file.
+		constexpr std::string_view OtherWriterBytes = "another writer's file";
+
+		// A mount where another writer takes each automation output file name at the last moment the server could still
+		// see it free: right after an existence check of it (GetInfo of a missing file below Automation/Out/), or right
+		// before the server creates it (WriteNewFile). A server that checks and then writes replaces that writer's file; one
+		// that creates exclusively refuses the name and leaves the file alone. Every call goes to the wrapped mount.
+		class ContendedOutputMount final : public IMount
+		{
+		public:
+			explicit ContendedOutputMount(Scope<IMount> inner)
+				: m_Inner(std::move(inner))
+			{
+			}
+
+			// Hands back the wrapped mount (after this one was unmounted).
+			[[nodiscard]] Scope<IMount> Release() { return std::move(m_Inner); }
+
+			[[nodiscard]] Result<Buffer> ReadFile(const VfsPath& path) const override { return m_Inner->ReadFile(path); }
+			[[nodiscard]] Result<Scope<IFileStream>> Open(const VfsPath& path) const override { return m_Inner->Open(path); }
+			[[nodiscard]] Status WriteFileAtomic(const VfsPath& path, std::span<const std::byte> data) override { return m_Inner->WriteFileAtomic(path, data); }
+			[[nodiscard]] Status WriteNewFile(const VfsPath& path, std::span<const std::byte> data) override
+			{
+				if (IsOutputFile(path) && !m_Inner->GetInfo(path).has_value())
+					TakeName(path);
+				return m_Inner->WriteNewFile(path, data);
+			}
+			[[nodiscard]] Result<FileInfo> GetInfo(const VfsPath& path) const override
+			{
+				Result<FileInfo> info = m_Inner->GetInfo(path);
+				if (!info.has_value() && info.error().GetCode() == ErrorCode::NotFound && IsOutputFile(path))
+					TakeName(path);
+				return info;
+			}
+			[[nodiscard]] Result<std::vector<VfsEntry>> List(const VfsPath& directory, bool recursive) const override { return m_Inner->List(directory, recursive); }
+			[[nodiscard]] Status CreateDirectories(const VfsPath& directory) override { return m_Inner->CreateDirectories(directory); }
+			[[nodiscard]] Status Remove(const VfsPath& path) override { return m_Inner->Remove(path); }
+			[[nodiscard]] Status RemoveEmptyDirectory(const VfsPath& directory) override { return m_Inner->RemoveEmptyDirectory(directory); }
+			[[nodiscard]] Status Move(const VfsPath& from, const VfsPath& to) override { return m_Inner->Move(from, to); }
+			[[nodiscard]] MountAccess GetAccess() const override { return m_Inner->GetAccess(); }
+
+			// The names the other writer took.
+			[[nodiscard]] uint32_t GetTakenCount() const { return m_Taken; }
+		private:
+			[[nodiscard]] static bool IsOutputFile(const VfsPath& path) { return path.GetPath().starts_with("Automation/Out/") && path.GetPath().ends_with(".json"); }
+
+			void TakeName(const VfsPath& path) const
+			{
+				REQUIRE(m_Inner->WriteFileAtomic(path, AsBytes(OtherWriterBytes)).has_value());
+				++m_Taken;
+			}
+
+			Scope<IMount> m_Inner;
+			mutable uint32_t m_Taken = 0;
+		};
+
 	}
 
 	TEST_SUITE("EditorCore")
@@ -657,6 +723,122 @@ namespace Engine {
 			// Unlike offloaded results, a server's output files stay when it is destroyed (a --batch run's screenshots).
 			CHECK(FileSystem::Exists(first));
 			CHECK(FileSystem::Exists(second));
+		}
+
+		// Docs/Decisions/0026-m16-contract.md, friction S1-03: test.run's JSON report (an output file) and a later offloaded
+		// result once took the same name from two counters, so the result replaced the report and project:// left a .bak.
+		TEST_CASE("AutomationServer: output files and offloaded results take one sequence and never replace one another")
+		{
+			Test::EditorTestFixture fixture("ServerOutputSequence");
+			fixture.CreateAndOpenProject();
+			const std::filesystem::path out = fixture.GetProjectRoot() / "Library" / "Automation" / "Out";
+			std::filesystem::path report;
+			std::filesystem::path offloaded;
+			std::filesystem::path junit;
+			const std::string reportText = R"({"passed": true})";
+			{
+				Test::AutomationTestClient client(fixture.GetEditor());
+				AutomationServer& server = client.GetServer();
+				const Result<std::string> written = server.WriteOutputFile("json", std::as_bytes(std::span(reportText.data(), reportText.size())));
+				REQUIRE_MESSAGE(written.has_value(), written.error().ToString());
+				report = FileSystem::PathFromUtf8(*written);
+				// The unfiltered catalogue is over the offload threshold (ADR 0008 decision 31).
+				Result<Json> discovered = client.Call("rpc.discover", Json::object());
+				REQUIRE(discovered.has_value());
+				REQUIRE((*discovered)["truncated"] == Json(true));
+				offloaded = FileSystem::PathFromUtf8(JsonReader((*discovered)["path"]).ReadString().value_or(std::string()));
+				const std::array<std::byte, 1> xml = { std::byte{ '<' } };
+				const Result<std::string> again = server.WriteOutputFile("xml", xml);
+				REQUIRE(again.has_value());
+				junit = FileSystem::PathFromUtf8(*again);
+
+				const std::string reportName = Test::PathToUtf8(report.filename());
+				CHECK(reportName.ends_with("-00000001.json"));
+				CHECK(Test::PathToUtf8(offloaded.filename()) == reportName.substr(0, reportName.size() - std::string_view("00000001.json").size()) + "00000002.json");
+				CHECK(Test::PathToUtf8(junit.filename()).ends_with("-00000003.xml"));
+				CHECK(FileSystem::ReadText(report).value_or(std::string()) == reportText);
+				CHECK(FileSystem::ReadText(offloaded).value_or(std::string()).contains("\"methods\""));
+
+				// A name that is taken already is never replaced: the write fails, and the next one takes the next number.
+				const std::filesystem::path taken = out / (reportName.substr(0, reportName.size() - std::string_view("00000001.json").size()) + "00000004.json");
+				REQUIRE(FileSystem::WriteFileAtomic(taken, std::as_bytes(std::span("kept", 4)), { .KeepBackup = false }).has_value());
+				const Json refused = client.Request("rpc.discover", Json::object());
+				CHECK(refused["error"]["data"]["errorCode"] == Json("AlreadyExists"));
+				CHECK(FileSystem::ReadText(taken).value_or(std::string()) == "kept");
+				Result<Json> next = client.Call("rpc.discover", Json::object());
+				REQUIRE(next.has_value());
+				CHECK(JsonReader((*next)["path"]).ReadString().value_or(std::string()).ends_with("-00000005.json"));
+
+				// Nothing in Out/ is a backup.
+				const auto entries = FileSystem::ListDirectory(out);
+				REQUIRE(entries.has_value());
+				CHECK(std::ranges::none_of(*entries, [](const std::filesystem::path& entry)
+				{
+					return Test::PathToUtf8(entry.filename()).ends_with(".bak");
+				}));
+			}
+			// The destructor removes the offloaded results and only those: the reports stay.
+			CHECK_FALSE(FileSystem::Exists(offloaded));
+			CHECK(FileSystem::ReadText(report).value_or(std::string()) == reportText);
+			CHECK(FileSystem::Exists(junit));
+		}
+
+		// M16 review R28: output files were checked and then written with a replacing atomic write, so a file another writer
+		// created between the check and the write was replaced although the contract says created, never replaced. They are
+		// created exclusively now: the name is refused and the other writer's file stays.
+		TEST_CASE("AutomationServer: an output file name another writer takes at the last moment is refused, never replaced")
+		{
+			Test::EditorTestFixture fixture("ServerOutputContended");
+			VirtualFileSystem& vfs = fixture.GetEditor().GetVfs();
+			Result<Scope<IMount>> user = vfs.Unmount("user");
+			REQUIRE(user.has_value());
+			Scope<ContendedOutputMount> contended = CreateScope<ContendedOutputMount>(std::move(*user));
+			ContendedOutputMount* mount = contended.get(); // a back-reference while the VFS owns it
+			REQUIRE(vfs.Mount("user", std::move(contended)).has_value());
+			{
+				Test::AutomationTestClient client(fixture.GetEditor());
+				const std::string text = R"({"report": true})";
+				const Result<std::string> refused = client.GetServer().WriteOutputFile("json", AsBytes(text));
+				REQUIRE_FALSE(refused.has_value());
+				CHECK(refused.error().GetCode() == ErrorCode::AlreadyExists);
+				CHECK(mount->GetTakenCount() == 1);
+				const Result<std::vector<VfsEntry>> entries = vfs.List(VfsPath::Create("user", "Automation/Out").value_or(VfsPath()));
+				REQUIRE(entries.has_value());
+				REQUIRE(entries->size() == 1);
+				const Result<std::string> kept = vfs.ReadText((*entries)[0].Path);
+				CHECK(kept.value_or(std::string()) == OtherWriterBytes);
+			}
+			// The unmounted ContendedOutputMount lives until the end of the case, so it can hand back the mount it wraps.
+			Result<Scope<IMount>> removed = vfs.Unmount("user");
+			REQUIRE(removed.has_value());
+			REQUIRE(vfs.Mount("user", mount->Release()).has_value());
+		}
+
+		TEST_CASE("AutomationServer: the first write prunes every file a gone server left, whatever its extension")
+		{
+			Test::EditorTestFixture fixture("ServerOutputPruning");
+			fixture.CreateAndOpenProject();
+			const std::filesystem::path out = fixture.GetProjectRoot() / "Library" / "Automation" / "Out";
+			REQUIRE(FileSystem::CreateDirectories(out).has_value());
+			// A process id no process has: its reports, a backup an older editor left and an interrupted write's temporary.
+			const std::vector<std::filesystem::path> stale = { out / "2147483644-1700000000-00000001.xml", out / "2147483644-1700000000-00000002.json.bak",
+				out / "2147483644-1700000000-00000003.json.tmp-0123456789abcdef" };
+			// The report of a live server (this process with another start time), and files that are no server's.
+			const std::vector<std::filesystem::path> kept = { out / std::format("{}-1-00000001.xml", Process::GetCurrentId()), out / "Notes.txt",
+				out / "2147483644.json" };
+			for (const std::filesystem::path& file : stale)
+				REQUIRE(FileSystem::WriteFileAtomic(file, std::as_bytes(std::span("x", 1)), { .KeepBackup = false }).has_value());
+			for (const std::filesystem::path& file : kept)
+				REQUIRE(FileSystem::WriteFileAtomic(file, std::as_bytes(std::span("x", 1)), { .KeepBackup = false }).has_value());
+			{
+				Test::AutomationTestClient client(fixture.GetEditor());
+				const std::array<std::byte, 1> bytes = { std::byte{ 1 } };
+				REQUIRE(client.GetServer().WriteOutputFile("png", bytes).has_value());
+				for (const std::filesystem::path& file : stale)
+					CHECK_MESSAGE(!FileSystem::Exists(file), Test::PathToUtf8(file));
+				for (const std::filesystem::path& file : kept)
+					CHECK_MESSAGE(FileSystem::Exists(file), Test::PathToUtf8(file));
+			}
 		}
 
 		TEST_CASE("AutomationServer: a failed session-file rewrite is reported once and tried again until it succeeds")

@@ -33,8 +33,11 @@ namespace Engine {
 		TranscriptLog() = delete;
 
 		// Appends a request line to project://Automation/BuildLog.jsonl (creating it) and returns its 1-based line number.
-		// The file is rewritten atomically with the line added, so a crash never leaves half a line. Errors: Validation when
-		// the existing file does not end with a newline (a torn line); the VFS errors.
+		// The file is rewritten atomically with the line added, so a crash never leaves half a line. A torn last line another
+		// writer left (one without its newline) is completed with "\n" first and keeps its number, as the bridge completes it,
+		// so the new line is numbered after it (Docs/Decisions/0026-m16-contract.md decision 13). The existing lines are
+		// counted as bytes and never decoded, as the bridge counts them, so a line torn inside a multi-byte UTF-8 character
+		// stops nothing. Errors: the VFS errors.
 		[[nodiscard]] static Result<uint64_t> AppendRequest(VirtualFileSystem& vfs, std::string_view client, const Json& id,
 			std::string_view method, const Json& params);
 

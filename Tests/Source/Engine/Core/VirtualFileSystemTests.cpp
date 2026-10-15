@@ -153,6 +153,12 @@ namespace Engine {
 			CHECK((*listed)[0].Path.ToString() == "project://Saved.txt");
 			CHECK((*listed)[1].Path.ToString() == "project://Version.txt");
 			CHECK((*listed)[1].Info.Size == 7);
+
+			// The exclusive create reaches the mount too, which never replaces the existing file.
+			REQUIRE(vfs.WriteNewFile(Path("engine://New.txt"), AsBytes("new")).has_value());
+			CHECK(vfs.ReadText(Path("engine://New.txt")) == std::string("new"));
+			CHECK(ErrorCodeOf(vfs.WriteNewFile(Path("project://Saved.txt"), AsBytes("again"))) == ErrorCode::AlreadyExists);
+			CHECK(vfs.ReadText(Path("project://Saved.txt")) == std::string("saved"));
 		}
 
 		TEST_CASE("VirtualFileSystem: unmounted schemes and the empty path are NotFound")
@@ -164,6 +170,7 @@ namespace Engine {
 			CHECK(ErrorCodeOf(vfs.ReadText(Path("user://Settings.json"))) == ErrorCode::NotFound);
 			CHECK(ErrorCodeOf(vfs.Open(Path("user://Settings.json"))) == ErrorCode::NotFound);
 			CHECK(ErrorCodeOf(vfs.WriteFileAtomic(Path("user://Settings.json"), AsBytes("{}"))) == ErrorCode::NotFound);
+			CHECK(ErrorCodeOf(vfs.WriteNewFile(Path("user://Settings.json"), AsBytes("{}"))) == ErrorCode::NotFound);
 			CHECK(ErrorCodeOf(vfs.List(Path("user://"))) == ErrorCode::NotFound);
 			CHECK(ErrorCodeOf(vfs.CreateDirectories(Path("user://Logs"))) == ErrorCode::NotFound);
 			CHECK(ErrorCodeOf(vfs.Remove(Path("user://Logs"))) == ErrorCode::NotFound);

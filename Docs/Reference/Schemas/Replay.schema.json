@@ -10,7 +10,7 @@
 		},
 		"Version": {
 			"description": "The format version this build writes; older versions are migrated when read.",
-			"enum": [1]
+			"enum": [2]
 		},
 		"Scene": {
 			"description": "The scene the replay starts in.",
@@ -158,17 +158,39 @@
 				"additionalProperties": false
 			}
 		},
+		"Checkpoints": {
+			"description": "The state hashes the recording observed along its run, one every 60 ticks before FinalTick, each at a completed-tick boundary (none at a tick inside a frame where a test suite's scripted clock ran several steps; a reader accepts any increasing ticks). Verification with strictHash compares each as playback reaches its tick and stops at the first that differs.",
+			"type": "array",
+			"items": {
+				"description": "One state-hash checkpoint.",
+				"type": "object",
+				"properties": {
+					"Tick": {
+						"description": "The completed-tick boundary of the checkpoint: after tick 0, before FinalTick, increasing strictly.",
+						"type": "integer",
+						"minimum": 1
+					},
+					"StateHash": {
+						"description": "The state hash the recording observed at Tick: 16 lowercase hex digits.",
+						"type": "string",
+						"pattern": "^[0-9a-f]{16}$"
+					}
+				},
+				"required": ["Tick", "StateHash"],
+				"additionalProperties": false
+			}
+		},
 		"FinalTick": {
 			"description": "The last tick of the replay.",
 			"type": "integer",
 			"minimum": 0
 		},
 		"FinalStateHash": {
-			"description": "The state hash at FinalTick: 16 lowercase hex digits.",
+			"description": "The state hash at FinalTick: 16 lowercase hex digits. It covers the simulated world (every entity with its serialized components, the tick, the session's Random state, the id draws and every body's physics state), never script tables, audio or input.",
 			"type": "string",
-			"pattern": "^[0-9a-fA-F]{16}$"
+			"pattern": "^[0-9a-f]{16}$"
 		}
 	},
-	"required": ["Format", "Version", "Scene", "Parameters", "Seed", "FixedHz", "EngineVersion", "Config", "Events", "Expect", "FinalTick", "FinalStateHash"],
+	"required": ["Format", "Version", "Scene", "Parameters", "Seed", "FixedHz", "EngineVersion", "Config", "Events", "Expect", "Checkpoints", "FinalTick", "FinalStateHash"],
 	"additionalProperties": false
 }

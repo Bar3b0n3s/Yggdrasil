@@ -206,8 +206,8 @@ end))");
 			}
 			REQUIRE(services.Reports.size() == 5);
 			CHECK(services.Reports[0].Message == "condition");
-			CHECK(services.Reports[1].Message == "equality");
-			CHECK(services.Reports[2].Message == "distance");
+			CHECK(services.Reports[1].Message == "equality (got 1, expected 2)");
+			CHECK(services.Reports[2].Message == "distance (got 1, expected 1.5, epsilon 0.1)");
 			CHECK(services.Reports[3].Signal == ScriptTestSignal::Fail);
 			CHECK(services.Reports[4].Signal == ScriptTestSignal::Skip);
 			CHECK(services.Errors.empty());
@@ -585,13 +585,72 @@ end))",
 			}
 			// A VM error a script caught keeps its authored location in every reported message, never the private chunk name.
 			CHECK(services.Reports[0].Message.starts_with("Assets/Tests/Bindings.luau:5: attempt to index nil"));
-			CHECK(services.Reports[1].Message == services.Reports[0].Message);
+			CHECK(services.Reports[1].Message == services.Reports[0].Message + " (got 1, expected 2)");
 			const std::string marker = std::format(" [truncated: {} bytes]", 1048576);
 			CHECK(services.Reports[2].Message == std::string(MaxScriptLogMessageBytes - marker.size(), 'm') + marker);
 			CHECK(services.Reports[3].Signal == ScriptTestSignal::Fail);
 			CHECK(services.Reports[3].Message == services.Reports[0].Message);
 			CHECK(result.Message == services.Reports[0].Message);
 			fixture.GetEngine()->CancelCase(thread);
+		}
+
+		// M16 friction S1-08: a failed ExpectEqual or ExpectNear reported only its message, so a failing row never said which
+		// values it compared.
+		TEST_CASE("TestBindings: ExpectEqual and ExpectNear failures report the actual and expected values and the epsilon")
+		{
+			TestServices services;
+			Test::ScriptTestFixture fixture({ .Mode = RunModes::Editor, .TestMode = true, .TestHost = &services });
+			const UUID entity = fixture.GetScene().CreateEntity("Visible").GetUUID();
+			REQUIRE(fixture.AddScript(UUID(734), "Assets/Scripts/Value.luau", "return {}"));
+			auto suite = Collect(fixture, services, R"(return Test.Suite("Values", function()
+	Test.Case("values", function()
+		Test.ExpectEqual(1, 2)
+		Test.ExpectEqual("a\"b\n", "c", "names")
+		Test.ExpectEqual(true, nil, "flags")
+		Test.ExpectNear(0.5, 0.25, 0.125, "speed")
+		Test.ExpectNear(vector.create(1, 2, 3), vector.create(1, 2, 3.5))
+		Test.ExpectEqual(Color.New(1, 0, 0), Color.New(0, 0.5, 0, 0.25))
+		Test.ExpectEqual(Quat.Identity(), Quat.New(0, 0, 1, 0))
+		Test.ExpectEqual(Scene.FindByName("Visible"), Assets.Load("Assets/Scripts/Value.luau"))
+		Test.ExpectEqual(Scene.FindByName("Visible").Transform, {}, "proxy")
+		Test.ExpectEqual("x" .. string.rep("\u{E9}", 100), print)
+		Test.ExpectEqual(1, 2, string.rep("m", 2^20))
+		Test.ExpectEqual(2, 2, "equal values report nothing")
+		Test.ExpectNear(1, 1.000001, nil, "near values report nothing")
+	end)
+end))");
+			REQUIRE(suite.Cases.size() == 1);
+			const auto thread = StartCase(fixture, suite.Cases[0]);
+			CHECK(Resume(fixture, thread, 0).State == ScriptCaseState::Completed);
+			fixture.GetEngine()->CancelCase(thread);
+			// "x" and 100 two-byte characters: the first 128 bytes end inside the 64th, which the row leaves out.
+			std::string accented;
+			for (int i = 0; i < 63; ++i)
+				accented += "\xC3\xA9";
+			const std::string marker = std::format(" [truncated: {} bytes]", 1048576);
+			const std::array<std::string, 11> expected{
+				"expected values to be equal (got 1, expected 2)",
+				R"(names (got "a\"b\n", expected "c"))",
+				"flags (got true, expected nil)",
+				"speed (got 0.5, expected 0.25, epsilon 0.125)",
+				"values differ by more than epsilon (got vector(1, 2, 3), expected vector(1, 2, 3.5), epsilon 1e-05)",
+				"expected values to be equal (got Color(1, 0, 0, 1), expected Color(0, 0.5, 0, 0.25))",
+				"expected values to be equal (got Quat(0, 0, 0, 1), expected Quat(0, 0, 1, 0))",
+				std::format("expected values to be equal (got Entity({}), expected AssetRef({}))", entity.ToString(), UUID(734).ToString()),
+				"proxy (got Transform, expected table)",
+				std::format("expected values to be equal (got \"x{}\"... (201 bytes), expected function)", accented),
+				std::string(MaxScriptLogMessageBytes - marker.size() - 20, 'm') + marker + " (got 1, expected 2)",
+			};
+			REQUIRE(services.Reports.size() == expected.size());
+			for (size_t index = 0; index < expected.size(); ++index)
+			{
+				CAPTURE(index);
+				CHECK(services.Reports[index].Signal == ScriptTestSignal::ExpectationFailed);
+				CHECK(services.Reports[index].Message == expected[index]);
+				CHECK(services.Reports[index].Line == index + 3);
+			}
+			CHECK(services.Reports.back().Message.size() == MaxScriptLogMessageBytes);
+			CHECK(services.Errors.empty());
 		}
 
 		TEST_CASE("TestBindings: cancellation stops a pending capture and its case owned tasks")

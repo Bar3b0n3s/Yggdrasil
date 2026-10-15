@@ -36,6 +36,15 @@ namespace Engine {
 			return {};
 		}
 
+		// A state hash as replays store it: exactly 16 lowercase hexadecimal digits.
+		Status Hash(std::string_view value, std::string pointer)
+		{
+			const auto hash = UUID::FromString(value);
+			if (!hash || hash->ToString() != value)
+				return std::unexpected(Invalid(std::move(pointer), "expected 16 lowercase hexadecimal digits"));
+			return {};
+		}
+
 		Status CheckTree(const JsonReader& root)
 		{
 			std::vector<std::pair<JsonReader, size_t>> pending{ { root, 0 } };
@@ -369,10 +378,9 @@ namespace Engine {
 			ENGINE_TRY(parameters.ExpectType(JsonType::Object));
 			ENGINE_TRY(CheckTree(parameters));
 		}
-		const auto hash = UUID::FromString(d.FinalStateHash);
-		if (!hash || hash->ToString() != d.FinalStateHash)
-			return std::unexpected(Invalid("/FinalStateHash", "expected 16 lowercase hexadecimal digits"));
-		if (d.Events.size() > std::numeric_limits<uint32_t>::max() || d.Expect.size() > std::numeric_limits<uint32_t>::max())
+		ENGINE_TRY(Hash(d.FinalStateHash, "/FinalStateHash"));
+		if (d.Events.size() > std::numeric_limits<uint32_t>::max() || d.Expect.size() > std::numeric_limits<uint32_t>::max()
+			|| d.Checkpoints.size() > std::numeric_limits<uint32_t>::max())
 			return std::unexpected(Invalid("", "replay item count exceeds format limit"));
 		uint64_t previous = 0;
 		for (size_t i = 0; i < d.Events.size(); ++i)
@@ -395,6 +403,16 @@ namespace Engine {
 			previous = e.Tick;
 			ENGINE_TRY(Text(e.Luau, pointer + "/Luau", true));
 		}
+		previous = 0;
+		for (size_t i = 0; i < d.Checkpoints.size(); ++i)
+		{
+			const auto& checkpoint = d.Checkpoints[i];
+			const auto pointer = std::format("/Checkpoints/{}", i);
+			if (checkpoint.Tick <= previous || checkpoint.Tick >= d.FinalTick)
+				return std::unexpected(Invalid(pointer + "/Tick", "checkpoint ticks must increase strictly, after tick 0 and before FinalTick"));
+			previous = checkpoint.Tick;
+			ENGINE_TRY(Hash(checkpoint.StateHash, pointer + "/StateHash"));
+		}
 		return {};
 	}
 
@@ -403,10 +421,14 @@ namespace Engine {
 		report = {};
 		const JsonReader root(document);
 		ReplayDocument d;
-		ENGINE_TRY_ASSIGN(d.Version, root.ReadFormatHeader(ReplayFormatName, 1, ReplayFormatVersion));
-		report.FileVersion = d.Version;
-		constexpr std::array<std::string_view, 12> Keys = { "Format", "Version", "Scene", "Parameters", "Seed", "FixedHz", "EngineVersion", "Config", "Events", "Expect", "FinalTick", "FinalStateHash" };
-		ENGINE_TRY(Unknown(root, Keys, report, strictUnknowns));
+		ENGINE_TRY_ASSIGN(const uint32_t fileVersion, root.ReadFormatHeader(ReplayFormatName, 1, ReplayFormatVersion));
+		report.FileVersion = fileVersion;
+		// Version 1 had no Checkpoints: it migrates to the current version with none (a member of that name is unknown there).
+		d.Version = ReplayFormatVersion;
+		const bool hasCheckpoints = fileVersion >= 2;
+		constexpr std::array<std::string_view, 13> Keys = { "Format", "Version", "Scene", "Parameters", "Seed", "FixedHz", "EngineVersion", "Config", "Events", "Expect", "Checkpoints", "FinalTick", "FinalStateHash" };
+		constexpr std::array<std::string_view, 12> KeysVersion1 = { "Format", "Version", "Scene", "Parameters", "Seed", "FixedHz", "EngineVersion", "Config", "Events", "Expect", "FinalTick", "FinalStateHash" };
+		ENGINE_TRY(Unknown(root, hasCheckpoints ? std::span<const std::string_view>(Keys) : std::span<const std::string_view>(KeysVersion1), report, strictUnknowns));
 		ENGINE_TRY_ASSIGN(auto scene, root.GetMember("Scene"));
 		constexpr std::array<std::string_view, 2> SceneKeys = { "Handle", "Path" };
 		ENGINE_TRY(Unknown(scene, SceneKeys, report, strictUnknowns));
@@ -442,6 +464,21 @@ namespace Engine {
 			ENGINE_TRY_ASSIGN(e.Luau, item.ReadMember<std::string>("Luau"));
 			d.Expect.push_back(std::move(e));
 		}
+		if (hasCheckpoints)
+		{
+			ENGINE_TRY_ASSIGN(auto checkpoints, root.GetMember("Checkpoints"));
+			ENGINE_TRY_ASSIGN(size_t checkpointCount, checkpoints.GetArraySize());
+			constexpr std::array<std::string_view, 2> CheckpointKeys = { "Tick", "StateHash" };
+			for (size_t i = 0; i < checkpointCount; ++i)
+			{
+				ENGINE_TRY_ASSIGN(auto item, checkpoints.GetElement(i));
+				ENGINE_TRY(Unknown(item, CheckpointKeys, report, strictUnknowns));
+				ReplayCheckpoint checkpoint;
+				ENGINE_TRY_ASSIGN(checkpoint.Tick, item.ReadMember<uint64_t>("Tick"));
+				ENGINE_TRY_ASSIGN(checkpoint.StateHash, item.ReadMember<std::string>("StateHash"));
+				d.Checkpoints.push_back(std::move(checkpoint));
+			}
+		}
 		ENGINE_TRY(ValidateReplayDocument(d));
 		return d;
 	}
@@ -456,11 +493,13 @@ namespace Engine {
 	Result<Json> ReplayToJson(const ReplayDocument& d)
 	{
 		ENGINE_TRY(ValidateReplayDocument(d));
-		Json j = { { "Format", ReplayFormatName }, { "Version", d.Version }, { "Scene", { { "Handle", d.Header.Scene.Handle.ToString() }, { "Path", d.Header.Scene.Path } } }, { "Parameters", d.Header.Parameters.IsNull() ? Json::object() : d.Header.Parameters.Get() }, { "Seed", d.Header.Seed }, { "FixedHz", d.Header.FixedHz }, { "EngineVersion", d.Header.EngineVersion }, { "Config", d.Header.Config }, { "Events", Json::array() }, { "Expect", Json::array() }, { "FinalTick", d.FinalTick }, { "FinalStateHash", d.FinalStateHash } };
+		Json j = { { "Format", ReplayFormatName }, { "Version", d.Version }, { "Scene", { { "Handle", d.Header.Scene.Handle.ToString() }, { "Path", d.Header.Scene.Path } } }, { "Parameters", d.Header.Parameters.IsNull() ? Json::object() : d.Header.Parameters.Get() }, { "Seed", d.Header.Seed }, { "FixedHz", d.Header.FixedHz }, { "EngineVersion", d.Header.EngineVersion }, { "Config", d.Header.Config }, { "Events", Json::array() }, { "Expect", Json::array() }, { "Checkpoints", Json::array() }, { "FinalTick", d.FinalTick }, { "FinalStateHash", d.FinalStateHash } };
 		for (const auto& e : d.Events)
 			j["Events"].push_back(EventJson(e));
 		for (const auto& e : d.Expect)
 			j["Expect"].push_back({ { "Tick", e.Tick }, { "Luau", e.Luau } });
+		for (const auto& checkpoint : d.Checkpoints)
+			j["Checkpoints"].push_back({ { "Tick", checkpoint.Tick }, { "StateHash", checkpoint.StateHash } });
 		return j;
 	}
 
@@ -512,6 +551,12 @@ namespace Engine {
 			w.WriteU32(static_cast<uint32_t>(script.size()));
 			w.WriteBytes(script);
 		}
+		w.WriteU32(static_cast<uint32_t>(d.Checkpoints.size()));
+		for (const auto& checkpoint : d.Checkpoints)
+		{
+			w.WriteU64(checkpoint.Tick);
+			w.WriteU64(UUID::FromString(checkpoint.StateHash)->GetValue());
+		}
 		w.WriteU64(d.FinalTick);
 		w.WriteU64(UUID::FromString(d.FinalStateHash)->GetValue());
 		return WriteCookedArtifact(ReplayData::StaticType, ReplayData::FormatVersion, importerVersion, w.GetData());
@@ -557,6 +602,17 @@ namespace Engine {
 			result->Expect.push_back({ tick, *script });
 			d.Expect.push_back({ tick, "compiled" });
 		}
+		ENGINE_TRY_ASSIGN(uint32_t checkpointCount, r.ReadU32());
+		if (checkpointCount > r.GetRemaining() / 16)
+			return std::unexpected(Invalid("/Checkpoints", "checkpoint count exceeds remaining payload"));
+		for (uint32_t i = 0; i < checkpointCount; ++i)
+		{
+			ReplayCheckpoint checkpoint;
+			ENGINE_TRY_ASSIGN(checkpoint.Tick, r.ReadU64());
+			ENGINE_TRY_ASSIGN(uint64_t checkpointHash, r.ReadU64());
+			checkpoint.StateHash = UUID(checkpointHash).ToString();
+			d.Checkpoints.push_back(std::move(checkpoint));
+		}
 		ENGINE_TRY_ASSIGN(d.FinalTick, r.ReadU64());
 		ENGINE_TRY_ASSIGN(uint64_t hash, r.ReadU64());
 		d.FinalStateHash = UUID(hash).ToString();
@@ -565,6 +621,7 @@ namespace Engine {
 		ENGINE_TRY(ValidateReplayDocument(d));
 		result->Header = std::move(d.Header);
 		result->Events = std::move(d.Events);
+		result->Checkpoints = std::move(d.Checkpoints);
 		result->FinalTick = d.FinalTick;
 		result->FinalStateHash = std::move(d.FinalStateHash);
 		return AssetRef<ReplayData>(std::move(result));

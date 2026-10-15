@@ -2,8 +2,10 @@
 #include "EditorCore/Automation/TranscriptLog.h"
 
 #include "Engine/Automation/Protocol/SessionFile.h"
+#include "Engine/Core/Buffer.h"
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Core/Json/JsonWriter.h"
+#include "Engine/Core/Log.h"
 #include "Engine/Core/VirtualFileSystem.h"
 
 #include <nlohmann/json.hpp>
@@ -23,20 +25,26 @@ namespace Engine {
 			return SessionFile::FormatUtcTimestamp(std::chrono::system_clock::now(), TimestampPrecision::Milliseconds);
 		}
 
-		// The transcript's current text (empty when the file does not exist yet), checked to end with a complete line.
+		// The transcript's current bytes (empty when the file does not exist yet), ending with a complete line: a torn last line
+		// (a writer that died mid-line) is completed with "\n" and keeps its number, as the bridge completes it
+		// (Tools/MCP/engine_mcp/transcript.py), so every line number keeps its meaning and nothing is edited by hand
+		// (Docs/Decisions/0026-m16-contract.md decision 13; the audit reports the torn line). The bytes are read and counted
+		// as bytes, never decoded, as the bridge does: a line torn inside a multi-byte UTF-8 character is not valid UTF-8, and
+		// it must not stop every later append.
 		static Result<std::string> ReadTranscript(const VirtualFileSystem& vfs, const VfsPath& path)
 		{
-			Result<std::string> text = vfs.ReadText(path);
-			if (!text)
+			Result<Buffer> bytes = vfs.ReadFile(path);
+			if (!bytes)
 			{
-				if (text.error().GetCode() == ErrorCode::NotFound)
+				if (bytes.error().GetCode() == ErrorCode::NotFound)
 					return std::string();
-				return std::unexpected(std::move(text).error().WithContext(std::format("while reading '{}'", path.ToString())));
+				return std::unexpected(std::move(bytes).error().WithContext(std::format("while reading '{}'", path.ToString())));
 			}
-			if (!text->empty() && text->back() != '\n')
+			std::string text(AsStringView(*bytes));
+			if (!text.empty() && text.back() != '\n')
 			{
-				return std::unexpected(Error(ErrorCode::Validation, std::format("'{}' does not end with a newline: its last line is torn", path.ToString()))
-						.WithHint("finish or remove the last line by hand; the transcript is append-only"));
+				ENGINE_WARN("'{}' ended with a torn line; it was completed with a newline and keeps its line number", path.ToString());
+				text += '\n';
 			}
 			return text;
 		}

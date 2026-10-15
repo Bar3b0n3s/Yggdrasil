@@ -26,12 +26,22 @@ namespace Engine {
 		// An asset reference (§7.1): a handle, which files store, or a project path "Assets/..." (with "#<key>" for a
 		// sub-asset) or an engine path "engine://...", which automation params also accept (MethodRegistry.h convention 13).
 		static constexpr std::string_view AssetReferencePattern = "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$";
+		// A hash written as 16 lowercase hex digits, the only form some readers accept (a replay's state hashes).
+		static constexpr std::string_view LowercaseHashPattern = "^[0-9a-f]{16}$";
 
 		static bool IsHexHandle(std::string_view text)
 		{
 			return text.size() == 16 && std::all_of(text.begin(), text.end(), [](char character)
 			{
 				return (character >= '0' && character <= '9') || (character >= 'a' && character <= 'f') || (character >= 'A' && character <= 'F');
+			});
+		}
+
+		static bool IsLowercaseHash(std::string_view text)
+		{
+			return text.size() == 16 && std::all_of(text.begin(), text.end(), [](char character)
+			{
+				return (character >= '0' && character <= '9') || (character >= 'a' && character <= 'f');
 			});
 		}
 		static constexpr std::string_view DefsPrefix = "#/$defs/";
@@ -578,11 +588,21 @@ namespace Engine {
 			{
 				const Result<std::string> pattern = argument.is_string() ? JsonReader(argument).ReadString() : Result<std::string>(std::string());
 				const bool isAssetReference = pattern.has_value() && *pattern == AssetReferencePattern;
-				if (!pattern.has_value() || (*pattern != UUIDPattern && !isAssetReference))
-					return SchemaError(std::format("only the UUID pattern {} and the asset reference pattern {} are supported", UUIDPattern, AssetReferencePattern));
+				const bool isLowercaseHash = pattern.has_value() && *pattern == LowercaseHashPattern;
+				if (!pattern.has_value() || (*pattern != UUIDPattern && !isAssetReference && !isLowercaseHash))
+				{
+					return SchemaError(std::format("only the UUID pattern {}, the asset reference pattern {} and the lowercase hash pattern {} are supported",
+						UUIDPattern, AssetReferencePattern, LowercaseHashPattern));
+				}
 				if (!instance.is_string())
 					return {};
 				ENGINE_TRY_ASSIGN(const std::string text, JsonReader(instance).ReadString());
+				if (isLowercaseHash)
+				{
+					if (!IsLowercaseHash(text))
+						AddViolation("must be 16 lowercase hexadecimal digits");
+					return {};
+				}
 				if (!isAssetReference)
 				{
 					if (!IsHexHandle(text))

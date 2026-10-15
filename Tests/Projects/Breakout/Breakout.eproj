@@ -1,0 +1,122 @@
+{
+	"Format": "Project",
+	"Version": 1,
+	"Name": "Breakout",
+	"StartScene": "Assets/Scenes/Main.scene",
+	"Window": {
+		"Title": "Breakout",
+		"Width": 1200,
+		"Height": 900,
+		"VSync": true,
+		"Fullscreen": false,
+		"Resizable": true
+	},
+	"Simulation": {
+		"FixedHz": 60,
+		"MaxStepsPerFrame": 5,
+		"Seed": 1977,
+		"MaxEntities": 65536
+	},
+	"Physics": {
+		"Gravity": [0, -9.81, 0],
+		"Layers": ["Default"],
+		"Collisions": [
+			["Default", "Default"]
+		]
+	},
+	"Input": {
+		"Actions": {
+			"Launch": {
+				"Type": "Button",
+				"Bindings": ["Key.Space", "Key.Up", "Gamepad.South"],
+				"Positive": [],
+				"Negative": [],
+				"Gamepad": "",
+				"Invert": false
+			},
+			"MoveX": {
+				"Type": "Axis",
+				"Bindings": [],
+				"Positive": ["Key.Right", "Key.D", "Gamepad.DPadRight"],
+				"Negative": ["Key.Left", "Key.A", "Gamepad.DPadLeft"],
+				"Gamepad": "Gamepad.LeftX",
+				"Invert": false
+			},
+			"Restart": {
+				"Type": "Button",
+				"Bindings": ["Key.R", "Key.Enter", "Gamepad.Start"],
+				"Positive": [],
+				"Negative": [],
+				"Gamepad": "",
+				"Invert": false
+			}
+		}
+	},
+	"Rendering": {
+		"ShadowMapSize": 2048,
+		"SsaoHalfResolution": false
+	},
+	"Scripting": {
+		"MemoryLimitMB": 256,
+		"CallbackBudgetMs": 1000,
+		"PauseOnError": true,
+		"BlockPlayOnTypeErrors": true
+	},
+	"Export": {
+		"BuildScenes": ["Assets/Scenes/Main.scene"],
+		"Exclude": ["Assets/Tests/**"],
+		"Icon": "",
+		"Version": "1.0.0",
+		"Company": ""
+	},
+	"Testing": {
+		"Suites": [
+			{
+				"Script": "Assets/Tests/Rules.test.luau",
+				"Scene": "",
+				"Parameters": null,
+				"Isolation": "Suite",
+				"Clock": [],
+				"Overrides": {
+					"CallbackBudgetMs": 0,
+					"MemoryLimitMB": 0,
+					"PauseOnError": "Inherit"
+				},
+				"ExpectQuit": -1,
+				"Modes": ["Editor", "Release", "Dist"]
+			},
+			{
+				"Script": "Assets/Tests/Breakout.test.luau",
+				"Scene": "Assets/Scenes/Main.scene",
+				"Parameters": null,
+				"Isolation": "Case",
+				"Clock": [],
+				"Overrides": {
+					"CallbackBudgetMs": 0,
+					"MemoryLimitMB": 0,
+					"PauseOnError": "Inherit"
+				},
+				"ExpectQuit": -1,
+				"Modes": ["Editor", "Release", "Dist"]
+			},
+			{
+				"Script": "Assets/Tests/Autopilot/Breakout.test.luau",
+				"Scene": "Assets/Scenes/Main.scene",
+				"Parameters": null,
+				"Isolation": "Suite",
+				"Clock": [],
+				"Overrides": {
+					"CallbackBudgetMs": 0,
+					"MemoryLimitMB": 0,
+					"PauseOnError": "Inherit"
+				},
+				"ExpectQuit": -1,
+				"Modes": ["Editor"]
+			}
+		],
+		"Replays": ["Assets/Tests/Replays/*.replay"],
+		"CaseTimeoutTicks": 600,
+		"SuiteTickLimit": 36000,
+		"CoverageGates": false
+	}
+}

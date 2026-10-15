@@ -28,19 +28,21 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
-#include <charconv>
 #include <format>
 #include <map>
+#include <optional>
+#include <span>
 #include <utility>
+#include <vector>
 
 // Client ids, as in the editor's AutomationServer: the server gives every client its own id and maps TCP connections
 // (numbered by the ProtocolServer) onto them, so in-process clients and connections never collide.
 //
 // Output and offloaded results go to user://Automation/Out/ (the game's user-data folder, <UserData>/<Name>/, §14.1), named
-// "<serverTag>-<sequence>.<extension>" like the editor's; responses name their absolute native path, the parent of the
-// sessions directory's "Out" (a server without a sessions directory, in the Tests, names the user:// path). The first write
-// removes the files of servers whose process is gone; the destructor removes this server's offloaded results and keeps its
-// output files (screenshots), as the editor does.
+// "<serverTag>-<sequence>.<extension>" from one sequence and created, never replaced, like the editor's (ResultOffload.h);
+// responses name their absolute native path, the parent of the sessions directory's "Out" (a server without a sessions
+// directory, in the Tests, names the user:// path). The first write removes the files of servers whose process is gone; the
+// destructor removes the offloaded results this server wrote and keeps its output files (screenshots), as the editor does.
 
 namespace Engine {
 
@@ -65,7 +67,10 @@ namespace Engine {
 			RuntimeAutomationServerSpecification Specification{};
 			std::map<ClientId, RuntimeClientRecord> Clients{};
 			std::string ServerTag{};
-			uint64_t NextOutputSequence = 1;
+			// The one sequence of the output files and offloaded results this server writes, and the offloaded results
+			// written, which the destructor removes.
+			uint64_t NextFileSequence = 1;
+			std::vector<VfsPath> OffloadedFiles{};
 			bool OutputDirectoryPrepared = false;
 			std::optional<int> ShutdownRequest{};
 			ClientId RecordingOwner = NoClient;
@@ -73,6 +78,9 @@ namespace Engine {
 
 			// user://Automation/Out/, created and, on first use, pruned of the files of servers that are gone.
 			[[nodiscard]] Result<VfsPath> PrepareOutputDirectory();
+			// Creates the next file of the sequence with `extension` there and returns it; AlreadyExists when that name
+			// exists (it is never replaced). The number is used up even when the write fails.
+			[[nodiscard]] Result<VfsPath> CreateOutputFile(std::string_view extension, std::span<const std::byte> bytes);
 			// The absolute native path of `file` (in PrepareOutputDirectory's directory), which responses name.
 			[[nodiscard]] std::string GetOutputPath(const VfsPath& file) const;
 		};
@@ -216,11 +224,7 @@ namespace Engine {
 					return (character >= 'a' && character <= 'z') || (character >= '0' && character <= '9');
 				}),
 					"output file extension '{}' must be lowercase letters and digits", extension);
-				ENGINE_TRY_ASSIGN(const VfsPath directory, m_Host->PrepareOutputDirectory());
-				const std::string fileName = std::format("{}-{:08}.{}", m_Host->ServerTag, m_Host->NextOutputSequence, extension);
-				ENGINE_TRY_ASSIGN(const VfsPath file, directory.Join(fileName));
-				ENGINE_TRY(m_Host->Vfs->WriteFileAtomic(file, bytes));
-				++m_Host->NextOutputSequence;
+				ENGINE_TRY_ASSIGN(const VfsPath file, m_Host->CreateOutputFile(extension, bytes));
 				return m_Host->GetOutputPath(file);
 			}
 
@@ -239,6 +243,8 @@ namespace Engine {
 					host.Clients.push_back(
 						SessionClientSummary{ .Id = id, .Name = record.Name, .Version = record.Version, .InProcess = record.InProcess });
 				}
+				// The game's scene, the only one it has (M16 friction S2-03).
+				host.Scene = MakeSceneSummary(m_Host->Session->GetScene());
 				return host;
 			}
 
@@ -307,10 +313,8 @@ namespace Engine {
 				{
 					for (const VfsEntry& entry : *entries)
 					{
-						const std::string_view name = entry.Path.GetFileName();
-						uint32_t processId = 0;
-						const std::from_chars_result parsed = std::from_chars(name.data(), name.data() + name.size(), processId);
-						if (entry.Info.IsDirectory || parsed.ec != std::errc() || parsed.ptr == name.data() || *parsed.ptr != '-' || Process::IsRunning(processId))
+						const std::optional<uint32_t> processId = ParseOffloadFileProcessId(entry.Path.GetFileName());
+						if (entry.Info.IsDirectory || !processId.has_value() || Process::IsRunning(*processId))
 							continue;
 						const Status removed = Vfs->Remove(entry.Path);
 						if (!removed && removed.error().GetCode() != ErrorCode::NotFound)
@@ -321,6 +325,15 @@ namespace Engine {
 			}
 			ENGINE_TRY(Vfs->CreateDirectories(directory));
 			return directory;
+		}
+
+		Result<VfsPath> RuntimeHost::CreateOutputFile(std::string_view extension, std::span<const std::byte> bytes)
+		{
+			ENGINE_TRY_ASSIGN(const VfsPath directory, PrepareOutputDirectory());
+			ENGINE_TRY_ASSIGN(const VfsPath file, directory.Join(MakeOffloadFileName(ServerTag, NextFileSequence++, extension)));
+			// Created exclusively: a name that exists, whoever created it and when, fails with AlreadyExists and stays as it is.
+			ENGINE_TRY(WithContext(Vfs->WriteNewFile(file, bytes), "while writing an automation output file, which is never replaced"));
+			return file;
 		}
 
 		std::string RuntimeHost::GetOutputPath(const VfsPath& file) const
@@ -402,16 +415,10 @@ namespace Engine {
 			return state;
 		}
 
-		[[nodiscard]] std::string GetOffloadServerTag() const override
+		[[nodiscard]] Result<std::string> WriteOffloadedResult(std::string_view text) override
 		{
-			return Host.ServerTag;
-		}
-
-		[[nodiscard]] Result<std::string> WriteOffloadedResult(std::string_view fileName, std::string_view text) override
-		{
-			ENGINE_TRY_ASSIGN(const VfsPath directory, Host.PrepareOutputDirectory());
-			ENGINE_TRY_ASSIGN(const VfsPath file, directory.Join(fileName));
-			ENGINE_TRY(Host.Vfs->WriteFileAtomic(file, std::as_bytes(std::span(text.data(), text.size()))));
+			ENGINE_TRY_ASSIGN(const VfsPath file, Host.CreateOutputFile(OffloadExtension, std::as_bytes(std::span(text.data(), text.size()))));
+			Host.OffloadedFiles.push_back(file);
 			return Host.GetOutputPath(file);
 		}
 	};
@@ -465,20 +472,11 @@ namespace Engine {
 			state.Transport->Stop();
 		state.Calls.reset();
 		state.Transport.reset();
-		if (state.Host.OutputDirectoryPrepared)
+		for (const VfsPath& file : state.Host.OffloadedFiles)
 		{
-			const Result<VfsPath> directory = VfsPath::Create("user", "Automation/Out");
-			const Result<std::vector<VfsEntry>> entries = directory.has_value() ? state.Host.Vfs->List(*directory, false) : Result<std::vector<VfsEntry>>();
-			const std::string prefix = state.Host.ServerTag + "-";
-			for (const VfsEntry& entry : entries.value_or(std::vector<VfsEntry>()))
-			{
-				const std::string_view name = entry.Path.GetFileName();
-				if (entry.Info.IsDirectory || !name.starts_with(prefix) || !name.ends_with(".json"))
-					continue;
-				const Status removed = state.Host.Vfs->Remove(entry.Path);
-				if (!removed && removed.error().GetCode() != ErrorCode::NotFound)
-					ENGINE_CORE_WARN("Could not remove the offloaded automation result '{}': {}", entry.Path.ToString(), removed.error().ToString());
-			}
+			const Status removed = state.Host.Vfs->Remove(file);
+			if (!removed && removed.error().GetCode() != ErrorCode::NotFound)
+				ENGINE_CORE_WARN("Could not remove the offloaded automation result '{}': {}", file.ToString(), removed.error().ToString());
 		}
 		if (state.SessionFileWritten)
 		{

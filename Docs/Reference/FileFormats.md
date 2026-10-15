@@ -15,7 +15,7 @@ Every authored file is UTF-8 JSON with LF line ends and tabs, written by the can
 | Prefab | `.prefab` | 1 | [Schemas/Prefab.schema.json](Schemas/Prefab.schema.json) |
 | Project | `.eproj` | 1 | [Schemas/Project.schema.json](Schemas/Project.schema.json) |
 | Provenance | `Automation/Provenance.json` | 1 | [Schemas/Provenance.schema.json](Schemas/Provenance.schema.json) |
-| Replay | `.replay` | 1 | [Schemas/Replay.schema.json](Schemas/Replay.schema.json) |
+| Replay | `.replay` | 2 | [Schemas/Replay.schema.json](Schemas/Replay.schema.json) |
 | Scene | `.scene` | 1 | [Schemas/Scene.schema.json](Schemas/Scene.schema.json) |
 | SoundEffect | `.sfx` | 1 | [Schemas/SoundEffect.schema.json](Schemas/SoundEffect.schema.json) |
 
@@ -271,14 +271,14 @@ Header: `"Format": "Provenance", "Version": 1`. Schema: [Schemas/Provenance.sche
 
 ### Replay (`.replay`)
 
-A recorded input replay (§6.7): the start scene and parameters, the seed and rate, the input events per tick, Luau expectations and the final state hash.
+A recorded input replay (§6.7): the start scene and parameters, the seed and rate, the input events per tick, Luau expectations, the state-hash checkpoints the recording observed (one every 60 ticks before the final tick) and the final state hash. The state hash covers the simulated world: every entity with its serialized components, the tick, the session's Random state, the id draws and every body's physics state; it never covers script tables (self.State, module locals), audio or input, which expectations observe instead. Verification with strictHash compares each checkpoint as playback reaches it and stops at the first that differs. A recording with input events is refused when a run without them reproduces every checkpoint, the final hash and every expectation. Version 1 files (no checkpoints) are read as version 2 with none, and project.upgrade rewrites them.
 
-Header: `"Format": "Replay", "Version": 1`. Schema: [Schemas/Replay.schema.json](Schemas/Replay.schema.json).
+Header: `"Format": "Replay", "Version": 2`. Schema: [Schemas/Replay.schema.json](Schemas/Replay.schema.json).
 
 ```json
 {
 	"Format": "Replay",
-	"Version": 1,
+	"Version": 2,
 	"Scene": {
 		"Handle": "8a61c0d2e4f31b77",
 		"Path": "Assets/Scenes/Level2.scene"
@@ -298,19 +298,19 @@ Header: `"Format": "Replay", "Version": 1`. Schema: [Schemas/Replay.schema.json]
 			"Value": 1
 		},
 		{
-			"Tick": 310,
+			"Tick": 100,
 			"Type": "Action",
 			"Name": "Jump",
 			"State": "Tap"
 		},
 		{
-			"Tick": 320,
+			"Tick": 140,
 			"Type": "Key",
 			"Key": "Escape",
 			"State": "Down"
 		},
 		{
-			"Tick": 321,
+			"Tick": 141,
 			"Type": "Key",
 			"Key": "Escape",
 			"State": "Up"
@@ -318,11 +318,21 @@ Header: `"Format": "Replay", "Version": 1`. Schema: [Schemas/Replay.schema.json]
 	],
 	"Expect": [
 		{
-			"Tick": 900,
+			"Tick": 150,
 			"Luau": "return Scene.GetName() == 'Level3'"
 		}
 	],
-	"FinalTick": 900,
+	"Checkpoints": [
+		{
+			"Tick": 60,
+			"StateHash": "9b1d5e0c27a4f381"
+		},
+		{
+			"Tick": 120,
+			"StateHash": "51c7a0e9d2b64f18"
+		}
+	],
+	"FinalTick": 150,
 	"FinalStateHash": "3e0c91a2b4d5f607"
 }
 ```
@@ -367,7 +377,7 @@ Header: `"Format": "Scene", "Version": 1`. Schema: [Schemas/Scene.schema.json](S
 
 ### SoundEffect (`.sfx`)
 
-A procedural sound effect (§6.6): layers of oscillators synthesized into a 48 kHz mono clip.
+A procedural sound effect (§6.6): layers of oscillators synthesized into a 48 kHz mono clip. Each layer plays notes such as `"C#5:0.06"` (name with `#` or `b`, octave 0 to 8, seconds) and rests such as `"R:0.1"`, or one frequency sweep; the tables below list every field, its range and the limits.
 
 Header: `"Format": "SoundEffect", "Version": 1`. Schema: [Schemas/SoundEffect.schema.json](Schemas/SoundEffect.schema.json).
 
@@ -394,6 +404,54 @@ Header: `"Format": "SoundEffect", "Version": 1`. Schema: [Schemas/SoundEffect.sc
 }
 ```
 
+#### Fields of SoundEffect
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `Seed` | `UInt32` | `0` |  |  |  | The seed of the noise layers' generators. |
+| `Volume` | `Float` | `1` | 0 to 1 |  |  | The sound's linear volume, from 0 to 1. |
+| `Layers` | `Array<SoundLayer>` | `[]` |  |  |  | 1 to 16 layers, summed. A layer lasts its Delay, plus its notes' seconds (or its Duration), plus its Envelope's Release; the sound lasts as long as its longest layer, at most 10 seconds. |
+
+#### Fields of SoundLayer
+
+One oscillator of a sound effect: a note sequence (Notes) or, without notes, one tone sweeping from StartFrequency to EndFrequency over Duration. Every note, or the tone, plays with its own Envelope.
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `Wave` | `SoundWave` | `"Square"` |  |  |  | The oscillator's waveform. |
+| `DutyCycle` | `Float` | `0.5` | 0.01 to 0.99 |  |  | Square waves only: the fraction of each period spent high. |
+| `Notes` | `Array<String>` | `[]` |  |  |  | At most 256 notes played back to back, each "\<Name>\<Octave>:\<seconds>" such as "C5:0.06", or "R:\<seconds>" for a rest such as "R:0.1". Name is C, C#, Db, D, D#, Eb, E, F, F#, Gb, G, G#, Ab, A, A#, Bb or B (case-sensitive: '#' sharpens, 'b' flattens); Octave is one digit, 0 to 8, with A4 = 440 Hz in equal temperament and C4 middle C; seconds is a positive plain decimal (no exponent or sign) with at most 7 digits before and 8 after the point. Empty: the layer plays one tone of Duration seconds. |
+| `Duration` | `Float` | `0.1` | 0 to 10 | s |  | Without notes: the sweep's length in seconds. |
+| `StartFrequency` | `Float` | `440` | 20 to 20000 | Hz |  | Without notes: the sweep's first frequency. |
+| `EndFrequency` | `Float` | `440` | 20 to 20000 | Hz |  | Without notes: the sweep's last frequency (an exponential glide). |
+| `Volume` | `Float` | `1` | 0 to 1 |  |  | The layer's linear volume, from 0 to 1. |
+| `Envelope` | `SoundEnvelope` | `{"Attack":0.005,"Decay":0,"Sustain":1,"Release":0.01}` |  |  |  | The volume envelope of each note. |
+| `LowPass` | `Float` | `0` | 0 to 20000 | Hz |  | The cutoff of a one-pole low-pass filter in Hz; 0 leaves the layer unfiltered. |
+| `Delay` | `Float` | `0` | 0 to 10 | s |  | Seconds from the sound's start until the layer starts. |
+
+#### Fields of SoundEnvelope
+
+The ADSR volume envelope every note of a layer plays with.
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `Attack` | `Float` | `0.005` | 0 to 10 | s |  | Seconds from silence to full level at the note's start. |
+| `Decay` | `Float` | `0` | 0 to 10 | s |  | Seconds from full level down to the sustain level. |
+| `Sustain` | `Float` | `1` | 0 to 1 |  |  | The level held until the note ends, from 0 to 1. |
+| `Release` | `Float` | `0.01` | 0 to 10 | s |  | Seconds from the sustain level to silence after the note ends. |
+
+#### Values of SoundWave
+
+The oscillator of a sound effect layer.
+
+| Value | Description |
+|---|---|
+| `Sine` | A pure sine tone. |
+| `Square` | A square wave with an adjustable duty cycle: hollow, chiptune-like. |
+| `Triangle` | A triangle wave: soft, flute-like. |
+| `Saw` | A sawtooth wave: bright and buzzy. |
+| `Noise` | Seeded noise, resampled at the frequency: hiss, hits and explosions. |
+
 ## Source formats
 
 The files the editor imports from `Assets/`, by importer and extension (§7.4). Importable rows are cooked into assets; a row that is not importable is claimed only to be refused with a hint. Settings name the importer's settings struct, the shape of a `.meta`'s `Settings` (`asset.getImportSettings` returns it).
@@ -412,7 +470,7 @@ The files the editor imports from `Assets/`, by importer and extension (§7.4). 
 | Gltf | `.gltf` | Prefab | 1 | `GltfImportSettings` | yes |
 | Material | `.material` | Material | 1 | none | yes |
 | Prefab | `.prefab` | Prefab | 1 | none | yes |
-| Replay | `.replay` | Replay | 1 | none | yes |
+| Replay | `.replay` | Replay | 2 | none | yes |
 | Scene | `.scene` | Scene | 1 | none | yes |
 | Script | `.luau` | Script | 1 | none | yes |
 | SoundEffect | `.sfx` | AudioClip | 1 | none | yes |

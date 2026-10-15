@@ -111,8 +111,10 @@ namespace Engine {
 	//   - in FinishRequest closes the request's dry run;
 	//   - reports MetaState from EditorContext::GetRevision, the dirty flag and the history;
 	//   - writes offloaded results to project://Library/Automation/Out/ (user://Automation/Out/ without a project or when
-	//     read-only), named with its server tag (its process id and start time).
-	// Method output files, such as screenshots, go to the same directory (WriteOutputFile).
+	//     read-only), named with its server tag (its process id and start time) and the next number of its one file
+	//     sequence (ResultOffload.h), and removes them, and only them, when it is destroyed.
+	// Method output files, such as screenshots and test reports, go to the same directory with the same sequence
+	// (WriteOutputFile), so no file of the server ever replaces another.
 	// As the requests' IAssetReferenceResolver (MethodRegistry.h convention 13) it resolves the readable spellings of asset
 	// references in params through the editor's asset manager, refreshing first for a project path (§7.3), and checks the
 	// asset's type against the field's.
@@ -182,14 +184,16 @@ namespace Engine {
 		// The responses for an in-process client since the last call, in completion order.
 		[[nodiscard]] std::vector<Json> TakeInProcessResponses(ClientId client);
 
-		// Writes a method's output file, such as a screenshot's PNG, as "<serverTag>-<sequence>.<extension>" (the sequence
-		// counts this server's output files from 1, as at least 8 digits) into the directory of offloaded results
-		// (project://Library/Automation/Out/, or user://Automation/Out/ without a writable project), and returns its absolute
-		// native path, which results name like offloaded ones. `extension` is lowercase letters and digits without the dot
-		// ("png"). Unlike offloaded results, output files outlive the server, so the screenshots of a --batch run can be read
-		// after it exits; the first write of a later server to the directory removes them with the other leftovers of
-		// servers that are gone. Method output is not project content, so the DenyMutations policy allows it, as it does
-		// offloaded results. Errors: those of the VFS writes.
+		// Writes a method's output file, such as a screenshot's PNG or a test report, as "<serverTag>-<sequence>.<extension>"
+		// (MakeOffloadFileName: the sequence counts every file this server writes there, offloaded results included, from
+		// 1, as at least 8 digits) into the directory of offloaded results (project://Library/Automation/Out/, or
+		// user://Automation/Out/ without a writable project), and returns its absolute native path, which results name like
+		// offloaded ones. `extension` is lowercase letters and digits without the dot ("png"). The file is created, never
+		// replaced (AlreadyExists, with no backup made). Unlike offloaded results, output files outlive the server, so the
+		// screenshots of a --batch run and the reports of a test run can be read after it exits; the first write of a later
+		// server to the directory removes them with the other leftovers of servers that are gone. Method output is not
+		// project content, so the DenyMutations policy allows it, as it does offloaded results. Errors: AlreadyExists, and
+		// those of the VFS writes.
 		[[nodiscard]] Result<std::string> WriteOutputFile(std::string_view extension, std::span<const std::byte> bytes);
 	private:
 		[[nodiscard]] Status CheckAvailability(const MethodDescriptor& method) const override;
@@ -199,13 +203,12 @@ namespace Engine {
 		void LeaveInvocation(MethodContext& context) override;
 		void FinishRequest(MethodContext& context) override;
 		[[nodiscard]] MetaState GetMetaState() const override;
-		[[nodiscard]] std::string GetOffloadServerTag() const override;
-		[[nodiscard]] Result<std::string> WriteOffloadedResult(std::string_view fileName, std::string_view text) override;
+		[[nodiscard]] Result<std::string> WriteOffloadedResult(std::string_view text) override;
 		[[nodiscard]] Result<UUID> ResolveAssetReference(std::string_view reference, std::string_view assetTypeName) override;
 	private:
 		// The Dispatcher, the ProtocolServer, the token, the session file path, the server tag, the clients with their
-		// names and versions, the in-process response queues, the project the session file last named and the output
-		// files' sequence (AutomationServer.cpp).
+		// names and versions, the in-process response queues, the project the session file last named, the file sequence
+		// and the offloaded results written (AutomationServer.cpp).
 		struct State;
 	private:
 		EditorContext* m_Editor = nullptr; // documented back-reference: outlives the server

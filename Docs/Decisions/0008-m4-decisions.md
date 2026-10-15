@@ -87,6 +87,8 @@ The token and version checks of `session.hello` run on the I/O thread, so unauth
   - `FinishRequest`, once at the end (answered, refused or cancelled): closes the sandbox before `_meta` is built;
   - `GetMetaState`, `GetOffloadServerTag` and `WriteOffloadedResult`.
 
+  > **Superseded in part** by `Docs/Decisions/0026-m16-contract.md` ("Integration (session 1 fixes)", friction S1-03): `GetOffloadServerTag` is gone and `WriteOffloadedResult(fileName, text)` became `WriteOffloadedResult(text)`. The host names the file (`MakeOffloadFileName` of its server tag and the next number of the one sequence it also names its method output files with), creates it without replacing anything (`AlreadyExists` when the name exists) and removes exactly its own offloaded results when it shuts down (`Engine/Automation/Protocol/ResultOffload.h`, Architecture §13.4 "Bounded output").
+
   `Dispatcher` keeps the per-client queues and pending operations in the protocol layer, so the Runtime reuses them in M7. A client can be added without offloading (`Dispatcher::AddClient`, `AutomationServer::ConnectInProcess`), which `BatchRunner` uses so its `$ref` substitution reads full results.
 - **Exceptions:** an exception escaping a handler asserts in Debug builds and becomes an Internal response in Release (§4.6 "asserts in Debug").
 
@@ -122,6 +124,8 @@ The frozen format is in `ProvenanceRecorder.h`: `{"Format": "Provenance", "Versi
 - `XXH64` is 16 hex digits (never a JSON number, as for UUIDs, §4.8).
 - `RequestId` is the JSON-RPC id as sent.
 - `RequestId` and `TranscriptLine` are `null` for `ui` and `cli` writes and for requests without a transcript line.
+
+  > **Superseded in part** by `Docs/Decisions/0026-m16-contract.md` decision 13 (G6): `RequestId` is null for `ui` writes only, and `TranscriptLine` is null for `ui` writes and for requests without a transcript line. A `cli` entry carries its own request's id and transcript line: `Editor --upgrade` transcribes `project.refreshAssets` (id 1) and `project.upgrade` (id 2).
 - Every project write goes through `EditorContext::WriteProjectFile`. It refuses writes in read-only editors, sends them to the overlay during dry runs, and otherwise records the `.eproj` and `Assets/**` with the current attribution, then saves the provenance file.
 
 ### 11. The transcript line format
@@ -136,6 +140,8 @@ Shared by `engine_mcp/transcript.py` and `TranscriptLog`, camelCase like the pro
 - Line numbers are 1-based.
 - `session.hello` is never written, because it carries the token.
 - The editor writes its own lines only for `--upgrade`, with client "cli" (§13.12). A line is added by an atomic rewrite of the file, because the VFS has no append.
+
+> **Superseded in part** by `Docs/Decisions/0026-m16-contract.md` ("Integration (session 1 fixes)", friction S1-16): a request line's `params` are the params the editor receives except for one member: the bridge records the `path` of a `project.create` or `project.open` inside the repository relative to the repository root, with `/` separators (the editor still receives the absolute path), and resolves a relative project path against the repository root. A response's `summary` names an offloaded result's file relative to the project root, or by its file name when it lies outside the project. The committed transcript therefore names no machine path where it can avoid one (Architecture §13.8 "Transcript").
 
 ### 12. Dry runs use a scene copy
 
@@ -251,6 +257,8 @@ Further rules:
 The protocol layer owns it (`Watchdog`). The Dispatcher sets "Automation:<method>" and handlers refine it (`MethodContext::SetPhase`). How the script engine (M13) and the importers (M6) reach it is for their contracts to decide, for example through an `EngineContext`-owned marker. The crash breadcrumbs cannot serve, because they have no reader outside the crash handler.
 
 ### 22. Offloaded results
+
+> Superseded in part by `Docs/Decisions/0026-m16-contract.md` ("Integration (session 1 fixes)", friction S1-02 and S1-03; Architecture §13.4 "Bounded output"): one per-server sequence names offloaded results and output files of every extension; files are created, never replaced (a taken name is `AlreadyExists`, no `.bak`); a summary repeats every top-level member of 512 bytes or less verbatim; shutdown removes only the server's offloaded results and keeps screenshots and test reports; first-use pruning removes every file of a gone server, leftovers included.
 
 - **File names:** `<serverTag>-<sequence>.json`, with an 8-digit per-server sequence and the server tag `<processId>-<startSeconds>` (`MakeOffloadServerTag`). §13.4's `<id>.json` would put client-chosen strings into file names, and a bare sequence would let two editors sharing `user://Automation/Out/`, or a restarted editor in its project's `Library/Automation/Out/`, overwrite each other's results.
 - **Without a project, and for read-only editors:** the files go to `user://Automation/Out/`.

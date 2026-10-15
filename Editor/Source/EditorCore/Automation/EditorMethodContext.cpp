@@ -25,6 +25,8 @@
 #include "Engine/Scene/Components/ScriptComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/PhysicsSystem.h"
+#include "Engine/Scene/Prefab.h"
+#include "Engine/Scene/PrefabAsset.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scripting/ScriptEngine.h"
 #include "Engine/Session/PlaySession.h"
@@ -180,7 +182,8 @@ namespace Engine {
 
 	Status EditorMethodContext::CompleteParameterOwners(Json& params)
 	{
-		if (GetRequest().Method != "entity.update")
+		const std::string& method = GetRequest().Method;
+		if (method != "entity.update" && method != "prefab.instantiate")
 			return {};
 		const auto components = params.find("components");
 		if (components == params.end() || !components->is_object())
@@ -191,6 +194,8 @@ namespace Engine {
 		const auto fields = script->find("Fields");
 		if (fields == script->end() || !fields->is_object() || fields->empty())
 			return {};
+		if (method == "prefab.instantiate")
+			return CompletePrefabScriptOwner(params, *script);
 		if (const auto removed = params.find("removeComponents"); removed != params.end() && removed->is_array())
 		{
 			for (const auto& name : *removed)
@@ -223,6 +228,44 @@ namespace Engine {
 		ENGINE_TRY_ASSIGN(const Entity owner, ResolveEntity(*scene, *reference, "/entity"));
 		if (const auto* existing = owner.TryGetComponent<ScriptComponent>(); existing != nullptr && existing->Script.IsValid())
 			(*script)["Script"] = existing->Script.GetHandle().ToString();
+		return {};
+	}
+
+	Status EditorMethodContext::CompletePrefabScriptOwner(const Json& params, Json& script)
+	{
+		// A malformed prefab param remains for the registry's located validation; a prefab that cannot be loaded is the
+		// handler's error, located at /prefab, which no later step could report once the fields fail to resolve.
+		const auto prefabJson = JsonReader(params).FindMember("prefab");
+		if (!prefabJson)
+			return {};
+		const auto reference = prefabJson->ReadString();
+		if (!reference)
+			return {};
+		ENGINE_TRY_ASSIGN(const AssetHandle handle, Utils::ResolveAssetParam(*this, *reference, "/prefab"));
+		// Only the root's Script handle is read here; the request's validation checks the field values against it.
+		LoadReport report;
+		Result<Prefab> prefab = LoadPrefabAsset(m_Editor->GetAssets(), handle, m_Editor->GetTypeRegistry(), nullptr, report);
+		if (!prefab)
+			return std::unexpected(Utils::LocateAtParam(prefab.error(), "/prefab"));
+		const std::string root = prefab->GetRootID().ToString();
+		for (const Json& entity : prefab->GetEntities())
+		{
+			const auto id = entity.find("ID");
+			if (id == entity.end() || *id != Json(root))
+				continue;
+			const Json* component = nullptr;
+			if (const auto components = entity.find("Components"); components != entity.end() && components->is_object())
+			{
+				if (const auto found = components->find("Script"); found != components->end() && found->is_object())
+					component = &*found;
+			}
+			if (component == nullptr)
+				return {};
+			const auto handleJson = component->find("Script");
+			if (handleJson != component->end() && handleJson->is_string())
+				script["Script"] = *handleJson;
+			return {};
+		}
 		return {};
 	}
 
@@ -435,6 +478,9 @@ namespace Engine {
 			host.Clients.push_back(
 				SessionClientSummary{ .Id = client.Id, .Name = client.Name, .Version = client.Version, .InProcess = client.InProcess });
 		}
+		// The edit scene, also while playing (M16 friction S2-03): opening a project opens none.
+		if (m_Editor->HasScene())
+			host.Scene = Utils::MakeSceneSummary(*m_Editor);
 		return host;
 	}
 

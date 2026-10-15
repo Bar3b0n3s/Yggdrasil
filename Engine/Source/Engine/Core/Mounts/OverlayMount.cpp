@@ -260,6 +260,30 @@ namespace Engine {
 		return {};
 	}
 
+	Status OverlayMount::WriteNewFile(const VfsPath& path, std::span<const std::byte> data)
+	{
+		const std::unique_lock lock(m_Mutex);
+		ENGINE_CORE_ASSERT(m_Lower != nullptr, "OverlayMount::WriteNewFile after ReleaseLower");
+		if (!m_Lower)
+			return Utils::ReleasedError();
+		const std::string_view scheme = path.GetScheme();
+		const std::string_view relativePath = path.GetPath();
+		if (relativePath.empty())
+			return MakeError(ErrorCode::Io, "cannot create '{}': it is the mount root, a directory", path.ToString());
+
+		const std::string_view parent = Utils::ParentPathOf(relativePath);
+		ENGINE_TRY_ASSIGN(const MergedEntry parentEntry, Utils::ResolveMerged(m_Upper, *m_Lower, m_Removed, scheme, parent));
+		ENGINE_TRY(Utils::RequireDirectory(parentEntry, scheme, parent));
+		ENGINE_TRY_ASSIGN(const std::optional<MergedEntry> existing, Utils::ResolveNewName(m_Upper, *m_Lower, m_Removed, scheme, relativePath));
+		if (existing)
+			return MakeError(ErrorCode::AlreadyExists, "cannot create '{}': it exists already and is never replaced", path.ToString());
+
+		ENGINE_TRY(Utils::EnsureUpperDirectory(m_Upper, scheme, parent));
+		ENGINE_TRY(m_Upper.WriteNewFile(path, data));
+		m_Changed.emplace(relativePath);
+		return {};
+	}
+
 	Result<FileInfo> OverlayMount::GetInfo(const VfsPath& path) const
 	{
 		const std::shared_lock lock(m_Mutex);
@@ -339,6 +363,30 @@ namespace Engine {
 		ENGINE_TRY_ASSIGN(const MergedEntry entry, Utils::ResolveMerged(m_Upper, *m_Lower, m_Removed, path.GetScheme(), relativePath));
 		if (entry.InUpper)
 			ENGINE_TRY(m_Upper.Remove(path));
+		if (entry.InLower)
+			m_Removed.emplace(relativePath);
+		m_Changed.emplace(relativePath);
+		return {};
+	}
+
+	Status OverlayMount::RemoveEmptyDirectory(const VfsPath& directory)
+	{
+		const std::unique_lock lock(m_Mutex);
+		ENGINE_CORE_ASSERT(m_Lower != nullptr, "OverlayMount::RemoveEmptyDirectory after ReleaseLower");
+		if (!m_Lower)
+			return Utils::ReleasedError();
+		const std::string_view relativePath = directory.GetPath();
+		if (relativePath.empty())
+			return MakeError(ErrorCode::InvalidArgument, "cannot remove '{}': it is the mount root", directory.ToString());
+
+		ENGINE_TRY_ASSIGN(const MergedEntry entry, Utils::ResolveMerged(m_Upper, *m_Lower, m_Removed, directory.GetScheme(), relativePath));
+		if (!entry.Info.IsDirectory)
+			return MakeError(ErrorCode::Io, "cannot remove the directory '{}': it is a file", directory.ToString());
+		ENGINE_TRY_ASSIGN(const std::vector<VfsEntry> entries, Utils::ListMerged(m_Upper, *m_Lower, m_Removed, directory, entry, false));
+		if (!entries.empty())
+			return MakeError(ErrorCode::InvalidState, "cannot remove the directory '{}': it is not empty", directory.ToString());
+		if (entry.InUpper)
+			ENGINE_TRY(m_Upper.RemoveEmptyDirectory(directory));
 		if (entry.InLower)
 			m_Removed.emplace(relativePath);
 		m_Changed.emplace(relativePath);

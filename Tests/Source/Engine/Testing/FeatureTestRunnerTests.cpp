@@ -3,6 +3,7 @@
 
 #include "Engine/Asset/AudioClipData.h"
 #include "Engine/Asset/DocumentData.h"
+#include "Engine/Asset/ReplayData.h"
 #include "Engine/Core/Jobs/JobSystem.h"
 #include "Engine/Core/Jobs/MainThreadQueue.h"
 #include "Engine/Core/Json/JsonReader.h"
@@ -64,6 +65,7 @@ namespace Engine {
 			AssetManager* ObservedAssets = nullptr;            // GetAssetManager: the manager a coverage run observes (null: none)
 			std::vector<TestCoverageCounter> ScriptCounters{}; // GetCoverage's counters
 			ReplayDocument Candidate{};
+			std::optional<uint64_t> InputCheckTick{}; // FeatureTestRunner::GetInputCheckTick after the last Run
 			Json SceneDocument{};
 			Ref<const ScriptFieldSchemaSource> Schemas{};
 
@@ -113,6 +115,34 @@ namespace Engine {
 				component.Script.SetHandle(handle);
 				Compiler.GetScene().CreateEntity("Driver").AddComponent<ScriptComponent>(component);
 				RefreshScene();
+			}
+
+			// A Driver that moves one unit along X per fixed step while Space, A or B is held, plus the Move axis, and jumps
+			// back to the origin on an R press (a restart in place): a recording that presses those keys has an outcome that
+			// depends on its input, which the recording's input check requires (M16 FX-4).
+			void InputDriven()
+			{
+				Behaviour(R"(local Driver={}
+function Driver.OnFixedUpdate(self)
+	if Input.IsKeyPressed("R") then self.Entity.Transform.Translation = vector.zero return end
+	local x = Input.GetAxis("Move")
+	if Input.IsKeyDown("Space") or Input.IsKeyDown("A") or Input.IsKeyDown("B") then x += 1 end
+	if x ~= 0 then self.Entity.Transform:Translate(vector.create(x, 0, 0)) end
+end
+return Script.Define("Driver",Driver))");
+			}
+
+			// Runs `runner` to its end and returns the error Advance ended it with, if any.
+			std::optional<Error> RunToEnd(FeatureTestRunner& runner)
+			{
+				for (uint32_t i = 0; i < 2000 && runner.IsRunning(); ++i)
+				{
+					const auto advanced = runner.Advance();
+					if (!advanced)
+						return advanced.error();
+				}
+				CHECK_FALSE(runner.IsRunning());
+				return std::nullopt;
 			}
 
 			TestSuiteSettings& Suite(std::string source)
@@ -285,6 +315,7 @@ namespace Engine {
 					REQUIRE(recording);
 					Candidate = std::move(*recording);
 				}
+				InputCheckTick = runner.GetInputCheckTick();
 				return *result;
 			}
 			void Finish(FeatureTestRunner& runner)
@@ -1351,6 +1382,7 @@ end))");
 		TEST_CASE("TestRunner: recording selects one suite and captures Test injections")
 		{
 			RunnerHost host;
+			host.InputDriven();
 			host.Suite(InputSuite);
 			auto result = host.Run({ .Record = true });
 			CHECK(result.Passed);
@@ -1381,15 +1413,21 @@ end))");
 		TEST_CASE("TestRunner: recording verifies fresh ordinary gameplay before publication")
 		{
 			RunnerHost host;
+			host.InputDriven();
 			host.Suite(InputSuite);
 			auto result = host.Run({ .Record = true });
 			CHECK(result.Passed);
-			CHECK(host.ReplaySessions == 1);
-			const auto& spec = host.Created.back();
-			CHECK_FALSE(spec.TestMode);
-			CHECK(spec.TestHost == nullptr);
-			CHECK(spec.TestHook == nullptr);
-			CHECK(spec.OwnsAudioTime);
+			// The verification, then the input check (the recording has input events): both ordinary play.
+			CHECK(host.ReplaySessions == 2);
+			REQUIRE(host.Created.size() >= 2);
+			for (size_t index = host.Created.size() - 2; index < host.Created.size(); ++index)
+			{
+				const auto& spec = host.Created[index];
+				CHECK_FALSE(spec.TestMode);
+				CHECK(spec.TestHost == nullptr);
+				CHECK(spec.TestHook == nullptr);
+				CHECK(spec.OwnsAudioTime);
+			}
 		}
 
 		TEST_CASE("TestRunner: recording mismatch retains the observed hash and publishes no candidate")
@@ -1412,6 +1450,7 @@ end))");
 		TEST_CASE("TestRunner: a verified recording transfers once without changing suite results")
 		{
 			RunnerHost host;
+			host.InputDriven();
 			host.Suite(InputSuite);
 			FeatureTestRunner runner;
 			REQUIRE(runner.Begin(host, { .Record = true }));
@@ -1431,11 +1470,46 @@ end))");
 		TEST_CASE("TestRunner: recording accepts a scripted clock when normal playback reproduces it")
 		{
 			RunnerHost host;
+			host.InputDriven();
 			host.Suite(InputSuite).Clock = { 0.0f, 2.0f / 60.0f, 5.0f / 60.0f };
 			auto result = host.Run({ .Record = true });
 			CHECK(result.Passed);
-			CHECK(host.ReplaySessions == 1);
+			CHECK(host.ReplaySessions == 2); // the verification and the input check
 			CHECK(host.Candidate.FinalTick == result.Suites[0].Ticks);
+		}
+
+		// M16 review R17: a checkpoint describes a completed-tick boundary, the previous tick's frame phase included, which is
+		// where ordinary playback compares it. A scripted clock that runs several steps in one frame leaves no such boundary
+		// at the ticks inside the frame: a checkpoint taken there missed the frame phase (here a LateUpdate write that follows
+		// the Driver), so normal playback refused a recording whose final state it reproduces. Those ticks now get none.
+		TEST_CASE("TestRunner: a recording under a grouping scripted clock keeps checkpoints only at completed-tick boundaries")
+		{
+			RunnerHost host;
+			host.Behaviour(R"(local Driver={}
+function Driver.OnFixedUpdate(self)
+	if Input.IsKeyDown("Space") then self.Entity.Transform:Translate(vector.create(1, 0, 0)) end
+end
+function Driver.OnLateUpdate(self)
+	self.Entity.Transform.Scale = vector.create(1 + self.Entity.Transform.Translation.x, 1, 1)
+end
+return Script.Define("Driver",Driver))");
+			host.Suite(R"(return Test.Suite("Grouped",function()
+	Test.Case("drive across the checkpoints",function()
+		Test.InjectKey("Space","Down"); Test.WaitTicks(250)
+		Test.InjectKey("Space","Up"); Test.WaitTicks(10)
+	end)
+end))")
+				.Clock = { 0.0f, 2.0f / 60.0f, 5.0f / 60.0f };
+			const auto result = host.Run({ .Record = true });
+			REQUIRE(result.Passed);
+			CHECK(host.ReplaySessions == 2); // the verification reproduced every checkpoint, then the input check differed
+			// The clock's frames run 0, 2 and 5 steps in turn, so at most two of the four multiples of 60 the run passes start
+			// a frame; every one kept does, and ordinary playback reproduced it.
+			const uint64_t multiples = (host.Candidate.FinalTick - 1) / ReplayCheckpointInterval;
+			CHECK(multiples >= 4);
+			CHECK(host.Candidate.Checkpoints.size() < multiples);
+			for (const ReplayCheckpoint& checkpoint : host.Candidate.Checkpoints)
+				CHECK(checkpoint.Tick % ReplayCheckpointInterval == 0);
 		}
 
 		TEST_CASE("TestRunner: case isolated recording preserves all inputs and reports reproduction failure")
@@ -1469,6 +1543,7 @@ end))");
 		TEST_CASE("TestRunner: a single selected isolated case records when normal playback reproduces it")
 		{
 			RunnerHost host;
+			host.InputDriven();
 			host.Suite(R"(return Test.Suite("Segments",function()
 				Test.Case("a",function() Test.Fail("not selected") end)
 				Test.Case("b",function() Test.InjectKey("B","Tap"); Test.WaitTicks(2) end)
@@ -1477,6 +1552,7 @@ end))");
 			auto result = host.Run({ .Filter = "Segments/b", .Record = true });
 			CHECK(result.Passed);
 			REQUIRE(result.Cases.size() == 1);
+			REQUIRE_FALSE(host.Candidate.Events.empty());
 			CHECK(host.Candidate.Events[0].KeyName == "B");
 		}
 
@@ -1796,6 +1872,207 @@ return Script.Define("Driver",Driver))");
 			const auto begun = runner.Begin(host, { .Record = true });
 			REQUIRE_FALSE(begun);
 			CHECK(begun.error().GetLocation().JsonPointer == std::optional<std::string>("/Testing/Suites/0/Parameters/big"));
+		}
+
+		// M16 friction S2-01 (FX-4): Breakout's autopilot ended with a restart in place, so the recorded final state was the
+		// idle state an input-free run reaches too, and the replay proved nothing about the gameplay it recorded. The
+		// recording now gets an input check: an input-free run that reproduces every checkpoint and the final hash refuses
+		// it; a checkpoint taken while the played state was still in the scene, or an ending that keeps it, lets it through.
+		TEST_CASE("TestRunner: recording refuses a replay whose final state hash equals that of the same session without input")
+		{
+			RunnerHost host;
+			host.InputDriven();
+			// Space held for 10 ticks moves the Driver; the R press at tick 15 puts it back, and the run ends idle at tick 30,
+			// before any checkpoint.
+			host.Suite(R"(return Test.Suite("Autopilot",function()
+	Test.Case("play then restart",function()
+		Test.InjectKey("Space","Down"); Test.WaitTicks(10)
+		Test.InjectKey("Space","Up"); Test.WaitTicks(4)
+		Test.InjectKey("R","Tap"); Test.WaitTicks(15)
+	end)
+end))");
+			FeatureTestRunner runner;
+			REQUIRE(runner.Begin(host, { .Record = true }));
+			const std::optional<Error> refused = host.RunToEnd(runner);
+			REQUIRE(refused.has_value());
+			CHECK(refused->GetCode() == ErrorCode::Validation);
+			CHECK(refused->GetMessageText().find("does not depend on its input") != std::string::npos);
+			// M16 friction S3-01: the hint names the input check's real rule (no checkpoint and no ending showed the input),
+			// not a trailing restart as such, which a checkpoint that saw the play lets through (below).
+			CHECK(refused->GetHint().find("restart") != std::string::npos);
+			CHECK(refused->GetHint().find(std::format("never shows in the world at a checkpoint (one every {} ticks) or at its end", ReplayCheckpointInterval))
+				!= std::string::npos);
+			CHECK_FALSE(runner.TakeRecording());
+			CHECK(host.ReplaySessions == 2); // the verification passed, then the input check reproduced it
+			const auto result = runner.GetResult();
+			REQUIRE(result);
+			CHECK_FALSE(result->Passed);
+			REQUIRE(result->Cases.size() == 1);
+			CHECK(result->Cases[0].Status == "passed");
+			CHECK(host.Active == nullptr);
+
+			// The same play that ends while the moved Driver is still in the scene depends on its input.
+			RunnerHost kept;
+			kept.InputDriven();
+			kept.Suite(R"(return Test.Suite("Autopilot",function()
+	Test.Case("play",function()
+		Test.InjectKey("Space","Down"); Test.WaitTicks(10)
+		Test.InjectKey("Space","Up"); Test.WaitTicks(19)
+	end)
+end))");
+			CHECK(kept.Run({ .Record = true }).Passed);
+			CHECK(kept.Candidate.Checkpoints.empty());
+
+			// A restart at the end no longer hides play that a checkpoint saw: Space held across tick 60, R at tick 80.
+			RunnerHost checkpointed;
+			checkpointed.InputDriven();
+			checkpointed.Suite(R"(return Test.Suite("Autopilot",function()
+	Test.Case("play across a checkpoint then restart",function()
+		Test.InjectKey("Space","Down"); Test.WaitTicks(70)
+		Test.InjectKey("Space","Up"); Test.WaitTicks(9)
+		Test.InjectKey("R","Tap"); Test.WaitTicks(50)
+	end)
+end))");
+			const auto passed = checkpointed.Run({ .Record = true });
+			CHECK(passed.Passed);
+			REQUIRE(checkpointed.Candidate.Checkpoints.size() == 2);
+			CHECK(checkpointed.Candidate.Checkpoints[0].Tick == 60);
+			CHECK(checkpointed.Candidate.Checkpoints[1].Tick == 120);
+			CHECK(checkpointed.Candidate.FinalTick == passed.Suites[0].Ticks);
+		}
+
+		// M16 friction S3-03: a recording's result said nothing about its input check. The runner keeps where the input-free
+		// run of an accepted recording first differed: at the first checkpoint, or at the final tick of a recording without
+		// one; nothing for a recording without input events or a refused one.
+		TEST_CASE("TestRunner: the result of a recording names where its input check diverged")
+		{
+			RunnerHost checkpointed;
+			checkpointed.InputDriven();
+			checkpointed.Suite(R"(return Test.Suite("Autopilot",function()
+	Test.Case("play across a checkpoint",function()
+		Test.InjectKey("Space","Down"); Test.WaitTicks(70)
+		Test.InjectKey("Space","Up"); Test.WaitTicks(9)
+	end)
+end))");
+			CHECK(checkpointed.Run({ .Record = true }).Passed);
+			REQUIRE(checkpointed.Candidate.Checkpoints.size() == 1);
+			CHECK(checkpointed.InputCheckTick == std::optional<uint64_t>(60));
+
+			RunnerHost brief;
+			brief.InputDriven();
+			brief.Suite(R"(return Test.Suite("Autopilot",function()
+	Test.Case("play",function()
+		Test.InjectKey("Space","Down"); Test.WaitTicks(10)
+		Test.InjectKey("Space","Up"); Test.WaitTicks(19)
+	end)
+end))");
+			CHECK(brief.Run({ .Record = true }).Passed);
+			CHECK(brief.Candidate.Checkpoints.empty());
+			CHECK(brief.InputCheckTick == std::optional<uint64_t>(brief.Candidate.FinalTick));
+
+			// No input events: nothing to check. No recording: no check either.
+			RunnerHost idle;
+			idle.Suite(R"(return Test.Suite("Autopilot",function()
+	Test.Case("wait",function() Test.WaitTicks(5) end)
+end))");
+			CHECK(idle.Run({ .Record = true }).Passed);
+			CHECK(idle.Candidate.Events.empty());
+			CHECK_FALSE(idle.InputCheckTick.has_value());
+			CHECK(checkpointed.Run().Passed);
+			CHECK_FALSE(checkpointed.InputCheckTick.has_value());
+		}
+
+		// One rule decides input independence (Architecture §13.6): the input-free run passes the recording's verification,
+		// whatever script errors that run raised. The Driver faults only when Space was never held, so the input check's run
+		// raises a script error that the recorded play and its verification never see, while the world, which the Driver
+		// never changes, reproduces the final hash.
+		TEST_CASE("TestRunner: recording refuses an input-independent replay although its input-free run raised a script error")
+		{
+			RunnerHost host;
+			host.Behaviour(R"(local Driver={}
+function Driver.OnFixedUpdate(self)
+	if Input.IsKeyDown("Space") then self.Pressed = true end
+	if Time.GetTick() == 20 and not self.Pressed then error("idle fault") end
+end
+return Script.Define("Driver",Driver))");
+			host.Suite(R"(return Test.Suite("Autopilot",function()
+	Test.Case("press",function()
+		Test.InjectKey("Space","Tap"); Test.WaitTicks(30)
+	end)
+end))");
+			FeatureTestRunner runner;
+			REQUIRE(runner.Begin(host, { .Record = true }));
+			std::optional<Error> refused;
+			{
+				Test::ExpectLog expected(LogLevel::Error, "idle fault");
+				refused = host.RunToEnd(runner);
+			}
+			REQUIRE(refused.has_value());
+			CHECK(refused->GetCode() == ErrorCode::Validation);
+			CHECK(refused->GetMessageText().find("does not depend on its input") != std::string::npos);
+			CHECK_FALSE(runner.TakeRecording());
+			CHECK(host.ReplaySessions == 2); // the verification passed without a script error, then the input check raised one
+			const auto result = runner.GetResult();
+			REQUIRE(result);
+			REQUIRE(result->Cases.size() == 1);
+			CHECK(result->Cases[0].Status == "passed");
+		}
+
+		TEST_CASE("TestRunner: a committed replay whose checkpoint differs fails with a located Checkpoint row")
+		{
+			RunnerHost host;
+			ReplayHeader header;
+			header.Scene = { UUID(401), "Assets/Scenes/Start.scene" };
+			header.Seed = host.Settings.Simulation.Seed;
+			header.EngineVersion = "1";
+			header.Config = "Debug";
+			auto reference = host.CreateReplaySession(header, TestSuiteSettings::Mode::Editor);
+			REQUIRE(reference);
+			auto replay = CreateRef<ReplayData>();
+			replay->Header = header;
+			replay->FinalTick = 130;
+			for (uint64_t tick = 1; tick <= replay->FinalTick; ++tick)
+			{
+				(*reference)->Tick();
+				if (tick % ReplayCheckpointInterval == 0)
+					replay->Checkpoints.push_back({ .Tick = tick, .StateHash = UUID((*reference)->ComputeStateHash()).ToString() });
+			}
+			replay->FinalStateHash = UUID((*reference)->ComputeStateHash()).ToString();
+			reference->reset();
+			REQUIRE(replay->Checkpoints.size() == 2);
+			const std::string recorded = replay->Checkpoints[0].StateHash;
+			host.ReplayAssets["Assets/Good.replay"] = replay;
+			host.ReplayGlobs = { "Assets/Good.replay" };
+			const auto matched = host.Run();
+			CHECK(matched.Passed);
+
+			auto tampered = CreateRef<ReplayData>();
+			tampered->Header = replay->Header;
+			tampered->Checkpoints = replay->Checkpoints;
+			tampered->FinalTick = replay->FinalTick;
+			tampered->FinalStateHash = replay->FinalStateHash;
+			tampered->Checkpoints[0].StateHash = recorded == "0000000000000000" ? "0000000000000001" : "0000000000000000";
+			host.ReplayAssets["Assets/Good.replay"] = tampered;
+			const auto result = host.Run();
+			CHECK_FALSE(result.Passed);
+			REQUIRE(result.Suites.size() == 1);
+			CHECK_FALSE(result.Suites[0].Passed);
+			CHECK(result.Suites[0].Ticks == 60);
+			CHECK(result.Suites[0].FinalStateHash == recorded);
+			REQUIRE(result.Cases.size() == 1);
+			const TestCaseResult& row = result.Cases[0];
+			CHECK(row.Suite == "replay:Assets/Good.replay");
+			CHECK(row.Case == "Checkpoint@60");
+			CHECK(row.Status == "failed");
+			CHECK(row.Message.find(recorded) != std::string::npos);
+			CHECK(row.Message.find(tampered->Checkpoints[0].StateHash) != std::string::npos);
+			CHECK(row.File == "Assets/Good.replay");
+			CHECK(row.JsonPointer == "/Checkpoints/0/StateHash");
+			// M16 friction S3-04: the suite entry counts the checkpoints compared and names the one that differed.
+			CHECK(matched.Suites[0].CheckpointsChecked == 2);
+			CHECK(matched.Suites[0].FailedCheckpointTick == 0);
+			CHECK(result.Suites[0].CheckpointsChecked == 1);
+			CHECK(result.Suites[0].FailedCheckpointTick == 60);
 		}
 	}
 

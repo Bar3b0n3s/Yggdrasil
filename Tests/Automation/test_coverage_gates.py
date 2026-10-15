@@ -307,6 +307,32 @@ class DeterminismVerificationTests(AutomationTestCase):
             f"hashes: Editor Release {saved['stateHash']}"])
         shutil.rmtree(work, ignore_errors=True)
 
+    def test_determinism_verification_fails_a_replay_whose_verification_passes_without_its_input(self) -> None:
+        # M16 friction S2-01 (FX-4): the determinism suite also runs the input check of every replay with input events.
+        # A replay given an input event that nothing in its scene reads still verifies at its hash, with and without the
+        # event, so it proves nothing about its input; its committed hash is still reported as matched.
+        client, root = self.open_editor_with_scene("InputCheck")
+        client.call("scene.save")
+        client.call("input.record", {"action": "start"})
+        client.call("play.step", {"ticks": 70})
+        path = "Assets/Tests/Replays/Idle.replay"
+        saved = client.call("input.record", {"action": "stop", "path": path})
+        client.call("session.shutdown", {"force": True})
+        self.editors[-1].wait()
+        document = json.loads((root / path).read_text(encoding="utf-8"))
+        document["Events"] = [{"Tick": 5, "Type": "Key", "Key": "Space", "State": "Down"}]
+        (root / path).write_text(json.dumps(document, indent="\t") + "\n", encoding="utf-8")
+        work = self.directory / "Work"
+        project_file = test_script.copy_project(root, work / "Copy")
+        outcomes = test_script.verify_replays(editor_executable(), project_file, [path], self.directory / "VerifyData",
+                                              120.0)
+        self.assertEqual(len(outcomes), 1)
+        self.assertEqual(outcomes[0].state_hash, saved["stateHash"])
+        self.assertEqual(len(outcomes[0].problems), 1, outcomes[0].problems)
+        self.assertIn("proves nothing about its input", outcomes[0].problems[0])
+        self.assertIn(path, outcomes[0].problems[0])
+        shutil.rmtree(work, ignore_errors=True)
+
 
 if __name__ == "__main__":
     unittest.main()

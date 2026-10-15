@@ -89,6 +89,12 @@ namespace Engine {
 		// existing entry only in case), PermissionDenied, Io.
 		[[nodiscard]] virtual Status WriteFileAtomic(const VfsPath& path, std::span<const std::byte> data) = 0;
 
+		// Creates the file, never replacing anything (FileSystem::WriteNewFile semantics for native mounts): a name that
+		// exists, also one another process created a moment before, is AlreadyExists and stays untouched; no backup is made.
+		// The parent directory must exist. Errors: NotFound (parent), AlreadyExists, Validation (case, as WriteFileAtomic),
+		// PermissionDenied, Io.
+		[[nodiscard]] virtual Status WriteNewFile(const VfsPath& path, std::span<const std::byte> data) = 0;
+
 		// Errors: NotFound, Validation (case), Io.
 		[[nodiscard]] virtual Result<FileInfo> GetInfo(const VfsPath& path) const = 0;
 
@@ -102,6 +108,13 @@ namespace Engine {
 		// Removes a file, or a directory with everything below it. Removing the root is InvalidArgument. Errors: NotFound,
 		// Validation (case), PermissionDenied, Io.
 		[[nodiscard]] virtual Status Remove(const VfsPath& path) = 0;
+
+		// Removes the directory only while it is empty, never anything below it (the editor removes folders this way, so a
+		// folder never goes with content it cannot see): a directory that still holds an entry is InvalidState and stays
+		// unchanged, also when that entry is one a NativeDirectoryMount does not list because no VfsPath can spell its host
+		// name. Removing the root is InvalidArgument. Errors: NotFound, Validation (case), InvalidState (not empty),
+		// PermissionDenied, Io (also for a file).
+		[[nodiscard]] virtual Status RemoveEmptyDirectory(const VfsPath& directory) = 0;
 
 		// Renames within this mount. The destination's parent must exist and the destination must not, except for a
 		// case-only rename of the source itself (see the case policy). Errors: NotFound, AlreadyExists, InvalidArgument
@@ -155,12 +168,14 @@ namespace Engine {
 		[[nodiscard]] Result<std::string> ReadText(const VfsPath& path) const;
 		[[nodiscard]] Result<Scope<IFileStream>> Open(const VfsPath& path) const;
 		[[nodiscard]] Status WriteFileAtomic(const VfsPath& path, std::span<const std::byte> data);
+		[[nodiscard]] Status WriteNewFile(const VfsPath& path, std::span<const std::byte> data);
 		// True when GetInfo succeeds.
 		[[nodiscard]] bool Exists(const VfsPath& path) const;
 		[[nodiscard]] Result<FileInfo> GetInfo(const VfsPath& path) const;
 		[[nodiscard]] Result<std::vector<VfsEntry>> List(const VfsPath& directory, bool recursive = false) const;
 		[[nodiscard]] Status CreateDirectories(const VfsPath& directory);
 		[[nodiscard]] Status Remove(const VfsPath& path);
+		[[nodiscard]] Status RemoveEmptyDirectory(const VfsPath& directory);
 		// Both paths must have the same scheme (InvalidArgument otherwise).
 		[[nodiscard]] Status Move(const VfsPath& from, const VfsPath& to);
 	private:

@@ -407,9 +407,9 @@ Draws a text string on the screen or in the world.
 | `Size` | `Float` | `32` | 1 to 1e+05 | px |  | The text height in pixels at the 1080p reference resolution. |
 | `Color` | `Color4` | `[1,1,1,1]` | 0 to 1 |  |  | The linear text colour with opacity in the fourth component. |
 | `Space` | `TextSpace` | `"Screen"` |  |  |  | Whether the text is placed on the screen or in the world. |
-| `Anchor` | `Vec2` | `[0.5,0.5]` | 0 to 1 |  |  | The screen point the text is placed at, normalized to the viewport (Screen space). |
-| `Pivot` | `Vec2` | `[0.5,0.5]` | 0 to 1 |  |  | The point of the text block that sits on the anchor, normalized to the block. |
-| `Offset` | `Vec2` | `[0,0]` |  | px |  | A further offset from the anchor, in pixels at the 1080p reference resolution. |
+| `Anchor` | `Vec2` | `[0.5,0.5]` | 0 to 1 |  |  | Screen space: the point of the viewport the text is placed at, normalized: (0, 0) is the top-left corner and (1, 1) the bottom-right, X to the right and Y down; (0.5, 0.5) is the centre. |
+| `Pivot` | `Vec2` | `[0.5,0.5]` | 0 to 1 |  |  | The point of the text block that sits on the anchor (Screen space) or at the entity's origin (World space), normalized to the block: (0, 0) is its top-left corner and (1, 1) its bottom-right. |
+| `Offset` | `Vec2` | `[0,0]` |  | px |  | Screen space: a further offset from the anchor in pixels at the 1080p reference resolution (scaled with the viewport's height), X to the right and Y down. |
 | `Alignment` | `TextAlignment` | `"Center"` |  |  |  | How the lines are aligned to each other. |
 | `Billboard` | `Bool` | `false` |  |  |  | Whether world-space text always faces the camera. |
 
@@ -418,12 +418,12 @@ Script members of `Text`:
 | Member | Kind | Signature | Access | Modes | Description |
 |---|---|---|---|---|---|
 | `Alignment` | proxy field | `TextAlignment` | read/write | All | How the lines are aligned to each other. |
-| `Anchor` | proxy field | `vector` | read/write | All | The screen point the text is placed at, normalized to the viewport (Screen space). |
+| `Anchor` | proxy field | `vector` | read/write | All | Screen space: the point of the viewport the text is placed at, normalized: (0, 0) is the top-left corner and (1, 1) the bottom-right, X to the right and Y down; (0.5, 0.5) is the centre. |
 | `Billboard` | proxy field | `boolean` | read/write | All | Whether world-space text always faces the camera. |
 | `Color` | proxy field | `Color` | read/write | All | The linear text colour with opacity in the fourth component. |
 | `Font` | proxy field | `AssetRef?` | read/write | All | The font; null uses the default font. |
-| `Offset` | proxy field | `vector` | read/write | All | A further offset from the anchor, in pixels at the 1080p reference resolution. |
-| `Pivot` | proxy field | `vector` | read/write | All | The point of the text block that sits on the anchor, normalized to the block. |
+| `Offset` | proxy field | `vector` | read/write | All | Screen space: a further offset from the anchor in pixels at the 1080p reference resolution (scaled with the viewport's height), X to the right and Y down. |
+| `Pivot` | proxy field | `vector` | read/write | All | The point of the text block that sits on the anchor (Screen space) or at the entity's origin (World space), normalized to the block: (0, 0) is its top-left corner and (1, 1) its bottom-right. |
 | `Size` | proxy field | `number` | read/write | All | The text height in pixels at the 1080p reference resolution. |
 | `Space` | proxy field | `TextSpace` | read/write | All | Whether the text is placed on the screen or in the world. |
 | `Text` | proxy field | `string` | read/write | All | The UTF-8 text; a line feed starts a new line. A value a script writes holds at most 4096 bytes of text. |
@@ -442,8 +442,8 @@ Simulates the entity with Jolt physics.
 |---|---|---|---|---|---|---|
 | `Type` | `BodyType` | `"Dynamic"` |  |  |  | Static never moves; Kinematic is moved by script; Dynamic is simulated. |
 | `Mass` | `Float` | `1` | 0.001 to 1e+09 | kg |  | Mass in kilograms (Dynamic only). |
-| `Friction` | `Float` | `0.5` | >= 0 |  |  | The friction coefficient of the body's surfaces. |
-| `Restitution` | `Float` | `0` | 0 to 1 |  |  | Bounciness, from no bounce (0) to a perfectly elastic bounce (1). |
+| `Friction` | `Float` | `0.5` | >= 0 |  |  | The friction coefficient of the body's surfaces. A contact uses the geometric mean of both bodies' values, so 0 on one body removes friction from all its contacts. |
+| `Restitution` | `Float` | `0` | 0 to 1 |  |  | Bounciness, from no bounce (0) to a perfectly elastic bounce (1). A contact uses the larger of both bodies' values, so 1 on a ball makes it bounce elastically off every surface. |
 | `LinearDamping` | `Float` | `0.05` | >= 0 |  |  | How quickly linear velocity decays, per second. |
 | `AngularDamping` | `Float` | `0.05` | >= 0 |  |  | How quickly angular velocity decays, per second. |
 | `GravityFactor` | `Float` | `1` |  |  |  | The multiplier of the project's gravity for this body (0 floats). |
@@ -470,7 +470,7 @@ Script members of `RigidBody`:
 | `AllowSleeping` | proxy field | `boolean` | read/write | All | Whether the body may sleep when it comes to rest. |
 | `AngularDamping` | proxy field | `number` | read/write | All | How quickly angular velocity decays, per second. |
 | `EnhancedInternalEdgeRemoval` | proxy field | `boolean` | read/write | All | Removes ghost collisions with internal edges of compound shapes; set it on rolling bodies. |
-| `Friction` | proxy field | `number` | read/write | All | The friction coefficient of the body's surfaces. |
+| `Friction` | proxy field | `number` | read/write | All | The friction coefficient of the body's surfaces. A contact uses the geometric mean of both bodies' values, so 0 on one body removes friction from all its contacts. |
 | `GetAngularVelocity` | method | `(self: RigidBody) -> vector` |  | All | Read current angular velocity. |
 | `GetLinearVelocity` | method | `(self: RigidBody) -> vector` |  | All | Read current linear velocity. |
 | `GravityFactor` | proxy field | `number` | read/write | All | The multiplier of the project's gravity for this body (0 floats). |
@@ -486,7 +486,7 @@ Script members of `RigidBody`:
 | `MaxLinearVelocity` | proxy field | `number` | read/write | All | The speed the body is clamped to, in metres per second. |
 | `MotionQuality` | proxy field | `MotionQuality` | read/write | All | Discrete or continuous (LinearCast) collision detection. |
 | `MoveKinematic` | method | `(self: RigidBody, position: vector, rotation: Quat) -> ()` |  | All | Set a Kinematic target for the next fixed step. |
-| `Restitution` | proxy field | `number` | read/write | All | Bounciness, from no bounce (0) to a perfectly elastic bounce (1). |
+| `Restitution` | proxy field | `number` | read/write | All | Bounciness, from no bounce (0) to a perfectly elastic bounce (1). A contact uses the larger of both bodies' values, so 1 on a ball makes it bounce elastically off every surface. |
 | `SetAngularVelocity` | method | `(self: RigidBody, velocity: vector) -> ()` |  | All | Set a Dynamic body's angular velocity. |
 | `SetLinearVelocity` | method | `(self: RigidBody, velocity: vector) -> ()` |  | All | Set a Dynamic body's linear velocity. |
 | `Teleport` | method | `(self: RigidBody, position: vector, rotation: Quat?) -> ()` |  | All | Place a body immediately, preserving velocity and resetting interpolation. |
@@ -770,7 +770,7 @@ How a rigid body moves.
 | Value | Description |
 |---|---|
 | `Static` | Never moves; the cheapest body, used for level geometry. |
-| `Kinematic` | Moved by script or animation; pushes dynamic bodies but is not pushed back. |
+| `Kinematic` | Moved by script or animation; pushes dynamic bodies but is not pushed back, and static bodies never stop it (clamp its motion in the script). |
 | `Dynamic` | Simulated: moved by gravity, forces and collisions. |
 
 ### ClearMode

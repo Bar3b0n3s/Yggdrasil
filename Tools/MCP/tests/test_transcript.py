@@ -52,6 +52,33 @@ class TranscriptTests(unittest.TestCase):
         with mock.patch.dict(os.environ, {transcript.TRANSCRIPT_ENVIRONMENT_VARIABLE: str(redirected)}):
             self.assertEqual(transcript.transcript_path(directory / "Project"), redirected)
 
+    def test_the_summary_of_an_offloaded_result_names_a_project_relative_path(self) -> None:
+        # Docs/Decisions/0026-m16-contract.md, friction S1-16: the committed transcript names no machine path.
+        project = self.make_directory() / "Game"
+        project.mkdir()
+        offloaded = project / "Library" / "Automation" / "Out" / "4242-1791244800-00000003.json"
+        response = {"jsonrpc": "2.0", "id": 4, "result": {"path": offloaded.as_posix(), "truncated": True,
+                                                          "summary": {"count": 3}, "_meta": {"revision": 2}}}
+        summary = transcript.summarize(response, project)
+        self.assertIn("offloaded to Library/Automation/Out/4242-1791244800-00000003.json", summary)
+        self.assertNotIn(project.as_posix(), summary)
+        # A file outside the project is named by its file name alone.
+        elsewhere = self.make_directory() / "Automation" / "Out" / "4242-1791244800-00000004.json"
+        response["result"]["path"] = str(elsewhere)
+        summary = transcript.summarize(response, project)
+        self.assertIn("offloaded to 4242-1791244800-00000004.json", summary)
+        self.assertNotIn(str(elsewhere.parent), summary)
+        environment = {key: value for key, value in os.environ.items()
+                       if key != transcript.TRANSCRIPT_ENVIRONMENT_VARIABLE}
+        with mock.patch.dict(os.environ, environment, clear=True):
+            log = transcript.Transcript.open(project)
+            line = log.append_request(4, "rpc.discover", {})
+            response["result"]["path"] = offloaded.as_posix()
+            log.append_response(4, line, response)
+            recorded = log.path.read_text(encoding="utf-8")
+        self.assertIn("offloaded to Library/Automation/Out/4242-1791244800-00000003.json", recorded)
+        self.assertNotIn(project.as_posix(), recorded)
+
     def test_hello_params_never_reach_the_transcript(self) -> None:
         self.assertIn("session.hello", transcript.UNRECORDED_METHODS)
         error = {"code": -32001, "message": "no entity", "data": {"errorCode": "NotFound", "detail": "no entity"}}

@@ -42,6 +42,54 @@ class ScriptTestRunnerTests(AutomationTestCase):
         self.assertIn("second", Path(result["junitPath"]).read_text(encoding="utf-8"))
         self.assertEqual(client.call("play.state")["state"], "Edit")
 
+    def test_test_run_returns_inline_and_names_the_failing_case(self) -> None:
+        # Docs/Decisions/0026-m16-contract.md, friction S1-02: the coverage counters made every result too large to
+        # send, and the offloaded summary hid the failures. Without coverage asked for, a run comes back inline.
+        client, _ = self.open_editor_with_scene()
+        cases = "".join(f'Test.Case("case {index}", function() Test.Expect(true) end)\n' for index in range(19))
+        self.configure_suite(client, 'return Test.Suite("Inline", function()\n' + cases
+                             + 'Test.Case("fails", function() Test.Expect(false, "expected failure") end)\nend)')
+        result = client.call("test.run", timeout=120.0)
+        self.assertNotIn("truncated", result)
+        self.assertFalse(result["passed"])
+        self.assertEqual(result["failedCases"], ["Inline/fails"])
+        counts = result["counts"]
+        self.assertEqual((counts["total"], counts["passed"], counts["failed"]), (20, 19, 1))
+        self.assertEqual(result["coverage"]["counters"], [])
+        report = json.loads(Path(result["jsonPath"]).read_text(encoding="utf-8"))
+        self.assertTrue(report["coverage"]["counters"])
+        self.assertEqual(report["cases"], result["cases"])
+        covered = engine_client.load_offloaded(client.call("test.run", {"coverage": True}, timeout=120.0))
+        self.assertEqual(covered["coverage"]["counters"], report["coverage"]["counters"])
+
+    def test_reports_outlive_later_runs_and_offloaded_results(self) -> None:
+        # Friction S1-03: an offloaded result once took the name of the previous run's JSON report and replaced it
+        # (project:// left a .bak), and shutting down deleted the reports.
+        editor = self.start_editor()
+        client = self.connect(editor)
+        root = self.create_project(client)
+        client.call("scene.new", {"path": "Assets/Scenes/Main.scene"})
+        self.configure_suite(client, 'return Test.Suite("Reports", function()\n'
+                             'Test.Case("first", function() Test.Expect(true) end)\nend)')
+        first = client.call("test.run", timeout=120.0)
+        first_report = Path(first["jsonPath"]).read_bytes()
+        discovered = client.call("rpc.discover")
+        self.assertTrue(discovered["truncated"])
+        second = client.call("test.run", timeout=120.0)
+        names = [Path(path).name for path in (first["junitPath"], first["jsonPath"], discovered["path"],
+                                               second["junitPath"], second["jsonPath"])]
+        self.assertEqual(len(set(names)), 5, names)
+        self.assertEqual(Path(first["jsonPath"]).read_bytes(), first_report)
+        self.assertEqual(json.loads(first_report.decode("utf-8"))["cases"], first["cases"])
+        out = root / "Library" / "Automation" / "Out"
+        self.assertEqual(sorted(path.name for path in out.iterdir() if path.name.endswith(".bak")), [])
+        client.call("session.shutdown", {"force": True})
+        self.assertEqual(editor.wait(), 0)
+        # The offloaded result goes with its editor; the reports stay.
+        self.assertFalse(Path(discovered["path"]).exists())
+        for path in (first["jsonPath"], first["junitPath"], second["jsonPath"], second["junitPath"]):
+            self.assertTrue(Path(path).is_file(), path)
+
     def test_test_run_record_writes_replay(self) -> None:
         client, root = self.open_editor_with_scene()
         self.configure_suite(client, 'return Test.Suite("Recorded", function()\n'
@@ -55,11 +103,27 @@ class ScriptTestRunnerTests(AutomationTestCase):
         playback = client.call("input.replay", {"path": path, "verify": True, "strictHash": True})
         self.assertTrue(playback["hashMatched"])
         self.assertEqual(playback["stateHash"], result["suites"][0]["finalStateHash"])
+        # M16 friction S3-03: the recording block describes the replay written; with no input there is nothing to check.
+        recorded = json.loads((root / path).read_text(encoding="utf-8"))
+        self.assertEqual(result["recording"], {
+            "path": path, "formatVersion": recorded["Version"], "ticks": recorded["FinalTick"], "events": 0,
+            "checkpoints": 0, "finalStateHash": recorded["FinalStateHash"],
+            "inputCheck": {"ran": False, "divergedAtTick": 0}})
+        plain = engine_client.load_offloaded(client.call("test.run", {"filter": "Recorded"}, timeout=120.0))
+        self.assertIsNone(plain["recording"])
 
     def test_record_captures_test_inject_and_parameters(self) -> None:
         client, root = self.open_editor_with_scene()
         client.call("project.setSettings", {"patch": {"Input": {"Actions": {
             "Jump": {"Type": "Button", "Bindings": ["Key.Space"]}}}}})
+        # The scene reacts to the injected key, so the recording's outcome depends on its input, which the recording's
+        # input check requires (M16 friction S2-01, FX-4).
+        client.call("script.write", {"path": "Assets/Scripts/Hopper.luau", "source":
+                    "local Hopper = {}\nfunction Hopper.OnFixedUpdate(self: any, dt: number)\n"
+                    "\tif Input.IsKeyDown(\"A\") then\n\t\tself.Entity.Transform:Translate(vector.create(0, 1, 0))\n"
+                    "\tend\nend\nreturn Script.Define(\"Hopper\", Hopper)\n"})
+        client.call("entity.create", {"name": "Hopper",
+                                      "components": {"Script": {"Script": "Assets/Scripts/Hopper.luau"}}})
         self.configure_suite(client, 'return Test.Suite("Inputs", function()\n'
                              'Test.Case("inject", function()\n'
                              'Test.ExpectEqual(Scene.GetLoadParameters().level, 3)\n'
@@ -79,6 +143,13 @@ class ScriptTestRunnerTests(AutomationTestCase):
         self.assertEqual([(event["Name"], event["State"]) for event in actions], [("Jump", "Down"), ("Jump", "Up")])
         self.assertEqual(keys[1]["Tick"], keys[0]["Tick"] + 1)
         self.assertTrue(client.call("input.replay", {"path": path, "verify": True, "strictHash": True})["passed"])
+        # M16 friction S3-03: the recording block; the run without input differed only at the final tick (no checkpoint
+        # in a recording this short), where the Hopper had not moved.
+        recording = result["recording"]
+        self.assertEqual((recording["path"], recording["events"], recording["checkpoints"], recording["ticks"]),
+                         (path, len(events), len(recorded["Checkpoints"]), recorded["FinalTick"]))
+        self.assertEqual(recording["finalStateHash"], recorded["FinalStateHash"])
+        self.assertEqual(recording["inputCheck"], {"ran": True, "divergedAtTick": recorded["FinalTick"]})
 
     def test_test_run_rejects_missing_selection_without_writing(self) -> None:
         client, root = self.open_editor_with_scene()

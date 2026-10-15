@@ -1,0 +1,406 @@
+{
+	"Format": "Provenance",
+	"Version": 1,
+	"Entries": [
+		{
+			"Path": ".luaurc",
+			"XXH64": "56824d2dd3716720",
+			"Method": "project.create",
+			"RequestId": 2,
+			"Client": "engine-mcp",
+			"TranscriptLine": 1
+		},
+		{
+			"Path": "Assets/Audio/BrickBreak.sfx",
+			"XXH64": "c998961521a0ab3e",
+			"Method": "edit.batch",
+			"RequestId": 14,
+			"Client": "engine-mcp",
+			"TranscriptLine": 25
+		},
+		{
+			"Path": "Assets/Audio/BrickBreak.sfx.meta",
+			"XXH64": "085178c90d304863",
+			"Method": "edit.batch",
+			"RequestId": 14,
+			"Client": "engine-mcp",
+			"TranscriptLine": 25
+		},
+		{
+			"Path": "Assets/Audio/GameOver.sfx",
+			"XXH64": "c7918edff40e29b4",
+			"Method": "edit.batch",
+			"RequestId": 14,
+			"Client": "engine-mcp",
+			"TranscriptLine": 25
+		},
+		{
+			"Path": "Assets/Audio/GameOver.sfx.meta",
+			"XXH64": "106644630ee71baf",
+			"Method": "edit.batch",
+			"RequestId": 14,
+			"Client": "engine-mcp",
+			"TranscriptLine": 25
+		},
+		{
+			"Path": "Assets/Audio/LifeLost.sfx",
+			"XXH64": "ee49eed585ba0ff5",
+			"Method": "edit.batch",
+			"RequestId": 14,
+			"Client": "engine-mcp",
+			"TranscriptLine": 25
+		},
+		{
+			"Path": "Assets/Audio/LifeLost.sfx.meta",
+			"XXH64": "0c485d643a5a05b0",
+			"Method": "edit.batch",
+			"RequestId": 14,
+			"Client": "engine-mcp",
+			"TranscriptLine": 25
+		},
+		{
+			"Path": "Assets/Audio/PaddleHit.sfx",
+			"XXH64": "0d79e18eba6556f8",
+			"Method": "edit.batch",
+			"RequestId": 14,
+			"Client": "engine-mcp",
+			"TranscriptLine": 25
+		},
+		{
+			"Path": "Assets/Audio/PaddleHit.sfx.meta",
+			"XXH64": "f55009d91aef30c8",
+			"Method": "edit.batch",
+			"RequestId": 14,
+			"Client": "engine-mcp",
+			"TranscriptLine": 25
+		},
+		{
+			"Path": "Assets/Audio/WallHit.sfx",
+			"XXH64": "0329f84cf177cac0",
+			"Method": "edit.batch",
+			"RequestId": 14,
+			"Client": "engine-mcp",
+			"TranscriptLine": 25
+		},
+		{
+			"Path": "Assets/Audio/WallHit.sfx.meta",
+			"XXH64": "4210370afb2cebde",
+			"Method": "edit.batch",
+			"RequestId": 14,
+			"Client": "engine-mcp",
+			"TranscriptLine": 25
+		},
+		{
+			"Path": "Assets/Audio/Win.sfx",
+			"XXH64": "bee89a9139f384fc",
+			"Method": "edit.batch",
+			"RequestId": 14,
+			"Client": "engine-mcp",
+			"TranscriptLine": 25
+		},
+		{
+			"Path": "Assets/Audio/Win.sfx.meta",
+			"XXH64": "2a7849bccb6ba4f3",
+			"Method": "edit.batch",
+			"RequestId": 14,
+			"Client": "engine-mcp",
+			"TranscriptLine": 25
+		},
+		{
+			"Path": "Assets/Materials/Ball.material",
+			"XXH64": "6c118add8fab89a9",
+			"Method": "edit.batch",
+			"RequestId": 13,
+			"Client": "engine-mcp",
+			"TranscriptLine": 23
+		},
+		{
+			"Path": "Assets/Materials/Ball.material.meta",
+			"XXH64": "280c233a0858337e",
+			"Method": "edit.batch",
+			"RequestId": 13,
+			"Client": "engine-mcp",
+			"TranscriptLine": 23
+		},
+		{
+			"Path": "Assets/Materials/BrickBlue.material",
+			"XXH64": "ba9f1bb7028b9ac9",
+			"Method": "edit.batch",
+			"RequestId": 13,
+			"Client": "engine-mcp",
+			"TranscriptLine": 23
+		},
+		{
+			"Path": "Assets/Materials/BrickBlue.material.meta",
+			"XXH64": "40d2e37a36766eb5",
+			"Method": "edit.batch",
+			"RequestId": 13,
+			"Client": "engine-mcp",
+			"TranscriptLine": 23
+		},
+		{
+			"Path": "Assets/Materials/BrickGreen.material",
+			"XXH64": "2c92a72bfa36cd7f",
+			"Method": "edit.batch",
+			"RequestId": 13,
+			"Client": "engine-mcp",
+			"TranscriptLine": 23
+		},
+		{
+			"Path": "Assets/Materials/BrickGreen.material.meta",
+			"XXH64": "b0a2155bb7b1b35d",
+			"Method": "edit.batch",
+			"RequestId": 13,
+			"Client": "engine-mcp",
+			"TranscriptLine": 23
+		},
+		{
+			"Path": "Assets/Materials/BrickOrange.material",
+			"XXH64": "0775697052fdb5eb",
+			"Method": "edit.batch",
+			"RequestId": 13,
+			"Client": "engine-mcp",
+			"TranscriptLine": 23
+		},
+		{
+			"Path": "Assets/Materials/BrickOrange.material.meta",
+			"XXH64": "56cd53d80de9bccd",
+			"Method": "edit.batch",
+			"RequestId": 13,
+			"Client": "engine-mcp",
+			"TranscriptLine": 23
+		},
+		{
+			"Path": "Assets/Materials/BrickRed.material",
+			"XXH64": "4c627907dbb118ff",
+			"Method": "edit.batch",
+			"RequestId": 13,
+			"Client": "engine-mcp",
+			"TranscriptLine": 23
+		},
+		{
+			"Path": "Assets/Materials/BrickRed.material.meta",
+			"XXH64": "72bd1c26d7f165a1",
+			"Method": "edit.batch",
+			"RequestId": 13,
+			"Client": "engine-mcp",
+			"TranscriptLine": 23
+		},
+		{
+			"Path": "Assets/Materials/BrickYellow.material",
+			"XXH64": "831f2d6d67677d53",
+			"Method": "edit.batch",
+			"RequestId": 13,
+			"Client": "engine-mcp",
+			"TranscriptLine": 23
+		},
+		{
+			"Path": "Assets/Materials/BrickYellow.material.meta",
+			"XXH64": "47464f03305fafb4",
+			"Method": "edit.batch",
+			"RequestId": 13,
+			"Client": "engine-mcp",
+			"TranscriptLine": 23
+		},
+		{
+			"Path": "Assets/Materials/Paddle.material",
+			"XXH64": "f3ce7d47e05c57f3",
+			"Method": "edit.batch",
+			"RequestId": 13,
+			"Client": "engine-mcp",
+			"TranscriptLine": 23
+		},
+		{
+			"Path": "Assets/Materials/Paddle.material.meta",
+			"XXH64": "1597974273c1469f",
+			"Method": "edit.batch",
+			"RequestId": 13,
+			"Client": "engine-mcp",
+			"TranscriptLine": 23
+		},
+		{
+			"Path": "Assets/Materials/Wall.material",
+			"XXH64": "d08b63619896350a",
+			"Method": "edit.batch",
+			"RequestId": 13,
+			"Client": "engine-mcp",
+			"TranscriptLine": 23
+		},
+		{
+			"Path": "Assets/Materials/Wall.material.meta",
+			"XXH64": "2a3ae26bc90e3547",
+			"Method": "edit.batch",
+			"RequestId": 13,
+			"Client": "engine-mcp",
+			"TranscriptLine": 23
+		},
+		{
+			"Path": "Assets/Prefabs/Brick.prefab",
+			"XXH64": "1b03223310afc522",
+			"Method": "prefab.create",
+			"RequestId": 29,
+			"Client": "engine-mcp",
+			"TranscriptLine": 55
+		},
+		{
+			"Path": "Assets/Prefabs/Brick.prefab.meta",
+			"XXH64": "5ae65340c31a23ec",
+			"Method": "prefab.create",
+			"RequestId": 29,
+			"Client": "engine-mcp",
+			"TranscriptLine": 55
+		},
+		{
+			"Path": "Assets/Scenes/Main.scene",
+			"XXH64": "3c8ae4b32ebb5d43",
+			"Method": "scene.save",
+			"RequestId": 37,
+			"Client": "engine-mcp",
+			"TranscriptLine": 71
+		},
+		{
+			"Path": "Assets/Scenes/Main.scene.meta",
+			"XXH64": "8b613aaba825e208",
+			"Method": "edit.batch",
+			"RequestId": 27,
+			"Client": "engine-mcp",
+			"TranscriptLine": 51
+		},
+		{
+			"Path": "Assets/Scripts/Ball.luau",
+			"XXH64": "f61efd417a1e76b4",
+			"Method": "script.write",
+			"RequestId": 23,
+			"Client": "engine-mcp",
+			"TranscriptLine": 43
+		},
+		{
+			"Path": "Assets/Scripts/Ball.luau.meta",
+			"XXH64": "c19da397efbb84ad",
+			"Method": "script.create",
+			"RequestId": 22,
+			"Client": "engine-mcp",
+			"TranscriptLine": 41
+		},
+		{
+			"Path": "Assets/Scripts/Brick.luau",
+			"XXH64": "1937db4c83931ef9",
+			"Method": "script.write",
+			"RequestId": 20,
+			"Client": "engine-mcp",
+			"TranscriptLine": 37
+		},
+		{
+			"Path": "Assets/Scripts/Brick.luau.meta",
+			"XXH64": "b7b9fe4b499b2fd6",
+			"Method": "script.create",
+			"RequestId": 19,
+			"Client": "engine-mcp",
+			"TranscriptLine": 35
+		},
+		{
+			"Path": "Assets/Scripts/Game.luau",
+			"XXH64": "abe314d0c88d0e19",
+			"Method": "script.write",
+			"RequestId": 22,
+			"Client": "engine-mcp",
+			"TranscriptLine": 261
+		},
+		{
+			"Path": "Assets/Scripts/Game.luau.meta",
+			"XXH64": "423668c7a014c5ed",
+			"Method": "script.create",
+			"RequestId": 15,
+			"Client": "engine-mcp",
+			"TranscriptLine": 27
+		},
+		{
+			"Path": "Assets/Scripts/Rules.luau",
+			"XXH64": "b937b4e43a844095",
+			"Method": "script.write",
+			"RequestId": 21,
+			"Client": "engine-mcp",
+			"TranscriptLine": 259
+		},
+		{
+			"Path": "Assets/Scripts/Rules.luau.meta",
+			"XXH64": "24f84fdaee5ea415",
+			"Method": "script.create",
+			"RequestId": 17,
+			"Client": "engine-mcp",
+			"TranscriptLine": 31
+		},
+		{
+			"Path": "Assets/Tests/Autopilot/Breakout.test.luau",
+			"XXH64": "37c1dc71ee375f30",
+			"Method": "script.write",
+			"RequestId": 45,
+			"Client": "engine-mcp",
+			"TranscriptLine": 379
+		},
+		{
+			"Path": "Assets/Tests/Autopilot/Breakout.test.luau.meta",
+			"XXH64": "b8f95e60815d752d",
+			"Method": "script.create",
+			"RequestId": 79,
+			"Client": "engine-mcp",
+			"TranscriptLine": 155
+		},
+		{
+			"Path": "Assets/Tests/Breakout.test.luau",
+			"XXH64": "845bf21961cd3746",
+			"Method": "script.write",
+			"RequestId": 22,
+			"Client": "engine-mcp",
+			"TranscriptLine": 335
+		},
+		{
+			"Path": "Assets/Tests/Breakout.test.luau.meta",
+			"XXH64": "25b2fb51d920e566",
+			"Method": "script.create",
+			"RequestId": 68,
+			"Client": "engine-mcp",
+			"TranscriptLine": 133
+		},
+		{
+			"Path": "Assets/Tests/Replays/Opening.replay",
+			"XXH64": "01b7b6e35a1e6e16",
+			"Method": "test.run",
+			"RequestId": 26,
+			"Client": "engine-mcp",
+			"TranscriptLine": 341
+		},
+		{
+			"Path": "Assets/Tests/Replays/Opening.replay.meta",
+			"XXH64": "7aef3bb13fdf2054",
+			"Method": "test.run",
+			"RequestId": 83,
+			"Client": "engine-mcp",
+			"TranscriptLine": 163
+		},
+		{
+			"Path": "Assets/Tests/Rules.test.luau",
+			"XXH64": "249f0fb24d20a560",
+			"Method": "script.write",
+			"RequestId": 23,
+			"Client": "engine-mcp",
+			"TranscriptLine": 263
+		},
+		{
+			"Path": "Assets/Tests/Rules.test.luau.meta",
+			"XXH64": "eb2a94e17c529952",
+			"Method": "script.create",
+			"RequestId": 71,
+			"Client": "engine-mcp",
+			"TranscriptLine": 139
+		},
+		{
+			"Path": "Breakout.eproj",
+			"XXH64": "a3c6f5df749629b8",
+			"Method": "project.setSettings",
+			"RequestId": 87,
+			"Client": "engine-mcp",
+			"TranscriptLine": 171
+		}
+	]
+}

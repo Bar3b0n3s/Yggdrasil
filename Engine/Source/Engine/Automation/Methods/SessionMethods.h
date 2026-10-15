@@ -1,11 +1,13 @@
 #pragma once
 
 #include "Engine/Automation/Methods/AutomationTypes.h"
+#include "Engine/Automation/Methods/SceneMethods.h"
 #include "Engine/Core/Base.h"
 #include "Engine/Core/Result.h"
 #include "Engine/Reflection/VariantValue.h"
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -68,7 +70,8 @@ namespace Engine {
 		bool InProcess = false; // a batch, CLI or test caller rather than a TCP connection
 	};
 
-	// session.info {} -> versions, capabilities, project, play state, renderer, lockstep owner, read-only flag (§13.5).
+	// session.info {} -> versions, capabilities, project, play state, renderer, lockstep owner, read-only flag (§13.5) and,
+	// since M16 (friction S2-03), the open scene.
 	struct SessionInfoResult
 	{
 		std::string Protocol{}; // "protocolVersion"
@@ -89,6 +92,10 @@ namespace Engine {
 		bool ReadOnly = false;
 		bool Headless = false;
 		std::vector<SessionClientSummary> Clients{};
+		// M16 friction S2-03: the open scene as scene.* results report it (SessionHostDescription::Scene, a SceneSummary:
+		// path, name, revision, dirty, entityCount), null without one. The editor's edit scene (none in the launcher state,
+		// nor after --project or project.open, which open no scene), the Runtime's game scene.
+		VariantValue Scene{};
 	};
 
 	// What a host reports about itself in session.hello and session.info (AutomationMethodContext::DescribeSession); the
@@ -101,6 +108,7 @@ namespace Engine {
 		bool ReadOnly = false;  // the host denies mutations: the editor with --read-only, the Runtime always
 		bool Headless = false;
 		std::vector<SessionClientSummary> Clients{}; // in any order: session.info sorts them by id
+		std::optional<SceneSummary> Scene{};         // the open scene (AutomationMethodContext::MakeSceneSummary); none without one
 	};
 
 	// session.shutdown {save?, force?}: the editor saves the open scene first when `save`; with a dirty scene and neither

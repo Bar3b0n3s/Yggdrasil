@@ -36,6 +36,7 @@ namespace Engine {
 				return m_Inner->Open(path);
 			}
 			[[nodiscard]] Status WriteFileAtomic(const VfsPath& path, std::span<const std::byte> data) override { return m_Inner->WriteFileAtomic(path, data); }
+			[[nodiscard]] Status WriteNewFile(const VfsPath& path, std::span<const std::byte> data) override { return m_Inner->WriteNewFile(path, data); }
 			[[nodiscard]] Result<FileInfo> GetInfo(const VfsPath& path) const override
 			{
 				++m_Reads;
@@ -48,6 +49,7 @@ namespace Engine {
 			}
 			[[nodiscard]] Status CreateDirectories(const VfsPath& directory) override { return m_Inner->CreateDirectories(directory); }
 			[[nodiscard]] Status Remove(const VfsPath& path) override { return m_Inner->Remove(path); }
+			[[nodiscard]] Status RemoveEmptyDirectory(const VfsPath& directory) override { return m_Inner->RemoveEmptyDirectory(directory); }
 			[[nodiscard]] Status Move(const VfsPath& from, const VfsPath& to) override { return m_Inner->Move(from, to); }
 			[[nodiscard]] MountAccess GetAccess() const override { return m_Inner->GetAccess(); }
 			[[nodiscard]] uint32_t GetReads() const { return m_Reads.load(); }

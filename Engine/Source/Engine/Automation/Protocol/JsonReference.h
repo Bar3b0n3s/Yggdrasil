@@ -22,7 +22,10 @@ namespace Engine {
 	// lines from 1 (indexBase 1). Only earlier results can be referenced: `results` holds exactly those.
 	// Objects with "$ref" next to other members are left alone (they are data). Errors, with `value` unchanged:
 	// InvalidArgument located at the "$ref" object's pointer for a malformed reference, an index outside `results` (a self or
-	// forward reference), or a path that names nothing ("no member 'entity' in the result of op 3").
+	// forward reference), or a path that names nothing ("no member 'entity' in the result of op 3", or "no member 'ids' in
+	// '3.prefab' (in the result of op 3)" for an object inside the result: the message and the hint name the object
+	// inspected; the hint lists the members that object has, sorted, at most 32 and then how many more, after "did you
+	// mean" for close ones, also given as the issue's suggestions).
 	[[nodiscard]] Status SubstituteReferences(Json& value, std::span<const Json> results, size_t indexBase);
 
 }

@@ -1,0 +1,12 @@
+{
+	"Format": "ProvenanceAuditFixture",
+	"Version": 1,
+	"ExitCode": 3,
+	"Findings": [
+		{
+			"Code": "provenance-missing",
+			"Path": "Automation/Provenance.json"
+		}
+	],
+	"Warnings": []
+}

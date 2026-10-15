@@ -116,6 +116,55 @@ class LauncherTests(unittest.TestCase):
         self.assertIn("AlreadyExists", str(raised.exception))
         self.assertEqual(sorted(path.name for path in occupied.iterdir()), ["notes.txt"])
 
+    def test_launch_opens_an_existing_project_through_a_transcribed_project_open(self) -> None:
+        # Docs/Decisions/0026-m16-contract.md decision 11 (G2a): the bridge opens an existing project with project.open
+        # on a launcher-state editor, never with --project, so what opening writes (here the .meta of a source copied
+        # in without one) is attributed to that transcribed request and its line, not to "ui" (§13.12 rule 2).
+        environment = {key: value for key, value in os.environ.items()
+                       if key != transcript.TRANSCRIPT_ENVIRONMENT_VARIABLE}
+        patch = mock.patch.dict(os.environ, environment, clear=True)
+        patch.start()
+        self.addCleanup(patch.stop)
+        executable = engine_client.find_editor_executable(REPOSITORY_ROOT,
+                                                          engine_client.configurations_from_environment())
+        creator = engine_client.launch_editor(executable, ["--headless", "--renderer", "none", "--automation"],
+                                              self.user_data, self.app_name)
+        self.editors.append(creator)
+        with creator.connect() as client:
+            client.call("project.create", {"path": str(self.directory / "Game"), "name": "Game"})
+            client.call("session.shutdown")
+        creator.wait()
+        root = self.directory / "Game"
+        texture = root / "Assets" / "Textures" / "Checker.png"
+        shutil.copyfile(REPOSITORY_ROOT / "Tests" / "Data" / "Assets" / "Gltf" / "Textures" / "Checker.png", texture)
+
+        launcher = Launcher(REPOSITORY_ROOT, self.user_data, engine_client.configurations_from_environment())
+        connection = launcher.launch(LaunchRequest(project=root))
+        try:
+            self.assertTrue(connection.supervised)
+            self.assertEqual(connection.call("project.info", {})["result"]["project"]["name"], "Game")
+            data = (root / transcript.TRANSCRIPT_RELATIVE_PATH).read_bytes()
+            lines = [json.loads(line.decode("utf-8")) for line in data.split(b"\n") if line]
+            self.assertEqual((lines[0]["type"], lines[0]["method"], lines[0]["client"]),
+                             ("request", "project.open", transcript.CLIENT_NAME))
+            self.assertEqual((lines[1]["type"], lines[1]["requestLine"], lines[1]["ok"]), ("response", 1, True))
+            # Friction S3-06: the launch then reads the session, transcribed, and reports that no scene is open.
+            self.assertEqual((lines[2]["type"], lines[2]["method"], lines[3]["requestLine"], lines[3]["ok"]),
+                             ("request", "session.info", 3, True))
+            self.assertIsNotNone(connection.session_info)
+            assert connection.session_info is not None
+            self.assertTrue(connection.session_info["project"]["open"])
+            self.assertIsNone(connection.session_info["scene"])
+            provenance = json.loads((root / "Automation" / "Provenance.json").read_text(encoding="utf-8"))
+            entries = {entry["Path"]: entry for entry in provenance["Entries"]}
+            meta = entries["Assets/Textures/Checker.png.meta"]
+            self.assertEqual((meta["Method"], meta["Client"], meta["TranscriptLine"]),
+                             ("project.open", transcript.CLIENT_NAME, 1))
+            self.assertEqual(meta["RequestId"], lines[0]["id"])
+            self.assertNotIn("ui", {entry["Method"] for entry in provenance["Entries"]})
+        finally:
+            self.assertTrue(connection.shutdown(force=True)["shutDown"])
+
     def test_launch_creates_a_basic3d_project(self) -> None:
         launcher = Launcher(REPOSITORY_ROOT, self.user_data, engine_client.configurations_from_environment())
         connection = launcher.launch(LaunchRequest(project=self.directory / "Basic", create=True, template="Basic3D"))

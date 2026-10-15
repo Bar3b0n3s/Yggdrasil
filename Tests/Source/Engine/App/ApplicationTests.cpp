@@ -254,6 +254,10 @@ namespace Engine {
 			{
 				return MakeError(ErrorCode::PermissionDenied, "a read-only mount");
 			}
+			[[nodiscard]] Status WriteNewFile(const VfsPath& /*path*/, std::span<const std::byte> /*data*/) override
+			{
+				return MakeError(ErrorCode::PermissionDenied, "a read-only mount");
+			}
 			[[nodiscard]] Result<FileInfo> GetInfo(const VfsPath& /*path*/) const override { return MakeError(ErrorCode::NotFound, "an empty mount"); }
 			[[nodiscard]] Result<std::vector<VfsEntry>> List(const VfsPath& /*directory*/, bool /*recursive*/) const override
 			{
@@ -261,6 +265,7 @@ namespace Engine {
 			}
 			[[nodiscard]] Status CreateDirectories(const VfsPath& /*directory*/) override { return MakeError(ErrorCode::PermissionDenied, "a read-only mount"); }
 			[[nodiscard]] Status Remove(const VfsPath& /*path*/) override { return MakeError(ErrorCode::PermissionDenied, "a read-only mount"); }
+			[[nodiscard]] Status RemoveEmptyDirectory(const VfsPath& /*directory*/) override { return MakeError(ErrorCode::PermissionDenied, "a read-only mount"); }
 			[[nodiscard]] Status Move(const VfsPath& /*from*/, const VfsPath& /*to*/) override { return MakeError(ErrorCode::PermissionDenied, "a read-only mount"); }
 			[[nodiscard]] MountAccess GetAccess() const override { return MountAccess::ReadOnly; }
 		};

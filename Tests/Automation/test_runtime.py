@@ -131,6 +131,8 @@ class RuntimeTests(AutomationTestCase):
         self.assertEqual(info["playState"], "Paused")
         self.assertEqual(info["project"]["name"], TINY_GAME_NAME)
         self.assertTrue(info["readOnly"])
+        # The game's scene, its only one (Docs/Decisions/0026-m16-contract.md, friction S2-03).
+        self.assertFalse(info["scene"]["dirty"])
         self.assertEqual(client.call("play.state")["tick"], 0)
         stepped = client.call("play.step", {"ticks": STEPPED_TICKS})
         self.assertEqual(stepped["tick"], STEPPED_TICKS)

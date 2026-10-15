@@ -1,9 +1,10 @@
-"""Scripts/CI.py's M15 stages and modes (Docs/Architecture.md §15.8, §15.9; Docs/Decisions/0024-m15-contract.md
-decisions 9, 10, 11, 18 and 19): --milestone selects every available stage plus hardening and implies
---require-clang-cl, refusing every selection and mode option; a plain run lists hardening as not run; the export and
-determinism stages require a device unless --gpu-optional; the Dist build is followed by the map check under its
-Roadmap name; the portability stage checks the Runtime's link settings; the hardening stage reports Hardening.py's steps
-one by one. Nothing here builds or runs a stage: the runner's script calls are recorded.
+"""Scripts/CI.py's M15 and M16 stages and modes (Docs/Architecture.md §15.8, §15.9; Docs/Decisions/0024-m15-contract.md
+decisions 9, 10, 11, 18 and 19; Docs/Decisions/0026-m16-contract.md decision 8): --milestone selects every available
+stage plus hardening and implies --require-clang-cl, refusing every selection and mode option; a plain run lists
+hardening as not run; the export, determinism and games stages require a device unless --gpu-optional, and every stage
+of §15.8 exists; the Dist build is followed by the map check under its Roadmap name; the portability stage checks the
+Runtime's link settings; the hardening stage reports Hardening.py's steps one by one. Nothing here builds or runs a
+stage: the runner's script calls are recorded.
 """
 
 from __future__ import annotations
@@ -96,6 +97,19 @@ class StageTests(unittest.TestCase):
                     ("determinism Debug, Release, Dist", "Test.py",
                      ["--suite", "determinism", "--config", "Debug,Release,Dist", "--junit", *device]),
                 ])
+
+    def test_the_games_stage_runs_one_test_py_over_the_selected_configurations(self) -> None:
+        # One run over the configurations --configs selects (the Dist half needs Dist, the editor halves Debug and
+        # Release), with a device unless --gpu-optional; games is no longer reported as not available.
+        self.assertEqual([stage.name for stage in CI.STAGES if not stage.available], [])
+        for options, configs, device in (((), "Debug,Release,Dist", ["--require-gpu"]),
+                                         (("--gpu-optional", "--configs", "Debug,Release"), "Debug,Release", [])):
+            with self.subTest(options=options):
+                runner = RecordingRunner(parse("--stages", "games", *options))
+                steps = CI.run_stage(runner, CI.STAGE_BY_NAME["games"], runner.arguments.configs)
+                self.assertEqual([step.status for step in steps], [Status.PASSED])
+                self.assertEqual(runner.calls, [(f"games {configs.replace(',', ', ')}", "Test.py",
+                                                 ["--suite", "games", "--config", configs, "--junit", *device])])
 
     def test_contract_mode_allows_skips_in_the_export_stage(self) -> None:
         runner = RecordingRunner(parse("--stages", "export", "--contract", "--configs", "Release"))

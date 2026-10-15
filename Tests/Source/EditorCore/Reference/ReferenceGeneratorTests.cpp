@@ -5,12 +5,16 @@
 #include "EditorCore/Automation/RegisterMethods.h"
 #include "EditorCore/Project/ProjectValidator.h"
 #include "Engine/App/EngineContext.h"
+#include "Engine/Asset/ReplayData.h"
 #include "Engine/AssetPipeline/ImporterRegistry.h"
+#include "Engine/Audio/SoundSynth.h"
 #include "Engine/Automation/Protocol/MethodRegistry.h"
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Core/Json/JsonWriter.h"
+#include "Engine/Reflection/EnumInfo.h"
 #include "Engine/Reflection/JsonSchema.h"
+#include "Engine/Reflection/StructInfo.h"
 #include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Scripting/ScriptApiRegistry.h"
 #include "Support/EditorTestFixture.h"
@@ -28,6 +32,7 @@
 #include <string_view>
 #include <system_error>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 namespace Engine {
@@ -329,6 +334,53 @@ namespace Engine {
 			}
 		}
 
+		// M16 friction S1-06: FileFormats.md showed the SoundEffect format only by example, and the note grammar (names with
+		// sharps and flats, octaves, rests, the seconds' notation) and the limits were written nowhere a builder could read.
+		TEST_CASE("ReferenceGenerator: the SoundEffect section lists every field, every wave, the note grammar and the limits")
+		{
+			Test::EditorTestFixture fixture("ReferenceSoundEffect");
+			const ReferenceRegistries registries(fixture);
+			const auto files = GenerateReferences(registries.GetSources());
+			REQUIRE_MESSAGE(files.has_value(), files.error().ToString());
+			const std::string& formats = FindFile(*files, "FileFormats.md")->Content;
+			const size_t begin = formats.find("### SoundEffect (`.sfx`)");
+			const size_t end = formats.find("## Source formats");
+			REQUIRE(begin != std::string::npos);
+			REQUIRE(end != std::string::npos);
+			REQUIRE(begin < end);
+			const std::string section = formats.substr(begin, end - begin);
+			const TypeRegistry& types = fixture.GetEngine().GetTypeRegistry();
+			for (const std::string_view name : { "SoundEffect", "SoundLayer", "SoundEnvelope" })
+			{
+				CAPTURE(name);
+				const StructInfo* type = types.FindStruct(name);
+				REQUIRE(type != nullptr);
+				CHECK(section.find(std::format("#### Fields of {}\n", name)) != std::string::npos);
+				for (const auto& field : type->GetFields())
+				{
+					CAPTURE(field->GetName());
+					CHECK(section.find(std::format("| `{}` |", field->GetName())) != std::string::npos);
+				}
+			}
+			const EnumInfo* waves = types.FindEnum("SoundWave");
+			REQUIRE(waves != nullptr);
+			CHECK(section.find("#### Values of SoundWave\n") != std::string::npos);
+			for (const EnumEntry& entry : waves->GetEntries())
+				CHECK(section.find(std::format("| `{}` |", entry.Name)) != std::string::npos);
+
+			const Json schema = ParseSchema(*files, "SoundEffect");
+			const std::string schemaText = schema.dump();
+			for (const std::string& text : { std::string("C, C#, Db, D, D#, Eb, E, F, F#, Gb, G, G#, Ab, A, A#, Bb or B"), std::string("Octave is one digit, 0 to 8"),
+					 std::string("for a rest"), std::string("at most 7 digits before and 8 after the point"),
+					 std::format("At most {} notes", MaxSoundNotesPerLayer), std::format("1 to {} layers", MaxSoundLayers),
+					 std::format("at most {} seconds", MaxSoundEffectSeconds) })
+			{
+				CAPTURE(text);
+				CHECK(section.find(text) != std::string::npos);
+				CHECK(schemaText.find(text) != std::string::npos);
+			}
+		}
+
 		// A schema rejects what its format's reader rejects, as far as the supported keywords can say it.
 		TEST_CASE("ReferenceGenerator: the schemas reject wrong headers, unknown keys and malformed handles")
 		{
@@ -363,6 +415,38 @@ namespace Engine {
 			const auto unknown = JsonReader::Parse(R"({"Format":"Scene","Version":1,"Entities":[{"ID":"0000000000000001","Components":{"FutureComponent":{"X":1}}}]})");
 			REQUIRE(unknown.has_value());
 			CHECK(JsonSchema::Validate(scene, *unknown).has_value());
+		}
+
+		// M16 review R20: the replay reader accepts a state hash only as 16 lowercase hex digits, while the schema reused the
+		// handle pattern, which accepts either case. The schema and the reader now agree on every checkpoint and final hash.
+		TEST_CASE("ReferenceGenerator: the Replay schema accepts only the lowercase state hashes the replay reader accepts")
+		{
+			Test::EditorTestFixture fixture("ReferenceReplayHashes");
+			const ReferenceRegistries registries(fixture);
+			const auto files = GenerateReferences(registries.GetSources());
+			REQUIRE_MESSAGE(files.has_value(), files.error().ToString());
+			const Json schema = ParseSchema(*files, "Replay");
+			const Result<std::string> text = Test::ReadTestDataText("SettingsObservation/Project/Assets/Tests/Replays/Main.replay");
+			REQUIRE(text.has_value());
+			Json lowercase = JsonReader::Parse(*text).value_or(Json());
+			REQUIRE(lowercase.is_object());
+			lowercase["FinalTick"] = 120;
+			lowercase["FinalStateHash"] = "00000000000000ff";
+			lowercase["Checkpoints"] = Json::array({ Json{ { "Tick", 60 }, { "StateHash", "00000000000000ab" } } });
+			Json uppercaseCheckpoint = lowercase;
+			uppercaseCheckpoint["Checkpoints"][0]["StateHash"] = "00000000000000AB";
+			Json uppercaseFinal = lowercase;
+			uppercaseFinal["FinalStateHash"] = "00000000000000FF";
+
+			const std::pair<Json, bool> cases[] = { { lowercase, true }, { uppercaseCheckpoint, false }, { uppercaseFinal, false } };
+			for (const auto& [document, accepted] : cases)
+			{
+				CAPTURE(document.dump());
+				ReplayLoadReport report;
+				CHECK(ReplayFromJson(document, report, true).has_value() == accepted);
+				const Status valid = JsonSchema::Validate(schema, document);
+				CHECK(valid.has_value() == accepted);
+			}
 		}
 	}
 

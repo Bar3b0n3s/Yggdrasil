@@ -102,7 +102,15 @@ namespace Engine {
 	// editor's automation types, turns ImGui on with ImGuiIniPath "Editor/imgui.ini" and turns the headless throttle off for
 	// --batch and --upgrade (§4.2). Errors: InvalidArgument for a bad command line, including any positional argument (the
 	// editor declares none), the option combinations ParseEditorLaunchOptions rejects, a screenshot option without --frames,
-	// or with --frames 1 for --editor-screenshot.
+	// or with --frames 1 for --editor-screenshot, and --help (RunEditor answers it before any application exists).
 	[[nodiscard]] Result<Scope<Application>> CreateEditorApp(std::span<const std::string> arguments);
+
+	// The editor's main (M16 friction F20): with --help or -h among arguments that otherwise parse (ExpandEditorShortOptions,
+	// ParseEditorLaunchOptions), writes the usage, "Usage: Editor [options]" and every option of the engine, EditorCore and
+	// the Editor executable with its one-line description (CommandLine::FormatUsage), to standard output and returns
+	// ExitCode::Success without creating the application or the process context (no log file, no user-data directory, no
+	// Vulkan loader); ExitCode::Failed when standard output cannot be written. Otherwise RunApplication(argc, argv,
+	// &CreateEditorApp), so an unknown option stays a usage error (exit code 2).
+	[[nodiscard]] int RunEditor(int argc, char** argv);
 
 }

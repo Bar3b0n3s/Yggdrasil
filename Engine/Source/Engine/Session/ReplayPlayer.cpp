@@ -24,6 +24,7 @@ namespace Engine {
 		uint64_t Tick = 0;
 		size_t NextExpectation = 0;
 		size_t NextEvent = 0;
+		size_t NextCheckpoint = 0;
 		bool Begun = false;
 		bool Complete = false;
 
@@ -70,13 +71,15 @@ namespace Engine {
 		}
 
 		// The completed playback at the boundary reached (Tick). `stopReason` is empty at FinalTick; otherwise playback
-		// ended early and has failed, and every expectation it never reached is reported unevaluated.
-		void Finish(const PlaySession& session, std::string stopReason)
+		// ended early and has failed, and every expectation it never reached is reported unevaluated. `failed` is the
+		// checkpoint whose hash differed (its observed hash is `observed`), when that ended it.
+		void Finish(const PlaySession& session, std::string stopReason, const ReplayCheckpoint* failed = nullptr, std::string observed = {})
 		{
 			auto& result = ReportData;
 			result.FinalTick = Tick;
-			result.StateHash = UUID(session.ComputeStateHash()).ToString();
-			result.ExpectedStateHash = Replay->FinalStateHash;
+			result.StateHash = failed != nullptr ? std::move(observed) : UUID(session.ComputeStateHash()).ToString();
+			result.ExpectedStateHash = failed != nullptr ? failed->StateHash : Replay->FinalStateHash;
+			result.CheckpointFailed = failed != nullptr;
 			result.Verified = Options.Verify;
 			result.HashChecked = Options.StrictHash;
 			result.HashMatched = stopReason.empty() && result.StateHash == result.ExpectedStateHash;
@@ -95,6 +98,22 @@ namespace Engine {
 				return item.Satisfied;
 			}));
 			Complete = true;
+		}
+
+		// StrictHash: compares the checkpoint of the boundary reached (Tick), if the replay has one there; a different hash
+		// completes the playback as failed (ReplayPlaybackResult::CheckpointFailed) and returns true.
+		bool CheckCheckpoint(const PlaySession& session)
+		{
+			if (!Options.StrictHash || NextCheckpoint >= Replay->Checkpoints.size() || Replay->Checkpoints[NextCheckpoint].Tick != Tick)
+				return false;
+			const ReplayCheckpoint& checkpoint = Replay->Checkpoints[NextCheckpoint++];
+			++ReportData.CheckpointsChecked;
+			std::string observed = UUID(session.ComputeStateHash()).ToString();
+			if (observed == checkpoint.StateHash)
+				return false;
+			std::string reason = std::format("the state hash at checkpoint tick {} is {}, but the recording's is {}: the simulation diverged from the recording by that tick", Tick, observed, checkpoint.StateHash);
+			Finish(session, std::move(reason), &checkpoint, std::move(observed));
+			return true;
 		}
 
 		// Why `session` refuses to advance before FinalTick, when gameplay ended it: a quit request or a fatal stop.
@@ -125,6 +144,7 @@ namespace Engine {
 		ReplayDocument document;
 		document.Header = replay->Header;
 		document.Events = replay->Events;
+		document.Checkpoints = replay->Checkpoints;
 		document.FinalTick = replay->FinalTick;
 		document.FinalStateHash = replay->FinalStateHash;
 		for (const auto& expectation : replay->Expect)
@@ -143,6 +163,8 @@ namespace Engine {
 			ENGINE_TRY_ASSIGN(auto event, DecodeReplayEvent(replay->Events[i], session.GetInput().GetActions(), std::format("/Events/{}", i)));
 			events.push_back(std::move(event));
 		}
+		if (options.WithoutInput)
+			events.clear();
 		*m_State = {};
 		m_State->Replay = std::move(replay);
 		m_State->Options = options;
@@ -194,6 +216,8 @@ namespace Engine {
 			}
 			++m_State->Tick;
 			m_State->EvaluateBoundary(session, evaluator);
+			if (m_State->CheckCheckpoint(session))
+				return true;
 		}
 		if (m_State->Tick == m_State->Replay->FinalTick)
 			m_State->Finish(session, {});

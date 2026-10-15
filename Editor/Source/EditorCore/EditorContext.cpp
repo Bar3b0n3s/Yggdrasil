@@ -9,6 +9,7 @@
 #include "EditorCore/Private/EditorFileError.h"
 #include "EditorCore/Private/PrefabInstances.h"
 #include "EditorCore/Private/SceneEditRollback.h"
+#include "EditorCore/Project/ProjectValidator.h"
 #include "EditorCore/Scripting/EditorScriptService.h"
 #include "EditorCore/Scripting/ScriptTypeChecker.h"
 #include "Engine/App/EngineContext.h"
@@ -39,6 +40,8 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <format>
+#include <functional>
 #include <map>
 #include <set>
 #include <utility>
@@ -132,9 +135,19 @@ namespace Engine {
 			return files;
 		}
 
+		// The project-relative path that the file `destination` (at or below `to`) had before a move from `from` to `to`.
+		static std::string GetMoveSource(std::string_view from, std::string_view to, std::string_view destination)
+		{
+			if (destination.size() == to.size())
+				return std::string(from);
+			return std::format("{}{}", from, destination.substr(to.size()));
+		}
+
 		// Brings `provenance` in step with one AssetWriter event (§13.4, §13.12 rules 1 and 3): a written file under a recorded
-		// path is recorded with `attribution`; the entries of a removed path, or of a move's source, are forgotten; every file
-		// a move brought to a recorded path is recorded with its hash and `attribution`. Returns whether anything changed.
+		// path is recorded with `attribution`; the entries of a removed path, or of a move's source, are forgotten. A move
+		// carries a source's entry to the file's new recorded path, with `attribution`, only when the source had an entry whose
+		// hash equals the moved bytes: a move writes no content, so a file the editor did not write (no entry, or bytes changed
+		// since its entry) gets no entry at its destination and the audit still reports it. Returns whether anything changed.
 		static bool ApplyWriteToProvenance(ProvenanceRecorder& provenance, const VirtualFileSystem& vfs, const WriteAttribution& attribution,
 			const AssetWriteEvent& event)
 		{
@@ -155,11 +168,21 @@ namespace Engine {
 						changed = provenance.Remove(path) || changed;
 					break;
 				case AssetWriteKind::Moved:
+				{
+					// The recorded hash of every source file, taken before the source's entries are forgotten.
+					std::map<std::string, uint64_t, std::less<>> sourceHashes;
 					for (const std::string& path : FindProvenanceEntries(provenance, event.From.GetPath()))
+					{
+						if (const ProvenanceEntry* entry = provenance.Find(path); entry != nullptr)
+							sourceHashes.emplace(path, entry->Hash);
 						changed = provenance.Remove(path) || changed;
+					}
 					for (const VfsPath& file : ListFilesAt(vfs, event.Path))
 					{
 						if (!ProvenanceRecorder::IsRecordedPath(file.GetPath()))
+							continue;
+						const auto recorded = sourceHashes.find(GetMoveSource(event.From.GetPath(), event.Path.GetPath(), file.GetPath()));
+						if (recorded == sourceHashes.end())
 							continue;
 						Result<Buffer> bytes = vfs.ReadFile(file);
 						if (!bytes)
@@ -167,10 +190,13 @@ namespace Engine {
 							ENGINE_WARN("Provenance could not record the moved file '{}': {}", file.ToString(), bytes.error().ToString());
 							continue;
 						}
-						provenance.Record(file.GetPath(), XXH64(*bytes), attribution);
+						if (XXH64(*bytes) != recorded->second)
+							continue;
+						provenance.Record(file.GetPath(), recorded->second, attribution);
 						changed = true;
 					}
 					break;
+				}
 				case AssetWriteKind::DirectoryCreated:
 					break;
 			}
@@ -249,7 +275,7 @@ namespace Engine {
 				if (prefab == loaded.end())
 				{
 					LoadReport prefabReport;
-					Result<Prefab> current = LoadPrefabAsset(assets, handle, registry, prefabReport);
+					Result<Prefab> current = LoadPrefabAsset(assets, handle, registry, options.Schemas, prefabReport);
 					if (!current)
 					{
 						if (current.error().GetCode() != ErrorCode::NotFound)
@@ -365,13 +391,21 @@ namespace Engine {
 			m_AudioPreview = CreateScope<AudioPreview>(*audio, *m_Assets);
 
 		// Provenance for every write of the manager's AssetWriter, the editor's own and the manager's .meta writes alike
-		// (§13.12 rule 1); never during a dry run, and not for read-only projects (no provenance).
+		// (§13.12 rule 1); never during a dry run, and not for read-only projects (no provenance). A write an import's
+		// publication made carries the write context the import started under, whose attribution it is recorded with
+		// (Docs/Decisions/0026-m16-contract.md decision 10); every other write gets the current attribution.
 		m_Assets->SetWriteObserver([this](const AssetWriteEvent& event)
 		{
 			if (IsDryRun() || !m_Provenance.has_value())
 				return;
 			VirtualFileSystem& vfs = GetVfs();
-			if (!Utils::ApplyWriteToProvenance(*m_Provenance, vfs, m_Attribution, event))
+			const WriteAttribution* attribution = &m_Attribution;
+			if (event.WriteContextId != 0)
+			{
+				if (const auto context = m_WriteContexts.find(event.WriteContextId); context != m_WriteContexts.end())
+					attribution = &context->second.Attribution;
+			}
+			if (!Utils::ApplyWriteToProvenance(*m_Provenance, vfs, *attribution, event))
 				return;
 			Status saved = m_Provenance->Save(vfs);
 			if (saved)
@@ -407,6 +441,9 @@ namespace Engine {
 			ENGINE_WARN("'{}' changed on disk; the open scene '{}' was left as it is{} (scene.open {{reload: true}} adopts the disk version)", path,
 				m_Scene->GetName(), dirty ? " with its unsaved changes" : "");
 		});
+
+		// The UI's write context, so an import the UI starts before any request keeps "ui" (decision 10).
+		SetWriteAttribution(std::nullopt);
 	}
 
 	EditorContext::~EditorContext()
@@ -424,7 +461,7 @@ namespace Engine {
 
 	void EditorContext::Update(double nowSeconds)
 	{
-		if (HasProject())
+		if (HasProject() && !IsAssetScanDeferred())
 		{
 			if (!m_Play->IsTestRunActive() && !IsDryRun() && nowSeconds >= m_NextScriptConfigurationCheck)
 			{
@@ -468,19 +505,35 @@ namespace Engine {
 		Result<FileInfo> info = vfs.GetInfo(path);
 		if (!info)
 			return std::unexpected(Utils::ToEditorFileError(std::move(info).error()));
-		if (info->IsDirectory)
+		if (!info->IsDirectory)
 		{
-			Result<std::vector<VfsEntry>> entries = vfs.List(path, false);
-			if (!entries)
-				return std::unexpected(Utils::ToEditorFileError(std::move(entries).error()));
-			if (!entries->empty())
-			{
-				return std::unexpected(Error(ErrorCode::InvalidState, std::format("cannot remove '{}': the folder is not empty", path.ToString()))
-						.WithHint("delete the assets in it first (asset.delete moves them to the trash)"));
-			}
+			Utils::ProvenanceErrorScope provenance(m_CollectProvenanceErrors, m_ProvenanceError);
+			ENGINE_TRY(Utils::ToEditorFileStatus(m_Assets->GetWriter().Remove(path)));
+			return provenance.Take();
+		}
+
+		// A folder goes only while it is empty, never with anything below it (never a permanent delete): the listing names
+		// what the editor can see, and the non-recursive removal refuses a folder that still holds an entry the listing
+		// leaves out, a host name no VfsPath can spell (NativeDirectoryMount::List).
+		Result<std::vector<VfsEntry>> entries = vfs.List(path, false);
+		if (!entries)
+			return std::unexpected(Utils::ToEditorFileError(std::move(entries).error()));
+		if (!entries->empty())
+		{
+			return std::unexpected(Error(ErrorCode::InvalidState, std::format("cannot remove '{}': the folder is not empty", path.ToString()))
+					.WithHint("delete the assets in it first (asset.delete moves them to the trash)"));
 		}
 		Utils::ProvenanceErrorScope provenance(m_CollectProvenanceErrors, m_ProvenanceError);
-		ENGINE_TRY(Utils::ToEditorFileStatus(m_Assets->GetWriter().Remove(path)));
+		Status removed = m_Assets->GetWriter().RemoveEmptyDirectory(path);
+		if (!removed && removed.error().GetCode() == ErrorCode::InvalidState)
+		{
+			return std::unexpected(Error(ErrorCode::InvalidState,
+				std::format("cannot remove '{}': the folder still holds an entry whose name no project path can spell, so the editor cannot list it (a "
+							"reserved device name such as 'nul.txt', a name ending in '.' or ' ', or one with a character such as ':', '?' or '*'); nothing was removed",
+					path.ToString()))
+					.WithHint("remove or rename that entry outside the editor, then delete the folder again"));
+		}
+		ENGINE_TRY(Utils::ToEditorFileStatus(std::move(removed)));
 		return provenance.Take();
 	}
 
@@ -578,7 +631,8 @@ namespace Engine {
 
 	EditorScriptService* EditorContext::GetScriptService()
 	{
-		if (!HasProject())
+		// While the asset scan is deferred, the script services wait for OpenDeferredAssets too (decision 11).
+		if (!HasProject() || IsAssetScanDeferred())
 			return nullptr;
 		if (const Status refreshed = RefreshScriptServices(); !refreshed)
 		{
@@ -596,6 +650,11 @@ namespace Engine {
 	{
 		if (!HasProject())
 			return MakeError(ErrorCode::InvalidState, "no project is open");
+		if (IsAssetScanDeferred())
+		{
+			return std::unexpected(Error(ErrorCode::InvalidState, "the project's asset scan is deferred (Editor --upgrade)")
+					.WithHint("project.refreshAssets runs the scan and starts the script services"));
+		}
 		ENGINE_TRY(RefreshScriptServices());
 		m_ScriptConfigurationError.clear();
 		return m_ScriptService.get();
@@ -762,19 +821,54 @@ namespace Engine {
 		m_SelectionSession = 0;
 		m_SelectionSceneGeneration = 0;
 		m_UiState.SetSelectedAsset({});
+		m_AssetScanDeferred = true;
+
+		// --upgrade (Docs/Decisions/0026-m16-contract.md decision 11): the rest waits for OpenDeferredAssets, which
+		// project.refreshAssets runs under its own attribution, so opening the project writes nothing.
+		if (m_Specification.DeferAssetScan)
+		{
+			ENGINE_INFO("Opened project '{}' at '{}'{}; its asset scan waits for project.refreshAssets", m_Project->GetSettings().Name,
+				FileSystem::PathToUtf8(m_Project->GetRoot()), m_Project->IsReadOnly() ? " read-only" : "");
+			return {};
+		}
+
+		// A project the editor cannot index stays closed.
+		if (Result<AssetRefreshReport> assets = OpenDeferredAssets(); !assets)
+		{
+			m_AssetScanDeferred = false;
+			m_Provenance.reset();
+			m_Project.reset();
+			Utils::UnmountLogged(vfs, Utils::CacheScheme);
+			Utils::UnmountLogged(vfs, Utils::ProjectScheme);
+			return std::unexpected(std::move(assets).error());
+		}
+		return {};
+	}
+
+	bool EditorContext::IsAssetScanDeferred() const
+	{
+		return m_Project != nullptr && m_AssetScanDeferred;
+	}
+
+	Result<AssetRefreshReport> EditorContext::OpenDeferredAssets()
+	{
+		if (!HasProject())
+			return MakeError(ErrorCode::InvalidState, "no project is open");
+		if (!m_AssetScanDeferred)
+		{
+			return std::unexpected(Error(ErrorCode::InvalidState, std::format("the assets of the project '{}' are already open", m_Project->GetSettings().Name))
+					.WithHint("only an editor started with --upgrade defers its asset scan, to its first project.refreshAssets"));
+		}
+		VirtualFileSystem& vfs = GetVfs();
 
 		// The project's assets (M6): scan, .meta files for new sources (recorded in provenance through the write observer,
-		// with the current attribution) and hot reload. A project the editor cannot index stays closed.
+		// with the current attribution) and hot reload. A failure undoes only this part: the project stays open.
 		Result<AssetRefreshReport> assets = OpenProjectAssets();
 		if (!assets)
 		{
 			m_Assets->SetScriptDiagnosticsProvider(nullptr);
 			m_ScriptService.reset();
 			m_ScriptChecker.reset();
-			m_Provenance.reset();
-			m_Project.reset();
-			Utils::UnmountLogged(vfs, Utils::CacheScheme);
-			Utils::UnmountLogged(vfs, Utils::ProjectScheme);
 			return std::unexpected(std::move(assets).error().WithContext("opening the project's assets"));
 		}
 
@@ -787,14 +881,11 @@ namespace Engine {
 				m_Assets->SetScriptDiagnosticsProvider(nullptr);
 				m_ScriptService.reset();
 				m_ScriptChecker.reset();
-				m_Provenance.reset();
-				m_Project.reset();
-				Utils::UnmountLogged(vfs, Utils::CacheScheme);
-				Utils::UnmountLogged(vfs, Utils::ProjectScheme);
 				return std::unexpected(std::move(strict).error().WithContext("opening the project with --strict"));
 			}
 		}
 
+		m_AssetScanDeferred = false;
 		if (vfs.IsMounted("user"))
 		{
 			if (Status added = ProjectManager::AddRecentProject(vfs, m_Project->GetProjectFile()); !added)
@@ -802,19 +893,7 @@ namespace Engine {
 		}
 		ENGINE_INFO("Opened project '{}' at '{}'{} ({} asset .meta files, {} new)", m_Project->GetSettings().Name,
 			FileSystem::PathToUtf8(m_Project->GetRoot()), m_Project->IsReadOnly() ? " read-only" : "", assets->MetaCount, assets->CreatedMetas.size());
-		return {};
-	}
-
-	bool EditorContext::IsAssetScanDeferred() const
-	{
-		ENGINE_CONTRACT_STUB();
-		return false;
-	}
-
-	Result<AssetRefreshReport> EditorContext::OpenDeferredAssets()
-	{
-		ENGINE_CONTRACT_STUB();
-		return MakeError(ErrorCode::Unsupported, "deferred asset scans arrive with M16 stream C (Docs/Decisions/0026-m16-contract.md decision 11)");
+		return assets;
 	}
 
 	Result<AssetRefreshReport> EditorContext::OpenProjectAssets()
@@ -854,6 +933,7 @@ namespace Engine {
 		ENGINE_TRY_ASSIGN(const Ref<const ScriptFieldSchemaSource> schemas, GetScriptSchemaSnapshot());
 		const TypeRegistry& registry = GetTypeRegistry();
 		std::vector<ErrorIssue> issues;
+		size_t failedFiles = 0;
 		for (const VfsEntry& entry : entries)
 		{
 			const std::string_view extension = entry.Path.GetExtension();
@@ -878,16 +958,27 @@ namespace Engine {
 			}
 			if (!loaded)
 			{
+				++failedFiles;
 				const Error& error = loaded.error();
 				issues.push_back(ErrorIssue{ .JsonPointer = error.GetLocation().JsonPointer.value_or(std::string()),
 					.Message = std::format("{}: {}", entry.Path.GetPath(), error.ToString()),
 					.Hint = error.GetHint(),
 					.Suggestions = {} });
+				// Script field values are named with the code and place project.validate reports them under (ADR 0026).
+				ENGINE_TRY_ASSIGN(const std::vector<LoadDiagnostic> problems, ProjectValidator::FindScriptFieldProblems(*this, entry.Path));
+				for (const LoadDiagnostic& problem : problems)
+				{
+					issues.push_back(ErrorIssue{ .JsonPointer = problem.JsonPointer,
+						.Message = std::format("{} {}: {} ({}, entity {})", entry.Path.GetPath(), problem.JsonPointer, problem.Message, problem.Code,
+							problem.Entity.ToString()),
+						.Hint = "project.validate reports it under the same code; correct or remove the override",
+						.Suggestions = {} });
+				}
 			}
 		}
 		if (issues.empty())
 			return {};
-		std::string message = issues.size() == 1 ? issues.front().Message : std::format("{} scene and prefab files do not load strictly", issues.size());
+		std::string message = failedFiles == 1 ? issues.front().Message : std::format("{} scene and prefab files do not load strictly", failedFiles);
 		return std::unexpected(Error(ErrorCode::Validation, std::move(message))
 				.WithIssues(std::move(issues))
 				.WithHint("--strict needs every scene and prefab to load strictly, unknown keys, fields and components being errors: correct the files "
@@ -932,6 +1023,7 @@ namespace Engine {
 		Utils::UnmountLogged(vfs, Utils::CacheScheme);
 		Utils::UnmountLogged(vfs, Utils::ProjectScheme);
 		const std::string name = m_Project->GetSettings().Name;
+		m_AssetScanDeferred = false;
 		m_Provenance.reset();
 		m_Project.reset(); // releases the project lock
 		ENGINE_INFO("Closed project '{}'", name);
@@ -1121,6 +1213,17 @@ namespace Engine {
 	{
 		m_HasRequestAttribution = attribution.has_value();
 		m_Attribution = attribution.has_value() ? std::move(*attribution) : WriteAttribution{};
+
+		// One write context per attribution (Docs/Decisions/0026-m16-contract.md decision 10): the imports started from now on
+		// keep it until they are published, and the editor remembers what its Id means only while the token is current or
+		// an import holds it.
+		std::erase_if(m_WriteContexts, [](const auto& entry)
+		{
+			return entry.second.Token.expired();
+		});
+		Ref<const AssetWriteContext> context = CreateRef<const AssetWriteContext>(AssetWriteContext{ .Id = ++m_LastWriteContextId });
+		m_WriteContexts.emplace(context->Id, WriteContextEntry{ .Token = context, .Attribution = m_Attribution });
+		m_Assets->SetWriteContext(std::move(context));
 	}
 
 	Status EditorContext::CheckTestRunAdmission(std::string_view method, bool dryRun) const

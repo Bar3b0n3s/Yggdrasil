@@ -7,7 +7,8 @@
 
 namespace Engine {
 
-	Result<Prefab> LoadPrefabAsset(AssetManager& assets, AssetHandle handle, const TypeRegistry& registry, LoadReport& report)
+	Result<Prefab> LoadPrefabAsset(AssetManager& assets, AssetHandle handle, const TypeRegistry& registry, const IFieldSchemaSource* schemas,
+		LoadReport& report)
 	{
 		if (!handle.IsValid())
 			return MakeError(ErrorCode::InvalidArgument, "cannot load a prefab from the null asset handle");
@@ -35,6 +36,7 @@ namespace Engine {
 		// The cooked document passed strict loading when it was imported (PrefabImporter, GltfImporter).
 		LoadOptions options;
 		options.Mode = LoadMode::Strict;
+		options.Schemas = schemas;
 		options.SourcePath = path;
 		Result<Prefab> parsed = Prefab::FromJson(*prefab->Document, registry, options, report);
 		if (!parsed)
@@ -45,7 +47,7 @@ namespace Engine {
 	Result<Entity> InstantiatePrefabAsset(Scene& scene, AssetManager& assets, const PrefabInstantiateOptions& instance,
 		const PrefabOptions& options, LoadReport& report)
 	{
-		ENGINE_TRY_ASSIGN(const Prefab prefab, LoadPrefabAsset(assets, instance.PrefabHandle, scene.GetTypeRegistry(), report));
+		ENGINE_TRY_ASSIGN(const Prefab prefab, LoadPrefabAsset(assets, instance.PrefabHandle, scene.GetTypeRegistry(), options.Schemas, report));
 		return PrefabInstantiator::Instantiate(scene, prefab, instance, options, report);
 	}
 

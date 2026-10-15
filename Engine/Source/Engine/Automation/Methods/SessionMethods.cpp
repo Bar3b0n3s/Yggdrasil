@@ -100,6 +100,11 @@ namespace Engine {
 			{
 				return left.Id < right.Id;
 			});
+			if (host.Scene.has_value())
+			{
+				ENGINE_TRY_ASSIGN(Json scene, context.SerializeResult(*host.Scene));
+				result.Scene = VariantValue(std::move(scene));
+			}
 			return result;
 		}
 
@@ -154,7 +159,11 @@ namespace Engine {
 			.Field("lockstepOwner", &SessionInfoResult::LockstepOwner, "The name of the client that owns lockstep; empty when none.")
 			.Field("readOnly", &SessionInfoResult::ReadOnly, "Whether the host denies mutations: the editor with --read-only, the Runtime always.")
 			.Field("headless", &SessionInfoResult::Headless, "Whether the host runs without a visible window (--headless).")
-			.Field("clients", &SessionInfoResult::Clients, "The connected clients, by id.");
+			.Field("clients", &SessionInfoResult::Clients, "The connected clients, by id.")
+			.Field("scene", &SessionInfoResult::Scene,
+				"The open scene as scene.* results report it ({path, name, revision, dirty, entityCount}; path is project-relative, empty for a scene "
+				"never saved); null without one: the editor opens no scene with its project (scene.open {path} opens the project's StartScene). "
+				"The Runtime reports its game scene.");
 
 		registry.Struct<SessionShutdownParams>("SessionShutdownParams", "The params of session.shutdown.")
 			.Field("save", &SessionShutdownParams::Save, "The editor saves the open scene first when it has unsaved changes (the Runtime has none to save).")
@@ -188,8 +197,8 @@ namespace Engine {
 		methods.Add(
 			{
 				.Name = "session.info",
-				.Description = "Reports the host's session (the editor's or the exported game's): versions, capabilities, the open project, play "
-							   "state, renderer, lockstep owner, the read-only flag and the connected clients.",
+				.Description = "Reports the host's session (the editor's or the exported game's): versions, capabilities, the open project and "
+							   "scene, play state, renderer, lockstep owner, the read-only flag and the connected clients.",
 				.AvailableInRuntime = true,
 				.AvailableInLauncher = true,
 				.AllowedInBatch = true,

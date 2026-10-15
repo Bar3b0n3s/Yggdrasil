@@ -102,6 +102,15 @@ namespace Engine {
 		return iterator->second->WriteFileAtomic(path, data);
 	}
 
+	Status VirtualFileSystem::WriteNewFile(const VfsPath& path, std::span<const std::byte> data)
+	{
+		const std::shared_lock lock(m_MountsMutex);
+		const auto iterator = m_Mounts.find(path.GetScheme());
+		if (path.IsEmpty() || iterator == m_Mounts.end())
+			return Utils::NotMountedError(path);
+		return iterator->second->WriteNewFile(path, data);
+	}
+
 	bool VirtualFileSystem::Exists(const VfsPath& path) const
 	{
 		return GetInfo(path).has_value();
@@ -141,6 +150,15 @@ namespace Engine {
 		if (path.IsEmpty() || iterator == m_Mounts.end())
 			return Utils::NotMountedError(path);
 		return iterator->second->Remove(path);
+	}
+
+	Status VirtualFileSystem::RemoveEmptyDirectory(const VfsPath& directory)
+	{
+		const std::shared_lock lock(m_MountsMutex);
+		const auto iterator = m_Mounts.find(directory.GetScheme());
+		if (directory.IsEmpty() || iterator == m_Mounts.end())
+			return Utils::NotMountedError(directory);
+		return iterator->second->RemoveEmptyDirectory(directory);
 	}
 
 	Status VirtualFileSystem::Move(const VfsPath& from, const VfsPath& to)

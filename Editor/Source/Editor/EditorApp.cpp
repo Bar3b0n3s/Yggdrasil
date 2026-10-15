@@ -32,6 +32,7 @@
 #include "EditorCore/Viewport/GizmoController.h"
 #include "Engine/App/CommandLine.h"
 #include "Engine/App/EngineContext.h"
+#include "Engine/App/EntryPoint.h"
 #include "Engine/App/ExitCode.h"
 #include "Engine/App/ProcessContext.h"
 #include "Engine/App/VulkanErrorHandler.h"
@@ -76,11 +77,13 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdio>
 #include <filesystem>
 #include <format>
 #include <limits>
 #include <optional>
 #include <span>
+#include <string>
 #include <system_error>
 #include <utility>
 #include <vector>
@@ -207,6 +210,15 @@ namespace Engine {
 			options.insert(options.end(), GetEditorCommandLineOptions().begin(), GetEditorCommandLineOptions().end());
 			options.insert(options.end(), EditorAppCommandLineOptions.begin(), EditorAppCommandLineOptions.end());
 			return options;
+		}
+
+		// Writes `text` to standard output and flushes it. Only --help's usage goes there (RunEditor): it is the program's
+		// output, not a diagnostic, and the logger's console sink writes to standard error.
+		[[nodiscard]] static Status WriteStandardOutput(std::string_view text)
+		{
+			if (std::fwrite(text.data(), 1, text.size(), stdout) != text.size() || std::fflush(stdout) != 0)
+				return MakeError(ErrorCode::Io, "cannot write {} bytes to standard output", text.size());
+			return {};
 		}
 
 		// The value of path option `name` as a path; an empty path when the option was not given.
@@ -466,6 +478,10 @@ namespace Engine {
 			editorSpecification.IdGeneratorState = Random(*options.IdSeed).GetState();
 		// --strict (§6; the M15 completion review's A024): every project this editor opens is read strictly.
 		editorSpecification.StrictUnknowns = options.Strict;
+		// --upgrade (Docs/Decisions/0026-m16-contract.md decision 11): opening the project writes nothing; its asset scan runs
+		// in the transcribed cli request project.refreshAssets below, so every .meta write it makes is attributed to that
+		// request (§13.12 rule 2).
+		editorSpecification.DeferAssetScan = options.Upgrade;
 		ENGINE_TRY_ASSIGN(state.Editor, EditorContext::Create(app.GetContext(), editorSpecification));
 		state.Saves = CreateScope<Autosave>(*state.Editor);
 		state.Recovery = CreateScope<EditorHostRecovery>(*state.Editor, *state.Saves);
@@ -577,7 +593,11 @@ namespace Engine {
 		}
 		else if (options.Upgrade)
 		{
-			std::vector<BatchRequest> requests = { BatchRequest{ .Method = "project.upgrade", .Params = {}, .Line = 0 } };
+			// The deferred asset scan first, then the upgrade: both transcribed, so provenance can name each request's line.
+			std::vector<BatchRequest> requests = {
+				BatchRequest{ .Method = "project.refreshAssets", .Params = {}, .Line = 0 },
+				BatchRequest{ .Method = "project.upgrade", .Params = {}, .Line = 0 },
+			};
 			state.Batch = CreateScope<BatchRunner>(std::move(requests), BatchRunOptions{ .ClientName = "cli", .WriteTranscript = true });
 		}
 		else if (options.CheckScripts || options.RunTests)
@@ -1400,13 +1420,15 @@ namespace Engine {
 	Result<Scope<Application>> CreateEditorApp(std::span<const std::string> arguments)
 	{
 		const std::vector<CommandLineOption> options = Utils::GetEditorAppCommandLineOptions();
-		ENGINE_TRY_ASSIGN(CommandLine commandLine, CommandLine::Parse(arguments, options));
+		ENGINE_TRY_ASSIGN(CommandLine commandLine, CommandLine::Parse(ExpandEditorShortOptions(arguments, options), options));
 		if (!commandLine.GetPositional().empty())
 		{
 			return MakeError(ErrorCode::InvalidArgument, "unexpected argument '{}': the editor takes no positional arguments",
 				commandLine.GetPositional().front());
 		}
 		ENGINE_TRY_ASSIGN(const EditorLaunchOptions launch, ParseEditorLaunchOptions(commandLine));
+		if (launch.Help)
+			return MakeError(ErrorCode::InvalidArgument, "option '--help' prints the usage before an editor exists (RunEditor), so it creates none");
 
 		ApplicationSpecification specification;
 		specification.Name = ENGINE_PRODUCT_NAME;
@@ -1441,6 +1463,31 @@ namespace Engine {
 				Utils::EditorScreenshotOption);
 		}
 		return CreateScope<EditorApp>(std::move(specification), std::move(editorOptions));
+	}
+
+	int RunEditor(int argc, char** argv)
+	{
+		// RunApplication's step 1: argv[1..] as UTF-8 strings.
+		std::vector<std::string> arguments;
+		for (int index = 1; index < argc; ++index)
+			arguments.emplace_back(argv[index] != nullptr ? argv[index] : "");
+		const std::vector<CommandLineOption> options = Utils::GetEditorAppCommandLineOptions();
+		const Result<CommandLine> commandLine = CommandLine::Parse(ExpandEditorShortOptions(arguments, options), options);
+		if (commandLine.has_value() && commandLine->GetPositional().empty())
+		{
+			const Result<EditorLaunchOptions> launch = ParseEditorLaunchOptions(*commandLine);
+			if (launch.has_value() && launch->Help)
+			{
+				if (Status written = Utils::WriteStandardOutput(CommandLine::FormatUsage("Editor", options)); !written.has_value())
+				{
+					ENGINE_ERROR("Cannot print the usage: {}", written.error());
+					return ExitCode::Failed;
+				}
+				return ExitCode::Success;
+			}
+		}
+		// Everything else, a command line that does not parse included, is the application's to report.
+		return RunApplication(argc, argv, &CreateEditorApp);
 	}
 
 }

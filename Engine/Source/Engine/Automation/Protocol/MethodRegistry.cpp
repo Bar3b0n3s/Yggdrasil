@@ -958,7 +958,7 @@ namespace Engine {
 		if (specification.Name != Utils::HelloMethodName)
 		{
 			Json revision = Json::object();
-			revision["description"] = "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.";
+			revision["description"] = "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.";
 			revision["type"] = "integer";
 			revision["minimum"] = 0;
 			properties[std::string(Utils::IfRevisionMember)] = std::move(revision);
@@ -996,7 +996,9 @@ namespace Engine {
 		Json schema = JsonSchema::ForStruct(*method.Result);
 		Json& properties = schema["properties"];
 		Json meta = Json::object();
-		meta["description"] = "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics.";
+		meta["description"] = "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's "
+							  "revision advances with every change to the open scene or the project settings; asset and script files are outside it, so "
+							  "writing one alone leaves it unchanged. The Runtime's is its play scene's.";
 		meta["type"] = "object";
 		properties["_meta"] = std::move(meta);
 		Json dryRun = Json::object();

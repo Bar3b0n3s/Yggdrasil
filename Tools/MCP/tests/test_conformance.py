@@ -1,5 +1,6 @@
 """MCP conformance through the official SDK's client (Docs/Architecture.md §15.7, Roadmap M4): the catalogue tools are
-listed without an editor, editor_launch starts a headless editor, entity_create and scene_tree work, a killed editor
+listed without an editor, a handshake-era client is told to fetch the tool list again once it has initialized (§13.8
+"Tool list refresh"), editor_launch starts a headless editor, entity_create and scene_tree work, a killed editor
 makes the next call return EditorCrashed, and the generated .mcp.json starts the bridge with no python on PATH. A
 rendering editor's viewport_screenshot returns an image content block (Roadmap M5; Docs/Decisions/0009-m5-decisions.md
 decision 33); that test needs a Vulkan device, which it probes for like the automation suite's rendering tests
@@ -43,6 +44,7 @@ from engine_mcp import server  # noqa: E402
 BRIDGE_ENVIRONMENT_VARIABLES = ("ENGINE_MCP_TRANSCRIPT", "ENGINE_MCP_USER_DATA_DIR", "ENGINE_AUTOMATION_CONFIG",
                                 "ENGINE_AUTOMATION_COVERAGE")
 SESSION_TIMEOUT_SECONDS = 300.0
+NOTIFICATION_TIMEOUT_SECONDS = 30.0
 # The M4 editor registers this many methods at least (test hooks excluded, since editor_launch starts no test hooks).
 MIN_EDITOR_METHODS = 36
 
@@ -64,6 +66,34 @@ class ConformanceTests(unittest.TestCase):
         names = self.list_tool_names()
         self.assertTrue(set(server.LOCAL_TOOL_NAMES) <= names)
         self.assertTrue({tool.name for tool in server.load_catalog()} <= names)
+
+    def test_sdk_client_is_told_to_fetch_the_tool_list_after_initializing(self) -> None:
+        # The stdio bridge declares tools.listChanged, and a handshake-era client (one that opens with initialize) that
+        # kept the tool list of an earlier bridge process fetches it again (Docs/Decisions/0026-m16-contract.md, P10;
+        # test_tool_list.py covers the rest of the refresh in process).
+        parameters = StdioServerParameters(command=sys.executable, args=[str(MCP_ROOT / "run.py")],
+                                           env=self.bridge_environment(None), cwd=str(REPOSITORY_ROOT))
+
+        async def session() -> tuple[bool | None, list[str]]:
+            methods: list[str] = []
+            arrived = anyio.Event()
+
+            async def record(message: Any) -> None:
+                method = getattr(message, "method", None)
+                if isinstance(method, str):
+                    methods.append(method)
+                    arrived.set()
+
+            with anyio.fail_after(SESSION_TIMEOUT_SECONDS):
+                async with Client(parameters, mode="legacy", message_handler=record, cache=None) as client:
+                    # Bounds only a notification that never comes (the assertions then report that none arrived).
+                    with anyio.move_on_after(NOTIFICATION_TIMEOUT_SECONDS):
+                        await arrived.wait()
+                    return client.server_capabilities.tools.list_changed, methods
+
+        list_changed, methods = anyio.run(session)
+        self.assertTrue(list_changed)
+        self.assertEqual(methods, ["notifications/tools/list_changed"])
 
     def test_sdk_client_launches_an_editor_and_calls_tools(self) -> None:
         results = self.run_session([

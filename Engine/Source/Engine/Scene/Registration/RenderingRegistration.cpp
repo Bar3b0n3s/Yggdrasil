@@ -229,11 +229,17 @@ namespace Engine {
 				{ .Min = Utils::MinTextSize, .Max = Utils::MaxTextSize, .Unit = "px" })
 			.ColorField("Color", &TextComponent::Color, "The linear text colour with opacity in the fourth component.", Utils::ColorRange())
 			.Field("Space", &TextComponent::Space, "Whether the text is placed on the screen or in the world.")
-			.Field("Anchor", &TextComponent::Anchor, "The screen point the text is placed at, normalized to the viewport (Screen space).",
+			.Field("Anchor", &TextComponent::Anchor,
+				"Screen space: the point of the viewport the text is placed at, normalized: (0, 0) is the top-left corner and (1, 1) the "
+				"bottom-right, X to the right and Y down; (0.5, 0.5) is the centre.",
 				{ .Min = 0.0, .Max = 1.0 })
-			.Field("Pivot", &TextComponent::Pivot, "The point of the text block that sits on the anchor, normalized to the block.",
+			.Field("Pivot", &TextComponent::Pivot,
+				"The point of the text block that sits on the anchor (Screen space) or at the entity's origin (World space), normalized to "
+				"the block: (0, 0) is its top-left corner and (1, 1) its bottom-right.",
 				{ .Min = 0.0, .Max = 1.0 })
-			.Field("Offset", &TextComponent::Offset, "A further offset from the anchor, in pixels at the 1080p reference resolution.",
+			.Field("Offset", &TextComponent::Offset,
+				"Screen space: a further offset from the anchor in pixels at the 1080p reference resolution (scaled with the viewport's height), "
+				"X to the right and Y down.",
 				{ .Unit = "px" })
 			.Field("Alignment", &TextComponent::Alignment, "How the lines are aligned to each other.")
 			.Field("Billboard", &TextComponent::Billboard, "Whether world-space text always faces the camera.");

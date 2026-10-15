@@ -10,7 +10,11 @@
 #include "EditorCore/Commands/ProjectSettingsCommand.h"
 #include "EditorCore/EditorContext.h"
 #include "EditorCore/Private/EditorFileError.h"
+#include "Engine/Asset/AssetMetadata.h"
+#include "Engine/Asset/MaterialData.h"
+#include "Engine/Asset/ReplayData.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
+#include "Engine/AssetPipeline/Importers/SoundEffectImporter.h"
 #include "Engine/Automation/Protocol/MethodRegistry.h"
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Json/JsonReader.h"
@@ -19,11 +23,14 @@
 #include "Engine/Core/VirtualFileSystem.h"
 #include "Engine/Project/ProjectSerializer.h"
 #include "Engine/Reflection/TypeRegistry.h"
+#include "Engine/Scene/Migrations.h"
 #include "Engine/Scene/Prefab.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/SceneSerializer.h"
 
 #include <nlohmann/json.hpp>
+
+#include <algorithm>
 
 namespace Engine {
 
@@ -56,7 +63,8 @@ namespace Engine {
 					.WithHint("start another editor for another project"));
 		}
 
-		// Records the files CreateProject wrote (§13.4: the .eproj and Assets/) with the current request's attribution, by
+		// Records the files CreateProject wrote (§13.4: the .eproj, the root .luaurc and Assets/) with the current request's
+		// attribution, by
 		// writing Automation/Provenance.json before the project opens (EditorContext::OpenProject then loads it): the files
 		// were written before project:// existed, so they never passed EditorContext::WriteProjectFile.
 		static Status RecordCreatedFiles(const CreatedProject& created, const WriteAttribution& attribution)
@@ -92,9 +100,43 @@ namespace Engine {
 			return files;
 		}
 
-		// The canonical bytes of one project file after migration (§6), or nullopt when it has no canonical form here (other
-		// file types). Errors: the file's load errors (Parse, Validation, UnsupportedVersion).
-		static Result<std::optional<std::string>> MakeCanonicalFile(const EditorContext& editor, const VfsPath& path, std::string_view text)
+		// One project file in its canonical form (MakeCanonicalFile) and why that form differs from the file when it does
+		// (DescribeUpgrade).
+		struct CanonicalProjectFile
+		{
+			std::string Text{};
+			std::string Reason{};
+		};
+
+		// Why project.upgrade rewrites a file (ProjectUpgradeChange::Reason, M16 friction S3-09): "format version <file> to
+		// <current>" when the file is older than its format, "component migration" when a scene's or prefab's components
+		// migrated within its version; "canonical form" when neither applies (formatting, member order, defaults written out).
+		// Scenes and prefabs load strictly (MakeCanonicalFile), so one that would need a load repair fails the upgrade instead
+		// of being rewritten, and no reason names repairs; materials, sound effects and replays are read with unknown members
+		// refused, as their importers read them, so no reason hides a dropped member.
+		static std::string DescribeUpgrade(uint32_t fileVersion, uint32_t currentVersion, bool migrated)
+		{
+			if (fileVersion < currentVersion)
+				return std::format("format version {} to {}", fileVersion, currentVersion);
+			if (migrated)
+				return "component migration";
+			return "canonical form";
+		}
+
+		// The "Version" member of a file's JSON text, or 0 when it has none that reads as one (the caller's reader has
+		// already accepted the file).
+		static uint32_t ReadFileVersion(std::string_view text)
+		{
+			const Result<Json> document = JsonReader::Parse(text);
+			if (!document)
+				return 0;
+			const std::optional<JsonReader> version = JsonReader(*document).FindMember("Version");
+			return version.has_value() ? version->ReadUInt32().value_or(0) : 0;
+		}
+
+		// The canonical bytes of one project file after migration (§6) with the reason they differ, or nullopt when it has no
+		// canonical form here (other file types). Errors: the file's load errors (Parse, Validation, UnsupportedVersion).
+		static Result<std::optional<CanonicalProjectFile>> MakeCanonicalFile(const EditorContext& editor, const VfsPath& path, std::string_view text)
 		{
 			const TypeRegistry& registry = editor.GetTypeRegistry();
 			const std::string source(path.GetPath());
@@ -106,7 +148,7 @@ namespace Engine {
 				ProjectLoadReport report;
 				ENGINE_TRY_ASSIGN(const ProjectSettings settings, ProjectSerializer::LoadFromString(text, registry, options, report));
 				ENGINE_TRY_ASSIGN(std::string canonical, ProjectSerializer::SaveToString(settings, registry));
-				return std::optional<std::string>(std::move(canonical));
+				return CanonicalProjectFile{ .Text = std::move(canonical), .Reason = DescribeUpgrade(report.FileVersion, ProjectSerializer::CurrentVersion, false) };
 			}
 			if (extension == ".scene")
 			{
@@ -121,7 +163,7 @@ namespace Engine {
 				LoadReport report;
 				ENGINE_TRY(SceneSerializer::LoadFromString(*scene, text, options, report));
 				ENGINE_TRY_ASSIGN(std::string canonical, SceneSerializer::SaveToString(*scene));
-				return std::optional<std::string>(std::move(canonical));
+				return CanonicalProjectFile{ .Text = std::move(canonical), .Reason = DescribeUpgrade(report.FileVersion, Migrations::CurrentVersion, report.Migrated) };
 			}
 			if (extension == ".prefab")
 			{
@@ -130,9 +172,60 @@ namespace Engine {
 				LoadReport report;
 				ENGINE_TRY_ASSIGN(const Prefab prefab, Prefab::LoadFromString(text, registry, options, report));
 				ENGINE_TRY_ASSIGN(std::string canonical, prefab.SaveToString());
-				return std::optional<std::string>(std::move(canonical));
+				return CanonicalProjectFile{ .Text = std::move(canonical), .Reason = DescribeUpgrade(report.FileVersion, Migrations::CurrentVersion, report.Migrated) };
 			}
-			return std::optional<std::string>();
+			// The asset formats with a canonical form (Docs/Decisions/0026-m16-contract.md decision 12): each through its reader,
+			// which migrates older versions, and its canonical writer.
+			if (extension == ".meta")
+			{
+				ENGINE_TRY_ASSIGN(const AssetMetadata metadata, ParseAssetMetadata(text, source));
+				return CanonicalProjectFile{ .Text = SerializeAssetMetadata(metadata), .Reason = DescribeUpgrade(ReadFileVersion(text), AssetMetadata::CurrentVersion, false) };
+			}
+			// Materials, sound effects and replays are read with unknown members refused, as their importers read them: the
+			// canonical writer would drop a member the reader does not know, and the rewrite would make a file the importer
+			// refuses importable. Such a file fails the upgrade at the member's pointer instead.
+			const auto locate = [&source](Error error) -> Error
+			{
+				Error located = std::move(error).WithLocation({ .File = source, .JsonPointer = std::nullopt, .Entity = {} });
+				if (!located.GetHint().empty())
+					return located;
+				return std::move(located).WithHint("its importer refuses the file as well: correct the value at this pointer (an unknown member is never dropped), then run project.upgrade again");
+			};
+			if (extension == ".material")
+			{
+				MaterialLoadReport report;
+				Result<MaterialData> material = MaterialFromText(text, registry, report, true);
+				if (!material)
+					return std::unexpected(locate(std::move(material).error()));
+				ENGINE_TRY_ASSIGN(std::string canonical, MaterialToText(*material, registry));
+				return CanonicalProjectFile{ .Text = std::move(canonical), .Reason = DescribeUpgrade(report.FileVersion, MaterialData::CurrentVersion, false) };
+			}
+			if (extension == ".sfx")
+			{
+				SoundEffectLoadReport report;
+				Result<SoundEffectDescription> sound = SoundEffectFromText(text, registry, report, true);
+				if (!sound)
+					return std::unexpected(locate(std::move(sound).error()));
+				ENGINE_TRY_ASSIGN(std::string canonical, SoundEffectToText(*sound, registry));
+				return CanonicalProjectFile{ .Text = std::move(canonical), .Reason = DescribeUpgrade(report.FileVersion, SoundEffectFormatVersion, false) };
+			}
+			if (extension == ".replay")
+			{
+				ReplayLoadReport report;
+				Result<ReplayDocument> replay = ReplayFromText(text, report, true);
+				if (!replay)
+					return std::unexpected(locate(std::move(replay).error()));
+				ENGINE_TRY_ASSIGN(std::string canonical, ReplayToText(*replay));
+				return CanonicalProjectFile{ .Text = std::move(canonical), .Reason = DescribeUpgrade(report.FileVersion, ReplayFormatVersion, false) };
+			}
+			return std::optional<CanonicalProjectFile>();
+		}
+
+		// Whether project.upgrade rewrites files with `extension` below Assets/ (MakeCanonicalFile has their canonical form).
+		static bool IsUpgradedAssetExtension(std::string_view extension)
+		{
+			constexpr std::string_view Extensions[] = { ".scene", ".prefab", ".meta", ".material", ".sfx", ".replay" };
+			return std::ranges::find(Extensions, extension) != std::end(Extensions);
 		}
 
 		// An asset diagnostic as project.validate reports it (§13.7): the same code, its file and asset, and the id the
@@ -151,7 +244,8 @@ namespace Engine {
 			return result;
 		}
 
-		// The project files project.upgrade rewrites: the .eproj, then every .scene and .prefab under Assets/, sorted.
+		// The project files project.upgrade rewrites: the .eproj, then every .scene, .prefab, .meta, .material, .sfx and .replay
+		// file under Assets/ (IsUpgradedAssetExtension), sorted.
 		static Result<std::vector<VfsPath>> ListUpgradeFiles(const EditorContext& editor)
 		{
 			std::vector<VfsPath> files;
@@ -166,12 +260,17 @@ namespace Engine {
 					return files;
 				return std::unexpected(ToEditorFileError(entries.error()));
 			}
+			std::vector<VfsPath> assetFiles;
 			for (const VfsEntry& entry : *entries)
 			{
-				const std::string_view extension = entry.Path.GetExtension();
-				if (!entry.Info.IsDirectory && (extension == ".scene" || extension == ".prefab"))
-					files.push_back(entry.Path);
+				if (!entry.Info.IsDirectory && IsUpgradedAssetExtension(entry.Path.GetExtension()))
+					assetFiles.push_back(entry.Path);
 			}
+			std::ranges::sort(assetFiles, [](const VfsPath& left, const VfsPath& right)
+			{
+				return left.GetPath() < right.GetPath();
+			});
+			files.insert(files.end(), assetFiles.begin(), assetFiles.end());
 			return files;
 		}
 
@@ -373,19 +472,24 @@ namespace Engine {
 				Result<std::string> text = editor.GetVfs().ReadText(file);
 				if (!text)
 					return std::unexpected(Utils::ToEditorFileError(std::move(text).error()).WithContext(std::format("while upgrading '{}'", relative)));
-				ENGINE_TRY_ASSIGN(const std::optional<std::string> canonical,
+				ENGINE_TRY_ASSIGN(const std::optional<Utils::CanonicalProjectFile> canonical,
 					WithContext(Utils::MakeCanonicalFile(editor, file, *text), std::format("while upgrading '{}'", relative)));
-				if (!canonical.has_value() || *canonical == *text)
+				if (!canonical.has_value() || canonical->Text == *text)
 				{
 					++result.UnchangedCount;
 					continue;
 				}
-				ENGINE_TRY(WithContext(editor.WriteProjectFile(file, std::as_bytes(std::span(canonical->data(), canonical->size()))),
+				ENGINE_TRY(WithContext(editor.WriteProjectFile(file, std::as_bytes(std::span(canonical->Text.data(), canonical->Text.size()))),
 					std::format("while upgrading '{}'", relative)));
 				result.ChangedFiles.push_back(relative);
+				result.Changes.push_back(ProjectUpgradeChange{ .Path = relative, .Reason = canonical->Reason });
 				openSceneChanged = openSceneChanged || (editor.GetScenePath().has_value() && *editor.GetScenePath() == file);
 			}
 			std::sort(result.ChangedFiles.begin(), result.ChangedFiles.end());
+			std::sort(result.Changes.begin(), result.Changes.end(), [](const ProjectUpgradeChange& left, const ProjectUpgradeChange& right)
+			{
+				return left.Path < right.Path;
+			});
 
 			// The open scene's file changed: reload it (a dry run changed nothing on disk, and its sandbox holds the scene).
 			if (openSceneChanged && !context.IsDryRun())
@@ -404,24 +508,40 @@ namespace Engine {
 
 		Result<ProjectRefreshAssetsResult> ProjectRefreshAssets(EditorMethodContext& context, const NoParams& /*params*/)
 		{
-			ENGINE_TRY_ASSIGN(const AssetRefreshReport report, context.GetEditor().GetAssets().Refresh());
-			ProjectRefreshAssetsResult result;
-			result.MetaCount = ToAutomationCounter(report.MetaCount);
-			for (const VfsPath& meta : report.CreatedMetas)
-				result.CreatedMetas.push_back(Utils::ToProjectRelative(meta));
-			std::sort(result.CreatedMetas.begin(), result.CreatedMetas.end());
-			const auto toIds = [](std::span<const AssetHandle> handles)
+			EditorContext& editor = context.GetEditor();
+			// Editor --upgrade (Docs/Decisions/0026-m16-contract.md decision 11): the project's deferred asset scan runs first,
+			// so the .meta files it writes are this request's (§13.12 rule 2), and the result reports both.
+			AssetRefreshReport opened;
+			if (editor.IsAssetScanDeferred())
+			{
+				ENGINE_TRY_ASSIGN(opened, editor.OpenDeferredAssets());
+			}
+			ENGINE_TRY_ASSIGN(const AssetRefreshReport report, editor.GetAssets().Refresh());
+			const auto merge = [](std::span<const AssetHandle> first, std::span<const AssetHandle> second)
 			{
 				std::vector<std::string> ids;
-				ids.reserve(handles.size());
-				for (const AssetHandle handle : handles)
-					ids.push_back(handle.ToString());
+				ids.reserve(first.size() + second.size());
+				for (const std::span<const AssetHandle> handles : { first, second })
+				{
+					for (const AssetHandle handle : handles)
+						ids.push_back(handle.ToString());
+				}
 				std::sort(ids.begin(), ids.end());
+				ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
 				return ids;
 			};
-			result.Added = toIds(report.Added);
-			result.Removed = toIds(report.Removed);
-			result.Changed = toIds(report.Changed);
+			ProjectRefreshAssetsResult result;
+			result.MetaCount = ToAutomationCounter(report.MetaCount);
+			for (const std::span<const VfsPath> metas : { std::span<const VfsPath>(opened.CreatedMetas), std::span<const VfsPath>(report.CreatedMetas) })
+			{
+				for (const VfsPath& meta : metas)
+					result.CreatedMetas.push_back(Utils::ToProjectRelative(meta));
+			}
+			std::sort(result.CreatedMetas.begin(), result.CreatedMetas.end());
+			result.CreatedMetas.erase(std::unique(result.CreatedMetas.begin(), result.CreatedMetas.end()), result.CreatedMetas.end());
+			result.Added = merge(opened.Added, report.Added);
+			result.Removed = merge(opened.Removed, report.Removed);
+			result.Changed = merge(opened.Changed, report.Changed);
 			for (const AssetDiagnostic& diagnostic : report.Diagnostics)
 				result.Diagnostics.push_back(Utils::MakeProjectDiagnostic(diagnostic));
 			if (!result.CreatedMetas.empty() || !result.Changed.empty() || !result.Removed.empty())
@@ -504,9 +624,13 @@ namespace Engine {
 			.Field("warningCount", &ProjectValidateResult::WarningCount, "The number of Warning diagnostics.")
 			.Field("undoIndex", &ProjectValidateResult::UndoIndex, "The undo index of the fixes; 0 when nothing was fixed, in a dry run or a batch.");
 
+		registry.Struct<ProjectUpgradeChange>("ProjectUpgradeChange", "One file project.upgrade rewrote (or a dry run would), with why.")
+			.Field("path", &ProjectUpgradeChange::Path, "The file, project-relative.")
+			.Field("reason", &ProjectUpgradeChange::Reason, "Why its canonical form differs: \"format version <file> to <current>\", \"component migration\" (a scene or prefab) or \"canonical form\" (formatting, member order, defaults written out).");
 		registry.Struct<ProjectUpgradeResult>("ProjectUpgradeResult", "What project.upgrade rewrote.")
 			.Field("changedFiles", &ProjectUpgradeResult::ChangedFiles, "The files rewritten (or that a dry run would rewrite), project-relative and sorted.")
-			.Field("unchangedCount", &ProjectUpgradeResult::UnchangedCount, "The project files already canonical.");
+			.Field("unchangedCount", &ProjectUpgradeResult::UnchangedCount, "The project files already canonical.")
+			.Field("changes", &ProjectUpgradeResult::Changes, "Each file of changedFiles with the reason it is rewritten, in the same order.");
 
 		registry.Struct<ProjectRefreshAssetsResult>("ProjectRefreshAssetsResult", "What a rescan of Assets/ found and did.")
 			.Field("metaCount", &ProjectRefreshAssetsResult::MetaCount, "The .meta files read.")
@@ -526,7 +650,8 @@ namespace Engine {
 		methods.Add(
 			{
 				.Name = "project.create",
-				.Description = "Creates a project from a template at a native path and opens it, taking its lock. Provenance records the .eproj.",
+				.Description = "Creates a project from a template at a native path and opens it, taking its lock. Provenance records the .eproj, "
+							   "the root .luaurc and the template's files under Assets/.",
 				.RequiredParams = { "path", "name" },
 				.ExposeAsTool = true,
 				.Mutates = true,
@@ -614,12 +739,18 @@ namespace Engine {
 		methods.Add(
 			{
 				.Name = "project.upgrade",
-				.Description = "Applies migrations and canonical re-saves to every project file (the .eproj, scenes and prefabs), records each "
-							   "rewrite in provenance and reports the changed files. Not undoable; needs a saved open scene.",
+				.Description = "Applies migrations and canonical re-saves to every project file (the .eproj, and every scene, prefab, .meta, "
+							   "material, sound effect and replay under Assets/), records each rewrite in provenance and reports the changed "
+							   "files, each with its reason (changes: \"format version 1 to 2\", \"canonical form\"). Run it after an engine change "
+							   "to canonical output; dryRun: true lists what it would rewrite. An unknown member in a material, sound effect or "
+							   "replay fails the upgrade at its file and pointer, as its importer refuses it. Not undoable; refuses an open "
+							   "scene with unsaved changes (save it first).",
+				.ExposeAsTool = true,
 				.Mutates = true,
 				.SupportsDryRun = true,
 				.TimeoutSeconds = 600,
-				.Examples = { { .Description = "Rewrite every project file in the current format.", .Params = Json::object() } },
+				.Examples = { { .Description = "Rewrite every project file in the current format.", .Params = Json::object() },
+					{ .Description = "List the files an upgrade would rewrite, and why, without writing.", .Params = Json{ { "dryRun", true } } } },
 			},
 			&Automation::ProjectUpgrade);
 
@@ -627,7 +758,8 @@ namespace Engine {
 			{
 				.Name = "project.refreshAssets",
 				.Description = "Rescans Assets/ now: writes .meta files for new sources, registers and unregisters assets, imports the new "
-							   "ones and reimports every asset whose files changed; complete when the call returns.",
+							   "ones and reimports every asset whose files changed; complete when the call returns. In Editor --upgrade, which "
+							   "defers the project's asset scan to this request, it runs that scan first and reports both.",
 				.TimeoutSeconds = 600,
 				.Examples = { { .Description = "Pick up files another program wrote.", .Params = Json::object() } },
 			},

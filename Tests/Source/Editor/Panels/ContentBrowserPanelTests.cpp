@@ -53,6 +53,7 @@ namespace Engine {
 		[[nodiscard]] Result<Buffer> ReadFile(const VfsPath& path) const override { return m_Inner->ReadFile(path); }
 		[[nodiscard]] Result<Scope<IFileStream>> Open(const VfsPath& path) const override { return m_Inner->Open(path); }
 		[[nodiscard]] Status WriteFileAtomic(const VfsPath& path, std::span<const std::byte> data) override { return m_Inner->WriteFileAtomic(path, data); }
+		[[nodiscard]] Status WriteNewFile(const VfsPath& path, std::span<const std::byte> data) override { return m_Inner->WriteNewFile(path, data); }
 		[[nodiscard]] Result<FileInfo> GetInfo(const VfsPath& path) const override { return m_Inner->GetInfo(path); }
 		[[nodiscard]] Result<std::vector<VfsEntry>> List(const VfsPath& directory, bool recursive) const override
 		{
@@ -62,6 +63,7 @@ namespace Engine {
 		}
 		[[nodiscard]] Status CreateDirectories(const VfsPath& directory) override { return m_Inner->CreateDirectories(directory); }
 		[[nodiscard]] Status Remove(const VfsPath& path) override { return m_Inner->Remove(path); }
+		[[nodiscard]] Status RemoveEmptyDirectory(const VfsPath& directory) override { return m_Inner->RemoveEmptyDirectory(directory); }
 		[[nodiscard]] Status Move(const VfsPath& from, const VfsPath& to) override { return m_Inner->Move(from, to); }
 		[[nodiscard]] MountAccess GetAccess() const override { return m_Inner->GetAccess(); }
 		[[nodiscard]] uint32_t GetListings() const { return m_Listings.load(); }

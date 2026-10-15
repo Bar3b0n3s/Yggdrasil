@@ -463,7 +463,7 @@ namespace Engine {
 			.Field("state", &PlayStateResult::State, "Edit, Play, Simulate or Paused (as _meta.playState).")
 			.Field("mode", &PlayStateResult::Mode, "Play or Simulate; tells them apart while Paused.")
 			.Field("tick", &PlayStateResult::Tick, "The next tick: the ticks run so far.")
-			.Field("stateHash", &PlayStateResult::StateHash, "The state hash (16 lowercase hex digits); empty in Edit.")
+			.Field("stateHash", &PlayStateResult::StateHash, "The state hash (16 lowercase hex digits); empty in Edit. It covers the simulated world (every entity with its serialized components, the tick, the session's Random state, the id draws and every body's physics state), never script tables, audio or input.")
 			.Field("lockstep", &PlayStateResult::Lockstep, "Ticks advance only through the owner's play.step.")
 			.Field("lockstepOwner", &PlayStateResult::LockstepOwner, "The name of the client that owns lockstep; empty without lockstep.")
 			.Field("ownedByCaller", &PlayStateResult::OwnedByCaller, "The requesting client owns lockstep.")
@@ -488,7 +488,7 @@ namespace Engine {
 
 		registry.Struct<PlayStepResult>("PlayStepResult", "Where a play.step left the session.")
 			.Field("tick", &PlayStepResult::Tick, "The session's tick after the call.")
-			.Field("stateHash", &PlayStepResult::StateHash, "The state hash after the call (16 lowercase hex digits).")
+			.Field("stateHash", &PlayStepResult::StateHash, "The state hash after the call (16 lowercase hex digits): the simulated world only (entities and their serialized components, the tick, Random, id draws, physics), never script tables, audio or input.")
 			.Field("ticks", &PlayStepResult::Ticks, "The ticks this call ran.")
 			.Field("frames", &PlayStepResult::Frames, "The host frames it spanned (ticks per frame fit a 50 ms budget).")
 			.Field("rendered", &PlayStepResult::Rendered, "The game-view extractions during the call.");

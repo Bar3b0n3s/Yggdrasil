@@ -62,7 +62,8 @@ namespace Engine {
 					std::format("the instance '{}' names no prefab asset", scene.GetEntityPath(root)), "unpack it with prefab.unpack"));
 			}
 			LoadReport report;
-			Result<Prefab> prefab = LoadPrefabAsset(editor.GetAssets(), handle, editor.GetTypeRegistry(), report);
+			ENGINE_TRY_ASSIGN(const auto schemas, editor.GetScriptSchemaSnapshot());
+			Result<Prefab> prefab = LoadPrefabAsset(editor.GetAssets(), handle, editor.GetTypeRegistry(), schemas.get(), report);
 			if (!prefab && prefab.error().GetCode() == ErrorCode::NotFound)
 			{
 				return std::unexpected(Utils::MakeParamError(ErrorCode::NotFound, "/instance",
@@ -285,6 +286,8 @@ namespace Engine {
 				root.SetName(params.Name);
 			if (hasTransform)
 				ENGINE_TRY(WriteTransform(root, params.Transform.Get(), "/transform"));
+			// Per-instance values are ordinary writes to the new root, which the commit records as its overrides (§5.5).
+			ENGINE_TRY(Utils::WriteComponents(editor, root, params.Components));
 			ENGINE_TRY_ASSIGN(const uint64_t undoIndex, edit.Commit());
 
 			PrefabInstantiateResult result;
@@ -431,7 +434,8 @@ namespace Engine {
 
 		registry.Struct<PrefabCreateResult>("PrefabCreateResult", "The created prefab.")
 			.Field("prefab", &PrefabCreateResult::Prefab, "The new prefab asset.")
-			.Field("instance", &PrefabCreateResult::Instance, "The instance root with replaceWithInstance; empty otherwise.")
+			.Field("instance", &PrefabCreateResult::Instance,
+				"The instance root with replaceWithInstance; empty otherwise (prefab.instantiate's result calls its root entity).")
 			.Field("undoIndex", &PrefabCreateResult::UndoIndex, "The undo index; 0 in a dry run or a batch.");
 
 		registry.Struct<PrefabInstantiateParams>("PrefabInstantiateParams", "The params of prefab.instantiate.")
@@ -439,10 +443,15 @@ namespace Engine {
 			.Field("parent", &PrefabInstantiateParams::Parent, "The parent entity; empty for a root.")
 			.Field("index", &PrefabInstantiateParams::Index, "The position among the parent's children; last when absent.")
 			.Field("transform", &PrefabInstantiateParams::Transform, "Transform fields over the prefab root's, such as {\"Translation\": [2, 0, 0]}.")
-			.Field("name", &PrefabInstantiateParams::Name, "The instance root's name; the prefab root's when absent.");
+			.Field("name", &PrefabInstantiateParams::Name, "The instance root's name; the prefab root's when absent.")
+			.VariantField("components", &PrefabInstantiateParams::Components,
+				"Per-instance component values for the instance root by registry name, merged into the prefab's as entity.update merges them "
+				"(missing components are added) and recorded as the instance's overrides; script fields go in {\"Script\": {\"Fields\": "
+				"{...}}}, the Script handle defaulting to the prefab root's.",
+				&ResolveComponentValue);
 
 		registry.Struct<PrefabInstantiateResult>("PrefabInstantiateResult", "The new instance.")
-			.Field("entity", &PrefabInstantiateResult::Entity, "The instance root.")
+			.Field("entity", &PrefabInstantiateResult::Entity, "The instance root (prefab.create's result calls it instance).")
 			.Field("prefab", &PrefabInstantiateResult::Prefab, "The prefab asset.")
 			.Field("undoIndex", &PrefabInstantiateResult::UndoIndex, "The undo index; 0 in a dry run or a batch.");
 
@@ -481,7 +490,8 @@ namespace Engine {
 			{
 				.Name = "prefab.create",
 				.Description = "Saves an entity's subtree as a new .prefab asset (nested instances flattened), optionally replacing the entity "
-							   "with an instance of it, as one undoable step.",
+							   "with an instance of it, as one undoable step. The result's instance is that instance's root (empty without "
+							   "replaceWithInstance).",
 				.RequiredParams = { "entity", "path" },
 				.ExposeAsTool = true,
 				.Mutates = true,
@@ -496,17 +506,24 @@ namespace Engine {
 		instantiateExample["parent"] = "/Board";
 		instantiateExample["transform"] = Json::object();
 		instantiateExample["transform"]["Translation"] = Json::array({ 2.0, 0.0, 0.0 });
+		Json overridesExample = instantiateExample;
+		overridesExample["name"] = "Cell 3";
+		overridesExample["components"] = Json::object();
+		overridesExample["components"]["MeshRenderer"] = Json::object();
+		overridesExample["components"]["MeshRenderer"]["CastShadows"] = false;
 		methods.Add(
 			{
 				.Name = "prefab.instantiate",
-				.Description = "Creates an instance of a prefab asset (a .prefab or a glTF) under a parent, with an optional transform and "
-							   "name, as one undoable step.",
+				.Description = "Creates an instance of a prefab asset (a .prefab or a glTF) under a parent, with an optional transform, name and "
+							   "per-instance component values (recorded as the instance's overrides), as one undoable step. The result's "
+							   "entity is the new instance root.",
 				.RequiredParams = { "prefab" },
 				.ExposeAsTool = true,
 				.Mutates = true,
 				.SupportsDryRun = true,
 				.AllowedInBatch = true,
-				.Examples = { { .Description = "Place a cell on the board.", .Params = instantiateExample } },
+				.Examples = { { .Description = "Place a cell on the board.", .Params = instantiateExample },
+					{ .Description = "Place a named cell that casts no shadow (an override of the instance).", .Params = overridesExample } },
 			},
 			&Automation::PrefabInstantiate);
 

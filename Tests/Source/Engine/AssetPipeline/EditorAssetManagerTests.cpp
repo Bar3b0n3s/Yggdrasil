@@ -1063,8 +1063,7 @@ namespace Engine {
 			CHECK(events[2].second == XXH64(fixture.ReadProjectFile("Assets/Kit.pack.meta")));
 		}
 
-		TEST_CASE("EditorAssetManager: the writes an import's publication makes carry the write context taken when the import started"
-			* doctest::skip(true))
+		TEST_CASE("EditorAssetManager: the writes an import's publication makes carry the write context taken when the import started")
 		{
 			ImportCounts counts;
 			Test::AssetTestFixture fixture;

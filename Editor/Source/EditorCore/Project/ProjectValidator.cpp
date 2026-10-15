@@ -40,14 +40,18 @@
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/LoadReport.h"
 #include "Engine/Scene/PhysicsValidation.h"
+#include "Engine/Scene/Prefab.h"
 #include "Engine/Scene/RenderAnnotations.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/SceneSerializer.h"
 
 #include <nlohmann/json.hpp>
 
+#include <charconv>
 #include <map>
+#include <optional>
 #include <set>
+#include <system_error>
 #include <tuple>
 #include <utility>
 
@@ -1401,6 +1405,105 @@ namespace Engine {
 			}
 		}
 
+		constexpr std::string_view EntitiesPointer = "/Entities/";
+		constexpr std::string_view ScriptFieldsPointer = "/Components/Script/Fields/";
+
+		// The entity index of a pointer "/Entities/<i>/Components/Script/Fields/<name>[/...]" (MapScriptFieldLoadCode), or
+		// nullopt for any other pointer.
+		static std::optional<size_t> ParseScriptFieldEntityIndex(std::string_view pointer)
+		{
+			const size_t fields = pointer.find(ScriptFieldsPointer);
+			if (!pointer.starts_with(EntitiesPointer) || fields == std::string_view::npos || fields <= EntitiesPointer.size())
+				return std::nullopt;
+			const std::string_view digits = pointer.substr(EntitiesPointer.size(), fields - EntitiesPointer.size());
+			size_t index = 0;
+			const auto [end, parsed] = std::from_chars(digits.data(), digits.data() + digits.size(), index);
+			if (parsed != std::errc() || end != digits.data() + digits.size())
+				return std::nullopt;
+			return index;
+		}
+
+		// The Script asset handle the Script component of entity `index` of a scene or prefab document names, or the invalid
+		// handle when it names none.
+		static AssetHandle FindEntityScriptHandle(const Json& document, size_t index)
+		{
+			if (!document.is_object())
+				return {};
+			const auto entities = document.find("Entities");
+			if (entities == document.end() || !entities->is_array() || index >= entities->size())
+				return {};
+			const Json& entity = (*entities)[index];
+			const auto components = entity.is_object() ? entity.find("Components") : entity.end();
+			if (!entity.is_object() || components == entity.end() || !components->is_object())
+				return {};
+			const auto script = components->find("Script");
+			if (script == components->end() || !script->is_object())
+				return {};
+			const auto handle = script->find("Script");
+			return handle != script->end() && handle->is_string() ? JsonReader(*handle).ReadUUID().value_or(AssetHandle()) : AssetHandle();
+		}
+
+		// Whether the Script.Fields values of an entity whose script is `handle` resolve against declared fields: `handle`
+		// names a registered Script asset whose fields load and which is a Behaviour. Validate checks only those values
+		// (CheckSceneScripts, CheckPrefabScriptFields); the asset reference, SCRIPT_NOT_A_BEHAVIOUR and script source checks
+		// report the others' scripts, never their values.
+		static bool HasDeclaredScriptFields(const EditorContext& editor, AssetHandle handle)
+		{
+			const EditorScriptService* service = editor.GetScriptService();
+			if (service == nullptr || !handle.IsValid() || editor.GetAssets().GetAssetType(handle) != AssetType::Script)
+				return false;
+			const Result<AssetRef<ScriptData>> declared = service->GetFields(handle);
+			return declared.has_value() && (*declared)->Kind == ScriptKind::Behaviour;
+		}
+
+		// The Script component field values of the project's prefab files, under the codes and at the place a scene's values
+		// get (CheckSceneScripts): SCRIPT_UNKNOWN_FIELD_OVERRIDE or SCRIPT_FIELD_TYPE_MISMATCH on the prefab file and entity,
+		// component "Script", field "Fields.<name>". They are found as the strict open and the exporter find them
+		// (ProjectValidator::FindScriptFieldProblems), so the three name the same code for the same entity (ADR 0026, friction
+		// S1-04). An entity whose script is not a registered Behaviour with loadable fields is left out there, as
+		// CheckSceneScripts leaves it: the asset reference, SCRIPT_NOT_A_BEHAVIOUR and script source checks report it.
+		static Status CheckPrefabScriptFields(const EditorContext& editor, std::vector<CollectedDiagnostic>& diagnostics)
+		{
+			if (editor.GetScriptService() == nullptr)
+				return {};
+			for (const AssetRecord* record : editor.GetAssets().GetRegistry().GetRecords())
+			{
+				const AssetMetadata& metadata = record->Metadata;
+				if (metadata.Kind != AssetMetaKind::Asset || metadata.Importer != "Prefab")
+					continue;
+				ENGINE_TRY_ASSIGN(const std::vector<LoadDiagnostic> problems, ProjectValidator::FindScriptFieldProblems(editor, record->SourcePath));
+				const std::string file(record->SourcePath.GetPath());
+				for (const LoadDiagnostic& problem : problems)
+				{
+					// "/Entities/<i>/Components/Script/Fields/<name>[/<inside the value>]" (MapScriptFieldLoadCode).
+					const std::string_view pointer = problem.JsonPointer;
+					const size_t fields = pointer.find(ScriptFieldsPointer);
+					if (fields == std::string_view::npos)
+						continue;
+					const std::string_view value = pointer.substr(fields + ScriptFieldsPointer.size() - 1); // "/<name>[/...]"
+					const std::string name = FirstPointerSegment(value);
+					if (name.empty())
+						continue;
+					const size_t nameEnd = value.find('/', 1);
+					const std::string_view inside = nameEnd == std::string_view::npos ? std::string_view() : value.substr(nameEnd);
+
+					DiagnosticSite site{ .File = file, .Entity = FormatOptionalUUID(problem.Entity), .Component = "Script", .Field = "Fields." + name, .Subject = name };
+					if (problem.Code == ScriptUnknownOverrideCode)
+					{
+						diagnostics.push_back(MakeDiagnostic(ScriptUnknownOverrideCode, DiagnosticSeverity::Error,
+							std::format("script declares no field '{}'; the prefab's value is preserved", name), site,
+							"remove or rename the value to a declared field", false));
+						continue;
+					}
+					site.Subject = name + std::string(inside);
+					diagnostics.push_back(MakeDiagnostic(ScriptFieldMismatchCode, DiagnosticSeverity::Error,
+						std::format("{}{}: {}; the declared default is used", name, inside, problem.Message), site,
+						"correct the value to match its declared type and constraints", false));
+				}
+			}
+			return {};
+		}
+
 		// Sorts `diagnostics` (by file, entity, code, component, field, id) and drops repeats of one id: the same problem found
 		// twice (two load diagnostics of one code at one pointer) is one diagnostic, so ids are unique within a report.
 		static void SortDiagnostics(std::vector<CollectedDiagnostic>& diagnostics)
@@ -1573,6 +1676,7 @@ namespace Engine {
 				ENGINE_TRY_ASSIGN(collection.Scanned, ScanAssets(context, diagnostics));
 				CollectImportDiagnostics(context, diagnostics);
 				CheckAssetFiles(context, diagnostics);
+				ENGINE_TRY(CheckPrefabScriptFields(context, diagnostics));
 				ENGINE_TRY_ASSIGN(const std::vector<VfsPath> scenes, ListSceneFiles(context));
 				for (const VfsPath& scene : scenes)
 				{
@@ -1970,6 +2074,71 @@ namespace Engine {
 		if (loadCode == SceneInconsistentPrefabLinkCode)
 			return SceneInconsistentPrefabLinkCode;
 		return {};
+	}
+
+	std::string_view ProjectValidator::MapScriptFieldLoadCode(std::string_view loadCode, std::string_view jsonPointer)
+	{
+		// "/Entities/<i>/Components/Script/Fields/<name>[/...]": a value of an entity's own Script component. An override's
+		// value (".../Components/Prefab/Overrides/<k>/Value/...") is not one: the member it applies to reports it.
+		constexpr std::string_view FieldsPointer = "/Components/Script/Fields/";
+		const size_t fields = jsonPointer.find(FieldsPointer);
+		if (fields == std::string_view::npos || !jsonPointer.starts_with("/Entities/")
+			|| jsonPointer.substr(0, fields).find('/', std::string_view("/Entities/").size()) != std::string_view::npos)
+			return {};
+		if (loadCode == VariantUnresolvedCode)
+			return ScriptUnknownOverrideCode;
+		if (loadCode == VariantSchemaMismatchCode)
+			return ScriptFieldMismatchCode;
+		return {};
+	}
+
+	Result<std::vector<LoadDiagnostic>> ProjectValidator::FindScriptFieldProblems(const EditorContext& context, const VfsPath& path)
+	{
+		if (!context.HasProject())
+			return MakeError(ErrorCode::InvalidState, "no project open; call project.create or project.open");
+		ENGINE_TRY_ASSIGN(const Ref<const ScriptFieldSchemaSource> schemas, context.GetScriptSchemaSnapshot());
+		LoadOptions options;
+		options.Mode = LoadMode::Strict;
+		options.Schemas = schemas.get();
+		options.SourcePath = std::string(path.GetPath());
+		LoadReport report;
+		Status loaded;
+		if (path.GetExtension() == ".prefab")
+		{
+			if (Result<Prefab> prefab = Prefab::LoadFromFile(context.GetVfs(), path, context.GetTypeRegistry(), options, report); !prefab)
+				loaded = std::unexpected(std::move(prefab).error());
+		}
+		else
+		{
+			UUIDGenerator scratchIds = UUIDGenerator::CreateDeterministic(0);
+			const Scope<Scene> scratch = Scene::Create({ .Name = std::string(path.GetStem()), .Seed = 0, .Registry = &context.GetTypeRegistry(), .IdGenerator = &scratchIds, .Runtime = false });
+			loaded = SceneSerializer::LoadFromFile(*scratch, context.GetVfs(), path, options, report);
+		}
+		std::vector<LoadDiagnostic> problems;
+		if (!loaded)
+			return problems;
+		// The document, read once a diagnostic maps, for the script of the entity each one locates.
+		std::optional<Json> document;
+		for (LoadDiagnostic& diagnostic : report.Diagnostics)
+		{
+			const std::string_view code = MapScriptFieldLoadCode(diagnostic.Code, diagnostic.JsonPointer);
+			if (code.empty())
+				continue;
+			if (!document.has_value())
+			{
+				const Result<std::string> text = context.GetVfs().ReadText(path);
+				document = text.has_value() ? JsonReader::Parse(*text).value_or(Json()) : Json();
+			}
+			// Validate checks only the values of a registered Behaviour whose fields load: a missing or mistyped script, one
+			// that fails to import or a Module leaves every value unresolved, and validate reports the script instead
+			// (CheckSceneScripts), so neither code is named here.
+			const std::optional<size_t> entity = Utils::ParseScriptFieldEntityIndex(diagnostic.JsonPointer);
+			if (!entity.has_value() || !Utils::HasDeclaredScriptFields(context, Utils::FindEntityScriptHandle(*document, *entity)))
+				continue;
+			diagnostic.Code = std::string(code);
+			problems.push_back(std::move(diagnostic));
+		}
+		return problems;
 	}
 
 	Result<std::vector<ProjectDiagnostic>> ProjectValidator::CheckTestSuites(const EditorContext& context)

@@ -145,6 +145,19 @@ namespace Engine {
 		return FileSystem::WriteFileAtomic(Utils::ToNative(m_Root, relativePath), data, m_WriteOptions);
 	}
 
+	Status NativeDirectoryMount::WriteNewFile(const VfsPath& path, std::span<const std::byte> data)
+	{
+		std::scoped_lock lock(m_Mutex);
+		ENGINE_TRY(Utils::CheckWritable(m_Access, path));
+		const std::string_view relativePath = path.GetPath();
+		if (relativePath.empty())
+			return MakeError(ErrorCode::Io, "cannot create '{}': it is the mount root, a directory", path.ToString());
+
+		ENGINE_TRY(Utils::VerifyParentDirectory(m_Root, relativePath));
+		ENGINE_TRY(Utils::VerifyNewName(m_Root, relativePath));
+		return FileSystem::WriteNewFile(Utils::ToNative(m_Root, relativePath), data);
+	}
+
 	Result<FileInfo> NativeDirectoryMount::GetInfo(const VfsPath& path) const
 	{
 		std::shared_lock lock(m_Mutex);
@@ -218,6 +231,16 @@ namespace Engine {
 			return MakeError(ErrorCode::InvalidArgument, "cannot remove '{}': it is the mount root", path.ToString());
 		ENGINE_TRY(FileSystem::VerifyCase(m_Root, path.GetPath()));
 		return FileSystem::Remove(Utils::ToNative(m_Root, path.GetPath()));
+	}
+
+	Status NativeDirectoryMount::RemoveEmptyDirectory(const VfsPath& directory)
+	{
+		std::scoped_lock lock(m_Mutex);
+		ENGINE_TRY(Utils::CheckWritable(m_Access, directory));
+		if (directory.GetPath().empty())
+			return MakeError(ErrorCode::InvalidArgument, "cannot remove '{}': it is the mount root", directory.ToString());
+		ENGINE_TRY(FileSystem::VerifyCase(m_Root, directory.GetPath()));
+		return FileSystem::RemoveEmptyDirectory(Utils::ToNative(m_Root, directory.GetPath()));
 	}
 
 	Status NativeDirectoryMount::Move(const VfsPath& from, const VfsPath& to)

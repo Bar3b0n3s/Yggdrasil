@@ -262,6 +262,65 @@ namespace Engine {
 			CHECK(fixture.Call("script.errors")["result"]["errors"].size() == 1);
 		}
 
+		// M16 FX-4: the Runtime's input.record stop runs the same input check as the editor's, through the host's replay restart.
+		TEST_CASE("RuntimeAutomationServer: input.record stop refuses a recording whose outcome does not depend on its input")
+		{
+			RuntimeServerFixture* active = nullptr;
+			std::optional<ReplayDocument> saved;
+			std::vector<uint64_t> released;
+			uint32_t restarts = 0;
+			RuntimeAutomationServerSpecification spec;
+			spec.GameName = "Tiny";
+			spec.StartRecordingSession = [&active](const PlayStartOptions& options, bool) -> Result<PlaySession*>
+			{
+				return active->Restart(options);
+			};
+			spec.DescribeReplayHeader = [&active]() -> Result<ReplayHeader>
+			{
+				return active->DescribeHeader();
+			};
+			spec.ValidateReplayOutput = [](std::string_view path) -> Result<std::string>
+			{
+				return "user://Replays/" + std::string(path);
+			};
+			spec.WriteReplay = [&saved](std::string_view path, const ReplayDocument& document) -> Result<std::string>
+			{
+				saved = document;
+				return "user://Replays/" + std::string(path);
+			};
+			spec.RestartForReplay = [&active, &restarts](const ReplayHeader& header) -> Result<PlaySession*>
+			{
+				++restarts;
+				PlayStartOptions options;
+				options.Seed = header.Seed;
+				options.Parameters = header.Parameters;
+				options.Lockstep = true;
+				options.Paused = true;
+				return active->Restart(options);
+			};
+			spec.ReleaseReplayInput = [&released](uint64_t serial)
+			{
+				released.push_back(serial);
+			};
+			RuntimeServerFixture fixture(spec);
+			active = &fixture;
+			REQUIRE(fixture.Call("input.record", Json{ { "action", "start" }, { "restart", true } }).contains("result"));
+			// Nothing in this game reads the keyboard.
+			REQUIRE(fixture.CallPending("play.step", Json{ { "ticks", 70 }, { "render", "none" }, { "input", Json::array({ Json{ { "tick", 2 }, { "type", "key" }, { "key", "Space" }, { "state", "tap" } } }) } }).contains("result"));
+			const Json refused = fixture.CallPending("input.record", Json{ { "action", "stop" }, { "path", "Idle.replay" } });
+			REQUIRE_MESSAGE(refused.contains("error"), refused.dump());
+			CHECK(refused["error"]["data"]["errorCode"] == Json("Validation"));
+			CHECK(refused["error"]["data"]["detail"].dump().find("does not depend on its input") != std::string::npos);
+			CHECK(refused["error"]["data"]["inputCheck"]["checkpointsChecked"] == Json(1));
+			CHECK_FALSE(saved.has_value());
+			CHECK(restarts == 1);
+			REQUIRE(released.size() == 1);
+			CHECK(released.front() == fixture.GetSession().GetSerial());
+			CHECK(fixture.GetSession().GetTick() == 70);
+			CHECK(fixture.GetSession().IsPaused());
+			CHECK_FALSE(fixture.GetSession().IsLockstep());
+		}
+
 		TEST_CASE("RuntimeAutomationServer: a recording owner's disconnect cancels after play.pause releases lockstep")
 		{
 			RuntimeServerFixture* active = nullptr;
@@ -424,13 +483,17 @@ namespace Engine {
 
 		TEST_CASE("RuntimeAutomationServer: session.info reports the game, its play state and its clients")
 		{
-			RuntimeServerFixture fixture({ .GameName = "Tiny", .Headless = true, .RendererName = "none" });
+			RuntimeServerFixture fixture({ .GameName = "Tiny", .Headless = true, .RendererName = "none", .ScenePath = "Assets/Scenes/Main.scene" });
 			const Json info = fixture.Call("session.info");
 			REQUIRE_MESSAGE(RuntimeServerFixture::GetErrorCode(info) == 0, info.dump());
 			const Json& result = info["result"];
 			CHECK(result["project"]["open"] == Json(true));
 			CHECK(result["project"]["name"] == Json("Tiny"));
 			CHECK(result["project"]["projectFile"] == Json(""));
+			// The game's scene, its only one, which it never saves (M16 friction S2-03).
+			CHECK(result["scene"]["path"] == Json("Assets/Scenes/Main.scene"));
+			CHECK(result["scene"]["dirty"] == Json(false));
+			CHECK(result["scene"]["entityCount"] == Json(2));
 			CHECK(result["readOnly"] == Json(true));
 			CHECK(result["headless"] == Json(true));
 			CHECK(result["renderer"] == Json("none"));

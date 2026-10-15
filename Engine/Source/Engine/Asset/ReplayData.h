@@ -22,7 +22,16 @@
 namespace Engine {
 
 	inline constexpr std::string_view ReplayFormatName = "Replay";
-	inline constexpr uint32_t ReplayFormatVersion = 1;
+	// Version 2 adds Checkpoints. A version 1 file migrates to version 2 with no checkpoints: only its FinalStateHash is
+	// compared, as before, and project.upgrade rewrites it canonically.
+	inline constexpr uint32_t ReplayFormatVersion = 2;
+	// The recorders (input.record, test.run's record) store the state hash of every completed-tick boundary that is a
+	// positive multiple of this interval and lies before FinalTick (one second at 60 Hz; a tick inside a frame where a
+	// suite's scripted clock grouped several steps is no completed boundary, ReplayRecorder::CaptureCheckpoint), so a replay proves the
+	// trajectory of its run and not only the state it ends in: an autopilot that ends on a restart returns the world to
+	// its idle state, which an input-free run reaches too. A reader accepts checkpoints at any ticks (strictly increasing,
+	// after tick 0, before FinalTick), so the interval is the writers' choice, never a format rule.
+	inline constexpr uint64_t ReplayCheckpointInterval = 60;
 
 	// Architecture §6.7: the handle is authoritative; Path is readable and may be stale after a move.
 	struct ReplaySceneReference
@@ -70,15 +79,31 @@ namespace Engine {
 		std::string Luau{};
 	};
 
-	// The JSON document is flattened: Format, Version, Header's members, Events, Expect, FinalTick, FinalStateHash.
-	// Event Tick is the zero-based step where input is applied. Expect Tick and FinalTick count completed ticks:
-	// 0 is setup; N is the boundary after ticks [0, N), including the frame phase and pending Scene.Load.
+	// The state hash the recording observed at the completed-tick boundary Tick (0 < Tick < FinalTick).
+	struct ReplayCheckpoint
+	{
+		uint64_t Tick = 0;
+		std::string StateHash{}; // Exactly 16 lowercase hex digits.
+	};
+
+	// The JSON document is flattened: Format, Version, Header's members, Events, Expect, Checkpoints, FinalTick,
+	// FinalStateHash. Event Tick is the zero-based step where input is applied. Expect, Checkpoint and FinalTick ticks count
+	// completed ticks: 0 is setup; N is the boundary after ticks [0, N), including the frame phase and pending Scene.Load.
+	//
+	// The state hash (PlaySession::ComputeStateHash) covers the simulated world: the scene's minified canonical
+	// serialization (every entity with its id, name, parent, active flag, tags and serialized components, a Script
+	// component's authored Fields included), the tick, the session's Random state, the UUIDGenerator's draw count and every body's
+	// physics state (position, rotation, linear and angular velocity, sleep flag). It does not cover Luau instance state
+	// (script tables such as self.State and module locals), audio voices, input state, the camera view or anything
+	// rendered: scripts are observed through their effects on the world and through Expect. Two runs with equal hashes at
+	// a tick have equal worlds there; they may still differ in script state that has not yet reached the world.
 	struct ReplayDocument
 	{
 		uint32_t Version = ReplayFormatVersion;
 		ReplayHeader Header{};
 		std::vector<ReplayEvent> Events{};
 		std::vector<ReplayExpectation> Expect{};
+		std::vector<ReplayCheckpoint> Checkpoints{}; // Strictly increasing ticks; the final tick's hash is FinalStateHash.
 		uint64_t FinalTick = 0;
 		std::string FinalStateHash{}; // Exactly 16 lowercase hex digits.
 	};
@@ -94,13 +119,14 @@ namespace Engine {
 	struct ReplayData : Asset
 	{
 		static constexpr AssetType StaticType = AssetType::Replay;
-		static constexpr uint16_t FormatVersion = 1;
+		static constexpr uint16_t FormatVersion = 2;
 
 		ReplayData();
 
 		ReplayHeader Header{};
 		std::vector<ReplayEvent> Events{};
 		std::vector<ReplayBytecodeExpectation> Expect{};
+		std::vector<ReplayCheckpoint> Checkpoints{};
 		uint64_t FinalTick = 0;
 		std::string FinalStateHash{};
 	};
@@ -113,9 +139,14 @@ namespace Engine {
 
 	// Pure structural validation: valid scene handle, object Parameters with finite JSON values, FixedHz in the
 	// FrameLoopConfig range, header strings, known event shapes, nondecreasing ticks (ties preserve array order),
-	// Events.Tick < FinalTick, Expect.Tick <= FinalTick and nonempty Luau, canonical hash. A trailing Tap release at
-	// FinalTick is outside the run and is not recorded. Newer Version is UnsupportedVersion. No compiler runs here.
+	// Events.Tick < FinalTick, Expect.Tick <= FinalTick and nonempty Luau, strictly increasing Checkpoints.Tick with
+	// 0 < Tick < FinalTick, canonical hashes. A trailing Tap release at FinalTick is outside the run and is not recorded.
+	// Version must be ReplayFormatVersion (readers migrate older files first); newer is UnsupportedVersion. No compiler
+	// runs here.
 	[[nodiscard]] Status ValidateReplayDocument(const ReplayDocument& document);
+	// The readers accept versions 1 and 2. Version 1 has no Checkpoints member (one is an unknown member there) and
+	// migrates to version 2 with none; the document returned is always ReplayFormatVersion, and report.FileVersion keeps
+	// the file's own version. Version 2 requires Checkpoints.
 	[[nodiscard]] Result<ReplayDocument> ReplayFromJson(const Json& document, ReplayLoadReport& report, bool strictUnknowns = false);
 	[[nodiscard]] Result<ReplayDocument> ReplayFromText(std::string_view text, ReplayLoadReport& report, bool strictUnknowns = false);
 	[[nodiscard]] Result<Json> ReplayToJson(const ReplayDocument& document);
@@ -127,10 +158,12 @@ namespace Engine {
 	// non-object, a float outside the float range, invalid UTF-8 or nesting deeper than MaxJsonDepth.
 	[[nodiscard]] Result<Json> CanonicalizeReplayParameters(const Json& parameters, std::string_view pointer = "/Parameters");
 
-	// Cooked FormatVersion 1 uses the standard ECKD header. Payload, little-endian: u32 source version; scene UUID
+	// Cooked FormatVersion 2 uses the standard ECKD header. Payload, little-endian: u32 source version; scene UUID
 	// u64; length-prefixed UTF-8 scene path and canonical Parameters JSON; seed u64; FixedHz u32; length-prefixed
 	// EngineVersion and Config; event count u32; events in array order; expectation count u32; expectations;
-	// FinalTick u64; state hash u64. A string/buffer length is u32. Event records: Tick u64, kind u8 (the nine kinds
+	// checkpoint count u32; checkpoints (Tick u64, state hash u64); FinalTick u64; state hash u64. Version 1 artifacts
+	// (no checkpoints) are UnsupportedVersion: the cache rebuilds them (ReplayImporter's version is part of the cache
+	// key) and exports are made again. A string/buffer length is u32. Event records: Tick u64, kind u8 (the nine kinds
 	// above in that order), then type-specific fields: strings, state u8 (Down=0, Up=1, Tap=2), f32 value or vec2;
 	// Action has a u8 State/Value discriminant; MouseButton has a u8 HasPosition; gamepad index is u32. Expectations:
 	// Tick u64, length-prefixed complete CookScript artifact. The nested artifact preserves source maps and compiler

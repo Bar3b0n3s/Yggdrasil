@@ -17,6 +17,10 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
+#include <format>
+#include <vector>
+
 namespace Engine {
 
 	namespace {
@@ -250,6 +254,133 @@ return Script.Define("Links", Links)
 			CHECK(events.front().Id == editor.GetAssets().Resolve("Assets/Models/Textured.gltf").value_or(AssetHandle()));
 			CHECK(editor.GetRevision() == revision);
 			CHECK(CaptureEntity(editor, "/Model") == instance);
+		}
+
+		// S1-04: the prefab itself was read without the script field schemas, so every instance of a prefab whose root sets
+		// a script field logged a REFLECTION_VARIANT_UNRESOLVED warning (fifty for Breakout's brick grid).
+		TEST_CASE("PrefabMethods: instantiating a prefab whose root sets script fields logs no warnings")
+		{
+			Test::AutomationFixture setup("PrefabScriptFieldsQuiet");
+			CallOrFail(setup, "script.write", Json{ { "path", "Assets/Scripts/Brick.luau" }, { "source", R"(
+local Brick = { Fields = { Points = Field.Integer(1, { Min = 1 }) } }
+return Script.Define("Brick", Brick)
+)" } });
+			CallOrFail(setup, "entity.create", Json{ { "name", "Brick" }, { "components", Json{ { "Script", Json{ { "Script", "Assets/Scripts/Brick.luau" }, { "Fields", Json{ { "Points", 2 } } } } } } } });
+			CallOrFail(setup, "prefab.create", Json{ { "entity", "/Brick" }, { "path", "Assets/Prefabs/Brick.prefab" } });
+
+			const Json response = setup.Request("prefab.instantiate", Json{ { "prefab", "Assets/Prefabs/Brick.prefab" }, { "name", "Brick2" } });
+			INFO(response.dump());
+			REQUIRE(response.contains("result"));
+			const Json& diagnostics = response["result"]["_meta"]["diagnostics"];
+			CHECK(diagnostics["newWarnings"] == Json(0));
+			CHECK(diagnostics["newErrors"] == Json(0));
+			const Json brick = CallOrFail(setup, "entity.get", Json{ { "entity", "/Brick2" } })["entity"];
+			CHECK(brick["components"]["Script"]["Fields"]["Points"] == Json(2));
+		}
+
+		// S1-17: a brick grid from one prefab without a second op per brick. Per-instance component values are ordinary writes
+		// to the new root in the same step, so the recorded overrides are those of prefab.instantiate followed by
+		// entity.update; one undo removes the instance, and dry runs and batches work as for the other params.
+		TEST_CASE("PrefabMethods: instantiate with components records the same overrides as instantiate followed by entity.update")
+		{
+			Test::AutomationFixture setup("PrefabInstantiateComponents");
+			CallOrFail(setup, "script.write", Json{ { "path", "Assets/Scripts/Brick.luau" }, { "source", R"(
+local Brick = { Fields = { Points = Field.Integer(1, { Min = 1 }) } }
+return Script.Define("Brick", Brick)
+)" } });
+			CallOrFail(setup, "entity.create", Json{ { "name", "Brick" }, { "components", Json{ { "Script", Json{ { "Script", "Assets/Scripts/Brick.luau" }, { "Fields", Json{ { "Points", 1 } } } } }, { "MeshRenderer", Json{ { "Mesh", "engine://Meshes/Cube" } } } } } });
+			CallOrFail(setup, "prefab.create", Json{ { "entity", "/Brick" }, { "path", "Assets/Prefabs/Brick.prefab" } });
+			CallOrFail(setup, "entity.destroy", Json{ { "entities", Json::array({ "/Brick" }) } });
+
+			// The Script handle of a Fields-only value comes from the prefab's root, as entity.update takes it from the entity.
+			const Json components{ { "Script", Json{ { "Fields", Json{ { "Points", 5 } } } } }, { "MeshRenderer", Json{ { "CastShadows", false } } },
+				{ "Transform", Json{ { "EulerAngles", Json::array({ 0, 90, 0 }) } } } };
+			const Json response = setup.Request("prefab.instantiate", Json{ { "prefab", "Assets/Prefabs/Brick.prefab" }, { "name", "Row1" }, { "transform", Json{ { "Translation", Json::array({ 2, 0, 0 }) } } }, { "components", components } });
+			INFO(response.dump());
+			REQUIRE(response.contains("result"));
+			CHECK(response["result"]["entity"]["name"] == Json("Row1"));
+			CHECK(response["result"]["_meta"]["diagnostics"]["newWarnings"] == Json(0));
+			CallOrFail(setup, "prefab.instantiate", Json{ { "prefab", "Assets/Prefabs/Brick.prefab" }, { "name", "Row2" }, { "transform", Json{ { "Translation", Json::array({ 2, 0, 0 }) } } } });
+			CallOrFail(setup, "entity.update", Json{ { "entity", "/Row2" }, { "components", components } });
+
+			const auto overridesOf = [&setup](std::string_view path)
+			{
+				const Entity root = setup.GetEditor().GetScene().FindEntityByPath(path);
+				REQUIRE(root.IsValid());
+				return root.GetComponent<PrefabInstanceComponent>().Overrides;
+			};
+			const std::vector<PrefabOverride> together = overridesOf("/Row1");
+			const std::vector<PrefabOverride> separate = overridesOf("/Row2");
+			REQUIRE(together.size() == separate.size());
+			for (size_t index = 0; index < together.size(); ++index)
+			{
+				CAPTURE(index);
+				CHECK(together[index].PrefabEntityID == separate[index].PrefabEntityID);
+				CHECK(together[index].Kind == separate[index].Kind);
+				CHECK(together[index].Component == separate[index].Component);
+				CHECK(together[index].Field == separate[index].Field);
+				CHECK(together[index].Value == separate[index].Value);
+			}
+			CHECK(std::ranges::any_of(together, [](const PrefabOverride& entry)
+			{
+				return entry.Component == "Script" && entry.Field == "Fields" && entry.Value.Get() == Json{ { "Points", 5 } };
+			}));
+			CHECK(std::ranges::any_of(together, [](const PrefabOverride& entry)
+			{
+				return entry.Component == "MeshRenderer" && entry.Field == "CastShadows";
+			}));
+			// The same components, but for the link to each instance's own root.
+			Json row1 = CallOrFail(setup, "entity.get", Json{ { "entity", "/Row1" } })["entity"]["components"];
+			Json row2 = CallOrFail(setup, "entity.get", Json{ { "entity", "/Row2" } })["entity"]["components"];
+			row1.erase("PrefabLink");
+			row2.erase("PrefabLink");
+			CHECK(row1 == row2);
+			CHECK(row1["Script"]["Fields"] == Json{ { "Points", 5 } });
+
+			// One undo step removes the instance with its values; redo brings both back.
+			REQUIRE(setup.Call("edit.undo", Json::object()).has_value()); // Row2's update
+			REQUIRE(setup.Call("edit.undo", Json::object()).has_value()); // Row2
+			REQUIRE(setup.Call("edit.undo", Json::object()).has_value()); // Row1
+			CHECK_FALSE(setup.GetEditor().GetScene().FindEntityByPath("/Row1").IsValid());
+			REQUIRE(setup.Call("edit.redo", Json::object()).has_value());
+			REQUIRE(setup.GetEditor().GetScene().FindEntityByPath("/Row1").IsValid());
+			CHECK(overridesOf("/Row1").size() == together.size());
+
+			// A dry run creates nothing; a batch instantiates a row whose values reference nothing earlier.
+			const Json dry = CallOrFail(setup, "prefab.instantiate", Json{ { "prefab", "Assets/Prefabs/Brick.prefab" }, { "name", "Dry" }, { "components", components }, { "dryRun", true } });
+			CHECK(dry["dryRun"] == Json(true));
+			CHECK_FALSE(setup.GetEditor().GetScene().FindEntityByPath("/Dry").IsValid());
+			Json ops = Json::array();
+			for (int points = 2; points <= 3; ++points)
+			{
+				ops.push_back(Json{ { "method", "prefab.instantiate" }, { "params", Json{ { "prefab", "Assets/Prefabs/Brick.prefab" }, { "name", std::format("Grid{}", points) }, { "components", Json{ { "Script", Json{ { "Fields", Json{ { "Points", points } } } } } } } } } });
+			}
+			CallOrFail(setup, "edit.batch", Json{ { "label", "Grid" }, { "ops", ops } });
+			CHECK(CallOrFail(setup, "entity.get", Json{ { "entity", "/Grid3" } })["entity"]["components"]["Script"]["Fields"]["Points"] == Json(3));
+
+			// Reopening the scene rebuilds every instance from the prefab and its overrides, script fields included, quietly.
+			CallOrFail(setup, "scene.save", Json::object());
+			const Json reopened = setup.Request("scene.open", Json{ { "path", "Assets/Scenes/Main.scene" }, { "reload", true } });
+			INFO(reopened.dump());
+			REQUIRE(reopened.contains("result"));
+			CHECK(reopened["result"]["_meta"]["diagnostics"]["newWarnings"] == Json(0));
+			CHECK(CallOrFail(setup, "entity.get", Json{ { "entity", "/Grid3" } })["entity"]["components"]["Script"]["Fields"]["Points"] == Json(3));
+
+			// Invalid values are the params' errors, located under /components, and create nothing.
+			const Result<Json> unknown = setup.Call("prefab.instantiate", Json{ { "prefab", "Assets/Prefabs/Brick.prefab" }, { "name", "Bad" }, { "components", Json{ { "Script", Json{ { "Fields", Json{ { "Pointz", 2 } } } } } } } });
+			REQUIRE_FALSE(unknown.has_value());
+			CHECK(unknown.error().GetCode() == ErrorCode::InvalidArgument);
+			REQUIRE_FALSE(unknown.error().GetIssues().empty());
+			CHECK(unknown.error().GetIssues()[0].JsonPointer == "/components/Script/Fields/Pointz");
+			const Result<Json> range = setup.Call("prefab.instantiate", Json{ { "prefab", "Assets/Prefabs/Brick.prefab" }, { "name", "Bad" }, { "components", Json{ { "Script", Json{ { "Fields", Json{ { "Points", 0 } } } } } } } });
+			REQUIRE_FALSE(range.has_value());
+			CHECK(range.error().GetIssues().front().JsonPointer == "/components/Script/Fields/Points");
+			const Result<Json> missingPrefab = setup.Call("prefab.instantiate", Json{ { "prefab", "Assets/Prefabs/Missing.prefab" }, { "components", Json{ { "Script", Json{ { "Fields", Json{ { "Points", 2 } } } } } } } });
+			REQUIRE_FALSE(missingPrefab.has_value());
+			CHECK(missingPrefab.error().GetCode() == ErrorCode::NotFound);
+			const Result<Json> hidden = setup.Call("prefab.instantiate", Json{ { "prefab", "Assets/Prefabs/Brick.prefab" }, { "name", "Bad" }, { "components", Json{ { "PrefabLink", Json::object() } } } });
+			REQUIRE_FALSE(hidden.has_value());
+			CHECK_FALSE(setup.GetEditor().GetScene().FindEntityByPath("/Bad").IsValid());
 		}
 
 		TEST_CASE("PrefabMethods: errors name the problem")

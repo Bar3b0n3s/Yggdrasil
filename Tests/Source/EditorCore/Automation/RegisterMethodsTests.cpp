@@ -112,7 +112,7 @@ namespace Engine {
 				"asset.setProperties", "component.list", "component.schema", "docs.get", "edit.batch", "edit.redo", "edit.undo", "editor.screenshot",
 				"entity.bounds", "entity.create", "entity.destroy", "entity.duplicate", "entity.get", "entity.reparent", "entity.update", "input.inject",
 				"input.record", "input.replay", "log.read", "play.start", "play.step", "play.stop", "play.waitFor", "prefab.apply", "prefab.create", "prefab.instantiate", "project.create",
-				"project.export", "project.getSettings", "project.open", "project.save", "project.setSettings", "project.validate", "scene.diff",
+				"project.export", "project.getSettings", "project.open", "project.save", "project.setSettings", "project.upgrade", "project.validate", "scene.diff",
 				"scene.new", "scene.open", "scene.query", "scene.save", "scene.tree",
 				"script.check", "script.create", "script.errors", "script.eval", "script.read", "script.write", "test.run", "viewport.screenshot" };
 			// The edit.batch ops (ADR 0008 decision 8): pure reads and methods whose effects all go through Execute. asset.import and
@@ -269,8 +269,9 @@ namespace Engine {
 			Json catalog = methods.BuildToolCatalog();
 			// The 25 M4 tools, viewport_screenshot and editor_screenshot, and M6's asset_list, asset_import, asset_create,
 			// asset_set_properties, asset_move, asset_delete, prefab_create, prefab_instantiate, prefab_apply and entity_bounds, and
-			// M7's play_start, play_stop, play_step, input_inject and project_export, plus M13's ten script/replay/test tools.
-			CHECK(catalog["Tools"].size() == 52);
+			// M7's play_start, play_stop, play_step, input_inject and project_export, plus M13's ten script/replay/test tools, and
+			// M16's project_upgrade (friction S3-09).
+			CHECK(catalog["Tools"].size() == 53);
 			for (Json& tool : catalog["Tools"])
 			{
 				INFO(tool["name"].dump());

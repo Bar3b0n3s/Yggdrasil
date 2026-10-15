@@ -91,10 +91,10 @@ namespace Engine {
 	// Descending into a resolved schema that is itself a struct (a PrefabOverride's AddComponent value resolves to the
 	// whole component, §5.4) replaces Owner, OwnerType and OwnerJson with that nested object (its C++ object when one
 	// exists, otherwise null, and its JSON object) and clears Key. A Field override's value resolves to the field itself
-	// without its owning component, so a resolver below it (ScriptComponent.Fields inside a PrefabOverride of field
-	// "Script.Fields") gets OwnerType = that component and neither Owner nor OwnerJson: it cannot resolve, and the values
-	// are kept with REFLECTION_VARIANT_UNRESOLVED until they are applied to a real entity (PrefabInstantiator applies them
-	// through ComponentAccess, where the member's ScriptComponent is the owner).
+	// without its owning component, so a resolver below it would get OwnerType = that component and neither Owner nor
+	// OwnerJson. The one such field, ScriptComponent.Fields, is therefore not resolved inside an override: the override
+	// resolver reads its value as free-form JSON, checked when PrefabInstantiator applies it to a real entity, where the
+	// member's ScriptComponent is the owner (Docs/Decisions/0026-m16-contract.md, amending ADR 0006 decision 6).
 	struct ResolveContext
 	{
 		const TypeRegistry* Registry = nullptr;

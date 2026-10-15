@@ -8,6 +8,7 @@
 #include "EditorCore/Export/Private/ExportPaths.h"
 #include "EditorCore/Export/TestingExport.h"
 #include "EditorCore/Project/ProjectManager.h"
+#include "EditorCore/Project/ProjectValidator.h"
 #include "EditorCore/Scripting/EditorScriptService.h"
 #include "Engine/App/EngineContext.h"
 #include "Engine/Asset/AssetDiagnostic.h"
@@ -603,11 +604,42 @@ namespace Engine {
 				{
 					issues.push_back(MakeIssue("", std::format("the build scene '{}' does not load strictly: {}", path, loaded.error().ToString()),
 						"open it with scene.open {\"repair\": true} and save it, or fix what project.validate reports"));
+					// Script field values are named with the code and place project.validate reports them under (ADR 0026).
+					ENGINE_TRY_ASSIGN(const VfsPath sourcePath, VfsPath::Create(ProjectScheme, path));
+					ENGINE_TRY_ASSIGN(const std::vector<LoadDiagnostic> problems, ProjectValidator::FindScriptFieldProblems(*Editor, sourcePath));
+					for (const LoadDiagnostic& problem : problems)
+					{
+						issues.push_back(MakeIssue("", std::format("'{}' {}: {} ({}, entity {})", path, problem.JsonPointer, problem.Message, problem.Code, problem.Entity.ToString()),
+							"project.validate reports it under the same code; correct or remove the override"));
+					}
 					continue;
+				}
+				// The script field values project.validate reports, under its codes (ADR 0006 decision 35), found as it finds
+				// them: only the values of a registered Behaviour whose fields load (FindScriptFieldProblems).
+				std::vector<LoadDiagnostic> scriptFieldProblems;
+				const bool hasScriptFieldDiagnostic = std::ranges::any_of(report.Diagnostics, [](const LoadDiagnostic& diagnostic)
+				{
+					return !ProjectValidator::MapScriptFieldLoadCode(diagnostic.Code, diagnostic.JsonPointer).empty();
+				});
+				if (hasScriptFieldDiagnostic)
+				{
+					ENGINE_TRY_ASSIGN(const VfsPath sourcePath, VfsPath::Create(ProjectScheme, path));
+					ENGINE_TRY_ASSIGN(scriptFieldProblems, ProjectValidator::FindScriptFieldProblems(*Editor, sourcePath));
 				}
 				for (const LoadDiagnostic& diagnostic : report.Diagnostics)
 				{
 					const std::string pointer = diagnostic.JsonPointer.empty() ? std::string("(root)") : diagnostic.JsonPointer;
+					const std::string_view validatorCode = ProjectValidator::MapScriptFieldLoadCode(diagnostic.Code, diagnostic.JsonPointer);
+					const bool reportedByValidate = !validatorCode.empty() && std::ranges::any_of(scriptFieldProblems, [&diagnostic, validatorCode](const LoadDiagnostic& problem)
+					{
+						return problem.JsonPointer == diagnostic.JsonPointer && problem.Code == validatorCode;
+					});
+					if (reportedByValidate)
+					{
+						Report.Warnings.push_back(std::format("'{}' {}: {} ({}, entity {})", path, pointer, diagnostic.Message, validatorCode,
+							diagnostic.Entity.ToString()));
+						continue;
+					}
 					Report.Warnings.push_back(std::format("'{}' {}: {} ({})", path, pointer, diagnostic.Message, diagnostic.Code));
 				}
 			}
@@ -1557,10 +1589,14 @@ namespace Engine {
 		}
 		if (!*stepped)
 			return std::nullopt;
-		// The phase's time runs from the previous phase's end, so the timings add up to the export's (§14.2 step 8).
-		const auto completed = std::chrono::steady_clock::now();
-		state.Report.PhaseTimings.push_back({ .Phase = phase, .Seconds = std::chrono::duration<double>(completed - state.PhaseStarted).count() });
-		state.PhaseStarted = completed;
+		// The phase's time runs from the previous listed phase's end, so the timings add up to the export's (§14.2 step 8). A
+		// smoke test that did not run is not listed (M16 friction S2-06): its time counts toward the next phase.
+		if (phase != ExportPhase::SmokeTest || state.Report.SmokeTestRan)
+		{
+			const auto completed = std::chrono::steady_clock::now();
+			state.Report.PhaseTimings.push_back({ .Phase = phase, .Seconds = std::chrono::duration<double>(completed - state.PhaseStarted).count() });
+			state.PhaseStarted = completed;
+		}
 		state.Phase = static_cast<ExportPhase>(std::to_underlying(phase) + 1);
 		if (state.Phase != ExportPhase::Done)
 			return std::nullopt;

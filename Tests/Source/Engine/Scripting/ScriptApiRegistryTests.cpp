@@ -19,6 +19,7 @@
 #include <format>
 #include <set>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace Engine {
@@ -521,6 +522,33 @@ return class
 				CHECK(diagnostic.Severity != DiagnosticSeverity::Error);
 			}
 		}
+		// M16 friction S1-10: every Entity shortcut said "or nil when absent", although a Required component's shortcut is
+		// typed as never nil and every entity has the component.
+		TEST_CASE("ScriptApiRegistry: a Required component's Entity shortcut is typed and described as always present")
+		{
+			Test::ScriptTestFixture fixture;
+			REQUIRE(fixture.Start());
+			const auto types = fixture.GetApi().GetTypes();
+			const auto entity = std::ranges::find(types, "Entity", &ScriptApiGroup::Name);
+			REQUIRE(entity != types.end());
+			const auto shortcut = [&entity](std::string_view name) -> const ScriptApiMember*
+			{
+				const auto found = std::ranges::find(entity->Members, name, &ScriptApiMember::Name);
+				return found == entity->Members.end() ? nullptr : &*found;
+			};
+			const ScriptApiMember* transform = shortcut("Transform");
+			REQUIRE(transform != nullptr);
+			CHECK(transform->Signature == "Transform");
+			CHECK(transform->Description == "The entity's Transform component, which every entity has.");
+			CHECK(transform->Description.find("nil") == std::string::npos);
+			const ScriptApiMember* body = shortcut("RigidBody");
+			REQUIRE(body != nullptr);
+			CHECK(body->Signature == "RigidBody?");
+			CHECK(body->Description == "The entity's RigidBody component, or nil when absent.");
+			const auto definitions = fixture.GetApi().GenerateDefinitions();
+			REQUIRE(definitions);
+			CHECK(definitions->find("-- The entity's Transform component, which every entity has.") != std::string::npos);
+		}
 		TEST_CASE("ScriptApiRegistry: binding availability is independent of run mode")
 		{
 			for (auto mode : { RunModes::Editor, RunModes::Release, RunModes::Dist })
@@ -711,6 +739,43 @@ return true
 			CHECK(docs->find("pure/read") != std::string::npos);
 			CHECK(docs->find("Runtime|Test") != std::string::npos);
 		}
+		// Docs/Decisions/0026-m16-contract.md, friction S2-05: docs.get anchors drop the '.' of "<Group>.<Member>", so
+		// "Test.Suite" and the alias "TestSuite" shared an anchor, and the Script module and the Script component shared a
+		// heading. A heading that would repeat another's anchor names its kind; the others stay plain.
+		TEST_CASE("ScriptApiRegistry: the Script API reference names a heading's kind where its anchor would repeat another's")
+		{
+			TypeRegistry types;
+			types.Freeze();
+			ScriptApiRegistry api;
+			EnumInfo alignment("TextAlignment", "Probe alignment.");
+			alignment.AddEntry({ "Left", 0, "Left aligned." });
+			REQUIRE(api.RegisterEnum(alignment));
+			REQUIRE(api.RegisterAlias("TestSuite", "{ Name: string }", "A probe suite."));
+			api.Module("Test", "Probe tests.").Function("Suite", RegistryProbe, "(name: string) -> TestSuite", "Makes a suite.", { .Mutates = false });
+			api.Module("Script", "Probe script global.").Function("Define", RegistryProbe, "() -> number", "Defines.", { .Mutates = false });
+			api.Module("A", "Probe A.").Function("Bc", RegistryProbe, "() -> number", "Reads A.Bc.", { .Mutates = false });
+			api.Module("Ab", "Probe Ab.").Function("C", RegistryProbe, "() -> number", "Reads Ab.C.", { .Mutates = false });
+			api.Type("Script", "Probe script type.").Method("Run", RegistryProbe, "(self: Script) -> number", "Runs.", { .Mutates = false });
+			api.Type("Text", "Probe text.").Property("Alignment", RegistryProbe, nullptr, "TextAlignment", "The alignment.");
+			REQUIRE(api.Freeze(types));
+			const auto documentation = api.GenerateDocumentation();
+			REQUIRE_MESSAGE(documentation.has_value(), documentation.error().ToString());
+
+			std::vector<std::string> headings;
+			size_t start = 0;
+			while (start < documentation->size())
+			{
+				const size_t end = documentation->find('\n', start);
+				const std::string line = documentation->substr(start, end == std::string::npos ? std::string::npos : end - start);
+				if (line.starts_with('#'))
+					headings.push_back(line);
+				if (end == std::string::npos)
+					break;
+				start = end + 1;
+			}
+			CHECK(headings == std::vector<std::string>{ "# Script API", "## A", "### A.Bc", "## Ab", "### Ab.C (global)", "## Script", "### Script.Define", "## Test", "### Test.Suite", "## Script (type)", "### Script.Run", "## Text", "### Text.Alignment", "## TextAlignment (enum)", "## TestSuite (type)" });
+		}
+
 		TEST_CASE("RegisterBindings: the built-in registry covers the complete scripting surface")
 		{
 			Test::ScriptTestFixture fixture;

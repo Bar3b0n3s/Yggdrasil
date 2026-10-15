@@ -3,7 +3,8 @@
 readers of the two committed files, the engine-consumed files, every finding code over the seeded fixtures of
 Tests/Data/Provenance/, the exit codes, the static-check wiring, the fresh-clone (index) mode in a temporary git
 repository, and that nothing below Library/ is ever read. Only the last class starts an editor: it builds a project
-through the MCP bridge's launcher and needs stream C's fixes G1, G2a, G2b and G5 (decisions 10, 11 and 13).
+through the MCP bridge's launcher, the regression test of stream C's fixes G1, G2a, G2b and G5 (decisions 10, 11 and
+13).
 """
 
 from __future__ import annotations
@@ -32,10 +33,6 @@ AUDIT_SCRIPT = REPOSITORY_ROOT / "Scripts" / "AuditProvenance.py"
 FIXTURES = REPOSITORY_ROOT / "Tests" / "Data" / "Provenance"
 CLEAN = "Clean"
 MCP_ROOT = REPOSITORY_ROOT / "Tools" / "MCP"
-SKIP_A = "contract stub: provenance audit (ADR 0026 decisions 3 to 6, stream A)"
-SKIP_STATIC = "contract stub: provenance audit static checks (ADR 0026 decision 9, stream A)"
-SKIP_BRIDGE = ("contract stub: provenance audit through the bridge (ADR 0026 decisions 4, 10, 11 and 13, streams A "
-               "and C: G1, G2a, G2b and G5)")
 
 
 def run_audit(*arguments: str, cwd: Path = REPOSITORY_ROOT,
@@ -81,7 +78,6 @@ def codes(findings: list[provenance.Finding]) -> list[tuple[str, str]]:
 
 
 class Xxh64Tests(unittest.TestCase):
-    @unittest.skip(SKIP_A)
     def test_xxh64_matches_the_engine_reference_vectors(self) -> None:
         # The independent expected values of Tests/Source/Engine/Core/HashTests.cpp, every tail path included (the same
         # vectors as Tools/MCP/tests/test_autosave_probe.py).
@@ -97,7 +93,6 @@ class Xxh64Tests(unittest.TestCase):
                 self.assertEqual(xxh64.xxh64(bytes(buffer[:size])), expected)
         self.assertEqual(xxh64.xxh64(b"abc"), 0x44BC2CF5AD770999)
 
-    @unittest.skip(SKIP_A)
     def test_xxh64_hex_is_sixteen_lowercase_digits(self) -> None:
         self.assertEqual(xxh64.xxh64_hex(b""), "ef46db3751d8e999")
         self.assertEqual(xxh64.xxh64_hex(b"abc"), "44bc2cf5ad770999")
@@ -108,7 +103,6 @@ class ReaderTests(unittest.TestCase):
         self.directory = Path(tempfile.mkdtemp(prefix="Provenance-"))
         self.addCleanup(shutil.rmtree, self.directory, ignore_errors=True)
 
-    @unittest.skip(SKIP_A)
     def test_provenance_entries_read_in_the_editors_pascal_case_spelling(self) -> None:
         path = self.directory / "Provenance.json"
         path.write_text(json.dumps({"Format": "Provenance", "Version": 1, "Entries": [
@@ -124,7 +118,6 @@ class ReaderTests(unittest.TestCase):
         with self.assertRaises(FileNotFoundError):
             provenance.load_provenance(self.directory / "Missing.json")
 
-    @unittest.skip(SKIP_A)
     def test_malformed_provenance_documents_are_refused_naming_a_pointer(self) -> None:
         entry = {"Path": "Assets/A.scene", "XXH64": "00000000000000aa", "Method": "scene.save", "RequestId": 4,
                  "Client": "engine-mcp", "TranscriptLine": 7}
@@ -152,7 +145,6 @@ class ReaderTests(unittest.TestCase):
                     provenance.load_provenance(path)
                 self.assertIn("Provenance.json", str(raised.exception))
 
-    @unittest.skip(SKIP_A)
     def test_transcript_lines_are_split_on_newline_bytes_only(self) -> None:
         path = self.directory / "BuildLog.jsonl"
         request = {"type": "request", "time": "2026-01-01T00:00:00.000Z", "client": "engine-mcp", "id": 1,
@@ -170,7 +162,6 @@ class ReaderTests(unittest.TestCase):
         path.write_bytes(b"")
         self.assertEqual(provenance.load_transcript(path).lines, ())
 
-    @unittest.skip(SKIP_A)
     def test_engine_consumed_files_are_the_root_project_file_luaurc_and_assets(self) -> None:
         project = self.directory / "Game"
         for relative in ("Game.eproj", ".luaurc", ".gitignore", "AGENTS.md", "README.md", "Notes.txt",
@@ -193,7 +184,6 @@ class FixtureTests(unittest.TestCase):
         self.directory = Path(tempfile.mkdtemp(prefix="ProvenanceFixtures-"))
         self.addCleanup(shutil.rmtree, self.directory, ignore_errors=True)
 
-    @unittest.skip(SKIP_A)
     def test_the_clean_fixture_passes_with_its_counts(self) -> None:
         project = FIXTURES / CLEAN / "Project"
         audit = provenance.audit_project(project, "disk")
@@ -222,7 +212,6 @@ class FixtureTests(unittest.TestCase):
         self.assertTrue(any(entry.method == "project.upgrade" and entry.client == "cli"
                             and entry.transcript_line is None for entry in entries))
 
-    @unittest.skip(SKIP_A)
     def test_each_seeded_fixture_has_exactly_its_findings_and_warnings(self) -> None:
         cases = sorted(path.name for path in FIXTURES.iterdir() if (path / "Expected.json").is_file())
         self.assertIn(CLEAN, cases)
@@ -239,23 +228,23 @@ class FixtureTests(unittest.TestCase):
                 if case != CLEAN:
                     self.assertTrue(audit.findings or audit.warnings, "a seeded fixture must have a finding")
 
-    @unittest.skip(SKIP_A)
     def test_every_finding_and_warning_code_has_a_seeded_fixture(self) -> None:
         seen: set[str] = set()
         for expected_path in FIXTURES.glob("*/Expected.json"):
             expected = json.loads(expected_path.read_text(encoding="utf-8"))
             seen.update(item["Code"] for item in expected["Findings"] + expected["Warnings"])
-        # crlf cannot be committed (.gitattributes normalizes it): test_crlf_text_is_a_warning builds it.
-        self.assertEqual(sorted(set(provenance.FINDING_CODES + provenance.WARNING_CODES) - seen), ["crlf"])
+        # crlf cannot be committed (.gitattributes normalizes it): test_crlf_text_is_a_warning builds it. The index-only
+        # path-collision cannot be audited in disk mode: FreshCloneTests builds it.
+        self.assertEqual(provenance.INDEX_ONLY_CODES, ("path-collision",))
+        self.assertEqual(sorted(set(provenance.FINDING_CODES + provenance.WARNING_CODES) - seen),
+                         ["crlf", "path-collision"])
 
-    @unittest.skip(SKIP_A)
     def test_the_self_test_passes(self) -> None:
         exit_code, document = run_audit("--self-test")
         self.assertEqual(exit_code, 0, document)
         self.assertTrue(document["success"])
         self.assertTrue(all(step["status"] == "passed" for step in document["steps"]))
 
-    @unittest.skip(SKIP_A)
     def test_the_self_test_fails_on_a_changed_expectation_and_on_a_code_without_a_case(self) -> None:
         fixtures = self.directory / "Fixtures"
         shutil.copytree(FIXTURES, fixtures)
@@ -278,7 +267,6 @@ class FixtureTests(unittest.TestCase):
         self.assertIn(code, coverage.detail)
         self.assertTrue(all(step.status == Status.PASSED for step in steps if step not in failed))
 
-    @unittest.skip(SKIP_A)
     def test_missing_required_files_exit_3(self) -> None:
         project = copy_fixture(CLEAN, self.directory)
         cases = {"provenance-missing": project / provenance.PROVENANCE_FILE,
@@ -300,7 +288,6 @@ class FixtureTests(unittest.TestCase):
                 self.assertEqual([finding["code"] for finding in document["projects"][0]["findings"]],
                                  ["project-missing"])
 
-    @unittest.skip(SKIP_A)
     def test_several_projects_exit_with_the_first_failing_projects_code(self) -> None:
         missing = self.directory / "Nowhere"
         hash_mismatch = copy_fixture("HashMismatch", self.directory)
@@ -311,7 +298,6 @@ class FixtureTests(unittest.TestCase):
                 self.assertEqual(exit_code, expected)
                 self.assertEqual([step["status"] for step in document["steps"]], ["failed", "failed"])
 
-    @unittest.skip(SKIP_A)
     def test_a_directory_with_several_project_files_fails_the_demos_step(self) -> None:
         with mock.patch.object(games, "discover_projects",
                                side_effect=ValueError("Projects/Twice holds 2 *.eproj files")):
@@ -322,7 +308,6 @@ class FixtureTests(unittest.TestCase):
                          [("provenance demos", "failed")])
         self.assertIn("Projects/Twice", document["steps"][0]["detail"])
 
-    @unittest.skip(SKIP_A)
     def test_usage_errors_exit_2(self) -> None:
         for arguments in ([], ["--self-test", "--project", "X"], ["--demos", "--self-test"],
                           ["--self-test", "--files", "disk"], ["--project", "X", "--files", "git"]):
@@ -331,7 +316,6 @@ class FixtureTests(unittest.TestCase):
                                            capture_output=True, text=True, timeout=120)
                 self.assertEqual(completed.returncode, EXIT_USAGE)
 
-    @unittest.skip(SKIP_A)
     def test_library_is_never_read(self) -> None:
         project = copy_fixture(CLEAN, self.directory)
         baseline_code, baseline = run_audit("--project", str(project), "--files", "disk")
@@ -345,7 +329,6 @@ class FixtureTests(unittest.TestCase):
         exit_code, document = run_audit("--project", str(project), "--files", "disk")
         self.assertEqual((exit_code, document["projects"]), (baseline_code, baseline["projects"]))
 
-    @unittest.skip(SKIP_A)
     def test_crlf_text_is_a_warning(self) -> None:
         project = copy_fixture(CLEAN, self.directory)
         audit = provenance.audit_project(project, "disk")
@@ -362,7 +345,6 @@ class FixtureTests(unittest.TestCase):
         self.assertEqual(audit.findings, [])
         self.assertEqual(codes(audit.warnings), [("crlf", script)])
 
-    @unittest.skip(SKIP_A)
     def test_a_torn_line_is_a_warning_until_an_entry_references_it(self) -> None:
         project = copy_fixture(CLEAN, self.directory)
         transcript = project / provenance.TRANSCRIPT_FILE
@@ -377,7 +359,6 @@ class FixtureTests(unittest.TestCase):
         audit = provenance.audit_project(project, "disk")
         self.assertIn(("torn-line", document["Entries"][0]["Path"]), codes(audit.findings))
 
-    @unittest.skip(SKIP_A)
     def test_the_json_report_lists_each_project_with_its_counts_and_findings(self) -> None:
         clean = copy_fixture(CLEAN, self.directory)
         hash_mismatch = copy_fixture("HashMismatch", self.directory)
@@ -391,7 +372,6 @@ class FixtureTests(unittest.TestCase):
         self.assertEqual([finding["code"] for finding in document["projects"][1]["findings"]], ["hash-mismatch"])
         self.assertEqual([step["status"] for step in document["steps"]], ["passed", "failed"])
 
-    @unittest.skip(SKIP_A)
     def test_demos_audits_every_discovered_game_project(self) -> None:
         exit_code, document = run_audit("--demos", "--files", "disk")
         self.assertEqual(exit_code, 0, document)
@@ -402,7 +382,6 @@ class FixtureTests(unittest.TestCase):
 
 
 class StaticCheckTests(unittest.TestCase):
-    @unittest.skip(SKIP_STATIC)
     def test_the_static_checks_run_the_audit_self_test_and_not_the_demo_audit(self) -> None:
         calls: list[tuple[str, str, list[str]]] = []
 
@@ -429,7 +408,6 @@ class FreshCloneTests(unittest.TestCase):
         git(self.repository, "add", "--all")
         git(self.repository, "commit", "--quiet", "--message", "Clean project")
 
-    @unittest.skip(SKIP_A)
     def test_index_mode_audits_the_staged_blobs_not_the_working_tree(self) -> None:
         self.assertEqual(provenance.audit_project(self.project, "index").findings, [])
         # Ignored and untracked files are not in a fresh clone, so they change nothing.
@@ -448,7 +426,6 @@ class FreshCloneTests(unittest.TestCase):
         git(self.repository, "add", "--", str(self.project / scene))
         self.assertEqual(codes(provenance.audit_project(self.project, "index").findings), [("hash-mismatch", scene)])
 
-    @unittest.skip(SKIP_A)
     def test_index_mode_holds_what_a_fresh_clone_checks_out(self) -> None:
         files = provenance.enumerate_engine_files(self.project, "disk")
         script = next(path for path in files if path.endswith(".luau"))
@@ -477,7 +454,6 @@ class FreshCloneTests(unittest.TestCase):
         git(self.repository, "commit", "--quiet", "--message", "Keep the project's bytes")
         self.assertEqual(provenance.audit_project(self.project, "index").findings, [])
 
-    @unittest.skip(SKIP_A)
     def test_index_mode_reads_the_staged_provenance_and_transcript(self) -> None:
         # Unstaged changes to the two committed files are not what a fresh clone holds, so index mode ignores them.
         (self.project / provenance.PROVENANCE_FILE).write_text("{}", encoding="utf-8")
@@ -488,7 +464,6 @@ class FreshCloneTests(unittest.TestCase):
         self.assertIn("provenance-invalid",
                       [finding.code for finding in provenance.audit_project(self.project, "disk").findings])
 
-    @unittest.skip(SKIP_A)
     def test_the_cli_audits_the_index_by_default_and_takes_a_project_file(self) -> None:
         project_file = next(self.project.glob("*.eproj"))
         self.assertEqual(AuditProvenance.resolve_project(str(project_file)), self.project.resolve())
@@ -502,7 +477,6 @@ class FreshCloneTests(unittest.TestCase):
         (self.project / scene).write_bytes((self.project / scene).read_bytes() + b"\n")
         self.assertEqual(run_audit("--project", str(self.project))[0], 0)
 
-    @unittest.skip(SKIP_A)
     def test_a_missing_or_unstaged_project_is_project_missing_in_index_mode(self) -> None:
         untracked = copy_fixture("HashMismatch", self.repository)
         for project in (self.repository / "Nowhere", untracked):
@@ -512,7 +486,6 @@ class FreshCloneTests(unittest.TestCase):
                 self.assertEqual([finding["code"] for finding in document["projects"][0]["findings"]],
                                  ["project-missing"])
 
-    @unittest.skip(SKIP_A)
     def test_index_mode_outside_a_repository_exits_3(self) -> None:
         outside = copy_fixture(CLEAN, self.directory / "Outside")
         # No repository above the copy is found, whatever holds the temporary directory.
@@ -522,7 +495,6 @@ class FreshCloneTests(unittest.TestCase):
         self.assertEqual([step["status"] for step in document["steps"]], ["failed"])
         self.assertEqual(run_audit("--project", str(outside), "--files", "disk", environment=environment)[0], 0)
 
-    @unittest.skip(SKIP_A)
     def test_demos_audit_only_staged_projects_in_index_mode_and_name_the_others(self) -> None:
         staged = copy_fixture(CLEAN, self.repository / "Tests" / "Projects")
         git(self.repository, "add", "--all")
@@ -546,7 +518,33 @@ class FreshCloneTests(unittest.TestCase):
             self.assertEqual(exit_code, 1)
             self.assertEqual(sorted(project["passed"] for project in document["projects"]), [False, True])
 
-    @unittest.skip(SKIP_A)
+    def test_staged_paths_that_differ_only_in_letter_case_are_a_path_collision(self) -> None:
+        # The milestone review's R07: on a case-insensitive file system the materialized copy holds one file for both
+        # paths, so a hand-added Ball.luau staged beside the recorded ball.luau was never audited. Both are staged here
+        # through the index alone (update-index --cacheinfo), as a commit made on Linux would bring them.
+        files = provenance.enumerate_engine_files(self.project, "disk")
+        script = next(path for path in files if path.endswith(".luau"))
+        folded = Path(script).with_name(Path(script).name.swapcase()).as_posix()
+        blob = git(self.repository, "hash-object", "-w", str(self.project / script)).strip()
+        # Paths that differ only in Unicode normalization (NFC "é" against NFD "e" and a combining accent) collide too:
+        # a macOS file system holds one file for them.
+        # Escapes keep the two spellings visible; precomposition is off because git on macOS would otherwise turn the
+        # NFD command-line path into NFC and stage one path twice.
+        nfc, nfd = "Assets/Caf\u00e9.material", "Assets/Cafe\u0301.material"
+        for relative in (folded, nfc, nfd):
+            git(self.repository, "-c", "core.precomposeUnicode=false", "update-index", "--add", "--cacheinfo",
+                f"100644,{blob},{self.project.name}/{relative}")
+        audit = provenance.audit_project(self.project, "index")
+        collisions = {finding.path: finding.detail for finding in audit.findings if finding.code == "path-collision"}
+        self.assertEqual(sorted(collisions), sorted([script, folded, nfc, nfd]))
+        for path, other in ((script, folded), (folded, script), (nfc, nfd), (nfd, nfc)):
+            self.assertIn(other, collisions[path])
+            self.assertIn("case-insensitive file system", collisions[path])
+        self.assertEqual(provenance.audit_exit_code(audit), provenance.EXIT_FINDINGS)
+        # Disk mode audits the working tree, which holds one spelling only.
+        self.assertNotIn("path-collision",
+                         [finding.code for finding in provenance.audit_project(self.project, "disk").findings])
+
     def test_materialize_index_writes_only_the_projects_staged_files(self) -> None:
         (self.repository / "Other.txt").write_text("outside the project", encoding="utf-8")
         git(self.repository, "add", "Other.txt")
@@ -560,13 +558,68 @@ class FreshCloneTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             provenance.materialize_index(self.repository, self.directory, self.directory / "Copy2")
 
+    def test_materialize_index_applies_only_the_gitattributes_conversions_whatever_the_git_configuration(self) -> None:
+        # .gitattributes' own conversions apply: text=auto without an eol everywhere, eol=crlf for one file.
+        notes = self.project / "Notes.txt"
+        notes.write_bytes(b"first\nsecond\n")
+        (self.repository / ".gitattributes").write_text(f"* text=auto\n/{self.project.name}/Notes.txt text eol=crlf\n",
+                                                        encoding="utf-8")
+        git(self.repository, "add", "--all")
+        # Configuration that converts line endings on checkout (here the repository's own, which outranks the user's
+        # and the system's: Git for Windows' system configuration sets core.autocrlf=true): materialize_index
+        # overrides all of it.
+        user_attributes = self.directory / "UserAttributes"
+        user_attributes.write_text("* text eol=crlf\n", encoding="utf-8")
+        for key, value in (("core.autocrlf", "true"), ("core.eol", "crlf"),
+                           ("core.attributesFile", user_attributes.as_posix())):
+            git(self.repository, "config", key, value)
+        destination = self.directory / "Copy"
+        copy = provenance.materialize_index(self.repository, self.project, destination)
+        relative = self.project.relative_to(self.repository).as_posix()
+        staged = git(self.repository, "ls-files", "-z", "--", relative).split("\0")
+        for path in filter(None, staged):
+            with self.subTest(path=path):
+                written = (destination / path).read_bytes()
+                if path == f"{relative}/Notes.txt":
+                    self.assertEqual(written, b"first\r\nsecond\r\n")
+                    continue
+                blob = subprocess.run(["git", "-C", str(self.repository), "cat-file", "blob", f":{path}"],
+                                      capture_output=True, check=True, timeout=120).stdout
+                self.assertEqual(written, blob)
+        self.assertEqual(provenance.audit_project(self.project, "index").findings, [])
+        self.assertTrue((copy / "Notes.txt").is_file())
+
+    def test_materialize_index_ignores_the_system_wide_gitattributes_file(self) -> None:
+        # The system-wide $(prefix)/etc/gitattributes cannot be replaced without administrator rights, so the test
+        # checks that both git commands run with GIT_ATTR_NOSYSTEM=1, the variable that makes git skip it.
+        git(self.repository, "add", "--all")
+        real_run = subprocess.run
+        environments: list[dict[str, str] | None] = []
+
+        def recorded(command: list[str], *arguments: object, **options: object) -> subprocess.CompletedProcess:
+            if command[:1] == ["git"]:
+                environments.append(options.get("env"))  # type: ignore[arg-type]
+            return real_run(command, *arguments, **options)  # type: ignore[arg-type]
+
+        with mock.patch.object(provenance.subprocess, "run", recorded):
+            provenance.materialize_index(self.repository, self.project, self.directory / "Copy")
+        self.assertEqual(len(environments), 2)
+        for environment in environments:
+            self.assertIsNotNone(environment)
+            assert environment is not None
+            self.assertEqual(environment.get("GIT_ATTR_NOSYSTEM"), "1")
+
 
 class BridgeAuditTests(AutomationTestCase):
     """A project built through the bridge's launcher, with the real transcript (ENGINE_MCP_TRANSCRIPT unset), passes the
     audit: the regression test of decision 10 (G1: a glTF's .meta rewritten after asset.import returned), decision 11
     (G2a: the bridge reopens an existing project through project.open; G2b: --upgrade's deferred scan) and decision 13's
-    G5 (the Empty template's root .luaurc, which project.create writes, is recorded). It passes once stream C has landed
-    all four."""
+    G5 (the Empty template's root .luaurc, which project.create writes, is recorded). Without G1 or G5 the audit fails.
+    G2a and G2b attribute the .meta files an open's scan writes, so build_project copies a source without a .meta into
+    Assets/ before --upgrade and another before the bridge reopens the project, and checks that each .meta is recorded
+    under the transcribed request that wrote it (cli project.refreshAssets, project.open); without G2a or G2b that check
+    fails. The copied sources themselves were written by hand, so the reopened session deletes them through automation
+    before the audit."""
 
     def setUp(self) -> None:
         super().setUp()
@@ -597,12 +650,45 @@ class BridgeAuditTests(AutomationTestCase):
                 self.assertIn("result", connection.call(method, params), method)
         finally:
             self.assertTrue(connection.shutdown(force=True)["shutDown"])
-        # Reopening the existing project goes through project.open, whose open-time writes it transcribes.
+        # G2b: --upgrade defers its asset scan to the transcribed cli project.refreshAssets, which writes the .meta of a
+        # source that has none.
+        upgraded = self.copy_source(project, "Assets/Materials/Upgraded.material")
+        exit_code, output = self.run_editor(["--headless", "--renderer", "none", "--project",
+                                             str(project / "Game.eproj"), "--upgrade"])
+        self.assertEqual(exit_code, 0, output)
+        self.assert_recorded_by(project, upgraded + ".meta", "project.refreshAssets", "cli")
+        # G2a: reopening the existing project goes through project.open, whose open-time writes it transcribes.
+        reopened = self.copy_source(project, "Assets/Materials/Reopened.material")
         connection = launcher.launch(LaunchRequest(project=project, create=False))
-        self.assertTrue(connection.shutdown(force=True)["shutDown"])
+        try:
+            self.assert_recorded_by(project, reopened + ".meta", "project.open", "engine-mcp")
+            for source in (upgraded, reopened):
+                self.assertIn("result", connection.call("asset.delete", {"asset": source}), source)
+        finally:
+            self.assertTrue(connection.shutdown(force=True)["shutDown"])
         return project
 
-    @unittest.skip(SKIP_BRIDGE)
+    @staticmethod
+    def copy_source(project: Path, relative: str) -> str:
+        """A copy of the project's Assets/Red.material at `relative`, made outside the editor and without a .meta, so
+        the next open's asset scan writes its .meta; returns `relative`."""
+        target = project / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(project / "Assets" / "Red.material", target)
+        return relative
+
+    def assert_recorded_by(self, project: Path, relative: str, method: str, client: str) -> None:
+        """`relative` has a provenance entry of `method` and `client` whose transcript line is that request's."""
+        entries = {entry.path: entry for entry in provenance.load_provenance(project / provenance.PROVENANCE_FILE)}
+        self.assertIn(relative, entries)
+        entry = entries[relative]
+        self.assertEqual((entry.method, entry.client), (method, client), entry)
+        self.assertIsNotNone(entry.transcript_line, entry)
+        transcript = provenance.load_transcript(project / provenance.TRANSCRIPT_FILE)
+        record = transcript.lines[(entry.transcript_line or 0) - 1].record or {}
+        self.assertEqual((record.get("type"), record.get("method"), record.get("client")),
+                         ("request", method, client), record)
+
     def test_a_project_built_through_the_bridge_passes_the_audit(self) -> None:
         project = self.build_project()
         audit = provenance.audit_project(project, "disk")
@@ -616,7 +702,6 @@ class BridgeAuditTests(AutomationTestCase):
         self.assertEqual(exit_code, 0, output)
         self.assertEqual(provenance.audit_project(project, "disk").findings, [])
 
-    @unittest.skip(SKIP_BRIDGE)
     def test_a_hand_edit_after_the_build_fails_with_hash_mismatch(self) -> None:
         project = self.build_project()
         material = project / "Assets" / "Red.material"

@@ -120,7 +120,7 @@ BUILD_FIXTURE_FINDINGS = {
 # it reports each step's duration as a notice annotation. Each of its tool processes has its own 10-minute timeout,
 # which catches a hang.
 STATIC_CHECK_TIMEOUTS = {"checkbuildconfig": 1800.0, "lint": 5400.0, "format": 1800.0, "fixtures": 600.0,
-                         "resources": 600.0, "runtimemap": 600.0, "detmath": 600.0}
+                         "resources": 600.0, "runtimemap": 600.0, "provenance": 600.0, "detmath": 600.0}
 
 # The committed fixture generators (AGENTS.md "Tests": generated fixtures come from committed generators); each one's
 # --check compares a fresh generation with the committed files and writes nothing.
@@ -136,7 +136,10 @@ def run_static_checks(console: Console, finished: Callable[[Step], Step], contra
     drift apart, in this order: CheckBuildConfig.py on the workspace and on every fixture workspace (each must fail
     with its own defect), Lint.py, Lint.py --self-test, CheckRuntimeMap.py --self-test (every seeded map fixture under
     Tests/Data/MapFiles/ gives exactly its expected findings, Docs/Decisions/0024-m15-contract.md decision 11),
-    Format.py --check, every fixture generator under Tests/Data/Generate/ with --check (the committed fixtures are
+    AuditProvenance.py --self-test (every seeded provenance fixture under Tests/Data/Provenance/ gives exactly its
+    expected findings and warnings, and every finding code has a case; Docs/Decisions/0026-m16-contract.md decision 9:
+    the demos themselves are audited once per gate, in index mode, by the games suite), Format.py --check, every
+    fixture generator under Tests/Data/Generate/ with --check (the committed fixtures are
     byte-identical to a fresh generation), GenerateDetMathReference.py --check (the committed DetMath oracle is
     byte-identical to a fresh generation, after the generator's self-test; Architecture §1.3 principle 2),
     FetchAssets.py defaults --check (the committed engine resources match their pins, offline) and FetchAssets.py
@@ -156,6 +159,8 @@ def run_static_checks(console: Console, finished: Callable[[Step], Step], contra
     steps.append(script("lint self-test", "Lint.py", ["--self-test"], STATIC_CHECK_TIMEOUTS["lint"]))
     steps.append(script("runtime map self-test", "CheckRuntimeMap.py", ["--self-test"],
                         STATIC_CHECK_TIMEOUTS["runtimemap"]))
+    steps.append(script("provenance audit self-test", "AuditProvenance.py", ["--self-test"],
+                        STATIC_CHECK_TIMEOUTS["provenance"]))
     steps.append(script("format", "Format.py", ["--check"], STATIC_CHECK_TIMEOUTS["format"]))
     for generator in sorted(FIXTURE_GENERATORS_ROOT.glob("*.py")):
         steps.append(script(f"fixtures {generator.stem}", generator.name, ["--check"],

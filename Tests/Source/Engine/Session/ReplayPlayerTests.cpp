@@ -57,11 +57,16 @@ namespace Engine {
 				auto replay = CreateRef<ReplayData>();
 				replay->Header = Header;
 				replay->FinalTick = finalTick;
-				auto original = Create();
-				for (uint64_t tick = 0; tick < finalTick; ++tick)
-					original->Tick();
-				replay->FinalStateHash = UUID(original->ComputeStateHash()).ToString();
+				replay->FinalStateHash = HashAt(finalTick);
 				return replay;
+			}
+			// The state hash of the boundary `tick` of an input-free run.
+			std::string HashAt(uint64_t tick)
+			{
+				auto original = Create();
+				for (uint64_t step = 0; step < tick; ++step)
+					original->Tick();
+				return UUID(original->ComputeStateHash()).ToString();
 			}
 			Result<Json> Evaluate(PlaySession& session, const ReplayBytecodeExpectation& expectation) override
 			{
@@ -76,7 +81,7 @@ namespace Engine {
 				ReplayPlayer player;
 				REQUIRE(player.Begin(std::move(replay), *session, options));
 				bool complete = false;
-				for (uint32_t i = 0; i < 100 && !complete; ++i)
+				for (uint32_t i = 0; i < 1000 && !complete; ++i)
 				{
 					auto advanced = player.Advance(*session, *this);
 					REQUIRE(advanced);
@@ -365,6 +370,79 @@ namespace Engine {
 			CHECK(session->GetInput().GetLastAppliedEvents().empty());
 		}
 
+		// M16 friction S2-01 (FX-4): a replay is verified along its trajectory, not only at its end. Under StrictHash every
+		// checkpoint is compared when playback reaches its tick, after that boundary's expectations, and the first one that
+		// differs ends the playback there, naming the tick and both hashes; without StrictHash none is compared.
+		TEST_CASE("ReplayPlayer: a checkpoint whose state hash differs ends the playback at its tick and names both hashes")
+		{
+			PlaybackFixture f;
+			auto replay = f.Data(150);
+			const std::string at60 = f.HashAt(60);
+			const std::string at120 = f.HashAt(120);
+			replay->Checkpoints = { { .Tick = 60, .StateHash = at60 }, { .Tick = 120, .StateHash = at120 } };
+			replay->Expect = { f.Predicate(120, "true", "/Expect/0/Luau"), f.Predicate(130, "true", "/Expect/1/Luau") };
+			const auto matched = f.Run(replay);
+			CHECK(matched.Passed);
+			CHECK(matched.CheckpointsChecked == 2);
+			CHECK_FALSE(matched.CheckpointFailed);
+			CHECK(matched.FinalTick == 150);
+
+			replay->Checkpoints[1].StateHash = at120 == "0000000000000000" ? "0000000000000001" : "0000000000000000";
+			const auto diverged = f.Run(replay);
+			CHECK_FALSE(diverged.Passed);
+			CHECK(diverged.CheckpointFailed);
+			CHECK(diverged.CheckpointsChecked == 2);
+			CHECK(diverged.FinalTick == 120);
+			CHECK(diverged.StateHash == at120);
+			CHECK(diverged.ExpectedStateHash == replay->Checkpoints[1].StateHash);
+			CHECK(diverged.HashChecked);
+			CHECK_FALSE(diverged.HashMatched);
+			CHECK(diverged.StopReason.find("checkpoint tick 120") != std::string::npos);
+			CHECK(diverged.StopReason.find(at120) != std::string::npos);
+			CHECK(diverged.StopReason.find(replay->Checkpoints[1].StateHash) != std::string::npos);
+			REQUIRE(diverged.Expect.size() == 2);
+			CHECK(diverged.Expect[0].Satisfied);
+			CHECK_FALSE(diverged.Expect[1].Evaluated);
+			REQUIRE(diverged.Expect[1].Failure);
+			CHECK(diverged.Expect[1].Failure->GetMessageText().find("stopped at tick 120") != std::string::npos);
+
+			// The first checkpoint that differs ends it, even when a later one would match.
+			replay->Checkpoints[0].StateHash = replay->Checkpoints[1].StateHash;
+			replay->Checkpoints[1].StateHash = at120;
+			const auto early = f.Run(replay);
+			CHECK(early.CheckpointFailed);
+			CHECK(early.FinalTick == 60);
+			CHECK(early.CheckpointsChecked == 1);
+			CHECK(early.StateHash == at60);
+
+			const auto loose = f.Run(replay, { .Verify = true, .StrictHash = false });
+			CHECK(loose.Passed);
+			CHECK(loose.CheckpointsChecked == 0);
+			CHECK_FALSE(loose.CheckpointFailed);
+			CHECK(loose.FinalTick == 150);
+		}
+
+		TEST_CASE("ReplayPlayer: WithoutInput plays the header and ticks with none of the replay's events")
+		{
+			PlaybackFixture f;
+			auto replay = f.Data();
+			replay->Events = { { .Tick = 0, .Type = "Key", .State = "Tap", .KeyName = "Space" } };
+			replay->Expect = { f.Predicate(1, "Input.IsKeyDown(\"Space\")") };
+			CHECK(f.Run(replay).Passed);
+			const auto withoutInput = f.Run(replay, { .Verify = true, .StrictHash = true, .WithoutInput = true });
+			CHECK_FALSE(withoutInput.Passed);
+			CHECK(withoutInput.FinalTick == 3);
+			CHECK(withoutInput.HashMatched); // this scene's state does not depend on the key, only the expectation does
+			REQUIRE(withoutInput.Expect.size() == 1);
+			CHECK(withoutInput.Expect[0].Evaluated);
+			CHECK_FALSE(withoutInput.Expect[0].Satisfied);
+			// The event stream is still checked against the action map before anything plays.
+			replay->Events.push_back({ .Tick = 1, .Type = "Action", .Name = "Unknown", .State = "Down" });
+			auto session = f.Create();
+			ReplayPlayer player;
+			CHECK_FALSE(player.Begin(replay, *session, { .Verify = true, .StrictHash = true, .WithoutInput = true }));
+		}
+
 		TEST_CASE("ReplayPlayer: cooked playback does not require automation or a compiler")
 		{
 			PlaybackFixture f;
@@ -381,6 +459,35 @@ namespace Engine {
 			REQUIRE(loaded);
 			replay.reset();
 			CHECK(f.Run(*loaded).Passed);
+		}
+
+		// The player of exported games (the Dist Runtime's --replay --verify and --feature-test) reads the cooked replay,
+		// which carries the checkpoints (ReplayData FormatVersion 2), and compares them as the editor does.
+		TEST_CASE("ReplayPlayer: a cooked replay's checkpoints are compared like the source's")
+		{
+			PlaybackFixture f;
+			ReplayDocument source;
+			source.Header = f.Header;
+			source.FinalTick = 130;
+			source.FinalStateHash = f.HashAt(130);
+			source.Checkpoints = { { .Tick = 60, .StateHash = f.HashAt(60) }, { .Tick = 120, .StateHash = f.HashAt(120) } };
+			const auto cook = [](const ReplayDocument& document)
+			{
+				const auto bytes = CookReplay(document, {}, 1);
+				REQUIRE_MESSAGE(bytes.has_value(), bytes.error().ToString());
+				auto loaded = LoadCookedReplay(*bytes);
+				REQUIRE_MESSAGE(loaded.has_value(), loaded.error().ToString());
+				return std::move(*loaded);
+			};
+			const auto passed = f.Run(cook(source));
+			CHECK(passed.Passed);
+			CHECK(passed.CheckpointsChecked == 2);
+			source.Checkpoints[0].StateHash = source.Checkpoints[1].StateHash;
+			const auto failed = f.Run(cook(source));
+			CHECK_FALSE(failed.Passed);
+			CHECK(failed.CheckpointFailed);
+			CHECK(failed.FinalTick == 60);
+			CHECK(failed.ExpectedStateHash == source.Checkpoints[0].StateHash);
 		}
 	}
 

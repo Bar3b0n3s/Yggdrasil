@@ -25,6 +25,8 @@ namespace Engine {
 		static constexpr std::array<std::string_view, 9> AssetFolders = { "Scenes", "Scripts", "Prefabs", "Materials", "Models", "Textures", "Audio",
 			"Fonts", "Tests" };
 		static constexpr std::string_view AgentsFileName = "AGENTS.md";
+		// The root type checker configuration, which provenance records (Docs/Decisions/0026-m16-contract.md decision 13, G5).
+		static constexpr std::string_view TypeCheckerConfigurationFileName = ".luaurc";
 		static constexpr std::string_view NamePlaceholder = "{{Name}}";
 		static constexpr std::string_view PreferencesFormat = "EditorPreferences";
 		static constexpr uint32_t PreferencesVersion = 1;
@@ -132,7 +134,7 @@ namespace Engine {
 			for (const TemplateFile& file : files)
 			{
 				const std::string relative = FileSystem::PathToUtf8(file.RelativePath);
-				if (relative.starts_with("Assets/"))
+				if (relative.starts_with("Assets/") || relative == TypeCheckerConfigurationFileName)
 					created.RecordedFiles.push_back(CreatedProjectFile{ .Path = relative, .Hash = XXH64(file.Contents) });
 			}
 			return created;

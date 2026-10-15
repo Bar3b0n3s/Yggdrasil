@@ -108,11 +108,50 @@ namespace Engine {
 		result.Mode = mode;
 		result.Passed = false;
 		result.Cases.push_back(TestCaseResult{ .Suite = "FeatureTest", .Case = "run", .Status = "error", .Message = SanitizeTestReportText(message) });
+		SummarizeTestRunCases(result);
 		return result;
+	}
+
+	void SummarizeTestRunCases(TestRunResult& result)
+	{
+		const auto saturate = [](uint32_t& count)
+		{
+			if (count != UINT32_MAX)
+				++count;
+		};
+		result.Counts = TestRunCounts{};
+		result.FailedCases.clear();
+		for (const TestCaseResult& row : result.Cases)
+		{
+			saturate(result.Counts.Total);
+			if (row.Status == "passed")
+				saturate(result.Counts.Passed);
+			else if (row.Status == "failed")
+				saturate(result.Counts.Failed);
+			else if (row.Status == "error")
+				saturate(result.Counts.Error);
+			else if (row.Status == "timeout")
+				saturate(result.Counts.Timeout);
+			else if (row.Status == "skipped")
+				saturate(result.Counts.Skipped);
+			else if (row.Status == "quit")
+				saturate(result.Counts.Quit);
+			const bool fails = IsFailure(row) || row.Status == "error" || row.Status == "timeout";
+			if (fails && result.FailedCases.size() < MaxReportedFailedCases)
+				result.FailedCases.push_back(std::format("{}/{}", row.Suite, row.Case));
+		}
 	}
 
 	void RegisterTestResultTypes(TypeRegistry& registry)
 	{
+		registry.Struct<TestRunCounts>("TestRunCounts", "The rows of a test run by status.")
+			.Field("total", &TestRunCounts::Total, "Every row of cases.")
+			.Field("passed", &TestRunCounts::Passed, "Rows with status passed.")
+			.Field("failed", &TestRunCounts::Failed, "Rows with status failed.")
+			.Field("error", &TestRunCounts::Error, "Rows with status error.")
+			.Field("timeout", &TestRunCounts::Timeout, "Rows with status timeout.")
+			.Field("skipped", &TestRunCounts::Skipped, "Rows with status skipped.")
+			.Field("quit", &TestRunCounts::Quit, "Rows with status quit.");
 		registry.Struct<TestFailureResult>("TestFailureResult", "TestFailureResult shared test report.")
 			.Field("message", &TestFailureResult::Message, "Message of the test report.")
 			.Field("file", &TestFailureResult::File, "File of the test report.")
@@ -140,7 +179,9 @@ namespace Engine {
 			.Field("breaks", &TestSuiteResult::Breaks, "Breaks of the test report.")
 			.Field("scriptErrors", &TestSuiteResult::ScriptErrors, "ScriptErrors of the test report.")
 			.Field("finalStateHash", &TestSuiteResult::FinalStateHash, "FinalStateHash of the test report.")
-			.Field("passed", &TestSuiteResult::Passed, "Passed of the test report.");
+			.Field("passed", &TestSuiteResult::Passed, "Passed of the test report.")
+			.Field("checkpointsChecked", &TestSuiteResult::CheckpointsChecked, "A replay suite: the state-hash checkpoints its playback compared, a checkpoint that differed included (all of them when it passed); 0 for a script suite.")
+			.Field("failedCheckpointTick", &TestSuiteResult::FailedCheckpointTick, "A replay suite: the tick of the checkpoint whose state hash differed, where playback stopped (its Checkpoint@<tick> row); 0 when none differed.");
 		registry.Struct<TestCoverageCounter>("TestCoverageCounter", "TestCoverageCounter shared test report.")
 			.Field("id", &TestCoverageCounter::Id, "Id of the test report.")
 			.Field("kind", &TestCoverageCounter::Kind, "Kind of the test report.")
@@ -155,16 +196,30 @@ namespace Engine {
 			.Field("registryFingerprint", &TestCoverageReport::RegistryFingerprint, "RegistryFingerprint of the test report.")
 			.Field("counters", &TestCoverageReport::Counters, "Counters of the test report.")
 			.Field("gates", &TestCoverageReport::Gates, "Gates of the test report.");
+		registry.Struct<TestRecordingInputCheck>("TestRecordingInputCheck", "The input check of a written recording: the recording replayed without its input events.")
+			.Field("ran", &TestRecordingInputCheck::Ran, "The check ran; false for a recording without input events, which has nothing to check.")
+			.Field("divergedAtTick", &TestRecordingInputCheck::DivergedAtTick, "Where the run without input first differed from the recording: the first checkpoint whose state hash differed, else where that run ended (the final tick); 0 when the check did not run.");
+		registry.Struct<TestRecordingResult>("TestRecordingResult", "The replay test.run {record} wrote.")
+			.Field("path", &TestRecordingResult::Path, "The written replay, project-relative (recordingPath).")
+			.Field("formatVersion", &TestRecordingResult::FormatVersion, "The Replay format version written.")
+			.Field("ticks", &TestRecordingResult::Ticks, "The replay's final tick (FinalTick).")
+			.Field("events", &TestRecordingResult::Events, "The input events written.")
+			.Field("checkpoints", &TestRecordingResult::Checkpoints, "The state-hash checkpoints written, one every 60 ticks before the final tick (none at a tick inside a frame where the suite's scripted clock ran several steps).")
+			.Field("finalStateHash", &TestRecordingResult::FinalStateHash, "The state hash at the final tick (FinalStateHash).")
+			.Field("inputCheck", &TestRecordingResult::InputCheck, "The input check that let the recording through.");
 		registry.Struct<TestRunResult>("TestRunResult", "TestRunResult shared test report.")
 			.Field("mode", &TestRunResult::Mode, "Mode of the test report.")
 			.Field("passed", &TestRunResult::Passed, "Passed of the test report.")
 			.Field("cancelled", &TestRunResult::Cancelled, "Cancelled of the test report.")
+			.Field("counts", &TestRunResult::Counts, "The rows of cases by status.")
+			.Field("failedCases", &TestRunResult::FailedCases, std::format("\"<suite>/<case>\" of each row that fails the run (failed, error, timeout, or a quit that was not expected or has failures), in the order of cases, at most {}.", MaxReportedFailedCases))
 			.Field("cases", &TestRunResult::Cases, "Cases of the test report.")
 			.Field("suites", &TestRunResult::Suites, "Suites of the test report.")
-			.Field("coverage", &TestRunResult::Coverage, "Coverage of the test report.")
+			.Field("coverage", &TestRunResult::Coverage, "The script API coverage: registryFingerprint and gates always; the counters in the JSON report always, and in test.run's result only with coverage: true or Testing.CoverageGates (left out, an empty list, otherwise).")
 			.Field("jsonPath", &TestRunResult::JsonPath, "JsonPath of the test report.")
 			.Field("junitPath", &TestRunResult::JunitPath, "JunitPath of the test report.")
-			.Field("recordingPath", &TestRunResult::RecordingPath, "RecordingPath of the test report.");
+			.Field("recordingPath", &TestRunResult::RecordingPath, "RecordingPath of the test report.")
+			.Field("recording", &TestRunResult::Recording, "The replay test.run {record} wrote: {path, formatVersion, ticks, events, checkpoints, finalStateHash, inputCheck: {ran, divergedAtTick}} (TestRecordingResult); null for every other run.");
 	}
 
 	Result<Json> TestRunResultToJson(const TestRunResult& result, const TypeRegistry& registry)

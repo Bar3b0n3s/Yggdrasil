@@ -704,7 +704,8 @@ namespace Engine {
 					&& !Utils::FindPrefabInstances(editor.GetScene(), prefabs).empty())
 				{
 					LoadReport report;
-					ENGINE_TRY_ASSIGN(const Prefab current, LoadPrefabAsset(editor.GetAssets(), target.Asset, editor.GetTypeRegistry(), report));
+					ENGINE_TRY_ASSIGN(const auto schemas, editor.GetScriptSchemaSnapshot());
+					ENGINE_TRY_ASSIGN(const Prefab current, LoadPrefabAsset(editor.GetAssets(), target.Asset, editor.GetTypeRegistry(), schemas.get(), report));
 					EditorTransaction transaction(editor, label);
 					ENGINE_TRY(Utils::RecordPrefabOverrides(editor, target.Asset, current));
 					ENGINE_TRY(editor.Execute(std::move(command)));

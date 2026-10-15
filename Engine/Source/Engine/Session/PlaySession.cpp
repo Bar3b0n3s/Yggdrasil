@@ -31,6 +31,7 @@
 #include <cmath>
 #include <format>
 #include <limits>
+#include <optional>
 #include <utility>
 
 namespace Engine {
@@ -148,6 +149,9 @@ namespace Engine {
 		PlayInput Input;
 		uint64_t Tick = 0;       // the next tick
 		uint64_t FrameIndex = 0; // frame phases run so far
+		// FrameIndex during the previous fixed step (none before the first): still FrameIndex at the next step when no frame
+		// phase ran in between, as when a grouping clock runs several steps in one frame (FeatureTestRunner).
+		std::optional<uint64_t> PreviousStepFrame{};
 		// The scene's revision at the session's last TransformSystem::Update: a different revision means a transform may
 		// have been written since (automation at the safe point), so the world matrices are refreshed before they are read.
 		uint64_t TransformRevision = 0;
@@ -327,7 +331,7 @@ namespace Engine {
 		if (position.has_value())
 			ENGINE_TRY(ScriptProxy::ValidateWorldPosition(parentEntity, *position));
 		LoadReport report;
-		ENGINE_TRY_ASSIGN(const Prefab asset, LoadPrefabAsset(*Assets, prefab, *Registry, report));
+		ENGINE_TRY_ASSIGN(const Prefab asset, LoadPrefabAsset(*Assets, prefab, *Registry, Schemas.get(), report));
 		ENGINE_TRY(Session.CheckEntityCapacity(asset.GetEntityIDs().size()));
 		PrefabInstantiateOptions options{};
 		options.PrefabHandle = prefab;
@@ -918,6 +922,13 @@ namespace Engine {
 		const SimStep step = SimStep::FromTick(tick, state.FixedDelta);
 		PhysicsSystem& physics = *state.Physics;
 		const bool play = state.Mode == PlayMode::Play;
+		// The checkpoint of the completed-tick boundary this step starts from, before anything of the step runs
+		// (ReplayRecorder.h). A step that follows the previous one in the same frame (a grouping scripted clock) starts from
+		// no such boundary, since the previous tick's frame phase has not run, so it captures none.
+		const bool completedBoundary = state.PreviousStepFrame != state.FrameIndex;
+		state.PreviousStepFrame = state.FrameIndex;
+		if (completedBoundary && state.Recorder != nullptr && state.Recorder->IsRecording())
+			state.Recorder->CaptureCheckpoint(*this);
 		state.ScriptFrame = { .Phase = InputPhase::Step, .Tick = tick, .Frame = state.FrameIndex, .DeltaTime = state.FixedDelta, .FixedDeltaTime = state.FixedDelta, .TimeScale = state.TimeScale, .InterpolationAlpha = 1.0f };
 		state.DebugDraw.Advance(static_cast<float>(state.FixedDelta));
 

@@ -107,6 +107,10 @@ namespace Engine {
 			const auto permission = call.PrepareHostMutation();
 			if (!permission)
 				return Lua::RaiseError(call, permission.error());
+			// The prefab is loaded first as host time (an import when it is not cached; Detail::LoadAssetAsHost), so only
+			// the instantiation itself counts toward the callback budget. A load failure is reported by Instantiate.
+			if (auto* assets = call.Engine->GetHost().GetAssets(); assets != nullptr)
+				static_cast<void>(Detail::LoadAssetAsHost(call, *assets, prefab));
 			const auto root = call.Engine->GetHost().Instantiate(prefab, position, rotation, parent);
 			if (!root)
 				return Lua::RaiseError(call, root.error());

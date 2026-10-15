@@ -38,6 +38,7 @@ namespace Engine {
 
 	class EditorContext;
 	class TypeRegistry;
+	class VfsPath;
 
 	// The documentation of one validation code (M14: Docs/Reference/Validation.md, the game-debugging skill's error-code
 	// table and gate 6 read it; Docs/Decisions/0022-m14-contract.md decision 10). Static text, valid for the process.
@@ -176,6 +177,28 @@ namespace Engine {
 		// The validator code of a scene-load diagnostic code (ADR 0006 decision 35); empty for load codes the validator does
 		// not report (unknown keys and components, which stay load warnings).
 		[[nodiscard]] static std::string_view MapLoadCode(std::string_view loadCode);
+
+		// The validator code ADR 0006 decision 35 gives a load diagnostic of a Script component's Fields value (located below
+		// "/Components/Script/Fields/" of an entity): SCRIPT_UNKNOWN_FIELD_OVERRIDE for REFLECTION_VARIANT_UNRESOLVED (no
+		// declared field checks the value), SCRIPT_FIELD_TYPE_MISMATCH for REFLECTION_VARIANT_MISMATCH; empty for any other.
+		// Validate reports these problems from the Script components of each scene, a prefab instance's members included, and
+		// of each prefab file (with the project scope; found through FindScriptFieldProblems) under the same codes (file,
+		// entity, component "Script", field "Fields.<name>"); the exporter and the strict open name the same code for the same
+		// entity and field, by JSON pointer, so the three agree (ADR 0026). The mapping reads only the code and the pointer:
+		// which values validate checks at all is FindScriptFieldProblems' filter.
+		[[nodiscard]] static std::string_view MapScriptFieldLoadCode(std::string_view loadCode, std::string_view jsonPointer);
+
+		// The Script component Fields problems of the scene or prefab document `path` (project://), each as its load diagnostic
+		// with the code MapScriptFieldLoadCode gives it, in document order: the document read as the strict reader reads it
+		// (LoadMode::Strict with the editor's script field schemas) but without --strict's promotion, so a document that
+		// --strict rejects for these values still names each of them. Only the values of an entity whose script is a
+		// registered Script asset that loads as a Behaviour are named, the values validate checks: a missing or mistyped
+		// script, one that fails to import and a Module leave every value unresolved, and validate reports the script
+		// (ASSET_MISSING, the script's source diagnostics, SCRIPT_NOT_A_BEHAVIOUR) instead of the values (M16 review R24).
+		// Empty for a document that does not load at all (its load error says why). The strict open and the exporter's strict
+		// load use it to name what project.validate names.
+		// Errors: InvalidState without an open project; those of EditorContext::GetScriptSchemaSnapshot.
+		[[nodiscard]] static Result<std::vector<LoadDiagnostic>> FindScriptFieldProblems(const EditorContext& context, const VfsPath& path);
 
 		// M15 (Docs/Decisions/0024-m15-contract.md decision 6): the TEST_SUITE_INVALID diagnostics of the open project's
 		// Testing.Suites, the one rule Validate and the exporter's testing validation (TestingExport.h) share. Entry i is

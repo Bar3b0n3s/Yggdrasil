@@ -283,6 +283,63 @@ namespace Engine {
 		return {};
 	}
 
+	Status FileSystem::WriteNewFile(const std::filesystem::path& path, std::span<const std::byte> data)
+	{
+		const std::filesystem::path fileName = path.filename();
+		if (fileName.empty() || fileName == "." || fileName == "..")
+			return MakeError(ErrorCode::InvalidArgument, "cannot create '{}': the path names no file", Utils::PathToUtf8(path));
+
+		std::error_code error;
+		const std::filesystem::path parent = path.parent_path();
+		const std::filesystem::path directory = parent.empty() ? std::filesystem::path(".") : parent;
+		const std::filesystem::file_status directoryStatus = std::filesystem::status(directory, error);
+		if (error && !Utils::IsMissingPathError(error))
+			return Utils::SystemError(error, "create a file in", directory);
+		if (!std::filesystem::is_directory(directoryStatus))
+		{
+			return MakeError(ErrorCode::NotFound, "cannot create '{}': the directory '{}' does not exist", Utils::PathToUtf8(path),
+				Utils::PathToUtf8(directory));
+		}
+
+		// The exclusive open is the only check: a name that exists when the host creates the file fails here, whoever made it.
+		errno = 0;
+		std::ofstream stream(path, std::ios::binary | std::ios::noreplace);
+		if (!stream.is_open())
+		{
+			const int openError = errno;
+			const std::filesystem::file_status existing = std::filesystem::symlink_status(path, error);
+			if (!error && std::filesystem::exists(existing))
+				return MakeError(ErrorCode::AlreadyExists, "cannot create '{}': it exists already and is never replaced", Utils::PathToUtf8(path));
+			return Utils::StreamError(openError, "create", path);
+		}
+
+		// A failed write removes the file this call created, so nothing incomplete stays.
+		const auto abandon = [&stream, &path](std::unexpected<Error> cause) -> Status
+		{
+			if (stream.is_open())
+				stream.close();
+			std::error_code removeError;
+			std::filesystem::remove(path, removeError);
+			if (!removeError)
+				return cause;
+			return std::unexpected(std::move(cause).error().WithContext(
+				std::format("and the incomplete file '{}' could not be removed: {}", Utils::PathToUtf8(path), Utils::ReasonOf(removeError))));
+		};
+		errno = 0;
+		if (!data.empty())
+			stream.write(reinterpret_cast<const char*>(data.data()), static_cast<std::streamsize>(data.size()));
+		if (!stream)
+			return abandon(Utils::StreamError(errno, "write", path));
+		errno = 0;
+		stream.flush();
+		if (!stream)
+			return abandon(Utils::StreamError(errno, "flush", path));
+		stream.close();
+		if (stream.fail())
+			return abandon(Utils::StreamError(errno, "close", path));
+		return {};
+	}
+
 	bool FileSystem::Exists(const std::filesystem::path& path)
 	{
 		std::error_code error;
@@ -360,6 +417,27 @@ namespace Engine {
 		if (error)
 			return Utils::SystemError(error, "remove", path);
 		return {};
+	}
+
+	Status FileSystem::RemoveEmptyDirectory(const std::filesystem::path& path)
+	{
+		std::error_code error;
+		const std::filesystem::file_status status = std::filesystem::symlink_status(path, error);
+		if (error && !Utils::IsMissingPathError(error))
+			return Utils::SystemError(error, "remove the directory", path);
+		if (!std::filesystem::exists(status))
+			return MakeError(ErrorCode::NotFound, "cannot remove the directory '{}': no such directory", Utils::PathToUtf8(path));
+		if (!std::filesystem::is_directory(status))
+			return MakeError(ErrorCode::Io, "cannot remove the directory '{}': it is not a directory", Utils::PathToUtf8(path));
+
+		// std::filesystem::remove, never remove_all: rmdir(2) and Windows' delete disposition fail on a directory that still
+		// holds an entry (ENOTEMPTY, which POSIX also allows as EEXIST; ERROR_DIR_NOT_EMPTY).
+		static_cast<void>(std::filesystem::remove(path, error));
+		if (!error)
+			return {};
+		if (error == std::errc::directory_not_empty || error == std::errc::file_exists)
+			return MakeError(ErrorCode::InvalidState, "cannot remove the directory '{}': it is not empty", Utils::PathToUtf8(path));
+		return Utils::SystemError(error, "remove the directory", path);
 	}
 
 	Status FileSystem::Move(const std::filesystem::path& from, const std::filesystem::path& to)

@@ -24,6 +24,8 @@
 #include <cstdint>
 #include <filesystem>
 #include <functional>
+#include <map>
+#include <memory>
 #include <optional>
 #include <span>
 #include <string>
@@ -55,6 +57,7 @@ namespace Engine {
 	class TypeRegistry;
 	class VirtualFileSystem;
 	struct AssetRefreshReport;
+	struct AssetWriteContext;
 
 	// Main-thread host hooks. Captured services must outlive the binding; clear it only after asynchronous writers
 	// and the fatal hook are quiescent, before destroying those services. Empty callbacks preserve CPU-only behavior.
@@ -163,11 +166,13 @@ namespace Engine {
 		// The editor's asset manager (see the class comment); valid for the editor's lifetime.
 		[[nodiscard]] EditorAssetManager& GetAssets() { return *m_Assets; }
 		[[nodiscard]] const EditorAssetManager& GetAssets() const { return *m_Assets; }
-		// M13: borrowed main-thread service, null without an open project. The context owns its diagnostics provider
+		// M13: borrowed main-thread service, null without an open project and while its asset scan is deferred
+		// (IsAssetScanDeferred). The context owns its diagnostics provider
 		// and shares that provider with imports. Before replacing configuration, drain jobs, then recreate both borrowed
 		// references; the provider outlives every job and service. The pointer expires at project/configuration changes.
 		[[nodiscard]] EditorScriptService* GetScriptService();
 		// Refreshes the checker configuration and preserves infrastructure errors for operations that require checking.
+		// Errors: InvalidState without a project or while its asset scan is deferred; the configuration errors.
 		[[nodiscard]] Result<EditorScriptService*> AcquireScriptService();
 		// Observes the service initialized by OpenProject; never creates or replaces state through a const editor.
 		// Configuration snapshots are refreshed by Update and the mutable accessor before mutable host operations.
@@ -372,8 +377,11 @@ namespace Engine {
 		[[nodiscard]] Status MoveProjectFile(const VfsPath& from, const VfsPath& to);
 
 		// Removes a file or an empty directory under the project through the asset writer, and its provenance entry (undo of a
-		// creation; the user-facing delete moves to the trash instead, AssetDeleteCommand). During a dry run the removal
-		// happens in the overlay and nothing is recorded. Errors: as MoveProjectFile; InvalidState for a non-empty directory.
+		// creation; the user-facing delete moves to the trash instead, AssetDeleteCommand). A directory is removed without
+		// recursion (AssetWriter::RemoveEmptyDirectory), so one that still holds an entry the VFS does not list, a host name no
+		// VfsPath can spell, is refused and nothing is deleted. During a dry run the removal happens in the overlay and nothing
+		// is recorded. Errors: as MoveProjectFile; InvalidState for a non-empty directory, also one whose only entries the VFS
+		// cannot list.
 		[[nodiscard]] Status RemoveProjectFile(const VfsPath& path);
 
 		// Creates a directory (and missing parents) under the project through the asset writer (asset.create {type: Folder},
@@ -381,7 +389,10 @@ namespace Engine {
 		[[nodiscard]] Status CreateProjectDirectory(const VfsPath& directory);
 
 		// The attribution of the request being served (set by AutomationServer::EnterInvocation, cleared by LeaveInvocation),
-		// or nullopt for UI writes (Method "ui").
+		// or nullopt for UI writes (Method "ui"). Each call, the UI's reset included, also makes a new write context current
+		// in the asset manager (EditorAssetManager::SetWriteContext; Docs/Decisions/0026-m16-contract.md decision 10), so the
+		// writes an import's publication makes are recorded with the attribution that was current when the import started,
+		// even when the publication runs after the request returned (§13.12 rule 2).
 		void SetWriteAttribution(std::optional<WriteAttribution> attribution);
 		[[nodiscard]] const WriteAttribution& GetWriteAttribution() const { return m_Attribution; }
 		// Agent while an automation request is served (an attribution is set), User otherwise.
@@ -486,6 +497,18 @@ namespace Engine {
 		WriteAttribution m_Attribution;
 		bool m_HasRequestAttribution = false;
 		bool m_AgentMutationsDenied = false;
+		// The write contexts SetWriteAttribution made current (Docs/Decisions/0026-m16-contract.md decision 10), by Id, with the
+		// attribution each stands for: kept while the token is current or an import holds it, pruned once it expired.
+		struct WriteContextEntry
+		{
+			std::weak_ptr<const AssetWriteContext> Token{};
+			WriteAttribution Attribution{};
+		};
+		std::map<uint64_t, WriteContextEntry> m_WriteContexts;
+		uint64_t m_LastWriteContextId = 0;
+		// OpenProject deferred the asset scan (EditorContextSpecification::DeferAssetScan) and OpenDeferredAssets has not run it
+		// yet (IsAssetScanDeferred).
+		bool m_AssetScanDeferred = false;
 		std::optional<ProvenanceRecorder> m_Provenance;  // the open writable project's provenance
 		std::optional<uint64_t> m_PendingRevisionBefore; // GetRevisionBeforeCommand's value while SceneEdit::Commit executes
 		EditorTransaction* m_Transaction = nullptr;      // the outermost open transaction, which registers itself

@@ -42,7 +42,8 @@ namespace Engine {
 			auto& editor = **context;
 			const auto created = ProjectManager::CreateProject(ContentBasicSpecification(fixture), editor.GetTypeRegistry());
 			REQUIRE(created);
-			CHECK(created->RecordedFiles.size() == 2);
+			// The .eproj, the root .luaurc (ADR 0026 decision 13, G5) and the starter scene.
+			CHECK(created->RecordedFiles.size() == 3);
 			for (const auto& file : created->RecordedFiles)
 			{
 				const auto contents = FileSystem::ReadFile(fixture.GetProjectRoot() / FileSystem::PathFromUtf8(file.Path));

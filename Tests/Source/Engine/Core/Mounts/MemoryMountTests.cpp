@@ -55,6 +55,22 @@ namespace Engine {
 			CHECK(ErrorCodeOf(mount.CreateDirectories(Path("project://Assets/Deep/Er/A.txt"))) == ErrorCode::AlreadyExists);
 		}
 
+		// M16 review R28: the exclusive create the automation output files use.
+		TEST_CASE("MemoryMount: WriteNewFile creates a file and never replaces an entry")
+		{
+			MemoryMount mount;
+			REQUIRE(mount.CreateDirectories(Path("project://Out/Folder")).has_value());
+			REQUIRE(mount.WriteNewFile(Path("project://Out/A.json"), AsBytes("first")).has_value());
+			CHECK(ErrorCodeOf(mount.WriteNewFile(Path("project://Out/A.json"), AsBytes("second"))) == ErrorCode::AlreadyExists);
+			const Result<Buffer> kept = mount.ReadFile(Path("project://Out/A.json"));
+			REQUIRE(kept.has_value());
+			CHECK(AsStringView(*kept) == "first");
+			CHECK(ErrorCodeOf(mount.WriteNewFile(Path("project://Out/Folder"), AsBytes("x"))) == ErrorCode::AlreadyExists);
+			CHECK(ErrorCodeOf(mount.WriteNewFile(Path("project://Out/a.json"), AsBytes("x"))) == ErrorCode::Validation);
+			CHECK(ErrorCodeOf(mount.WriteNewFile(Path("project://Missing/A.json"), AsBytes("x"))) == ErrorCode::NotFound);
+			CHECK(mount.GetMutationCount() == 2); // the directories and the one file
+		}
+
 		TEST_CASE("MemoryMount: read-only access rejects every mutation")
 		{
 			MemoryMount mount;
@@ -63,6 +79,7 @@ namespace Engine {
 			CHECK(mount.GetAccess() == MountAccess::ReadOnly);
 
 			CHECK(ErrorCodeOf(mount.WriteFileAtomic(Path("project://A.txt"), AsBytes("b"))) == ErrorCode::PermissionDenied);
+			CHECK(ErrorCodeOf(mount.WriteNewFile(Path("project://B.txt"), AsBytes("b"))) == ErrorCode::PermissionDenied);
 			CHECK(ErrorCodeOf(mount.CreateDirectories(Path("project://Dir"))) == ErrorCode::PermissionDenied);
 			CHECK(ErrorCodeOf(mount.Remove(Path("project://A.txt"))) == ErrorCode::PermissionDenied);
 			CHECK(ErrorCodeOf(mount.Move(Path("project://A.txt"), Path("project://B.txt"))) == ErrorCode::PermissionDenied);
@@ -209,6 +226,32 @@ namespace Engine {
 			CHECK(ErrorCodeOf(mount.GetInfo(Path("project://Dir/Sub/A.txt"))) == ErrorCode::NotFound);
 			CHECK(ErrorCodeOf(mount.Remove(Path("project://Dir"))) == ErrorCode::NotFound);
 			CHECK(ErrorCodeOf(mount.Remove(Path("project://"))) == ErrorCode::InvalidArgument);
+		}
+
+		TEST_CASE("MemoryMount: RemoveEmptyDirectory removes only an empty directory")
+		{
+			MemoryMount mount;
+			REQUIRE(mount.CreateDirectories(Path("project://Dir/Sub")).has_value());
+			REQUIRE(mount.CreateDirectories(Path("project://Files")).has_value());
+			REQUIRE(mount.WriteFileAtomic(Path("project://Files/A.txt"), AsBytes("a")).has_value());
+			const uint64_t mutations = mount.GetMutationCount();
+
+			CHECK(ErrorCodeOf(mount.RemoveEmptyDirectory(Path("project://Dir"))) == ErrorCode::InvalidState);
+			CHECK(ErrorCodeOf(mount.RemoveEmptyDirectory(Path("project://Files"))) == ErrorCode::InvalidState);
+			CHECK(ErrorCodeOf(mount.RemoveEmptyDirectory(Path("project://Files/A.txt"))) == ErrorCode::Io);
+			CHECK(ErrorCodeOf(mount.RemoveEmptyDirectory(Path("project://dir/Sub"))) == ErrorCode::Validation);
+			CHECK(ErrorCodeOf(mount.RemoveEmptyDirectory(Path("project://"))) == ErrorCode::InvalidArgument);
+			CHECK(mount.GetMutationCount() == mutations);
+			CHECK(mount.ReadFile(Path("project://Files/A.txt")).has_value());
+
+			REQUIRE(mount.RemoveEmptyDirectory(Path("project://Dir/Sub")).has_value());
+			REQUIRE(mount.RemoveEmptyDirectory(Path("project://Dir")).has_value());
+			CHECK(ErrorCodeOf(mount.GetInfo(Path("project://Dir"))) == ErrorCode::NotFound);
+			CHECK(ErrorCodeOf(mount.RemoveEmptyDirectory(Path("project://Dir"))) == ErrorCode::NotFound);
+			CHECK(mount.GetMutationCount() == mutations + 2);
+
+			mount.SetAccess(MountAccess::ReadOnly);
+			CHECK(ErrorCodeOf(mount.RemoveEmptyDirectory(Path("project://Files"))) == ErrorCode::PermissionDenied);
 		}
 	}
 

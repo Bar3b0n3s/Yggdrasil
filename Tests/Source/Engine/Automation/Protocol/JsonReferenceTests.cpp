@@ -4,6 +4,12 @@
 
 #include "Engine/Core/Json/JsonReader.h"
 
+#include <nlohmann/json.hpp>
+
+#include <format>
+#include <string>
+#include <vector>
+
 namespace Engine {
 
 	static Json ParseReferenceJson(std::string_view text)
@@ -57,6 +63,60 @@ namespace Engine {
 				CHECK(status.error().GetLocation().JsonPointer.has_value());
 				CHECK(params == before);
 			}
+		}
+
+		TEST_CASE("JsonReference: a missing member names the members the result has")
+		{
+			// prefab.create's result names its instance "instance", prefab.instantiate's "entity": a batch that confuses them
+			// learns which members the result has instead.
+			const std::vector<Json> results = { ParseReferenceJson(R"({"prefab":{"id":"a41f0c2290b1d3e4"},"undoIndex":0,"instance":{"id":""}})"),
+				ParseReferenceJson(R"({"undoIndex":0,"prefab":{"id":"a41f0c2290b1d3e4"},"entity":{"id":"5d1c9a7e33b04f12"}})"), Json::object() };
+			Json params = ParseReferenceJson(R"({"entity":{"$ref":"1.instance.id"}})");
+			const Status status = SubstituteReferences(params, results, 0);
+			REQUIRE_FALSE(status.has_value());
+			const Error& error = status.error();
+			CHECK(error.GetCode() == ErrorCode::InvalidArgument);
+			CHECK(error.GetMessageText() == "$ref '1.instance.id': no member 'instance' in the result of op 1");
+			CHECK(error.GetHint() == "the result of op 1 has 'entity', 'prefab', 'undoIndex'");
+			REQUIRE(error.GetIssues().size() == 1);
+			CHECK(error.GetIssues()[0].JsonPointer == "/entity");
+			CHECK(error.GetIssues()[0].Hint == error.GetHint());
+			CHECK(error.GetIssues()[0].Suggestions.empty());
+
+			// A close name is suggested first, in the hint and as the issue's suggestion.
+			Json misspelt = ParseReferenceJson(R"({"entity":{"$ref":"1.entityy.id"}})");
+			const Status close = SubstituteReferences(misspelt, results, 0);
+			REQUIRE_FALSE(close.has_value());
+			CHECK(close.error().GetHint() == "did you mean 'entity'? the result of op 1 has 'entity', 'prefab', 'undoIndex'");
+			REQUIRE(close.error().GetIssues().size() == 1);
+			CHECK(close.error().GetIssues()[0].Suggestions == std::vector<std::string>{ "entity" });
+			// M16 review R27: an object inside the result lists its own members under its own name, not as the result's.
+			Json nested = ParseReferenceJson(R"({"asset":{"$ref":"0.prefab.ids"}})");
+			const Status inner = SubstituteReferences(nested, results, 0);
+			REQUIRE_FALSE(inner.has_value());
+			CHECK(inner.error().GetMessageText() == "$ref '0.prefab.ids': no member 'ids' in '0.prefab' (in the result of op 0)");
+			CHECK(inner.error().GetHint() == "did you mean 'id'? '0.prefab' (in the result of op 0) has 'id'");
+
+			// Batch files number their lines from 1; an empty result says so.
+			Json line = ParseReferenceJson(R"({"entity":{"$ref":"3.entity.id"}})");
+			const Status empty = SubstituteReferences(line, results, 1);
+			REQUIRE_FALSE(empty.has_value());
+			CHECK(empty.error().GetHint() == "the result of line 3 is an empty object");
+
+			// M16 review R27: the listed members are bounded (error responses are never offloaded): the first 32, sorted, then
+			// how many more.
+			Json wide = Json::object();
+			for (int member = 0; member < 40; ++member)
+				wide["inner"][std::format("m{:02}", member)] = member;
+			const std::vector<Json> wideResults = { wide };
+			Json missing = ParseReferenceJson(R"({"value":{"$ref":"0.inner.zzz"}})");
+			const Status bounded = SubstituteReferences(missing, wideResults, 0);
+			REQUIRE_FALSE(bounded.has_value());
+			const std::string hint = bounded.error().GetHint();
+			CHECK(hint.starts_with("'0.inner' (in the result of op 0) has 'm00', 'm01', "));
+			CHECK(hint.contains("'m31'"));
+			CHECK_FALSE(hint.contains("'m32'"));
+			CHECK(hint.ends_with("'m31' and 8 more"));
 		}
 
 		TEST_CASE("JsonReference: objects with other members next to $ref are data")

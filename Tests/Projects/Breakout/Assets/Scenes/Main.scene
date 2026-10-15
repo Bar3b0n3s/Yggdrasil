@@ -1,0 +1,4175 @@
+{
+	"Format": "Scene",
+	"Version": 1,
+	"Name": "Main",
+	"Seed": 0,
+	"ComponentVersions": {
+		"Transform": 1,
+		"Prefab": 1,
+		"PrefabLink": 1,
+		"MeshRenderer": 1,
+		"Camera": 1,
+		"DirectionalLight": 1,
+		"Environment": 1,
+		"PostProcess": 1,
+		"Text": 1,
+		"RigidBody": 1,
+		"BoxCollider": 1,
+		"SphereCollider": 1,
+		"AudioListener": 1,
+		"Script": 1
+	},
+	"Entities": [
+		{
+			"ID": "680ef1b788caceb3",
+			"Name": "Camera",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 20],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Camera": {
+					"Projection": "Orthographic",
+					"VerticalFov": 60,
+					"OrthographicSize": 8,
+					"NearClip": 0.1,
+					"FarClip": 100,
+					"Primary": true,
+					"Clear": "Color",
+					"ClearColor": [0.02, 0.02, 0.05]
+				},
+				"AudioListener": {
+					"Primary": true
+				}
+			}
+		},
+		{
+			"ID": "14fbfefba5500a5d",
+			"Name": "Sun",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [-0.21458794, 0.1274322, 0.028251039, 0.96794367],
+					"Scale": [1, 1, 1]
+				},
+				"DirectionalLight": {
+					"Color": [1, 1, 1],
+					"Intensity": 1.2,
+					"CastShadows": false,
+					"ShadowDistance": 100,
+					"CascadeCount": 4,
+					"CascadeSplitLambda": 0.75,
+					"LightAngle": 1,
+					"DepthBias": 1,
+					"NormalBias": 1
+				}
+			}
+		},
+		{
+			"ID": "3bdcf79abe22ceaa",
+			"Name": "Environment",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Environment": {
+					"Environment": null,
+					"Intensity": 1,
+					"Rotation": 0,
+					"ShowSkybox": false,
+					"SkyboxBlur": 0,
+					"FallbackColor": [0.15, 0.15, 0.18]
+				},
+				"PostProcess": {
+					"ExposureEV": 0,
+					"Tonemap": "PbrNeutral",
+					"SsaoEnabled": false,
+					"SsaoRadius": 0.5,
+					"SsaoIntensity": 1,
+					"SsaoQuality": "Medium",
+					"BloomEnabled": true,
+					"BloomIntensity": 0.04,
+					"FxaaEnabled": true
+				}
+			}
+		},
+		{
+			"ID": "5da4c06203159740",
+			"Name": "Arena",
+			"Parent": null,
+			"Active": true,
+			"Tags": ["Wall"],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"RigidBody": {
+					"Type": "Static",
+					"Mass": 1,
+					"Friction": 0,
+					"Restitution": 1,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				}
+			}
+		},
+		{
+			"ID": "c313f33f24dc5535",
+			"Name": "LeftWall",
+			"Parent": "5da4c06203159740",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-9, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 16, 1]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["4680262ddf5bce12"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				}
+			}
+		},
+		{
+			"ID": "8a5e7f86fe80752a",
+			"Name": "RightWall",
+			"Parent": "5da4c06203159740",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [9, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 16, 1]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["4680262ddf5bce12"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				}
+			}
+		},
+		{
+			"ID": "9cc1ab3770405d60",
+			"Name": "TopWall",
+			"Parent": "5da4c06203159740",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 7.5, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [17, 1, 1]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["4680262ddf5bce12"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				}
+			}
+		},
+		{
+			"ID": "c9bff8428185b819",
+			"Name": "Paddle",
+			"Parent": null,
+			"Active": true,
+			"Tags": ["Paddle"],
+			"Components": {
+				"Transform": {
+					"Translation": [0, -6.5, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [2.4, 0.4, 1]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["fbaa5ba7c97f054e"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"RigidBody": {
+					"Type": "Kinematic",
+					"Mass": 1,
+					"Friction": 0,
+					"Restitution": 1,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": false,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				}
+			}
+		},
+		{
+			"ID": "e0e0fb587c483494",
+			"Name": "Ball",
+			"Parent": null,
+			"Active": true,
+			"Tags": ["Ball"],
+			"Components": {
+				"Transform": {
+					"Translation": [0, -6, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.5, 0.5, 0.5]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000102",
+					"Materials": ["1f23a7278b972c0a"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"RigidBody": {
+					"Type": "Dynamic",
+					"Mass": 1,
+					"Friction": 0,
+					"Restitution": 1,
+					"LinearDamping": 0,
+					"AngularDamping": 0,
+					"GravityFactor": 0,
+					"MotionQuality": "LinearCast",
+					"AllowSleeping": false,
+					"LockTranslation": [false, false, true],
+					"LockRotation": [true, true, true],
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"SphereCollider": {
+					"Radius": 0.5,
+					"Offset": [0, 0, 0],
+					"IsTrigger": false
+				},
+				"Script": {
+					"Script": "e2a8433934a22dc6",
+					"Fields": {
+						"Game": "3164574db437db5a"
+					},
+					"ExecutionOrder": 0
+				}
+			}
+		},
+		{
+			"ID": "0deebadb2218c766",
+			"Name": "Bricks",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				}
+			}
+		},
+		{
+			"ID": "cbfd044833d2a16c",
+			"Name": "Brick_R1_C01",
+			"Parent": "0deebadb2218c766",
+			"Active": true,
+			"Tags": ["Brick"],
+			"Components": {
+				"Transform": {
+					"Translation": [-7.2, 5.5, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1.5, 0.5, 1]
+				},
+				"Prefab": {
+					"Prefab": "11d04163305d2e9f",
+					"Overrides": [
+						{
+							"PrefabEntityID": "55425a047af78945",
+							"Kind": "Field",
+							"Component": "MeshRenderer",
+							"Field": "Materials",
+							"Value": ["18c27cc27d24eda2"]
+						},
+						{
+							"PrefabEntityID": "55425a047af78945",
+							"Kind": "Field",
+							"Component": "Script",
+							"Field": "Fields",
+							"Value": {
+								"Points": 5
+							}
+						}
+					]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "55425a047af78945",
+					"InstanceRoot": "cbfd044833d2a16c"
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["18c27cc27d24eda2"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"RigidBody": {
+					"Type": "Static",
+					"Mass": 1,
+					"Friction": 0,
+					"Restitution": 1,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				},
+				"Script": {
+					"Script": "e29b62c819907a37",
+					"Fields": {
+						"Points": 5
+					},
+					"ExecutionOrder": 0
+				}
+			}
+		},
+		{
+			"ID": "4e2a51398b3145a4",
+			"Name": "Brick_R1_C02",
+			"Parent": "0deebadb2218c766",
+			"Active": true,
+			"Tags": ["Brick"],
+			"Components": {
+				"Transform": {
+					"Translation": [-5.6, 5.5, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1.5, 0.5, 1]
+				},
+				"Prefab": {
+					"Prefab": "11d04163305d2e9f",
+					"Overrides": [
+						{
+							"PrefabEntityID": "55425a047af78945",
+							"Kind": "Field",
+							"Component": "MeshRenderer",
+							"Field": "Materials",
+							"Value": ["18c27cc27d24eda2"]
+						},
+						{
+							"PrefabEntityID": "55425a047af78945",
+							"Kind": "Field",
+							"Component": "Script",
+							"Field": "Fields",
+							"Value": {
+								"Points": 5
+							}
+						}
+					]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "55425a047af78945",
+					"InstanceRoot": "4e2a51398b3145a4"
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["18c27cc27d24eda2"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"RigidBody": {
+					"Type": "Static",
+					"Mass": 1,
+					"Friction": 0,
+					"Restitution": 1,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				},
+				"Script": {
+					"Script": "e29b62c819907a37",
+					"Fields": {
+						"Points": 5
+					},
+					"ExecutionOrder": 0
+				}
+			}
+		},
+		{
+			"ID": "6356333445f5e902",
+			"Name": "Brick_R1_C03",
+			"Parent": "0deebadb2218c766",
+			"Active": true,
+			"Tags": ["Brick"],
+			"Components": {
+				"Transform": {
+					"Translation": [-4, 5.5, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1.5, 0.5, 1]
+				},
+				"Prefab": {
+					"Prefab": "11d04163305d2e9f",
+					"Overrides": [
+						{
+							"PrefabEntityID": "55425a047af78945",
+							"Kind": "Field",
+							"Component": "MeshRenderer",
+							"Field": "Materials",
+							"Value": ["18c27cc27d24eda2"]
+						},
+						{
+							"PrefabEntityID": "55425a047af78945",
+							"Kind": "Field",
+							"Component": "Script",
+							"Field": "Fields",
+							"Value": {
+								"Points": 5
+							}
+						}
+					]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "55425a047af78945",
+					"InstanceRoot": "6356333445f5e902"
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["18c27cc27d24eda2"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"RigidBody": {
+					"Type": "Static",
+					"Mass": 1,
+					"Friction": 0,
+					"Restitution": 1,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				},
+				"Script": {
+					"Script": "e29b62c819907a37",
+					"Fields": {
+						"Points": 5
+					},
+					"ExecutionOrder": 0
+				}
+			}
+		},
+		{
+			"ID": "9d0926e0f602be4f",
+			"Name": "Brick_R1_C04",
+			"Parent": "0deebadb2218c766",
+			"Active": true,
+			"Tags": ["Brick"],
+			"Components": {
+				"Transform": {
+					"Translation": [-2.4, 5.5, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1.5, 0.5, 1]
+				},
+				"Prefab": {
+					"Prefab": "11d04163305d2e9f",
+					"Overrides": [
+						{
+							"PrefabEntityID": "55425a047af78945",
+							"Kind": "Field",
+							"Component": "MeshRenderer",
+							"Field": "Materials",
+							"Value": ["18c27cc27d24eda2"]
+						},
+						{
+							"PrefabEntityID": "55425a047af78945",
+							"Kind": "Field",
+							"Component": "Script",
+							"Field": "Fields",
+							"Value": {
+								"Points": 5
+							}
+						}
+					]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "55425a047af78945",
+					"InstanceRoot": "9d0926e0f602be4f"
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["18c27cc27d24eda2"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"RigidBody": {
+					"Type": "Static",
+					"Mass": 1,
+					"Friction": 0,
+					"Restitution": 1,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				},
+				"Script": {
+					"Script": "e29b62c819907a37",
+					"Fields": {
+						"Points": 5
+					},
+					"ExecutionOrder": 0
+				}
+			}
+		},
+		{
+			"ID": "8cbfb0ae9345e2f0",
+			"Name": "Brick_R1_C05",
+			"Parent": "0deebadb2218c766",
+			"Active": true,
+			"Tags": ["Brick"],
+			"Components": {
+				"Transform": {
+					"Translation": [-0.8, 5.5, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1.5, 0.5, 1]
+				},
+				"Prefab": {
+					"Prefab": "11d04163305d2e9f",
+					"Overrides": [
+						{
+							"PrefabEntityID": "55425a047af78945",
+							"Kind": "Field",
+							"Component": "MeshRenderer",
+							"Field": "Materials",
+							"Value": ["18c27cc27d24eda2"]
+						},
+						{
+							"PrefabEntityID": "55425a047af78945",
+							"Kind": "Field",
+							"Component": "Script",
+							"Field": "Fields",
+							"Value": {
+								"Points": 5
+							}
+						}
+					]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "55425a047af78945",
+					"InstanceRoot": "8cbfb0ae9345e2f0"
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["18c27cc27d24eda2"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"RigidBody": {
+					"Type": "Static",
+					"Mass": 1,
+					"Friction": 0,
+					"Restitution": 1,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				},
+				"Script": {
+					"Script": "e29b62c819907a37",
+					"Fields": {
+						"Points": 5
+					},
+					"ExecutionOrder": 0
+				}
+			}
+		},
+		{
+			"ID": "5473307ac37053ef",
+			"Name": "Brick_R1_C06",
+			"Parent": "0deebadb2218c766",
+			"Active": true,
+			"Tags": ["Brick"],
+			"Components": {
+				"Transform": {
+					"Translation": [0.8, 5.5, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1.5, 0.5, 1]
+				},
+				"Prefab": {
+					"Prefab": "11d04163305d2e9f",
+					"Overrides": [
+						{
+							"PrefabEntityID": "55425a047af78945",
+							"Kind": "Field",
+							"Component": "MeshRenderer",
+							"Field": "Materials",
+							"Value": ["18c27cc27d24eda2"]
+						},
+						{
+							"PrefabEntityID": "55425a047af78945",
+							"Kind": "Field",
+							"Component": "Script",
+							"Field": "Fields",
+							"Value": {
+								"Points": 5
+							}
+						}
+					]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "55425a047af78945",
+					"InstanceRoot": "5473307ac37053ef"
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["18c27cc27d24eda2"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"RigidBody": {
+					"Type": "Static",
+					"Mass": 1,
+					"Friction": 0,
+					"Restitution": 1,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				},
+				"Script": {
+					"Script": "e29b62c819907a37",
+					"Fields": {
+						"Points": 5
+					},
+					"ExecutionOrder": 0
+				}
+			}
+		},
+		{
+			"ID": "ba2fb6d1651a873c",
+			"Name": "Brick_R1_C07",
+			"Parent": "0deebadb2218c766",
+			"Active": true,
+			"Tags": ["Brick"],
+			"Components": {
+				"Transform": {
+					"Translation": [2.4, 5.5, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1.5, 0.5, 1]
+				},
+				"Prefab": {
+					"Prefab": "11d04163305d2e9f",
+					"Overrides": [
+						{
+							"PrefabEntityID": "55425a047af78945",
+							"Kind": "Field",
+							"Component": "MeshRenderer",
+							"Field": "Materials",
+							"Value": ["18c27cc27d24eda2"]
+						},
+						{
+							"PrefabEntityID": "55425a047af78945",
+							"Kind": "Field",
+							"Component": "Script",
+							"Field": "Fields",
+							"Value": {
+								"Points": 5
+							}
+						}
+					]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "55425a047af78945",
+					"InstanceRoot": "ba2fb6d1651a873c"
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["18c27cc27d24eda2"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"RigidBody": {
+					"Type": "Static",
+					"Mass": 1,
+					"Friction": 0,
+					"Restitution": 1,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				},
+				"Script": {
+					"Script": "e29b62c819907a37",
+					"Fields": {
+						"Points": 5
+					},
+					"ExecutionOrder": 0
+				}
+			}
+		},
+		{
+			"ID": "c5d19285c95aa153",
+			"Name": "Brick_R1_C08",
+			"Parent": "0deebadb2218c766",
+			"Active": true,
+			"Tags": ["Brick"],
+			"Components": {
+				"Transform": {
+					"Translation": [4, 5.5, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1.5, 0.5, 1]
+				},
+				"Prefab": {
+					"Prefab": "11d04163305d2e9f",
+					"Overrides": [
+						{
+							"PrefabEntityID": "55425a047af78945",
+							"Kind": "Field",
+							"Component": "MeshRenderer",
+							"Field": "Materials",
+							"Value": ["18c27cc27d24eda2"]
+						},
+						{
+							"PrefabEntityID": "55425a047af78945",
+							"Kind": "Field",
+							"Component": "Script",
+							"Field": "Fields",
+							"Value": {
+								"Points": 5
+							}
+						}
+					]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "55425a047af78945",
+					"InstanceRoot": "c5d19285c95aa153"
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["18c27cc27d24eda2"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"RigidBody": {
+					"Type": "Static",
+					"Mass": 1,
+					"Friction": 0,
+					"Restitution": 1,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				},
+				"Script": {
+					"Script": "e29b62c819907a37",
+					"Fields": {
+						"Points": 5
+					},
+					"ExecutionOrder": 0
+				}
+			}
+		},
+		{
+			"ID": "32e5f72800e5b7cc",
+			"Name": "Brick_R1_C09",
+			"Parent": "0deebadb2218c766",
+			"Active": true,
+			"Tags": ["Brick"],
+			"Components": {
+				"Transform": {
+					"Translation": [5.6, 5.5, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1.5, 0.5, 1]
+				},
+				"Prefab": {
+					"Prefab": "11d04163305d2e9f",
+					"Overrides": [
+						{
+							"PrefabEntityID": "55425a047af78945",
+							"Kind": "Field",
+							"Component": "MeshRenderer",
+							"Field": "Materials",
+							"Value": ["18c27cc27d24eda2"]
+						},
+						{
+							"PrefabEntityID": "55425a047af78945",
+							"Kind": "Field",
+							"Component": "Script",
+							"Field": "Fields",
+							"Value": {
+								"Points": 5
+							}
+						}
+					]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "55425a047af78945",
+					"InstanceRoot": "32e5f72800e5b7cc"
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["18c27cc27d24eda2"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"RigidBody": {
+					"Type": "Static",
+					"Mass": 1,
+					"Friction": 0,
+					"Restitution": 1,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				},
+				"Script": {
+					"Script": "e29b62c819907a37",
+					"Fields": {
+						"Points": 5
+					},
+					"ExecutionOrder": 0
+				}
+			}
+		},
+		{
+			"ID": "fd61fbe6be3141a3",
+			"Name": "Brick_R1_C10",
+			"Parent": "0deebadb2218c766",
+			"Active": true,
+			"Tags": ["Brick"],
+			"Components": {
+				"Transform": {
+					"Translation": [7.2, 5.5, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1.5, 0.5, 1]
+				},
+				"Prefab": {
+					"Prefab": "11d04163305d2e9f",
+					"Overrides": [
+						{
+							"PrefabEntityID": "55425a047af78945",
+							"Kind": "Field",
+							"Component": "MeshRenderer",
+							"Field": "Materials",
+							"Value": ["18c27cc27d24eda2"]
+						},
+						{
+							"PrefabEntityID": "55425a047af78945",
+							"Kind": "Field",
+							"Component": "Script",
+							"Field": "Fields",
+							"Value": {
+								"Points": 5
+							}
+						}
+					]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "55425a047af78945",
+					"InstanceRoot": "fd61fbe6be3141a3"
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["18c27cc27d24eda2"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"RigidBody": {
+					"Type": "Static",
+					"Mass": 1,
+					"Friction": 0,
+					"Restitution": 1,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				},
+				"Script": {
+					"Script": "e29b62c819907a37",
+					"Fields": {
+						"Points": 5
+					},
+					"ExecutionOrder": 0
+				}
+			}
+		},
+		{
+			"ID": "67b0d694546d0e9d",
+			"Name": "Brick_R2_C01",
+			"Parent": "0deebadb2218c766",
+			"Active": true,
+			"Tags": ["Brick"],
+			"Components": {
+				"Transform": {
+					"Translation": [-7.2, 4.9, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1.5, 0.5, 1]
+				},
+				"Prefab": {
+					"Prefab": "11d04163305d2e9f",
+					"Overrides": [
+						{
+							"PrefabEntityID": "55425a047af78945",
+							"Kind": "Field",
+							"Component": "MeshRenderer",
+							"Field": "Materials",
+							"Value": ["19c57a9ec62c018d"]
+						},
+						{
+							"PrefabEntityID": "55425a047af78945",
+							"Kind": "Field",
+							"Component": "Script",
+							"Field": "Fields",
+							"Value": {
+								"Points": 4
+							}
+						}
+					]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "55425a047af78945",
+					"InstanceRoot": "67b0d694546d0e9d"
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["19c57a9ec62c018d"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"RigidBody": {
+					"Type": "Static",
+					"Mass": 1,
+					"Friction": 0,
+					"Restitution": 1,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				},
+				"Script": {
+					"Script": "e29b62c819907a37",
+					"Fields": {
+						"Points": 4
+					},
+					"ExecutionOrder": 0
+				}
+			}
+		},
+		{
+			"ID": "2ed66af102020bcc",
+			"Name": "Brick_R2_C02",
+			"Parent": "0deebadb2218c766",
+			"Active": true,
+			"Tags": ["Brick"],
+			"Components": {
+				"Transform": {
+					"Translation": [-5.6, 4.9, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1.5, 0.5, 1]
+				},
+				"Prefab": {
+					"Prefab": "11d04163305d2e9f",
+					"Overrides": [
+						{
+							"PrefabEntityID": "55425a047af78945",
+							"Kind": "Field",
+							"Component": "MeshRenderer",
+							"Field": "Materials",
+							"Value": ["19c57a9ec62c018d"]
+						},
+						{
+							"PrefabEntityID": "55425a047af78945",
+							"Kind": "Field",
+							"Component": "Script",
+							"Field": "Fields",
+							"Value": {
+								"Points": 4
+							}
+						}
+					]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "55425a047af78945",
+					"InstanceRoot": "2ed66af102020bcc"
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["19c57a9ec62c018d"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"RigidBody": {
+					"Type": "Static",
+					"Mass": 1,
+					"Friction": 0,
+					"Restitution": 1,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				},
+				"Script": {
+					"Script": "e29b62c819907a37",
+					"Fields": {
+						"Points": 4
+					},
+					"ExecutionOrder": 0
+				}
+			}
+		},
+		{
+			"ID": "71323b9e27a1530c",
+			"Name": "Brick_R2_C03",
+			"Parent": "0deebadb2218c766",
+			"Active": true,
+			"Tags": ["Brick"],
+			"Components": {
+				"Transform": {
+					"Translation": [-4, 4.9, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1.5, 0.5, 1]
+				},
+				"Prefab": {
+					"Prefab": "11d04163305d2e9f",
+					"Overrides": [
+						{
+							"PrefabEntityID": "55425a047af78945",
+							"Kind": "Field",
+							"Component": "MeshRenderer",
+							"Field": "Materials",
+							"Value": ["19c57a9ec62c018d"]
+						},
+						{
+							"PrefabEntityID": "55425a047af78945",
+							"Kind": "Field",
+							"Component": "Script",
+							"Field": "Fields",
+							"Value": {
+								"Points": 4
+							}
+						}
+					]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "55425a047af78945",
+					"InstanceRoot": "71323b9e27a1530c"
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["19c57a9ec62c018d"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"RigidBody": {
+					"Type": "Static",
+					"Mass": 1,
+					"Friction": 0,
+					"Restitution": 1,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				},
+				"Script": {
+					"Script": "e29b62c819907a37",
+					"Fields": {
+						"Points": 4
+					},
+					"ExecutionOrder": 0
+				}
+			}
+		},
+		{
+			"ID": "a2de7c63b9fc7b52",
+			"Name": "Brick_R2_C04",
+			"Parent": "0deebadb2218c766",
+			"Active": true,
+			"Tags": ["Brick"],
+			"Components": {
+				"Transform": {
+					"Translation": [-2.4, 4.9, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1.5, 0.5, 1]
+				},
+				"Prefab": {
+					"Prefab": "11d04163305d2e9f",
+					"Overrides": [
+						{
+							"PrefabEntityID": "55425a047af78945",
+							"Kind": "Field",
+							"Component": "MeshRenderer",
+							"Field": "Materials",
+							"Value": ["19c57a9ec62c018d"]
+						},
+						{
+							"PrefabEntityID": "55425a047af78945",
+							"Kind": "Field",
+							"Component": "Script",
+							"Field": "Fields",
+							"Value": {
+								"Points": 4
+							}
+						}
+					]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "55425a047af78945",
+					"InstanceRoot": "a2de7c63b9fc7b52"
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["19c57a9ec62c018d"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"RigidBody": {
+					"Type": "Static",
+					"Mass": 1,
+					"Friction": 0,
+					"Restitution": 1,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				},
+				"Script": {
+					"Script": "e29b62c819907a37",
+					"Fields": {
+						"Points": 4
+					},
+					"ExecutionOrder": 0
+				}
+			}
+		},
+		{
+			"ID": "3e3023611346d17a",
+			"Name": "Brick_R2_C05",
+			"Parent": "0deebadb2218c766",
+			"Active": true,
+			"Tags": ["Brick"],
+			"Components": {
+				"Transform": {
+					"Translation": [-0.8, 4.9, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1.5, 0.5, 1]
+				},
+				"Prefab": {
+					"Prefab": "11d04163305d2e9f",
+					"Overrides": [
+						{
+							"PrefabEntityID": "55425a047af78945",
+							"Kind": "Field",
+							"Component": "MeshRenderer",
+							"Field": "Materials",
+							"Value": ["19c57a9ec62c018d"]
+						},
+						{
+							"PrefabEntityID": "55425a047af78945",
+							"Kind": "Field",
+							"Component": "Script",
+							"Field": "Fields",
+							"Value": {
+								"Points": 4
+							}
+						}
+					]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "55425a047af78945",
+					"InstanceRoot": "3e3023611346d17a"
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["19c57a9ec62c018d"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"RigidBody": {
+					"Type": "Static",
+					"Mass": 1,
+					"Friction": 0,
+					"Restitution": 1,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				},
+				"Script": {
+					"Script": "e29b62c819907a37",
+					"Fields": {
+						"Points": 4
+					},
+					"ExecutionOrder": 0
+				}
+			}
+		},
+		{
+			"ID": "dc17af7a94ee6cb7",
+			"Name": "Brick_R2_C06",
+			"Parent": "0deebadb2218c766",
+			"Active": true,
+			"Tags": ["Brick"],
+			"Components": {
+				"Transform": {
+					"Translation": [0.8, 4.9, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1.5, 0.5, 1]
+				},
+				"Prefab": {
+					"Prefab": "11d04163305d2e9f",
+					"Overrides": [
+						{
+							"PrefabEntityID": "55425a047af78945",
+							"Kind": "Field",
+							"Component": "MeshRenderer",
+							"Field": "Materials",
+							"Value": ["19c57a9ec62c018d"]
+						},
+						{
+							"PrefabEntityID": "55425a047af78945",
+							"Kind": "Field",
+							"Component": "Script",
+							"Field": "Fields",
+							"Value": {
+								"Points": 4
+							}
+						}
+					]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "55425a047af78945",
+					"InstanceRoot": "dc17af7a94ee6cb7"
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["19c57a9ec62c018d"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"RigidBody": {
+					"Type": "Static",
+					"Mass": 1,
+					"Friction": 0,
+					"Restitution": 1,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				},
+				"Script": {
+					"Script": "e29b62c819907a37",
+					"Fields": {
+						"Points": 4
+					},
+					"ExecutionOrder": 0
+				}
+			}
+		},
+		{
+			"ID": "93fb14ff2e67c8d1",
+			"Name": "Brick_R2_C07",
+			"Parent": "0deebadb2218c766",
+			"Active": true,
+			"Tags": ["Brick"],
+			"Components": {
+				"Transform": {
+					"Translation": [2.4, 4.9, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1.5, 0.5, 1]
+				},
+				"Prefab": {
+					"Prefab": "11d04163305d2e9f",
+					"Overrides": [
+						{
+							"PrefabEntityID": "55425a047af78945",
+							"Kind": "Field",
+							"Component": "MeshRenderer",
+							"Field": "Materials",
+							"Value": ["19c57a9ec62c018d"]
+						},
+						{
+							"PrefabEntityID": "55425a047af78945",
+							"Kind": "Field",
+							"Component": "Script",
+							"Field": "Fields",
+							"Value": {
+								"Points": 4
+							}
+						}
+					]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "55425a047af78945",
+					"InstanceRoot": "93fb14ff2e67c8d1"
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["19c57a9ec62c018d"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"RigidBody": {
+					"Type": "Static",
+					"Mass": 1,
+					"Friction": 0,
+					"Restitution": 1,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				},
+				"Script": {
+					"Script": "e29b62c819907a37",
+					"Fields": {
+						"Points": 4
+					},
+					"ExecutionOrder": 0
+				}
+			}
+		},
+		{
+			"ID": "28219e05312cc711",
+			"Name": "Brick_R2_C08",
+			"Parent": "0deebadb2218c766",
+			"Active": true,
+			"Tags": ["Brick"],
+			"Components": {
+				"Transform": {
+					"Translation": [4, 4.9, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1.5, 0.5, 1]
+				},
+				"Prefab": {
+					"Prefab": "11d04163305d2e9f",
+					"Overrides": [
+						{
+							"PrefabEntityID": "55425a047af78945",
+							"Kind": "Field",
+							"Component": "MeshRenderer",
+							"Field": "Materials",
+							"Value": ["19c57a9ec62c018d"]
+						},
+						{
+							"PrefabEntityID": "55425a047af78945",
+							"Kind": "Field",
+							"Component": "Script",
+							"Field": "Fields",
+							"Value": {
+								"Points": 4
+							}
+						}
+					]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "55425a047af78945",
+					"InstanceRoot": "28219e05312cc711"
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["19c57a9ec62c018d"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"RigidBody": {
+					"Type": "Static",
+					"Mass": 1,
+					"Friction": 0,
+					"Restitution": 1,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				},
+				"Script": {
+					"Script": "e29b62c819907a37",
+					"Fields": {
+						"Points": 4
+					},
+					"ExecutionOrder": 0
+				}
+			}
+		},
+		{
+			"ID": "4cab2139eac239fa",
+			"Name": "Brick_R2_C09",
+			"Parent": "0deebadb2218c766",
+			"Active": true,
+			"Tags": ["Brick"],
+			"Components": {
+				"Transform": {
+					"Translation": [5.6, 4.9, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1.5, 0.5, 1]
+				},
+				"Prefab": {
+					"Prefab": "11d04163305d2e9f",
+					"Overrides": [
+						{
+							"PrefabEntityID": "55425a047af78945",
+							"Kind": "Field",
+							"Component": "MeshRenderer",
+							"Field": "Materials",
+							"Value": ["19c57a9ec62c018d"]
+						},
+						{
+							"PrefabEntityID": "55425a047af78945",
+							"Kind": "Field",
+							"Component": "Script",
+							"Field": "Fields",
+							"Value": {
+								"Points": 4
+							}
+						}
+					]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "55425a047af78945",
+					"InstanceRoot": "4cab2139eac239fa"
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["19c57a9ec62c018d"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"RigidBody": {
+					"Type": "Static",
+					"Mass": 1,
+					"Friction": 0,
+					"Restitution": 1,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				},
+				"Script": {
+					"Script": "e29b62c819907a37",
+					"Fields": {
+						"Points": 4
+					},
+					"ExecutionOrder": 0
+				}
+			}
+		},
+		{
+			"ID": "577616da91a3ae34",
+			"Name": "Brick_R2_C10",
+			"Parent": "0deebadb2218c766",
+			"Active": true,
+			"Tags": ["Brick"],
+			"Components": {
+				"Transform": {
+					"Translation": [7.2, 4.9, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1.5, 0.5, 1]
+				},
+				"Prefab": {
+					"Prefab": "11d04163305d2e9f",
+					"Overrides": [
+						{
+							"PrefabEntityID": "55425a047af78945",
+							"Kind": "Field",
+							"Component": "MeshRenderer",
+							"Field": "Materials",
+							"Value": ["19c57a9ec62c018d"]
+						},
+						{
+							"PrefabEntityID": "55425a047af78945",
+							"Kind": "Field",
+							"Component": "Script",
+							"Field": "Fields",
+							"Value": {
+								"Points": 4
+							}
+						}
+					]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "55425a047af78945",
+					"InstanceRoot": "577616da91a3ae34"
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["19c57a9ec62c018d"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"RigidBody": {
+					"Type": "Static",
+					"Mass": 1,
+					"Friction": 0,
+					"Restitution": 1,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				},
+				"Script": {
+					"Script": "e29b62c819907a37",
+					"Fields": {
+						"Points": 4
+					},
+					"ExecutionOrder": 0
+				}
+			}
+		},
+		{
+			"ID": "3b109ebad56fc624",
+			"Name": "Brick_R3_C01",
+			"Parent": "0deebadb2218c766",
+			"Active": true,
+			"Tags": ["Brick"],
+			"Components": {
+				"Transform": {
+					"Translation": [-7.2, 4.3, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1.5, 0.5, 1]
+				},
+				"Prefab": {
+					"Prefab": "11d04163305d2e9f",
+					"Overrides": [
+						{
+							"PrefabEntityID": "55425a047af78945",
+							"Kind": "Field",
+							"Component": "MeshRenderer",
+							"Field": "Materials",
+							"Value": ["a6d76e2cc629df81"]
+						},
+						{
+							"PrefabEntityID": "55425a047af78945",
+							"Kind": "Field",
+							"Component": "Script",
+							"Field": "Fields",
+							"Value": {
+								"Points": 3
+							}
+						}
+					]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "55425a047af78945",
+					"InstanceRoot": "3b109ebad56fc624"
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["a6d76e2cc629df81"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"RigidBody": {
+					"Type": "Static",
+					"Mass": 1,
+					"Friction": 0,
+					"Restitution": 1,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				},
+				"Script": {
+					"Script": "e29b62c819907a37",
+					"Fields": {
+						"Points": 3
+					},
+					"ExecutionOrder": 0
+				}
+			}
+		},
+		{
+			"ID": "6ad01dbb2bc2bd12",
+			"Name": "Brick_R3_C02",
+			"Parent": "0deebadb2218c766",
+			"Active": true,
+			"Tags": ["Brick"],
+			"Components": {
+				"Transform": {
+					"Translation": [-5.6, 4.3, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1.5, 0.5, 1]
+				},
+				"Prefab": {
+					"Prefab": "11d04163305d2e9f",
+					"Overrides": [
+						{
+							"PrefabEntityID": "55425a047af78945",
+							"Kind": "Field",
+							"Component": "MeshRenderer",
+							"Field": "Materials",
+							"Value": ["a6d76e2cc629df81"]
+						},
+						{
+							"PrefabEntityID": "55425a047af78945",
+							"Kind": "Field",
+							"Component": "Script",
+							"Field": "Fields",
+							"Value": {
+								"Points": 3
+							}
+						}
+					]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "55425a047af78945",
+					"InstanceRoot": "6ad01dbb2bc2bd12"
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["a6d76e2cc629df81"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"RigidBody": {
+					"Type": "Static",
+					"Mass": 1,
+					"Friction": 0,
+					"Restitution": 1,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				},
+				"Script": {
+					"Script": "e29b62c819907a37",
+					"Fields": {
+						"Points": 3
+					},
+					"ExecutionOrder": 0
+				}
+			}
+		},
+		{
+			"ID": "d5194d081162cd38",
+			"Name": "Brick_R3_C03",
+			"Parent": "0deebadb2218c766",
+			"Active": true,
+			"Tags": ["Brick"],
+			"Components": {
+				"Transform": {
+					"Translation": [-4, 4.3, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1.5, 0.5, 1]
+				},
+				"Prefab": {
+					"Prefab": "11d04163305d2e9f",
+					"Overrides": [
+						{
+							"PrefabEntityID": "55425a047af78945",
+							"Kind": "Field",
+							"Component": "MeshRenderer",
+							"Field": "Materials",
+							"Value": ["a6d76e2cc629df81"]
+						},
+						{
+							"PrefabEntityID": "55425a047af78945",
+							"Kind": "Field",
+							"Component": "Script",
+							"Field": "Fields",
+							"Value": {
+								"Points": 3
+							}
+						}
+					]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "55425a047af78945",
+					"InstanceRoot": "d5194d081162cd38"
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["a6d76e2cc629df81"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"RigidBody": {
+					"Type": "Static",
+					"Mass": 1,
+					"Friction": 0,
+					"Restitution": 1,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				},
+				"Script": {
+					"Script": "e29b62c819907a37",
+					"Fields": {
+						"Points": 3
+					},
+					"ExecutionOrder": 0
+				}
+			}
+		},
+		{
+			"ID": "12923d2505078d92",
+			"Name": "Brick_R3_C04",
+			"Parent": "0deebadb2218c766",
+			"Active": true,
+			"Tags": ["Brick"],
+			"Components": {
+				"Transform": {
+					"Translation": [-2.4, 4.3, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1.5, 0.5, 1]
+				},
+				"Prefab": {
+					"Prefab": "11d04163305d2e9f",
+					"Overrides": [
+						{
+							"PrefabEntityID": "55425a047af78945",
+							"Kind": "Field",
+							"Component": "MeshRenderer",
+							"Field": "Materials",
+							"Value": ["a6d76e2cc629df81"]
+						},
+						{
+							"PrefabEntityID": "55425a047af78945",
+							"Kind": "Field",
+							"Component": "Script",
+							"Field": "Fields",
+							"Value": {
+								"Points": 3
+							}
+						}
+					]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "55425a047af78945",
+					"InstanceRoot": "12923d2505078d92"
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["a6d76e2cc629df81"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"RigidBody": {
+					"Type": "Static",
+					"Mass": 1,
+					"Friction": 0,
+					"Restitution": 1,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				},
+				"Script": {
+					"Script": "e29b62c819907a37",
+					"Fields": {
+						"Points": 3
+					},
+					"ExecutionOrder": 0
+				}
+			}
+		},
+		{
+			"ID": "02dd471e60a71aee",
+			"Name": "Brick_R3_C05",
+			"Parent": "0deebadb2218c766",
+			"Active": true,
+			"Tags": ["Brick"],
+			"Components": {
+				"Transform": {
+					"Translation": [-0.8, 4.3, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1.5, 0.5, 1]
+				},
+				"Prefab": {
+					"Prefab": "11d04163305d2e9f",
+					"Overrides": [
+						{
+							"PrefabEntityID": "55425a047af78945",
+							"Kind": "Field",
+							"Component": "MeshRenderer",
+							"Field": "Materials",
+							"Value": ["a6d76e2cc629df81"]
+						},
+						{
+							"PrefabEntityID": "55425a047af78945",
+							"Kind": "Field",
+							"Component": "Script",
+							"Field": "Fields",
+							"Value": {
+								"Points": 3
+							}
+						}
+					]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "55425a047af78945",
+					"InstanceRoot": "02dd471e60a71aee"
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["a6d76e2cc629df81"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"RigidBody": {
+					"Type": "Static",
+					"Mass": 1,
+					"Friction": 0,
+					"Restitution": 1,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				},
+				"Script": {
+					"Script": "e29b62c819907a37",
+					"Fields": {
+						"Points": 3
+					},
+					"ExecutionOrder": 0
+				}
+			}
+		},
+		{
+			"ID": "94e9350ca4a9c397",
+			"Name": "Brick_R3_C06",
+			"Parent": "0deebadb2218c766",
+			"Active": true,
+			"Tags": ["Brick"],
+			"Components": {
+				"Transform": {
+					"Translation": [0.8, 4.3, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1.5, 0.5, 1]
+				},
+				"Prefab": {
+					"Prefab": "11d04163305d2e9f",
+					"Overrides": [
+						{
+							"PrefabEntityID": "55425a047af78945",
+							"Kind": "Field",
+							"Component": "MeshRenderer",
+							"Field": "Materials",
+							"Value": ["a6d76e2cc629df81"]
+						},
+						{
+							"PrefabEntityID": "55425a047af78945",
+							"Kind": "Field",
+							"Component": "Script",
+							"Field": "Fields",
+							"Value": {
+								"Points": 3
+							}
+						}
+					]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "55425a047af78945",
+					"InstanceRoot": "94e9350ca4a9c397"
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["a6d76e2cc629df81"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"RigidBody": {
+					"Type": "Static",
+					"Mass": 1,
+					"Friction": 0,
+					"Restitution": 1,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				},
+				"Script": {
+					"Script": "e29b62c819907a37",
+					"Fields": {
+						"Points": 3
+					},
+					"ExecutionOrder": 0
+				}
+			}
+		},
+		{
+			"ID": "d4d1a58b3d8e10fb",
+			"Name": "Brick_R3_C07",
+			"Parent": "0deebadb2218c766",
+			"Active": true,
+			"Tags": ["Brick"],
+			"Components": {
+				"Transform": {
+					"Translation": [2.4, 4.3, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1.5, 0.5, 1]
+				},
+				"Prefab": {
+					"Prefab": "11d04163305d2e9f",
+					"Overrides": [
+						{
+							"PrefabEntityID": "55425a047af78945",
+							"Kind": "Field",
+							"Component": "MeshRenderer",
+							"Field": "Materials",
+							"Value": ["a6d76e2cc629df81"]
+						},
+						{
+							"PrefabEntityID": "55425a047af78945",
+							"Kind": "Field",
+							"Component": "Script",
+							"Field": "Fields",
+							"Value": {
+								"Points": 3
+							}
+						}
+					]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "55425a047af78945",
+					"InstanceRoot": "d4d1a58b3d8e10fb"
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["a6d76e2cc629df81"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"RigidBody": {
+					"Type": "Static",
+					"Mass": 1,
+					"Friction": 0,
+					"Restitution": 1,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				},
+				"Script": {
+					"Script": "e29b62c819907a37",
+					"Fields": {
+						"Points": 3
+					},
+					"ExecutionOrder": 0
+				}
+			}
+		},
+		{
+			"ID": "d6525f275562fa6b",
+			"Name": "Brick_R3_C08",
+			"Parent": "0deebadb2218c766",
+			"Active": true,
+			"Tags": ["Brick"],
+			"Components": {
+				"Transform": {
+					"Translation": [4, 4.3, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1.5, 0.5, 1]
+				},
+				"Prefab": {
+					"Prefab": "11d04163305d2e9f",
+					"Overrides": [
+						{
+							"PrefabEntityID": "55425a047af78945",
+							"Kind": "Field",
+							"Component": "MeshRenderer",
+							"Field": "Materials",
+							"Value": ["a6d76e2cc629df81"]
+						},
+						{
+							"PrefabEntityID": "55425a047af78945",
+							"Kind": "Field",
+							"Component": "Script",
+							"Field": "Fields",
+							"Value": {
+								"Points": 3
+							}
+						}
+					]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "55425a047af78945",
+					"InstanceRoot": "d6525f275562fa6b"
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["a6d76e2cc629df81"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"RigidBody": {
+					"Type": "Static",
+					"Mass": 1,
+					"Friction": 0,
+					"Restitution": 1,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				},
+				"Script": {
+					"Script": "e29b62c819907a37",
+					"Fields": {
+						"Points": 3
+					},
+					"ExecutionOrder": 0
+				}
+			}
+		},
+		{
+			"ID": "4c047f6c239f6c54",
+			"Name": "Brick_R3_C09",
+			"Parent": "0deebadb2218c766",
+			"Active": true,
+			"Tags": ["Brick"],
+			"Components": {
+				"Transform": {
+					"Translation": [5.6, 4.3, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1.5, 0.5, 1]
+				},
+				"Prefab": {
+					"Prefab": "11d04163305d2e9f",
+					"Overrides": [
+						{
+							"PrefabEntityID": "55425a047af78945",
+							"Kind": "Field",
+							"Component": "MeshRenderer",
+							"Field": "Materials",
+							"Value": ["a6d76e2cc629df81"]
+						},
+						{
+							"PrefabEntityID": "55425a047af78945",
+							"Kind": "Field",
+							"Component": "Script",
+							"Field": "Fields",
+							"Value": {
+								"Points": 3
+							}
+						}
+					]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "55425a047af78945",
+					"InstanceRoot": "4c047f6c239f6c54"
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["a6d76e2cc629df81"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"RigidBody": {
+					"Type": "Static",
+					"Mass": 1,
+					"Friction": 0,
+					"Restitution": 1,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				},
+				"Script": {
+					"Script": "e29b62c819907a37",
+					"Fields": {
+						"Points": 3
+					},
+					"ExecutionOrder": 0
+				}
+			}
+		},
+		{
+			"ID": "235a63600269dd6f",
+			"Name": "Brick_R3_C10",
+			"Parent": "0deebadb2218c766",
+			"Active": true,
+			"Tags": ["Brick"],
+			"Components": {
+				"Transform": {
+					"Translation": [7.2, 4.3, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1.5, 0.5, 1]
+				},
+				"Prefab": {
+					"Prefab": "11d04163305d2e9f",
+					"Overrides": [
+						{
+							"PrefabEntityID": "55425a047af78945",
+							"Kind": "Field",
+							"Component": "MeshRenderer",
+							"Field": "Materials",
+							"Value": ["a6d76e2cc629df81"]
+						},
+						{
+							"PrefabEntityID": "55425a047af78945",
+							"Kind": "Field",
+							"Component": "Script",
+							"Field": "Fields",
+							"Value": {
+								"Points": 3
+							}
+						}
+					]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "55425a047af78945",
+					"InstanceRoot": "235a63600269dd6f"
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["a6d76e2cc629df81"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"RigidBody": {
+					"Type": "Static",
+					"Mass": 1,
+					"Friction": 0,
+					"Restitution": 1,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				},
+				"Script": {
+					"Script": "e29b62c819907a37",
+					"Fields": {
+						"Points": 3
+					},
+					"ExecutionOrder": 0
+				}
+			}
+		},
+		{
+			"ID": "5a128711643b5917",
+			"Name": "Brick_R4_C01",
+			"Parent": "0deebadb2218c766",
+			"Active": true,
+			"Tags": ["Brick"],
+			"Components": {
+				"Transform": {
+					"Translation": [-7.2, 3.7, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1.5, 0.5, 1]
+				},
+				"Prefab": {
+					"Prefab": "11d04163305d2e9f",
+					"Overrides": [
+						{
+							"PrefabEntityID": "55425a047af78945",
+							"Kind": "Field",
+							"Component": "MeshRenderer",
+							"Field": "Materials",
+							"Value": ["16305f6ca94cdc2d"]
+						},
+						{
+							"PrefabEntityID": "55425a047af78945",
+							"Kind": "Field",
+							"Component": "Script",
+							"Field": "Fields",
+							"Value": {
+								"Points": 2
+							}
+						}
+					]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "55425a047af78945",
+					"InstanceRoot": "5a128711643b5917"
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["16305f6ca94cdc2d"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"RigidBody": {
+					"Type": "Static",
+					"Mass": 1,
+					"Friction": 0,
+					"Restitution": 1,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				},
+				"Script": {
+					"Script": "e29b62c819907a37",
+					"Fields": {
+						"Points": 2
+					},
+					"ExecutionOrder": 0
+				}
+			}
+		},
+		{
+			"ID": "ac6cbf3ecdcff45c",
+			"Name": "Brick_R4_C02",
+			"Parent": "0deebadb2218c766",
+			"Active": true,
+			"Tags": ["Brick"],
+			"Components": {
+				"Transform": {
+					"Translation": [-5.6, 3.7, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1.5, 0.5, 1]
+				},
+				"Prefab": {
+					"Prefab": "11d04163305d2e9f",
+					"Overrides": [
+						{
+							"PrefabEntityID": "55425a047af78945",
+							"Kind": "Field",
+							"Component": "MeshRenderer",
+							"Field": "Materials",
+							"Value": ["16305f6ca94cdc2d"]
+						},
+						{
+							"PrefabEntityID": "55425a047af78945",
+							"Kind": "Field",
+							"Component": "Script",
+							"Field": "Fields",
+							"Value": {
+								"Points": 2
+							}
+						}
+					]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "55425a047af78945",
+					"InstanceRoot": "ac6cbf3ecdcff45c"
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["16305f6ca94cdc2d"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"RigidBody": {
+					"Type": "Static",
+					"Mass": 1,
+					"Friction": 0,
+					"Restitution": 1,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				},
+				"Script": {
+					"Script": "e29b62c819907a37",
+					"Fields": {
+						"Points": 2
+					},
+					"ExecutionOrder": 0
+				}
+			}
+		},
+		{
+			"ID": "0e8ad929dfaa7c54",
+			"Name": "Brick_R4_C03",
+			"Parent": "0deebadb2218c766",
+			"Active": true,
+			"Tags": ["Brick"],
+			"Components": {
+				"Transform": {
+					"Translation": [-4, 3.7, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1.5, 0.5, 1]
+				},
+				"Prefab": {
+					"Prefab": "11d04163305d2e9f",
+					"Overrides": [
+						{
+							"PrefabEntityID": "55425a047af78945",
+							"Kind": "Field",
+							"Component": "MeshRenderer",
+							"Field": "Materials",
+							"Value": ["16305f6ca94cdc2d"]
+						},
+						{
+							"PrefabEntityID": "55425a047af78945",
+							"Kind": "Field",
+							"Component": "Script",
+							"Field": "Fields",
+							"Value": {
+								"Points": 2
+							}
+						}
+					]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "55425a047af78945",
+					"InstanceRoot": "0e8ad929dfaa7c54"
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["16305f6ca94cdc2d"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"RigidBody": {
+					"Type": "Static",
+					"Mass": 1,
+					"Friction": 0,
+					"Restitution": 1,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				},
+				"Script": {
+					"Script": "e29b62c819907a37",
+					"Fields": {
+						"Points": 2
+					},
+					"ExecutionOrder": 0
+				}
+			}
+		},
+		{
+			"ID": "92cc45d1ad345564",
+			"Name": "Brick_R4_C04",
+			"Parent": "0deebadb2218c766",
+			"Active": true,
+			"Tags": ["Brick"],
+			"Components": {
+				"Transform": {
+					"Translation": [-2.4, 3.7, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1.5, 0.5, 1]
+				},
+				"Prefab": {
+					"Prefab": "11d04163305d2e9f",
+					"Overrides": [
+						{
+							"PrefabEntityID": "55425a047af78945",
+							"Kind": "Field",
+							"Component": "MeshRenderer",
+							"Field": "Materials",
+							"Value": ["16305f6ca94cdc2d"]
+						},
+						{
+							"PrefabEntityID": "55425a047af78945",
+							"Kind": "Field",
+							"Component": "Script",
+							"Field": "Fields",
+							"Value": {
+								"Points": 2
+							}
+						}
+					]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "55425a047af78945",
+					"InstanceRoot": "92cc45d1ad345564"
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["16305f6ca94cdc2d"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"RigidBody": {
+					"Type": "Static",
+					"Mass": 1,
+					"Friction": 0,
+					"Restitution": 1,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				},
+				"Script": {
+					"Script": "e29b62c819907a37",
+					"Fields": {
+						"Points": 2
+					},
+					"ExecutionOrder": 0
+				}
+			}
+		},
+		{
+			"ID": "c95be6caa2147037",
+			"Name": "Brick_R4_C05",
+			"Parent": "0deebadb2218c766",
+			"Active": true,
+			"Tags": ["Brick"],
+			"Components": {
+				"Transform": {
+					"Translation": [-0.8, 3.7, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1.5, 0.5, 1]
+				},
+				"Prefab": {
+					"Prefab": "11d04163305d2e9f",
+					"Overrides": [
+						{
+							"PrefabEntityID": "55425a047af78945",
+							"Kind": "Field",
+							"Component": "MeshRenderer",
+							"Field": "Materials",
+							"Value": ["16305f6ca94cdc2d"]
+						},
+						{
+							"PrefabEntityID": "55425a047af78945",
+							"Kind": "Field",
+							"Component": "Script",
+							"Field": "Fields",
+							"Value": {
+								"Points": 2
+							}
+						}
+					]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "55425a047af78945",
+					"InstanceRoot": "c95be6caa2147037"
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["16305f6ca94cdc2d"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"RigidBody": {
+					"Type": "Static",
+					"Mass": 1,
+					"Friction": 0,
+					"Restitution": 1,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				},
+				"Script": {
+					"Script": "e29b62c819907a37",
+					"Fields": {
+						"Points": 2
+					},
+					"ExecutionOrder": 0
+				}
+			}
+		},
+		{
+			"ID": "33cdbc030fc4ab5e",
+			"Name": "Brick_R4_C06",
+			"Parent": "0deebadb2218c766",
+			"Active": true,
+			"Tags": ["Brick"],
+			"Components": {
+				"Transform": {
+					"Translation": [0.8, 3.7, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1.5, 0.5, 1]
+				},
+				"Prefab": {
+					"Prefab": "11d04163305d2e9f",
+					"Overrides": [
+						{
+							"PrefabEntityID": "55425a047af78945",
+							"Kind": "Field",
+							"Component": "MeshRenderer",
+							"Field": "Materials",
+							"Value": ["16305f6ca94cdc2d"]
+						},
+						{
+							"PrefabEntityID": "55425a047af78945",
+							"Kind": "Field",
+							"Component": "Script",
+							"Field": "Fields",
+							"Value": {
+								"Points": 2
+							}
+						}
+					]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "55425a047af78945",
+					"InstanceRoot": "33cdbc030fc4ab5e"
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["16305f6ca94cdc2d"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"RigidBody": {
+					"Type": "Static",
+					"Mass": 1,
+					"Friction": 0,
+					"Restitution": 1,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				},
+				"Script": {
+					"Script": "e29b62c819907a37",
+					"Fields": {
+						"Points": 2
+					},
+					"ExecutionOrder": 0
+				}
+			}
+		},
+		{
+			"ID": "08c5f6fede8488f1",
+			"Name": "Brick_R4_C07",
+			"Parent": "0deebadb2218c766",
+			"Active": true,
+			"Tags": ["Brick"],
+			"Components": {
+				"Transform": {
+					"Translation": [2.4, 3.7, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1.5, 0.5, 1]
+				},
+				"Prefab": {
+					"Prefab": "11d04163305d2e9f",
+					"Overrides": [
+						{
+							"PrefabEntityID": "55425a047af78945",
+							"Kind": "Field",
+							"Component": "MeshRenderer",
+							"Field": "Materials",
+							"Value": ["16305f6ca94cdc2d"]
+						},
+						{
+							"PrefabEntityID": "55425a047af78945",
+							"Kind": "Field",
+							"Component": "Script",
+							"Field": "Fields",
+							"Value": {
+								"Points": 2
+							}
+						}
+					]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "55425a047af78945",
+					"InstanceRoot": "08c5f6fede8488f1"
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["16305f6ca94cdc2d"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"RigidBody": {
+					"Type": "Static",
+					"Mass": 1,
+					"Friction": 0,
+					"Restitution": 1,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				},
+				"Script": {
+					"Script": "e29b62c819907a37",
+					"Fields": {
+						"Points": 2
+					},
+					"ExecutionOrder": 0
+				}
+			}
+		},
+		{
+			"ID": "e01240fff9bed39f",
+			"Name": "Brick_R4_C08",
+			"Parent": "0deebadb2218c766",
+			"Active": true,
+			"Tags": ["Brick"],
+			"Components": {
+				"Transform": {
+					"Translation": [4, 3.7, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1.5, 0.5, 1]
+				},
+				"Prefab": {
+					"Prefab": "11d04163305d2e9f",
+					"Overrides": [
+						{
+							"PrefabEntityID": "55425a047af78945",
+							"Kind": "Field",
+							"Component": "MeshRenderer",
+							"Field": "Materials",
+							"Value": ["16305f6ca94cdc2d"]
+						},
+						{
+							"PrefabEntityID": "55425a047af78945",
+							"Kind": "Field",
+							"Component": "Script",
+							"Field": "Fields",
+							"Value": {
+								"Points": 2
+							}
+						}
+					]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "55425a047af78945",
+					"InstanceRoot": "e01240fff9bed39f"
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["16305f6ca94cdc2d"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"RigidBody": {
+					"Type": "Static",
+					"Mass": 1,
+					"Friction": 0,
+					"Restitution": 1,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				},
+				"Script": {
+					"Script": "e29b62c819907a37",
+					"Fields": {
+						"Points": 2
+					},
+					"ExecutionOrder": 0
+				}
+			}
+		},
+		{
+			"ID": "2109d9199dbeed36",
+			"Name": "Brick_R4_C09",
+			"Parent": "0deebadb2218c766",
+			"Active": true,
+			"Tags": ["Brick"],
+			"Components": {
+				"Transform": {
+					"Translation": [5.6, 3.7, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1.5, 0.5, 1]
+				},
+				"Prefab": {
+					"Prefab": "11d04163305d2e9f",
+					"Overrides": [
+						{
+							"PrefabEntityID": "55425a047af78945",
+							"Kind": "Field",
+							"Component": "MeshRenderer",
+							"Field": "Materials",
+							"Value": ["16305f6ca94cdc2d"]
+						},
+						{
+							"PrefabEntityID": "55425a047af78945",
+							"Kind": "Field",
+							"Component": "Script",
+							"Field": "Fields",
+							"Value": {
+								"Points": 2
+							}
+						}
+					]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "55425a047af78945",
+					"InstanceRoot": "2109d9199dbeed36"
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["16305f6ca94cdc2d"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"RigidBody": {
+					"Type": "Static",
+					"Mass": 1,
+					"Friction": 0,
+					"Restitution": 1,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				},
+				"Script": {
+					"Script": "e29b62c819907a37",
+					"Fields": {
+						"Points": 2
+					},
+					"ExecutionOrder": 0
+				}
+			}
+		},
+		{
+			"ID": "699dfc19778a77ff",
+			"Name": "Brick_R4_C10",
+			"Parent": "0deebadb2218c766",
+			"Active": true,
+			"Tags": ["Brick"],
+			"Components": {
+				"Transform": {
+					"Translation": [7.2, 3.7, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1.5, 0.5, 1]
+				},
+				"Prefab": {
+					"Prefab": "11d04163305d2e9f",
+					"Overrides": [
+						{
+							"PrefabEntityID": "55425a047af78945",
+							"Kind": "Field",
+							"Component": "MeshRenderer",
+							"Field": "Materials",
+							"Value": ["16305f6ca94cdc2d"]
+						},
+						{
+							"PrefabEntityID": "55425a047af78945",
+							"Kind": "Field",
+							"Component": "Script",
+							"Field": "Fields",
+							"Value": {
+								"Points": 2
+							}
+						}
+					]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "55425a047af78945",
+					"InstanceRoot": "699dfc19778a77ff"
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["16305f6ca94cdc2d"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"RigidBody": {
+					"Type": "Static",
+					"Mass": 1,
+					"Friction": 0,
+					"Restitution": 1,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				},
+				"Script": {
+					"Script": "e29b62c819907a37",
+					"Fields": {
+						"Points": 2
+					},
+					"ExecutionOrder": 0
+				}
+			}
+		},
+		{
+			"ID": "77ba594175e157f1",
+			"Name": "Brick_R5_C01",
+			"Parent": "0deebadb2218c766",
+			"Active": true,
+			"Tags": ["Brick"],
+			"Components": {
+				"Transform": {
+					"Translation": [-7.2, 3.1, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1.5, 0.5, 1]
+				},
+				"Prefab": {
+					"Prefab": "11d04163305d2e9f",
+					"Overrides": []
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "55425a047af78945",
+					"InstanceRoot": "77ba594175e157f1"
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["4fe19c1c1e553eec"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"RigidBody": {
+					"Type": "Static",
+					"Mass": 1,
+					"Friction": 0,
+					"Restitution": 1,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				},
+				"Script": {
+					"Script": "e29b62c819907a37",
+					"Fields": {
+						"Points": 1
+					},
+					"ExecutionOrder": 0
+				}
+			}
+		},
+		{
+			"ID": "64acee1c8f7fcd6b",
+			"Name": "Brick_R5_C02",
+			"Parent": "0deebadb2218c766",
+			"Active": true,
+			"Tags": ["Brick"],
+			"Components": {
+				"Transform": {
+					"Translation": [-5.6, 3.1, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1.5, 0.5, 1]
+				},
+				"Prefab": {
+					"Prefab": "11d04163305d2e9f",
+					"Overrides": []
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "55425a047af78945",
+					"InstanceRoot": "64acee1c8f7fcd6b"
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["4fe19c1c1e553eec"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"RigidBody": {
+					"Type": "Static",
+					"Mass": 1,
+					"Friction": 0,
+					"Restitution": 1,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				},
+				"Script": {
+					"Script": "e29b62c819907a37",
+					"Fields": {
+						"Points": 1
+					},
+					"ExecutionOrder": 0
+				}
+			}
+		},
+		{
+			"ID": "2011b4db5569f665",
+			"Name": "Brick_R5_C03",
+			"Parent": "0deebadb2218c766",
+			"Active": true,
+			"Tags": ["Brick"],
+			"Components": {
+				"Transform": {
+					"Translation": [-4, 3.1, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1.5, 0.5, 1]
+				},
+				"Prefab": {
+					"Prefab": "11d04163305d2e9f",
+					"Overrides": []
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "55425a047af78945",
+					"InstanceRoot": "2011b4db5569f665"
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["4fe19c1c1e553eec"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"RigidBody": {
+					"Type": "Static",
+					"Mass": 1,
+					"Friction": 0,
+					"Restitution": 1,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				},
+				"Script": {
+					"Script": "e29b62c819907a37",
+					"Fields": {
+						"Points": 1
+					},
+					"ExecutionOrder": 0
+				}
+			}
+		},
+		{
+			"ID": "4f060f247cfd860d",
+			"Name": "Brick_R5_C04",
+			"Parent": "0deebadb2218c766",
+			"Active": true,
+			"Tags": ["Brick"],
+			"Components": {
+				"Transform": {
+					"Translation": [-2.4, 3.1, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1.5, 0.5, 1]
+				},
+				"Prefab": {
+					"Prefab": "11d04163305d2e9f",
+					"Overrides": []
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "55425a047af78945",
+					"InstanceRoot": "4f060f247cfd860d"
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["4fe19c1c1e553eec"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"RigidBody": {
+					"Type": "Static",
+					"Mass": 1,
+					"Friction": 0,
+					"Restitution": 1,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				},
+				"Script": {
+					"Script": "e29b62c819907a37",
+					"Fields": {
+						"Points": 1
+					},
+					"ExecutionOrder": 0
+				}
+			}
+		},
+		{
+			"ID": "8aed70f49845ef20",
+			"Name": "Brick_R5_C05",
+			"Parent": "0deebadb2218c766",
+			"Active": true,
+			"Tags": ["Brick"],
+			"Components": {
+				"Transform": {
+					"Translation": [-0.8, 3.1, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1.5, 0.5, 1]
+				},
+				"Prefab": {
+					"Prefab": "11d04163305d2e9f",
+					"Overrides": []
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "55425a047af78945",
+					"InstanceRoot": "8aed70f49845ef20"
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["4fe19c1c1e553eec"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"RigidBody": {
+					"Type": "Static",
+					"Mass": 1,
+					"Friction": 0,
+					"Restitution": 1,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				},
+				"Script": {
+					"Script": "e29b62c819907a37",
+					"Fields": {
+						"Points": 1
+					},
+					"ExecutionOrder": 0
+				}
+			}
+		},
+		{
+			"ID": "302348698acc43ae",
+			"Name": "Brick_R5_C06",
+			"Parent": "0deebadb2218c766",
+			"Active": true,
+			"Tags": ["Brick"],
+			"Components": {
+				"Transform": {
+					"Translation": [0.8, 3.1, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1.5, 0.5, 1]
+				},
+				"Prefab": {
+					"Prefab": "11d04163305d2e9f",
+					"Overrides": []
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "55425a047af78945",
+					"InstanceRoot": "302348698acc43ae"
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["4fe19c1c1e553eec"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"RigidBody": {
+					"Type": "Static",
+					"Mass": 1,
+					"Friction": 0,
+					"Restitution": 1,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				},
+				"Script": {
+					"Script": "e29b62c819907a37",
+					"Fields": {
+						"Points": 1
+					},
+					"ExecutionOrder": 0
+				}
+			}
+		},
+		{
+			"ID": "2c01bc0c282ab3ca",
+			"Name": "Brick_R5_C07",
+			"Parent": "0deebadb2218c766",
+			"Active": true,
+			"Tags": ["Brick"],
+			"Components": {
+				"Transform": {
+					"Translation": [2.4, 3.1, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1.5, 0.5, 1]
+				},
+				"Prefab": {
+					"Prefab": "11d04163305d2e9f",
+					"Overrides": []
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "55425a047af78945",
+					"InstanceRoot": "2c01bc0c282ab3ca"
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["4fe19c1c1e553eec"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"RigidBody": {
+					"Type": "Static",
+					"Mass": 1,
+					"Friction": 0,
+					"Restitution": 1,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				},
+				"Script": {
+					"Script": "e29b62c819907a37",
+					"Fields": {
+						"Points": 1
+					},
+					"ExecutionOrder": 0
+				}
+			}
+		},
+		{
+			"ID": "e52d96fd9d52709a",
+			"Name": "Brick_R5_C08",
+			"Parent": "0deebadb2218c766",
+			"Active": true,
+			"Tags": ["Brick"],
+			"Components": {
+				"Transform": {
+					"Translation": [4, 3.1, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1.5, 0.5, 1]
+				},
+				"Prefab": {
+					"Prefab": "11d04163305d2e9f",
+					"Overrides": []
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "55425a047af78945",
+					"InstanceRoot": "e52d96fd9d52709a"
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["4fe19c1c1e553eec"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"RigidBody": {
+					"Type": "Static",
+					"Mass": 1,
+					"Friction": 0,
+					"Restitution": 1,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				},
+				"Script": {
+					"Script": "e29b62c819907a37",
+					"Fields": {
+						"Points": 1
+					},
+					"ExecutionOrder": 0
+				}
+			}
+		},
+		{
+			"ID": "c3ef825b16186b9b",
+			"Name": "Brick_R5_C09",
+			"Parent": "0deebadb2218c766",
+			"Active": true,
+			"Tags": ["Brick"],
+			"Components": {
+				"Transform": {
+					"Translation": [5.6, 3.1, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1.5, 0.5, 1]
+				},
+				"Prefab": {
+					"Prefab": "11d04163305d2e9f",
+					"Overrides": []
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "55425a047af78945",
+					"InstanceRoot": "c3ef825b16186b9b"
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["4fe19c1c1e553eec"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"RigidBody": {
+					"Type": "Static",
+					"Mass": 1,
+					"Friction": 0,
+					"Restitution": 1,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				},
+				"Script": {
+					"Script": "e29b62c819907a37",
+					"Fields": {
+						"Points": 1
+					},
+					"ExecutionOrder": 0
+				}
+			}
+		},
+		{
+			"ID": "a54602d5759eb73b",
+			"Name": "Brick_R5_C10",
+			"Parent": "0deebadb2218c766",
+			"Active": true,
+			"Tags": ["Brick"],
+			"Components": {
+				"Transform": {
+					"Translation": [7.2, 3.1, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1.5, 0.5, 1]
+				},
+				"Prefab": {
+					"Prefab": "11d04163305d2e9f",
+					"Overrides": []
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "55425a047af78945",
+					"InstanceRoot": "a54602d5759eb73b"
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["4fe19c1c1e553eec"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"RigidBody": {
+					"Type": "Static",
+					"Mass": 1,
+					"Friction": 0,
+					"Restitution": 1,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				},
+				"Script": {
+					"Script": "e29b62c819907a37",
+					"Fields": {
+						"Points": 1
+					},
+					"ExecutionOrder": 0
+				}
+			}
+		},
+		{
+			"ID": "c485508f72efec16",
+			"Name": "ScoreText",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Text": {
+					"Text": "SCORE 0",
+					"Font": null,
+					"Size": 44,
+					"Color": [1, 1, 1, 1],
+					"Space": "Screen",
+					"Anchor": [0.03, 0.03],
+					"Pivot": [0, 0],
+					"Offset": [0, 0],
+					"Alignment": "Left",
+					"Billboard": false
+				}
+			}
+		},
+		{
+			"ID": "e83aa29a71e02baa",
+			"Name": "LivesText",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Text": {
+					"Text": "LIVES 3",
+					"Font": null,
+					"Size": 44,
+					"Color": [1, 1, 1, 1],
+					"Space": "Screen",
+					"Anchor": [0.97, 0.03],
+					"Pivot": [1, 0],
+					"Offset": [0, 0],
+					"Alignment": "Right",
+					"Billboard": false
+				}
+			}
+		},
+		{
+			"ID": "358a46446e19c3e5",
+			"Name": "MessageText",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Text": {
+					"Text": "PRESS SPACE TO LAUNCH",
+					"Font": null,
+					"Size": 52,
+					"Color": [1, 0.95, 0.6, 1],
+					"Space": "Screen",
+					"Anchor": [0.5, 0.6],
+					"Pivot": [0.5, 0.5],
+					"Offset": [0, 0],
+					"Alignment": "Center",
+					"Billboard": false
+				}
+			}
+		},
+		{
+			"ID": "3164574db437db5a",
+			"Name": "Game",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Script": {
+					"Script": "f03aaac70b2f5037",
+					"Fields": {
+						"Ball": "e0e0fb587c483494",
+						"BrickBreakSound": "3e69f27e1119a90d",
+						"BrickRoot": "0deebadb2218c766",
+						"GameOverSound": "1281af27c6d1d20f",
+						"LifeLostSound": "04a73e94d0da0935",
+						"LivesText": "e83aa29a71e02baa",
+						"MessageText": "358a46446e19c3e5",
+						"Paddle": "c9bff8428185b819",
+						"PaddleHitSound": "47480773fb23c464",
+						"ScoreText": "c485508f72efec16",
+						"WallHitSound": "3b22308614f51348",
+						"WinSound": "4a99b5db3ab5af16"
+					},
+					"ExecutionOrder": 0
+				}
+			}
+		}
+	]
+}

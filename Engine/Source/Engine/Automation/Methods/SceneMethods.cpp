@@ -389,7 +389,9 @@ namespace Engine {
 		registry.Struct<SceneSummary>("SceneSummary", "The open scene.")
 			.Field("path", &SceneSummary::Path, "The project-relative path of its file; empty for a scene never saved.")
 			.Field("name", &SceneSummary::Name, "The scene's name.")
-			.Field("revision", &SceneSummary::Revision, "The host's revision (the play scene's in the Runtime), which grows with every change.")
+			.Field("revision", &SceneSummary::Revision,
+				"The host's revision (_meta.revision; the play scene's in the Runtime): it grows with every change to the open scene or the project "
+				"settings; writing an asset or script file alone leaves it unchanged.")
 			.Field("dirty", &SceneSummary::Dirty, "Whether the scene has unsaved changes.")
 			.Field("entityCount", &SceneSummary::EntityCount, "The number of entities.");
 

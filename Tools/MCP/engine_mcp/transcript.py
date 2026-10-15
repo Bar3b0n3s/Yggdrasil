@@ -8,8 +8,19 @@ camelCase, one object per line, appended and never rewritten:
   {"type": "request", "time": "<UTC ISO 8601>", "client": "<name>", "id": <id>, "method": "<method>", "params": {...}}
   {"type": "response", "time": "...", "client": "<name>", "id": <id>, "requestLine": <line of the request>, "ok": true,
    "summary": "<one line>"}          (or "ok": false with "error": {"code", "errorCode", "detail"})
+A summary names an offloaded result's file relative to the project root ("offloaded to Library/Automation/Out/..."),
+or by its file name alone when it lies outside the project, so the committed transcript names no machine path
+(Docs/Decisions/0026-m16-contract.md, friction S1-16; connection.py records project paths the same way).
 The 1-based line number of each request line is passed to the editor as params._meta.transcriptLine, which provenance
 stores. Session-level methods (session.hello) are not written: they carry the token.
+
+Request ids belong to one connection: every editor_launch and editor_attach connects anew, and its ids start again after
+session.hello's, so an id names a request only together with its line (provenance keys on TranscriptLine). Ids can also
+skip: the bridge's own rpc.discover reads (engine_call's timeout, EditorConnection.method_timeout) take an id but are
+not transcribed (Docs/Decisions/0026-m16-contract.md, friction S3-11). Where one connection ends and the next begins is
+marked by the first line of the new one: project.create or project.open for a launched editor (followed by the
+session.info every launch sends next), the session.info every attach sends first for an attached one (launcher.py;
+Docs/Decisions/0026-m16-contract.md, frictions S2-10 and S3-06).
 
 Line numbers stay right when several writers share the file (two bridges attached to one editor): every append takes an
 exclusive OS lock on the file (the project lock's primitives: LockFileEx on one far byte on Windows, flock on POSIX),
@@ -19,7 +30,11 @@ The transcript of a project that is being created or opened (editor_launch {crea
 project.open) is pending until the editor confirms the project: its lines are kept in memory, numbered after the lines
 the project's transcript already holds, and written once the directory holds a project file (.eproj). The bridge
 creates nothing before that: project.create accepts only a new or empty directory, so an Automation/ folder written
-first would make it fail, and a refused call must leave nothing behind in a directory that is not a project.
+first would make it fail, and a refused call must leave nothing behind in a directory that is not a project. A refused
+call whose directory holds a project file keeps its lines (the editor may have recorded files under its line before
+refusing), and a call the bridge stopped waiting for (a timeout, a broken connection) keeps them pending until the
+project file appears, which every later call checks first (connection.py, EditorConnection.resolve_pending; the M16
+milestone review's R05 and R31).
 """
 
 from __future__ import annotations
@@ -56,8 +71,10 @@ class Transcript:
     """Appends to one transcript file. Counts its existing lines when opened, so line numbers continue across bridge
     restarts; a file whose last line lacks its newline (a torn write) is completed with one before appending."""
 
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, project_root: Path | None = None) -> None:
         self.path = path
+        # The project the transcript belongs to: summaries name its files relative to it.
+        self.project_root = project_root
         self.line_count = 0
         # Bytes of the file already counted in line_count.
         self.counted_size = 0
@@ -71,7 +88,7 @@ class Transcript:
         """The transcript of `project_root` (transcript_path), with Automation/ created. With `pending` (a project being
         created or opened), or for a directory that does not exist, nothing is created: lines are kept in memory until
         flush_pending finds the project file (see the module comment). A redirected transcript is never pending."""
-        transcript = cls(transcript_path(project_root))
+        transcript = cls(transcript_path(project_root), project_root)
         redirected = bool(os.environ.get(TRANSCRIPT_ENVIRONMENT_VARIABLE, ""))
         if not redirected and (pending or not project_root.is_dir()):
             transcript.pending_root = project_root
@@ -93,7 +110,7 @@ class Transcript:
         """Appends the response line of the request at `request_line`, with summarize(response)."""
         line: dict[str, Any] = {"type": "response", "time": utc_timestamp(), "client": CLIENT_NAME, "id": request_id,
                                 "requestLine": request_line, "ok": "error" not in response,
-                                "summary": summarize(response)}
+                                "summary": summarize(response, self.project_root)}
         error = response.get("error")
         if isinstance(error, dict):
             data = error.get("data") if isinstance(error.get("data"), dict) else {}
@@ -149,8 +166,9 @@ class Transcript:
         return True
 
     def discard_pending(self) -> None:
-        """Drops the kept lines of a project that was never confirmed (a refused project.create or project.open):
-        nothing is written to a directory that is not a project."""
+        """Drops the kept lines of a project that was never confirmed (a refused project.create or project.open, or one
+        that timed out, whose directory holds no project file): nothing is written to a directory that is not a
+        project."""
         self.pending_lines = []
 
     def catch_up(self, file: BinaryIO) -> None:
@@ -202,9 +220,10 @@ def _holds_project_file(root: Path) -> bool:
         return False
 
 
-def summarize(response: dict[str, Any]) -> str:
+def summarize(response: dict[str, Any], project_root: Path | None = None) -> str:
     """One line for a response: the error's code and detail, or the result's notable members (ids, names, counts) and
-    its _meta delta (revision, dirty, new errors and warnings), at most 200 characters."""
+    its _meta delta (revision, dirty, new errors and warnings), at most 200 characters. An offloaded result's file is
+    named relative to `project_root` when it lies inside it, else by its file name (see the module comment)."""
     error = response.get("error")
     if isinstance(error, dict):
         data = error.get("data") if isinstance(error.get("data"), dict) else {}
@@ -217,8 +236,8 @@ def summarize(response: dict[str, Any]) -> str:
     if not isinstance(result, dict):
         return _clip(f"result {json.dumps(result)}")
     parts = []
-    if result.get("truncated") is True and "path" in result:
-        parts.append(f"offloaded to {result['path']}")
+    if result.get("truncated") is True and isinstance(result.get("path"), str):
+        parts.append(f"offloaded to {_recorded_path(result['path'], project_root)}")
     if result.get("dryRun") is True:
         parts.append("dry run")
     keys = [key for key in _NOTABLE_MEMBERS if key in result]
@@ -231,6 +250,17 @@ def summarize(response: dict[str, Any]) -> str:
     if isinstance(meta, dict):
         parts.append(_describe_meta(meta))
     return _clip("; ".join(part for part in parts if part) or "ok")
+
+
+def _recorded_path(path: str, project_root: Path | None) -> str:
+    """`path` relative to `project_root` with '/' separators when it lies inside it, else its file name."""
+    file = Path(path)
+    if project_root is not None:
+        try:
+            return file.resolve().relative_to(project_root.resolve()).as_posix()
+        except (OSError, ValueError):
+            pass
+    return file.name
 
 
 def _describe_member(key: str, value: Any) -> str:

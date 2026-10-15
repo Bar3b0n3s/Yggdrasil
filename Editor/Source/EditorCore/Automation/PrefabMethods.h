@@ -6,6 +6,7 @@
 #include "Engine/Reflection/VariantValue.h"
 
 #include <cstdint>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -26,7 +27,8 @@ namespace Engine {
 	// project-relative `path` (below Assets/, extension .prefab) with its .meta (Prefab::CreateFromEntity: nested instances
 	// are flattened, §1.2, §5.5). With replaceWithInstance (default false) the entity is replaced by an instance of the new
 	// prefab at the same place in the hierarchy, keeping its root ID (so references to it survive). Supports dry runs
-	// (§13.4: the files go to the overlay and the scene change to the dry run's copy).
+	// (§13.4: the files go to the overlay and the scene change to the dry run's copy). The result names the instance root
+	// `instance`, empty without replaceWithInstance (prefab.instantiate names its new root `entity`).
 	struct PrefabCreateParams
 	{
 		std::string Entity{};
@@ -41,10 +43,15 @@ namespace Engine {
 		uint32_t UndoIndex = 0;
 	};
 
-	// prefab.instantiate {prefab, parent?, index?, transform?, name?}: InstantiatePrefabAsset with a fresh root ID from the
-	// editor's generator, under `parent` (empty: a root) at sibling `index` (absent: last). `transform` is a partial
-	// Transform component value (registry PascalCase, virtual fields such as EulerAngles allowed, ADR 0008 decision 35)
-	// over the prefab root's; `name` renames the root (absent: the prefab root's name). Supports dry runs.
+	// prefab.instantiate {prefab, parent?, index?, transform?, name?, components?}: InstantiatePrefabAsset with a fresh root
+	// ID from the editor's generator, under `parent` (empty: a root) at sibling `index` (absent: last). `transform` is a
+	// partial Transform component value (registry PascalCase, virtual fields such as EulerAngles allowed, ADR 0008 decision
+	// 35) over the prefab root's; `name` renames the root (absent: the prefab root's name). `components` are per-instance
+	// values for the root, written as entity.update writes them after `transform` (merged into the prefab's components,
+	// missing ones added; script fields through {"Script": {"Fields": {...}}}, whose Script handle defaults to the prefab
+	// root's) and recorded as the instance's overrides when the step commits, so one call equals prefab.instantiate
+	// followed by entity.update of the new root. Supports dry runs and batches. The result names the new root `entity`
+	// (prefab.create names its instance `instance`).
 	struct PrefabInstantiateParams
 	{
 		std::string Prefab{};
@@ -52,6 +59,7 @@ namespace Engine {
 		uint32_t Index = 0;       // only when given (MethodContext::HasParam)
 		VariantValue Transform{}; // an object or null
 		std::string Name{};       // only when given
+		std::map<std::string, VariantValue> Components{};
 	};
 
 	struct PrefabInstantiateResult
@@ -124,7 +132,8 @@ namespace Engine {
 		// AlreadyExists for an existing file; InvalidState for an ambiguous reference (ADR 0006 decision 32).
 		[[nodiscard]] Result<PrefabCreateResult> PrefabCreate(EditorMethodContext& context, const PrefabCreateParams& params);
 		// prefab.instantiate. Errors: NotFound (prefab or parent); Validation for an invalid transform (located under
-		// /transform) or a unique-per-scene collision; those of InstantiatePrefabAsset.
+		// /transform) or a unique-per-scene collision; those of InstantiatePrefabAsset; those of entity.update's components
+		// (located under /components). Nothing is created on error.
 		[[nodiscard]] Result<PrefabInstantiateResult> PrefabInstantiate(EditorMethodContext& context, const PrefabInstantiateParams& params);
 		// prefab.apply. Errors: NotFound; InvalidArgument when `instance` is not an instance root; NotFound for its missing
 		// prefab asset (PREFAB_MISSING_ASSET); InvalidState for an ambiguous reference.

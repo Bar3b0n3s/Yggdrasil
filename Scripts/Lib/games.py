@@ -13,16 +13,30 @@ only staged projects, and name each project found on disk but not staged in a pa
 is not part of a commit never fails it and is never skipped silently. Apart from index discovery, which runs git, the
 helpers are pure: they read files or the documents the editor and the Runtime return, start nothing, and return failure
 lines ("<what>: <why>"), an empty list meaning the check passed.
+
+The input check (M16 friction S2-01, FX-4): every committed replay with input events is also verified without them
+(input.replay {verify: true, strictHash: true, withoutInput: true}; withoutInput without verify is refused, since it
+would check nothing) in the editor halves, and that verification must fail (evaluate_input_check),
+because a replay whose outcome does not depend on its input proves nothing about the gameplay it recorded. One rule
+decides input independence everywhere (Docs/Architecture.md §13.6; the recording guards of input.record and test.run
+{record} apply it too): a replay is input-independent when its input-free run passes verification (every checkpoint,
+the final state hash, every expectation), whatever script errors that run raised. A game also needs at least one test
+suite (evaluate_run) and at least one committed replay with input events (check_replay_acceptance), as the demo
+acceptance of Roadmap M16 to M18 asks.
 """
 
 from __future__ import annotations
 
 import dataclasses
+import json
+import re
+import subprocess
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
-from Lib import exports
+from Lib import exports, paths, provenance
+from Lib.process import format_command
 
 GAME_PROJECT_ROOTS = ("Projects", "Tests/Projects")
 EXCLUDED_PROJECTS = ("Projects/FeatureTest",)
@@ -41,6 +55,14 @@ EXPORTED_CONFIGURATION = exports.EXPORTED_CONFIGURATIONS[-1]
 REPORT_PREFIX = "Games"
 # The command a changed file of the upgrade dry run names (§13.12).
 UPGRADE_COMMAND = "Editor --headless --project {project} --upgrade"
+
+PROJECT_FILE_SUFFIX = ".eproj"
+REPLAY_FILE_SUFFIX = ".replay"
+ASSETS_DIRECTORY = "Assets"
+GIT_TIMEOUT_SECONDS = 120.0
+# A committed FinalStateHash: 16 hexadecimal digits (Engine/Source/Engine/Asset/ReplayData.h: ReplayToText writes them
+# lowercase).
+STATE_HASH_PATTERN = re.compile(r"[0-9a-fA-F]{16}")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -78,21 +100,204 @@ def discover_projects(root: Path, files: str = "disk") -> list[GameProject]:
     contributes nothing; no project at all is an empty list. Raises ValueError naming the directory when one holds
     several *.eproj files, or for a `files` value outside FILE_MODES, and RuntimeError naming the git command and its
     output when git is missing or fails in index mode."""
-    raise NotImplementedError("contract stub: games (ADR 0026 decision 7, stream B)")
+    if files not in provenance.FILE_MODES:
+        raise ValueError(f"unknown file source '{files}' (expected {' or '.join(provenance.FILE_MODES)})")
+    base = root.absolute()
+    # {root-relative project directory: the names of its *.eproj files}
+    candidates = _staged_project_files(base) if files == "index" else _disk_project_files(base)
+    projects: list[GameProject] = []
+    for relative in sorted(candidates):
+        if relative in EXCLUDED_PROJECTS:
+            continue
+        names = sorted(candidates[relative])
+        if len(names) != 1:
+            raise ValueError(f"{relative} holds {len(names)} *{PROJECT_FILE_SUFFIX} files ({', '.join(names)}); a game "
+                             f"project holds exactly one")
+        directory = base / relative
+        projects.append(GameProject(directory, directory / names[0], Path(names[0]).stem))
+    return projects
+
+
+def _disk_project_files(base: Path) -> dict[str, list[str]]:
+    """The *.eproj files directly in each directory directly below a GAME_PROJECT_ROOTS entry of the working tree."""
+    candidates: dict[str, list[str]] = {}
+    for project_root in GAME_PROJECT_ROOTS:
+        directory = base / project_root
+        if not directory.is_dir():
+            continue
+        for child in directory.iterdir():
+            if not child.is_dir():
+                continue
+            names = [entry.name for entry in child.iterdir() if entry.suffix == PROJECT_FILE_SUFFIX and entry.is_file()]
+            if names:
+                candidates[f"{project_root}/{child.name}"] = names
+    return candidates
+
+
+def _staged_project_files(base: Path) -> dict[str, list[str]]:
+    """The staged *.eproj files directly in each directory directly below a GAME_PROJECT_ROOTS entry (git ls-files)."""
+    command = ["git", "-C", str(base), "ls-files", "-z", "--", *GAME_PROJECT_ROOTS]
+    try:
+        completed = subprocess.run(command, stdin=subprocess.DEVNULL, capture_output=True, timeout=GIT_TIMEOUT_SECONDS,
+                                   check=False)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise RuntimeError(f"{format_command(command)} could not run: {error}") from error
+    if completed.returncode != 0:
+        output = completed.stderr.decode("utf-8", errors="replace").strip() or "no output"
+        raise RuntimeError(f"{format_command(command)} exited with code {completed.returncode}: {output}")
+    candidates: dict[str, list[str]] = {}
+    for entry in completed.stdout.decode("utf-8", errors="surrogateescape").split("\0"):
+        for project_root in GAME_PROJECT_ROOTS:
+            if not entry.startswith(f"{project_root}/"):
+                continue
+            parts = entry[len(project_root) + 1:].split("/")
+            if len(parts) == 2 and parts[1].endswith(PROJECT_FILE_SUFFIX):
+                candidates.setdefault(f"{project_root}/{parts[0]}", []).append(parts[1])
+    return candidates
+
+
+def _read_json_object(path: Path, what: str) -> dict[str, Any]:
+    """The JSON object in the UTF-8 file `path`; ValueError naming `what` otherwise."""
+    try:
+        document = json.loads(path.read_bytes().decode("utf-8"))
+    except OSError as error:
+        raise ValueError(f"{what}: cannot be read: {error}") from error
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ValueError(f"{what}: not UTF-8 JSON: {error}") from error
+    if not isinstance(document, dict):
+        raise ValueError(f"{what}: not a JSON object")
+    return document
 
 
 def read_testing(project_file: Path) -> TestingSettings:
     """The Testing settings of the .eproj `project_file`: each Testing.Suites entry's Script, Scene and Modes (absent
     Modes are DEFAULT_SUITE_MODES) and Testing.Replays, absent members read as empty. Raises ValueError naming the file
     for a document that is not a .eproj JSON object, or a member of the wrong type."""
-    raise NotImplementedError("contract stub: games (ADR 0026 decision 7, stream B)")
+    name = paths.display_path(project_file)
+    document = _read_json_object(project_file, name)
+    if document.get("Format") != "Project":
+        raise ValueError(f"{name}: not a project file (its Format is {document.get('Format')!r}, not 'Project')")
+    testing = document.get("Testing", {})
+    if not isinstance(testing, dict):
+        raise ValueError(f"{name}: Testing must be an object")
+    suites_value = testing.get("Suites", [])
+    if not isinstance(suites_value, list):
+        raise ValueError(f"{name}: Testing.Suites must be an array")
+    suites: list[SuiteEntry] = []
+    for index, entry in enumerate(suites_value):
+        where = f"{name}: Testing.Suites[{index}]"
+        if not isinstance(entry, dict):
+            raise ValueError(f"{where} must be an object")
+        script = entry.get("Script")
+        if not isinstance(script, str):
+            raise ValueError(f"{where}.Script must be a string")
+        scene = entry.get("Scene", "")
+        if scene is None:
+            scene = ""
+        if not isinstance(scene, str):
+            raise ValueError(f"{where}.Scene must be a string")
+        modes = entry.get("Modes", list(DEFAULT_SUITE_MODES))
+        if not isinstance(modes, list) or not all(isinstance(mode, str) for mode in modes):
+            raise ValueError(f"{where}.Modes must be an array of strings")
+        unknown = [mode for mode in modes if mode not in TEST_MODES]
+        if unknown:
+            raise ValueError(f"{where}.Modes names the unknown run mode '{unknown[0]}' (expected "
+                             f"{', '.join(TEST_MODES)})")
+        suites.append(SuiteEntry(script, scene, tuple(modes)))
+    replays = testing.get("Replays", [])
+    if not isinstance(replays, list) or not all(isinstance(replay, str) for replay in replays):
+        raise ValueError(f"{name}: Testing.Replays must be an array of strings")
+    return TestingSettings(tuple(suites), tuple(replays))
 
 
 def committed_hashes(project_directory: Path, replays: Iterable[str]) -> dict[str, str]:
     """{replay: FinalStateHash} for each project-relative .replay path of `replays` (Test.py's expand_replay_globs of
     Testing.Replays), read from the replay file's header as committed. Raises ValueError naming a replay that cannot be
     read, is not a Replay document, or has no 16-hexadecimal-digit FinalStateHash."""
-    raise NotImplementedError("contract stub: games (ADR 0026 decision 7, stream B)")
+    hashes: dict[str, str] = {}
+    for replay in replays:
+        document = _read_json_object(project_directory / replay, replay)
+        if document.get("Format") != "Replay":
+            raise ValueError(f"{replay}: not a replay (its Format is {document.get('Format')!r}, not 'Replay')")
+        state_hash = document.get("FinalStateHash")
+        if not isinstance(state_hash, str) or not STATE_HASH_PATTERN.fullmatch(state_hash):
+            raise ValueError(f"{replay}: no FinalStateHash of 16 hexadecimal digits (it holds {state_hash!r}); record "
+                             f"the replay again through automation (§13.6)")
+        hashes[replay] = state_hash
+    return hashes
+
+
+def replay_event_counts(project_directory: Path, replays: Iterable[str]) -> dict[str, int]:
+    """{replay: number of input events} for each project-relative .replay path of `replays`, read from the replay file
+    as committed: the replays with events are those the input check (evaluate_input_check) plays without them. Raises
+    ValueError naming a replay that cannot be read, is not a Replay document or has no Events array."""
+    counts: dict[str, int] = {}
+    for replay in replays:
+        document = _read_json_object(project_directory / replay, replay)
+        if document.get("Format") != "Replay":
+            raise ValueError(f"{replay}: not a replay (its Format is {document.get('Format')!r}, not 'Replay')")
+        events = document.get("Events")
+        if not isinstance(events, list):
+            raise ValueError(f"{replay}: no Events array")
+        counts[replay] = len(events)
+    return counts
+
+
+def evaluate_input_check(replay: str, events: int, result: dict[str, Any] | None,
+                         error: tuple[str, str] | None) -> list[str]:
+    """The failures of the input check of one committed replay with `events` input events (M16 friction S2-01): the
+    replay verified with input.replay {verify: true, strictHash: true, withoutInput: true}, `result` being that
+    call's result when it succeeded and `error` its (errorCode, detail) when it failed. The check passes only when
+    that verification failed with Validation: a replay whose verification (every checkpoint, the final state hash,
+    every expectation) still passes without its input proves nothing about the gameplay it recorded. That happens
+    only when its input never shows in the world at a checkpoint (one every 60 ticks in a replay recorded with
+    checkpoints), at its end or in an expectation: a replay without checkpoints (format 1, or upgraded from it by
+    project.upgrade, which writes an empty Checkpoints list) that ends idle or after a restart, whatever its length;
+    a replay shorter than 60 ticks that ends idle; input that changes only script state; or play after the last
+    checkpoint that a restart undoes (M16 friction S3-01; a longer replay recorded with checkpoints that ends with a
+    restart passes, its checkpoints having seen the play, while its final hash then proves only the restored state).
+    Script errors in the input-free run do not matter (input.replay's success ignores them, as the recording guards
+    do; §13.6). Another error fails naming it; a replay without events has nothing to check."""
+    if events == 0:
+        return []
+    if error is None:
+        tick = result.get("finalTick") if isinstance(result, dict) else None
+        return [f"{replay}: its verification passes without its {events} input event(s) (input.replay {{verify: "
+                f"true, strictHash: true, withoutInput: true}} reproduced every checkpoint, the final state hash at "
+                f"tick {tick} and every expectation), so it proves nothing about its input: record it again so that "
+                f"its input shows in the world at a checkpoint (one every 60 ticks) and it ends while the played state "
+                f"is still in the scene, not after a restart"]
+    code, detail = error
+    if code != "Validation":
+        return [f"{replay}: the input check could not run (input.replay {{verify: true, strictHash: true, "
+                f"withoutInput: true}} failed with {code}: {detail})"]
+    return []
+
+
+def check_replay_acceptance(events: dict[str, int]) -> list[str]:
+    """The failures of a game's committed replays against the demo acceptance (Roadmap M16 to M18: the suites and a
+    replay recorded from tick 0 pass, and the replay's final hash is identical in the editor and the Dist export):
+    `events` is replay_event_counts' {replay: input events} of the replays Testing.Replays matches. A game fails when
+    Testing.Replays matches no replay, or when none of its replays has input events, since a replay without input proves
+    nothing about the gameplay and the input check (evaluate_input_check) would have nothing to check. Testing.Suites'
+    rule is evaluate_run's."""
+    if not events:
+        return ["Testing.Replays matches no replay: every game commits at least one replay recorded from tick 0 with "
+                "the input that plays it (Roadmap M16 to M18; record one with test.run {record} or input.record)"]
+    if not any(count > 0 for count in events.values()):
+        names = ", ".join(sorted(events))
+        return [f"no replay of Testing.Replays has input events ({names}): every game commits at least one replay "
+                f"recorded from tick 0 with the input that plays it, which the input check then requires to matter "
+                f"(Roadmap M16 to M18)"]
+    return []
+
+
+def _rows(document: dict[str, Any], key: str) -> list[dict[str, Any]] | None:
+    """The object rows of the list `document[key]`, or None when it is not a list."""
+    value = document.get(key)
+    if not isinstance(value, list):
+        return None
+    return [row for row in value if isinstance(row, dict)]
 
 
 def evaluate_run(document: dict[str, Any], mode: str, testing: TestingSettings, committed: dict[str, str]) -> list[str]:
@@ -103,14 +308,76 @@ def evaluate_run(document: dict[str, Any], mode: str, testing: TestingSettings, 
     row with its Script (a Dist run leaves Editor-only suites out); a replay of `committed` has no "replay:<path>" row,
     or that row failed; a row's finalStateHash differs from the committed hash. Coverage gates are not evaluated: games
     leave Testing.CoverageGates off (coverage.evaluate_feature_report is FeatureTest's)."""
-    raise NotImplementedError("contract stub: games (ADR 0026 decision 7, stream B)")
+    if not isinstance(document, dict):
+        return [f"the {mode} run's result is not a TestRunResult object"]
+    failures: list[str] = []
+    if document.get("mode") != mode:
+        failures.append(f"the run's mode is {document.get('mode')!r}, not {mode!r}")
+    if document.get("passed") is not True:
+        failures.append(f"the {mode} run did not pass (passed is {json.dumps(document.get('passed'))})")
+    if document.get("cancelled") is not False:
+        failures.append(f"the {mode} run was cancelled (cancelled is {json.dumps(document.get('cancelled'))})")
+    cases = _rows(document, "cases")
+    if cases is None:
+        failures.append(f"the {mode} run's result has no cases array")
+    else:
+        failures.extend(f"skipped case ({mode}): {row.get('suite')}/{row.get('case')}: a game's run permits no skipped "
+                        f"case" for row in cases if row.get("status") == "skipped")
+    rows = _rows(document, "suites")
+    if rows is None:
+        failures.append(f"the {mode} run's result has no suites array")
+        rows = []
+    if not testing.suites:
+        failures.append("Testing.Suites is empty: every game has at least one test suite (Roadmap M16 to M18)")
+    replay_rows: dict[str, dict[str, Any]] = {}
+    suite_rows: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        name = row.get("suite")
+        if isinstance(name, str) and name.startswith(REPLAY_SUITE_PREFIX):
+            replay_rows[name[len(REPLAY_SUITE_PREFIX):]] = row
+        elif isinstance(row.get("script"), str):
+            suite_rows[row["script"]] = row
+    for entry in testing.suites:
+        if mode not in entry.modes:
+            continue
+        row = suite_rows.get(entry.script)
+        if row is None:
+            failures.append(f"{entry.script}: the {mode} run has no suite row for it, although its Modes include "
+                            f"{mode}")
+        elif row.get("passed") is not True:
+            failures.append(f"{entry.script}: the suite failed in the {mode} run")
+    for replay in sorted(committed):
+        row = replay_rows.get(replay)
+        if row is None:
+            failures.append(f"{replay}: the {mode} run has no {REPLAY_SUITE_PREFIX}{replay} row, so it never played "
+                            f"the committed replay")
+            continue
+        if row.get("passed") is not True:
+            failures.append(f"{replay}: the replay failed in the {mode} run")
+        state_hash = row.get("finalStateHash")
+        if state_hash != committed[replay]:
+            shown = state_hash if isinstance(state_hash, str) and state_hash else "(none)"
+            failures.append(f"{replay}: the {mode} run ended with the state hash {shown}, not the committed "
+                            f"FinalStateHash {committed[replay]}")
+    for replay in sorted(set(replay_rows) - set(committed)):
+        failures.append(f"{replay}: the {mode} run played it, but Testing.Replays as the games suite expands it does "
+                        f"not match it")
+    return failures
 
 
 def check_replays_matched(project_directory: Path, matched: Iterable[str]) -> list[str]:
     """The failures of the replays below Assets/ of `project_directory` (an editor half's copy) against `matched`
     (Test.py's expand_replay_globs of Testing.Replays): one line per project-relative .replay file that `matched` does
     not hold, naming it, since an export would never run it; none when every replay is matched."""
-    raise NotImplementedError("contract stub: games (ADR 0026 decision 7, stream B)")
+    assets = project_directory / ASSETS_DIRECTORY
+    if not assets.is_dir():
+        return []
+    expected = set(matched)
+    found = sorted(path.relative_to(project_directory).as_posix() for path in assets.rglob(f"*{REPLAY_FILE_SUFFIX}")
+                   if path.is_file())
+    return [f"{replay}: a replay below Assets/ that Testing.Replays does not match, so no test run and no export plays "
+            f"it (add it to Testing.Replays or delete it through automation)" for replay in found
+            if replay not in expected]
 
 
 def compare_game_hashes(committed: dict[str, str], runs: dict[str, dict[str, str]]) -> list[str]:
@@ -119,49 +386,84 @@ def compare_game_hashes(committed: dict[str, str], runs: dict[str, dict[str, str
     exports.compare_determinism_runs' lines, each prefixed with its replay ("<replay>: <line>"), so a hash the Dist
     export computes differently from an editor half, or from the committed one, fails naming the replay; none when
     every run reproduces every committed hash."""
-    raise NotImplementedError("contract stub: games (ADR 0026 decision 7, stream B)")
+    compared = exports.compare_determinism_runs(committed, runs)
+    return [f"{replay}: {line}" for replay in sorted(compared) for line in compared[replay]]
 
 
 def check_script_check(result: dict[str, Any]) -> list[str]:
     """The failures of a script.check result: one line per diagnostic ("<file>:<line>: <code>: <message>"); none when
     its diagnostics are empty."""
-    raise NotImplementedError("contract stub: games (ADR 0026 decision 7, stream B)")
+    diagnostics = result.get("diagnostics")
+    if not isinstance(diagnostics, list):
+        return ["script.check returned no diagnostics array"]
+    failures = [f"{item.get('file', '')}:{item.get('line', 0)}: {item.get('code', '')}: {item.get('message', '')}"
+                if isinstance(item, dict) else f"script.check: a diagnostic that is not an object: {item!r}"
+                for item in diagnostics]
+    if not failures and result.get("passed") is False:
+        failures.append("script.check did not pass, without a diagnostic")
+    return failures
 
 
 def check_validate(result: dict[str, Any]) -> list[str]:
     """The failures of a project.validate result: one line per diagnostic, warnings included ("<severity> <code>:
     <message> (<file or asset>)"), because a demo's project.validate must be clean (Roadmap M16 to M18)."""
-    raise NotImplementedError("contract stub: games (ADR 0026 decision 7, stream B)")
+    diagnostics = result.get("diagnostics")
+    if not isinstance(diagnostics, list):
+        return ["project.validate returned no diagnostics array"]
+    failures: list[str] = []
+    for item in diagnostics:
+        if not isinstance(item, dict):
+            failures.append(f"project.validate: a diagnostic that is not an object: {item!r}")
+            continue
+        subject = item.get("file") or item.get("asset") or "the project"
+        failures.append(f"{item.get('severity', '')} {item.get('code', '')}: {item.get('message', '')} ({subject})")
+    return failures
 
 
 def check_upgrade_dry_run(result: dict[str, Any], project: GameProject) -> list[str]:
     """The failures of a project.upgrade {dryRun: true} result (the canonical re-save check, §15.8): one line per
     changedFiles entry, each naming UPGRADE_COMMAND for the project's repository-relative directory, since an engine
     change that alters canonical output must upgrade the demo in the same change (§13.12)."""
-    raise NotImplementedError("contract stub: games (ADR 0026 decision 7, stream B)")
+    changed = result.get("changedFiles")
+    if not isinstance(changed, list):
+        return ["project.upgrade {dryRun: true} returned no changedFiles array"]
+    command = UPGRADE_COMMAND.format(project=paths.display_path(project.directory))
+    return [f"{file}: not in its canonical form, so project.upgrade would rewrite it: run {command} (or "
+            f"project.upgrade through automation) and commit the result in the same change (§13.12)"
+            for file in changed]
 
 
 def check_smoke(result: dict[str, Any], require_gpu: bool) -> tuple[list[str], list[str]]:
     """(failures, warnings) of a plain Dist project.export {smokeTest: true} result: a smokeTestExitCode other than 0 is
     a failure; smokeTestRan false (no device, Exporter.h step 6) is a failure with `require_gpu`, else a warning that
     names the reason the export reported."""
-    raise NotImplementedError("contract stub: games (ADR 0026 decision 7, stream B)")
+    if result.get("smokeTestRan") is True:
+        exit_code = result.get("smokeTestExitCode")
+        if exit_code != 0:
+            return [f"the plain Dist export's smoke test exited with code {exit_code}"], []
+        return [], []
+    warnings = [str(warning) for warning in result.get("warnings", [])] if isinstance(result.get("warnings"), list) \
+        else []
+    reason = "; ".join(warnings) or "the export reported no reason"
+    if require_gpu:
+        return [f"the plain Dist export's smoke test did not run ({reason}) and --require-gpu is given"], []
+    return [], [f"the plain Dist export's smoke test did not run ({reason}); --require-gpu fails instead"]
 
 
 def editor_report_path(project: GameProject, config: str) -> Path:
     """bin/TestResults/Games-<Name>-Editor-<config>.json: the test.run document of the project's editor half in
     `config`, written with --junit."""
-    raise NotImplementedError("contract stub: games (ADR 0026 decision 7, stream B)")
+    return paths.TEST_RESULTS_ROOT / f"{REPORT_PREFIX}-{project.name}-Editor-{config}.json"
 
 
 def dist_report_path(project: GameProject, suffix: str) -> Path:
     """bin/TestResults/Games-<Name>-Dist<suffix> (suffix ".json" or ".xml"): the exported --feature-test run's report,
     copied there from the run's temporary working directory, so the export stage's FeatureTest-Dist reports are never
     overwritten."""
-    raise NotImplementedError("contract stub: games (ADR 0026 decision 7, stream B)")
+    return paths.TEST_RESULTS_ROOT / f"{REPORT_PREFIX}-{project.name}-{EXPORTED_CONFIGURATION}{suffix}"
 
 
 def junit_path(config: str) -> Path:
     """bin/TestResults/Games-<config>.xml: the JUnit file of one requested configuration's steps (the audit steps go
     into the first requested configuration's file, in Debug, Release, Dist order)."""
-    raise NotImplementedError("contract stub: games (ADR 0026 decision 7, stream B)")
+    return paths.TEST_RESULTS_ROOT / f"{REPORT_PREFIX}-{config}.xml"

@@ -91,7 +91,7 @@
 //      A non-zero exit code fails the export, naming the code and the end of its output.
 //   7. Move the staging directory into OutputDirectory, replacing an earlier export there; step 1's output directory rule
 //      is checked again first, since the directory may have changed during the cook.
-//   8. Return the report, with the time of every phase entered (ExportReport::PhaseTimings).
+//   8. Return the report, with the time of every phase entered (ExportReport::PhaseTimings; SmokeTest only when it ran).
 //
 // Main thread only (the asset manager and the open scene are main-thread state, §4.11); the cooking and the smoke test's
 // process run in the background, and Poll advances the export once per frame, so the editor stays responsive (§13.2
@@ -175,15 +175,16 @@ namespace Engine {
 		// Whether step 6 ran the exported executable: false without SmokeTest, and for a Dist export from an editor without
 		// a graphics device (with a warning).
 		bool SmokeTestRan = false;
-		int SmokeTestExitCode = 0;
-		double Seconds = 0.0; // wall-clock duration, for the report only
+		int SmokeTestExitCode = 0; // meaningful only when SmokeTestRan (project.export reports null otherwise)
+		double Seconds = 0.0;      // wall-clock duration, for the report only
 		// M15 (ADR 0024 decisions 2, 4 and 6).
 		bool Testing = false;          // ExportSpecification::Testing
 		uint32_t TestSuiteCount = 0;   // a testing export's Testing.Suites entries (TestingExportContent::SuiteCount)
 		uint32_t ReplayCount = 0;      // a testing export's packaged replays (TestingExportContent::Replays)
 		bool ResourcesPatched = false; // step 4a wrote the executable's resources (Windows) or Info.plist (macOS)
 		// One entry per phase entered, in phase order from Validate to MoveToOutput, including a phase with nothing to do on
-		// this host or for this specification (Sign outside macOS, SmokeTest without SmokeTest), whose time is about zero.
+		// this host (Sign outside macOS), whose time is about zero. SmokeTest is listed only when the smoke test ran (M16
+		// friction S2-06); otherwise its time, about zero, counts toward MoveToOutput, so the timings still add up.
 		std::vector<ExportPhaseTiming> PhaseTimings{};
 	};
 

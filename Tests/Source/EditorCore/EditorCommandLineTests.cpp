@@ -4,6 +4,11 @@
 
 #include "Engine/App/Application.h"
 
+#include <algorithm>
+#include <format>
+#include <string>
+#include <vector>
+
 namespace Engine {
 
 	// Parses `arguments` with the engine's and the editor's options, as the editor's factory does.
@@ -78,10 +83,58 @@ namespace Engine {
 				names.push_back(option.Name);
 				CHECK_FALSE(option.Description.empty());
 			}
-			const std::vector<std::string_view> expected = { "--project", "--read-only", "--automation", "--automation-test-hooks", "--batch",
+			const std::vector<std::string_view> expected = { "--help", "--project", "--read-only", "--automation", "--automation-test-hooks", "--batch",
 				"--upgrade", "--dump-reference", "--bake-engine-assets", "--engine-cache-dir", "--check-scripts", "--run-tests", "--filter", "--id-seed", "--junit",
 				"--export", "--config", "--testing", "--smoke-test", "--export-report", "--export-root", "--strict" };
 			CHECK(names == expected);
+		}
+
+		// M16 friction F20: `Editor --help` was an unknown option, and the option list appeared only inside the "Invalid
+		// command line" error. --help (and -h) asks for the usage whatever else is given, as long as it parses.
+		TEST_CASE("EditorCommandLine: --help and -h ask for the usage whatever else is given, and unknown options stay errors")
+		{
+			std::vector<CommandLineOption> options(GetEngineCommandLineOptions().begin(), GetEngineCommandLineOptions().end());
+			options.insert(options.end(), GetEditorCommandLineOptions().begin(), GetEditorCommandLineOptions().end());
+			const auto parse = [&options](const std::vector<std::string>& arguments)
+			{
+				return CommandLine::Parse(ExpandEditorShortOptions(arguments, options), options).and_then([](const CommandLine& commandLine)
+				{
+					return ParseEditorLaunchOptions(commandLine);
+				});
+			};
+			for (const std::vector<std::string>& arguments : std::vector<std::vector<std::string>>{
+					 { "--help" }, { "-h" }, { "--headless", "-h" }, { "--read-only", "--help" }, { "--project", "P", "--upgrade", "--read-only", "-h" } })
+			{
+				CAPTURE(arguments.back());
+				const Result<EditorLaunchOptions> launch = parse(arguments);
+				REQUIRE_MESSAGE(launch.has_value(), launch.error().ToString());
+				CHECK(launch->Help);
+			}
+			const Result<EditorLaunchOptions> plain = parse({ "--headless" });
+			REQUIRE(plain.has_value());
+			CHECK_FALSE(plain->Help);
+
+			// An unknown option is still a usage error, --help or not; "-h" as an option's value or after "--" is not --help.
+			for (const std::vector<std::string>& arguments : std::vector<std::vector<std::string>>{ { "--help", "--bogus" }, { "-x" }, { "-help" } })
+			{
+				const Result<EditorLaunchOptions> invalid = parse(arguments);
+				REQUIRE_FALSE(invalid.has_value());
+				CHECK(invalid.error().GetCode() == ErrorCode::InvalidArgument);
+			}
+			CHECK(ExpandEditorShortOptions(std::vector<std::string>{ "--project", "-h", "-h", "--", "-h" }, options)
+				== std::vector<std::string>{ "--project", "-h", "--help", "--", "-h" });
+			CHECK(ExpandEditorShortOptions(std::vector<std::string>{ "--project=-h", "-h" }, options) == std::vector<std::string>{ "--project=-h", "--help" });
+			const Result<EditorLaunchOptions> value = parse({ "--project", "-h" });
+			REQUIRE_MESSAGE(value.has_value(), value.error().ToString());
+			CHECK_FALSE(value->Help);
+			CHECK(value->Project == std::filesystem::path("-h"));
+
+			// The usage lists every option, one line each.
+			const std::string usage = CommandLine::FormatUsage("Editor", options);
+			CHECK(usage.starts_with("Usage: Editor [options]\n"));
+			for (const CommandLineOption& option : options)
+				CHECK_MESSAGE(usage.contains(std::format("  {}", option.Name)), option.Name);
+			CHECK(static_cast<size_t>(std::ranges::count(usage, '\n')) == options.size() + 1);
 		}
 
 		TEST_CASE("EditorCommandLine: every option parses into the launch options")

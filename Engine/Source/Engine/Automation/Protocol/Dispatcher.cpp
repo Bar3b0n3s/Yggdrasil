@@ -54,7 +54,6 @@ namespace Engine {
 		Watchdog* PhaseMarker = nullptr;
 		DispatcherSpecification Specification{};
 		MetaBuilder Meta;
-		uint64_t NextOffloadSequence = 1;
 		uint64_t NextRequestSequence = 1;
 		std::map<ClientId, Client> Clients{}; // id order is the round-robin order
 		ClientId LastServed = NoClient;
@@ -372,9 +371,8 @@ namespace Engine {
 			const std::string text = result.dump(-1, ' ', false, Json::error_handler_t::replace);
 			if (text.size() > Specification.OffloadThresholdBytes)
 			{
-				const std::string fileName = MakeOffloadFileName(Host->GetOffloadServerTag(), NextOffloadSequence++);
 				const std::string file = result.dump(1, '\t', false, Json::error_handler_t::replace);
-				Result<std::string> path = Host->WriteOffloadedResult(fileName, file);
+				Result<std::string> path = Host->WriteOffloadedResult(file);
 				if (!path)
 				{
 					const Error error = std::move(path).error().WithContext(

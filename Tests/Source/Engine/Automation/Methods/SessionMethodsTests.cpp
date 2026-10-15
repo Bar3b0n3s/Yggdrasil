@@ -51,6 +51,43 @@ namespace Engine {
 			CHECK((*info)["stopError"].is_null());
 		}
 
+		// Docs/Decisions/0026-m16-contract.md, friction S2-03: an opened or attached project has no open scene, and neither
+		// session.info nor editor_status said so; the builder's first entity call failed with "no scene open".
+		TEST_CASE("SessionMethods: session.info reports the open scene's path and dirty flag, and null without a scene")
+		{
+			Test::AutomationFixture setup("SessionInfoScene", false);
+			const Result<Json> none = setup.Call("session.info", Json::object());
+			REQUIRE_MESSAGE(none.has_value(), none.error().ToString());
+			CHECK((*none)["project"]["open"] == Json(true));
+			REQUIRE(none->contains("scene"));
+			CHECK((*none)["scene"].is_null());
+
+			REQUIRE(setup.Call("scene.new", Json{ { "path", "Assets/Scenes/Level.scene" } }).has_value());
+			const Result<Json> opened = setup.Call("session.info", Json::object());
+			REQUIRE(opened.has_value());
+			const Json& scene = (*opened)["scene"];
+			CHECK(scene["path"] == Json("Assets/Scenes/Level.scene"));
+			CHECK(scene["name"] == Json("Level"));
+			CHECK(scene["dirty"] == Json(false));
+			CHECK(scene["entityCount"] == Json(0));
+
+			REQUIRE(setup.Call("entity.create", Json{ { "name", "Unsaved" } }).has_value());
+			const Result<Json> dirty = setup.Call("session.info", Json::object());
+			REQUIRE(dirty.has_value());
+			CHECK((*dirty)["scene"]["dirty"] == Json(true));
+			CHECK((*dirty)["scene"]["entityCount"] == Json(1));
+			CHECK((*dirty)["scene"]["revision"] == (*dirty)["_meta"]["revision"]);
+
+			// While playing, the edit scene is still the open scene.
+			REQUIRE(setup.Call("play.start", Json{ { "lockstep", true } }).has_value());
+			const Result<Json> playing = setup.Call("session.info", Json::object());
+			REQUIRE(playing.has_value());
+			CHECK((*playing)["playState"] == Json("Play"));
+			CHECK((*playing)["scene"]["path"] == Json("Assets/Scenes/Level.scene"));
+			CHECK((*playing)["scene"]["dirty"] == Json(true));
+			REQUIRE(setup.Call("play.stop", Json::object()).has_value());
+		}
+
 		TEST_CASE("SessionMethods: session.info reports a fatal stop as play.state does")
 		{
 			// §11.1: a second soft memory breach stops the session; session.info and play.state report the same error.

@@ -48,8 +48,10 @@ namespace Engine {
 		// Lazily pins the editor's current script field snapshot for this request, after path resolution. No project is
 		// InvalidState; snapshot acquisition failures propagate. Methods without schema-dependent params never load it.
 		[[nodiscard]] Result<Ref<const IFieldSchemaSource>> GetFieldSchemaSnapshot() override;
-		// entity.update's Fields-only Script patch borrows its absent Script handle from the addressed entity. An explicit
-		// Script (including null), or removing/re-adding the component, never borrows the old handle. No scene writes.
+		// entity.update's Fields-only Script patch borrows its absent Script handle from the addressed entity, and
+		// prefab.instantiate's from the prefab's root (the component the per-instance values merge into). An explicit Script
+		// (including null), or removing/re-adding the component, never borrows the old handle. No scene writes. Errors:
+		// prefab.instantiate's for a prefab that does not resolve or load, located at /prefab.
 		[[nodiscard]] Status CompleteParameterOwners(Json& params) override;
 
 		// The scene a request addresses (§13.4 "Target"): `target` as given when `given`, else the play scene for reads while
@@ -98,7 +100,8 @@ namespace Engine {
 		[[nodiscard]] Result<std::string> WriteOutputFile(std::string_view extension, std::span<const std::byte> bytes) override;
 
 		// The services of the moved M4 to M6 domains (Docs/Decisions/0012-m7-decisions.md decision 12) over the editor:
-		// DescribeSession reports the server's capabilities, clients, renderer and headless flag and the open project;
+		// DescribeSession reports the server's capabilities, clients, renderer and headless flag, the open project and the
+		// edit scene (none before scene.open or scene.new);
 		// Shutdown saves the open scene with save (InvalidState for a dirty scene without save or force, PermissionDenied for
 		// save in a read-only editor) and requests the exit (EditorContext::RequestShutdown); MakeSceneSummary reports the
 		// edit scene's file and dirty flag (Utils::MakeSceneSummary), and for the play scene the edit scene's file, never
@@ -118,6 +121,10 @@ namespace Engine {
 		// Never substitutes retained aspect, pending panel size or a screenshot target; host publishes after actual render.
 		// InvalidState for an unavailable/minimized view; Unsupported only while this contract adapter is unimplemented.
 		[[nodiscard]] Result<ViewportPixelSize> GetViewportPixelSize(ViewportView view) const;
+	private:
+		// CompleteParameterOwners for prefab.instantiate: sets `script` (the Script object of params' components) to the
+		// Script handle of the prefab root's Script component, when it has one.
+		[[nodiscard]] Status CompletePrefabScriptOwner(const Json& params, Json& script);
 	private:
 		Ref<const IFieldSchemaSource> m_FieldSchemas{};
 		EditorContext* m_Editor = nullptr;    // documented back-reference

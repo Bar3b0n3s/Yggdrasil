@@ -1,0 +1,70 @@
+{
+	"Format": "Provenance",
+	"Version": 1,
+	"Entries": [
+		{
+			"Path": ".luaurc",
+			"XXH64": "56824d2dd3716720",
+			"Method": "project.create",
+			"RequestId": 2,
+			"Client": "engine-mcp",
+			"TranscriptLine": 1
+		},
+		{
+			"Path": "Assets/Materials/Red.material",
+			"XXH64": "62256d35414487cd",
+			"Method": "edit.batch",
+			"RequestId": 4,
+			"Client": "engine-mcp",
+			"TranscriptLine": 19
+		},
+		{
+			"Path": "Assets/Materials/Red.material.meta",
+			"XXH64": "4c9592c0fd21d94d",
+			"Method": "project.upgrade",
+			"RequestId": null,
+			"Client": "cli",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/Main.scene",
+			"XXH64": "467f3a9cd6d02d7c",
+			"Method": "scene.save",
+			"RequestId": 6,
+			"Client": "engine-mcp",
+			"TranscriptLine": 23
+		},
+		{
+			"Path": "Assets/Scenes/Main.scene.meta",
+			"XXH64": "4f4ed7a0d4a24602",
+			"Method": "scene.save",
+			"RequestId": 8,
+			"Client": "engine-mcp",
+			"TranscriptLine": 13
+		},
+		{
+			"Path": "Assets/Scripts/Ball.luau",
+			"XXH64": "8a0f09c75fe19965",
+			"Method": "script.write",
+			"RequestId": 7,
+			"Client": "engine-mcp",
+			"TranscriptLine": 11
+		},
+		{
+			"Path": "Assets/Scripts/Ball.luau.meta",
+			"XXH64": "76126014690c26ee",
+			"Method": "project.upgrade",
+			"RequestId": 7,
+			"Client": "engine-mcp",
+			"TranscriptLine": 24
+		},
+		{
+			"Path": "Mini.eproj",
+			"XXH64": "dd062c7b07315f4e",
+			"Method": "project.setSettings",
+			"RequestId": 5,
+			"Client": "engine-mcp",
+			"TranscriptLine": 21
+		}
+	]
+}

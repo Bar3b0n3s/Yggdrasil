@@ -89,8 +89,11 @@ namespace Engine {
 	{
 		constexpr std::string_view AssetsPrefix = "Assets/";
 		constexpr std::string_view ProjectExtension = ".eproj";
+		constexpr std::string_view TypeCheckerConfiguration = ".luaurc";
 		if (path.starts_with(AssetsPrefix))
 			return path.size() > AssetsPrefix.size();
+		if (path == TypeCheckerConfiguration)
+			return true;
 		return path.find('/') == std::string_view::npos && path.size() > ProjectExtension.size() && path.ends_with(ProjectExtension);
 	}
 

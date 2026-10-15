@@ -225,6 +225,42 @@ namespace Engine {
 			CHECK_FALSE(result["junitPath"].empty());
 		}
 
+		// Docs/Decisions/0026-m16-contract.md, friction S1-02: every test.run result carried several hundred script API
+		// coverage counters, so even a small run was offloaded and its summary hid the failures. Without coverage asked for,
+		// the result leaves them out (the JSON report keeps them) and names its outcome.
+		TEST_CASE("TestMethods: an ordinary run leaves out the coverage counters, stays inline and names its failing cases")
+		{
+			Test::AutomationFixture fixture("TestRunInline");
+			REQUIRE_FALSE(fixture.GetEditor().GetProject().GetSettings().Testing.CoverageGates);
+			std::string source = "return Test.Suite('Inline', function()\n";
+			for (int index = 0; index < 19; ++index)
+				source += std::format("Test.Case('case {}', function() Test.Expect(true) end)\n", index);
+			source += "Test.Case('fails', function() Test.Expect(false, 'expected failure') end)\nend)";
+			WriteSuite(fixture, source);
+			const Json response = fixture.Request("test.run", Json::object());
+			REQUIRE_MESSAGE(response.contains("result"), response.dump());
+			const Json& result = response["result"];
+			REQUIRE_FALSE(result.contains("truncated"));
+			CHECK(result["passed"] == Json(false));
+			CHECK(result["coverage"]["counters"].empty());
+			CHECK(result["counts"] == Json{ { "total", 20 }, { "passed", 19 }, { "failed", 1 }, { "error", 0 }, { "timeout", 0 }, { "skipped", 0 }, { "quit", 0 } });
+			CHECK(result["failedCases"] == Json::array({ "Inline/fails" }));
+			REQUIRE(result["cases"].size() == 20);
+			// The JSON report holds the complete run, counters included.
+			const auto text = FileSystem::ReadText(FileSystem::PathFromUtf8(JsonReader(result).ReadMember<std::string>("jsonPath").value_or(std::string())));
+			REQUIRE_MESSAGE(text.has_value(), (text ? "" : text.error().ToString()));
+			const auto report = JsonReader::Parse(*text);
+			REQUIRE(report.has_value());
+			CHECK_FALSE((*report)["coverage"]["counters"].empty());
+			CHECK((*report)["cases"] == result["cases"]);
+			CHECK((*report)["failedCases"] == result["failedCases"]);
+
+			// coverage: true asks for the counters.
+			const Json covered = CallTestMethod(fixture, "test.run", Json{ { "coverage", true } });
+			CHECK_FALSE(covered["coverage"]["counters"].empty());
+			CHECK(covered["coverage"]["counters"] == (*report)["coverage"]["counters"]);
+		}
+
 		// ADR 0022 decisions 3 and 5 (stream A): a coverage run of the editor host observes loads through the editor's asset
 		// manager (IFeatureTestHost::GetAssetManager), so the suite script's own load counts for gate 9, and it reports the
 		// six evaluated per-mode gates.
@@ -321,6 +357,110 @@ namespace Engine {
 			const auto document = JsonReader::Parse(*text);
 			REQUIRE(document.has_value());
 			CHECK((*document)["Config"] == Json("Editor"));
+			// The recording block (M16 friction S3-03): a pure determinism recording has no input to check.
+			const Json& recording = result["recording"];
+			CHECK(recording["path"] == Json(path));
+			CHECK(recording["formatVersion"] == Json(ReplayFormatVersion));
+			CHECK(recording["ticks"] == (*document)["FinalTick"]);
+			CHECK(recording["events"] == Json(0));
+			CHECK(recording["checkpoints"] == Json(0));
+			CHECK(recording["finalStateHash"] == (*document)["FinalStateHash"]);
+			CHECK(recording["inputCheck"] == Json{ { "ran", false }, { "divergedAtTick", 0 } });
+		}
+
+		// M16 friction S3-03: test.run {record} returned only recordingPath, so learning a recording's checkpoints, final hash
+		// or input-check outcome took another input.replay. Its result (and its JSON report) now carries a recording block.
+		TEST_CASE("TestMethods: a recording run reports the recording's ticks, events, checkpoints, final hash and where its input check diverged")
+		{
+			Test::AutomationFixture fixture("TestRecordBlock");
+			CallTestMethod(fixture, "script.write", Json{ { "path", "Assets/Scripts/Paddle.luau" }, { "source", "local Paddle = {}\n"
+																												"function Paddle.OnFixedUpdate(self: any, dt: number)\n"
+																												"\tif Input.IsKeyDown(\"Space\") then self.Entity.Transform:Translate(vector.create(1, 0, 0)) end\n"
+																												"end\n"
+																												"return Script.Define(\"Paddle\", Paddle)\n" } });
+			CallTestMethod(fixture, "entity.create", Json{ { "name", "Paddle" }, { "components", Json{ { "Script", Json{ { "Script", "Assets/Scripts/Paddle.luau" } } } } } });
+			CallTestMethod(fixture, "scene.save", Json::object());
+			WriteSuite(fixture, "return Test.Suite('Autopilot', function()\n"
+								"Test.Case('play across a checkpoint', function()\n"
+								"Test.InjectKey('Space', 'Down'); Test.WaitTicks(70)\n"
+								"Test.InjectKey('Space', 'Up'); Test.WaitTicks(9)\n"
+								"end)\nend)");
+			CallTestMethod(fixture, "project.setSettings", Json{ { "patch", Json{ { "Testing", Json{ { "Suites", Json::array({ Json{ { "Script", "Assets/Tests/Contract.test.luau" }, { "Scene", "Assets/Scenes/Main.scene" } } }) } } } } } });
+			const Json plain = CallTestMethod(fixture, "test.run", Json::object());
+			CHECK(plain["recording"].is_null());
+
+			const std::string path = "Assets/Tests/Replays/Autopilot.replay";
+			const Json result = CallTestMethod(fixture, "test.run", Json{ { "record", path } });
+			REQUIRE(result["passed"] == Json(true));
+			const auto text = FileSystem::ReadText(fixture.GetEditorFixture().GetProjectRoot() / path);
+			REQUIRE_MESSAGE(text.has_value(), (text ? "" : text.error().ToString()));
+			const auto document = JsonReader::Parse(*text);
+			REQUIRE(document.has_value());
+			const Json& recording = result["recording"];
+			CHECK(recording["path"] == Json(path));
+			CHECK(recording["formatVersion"] == Json(ReplayFormatVersion));
+			CHECK(recording["ticks"] == (*document)["FinalTick"]);
+			CHECK(recording["events"] == Json((*document)["Events"].size()));
+			CHECK(recording["events"] == Json(2));
+			CHECK(recording["checkpoints"] == Json((*document)["Checkpoints"].size()));
+			CHECK(recording["checkpoints"] == Json(1));
+			CHECK(recording["finalStateHash"] == (*document)["FinalStateHash"]);
+			CHECK(recording["finalStateHash"] == result["suites"][0]["finalStateHash"]);
+			// The paddle had moved by the first checkpoint, so the run without input differed there.
+			CHECK(recording["inputCheck"] == Json{ { "ran", true }, { "divergedAtTick", 60 } });
+			// The JSON report holds the same block.
+			const auto report = FileSystem::ReadText(FileSystem::PathFromUtf8(JsonReader(result).ReadMember<std::string>("jsonPath").value_or("")));
+			REQUIRE_MESSAGE(report.has_value(), (report ? "" : report.error().ToString()));
+			const auto reportDocument = JsonReader::Parse(*report);
+			REQUIRE(reportDocument.has_value());
+			CHECK((*reportDocument)["recording"] == recording);
+		}
+
+		// M16 friction S2-01 (FX-4): Breakout's autopilot pressed keys and then restarted the game in place, so its recording's
+		// outcome did not depend on its input. test.run's record refuses such a recording, names the replay it did not
+		// write, keeps the case rows and reports, and writes the replay once the run ends with the played state in the scene.
+		TEST_CASE("TestMethods: recording refuses a replay whose final state hash equals that of the same session without input")
+		{
+			Test::AutomationFixture fixture("TestRecordInputIndependent");
+			CallTestMethod(fixture, "script.write", Json{ { "path", "Assets/Scripts/Paddle.luau" }, { "source", "local Paddle = {}\n"
+																												"function Paddle.OnFixedUpdate(self: any, dt: number)\n"
+																												"\tif Input.IsKeyPressed(\"R\") then self.Entity.Transform.Translation = vector.zero return end\n"
+																												"\tif Input.IsKeyDown(\"Space\") then self.Entity.Transform:Translate(vector.create(1, 0, 0)) end\n"
+																												"end\n"
+																												"return Script.Define(\"Paddle\", Paddle)\n" } });
+			CallTestMethod(fixture, "entity.create", Json{ { "name", "Paddle" }, { "components", Json{ { "Script", Json{ { "Script", "Assets/Scripts/Paddle.luau" } } } } } });
+			CallTestMethod(fixture, "scene.save", Json::object());
+			WriteSuite(fixture, "return Test.Suite('Autopilot', function()\n"
+								"Test.Case('play then restart', function()\n"
+								"Test.InjectKey('Space', 'Down'); Test.WaitTicks(10)\n"
+								"Test.InjectKey('Space', 'Up'); Test.WaitTicks(3)\n"
+								"Test.InjectKey('R', 'Tap'); Test.WaitTicks(10)\n"
+								"end)\nend)");
+			CallTestMethod(fixture, "project.setSettings", Json{ { "patch", Json{ { "Testing", Json{ { "Suites", Json::array({ Json{ { "Script", "Assets/Tests/Contract.test.luau" }, { "Scene", "Assets/Scenes/Main.scene" } } }) } } } } } });
+			const std::string path = "Assets/Tests/Replays/Autopilot.replay";
+			const Json refused = fixture.Request("test.run", Json{ { "record", path } });
+			REQUIRE_MESSAGE(refused.contains("error"), refused.dump());
+			const Json& data = refused["error"]["data"];
+			CHECK(data["errorCode"] == Json("Validation"));
+			CHECK(JsonReader(data).ReadMember<std::string>("detail").value_or("").find("does not depend on its input") != std::string::npos);
+			CHECK(data["contexts"].dump().find(path) != std::string::npos);
+			CHECK(JsonReader(data).ReadMember<std::string>("hint").value_or("").find("restart") != std::string::npos);
+			// The cases passed and their reports were written; only the recording was refused.
+			REQUIRE(data.contains("testRun"));
+			CHECK(data["testRun"]["cases"][0]["status"] == Json("passed"));
+			CHECK_FALSE(FileSystem::Exists(fixture.GetEditorFixture().GetProjectRoot() / path));
+
+			// The same autopilot without the restart at its end leaves the moved paddle in the scene: the recording is written.
+			WriteSuite(fixture, "return Test.Suite('Autopilot', function()\n"
+								"Test.Case('play', function()\n"
+								"Test.InjectKey('Space', 'Down'); Test.WaitTicks(10)\n"
+								"Test.InjectKey('Space', 'Up'); Test.WaitTicks(13)\n"
+								"end)\nend)");
+			CallTestMethod(fixture, "project.setSettings", Json{ { "patch", Json{ { "Testing", Json{ { "Suites", Json::array({ Json{ { "Script", "Assets/Tests/Contract.test.luau" }, { "Scene", "Assets/Scenes/Main.scene" } } }) } } } } } });
+			const Json written = CallTestMethod(fixture, "test.run", Json{ { "record", path } });
+			CHECK(written["passed"] == Json(true));
+			CHECK(written["recordingPath"] == Json(path));
+			CHECK(FileSystem::Exists(fixture.GetEditorFixture().GetProjectRoot() / path));
 		}
 
 		TEST_CASE("TestMethods: the editor host's suite sessions own simulation audio time")

@@ -232,7 +232,9 @@ namespace Engine {
 
 		// Requires Freeze, else InvalidState. Pure, deterministic strings in byte-wise group/member name order (kind is
 		// the tie-breaker); enum values preserve their authoritative order. Definitions use Luau 0.741 declare extern
-		// type syntax, singleton enum unions, overloads, generic Script.Define and mode/availability annotations.
+		// type syntax, singleton enum unions, overloads, generic Script.Define and mode/availability annotations. The
+		// documentation's headings are unique, also as docs.get anchors (M16 friction S2-05): one that would share its anchor
+		// with another names its kind ("Script (component)" after the Script global, "TestSuite (type)" beside Test.Suite).
 		[[nodiscard]] Result<std::string> GenerateDefinitions() const;
 		[[nodiscard]] Result<std::string> GenerateDocumentation() const;
 

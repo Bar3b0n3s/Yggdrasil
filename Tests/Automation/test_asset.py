@@ -47,6 +47,30 @@ class AssetTests(AutomationTestCase):
         self.assertFalse((root / "Assets" / "Red.material").exists())
         self.assertEqual(client.call("asset.list", {"type": "Material"})["assets"], [])
 
+    def test_asset_delete_removes_an_emptied_folder_and_refuses_one_that_holds_files(self) -> None:
+        # M16 friction S3-07: the folder a trashed recording left behind could not be removed through automation.
+        client, root = self.open_editor_with_scene()
+        client.call("asset.create", {"type": "Material", "path": "Assets/Tests/Probe/Probe.material"})
+        with self.assertRaises(engine_client.EngineError) as refused:
+            client.call("asset.delete", {"asset": "Assets/Tests/Probe"})
+        self.assert_engine_error(refused.exception, engine_client.VALIDATION_FAILED, "Validation")
+        message = str(refused.exception.data["issues"][0]["message"])
+        self.assertIn("Assets/Tests/Probe/Probe.material", message)
+        self.assertIn("delete its assets first", str(refused.exception.data["issues"][0]["hint"]))
+        self.assertTrue((root / "Assets" / "Tests" / "Probe" / "Probe.material").is_file())
+
+        client.call("asset.delete", {"asset": "Assets/Tests/Probe/Probe.material"})
+        deleted = client.call("asset.delete", {"asset": "Assets/Tests/Probe"})
+        self.assertEqual(deleted["removedFolders"], ["Assets/Tests/Probe"])
+        self.assertEqual((deleted["asset"]["path"], deleted["asset"]["id"], deleted["trashDirectory"]),
+                         ("Assets/Tests/Probe", "", ""))
+        self.assertFalse((root / "Assets" / "Tests" / "Probe").exists())
+        self.assertTrue((root / "Assets" / "Tests").is_dir())
+        client.call("edit.undo", {"steps": 1})
+        self.assertTrue((root / "Assets" / "Tests" / "Probe").is_dir())
+        client.call("edit.redo", {"steps": 1})
+        self.assertFalse((root / "Assets" / "Tests" / "Probe").exists())
+
     def test_refresh_assets_after_external_write(self) -> None:
         client, root = self.open_editor_with_scene()
         # The scene the harness saved has no .meta until a refresh gives it one (writes never create metas, ADR 0010

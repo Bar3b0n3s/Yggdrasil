@@ -237,7 +237,12 @@ namespace Engine {
 
 	// asset.delete {asset}: AssetDeleteCommand of a main asset (to Library/Trash/, undoable; never a permanent delete). When
 	// another asset found it by path (EditorAssetManager::GetPathDependents) the delete still runs and logs a warning naming
-	// those assets, whose next import fails until it is restored.
+	// those assets, whose next import fails until it is restored. M16 friction S3-07 (additive): `asset` may also name a
+	// folder below Assets/ (a project path) that holds no files, only empty folders: an AssetEditCommand removes it and them
+	// (nothing to trash; undo creates them again), reported with an empty asset id, type None, no trash directory and
+	// RemovedFolders. A folder that holds files is refused with Validation naming its first files. The folders are removed
+	// without recursion (EditorContext::RemoveProjectFile), so a folder that also holds an entry the VFS cannot list (a host
+	// name no VfsPath can spell) is refused with InvalidState and nothing is removed (FX-6 review).
 	struct AssetDeleteParams
 	{
 		std::string Asset{};
@@ -249,6 +254,7 @@ namespace Engine {
 		std::string TrashDirectory{};            // project-relative, "Library/Trash/<entry>"
 		std::vector<std::string> TrashedFiles{}; // the old project-relative paths, the .meta files and dependencies included
 		uint32_t UndoIndex = 0;
+		std::vector<std::string> RemovedFolders{}; // a folder delete: the folder and the empty folders below it, sorted
 	};
 
 	namespace Automation {
@@ -287,7 +293,9 @@ namespace Engine {
 		// asset.move. Errors: as asset.info; those of AssetMoveCommand::Create (InvalidState naming the assets that found it by
 		// path) and Execute.
 		[[nodiscard]] Result<AssetMoveResult> AssetMove(EditorMethodContext& context, const AssetMoveParams& params);
-		// asset.delete. Errors: as asset.info; those of AssetDeleteCommand::Create and Execute.
+		// asset.delete. Errors: as asset.info; those of AssetDeleteCommand::Create and Execute. A folder: InvalidArgument for
+		// Assets/ itself, Validation for one that holds files, and the AssetEditCommand's errors (InvalidState for one that holds
+		// an entry no project path can spell, nothing removed).
 		[[nodiscard]] Result<AssetDeleteResult> AssetDelete(EditorMethodContext& context, const AssetDeleteParams& params);
 
 	}

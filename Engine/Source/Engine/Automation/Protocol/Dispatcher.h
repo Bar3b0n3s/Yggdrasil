@@ -76,14 +76,14 @@ namespace Engine {
 		// The state "_meta" reports (MetaBuilder).
 		[[nodiscard]] virtual MetaState GetMetaState() const = 0;
 
-		// The server tag of this host's offload file names (MakeOffloadServerTag of its process id and start time), fixed
-		// for the host's lifetime.
-		[[nodiscard]] virtual std::string GetOffloadServerTag() const = 0;
-
-		// Writes an offloaded result's text to `fileName` (MakeOffloadFileName with the host's MakeOffloadServerTag) in the
-		// host's offload directory and returns the absolute native path, UTF-8 with '/' separators, that the response names.
-		// Errors: those of the write; the Dispatcher then answers with the error instead of the oversized result.
-		[[nodiscard]] virtual Result<std::string> WriteOffloadedResult(std::string_view fileName, std::string_view text) = 0;
+		// Writes an offloaded result's text to a new file in the host's offload directory and returns the absolute native
+		// path, UTF-8 with '/' separators, that the response names. The host names the file (ResultOffload.h):
+		// MakeOffloadFileName of its server tag (MakeOffloadServerTag of its process id and start time) and the next number
+		// of the one sequence it also names its method output files with, so an offloaded result never takes the name of a
+		// screenshot or test report; it creates the file without replacing anything (AlreadyExists when the name exists)
+		// and remembers it, so it can remove its own offloaded results, and only those, when it shuts down. Errors: those of
+		// the write; the Dispatcher then answers with the error instead of the oversized result.
+		[[nodiscard]] virtual Result<std::string> WriteOffloadedResult(std::string_view text) = 0;
 	};
 
 	// A response (or nothing for a notification) for one client.
@@ -185,8 +185,7 @@ namespace Engine {
 		[[nodiscard]] size_t GetQueuedCount(ClientId client) const;
 		[[nodiscard]] size_t GetPendingCount(ClientId client) const;
 	private:
-		// The back-references, the MetaBuilder, the clients with their queues and pending operations, and the offload
-		// sequence (Dispatcher.cpp).
+		// The back-references, the MetaBuilder, and the clients with their queues and pending operations (Dispatcher.cpp).
 		struct State;
 	private:
 		Scope<State> m_State;

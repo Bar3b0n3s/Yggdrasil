@@ -1,5 +1,6 @@
 #include "TestsPCH.h"
 
+#include "Engine/Core/Error.h"
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Core/Json/JsonWriter.h"
@@ -69,6 +70,30 @@ namespace Engine {
 			return files;
 		}
 
+		// The repository directories whose projects are authored input (Scripts/Lib/games.py GAME_PROJECT_ROOTS): Projects/
+		// (FeatureTest and the demo games) and Tests/Projects/ (the M16 dry run, Docs/Decisions/0026-m16-contract.md
+		// decision 8).
+		const std::vector<std::string> ProjectRoots = { "Projects", "Tests/Projects" };
+
+		// Every file below the repository directory `root`, as paths that start with it; a root that does not exist holds
+		// none (Tests/Projects/ has no project before the dry run builds one).
+		std::vector<std::filesystem::path> ListProjectTreeFiles(const std::string& root)
+		{
+			const std::filesystem::path directory = Test::GetRepositoryRoot() / FileSystem::PathFromUtf8(root);
+			const Result<std::vector<std::filesystem::path>> entries = FileSystem::ListDirectory(directory, true);
+			if (!entries.has_value() && entries.error().GetCode() == ErrorCode::NotFound)
+				return {};
+			REQUIRE_MESSAGE(entries.has_value(), entries.error().ToString());
+			std::vector<std::filesystem::path> files;
+			for (const std::filesystem::path& path : *entries)
+			{
+				std::error_code error;
+				if (!std::filesystem::is_directory(path, error))
+					files.push_back(path);
+			}
+			return files;
+		}
+
 	}
 
 	TEST_SUITE("Core")
@@ -82,8 +107,9 @@ namespace Engine {
 			size_t checked = 0;
 			for (const std::string& file : *files)
 			{
-				// Lint fixtures are seeded defects of their own kind, never engine input.
-				if (file.starts_with("Lint/") || file.find("/Automation/") != std::string::npos)
+				// Lint fixtures are seeded defects of their own kind, never engine input; the provenance-audit fixtures are byte-hash
+				// inputs of Scripts/AuditProvenance.py, some edited by hand on purpose (Docs/Decisions/0026-m16-contract.md decision 6).
+				if (file.starts_with("Lint/") || file.starts_with("Provenance/") || file.find("/Automation/") != std::string::npos)
 					continue;
 				if (nonCanonical.contains(file))
 				{
@@ -111,34 +137,39 @@ namespace Engine {
 
 		TEST_CASE("AuthoredFiles: every authored file under Projects is canonical JSON")
 		{
-			const std::filesystem::path projects = Test::GetRepositoryRoot() / "Projects";
-			const Result<std::vector<std::filesystem::path>> entries = FileSystem::ListDirectory(projects, true);
-			REQUIRE_MESSAGE(entries.has_value(), entries.error().ToString());
+			// Projects/ and, from M16, Tests/Projects/ (ADR 0026 decision 8), with the same skips.
+			const std::filesystem::path repository = Test::GetRepositoryRoot();
 			std::vector<std::string> files;
-			for (const std::filesystem::path& path : *entries)
+			size_t underProjects = 0;
+			for (const std::string& root : ProjectRoots)
 			{
-				std::error_code error;
-				if (std::filesystem::is_directory(path, error))
-					continue;
-				std::string relative = FileSystem::PathToUtf8(path.lexically_relative(projects));
-				std::ranges::replace(relative, '\\', '/');
-				// Library/ is the editor's cache and Automation/ holds logs; batch scaffolds (.jsonl) are line-oriented.
-				const size_t project = relative.find('/');
-				const std::string_view inside = project == std::string::npos ? std::string_view() : std::string_view(relative).substr(project + 1);
-				if (inside.starts_with("Library/") || inside.starts_with("Build/") || inside.starts_with("Automation/"))
-					continue;
-				const std::string extension = FileSystem::PathToUtf8(path.extension());
-				if (std::ranges::find(AuthoredExtensions, extension) != AuthoredExtensions.end())
-					files.push_back(relative);
+				const std::filesystem::path base = repository / FileSystem::PathFromUtf8(root);
+				for (const std::filesystem::path& path : ListProjectTreeFiles(root))
+				{
+					std::string relative = FileSystem::PathToUtf8(path.lexically_relative(base));
+					std::ranges::replace(relative, '\\', '/');
+					// Library/ is the editor's cache and Automation/ holds logs; batch scaffolds (.jsonl) are line-oriented.
+					const size_t project = relative.find('/');
+					const std::string_view inside = project == std::string::npos ? std::string_view() : std::string_view(relative).substr(project + 1);
+					if (inside.starts_with("Library/") || inside.starts_with("Build/") || inside.starts_with("Automation/"))
+						continue;
+					const std::string extension = FileSystem::PathToUtf8(path.extension());
+					if (std::ranges::find(AuthoredExtensions, extension) == AuthoredExtensions.end())
+						continue;
+					files.push_back(root + "/" + relative);
+					if (root == "Projects")
+						++underProjects;
+				}
 			}
 			std::ranges::sort(files);
 			for (const std::string& file : files)
 			{
-				const Result<std::string> text = FileSystem::ReadText(projects / FileSystem::PathFromUtf8(file));
+				const Result<std::string> text = FileSystem::ReadText(repository / FileSystem::PathFromUtf8(file));
 				REQUIRE_MESSAGE(text.has_value(), text.error().ToString());
-				CheckCanonical("Projects/" + file, *text);
+				CheckCanonical(file, *text);
 			}
-			CHECK(files.size() >= 100);
+			// The floor proves the walk finds FeatureTest; it counts Projects/ only, since Tests/Projects/ may be empty.
+			CHECK(underProjects >= 100);
 		}
 
 		// §6.7 (ADR 0022 "Integration" fix 4; review findings M22 and M26): a replay header's Config is the run mode of the
@@ -154,19 +185,21 @@ namespace Engine {
 				if (!file.starts_with("Lint/"))
 					replays.push_back(Test::GetTestDataPath(file));
 			}
-			const std::filesystem::path projects = Test::GetRepositoryRoot() / "Projects";
-			const Result<std::vector<std::filesystem::path>> entries = FileSystem::ListDirectory(projects, true);
-			REQUIRE_MESSAGE(entries.has_value(), entries.error().ToString());
-			for (const std::filesystem::path& path : *entries)
+			// Projects/ and, from M16, Tests/Projects/ (ADR 0026 decision 8).
+			for (const std::string& root : ProjectRoots)
 			{
-				// A project's Library/ (the editor's cache) and Build/ (exports) are not committed.
-				const std::filesystem::path relative = path.lexically_relative(projects);
-				const bool committed = std::ranges::none_of(relative, [](const std::filesystem::path& part)
+				const std::filesystem::path base = Test::GetRepositoryRoot() / FileSystem::PathFromUtf8(root);
+				for (const std::filesystem::path& path : ListProjectTreeFiles(root))
 				{
-					return part == "Library" || part == "Build";
-				});
-				if (path.extension() == ".replay" && committed)
-					replays.push_back(path);
+					// A project's Library/ (the editor's cache) and Build/ (exports) are not committed.
+					const std::filesystem::path relative = path.lexically_relative(base);
+					const bool committed = std::ranges::none_of(relative, [](const std::filesystem::path& part)
+					{
+						return part == "Library" || part == "Build";
+					});
+					if (path.extension() == ".replay" && committed)
+						replays.push_back(path);
+				}
 			}
 			std::ranges::sort(replays);
 			for (const std::filesystem::path& replay : replays)

@@ -2,6 +2,7 @@
 #include "EditorCore/Automation/TestMethods.h"
 
 #include "EditorCore/Automation/EditorMethodContext.h"
+#include "EditorCore/EditorContext.h"
 #include "EditorCore/Play/EditorFeatureTestHost.h"
 #include "Engine/Automation/Methods/SharedMethodSupport.h"
 #include "Engine/Automation/Protocol/MethodRegistry.h"
@@ -10,6 +11,8 @@
 #include "Engine/Reflection/TypeRegistry.h"
 
 #include <nlohmann/json.hpp>
+
+#include <format>
 
 namespace Engine {
 
@@ -20,8 +23,9 @@ namespace Engine {
 		class TestRunOperation final : public PendingOperation
 		{
 		public:
-			TestRunOperation(Scope<IFeatureTestHost> host, std::string record)
-				: m_Host(std::move(host)), m_Record(std::move(record))
+			// `reportCoverage`: the result keeps Coverage.Counters (TestRunParams::Coverage or Testing.CoverageGates).
+			TestRunOperation(Scope<IFeatureTestHost> host, std::string record, bool reportCoverage)
+				: m_Host(std::move(host)), m_Record(std::move(record)), m_ReportCoverage(reportCoverage)
 			{
 			}
 			~TestRunOperation() override
@@ -47,12 +51,13 @@ namespace Engine {
 					if (!advanced)
 					{
 						// Recording verification can fail after the cases finished. Preserve those cases and their report
-						// files, while returning the verification error and never transferring the candidate recording.
-						const Error failure = advanced.error();
+						// files, while returning the verification error and never transferring the candidate recording. A
+						// recording's failure (verification, the input check) names the replay it did not write.
+						const Error failure = m_Record.empty() ? advanced.error() : Error(advanced.error()).WithContext(std::format("while recording '{}'; nothing was written", m_Record));
 						if (const auto result = m_Runner.GetResult(); result)
 						{
 							Cancel(context);
-							auto report = PublishReports(host, *result);
+							auto report = PublishReports(host, *result, m_ReportCoverage);
 							if (report)
 								context.SetErrorData("testRun", std::move(*report));
 							else
@@ -96,29 +101,55 @@ namespace Engine {
 				{
 					ENGINE_TRY_ASSIGN(recording, m_Runner.TakeRecording());
 				}
+				const std::optional<uint64_t> inputCheckTick = m_Runner.GetInputCheckTick();
 				// The simulation is terminal. Restore the editor before publishing through its guarded write path;
 				// this remains one invocation, with the original request's attribution and no interleaved frame.
 				Cancel(context);
 				if (recording)
 				{
 					ENGINE_TRY_ASSIGN(result.RecordingPath, context.WriteReplay(m_Record, *recording));
+					ENGINE_TRY_ASSIGN(result.Recording, MakeRecordingBlock(context, result.RecordingPath, *recording, inputCheckTick));
 				}
-				return PublishReports(context, std::move(result));
+				return PublishReports(context, std::move(result), m_ReportCoverage);
 			}
 
-			[[nodiscard]] static Result<Json> PublishReports(EditorMethodContext& context, TestRunResult result)
+			// The result's recording block (TestRunResult::Recording, M16 friction S3-03): what the written replay holds and
+			// where its input check diverged.
+			[[nodiscard]] static Result<VariantValue> MakeRecordingBlock(EditorMethodContext& context, const std::string& path, const ReplayDocument& recording,
+				std::optional<uint64_t> inputCheckTick)
+			{
+				const TestRecordingResult block{
+					.Path = path,
+					.FormatVersion = recording.Version,
+					.Ticks = ToAutomationCounter(recording.FinalTick),
+					.Events = ToAutomationCounter(recording.Events.size()),
+					.Checkpoints = ToAutomationCounter(recording.Checkpoints.size()),
+					.FinalStateHash = recording.FinalStateHash,
+					.InputCheck = { .Ran = inputCheckTick.has_value(), .DivergedAtTick = ToAutomationCounter(inputCheckTick.value_or(0)) },
+				};
+				ENGINE_TRY_ASSIGN(Json serialized, context.SerializeResult(block));
+				return VariantValue(std::move(serialized));
+			}
+
+			// Writes the JUnit and JSON reports (the JSON report always holds the coverage counters) and returns the RPC
+			// result, which leaves Coverage.Counters out unless `reportCoverage`: without the counters (several hundred
+			// script API entries) an ordinary run's result stays below the offload threshold.
+			[[nodiscard]] static Result<Json> PublishReports(EditorMethodContext& context, TestRunResult result, bool reportCoverage)
 			{
 				ENGINE_TRY_ASSIGN(const std::string junit, TestRunResultToJUnit(result));
 				ENGINE_TRY_ASSIGN(result.JunitPath, context.WriteOutputFile("xml", AsBytes(junit)));
 				ENGINE_TRY_ASSIGN(const Json report, context.SerializeResult(result));
 				ENGINE_TRY_ASSIGN(const std::string text, JsonWriter::Write(report));
 				ENGINE_TRY_ASSIGN(result.JsonPath, context.WriteOutputFile("json", AsBytes(text)));
+				if (!reportCoverage)
+					result.Coverage.Counters.clear();
 				return context.SerializeResult(result);
 			}
 		private:
 			Scope<IFeatureTestHost> m_Host{};
 			FeatureTestRunner m_Runner{};
 			std::string m_Record{};
+			bool m_ReportCoverage = false;
 			bool m_Released = false;
 		};
 
@@ -148,7 +179,8 @@ namespace Engine {
 			auto host = CreateScope<EditorFeatureTestHost>(context);
 			ENGINE_TRY(host->Preflight());
 			EditorFeatureTestHost* adapter = host.get();
-			auto operation = CreateScope<TestRunOperation>(std::move(host), params.Record);
+			const bool reportCoverage = params.Coverage || context.GetEditor().GetProject().GetSettings().Testing.CoverageGates;
+			auto operation = CreateScope<TestRunOperation>(std::move(host), params.Record, reportCoverage);
 			// The script API baseline immediately before Begin, whose suite collection counts (ADR 0022 decision 4).
 			ENGINE_TRY(adapter->CaptureCoverageBaseline());
 			const Status begun = operation->Begin(params);
@@ -184,14 +216,15 @@ namespace Engine {
 		registry.Struct<TestRunParams>("TestRunParams", "Run selected suites, cases and replays without altering authored scene state.")
 			.Field("filter", &TestRunParams::Filter, "Case-insensitive substring of suite/case or replay path.")
 			.Field("timeoutTicks", &TestRunParams::TimeoutTicks, "Optional positive run-wide tick cap; omitted means no additional limit.")
-			.Field("record", &TestRunParams::Record, "Optional project Assets .replay output; requires one selected suite and strict reproduction.");
+			.Field("record", &TestRunParams::Record, "Optional project Assets .replay output; requires one selected suite and strict reproduction in ordinary play (every state-hash checkpoint, one every 60 ticks, and the final hash). A recording with input events is also replayed without them and refused when that run reproduces every checkpoint and the final hash too, whatever script errors it raises: its outcome does not depend on its input. The result's recording block describes the replay written.")
+			.Field("coverage", &TestRunParams::Coverage, "Return coverage.counters in the result; without it they are left out unless the project sets Testing.CoverageGates. The JSON report at jsonPath always holds them.");
 	}
 
 	void RegisterTestMethods(MethodRegistry& methods)
 	{
 		methods.Add({ .Name = "test.list", .Description = "Collects test suite and case names and source locations without running case bodies.", .Examples = { { .Description = "List configured tests.", .Params = Json::object() } } }, &Automation::TestList);
 		methods.AddPending<EditorMethodContext, TestRunParams, TestRunMethodResult>(
-			{ .Name = "test.run", .Description = "Runs configured tests and returns every outcome plus JSON/JUnit reports. Optional recording is published only after strict replay verification.", .ExposeAsTool = true, .TimeoutSeconds = 900, .Examples = { { .Description = "Run every configured test.", .Params = Json::object() } } }, &Automation::TestRun);
+			{ .Name = "test.run", .Description = "Runs configured tests and returns every outcome (counts, failedCases and the case rows; a replay's suite entry counts the checkpoints it compared) plus JSON/JUnit reports. The coverage object always keeps its registryFingerprint and gates; its counters are returned only with coverage: true or Testing.CoverageGates. Optional recording is published only after strict replay verification and, with input events, the input check (§13.6: refused when a run without them still passes that verification, whatever script errors it raises), and reported in the recording block (format version, ticks, events, checkpoints, final hash, where the input check diverged).", .ExposeAsTool = true, .TimeoutSeconds = 900, .Examples = { { .Description = "Run every configured test.", .Params = Json::object() }, { .Description = "Run every test and return the script API coverage counters.", .Params = Json{ { "coverage", true } } } } }, &Automation::TestRun);
 	}
 
 }

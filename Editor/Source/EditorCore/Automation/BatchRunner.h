@@ -14,8 +14,9 @@
 #include <vector>
 
 // Sequential in-process request runs (Architecture §13.9, §6.7): `Editor --headless --batch f.jsonl` replays RPC calls and
-// exits non-zero at the first error, and `Editor --headless --project P --upgrade` runs project.upgrade with its own
-// transcript lines (§13.12, client "cli").
+// exits non-zero at the first error, and `Editor --headless --project P --upgrade` runs project.refreshAssets (the asset
+// scan it defers) and project.upgrade with their own transcript lines (§13.12, client "cli";
+// Docs/Decisions/0026-m16-contract.md decision 11).
 
 namespace Engine {
 

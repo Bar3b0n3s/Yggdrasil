@@ -25,7 +25,7 @@
 			"maximum": 1
 		},
 		"Layers": {
-			"description": "The layers, summed.",
+			"description": "1 to 16 layers, summed. A layer lasts its Delay, plus its notes' seconds (or its Duration), plus its Envelope's Release; the sound lasts as long as its longest layer, at most 10 seconds.",
 			"type": "array",
 			"items": {
 				"$ref": "#/$defs/SoundLayer"
@@ -36,7 +36,7 @@
 	"additionalProperties": false,
 	"$defs": {
 		"SoundLayer": {
-			"description": "One oscillator of a sound effect: a note sequence or a frequency sweep.",
+			"description": "One oscillator of a sound effect: a note sequence (Notes) or, without notes, one tone sweeping from StartFrequency to EndFrequency over Duration. Every note, or the tone, plays with its own Envelope.",
 			"type": "object",
 			"properties": {
 				"Wave": {
@@ -50,7 +50,7 @@
 					"maximum": 0.99
 				},
 				"Notes": {
-					"description": "Notes played back to back, such as \"C5:0.06\" (name, octave, seconds) or \"R:0.1\" (a rest).",
+					"description": "At most 256 notes played back to back, each \"<Name><Octave>:<seconds>\" such as \"C5:0.06\", or \"R:<seconds>\" for a rest such as \"R:0.1\". Name is C, C#, Db, D, D#, Eb, E, F, F#, Gb, G, G#, Ab, A, A#, Bb or B (case-sensitive: '#' sharpens, 'b' flattens); Octave is one digit, 0 to 8, with A4 = 440 Hz in equal temperament and C4 middle C; seconds is a positive plain decimal (no exponent or sign) with at most 7 digits before and 8 after the point. Empty: the layer plays one tone of Duration seconds.",
 					"type": "array",
 					"items": {
 						"type": "string"

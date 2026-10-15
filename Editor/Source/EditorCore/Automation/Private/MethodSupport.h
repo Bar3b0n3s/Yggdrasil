@@ -7,11 +7,13 @@
 #include "Engine/Core/Json/Json.h"
 #include "Engine/Core/Result.h"
 #include "Engine/Core/VfsPath.h"
+#include "Engine/Reflection/VariantValue.h"
 #include "Engine/Scene/LoadReport.h"
 
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <map>
 #include <optional>
 #include <span>
 #include <string>
@@ -28,11 +30,13 @@
 namespace Engine {
 
 	class AutomationMethodContext;
+	class ComponentInfo;
 	class ConstEntity;
 	class EditorContext;
 	class Entity;
 	class Scene;
 	class TypeInfo;
+	class TypeRegistry;
 	class UUIDGenerator;
 	struct ProjectSummary;
 	struct SceneSummary;
@@ -69,8 +73,10 @@ namespace Engine {
 		[[nodiscard]] Status CheckDirtyScene(const EditorContext& editor, bool save, bool discard, std::string_view discardFlag);
 
 		// Reads `path` into `scene` (empty) with `mode`: options.SourcePath is the project-relative path, Repair loads draw
-		// their fresh ids from `repairIds`. Errors: the VFS read errors (an operating-system access failure as Io,
-		// ToEditorFileError) and those of SceneSerializer::LoadFromFile.
+		// their fresh ids from `repairIds`, script field values resolve against the editor's script field schemas, and an
+		// editor with --strict reads with LoadOptions::StrictUnknowns. Errors: the VFS read errors (an operating-system access
+		// failure as Io, ToEditorFileError), those of EditorContext::GetScriptSchemaSnapshot and those of
+		// SceneSerializer::LoadFromFile.
 		[[nodiscard]] Status LoadSceneFile(const EditorContext& editor, Scene& scene, const VfsPath& path, LoadMode mode, UUIDGenerator* repairIds,
 			LoadReport& report);
 
@@ -99,6 +105,19 @@ namespace Engine {
 
 		// The number of entities in the subtrees of `roots` (valid, asserted; disjoint subtrees, as ResolveEntityRoots gives).
 		[[nodiscard]] size_t CountSubtreeEntities(std::span<const Entity> roots);
+
+		// The registered component `name` that automation may write. Errors at `pointer`: NotFound with suggestions;
+		// InvalidArgument for an entity-level component (written through the entity's members) or a Hidden one.
+		[[nodiscard]] Result<const ComponentInfo*> FindWritableComponent(const TypeRegistry& registry, std::string_view name, std::string_view pointer);
+
+		// Writes a "components" param (component values by registry name, convention 10 of MethodRegistry.h) onto `entity`,
+		// as entity.create, entity.update and prefab.instantiate do: existing components are merged (RFC 7386), missing ones
+		// added once the components they require are present (so {"SphereCollider": ..., "RigidBody": ...} works in any
+		// order); stored fields go through ComponentAccess in one write per component, writable virtual fields
+		// (Transform.EulerAngles, WorldPosition) through their setters after it; a Script handle must name a Behaviour.
+		// A component that can never be added is attempted anyway, which reports why (ComponentAccess::AddComponent).
+		// Errors are located below "/components/<name>"; the caller's SceneEdit rolls back what was written.
+		[[nodiscard]] Status WriteComponents(EditorContext& editor, Entity entity, const std::map<std::string, VariantValue>& components);
 
 	}
 

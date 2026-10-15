@@ -41,6 +41,10 @@ Tools/MCP/.venv/
 # directory that happens to share one of these names is ignored (and silently left out of format, lint and commits).
 /Projects/*/Library/
 /Tests/Projects/*/Library/
+# The exports project.export writes to <Project>/Build/ (a backstop beside each project's own .gitignore; ADR 0026
+# decision 13, G4).
+/Projects/*/Build/
+/Tests/Projects/*/Build/
 
 # Python
 __pycache__/

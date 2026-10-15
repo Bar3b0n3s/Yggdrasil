@@ -3,6 +3,7 @@
 #include "EditorCore/Automation/AssetMethods.h"
 
 #include "EditorCore/EditorContext.h"
+#include "EditorCore/Project/ProjectManager.h"
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Core/VirtualFileSystem.h"
@@ -13,6 +14,9 @@
 #include "Support/TestData.h"
 
 #include <nlohmann/json.hpp>
+
+#include <filesystem>
+#include <system_error>
 
 namespace Engine {
 
@@ -76,6 +80,101 @@ namespace Engine {
 			Json info = CallOrFail(setup, "asset.info", Json{ { "asset", "Assets/Materials/Red.material" } });
 			CHECK(info["asset"]["id"] == Json(id));
 			CHECK(CallOrFail(setup, "asset.getProperties", Json{ { "asset", id } })["values"]["Metallic"] == Json(0.0f));
+		}
+
+		// M16 friction S3-07: asset.delete knew only assets, so the folder a trashed recording left behind could not be removed
+		// ("NotFound: no asset 'Assets/Tests/Probe'"). An empty folder is now removed as one undoable command, and a folder
+		// that holds files is refused, naming them.
+		TEST_CASE("AssetMethods: asset.delete removes an empty folder as one undoable command and refuses a folder that holds files")
+		{
+			Test::AutomationFixture setup("AssetDeleteFolder");
+			const VirtualFileSystem& vfs = setup.GetEditor().GetVfs();
+			const auto exists = [&vfs](std::string_view path)
+			{
+				return vfs.Exists(VfsPath::Create("project", std::string(path)).value_or(VfsPath()));
+			};
+			CallOrFail(setup, "asset.create", ParseAssetMethodJson(R"({"type": "Folder", "path": "Assets/Probe/Inner"})"));
+			CallOrFail(setup, "asset.create", ParseAssetMethodJson(R"({"type": "Material", "path": "Assets/Full/Red.material"})"));
+
+			Json refused = setup.Request("asset.delete", Json{ { "asset", "Assets/Full" } });
+			REQUIRE_MESSAGE(refused.contains("error"), refused.dump());
+			CHECK(refused["error"]["data"]["errorCode"] == Json("Validation"));
+			const std::string detail = refused["error"]["data"]["issues"][0]["message"].dump();
+			CHECK(detail.find("not empty") != std::string::npos);
+			CHECK(detail.find("Assets/Full/Red.material") != std::string::npos);
+			CHECK(detail.find("Assets/Full/Red.material.meta") != std::string::npos);
+			CHECK(refused["error"]["data"]["issues"][0]["pointer"] == Json("/asset"));
+			CHECK(refused["error"]["data"]["issues"][0]["hint"].dump().find("delete its assets first") != std::string::npos);
+			CHECK(exists("Assets/Full/Red.material"));
+
+			Json deleted = CallOrFail(setup, "asset.delete", Json{ { "asset", "Assets/Probe" } });
+			CHECK(deleted["asset"] == Json{ { "id", "" }, { "path", "Assets/Probe" }, { "type", "None" } });
+			CHECK(deleted["removedFolders"] == Json::array({ "Assets/Probe", "Assets/Probe/Inner" }));
+			CHECK(deleted["trashDirectory"] == Json(""));
+			CHECK(deleted["trashedFiles"] == Json::array());
+			CHECK(deleted["undoIndex"] != Json(0));
+			CHECK_FALSE(exists("Assets/Probe"));
+			REQUIRE(setup.Call("edit.undo", Json::object()).has_value());
+			CHECK(exists("Assets/Probe/Inner"));
+			REQUIRE(setup.Call("edit.redo", Json::object()).has_value());
+			CHECK_FALSE(exists("Assets/Probe"));
+
+			// S3's case: the folder an asset leaves behind once the asset went to the trash.
+			CallOrFail(setup, "asset.delete", Json{ { "asset", "Assets/Full/Red.material" } });
+			CHECK(CallOrFail(setup, "asset.delete", Json{ { "asset", "project://Assets/Full" } })["removedFolders"] == Json::array({ "Assets/Full" }));
+			CHECK_FALSE(exists("Assets/Full"));
+
+			Json root = setup.Request("asset.delete", Json{ { "asset", "Assets" } });
+			CHECK(root["error"]["data"]["errorCode"] == Json("InvalidArgument"));
+			CHECK(exists("Assets"));
+			Json missing = setup.Request("asset.delete", Json{ { "asset", "Assets/Nothing" } });
+			CHECK(missing["error"]["data"]["errorCode"] == Json("NotFound"));
+		}
+
+		// FX-6 review: the folder form judged emptiness from VFS listings, which leave out host names no VfsPath can spell, and
+		// the removal was recursive, so such a file was deleted for good with its "empty" folder. Folders are now removed
+		// without recursion: the host refuses one that still holds anything, the command restores what it removed, and the
+		// file survives.
+		TEST_CASE("AssetMethods: asset.delete refuses a folder holding a file no project path can spell and deletes nothing")
+		{
+			Test::AutomationFixture setup("AssetDeleteHiddenFile");
+			const VirtualFileSystem& vfs = setup.GetEditor().GetVfs();
+			const auto exists = [&vfs](std::string_view path)
+			{
+				return vfs.Exists(VfsPath::Create("project", std::string(path)).value_or(VfsPath()));
+			};
+			CallOrFail(setup, "asset.create", ParseAssetMethodJson(R"({"type": "Folder", "path": "Assets/Probe/Inner"})"));
+
+			// "nul.txt" is a Windows reserved device name, which VfsPath rejects on every host, so no listing shows it. POSIX
+			// hosts create it like any other name; Windows needs the extended-length form, which never resolves it to the device.
+			const std::filesystem::path folder = setup.GetEditor().GetProject().GetProjectFile().parent_path() / "Assets" / "Probe";
+#if defined(ENGINE_PLATFORM_WINDOWS)
+			std::error_code error;
+			const std::filesystem::path absolute = std::filesystem::absolute(folder / "nul.txt", error).lexically_normal();
+			REQUIRE_FALSE(error);
+			const std::filesystem::path hidden(L"\\\\?\\" + absolute.native());
+#else
+			const std::filesystem::path hidden = folder / "nul.txt";
+#endif
+			REQUIRE(FileSystem::WriteFileAtomic(hidden, AsBytes("notes"), { .KeepBackup = false }).has_value());
+			const Result<std::vector<VfsEntry>> listed = vfs.List(VfsPath::Create("project", "Assets/Probe").value_or(VfsPath()), true);
+			REQUIRE(listed.has_value());
+			REQUIRE(listed->size() == 1);
+			CHECK((*listed)[0].Path.GetPath() == "Assets/Probe/Inner");
+
+			Json refused = setup.Request("asset.delete", Json{ { "asset", "Assets/Probe" } });
+			REQUIRE_MESSAGE(refused.contains("error"), refused.dump());
+			CHECK(refused["error"]["data"]["errorCode"] == Json("InvalidState"));
+			const std::string detail = refused.dump();
+			CHECK(detail.find("cannot list") != std::string::npos);
+			CHECK(detail.find("nothing was removed") != std::string::npos);
+			CHECK(FileSystem::ReadText(hidden) == std::string("notes"));
+			CHECK(exists("Assets/Probe/Inner")); // removed first, then restored when the folder above it was refused
+
+			// Once the file is gone the folder is empty for the host too.
+			REQUIRE(FileSystem::Remove(hidden).has_value());
+			CHECK(CallOrFail(setup, "asset.delete", Json{ { "asset", "Assets/Probe" } })["removedFolders"] == Json::array({ "Assets/Probe", "Assets/Probe/Inner" }));
+			CHECK_FALSE(exists("Assets/Probe"));
 		}
 
 		TEST_CASE("AssetMethods: asset.create supports dry runs and rejects bad paths and values")

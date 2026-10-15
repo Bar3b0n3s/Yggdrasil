@@ -69,6 +69,14 @@ namespace Engine {
 		return {};
 	}
 
+	void ReplayRecorder::CaptureCheckpoint(const PlaySession& session)
+	{
+		const uint64_t tick = session.GetTick();
+		if (!m_State->Recording || !m_State->InvalidReason.empty() || tick != m_State->NextTick || tick == 0 || tick % ReplayCheckpointInterval != 0)
+			return;
+		m_State->Document.Checkpoints.push_back({ .Tick = tick, .StateHash = UUID(session.ComputeStateHash()).ToString() });
+	}
+
 	void ReplayRecorder::Invalidate(std::string_view reason)
 	{
 		if (m_State->Recording && m_State->InvalidReason.empty())

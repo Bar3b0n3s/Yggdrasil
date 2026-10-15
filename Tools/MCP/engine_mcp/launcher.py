@@ -8,17 +8,26 @@ editor_launch {project, create?, template?, headless?, renderer?, recover?}:
      EditorAlreadyOpen {pid} (the pid from the lock file) and the hint "enable Allow AI automation in the editor's
      Automation panel, then call editor_attach".
   3. Otherwise spawn bin/<cfg>-<sys>-<arch>/Editor/Editor(.exe) (Release preferred; a missing binary is an error naming
-     "python Scripts/Build.py --config Release --project Editor") with --automation --project <path> (headless:
+     "python Scripts/Build.py --config Release --project Editor") in the launcher state with --automation (headless:
      --headless; renderer: --renderer none by default, so a launch needs no GPU; "vulkan" serves viewport_screenshot and
      editor_screenshot, which a --renderer none editor answers with Unsupported), and supervise it. With create, the
-     project is created first through project.create on a launcher-state editor (template: one of project.create's,
-     Empty or Basic3D). An existing project with recover, or with a published autosave candidate
-     (autosave.has_published_autosave, as after EditorCrashed {autosaveAvailable: true}), opens instead through
-     project.open {path, recover} on a launcher-state editor, the one path that can adopt a recovery (§13.8
-     "Resilience"): the launch then reports the editor's recoveryAvailable and recovered, and recover: true installs
-     the autosave as a dirty scene. Without recover a candidate is only reported, never adopted.
+     project is created through project.create (template: one of project.create's, Empty or Basic3D). An existing
+     project opens through project.open {path, recover}, never through --project, so whatever opening it writes (the
+     .meta files of new sources) is attributed to that transcribed request (§13.12 rule 2;
+     Docs/Decisions/0026-m16-contract.md decision 11). project.open is also the one path that can adopt a recovery
+     (§13.8 "Resilience"): the launch reports the editor's recoveryAvailable and recovered (a published autosave
+     candidate, as after EditorCrashed {autosaveAvailable: true}), and recover: true installs the autosave as a dirty
+     scene. Without recover a candidate is only reported, never adopted. After the project.create or project.open, the
+     launch sends a transcribed session.info (Launcher.read_session_info; Docs/Decisions/0026-m16-contract.md, friction
+     S3-06), so editor_launch reports the session with its open scene (none: opening a project opens no scene) as an
+     attach does.
 editor_attach {project? | pid?}: attaches explicitly to a live session. The bridge never supervises or kills an editor
-it attached to; editor_shutdown on an attached editor only disconnects.
+it attached to; editor_shutdown on an attached editor only disconnects. Every attach, step 1's too, sends a transcribed
+session.info first (Launcher.attach_session; Docs/Decisions/0026-m16-contract.md, friction S2-10), so the transcript
+shows where each attached session begins: its first line names the editor's pid, project and renderer.
+
+A relative project path names a path below the repository root ("Tests/Projects/Breakout"), whatever the bridge's
+working directory (Launcher.resolve_project; Docs/Decisions/0026-m16-contract.md, friction S1-16 and prediction P09).
 
 Spawned editors get --user-data-dir with the launcher's user-data root (the OS's by default), so the bridge finds their
 session files and crash reports where it looks.
@@ -31,7 +40,6 @@ from pathlib import Path
 from typing import Any
 
 import engine_client
-from engine_mcp.autosave import has_published_autosave
 from engine_mcp.connection import EditorConnection
 from engine_mcp.transcript import CLIENT_NAME
 
@@ -99,14 +107,22 @@ class Launcher:
     def sessions_directory(self) -> Path:
         return engine_client.sessions_directory(self.app_name, self.user_data_root)
 
+    def resolve_project(self, project: Path) -> Path:
+        """`project` as an absolute path: "~" expanded, and a relative path taken below the repository root, never the
+        bridge's working directory (the MCP client decides that one)."""
+        project = project.expanduser()
+        return (project if project.is_absolute() else self.repository_root / project).resolve()
+
     def launch(self, request: LaunchRequest) -> EditorConnection:
         """editor_launch (see the module comment). Raises EditorAlreadyOpen, FileNotFoundError for a missing binary, or
-        RuntimeError when the spawned editor exits before it listens (with its exit code: 3 for a locked or invalid
-        project), when project.create or project.open fails, or when recover asks to adopt an autosave that an
-        editor already serving the project holds."""
+        RuntimeError when the spawned editor exits before it listens (with its exit code), when project.create or
+        project.open fails (a locked or invalid project, a refused recovery), or when recover asks to adopt an autosave
+        that an editor already serving the project holds. Whatever else the project.create, project.open or session.info
+        of a spawned editor raises (a timeout, a broken connection) propagates after that editor is killed, since no
+        connection to it is returned."""
         if request.renderer not in RENDERERS:
             raise ValueError(f"renderer must be one of {', '.join(RENDERERS)} (got '{request.renderer}')")
-        project = request.project.expanduser().resolve()
+        project = self.resolve_project(request.project)
         project_file = find_project_file(project)
         if project_file is None and not request.create:
             raise FileNotFoundError(f"no project at {project}: pass create: true to create one")
@@ -119,18 +135,14 @@ class Launcher:
                     raise RuntimeError(f"an editor (pid {session.pid}) already has {project_file} open; only its "
                                        "Recover prompt can adopt the autosave (attach without recover to use that "
                                        "editor)")
-                return self.connect(session, supervised=False, editor=None)
+                return self.attach_session(session)
             holder = engine_client.read_lock_holder(project_file.parent)
             if holder is not None:
                 raise EditorAlreadyOpen(holder)
-        # project.open {recover} adopts a recovery only in the launcher state, so an existing project with a recovery to
-        # adopt or report opens through it; any other existing project opens directly with --project.
-        open_with_recovery = (project_file is not None
-                              and (request.recover or has_published_autosave(project_file.parent)))
+        # A launcher-state editor, which creates or opens the project through a transcribed request, so every write of
+        # the creation or the open (the .meta files the open's scan writes for new sources) is attributed to it.
         executable = engine_client.find_editor_executable(self.repository_root, self.configurations)
         arguments = ["--automation", "--renderer", request.renderer, *(["--headless"] if request.headless else [])]
-        if project_file is not None and not open_with_recovery:
-            arguments += ["--project", str(project_file)]
         editor = engine_client.launch_editor(executable, arguments, self.user_data_directory(), self.app_name)
         assert editor.session is not None
         try:
@@ -138,10 +150,18 @@ class Launcher:
         except BaseException:
             editor.kill()
             raise
-        if project_file is None:
-            self.create_project(connection, project, request.template)
-        elif open_with_recovery:
-            self.open_project(connection, project_file, request.recover)
+        try:
+            if project_file is None:
+                self.create_project(connection, project, request.template)
+            else:
+                self.open_project(connection, project_file, request.recover)
+            self.read_session_info(connection)
+        except BaseException:
+            # The bridge never returns this connection, so nothing else would end the editor it spawned: a refused,
+            # timed-out or broken project.create, project.open or session.info (the milestone review's R30).
+            connection.disconnect()
+            editor.kill()
+            raise
         return connection
 
     def attach(self, project: Path | None = None, pid: int | None = None) -> EditorConnection:
@@ -151,7 +171,7 @@ class Launcher:
             raise ValueError("editor_attach takes exactly one of project and pid")
         sessions = self.sessions_directory()
         if project is not None:
-            project_file = find_project_file(project.expanduser().resolve())
+            project_file = find_project_file(self.resolve_project(project))
             if project_file is None:
                 raise LookupError(f"no project at {project}")
             session = engine_client.find_session(sessions, project_file)
@@ -163,7 +183,30 @@ class Launcher:
             session = next((item for item in engine_client.list_sessions(sessions) if item.pid == pid), None)
             if session is None:
                 raise LookupError(f"no editor with automation runs as pid {pid} (session files in {sessions})")
-        return self.connect(session, supervised=False, editor=None)
+        return self.attach_session(session)
+
+    def attach_session(self, session: engine_client.SessionInfo) -> EditorConnection:
+        """An attach (editor_attach, or editor_launch finding the editor that serves the project): the connection, then
+        a transcribed session.info (Docs/Decisions/0026-m16-contract.md, friction S2-10), so every attach leaves a
+        request line in the project's transcript, and the summary of its response names the editor's pid, project and
+        renderer. The result is kept as EditorConnection.session_info; a session.info the editor refuses leaves the
+        connection attached (the response line records why), and a connection that breaks is closed again and raised."""
+        connection = self.connect(session, supervised=False, editor=None)
+        try:
+            self.read_session_info(connection)
+        except BaseException:
+            connection.disconnect()
+            raise
+        return connection
+
+    @staticmethod
+    def read_session_info(connection: EditorConnection) -> None:
+        """The transcribed session.info that begins every attached or launched session (attach_session, and launch after
+        its project.create or project.open), kept as EditorConnection.session_info: None when the editor refuses it,
+        whose response line then records why. Raises what EditorConnection.call raises."""
+        response = connection.call("session.info", {})
+        result = response.get("result")
+        connection.session_info = result if isinstance(result, dict) else None
 
     # ----------------------------------------------------------------------------------------------------------------
 
@@ -176,7 +219,7 @@ class Launcher:
                                                             call_log=engine_client.CallLog.from_environment())
         project_root = Path(session.project_path).parent if session.project_path else None
         return EditorConnection(project_root, supervised, client=client, editor=editor, session=session,
-                                app_name=self.app_name)
+                                app_name=self.app_name, repository_root=self.repository_root)
 
     @staticmethod
     def create_project(connection: EditorConnection, project: Path, template: str) -> None:
@@ -191,10 +234,10 @@ class Launcher:
 
     @staticmethod
     def open_project(connection: EditorConnection, project_file: Path, recover: bool) -> None:
-        """project.open {path, recover} on the launcher-state editor just spawned; records the editor's
-        recoveryAvailable and recovered on the connection (EditorConnection.recovery). A failure (a stale or corrupt
-        recovery with recover: Conflict, Parse or Validation) shuts the editor down again and is raised as RuntimeError;
-        the project files are unchanged."""
+        """project.open {path, recover} on the launcher-state editor just spawned, transcribed like every call (the
+        transcript of the project starts or continues with it); records the editor's recoveryAvailable and recovered on
+        the connection (EditorConnection.recovery). A failure (a locked or invalid project; a stale or corrupt recovery
+        with recover: Conflict, Parse or Validation) shuts the editor down again and is raised as RuntimeError."""
         response = connection.call("project.open", {"path": str(project_file), "recover": recover})
         if "error" in response:
             error = engine_client.error_from_response("project.open", response)

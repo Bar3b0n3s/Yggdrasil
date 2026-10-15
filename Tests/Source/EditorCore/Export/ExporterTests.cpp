@@ -34,6 +34,7 @@
 #include "Support/ExportBinaryRoot.h"
 #include "Support/HeadlessGpuFixture.h"
 #include "Support/PlatformProbes.h"
+#include "Support/ScriptOverrideProject.h"
 #include "Support/TempDirectory.h"
 #include "Support/TestData.h"
 #include "Support/WaitUntil.h"
@@ -449,6 +450,120 @@ namespace Engine {
 			CHECK(outcome->error().ToString().find("Bad.luau") != std::string::npos);
 			CHECK((*exporter)->GetPhase() == ExportPhase::Validate);
 			CHECK_FALSE(FileSystem::Exists(fixture.GetProjectRoot() / "Build"));
+		}
+
+		// S1-04: the build scene's prefab instance overrides a script field. A valid override exports without a warning (the
+		// dry run's export warned 40 times about valid ones); an invalid one is warned about once, at the instance's own field,
+		// under the code project.validate reports.
+		TEST_CASE("Exporter: a prefab instance's script field override exports without warnings and an invalid one is named as project.validate names it")
+		{
+			Test::EditorTestFixture fixture("ExportScriptOverride");
+			fixture.CreateAndOpenProject();
+			EditorContext& editor = fixture.GetEditor();
+			Test::WriteScriptOverrideProject(fixture.GetProjectRoot());
+			REQUIRE(editor.GetAssets().Refresh().has_value());
+			ApplySettings(editor, R"({"StartScene":"Assets/Scenes/Main.scene","Export":{"BuildScenes":["Assets/Scenes/Main.scene"]}})");
+			const Test::TempDirectory binaries("ExportScriptOverrideBinaries");
+			const std::filesystem::path binaryRoot = MakeRealBinaryRoot(binaries);
+			const auto exportWarnings = [&editor, &binaryRoot]()
+			{
+				Result<Scope<Exporter>> exporter = Exporter::Start(editor, MakeSpecification(binaryRoot));
+				REQUIRE_MESSAGE(exporter.has_value(), exporter.error().ToString());
+				const std::optional<Result<ExportReport>> outcome = RunToEnd(**exporter);
+				REQUIRE(outcome.has_value());
+				REQUIRE_MESSAGE(outcome->has_value(), outcome->error().ToString());
+				return (*outcome)->Warnings;
+			};
+			const auto mentions = [](const std::vector<std::string>& warnings, std::string_view text)
+			{
+				return std::ranges::count_if(warnings, [text](const std::string& warning)
+				{
+					return warning.contains(text);
+				});
+			};
+			const auto describe = [](const std::vector<std::string>& warnings)
+			{
+				std::string text;
+				for (const std::string& warning : warnings)
+					text += warning + "\n";
+				return text;
+			};
+
+			const std::vector<std::string> valid = exportWarnings();
+			INFO(describe(valid));
+			CHECK(mentions(valid, "Main.scene") == 0);
+
+			Test::WriteScriptOverrideProject(fixture.GetProjectRoot(), "Pointz");
+			REQUIRE(editor.GetAssets().Refresh().has_value());
+			const std::vector<std::string> invalid = exportWarnings();
+			INFO(describe(invalid));
+			REQUIRE(mentions(invalid, "Main.scene") == 1);
+			CHECK(mentions(invalid, std::string(Test::ScriptOverrideFieldsPointer) + "Pointz") == 1);
+			CHECK(mentions(invalid, "SCRIPT_UNKNOWN_FIELD_OVERRIDE") == 1);
+			CHECK(mentions(invalid, Test::ScriptOverrideInstanceID.ToString()) == 1);
+			CHECK(mentions(invalid, "/Components/Prefab/") == 0);
+		}
+
+		// M16 review R24: the exporter named every unresolved Script.Fields value SCRIPT_UNKNOWN_FIELD_OVERRIDE, also the values
+		// of a Module script, which project.validate reports as SCRIPT_NOT_A_BEHAVIOUR and never as an unknown override. It
+		// names a value only under the code validate reports for it: a type mismatch as one, a Module's values under their
+		// load code.
+		TEST_CASE("Exporter: a script field value is named only under the code project.validate reports for it")
+		{
+			Test::EditorTestFixture fixture("ExportScriptFieldCodes");
+			fixture.CreateAndOpenProject();
+			EditorContext& editor = fixture.GetEditor();
+			ApplySettings(editor, R"({"StartScene":"Assets/Scenes/Main.scene","Export":{"BuildScenes":["Assets/Scenes/Main.scene"]}})");
+			const Test::TempDirectory binaries("ExportScriptFieldCodesBinaries");
+			const std::filesystem::path binaryRoot = MakeRealBinaryRoot(binaries);
+			// Every line the export reports: its warnings when it succeeds, its issues when it fails.
+			const auto exportLines = [&editor, &binaryRoot]()
+			{
+				Result<Scope<Exporter>> exporter = Exporter::Start(editor, MakeSpecification(binaryRoot));
+				REQUIRE_MESSAGE(exporter.has_value(), exporter.error().ToString());
+				const std::optional<Result<ExportReport>> outcome = RunToEnd(**exporter);
+				REQUIRE(outcome.has_value());
+				std::vector<std::string> lines;
+				if (outcome->has_value())
+					return (*outcome)->Warnings;
+				for (const ErrorIssue& issue : outcome->error().GetIssues())
+					lines.push_back(issue.Message + " (hint: " + issue.Hint + ")");
+				return lines;
+			};
+			const auto mentions = [](const std::vector<std::string>& lines, std::string_view text)
+			{
+				return std::ranges::count_if(lines, [text](const std::string& line)
+				{
+					return line.contains(text);
+				});
+			};
+			const auto describe = [](const std::vector<std::string>& lines)
+			{
+				std::string text;
+				for (const std::string& line : lines)
+					text += line + "\n";
+				return text;
+			};
+
+			Test::WriteScriptOverrideProject(fixture.GetProjectRoot(), "Points", "\"five\"");
+			REQUIRE(editor.GetAssets().Refresh().has_value());
+			const std::vector<std::string> mismatched = exportLines();
+			INFO(describe(mismatched));
+			CHECK(mentions(mismatched, "SCRIPT_FIELD_TYPE_MISMATCH") == 1);
+			CHECK(mentions(mismatched, "SCRIPT_UNKNOWN_FIELD_OVERRIDE") == 0);
+
+			for (const std::string_view field : { "Points", "Pointz" })
+			{
+				CAPTURE(std::string(field));
+				Test::WriteScriptOverrideProject(fixture.GetProjectRoot(), field);
+				Test::WriteScriptOverrideScript(fixture.GetProjectRoot(), Test::ScriptOverrideModuleSource);
+				REQUIRE(editor.GetAssets().Refresh().has_value());
+				const std::vector<std::string> module = exportLines();
+				INFO(describe(module));
+				CHECK(mentions(module, "SCRIPT_UNKNOWN_FIELD_OVERRIDE") == 0);
+				CHECK(mentions(module, "SCRIPT_FIELD_TYPE_MISMATCH") == 0);
+				CHECK(mentions(module, "correct or remove the override") == 0);
+			}
 		}
 
 		TEST_CASE("Exporter: invalid checker configuration blocks export instead of skipping type checks")
@@ -1278,6 +1393,7 @@ namespace Engine {
 			CHECK(ListNames(target.GetPath()) == std::vector<std::string>{ "Game" });
 		}
 
+		// M16 friction S2-06: SmokeTest is listed only when the smoke test ran; without one its time counts toward MoveToOutput.
 		TEST_CASE("Exporter: the report times every phase entered, in order")
 		{
 			Test::EditorTestFixture fixture("ExportTimings");
@@ -1296,7 +1412,8 @@ namespace Engine {
 				CHECK(timing.Seconds >= 0.0);
 				total += timing.Seconds;
 			}
-			CHECK(phases == std::vector<ExportPhase>{ ExportPhase::Validate, ExportPhase::Cook, ExportPhase::WritePaks, ExportPhase::CopyRuntime, ExportPhase::PatchResources, ExportPhase::WriteManifest, ExportPhase::Sign, ExportPhase::SmokeTest, ExportPhase::MoveToOutput });
+			CHECK_FALSE((*outcome)->SmokeTestRan);
+			CHECK(phases == std::vector<ExportPhase>{ ExportPhase::Validate, ExportPhase::Cook, ExportPhase::WritePaks, ExportPhase::CopyRuntime, ExportPhase::PatchResources, ExportPhase::WriteManifest, ExportPhase::Sign, ExportPhase::MoveToOutput });
 			CHECK(total <= (*outcome)->Seconds + 1e-6);
 		}
 	}

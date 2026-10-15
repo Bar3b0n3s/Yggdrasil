@@ -1,6 +1,6 @@
 {
 	"Format": "Replay",
-	"Version": 1,
+	"Version": 2,
 	"Scene": {
 		"Handle": "1913ebcc36a006ad",
 		"Path": "Assets/Scenes/Determinism.scene"
@@ -82,6 +82,44 @@
 		{
 			"Tick": 600,
 			"Luau": "for _, e in Scene.FindAllWithComponent(\"RigidBody\") do\n\tif string.find(e.Name, \"^Box\") and e.Transform.WorldPosition.y < 0 then return false end\nend\nreturn true"
+		}
+	],
+	"Checkpoints": [
+		{
+			"Tick": 60,
+			"StateHash": "5d222cbbaba3021d"
+		},
+		{
+			"Tick": 120,
+			"StateHash": "ccfca267e0938e99"
+		},
+		{
+			"Tick": 180,
+			"StateHash": "7bba67eca8881d59"
+		},
+		{
+			"Tick": 240,
+			"StateHash": "042883546793f529"
+		},
+		{
+			"Tick": 300,
+			"StateHash": "39ab38fa7971ec7a"
+		},
+		{
+			"Tick": 360,
+			"StateHash": "da1af46ae1ce8f32"
+		},
+		{
+			"Tick": 420,
+			"StateHash": "448d518271a93ef1"
+		},
+		{
+			"Tick": 480,
+			"StateHash": "12a6d61b68854dbb"
+		},
+		{
+			"Tick": 540,
+			"StateHash": "cc910261039e2068"
 		}
 	],
 	"FinalTick": 600,

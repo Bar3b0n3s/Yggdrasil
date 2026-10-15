@@ -246,11 +246,13 @@ class ExportSuiteTests(unittest.TestCase):
             self.parse(*argv)
         self.assertEqual(raised.exception.code, 2)
 
-    def test_dist_is_accepted_only_by_the_export_and_determinism_suites(self) -> None:
+    def test_dist_is_accepted_only_by_the_export_determinism_and_games_suites(self) -> None:
         self.assertEqual(self.parse("--suite", "export", "--config", "Release,Dist").configs, ["Release", "Dist"])
         self.assertEqual(self.parse("--suite", "determinism", "--config", "Dist,Debug").configs, ["Debug", "Dist"])
+        self.assertEqual(self.parse("--suite", "games", "--config", "Dist,Debug").configs, ["Debug", "Dist"])
         self.assertEqual(test_script.SUITES["export"].configurations, ("Release", "Dist"))
         self.assertEqual(test_script.SUITES["determinism"].configurations, ("Debug", "Release", "Dist"))
+        self.assertEqual(test_script.SUITES["games"].configurations, ("Debug", "Release", "Dist"))
         self.assert_usage_error("--suite", "unit", "--config", "Dist")
         self.assert_usage_error("--suite", "export", "--config", "Debug")
         self.assert_usage_error("--suite", "feature", "--editor-report", "Feature.json")
@@ -381,7 +383,8 @@ class ExportSuiteTests(unittest.TestCase):
 
     def test_the_default_suites_skip_a_configuration_a_suite_does_not_take(self) -> None:
         # `Test.py --config Debug` runs every suite that has a Debug run and lists the export suite's Debug as skipped;
-        # a suite named explicitly with a configuration it does not take stays a usage error.
+        # a suite named explicitly with a configuration it does not take stays a usage error. Every suite exists since
+        # the games suite became available (ADR 0026 decision 8), and it takes all three configurations.
         ran: list[tuple[str, tuple[str, ...]]] = []
 
         def suite(name: str, config: str, arguments: argparse.Namespace, console: Console) -> object:
@@ -396,12 +399,17 @@ class ExportSuiteTests(unittest.TestCase):
             ran.append(("export", tuple(configs)))
             return [test_script.Step(f"export {config}", Status.PASSED) for config in configs]
 
+        def games(configs: list[str], arguments: argparse.Namespace, console: Console) -> list[object]:
+            ran.append(("games", tuple(configs)))
+            return [test_script.Step(f"games {', '.join(configs)}", Status.PASSED)]
+
         def main(*argv: str) -> tuple[int, dict]:
             ran.clear()
             output = io.StringIO()
             with (mock.patch.object(test_script, "run_suite", suite),
                   mock.patch.object(test_script, "run_determinism", determinism),
                   mock.patch.object(test_script, "run_export", export),
+                  mock.patch.object(test_script, "run_games", games),
                   contextlib.redirect_stdout(output), contextlib.redirect_stderr(io.StringIO())):
                 exit_code = test_script.main([*argv, "--json"])
             return exit_code, json.loads(output.getvalue())
@@ -409,20 +417,25 @@ class ExportSuiteTests(unittest.TestCase):
         exit_code, document = main("--config", "Debug")
         self.assertEqual(exit_code, 0)
         self.assertEqual(ran, [("unit", ("Debug",)), ("gpu", ("Debug",)), ("golden", ("Debug",)),
-                               ("feature", ("Debug",)), ("automation", ("Debug",)), ("determinism", ("Debug",))])
+                               ("feature", ("Debug",)), ("automation", ("Debug",)), ("determinism", ("Debug",)),
+                               ("games", ("Debug",))])
         statuses = {step["name"]: step["status"] for step in document["steps"]}
         self.assertEqual(statuses["export Debug"], "skipped")
-        self.assertEqual(statuses["games"], "not-available")
+        self.assertEqual(statuses["games Debug"], "passed")
+        self.assertNotIn("not-available", statuses.values())
         skipped = next(step for step in document["steps"] if step["name"] == "export Debug")
         self.assertIn("not run in Debug: the export suite takes Release, Dist", skipped["detail"])
         exit_code, document = main("--config", "Debug,Release")
         self.assertIn(("export", ("Release",)), ran)
         self.assertIn(("determinism", ("Debug", "Release")), ran)
+        self.assertIn(("games", ("Debug", "Release")), ran)
         self.assertEqual([step["name"] for step in document["steps"] if step["status"] == "skipped"],
                          ["export Debug"])
         exit_code, document = main("--config", "Dist")
-        self.assertEqual(ran, [("export", ("Dist",)), ("determinism", ("Dist",))])
-        self.assertEqual(len([step for step in document["steps"] if step["status"] == "skipped"]), 5)
+        self.assertEqual(ran, [("export", ("Dist",)), ("determinism", ("Dist",)), ("games", ("Dist",))])
+        # unit, gpu, golden, feature and automation do not run in Dist; export, determinism and games do.
+        self.assertEqual([step["name"] for step in document["steps"] if step["status"] == "skipped"],
+                         ["unit Dist", "gpu Dist", "golden Dist", "feature Dist", "automation Dist"])
         self.assert_usage_error("--suite", "export", "--config", "Debug")
         self.assert_usage_error("--suite", "unit,export", "--config", "Debug")
         self.assertEqual(self.parse("--suite", "unit,export", "--config", "Release").configs, ["Release"])

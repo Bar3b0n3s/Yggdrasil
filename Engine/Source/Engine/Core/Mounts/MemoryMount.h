@@ -29,10 +29,12 @@ namespace Engine {
 		// The stream reads a snapshot of the file taken when it was opened.
 		[[nodiscard]] Result<Scope<IFileStream>> Open(const VfsPath& path) const override;
 		[[nodiscard]] Status WriteFileAtomic(const VfsPath& path, std::span<const std::byte> data) override;
+		[[nodiscard]] Status WriteNewFile(const VfsPath& path, std::span<const std::byte> data) override;
 		[[nodiscard]] Result<FileInfo> GetInfo(const VfsPath& path) const override;
 		[[nodiscard]] Result<std::vector<VfsEntry>> List(const VfsPath& directory, bool recursive) const override;
 		[[nodiscard]] Status CreateDirectories(const VfsPath& directory) override;
 		[[nodiscard]] Status Remove(const VfsPath& path) override;
+		[[nodiscard]] Status RemoveEmptyDirectory(const VfsPath& directory) override;
 		[[nodiscard]] Status Move(const VfsPath& from, const VfsPath& to) override;
 		[[nodiscard]] MountAccess GetAccess() const override;
 

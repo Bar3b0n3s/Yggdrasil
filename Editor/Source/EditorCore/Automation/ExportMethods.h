@@ -3,6 +3,7 @@
 #include "EditorCore/Export/Exporter.h"
 #include "Engine/Core/Base.h"
 #include "Engine/Core/Result.h"
+#include "Engine/Reflection/VariantValue.h"
 
 #include <cstdint>
 #include <string>
@@ -63,7 +64,9 @@ namespace Engine {
 		uint32_t EngineEntryCount = 0;
 		std::vector<std::string> Warnings{};
 		bool SmokeTestRan = false;
-		int32_t SmokeTestExitCode = 0;
+		// The smoke test's exit code, an integer; null when it did not run (M16 friction S2-06: it was 0, which read like a
+		// passing run). ExportReport::SmokeTestExitCode with ExportReport::SmokeTestRan.
+		VariantValue SmokeTestExitCode{};
 		float Seconds = 0.0f;
 		// M15 (ADR 0024 decisions 2, 4 and 6): ExportReport's testing, resource and timing members.
 		bool Testing = false;

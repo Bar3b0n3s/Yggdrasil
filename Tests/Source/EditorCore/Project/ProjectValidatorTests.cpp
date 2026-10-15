@@ -14,6 +14,7 @@
 #include "Engine/Asset/BuiltinAssets.h"
 #include "Engine/Asset/ScriptData.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
+#include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Hash.h"
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Core/VirtualFileSystem.h"
@@ -36,14 +37,18 @@
 #include "Support/AssetTestFixture.h"
 #include "Support/EditorTestFixture.h"
 #include "Support/ExpectLog.h"
+#include "Support/ScriptOverrideProject.h"
 #include "Support/TestData.h"
 #include "Support/ValidatorTestTypes.h"
 
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <filesystem>
 #include <limits>
 #include <map>
+#include <string>
+#include <vector>
 
 namespace Engine {
 
@@ -183,6 +188,212 @@ namespace Engine {
 			REQUIRE(after);
 			CHECK(*after == *before);
 			CHECK(editor.GetRevision() == revision);
+		}
+
+		TEST_CASE("ProjectValidator: script field load diagnostics map to the script override codes only at an entity's own Script component")
+		{
+			CHECK(ProjectValidator::MapScriptFieldLoadCode(VariantUnresolvedCode, "/Entities/3/Components/Script/Fields/Pointz") == "SCRIPT_UNKNOWN_FIELD_OVERRIDE");
+			CHECK(ProjectValidator::MapScriptFieldLoadCode(VariantSchemaMismatchCode, "/Entities/0/Components/Script/Fields/Rows/1") == "SCRIPT_FIELD_TYPE_MISMATCH");
+			// An override's value is checked on the member it applies to, which reports it; other codes and places map to nothing.
+			CHECK(ProjectValidator::MapScriptFieldLoadCode(VariantUnresolvedCode, "/Entities/0/Components/Prefab/Overrides/1/Value/Points").empty());
+			CHECK(ProjectValidator::MapScriptFieldLoadCode(VariantUnresolvedCode, "/Entities/0/Components/Prefab/Overrides/0/Value/Components/Script/Fields/X").empty());
+			CHECK(ProjectValidator::MapScriptFieldLoadCode(UnknownFieldCode, "/Entities/0/Components/Script/Fields/Pointz").empty());
+			CHECK(ProjectValidator::MapScriptFieldLoadCode(VariantUnresolvedCode, "/Entities/0/Components/Script/Script").empty());
+			CHECK(ProjectValidator::MapScriptFieldLoadCode(VariantUnresolvedCode, "/Components/Script/Fields/Pointz").empty());
+		}
+
+		// S1-04: one invalid override, one code and one place, whichever reports it. project.validate names the instance
+		// member's entity and "Fields.<name>"; FindScriptFieldProblems, which the strict open and the exporter's strict load
+		// report, names the same code for the same entity at that field's JSON pointer. A valid override is reported by none.
+		TEST_CASE("ProjectValidator: an invalid script field override of a prefab instance has the same code and place in validate and in the strict readers")
+		{
+			Test::EditorTestFixture fixture("ValidatorScriptOverride");
+			fixture.CreateAndOpenProject();
+			EditorContext& editor = fixture.GetEditor();
+			Test::WriteScriptOverrideProject(fixture.GetProjectRoot());
+			REQUIRE(editor.GetAssets().Refresh().has_value());
+			const Result<VfsPath> scene = VfsPath::Create("project", Test::ScriptOverrideScene);
+			REQUIRE(scene.has_value());
+
+			const auto overrideDiagnostics = [&editor]()
+			{
+				const Result<ValidationReport> report = ProjectValidator::Validate(editor, ValidationScope::Project);
+				REQUIRE_MESSAGE(report.has_value(), report.error().ToString());
+				INFO(DescribeDiagnostics(*report));
+				std::vector<ProjectDiagnostic> found;
+				for (const ProjectDiagnostic& diagnostic : report->Diagnostics)
+				{
+					if (diagnostic.Code.starts_with("SCRIPT_") || diagnostic.Code.starts_with("PREFAB_"))
+						found.push_back(diagnostic);
+				}
+				return found;
+			};
+			CHECK(overrideDiagnostics().empty());
+			const Result<std::vector<LoadDiagnostic>> valid = ProjectValidator::FindScriptFieldProblems(editor, *scene);
+			REQUIRE_MESSAGE(valid.has_value(), valid.error().ToString());
+			CHECK(valid->empty());
+
+			Test::WriteScriptOverrideProject(fixture.GetProjectRoot(), "Pointz");
+			REQUIRE(editor.GetAssets().Refresh().has_value());
+			const std::vector<ProjectDiagnostic> validated = overrideDiagnostics();
+			REQUIRE(validated.size() == 1);
+			CHECK(validated[0].Code == "SCRIPT_UNKNOWN_FIELD_OVERRIDE");
+			CHECK(validated[0].File == Test::ScriptOverrideScene);
+			CHECK(validated[0].Entity == Test::ScriptOverrideInstanceID.ToString());
+			CHECK(validated[0].Component == "Script");
+			CHECK(validated[0].Field == "Fields.Pointz");
+
+			const Result<std::vector<LoadDiagnostic>> problems = ProjectValidator::FindScriptFieldProblems(editor, *scene);
+			REQUIRE_MESSAGE(problems.has_value(), problems.error().ToString());
+			REQUIRE(problems->size() == 1);
+			CHECK((*problems)[0].Code == validated[0].Code);
+			CHECK((*problems)[0].Entity.ToString() == validated[0].Entity);
+			CHECK((*problems)[0].JsonPointer == std::string(Test::ScriptOverrideFieldsPointer) + "Pointz");
+			CHECK((*problems)[0].Message.contains("Pointz"));
+		}
+
+		// S1-04, the prefab half: an invalid script field value inside a .prefab file, which the strict open and the exporter
+		// name (FindScriptFieldProblems), is reported by project.validate too, under the same code for the same prefab entity,
+		// with the file, component "Script" and field "Fields.<name>" a scene's value gets.
+		TEST_CASE("ProjectValidator: an invalid script field value in a prefab file has the same code and place in validate and in the strict readers")
+		{
+			Test::EditorTestFixture fixture("ValidatorPrefabScriptFields");
+			fixture.CreateAndOpenProject();
+			EditorContext& editor = fixture.GetEditor();
+			Test::WriteScriptOverrideProject(fixture.GetProjectRoot());
+			REQUIRE(editor.GetAssets().Refresh().has_value());
+			const Result<VfsPath> prefab = VfsPath::Create("project", Test::ScriptOverridePrefab);
+			REQUIRE(prefab.has_value());
+
+			const auto prefabDiagnostics = [&editor]()
+			{
+				const Result<ValidationReport> report = ProjectValidator::Validate(editor, ValidationScope::Project);
+				REQUIRE_MESSAGE(report.has_value(), report.error().ToString());
+				INFO(DescribeDiagnostics(*report));
+				std::vector<ProjectDiagnostic> found;
+				for (const ProjectDiagnostic& diagnostic : report->Diagnostics)
+				{
+					if (diagnostic.File == Test::ScriptOverridePrefab && diagnostic.Code.starts_with("SCRIPT_"))
+						found.push_back(diagnostic);
+				}
+				return found;
+			};
+			CHECK(prefabDiagnostics().empty());
+
+			// The prefab root's Points becomes a string, and it gains a field the script does not declare.
+			const std::filesystem::path prefabFile = fixture.GetProjectRoot() / FileSystem::PathFromUtf8(Test::ScriptOverridePrefab);
+			Result<std::string> text = FileSystem::ReadText(prefabFile);
+			REQUIRE(text.has_value());
+			const size_t points = text->find("\"Points\": 1");
+			REQUIRE(points != std::string::npos);
+			text->replace(points, std::string_view("\"Points\": 1").size(), "\"Points\": \"five\",\n\t\t\t\t\t\t\"Pointz\": 2");
+			REQUIRE(editor.GetVfs().WriteFileAtomic(*prefab, AsBytes(*text)).has_value());
+			REQUIRE(editor.GetAssets().Refresh().has_value());
+
+			const Result<std::vector<LoadDiagnostic>> problems = ProjectValidator::FindScriptFieldProblems(editor, *prefab);
+			REQUIRE_MESSAGE(problems.has_value(), problems.error().ToString());
+			REQUIRE(problems->size() == 2);
+			const std::vector<ProjectDiagnostic> validated = prefabDiagnostics();
+			REQUIRE(validated.size() == 2);
+			for (const LoadDiagnostic& problem : *problems)
+			{
+				const std::string name = problem.JsonPointer.substr(problem.JsonPointer.rfind('/') + 1);
+				CAPTURE(problem.JsonPointer);
+				const auto match = std::ranges::find(validated, problem.Code, &ProjectDiagnostic::Code);
+				REQUIRE(match != validated.end());
+				CHECK(match->Entity == problem.Entity.ToString());
+				CHECK(match->Component == "Script");
+				CHECK(match->Field == "Fields." + name);
+				CHECK(match->Message.contains(name));
+			}
+			CHECK(std::ranges::count(validated, std::string("SCRIPT_UNKNOWN_FIELD_OVERRIDE"), &ProjectDiagnostic::Code) == 1);
+			CHECK(std::ranges::count(validated, std::string("SCRIPT_FIELD_TYPE_MISMATCH"), &ProjectDiagnostic::Code) == 1);
+			const auto unknown = std::ranges::find(validated, std::string("Fields.Pointz"), &ProjectDiagnostic::Field);
+			REQUIRE(unknown != validated.end());
+			CHECK(unknown->Code == "SCRIPT_UNKNOWN_FIELD_OVERRIDE");
+		}
+
+		// M16 review R24: the strict readers labelled every unresolved Script.Fields value SCRIPT_UNKNOWN_FIELD_OVERRIDE, also
+		// when the script itself did not resolve (it failed to import, or it is a Module), where project.validate reports
+		// the script and never the values, and the hint told the agent to remove valid overrides. FindScriptFieldProblems
+		// names a value only as validate does: an unknown field as SCRIPT_UNKNOWN_FIELD_OVERRIDE, a type mismatch as
+		// SCRIPT_FIELD_TYPE_MISMATCH, and nothing for a script whose fields do not resolve.
+		TEST_CASE("ProjectValidator: the strict readers name a script field value only under the code validate reports for it")
+		{
+			Test::EditorTestFixture fixture("ValidatorScriptFieldAgreement");
+			fixture.CreateAndOpenProject();
+			EditorContext& editor = fixture.GetEditor();
+			const Result<VfsPath> scene = VfsPath::Create("project", Test::ScriptOverrideScene);
+			REQUIRE(scene.has_value());
+			const auto scriptDiagnostics = [&editor]()
+			{
+				const Result<ValidationReport> report = ProjectValidator::Validate(editor, ValidationScope::Project);
+				REQUIRE_MESSAGE(report.has_value(), report.error().ToString());
+				INFO(DescribeDiagnostics(*report));
+				std::vector<ProjectDiagnostic> found;
+				for (const ProjectDiagnostic& diagnostic : report->Diagnostics)
+				{
+					if (diagnostic.Code.starts_with("SCRIPT_"))
+						found.push_back(diagnostic);
+				}
+				return found;
+			};
+			const auto codesOf = [](const auto& diagnostics)
+			{
+				std::vector<std::string> codes;
+				for (const auto& diagnostic : diagnostics)
+					codes.push_back(diagnostic.Code);
+				std::ranges::sort(codes);
+				return codes;
+			};
+
+			// A value of the wrong type: both name it a type mismatch, at the same entity.
+			Test::WriteScriptOverrideProject(fixture.GetProjectRoot(), "Points", "\"five\"");
+			REQUIRE(editor.GetAssets().Refresh().has_value());
+			const std::vector<ProjectDiagnostic> mismatched = scriptDiagnostics();
+			const Result<std::vector<LoadDiagnostic>> mismatch = ProjectValidator::FindScriptFieldProblems(editor, *scene);
+			REQUIRE_MESSAGE(mismatch.has_value(), mismatch.error().ToString());
+			REQUIRE(mismatch->size() == 1);
+			CHECK((*mismatch)[0].Code == "SCRIPT_FIELD_TYPE_MISMATCH");
+			CHECK((*mismatch)[0].JsonPointer == std::string(Test::ScriptOverrideFieldsPointer) + "Points");
+			CHECK(codesOf(mismatched) == std::vector<std::string>{ "SCRIPT_FIELD_TYPE_MISMATCH" });
+			REQUIRE_FALSE(mismatched.empty());
+			CHECK(mismatched[0].Entity == (*mismatch)[0].Entity.ToString());
+
+			// A script that resolves no fields, in a project where it never imported as a Behaviour (a script that fails to
+			// import from the start, or a Module): validate names the script, never the values, and so do the strict readers,
+			// whether the override names a declared field or not.
+			uint32_t project = 0;
+			for (const std::string_view source : { Test::ScriptOverrideBrokenSource, Test::ScriptOverrideModuleSource })
+			{
+				for (const std::string_view field : { "Points", "Pointz" })
+				{
+					CAPTURE(std::string(source));
+					CAPTURE(std::string(field));
+					std::optional<Test::ExpectLog> importFailure;
+					if (source == Test::ScriptOverrideBrokenSource)
+						importFailure.emplace(LogLevel::Error, "ASSET_IMPORT_FAILED Assets/Scripts/Brick.luau");
+					Test::EditorTestFixture unresolved(std::format("ValidatorScriptFieldUnresolved{}", project++));
+					unresolved.CreateAndOpenProject();
+					Test::WriteScriptOverrideProject(unresolved.GetProjectRoot(), field);
+					Test::WriteScriptOverrideScript(unresolved.GetProjectRoot(), source);
+					REQUIRE(unresolved.GetEditor().GetAssets().Refresh().has_value());
+					const Result<ValidationReport> report = ProjectValidator::Validate(unresolved.GetEditor(), ValidationScope::Project);
+					REQUIRE_MESSAGE(report.has_value(), report.error().ToString());
+					INFO(DescribeDiagnostics(*report));
+					CHECK(std::ranges::any_of(report->Diagnostics, [](const ProjectDiagnostic& diagnostic)
+					{
+						return diagnostic.File == Test::ScriptOverrideScript || diagnostic.Code == "SCRIPT_NOT_A_BEHAVIOUR";
+					}));
+					CHECK(std::ranges::none_of(report->Diagnostics, [](const ProjectDiagnostic& diagnostic)
+					{
+						return diagnostic.Code == "SCRIPT_UNKNOWN_FIELD_OVERRIDE" || diagnostic.Code == "SCRIPT_FIELD_TYPE_MISMATCH";
+					}));
+					const Result<std::vector<LoadDiagnostic>> problems = ProjectValidator::FindScriptFieldProblems(unresolved.GetEditor(), *scene);
+					REQUIRE_MESSAGE(problems.has_value(), problems.error().ToString());
+					CHECK(problems->empty());
+				}
+			}
 		}
 
 		TEST_CASE("ProjectValidator: script references use effective schemas recursively without changing read snapshots")

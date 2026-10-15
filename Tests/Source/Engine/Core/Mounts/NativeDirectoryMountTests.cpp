@@ -61,6 +61,22 @@ namespace Engine {
 			CHECK_FALSE(FileSystem::Exists(directory / "Assets"));
 		}
 
+		// M16 review R28: the exclusive create the automation output files use, with the mount's case policy and no backup
+		// whatever the mount's write options.
+		TEST_CASE("NativeDirectoryMount: WriteNewFile creates a file and never replaces an entry")
+		{
+			Test::TempDirectory directory("NativeMount");
+			NativeDirectoryMount mount(directory.GetPath());
+			REQUIRE(mount.CreateDirectories(Path("project://Library/Automation/Out")).has_value());
+			REQUIRE(mount.WriteNewFile(Path("project://Library/Automation/Out/A.json"), AsBytes("first")).has_value());
+			CHECK(ErrorCodeOf(mount.WriteNewFile(Path("project://Library/Automation/Out/A.json"), AsBytes("second"))) == ErrorCode::AlreadyExists);
+			CHECK(FileSystem::ReadText(directory / "Library/Automation/Out/A.json") == std::string("first"));
+			CHECK_FALSE(FileSystem::Exists(directory / "Library/Automation/Out/A.json.bak"));
+			CHECK(ErrorCodeOf(mount.WriteNewFile(Path("project://Library/Automation/Out/a.json"), AsBytes("x"))) == ErrorCode::Validation);
+			CHECK(ErrorCodeOf(mount.WriteNewFile(Path("project://Library/Missing/A.json"), AsBytes("x"))) == ErrorCode::NotFound);
+			CHECK(ErrorCodeOf(mount.WriteNewFile(Path("project://Library/Automation/Out"), AsBytes("x"))) == ErrorCode::AlreadyExists);
+		}
+
 		TEST_CASE("NativeDirectoryMount: read-only access rejects writes")
 		{
 			Test::TempDirectory directory("NativeMount");
@@ -70,6 +86,7 @@ namespace Engine {
 			CHECK(mount.GetAccess() == MountAccess::ReadOnly);
 			CHECK(mount.ReadFile(Path("engine://A.txt")).has_value());
 			CHECK(ErrorCodeOf(mount.WriteFileAtomic(Path("engine://A.txt"), AsBytes("b"))) == ErrorCode::PermissionDenied);
+			CHECK(ErrorCodeOf(mount.WriteNewFile(Path("engine://B.txt"), AsBytes("b"))) == ErrorCode::PermissionDenied);
 			CHECK(ErrorCodeOf(mount.Remove(Path("engine://A.txt"))) == ErrorCode::PermissionDenied);
 			CHECK(FileSystem::ReadText(directory / "A.txt") == std::string("a"));
 		}
@@ -261,6 +278,42 @@ namespace Engine {
 			CHECK((*listed)[3].Info.Size == 3);
 			CHECK(ErrorCodeOf(mount.List(Path("project://Assets/a.txt"), false)) == ErrorCode::Io);
 			CHECK(ErrorCodeOf(mount.List(Path("project://assets"), false)) == ErrorCode::Validation);
+		}
+
+		TEST_CASE("NativeDirectoryMount: RemoveEmptyDirectory refuses a directory holding a name no VfsPath can spell")
+		{
+			// "nul.txt" is a Windows reserved device name, which VfsPath rejects on every host, so List leaves it out. POSIX
+			// hosts create it like any other name; Windows needs the extended-length form, which the host does not resolve
+			// to the device on any version.
+			Test::TempDirectory directory("NativeMountRemoveEmpty");
+			REQUIRE(FileSystem::CreateDirectories(directory / "Assets/Probe").has_value());
+			REQUIRE(FileSystem::CreateDirectories(directory / "Assets/Empty").has_value());
+#if defined(ENGINE_PLATFORM_WINDOWS)
+			std::error_code error;
+			const std::filesystem::path absolute = std::filesystem::absolute(directory / "Assets/Probe/nul.txt", error).lexically_normal();
+			REQUIRE_FALSE(error);
+			const std::filesystem::path hidden(L"\\\\?\\" + absolute.native());
+#else
+			const std::filesystem::path hidden = directory / "Assets/Probe/nul.txt";
+#endif
+			REQUIRE(FileSystem::WriteFileAtomic(hidden, AsBytes("kept"), { .KeepBackup = false }).has_value());
+			NativeDirectoryMount mount(directory.GetPath());
+			const Result<std::vector<VfsEntry>> listed = mount.List(Path("project://Assets/Probe"), false);
+			REQUIRE(listed.has_value());
+			CHECK(listed->empty());
+
+			const Status refused = mount.RemoveEmptyDirectory(Path("project://Assets/Probe"));
+			REQUIRE_FALSE(refused.has_value());
+			CHECK(refused.error().GetCode() == ErrorCode::InvalidState);
+			CHECK(FileSystem::ReadText(hidden) == std::string("kept"));
+			CHECK(ErrorCodeOf(mount.RemoveEmptyDirectory(Path("project://assets/Empty"))) == ErrorCode::Validation);
+			CHECK(ErrorCodeOf(mount.RemoveEmptyDirectory(Path("project://"))) == ErrorCode::InvalidArgument);
+			REQUIRE(mount.RemoveEmptyDirectory(Path("project://Assets/Empty")).has_value());
+			CHECK_FALSE(FileSystem::Exists(directory / "Assets/Empty"));
+
+			// The temporary directory's own removal does not use the extended-length form.
+			REQUIRE(FileSystem::Remove(hidden).has_value());
+			REQUIRE(mount.RemoveEmptyDirectory(Path("project://Assets/Probe")).has_value());
 		}
 
 		TEST_CASE("NativeDirectoryMount: CreateDirectories applies the case policy to existing components")

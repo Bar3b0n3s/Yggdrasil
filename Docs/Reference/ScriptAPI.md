@@ -94,7 +94,7 @@ All modes; Runtime|Test; pure/read.
 
 `(reference: string) -> AssetRef?`
 
-Loads a path or hexadecimal reference; missing references return nil and loading failures raise a located error.
+Loads a path or hexadecimal reference; missing references return nil and loading failures raise a located error. The import of an asset that is not cached yet does not count toward the callback budget.
 
 All modes; Runtime|Test; pure/read.
 
@@ -960,7 +960,7 @@ All modes; Runtime|Test; mutates.
 
 ## Test
 
-Feature test suites, assertions, waits and deterministic input. A reported message shows authored locations and keeps at most 8192 bytes, truncated and marked like a log entry. A case's report keeps at most 32 failures for expectations and unexpected script errors, the last then counting any further ones as [truncated: <n> more failures], and a suite at most 1024 such failures. Test.Inject* queues at most 1024 events per input tick.
+Feature test suites, assertions, waits and deterministic input. A reported message shows authored locations and keeps at most 8192 bytes, truncated and marked like a log entry. A failed Test.ExpectEqual or Test.ExpectNear adds its values after the message, which is cut first so they always fit: nil, booleans and numbers (shortest round-trip form) as Luau writes them, strings quoted (their first 128 bytes, then their length), vectors, Colors and Quats by component, Entities and AssetRefs by UUID and other values by type name. A case's report keeps at most 32 failures for expectations and unexpected script errors, the last then counting any further ones as [truncated: <n> more failures], and a suite at most 1024 such failures. Test.Inject* queues at most 1024 events per input tick.
 
 ### Test.CaptureAudio
 
@@ -988,17 +988,17 @@ All modes; Test; pure/read.
 
 ### Test.ExpectEqual
 
-`(a: any, b: any, message: string?) -> ()`
+`(actual: any, expected: any, message: string?) -> ()`
 
-Record a failed Luau equality comparison.
+Record a failed Luau equality comparison of actual with expected. The failure shows the message (default "expected values to be equal") followed by (got <actual>, expected <expected>).
 
 All modes; Test; pure/read.
 
 ### Test.ExpectNear
 
-`(a: number | vector, b: number | vector, epsilon: number?, message: string?) -> ()`
+`(actual: number | vector, expected: number | vector, epsilon: number?, message: string?) -> ()`
 
-Compare finite numbers or vector components with an absolute epsilon, default 0.00001.
+Compare finite numbers or vector components with an absolute epsilon, default 0.00001. The failure shows the message (default "values differ by more than epsilon") followed by (got <actual>, expected <expected>, epsilon <epsilon>).
 
 All modes; Test; pure/read.
 
@@ -1046,7 +1046,7 @@ All modes; Test; pure/read.
 
 `() -> string`
 
-Read the canonical simulated state hash.
+Read the canonical simulated state hash: the world (every entity with its serialized components, the tick, the session's Random state, the id draws and every body's physics state), never script tables, audio or input.
 
 All modes; Test; pure/read.
 
@@ -1054,7 +1054,7 @@ All modes; Test; pure/read.
 
 `(name: string, state: InputEventState?, value: number?) -> ()`
 
-Queue a named button state or analog value (with a nil or Down state) for the next unapplied input tick.
+Queue a named button state or analog value (with a nil or Down state) for the next unapplied input tick. A button stays down until an Up (Tap releases it on the next tick), and an analog value holds on every later tick until another value is injected for the action (0 releases it).
 
 All modes; Test; mutates.
 
@@ -2198,7 +2198,7 @@ All modes; Runtime|Test; pure/read.
 
 `Transform`
 
-The entity's Transform component, or nil when absent.
+The entity's Transform component, which every entity has.
 
 All modes; Runtime|Test; pure/read.
 
@@ -2730,7 +2730,7 @@ All modes; Runtime|Test; pure/read; setter mutates.
 
 `number`
 
-The friction coefficient of the body's surfaces.
+The friction coefficient of the body's surfaces. A contact uses the geometric mean of both bodies' values, so 0 on one body removes friction from all its contacts.
 
 All modes; Runtime|Test; pure/read; setter mutates.
 
@@ -2858,7 +2858,7 @@ All modes; Runtime|Test; mutates.
 
 `number`
 
-Bounciness, from no bounce (0) to a perfectly elastic bounce (1).
+Bounciness, from no bounce (0) to a perfectly elastic bounce (1). A contact uses the larger of both bodies' values, so 1 on a ball makes it bounce elastically off every surface.
 
 All modes; Runtime|Test; pure/read; setter mutates.
 
@@ -2902,7 +2902,7 @@ Wake a sleeping body.
 
 All modes; Runtime|Test; mutates.
 
-## Script
+## Script (component)
 
 Attaches a Behaviour script to the entity (one per entity).
 
@@ -3038,7 +3038,7 @@ All modes; Runtime|Test; pure/read; setter mutates.
 
 `vector`
 
-The screen point the text is placed at, normalized to the viewport (Screen space).
+Screen space: the point of the viewport the text is placed at, normalized: (0, 0) is the top-left corner and (1, 1) the bottom-right, X to the right and Y down; (0.5, 0.5) is the centre.
 
 All modes; Runtime|Test; pure/read; setter mutates.
 
@@ -3070,7 +3070,7 @@ All modes; Runtime|Test; pure/read; setter mutates.
 
 `vector`
 
-A further offset from the anchor, in pixels at the 1080p reference resolution.
+Screen space: a further offset from the anchor in pixels at the 1080p reference resolution (scaled with the viewport's height), X to the right and Y down.
 
 All modes; Runtime|Test; pure/read; setter mutates.
 
@@ -3078,7 +3078,7 @@ All modes; Runtime|Test; pure/read; setter mutates.
 
 `vector`
 
-The point of the text block that sits on the anchor, normalized to the block.
+The point of the text block that sits on the anchor (Screen space) or at the entity's origin (World space), normalized to the block: (0, 0) is its top-left corner and (1, 1) its bottom-right.
 
 All modes; Runtime|Test; pure/read; setter mutates.
 
@@ -3388,7 +3388,7 @@ How a rigid body moves.
 
 - `Static`: Never moves; the cheapest body, used for level geometry.
 
-- `Kinematic`: Moved by script or animation; pushes dynamic bodies but is not pushed back.
+- `Kinematic`: Moved by script or animation; pushes dynamic bodies but is not pushed back, and static bodies never stop it (clamp its motion in the script).
 
 - `Dynamic`: Simulated: moved by gravity, forces and collisions.
 
@@ -4120,7 +4120,7 @@ A suite's PauseOnError override. A script error never pauses a test run, so no v
 
 - `Continue`: Keep running after a script error, as every test run does.
 
-## TextAlignment
+## TextAlignment (enum)
 
 How the lines of a text element are aligned to each other.
 
@@ -4130,7 +4130,7 @@ How the lines of a text element are aligned to each other.
 
 - `Right`: Lines end at the right edge of the text block.
 
-## TextSpace
+## TextSpace (enum)
 
 Where a text element is placed.
 
@@ -4224,7 +4224,7 @@ Positive tick timeout overriding the suite default.
 
 The last completed render extraction: its interpolation Alpha, and Frame, the number of extractions completed so far.
 
-## TestSuite
+## TestSuite (type)
 
 `{Name: string, Body: () -> (), Options: TestSuiteOptions}`
 

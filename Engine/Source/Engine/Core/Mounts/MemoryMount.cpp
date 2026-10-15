@@ -188,6 +188,29 @@ namespace Engine {
 		return {};
 	}
 
+	Status MemoryMount::WriteNewFile(const VfsPath& path, std::span<const std::byte> data)
+	{
+		const std::unique_lock lock(m_Mutex);
+		ENGINE_TRY(Utils::CheckWritable(m_Access, path));
+		const std::string relativePath(path.GetPath());
+		if (relativePath.empty())
+			return MakeError(ErrorCode::Io, "cannot create '{}': it is the mount root, a directory", path.ToString());
+
+		const std::string_view parent = Utils::ParentPathOf(relativePath);
+		ENGINE_TRY_ASSIGN(const EntryKind parentKind, Utils::ResolveExisting(m_Files, m_Directories, path.GetScheme(), parent));
+		if (parentKind != EntryKind::Directory)
+			return MakeError(ErrorCode::NotFound, "cannot create '{}': '{}' is a file, not a directory", path.ToString(), parent);
+		ENGINE_TRY(Utils::VerifyNewName(m_Files, m_Directories, path.GetScheme(), relativePath));
+		if (Utils::KindOf(m_Files, m_Directories, relativePath) != EntryKind::None)
+			return MakeError(ErrorCode::AlreadyExists, "cannot create '{}': it exists already and is never replaced", path.ToString());
+
+		++m_MutationCount;
+		File& file = m_Files[relativePath];
+		file.Data.assign(data.begin(), data.end());
+		file.ModificationTime = m_MutationCount;
+		return {};
+	}
+
 	Result<FileInfo> MemoryMount::GetInfo(const VfsPath& path) const
 	{
 		const std::shared_lock lock(m_Mutex);
@@ -312,6 +335,28 @@ namespace Engine {
 			});
 			m_Directories.erase(relativePath);
 		}
+		++m_MutationCount;
+		return {};
+	}
+
+	Status MemoryMount::RemoveEmptyDirectory(const VfsPath& directory)
+	{
+		const std::unique_lock lock(m_Mutex);
+		ENGINE_TRY(Utils::CheckWritable(m_Access, directory));
+		const std::string relativePath(directory.GetPath());
+		if (relativePath.empty())
+			return MakeError(ErrorCode::InvalidArgument, "cannot remove '{}': it is the mount root", directory.ToString());
+		ENGINE_TRY_ASSIGN(const EntryKind kind, Utils::ResolveExisting(m_Files, m_Directories, directory.GetScheme(), relativePath));
+		if (kind == EntryKind::File)
+			return MakeError(ErrorCode::Io, "cannot remove the directory '{}': it is a file", directory.ToString());
+
+		// Every stored entry below the directory sorts right after this prefix.
+		const std::string prefix = relativePath + '/';
+		const auto file = m_Files.lower_bound(prefix);
+		const auto subdirectory = m_Directories.lower_bound(prefix);
+		if ((file != m_Files.end() && file->first.starts_with(prefix)) || (subdirectory != m_Directories.end() && subdirectory->starts_with(prefix)))
+			return MakeError(ErrorCode::InvalidState, "cannot remove the directory '{}': it is not empty", directory.ToString());
+		m_Directories.erase(relativePath);
 		++m_MutationCount;
 		return {};
 	}

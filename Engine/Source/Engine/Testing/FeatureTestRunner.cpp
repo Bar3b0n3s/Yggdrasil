@@ -2,6 +2,7 @@
 #include "Engine/Testing/FeatureTestRunner.h"
 
 #include "Engine/Asset/AssetManager.h"
+#include "Engine/Asset/ReplayData.h"
 #include "Engine/Audio/AudioEngine.h"
 #include "Engine/Core/Clock.h"
 #include "Engine/Core/FixedStepScheduler.h"
@@ -136,7 +137,16 @@ namespace Engine {
 			CloseSuite,
 			Replay,
 			Verify,
+			InputCheck,
 			Done
+		};
+		// What a replay session of the run plays: a committed replay (its rows join the report), the recording's
+		// verification in ordinary play, or the recording's input check (the recording played without its input).
+		enum class ReplayRun : uint8_t
+		{
+			Committed,
+			Verification,
+			InputCheck
 		};
 		struct Selection
 		{
@@ -193,6 +203,8 @@ namespace Engine {
 		std::optional<ReplayDocument> Recording{};
 		std::string RecordingError{};
 		bool VerifiedRecording = false;
+		// Where the input check of the verified recording ended (FeatureTestRunner::GetInputCheckTick); none before it ran.
+		std::optional<uint64_t> InputCheckTick{};
 		// Coverage (FeatureTestRunner.h; Docs/Decisions/0022-m14-contract.md decisions 3 to 5). CoverageProject: the
 		// project's Testing.CoverageGates. CoverageRun: also unfiltered and not recording, so scenes and loads are recorded
 		// and a completed run evaluates the gates.
@@ -222,10 +234,10 @@ namespace Engine {
 		}
 
 		// Records the active session's scene for gates 1 and 1b (after setup, after each scene replacement and before
-		// teardown). The recording-verification session never counts; after a failure nothing more is recorded.
+		// teardown). The recording's verification and input-check sessions never count; after a failure nothing more is recorded.
 		void RecordScene()
 		{
-			if (!CoverageRun || !Session || CoverageError || ReportData.Cancelled || CurrentPhase == Phase::Verify)
+			if (!CoverageRun || !Session || CoverageError || ReportData.Cancelled || CurrentPhase == Phase::Verify || CurrentPhase == Phase::InputCheck)
 				return;
 			const Scene& scene = Session->GetScene();
 			if (!SceneCoverage)
@@ -723,6 +735,12 @@ namespace Engine {
 							event.Tick += Recording->FinalTick;
 							Recording->Events.push_back(std::move(event));
 						}
+						// The segment's checkpoints keep what it observed, at the same cumulative offset as its events.
+						for (auto& checkpoint : finished->Checkpoints)
+						{
+							checkpoint.Tick += Recording->FinalTick;
+							Recording->Checkpoints.push_back(std::move(checkpoint));
+						}
 						Recording->FinalTick += finished->FinalTick;
 						Recording->FinalStateHash = finished->FinalStateHash;
 					}
@@ -946,7 +964,7 @@ namespace Engine {
 			return {};
 		}
 
-		Status BeginReplay(AssetRef<ReplayData> data)
+		Status BeginReplay(AssetRef<ReplayData> data, bool withoutInput = false)
 		{
 			PlayingHeader = data->Header;
 			PlayingFinalTick = data->FinalTick;
@@ -956,7 +974,7 @@ namespace Engine {
 			Host->SetActiveTestSession(Session.get());
 			Published = true;
 			ENGINE_TRY(CheckAudioTime());
-			ENGINE_TRY(Player.Begin(std::move(data), *Session, { true, true }));
+			ENGINE_TRY(Player.Begin(std::move(data), *Session, { .Verify = true, .StrictHash = true, .WithoutInput = withoutInput }));
 			ReplayGeneration = Session->GetSceneGeneration();
 			RecordScene();
 			return {};
@@ -1050,7 +1068,19 @@ namespace Engine {
 			CurrentPhase = Phase::Done;
 		}
 
-		Status ReplayStep(bool verification)
+		// The recording as the replay its verification and input check play.
+		AssetRef<ReplayData> MakeRecordingReplay() const
+		{
+			auto data = CreateRef<ReplayData>();
+			data->Header = Recording->Header;
+			data->Events = Recording->Events;
+			data->Checkpoints = Recording->Checkpoints;
+			data->FinalTick = Recording->FinalTick;
+			data->FinalStateHash = Recording->FinalStateHash;
+			return AssetRef<ReplayData>(std::move(data));
+		}
+
+		Status ReplayStep(ReplayRun run)
 		{
 			if (Options.TimeoutTicks && RunTicks >= Options.TimeoutTicks && Session->GetTick() < PlayingFinalTick)
 				return MakeError(ErrorCode::Timeout, "run tick limit exceeded during replay");
@@ -1070,23 +1100,63 @@ namespace Engine {
 			if (auto* scripts = Session->GetScripts())
 				scripts->Stop();
 			const auto& errors = Session->GetScriptErrors();
-			if (verification)
+			if (run == ReplayRun::InputCheck)
+			{
+				// The recording guard (FeatureTestRunner.h): an input-free run that passes the recording's verification,
+				// whatever script errors it raised, has shown that the recording proves nothing about its input.
+				DestroySession();
+				if (playback.Passed)
+				{
+					return std::unexpected(Error(ErrorCode::Validation, std::format("the recording's outcome does not depend on its input: the same scene, seed and parameters run without its {} "
+																					"input event(s) reproduce its final state hash at tick {} and its {} checkpoint(s)",
+																			Recording->Events.size(), Recording->FinalTick, Recording->Checkpoints.size()))
+							.WithHint(std::format("end the recording while the played state is still in the scene: a recording is refused only when its input never shows in the "
+												  "world at a checkpoint (one every {0} ticks) or at its end, as in one shorter than {0} ticks that ends idle, input that "
+												  "changes only script state, or play after the last checkpoint that a restart undoes",
+								ReplayCheckpointInterval)));
+				}
+				InputCheckTick = playback.FinalTick;
+				VerifiedRecording = true;
+				Complete();
+				return {};
+			}
+			if (run == ReplayRun::Verification)
 			{
 				const bool scriptFailed = errors.GetCursor() != 0;
 				DestroySession();
 				if (scriptFailed)
 					return MakeError(ErrorCode::Validation, "recording ordinary-play verification reported script errors");
+				if (playback.CheckpointFailed)
+					return MakeError(ErrorCode::Validation, "recording cannot reproduce ordinary gameplay at checkpoint tick {}: expected {}, observed {}", playback.FinalTick, playback.ExpectedStateHash, playback.StateHash);
 				if (!playback.StopReason.empty())
 					return MakeError(ErrorCode::Validation, "recording cannot reproduce ordinary gameplay: {}", playback.StopReason);
 				if (!playback.Passed)
 					return MakeError(ErrorCode::Validation, "recording cannot reproduce ordinary gameplay at tick {}: expected {}, observed {}", playback.FinalTick, playback.ExpectedStateHash, playback.StateHash);
+				// A recording with input events goes on to its input check; a pure determinism recording has none to check.
+				if (!Recording->Events.empty())
+				{
+					Player.Cancel();
+					CurrentPhase = Phase::InputCheck;
+					return {};
+				}
 				VerifiedRecording = true;
 				Complete();
 				return {};
 			}
 			const auto name = "replay:" + Replays[ReplayIndex];
 			AddReplayScriptErrorRows(name);
-			if (!playback.StopReason.empty())
+			if (playback.CheckpointFailed)
+			{
+				// The first checkpoint whose state hash differed ended the replay at its tick.
+				TestCaseResult row;
+				row.Suite = name;
+				row.Case = std::format("Checkpoint@{}", playback.FinalTick);
+				row.Status = "failed";
+				row.Ticks = Count(playback.FinalTick);
+				AddFailure(row, { std::format("expected {}, observed {}", playback.ExpectedStateHash, playback.StateHash), Replays[ReplayIndex], 0, std::format("/Checkpoints/{}/StateHash", playback.CheckpointsChecked - 1) });
+				ReportData.Cases.push_back(std::move(row));
+			}
+			else if (!playback.StopReason.empty())
 			{
 				// Gameplay quit or stopped fatally before FinalTick: the replay failed where it ended.
 				TestCaseResult row;
@@ -1130,6 +1200,8 @@ namespace Engine {
 			suite.Mode = Options.Mode;
 			suite.Ticks = Count(playback.FinalTick);
 			suite.FinalStateHash = playback.StateHash;
+			suite.CheckpointsChecked = Count(playback.CheckpointsChecked);
+			suite.FailedCheckpointTick = playback.CheckpointFailed ? Count(playback.FinalTick) : 0;
 			suite.ScriptErrors = Count(errors.GetCursor());
 			suite.Passed = playback.Passed && suite.ScriptErrors == 0;
 			ReportData.Suites.push_back(std::move(suite));
@@ -1224,7 +1296,7 @@ namespace Engine {
 				{
 					if (ReplayIndex < Replays.size())
 					{
-						const Status stepped = Session ? ReplayStep(false) : StartReplay();
+						const Status stepped = Session ? ReplayStep(ReplayRun::Committed) : StartReplay();
 						if (!stepped)
 							FailReplay(stepped.error());
 						return false;
@@ -1249,16 +1321,17 @@ namespace Engine {
 				case Phase::Verify:
 				{
 					if (!Session)
-					{
-						auto data = CreateRef<ReplayData>();
-						data->Header = Recording->Header;
-						data->Events = Recording->Events;
-						data->FinalTick = Recording->FinalTick;
-						data->FinalStateHash = Recording->FinalStateHash;
-						ENGINE_TRY(BeginReplay(std::move(data)));
-					}
+						ENGINE_TRY(BeginReplay(MakeRecordingReplay()));
 					else
-						ENGINE_TRY(ReplayStep(true));
+						ENGINE_TRY(ReplayStep(ReplayRun::Verification));
+					return CurrentPhase == Phase::Done;
+				}
+				case Phase::InputCheck:
+				{
+					if (!Session)
+						ENGINE_TRY(BeginReplay(MakeRecordingReplay(), true));
+					else
+						ENGINE_TRY(ReplayStep(ReplayRun::InputCheck));
 					return CurrentPhase == Phase::Done;
 				}
 			}
@@ -1399,7 +1472,9 @@ namespace Engine {
 	{
 		if (m_State->CurrentPhase != State::Phase::Done)
 			return MakeError(ErrorCode::InvalidState, "test run has not completed");
-		return m_State->ReportData;
+		TestRunResult result = m_State->ReportData;
+		SummarizeTestRunCases(result);
+		return result;
 	}
 
 	Result<ReplayDocument> FeatureTestRunner::TakeRecording()
@@ -1410,6 +1485,11 @@ namespace Engine {
 		m_State->Recording.reset();
 		m_State->VerifiedRecording = false;
 		return recording;
+	}
+
+	std::optional<uint64_t> FeatureTestRunner::GetInputCheckTick() const
+	{
+		return m_State->InputCheckTick;
 	}
 
 	void FeatureTestRunner::Cancel()
@@ -1438,6 +1518,7 @@ namespace Engine {
 			case State::Phase::CloseSuite: return "teardown suite";
 			case State::Phase::Replay:     return "replay";
 			case State::Phase::Verify:     return "verify recording";
+			case State::Phase::InputCheck: return "check the recording's input";
 			case State::Phase::Done:       return "complete";
 		}
 		return "idle";

@@ -122,6 +122,7 @@ Section references (§) point to `Docs/Architecture.md` unless marked CodeStyle 
 
 - [ ] A change in behaviour, CLI or format updates the owning document: Architecture, Roadmap, `AGENTS.md`, a skill, or a `VENDOR.md`. A deliberate deviation has an ADR.
 - [ ] Generated files are regenerated and committed: `Docs/Reference/*`, `Engine.d.luau` and `catalog.json`. `GenerateDocs.py --check` is clean once it exists.
+- [ ] An engine change that alters canonical project output (a new field written with its default, a migration, a `.meta` schema change) or simulation hashes carries, in the same change, the upgrade of every demo game through the transcribed upgrade (`Editor --headless --project <Game> --upgrade`, or `project.upgrade` through the bridge), the FeatureTest regeneration (`Scaffold.py`, then `Scaffold.py --check`) and the re-recording of every affected replay through automation, with its reason stated; the provenance audit (`AuditProvenance.py --project <Game>` on the staged files) and the games suite stay green (§13.12, ADR 0026 decision 14). Hand edits of a demo's engine-consumed files, `Provenance.json` or `BuildLog.jsonl` are a finding.
 - [ ] Every new script has `--help`, `--json` where sensible, and documented exit codes.
 - [ ] New reflected types, fields, methods and script APIs have descriptions (coverage gate 7).
 

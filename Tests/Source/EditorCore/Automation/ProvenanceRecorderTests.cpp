@@ -67,7 +67,9 @@ namespace Engine {
 			CHECK(project->Method == "project.create");
 		}
 
-		TEST_CASE("ProvenanceRecorder: ui and cli writes have null request ids and transcript lines")
+		// Docs/Decisions/0026-m16-contract.md decision 13 (G6): only "ui" writes have null ids and lines; a "cli" entry carries
+		// its own request's id and transcript line (EditorAppTests' --upgrade cases).
+		TEST_CASE("ProvenanceRecorder: ui writes have null request ids and transcript lines")
 		{
 			std::vector<ProvenanceEntry> entries = { { .Path = "Assets/A.scene", .Hash = 1, .Method = "ui", .RequestId = {}, .Client = "ui", .TranscriptLine = std::nullopt } };
 			const std::string text = ProvenanceRecorder::ToText(entries);
@@ -89,6 +91,28 @@ namespace Engine {
 			CHECK_FALSE(ProvenanceRecorder::IsRecordedPath("Sub/Other.eproj"));
 			CHECK_FALSE(ProvenanceRecorder::IsRecordedPath("AGENTS.md"));
 			CHECK_FALSE(ProvenanceRecorder::IsRecordedPath("AssetsX/a.scene"));
+		}
+
+		// Docs/Decisions/0026-m16-contract.md decision 13 (G5): the type checker reads the root .luaurc, so it is engine-consumed
+		// and recorded like the .eproj (project.create records it; ProjectMethodsTests), and a hand edit fails the audit.
+		TEST_CASE("ProvenanceRecorder: a root .luaurc is a recorded path")
+		{
+			CHECK(ProvenanceRecorder::IsRecordedPath(".luaurc"));
+			CHECK(ProvenanceRecorder::IsRecordedPath("Assets/Scripts/.luaurc"));
+			CHECK_FALSE(ProvenanceRecorder::IsRecordedPath("Sub/.luaurc"));
+			CHECK_FALSE(ProvenanceRecorder::IsRecordedPath(".luaurc.bak"));
+			CHECK_FALSE(ProvenanceRecorder::IsRecordedPath("x.luaurc"));
+			CHECK_FALSE(ProvenanceRecorder::IsRecordedPath(".gitignore"));
+
+			ProvenanceRecorder recorder;
+			recorder.Record(".luaurc", 7, MakeAttribution("project.create", Json(1), "engine-mcp", 1));
+			recorder.Record("Game.eproj", 8, MakeAttribution("project.create", Json(1), "engine-mcp", 1));
+			REQUIRE(recorder.GetEntries().size() == 2);
+			CHECK(recorder.GetEntries()[0].Path == ".luaurc");
+			const Result<std::vector<ProvenanceEntry>> read = ProvenanceRecorder::FromText(ProvenanceRecorder::ToText(recorder.GetEntries()));
+			REQUIRE_MESSAGE(read.has_value(), read.error().ToString());
+			REQUIRE(read->size() == 2);
+			CHECK((*read)[0].Path == ".luaurc");
 		}
 
 		TEST_CASE("ProvenanceRecorder: malformed files are located errors")

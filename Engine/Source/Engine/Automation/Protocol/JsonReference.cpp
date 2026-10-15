@@ -2,7 +2,9 @@
 #include "Engine/Automation/Protocol/JsonReference.h"
 
 #include "Engine/Core/Json/JsonReader.h"
+#include "Engine/Reflection/FuzzySuggest.h"
 
+#include <algorithm>
 #include <format>
 #include <optional>
 #include <string>
@@ -34,14 +36,44 @@ namespace Engine {
 			return indexBase == 0 ? "op" : "line";
 		}
 
-		// An InvalidArgument error located at the "$ref" object at `pointer`.
-		[[nodiscard]] static std::unexpected<Error> MakeReferenceError(const std::string& pointer, std::string message)
+		// An InvalidArgument error located at the "$ref" object at `pointer`, with an optional hint and suggestions.
+		[[nodiscard]] static std::unexpected<Error> MakeReferenceError(const std::string& pointer, std::string message, std::string hint = {},
+			std::vector<std::string> suggestions = {})
 		{
 			ErrorLocation location;
 			location.JsonPointer = pointer;
 			return std::unexpected(Error(ErrorCode::InvalidArgument, message)
+					.WithHint(hint)
 					.WithLocation(std::move(location))
-					.WithIssue(ErrorIssue{ .JsonPointer = pointer, .Message = std::move(message), .Hint = {}, .Suggestions = {} }));
+					.WithIssue(ErrorIssue{ .JsonPointer = pointer, .Message = std::move(message), .Hint = std::move(hint), .Suggestions = std::move(suggestions) }));
+		}
+
+		// The most members a missing-member hint lists; it counts the rest ("and 12 more").
+		constexpr size_t MaxListedReferenceMembers = 32;
+
+		// The error of a path segment naming no member of `object`, which `inspected` names: the reference up to the segment,
+		// the result itself ("0") or an object inside it ("0.prefab"). Its hint names the members the object has, sorted, at
+		// most MaxListedReferenceMembers of them, after "did you mean" for close ones, which are also the issue's suggestions.
+		[[nodiscard]] static std::unexpected<Error> MakeMissingMemberError(const std::string& pointer, std::string_view reference,
+			std::string_view inspected, std::string_view segment, const Json& object, std::string_view unit, size_t index)
+		{
+			std::vector<std::string> members;
+			members.reserve(object.size());
+			for (auto member = object.begin(); member != object.end(); ++member)
+				members.push_back(member.key());
+			std::ranges::sort(members);
+			std::vector<std::string> suggestions = FuzzySuggest(segment, members);
+			std::string listed;
+			for (size_t member = 0; member < members.size() && member < MaxListedReferenceMembers; ++member)
+				listed += std::format("{}'{}'", listed.empty() ? "" : ", ", members[member]);
+			if (members.size() > MaxListedReferenceMembers)
+				listed += std::format(" and {} more", members.size() - MaxListedReferenceMembers);
+			const std::string where = inspected.contains('.') ? std::format("'{}' (in the result of {} {})", inspected, unit, index)
+															  : std::format("the result of {} {}", unit, index);
+			std::string hint = members.empty() ? std::format("{} is an empty object", where) : std::format("{} has {}", where, listed);
+			if (!suggestions.empty())
+				hint = std::format("{} {}", MakeDidYouMeanHint(suggestions), hint);
+			return MakeReferenceError(pointer, std::format("$ref '{}': no member '{}' in {}", reference, segment, where), std::move(hint), std::move(suggestions));
 		}
 
 		// The value `reference` ("<index>.<path>") names in `results`.
@@ -79,7 +111,9 @@ namespace Engine {
 					const auto member = value->find(std::string(segment));
 					if (member == value->end())
 					{
-						return MakeReferenceError(pointer, std::format("$ref '{}': no member '{}' in the result of {} {}", reference, segment, unit, *index));
+						// The reference up to the segment: what was inspected ("0" for the result, "0.prefab" inside it).
+						const std::string_view inspected = reference.substr(0, reference.size() - path.size() - 1);
+						return MakeMissingMemberError(pointer, reference, inspected, segment, *value, unit, *index);
 					}
 					value = &*member;
 				}

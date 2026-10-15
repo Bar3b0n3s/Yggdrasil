@@ -142,7 +142,7 @@ namespace Engine {
 			if (position.has_value())
 				ENGINE_TRY(ScriptProxy::ValidateWorldPosition(parentEntity, *position));
 			LoadReport report;
-			ENGINE_TRY_ASSIGN(const Prefab asset, LoadPrefabAsset(m_Assets, prefab, GetTypes(), report));
+			ENGINE_TRY_ASSIGN(const Prefab asset, LoadPrefabAsset(m_Assets, prefab, GetTypes(), m_Schemas.get(), report));
 			const size_t existing = GetScene().GetEntityCount();
 			if (existing >= EntityLimit || asset.GetEntityIDs().size() > EntityLimit - existing)
 				return MakeError(ErrorCode::Validation, "The prefab exceeds the fixture entity limit");

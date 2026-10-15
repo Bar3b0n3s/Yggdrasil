@@ -5,7 +5,7 @@ description: Write or debug gameplay behaviours, shared modules and test suites 
 
 # Luau gameplay
 
-Use `Docs/Reference/ScriptAPI.md` and `Resources/Scripting/Engine.d.luau` for the available API, `Docs/Architecture.md` §5.7 and §11 for semantics, and the shipped `Resources/Templates/Scripts/` templates. In an automation-only game-building task, create and edit scripts through `script.create` and `script.write`; their results include compile/type diagnostics. Use `script.check` before testing.
+The API is served by `docs.get` (a connected editor answers it): `reference/ScriptAPI` describes every module, type, member and callback, and `scripting/Engine.d.luau` is the declarations file the type checker uses. Both are long, so ask for one section (`{topic: "reference/ScriptAPI", section: "Input"}`, a type such as `{topic: "scripting/Engine.d.luau", section: "Entity"}`, where the Script component's type is `Script (type)` and the `Script` global is `Script`) or page with `offset` and `length`. The script templates are `templates/Scripts/Behaviour`, `templates/Scripts/Module` and `templates/Scripts/Test`; they name their type `Script_<File>`, which you rename. In an automation-only game-building task, create and edit scripts through `script.create` and `script.write`; their results include compile/type diagnostics. Use `script.check` before testing. (Engine developers find the semantics behind the API in Architecture §5.7 and §11 of the repository.)
 
 ## Script shape
 
@@ -49,7 +49,7 @@ return Script.Define("Goal", Goal)
 
 Examples in this file and every other document are type-checked by the unit suite ("DocExamples: every Luau example in the docs type-checks"); `./Ball` resolves to a stub of the rolling-ball behaviour there.
 
-`GetScript()` returns the instance; `GetComponent("Script")` returns the component proxy. There is no `.Script` shortcut. Other eligible component shortcuts can be nil: narrow or cast after checking the component exists.
+`GetScript()` returns the instance; `GetComponent("Script")` returns the component proxy. There is no `.Script` shortcut. `entity.Transform` is never nil (every entity has one); every other component shortcut can be nil: narrow or cast after checking the component exists.
 
 ## Timing and tasks
 
@@ -68,6 +68,67 @@ For a follow camera, use `OnLateUpdate` and the target's `Transform.RenderPositi
 - **DAS/ARR input** (delayed auto-shift and auto-repeat, as in falling-block games). On `Input.IsActionPressed` move once and reset a tick counter; while `Input.IsActionDown`, count ticks and move again after the delay ticks, then every repeat-interval ticks. Count ticks, never seconds or wall time.
 - **Pooling.** Create a fixed set of entities once (for example in `OnStart`), then reuse them with `SetActive(true/false)` and `Transform:Teleport` instead of creating and destroying every tick. `OnEnable`/`OnDisable` run on each toggle.
 - **Typing.** Annotate callbacks with the exported instance alias (`function Ball.OnStart(self: Ball)`), so strict mode checks `self` fields. An optional field (`Goal: Entity?`, `Field.Asset`) can be nil: test it (`if self.Goal then`) or cast after checking before using it.
+- **Constant-speed ball** (Breakout, Pong). Give the ball a `Dynamic` `RigidBody` with `GravityFactor` 0, `Restitution` 1, `Friction` 0, `LinearDamping` 0, `AngularDamping` 0, `AllowSleeping` false and `MotionQuality` `LinearCast` (continuous collision, so a fast ball cannot pass through a thin paddle or brick between ticks), and keep it in the play plane with `LockTranslation` `[false, false, true]` and every `LockRotation` axis locked. Contacts combine friction as the geometric mean of the two bodies' values and restitution as the larger, so these values on the ball hold against every surface. Bounces still gain or lose a little speed and the angle drifts, so renormalize the velocity every tick, keeping a minimum vertical share so the ball never travels flat between the side walls (example below).
+- **Player-driven paddles and platforms.** Make them `Kinematic` and move them with `RigidBody:MoveKinematic` in `OnFixedUpdate`. A kinematic body pushes dynamic bodies but is never stopped by `Static` ones, so clamp its target in the script (a paddle limit), or it slides through the walls. A `Dynamic` paddle would be knocked away by the ball.
+- **Per-entity collisions.** `OnCollisionEnter` names the entity that owns the other body; colliders under an ancestor with a `RigidBody` belong to that ancestor's compound body and report the ancestor. An entity that must report its own hits (a brick) needs its own body (`game-building`, "Scenes, assets and prefabs"). Break it with `SetActive(false)` and bring it back with `SetActive(true)` on a restart rather than destroying and recreating it.
+- **Variants from one prefab.** Instances built with `prefab.instantiate {components}` differ only in their overrides (a material, a script field such as a brick's `Points`); a behaviour reads its own fields from `self` and another's through `GetScript()` with its exported alias.
+
+```luau path=Assets/Scripts/Breakout.luau
+--!strict
+export type Breakout = ScriptInstance & {
+	Ball: Entity?,
+	Paddle: Entity?,
+	BallSpeed: number,
+	PaddleSpeed: number,
+	PaddleLimit: number,
+	PaddleX: number,
+}
+
+local Breakout = {}
+
+Breakout.Fields = {
+	Ball = Field.Entity(),
+	Paddle = Field.Entity(),
+	BallSpeed = Field.Number(9, { Min = 1 }),
+	PaddleSpeed = Field.Number(14, { Min = 1 }),
+	PaddleLimit = Field.Number(7.3, { Min = 0 }),
+}
+
+-- The smallest vertical share of the ball's direction, so it never ends up travelling flat between the walls.
+local MinVertical = 0.25
+
+function Breakout.OnStart(self: Breakout)
+	self.PaddleX = 0
+end
+
+function Breakout.OnFixedUpdate(self: Breakout, dt: number)
+	-- The kinematic paddle is not stopped by the static walls: clamp its target before moving it.
+	self.PaddleX = math.clamp(self.PaddleX + Input.GetAxis("MoveX") * self.PaddleSpeed * dt, -self.PaddleLimit, self.PaddleLimit)
+	local paddle = self.Paddle
+	local paddleBody = if paddle then paddle.RigidBody else nil
+	if paddle and paddleBody then
+		paddleBody:MoveKinematic(vector.create(self.PaddleX, paddle.Transform.WorldPosition.y, 0), Quat.Identity())
+	end
+
+	-- Restitution 1 keeps the speed only approximately: restore it every tick, keeping the direction.
+	local ball = self.Ball
+	local body = if ball then ball.RigidBody else nil
+	if body then
+		local velocity = body:GetLinearVelocity()
+		local speed = vector.magnitude(velocity)
+		if speed > 0 then
+			local direction = velocity / speed
+			if math.abs(direction.y) < MinVertical then
+				local x = (if direction.x < 0 then -1 else 1) * math.sqrt(1 - MinVertical * MinVertical)
+				direction = vector.create(x, if direction.y < 0 then -MinVertical else MinVertical, 0)
+			end
+			body:SetLinearVelocity(direction * self.BallSpeed)
+		end
+	end
+end
+
+return Script.Define("Breakout", Breakout)
+```
 
 ## Determinism pitfalls
 
@@ -82,8 +143,8 @@ Log entries and `print` keep at most 8 KiB each (longer text is truncated and ma
 
 ## Testing and diagnosis
 
-Create test scripts with `Test.Suite` and register `Test.Case` inside the suite body; the body registers cases, while the cases perform runtime work. Use `Test.Inject*` and `Test.WaitTicks` for deterministic input. `Test.Expect` records a failure and continues; `Test.Fail` ends the case. Configure suites in `Testing.Suites` with their scene, parameters and supported modes. Run with `test.run` or `Editor --headless --project <project> --run-tests`; `--filter` selects a suite/case. `Projects/FeatureTest/Assets/Tests/` holds working suites for every API module (`Api/`), callback (`Callbacks/`), input (`Input/`), timing (`Timing/`), prefab, scene-load and error case to copy from.
+Create test scripts with `Test.Suite` and register `Test.Case` inside the suite body; the body registers cases, while the cases perform runtime work (`templates/Scripts/Test` is the starting point). Use `Test.Inject*` and `Test.WaitTicks` for deterministic input. A button injected `Down` stays down until an `Up`, and an analog value (`Test.InjectAction("MoveX", nil, 0.5)`) holds on every later tick until another value replaces it: inject 0 to let go. `Test.Expect` records a failure and continues; `Test.Fail` ends the case. Pass the actual value first to `Test.ExpectEqual(actual, expected, message?)` and `Test.ExpectNear(actual, expected, epsilon?, message?)`: a failure row shows the message, then `(got <actual>, expected <expected>)`, with `, epsilon <e>` for `ExpectNear`. Configure suites in `Testing.Suites` with their scene, parameters and supported modes. Run with `test.run` or `Editor --headless --project <project> --run-tests`; `--filter` selects a suite/case.
 
 Use `script.errors`, diagnostics and the structured test results to find authored file/line, traceback, callback, entity and tick. A failing behaviour is disabled; in the editor `PauseOnError` may pause the session. Fix the source and confirm the fresh run rather than assuming an old disabled instance restarted. Ordinary editor play supports transactional hot reload; deterministic lockstep/replay/recording/test sessions defer it except explicit test reload.
 
-Start input recording at tick zero. Record through `input.record` or `test.run`'s record option, then verify with `input.replay` and strict hash checking. External `script.eval`/`play.waitFor` writes or session-RNG use invalidate recording; observation alone does not. A test-driven recording is published only after an ordinary fresh replay reproduces its original final state hash.
+Start input recording at tick zero. Record through `input.record` or `test.run`'s record option, then verify with `input.replay` and strict hash checking. External `script.eval`/`play.waitFor` writes or session-RNG use invalidate recording; observation alone does not. A test-driven recording is published only after an ordinary fresh replay reproduces every state-hash checkpoint and its final hash, and, with input events, is refused when a run without them reproduces it too (game-building §7).

@@ -11,6 +11,7 @@
 #include "Engine/Testing/TestResults.h"
 
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -50,11 +51,13 @@ namespace Engine {
 	{
 		TestSuiteSettings::Mode Mode = TestSuiteSettings::Mode::Editor;
 		std::string Filter{};
-		// 0: no extra run-wide limit; otherwise counts actual fixed ticks across suites, cases, replays and record verification.
+		// 0: no extra run-wide limit; otherwise counts actual fixed ticks across suites, cases, replays and record verification
+		// (the input check included).
 		// Case and suite limits still apply independently. Does not change a declared case TimeoutTicks.
 		uint64_t TimeoutTicks = 0;
-		// Exactly one selected suite. Publication requires fresh ordinary playback with Verify and StrictHash; there is
-		// no unverified-record option. The adapter, not this class, owns the destination path and atomic file write.
+		// Exactly one selected suite. Publication requires fresh ordinary playback with Verify and StrictHash and, for a
+		// recording with input events, an input check that fails (see Advance); there is no unverified-record option. The
+		// adapter, not this class, owns the destination path and atomic file write.
 		// The recorded suite runs with its Parameters in the replay header's form (CanonicalizeReplayParameters; Begin
 		// fails with its located Validation error for a float out of the float range).
 		bool Record = false;
@@ -89,6 +92,8 @@ namespace Engine {
 		// live input suppressed, cursor at the test-run baseline. Verification cannot exit the application on Quit; the
 		// host retains that request. A replay that cannot load, start or play becomes failed replay:<path> rows, and a
 		// quit or fatal stop before its FinalTick a failed replay (ReplayPlaybackResult::StopReason); the run continues.
+		// Every replay is played with StrictHash: the first checkpoint whose state hash differs ends it with a failed
+		// "Checkpoint@<tick>" row (located at /Checkpoints/<index>/StateHash) naming both hashes.
 		[[nodiscard]] virtual Result<Scope<PlaySession>> CreateReplaySession(const ReplayHeader& header, TestSuiteSettings::Mode mode) = 0;
 		// Publishes a borrowed view for UI/automation reads. Null before destruction; the host never advances it from
 		// its ordinary frame loop or lets another writer/driver take over during the runner's exclusive lease.
@@ -168,19 +173,33 @@ namespace Engine {
 		// Case isolation still restarts the configured scene; Quit ends the suite without recollection. Approved M13 ADR
 		// refinement (proposal section 9); no coroutine continuation crosses a VM lifetime.
 		// With Record, retain every applied input in order and concatenate isolated sessions by cumulative tick offset,
-		// without a reset opcode. Keep the original starting header and observed terminal hash unchanged. Clock and Case
+		// without a reset opcode; each segment's state-hash checkpoints (ReplayRecorder::CaptureCheckpoint; a suite Clock that
+		// runs several steps in one frame gets none at the ticks inside such a frame, which start from no completed-tick
+		// boundary) move by the same offset. Keep the original starting header and observed terminal hash unchanged. Clock and Case
 		// isolation have no blanket exclusion. After suite teardown, run a fresh normal-play session through ReplayPlayer
 		// with Verify=true and StrictHash=true: no suite collection, TestHost, test tasks, overrides or injected snapshot.
-		// Publication requires passing selected cases, no invalidation and successful reproduction. Failure is Validation
-		// with the reason and expected/actual hash/tick; never substitute the verifier's hash or omit an earlier segment.
-		// Verification is cancellable and counts toward the run-wide tick cap, but not case/suite ticks or coverage.
+		// Every checkpoint and the final hash must reproduce. A recording with input events then gets its input check
+		// (M16 FX-4): another fresh session plays it with WithoutInput; when that playback passes too (every checkpoint and
+		// the final hash reproduced without input), whatever script errors it raised, the recording's outcome does not depend
+		// on its input and the run fails with Validation and a hint (end the recording while the played state is in the scene).
+		// Publication requires passing selected cases, no invalidation, successful reproduction and a failed input check
+		// (or no input events). Failure is Validation with the reason and expected/actual hash/tick; never substitute the
+		// verifier's hash or omit an earlier segment. Verification and the input check are cancellable and count toward the
+		// run-wide tick cap, but not case/suite ticks or coverage.
 		[[nodiscard]] Result<bool> Advance();
-		// Available after a terminal run, including a recording-verification error; preserves the original case results.
+		// Available after a terminal run, including a recording-verification error; preserves the original case results,
+		// with Counts and FailedCases set from them (SummarizeTestRunCases).
 		[[nodiscard]] Result<TestRunResult> GetResult() const;
 		// Transfers the successful, strictly verified candidate once; InvalidState before verification, after failure or
 		// cancellation, when Record was false, or after transfer. The adapter writes through its host with provenance only
 		// after this succeeds. Cancellation, reproduction failure and write failure never replace the destination file.
 		[[nodiscard]] Result<ReplayDocument> TakeRecording();
+		// Where the input check of this run's verified recording ended (M16 friction S3-03): the tick of the first checkpoint
+		// whose state hash differed without the input, else where that playback ended (the recording's final tick, or where
+		// gameplay stopped). nullopt when no input check let a recording through: no recording, a recording without input
+		// events (nothing to check), or a run that failed or was cancelled before. Kept after TakeRecording, until the next
+		// Begin.
+		[[nodiscard]] std::optional<uint64_t> GetInputCheckTick() const;
 		// Idempotent. Cancel current case, EndSuite, stop captures, unpublish/destroy session, then release audio/time.
 		// No Poll/Advance is required after cancellation; unwritten recordings are discarded.
 		void Cancel();

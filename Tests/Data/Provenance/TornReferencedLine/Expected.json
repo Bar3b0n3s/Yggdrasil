@@ -1,0 +1,12 @@
+{
+	"Format": "ProvenanceAuditFixture",
+	"Version": 1,
+	"ExitCode": 1,
+	"Findings": [
+		{
+			"Code": "torn-line",
+			"Path": "Assets/Scripts/Ball.luau"
+		}
+	],
+	"Warnings": []
+}

@@ -1,0 +1,12 @@
+{
+	"Format": "ProvenanceAuditFixture",
+	"Version": 1,
+	"ExitCode": 1,
+	"Findings": [
+		{
+			"Code": "hash-mismatch",
+			"Path": "Assets/Materials/Red.material"
+		}
+	],
+	"Warnings": []
+}

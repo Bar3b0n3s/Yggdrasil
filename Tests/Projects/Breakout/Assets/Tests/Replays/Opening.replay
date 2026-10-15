@@ -1,0 +1,4822 @@
+{
+	"Format": "Replay",
+	"Version": 2,
+	"Scene": {
+		"Handle": "16e5026585c253f7",
+		"Path": "Assets/Scenes/Main.scene"
+	},
+	"Parameters": {},
+	"Seed": 1977,
+	"FixedHz": 60,
+	"EngineVersion": "0.1.0",
+	"Config": "Editor",
+	"Events": [
+		{
+			"Tick": 31,
+			"Type": "Action",
+			"Name": "Launch",
+			"State": "Down"
+		},
+		{
+			"Tick": 32,
+			"Type": "Action",
+			"Name": "Launch",
+			"State": "Up"
+		},
+		{
+			"Tick": 33,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.5193672
+		},
+		{
+			"Tick": 34,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.2569559
+		},
+		{
+			"Tick": 35,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.086388536
+		},
+		{
+			"Tick": 36,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.02448024
+		},
+		{
+			"Tick": 37,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.09654494
+		},
+		{
+			"Tick": 38,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.14338702
+		},
+		{
+			"Tick": 39,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.17383434
+		},
+		{
+			"Tick": 40,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.1936251
+		},
+		{
+			"Tick": 41,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.20648912
+		},
+		{
+			"Tick": 42,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.21485072
+		},
+		{
+			"Tick": 43,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.2202858
+		},
+		{
+			"Tick": 44,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.22381851
+		},
+		{
+			"Tick": 45,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.2261148
+		},
+		{
+			"Tick": 46,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.22760735
+		},
+		{
+			"Tick": 47,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.22857751
+		},
+		{
+			"Tick": 48,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.22920814
+		},
+		{
+			"Tick": 49,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.22961803
+		},
+		{
+			"Tick": 50,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.22988446
+		},
+		{
+			"Tick": 51,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23005769
+		},
+		{
+			"Tick": 52,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23017025
+		},
+		{
+			"Tick": 53,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23024338
+		},
+		{
+			"Tick": 54,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23029095
+		},
+		{
+			"Tick": 55,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23032188
+		},
+		{
+			"Tick": 56,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23034191
+		},
+		{
+			"Tick": 57,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23035505
+		},
+		{
+			"Tick": 58,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23036346
+		},
+		{
+			"Tick": 59,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.230369
+		},
+		{
+			"Tick": 60,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037267
+		},
+		{
+			"Tick": 61,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.2303749
+		},
+		{
+			"Tick": 62,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037651
+		},
+		{
+			"Tick": 63,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.2303774
+		},
+		{
+			"Tick": 64,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037812
+		},
+		{
+			"Tick": 65,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037848
+		},
+		{
+			"Tick": 66,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037884
+		},
+		{
+			"Tick": 67,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037902
+		},
+		{
+			"Tick": 68,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037902
+		},
+		{
+			"Tick": 69,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.2303792
+		},
+		{
+			"Tick": 70,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037937
+		},
+		{
+			"Tick": 71,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037955
+		},
+		{
+			"Tick": 72,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037955
+		},
+		{
+			"Tick": 73,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037955
+		},
+		{
+			"Tick": 74,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 75,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 76,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 77,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 78,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 79,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 80,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 81,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 82,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 83,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 84,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 85,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23038009
+		},
+		{
+			"Tick": 86,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 87,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 88,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 89,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 90,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 91,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23038009
+		},
+		{
+			"Tick": 92,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 93,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 94,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 95,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 96,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 97,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 98,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23038009
+		},
+		{
+			"Tick": 99,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 100,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 101,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 102,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 103,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 104,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23038009
+		},
+		{
+			"Tick": 105,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 106,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 107,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037937
+		},
+		{
+			"Tick": 108,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 109,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 110,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 111,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 112,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 113,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 114,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 115,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 116,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 117,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 118,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 119,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 120,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 121,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 122,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 123,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 124,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 125,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 126,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 127,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 128,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 129,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 130,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 131,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 132,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23038045
+		},
+		{
+			"Tick": 133,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 134,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 135,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 136,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 137,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 138,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 139,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 140,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 141,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 142,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 143,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 144,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 145,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23038045
+		},
+		{
+			"Tick": 146,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 147,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 148,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 149,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 150,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 151,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 152,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 153,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 154,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 155,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 156,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 157,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 158,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23038045
+		},
+		{
+			"Tick": 159,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.24530354
+		},
+		{
+			"Tick": 160,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.25500384
+		},
+		{
+			"Tick": 161,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.26130953
+		},
+		{
+			"Tick": 162,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.26540795
+		},
+		{
+			"Tick": 163,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.26807228
+		},
+		{
+			"Tick": 164,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.2698032
+		},
+		{
+			"Tick": 165,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.270929
+		},
+		{
+			"Tick": 166,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.27166072
+		},
+		{
+			"Tick": 167,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.27213636
+		},
+		{
+			"Tick": 168,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.27244535
+		},
+		{
+			"Tick": 169,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.27264562
+		},
+		{
+			"Tick": 170,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.2727765
+		},
+		{
+			"Tick": 171,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.27286163
+		},
+		{
+			"Tick": 172,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.2729167
+		},
+		{
+			"Tick": 173,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.27295247
+		},
+		{
+			"Tick": 174,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.27297607
+		},
+		{
+			"Tick": 175,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.2729911
+		},
+		{
+			"Tick": 176,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.32976308
+		},
+		{
+			"Tick": 177,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.42531982
+		},
+		{
+			"Tick": 178,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.5208758
+		},
+		{
+			"Tick": 179,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.61643255
+		},
+		{
+			"Tick": 180,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.7119893
+		},
+		{
+			"Tick": 181,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.807546
+		},
+		{
+			"Tick": 182,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.7119893
+		},
+		{
+			"Tick": 183,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.61643255
+		},
+		{
+			"Tick": 184,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.5208758
+		},
+		{
+			"Tick": 185,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.4253191
+		},
+		{
+			"Tick": 186,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.32976237
+		},
+		{
+			"Tick": 187,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23420563
+		},
+		{
+			"Tick": 188,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.1386489
+		},
+		{
+			"Tick": 189,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.043092154
+		},
+		{
+			"Tick": 190,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.052464582
+		},
+		{
+			"Tick": 191,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.12965855
+		},
+		{
+			"Tick": 192,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.17983517
+		},
+		{
+			"Tick": 193,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.2124494
+		},
+		{
+			"Tick": 194,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.23364887
+		},
+		{
+			"Tick": 195,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.24742827
+		},
+		{
+			"Tick": 196,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.25638542
+		},
+		{
+			"Tick": 197,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.26220688
+		},
+		{
+			"Tick": 198,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.2659913
+		},
+		{
+			"Tick": 199,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.26845106
+		},
+		{
+			"Tick": 200,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.27005038
+		},
+		{
+			"Tick": 201,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.27108893
+		},
+		{
+			"Tick": 202,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.27176484
+		},
+		{
+			"Tick": 203,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.272204
+		},
+		{
+			"Tick": 204,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.2724894
+		},
+		{
+			"Tick": 205,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.27267465
+		},
+		{
+			"Tick": 206,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.27279553
+		},
+		{
+			"Tick": 207,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.2728735
+		},
+		{
+			"Tick": 208,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.27292427
+		},
+		{
+			"Tick": 209,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.2729579
+		},
+		{
+			"Tick": 210,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.27297935
+		},
+		{
+			"Tick": 211,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.27299294
+		},
+		{
+			"Tick": 212,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.27300224
+		},
+		{
+			"Tick": 213,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.27300867
+		},
+		{
+			"Tick": 214,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.27301225
+		},
+		{
+			"Tick": 215,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.2730144
+		},
+		{
+			"Tick": 216,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.27301654
+		},
+		{
+			"Tick": 217,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.27301726
+		},
+		{
+			"Tick": 218,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.27301797
+		},
+		{
+			"Tick": 219,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.2730187
+		},
+		{
+			"Tick": 220,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.2730187
+		},
+		{
+			"Tick": 221,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.2730187
+		},
+		{
+			"Tick": 222,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.2730187
+		},
+		{
+			"Tick": 223,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.2730194
+		},
+		{
+			"Tick": 224,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.2730194
+		},
+		{
+			"Tick": 225,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.2730187
+		},
+		{
+			"Tick": 226,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.2730194
+		},
+		{
+			"Tick": 227,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.2730194
+		},
+		{
+			"Tick": 228,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.2730194
+		},
+		{
+			"Tick": 229,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.2730187
+		},
+		{
+			"Tick": 230,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.2730194
+		},
+		{
+			"Tick": 231,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.2730194
+		},
+		{
+			"Tick": 232,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.2730194
+		},
+		{
+			"Tick": 233,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.2730194
+		},
+		{
+			"Tick": 234,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.2730187
+		},
+		{
+			"Tick": 235,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.2730194
+		},
+		{
+			"Tick": 236,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.2730194
+		},
+		{
+			"Tick": 237,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.2730194
+		},
+		{
+			"Tick": 238,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.2730187
+		},
+		{
+			"Tick": 239,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.2730194
+		},
+		{
+			"Tick": 240,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.2730194
+		},
+		{
+			"Tick": 241,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.2730194
+		},
+		{
+			"Tick": 242,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.2730194
+		},
+		{
+			"Tick": 243,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.2730187
+		},
+		{
+			"Tick": 244,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.2730194
+		},
+		{
+			"Tick": 245,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.27301905
+		},
+		{
+			"Tick": 246,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.2730194
+		},
+		{
+			"Tick": 247,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.27301905
+		},
+		{
+			"Tick": 248,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.27301905
+		},
+		{
+			"Tick": 249,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.2730187
+		},
+		{
+			"Tick": 250,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.27301833
+		},
+		{
+			"Tick": 251,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.27301833
+		},
+		{
+			"Tick": 252,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.27301833
+		},
+		{
+			"Tick": 253,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.27301833
+		},
+		{
+			"Tick": 254,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.27301833
+		},
+		{
+			"Tick": 255,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.27301833
+		},
+		{
+			"Tick": 256,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.27301833
+		},
+		{
+			"Tick": 257,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.27301833
+		},
+		{
+			"Tick": 258,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.27301797
+		},
+		{
+			"Tick": 259,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.27301833
+		},
+		{
+			"Tick": 260,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.27301833
+		},
+		{
+			"Tick": 261,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.27301797
+		},
+		{
+			"Tick": 262,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.27301833
+		},
+		{
+			"Tick": 263,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.27301833
+		},
+		{
+			"Tick": 264,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.27301833
+		},
+		{
+			"Tick": 265,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.27301797
+		},
+		{
+			"Tick": 266,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.27301833
+		},
+		{
+			"Tick": 267,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.27301833
+		},
+		{
+			"Tick": 268,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.27301797
+		},
+		{
+			"Tick": 269,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.27301833
+		},
+		{
+			"Tick": 270,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.27301833
+		},
+		{
+			"Tick": 271,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.27301833
+		},
+		{
+			"Tick": 272,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.27301797
+		},
+		{
+			"Tick": 273,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.27301833
+		},
+		{
+			"Tick": 274,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.27301833
+		},
+		{
+			"Tick": 275,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.27301797
+		},
+		{
+			"Tick": 276,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.27301815
+		},
+		{
+			"Tick": 277,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.27301833
+		},
+		{
+			"Tick": 278,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.27301815
+		},
+		{
+			"Tick": 279,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.27301815
+		},
+		{
+			"Tick": 280,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.27301833
+		},
+		{
+			"Tick": 281,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.27301815
+		},
+		{
+			"Tick": 282,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.27301833
+		},
+		{
+			"Tick": 283,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.27301815
+		},
+		{
+			"Tick": 284,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.27301815
+		},
+		{
+			"Tick": 285,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.27301833
+		},
+		{
+			"Tick": 286,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.27301815
+		},
+		{
+			"Tick": 287,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.27301833
+		},
+		{
+			"Tick": 288,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.27301815
+		},
+		{
+			"Tick": 289,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.1524432
+		},
+		{
+			"Tick": 290,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.0740696
+		},
+		{
+			"Tick": 291,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.023126578
+		},
+		{
+			"Tick": 292,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.009986186
+		},
+		{
+			"Tick": 293,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.03150966
+		},
+		{
+			"Tick": 294,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.045499884
+		},
+		{
+			"Tick": 295,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.054593466
+		},
+		{
+			"Tick": 296,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.06050434
+		},
+		{
+			"Tick": 297,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.064346336
+		},
+		{
+			"Tick": 298,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.06684365
+		},
+		{
+			"Tick": 299,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.068466924
+		},
+		{
+			"Tick": 300,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.069522105
+		},
+		{
+			"Tick": 301,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.070208035
+		},
+		{
+			"Tick": 302,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07065382
+		},
+		{
+			"Tick": 303,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.0709435
+		},
+		{
+			"Tick": 304,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07113179
+		},
+		{
+			"Tick": 305,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.071254276
+		},
+		{
+			"Tick": 306,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07133385
+		},
+		{
+			"Tick": 307,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.071385525
+		},
+		{
+			"Tick": 308,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07141914
+		},
+		{
+			"Tick": 309,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07144114
+		},
+		{
+			"Tick": 310,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07145526
+		},
+		{
+			"Tick": 311,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07146456
+		},
+		{
+			"Tick": 312,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07147046
+		},
+		{
+			"Tick": 313,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.071474396
+		},
+		{
+			"Tick": 314,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.0714769
+		},
+		{
+			"Tick": 315,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07147851
+		},
+		{
+			"Tick": 316,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07147958
+		},
+		{
+			"Tick": 317,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.0714803
+		},
+		{
+			"Tick": 318,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148083
+		},
+		{
+			"Tick": 319,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148119
+		},
+		{
+			"Tick": 320,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148137
+		},
+		{
+			"Tick": 321,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148137
+		},
+		{
+			"Tick": 322,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148155
+		},
+		{
+			"Tick": 323,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148155
+		},
+		{
+			"Tick": 324,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148155
+		},
+		{
+			"Tick": 325,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148155
+		},
+		{
+			"Tick": 326,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148155
+		},
+		{
+			"Tick": 327,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148155
+		},
+		{
+			"Tick": 328,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148173
+		},
+		{
+			"Tick": 329,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148155
+		},
+		{
+			"Tick": 330,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148173
+		},
+		{
+			"Tick": 331,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148155
+		},
+		{
+			"Tick": 332,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148173
+		},
+		{
+			"Tick": 333,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148155
+		},
+		{
+			"Tick": 334,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148173
+		},
+		{
+			"Tick": 335,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148155
+		},
+		{
+			"Tick": 336,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148173
+		},
+		{
+			"Tick": 337,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148155
+		},
+		{
+			"Tick": 338,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148173
+		},
+		{
+			"Tick": 339,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148155
+		},
+		{
+			"Tick": 340,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148173
+		},
+		{
+			"Tick": 341,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148155
+		},
+		{
+			"Tick": 342,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148173
+		},
+		{
+			"Tick": 343,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148155
+		},
+		{
+			"Tick": 344,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148173
+		},
+		{
+			"Tick": 345,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148155
+		},
+		{
+			"Tick": 346,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148173
+		},
+		{
+			"Tick": 347,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148155
+		},
+		{
+			"Tick": 348,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148173
+		},
+		{
+			"Tick": 349,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148155
+		},
+		{
+			"Tick": 350,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148173
+		},
+		{
+			"Tick": 351,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148173
+		},
+		{
+			"Tick": 352,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148173
+		},
+		{
+			"Tick": 353,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148173
+		},
+		{
+			"Tick": 354,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148137
+		},
+		{
+			"Tick": 355,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148173
+		},
+		{
+			"Tick": 356,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148173
+		},
+		{
+			"Tick": 357,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148173
+		},
+		{
+			"Tick": 358,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148137
+		},
+		{
+			"Tick": 359,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148173
+		},
+		{
+			"Tick": 360,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148173
+		},
+		{
+			"Tick": 361,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148173
+		},
+		{
+			"Tick": 362,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148137
+		},
+		{
+			"Tick": 363,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148173
+		},
+		{
+			"Tick": 364,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148173
+		},
+		{
+			"Tick": 365,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148173
+		},
+		{
+			"Tick": 366,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148137
+		},
+		{
+			"Tick": 367,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148173
+		},
+		{
+			"Tick": 368,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148173
+		},
+		{
+			"Tick": 369,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148173
+		},
+		{
+			"Tick": 370,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148137
+		},
+		{
+			"Tick": 371,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148173
+		},
+		{
+			"Tick": 372,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148173
+		},
+		{
+			"Tick": 373,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148137
+		},
+		{
+			"Tick": 374,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148173
+		},
+		{
+			"Tick": 375,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148173
+		},
+		{
+			"Tick": 376,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148173
+		},
+		{
+			"Tick": 377,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148137
+		},
+		{
+			"Tick": 378,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148173
+		},
+		{
+			"Tick": 379,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148173
+		},
+		{
+			"Tick": 380,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148173
+		},
+		{
+			"Tick": 381,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148137
+		},
+		{
+			"Tick": 382,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148173
+		},
+		{
+			"Tick": 383,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148173
+		},
+		{
+			"Tick": 384,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148173
+		},
+		{
+			"Tick": 385,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148137
+		},
+		{
+			"Tick": 386,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148173
+		},
+		{
+			"Tick": 387,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148173
+		},
+		{
+			"Tick": 388,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148173
+		},
+		{
+			"Tick": 389,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148137
+		},
+		{
+			"Tick": 390,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148173
+		},
+		{
+			"Tick": 391,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148173
+		},
+		{
+			"Tick": 392,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148173
+		},
+		{
+			"Tick": 393,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148137
+		},
+		{
+			"Tick": 394,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148173
+		},
+		{
+			"Tick": 395,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148173
+		},
+		{
+			"Tick": 396,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148173
+		},
+		{
+			"Tick": 397,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148137
+		},
+		{
+			"Tick": 398,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148173
+		},
+		{
+			"Tick": 399,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148173
+		},
+		{
+			"Tick": 400,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148173
+		},
+		{
+			"Tick": 401,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148137
+		},
+		{
+			"Tick": 402,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148173
+		},
+		{
+			"Tick": 403,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148173
+		},
+		{
+			"Tick": 404,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148173
+		},
+		{
+			"Tick": 405,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148137
+		},
+		{
+			"Tick": 406,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148173
+		},
+		{
+			"Tick": 407,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148173
+		},
+		{
+			"Tick": 408,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148173
+		},
+		{
+			"Tick": 409,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148137
+		},
+		{
+			"Tick": 410,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148173
+		},
+		{
+			"Tick": 411,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148173
+		},
+		{
+			"Tick": 412,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148173
+		},
+		{
+			"Tick": 413,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148137
+		},
+		{
+			"Tick": 414,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07148173
+		},
+		{
+			"Tick": 415,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.12050929
+		},
+		{
+			"Tick": 416,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.15237716
+		},
+		{
+			"Tick": 417,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.17309132
+		},
+		{
+			"Tick": 418,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.1865553
+		},
+		{
+			"Tick": 419,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.19530717
+		},
+		{
+			"Tick": 420,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.2009956
+		},
+		{
+			"Tick": 421,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.20469347
+		},
+		{
+			"Tick": 422,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.20709673
+		},
+		{
+			"Tick": 423,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.2086592
+		},
+		{
+			"Tick": 424,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.20967487
+		},
+		{
+			"Tick": 425,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.21033469
+		},
+		{
+			"Tick": 426,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.21076384
+		},
+		{
+			"Tick": 427,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.21104279
+		},
+		{
+			"Tick": 428,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.21122375
+		},
+		{
+			"Tick": 429,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.21134177
+		},
+		{
+			"Tick": 430,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.21141794
+		},
+		{
+			"Tick": 431,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.21146801
+		},
+		{
+			"Tick": 432,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.2115002
+		},
+		{
+			"Tick": 433,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.2115213
+		},
+		{
+			"Tick": 434,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.21153489
+		},
+		{
+			"Tick": 435,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.21154419
+		},
+		{
+			"Tick": 436,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.21154991
+		},
+		{
+			"Tick": 437,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.21155348
+		},
+		{
+			"Tick": 438,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.21155563
+		},
+		{
+			"Tick": 439,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.21155706
+		},
+		{
+			"Tick": 440,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.21155849
+		},
+		{
+			"Tick": 441,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.2115592
+		},
+		{
+			"Tick": 442,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.21155992
+		},
+		{
+			"Tick": 443,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.21155992
+		},
+		{
+			"Tick": 444,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.21155992
+		},
+		{
+			"Tick": 445,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.21155992
+		},
+		{
+			"Tick": 446,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.21156064
+		},
+		{
+			"Tick": 447,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.21155992
+		},
+		{
+			"Tick": 448,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.21156064
+		},
+		{
+			"Tick": 449,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.21155992
+		},
+		{
+			"Tick": 450,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.21156064
+		},
+		{
+			"Tick": 451,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.21156064
+		},
+		{
+			"Tick": 452,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.21155992
+		},
+		{
+			"Tick": 453,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.21156064
+		},
+		{
+			"Tick": 454,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.21156064
+		},
+		{
+			"Tick": 455,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.21155992
+		},
+		{
+			"Tick": 456,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.21156064
+		},
+		{
+			"Tick": 457,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.21156064
+		},
+		{
+			"Tick": 458,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.21155992
+		},
+		{
+			"Tick": 459,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.21156064
+		},
+		{
+			"Tick": 460,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.21156064
+		},
+		{
+			"Tick": 461,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.21155992
+		},
+		{
+			"Tick": 462,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.21156064
+		},
+		{
+			"Tick": 463,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.21156064
+		},
+		{
+			"Tick": 464,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.21155992
+		},
+		{
+			"Tick": 465,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.21156064
+		},
+		{
+			"Tick": 466,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.21155992
+		},
+		{
+			"Tick": 467,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.21156064
+		},
+		{
+			"Tick": 468,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.21156064
+		},
+		{
+			"Tick": 469,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.21155992
+		},
+		{
+			"Tick": 470,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.21156064
+		},
+		{
+			"Tick": 471,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.21156064
+		},
+		{
+			"Tick": 472,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.21155992
+		},
+		{
+			"Tick": 473,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.21156064
+		},
+		{
+			"Tick": 474,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.21156064
+		},
+		{
+			"Tick": 475,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.21155992
+		},
+		{
+			"Tick": 476,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.21156064
+		},
+		{
+			"Tick": 477,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.21156064
+		},
+		{
+			"Tick": 478,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.21155992
+		},
+		{
+			"Tick": 479,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.21156064
+		},
+		{
+			"Tick": 480,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.21156064
+		},
+		{
+			"Tick": 481,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.21155992
+		},
+		{
+			"Tick": 482,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.21156064
+		},
+		{
+			"Tick": 483,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.21156064
+		},
+		{
+			"Tick": 484,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.21155992
+		},
+		{
+			"Tick": 485,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.21156064
+		},
+		{
+			"Tick": 486,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.21155992
+		},
+		{
+			"Tick": 487,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.21156064
+		},
+		{
+			"Tick": 488,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.21156064
+		},
+		{
+			"Tick": 489,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.21155992
+		},
+		{
+			"Tick": 490,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.21156064
+		},
+		{
+			"Tick": 491,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.21156064
+		},
+		{
+			"Tick": 492,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.21155992
+		},
+		{
+			"Tick": 493,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.21156064
+		},
+		{
+			"Tick": 494,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.21156064
+		},
+		{
+			"Tick": 495,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.21155992
+		},
+		{
+			"Tick": 496,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.21156064
+		},
+		{
+			"Tick": 497,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.21156064
+		},
+		{
+			"Tick": 498,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.21155992
+		},
+		{
+			"Tick": 499,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.21156064
+		},
+		{
+			"Tick": 500,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.21156064
+		},
+		{
+			"Tick": 501,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.21155992
+		},
+		{
+			"Tick": 502,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.25139037
+		},
+		{
+			"Tick": 503,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.3254365
+		},
+		{
+			"Tick": 504,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.39948264
+		},
+		{
+			"Tick": 505,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.47352877
+		},
+		{
+			"Tick": 506,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.5475749
+		},
+		{
+			"Tick": 507,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.621621
+		},
+		{
+			"Tick": 508,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.69566715
+		},
+		{
+			"Tick": 509,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.7697133
+		},
+		{
+			"Tick": 510,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.8437594
+		},
+		{
+			"Tick": 511,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.7697133
+		},
+		{
+			"Tick": 512,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.69566715
+		},
+		{
+			"Tick": 513,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.621621
+		},
+		{
+			"Tick": 514,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.5475749
+		},
+		{
+			"Tick": 515,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.47352877
+		},
+		{
+			"Tick": 516,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.39948264
+		},
+		{
+			"Tick": 517,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.3254365
+		},
+		{
+			"Tick": 518,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.25139037
+		},
+		{
+			"Tick": 519,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.17734423
+		},
+		{
+			"Tick": 520,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.10329809
+		},
+		{
+			"Tick": 521,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.029251957
+		},
+		{
+			"Tick": 522,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.04479418
+		},
+		{
+			"Tick": 523,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.103162624
+		},
+		{
+			"Tick": 524,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.14110121
+		},
+		{
+			"Tick": 525,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.16576251
+		},
+		{
+			"Tick": 526,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.1817914
+		},
+		{
+			"Tick": 527,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.19221053
+		},
+		{
+			"Tick": 528,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.19898328
+		},
+		{
+			"Tick": 529,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.20338497
+		},
+		{
+			"Tick": 530,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.2062467
+		},
+		{
+			"Tick": 531,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.20810637
+		},
+		{
+			"Tick": 532,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.20931515
+		},
+		{
+			"Tick": 533,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.21010122
+		},
+		{
+			"Tick": 534,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.21061191
+		},
+		{
+			"Tick": 535,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.21094379
+		},
+		{
+			"Tick": 536,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.2111598
+		},
+		{
+			"Tick": 537,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.21129999
+		},
+		{
+			"Tick": 540,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -1
+		},
+		{
+			"Tick": 541,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -1
+		},
+		{
+			"Tick": 542,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -1
+		},
+		{
+			"Tick": 543,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -1
+		},
+		{
+			"Tick": 544,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -1
+		},
+		{
+			"Tick": 545,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -1
+		},
+		{
+			"Tick": 546,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -1
+		},
+		{
+			"Tick": 547,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -1
+		},
+		{
+			"Tick": 548,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -1
+		},
+		{
+			"Tick": 549,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -1
+		},
+		{
+			"Tick": 550,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -1
+		},
+		{
+			"Tick": 551,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -1
+		},
+		{
+			"Tick": 552,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -1
+		},
+		{
+			"Tick": 553,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -1
+		},
+		{
+			"Tick": 554,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -1
+		},
+		{
+			"Tick": 555,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -1
+		},
+		{
+			"Tick": 556,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -1
+		},
+		{
+			"Tick": 557,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -1
+		},
+		{
+			"Tick": 558,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -1
+		},
+		{
+			"Tick": 559,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -1
+		},
+		{
+			"Tick": 560,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.63342655
+		},
+		{
+			"Tick": 561,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.37399757
+		},
+		{
+			"Tick": 562,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.2053687
+		},
+		{
+			"Tick": 563,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.09575987
+		},
+		{
+			"Tick": 564,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.024514139
+		},
+		{
+			"Tick": 565,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.021795452
+		},
+		{
+			"Tick": 566,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.05189681
+		},
+		{
+			"Tick": 567,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.07146263
+		},
+		{
+			"Tick": 568,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.084180415
+		},
+		{
+			"Tick": 569,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.09244716
+		},
+		{
+			"Tick": 570,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.09782034
+		},
+		{
+			"Tick": 571,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.101312935
+		},
+		{
+			"Tick": 572,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.10358316
+		},
+		{
+			"Tick": 573,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.10505873
+		},
+		{
+			"Tick": 574,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.10601807
+		},
+		{
+			"Tick": 575,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.10664141
+		},
+		{
+			"Tick": 576,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.107046604
+		},
+		{
+			"Tick": 577,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.10731
+		},
+		{
+			"Tick": 578,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.1074813
+		},
+		{
+			"Tick": 579,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.10759252
+		},
+		{
+			"Tick": 580,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.10766494
+		},
+		{
+			"Tick": 581,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.10771197
+		},
+		{
+			"Tick": 582,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.10774255
+		},
+		{
+			"Tick": 583,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.1077624
+		},
+		{
+			"Tick": 584,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.10777527
+		},
+		{
+			"Tick": 585,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.107783675
+		},
+		{
+			"Tick": 586,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.10778904
+		},
+		{
+			"Tick": 587,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.107792616
+		},
+		{
+			"Tick": 588,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.10779512
+		},
+		{
+			"Tick": 589,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.10779655
+		},
+		{
+			"Tick": 590,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.107797265
+		},
+		{
+			"Tick": 591,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.10779798
+		},
+		{
+			"Tick": 592,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.107798696
+		},
+		{
+			"Tick": 593,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.032339215
+		},
+		{
+			"Tick": 594,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.01670909
+		},
+		{
+			"Tick": 595,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.0485909
+		},
+		{
+			"Tick": 596,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.12754619
+		},
+		{
+			"Tick": 597,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.07622516
+		},
+		{
+			"Tick": 598,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.20867622
+		},
+		{
+			"Tick": 599,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.29476976
+		},
+		{
+			"Tick": 600,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.34818435
+		},
+		{
+			"Tick": 601,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.3829034
+		},
+		{
+			"Tick": 602,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.40547097
+		},
+		{
+			"Tick": 603,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.42013997
+		},
+		{
+			"Tick": 604,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.42967486
+		},
+		{
+			"Tick": 605,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.43587238
+		},
+		{
+			"Tick": 606,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.43990088
+		},
+		{
+			"Tick": 607,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.44251925
+		},
+		{
+			"Tick": 608,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.44422138
+		},
+		{
+			"Tick": 609,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.4453277
+		},
+		{
+			"Tick": 610,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.4460467
+		},
+		{
+			"Tick": 611,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.44651422
+		},
+		{
+			"Tick": 612,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.44681802
+		},
+		{
+			"Tick": 613,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.44701543
+		},
+		{
+			"Tick": 614,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.44714382
+		},
+		{
+			"Tick": 615,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.44722733
+		},
+		{
+			"Tick": 616,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.4472815
+		},
+		{
+			"Tick": 617,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.44731677
+		},
+		{
+			"Tick": 618,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.4473397
+		},
+		{
+			"Tick": 619,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.4473546
+		},
+		{
+			"Tick": 620,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.44736427
+		},
+		{
+			"Tick": 621,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.44737056
+		},
+		{
+			"Tick": 622,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.44737464
+		},
+		{
+			"Tick": 623,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.44737732
+		},
+		{
+			"Tick": 624,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.447379
+		},
+		{
+			"Tick": 625,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.4473802
+		},
+		{
+			"Tick": 626,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.44738093
+		},
+		{
+			"Tick": 627,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.44738138
+		},
+		{
+			"Tick": 628,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.44738165
+		},
+		{
+			"Tick": 629,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.44738182
+		},
+		{
+			"Tick": 630,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.447382
+		},
+		{
+			"Tick": 631,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.4473821
+		},
+		{
+			"Tick": 632,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.4473821
+		},
+		{
+			"Tick": 633,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.44738227
+		},
+		{
+			"Tick": 634,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.44738227
+		},
+		{
+			"Tick": 635,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.44738227
+		},
+		{
+			"Tick": 636,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.4473821
+		},
+		{
+			"Tick": 637,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.44738227
+		},
+		{
+			"Tick": 638,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.44738227
+		},
+		{
+			"Tick": 639,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.44738227
+		},
+		{
+			"Tick": 640,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.4473821
+		},
+		{
+			"Tick": 641,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.4473821
+		},
+		{
+			"Tick": 642,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.44738245
+		},
+		{
+			"Tick": 643,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.4473821
+		},
+		{
+			"Tick": 644,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.44738245
+		},
+		{
+			"Tick": 645,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.4473821
+		},
+		{
+			"Tick": 646,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.44738245
+		},
+		{
+			"Tick": 647,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.4473821
+		},
+		{
+			"Tick": 648,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.4473821
+		},
+		{
+			"Tick": 649,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.44738245
+		},
+		{
+			"Tick": 650,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.4473821
+		},
+		{
+			"Tick": 651,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.44738245
+		},
+		{
+			"Tick": 652,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.4473821
+		},
+		{
+			"Tick": 653,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.44738245
+		},
+		{
+			"Tick": 654,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.4473821
+		},
+		{
+			"Tick": 655,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.4473821
+		},
+		{
+			"Tick": 656,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.44738245
+		},
+		{
+			"Tick": 657,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.4473819
+		},
+		{
+			"Tick": 658,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.4473821
+		},
+		{
+			"Tick": 659,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.4473819
+		},
+		{
+			"Tick": 660,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.44738173
+		},
+		{
+			"Tick": 661,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.44738156
+		},
+		{
+			"Tick": 662,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.4473821
+		},
+		{
+			"Tick": 663,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.4473819
+		},
+		{
+			"Tick": 664,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.44738173
+		},
+		{
+			"Tick": 665,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.44738156
+		},
+		{
+			"Tick": 666,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.4473821
+		},
+		{
+			"Tick": 667,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.4473819
+		},
+		{
+			"Tick": 668,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.44738173
+		},
+		{
+			"Tick": 669,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.44738156
+		},
+		{
+			"Tick": 670,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.44738138
+		},
+		{
+			"Tick": 671,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.4473819
+		},
+		{
+			"Tick": 672,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.44738173
+		},
+		{
+			"Tick": 673,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.4473816
+		},
+		{
+			"Tick": 674,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.44738215
+		},
+		{
+			"Tick": 675,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.44738197
+		},
+		{
+			"Tick": 676,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.44738182
+		},
+		{
+			"Tick": 677,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.44738168
+		},
+		{
+			"Tick": 678,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.4473815
+		},
+		{
+			"Tick": 679,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.4473821
+		},
+		{
+			"Tick": 680,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.4473819
+		},
+		{
+			"Tick": 681,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.44738173
+		},
+		{
+			"Tick": 682,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.44738156
+		},
+		{
+			"Tick": 683,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.44738138
+		},
+		{
+			"Tick": 684,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.4473819
+		},
+		{
+			"Tick": 685,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.44738173
+		},
+		{
+			"Tick": 686,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.44738156
+		},
+		{
+			"Tick": 687,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.4473821
+		},
+		{
+			"Tick": 688,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.4473819
+		},
+		{
+			"Tick": 689,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.44738173
+		},
+		{
+			"Tick": 690,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.44738156
+		},
+		{
+			"Tick": 691,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.52927744
+		},
+		{
+			"Tick": 692,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.68586105
+		},
+		{
+			"Tick": 693,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.84244466
+		},
+		{
+			"Tick": 694,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.99902827
+		},
+		{
+			"Tick": 695,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0
+		},
+		{
+			"Tick": 725,
+			"Type": "Action",
+			"Name": "Launch",
+			"State": "Down"
+		},
+		{
+			"Tick": 726,
+			"Type": "Action",
+			"Name": "Launch",
+			"State": "Up"
+		},
+		{
+			"Tick": 727,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.5193671
+		},
+		{
+			"Tick": 728,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.43873414
+		},
+		{
+			"Tick": 729,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.35810122
+		},
+		{
+			"Tick": 730,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.2774683
+		},
+		{
+			"Tick": 731,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.19683537
+		},
+		{
+			"Tick": 732,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.11620245
+		},
+		{
+			"Tick": 733,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.035569526
+		},
+		{
+			"Tick": 734,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.0450634
+		},
+		{
+			"Tick": 735,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.10992422
+		},
+		{
+			"Tick": 736,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.15208355
+		},
+		{
+			"Tick": 737,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.17948714
+		},
+		{
+			"Tick": 738,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.19729987
+		},
+		{
+			"Tick": 739,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.20887771
+		},
+		{
+			"Tick": 740,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.21640363
+		},
+		{
+			"Tick": 741,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.22129527
+		},
+		{
+			"Tick": 742,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.22447458
+		},
+		{
+			"Tick": 743,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.22654167
+		},
+		{
+			"Tick": 744,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.22788492
+		},
+		{
+			"Tick": 745,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.22875825
+		},
+		{
+			"Tick": 746,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.22932544
+		},
+		{
+			"Tick": 747,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.22969452
+		},
+		{
+			"Tick": 748,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.22993413
+		},
+		{
+			"Tick": 749,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23009005
+		},
+		{
+			"Tick": 750,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23019162
+		},
+		{
+			"Tick": 751,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23025742
+		},
+		{
+			"Tick": 752,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23030034
+		},
+		{
+			"Tick": 753,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23032823
+		},
+		{
+			"Tick": 754,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23034611
+		},
+		{
+			"Tick": 755,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23035827
+		},
+		{
+			"Tick": 756,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23036543
+		},
+		{
+			"Tick": 757,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037043
+		},
+		{
+			"Tick": 758,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037401
+		},
+		{
+			"Tick": 759,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037615
+		},
+		{
+			"Tick": 760,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037758
+		},
+		{
+			"Tick": 761,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.2303783
+		},
+		{
+			"Tick": 762,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.2303783
+		},
+		{
+			"Tick": 763,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037902
+		},
+		{
+			"Tick": 764,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037902
+		},
+		{
+			"Tick": 765,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 766,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 767,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 768,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 769,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 770,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 771,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 772,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 773,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 774,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 775,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 776,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 777,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 778,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 779,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 780,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 781,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 782,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 783,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 784,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 785,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 786,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 787,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 788,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 789,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 790,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 791,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23038045
+		},
+		{
+			"Tick": 792,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 793,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 794,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 795,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 796,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 797,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 798,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23038009
+		},
+		{
+			"Tick": 799,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 800,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 801,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 802,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23038009
+		},
+		{
+			"Tick": 803,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 804,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 805,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 806,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 807,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 808,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23038009
+		},
+		{
+			"Tick": 809,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 810,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 811,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 812,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 813,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 814,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 815,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23038009
+		},
+		{
+			"Tick": 816,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 817,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 818,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 819,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 820,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 821,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23038009
+		},
+		{
+			"Tick": 822,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 823,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 824,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 825,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037955
+		},
+		{
+			"Tick": 826,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037973
+		},
+		{
+			"Tick": 827,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037955
+		},
+		{
+			"Tick": 828,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037937
+		},
+		{
+			"Tick": 829,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.2303792
+		},
+		{
+			"Tick": 830,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037937
+		},
+		{
+			"Tick": 831,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.2303792
+		},
+		{
+			"Tick": 832,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037937
+		},
+		{
+			"Tick": 833,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.2303792
+		},
+		{
+			"Tick": 834,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037937
+		},
+		{
+			"Tick": 835,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037937
+		},
+		{
+			"Tick": 836,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.2303792
+		},
+		{
+			"Tick": 837,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.2303792
+		},
+		{
+			"Tick": 838,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037937
+		},
+		{
+			"Tick": 839,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.2303792
+		},
+		{
+			"Tick": 840,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037937
+		},
+		{
+			"Tick": 841,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.2303792
+		},
+		{
+			"Tick": 842,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037937
+		},
+		{
+			"Tick": 843,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.2303792
+		},
+		{
+			"Tick": 844,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037937
+		},
+		{
+			"Tick": 845,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.2303792
+		},
+		{
+			"Tick": 846,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037937
+		},
+		{
+			"Tick": 847,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.2303792
+		},
+		{
+			"Tick": 848,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.2303792
+		},
+		{
+			"Tick": 849,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037937
+		},
+		{
+			"Tick": 850,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.2303792
+		},
+		{
+			"Tick": 851,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.23037937
+		},
+		{
+			"Tick": 852,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0
+		}
+	],
+	"Expect": [],
+	"Checkpoints": [
+		{
+			"Tick": 60,
+			"StateHash": "25d94fd414071a30"
+		},
+		{
+			"Tick": 120,
+			"StateHash": "e132ab0666ac844c"
+		},
+		{
+			"Tick": 180,
+			"StateHash": "2cee7474cdbddb41"
+		},
+		{
+			"Tick": 240,
+			"StateHash": "d8940084fd84fa6c"
+		},
+		{
+			"Tick": 300,
+			"StateHash": "00b71417faf660df"
+		},
+		{
+			"Tick": 360,
+			"StateHash": "cde216f9bd3dfb55"
+		},
+		{
+			"Tick": 420,
+			"StateHash": "2fa30f036c225291"
+		},
+		{
+			"Tick": 480,
+			"StateHash": "b6cee4916c685c8c"
+		},
+		{
+			"Tick": 540,
+			"StateHash": "30b7a4ebe96333b5"
+		},
+		{
+			"Tick": 600,
+			"StateHash": "5e317dc5711c87cf"
+		},
+		{
+			"Tick": 660,
+			"StateHash": "4e5fee647e4b4fc5"
+		},
+		{
+			"Tick": 720,
+			"StateHash": "50cf22cc8d7fb47a"
+		},
+		{
+			"Tick": 780,
+			"StateHash": "5a7d7db615f7b0b0"
+		},
+		{
+			"Tick": 840,
+			"StateHash": "6717f4a74f3199e5"
+		}
+	],
+	"FinalTick": 872,
+	"FinalStateHash": "d4b7ace57c8d7e15"
+}

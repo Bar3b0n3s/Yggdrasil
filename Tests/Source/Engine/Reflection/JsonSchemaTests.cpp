@@ -149,6 +149,12 @@ namespace Engine {
 			CHECK_FALSE(JsonSchema::Validate(nullable, Json("3ff")).has_value());
 			CHECK_FALSE(JsonSchema::Validate(nullable, Json(5)).has_value());
 
+			// A replay's state hashes: 16 lowercase hex digits only (M16 review R20).
+			const Json hash = ParseSchemaJson(R"({ "type": "string", "pattern": "^[0-9a-f]{16}$" })");
+			CHECK(JsonSchema::Validate(hash, Json("00000000000003ff")).has_value());
+			CHECK_FALSE(JsonSchema::Validate(hash, Json("00000000000003FF")).has_value());
+			CHECK_FALSE(JsonSchema::Validate(hash, Json("3ff")).has_value());
+
 			const Json anything = Json::object();
 			CHECK(JsonSchema::Validate(anything, ParseSchemaJson(R"({ "a": [1, { "b": null }] })")).has_value());
 		}

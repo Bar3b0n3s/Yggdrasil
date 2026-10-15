@@ -382,7 +382,9 @@ namespace Engine {
 		// Tick do nothing and the session stays paused until the host ends it (play.state reports it).
 		[[nodiscard]] const std::optional<ScriptError>& GetFatalError() const;
 		// One recorder for this session's absolute input timeline, owned by the session. Null in Simulate. Session
-		// feeds it every ApplyInput result before scripts run, and MarkModified invalidates it. It survives Scene.Load.
+		// feeds it every ApplyInput result before scripts run, and the state-hash checkpoint of the boundary each fixed step
+		// starts from (ReplayRecorder::CaptureCheckpoint) when a frame phase ran since the previous step, so the boundary is
+		// a completed tick's; MarkModified invalidates it. It survives Scene.Load.
 		[[nodiscard]] ReplayRecorder* GetRecorder();
 		[[nodiscard]] const ReplayRecorder* GetRecorder() const;
 		// M12: the session's audio (see "Audio" above): null in Simulate mode and without PlaySessionSpecification::Audio.
@@ -406,6 +408,11 @@ namespace Engine {
 		// The state hash (§13.7, §5.1): XXH64 (seed 0) over the scene's minified canonical serialization
 		// (SceneSerializer::SaveToString, JsonStyle::Minified), followed by the tick, the Random state and the UUIDGenerator's
 		// draw count as little-endian 64-bit values; M11 appends the physics state (§5.1 "+ physics velocities at runtime").
+		// It covers the simulated world only: every entity with its id, name, parent, active flag, tags and serialized
+		// components (a Script component's authored Fields, never its Luau instance state), the tick, Random, the id draws and
+		// each body's position, rotation, velocities and sleep flag. Script tables (self.State, module locals), audio voices,
+		// input state and rendering are outside it, so two sessions with equal hashes have equal worlds but may hold different
+		// script state that has not reached the world yet (ReplayData.h, Architecture §5.1).
 		// Equal for equal sessions in every configuration (§1.3); play.state, play.step and input.replay report it as 16
 		// lowercase hex digits. Returns 0 only when the scene cannot be serialized (logged).
 		[[nodiscard]] uint64_t ComputeStateHash() const;

@@ -240,6 +240,11 @@ namespace Engine {
 		return Utils::RejectMutation(path);
 	}
 
+	Status PakMount::WriteNewFile(const VfsPath& path, std::span<const std::byte> /*data*/)
+	{
+		return Utils::RejectMutation(path);
+	}
+
 	Result<FileInfo> PakMount::GetInfo(const VfsPath& path) const
 	{
 		const State& state = *m_State;
@@ -292,6 +297,11 @@ namespace Engine {
 	Status PakMount::Remove(const VfsPath& path)
 	{
 		return Utils::RejectMutation(path);
+	}
+
+	Status PakMount::RemoveEmptyDirectory(const VfsPath& directory)
+	{
+		return Utils::RejectMutation(directory);
 	}
 
 	Status PakMount::Move(const VfsPath& from, const VfsPath& /*to*/)

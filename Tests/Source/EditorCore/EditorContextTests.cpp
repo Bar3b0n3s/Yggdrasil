@@ -19,6 +19,7 @@
 #include "Engine/Scene/Scene.h"
 #include "Support/EditorTestFixture.h"
 #include "Support/ExpectLog.h"
+#include "Support/ScriptOverrideProject.h"
 #include "Support/TempDirectory.h"
 #include "Support/TestData.h"
 
@@ -969,8 +970,7 @@ namespace Engine {
 			}
 		}
 
-		TEST_CASE("EditorContext: a glTF's .meta rewritten with its sub-assets after asset.import returned is attributed to asset.import"
-			* doctest::skip(true))
+		TEST_CASE("EditorContext: a glTF's .meta rewritten with its sub-assets after asset.import returned is attributed to asset.import")
 		{
 			Test::EditorTestFixture fixture("DeferredImportProvenance");
 			fixture.CreateAndOpenProject();
@@ -1027,8 +1027,7 @@ namespace Engine {
 			}
 		}
 
-		TEST_CASE("EditorContext: a deferred asset scan writes nothing at open and runs under the attribution of OpenDeferredAssets"
-			* doctest::skip(true))
+		TEST_CASE("EditorContext: a deferred asset scan writes nothing at open and runs under the attribution of OpenDeferredAssets")
 		{
 			Test::TempDirectory directory("DeferredAssetScan");
 			REQUIRE(FileSystem::CreateDirectories(directory / "UserData").has_value());
@@ -1180,6 +1179,43 @@ namespace Engine {
 			const Status missing = editor.RemoveProjectFile(MakeEditorPath("project://Assets/Nothing.material"));
 			REQUIRE_FALSE(missing.has_value());
 			CHECK(missing.error().GetCode() == ErrorCode::NotFound);
+		}
+
+		TEST_CASE("EditorContext: a move carries a provenance entry only to a file whose bytes still match it")
+		{
+			Test::EditorTestFixture fixture("EditorMoveUnrecorded");
+			fixture.CreateAndOpenProject();
+			EditorContext& editor = fixture.GetEditor();
+			const std::filesystem::path root = editor.GetProject().GetRoot();
+			const std::string material = R"({"Format": "Material", "Version": 1})";
+			REQUIRE(editor.WriteProjectFile(MakeEditorPath("project://Assets/Old/Kept.material"), AsEditorBytes(material)).has_value());
+			REQUIRE(editor.WriteProjectFile(MakeEditorPath("project://Assets/Old/Edited.material"), AsEditorBytes(material)).has_value());
+			REQUIRE(editor.WriteProjectFile(MakeEditorPath("project://Assets/Single.material"), AsEditorBytes(material)).has_value());
+			// Changed and created outside the editor: Edited's and Single's entries no longer match, Hand has none.
+			const std::string edited = R"({"Format": "Material", "Version": 1, "Name": "Hand"})";
+			WriteStrictnessFile(root / "Assets/Old/Edited.material", edited);
+			WriteStrictnessFile(root / "Assets/Old/Hand.material", material);
+			WriteStrictnessFile(root / "Assets/Single.material", edited);
+
+			editor.SetWriteAttribution(WriteAttribution{ .Method = "asset.move", .RequestId = VariantValue(Json(5)), .Client = "test", .TranscriptLine = 11 });
+			REQUIRE(editor.MoveProjectFile(MakeEditorPath("project://Assets/Old"), MakeEditorPath("project://Assets/New")).has_value());
+			REQUIRE(editor.MoveProjectFile(MakeEditorPath("project://Assets/Single.material"), MakeEditorPath("project://Assets/Moved.material")).has_value());
+			editor.SetWriteAttribution(std::nullopt);
+
+			const ProvenanceRecorder* provenance = editor.GetProvenance();
+			REQUIRE(provenance != nullptr);
+			const ProvenanceEntry* kept = provenance->Find("Assets/New/Kept.material");
+			REQUIRE(kept != nullptr);
+			CHECK(kept->Method == "asset.move");
+			CHECK(kept->TranscriptLine == std::optional<uint64_t>(11));
+			CHECK(kept->Hash == XXH64(material));
+			// A move writes no content: the files the editor did not write keep no entry, so the audit reports them.
+			CHECK(provenance->Find("Assets/New/Edited.material") == nullptr);
+			CHECK(provenance->Find("Assets/New/Hand.material") == nullptr);
+			CHECK(provenance->Find("Assets/Moved.material") == nullptr);
+			for (const std::string_view source : { "Assets/Old/Kept.material", "Assets/Old/Edited.material", "Assets/Single.material" })
+				CHECK(provenance->Find(source) == nullptr);
+			CHECK(editor.GetVfs().Exists(MakeEditorPath("project://Assets/New/Hand.material")));
 		}
 
 		TEST_CASE("EditorContext: the write path refuses read-only projects and works without provenance in dry runs")
@@ -1444,6 +1480,115 @@ namespace Engine {
 				CHECK_FALSE(strict.GetEditor().HasProject());
 				CHECK_FALSE(strict.GetEditor().GetVfs().IsMounted("project"));
 			}
+		}
+
+		// The M16 dry run's S1-04: a scene whose prefab instance overrides a script field (Breakout's bricks, each row's Points)
+		// made every --strict editor refuse the project, because the override's value was resolved without its Script
+		// component. It is read as free-form JSON and checked on the member's own Script component, so a valid override
+		// opens and an invalid one is refused once, at the member's field, under the code project.validate reports.
+		TEST_CASE("EditorContext: --strict opens a project whose scene overrides a prefab instance's script field and names an invalid override")
+		{
+			const Test::TempDirectory directory("EditorStrictScriptOverride");
+			std::filesystem::path projectFile;
+			{
+				StrictnessEditor creator(directory / "Creator", false);
+				const Result<CreatedProject> created = ProjectManager::CreateProject(
+					{ .Directory = directory / "Game", .Name = "Game", .Template = ProjectTemplate::Empty, .TemplatesDirectory = creator.GetEditor().GetSpecification().TemplatesDirectory },
+					creator.GetEditor().GetTypeRegistry());
+				REQUIRE_MESSAGE(created.has_value(), created.error().ToString());
+				projectFile = created->ProjectFile;
+			}
+			const std::filesystem::path root = projectFile.parent_path();
+			Test::WriteScriptOverrideProject(root);
+			{
+				StrictnessEditor strict(directory / "Strict", true);
+				const Status opened = strict.Open(projectFile);
+				REQUIRE_MESSAGE(opened.has_value(), opened.error().ToString());
+				REQUIRE(strict.GetEditor().CloseProject().has_value());
+			}
+
+			// An override of a field the script does not declare.
+			Test::WriteScriptOverrideProject(root, "Pointz");
+			StrictnessEditor strict(directory / "StrictInvalid", true);
+			const Status refused = strict.Open(projectFile);
+			REQUIRE_FALSE(refused.has_value());
+			INFO(refused.error().ToString());
+			CHECK(refused.error().GetCode() == ErrorCode::Validation);
+			const std::string pointer = std::string(Test::ScriptOverrideFieldsPointer) + "Pointz";
+			const std::vector<ErrorIssue>& issues = refused.error().GetIssues();
+			REQUIRE(issues.size() == 2);
+			CHECK(issues[0].Message.starts_with("Assets/Scenes/Main.scene: "));
+			CHECK(issues[0].JsonPointer == pointer);
+			CHECK(issues[1].JsonPointer == pointer);
+			CHECK(issues[1].Message.contains("SCRIPT_UNKNOWN_FIELD_OVERRIDE"));
+			CHECK(issues[1].Message.contains(Test::ScriptOverrideInstanceID.ToString()));
+			for (const ErrorIssue& issue : issues)
+				CHECK_FALSE(issue.JsonPointer.contains("/Components/Prefab/"));
+			CHECK_FALSE(strict.GetEditor().HasProject());
+		}
+
+		// M16 review R24: the strict open named every unresolved Script.Fields value SCRIPT_UNKNOWN_FIELD_OVERRIDE with the hint
+		// to remove the override, also a value of the wrong type and every value of a script that failed to import, which
+		// project.validate reports as a type mismatch and as the script's own error. It now names a value only under the
+		// code validate reports for it.
+		TEST_CASE("EditorContext: --strict names a script field value only under the code project.validate reports for it")
+		{
+			const Test::TempDirectory directory("EditorStrictScriptFieldCodes");
+			std::filesystem::path projectFile;
+			{
+				StrictnessEditor creator(directory / "Creator", false);
+				const Result<CreatedProject> created = ProjectManager::CreateProject(
+					{ .Directory = directory / "Game", .Name = "Game", .Template = ProjectTemplate::Empty, .TemplatesDirectory = creator.GetEditor().GetSpecification().TemplatesDirectory },
+					creator.GetEditor().GetTypeRegistry());
+				REQUIRE_MESSAGE(created.has_value(), created.error().ToString());
+				projectFile = created->ProjectFile;
+			}
+			const std::filesystem::path root = projectFile.parent_path();
+			const auto mentions = [](const std::vector<ErrorIssue>& issues, std::string_view text)
+			{
+				return std::ranges::count_if(issues, [text](const ErrorIssue& issue)
+				{
+					return issue.Message.contains(text) || issue.Hint.contains(text);
+				});
+			};
+
+			// A valid override of a script that fails to import (it never imported): the scene and the prefab that run it do
+			// not load strictly, each issue is a file's own load error, and no value is named.
+			Test::WriteScriptOverrideProject(root);
+			Test::WriteScriptOverrideScript(root, Test::ScriptOverrideBrokenSource);
+			{
+				const Test::ExpectLog importFailure(LogLevel::Error, "ASSET_IMPORT_FAILED Assets/Scripts/Brick.luau");
+				StrictnessEditor strict(directory / "StrictBrokenScript", true);
+				const Status refused = strict.Open(projectFile);
+				REQUIRE_FALSE(refused.has_value());
+				INFO(refused.error().ToString());
+				const std::vector<ErrorIssue>& issues = refused.error().GetIssues();
+				REQUIRE_FALSE(issues.empty());
+				CHECK(std::ranges::count_if(issues, [](const ErrorIssue& issue)
+				{
+					return issue.Message.starts_with("Assets/Scenes/Main.scene: ");
+				}) == 1);
+				for (const ErrorIssue& issue : issues)
+					CHECK((issue.Message.starts_with("Assets/Scenes/Main.scene: ") || issue.Message.starts_with("Assets/Prefabs/Brick.prefab: ")));
+				CHECK(mentions(issues, "SCRIPT_UNKNOWN_FIELD_OVERRIDE") == 0);
+				CHECK(mentions(issues, "correct or remove the override") == 0);
+			}
+
+			// A value of the wrong type is a type mismatch, at the member's field.
+			Test::WriteScriptOverrideProject(root, "Points", "\"five\"");
+			StrictnessEditor strict(directory / "StrictMismatch", true);
+			const Status refused = strict.Open(projectFile);
+			REQUIRE_FALSE(refused.has_value());
+			INFO(refused.error().ToString());
+			const std::vector<ErrorIssue>& issues = refused.error().GetIssues();
+			CHECK(mentions(issues, "SCRIPT_FIELD_TYPE_MISMATCH") == 1);
+			CHECK(mentions(issues, "SCRIPT_UNKNOWN_FIELD_OVERRIDE") == 0);
+			const auto named = std::ranges::find_if(issues, [](const ErrorIssue& issue)
+			{
+				return issue.Message.contains("SCRIPT_FIELD_TYPE_MISMATCH");
+			});
+			REQUIRE(named != issues.end());
+			CHECK(named->JsonPointer == std::string(Test::ScriptOverrideFieldsPointer) + "Points");
 		}
 	}
 

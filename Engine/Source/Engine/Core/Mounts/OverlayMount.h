@@ -22,6 +22,9 @@ namespace Engine {
 	//   - Every mutation (write, create directory, remove, move) changes only the overlay. The lower mount is never
 	//     written, whatever its access mode, so a read-only lower mount (a pak) can be overlaid too.
 	//   - List merges both layers, applies removals and returns the IMount order.
+	//   - RemoveEmptyDirectory judges emptiness on the merged view, so an entry the lower mount does not list (a host name
+	//     no VfsPath can spell behind a NativeDirectoryMount) goes unseen: a dry run can accept a folder removal that the
+	//     real call refuses, while nothing is ever deleted.
 	//   - The case policy applies against the merged view: a write, directory creation or move destination whose name
 	//     differs only in case from an entry of either layer is Validation, and a case-only rename of an entry moves it
 	//     within the overlay.
@@ -36,10 +39,12 @@ namespace Engine {
 		[[nodiscard]] Result<Buffer> ReadFile(const VfsPath& path) const override;
 		[[nodiscard]] Result<Scope<IFileStream>> Open(const VfsPath& path) const override;
 		[[nodiscard]] Status WriteFileAtomic(const VfsPath& path, std::span<const std::byte> data) override;
+		[[nodiscard]] Status WriteNewFile(const VfsPath& path, std::span<const std::byte> data) override;
 		[[nodiscard]] Result<FileInfo> GetInfo(const VfsPath& path) const override;
 		[[nodiscard]] Result<std::vector<VfsEntry>> List(const VfsPath& directory, bool recursive) const override;
 		[[nodiscard]] Status CreateDirectories(const VfsPath& directory) override;
 		[[nodiscard]] Status Remove(const VfsPath& path) override;
+		[[nodiscard]] Status RemoveEmptyDirectory(const VfsPath& directory) override;
 		[[nodiscard]] Status Move(const VfsPath& from, const VfsPath& to) override;
 		[[nodiscard]] MountAccess GetAccess() const override { return MountAccess::ReadWrite; }
 

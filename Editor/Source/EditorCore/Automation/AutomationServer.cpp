@@ -23,8 +23,6 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
-#include <array>
-#include <charconv>
 #include <deque>
 #include <filesystem>
 #include <format>
@@ -40,20 +38,18 @@
 // the parent of the sessions directory (<UserData>/<AppName>/Automation, §13.2). A server without a sessions directory (an
 // in-process server of the Tests) names the user:// path instead, the only one it knows.
 //
-// Offloaded results are transient: an agent reads one right after its response. So that the directories do not grow
-// without bound, the first write to a directory removes the files of servers whose process no longer runs (crashed
-// editors; the process id is the first part of the server tag), and the destructor removes this server's own offloaded
-// results from every directory it wrote to. Output files (WriteOutputFile: screenshots) share the directories and the
-// naming, but the destructor keeps them, so a --batch run's screenshots outlive it; the first write of a later server
-// removes them like any other leftover.
+// Offloaded results are transient: an agent reads one right after its response. Output files (WriteOutputFile:
+// screenshots, test.run's JSON and JUnit reports) share the directories, and every file this server writes there takes the
+// next number of one sequence (ResultOffload.h), so an offloaded result never replaces a report. Files are created, never
+// replaced, so no ".bak" backup appears there. So that the directories do not grow without bound, the first write to a
+// directory removes every file of a server whose process no longer runs (crashed editors; the process id is the first part
+// of the server tag; ParseOffloadFileProcessId), and the destructor removes the offloaded results this server wrote, and
+// only those: its output files stay, so a --batch run's screenshots and a test run's reports outlive it, until the first
+// write of a later server removes them like any other leftover.
 
 namespace Engine {
 
 	namespace Utils {
-
-		constexpr std::string_view OffloadExtension = ".json";
-		// The extensions of the output files servers write (WriteOutputFile): the screenshots' PNGs.
-		constexpr std::array<std::string_view, 1> OutputExtensions = { ".png" };
 
 		[[nodiscard]] static Status RemoveUtilityAutomationSession(const std::filesystem::path& directory)
 		{
@@ -69,23 +65,6 @@ namespace Engine {
 			if (error)
 				return MakeError(ErrorCode::Io, "cannot remove automation session file '{}': {}", FileSystem::PathToUtf8(path), error.message());
 			return {};
-		}
-
-		// The process id at the start of an offload or output file name ("<processId>-<startSeconds>-<sequence>.json",
-		// MakeOffloadServerTag and MakeOffloadFileName, or ".png"), or nullopt for a name of another form.
-		[[nodiscard]] static std::optional<uint32_t> ParseOffloadProcessId(std::string_view fileName)
-		{
-			const bool known = fileName.ends_with(OffloadExtension) || std::ranges::any_of(OutputExtensions, [fileName](std::string_view extension)
-			{
-				return fileName.ends_with(extension);
-			});
-			if (!known)
-				return std::nullopt;
-			uint32_t processId = 0;
-			const std::from_chars_result parsed = std::from_chars(fileName.data(), fileName.data() + fileName.size(), processId);
-			if (parsed.ec != std::errc() || parsed.ptr == fileName.data() || *parsed.ptr != '-')
-				return std::nullopt;
-			return processId;
 		}
 
 		// Whether a request that is not flagged Mutates would still drop the open scene's unsaved changes and its undo
@@ -165,7 +144,10 @@ namespace Engine {
 		std::chrono::steady_clock::time_point NextSessionFileAttempt{};
 		// The offload directories this server wrote to, each pruned of the files of servers that are gone when first used.
 		std::vector<VfsPath> OffloadDirectories{};
-		uint64_t NextOutputSequence = 1; // WriteOutputFile's file names
+		// The one sequence of every file name this server writes to them, offloaded results and output files alike.
+		uint64_t NextFileSequence = 1;
+		// The offloaded results this server wrote, which the destructor removes.
+		std::vector<VfsPath> OffloadedFiles{};
 		// The dry run of the request being served: dry runs are never pending, so at most one is open, from AdmitRequest to
 		// FinishRequest of the request that opened it.
 		Scope<EditorDryRunScope> DryRun;
@@ -179,12 +161,16 @@ namespace Engine {
 		// the error is returned for the first failure only.
 		[[nodiscard]] Status WriteSessionFileIfChanged(const EditorContext& editor, const AutomationServerSpecification& specification,
 			std::chrono::steady_clock::time_point now);
-		// Removes this server's offloaded results from every directory it wrote to; its output files stay.
+		// Removes the offloaded results this server wrote; its output files stay.
 		void RemoveOwnOffloadFiles(VirtualFileSystem& vfs) const;
 		// The directory of offloaded results and output files for the editor's state (project://Library/Automation/Out/ for a
 		// writable project, user://Automation/Out/ otherwise), pruned of the files of servers that are gone when this server
 		// first uses it, and created.
 		[[nodiscard]] Result<VfsPath> PrepareOutputDirectory(EditorContext& editor);
+		// Creates the next file of this server's sequence with `extension` in PrepareOutputDirectory's directory and
+		// returns it; AlreadyExists when that name exists (it is never replaced). The number is used up even when the write
+		// fails, so a later write never meets the same name.
+		[[nodiscard]] Result<VfsPath> CreateOutputFile(EditorContext& editor, std::string_view extension, std::span<const std::byte> bytes);
 		// The absolute native path of `file`, a file in PrepareOutputDirectory's directory, which responses name (see the file
 		// comment).
 		[[nodiscard]] static std::string GetOutputPath(const EditorContext& editor, const AutomationServerSpecification& specification,
@@ -541,16 +527,10 @@ namespace Engine {
 		return state;
 	}
 
-	std::string AutomationServer::GetOffloadServerTag() const
+	Result<std::string> AutomationServer::WriteOffloadedResult(std::string_view text)
 	{
-		return m_State->ServerTag;
-	}
-
-	Result<std::string> AutomationServer::WriteOffloadedResult(std::string_view fileName, std::string_view text)
-	{
-		ENGINE_TRY_ASSIGN(const VfsPath directory, m_State->PrepareOutputDirectory(*m_Editor));
-		ENGINE_TRY_ASSIGN(const VfsPath file, directory.Join(fileName));
-		ENGINE_TRY(m_Editor->GetVfs().WriteFileAtomic(file, std::as_bytes(std::span(text.data(), text.size()))));
+		ENGINE_TRY_ASSIGN(const VfsPath file, m_State->CreateOutputFile(*m_Editor, OffloadExtension, std::as_bytes(std::span(text.data(), text.size()))));
+		m_State->OffloadedFiles.push_back(file);
 		return State::GetOutputPath(*m_Editor, m_Specification, file);
 	}
 
@@ -582,11 +562,7 @@ namespace Engine {
 			return (character >= 'a' && character <= 'z') || (character >= '0' && character <= '9');
 		}),
 			"output file extension '{}' must be lowercase letters and digits", extension);
-		ENGINE_TRY_ASSIGN(const VfsPath directory, m_State->PrepareOutputDirectory(*m_Editor));
-		const std::string fileName = std::format("{}-{:08}.{}", m_State->ServerTag, m_State->NextOutputSequence, extension);
-		ENGINE_TRY_ASSIGN(const VfsPath file, directory.Join(fileName));
-		ENGINE_TRY(m_Editor->GetVfs().WriteFileAtomic(file, bytes));
-		++m_State->NextOutputSequence;
+		ENGINE_TRY_ASSIGN(const VfsPath file, m_State->CreateOutputFile(*m_Editor, extension, bytes));
 		return State::GetOutputPath(*m_Editor, m_Specification, file);
 	}
 
@@ -613,14 +589,21 @@ namespace Engine {
 
 	void AutomationServer::State::RemoveOwnOffloadFiles(VirtualFileSystem& vfs) const
 	{
-		const std::string prefix = ServerTag + "-";
-		for (const VfsPath& directory : OffloadDirectories)
+		for (const VfsPath& file : OffloadedFiles)
 		{
-			Utils::RemoveOffloadFiles(vfs, directory, [&prefix](std::string_view name)
-			{
-				return name.starts_with(prefix) && name.ends_with(Utils::OffloadExtension);
-			});
+			const Status removed = vfs.Remove(file);
+			if (!removed && removed.error().GetCode() != ErrorCode::NotFound)
+				ENGINE_WARN("Could not remove the offloaded automation result '{}': {}", file.ToString(), removed.error().ToString());
 		}
+	}
+
+	Result<VfsPath> AutomationServer::State::CreateOutputFile(EditorContext& editor, std::string_view extension, std::span<const std::byte> bytes)
+	{
+		ENGINE_TRY_ASSIGN(const VfsPath directory, PrepareOutputDirectory(editor));
+		ENGINE_TRY_ASSIGN(const VfsPath file, directory.Join(MakeOffloadFileName(ServerTag, NextFileSequence++, extension)));
+		// Created exclusively: a name that exists, whoever created it and when, fails with AlreadyExists and stays as it is.
+		ENGINE_TRY(WithContext(editor.GetVfs().WriteNewFile(file, bytes), "while writing an automation output file, which is never replaced"));
+		return file;
 	}
 
 	Result<VfsPath> AutomationServer::State::PrepareOutputDirectory(EditorContext& editor)
@@ -633,7 +616,7 @@ namespace Engine {
 			// First use: the leftovers of servers that are gone (see the file comment).
 			Utils::RemoveOffloadFiles(vfs, directory, [](std::string_view name)
 			{
-				const std::optional<uint32_t> processId = Utils::ParseOffloadProcessId(name);
+				const std::optional<uint32_t> processId = ParseOffloadFileProcessId(name);
 				return processId.has_value() && !Process::IsRunning(*processId);
 			});
 			OffloadDirectories.push_back(directory);

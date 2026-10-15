@@ -3,6 +3,7 @@
 #include "EditorCore/Project/ProjectManager.h"
 
 #include "Engine/Core/FileSystem.h"
+#include "Engine/Core/Hash.h"
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Core/Json/JsonWriter.h"
 #include "Engine/Platform/Process.h"
@@ -63,9 +64,11 @@ namespace Engine {
 				INFO(std::string(file));
 				CHECK(FileSystem::Exists(root / file));
 			}
+			// The cache, the exports project.export writes to <Project>/Build/ and the .bak copies project:// keeps beside every
+			// replaced file are never committed (ADR 0026 decision 13, G4): exactly these bytes.
 			const Result<std::string> gitignore = FileSystem::ReadText(root / ".gitignore");
 			REQUIRE(gitignore.has_value());
-			CHECK(gitignore->contains("Library/"));
+			CHECK(*gitignore == "Library/\nBuild/\n*.bak\n");
 			const Result<std::string> agents = FileSystem::ReadText(root / "AGENTS.md");
 			REQUIRE(agents.has_value());
 			CHECK(agents->contains("Tetris"));
@@ -82,8 +85,14 @@ namespace Engine {
 			REQUIRE(canonical.has_value());
 			CHECK(*canonical == *eproj);
 
-			REQUIRE(created->RecordedFiles.size() == 1);
+			// The .eproj and the root .luaurc the type checker reads (ADR 0026 decision 13, G5), each with the hash of its bytes.
+			REQUIRE(created->RecordedFiles.size() == 2);
 			CHECK(created->RecordedFiles[0].Path == "Tetris.eproj");
+			CHECK(created->RecordedFiles[0].Hash == XXH64(*eproj));
+			CHECK(created->RecordedFiles[1].Path == ".luaurc");
+			const Result<Buffer> luaurc = FileSystem::ReadFile(root / ".luaurc");
+			REQUIRE(luaurc.has_value());
+			CHECK(created->RecordedFiles[1].Hash == XXH64(*luaurc));
 		}
 
 		TEST_CASE("ProjectManager: creating into a non-empty directory is AlreadyExists and an invalid name Validation")

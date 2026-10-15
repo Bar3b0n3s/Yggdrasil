@@ -5,12 +5,14 @@ Tests/Automation/fake_editor.py and stand-in processes."""
 from __future__ import annotations
 
 import base64
+import contextlib
 import json
 import os
 import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -91,6 +93,7 @@ class FormatTests(BridgeTestCase):
                      "summary": {"scene": {"type": "object"}}, "_meta": meta}
         _, text = server.format_result({"jsonrpc": "2.0", "id": 3, "result": offloaded})
         self.assertIn("Out/1-2-00000001.json", text.splitlines()[0])
+        self.assertIn("result_read", text.splitlines()[0])
 
         _, text = server.format_result({"jsonrpc": "2.0", "id": 4, "result": {"text": "x" * 100000, "_meta": meta}})
         self.assertLessEqual(len(text.encode("utf-8")), server.MAX_TEXT_BYTES)
@@ -252,6 +255,137 @@ class ConnectionTests(BridgeTestCase):
                          ["request", "response", "project.open", "response"])
         self.assertEqual(lines[3]["requestLine"], 3)
 
+    def test_a_refused_project_call_that_wrote_a_project_keeps_its_transcript_lines(self) -> None:
+        # The milestone review's R05: project.create records the files it created before its open, so a create whose
+        # open then failed left entries naming line 1, and the bridge dropped that line; the next request took its
+        # number.
+        def create(params: dict[str, Any]) -> dict[str, Any]:
+            root = Path(params["path"])
+            root.mkdir(exist_ok=True)
+            (root / f"{params['name']}.eproj").write_text('{"Format": "Project", "Version": 1}\n', encoding="utf-8")
+            raise fake_editor.FakeError(engine_client.INTERNAL, "IoError", "a .meta write failed after the create")
+
+        def open_project(params: dict[str, Any]) -> dict[str, Any]:
+            project = Path(params["path"])
+            return {"project": {"name": project.name, "root": project.as_posix()}}
+
+        editor = self.start_server({"project.create": create, "project.open": open_project})
+        connection = EditorConnection(None, supervised=False, client=self.connect(editor))
+        game = self.directory / "Game"
+        refused = connection.call("project.create", {"path": str(game), "name": "Game"})
+        self.assertIn("error", refused)
+        self.assertIsNone(connection.transcript)
+        self.assertIsNone(connection.project_root)
+        path = game / transcript.TRANSCRIPT_RELATIVE_PATH
+        lines = self.read_lines(path)
+        self.assertEqual([(line["type"], line.get("method")) for line in lines],
+                         [("request", "project.create"), ("response", None)])
+        self.assertEqual((lines[1]["requestLine"], lines[1]["ok"], lines[1]["error"]["errorCode"]),
+                         (1, False, "IoError"))
+        self.assertEqual(editor.requests[0].params["_meta"], {"transcriptLine": 1})
+        # The next project call continues the transcript instead of taking line 1 again.
+        self.assertIn("result", connection.call("project.open", {"path": str(game)}))
+        self.assertEqual(editor.requests[1].params["_meta"], {"transcriptLine": 3})
+        self.assertEqual([line.get("method", line["type"]) for line in self.read_lines(path)],
+                         ["project.create", "response", "project.open", "response"])
+
+    def test_a_timed_out_project_call_writes_its_lines_once_the_project_exists(self) -> None:
+        # The milestone review's R31: a project.open or project.create the bridge stopped waiting for left the
+        # transcript pending for good, so every later line stayed in memory while the editor recorded provenance at it.
+        release = threading.Event()
+        created = threading.Event()
+
+        def open_project(params: dict[str, Any]) -> dict[str, Any]:
+            release.wait(60.0)
+            project = Path(params["path"])
+            return {"project": {"name": project.name, "root": project.as_posix()}}
+
+        def create(params: dict[str, Any]) -> dict[str, Any]:
+            # The project file appears only after the bridge stopped waiting.
+            release.wait(60.0)
+            root = Path(params["path"])
+            root.mkdir(exist_ok=True)
+            (root / f"{params['name']}.eproj").write_text('{"Format": "Project", "Version": 1}\n', encoding="utf-8")
+            created.set()
+            return {"project": {"name": params["name"], "root": root.as_posix()}, "createdFiles": []}
+
+        editor = self.start_server({"project.open": open_project, "project.create": create,
+                                    "scene.new": lambda params: {}})
+        # An existing project's open: its project file is there, so the lines are written when the call times out.
+        root = self.make_project()
+        connection = EditorConnection(None, supervised=False, client=self.connect(editor))
+        with self.assertRaises(TimeoutError):
+            connection.call("project.open", {"path": str(root)}, timeout=0.2)
+        path = root / transcript.TRANSCRIPT_RELATIVE_PATH
+        self.assertEqual([(line["type"], line.get("method")) for line in self.read_lines(path)],
+                         [("request", "project.open"), ("response", None)])
+        self.assertEqual(self.read_lines(path)[1]["error"]["errorCode"], "Timeout")
+        release.set()
+        self.assertIn("result", connection.call("scene.new", {"path": "Assets/Scenes/Main.scene"}))
+        self.assertEqual(editor.requests[1].params["_meta"], {"transcriptLine": 3})
+        self.assertEqual([line.get("method", line["type"]) for line in self.read_lines(path)],
+                         ["project.open", "response", "scene.new", "response"])
+
+        # A create whose project file appears after the timeout: the lines are written at the next call.
+        release.clear()
+        game = self.directory / "New"
+        creating = EditorConnection(None, supervised=False, client=self.connect(editor))
+        with self.assertRaises(TimeoutError):
+            creating.call("project.create", {"path": str(game), "name": "New"}, timeout=0.2)
+        self.assertTrue(creating.transcript is not None and creating.transcript.is_pending)
+        self.assertFalse((game / transcript.TRANSCRIPT_RELATIVE_PATH).exists())
+        release.set()
+        self.assertTrue(created.wait(60.0))
+        self.assertIn("result", creating.call("scene.new", {"path": "Assets/Scenes/Main.scene"}))
+        lines = self.read_lines(game / transcript.TRANSCRIPT_RELATIVE_PATH)
+        self.assertEqual([line.get("method", line["type"]) for line in lines],
+                         ["project.create", "response", "scene.new", "response"])
+        self.assertEqual(editor.requests[-1].params["_meta"], {"transcriptLine": 3})
+
+        # A create that timed out and never made its project: the next project call, for another directory, starts
+        # that directory's transcript afresh, and nothing is written to the first one.
+        release.clear()
+        abandoned = self.directory / "Abandoned"
+        retrying = EditorConnection(None, supervised=False, client=self.connect(editor))
+        with self.assertRaises(TimeoutError):
+            retrying.call("project.open", {"path": str(abandoned)}, timeout=0.2)
+        release.set()
+        other = self.make_project("Other")
+        self.assertIn("result", retrying.call("project.open", {"path": str(other)}))
+        self.assertEqual(editor.requests[-1].params["_meta"], {"transcriptLine": 1})
+        self.assertFalse(abandoned.exists())
+        self.assertEqual([line.get("method", line["type"])
+                          for line in self.read_lines(other / transcript.TRANSCRIPT_RELATIVE_PATH)],
+                         ["project.open", "response"])
+
+    def test_a_timed_out_project_create_writes_its_lines_when_the_connection_closes(self) -> None:
+        # The fix check's follow-up to R31: lines still pending when the connection ends without another call (an
+        # attached editor's shutdown, a new launch or attach, the bridge's exit) were dropped although the editor had
+        # recorded provenance at them.
+        release = threading.Event()
+        created = threading.Event()
+
+        def create(params: dict[str, Any]) -> dict[str, Any]:
+            release.wait(60.0)
+            root = Path(params["path"])
+            root.mkdir(exist_ok=True)
+            (root / f"{params['name']}.eproj").write_text('{"Format": "Project", "Version": 1}\n', encoding="utf-8")
+            created.set()
+            return {"project": {"name": params["name"], "root": root.as_posix()}, "createdFiles": []}
+
+        editor = self.start_server({"project.create": create})
+        game = self.directory / "Closed"
+        connection = EditorConnection(None, supervised=False, client=self.connect(editor))
+        with self.assertRaises(TimeoutError):
+            connection.call("project.create", {"path": str(game), "name": "Closed"}, timeout=0.2)
+        self.assertTrue(connection.transcript is not None and connection.transcript.is_pending)
+        release.set()
+        self.assertTrue(created.wait(60.0))
+        self.assertEqual(connection.shutdown()["shutDown"], False)
+        lines = self.read_lines(game / transcript.TRANSCRIPT_RELATIVE_PATH)
+        self.assertEqual([(line["type"], line.get("method")) for line in lines],
+                         [("request", "project.create"), ("response", None)])
+
     def test_a_dead_supervised_editor_is_reported_as_crashed(self) -> None:
         user_data = self.directory / "UserData"
         crashes = user_data / "App" / "Crashes"
@@ -296,6 +430,243 @@ class ConnectionTests(BridgeTestCase):
         self.assertNotIn("recover", EditorCrashed(4, [], "", False).to_json()["hint"])
 
 
+class ProjectPathTests(BridgeTestCase):
+    """Docs/Decisions/0026-m16-contract.md, friction S1-16 and prediction P09: the committed transcript names a project
+    inside the repository by its repository-relative path, and a relative project path means one below the repository
+    root, whatever the bridge's working directory."""
+
+    def make_repository(self) -> Path:
+        repository = self.directory / "Repository"
+        repository.mkdir()
+        (repository / "premake5.lua").write_text('WorkspaceName = "Sample"\n', encoding="utf-8")
+        return repository
+
+    def enter_directory(self, directory: Path) -> None:
+        """Runs the rest of the test with `directory` as the working directory."""
+        previous = Path.cwd()
+        os.chdir(directory)
+        self.addCleanup(os.chdir, previous)
+
+    def test_project_paths_are_recorded_relative_to_the_repository(self) -> None:
+        repository = self.make_repository()
+        root = repository / "Projects" / "Game"
+        root.mkdir(parents=True)
+        (root / "Game.eproj").write_text('{"Format": "Project", "Version": 1}\n', encoding="utf-8")
+        outside = self.make_project("Outside")
+
+        def open_project(params: dict[str, Any]) -> dict[str, Any]:
+            project = Path(params["path"])
+            return {"project": {"name": project.name, "root": project.as_posix()}}
+
+        editor = self.start_server({"project.open": open_project})
+        self.enter_directory(outside)
+        connection = EditorConnection(None, supervised=False, client=self.connect(editor), repository_root=repository)
+        # A relative path is the repository's, not the working directory's; the editor gets it absolute.
+        self.assertIn("result", connection.call("project.open", {"path": "Projects/Game"}))
+        self.assertEqual(Path(editor.requests[0].params["path"]), root.resolve())
+        self.assertIn("result", connection.call("project.open", {"path": str(root)}))
+        self.assertEqual(Path(editor.requests[1].params["path"]), root)
+        lines = self.read_lines(root / transcript.TRANSCRIPT_RELATIVE_PATH)
+        self.assertEqual([line["params"]["path"] for line in lines if line["type"] == "request"],
+                         ["Projects/Game", "Projects/Game"])
+        self.assertNotIn(self.directory.as_posix(), (root / transcript.TRANSCRIPT_RELATIVE_PATH).read_text("utf-8"))
+        # A project outside the repository is recorded as given.
+        other = EditorConnection(None, supervised=False, client=self.connect(editor), repository_root=repository)
+        self.assertIn("result", other.call("project.open", {"path": str(outside)}))
+        recorded = self.read_lines(outside / transcript.TRANSCRIPT_RELATIVE_PATH)
+        self.assertEqual(recorded[0]["params"]["path"], str(outside))
+
+    def test_a_relative_project_resolves_against_the_repository_root(self) -> None:
+        repository = self.make_repository()
+        root = repository / "Tests" / "Projects" / "Game"
+        root.mkdir(parents=True)
+        (root / "Game.eproj").write_text('{"Format": "Project", "Version": 1}\n', encoding="utf-8")
+        editor = self.start_server({"session.info": lambda params: {"pid": os.getpid()}})
+        launcher = Launcher(repository, self.directory / "UserData")
+        editor.write_session_file(launcher.sessions_directory(), project_path=(root / "Game.eproj").as_posix())
+        elsewhere = self.directory / "Elsewhere"
+        elsewhere.mkdir()
+        self.enter_directory(elsewhere)
+        self.assertEqual(launcher.resolve_project(Path("Tests/Projects/Game")), root.resolve())
+        connection = launcher.launch(LaunchRequest(project=Path("Tests/Projects/Game")))
+        self.assertEqual(connection.project_root, root)
+        connection.disconnect()
+        bridge = server.Bridge(repository, [], launcher)
+        for name, arguments in (("editor_launch", {"project": "Tests/Projects/Game"}),
+                                ("editor_attach", {"project": "Tests/Projects/Game/Game.eproj"})):
+            with self.subTest(tool=name):
+                structured, text, is_error = bridge.call_tool(name, arguments)
+                self.assertFalse(is_error, text)
+                self.assertEqual(Path(structured["project"]), root)
+                bridge.call_tool("editor_shutdown", {})
+        self.assertFalse((elsewhere / "Tests").exists())
+
+
+class ResultReadTests(BridgeTestCase):
+    """Friction S1-01: result_read lets an agent with only the MCP tools read what the editor offloaded (or a test
+    report), and nothing outside the offload folders."""
+
+    def make_bridge(self, root: Path | None) -> server.Bridge:
+        bridge = server.Bridge(REPOSITORY_ROOT, [], Launcher(REPOSITORY_ROOT, self.directory / "UserData"))
+        if root is not None:
+            bridge.connection = EditorConnection(root, supervised=False)
+        return bridge
+
+    def test_result_read_pages_an_offloaded_result_and_reads_a_pointer(self) -> None:
+        root = self.make_project()
+        out = root / server.OFFLOAD_DIRECTORY
+        out.mkdir(parents=True)
+        document = {"passed": False, "failedCases": ["Breakout/launch"],
+                    "cases": [{"suite": "Breakout", "case": f"case {index}", "status": "passed",
+                               "message": "é" * 40} for index in range(300)]}
+        offloaded = out / "4242-1791244800-00000002.json"
+        offloaded.write_bytes(json.dumps(document, ensure_ascii=False, indent=1).encode("utf-8"))
+        bridge = self.make_bridge(root)
+
+        text = offloaded.read_bytes().decode("utf-8")
+        joined, offset, pages = "", 0, 0
+        while True:
+            structured, summary, is_error = bridge.call_tool("result_read", {"path": str(offloaded), "offset": offset,
+                                                                             "length": 4096})
+            self.assertFalse(is_error, summary)
+            self.assertEqual(structured["offset"], offset)
+            self.assertLessEqual(len(structured["content"].encode("utf-8")), 4096)
+            self.assertIn(structured["content"], summary)
+            joined += structured["content"]
+            pages += 1
+            offset = structured["nextOffset"]
+            if offset == 0 or pages > 100:
+                break
+        self.assertEqual(joined, text)
+        self.assertGreater(pages, 1)
+        self.assertEqual(structured["totalBytes"], len(text.encode("utf-8")))
+
+        structured, _, is_error = bridge.call_tool("result_read", {"path": offloaded.name, "pointer": "/cases/7/case"})
+        self.assertFalse(is_error)
+        self.assertEqual(structured["content"], "case 7")
+        structured, _, is_error = bridge.call_tool("result_read", {"path": "Library/Automation/Out/" + offloaded.name,
+                                                                   "pointer": "/failedCases"})
+        self.assertFalse(is_error)
+        self.assertEqual(json.loads(structured["content"]), ["Breakout/launch"])
+        for pointer, error in (("/cases/300", "NotFound"), ("/nothing", "NotFound"), ("cases", "InvalidParams")):
+            with self.subTest(pointer=pointer):
+                structured, _, is_error = bridge.call_tool("result_read", {"path": str(offloaded), "pointer": pointer})
+                self.assertTrue(is_error)
+                self.assertEqual(structured["error"], error)
+
+    def test_result_read_refuses_files_outside_the_offload_folders(self) -> None:
+        root = self.make_project()
+        out = root / server.OFFLOAD_DIRECTORY
+        out.mkdir(parents=True)
+        (out / "1-2-00000001.png").write_bytes(b"\x89PNG\r\n\x1a\n\xff\xfe")
+        bridge = self.make_bridge(root)
+        # A bare file name is looked for in the offload folders only once the location is checked before the file
+        # system (the milestone review's R33): the project's Game.eproj is never touched, so it is NotFound there, and
+        # never read.
+        for path, error in ((str(root / "Game.eproj"), "PermissionDenied"),
+                            ("Library/Automation/Out/../../../Game.eproj", "PermissionDenied"),
+                            ("Game.eproj", "NotFound"),
+                            (str(REPOSITORY_ROOT / "AGENTS.md"), "PermissionDenied"),
+                            ("Library/Automation/Out/missing.json", "NotFound"),
+                            ("1-2-00000001.png", "NotText")):
+            with self.subTest(path=path):
+                structured, text, is_error = bridge.call_tool("result_read", {"path": path})
+                self.assertTrue(is_error, text)
+                self.assertEqual(structured["error"], error)
+        for arguments in ({}, {"path": "x.json", "offset": -1}, {"path": "x.json", "length": 0},
+                          {"path": "x.json", "length": server.RESULT_PAGE_BYTES + 1}):
+            with self.subTest(arguments=arguments):
+                structured, _, is_error = bridge.call_tool("result_read", arguments)
+                self.assertTrue(is_error)
+                self.assertEqual(structured["error"], "InvalidParams")
+
+    def test_result_read_touches_nothing_outside_the_offload_folders(self) -> None:
+        # The milestone review's R33: result_read stat'ed any absolute path before its confinement check, so a UNC path
+        # made Windows open an SMB connection (sending the user's credentials) and NotFound against PermissionDenied
+        # told whether a file outside the folders existed. The location is now checked as text first.
+        root = self.make_project()
+        (root / server.OFFLOAD_DIRECTORY).mkdir(parents=True)
+        outside = self.directory / "Secret.json"
+        outside.write_text('{"secret": true}', encoding="utf-8")
+        unc = "\\\\attacker.invalid\\share\\x.json" if os.name == "nt" else "//attacker.invalid/share/x.json"
+        bridge = self.make_bridge(root)
+        touched: list[str] = []
+        real = {name: getattr(Path, name) for name in ("is_file", "exists", "stat", "resolve")}
+
+        def recording(name: str) -> Any:
+            def method(path: Path, *arguments: Any, **options: Any) -> Any:
+                touched.append(str(path))
+                return real[name](path, *arguments, **options)
+            return method
+
+        patches = [mock.patch.object(Path, name, recording(name)) for name in real]
+        with contextlib.ExitStack() as stack:
+            for patch in patches:
+                stack.enter_context(patch)
+            for path in (unc, str(outside), str(self.directory / "Missing.json"), "Library/../Game.eproj"):
+                with self.subTest(path=path):
+                    structured, text, is_error = bridge.call_tool("result_read", {"path": path})
+                    self.assertTrue(is_error, text)
+                    # The same answer whether the outside file exists or not.
+                    self.assertEqual(structured["error"], "PermissionDenied")
+                    self.assertNotIn("secret", text)
+        for path in touched:
+            self.assertNotIn("attacker.invalid", path)
+            self.assertNotEqual(Path(path), outside)
+            self.assertNotEqual(Path(path), self.directory / "Missing.json")
+
+    def test_result_read_refuses_a_link_inside_an_offload_folder_that_leads_outside(self) -> None:
+        # The milestone review's R35: Out/evil.json leading to a file outside the folders is refused once resolved
+        # (Path.resolve, never a lexical normalization). The link is a real symbolic link where this process may create
+        # one; otherwise (Windows without the privilege; a junction links directories only) Path.resolve answers for it
+        # as a link would, so a check that stopped resolving reads the stand-in file and fails here.
+        root = self.make_project()
+        out = root / server.OFFLOAD_DIRECTORY
+        out.mkdir(parents=True)
+        outside = self.directory / "Secret.json"
+        outside.write_text('{"secret": true}', encoding="utf-8")
+        link = out / "evil.json"
+        try:
+            os.symlink(outside, link)
+            stand_in = contextlib.nullcontext()
+        except OSError:
+            link.write_text('{"stand-in": true}', encoding="utf-8")
+            real_resolve = Path.resolve
+
+            def resolve(path: Path, strict: bool = False) -> Path:
+                return outside if os.path.normcase(str(path)) == os.path.normcase(str(link)) \
+                    else real_resolve(path, strict)
+
+            stand_in = mock.patch.object(Path, "resolve", resolve)
+        bridge = self.make_bridge(root)
+        with stand_in:
+            for path in (str(link), "evil.json", "Library/Automation/Out/evil.json"):
+                with self.subTest(path=path):
+                    structured, text, is_error = bridge.call_tool("result_read", {"path": path})
+                    self.assertTrue(is_error, text)
+                    self.assertEqual(structured["error"], "PermissionDenied")
+                    self.assertNotIn("secret", text)
+                    self.assertNotIn(outside.as_posix(), text)
+
+    def test_result_read_reads_the_user_data_offload_folder_without_a_project(self) -> None:
+        bridge = self.make_bridge(None)
+        out = bridge.launcher.sessions_directory().parent / "Out"
+        out.mkdir(parents=True)
+        (out / "7-8-00000001.json").write_text('{"methods": []}', encoding="utf-8")
+        structured, text, is_error = bridge.call_tool("result_read", {"path": "7-8-00000001.json"})
+        self.assertFalse(is_error, text)
+        self.assertEqual(structured["content"], '{"methods": []}')
+        self.assertEqual(structured["nextOffset"], 0)
+
+    def test_pages_end_at_line_breaks_and_never_split_a_character(self) -> None:
+        text = "".join(f"{line:02} ééé\n" for line in range(10))
+        self.assertEqual(server.page_text(text, 0, 25), (text[:14], 0, 20, 100))
+        self.assertEqual(server.page_text(text, 3, 4), ("éé", 3, 7, 100))
+        self.assertEqual(server.page_text(text, 4, 2)[1], 5)
+        self.assertEqual(server.page_text(text, 90, 100), (text[-7:], 90, 0, 100))
+        self.assertEqual(server.resolve_json_pointer({"a/b": {"~": [1, 2]}}, "/a~1b/~0/1"), 2)
+
+
 class EngineMethodsTests(BridgeTestCase):
     def test_engine_methods_reads_an_offloaded_catalogue(self) -> None:
         # The unfiltered rpc.discover is over the offload threshold, so the editor answers with the file it wrote
@@ -324,6 +695,152 @@ class EngineMethodsTests(BridgeTestCase):
         self.assertEqual([method["name"] for method in structured["methods"]], ["scene.tree"])
 
 
+class EngineCallTests(BridgeTestCase):
+    def test_engine_call_waits_for_the_called_methods_own_timeout(self) -> None:
+        # Docs/Decisions/0026-m16-contract.md decision 13: engine_call bounds a call by the method's own timeoutSeconds
+        # as the editor declares it (rpc.discover {domain}, asked once per domain and never transcribed), then the
+        # catalogue's, then 60 s, so a long project.upgrade or test.run through engine_call is not cut off at 60 s.
+        root = self.make_project()
+        discovered: list[dict[str, Any]] = []
+
+        def discover(params: dict[str, Any]) -> dict[str, Any]:
+            discovered.append(params)
+            if params.get("domain") == "project":
+                return {"methods": [{"name": "project.upgrade", "timeoutSeconds": 600},
+                                    {"name": "project.info", "timeoutSeconds": 60}]}
+            return {"methods": []}
+
+        editor = self.start_server({"rpc.discover": discover,
+                                    "project.upgrade": lambda params: {"changedFiles": [], "unchangedCount": 3},
+                                    "scene.tree": lambda params: {"text": "Main"},
+                                    "debug.echo": lambda params: {}})
+        catalog = [server.CatalogTool(name="scene_tree", method="scene.tree", description="The hierarchy.",
+                                      input_schema={"type": "object"}, mutates=False, supports_dry_run=False,
+                                      timeout_seconds=90)]
+        bridge = server.Bridge(REPOSITORY_ROOT, catalog, Launcher(REPOSITORY_ROOT, self.directory / "UserData"))
+        connection = EditorConnection(root, supervised=False, client=self.connect(editor))
+        bridge.connection = connection
+        assert connection.client is not None
+        sent: list[tuple[str, float]] = []
+        original = connection.client.request
+
+        def request(method: str, params: dict[str, Any] | None = None, transcript_line: int | None = None,
+                    timeout: float = engine_client.DEFAULT_TIMEOUT_SECONDS) -> dict[str, Any]:
+            sent.append((method, timeout))
+            return original(method, params, transcript_line, timeout)
+
+        with mock.patch.object(connection.client, "request", side_effect=request):
+            for method in ("project.upgrade", "project.upgrade", "scene.tree", "debug.echo"):
+                structured, text, is_error = bridge.call_tool("engine_call", {"method": method, "params": {}})
+                self.assertFalse(is_error, text)
+        calls = [(method, timeout) for method, timeout in sent if method != "rpc.discover"]
+        self.assertEqual(calls, [("project.upgrade", 600.0), ("project.upgrade", 600.0), ("scene.tree", 90.0),
+                                 ("debug.echo", float(server.DEFAULT_TIMEOUT_SECONDS))])
+        self.assertEqual(discovered, [{"domain": "project"}, {"domain": "scene"}, {"domain": "debug"}])
+        # Only the agent's calls are in the transcript, each request with its response.
+        lines = self.read_lines(root / "Automation" / "BuildLog.jsonl")
+        self.assertEqual([line["method"] for line in lines if line["type"] == "request"],
+                         ["project.upgrade", "project.upgrade", "scene.tree", "debug.echo"])
+        self.assertEqual(len(lines), 8)
+
+
+class ArgumentCoercionTests(BridgeTestCase):
+    """Docs/Decisions/0026-m16-contract.md, friction S3-02: a client whose tool list predates the current catalogue
+    sends an argument its cached schema lacks as a string, which the editor refused ("expected boolean, got string
+    /toc"). The bridge converts a string to the type the current catalogue declares when it is exactly that type's JSON
+    literal, and forwards everything else unchanged for the editor to judge."""
+
+    SCHEMA = {"type": "object", "additionalProperties": False, "properties": {
+        "topic": {"type": "string"}, "toc": {"type": "boolean"}, "offset": {"type": "integer", "minimum": 0},
+        "scale": {"type": "number"}, "where": {"type": "object"}, "select": {"type": "array"},
+        "either": {"type": ["integer", "null"]}, "free": {"description": "any JSON value"},
+        "target": {"enum": ["Edit", "Play"]}}}
+
+    def make_bridge(self, editor: fake_editor.FakeEditor, root: Path) -> server.Bridge:
+        catalog = [server.CatalogTool(name="docs_get", method="docs.get", description="Docs.", input_schema=self.SCHEMA,
+                                      mutates=False, supports_dry_run=False, timeout_seconds=60)]
+        bridge = server.Bridge(REPOSITORY_ROOT, catalog, Launcher(REPOSITORY_ROOT, self.directory / "UserData"))
+        bridge.connection = EditorConnection(root, supervised=False, client=self.connect(editor))
+        return bridge
+
+    def test_a_typed_tool_call_whose_stringified_arguments_the_catalogue_types_reaches_the_editor_with_json_types(
+            self) -> None:
+        root = self.make_project()
+        editor = self.start_server({"docs.get": lambda params: {"text": "ok"}})
+        bridge = self.make_bridge(editor, root)
+        structured, text, is_error = bridge.call_tool("docs_get", {
+            "topic": "123", "toc": "true", "offset": "-0", "scale": "2.5e-1", "where": '{"name": "Ball"}',
+            "select": '["Transform", 1]', "either": "null"})
+        self.assertFalse(is_error, text)
+        params = {key: value for key, value in editor.requests[0].params.items() if key != "_meta"}
+        self.assertEqual(params, {"topic": "123", "toc": True, "offset": 0, "scale": 0.25, "where": {"name": "Ball"},
+                                  "select": ["Transform", 1], "either": None})
+        # The transcript records what the editor received.
+        request = self.read_lines(root / transcript.TRANSCRIPT_RELATIVE_PATH)[0]
+        self.assertEqual(request["params"], params)
+        # An integer literal for a number stays an integer; "false" is a boolean too.
+        bridge.call_tool("docs_get", {"toc": "false", "scale": "3", "either": "7"})
+        self.assertEqual({key: value for key, value in editor.requests[1].params.items() if key != "_meta"},
+                         {"toc": False, "scale": 3, "either": 7})
+
+        # The committed catalogue's docs_get declares toc a boolean: S3's refused call goes through now.
+        docs_get = next(tool for tool in server.load_catalog() if tool.name == "docs_get")
+        self.assertEqual(server.coerce_arguments({"topic": "skills/game-building", "toc": "true"},
+                                                 docs_get.input_schema),
+                         {"topic": "skills/game-building", "toc": True})
+
+    def test_a_string_that_is_not_the_declared_types_literal_is_forwarded_unchanged(self) -> None:
+        root = self.make_project()
+        editor = self.start_server({"docs.get": lambda params: {"text": "ok"}})
+        bridge = self.make_bridge(editor, root)
+        # The milestone review's R32: a number literal that overflows a double inside object or array text (it would
+        # become Infinity, which is not JSON, in the request frame and the transcript) and an integer literal too long
+        # for Python's int() are forwarded unchanged too.
+        too_long = "1" * 5000
+        cases = [{"toc": "True"}, {"toc": "yes"}, {"toc": " true"}, {"toc": "1"},
+                 {"offset": "1.0"}, {"offset": "01"}, {"offset": "1e2"}, {"offset": "+1"}, {"offset": " 1"},
+                 {"scale": "NaN"}, {"scale": "Infinity"}, {"scale": "1e400"}, {"scale": ".5"}, {"scale": "0x10"},
+                 {"where": "[1]"}, {"where": "{bad}"}, {"where": '{"a": NaN}'}, {"select": "{}"},
+                 {"either": "none"}, {"topic": "true"}, {"free": "true"}, {"target": "1"}, {"unknown": "true"},
+                 {"where": '{"x": 1e400}'}, {"select": "[-1e999]"}, {"where": '{"x": [1, 2E+309]}'},
+                 {"offset": too_long}, {"scale": too_long}, {"either": too_long}, {"select": f"[{too_long}]"}]
+        for index, arguments in enumerate(cases):
+            with self.subTest(arguments=arguments):
+                structured, text, is_error = bridge.call_tool("docs_get", arguments)
+                self.assertFalse(is_error, text)
+                forwarded = {key: value for key, value in editor.requests[index].params.items() if key != "_meta"}
+                self.assertEqual(forwarded, arguments)
+        # Every request line the transcript holds is strict JSON (no Infinity).
+        for line in (root / transcript.TRANSCRIPT_RELATIVE_PATH).read_text(encoding="utf-8").splitlines():
+            json.loads(line, parse_constant=lambda name: self.fail(f"{name} in the transcript: {line[:80]}"))
+        # Arguments that already have their JSON types are never touched.
+        typed = {"toc": True, "offset": 3, "where": {"name": "x"}, "select": ["a"]}
+        self.assertEqual(server.coerce_arguments(typed, self.SCHEMA), typed)
+        # A schema without properties converts nothing.
+        self.assertEqual(server.coerce_arguments({"toc": "true"}, {"type": "object"}), {"toc": "true"})
+
+    def test_the_conversion_follows_the_catalogue_a_launch_reloaded(self) -> None:
+        # "The current catalogue": a parameter the reloaded catalogue declares is converted from then on.
+        path = self.directory / "catalog.json"
+        entry = {"name": "input_replay", "method": "input.replay", "description": "Replays.", "mutates": False,
+                 "supportsDryRun": False, "timeoutSeconds": 600,
+                 "inputSchema": {"type": "object", "properties": {"path": {"type": "string"}}}}
+        path.write_text(json.dumps({"Format": "McpCatalog", "Version": 1, "Tools": [entry]}), encoding="utf-8")
+        tools, digest = server.read_catalog(path)
+        root = self.make_project()
+        editor = self.start_server({"input.replay": lambda params: {"passed": True}})
+        bridge = server.Bridge(REPOSITORY_ROOT, tools, Launcher(REPOSITORY_ROOT, self.directory / "UserData"), path,
+                               digest)
+        bridge.connection = EditorConnection(root, supervised=False, client=self.connect(editor))
+        bridge.call_tool("input_replay", {"path": "Assets/A.replay", "withoutInput": "true"})
+        self.assertEqual(editor.requests[0].params["withoutInput"], "true")
+        entry["inputSchema"]["properties"]["withoutInput"] = {"type": "boolean"}
+        path.write_text(json.dumps({"Format": "McpCatalog", "Version": 1, "Tools": [entry]}), encoding="utf-8")
+        self.assertTrue(bridge.reload_catalog())
+        bridge.call_tool("input_replay", {"path": "Assets/A.replay", "withoutInput": "true"})
+        self.assertIs(editor.requests[1].params["withoutInput"], True)
+
+
 class LauncherTests(BridgeTestCase):
     def make_launcher(self) -> tuple[Launcher, Path]:
         launcher = Launcher(REPOSITORY_ROOT, self.directory / "UserData")
@@ -347,6 +864,200 @@ class LauncherTests(BridgeTestCase):
         with self.assertRaises(LookupError):
             launcher.attach(pid=finished_pid())
         self.assertTrue((root / "Automation" / "BuildLog.jsonl").is_file())
+
+    def test_editor_attach_transcribes_a_session_info_naming_the_editor(self) -> None:
+        # Docs/Decisions/0026-m16-contract.md, friction S2-10: an attach sent no request, so nothing in the transcript
+        # showed where an attached session began; and S2-03: nothing reported that the project had no open scene.
+        root = self.make_project()
+        project = {"open": True, "name": "Game", "projectFile": (root / "Game.eproj").as_posix()}
+        info: dict[str, Any] = {"pid": os.getpid(), "renderer": "vulkan", "scene": None, "project": project}
+        editor = self.start_server({"session.info": lambda params: dict(info)})
+        launcher, sessions = self.make_launcher()
+        editor.write_session_file(sessions, project_path=(root / "Game.eproj").as_posix())
+        bridge = server.Bridge(REPOSITORY_ROOT, [], launcher)
+        structured, text, is_error = bridge.call_tool("editor_attach", {"project": str(root)})
+        self.assertFalse(is_error, text)
+        path = root / transcript.TRANSCRIPT_RELATIVE_PATH
+        lines = self.read_lines(path)
+        self.assertEqual([(line["type"], line.get("method")) for line in lines],
+                         [("request", "session.info"), ("response", None)])
+        for part in (f"pid {os.getpid()}", "project Game", "renderer vulkan"):
+            self.assertIn(part, lines[1]["summary"])
+        self.assertIsNone(structured["session"]["scene"])
+        self.assertIn("no scene is open: scene_open", text)
+
+        # editor_status asks again: the open scene, once there is one.
+        info["scene"] = {"path": "Assets/Scenes/Main.scene", "name": "Main", "revision": 3, "dirty": True,
+                         "entityCount": 2}
+        status, _, _ = bridge.call_tool("editor_status", {})
+        self.assertEqual(status["session"]["scene"], info["scene"])
+        self.assertFalse(bridge.call_tool("editor_shutdown", {})[2])
+
+        # editor_launch attaching to the editor that serves the project begins the same way; the new connection's
+        # request ids start again, so only the line tells the two session.info requests apart.
+        structured, text, is_error = bridge.call_tool("editor_launch", {"project": str(root)})
+        self.assertFalse(is_error, text)
+        self.assertIn("scene Assets/Scenes/Main.scene (unsaved changes)", text)
+        self.assertEqual(structured["session"]["scene"]["path"], "Assets/Scenes/Main.scene")
+        lines = self.read_lines(path)
+        requests = [line for line in lines if line["type"] == "request"]
+        self.assertEqual([line["method"] for line in requests], ["session.info"] * 3)
+        self.assertEqual(requests[2]["id"], requests[0]["id"])
+        bridge.call_tool("editor_shutdown", {})
+
+        # An editor that refuses session.info is still attached; the response line records why.
+        refusing = self.start_server({})
+        other = self.make_project("Other")
+        other_launcher = Launcher(REPOSITORY_ROOT, self.directory / "OtherUserData")
+        refusing.write_session_file(other_launcher.sessions_directory(),
+                                    project_path=(other / "Other.eproj").as_posix())
+        connection = other_launcher.attach(project=other)
+        self.assertTrue(connection.is_alive())
+        self.assertIsNone(connection.session_info)
+        refused = self.read_lines(other / transcript.TRANSCRIPT_RELATIVE_PATH)
+        self.assertEqual((refused[0]["method"], refused[1]["ok"]), ("session.info", False))
+        connection.disconnect()
+
+    def test_editor_launch_transcribes_a_session_info_after_opening_the_project_and_reports_the_scene(self) -> None:
+        # Docs/Decisions/0026-m16-contract.md, friction S3-06: a launch opened the project and sent no session.info, so
+        # editor_launch said nothing about the open scene (none: opening a project opens none), unlike an attach.
+        root = self.make_project()
+        project = {"open": True, "name": "Game", "projectFile": (root / "Game.eproj").as_posix()}
+        info: dict[str, Any] = {"pid": 4242, "renderer": "none", "scene": None, "project": project}
+
+        def open_project(params: dict[str, Any]) -> dict[str, Any]:
+            return {"project": {"name": "Game", "root": root.as_posix()}, "warnings": [], "recoveryAvailable": False,
+                    "recovered": False}
+
+        def create_project(params: dict[str, Any]) -> dict[str, Any]:
+            created = Path(params["path"])
+            created.mkdir(exist_ok=True)
+            (created / f"{params['name']}.eproj").write_text('{"Format": "Project", "Version": 1}\n', encoding="utf-8")
+            return {"project": {"name": params["name"], "root": created.as_posix()}, "createdFiles": []}
+
+        editor = self.start_server({"project.open": open_project, "project.create": create_project,
+                                    "session.info": lambda params: dict(info)})
+        launcher, _ = self.make_launcher()
+        spawned = mock.Mock()
+
+        def connect(session: Any, supervised: bool, editor_process: Any = None, **_: Any) -> EditorConnection:
+            return EditorConnection(None, supervised=True, client=self.connect(editor), repository_root=REPOSITORY_ROOT)
+
+        bridge = server.Bridge(REPOSITORY_ROOT, [], launcher)
+        new = self.directory / "New"
+        with mock.patch.object(engine_client, "find_editor_executable", return_value=Path("Editor")), \
+                mock.patch.object(engine_client, "launch_editor", return_value=spawned), \
+                mock.patch.object(launcher, "connect", side_effect=connect):
+            for arguments, path in (({"project": str(root)}, root),
+                                    ({"project": str(new), "create": True}, new)):
+                with self.subTest(arguments=arguments):
+                    structured, text, is_error = bridge.call_tool("editor_launch", arguments)
+                    self.assertFalse(is_error, text)
+                    self.assertIsNone(structured["session"]["scene"])
+                    self.assertEqual(structured["session"]["pid"], 4242)
+                    self.assertIn("no scene is open: scene_open", text)
+                    lines = self.read_lines(path / transcript.TRANSCRIPT_RELATIVE_PATH)
+                    opened = "project.create" if arguments.get("create") else "project.open"
+                    self.assertEqual([(line["type"], line.get("method")) for line in lines],
+                                     [("request", opened), ("response", None), ("request", "session.info"),
+                                      ("response", None)])
+                    self.assertEqual(lines[3]["requestLine"], 3)
+                    self.assertFalse(bridge.call_tool("editor_shutdown", {})[2])
+        self.assertEqual([request.method for request in editor.requests],
+                         ["project.open", "session.info", "project.create", "session.info"])
+        spawned.kill.assert_not_called()
+
+        # A session.info the editor refuses leaves the launch connected (the response line records why); one whose
+        # connection breaks ends the editor the launch spawned.
+        refusing = self.start_server({"project.open": open_project})
+        refused = EditorConnection(None, supervised=True, client=self.connect(refusing),
+                                   repository_root=REPOSITORY_ROOT)
+        with mock.patch.object(engine_client, "find_editor_executable", return_value=Path("Editor")), \
+                mock.patch.object(engine_client, "launch_editor", return_value=spawned), \
+                mock.patch.object(launcher, "connect", return_value=refused):
+            connection = launcher.launch(LaunchRequest(project=root))
+        self.assertIs(connection, refused)
+        self.assertIsNone(connection.session_info)
+        self.assertTrue(connection.is_alive())
+        connection.disconnect()
+        broken = EditorConnection(None, supervised=True, client=self.connect(editor), repository_root=REPOSITORY_ROOT)
+        with mock.patch.object(engine_client, "find_editor_executable", return_value=Path("Editor")), \
+                mock.patch.object(engine_client, "launch_editor", return_value=spawned), \
+                mock.patch.object(launcher, "connect", return_value=broken), \
+                mock.patch.object(Launcher, "read_session_info", side_effect=engine_client.ConnectionClosed("gone")):
+            with self.assertRaises(engine_client.ConnectionClosed):
+                launcher.launch(LaunchRequest(project=root))
+        spawned.kill.assert_called_once()
+        self.assertIsNone(broken.client)
+
+    def test_a_launch_whose_project_call_raises_kills_the_editor_it_spawned(self) -> None:
+        # The milestone review's R30: only a raising session.info ended the spawned editor; a project.open or
+        # project.create that raised instead of answering left it running, unsupervised and holding the project lock.
+        root = self.make_project()
+        launcher, _ = self.make_launcher()
+
+        def close(params: dict[str, Any]) -> dict[str, Any]:
+            raise fake_editor.CloseConnection()
+
+        cases = [("project.open closes the connection", False, None, engine_client.ConnectionClosed),
+                 ("project.open times out", False, TimeoutError("project.open did not answer within 60 s"),
+                  TimeoutError),
+                 ("project.create breaks the protocol", True, engine_client.ProtocolError("a frame that is not JSON"),
+                  engine_client.ProtocolError)]
+        for name, create, raised, expected in cases:
+            with self.subTest(case=name):
+                spawned = mock.Mock()
+                editor = self.start_server({"project.open": close, "project.create": close})
+                connection = EditorConnection(None, supervised=True, client=self.connect(editor),
+                                              repository_root=REPOSITORY_ROOT)
+                method = "create_project" if create else "open_project"
+                patched = (mock.patch.object(Launcher, method, side_effect=raised) if raised is not None
+                           else contextlib.nullcontext())
+                with mock.patch.object(engine_client, "find_editor_executable", return_value=Path("Editor")), \
+                        mock.patch.object(engine_client, "launch_editor", return_value=spawned), \
+                        mock.patch.object(launcher, "connect", return_value=connection), patched:
+                    with self.assertRaises(expected):
+                        launcher.launch(LaunchRequest(project=self.directory / "New" if create else root,
+                                                      create=create))
+                spawned.kill.assert_called_once()
+                self.assertIsNone(connection.client)
+
+    def test_local_tools_read_booleans_strictly(self) -> None:
+        # The milestone review's R34: the bridge's own tools applied Python truthiness, so the string "false" (a
+        # client with a stale schema stringifies arguments, F30) meant true: editor_shutdown {force: "false"} forced.
+        root = self.make_project()
+        launcher, _ = self.make_launcher()
+        bridge = server.Bridge(REPOSITORY_ROOT, [], launcher)
+        requests: list[LaunchRequest] = []
+
+        def launch(request: LaunchRequest) -> EditorConnection:
+            requests.append(request)
+            return EditorConnection(root, supervised=False)
+
+        with mock.patch.object(launcher, "launch", side_effect=launch):
+            structured, text, is_error = bridge.call_tool("editor_launch", {
+                "project": str(root), "create": "false", "recover": "false", "headless": "true"})
+            self.assertFalse(is_error, text)
+            self.assertEqual((requests[-1].create, requests[-1].recover, requests[-1].headless), (False, False, True))
+            bridge.connection = None
+            for arguments in ({"create": "False"}, {"recover": 1}, {"headless": "yes"}):
+                with self.subTest(arguments=arguments):
+                    structured, text, is_error = bridge.call_tool("editor_launch", {"project": str(root), **arguments})
+                    self.assertTrue(is_error)
+                    self.assertEqual(structured["error"], "InvalidParams")
+                    self.assertIn(next(iter(arguments)), structured["message"])
+        self.assertEqual(len(requests), 1)
+        connection = mock.Mock()
+        connection.shutdown.return_value = {"disconnected": True, "shutDown": True}
+        bridge.connection = connection
+        structured, text, is_error = bridge.call_tool("editor_shutdown", {"save": "false", "force": "false"})
+        self.assertFalse(is_error, text)
+        connection.shutdown.assert_called_once_with(save=False, force=False)
+        bridge.connection = connection
+        structured, text, is_error = bridge.call_tool("editor_shutdown", {"force": "maybe"})
+        self.assertTrue(is_error)
+        self.assertEqual(structured["error"], "InvalidParams")
+        connection.shutdown.assert_called_once()
 
     def test_a_held_lock_without_a_session_is_editor_already_open(self) -> None:
         root = self.make_project()

@@ -158,15 +158,12 @@ namespace Engine {
 			return MetaState{ .Revision = m_State->Revision, .Dirty = false, .UndoLabel = {}, .Tick = std::nullopt, .PlayState = "Edit" };
 		}
 
-		std::string TestMethodHost::GetOffloadServerTag() const
+		Result<std::string> TestMethodHost::WriteOffloadedResult(std::string_view text)
 		{
-			return std::string(TestOffloadServerTag);
-		}
-
-		Result<std::string> TestMethodHost::WriteOffloadedResult(std::string_view fileName, std::string_view text)
-		{
-			m_State->Offloaded.emplace_back(std::string(fileName), std::string(text));
-			return "/offload/" + std::string(fileName);
+			std::string fileName = MakeOffloadFileName(TestOffloadServerTag, m_State->Offloaded.size() + 1);
+			std::string path = "/offload/" + fileName;
+			m_State->Offloaded.emplace_back(std::move(fileName), std::string(text));
+			return path;
 		}
 
 		Scope<TypeRegistry> CreateProtocolTestTypes()

@@ -154,6 +154,15 @@ namespace Engine {
 		return {};
 	}
 
+	Status AssetWriter::RemoveEmptyDirectory(const VfsPath& directory)
+	{
+		if (m_State->Guard)
+			ENGINE_TRY(m_State->Guard());
+		ENGINE_TRY(m_State->Vfs->RemoveEmptyDirectory(directory));
+		m_State->Report(AssetWriteEvent{ .Kind = AssetWriteKind::Removed, .Path = directory, .From = {}, .ContentHash = 0, .Backup = {} });
+		return {};
+	}
+
 	Status AssetWriter::Move(const VfsPath& from, const VfsPath& to)
 	{
 		if (m_State->Guard)

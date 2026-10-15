@@ -281,7 +281,7 @@ namespace Engine {
 			auto* assets = call.Engine->GetHost().GetAssets();
 			if (!assets)
 				Lua::RaiseError(call, "asset service is unavailable");
-			auto loaded = assets->Load(handle);
+			auto loaded = Detail::LoadAssetAsHost(call, *assets, handle);
 			if (!loaded)
 				Lua::RaiseError(call, loaded.error());
 			auto mesh = AssetCast<MeshData>(*loaded);

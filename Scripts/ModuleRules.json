@@ -711,7 +711,7 @@
 		]
 	},
 	"Json": {
-		"Notes": "Authored formats of section 6 plus every .json file. Fixtures under Tests/Data are exercised by the unit tests, some deliberately malformed.",
+		"Notes": "Authored formats of section 6 plus every .json file. Fixtures under Tests/Data are exercised by the unit tests, some deliberately malformed. A game's Automation/BuildLog.jsonl transcript is append-only and may hold a torn line a killed writer left, completed in place so every line keeps its number: Scripts/AuditProvenance.py validates transcripts (a torn line an entry references fails the audit), so Lint leaves them out (ADR 0026 decision 13, G8).",
 		"Extensions": [
 			".json",
 			".eproj",
@@ -727,7 +727,8 @@
 		],
 		"Exclude": [
 			"Tests/Data/**",
-			"compile_commands.json"
+			"compile_commands.json",
+			"**/Automation/BuildLog.jsonl"
 		]
 	}
 }

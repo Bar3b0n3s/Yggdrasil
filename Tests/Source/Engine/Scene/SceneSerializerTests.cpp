@@ -19,6 +19,7 @@
 #include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Components/UnknownComponentsComponent.h"
 #include "Engine/Scene/Entity.h"
+#include "Support/FixtureSchemaSource.h"
 #include "Support/Fuzz.h"
 #include "Support/GlmApprox.h"
 #include "Support/SceneTestFixture.h"
@@ -821,6 +822,64 @@ namespace Engine {
 			INFO((strict.has_value() ? std::string() : strict.error().ToString()));
 			CHECK(strict.has_value());
 			CHECK(reloadReport.Repairs.empty());
+		}
+
+		TEST_CASE("SceneSerializer: a prefab instance's Script.Fields override loads strictly without a diagnostic")
+		{
+			// An instance of a one-entity prefab whose script field Torque the instance overrides: the override and the
+			// member's flattened Script component both hold the value, as prefab.instantiate and entity.update write them.
+			constexpr std::string_view Text = R"({
+				"Format": "Scene", "Version": 1, "Name": "Turrets", "Seed": 0,
+				"ComponentVersions": { "Transform": 1, "Script": 1, "Prefab": 1, "PrefabLink": 1 },
+				"Entities": [
+					{ "ID": "4f00000000000001", "Name": "Turret", "Parent": null, "Active": true, "Tags": [],
+					  "Components": {
+						"Transform": {},
+						"Script": { "Script": "00000000c0ffee01", "Fields": { "Torque": 60 }, "ExecutionOrder": 0 },
+						"Prefab": { "Prefab": null, "Overrides": [
+							{ "PrefabEntityID": "00000000000c0001", "Kind": "Field", "Component": "Script", "Field": "Fields", "Value": { "Torque": 60 } } ] },
+						"PrefabLink": { "PrefabEntityID": "00000000000c0001", "InstanceRoot": "4f00000000000001" } } }
+				]
+			})";
+			const Test::FixtureSchemaSource schemas = Test::FixtureSchemaSource::CreateStandard();
+			Test::SceneTestFixture setup;
+			LoadOptions strict;
+			strict.StrictUnknowns = true;
+			strict.Schemas = &schemas;
+			LoadReport report;
+			const Status loaded = SceneSerializer::LoadFromString(setup.GetScene(), Text, strict, report);
+			REQUIRE_MESSAGE(loaded.has_value(), (loaded ? std::string() : loaded.error().ToString()));
+			CHECK(report.Diagnostics.empty());
+			const Entity turret = setup.GetScene().FindEntityByID(UUID(0x4f00000000000001));
+			REQUIRE(turret.IsValid());
+			const std::vector<PrefabOverride>& overrides = turret.GetComponent<PrefabInstanceComponent>().Overrides;
+			REQUIRE(overrides.size() == 1);
+			CHECK(overrides[0].Value.Get() == Json{ { "Torque", 60 } });
+
+			// The override's value is free-form where it is read; the member's own Script component resolves it, so an unknown
+			// script field is reported there, once, and fails a strict load at that location.
+			std::string invalid(Text);
+			for (size_t position = invalid.find("\"Torque\": 60"); position != std::string::npos; position = invalid.find("\"Torque\": 60", position))
+				invalid.replace(position, 8, "\"Torq\"");
+			const Scope<Scene> rejectedScene = setup.CreateEmptyScene();
+			LoadReport rejectedReport;
+			const Status rejected = SceneSerializer::LoadFromString(*rejectedScene, invalid, strict, rejectedReport);
+			REQUIRE_FALSE(rejected.has_value());
+			CHECK(rejected.error().GetCode() == ErrorCode::Validation);
+			CHECK(rejected.error().GetLocation().JsonPointer == std::optional<std::string>("/Entities/0/Components/Script/Fields/Torq"));
+			for (const ErrorIssue& issue : rejected.error().GetIssues())
+				CHECK_FALSE(issue.JsonPointer.starts_with("/Entities/0/Components/Prefab"));
+
+			// Without --strict the same file loads with one warning, at the member's field.
+			const Scope<Scene> lenientScene = setup.CreateEmptyScene();
+			LoadOptions lenient;
+			lenient.Schemas = &schemas;
+			LoadReport lenientReport;
+			REQUIRE(SceneSerializer::LoadFromString(*lenientScene, invalid, lenient, lenientReport).has_value());
+			REQUIRE(lenientReport.Diagnostics.size() == 1);
+			CHECK(lenientReport.Diagnostics[0].Code == VariantUnresolvedCode);
+			CHECK(lenientReport.Diagnostics[0].JsonPointer == "/Entities/0/Components/Script/Fields/Torq");
+			CHECK(lenientReport.Diagnostics[0].Entity == UUID(0x4f00000000000001));
 		}
 
 		TEST_CASE("SceneSerializer: deeply nested prefab overrides in a file are kept with a diagnostic instead of exhausting the stack")

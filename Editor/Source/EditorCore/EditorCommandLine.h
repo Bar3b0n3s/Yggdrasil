@@ -10,10 +10,12 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <vector>
 
 // The editor's own command-line options (Architecture §12.1, §13.9), the M4 subset, M6's --bake-engine-assets and
-// --engine-cache-dir, M13's --check-scripts, --run-tests and --filter, M14's --id-seed and --junit, and M15's export options
-// and --strict:
+// --engine-cache-dir, M13's --check-scripts, --run-tests and --filter, M14's --id-seed and --junit, M15's export options
+// and --strict, and M16's --help (friction F20):
+//   Editor [--help | -h]
 //   Editor [--project <path>] [--read-only] [--strict] [--automation[=port]] [--automation-test-hooks] [--batch <file.jsonl>
 //          [--id-seed <n>]] [--upgrade] [--dump-reference <dir>] [--bake-engine-assets] [--engine-cache-dir <dir>]
 //          [--check-scripts] [--run-tests [--filter <pattern>] [--junit <file.xml>]]
@@ -31,6 +33,11 @@ namespace Engine {
 	// What the editor was asked to do.
 	struct EditorLaunchOptions
 	{
+		// --help, or -h (ExpandEditorShortOptions): print the usage, every option with its one-line description
+		// (CommandLine::FormatUsage), to standard output and exit 0 without starting the editor (Editor/EditorApp.h RunEditor).
+		// The other options must still parse (an unknown option stays a usage error), but no other rule is checked and no
+		// other member is read.
+		bool Help = false;
 		// --project <path>: a .eproj or a directory holding one; native, absolute or relative to the working directory. Without
 		// it the editor starts in the launcher state (§12.1).
 		std::optional<std::filesystem::path> Project{};
@@ -50,7 +57,8 @@ namespace Engine {
 		bool AutomationTestHooks = false;
 		// --batch <file>: run the file's requests (BatchRunner) and exit with 0 or 1 (§13.9).
 		std::optional<std::filesystem::path> BatchFile{};
-		// --upgrade: run project.upgrade on --project, with transcript lines (client "cli"), and exit (§13.12).
+		// --upgrade: open --project with its asset scan deferred, run project.refreshAssets (the scan) and project.upgrade,
+		// with transcript lines (client "cli"), and exit (§13.12; Docs/Decisions/0026-m16-contract.md decision 11).
 		bool Upgrade = false;
 		// One-shot M13 modes; require --project and share the automation implementations and result schemas.
 		bool CheckScripts = false;
@@ -121,8 +129,13 @@ namespace Engine {
 	// The options above, for CommandLine::Parse together with GetEngineCommandLineOptions. The views refer to static storage.
 	[[nodiscard]] std::span<const CommandLineOption> GetEditorCommandLineOptions();
 
-	// Reads the editor options of `commandLine` (parsed with both option tables). Errors: InvalidArgument naming the option
-	// for: an --automation port that is not 1 to 65535; --read-only or --upgrade without --project; --upgrade with --read-only; more than one of --batch, --upgrade,
+	// `arguments` with "-h", the one single-dash option (CommandLine::Parse accepts none), spelled "--help" wherever it stands
+	// as an option: not as the value of a Required option of `options` given as "--name value", and not after "--". Every
+	// other argument is kept as it is.
+	[[nodiscard]] std::vector<std::string> ExpandEditorShortOptions(std::span<const std::string> arguments, std::span<const CommandLineOption> options);
+
+	// Reads the editor options of `commandLine` (parsed with both option tables). With --help, only Help is set and nothing
+	// else is checked. Errors: InvalidArgument naming the option for: an --automation port that is not 1 to 65535; --read-only or --upgrade without --project; --upgrade with --read-only; more than one of --batch, --upgrade,
 	// --dump-reference, --bake-engine-assets, --check-scripts, --run-tests and --export; --automation or --automation-test-hooks together with --dump-reference,
 	// --upgrade, --bake-engine-assets, --check-scripts, --run-tests or --export; --automation-test-hooks without --automation or --batch; --config other
 	// than Debug, Release or Dist; --config, --testing, --smoke-test or --export-report without --export; --export without --config or --project, or with

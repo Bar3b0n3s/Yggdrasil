@@ -35,7 +35,8 @@ namespace Engine {
 	// project.create {path, name, template}: creates the project (ProjectManager::CreateProject, template files from
 	// Resources/Templates/Projects) and opens it (taking the lock). `path` is a native directory, absolute or relative to
 	// the editor's working directory (project paths are the one exception to project:// confinement, §13.2). Available in the
-	// launcher state; with a project open it is InvalidState (one project per editor). Provenance records the .eproj.
+	// launcher state; with a project open it is InvalidState (one project per editor). Provenance records the .eproj, the
+	// root .luaurc and the template's files under Assets/.
 	struct ProjectCreateParams
 	{
 		std::string Path{};
@@ -136,21 +137,37 @@ namespace Engine {
 		uint32_t UndoIndex = 0; // the fixes' undo step; 0 when nothing was fixed
 	};
 
-	// project.upgrade {}: applies migrations and canonical re-saves to every project file: the .eproj and every .scene and
-	// .prefab under Assets/ (§6, §13.5, §13.12). A file is written only when its canonical bytes differ, through
+	// One file project.upgrade rewrites (M16 friction S3-09, additive): its project-relative path and why its canonical form
+	// differs: "format version <file> to <current>", "component migration" (a scene or prefab), or "canonical form" when
+	// neither applies. Scenes and prefabs load strictly, so one that would need a load repair fails the upgrade instead.
+	struct ProjectUpgradeChange
+	{
+		std::string Path{};
+		std::string Reason{};
+	};
+
+	// project.upgrade {}: applies migrations and canonical re-saves to every project file: the .eproj and every .scene,
+	// .prefab, .meta, .material, .sfx and .replay file under Assets/, each through its reader (with its migrations) and its
+	// canonical writer (§6, §13.5, §13.12; Docs/Decisions/0026-m16-contract.md decision 12); .material, .sfx and .replay files
+	// are read with unknown members refused, as their importers read them, so such a member fails the upgrade at its file and
+	// pointer instead of being dropped by the rewrite. A file is written only when its canonical bytes differ, through
 	// EditorContext::WriteProjectFile, so provenance records each rewrite with the method "project.upgrade". The open scene
-	// must not be dirty (InvalidState); it is reloaded afterwards when its file changed. Supports dry runs: changedFiles then
-	// lists what a real upgrade would rewrite, and nothing is written. Not undoable (it is a file-format operation); the
-	// history is cleared when the open scene reloads.
+	// must not be dirty (InvalidState); it is reloaded afterwards when its file changed; no scene needs to be open.
+	// Supports dry runs: changedFiles then lists what a real upgrade would rewrite, and nothing is written. Not undoable (it
+	// is a file-format operation); the history is cleared when the open scene reloads.
 	struct ProjectUpgradeResult
 	{
 		std::vector<std::string> ChangedFiles{}; // project-relative, sorted
 		uint32_t UnchangedCount = 0;
+		std::vector<ProjectUpgradeChange> Changes{}; // ChangedFiles with their reasons, in the same order
 	};
 
 	// project.refreshAssets {} (§7.3): EditorAssetManager::Refresh: a synchronous rescan of Assets/, a .meta for every
 	// source without one (writable editors), the import of every main asset it registered (ADR 0010 decision 31) and the
-	// reimport of every changed asset, all complete when the call returns.
+	// reimport of every changed asset, all complete when the call returns. While the project's asset scan is deferred
+	// (Editor --upgrade, EditorContext::OpenDeferredAssets; Docs/Decisions/0026-m16-contract.md decision 11) it runs that scan
+	// first, so its .meta writes are this request's, and reports both (the lists merged, the count and diagnostics of the
+	// rescan).
 	// Not Mutates (it writes only .meta files a scan needs; read-only editors register transient metas instead), not
 	// AllowedInBatch (it writes outside a command), no dry run.
 	struct ProjectRefreshAssetsResult
@@ -183,7 +200,8 @@ namespace Engine {
 		// project.upgrade. Errors: InvalidState for a dirty open scene; the first file that fails to load or write (files
 		// rewritten before it stay rewritten and recorded).
 		[[nodiscard]] Result<ProjectUpgradeResult> ProjectUpgrade(EditorMethodContext& context, const NoParams& params);
-		// project.refreshAssets. Errors: those of EditorAssetManager::Refresh (the scan of Assets/).
+		// project.refreshAssets. Errors: those of EditorContext::OpenDeferredAssets while the scan is deferred, then those of
+		// EditorAssetManager::Refresh (the scan of Assets/).
 		[[nodiscard]] Result<ProjectRefreshAssetsResult> ProjectRefreshAssets(EditorMethodContext& context, const NoParams& params);
 
 	}
@@ -194,7 +212,8 @@ namespace Engine {
 
 	// Registers the nine methods (project.refreshAssets from M6, reached through engine_call, §13.8): project.create and
 	// project.open are available in the launcher state; create, open, save,
-	// getSettings, setSettings and validate are tools (§13.8; info and upgrade are reached through engine_call); create,
+	// getSettings, setSettings, validate and upgrade are tools (§13.8; info and refreshAssets are reached through engine_call;
+	// upgrade became a tool with M16 friction S3-09); create,
 	// save, setSettings and upgrade mutate; setSettings, validate and upgrade support dry runs; info, getSettings,
 	// setSettings and validate are AllowedInBatch (setSettings and validate's fixes go through EditorContext::Execute, and
 	// a fix inside a batch joins the batch's transaction), while create, open, save and upgrade are not.

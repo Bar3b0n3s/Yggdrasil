@@ -27,10 +27,16 @@ namespace Engine {
 		std::string Filter{};      // Case-insensitive substring of suite/case; replays match their path.
 		uint32_t TimeoutTicks = 0; // Omitted: no additional run limit; when present require 1..UINT32_MAX.
 		std::string Record{};      // Optional project://Assets/... .replay destination; exactly one selected suite required.
+		bool Coverage = false;     // Return Coverage.Counters (they are left out unless this or Testing.CoverageGates).
 	};
 
 	// The RPC returns the runner's exact schema (§11.10), without nesting it in a second result envelope. The alias
-	// follows the method-name collision convention; reflection continues to identify this one type as TestRunResult.
+	// follows the method-name collision convention; reflection continues to identify this one type as TestRunResult. One
+	// difference from the JSON report: the result leaves Coverage.Counters empty unless TestRunParams::Coverage or the
+	// project's Testing.CoverageGates asks for them (Docs/Decisions/0026-m16-contract.md, friction S1-02), so an ordinary
+	// run's result stays inline; the report at JsonPath always holds them. A recording run that wrote its replay fills
+	// TestRunResult::Recording (M16 friction S3-03) in both, from the written document and the runner's input-check tick
+	// (FeatureTestRunner::GetInputCheckTick).
 	using TestRunMethodResult = TestRunResult;
 
 	inline constexpr std::chrono::milliseconds TestRunFrameBudget{ 50 };

@@ -1,6 +1,7 @@
 #include "EnginePCH.h"
 #include "Engine/Scripting/Private/BindingRegistration.h"
 
+#include "Engine/Core/Utf8.h"
 #include "Engine/Platform/Input/KeyCodes.h"
 #include "Engine/Reflection/EnumInfo.h"
 #include "Engine/Scripting/Private/ScriptEngineAccess.h"
@@ -10,6 +11,7 @@
 #include "Engine/Scripting/ScriptTestHost.h"
 
 #include <lua.h>
+#include <lualib.h>
 #include <nlohmann/json.hpp>
 
 #include <array>
@@ -18,6 +20,7 @@
 #include <limits>
 #include <string>
 #include <string_view>
+#include <utility>
 
 namespace Engine {
 
@@ -40,6 +43,116 @@ namespace Engine {
 		static std::string Message(ScriptCall& call, int index, std::string_view fallback)
 		{
 			return Lua::IsNoneOrNil(call, index) ? std::string(fallback) : Lua::CheckDiagnosticText(call, index);
+		}
+
+		// The bytes of a string value an expectation's failure row shows; a longer string shows this prefix and its length.
+		constexpr size_t MaxExpectationStringBytes = 128;
+
+		// A string value of a failure row: quoted, with '"', '\' and control characters escaped, its first
+		// MaxExpectationStringBytes bytes (cut at a UTF-8 boundary) followed by "... (<n> bytes)" when it is longer.
+		static std::string QuoteValue(std::string_view text)
+		{
+			const std::string_view shown = text.substr(0, CompleteUtf8Prefix(text.substr(0, MaxExpectationStringBytes)));
+			std::string quoted = "\"";
+			for (const char character : shown)
+			{
+				switch (character)
+				{
+					case '"':  quoted += "\\\""; break;
+					case '\\': quoted += "\\\\"; break;
+					case '\n': quoted += "\\n"; break;
+					case '\r': quoted += "\\r"; break;
+					case '\t': quoted += "\\t"; break;
+					default:
+						if (static_cast<unsigned char>(character) < 0x20)
+							quoted += std::format("\\x{:02x}", static_cast<unsigned char>(character));
+						else
+							quoted += character;
+						break;
+				}
+			}
+			quoted += '"';
+			if (shown.size() < text.size())
+				quoted += std::format("... ({} bytes)", text.size());
+			return quoted;
+		}
+
+		// A value of an expectation's failure row, as deterministic text that runs no Luau and shows no address: nil, a boolean
+		// or a number (shortest round-trip form) as Luau writes it, a string quoted (QuoteValue), a vector as vector(x, y, z),
+		// a Color or Quat by its components, an Entity or AssetRef by its UUID, another engine value by its type name (its
+		// metatable's __type) and any other value by its Luau type name.
+		static std::string DescribeValue(ScriptCall& call, int index)
+		{
+			lua_State* state = call.State;
+			switch (lua_type(state, index))
+			{
+				case LUA_TNIL:     return "nil";
+				case LUA_TBOOLEAN: return lua_toboolean(state, index) ? "true" : "false";
+				case LUA_TNUMBER:  return std::format("{}", lua_tonumber(state, index));
+				case LUA_TVECTOR:
+				{
+					const float* vector = lua_tovector(state, index);
+					return std::format("vector({}, {}, {})", vector[0], vector[1], vector[2]);
+				}
+				case LUA_TSTRING:
+				{
+					size_t length = 0;
+					const char* text = lua_tolstring(state, index, &length);
+					return QuoteValue(std::string_view(text, length));
+				}
+				case LUA_TUSERDATA:
+				{
+					switch (lua_userdatatag(state, index))
+					{
+						case std::to_underlying(Detail::ScriptValueTag::Entity):
+							return std::format("Entity({})", Lua::Check<ScriptEntityIdentity>(call, index).ID.ToString());
+						case std::to_underlying(Detail::ScriptValueTag::AssetRef):
+							return std::format("AssetRef({})", Lua::Check<AssetHandle>(call, index).ToString());
+						case std::to_underlying(Detail::ScriptValueTag::Color):
+						{
+							const glm::vec4& color = Lua::CheckColorStorage(call, index);
+							return std::format("Color({}, {}, {}, {})", color.r, color.g, color.b, color.a);
+						}
+						case std::to_underlying(Detail::ScriptValueTag::Quat):
+						{
+							const glm::quat& rotation = Lua::CheckQuatStorage(call, index);
+							return std::format("Quat({}, {}, {}, {})", rotation.x, rotation.y, rotation.z, rotation.w);
+						}
+						default:
+							break;
+					}
+					if (luaL_getmetafield(state, index, "__type") != 0)
+					{
+						std::string name = lua_type(state, -1) == LUA_TSTRING ? Lua::Check<std::string>(call, -1) : std::string();
+						lua_pop(state, 1);
+						if (!name.empty())
+							return name.substr(0, CompleteUtf8Prefix(std::string_view(name).substr(0, MaxExpectationStringBytes)));
+					}
+					return "userdata";
+				}
+				default:
+					return lua_typename(state, lua_type(state, index));
+			}
+		}
+
+		// The failure row of a value expectation: `message` (Message of argument `index`), then `values`, " (got <actual>,
+		// expected <expected>[, epsilon <e>])". A message that leaves no room for the values is cut first, at a UTF-8 boundary,
+		// and marked " [truncated: <n> bytes]" like any bounded diagnostic (n the full byte count of the script's text), so
+		// the values always fit within MaxScriptLogMessageBytes.
+		static std::string WithValues(ScriptCall& call, int index, std::string message, std::string_view values)
+		{
+			if (message.size() + values.size() > MaxScriptLogMessageBytes)
+			{
+				size_t fullBytes = message.size();
+				if (!Lua::IsNoneOrNil(call, index))
+					static_cast<void>(lua_tolstring(call.State, index, &fullBytes));
+				const std::string marker = std::format(" [truncated: {} bytes]", fullBytes);
+				message.resize(MaxScriptLogMessageBytes - values.size() - marker.size());
+				message.resize(CompleteUtf8Prefix(message));
+				message += marker;
+			}
+			message += values;
+			return message;
 		}
 
 		static int Report(ScriptCall& call, ScriptTestSignal signal, std::string message)
@@ -95,8 +208,11 @@ namespace Engine {
 		{
 			if (Lua::GetArgumentCount(call) < 2)
 				return Lua::RaiseError(call, "Test.ExpectEqual needs two values");
-			const auto message = Message(call, 3, "expected values to be equal");
-			return lua_equal(call.State, 1, 2) ? 0 : Report(call, ScriptTestSignal::ExpectationFailed, message);
+			auto message = Message(call, 3, "expected values to be equal");
+			if (lua_equal(call.State, 1, 2))
+				return 0;
+			const std::string values = std::format(" (got {}, expected {})", DescribeValue(call, 1), DescribeValue(call, 2));
+			return Report(call, ScriptTestSignal::ExpectationFailed, WithValues(call, 3, std::move(message), values));
 		}
 
 		static int ExpectNear(ScriptCall& call)
@@ -112,8 +228,11 @@ namespace Engine {
 			}
 			else
 				near = std::abs(Lua::Check<double>(call, 1) - Lua::Check<double>(call, 2)) <= epsilon;
-			const auto message = Message(call, 4, "values differ by more than epsilon");
-			return near ? 0 : Report(call, ScriptTestSignal::ExpectationFailed, message);
+			auto message = Message(call, 4, "values differ by more than epsilon");
+			if (near)
+				return 0;
+			const std::string values = std::format(" (got {}, expected {}, epsilon {})", DescribeValue(call, 1), DescribeValue(call, 2), epsilon);
+			return Report(call, ScriptTestSignal::ExpectationFailed, WithValues(call, 4, std::move(message), values));
 		}
 
 		static int Fail(ScriptCall& call)
@@ -390,25 +509,38 @@ namespace Engine {
 				{ .ArgumentIndex = 2, .EnumName = "GamepadAxis", .SelectorIndex = 3, .Selector = ScriptArgumentType::Number },
 			};
 			const std::string description = std::format("Feature test suites, assertions, waits and deterministic input. A reported message shows authored locations "
-														"and keeps at most {} bytes, truncated and marked like a log entry. A case's report keeps at most {} failures for "
-														"expectations and unexpected script errors, the last then counting any further ones as [truncated: <n> more "
-														"failures], and a suite at most {} such failures. Test.Inject* queues at most {} events per input tick.",
-				MaxScriptLogMessageBytes, MaxScriptTestFailuresPerCase, MaxScriptTestFailuresPerSuite, MaxScriptInjectedInputsPerTick);
+														"and keeps at most {} bytes, truncated and marked like a log entry. A failed Test.ExpectEqual or Test.ExpectNear "
+														"adds its values after the message, which is cut first so they always fit: nil, booleans and numbers (shortest "
+														"round-trip form) as Luau writes them, strings quoted (their first {} bytes, then their length), vectors, Colors and "
+														"Quats by component, Entities and AssetRefs by UUID and other values by type name. A case's report keeps at most {} "
+														"failures for expectations and unexpected script errors, the last then counting any further ones as [truncated: "
+														"<n> more failures], and a suite at most {} such failures. Test.Inject* queues at most {} events per input tick.",
+				MaxScriptLogMessageBytes, Utils::MaxExpectationStringBytes, MaxScriptTestFailuresPerCase, MaxScriptTestFailuresPerSuite, MaxScriptInjectedInputsPerTick);
 			api.Module("Test", description)
 				.Function("Suite", Detail::CreateTestSuite, "(name: string, body: () -> (), options: TestSuiteOptions?) -> TestSuite",
 					std::format("Construct a suite without executing its body; the name is UTF-8 without NUL and at most {} bytes.", MaxScriptTestNameBytes), all)
 				.Function("Case", Utils::Case, "(name: string, fn: () -> (), options: TestCaseOptions?) -> ()",
 					std::format("Register a case while collecting the suite body; the name is nonempty, unique in the suite and at most {} bytes, and a suite has at most {} cases.", MaxScriptTestNameBytes, MaxScriptTestCasesPerSuite), pure)
 				.Function("Expect", Utils::Expect, "(condition: boolean, message: string?) -> ()", "Record a failed condition and continue the case.", pure)
-				.Function("ExpectEqual", Utils::ExpectEqual, "(a: any, b: any, message: string?) -> ()", "Record a failed Luau equality comparison.", pure)
-				.Function("ExpectNear", Utils::ExpectNear, "(a: number | vector, b: number | vector, epsilon: number?, message: string?) -> ()", "Compare finite numbers or vector components with an absolute epsilon, default 0.00001.", pure)
+				.Function("ExpectEqual", Utils::ExpectEqual, "(actual: any, expected: any, message: string?) -> ()",
+					"Record a failed Luau equality comparison of actual with expected. The failure shows the message (default \"expected values to be equal\") "
+					"followed by (got <actual>, expected <expected>).",
+					pure)
+				.Function("ExpectNear", Utils::ExpectNear, "(actual: number | vector, expected: number | vector, epsilon: number?, message: string?) -> ()",
+					"Compare finite numbers or vector components with an absolute epsilon, default 0.00001. The failure shows the message (default \"values "
+					"differ by more than epsilon\") followed by (got <actual>, expected <expected>, epsilon <epsilon>).",
+					pure)
 				.Function("Fail", Utils::Fail, "(message: string) -> ()", "End this case as failed. A case thread, or a task a behaviour spawned (which is cancelled), never runs past the call, even inside pcall; a lifecycle callback cannot yield, so there the call raises a script error that unwinds to the nearest pcall. The outcome stays latched either way.", pure)
 				.Function("Skip", Utils::Skip, "(reason: string) -> ()", "End this case as skipped without erasing earlier failures; it stops its caller the way Test.Fail does, and the outcome stays latched.", pure)
 				.Function("WaitTicks", Utils::WaitTicks, "(ticks: number) -> ()", "Yield a test thread for simulation ticks.", pure)
 				.Function("WaitUntil", Utils::WaitUntil, "(predicate: () -> boolean, timeoutTicks: number) -> ()", "Wait for a predicate through a bounded simulation deadline.", pure)
 				.Function("ExpectScriptError", Utils::ExpectScriptError, "(pattern: string, withinTicks: number) -> ()", std::format("Claim one nonfatal error occurrence in the current case using a Luau message pattern of at most {} bytes; the case keeps at most {} unclaimed errors to claim.", MaxScriptErrorPatternBytes, MaxScriptTestUnclaimedErrors), pure)
 				.Function("CaptureAudio", Utils::CaptureAudio, "(ticks: number) -> TestAudioLevels", "Capture exactly the requested current-and-following ticks; yield until grouped audio is ready.", mutation)
-				.Function("InjectAction", Utils::InjectAction, "(name: string, state: InputEventState?, value: number?) -> ()", "Queue a named button state or analog value (with a nil or Down state) for the next unapplied input tick.", action)
+				.Function("InjectAction", Utils::InjectAction, "(name: string, state: InputEventState?, value: number?) -> ()",
+					"Queue a named button state or analog value (with a nil or Down state) for the next unapplied input tick. A button stays down until an Up "
+					"(Tap releases it on the next tick), and an analog value holds on every later tick until another value is injected for the action "
+					"(0 releases it).",
+					action)
 				.Function("InjectKey", Utils::InjectKey, "(key: Key, state: InputEventState) -> ()", "Queue a key state for the next unapplied input tick.", key)
 				.Function("InjectMouse", Utils::InjectMouse, "(button: MouseButton, state: InputEventState, position: vector?) -> ()", "Queue a mouse button and optional finite XY position.", mouse)
 				.Function("InjectGamepad", Utils::InjectGamepad, "((index: number, button: GamepadButton, state: InputEventState) -> ()) & ((index: number, axis: GamepadAxis, value: number) -> ())",
@@ -416,7 +548,7 @@ namespace Engine {
 				.Function("Screenshot", Utils::Screenshot, "(name: string) -> ()",
 					std::format("Capture a screenshot through the owning host; a suite takes at most {} screenshots, and a later call raises an error without capturing.", MaxScriptTestScreenshotsPerSuite), mutation)
 				.Function("ReloadScript", Utils::ReloadScript, "(asset: AssetRef) -> ()", "Synchronously reload a script in an editor test.", editor)
-				.Function("GetStateHash", Utils::GetStateHash, "() -> string", "Read the canonical simulated state hash.", pure)
+				.Function("GetStateHash", Utils::GetStateHash, "() -> string", "Read the canonical simulated state hash: the world (every entity with its serialized components, the tick, the session's Random state, the id draws and every body's physics state), never script tables, audio or input.", pure)
 				.Function("GetLastExtraction", Utils::GetLastExtraction, "() -> TestExtraction", "Read the last completed render extraction.", pure)
 				.Function("GetExtractedPosition", Utils::GetExtractedPosition, "(entity: Entity) -> vector?", "Read an entity's position in the last render snapshot.", pure)
 				.Function("GetScriptErrors", Utils::GetScriptErrors, "(since: number?) -> {ScriptError}", std::format("Read occurrences newer than an exclusive error cursor; claimed errors remain visible. The VM keeps the {} distinct errors with the latest occurrences.", MaxScriptErrorEntries), pure);

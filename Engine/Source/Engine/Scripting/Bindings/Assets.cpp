@@ -30,7 +30,7 @@ namespace Engine {
 				Lua::PushNil(call);
 				return 1;
 			}
-			const auto loaded = assets.Load(*handle);
+			const auto loaded = Detail::LoadAssetAsHost(call, assets, *handle);
 			if (!loaded)
 				return Lua::RaiseError(call, loaded.error());
 			Lua::Push(call, *handle);
@@ -67,6 +67,23 @@ namespace Engine {
 
 	}
 
+	namespace Detail {
+
+		Result<AssetRef<Asset>> LoadAssetAsHost(ScriptCall& call, AssetManager& assets, AssetHandle handle)
+		{
+			Result<AssetRef<Asset>> loaded = MakeError(ErrorCode::Unsupported, "the asset {} was not loaded", handle.ToString());
+			Status run = call.Engine->RunHostOperation([&assets, &loaded, handle]() -> Status
+			{
+				loaded = assets.Load(handle);
+				return {};
+			});
+			if (!run)
+				return std::unexpected(std::move(run).error());
+			return loaded;
+		}
+
+	}
+
 	namespace ScriptBindings {
 
 		Status RegisterAssets(ScriptApiRegistry& api)
@@ -76,7 +93,7 @@ namespace Engine {
 			api.Type("AssetRef", "An opaque immutable asset handle; resolve metadata through Assets.")
 				.Operator("__eq", &Utils::AssetsEqual, "(self: AssetRef, other: AssetRef) -> boolean", "Compares asset handles, so two references to the same asset are equal.", pure);
 			api.Module("Assets", "Resolves and loads project or built-in assets through the active asset manager.")
-				.Function("Load", &Utils::AssetsLoad, "(reference: string) -> AssetRef?", "Loads a path or hexadecimal reference; missing references return nil and loading failures raise a located error.", read)
+				.Function("Load", &Utils::AssetsLoad, "(reference: string) -> AssetRef?", "Loads a path or hexadecimal reference; missing references return nil and loading failures raise a located error. The import of an asset that is not cached yet does not count toward the callback budget.", read)
 				.Function("IsValid", &Utils::AssetsValid, "(asset: AssetRef?) -> boolean", "Returns whether the handle is currently registered; nil is false.", read)
 				.Function("GetPath", &Utils::AssetsPath, "(asset: AssetRef) -> string", "Returns the readable reference path, or an empty string for an unknown handle.", read)
 				.Function("GetType", &Utils::AssetsType, "(asset: AssetRef) -> string", "Returns the asset type name, or None for an unknown handle.", read);

@@ -9,6 +9,7 @@
 #include "Engine/Reflection/StructInfo.h"
 #include "Engine/Reflection/TypeRegistry.h"
 #include "Support/DocExamples.h"
+#include "Support/TempDirectory.h"
 #include "Support/TestData.h"
 
 #include <nlohmann/json.hpp>
@@ -51,12 +52,12 @@ namespace Engine {
 			return serialized->dump(-1, ' ', false, Json::error_handler_t::replace).size();
 		}
 
-		// The documents whose Luau blocks are checked, repository-relative and sorted: Docs/*.md, Docs/Reference/*.md,
-		// AGENTS.md, Projects/*/AGENTS.md, Resources/Templates/**/*.md and .claude/skills/*/SKILL.md (Docs/Decisions/ is
-		// history and is not checked).
-		std::vector<std::string> ListCheckedDocuments()
+		// The documents of the tree at `root` (the repository) whose Luau blocks are checked, root-relative and sorted:
+		// Docs/*.md, Docs/Reference/*.md, AGENTS.md, Projects/*/AGENTS.md, Tests/Projects/*/AGENTS.md (the dry-run game's
+		// notes, Docs/Decisions/0026-m16-contract.md decision 13; the directory may not exist yet),
+		// Resources/Templates/**/*.md and .claude/skills/*/SKILL.md (Docs/Decisions/ is history and is not checked).
+		std::vector<std::string> ListCheckedDocuments(const std::filesystem::path& root)
 		{
-			const std::filesystem::path root = Test::GetRepositoryRoot();
 			std::vector<std::string> documents;
 			const auto relative = [&root](const std::filesystem::path& path)
 			{
@@ -85,12 +86,28 @@ namespace Engine {
 			addMarkdown(root / "Docs" / "Reference", false);
 			addFile(root / "AGENTS.md");
 			addMarkdown(root / "Resources" / "Templates", true);
-			for (const std::string_view directory : { "Projects", ".claude/skills" })
+			// Each directory, the file each of its subdirectories holds, and whether the directory may be missing.
+			struct DocumentDirectory
 			{
-				const auto entries = FileSystem::ListDirectory(root / FileSystem::PathFromUtf8(directory), false);
+				std::string_view Directory{};
+				std::string_view File{};
+				bool Optional = false;
+			};
+			constexpr DocumentDirectory Directories[] = {
+				{ .Directory = "Projects", .File = "AGENTS.md", .Optional = false },
+				{ .Directory = "Tests/Projects", .File = "AGENTS.md", .Optional = true },
+				{ .Directory = ".claude/skills", .File = "SKILL.md", .Optional = false },
+			};
+			for (const DocumentDirectory& directory : Directories)
+			{
+				const std::filesystem::path path = root / FileSystem::PathFromUtf8(directory.Directory);
+				std::error_code error;
+				if (directory.Optional && !std::filesystem::is_directory(path, error))
+					continue;
+				const auto entries = FileSystem::ListDirectory(path, false);
 				REQUIRE_MESSAGE(entries.has_value(), (entries ? std::string() : entries.error().ToString()));
 				for (const std::filesystem::path& entry : *entries)
-					addFile(entry / (directory == "Projects" ? "AGENTS.md" : "SKILL.md"));
+					addFile(entry / FileSystem::PathFromUtf8(directory.File));
 			}
 			std::ranges::sort(documents);
 			documents.erase(std::unique(documents.begin(), documents.end()), documents.end());
@@ -109,8 +126,9 @@ namespace Engine {
 	TEST_SUITE("EditorCore")
 	{
 		// Roadmap M14 acceptance; Architecture §11.9 (ADR 0022 decision 14). Every fenced block whose info string starts with
-		// lua or luau in Docs/*.md, Docs/Reference/*.md, AGENTS.md, Projects/*/AGENTS.md, Resources/Templates/**/*.md and
-		// .claude/skills/*/SKILL.md (Docs/Decisions/ excluded) is checked with the engine's strict checker at its path=
+		// lua or luau in Docs/*.md, Docs/Reference/*.md, AGENTS.md, Projects/*/AGENTS.md, Tests/Projects/*/AGENTS.md,
+		// Resources/Templates/**/*.md and .claude/skills/*/SKILL.md (Docs/Decisions/ excluded) is checked with the engine's
+		// strict checker at its path=
 		// (default Assets/Scripts/DocExample.luau), wrapped by its prelude= stub, unless it carries skip="<reason>". Stub
 		// modules and preludes live in Tests/Data/TypeChecker/DocExamples/. Zero Error findings pass; at least
 		// MinimumCheckedBlocks blocks must be checked.
@@ -121,7 +139,7 @@ namespace Engine {
 			const Test::DocExampleChecker checker(Test::GetTestDataPath("TypeChecker/DocExamples"));
 			size_t checked = 0;
 			std::vector<std::string> failures;
-			for (const std::string& document : ListCheckedDocuments())
+			for (const std::string& document : ListCheckedDocuments(Test::GetRepositoryRoot()))
 			{
 				const Result<std::string> text = FileSystem::ReadText(Test::GetRepositoryRoot() / FileSystem::PathFromUtf8(document));
 				REQUIRE_MESSAGE(text.has_value(), (text ? std::string() : text.error().ToString()));
@@ -153,6 +171,24 @@ namespace Engine {
 			CHECK(failures.empty());
 			CAPTURE(checked);
 			CHECK(checked >= MinimumCheckedBlocks);
+		}
+
+		// Docs/Decisions/0026-m16-contract.md decision 13: the dry-run game lives under Tests/Projects/, and the notes its
+		// builder writes there are checked like a demo's under Projects/; the directory may be missing (before the dry run).
+		TEST_CASE("DocExamples: the AGENTS.md of every project under Projects/ and Tests/Projects/ is checked")
+		{
+			Test::TempDirectory tree("DocExampleDocuments");
+			const std::string_view notes = "# Notes\n\n```luau\nlocal speed: number = 8\n```\n";
+			for (const std::string_view directory : { "Docs/Reference", "Resources/Templates", ".claude/skills/a-skill", "Projects/Game" })
+				REQUIRE(FileSystem::CreateDirectories(tree / directory).has_value());
+			for (const std::string_view file : { "Projects/Game/AGENTS.md", ".claude/skills/a-skill/SKILL.md" })
+				REQUIRE(FileSystem::WriteFileAtomic(tree / file, AsBytes(notes)).has_value());
+			CHECK(ListCheckedDocuments(tree.GetPath()) == std::vector<std::string>{ ".claude/skills/a-skill/SKILL.md", "Projects/Game/AGENTS.md" });
+
+			REQUIRE(FileSystem::CreateDirectories(tree / "Tests/Projects/Breakout").has_value());
+			REQUIRE(FileSystem::WriteFileAtomic(tree / "Tests/Projects/Breakout/AGENTS.md", AsBytes(notes)).has_value());
+			CHECK(ListCheckedDocuments(tree.GetPath())
+				== std::vector<std::string>{ ".claude/skills/a-skill/SKILL.md", "Projects/Game/AGENTS.md", "Tests/Projects/Breakout/AGENTS.md" });
 		}
 
 		// Tests/Data/TypeChecker/DocExamples/Seeded/Seeded.md holds three examples with a type error each: one wrapped by the

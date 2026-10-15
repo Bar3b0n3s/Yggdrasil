@@ -1,0 +1,25 @@
+{"type": "request", "time": "2026-01-01T00:00:00.000Z", "client": "engine-mcp", "id": 2, "method": "project.create", "params": {"path": "C:/Work/Mini", "template": "Empty"}}
+{"type": "response", "time": "2026-01-01T00:00:00.000Z", "client": "engine-mcp", "id": 2, "requestLine": 1, "ok": true, "summary": "project Mini"}
+{"type": "request", "time": "2026-01-01T00:00:00.000Z", "client": "engine-mcp", "id": 3, "method": "scene.new", "params": {"path": "Assets/Scenes/Main.scene"}}
+{"type": "response", "time": "2026-01-01T00:00:00.000Z", "client": "engine-mcp", "id": 3, "requestLine": 3, "ok": true, "summary": "scene Main; rev 1"}
+{"type": "request", "time": "2026-01-01T00:00:00.000Z", "client": "engine-mcp", "id": 4, "method": "entity.create", "params": {"name": "Paddle"}}
+{"type": "response", "time": "2026-01-01T00:00:00.000Z", "client": "engine-mcp", "id": 4, "requestLine": 5, "ok": true, "summary": "entity a1a1000000000001 Paddle; rev 2 dirty"}
+{"type": "request", "time": "2026-01-01T00:00:00.000Z", "client": "engine-mcp", "id": 5, "method": "asset.create", "params": {"type": "material", "path": "Assets/Materials/Red.material"}}
+{"type": "response", "time": "2026-01-01T00:00:00.000Z", "client": "engine-mcp", "id": 5, "requestLine": 7, "ok": true, "summary": "asset 0a5e000000000003 Material Assets/Materials/Red.material"}
+{"type": "request", "time": "2026-01-01T00:00:00.000Z", "client": "engine-mcp", "id": 6, "method": "asset.create", "params": {"type": "material", "path": "Assets/Materials/Old.material"}}
+{"type": "response", "time": "2026-01-01T00:00:00.000Z", "client": "engine-mcp", "id": 6, "requestLine": 9, "ok": true, "summary": "asset 0a5e000000000004 Material Assets/Materials/Old.material"}
+{"type": "request", "time": "2026-01-01T00:00:00.000Z", "cli
+{"type": "response", "time": "2026-01-01T00:00:00.000Z", "client": "engine-mcp", "id": 7, "requestLine": 11, "ok": true, "summary": "path Assets/Scripts/Ball.luau"}
+{"type": "request", "time": "2026-01-01T00:00:00.000Z", "client": "engine-mcp", "id": 8, "method": "scene.save", "params": {}}
+{"type": "response", "time": "2026-01-01T00:00:00.000Z", "client": "engine-mcp", "id": 8, "requestLine": 13, "ok": true, "summary": "scene Main; savedFiles 1; rev 2"}
+{"type": "request", "time": "2026-01-01T00:00:00.000Z", "client": "engine-mcp", "id": 2, "method": "project.open", "params": {"path": "C:/Work/Mini/Mini.eproj"}}
+{"type": "response", "time": "2026-01-01T00:00:00.000Z", "client": "engine-mcp", "id": 2, "requestLine": 15, "ok": true, "summary": "project Mini"}
+{"type": "request", "time": "2026-01-01T00:00:00.000Z", "client": "engine-mcp", "id": 3, "method": "edit.batch", "params": {"label": "Tidy", "ops": [{"method": "asset.delete", "params": {"asset": "Assets/Materials/Old.material"}}, {"method": "entity.create", "params": {"name": "Ball"}}]}}
+{"type": "response", "time": "2026-01-01T00:00:00.000Z", "client": "engine-mcp", "id": 3, "requestLine": 17, "ok": true, "summary": "results 2; undoIndex 3; rev 3 dirty"}
+{"type": "request", "time": "2026-01-01T00:00:00.000Z", "client": "engine-mcp", "id": 4, "method": "edit.batch", "params": {"label": "Shine", "ops": [{"method": "asset.setProperties", "params": {"asset": "Assets/Materials/Red.material", "properties": {"Roughness": 0.2}}}, {"method": "entity.update", "params": {"entity": "Missing", "patch": {"Name": "Brick"}}}]}}
+{"type": "response", "time": "2026-01-01T00:00:00.000Z", "client": "engine-mcp", "id": 4, "requestLine": 19, "ok": false, "summary": "error -32001 NotFound: no entity named 'Missing'; failedOp 1", "error": {"code": -32001, "errorCode": "NotFound", "detail": "no entity named 'Missing'"}}
+{"type": "request", "time": "2026-01-01T00:00:00.000Z", "client": "engine-mcp", "id": 5, "method": "project.setSettings", "params": {"patch": {"StartScene": "Assets/Scenes/Main.scene"}}}
+{"type": "response", "time": "2026-01-01T00:00:00.000Z", "client": "engine-mcp", "id": 5, "requestLine": 21, "ok": true, "summary": "changedFiles 1; rev 3"}
+{"type": "request", "time": "2026-01-01T00:00:00.000Z", "client": "engine-mcp", "id": 6, "method": "scene.save", "params": {}}
+{"type":"request","time":"2026-01-01T00:00:00.000Z","client":"cli","id":1,"method":"project.upgrade","params":{}}
+{"type":"response","time":"2026-01-01T00:00:00.000Z","client":"cli","id":1,"requestLine":24,"ok":true,"summary":"changedFiles 1"}

@@ -491,7 +491,7 @@ declare extern type Entity with
 	SpotLight: SpotLight?
 	-- The entity's Text component, or nil when absent. [All modes; Runtime|Test; pure/read]
 	Text: Text?
-	-- The entity's Transform component, or nil when absent. [All modes; Runtime|Test; pure/read]
+	-- The entity's Transform component, which every entity has. [All modes; Runtime|Test; pure/read]
 	Transform: Transform
 	-- Compare UUIDs; equality does not authorize access to an expired scene. [All modes; Runtime|Test; pure/read]
 	__eq: (self: Entity, other: Entity) -> boolean
@@ -657,7 +657,7 @@ declare extern type RigidBody with
 	AngularDamping: number
 	-- Removes ghost collisions with internal edges of compound shapes; set it on rolling bodies. [All modes; Runtime|Test; pure/read; setter mutates]
 	EnhancedInternalEdgeRemoval: boolean
-	-- The friction coefficient of the body's surfaces. [All modes; Runtime|Test; pure/read; setter mutates]
+	-- The friction coefficient of the body's surfaces. A contact uses the geometric mean of both bodies' values, so 0 on one body removes friction from all its contacts. [All modes; Runtime|Test; pure/read; setter mutates]
 	Friction: number
 	-- Read current angular velocity. [All modes; Runtime|Test; pure/read]
 	GetAngularVelocity: (self: RigidBody) -> vector
@@ -689,7 +689,7 @@ declare extern type RigidBody with
 	MotionQuality: MotionQuality
 	-- Set a Kinematic target for the next fixed step. [All modes; Runtime|Test; mutates]
 	MoveKinematic: (self: RigidBody, position: vector, rotation: Quat) -> ()
-	-- Bounciness, from no bounce (0) to a perfectly elastic bounce (1). [All modes; Runtime|Test; pure/read; setter mutates]
+	-- Bounciness, from no bounce (0) to a perfectly elastic bounce (1). A contact uses the larger of both bodies' values, so 1 on a ball makes it bounce elastically off every surface. [All modes; Runtime|Test; pure/read; setter mutates]
 	Restitution: number
 	-- Set a Dynamic body's angular velocity. [All modes; Runtime|Test; mutates]
 	SetAngularVelocity: (self: RigidBody, velocity: vector) -> ()
@@ -749,7 +749,7 @@ end
 declare extern type Text with
 	-- How the lines are aligned to each other. [All modes; Runtime|Test; pure/read; setter mutates]
 	Alignment: TextAlignment
-	-- The screen point the text is placed at, normalized to the viewport (Screen space). [All modes; Runtime|Test; pure/read; setter mutates]
+	-- Screen space: the point of the viewport the text is placed at, normalized: (0, 0) is the top-left corner and (1, 1) the bottom-right, X to the right and Y down; (0.5, 0.5) is the centre. [All modes; Runtime|Test; pure/read; setter mutates]
 	Anchor: vector
 	-- Whether world-space text always faces the camera. [All modes; Runtime|Test; pure/read; setter mutates]
 	Billboard: boolean
@@ -757,9 +757,9 @@ declare extern type Text with
 	Color: Color
 	-- The font; null uses the default font. [All modes; Runtime|Test; pure/read; setter mutates]
 	Font: AssetRef?
-	-- A further offset from the anchor, in pixels at the 1080p reference resolution. [All modes; Runtime|Test; pure/read; setter mutates]
+	-- Screen space: a further offset from the anchor in pixels at the 1080p reference resolution (scaled with the viewport's height), X to the right and Y down. [All modes; Runtime|Test; pure/read; setter mutates]
 	Offset: vector
-	-- The point of the text block that sits on the anchor, normalized to the block. [All modes; Runtime|Test; pure/read; setter mutates]
+	-- The point of the text block that sits on the anchor (Screen space) or at the entity's origin (World space), normalized to the block: (0, 0) is its top-left corner and (1, 1) its bottom-right. [All modes; Runtime|Test; pure/read; setter mutates]
 	Pivot: vector
 	-- The text height in pixels at the 1080p reference resolution. [All modes; Runtime|Test; pure/read; setter mutates]
 	Size: number
@@ -837,7 +837,7 @@ declare Assets: {
 	GetType: (asset: AssetRef) -> string,
 	-- Returns whether the handle is currently registered; nil is false. [All modes; Runtime|Test; pure/read]
 	IsValid: (asset: AssetRef?) -> boolean,
-	-- Loads a path or hexadecimal reference; missing references return nil and loading failures raise a located error. [All modes; Runtime|Test; pure/read]
+	-- Loads a path or hexadecimal reference; missing references return nil and loading failures raise a located error. The import of an asset that is not cached yet does not count toward the callback budget. [All modes; Runtime|Test; pure/read]
 	Load: (reference: string) -> AssetRef?,
 }
 
@@ -1083,7 +1083,7 @@ declare Task: {
 	WaitTicks: (ticks: number) -> (),
 }
 
--- Feature test suites, assertions, waits and deterministic input. A reported message shows authored locations and keeps at most 8192 bytes, truncated and marked like a log entry. A case's report keeps at most 32 failures for expectations and unexpected script errors, the last then counting any further ones as [truncated: <n> more failures], and a suite at most 1024 such failures. Test.Inject* queues at most 1024 events per input tick.
+-- Feature test suites, assertions, waits and deterministic input. A reported message shows authored locations and keeps at most 8192 bytes, truncated and marked like a log entry. A failed Test.ExpectEqual or Test.ExpectNear adds its values after the message, which is cut first so they always fit: nil, booleans and numbers (shortest round-trip form) as Luau writes them, strings quoted (their first 128 bytes, then their length), vectors, Colors and Quats by component, Entities and AssetRefs by UUID and other values by type name. A case's report keeps at most 32 failures for expectations and unexpected script errors, the last then counting any further ones as [truncated: <n> more failures], and a suite at most 1024 such failures. Test.Inject* queues at most 1024 events per input tick.
 declare Test: {
 	-- Capture exactly the requested current-and-following ticks; yield until grouped audio is ready. [All modes; Test; mutates]
 	CaptureAudio: (ticks: number) -> TestAudioLevels,
@@ -1091,10 +1091,10 @@ declare Test: {
 	Case: (name: string, fn: () -> (), options: TestCaseOptions?) -> (),
 	-- Record a failed condition and continue the case. [All modes; Test; pure/read]
 	Expect: (condition: boolean, message: string?) -> (),
-	-- Record a failed Luau equality comparison. [All modes; Test; pure/read]
-	ExpectEqual: (a: any, b: any, message: string?) -> (),
-	-- Compare finite numbers or vector components with an absolute epsilon, default 0.00001. [All modes; Test; pure/read]
-	ExpectNear: (a: number | vector, b: number | vector, epsilon: number?, message: string?) -> (),
+	-- Record a failed Luau equality comparison of actual with expected. The failure shows the message (default "expected values to be equal") followed by (got <actual>, expected <expected>). [All modes; Test; pure/read]
+	ExpectEqual: (actual: any, expected: any, message: string?) -> (),
+	-- Compare finite numbers or vector components with an absolute epsilon, default 0.00001. The failure shows the message (default "values differ by more than epsilon") followed by (got <actual>, expected <expected>, epsilon <epsilon>). [All modes; Test; pure/read]
+	ExpectNear: (actual: number | vector, expected: number | vector, epsilon: number?, message: string?) -> (),
 	-- Claim one nonfatal error occurrence in the current case using a Luau message pattern of at most 1024 bytes; the case keeps at most 256 unclaimed errors to claim. [All modes; Test; pure/read]
 	ExpectScriptError: (pattern: string, withinTicks: number) -> (),
 	-- End this case as failed. A case thread, or a task a behaviour spawned (which is cancelled), never runs past the call, even inside pcall; a lifecycle callback cannot yield, so there the call raises a script error that unwinds to the nearest pcall. The outcome stays latched either way. [All modes; Test; pure/read]
@@ -1105,9 +1105,9 @@ declare Test: {
 	GetLastExtraction: () -> TestExtraction,
 	-- Read occurrences newer than an exclusive error cursor; claimed errors remain visible. The VM keeps the 256 distinct errors with the latest occurrences. [All modes; Test; pure/read]
 	GetScriptErrors: (since: number?) -> {ScriptError},
-	-- Read the canonical simulated state hash. [All modes; Test; pure/read]
+	-- Read the canonical simulated state hash: the world (every entity with its serialized components, the tick, the session's Random state, the id draws and every body's physics state), never script tables, audio or input. [All modes; Test; pure/read]
 	GetStateHash: () -> string,
-	-- Queue a named button state or analog value (with a nil or Down state) for the next unapplied input tick. [All modes; Test; mutates]
+	-- Queue a named button state or analog value (with a nil or Down state) for the next unapplied input tick. A button stays down until an Up (Tap releases it on the next tick), and an analog value holds on every later tick until another value is injected for the action (0 releases it). [All modes; Test; mutates]
 	InjectAction: (name: string, state: InputEventState?, value: number?) -> (),
 	-- Queue a gamepad button state, or an engine-convention axis value when the third argument is a number. [All modes; Test; mutates]
 	InjectGamepad: ((index: number, button: GamepadButton, state: InputEventState) -> ()) & ((index: number, axis: GamepadAxis, value: number) -> ()),

@@ -73,9 +73,9 @@ namespace Engine {
 		// no listener.
 		void SetListener(Listener listener);
 
-		// Optional main-thread permission check before every Write, Remove, Move or CreateDirectories call touches the VFS,
-		// including backups and missing parents. A failure is returned unchanged, with no watcher or listener notification.
-		// Empty allows ordinary writes. Still called during dry runs: the owner decides whether an overlay permits the write.
+		// Optional main-thread permission check before every Write, Remove, RemoveEmptyDirectory, Move or CreateDirectories
+		// call touches the VFS, including backups and missing parents. A failure is returned unchanged, with no watcher or
+		// listener notification. Empty allows ordinary writes. Still called during dry runs: the owner decides whether an overlay permits the write.
 		// Captured services are borrowed and must outlive the binding; clear it before those services begin destruction.
 		void SetMutationGuard(MutationGuard guard);
 
@@ -93,6 +93,11 @@ namespace Engine {
 		// VirtualFileSystem::Remove, then MarkKnown of every file it removed under the watcher's root, then the listener.
 		// Errors: the VFS's.
 		[[nodiscard]] Status Remove(const VfsPath& path);
+
+		// VirtualFileSystem::RemoveEmptyDirectory, never anything below the directory (a directory that still holds an entry,
+		// even one the VFS does not list, is refused and left unchanged), then the listener (directories are not watched).
+		// Errors: the VFS's.
+		[[nodiscard]] Status RemoveEmptyDirectory(const VfsPath& directory);
 
 		// VirtualFileSystem::Move (same scheme), creating the destination's parent directories first, then MarkKnown of the
 		// old and new paths of every file it moved, then the listener. Errors: the VFS's.

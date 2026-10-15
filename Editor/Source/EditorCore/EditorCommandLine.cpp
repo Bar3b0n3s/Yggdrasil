@@ -4,12 +4,15 @@
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Utf8.h"
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <filesystem>
 #include <format>
 #include <limits>
+#include <string>
 #include <system_error>
+#include <vector>
 
 namespace Engine {
 
@@ -36,16 +39,20 @@ namespace Engine {
 		constexpr std::string_view ExportReportOption = "--export-report";
 		constexpr std::string_view ExportRootOption = "--export-root";
 		constexpr std::string_view StrictOption = "--strict";
+		constexpr std::string_view HelpOption = "--help";
+		// --help's short spelling, the editor's one single-dash option (ExpandEditorShortOptions).
+		constexpr std::string_view ShortHelpOption = "-h";
 		// The engine option (GetEngineCommandLineOptions) that ends the run after N frames, which an export must not do.
 		constexpr std::string_view FramesOption = "--frames";
 
 		constexpr std::array EditorOptions = {
+			CommandLineOption{ .Name = HelpOption, .Value = CommandLineValue::None, .ValueName = {}, .Description = "Print this list of options and exit (also -h)." },
 			CommandLineOption{ .Name = ProjectOption, .Value = CommandLineValue::Required, .ValueName = "path", .Description = "Open the project (.eproj or its directory)." },
 			CommandLineOption{ .Name = ReadOnlyOption, .Value = CommandLineValue::None, .ValueName = {}, .Description = "Open the project read-only, without the lock." },
 			CommandLineOption{ .Name = AutomationOption, .Value = CommandLineValue::Optional, .ValueName = "port", .Description = "Start the automation server (127.0.0.1)." },
 			CommandLineOption{ .Name = TestHooksOption, .Value = CommandLineValue::None, .ValueName = {}, .Description = "Register the debug.* test hooks." },
 			CommandLineOption{ .Name = BatchOption, .Value = CommandLineValue::Required, .ValueName = "file.jsonl", .Description = "Run the automation requests of a batch file and exit." },
-			CommandLineOption{ .Name = UpgradeOption, .Value = CommandLineValue::None, .ValueName = {}, .Description = "Run project.upgrade on the project and exit." },
+			CommandLineOption{ .Name = UpgradeOption, .Value = CommandLineValue::None, .ValueName = {}, .Description = "Run project.refreshAssets and project.upgrade on the project, transcribed, and exit." },
 			CommandLineOption{ .Name = DumpReferenceOption, .Value = CommandLineValue::Required, .ValueName = "dir", .Description = "Write the generated reference (method catalogues, Markdown references, schemas, Engine.d.luau) into dir and exit." },
 			CommandLineOption{ .Name = BakeEngineAssetsOption, .Value = CommandLineValue::None, .ValueName = {}, .Description = "Bake the engine resources into the engine cooked cache and exit." },
 			CommandLineOption{ .Name = EngineCacheDirectoryOption, .Value = CommandLineValue::Required, .ValueName = "dir", .Description = "Use this engine cooked cache instead of the checkout's bin/EngineCache." },
@@ -138,9 +145,38 @@ namespace Engine {
 		return EditorOptions;
 	}
 
+	std::vector<std::string> ExpandEditorShortOptions(std::span<const std::string> arguments, std::span<const CommandLineOption> options)
+	{
+		std::vector<std::string> expanded(arguments.begin(), arguments.end());
+		for (size_t index = 0; index < expanded.size(); ++index)
+		{
+			const std::string& argument = expanded[index];
+			if (argument == "--")
+				break;
+			if (argument == ShortHelpOption)
+			{
+				expanded[index] = std::string(HelpOption);
+				continue;
+			}
+			// "--name value": the next argument is the Required option's value, whatever it looks like (CommandLine::Parse).
+			if (argument.starts_with("--") && !argument.contains('='))
+			{
+				const auto option = std::ranges::find(options, std::string_view(argument), &CommandLineOption::Name);
+				if (option != options.end() && option->Value == CommandLineValue::Required)
+					++index;
+			}
+		}
+		return expanded;
+	}
+
 	Result<EditorLaunchOptions> ParseEditorLaunchOptions(const CommandLine& commandLine)
 	{
 		EditorLaunchOptions options;
+		if (commandLine.Has(HelpOption))
+		{
+			options.Help = true;
+			return options;
+		}
 		ENGINE_TRY_ASSIGN(options.Project, Utils::ReadPathOption(commandLine, ProjectOption));
 		options.ReadOnly = commandLine.Has(ReadOnlyOption);
 

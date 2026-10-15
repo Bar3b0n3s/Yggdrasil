@@ -148,6 +148,9 @@ class ExportTests(AutomationTestCase):
             self.assertEqual(entry["size"], (output / path).stat().st_size, path)
             self.assertRegex(entry["hash"], r"^[0-9a-f]{16}$")
         self.assertFalse(report["smokeTestRan"])
+        # Docs/Decisions/0026-m16-contract.md, friction S2-06: neither an exit code nor a SmokeTest timing without one.
+        self.assertIsNone(report["smokeTestExitCode"])
+        self.assertNotIn("SmokeTest", [timing["phase"] for timing in report["phaseTimings"]])
         # Nothing but the output directory is left beside it: the staging directory became the output.
         self.assertEqual([entry.name for entry in output.parent.iterdir()], [TINY_GAME_NAME])
 
@@ -217,6 +220,7 @@ class ExportTests(AutomationTestCase):
         report = export_tiny_game(client, smoke_test=True)
         self.assertTrue(report["smokeTestRan"])
         self.assertEqual(report["smokeTestExitCode"], 0)
+        self.assertIn("SmokeTest", [timing["phase"] for timing in report["phaseTimings"]])
         # The smoke test ran on the staged package: nothing it wrote is in the package, and its user-data directory is
         # gone too.
         output = Path(report["outputDirectory"])
@@ -242,6 +246,9 @@ class ExportTests(AutomationTestCase):
         report = export_tiny_game(client, "Dist", smoke_test=True)
         self.assertFalse(report["smokeTestRan"])
         self.assertTrue(any("smoke test" in warning for warning in report["warnings"]), report["warnings"])
+        # Friction S2-06: asked for but not run reads as not run, not as exit code 0.
+        self.assertIsNone(report["smokeTestExitCode"])
+        self.assertNotIn("SmokeTest", [timing["phase"] for timing in report["phaseTimings"]])
 
     def test_export_with_renderer_none_uses_prebaked_engine_cache(self) -> None:
         # §7.5, §7.6 (Roadmap M8; Docs/Decisions/0013-m8-decisions.md decision 9): without a device and without a bake,

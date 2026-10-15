@@ -1,6 +1,6 @@
 {
 	"Format": "Replay",
-	"Version": 1,
+	"Version": 2,
 	"Scene": {
 		"Handle": "6a795a5b2cab3e74",
 		"Path": "Assets/Scenes/Input.scene"
@@ -228,6 +228,7 @@
 			"Luau": "local p = Scene.FindByName(\"InputProbe\"):GetScript()\nreturn p.StepCount == 40 and p.FrameCount == 40"
 		}
 	],
+	"Checkpoints": [],
 	"FinalTick": 40,
 	"FinalStateHash": "ff0e3f70e3200f86"
 }

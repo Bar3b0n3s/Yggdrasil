@@ -99,7 +99,7 @@ namespace Engine {
 			CommandLineOption{ .Name = AutomationOption, .Value = CommandLineValue::Optional, .ValueName = "port", .Description = "Serve the Runtime's automation subset (127.0.0.1)." },
 			CommandLineOption{ .Name = PausedOption, .Value = CommandLineValue::None, .ValueName = {}, .Description = "Start the play session paused at tick 0 (needs --automation)." },
 			CommandLineOption{ .Name = ReplayOption, .Value = CommandLineValue::Required, .ValueName = "path", .Description = "Run a replay from its recorded initial scene, parameters and seed, then exit." },
-			CommandLineOption{ .Name = VerifyOption, .Value = CommandLineValue::None, .Description = "Verify replay expectations and its final state hash." },
+			CommandLineOption{ .Name = VerifyOption, .Value = CommandLineValue::None, .Description = "Verify replay expectations, every state-hash checkpoint and the final state hash." },
 #endif
 		};
 
@@ -443,6 +443,7 @@ namespace Engine {
 			auto replay = CreateRef<ReplayData>();
 			replay->Header = document.Header;
 			replay->Events = document.Events;
+			replay->Checkpoints = document.Checkpoints;
 			replay->FinalTick = document.FinalTick;
 			replay->FinalStateHash = document.FinalStateHash;
 			for (size_t i = 0; i < document.Expect.size(); ++i)
@@ -897,7 +898,7 @@ namespace Engine {
 			state.SessionViewFixed = true;
 			state.BeginSessionTiming();
 			state.ReplayInputSerial = state.Session->GetSerial();
-			ENGINE_TRY(state.Player.Begin(std::move(replay), *state.Session, { state.Options.VerifyReplay, state.Options.VerifyReplay }));
+			ENGINE_TRY(state.Player.Begin(std::move(replay), *state.Session, { .Verify = state.Options.VerifyReplay, .StrictHash = state.Options.VerifyReplay }));
 		}
 
 #if !defined(ENGINE_DIST)
@@ -1152,7 +1153,9 @@ namespace Engine {
 							scripts->Stop();
 						const bool passed = result && result->Passed && state.Session->GetScriptErrors().GetCursor() == 0;
 						if (passed)
-							ENGINE_INFO("Replay passed at tick {} with state hash {}", result->FinalTick, result->StateHash);
+							ENGINE_INFO("Replay passed at tick {} with state hash {} ({} checkpoint(s) compared)", result->FinalTick, result->StateHash, result->CheckpointsChecked);
+						else if (result && result->CheckpointFailed)
+							ENGINE_ERROR("Replay verification failed at checkpoint tick {}: expected {}, observed {}", result->FinalTick, result->ExpectedStateHash, result->StateHash);
 						else if (result && !result->StopReason.empty())
 							ENGINE_ERROR("Replay failed: {}", result->StopReason);
 						else if (result)

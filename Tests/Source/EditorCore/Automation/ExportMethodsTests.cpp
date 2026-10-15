@@ -235,7 +235,11 @@ end)
 			CHECK((*result)["resourcesPatched"] == Json(false));
 #endif
 			// One timing per phase entered, in phase order: every phase from Validate to MoveToOutput, a phase with nothing
-			// to do for this export (Sign off macOS, SmokeTest without smokeTest) included (ADR 0024 decision 2).
+			// to do on this host (Sign off macOS) included (ADR 0024 decision 2), but SmokeTest only when the smoke test ran,
+			// and smokeTestExitCode null without one (M16 friction S2-06: it was 0, beside a SmokeTest timing).
+			CHECK((*result)["smokeTestRan"] == Json(false));
+			REQUIRE(result->contains("smokeTestExitCode"));
+			CHECK((*result)["smokeTestExitCode"].is_null());
 			const Json& timings = (*result)["phaseTimings"];
 			REQUIRE(timings.is_array());
 			std::vector<std::string> phases;
@@ -247,7 +251,27 @@ end)
 				CHECK(JsonReader(timing["seconds"]).ReadDouble().value_or(-1.0) >= 0.0);
 				phases.push_back(JsonReader(timing["phase"]).ReadString().value_or(std::string()));
 			}
-			CHECK(phases == std::vector<std::string>{ "Validate", "Cook", "WritePaks", "CopyRuntime", "PatchResources", "WriteManifest", "Sign", "SmokeTest", "MoveToOutput" });
+			CHECK(phases == std::vector<std::string>{ "Validate", "Cook", "WritePaks", "CopyRuntime", "PatchResources", "WriteManifest", "Sign", "MoveToOutput" });
+		}
+
+		// M16 friction S2-06: the report of an export whose smoke test ran carries its exit code, and of one without the code
+		// null (MakeProjectExportResult is what project.export and Editor --export-report both write).
+		TEST_CASE("ExportMethods: the export result reports the smoke test's exit code only when it ran")
+		{
+			ExportReport report;
+			report.PhaseTimings = { { .Phase = ExportPhase::Validate, .Seconds = 0.5 }, { .Phase = ExportPhase::MoveToOutput, .Seconds = 0.25 } };
+			const ProjectExportResult notRun = MakeProjectExportResult(report);
+			CHECK_FALSE(notRun.SmokeTestRan);
+			CHECK(notRun.SmokeTestExitCode.IsNull());
+
+			report.SmokeTestRan = true;
+			report.SmokeTestExitCode = 0;
+			report.PhaseTimings.insert(report.PhaseTimings.begin() + 1, { .Phase = ExportPhase::SmokeTest, .Seconds = 2.0 });
+			const ProjectExportResult ran = MakeProjectExportResult(report);
+			CHECK(ran.SmokeTestRan);
+			CHECK(ran.SmokeTestExitCode.Get() == Json(0));
+			REQUIRE(ran.PhaseTimings.size() == 3);
+			CHECK(ran.PhaseTimings[1].Phase == ExportPhase::SmokeTest);
 		}
 
 		TEST_CASE("ExportMethods: a disconnect cancels project.export and removes what it wrote")

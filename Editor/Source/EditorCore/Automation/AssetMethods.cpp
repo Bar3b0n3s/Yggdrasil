@@ -14,6 +14,7 @@
 #include "Engine/Asset/AssetReference.h"
 #include "Engine/Asset/BuiltinAssets.h"
 #include "Engine/Asset/MaterialData.h"
+#include "Engine/Asset/ScriptData.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/AssetPipeline/ImporterRegistry.h"
 #include "Engine/AssetPipeline/Importers/GltfImporter.h"
@@ -554,6 +555,84 @@ namespace Engine {
 			return copies;
 		}
 
+		// The most files the refusal of a folder that is not empty names (asset.delete).
+		constexpr size_t MaxNamedFolderFiles = 5;
+
+		// asset.delete's folder form (M16 friction S3-07): the folder `reference` names when it is an existing directory below
+		// (or at) Assets/, as a project path; nullopt otherwise, the reference then naming an asset (or nothing).
+		std::optional<VfsPath> FindFolderParam(const EditorMethodContext& context, std::string_view reference)
+		{
+			const Result<VfsPath> path = context.ResolveProjectPath(reference, "/asset");
+			const Result<VfsPath> assets = VfsPath::Create("project", "Assets");
+			if (!path || !assets || !path->IsUnder(*assets))
+				return std::nullopt;
+			const Result<FileInfo> info = context.GetEditor().GetVfs().GetInfo(*path);
+			if (!info || !info->IsDirectory)
+				return std::nullopt;
+			return *path;
+		}
+
+		// Removes `folder`, a folder below Assets/ that holds no files (only empty folders, which go with it), as one undoable
+		// AssetEditCommand of directory entries: the inverse of asset.create {type: Folder}. An empty folder holds nothing to
+		// keep, so nothing goes to the trash; undo creates the folders again. The listing cannot show a host name no VfsPath can
+		// spell, so the command removes each folder without recursion (EditorContext::RemoveProjectFile): a folder that still
+		// holds such an entry fails the command, which restores the folders it already removed, and nothing is deleted.
+		// Errors: InvalidArgument for Assets/ itself; Validation for a folder that holds files, naming the first of them; the
+		// listing's and the command's errors (InvalidState for an entry the listing does not show).
+		Result<AssetDeleteResult> DeleteEmptyFolder(EditorMethodContext& context, const VfsPath& folder)
+		{
+			EditorContext& editor = context.GetEditor();
+			const std::string relative = Utils::ToProjectRelative(folder);
+			ENGINE_TRY_ASSIGN(const VfsPath assets, VfsPath::Create("project", "Assets"));
+			if (folder == assets)
+			{
+				return std::unexpected(Utils::MakeParamError(ErrorCode::InvalidArgument, "/asset", "the Assets folder itself cannot be deleted",
+					"delete the assets and folders inside it instead"));
+			}
+			Result<std::vector<VfsEntry>> entries = editor.GetVfs().List(folder, true);
+			if (!entries)
+				return std::unexpected(Utils::ToEditorFileError(std::move(entries).error()));
+			std::vector<VfsPath> folders = { folder };
+			std::vector<std::string> files;
+			for (const VfsEntry& entry : *entries)
+			{
+				if (entry.Info.IsDirectory)
+					folders.push_back(entry.Path);
+				else
+					files.push_back(Utils::ToProjectRelative(entry.Path));
+			}
+			if (!files.empty())
+			{
+				std::sort(files.begin(), files.end());
+				std::string named;
+				for (size_t index = 0; index < std::min(files.size(), MaxNamedFolderFiles); ++index)
+					named += std::format("{}'{}'", index == 0 ? "" : ", ", files[index]);
+				if (files.size() > MaxNamedFolderFiles)
+					named += std::format(" and {} more", files.size() - MaxNamedFolderFiles);
+				return std::unexpected(Utils::MakeParamError(ErrorCode::Validation, "/asset",
+					std::format("the folder '{}' is not empty: it holds {} file(s): {}", relative, files.size(), named),
+					"delete its assets first (asset.delete moves each to the trash with its .meta), then the folder"));
+			}
+			// A folder's path sorts before every path below it, so the reverse order removes the deepest folders first, and
+			// undo, which applies the entries in reverse, creates the outermost first.
+			std::sort(folders.begin(), folders.end(), [](const VfsPath& left, const VfsPath& right)
+			{
+				return left.GetPath() > right.GetPath();
+			});
+			AssetDeleteResult result;
+			result.Asset = AssetSummary{ .Id = {}, .Path = relative, .Type = AssetType::None };
+			std::vector<AssetFileEdit> edits;
+			for (const VfsPath& path : folders)
+			{
+				result.RemovedFolders.push_back(Utils::ToProjectRelative(path));
+				edits.push_back(AssetFileEdit{ .Path = path, .Kind = AssetFileKind::Directory, .Before = Buffer(), .After = std::nullopt });
+			}
+			std::sort(result.RemovedFolders.begin(), result.RemovedFolders.end());
+			ENGINE_TRY_ASSIGN(const uint64_t undoIndex, editor.Execute(CreateScope<AssetEditCommand>(std::format("Delete Folder '{}'", folder.GetFileName()), std::move(edits))));
+			result.UndoIndex = ToAutomationCounter(undoIndex);
+			return result;
+		}
+
 	}
 
 	namespace Automation {
@@ -882,7 +961,8 @@ namespace Engine {
 			// §5.5 "Update": the instances follow the new settings in the same undo step. The overrides are recorded against the
 			// version the instances were built from, the settings written, the asset reimported now, and the instances rebuilt.
 			LoadReport report;
-			ENGINE_TRY_ASSIGN(const Prefab current, LoadPrefabAsset(assets, handle, editor.GetTypeRegistry(), report));
+			ENGINE_TRY_ASSIGN(const auto schemas, editor.GetScriptSchemaSnapshot());
+			ENGINE_TRY_ASSIGN(const Prefab current, LoadPrefabAsset(assets, handle, editor.GetTypeRegistry(), schemas.get(), report));
 			EditorTransaction transaction(editor, label);
 			ENGINE_TRY(Utils::RecordPrefabOverrides(editor, handle, current));
 			ENGINE_TRY(editor.Execute(std::move(command)));
@@ -920,6 +1000,8 @@ namespace Engine {
 		Result<AssetDeleteResult> AssetDelete(EditorMethodContext& context, const AssetDeleteParams& params)
 		{
 			EditorContext& editor = context.GetEditor();
+			if (const std::optional<VfsPath> folder = FindFolderParam(context, params.Asset); folder.has_value())
+				return DeleteEmptyFolder(context, *folder);
 			ENGINE_TRY_ASSIGN(const AssetHandle handle, Utils::ResolveAssetParam(context, params.Asset, "/asset"));
 			const EditorAssetManager& assets = editor.GetAssets();
 			ENGINE_TRY_ASSIGN(const AssetRecord* record, FindMainAssetRecord(assets, handle, "/asset", "file to delete"));
@@ -1067,12 +1149,13 @@ namespace Engine {
 			.Field("undoIndex", &AssetMoveResult::UndoIndex, "The command's undo index; 0 in a batch.");
 
 		registry.Struct<AssetDeleteParams>("AssetDeleteParams", "The params of asset.delete.")
-			.Field("asset", &AssetDeleteParams::Asset, "The asset to move to the trash (a source, not a sub-asset).");
+			.Field("asset", &AssetDeleteParams::Asset, "The asset to move to the trash (a source, not a sub-asset), or a folder below Assets/ that holds no files, to remove.");
 
 		registry.Struct<AssetDeleteResult>("AssetDeleteResult", "The deleted asset.")
-			.Field("asset", &AssetDeleteResult::Asset, "The asset as it was.")
-			.Field("trashDirectory", &AssetDeleteResult::TrashDirectory, "Where its files went: \"Library/Trash/<entry>\".")
+			.Field("asset", &AssetDeleteResult::Asset, "The asset as it was; for a folder its path, with an empty id and type None.")
+			.Field("trashDirectory", &AssetDeleteResult::TrashDirectory, "Where its files went: \"Library/Trash/<entry>\"; empty for a folder, which holds none.")
 			.Field("trashedFiles", &AssetDeleteResult::TrashedFiles, "The old paths of every file trashed, .meta files and dependency files included.")
+			.Field("removedFolders", &AssetDeleteResult::RemovedFolders, "A folder delete: the folder and every empty folder below it, project-relative and sorted; empty for an asset.")
 			.Field("undoIndex", &AssetDeleteResult::UndoIndex, "The command's undo index; 0 in a batch.");
 	}
 
@@ -1243,7 +1326,8 @@ namespace Engine {
 			{
 				.Name = "asset.delete",
 				.Description = "Moves an asset with its .meta (and a glTF's dependency files) to Library/Trash as one undoable command; never "
-							   "a permanent delete.",
+							   "a permanent delete. A folder below Assets/ that holds no files (only empty folders) is removed, also undoably; a folder "
+							   "that holds files is refused (Validation, naming them): delete its assets first.",
 				.RequiredParams = { "asset" },
 				.ExposeAsTool = true,
 				.Mutates = true,

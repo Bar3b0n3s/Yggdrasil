@@ -585,6 +585,12 @@ namespace Engine {
 		std::optional<DryRunSnapshot> DryRun;
 		uint32_t OutstandingTasks = 0; // publications posted to the main thread, not yet run
 		Ref<bool> Alive;               // expires with the manager: posted tasks check it
+		// Deferred-write attribution (SetWriteContext; Docs/Decisions/0026-m16-contract.md decision 10): the current write
+		// context, and while a publication runs (ApplyImport, nested ones included) the context of the import it publishes,
+		// which the tickets begun meanwhile keep and the writes made meanwhile carry. PublicationDepth 0: none runs.
+		Ref<const AssetWriteContext> WriteContext;
+		Ref<const AssetWriteContext> PublicationContext;
+		uint32_t PublicationDepth = 0;
 
 		// --- Small helpers ----------------------------------------------------------------------------------------------
 
@@ -631,6 +637,45 @@ namespace Engine {
 				return OpenProject->HotReloader->BeginReimport(handle, contentHash);
 			return { .Handle = handle, .ContentHash = contentHash, .Generation = ++Generations[handle] };
 		}
+
+		// The write context an import whose ticket begins now keeps until it is published, superseded or dropped: the
+		// publishing import's while a publication runs (none when it has none), else the current one (SetWriteContext).
+		[[nodiscard]] Ref<const AssetWriteContext> GetTicketContext() const
+		{
+			return PublicationDepth > 0 ? PublicationContext : WriteContext;
+		}
+
+		// The Id the writes made now carry (AssetWriteEvent::WriteContextId): the publishing import's context's while a
+		// publication runs, else 0.
+		[[nodiscard]] uint64_t GetPublicationContextId() const
+		{
+			return PublicationDepth > 0 && PublicationContext != nullptr ? PublicationContext->Id : 0;
+		}
+
+		// Holds `context` as the publishing context for the scope of one publication, restoring the enclosing one after it.
+		class PublicationScope
+		{
+		public:
+			// `state` is a documented back-reference to the manager's state, which outlives the scope.
+			PublicationScope(State& state, Ref<const AssetWriteContext> context)
+				: m_State(&state), m_Previous(std::move(state.PublicationContext))
+			{
+				m_State->PublicationContext = std::move(context);
+				++m_State->PublicationDepth;
+			}
+
+			~PublicationScope()
+			{
+				--m_State->PublicationDepth;
+				m_State->PublicationContext = std::move(m_Previous);
+			}
+
+			PublicationScope(const PublicationScope&) = delete;
+			PublicationScope& operator=(const PublicationScope&) = delete;
+		private:
+			State* m_State = nullptr;
+			Ref<const AssetWriteContext> m_Previous;
+		};
 
 		[[nodiscard]] bool IsTicketCurrent(const AssetReimportTicket& ticket) const
 		{
@@ -855,8 +900,12 @@ namespace Engine {
 					case AssetWriteKind::DirectoryCreated: break;
 				}
 			}
-			if (Observer)
-				Observer(event);
+			if (!Observer)
+				return;
+			// The writes of an import's publication carry its write context (SetWriteContext); every other write carries 0.
+			AssetWriteEvent forwarded = event;
+			forwarded.WriteContextId = GetPublicationContextId();
+			Observer(forwarded);
 		}
 
 		void OnFileWritten(const VfsPath& path, uint64_t contentHash, const VfsPath& backup)
@@ -1111,11 +1160,14 @@ namespace Engine {
 		// artifacts (a new version of each that changed), diagnostics, graph edges and path dependents. Returns the outcome,
 		// or the import's error (recorded as a remembered failure). `reload`: a reimport of something already published,
 		// which appends AssetReloaded; `scheduleDependents`: reimport the published asset's dependents afterwards (hot reload).
+		// `context`: the write context the import kept when its ticket began (GetTicketContext), which the publication's
+		// writes carry and the tickets it begins keep.
 		Result<AssetImportOutcome> ApplyImport(AssetHandle source, const AssetReimportTicket& ticket, ImportOutput output, bool reload,
-			bool scheduleDependents)
+			bool scheduleDependents, Ref<const AssetWriteContext> context)
 		{
 			if (!IsTicketCurrent(ticket))
 				return MakeError(ErrorCode::Cancelled, "the import of {} was superseded by a newer one", source.ToString());
+			const PublicationScope publication(*this, std::move(context));
 			const AssetRecord* record = Registry.Find(source);
 			if (record == nullptr || record->Metadata.Kind != AssetMetaKind::Asset)
 				return MakeError(ErrorCode::NotFound, "asset {} was unregistered while it imported", source.ToString());
@@ -1287,6 +1339,7 @@ namespace Engine {
 		{
 			Result<ImportRequest> request = BuildRequest(source, useCache);
 			const AssetReimportTicket ticket = BeginTicket(source, 0);
+			Ref<const AssetWriteContext> context = GetTicketContext();
 			if (!request.has_value())
 			{
 				const AssetRecord* record = Registry.Find(source);
@@ -1295,7 +1348,7 @@ namespace Engine {
 				RecordFailure(source, request.error(), record->SourcePath, {});
 				return std::unexpected(std::move(request).error());
 			}
-			return ApplyImport(source, ticket, Utils::RunImport(*request), reload, false);
+			return ApplyImport(source, ticket, Utils::RunImport(*request), reload, false, std::move(context));
 		}
 
 		// Starts an import of `source` on a job; its publication runs at a later MainThreadQueue::Drain. Returns the job, which
@@ -1332,7 +1385,9 @@ namespace Engine {
 			std::weak_ptr<bool> alive = Alive;
 			const uint64_t serial = ProjectSerial;
 			State* state = this;
-			return Specification.Jobs->Submit([shared, requested, ticket, queue, alive, serial, state, reload, observed = artifact]() -> Result<AssetRef<Asset>>
+			// The import holds its write context until its publication runs or is dropped (the posted task owns it then).
+			return Specification.Jobs->Submit([shared, requested, ticket, queue, alive, serial, state, reload, observed = artifact,
+												  context = GetTicketContext()]() mutable -> Result<AssetRef<Asset>>
 			{
 				ImportOutput output = Utils::RunImport(*shared);
 				Result<AssetRef<Asset>> value = MakeError(ErrorCode::NotFound, "the import of {} did not produce {}", shared->Metadata.Handle.ToString(),
@@ -1349,11 +1404,11 @@ namespace Engine {
 							value = output.Decoded[index];
 					}
 				}
-				queue->Post([output = std::move(output), ticket, alive, serial, state, reload, observed]() mutable
+				queue->Post([output = std::move(output), ticket, alive, serial, state, reload, observed, context = std::move(context)]() mutable
 				{
 					if (alive.expired())
 						return;
-					state->FinishAsyncImport(ticket, std::move(output), serial, reload, observed);
+					state->FinishAsyncImport(ticket, std::move(output), serial, reload, observed, std::move(context));
 				});
 				return value;
 			});
@@ -1361,14 +1416,16 @@ namespace Engine {
 
 		// Publishes an asynchronous import. `observed` is the LoadAsync request's artifact (null for scans and hot
 		// reloads): once it is loaded, its publication is reported to the load observer, after the tables are updated.
-		void FinishAsyncImport(const AssetReimportTicket& ticket, ImportOutput output, uint64_t serial, bool reload, AssetHandle observed)
+		// `context`: the write context the import kept (ApplyImport).
+		void FinishAsyncImport(const AssetReimportTicket& ticket, ImportOutput output, uint64_t serial, bool reload, AssetHandle observed,
+			Ref<const AssetWriteContext> context)
 		{
 			--OutstandingTasks;
 			if (const auto inFlight = InFlight.find(ticket.Handle); inFlight != InFlight.end() && --inFlight->second == 0)
 				InFlight.erase(inFlight);
 			if (serial != ProjectSerial)
 				return;
-			static_cast<void>(ApplyImport(ticket.Handle, ticket, std::move(output), reload, reload));
+			static_cast<void>(ApplyImport(ticket.Handle, ticket, std::move(output), reload, reload, std::move(context)));
 			if (!observed.IsValid())
 				return;
 			if (const auto loaded = Loaded.find(observed); loaded != Loaded.end() && loaded->second.Value != nullptr)
@@ -2296,7 +2353,8 @@ namespace Engine {
 		MainThreadQueue* queue = state->Specification.MainThread;
 		std::weak_ptr<bool> alive = state->Alive;
 		const uint64_t serial = state->ProjectSerial;
-		return jobs.Submit([shared, ticket, queue, alive, serial, state, reload]() -> Result<AssetImportOutcome>
+		// The import holds its write context until its publication runs or is dropped (the posted task owns it then).
+		return jobs.Submit([shared, ticket, queue, alive, serial, state, reload, context = state->GetTicketContext()]() mutable -> Result<AssetImportOutcome>
 		{
 			ImportOutput output = Utils::RunImport(*shared);
 			Result<AssetImportOutcome> outcome = output.Failure.has_value() ? Result<AssetImportOutcome>(std::unexpected(*output.Failure))
@@ -2306,11 +2364,11 @@ namespace Engine {
 																				  .Diagnostics = output.Import.Import.Diagnostics,
 																				  .FromCache = output.FromCache,
 																			  });
-			queue->Post([output = std::move(output), ticket, alive, serial, state, reload]() mutable
+			queue->Post([output = std::move(output), ticket, alive, serial, state, reload, context = std::move(context)]() mutable
 			{
 				if (alive.expired())
 					return;
-				state->FinishAsyncImport(ticket, std::move(output), serial, reload, AssetHandle());
+				state->FinishAsyncImport(ticket, std::move(output), serial, reload, AssetHandle(), std::move(context));
 			});
 			return outcome;
 		});
@@ -2377,9 +2435,9 @@ namespace Engine {
 		m_State->Observer = std::move(observer);
 	}
 
-	void EditorAssetManager::SetWriteContext(Ref<const AssetWriteContext> /*context*/)
+	void EditorAssetManager::SetWriteContext(Ref<const AssetWriteContext> context)
 	{
-		ENGINE_CONTRACT_STUB();
+		m_State->WriteContext = std::move(context);
 	}
 
 	void EditorAssetManager::Update(double nowSeconds)

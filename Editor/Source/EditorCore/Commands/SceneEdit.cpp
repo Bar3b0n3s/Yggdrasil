@@ -100,7 +100,7 @@ namespace Engine {
 				if (prefab == loaded.end())
 				{
 					LoadReport report;
-					Result<Prefab> current = LoadPrefabAsset(context.GetAssets(), handle, scene.GetTypeRegistry(), report);
+					Result<Prefab> current = LoadPrefabAsset(context.GetAssets(), handle, scene.GetTypeRegistry(), options.Schemas, report);
 					if (!current)
 					{
 						if (current.error().GetCode() != ErrorCode::NotFound)

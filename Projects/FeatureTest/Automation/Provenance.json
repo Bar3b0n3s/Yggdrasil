@@ -173,9 +173,9 @@
 		{
 			"Path": "Assets/Formats/Gltf/Box.glb.meta",
 			"XXH64": "51760523ba834d30",
-			"Method": "ui",
-			"RequestId": null,
-			"Client": "ui",
+			"Method": "asset.import",
+			"RequestId": 13,
+			"Client": "batch",
 			"TranscriptLine": null
 		},
 		{
@@ -189,9 +189,9 @@
 		{
 			"Path": "Assets/Formats/Gltf/Box.gltf.meta",
 			"XXH64": "082a032590dafa75",
-			"Method": "ui",
-			"RequestId": null,
-			"Client": "ui",
+			"Method": "asset.import",
+			"RequestId": 14,
+			"Client": "batch",
 			"TranscriptLine": null
 		},
 		{
@@ -205,9 +205,9 @@
 		{
 			"Path": "Assets/Formats/Gltf/DataUri.gltf.meta",
 			"XXH64": "d784ea34711888c6",
-			"Method": "ui",
-			"RequestId": null,
-			"Client": "ui",
+			"Method": "asset.import",
+			"RequestId": 15,
+			"Client": "batch",
 			"TranscriptLine": null
 		},
 		{
@@ -237,9 +237,9 @@
 		{
 			"Path": "Assets/Formats/Gltf/Textured.gltf.meta",
 			"XXH64": "f8fc218ac1a98e75",
-			"Method": "ui",
-			"RequestId": null,
-			"Client": "ui",
+			"Method": "asset.import",
+			"RequestId": 16,
+			"Client": "batch",
 			"TranscriptLine": null
 		},
 		{
@@ -2804,7 +2804,7 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/Determinism.replay",
-			"XXH64": "d78d3be9e70154f6",
+			"XXH64": "7cfa61d816064113",
 			"Method": "input.record",
 			"RequestId": 7,
 			"Client": "batch",
@@ -2812,7 +2812,7 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/Determinism.replay.meta",
-			"XXH64": "24cbbdef61158458",
+			"XXH64": "36c64bbd65231455",
 			"Method": "input.record",
 			"RequestId": 7,
 			"Client": "batch",
@@ -2820,7 +2820,7 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/Input.replay",
-			"XXH64": "642973719f3d0b0f",
+			"XXH64": "77f5871535a7e14a",
 			"Method": "input.record",
 			"RequestId": 3,
 			"Client": "batch",
@@ -2828,7 +2828,7 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/Input.replay.meta",
-			"XXH64": "1aeac6f3c0fdd9f6",
+			"XXH64": "a03772babd3b0b36",
 			"Method": "input.record",
 			"RequestId": 3,
 			"Client": "batch",

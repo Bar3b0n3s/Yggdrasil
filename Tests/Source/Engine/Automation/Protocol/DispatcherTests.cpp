@@ -32,15 +32,14 @@ namespace Engine {
 			}
 			void FinishRequest(MethodContext& context) override { m_Host.FinishRequest(context); }
 			[[nodiscard]] MetaState GetMetaState() const override { return m_Host.GetMetaState(); }
-			[[nodiscard]] std::string GetOffloadServerTag() const override { return m_Host.GetOffloadServerTag(); }
-			[[nodiscard]] Result<std::string> WriteOffloadedResult(std::string_view name, std::string_view text) override
+			[[nodiscard]] Result<std::string> WriteOffloadedResult(std::string_view text) override
 			{
 				++OffloadAttempts;
 				if (BeforeOffload)
 					BeforeOffload();
 				if (FailOffload)
 					return MakeError(ErrorCode::Io, "injected offload failure");
-				return m_Host.WriteOffloadedResult(name, text);
+				return m_Host.WriteOffloadedResult(text);
 			}
 			std::function<void()> AfterInvocation{};
 			std::function<void()> BeforeOffload{};

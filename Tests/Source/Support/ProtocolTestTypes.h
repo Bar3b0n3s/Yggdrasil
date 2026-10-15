@@ -120,8 +120,9 @@ namespace Engine {
 			void LeaveInvocation(MethodContext& context) override;
 			void FinishRequest(MethodContext& context) override;
 			[[nodiscard]] MetaState GetMetaState() const override;
-			[[nodiscard]] std::string GetOffloadServerTag() const override;
-			[[nodiscard]] Result<std::string> WriteOffloadedResult(std::string_view fileName, std::string_view text) override;
+			// Names the result MakeOffloadFileName(TestOffloadServerTag, n), numbering from 1, records it in Offloaded and
+			// returns "/offload/<name>".
+			[[nodiscard]] Result<std::string> WriteOffloadedResult(std::string_view text) override;
 		private:
 			TestHostState* m_State = nullptr; // documented back-reference
 		};

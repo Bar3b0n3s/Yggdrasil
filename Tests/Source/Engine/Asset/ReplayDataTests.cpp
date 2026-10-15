@@ -119,7 +119,7 @@ namespace Engine {
 			ReplayLoadReport report;
 			auto read = ReplayFromText(*text, report, true);
 			REQUIRE(read.has_value());
-			CHECK(report.FileVersion == 1);
+			CHECK(report.FileVersion == ReplayFormatVersion);
 			CHECK(report.Diagnostics.empty());
 			CHECK(read->Header.Seed == d.Header.Seed);
 			CHECK(read->Header.Parameters == d.Header.Parameters);
@@ -160,7 +160,7 @@ namespace Engine {
 			ReplayLoadReport report;
 			SUBCASE("new version")
 			{
-				(*json)["Version"] = 2;
+				(*json)["Version"] = ReplayFormatVersion + 1;
 				auto result = ReplayFromJson(*json, report);
 				REQUIRE_FALSE(result);
 				CHECK(result.error().GetCode() == ErrorCode::UnsupportedVersion);
@@ -256,7 +256,110 @@ namespace Engine {
 			REQUIRE(artifact);
 			Buffer payload(artifact->Payload.begin(), artifact->Payload.end());
 			payload.push_back(std::byte{ 0 });
-			CHECK_FALSE(LoadCookedReplay(WriteCookedArtifact(AssetType::Replay, 1, 1, payload)));
+			CHECK_FALSE(LoadCookedReplay(WriteCookedArtifact(AssetType::Replay, ReplayData::FormatVersion, 1, payload)));
+		}
+
+		// M16 friction S2-01 (FX-4): version 2 adds the state-hash checkpoints. A version 1 file still loads, migrated with
+		// none (only its final hash is compared, as before), and writes back canonically as version 2, the bytes
+		// project.upgrade then writes (Tests/Data/Formats/Replay/v1.upgraded.replay).
+		TEST_CASE("ReplayData: a version 1 replay migrates to version 2 with no checkpoints")
+		{
+			const Result<std::string> v1 = Test::ReadTestDataText("Formats/Replay/v1.replay");
+			const Result<std::string> upgraded = Test::ReadTestDataText("Formats/Replay/v1.upgraded.replay");
+			REQUIRE(v1.has_value());
+			REQUIRE(upgraded.has_value());
+			ReplayLoadReport report;
+			const auto migrated = ReplayFromText(*v1, report, true);
+			REQUIRE_MESSAGE(migrated.has_value(), migrated.error().ToString());
+			CHECK(report.FileVersion == 1);
+			CHECK(report.Diagnostics.empty());
+			CHECK(migrated->Version == ReplayFormatVersion);
+			CHECK(migrated->Checkpoints.empty());
+			CHECK(migrated->FinalStateHash == "3e0c91a2b4d5f607");
+			const auto text = ReplayToText(*migrated);
+			REQUIRE(text.has_value());
+			CHECK(*text == *upgraded);
+			// The written form reads back unchanged, as version 2.
+			const auto again = ReplayFromText(*upgraded, report, true);
+			REQUIRE(again.has_value());
+			CHECK(report.FileVersion == 2);
+			CHECK(ReplayToText(*again).value_or("") == *upgraded);
+
+			// Version 1 has no Checkpoints: one there is an unknown member (a warning, an error when strict) and is ignored.
+			const auto document = JsonReader::Parse(*v1);
+			REQUIRE(document.has_value());
+			Json withCheckpoints = *document;
+			withCheckpoints["Checkpoints"] = Json::array({ Json{ { "Tick", 60 }, { "StateHash", "0123456789abcdef" } } });
+			const auto lenient = ReplayFromJson(withCheckpoints, report);
+			REQUIRE(lenient.has_value());
+			CHECK(lenient->Checkpoints.empty());
+			REQUIRE(report.Diagnostics.size() == 1);
+			CHECK(report.Diagnostics[0].JsonPointer == "/Checkpoints");
+			CHECK_FALSE(ReplayFromJson(withCheckpoints, report, true).has_value());
+			// Version 2 requires them.
+			Json missing = JsonReader::Parse(*upgraded).value_or(Json());
+			missing.erase("Checkpoints");
+			CHECK_FALSE(ReplayFromJson(missing, report).has_value());
+		}
+
+		TEST_CASE("ReplayData: checkpoints round trip through the source and cooked replays and are validated")
+		{
+			auto d = Document();
+			d.FinalTick = 200;
+			d.Checkpoints = { { .Tick = 60, .StateHash = "00000000000000ff" }, { .Tick = 120, .StateHash = "fedcba9876543210" } };
+			REQUIRE(ValidateReplayDocument(d));
+			const auto text = ReplayToText(d);
+			REQUIRE(text.has_value());
+			CHECK(text->find("\"Checkpoints\": [") < text->find("\"FinalTick\""));
+			CHECK(text->find("\"Expect\": [") < text->find("\"Checkpoints\": ["));
+			ReplayLoadReport report;
+			const auto read = ReplayFromText(*text, report, true);
+			REQUIRE_MESSAGE(read.has_value(), read.error().ToString());
+			REQUIRE(read->Checkpoints.size() == 2);
+			CHECK(read->Checkpoints[1].Tick == 120);
+			CHECK(read->Checkpoints[1].StateHash == "fedcba9876543210");
+			const auto cooked = CookReplay(d, {}, 1);
+			REQUIRE_MESSAGE(cooked.has_value(), cooked.error().ToString());
+			const auto loaded = LoadCookedReplay(*cooked);
+			REQUIRE_MESSAGE(loaded.has_value(), loaded.error().ToString());
+			REQUIRE((*loaded)->Checkpoints.size() == 2);
+			CHECK((*loaded)->Checkpoints[0].Tick == 60);
+			CHECK((*loaded)->Checkpoints[0].StateHash == "00000000000000ff");
+			CHECK((*loaded)->Checkpoints[1].StateHash == "fedcba9876543210");
+			// Every truncation of the payload is refused.
+			for (size_t size = 0; size < cooked->size(); ++size)
+				CHECK_FALSE(LoadCookedReplay(std::span<const std::byte>(*cooked).first(size)));
+			// A cooked replay of payload version 1 (no checkpoints) is UnsupportedVersion: the cache rebuilds it.
+			const auto artifact = ReadCookedArtifact(*cooked);
+			REQUIRE(artifact.has_value());
+			const auto older = LoadCookedReplay(WriteCookedArtifact(AssetType::Replay, 1, 1, Buffer(artifact->Payload.begin(), artifact->Payload.end())));
+			REQUIRE_FALSE(older.has_value());
+			CHECK(older.error().GetCode() == ErrorCode::UnsupportedVersion);
+
+			const auto refused = [](const ReplayDocument& document, std::string_view pointer)
+			{
+				const Status valid = ValidateReplayDocument(document);
+				REQUIRE_FALSE(valid.has_value());
+				CHECK(valid.error().GetLocation().JsonPointer == std::optional<std::string>(pointer));
+			};
+			auto unordered = d;
+			std::swap(unordered.Checkpoints[0], unordered.Checkpoints[1]);
+			refused(unordered, "/Checkpoints/1/Tick");
+			auto duplicate = d;
+			duplicate.Checkpoints[1].Tick = 60;
+			refused(duplicate, "/Checkpoints/1/Tick");
+			auto setup = d;
+			setup.Checkpoints[0].Tick = 0;
+			refused(setup, "/Checkpoints/0/Tick");
+			auto atFinal = d;
+			atFinal.Checkpoints[1].Tick = d.FinalTick;
+			refused(atFinal, "/Checkpoints/1/Tick");
+			auto uppercase = d;
+			uppercase.Checkpoints[0].StateHash = "00000000000000FF";
+			refused(uppercase, "/Checkpoints/0/StateHash");
+			auto shortHash = d;
+			shortHash.Checkpoints[1].StateHash = "abc";
+			refused(shortHash, "/Checkpoints/1/StateHash");
 		}
 
 		TEST_CASE("ReplayData: seeded source and binary mutations never assert or crash" * doctest::test_suite(Test::FuzzSuite))

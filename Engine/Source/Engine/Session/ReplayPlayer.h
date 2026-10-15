@@ -19,7 +19,14 @@ namespace Engine {
 	struct ReplayPlaybackOptions
 	{
 		bool Verify = true;
-		bool StrictHash = false; // Requires Verify. FeatureTest and determinism always set both true.
+		// Requires Verify. FeatureTest and determinism always set both true. Compares every state-hash checkpoint as playback
+		// reaches its tick (ReplayData::Checkpoints) and the final hash at FinalTick.
+		bool StrictHash = false;
+		// Plays the replay's header and tick count with none of its input events: the check that its outcome depends on its
+		// input. Expectations, checkpoints and the final hash are compared as usual, so a playback that still passes proves
+		// that the replay's verification does not depend on its input (the recording guard of input.record and test.run's
+		// record, input.replay {withoutInput}, the games suite).
+		bool WithoutInput = false;
 	};
 
 	struct ReplayExpectationOutcome
@@ -43,10 +50,17 @@ namespace Engine {
 		uint64_t FinalTick = 0; // the completed tick playback reached: the replay's FinalTick unless it stopped early
 		std::string StateHash{};
 		std::string ExpectedStateHash{};
-		// Why playback ended before the replay's FinalTick: the game quit (Application.Quit) or a fatal script error stopped
-		// the session. Empty when it reached FinalTick. A stopped playback has failed: HashMatched is false and the
-		// expectations after FinalTick (the tick reached) are reported unevaluated with a located failure.
+		// Why playback ended before the replay's FinalTick: the game quit (Application.Quit), a fatal script error stopped
+		// the session, or a checkpoint's state hash differed (CheckpointFailed). Empty when it reached FinalTick. A stopped
+		// playback has failed: HashMatched is false and the expectations after FinalTick (the tick reached) are reported
+		// unevaluated with a located failure.
 		std::string StopReason{};
+		// The checkpoints compared (StrictHash only), the failed one included. Playback stops at the first checkpoint whose
+		// state hash differs, after that boundary's expectations: CheckpointFailed is true, FinalTick is the checkpoint's
+		// tick, StateHash and ExpectedStateHash are the observed and the recorded hash there, and StopReason names the tick
+		// and both hashes. The failed checkpoint is ReplayData::Checkpoints[CheckpointsChecked - 1].
+		uint64_t CheckpointsChecked = 0;
+		bool CheckpointFailed = false;
 	};
 
 	// The adapter executes expectation.Script in the current play VM using ScriptEngine::ExecuteBytecode.
@@ -70,10 +84,13 @@ namespace Engine {
 
 		// Session is fresh at tick 0 with the header's scene/parameters/seed/FixedHz; host validates scene identity and
 		// suppresses live input before calling. Checks the entire event stream against the action map before queueing
-		// anything, stores immutable replay data and the session serial. Does not step or evaluate a chunk.
+		// anything (with options.WithoutInput too, which then queues none), stores immutable replay data and the session
+		// serial. Does not step or evaluate a chunk.
 		[[nodiscard]] Status Begin(AssetRef<ReplayData> replay, const PlaySession& session, const ReplayPlaybackOptions& options = {});
-		// Runs at most one Tick (fixed + frame), then evaluates all expectations at the resulting completed-tick boundary.
-		// Checks tick-0 expectations before the first Tick, including FinalTick=0. Returns true when complete. A gameplay
+		// Runs at most one Tick (fixed + frame), then evaluates all expectations at the resulting completed-tick boundary,
+		// then (StrictHash) compares the boundary's checkpoint, completing the playback as failed when it differs (see
+		// ReplayPlaybackResult::CheckpointFailed). Checks tick-0 expectations before the first Tick, including FinalTick=0.
+		// Returns true when complete. A gameplay
 		// quit request or a fatal stop (PlaySession::GetFatalError) that keeps the session from reaching FinalTick completes
 		// the playback as failed (ReplayPlaybackResult::StopReason), never an outer error. Any other changed serial or
 		// unexpected tick is Cancelled. Gameplay Scene.Load preserves serial and absolute tick. False predicates and

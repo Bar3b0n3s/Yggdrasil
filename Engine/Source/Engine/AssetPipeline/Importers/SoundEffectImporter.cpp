@@ -249,10 +249,18 @@ namespace Engine {
 			.Field("Release", &SoundEnvelope::Release, "Seconds from the sustain level to silence after the note ends.",
 				{ .Min = 0.0, .Max = 10.0, .Unit = "s" });
 
-		registry.Struct<SoundLayer>("SoundLayer", "One oscillator of a sound effect: a note sequence or a frequency sweep.")
+		registry.Struct<SoundLayer>("SoundLayer",
+					"One oscillator of a sound effect: a note sequence (Notes) or, without notes, one tone sweeping from StartFrequency to EndFrequency "
+					"over Duration. Every note, or the tone, plays with its own Envelope.")
 			.Field("Wave", &SoundLayer::Wave, "The oscillator's waveform.")
 			.Field("DutyCycle", &SoundLayer::DutyCycle, "Square waves only: the fraction of each period spent high.", { .Min = 0.01, .Max = 0.99 })
-			.Field("Notes", &SoundLayer::Notes, "Notes played back to back, such as \"C5:0.06\" (name, octave, seconds) or \"R:0.1\" (a rest).")
+			.Field("Notes", &SoundLayer::Notes,
+				std::format("At most {} notes played back to back, each \"<Name><Octave>:<seconds>\" such as \"C5:0.06\", or \"R:<seconds>\" for a "
+							"rest such as \"R:0.1\". Name is C, C#, Db, D, D#, Eb, E, F, F#, Gb, G, G#, Ab, A, A#, Bb or B (case-sensitive: '#' "
+							"sharpens, 'b' flattens); Octave is one digit, 0 to 8, with A4 = 440 Hz in equal temperament and C4 middle C; seconds is "
+							"a positive plain decimal (no exponent or sign) with at most 7 digits before and 8 after the point. Empty: the layer "
+							"plays one tone of Duration seconds.",
+					MaxSoundNotesPerLayer))
 			.Field("Duration", &SoundLayer::Duration, "Without notes: the sweep's length in seconds.", { .Min = 0.0, .Max = 10.0, .Unit = "s" })
 			.Field("StartFrequency", &SoundLayer::StartFrequency, "Without notes: the sweep's first frequency.", { .Min = 20.0, .Max = 20000.0, .Unit = "Hz" })
 			.Field("EndFrequency", &SoundLayer::EndFrequency, "Without notes: the sweep's last frequency (an exponential glide).",
@@ -265,10 +273,14 @@ namespace Engine {
 			.Validate(&Utils::ValidateSoundLayer)
 			.Generate(&Utils::GenerateSoundLayer);
 
-		registry.Struct<SoundEffectDescription>("SoundEffect", "A procedural sound effect (.sfx): layers of oscillators synthesized into a clip.")
+		registry.Struct<SoundEffectDescription>("SoundEffect",
+					"A procedural sound effect (.sfx): layers of oscillators synthesized at import into a 48 kHz mono clip, identical on every machine.")
 			.Field("Seed", &SoundEffectDescription::Seed, "The seed of the noise layers' generators.")
 			.Field("Volume", &SoundEffectDescription::Volume, "The sound's linear volume, from 0 to 1.", { .Min = 0.0, .Max = 1.0 })
-			.Field("Layers", &SoundEffectDescription::Layers, "The layers, summed.")
+			.Field("Layers", &SoundEffectDescription::Layers,
+				std::format("1 to {} layers, summed. A layer lasts its Delay, plus its notes' seconds (or its Duration), plus its Envelope's Release; "
+							"the sound lasts as long as its longest layer, at most {} seconds.",
+					MaxSoundLayers, MaxSoundEffectSeconds))
 			.Validate(&Utils::ValidateSoundEffectDescription)
 			.Generate(&Utils::GenerateSoundEffect);
 	}

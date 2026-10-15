@@ -610,8 +610,10 @@ namespace Engine {
 				ScriptApiMember shortcut;
 				shortcut.Name = component->GetName();
 				shortcut.Kind = ScriptApiMemberKind::Property;
-				shortcut.Signature = component->GetName() + (component->HasFlag(ComponentFlags::Required) ? "" : "?");
-				shortcut.Description = "The entity's " + component->GetName() + " component, or nil when absent.";
+				// A Required component is on every entity, so its shortcut is never nil (M16 friction S1-10).
+				const bool required = component->HasFlag(ComponentFlags::Required);
+				shortcut.Signature = component->GetName() + (required ? "" : "?");
+				shortcut.Description = "The entity's " + component->GetName() + (required ? " component, which every entity has." : " component, or nil when absent.");
 				shortcut.Options.Mutates = false;
 				shortcut.Readable = true;
 				shortcut.ComponentTypeIndex = component->GetIndex();
@@ -951,6 +953,20 @@ namespace Engine {
 			}
 			return "\t" + member.Name + ": " + member.Signature + "\n";
 		}
+		// What two Script API reference headings would share as docs.get anchors (EditorCore/Automation/ObserveMethods.h):
+		// the text lowercased, without the '.' of "<Group>.<Member>". Registered names are Luau identifiers, so no other
+		// part of the anchor rule applies to them.
+		static std::string HeadingKey(std::string_view text)
+		{
+			std::string key;
+			key.reserve(text.size());
+			for (const char character : text)
+			{
+				if (character != '.')
+					key.push_back(character >= 'A' && character <= 'Z' ? static_cast<char>(character - 'A' + 'a') : character);
+			}
+			return key;
+		}
 
 	}
 
@@ -1019,14 +1035,35 @@ namespace Engine {
 	{
 		if (!IsFrozen())
 			return MakeError(ErrorCode::InvalidState, "script registry is not frozen");
+		// Unique headings and anchors (M16 friction S2-05): docs.get finds a section by its heading's text, then by its
+		// anchor, which drops the '.' of "<Group>.<Member>". A heading that would share its anchor with another names its
+		// kind instead: a module, type, enum or alias whose anchor a member heading has ("TestSuite (type)" beside
+		// "Test.Suite") or an earlier heading of that level took ("Script (component)" after the Script module), and a member
+		// heading that an earlier group's member took ("<Group>.<Member> (component)").
+		std::set<std::string> memberKeys;
+		for (const auto* groups : { &m_Storage->Modules, &m_Storage->Types })
+			for (const auto& group : *groups)
+				for (const auto& member : group.Members)
+					memberKeys.insert(Utils::HeadingKey(group.Name + "." + member.Name));
+		std::set<std::string> taken;
+		const auto heading = [&memberKeys, &taken](const std::string& name, std::string_view kind, bool member) -> std::string
+		{
+			const std::string key = Utils::HeadingKey(name);
+			if ((member || !memberKeys.contains(key)) && taken.insert(key).second)
+				return name;
+			return std::format("{} ({})", name, kind);
+		};
 		std::string result = "# Script API\n\nGenerated from ScriptApiRegistry and TypeRegistry.\n";
 		for (const auto* groups : { &m_Storage->Modules, &m_Storage->Types })
 			for (const auto& group : *groups)
 			{
-				result += "\n## " + group.Name + "\n\n" + group.Description + "\n";
+				const std::string_view kind = groups == &m_Storage->Modules       ? "global"
+					: m_Storage->Reflection->FindComponent(group.Name) != nullptr ? "component"
+																				  : "type";
+				result += "\n## " + heading(group.Name, kind, false) + "\n\n" + group.Description + "\n";
 				for (const auto& member : group.Members)
 				{
-					result += "\n### " + group.Name + "." + member.Name + "\n\n`" + member.Signature + "`\n\n" + member.Description + "\n\n" + Utils::Policy(member) + ".\n";
+					result += "\n### " + heading(group.Name + "." + member.Name, kind, true) + "\n\n`" + member.Signature + "`\n\n" + member.Description + "\n\n" + Utils::Policy(member) + ".\n";
 					for (const auto& parameter : member.Options.EnumParameters)
 					{
 						const std::string selector = parameter.Selector == ScriptArgumentType::Any ? std::string{}
@@ -1037,12 +1074,12 @@ namespace Engine {
 			}
 		for (const auto& item : m_Storage->Enums)
 		{
-			result += "\n## " + item.Name + "\n\n" + item.Description + "\n";
+			result += "\n## " + heading(item.Name, "enum", false) + "\n\n" + item.Description + "\n";
 			for (const auto& value : item.Values)
 				result += "\n- `" + value.Name + "`: " + value.Description + "\n";
 		}
 		for (const auto& item : m_Storage->Aliases)
-			result += "\n## " + item.Name + "\n\n`" + item.Definition + "`\n\n" + item.Description + "\n";
+			result += "\n## " + heading(item.Name, "type", false) + "\n\n`" + item.Definition + "`\n\n" + item.Description + "\n";
 		return result;
 	}
 

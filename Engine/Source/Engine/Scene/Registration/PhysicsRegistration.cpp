@@ -28,7 +28,8 @@ namespace Engine {
 	{
 		registry.Enum<BodyType>("BodyType", "How a rigid body moves.")
 			.Entry(BodyType::Static, "Static", "Never moves; the cheapest body, used for level geometry.")
-			.Entry(BodyType::Kinematic, "Kinematic", "Moved by script or animation; pushes dynamic bodies but is not pushed back.")
+			.Entry(BodyType::Kinematic, "Kinematic",
+				"Moved by script or animation; pushes dynamic bodies but is not pushed back, and static bodies never stop it (clamp its motion in the script).")
 			.Entry(BodyType::Dynamic, "Dynamic", "Simulated: moved by gravity, forces and collisions.");
 
 		registry.Enum<MotionQuality>("MotionQuality", "How a moving body is checked for collisions between steps.")
@@ -43,8 +44,13 @@ namespace Engine {
 			.Field("Type", &RigidBodyComponent::Type, "Static never moves; Kinematic is moved by script; Dynamic is simulated.")
 			.Field("Mass", &RigidBodyComponent::Mass, "Mass in kilograms (Dynamic only).",
 				{ .Min = Utils::MinPhysicsMass, .Max = static_cast<double>(MaxPhysicsMass), .Unit = "kg" })
-			.Field("Friction", &RigidBodyComponent::Friction, "The friction coefficient of the body's surfaces.", { .Min = 0.0 })
-			.Field("Restitution", &RigidBodyComponent::Restitution, "Bounciness, from no bounce (0) to a perfectly elastic bounce (1).",
+			.Field("Friction", &RigidBodyComponent::Friction,
+				"The friction coefficient of the body's surfaces. A contact uses the geometric mean of both bodies' values, so 0 on one body removes "
+				"friction from all its contacts.",
+				{ .Min = 0.0 })
+			.Field("Restitution", &RigidBodyComponent::Restitution,
+				"Bounciness, from no bounce (0) to a perfectly elastic bounce (1). A contact uses the larger of both bodies' values, so 1 on a ball "
+				"makes it bounce elastically off every surface.",
 				{ .Min = 0.0, .Max = 1.0 })
 			.Field("LinearDamping", &RigidBodyComponent::LinearDamping, "How quickly linear velocity decays, per second.", { .Min = 0.0 })
 			.Field("AngularDamping", &RigidBodyComponent::AngularDamping, "How quickly angular velocity decays, per second.", { .Min = 0.0 })

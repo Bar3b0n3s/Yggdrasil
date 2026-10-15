@@ -29,11 +29,11 @@
 						"pattern": "^[0-9a-fA-F]{16}$"
 					},
 					"Method": {
-						"description": "The automation method that wrote the file, \"ui\" for the windowed UI or \"project.upgrade\".",
+						"description": "The automation method that wrote the file, or \"ui\" for the windowed UI.",
 						"type": "string"
 					},
 					"RequestId": {
-						"description": "The JSON-RPC id as sent; null for ui and cli writes.",
+						"description": "The JSON-RPC id as sent; null for ui writes only (a cli entry carries its own request's id and transcript line).",
 						"type": ["integer", "string", "null"]
 					},
 					"Client": {

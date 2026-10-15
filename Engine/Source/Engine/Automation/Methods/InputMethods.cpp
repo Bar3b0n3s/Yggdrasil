@@ -305,7 +305,9 @@ namespace Engine {
 			.Field("type", &InputEventParams::Type, "The event type (required).")
 			.Field("name", &InputEventParams::Name, "action: the project action's name (exact, case-sensitive).")
 			.Field("state", &InputEventParams::State, "action, key, mouseButton, gamepadButton: down (the default), up or tap.")
-			.Field("value", &InputEventParams::Value, "action: an axis value in [-1, 1]; gamepadAxis: [-1, 1] for sticks (up positive), [0, 1] for triggers.",
+			.Field("value", &InputEventParams::Value,
+				"action: an axis value in [-1, 1]; gamepadAxis: [-1, 1] for sticks (up positive), [0, 1] for triggers. A value holds on every later "
+				"tick until another value for the same action or axis (or releaseAll) changes it; 0 releases it.",
 				unitMeta)
 			.Field("key", &InputEventParams::KeyName, "key: the key's name, such as \"Space\", \"A\" or \"Escape\".")
 			.Field("button", &InputEventParams::ButtonName, "mouseButton: \"Left\", \"Right\", \"Middle\" ...; gamepadButton: \"South\", \"Start\" ...")

@@ -41,8 +41,8 @@ Every new component, field and enum value is covered in `Projects/FeatureTest` i
 
 ## Consequences of a new serialized field
 
-- **State hashes change.** The state hash covers serialized component data, so every committed replay that touches the component's scenes changes its `FinalStateHash`. Re-record the replays through automation (`game-building`, "Re-recording replays") and state in the review why the hashes changed; `Projects/FeatureTest`'s replays are recorded by `Scaffold/Replays.jsonl`.
-- **Canonical form changes.** Files written before the change lack the new key, so the byte-identical re-save test fails for every project that holds the component. Run `project.upgrade` through automation on each demo project (`Editor --headless --project Projects/<Game> --upgrade`), which rewrites the files and records provenance and a transcript line, and regenerate `Projects/FeatureTest` with `Scaffold.py`.
+- **State hashes change.** The state hash covers serialized component data, so every committed replay that touches the component's scenes changes its checkpoints and `FinalStateHash`. Re-record the replays (which rewrites both) through automation (`game-building`, "Re-recording replays") and state in the review why the hashes changed; `Projects/FeatureTest`'s replays are recorded by `Scaffold/Replays.jsonl`.
+- **Canonical form changes.** Files written before the change lack the new key, so the byte-identical re-save test fails for every project that holds the component. Run `project.upgrade` through automation on each demo project (`Editor --headless --project <Game> --upgrade`, which transcribes `project.refreshAssets` and `project.upgrade` as client `cli`, or `project.upgrade` through the bridge), which rewrites the files and records provenance and their transcript lines, and regenerate `Projects/FeatureTest` with `Scaffold.py`.
 - **Goldens** may change when the field affects rendering (`golden-images`).
 
 ## Checklist

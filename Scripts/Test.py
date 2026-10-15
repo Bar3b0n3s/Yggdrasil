@@ -24,12 +24,16 @@ Suites and the configurations the §15.8 matrix runs them in when --config is no
                Dist             strictHash} in the --renderer none editor of Debug and Release, and read from the
                                 exported Release and Dist runs' reports (§15.1 T3d; ADR 0024 decision 10): one step
                                 over all requested configurations, which compares their hashes
-  games        Release          not available yet (M16-M18)
+  games        Debug, Release,  every staged demo game below Projects/ and Tests/Projects/ (§15.1 T5, §15.8; ADR 0026
+               Dist             decisions 7 and 8): its provenance audit, the editor half of Debug and Release (checks
+                                and test.run in a strict editor on its staged files) and the exported Dist half (a
+                                testing Dist export run with --feature-test, its hashes compared with the editor
+                                halves', and a plain Dist export's smoke test)
 --config takes Debug and Release for the doctest, feature and automation suites (test executables and the editor do not
-exist in Dist), Release and Dist for the export suite, and any of the three for the determinism suite. A suite named
-in --suite must take every configuration --config names (a usage error otherwise); with the default --suite all, each
-suite runs in the requested configurations it takes and reports each other one as a "skipped" step ("not run in
-<Config>"), so `--config Debug` runs every suite that has a Debug run.
+exist in Dist), Release and Dist for the export suite, and any of the three for the determinism and games suites. A
+suite named in --suite must take every configuration --config names (a usage error otherwise); with the default --suite
+all, each suite runs in the requested configurations it takes and reports each other one as a "skipped" step ("not run
+in <Config>"), so `--config Debug` runs every suite that has a Debug run.
 A suite that does not exist yet is reported with the distinct status "not-available"; it neither passes nor fails.
 
 GPU and golden runs (Docs/Decisions/0009-m5-decisions.md decision 14): a test case without a usable Vulkan device passes
@@ -101,14 +105,49 @@ The determinism suite (ADR 0022 decision 7, ADR 0024 decision 10, §15.1 T3d) ha
 Debug selects Editor Debug, Release Editor Release and Exported Release, Dist Exported Dist. Each editor run copies
 Projects/FeatureTest without Library/ into a temporary directory, starts `Editor --headless --renderer none
 --audio-device none --automation --strict` on it and runs input.replay {path, verify: true, strictHash: true} for every
-file Testing.Replays matches (the editor's glob rules); it needs no GPU. An exported run reads the "replay:<path>" rows
-of bin/TestResults/FeatureTest-<Config>.json, which the export suite of the same tree wrote, and is never rerun: a
-report older than the <Config> Runtime, the Release editor or a FeatureTest file outside Library/ (or missing) fails the
-step with exit code 3 naming `Test.py --suite export --junit` under --require-gpu, and otherwise leaves that run out of
-the comparison with the reason, as a warning. A replay fails when an editor run's verification fails, when a run has no
-hash, when a hash differs from the committed FinalStateHash, or when the runs disagree. With --junit it writes
-bin/TestResults/Determinism.xml, one test case per replay, whose failure lists each run's hash. A project whose
-Testing.Replays matches nothing ends as a warning.
+file Testing.Replays matches (the editor's glob rules), then the input check of each one with input events (it must
+fail input.replay {verify, strictHash, withoutInput}, M16 friction S2-01); it needs no GPU. An exported run reads the
+"replay:<path>" rows of bin/TestResults/FeatureTest-<Config>.json, which the export suite of the same tree wrote, and
+is never rerun: a report older than the <Config> Runtime, the Release editor or a FeatureTest file outside Library/ (or
+missing) fails the step with exit code 3 naming `Test.py --suite export --junit` under --require-gpu, and otherwise
+leaves that run out of the comparison with the reason, as a warning. A replay fails when an editor run's verification
+or input check fails, when a run has no hash, when a hash differs from the committed FinalStateHash, or when the runs
+disagree. With --junit it writes bin/TestResults/Determinism.xml, one test case per replay, whose failure lists each
+run's hash. A project whose Testing.Replays matches nothing ends as a warning.
+
+The games suite (Docs/Decisions/0026-m16-contract.md decisions 7 and 8) runs over the staged game projects
+(Scripts/Lib/games.py discover_projects in index mode: every directory directly below Projects/ or Tests/Projects/ whose
+root holds one staged *.eproj, Projects/FeatureTest excluded); a project found on disk but not staged gets one passed
+step, "games <Name>", and nothing else, and without any project the suite passes with one step, "games". Per project:
+  - "games <Name> audit": Scripts/Lib/provenance.py's audit of the staged files (the acceptance mode, as
+    Scripts/AuditProvenance.py --project runs it), failing with each finding's code and path;
+  - "games <Name> Editor <Config>" for Debug and Release: the project's staged blobs materialized into a temporary
+    directory (no Library/, no Build/), the strict rendering editor of that configuration on them (`--headless
+    --renderer vulkan --audio-device none --automation --strict --expect-no-gpu-errors`, with --user-data-dir and
+    --export-root in the temporary directory), then script.check and project.validate (warnings included) clean,
+    project.upgrade {dryRun: true} without a changed file (each one names `Editor --headless --project <dir>
+    --upgrade`), and test.run {} passed in Editor mode with a suite row for every Testing.Suites entry of that mode, no
+    skipped case row and a passing "replay:<path>" row at the committed FinalStateHash for every replay Testing.Replays
+    matches; at least one of those replays must have input events (games.check_replay_acceptance: a game whose
+    Testing.Replays matches no replay, or only replays without input, fails, as the demo acceptance of Roadmap M16 to
+    M18 asks); every such replay with input events must then fail input.replay {verify, strictHash, withoutInput} (the
+    input check, M16 friction S2-01: a replay whose verification passes without its input proves nothing); a .replay
+    below Assets/ that Testing.Replays leaves out fails it; after session.shutdown the editor must exit 0 and the copy
+    must be unchanged outside Library/;
+  - "games <Name> Dist", which the Release editor drives (in the Release half's session when Release runs too):
+    project.export {config: Dist, testing: true} installed to bin/Exports/Dist/<Name>/, `<package>/<Name> --headless
+    --feature-test` run in a temporary working directory (so the export suite's FeatureTest-Dist reports are never
+    touched), its exit code (printing the end of its log), its user data, its report in Dist mode, each replay's hash
+    against the committed one and every editor half of the run, and games.check_replay_acceptance; then a plain
+    project.export {config: Dist, smokeTest: true}, whose smoke test must exit 0 (one that did not run warns, and fails
+    with --require-gpu). In a session of its own (a run without Release), whatever fails after these checks (a refused
+    session.shutdown, a broken connection, a timeout, the editor's exit code) fails it too.
+The builds the requested halves need (each editor half's editor; the Release editor and the Dist Runtime for the Dist
+half) are looked up after the audits: a missing one fails its half with exit code 3. Then the device is probed once;
+without one the editor and Dist halves pass without running, as warnings, unless --require-gpu is given, and nothing
+is copied or started. With --junit it writes bin/TestResults/Games-<Config>.xml per requested configuration (the audit
+and suite-level steps in the first one), Games-<Name>-Editor-<Config>.json (the test.run document) and
+Games-<Name>-Dist.{json,xml} (the exported run's reports).
 
 --merge-coverage <Editor.json> <Release.json> <Dist.json> runs only the cross-mode union merge of §15.6
 (coverage.merge_coverage, decision 6) and prints one "merge: <rule>: <subject>" line per failure; it exits 0 when the
@@ -140,8 +179,9 @@ doctest's console reporter. If the test process dies before writing it, a JUnit 
 the crash.
 
 Exit codes: 0 every requested suite that exists passed, 1 a suite failed or none of the requested suites exists
-yet, 2 usage error, 3 a test executable or the MCP virtual environment is missing (build it, or run Setup.py), or a
-report the export or determinism suite reads is missing or stale (run the suite that writes it), 5 timeout.
+yet, 2 usage error, 3 a test executable or the MCP virtual environment is missing (build it, or run Setup.py), a
+report the export or determinism suite reads is missing or stale (run the suite that writes it), or a game's
+provenance files are missing or git fails, 5 timeout.
 """
 
 from __future__ import annotations
@@ -167,7 +207,7 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
-from Lib import coverage, exports, hardening, paths
+from Lib import coverage, exports, games, hardening, paths, provenance
 from Lib.process import (
     ToolNotFoundError,
     child_environment,
@@ -257,6 +297,8 @@ UNCOVERED_IN_DETAIL = 5
 FEATURE_PROJECT = paths.REPOSITORY_ROOT / "Projects" / "FeatureTest"
 FEATURE_PROJECT_FILE = FEATURE_PROJECT / "FeatureTest.eproj"
 PROJECT_CACHE_DIRECTORY = "Library"
+# A project's export output (project.export without --export-root writes <Project>/Build/), which no copy takes.
+PROJECT_BUILD_DIRECTORY = "Build"
 GPU_PROBE_ARGUMENTS = ("--gpu-validation=sync", "--expect-no-gpu-errors")
 GPU_PROBE_TIMEOUT_SECONDS = 120.0
 NO_DEVICE_TEXT = "GPU test without a device (passes without running): "
@@ -280,6 +322,19 @@ PROJECT_LOCK_FILE = "Editor.lock"
 DEFAULT_EDITOR_REPORT = paths.TEST_RESULTS_ROOT / "Feature-Release.json"
 MERGE_STEP_NAME = "merge coverage"
 LOG_TAIL_LINES = 40
+
+# The games suite (Docs/Decisions/0026-m16-contract.md decision 8): the strict rendering editor of the editor halves and
+# of the Dist half's exports, failing its exit code on any GPU error or warning; the exported configuration and the
+# label of its run among exports.DETERMINISM_RUNS; the suite-level step and its note without a game; the findings an
+# audit step's detail names before it counts the rest (the console and the step's data list every one).
+GAMES_EDITOR_ARGUMENTS = ("--headless", "--renderer", "vulkan", "--audio-device", "none", "--automation",
+                          STRICT_EDITOR_ARGUMENT, "--expect-no-gpu-errors")
+DIST_HALF = games.EXPORTED_CONFIGURATION
+EXPORTED_DIST_RUN = f"Exported {DIST_HALF}"
+GAMES_STEP_NAME = "games"
+NO_GAME_PROJECT_NOTE = "no game project below Projects/ or Tests/Projects/ (FeatureTest excluded)"
+GAMES_FINDINGS_IN_DETAIL = 20
+GIT_TIMEOUT_SECONDS = 120.0
 
 
 # The configurations whose binaries the doctest, feature and automation suites run: test executables and the editor do
@@ -306,7 +361,7 @@ SUITES = {
         Suite("automation", ("Release",), True),
         Suite("export", exports.EXPORTED_CONFIGURATIONS, True, allowed=exports.EXPORTED_CONFIGURATIONS),
         Suite("determinism", ("Debug", "Release", "Dist"), True, allowed=paths.CONFIGURATIONS),
-        Suite("games", ("Release",), False, "M16-M18 (demo games)"),
+        Suite("games", ("Debug", "Release", "Dist"), True, allowed=paths.CONFIGURATIONS),
     )
 }
 
@@ -731,6 +786,12 @@ def editor_executable(config: str, build_root: Path = paths.BIN_ROOT) -> Path:
     return build_root / paths.output_directory_name(config) / "Editor" / paths.executable_name("Editor")
 
 
+def runtime_executable(config: str, build_root: Path = paths.BIN_ROOT) -> Path:
+    """<build root>/<OutputDir>/Runtime/Runtime: the Runtime a testing export of `config` packages, which the export and
+    games suites look up before they export."""
+    return build_root / paths.output_directory_name(config) / "Runtime" / paths.executable_name("Runtime")
+
+
 def venv_interpreter() -> Path:
     return MCP_VENV / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
 
@@ -1062,10 +1123,11 @@ def describe_export_error(error: Any) -> str:
     return error.detail + (f" ({'; '.join(issues)})" if issues else "")
 
 
-def install_package(output: Path, config: str) -> Path:
-    """Moves the export in `output` to exports.package_directory(config), replacing an earlier one; returns the package
-    directory. Raises OSError when the earlier package cannot be removed or the move fails."""
-    package = exports.package_directory(config)
+def install_package(output: Path, config: str, name: str = exports.FEATURE_TEST_NAME) -> Path:
+    """Moves the export in `output` to exports.package_directory(config, name) (bin/Exports/<config>/<name>), replacing
+    an earlier one; returns the package directory. Raises OSError when the earlier package cannot be removed or the move
+    fails."""
+    package = exports.package_directory(config, name)
     if package.exists():
         shutil.rmtree(package)
     package.parent.mkdir(parents=True, exist_ok=True)
@@ -1214,7 +1276,7 @@ def run_export(configs: list[str], arguments: argparse.Namespace, console: Conso
                                           f"--config {exports.EXPORTING_EDITOR_CONFIGURATION} --project Editor",
                      exit_code=EXIT_INIT_FAILED) for name in names]
     for config in configs:
-        runtime = paths.output_directory(config) / "Runtime" / paths.executable_name("Runtime")
+        runtime = runtime_executable(config)
         if not runtime.is_file():
             return [Step(f"export {config}", Status.FAILED, f"{paths.display_path(runtime)} not found: run python "
                                                             f"Scripts/Build.py --config {config} --project Runtime",
@@ -1341,14 +1403,15 @@ class ReplayOutcome:
 
 
 def copy_project(source: Path, destination: Path, keep_cache: bool = False) -> Path:
-    """Copies the project `source` to `destination`, without its Library/ directory unless `keep_cache` (the import
-    cache, which then saves the copy's editor the imports, without the project lock file of an editor that may hold the
-    source); returns its project file."""
+    """Copies the project `source` to `destination`, without its Build/ directory (exports, never project input) and
+    without its Library/ directory unless `keep_cache` (the import cache, which then saves the copy's editor the
+    imports, without the project lock file of an editor that may hold the source); returns its project file."""
     cache = source / PROJECT_CACHE_DIRECTORY
+    skipped = {PROJECT_BUILD_DIRECTORY} | (set() if keep_cache else {PROJECT_CACHE_DIRECTORY})
 
     def ignored(directory: str, names: list[str]) -> list[str]:
-        if Path(directory) == source and not keep_cache:
-            return [name for name in names if name == PROJECT_CACHE_DIRECTORY]
+        if Path(directory) == source:
+            return [name for name in names if name in skipped]
         if Path(directory) == cache:
             return [name for name in names if name == PROJECT_LOCK_FILE]
         return []
@@ -1363,30 +1426,22 @@ def copy_project(source: Path, destination: Path, keep_cache: bool = False) -> P
 def verify_replays(editor: Path, project_file: Path, replays: list[str], user_data: Path,
                    timeout: float) -> list[ReplayOutcome]:
     """Starts `editor --headless --renderer none --audio-device none --automation --strict` on `project_file` and runs
-    input.replay {path, verify: true, strictHash: true} for each of `replays`, in order. Each outcome holds the observed
-    stateHash and any failure; the editor is always stopped. Raises RuntimeError when the editor cannot be started or
-    reached."""
+    input.replay {path, verify: true, strictHash: true} for each of `replays`, in order, then the input check of each
+    replay with input events (input_check_failures). Each outcome holds the observed stateHash and any failure; the
+    editor is always stopped. Raises RuntimeError when the editor cannot be started or reached, and ValueError when a
+    replay file cannot be read."""
     engine_client = import_engine_client()
+    events = games.replay_event_counts(project_file.parent, replays)
     process = engine_client.launch_editor(editor, [*DETERMINISM_EDITOR_ARGUMENTS, "--project", str(project_file)],
                                           user_data, paths.workspace_name(), environment=child_environment())
     outcomes: list[ReplayOutcome] = []
     try:
         client = process.connect("determinism", call_log=engine_client.CallLog(None))
         with client:
-            for path in replays:
-                outcome = ReplayOutcome(path)
-                try:
-                    result = client.call("input.replay", {"path": path, "verify": True, "strictHash": True},
-                                         timeout=timeout)
-                except engine_client.EngineError as error:
-                    result = error.data.get("replay") if isinstance(error.data.get("replay"), dict) else {}
-                    outcome.problems.append(f"input.replay failed: {error.detail}")
-                outcome.state_hash = str(result.get("stateHash", ""))
-                if result and not result.get("passed", False) and not outcome.problems:
-                    outcome.problems.append("verification failed")
-                if result.get("stopReason"):
-                    outcome.problems.append(f"stopped before its final tick: {result['stopReason']}")
-                outcomes.append(outcome)
+            outcomes = replay_outcomes(client, engine_client, replays, timeout)
+            checked = input_check_failures(client, engine_client, events, timeout)
+            for outcome in outcomes:
+                outcome.problems += checked.get(outcome.path, [])
             try:
                 client.call("session.shutdown", {"force": True}, timeout=EDITOR_SHUTDOWN_TIMEOUT_SECONDS)
             except (engine_client.EngineError, engine_client.ConnectionClosed, TimeoutError):
@@ -1398,6 +1453,55 @@ def verify_replays(editor: Path, project_file: Path, replays: list[str], user_da
     finally:
         process.kill()
     return outcomes
+
+
+def replay_outcomes(client: Any, engine_client: Any, replays: list[str], timeout: float) -> list[ReplayOutcome]:
+    """input.replay {path, verify: true, strictHash: true} for each of `replays`, in order, on the open session of
+    `client` (an engine_client.EngineClient; `engine_client` is the module, for its EngineError): each outcome holds the
+    observed stateHash and any failure (a refused or failed verification, a replay stopped before its final tick).
+    Connection errors (engine_client.ConnectionClosed, ProtocolError, TimeoutError) propagate to the caller."""
+    outcomes: list[ReplayOutcome] = []
+    for path in replays:
+        outcome = ReplayOutcome(path)
+        try:
+            result = client.call("input.replay", {"path": path, "verify": True, "strictHash": True}, timeout=timeout)
+        except engine_client.EngineError as error:
+            result = error.data.get("replay") if isinstance(error.data.get("replay"), dict) else {}
+            outcome.problems.append(f"input.replay failed: {error.detail}")
+        outcome.state_hash = str(result.get("stateHash", ""))
+        if result and not result.get("passed", False) and not outcome.problems:
+            outcome.problems.append("verification failed")
+        if result.get("stopReason"):
+            outcome.problems.append(f"stopped before its final tick: {result['stopReason']}")
+        outcomes.append(outcome)
+    return outcomes
+
+
+def input_check_failures(client: Any, engine_client: Any, events: dict[str, int],
+                         timeout: float) -> dict[str, list[str]]:
+    """The input check of the replays in `events` ({project-relative path: input event count}) that hold input events
+    (M16 friction S2-01): each is verified again with input.replay {verify: true, strictHash: true, withoutInput: true}
+    on the open session of `client`, and that verification must fail (games.evaluate_input_check), since a replay whose
+    outcome does not depend on its input proves nothing about its gameplay. Returns {replay: failure lines} for the
+    replays that fail it; afterwards no play session is left (play.stop, a failure naming the first replay checked when
+    it is refused). Connection errors propagate to the caller."""
+    failures: dict[str, list[str]] = {}
+    checked = [replay for replay, count in events.items() if count > 0]
+    for replay in checked:
+        params = {"path": replay, "verify": True, "strictHash": True, "withoutInput": True}
+        try:
+            result = client.call("input.replay", params, timeout=timeout)
+            lines = games.evaluate_input_check(replay, events[replay], result, None)
+        except engine_client.EngineError as error:
+            lines = games.evaluate_input_check(replay, events[replay], None, (error.error_code, error.detail))
+        if lines:
+            failures[replay] = lines
+    if checked and client.call("play.state", {}, timeout=timeout).get("state") != "Edit":
+        try:
+            client.call("play.stop", {}, timeout=timeout)
+        except engine_client.EngineError as error:
+            failures.setdefault(checked[0], []).append(f"play.stop after the input check failed: {error.detail}")
+    return failures
 
 
 def determinism_problems(committed: dict[str, str], outcomes: dict[str, list[ReplayOutcome]],
@@ -1557,6 +1661,502 @@ def run_determinism(configs: list[str], arguments: argparse.Namespace, console: 
     return Step(name, Status.PASSED, detail, duration, data=data)
 
 
+# --------------------------------------------------------------------------------------------------------------------
+# The games suite (Docs/Decisions/0026-m16-contract.md decisions 7 and 8, §15.1 T5)
+# --------------------------------------------------------------------------------------------------------------------
+
+
+def games_audit_step(project: games.GameProject, console: Console) -> Step:
+    """"games <Name> audit": provenance.audit_project of the project's staged files (index mode, the acceptance mode);
+    it needs neither a build nor a device. A failure names its findings ("<code> <path>"; the console and the step's
+    "audit" data list every one) with exit code 1, or 3 when a required file is missing or git fails."""
+    name = f"games {project.name} audit"
+    data: dict[str, object] = {"suite": "games", "project": paths.display_path(project.directory)}
+    started = time.monotonic()
+    console.heading(f"{name}: the provenance audit of the staged {paths.display_path(project.directory)}")
+    try:
+        audit = provenance.audit_project(project.directory, "index")
+    except (RuntimeError, ValueError) as error:
+        return Step(name, Status.FAILED, f"the provenance audit could not run: {error}", time.monotonic() - started,
+                    exit_code=EXIT_INIT_FAILED, data=data)
+    data["audit"] = provenance.audit_to_json(audit)
+    for warning in audit.warnings:
+        console.print(f"  warning {warning.code}: {warning.path}: {warning.detail}")
+    for finding in audit.findings:
+        console.print(f"  {finding.code}: {finding.path}: {finding.detail}")
+    duration = time.monotonic() - started
+    counts = audit.counts
+    if not audit.findings:
+        return Step(name, Status.PASSED, f"index: {counts.get('files', 0)} engine-consumed file(s), "
+                                         f"{counts.get('entries', 0)} entries, {counts.get('transcriptLines', 0)} "
+                                         f"transcript line(s) ({counts.get('requests', 0)} requests), "
+                                         f"{len(audit.warnings)} warning(s)", duration, data=data)
+    named = "; ".join(f"{finding.code} {finding.path or '(the project)'}"
+                      for finding in audit.findings[:GAMES_FINDINGS_IN_DETAIL])
+    more = len(audit.findings) - GAMES_FINDINGS_IN_DETAIL
+    return Step(name, Status.FAILED, f"{len(audit.findings)} provenance finding(s): {named}"
+                                     + (f" and {more} more" if more > 0 else ""),
+                duration, exit_code=provenance.audit_exit_code(audit), data=data)
+
+
+def git_toplevel(directory: Path) -> Path:
+    """The work tree root of the git repository that holds `directory` (git rev-parse --show-toplevel). Raises
+    RuntimeError naming the command and its output when git is missing or fails."""
+    command = ["git", "-C", str(directory), "rev-parse", "--show-toplevel"]
+    try:
+        result = run_captured(command, cwd=paths.REPOSITORY_ROOT, env=child_environment(), timeout=GIT_TIMEOUT_SECONDS)
+    except ToolNotFoundError as error:
+        raise RuntimeError(f"{format_command(command)} could not run: {error}") from error
+    if not result.succeeded:
+        raise RuntimeError(f"{format_command(command)} {result.describe_exit()}: {result.tail(3)}")
+    return Path(result.output.strip()).resolve()
+
+
+def materialize_game(project: games.GameProject, destination: Path) -> Path:
+    """The staged files of `project` as a fresh clone of the commit about to be made holds them
+    (provenance.materialize_index below `destination`: no Library/, no Build/, no untracked or ignored file); returns
+    the copy's project directory. Raises RuntimeError when git fails and ValueError when the index holds no project
+    file."""
+    copy = provenance.materialize_index(git_toplevel(project.directory), project.directory.resolve(), destination)
+    if not (copy / project.project_file.name).is_file():
+        raise ValueError(f"the index holds no {paths.display_path(project.project_file)}")
+    return copy
+
+
+def game_replay_hashes(document: Any) -> dict[str, str]:
+    """{replay path: finalStateHash} of the "replay:<path>" suite rows of a TestRunResult document that carry a hash,
+    as exports.read_replay_hashes reads them from a report file."""
+    rows = document.get("suites") if isinstance(document, dict) else None
+    hashes: dict[str, str] = {}
+    for row in rows if isinstance(rows, list) else []:
+        if not isinstance(row, dict) or not isinstance(row.get("suite"), str):
+            continue
+        state_hash = row.get("finalStateHash")
+        if row["suite"].startswith(games.REPLAY_SUITE_PREFIX) and isinstance(state_hash, str) and state_hash:
+            hashes[row["suite"][len(games.REPLAY_SUITE_PREFIX):]] = state_hash
+    return hashes
+
+
+def failed_with(step: Step, line: str, status: Status = Status.FAILED) -> Step:
+    """`step` failed with `line` added to its failures: a session check that came after the step was decided (the
+    exit code of the editor that also ran it, a refused session.shutdown, a broken connection or a timeout). A step
+    that had not failed takes `status`; one that had keeps its own."""
+    failures = [*step.data.get("failures", []), line] if step.failed else [line]
+    data = {**step.data, "failures": failures}
+    return Step(step.name, step.status if step.failed else status, describe_lines(failures), step.duration,
+                exit_code=step.exit_code, data=data)
+
+
+def failed_with_lines(step: Step, lines: list[str], status: Status = Status.FAILED) -> Step:
+    """failed_with for each of `lines` in order; `step` unchanged when there is none."""
+    for line in lines:
+        step = failed_with(step, line, status)
+    return step
+
+
+@dataclasses.dataclass
+class GameCopy:
+    """The staged copy one editor session of a game runs on, and what the games suite reads from it."""
+
+    directory: Path  # the copy's project directory (materialize_game)
+    project_file: Path
+    testing: games.TestingSettings
+    matched: list[str]  # the project-relative replays Testing.Replays matches (expand_replay_globs)
+    committed: dict[str, str]  # their committed FinalStateHash
+    events: dict[str, int] = dataclasses.field(default_factory=dict)  # their input event counts (the input check)
+
+
+def check_game_in_editor(client: Any, engine_client: Any, project: games.GameProject, config: str, copy: GameCopy,
+                         hashes: dict[str, dict[str, str]], data: dict[str, object], arguments: argparse.Namespace,
+                         console: Console) -> list[str]:
+    """The editor half's checks on the open session (decision 8 step 2), as failure lines: script.check and
+    project.validate clean, the upgrade dry run with no changed file, test.run {} evaluated with games.evaluate_run
+    in Editor mode (its replay hashes go into `hashes` as "Editor <config>", and with --junit the document into
+    games.editor_report_path), at least one committed replay with input events (games.check_replay_acceptance), the
+    input check of every committed replay with input events (input_check_failures: its verification without them must
+    fail, M16 friction S2-01), and no replay below Assets/ that Testing.Replays leaves out."""
+    failures: list[str] = []
+
+    def call(method: str, params: dict[str, Any]) -> dict[str, Any] | None:
+        console.heading(f"games {project.name} Editor {config}: {method}")
+        try:
+            return client.call(method, params, timeout=arguments.timeout)
+        except engine_client.EngineError as error:
+            failures.append(f"{method} failed: {describe_export_error(error)}")
+            return None
+
+    checked = call("script.check", {})
+    if checked is not None:
+        failures += games.check_script_check(checked)
+    validated = call("project.validate", {})
+    if validated is not None:
+        failures += games.check_validate(validated)
+    upgraded = call("project.upgrade", {"dryRun": True})
+    if upgraded is not None:
+        failures += games.check_upgrade_dry_run(upgraded, project)
+    result = call("test.run", {})
+    if result is not None:
+        try:
+            # A result over the bounded-output limit comes back as a file in the copy's Library/ (§13.4).
+            document = engine_client.load_offloaded(result)
+        except (OSError, ValueError, engine_client.ProtocolError) as error:
+            failures.append(f"the test.run result cannot be read: {error}")
+        else:
+            failures += games.evaluate_run(document, "Editor", copy.testing, copy.committed)
+            hashes[f"Editor {config}"] = game_replay_hashes(document)
+            data["hashes"] = hashes[f"Editor {config}"]
+            if arguments.junit:
+                report = games.editor_report_path(project, config)
+                report.parent.mkdir(parents=True, exist_ok=True)
+                report.write_text(json.dumps({key: value for key, value in document.items() if key != "_meta"},
+                                             indent="\t") + "\n", encoding="utf-8")
+                data["report"] = paths.display_path(report)
+    failures += games.check_replay_acceptance(copy.events)
+    with_events = sorted(replay for replay, count in copy.events.items() if count > 0)
+    if with_events:
+        console.heading(f"games {project.name} Editor {config}: input.replay {{verify, strictHash, withoutInput}} of "
+                        f"{len(with_events)} replay(s) with input events, which must fail")
+        checked = input_check_failures(client, engine_client, copy.events, arguments.timeout)
+        data["inputChecked"] = with_events
+        for replay in sorted(checked):
+            failures += checked[replay]
+    failures += games.check_replays_matched(copy.directory, copy.matched)
+    return failures
+
+
+def check_game_export(client: Any, engine_client: Any, project: games.GameProject, copy: GameCopy,
+                      hashes: dict[str, dict[str, str]], work: Path, data: dict[str, object],
+                      arguments: argparse.Namespace, console: Console) -> Step:
+    """The Dist half on the open session of the Release editor (decision 8 step 3): project.export {config: Dist,
+    testing: true} installed to bin/Exports/Dist/<Name>/, the package's --feature-test run from a temporary working
+    directory (its reports copied to games.dist_report_path with --junit, so the export stage's FeatureTest-Dist
+    reports are never touched), its exit code, testing user data and games.evaluate_run in Dist mode,
+    games.compare_game_hashes over the committed hashes, every editor half of this run (`hashes`) and the exported run,
+    games.check_replay_acceptance (a game whose determinism rests on no replay with input fails here too), then a plain
+    project.export {config: Dist, smokeTest: true} into the editor's export root, checked with games.check_smoke."""
+    name = f"games {project.name} Dist"
+    started = time.monotonic()
+    console.heading(f"{name}: project.export {{config: {DIST_HALF}, testing: true}}")
+    try:
+        result = client.call("project.export", {"config": DIST_HALF, "testing": True}, timeout=arguments.timeout)
+    except engine_client.EngineError as error:
+        return Step(name, Status.FAILED, f"the testing {DIST_HALF} export failed: {describe_export_error(error)}",
+                    time.monotonic() - started, data=data)
+    data.update({"testSuites": result.get("testSuiteCount"), "replays": result.get("replayCount")})
+    try:
+        package = install_package(Path(str(result["outputDirectory"])), DIST_HALF, project.name)
+    except (OSError, KeyError) as error:
+        destination = paths.display_path(exports.package_directory(DIST_HALF, project.name))
+        return Step(name, Status.FAILED, f"cannot move the testing export to {destination}: {error}",
+                    time.monotonic() - started, data=data)
+    executable = exports.package_executable(package, project.name)
+    data["package"] = paths.display_path(package)
+    if not executable.is_file():
+        return Step(name, Status.FAILED, f"the package holds no {paths.display_path(executable)}",
+                    time.monotonic() - started, data=data)
+
+    # The Runtime names its reports FeatureTest-Dist whatever the game (RuntimeApp.cpp), below its working directory.
+    run_directory = work / "DistRun"
+    run_directory.mkdir(parents=True, exist_ok=True)
+    report = run_directory / "bin" / "TestResults" / f"{exports.FEATURE_TEST_NAME}-{DIST_HALF}.json"
+    command = [str(executable), "--headless", "--feature-test"]
+    console.heading(f"{name}: {format_command([paths.display_path(executable), *command[1:]])}")
+    try:
+        run = run_streamed(command, cwd=run_directory, env=child_environment(), timeout=arguments.timeout,
+                           echo=console.stream)
+    except ToolNotFoundError as error:
+        return Step(name, Status.FAILED, str(error), time.monotonic() - started, data=data)
+    log = exports.testing_user_data(package, project.name) / "Logs" / f"{project.name}.log"
+    if run.timed_out:
+        console.print(tail_lines(log, LOG_TAIL_LINES))
+        return Step(name, Status.TIMEOUT, f"the {DIST_HALF} --feature-test run {run.describe_exit()}",
+                    time.monotonic() - started, data=data)
+    failures: list[str] = []
+    if run.exit_code != EXIT_SUCCESS:
+        failures.append(f"the {DIST_HALF} --feature-test run {run.describe_exit()}")
+        console.print(f"The end of {paths.display_path(log)}:")
+        console.print(tail_lines(log, LOG_TAIL_LINES))
+    failures += check_testing_user_data(package, project.name)
+    exported: dict[str, str] = {}
+    try:
+        failures += games.evaluate_run(json.loads(report.read_text(encoding="utf-8")), DIST_HALF, copy.testing,
+                                       copy.committed)
+        exported = exports.read_replay_hashes(report)
+    except (OSError, ValueError) as error:
+        failures.append(f"no readable --feature-test report: {error}")
+    if arguments.junit:
+        for suffix in (".json", ".xml"):
+            source = report.with_suffix(suffix)
+            if source.is_file():
+                destination = games.dist_report_path(project, suffix)
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(source, destination)
+        data["report"] = paths.display_path(games.dist_report_path(project, ".json"))
+    runs = {**hashes, EXPORTED_DIST_RUN: exported}
+    data["hashes"] = runs
+    failures += games.compare_game_hashes(copy.committed, runs)
+    failures += games.check_replay_acceptance(copy.events)
+
+    console.heading(f"{name}: project.export {{config: {DIST_HALF}, smokeTest: true}}")
+    warnings: list[str] = []
+    try:
+        smoke = client.call("project.export", {"config": DIST_HALF, "smokeTest": True}, timeout=arguments.timeout)
+        smoke_failures, warnings = games.check_smoke(smoke, arguments.require_gpu)
+        failures += smoke_failures
+        data["smokeTestRan"] = smoke.get("smokeTestRan")
+    except engine_client.EngineError as error:
+        failures.append(f"the plain {DIST_HALF} export failed: {describe_export_error(error)}")
+    duration = time.monotonic() - started
+    for failure in failures:
+        console.print(f"FAILED: {failure}")
+    if failures:
+        data["failures"] = failures
+        return Step(name, Status.FAILED, describe_lines(failures), duration, data=data)
+    compared = ", ".join(runs)
+    detail = (f"the testing {DIST_HALF} export ({data['testSuites']} suite(s), {data['replays']} replay(s)) passed "
+              f"--feature-test with every replay at its committed FinalStateHash in {compared}")
+    if warnings:
+        data["warnings"] = warnings
+        return Step(name, Status.WARNING, f"{detail}; {'; '.join(warnings)}", duration, data=data)
+    return Step(name, Status.PASSED, f"{detail}; the plain {DIST_HALF} export's smoke test exited 0", duration,
+                data=data)
+
+
+def shutdown_game_editor(client: Any, engine_client: Any) -> list[str]:
+    """session.shutdown {}, as failure lines: none when the editor accepts it; when it refuses (unsaved changes in the
+    open scene, which no check may leave), a failure, and session.shutdown {force: true} so the editor still exits."""
+    try:
+        client.call("session.shutdown", {}, timeout=EDITOR_SHUTDOWN_TIMEOUT_SECONDS)
+        return []
+    except engine_client.EngineError as error:
+        client.call("session.shutdown", {"force": True}, timeout=EDITOR_SHUTDOWN_TIMEOUT_SECONDS)
+        return [f"session.shutdown refused to exit ({error.detail}): the checks left unsaved changes in the open scene"]
+
+
+def drive_game_session(project: games.GameProject, config: str, editor_half: bool, dist_half: bool,
+                       hashes: dict[str, dict[str, str]], arguments: argparse.Namespace,
+                       console: Console) -> tuple[Step | None, Step | None]:
+    """One strict rendering editor of `config` on a fresh copy of the project's staged files (materialize_game),
+    started through engine_client (GAMES_EDITOR_ARGUMENTS, --user-data-dir and --export-root in a temporary directory):
+    with `editor_half` the checks of check_game_in_editor, with `dist_half` those of check_game_export, then
+    session.shutdown, after which the editor must exit 0 and, for the editor half, the copy must be unchanged outside
+    Library/ (snapshot_project). What fails after the Dist checks (a refused session.shutdown, a broken connection, a
+    timeout, the exit code) fails the editor step when an editor half shares the session, and the Dist step otherwise.
+    Returns (the "games <Name> Editor <config>" step or None, the "games <Name> Dist" step or None)."""
+    editor = editor_executable(config)
+    shown = paths.display_path(project.directory)
+    editor_name = f"games {project.name} Editor {config}"
+    dist_name = f"games {project.name} Dist"
+    editor_data: dict[str, object] = {"suite": "games", "project": shown, "config": config,
+                                      "editor": paths.display_path(editor)}
+    dist_data: dict[str, object] = {"suite": "games", "project": shown, "config": DIST_HALF,
+                                    "editor": paths.display_path(editor)}
+    started = time.monotonic()
+
+    def failed(lines: list[str], status: Status = Status.FAILED,
+               done: Step | None = None) -> tuple[Step | None, Step | None]:
+        """Both requested steps failed with `lines`. A Dist step already `done` keeps its result when the editor half
+        shares the session, whose step reports the lines; without an editor half the lines fail it (failed_with_lines),
+        so a Dist-only run never drops a failure that came after its checks."""
+        duration = time.monotonic() - started
+        detail = describe_lines(lines)
+        editor_step = Step(editor_name, status, detail, duration, data=editor_data) if editor_half else None
+        if done is not None:
+            return editor_step, done if editor_half else failed_with_lines(done, lines, status)
+        return editor_step, Step(dist_name, status, detail, duration, data=dist_data) if dist_half else None
+
+    engine_client = import_engine_client()
+    with tempfile.TemporaryDirectory(prefix=f"Test-Games-{config}-") as directory:
+        work = Path(directory)
+        try:
+            copy_directory = materialize_game(project, work / "Index")
+            project_file = copy_directory / project.project_file.name
+            testing = games.read_testing(project_file)
+            matched = expand_replay_globs(copy_directory, list(testing.replays))
+            copy = GameCopy(copy_directory, project_file, testing, matched,
+                            games.committed_hashes(copy_directory, matched),
+                            games.replay_event_counts(copy_directory, matched))
+        except (RuntimeError, ValueError, OSError) as error:
+            return failed([f"the staged project cannot be prepared: {error}"])
+        editor_data["replays"] = copy.committed
+        before = snapshot_project(copy.directory)
+        command = [*GAMES_EDITOR_ARGUMENTS, "--export-root", str(work / "Exports"), "--project", str(project_file)]
+        console.heading(f"games {project.name} ({config} editor on the staged files): "
+                        f"{format_command([paths.display_path(editor), *command])}")
+        try:
+            process = engine_client.launch_editor(editor, command, work / "UserData", paths.workspace_name(),
+                                                  environment=child_environment())
+        except (RuntimeError, TimeoutError, ValueError, OSError) as error:
+            return failed([f"the {config} editor could not start: {error}"])
+        editor_failures: list[str] = []
+        dist_step: Step | None = None
+        try:
+            client = process.connect("games", call_log=engine_client.CallLog(None))
+            with client:
+                if editor_half:
+                    editor_failures += check_game_in_editor(client, engine_client, project, config, copy, hashes,
+                                                            editor_data, arguments, console)
+                if dist_half:
+                    dist_step = check_game_export(client, engine_client, project, copy, hashes, work, dist_data,
+                                                  arguments, console)
+                editor_failures += shutdown_game_editor(client, engine_client)
+            exit_code = process.wait(EDITOR_SHUTDOWN_TIMEOUT_SECONDS)
+        except TimeoutError as error:
+            return failed([*editor_failures, f"the {config} editor did not answer in time: {error}"], Status.TIMEOUT,
+                          dist_step)
+        except (engine_client.EngineError, engine_client.ConnectionClosed, engine_client.ProtocolError,
+                OSError) as error:
+            console.print(process.output())
+            return failed([*editor_failures, f"the {config} editor failed: {error}"], Status.FAILED, dist_step)
+        finally:
+            process.kill()
+        exit_failure = (f"the {config} editor exited with code {describe_exit_code(exit_code)} after session.shutdown "
+                        f"(--expect-no-gpu-errors fails it on any GPU error or warning)") if exit_code != 0 else ""
+        if not editor_half:
+            # The Dist step is this session's only step: a refused session.shutdown and the exit code fail it.
+            lines = [*editor_failures, *([exit_failure] if exit_failure else [])]
+            return None, failed_with_lines(dist_step, lines) if dist_step is not None else None
+        editor_failures += [exit_failure] if exit_failure else []
+        for change in compare_snapshots(before, snapshot_project(copy.directory)):
+            kind, path = change.split(": ", 1)
+            editor_failures.append(f"{path}: {kind} by the {config} editor's run, which must leave the staged files "
+                                   f"as committed")
+    # A shared session's Dist half counts in its own step.
+    duration = time.monotonic() - started - (dist_step.duration if dist_step is not None else 0.0)
+    for failure in editor_failures:
+        console.print(f"FAILED: {failure}")
+    if editor_failures:
+        editor_data["failures"] = editor_failures
+        return Step(editor_name, Status.FAILED, describe_lines(editor_failures), duration, data=editor_data), dist_step
+    checked = sum(1 for count in copy.events.values() if count > 0)
+    return (Step(editor_name, Status.PASSED, f"script.check, project.validate and the upgrade dry run clean; test.run "
+                                             f"passed with {len(copy.committed)} replay(s) at their committed "
+                                             f"FinalStateHash; {checked} replay(s) with input events fail without it; "
+                                             f"the editor exited 0 and left the staged files unchanged",
+                 duration, data=editor_data), dist_step)
+
+
+def missing_game_builds(halves: list[str], exported: bool, arguments: argparse.Namespace) -> dict[str, str]:
+    """{half: why it cannot run} for each requested half whose build is missing: an editor half's editor, and for the
+    Dist half the Release editor that exports and the Dist Runtime the export packages (decision 8)."""
+    missing: dict[str, str] = {}
+    for config in halves:
+        editor = editor_executable(config)
+        if not editor.is_file():
+            missing[config] = f"{paths.display_path(editor)} not found: {build_hint(config, 'Editor', arguments)}"
+    if exported:
+        problems: list[str] = []
+        editor = editor_executable(exports.EXPORTING_EDITOR_CONFIGURATION)
+        if not editor.is_file():
+            problems.append(f"{paths.display_path(editor)} not found: "
+                            f"{build_hint(exports.EXPORTING_EDITOR_CONFIGURATION, 'Editor', arguments)}")
+        runtime = runtime_executable(DIST_HALF)
+        if not runtime.is_file():
+            problems.append(f"{paths.display_path(runtime)} not found: {build_hint(DIST_HALF, 'Runtime', arguments)}")
+        if problems:
+            missing[DIST_HALF] = "; ".join(problems)
+    return missing
+
+
+def run_game_halves(project: games.GameProject, halves: list[str], exported: bool, missing: dict[str, str],
+                    no_device: str | None, arguments: argparse.Namespace, console: Console) -> list[tuple[str, Step]]:
+    """The editor halves (`halves`, Debug before Release) and with `exported` the Dist half of one project, as
+    (configuration, step) pairs: a half whose build is `missing` fails with exit code 3; without a device
+    (`no_device`, the probe's reason) the others end as warnings, or fail under --require-gpu, and nothing is copied
+    or started; otherwise each editor half runs its own editor, and the Dist half shares the Release half's session,
+    or runs a Release editor of its own when the Release half is not requested."""
+    names = {config: f"games {project.name} Editor {config}" for config in halves}
+    if exported:
+        names[DIST_HALF] = f"games {project.name} Dist"
+    shown = paths.display_path(project.directory)
+    steps: dict[str, Step] = {half: Step(names[half], Status.FAILED, detail, exit_code=EXIT_INIT_FAILED,
+                                         data={"suite": "games", "project": shown, "config": half})
+                              for half, detail in missing.items() if half in names}
+    runnable = [half for half in names if half not in steps]
+    if no_device is not None:
+        for half in runnable:
+            data = {"suite": "games", "project": shown, "config": half, "noDevice": no_device}
+            what = "exported half" if half == DIST_HALF else "editor half"
+            if arguments.require_gpu:
+                steps[half] = Step(names[half], Status.FAILED, f"no usable Vulkan device (--require-gpu): {no_device}",
+                                   data=data)
+            else:
+                steps[half] = Step(names[half], Status.WARNING, f"no usable Vulkan device, so the {what} passed "
+                                                                f"without running ({no_device}); --require-gpu fails "
+                                                                f"instead", data=data)
+        return [(half, steps[half]) for half in names]
+    hashes: dict[str, dict[str, str]] = {}
+    shares_session = DIST_HALF in runnable and exports.EXPORTING_EDITOR_CONFIGURATION in runnable
+    for config in [half for half in runnable if half != DIST_HALF]:
+        with_dist = shares_session and config == exports.EXPORTING_EDITOR_CONFIGURATION
+        editor_step, dist_step = drive_game_session(project, config, True, with_dist, hashes, arguments, console)
+        if editor_step is not None:
+            steps[config] = editor_step
+        if dist_step is not None:
+            steps[DIST_HALF] = dist_step
+    if DIST_HALF in runnable and DIST_HALF not in steps:
+        _, dist_step = drive_game_session(project, exports.EXPORTING_EDITOR_CONFIGURATION, False, True, hashes,
+                                          arguments, console)
+        if dist_step is not None:
+            steps[DIST_HALF] = dist_step
+    return [(half, steps[half]) for half in names]
+
+
+def run_games(configs: list[str], arguments: argparse.Namespace, console: Console) -> list[Step]:
+    """The games suite (ADR 0026 decision 8) over the requested configurations: Debug and Release select those editors'
+    halves, Dist the exported half the Release editor drives. Every staged game project (games.discover_projects in
+    index mode) gets "games <Name> audit", then its halves; a project found on disk but not staged gets one passed step,
+    "games <Name>", and nothing else. The builds the halves need are looked up after the audits, then the device is
+    probed once, and only then are the staged files copied. With --junit each requested configuration's steps go to
+    games.junit_path(<Config>), the audit and suite-level steps into the first requested configuration's file."""
+    configs = [config for config in paths.CONFIGURATIONS if config in configs]
+    first = configs[0]
+    assigned: list[tuple[str, Step]] = []  # (the configuration whose JUnit file holds the step, the step)
+    try:
+        staged = games.discover_projects(paths.REPOSITORY_ROOT, "index")
+        on_disk = games.discover_projects(paths.REPOSITORY_ROOT, "disk")
+    except ValueError as error:
+        assigned.append((first, Step(GAMES_STEP_NAME, Status.FAILED, str(error), data={"suite": "games"})))
+    except RuntimeError as error:
+        assigned.append((first, Step(GAMES_STEP_NAME, Status.FAILED, f"cannot list the staged game projects: {error}",
+                                     exit_code=EXIT_INIT_FAILED, data={"suite": "games"})))
+    else:
+        directories = {project.directory for project in staged}
+        unstaged = [project for project in on_disk if project.directory not in directories]
+        if not staged and not unstaged:
+            assigned.append((first, Step(GAMES_STEP_NAME, Status.PASSED, NO_GAME_PROJECT_NOTE,
+                                         data={"suite": "games"})))
+        # The audits need neither a build nor a device.
+        audits = [games_audit_step(project, console) for project in staged]
+        halves = [config for config in configs if config in games.EDITOR_CONFIGURATIONS]
+        exported = DIST_HALF in configs
+        missing = missing_game_builds(halves, exported, arguments) if staged else {}
+        runnable = [half for half in [*halves, *([DIST_HALF] if exported else [])] if half not in missing]
+        no_device: str | None = None
+        if staged and runnable:
+            # The probe runs an editor that exists: the first runnable half's (the Dist half's is the Release editor).
+            probe = runnable[0] if runnable[0] != DIST_HALF else exports.EXPORTING_EDITOR_CONFIGURATION
+            no_device = probe_rendering_editor(editor_executable(probe))
+            if no_device is not None:
+                console.print(f"{NO_DEVICE_TEXT}games: {no_device}")
+        for project, audit in zip(staged, audits):
+            assigned.append((first, audit))
+            assigned += run_game_halves(project, halves, exported, missing, no_device, arguments, console)
+        for project in unstaged:
+            assigned.append((first, Step(f"games {project.name}", Status.PASSED,
+                                         f"{paths.display_path(project.directory)} is not staged, so it is not part "
+                                         f"of the commit: neither audited nor run (git add it to include it)",
+                                         data={"suite": "games", "project": paths.display_path(project.directory)})))
+    if arguments.junit:
+        for config in configs:
+            report = games.junit_path(config)
+            selected = [step for owner, step in assigned if owner == config]
+            write_junit(report, f"Games.{config}", selected)
+            for step in selected:
+                step.data["junit"] = paths.display_path(report)
+    return [step for _, step in assigned]
+
+
 def unreadable_report_failures(reports: list[coverage.FeatureReport | None]) -> list[str]:
     """The `report` rule's lines (coverage.merge_coverage) over the positional reports when some could not be read
     (None): a position whose report is missing, unreadable, names another mode or duplicates a mode fails for its
@@ -1634,15 +2234,16 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
                         help=f"comma-separated suites: {', '.join(SUITES)} or all (default: all)")
     parser.add_argument("--config", help="comma-separated configurations, overriding the matrix (Debug, Release; "
                                          "test executables do not exist in Dist; the export suite takes Release and "
-                                         "Dist, the determinism suite any of the three); with --suite all, a suite "
-                                         "skips the ones it does not take")
+                                         "Dist, the determinism and games suites any of the three); with --suite all, "
+                                         "a suite skips the ones it does not take")
     parser.add_argument("--junit", action="store_true", help="write JUnit XML into bin/TestResults/")
     parser.add_argument("--require-gpu", action="store_true",
-                        help="gpu, golden, feature, automation and export suites: a test case (or a Python test that "
-                             "starts a rendering editor, or the FeatureTest run or export) without a usable Vulkan "
-                             "device fails instead of passing without running; determinism suite: a missing or stale "
-                             "exported report fails (exit code 3) instead of leaving that run out (CI.py and "
-                             "PreCommit.py pass it unless --gpu-optional, §15.2)")
+                        help="gpu, golden, feature, automation, export and games suites: a test case (or a Python test "
+                             "that starts a rendering editor, the FeatureTest run or export, or a game's editor or "
+                             "Dist half) without a usable Vulkan device fails instead of passing without running, and "
+                             "so does a game's plain Dist export whose smoke test did not run; determinism suite: a "
+                             "missing or stale exported report fails (exit code 3) instead of leaving that run out "
+                             "(CI.py and PreCommit.py pass it unless --gpu-optional, §15.2)")
     parser.add_argument("--editor-report", type=Path,
                         help="export suite: the Editor-mode FeatureTest report its coverage merge reads (default: "
                              f"{paths.display_path(DEFAULT_EDITOR_REPORT)}, which Test.py --suite feature --config "
@@ -1661,8 +2262,9 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
                              f"{CHILD_TARGET_SUITE} suite (unit, gpu, golden) and skipped Python tests (automation) "
                              "instead of failing the run")
     parser.add_argument("--timeout", type=float, default=SUITE_TIMEOUT_SECONDS,
-                        help=f"seconds per Tests, automation or FeatureTest run, and per export of the export suite "
-                             f"(default: {SUITE_TIMEOUT_SECONDS:.0f})")
+                        help=f"seconds per Tests, automation or FeatureTest run, per export of the export suite, and "
+                             f"per editor call and exported run of the games suite (default: "
+                             f"{SUITE_TIMEOUT_SECONDS:.0f})")
     parser.add_argument("--merge-coverage", nargs=3, metavar=("EDITOR_JSON", "RELEASE_JSON", "DIST_JSON"),
                         help="run only the cross-mode coverage merge of three FeatureTest reports (§15.6) and print "
                              "one 'merge: <rule>: <subject>' line per failure")
@@ -1764,6 +2366,12 @@ def main(argv: list[str] | None = None) -> int:
         if name == "export":
             # One editor exports every configuration, and the merge needs both.
             for step in run_export(configs, arguments, console):
+                steps.append(step)
+                console.result(step)
+            continue
+        if name == "games":
+            # The Dist half compares its hashes with every editor half of the run, and may share the Release editor.
+            for step in run_games(configs, arguments, console):
                 steps.append(step)
                 console.result(step)
             continue

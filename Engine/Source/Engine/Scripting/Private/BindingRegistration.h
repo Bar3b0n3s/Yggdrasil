@@ -10,6 +10,8 @@
 
 namespace Engine {
 
+	class AssetManager;
+
 	namespace Detail {
 
 		// The registry owns this tag space. Payloads contain values only; no engine, scene or component addresses.
@@ -51,6 +53,11 @@ namespace Engine {
 		[[nodiscard]] Status SetScriptRegistrationRecord(ScriptCall& call, int tableIndex, int recordIndex);
 		// A null assignment detaches; a nonnull assignment must load as persistent authenticated Behaviour data.
 		[[nodiscard]] Status ValidateBehaviourAssignment(IScriptHost& host, AssetHandle handle);
+		// A binding's synchronous load of `handle` (AssetManager::Load) as host time (ScriptEngine::RunHostOperation): the
+		// import an uncached asset runs on this thread (EditorAssetManager::Load) runs no Luau of this VM, so its time never
+		// counts toward the callback budget, and a callback or test case that loads an uncached asset behaves from a cold
+		// import cache as from a warm one (Docs/Decisions/0026-m16-contract.md decision 13, G9). Errors: Load's.
+		[[nodiscard]] Result<AssetRef<Asset>> LoadAssetAsHost(ScriptCall& call, AssetManager& assets, AssetHandle handle);
 		// Pushes one authenticated suite body. Stack unchanged on failure. Does not execute the function.
 		[[nodiscard]] Status PushSuiteBody(ScriptCall& call, int index, ScriptCollectedSuite& suite, uint32_t& defaultTimeout);
 		// D registers this callback as Test.Suite (All, Mutates=false); the constructor never runs its body.

@@ -4,6 +4,7 @@
 #include "EditorCore/Automation/ProjectMethods.h"
 #include "EditorCore/EditorContext.h"
 #include "EditorCore/Private/EditorFileError.h"
+#include "EditorCore/Scripting/EditorScriptService.h"
 #include "Engine/Asset/ScriptData.h"
 #include "Engine/Automation/Methods/AutomationMethodContext.h"
 #include "Engine/Automation/Methods/SceneMethods.h"
@@ -12,17 +13,27 @@
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Core/Log.h"
 #include "Engine/Core/VirtualFileSystem.h"
+#include "Engine/Reflection/ComponentInfo.h"
 #include "Engine/Reflection/EnumInfo.h"
 #include "Engine/Reflection/FieldInfo.h"
+#include "Engine/Reflection/FuzzySuggest.h"
 #include "Engine/Reflection/StructInfo.h"
 #include "Engine/Reflection/TypeInfo.h"
 #include "Engine/Reflection/TypeRegistry.h"
+#include "Engine/Reflection/Value.h"
+#include "Engine/Scene/ComponentAccess.h"
+#include "Engine/Scene/ComponentHostOps.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/SceneSerializer.h"
 #include "Engine/Session/PlaySession.h"
 
 #include <nlohmann/json.hpp>
+
+#include <algorithm>
+#include <map>
+#include <utility>
+#include <vector>
 
 namespace Engine {
 
@@ -110,15 +121,12 @@ namespace Engine {
 			options.Mode = mode;
 			options.RepairIdGenerator = mode == LoadMode::Repair ? repairIds : nullptr;
 			options.SourcePath = ToProjectRelative(path);
-			// --strict (EditorContextSpecification::StrictUnknowns): unknown keys, fields and components are errors. Script
-			// field overrides then resolve against the declared fields, so a value merely lacking a schema is not one.
-			Ref<const ScriptFieldSchemaSource> schemas;
-			if (editor.GetSpecification().StrictUnknowns)
-			{
-				ENGINE_TRY_ASSIGN(schemas, editor.GetScriptSchemaSnapshot());
-				options.StrictUnknowns = true;
-				options.Schemas = schemas.get();
-			}
+			// Script field values resolve against the declared fields, so a valid value reports nothing and only an unknown or
+			// mismatching one is a diagnostic (ADR 0026). --strict (EditorContextSpecification::StrictUnknowns): unknown keys,
+			// fields and components, and those script field values, are errors.
+			ENGINE_TRY_ASSIGN(const Ref<const ScriptFieldSchemaSource> schemas, editor.GetScriptSchemaSnapshot());
+			options.Schemas = schemas.get();
+			options.StrictUnknowns = editor.GetSpecification().StrictUnknowns;
 			const Status loaded = SceneSerializer::LoadFromFile(scene, editor.GetVfs(), path, options, report);
 			if (!loaded)
 				return std::unexpected(ToEditorFileError(loaded.error()));
@@ -209,6 +217,134 @@ namespace Engine {
 				case FieldType::Variant:
 					return;
 			}
+		}
+
+		Result<const ComponentInfo*> FindWritableComponent(const TypeRegistry& registry, std::string_view name, std::string_view pointer)
+		{
+			const ComponentInfo* info = registry.FindComponent(name);
+			if (info == nullptr || info->GetHostOps() == nullptr || !info->HasFlag(ComponentFlags::Serializable))
+			{
+				std::vector<std::string> suggestions = registry.SuggestComponentNames(name);
+				return std::unexpected(MakeParamError(ErrorCode::NotFound, pointer, std::format("no component '{}'", name),
+					suggestions.empty() ? std::string("component.list lists every component") : MakeDidYouMeanHint(suggestions)));
+			}
+			if (info->HasFlag(ComponentFlags::EntityLevel))
+			{
+				return std::unexpected(MakeParamError(ErrorCode::InvalidArgument, pointer, std::format("'{}' is an entity member, not a component", name),
+					"set names, tags and active state with the name, tags and active params, and parents with entity.reparent"));
+			}
+			if (info->HasFlag(ComponentFlags::Hidden))
+			{
+				return std::unexpected(MakeParamError(ErrorCode::InvalidArgument, pointer,
+					std::format("'{}' is maintained by the engine and cannot be written", name)));
+			}
+			return info;
+		}
+
+		// Writes one component's (partial) JSON `value`: added when `add`, else merged into the existing component (RFC 7386).
+		// Stored fields go through ComponentAccess in one write; virtual fields (Transform.EulerAngles, WorldPosition) are set
+		// after it through their setters. Errors are located below `pointer`.
+		static Status WriteComponent(EditorContext& editor, Entity entity, const ComponentInfo& info, const Json& value, bool add,
+			const std::string& pointer, const IFieldSchemaSource* schemas)
+		{
+			if (!value.is_object())
+				return std::unexpected(MakeParamError(ErrorCode::InvalidArgument, pointer, std::format("the value of '{}' must be an object of fields", info.GetName())));
+			if (info.GetName() == "Script")
+			{
+				const auto script = value.find("Script");
+				if (script != value.end() && !script->is_null())
+				{
+					const std::string scriptPointer = JsonReader::AppendPointer(pointer, "Script");
+					const auto handle = UUID::FromString(JsonReader(*script).ReadString().value_or(std::string()));
+					if (!handle.has_value())
+						return std::unexpected(MakeParamError(ErrorCode::InvalidArgument, scriptPointer, "expected a script asset handle"));
+					if (handle->IsValid())
+					{
+						EditorScriptService* service = editor.GetScriptService();
+						if (service == nullptr)
+							return std::unexpected(MakeParamError(ErrorCode::InvalidState, scriptPointer, "no project script service is available"));
+						const auto data = service->GetFields(*handle);
+						if (!data)
+							return std::unexpected(LocateAtParam(data.error(), scriptPointer));
+						if ((*data)->Kind != ScriptKind::Behaviour)
+							return std::unexpected(MakeParamError(ErrorCode::Validation, scriptPointer,
+								"SCRIPT_NOT_A_BEHAVIOUR: only a Behaviour script may be attached to an entity"));
+					}
+				}
+			}
+
+			Json stored = Json::object();
+			std::vector<std::pair<const FieldInfo*, const Json*>> virtuals;
+			for (auto member = value.begin(); member != value.end(); ++member)
+			{
+				const FieldInfo* field = info.FindField(member.key());
+				if (field != nullptr && field->IsVirtual())
+					virtuals.emplace_back(field, &member.value());
+				else
+					stored[member.key()] = member.value();
+			}
+
+			const Status written = add ? ComponentAccess::AddComponent(entity, info.GetName(), &stored, schemas)
+									   : (stored.empty() ? Status() : ComponentAccess::PatchComponentJson(entity, info.GetName(), stored, schemas));
+			if (!written)
+				return std::unexpected(PrefixPointers(written.error(), pointer));
+
+			for (const auto& [field, json] : virtuals)
+			{
+				const std::string fieldPointer = JsonReader::AppendPointer(pointer, field->GetName());
+				Result<Value> fieldValue = ValueFromJson(JsonReader(*json), field->GetType());
+				if (!fieldValue)
+					return std::unexpected(PrefixPointers(fieldValue.error(), fieldPointer));
+				const Status set = ComponentAccess::SetFieldValue(entity, info.GetName(), field->GetName(), *fieldValue, schemas);
+				if (!set)
+					return std::unexpected(PrefixPointers(set.error(), pointer));
+			}
+			return {};
+		}
+
+		Status WriteComponents(EditorContext& editor, Entity entity, const std::map<std::string, VariantValue>& components)
+		{
+			Ref<const ScriptFieldSchemaSource> schemas;
+			if (components.contains("Script"))
+			{
+				ENGINE_TRY_ASSIGN(schemas, editor.GetScriptSchemaSnapshot());
+			}
+			const TypeRegistry& registry = entity.GetScene()->GetTypeRegistry();
+			std::vector<std::pair<const ComponentInfo*, const VariantValue*>> additions;
+			for (const auto& [name, value] : components)
+			{
+				const std::string pointer = JsonReader::AppendPointer("/components", name);
+				ENGINE_TRY_ASSIGN(const ComponentInfo* info, FindWritableComponent(registry, name, pointer));
+				if (info->GetHostOps()->Has(entity))
+					ENGINE_TRY(WriteComponent(editor, entity, *info, value.Get(), false, pointer, schemas.get()));
+				else
+					additions.emplace_back(info, &value);
+			}
+
+			std::sort(additions.begin(), additions.end(), [](const auto& left, const auto& right)
+			{
+				return left.first->GetIndex() < right.first->GetIndex();
+			});
+			while (!additions.empty())
+			{
+				const auto isPending = [&additions](const ComponentInfo* component)
+				{
+					return std::ranges::any_of(additions, [component](const auto& addition)
+					{
+						return addition.first == component;
+					});
+				};
+				auto ready = std::ranges::find_if(additions, [&isPending](const auto& addition)
+				{
+					return std::ranges::none_of(addition.first->GetRequires(), isPending);
+				});
+				if (ready == additions.end())
+					ready = additions.begin();
+				const std::string pointer = JsonReader::AppendPointer("/components", ready->first->GetName());
+				ENGINE_TRY(WriteComponent(editor, entity, *ready->first, ready->second->Get(), true, pointer, schemas.get()));
+				additions.erase(ready);
+			}
+			return {};
 		}
 
 		Status CheckPlayEntityCapacity(const AutomationMethodContext& context, const Scene& scene, size_t additional)

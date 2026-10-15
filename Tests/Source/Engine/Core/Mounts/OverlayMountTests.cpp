@@ -70,6 +70,29 @@ namespace Engine {
 			CHECK(overlay.GetChangedPaths() == expectedChanges);
 		}
 
+		// M16 review R28: the exclusive create judges the merged view: an entry of either layer is never replaced, a lower file
+		// the overlay removed leaves its name free, and nothing reaches the lower mount.
+		TEST_CASE("OverlayMount: WriteNewFile creates in the overlay and never replaces an entry of either layer")
+		{
+			Scope<MemoryMount> lowerOwner = MakeLower();
+			const MemoryMount* lower = lowerOwner.get();
+			const uint64_t lowerMutations = lower->GetMutationCount();
+			OverlayMount overlay(std::move(lowerOwner));
+
+			CHECK(ErrorCodeOf(overlay.WriteNewFile(Path("project://Assets/Level1.scene"), AsBytes("x"))) == ErrorCode::AlreadyExists);
+			REQUIRE(overlay.WriteNewFile(Path("project://Assets/New.scene"), AsBytes("new")).has_value());
+			CHECK(ErrorCodeOf(overlay.WriteNewFile(Path("project://Assets/New.scene"), AsBytes("again"))) == ErrorCode::AlreadyExists);
+			CHECK(ReadText(overlay, "project://Assets/New.scene") == "new");
+			REQUIRE(overlay.Remove(Path("project://Assets/Old.scene")).has_value());
+			REQUIRE(overlay.WriteNewFile(Path("project://Assets/Old.scene"), AsBytes("recreated")).has_value());
+			CHECK(ReadText(overlay, "project://Assets/Old.scene") == "recreated");
+			CHECK(ErrorCodeOf(overlay.WriteNewFile(Path("project://Assets/level1.scene"), AsBytes("x"))) == ErrorCode::Validation);
+
+			CHECK(lower->GetMutationCount() == lowerMutations);
+			CHECK(ReadText(*lower, "project://Assets/Old.scene") == "old");
+			CHECK(ErrorCodeOf(lower->GetInfo(Path("project://Assets/New.scene"))) == ErrorCode::NotFound);
+		}
+
 		TEST_CASE("OverlayMount: removals hide lower files without touching them")
 		{
 			Scope<MemoryMount> lowerOwner = MakeLower();
@@ -140,6 +163,35 @@ namespace Engine {
 			CHECK((*listed)[0].Path.GetFileName() == "Fresh.scene");
 			CHECK(ErrorCodeOf(overlay.ReadFile(Path("project://Assets/Level1.scene"))) == ErrorCode::NotFound);
 			CHECK(overlay.GetChangedPaths() == std::vector<std::string>{ "Assets", "Assets/Fresh.scene" });
+		}
+
+		TEST_CASE("OverlayMount: RemoveEmptyDirectory judges the merged view and never touches the lower mount")
+		{
+			Scope<MemoryMount> lowerOwner = MakeLower();
+			REQUIRE(lowerOwner->CreateDirectories(Path("project://Assets/Empty")).has_value());
+			const MemoryMount* lower = lowerOwner.get();
+			const uint64_t lowerMutations = lower->GetMutationCount();
+			OverlayMount overlay(std::move(lowerOwner));
+
+			// A lower directory with files, and an overlay file in an otherwise empty lower directory, are both not empty.
+			CHECK(ErrorCodeOf(overlay.RemoveEmptyDirectory(Path("project://Assets"))) == ErrorCode::InvalidState);
+			REQUIRE(overlay.WriteFileAtomic(Path("project://Assets/Empty/Draft.scene"), AsBytes("draft")).has_value());
+			CHECK(ErrorCodeOf(overlay.RemoveEmptyDirectory(Path("project://Assets/Empty"))) == ErrorCode::InvalidState);
+			CHECK(ErrorCodeOf(overlay.RemoveEmptyDirectory(Path("project://Assets/Level1.scene"))) == ErrorCode::Io);
+			CHECK(ErrorCodeOf(overlay.RemoveEmptyDirectory(Path("project://"))) == ErrorCode::InvalidArgument);
+
+			// Once the overlay removed what it held, the directory goes, in the overlay only; so does one created there.
+			REQUIRE(overlay.Remove(Path("project://Assets/Empty/Draft.scene")).has_value());
+			REQUIRE(overlay.RemoveEmptyDirectory(Path("project://Assets/Empty")).has_value());
+			CHECK(ErrorCodeOf(overlay.GetInfo(Path("project://Assets/Empty"))) == ErrorCode::NotFound);
+			REQUIRE(overlay.CreateDirectories(Path("project://Assets/New")).has_value());
+			REQUIRE(overlay.RemoveEmptyDirectory(Path("project://Assets/New")).has_value());
+			CHECK(ErrorCodeOf(overlay.GetInfo(Path("project://Assets/New"))) == ErrorCode::NotFound);
+
+			CHECK(lower->GetMutationCount() == lowerMutations);
+			const Result<FileInfo> kept = lower->GetInfo(Path("project://Assets/Empty"));
+			REQUIRE(kept.has_value());
+			CHECK(kept->IsDirectory);
 		}
 
 		TEST_CASE("OverlayMount: a case-only rename of a lower directory moves it within the overlay")

@@ -5,6 +5,7 @@
 #include "EditorCore/Viewport/EditorCamera.h"
 #include "Engine/Asset/BuiltinAssets.h"
 #include "Engine/Asset/MeshData.h"
+#include "Engine/Asset/ScriptData.h"
 #include "Engine/Asset/TextureData.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/Core/FileSystem.h"
@@ -187,7 +188,8 @@ namespace Engine {
 		{
 			LoadReport report;
 			const PrefabInstantiateOptions instance{ .PrefabHandle = request.Asset, .RootID = ids.Next(), .Parent = {}, .SiblingIndex = {}, .RootTransform = {} };
-			ENGINE_TRY(InstantiatePrefabAsset(scene, m_Editor.GetAssets(), instance, {}, report));
+			ENGINE_TRY_ASSIGN(const auto schemas, m_Editor.GetScriptSchemaSnapshot());
+			ENGINE_TRY(InstantiatePrefabAsset(scene, m_Editor.GetAssets(), instance, { .Schemas = schemas.get() }, report));
 		}
 		else if (asset->GetAssetType() == AssetType::Mesh || asset->GetAssetType() == AssetType::Material)
 		{

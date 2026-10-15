@@ -29,7 +29,7 @@
 						"type": "boolean"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -44,7 +44,7 @@
 		{
 			"name": "asset_delete",
 			"method": "asset.delete",
-			"description": "Moves an asset with its .meta (and a glTF's dependency files) to Library/Trash as one undoable command; never a permanent delete.",
+			"description": "Moves an asset with its .meta (and a glTF's dependency files) to Library/Trash as one undoable command; never a permanent delete. A folder below Assets/ that holds no files (only empty folders) is removed, also undoably; a folder that holds files is refused (Validation, naming them): delete its assets first.",
 			"inputSchema": {
 				"$schema": "https://json-schema.org/draft/2020-12/schema",
 				"title": "AssetDeleteParams",
@@ -52,11 +52,11 @@
 				"type": "object",
 				"properties": {
 					"asset": {
-						"description": "The asset to move to the trash (a source, not a sub-asset).",
+						"description": "The asset to move to the trash (a source, not a sub-asset), or a folder below Assets/ that holds no files, to remove.",
 						"type": "string"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -90,7 +90,7 @@
 						"description": "Import settings merged over the importer's defaults; null for the defaults."
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -139,7 +139,7 @@
 						"type": "string"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -169,7 +169,7 @@
 						"type": "string"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -203,7 +203,7 @@
 						"type": "boolean"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -226,7 +226,7 @@
 				"type": "object",
 				"properties": {
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -252,7 +252,7 @@
 						"type": "string"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -267,7 +267,7 @@
 		{
 			"name": "docs_get",
 			"method": "docs.get",
-			"description": "Serves the agent documentation: without a topic the list of skills and reference documents, with one its Markdown.",
+			"description": "Serves the agent documentation: without a topic the list of topics (skills, the generated reference and JSON schemas, the script declarations and the script templates); with one its text, one section of it (section, or \"<topic>#<section>\", by heading text or anchor), one page (offset, length) or with toc only its section list with sizes. A text too large to return inline comes back as its first page with nextOffset and its list of sections.",
 			"inputSchema": {
 				"$schema": "https://json-schema.org/draft/2020-12/schema",
 				"title": "DocsGetParams",
@@ -275,11 +275,31 @@
 				"type": "object",
 				"properties": {
 					"topic": {
-						"description": "The topic, such as \"skills/game-building\"; empty for the list of topics.",
+						"description": "The topic, such as \"skills/game-building\", \"reference/ScriptAPI\", \"reference/Schemas/Scene\", \"scripting/Engine.d.luau\" or \"templates/Scripts/Behaviour\"; a \"#<section>\" suffix selects a section like section; empty for the list of topics.",
 						"type": "string"
 					},
+					"section": {
+						"description": "A section of the topic: a Markdown heading, or a top-level declaration of a .d.luau topic (\"Entity\"). Named by the heading's exact text (\"Test.Suite\"), by that text without a trailing parenthesized qualifier (\"TestSuite\" for \"TestSuite (type)\"), or by its anchor (the text lowercased, spaces as '-', other ASCII punctuation removed, \"-1\" added to a repeat: \"testsuite-type\"), tried in that order; a text several headings share is refused with their anchors. The result is the section with its subsections.",
+						"type": "string"
+					},
+					"offset": {
+						"description": "Where the page starts, in bytes of the topic's (or the section's) text: 0, or the previous page's nextOffset.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"length": {
+						"description": "The most bytes of text to return (the default is the most). A page ends after a line break when one falls inside it.",
+						"type": "integer",
+						"minimum": 1,
+						"maximum": 32768
+					},
+					"toc": {
+						"description": "Return no text, only the topic's section list (or the subsections of section) with each section's title, anchor, level, offset and size, down to the deepest heading level whose list fits in 40960 bytes, and totalBytes. Not with offset or length.",
+						"type": "boolean"
+					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -327,7 +347,7 @@
 						"type": "boolean"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -356,7 +376,7 @@
 						"maximum": 1000
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -384,7 +404,7 @@
 						"maximum": 1000
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -412,7 +432,7 @@
 						"maximum": 8192
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -449,7 +469,7 @@
 						"enum": ["Edit", "Play"]
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -509,7 +529,7 @@
 						"type": "boolean"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -547,7 +567,7 @@
 						"type": "boolean"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -585,7 +605,7 @@
 						"type": "boolean"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -623,7 +643,7 @@
 						"enum": ["Edit", "Play"]
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -672,7 +692,7 @@
 						"type": "boolean"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -733,7 +753,7 @@
 						"type": "boolean"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -781,7 +801,7 @@
 									"enum": ["Down", "Up", "Tap"]
 								},
 								"value": {
-									"description": "action: an axis value in [-1, 1]; gamepadAxis: [-1, 1] for sticks (up positive), [0, 1] for triggers.",
+									"description": "action: an axis value in [-1, 1]; gamepadAxis: [-1, 1] for sticks (up positive), [0, 1] for triggers. A value holds on every later tick until another value for the same action or axis (or releaseAll) changes it; 0 releases it.",
 									"type": "number",
 									"minimum": -1,
 									"maximum": 1
@@ -845,7 +865,7 @@
 						"type": "boolean"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -860,7 +880,7 @@
 		{
 			"name": "input_record",
 			"method": "input.record",
-			"description": "Starts a tick-zero recording or saves its validated applied inputs and expectations. Stop checks output write permission.",
+			"description": "Starts a tick-zero recording or saves its validated applied inputs, expectations and state-hash checkpoints (one every 60 ticks). Stop checks output write permission. A recording with input events is first replayed without them (the input check, which replaces the play session as input.replay does and leaves it paused where it ended); when that run reproduces every checkpoint, the final hash and every expectation, whatever script errors it raises, the recording's outcome does not depend on its input and Stop refuses to write it (Validation, the check's outcome in error data inputCheck). End such a recording while the played state is still in the scene.",
 			"inputSchema": {
 				"$schema": "https://json-schema.org/draft/2020-12/schema",
 				"title": "InputRecordParams",
@@ -914,7 +934,7 @@
 						}
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -924,12 +944,12 @@
 			},
 			"mutates": false,
 			"supportsDryRun": false,
-			"timeoutSeconds": 60
+			"timeoutSeconds": 600
 		},
 		{
 			"name": "input_replay",
 			"method": "input.replay",
-			"description": "Replays recorded inputs in a fresh session; verification failures retain every expectation and hash outcome in error data.",
+			"description": "Replays recorded inputs in a fresh session; verification failures retain every expectation and hash outcome in error data. strictHash compares the state hash at each checkpoint and at the final tick and stops at the first checkpoint that differs. The state hash covers the simulated world (entities and their serialized components, the tick, Random, id draws, physics), never script tables, so expectations observe script state. withoutInput replays without the input events, the check that the replay depends on its input. Afterwards the session stays paused at the replay's last tick (or where playback stopped), so script.eval, scene.query and entity.get read its final state; play.stop ends it.",
 			"inputSchema": {
 				"$schema": "https://json-schema.org/draft/2020-12/schema",
 				"title": "InputReplayParams",
@@ -945,11 +965,15 @@
 						"type": "boolean"
 					},
 					"strictHash": {
-						"description": "Compare the recorded final hash; requires verify.",
+						"description": "Compare the recorded state hash at every checkpoint and at the final tick; requires verify. The first checkpoint that differs ends the playback there.",
+						"type": "boolean"
+					},
+					"withoutInput": {
+						"description": "Apply none of the replay's input events: the check that its outcome depends on its input; requires verify. A replay whose verification still passes this way proves nothing about its input.",
 						"type": "boolean"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -997,7 +1021,7 @@
 						"maximum": 1000
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -1054,7 +1078,7 @@
 						"type": "boolean"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -1107,7 +1131,7 @@
 									"enum": ["Down", "Up", "Tap"]
 								},
 								"value": {
-									"description": "action: an axis value in [-1, 1]; gamepadAxis: [-1, 1] for sticks (up positive), [0, 1] for triggers.",
+									"description": "action: an axis value in [-1, 1]; gamepadAxis: [-1, 1] for sticks (up positive), [0, 1] for triggers. A value holds on every later tick until another value for the same action or axis (or releaseAll) changes it; 0 releases it.",
 									"type": "number",
 									"minimum": -1,
 									"maximum": 1
@@ -1171,7 +1195,7 @@
 						"enum": ["Every", "Last", "None"]
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -1194,7 +1218,7 @@
 				"type": "object",
 				"properties": {
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -1226,7 +1250,7 @@
 						"maximum": 1000000
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -1253,7 +1277,7 @@
 						"type": "string"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -1268,7 +1292,7 @@
 		{
 			"name": "prefab_create",
 			"method": "prefab.create",
-			"description": "Saves an entity's subtree as a new .prefab asset (nested instances flattened), optionally replacing the entity with an instance of it, as one undoable step.",
+			"description": "Saves an entity's subtree as a new .prefab asset (nested instances flattened), optionally replacing the entity with an instance of it, as one undoable step. The result's instance is that instance's root (empty without replaceWithInstance).",
 			"inputSchema": {
 				"$schema": "https://json-schema.org/draft/2020-12/schema",
 				"title": "PrefabCreateParams",
@@ -1292,7 +1316,7 @@
 						"type": "boolean"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -1307,7 +1331,7 @@
 		{
 			"name": "prefab_instantiate",
 			"method": "prefab.instantiate",
-			"description": "Creates an instance of a prefab asset (a .prefab or a glTF) under a parent, with an optional transform and name, as one undoable step.",
+			"description": "Creates an instance of a prefab asset (a .prefab or a glTF) under a parent, with an optional transform, name and per-instance component values (recorded as the instance's overrides), as one undoable step. The result's entity is the new instance root.",
 			"inputSchema": {
 				"$schema": "https://json-schema.org/draft/2020-12/schema",
 				"title": "PrefabInstantiateParams",
@@ -1335,12 +1359,16 @@
 						"description": "The instance root's name; the prefab root's when absent.",
 						"type": "string"
 					},
+					"components": {
+						"type": "object",
+						"description": "Field values by registry name; see component_schema."
+					},
 					"dryRun": {
 						"description": "Validate and return the would-be result without applying anything.",
 						"type": "boolean"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -1355,7 +1383,7 @@
 		{
 			"name": "project_create",
 			"method": "project.create",
-			"description": "Creates a project from a template at a native path and opens it, taking its lock. Provenance records the .eproj.",
+			"description": "Creates a project from a template at a native path and opens it, taking its lock. Provenance records the .eproj, the root .luaurc and the template's files under Assets/.",
 			"inputSchema": {
 				"$schema": "https://json-schema.org/draft/2020-12/schema",
 				"title": "ProjectCreateParams",
@@ -1375,7 +1403,7 @@
 						"enum": ["Empty", "Basic3D"]
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -1414,7 +1442,7 @@
 						"type": "boolean"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -1437,7 +1465,7 @@
 				"type": "object",
 				"properties": {
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -1467,7 +1495,7 @@
 						"type": "boolean"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -1490,7 +1518,7 @@
 				"type": "object",
 				"properties": {
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -1519,7 +1547,7 @@
 						"type": "boolean"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -1530,6 +1558,32 @@
 			"mutates": true,
 			"supportsDryRun": true,
 			"timeoutSeconds": 60
+		},
+		{
+			"name": "project_upgrade",
+			"method": "project.upgrade",
+			"description": "Applies migrations and canonical re-saves to every project file (the .eproj, and every scene, prefab, .meta, material, sound effect and replay under Assets/), records each rewrite in provenance and reports the changed files, each with its reason (changes: \"format version 1 to 2\", \"canonical form\"). Run it after an engine change to canonical output; dryRun: true lists what it would rewrite. An unknown member in a material, sound effect or replay fails the upgrade at its file and pointer, as its importer refuses it. Not undoable; refuses an open scene with unsaved changes (save it first).",
+			"inputSchema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "NoParams",
+				"description": "The params of a method that takes none: an empty object.",
+				"type": "object",
+				"properties": {
+					"dryRun": {
+						"description": "Validate and return the would-be result without applying anything.",
+						"type": "boolean"
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false
+			},
+			"mutates": true,
+			"supportsDryRun": true,
+			"timeoutSeconds": 600
 		},
 		{
 			"name": "project_validate",
@@ -1553,7 +1607,7 @@
 						"type": "boolean"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -1585,7 +1639,7 @@
 						"maximum": 4294967295
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -1624,7 +1678,7 @@
 						"type": "boolean"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -1667,7 +1721,7 @@
 						"type": "boolean"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -1734,7 +1788,7 @@
 						"enum": ["Edit", "Play"]
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -1761,7 +1815,7 @@
 						"type": "string"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -1801,7 +1855,7 @@
 						"enum": ["Edit", "Play"]
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -1830,7 +1884,7 @@
 						}
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -1864,7 +1918,7 @@
 						"type": "boolean"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -1897,7 +1951,7 @@
 						"maximum": 1000
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -1931,7 +1985,7 @@
 						"type": "string"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -1958,7 +2012,7 @@
 						"type": "string"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -1993,7 +2047,7 @@
 						"type": "boolean"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -2008,7 +2062,7 @@
 		{
 			"name": "test_run",
 			"method": "test.run",
-			"description": "Runs configured tests and returns every outcome plus JSON/JUnit reports. Optional recording is published only after strict replay verification.",
+			"description": "Runs configured tests and returns every outcome (counts, failedCases and the case rows; a replay's suite entry counts the checkpoints it compared) plus JSON/JUnit reports. The coverage object always keeps its registryFingerprint and gates; its counters are returned only with coverage: true or Testing.CoverageGates. Optional recording is published only after strict replay verification and, with input events, the input check (§13.6: refused when a run without them still passes that verification, whatever script errors it raises), and reported in the recording block (format version, ticks, events, checkpoints, final hash, where the input check diverged).",
 			"inputSchema": {
 				"$schema": "https://json-schema.org/draft/2020-12/schema",
 				"title": "TestRunParams",
@@ -2026,11 +2080,15 @@
 						"maximum": 4294967295
 					},
 					"record": {
-						"description": "Optional project Assets .replay output; requires one selected suite and strict reproduction.",
+						"description": "Optional project Assets .replay output; requires one selected suite and strict reproduction in ordinary play (every state-hash checkpoint, one every 60 ticks, and the final hash). A recording with input events is also replayed without them and refused when that run reproduces every checkpoint and the final hash too, whatever script errors it raises: its outcome does not depend on its input. The result's recording block describes the replay written.",
 						"type": "string"
 					},
+					"coverage": {
+						"description": "Return coverage.counters in the result; without it they are left out unless the project sets Testing.CoverageGates. The JSON report at jsonPath always holds them.",
+						"type": "boolean"
+					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}
@@ -2093,7 +2151,7 @@
 						"type": "boolean"
 					},
 					"ifRevision": {
-						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision still equals this value.",
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
 						"type": "integer",
 						"minimum": 0
 					}

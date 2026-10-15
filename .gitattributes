@@ -24,3 +24,12 @@
 *.a binary
 *.so binary
 *.dylib binary
+# The engine-consumed files of game projects (the .eproj, the root .luaurc and everything below Assets/) are stored and
+# checked out byte for byte, so a fresh clone holds exactly the bytes the editor wrote and provenance hashed, whatever
+# line endings a writer used (§13.12; ADR 0026 decision 13, G7). Scripts/AuditProvenance.py warns about CR LF text.
+/Projects/*/Assets/** -text
+/Projects/*/*.eproj -text
+/Projects/*/.luaurc -text
+/Tests/Projects/*/Assets/** -text
+/Tests/Projects/*/*.eproj -text
+/Tests/Projects/*/.luaurc -text

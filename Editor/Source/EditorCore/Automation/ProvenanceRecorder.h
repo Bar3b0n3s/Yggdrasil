@@ -25,10 +25,12 @@
 //               "Method": "scene.save", "RequestId": 17, "Client": "engine-mcp", "TranscriptLine": 42 }
 //         ]
 //     }
-// "RequestId" is the JSON-RPC id as sent (an integer or a string), null for "ui" and "cli" writes; "TranscriptLine" is the
+// "RequestId" is the JSON-RPC id as sent (an integer or a string), null for "ui" writes only; "TranscriptLine" is the
 // request's 1-based line in Automation/BuildLog.jsonl, null when the request carried none. "Method" is the automation method,
-// "ui" for writes by the windowed UI (the audit rejects those for demo projects) and "project.upgrade" for --upgrade
-// (client "cli"). Dry runs and read-only editors never record.
+// "ui" for writes by the windowed UI (the audit rejects those for demo projects). A "cli" entry carries its own request's
+// id and transcript line: Editor --upgrade's batch transcribes its requests project.refreshAssets (id 1) and
+// project.upgrade (id 2) and attributes their writes to them (Docs/Decisions/0026-m16-contract.md decisions 11 and 13).
+// Dry runs and read-only editors never record.
 
 namespace Engine {
 
@@ -39,7 +41,7 @@ namespace Engine {
 	struct WriteAttribution
 	{
 		std::string Method = "ui";
-		VariantValue RequestId{};                 // the JSON-RPC id; null for "ui" and "cli"
+		VariantValue RequestId{};                 // the JSON-RPC id; null for "ui" only (a "cli" request has its own id)
 		std::string Client = "ui";                // session.hello client.name, "batch", "cli", "test" or "ui"
 		std::optional<uint64_t> TranscriptLine{}; // params._meta.transcriptLine
 	};
@@ -65,8 +67,9 @@ namespace Engine {
 		// Project-relative.
 		static constexpr std::string_view FilePath = "Automation/Provenance.json";
 
-		// Whether writes to `path` (project-relative) are recorded: a ".eproj" file at the project root and every file under
-		// "Assets/" (§13.4). Library/, Automation/ and anything else are not.
+		// Whether writes to `path` (project-relative) are recorded: a ".eproj" file at the project root, the root ".luaurc"
+		// (the type checker reads it; Docs/Decisions/0026-m16-contract.md decision 13, G5) and every file under "Assets/"
+		// (§13.4). Library/, Automation/ and anything else are not.
 		[[nodiscard]] static bool IsRecordedPath(std::string_view path);
 
 		// Reads project://Automation/Provenance.json; a missing file gives an empty recorder. Errors: Parse (line and column)

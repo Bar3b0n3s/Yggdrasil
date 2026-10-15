@@ -11,7 +11,9 @@
 #include <nlohmann/json.hpp>
 
 #include <cstddef>
+#include <format>
 #include <string>
+#include <vector>
 
 namespace Engine {
 
@@ -30,13 +32,48 @@ namespace Engine {
 			auto json = TestRunResultToJson(result, registry);
 			REQUIRE(json);
 			JsonReader root(*json);
-			for (auto key : { "mode", "passed", "cancelled", "cases", "suites", "coverage", "jsonPath", "junitPath", "recordingPath" })
+			for (auto key : { "mode", "passed", "cancelled", "counts", "failedCases", "cases", "suites", "coverage", "jsonPath", "junitPath", "recordingPath", "recording" })
 				CHECK(root.HasMember(key));
 			auto cases = root.GetMember("cases");
 			REQUIRE(cases);
 			auto row = cases->GetElement(0);
 			REQUIRE(row);
 			CHECK(row->ReadMember<std::string>("status").value_or("") == "passed");
+			// M16 friction S3-03 and S3-04 (additive): a run that wrote no recording has a null recording block, and every
+			// suite entry counts the checkpoints a replay compared (0 for a script suite).
+			CHECK((*json)["recording"].is_null());
+			auto suites = root.GetMember("suites");
+			REQUIRE(suites);
+			auto suite = suites->GetElement(0);
+			REQUIRE(suite);
+			CHECK(suite->ReadMember<uint32_t>("checkpointsChecked").value_or(1) == 0);
+			CHECK(suite->ReadMember<uint32_t>("failedCheckpointTick").value_or(1) == 0);
+		}
+
+		// Friction S1-02: the counts and failing case names survive an offloaded test.run result's summary.
+		TEST_CASE("TestResults: counts and failed cases summarize the rows by status")
+		{
+			TestRunResult result;
+			for (const auto* status : { "passed", "failed", "error", "timeout", "skipped", "quit", "quit", "passed" })
+				result.Cases.push_back({ .Suite = "S", .Case = std::format("{} {}", status, result.Cases.size()), .Status = status });
+			result.Cases[5].QuitExpected = true;
+			SummarizeTestRunCases(result);
+			CHECK(result.Counts.Total == 8);
+			CHECK(result.Counts.Passed == 2);
+			CHECK(result.Counts.Failed == 1);
+			CHECK(result.Counts.Error == 1);
+			CHECK(result.Counts.Timeout == 1);
+			CHECK(result.Counts.Skipped == 1);
+			CHECK(result.Counts.Quit == 2);
+			// The expected quit passes; the unexpected one fails the run.
+			CHECK(result.FailedCases == std::vector<std::string>{ "S/failed 1", "S/error 2", "S/timeout 3", "S/quit 6" });
+
+			for (size_t index = 0; index < MaxReportedFailedCases + 5; ++index)
+				result.Cases.push_back({ .Suite = "T", .Case = std::format("{}", index), .Status = "failed" });
+			SummarizeTestRunCases(result);
+			CHECK(result.Counts.Failed == MaxReportedFailedCases + 6);
+			CHECK(result.FailedCases.size() == MaxReportedFailedCases);
+			CHECK(MakeFailedTestRunResult(TestSuiteSettings::Mode::Release, "no suites").FailedCases == std::vector<std::string>{ "FeatureTest/run" });
 		}
 
 		TEST_CASE("TestResults: every expectation failure retains its source location")

@@ -11,9 +11,12 @@ The stages, with the configurations of the §15.8 matrix:
                                      included) and Lint.py --self-test (every seeded fixture under Tests/Data/Lint/
                                      fails with exactly its expected findings); Scripts/CheckRuntimeMap.py --self-test
                                      (every seeded map under Tests/Data/MapFiles/ gives exactly its expected findings,
-                                     in every map format); Scripts/Format.py --check; every fixture generator under
-                                     Tests/Data/Generate/ with --check (the committed fixtures are byte-identical to a
-                                     fresh generation); Scripts/GenerateDetMathReference.py --check (its self-test,
+                                     in every map format); Scripts/AuditProvenance.py --self-test (every seeded case
+                                     under Tests/Data/Provenance/ yields exactly the findings and warnings of its
+                                     Expected.json, and every finding code has a case); Scripts/Format.py --check;
+                                     every fixture generator under Tests/Data/Generate/ with --check (the committed
+                                     fixtures are byte-identical to a fresh generation);
+                                     Scripts/GenerateDetMathReference.py --check (its self-test,
                                      then the committed DetMath oracle is byte-identical to a fresh generation);
                                      Scripts/FetchAssets.py defaults --check
                                      (the committed engine resources match their SHA-256 pins, offline) and
@@ -65,11 +68,26 @@ The stages, with the configurations of the §15.8 matrix:
                                      --strict; --gpu-optional as for gpu
   determinism  Debug, Release, Dist  Scripts/Test.py --suite determinism --config Debug,Release,Dist --junit
                                      --require-gpu: every Testing.Replays file of FeatureTest, verified with
-                                     input.replay {verify, strictHash} in the --renderer none --strict Debug and
-                                     Release editors (CPU only) and read from the export stage's current Release and
-                                     Dist reports (never rerun), against its committed FinalStateHash and across the
-                                     four runs (§15.1 T3d; ADR 0024 decision 10); a missing or stale exported report
-                                     fails it, or with --gpu-optional leaves the exported runs out with a warning
+                                     input.replay {verify, strictHash} (its checkpoints compared) in the --renderer
+                                     none --strict Debug and Release editors (CPU only) and read from the export
+                                     stage's current Release and Dist reports (never rerun), against its committed
+                                     FinalStateHash and across the four runs (§15.1 T3d; ADR 0024 decision 10); in the
+                                     editor runs every replay with input events must fail input.replay {verify,
+                                     strictHash, withoutInput} (the input check, §13.6); a missing or stale exported
+                                     report fails it, or with --gpu-optional leaves the exported runs out with a
+                                     warning
+  games        Debug, Release, Dist  Scripts/Test.py --suite games --config Debug,Release,Dist --junit --require-gpu:
+                                     every staged demo game below Projects/ and Tests/Projects/ (§15.1 T5; ADR 0026
+                                     decisions 7 and 8): its provenance audit of the staged files, the editor halves
+                                     (script.check, project.validate, the canonical re-save dry run and test.run with
+                                     every replay at its committed hash, checkpoints compared, in strict Debug and
+                                     Release editors on the staged files; at least one committed replay with input
+                                     events, and every one must fail input.replay {verify, strictHash, withoutInput},
+                                     the input check of §13.6), and the exported half (a testing Dist export from the
+                                     Release editor run with --feature-test, its hashes identical to the editor
+                                     halves', and a plain Dist export's smoke test); it passes
+                                     with a note while no game exists; --gpu-optional lets the editor and Dist halves
+                                     pass without running, as warnings, on a machine without a usable Vulkan device
   portability  n/a                   premake --os=linux gmake, --os=linux ninja, --os=macosx xcode4 (and the vs2026
                                      reference) into bin-int/Portability/, each checked against the expected file list
                                      and project/configuration set; the xcode4 projects' precompiled headers
@@ -91,7 +109,6 @@ The stages, with the configurations of the §15.8 matrix:
                                      1,000,000-iteration fuzz of every reader of Tests/Data/Fuzz/Targets.json (§15.1
                                      T6; ADR 0024 decisions 12 to 16 and 19). A plain CI.py lists it as not run
                                      ("milestone gates only")
-The games stage of §15.8 is accepted by --stages and reported as "not-available" until its milestone.
 
 --milestone (Roadmap rule 1, Architecture §15.9; ADR 0024 decision 19) is the gate of the commit that completes a
 milestone: every available stage plus hardening, with --require-clang-cl. It is the whole matrix on a machine with a
@@ -101,13 +118,14 @@ device in strict mode, so combining it with --stages, --skip-stages, --configs, 
 Modes (Roadmap rule 3, Docs/Decisions/0004-contract-stub-gate.md): strict by default, so a milestone cannot end with a
 contract stub (ENGINE_CONTRACT_STUB) or a skipped test case outside the child-process targets. --contract passes
 --allow-contract-stubs to Lint.py (lint) and --allow-skips to Test.py (unit, gpu, golden, feature, automation,
-export, determinism), like PreCommit.py --contract (Scripts/Lib/scripts.py); the run prints which mode it is in at the
-start and in the summary.
+export, determinism, games), like PreCommit.py --contract (Scripts/Lib/scripts.py); the run prints which mode it is in
+at the start and in the summary.
 
 Results: each stage's own output, a summary table, bin/TestResults/CI.xml (JUnit, one test case per step; another
 path with --summary-junit, so separate runs of one CI job keep separate summaries), the unit, gpu, golden, feature
 (with the editor's JSON report beside it), automation, export (with the Runtime's FeatureTest-<Config> reports),
-determinism and hardening (Soak, Perf, Unit/Feature/Fuzz-Release-Asan) files in bin/TestResults/, and the actual,
+determinism, games (Games-<Config>.xml, Games-<Name>-Editor-<Config>.json and Games-<Name>-Dist.{json,xml}) and
+hardening (Soak, Perf, Unit/Feature/Fuzz-Release-Asan) files in bin/TestResults/, and the actual,
 expected and diff images of failed golden comparisons in bin/TestResults/Golden/.
 
 Exit codes (§4.1): 0 every selected stage passed, otherwise the code of the first failing step: 1 failed,
@@ -187,6 +205,7 @@ TIMEOUTS = {
     "automation": 3600.0,
     "export": 3600.0,
     "determinism": 3600.0,
+    "games": 3600.0,
     "portability": 600.0,
     "clang-cl": 7200.0,
     "runtime-map": 600.0,
@@ -221,7 +240,7 @@ STAGES = (
     Stage("automation", ("Release",), True),
     Stage("export", ("Release", "Dist"), True),
     Stage("determinism", ("Debug", "Release", "Dist"), True),
-    Stage("games", ("Release",), False, "M16-M18 (demo games)"),
+    Stage("games", ("Debug", "Release", "Dist"), True),
     Stage("portability", None, True),
     Stage("hardening", ("Release",), True, milestone_only=True),
 )
@@ -428,6 +447,17 @@ class Runner:
         return [self.script(f"determinism {', '.join(configs)}", "Test.py",
                             ["--suite", "determinism", "--config", ",".join(configs), "--junit", *device, *mode],
                             TIMEOUTS["determinism"])]
+
+    def games(self, configs: list[str]) -> list[Step]:
+        """§15.8 games (ADR 0026 decision 8): one Test.py run over the selected configurations, which audits every
+        staged demo game, runs its Debug and Release editor halves (so its replays verify in both editor
+        configurations, Roadmap rule 1) and its exported Dist half, whose hashes it compares with the editor halves'.
+        It needs a device (--require-gpu unless --gpu-optional) and, for the Dist half, the Dist build."""
+        mode = test_mode_arguments(self.arguments.contract)
+        device = [] if self.arguments.gpu_optional else ["--require-gpu"]
+        return [self.script(f"games {', '.join(configs)}", "Test.py",
+                            ["--suite", "games", "--config", ",".join(configs), "--junit", *device, *mode],
+                            TIMEOUTS["games"])]
 
     def hardening(self) -> list[Step]:
         """§15.8 hardening (§15.1 T6; ADR 0024 decision 19): Scripts/Hardening.py with every step, run once with
@@ -707,11 +737,12 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
     )
     available = [stage.name for stage in STAGES if stage.available and not stage.milestone_only]
     milestone_only = [stage.name for stage in STAGES if stage.available and stage.milestone_only]
+    unavailable = [stage.name for stage in STAGES if not stage.available]
+    later = f"; later stages ({', '.join(unavailable)}) are reported as not available" if unavailable else ""
     parser.add_argument("--stages", default=None,
                         help=f"comma-separated stages (default: all stages that exist: {', '.join(available)}, with "
                              f"{', '.join(milestone_only)} listed as not run: {MILESTONE_ONLY_NOTE}); naming "
-                             f"{', '.join(milestone_only)} runs it; later stages "
-                             f"({', '.join(s.name for s in STAGES if not s.available)}) are reported as not available")
+                             f"{', '.join(milestone_only)} runs it{later}")
     parser.add_argument("--skip-stages", default="", help="comma-separated stages to leave out")
     parser.add_argument("--configs", default=None,
                         help="restrict the configuration matrix (default: Debug,Release,Dist)")
@@ -728,11 +759,13 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
                         help="portability: fail (exit code 3) instead of skipping the clang-cl build when Visual "
                              "Studio's C++ Clang component is missing (CI runners that must have it)")
     parser.add_argument("--gpu-optional", action="store_true",
-                        help="gpu, golden, feature, automation and export: run without --require-gpu, so on a "
-                             "machine without a usable Vulkan device the GPU test cases, the FeatureTest runs and the "
-                             "rendering automation tests pass without running, naming the reason, and the steps end as "
-                             "warnings (the GitHub-hosted Windows and macOS runners, which have no GPU); determinism: "
-                             "a missing or stale exported report leaves the exported runs out with a warning; bake: "
+                        help="gpu, golden, feature, automation, export and games: run without --require-gpu, so on a "
+                             "machine without a usable Vulkan device the GPU test cases, the FeatureTest runs, the "
+                             "rendering automation tests and the games' editor and Dist halves pass without running, "
+                             "naming the reason, and the steps end as warnings (the GitHub-hosted Windows and macOS "
+                             "runners, which have no GPU), and a game's Dist smoke test that did not run only warns; "
+                             "determinism: a missing or stale exported report leaves the exported runs out with a "
+                             "warning; bake: "
                              "without a usable device, bake without the environments (--renderer none) and end as a "
                              "warning; by default a missing device fails them")
     parser.add_argument("--contract", action="store_true", help=CONTRACT_FLAG_HELP)
@@ -801,6 +834,7 @@ def run_stage(runner: Runner, stage: Stage, configs: list[str]) -> list[Step]:
         "automation": lambda: runner.device_suite("automation", stage_configs),
         "export": lambda: runner.export(stage_configs),
         "determinism": lambda: runner.determinism(stage_configs),
+        "games": lambda: runner.games(stage_configs),
         "portability": runner.portability,
         "hardening": runner.hardening,
     }

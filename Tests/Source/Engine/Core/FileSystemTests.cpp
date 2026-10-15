@@ -94,6 +94,30 @@ namespace Engine {
 			CHECK(status.error().GetCode() == ErrorCode::NotFound);
 		}
 
+		// M16 review R28: the automation output files are created exclusively, so a name another writer holds is never
+		// replaced, whenever that writer created it.
+		TEST_CASE("FileSystem: WriteNewFile creates a file and never replaces an existing one")
+		{
+			Test::TempDirectory directory("NewFile");
+			const std::filesystem::path target = directory / "4242-1791244800-00000001.json";
+			REQUIRE(FileSystem::WriteNewFile(target, AsBytes("first")).has_value());
+			CHECK(ReadTextOrEmpty(target) == "first");
+
+			const Status again = FileSystem::WriteNewFile(target, AsBytes("second"));
+			CHECK(ErrorCodeOf(again) == std::optional<ErrorCode>(ErrorCode::AlreadyExists));
+			CHECK(ReadTextOrEmpty(target) == "first");
+			// No backup and no temporary: the directory holds the one file.
+			CHECK(FileNames(directory.GetPath()) == std::vector<std::string>{ "4242-1791244800-00000001.json" });
+
+			// An empty file, a directory in the way, a missing parent and a path that names no file.
+			REQUIRE(FileSystem::WriteNewFile(directory / "Empty.json", {}).has_value());
+			CHECK(ReadTextOrEmpty(directory / "Empty.json").empty());
+			REQUIRE(FileSystem::CreateDirectories(directory / "Folder").has_value());
+			CHECK(ErrorCodeOf(FileSystem::WriteNewFile(directory / "Folder", AsBytes("x"))) == std::optional<ErrorCode>(ErrorCode::AlreadyExists));
+			CHECK(ErrorCodeOf(FileSystem::WriteNewFile(directory / "Missing/File.json", AsBytes("x"))) == std::optional<ErrorCode>(ErrorCode::NotFound));
+			CHECK(ErrorCodeOf(FileSystem::WriteNewFile(directory / "Folder" / ".", AsBytes("x"))) == std::optional<ErrorCode>(ErrorCode::InvalidArgument));
+		}
+
 		TEST_CASE("FileSystem: reads return the bytes and validate text as UTF-8")
 		{
 			Test::TempDirectory directory("Read");
@@ -281,6 +305,28 @@ namespace Engine {
 			REQUIRE(FileSystem::Remove(directory / "A").has_value());
 			CHECK_FALSE(FileSystem::Exists(directory / "A"));
 			CHECK(ErrorCodeOf(FileSystem::Remove(directory / "A")) == ErrorCode::NotFound);
+		}
+
+		TEST_CASE("FileSystem: RemoveEmptyDirectory removes only an empty directory and never what it holds")
+		{
+			Test::TempDirectory directory("RemoveEmpty");
+			REQUIRE(FileSystem::CreateDirectories(directory / "Full/Inner").has_value());
+			REQUIRE(FileSystem::WriteFileAtomic(directory / "Full/Inner/File.txt", AsBytes("kept")).has_value());
+			REQUIRE(FileSystem::CreateDirectories(directory / "Empty").has_value());
+
+			const Status full = FileSystem::RemoveEmptyDirectory(directory / "Full");
+			REQUIRE_FALSE(full.has_value());
+			CHECK(full.error().GetCode() == ErrorCode::InvalidState);
+			CHECK(full.error().GetMessageText().contains("not empty"));
+			CHECK(ErrorCodeOf(FileSystem::RemoveEmptyDirectory(directory / "Full/Inner")) == ErrorCode::InvalidState);
+			CHECK(FileSystem::ReadText(directory / "Full/Inner/File.txt") == std::string("kept"));
+
+			CHECK(ErrorCodeOf(FileSystem::RemoveEmptyDirectory(directory / "Full/Inner/File.txt")) == ErrorCode::Io);
+			CHECK(FileSystem::Exists(directory / "Full/Inner/File.txt"));
+
+			REQUIRE(FileSystem::RemoveEmptyDirectory(directory / "Empty").has_value());
+			CHECK_FALSE(FileSystem::Exists(directory / "Empty"));
+			CHECK(ErrorCodeOf(FileSystem::RemoveEmptyDirectory(directory / "Empty")) == ErrorCode::NotFound);
 		}
 
 		TEST_CASE("FileSystem: a path below a file does not exist, and CreateDirectories reports the file in the way")

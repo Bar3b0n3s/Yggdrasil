@@ -2,9 +2,12 @@
 
 #include "EditorCore/Automation/TranscriptLog.h"
 
+#include "Engine/Core/Buffer.h"
 #include "Engine/Core/Json/JsonReader.h"
+#include "Engine/Core/Log.h"
 #include "Engine/Core/Mounts/MemoryMount.h"
 #include "Engine/Core/VirtualFileSystem.h"
+#include "Support/ExpectLog.h"
 
 #include <nlohmann/json.hpp>
 
@@ -85,7 +88,10 @@ namespace Engine {
 			CHECK((*responseLine)["error"]["detail"] == Json("bad scene"));
 		}
 
-		TEST_CASE("TranscriptLog: a file that does not end with a newline is rejected")
+		// Docs/Decisions/0026-m16-contract.md decision 13: a writer that died mid-line (a killed bridge) leaves a torn last line.
+		// It is completed with "\n" and keeps its number, as the bridge completes it (transcript.py), so every line reference
+		// keeps its meaning and nobody edits the append-only file by hand.
+		TEST_CASE("TranscriptLog: a torn last line is completed and the next line numbered after it")
 		{
 			Scope<VirtualFileSystem> vfs = MakeTranscriptVfs();
 			const Result<VfsPath> file = VfsPath::Parse("project://Automation/BuildLog.jsonl");
@@ -93,11 +99,73 @@ namespace Engine {
 			const Result<VfsPath> directory = VfsPath::Parse("project://Automation");
 			REQUIRE(directory.has_value());
 			REQUIRE(vfs->CreateDirectories(*directory).has_value());
+			const std::string complete = R"({"type": "request", "id": 1})";
 			const std::string torn = R"({"type": "request")";
-			REQUIRE(vfs->WriteFileAtomic(*file, std::as_bytes(std::span(torn.data(), torn.size()))).has_value());
-			const Result<uint64_t> appended = TranscriptLog::AppendRequest(*vfs, "cli", Json(), "project.upgrade", Json::object());
-			REQUIRE_FALSE(appended.has_value());
-			CHECK(appended.error().GetCode() == ErrorCode::Validation);
+			const std::string before = complete + "\n" + torn;
+			REQUIRE(vfs->WriteFileAtomic(*file, std::as_bytes(std::span(before.data(), before.size()))).has_value());
+
+			Result<uint64_t> appended = MakeError(ErrorCode::Unsupported, "not appended");
+			{
+				Test::ExpectLog completed(LogLevel::Warn, "torn line");
+				appended = TranscriptLog::AppendRequest(*vfs, "cli", Json(1), "project.upgrade", Json::object());
+			}
+			REQUIRE_MESSAGE(appended.has_value(), appended.error().ToString());
+			CHECK(*appended == 3);
+
+			// The torn line is kept byte for byte, completed, and the new line follows it.
+			const Result<std::string> text = vfs->ReadText(*file);
+			REQUIRE(text.has_value());
+			CHECK(text->starts_with(before + "\n"));
+			CHECK(std::count(text->begin(), text->end(), '\n') == 3);
+			const Result<Json> line = JsonReader::Parse(std::string_view(*text).substr(before.size() + 1, text->size() - before.size() - 2));
+			REQUIRE_MESSAGE(line.has_value(), line.error().ToString());
+			CHECK((*line)["method"] == Json("project.upgrade"));
+
+			// A response to it references its line, and the file stays complete.
+			REQUIRE(TranscriptLog::AppendResponse(*vfs, "cli", Json(1), *appended, "ok", Json()).has_value());
+			const Result<std::string> after = vfs->ReadText(*file);
+			REQUIRE(after.has_value());
+			CHECK(std::count(after->begin(), after->end(), '\n') == 4);
+			CHECK(after->ends_with("\n"));
+		}
+
+		// The bridge writes raw UTF-8 (ensure_ascii=False) and completes a torn line byte-wise, so a writer killed inside a
+		// multi-byte character leaves bytes that are not valid UTF-8 in the append-only file for good. The editor reads and
+		// counts them as bytes, as the bridge does, and keeps appending.
+		TEST_CASE("TranscriptLog: a line torn inside a multi-byte UTF-8 character is completed and appending goes on")
+		{
+			Scope<VirtualFileSystem> vfs = MakeTranscriptVfs();
+			const Result<VfsPath> file = VfsPath::Parse("project://Automation/BuildLog.jsonl");
+			REQUIRE(file.has_value());
+			const Result<VfsPath> directory = VfsPath::Parse("project://Automation");
+			REQUIRE(directory.has_value());
+			REQUIRE(vfs->CreateDirectories(*directory).has_value());
+			// "\xE2\x80" is U+2014 (EM DASH, E2 80 94) cut after its second byte.
+			const std::string complete = "{\"type\": \"request\", \"params\": {\"source\": \"-- \xE2\x80\x94 ok\"}}";
+			const std::string torn = "{\"type\": \"request\", \"params\": {\"source\": \"-- \xE2\x80";
+			const std::string before = complete + "\n" + torn;
+			REQUIRE(vfs->WriteFileAtomic(*file, AsBytes(before)).has_value());
+
+			Result<uint64_t> appended = MakeError(ErrorCode::Unsupported, "not appended");
+			{
+				Test::ExpectLog completed(LogLevel::Warn, "torn line");
+				appended = TranscriptLog::AppendRequest(*vfs, "cli", Json(1), "project.refreshAssets", Json::object());
+			}
+			REQUIRE_MESSAGE(appended.has_value(), appended.error().ToString());
+			CHECK(*appended == 3);
+			REQUIRE(TranscriptLog::AppendResponse(*vfs, "cli", Json(1), *appended, "ok", Json()).has_value());
+
+			// Every byte before the tear is kept, the torn line is completed, and the two new lines follow it.
+			const Result<Buffer> bytes = vfs->ReadFile(*file);
+			REQUIRE(bytes.has_value());
+			const std::string_view text = AsStringView(*bytes);
+			CHECK(text.starts_with(before + "\n"));
+			CHECK(std::ranges::count(text, '\n') == 4);
+			CHECK(text.ends_with("\n"));
+			const std::string_view appendedLines = text.substr(before.size() + 1);
+			const Result<Json> request = JsonReader::Parse(appendedLines.substr(0, appendedLines.find('\n')));
+			REQUIRE_MESSAGE(request.has_value(), request.error().ToString());
+			CHECK((*request)["method"] == Json("project.refreshAssets"));
 		}
 	}
 

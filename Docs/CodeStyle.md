@@ -646,7 +646,7 @@ The macros are defined in `Engine/Core/Log.h` and `Engine/Core/Assert.h`. The ex
   - **Error:** an operation failed and the engine continues.
   - **Critical:** the engine cannot continue.
 - **Hot paths:** no Info or Warn messages emitted every frame, and no logging in tight loops.
-- **No other output channels:** no `printf`, `std::cout` or `std::cerr` for diagnostics.
+- **No other output channels:** no `printf`, `std::cout` or `std::cerr` for diagnostics. The one write to standard output is output the user asked for, not a diagnostic: `Editor --help` writes its usage with `std::fwrite` before any logger exists (`RunEditor` in `Editor/EditorApp.h`; ADR 0026, friction F20).
 
 ```cpp
 ENGINE_CORE_ERROR("Failed to load texture '{}': {}", path.string(), reason);

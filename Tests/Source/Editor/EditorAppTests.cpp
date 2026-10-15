@@ -197,6 +197,66 @@ end)
 			CHECK_MESSAGE(passed->ExitCode == ExitCode::Success, passed->StandardError);
 		}
 
+		// Docs/Decisions/0026-m16-contract.md decision 13 (G9): a fresh clone, and the games suite's index copies, have no
+		// Library/, so a case's Assets.Load imports the asset synchronously inside the case. That import is host work that
+		// runs no Luau: its time must not count toward the callback budget (it did, and FeatureTest's Formats case failed
+		// with "script exceeded 500 ms" from a cold cache while the Inter font imported for 2 s in Debug). The case loads
+		// two fonts and five textures nothing imported before, under a callback budget far below their import time.
+		TEST_CASE("EditorApp: --run-tests passes a case that loads uncached assets from a cold import cache")
+		{
+			Test::EditorTestFixture fixture("RunTestsColdCache");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			const std::filesystem::path projectFile = fixture.GetEditor().GetProject().GetProjectFile();
+			const std::filesystem::path root = projectFile.parent_path();
+			ProjectSettings settings = fixture.GetEditor().GetProject().GetSettings();
+			settings.Scripting.CallbackBudgetMs = 100;
+			TestSuiteSettings suite;
+			suite.Script = "Assets/Tests/Cold.test.luau";
+			suite.Scene = "Assets/Scenes/Main.scene";
+			settings.Testing.Suites.push_back(std::move(suite));
+			const auto project = ProjectSerializer::SaveToString(settings, fixture.GetEngine().GetTypeRegistry());
+			REQUIRE(project);
+			REQUIRE(fixture.GetEditor().CloseProject());
+			WriteProcessTestFile(projectFile, *project);
+			std::string paths;
+			for (const std::string_view asset : { "Fonts/Inter-Regular.otf", "Fonts/Glyphs.ttf", "Textures/Alpha.tga", "Textures/Baseline.jpeg",
+					 "Textures/Photo.jpg", "Textures/Rgba.png", "Textures/Solid.bmp" })
+			{
+				const Result<Buffer> bytes = FileSystem::ReadFile(Test::GetTestDataPath(std::format("Assets/{}", asset)));
+				REQUIRE_MESSAGE(bytes.has_value(), bytes.error().ToString());
+				const std::filesystem::path target = root / "Assets" / "Cold" / FileSystem::PathFromUtf8(asset);
+				REQUIRE(FileSystem::CreateDirectories(target.parent_path()).has_value());
+				REQUIRE(FileSystem::WriteFileAtomic(target, *bytes).has_value());
+				paths += std::format("\t\"Assets/Cold/{}\",\n", asset);
+			}
+			WriteProcessTestFile(root / "Assets/Tests/Cold.test.luau", std::format(R"(--!strict
+local PATHS = {{
+{}}}
+return Test.Suite("Cold", function()
+	Test.Case("loads assets nothing imported before", function()
+		for _, path in PATHS do
+			local asset = Assets.Load(path)
+			Test.Expect(asset ~= nil, `{{path}} loads`)
+		end
+	end)
+end)
+)",
+																		   paths));
+			// A fresh copy without Library/: every asset above is imported for the first time inside the case.
+			std::error_code error;
+			std::filesystem::remove_all(root / "Library", error);
+			REQUIRE_FALSE(error);
+			REQUIRE_FALSE(std::filesystem::exists(root / "Library", error));
+			const auto run = RunEditor(fixture.GetDirectory(),
+				{ "--headless", "--renderer", "none", "--project", Test::PathToUtf8(projectFile), "--run-tests", "--junit",
+					Test::PathToUtf8(fixture.GetDirectory() / "Reports" / "Cold.xml") },
+				std::chrono::seconds(300));
+			REQUIRE(run);
+			CHECK_FALSE(run->StandardError.contains("possible infinite loop"));
+			CHECK_MESSAGE(run->ExitCode == ExitCode::Success, run->StandardError);
+		}
+
 		TEST_CASE("EditorApp: --run-tests runs in a windowed editor")
 		{
 			// ADR 0019 decision 6: the normal windowed editor constructs its AudioEngine with deterministic decoding, so
@@ -470,16 +530,24 @@ end)
 			CHECK_MESSAGE(result->ExitCode == ExitCode::Success, result->StandardError);
 			const Result<std::string> transcript = FileSystem::ReadText(projectFile.parent_path() / "Automation/BuildLog.jsonl");
 			REQUIRE(transcript.has_value());
+			CHECK(transcript->contains("project.refreshAssets"));
 			CHECK(transcript->contains("project.upgrade"));
 			CHECK(transcript->contains(R"("cli")"));
+			// project.upgrade is the second request of the cli batch (ADR 0026 decision 11): line 3, after project.refreshAssets
+			// and its response, and it carries its own request id (G6).
 			const Result<std::string> provenance = FileSystem::ReadText(projectFile.parent_path() / "Automation/Provenance.json");
 			REQUIRE(provenance.has_value());
-			CHECK(provenance->contains(R"("Method": "project.upgrade")"));
-			CHECK(provenance->contains(R"("TranscriptLine": 1)"));
+			const Result<std::vector<ProvenanceEntry>> entries = ProvenanceRecorder::FromText(*provenance);
+			REQUIRE_MESSAGE(entries.has_value(), entries.error().ToString());
+			const auto scene = std::ranges::find(*entries, std::string_view("Assets/Scenes/Old.scene"), &ProvenanceEntry::Path);
+			REQUIRE(scene != entries->end());
+			CHECK(scene->Method == "project.upgrade");
+			CHECK(scene->Client == "cli");
+			CHECK(scene->RequestId == VariantValue(Json(2)));
+			CHECK(scene->TranscriptLine == std::optional<uint64_t>(3));
 		}
 
-		TEST_CASE("EditorApp: --upgrade defers the asset scan to a transcribed project.refreshAssets before project.upgrade"
-			* doctest::skip(true))
+		TEST_CASE("EditorApp: --upgrade defers the asset scan to a transcribed project.refreshAssets before project.upgrade")
 		{
 			Test::EditorTestFixture fixture("EditorUpgradeDeferredScan");
 			const std::filesystem::path projectFile = CreateProcessTestProject(fixture, "Deferred");
@@ -616,6 +684,33 @@ end)
 				{ "--headless", "--renderer", "none", "--batch", Test::PathToUtf8(userData / "Missing.jsonl") }, std::chrono::seconds(60));
 			REQUIRE(missing.has_value());
 			CHECK(missing->ExitCode == ExitCode::InitFailed);
+		}
+
+		// M16 friction F20: `Editor --help` was an unknown option (exit 2) that printed the option list only inside the error.
+		TEST_CASE("EditorApp: --help and -h print the usage to standard output and exit 0, and an unknown option stays a usage error")
+		{
+			Test::TempDirectory userData("EditorHelp");
+			for (const std::string_view help : { "--help", "-h" })
+			{
+				CAPTURE(help);
+				const Result<ProcessResult> result = RunEditor(userData, { std::string(help) }, std::chrono::seconds(60));
+				REQUIRE_MESSAGE(result.has_value(), result.error().ToString());
+				INFO("editor stderr: ", result->StandardError);
+				CHECK(result->ExitCode == ExitCode::Success);
+				CHECK(result->StandardOutput.starts_with("Usage: Editor [options]"));
+				for (const std::string_view option : { "--help", "--project", "--headless", "--renderer", "--export", "--viewport-screenshot", "--user-data-dir" })
+					CHECK_MESSAGE(result->StandardOutput.contains(option), option);
+				// Nothing started: no log line, and no user-data directory of the product.
+				CHECK(result->StandardError.empty());
+				std::error_code error;
+				CHECK(std::filesystem::is_empty(userData.GetPath(), error));
+				CHECK_FALSE(error);
+			}
+			const Result<ProcessResult> unknown = RunEditor(userData, { "--help", "--bogus" }, std::chrono::seconds(60));
+			REQUIRE(unknown.has_value());
+			CHECK(unknown->ExitCode == ExitCode::UsageError);
+			CHECK(unknown->StandardOutput.empty());
+			CHECK(unknown->StandardError.contains("--bogus"));
 		}
 
 		TEST_CASE("EditorApp: inconsistent editor options are usage errors")

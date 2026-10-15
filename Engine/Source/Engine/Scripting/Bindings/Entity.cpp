@@ -226,7 +226,14 @@ namespace Engine {
 			context.Strict = true;
 			EntityChecked(call, info.FromJson(checked.get(), JsonReader(*json), context));
 			if (name == "Script")
-				EntityChecked(call, Detail::ValidateBehaviourAssignment(call.Engine->GetHost(), static_cast<const ScriptComponent*>(checked.get())->Script.GetHandle()));
+			{
+				// Loading the script asset (an import when it is not cached) is host time (Detail::LoadAssetAsHost).
+				const AssetHandle script = static_cast<const ScriptComponent*>(checked.get())->Script.GetHandle();
+				EntityChecked(call, call.Engine->RunHostOperation([&call, script]()
+				{
+					return Detail::ValidateBehaviourAssignment(call.Engine->GetHost(), script);
+				}));
+			}
 			EntityMutation(call);
 			EntityChecked(call, ComponentAccess::AddComponent(entity, name, &*json, context.Schemas));
 			if (name == "Script")
@@ -344,7 +351,16 @@ namespace Engine {
 		{
 			const Entity entity = EntitySelf(call);
 			auto* assets = call.Engine->GetHost().GetAssets();
-			const auto bounds = assets ? ComputeEntityWorldBounds(entity, *assets, { .IncludeDescendants = false }) : std::nullopt;
+			// Loading the meshes (an import when one is not cached) is host time (Detail::LoadAssetAsHost).
+			std::optional<Aabb> bounds;
+			if (assets != nullptr)
+			{
+				static_cast<void>(call.Engine->RunHostOperation([&bounds, &entity, assets]() -> Status
+				{
+					bounds = ComputeEntityWorldBounds(entity, *assets, { .IncludeDescendants = false });
+					return {};
+				}));
+			}
 			if (bounds)
 			{
 				Lua::Push(call, bounds->Min);

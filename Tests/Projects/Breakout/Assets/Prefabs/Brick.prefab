@@ -1,0 +1,68 @@
+{
+	"Format": "Prefab",
+	"Version": 1,
+	"Name": "Brick",
+	"Root": "55425a047af78945",
+	"ComponentVersions": {
+		"Transform": 1,
+		"MeshRenderer": 1,
+		"RigidBody": 1,
+		"BoxCollider": 1,
+		"Script": 1
+	},
+	"Entities": [
+		{
+			"ID": "55425a047af78945",
+			"Name": "Brick",
+			"Parent": null,
+			"Active": true,
+			"Tags": ["Brick"],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1.5, 0.5, 1]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["4fe19c1c1e553eec"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"RigidBody": {
+					"Type": "Static",
+					"Mass": 1,
+					"Friction": 0,
+					"Restitution": 1,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				},
+				"Script": {
+					"Script": "e29b62c819907a37",
+					"Fields": {
+						"Points": 1
+					},
+					"ExecutionOrder": 0
+				}
+			}
+		}
+	]
+}

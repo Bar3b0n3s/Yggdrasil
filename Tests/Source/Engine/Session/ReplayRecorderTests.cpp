@@ -11,6 +11,8 @@
 #include <nlohmann/json.hpp>
 
 #include <array>
+#include <string>
+#include <vector>
 
 namespace Engine {
 
@@ -209,6 +211,98 @@ namespace Engine {
 			CHECK(result->FinalTick == 3);
 			CHECK(result->FinalStateHash == UUID(session->ComputeStateHash()).ToString());
 			CHECK_FALSE(recorder.IsRecording());
+		}
+
+		// M16 friction S2-01 (FX-4): the session feeds its own recorder the state hash of the boundary every fixed step starts
+		// from, and the recording keeps every positive multiple of ReplayCheckpointInterval before its final tick, whose hash
+		// stays FinalStateHash.
+		TEST_CASE("ReplayRecorder: a recording keeps the state hash of every 60th completed tick before its final tick")
+		{
+			RecordingFixture f;
+			for (const uint64_t finalTick : { uint64_t{ 150 }, 2 * ReplayCheckpointInterval })
+			{
+				CAPTURE(finalTick);
+				auto session = f.Create();
+				ReplayRecorder* recorder = session->GetRecorder();
+				REQUIRE(recorder != nullptr);
+				REQUIRE(recorder->Begin(f.Header, *session));
+				std::vector<ReplayCheckpoint> expected;
+				for (uint64_t tick = 0; tick < finalTick; ++tick)
+				{
+					session->Tick();
+					if (session->GetTick() % ReplayCheckpointInterval == 0 && session->GetTick() < finalTick)
+						expected.push_back({ .Tick = session->GetTick(), .StateHash = UUID(session->ComputeStateHash()).ToString() });
+				}
+				const auto document = recorder->Finish(*session);
+				REQUIRE_MESSAGE(document.has_value(), document.error().ToString());
+				CHECK(document->FinalTick == finalTick);
+				CHECK(document->FinalStateHash == UUID(session->ComputeStateHash()).ToString());
+				REQUIRE(document->Checkpoints.size() == expected.size());
+				CHECK(document->Checkpoints.size() == (finalTick - 1) / ReplayCheckpointInterval);
+				for (size_t index = 0; index < expected.size(); ++index)
+				{
+					CHECK(document->Checkpoints[index].Tick == expected[index].Tick);
+					CHECK(document->Checkpoints[index].StateHash == expected[index].StateHash);
+				}
+			}
+			// A recording without a 60th tick keeps none.
+			auto session = f.Create();
+			ReplayRecorder* recorder = session->GetRecorder();
+			REQUIRE(recorder != nullptr);
+			REQUIRE(recorder->Begin(f.Header, *session));
+			for (uint64_t tick = 0; tick < ReplayCheckpointInterval - 1; ++tick)
+				session->Tick();
+			const auto shortRecording = recorder->Finish(*session);
+			REQUIRE(shortRecording.has_value());
+			CHECK(shortRecording->Checkpoints.empty());
+		}
+
+		// M16 review R22: a recorder that is not recording keeps no checkpoint, even when it is handed checkpoint boundaries
+		// (ticks 60 and 120, where the tick-0 exemption hides nothing) of a session whose state differs (another seed): it
+		// has nothing to finish, and the recording it makes next holds exactly its own session's checkpoint. An idle recorder
+		// is stopped twice over (no recording is active, and its next tick is 0), and Begin starts an empty document, so the
+		// check fails only when an idle capture can reach a document.
+		TEST_CASE("ReplayRecorder: a recorder that is not recording keeps no checkpoint for a later recording")
+		{
+			RecordingFixture f;
+			ReplayRecorder recorder;
+			f.Spec.Seed = f.Header.Seed + 1;
+			auto other = f.Create(93);
+			f.Spec.Seed = f.Header.Seed;
+			std::vector<std::string> otherHashes;
+			for (uint64_t tick = 0; tick < 2 * ReplayCheckpointInterval; ++tick)
+			{
+				other->Tick();
+				if (other->GetTick() % ReplayCheckpointInterval == 0)
+				{
+					otherHashes.push_back(UUID(other->ComputeStateHash()).ToString());
+					recorder.CaptureCheckpoint(*other);
+				}
+			}
+			REQUIRE(otherHashes.size() == 2);
+			CHECK_FALSE(recorder.IsRecording());
+			const auto nothing = recorder.Finish(*other);
+			REQUIRE_FALSE(nothing.has_value());
+			CHECK(nothing.error().GetCode() == ErrorCode::InvalidState);
+
+			// The recording feeds the standalone recorder as a session feeds its own: the checkpoint before each step, the
+			// applied input after it.
+			auto session = f.Create();
+			REQUIRE(recorder.Begin(f.Header, *session));
+			std::string ownHash;
+			for (uint64_t tick = 0; tick <= ReplayCheckpointInterval; ++tick)
+			{
+				if (session->GetTick() == ReplayCheckpointInterval)
+					ownHash = UUID(session->ComputeStateHash()).ToString();
+				recorder.CaptureCheckpoint(*session);
+				f.Step(recorder, *session);
+			}
+			const auto document = recorder.Finish(*session);
+			REQUIRE_MESSAGE(document.has_value(), document.error().ToString());
+			REQUIRE(document->Checkpoints.size() == 1);
+			CHECK(document->Checkpoints[0].Tick == ReplayCheckpointInterval);
+			CHECK(document->Checkpoints[0].StateHash == ownHash);
+			CHECK(ownHash != otherHashes[0]);
 		}
 	}
 

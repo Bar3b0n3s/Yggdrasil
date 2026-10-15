@@ -197,6 +197,30 @@ namespace Engine {
 			return RemovedValueField;
 		}
 
+		// The schema-only field describing the Value of a Field override whose target field resolves its values against the
+		// component that holds them (Script.Fields, against the component's Script handle).
+		static FieldInfo::Specification MakeComponentResolvedValueField(const TypeInfo& type)
+		{
+			FieldInfo::Specification specification;
+			specification.Name = "Value";
+			specification.Description = "The overridden values of a field whose values resolve against their component (Script.Fields): checked on the "
+										"instance member's own component when the override is applied.";
+			specification.Type = &type;
+			return specification;
+		}
+
+		// The schema of such a Field override's Value: free-form JSON. An override has no component to resolve it against
+		// (its owner is the PrefabOverride), so it is checked where it is applied: PrefabInstantiator applies it to the
+		// member's own component, whose read resolves each value and reports an unknown or mismatching one there, and the
+		// member's flattened component in a scene file is read the same way (ADR 0026, amending ADR 0006 decision 6).
+		// Immutable constants after their thread-safe first-use initialization; they outlive every resolution.
+		static const FieldInfo& GetComponentResolvedValueSchema()
+		{
+			static const TypeInfo ResolvedValueType(MakeFreeFormVariantType());
+			static const FieldInfo ResolvedValueField(MakeComponentResolvedValueField(ResolvedValueType));
+			return ResolvedValueField;
+		}
+
 		// What an override resolver reads from its owner: the kind and the names that precede Value.
 		struct PrefabOverrideTarget
 		{
@@ -262,9 +286,10 @@ namespace Engine {
 			return component;
 		}
 
-		// The VariantSchemaResolver of PrefabOverride.Value (§5.4): the overridden field's schema for Field, the
-		// component's whole schema for AddComponent, null for RemoveComponent (of a component that exists), the
-		// PrefabEntityKeys field for EntityKey.
+		// The VariantSchemaResolver of PrefabOverride.Value (§5.4): the overridden field's schema for Field (free-form JSON
+		// for a field whose own values resolve against their component, GetComponentResolvedValueSchema), the component's
+		// whole schema for AddComponent, null for RemoveComponent (of a component that exists), the PrefabEntityKeys field
+		// for EntityKey.
 		static Result<const FieldInfo*> ResolvePrefabOverrideValue(const ResolveContext& context)
 		{
 			if (context.OwnerType == nullptr || context.OwnerType->GetType().GetKey() != TypeKeyOf<PrefabOverride>())
@@ -282,7 +307,7 @@ namespace Engine {
 					ENGINE_TRY_ASSIGN(const ComponentInfo* component, FindOverridableComponent(registry, target.Component));
 					const FieldInfo* field = component->FindField(target.Field);
 					if (field != nullptr && field->IsStored() && field->GetMeta().Serialized)
-						return field;
+						return field->GetResolver() != nullptr ? &GetComponentResolvedValueSchema() : field;
 
 					const std::string message = std::format("component '{}' has no serialized field '{}'", target.Component, target.Field);
 					return std::unexpected(Error(ErrorCode::NotFound, message).WithHint(MakeDidYouMeanHint(component->SuggestFieldNames(target.Field))));

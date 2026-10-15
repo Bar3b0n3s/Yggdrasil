@@ -8,9 +8,28 @@ import unittest
 
 from harness import AutomationTestCase, engine_client
 
+# A Mover that steps one unit along X per fixed step while Space is held: a recording that presses Space has an outcome
+# that depends on its input, which input.record stop's input check requires (M16 friction S2-01, FX-4).
+KEY_MOVER = """local KeyMover = {}
+function KeyMover.OnFixedUpdate(self: any, dt: number)
+\tif Input.IsKeyDown("Space") then
+\t\tself.Entity.Transform:Translate(vector.create(1, 0, 0))
+\tend
+end
+return Script.Define("KeyMover", KeyMover)
+"""
+
+
+def add_key_mover(client: engine_client.EngineClient) -> None:
+    """Adds the KeyMover script and its "Mover" entity to the open scene (unsaved)."""
+    client.call("script.write", {"path": "Assets/Scripts/KeyMover.luau", "source": KEY_MOVER})
+    client.call("entity.create", {"name": "Mover",
+                                   "components": {"Script": {"Script": "Assets/Scripts/KeyMover.luau"}}})
+
 
 class ReplayTests(AutomationTestCase):
     def record(self, client: engine_client.EngineClient, path: str, ticks: int = 4) -> dict:
+        add_key_mover(client)
         client.call("scene.save")
         client.call("input.record", {"action": "start", "seed": 42, "parameters": {"level": 7}})
         client.call("play.step", {"ticks": ticks, "render": "none", "input": [
@@ -57,6 +76,30 @@ class ReplayTests(AutomationTestCase):
         self.assertFalse(state["lockstep"])
         self.assertEqual(state["state"], "Paused")
         self.assertEqual(state["tick"], 4)
+
+    def test_replay_leaves_the_session_paused_at_its_last_tick_for_inspection(self) -> None:
+        # input.replay's documented end state (M16 friction S1-09): the session waits paused at the replay's last tick,
+        # script.eval and scene.query read that state, and play.stop ends it.
+        client, _ = self.open_editor_with_scene()
+        client.call("entity.create", {"name": "Probe"})
+        path = "Assets/Tests/Inspected.replay"
+        self.record(client, path, ticks=6)
+        client.call("play.stop")
+        result = client.call("input.replay", {"path": path, "verify": True, "strictHash": True})
+        self.assertTrue(result["passed"])
+        self.assertEqual(result["finalTick"], 6)
+        state = client.call("play.state")
+        self.assertEqual(state["state"], "Paused")
+        self.assertEqual(state["tick"], 6)
+        self.assertEqual(state["stateHash"], result["stateHash"])
+        evaluated = client.call("script.eval", {"context": "play", "code":
+                                                "return {Time.GetTick(), Scene.GetLoadParameters().level}"})
+        self.assertEqual(evaluated["value"], [6, 7])
+        found = client.call("scene.query", {"where": {"name": "Probe"}})
+        self.assertEqual(len(found["entities"]), 1)
+        self.assertEqual(client.call("play.state")["tick"], 6)  # inspecting never steps the session
+        client.call("play.stop")
+        self.assertEqual(client.call("play.state")["state"], "Edit")
 
     def test_replay_strict_hash(self) -> None:
         client, root = self.open_editor_with_scene()
@@ -146,6 +189,98 @@ class ReplayTests(AutomationTestCase):
             client.call("input.record", {"action": "stop", "path": path})
         self.assert_engine_error(invalid.exception, engine_client.INVALID_STATE, "InvalidState")
         self.assertFalse((root / path).exists())
+
+    def test_record_refuses_a_recording_whose_outcome_does_not_depend_on_its_input(self) -> None:
+        # M16 friction S2-01 (FX-4): a recording with input events is replayed without them before it is written; when
+        # that run reproduces every checkpoint, the final hash and every expectation, nothing is written.
+        client, root = self.open_editor_with_scene()
+        client.call("scene.save")
+        client.call("input.record", {"action": "start"})
+        client.call("play.step", {"ticks": 70, "render": "none", "input": [
+            {"tick": 2, "type": "key", "key": "Space", "state": "tap"}]})
+        path = "Assets/Tests/Idle.replay"
+        with self.assertRaises(engine_client.EngineError) as refused:
+            client.call("input.record", {"action": "stop", "path": path})
+        self.assert_engine_error(refused.exception, engine_client.VALIDATION_FAILED, "Validation")
+        self.assertIn("does not depend on its input", refused.exception.detail)
+        self.assertIn(path, refused.exception.detail)
+        self.assertIn("restart", refused.exception.data["hint"])
+        # M16 friction S3-01: the hint states the input check's real rule, not a trailing restart as such.
+        self.assertIn("never shows in the world at a checkpoint", refused.exception.data["hint"])
+        check = refused.exception.data["inputCheck"]
+        self.assertTrue(check["passed"])
+        self.assertTrue(check["withoutInput"])
+        self.assertEqual(check["checkpointsChecked"], 1)
+        self.assertFalse((root / path).exists())
+        state = client.call("play.state")
+        self.assertFalse(state["recording"])
+        self.assertEqual((state["state"], state["tick"]), ("Paused", 70))
+        client.call("play.stop")
+
+        # The same input on a scene that reacts to it is written, with its checkpoint and where the check ended.
+        add_key_mover(client)
+        client.call("scene.save")
+        client.call("input.record", {"action": "start"})
+        client.call("play.step", {"ticks": 70, "render": "none", "input": [
+            {"tick": 2, "type": "key", "key": "Space", "state": "tap"}]})
+        saved = client.call("input.record", {"action": "stop", "path": path})
+        self.assertEqual((saved["events"], saved["checkpoints"], saved["inputCheckTick"]), (2, 1, 60))
+        document = json.loads((root / path).read_text(encoding="utf-8"))
+        self.assertEqual(document["Version"], 2)
+        self.assertEqual([checkpoint["Tick"] for checkpoint in document["Checkpoints"]], [60])
+
+    def test_replay_stops_at_the_first_checkpoint_that_differs(self) -> None:
+        client, root = self.open_editor_with_scene()
+        client.call("scene.save")
+        client.call("input.record", {"action": "start"})
+        client.call("play.step", {"ticks": 130, "render": "none"})
+        path = "Assets/Tests/Checkpoints.replay"
+        saved = client.call("input.record", {"action": "stop", "path": path})
+        self.assertEqual((saved["events"], saved["checkpoints"], saved["inputCheckTick"]), (0, 2, 0))
+        source = root / path
+        document = json.loads(source.read_text(encoding="utf-8"))
+        self.assertEqual([checkpoint["Tick"] for checkpoint in document["Checkpoints"]], [60, 120])
+        verified = client.call("input.replay", {"path": path, "verify": True, "strictHash": True})
+        self.assertEqual((verified["passed"], verified["checkpointsChecked"]), (True, 2))
+        recorded = document["Checkpoints"][0]["StateHash"]
+        document["Checkpoints"][0]["StateHash"] = "0000000000000001" if recorded == "0000000000000000" else \
+            "0000000000000000"
+        source.write_text(json.dumps(document), encoding="utf-8")
+        client.call("asset.reimport", {"asset": path})
+        with self.assertRaises(engine_client.EngineError) as mismatch:
+            client.call("input.replay", {"path": path, "verify": True, "strictHash": True})
+        self.assert_engine_error(mismatch.exception, engine_client.VALIDATION_FAILED, "Validation")
+        self.assertIn("checkpoint tick 60", mismatch.exception.detail)
+        outcome = mismatch.exception.data["replay"]
+        self.assertTrue(outcome["checkpointFailed"])
+        self.assertEqual((outcome["finalTick"], outcome["checkpointsChecked"]), (60, 1))
+        self.assertEqual((outcome["stateHash"], outcome["expectedStateHash"]),
+                         (recorded, document["Checkpoints"][0]["StateHash"]))
+        self.assertEqual(client.call("play.state")["tick"], 60)
+
+    def test_replay_without_input_applies_none_of_its_events(self) -> None:
+        client, _ = self.open_editor_with_scene()
+        path = "Assets/Tests/Pressed.replay"
+        saved = self.record(client, path, ticks=8)
+        self.assertGreater(saved["inputCheckTick"], 0)
+        client.call("play.stop")
+        with self.assertRaises(engine_client.EngineError) as failed:
+            client.call("input.replay", {"path": path, "verify": True, "strictHash": True, "withoutInput": True})
+        outcome = failed.exception.data["replay"]
+        self.assertTrue(outcome["withoutInput"])
+        self.assertFalse(outcome["hashMatched"])
+        self.assertEqual(outcome["expectedStateHash"], saved["stateHash"])
+        moved = client.call("script.eval", {"context": "play", "code":
+                                            "return Scene.FindByName('Mover').Transform.WorldPosition.x"})
+        self.assertEqual(moved["value"], 0)
+        replayed = client.call("input.replay", {"path": path, "verify": True, "strictHash": True})
+        self.assertFalse(replayed["withoutInput"])
+        self.assertTrue(replayed["passed"])
+        # Without verify nothing would be checked and the input check would always pass (M16 review R19).
+        with self.assertRaises(engine_client.EngineError) as unverified:
+            client.call("input.replay", {"path": path, "withoutInput": True})
+        self.assert_engine_error(unverified.exception, engine_client.INVALID_PARAMS, "InvalidArgument")
+        self.assertIn("withoutInput requires verify:true", unverified.exception.detail)
 
     def test_replay_faults_preserve_both_embedded_locations(self) -> None:
         client, _ = self.open_editor_with_scene()
