@@ -74,7 +74,7 @@ D:/Engine
 ├─ Tools/     MCP/{run.py, engine_mcp/, catalog.json (generated), requirements.lock, tests/}
 │             Automation/engine_client.py (stdlib JSON-RPC client shared by MCP and tests)
 ├─ Projects/  FeatureTest/  Tetris/ (M17)  RollingBall/ (M18)
-└─ Docs/      Architecture.md  Roadmap.md  CodeStyle.md  ReviewChecklist.md  Decisions/
+└─ Docs/      Architecture.md  Roadmap.md  CodeStyle.md  ReviewChecklist.md  Backlog.md  Decisions/
               Reference/ (generated: Components, ScriptAPI, Automation, Validation, FileFormats, Methods.json,
                           Schemas/)
 ```
