@@ -20,6 +20,19 @@ return Script.Define("KeyMover", KeyMover)
 """
 
 
+# A Booster that steps one unit along X per fixed step while Space is held or while its own table says so: a script
+# table that script.eval can write without any engine call, so nothing invalidates the recording.
+BOOSTER = """local Booster = {}
+function Booster.OnFixedUpdate(self: any, dt: number)
+\tif Input.IsKeyDown("Space") or self.Boost then
+\t\tself.Entity.Transform:Translate(vector.create(1, 0, 0))
+\tend
+end
+return Script.Define("Booster", Booster)
+"""
+SKIP_RECORD_VERIFIES = "contract stub: input.record stop replays with its input first (ADR 0027 decision 3, A1)"
+
+
 def add_key_mover(client: engine_client.EngineClient) -> None:
     """Adds the KeyMover script and its "Mover" entity to the open scene (unsaved)."""
     client.call("script.write", {"path": "Assets/Scripts/KeyMover.luau", "source": KEY_MOVER})
@@ -228,6 +241,55 @@ class ReplayTests(AutomationTestCase):
         document = json.loads((root / path).read_text(encoding="utf-8"))
         self.assertEqual(document["Version"], 2)
         self.assertEqual([checkpoint["Tick"] for checkpoint in document["Checkpoints"]], [60])
+
+    @unittest.skip(SKIP_RECORD_VERIFIES)
+    def test_record_refuses_a_recording_changed_by_a_script_table_write(self) -> None:
+        # Docs/Decisions/0027-m17-contract.md decision 3, A1 (M17 maps GTF-01, GDF-03, GAF-09): a script.eval that
+        # writes only a script table during a recording calls no engine API, so nothing invalidates the recording, and
+        # Stop played it only without its input, which the boosted world fails too, so it wrote a replay that its own
+        # input does not reproduce. Stop now replays the recording with its input first and refuses it there.
+        client, root = self.open_editor_with_scene()
+        client.call("script.write", {"path": "Assets/Scripts/Booster.luau", "source": BOOSTER})
+        client.call("entity.create", {"name": "Booster",
+                                       "components": {"Script": {"Script": "Assets/Scripts/Booster.luau"}}})
+        client.call("scene.save")
+        client.call("input.record", {"action": "start"})
+        client.call("play.step", {"ticks": 10, "render": "none", "input": [
+            {"tick": 2, "type": "key", "key": "Space", "state": "tap"}]})
+        client.call("script.eval", {"context": "play", "entity": "/Booster", "code": "self.Boost = true; return true"})
+        client.call("play.step", {"ticks": 120, "render": "none"})
+        path = "Assets/Tests/Boosted.replay"
+        with self.assertRaises(engine_client.EngineError) as refused:
+            client.call("input.record", {"action": "stop", "path": path})
+        self.assert_engine_error(refused.exception, engine_client.VALIDATION_FAILED, "Validation")
+        detail = refused.exception.detail
+        self.assertIn(f"refusing to write '{path}'", detail)
+        self.assertIn("replayed with its input, the recording does not reproduce itself", detail)
+        self.assertIn("checkpoint tick 60", detail)
+        self.assertIn("neither recorded nor detected", refused.exception.data["hint"])
+        verification = refused.exception.data["verification"]
+        self.assertTrue(verification["checkpointFailed"])
+        self.assertFalse(verification["withoutInput"])
+        self.assertEqual(verification["finalTick"], 60)
+        self.assertIn(verification["stateHash"], detail)
+        self.assertIn(verification["expectedStateHash"], detail)
+        self.assertFalse((root / path).exists())
+        state = client.call("play.state")
+        self.assertFalse(state["recording"])
+        self.assertFalse(state["lockstep"])
+        self.assertEqual((state["state"], state["tick"]), ("Paused", 60))
+        client.call("play.stop")
+
+        # The same play without the evaluation reproduces itself, fails without its input and is written.
+        client.call("input.record", {"action": "start"})
+        client.call("play.step", {"ticks": 130, "render": "none", "input": [
+            {"tick": 2, "type": "key", "key": "Space", "state": "tap"}]})
+        saved = client.call("input.record", {"action": "stop", "path": path})
+        self.assertEqual((saved["events"], saved["checkpoints"], saved["inputCheckTick"]), (2, 2, 60))
+        self.assertTrue((root / path).exists())
+        verified = client.call("input.replay", {"path": path, "verify": True, "strictHash": True})
+        self.assertTrue(verified["passed"])
+        self.assertEqual(verified["stateHash"], saved["stateHash"])
 
     def test_replay_stops_at_the_first_checkpoint_that_differs(self) -> None:
         client, root = self.open_editor_with_scene()

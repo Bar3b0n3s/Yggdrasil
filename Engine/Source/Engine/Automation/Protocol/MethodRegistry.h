@@ -258,8 +258,11 @@ namespace Engine {
 		// are errors), and calls the handler. Errors, the handler not running: a resolver error other than NotFound and
 		// InvalidArgument (InvalidState without a project, a refresh's Io) unchanged, located at its value; NotFound when
 		// every other unresolved reference names nothing; otherwise InvalidArgument (reported as InvalidParams) with one
-		// issue per reference, located at its value; a parse failure as InvalidArgument carrying every issue. Does not catch
-		// exceptions: the Dispatcher's allowlisted boundary does (§4.6 item 5).
+		// issue per reference, located at its value. An EntityRef value in component data that is a string but not a 16-hex
+		// id is such an issue, never NotFound, with the hint that component data takes the entity's id, which is also the
+		// error's hint when every issue is one (Docs/Decisions/0027-m17-contract.md decision 3, A4). A parse failure is
+		// InvalidArgument carrying every issue. Does not catch exceptions: the Dispatcher's allowlisted boundary does (§4.6
+		// item 5).
 		[[nodiscard]] MethodResult Invoke(MethodContext& context) const;
 
 		// One op of edit.batch (§13.4). Before anything runs it checks, in order: `method` exists (NotFound with

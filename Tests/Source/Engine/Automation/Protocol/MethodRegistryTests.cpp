@@ -160,6 +160,30 @@ namespace Engine {
 			return *schemas;
 		}
 
+		// The script "Assets/Fields.luau" (handle 0x515) with the Entity fields of a HUD-driving behaviour: Target
+		// (Field.Entity()) and Targets (Field.Array(Field.Entity())).
+		Ref<const IFieldSchemaSource> MakeEntityFieldSchemas()
+		{
+			auto script = CreateRef<ScriptData>();
+			script->Kind = ScriptKind::Behaviour;
+			script->Name = "Fields";
+			ScriptFieldSchema target;
+			target.Name = "Target";
+			target.Type = FieldType::EntityRef;
+			script->Fields.push_back(target);
+			ScriptFieldSchema element;
+			element.Type = FieldType::EntityRef;
+			ScriptFieldSchema targets;
+			targets.Name = "Targets";
+			targets.Type = FieldType::Array;
+			targets.DefaultValue = VariantValue(Json::array());
+			targets.Element = CreateRef<ScriptFieldSchema>(element);
+			script->Fields.push_back(std::move(targets));
+			const auto schemas = ScriptFieldSchemaSource::Create({ { UUID(0x515), AssetRef<ScriptData>(script) } });
+			REQUIRE_MESSAGE(schemas.has_value(), (schemas ? std::string() : schemas.error().ToString()));
+			return *schemas;
+		}
+
 		struct SchemaRegistrySetup
 		{
 			Scope<TypeRegistry> Types = Test::CreateProtocolTestTypes();
@@ -255,6 +279,43 @@ namespace Engine {
 			REQUIRE_FALSE(issues.empty());
 			CHECK(issues[0].JsonPointer == "/components/Script/Fields/Weights/0");
 			CHECK(setup.State.HandlerCalls == 0);
+		}
+
+		// Docs/Decisions/0027-m17-contract.md decision 3, A4 (M17 content map C02, R1): an Entity value inside component data
+		// takes the entity's 16-hex id, unlike an entity a method's own params name (§13.4), so the Tetris walkthrough's
+		// `ScoreText: "/Game/ScoreText"` failed with only "expected a 16-digit hex UUID string". The rule stays (ADR 0010
+		// decision 32); every such value is refused at its pointer with a hint that says how to give the id.
+		TEST_CASE("MethodRegistry: an entity path in an EntityRef component value is refused with a hint naming the entity id"
+			* doctest::skip(true))
+		{
+			const std::string hint = "an Entity value in component data takes the entity's 16-hex id; use {\"$ref\": \"<op>.entity.id\"} in a batch or the id entity.get returns";
+			SchemaRegistrySetup setup;
+			setup.State.Published = MakeEntityFieldSchemas();
+			auto context = setup.Context(ParseRegistryJson(R"({"text":"fields","components":{"Script":{"Script":"Assets/Fields.luau",
+				"Fields":{"Target":"/Game/ScoreText","Targets":["0000000000000abc","4f2a"]}}}})"));
+			const MethodResult result = setup.Methods.Invoke(*context);
+			REQUIRE(std::holds_alternative<Error>(result));
+			const Error& error = std::get<Error>(result);
+			CAPTURE(error.ToString());
+			CHECK(error.GetCode() == ErrorCode::InvalidArgument);
+			CHECK(error.GetHint() == hint);
+			const std::vector<ErrorIssue>& issues = error.GetIssues();
+			REQUIRE(issues.size() == 2);
+			CHECK(issues[0].JsonPointer == "/components/Script/Fields/Target");
+			CHECK(issues[0].Hint == hint);
+			CHECK(issues[1].JsonPointer == "/components/Script/Fields/Targets/1");
+			CHECK(issues[1].Hint == hint);
+			CHECK(setup.State.HandlerCalls == 0);
+
+			// A 16-hex id is accepted as before, in a field and in an array.
+			SchemaRegistrySetup valid;
+			valid.State.Published = MakeEntityFieldSchemas();
+			auto accepted = valid.Context(ParseRegistryJson(R"({"text":"fields","components":{"Script":{"Script":"Assets/Fields.luau",
+				"Fields":{"Target":"0000000000000abc","Targets":["0000000000000def"]}}}})"));
+			const MethodResult passed = valid.Methods.Invoke(*accepted);
+			REQUIRE_MESSAGE(std::holds_alternative<Json>(passed), (std::holds_alternative<Error>(passed) ? std::get<Error>(passed).ToString() : std::string()));
+			CHECK(valid.State.HandlerCalls == 1);
+			CHECK(valid.State.ReadScript["Fields"]["Target"] == Json("0000000000000abc"));
 		}
 
 		TEST_CASE("MethodRegistry: registry-only parameters do not acquire external field schemas")

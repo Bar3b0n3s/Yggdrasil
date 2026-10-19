@@ -42,6 +42,8 @@ SMOKE_SUITE = "Assets/Tests/Smoke.test.luau"
 EDITOR_ONLY_SUITE = "Assets/Tests/EditorOnly.test.luau"
 REPLAY = "Assets/Tests/Replays/Rally.replay"
 REPLAY_HASH = "0123456789abcdef"
+SKIP_BUILD_SETTINGS = "contract stub: games.check_build_settings (ADR 0027 decision 4, B1, stream B)"
+SKIP_GAME_NAME = "contract stub: the Dist half names the package after the game (ADR 0027 decision 4, B2, stream B)"
 
 
 def git_stage(repository: Path, initialize: bool = False) -> None:
@@ -58,12 +60,17 @@ def git_stage(repository: Path, initialize: bool = False) -> None:
                        timeout=120)
 
 
-def write_project(root: Path, relative: str, testing: dict | None = None) -> Path:
-    """<root>/<relative>/<name>.eproj with `testing` as its Testing member; read_testing lets the rest be absent."""
+def write_project(root: Path, relative: str, testing: dict | None = None, build_settings: bool = True) -> Path:
+    """<root>/<relative>/<name>.eproj with `testing` as its Testing member; read_testing lets the rest be absent. With
+    `build_settings` its StartScene is TINY_SCENE and Export.BuildScenes lists it, the demo acceptance's build settings
+    (games.check_build_settings, Docs/Decisions/0027-m17-contract.md decision 4, B1), so the editor halves keep
+    passing once B1 checks them."""
     directory = root / relative
     directory.mkdir(parents=True, exist_ok=True)
     project_file = directory / f"{directory.name}.eproj"
-    document = {"Format": "Project", "Version": 1, "Name": directory.name}
+    document: dict[str, Any] = {"Format": "Project", "Version": 1, "Name": directory.name}
+    if build_settings:
+        document.update({"StartScene": TINY_SCENE, "Export": {"BuildScenes": [TINY_SCENE]}})
     if testing is not None:
         document["Testing"] = testing
     project_file.write_text(json.dumps(document, indent="\t") + "\n", encoding="utf-8")
@@ -100,12 +107,15 @@ def write_replay(project: Path, relative: str = REPLAY, state_hash: str = REPLAY
                                   "FinalStateHash": state_hash}, indent="\t") + "\n", encoding="utf-8")
 
 
-def make_game_repository(root: Path, stray_replay: bool = False, events: int = 2) -> games.GameProject:
+def make_game_repository(root: Path, stray_replay: bool = False, events: int = 2,
+                         build_settings: bool = True) -> games.GameProject:
     """A git repository at `root` with the game <root>/Tests/Projects/Game staged: one suite, the replay glob and the
     replay with REPLAY_HASH and `events` input events (a game needs a replay with input, games.check_replay_acceptance),
-    and with `stray_replay` a replay below Assets/ that Testing.Replays does not match."""
+    with `stray_replay` a replay below Assets/ that Testing.Replays does not match, and without `build_settings` no
+    StartScene and no Export.BuildScenes (write_project)."""
     project_file = write_project(root, "Tests/Projects/Game", {
-        "Suites": [{"Script": SMOKE_SUITE, "Scene": TINY_SCENE}], "Replays": ["Assets/Tests/Replays/*.replay"]})
+        "Suites": [{"Script": SMOKE_SUITE, "Scene": TINY_SCENE}], "Replays": ["Assets/Tests/Replays/*.replay"]},
+        build_settings)
     write_replay(project_file.parent, events=events)
     if stray_replay:
         write_replay(project_file.parent, "Assets/Stray.replay")
@@ -204,15 +214,20 @@ class FakeEditorSession:
 
 
 class FakeExportingSession(FakeEditorSession):
-    """The Release editor of the Dist half: project.export {testing: true} leaves a package holding the game's
-    executable below `output_root` (set by the test), and the plain export reports `smoke`. It counts its launches, so
-    a test sees whether the Release half's session was shared."""
+    """The Release editor of the Dist half: project.export {testing: true} leaves below `output_root` (set by the test)
+    the package of the game `name` (its Name, which the exporter gives the executable whatever the .eproj's file stem):
+    the executable and, unless `manifest` is false, its Game.json (at the package root, or in the bundle's
+    Contents/Resources on macOS), and reports its outputDirectory and executable, as the editor does
+    (ExportMethods.cpp, Exporter.cpp). The plain export reports `smoke`. It counts its launches, so a test sees whether
+    the Release half's session was shared."""
 
     def __init__(self, smoke: dict[str, Any], shutdown_error: Exception | None = None,
-                 wait_error: Exception | None = None) -> None:
+                 wait_error: Exception | None = None, name: str = "Game", manifest: bool = True) -> None:
         super().__init__(shutdown_error=shutdown_error, wait_error=wait_error)
         self.output_root: Path | None = None
         self.smoke = smoke
+        self.name = name
+        self.manifest = manifest
         self.launches = 0
         self.exports: list[dict[str, Any]] = []
 
@@ -229,11 +244,17 @@ class FakeExportingSession(FakeEditorSession):
             return dict(self.smoke)
         if self.output_root is None:
             raise FakeEngineError("the test set no output_root for project.export")
-        output = self.output_root / f"Export{len(self.exports)}" / "Game"
-        executable = exports.package_executable(output, "Game")
+        output = self.output_root / f"Export{len(self.exports)}" / self.name
+        executable = exports.package_executable(output, self.name)
         executable.parent.mkdir(parents=True)
         executable.write_bytes(b"")
-        return {"outputDirectory": str(output), "testSuiteCount": 1, "replayCount": 1}
+        if self.manifest:
+            resources = output / f"{self.name}.app" / "Contents" / "Resources" if paths.host().is_macos else output
+            resources.mkdir(parents=True, exist_ok=True)
+            (resources / "Game.json").write_text(json.dumps({"Format": "GameManifest", "Version": 1, "Name": self.name,
+                                                            "EngineVersion": "0.1.0", "Testing": True}),
+                                                 encoding="utf-8")
+        return {"outputDirectory": str(output), "executable": str(executable), "testSuiteCount": 1, "replayCount": 1}
 
 
 class FakeFeatureTestRun:
@@ -241,8 +262,9 @@ class FakeFeatureTestRun:
     (FeatureTest-Dist.{json,xml} below its working directory, whatever the game) with `state_hash` as the replay's hash,
     and the package's testing log; it records each run's working directory."""
 
-    def __init__(self, state_hash: str) -> None:
+    def __init__(self, state_hash: str, name: str = "Game") -> None:
         self.state_hash = state_hash
+        self.name = name  # the game's Name: its package directory, testing user-data folder and log are named after it
         self.directories: list[Path] = []
 
     def __call__(self, command: list[str], cwd: Path | None = None, **options: object) -> ProcessResult:
@@ -253,7 +275,8 @@ class FakeFeatureTestRun:
         document = run_document("Dist", [suite_row(SMOKE_SUITE), replay_row(REPLAY, self.state_hash)])
         (reports / "FeatureTest-Dist.json").write_text(json.dumps(document), encoding="utf-8")
         (reports / "FeatureTest-Dist.xml").write_text("<testsuites/>", encoding="utf-8")
-        log = exports.testing_user_data(exports.package_directory("Dist", "Game"), "Game") / "Logs" / "Game.log"
+        package = exports.package_directory("Dist", self.name)
+        log = exports.testing_user_data(package, self.name) / "Logs" / f"{self.name}.log"
         log.parent.mkdir(parents=True, exist_ok=True)
         log.write_text("ran\n", encoding="utf-8")
         return ProcessResult([str(part) for part in command], 0, False, 0.0, "")
@@ -430,6 +453,95 @@ class EvaluationTests(unittest.TestCase):
         self.assertEqual(len(without_input), 1)
         for text in ("no replay of Testing.Replays has input events", REPLAY, idle, "Roadmap M16 to M18"):
             self.assertIn(text, without_input[0])
+
+    @unittest.skip(SKIP_BUILD_SETTINGS)
+    def test_a_game_needs_a_start_scene_that_its_build_scenes_list(self) -> None:
+        # ADR 0027 decision 4, B1 (M17 pipeline map G2): Roadmap M17 and M18 accept a demo with "StartScene and
+        # Export.BuildScenes set", but the validator and the exporter accept an empty BuildScenes (FeatureTest relies on
+        # it), so only the games suite checks the rule; that BuildScenes lists StartScene is this ADR's convention.
+        main = "Assets/Scenes/Main.scene"
+        roadmap = "(Roadmap M17 and M18: StartScene and Export.BuildScenes set)"
+        start = f"StartScene is empty: set it to the scene the game starts with {roadmap}"
+        build = (f"Export.BuildScenes is empty: list the scenes the export must load strictly, StartScene included "
+                 f"{roadmap}")
+        unlisted = (f"Export.BuildScenes does not list the StartScene '{main}': add it (ADR 0027 decision 4: the "
+                    f"demos' convention)")
+        cases: dict[str, tuple[dict[str, Any], list[str]]] = {
+            "complete": ({"StartScene": main, "Export": {"BuildScenes": [main, "Assets/Scenes/Level2.scene"]}}, []),
+            "nothing set": ({}, [start, build]),
+            "both empty": ({"StartScene": "", "Export": {"BuildScenes": []}}, [start, build]),
+            "no start scene": ({"Export": {"BuildScenes": [main]}}, [start]),
+            "no build scenes": ({"StartScene": main, "Export": {"Exclude": ["Assets/Tests/**"]}}, [build]),
+            "start scene not listed": ({"StartScene": main, "Export": {"BuildScenes": ["Assets/Scenes/Menu.scene"]}},
+                                       [unlisted]),
+        }
+        with tempfile.TemporaryDirectory(prefix="GamesBuildSettings-") as directory:
+            for name, (members, expected) in cases.items():
+                with self.subTest(case=name):
+                    project_file = Path(directory) / name.replace(" ", "-") / "Game.eproj"
+                    project_file.parent.mkdir()
+                    project_file.write_text(json.dumps({"Format": "Project", "Version": 1, "Name": "Game", **members}),
+                                            encoding="utf-8")
+                    self.assertEqual(games.check_build_settings(project_file), expected)
+            refused: dict[str, Any] = {
+                "scene": {"Format": "Scene", "Version": 1},
+                "array": [],
+                "start": {"Format": "Project", "Version": 1, "StartScene": 3},
+                "export": {"Format": "Project", "Version": 1, "Export": ["Assets/Scenes/Main.scene"]},
+                "build": {"Format": "Project", "Version": 1, "Export": {"BuildScenes": main}},
+                "build items": {"Format": "Project", "Version": 1, "Export": {"BuildScenes": [3]}},
+                "missing": None,
+            }
+            for name, document in refused.items():
+                with self.subTest(refused=name):
+                    project_file = Path(directory) / f"Refused-{name.replace(' ', '-')}.eproj"
+                    if document is not None:
+                        project_file.write_text(json.dumps(document), encoding="utf-8")
+                    with self.assertRaises(ValueError) as raised:
+                        games.check_build_settings(project_file)
+                    self.assertIn(project_file.name, str(raised.exception))
+        # The committed dry-run game already complies.
+        breakout = REPOSITORY_ROOT / "Tests" / "Projects" / "Breakout" / "Breakout.eproj"
+        self.assertEqual(games.check_build_settings(breakout), [])
+
+    @unittest.skip(SKIP_GAME_NAME)
+    def test_the_game_name_is_read_from_a_package_manifest_or_a_project_file(self) -> None:
+        # ADR 0027 decision 4, B2 (M17 pipeline map R6): the exporter names the package's executable, its testing user
+        # data and its log after the project's Name, which the testing export's Game.json carries, whatever the .eproj's
+        # file stem; read_game_name reads it from either document and refuses anything else, naming the file.
+        with tempfile.TemporaryDirectory(prefix="GamesGameName-") as directory:
+            root = Path(directory)
+            accepted: dict[str, dict[str, Any]] = {
+                "Game.json": {"Format": "GameManifest", "Version": 1, "Name": "Falling", "EngineVersion": "0.1.0",
+                              "Testing": True},
+                "Tetris.eproj": {"Format": "Project", "Version": 1, "Name": "Falling"},
+            }
+            for file_name, document in accepted.items():
+                with self.subTest(accepted=file_name):
+                    path = root / file_name
+                    path.write_text(json.dumps(document), encoding="utf-8")
+                    self.assertEqual(games.read_game_name(path), "Falling")
+            refused: dict[str, Any] = {
+                "Scene.json": {"Format": "Scene", "Version": 1, "Name": "Falling"},
+                "Unnamed.json": {"Format": "GameManifest", "Version": 1},
+                "Empty.json": {"Format": "GameManifest", "Version": 1, "Name": ""},
+                "Numbered.eproj": {"Format": "Project", "Version": 1, "Name": 7},
+                "Array.json": [],
+                "Missing.json": None,
+            }
+            for file_name, document in refused.items():
+                with self.subTest(refused=file_name):
+                    path = root / file_name
+                    if document is not None:
+                        path.write_text(json.dumps(document), encoding="utf-8")
+                    with self.assertRaises(ValueError) as raised:
+                        games.read_game_name(path)
+                    self.assertIn(file_name, str(raised.exception))
+            broken = root / "Broken.json"
+            broken.write_text("{not json", encoding="utf-8")
+            with self.assertRaises(ValueError) as raised:
+                games.read_game_name(broken)
+            self.assertIn(broken.name, str(raised.exception))
 
     def test_script_check_and_validate_fail_on_any_diagnostic(self) -> None:
         self.assertEqual(games.check_script_check({"diagnostics": []}), [])
@@ -640,6 +752,37 @@ class SuiteTests(unittest.TestCase):
         order = ["script.check", "project.validate", "project.upgrade", "test.run", "input.replay", "session.shutdown"]
         self.assertEqual([method for method in session.methods if method in order], order)
 
+    @unittest.skip(SKIP_BUILD_SETTINGS)
+    def test_the_editor_half_fails_a_game_without_build_settings_first(self) -> None:
+        # ADR 0027 decision 4, B1: check_game_in_editor checks the staged copy's build settings first, so PreCommit's
+        # Debug half enforces the demo acceptance's "StartScene and Export.BuildScenes set". Its lines come first among
+        # the half's failures, the half's other checks still run, and a project file it cannot read is one failure line
+        # naming the file.
+        with tempfile.TemporaryDirectory(prefix="GamesBuildSettings-") as directory:
+            project = make_game_repository(Path(directory), build_settings=False)
+            session = FakeEditorSession()
+            step = self.run_editor_half(project, session)
+        self.assertEqual(step.status, Status.FAILED)
+        failures = step.data["failures"]
+        self.assertEqual(len(failures), 2, failures)
+        self.assertTrue(failures[0].startswith("StartScene is empty: "), failures)
+        self.assertTrue(failures[1].startswith("Export.BuildScenes is empty: "), failures)
+        order = ["script.check", "project.validate", "project.upgrade", "test.run", "input.replay", "session.shutdown"]
+        self.assertEqual([method for method in session.methods if method in order], order)
+
+        with tempfile.TemporaryDirectory(prefix="GamesBuildSettingsMalformed-") as directory:
+            root = Path(directory)
+            project = make_game_repository(root)
+            document = json.loads(project.project_file.read_text(encoding="utf-8"))
+            document["Export"] = [TINY_SCENE]
+            project.project_file.write_text(json.dumps(document, indent="\t") + "\n", encoding="utf-8")
+            git_stage(root)
+            step = self.run_editor_half(project, FakeEditorSession())
+        self.assertEqual(step.status, Status.FAILED)
+        failures = step.data["failures"]
+        self.assertEqual(len(failures), 1, failures)
+        self.assertIn(project.project_file.name, failures[0])
+
     def test_the_editor_half_runs_on_the_staged_blobs_not_the_working_tree(self) -> None:
         # The milestone review's R12: the editor half must see what a fresh clone of the commit holds. Unstaged bytes
         # (a replay whose committed hash was changed on disk) and an untracked replay are not in the copy, so the half
@@ -799,6 +942,60 @@ class SuiteTests(unittest.TestCase):
         self.assertEqual(session.methods, ["project.export", "project.export", "session.shutdown"])
         self.assertEqual(steps["games Game Dist"].data["hashes"], {"Exported Dist": {REPLAY: REPLAY_HASH}})
 
+    @unittest.skip(SKIP_GAME_NAME)
+    def test_the_dist_half_finds_the_package_by_the_project_name_not_the_file_stem(self) -> None:
+        # ADR 0027 decision 4, B2 (M17 pipeline map R6): the exporter names the executable, the testing user data and
+        # its log after the project's Name (ProjectSettings::Name), while the Dist half looked for them under the
+        # .eproj's file stem, so a game whose Name differs from its file stem failed with "the package holds no
+        # .../Game.exe". The game's name comes from the testing export's manifest and its executable from
+        # project.export's result; the steps and reports keep the stem. A testing export without a readable manifest
+        # fails the Dist step with one line naming Game.json, as a package that cannot be installed does.
+        name = "Falling"
+        ran = {"smokeTestRan": True, "smokeTestExitCode": 0, "warnings": []}
+        for manifest in (True, False):
+            with self.subTest(manifest=manifest), tempfile.TemporaryDirectory(prefix="GamesGameName-") as directory:
+                session = FakeExportingSession(ran, name=name, manifest=manifest)
+                run = FakeFeatureTestRun(REPLAY_HASH, name)
+                root = Path(directory)
+                repository = root / "Repository"
+                project_file = write_project(repository, "Tests/Projects/Game", {
+                    "Suites": [{"Script": SMOKE_SUITE, "Scene": TINY_SCENE}],
+                    "Replays": ["Assets/Tests/Replays/*.replay"]})
+                document = json.loads(project_file.read_text(encoding="utf-8"))
+                document["Name"] = name
+                project_file.write_text(json.dumps(document, indent="\t") + "\n", encoding="utf-8")
+                write_replay(project_file.parent, events=2)
+                git_stage(repository, initialize=True)
+                project = games.GameProject(project_file.parent, project_file, "Game")
+                session.output_root = root / "EditorExports"
+                passing = provenance.ProjectAudit(project.directory, "index", {}, [], [])
+                arguments = test_script.parse_arguments(["--suite", "games", "--config", "Dist"])
+                with mock.patch.object(games, "discover_projects", return_value=[project]), \
+                        mock.patch.object(provenance, "audit_project", return_value=passing), \
+                        mock.patch.object(test_script, "editor_executable", return_value=Path(sys.executable)), \
+                        mock.patch.object(test_script, "runtime_executable", return_value=Path(sys.executable)), \
+                        mock.patch.object(test_script, "probe_rendering_editor", return_value=None), \
+                        mock.patch.object(test_script, "import_engine_client", return_value=session.module()), \
+                        mock.patch.object(test_script, "run_streamed", run), \
+                        mock.patch.object(exports, "EXPORTS_ROOT", root / "Exports"):
+                    steps = {step.name: step for step in test_script.run_games(["Dist"], arguments, quiet_console())}
+                    self.assertEqual(list(steps), ["games Game audit", "games Game Dist"])
+                    step = steps["games Game Dist"]
+                    package = exports.package_directory("Dist", name)
+                    if not manifest:
+                        self.assertEqual(step.status, Status.FAILED)
+                        self.assertEqual(len(step.detail.splitlines()), 1, step.detail)
+                        self.assertIn("Game.json", step.detail)
+                        self.assertEqual(run.directories, [])
+                        self.assertFalse(exports.package_directory("Dist", "Game").exists())
+                        continue
+                    self.assertEqual(step.status, Status.PASSED, step.detail)
+                    self.assertFalse(exports.package_directory("Dist", "Game").exists())
+                    self.assertEqual(step.data["package"], paths.display_path(package))
+                    self.assertTrue(exports.package_executable(package, name).is_file())
+                    self.assertTrue((exports.testing_user_data(package, name) / "Logs" / f"{name}.log").is_file())
+                self.assertEqual(len(run.directories), 1)
+
     def test_a_dist_only_run_fails_its_dist_step_on_what_fails_after_the_exports(self) -> None:
         # The milestone review's R08: without an editor half, a refused session.shutdown, a lost connection or an exit
         # that timed out after the Dist checks had passed was dropped, so the Dist step passed.
@@ -923,8 +1120,11 @@ class GamesSuiteEndToEndTests(AutomationTestCase):
                                      "function()\n\tTest.Case(\"passes\", function()\n\t\tTest.InjectKey(\"A\", "
                                      "\"Tap\")\n\t\tTest.WaitTicks(4)\n\t\tTest.Expect(true, \"true\")\n\tend)\n"
                                      "end)\n"})
-        client.call("project.setSettings", {"patch": {"Testing": {
-            "Suites": [{"Script": SMOKE_SUITE, "Scene": TINY_SCENE}], "Replays": ["Assets/Tests/Replays/*.replay"]}}})
+        # The demo acceptance's build settings, which the editor half checks first (ADR 0027 decision 4, B1).
+        client.call("project.setSettings", {"patch": {
+            "StartScene": TINY_SCENE, "Export": {"BuildScenes": [TINY_SCENE]},
+            "Testing": {"Suites": [{"Script": SMOKE_SUITE, "Scene": TINY_SCENE}],
+                        "Replays": ["Assets/Tests/Replays/*.replay"]}}})
         client.call("scene.save", {})
         client.call("test.run", {"filter": "Smoke", "record": f"project://{REPLAY}"})
         client.call("session.shutdown")

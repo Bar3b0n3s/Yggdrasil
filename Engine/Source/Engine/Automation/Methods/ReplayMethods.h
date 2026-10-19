@@ -98,14 +98,20 @@ namespace Engine {
 		// write authorization before consuming the recording. The host cancels the immediate Start's recorder on client
 		// disconnect, without needing a pending Poll, and writes no partial/invalid recording.
 		// Pending (M16 FX-4): Start and an event-free Stop resolve in their first Poll, and the recorded session stays at its
-		// last tick. A Stop with input events first runs the recording guard, the input check: the play session restarts for
-		// the candidate (RestartForReplay, as input.replay does) and plays it with ReplayPlaybackOptions{Verify, StrictHash,
-		// WithoutInput}, at least one tick per Poll within PlayStepFrameBudget, its expectations compiled from their source.
-		// When that playback passes (every checkpoint, the final hash and every expectation reproduced without input), whatever
-		// script errors it raised, Stop writes nothing and fails with Validation naming the replay ("its outcome does not
-		// depend on its input"), a hint and the check's InputReplayResult as error data "inputCheck"; otherwise it writes the
-		// replay (inputCheckTick: where the check ended). Either way the play session is then the check's, paused where it ended,
-		// with lockstep released, as after input.replay. A disconnect during the check writes nothing.
+		// last tick (an event-free recording is written without being replayed). A Stop with input events first verifies the
+		// candidate with its input (M17, Docs/Decisions/0027-m17-contract.md decision 3, A1): the play session restarts for the
+		// candidate (RestartForReplay, as input.replay does) and plays it with ReplayPlaybackOptions{Verify, StrictHash} and its
+		// input, its expectations compiled from their source. Unless that playback passes (every checkpoint, the final hash and
+		// every expectation reproduced, no early stop) and raises no script error, Stop writes nothing and fails with Validation
+		// at /path naming the first failure, a hint and the playback's InputReplayResult as error data "verification", and the
+		// play session is the verification's. Only then the recording guard, the input check: the play session restarts again
+		// and plays the candidate WithoutInput. When that playback passes (every checkpoint, the final hash and every
+		// expectation reproduced without input), whatever script errors it raised, Stop writes nothing and fails with Validation
+		// naming the replay ("its outcome does not depend on its input"), a hint and the check's InputReplayResult as error data
+		// "inputCheck"; otherwise it writes the replay (inputCheckTick: where the check ended). Each playback advances at least
+		// one tick per Poll within PlayStepFrameBudget. Whatever the outcome, the play session is then the last playback's,
+		// paused where it ended, with lockstep released, as after input.replay. A disconnect during either playback writes
+		// nothing.
 		[[nodiscard]] Result<Scope<PendingOperation>> InputRecord(AutomationMethodContext& context, const InputRecordParams& params);
 		// A fresh session from the validated header. Pending: at least one tick per Poll within the common 50 ms
 		// budget, never an unbounded synchronous replay. Reject another time owner or active driver before replacing

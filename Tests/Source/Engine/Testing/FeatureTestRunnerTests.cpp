@@ -2074,6 +2074,106 @@ end))");
 			CHECK(result.Suites[0].CheckpointsChecked == 1);
 			CHECK(result.Suites[0].FailedCheckpointTick == 60);
 		}
+
+		// Docs/Decisions/0027-m17-contract.md decision 3, A3 (M17 map GTF-07): a recording refused because a selected row did
+		// not pass said only "recording requires passing selected cases and a valid starting scene", so a recording filter
+		// that also selected a stale replay's path left the builder guessing. The refusal names each selected row that did
+		// not pass, with its status, in report order; the rows that passed are not named.
+		TEST_CASE("TestRunner: a refused recording names the selected rows that did not pass" * doctest::skip(true))
+		{
+			RunnerHost host;
+			host.InputDriven();
+			host.Suite(R"(return Test.Suite("Pilot", function()
+				Test.Case("drive", function()
+					Test.InjectKey("Space", "Tap")
+					Test.WaitTicks(3)
+				end)
+				Test.Case("check", function()
+					Test.Expect(false, "deliberate")
+				end)
+			end))");
+			ReplayHeader header;
+			header.Scene = { UUID(401), "Assets/Scenes/Start.scene" };
+			header.Seed = host.Settings.Simulation.Seed;
+			header.EngineVersion = "1";
+			header.Config = "Debug";
+			auto stale = CreateRef<ReplayData>();
+			stale->Header = header;
+			stale->FinalTick = 6;
+			stale->FinalStateHash = "0000000000000001";
+			host.ReplayAssets["Assets/Tests/Replays/Pilot.replay"] = stale;
+			host.ReplayGlobs = { "Assets/Tests/Replays/Pilot.replay" };
+
+			FeatureTestRunner runner;
+			REQUIRE(runner.Begin(host, { .Record = true }));
+			const std::optional<Error> refused = host.RunToEnd(runner);
+			REQUIRE(refused.has_value());
+			CHECK(refused->GetCode() == ErrorCode::Validation);
+			const std::string message = refused->GetMessageText();
+			CAPTURE(message);
+			CHECK(message.starts_with("recording requires passing selected cases and a valid starting scene; 2 selected row(s) did not pass: "));
+			CHECK(message.find("Pilot/check (failed)") != std::string::npos);
+			CHECK(message.find("replay:Assets/Tests/Replays/Pilot.replay/FinalStateHash (failed)") != std::string::npos);
+			CHECK(message.find("Pilot/check (failed), replay:Assets/Tests/Replays/Pilot.replay/FinalStateHash (failed)") != std::string::npos);
+			CHECK(message.find("Pilot/drive") == std::string::npos);
+			// A replay row among them: the hint says how a recording filter leaves the replays out.
+			CHECK(refused->GetHint().find("Record.") != std::string::npos);
+			CHECK_FALSE(runner.TakeRecording());
+			// The rows the message names are the report's rows that did not pass, in report order.
+			const auto result = runner.GetResult();
+			REQUIRE(result);
+			CHECK_FALSE(result->Passed);
+			REQUIRE(result->Cases.size() == 3);
+			CHECK(result->Cases[0].Suite + "/" + result->Cases[0].Case + " (" + result->Cases[0].Status + ")" == "Pilot/drive (passed)");
+			CHECK(result->Cases[1].Suite + "/" + result->Cases[1].Case + " (" + result->Cases[1].Status + ")" == "Pilot/check (failed)");
+			CHECK(result->Cases[2].Suite + "/" + result->Cases[2].Case + " (" + result->Cases[2].Status + ")"
+				== "replay:Assets/Tests/Replays/Pilot.replay/FinalStateHash (failed)");
+		}
+
+		// Docs/Decisions/0027-m17-contract.md decision 3, A2: test.run refuses, before it takes its lease, a dirty open scene
+		// that a selected suite or replay plays, so the runner reports what Begin selected: each selected suite's index into
+		// Testing.Suites (a suite of the run's mode with a case the filter matches) and each replay the filter matches. The
+		// selection is kept until the next Begin.
+		TEST_CASE("TestRunner: Begin's selection names each selected suite and replay" * doctest::skip(true))
+		{
+			RunnerHost host;
+			host.Suite(R"(return Test.Suite("Pilot",function() Test.Case("drive",function() end) end))");
+			host.Suite(R"(return Test.Suite("Exported",function() Test.Case("pilot",function() end) end))").Modes = { TestSuiteSettings::Mode::Release };
+			host.Suite(R"(return Test.Suite("Board",function() Test.Case("clears",function() end); Test.Case("autopilot",function() end) end))");
+			host.Suite(R"(return Test.Suite("Other",function() Test.Case("runs",function() end) end))");
+			auto replay = CreateRef<ReplayData>();
+			replay->Header.Scene = { UUID(401), "Assets/Scenes/Start.scene" };
+			replay->Header.Seed = host.Settings.Simulation.Seed;
+			replay->Header.EngineVersion = "1";
+			replay->Header.Config = "Debug";
+			host.ReplayAssets["Assets/Tests/Replays/Other.replay"] = replay;
+			host.ReplayAssets["Assets/Tests/Replays/Pilot.replay"] = replay;
+			host.ReplayGlobs = { "Assets/Tests/Replays/Pilot.replay", "Assets/Tests/Replays/Other.replay" };
+
+			FeatureTestRunner runner;
+			const auto before = runner.GetSelection();
+			REQUIRE_FALSE(before.has_value());
+			CHECK(before.error().GetCode() == ErrorCode::InvalidState);
+
+			// "pilot" matches Pilot/drive, Board/autopilot and the Pilot replay; the Release-only suite is not of the run's mode.
+			REQUIRE(runner.Begin(host, { .Filter = "pilot" }));
+			const auto filtered = runner.GetSelection();
+			REQUIRE_MESSAGE(filtered.has_value(), (filtered ? std::string() : filtered.error().ToString()));
+			CHECK(filtered->Suites == std::vector<size_t>{ 0, 2 });
+			CHECK(filtered->Replays == std::vector<std::string>{ "Assets/Tests/Replays/Pilot.replay" });
+			runner.Cancel();
+			const auto kept = runner.GetSelection();
+			REQUIRE(kept.has_value());
+			CHECK(kept->Suites == std::vector<size_t>{ 0, 2 });
+
+			// The next Begin replaces it: an empty filter selects every suite of the mode and every replay, in sorted order.
+			REQUIRE(runner.Begin(host, {}));
+			const auto everything = runner.GetSelection();
+			REQUIRE(everything.has_value());
+			CHECK(everything->Suites == std::vector<size_t>{ 0, 2, 3 });
+			CHECK(everything->Replays == std::vector<std::string>{ "Assets/Tests/Replays/Other.replay", "Assets/Tests/Replays/Pilot.replay" });
+			runner.Cancel();
+		}
 	}
 
 }

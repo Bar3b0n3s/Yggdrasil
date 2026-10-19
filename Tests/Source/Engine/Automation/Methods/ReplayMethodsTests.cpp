@@ -631,6 +631,93 @@ namespace Engine {
 			// The refusal restarted nothing: the recorded session stays where it was.
 			CHECK(CallReplayMethod(fixture, "play.state")["tick"] == before["tick"]);
 		}
+
+		// Docs/Decisions/0027-m17-contract.md decision 3, A1 (M17 maps GTF-01, GDF-03, GAF-09): Stop played a recording with
+		// input events only without its input, so it wrote a recording that its own input does not reproduce: one changed
+		// by a script-table write from script.eval (no engine call, so nothing invalidates the recording), or one whose
+		// expectation is false (the input check fails it too, which let it through). Stop now replays the candidate with
+		// its input first, in a fresh ordinary playback, and refuses it naming where that playback diverged.
+		TEST_CASE("ReplayMethods: input.record stop refuses a recording that a replay with its input does not reproduce"
+			* doctest::skip(true))
+		{
+			Test::AutomationFixture fixture("RecordNotReproduced");
+			// The Booster moves one unit along X per fixed step while A is held or while its own table says so.
+			CallReplayMethod(fixture, "script.write", Json{ { "path", "Assets/Scripts/Booster.luau" }, { "source", "local Booster = {}\n"
+																												   "function Booster.OnFixedUpdate(self: any, dt: number)\n"
+																												   "\tif Input.IsKeyDown(\"A\") or self.Boost then\n"
+																												   "\t\tself.Entity.Transform:Translate(vector.create(1, 0, 0))\n"
+																												   "\tend\n"
+																												   "end\n"
+																												   "return Script.Define(\"Booster\", Booster)\n" } });
+			CallReplayMethod(fixture, "entity.create", Json{ { "name", "Booster" }, { "components", Json{ { "Script", Json{ { "Script", "Assets/Scripts/Booster.luau" } } } } } });
+			CallReplayMethod(fixture, "scene.save");
+
+			// Recorded, the Booster moves once for the tap and on every tick after the evaluation; replayed with its input,
+			// it moves once, so the first checkpoint differs. Without its input it never moves, so the input check alone
+			// fails and the recording used to be written.
+			CallReplayMethod(fixture, "input.record", Json{ { "action", "start" } });
+			CallReplayMethod(fixture, "play.step", Json{ { "ticks", 10 }, { "render", "none" }, { "input", Json::array({ Json{ { "tick", 2 }, { "type", "key" }, { "key", "A" }, { "state", "tap" } } }) } });
+			CallReplayMethod(fixture, "script.eval", Json{ { "context", "play" }, { "entity", "/Booster" }, { "code", "self.Boost = true; return true" } });
+			CallReplayMethod(fixture, "play.step", Json{ { "ticks", 120 }, { "render", "none" } });
+			const Json diverged = fixture.Request("input.record", Json{ { "action", "stop" }, { "path", "Assets/Tests/Boosted.replay" } });
+			REQUIRE_MESSAGE(diverged.contains("error"), diverged.dump());
+			const Json& data = diverged["error"]["data"];
+			CHECK(data["errorCode"] == Json("Validation"));
+			CHECK(data.dump().find("/path") != std::string::npos);
+			const std::string detail = JsonReader(data).ReadMember<std::string>("detail").value_or("");
+			CHECK(detail.find("refusing to write 'Assets/Tests/Boosted.replay'") != std::string::npos);
+			CHECK(detail.find("replayed with its input, the recording does not reproduce itself") != std::string::npos);
+			CHECK(detail.find("checkpoint tick 60") != std::string::npos);
+			const std::string hint = JsonReader(data).ReadMember<std::string>("hint").value_or("");
+			CHECK(hint.find("script.eval") != std::string::npos);
+			CHECK(hint.find("neither recorded nor detected") != std::string::npos);
+			// The playback's own outcome, as input.replay reports it: stopped at the checkpoint, with both hashes named.
+			REQUIRE_MESSAGE(data.contains("verification"), data.dump());
+			const Json& verification = data["verification"];
+			CHECK(verification["passed"] == Json(false));
+			CHECK(verification["withoutInput"] == Json(false));
+			CHECK(verification["checkpointFailed"] == Json(true));
+			CHECK(verification["finalTick"] == Json(60));
+			const std::string observed = JsonReader(verification).ReadMember<std::string>("stateHash").value_or("");
+			const std::string recorded = JsonReader(verification).ReadMember<std::string>("expectedStateHash").value_or("");
+			CHECK_FALSE(observed.empty());
+			CHECK(observed != recorded);
+			CHECK(detail.find(observed) != std::string::npos);
+			CHECK(detail.find(recorded) != std::string::npos);
+			CHECK_FALSE(data.contains("inputCheck"));
+			CHECK_FALSE(ProjectFileExists(fixture, "Assets/Tests/Boosted.replay"));
+			// The session is the verification's, paused where it stopped, with lockstep released and no recording.
+			Json state = CallReplayMethod(fixture, "play.state");
+			CHECK(state["recording"] == Json(false));
+			CHECK(state["lockstep"] == Json(false));
+			CHECK(state["tick"] == Json(60));
+
+			// An expectation the recording's own input does not satisfy: replayed with its input, the expectation fails.
+			CallReplayMethod(fixture, "input.record", Json{ { "action", "start" }, { "restart", true } });
+			CallReplayMethod(fixture, "play.step", Json{ { "ticks", 20 }, { "render", "none" }, { "input", Json::array({ Json{ { "tick", 2 }, { "type", "key" }, { "key", "A" }, { "state", "down" } } }) } });
+			const Json unsatisfied = fixture.Request("input.record", Json{ { "action", "stop" }, { "path", "Assets/Tests/Unsatisfied.replay" }, { "expect", Json::array({ Json{ { "tick", 10 }, { "luau", "Scene.FindByName('Booster').Transform.WorldPosition.x > 100" } } }) } });
+			REQUIRE_MESSAGE(unsatisfied.contains("error"), unsatisfied.dump());
+			const Json& refused = unsatisfied["error"]["data"];
+			CHECK(refused["errorCode"] == Json("Validation"));
+			const std::string reason = JsonReader(refused).ReadMember<std::string>("detail").value_or("");
+			CHECK(reason.find("refusing to write 'Assets/Tests/Unsatisfied.replay'") != std::string::npos);
+			CHECK(reason.find("expectation 0 at tick 10 (/expect/0/luau) is false") != std::string::npos);
+			REQUIRE_MESSAGE(refused.contains("verification"), refused.dump());
+			REQUIRE(refused["verification"]["expect"].size() == 1);
+			CHECK(refused["verification"]["expect"][0]["evaluated"] == Json(true));
+			CHECK(refused["verification"]["expect"][0]["satisfied"] == Json(false));
+			CHECK_FALSE(ProjectFileExists(fixture, "Assets/Tests/Unsatisfied.replay"));
+			state = CallReplayMethod(fixture, "play.state");
+			CHECK(state["recording"] == Json(false));
+			CHECK(state["lockstep"] == Json(false));
+
+			// The same input with an expectation it satisfies reproduces, passes the input check and is written.
+			CallReplayMethod(fixture, "input.record", Json{ { "action", "start" }, { "restart", true } });
+			CallReplayMethod(fixture, "play.step", Json{ { "ticks", 20 }, { "render", "none" }, { "input", Json::array({ Json{ { "tick", 2 }, { "type", "key" }, { "key", "A" }, { "state", "down" } } }) } });
+			const Json saved = CallReplayMethod(fixture, "input.record", Json{ { "action", "stop" }, { "path", "Assets/Tests/Satisfied.replay" }, { "expect", Json::array({ Json{ { "tick", 10 }, { "luau", "Scene.FindByName('Booster').Transform.WorldPosition.x > 3" } } }) } });
+			CHECK(saved["events"] == Json(1));
+			CHECK(ProjectFileExists(fixture, "Assets/Tests/Satisfied.replay"));
+		}
 	}
 
 }

@@ -10,6 +10,7 @@
 #include "Engine/Session/ReplayPlayer.h"
 #include "Engine/Testing/TestResults.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <span>
@@ -44,6 +45,18 @@ namespace Engine {
 	struct TestInventory
 	{
 		std::vector<TestSuiteDescription> Suites{};
+		std::vector<std::string> Replays{};
+	};
+
+	// What a successful FeatureTestRunner::Begin selected, in run order (FeatureTestRunner::GetSelection;
+	// Docs/Decisions/0027-m17-contract.md decision 3, A2).
+	struct FeatureTestSelection
+	{
+		// Each selected suite's index into the host's ProjectSettings::Testing.Suites, in settings order: a suite whose Modes
+		// hold the run's mode, with a case whose "<suite>/<case>" the filter matches or, without cases, whose name it matches
+		// (a case-insensitive substring; an empty filter matches everything).
+		std::vector<size_t> Suites{};
+		// Each replay the filter matches, as Discover lists it (its canonical project-relative path, in sorted order).
 		std::vector<std::string> Replays{};
 	};
 
@@ -200,6 +213,11 @@ namespace Engine {
 		// events (nothing to check), or a run that failed or was cancelled before. Kept after TakeRecording, until the next
 		// Begin.
 		[[nodiscard]] std::optional<uint64_t> GetInputCheckTick() const;
+		// The selection of the last successful Begin (FeatureTestSelection), kept until the next Begin (through cancellation
+		// and completion), so an adapter can check what the run will play before its first Advance and before it acquires its
+		// lease: test.run refuses a dirty open scene that a selected suite or replay plays (Docs/Decisions/0027-m17-contract.md
+		// decision 3, A2). InvalidState when no Begin has succeeded.
+		[[nodiscard]] Result<FeatureTestSelection> GetSelection() const;
 		// Idempotent. Cancel current case, EndSuite, stop captures, unpublish/destroy session, then release audio/time.
 		// No Poll/Advance is required after cancellation; unwritten recordings are discarded.
 		void Cancel();

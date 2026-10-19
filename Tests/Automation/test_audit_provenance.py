@@ -26,7 +26,7 @@ from harness import EXIT_INIT_FAILED, EXIT_USAGE, REPOSITORY_ROOT, AutomationTes
 sys.path.insert(0, str(REPOSITORY_ROOT / "Scripts"))
 
 import AuditProvenance  # noqa: E402  (Scripts/ is on sys.path above)
-from Lib import games, provenance, scripts, xxh64  # noqa: E402
+from Lib import games, paths, provenance, scripts, xxh64  # noqa: E402
 from Lib.report import Console, Status, Step  # noqa: E402
 
 AUDIT_SCRIPT = REPOSITORY_ROOT / "Scripts" / "AuditProvenance.py"
@@ -379,6 +379,30 @@ class FixtureTests(unittest.TestCase):
         self.assertEqual(len(document["projects"]), len(discovered))
         if not discovered:
             self.assertEqual([step["status"] for step in document["steps"]], ["passed"])
+
+    def test_demos_audits_every_staged_game_project_and_names_the_unstaged_ones(self) -> None:
+        # Docs/Decisions/0027-m17-contract.md decision 4, B3 (M17 pipeline map G3): the case above audits the working
+        # tree, so a half-built demo that is not staged (Tetris during M17) fails every commit's automation suite on its
+        # working-tree state, against ADR 0026 decisions 3, 7 and 9; stream B deletes it. --demos in its default index
+        # mode audits the staged projects, each of which must pass, and names each project found only on disk in one
+        # passed step.
+        exit_code, document = run_audit("--demos")
+        self.assertEqual(exit_code, 0, document)
+        staged = games.discover_projects(REPOSITORY_ROOT, "index")
+        directories = {project.directory for project in staged}
+        unstaged = [project for project in games.discover_projects(REPOSITORY_ROOT, "disk")
+                    if project.directory not in directories]
+        self.assertEqual(len(document["projects"]), len(staged))
+        self.assertTrue(all(project["passed"] and project["files"] == "index" for project in document["projects"]),
+                        document["projects"])
+        for project in unstaged:
+            with self.subTest(unstaged=project.name):
+                name = f"provenance {paths.display_path(project.directory)}"
+                notes = [step for step in document["steps"] if step["name"] == name]
+                self.assertEqual([step["status"] for step in notes], ["passed"])
+                self.assertIn("not staged", notes[0]["detail"])
+        if not staged and not unstaged:
+            self.assertEqual([step["name"] for step in document["steps"]], ["provenance demos"])
 
 
 class StaticCheckTests(unittest.TestCase):

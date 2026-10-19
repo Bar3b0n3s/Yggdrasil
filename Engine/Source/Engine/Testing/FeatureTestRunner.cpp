@@ -1492,6 +1492,12 @@ namespace Engine {
 		return m_State->InputCheckTick;
 	}
 
+	Result<FeatureTestSelection> FeatureTestRunner::GetSelection() const
+	{
+		ENGINE_CONTRACT_STUB();
+		return std::unexpected(Error(ErrorCode::Unsupported, "M17 test.run selection contract (Docs/Decisions/0027-m17-contract.md A2, stream A)"));
+	}
+
 	void FeatureTestRunner::Cancel()
 	{
 		if (!IsRunning())

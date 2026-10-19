@@ -8,6 +8,8 @@ from pathlib import Path
 
 from harness import AutomationTestCase, engine_client
 
+SKIP_DIRTY_SCENE = "contract stub: test.run refuses a dirty open scene it plays (ADR 0027 decision 3, A2, stream A)"
+
 
 class ScriptTestRunnerTests(AutomationTestCase):
     def configure_suite(self, client: engine_client.EngineClient, source: str) -> None:
@@ -41,6 +43,30 @@ class ScriptTestRunnerTests(AutomationTestCase):
         self.assertEqual(saved["cases"], result["cases"])
         self.assertIn("second", Path(result["junitPath"]).read_text(encoding="utf-8"))
         self.assertEqual(client.call("play.state")["state"], "Edit")
+
+    @unittest.skip(SKIP_DIRTY_SCENE)
+    def test_test_run_refuses_a_dirty_open_scene_that_a_selected_suite_uses(self) -> None:
+        # Docs/Decisions/0027-m17-contract.md decision 3, A2 (M17 map GTF-04): test.run plays the saved scene file, so a
+        # run while the suite's scene was open with unsaved changes silently tested what the editor no longer showed.
+        client, _ = self.open_editor_with_scene()
+        self.configure_suite(client, 'return Test.Suite("Dirty", function()\n'
+                             'Test.Case("sees the edit", function()\n'
+                             'Test.Expect(Scene.FindByName("Unsaved") ~= nil)\n'
+                             'end)\n'
+                             'end)')
+        client.call("entity.create", {"name": "Unsaved"})
+        with self.assertRaises(engine_client.EngineError) as refused:
+            client.call("test.run", timeout=120.0)
+        self.assert_engine_error(refused.exception, engine_client.INVALID_STATE, "InvalidState")
+        self.assertIn("'Assets/Scenes/Main.scene' is open with unsaved changes", refused.exception.detail)
+        self.assertIn("the selected suite 'Dirty' plays its saved file", refused.exception.detail)
+        self.assertEqual(refused.exception.data["hint"], "scene.save first; test runs play the saved scene file")
+        self.assertEqual(client.call("play.state")["state"], "Edit")
+        # Saved, the suite plays what the editor shows.
+        client.call("scene.save")
+        result = engine_client.load_offloaded(client.call("test.run", timeout=120.0))
+        self.assertTrue(result["passed"])
+        self.assertEqual([case["status"] for case in result["cases"]], ["passed"])
 
     def test_test_run_returns_inline_and_names_the_failing_case(self) -> None:
         # Docs/Decisions/0026-m16-contract.md, friction S1-02: the coverage counters made every result too large to

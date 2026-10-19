@@ -114,6 +114,15 @@ namespace Engine {
 			return documents;
 		}
 
+		// A game's own notes (Projects/*/AGENTS.md, Tests/Projects/*/AGENTS.md): checked for type errors like every other
+		// document, but not for lint warnings, since the games suite's script.check never reads them and the notes of an
+		// unstaged demo are written by its builder, which has no tool that lints them (Docs/Decisions/0027-m17-contract.md
+		// decision 5, C1).
+		bool IsProjectNotes(std::string_view document)
+		{
+			return document.ends_with("/AGENTS.md") && (document.starts_with("Projects/") || document.starts_with("Tests/Projects/"));
+		}
+
 		std::string DescribeFinding(std::string_view document, const Test::DocExampleFinding& finding)
 		{
 			const std::string where = finding.DocumentLine != 0 ? std::format("{}:{}", document, finding.DocumentLine)
@@ -162,6 +171,66 @@ namespace Engine {
 					++checked;
 					for (const Test::DocExampleFinding& finding : *findings)
 						failures.push_back(DescribeFinding(document, finding));
+				}
+			}
+			std::string report;
+			for (const std::string& failure : failures)
+				report += failure + "\n";
+			INFO(report);
+			CHECK(failures.empty());
+			CAPTURE(checked);
+			CHECK(checked >= MinimumCheckedBlocks);
+		}
+
+		// Docs/Decisions/0027-m17-contract.md decision 5, C1 (M17 gameplay map GAF-10): the games suite fails a demo on any
+		// script.check diagnostic, lint warnings included, while the case above counts only errors, so Architecture §13.11
+		// taught `then self:HardDrop() return end`, two statements on one line that Luau's SameLineStatement lint warns
+		// about. DocExampleChecker::Check reports Warning findings too: a seeded block proves a lint warning comes back at
+		// its document line, then no example of the checked documents may warn, except in a game's own notes
+		// (IsProjectNotes), which only the case above checks.
+		TEST_CASE("DocExamples: every Luau example in the docs is free of lint warnings" * doctest::skip(true))
+		{
+			const Test::DocExampleChecker checker(Test::GetTestDataPath("TypeChecker/DocExamples"));
+			const std::string_view seeded = "# Seeded\n\n```luau\nlocal function clamp(value: number): number\n\tif value < 0 then value = 0 return value end\n\treturn value\nend\nreturn clamp\n```\n";
+			const auto seededBlocks = Test::ExtractDocExamples(seeded);
+			REQUIRE_MESSAGE(seededBlocks.has_value(), (seededBlocks ? std::string() : seededBlocks.error().ToString()));
+			REQUIRE(seededBlocks->size() == 1);
+			const auto seededFindings = checker.Check(seededBlocks->front());
+			REQUIRE_MESSAGE(seededFindings.has_value(), (seededFindings ? std::string() : seededFindings.error().ToString()));
+			const auto warning = std::ranges::find_if(*seededFindings, [](const Test::DocExampleFinding& finding)
+			{
+				return finding.Diagnostic.Severity == DiagnosticSeverity::Warning;
+			});
+			REQUIRE_MESSAGE(warning != seededFindings->end(), "the seeded block's SameLineStatement warning was not reported");
+			CHECK(warning->DocumentLine == 5);
+			CHECK(warning->Diagnostic.Message.find("same line") != std::string::npos);
+			CHECK(std::ranges::none_of(*seededFindings, [](const Test::DocExampleFinding& finding)
+			{
+				return finding.Diagnostic.Severity == DiagnosticSeverity::Error;
+			}));
+
+			size_t checked = 0;
+			std::vector<std::string> failures;
+			for (const std::string& document : ListCheckedDocuments(Test::GetRepositoryRoot()))
+			{
+				if (IsProjectNotes(document))
+					continue;
+				const Result<std::string> text = FileSystem::ReadText(Test::GetRepositoryRoot() / FileSystem::PathFromUtf8(document));
+				REQUIRE_MESSAGE(text.has_value(), (text ? std::string() : text.error().ToString()));
+				const auto blocks = Test::ExtractDocExamples(*text);
+				REQUIRE_MESSAGE(blocks.has_value(), std::format("{}: {}", document, blocks ? std::string() : blocks.error().ToString()));
+				for (const Test::DocExampleBlock& block : *blocks)
+				{
+					if (block.Skip.has_value())
+						continue;
+					const auto findings = checker.Check(block);
+					REQUIRE_MESSAGE(findings.has_value(), std::format("{}:{}: {}", document, block.FenceLine, findings ? std::string() : findings.error().ToString()));
+					++checked;
+					for (const Test::DocExampleFinding& finding : *findings)
+					{
+						if (finding.Diagnostic.Severity == DiagnosticSeverity::Warning)
+							failures.push_back(DescribeFinding(document, finding));
+					}
 				}
 			}
 			std::string report;

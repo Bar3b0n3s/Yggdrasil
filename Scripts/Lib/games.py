@@ -210,6 +210,41 @@ def read_testing(project_file: Path) -> TestingSettings:
     return TestingSettings(tuple(suites), tuple(replays))
 
 
+def check_build_settings(project_file: Path) -> list[str]:
+    """The failures of the .eproj `project_file` against the demo acceptance's build settings (Roadmap M17 and M18:
+    "StartScene and Export.BuildScenes set"; Docs/Decisions/0027-m17-contract.md decision 4, B1, stream B), one line
+    each, in this order:
+
+    - StartScene absent or empty: "StartScene is empty: set it to the scene the game starts with (Roadmap M17 and
+      M18: StartScene and Export.BuildScenes set)";
+    - Export or Export.BuildScenes absent, or BuildScenes empty: "Export.BuildScenes is empty: list the scenes the
+      export must load strictly, StartScene included (Roadmap M17 and M18: StartScene and Export.BuildScenes set)";
+    - a non-empty StartScene that a non-empty Export.BuildScenes does not list (compared as written):
+      "Export.BuildScenes does not list the StartScene '<StartScene>': add it (ADR 0027 decision 4: the demos'
+      convention)".
+
+    An empty list when every rule holds. Export.BuildScenes decides which scenes the export loads strictly beside
+    StartScene, not what ships (Game.pak holds every registered asset below Assets/). The engine is unchanged: an empty
+    Export.BuildScenes stays valid for the validator and the exporter (FeatureTest relies on it), and only the games
+    suite applies this rule, first in each editor half (check_game_in_editor, on the index copy's project file, its
+    lines first among the half's failures), so PreCommit's Debug half catches it. Raises ValueError naming the file for
+    a file that cannot be read, a document that is not a .eproj JSON object (Format "Project"), a StartScene that is not
+    a string, an Export that is not an object or an Export.BuildScenes that is not an array of strings."""
+    raise NotImplementedError("contract stub: games (ADR 0027 decision 4, B1, stream B)")
+
+
+def read_game_name(path: Path) -> str:
+    """The Name of the game whose package manifest (Game.json, Format "GameManifest", Engine/Project/GameManifest.h)
+    or project file (.eproj, Format "Project") is `path`: the name the exporter gives the executable, the testing
+    user-data folder and its log (Exporter.cpp names them after ProjectSettings::Name), whatever the .eproj's file stem
+    (Docs/Decisions/0027-m17-contract.md decision 4, B2, stream B). The Dist half reads it, before it installs the
+    package to exports.package_directory(EXPORTED_CONFIGURATION, <Name>), from the testing export's manifest:
+    <outputDirectory>/Game.json, or on macOS the bundle's Contents/Resources/Game.json beside the Contents/MacOS folder
+    of project.export's `executable`. Raises ValueError naming the file for a file that cannot be read, a document that
+    is neither a GameManifest nor a Project JSON object, or one whose Name is not a non-empty string."""
+    raise NotImplementedError("contract stub: games (ADR 0027 decision 4, B2, stream B)")
+
+
 def committed_hashes(project_directory: Path, replays: Iterable[str]) -> dict[str, str]:
     """{replay: FinalStateHash} for each project-relative .replay path of `replays` (Test.py's expand_replay_globs of
     Testing.Replays), read from the replay file's header as committed. Raises ValueError naming a replay that cannot be

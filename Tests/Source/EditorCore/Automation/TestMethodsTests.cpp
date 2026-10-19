@@ -26,7 +26,9 @@
 
 #include <array>
 #include <chrono>
+#include <format>
 #include <optional>
+#include <string>
 #include <utility>
 
 namespace Engine {
@@ -325,6 +327,74 @@ namespace Engine {
 			CHECK(result["cases"][0]["status"] == Json("timeout"));
 			CHECK(result["cases"][0]["line"] == Json(3));
 			CHECK(result["cases"][1]["status"] == Json("passed"));
+		}
+
+		// Docs/Decisions/0027-m17-contract.md decision 3, A2 (M17 map GTF-04): a test run plays the saved file of every
+		// scene it uses, so a run while that scene was open with unsaved changes silently tested what the editor no longer
+		// showed (here a case that looks for the unsaved entity). The run is refused before anything plays when a selected
+		// suite is bound to the dirty open scene or a selected replay plays it; an empty-scene suite still runs.
+		TEST_CASE("TestMethods: test.run refuses while a selected suite's scene is open with unsaved changes" * doctest::skip(true))
+		{
+			Test::AutomationFixture fixture("TestRunDirtyScene");
+			CallTestMethod(fixture, "script.write", Json{ { "path", "Assets/Tests/Contract.test.luau" }, { "source", "return Test.Suite('Bound', function()\n"
+																													 "Test.Case('sees the edit', function() Test.Expect(Scene.FindByName('Unsaved') ~= nil) end)\nend)" } });
+			CallTestMethod(fixture, "script.write", Json{ { "path", "Assets/Tests/Detached.test.luau" }, { "source", "return Test.Suite('Detached', function()\n"
+																													 "Test.Case('runs', function() Test.Expect(true) end)\nend)" } });
+			CallTestMethod(fixture, "project.setSettings", Json{ { "patch", Json{ { "Testing", Json{ { "Suites", Json::array({ Json{ { "Script", "Assets/Tests/Contract.test.luau" }, { "Scene", "Assets/Scenes/Main.scene" }, { "Modes", Json::array({ "Editor" }) } }, Json{ { "Script", "Assets/Tests/Detached.test.luau" }, { "Scene", "" }, { "Modes", Json::array({ "Editor" }) } } }) }, { "Replays", Json::array({ "Assets/Tests/Replays/*.replay" }) } } } } } });
+			// A pure determinism replay of the saved Main.scene.
+			CallTestMethod(fixture, "input.record", Json{ { "action", "start" } });
+			CallTestMethod(fixture, "play.step", Json{ { "ticks", 3 }, { "render", "none" } });
+			CallTestMethod(fixture, "input.record", Json{ { "action", "stop" }, { "path", "Assets/Tests/Replays/Recorded.replay" } });
+			CallTestMethod(fixture, "play.stop", Json::object());
+			CallTestMethod(fixture, "entity.create", Json{ { "name", "Unsaved" } });
+			REQUIRE(fixture.GetEditor().IsSceneDirty());
+
+			const std::string_view hint = "scene.save first; test runs play the saved scene file";
+			for (const auto& [filter, selected] : { std::pair<std::string, std::string>{ "", "suite 'Bound'" }, std::pair<std::string, std::string>{ "Bound", "suite 'Bound'" },
+					 std::pair<std::string, std::string>{ "Recorded.replay", "replay 'Assets/Tests/Replays/Recorded.replay'" } })
+			{
+				CAPTURE(filter);
+				const Json response = fixture.Request("test.run", Json{ { "filter", filter } });
+				REQUIRE_MESSAGE(response.contains("error"), response.dump());
+				const Json& data = response["error"]["data"];
+				CHECK(data["errorCode"] == Json("InvalidState"));
+				const std::string detail = JsonReader(data).ReadMember<std::string>("detail").value_or("");
+				CHECK(detail.find("'Assets/Scenes/Main.scene' is open with unsaved changes") != std::string::npos);
+				CHECK(detail.find(std::format("the selected {} plays its saved file", selected)) != std::string::npos);
+				CHECK(JsonReader(data).ReadMember<std::string>("hint").value_or("") == hint);
+				// Nothing ran: no report, and the open scene keeps its edit.
+				CHECK_FALSE(data.contains("testRun"));
+				CHECK(fixture.GetEditor().IsSceneDirty());
+			}
+			// A suite of no scene does not play the open scene's file.
+			const Json detached = CallTestMethod(fixture, "test.run", Json{ { "filter", "Detached" } });
+			CHECK(detached["passed"] == Json(true));
+			REQUIRE(detached["cases"].size() == 1);
+			CHECK(detached["cases"][0]["suite"] == Json("Detached"));
+			// Saved, the suite plays what the editor shows.
+			CallTestMethod(fixture, "scene.save", Json::object());
+			const Json bound = CallTestMethod(fixture, "test.run", Json{ { "filter", "Bound" } });
+			CHECK(bound["passed"] == Json(true));
+		}
+
+		// A2's other half: only a dirty scene that a selected suite or replay plays refuses a run. A suite bound
+		// to another scene plays that scene's saved file while the open scene keeps its unsaved edits.
+		TEST_CASE("TestMethods: test.run runs a suite of another scene while the open scene has unsaved changes")
+		{
+			Test::AutomationFixture fixture("TestRunOtherDirtyScene");
+			CallTestMethod(fixture, "script.write", Json{ { "path", "Assets/Tests/Contract.test.luau" }, { "source", "return Test.Suite('Main', function()\n"
+																													 "Test.Case('plays the saved main scene', function() Test.Expect(Scene.FindByName('Unsaved') == nil) end)\nend)" } });
+			CallTestMethod(fixture, "project.setSettings", Json{ { "patch", Json{ { "Testing", Json{ { "Suites", Json::array({ Json{ { "Script", "Assets/Tests/Contract.test.luau" }, { "Scene", "Assets/Scenes/Main.scene" }, { "Modes", Json::array({ "Editor" }) } } }) } } } } } });
+			CallTestMethod(fixture, "scene.new", Json{ { "path", "Assets/Scenes/Other.scene" } });
+			CallTestMethod(fixture, "entity.create", Json{ { "name", "Unsaved" } });
+			REQUIRE(fixture.GetEditor().IsSceneDirty());
+			const Json result = CallTestMethod(fixture, "test.run", Json::object());
+			CHECK(result["passed"] == Json(true));
+			REQUIRE(result["cases"].size() == 1);
+			CHECK(result["cases"][0]["status"] == Json("passed"));
+			CHECK(fixture.GetEditor().IsSceneDirty());
+			REQUIRE(fixture.GetEditor().GetScenePath().has_value());
+			CHECK(fixture.GetEditor().GetScenePath()->GetPath() == "Assets/Scenes/Other.scene");
 		}
 
 		TEST_CASE("TestMethods: recording requires exactly one selected suite before writing any replay")

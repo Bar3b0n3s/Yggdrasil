@@ -49,7 +49,10 @@ namespace Engine {
 		[[nodiscard]] Result<TestListResult> TestList(EditorMethodContext& context, const NoParams& params);
 
 		// Pending, main-thread adapter over FeatureTestRunner. Preflight validates scripts, all requested paths, filter
-		// selection and recording destination before acquiring the exclusive run lease or replacing any session.
+		// selection and recording destination before acquiring the exclusive run lease or replacing any session. After a
+		// successful FeatureTestRunner::Begin and before the lease, it refuses (InvalidState, nothing run) an open scene with
+		// unsaved changes that a selected suite or replay plays, since the run plays the saved file (the runner's
+		// GetSelection; Docs/Decisions/0027-m17-contract.md decision 3, A2); the errors of Preflight and Begin come first.
 		// Each Poll advances at least one bounded runner unit and then stops when the 50 ms wall budget is consumed;
 		// simulated clocks, tick deadlines and outcomes never depend on this partition. OwnsAudioTime is set on every
 		// suite session, including ScriptedClock suites. The regular editor frame loop must not also advance it.
@@ -58,7 +61,8 @@ namespace Engine {
 		// Cancel/disconnect unpublishes/destroys the runner sessions, cancels case/tasks/captures, releases audio/time
 		// ownership and restores the prior editor state without another Poll; it never publishes an incomplete replay.
 		// Errors: InvalidArgument at /timeoutTicks or /record; Validation for script/check/selection failures;
-		// InvalidState for a conflicting run/time owner; PermissionDenied for recording in a read-only project; I/O errors.
+		// InvalidState for a conflicting run/time owner or a dirty open scene that a selected suite or replay plays (A2);
+		// PermissionDenied for recording in a read-only project; I/O errors.
 		[[nodiscard]] Result<Scope<PendingOperation>> TestRun(EditorMethodContext& context, const TestRunParams& params);
 
 	}
