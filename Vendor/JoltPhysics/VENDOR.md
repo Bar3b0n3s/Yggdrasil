@@ -243,7 +243,7 @@ The final executable needs these. A static library does not carry link options.
 - In the engine workspace, `Tests` passes `"Jolt: version ID includes JPH_CROSS_PLATFORM_DETERMINISTIC"` in Debug and
   Release, and `Scripts/CheckBuildConfig.py` passes on the workspace and fails on its three fixture workspaces.
 - Linux and macOS: the generated gmake, ninja and xcode4 projects were checked for `-ffp-contract=off` and the absence
-  of `-ffp-contract=on` and `-ffast-math`; GitHub Actions compiles them.
+  of `-ffp-contract=on` and `-ffast-math`; nothing compiles them on Linux or macOS (ADR 0028 decision 10).
 
 ### Original vendoring (2026-10-05, upstream default configuration)
 

@@ -696,7 +696,7 @@ The language standard is C++23 for Engine, Editor, Runtime and Tests.
 - Clang 19 or later (Clang 18 cannot use libstdc++'s `std::expected`).
 - Apple Clang with the libc++ of the minimum supported Xcode **[Architecture]**.
 
-When in doubt, check the compiler-support tables on cppreference. CI on all three platforms has the final say.
+When in doubt, check the compiler-support tables on cppreference. Windows is the only verified platform: nothing compiles the code with GCC 14, Clang 19+ against libstdc++ or Apple Clang against libc++ (`Docs/Decisions/0028-backlog-program.md` decision 10), so keep to this rule and those tables; the portability stage's clang-cl builds against MSVC's library are the only non-MSVC compile.
 
 **Encouraged**
 
