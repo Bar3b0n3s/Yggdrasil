@@ -533,7 +533,10 @@ namespace Engine {
 				.Function("Fail", Utils::Fail, "(message: string) -> ()", "End this case as failed. A case thread, or a task a behaviour spawned (which is cancelled), never runs past the call, even inside pcall; a lifecycle callback cannot yield, so there the call raises a script error that unwinds to the nearest pcall. The outcome stays latched either way.", pure)
 				.Function("Skip", Utils::Skip, "(reason: string) -> ()", "End this case as skipped without erasing earlier failures; it stops its caller the way Test.Fail does, and the outcome stays latched.", pure)
 				.Function("WaitTicks", Utils::WaitTicks, "(ticks: number) -> ()", "Yield a test thread for simulation ticks.", pure)
-				.Function("WaitUntil", Utils::WaitUntil, "(predicate: () -> boolean, timeoutTicks: number) -> ()", "Wait for a predicate through a bounded simulation deadline.", pure)
+				.Function("WaitUntil", Utils::WaitUntil, "(predicate: () -> boolean, timeoutTicks: number) -> ()",
+					"Evaluate the predicate now and after every following tick until it returns true; it must return a boolean (anything else is a "
+					"script error). Still false after timeoutTicks ticks, the case fails with \"Test.WaitUntil exceeded its tick limit\" at this call.",
+					pure)
 				.Function("ExpectScriptError", Utils::ExpectScriptError, "(pattern: string, withinTicks: number) -> ()", std::format("Claim one nonfatal error occurrence in the current case using a Luau message pattern of at most {} bytes; the case keeps at most {} unclaimed errors to claim.", MaxScriptErrorPatternBytes, MaxScriptTestUnclaimedErrors), pure)
 				.Function("CaptureAudio", Utils::CaptureAudio, "(ticks: number) -> TestAudioLevels", "Capture exactly the requested current-and-following ticks; yield until grouped audio is ready.", mutation)
 				.Function("InjectAction", Utils::InjectAction, "(name: string, state: InputEventState?, value: number?) -> ()",
@@ -548,7 +551,7 @@ namespace Engine {
 				.Function("Screenshot", Utils::Screenshot, "(name: string) -> ()",
 					std::format("Capture a screenshot through the owning host; a suite takes at most {} screenshots, and a later call raises an error without capturing.", MaxScriptTestScreenshotsPerSuite), mutation)
 				.Function("ReloadScript", Utils::ReloadScript, "(asset: AssetRef) -> ()", "Synchronously reload a script in an editor test.", editor)
-				.Function("GetStateHash", Utils::GetStateHash, "() -> string", "Read the canonical simulated state hash: the world (every entity with its serialized components, the tick, the session's Random state, the id draws and every body's physics state), never script tables, audio or input.", pure)
+				.Function("GetStateHash", Utils::GetStateHash, "() -> string", "Read the canonical simulated state hash: the world (every entity with its serialized components, the tick, the session's Random state, the id draws and every body's physics state), never script tables, audio or input. It includes the tick, so two reads at different ticks always differ: compare two runs with input.replay's stateHash instead.", pure)
 				.Function("GetLastExtraction", Utils::GetLastExtraction, "() -> TestExtraction", "Read the last completed render extraction.", pure)
 				.Function("GetExtractedPosition", Utils::GetExtractedPosition, "(entity: Entity) -> vector?", "Read an entity's position in the last render snapshot.", pure)
 				.Function("GetScriptErrors", Utils::GetScriptErrors, "(since: number?) -> {ScriptError}", std::format("Read occurrences newer than an exclusive error cursor; claimed errors remain visible. The VM keeps the {} distinct errors with the latest occurrences.", MaxScriptErrorEntries), pure);

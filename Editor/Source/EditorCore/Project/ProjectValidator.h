@@ -45,7 +45,7 @@ namespace Engine {
 	struct ValidationCodeInfo
 	{
 		std::string_view Code{};        // "SCENE_NO_PRIMARY_CAMERA"
-		std::string_view Severity{};    // "Error", "Warning", or "Warning; Error at the limit" (§13.7)
+		std::string_view Severity{};    // "Error", "Warning", "Warning; Error at the limit" or "Error; Warning for a Luau lint warning" (§13.7)
 		bool AutoFixable = false;       // project.validate {fix} can fix at least some of its diagnostics
 		std::string_view Description{}; // one sentence: what the code reports
 		std::string_view Fix{};         // one sentence: how an author or agent fixes it

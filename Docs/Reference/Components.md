@@ -404,7 +404,7 @@ Draws a text string on the screen or in the world.
 |---|---|---|---|---|---|---|
 | `Text` | `String` | `""` |  |  |  | The UTF-8 text; a line feed starts a new line. |
 | `Font` | `AssetRef(Font)` | `null` |  |  |  | The font; null uses the default font. |
-| `Size` | `Float` | `32` | 1 to 1e+05 | px |  | The text height in pixels at the 1080p reference resolution. |
+| `Size` | `Float` | `32` | 1 to 1e+05 | px |  | The em size. Screen space: pixels at the 1080p reference resolution, scaled by the viewport's height / 1080. World space: an em of Size / 100 metres (100 world-text pixels per metre) before the entity's scale, in the entity's local XY plane or facing the camera with Billboard, so the default 32 is 0.32 m. |
 | `Color` | `Color4` | `[1,1,1,1]` | 0 to 1 |  |  | The linear text colour with opacity in the fourth component. |
 | `Space` | `TextSpace` | `"Screen"` |  |  |  | Whether the text is placed on the screen or in the world. |
 | `Anchor` | `Vec2` | `[0.5,0.5]` | 0 to 1 |  |  | Screen space: the point of the viewport the text is placed at, normalized: (0, 0) is the top-left corner and (1, 1) the bottom-right, X to the right and Y down; (0.5, 0.5) is the centre. |
@@ -424,7 +424,7 @@ Script members of `Text`:
 | `Font` | proxy field | `AssetRef?` | read/write | All | The font; null uses the default font. |
 | `Offset` | proxy field | `vector` | read/write | All | Screen space: a further offset from the anchor in pixels at the 1080p reference resolution (scaled with the viewport's height), X to the right and Y down. |
 | `Pivot` | proxy field | `vector` | read/write | All | The point of the text block that sits on the anchor (Screen space) or at the entity's origin (World space), normalized to the block: (0, 0) is its top-left corner and (1, 1) its bottom-right. |
-| `Size` | proxy field | `number` | read/write | All | The text height in pixels at the 1080p reference resolution. |
+| `Size` | proxy field | `number` | read/write | All | The em size. Screen space: pixels at the 1080p reference resolution, scaled by the viewport's height / 1080. World space: an em of Size / 100 metres (100 world-text pixels per metre) before the entity's scale, in the entity's local XY plane or facing the camera with Billboard, so the default 32 is 0.32 m. |
 | `Space` | proxy field | `TextSpace` | read/write | All | Whether the text is placed on the screen or in the world. |
 | `Text` | proxy field | `string` | read/write | All | The UTF-8 text; a line feed starts a new line. A value a script writes holds at most 4096 bytes of text. |
 

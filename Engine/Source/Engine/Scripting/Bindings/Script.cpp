@@ -569,7 +569,10 @@ namespace Engine {
 				.Function("Color", Utils::FieldConstructor<FieldType::Color4>, "(default: Color?, options: FieldOptions?) -> FieldDescriptor", "Declare a linear RGBA color; the omitted default is white.", pure)
 				.Function("Quat", Utils::FieldConstructor<FieldType::Quat>, "(default: Quat?, options: FieldOptions?) -> FieldDescriptor", "Declare a finite nonzero quaternion; the omitted default is identity.", pure)
 				.Function("Entity", Utils::FieldConstructor<FieldType::EntityRef>, "() -> FieldDescriptor", "Declare an Entity reference with a null default.", pure)
-				.Function("Asset", Utils::FieldConstructor<FieldType::AssetRef>, "(type: string) -> FieldDescriptor", "Declare an asset reference restricted to the named asset type, with a null default.", pure)
+				.Function("Asset", Utils::FieldConstructor<FieldType::AssetRef>, "(type: string) -> FieldDescriptor",
+					"Declare an asset reference restricted to the named AssetType (Scene, Prefab, Mesh, Material, Texture, Environment, AudioClip for "
+					"imported audio and .sfx sound effects, Script, Font or Replay), with a null default; any other name fails the import.",
+					pure)
 				.Function("Enum", Utils::FieldConstructor<FieldType::Enum>, "(values: {string}, default: string?) -> FieldDescriptor", "Declare ordered unique string choices; the omitted default is the first choice.", pure)
 				.Function("Array", Utils::FieldConstructor<FieldType::Array>, "(element: FieldDescriptor) -> FieldDescriptor", "Declare an empty array whose element keeps its complete nested field schema.", pure);
 			auto behaviour = api.Type("Behaviour", "Optional behaviour lifecycle callbacks in execution order and canonical entity order.");

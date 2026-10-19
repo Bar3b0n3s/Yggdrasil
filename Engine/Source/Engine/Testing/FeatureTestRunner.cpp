@@ -1211,6 +1211,37 @@ namespace Engine {
 			return {};
 		}
 
+		// A recording refused for its rows (Docs/Decisions/0027-m17-contract.md "Frozen interfaces / A3"): the message names
+		// each selected row that did not pass with its status, in report order, and the hint says how to leave out the
+		// replays a recording filter also selected. Unchanged when every row passed but the suite never recorded.
+		[[nodiscard]] Error RefuseRecording() const
+		{
+			constexpr std::string_view Refusal = "recording requires passing selected cases and a valid starting scene";
+			constexpr size_t MaxNamedRows = 10;
+			std::vector<const TestCaseResult*> failed;
+			for (const TestCaseResult& row : ReportData.Cases)
+				if (!Passed(row))
+					failed.push_back(&row);
+			if (failed.empty())
+				return Error(ErrorCode::Validation, std::string(Refusal));
+			std::string message = std::format("{}; {} selected row(s) did not pass: ", Refusal, failed.size());
+			bool namesReplay = false;
+			for (size_t index = 0; index < std::min(failed.size(), MaxNamedRows); ++index)
+			{
+				// The rows are not sanitized until the run completes, and their names come from scripts (§11.10).
+				const TestCaseResult& row = *failed[index];
+				message += std::format("{}{}/{} ({})", index == 0 ? "" : ", ", SanitizeTestReportText(row.Suite), SanitizeTestReportText(row.Case), SanitizeTestReportText(row.Status));
+				namesReplay = namesReplay || row.Suite.starts_with("replay:");
+			}
+			if (failed.size() > MaxNamedRows)
+				message += std::format(", and {} more", failed.size() - MaxNamedRows);
+			Error refusal(ErrorCode::Validation, std::move(message));
+			if (!namesReplay)
+				return refusal;
+			return std::move(refusal).WithHint("the filter also selects the replays named; give the recording suite a name that no replay path contains (for example Record.<Name>) and record "
+											   "with exactly that filter");
+		}
+
 		Result<bool> Advance()
 		{
 			switch (CurrentPhase)
@@ -1313,7 +1344,7 @@ namespace Engine {
 					{
 						return !Passed(row);
 					}))
-						return MakeError(ErrorCode::Validation, "recording requires passing selected cases and a valid starting scene");
+						return std::unexpected(RefuseRecording());
 					ENGINE_TRY(ValidateReplayDocument(*Recording));
 					CurrentPhase = Phase::Verify;
 					return false;
@@ -1494,8 +1525,15 @@ namespace Engine {
 
 	Result<FeatureTestSelection> FeatureTestRunner::GetSelection() const
 	{
-		ENGINE_CONTRACT_STUB();
-		return std::unexpected(Error(ErrorCode::Unsupported, "M17 test.run selection contract (Docs/Decisions/0027-m17-contract.md A2, stream A)"));
+		// Begin replaces the whole state only when it succeeds, and nothing after it clears the selection.
+		if (m_State->CurrentPhase == State::Phase::Idle)
+			return MakeError(ErrorCode::InvalidState, "no test run has begun");
+		FeatureTestSelection selection;
+		selection.Suites.reserve(m_State->Selected.size());
+		for (const State::Selection& suite : m_State->Selected)
+			selection.Suites.push_back(suite.SettingsIndex);
+		selection.Replays = m_State->Replays;
+		return selection;
 	}
 
 	void FeatureTestRunner::Cancel()

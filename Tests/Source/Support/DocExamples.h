@@ -49,7 +49,7 @@ namespace Engine {
 		// file, or a fence that is never closed.
 		[[nodiscard]] Result<std::vector<DocExampleBlock>> ExtractDocExamples(std::string_view text);
 
-		// One error finding of a checked block.
+		// One finding of a checked block: a type error or a lint warning (Diagnostic.Severity says which).
 		struct DocExampleFinding
 		{
 			// The document line of a finding inside the example; 0 for one in a prelude or a required module.
@@ -71,8 +71,10 @@ namespace Engine {
 			DocExampleChecker(const DocExampleChecker&) = delete;
 			DocExampleChecker& operator=(const DocExampleChecker&) = delete;
 
-			// The error findings of `block` (Severity Error), sorted as the checker sorts them. Errors: NotFound for an
-			// unknown prelude; Validation for a prelude without exactly one marker line.
+			// The findings of `block`, Error findings (type errors) and Warning findings (Luau's lint warnings, every lint the
+			// engine's checker enables) alike, each with its Diagnostic.Severity, sorted as the checker sorts them; callers
+			// that judge type errors only filter to Severity Error (Docs/Decisions/0027-m17-contract.md decision 5, C1).
+			// Errors: NotFound for an unknown prelude; Validation for a prelude without exactly one marker line.
 			[[nodiscard]] Result<std::vector<DocExampleFinding>> Check(const DocExampleBlock& block) const;
 		private:
 			struct State;

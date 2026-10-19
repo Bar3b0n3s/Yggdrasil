@@ -104,14 +104,16 @@ namespace Engine {
 		// input, its expectations compiled from their source. Unless that playback passes (every checkpoint, the final hash and
 		// every expectation reproduced, no early stop) and raises no script error, Stop writes nothing and fails with Validation
 		// at /path naming the first failure, a hint and the playback's InputReplayResult as error data "verification", and the
-		// play session is the verification's. Only then the recording guard, the input check: the play session restarts again
-		// and plays the candidate WithoutInput. When that playback passes (every checkpoint, the final hash and every
-		// expectation reproduced without input), whatever script errors it raised, Stop writes nothing and fails with Validation
-		// naming the replay ("its outcome does not depend on its input"), a hint and the check's InputReplayResult as error data
-		// "inputCheck"; otherwise it writes the replay (inputCheckTick: where the check ended). Each playback advances at least
-		// one tick per Poll within PlayStepFrameBudget. Whatever the outcome, the play session is then the last playback's,
-		// paused where it ended, with lockstep released, as after input.replay. A disconnect during either playback writes
-		// nothing.
+		// play session is the verification's. The errors counted are those raised up to the playback's last tick: its session
+		// is not torn down there (a refused one stays live), so an error raised only at teardown (OnDestroy) is not seen, while
+		// test.run, which stops a replay's scripts before it reads their errors, counts it. Only then the recording guard, the
+		// input check: the play session restarts again and plays the candidate WithoutInput. When that playback passes (every
+		// checkpoint, the final hash and every expectation reproduced without input), whatever script errors it raised, Stop
+		// writes nothing and fails with Validation naming the replay ("its outcome does not depend on its input"), a hint and the
+		// check's InputReplayResult as error data "inputCheck"; otherwise it writes the replay (inputCheckTick: where the check
+		// ended). Each playback advances at least one tick per Poll within PlayStepFrameBudget. Whatever the outcome, the play
+		// session is then the last playback's, paused where it ended, with lockstep released, as after input.replay. A
+		// disconnect during either playback writes nothing.
 		[[nodiscard]] Result<Scope<PendingOperation>> InputRecord(AutomationMethodContext& context, const InputRecordParams& params);
 		// A fresh session from the validated header. Pending: at least one tick per Poll within the common 50 ms
 		// budget, never an unbounded synchronous replay. Reject another time owner or active driver before replacing

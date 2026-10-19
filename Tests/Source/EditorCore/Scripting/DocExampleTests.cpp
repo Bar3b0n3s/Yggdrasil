@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <filesystem>
 #include <format>
+#include <iterator>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -170,7 +171,11 @@ namespace Engine {
 					}
 					++checked;
 					for (const Test::DocExampleFinding& finding : *findings)
-						failures.push_back(DescribeFinding(document, finding));
+					{
+						// Lint warnings are the next case's (Docs/Decisions/0027-m17-contract.md decision 5, C1).
+						if (finding.Diagnostic.Severity == DiagnosticSeverity::Error)
+							failures.push_back(DescribeFinding(document, finding));
+					}
 				}
 			}
 			std::string report;
@@ -188,7 +193,7 @@ namespace Engine {
 		// about. DocExampleChecker::Check reports Warning findings too: a seeded block proves a lint warning comes back at
 		// its document line, then no example of the checked documents may warn, except in a game's own notes
 		// (IsProjectNotes), which only the case above checks.
-		TEST_CASE("DocExamples: every Luau example in the docs is free of lint warnings" * doctest::skip(true))
+		TEST_CASE("DocExamples: every Luau example in the docs is free of lint warnings")
 		{
 			const Test::DocExampleChecker checker(Test::GetTestDataPath("TypeChecker/DocExamples"));
 			const std::string_view seeded = "# Seeded\n\n```luau\nlocal function clamp(value: number): number\n\tif value < 0 then value = 0 return value end\n\treturn value\nend\nreturn clamp\n```\n";
@@ -264,6 +269,8 @@ namespace Engine {
 		// Behaviour prelude, reported at its document line through the fence and prelude offsets; one without a prelude,
 		// through the fence offset alone; and one whose mistake surfaces in the prelude's epilogue (after its marker),
 		// reported at that line of the prelude file (review finding M16: the prelude arithmetic was never exercised).
+		// Expected.json lists Error findings only; lint warnings are judged by the lint case above (Docs/Decisions/
+		// 0027-m17-contract.md decision 5, C1).
 		TEST_CASE("DocExamples: a seeded mistake is reported at its document line")
 		{
 			const auto seeded = Test::ReadTestDataText("TypeChecker/DocExamples/Seeded/Seeded.md");
@@ -291,7 +298,10 @@ namespace Engine {
 				const auto blockFindings = checker.Check(block);
 				REQUIRE_MESSAGE(blockFindings.has_value(), blockFindings.error().ToString());
 				++checked;
-				findings.insert(findings.end(), blockFindings->begin(), blockFindings->end());
+				std::ranges::copy_if(*blockFindings, std::back_inserter(findings), [](const Test::DocExampleFinding& finding)
+				{
+					return finding.Diagnostic.Severity == DiagnosticSeverity::Error;
+				});
 			}
 			CHECK(expected.ReadMember<uint32_t>("Checked") == static_cast<uint32_t>(checked));
 			CHECK(expected.ReadMember<uint32_t>("Skipped") == static_cast<uint32_t>(skipped));

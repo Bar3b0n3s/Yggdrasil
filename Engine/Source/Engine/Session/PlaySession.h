@@ -374,6 +374,11 @@ namespace Engine {
 		// Session-owned history, including faults of scenes whose VM has been replaced. Cursors never reset on Scene.Load.
 		[[nodiscard]] ScriptErrorStream& GetScriptErrors();
 		[[nodiscard]] const ScriptErrorStream& GetScriptErrors() const;
+		// The first script error the session published to GetScriptErrors (its scripts' faults and its session errors, OnStart's
+		// included), as it was then, with the tick it occurred at; nullopt until one is. The stream moves a repeated error to
+		// its back with a new ID, so its first entry is not always the first occurrence (input.record stop's verification names
+		// this one, Docs/Decisions/0027-m17-contract.md A1). Like the cursors, it is never reset on Scene.Load.
+		[[nodiscard]] const std::optional<ScriptError>& GetFirstScriptError() const;
 		// Application.Quit records the first request. The editor stops play and the Runtime exits only after returning
 		// from the current frame; a test hook also receives it for ExpectQuit. It is not a recursive destruction call.
 		[[nodiscard]] std::optional<int32_t> GetQuitRequest() const;

@@ -637,8 +637,7 @@ namespace Engine {
 		// by a script-table write from script.eval (no engine call, so nothing invalidates the recording), or one whose
 		// expectation is false (the input check fails it too, which let it through). Stop now replays the candidate with
 		// its input first, in a fresh ordinary playback, and refuses it naming where that playback diverged.
-		TEST_CASE("ReplayMethods: input.record stop refuses a recording that a replay with its input does not reproduce"
-			* doctest::skip(true))
+		TEST_CASE("ReplayMethods: input.record stop refuses a recording that a replay with its input does not reproduce")
 		{
 			Test::AutomationFixture fixture("RecordNotReproduced");
 			// The Booster moves one unit along X per fixed step while A is held or while its own table says so.
@@ -684,6 +683,10 @@ namespace Engine {
 			CHECK(observed != recorded);
 			CHECK(detail.find(observed) != std::string::npos);
 			CHECK(detail.find(recorded) != std::string::npos);
+			// The frozen reason, the observed hash first.
+			CHECK(detail == std::format("refusing to write 'Assets/Tests/Boosted.replay': replayed with its input, the recording does not reproduce itself: the state hash at "
+										"checkpoint tick 60 is {}, recorded {}; nothing was written",
+					  observed, recorded));
 			CHECK_FALSE(data.contains("inputCheck"));
 			CHECK_FALSE(ProjectFileExists(fixture, "Assets/Tests/Boosted.replay"));
 			// The session is the verification's, paused where it stopped, with lockstep released and no recording.
@@ -717,6 +720,231 @@ namespace Engine {
 			const Json saved = CallReplayMethod(fixture, "input.record", Json{ { "action", "stop" }, { "path", "Assets/Tests/Satisfied.replay" }, { "expect", Json::array({ Json{ { "tick", 10 }, { "luau", "Scene.FindByName('Booster').Transform.WorldPosition.x > 3" } } }) } });
 			CHECK(saved["events"] == Json(1));
 			CHECK(ProjectFileExists(fixture, "Assets/Tests/Satisfied.replay"));
+
+			// A script error that the recording's own input raises: replayed with its input, the playback reproduces every
+			// hash, but test.run, the games suite and --feature-test fail a replay that raises one, so Stop refuses it with
+			// the script-error reason (nothing is written, and the input check never runs).
+			CallReplayMethod(fixture, "play.stop");
+			CallReplayMethod(fixture, "script.write", Json{ { "path", "Assets/Scripts/Faulty.luau" }, { "source", "local Faulty = {}\n"
+																												  "function Faulty.OnFixedUpdate(self: any, dt: number)\n"
+																												  "\tif Input.IsKeyDown(\"B\") then\n"
+																												  "\t\terror(\"pressed too hard\")\n"
+																												  "\tend\n"
+																												  "end\n"
+																												  "return Script.Define(\"Faulty\", Faulty)\n" } });
+			CallReplayMethod(fixture, "entity.create", Json{ { "name", "Faulty" }, { "components", Json{ { "Script", Json{ { "Script", "Assets/Scripts/Faulty.luau" } } } } } });
+			CallReplayMethod(fixture, "scene.save");
+			Test::ExpectLog raised(LogLevel::Error, "pressed too hard");
+			CallReplayMethod(fixture, "input.record", Json{ { "action", "start" } });
+			CallReplayMethod(fixture, "play.step", Json{ { "ticks", 20 }, { "render", "none" }, { "input", Json::array({ Json{ { "tick", 2 }, { "type", "key" }, { "key", "A" }, { "state", "down" } }, Json{ { "tick", 3 }, { "type", "key" }, { "key", "B" }, { "state", "tap" } } }) } });
+			const Json faulted = fixture.Request("input.record", Json{ { "action", "stop" }, { "path", "Assets/Tests/Faulted.replay" } });
+			REQUIRE_MESSAGE(faulted.contains("error"), faulted.dump());
+			const Json& faultData = faulted["error"]["data"];
+			CHECK(faultData["errorCode"] == Json("Validation"));
+			const std::string fault = JsonReader(faultData).ReadMember<std::string>("detail").value_or("");
+			CHECK(fault == "refusing to write 'Assets/Tests/Faulted.replay': replayed with its input, the recording does not reproduce itself: "
+						   "the playback raised 1 script error(s); the first: Assets/Scripts/Faulty.luau:4: pressed too hard (tick 3); nothing was written");
+			// Every hash and expectation reproduced: the script error alone refuses it.
+			REQUIRE_MESSAGE(faultData.contains("verification"), faultData.dump());
+			CHECK(faultData["verification"]["passed"] == Json(true));
+			CHECK(faultData["verification"]["finalTick"] == Json(20));
+			CHECK_FALSE(faultData.contains("inputCheck"));
+			CHECK_FALSE(ProjectFileExists(fixture, "Assets/Tests/Faulted.replay"));
+			// Raised once while recording and once by the verification.
+			CHECK(raised.GetMatchCount() == 2);
+			state = CallReplayMethod(fixture, "play.state");
+			CHECK(state["recording"] == Json(false));
+			CHECK(state["lockstep"] == Json(false));
+			CHECK(state["tick"] == Json(20));
+		}
+
+		// A1's other refusal reasons (Docs/Decisions/0027-m17-contract.md "Frozen interfaces / A1"): an expectation that raises
+		// is named with its error's message, not as false; gameplay that stops the playback early is named with its stop
+		// reason; and the script errors are every occurrence of the verification's own session from its start (OnStart's
+		// included), the first named as it first appeared, although the stream keeps a repeated error at its latest tick.
+		TEST_CASE("ReplayMethods: input.record stop names a raised expectation, an early stop and every script error of its verification")
+		{
+			Test::AutomationFixture fixture("RecordVerificationReasons");
+			SaveInputScene(fixture);
+			const Json held = Json::array({ Json{ { "tick", 2 }, { "type", "key" }, { "key", "A" }, { "state", "down" } } });
+			const std::string_view hint = "a script.eval or play.waitFor that writes script state (a self field, a module table) during a recording is neither recorded nor "
+										  "detected, an expectation must hold when the recording's own input is replayed, and a script that reads the host (Application "
+										  "queries, pairs over entity keys) diverges; record again without them";
+			const auto refusal = [](std::string_view path, std::string_view reason)
+			{
+				return std::format("refusing to write '{}': replayed with its input, the recording does not reproduce itself: {}; nothing was written", path, reason);
+			};
+
+			// An expectation that raises keeps its error's message (and code), where a false one says "is false".
+			CallReplayMethod(fixture, "input.record", Json{ { "action", "start" } });
+			CallReplayMethod(fixture, "play.step", Json{ { "ticks", 20 }, { "render", "none" }, { "input", held } });
+			Json raised;
+			{
+				Test::ExpectLog boom(LogLevel::Error, "boom");
+				raised = fixture.Request("input.record", Json{ { "action", "stop" }, { "path", "Assets/Tests/Raised.replay" }, { "expect", Json::array({ Json{ { "tick", 10 }, { "luau", "error('boom')" } } }) } });
+			}
+			REQUIRE_MESSAGE(raised.contains("error"), raised.dump());
+			const Json& raisedData = raised["error"]["data"];
+			CHECK(raisedData["errorCode"] == Json("Validation"));
+			REQUIRE_MESSAGE(raisedData.contains("verification"), raisedData.dump());
+			REQUIRE(raisedData["verification"]["expect"].size() == 1);
+			const Json& expectation = raisedData["verification"]["expect"][0];
+			CHECK(expectation["evaluated"] == Json(true));
+			CHECK(expectation["satisfied"] == Json(false));
+			const std::string message = JsonReader(expectation).ReadMember<std::string>("message").value_or("");
+			CHECK(message.find("boom") != std::string::npos);
+			CHECK(JsonReader(raisedData).ReadMember<std::string>("detail").value_or("")
+				== refusal("Assets/Tests/Raised.replay", std::format("expectation 0 at tick 10 (/expect/0/luau) failed: {}", message)));
+			CHECK(JsonReader(raisedData).ReadMember<std::string>("hint").value_or("") == hint);
+			CHECK_FALSE(raisedData.contains("inputCheck"));
+			CHECK_FALSE(ProjectFileExists(fixture, "Assets/Tests/Raised.replay"));
+
+			// Gameplay that quits during the playback (here the expectation at tick 2 asks to) stops it early: its stop reason.
+			CallReplayMethod(fixture, "input.record", Json{ { "action", "start" }, { "restart", true } });
+			CallReplayMethod(fixture, "play.step", Json{ { "ticks", 20 }, { "render", "none" }, { "input", held } });
+			const Json quit = fixture.Request("input.record", Json{ { "action", "stop" }, { "path", "Assets/Tests/Quit.replay" }, { "expect", Json::array({ Json{ { "tick", 2 }, { "luau", "Application.Quit(3); return true" } } }) } });
+			REQUIRE_MESSAGE(quit.contains("error"), quit.dump());
+			const Json& quitData = quit["error"]["data"];
+			CHECK(quitData["errorCode"] == Json("Validation"));
+			REQUIRE_MESSAGE(quitData.contains("verification"), quitData.dump());
+			const Json& stopped = quitData["verification"];
+			CHECK(stopped["passed"] == Json(false));
+			CHECK(stopped["checkpointFailed"] == Json(false));
+			CHECK(stopped["finalTick"] == Json(2));
+			CHECK(stopped["expect"][0]["satisfied"] == Json(true));
+			const std::string stopReason = JsonReader(stopped).ReadMember<std::string>("stopReason").value_or("");
+			CHECK(stopReason.find("the game quit with exit code 3 at tick 2") != std::string::npos);
+			CHECK(JsonReader(quitData).ReadMember<std::string>("detail").value_or("") == refusal("Assets/Tests/Quit.replay", std::format("playback stopped at tick 2: {}", stopReason)));
+			CHECK_FALSE(ProjectFileExists(fixture, "Assets/Tests/Quit.replay"));
+
+			// Three instances raise the same error at ticks 3, 4 and 5 while B is held (each instance once: a faulting instance
+			// is disabled). The stream keeps the one entry at its latest tick, 5; the reason counts every occurrence and names
+			// the first as it appeared.
+			CallReplayMethod(fixture, "play.stop");
+			CallReplayMethod(fixture, "script.write", Json{ { "path", "Assets/Scripts/Faulty.luau" }, { "source", "local Faulty = { Fields = { At = Field.Number(0) } }\n"
+																												  "function Faulty.OnFixedUpdate(self: any, dt: number)\n"
+																												  "\tif Input.IsKeyDown(\"B\") and Time.GetTick() >= self.At then\n"
+																												  "\t\terror(\"pressed too hard\")\n"
+																												  "\tend\n"
+																												  "end\n"
+																												  "return Script.Define(\"Faulty\", Faulty)\n" } });
+			for (const int at : { 3, 4, 5 })
+				CallReplayMethod(fixture, "entity.create", Json{ { "name", std::format("Faulty{}", at) }, { "components", Json{ { "Script", Json{ { "Script", "Assets/Scripts/Faulty.luau" }, { "Fields", Json{ { "At", at } } } } } } } });
+			CallReplayMethod(fixture, "scene.save");
+			{
+				Test::ExpectLog pressed(LogLevel::Error, "pressed too hard");
+				CallReplayMethod(fixture, "input.record", Json{ { "action", "start" } });
+				CallReplayMethod(fixture, "play.step", Json{ { "ticks", 20 }, { "render", "none" }, { "input", Json::array({ Json{ { "tick", 2 }, { "type", "key" }, { "key", "A" }, { "state", "down" } }, Json{ { "tick", 3 }, { "type", "key" }, { "key", "B" }, { "state", "down" } }, Json{ { "tick", 8 }, { "type", "key" }, { "key", "B" }, { "state", "up" } } }) } });
+				const Json repeated = fixture.Request("input.record", Json{ { "action", "stop" }, { "path", "Assets/Tests/Repeated.replay" } });
+				REQUIRE_MESSAGE(repeated.contains("error"), repeated.dump());
+				const Json& repeatedData = repeated["error"]["data"];
+				CHECK(repeatedData["errorCode"] == Json("Validation"));
+				CHECK(repeatedData["verification"]["passed"] == Json(true));
+				CHECK(JsonReader(repeatedData).ReadMember<std::string>("detail").value_or("")
+					== refusal("Assets/Tests/Repeated.replay", "the playback raised 3 script error(s); the first: Assets/Scripts/Faulty.luau:4: pressed too hard (tick 3)"));
+				CHECK_FALSE(ProjectFileExists(fixture, "Assets/Tests/Repeated.replay"));
+				// Three while recording and three by the verification.
+				CHECK(pressed.GetMatchCount() == 6);
+			}
+
+			// An error of OnStart, raised when the verification's session starts, counts too.
+			CallReplayMethod(fixture, "play.stop");
+			CallReplayMethod(fixture, "script.write", Json{ { "path", "Assets/Scripts/Starter.luau" }, { "source", "local Starter = {}\n"
+																												   "function Starter.OnStart(self: any)\n"
+																												   "\terror(\"bad start\")\n"
+																												   "end\n"
+																												   "return Script.Define(\"Starter\", Starter)\n" } });
+			CallReplayMethod(fixture, "entity.create", Json{ { "name", "Starter" }, { "components", Json{ { "Script", Json{ { "Script", "Assets/Scripts/Starter.luau" } } } } } });
+			CallReplayMethod(fixture, "scene.save");
+			{
+				Test::ExpectLog started(LogLevel::Error, "bad start");
+				CallReplayMethod(fixture, "input.record", Json{ { "action", "start" } });
+				CallReplayMethod(fixture, "play.step", Json{ { "ticks", 20 }, { "render", "none" }, { "input", held } });
+				const Json faulted = fixture.Request("input.record", Json{ { "action", "stop" }, { "path", "Assets/Tests/Started.replay" } });
+				REQUIRE_MESSAGE(faulted.contains("error"), faulted.dump());
+				const Json& faultedData = faulted["error"]["data"];
+				CHECK(faultedData["errorCode"] == Json("Validation"));
+				CHECK(JsonReader(faultedData).ReadMember<std::string>("detail").value_or("")
+					== refusal("Assets/Tests/Started.replay", "the playback raised 1 script error(s); the first: Assets/Scripts/Starter.luau:3: bad start (tick 0)"));
+				CHECK_FALSE(ProjectFileExists(fixture, "Assets/Tests/Started.replay"));
+				CHECK(started.GetMatchCount() == 2);
+			}
+		}
+
+		// A1's script-error reason names the verification's first occurrence (PlaySession::GetFirstScriptError). The stream
+		// moves a repeated error behind the others with a new ID, so when two instances of one behaviour fault around another
+		// behaviour's error within one tick, or within OnStart, its first entry is the other error, which the reason used to name.
+		TEST_CASE("ReplayMethods: input.record stop names the first script error of its verification although a repeated error follows another in one tick")
+		{
+			Test::AutomationFixture fixture("RecordFirstScriptError");
+			SaveInputScene(fixture);
+			const auto refusal = [](std::string_view path, std::string_view reason)
+			{
+				return std::format("refusing to write '{}': replayed with its input, the recording does not reproduce itself: {}; nothing was written", path, reason);
+			};
+			const auto writeFault = [&fixture](std::string_view name, std::string_view callback, std::string_view condition, std::string_view message)
+			{
+				CallReplayMethod(fixture, "script.write", Json{ { "path", std::format("Assets/Scripts/{}.luau", name) }, { "source", std::format("local {0} = {{}}\n"
+																																				 "function {0}.{1}(self: any{2})\n"
+																																				 "\tif {3} then\n"
+																																				 "\t\terror(\"{4}\")\n"
+																																				 "\tend\n"
+																																				 "end\n"
+																																				 "return Script.Define(\"{0}\", {0})\n",
+																																		 name, callback, callback == "OnStart" ? "" : ", dt: number", condition, message) } });
+			};
+			const auto createEntities = [&fixture](std::initializer_list<std::pair<std::string_view, std::string_view>> entities)
+			{
+				// Root entities keep their creation order, which is the canonical order their callbacks run in.
+				for (const auto& [name, script] : entities)
+					CallReplayMethod(fixture, "entity.create", Json{ { "name", name }, { "components", Json{ { "Script", Json{ { "Script", std::format("Assets/Scripts/{}.luau", script) } } } } } });
+				CallReplayMethod(fixture, "scene.save");
+			};
+
+			// In tick 3, while B is held, Faulty1, Other and Faulty2 fault in that order: the stream ends with Other's entry
+			// and then Faulty's, moved behind it at tick 3 with a count of 2.
+			writeFault("Faulty", "OnFixedUpdate", "Input.IsKeyDown(\"B\")", "pressed too hard");
+			writeFault("Other", "OnFixedUpdate", "Input.IsKeyDown(\"B\")", "other fault");
+			createEntities({ { "Faulty1", "Faulty" }, { "Other", "Other" }, { "Faulty2", "Faulty" } });
+			{
+				Test::ExpectLog pressed(LogLevel::Error, "pressed too hard");
+				Test::ExpectLog other(LogLevel::Error, "other fault");
+				CallReplayMethod(fixture, "input.record", Json{ { "action", "start" } });
+				CallReplayMethod(fixture, "play.step", Json{ { "ticks", 20 }, { "render", "none" }, { "input", Json::array({ Json{ { "tick", 2 }, { "type", "key" }, { "key", "A" }, { "state", "down" } }, Json{ { "tick", 3 }, { "type", "key" }, { "key", "B" }, { "state", "tap" } } }) } });
+				const Json interleaved = fixture.Request("input.record", Json{ { "action", "stop" }, { "path", "Assets/Tests/Interleaved.replay" } });
+				REQUIRE_MESSAGE(interleaved.contains("error"), interleaved.dump());
+				const Json& data = interleaved["error"]["data"];
+				CHECK(data["errorCode"] == Json("Validation"));
+				CHECK(data["verification"]["passed"] == Json(true));
+				CHECK(JsonReader(data).ReadMember<std::string>("detail").value_or("")
+					== refusal("Assets/Tests/Interleaved.replay", "the playback raised 3 script error(s); the first: Assets/Scripts/Faulty.luau:4: pressed too hard (tick 3)"));
+				CHECK_FALSE(ProjectFileExists(fixture, "Assets/Tests/Interleaved.replay"));
+				// Twice while recording and twice by the verification; Other once in each.
+				CHECK(pressed.GetMatchCount() == 4);
+				CHECK(other.GetMatchCount() == 2);
+			}
+
+			// The same in OnStart, raised when the verification's session starts: Starter1, Second and Starter2, in that order.
+			CallReplayMethod(fixture, "play.stop");
+			writeFault("Starter", "OnStart", "self ~= nil", "bad start");
+			writeFault("Second", "OnStart", "self ~= nil", "second start");
+			createEntities({ { "Starter1", "Starter" }, { "Second", "Second" }, { "Starter2", "Starter" } });
+			{
+				Test::ExpectLog started(LogLevel::Error, "bad start");
+				Test::ExpectLog second(LogLevel::Error, "second start");
+				CallReplayMethod(fixture, "input.record", Json{ { "action", "start" } });
+				CallReplayMethod(fixture, "play.step", Json{ { "ticks", 20 }, { "render", "none" }, { "input", Json::array({ Json{ { "tick", 2 }, { "type", "key" }, { "key", "A" }, { "state", "down" } } }) } });
+				const Json faulted = fixture.Request("input.record", Json{ { "action", "stop" }, { "path", "Assets/Tests/StartedTwice.replay" } });
+				REQUIRE_MESSAGE(faulted.contains("error"), faulted.dump());
+				const Json& data = faulted["error"]["data"];
+				CHECK(data["errorCode"] == Json("Validation"));
+				CHECK(data["verification"]["passed"] == Json(true));
+				CHECK(JsonReader(data).ReadMember<std::string>("detail").value_or("")
+					== refusal("Assets/Tests/StartedTwice.replay", "the playback raised 3 script error(s); the first: Assets/Scripts/Starter.luau:4: bad start (tick 0)"));
+				CHECK_FALSE(ProjectFileExists(fixture, "Assets/Tests/StartedTwice.replay"));
+				CHECK(started.GetMatchCount() == 4);
+				CHECK(second.GetMatchCount() == 2);
+			}
 		}
 	}
 

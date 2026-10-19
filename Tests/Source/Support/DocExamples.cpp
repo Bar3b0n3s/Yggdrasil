@@ -295,8 +295,6 @@ namespace Engine {
 			StubModuleReader reader(state.Modules);
 			for (ScriptDiagnostic& diagnostic : state.Checker->CheckScript({ .Path = root, .Source = combined, .Modules = &reader }))
 			{
-				if (diagnostic.Severity != DiagnosticSeverity::Error)
-					continue;
 				DocExampleFinding finding;
 				if (diagnostic.File != block.Path)
 				{

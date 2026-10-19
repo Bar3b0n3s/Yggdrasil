@@ -203,6 +203,7 @@ namespace Engine {
 		std::optional<int32_t> QuitRequest{};
 		bool FatalStop = false;
 		std::optional<ScriptError> FatalError{}; // set with FatalStop (GetFatalError)
+		std::optional<ScriptError> FirstError{}; // the session's first published script error (GetFirstScriptError)
 		bool ReplacingScene = false;
 		DebugDrawList DebugDraw{};
 		Scope<Scene> PendingScene{};
@@ -400,6 +401,8 @@ namespace Engine {
 	void PlaySession::State::OnScriptError(const ScriptError& error, bool fatal)
 	{
 		const ScriptError published = Errors.Add(error);
+		if (!FirstError.has_value())
+			FirstError = published;
 		if (Host != nullptr)
 			Host->OnScriptError(published, fatal);
 		if (fatal)
@@ -1092,6 +1095,11 @@ namespace Engine {
 	const ScriptErrorStream& PlaySession::GetScriptErrors() const
 	{
 		return m_State->Errors;
+	}
+
+	const std::optional<ScriptError>& PlaySession::GetFirstScriptError() const
+	{
+		return m_State->FirstError;
 	}
 
 	std::optional<int32_t> PlaySession::GetQuitRequest() const

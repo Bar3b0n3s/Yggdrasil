@@ -1,6 +1,6 @@
 # Backlog
 
-Status: index, not authoritative; current after M16 (2026-10-15). It gathers in one place the engine and editor work that v1 does not do, and names the document that decides each item: § refers to `Docs/Architecture.md`, "ADR NNNN" to `Docs/Decisions/NNNN-*.md`. Where this file and its source disagree, the source wins and this file is fixed. A change that adds, closes or reschedules an item (an Appendix C row, an ADR's deferral, accepted limit, follow-up or watch item) updates this file in the same change (`Docs/ReviewChecklist.md` §9).
+Status: index, not authoritative; current after M16 (2026-10-15) and the M17 contract, ADR 0027 (2026-10-18). It gathers in one place the engine and editor work that v1 does not do, and names the document that decides each item: § refers to `Docs/Architecture.md`, "ADR NNNN" to `Docs/Decisions/NNNN-*.md`. Where this file and its source disagree, the source wins and this file is fixed. A change that adds, closes or reschedules an item (an Appendix C row, an ADR's deferral, accepted limit, follow-up or watch item) updates this file in the same change (`Docs/ReviewChecklist.md` §9).
 
 ## 1. Planned milestones
 
@@ -28,7 +28,13 @@ Decisions left open with a default in force. Reopening one needs an ADR.
 | Export | Pak compression and reachability pruning | uncompressed paks holding everything under `Assets/` minus the excludes | Appendix C, §7.6, §14.1 |
 | Export | Stripping Luau's compiler objects from Dist | linked but unreachable from game input; stripping them needs a vendored-source edit or a Release/Dist behaviour difference | Appendix C, §14.4; ADR 0025 decision 5 |
 | Export | Build versioning | `EngineVersion` is the constant `0.1.0` in `Game.json`, `Engine.pak`, replays and session files | Appendix C, §14.1; ADR 0025 decision 6 |
-| Automation | Expectations in autopilot recordings (`test.run {record, expect}`) | `test.run {record}` writes none: an autopilot replay proves its play through its state-hash checkpoints, and expectations stay with `input.record`'s `expect`; M17 at the earliest | ADR 0026 friction F10 |
+| Automation | Expectations in recordings made by `test.run {record}` (`test.run {record, expect}`) | `test.run {record}` writes none: the replay's state-hash checkpoints and the hashed HUD state prove the play, the recording suite's own `Test.Expect` asserts it at record time, and `input.record`'s `expect` stays available | ADR 0026 friction F10; ADR 0027 decision 12 |
+| Automation | The input check's optional warning when only the final hash does not depend on the input (it needs the run without input to continue past a failed checkpoint) | not done: the input check keeps its one rule | ADR 0026 friction F29; ADR 0027 decision 12 |
+| Automation | Entity paths in component data: an `EntityRef` value (a component field, a script's `Field.Entity()`) resolved from a path or unique prefix, as method params are | an `EntityRef` in component data keeps the handle pattern (ADR 0010 decision 32) and takes the 16-hex id; a path there is refused with a hint to use `{"$ref": "<op>.entity.id"}` in a batch or the id `entity.get` returns | ADR 0027 decision 12 |
+| Automation | Named `$ref` (an op named instead of its index) | positional op indices; the docs create the assets in a first batch and refer to them by path, name entities in entity params by path, and advise `dryRun: true` first | ADR 0027 decision 12 |
+| Automation | Reading a replay's input events back through automation | every demo replay comes from a recording suite (`test.run {record}`), whose input plan `script.read` shows; a replay made with `input.record` is re-recorded by planning its input again | ADR 0027 decision 12 |
+| Automation | A builder-side Dist hash self-check (a testing export that runs `--feature-test` and reports its hashes) | the games suite's Dist half compares the testing Dist export's hashes with the editors' | ADR 0027 decision 12 |
+| Automation | Screenshots kept outside `Library/Automation/Out/`, which the next editor session prunes | the lead copies the look screenshots to `bin/Reviews/M17-Look/` before the next editor launch on the project (ADR 0027 decision 9) | ADR 0027 decision 12 |
 | Testing | Provenance of FeatureTest's 24 copied-in M9 golden files | no `Provenance.json` entries; a reviewed regeneration through one recorded editor run is needed before any audit targets FeatureTest | Appendix C, §15.4; ADR 0025 decision 7 |
 | Platform | Native Wayland | X11, including XWayland sessions | Appendix C, §16 |
 
@@ -74,6 +80,9 @@ Limits accepted for v1, with no work planned. Reopening one needs an ADR.
 - Device loss, GPU out-of-memory and GPU hangs are fatal: autosave in the editor, a crash report and exit code 4, with no recovery (§8.14).
 - A material that leaves the view and returns gets a new binding set (ADR 0013 decision 25; ADR 0025 decision 18).
 - Golden images exist for the `nvidia-61x` device class only; every other device class runs them in smoke mode (§15.4; ADR 0013 decision 25).
+- `input.record`'s `stop` writes a recording without input events as recorded, with no verification, unlike `test.run {record}`; its expectations and any `script.eval` write during it are first checked by the `input.replay {verify: true, strictHash: true}` the docs require after every recording (§13.6; ADR 0027 decision 12).
+- `input.record`'s verification of a recording with input events counts the script errors raised up to its final tick, not those raised only when its session's scripts are torn down (`OnDestroy`), because a refused verification leaves its session live; `test.run`, which stops a replay's scripts before it reads their errors, counts them when it plays the replay (§13.6; ADR 0027 decision 12).
+- Two staged game projects whose `.eproj` files share a file stem are not refused: their games steps and reports (`games <stem> ...`, `Games-<stem>-...`) collide, and two whose manifests share a `Name` share the Dist half's package directory (`bin/Exports/Dist/<Name>`); two `.eproj` files in one directory still fail the games suite (ADR 0027 decision 12; ADR 0026 R13).
 
 ## 7. Non-goals for v1
 

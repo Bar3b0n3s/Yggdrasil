@@ -59,6 +59,11 @@ namespace Engine {
 		// How deep compact schemas inline struct definitions before they show a nested struct as a free-form object.
 		constexpr uint32_t MaxInlineDepth = 32;
 		constexpr std::string_view DefsPrefix = "#/$defs/";
+		// Docs/Decisions/0027-m17-contract.md "Frozen interfaces / A4": the issue an EntityRef value in component data gets
+		// when it is a string but not a 16-hex id (the strict reader's message), and its hint.
+		constexpr std::string_view EntityReferenceMessage = "expected a 16-digit hex UUID string";
+		constexpr std::string_view EntityReferenceHint = "an Entity value in component data takes the entity's 16-hex id; use {\"$ref\": \"<op>.entity.id\"} in a batch or the "
+														 "id entity.get returns";
 
 		[[maybe_unused]] [[nodiscard]] static bool IsLowerAlpha(char character)
 		{
@@ -304,8 +309,10 @@ namespace Engine {
 
 		// Rewrites every enum spelling `value` holds that `type` recognizes, ignoring ASCII case, to its registry name
 		// (convention 6), and, with a resolver, every asset reference that is not a handle to the handle it names
-		// (convention 13), collecting one issue per reference that does not resolve. Values of the wrong JSON type are left
-		// for the strict reader to report.
+		// (convention 13), collecting one issue per reference that does not resolve. It also collects one issue per EntityRef
+		// value in component data that is a string but not a 16-hex id (A4): component data takes the entity's id (ADR 0010
+		// decision 32), unlike an entity that a method's own params name (§13.4). Values of the wrong JSON type are left for
+		// the strict reader to report.
 		class ParamsCanonicalizer
 		{
 		public:
@@ -335,11 +342,15 @@ namespace Engine {
 				}
 			}
 
-			// The asset references that did not resolve with NotFound or InvalidArgument, one issue each.
+			// The asset references that did not resolve with NotFound or InvalidArgument and the EntityRef values in component
+			// data that are not ids, one issue each.
 			[[nodiscard]] std::vector<ErrorIssue> TakeIssues() { return std::move(m_Issues); }
 			// True when every reference that did not resolve names no asset (NotFound), so the call is NotFound rather than
-			// InvalidParams.
+			// InvalidParams; an EntityRef issue is never NotFound.
 			[[nodiscard]] bool AllNotFound() const { return m_AllNotFound; }
+			// True when there are issues (before TakeIssues) and each is an EntityRef value in component data, so the error
+			// carries their hint.
+			[[nodiscard]] bool OnlyEntityReferenceIssues() const { return !m_Issues.empty() && m_EntityReferenceIssues == m_Issues.size(); }
 			// The first resolver error of another code (InvalidState without a project, a refresh's Io), located at its value;
 			// Invoke returns it unchanged, so the code is the one the host gave.
 			[[nodiscard]] std::optional<Error> TakeHostError() { return std::move(m_HostError); }
@@ -382,6 +393,9 @@ namespace Engine {
 					case FieldType::Variant:
 						CanonicalizeVariant(field, value, owner, variantDepth, pointer);
 						break;
+					case FieldType::EntityRef:
+						CheckEntityReference(value, pointer);
+						break;
 					case FieldType::Bool:
 					case FieldType::Int32:
 					case FieldType::UInt32:
@@ -394,9 +408,22 @@ namespace Engine {
 					case FieldType::Color4:
 					case FieldType::Bool3:
 					case FieldType::String:
-					case FieldType::EntityRef:
 						break;
 				}
+			}
+
+			// A4: inside component data, a string EntityRef value must be a 16-hex id; null, an id and the other JSON types
+			// (which the strict reader reports) pass.
+			void CheckEntityReference(const Json& value, const std::string& pointer)
+			{
+				if (!m_InComponentData || !value.is_string())
+					return;
+				const Result<std::string> text = JsonReader(value).ReadString();
+				if (!text || UUID::FromString(*text).has_value())
+					return;
+				m_AllNotFound = false;
+				++m_EntityReferenceIssues;
+				m_Issues.push_back(ErrorIssue{ .JsonPointer = pointer, .Message = std::string(EntityReferenceMessage), .Hint = std::string(EntityReferenceHint), .Suggestions = {} });
 			}
 
 			static void CanonicalizeEnum(const TypeInfo& type, Json& value)
@@ -453,7 +480,11 @@ namespace Engine {
 				ResolveContext nested;
 				nested.Registry = m_Types;
 				nested.Schemas = owner.Schemas;
+				// A component value (convention 10) and everything inside it, script fields included, is component data.
+				const bool outer = m_InComponentData;
+				m_InComponentData = outer || field.GetResolver() == &ResolveComponentValue;
 				CanonicalizeValue(resolved.GetType(), resolved, value, nested, variantDepth + 1, pointer);
+				m_InComponentData = outer;
 			}
 		private:
 			const TypeRegistry* m_Types = nullptr;
@@ -461,8 +492,10 @@ namespace Engine {
 			const IFieldSchemaSource* m_Schemas = nullptr; // borrowed from the invocation's pinned snapshot
 			std::vector<ErrorIssue> m_Issues;
 			std::optional<Error> m_HostError;
+			size_t m_EntityReferenceIssues = 0; // the issues of m_Issues that are EntityRef values (CheckEntityReference)
 			bool m_AllNotFound = true;
 			bool m_NeedsFieldSchemas = false;
+			bool m_InComponentData = false; // the value being canonicalized is inside a component value
 		};
 
 		// Replaces every {"$ref": "#/$defs/<Name>"} inside `node` by the definition from `definitions` (keeping the referring
@@ -733,6 +766,7 @@ namespace Engine {
 			// A host's own error (InvalidState, Io) keeps its code; it outranks the references' NotFound and InvalidParams.
 			if (std::optional<Error> hostError = canonicalizer.TakeHostError(); hostError.has_value())
 				return std::unexpected(std::move(*hostError));
+			const bool entityReferencesOnly = canonicalizer.OnlyEntityReferenceIssues();
 			std::vector<ErrorIssue> unresolved = canonicalizer.TakeIssues();
 			if (!unresolved.empty() && canonicalizer.AllNotFound())
 			{
@@ -744,7 +778,13 @@ namespace Engine {
 						.WithIssues(notFound.GetIssues()));
 			}
 			if (!unresolved.empty())
-				return std::unexpected(Utils::MakeParamsError(method.Specification.Name, std::move(unresolved)));
+			{
+				Error invalid = Utils::MakeParamsError(method.Specification.Name, std::move(unresolved));
+				// Several EntityRef issues share one hint, which MakeParamsError gives only to a single issue's error (A4).
+				if (entityReferencesOnly)
+					return std::unexpected(std::move(invalid).WithHint(std::string(Utils::EntityReferenceHint)));
+				return std::unexpected(std::move(invalid));
+			}
 			context.m_Request.Params = std::move(resolved);
 			return canonicalizer.NeedsFieldSchemas();
 		};

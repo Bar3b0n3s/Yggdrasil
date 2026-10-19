@@ -34,7 +34,7 @@ All modes; Runtime|Test; pure/read.
 
 `() -> boolean`
 
-True in the editor; false in the standalone Runtime.
+True in the editor; false in the standalone Runtime. Gameplay that branches on it splits the editor's and the export's state hashes, which the games suite compares.
 
 All modes; Runtime|Test; pure/read.
 
@@ -42,7 +42,7 @@ All modes; Runtime|Test; pure/read.
 
 `() -> boolean`
 
-Returns the current native-window focus state.
+Returns the current native-window focus state. Nondeterministic: it follows the host window in every session, lockstep, recording, replay and test sessions included, so never base gameplay on it.
 
 All modes; Runtime|Test; pure/read.
 
@@ -208,7 +208,7 @@ All modes; LoadTime|Runtime|Test; pure/read.
 
 `(type: string) -> FieldDescriptor`
 
-Declare an asset reference restricted to the named asset type, with a null default.
+Declare an asset reference restricted to the named AssetType (Scene, Prefab, Mesh, Material, Texture, Environment, AudioClip for imported audio and .sfx sound effects, Script, Font or Replay), with a null default; any other name fails the import.
 
 All modes; LoadTime|Runtime|Test; pure/read.
 
@@ -350,7 +350,7 @@ All modes; Runtime|Test; pure/read.
 
 `(name: string) -> boolean`
 
-Returns a configured action's press edge.
+Returns whether a configured action was pressed since the previous latch of the current phase: in OnFixedUpdate since the previous tick, in OnUpdate and OnLateUpdate since the previous frame. A press and release between two ticks reports both edges with IsActionDown false, and a frame that runs several ticks reports the edge on its first tick only; an unknown name raises INPUT_UNKNOWN_ACTION.
 
 All modes; Runtime|Test; pure/read.
 
@@ -358,7 +358,7 @@ All modes; Runtime|Test; pure/read.
 
 `(name: string) -> boolean`
 
-Returns a configured action's release edge.
+Returns whether a configured action was released since the previous latch of the current phase: in OnFixedUpdate since the previous tick, in OnUpdate and OnLateUpdate since the previous frame. A press and release between two ticks reports both edges with IsActionDown false, and a frame that runs several ticks reports the edge on its first tick only; an unknown name raises INPUT_UNKNOWN_ACTION.
 
 All modes; Runtime|Test; pure/read.
 
@@ -742,7 +742,7 @@ All modes; Runtime|Test; mutates.
 
 `(seed: number) -> RandomGenerator`
 
-Creates an independent local stream; allowed in read-only evaluation.
+Creates an independent local stream; allowed in read-only evaluation. Its state is a script value outside the state hash, and a constant seed repeats the same sequence in every session: seed it from Random.Integer (Random.New(Random.Integer(0, 2147483647))) to follow the session seed. Not available at a module's top level.
 
 All modes; Runtime|Test; pure/read.
 
@@ -1046,7 +1046,7 @@ All modes; Test; pure/read.
 
 `() -> string`
 
-Read the canonical simulated state hash: the world (every entity with its serialized components, the tick, the session's Random state, the id draws and every body's physics state), never script tables, audio or input.
+Read the canonical simulated state hash: the world (every entity with its serialized components, the tick, the session's Random state, the id draws and every body's physics state), never script tables, audio or input. It includes the tick, so two reads at different ticks always differ: compare two runs with input.replay's stateHash instead.
 
 All modes; Test; pure/read.
 
@@ -1142,7 +1142,7 @@ All modes; Test; pure/read.
 
 `(predicate: () -> boolean, timeoutTicks: number) -> ()`
 
-Wait for a predicate through a bounded simulation deadline.
+Evaluate the predicate now and after every following tick until it returns true; it must return a boolean (anything else is a script error). Still false after timeoutTicks ticks, the case fails with "Test.WaitUntil exceeded its tick limit" at this call.
 
 All modes; Test; pure/read.
 
@@ -3086,7 +3086,7 @@ All modes; Runtime|Test; pure/read; setter mutates.
 
 `number`
 
-The text height in pixels at the 1080p reference resolution.
+The em size. Screen space: pixels at the 1080p reference resolution, scaled by the viewport's height / 1080. World space: an em of Size / 100 metres (100 world-text pixels per metre) before the entity's scale, in the entity's local XY plane or facing the camera with Billboard, so the default 32 is 0.32 m.
 
 All modes; Runtime|Test; pure/read; setter mutates.
 

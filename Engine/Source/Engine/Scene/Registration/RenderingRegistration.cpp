@@ -225,7 +225,10 @@ namespace Engine {
 			.Version(1)
 			.Field("Text", &TextComponent::Text, "The UTF-8 text; a line feed starts a new line.")
 			.Field("Font", &TextComponent::Font, "The font; null uses the default font.")
-			.Field("Size", &TextComponent::Size, "The text height in pixels at the 1080p reference resolution.",
+			.Field("Size", &TextComponent::Size,
+				"The em size. Screen space: pixels at the 1080p reference resolution, scaled by the viewport's height / 1080. World space: "
+				"an em of Size / 100 metres (100 world-text pixels per metre) before the entity's scale, in the entity's local XY plane or "
+				"facing the camera with Billboard, so the default 32 is 0.32 m.",
 				{ .Min = Utils::MinTextSize, .Max = Utils::MaxTextSize, .Unit = "px" })
 			.ColorField("Color", &TextComponent::Color, "The linear text colour with opacity in the fourth component.", Utils::ColorRange())
 			.Field("Space", &TextComponent::Space, "Whether the text is placed on the screen or in the world.")

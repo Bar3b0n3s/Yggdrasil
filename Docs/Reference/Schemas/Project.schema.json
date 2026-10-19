@@ -232,7 +232,7 @@
 			"type": "object",
 			"properties": {
 				"BuildScenes": {
-					"description": "Project-relative scenes packed into the export.",
+					"description": "Project-relative scenes the export loads strictly beside StartScene (each must be a registered scene file that loads strictly). They do not decide what ships: Data/Game.pak holds every registered asset below Assets/ except the Export.Exclude globs.",
 					"type": "array",
 					"items": {
 						"type": "string"

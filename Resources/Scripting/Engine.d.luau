@@ -761,7 +761,7 @@ declare extern type Text with
 	Offset: vector
 	-- The point of the text block that sits on the anchor (Screen space) or at the entity's origin (World space), normalized to the block: (0, 0) is its top-left corner and (1, 1) its bottom-right. [All modes; Runtime|Test; pure/read; setter mutates]
 	Pivot: vector
-	-- The text height in pixels at the 1080p reference resolution. [All modes; Runtime|Test; pure/read; setter mutates]
+	-- The em size. Screen space: pixels at the 1080p reference resolution, scaled by the viewport's height / 1080. World space: an em of Size / 100 metres (100 world-text pixels per metre) before the entity's scale, in the entity's local XY plane or facing the camera with Billboard, so the default 32 is 0.32 m. [All modes; Runtime|Test; pure/read; setter mutates]
 	Size: number
 	-- Whether the text is placed on the screen or in the world. [All modes; Runtime|Test; pure/read; setter mutates]
 	Space: TextSpace
@@ -819,9 +819,9 @@ declare Application: {
 	GetVersion: () -> string,
 	-- Returns the size of the session's view in view coordinates as vector(width, height, 0): the game view's image in ordinary play, the project's Window.Width x Window.Height in lockstep, recording, replay and test sessions. [All modes; Runtime|Test; pure/read]
 	GetWindowSize: () -> vector,
-	-- True in the editor; false in the standalone Runtime. [All modes; Runtime|Test; pure/read]
+	-- True in the editor; false in the standalone Runtime. Gameplay that branches on it splits the editor's and the export's state hashes, which the games suite compares. [All modes; Runtime|Test; pure/read]
 	IsEditor: () -> boolean,
-	-- Returns the current native-window focus state. [All modes; Runtime|Test; pure/read]
+	-- Returns the current native-window focus state. Nondeterministic: it follows the host window in every session, lockstep, recording, replay and test sessions included, so never base gameplay on it. [All modes; Runtime|Test; pure/read]
 	IsFocused: () -> boolean,
 	-- Returns whether the host has no native window. [All modes; Runtime|Test; pure/read]
 	IsHeadless: () -> boolean,
@@ -873,7 +873,7 @@ declare Debug: {
 declare Field: {
 	-- Declare an empty array whose element keeps its complete nested field schema. [All modes; LoadTime|Runtime|Test; pure/read]
 	Array: (element: FieldDescriptor) -> FieldDescriptor,
-	-- Declare an asset reference restricted to the named asset type, with a null default. [All modes; LoadTime|Runtime|Test; pure/read]
+	-- Declare an asset reference restricted to the named AssetType (Scene, Prefab, Mesh, Material, Texture, Environment, AudioClip for imported audio and .sfx sound effects, Script, Font or Replay), with a null default; any other name fails the import. [All modes; LoadTime|Runtime|Test; pure/read]
 	Asset: (type: string) -> FieldDescriptor,
 	-- Declare a boolean; the omitted default is false. [All modes; LoadTime|Runtime|Test; pure/read]
 	Bool: (default: boolean?, options: FieldOptions?) -> FieldDescriptor,
@@ -911,9 +911,9 @@ declare Input: {
 	GetScrollDelta: () -> vector,
 	-- Returns a configured action's held state; an unknown name raises INPUT_UNKNOWN_ACTION. [All modes; Runtime|Test; pure/read]
 	IsActionDown: (name: string) -> boolean,
-	-- Returns a configured action's press edge. [All modes; Runtime|Test; pure/read]
+	-- Returns whether a configured action was pressed since the previous latch of the current phase: in OnFixedUpdate since the previous tick, in OnUpdate and OnLateUpdate since the previous frame. A press and release between two ticks reports both edges with IsActionDown false, and a frame that runs several ticks reports the edge on its first tick only; an unknown name raises INPUT_UNKNOWN_ACTION. [All modes; Runtime|Test; pure/read]
 	IsActionPressed: (name: string) -> boolean,
-	-- Returns a configured action's release edge. [All modes; Runtime|Test; pure/read]
+	-- Returns whether a configured action was released since the previous latch of the current phase: in OnFixedUpdate since the previous tick, in OnUpdate and OnLateUpdate since the previous frame. A press and release between two ticks reports both edges with IsActionDown false, and a frame that runs several ticks reports the edge on its first tick only; an unknown name raises INPUT_UNKNOWN_ACTION. [All modes; Runtime|Test; pure/read]
 	IsActionReleased: (name: string) -> boolean,
 	-- Returns a gamepad button's held state. [All modes; Runtime|Test; pure/read]
 	IsGamepadButtonDown: (index: number, button: GamepadButton) -> boolean,
@@ -1017,7 +1017,7 @@ declare Random: {
 	Choice: <T>(array: {T}) -> T,
 	-- Uniform integer in inclusive bounds, each within the exact-number integer range. [All modes; Runtime|Test; mutates]
 	Integer: (min: number, max: number) -> number,
-	-- Creates an independent local stream; allowed in read-only evaluation. [All modes; Runtime|Test; pure/read]
+	-- Creates an independent local stream; allowed in read-only evaluation. Its state is a script value outside the state hash, and a constant seed repeats the same sequence in every session: seed it from Random.Integer (Random.New(Random.Integer(0, 2147483647))) to follow the session seed. Not available at a module's top level. [All modes; Runtime|Test; pure/read]
 	New: (seed: number) -> RandomGenerator,
 	-- Uniform in [min,max); defaults to [0,1), one argument is the maximum. Equal bounds still consume one draw. [All modes; Runtime|Test; mutates]
 	Number: (min: number?, max: number?) -> number,
@@ -1105,7 +1105,7 @@ declare Test: {
 	GetLastExtraction: () -> TestExtraction,
 	-- Read occurrences newer than an exclusive error cursor; claimed errors remain visible. The VM keeps the 256 distinct errors with the latest occurrences. [All modes; Test; pure/read]
 	GetScriptErrors: (since: number?) -> {ScriptError},
-	-- Read the canonical simulated state hash: the world (every entity with its serialized components, the tick, the session's Random state, the id draws and every body's physics state), never script tables, audio or input. [All modes; Test; pure/read]
+	-- Read the canonical simulated state hash: the world (every entity with its serialized components, the tick, the session's Random state, the id draws and every body's physics state), never script tables, audio or input. It includes the tick, so two reads at different ticks always differ: compare two runs with input.replay's stateHash instead. [All modes; Test; pure/read]
 	GetStateHash: () -> string,
 	-- Queue a named button state or analog value (with a nil or Down state) for the next unapplied input tick. A button stays down until an Up (Tap releases it on the next tick), and an analog value holds on every later tick until another value is injected for the action (0 releases it). [All modes; Test; mutates]
 	InjectAction: (name: string, state: InputEventState?, value: number?) -> (),
@@ -1125,7 +1125,7 @@ declare Test: {
 	Suite: (name: string, body: () -> (), options: TestSuiteOptions?) -> TestSuite,
 	-- Yield a test thread for simulation ticks. [All modes; Test; pure/read]
 	WaitTicks: (ticks: number) -> (),
-	-- Wait for a predicate through a bounded simulation deadline. [All modes; Test; pure/read]
+	-- Evaluate the predicate now and after every following tick until it returns true; it must return a boolean (anything else is a script error). Still false after timeoutTicks ticks, the case fails with "Test.WaitUntil exceeded its tick limit" at this call. [All modes; Test; pure/read]
 	WaitUntil: (predicate: () -> boolean, timeoutTicks: number) -> (),
 }
 

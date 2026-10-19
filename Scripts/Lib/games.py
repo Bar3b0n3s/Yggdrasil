@@ -1,6 +1,6 @@
 """The demo game projects and the evaluation helpers of the games suite (Docs/Architecture.md §15.1 T5, §15.8, §13.12;
-Roadmap M16 to M18; Docs/Decisions/0026-m16-contract.md decision 7, stream B), shared by Scripts/Test.py's games suite
-and Scripts/AuditProvenance.py --demos.
+Roadmap M16 to M18; Docs/Decisions/0026-m16-contract.md decision 7, stream B; Docs/Decisions/0027-m17-contract.md
+decision 4, stream B), shared by Scripts/Test.py's games suite and Scripts/AuditProvenance.py --demos.
 
 A game project is a directory directly below one of GAME_PROJECT_ROOTS whose root holds exactly one *.eproj, except
 EXCLUDED_PROJECTS: Projects/FeatureTest is covered by the feature, export and determinism suites and never audited (ADR
@@ -22,7 +22,15 @@ decides input independence everywhere (Docs/Architecture.md §13.6; the recordin
 {record} apply it too): a replay is input-independent when its input-free run passes verification (every checkpoint,
 the final state hash, every expectation), whatever script errors that run raised. A game also needs at least one test
 suite (evaluate_run) and at least one committed replay with input events (check_replay_acceptance), as the demo
-acceptance of Roadmap M16 to M18 asks.
+acceptance of Roadmap M16 to M18 asks, and the build settings that acceptance names from M17 on, "StartScene and
+Export.BuildScenes set", with Export.BuildScenes listing StartScene (check_build_settings, the first check of each
+editor half; ADR 0027 decision 4, B1).
+
+A GameProject's name is its .eproj's file stem, which names the suite's steps and reports only. The exporter names the
+package's executable and its testing user data after the project's Name (ProjectSettings::Name), and the Runtime names
+its log after the executable's stem (Docs/Architecture.md §4.4: Logs/<exe>.log), so the Dist half reads that Name from
+the testing export's manifest (read_game_name; ADR 0027 decision 4, B2) and takes the executable from project.export's
+result.
 """
 
 from __future__ import annotations
@@ -57,6 +65,24 @@ REPORT_PREFIX = "Games"
 UPGRADE_COMMAND = "Editor --headless --project {project} --upgrade"
 
 PROJECT_FILE_SUFFIX = ".eproj"
+PROJECT_FORMAT = "Project"
+# The package manifest of an export (Engine/Project/GameManifest.h: GameManifest::FileName and FormatName), at the
+# package's root or, on macOS, in the bundle's Contents/Resources (Exporter.cpp: GetPackageResources).
+GAME_MANIFEST_FILE = "Game.json"
+GAME_MANIFEST_FORMAT = "GameManifest"
+# What a game's Name never holds, since the package directory, its executable and the testing user-data folder are
+# named after it (Engine/Platform/Paths.cpp: ValidateAppName refuses these characters and the relative folders "." and
+# "..").
+FORBIDDEN_NAME_CHARACTERS = '<>:"/\\|?*'
+RELATIVE_FOLDER_NAMES = (".", "..")
+# The failure lines of check_build_settings (ADR 0027 decision 4, B1, "Frozen interfaces"): the demo acceptance's rule
+# (Roadmap M17 and M18) and the demos' convention that Export.BuildScenes lists StartScene.
+BUILD_SETTINGS_RULE = "(Roadmap M17 and M18: StartScene and Export.BuildScenes set)"
+START_SCENE_EMPTY = f"StartScene is empty: set it to the scene the game starts with {BUILD_SETTINGS_RULE}"
+BUILD_SCENES_EMPTY = ("Export.BuildScenes is empty: list the scenes the export must load strictly, StartScene "
+                      f"included {BUILD_SETTINGS_RULE}")
+START_SCENE_NOT_LISTED = ("Export.BuildScenes does not list the StartScene '{scene}': add it (ADR 0027 decision 4: the "
+                          "demos' convention)")
 REPLAY_FILE_SUFFIX = ".replay"
 ASSETS_DIRECTORY = "Assets"
 GIT_TIMEOUT_SECONDS = 120.0
@@ -71,7 +97,9 @@ class GameProject:
 
     directory: Path  # absolute
     project_file: Path  # directory / "<name>.eproj"
-    name: str  # the .eproj's stem: the exported executable's name and the testing user-data folder's
+    # The .eproj's file stem, which names the suite's steps and reports only: the exported package, its executable and
+    # testing user data take the project's Name (read_game_name), whatever the stem, and the log the executable's stem.
+    name: str
 
 
 @dataclasses.dataclass(frozen=True)
@@ -169,14 +197,22 @@ def _read_json_object(path: Path, what: str) -> dict[str, Any]:
     return document
 
 
+def _read_project(project_file: Path) -> tuple[str, dict[str, Any]]:
+    """(the display path, the document) of the .eproj `project_file`; ValueError naming the file for one that cannot be
+    read or is not a project file's JSON object."""
+    name = paths.display_path(project_file)
+    document = _read_json_object(project_file, name)
+    if document.get("Format") != PROJECT_FORMAT:
+        raise ValueError(f"{name}: not a project file (its Format is {document.get('Format')!r}, not "
+                         f"'{PROJECT_FORMAT}')")
+    return name, document
+
+
 def read_testing(project_file: Path) -> TestingSettings:
     """The Testing settings of the .eproj `project_file`: each Testing.Suites entry's Script, Scene and Modes (absent
     Modes are DEFAULT_SUITE_MODES) and Testing.Replays, absent members read as empty. Raises ValueError naming the file
     for a document that is not a .eproj JSON object, or a member of the wrong type."""
-    name = paths.display_path(project_file)
-    document = _read_json_object(project_file, name)
-    if document.get("Format") != "Project":
-        raise ValueError(f"{name}: not a project file (its Format is {document.get('Format')!r}, not 'Project')")
+    name, document = _read_project(project_file)
     testing = document.get("Testing", {})
     if not isinstance(testing, dict):
         raise ValueError(f"{name}: Testing must be an object")
@@ -230,19 +266,52 @@ def check_build_settings(project_file: Path) -> list[str]:
     lines first among the half's failures), so PreCommit's Debug half catches it. Raises ValueError naming the file for
     a file that cannot be read, a document that is not a .eproj JSON object (Format "Project"), a StartScene that is not
     a string, an Export that is not an object or an Export.BuildScenes that is not an array of strings."""
-    raise NotImplementedError("contract stub: games (ADR 0027 decision 4, B1, stream B)")
+    name, document = _read_project(project_file)
+    start_scene = document.get("StartScene", "")
+    if not isinstance(start_scene, str):
+        raise ValueError(f"{name}: StartScene must be a string")
+    export = document.get("Export", {})
+    if not isinstance(export, dict):
+        raise ValueError(f"{name}: Export must be an object")
+    build_scenes = export.get("BuildScenes", [])
+    if not isinstance(build_scenes, list) or not all(isinstance(scene, str) for scene in build_scenes):
+        raise ValueError(f"{name}: Export.BuildScenes must be an array of strings")
+    failures: list[str] = []
+    if not start_scene:
+        failures.append(START_SCENE_EMPTY)
+    if not build_scenes:
+        failures.append(BUILD_SCENES_EMPTY)
+    if start_scene and build_scenes and start_scene not in build_scenes:
+        failures.append(START_SCENE_NOT_LISTED.format(scene=start_scene))
+    return failures
 
 
 def read_game_name(path: Path) -> str:
     """The Name of the game whose package manifest (Game.json, Format "GameManifest", Engine/Project/GameManifest.h)
-    or project file (.eproj, Format "Project") is `path`: the name the exporter gives the executable, the testing
-    user-data folder and its log (Exporter.cpp names them after ProjectSettings::Name), whatever the .eproj's file stem
-    (Docs/Decisions/0027-m17-contract.md decision 4, B2, stream B). The Dist half reads it, before it installs the
-    package to exports.package_directory(EXPORTED_CONFIGURATION, <Name>), from the testing export's manifest:
+    or project file (.eproj, Format "Project") is `path`: the name the exporter gives the executable and the testing
+    user-data folder (Exporter.cpp names them after ProjectSettings::Name; the log in that folder takes the
+    executable's stem, Docs/Architecture.md §4.4), whatever the .eproj's file stem (Docs/Decisions/0027-m17-contract.md
+    decision 4, B2, stream B). The Dist half reads it, before it installs the package to
+    exports.package_directory(EXPORTED_CONFIGURATION, <Name>), from the testing export's manifest:
     <outputDirectory>/Game.json, or on macOS the bundle's Contents/Resources/Game.json beside the Contents/MacOS folder
     of project.export's `executable`. Raises ValueError naming the file for a file that cannot be read, a document that
-    is neither a GameManifest nor a Project JSON object, or one whose Name is not a non-empty string."""
-    raise NotImplementedError("contract stub: games (ADR 0027 decision 4, B2, stream B)")
+    is neither a GameManifest nor a Project JSON object, or one whose Name is not a non-empty string. Since the Dist
+    half replaces the package directory named after it, a Name that is not one folder name (one holding a character of
+    FORBIDDEN_NAME_CHARACTERS, or "." or "..", which Paths::ValidateAppName refuses and the exporter never writes) also
+    raises ValueError naming the file."""
+    name = paths.display_path(path)
+    document = _read_json_object(path, name)
+    formats = (GAME_MANIFEST_FORMAT, PROJECT_FORMAT)
+    if document.get("Format") not in formats:
+        raise ValueError(f"{name}: neither a game manifest nor a project file (its Format is "
+                         f"{document.get('Format')!r}, not {' or '.join(repr(entry) for entry in formats)})")
+    game = document.get("Name")
+    if not isinstance(game, str) or not game:
+        raise ValueError(f"{name}: its Name must be a non-empty string (it holds {game!r})")
+    if game in RELATIVE_FOLDER_NAMES or any(character in FORBIDDEN_NAME_CHARACTERS for character in game):
+        raise ValueError(f"{name}: its Name {game!r} is not one folder name, which the package directory, its "
+                         f"executable and the testing user data are named after")
+    return game
 
 
 def committed_hashes(project_directory: Path, replays: Iterable[str]) -> dict[str, str]:

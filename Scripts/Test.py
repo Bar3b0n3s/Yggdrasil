@@ -115,33 +115,41 @@ or input check fails, when a run has no hash, when a hash differs from the commi
 disagree. With --junit it writes bin/TestResults/Determinism.xml, one test case per replay, whose failure lists each
 run's hash. A project whose Testing.Replays matches nothing ends as a warning.
 
-The games suite (Docs/Decisions/0026-m16-contract.md decisions 7 and 8) runs over the staged game projects
-(Scripts/Lib/games.py discover_projects in index mode: every directory directly below Projects/ or Tests/Projects/ whose
-root holds one staged *.eproj, Projects/FeatureTest excluded); a project found on disk but not staged gets one passed
-step, "games <Name>", and nothing else, and without any project the suite passes with one step, "games". Per project:
+The games suite (Docs/Decisions/0026-m16-contract.md decisions 7 and 8; Docs/Decisions/0027-m17-contract.md decision
+4) runs over the staged game projects (Scripts/Lib/games.py discover_projects in index mode: every directory directly
+below Projects/ or Tests/Projects/ whose root holds one staged *.eproj, Projects/FeatureTest excluded); a project found
+on disk but not staged gets one passed step, "games <Name>", and nothing else, and without any project the suite passes
+with one step, "games". <Name> in the names of the steps and reports is the .eproj's file stem. Per project:
   - "games <Name> audit": Scripts/Lib/provenance.py's audit of the staged files (the acceptance mode, as
     Scripts/AuditProvenance.py --project runs it), failing with each finding's code and path;
   - "games <Name> Editor <Config>" for Debug and Release: the project's staged blobs materialized into a temporary
     directory (no Library/, no Build/), the strict rendering editor of that configuration on them (`--headless
     --renderer vulkan --audio-device none --automation --strict --expect-no-gpu-errors`, with --user-data-dir and
-    --export-root in the temporary directory), then script.check and project.validate (warnings included) clean,
-    project.upgrade {dryRun: true} without a changed file (each one names `Editor --headless --project <dir>
-    --upgrade`), and test.run {} passed in Editor mode with a suite row for every Testing.Suites entry of that mode, no
-    skipped case row and a passing "replay:<path>" row at the committed FinalStateHash for every replay Testing.Replays
-    matches; at least one of those replays must have input events (games.check_replay_acceptance: a game whose
-    Testing.Replays matches no replay, or only replays without input, fails, as the demo acceptance of Roadmap M16 to
-    M18 asks); every such replay with input events must then fail input.replay {verify, strictHash, withoutInput} (the
-    input check, M16 friction S2-01: a replay whose verification passes without its input proves nothing); a .replay
-    below Assets/ that Testing.Replays leaves out fails it; after session.shutdown the editor must exit 0 and the copy
-    must be unchanged outside Library/;
+    --export-root in the temporary directory), then first the copy's build settings (games.check_build_settings:
+    StartScene and Export.BuildScenes set, as the demo acceptance of Roadmap M17 and M18 asks, and Export.BuildScenes
+    listing StartScene, the demos' convention; its lines come first, and the other checks run either way), script.check
+    and project.validate (warnings included) clean, project.upgrade {dryRun: true} without a changed file (each one
+    names `Editor --headless --project <dir> --upgrade`), and test.run {} passed in Editor mode with a suite row for
+    every Testing.Suites entry of that mode, no skipped case row and a passing "replay:<path>" row at the committed
+    FinalStateHash for every replay Testing.Replays matches; at least one of those replays must have input events
+    (games.check_replay_acceptance: a game whose Testing.Replays matches no replay, or only replays without input,
+    fails, as the demo acceptance of Roadmap M16 to M18 asks); every such replay with input events must then fail
+    input.replay {verify, strictHash, withoutInput} (the input check, M16 friction S2-01: a replay whose verification
+    passes without its input proves nothing); a .replay below Assets/ that Testing.Replays leaves out fails it; after
+    session.shutdown the editor must exit 0 and the copy must be unchanged outside Library/;
   - "games <Name> Dist", which the Release editor drives (in the Release half's session when Release runs too):
-    project.export {config: Dist, testing: true} installed to bin/Exports/Dist/<Name>/, `<package>/<Name> --headless
-    --feature-test` run in a temporary working directory (so the export suite's FeatureTest-Dist reports are never
-    touched), its exit code (printing the end of its log), its user data, its report in Dist mode, each replay's hash
-    against the committed one and every editor half of the run, and games.check_replay_acceptance; then a plain
-    project.export {config: Dist, smokeTest: true}, whose smoke test must exit 0 (one that did not run warns, and fails
-    with --require-gpu). In a session of its own (a run without Release), whatever fails after these checks (a refused
-    session.shutdown, a broken connection, a timeout, the editor's exit code) fails it too.
+    project.export {config: Dist, testing: true}, whose result's executable must lie below its outputDirectory and
+    whose manifest (Game.json, on macOS in the bundle's Contents/Resources) names the game (games.read_game_name), each
+    a one-line failure otherwise, installed to bin/Exports/Dist/<Game>/, <Game> being that Name (ProjectSettings::Name,
+    after which the exporter names the executable and the testing user data, whatever the file stem); the package's
+    executable run with `--headless --feature-test` in a temporary working directory (so the export suite's
+    FeatureTest-Dist reports are never touched), its exit code (printing the end of its log), its user data
+    (bin/TestUserData/<Game>/ in the package, holding Logs/<exe>.log, named after the executable's stem as the Runtime
+    names it, Architecture §4.4), its report in Dist mode, each replay's hash against the committed one
+    and every editor half of the run, and games.check_replay_acceptance; then a plain project.export {config: Dist,
+    smokeTest: true}, whose smoke test must exit 0 (one that did not run warns, and fails with --require-gpu). In a
+    session of its own (a run without Release), whatever fails after these checks (a refused session.shutdown, a broken
+    connection, a timeout, the editor's exit code) fails it too.
 The builds the requested halves need (each editor half's editor; the Release editor and the Dist Runtime for the Dist
 half) are looked up after the audits: a missing one fails its half with exit code 3. Then the device is probed once;
 without one the editor and Dist halves pass without running, as warnings, unless --require-gpu is given, and nothing
@@ -335,6 +343,9 @@ GAMES_STEP_NAME = "games"
 NO_GAME_PROJECT_NOTE = "no game project below Projects/ or Tests/Projects/ (FeatureTest excluded)"
 GAMES_FINDINGS_IN_DETAIL = 20
 GIT_TIMEOUT_SECONDS = 120.0
+# The folder of a macOS bundle's Contents/ that holds Game.json, beside the Contents/MacOS folder of its executable
+# (Editor/Source/EditorCore/Export/AppBundle.h; ADR 0027 decision 4, B2).
+MACOS_BUNDLE_RESOURCES = "Resources"
 
 
 # The configurations whose binaries the doctest, feature and automation suites run: test executables and the editor do
@@ -1135,13 +1146,16 @@ def install_package(output: Path, config: str, name: str = exports.FEATURE_TEST_
     return package
 
 
-def check_testing_user_data(package: Path, name: str = exports.FEATURE_TEST_NAME) -> list[str]:
+def check_testing_user_data(package: Path, name: str = exports.FEATURE_TEST_NAME, log_name: str = "") -> list[str]:
     """The user-data failures of a --feature-test run of the package of the game `name` in `package` (ADR 0024 decision
-    9 step 4, the Dist half of "Export: user data goes to the manifest Name folder"): its log must be in
-    exports.testing_user_data(package, name), and no folder named after the product may exist beside that one."""
+    9 step 4, the Dist half of "Export: user data goes to the manifest Name folder"): its log, <log_name>.log (`name`
+    when empty), must be in exports.testing_user_data(package, name), and no folder named after the product may exist
+    beside that one. The Runtime names its log after its executable's stem (Architecture §4.4: Logs/<exe>.log), which
+    is the Name on Windows (<Name>.exe) but loses the part after a dot of the Name elsewhere, so a caller that knows the
+    executable passes its stem as `log_name`."""
     user_data = exports.testing_user_data(package, name)
     failures: list[str] = []
-    log = user_data / "Logs" / f"{name}.log"
+    log = user_data / "Logs" / f"{log_name or name}.log"
     if not log.is_file():
         failures.append(f"the run wrote no {paths.display_path(log)}")
     product = user_data.parent / paths.workspace_name()
@@ -1769,13 +1783,20 @@ class GameCopy:
 def check_game_in_editor(client: Any, engine_client: Any, project: games.GameProject, config: str, copy: GameCopy,
                          hashes: dict[str, dict[str, str]], data: dict[str, object], arguments: argparse.Namespace,
                          console: Console) -> list[str]:
-    """The editor half's checks on the open session (decision 8 step 2), as failure lines: script.check and
+    """The editor half's checks on the open session (decision 8 step 2), as failure lines: first the build settings of
+    the copy's project file (games.check_build_settings: StartScene and Export.BuildScenes set, and Export.BuildScenes
+    listing StartScene, Docs/Decisions/0027-m17-contract.md decision 4, B1; its lines come first, a project file it
+    cannot read is one line naming the file, and the other checks run either way), then script.check and
     project.validate clean, the upgrade dry run with no changed file, test.run {} evaluated with games.evaluate_run
     in Editor mode (its replay hashes go into `hashes` as "Editor <config>", and with --junit the document into
     games.editor_report_path), at least one committed replay with input events (games.check_replay_acceptance), the
     input check of every committed replay with input events (input_check_failures: its verification without them must
     fail, M16 friction S2-01), and no replay below Assets/ that Testing.Replays leaves out."""
-    failures: list[str] = []
+    console.heading(f"games {project.name} Editor {config}: the build settings of {copy.project_file.name}")
+    try:
+        failures = games.check_build_settings(copy.project_file)
+    except ValueError as error:
+        failures = [f"the build settings cannot be checked: {error}"]
 
     def call(method: str, params: dict[str, Any]) -> dict[str, Any] | None:
         console.heading(f"games {project.name} Editor {config}: {method}")
@@ -1824,16 +1845,52 @@ def check_game_in_editor(client: Any, engine_client: Any, project: games.GamePro
     return failures
 
 
+def locate_testing_package(result: dict[str, Any]) -> tuple[Path, Path, str]:
+    """(the export's output directory, its executable relative to that directory, the game's Name) of the result of a
+    testing project.export {config: Dist} (Docs/Decisions/0027-m17-contract.md decision 4, B2): the executable is the
+    result's `executable`, which must lie below its `outputDirectory`, and the Name is the package manifest's
+    (games.read_game_name), read where the exporter writes it: <outputDirectory>/Game.json, or on macOS the bundle's
+    Contents/Resources/Game.json beside the Contents/MacOS folder that holds the executable (Exporter.cpp:
+    GetPackageResources). The bundle is never spelled from the .eproj's stem or the Name, so the stem cannot come back
+    on a host the Windows gate does not see. Raises ValueError with the one failure line of the Dist step: a result
+    without outputDirectory or executable, an executable outside outputDirectory, or a manifest that read_game_name
+    refuses (naming the manifest)."""
+    output = result.get("outputDirectory")
+    if not isinstance(output, str) or not output:
+        raise ValueError(f"the testing {DIST_HALF} export's result has no outputDirectory")
+    executable = result.get("executable")
+    if not isinstance(executable, str) or not executable:
+        raise ValueError(f"the testing {DIST_HALF} export's result has no executable")
+    output_directory, executable_path = Path(output), Path(executable)
+    relative = executable_path.relative_to(output_directory) if executable_path.is_relative_to(output_directory) \
+        else None
+    if relative is None or not relative.parts or ".." in relative.parts:
+        raise ValueError(f"the testing {DIST_HALF} export's executable {executable} is not below its outputDirectory "
+                         f"{output}")
+    if paths.host().is_macos:
+        manifest = executable_path.parent.parent / MACOS_BUNDLE_RESOURCES / games.GAME_MANIFEST_FILE
+    else:
+        manifest = output_directory / games.GAME_MANIFEST_FILE
+    try:
+        game = games.read_game_name(manifest)
+    except ValueError as error:
+        raise ValueError(f"the testing {DIST_HALF} export's manifest does not name the game: {error}") from error
+    return output_directory, relative, game
+
+
 def check_game_export(client: Any, engine_client: Any, project: games.GameProject, copy: GameCopy,
                       hashes: dict[str, dict[str, str]], work: Path, data: dict[str, object],
                       arguments: argparse.Namespace, console: Console) -> Step:
     """The Dist half on the open session of the Release editor (decision 8 step 3): project.export {config: Dist,
-    testing: true} installed to bin/Exports/Dist/<Name>/, the package's --feature-test run from a temporary working
-    directory (its reports copied to games.dist_report_path with --junit, so the export stage's FeatureTest-Dist
-    reports are never touched), its exit code, testing user data and games.evaluate_run in Dist mode,
-    games.compare_game_hashes over the committed hashes, every editor half of this run (`hashes`) and the exported run,
-    games.check_replay_acceptance (a game whose determinism rests on no replay with input fails here too), then a plain
-    project.export {config: Dist, smokeTest: true} into the editor's export root, checked with games.check_smoke."""
+    testing: true}, located with locate_testing_package (its executable from the result, the game's Name from its
+    manifest, Docs/Decisions/0027-m17-contract.md decision 4, B2) and installed to bin/Exports/Dist/<Game>/, the
+    package's --feature-test run from a temporary working directory (its reports copied to games.dist_report_path with
+    --junit, so the export stage's FeatureTest-Dist reports are never touched), its exit code, testing user data and
+    games.evaluate_run in Dist mode, games.compare_game_hashes over the committed hashes, every editor half of this run
+    (`hashes`) and the exported run, games.check_replay_acceptance (a game whose determinism rests on no replay with
+    input fails here too), then a plain project.export {config: Dist, smokeTest: true} into the editor's export root,
+    checked with games.check_smoke. <Game> is the project's Name, whatever the .eproj's file stem (project.name), which
+    names only the step and its reports."""
     name = f"games {project.name} Dist"
     started = time.monotonic()
     console.heading(f"{name}: project.export {{config: {DIST_HALF}, testing: true}}")
@@ -1844,12 +1901,16 @@ def check_game_export(client: Any, engine_client: Any, project: games.GameProjec
                     time.monotonic() - started, data=data)
     data.update({"testSuites": result.get("testSuiteCount"), "replays": result.get("replayCount")})
     try:
-        package = install_package(Path(str(result["outputDirectory"])), DIST_HALF, project.name)
-    except (OSError, KeyError) as error:
-        destination = paths.display_path(exports.package_directory(DIST_HALF, project.name))
+        output, relative_executable, game = locate_testing_package(result)
+    except ValueError as error:
+        return Step(name, Status.FAILED, str(error), time.monotonic() - started, data=data)
+    try:
+        package = install_package(output, DIST_HALF, game)
+    except OSError as error:
+        destination = paths.display_path(exports.package_directory(DIST_HALF, game))
         return Step(name, Status.FAILED, f"cannot move the testing export to {destination}: {error}",
                     time.monotonic() - started, data=data)
-    executable = exports.package_executable(package, project.name)
+    executable = package / relative_executable
     data["package"] = paths.display_path(package)
     if not executable.is_file():
         return Step(name, Status.FAILED, f"the package holds no {paths.display_path(executable)}",
@@ -1866,7 +1927,9 @@ def check_game_export(client: Any, engine_client: Any, project: games.GameProjec
                            echo=console.stream)
     except ToolNotFoundError as error:
         return Step(name, Status.FAILED, str(error), time.monotonic() - started, data=data)
-    log = exports.testing_user_data(package, project.name) / "Logs" / f"{project.name}.log"
+    # The user data takes the Name, the log the executable's stem (check_testing_user_data).
+    log_name = relative_executable.stem
+    log = exports.testing_user_data(package, game) / "Logs" / f"{log_name}.log"
     if run.timed_out:
         console.print(tail_lines(log, LOG_TAIL_LINES))
         return Step(name, Status.TIMEOUT, f"the {DIST_HALF} --feature-test run {run.describe_exit()}",
@@ -1876,7 +1939,7 @@ def check_game_export(client: Any, engine_client: Any, project: games.GameProjec
         failures.append(f"the {DIST_HALF} --feature-test run {run.describe_exit()}")
         console.print(f"The end of {paths.display_path(log)}:")
         console.print(tail_lines(log, LOG_TAIL_LINES))
-    failures += check_testing_user_data(package, project.name)
+    failures += check_testing_user_data(package, game, log_name)
     exported: dict[str, str] = {}
     try:
         failures += games.evaluate_run(json.loads(report.read_text(encoding="utf-8")), DIST_HALF, copy.testing,

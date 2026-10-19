@@ -1745,7 +1745,8 @@ end
 			{
 				CAPTURE(codes[index]);
 				CHECK(infos[index].Code == codes[index]);
-				CHECK((infos[index].Severity == "Error" || infos[index].Severity == "Warning" || infos[index].Severity == "Warning; Error at the limit"));
+				CHECK((infos[index].Severity == "Error" || infos[index].Severity == "Warning" || infos[index].Severity == "Warning; Error at the limit"
+					|| infos[index].Severity == "Error; Warning for a Luau lint warning"));
 				CHECK(infos[index].Description.find_first_not_of(" \t") != std::string_view::npos);
 				CHECK(infos[index].Fix.find_first_not_of(" \t") != std::string_view::npos);
 			}
@@ -1755,6 +1756,35 @@ end
 			const auto adjacent = std::ranges::find(infos, std::string_view("PHYSICS_ADJACENT_STATIC_BODIES"), &ValidationCodeInfo::Code);
 			REQUIRE(adjacent != infos.end());
 			CHECK(adjacent->AutoFixable);
+		}
+
+		// Docs/Decisions/0027-m17-contract.md: project.validate reports a Luau lint warning as SCRIPT_TYPE_ERROR with severity
+		// Warning (here SameLineStatement: two statements on one line), so the code's documented severity (Validation.md, the
+		// game-debugging skill's table) names both severities, as PHYSICS_LIMIT_EXCEEDED's does.
+		TEST_CASE("ProjectValidator: a Luau lint warning is a SCRIPT_TYPE_ERROR warning, as the code's documented severity says")
+		{
+			Test::EditorTestFixture fixture("ValidatorLintWarning");
+			fixture.CreateAndOpenProject();
+			auto& editor = fixture.GetEditor();
+			REQUIRE(editor.GetScriptService() != nullptr);
+			WriteValidatorFile(editor, "Assets/Clamp.luau", "local function clamp(value: number): number\n\tif value < 0 then value = 0 return value end\n\treturn value\nend\nreturn clamp\n");
+			const auto report = ProjectValidator::Validate(editor, ValidationScope::Project);
+			REQUIRE_MESSAGE(report.has_value(), (report ? std::string() : report.error().ToString()));
+			INFO(DescribeDiagnostics(*report));
+			const auto* warning = FindFileDiagnostic(*report, "Assets/Clamp.luau", "SCRIPT_TYPE_ERROR");
+			REQUIRE(warning != nullptr);
+			CHECK(warning->Severity == DiagnosticSeverity::Warning);
+			CHECK(warning->Line == 2);
+			CHECK(warning->Message.find("same line") != std::string::npos);
+			CHECK(std::ranges::none_of(report->Diagnostics, [](const ProjectDiagnostic& diagnostic)
+			{
+				return diagnostic.File == "Assets/Clamp.luau" && diagnostic.Severity == DiagnosticSeverity::Error;
+			}));
+			const auto infos = ProjectValidator::GetCodeInfos();
+			const auto type = std::ranges::find(infos, std::string_view("SCRIPT_TYPE_ERROR"), &ValidationCodeInfo::Code);
+			REQUIRE(type != infos.end());
+			CHECK(type->Severity == "Error; Warning for a Luau lint warning");
+			CHECK(type->Description.find("lint warning") != std::string_view::npos);
 		}
 
 		// M15 (Docs/Decisions/0024-m15-contract.md decision 6, stream B): the suite rule Validate and testing exports share.

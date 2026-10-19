@@ -27,8 +27,12 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <chrono>
+#include <format>
 #include <functional>
+#include <optional>
+#include <vector>
 
 // The Runtime's automation server (Architecture §13.2, §13.5 "Runtime subset"; Docs/Decisions/0012-m7-decisions.md
 // decision 12) in process: the shared handlers on the Runtime's context, over a play session of a test scene.
@@ -313,12 +317,170 @@ namespace Engine {
 			CHECK(refused["error"]["data"]["detail"].dump().find("does not depend on its input") != std::string::npos);
 			CHECK(refused["error"]["data"]["inputCheck"]["checkpointsChecked"] == Json(1));
 			CHECK_FALSE(saved.has_value());
+			// M17 A1: the replay restart runs twice, for the verification with the input and then for the input check, and
+			// each playback releases its session's replay input; the session is the input check's.
+			CHECK(restarts == 2);
+			REQUIRE(released.size() == 2);
+			CHECK(released.front() != released.back());
+			CHECK(released.back() == fixture.GetSession().GetSerial());
+			CHECK(fixture.GetSession().GetTick() == 70);
+			CHECK(fixture.GetSession().IsPaused());
+			CHECK_FALSE(fixture.GetSession().IsLockstep());
+		}
+
+		// Docs/Decisions/0027-m17-contract.md decision 3, A1: the Runtime's input.record stop also replays a recording with
+		// input events with its input before its input check, through the host's replay restart. A change that no engine API
+		// reported (here a direct write to the recorded world, as a script-table write from script.eval is) is refused at the
+		// final hash, and an operational failure names the playback it stopped.
+		TEST_CASE("RuntimeAutomationServer: input.record stop verifies a recording with its input before its input check")
+		{
+			RuntimeServerFixture* active = nullptr;
+			std::optional<ReplayDocument> saved;
+			std::vector<uint64_t> released;
+			uint32_t restarts = 0;
+			std::vector<uint32_t> failingRestarts; // the restart calls (1-based) that fail
+			auto now = std::chrono::steady_clock::time_point{};
+			RuntimeAutomationServerSpecification spec;
+			spec.GameName = "Tiny";
+			// Every reading moves past PlayStepFrameBudget, so each Poll of a playback advances exactly one tick.
+			spec.WallClock = [&now]()
+			{
+				now += std::chrono::milliseconds(100);
+				return now;
+			};
+			spec.StartRecordingSession = [&active](const PlayStartOptions& options, bool) -> Result<PlaySession*>
+			{
+				return active->Restart(options);
+			};
+			spec.DescribeReplayHeader = [&active]() -> Result<ReplayHeader>
+			{
+				return active->DescribeHeader();
+			};
+			spec.ValidateReplayOutput = [](std::string_view path) -> Result<std::string>
+			{
+				return "user://Replays/" + std::string(path);
+			};
+			spec.WriteReplay = [&saved](std::string_view path, const ReplayDocument& document) -> Result<std::string>
+			{
+				saved = document;
+				return "user://Replays/" + std::string(path);
+			};
+			spec.RestartForReplay = [&active, &restarts, &failingRestarts](const ReplayHeader& header) -> Result<PlaySession*>
+			{
+				++restarts;
+				if (std::find(failingRestarts.begin(), failingRestarts.end(), restarts) != failingRestarts.end())
+					return MakeError(ErrorCode::NotFound, "the replay's scene asset is missing");
+				PlayStartOptions options;
+				options.Seed = header.Seed;
+				options.Parameters = header.Parameters;
+				options.Lockstep = true;
+				options.Paused = true;
+				return active->Restart(options);
+			};
+			spec.ReleaseReplayInput = [&released](uint64_t serial)
+			{
+				released.push_back(serial);
+			};
+			RuntimeServerFixture fixture(spec);
+			active = &fixture;
+			const Json tap = Json::array({ Json{ { "tick", 2 }, { "type", "key" }, { "key", "Space" }, { "state", "tap" } } });
+
+			// The recorded world moved without any engine call after its last step: replayed with its input, the final hash
+			// differs, so Stop refuses before the input check and the session is the verification's.
+			REQUIRE(fixture.Call("input.record", Json{ { "action", "start" }, { "restart", true } }).contains("result"));
+			REQUIRE(fixture.CallPending("play.step", Json{ { "ticks", 70 }, { "render", "none" }, { "input", tap } }).contains("result"));
+			Entity ball = fixture.GetSession().GetScene().FindEntityByPath("/Game/Ball");
+			REQUIRE(ball.IsValid());
+			ball.GetComponent<TransformComponent>().Translation.x += 5.0f;
+			const Json diverged = fixture.CallPending("input.record", Json{ { "action", "stop" }, { "path", "Moved.replay" } });
+			REQUIRE_MESSAGE(diverged.contains("error"), diverged.dump());
+			const Json& data = diverged["error"]["data"];
+			CHECK(data["errorCode"] == Json("Validation"));
+			const std::string detail = JsonReader(data).ReadMember<std::string>("detail").value_or("");
+			CAPTURE(detail);
+			CHECK(detail.find("refusing to write 'Moved.replay': replayed with its input, the recording does not reproduce itself: the final state hash at tick 70 is ") != std::string::npos);
+			REQUIRE(data.contains("verification"));
+			CHECK(data["verification"]["hashMatched"] == Json(false));
+			CHECK(data["verification"]["checkpointsChecked"] == Json(1));
+			CHECK(detail.find(std::format("is {}, recorded {}; nothing was written", JsonReader(data["verification"]).ReadMember<std::string>("stateHash").value_or("?"),
+					  JsonReader(data["verification"]).ReadMember<std::string>("expectedStateHash").value_or("?")))
+				!= std::string::npos);
+			CHECK_FALSE(data.contains("inputCheck"));
+			CHECK_FALSE(saved.has_value());
 			CHECK(restarts == 1);
 			REQUIRE(released.size() == 1);
 			CHECK(released.front() == fixture.GetSession().GetSerial());
 			CHECK(fixture.GetSession().GetTick() == 70);
 			CHECK(fixture.GetSession().IsPaused());
 			CHECK_FALSE(fixture.GetSession().IsLockstep());
+
+			// The verification's restart fails: its context names it, and nothing is written.
+			failingRestarts = { 2 };
+			REQUIRE(fixture.Call("input.record", Json{ { "action", "start" }, { "restart", true } }).contains("result"));
+			REQUIRE(fixture.CallPending("play.step", Json{ { "ticks", 70 }, { "render", "none" }, { "input", tap } }).contains("result"));
+			const Json unstarted = fixture.CallPending("input.record", Json{ { "action", "stop" }, { "path", "Unstarted.replay" } });
+			REQUIRE_MESSAGE(unstarted.contains("error"), unstarted.dump());
+			CHECK(unstarted["error"]["data"]["errorCode"] == Json("NotFound"));
+			CHECK(unstarted["error"]["data"]["contexts"] == Json::array({ "while starting the verification of 'Unstarted.replay' with its input; nothing was written" }));
+			CHECK_FALSE(saved.has_value());
+			CHECK_FALSE(fixture.GetSession().GetRecorder()->IsRecording());
+
+			// The verification passes (nothing in this game reads the keyboard, so the run with the tap reproduces), and the
+			// input check's restart fails: its own context names it.
+			failingRestarts = { 4 };
+			REQUIRE(fixture.Call("input.record", Json{ { "action", "start" }, { "restart", true } }).contains("result"));
+			REQUIRE(fixture.CallPending("play.step", Json{ { "ticks", 70 }, { "render", "none" }, { "input", tap } }).contains("result"));
+			const Json unchecked = fixture.CallPending("input.record", Json{ { "action", "stop" }, { "path", "Unchecked.replay" } });
+			REQUIRE_MESSAGE(unchecked.contains("error"), unchecked.dump());
+			CHECK(unchecked["error"]["data"]["errorCode"] == Json("NotFound"));
+			CHECK(unchecked["error"]["data"]["contexts"] == Json::array({ "while starting the input check of 'Unchecked.replay'; nothing was written" }));
+			CHECK_FALSE(saved.has_value());
+			CHECK(restarts == 4);
+			// The session is the verification's, paused at its end with lockstep released.
+			CHECK(fixture.GetSession().GetTick() == 70);
+			CHECK(fixture.GetSession().IsPaused());
+			CHECK_FALSE(fixture.GetSession().IsLockstep());
+
+			// A failure during the verification's playback keeps its code and names the verification: its session ticks
+			// behind the playback's back (an Advance error), or stops stepping (a cancelled session). The stepped wall clock
+			// makes each Poll advance one tick, so the Stop is still pending after the Pump that starts it.
+			failingRestarts.clear();
+			for (const bool ticked : { true, false })
+			{
+				CAPTURE(ticked);
+				REQUIRE(fixture.Call("input.record", Json{ { "action", "start" }, { "restart", true } }).contains("result"));
+				REQUIRE(fixture.CallPending("play.step", Json{ { "ticks", 70 }, { "render", "none" }, { "input", tap } }).contains("result"));
+				fixture.GetServer().SubmitInProcess(fixture.GetClient(), RpcRequest{ .Id = Json(ticked ? "stop-ticked" : "stop-cancelled"), .Method = "input.record", .Params = Json{ { "action", "stop" }, { "path", "Interrupted.replay" } }, .TranscriptLine = std::nullopt });
+				fixture.GetServer().Pump();
+				REQUIRE(fixture.GetServer().TakeInProcessResponses(fixture.GetClient()).empty());
+				PlaySession& verification = fixture.GetSession();
+				REQUIRE(verification.IsStepping());
+				CHECK(verification.GetTick() < 70);
+				const uint64_t serial = verification.GetSerial();
+				if (ticked)
+					verification.Tick();
+				else
+					verification.SetStepping(false);
+				std::vector<Json> responses;
+				REQUIRE(Test::WaitUntil([&fixture, &responses]
+				{
+					fixture.GetServer().Pump();
+					responses = fixture.GetServer().TakeInProcessResponses(fixture.GetClient());
+					return !responses.empty();
+				}));
+				REQUIRE(responses.size() == 1);
+				const Json& interrupted = responses.front();
+				REQUIRE_MESSAGE(interrupted.contains("error"), interrupted.dump());
+				const Json& failure = interrupted["error"]["data"];
+				CHECK(failure["errorCode"] == Json("Cancelled"));
+				REQUIRE_MESSAGE(failure.contains("contexts"), failure.dump());
+				CHECK(failure["contexts"] == Json::array({ "while verifying 'Interrupted.replay' with its input; nothing was written" }));
+				CHECK_FALSE(saved.has_value());
+				// The verification's session, cancelled: paused, with lockstep released.
+				CHECK(fixture.GetSession().GetSerial() == serial);
+				CHECK(fixture.GetSession().IsPaused());
+				CHECK_FALSE(fixture.GetSession().IsLockstep());
+			}
 		}
 
 		TEST_CASE("RuntimeAutomationServer: a recording owner's disconnect cancels after play.pause releases lockstep")

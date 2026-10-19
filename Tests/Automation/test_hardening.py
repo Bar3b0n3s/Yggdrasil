@@ -38,7 +38,6 @@ from Lib.report import Status, Step  # noqa: E402
 
 
 RECORDED_SOAKS = REPOSITORY_ROOT / "Tests" / "Data" / "Hardening"
-SKIP_SOAK_SCRIPT_ERRORS = "contract stub: the soak reads script.errors (ADR 0027 decision 4, B4, stream B)"
 
 
 def recorded_soak(name: str) -> dict[str, list[hardening.SoakSample]]:
@@ -562,7 +561,9 @@ class FakeEngineError(Exception):
 
 class FakeClient:
     """An engine client whose play.step takes `step_seconds` of the fake clock; a call whose timeout is shorter than its
-    cost uses up the timeout and raises TimeoutError, as engine_client does."""
+    cost uses up the timeout and raises TimeoutError, as engine_client does. Its script.errors reports an empty error
+    stream (ScriptErrorClient serves one with errors), which the soak reads before play.start and after its last step
+    (Docs/Decisions/0027-m17-contract.md decision 4, B4)."""
 
     def __init__(self, clock: FakeClock, step_seconds: float) -> None:
         self.clock = clock
@@ -582,6 +583,8 @@ class FakeClient:
             self.clock.now += timeout
             raise TimeoutError(f"no message from the editor within {timeout:.1f} s")
         self.clock.now += cost
+        if method == "script.errors":
+            return {"errors": [], "nextCursor": "0", "evicted": False}
         return {"entities": 3, "bodies": 1, "voices": 0, "scriptHeapBytes": 500_000, "memoryAllocationCount": 9}
 
 
@@ -605,39 +608,130 @@ class FakeEditorProcess:
 
 
 class ScriptErrorClient(FakeClient):
-    """A FakeClient that serves script.errors as the editor does (ScriptMethods.cpp): the editor's stream already holds
-    three errors (ids 1 to 3, raised before the soak takes its cursor), `error` is appended once with the next id when
-    the method `raised_by` is first called (play.start for an OnStart error, play.step for one raised while the soak
-    plays), since "end" returns no entry and the current cursor, and a decimal since (or none, read as 0) returns the
-    entries with a larger id, at most `limit`, with the last one's id as nextCursor. It records the since of every
-    script.errors call."""
+    """A FakeClient that serves script.errors as the editor does (ScriptMethods.cpp over ScriptErrorStream,
+    ScriptError.cpp). The editor's stream already holds three distinct errors (ids 1 to 3, raised before the soak takes
+    its cursor). `error`, one error or a list of them, is added in order when the method `raised_by` is first called
+    (play.start for an OnStart error, play.step for one raised while the soak plays); each one added takes the next id
+    with count 1, unless the stream holds an error with the same script, jsonPointer, line and message, which it
+    replaces at the end with the new id, its own tick and that error's count + 1 (a repeated error moves to its latest
+    occurrence). The stream keeps the MAX_ENTRIES distinct errors with the latest occurrences, evicting the oldest.
+    Since "end" returns no entry and the current cursor; a decimal since (or none, read as 0) returns the entries with a
+    larger id, at most `limit`, with the last one's id as nextCursor, and evicted true when an error whose latest
+    occurrence was newer than since has been evicted. Like the editor, it refuses with an EngineError a since that is
+    neither empty, "end" nor a decimal cursor, and a limit outside 1 to 1000 (100 when absent), so a page the editor
+    would refuse fails the soak here too. It records the since of every script.errors call."""
 
-    def __init__(self, clock: FakeClock, error: dict[str, Any] | None, raised_by: str = "play.step") -> None:
+    MAX_ENTRIES = 256  # MaxScriptErrorEntries, ScriptLimits.h
+
+    def __init__(self, clock: FakeClock, error: dict[str, Any] | list[dict[str, Any]] | None,
+                 raised_by: str = "play.step") -> None:
         super().__init__(clock, step_seconds=0.0)
-        self.error = error
+        self.errors = [] if error is None else error if isinstance(error, list) else [error]
         self.raised_by = raised_by
-        self.stream: list[dict[str, Any]] = [
-            {"id": index, "kind": "runtime", "script": "Assets/Scripts/Menu.luau", "line": 1, "column": 1,
-             "message": "an error raised before the soak", "callback": "", "tick": 0, "count": 1, "traceback": [],
-             "jsonPointer": ""} for index in (1, 2, 3)]
+        self.stream: list[dict[str, Any]] = []
+        self.cursor = 0
+        self.evicted_through = 0
+        for line in (1, 2, 3):
+            self.add({"kind": "runtime", "script": "Assets/Scripts/Menu.luau", "line": line, "column": 1,
+                      "message": "an error raised before the soak", "callback": "", "tick": 0, "traceback": [],
+                      "jsonPointer": ""})
         self.raised = False
         self.since: list[str] = []
 
+    def add(self, error: dict[str, Any]) -> None:
+        """ScriptErrorStream::Add: the error with the next id and its count, replacing the same error or evicting the
+        error whose latest occurrence is the oldest when the stream is full."""
+        self.cursor += 1
+        added = {**error, "id": self.cursor, "count": 1}
+        key = ("script", "jsonPointer", "line", "message")
+        previous = next((entry for entry in self.stream if all(entry[k] == added[k] for k in key)), None)
+        if previous is not None:
+            added["count"] = previous["count"] + 1
+            self.stream.remove(previous)
+        elif len(self.stream) == self.MAX_ENTRIES:
+            self.evicted_through = self.stream.pop(0)["id"]
+        self.stream.append(added)
+
     def call(self, method: str, params: dict[str, Any], timeout: float) -> dict[str, Any]:
         if method != "script.errors":
-            if method == self.raised_by and self.error is not None and not self.raised:
+            if method == self.raised_by and not self.raised:
                 self.raised = True
-                self.stream.append({**self.error, "id": len(self.stream) + 1})
+                for error in self.errors:
+                    self.add(error)
             return super().call(method, params, timeout)
         self.calls.append((method, timeout))
         since = str((params or {}).get("since", ""))
         self.since.append(since)
-        cursor = self.stream[-1]["id"] if self.stream else 0
+        if since not in ("", "end") and not (since.isascii() and since.isdecimal()):
+            raise FakeEngineError("expected an unsigned decimal cursor or end")
+        limit = (params or {}).get("limit", 100)
+        if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 1000:
+            raise FakeEngineError("limit must be from 1 to 1000")
         if since == "end":
-            return {"errors": [], "nextCursor": str(cursor), "evicted": False}
+            return {"errors": [], "nextCursor": str(self.cursor), "evicted": False}
         after = int(since) if since else 0
-        page = [entry for entry in self.stream if entry["id"] > after][:int((params or {}).get("limit", 100))]
-        return {"errors": page, "nextCursor": str(page[-1]["id"] if page else after), "evicted": False}
+        page = [entry for entry in self.stream if entry["id"] > after][:limit]
+        return {"errors": page, "nextCursor": str(page[-1]["id"] if page else after),
+                "evicted": self.evicted_through > after}
+
+
+class FailingScriptErrorClient(ScriptErrorClient):
+    """A ScriptErrorClient whose script.errors fails with an EngineError for the since `failing` (recorded like the
+    others), as a host without a script error service answers (Unsupported); the calls with any other since are
+    served, so a failure on the page after one that returned errors is reachable."""
+
+    def __init__(self, clock: FakeClock, error: dict[str, Any] | None, failing: str) -> None:
+        super().__init__(clock, error)
+        self.failing = failing
+
+    def call(self, method: str, params: dict[str, Any], timeout: float) -> dict[str, Any]:
+        if method == "script.errors" and str((params or {}).get("since", "")) == self.failing:
+            self.calls.append((method, timeout))
+            self.since.append(self.failing)
+            raise FakeEngineError("no script error service")
+        return super().call(method, params, timeout)
+
+
+class EndingScriptErrorClient(ScriptErrorClient):
+    """A ScriptErrorClient whose method `raised_by` fails with an EngineError the first time it is called, after the
+    error it raises has joined the stream (play.start refusing after an OnStart error, or play.step after an error
+    raised while playing), so the soak ends early with that error and must still read the script errors."""
+
+    def __init__(self, clock: FakeClock, error: dict[str, Any] | None, raised_by: str) -> None:
+        super().__init__(clock, error, raised_by)
+        self.failed = False
+
+    def call(self, method: str, params: dict[str, Any], timeout: float) -> dict[str, Any]:
+        result = super().call(method, params, timeout)
+        if method == self.raised_by and not self.failed:
+            self.failed = True
+            raise FakeEngineError("the play session stopped")
+        return result
+
+
+class CannedScriptErrorClient(ScriptErrorClient):
+    """A ScriptErrorClient whose script.errors returns `answers[since]` for the since values it lists (recorded like the
+    others), the malformed results and stuck pages a misbehaving editor could give; any other since is served. More
+    than MAX_READS script.errors calls is an AssertionError, which no soak catches, so a reading loop that never ends
+    fails the test instead of hanging it."""
+
+    MAX_READS = 10
+
+    def __init__(self, clock: FakeClock, error: dict[str, Any] | None, answers: dict[str, Any]) -> None:
+        super().__init__(clock, error)
+        self.answers = answers
+
+    def call(self, method: str, params: dict[str, Any], timeout: float) -> dict[str, Any]:
+        if method != "script.errors":
+            return super().call(method, params, timeout)
+        if len(self.since) >= self.MAX_READS:
+            raise AssertionError(f"script.errors was called more than {self.MAX_READS} times: {self.since}")
+        since = str((params or {}).get("since", ""))
+        if since not in self.answers:
+            return super().call(method, params, timeout)
+        self.calls.append((method, timeout))
+        self.since.append(since)
+        return self.answers[since]
 
 
 def fake_engine_client(editor_process: FakeEditorProcess) -> types.SimpleNamespace:
@@ -681,14 +775,14 @@ class SoakDeadlineTests(unittest.TestCase):
         self.assertTrue(editor.killed)
         self.assertTrue(all(timeout <= hardening_script.SOAK_CALL_TIMEOUT_SECONDS for _, timeout in client.calls))
 
-    @unittest.skip(SKIP_SOAK_SCRIPT_ERRORS)
     def test_a_soak_subject_whose_scripts_raise_an_error_fails(self) -> None:
         # ADR 0027 decision 4, B4 (M17 gameplay map GDF-11): play.step keeps ticking through a non-fatal script error
         # (the editor only disables the faulting instance), so the soak passed a scene whose game had stopped with an
         # error at top-out. The soak takes script.errors' cursor after scene.open and before play.start, so an error
         # in OnStart (which play.start runs) counts, and reads from that cursor after its last step, following
-        # nextCursor until a page is empty: a new error adds one line with the first error's location and message to
-        # the subject's errors, which fails the subject. Errors from before the cursor never count.
+        # nextCursor until a page is empty: a new error adds one line counting them and naming the earliest listed
+        # error, at its latest tick and count, to the subject's errors, which fails the subject. Errors from before the
+        # cursor never count.
         late = {"kind": "runtime", "script": "Assets/Scripts/Game.luau", "line": 42, "column": 9,
                 "message": "attempt to index nil with 'Transform'", "callback": "OnFixedUpdate", "tick": 6012,
                 "count": 1, "traceback": [], "jsonPointer": ""}
@@ -715,8 +809,9 @@ class SoakDeadlineTests(unittest.TestCase):
                     continue
                 self.assertEqual(client.since, ["end", "3", "4"])
                 self.assertEqual(len(errors), 1, errors)
-                for text in ("1 new script error(s) during the soak", f"{error['script']}:{error['line']}",
-                             error["message"], f"tick {error['tick']}"):
+                for text in ("1 new script error(s) during the soak; the earliest listed: ",
+                             f"{error['script']}:{error['line']}", error["message"],
+                             f"(latest at tick {error['tick']}, 1 occurrence(s))"):
                     self.assertIn(text, errors[0])
                 self.assertNotIn("an error raised before the soak", errors[0])
                 subject = hardening_script.SoakSubject("Tetris:Assets/Scenes/Main.scene", "test",
@@ -726,6 +821,168 @@ class SoakDeadlineTests(unittest.TestCase):
                                                              self.directory / "Soak-Release.xml")
                 self.assertFalse(outcome.results[0].passed)
                 self.assertIn(error["message"], outcome.results[0].failures[0])
+
+    def test_the_soak_line_names_the_earliest_listed_error_with_its_latest_tick_and_count(self) -> None:
+        # ADR 0027 Integration, stream B (review finding P-01): script.errors lists each distinct error once, at its
+        # latest occurrence (a repeated error moves to the end with a new id, its latest tick and its count + 1, the
+        # occurrences before the cursor included), and keeps the 256 errors with the latest occurrences, answering
+        # evicted: true on a page after whose since one was evicted. The soak cannot know the first occurrence, so its
+        # line names the earliest listed error with its latest tick and count, and says when earlier errors were
+        # evicted.
+        def game(line: int, tick: int) -> dict[str, Any]:
+            return {"kind": "runtime", "script": "Assets/Scripts/Game.luau", "line": line, "column": 9,
+                    "message": f"attempt to index nil (line {line})", "callback": "OnFixedUpdate", "tick": tick,
+                    "traceback": [], "jsonPointer": ""}
+
+        menu = {"kind": "runtime", "script": "Assets/Scripts/Menu.luau", "line": 2, "column": 1,
+                "message": "an error raised before the soak", "callback": "OnFixedUpdate", "tick": 1000,
+                "traceback": [], "jsonPointer": ""}
+        listed = "new script error(s) during the soak; the earliest listed:"
+        cases = {
+            # Line 20 at tick 250, line 30 at 500, line 20 again at 750: line 30 is listed first.
+            "a repeated error": ([game(20, 250), game(30, 500), game(20, 750)], ["end", "3", "6"],
+                                 f"2 {listed} Assets/Scripts/Game.luau:30: attempt to index nil (line 30) (latest at "
+                                 "tick 500, 1 occurrence(s))"),
+            # An error raised before the cursor and again while the soak plays counts both occurrences.
+            "an error raised before the soak too": ([menu], ["end", "3", "4"],
+                                                    f"1 {listed} Assets/Scripts/Menu.luau:2: an error raised before "
+                                                    "the soak (latest at tick 1000, 2 occurrence(s))"),
+            # 300 distinct errors (ids 4 to 303): the stream keeps ids 48 to 303, so 44 of them were evicted.
+            "evicted errors": ([game(100 + index, 10 + index) for index in range(300)], ["end", "3", "303"],
+                               f"256 {listed} Assets/Scripts/Game.luau:144: attempt to index nil (line 144) (latest "
+                               "at tick 54, 1 occurrence(s)); earlier errors were evicted"),
+        }
+        for name, (raised, since, expected) in cases.items():
+            with self.subTest(case=name):
+                clock = FakeClock()
+                client = ScriptErrorClient(clock, raised)
+                samples, errors = self.soak_scene(client, clock)
+                self.assertEqual(len(samples), hardening.SOAK_FRAMES // hardening_script.SOAK_STEP_TICKS + 1)
+                self.assertEqual(client.since, since)
+                self.assertEqual(errors, [expected])
+
+    def test_the_fake_script_error_stream_merges_and_evicts_as_the_editor_does(self) -> None:
+        # ScriptErrorStream::Add (ScriptError.cpp): a repeated error (the same script, jsonPointer, line and message)
+        # moves to the end with the next id, its own tick and the count + 1; beyond MaxScriptErrorEntries (256) the
+        # error whose latest occurrence is the oldest is evicted, and HasEvictedAfter(since) holds while an evicted id
+        # is greater than since. The P-01 test relies on ScriptErrorClient doing the same.
+        client = ScriptErrorClient(FakeClock(), None)
+        client.add({**client.stream[0], "tick": 7})
+        self.assertEqual([(entry["id"], entry["line"], entry["tick"], entry["count"]) for entry in client.stream],
+                         [(2, 2, 0, 1), (3, 3, 0, 1), (4, 1, 7, 2)])
+        for line in range(10, 10 + ScriptErrorClient.MAX_ENTRIES - 1):
+            client.add({**client.stream[0], "line": line})
+        self.assertEqual(len(client.stream), ScriptErrorClient.MAX_ENTRIES)
+        self.assertEqual(client.stream[0]["id"], 4)  # ids 2 and 3 evicted
+        self.assertTrue(client.call("script.errors", {"since": "2", "limit": 1000}, 1.0)["evicted"])
+        self.assertFalse(client.call("script.errors", {"since": "3", "limit": 1000}, 1.0)["evicted"])
+        self.assertEqual(len(client.call("script.errors", {"since": "", "limit": 1000}, 1.0)["errors"]),
+                         ScriptErrorClient.MAX_ENTRIES)
+
+    def test_a_failed_script_errors_call_fails_the_soak_subject_naming_it(self) -> None:
+        # ADR 0027 decision 4, B4: a script.errors call that fails is an error line naming it, so a soak that cannot
+        # read its scene's errors never passes as one without errors. The soak still runs all its ticks; without a
+        # cursor it reads nothing after them.
+        late = {"kind": "runtime", "script": "Assets/Scripts/Game.luau", "line": 42, "column": 9,
+                "message": "attempt to index nil with 'Transform'", "callback": "OnFixedUpdate", "tick": 6012,
+                "count": 1, "traceback": [], "jsonPointer": ""}
+        cases = {"end": (["end"], ['script.errors {since: "end"} failed: no script error service']),
+                 "3": (["end", "3"], ['script.errors {since: "3"} failed: no script error service']),
+                 "4": (["end", "3", "4"], ["1 new script error(s) during the soak; the earliest listed: "
+                                           "Assets/Scripts/Game.luau:42: attempt to index nil with 'Transform' (latest "
+                                           "at tick 6012, 1 occurrence(s))",
+                                           'script.errors {since: "4"} failed: no script error service'])}
+        for failing, (since, expected) in cases.items():
+            with self.subTest(failing=failing):
+                clock = FakeClock()
+                client = FailingScriptErrorClient(clock, late, failing)
+                deadline = hardening_script.SoakDeadline(1000.0, clock)
+                samples, errors = hardening_script.soak_editor_scene(
+                    fake_engine_client(FakeEditorProcess(client)), self.directory / "Editor",
+                    self.directory / "P.eproj", "Assets/Scenes/Main.scene", self.directory / "UserData", self.console,
+                    deadline)
+                self.assertEqual(len(samples), hardening.SOAK_FRAMES // hardening_script.SOAK_STEP_TICKS + 1)
+                self.assertEqual(client.since, since)
+                self.assertEqual(errors, expected)
+
+    def soak_scene(self, client: FakeClient, clock: FakeClock) -> hardening_script.SoakRun:
+        """soak_editor_scene of Assets/Scenes/Main.scene on `client`, with 1,000 s of `clock` left."""
+        return hardening_script.soak_editor_scene(
+            fake_engine_client(FakeEditorProcess(client)), self.directory / "Editor", self.directory / "P.eproj",
+            "Assets/Scenes/Main.scene", self.directory / "UserData", self.console,
+            hardening_script.SoakDeadline(1000.0, clock))
+
+    def test_a_soak_that_ends_early_still_reads_its_script_errors(self) -> None:
+        # ADR 0027 decision 4, B4 ("Frozen interfaces"): the errors are read after the soak's last step, all its ticks
+        # or where an error ended it. A play.start that fails after an OnStart error, or a play.step that fails after an
+        # error raised while playing, ends the soak with that error, and the script error that explains it still adds
+        # its line after it.
+        late = {"kind": "runtime", "script": "Assets/Scripts/Game.luau", "line": 42, "column": 9,
+                "message": "attempt to index nil with 'Transform'", "callback": "OnFixedUpdate", "tick": 6012,
+                "count": 1, "traceback": [], "jsonPointer": ""}
+        start = {**late, "line": 17, "message": "attempt to call a nil value (field 'Instantiate')",
+                 "callback": "OnStart", "tick": 0}
+        cases = {"play.start": (start, 0, "the play session stopped",
+                                "Assets/Scripts/Game.luau:17: attempt to call a nil value (field 'Instantiate') "
+                                "(latest at tick 0, 1 occurrence(s))"),
+                 "play.step": (late, 1, "play.step after tick 0 failed: the play session stopped",
+                               "Assets/Scripts/Game.luau:42: attempt to index nil with 'Transform' (latest at tick "
+                               "6012, 1 occurrence(s))")}
+        for raised_by, (error, sampled, ended, earliest) in cases.items():
+            with self.subTest(raised_by=raised_by):
+                clock = FakeClock()
+                client = EndingScriptErrorClient(clock, error, raised_by)
+                samples, errors = self.soak_scene(client, clock)
+                self.assertEqual(len(samples), sampled)
+                self.assertEqual(client.since, ["end", "3", "4"])
+                self.assertEqual(errors, [ended, f"1 new script error(s) during the soak; the earliest listed: "
+                                                 f"{earliest}"])
+
+    def test_a_malformed_or_stuck_script_errors_result_fails_the_soak_subject_naming_the_call(self) -> None:
+        # ADR 0027 decision 4, B4: a script.errors result without the cursor the soak needs, without an errors array, or
+        # with a page of errors that leaves nextCursor where it was (which would read the same page forever) is an error
+        # line naming the call, after the count of what was read; the reading stops there, and the soak still runs all
+        # its ticks.
+        late = {"kind": "runtime", "script": "Assets/Scripts/Game.luau", "line": 42, "column": 9,
+                "message": "attempt to index nil with 'Transform'", "callback": "OnFixedUpdate", "tick": 6012,
+                "count": 1, "traceback": [], "jsonPointer": ""}
+        counted = ("Assets/Scripts/Game.luau:42: attempt to index nil with 'Transform' (latest at tick 6012, "
+                   "1 occurrence(s))")
+        no_cursor = 'script.errors {since: "end"} failed: its result has no nextCursor'
+        no_page = 'script.errors {since: "3"} failed: its result has no errors array or no nextCursor'
+        stuck = 'script.errors {{since: "{since}"}} failed: it returned 1 error(s) without advancing its nextCursor'
+        cases: dict[str, tuple[dict[str, Any], list[str], list[str]]] = {
+            "no cursor at the end": ({"end": {}}, ["end"], [no_cursor]),
+            "an empty cursor at the end": ({"end": {"errors": [], "nextCursor": "", "evicted": False}}, ["end"],
+                                           [no_cursor]),
+            "no nextCursor": ({"3": {"errors": [{**late, "id": 4}]}}, ["end", "3"], [no_page]),
+            "no errors array": ({"3": {"nextCursor": "4", "evicted": False}}, ["end", "3"], [no_page]),
+            "a stuck first page": ({"3": {"errors": [{**late, "id": 4}], "nextCursor": "3", "evicted": False}},
+                                   ["end", "3"], [f"1 new script error(s) during the soak; the earliest listed: "
+                                                  f"{counted}", stuck.format(since="3")]),
+            "a stuck later page": ({"4": {"errors": [{**late, "id": 4}], "nextCursor": "4", "evicted": False}},
+                                   ["end", "3", "4"], [f"2 new script error(s) during the soak; the earliest listed: "
+                                                       f"{counted}", stuck.format(since="4")]),
+        }
+        for name, (answers, since, expected) in cases.items():
+            with self.subTest(case=name):
+                clock = FakeClock()
+                client = CannedScriptErrorClient(clock, late, answers)
+                samples, errors = self.soak_scene(client, clock)
+                self.assertEqual(len(samples), hardening.SOAK_FRAMES // hardening_script.SOAK_STEP_TICKS + 1)
+                self.assertEqual(client.since, since)
+                self.assertEqual(errors, expected)
+
+    def test_the_fake_script_error_stream_refuses_what_the_editor_refuses(self) -> None:
+        # ScriptMethods.cpp refuses a limit outside 1 to 1000 and a since that is not a cursor; ScriptErrorClient does
+        # too, so a soak that asked for a page the editor refuses would fail the B4 tests, not only the real soak.
+        client = ScriptErrorClient(FakeClock(), None)
+        for params in ({"since": "3", "limit": 0}, {"since": "3", "limit": 1001}, {"since": "end", "limit": 5000},
+                       {"since": "-1"}, {"since": "three"}):
+            with self.subTest(params=params), self.assertRaises(FakeEngineError):
+                client.call("script.errors", params, 1.0)
+        self.assertEqual(client.call("script.errors", {"since": "1", "limit": 1}, 1.0)["nextCursor"], "2")
+        self.assertEqual(len(client.call("script.errors", {"since": "", "limit": 1000}, 1.0)["errors"]), 3)
 
     def test_the_deadline_ends_the_step_as_a_timeout_and_keeps_the_finished_subjects(self) -> None:
         clock = FakeClock()

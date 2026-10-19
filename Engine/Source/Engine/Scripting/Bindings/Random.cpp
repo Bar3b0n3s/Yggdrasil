@@ -185,7 +185,11 @@ namespace Engine {
 				.Function("Choice", &Utils::RandomChoice<false>, "<T>(array: {T}) -> T", "Chooses from a nonempty dense one-based array; frozen arrays may be read.")
 				.Function("Shuffle", &Utils::RandomShuffle<false>, "<T>(array: {T}) -> {T}", "Fisher-Yates shuffle in place, returning the same array. Rejects holes, dictionary keys and frozen tables.")
 				.Function("UnitVector", &Utils::RandomUnitVector<false>, "() -> vector", "Uniform unit direction using two draws and deterministic trigonometry.")
-				.Function("New", &Utils::RandomNew, "(seed: number) -> RandomGenerator", "Creates an independent local stream; allowed in read-only evaluation.", local);
+				.Function("New", &Utils::RandomNew, "(seed: number) -> RandomGenerator",
+					"Creates an independent local stream; allowed in read-only evaluation. Its state is a script value outside the state hash, and a "
+					"constant seed repeats the same sequence in every session: seed it from Random.Integer (Random.New(Random.Integer(0, 2147483647))) "
+					"to follow the session seed. Not available at a module's top level.",
+					local);
 			api.Type("RandomGenerator", "An independent value-owned seeded stream; its methods never change session randomness.")
 				.Method("Seed", &Utils::RandomSeed<true>, "(self: RandomGenerator, seed: number) -> ()", "Reseeds this local generator with a nonnegative exact integer.", local)
 				.Method("Integer", &Utils::RandomInteger<true>, "(self: RandomGenerator, min: number, max: number) -> number", "Draws an inclusive bounded integer from this stream.", local)

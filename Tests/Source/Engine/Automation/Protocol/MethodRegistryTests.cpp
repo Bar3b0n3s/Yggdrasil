@@ -285,8 +285,7 @@ namespace Engine {
 		// takes the entity's 16-hex id, unlike an entity a method's own params name (§13.4), so the Tetris walkthrough's
 		// `ScoreText: "/Game/ScoreText"` failed with only "expected a 16-digit hex UUID string". The rule stays (ADR 0010
 		// decision 32); every such value is refused at its pointer with a hint that says how to give the id.
-		TEST_CASE("MethodRegistry: an entity path in an EntityRef component value is refused with a hint naming the entity id"
-			* doctest::skip(true))
+		TEST_CASE("MethodRegistry: an entity path in an EntityRef component value is refused with a hint naming the entity id")
 		{
 			const std::string hint = "an Entity value in component data takes the entity's 16-hex id; use {\"$ref\": \"<op>.entity.id\"} in a batch or the id entity.get returns";
 			SchemaRegistrySetup setup;
@@ -316,6 +315,46 @@ namespace Engine {
 			REQUIRE_MESSAGE(std::holds_alternative<Json>(passed), (std::holds_alternative<Error>(passed) ? std::get<Error>(passed).ToString() : std::string()));
 			CHECK(valid.State.HandlerCalls == 1);
 			CHECK(valid.State.ReadScript["Fields"]["Target"] == Json("0000000000000abc"));
+		}
+
+		// A4's precedence (Docs/Decisions/0027-m17-contract.md "Frozen interfaces / A4"): an EntityRef issue is never NotFound,
+		// so beside an asset reference that names nothing the call is InvalidArgument with both issues, and the error keeps
+		// MakeParamsError's rule for several issues of different kinds (no shared hint) while each issue keeps its own.
+		TEST_CASE("MethodRegistry: an EntityRef issue beside an unresolved asset reference makes the call InvalidArgument with both issues")
+		{
+			auto script = CreateRef<ScriptData>();
+			script->Kind = ScriptKind::Behaviour;
+			script->Name = "Fields";
+			ScriptFieldSchema skin;
+			skin.Name = "Skin";
+			skin.Type = FieldType::AssetRef;
+			skin.Meta.AssetFilter = "Material";
+			script->Fields.push_back(skin);
+			ScriptFieldSchema target;
+			target.Name = "Target";
+			target.Type = FieldType::EntityRef;
+			script->Fields.push_back(target);
+			const auto schemas = ScriptFieldSchemaSource::Create({ { UUID(0x515), AssetRef<ScriptData>(script) } });
+			REQUIRE_MESSAGE(schemas.has_value(), (schemas ? std::string() : schemas.error().ToString()));
+
+			SchemaRegistrySetup setup;
+			setup.State.Published = *schemas;
+			auto context = setup.Context(ParseRegistryJson(R"({"text":"fields","components":{"Script":{"Script":"Assets/Fields.luau",
+				"Fields":{"Skin":"Assets/Missing.material","Target":"/Game/ScoreText"}}}})"));
+			const MethodResult result = setup.Methods.Invoke(*context);
+			REQUIRE(std::holds_alternative<Error>(result));
+			const Error& error = std::get<Error>(result);
+			CAPTURE(error.ToString());
+			CHECK(error.GetCode() == ErrorCode::InvalidArgument);
+			CHECK(error.GetHint().empty());
+			const std::vector<ErrorIssue>& issues = error.GetIssues();
+			REQUIRE(issues.size() == 2);
+			CHECK(issues[0].JsonPointer == "/components/Script/Fields/Skin");
+			CHECK(issues[0].Message == "no asset 'Assets/Missing.material'");
+			CHECK(issues[1].JsonPointer == "/components/Script/Fields/Target");
+			CHECK(issues[1].Message == "expected a 16-digit hex UUID string");
+			CHECK(issues[1].Hint.starts_with("an Entity value in component data takes the entity's 16-hex id"));
+			CHECK(setup.State.HandlerCalls == 0);
 		}
 
 		TEST_CASE("MethodRegistry: registry-only parameters do not acquire external field schemas")

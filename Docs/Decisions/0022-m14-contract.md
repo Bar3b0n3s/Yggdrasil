@@ -276,7 +276,7 @@ Any change that alters the hash re-records it with a stated reason in the review
 
 ### 10. Validation code documentation
 
-`ProjectValidator::GetCodeInfos()` returns one `ValidationCodeInfo {Code, Severity, AutoFixable, Description, Fix}` per code, in `GetCodes()` order. `Severity` is `Error`, `Warning` or `Warning; Error at the limit`. `Validation.md`, the game-debugging skill's error-code table and gate 6 read it. §13.7 gains `ASSET_CONTENT_SKIPPED`, which the validator already reports.
+`ProjectValidator::GetCodeInfos()` returns one `ValidationCodeInfo {Code, Severity, AutoFixable, Description, Fix}` per code, in `GetCodes()` order. `Severity` is `Error`, `Warning` or `Warning; Error at the limit` (*note, ADR 0027 Integration:* `SCRIPT_TYPE_ERROR` adds `Error; Warning for a Luau lint warning`). `Validation.md`, the game-debugging skill's error-code table and gate 6 read it. §13.7 gains `ASSET_CONTENT_SKIPPED`, which the validator already reports.
 
 ### 11. Validation fixtures
 

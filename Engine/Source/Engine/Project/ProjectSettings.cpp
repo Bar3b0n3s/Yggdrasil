@@ -349,7 +349,9 @@ namespace Engine {
 				"Refuses to start play while the type checker reports errors.");
 
 		registry.Struct<ExportSettings>("ExportSettings", "What an exported game contains and how its executable is labelled.")
-			.Field("BuildScenes", &ExportSettings::BuildScenes, "Project-relative scenes packed into the export.")
+			.Field("BuildScenes", &ExportSettings::BuildScenes,
+				"Project-relative scenes the export loads strictly beside StartScene (each must be a registered scene file that loads strictly). "
+				"They do not decide what ships: Data/Game.pak holds every registered asset below Assets/ except the Export.Exclude globs.")
 			.Field("Exclude", &ExportSettings::Exclude, "Project-relative globs of assets left out of the export.")
 			.Field("Icon", &ExportSettings::Icon, "Project-relative square PNG used as the executable's icon, at least 256 x 256 pixels.")
 			.Field("Version", &ExportSettings::Version, "Version of the exported game, in the form major.minor.patch.")

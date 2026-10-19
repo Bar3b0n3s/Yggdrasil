@@ -104,7 +104,9 @@ The stages, with the configurations of the §15.8 matrix:
   hardening    Release               milestone gates only (CI.py --milestone, or named in --stages):
                                      Scripts/Hardening.py --steps perf,soak,asan-generate,asan-build,asan-unit,
                                      asan-feature,fuzz, one step each, failing fast: the perf capture (warning-only),
-                                     the soak of every scene of every project and of the exported Release Runtime, the
+                                     the soak of every scene of every project under Projects/ (FeatureTest and the
+                                     demos there, not Tests/Projects/; a new script error during a scene's soak fails
+                                     it) and of the exported Release Runtime, the
                                      AddressSanitizer workspace (bin-int/Asan) with its unit and feature suites, and the
                                      1,000,000-iteration fuzz of every reader of Tests/Data/Fuzz/Targets.json (§15.1
                                      T6; ADR 0024 decisions 12 to 16 and 19). A plain CI.py lists it as not run

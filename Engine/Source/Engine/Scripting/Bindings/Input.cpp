@@ -132,8 +132,18 @@ namespace Engine {
 				.Function("GetMouseDelta", &Utils::InputMouseVector<&InputState::GetMouseDelta>, "() -> vector", "Returns accumulated cursor movement in this phase.", read)
 				.Function("GetScrollDelta", &Utils::InputMouseVector<&InputState::GetScrollDelta>, "() -> vector", "Returns accumulated scroll, right-positive and up-positive.", read)
 				.Function("IsActionDown", &Utils::InputAction<&ScriptActionState::Down>, "(name: string) -> boolean", "Returns a configured action's held state; an unknown name raises INPUT_UNKNOWN_ACTION.", read)
-				.Function("IsActionPressed", &Utils::InputAction<&ScriptActionState::Pressed>, "(name: string) -> boolean", "Returns a configured action's press edge.", read)
-				.Function("IsActionReleased", &Utils::InputAction<&ScriptActionState::Released>, "(name: string) -> boolean", "Returns a configured action's release edge.", read)
+				.Function("IsActionPressed", &Utils::InputAction<&ScriptActionState::Pressed>, "(name: string) -> boolean",
+					"Returns whether a configured action was pressed since the previous latch of the current phase: in OnFixedUpdate since the previous "
+					"tick, in OnUpdate and OnLateUpdate since the previous frame. A press and release between two ticks reports both edges with "
+					"IsActionDown false, and a frame that runs several ticks reports the edge on its first tick only; an unknown name raises "
+					"INPUT_UNKNOWN_ACTION.",
+					read)
+				.Function("IsActionReleased", &Utils::InputAction<&ScriptActionState::Released>, "(name: string) -> boolean",
+					"Returns whether a configured action was released since the previous latch of the current phase: in OnFixedUpdate since the previous "
+					"tick, in OnUpdate and OnLateUpdate since the previous frame. A press and release between two ticks reports both edges with "
+					"IsActionDown false, and a frame that runs several ticks reports the edge on its first tick only; an unknown name raises "
+					"INPUT_UNKNOWN_ACTION.",
+					read)
 				.Function("GetAxis", &Utils::InputAction<&ScriptActionState::Axis>, "(name: string) -> number", "Returns a configured action's combined axis value.", read)
 				.Function("IsGamepadConnected", &Utils::InputGamepadConnected, "(index: number) -> boolean", "Returns whether gamepad 0 through 3 is connected.", read)
 				.Function("IsGamepadButtonDown", &Utils::InputGamepadButton, "(index: number, button: GamepadButton) -> boolean", "Returns a gamepad button's held state.", { .Mutates = false, .EnumParameters = { { 2, "GamepadButton" } } })

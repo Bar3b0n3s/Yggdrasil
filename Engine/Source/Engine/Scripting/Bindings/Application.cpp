@@ -63,9 +63,15 @@ namespace Engine {
 			const ScriptMemberOptions read{ .Mutates = false };
 			api.Module("Application", "Application identity, window state and deferred quit requests.")
 				.Function("Quit", &Utils::ApplicationQuit, "(exitCode: number?) -> ()", "Requests exit (default 0): stops editor Play, exits Runtime, or records quit and ends the current test suite. Never destroys the executing VM inline.")
-				.Function("IsEditor", &Utils::ApplicationEditor, "() -> boolean", "True in the editor; false in the standalone Runtime.", read)
+				.Function("IsEditor", &Utils::ApplicationEditor, "() -> boolean",
+					"True in the editor; false in the standalone Runtime. Gameplay that branches on it splits the editor's and the export's state "
+					"hashes, which the games suite compares.",
+					read)
 				.Function("IsHeadless", &Utils::ApplicationHeadless, "() -> boolean", "Returns whether the host has no native window.", read)
-				.Function("IsFocused", &Utils::ApplicationFocused, "() -> boolean", "Returns the current native-window focus state.", read)
+				.Function("IsFocused", &Utils::ApplicationFocused, "() -> boolean",
+					"Returns the current native-window focus state. Nondeterministic: it follows the host window in every session, lockstep, "
+					"recording, replay and test sessions included, so never base gameplay on it.",
+					read)
 				.Function("GetPlatform", &Utils::ApplicationPlatform, "() -> string", "Returns the host platform name.", read)
 				.Function("GetVersion", &Utils::ApplicationVersion, "() -> string", "Returns the running engine version.", read)
 				.Function("GetWindowSize", &Utils::ApplicationWindow, "() -> vector", "Returns the size of the session's view in view coordinates as vector(width, height, 0): the game view's image in ordinary play, the project's Window.Width x Window.Height in lockstep, recording, replay and test sessions.", read);

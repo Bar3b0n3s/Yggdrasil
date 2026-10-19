@@ -372,20 +372,12 @@ class FixtureTests(unittest.TestCase):
         self.assertEqual([finding["code"] for finding in document["projects"][1]["findings"]], ["hash-mismatch"])
         self.assertEqual([step["status"] for step in document["steps"]], ["passed", "failed"])
 
-    def test_demos_audits_every_discovered_game_project(self) -> None:
-        exit_code, document = run_audit("--demos", "--files", "disk")
-        self.assertEqual(exit_code, 0, document)
-        discovered = games.discover_projects(REPOSITORY_ROOT)
-        self.assertEqual(len(document["projects"]), len(discovered))
-        if not discovered:
-            self.assertEqual([step["status"] for step in document["steps"]], ["passed"])
-
     def test_demos_audits_every_staged_game_project_and_names_the_unstaged_ones(self) -> None:
-        # Docs/Decisions/0027-m17-contract.md decision 4, B3 (M17 pipeline map G3): the case above audits the working
-        # tree, so a half-built demo that is not staged (Tetris during M17) fails every commit's automation suite on its
-        # working-tree state, against ADR 0026 decisions 3, 7 and 9; stream B deletes it. --demos in its default index
-        # mode audits the staged projects, each of which must pass, and names each project found only on disk in one
-        # passed step.
+        # Docs/Decisions/0027-m17-contract.md decision 4, B3 (M17 pipeline map G3): the case this one replaced,
+        # test_demos_audits_every_discovered_game_project, audited the working tree (--demos --files disk), so a
+        # half-built demo that is not staged (Tetris during M17) failed every commit's automation suite on its
+        # working-tree state, against ADR 0026 decisions 3, 7 and 9. --demos in its default index mode audits the staged
+        # projects, each of which must pass, and names each project found only on disk in one passed step.
         exit_code, document = run_audit("--demos")
         self.assertEqual(exit_code, 0, document)
         staged = games.discover_projects(REPOSITORY_ROOT, "index")

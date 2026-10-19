@@ -595,7 +595,7 @@
 					"x-assetType": "Font"
 				},
 				"Size": {
-					"description": "The text height in pixels at the 1080p reference resolution.",
+					"description": "The em size. Screen space: pixels at the 1080p reference resolution, scaled by the viewport's height / 1080. World space: an em of Size / 100 metres (100 world-text pixels per metre) before the entity's scale, in the entity's local XY plane or facing the camera with Billboard, so the default 32 is 0.32 m.",
 					"type": "number",
 					"minimum": 1,
 					"maximum": 100000

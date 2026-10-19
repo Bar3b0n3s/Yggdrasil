@@ -8,8 +8,6 @@ from pathlib import Path
 
 from harness import AutomationTestCase, engine_client
 
-SKIP_DIRTY_SCENE = "contract stub: test.run refuses a dirty open scene it plays (ADR 0027 decision 3, A2, stream A)"
-
 
 class ScriptTestRunnerTests(AutomationTestCase):
     def configure_suite(self, client: engine_client.EngineClient, source: str) -> None:
@@ -44,7 +42,6 @@ class ScriptTestRunnerTests(AutomationTestCase):
         self.assertIn("second", Path(result["junitPath"]).read_text(encoding="utf-8"))
         self.assertEqual(client.call("play.state")["state"], "Edit")
 
-    @unittest.skip(SKIP_DIRTY_SCENE)
     def test_test_run_refuses_a_dirty_open_scene_that_a_selected_suite_uses(self) -> None:
         # Docs/Decisions/0027-m17-contract.md decision 3, A2 (M17 map GTF-04): test.run plays the saved scene file, so a
         # run while the suite's scene was open with unsaved changes silently tested what the editor no longer showed.

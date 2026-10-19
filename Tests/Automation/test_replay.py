@@ -30,7 +30,6 @@ function Booster.OnFixedUpdate(self: any, dt: number)
 end
 return Script.Define("Booster", Booster)
 """
-SKIP_RECORD_VERIFIES = "contract stub: input.record stop replays with its input first (ADR 0027 decision 3, A1)"
 
 
 def add_key_mover(client: engine_client.EngineClient) -> None:
@@ -242,7 +241,6 @@ class ReplayTests(AutomationTestCase):
         self.assertEqual(document["Version"], 2)
         self.assertEqual([checkpoint["Tick"] for checkpoint in document["Checkpoints"]], [60])
 
-    @unittest.skip(SKIP_RECORD_VERIFIES)
     def test_record_refuses_a_recording_changed_by_a_script_table_write(self) -> None:
         # Docs/Decisions/0027-m17-contract.md decision 3, A1 (M17 maps GTF-01, GDF-03, GAF-09): a script.eval that
         # writes only a script table during a recording calls no engine API, so nothing invalidates the recording, and

@@ -2079,7 +2079,7 @@ end))");
 		// not pass said only "recording requires passing selected cases and a valid starting scene", so a recording filter
 		// that also selected a stale replay's path left the builder guessing. The refusal names each selected row that did
 		// not pass, with its status, in report order; the rows that passed are not named.
-		TEST_CASE("TestRunner: a refused recording names the selected rows that did not pass" * doctest::skip(true))
+		TEST_CASE("TestRunner: a refused recording names the selected rows that did not pass")
 		{
 			RunnerHost host;
 			host.InputDriven();
@@ -2118,6 +2118,9 @@ end))");
 			CHECK(message.find("Pilot/drive") == std::string::npos);
 			// A replay row among them: the hint says how a recording filter leaves the replays out.
 			CHECK(refused->GetHint().find("Record.") != std::string::npos);
+			CHECK(refused->GetHint()
+				== "the filter also selects the replays named; give the recording suite a name that no replay path contains (for example Record.<Name>) and record "
+				   "with exactly that filter");
 			CHECK_FALSE(runner.TakeRecording());
 			// The rows the message names are the report's rows that did not pass, in report order.
 			const auto result = runner.GetResult();
@@ -2130,11 +2133,37 @@ end))");
 				== "replay:Assets/Tests/Replays/Pilot.replay/FinalStateHash (failed)");
 		}
 
+		// A3's bound (Docs/Decisions/0027-m17-contract.md "Frozen interfaces / A3"): the refusal names at most ten rows, in
+		// report order, and counts the rest; without a replay row among them it has no hint.
+		TEST_CASE("TestRunner: a refused recording names at most ten rows and counts the rest")
+		{
+			RunnerHost host;
+			host.InputDriven();
+			std::string source = "return Test.Suite(\"Many\", function()\n";
+			for (int index = 0; index < 12; ++index)
+				source += std::format("\tTest.Case(\"case{:02}\", function() Test.Expect(false, \"deliberate\") end)\n", index);
+			source += "end)";
+			host.Suite(std::move(source));
+
+			FeatureTestRunner runner;
+			REQUIRE(runner.Begin(host, { .Record = true }));
+			const std::optional<Error> refused = host.RunToEnd(runner);
+			REQUIRE(refused.has_value());
+			CHECK(refused->GetCode() == ErrorCode::Validation);
+			std::string expected = "recording requires passing selected cases and a valid starting scene; 12 selected row(s) did not pass: ";
+			for (int index = 0; index < 10; ++index)
+				expected += std::format("{}Many/case{:02} (failed)", index == 0 ? "" : ", ", index);
+			expected += ", and 2 more";
+			CHECK(refused->GetMessageText() == expected);
+			CHECK(refused->GetHint().empty());
+			CHECK_FALSE(runner.TakeRecording());
+		}
+
 		// Docs/Decisions/0027-m17-contract.md decision 3, A2: test.run refuses, before it takes its lease, a dirty open scene
 		// that a selected suite or replay plays, so the runner reports what Begin selected: each selected suite's index into
 		// Testing.Suites (a suite of the run's mode with a case the filter matches) and each replay the filter matches. The
 		// selection is kept until the next Begin.
-		TEST_CASE("TestRunner: Begin's selection names each selected suite and replay" * doctest::skip(true))
+		TEST_CASE("TestRunner: Begin's selection names each selected suite and replay")
 		{
 			RunnerHost host;
 			host.Suite(R"(return Test.Suite("Pilot",function() Test.Case("drive",function() end) end))");

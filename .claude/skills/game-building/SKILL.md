@@ -1,11 +1,11 @@
 ---
 name: game-building
-description: Build a game end to end through the editor's automation (the MCP tools or engine_client): launch, project settings, scenes, prefabs, scripts, deterministic checks, test suites, recorded replays with the autopilot workflow, validation and export, and the provenance, transcript and demo-audit rules that define done.
+description: Build a game end to end through the editor's automation (the MCP tools or engine_client): launch, project settings, scenes, prefabs, the look, scripts, deterministic checks, test suites, replays recorded from recording suites (autopilots and planned input), validation and export, and the provenance, transcript, soak and demo-audit rules that define done.
 ---
 
 # Game building
 
-This is the workflow an agent follows to build a game with this engine, from an empty project to an exported build. Write gameplay with the `luau-gameplay` skill, and diagnose with `game-debugging`. Tools are named `domain_verb` as the MCP bridge proxies them; a method without a tool (`prefab.revert`, `project.refreshAssets`, `play.state`) is reached through `engine_call {method, params}`, and `engine_client` calls every method by its `domain.verb` name.
+This is the workflow an agent follows to build a game with this engine, from an empty project to an exported build. Write gameplay with the `luau-gameplay` skill, and diagnose with `game-debugging`. Tools are named `domain_verb` as the MCP bridge proxies them; a method without a tool (`prefab.revert`, `project.refreshAssets`, `play.state`, `stats.get`) is reached through `engine_call {method, params}`, and `engine_client` calls every method by its `domain.verb` name.
 
 ## Documentation
 
@@ -25,8 +25,8 @@ Architecture sections cited below (§13.12 is the demo acceptance rule) and the 
 - **Only through automation.** Every engine-consumed file of a game (the root `<Game>.eproj` and `.luaurc`, everything under `Assets/` and every `.meta`) is written by the editor through an automation method: never with a text editor, a shell or a file-copy tool. `Scripts/AuditProvenance.py` rejects any other origin (§13.12).
 - **Provenance and transcript are committed.** In the game's project directory, `<Game>/` below (`Projects/<Game>/` for a demo, `Tests/Projects/Breakout/` for the M16 dry run), the editor records each write in `<Game>/Automation/Provenance.json` (`{Path, XXH64, Method, RequestId, Client, TranscriptLine}`; `RequestId` is null only for a `ui` write), and the MCP bridge appends every request to `<Game>/Automation/BuildLog.jsonl` and passes its line number on, so each entry names the transcript line of the request that wrote it. Never edit either by hand; never delete the transcript.
 - **Windowed UI writes do not count.** A file saved from the editor's own UI is recorded with method `ui`, which the audit rejects for demo games. Use the UI to look, not to author.
-- **`Library/` is a cache** (import cache, autosave, lock, offloaded results). It is gitignored and never consulted by the audit.
-- **Documentation is exempt.** `<Game>/AGENTS.md` and a `README.md` may be written directly; describe the game's scenes, actions, scripts and tests there when you finish.
+- **`Library/` is a cache** (import cache, autosave, lock, offloaded results, screenshots). It is gitignored and never consulted by the audit.
+- **Documentation is exempt.** `<Game>/AGENTS.md` and a `README.md` are written directly (no automation method writes them); describe the game's scenes, actions, scripts and tests there when you finish. The unit suite type-checks every `luau` fence of `AGENTS.md` against the documentation's stub modules, not the game's (it does not lint them): a fence is either code you already ran through `script_write` and `script_check`, or carries `skip="<reason>"`, as a snippet that requires the game's own modules must.
 - **A missing capability is an engine change.** When automation cannot do what the game needs, add the method (the `add-automation-method` skill) or the script API (`add-script-api`) with its tests before continuing. Never work around it by hand.
 
 ## 1. Launch
@@ -35,6 +35,7 @@ Architecture sections cited below (§13.12 is the demo acceptance rule) and the 
 - If the user already has the project open with "Allow AI automation" on, `editor_launch` attaches to that editor instead (§13.8). `EditorAlreadyOpen {pid}` means an editor without automation holds the project: ask the user to allow automation, then `editor_attach`. Every attach and every launch begins with a transcribed `session.info` (a launch sends it right after its `project.open` or `project.create`), so the transcript shows where each session starts and the result reports the session with its open scene. Request ids start again with every launch or attach and can skip where the bridge read `rpc.discover` for itself (`engine_call`'s timeout; those reads are not transcribed), so the transcript line, not the id, identifies a request.
 - **No scene is open after a launch.** Opening a project opens none of its scenes, so scene and entity tools answer `InvalidState` ("no scene open") until you open one: `scene_open {path: "Assets/Scenes/Main.scene"}` (the project's `StartScene`, from `project_get_settings`), or `scene_new {path}` in a new project. An attached editor shows whatever scene its user has open, or none. `editor_status` (its `session.scene`) and the result of a launch or an attach report the open scene's `path` and `dirty` flag, or null.
 - After `EditorCrashed {autosaveAvailable: true}`, `editor_launch {recover: true}` adopts the autosave as an unsaved scene; save it deliberately.
+- **A stale tool list.** A Claude Code session keeps the tool list it started with. After a change of a method's parameters or of the method set (a new catalogue), work from a fresh Claude Code session (or `/mcp`, Reconnect): until then a parameter the cached schema lacks reaches the bridge as a string, which it converts only where the current catalogue types it.
 - `docs_get` answers only through a connected editor, so launch or attach before reading any topic ("Documentation" above).
 
 ## 2. Project settings
@@ -52,32 +53,34 @@ Architecture sections cited below (§13.12 is the demo acceptance rule) and the 
 	"Export": {"BuildScenes": ["Assets/Scenes/Main.scene"]},
 	"Testing": {
 		"Suites": [{"Script": "Assets/Tests/Board.test.luau"},
-			{"Script": "Assets/Tests/Tetris.test.luau", "Scene": "Assets/Scenes/Main.scene"}],
+			{"Script": "Assets/Tests/Tetris.test.luau", "Scene": "Assets/Scenes/Main.scene", "Isolation": "Case"},
+			{"Script": "Assets/Tests/Record/Opening.test.luau", "Scene": "Assets/Scenes/Main.scene", "Modes": ["Editor"]}],
 		"Replays": ["Assets/Tests/Replays/*.replay"]}}}
 ```
 
 - `project_get_settings` returns the whole document; `docs_get {topic: "reference/Schemas/Project"}` lists every field with its type, range and default.
+- **Build settings.** Set `StartScene` and list it in `Export.BuildScenes` (the scenes the export loads strictly beside it): the games suite fails a game whose `StartScene` is empty or whose `BuildScenes` is empty or does not list `StartScene` as written, and reports these first among each editor half's failures (its other checks still run).
 - Physics layers: `Physics.Layers` holds 1 to 16 names with `Default` first, and `Physics.Collisions` lists the pairs that collide; unlisted pairs do not.
-- `_meta.diagnostics` in every response reports new validation errors. `BUILD_START_SCENE_MISSING` is expected until the start scene exists.
+- **Validation codes come from `project_validate {}`.** `_meta.diagnostics` only counts what was logged since your previous call (`newErrors`, `newWarnings`, `newScriptErrors`, the first three entries in `firstNew`) and never lists a validation code. `BUILD_START_SCENE_MISSING` and `BUILD_SCENE_MISSING` are expected until the start scene exists, and `TEST_SUITE_INVALID` until each suite's script exists.
 
 ### `Testing.Suites`
 
 Each entry is `{Script, Scene?, Parameters?, Isolation?, Clock?, Overrides?, ExpectQuit?, Modes?}` (§11.10):
 - `Script`: the `*.test.luau` file; `Scene`: the scene it runs in (omitted: an empty scene, right for pure-logic suites).
 - `Parameters`: the `Scene.Load` parameters (`Scene.GetLoadParameters()`), for example a timer carried into level 2.
-- `Isolation`: `"Suite"` (cases share one scene, in order) or `"Case"` (the scene restarts before each case).
+- `Isolation`: `"Suite"` (cases share one scene, in order, so a board carries from case to case) or `"Case"` (the scene restarts before each case, each from the same seed).
 - `Clock`: a list of frame deltas that replaces the lockstep clock (for frame-timing tests).
 - `Overrides`: `{CallbackBudgetMs, MemoryLimitMB, PauseOnError}` for this suite, applied exactly.
 - `ExpectQuit`: the exit code the suite must end with through `Application.Quit` (-1: it must not quit).
-- `Modes`: the run modes it runs in, `["Editor", "Release", "Dist"]` by default; autopilot suites are `["Editor"]`.
+- `Modes`: the run modes it runs in, `["Editor", "Release", "Dist"]` by default; recording suites (§8) are `["Editor"]`.
 
 `Testing.Replays` holds globs of `.replay` files; every run verifies each one. `CaseTimeoutTicks` and `SuiteTickLimit` bound cases and suites. Leave `CoverageGates` false: only `Projects/FeatureTest` evaluates the engine's coverage gates.
 
 ## 3. Scenes, assets and prefabs
 
 - `scene_new {path: "Assets/Scenes/Main.scene"}` creates and opens a scene; `scene_save` writes it; `scene_open {path, save | discardChanges}` switches.
-- Build content with one atomic `edit_batch {label, ops: [{method, params}]}` per logical step: if op *k* fails, ops 0..k−1 are undone and the error names `failedOp`. `{"$ref": "<op>.<jsonPath>"}` passes an earlier result on, such as `{"$ref": "3.entity.id"}` for a parent or `{"$ref": "0.asset.id"}` for a material. `dryRun: true` checks a batch without applying it.
-- `entity_create {name, parent?, components: {Type: {Field: value}}}` and `entity_update` take component values by registry name; `component_schema {name}` lists fields, ranges, defaults and enum values. Entities are referenced by id, unique id prefix or path (`/Game/Board`); assets by handle, `Assets/...` path or `engine://...` path (built-ins such as `engine://Meshes/Cube`).
+- **Batches.** Build content with one atomic `edit_batch {label, ops: [{method, params}]}` per logical step: if op *k* fails, ops 0..k−1 are undone and the error names `failedOp`. Create the assets in a first batch and name them by path afterwards (`"Materials": ["Assets/Materials/Wall.material"]`, also inside component data). In an entity param, name an entity that an earlier op of the same batch created by its path (`"parent": "/Game"`): unlike a positional `{"$ref": "<op>.<jsonPath>"}` (`{"$ref": "3.entity.id"}`), a path does not shift when you insert an op. Run `dryRun: true` first and check each op's `entity.path` in `results`.
+- `entity_create {name, parent?, components: {Type: {Field: value}}}` and `entity_update` take component values by registry name; `component_schema {name}` lists fields, ranges, defaults and enum values. Write enum values in their canonical spelling, as the schemas list them (`"Orthographic"`, `"Game"`, `"Play"`). Entity params take an id, a unique id prefix or a path (`/Game/Board`). An **`Entity` value inside component data** (a script's `Field.Entity()`, any entity field of a component) takes the 16-hex id only: `{"$ref": "<op>.entity.id"}` in a batch, or the id a create or `entity_get` returned; a path there is refused (InvalidParams, with a hint saying so). Assets are referenced by handle, `Assets/...` path or `engine://...` path (built-ins such as `engine://Meshes/Cube`).
 - `asset_create {type: Material | SoundEffect | Scene | Prefab | Folder, path, values}` writes native assets; `asset_import {source, destDir}` imports external files (glTF, PNG, HDR, audio, fonts). `asset_delete {asset}` moves an asset with its `.meta` to `Library/Trash/` as one undoable command; given a folder below `Assets/` that holds no files (only empty folders, as a trashed recording leaves behind), it removes that folder, also undoably, and it refuses a folder that holds files (`Validation`, naming them: delete its assets first) or a file whose name no project path can spell, such as `nul.txt` or one ending in a dot (`InvalidState`, nothing removed: remove it outside the editor).
 - Prefabs: build an entity, `prefab_create {entity, path, replaceWithInstance?}`, then `prefab_instantiate {prefab, parent?, index?, transform?, name?, components?}`; `prefab_apply` writes an instance's overrides into the prefab and `prefab.revert` (through `engine_call`) drops them. `prefab_create` returns the replacing instance as `instance`, `prefab_instantiate` returns the new root as `entity` (`{"$ref": "2.entity.id"}` in a batch).
 - **Per-instance values.** `prefab_instantiate`'s `components` sets instance overrides in the same command, as the inspector would: `{<Component>: {<Field>: value}}`, script fields through `Script: {Fields: {...}}`. It works inside `edit_batch` and with `dryRun`, so a grid of variants is one op per cell, with no `entity_update` after each:
@@ -92,31 +95,42 @@ Each entry is `{Script, Scene?, Parameters?, Isolation?, Clock?, Overrides?, Exp
 		"components": {"MeshRenderer": {"Materials": ["Assets/Materials/BrickRed.material"]}, "Script": {"Fields": {"Points": 5}}}}}]}
 ```
 
-- **Tracks and levels.** Give each level a root entity with a `Static` `RigidBody` and instantiate every track piece under it: the pieces join one static compound body, so a rolling ball crosses seams without bumps. Separate static bodies that touch are reported as `PHYSICS_ADJACENT_STATIC_BODIES`, and `project_validate {fix: ["PHYSICS_ADJACENT_STATIC_BODIES"]}` adds that root body for you. Lay out a level as one `edit_batch` of `prefab.instantiate` ops chained with `$ref`, plus ordered waypoint entities along the main route for the autopilot.
+- **Tracks and levels.** Give each level a root entity with a `Static` `RigidBody` and instantiate every track piece under it: the pieces join one static compound body, so a rolling ball crosses seams without bumps. Separate static bodies that touch are reported as `PHYSICS_ADJACENT_STATIC_BODIES`, and `project_validate {fix: ["PHYSICS_ADJACENT_STATIC_BODIES"]}` adds that root body for you. Lay out a level as one `edit_batch` of `prefab.instantiate` ops under the root (`"parent": "/Level"`), plus ordered waypoint entities along the main route for the autopilot.
 - **Entities that report their own collisions** (bricks, targets, pickups) keep their own bodies instead: a collision callback names the entity that owns the body, so colliders merged into a root's compound body all report the root. Give each brick its own `Static` `RigidBody` (in its prefab), put the bricks under a root without a body, and leave a small gap (0.1 m) between neighbours so they never touch and `PHYSICS_ADJACENT_STATIC_BODIES` stays quiet. Walls the ball only bounces off can share one compound body under a root. The body settings of a constant-speed ball and of a player-driven paddle are idioms of `luau-gameplay`.
-- Look at the result: `scene_tree {format: "text"}` for the outline, `entity_bounds` for layout and gaps, and `viewport_screenshot {view: "game", annotate: {labels: "all"}}` (needs `renderer: "vulkan"`).
+- Look at the result: `scene_tree {format: "Text"}` for the outline, `entity_bounds` for layout and gaps, and `viewport_screenshot {view: "Game", width: <Window.Width>, height: <Window.Height>, annotate: {labels: "all"}}` (needs `renderer: "vulkan"`). Without `width` and `height` it renders 640 × 360 whatever the window, which misframes a portrait game and scales screen text by the wrong height. The image comes back as image content; its PNG stays in `Library/Automation/Out/` only until the next editor session prunes it, so report the path of a screenshot you must hand over at once.
+
+### Look
+
+- **Defaults.** `PostProcess` has GTAO (`SsaoEnabled`), bloom (`BloomEnabled`, `BloomIntensity` 0.04) and FXAA on, with AgX tonemapping. A `DirectionalLight` casts PCSS soft shadows (`CastShadows`), whose penumbra radius is (receiver depth − blocker depth) × tan(`LightAngle` / 2), clamped: the default `LightAngle` 1 gives near-hard edges, about 10 looks soft. Its up to four cascades spread over `ShadowDistance` (default 100 m); about twice the camera's distance to the board keeps them sharp.
+- **Receivers.** Shadows and GTAO show only on surfaces the camera sees: a board viewed straight on needs a backboard behind it to receive them. A `Blend` material casts no shadow and takes no GTAO.
+- **Glow.** Bloom has no threshold, so a visible glow needs HDR emission: `Emissive` the piece colour with `EmissiveStrength` 2 to 4.
+- **Background.** An orthographic camera's skybox is one flat colour: set `Camera.Clear` to `"Color"` with a dark `ClearColor` and keep the environment for lighting.
+- **Screen text.** A `Screen` `Text` sits at `Anchor` (viewport-normalized: (0, 0) top-left, Y down), its block's `Pivot` on that point, moved by `Offset`; `Size` and `Offset` are pixels at the 1080p reference, scaled by viewport height / 1080 (× 0.83 at 900 px). The default font's digits are proportional, so a number centred on its anchor jitters as it changes: pin its left or right edge (`Pivot` x 0 or 1). A `World` text's em is `Size` / 100 metres before the entity's scale.
+- **Framing.** Iterate the camera on game-view screenshots at the window's size (`width` and `height`), taken in play (`target: "Play"`) once the runtime entities exist, and with `debugView: "AO"` or `"ShadowCascades"` to see that GTAO and the cascades reach the board.
 
 ## 4. Scripts
 
-- `script_create {path, template: "Behaviour" | "Module" | "Test"}`, then `script_write {path, source}`. Each result carries compile and type diagnostics with full ranges; iterate until `script_check {}` reports none. Set `Scripting.BlockPlayOnTypeErrors` to keep type errors out of play: play, reloads and test runs then refuse them (test runs always do).
-- The templates (`templates/Scripts/<Template>` in `docs_get`) name their type `Script_<File>`, a unique valid identifier: rename it (the local table, the exported alias and the `Script.Define` name) in the first `script_write`.
+- `script_create {path, template: "Behaviour" | "Module" | "Test"}`, then `script_write {path, source}`. Each result carries compile, type and lint diagnostics with full ranges; iterate until `script_check {}` returns an empty `diagnostics` array. Its `passed` counts only errors, but the games suite fails a game on any diagnostic, and Luau's lint warnings (severity `Warning`, such as an unused local or two statements on one line) count. Set `Scripting.BlockPlayOnTypeErrors` to keep type errors out of play: play, reloads and test runs then refuse them (test runs always do).
+- The Behaviour and Module templates (`templates/Scripts/<Template>` in `docs_get`) name their table `Script_<File>` (a Behaviour also its exported alias and its `Script.Define` name), a unique valid identifier: rename it in the first `script_write`. The Test template has no type and names its suite after the file stem without `.test`: `Assets/Tests/Board.test.luau` gives `Test.Suite("Board", ...)`.
 - `script_write` replaces the whole file. Keep scripts small modules (rules in a Module, the behaviour that drives them in another) so each write stays short.
-- Attach a behaviour with `entity_update {entity, components: {Script: {Script: "Assets/Scripts/Game.luau", Fields: {...}}}}`. `_meta` and `project_validate` report overrides that match no declared field (`SCRIPT_UNKNOWN_FIELD_OVERRIDE`) or have the wrong type (`SCRIPT_FIELD_TYPE_MISMATCH`).
-- Keep pure logic (boards, scoring, kick tables) in Modules without engine calls, so the empty-scene suites can test it.
+- Attach a behaviour with `entity_update {entity, components: {Script: {Script: "Assets/Scripts/Game.luau", Fields: {...}}}}`. The call refuses an override that names no declared field or has the wrong type or range (InvalidParams at `/components/Script/Fields/<Name>`), so success means every override matched; `project_validate` reports such overrides already in files (`SCRIPT_UNKNOWN_FIELD_OVERRIDE`, `SCRIPT_FIELD_TYPE_MISMATCH`).
+- Keep pure logic (boards, scoring, kick tables, and the spawn rules: bag, hold, top-out, levels) in Modules without engine calls, so the empty-scene suites test it. The behaviour reads input, calls them and mirrors their state into components (cells' active flags and materials, HUD `Text`), which the state hash and the replays see.
 
 ## 5. Verify deterministically
 
-- `play_start {lockstep: true, seed: 42}` decouples simulation from the wall clock; only `play_step {ticks, input?, render?}` advances it. Each result carries `tick` and `stateHash`.
-- Input events are tick offsets from the step's start: `{tick: 0, type: "action", name: "MoveLeft", state: "tap"}` (down this tick, up the next). Analog actions take `value`, which holds on every later tick until another value replaces it: send `value: 0` to let go. A `down` button likewise stays down until an `up`.
-- `script_eval {context: "play", entity: "/Game", code: "return self.Board:ToAscii()"}` reads state; `play_wait_for {until: "<luau returning a boolean>", timeoutTicks}` steps until a predicate holds.
-- Repeated runs with the same seed and input must give the same `stateHash`. A difference is a determinism bug in the game: see the pitfalls in `luau-gameplay`.
-- **What the state hash covers.** The simulated world only: every entity with its id, name, parent, active flag, tags and serialized components (a `Script` component's authored `Fields`, never its Luau instance state), the tick, the session's `Random` state, the id draws and every body's position, rotation, velocities and sleep flag. It never covers script tables (`self.State`, module locals), audio voices, input state or anything rendered. Two runs with equal hashes have equal worlds at that tick; a score or a counter that lives only in a script table is invisible to it until a Text, a transform or another component shows it. Observe script state with `Expect` (replays) and `Test.Expect*` (suites).
+- `scene_save`, then `play_start {lockstep: true}`. Without `seed` the session runs with the session seed (the project's `Simulation.Seed` XOR the scene's `Seed`), as every suite and every recording does, so it shows their piece order and spawns, which another `seed` can change. `play_start` plays the open scene with its unsaved edits, while recordings and test runs play the saved file. Only `play_step {ticks, input?, render?}` advances it; each result carries `tick` and `stateHash`.
+- Input events are tick offsets from the step's start: `{tick: 0, type: "Action", name: "MoveLeft", state: "Tap"}` (down this tick, up the next). Analog actions take `value`, which holds on every later tick until another value replaces it: send `value: 0` to let go. A `Down` button likewise stays down until an `Up`.
+- `script_eval {context: "Play", entity: "/Game", code: "return self.Board:ToAscii()"}` reads state; `play_wait_for {until: "<luau returning a boolean>", timeoutTicks}` steps until a predicate holds.
+- Repeated runs with the same seed and input must give the same `stateHash`. A difference is a determinism bug in the game: `^` with a computed exponent, `pairs` over entity keys and gameplay that reads the host (`Application.IsEditor`, `Application.IsFocused`, `Time.GetRealTime`) are the usual causes, and split the editor's hashes from the export's (`luau-gameplay`, "Determinism pitfalls").
+- **What the state hash covers.** The simulated world only: every entity with its id, name, parent, active flag, tags and serialized components (a `Script` component's authored `Fields`, never its Luau instance state), the tick, the session's `Random` state, the id draws and every body's position, rotation, velocities and sleep flag. It never covers script tables (`self.State`, module locals), a `Random.New` generator's state, audio voices, input state or rendered output (frames, interpolated positions). What decides the image is covered: an entity's active flag, a `MeshRenderer`'s `Materials` and `Visible` and a `Text`'s string are serialized components. A score that lives only in a script table is invisible to the hash until a Text or another component shows it. Observe script state with `Expect` (replays) and `Test.Expect*` (suites).
 - `play_stop` returns to the edit scene unchanged.
 
 ## 6. Test suites
 
-- One suite per area: pure-logic suites in the empty scene (`Board.test.luau`) and integration suites bound to a scene (`Tetris.test.luau`) that drive play with `Test.InjectAction`, `Test.WaitTicks`, `Test.WaitUntil` and `Test.GetStateHash`.
-- `test_run {}` runs every suite and verifies every replay; `test_run {filter: "Tetris/hard drop"}` selects by a case-insensitive substring of `<suite>/<case>`, so `"Breakout/"` also selects `Autopilot.Breakout/...`: name the longer suite or a case when one suite's name ends another's (a `record` filter must select exactly one suite). The result has `passed`, `counts` (rows by status: `total`, `passed`, `failed`, `error`, `timeout`, `skipped`, `quit`), `failedCases` (up to 20 `"<suite>/<case>"` names), each case with its outcome and failures with file and line, and the `jsonPath` and `junitPath` reports. The `coverage` object is always there with its `registryFingerprint` and `gates`, but its `counters` list stays empty unless you pass `coverage: true` (the JSON report always holds them). A green run has no failed, errored, timed-out or skipped rows.
+- One suite per area: pure-logic suites in the empty scene (`Board.test.luau`) and integration suites bound to a scene (`Tetris.test.luau`) that drive play with `Test.InjectAction`, `Test.WaitTicks` and `Test.WaitUntil` and read the game through `GetScript()` and component values. `Test.GetStateHash` hashes the tick too, so two reads at different ticks always differ and no suite can compare two runs: compare runs with `input_replay` (§7).
+- **Tick budgets.** A case has 600 ticks by default (`Testing.CaseTimeoutTicks`, or `{ TimeoutTicks = N }` on the case) and a suite 36,000 in all (`SuiteTickLimit`). Drive cases with hard drops rather than gravity, and give a gravity-paced case its own `TimeoutTicks`. `Test.WaitUntil(predicate, timeoutTicks)` checks now and after every tick, its predicate must return a boolean, and a timeout fails the case.
+- `test_run {}` runs every suite and verifies every replay; `test_run {filter: "Tetris/hard drop"}` selects by a case-insensitive substring of `<suite>/<case>` (a replay by its path), so `"Breakout/"` also selects `Autopilot.Breakout/...`: name the longer suite or a case when one suite's name ends another's (a `record` filter must select exactly one suite). The result has `passed`, `counts` (rows by status: `total`, `passed`, `failed`, `error`, `timeout`, `skipped`, `quit`), `failedCases` (up to 20 `"<suite>/<case>"` names), each case with its outcome and failures with file and line, and the `jsonPath` and `junitPath` reports. The `coverage` object is always there with its `registryFingerprint` and `gates`, but its `counters` list stays empty unless you pass `coverage: true` (the JSON report always holds them). A green run has no failed, errored, timed-out or skipped rows.
+- **Test runs play saved scene files.** `test_run` refuses with `InvalidState` (hint `scene.save first; test runs play the saved scene file`) while the open scene has unsaved changes and a selected suite is bound to it or a selected replay plays it: `scene_save` first.
 - Write a feature's tests first: stub the new function, write its cases and run them red, then implement it and run them green. `edit_undo` and `edit_redo` also take a `script_write` back and forth, so a test can be shown failing without the feature through automation.
 - The same suites run headless with `Editor --headless --project Projects/<Game> --run-tests [--filter F]` and, in exported testing builds, with `Runtime --feature-test`.
 
@@ -124,62 +138,60 @@ Each entry is `{Script, Scene?, Parameters?, Isolation?, Clock?, Overrides?, Exp
 
 A replay records the input applied per tick from tick 0, the state hash of every 60th tick (its **checkpoints**) and the final state hash (§6.7, §13.6). The checkpoints make a replay prove the trajectory of its run, not only where it ends.
 
-- Save the scene first: a recording plays the saved scene asset its header names. In Edit mode, `input_record {action: "start", scene?, parameters?, seed?}` starts a lockstep session at tick 0 and records. Drive it with `play_step` input, then `input_record {action: "stop", path: "Assets/Tests/Replays/Opening.replay", expect: [{tick: 600, luau: "return Scene.FindByName('Game') ~= nil"}]}`.
-- A hot reload or a play-scene edit during the recording invalidates it: `stop` then fails, writes nothing and names the reason.
-- **The input check.** A recording with input events is replayed without them before it is written. When that run reproduces every checkpoint, the final hash and every `Expect` (whatever script errors it raises), the recording's outcome does not depend on its input, so it proves nothing about the gameplay you recorded: `stop` (and `test_run {record}`) refuse it with `Validation` ("does not depend on its input") and write nothing. That happens only when the input never shows in the world at a checkpoint, at the end or in an `Expect`: a recording shorter than one checkpoint interval (60 ticks) that ends idle, input that changes only script state (script tables are outside the state hash), or input that acts only after the last checkpoint and is undone by the end, such as by a restart. A longer recording that ends with a restart is accepted, because its checkpoints saw the play, but its final hash then proves only the restored state and the play after its last checkpoint goes unchecked. So end every recording while the played state is still in the scene (bricks broken, score shown, a life lost), and with `input_record` add an `Expect` for what only the input causes. A recording without input events (a pure determinism run) has nothing to check. The check replaces the play session, as `input_replay` does: after `stop` the session waits paused where the check ended (`inputCheckTick`); inspect the recorded run before `stop`, or replay the written file.
+- **Record every replay from a recording suite** (§8): re-recording is then one `test_run {record}`, and the input plan stays readable through `script_read`. No method reads a replay's events or the transcript back, so a replay made with `input_record` can only be re-recorded by planning its input again.
+- `input_record` suits a quick check of planned input, written to a scratch replay. Save the scene first: a recording plays the saved scene asset its header names. In Edit mode, `input_record {action: "Start", scene?, parameters?, seed?}` starts a lockstep session at tick 0 (default seed: the session seed) and records. Drive it with `play_step` input, then `input_record {action: "Stop", path: "Assets/Tests/Replays/Check.replay", expect: [{tick: 600, luau: "return (Scene.FindByName('Game') :: Entity):GetScript().Lines >= 1"}]}`: an expectation that only the input satisfies, at a tick no later than the last. Expectations are compiled, never type-checked: run the exact expression with `script_eval {context: "Play"}` before `stop`. Once you have checked it, `asset_delete {asset: "Assets/Tests/Replays/Check.replay"}`: every replay left below `Assets/` counts as committed (the games suite fails one that `Testing.Replays` leaves out), and a committed replay comes from a recording suite.
+- **`stop` verifies with the input.** A recording with input events is first replayed with its input (`verify`, `strictHash`, its `expect`). Unless that playback reproduces every checkpoint, the final hash and every expectation, without stopping early or raising a script error, `stop` refuses with `Validation` ("replayed with its input, the recording does not reproduce itself: <reason>", the first failing checkpoint, expectation, final hash, stop or script error, with its tick), writes nothing and ends the recording; error data `verification` holds the playback's outcome. A recording without input events is written as recorded: verify it with `input_replay`.
+- **Evaluate only reads while recording.** A `script_eval` or `play_wait_for` that calls a mutating engine API (a component write, `SetActive`, a session `Random` draw, or `Scene.CreateEntity`, `Instantiate`, `Destroy` or `Load`; `Scene.FindByName` and the other `Scene` queries only read) invalidates the recording at once; one that writes script state (a `self` field, a board table) is neither detected nor recorded, so `stop` refuses the recording once that write shows. A hot reload or a play-scene edit during the recording invalidates it too: `stop` then fails, writes nothing and names the reason.
+- **The input check.** A recording with input events is then replayed without them before it is written. When that run reproduces every checkpoint, the final hash and every `Expect` (whatever script errors it raises), the recording's outcome does not depend on its input, so it proves nothing about the gameplay you recorded: `stop` (and `test_run {record}`) refuse it with `Validation` ("does not depend on its input") and write nothing. That happens only when the input never shows in the world at a checkpoint, at the end or in an `Expect`: a recording shorter than one checkpoint interval (60 ticks) that ends idle, input that changes only script state (script tables are outside the state hash) or that falls where the game ignores it, or input that acts only after the last checkpoint and is undone by the end, such as by a restart. A longer recording that ends with a restart is accepted, because its checkpoints saw the play, but its final hash then proves only the restored state and the play after its last checkpoint goes unchecked. So give the first input well inside the first 60 ticks, end every recording while the played state is still in the scene (pieces placed, score shown, a life lost), and keep an `Expect` for what only the input causes. The check replaces the play session, as `input_replay` does: after `stop` the session waits paused where the check ended (`inputCheckTick`); inspect the recorded run before `stop`, or replay the written file.
 - Verify with `input_replay {path, verify: true, strictHash: true}`: every `Expect` must hold, every checkpoint must match when playback reaches its tick (the first that differs stops it there, `checkpointFailed`, naming the tick and both hashes) and the final hash must match. `checkpointsChecked` counts the checkpoints compared, the one that failed included, so a passing replay compared all of them. `Testing.Replays` makes every test run verify them; each replay's entry in the run's `suites` reports the same count as `checkpointsChecked` and the tick of a checkpoint that differed as `failedCheckpointTick`.
+- **Replay twice.** Verify each new replay twice that way: the two `stateHash` values must be equal (a demo's acceptance names it, and the transcript keeps both).
 - `input_replay {path, verify: true, strictHash: true, withoutInput: true}` plays the replay with none of its input events. It must fail for a replay with events. Like every failed verification it fails as an error, -32003 `Validation`, whose data `replay` holds the outcome: `passed: false` and, at a differing checkpoint, `checkpointFailed: true`, `finalTick` at that checkpoint and `checkpointsChecked` counting it. When it passes, re-record the replay (the games suite checks this for every committed replay).
-- After `input_replay` the session stays paused at the replay's last tick (or where playback stopped): inspect the end state with `script_eval {context: "play", ...}`, `scene_query` or `entity_get`, then end it with `play_stop`.
+- After `input_replay` the session stays paused at the replay's last tick (or where playback stopped): inspect the end state with `script_eval {context: "Play", ...}`, `scene_query` or `entity_get`, then end it with `play_stop`.
 
-## 8. The autopilot-and-record workflow
+## 8. Recording suites
 
-Steering a physics ball with hand-written tick-stamped input is impractical. Instead write a test-only **autopilot suite** that steers like a player, record its run, and verify the replay without it:
+A replay is recorded by a test-only **recording suite** that plays like a player: an **autopilot** where hand-written input is impractical (steering a physics ball), or a single case that injects a **planned input list** at fixed ticks (a Tetris opening). Record its run, then verify the replay without it:
 
-1. Add `Assets/Tests/Autopilot/Level1.test.luau` to `Testing.Suites` bound to the level, with `Modes: ["Editor"]`, so exported builds never run it.
-2. Its single case reads the ball's state, follows the level's waypoint entities with a PD controller, and injects analog actions with `Test.InjectAction` every tick until the goal is reached. It must only read the scene and inject input: never move entities, write components or draw from the session's `Random` stream, so the run equals a player pressing the same inputs.
-3. Record it: `test_run {filter: "Autopilot.Level1", record: "Assets/Tests/Replays/Level1.replay"}`. The filter must select exactly one suite. The editor verifies the candidate in fresh ordinary gameplay without the test driver, every checkpoint and the final hash included, then runs the input check (§7), before it writes the file. Let the case end while its effects are in the scene, with no restart at its end (cover restarts in another suite): a restart after the last checkpoint leaves the final hash proving only the restored state. The result's `recording` block describes the replay written: `path`, `formatVersion`, `ticks`, `events`, `checkpoints`, `finalStateHash` and `inputCheck` (`ran`, and `divergedAtTick`, where the run without input first differed).
-4. The replay is then verified **without** the autopilot by `input_replay {verify: true, strictHash: true}` and by every test run through `Testing.Replays`, which proves that plain input reaches the goal. Level 2 and 3 suites set `Parameters` (such as the carried timer), which the replay header stores. An autopilot recording carries no `Expect`: its checkpoints and the input check make it prove its gameplay, and behaviour assertions belong in suites (or in `input_record`'s `expect`).
+1. Add it to `Testing.Suites`, bound to the scene, with `Modes: ["Editor"]`, so exported builds never run it.
+2. Its single case reads the scene and injects input with `Test.InjectAction`: an autopilot follows the level's waypoint entities with a PD controller every tick until the goal is reached; a planned case taps each action at its tick. It must only read the scene and inject input: never move entities, write components or draw from the session's `Random` stream, so the run equals a player pressing the same inputs. End it with `Test.Expect` on what only the input causes, while the played state is in the scene, with no restart at its end (cover restarts in another suite).
+3. **Name it so that no replay path contains its name** (`Record.Opening`, not `Opening`, whose filter would also select `Assets/Tests/Replays/Opening.replay`), and record with exactly that filter: `test_run {filter: "Record.Opening", record: "Assets/Tests/Replays/Opening.replay"}`. The filter must select exactly one suite, and every selected row must pass: a refused recording names the selected rows that did not pass (a `replay:<path>/...` row is a committed replay the filter also selected). The editor verifies the candidate in fresh ordinary gameplay without the test driver, every checkpoint and the final hash included, then runs the input check (§7), before it writes the file. The result's `recording` block describes the replay written: `path`, `formatVersion`, `ticks`, `events`, `checkpoints`, `finalStateHash` and `inputCheck` (`ran`, and `divergedAtTick`, where the run without input first differed).
+4. The replay is then verified **without** the suite by `input_replay {verify: true, strictHash: true}` and by every test run through `Testing.Replays`, which proves that plain input reproduces the play. Level 2 and 3 suites set `Parameters` (such as the carried timer), which the replay header stores. A recording made by `test_run` carries no `Expect`: its checkpoints and the input check make it prove its gameplay, and the suite's own `Test.Expect` asserts it at record time.
 
-```luau path=Assets/Tests/Autopilot/Level1.test.luau
+```luau path=Assets/Tests/Record/Opening.test.luau
 --!strict
-local BallScript = require("../../Scripts/Ball")
+local GameScript = require("../../Scripts/Game")
 
--- Steering gains of the PD controller and the distance at which a waypoint counts as reached.
-local Gain, Damping, Reach = 0.6, 0.25, 1.5
+-- The planned input: one tap of each action at its tick, ticks increasing.
+type Tap = { Tick: number, Action: string }
+local Plan: { Tap } = {
+	{ Tick = 12, Action = "MoveLeft" },
+	{ Tick = 30, Action = "RotateCW" },
+	{ Tick = 48, Action = "HardDrop" },
+}
 
-local function byName(a: Entity, b: Entity): boolean
-	return a.Name < b.Name
-end
-
-return Test.Suite("Autopilot.Level1", function()
-	Test.Case("reaches the goal", function()
-		local found = Scene.FindByName("Ball")
-		Test.Expect(found ~= nil, "the level has a Ball")
-		local ballEntity = found :: Entity
-		local ball = ballEntity:GetScript() :: BallScript.Ball
-		local body = ballEntity.RigidBody :: RigidBody
-		local waypoints = Scene.FindAllByTag("PathNode")
-		table.sort(waypoints, byName)
-		local target = 1
-		while not ball.ReachedGoal do
-			local offset = waypoints[target].Transform.WorldPosition - ballEntity.Transform.WorldPosition
-			if vector.magnitude(vector.create(offset.x, 0, offset.z)) < Reach and target < #waypoints then
-				target += 1
-			end
-			local velocity = body:GetLinearVelocity()
-			Test.InjectAction("MoveX", nil, math.clamp(offset.x * Gain - velocity.x * Damping, -1, 1))
-			Test.InjectAction("MoveZ", nil, math.clamp(offset.z * Gain - velocity.z * Damping, -1, 1))
-			Test.WaitTicks(1)
+return Test.Suite("Record.Opening", function()
+	Test.Case("plays the opening", function()
+		local found = Scene.FindByName("Game")
+		Test.Expect(found ~= nil, "Main.scene has a Game entity")
+		local game = (found :: Entity):GetScript() :: GameScript.Game
+		local tick = 0
+		for _, tap in Plan do
+			Test.WaitTicks(tap.Tick - tick)
+			tick = tap.Tick
+			Test.InjectAction(tap.Action, "Tap")
 		end
-	end, { TimeoutTicks = 3600 })
+		Test.WaitTicks(60)
+		Test.Expect(game.LockedCount >= 1, "the input locked a piece")
+	end)
 end)
 ```
+
+An autopilot suite for a rolling-ball level is in `luau-gameplay` ("Recording").
 
 ## 9. Re-recording replays
 
 When an engine change legitimately alters simulation results (a physics fix, a new serialized field, a changed default), replay hashes change and their verification fails:
-- Re-run each autopilot suite with `test_run {record: ...}` through automation, so provenance and the transcript record the new replay.
-- Replays without an autopilot (a Tetris opening) are re-recorded by repeating the recorded `play_step` inputs from the transcript inside a new `input_record` session.
+- Re-run each recording suite with `test_run {filter, record}` through automation, so provenance and the transcript record the new replay; verify it twice and run the input check again (§7).
 - After a gameplay change, re-record a replay when it must cover the new behaviour: a matching hash only means the worlds matched at each checkpoint and at the end, and script state that never reached the world is not compared.
 - The review of the change states why the hashes changed. A verifier's hash never replaces a recorded one by hand.
 - A replay of format version 1 (no `Checkpoints`) still verifies, by its final hash only; `project_upgrade` rewrites it as version 2 without checkpoints, and re-recording it adds them.
@@ -195,19 +207,23 @@ When an engine change legitimately alters simulation results (a physics fix, a n
 ## Definition of done
 
 A game is done when all of these hold:
-1. `project_validate {}` reports no diagnostics and `script_check {}` no findings.
+1. `project_validate {}` reports no diagnostics and `script_check {}` none, lint warnings included.
 2. `test_run {}` is green: every suite in every mode it lists, and every replay verified with its committed hash. `Testing.Replays` matches at least one committed replay recorded from tick 0 with input events, and every replay with input events fails its verification without them (§7).
-3. Every level that a physics ball plays has an autopilot suite and a recorded replay that reaches the goal without it.
-4. `project_export {config: "Dist", smokeTest: true}` succeeds from a rendering editor, with `smokeTestRan: true` and `smokeTestExitCode: 0`.
-5. `python Scripts/AuditProvenance.py --project <Game>` passes on the staged project (index mode, the acceptance mode: it audits the staged files as a fresh clone holds them): every engine-consumed file has a provenance entry with its current XXH64, written by an automation method whose request at the entry's transcript line in `BuildLog.jsonl` has the same id, method and client (or by `project.upgrade`); no entry names a file that no longer exists unless the transcript records an `asset.delete` or `asset.move` of that file (deleting its folder never excuses it); no two staged paths differ only in letter case.
-6. `python Scripts/Test.py --suite games --config Debug,Release,Dist --require-gpu` passes with the game staged: the audit; `script.check`, `project.validate` and the `project.upgrade` dry run clean; every suite and replay at its committed hash in the Debug and Release editors and in a testing Dist export; at least one committed replay with input events, and every one failing its verification without them (`input_replay {verify: true, strictHash: true, withoutInput: true}`); and the plain Dist export's smoke test run and exiting 0.
-7. `<Game>/AGENTS.md` describes the scenes, input actions, scripts, suites and replays.
+3. Every replay comes from a recording suite (every level a physics ball plays has an autopilot whose replay reaches the goal without it), and each was verified twice with `input_replay {verify: true, strictHash: true}` with equal `stateHash` values.
+4. `StartScene` is set and `Export.BuildScenes` lists it.
+5. `project_export {config: "Dist", smokeTest: true}` succeeds from a rendering editor, with `smokeTestRan: true` and `smokeTestExitCode: 0`.
+6. **Soak-ready.** The milestone gate soaks every scene below `Assets/Scenes/` of a game in `Projects/<Game>` (not one in `Tests/Projects/<Game>`) for 10,000 rendered lockstep ticks without input, from the session seed, and fails a scene whose entity, body, voice or device-allocation counts are higher in its last twentieth than in ticks 5,000 to 5,500, whose memory or script heap grows, or that raises a new script error (in `OnStart` too). So pool entities (no `Scene.Instantiate` per lock), give pooled entities no `RigidBody` or collider, let game over wait for `Restart` with a short sound and no looping audio, keep live data bounded (no move history), and write HUD text on change. Check it: from the saved scene `play_start {lockstep: true}`, `play_step` to tick 10,000, `script_errors {}`, and `engine_call {method: "stats.get"}` past ticks 5,000 and 9,500 (`entities`, `bodies` and `voices` must not grow between them).
+7. `python Scripts/AuditProvenance.py --project <Game>` passes on the staged project (index mode, the acceptance mode: it audits the staged files as a fresh clone holds them): every engine-consumed file has a provenance entry with its current XXH64, written by an automation method whose request at the entry's transcript line in `BuildLog.jsonl` has the same id, method and client (or by `project.upgrade`); no entry names a file that no longer exists unless the transcript records an `asset.delete` or `asset.move` of that file (deleting its folder never excuses it); no two staged paths differ only in letter case.
+8. `python Scripts/Test.py --suite games --config Debug,Release,Dist --require-gpu` passes with the game staged: the audit; the build settings (4), `script.check`, `project.validate` and the `project.upgrade` dry run clean; every suite and replay at its committed hash in the Debug and Release editors and in a testing Dist export; at least one committed replay with input events, and every one failing its verification without them (`input_replay {verify: true, strictHash: true, withoutInput: true}`); and the plain Dist export's smoke test run and exiting 0.
+9. `<Game>/AGENTS.md` describes the scenes, input actions, scripts, suites and replays, and every `luau` fence in it type-checks against the documentation stubs (code already run through `script_write` and `script_check` that requires none of the game's own modules) or carries `skip="<reason>"`: the unit suite type-checks the notes (it does not lint them), so a failing fence fails every later commit.
+
+A demo milestone adds its Roadmap acceptance. **Tetris (M17):** `Board.test.luau` covers kicks at both walls and the floor, clears of 1–4 lines and their scores, the 7-bag yielding each piece once per bag, top-out ending the game and hold swapping once per piece; `Tetris.test.luau`, bound to `Main.scene`, has integration cases driven by `Test.InjectAction`; `Opening.replay` (several pieces placed with moves, rotations, a hold, a soft drop and hard drops, ending with them in the well) and `LineClear.replay` (a planned placement of the known pieces that clears at least one line, the HUD showing it) each come from a recording suite; and the look screenshots, from a `renderer: "vulkan"` editor in a lockstep session with a stack of cells, are `viewport_screenshot {view: "Game", target: "Play", width: 720, height: 900}` plus the same with `debugView: "AO"` and with `"ShadowCascades"`, their paths reported.
 
 ## Pitfalls
 
 - **Arrays replace.** A settings patch with `"Suites": [one entry]` drops every other suite.
-- **Unsaved scene.** Recording, replay verification and export use saved files: `scene_save` first.
-- **Renderer none.** The bridge's default editor cannot take screenshots (`Unsupported`); relaunch with `renderer: "vulkan"`.
+- **Unsaved scene.** Recording, replay verification, test runs (every suite bound to a scene and every replay) and export use the saved files, while `play_start` plays the open scene with its unsaved edits: `scene_save` first (`test_run` refuses a dirty scene it would play).
+- **Renderer none.** The bridge's default editor cannot take screenshots (`Unsupported`), and a `Test.Screenshot` call errors its case there; relaunch with `renderer: "vulkan"`.
 - **Lockstep ownership.** Only the client that started lockstep may step it; a disconnect releases it.
 - **Large results** over 48 KB come back as `{path, truncated: true, summary}`: read the file with the bridge's `result_read {path, pointer?, offset?, length?}` (one page of its text with `nextOffset`, or the JSON value at a pointer such as `/cases/0`; `engine_client.load_offloaded` outside the bridge), never with another file tool. `result_read` also reads a test run's `jsonPath` and `junitPath` reports.
 - **Hot reload pauses for determinism.** Lockstep, recording, replay and test sessions defer script reloads; ordinary play reloads at safe points.

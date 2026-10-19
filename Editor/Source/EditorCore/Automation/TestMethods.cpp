@@ -4,15 +4,23 @@
 #include "EditorCore/Automation/EditorMethodContext.h"
 #include "EditorCore/EditorContext.h"
 #include "EditorCore/Play/EditorFeatureTestHost.h"
+#include "Engine/Asset/Asset.h"
+#include "Engine/Asset/AssetRegistry.h"
+#include "Engine/Asset/ReplayData.h"
+#include "Engine/Asset/ScriptData.h"
+#include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/Automation/Methods/SharedMethodSupport.h"
 #include "Engine/Automation/Protocol/MethodRegistry.h"
 #include "Engine/Automation/Protocol/PendingOperation.h"
 #include "Engine/Core/Json/JsonWriter.h"
+#include "Engine/Core/VfsPath.h"
 #include "Engine/Reflection/TypeRegistry.h"
 
 #include <nlohmann/json.hpp>
 
 #include <format>
+#include <string>
+#include <vector>
 
 namespace Engine {
 
@@ -38,6 +46,9 @@ namespace Engine {
 			{
 				return m_Runner.Begin(*m_Host, { .Mode = TestSuiteSettings::Mode::Editor, .Filter = params.Filter, .TimeoutTicks = params.TimeoutTicks, .Record = !m_Record.empty() });
 			}
+
+			// What the successful Begin selected (FeatureTestRunner::GetSelection).
+			[[nodiscard]] Result<FeatureTestSelection> GetSelection() const { return m_Runner.GetSelection(); }
 
 			[[nodiscard]] std::optional<Result<Json>> Poll(MethodContext& context) override
 			{
@@ -153,6 +164,55 @@ namespace Engine {
 			bool m_Released = false;
 		};
 
+		// The declared name of the selected suite `settings` (its script's Test.Suite name), for messages; its script path
+		// when the script does not load as a suite.
+		[[nodiscard]] std::string DescribeSuite(EditorContext& editor, EditorFeatureTestHost& host, const TestSuiteSettings& settings)
+		{
+			const Result<AssetHandle> handle = host.ResolveTestScript(settings.Script);
+			if (!handle)
+				return settings.Script;
+			const Result<AssetRef<Asset>> loaded = editor.GetAssets().Load(*handle);
+			const AssetRef<ScriptData> script = loaded ? AssetCast<ScriptData>(*loaded) : AssetRef<ScriptData>();
+			return script ? script->Name : settings.Script;
+		}
+
+		// Docs/Decisions/0027-m17-contract.md "Frozen interfaces / A2": a test run plays the saved file of every scene it uses,
+		// so it refuses an open scene with unsaved changes that a selected suite is bound to (its Scene resolved as play.start
+		// resolves it) or that a selected replay plays (the registry's source path of its scene asset, as the replay session
+		// loads it). The first such selection is named: suites in Testing.Suites order, then replays in canonical path order.
+		// A suite Scene that does not resolve, or a replay whose scene asset is missing, matches nothing: the run reports it.
+		[[nodiscard]] Status CheckDirtyScene(EditorMethodContext& context, EditorFeatureTestHost& host, const FeatureTestSelection& selection)
+		{
+			EditorContext& editor = context.GetEditor();
+			if (!editor.HasScene() || !editor.IsSceneDirty() || !editor.GetScenePath().has_value())
+				return {};
+			const VfsPath& open = *editor.GetScenePath();
+			const auto refuse = [&open](std::string selected)
+			{
+				return std::unexpected(Error(ErrorCode::InvalidState, std::format("'{}' is open with unsaved changes, and the selected {} plays its saved file", open.GetPath(), selected))
+						.WithHint("scene.save first; test runs play the saved scene file"));
+			};
+			const std::vector<TestSuiteSettings>& suites = host.GetProjectSettings().Testing.Suites;
+			for (const size_t index : selection.Suites)
+			{
+				if (index >= suites.size() || suites[index].Scene.empty())
+					continue;
+				const Result<VfsPath> scene = context.ResolveProjectPath(suites[index].Scene, "/scene", ".scene");
+				if (scene && *scene == open)
+					return refuse(std::format("suite '{}'", DescribeSuite(editor, host, suites[index])));
+			}
+			for (const std::string& path : selection.Replays)
+			{
+				const Result<AssetRef<ReplayData>> replay = host.LoadReplay(path);
+				if (!replay)
+					continue;
+				const AssetRecord* scene = editor.GetAssets().GetRegistry().Find((*replay)->Header.Scene.Handle);
+				if (scene != nullptr && scene->Metadata.Type == AssetType::Scene && scene->SourcePath == open)
+					return refuse(std::format("replay '{}'", path));
+			}
+			return {};
+		}
+
 	}
 
 	namespace Automation {
@@ -190,6 +250,9 @@ namespace Engine {
 					return std::unexpected(Error(ErrorCode::Validation, begun.error().GetMessageText()).WithLocation(begun.error().GetLocation()));
 				return std::unexpected(begun.error());
 			}
+			// After every error of Preflight and Begin, before the lease and before anything plays (A2).
+			ENGINE_TRY_ASSIGN(const FeatureTestSelection selection, operation->GetSelection());
+			ENGINE_TRY(CheckDirtyScene(context, *adapter, selection));
 			ENGINE_TRY(adapter->Acquire());
 			return Scope<PendingOperation>(std::move(operation));
 		}
@@ -224,7 +287,7 @@ namespace Engine {
 	{
 		methods.Add({ .Name = "test.list", .Description = "Collects test suite and case names and source locations without running case bodies.", .Examples = { { .Description = "List configured tests.", .Params = Json::object() } } }, &Automation::TestList);
 		methods.AddPending<EditorMethodContext, TestRunParams, TestRunMethodResult>(
-			{ .Name = "test.run", .Description = "Runs configured tests and returns every outcome (counts, failedCases and the case rows; a replay's suite entry counts the checkpoints it compared) plus JSON/JUnit reports. The coverage object always keeps its registryFingerprint and gates; its counters are returned only with coverage: true or Testing.CoverageGates. Optional recording is published only after strict replay verification and, with input events, the input check (§13.6: refused when a run without them still passes that verification, whatever script errors it raises), and reported in the recording block (format version, ticks, events, checkpoints, final hash, where the input check diverged).", .ExposeAsTool = true, .TimeoutSeconds = 900, .Examples = { { .Description = "Run every configured test.", .Params = Json::object() }, { .Description = "Run every test and return the script API coverage counters.", .Params = Json{ { "coverage", true } } } } }, &Automation::TestRun);
+			{ .Name = "test.run", .Description = "Runs configured tests and returns every outcome (counts, failedCases and the case rows; a replay's suite entry counts the checkpoints it compared) plus JSON/JUnit reports. The coverage object always keeps its registryFingerprint and gates; its counters are returned only with coverage: true or Testing.CoverageGates. Optional recording is published only after strict replay verification and, with input events, the input check (§13.6: refused when a run without them still passes that verification, whatever script errors it raises), and reported in the recording block (format version, ticks, events, checkpoints, final hash, where the input check diverged); a refused recording names the selected rows that did not pass. Runs play saved scene files, so test.run refuses (InvalidState, nothing run) while the open scene has unsaved changes and a selected suite or replay plays it: scene.save first.", .ExposeAsTool = true, .TimeoutSeconds = 900, .Examples = { { .Description = "Run every configured test.", .Params = Json::object() }, { .Description = "Run every test and return the script API coverage counters.", .Params = Json{ { "coverage", true } } } } }, &Automation::TestRun);
 	}
 
 }

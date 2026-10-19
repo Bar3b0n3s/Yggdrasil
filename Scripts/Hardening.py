@@ -6,11 +6,17 @@ milestone gates (CI.py --milestone).
 Steps, in this order, failing fast (a step after a failed one is reported as not run):
   perf           perf capture (Release): Scripts/Perf.py --config Release (stream D), warning-only: an over-budget
                  metric or a fallback without a GPU is a warning, only a capture that cannot run fails
-  soak           soak Release: every scene of every project (Lib/hardening.py soak_projects and soak_scenes, the
-                 golden scenes included) in one plain Release editor each (--headless --renderer vulkan --audio-device
-                 none --automation, on a temporary copy of the project with Library/): scene.open, play.start
-                 {lockstep: true} and N / 250 x play.step {ticks: 250, render: "Every"}, N rendered frames (N =
-                 --soak-frames, 10,000 by default), sampling the editor's process memory and stats.get after each step;
+  soak           soak Release: every scene of every project below Projects/ (Lib/hardening.py soak_projects and
+                 soak_scenes: FeatureTest and the demos built there, not those below Tests/Projects/, the golden scenes
+                 included) in one plain Release editor each (--headless --renderer vulkan --audio-device none
+                 --automation, on a temporary copy of the project with Library/): scene.open, script.errors {since:
+                 "end"} (the error stream's cursor, taken before play.start runs OnStart), play.start {lockstep: true}
+                 and N / 250 x play.step {ticks: 250, render: "Every"}, N rendered frames (N = --soak-frames, 10,000 by
+                 default), sampling the editor's process memory and stats.get after each step, then script.errors from
+                 that cursor: any new script error of the play session, OnStart's included, fails the subject with one
+                 line counting them and naming the earliest listed, at its latest occurrence (script.errors lists each
+                 distinct error once; Docs/Decisions/0027-m17-contract.md decision 4, B4; play.step keeps ticking
+                 through a non-fatal script error, so the soak runs all its ticks either way);
                  then the exported Release FeatureTest that the export stage leaves in bin/Exports/Release/FeatureTest
                  (--headless --frames N, its memory sampled from outside every 0.5 s). hardening.evaluate_soak applies
                  the rules of decision 15 to each subject, its windows being fractions of the soak whatever N is;
@@ -136,6 +142,10 @@ NO_DEVICE_TEXT = "GPU test without a device (passes without running): "
 SOAK_STEP_TICKS = hardening.SOAK_SAMPLE_INTERVAL
 SOAK_CALL_TIMEOUT_SECONDS = 600.0
 SOAK_SHUTDOWN_TIMEOUT_SECONDS = 60.0
+# script.errors' cursor for "the stream's current end" and its largest page (ScriptMethods.cpp: limit 1 to 1000), with
+# which the soak reads the errors of a scene's play session (Docs/Decisions/0027-m17-contract.md decision 4, B4).
+SCRIPT_ERRORS_END = "end"
+SCRIPT_ERRORS_PAGE_LIMIT = 1000
 SOAK_REPORT = paths.TEST_RESULTS_ROOT / "Soak.json"
 SOAK_JUNIT = paths.TEST_RESULTS_ROOT / "Soak-Release.xml"
 FUZZ_JUNIT = paths.TEST_RESULTS_ROOT / "Fuzz-Release-Asan.xml"
@@ -344,15 +354,86 @@ def soak_deadline_error(where: str = "", seconds: float = TIMEOUTS["soak"]) -> s
     return f"the soak step's {seconds:.0f} s deadline passed" + (f" {where}" if where else "")
 
 
-SoakRun = tuple[list[hardening.SoakSample], list[str]]  # a subject's samples and the errors that ended it early
+SoakRun = tuple[list[hardening.SoakSample], list[str]]  # a subject's samples and the errors that fail it
+
+
+def script_error_cursor(client: Any, engine_client: Any, deadline: SoakDeadline) -> tuple[str | None, list[str]]:
+    """script.errors {since: "end"}: (its nextCursor, the current end of the editor's error stream, []), or (None, [the
+    error line naming the failed call]) when the call fails or returns no cursor. The soak takes it after scene.open and
+    before play.start, whose activation runs OnStart, so OnStart's errors come after it
+    (Docs/Decisions/0027-m17-contract.md decision 4, B4)."""
+    call = f'script.errors {{since: "{SCRIPT_ERRORS_END}"}}'
+    try:
+        result = client.call("script.errors", {"since": SCRIPT_ERRORS_END},
+                             timeout=deadline.limit(SOAK_CALL_TIMEOUT_SECONDS))
+    except engine_client.EngineError as error:
+        return None, [f"{call} failed: {error}"]
+    cursor = result.get("nextCursor") if isinstance(result, dict) else None
+    if not isinstance(cursor, str) or not cursor:
+        return None, [f"{call} failed: its result has no nextCursor"]
+    return cursor, []
+
+
+def new_script_errors(client: Any, engine_client: Any, cursor: str, deadline: SoakDeadline) -> list[str]:
+    """The script errors after `cursor` (script_error_cursor's), read with script.errors {since, limit:
+    SCRIPT_ERRORS_PAGE_LIMIT} from the cursor, following nextCursor until a page is empty (ADR 0027 decision 4, B4).
+    The editor never clears its error stream and each soak scene starts a fresh editor, so every entry after the cursor
+    is an error of this scene's play session (a repeated error included, which the stream moves after the cursor with
+    its latest occurrence). The stream lists each distinct error once, at its latest occurrence (its tick, and its count
+    of every occurrence, those before the cursor included), and keeps the 256 errors with the latest occurrences, so the
+    first occurrence is unknown: the line names the earliest listed entry. Returns one line when there is any, "<n> new
+    script error(s) during the soak; the earliest listed: <script>:<line>: <message> (latest at tick <tick>, <count>
+    occurrence(s))", <n> counting the entries returned, followed by "; earlier errors were evicted" when any page
+    answered evicted: true; and a line naming a script.errors call that failed (or returned no errors array or
+    nextCursor, or a page that leaves the cursor where it was)."""
+    entries: list[Any] = []
+    evicted = False
+    failure: str | None = None
+    since = cursor
+    while True:
+        call = f'script.errors {{since: "{since}"}}'
+        try:
+            result = client.call("script.errors", {"since": since, "limit": SCRIPT_ERRORS_PAGE_LIMIT},
+                                 timeout=deadline.limit(SOAK_CALL_TIMEOUT_SECONDS))
+        except engine_client.EngineError as error:
+            failure = f"{call} failed: {error}"
+            break
+        page = result.get("errors") if isinstance(result, dict) else None
+        next_cursor = result.get("nextCursor") if isinstance(result, dict) else None
+        if not isinstance(page, list) or not isinstance(next_cursor, str):
+            failure = f"{call} failed: its result has no errors array or no nextCursor"
+            break
+        evicted = evicted or result.get("evicted") is True
+        if not page:
+            break
+        entries += page
+        if next_cursor == since:
+            failure = f"{call} failed: it returned {len(page)} error(s) without advancing its nextCursor"
+            break
+        since = next_cursor
+    lines: list[str] = []
+    if entries:
+        earliest = entries[0] if isinstance(entries[0], dict) else {}
+        line = (f"{len(entries)} new script error(s) during the soak; the earliest listed: "
+                f"{earliest.get('script', '')}:{earliest.get('line', 0)}: {earliest.get('message', '')} "
+                f"(latest at tick {earliest.get('tick', 0)}, {earliest.get('count', 0)} occurrence(s))")
+        lines.append(f"{line}; earlier errors were evicted" if evicted else line)
+    if failure is not None:
+        lines.append(failure)
+    return lines
 
 
 def soak_editor_scene(engine_client: Any, editor: Path, project_file: Path, scene: str, user_data: Path,
                       console: Console, deadline: SoakDeadline, frames: int = hardening.SOAK_FRAMES) -> SoakRun:
     """One scene's editor soak of `frames` ticks (frames / SOAK_STEP_TICKS play.step calls): its samples, each at
-    position tick / frames, and the errors that ended it early (empty when it ran all its ticks). Each call waits at
-    most SOAK_CALL_TIMEOUT_SECONDS and never past `deadline`; at the deadline the scene ends with an error naming it,
-    and the editor is killed."""
+    position tick / frames, and its errors, which fail the subject: those that ended it early (none when it ran all
+    its ticks) and its new script errors (Docs/Decisions/0027-m17-contract.md decision 4, B4). After scene.open it takes
+    script.errors' cursor (script_error_cursor), before play.start, whose activation runs OnStart; after the soak's
+    last step (all its ticks, or where an error ended it) it reads the errors after that cursor (new_script_errors), so
+    any script error of the play session, OnStart's included, adds one line naming how many there were and the earliest
+    listed one. play.step keeps ticking through a non-fatal script error (the editor disables the faulting instance), so
+    the soak runs all its ticks either way. Each call waits at most SOAK_CALL_TIMEOUT_SECONDS and never past `deadline`;
+    at the deadline the scene ends with an error naming it, and the editor is killed."""
     samples: list[hardening.SoakSample] = []
     errors: list[str] = []
     try:
@@ -368,8 +449,11 @@ def soak_editor_scene(engine_client: Any, editor: Path, project_file: Path, scen
         client = editor_process.connect("hardening-soak", call_log=engine_client.CallLog(None))
         with client:
             pid = editor_process.process.pid
+            cursor: str | None = None
             try:
                 client.call("scene.open", {"path": scene}, timeout=deadline.limit(SOAK_CALL_TIMEOUT_SECONDS))
+                cursor, cursor_errors = script_error_cursor(client, engine_client, deadline)
+                errors += cursor_errors
                 client.call("play.start", {"lockstep": True}, timeout=deadline.limit(SOAK_CALL_TIMEOUT_SECONDS))
                 stats = client.call("stats.get", {}, timeout=deadline.limit(SOAK_CALL_TIMEOUT_SECONDS))
                 samples.append(stats_sample(0.0, pid, stats))
@@ -385,6 +469,8 @@ def soak_editor_scene(engine_client: Any, editor: Path, project_file: Path, scen
                     samples.append(stats_sample(tick / frames, pid, stats))
             except engine_client.EngineError as error:
                 errors.append(f"{error}")
+            if cursor is not None:
+                errors += new_script_errors(client, engine_client, cursor, deadline)
             try:
                 client.call("session.shutdown", {"force": True}, timeout=deadline.limit(SOAK_SHUTDOWN_TIMEOUT_SECONDS))
             except (engine_client.EngineError, engine_client.ConnectionClosed, TimeoutError):
@@ -517,7 +603,8 @@ def write_soak_reports(outcome: SoakOutcome, report: Path, junit: Path, frames: 
 def run_soak_subjects(subjects: list[SoakSubject], deadline: SoakDeadline, console: Console,
                       report: Path = SOAK_REPORT, junit: Path = SOAK_JUNIT,
                       frames: int = hardening.SOAK_FRAMES) -> SoakOutcome:
-    """Soaks `subjects` in order and evaluates each (hardening.evaluate_soak, after the errors that ended it early).
+    """Soaks `subjects` in order and evaluates each (hardening.evaluate_soak, after its errors: those that ended it
+    early and, for an editor scene, its new script errors, each of which fails it).
     No subject starts after `deadline`: the subject it cut short fails naming it, the rest are listed as not run and the
     outcome is timed out. Soak.json and the JUnit report are written from a finally block, so the subjects that
     finished survive whatever ends the step."""
