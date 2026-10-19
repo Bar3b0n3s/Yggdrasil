@@ -37,6 +37,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <charconv>
 #include <filesystem>
 #include <set>
@@ -355,6 +356,59 @@ namespace Engine {
 			return offset;
 		}
 
+		// The prefix of an asset.list dir that lists the built-in assets (M17 friction F02).
+		constexpr std::string_view EngineDirPrefix = "engine://";
+
+		// asset.list's built-in form (M17 friction F02): the BuiltinAssetCatalog entries below `params.Dir` ("engine://" or a
+		// folder below it, such as "engine://Environments"), with type, recursive, limit and cursor as for project assets (a
+		// built-in has no sub-assets), sorted by path. Errors: InvalidArgument at /dir for a malformed engine path or one that
+		// names a built-in asset; NotFound when no built-in lies below it; ParseListCursor's.
+		Result<AssetListResult> ListBuiltinAssets(const EditorAssetManager& assets, const AssetListParams& params)
+		{
+			const Result<VfsPath> directory = VfsPath::Parse(params.Dir);
+			if (!directory)
+			{
+				return std::unexpected(Utils::MakeParamError(ErrorCode::InvalidArgument, "/dir",
+					std::format("'{}' is not a valid engine path: {}", params.Dir, directory.error().GetMessageText()),
+					"pass \"engine://\" or a folder below it, such as \"engine://Environments\""));
+			}
+			const BuiltinAssetCatalog& builtins = assets.GetBuiltins();
+			if (builtins.FindByPath(params.Dir) != nullptr)
+			{
+				return std::unexpected(Utils::MakeParamError(ErrorCode::InvalidArgument, "/dir", std::format("'{}' is a built-in asset, not a folder", params.Dir),
+					std::format("asset.info {{asset: \"{}\"}} describes it", params.Dir)));
+			}
+			bool folderExists = false;
+			std::vector<const BuiltinAssetEntry*> matches;
+			for (const BuiltinAssetEntry& entry : builtins.GetEntries())
+			{
+				// The catalogue validated every path when it was parsed (BuiltinAssetCatalog::Parse).
+				const Result<VfsPath> path = VfsPath::Parse(entry.Path);
+				if (!path || !path->IsUnder(*directory) || *path == *directory)
+					continue;
+				folderExists = true;
+				const bool inside = params.Recursive || path->GetParent() == *directory;
+				if (inside && (params.Type == AssetType::None || params.Type == entry.Type))
+					matches.push_back(&entry);
+			}
+			if (!folderExists)
+			{
+				return std::unexpected(Utils::MakeParamError(ErrorCode::NotFound, "/dir", std::format("'{}' is not a folder of the built-in assets", params.Dir),
+					"asset.list {dir: \"engine://\"} lists every built-in asset"));
+			}
+			std::ranges::sort(matches, {}, &BuiltinAssetEntry::Path);
+
+			ENGINE_TRY_ASSIGN(const size_t offset, ParseListCursor(params.Cursor, matches.size()));
+			const size_t end = std::min(matches.size(), offset + params.Limit);
+			AssetListResult result;
+			result.Total = ToAutomationCounter(matches.size());
+			for (size_t index = offset; index < end; ++index)
+				result.Assets.push_back(AssetSummary{ .Id = matches[index]->Handle.ToString(), .Path = matches[index]->Path, .Type = matches[index]->Type });
+			if (end < matches.size())
+				result.NextCursor = std::to_string(end);
+			return result;
+		}
+
 		// Whether the open scene instantiates `prefab`, so a new version of it must update the instances (§5.5).
 		bool IsInstancedInOpenScene(EditorContext& editor, AssetHandle prefab)
 		{
@@ -641,6 +695,8 @@ namespace Engine {
 		{
 			if (params.Limit < 1 || params.Limit > MaxListLimit)
 				return std::unexpected(Utils::MakeParamError(ErrorCode::InvalidArgument, "/limit", std::format("limit must be 1 to {}", MaxListLimit)));
+			if (params.Dir.starts_with(EngineDirPrefix))
+				return ListBuiltinAssets(context.GetEditor().GetAssets(), params);
 			ENGINE_TRY_ASSIGN(const VfsPath directory, Utils::ResolveAssetsPath(context, params.Dir, "/dir", {}, true));
 			EditorContext& editor = context.GetEditor();
 			ENGINE_TRY(Utils::RefreshAssets(editor));
@@ -834,7 +890,19 @@ namespace Engine {
 			if (params.Type == AssetCreateType::Folder)
 			{
 				if (vfs.Exists(path))
-					return std::unexpected(Utils::MakeParamError(ErrorCode::AlreadyExists, "/path", std::format("'{}' already exists", relative)));
+				{
+					// M17 friction F07: a folder that is already there is what was asked for, so nothing is written or recorded
+					// (created: false) and an edit.batch no longer fails on a folder the project template made.
+					Result<FileInfo> existing = vfs.GetInfo(path);
+					if (!existing)
+						return std::unexpected(Utils::ToEditorFileError(std::move(existing).error()));
+					if (!existing->IsDirectory)
+					{
+						return std::unexpected(Utils::MakeParamError(ErrorCode::AlreadyExists, "/path", std::format("'{}' already exists as a file", relative),
+							"choose another path for the folder"));
+					}
+					return result;
+				}
 				Utils::AddMissingDirectoryEdits(vfs, path, edits);
 				label = std::format("Create Folder '{}'", path.GetFileName());
 			}
@@ -855,6 +923,7 @@ namespace Engine {
 			}
 			ENGINE_TRY_ASSIGN(const uint64_t undoIndex, editor.Execute(CreateScope<AssetEditCommand>(std::move(label), std::move(edits))));
 			result.UndoIndex = ToAutomationCounter(undoIndex);
+			result.Created = true;
 			return result;
 		}
 
@@ -1034,7 +1103,7 @@ namespace Engine {
 			.Entry(AssetCreateType::Scene, "Scene", "A .scene file: an empty scene named after the file.")
 			.Entry(AssetCreateType::Prefab, "Prefab", "A .prefab file with one root entity named after the file.")
 			.Entry(AssetCreateType::SoundEffect, "SoundEffect", "A .sfx sound effect: synthesized layers of oscillators, imported as an AudioClip.")
-			.Entry(AssetCreateType::Folder, "Folder", "A folder below Assets/.");
+			.Entry(AssetCreateType::Folder, "Folder", "A folder below Assets/; one that already exists is left as it is (created: false).");
 
 		registry.Struct<AssetDiagnosticInfo>("AssetDiagnosticInfo", "A diagnostic of an asset.")
 			.Field("severity", &AssetDiagnosticInfo::Severity, "How serious it is.")
@@ -1044,7 +1113,9 @@ namespace Engine {
 			.Field("hint", &AssetDiagnosticInfo::Hint, "How to fix it; empty when there is no hint.");
 
 		registry.Struct<AssetListParams>("AssetListParams", "The params of asset.list.")
-			.Field("dir", &AssetListParams::Dir, "The project-relative folder to list, Assets or below it.")
+			.Field("dir", &AssetListParams::Dir,
+				"The folder to list: project-relative, Assets or below it; or engine:// or a folder below it, such as engine://Environments, "
+				"for the built-in assets (which have no sub-assets).")
 			.Field("type", &AssetListParams::Type, "Only assets of this type; None lists every type.")
 			.Field("recursive", &AssetListParams::Recursive, "Also list the folders below dir.")
 			.Field("subAssets", &AssetListParams::SubAssets, "Also list sub-assets (a glTF's meshes, materials and textures) after their source.")
@@ -1095,7 +1166,9 @@ namespace Engine {
 
 		registry.Struct<AssetCreateParams>("AssetCreateParams", "The params of asset.create.")
 			.Field("type", &AssetCreateParams::Type, "What to create.")
-			.Field("path", &AssetCreateParams::Path, "The project-relative path below Assets/, with the type's extension (.material, .scene, .prefab, .sfx).")
+			.Field("path", &AssetCreateParams::Path,
+				"The project-relative path below Assets/, with the type's extension (.material, .scene, .prefab, .sfx; none for a folder); missing "
+				"parent folders are created with it.")
 			.Field("values", &AssetCreateParams::Values,
 				"A Material's or a SoundEffect's fields over the defaults (registry names, such as Roughness, or Layers, which a sound effect "
 				"needs); absent for other types.");
@@ -1103,7 +1176,9 @@ namespace Engine {
 		registry.Struct<AssetCreateResult>("AssetCreateResult", "The created asset.")
 			.Field("asset", &AssetCreateResult::Asset, "The created asset; an empty id and type None for a folder.")
 			.Field("path", &AssetCreateResult::Path, "The project-relative path created.")
-			.Field("undoIndex", &AssetCreateResult::UndoIndex, "The command's undo index; 0 in a dry run or a batch.");
+			.Field("undoIndex", &AssetCreateResult::UndoIndex, "The command's undo index; 0 in a dry run or a batch, and when nothing was created.")
+			.Field("created", &AssetCreateResult::Created,
+				"Whether anything was created: false only for a Folder whose path is already a folder, which succeeds without a command.");
 
 		registry.Struct<AssetGetPropertiesParams>("AssetGetPropertiesParams", "The params of asset.getProperties.")
 			.Field("asset", &AssetGetPropertiesParams::Asset, "The native asset (a material or a sound effect).");
@@ -1164,14 +1239,17 @@ namespace Engine {
 		Json listExample = Json::object();
 		listExample["dir"] = "Assets/Materials";
 		listExample["type"] = "Material";
+		Json builtinListExample = Json::object();
+		builtinListExample["dir"] = "engine://Environments";
 		methods.Add(
 			{
 				.Name = "asset.list",
-				.Description = "Lists the project's assets below a folder, optionally of one type, sorted by path with each glTF's sub-assets "
-							   "after it; paged with limit and cursor.",
+				.Description = "Lists the project's assets below a folder, or the built-in assets below engine:// (such as engine://Environments), "
+							   "optionally of one type, sorted by path with each glTF's sub-assets after it; paged with limit and cursor.",
 				.ExposeAsTool = true,
 				.AllowedInBatch = true,
-				.Examples = { { .Description = "List the materials.", .Params = listExample } },
+				.Examples = { { .Description = "List the materials.", .Params = listExample },
+					{ .Description = "List the built-in environments.", .Params = builtinListExample } },
 			},
 			&Automation::AssetList);
 
@@ -1235,7 +1313,8 @@ namespace Engine {
 			{
 				.Name = "asset.create",
 				.Description = "Creates a material or a sound effect (with values over the defaults), an empty scene, a one-entity prefab or a "
-							   "folder below Assets/, with its .meta, as one undoable command.",
+							   "folder below Assets/, with its .meta and any missing parent folders, as one undoable command. A folder that already "
+							   "exists succeeds without a command (created: false), so a Folder op is needed only for an empty folder.",
 				.RequiredParams = { "type", "path" },
 				.ExposeAsTool = true,
 				.Mutates = true,
@@ -1253,6 +1332,7 @@ namespace Engine {
 				.Name = "asset.getProperties",
 				.Description = "Returns every property of a native asset (a material or a sound effect) by registry name.",
 				.RequiredParams = { "asset" },
+				.ExposeAsTool = true,
 				.AllowedInBatch = true,
 				.Examples = { { .Description = "Read a material.", .Params = getPropertiesExample } },
 			},
@@ -1266,7 +1346,8 @@ namespace Engine {
 			{
 				.Name = "asset.setProperties",
 				.Description = "Applies an RFC 7386 merge patch to a native asset's properties (a material or a sound effect) and writes it, as "
-							   "one undoable command.",
+							   "one undoable command. A running lockstep, recording, replay or test session sees the change only after it ends: asset "
+							   "reloads are deferred like script reloads.",
 				.RequiredParams = { "asset", "values" },
 				.ExposeAsTool = true,
 				.Mutates = true,

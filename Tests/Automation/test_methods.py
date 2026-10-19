@@ -174,8 +174,11 @@ class MethodTests(AutomationTestCase):
         # line.
         client = self.connect(self.start_editor())
         topics = {topic["name"]: topic for topic in client.call("docs.get")["topics"]}
-        for name in ("reference/Schemas/Scene", "scripting/Engine.d.luau", "templates/Scripts/Behaviour"):
+        for name in ("reference/Schemas/Scene", "reference/BuiltinAssets", "scripting/Engine.d.luau",
+                     "templates/Scripts/Behaviour"):
             self.assertIn(name, topics)
+        builtins = client.call("docs.get", {"topic": "reference/BuiltinAssets"})
+        self.assertIn("engine://Environments/Studio", builtins["content"])
         text = (REPOSITORY_ROOT / "Docs" / "Reference" / "ScriptAPI.md").read_bytes().decode("utf-8")
         first = client.call("docs.get", {"topic": "reference/ScriptAPI"})
         self.assertNotIn("truncated", first)

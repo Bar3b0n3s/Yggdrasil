@@ -7,6 +7,7 @@
 #include "EditorCore/Reference/DescriptionInventory.h"
 #include "Engine/Asset/AssetMetadata.h"
 #include "Engine/Asset/AssetType.h"
+#include "Engine/Asset/BuiltinAssets.h"
 #include "Engine/Asset/MaterialData.h"
 #include "Engine/Asset/ReplayData.h"
 #include "Engine/Asset/SourceFormats.h"
@@ -20,6 +21,7 @@
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Core/Json/JsonWriter.h"
 #include "Engine/Core/Log.h"
+#include "Engine/Core/VfsPath.h"
 #include "Engine/Platform/Input/InputState.h"
 #include "Engine/Platform/Input/KeyCodes.h"
 #include "Engine/Project/GameManifest.h"
@@ -647,6 +649,73 @@ namespace Engine {
 			return out;
 		}
 
+		// --- BuiltinAssets.md -----------------------------------------------------------------------------------------------
+
+		// What the catalogue makes a built-in from (BuiltinAssetSource), for its table row.
+		[[nodiscard]] static Result<std::string> DescribeBuiltinSource(const BuiltinAssetEntry& entry)
+		{
+			switch (entry.Source)
+			{
+				case BuiltinAssetSource::Procedural:
+					return std::string("procedural: generated in code");
+				case BuiltinAssetSource::Generated:
+					return std::format("generated at bake time by {}", Code(entry.Generator));
+				case BuiltinAssetSource::File:
+				{
+					std::string text = std::format("the file {} through the {} importer", Code(entry.File), entry.Importer);
+					if (!entry.Settings.IsNull())
+					{
+						ENGINE_TRY_ASSIGN(const std::string settings, MinifiedJson(entry.Settings.Get()));
+						text += std::format(", settings {}", Code(settings));
+					}
+					return text;
+				}
+			}
+			return MakeError(ErrorCode::InvalidArgument, "the built-in '{}' has an unknown source {}", entry.Path, std::to_underlying(entry.Source));
+		}
+
+		// M17 friction F02: every built-in asset of the catalogue, by folder in path order, and the placeholders among them.
+		[[nodiscard]] static Result<std::string> GenerateBuiltinAssets(const BuiltinAssetCatalog& builtins)
+		{
+			std::string out = std::format("# Built-in assets\n\n{}\n\n", GeneratedNote);
+			out += "The assets the engine ships, which every project references by engine path, such as `engine://Meshes/Cube` in a "
+				   "MeshRenderer's `Mesh` or `engine://Environments/Studio` in an Environment's `Environment` (Architecture §7.1). The "
+				   "engine's catalogue `Resources/EngineAssets.json` names them; this page lists every entry, sorted by path. "
+				   "`asset.list {dir: \"engine://\"}` lists them too (a folder such as `engine://Environments` narrows the list), "
+				   "`asset.info` describes one, and an engine path that names nothing is refused with the closest built-in paths "
+				   "as suggestions. Built-ins have no `.meta` and cannot be changed: create a project asset instead (`asset.create`). "
+				   "The id is the asset's handle, which scenes and prefabs store.\n\n";
+
+			std::vector<const BuiltinAssetEntry*> entries;
+			for (const BuiltinAssetEntry& entry : builtins.GetEntries())
+				entries.push_back(&entry);
+			std::ranges::sort(entries, {}, &BuiltinAssetEntry::Path);
+
+			std::string folder;
+			bool first = true;
+			std::vector<std::string> placeholders;
+			for (const BuiltinAssetEntry* entry : entries)
+			{
+				ENGINE_TRY_ASSIGN(const VfsPath path, VfsPath::Parse(entry->Path));
+				const std::string parent(path.GetParent().GetPath());
+				if (first || parent != folder)
+				{
+					out += std::format("{}## {}\n\n| Path | Type | Id | Made from |\n|---|---|---|---|\n", first ? "" : "\n", parent.empty() ? std::string("engine://") : parent);
+					folder = parent;
+					first = false;
+				}
+				ENGINE_TRY_ASSIGN(const std::string source, DescribeBuiltinSource(*entry));
+				out += std::format("| {} | {} | {} | {} |\n", Code(entry->Path), AssetTypeToString(entry->Type), Code(entry->Handle.ToString()), EscapeCell(source));
+				if (GetPlaceholderHandle(entry->Type) == entry->Handle)
+					placeholders.push_back(std::format("{} {}", AssetTypeToString(entry->Type), Code(entry->Path)));
+			}
+			out += "\n## Placeholders\n\nA load that fails gets its type's placeholder (Architecture §7.2) and records a diagnostic: ";
+			out += placeholders.empty() ? std::string("none of the built-ins is a placeholder") : Join(placeholders, ", ");
+			out += ". Scenes, prefabs, scripts and replays report their failure instead, and an environment that fails lights the "
+				   "scene with the Environment's `FallbackColor`.\n";
+			return out;
+		}
+
 		// --- Schemas --------------------------------------------------------------------------------------------------------
 
 		static Json Described(Json schema, std::string_view description)
@@ -1200,8 +1269,8 @@ namespace Engine {
 
 	Result<std::vector<GeneratedReferenceFile>> GenerateReferences(const ReferenceSources& sources)
 	{
-		if (sources.Types == nullptr || sources.Scripts == nullptr || sources.Methods == nullptr || sources.Importers == nullptr)
-			return MakeError(ErrorCode::InvalidArgument, "the reference needs the type, script API, method and importer registries");
+		if (sources.Types == nullptr || sources.Scripts == nullptr || sources.Methods == nullptr || sources.Importers == nullptr || sources.Builtins == nullptr)
+			return MakeError(ErrorCode::InvalidArgument, "the reference needs the type, script API, method and importer registries and the built-in catalogue");
 
 		// Gate 7's walk (§5.4): an empty description fails generation. It also refuses registries that are not frozen.
 		ENGINE_TRY_ASSIGN(const std::vector<DescriptionEntry> descriptions, CollectDescriptions(*sources.Types, *sources.Scripts, *sources.Methods));
@@ -1224,8 +1293,10 @@ namespace Engine {
 		ENGINE_TRY_ASSIGN(std::string automation, Utils::GenerateAutomation(*sources.Methods));
 		ENGINE_TRY_ASSIGN(const auto schemas, Utils::GenerateSchemas(sources));
 		ENGINE_TRY_ASSIGN(std::string formats, Utils::GenerateFileFormats(*sources.Types, *sources.Importers, schemas));
+		ENGINE_TRY_ASSIGN(std::string builtins, Utils::GenerateBuiltinAssets(*sources.Builtins));
 
 		files.push_back({ "Automation.md", std::move(automation) });
+		files.push_back({ "BuiltinAssets.md", std::move(builtins) });
 		files.push_back({ "catalog.json", toolCatalog });
 		files.push_back({ "Components.md", std::move(components) });
 		files.push_back({ "Engine.d.luau", std::move(definitions) });
@@ -1268,15 +1339,16 @@ namespace Engine {
 		return {};
 	}
 
-	Status DumpReferences(const TypeRegistry& types, const ScriptApiRegistry& scripts, const std::filesystem::path& directory)
+	Status DumpReferences(const TypeRegistry& types, const ScriptApiRegistry& scripts, const VirtualFileSystem& engineFiles, const std::filesystem::path& directory)
 	{
 		MethodRegistry methods(types);
 		RegisterEditorMethods(methods, EditorMethodOptions{ .TestHooks = false });
 		methods.Freeze();
 		ImporterRegistry importers;
 		RegisterBuiltinImporters(importers);
+		ENGINE_TRY_ASSIGN(const BuiltinAssetCatalog builtins, WithContext(BuiltinAssetCatalog::Load(engineFiles), "reading the built-in assets for the reference"));
 		ENGINE_TRY_ASSIGN(const std::vector<GeneratedReferenceFile> files,
-			GenerateReferences(ReferenceSources{ .Types = &types, .Scripts = &scripts, .Methods = &methods, .Importers = &importers }));
+			GenerateReferences(ReferenceSources{ .Types = &types, .Scripts = &scripts, .Methods = &methods, .Importers = &importers, .Builtins = &builtins }));
 		ENGINE_TRY(WriteReferences(files, directory));
 		ENGINE_INFO("Wrote {} reference files ({} methods) to '{}'", files.size(), methods.GetMethods().size(), FileSystem::PathToUtf8(directory));
 		return {};

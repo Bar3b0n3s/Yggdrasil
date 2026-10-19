@@ -2075,6 +2075,61 @@ end))");
 			CHECK(result.Suites[0].FailedCheckpointTick == 60);
 		}
 
+		// M17 friction F03: a Checkpoint or FinalStateHash row named only the two hashes, so a builder who had tuned the look
+		// (serialized components, in the state hash) after recording had no hint why. Both rows now add what changes the
+		// world and how to re-record.
+		TEST_CASE("TestRunner: a replay's Checkpoint and FinalStateHash failures hint that the world changed since the recording")
+		{
+			RunnerHost host;
+			ReplayHeader header;
+			header.Scene = { UUID(401), "Assets/Scenes/Start.scene" };
+			header.Seed = host.Settings.Simulation.Seed;
+			header.EngineVersion = "1";
+			header.Config = "Debug";
+			auto reference = host.CreateReplaySession(header, TestSuiteSettings::Mode::Editor);
+			REQUIRE(reference);
+			std::string at60;
+			std::string at70;
+			for (uint64_t tick = 1; tick <= 70; ++tick)
+			{
+				(*reference)->Tick();
+				if (tick == 60)
+					at60 = UUID((*reference)->ComputeStateHash()).ToString();
+			}
+			at70 = UUID((*reference)->ComputeStateHash()).ToString();
+			reference->reset();
+			const auto differing = [](const std::string& hash)
+			{
+				return std::string(hash == "0000000000000000" ? "0000000000000001" : "0000000000000000");
+			};
+
+			auto checkpoint = CreateRef<ReplayData>();
+			checkpoint->Header = header;
+			checkpoint->FinalTick = 70;
+			checkpoint->Checkpoints = { { .Tick = 60, .StateHash = differing(at60) } };
+			checkpoint->FinalStateHash = at70;
+			auto finalHash = CreateRef<ReplayData>();
+			finalHash->Header = header;
+			finalHash->FinalTick = 70;
+			finalHash->Checkpoints = { { .Tick = 60, .StateHash = at60 } };
+			finalHash->FinalStateHash = differing(at70);
+			host.ReplayAssets["Assets/Checkpoint.replay"] = checkpoint;
+			host.ReplayAssets["Assets/Final.replay"] = finalHash;
+			host.ReplayGlobs = { "Assets/Checkpoint.replay", "Assets/Final.replay" };
+			const auto result = host.Run();
+			CHECK_FALSE(result.Passed);
+			REQUIRE(result.Cases.size() == 2);
+			CHECK(result.Cases[0].Suite == "replay:Assets/Checkpoint.replay");
+			CHECK(result.Cases[0].Case == "Checkpoint@60");
+			CHECK(result.Cases[0].Message == std::format("expected {}, observed {}; {}", differing(at60), at60, GetReplayDivergenceHint()));
+			CHECK(result.Cases[0].JsonPointer == "/Checkpoints/0/StateHash");
+			CHECK(result.Cases[1].Suite == "replay:Assets/Final.replay");
+			CHECK(result.Cases[1].Case == "FinalStateHash");
+			CHECK(result.Cases[1].Status == "failed");
+			CHECK(result.Cases[1].Message == std::format("expected {}, observed {}; {}", differing(at70), at70, GetReplayDivergenceHint()));
+			CHECK(result.Cases[1].JsonPointer == "/FinalStateHash");
+		}
+
 		// Docs/Decisions/0027-m17-contract.md decision 3, A3 (M17 map GTF-07): a recording refused because a selected row did
 		// not pass said only "recording requires passing selected cases and a valid starting scene", so a recording filter
 		// that also selected a stale replay's path left the builder guessing. The refusal names each selected row that did

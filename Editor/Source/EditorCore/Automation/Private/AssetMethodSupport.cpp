@@ -8,6 +8,7 @@
 #include "EditorCore/Private/PrefabInstances.h"
 #include "Engine/Asset/AssetMetadata.h"
 #include "Engine/Asset/AssetReference.h"
+#include "Engine/Asset/BuiltinAssets.h"
 #include "Engine/Asset/ScriptData.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/Core/VirtualFileSystem.h"
@@ -62,15 +63,27 @@ namespace Engine {
 			if (const std::optional<AssetHandle> handle = assets.Resolve(reference); handle.has_value())
 				return *handle;
 
+			// An engine path is compared with the built-in paths (M17 friction F02), any other reference with the project's.
+			const bool enginePath = parsed.Kind == AssetReferenceKind::EnginePath;
 			std::vector<std::string> candidates;
-			for (const AssetRecord* record : assets.GetRegistry().GetRecords())
+			if (enginePath)
 			{
-				if (record->Metadata.Kind == AssetMetaKind::Asset)
-					candidates.push_back(std::string(record->SourcePath.GetPath()));
+				for (const BuiltinAssetEntry& entry : assets.GetBuiltins().GetEntries())
+					candidates.push_back(entry.Path);
+			}
+			else
+			{
+				for (const AssetRecord* record : assets.GetRegistry().GetRecords())
+				{
+					if (record->Metadata.Kind == AssetMetaKind::Asset)
+						candidates.push_back(std::string(record->SourcePath.GetPath()));
+				}
 			}
 			const std::vector<std::string> suggestions = FuzzySuggest(reference, candidates);
-			return std::unexpected(Error(ErrorCode::NotFound, std::format("no asset '{}'", reference))
-					.WithHint(suggestions.empty() ? std::string("asset.list lists the project's assets") : MakeDidYouMeanHint(suggestions)));
+			std::string hint = MakeDidYouMeanHint(suggestions);
+			if (hint.empty())
+				hint = enginePath ? "asset.list {dir: \"engine://\"} lists the built-in assets" : "asset.list lists the project's assets";
+			return std::unexpected(Error(ErrorCode::NotFound, std::format("no asset '{}'", reference)).WithHint(std::move(hint)));
 		}
 
 		Result<AssetHandle> ResolveAssetParam(EditorMethodContext& context, std::string_view reference, std::string_view pointer)

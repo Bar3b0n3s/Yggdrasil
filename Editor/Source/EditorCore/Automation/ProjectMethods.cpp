@@ -650,8 +650,10 @@ namespace Engine {
 		methods.Add(
 			{
 				.Name = "project.create",
-				.Description = "Creates a project from a template at a native path and opens it, taking its lock. Provenance records the .eproj, "
-							   "the root .luaurc and the template's files under Assets/.",
+				.Description = "Creates a project from a template at a native path and opens it, taking its lock. Every template has the folders "
+							   "Assets/Scenes, Scripts, Prefabs, Materials, Models, Textures, Audio, Fonts and Tests; asset.create creates missing parent "
+							   "folders, so a Folder op is needed only for an empty folder. Provenance records the .eproj, the root .luaurc and the "
+							   "template's files under Assets/.",
 				.RequiredParams = { "path", "name" },
 				.ExposeAsTool = true,
 				.Mutates = true,

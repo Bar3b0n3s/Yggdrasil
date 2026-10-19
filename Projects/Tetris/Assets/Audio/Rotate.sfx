@@ -1,0 +1,25 @@
+{
+	"Format": "SoundEffect",
+	"Version": 1,
+	"Seed": 0,
+	"Volume": 0.4,
+	"Layers": [
+		{
+			"Wave": "Triangle",
+			"DutyCycle": 0.5,
+			"Notes": [],
+			"Duration": 0.05,
+			"StartFrequency": 660,
+			"EndFrequency": 990,
+			"Volume": 0.7,
+			"Envelope": {
+				"Attack": 0.002,
+				"Decay": 0.04,
+				"Sustain": 0.2,
+				"Release": 0.02
+			},
+			"LowPass": 0,
+			"Delay": 0
+		}
+	]
+}

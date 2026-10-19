@@ -1,0 +1,176 @@
+{
+	"Format": "Project",
+	"Version": 1,
+	"Name": "Tetris",
+	"StartScene": "Assets/Scenes/Main.scene",
+	"Window": {
+		"Title": "Tetris",
+		"Width": 720,
+		"Height": 900,
+		"VSync": true,
+		"Fullscreen": false,
+		"Resizable": false
+	},
+	"Simulation": {
+		"FixedHz": 60,
+		"MaxStepsPerFrame": 5,
+		"Seed": 1717,
+		"MaxEntities": 65536
+	},
+	"Physics": {
+		"Gravity": [0, -9.81, 0],
+		"Layers": ["Default"],
+		"Collisions": [
+			["Default", "Default"]
+		]
+	},
+	"Input": {
+		"Actions": {
+			"HardDrop": {
+				"Type": "Button",
+				"Bindings": ["Key.Space", "Key.W", "Gamepad.DPadUp"],
+				"Positive": [],
+				"Negative": [],
+				"Gamepad": "",
+				"Invert": false
+			},
+			"Hold": {
+				"Type": "Button",
+				"Bindings": ["Key.C", "Key.LeftShift", "Gamepad.LeftBumper"],
+				"Positive": [],
+				"Negative": [],
+				"Gamepad": "",
+				"Invert": false
+			},
+			"MoveLeft": {
+				"Type": "Button",
+				"Bindings": ["Key.Left", "Key.A", "Gamepad.DPadLeft"],
+				"Positive": [],
+				"Negative": [],
+				"Gamepad": "",
+				"Invert": false
+			},
+			"MoveRight": {
+				"Type": "Button",
+				"Bindings": ["Key.Right", "Key.D", "Gamepad.DPadRight"],
+				"Positive": [],
+				"Negative": [],
+				"Gamepad": "",
+				"Invert": false
+			},
+			"Restart": {
+				"Type": "Button",
+				"Bindings": ["Key.Enter", "Key.R", "Gamepad.Start"],
+				"Positive": [],
+				"Negative": [],
+				"Gamepad": "",
+				"Invert": false
+			},
+			"RotateCCW": {
+				"Type": "Button",
+				"Bindings": ["Key.Z", "Key.LeftControl", "Gamepad.East"],
+				"Positive": [],
+				"Negative": [],
+				"Gamepad": "",
+				"Invert": false
+			},
+			"RotateCW": {
+				"Type": "Button",
+				"Bindings": ["Key.Up", "Key.X", "Gamepad.South"],
+				"Positive": [],
+				"Negative": [],
+				"Gamepad": "",
+				"Invert": false
+			},
+			"SoftDrop": {
+				"Type": "Button",
+				"Bindings": ["Key.Down", "Key.S", "Gamepad.DPadDown"],
+				"Positive": [],
+				"Negative": [],
+				"Gamepad": "",
+				"Invert": false
+			}
+		}
+	},
+	"Rendering": {
+		"ShadowMapSize": 2048,
+		"SsaoHalfResolution": false
+	},
+	"Scripting": {
+		"MemoryLimitMB": 256,
+		"CallbackBudgetMs": 1000,
+		"PauseOnError": true,
+		"BlockPlayOnTypeErrors": true
+	},
+	"Export": {
+		"BuildScenes": ["Assets/Scenes/Main.scene"],
+		"Exclude": ["Assets/Tests/**"],
+		"Icon": "",
+		"Version": "1.0.0",
+		"Company": "Engine Demos"
+	},
+	"Testing": {
+		"Suites": [
+			{
+				"Script": "Assets/Tests/Board.test.luau",
+				"Scene": "",
+				"Parameters": null,
+				"Isolation": "Suite",
+				"Clock": [],
+				"Overrides": {
+					"CallbackBudgetMs": 0,
+					"MemoryLimitMB": 0,
+					"PauseOnError": "Inherit"
+				},
+				"ExpectQuit": -1,
+				"Modes": ["Editor", "Release", "Dist"]
+			},
+			{
+				"Script": "Assets/Tests/Tetris.test.luau",
+				"Scene": "Assets/Scenes/Main.scene",
+				"Parameters": null,
+				"Isolation": "Case",
+				"Clock": [],
+				"Overrides": {
+					"CallbackBudgetMs": 0,
+					"MemoryLimitMB": 0,
+					"PauseOnError": "Inherit"
+				},
+				"ExpectQuit": -1,
+				"Modes": ["Editor", "Release", "Dist"]
+			},
+			{
+				"Script": "Assets/Tests/Record/Opening.test.luau",
+				"Scene": "Assets/Scenes/Main.scene",
+				"Parameters": null,
+				"Isolation": "Suite",
+				"Clock": [],
+				"Overrides": {
+					"CallbackBudgetMs": 0,
+					"MemoryLimitMB": 0,
+					"PauseOnError": "Inherit"
+				},
+				"ExpectQuit": -1,
+				"Modes": ["Editor"]
+			},
+			{
+				"Script": "Assets/Tests/Record/LineClear.test.luau",
+				"Scene": "Assets/Scenes/Main.scene",
+				"Parameters": null,
+				"Isolation": "Suite",
+				"Clock": [],
+				"Overrides": {
+					"CallbackBudgetMs": 0,
+					"MemoryLimitMB": 0,
+					"PauseOnError": "Inherit"
+				},
+				"ExpectQuit": -1,
+				"Modes": ["Editor"]
+			}
+		],
+		"Replays": ["Assets/Tests/Replays/*.replay"],
+		"CaseTimeoutTicks": 600,
+		"SuiteTickLimit": 36000,
+		"CoverageGates": false
+	}
+}

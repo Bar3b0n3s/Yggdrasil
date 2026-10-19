@@ -141,6 +141,36 @@ return Script.Define("Owner", Owner)
         self.assertFalse(follow["evicted"])
         self.assertFalse(follow["errors"])
 
+    def test_script_errors_give_the_entity_path_while_the_scene_holds_the_entity(self) -> None:
+        # The entity summary's path ("the entity's path from the scene root") was always empty. It is read with the
+        # errors, in the scene that reads address (the play scene while playing, else the edit scene), and is empty once
+        # that scene no longer holds the entity.
+        client, _ = self.open_editor_with_scene()
+        path = "Assets/Scripts/Faulty.luau"
+        client.call("script.write", {"path": path, "source": (
+            'local Faulty = {}\n'
+            'function Faulty:OnStart() error("board fault", 0) end\n'
+            'return Script.Define("Faulty", Faulty)\n')})
+        client.call("entity.create", {"name": "Game"})
+        board = client.call("entity.create", {"name": "Board", "parent": "/Game",
+                                              "components": {"Script": {"Script": path}}})["entity"]
+        cursor = client.call("script.errors", {"since": "end"})["nextCursor"]
+
+        def read_entity() -> dict:
+            errors = client.call("script.errors", {"since": cursor})["errors"]
+            self.assertEqual(len(errors), 1, errors)
+            return errors[0]["entity"]
+
+        client.call("play.start", {"lockstep": True})
+        client.call("play.step", {"ticks": 1})
+        self.assertEqual(read_entity(), {"id": board["id"], "name": "Board", "path": "/Game/Board"})
+        client.call("entity.destroy", {"entities": ["/Game/Board"], "target": "play"})
+        self.assertEqual(read_entity(), {"id": board["id"], "name": "Board", "path": ""})
+        client.call("play.stop")
+        self.assertEqual(read_entity()["path"], "/Game/Board")
+        client.call("entity.destroy", {"entities": ["/Game/Board"]})
+        self.assertEqual(read_entity(), {"id": board["id"], "name": "Board", "path": ""})
+
     def test_wait_for_predicate(self) -> None:
         client, _ = self.open_editor_with_scene()
         client.call("play.start", {"lockstep": True, "parameters": {"level": 4}, "pauseOnError": False})

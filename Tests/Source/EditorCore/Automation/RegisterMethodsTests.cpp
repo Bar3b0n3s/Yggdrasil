@@ -108,7 +108,7 @@ namespace Engine {
 			methods.Freeze();
 			const std::vector<std::string> launcher = { "docs.get", "project.create", "project.open", "rpc.discover", "session.hello",
 				"session.info", "session.shutdown" };
-			const std::vector<std::string> tools = { "asset.create", "asset.delete", "asset.import", "asset.list", "asset.move",
+			const std::vector<std::string> tools = { "asset.create", "asset.delete", "asset.getProperties", "asset.import", "asset.list", "asset.move",
 				"asset.setProperties", "component.list", "component.schema", "docs.get", "edit.batch", "edit.redo", "edit.undo", "editor.screenshot",
 				"entity.bounds", "entity.create", "entity.destroy", "entity.duplicate", "entity.get", "entity.reparent", "entity.update", "input.inject",
 				"input.record", "input.replay", "log.read", "play.start", "play.step", "play.stop", "play.waitFor", "prefab.apply", "prefab.create", "prefab.instantiate", "project.create",
@@ -270,8 +270,8 @@ namespace Engine {
 			// The 25 M4 tools, viewport_screenshot and editor_screenshot, and M6's asset_list, asset_import, asset_create,
 			// asset_set_properties, asset_move, asset_delete, prefab_create, prefab_instantiate, prefab_apply and entity_bounds, and
 			// M7's play_start, play_stop, play_step, input_inject and project_export, plus M13's ten script/replay/test tools, and
-			// M16's project_upgrade (friction S3-09).
-			CHECK(catalog["Tools"].size() == 53);
+			// M16's project_upgrade (friction S3-09), and M17's asset_get_properties (friction F11).
+			CHECK(catalog["Tools"].size() == 54);
 			for (Json& tool : catalog["Tools"])
 			{
 				INFO(tool["name"].dump());

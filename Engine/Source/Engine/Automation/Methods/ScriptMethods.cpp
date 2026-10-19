@@ -7,6 +7,7 @@
 #include "Engine/Automation/Protocol/MethodRegistry.h"
 #include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Scene/Entity.h"
+#include "Engine/Scene/Scene.h"
 #include "Engine/Scripting/ScriptEngine.h"
 #include "Engine/Scripting/ScriptLimits.h"
 #include "Engine/Session/PlaySession.h"
@@ -43,6 +44,10 @@ namespace Engine {
 				return result;
 			}
 			result.Evicted = stream->HasEvictedAfter(since);
+			// The stream outlives the sessions and scenes its errors came from, so each entity's path is read now, in the scene
+			// reads address by default (§13.4: the play scene while playing, else the edit scene), and stays empty when that
+			// scene no longer holds the entity (destroyed, spawned by an ended session) or there is none.
+			const Result<Scene*> scene = context.ResolveTargetScene(SceneTarget::Play, false, false);
 			for (const ScriptError& error : stream->Read(since, params.Limit))
 			{
 				ScriptErrorSummary entry;
@@ -55,6 +60,11 @@ namespace Engine {
 				entry.Callback = error.Callback;
 				entry.Entity.Id = Utils::FormatOptionalUUID(error.Entity);
 				entry.Entity.Name = error.EntityName;
+				if (scene && error.Entity.IsValid())
+				{
+					if (const ConstEntity owner = (*scene)->FindEntityByID(error.Entity); owner.IsValid())
+						entry.Entity.Path = (*scene)->GetEntityPath(owner);
+				}
 				entry.Tick = ToAutomationCounter(error.Tick);
 				entry.Count = ToAutomationCounter(error.Count);
 				entry.JsonPointer = error.JsonPointer;
@@ -141,7 +151,7 @@ namespace Engine {
 			.Field("column", &ScriptErrorSummary::Column, "One-based UTF-8 byte column, zero when unknown.")
 			.Field("message", &ScriptErrorSummary::Message, std::format("Error message of at most {} bytes; longer text is cut and ends with [truncated: <n> bytes].", MaxScriptLogMessageBytes))
 			.Field("callback", &ScriptErrorSummary::Callback, "Callback that failed.")
-			.Field("entity", &ScriptErrorSummary::Entity, "Detached entity identity and name.")
+			.Field("entity", &ScriptErrorSummary::Entity, "The entity whose script raised the error: its id and name at the latest occurrence, and its path read now in the scene reads address by default (the play scene while playing, else the edit scene), empty when that scene no longer holds the entity (destroyed, or spawned by a play session that ended) and for an error raised outside an entity.")
 			.Field("tick", &ScriptErrorSummary::Tick, "Simulation tick of the latest occurrence.")
 			.Field("count", &ScriptErrorSummary::Count, "Number of occurrences.")
 			.Field("traceback", &ScriptErrorSummary::Traceback, std::format("Authored traceback frames, innermost first: at most {}, the last a [truncated: <n> more frames] function without a script when deeper frames were left out.", MaxScriptErrorTracebackFrames))

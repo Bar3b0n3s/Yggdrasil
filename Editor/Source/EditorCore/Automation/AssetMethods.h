@@ -41,7 +41,10 @@ namespace Engine {
 	// asset.list {dir?, type?, recursive?, subAssets?, limit?, cursor?}: registered assets whose source lies in `dir`
 	// (project-relative, default "Assets"; with recursive, also below it), of `type` (None: every type), sorted by path, a
 	// glTF's sub-assets right after it ("Assets/Track.glb#mesh:0:Straight"). Dependency files are never listed. Bounded
-	// (§13.4): at most `limit` (1 to 1000) entries per call; nextCursor continues.
+	// (§13.4): at most `limit` (1 to 1000) entries per call; nextCursor continues. M17 friction F02 (additive): a `dir` of
+	// "engine://" or a folder below it ("engine://Environments") lists the built-in assets of the BuiltinAssetCatalog
+	// (Resources/EngineAssets.json) below it instead, as the same {id, path, type} summaries sorted by path (a built-in has
+	// no sub-assets); every other scheme stays refused.
 	struct AssetListParams
 	{
 		std::string Dir = "Assets";
@@ -141,8 +144,10 @@ namespace Engine {
 	// ValidateSoundEffect (at least one layer; every violation Validation located under /values, such as
 	// /values/Layers/0/Notes/2, as for a material); for the other types it must be absent. A Scene is an empty scene
 	// named after the file stem; a Prefab holds one root entity named after the file stem. The new asset's id and type are
-	// its importer's main type (a SoundEffect is an AudioClip, §7.4). One AssetEditCommand; supports dry runs (the files
-	// then go to the overlay, §13.4).
+	// its importer's main type (a SoundEffect is an AudioClip, §7.4). One AssetEditCommand, which also creates the missing
+	// parent folders; supports dry runs (the files then go to the overlay, §13.4). M17 friction F07 (additive): a Folder
+	// whose path is already a directory succeeds without a command (nothing written, undoIndex 0) and reports created:
+	// false, so an edit.batch no longer fails on a folder the project template made; a file at the path stays AlreadyExists.
 	struct AssetCreateParams
 	{
 		AssetCreateType Type = AssetCreateType::Material;
@@ -155,6 +160,7 @@ namespace Engine {
 		AssetSummary Asset{}; // empty id and type None for a Folder
 		std::string Path{};   // project-relative
 		uint32_t UndoIndex = 0;
+		bool Created = false; // M17 friction F07: false only for a Folder whose path was already a directory
 	};
 
 	// asset.getProperties {asset}: the properties of a native asset (§13.5: materials; sound effects from M12, the .sfx
@@ -171,7 +177,9 @@ namespace Engine {
 	};
 
 	// asset.setProperties {asset, values}: an RFC 7386 merge patch of a native asset's properties (null resets a field),
-	// validated through the registry and written as one AssetEditCommand; supports dry runs.
+	// validated through the registry and written as one AssetEditCommand; supports dry runs. A play session in lockstep (a
+	// recording or replay included) or a test run sees the change only after it ends: the asset reload is deferred like a
+	// script reload (§7.5 race rule 4).
 	struct AssetSetPropertiesParams
 	{
 		std::string Asset{};
@@ -259,8 +267,9 @@ namespace Engine {
 
 	namespace Automation {
 
-		// asset.list. Errors: InvalidArgument for a dir outside Assets/, a limit outside 1 to 1000 or a malformed cursor;
-		// NotFound for a dir that does not exist.
+		// asset.list. Errors: InvalidArgument for a dir outside Assets/ and engine://, a malformed engine path, one that names a
+		// built-in asset, a limit outside 1 to 1000 or a malformed cursor; NotFound for a dir that does not exist (an engine://
+		// folder no built-in lies below).
 		[[nodiscard]] Result<AssetListResult> AssetList(EditorMethodContext& context, const AssetListParams& params);
 		// asset.info. Errors: InvalidArgument for a malformed reference; NotFound for an unknown asset (with suggestions).
 		[[nodiscard]] Result<AssetInfoResult> AssetInfo(EditorMethodContext& context, const AssetInfoParams& params);
@@ -274,7 +283,8 @@ namespace Engine {
 		[[nodiscard]] Result<Scope<PendingOperation>> AssetReimport(EditorMethodContext& context, const AssetReimportParams& params);
 		// asset.create. Errors: InvalidArgument for a path outside Assets/, a wrong extension, values given for a type that
 		// takes none, and a Material's or SoundEffect's values that are not an object or that set "Format" or "Version";
-		// AlreadyExists; Validation for invalid values (located under /values; a SoundEffect without layers included).
+		// AlreadyExists (for a Folder, only when a file is at its path); Validation for invalid values (located under /values;
+		// a SoundEffect without layers included).
 		[[nodiscard]] Result<AssetCreateResult> AssetCreate(EditorMethodContext& context, const AssetCreateParams& params);
 		// asset.getProperties. Errors: as asset.info; InvalidArgument for an asset that is not native (with the hint
 		// "use asset.getImportSettings").

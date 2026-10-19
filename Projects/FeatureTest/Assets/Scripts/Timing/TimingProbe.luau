@@ -2,6 +2,10 @@
 -- Records what each fixed step and each frame of a Timing.scene session observes: ticks, phase-aware deltas, the
 -- interpolation alpha, Space/Jump input edges, and the previous frame's render extraction (its frame, alpha and the
 -- extracted positions of the moving entities). It also teleports Jumper in the frame phase of TeleportFrames.
+-- It records only when the scene is loaded with the parameter RecordTiming = true, which the Timing suite's entry in
+-- Testing.Suites passes: the extraction reads (Test.GetLastExtraction, Test.GetExtractedPosition) exist only in test
+-- runs and the records grow every tick, so a play outside that suite (editor Play, the hardening soak) records nothing
+-- and raises no script error. OnCreate reads the parameter before the first frame the suite checks.
 export type StepRecord = {
 	Tick: number,
 	Frame: number,
@@ -41,6 +45,7 @@ export type TimingProbe = ScriptInstance & {
 	Jumper: Entity?,
 	TeleportFrames: { number },
 	TeleportTarget: vector,
+	Record: boolean,
 	Steps: { StepRecord },
 	Frames: { FrameRecord },
 	Teleports: { [number]: number },
@@ -57,12 +62,16 @@ TimingProbe.Fields = {
 }
 
 function TimingProbe.OnCreate(self: TimingProbe)
+	self.Record = Scene.GetLoadParameters().RecordTiming == true
 	self.Steps = {}
 	self.Frames = {}
 	self.Teleports = {}
 end
 
 function TimingProbe.OnFixedUpdate(self: TimingProbe, dt: number)
+	if not self.Record then
+		return
+	end
 	table.insert(self.Steps, {
 		Tick = Time.GetTick(),
 		Frame = Time.GetFrameCount(),
@@ -87,6 +96,9 @@ local function Extracted(entity: Entity?): vector?
 end
 
 function TimingProbe.OnUpdate(self: TimingProbe, dt: number)
+	if not self.Record then
+		return
+	end
 	local last = Test.GetLastExtraction()
 	table.insert(self.Frames, {
 		Frame = Time.GetFrameCount(),

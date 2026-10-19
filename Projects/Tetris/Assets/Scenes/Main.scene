@@ -1,0 +1,589 @@
+{
+	"Format": "Scene",
+	"Version": 1,
+	"Name": "Main",
+	"Seed": 0,
+	"ComponentVersions": {
+		"Transform": 1,
+		"MeshRenderer": 1,
+		"Camera": 1,
+		"DirectionalLight": 1,
+		"Environment": 1,
+		"PostProcess": 1,
+		"Text": 1,
+		"Script": 1
+	},
+	"Entities": [
+		{
+			"ID": "f55a2c342dbb8787",
+			"Name": "Camera",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 15],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Camera": {
+					"Projection": "Orthographic",
+					"VerticalFov": 60,
+					"OrthographicSize": 12.5,
+					"NearClip": 0.5,
+					"FarClip": 40,
+					"Primary": true,
+					"Clear": "Color",
+					"ClearColor": [0.012, 0.014, 0.026]
+				}
+			}
+		},
+		{
+			"ID": "a0a86f4f5b4b9f78",
+			"Name": "Sun",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 10],
+					"Rotation": [-0.252684, -0.20906462, -0.056018695, 0.9430295],
+					"Scale": [1, 1, 1]
+				},
+				"DirectionalLight": {
+					"Color": [1, 0.96, 0.9],
+					"Intensity": 2.6,
+					"CastShadows": true,
+					"ShadowDistance": 20,
+					"CascadeCount": 1,
+					"CascadeSplitLambda": 0.75,
+					"LightAngle": 10,
+					"DepthBias": 1,
+					"NormalBias": 1
+				}
+			}
+		},
+		{
+			"ID": "4f7e2f5bda3f6205",
+			"Name": "Environment",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Environment": {
+					"Environment": "0000000000000201",
+					"Intensity": 0.8,
+					"Rotation": 0,
+					"ShowSkybox": false,
+					"SkyboxBlur": 0,
+					"FallbackColor": [0.2, 0.22, 0.25]
+				},
+				"PostProcess": {
+					"ExposureEV": -0.8,
+					"Tonemap": "ACES",
+					"SsaoEnabled": true,
+					"SsaoRadius": 1.5,
+					"SsaoIntensity": 2.5,
+					"SsaoQuality": "High",
+					"BloomEnabled": true,
+					"BloomIntensity": 0.3,
+					"FxaaEnabled": true
+				}
+			}
+		},
+		{
+			"ID": "a40b2d3715da98e6",
+			"Name": "Stage",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				}
+			}
+		},
+		{
+			"ID": "6e9b08136ecffde0",
+			"Name": "Backdrop",
+			"Parent": "a40b2d3715da98e6",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, -1.6],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [40, 30, 0.2]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["5c848caebbf84c4f"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "a3587a2eea7df76b",
+			"Name": "Backboard",
+			"Parent": "a40b2d3715da98e6",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, -0.65],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [10, 20, 0.3]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["a33b616ed870d536"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "c9b5663ae0c694cd",
+			"Name": "WallLeft",
+			"Parent": "a40b2d3715da98e6",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-5.2, -0.2, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.4, 20.8, 1.1]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["c030b52a5aa3b58a"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "ddd5abf96fe1b325",
+			"Name": "WallRight",
+			"Parent": "a40b2d3715da98e6",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [5.2, -0.2, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.4, 20.8, 1.1]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["c030b52a5aa3b58a"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "30045135d71b3e71",
+			"Name": "Floor",
+			"Parent": "a40b2d3715da98e6",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, -10.2, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [10.8, 0.4, 1.1]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["c030b52a5aa3b58a"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "45a84ee76e906a61",
+			"Name": "TopLine",
+			"Parent": "a40b2d3715da98e6",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 10.05, -0.45],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [10, 0.1, 0.1]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["1aadfddcfd5accee"],
+					"CastShadows": false,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "9b2479320feb566f",
+			"Name": "HoldPanel",
+			"Parent": "a40b2d3715da98e6",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-7.5, 7.5, -0.65],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [3.6, 3.6, 0.3]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["a33b616ed870d536"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "59baa875ed917141",
+			"Name": "NextPanel",
+			"Parent": "a40b2d3715da98e6",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [7.5, 4.5, -0.65],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [3.6, 9.6, 0.3]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["a33b616ed870d536"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "836656404aa5b765",
+			"Name": "Game",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Script": {
+					"Script": "2c31e5fd8094d5ff",
+					"Fields": {
+						"CellPrefab": "b2ce1ae4cc59874d",
+						"ClearSound": "bace05d6580b3799",
+						"DropSound": "5f795ba4ad9c13e6",
+						"GameOverSound": "5a73e72041250825",
+						"HoldSound": "fa88b7ddac079753",
+						"LevelSound": "cc538f4c47bce4da",
+						"LockSound": "ca51c77fbe30b01d",
+						"Materials": ["aff966c9a9e359dc", "27ca6d33a4480e64", "893c23986c541ed6", "dc4dfea16315ab14", "90668ec5cd8a76b4", "e109111d603ab2d0", "235bd62a206faf5d", "1687a7ad5db0d220", "59a06c0f473572bf"],
+						"MoveSound": "0fb92e13ec6a305f",
+						"RotateSound": "755872f1acca1dab",
+						"TetrisSound": "c971e7208a5a6cc8"
+					},
+					"ExecutionOrder": 0
+				}
+			}
+		},
+		{
+			"ID": "35d62d8136b30df5",
+			"Name": "Cells",
+			"Parent": "836656404aa5b765",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				}
+			}
+		},
+		{
+			"ID": "14a674e484aec33b",
+			"Name": "Previews",
+			"Parent": "836656404aa5b765",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				}
+			}
+		},
+		{
+			"ID": "d98a51c7bad3e24f",
+			"Name": "HUD",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				}
+			}
+		},
+		{
+			"ID": "ad9746d42b02dada",
+			"Name": "Title",
+			"Parent": "d98a51c7bad3e24f",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Text": {
+					"Text": "TETRIS",
+					"Font": null,
+					"Size": 60,
+					"Color": [0.55, 0.8, 1, 1],
+					"Space": "Screen",
+					"Anchor": [0.5, 0.048],
+					"Pivot": [0.5, 0.5],
+					"Offset": [0, 0],
+					"Alignment": "Center",
+					"Billboard": false
+				}
+			}
+		},
+		{
+			"ID": "de5d7f146fe69966",
+			"Name": "HoldLabel",
+			"Parent": "d98a51c7bad3e24f",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Text": {
+					"Text": "HOLD",
+					"Font": null,
+					"Size": 30,
+					"Color": [0.8, 0.85, 0.95, 1],
+					"Space": "Screen",
+					"Anchor": [0.125, 0.108],
+					"Pivot": [0.5, 0.5],
+					"Offset": [0, 0],
+					"Alignment": "Center",
+					"Billboard": false
+				}
+			}
+		},
+		{
+			"ID": "85c5fba2d51d4dab",
+			"Name": "NextLabel",
+			"Parent": "d98a51c7bad3e24f",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Text": {
+					"Text": "NEXT",
+					"Font": null,
+					"Size": 30,
+					"Color": [0.8, 0.85, 0.95, 1],
+					"Space": "Screen",
+					"Anchor": [0.875, 0.108],
+					"Pivot": [0.5, 0.5],
+					"Offset": [0, 0],
+					"Alignment": "Center",
+					"Billboard": false
+				}
+			}
+		},
+		{
+			"ID": "28ec1488e01d3f2c",
+			"Name": "ScoreText",
+			"Parent": "d98a51c7bad3e24f",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Text": {
+					"Text": "SCORE\n0",
+					"Font": null,
+					"Size": 30,
+					"Color": [1, 1, 1, 1],
+					"Space": "Screen",
+					"Anchor": [0.04, 0.316],
+					"Pivot": [0, 0],
+					"Offset": [0, 0],
+					"Alignment": "Left",
+					"Billboard": false
+				}
+			}
+		},
+		{
+			"ID": "f0f9a2170d4b33ca",
+			"Name": "LevelText",
+			"Parent": "d98a51c7bad3e24f",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Text": {
+					"Text": "LEVEL\n1",
+					"Font": null,
+					"Size": 30,
+					"Color": [1, 1, 1, 1],
+					"Space": "Screen",
+					"Anchor": [0.04, 0.436],
+					"Pivot": [0, 0],
+					"Offset": [0, 0],
+					"Alignment": "Left",
+					"Billboard": false
+				}
+			}
+		},
+		{
+			"ID": "8cc7090156149d77",
+			"Name": "LinesText",
+			"Parent": "d98a51c7bad3e24f",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Text": {
+					"Text": "LINES\n0",
+					"Font": null,
+					"Size": 30,
+					"Color": [1, 1, 1, 1],
+					"Space": "Screen",
+					"Anchor": [0.04, 0.556],
+					"Pivot": [0, 0],
+					"Offset": [0, 0],
+					"Alignment": "Left",
+					"Billboard": false
+				}
+			}
+		},
+		{
+			"ID": "84082ca9636e58e0",
+			"Name": "ClearText",
+			"Parent": "d98a51c7bad3e24f",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Text": {
+					"Text": "",
+					"Font": null,
+					"Size": 32,
+					"Color": [1, 0.85, 0.3, 1],
+					"Space": "Screen",
+					"Anchor": [0.125, 0.7],
+					"Pivot": [0.5, 0],
+					"Offset": [0, 0],
+					"Alignment": "Center",
+					"Billboard": false
+				}
+			}
+		},
+		{
+			"ID": "852fe7ca75e47ec6",
+			"Name": "StatusText",
+			"Parent": "d98a51c7bad3e24f",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Text": {
+					"Text": "",
+					"Font": null,
+					"Size": 44,
+					"Color": [1, 0.35, 0.3, 1],
+					"Space": "Screen",
+					"Anchor": [0.5, 0.45],
+					"Pivot": [0.5, 0.5],
+					"Offset": [0, 0],
+					"Alignment": "Center",
+					"Billboard": false
+				}
+			}
+		},
+		{
+			"ID": "c0d7eac4aed1e775",
+			"Name": "HelpText",
+			"Parent": "d98a51c7bad3e24f",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Text": {
+					"Text": "CONTROLS\nLeft/Right: move\nUp, X: rotate\nZ: rotate back\nDown: soft drop\nSpace: hard drop\nC: hold\nEnter: restart",
+					"Font": null,
+					"Size": 19,
+					"Color": [0.6, 0.65, 0.75, 1],
+					"Space": "Screen",
+					"Anchor": [0.785, 0.548],
+					"Pivot": [0, 0],
+					"Offset": [0, 0],
+					"Alignment": "Left",
+					"Billboard": false
+				}
+			}
+		}
+	]
+}

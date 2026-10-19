@@ -755,7 +755,9 @@
 			{
 				"Script": "Assets/Tests/Timing/Timing.test.luau",
 				"Scene": "Assets/Scenes/Timing.scene",
-				"Parameters": null,
+				"Parameters": {
+					"RecordTiming": true
+				},
 				"Isolation": "Suite",
 				"Clock": [0.004, 0.016, 0.0334, 0.083, 0.5, 0],
 				"Overrides": {

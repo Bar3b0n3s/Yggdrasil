@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
-from harness import REPOSITORY_ROOT
+from harness import REPOSITORY_ROOT, engine_client
 
 sys.path.insert(0, str(REPOSITORY_ROOT / "Scripts"))
 
@@ -619,15 +619,23 @@ class ScriptErrorClient(FakeClient):
     larger id, at most `limit`, with the last one's id as nextCursor, and evicted true when an error whose latest
     occurrence was newer than since has been evicted. Like the editor, it refuses with an EngineError a since that is
     neither empty, "end" nor a decimal cursor, and a limit outside 1 to 1000 (100 when absent), so a page the editor
-    would refuse fails the soak here too. It records the since of every script.errors call."""
+    would refuse fails the soak here too. Each entry carries the editor's fields, the entity {id, name, path} included
+    (ScriptMethods.cpp fills its id and name; its path stays empty), so a page has the editor's size, and every result
+    goes through the Dispatcher's bounded output as a socket client's does (respond: over 48 KB it is offloaded to a
+    file in `offload_directory`). It records the since of every script.errors call and the files it offloaded."""
 
     MAX_ENTRIES = 256  # MaxScriptErrorEntries, ScriptLimits.h
+    OFFLOAD_THRESHOLD_BYTES = 48 * 1024  # DefaultOffloadThresholdBytes, ResultOffload.h
+    SUMMARY_VERBATIM_BYTES = 512  # MaxOffloadSummaryVerbatimBytes, ResultOffload.h
+    ENTITY = {"id": "5c1e9a77d0f4b312", "name": "Board", "path": ""}
 
     def __init__(self, clock: FakeClock, error: dict[str, Any] | list[dict[str, Any]] | None,
-                 raised_by: str = "play.step") -> None:
+                 raised_by: str = "play.step", offload_directory: Path | None = None) -> None:
         super().__init__(clock, step_seconds=0.0)
         self.errors = [] if error is None else error if isinstance(error, list) else [error]
         self.raised_by = raised_by
+        self.offload_directory = offload_directory
+        self.offloaded: list[Path] = []
         self.stream: list[dict[str, Any]] = []
         self.cursor = 0
         self.evicted_through = 0
@@ -642,7 +650,7 @@ class ScriptErrorClient(FakeClient):
         """ScriptErrorStream::Add: the error with the next id and its count, replacing the same error or evicting the
         error whose latest occurrence is the oldest when the stream is full."""
         self.cursor += 1
-        added = {**error, "id": self.cursor, "count": 1}
+        added = {"entity": self.ENTITY, **error, "id": self.cursor, "count": 1}
         key = ("script", "jsonPointer", "line", "message")
         previous = next((entry for entry in self.stream if all(entry[k] == added[k] for k in key)), None)
         if previous is not None:
@@ -668,11 +676,33 @@ class ScriptErrorClient(FakeClient):
         if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 1000:
             raise FakeEngineError("limit must be from 1 to 1000")
         if since == "end":
-            return {"errors": [], "nextCursor": str(self.cursor), "evicted": False}
+            return self.respond({"errors": [], "nextCursor": str(self.cursor), "evicted": False})
         after = int(since) if since else 0
         page = [entry for entry in self.stream if entry["id"] > after][:limit]
-        return {"errors": page, "nextCursor": str(page[-1]["id"] if page else after),
-                "evicted": self.evicted_through > after}
+        return self.respond({"errors": page, "nextCursor": str(page[-1]["id"] if page else after),
+                             "evicted": self.evicted_through > after})
+
+    def respond(self, result: dict[str, Any]) -> dict[str, Any]:
+        """The Dispatcher's bounded output for a client with offloading on, as every socket client has (§13.4,
+        Dispatcher.cpp, ResultOffload.h): a result whose minified JSON is over OFFLOAD_THRESHOLD_BYTES is written,
+        indented, to a new file in the offload directory, and the response carries {path, truncated: true, summary}
+        instead, the summary repeating each member whose minified JSON is at most SUMMARY_VERBATIM_BYTES and giving the
+        type and count of a longer array (MakeOffloadSummary). A result to offload without an offload directory is an
+        AssertionError, which no soak catches, so a test whose pages grow past the limit cannot skip the offload."""
+        def minified_size(value: Any) -> int:
+            return len(json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+
+        if minified_size(result) <= self.OFFLOAD_THRESHOLD_BYTES:
+            return result
+        if self.offload_directory is None:
+            raise AssertionError(f"a {minified_size(result)}-byte script.errors result needs an offload directory")
+        self.offload_directory.mkdir(parents=True, exist_ok=True)
+        path = self.offload_directory / f"4242-1791244800-{len(self.offloaded) + 1:08d}.json"
+        path.write_text(json.dumps(result, ensure_ascii=False, indent="\t"), encoding="utf-8")
+        self.offloaded.append(path)
+        summary = {name: value if minified_size(value) <= self.SUMMARY_VERBATIM_BYTES
+                   else {"type": "array", "count": len(value)} for name, value in result.items()}
+        return {"path": str(path), "truncated": True, "summary": summary}
 
 
 class FailingScriptErrorClient(ScriptErrorClient):
@@ -734,10 +764,42 @@ class CannedScriptErrorClient(ScriptErrorClient):
         return self.answers[since]
 
 
+class DamagedOffloadScriptErrorClient(ScriptErrorClient):
+    """A ScriptErrorClient that damages each file it offloads before answering with it, as a file removed or cut short
+    before the soak reads it leaves it: `damage` "missing" removes it, "not JSON" cuts it short and "not an object"
+    replaces it with a JSON array."""
+
+    def __init__(self, clock: FakeClock, error: list[dict[str, Any]], offload_directory: Path, damage: str) -> None:
+        super().__init__(clock, error, offload_directory=offload_directory)
+        self.damage = damage
+
+    def respond(self, result: dict[str, Any]) -> dict[str, Any]:
+        response = super().respond(result)
+        if response.get("truncated") is True:
+            path = Path(response["path"])
+            if self.damage == "missing":
+                path.unlink()
+            else:
+                path.write_text('{"errors": [' if self.damage == "not JSON" else "[]", encoding="utf-8")
+        return response
+
+
+def distinct_errors(count: int) -> list[dict[str, Any]]:
+    """`count` distinct short runtime errors of Assets/Scripts/Game.luau, lines 100 onwards at ticks 10 onwards, for a
+    ScriptErrorClient to raise."""
+    return [{"kind": "runtime", "script": "Assets/Scripts/Game.luau", "line": 100 + index, "column": 9,
+             "message": f"attempt to index nil (line {100 + index})", "callback": "OnFixedUpdate", "tick": 10 + index,
+             "traceback": [], "jsonPointer": ""} for index in range(count)]
+
+
 def fake_engine_client(editor_process: FakeEditorProcess) -> types.SimpleNamespace:
+    """The engine_client module as the soak uses it, around `editor_process`: its exceptions (the real ProtocolError,
+    which the real load_offloaded raises for a file that is not an object) and the real load_offloaded, which reads an
+    offloaded result's file (§13.4)."""
     return types.SimpleNamespace(EngineError=FakeEngineError, ConnectionClosed=ConnectionError,
-                                 ProtocolError=ValueError, CallLog=lambda path: None,
-                                 launch_editor=lambda *arguments, **options: editor_process)
+                                 ProtocolError=engine_client.ProtocolError, CallLog=lambda path: None,
+                                 launch_editor=lambda *arguments, **options: editor_process,
+                                 load_offloaded=engine_client.load_offloaded)
 
 
 def flat_samples() -> list[hardening.SoakSample]:
@@ -828,7 +890,9 @@ class SoakDeadlineTests(unittest.TestCase):
         # occurrences before the cursor included), and keeps the 256 errors with the latest occurrences, answering
         # evicted: true on a page after whose since one was evicted. The soak cannot know the first occurrence, so its
         # line names the earliest listed error with its latest tick and count, and says when earlier errors were
-        # evicted.
+        # evicted. M17 milestone review P-01: the soak's connection has offloading on, so a page over 48 KB (the 256
+        # retained errors, or 200 short distinct ones) comes back as {path, truncated: true, summary}; the soak reads it
+        # from that file and still counts and names its errors.
         def game(line: int, tick: int) -> dict[str, Any]:
             return {"kind": "runtime", "script": "Assets/Scripts/Game.luau", "line": line, "column": 9,
                     "message": f"attempt to index nil (line {line})", "callback": "OnFixedUpdate", "tick": tick,
@@ -842,31 +906,38 @@ class SoakDeadlineTests(unittest.TestCase):
             # Line 20 at tick 250, line 30 at 500, line 20 again at 750: line 30 is listed first.
             "a repeated error": ([game(20, 250), game(30, 500), game(20, 750)], ["end", "3", "6"],
                                  f"2 {listed} Assets/Scripts/Game.luau:30: attempt to index nil (line 30) (latest at "
-                                 "tick 500, 1 occurrence(s))"),
+                                 "tick 500, 1 occurrence(s))", 0),
             # An error raised before the cursor and again while the soak plays counts both occurrences.
             "an error raised before the soak too": ([menu], ["end", "3", "4"],
                                                     f"1 {listed} Assets/Scripts/Menu.luau:2: an error raised before "
-                                                    "the soak (latest at tick 1000, 2 occurrence(s))"),
-            # 300 distinct errors (ids 4 to 303): the stream keeps ids 48 to 303, so 44 of them were evicted.
-            "evicted errors": ([game(100 + index, 10 + index) for index in range(300)], ["end", "3", "303"],
+                                                    "the soak (latest at tick 1000, 2 occurrence(s))", 0),
+            # 200 distinct errors (ids 4 to 203), none evicted: their page is over 48 KB, so it is offloaded.
+            "an offloaded page": (distinct_errors(200), ["end", "3", "203"],
+                                  f"200 {listed} Assets/Scripts/Game.luau:100: attempt to index nil (line 100) (latest "
+                                  "at tick 10, 1 occurrence(s))", 1),
+            # 300 distinct errors (ids 4 to 303): the stream keeps ids 48 to 303, so 44 of them were evicted; the page
+            # of the 256 retained ones is offloaded.
+            "evicted errors": (distinct_errors(300), ["end", "3", "303"],
                                f"256 {listed} Assets/Scripts/Game.luau:144: attempt to index nil (line 144) (latest "
-                               "at tick 54, 1 occurrence(s)); earlier errors were evicted"),
+                               "at tick 54, 1 occurrence(s)); earlier errors were evicted", 1),
         }
-        for name, (raised, since, expected) in cases.items():
+        for name, (raised, since, expected, offloads) in cases.items():
             with self.subTest(case=name):
                 clock = FakeClock()
-                client = ScriptErrorClient(clock, raised)
+                client = ScriptErrorClient(clock, raised, offload_directory=Path(tempfile.mkdtemp(dir=self.directory)))
                 samples, errors = self.soak_scene(client, clock)
                 self.assertEqual(len(samples), hardening.SOAK_FRAMES // hardening_script.SOAK_STEP_TICKS + 1)
                 self.assertEqual(client.since, since)
+                self.assertEqual(len(client.offloaded), offloads)
                 self.assertEqual(errors, [expected])
 
     def test_the_fake_script_error_stream_merges_and_evicts_as_the_editor_does(self) -> None:
         # ScriptErrorStream::Add (ScriptError.cpp): a repeated error (the same script, jsonPointer, line and message)
         # moves to the end with the next id, its own tick and the count + 1; beyond MaxScriptErrorEntries (256) the
         # error whose latest occurrence is the oldest is evicted, and HasEvictedAfter(since) holds while an evicted id
-        # is greater than since. The P-01 test relies on ScriptErrorClient doing the same.
-        client = ScriptErrorClient(FakeClock(), None)
+        # is greater than since. The P-01 test relies on ScriptErrorClient doing the same. Pages of the full stream are
+        # over 48 KB, so they are read through the offload as the soak reads them.
+        client = ScriptErrorClient(FakeClock(), None, offload_directory=self.directory / "Out")
         client.add({**client.stream[0], "tick": 7})
         self.assertEqual([(entry["id"], entry["line"], entry["tick"], entry["count"]) for entry in client.stream],
                          [(2, 2, 0, 1), (3, 3, 0, 1), (4, 1, 7, 2)])
@@ -874,10 +945,59 @@ class SoakDeadlineTests(unittest.TestCase):
             client.add({**client.stream[0], "line": line})
         self.assertEqual(len(client.stream), ScriptErrorClient.MAX_ENTRIES)
         self.assertEqual(client.stream[0]["id"], 4)  # ids 2 and 3 evicted
-        self.assertTrue(client.call("script.errors", {"since": "2", "limit": 1000}, 1.0)["evicted"])
-        self.assertFalse(client.call("script.errors", {"since": "3", "limit": 1000}, 1.0)["evicted"])
-        self.assertEqual(len(client.call("script.errors", {"since": "", "limit": 1000}, 1.0)["errors"]),
-                         ScriptErrorClient.MAX_ENTRIES)
+
+        def read(since: str) -> dict[str, Any]:
+            return engine_client.load_offloaded(client.call("script.errors", {"since": since, "limit": 1000}, 1.0))
+
+        self.assertTrue(read("2")["evicted"])
+        self.assertFalse(read("3")["evicted"])
+        self.assertEqual(len(read("")["errors"]), ScriptErrorClient.MAX_ENTRIES)
+
+    def test_the_fake_script_error_stream_offloads_a_large_page_as_the_dispatcher_does(self) -> None:
+        # Dispatcher.cpp and ResultOffload.h (§13.4): every socket client has offloading on, and a result whose
+        # minified JSON, "_meta" excluded, is over 48 KB (49,152 bytes) is written to a file, the response carrying
+        # {path, truncated: true, summary}. Entries with the editor's fields, the entity {id, name, path} included, put
+        # the limit between 182 and 183 short errors, so the soak's tests meet the offload the real editor gives them.
+        directory = self.directory / "Out"
+        for count, offloaded in ((182, False), (183, True)):
+            with self.subTest(count=count):
+                client = ScriptErrorClient(FakeClock(), distinct_errors(count), offload_directory=directory)
+                client.call("play.step", {"ticks": 250}, 1.0)
+                response = client.call("script.errors", {"since": "3", "limit": 1000}, 1.0)
+                full = engine_client.load_offloaded(response)
+                self.assertEqual(len(full["errors"]), count)
+                self.assertEqual(full["errors"][0]["entity"], ScriptErrorClient.ENTITY)
+                size = len(json.dumps(full, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+                self.assertEqual(size > 49_152, offloaded, size)
+                if not offloaded:
+                    self.assertIs(full, response)
+                    continue
+                self.assertEqual(set(response), {"path", "truncated", "summary"})
+                self.assertTrue(response["truncated"])
+                self.assertEqual(Path(response["path"]).parent, directory)
+                self.assertEqual(response["summary"], {"errors": {"type": "array", "count": count},
+                                                       "nextCursor": str(3 + count), "evicted": False})
+        client = ScriptErrorClient(FakeClock(), distinct_errors(200))
+        client.call("play.step", {"ticks": 250}, 1.0)
+        with self.assertRaisesRegex(AssertionError, "needs an offload directory"):
+            client.call("script.errors", {"since": "3", "limit": 1000}, 1.0)
+
+    def test_an_offloaded_script_errors_page_that_cannot_be_read_fails_the_soak_subject_naming_its_file(self) -> None:
+        # M17 milestone review P-01: an offloaded page whose file is missing, is not JSON or is not an object is one
+        # error line naming the call and the file, never the "no errors array" line the offloaded result's own members
+        # would give; the reading stops there, and the soak still runs all its ticks.
+        for damage in ("missing", "not JSON", "not an object"):
+            with self.subTest(damage=damage):
+                clock = FakeClock()
+                client = DamagedOffloadScriptErrorClient(clock, distinct_errors(200),
+                                                         Path(tempfile.mkdtemp(dir=self.directory)), damage)
+                samples, errors = self.soak_scene(client, clock)
+                self.assertEqual(len(samples), hardening.SOAK_FRAMES // hardening_script.SOAK_STEP_TICKS + 1)
+                self.assertEqual(client.since, ["end", "3"])
+                self.assertEqual(len(client.offloaded), 1)
+                self.assertEqual(len(errors), 1, errors)
+                self.assertTrue(errors[0].startswith(f'script.errors {{since: "3"}} failed: its offloaded result '
+                                                     f"{client.offloaded[0]} cannot be read: "), errors[0])
 
     def test_a_failed_script_errors_call_fails_the_soak_subject_naming_it(self) -> None:
         # ADR 0027 decision 4, B4: a script.errors call that fails is an error line naming it, so a soak that cannot

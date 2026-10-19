@@ -1,0 +1,304 @@
+{
+	"Format": "Replay",
+	"Version": 2,
+	"Scene": {
+		"Handle": "725f899f01f732a0",
+		"Path": "Assets/Scenes/Main.scene"
+	},
+	"Parameters": {},
+	"Seed": 1717,
+	"FixedHz": 60,
+	"EngineVersion": "0.1.0",
+	"Config": "Editor",
+	"Events": [
+		{
+			"Tick": 11,
+			"Type": "Action",
+			"Name": "MoveLeft",
+			"State": "Down"
+		},
+		{
+			"Tick": 12,
+			"Type": "Action",
+			"Name": "MoveLeft",
+			"State": "Up"
+		},
+		{
+			"Tick": 15,
+			"Type": "Action",
+			"Name": "MoveLeft",
+			"State": "Down"
+		},
+		{
+			"Tick": 16,
+			"Type": "Action",
+			"Name": "MoveLeft",
+			"State": "Up"
+		},
+		{
+			"Tick": 19,
+			"Type": "Action",
+			"Name": "MoveLeft",
+			"State": "Down"
+		},
+		{
+			"Tick": 20,
+			"Type": "Action",
+			"Name": "MoveLeft",
+			"State": "Up"
+		},
+		{
+			"Tick": 23,
+			"Type": "Action",
+			"Name": "MoveLeft",
+			"State": "Down"
+		},
+		{
+			"Tick": 24,
+			"Type": "Action",
+			"Name": "MoveLeft",
+			"State": "Up"
+		},
+		{
+			"Tick": 31,
+			"Type": "Action",
+			"Name": "HardDrop",
+			"State": "Down"
+		},
+		{
+			"Tick": 32,
+			"Type": "Action",
+			"Name": "HardDrop",
+			"State": "Up"
+		},
+		{
+			"Tick": 41,
+			"Type": "Action",
+			"Name": "MoveLeft",
+			"State": "Down"
+		},
+		{
+			"Tick": 42,
+			"Type": "Action",
+			"Name": "MoveLeft",
+			"State": "Up"
+		},
+		{
+			"Tick": 49,
+			"Type": "Action",
+			"Name": "HardDrop",
+			"State": "Down"
+		},
+		{
+			"Tick": 50,
+			"Type": "Action",
+			"Name": "HardDrop",
+			"State": "Up"
+		},
+		{
+			"Tick": 57,
+			"Type": "Action",
+			"Name": "Hold",
+			"State": "Down"
+		},
+		{
+			"Tick": 58,
+			"Type": "Action",
+			"Name": "Hold",
+			"State": "Up"
+		},
+		{
+			"Tick": 65,
+			"Type": "Action",
+			"Name": "RotateCCW",
+			"State": "Down"
+		},
+		{
+			"Tick": 66,
+			"Type": "Action",
+			"Name": "RotateCCW",
+			"State": "Up"
+		},
+		{
+			"Tick": 71,
+			"Type": "Action",
+			"Name": "MoveRight",
+			"State": "Down"
+		},
+		{
+			"Tick": 72,
+			"Type": "Action",
+			"Name": "MoveRight",
+			"State": "Up"
+		},
+		{
+			"Tick": 75,
+			"Type": "Action",
+			"Name": "MoveRight",
+			"State": "Down"
+		},
+		{
+			"Tick": 76,
+			"Type": "Action",
+			"Name": "MoveRight",
+			"State": "Up"
+		},
+		{
+			"Tick": 79,
+			"Type": "Action",
+			"Name": "MoveRight",
+			"State": "Down"
+		},
+		{
+			"Tick": 80,
+			"Type": "Action",
+			"Name": "MoveRight",
+			"State": "Up"
+		},
+		{
+			"Tick": 83,
+			"Type": "Action",
+			"Name": "MoveRight",
+			"State": "Down"
+		},
+		{
+			"Tick": 84,
+			"Type": "Action",
+			"Name": "MoveRight",
+			"State": "Up"
+		},
+		{
+			"Tick": 87,
+			"Type": "Action",
+			"Name": "MoveRight",
+			"State": "Down"
+		},
+		{
+			"Tick": 88,
+			"Type": "Action",
+			"Name": "MoveRight",
+			"State": "Up"
+		},
+		{
+			"Tick": 93,
+			"Type": "Action",
+			"Name": "SoftDrop",
+			"State": "Down"
+		},
+		{
+			"Tick": 153,
+			"Type": "Action",
+			"Name": "SoftDrop",
+			"State": "Up"
+		},
+		{
+			"Tick": 171,
+			"Type": "Action",
+			"Name": "Hold",
+			"State": "Down"
+		},
+		{
+			"Tick": 172,
+			"Type": "Action",
+			"Name": "Hold",
+			"State": "Up"
+		},
+		{
+			"Tick": 181,
+			"Type": "Action",
+			"Name": "MoveRight",
+			"State": "Down"
+		},
+		{
+			"Tick": 182,
+			"Type": "Action",
+			"Name": "MoveRight",
+			"State": "Up"
+		},
+		{
+			"Tick": 185,
+			"Type": "Action",
+			"Name": "MoveRight",
+			"State": "Down"
+		},
+		{
+			"Tick": 186,
+			"Type": "Action",
+			"Name": "MoveRight",
+			"State": "Up"
+		},
+		{
+			"Tick": 193,
+			"Type": "Action",
+			"Name": "HardDrop",
+			"State": "Down"
+		},
+		{
+			"Tick": 194,
+			"Type": "Action",
+			"Name": "HardDrop",
+			"State": "Up"
+		},
+		{
+			"Tick": 201,
+			"Type": "Action",
+			"Name": "RotateCW",
+			"State": "Down"
+		},
+		{
+			"Tick": 202,
+			"Type": "Action",
+			"Name": "RotateCW",
+			"State": "Up"
+		},
+		{
+			"Tick": 207,
+			"Type": "Action",
+			"Name": "MoveLeft",
+			"State": "Down"
+		},
+		{
+			"Tick": 208,
+			"Type": "Action",
+			"Name": "MoveLeft",
+			"State": "Up"
+		},
+		{
+			"Tick": 215,
+			"Type": "Action",
+			"Name": "HardDrop",
+			"State": "Down"
+		},
+		{
+			"Tick": 216,
+			"Type": "Action",
+			"Name": "HardDrop",
+			"State": "Up"
+		}
+	],
+	"Expect": [],
+	"Checkpoints": [
+		{
+			"Tick": 60,
+			"StateHash": "824d4f6b029f190b"
+		},
+		{
+			"Tick": 120,
+			"StateHash": "a03286e218f73375"
+		},
+		{
+			"Tick": 180,
+			"StateHash": "377c309f767e7772"
+		},
+		{
+			"Tick": 240,
+			"StateHash": "f9de817491cddb79"
+		},
+		{
+			"Tick": 300,
+			"StateHash": "80e1a6722e38581a"
+		}
+	],
+	"FinalTick": 301,
+	"FinalStateHash": "93ad9cdf7978c2d2"
+}

@@ -79,6 +79,9 @@ namespace Engine {
 
 		// Main-thread reads over the host's script error stream, including retained editor errors outside Play.
 		// Duplicate occurrences remain observable by cursor with their updated count. Does not clear or consume errors.
+		// An entry's entity keeps the id and name of the error's latest occurrence; its path is read at call time from the
+		// scene reads address by default (ResolveTargetScene: the play scene while playing, else the edit scene) and is
+		// empty when that scene does not hold the entity or there is none.
 		// Errors: InvalidArgument at /since; Unsupported if the host has no script-error service.
 		[[nodiscard]] Result<ScriptErrorsResult> ScriptErrors(AutomationMethodContext& context, const ScriptErrorsParams& params);
 

@@ -1972,7 +1972,7 @@
 		},
 		{
 			"Path": "Assets/Scripts/Timing/TimingProbe.luau",
-			"XXH64": "dfd88961e405a0bd",
+			"XXH64": "ea9ad3be0f528ce6",
 			"Method": "script.write",
 			"RequestId": 2,
 			"Client": "batch",
@@ -2884,7 +2884,7 @@
 		},
 		{
 			"Path": "FeatureTest.eproj",
-			"XXH64": "9f074048a0ee3106",
+			"XXH64": "d4714793aeb2f9ab",
 			"Method": "project.setSettings",
 			"RequestId": 1,
 			"Client": "batch",

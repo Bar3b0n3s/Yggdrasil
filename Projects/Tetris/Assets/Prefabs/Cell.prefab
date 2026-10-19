@@ -1,0 +1,33 @@
+{
+	"Format": "Prefab",
+	"Version": 1,
+	"Name": "Cell",
+	"Root": "ba4cc71fb92f07ec",
+	"ComponentVersions": {
+		"Transform": 1,
+		"MeshRenderer": 1
+	},
+	"Entities": [
+		{
+			"ID": "ba4cc71fb92f07ec",
+			"Name": "Cell",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.94, 0.94, 0.94]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["59a06c0f473572bf"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		}
+	]
+}

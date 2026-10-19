@@ -8,6 +8,7 @@
 #include "Engine/Core/VirtualFileSystem.h"
 #include "Engine/Platform/Events.h"
 #include "Engine/Session/PlaySession.h"
+#include "Engine/Session/ReplayPlayer.h"
 #include "Engine/Session/ReplayRecorder.h"
 #include "Support/AutomationTestClient.h"
 #include "Support/ExpectLog.h"
@@ -586,6 +587,78 @@ namespace Engine {
 			CHECK(loose["finalTick"] == Json(130));
 		}
 
+		// M17 friction F03: the look's components (PostProcess here) are serialized components, so they are in the state hash
+		// and a look tuned after a recording fails its replay, which named only the two hashes. A checkpoint or final hash that
+		// differs now carries a hint naming what changes the world and how to re-record, and a checkpoint's stop reason names
+		// the causes; an expectation that fails while the hash matches gets no such hint.
+		TEST_CASE("ReplayMethods: input.replay's checkpoint and final-hash failures hint that the world changed since the recording")
+		{
+			Test::AutomationFixture fixture("ReplayDivergenceHint");
+			const std::string hint(GetReplayDivergenceHint());
+			CHECK(hint.find("the look's included") != std::string::npos);
+			// M17 review D-06/R-03: an engine hint names the method, which engine_client and Runtime callers can call, and the
+			// skill section as game-building titles it, never the MCP tool.
+			CHECK(hint.ends_with("; re-record it with test.run {record} (the game-building skill, \"Re-recording replays\")"));
+			CHECK(hint.find("test_run") == std::string::npos);
+			const auto setRadius = [&fixture](double radius)
+			{
+				CallReplayMethod(fixture, "entity.update", Json{ { "entity", "/Look" }, { "components", Json{ { "PostProcess", Json{ { "SsaoRadius", radius } } } } } });
+				CallReplayMethod(fixture, "scene.save");
+			};
+			const auto record = [&fixture](std::string_view path, uint32_t ticks, const Json& expect)
+			{
+				CallReplayMethod(fixture, "input.record", Json{ { "action", "start" } });
+				CallReplayMethod(fixture, "play.step", Json{ { "ticks", ticks }, { "render", "none" } });
+				CallReplayMethod(fixture, "input.record", Json{ { "action", "stop" }, { "path", path }, { "expect", expect } });
+				CallReplayMethod(fixture, "play.stop");
+			};
+			const Json verify = Json{ { "verify", true }, { "strictHash", true } };
+			const auto replay = [&fixture, &verify](std::string_view path)
+			{
+				Json params = verify;
+				params["path"] = path;
+				return fixture.Request("input.replay", params);
+			};
+			CallReplayMethod(fixture, "entity.create", Json{ { "name", "Look" }, { "components", Json{ { "PostProcess", Json{ { "SsaoRadius", 0.5 } } } } } });
+			CallReplayMethod(fixture, "scene.save");
+			record("Assets/Tests/Look.replay", 70, Json::array());
+			record("Assets/Tests/Short.replay", 30, Json::array());
+			record("Assets/Tests/False.replay", 30, Json::array({ Json{ { "tick", 10 }, { "luau", "false" } } }));
+			CHECK_FALSE(replay("Assets/Tests/Look.replay").contains("error"));
+			CallReplayMethod(fixture, "play.stop");
+
+			// Only the look changed: the replay stops at its first checkpoint.
+			setRadius(1.5);
+			const Json checkpoint = replay("Assets/Tests/Look.replay");
+			REQUIRE_MESSAGE(checkpoint.contains("error"), checkpoint.dump());
+			const Json& data = checkpoint["error"]["data"];
+			CHECK(data["errorCode"] == Json("Validation"));
+			CHECK(JsonReader(data).ReadMember<std::string>("detail").value_or("").starts_with("replay verification failed at checkpoint tick 60: expected state hash "));
+			CHECK(JsonReader(data).ReadMember<std::string>("hint").value_or("") == hint);
+			CHECK(data["replay"]["checkpointFailed"] == Json(true));
+			const std::string stopReason = JsonReader(data["replay"]).ReadMember<std::string>("stopReason").value_or("");
+			CHECK(stopReason.find("checkpoint tick 60") != std::string::npos);
+			CHECK(stopReason.find(GetReplayDivergenceCauses()) != std::string::npos);
+			CallReplayMethod(fixture, "play.stop");
+
+			// A replay shorter than a checkpoint interval fails at its final hash, with the same hint and its message kept.
+			const Json finalHash = replay("Assets/Tests/Short.replay");
+			REQUIRE_MESSAGE(finalHash.contains("error"), finalHash.dump());
+			CHECK(finalHash["error"]["data"]["detail"] == Json("replay verification failed at tick 30"));
+			CHECK(JsonReader(finalHash["error"]["data"]).ReadMember<std::string>("hint").value_or("") == hint);
+			CHECK(finalHash["error"]["data"]["replay"]["hashMatched"] == Json(false));
+			CHECK(finalHash["error"]["data"]["replay"]["checkpointFailed"] == Json(false));
+			CallReplayMethod(fixture, "play.stop");
+
+			// Back to the recorded look, only the false expectation fails: no hint.
+			setRadius(0.5);
+			const Json expectation = replay("Assets/Tests/False.replay");
+			REQUIRE_MESSAGE(expectation.contains("error"), expectation.dump());
+			CHECK(expectation["error"]["data"]["detail"] == Json("replay verification failed at tick 30"));
+			CHECK(expectation["error"]["data"]["replay"]["hashMatched"] == Json(true));
+			CHECK_FALSE(expectation["error"]["data"].contains("hint"));
+		}
+
 		TEST_CASE("ReplayMethods: input.replay withoutInput applies none of the replay's events")
 		{
 			Test::AutomationFixture fixture("ReplayWithoutInput");
@@ -604,6 +677,113 @@ namespace Engine {
 			// Without input the Mover never moved.
 			const Json moved = CallReplayMethod(fixture, "script.eval", Json{ { "context", "play" }, { "code", "return Scene.FindByName('Mover').Transform.WorldPosition.x" } });
 			CHECK(moved["value"] == Json(0));
+		}
+
+		// input.replay {withoutInput: true} is the input check, whose failure is the expected outcome for a replay with input
+		// events. M17 friction F03's divergence hint and causes, which ask for a re-recording, were added to its checkpoint and
+		// final-hash failures too; they belong only to a playback with the recording's input, so these failures carry neither
+		// and say instead that the replay ran without its input events, as an early stop's does.
+		TEST_CASE("ReplayMethods: input.replay withoutInput failures carry no divergence hint and say the replay ran without its input")
+		{
+			Test::AutomationFixture fixture("ReplayWithoutInputNoHint");
+			SaveInputScene(fixture);
+			const std::string causes(GetReplayDivergenceCauses());
+			const std::string note = "the replay ran without its input events (withoutInput), which a replay that depends on its input is expected to fail";
+			const auto record = [&fixture](std::string_view path, uint32_t ticks, std::string_view key)
+			{
+				CallReplayMethod(fixture, "input.record", Json{ { "action", "start" } });
+				CallReplayMethod(fixture, "play.step", Json{ { "ticks", ticks }, { "render", "none" }, { "input", Json::array({ Json{ { "tick", 3 }, { "type", "key" }, { "key", key }, { "state", "tap" } } }) } });
+				const Json saved = CallReplayMethod(fixture, "input.record", Json{ { "action", "stop" }, { "path", path } });
+				CHECK(JsonReader(saved).ReadMember<uint32_t>("inputCheckTick").value_or(0) > 0);
+				CallReplayMethod(fixture, "play.stop");
+			};
+			const auto replayWithoutInput = [&fixture](std::string_view path)
+			{
+				const Json response = fixture.Request("input.replay", Json{ { "path", path }, { "verify", true }, { "strictHash", true }, { "withoutInput", true } });
+				REQUIRE_MESSAGE(response.contains("error"), response.dump());
+				return response["error"]["data"];
+			};
+			record("Assets/Tests/Pressed.replay", 70, "B");
+			record("Assets/Tests/Short.replay", 20, "B");
+
+			// Without its input the Mover never moves, so the replay stops at its first checkpoint.
+			const Json checkpoint = replayWithoutInput("Assets/Tests/Pressed.replay");
+			CHECK(checkpoint["errorCode"] == Json("Validation"));
+			const std::string detail = JsonReader(checkpoint).ReadMember<std::string>("detail").value_or("");
+			CHECK(detail.starts_with("replay verification failed at checkpoint tick 60: expected state hash "));
+			CHECK(detail.ends_with("; " + note));
+			CHECK_FALSE(checkpoint.contains("hint"));
+			CHECK(checkpoint["replay"]["checkpointFailed"] == Json(true));
+			CHECK(checkpoint["replay"]["withoutInput"] == Json(true));
+			const std::string stopReason = JsonReader(checkpoint["replay"]).ReadMember<std::string>("stopReason").value_or("");
+			CHECK(stopReason.find("checkpoint tick 60") != std::string::npos);
+			CHECK(stopReason.find("the replay ran without its input events") != std::string::npos);
+			CHECK(checkpoint.dump().find(causes) == std::string::npos);
+			CallReplayMethod(fixture, "play.stop");
+
+			// A replay shorter than a checkpoint interval fails at its final hash.
+			const Json finalHash = replayWithoutInput("Assets/Tests/Short.replay");
+			CHECK(finalHash["detail"] == Json("replay verification failed at tick 20; " + note));
+			CHECK_FALSE(finalHash.contains("hint"));
+			CHECK(finalHash["replay"]["hashMatched"] == Json(false));
+			CHECK(finalHash["replay"]["checkpointFailed"] == Json(false));
+			CHECK(finalHash.dump().find(causes) == std::string::npos);
+			CallReplayMethod(fixture, "play.stop");
+
+			// Played with their input, both still verify.
+			for (const std::string_view path : { "Assets/Tests/Pressed.replay", "Assets/Tests/Short.replay" })
+			{
+				CHECK(CallReplayMethod(fixture, "input.replay", Json{ { "path", path }, { "verify", true }, { "strictHash", true } })["passed"] == Json(true));
+				CallReplayMethod(fixture, "play.stop");
+			}
+
+			// A game that quits only without the input (C was never held by tick 10) stops early, and says so too.
+			CallReplayMethod(fixture, "script.write", Json{ { "path", "Assets/Scripts/Quitter.luau" }, { "source", "local Quitter = {}\n"
+																												   "function Quitter.OnFixedUpdate(self: any, dt: number)\n"
+																												   "\tif Input.IsKeyDown(\"C\") then self.Pressed = true end\n"
+																												   "\tif Time.GetTick() == 10 and not self.Pressed then Application.Quit(3) end\n"
+																												   "end\n"
+																												   "return Script.Define(\"Quitter\", Quitter)\n" } });
+			CallReplayMethod(fixture, "entity.create", Json{ { "name", "Quitter" }, { "components", Json{ { "Script", Json{ { "Script", "Assets/Scripts/Quitter.luau" } } } } } });
+			CallReplayMethod(fixture, "scene.save");
+			record("Assets/Tests/Quits.replay", 20, "C");
+			const Json stopped = replayWithoutInput("Assets/Tests/Quits.replay");
+			const std::string stoppedDetail = JsonReader(stopped).ReadMember<std::string>("detail").value_or("");
+			CAPTURE(stoppedDetail);
+			// Application.Quit in the fixed step that Time.GetTick() numbers 10 lets that step complete: the replay stops at tick 11.
+			CHECK(stoppedDetail.starts_with("replay failed: the game quit with exit code 3 at tick 11"));
+			CHECK(stoppedDetail.ends_with("; " + note));
+			CHECK_FALSE(stopped.contains("hint"));
+			CHECK(stopped["replay"]["finalTick"] == Json(11));
+		}
+
+		// The recording guards of input.record stop keep their own messages. The input check without the recording's input,
+		// below, names neither the divergence causes nor the without-input note of input.replay; the verification with its
+		// input names no causes either (its case, "input.record stop refuses a recording that a replay with its input does
+		// not reproduce", checks its error data).
+		TEST_CASE("ReplayMethods: input.record stop's input check keeps its own refusal without the divergence hint")
+		{
+			Test::AutomationFixture fixture("RecordGuardMessages");
+			CallReplayMethod(fixture, "scene.save");
+			CallReplayMethod(fixture, "input.record", Json{ { "action", "start" } });
+			CallReplayMethod(fixture, "play.step", Json{ { "ticks", 70 }, { "render", "none" }, { "input", Json::array({ Json{ { "tick", 3 }, { "type", "key" }, { "key", "Space" }, { "state", "tap" } } }) } });
+			const Json refused = fixture.Request("input.record", Json{ { "action", "stop" }, { "path", "Assets/Tests/Idle.replay" } });
+			REQUIRE_MESSAGE(refused.contains("error"), refused.dump());
+			const Json& data = refused["error"]["data"];
+			CHECK(data["errorCode"] == Json("Validation"));
+			CHECK(data["detail"] == Json("refusing to write 'Assets/Tests/Idle.replay': its outcome does not depend on its input (the same scene, seed and parameters run without its 2 "
+										 "input event(s) reproduce its final state hash at tick 70, its 1 checkpoint(s) and its 0 expectation(s))"));
+			CHECK(data["hint"] == Json(std::format("end the recording while the played state is still in the scene (a recording is refused only when its input never shows in the world at a "
+												   "checkpoint, one every {0} ticks, at its end or in an expectation, as in one shorter than {0} ticks that ends idle, input that changes "
+												   "only script state, or play after the last checkpoint that a restart undoes), or add an expectation that only the input satisfies; "
+												   "a replay without input events records a pure determinism run",
+					  ReplayCheckpointInterval)));
+			CHECK(data["inputCheck"]["passed"] == Json(true));
+			CHECK(JsonReader(data["inputCheck"]).ReadMember<std::string>("stopReason").value_or("").empty());
+			const std::string text = data.dump();
+			CHECK(text.find(GetReplayDivergenceCauses()) == std::string::npos);
+			CHECK(text.find("ran without its input events") == std::string::npos);
+			CHECK_FALSE(ProjectFileExists(fixture, "Assets/Tests/Idle.replay"));
 		}
 
 		// M16 review R19: without verify nothing is checked, so input.replay {withoutInput: true} always passed and the input
@@ -658,7 +838,8 @@ namespace Engine {
 			CallReplayMethod(fixture, "play.step", Json{ { "ticks", 10 }, { "render", "none" }, { "input", Json::array({ Json{ { "tick", 2 }, { "type", "key" }, { "key", "A" }, { "state", "tap" } } }) } });
 			CallReplayMethod(fixture, "script.eval", Json{ { "context", "play" }, { "entity", "/Booster" }, { "code", "self.Boost = true; return true" } });
 			CallReplayMethod(fixture, "play.step", Json{ { "ticks", 120 }, { "render", "none" } });
-			const Json diverged = fixture.Request("input.record", Json{ { "action", "stop" }, { "path", "Assets/Tests/Boosted.replay" } });
+			// The expectation at tick 100 lies after the checkpoint where the verification stops, so it is left unevaluated.
+			const Json diverged = fixture.Request("input.record", Json{ { "action", "stop" }, { "path", "Assets/Tests/Boosted.replay" }, { "expect", Json::array({ Json{ { "tick", 100 }, { "luau", "true" } } }) } });
 			REQUIRE_MESSAGE(diverged.contains("error"), diverged.dump());
 			const Json& data = diverged["error"]["data"];
 			CHECK(data["errorCode"] == Json("Validation"));
@@ -687,6 +868,14 @@ namespace Engine {
 			CHECK(detail == std::format("refusing to write 'Assets/Tests/Boosted.replay': replayed with its input, the recording does not reproduce itself: the state hash at "
 										"checkpoint tick 60 is {}, recorded {}; nothing was written",
 					  observed, recorded));
+			// M17 review C-01: the candidate was recorded moments before, so nothing in the error data blames changes since the
+			// recording: the stop reason, and the unevaluated expectation's message that repeats it, keep the plain form.
+			const std::string stopReason = JsonReader(verification).ReadMember<std::string>("stopReason").value_or("");
+			CHECK(stopReason == std::format("the state hash at checkpoint tick 60 is {}, but the recording's is {}", observed, recorded));
+			REQUIRE(verification["expect"].size() == 1);
+			CHECK(verification["expect"][0]["evaluated"] == Json(false));
+			CHECK(verification["expect"][0]["message"] == Json("the replay stopped at tick 60 before this expectation's tick 100: " + stopReason));
+			CHECK(data.dump().find(GetReplayDivergenceCauses()) == std::string::npos);
 			CHECK_FALSE(data.contains("inputCheck"));
 			CHECK_FALSE(ProjectFileExists(fixture, "Assets/Tests/Boosted.replay"));
 			// The session is the verification's, paused where it stopped, with lockstep released and no recording.

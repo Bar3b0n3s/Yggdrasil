@@ -444,7 +444,7 @@ namespace Engine {
 			.Entry(PlayRunState::Simulate, "Simulate", "A running Simulate session.")
 			.Entry(PlayRunState::Paused, "Paused", "A paused session of either mode.");
 
-		registry.Enum<PlayStepRender>("PlayStepRender", "Which ticks of a play.step extract the game view.")
+		registry.Enum<PlayStepRender>("PlayStepRender", "Which ticks of a play.step extract the play scene's game view (its primary camera) for rendering.")
 			.Entry(PlayStepRender::Every, "Every", "Every tick, one tick per frame.")
 			.Entry(PlayStepRender::Last, "Last", "Only the last tick; the ticks before it run as fast as the frame budget allows.")
 			.Entry(PlayStepRender::None, "None", "No tick.");
@@ -484,14 +484,16 @@ namespace Engine {
 			.Field("ticks", &PlayStepParams::Ticks, "The ticks to run (required), each a fixed step and a frame phase.",
 				{ .Min = 1.0, .Max = static_cast<double>(MaxPlayStepTicks) })
 			.Field("input", &PlayStepParams::Input, "Input events, each with a tick offset from the first tick this call runs (below ticks).")
-			.Field("render", &PlayStepParams::Render, "Which ticks extract the game view: every, last (the default) or none.");
+			.Field("render", &PlayStepParams::Render,
+				"Which ticks extract the play scene's game view (its primary camera) for rendering: every, last (the default) or none. The Runtime "
+				"renders that view; an editor renders only its displayed viewport panels, once per frame (a headless editor: the Scene view).");
 
 		registry.Struct<PlayStepResult>("PlayStepResult", "Where a play.step left the session.")
 			.Field("tick", &PlayStepResult::Tick, "The session's tick after the call.")
 			.Field("stateHash", &PlayStepResult::StateHash, "The state hash after the call (16 lowercase hex digits): the simulated world only (entities and their serialized components, the tick, Random, id draws, physics), never script tables, audio or input.")
 			.Field("ticks", &PlayStepResult::Ticks, "The ticks this call ran.")
 			.Field("frames", &PlayStepResult::Frames, "The host frames it spanned (ticks per frame fit a 50 ms budget).")
-			.Field("rendered", &PlayStepResult::Rendered, "The game-view extractions during the call.");
+			.Field("rendered", &PlayStepResult::Rendered, "The game-view extractions during the call (the ticks render selected).");
 
 		registry.Struct<PlaySetTimeScaleParams>("PlaySetTimeScaleParams", "The params of play.setTimeScale.")
 			.Field("scale", &PlaySetTimeScaleParams::Scale, "The time scale, 0 to 100 (required; 1 is real time).", timeScaleMeta);

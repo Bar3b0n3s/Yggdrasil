@@ -16,18 +16,21 @@
 
 namespace Engine {
 
+	class BuiltinAssetCatalog;
 	class ImporterRegistry;
 	class MethodRegistry;
 	class ScriptApiRegistry;
 	class TypeRegistry;
+	class VirtualFileSystem;
 
 	// The frozen registries the reference describes; borrowed for the call.
 	struct ReferenceSources
 	{
-		const TypeRegistry* Types = nullptr;         // the editor's registry, editor method types registered
-		const ScriptApiRegistry* Scripts = nullptr;  // RegisterBindings, frozen
-		const MethodRegistry* Methods = nullptr;     // RegisterEditorMethods without test hooks, frozen
-		const ImporterRegistry* Importers = nullptr; // RegisterBuiltinImporters
+		const TypeRegistry* Types = nullptr;           // the editor's registry, editor method types registered
+		const ScriptApiRegistry* Scripts = nullptr;    // RegisterBindings, frozen
+		const MethodRegistry* Methods = nullptr;       // RegisterEditorMethods without test hooks, frozen
+		const ImporterRegistry* Importers = nullptr;   // RegisterBuiltinImporters
+		const BuiltinAssetCatalog* Builtins = nullptr; // M17 friction F02: engine://EngineAssets.json, the built-in assets
 	};
 
 	// One generated file: Path is '/'-separated and relative to the dump directory.
@@ -38,6 +41,9 @@ namespace Engine {
 	};
 
 	// Every reference file, sorted by Path:
+	//   BuiltinAssets.md              M17 friction F02: every built-in asset of the BuiltinAssetCatalog (Resources/
+	//                                 EngineAssets.json) by folder, sorted by path: its path, type, id and what it is made
+	//                                 from, and which built-ins are placeholders
 	//   catalog.json                  MethodRegistry::BuildToolCatalog (the MCP catalogue, unchanged format)
 	//   Methods.json                  MethodRegistry::BuildMethodCatalog (unchanged format)
 	//   Engine.d.luau, ScriptAPI.md   ScriptApiRegistry::GenerateDefinitions and GenerateDocumentation (unchanged)
@@ -51,9 +57,9 @@ namespace Engine {
 	//   Schemas/<Format>.schema.json  one JSON Schema per authored format: AssetMeta, BatchRequest, GameManifest, Material,
 	//                                 Prefab, Project, Provenance, Replay, Scene, SoundEffect; only the subset
 	//                                 JsonSchema::Validate supports, unknown components and keys allowed where §6 allows them
-	// Errors: InvalidArgument for a missing source; InvalidState for a registry that is not frozen; Validation naming every
-	// empty or whitespace-only description (§5.4, gate 7: CollectDescriptions and FindMissingDescriptions of
-	// DescriptionInventory.h, so the generator and the gate share one walk).
+	// Errors: InvalidArgument for a missing source (the built-in catalogue included); InvalidState for a registry that is not
+	// frozen; Validation naming every empty or whitespace-only description (§5.4, gate 7: CollectDescriptions and
+	// FindMissingDescriptions of DescriptionInventory.h, so the generator and the gate share one walk).
 	[[nodiscard]] Result<std::vector<GeneratedReferenceFile>> GenerateReferences(const ReferenceSources& sources);
 
 	// Writes `files` below `directory` (created with its parents), each atomically (a temporary file, then a rename).
@@ -61,10 +67,13 @@ namespace Engine {
 	[[nodiscard]] Status WriteReferences(std::span<const GeneratedReferenceFile> files, const std::filesystem::path& directory);
 
 	// `Editor --dump-reference <dir>` (EditorApp calls only this; ADR 0022 decision 13): builds the method registry
-	// (RegisterEditorMethods without test hooks, frozen) over `types` and the built-in ImporterRegistry, then writes every
-	// file of GenerateReferences into `directory` with WriteReferences: the method and MCP catalogues, the Markdown
+	// (RegisterEditorMethods without test hooks, frozen) over `types` and the built-in ImporterRegistry, reads the built-in
+	// catalogue engine://EngineAssets.json from `engineFiles` (BuiltinAssetCatalog::Load; M17 friction F02), then writes
+	// every file of GenerateReferences into `directory` with WriteReferences: the method and MCP catalogues, the Markdown
 	// references, Schemas/, Engine.d.luau and ScriptAPI.md. `types` is the editor's frozen registry with the editor method
-	// types registered and `scripts` its frozen script API. Errors: those of generating and writing, naming the file.
-	[[nodiscard]] Status DumpReferences(const TypeRegistry& types, const ScriptApiRegistry& scripts, const std::filesystem::path& directory);
+	// types registered and `scripts` its frozen script API. Errors: those of BuiltinAssetCatalog::Load, of generating and of
+	// writing, naming the file.
+	[[nodiscard]] Status DumpReferences(const TypeRegistry& types, const ScriptApiRegistry& scripts, const VirtualFileSystem& engineFiles,
+		const std::filesystem::path& directory);
 
 }

@@ -368,9 +368,9 @@ The scene's exposure, tone mapping, ambient occlusion, bloom and anti-aliasing (
 |---|---|---|---|---|---|---|
 | `ExposureEV` | `Float` | `0` | -16 to 16 | EV |  | The exposure compensation in stops: the image is multiplied by 2^EV. |
 | `Tonemap` | `Tonemapper` | `"AgX"` |  |  |  | The tone mapping curve. |
-| `SsaoEnabled` | `Bool` | `true` |  |  |  | Whether screen-space ambient occlusion (GTAO) is applied. |
-| `SsaoRadius` | `Float` | `0.5` | >= 0.01 | m |  | The world-space radius within which ambient occlusion is sampled, in metres. |
-| `SsaoIntensity` | `Float` | `1` | >= 0 |  |  | The strength of the ambient occlusion. |
+| `SsaoEnabled` | `Bool` | `true` |  |  |  | Whether screen-space ambient occlusion (GTAO) is applied. It darkens the environment's image-based light only (the Environment's FallbackColor ambient without a map), never direct lights. |
+| `SsaoRadius` | `Float` | `0.5` | >= 0.01 | m |  | The world-space radius within which ambient occlusion is sampled, in metres. An occluder further than this in front of a surface casts little occlusion on it: set it above the depth gap between the pieces and the surface behind them. |
+| `SsaoIntensity` | `Float` | `1` | >= 0 |  |  | The strength of the ambient occlusion, which darkens the environment's image-based light only, never direct lights. |
 | `SsaoQuality` | `SsaoQuality` | `"Medium"` |  |  |  | The ambient occlusion sample count. |
 | `BloomEnabled` | `Bool` | `true` |  |  |  | Whether bright areas bloom. |
 | `BloomIntensity` | `Float` | `0.04` | 0 to 1 |  |  | How much of the bloom is blended into the image. |
@@ -384,10 +384,10 @@ Script members of `PostProcess`:
 | `BloomIntensity` | proxy field | `number` | read/write | All | How much of the bloom is blended into the image. |
 | `ExposureEV` | proxy field | `number` | read/write | All | The exposure compensation in stops: the image is multiplied by 2^EV. |
 | `FxaaEnabled` | proxy field | `boolean` | read/write | All | Whether FXAA anti-aliasing is applied. |
-| `SsaoEnabled` | proxy field | `boolean` | read/write | All | Whether screen-space ambient occlusion (GTAO) is applied. |
-| `SsaoIntensity` | proxy field | `number` | read/write | All | The strength of the ambient occlusion. |
+| `SsaoEnabled` | proxy field | `boolean` | read/write | All | Whether screen-space ambient occlusion (GTAO) is applied. It darkens the environment's image-based light only (the Environment's FallbackColor ambient without a map), never direct lights. |
+| `SsaoIntensity` | proxy field | `number` | read/write | All | The strength of the ambient occlusion, which darkens the environment's image-based light only, never direct lights. |
 | `SsaoQuality` | proxy field | `SsaoQuality` | read/write | All | The ambient occlusion sample count. |
-| `SsaoRadius` | proxy field | `number` | read/write | All | The world-space radius within which ambient occlusion is sampled, in metres. |
+| `SsaoRadius` | proxy field | `number` | read/write | All | The world-space radius within which ambient occlusion is sampled, in metres. An occluder further than this in front of a surface casts little occlusion on it: set it above the depth gap between the pieces and the surface behind them. |
 | `Tonemap` | proxy field | `Tonemapper` | read/write | All | The tone mapping curve. |
 
 ## Text

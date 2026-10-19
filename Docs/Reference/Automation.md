@@ -34,7 +34,7 @@ Flags: **tool** (proxied by the MCP bridge as the named tool), **mutates** (chan
 
 ### asset.create
 
-Creates a material or a sound effect (with values over the defaults), an empty scene, a one-entity prefab or a folder below Assets/, with its .meta, as one undoable command.
+Creates a material or a sound effect (with values over the defaults), an empty scene, a one-entity prefab or a folder below Assets/, with its .meta and any missing parent folders, as one undoable command. A folder that already exists succeeds without a command (created: false), so a Folder op is needed only for an empty folder.
 
 - Flags: tool `asset_create`, mutates, dry run, batch
 - Timeout: 60 s
@@ -43,14 +43,15 @@ Creates a material or a sound effect (with values over the defaults), an empty s
 | Param | Type | Required | Default | Description |
 |---|---|---|---|---|
 | `type` | `AssetCreateType` | yes | `"Material"` | What to create. |
-| `path` | `String` | yes | `""` | The project-relative path below Assets/, with the type's extension (.material, .scene, .prefab, .sfx). |
+| `path` | `String` | yes | `""` | The project-relative path below Assets/, with the type's extension (.material, .scene, .prefab, .sfx; none for a folder); missing parent folders are created with it. |
 | `values` | `Variant` |  | `null` | A Material's or a SoundEffect's fields over the defaults (registry names, such as Roughness, or Layers, which a sound effect needs); absent for other types. |
 
 | Result | Type | Description |
 |---|---|---|
 | `asset` | `AssetSummary` | The created asset; an empty id and type None for a folder. |
 | `path` | `String` | The project-relative path created. |
-| `undoIndex` | `UInt32` | The command's undo index; 0 in a dry run or a batch. |
+| `undoIndex` | `UInt32` | The command's undo index; 0 in a dry run or a batch, and when nothing was created. |
+| `created` | `Bool` | Whether anything was created: false only for a Folder whose path is already a folder, which succeeds without a command. |
 
 Example: Create a red material.
 
@@ -118,7 +119,7 @@ Example: Read a texture's import settings.
 
 Returns every property of a native asset (a material or a sound effect) by registry name.
 
-- Flags: batch
+- Flags: tool `asset_get_properties`, batch
 - Timeout: 60 s
 - Required params: `asset`
 
@@ -200,14 +201,14 @@ Example: Inspect a glTF model.
 
 ### asset.list
 
-Lists the project's assets below a folder, optionally of one type, sorted by path with each glTF's sub-assets after it; paged with limit and cursor.
+Lists the project's assets below a folder, or the built-in assets below engine:// (such as engine://Environments), optionally of one type, sorted by path with each glTF's sub-assets after it; paged with limit and cursor.
 
 - Flags: tool `asset_list`, batch
 - Timeout: 60 s
 
 | Param | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `dir` | `String` |  | `"Assets"` | The project-relative folder to list, Assets or below it. |
+| `dir` | `String` |  | `"Assets"` | The folder to list: project-relative, Assets or below it; or engine:// or a folder below it, such as engine://Environments, for the built-in assets (which have no sub-assets). |
 | `type` | `AssetType` |  | `"None"` | Only assets of this type; None lists every type. |
 | `recursive` | `Bool` |  | `true` | Also list the folders below dir. |
 | `subAssets` | `Bool` |  | `true` | Also list sub-assets (a glTF's meshes, materials and textures) after their source. |
@@ -224,6 +225,12 @@ Example: List the materials.
 
 ```json
 {"dir":"Assets/Materials","type":"Material"}
+```
+
+Example: List the built-in environments.
+
+```json
+{"dir":"engine://Environments"}
 ```
 
 ### asset.move
@@ -303,7 +310,7 @@ Example: Import a texture as a normal map.
 
 ### asset.setProperties
 
-Applies an RFC 7386 merge patch to a native asset's properties (a material or a sound effect) and writes it, as one undoable command.
+Applies an RFC 7386 merge patch to a native asset's properties (a material or a sound effect) and writes it, as one undoable command. A running lockstep, recording, replay or test session sees the change only after it ends: asset reloads are deferred like script reloads.
 
 - Flags: tool `asset_set_properties`, mutates, dry run, batch
 - Timeout: 60 s
@@ -1225,7 +1232,7 @@ Runs ticks (fixed step + frame phase each) of a lockstep or paused session, as m
 |---|---|---|---|---|
 | `ticks` | `UInt32` | yes | `1` | The ticks to run (required), each a fixed step and a frame phase. |
 | `input` | `Array<InputEvent>` |  | `[]` | Input events, each with a tick offset from the first tick this call runs (below ticks). |
-| `render` | `PlayStepRender` |  | `"Last"` | Which ticks extract the game view: every, last (the default) or none. |
+| `render` | `PlayStepRender` |  | `"Last"` | Which ticks extract the play scene's game view (its primary camera) for rendering: every, last (the default) or none. The Runtime renders that view; an editor renders only its displayed viewport panels, once per frame (a headless editor: the Scene view). |
 
 | Result | Type | Description |
 |---|---|---|
@@ -1233,7 +1240,7 @@ Runs ticks (fixed step + frame phase each) of a lockstep or paused session, as m
 | `stateHash` | `String` | The state hash after the call (16 lowercase hex digits): the simulated world only (entities and their serialized components, the tick, Random, id draws, physics), never script tables, audio or input. |
 | `ticks` | `UInt32` | The ticks this call ran. |
 | `frames` | `UInt32` | The host frames it spanned (ticks per frame fit a 50 ms budget). |
-| `rendered` | `UInt32` | The game-view extractions during the call. |
+| `rendered` | `UInt32` | The game-view extractions during the call (the ticks render selected). |
 
 Example: Fast-forward 10 s at 60 Hz and render the last tick.
 
@@ -1431,7 +1438,7 @@ Example: Make the cell an ordinary entity.
 
 ### project.create
 
-Creates a project from a template at a native path and opens it, taking its lock. Provenance records the .eproj, the root .luaurc and the template's files under Assets/.
+Creates a project from a template at a native path and opens it, taking its lock. Every template has the folders Assets/Scenes, Scripts, Prefabs, Materials, Models, Textures, Audio, Fonts and Tests; asset.create creates missing parent folders, so a Folder op is needed only for an empty folder. Provenance records the .eproj, the root .luaurc and the template's files under Assets/.
 
 - Flags: tool `project_create`, mutates, launcher
 - Timeout: 60 s
@@ -2204,7 +2211,7 @@ Param: none.
 | `scriptHardLimitBytes` | `Float` | Approximate script heap hard limit in bytes when available. |
 | `memoryAllocationCount` | `UInt32` | Current Vulkan device memory allocation count. |
 | `maxMemoryAllocationCount` | `UInt32` | Vulkan device allocation limit, zero without a device. |
-| `views` | `Array<StatsViewSummary>` | Displayed scene then game views; Runtime supplies game only. |
+| `views` | `Array<StatsViewSummary>` | The scene then the game view, as the editor's displayed viewport panels: a view whose panel is not displayed is unavailable, and a headless editor displays only the Scene view of its default layout, so game is unavailable there. The Runtime supplies game only. |
 
 Example: Inspect current host and renderer observations.
 
@@ -2383,7 +2390,7 @@ Renders a view of the target scene afresh at width x height (the game view throu
 | `width` | `UInt32` |  | `640` | The rendered width in pixels, before maxDimension. |
 | `height` | `UInt32` |  | `360` | The rendered height in pixels, before maxDimension. |
 | `camera` | `String` |  | `""` | A camera entity of the target scene (an EntityRef) to render through instead of the view's camera. |
-| `debugView` | `String` |  | `""` | A debug view to render instead of the lit image, ignoring case: "Lit" (the default, also for ""), "Albedo", "Normals", "Roughness", "Metallic", "Emissive", "AO", "ShadowCascades" or "Overdraw". A data view stores each value v as round(255 v). |
+| `debugView` | `String` |  | `""` | A debug view to render instead of the lit image, ignoring case: "Lit" (the default, also for ""), "Albedo", "Normals", "Roughness", "Metallic", "Emissive", "AO", "ShadowCascades" or "Overdraw". A data view stores each value v as round(255 v). ShadowCascades colours each surface by the directional shadow cascade its view distance falls in: 1 red, 2 green, 3 blue, 4 yellow, blended across the blend bands; black means no surface, no shadow-casting directional light, or beyond the shadow distance (ShadowDistance or the camera's far clip, whichever is nearer), into which the last cascade fades over the last tenth of that distance. A uniform colour over an orthographic board means it lies in one cascade, which CascadeCount 1 suits. |
 | `annotate` | `Variant` |  | `null` | Capture-only annotations: labels=all, selection (selected), none or an EntityRef array; colliders, bounds and axes are booleans. Unknown members and invalid references are rejected. |
 | `maxDimension` | `UInt32` |  | `1024` | The larger side of the PNG at most this many pixels. |
 | `inline` | `Bool` |  | `false` | Also return the PNG as base64 in "data" when it is at most 30 KB; a larger one is only written (inlineOmitted). |

@@ -210,10 +210,15 @@ namespace Engine {
 			.Field("ExposureEV", &PostProcessComponent::ExposureEV, "The exposure compensation in stops: the image is multiplied by 2^EV.",
 				{ .Min = -Utils::MaxExposureEV, .Max = Utils::MaxExposureEV, .Unit = "EV" })
 			.Field("Tonemap", &PostProcessComponent::Tonemap, "The tone mapping curve.")
-			.Field("SsaoEnabled", &PostProcessComponent::SsaoEnabled, "Whether screen-space ambient occlusion (GTAO) is applied.")
-			.Field("SsaoRadius", &PostProcessComponent::SsaoRadius, "The world-space radius within which ambient occlusion is sampled, in metres.",
+			.Field("SsaoEnabled", &PostProcessComponent::SsaoEnabled,
+				"Whether screen-space ambient occlusion (GTAO) is applied. It darkens the environment's image-based light only (the "
+				"Environment's FallbackColor ambient without a map), never direct lights.")
+			.Field("SsaoRadius", &PostProcessComponent::SsaoRadius,
+				"The world-space radius within which ambient occlusion is sampled, in metres. An occluder further than this in front of a "
+				"surface casts little occlusion on it: set it above the depth gap between the pieces and the surface behind them.",
 				{ .Min = Utils::MinSsaoRadius, .Unit = "m" })
-			.Field("SsaoIntensity", &PostProcessComponent::SsaoIntensity, "The strength of the ambient occlusion.", { .Min = 0.0 })
+			.Field("SsaoIntensity", &PostProcessComponent::SsaoIntensity,
+				"The strength of the ambient occlusion, which darkens the environment's image-based light only, never direct lights.", { .Min = 0.0 })
 			.Field("SsaoQuality", &PostProcessComponent::SsaoQuality, "The ambient occlusion sample count.")
 			.Field("BloomEnabled", &PostProcessComponent::BloomEnabled, "Whether bright areas bloom.")
 			.Field("BloomIntensity", &PostProcessComponent::BloomIntensity, "How much of the bloom is blended into the image.",

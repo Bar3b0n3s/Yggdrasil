@@ -11,8 +11,34 @@
 #include <format>
 #include <optional>
 #include <string>
+#include <string_view>
 
 namespace Engine {
+
+	namespace {
+
+		// M17 friction F03 (ReplayPlayer.h): the hint contains the causes word for word.
+		constexpr std::string_view ReplayDivergenceCauses = "a serialized component of the scene (the look's included), a script, an asset or the engine "
+															"changed since it was recorded, or the play is not deterministic";
+		constexpr std::string_view ReplayDivergenceHint = "the world differs from the recording: a serialized component of the scene (the look's "
+														  "included), a script, an asset or the engine changed since it was recorded, or the play is not "
+														  "deterministic; re-record it with test.run {record} (the game-building skill, \"Re-recording replays\")";
+		static_assert(ReplayDivergenceHint.find(ReplayDivergenceCauses) != std::string_view::npos);
+		// What a checkpoint that differs means in a playback WithoutInput, the input check: the expected outcome of a replay
+		// whose verification depends on its input, never a reason to re-record it, so the causes are not named there.
+		constexpr std::string_view ReplayWithoutInputNote = "the replay ran without its input events, which a replay that depends on its input is expected to fail";
+
+	}
+
+	std::string_view GetReplayDivergenceCauses()
+	{
+		return ReplayDivergenceCauses;
+	}
+
+	std::string_view GetReplayDivergenceHint()
+	{
+		return ReplayDivergenceHint;
+	}
 
 	struct ReplayPlayer::State
 	{
@@ -101,7 +127,9 @@ namespace Engine {
 		}
 
 		// StrictHash: compares the checkpoint of the boundary reached (Tick), if the replay has one there; a different hash
-		// completes the playback as failed (ReplayPlaybackResult::CheckpointFailed) and returns true.
+		// completes the playback as failed (ReplayPlaybackResult::CheckpointFailed) and returns true. The stop reason names
+		// the divergence causes only for a playback with the replay's input that names them (NameDivergenceCauses);
+		// WithoutInput it says the input was left out.
 		bool CheckCheckpoint(const PlaySession& session)
 		{
 			if (!Options.StrictHash || NextCheckpoint >= Replay->Checkpoints.size() || Replay->Checkpoints[NextCheckpoint].Tick != Tick)
@@ -111,7 +139,11 @@ namespace Engine {
 			std::string observed = UUID(session.ComputeStateHash()).ToString();
 			if (observed == checkpoint.StateHash)
 				return false;
-			std::string reason = std::format("the state hash at checkpoint tick {} is {}, but the recording's is {}: the simulation diverged from the recording by that tick", Tick, observed, checkpoint.StateHash);
+			std::string reason = std::format("the state hash at checkpoint tick {} is {}, but the recording's is {}", Tick, observed, checkpoint.StateHash);
+			if (Options.WithoutInput)
+				reason += std::format(": {}", ReplayWithoutInputNote);
+			else if (Options.NameDivergenceCauses)
+				reason += std::format(": the simulation diverged from the recording by that tick, because {}", ReplayDivergenceCauses);
 			Finish(session, std::move(reason), &checkpoint, std::move(observed));
 			return true;
 		}

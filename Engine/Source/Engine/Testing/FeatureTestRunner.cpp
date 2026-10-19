@@ -1153,7 +1153,8 @@ namespace Engine {
 				row.Case = std::format("Checkpoint@{}", playback.FinalTick);
 				row.Status = "failed";
 				row.Ticks = Count(playback.FinalTick);
-				AddFailure(row, { std::format("expected {}, observed {}", playback.ExpectedStateHash, playback.StateHash), Replays[ReplayIndex], 0, std::format("/Checkpoints/{}/StateHash", playback.CheckpointsChecked - 1) });
+				// M17 friction F03: the row says why a state hash can differ and how to fix it.
+				AddFailure(row, { std::format("expected {}, observed {}; {}", playback.ExpectedStateHash, playback.StateHash, GetReplayDivergenceHint()), Replays[ReplayIndex], 0, std::format("/Checkpoints/{}/StateHash", playback.CheckpointsChecked - 1) });
 				ReportData.Cases.push_back(std::move(row));
 			}
 			else if (!playback.StopReason.empty())
@@ -1190,7 +1191,7 @@ namespace Engine {
 				row.Status = playback.HashMatched ? "passed" : "failed";
 				row.Ticks = Count(playback.FinalTick);
 				if (!playback.HashMatched)
-					AddFailure(row, { std::format("expected {}, observed {}", playback.ExpectedStateHash, playback.StateHash), Replays[ReplayIndex], 0, "/FinalStateHash" });
+					AddFailure(row, { std::format("expected {}, observed {}; {}", playback.ExpectedStateHash, playback.StateHash, GetReplayDivergenceHint()), Replays[ReplayIndex], 0, "/FinalStateHash" });
 				ReportData.Cases.push_back(std::move(row));
 			}
 			TestSuiteResult suite;

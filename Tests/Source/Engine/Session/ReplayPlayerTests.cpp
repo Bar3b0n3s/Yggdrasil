@@ -12,6 +12,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include <format>
+
 namespace Engine {
 
 	namespace {
@@ -400,6 +402,8 @@ namespace Engine {
 			CHECK(diverged.StopReason.find("checkpoint tick 120") != std::string::npos);
 			CHECK(diverged.StopReason.find(at120) != std::string::npos);
 			CHECK(diverged.StopReason.find(replay->Checkpoints[1].StateHash) != std::string::npos);
+			// M17 friction F03: the reason names what changes the world (the look's components included).
+			CHECK(diverged.StopReason.find(GetReplayDivergenceCauses()) != std::string::npos);
 			REQUIRE(diverged.Expect.size() == 2);
 			CHECK(diverged.Expect[0].Satisfied);
 			CHECK_FALSE(diverged.Expect[1].Evaluated);
@@ -441,6 +445,62 @@ namespace Engine {
 			auto session = f.Create();
 			ReplayPlayer player;
 			CHECK_FALSE(player.Begin(replay, *session, { .Verify = true, .StrictHash = true, .WithoutInput = true }));
+		}
+
+		// A playback WithoutInput is the input check, whose failure a replay that depends on its input is expected to give, so
+		// a checkpoint that differs there names no divergence causes (M17 friction F03's, which ask for a re-recording): its
+		// stop reason says instead that the replay ran without its input events.
+		TEST_CASE("ReplayPlayer: a checkpoint that differs WithoutInput names no divergence causes")
+		{
+			PlaybackFixture f;
+			auto replay = f.Data(70);
+			const std::string at60 = f.HashAt(60);
+			replay->Checkpoints = { { .Tick = 60, .StateHash = at60 == "0000000000000000" ? "0000000000000001" : "0000000000000000" } };
+			replay->Expect = { f.Predicate(65, "true", "/Expect/0/Luau") };
+			const auto withInput = f.Run(replay);
+			REQUIRE(withInput.CheckpointFailed);
+			CHECK(withInput.StopReason.find(GetReplayDivergenceCauses()) != std::string::npos);
+
+			const auto withoutInput = f.Run(replay, { .Verify = true, .StrictHash = true, .WithoutInput = true });
+			CHECK_FALSE(withoutInput.Passed);
+			REQUIRE(withoutInput.CheckpointFailed);
+			CHECK(withoutInput.FinalTick == 60);
+			CHECK(withoutInput.StopReason.find("checkpoint tick 60") != std::string::npos);
+			CHECK(withoutInput.StopReason.find(at60) != std::string::npos);
+			CHECK(withoutInput.StopReason.find(replay->Checkpoints[0].StateHash) != std::string::npos);
+			CHECK(withoutInput.StopReason.find("the replay ran without its input events") != std::string::npos);
+			CHECK(withoutInput.StopReason.find(GetReplayDivergenceCauses()) == std::string::npos);
+			// The expectation the stop left unevaluated repeats the reason, so it names no causes either.
+			REQUIRE(withoutInput.Expect.size() == 1);
+			REQUIRE(withoutInput.Expect[0].Failure);
+			CHECK(withoutInput.Expect[0].Failure->GetMessageText().find(GetReplayDivergenceCauses()) == std::string::npos);
+		}
+
+		// M17 review C-01: input.record stop's verification plays a candidate recorded moments before, so a checkpoint that
+		// differs there must not blame changes since the recording. NameDivergenceCauses false keeps the plain stop reason,
+		// which the expectations the stop left unevaluated repeat.
+		TEST_CASE("ReplayPlayer: a checkpoint that differs names no divergence causes when NameDivergenceCauses is false")
+		{
+			PlaybackFixture f;
+			auto replay = f.Data(70);
+			const std::string at60 = f.HashAt(60);
+			const std::string recorded = at60 == "0000000000000000" ? "0000000000000001" : "0000000000000000";
+			replay->Checkpoints = { { .Tick = 60, .StateHash = recorded } };
+			replay->Expect = { f.Predicate(65, "true", "/Expect/0/Luau") };
+
+			const auto plain = f.Run(replay, { .Verify = true, .StrictHash = true, .WithoutInput = false, .NameDivergenceCauses = false });
+			CHECK_FALSE(plain.Passed);
+			REQUIRE(plain.CheckpointFailed);
+			CHECK(plain.FinalTick == 60);
+			CHECK(plain.StopReason == std::format("the state hash at checkpoint tick 60 is {}, but the recording's is {}", at60, recorded));
+			REQUIRE(plain.Expect.size() == 1);
+			CHECK_FALSE(plain.Expect[0].Evaluated);
+			REQUIRE(plain.Expect[0].Failure);
+			CHECK(plain.Expect[0].Failure->GetMessageText() == "the replay stopped at tick 60 before this expectation's tick 65: " + plain.StopReason);
+			// The default names them, and WithoutInput keeps its own note whatever NameDivergenceCauses says.
+			CHECK(f.Run(replay).StopReason.find(GetReplayDivergenceCauses()) != std::string::npos);
+			const auto withoutInput = f.Run(replay, { .Verify = true, .StrictHash = true, .WithoutInput = true, .NameDivergenceCauses = false });
+			CHECK(withoutInput.StopReason.find("the replay ran without its input events") != std::string::npos);
 		}
 
 		TEST_CASE("ReplayPlayer: cooked playback does not require automation or a compiler")

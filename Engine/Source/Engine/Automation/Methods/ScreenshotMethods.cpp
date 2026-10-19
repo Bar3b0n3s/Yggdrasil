@@ -261,7 +261,11 @@ namespace Engine {
 				"A camera entity of the target scene (an EntityRef) to render through instead of the view's camera.")
 			.Field("debugView", &ViewportScreenshotParams::DebugView,
 				"A debug view to render instead of the lit image, ignoring case: \"Lit\" (the default, also for \"\"), \"Albedo\", "
-				"\"Normals\", \"Roughness\", \"Metallic\", \"Emissive\", \"AO\", \"ShadowCascades\" or \"Overdraw\". A data view stores each value v as round(255 v).")
+				"\"Normals\", \"Roughness\", \"Metallic\", \"Emissive\", \"AO\", \"ShadowCascades\" or \"Overdraw\". A data view stores each value v as round(255 v). "
+				"ShadowCascades colours each surface by the directional shadow cascade its view distance falls in: 1 red, 2 green, 3 blue, 4 yellow, "
+				"blended across the blend bands; black means no surface, no shadow-casting directional light, or beyond the shadow distance "
+				"(ShadowDistance or the camera's far clip, whichever is nearer), into which the last cascade fades over the last tenth of that distance. A uniform "
+				"colour over an orthographic board means it lies in one cascade, which CascadeCount 1 suits.")
 			.Field("annotate", &ViewportScreenshotParams::Annotate,
 				"Capture-only annotations: labels=all, selection (selected), none or an EntityRef array; colliders, bounds and axes are booleans. Unknown members and invalid references are rejected.")
 			.Field("maxDimension", &ViewportScreenshotParams::MaxDimension, "The larger side of the PNG at most this many pixels.", dimensionMeta)

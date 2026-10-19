@@ -6,7 +6,7 @@
 		{
 			"name": "asset.create",
 			"domain": "asset",
-			"description": "Creates a material or a sound effect (with values over the defaults), an empty scene, a one-entity prefab or a folder below Assets/, with its .meta, as one undoable command.",
+			"description": "Creates a material or a sound effect (with values over the defaults), an empty scene, a one-entity prefab or a folder below Assets/, with its .meta and any missing parent folders, as one undoable command. A folder that already exists succeeds without a command (created: false), so a Folder op is needed only for an empty folder.",
 			"exposeAsTool": true,
 			"mutates": true,
 			"supportsDryRun": true,
@@ -26,7 +26,7 @@
 						"enum": ["Material", "Scene", "Prefab", "SoundEffect", "Folder"]
 					},
 					"path": {
-						"description": "The project-relative path below Assets/, with the type's extension (.material, .scene, .prefab, .sfx).",
+						"description": "The project-relative path below Assets/, with the type's extension (.material, .scene, .prefab, .sfx; none for a folder); missing parent folders are created with it.",
 						"type": "string"
 					},
 					"values": {
@@ -61,10 +61,14 @@
 						"type": "string"
 					},
 					"undoIndex": {
-						"description": "The command's undo index; 0 in a dry run or a batch.",
+						"description": "The command's undo index; 0 in a dry run or a batch, and when nothing was created.",
 						"type": "integer",
 						"minimum": 0,
 						"maximum": 4294967295
+					},
+					"created": {
+						"description": "Whether anything was created: false only for a Folder whose path is already a folder, which succeeds without a command.",
+						"type": "boolean"
 					},
 					"_meta": {
 						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
@@ -328,7 +332,7 @@
 			"name": "asset.getProperties",
 			"domain": "asset",
 			"description": "Returns every property of a native asset (a material or a sound effect) by registry name.",
-			"exposeAsTool": false,
+			"exposeAsTool": true,
 			"mutates": false,
 			"supportsDryRun": false,
 			"availableInRuntime": false,
@@ -730,7 +734,7 @@
 		{
 			"name": "asset.list",
 			"domain": "asset",
-			"description": "Lists the project's assets below a folder, optionally of one type, sorted by path with each glTF's sub-assets after it; paged with limit and cursor.",
+			"description": "Lists the project's assets below a folder, or the built-in assets below engine:// (such as engine://Environments), optionally of one type, sorted by path with each glTF's sub-assets after it; paged with limit and cursor.",
 			"exposeAsTool": true,
 			"mutates": false,
 			"supportsDryRun": false,
@@ -746,7 +750,7 @@
 				"type": "object",
 				"properties": {
 					"dir": {
-						"description": "The project-relative folder to list, Assets or below it.",
+						"description": "The folder to list: project-relative, Assets or below it; or engine:// or a folder below it, such as engine://Environments, for the built-in assets (which have no sub-assets).",
 						"type": "string"
 					},
 					"type": {
@@ -841,6 +845,12 @@
 					"params": {
 						"dir": "Assets/Materials",
 						"type": "Material"
+					}
+				},
+				{
+					"description": "List the built-in environments.",
+					"params": {
+						"dir": "engine://Environments"
 					}
 				}
 			]
@@ -1175,7 +1185,7 @@
 		{
 			"name": "asset.setProperties",
 			"domain": "asset",
-			"description": "Applies an RFC 7386 merge patch to a native asset's properties (a material or a sound effect) and writes it, as one undoable command.",
+			"description": "Applies an RFC 7386 merge patch to a native asset's properties (a material or a sound effect) and writes it, as one undoable command. A running lockstep, recording, replay or test session sees the change only after it ends: asset reloads are deferred like script reloads.",
 			"exposeAsTool": true,
 			"mutates": true,
 			"supportsDryRun": true,
@@ -3572,16 +3582,16 @@
 								"enum": ["AgX", "ACES", "PbrNeutral", "Linear"]
 							},
 							"SsaoEnabled": {
-								"description": "Whether screen-space ambient occlusion (GTAO) is applied.",
+								"description": "Whether screen-space ambient occlusion (GTAO) is applied. It darkens the environment's image-based light only (the Environment's FallbackColor ambient without a map), never direct lights.",
 								"type": "boolean"
 							},
 							"SsaoRadius": {
-								"description": "The world-space radius within which ambient occlusion is sampled, in metres.",
+								"description": "The world-space radius within which ambient occlusion is sampled, in metres. An occluder further than this in front of a surface casts little occlusion on it: set it above the depth gap between the pieces and the surface behind them.",
 								"type": "number",
 								"minimum": 0.01
 							},
 							"SsaoIntensity": {
-								"description": "The strength of the ambient occlusion.",
+								"description": "The strength of the ambient occlusion, which darkens the environment's image-based light only, never direct lights.",
 								"type": "number",
 								"minimum": 0
 							},
@@ -5403,16 +5413,16 @@
 								"enum": ["AgX", "ACES", "PbrNeutral", "Linear"]
 							},
 							"SsaoEnabled": {
-								"description": "Whether screen-space ambient occlusion (GTAO) is applied.",
+								"description": "Whether screen-space ambient occlusion (GTAO) is applied. It darkens the environment's image-based light only (the Environment's FallbackColor ambient without a map), never direct lights.",
 								"type": "boolean"
 							},
 							"SsaoRadius": {
-								"description": "The world-space radius within which ambient occlusion is sampled, in metres.",
+								"description": "The world-space radius within which ambient occlusion is sampled, in metres. An occluder further than this in front of a surface casts little occlusion on it: set it above the depth gap between the pieces and the surface behind them.",
 								"type": "number",
 								"minimum": 0.01
 							},
 							"SsaoIntensity": {
-								"description": "The strength of the ambient occlusion.",
+								"description": "The strength of the ambient occlusion, which darkens the environment's image-based light only, never direct lights.",
 								"type": "number",
 								"minimum": 0
 							},
@@ -8054,7 +8064,7 @@
 						}
 					},
 					"render": {
-						"description": "Which ticks extract the game view: every, last (the default) or none.",
+						"description": "Which ticks extract the play scene's game view (its primary camera) for rendering: every, last (the default) or none. The Runtime renders that view; an editor renders only its displayed viewport panels, once per frame (a headless editor: the Scene view).",
 						"enum": ["Every", "Last", "None"]
 					},
 					"ifRevision": {
@@ -8178,7 +8188,7 @@
 						"maximum": 4294967295
 					},
 					"rendered": {
-						"description": "The game-view extractions during the call.",
+						"description": "The game-view extractions during the call (the ticks render selected).",
 						"type": "integer",
 						"minimum": 0,
 						"maximum": 4294967295
@@ -9259,16 +9269,16 @@
 								"enum": ["AgX", "ACES", "PbrNeutral", "Linear"]
 							},
 							"SsaoEnabled": {
-								"description": "Whether screen-space ambient occlusion (GTAO) is applied.",
+								"description": "Whether screen-space ambient occlusion (GTAO) is applied. It darkens the environment's image-based light only (the Environment's FallbackColor ambient without a map), never direct lights.",
 								"type": "boolean"
 							},
 							"SsaoRadius": {
-								"description": "The world-space radius within which ambient occlusion is sampled, in metres.",
+								"description": "The world-space radius within which ambient occlusion is sampled, in metres. An occluder further than this in front of a surface casts little occlusion on it: set it above the depth gap between the pieces and the surface behind them.",
 								"type": "number",
 								"minimum": 0.01
 							},
 							"SsaoIntensity": {
-								"description": "The strength of the ambient occlusion.",
+								"description": "The strength of the ambient occlusion, which darkens the environment's image-based light only, never direct lights.",
 								"type": "number",
 								"minimum": 0
 							},
@@ -10217,7 +10227,7 @@
 		{
 			"name": "project.create",
 			"domain": "project",
-			"description": "Creates a project from a template at a native path and opens it, taking its lock. Provenance records the .eproj, the root .luaurc and the template's files under Assets/.",
+			"description": "Creates a project from a template at a native path and opens it, taking its lock. Every template has the folders Assets/Scenes, Scripts, Prefabs, Materials, Models, Textures, Audio, Fonts and Tests; asset.create creates missing parent folders, so a Folder op is needed only for an empty folder. Provenance records the .eproj, the root .luaurc and the template's files under Assets/.",
 			"exposeAsTool": true,
 			"mutates": true,
 			"supportsDryRun": false,
@@ -13682,7 +13692,7 @@
 								"type": "string"
 							},
 							"entity": {
-								"description": "Detached entity identity and name.",
+								"description": "The entity whose script raised the error: its id and name at the latest occurrence, and its path read now in the scene reads address by default (the play scene while playing, else the edit scene), empty when that scene no longer holds the entity (destroyed, or spawned by a play session that ended) and for an error raised outside an entity.",
 								"$ref": "#/$defs/EntitySummary"
 							},
 							"tick": {
@@ -14664,7 +14674,7 @@
 						"maximum": 4294967295
 					},
 					"views": {
-						"description": "Displayed scene then game views; Runtime supplies game only.",
+						"description": "The scene then the game view, as the editor's displayed viewport panels: a view whose panel is not displayed is unavailable, and a headless editor displays only the Scene view of its default layout, so game is unavailable there. The Runtime supplies game only.",
 						"type": "array",
 						"items": {
 							"$ref": "#/$defs/StatsViewSummary"
@@ -15885,7 +15895,7 @@
 						"type": "string"
 					},
 					"debugView": {
-						"description": "A debug view to render instead of the lit image, ignoring case: \"Lit\" (the default, also for \"\"), \"Albedo\", \"Normals\", \"Roughness\", \"Metallic\", \"Emissive\", \"AO\", \"ShadowCascades\" or \"Overdraw\". A data view stores each value v as round(255 v).",
+						"description": "A debug view to render instead of the lit image, ignoring case: \"Lit\" (the default, also for \"\"), \"Albedo\", \"Normals\", \"Roughness\", \"Metallic\", \"Emissive\", \"AO\", \"ShadowCascades\" or \"Overdraw\". A data view stores each value v as round(255 v). ShadowCascades colours each surface by the directional shadow cascade its view distance falls in: 1 red, 2 green, 3 blue, 4 yellow, blended across the blend bands; black means no surface, no shadow-casting directional light, or beyond the shadow distance (ShadowDistance or the camera's far clip, whichever is nearer), into which the last cascade fades over the last tenth of that distance. A uniform colour over an orthographic board means it lies in one cascade, which CascadeCount 1 suits.",
 						"type": "string"
 					},
 					"annotate": {

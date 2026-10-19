@@ -1,10 +1,10 @@
 """MCP conformance through the official SDK's client (Docs/Architecture.md §15.7, Roadmap M4): the catalogue tools are
 listed without an editor, a handshake-era client is told to fetch the tool list again once it has initialized (§13.8
-"Tool list refresh"), editor_launch starts a headless editor, entity_create and scene_tree work, a killed editor
-makes the next call return EditorCrashed, and the generated .mcp.json starts the bridge with no python on PATH. A
-rendering editor's viewport_screenshot returns an image content block (Roadmap M5; Docs/Decisions/0009-m5-decisions.md
-decision 33); that test needs a Vulkan device, which it probes for like the automation suite's rendering tests
-(Tests/Automation/harness.py, require_gpu).
+"Tool list refresh"), editor_launch starts a headless editor, entity_create, scene_tree and asset_get_properties work,
+a killed editor makes the next call return EditorCrashed, and the generated .mcp.json starts the bridge with no python
+on PATH. A rendering editor's viewport_screenshot returns an image content block (Roadmap M5;
+Docs/Decisions/0009-m5-decisions.md decision 33); that test needs a Vulkan device, which it probes for like the
+automation suite's rendering tests (Tests/Automation/harness.py, require_gpu).
 
 These tests run in the bridge's virtual environment (Scripts/Test.py starts them with Tools/MCP/.venv's interpreter),
 where the mcp package is installed from Tools/MCP/requirements.lock.
@@ -102,6 +102,9 @@ class ConformanceTests(unittest.TestCase):
             ("entity_create", {"name": "Board"}),
             ("scene_tree", {}),
             ("engine_methods", {}),
+            ("asset_create", {"type": "Material", "path": "Assets/Materials/Red.material",
+                              "values": {"Roughness": 0.25}}),
+            ("asset_get_properties", {"asset": "Assets/Materials/Red.material"}),
         ])
         self.assertIn("Board", results[3]["structuredContent"]["text"])
         self.assertIn("_meta", results[3]["text"])
@@ -110,6 +113,11 @@ class ConformanceTests(unittest.TestCase):
         names = {method["name"] for method in results[4]["structuredContent"]["methods"]}
         self.assertGreaterEqual(len(names), MIN_EDITOR_METHODS)
         self.assertTrue({"entity.create", "rpc.discover", "project.upgrade"} <= names, sorted(names))
+        # M17 friction F11: a material is read through its own tool, not engine_call.
+        self.assertFalse(results[5]["isError"], results[5]["text"])
+        self.assertFalse(results[6]["isError"], results[6]["text"])
+        self.assertEqual(results[6]["structuredContent"]["asset"]["path"], "Assets/Materials/Red.material")
+        self.assertEqual(results[6]["structuredContent"]["values"]["Roughness"], 0.25)
 
     def test_sdk_client_receives_an_image_from_viewport_screenshot(self) -> None:
         reason = harness.probe_rendering_editor()

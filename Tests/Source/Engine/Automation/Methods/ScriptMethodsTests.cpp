@@ -136,6 +136,44 @@ namespace Engine {
 			CHECK(next["errors"].empty());
 		}
 
+		// The entity summary's path is "the entity's path from the scene root", which script.errors left empty. The stream
+		// outlives the play session, so the path is read when the errors are: from the play scene while playing and from the
+		// edit scene after play, and it is empty once the scene that reads address no longer holds the entity.
+		TEST_CASE("ScriptMethods: errors give the entity's path in the scene that reads address while it holds the entity")
+		{
+			Test::AutomationFixture fixture("ScriptErrorEntityPath");
+			CallScriptMethod(fixture, "script.write", Json{ { "path", "Assets/Scripts/Faulty.luau" }, { "source", "local Faulty = {}\n"
+																												  "function Faulty.OnStart(self: any)\n"
+																												  "\terror('board fault', 0)\n"
+																												  "end\n"
+																												  "return Script.Define('Faulty', Faulty)\n" } });
+			CallScriptMethod(fixture, "entity.create", Json{ { "name", "Game" } });
+			const Json board = CallScriptMethod(fixture, "entity.create", Json{ { "name", "Board" }, { "parent", "/Game" }, { "components", Json{ { "Script", Json{ { "Script", "Assets/Scripts/Faulty.luau" } } } } } });
+			const Json id = board["entity"]["id"];
+			const auto readEntity = [&fixture]()
+			{
+				const Json errors = CallScriptMethod(fixture, "script.errors", Json::object());
+				REQUIRE(errors["errors"].size() == 1);
+				return errors["errors"][0]["entity"];
+			};
+
+			{
+				// OnStart runs as the session starts.
+				Test::ExpectLog expected(LogLevel::Error, "board fault");
+				CallScriptMethod(fixture, "play.start", Json{ { "mode", "play" }, { "lockstep", true } });
+				CHECK(expected.GetMatchCount() == 1);
+			}
+			CHECK(readEntity() == Json{ { "id", id }, { "name", "Board" }, { "path", "/Game/Board" } });
+			// Destroyed in the play scene: the id and name stay, the path is empty.
+			CallScriptMethod(fixture, "entity.destroy", Json{ { "entities", Json::array({ "/Game/Board" }) }, { "target", "play" } });
+			CHECK(readEntity() == Json{ { "id", id }, { "name", "Board" }, { "path", "" } });
+			// After play the edit scene, which still holds it, gives the path; destroyed there too, it is empty again.
+			CallScriptMethod(fixture, "play.stop", Json::object());
+			CHECK(readEntity()["path"] == Json("/Game/Board"));
+			CallScriptMethod(fixture, "entity.destroy", Json{ { "entities", Json::array({ "/Game/Board" }) } });
+			CHECK(readEntity() == Json{ { "id", id }, { "name", "Board" }, { "path", "" } });
+		}
+
 		TEST_CASE("ScriptMethods: errors preserve distinct embedded expectation pointers across RPC cursor pages")
 		{
 			Test::AutomationFixture fixture("ScriptEmbeddedErrorCursor");

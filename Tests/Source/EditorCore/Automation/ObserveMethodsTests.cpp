@@ -538,7 +538,9 @@ namespace Engine {
 			Test::EditorTestFixture fixture("DocsRepository");
 			Test::AutomationTestClient client(fixture.GetEditor());
 			const Json listed = CallDocs(client, Json::object());
-			for (const std::string_view required : { "reference/Schemas/Scene", "scripting/Engine.d.luau", "templates/Scripts/Behaviour", "reference/ScriptAPI" })
+			// reference/BuiltinAssets: M17 friction F02 (the built-in assets, generated from Resources/EngineAssets.json).
+			for (const std::string_view required : { "reference/Schemas/Scene", "scripting/Engine.d.luau", "templates/Scripts/Behaviour", "reference/ScriptAPI",
+					 "reference/BuiltinAssets" })
 				CHECK_MESSAGE(listed["topics"].dump().contains(std::format("\"{}\"", required)), required);
 			for (const Json& topic : listed["topics"])
 			{

@@ -154,6 +154,47 @@ class AssetTests(AutomationTestCase):
         self.assertFalse((root / "Assets" / "Dry.material.meta").exists())
         self.assertEqual(client.call("asset.list", {"type": "Material"})["assets"], [])
 
+    def test_asset_list_lists_the_built_in_assets_below_engine(self) -> None:
+        # M17 friction F02: asset.list refused engine://, so a builder could only guess the built-in paths, and an
+        # unknown engine path was compared with the project's paths.
+        client, _ = self.open_editor_with_scene()
+        listed = client.call("asset.list", {"dir": "engine://", "limit": 1000})
+        paths = [asset["path"] for asset in listed["assets"]]
+        self.assertEqual(paths, sorted(paths))
+        self.assertEqual(listed["total"], len(paths))
+        self.assertIn("engine://Environments/Studio", paths)
+        self.assertIn("engine://Meshes/Cube", paths)
+        environments = client.call("asset.list", {"dir": "engine://Environments"})
+        self.assertEqual(environments["assets"], [
+            {"id": "0000000000000202", "path": "engine://Environments/Sky", "type": "Environment"},
+            {"id": "0000000000000201", "path": "engine://Environments/Studio", "type": "Environment"}])
+        with self.assertRaises(engine_client.EngineError) as unknown:
+            client.call("asset.info", {"asset": "engine://Environments/Default"})
+        self.assert_engine_error(unknown.exception, engine_client.NOT_FOUND, "NotFound")
+        self.assertIn("'engine://Environments/Studio'", unknown.exception.data["hint"])
+        with self.assertRaises(engine_client.EngineError) as other:
+            client.call("asset.list", {"dir": "user://Replays"})
+        self.assert_engine_error(other.exception, engine_client.INVALID_PARAMS, "InvalidArgument")
+
+    def test_asset_create_of_an_existing_folder_creates_nothing(self) -> None:
+        # M17 friction F07: the template's folders made a Folder op fail with AlreadyExists, rolling back its whole
+        # batch.
+        client, root = self.open_editor_with_scene()
+        existing = client.call("asset.create", {"type": "Folder", "path": "Assets/Materials"})
+        self.assertEqual((existing["created"], existing["undoIndex"]), (False, 0))
+        batch = client.call("edit.batch", {"label": "Materials", "ops": [
+            {"method": "asset.create", "params": {"type": "Folder", "path": "Assets/Materials"}},
+            {"method": "asset.create", "params": {"type": "Material", "path": "Assets/Materials/Red.material"}}]})
+        self.assertEqual([result["created"] for result in batch["results"]], [False, True])
+        self.assertTrue((root / "Assets" / "Materials" / "Red.material").is_file())
+        created = client.call("asset.create", {"type": "Folder", "path": "Assets/Levels"})
+        self.assertTrue(created["created"])
+        self.assertTrue((root / "Assets" / "Levels").is_dir())
+        with self.assertRaises(engine_client.EngineError) as file:
+            client.call("asset.create", {"type": "Folder", "path": "Assets/Materials/Red.material"})
+        self.assert_engine_error(file.exception, engine_client.CONFLICT, "AlreadyExists")
+        self.assertTrue((root / "Assets" / "Materials" / "Red.material").is_file())
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -546,16 +546,16 @@
 					"enum": ["AgX", "ACES", "PbrNeutral", "Linear"]
 				},
 				"SsaoEnabled": {
-					"description": "Whether screen-space ambient occlusion (GTAO) is applied.",
+					"description": "Whether screen-space ambient occlusion (GTAO) is applied. It darkens the environment's image-based light only (the Environment's FallbackColor ambient without a map), never direct lights.",
 					"type": "boolean"
 				},
 				"SsaoRadius": {
-					"description": "The world-space radius within which ambient occlusion is sampled, in metres.",
+					"description": "The world-space radius within which ambient occlusion is sampled, in metres. An occluder further than this in front of a surface casts little occlusion on it: set it above the depth gap between the pieces and the surface behind them.",
 					"type": "number",
 					"minimum": 0.01
 				},
 				"SsaoIntensity": {
-					"description": "The strength of the ambient occlusion.",
+					"description": "The strength of the ambient occlusion, which darkens the environment's image-based light only, never direct lights.",
 					"type": "number",
 					"minimum": 0
 				},

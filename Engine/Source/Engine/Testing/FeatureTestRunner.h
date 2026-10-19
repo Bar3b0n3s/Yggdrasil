@@ -106,7 +106,8 @@ namespace Engine {
 		// host retains that request. A replay that cannot load, start or play becomes failed replay:<path> rows, and a
 		// quit or fatal stop before its FinalTick a failed replay (ReplayPlaybackResult::StopReason); the run continues.
 		// Every replay is played with StrictHash: the first checkpoint whose state hash differs ends it with a failed
-		// "Checkpoint@<tick>" row (located at /Checkpoints/<index>/StateHash) naming both hashes.
+		// "Checkpoint@<tick>" row (located at /Checkpoints/<index>/StateHash) naming both hashes; it and a failed
+		// FinalStateHash row end their message with GetReplayDivergenceHint (M17 friction F03).
 		[[nodiscard]] virtual Result<Scope<PlaySession>> CreateReplaySession(const ReplayHeader& header, TestSuiteSettings::Mode mode) = 0;
 		// Publishes a borrowed view for UI/automation reads. Null before destruction; the host never advances it from
 		// its ordinary frame loop or lets another writer/driver take over during the runner's exclusive lease.

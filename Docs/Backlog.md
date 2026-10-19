@@ -1,13 +1,12 @@
 # Backlog
 
-Status: index, not authoritative; current after M16 (2026-10-15) and the M17 contract, ADR 0027 (2026-10-18). It gathers in one place the engine and editor work that v1 does not do, and names the document that decides each item: § refers to `Docs/Architecture.md`, "ADR NNNN" to `Docs/Decisions/NNNN-*.md`. Where this file and its source disagree, the source wins and this file is fixed. A change that adds, closes or reschedules an item (an Appendix C row, an ADR's deferral, accepted limit, follow-up or watch item) updates this file in the same change (`Docs/ReviewChecklist.md` §9).
+Status: index, not authoritative; current after M16 (2026-10-15) and M17 (ADR 0027, 2026-10-19). It gathers in one place the engine and editor work that v1 does not do, and names the document that decides each item: § refers to `Docs/Architecture.md`, "ADR NNNN" to `Docs/Decisions/NNNN-*.md`. Where this file and its source disagree, the source wins and this file is fixed. A change that adds, closes or reschedules an item (an Appendix C row, an ADR's deferral, accepted limit, follow-up or watch item) updates this file in the same change (`Docs/ReviewChecklist.md` §9).
 
 ## 1. Planned milestones
 
 | Milestone | Scope | Source |
 |---|---|---|
-| M17 Tetris | `Projects/Tetris`, built by an agent through the MCP tools only; the engine and editor gaps it finds are fixed in their owning modules, never worked around in the game | Roadmap M17, §13.11 |
-| M18 Rolling Ball 3D | `Projects/RollingBall`, built the same way; it may run alongside M17 | Roadmap M18, §13.11 |
+| M18 Rolling Ball 3D | `Projects/RollingBall`, built by an agent through the MCP tools only, as Tetris was in M17; the engine and editor gaps it finds are fixed in their owning modules, never worked around in the game | Roadmap M18, §13.11 |
 
 ## 2. Deferred features
 
@@ -35,6 +34,8 @@ Decisions left open with a default in force. Reopening one needs an ADR.
 | Automation | Reading a replay's input events back through automation | every demo replay comes from a recording suite (`test.run {record}`), whose input plan `script.read` shows; a replay made with `input.record` is re-recorded by planning its input again | ADR 0027 decision 12 |
 | Automation | A builder-side Dist hash self-check (a testing export that runs `--feature-test` and reports its hashes) | the games suite's Dist half compares the testing Dist export's hashes with the editors' | ADR 0027 decision 12 |
 | Automation | Screenshots kept outside `Library/Automation/Out/`, which the next editor session prunes | the lead copies the look screenshots to `bin/Reviews/M17-Look/` before the next editor launch on the project (ADR 0027 decision 9) | ADR 0027 decision 12 |
+| Automation | A replay header fingerprint of the starting state per entity and component, so a checkpoint failure names what changed | the divergence hint lists the possible causes (a serialized component, a script, an asset, the engine, nondeterminism) and the re-recording path | ADR 0027 friction F13 |
+| Testing | The editor soak renders each scene's game view (its camera and post-processing) | the Scene view renders the play scene (a headless editor displays no Game view); the game camera's own passes are covered by the golden images and the Runtime soak subject | ADR 0027 friction F08 |
 | Testing | Provenance of FeatureTest's 24 copied-in M9 golden files | no `Provenance.json` entries; a reviewed regeneration through one recorded editor run is needed before any audit targets FeatureTest | Appendix C, §15.4; ADR 0025 decision 7 |
 | Platform | Native Wayland | X11, including XWayland sessions | Appendix C, §16 |
 

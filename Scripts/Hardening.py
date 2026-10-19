@@ -13,10 +13,12 @@ Steps, in this order, failing fast (a step after a failed one is reported as not
                  "end"} (the error stream's cursor, taken before play.start runs OnStart), play.start {lockstep: true}
                  and N / 250 x play.step {ticks: 250, render: "Every"}, N rendered frames (N = --soak-frames, 10,000 by
                  default), sampling the editor's process memory and stats.get after each step, then script.errors from
-                 that cursor: any new script error of the play session, OnStart's included, fails the subject with one
-                 line counting them and naming the earliest listed, at its latest occurrence (script.errors lists each
-                 distinct error once; Docs/Decisions/0027-m17-contract.md decision 4, B4; play.step keeps ticking
-                 through a non-fatal script error, so the soak runs all its ticks either way);
+                 that cursor, each page read from the file the editor offloads it to when it is over the 48 KB
+                 bounded-output limit (Architecture §13.4): any new script error of the play session, OnStart's
+                 included, fails the subject with one line counting them and naming the earliest listed, at its latest
+                 occurrence (script.errors lists each distinct error once; Docs/Decisions/0027-m17-contract.md
+                 decision 4, B4; play.step keeps ticking through a non-fatal script error, so the soak runs all its
+                 ticks either way);
                  then the exported Release FeatureTest that the export stage leaves in bin/Exports/Release/FeatureTest
                  (--headless --frames N, its memory sampled from outside every 0.5 s). hardening.evaluate_soak applies
                  the rules of decision 15 to each subject, its windows being fractions of the soak whatever N is;
@@ -143,7 +145,9 @@ SOAK_STEP_TICKS = hardening.SOAK_SAMPLE_INTERVAL
 SOAK_CALL_TIMEOUT_SECONDS = 600.0
 SOAK_SHUTDOWN_TIMEOUT_SECONDS = 60.0
 # script.errors' cursor for "the stream's current end" and its largest page (ScriptMethods.cpp: limit 1 to 1000), with
-# which the soak reads the errors of a scene's play session (Docs/Decisions/0027-m17-contract.md decision 4, B4).
+# which the soak reads the errors of a scene's play session (Docs/Decisions/0027-m17-contract.md decision 4, B4). A page
+# over the 48 KB bounded-output limit (about 200 short errors, fewer with tracebacks) arrives offloaded to a file
+# (Architecture §13.4), which new_script_errors reads.
 SCRIPT_ERRORS_END = "end"
 SCRIPT_ERRORS_PAGE_LIMIT = 1000
 SOAK_REPORT = paths.TEST_RESULTS_ROOT / "Soak.json"
@@ -377,6 +381,9 @@ def script_error_cursor(client: Any, engine_client: Any, deadline: SoakDeadline)
 def new_script_errors(client: Any, engine_client: Any, cursor: str, deadline: SoakDeadline) -> list[str]:
     """The script errors after `cursor` (script_error_cursor's), read with script.errors {since, limit:
     SCRIPT_ERRORS_PAGE_LIMIT} from the cursor, following nextCursor until a page is empty (ADR 0027 decision 4, B4).
+    Every page is read through engine_client.load_offloaded: the soak's connection has offloading on, so a page whose
+    JSON is over the 48 KB bounded-output limit comes back as {path, truncated: true, summary} and the page itself is in
+    the file it names (Architecture §13.4).
     The editor never clears its error stream and each soak scene starts a fresh editor, so every entry after the cursor
     is an error of this scene's play session (a repeated error included, which the stream moves after the cursor with
     its latest occurrence). The stream lists each distinct error once, at its latest occurrence (its tick, and its count
@@ -385,7 +392,8 @@ def new_script_errors(client: Any, engine_client: Any, cursor: str, deadline: So
     script error(s) during the soak; the earliest listed: <script>:<line>: <message> (latest at tick <tick>, <count>
     occurrence(s))", <n> counting the entries returned, followed by "; earlier errors were evicted" when any page
     answered evicted: true; and a line naming a script.errors call that failed (or returned no errors array or
-    nextCursor, or a page that leaves the cursor where it was)."""
+    nextCursor, an offloaded page whose file cannot be read, which the line names, or a page that leaves the cursor
+    where it was)."""
     entries: list[Any] = []
     evicted = False
     failure: str | None = None
@@ -398,6 +406,12 @@ def new_script_errors(client: Any, engine_client: Any, cursor: str, deadline: So
         except engine_client.EngineError as error:
             failure = f"{call} failed: {error}"
             break
+        if isinstance(result, dict):
+            try:
+                result = engine_client.load_offloaded(result)
+            except (OSError, ValueError, engine_client.ProtocolError) as error:
+                failure = f"{call} failed: its offloaded result {result.get('path')} cannot be read: {error}"
+                break
         page = result.get("errors") if isinstance(result, dict) else None
         next_cursor = result.get("nextCursor") if isinstance(result, dict) else None
         if not isinstance(page, list) or not isinstance(next_cursor, str):

@@ -95,7 +95,7 @@ export type PlayMode = "Play" | "Simulate"
 -- The play state, in the vocabulary of _meta.playState.
 export type PlayRunState = "Edit" | "Play" | "Simulate" | "Paused"
 
--- Which ticks of a play.step extract the game view.
+-- Which ticks of a play.step extract the play scene's game view (its primary camera) for rendering.
 export type PlayStepRender = "Every" | "Last" | "None"
 
 -- What a prefab override changes on one prefab entity of an instance.
@@ -567,13 +567,13 @@ declare extern type PostProcess with
 	ExposureEV: number
 	-- Whether FXAA anti-aliasing is applied. [All modes; Runtime|Test; pure/read; setter mutates]
 	FxaaEnabled: boolean
-	-- Whether screen-space ambient occlusion (GTAO) is applied. [All modes; Runtime|Test; pure/read; setter mutates]
+	-- Whether screen-space ambient occlusion (GTAO) is applied. It darkens the environment's image-based light only (the Environment's FallbackColor ambient without a map), never direct lights. [All modes; Runtime|Test; pure/read; setter mutates]
 	SsaoEnabled: boolean
-	-- The strength of the ambient occlusion. [All modes; Runtime|Test; pure/read; setter mutates]
+	-- The strength of the ambient occlusion, which darkens the environment's image-based light only, never direct lights. [All modes; Runtime|Test; pure/read; setter mutates]
 	SsaoIntensity: number
 	-- The ambient occlusion sample count. [All modes; Runtime|Test; pure/read; setter mutates]
 	SsaoQuality: SsaoQuality
-	-- The world-space radius within which ambient occlusion is sampled, in metres. [All modes; Runtime|Test; pure/read; setter mutates]
+	-- The world-space radius within which ambient occlusion is sampled, in metres. An occluder further than this in front of a surface casts little occlusion on it: set it above the depth gap between the pieces and the surface behind them. [All modes; Runtime|Test; pure/read; setter mutates]
 	SsaoRadius: number
 	-- The tone mapping curve. [All modes; Runtime|Test; pure/read; setter mutates]
 	Tonemap: Tonemapper

@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace Engine {
@@ -25,8 +26,16 @@ namespace Engine {
 		// Plays the replay's header and tick count with none of its input events: the check that its outcome depends on its
 		// input. Expectations, checkpoints and the final hash are compared as usual, so a playback that still passes proves
 		// that the replay's verification does not depend on its input (the recording guard of input.record and test.run's
-		// record, input.replay {withoutInput}, the games suite).
+		// record, input.replay {withoutInput}, the games suite). Failing that way is the expected outcome of a replay that
+		// depends on its input, so a checkpoint that differs names no divergence causes (GetReplayDivergenceCauses) in
+		// ReplayPlaybackResult::StopReason, which says instead that the replay ran without its input events.
 		bool WithoutInput = false;
+		// Whether a checkpoint that differs in a playback with the replay's input names the divergence causes
+		// (GetReplayDivergenceCauses) in ReplayPlaybackResult::StopReason. False keeps the plain "the state hash at checkpoint
+		// tick T is X, but the recording's is Y": input.record stop's verification of a candidate recorded moments before
+		// (Docs/Decisions/0027-m17-contract.md decision 3, A1), where nothing changed since the recording and its refusal's
+		// hint names the usual causes instead (M17 review C-01). Ignored WithoutInput, which never names them.
+		bool NameDivergenceCauses = true;
 	};
 
 	struct ReplayExpectationOutcome
@@ -62,6 +71,17 @@ namespace Engine {
 		uint64_t CheckpointsChecked = 0;
 		bool CheckpointFailed = false;
 	};
+
+	// M17 friction F03: what a replay whose state hash differs from the recording's at a checkpoint or at its final tick
+	// means. The state hash covers every serialized component, the look's included (PostProcess, Environment, the lights,
+	// Camera, Text), so tuning the look after a recording fails its replay like any other change.
+	// Both belong only to a playback with the replay's input, never to one WithoutInput (ReplayPlaybackOptions).
+	//   GetReplayDivergenceCauses: the causes, which ReplayPlaybackResult::StopReason names for a checkpoint that differs
+	//   unless ReplayPlaybackOptions::NameDivergenceCauses is false.
+	//   GetReplayDivergenceHint: the causes and the remedy, the hint of input.replay's checkpoint and final-hash failures and
+	//   the text test.run's Checkpoint@<tick> and FinalStateHash rows add to their messages.
+	[[nodiscard]] std::string_view GetReplayDivergenceCauses();
+	[[nodiscard]] std::string_view GetReplayDivergenceHint();
 
 	// The adapter executes expectation.Script in the current play VM using ScriptEngine::ExecuteBytecode.
 	// Re-resolve that VM for each call, especially after Scene.Load. No compiler, Automation or Testing dependency.

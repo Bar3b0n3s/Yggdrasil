@@ -79,15 +79,17 @@ The stages, with the configurations of the §15.8 matrix:
   games        Debug, Release, Dist  Scripts/Test.py --suite games --config Debug,Release,Dist --junit --require-gpu:
                                      every staged demo game below Projects/ and Tests/Projects/ (§15.1 T5; ADR 0026
                                      decisions 7 and 8): its provenance audit of the staged files, the editor halves
-                                     (script.check, project.validate, the canonical re-save dry run and test.run with
-                                     every replay at its committed hash, checkpoints compared, in strict Debug and
-                                     Release editors on the staged files; at least one committed replay with input
-                                     events, and every one must fail input.replay {verify, strictHash, withoutInput},
-                                     the input check of §13.6), and the exported half (a testing Dist export from the
-                                     Release editor run with --feature-test, its hashes identical to the editor
-                                     halves', and a plain Dist export's smoke test); it passes
-                                     with a note while no game exists; --gpu-optional lets the editor and Dist halves
-                                     pass without running, as warnings, on a machine without a usable Vulkan device
+                                     (the build-settings check first: a set StartScene that a non-empty
+                                     Export.BuildScenes lists, ADR 0027 decision 4, B1; then script.check,
+                                     project.validate, the canonical re-save dry run and test.run with every replay at
+                                     its committed hash, checkpoints compared, in strict Debug and Release editors on
+                                     the staged files; at least one committed replay with input events, and every one
+                                     must fail input.replay {verify, strictHash, withoutInput}, the input check of
+                                     §13.6), and the exported half (a testing Dist export from the Release editor run
+                                     with --feature-test, its hashes identical to the editor halves', and a plain Dist
+                                     export's smoke test); it passes with a note while no game exists; --gpu-optional
+                                     lets the editor and Dist halves pass without running, as warnings, on a machine
+                                     without a usable Vulkan device
   portability  n/a                   premake --os=linux gmake, --os=linux ninja, --os=macosx xcode4 (and the vs2026
                                      reference) into bin-int/Portability/, each checked against the expected file list
                                      and project/configuration set; the xcode4 projects' precompiled headers

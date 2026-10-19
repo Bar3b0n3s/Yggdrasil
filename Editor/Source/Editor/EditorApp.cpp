@@ -443,7 +443,7 @@ namespace Engine {
 
 		if (options.DumpReferenceDirectory.has_value())
 		{
-			ENGINE_TRY(DumpReferences(app.GetContext().GetTypeRegistry(), app.GetContext().GetScriptApiRegistry(), *options.DumpReferenceDirectory));
+			ENGINE_TRY(DumpReferences(app.GetContext().GetTypeRegistry(), app.GetContext().GetScriptApiRegistry(), app.GetContext().GetVfs(), *options.DumpReferenceDirectory));
 			app.RequestExit(ExitCode::Success);
 			return {};
 		}

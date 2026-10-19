@@ -4,6 +4,8 @@
 
 #include "EditorCore/EditorContext.h"
 #include "EditorCore/Project/ProjectManager.h"
+#include "Engine/Asset/BuiltinAssets.h"
+#include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Core/VirtualFileSystem.h"
@@ -15,8 +17,11 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <filesystem>
+#include <string>
 #include <system_error>
+#include <vector>
 
 namespace Engine {
 
@@ -190,15 +195,141 @@ namespace Engine {
 			CHECK(wrongExtension["error"]["code"] == Json(-32602));
 			Json invalid = setup.Request("asset.create", ParseAssetMethodJson(R"({"type": "Material", "path": "Assets/Red.material", "values": {"Roughness": 2}})"));
 			CHECK(invalid["error"]["data"]["issues"][0]["pointer"] == Json("/values/Roughness"));
-			// New projects already have Assets/Audio (ProjectManager's folders), so a second one is AlreadyExists.
-			Json existingFolder = setup.Request("asset.create", ParseAssetMethodJson(R"({"type": "Folder", "path": "Assets/Audio"})"));
-			CHECK(existingFolder["error"]["data"]["issues"][0]["pointer"] == Json("/path"));
+			// An existing folder: "asset.create of an existing folder succeeds without a command and a file in the way is still
+			// refused" below.
 			Json folder = CallOrFail(setup, "asset.create", ParseAssetMethodJson(R"({"type": "Folder", "path": "Assets/Levels/Desert"})"));
 			CHECK(folder["asset"]["id"] == Json(""));
 			CHECK(folder["path"] == Json("Assets/Levels/Desert"));
+			CHECK(folder["created"] == Json(true));
 			const Result<FileInfo> created = setup.GetEditor().GetVfs().GetInfo(VfsPath::Create("project", "Assets/Levels/Desert").value_or(VfsPath()));
 			REQUIRE(created.has_value());
 			CHECK(created->IsDirectory);
+		}
+
+		// M17 friction F07: new projects already have the template's folders (ProjectManager), so asset.create {type: Folder}
+		// of Assets/Materials failed with AlreadyExists and rolled back the whole edit.batch it was the first op of. A folder
+		// that is already there now succeeds without a command (created: false); a file at the path is still refused.
+		TEST_CASE("AssetMethods: asset.create of an existing folder succeeds without a command and a file in the way is still refused")
+		{
+			Test::AutomationFixture setup("AssetCreateExistingFolder");
+			const VirtualFileSystem& vfs = setup.GetEditor().GetVfs();
+			const auto exists = [&vfs](std::string_view path)
+			{
+				return vfs.Exists(VfsPath::Create("project", std::string(path)).value_or(VfsPath()));
+			};
+			const size_t undoCount = setup.GetEditor().GetHistory().GetUndoCount();
+			for (const std::string_view folder : { "Assets/Materials", "Assets/Tests", "project://Assets/Audio" })
+			{
+				CAPTURE(folder);
+				const Json existing = CallOrFail(setup, "asset.create", Json{ { "type", "Folder" }, { "path", folder } });
+				CHECK(existing["created"] == Json(false));
+				CHECK(existing["undoIndex"] == Json(0));
+				CHECK(existing["asset"] == Json{ { "id", "" }, { "path", "" }, { "type", "None" } });
+			}
+			CHECK(setup.GetEditor().GetHistory().GetUndoCount() == undoCount);
+
+			// A new folder is one undo step; asking for it again changes nothing.
+			const Json created = CallOrFail(setup, "asset.create", ParseAssetMethodJson(R"({"type": "Folder", "path": "Assets/Levels/Desert"})"));
+			CHECK(created["created"] == Json(true));
+			CHECK(created["undoIndex"] != Json(0));
+			const Json again = CallOrFail(setup, "asset.create", ParseAssetMethodJson(R"({"type": "Folder", "path": "Assets/Levels/Desert"})"));
+			CHECK(again["created"] == Json(false));
+			CHECK(again["undoIndex"] == Json(0));
+			CHECK(again["path"] == Json("Assets/Levels/Desert"));
+			CHECK(setup.GetEditor().GetHistory().GetUndoCount() == undoCount + 1);
+
+			// A file at the path is still AlreadyExists, and stays a file.
+			const Json material = CallOrFail(setup, "asset.create", ParseAssetMethodJson(R"({"type": "Material", "path": "Assets/Red.material"})"));
+			CHECK(material["created"] == Json(true));
+			const Json file = setup.Request("asset.create", ParseAssetMethodJson(R"({"type": "Folder", "path": "Assets/Red.material"})"));
+			REQUIRE_MESSAGE(file.contains("error"), file.dump());
+			CHECK(file["error"]["data"]["errorCode"] == Json("AlreadyExists"));
+			CHECK(file["error"]["data"]["issues"][0]["pointer"] == Json("/path"));
+			const Result<FileInfo> info = vfs.GetInfo(VfsPath::Create("project", "Assets/Red.material").value_or(VfsPath()));
+			REQUIRE(info.has_value());
+			CHECK_FALSE(info->IsDirectory);
+
+			// S1's batch: a template folder first, then an asset in it, now runs as one undo step.
+			const Json batch = CallOrFail(setup, "edit.batch", ParseAssetMethodJson(R"({"label": "Materials", "ops": [
+				{"method": "asset.create", "params": {"type": "Folder", "path": "Assets/Materials"}},
+				{"method": "asset.create", "params": {"type": "Material", "path": "Assets/Materials/Blue.material"}}]})"));
+			CHECK(batch["results"][0]["created"] == Json(false));
+			CHECK(batch["results"][1]["created"] == Json(true));
+			CHECK(exists("Assets/Materials/Blue.material"));
+			REQUIRE(setup.Call("edit.undo", Json::object()).has_value());
+			CHECK_FALSE(exists("Assets/Materials/Blue.material"));
+			CHECK(exists("Assets/Materials"));
+		}
+
+		// M17 friction F02: asset.list refused every dir outside the project, so a builder could find a built-in asset only
+		// by guessing its path (engine://Environments/Studio). engine:// and the folders below it now list the built-in
+		// catalogue (Resources/EngineAssets.json) as project assets are listed.
+		TEST_CASE("AssetMethods: asset.list lists the built-in assets under engine://")
+		{
+			Test::AutomationFixture setup("AssetListBuiltins", true, std::nullopt, true);
+			const BuiltinAssetCatalog& builtins = setup.GetEditor().GetAssets().GetBuiltins();
+			REQUIRE(builtins.FindByPath("engine://Environments/Studio") != nullptr);
+
+			const Json all = CallOrFail(setup, "asset.list", Json{ { "dir", "engine://" }, { "limit", 1000 } });
+			CHECK(all["total"] == Json(builtins.GetEntries().size()));
+			CHECK(all["nextCursor"] == Json(""));
+			REQUIRE(all["assets"].size() == builtins.GetEntries().size());
+			std::vector<std::string> paths;
+			for (const Json& asset : all["assets"])
+			{
+				const std::string path = JsonReader(asset).ReadMember<std::string>("path").value_or(std::string());
+				CAPTURE(path);
+				const BuiltinAssetEntry* entry = builtins.FindByPath(path);
+				REQUIRE(entry != nullptr);
+				CHECK(asset == Json{ { "id", entry->Handle.ToString() }, { "path", entry->Path }, { "type", std::string(AssetTypeToString(entry->Type)) } });
+				paths.push_back(path);
+			}
+			CHECK(std::ranges::is_sorted(paths));
+
+			const Json environments = CallOrFail(setup, "asset.list", Json{ { "dir", "engine://Environments" } });
+			CHECK(environments["assets"] == ParseAssetMethodJson(R"([{"id": "0000000000000202", "path": "engine://Environments/Sky", "type": "Environment"},
+				{"id": "0000000000000201", "path": "engine://Environments/Studio", "type": "Environment"}])"));
+
+			// type, recursive, limit and cursor work as for project assets.
+			CHECK(CallOrFail(setup, "asset.list", Json{ { "dir", "engine://" }, { "type", "mesh" }, { "recursive", false } })["total"] == Json(0));
+			const Json first = CallOrFail(setup, "asset.list", Json{ { "dir", "engine://" }, { "type", "Mesh" }, { "limit", 4 } });
+			CHECK(first["total"] == Json(7));
+			CHECK(first["assets"].size() == 4);
+			CHECK(first["assets"][0]["path"] == Json("engine://Meshes/Capsule"));
+			const Json rest = CallOrFail(setup, "asset.list", Json{ { "dir", "engine://Meshes" }, { "limit", 4 }, { "cursor", first["nextCursor"] } });
+			CHECK(rest["assets"].size() == 3);
+			CHECK(rest["assets"][2]["path"] == Json("engine://Meshes/Sphere"));
+			CHECK(rest["nextCursor"] == Json(""));
+
+			// A folder no built-in lies below, a built-in asset, a malformed engine path and every other scheme are refused.
+			CHECK(setup.Request("asset.list", Json{ { "dir", "engine://Nothing" } })["error"]["code"] == Json(-32001));
+			CHECK(setup.Request("asset.list", Json{ { "dir", "engine://Meshes/Cube" } })["error"]["code"] == Json(-32602));
+			CHECK(setup.Request("asset.list", Json{ { "dir", "engine://Meshes/" } })["error"]["code"] == Json(-32602));
+			CHECK(setup.Request("asset.list", Json{ { "dir", "user://Replays" } })["error"]["code"] == Json(-32602));
+			CHECK(setup.Request("asset.list", Json{ { "dir", "enginecache://" } })["error"]["code"] == Json(-32602));
+		}
+
+		// M17 friction F02: an unknown engine path was compared with the project's paths, so asset.info
+		// {asset: "engine://Environments/Default"} got only "asset.list lists the project's assets". It now suggests the
+		// closest built-in paths, in method params and component values alike.
+		TEST_CASE("AssetMethods: an unknown engine path suggests the built-in assets it resembles")
+		{
+			Test::AutomationFixture setup("AssetBuiltinSuggestions", true, std::nullopt, true);
+			const Json unknown = setup.Request("asset.info", Json{ { "asset", "engine://Environments/Default" } });
+			REQUIRE_MESSAGE(unknown.contains("error"), unknown.dump());
+			CHECK(unknown["error"]["code"] == Json(-32001));
+			const std::string hint = JsonReader(unknown["error"]["data"]).ReadMember<std::string>("hint").value_or(std::string());
+			CHECK(hint.find("did you mean") != std::string::npos);
+			CHECK(hint.find("'engine://Environments/Studio'") != std::string::npos);
+			CHECK(hint.find("'engine://Environments/Sky'") != std::string::npos);
+
+			const Json far = setup.Request("asset.info", Json{ { "asset", "engine://Qqqqqqqqqqqqqqqqqqqqqqqq" } });
+			CHECK(far["error"]["code"] == Json(-32001));
+			CHECK(far["error"]["data"]["hint"] == Json("asset.list {dir: \"engine://\"} lists the built-in assets"));
+
+			const Json component = setup.Request("entity.create", ParseAssetMethodJson(R"({"name": "Box", "components": {"MeshRenderer": {"Mesh": "engine://Meshes/Cub"}}})"));
+			REQUIRE_MESSAGE(component.contains("error"), component.dump());
+			CHECK(component.dump().find("did you mean 'engine://Meshes/Cube'") != std::string::npos);
 		}
 
 		TEST_CASE("AssetMethods: asset.list and asset.info report sub-assets, dependencies and diagnostics")

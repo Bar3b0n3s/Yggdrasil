@@ -2430,7 +2430,7 @@ All modes; Runtime|Test; pure/read; setter mutates.
 
 `boolean`
 
-Whether screen-space ambient occlusion (GTAO) is applied.
+Whether screen-space ambient occlusion (GTAO) is applied. It darkens the environment's image-based light only (the Environment's FallbackColor ambient without a map), never direct lights.
 
 All modes; Runtime|Test; pure/read; setter mutates.
 
@@ -2438,7 +2438,7 @@ All modes; Runtime|Test; pure/read; setter mutates.
 
 `number`
 
-The strength of the ambient occlusion.
+The strength of the ambient occlusion, which darkens the environment's image-based light only, never direct lights.
 
 All modes; Runtime|Test; pure/read; setter mutates.
 
@@ -2454,7 +2454,7 @@ All modes; Runtime|Test; pure/read; setter mutates.
 
 `number`
 
-The world-space radius within which ambient occlusion is sampled, in metres.
+The world-space radius within which ambient occlusion is sampled, in metres. An occluder further than this in front of a surface casts little occlusion on it: set it above the depth gap between the pieces and the surface behind them.
 
 All modes; Runtime|Test; pure/read; setter mutates.
 
@@ -3288,7 +3288,7 @@ What asset.create makes.
 
 - `SoundEffect`: A .sfx sound effect: synthesized layers of oscillators, imported as an AudioClip.
 
-- `Folder`: A folder below Assets/.
+- `Folder`: A folder below Assets/; one that already exists is left as it is (created: false).
 
 ## AssetState
 
@@ -3956,7 +3956,7 @@ The play state, in the vocabulary of _meta.playState.
 
 ## PlayStepRender
 
-Which ticks of a play.step extract the game view.
+Which ticks of a play.step extract the play scene's game view (its primary camera) for rendering.
 
 - `Every`: Every tick, one tick per frame.
 

@@ -32,6 +32,11 @@ return Script.Define("Booster", Booster)
 """
 
 
+# What input.replay {withoutInput: true}'s failures say instead of the divergence hint (ReplayMethods.cpp).
+WITHOUT_INPUT_NOTE = ("the replay ran without its input events (withoutInput), which a replay that depends on its "
+                      "input is expected to fail")
+
+
 def add_key_mover(client: engine_client.EngineClient) -> None:
     """Adds the KeyMover script and its "Mover" entity to the open scene (unsaved)."""
     client.call("script.write", {"path": "Assets/Scripts/KeyMover.luau", "source": KEY_MOVER})
@@ -126,6 +131,12 @@ class ReplayTests(AutomationTestCase):
         with self.assertRaises(engine_client.EngineError) as mismatch:
             client.call("input.replay", {"path": path, "verify": True, "strictHash": True})
         self.assert_engine_error(mismatch.exception, engine_client.VALIDATION_FAILED, "Validation")
+        # M17 friction F03: a state hash that differs says what changes the world and how to re-record.
+        self.assertIn("the world differs from the recording", mismatch.exception.data["hint"])
+        # M17 review D-06/R-03: the hint names the method engine_client calls, never the MCP tool.
+        self.assertIn('re-record it with test.run {record} (the game-building skill, "Re-recording replays")',
+                      mismatch.exception.data["hint"])
+        self.assertNotIn("test_run", mismatch.exception.data["hint"])
         outcome = mismatch.exception.data["replay"]
         self.assertTrue(outcome["hashChecked"])
         self.assertFalse(outcome["hashMatched"])
@@ -271,6 +282,11 @@ class ReplayTests(AutomationTestCase):
         self.assertEqual(verification["finalTick"], 60)
         self.assertIn(verification["stateHash"], detail)
         self.assertIn(verification["expectedStateHash"], detail)
+        # M17 review C-01: the recording was made moments before, so its stop reason blames no change since then.
+        self.assertEqual(verification["stopReason"],
+                         f"the state hash at checkpoint tick 60 is {verification['stateHash']}, "
+                         f"but the recording's is {verification['expectedStateHash']}")
+        self.assertNotIn("changed since it was recorded", json.dumps(refused.exception.data))
         self.assertFalse((root / path).exists())
         state = client.call("play.state")
         self.assertFalse(state["recording"])
@@ -311,8 +327,10 @@ class ReplayTests(AutomationTestCase):
             client.call("input.replay", {"path": path, "verify": True, "strictHash": True})
         self.assert_engine_error(mismatch.exception, engine_client.VALIDATION_FAILED, "Validation")
         self.assertIn("checkpoint tick 60", mismatch.exception.detail)
+        self.assertIn("(the look's included)", mismatch.exception.data["hint"])
         outcome = mismatch.exception.data["replay"]
         self.assertTrue(outcome["checkpointFailed"])
+        self.assertIn("(the look's included)", outcome["stopReason"])
         self.assertEqual((outcome["finalTick"], outcome["checkpointsChecked"]), (60, 1))
         self.assertEqual((outcome["stateHash"], outcome["expectedStateHash"]),
                          (recorded, document["Checkpoints"][0]["StateHash"]))
@@ -326,6 +344,11 @@ class ReplayTests(AutomationTestCase):
         client.call("play.stop")
         with self.assertRaises(engine_client.EngineError) as failed:
             client.call("input.replay", {"path": path, "verify": True, "strictHash": True, "withoutInput": True})
+        self.assert_engine_error(failed.exception, engine_client.VALIDATION_FAILED, "Validation")
+        # The input check's failure is the expected outcome for a replay with input events: no divergence hint asks for
+        # a re-recording (M17 friction F03 belongs to a playback with the input), and the message says what ran.
+        self.assertEqual(failed.exception.detail, "replay verification failed at tick 8; " + WITHOUT_INPUT_NOTE)
+        self.assertNotIn("hint", failed.exception.data)
         outcome = failed.exception.data["replay"]
         self.assertTrue(outcome["withoutInput"])
         self.assertFalse(outcome["hashMatched"])
@@ -341,6 +364,25 @@ class ReplayTests(AutomationTestCase):
             client.call("input.replay", {"path": path, "withoutInput": True})
         self.assert_engine_error(unverified.exception, engine_client.INVALID_PARAMS, "InvalidArgument")
         self.assertIn("withoutInput requires verify:true", unverified.exception.detail)
+
+        # A longer replay fails without its input at its first checkpoint, whose stop reason names no divergence causes.
+        client.call("play.stop")
+        long_path = "Assets/Tests/PressedLong.replay"
+        client.call("input.record", {"action": "start"})
+        client.call("play.step", {"ticks": 70, "render": "none", "input": [
+            {"tick": 2, "type": "key", "key": "Space", "state": "tap"}]})
+        client.call("input.record", {"action": "stop", "path": long_path})
+        client.call("play.stop")
+        with self.assertRaises(engine_client.EngineError) as diverged:
+            client.call("input.replay", {"path": long_path, "verify": True, "strictHash": True, "withoutInput": True})
+        self.assert_engine_error(diverged.exception, engine_client.VALIDATION_FAILED, "Validation")
+        self.assertIn("checkpoint tick 60", diverged.exception.detail)
+        self.assertTrue(diverged.exception.detail.endswith("; " + WITHOUT_INPUT_NOTE))
+        self.assertNotIn("hint", diverged.exception.data)
+        check = diverged.exception.data["replay"]
+        self.assertTrue(check["checkpointFailed"])
+        self.assertIn("the replay ran without its input events", check["stopReason"])
+        self.assertNotIn("(the look's included)", check["stopReason"])
 
     def test_replay_faults_preserve_both_embedded_locations(self) -> None:
         client, _ = self.open_editor_with_scene()

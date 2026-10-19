@@ -122,7 +122,9 @@ namespace Engine {
 			.Field("scriptHardLimitBytes", &StatsGetResult::ScriptHardLimitBytes, "Approximate script heap hard limit in bytes when available.")
 			.Field("memoryAllocationCount", &StatsGetResult::MemoryAllocationCount, "Current Vulkan device memory allocation count.")
 			.Field("maxMemoryAllocationCount", &StatsGetResult::MaxMemoryAllocationCount, "Vulkan device allocation limit, zero without a device.")
-			.Field("views", &StatsGetResult::Views, "Displayed scene then game views; Runtime supplies game only.");
+			.Field("views", &StatsGetResult::Views,
+				"The scene then the game view, as the editor's displayed viewport panels: a view whose panel is not displayed is unavailable, and a "
+				"headless editor displays only the Scene view of its default layout, so game is unavailable there. The Runtime supplies game only.");
 	}
 
 	void RegisterStatsMethods(MethodRegistry& methods)

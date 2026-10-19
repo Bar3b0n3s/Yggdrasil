@@ -39,7 +39,8 @@ namespace Engine {
 		// The handle an asset reference names (§7.1): 16 hex digits, "Assets/..." with an optional "#<key>", or an engine
 		// path; a project path refreshes the registry first. Errors (not located): InvalidArgument for an empty or malformed
 		// reference (ParseAssetReference's message and hint); NotFound for one that names nothing, with "did you mean"
-		// suggestions among the registered paths; the refresh's errors.
+		// suggestions among the registered paths (among the built-in paths for an engine path, M17 friction F02); the
+		// refresh's errors.
 		[[nodiscard]] Result<AssetHandle> ResolveAssetReference(EditorContext& editor, std::string_view reference);
 
 		// ResolveAssetReference for an asset param, its errors located at `pointer`.

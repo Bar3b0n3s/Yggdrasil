@@ -5,6 +5,7 @@
 #include "EditorCore/Automation/RegisterMethods.h"
 #include "EditorCore/Project/ProjectValidator.h"
 #include "Engine/App/EngineContext.h"
+#include "Engine/Asset/BuiltinAssets.h"
 #include "Engine/Asset/ReplayData.h"
 #include "Engine/AssetPipeline/ImporterRegistry.h"
 #include "Engine/Audio/SoundSynth.h"
@@ -27,6 +28,7 @@
 #include <filesystem>
 #include <format>
 #include <map>
+#include <optional>
 #include <set>
 #include <string>
 #include <string_view>
@@ -45,12 +47,22 @@ namespace Engine {
 			return found == files.end() ? nullptr : &*found;
 		}
 
-		// The editor's registries of one fixture, frozen, as the dump builds them.
+		// The repository's built-in catalogue, Resources/EngineAssets.json, as DumpReferences reads it through engine://.
+		BuiltinAssetCatalog LoadRepositoryBuiltins()
+		{
+			const Result<std::string> text = FileSystem::ReadText(Test::GetRepositoryRoot() / "Resources" / "EngineAssets.json");
+			REQUIRE_MESSAGE(text.has_value(), text.error().ToString());
+			Result<BuiltinAssetCatalog> catalogue = BuiltinAssetCatalog::Parse(*text);
+			REQUIRE_MESSAGE(catalogue.has_value(), catalogue.error().ToString());
+			return std::move(*catalogue);
+		}
+
+		// The editor's registries of one fixture, frozen, as the dump builds them, and the repository's built-in catalogue.
 		class ReferenceRegistries
 		{
 		public:
 			explicit ReferenceRegistries(Test::EditorTestFixture& fixture)
-				: m_Fixture(fixture), m_Methods(fixture.GetEngine().GetTypeRegistry())
+				: m_Fixture(fixture), m_Methods(fixture.GetEngine().GetTypeRegistry()), m_Builtins(LoadRepositoryBuiltins())
 			{
 				RegisterEditorMethods(m_Methods, EditorMethodOptions{ .TestHooks = false });
 				m_Methods.Freeze();
@@ -62,12 +74,14 @@ namespace Engine {
 				return ReferenceSources{ .Types = &m_Fixture.GetEngine().GetTypeRegistry(),
 					.Scripts = &m_Fixture.GetEngine().GetScriptApiRegistry(),
 					.Methods = &m_Methods,
-					.Importers = &m_Importers };
+					.Importers = &m_Importers,
+					.Builtins = &m_Builtins };
 			}
 		private:
 			Test::EditorTestFixture& m_Fixture;
 			MethodRegistry m_Methods;
 			ImporterRegistry m_Importers{};
+			BuiltinAssetCatalog m_Builtins{};
 		};
 
 		Json ParseSchema(const std::vector<GeneratedReferenceFile>& files, std::string_view format)
@@ -112,12 +126,13 @@ namespace Engine {
 			methods.Freeze();
 			ImporterRegistry importers;
 			RegisterBuiltinImporters(importers);
-			const ReferenceSources sources{ .Types = &types, .Scripts = &scripts, .Methods = &methods, .Importers = &importers };
+			const BuiltinAssetCatalog builtins = LoadRepositoryBuiltins();
+			const ReferenceSources sources{ .Types = &types, .Scripts = &scripts, .Methods = &methods, .Importers = &importers, .Builtins = &builtins };
 
 			const auto files = GenerateReferences(sources);
 			REQUIRE_MESSAGE(files.has_value(), files.error().ToString());
 			CHECK(std::ranges::is_sorted(*files, {}, &GeneratedReferenceFile::Path));
-			for (const std::string_view path : { "Automation.md", "catalog.json", "Components.md", "Engine.d.luau", "FileFormats.md", "Methods.json",
+			for (const std::string_view path : { "Automation.md", "BuiltinAssets.md", "catalog.json", "Components.md", "Engine.d.luau", "FileFormats.md", "Methods.json",
 					 "ScriptAPI.md", "Validation.md", "Schemas/AssetMeta.schema.json", "Schemas/BatchRequest.schema.json",
 					 "Schemas/GameManifest.schema.json", "Schemas/Material.schema.json", "Schemas/Prefab.schema.json", "Schemas/Project.schema.json",
 					 "Schemas/Provenance.schema.json", "Schemas/Replay.schema.json", "Schemas/Scene.schema.json", "Schemas/SoundEffect.schema.json" })
@@ -125,7 +140,7 @@ namespace Engine {
 				CAPTURE(path);
 				CHECK(FindFile(*files, path) != nullptr);
 			}
-			CHECK(files->size() == 18);
+			CHECK(files->size() == 19);
 			for (const GeneratedReferenceFile& file : *files)
 			{
 				CAPTURE(file.Path);
@@ -180,10 +195,18 @@ namespace Engine {
 			RegisterEditorMethods(methods, EditorMethodOptions{ .TestHooks = false });
 			ImporterRegistry importers;
 			RegisterBuiltinImporters(importers);
-			const auto unfrozen = GenerateReferences(
-				ReferenceSources{ .Types = &types, .Scripts = &fixture.GetEngine().GetScriptApiRegistry(), .Methods = &methods, .Importers = &importers });
+			const BuiltinAssetCatalog builtins = LoadRepositoryBuiltins();
+			const auto unfrozen = GenerateReferences(ReferenceSources{
+				.Types = &types, .Scripts = &fixture.GetEngine().GetScriptApiRegistry(), .Methods = &methods, .Importers = &importers, .Builtins = &builtins });
 			REQUIRE_FALSE(unfrozen.has_value());
 			CHECK(unfrozen.error().GetCode() == ErrorCode::InvalidState);
+
+			// M17 friction F02: the built-in catalogue is a source like the registries.
+			methods.Freeze();
+			const auto withoutBuiltins = GenerateReferences(
+				ReferenceSources{ .Types = &types, .Scripts = &fixture.GetEngine().GetScriptApiRegistry(), .Methods = &methods, .Importers = &importers });
+			REQUIRE_FALSE(withoutBuiltins.has_value());
+			CHECK(withoutBuiltins.error().GetCode() == ErrorCode::InvalidArgument);
 		}
 
 		// ADR 0022 decision 13: every file lands below the directory at its '/'-separated path, parents created, each written
@@ -219,12 +242,14 @@ namespace Engine {
 			CHECK_FALSE(std::filesystem::exists(directory / "Out", error));
 		}
 
-		// `Editor --dump-reference` calls only DumpReferences, which writes the whole reference set (ADR 0022 decision 13).
+		// `Editor --dump-reference` calls only DumpReferences, which writes the whole reference set (ADR 0022 decision 13); the
+		// built-in catalogue comes from engine:// (M17 friction F02).
 		TEST_CASE("ReferenceGenerator: DumpReferences writes the whole reference set")
 		{
-			Test::EditorTestFixture fixture("ReferenceDump");
+			Test::EditorTestFixture fixture("ReferenceDump", {}, nullptr, std::nullopt, true);
 			const Test::TempDirectory directory("ReferenceDump");
-			const Status dumped = DumpReferences(fixture.GetEngine().GetTypeRegistry(), fixture.GetEngine().GetScriptApiRegistry(), directory / "Reference");
+			const Status dumped = DumpReferences(fixture.GetEngine().GetTypeRegistry(), fixture.GetEngine().GetScriptApiRegistry(), fixture.GetEngine().GetVfs(),
+				directory / "Reference");
 			REQUIRE_MESSAGE(dumped.has_value(), dumped.error().ToString());
 			const ReferenceRegistries registries(fixture);
 			const auto files = GenerateReferences(registries.GetSources());
@@ -234,6 +259,57 @@ namespace Engine {
 				CAPTURE(file.Path);
 				CHECK(FileSystem::ReadText(directory / "Reference" / FileSystem::PathFromUtf8(file.Path)).value_or(std::string()) == file.Content);
 			}
+
+			// Without engine:// there is no catalogue to read, so nothing is written.
+			Test::EditorTestFixture bare("ReferenceDumpWithoutResources");
+			const Status refused = DumpReferences(bare.GetEngine().GetTypeRegistry(), bare.GetEngine().GetScriptApiRegistry(), bare.GetEngine().GetVfs(),
+				directory / "Refused");
+			CHECK_FALSE(refused.has_value());
+			std::error_code error;
+			CHECK_FALSE(std::filesystem::exists(directory / "Refused", error));
+		}
+
+		// M17 friction F02: the built-in assets were listed only in Architecture §7.1, which docs.get does not serve, so a
+		// builder guessed engine paths. BuiltinAssets.md (reference/BuiltinAssets) lists every entry of the catalogue by
+		// folder in path order, with its type, id and what it is made from, and names the placeholders.
+		TEST_CASE("ReferenceGenerator: the reference lists every built-in asset of EngineAssets.json")
+		{
+			Test::EditorTestFixture fixture("ReferenceBuiltins");
+			const ReferenceRegistries registries(fixture);
+			const auto files = GenerateReferences(registries.GetSources());
+			REQUIRE_MESSAGE(files.has_value(), files.error().ToString());
+			const GeneratedReferenceFile* file = FindFile(*files, "BuiltinAssets.md");
+			REQUIRE(file != nullptr);
+			const std::string& text = file->Content;
+			CHECK(text.starts_with("# Built-in assets\n"));
+
+			const BuiltinAssetCatalog builtins = LoadRepositoryBuiltins();
+			REQUIRE(builtins.GetEntries().size() >= 29);
+			std::vector<std::pair<size_t, std::string>> rows;
+			for (const BuiltinAssetEntry& entry : builtins.GetEntries())
+			{
+				CAPTURE(entry.Path);
+				const std::string row = std::format("| `{}` | {} | `{}` | ", entry.Path, AssetTypeToString(entry.Type), entry.Handle.ToString());
+				const size_t position = text.find(row);
+				REQUIRE(position != std::string::npos);
+				CHECK(text.find(row, position + 1) == std::string::npos);
+				rows.emplace_back(position, entry.Path);
+			}
+			// Sorted by path, under a heading per folder.
+			std::ranges::sort(rows);
+			CHECK(std::ranges::is_sorted(rows, {}, &std::pair<size_t, std::string>::second));
+			for (const std::string_view folder : { "Audio", "Environments", "Fonts", "Materials", "Meshes", "Textures" })
+				CHECK_MESSAGE(text.find(std::format("\n## {}\n", folder)) != std::string::npos, folder);
+			CHECK(text.find("| `engine://Environments/Studio` | Environment | `0000000000000201` | the file `Environments/Studio.hdr` through the Environment importer |")
+				!= std::string::npos);
+			CHECK(text.find("through the Environment importer, settings `{\"ClampLuminance\":true}` |") != std::string::npos);
+			CHECK(text.find("| `engine://Textures/BlueNoise` | Texture | `0000000000000186` | generated at bake time by `BlueNoise` |") != std::string::npos);
+			CHECK(text.find("| `engine://Meshes/Cube` | Mesh | `0000000000000101` | procedural: generated in code |") != std::string::npos);
+			const size_t placeholders = text.find("\n## Placeholders\n");
+			REQUIRE(placeholders != std::string::npos);
+			for (const std::string_view placeholder : { "Mesh `engine://Meshes/Cube`", "Material `engine://Materials/Error`", "Texture `engine://Textures/Missing`",
+					 "Font `engine://Fonts/Default`", "AudioClip `engine://Audio/Silence`" })
+				CHECK_MESSAGE(text.find(placeholder, placeholders) != std::string::npos, placeholder);
 		}
 
 		// The schemas describe the files authors and agents write: every .eproj, .scene, .prefab, .material, .sfx, .meta and

@@ -6,7 +6,7 @@
 		{
 			"name": "asset_create",
 			"method": "asset.create",
-			"description": "Creates a material or a sound effect (with values over the defaults), an empty scene, a one-entity prefab or a folder below Assets/, with its .meta, as one undoable command.",
+			"description": "Creates a material or a sound effect (with values over the defaults), an empty scene, a one-entity prefab or a folder below Assets/, with its .meta and any missing parent folders, as one undoable command. A folder that already exists succeeds without a command (created: false), so a Folder op is needed only for an empty folder.",
 			"inputSchema": {
 				"$schema": "https://json-schema.org/draft/2020-12/schema",
 				"title": "AssetCreateParams",
@@ -18,7 +18,7 @@
 						"enum": ["Material", "Scene", "Prefab", "SoundEffect", "Folder"]
 					},
 					"path": {
-						"description": "The project-relative path below Assets/, with the type's extension (.material, .scene, .prefab, .sfx).",
+						"description": "The project-relative path below Assets/, with the type's extension (.material, .scene, .prefab, .sfx; none for a folder); missing parent folders are created with it.",
 						"type": "string"
 					},
 					"values": {
@@ -69,6 +69,33 @@
 			"timeoutSeconds": 60
 		},
 		{
+			"name": "asset_get_properties",
+			"method": "asset.getProperties",
+			"description": "Returns every property of a native asset (a material or a sound effect) by registry name.",
+			"inputSchema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "AssetGetPropertiesParams",
+				"description": "The params of asset.getProperties.",
+				"type": "object",
+				"properties": {
+					"asset": {
+						"description": "The native asset (a material or a sound effect).",
+						"type": "string"
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the editor's revision (_meta.revision) still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"required": ["asset"]
+			},
+			"mutates": false,
+			"supportsDryRun": false,
+			"timeoutSeconds": 60
+		},
+		{
 			"name": "asset_import",
 			"method": "asset.import",
 			"description": "Copies a file (and a glTF's buffers and images) into a folder below Assets/ with its .meta files as one undoable command, then imports it; resolves when the import completed.",
@@ -105,7 +132,7 @@
 		{
 			"name": "asset_list",
 			"method": "asset.list",
-			"description": "Lists the project's assets below a folder, optionally of one type, sorted by path with each glTF's sub-assets after it; paged with limit and cursor.",
+			"description": "Lists the project's assets below a folder, or the built-in assets below engine:// (such as engine://Environments), optionally of one type, sorted by path with each glTF's sub-assets after it; paged with limit and cursor.",
 			"inputSchema": {
 				"$schema": "https://json-schema.org/draft/2020-12/schema",
 				"title": "AssetListParams",
@@ -113,7 +140,7 @@
 				"type": "object",
 				"properties": {
 					"dir": {
-						"description": "The project-relative folder to list, Assets or below it.",
+						"description": "The folder to list: project-relative, Assets or below it; or engine:// or a folder below it, such as engine://Environments, for the built-in assets (which have no sub-assets).",
 						"type": "string"
 					},
 					"type": {
@@ -184,7 +211,7 @@
 		{
 			"name": "asset_set_properties",
 			"method": "asset.setProperties",
-			"description": "Applies an RFC 7386 merge patch to a native asset's properties (a material or a sound effect) and writes it, as one undoable command.",
+			"description": "Applies an RFC 7386 merge patch to a native asset's properties (a material or a sound effect) and writes it, as one undoable command. A running lockstep, recording, replay or test session sees the change only after it ends: asset reloads are deferred like script reloads.",
 			"inputSchema": {
 				"$schema": "https://json-schema.org/draft/2020-12/schema",
 				"title": "AssetSetPropertiesParams",
@@ -1191,7 +1218,7 @@
 						}
 					},
 					"render": {
-						"description": "Which ticks extract the game view: every, last (the default) or none.",
+						"description": "Which ticks extract the play scene's game view (its primary camera) for rendering: every, last (the default) or none. The Runtime renders that view; an editor renders only its displayed viewport panels, once per frame (a headless editor: the Scene view).",
 						"enum": ["Every", "Last", "None"]
 					},
 					"ifRevision": {
@@ -1383,7 +1410,7 @@
 		{
 			"name": "project_create",
 			"method": "project.create",
-			"description": "Creates a project from a template at a native path and opens it, taking its lock. Provenance records the .eproj, the root .luaurc and the template's files under Assets/.",
+			"description": "Creates a project from a template at a native path and opens it, taking its lock. Every template has the folders Assets/Scenes, Scripts, Prefabs, Materials, Models, Textures, Audio, Fonts and Tests; asset.create creates missing parent folders, so a Folder op is needed only for an empty folder. Provenance records the .eproj, the root .luaurc and the template's files under Assets/.",
 			"inputSchema": {
 				"$schema": "https://json-schema.org/draft/2020-12/schema",
 				"title": "ProjectCreateParams",
@@ -2134,7 +2161,7 @@
 						"type": "string"
 					},
 					"debugView": {
-						"description": "A debug view to render instead of the lit image, ignoring case: \"Lit\" (the default, also for \"\"), \"Albedo\", \"Normals\", \"Roughness\", \"Metallic\", \"Emissive\", \"AO\", \"ShadowCascades\" or \"Overdraw\". A data view stores each value v as round(255 v).",
+						"description": "A debug view to render instead of the lit image, ignoring case: \"Lit\" (the default, also for \"\"), \"Albedo\", \"Normals\", \"Roughness\", \"Metallic\", \"Emissive\", \"AO\", \"ShadowCascades\" or \"Overdraw\". A data view stores each value v as round(255 v). ShadowCascades colours each surface by the directional shadow cascade its view distance falls in: 1 red, 2 green, 3 blue, 4 yellow, blended across the blend bands; black means no surface, no shadow-casting directional light, or beyond the shadow distance (ShadowDistance or the camera's far clip, whichever is nearer), into which the last cascade fades over the last tenth of that distance. A uniform colour over an orthographic board means it lies in one cascade, which CascadeCount 1 suits.",
 						"type": "string"
 					},
 					"annotate": {

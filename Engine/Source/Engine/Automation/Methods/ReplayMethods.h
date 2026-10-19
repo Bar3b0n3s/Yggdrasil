@@ -113,7 +113,8 @@ namespace Engine {
 		// check's InputReplayResult as error data "inputCheck"; otherwise it writes the replay (inputCheckTick: where the check
 		// ended). Each playback advances at least one tick per Poll within PlayStepFrameBudget. Whatever the outcome, the play
 		// session is then the last playback's, paused where it ended, with lockstep released, as after input.replay. A
-		// disconnect during either playback writes nothing.
+		// disconnect during either playback writes nothing. The verification names no divergence causes in its stop reason
+		// (ReplayPlaybackOptions::NameDivergenceCauses false): nothing changed since a recording made moments before.
 		[[nodiscard]] Result<Scope<PendingOperation>> InputRecord(AutomationMethodContext& context, const InputRecordParams& params);
 		// A fresh session from the validated header. Pending: at least one tick per Poll within the common 50 ms
 		// budget, never an unbounded synchronous replay. Reject another time owner or active driver before replacing
@@ -124,10 +125,13 @@ namespace Engine {
 		// Validation with the complete outcome in error data, preserving all locations and hash status; so does gameplay
 		// that quits or stops fatally before the replay's final tick (stopReason, the tick reached, unevaluated later
 		// expectations), which is a failed replay, never Cancelled. With strictHash a checkpoint whose hash differs ends the
-		// playback there as failed (checkpointFailed, the tick and both hashes in the message and the outcome). withoutInput
+		// playback there as failed (checkpointFailed, the tick and both hashes in the message and the outcome); its error, and
+		// that of a final hash that differs, carries GetReplayDivergenceHint as its hint (M17 friction F03). withoutInput
 		// applies none of the replay's events (ReplayPlaybackOptions::WithoutInput): a replay whose verification still passes
-		// that way proves nothing about its input. withoutInput without verify checks nothing, so it is InvalidArgument at
-		// /withoutInput, as strictHash without verify is at /strictHash.
+		// that way proves nothing about its input. That playback is the input check, whose failure is the expected outcome
+		// for a replay that depends on its input, so its errors carry no hint, neither they nor its stop reason name the
+		// divergence causes, and their message says that the replay ran without its input events. withoutInput without
+		// verify checks nothing, so it is InvalidArgument at /withoutInput, as strictHash without verify is at /strictHash.
 		[[nodiscard]] Result<Scope<PendingOperation>> InputReplay(AutomationMethodContext& context, const InputReplayParams& params);
 
 	}

@@ -56,6 +56,10 @@ namespace Engine {
 																"input is replayed, and a script that reads the host (Application queries, pairs over entity "
 																"keys) diverges; record again without them";
 
+		// What input.replay {withoutInput: true}'s failures say instead of GetReplayDivergenceHint: that playback is the input
+		// check, and its failure the expected outcome for a replay that depends on its input.
+		constexpr std::string_view ReplayWithoutInputNote = "the replay ran without its input events (withoutInput), which a replay that depends on its input is expected to fail";
+
 		// input.record stop's result for the written `document`; `checkTick` is where its input check ended (0: none ran).
 		InputRecordResult MakeRecordResult(const ReplayDocument& document, std::string written, uint64_t checkTick)
 		{
@@ -93,9 +97,11 @@ namespace Engine {
 			}
 
 			// input.record stop's first playback: the candidate with its input (A1). Errors carry the verification's context.
+			// The candidate was recorded moments before, so a checkpoint that differs does not blame changes since then: its
+			// stop reason keeps the plain form (NameDivergenceCauses false), and the refusal's hint names the usual causes.
 			[[nodiscard]] Status StartVerification(AutomationMethodContext& context)
 			{
-				if (Status started = Restart(context, { .Verify = true, .StrictHash = true, .WithoutInput = false }); !started)
+				if (Status started = Restart(context, { .Verify = true, .StrictHash = true, .WithoutInput = false, .NameDivergenceCauses = false }); !started)
 					return std::unexpected(std::move(started).error().WithContext(std::format("while starting the verification of '{}' with its input; nothing was written", m_Guard->Path)));
 				return {};
 			}
@@ -144,11 +150,7 @@ namespace Engine {
 						if (!playback->Passed)
 						{
 							context.SetErrorData("replay", *serialized);
-							if (playback->CheckpointFailed)
-								return MakeError(ErrorCode::Validation, "replay verification failed at checkpoint tick {}: expected state hash {}, observed {}", playback->FinalTick, playback->ExpectedStateHash, playback->StateHash);
-							if (!playback->StopReason.empty())
-								return MakeError(ErrorCode::Validation, "replay failed: {}", playback->StopReason);
-							return MakeError(ErrorCode::Validation, "replay verification failed at tick {}", playback->FinalTick);
+							return std::unexpected(DescribeReplayFailure(*playback));
 						}
 						return *serialized;
 					}
@@ -203,6 +205,35 @@ namespace Engine {
 				if (m_Stage == Stage::Verification)
 					NoteScriptErrors(session);
 				return {};
+			}
+
+			// input.replay's failed playback. M17 friction F03: with the replay's input, a checkpoint or final hash that differs
+			// says why it can and how to fix it (GetReplayDivergenceHint); an expectation that fails while the hash matches gets
+			// no hint. withoutInput is the input check, whose failure is the expected outcome for a replay that depends on its
+			// input: no hint, and the message says the replay ran without its input events.
+			[[nodiscard]] Error DescribeReplayFailure(const ReplayPlaybackResult& playback) const
+			{
+				std::string message;
+				bool diverged = false;
+				if (playback.CheckpointFailed)
+				{
+					message = std::format("replay verification failed at checkpoint tick {}: expected state hash {}, observed {}", playback.FinalTick, playback.ExpectedStateHash, playback.StateHash);
+					diverged = true;
+				}
+				else if (!playback.StopReason.empty())
+				{
+					message = std::format("replay failed: {}", playback.StopReason);
+				}
+				else
+				{
+					// Otherwise an expectation or the final hash failed.
+					message = std::format("replay verification failed at tick {}", playback.FinalTick);
+					diverged = playback.HashChecked && !playback.HashMatched;
+				}
+				if (m_WithoutInput)
+					return Error(ErrorCode::Validation, std::format("{}; {}", message, ReplayWithoutInputNote));
+				// An empty hint is none.
+				return Error(ErrorCode::Validation, std::move(message)).WithHint(diverged ? std::string(GetReplayDivergenceHint()) : std::string());
 			}
 
 			// The verification's script errors (A1). The session RestartForReplay created for it is fresh, so its own stream
