@@ -1,6 +1,6 @@
 # Review Checklist
 
-This is the pre-commit code review checklist from Architecture §15.9. The `commit-review` skill (`.claude/skills/commit-review/SKILL.md`; Architecture calls it `code-review`, see `Docs/Decisions/0002-m0-deviations.md`) applies it to the staged diff before every commit; a human reviewer uses the same list.
+This is the pre-commit code review checklist from Architecture §15.9. The `commit-review` skill (`.claude/skills/commit-review/SKILL.md`; Architecture calls it `code-review`, see `Docs/Decisions/0002-m0-deviations.md`) applies it to the staged diff before every checkpoint, milestone-end or main commit; a human reviewer uses the same list.
 
 ## How to use it
 
@@ -9,26 +9,27 @@ This is the pre-commit code review checklist from Architecture §15.9. The `comm
   - **pass**;
   - **n/a**, with a reason when the reason is not obvious;
   - **finding**, with file, line, the item, the concrete failure scenario and the fix.
-- **Blocking**, so the commit does not happen: a failing gate (`PreCommit.py`, or `CI.py` for a milestone commit, `CI.py --milestone` for the commit that completes a milestone), any finding against an item in §1–§13, missing tests for new behaviour, and any style violation.
+- **Blocking**, so the commit does not happen: a failing gate (a checkpoint commit's targeted runs, `PreCommit.py` for a commit straight to main, or the milestone-end `CI.py`), any finding against an item in §1–§13, any unfixed confirmed finding, a nit included, missing tests for new behaviour, and any style violation.
   - A finding is resolved by fixing it and re-reviewing the fix.
   - It may also be closed by an ADR in `Docs/Decisions/` when the rule itself is wrong.
   - "Will fix later" never resolves a finding.
-- **Non-blocking:** naming taste beyond the style guide, optional simplifications, and follow-ups outside the change's scope. Record each one in the review summary, and spin it off as its own task when it is worth doing.
+- **One pass, everything fixed** (`Docs/Decisions/0028-backlog-program.md` decision 11). One review pass per wave: blocker and major findings are verified before they are fixed, every confirmed finding is fixed at once, minors and nits included (never batched or deferred), and there are no rechecks of rechecks. A contract checkpoint gets one review of the frozen interfaces; the wave's one review pass covers the integrated wave diff; neither is rechecked. Naming taste beyond the style guide and optional simplifications inside the change are minor findings or nits, fixed in the same pass.
+- **Outside the change:** follow-ups beyond the change's scope are not findings. Record each one in the review summary, and spin it off as its own task when it is worth doing.
 - **Recording:** the commit message ends with the trailer
   `Reviewed: <outcome>; <n> findings (<n> fixed); PreCommit <green|red> (<stages>)`, for example
   `Reviewed: approved; 3 findings (3 fixed); PreCommit green (generate, checkbuildconfig, lint, lint self-test, format, Debug build, unit 42/42)`.
-  A milestone's contract commit records its mode: `PreCommit green, contract mode (...)`. A milestone commit names its CI run instead: `CI green (<stages>)` (ADR 0023).
+  A checkpoint commit names its targeted runs instead: `checkpoint (<runs>)`, with `contract mode` for a contract checkpoint. The milestone end names its CI run: `CI green (<stages>)` (ADR 0023, ADR 0028).
 
 Section references (§) point to `Docs/Architecture.md` unless marked CodeStyle (`Docs/CodeStyle.md`) or Roadmap (`Docs/Roadmap.md`).
 
 ## 0. Gate and scope
 
-- [ ] One gate run passed on the final tree, after the last code edit: `python Scripts/PreCommit.py`, or `python Scripts/CI.py` alone for a milestone commit (`python Scripts/CI.py --milestone` for the commit that completes a milestone, ADR 0024 decision 19). A run that predates a code fix does not count; documentation edits no check reads keep it, and a check that reads an edited file was rerun (ADR 0023).
-- [ ] The gate ran in the right mode (Roadmap rule 3, `Docs/Decisions/0004-contract-stub-gate.md`). Only a milestone's contract commit runs `PreCommit.py --contract`. Every other commit ran strict, so no `ENGINE_CONTRACT_STUB` remains and no test case is skipped outside the child-process targets (`Test::ChildTargetSuite`).
+- [ ] The gate that fits the commit passed on the final tree, after the last code edit (ADR 0023; `Docs/Decisions/0028-backlog-program.md` decisions 11 and 12). Wave and contract commits are checkpoint commits on the milestone branch: each is reviewed and runs only the tests and suites its change touches, never `PreCommit.py` or `CI.py`. Commits straight to main outside a milestone keep ADR 0023's rule: `PreCommit.py`, or for documentation-only edits the checks that read the edited files. The milestone-end `CI.py` adds `--milestone` (the hardening stage: perf, soak, ASan, fuzz) only for a milestone that touches core systems, file readers (fuzzed formats) or the renderer, as its plan or contract decides; any other milestone ends with `CI.py --require-clang-cl` without `--milestone`. A run that predates a code fix does not count; documentation edits no check reads keep it, and a check that reads an edited file was rerun.
+- [ ] Checks ran in the right mode (Roadmap rule 3, `Docs/Decisions/0004-contract-stub-gate.md`). A contract checkpoint runs its targeted checks in contract mode (`Lint.py --allow-contract-stubs`, `Test.py --allow-skips`); the wave's integration replaces every stub and skip of its contract, and the milestone-end `CI.py` is strict, so none reaches main. Every other run was strict, so no `ENGINE_CONTRACT_STUB` remains and no test case is skipped outside the child-process targets (`Test::ChildTargetSuite`).
 - [ ] The diff does what the task asks and nothing else. There are no unrelated edits, drive-by reformatting or stray files.
 - [ ] Only files the task owns are changed. Changes to shared integration files (premake files, `Scripts/ModuleRules.json`, `BuiltinComponents.h`, `RegisterBindings.cpp`, `RegisterMethods.cpp`, `Docs/Reference/*`) come from, or are approved by, their owner (Roadmap rule 4).
 - [ ] Frozen contract headers are unchanged, or the change carries the contract owner's review (Roadmap rule 3).
-- [ ] Milestone commit: the full `python Scripts/CI.py` is green in the §15.8 configurations, run once instead of PreCommit; the commit that completes a milestone ran `python Scripts/CI.py --milestone`, the hardening stage included.
+- [ ] Milestone end: one review pass of the milestone diff with every finding fixed, then one `CI.py` on the final tree; main fast-forwards to the milestone branch and is pushed only after that run is green, then the work pauses for the product owner's go-ahead. The run is green in the §15.8 configurations, instead of PreCommit, with the hardening stage when the gate scope applies.
 
 ## 1. Correctness
 
@@ -109,7 +110,7 @@ Section references (§) point to `Docs/Architecture.md` unless marked CodeStyle 
 
 ## 8. Tests (CodeStyle §14, §15)
 
-- [ ] Every new or changed behaviour has a test, and every bug fix has a regression test that fails without the fix.
+- [ ] Every new or changed behaviour has a test. Tests per behaviour, not per message string: no exact-message pin unless the message is itself a frozen contract; every real bug fix keeps a regression test that failed before the fix; every existing test is kept (`Docs/Decisions/0028-backlog-program.md` decision 13).
 - [ ] Tests are meaningful: they assert outcomes rather than mere execution, cover failure paths, and would catch a plausible regression. No test was weakened, skipped or deleted to get green. A permanent `doctest::skip` exists only on a child-process target, with `doctest::test_suite(Test::ChildTargetSuite)` in the same decorator expression.
 - [ ] Naming and location follow the conventions: `Tests/Source/<path>Tests.cpp`, `TEST_SUITE("<Module>")`, and `TEST_CASE("<Unit>: <behaviour>")`. Roadmap acceptance names are used verbatim.
 - [ ] Tests are deterministic: no sleeps or wall-clock time, fixed seeds, no network, temporary directories only, and no dependence on order. The wall-clock exceptions are the windowed child "FrameLoop: a minimized window uses little CPU time per second" (ADR 0005 decision 13) and the Python `test_busy_watchdog_reports_phase` (ADR 0008 decision 15), `test_headless_play_without_lockstep_is_throttled` (ADR 0012 decision 3) and `test_runaway_script_busy_watchdog` (`Docs/Decisions/0021-review-fixes.md`); another needs its own ADR entry. Bounded waits (ADR 0008 decision 15) are allowed: a generous deadline that only bounds the failure of a wait for another thread or process (`Test::WaitUntil`), or a timeout whose peer never answers, never asserted on and never deciding a passing outcome. A wait bounded by a spin count is a finding.
@@ -129,7 +130,7 @@ Section references (§) point to `Docs/Architecture.md` unless marked CodeStyle 
 
 ## 10. No debug leftovers
 
-- [ ] No temporary logging, `printf` debugging, hard-coded local paths, disabled tests, `#if 0`, commented-out code or forced flags. Outside a contract commit, no `ENGINE_CONTRACT_STUB` stub remains.
+- [ ] No temporary logging, `printf` debugging, hard-coded local paths, disabled tests, `#if 0`, commented-out code or forced flags. Outside a contract checkpoint (until its wave's integration), no `ENGINE_CONTRACT_STUB` stub remains.
 - [ ] No warning suppressed to get green. A suppression is acceptable only when it is file-scoped in a vendor premake file, with the reason recorded in its `VENDOR.md`.
 - [ ] No generated, build or machine-specific files are committed: `bin/`, project files, `.mcp.json`, `Library/`, `compile_commands.json`.
 - [ ] No secrets, tokens or personal data appear in code, fixtures, logs or test output.

@@ -1,17 +1,18 @@
 # Roadmap
 
-Status: authoritative plan, v1.2, 2026-10-05. Section references (§) point to `Docs/Architecture.md` v1.2, whose Appendix D lists the review findings this plan schedules. v1.2 incorporates the accepted M0 deviations of `Docs/Decisions/0002-m0-deviations.md` (M0 deliverables; `config.h` moves to the M1 contract task).
+Status: authoritative plan, v1.2, 2026-10-05. Section references (§) point to `Docs/Architecture.md` v1.2, whose Appendix D lists the review findings this plan schedules. v1.2 incorporates the accepted M0 deviations of `Docs/Decisions/0002-m0-deviations.md` (M0 deliverables; `config.h` moves to the M1 contract task). Amended on 2026-10-19 by `Docs/Decisions/0028-backlog-program.md` (the backlog program M18 to M23, Rolling Ball renumbered M24, and rules 1, 3, 4, 6 and 7).
 
-The roadmap goes from an empty repository to a finished engine and editor (M15), then to two demo games built by an AI agent through editor automation (M17 Tetris, M18 Rolling Ball 3D), after a time-boxed dry run (M16).
+The roadmap goes from an empty repository to a finished engine and editor (M15), then to two demo games built by an AI agent through editor automation (M17 Tetris, M24 Rolling Ball 3D), after a time-boxed dry run (M16). Between them, the backlog program (M18 to M23, ADR 0028) completes the engine: the backlog, a 2D path and a UI framework, with Tetris rebuilt in place as pixel art at the end of M20.
 
 ## Rules for every milestone
 
-1. **Green or not done.** A milestone is complete when `python Scripts/CI.py` passes on Windows x64 (from M15 `python Scripts/CI.py --milestone`, which adds the `hardening` stage that plain `CI.py` and so integration commits leave out; `Docs/Decisions/0024-m15-contract.md` decision 19), with every stage that exists at that point running in the configurations the §15.8 matrix names for it (builds in Debug, Release and Dist; unit, GPU and editor FeatureTest in Debug and Release; exported FeatureTest in Release and Dist; the `determinism` stage across all of them). A recorded review (§15.9) and a commit follow. Because simulation is deterministic across configurations (§9.1), a replay or expected hash recorded in one configuration must verify in all of them; a configuration-dependent result is a bug, never a reason to store per-configuration expectations. Linux and macOS are *generation-checked* by the `portability` stage; they are never reported as verified without CI on that OS.
+1. **Green or not done.** A milestone is complete when one `python Scripts/CI.py` on its final tree passes on Windows x64, with every stage that exists at that point running in the configurations the §15.8 matrix names for it (builds in Debug, Release and Dist; unit, GPU and editor FeatureTest in Debug and Release; exported FeatureTest in Release and Dist; the `determinism` stage across all of them). Up to M14 that run was plain `python Scripts/CI.py`, and from M15 to M17 `python Scripts/CI.py --milestone` (`Docs/Decisions/0024-m15-contract.md` decision 19). From M18 on, the milestone-end `CI.py` adds `--milestone` (the hardening stage: perf, soak, ASan, fuzz) only for a milestone that touches core systems, file readers (fuzzed formats) or the renderer, as its plan or contract decides; any other milestone ends with `CI.py --require-clang-cl` without `--milestone` (`Docs/Decisions/0028-backlog-program.md` decision 12, superseding ADR 0024 decision 19 in part). Milestone end: one review pass of the milestone diff with every finding fixed, then one `CI.py` on the final tree; main fast-forwards to the milestone branch and is pushed only after that run is green, then the work pauses for the product owner's go-ahead. Because simulation is deterministic across configurations (§9.1), a replay or expected hash recorded in one configuration must verify in all of them; a configuration-dependent result is a bug, never a reason to store per-configuration expectations. Linux and macOS are *generation-checked* by the `portability` stage; they are never reported as verified without CI on that OS.
 2. **Session-sized tasks.** Each milestone is split into tasks that one engineer or agent finishes in one session, each with its own tests. A task never leaves the tree red.
-3. **Interfaces first.** The first task of a milestone ("contract" task) commits the public headers of the milestone's modules with documented signatures, stub implementations returning `Unsupported` whose first statement is the contract-stub marker `ENGINE_CONTRACT_STUB();` (`Core/Base.h`), and failing-by-design tests marked `doctest::skip`. Parallel tasks then implement against frozen headers; changing a frozen header requires the contract owner's review. The contract commit alone runs the gate in contract mode (`PreCommit.py --contract`, which passes `Lint.py --allow-contract-stubs` and `Test.py --allow-skips`); every other commit is strict, so a marker or a skipped test outside the child-process targets (`Test::ChildTargetSuite`) cannot survive into a milestone commit (`Docs/Decisions/0004-contract-stub-gate.md`).
-4. **File ownership.** Parallel workstreams own disjoint directories. Shared integration files have a single owner per milestone: the premake files, `Scripts/ModuleRules.json`, `BuiltinComponents` (`Scene/Components/BuiltinComponents.h`), `Engine/Source/Engine/Scripting/RegisterBindings.cpp`, `EditorCore/Automation/RegisterMethods.cpp` and `Docs/Reference/*` (generated). Other workstreams send changes to these files through the owner (or land them in the final integration task).
+3. **Interfaces first, where they freeze.** From M18 on, a milestone runs on its own branch in waves; each wave is streams in worktrees, integrated into the milestone branch. A contract only where a milestone or wave freezes shared interfaces; no contract task otherwise. The contract task commits the public headers concerned with documented signatures, stub implementations returning `Unsupported` whose first statement is the contract-stub marker `ENGINE_CONTRACT_STUB();` (`Core/Base.h`), and failing-by-design tests marked `doctest::skip`. Parallel streams then implement against frozen headers; changing a frozen header requires the contract owner's review. Wave and contract commits are checkpoint commits on the milestone branch: each is reviewed and runs only the tests and suites its change touches, never `PreCommit.py` or `CI.py`. A contract checkpoint runs its targeted checks in contract mode (`Lint.py --allow-contract-stubs`, `Test.py --allow-skips`); the wave's integration replaces every stub and skip of its contract, and the milestone-end `CI.py` is strict, so none reaches main: a marker or a skipped test outside the child-process targets (`Test::ChildTargetSuite`) cannot survive into a milestone commit (`Docs/Decisions/0004-contract-stub-gate.md`; `Docs/Decisions/0028-backlog-program.md` decision 11). Up to M17 the first task of every milestone was its contract, and the contract commit alone ran the gate in contract mode (`PreCommit.py --contract`).
+4. **File ownership.** Parallel workstreams own disjoint directories. Shared integration files have a single owner per milestone (per wave from M18, ADR 0028 decision 11): the premake files, `Scripts/ModuleRules.json`, `BuiltinComponents` (`Scene/Components/BuiltinComponents.h`), `Engine/Source/Engine/Scripting/RegisterBindings.cpp`, `EditorCore/Automation/RegisterMethods.cpp` and `Docs/Reference/*` (generated). Other workstreams send changes to these files through the owner (or land them in the final integration task).
 5. **Parity.** Every editor-visible capability lands with its automation method and a Python test in the same milestone (P6). Every new component, field, enum value, project setting, importer/extension, script function, method, property or callback gets its FeatureTest coverage, in every run mode it supports (§15.6), at the latest in M14, and from M14 on in the same change.
-6. **Approvals first.** Every operator approval (downloads, vendoring) is requested in M0's approvals task, never in the middle of a milestone.
+6. **Approvals first.** Every operator approval (downloads, vendoring) is requested in M0's approvals task, or for a later program before its first milestone (the backlog program's in ADR 0028 decision 7), never in the middle of a milestone.
+7. **Reviews and tests** (from M18, ADR 0028 decisions 11 and 13). One review pass per wave: blocker and major findings are verified before they are fixed, every confirmed finding is fixed at once, minors and nits included (never batched or deferred), and there are no rechecks of rechecks. A contract checkpoint gets one review of the frozen interfaces; the wave's one review pass covers the integrated wave diff; neither is rechecked. An unfixed confirmed finding of any severity, a nit included, blocks the commit. Tests per behaviour, not per message string: no exact-message pin unless the message is itself a frozen contract; every real bug fix keeps a regression test that failed before the fix; every existing test is kept. Commits straight to main outside a milestone keep ADR 0023's rule: `PreCommit.py`, or for documentation-only edits the checks that read the edited files.
 
 ## Milestone dependency graph
 
@@ -35,7 +36,15 @@ The roadmap goes from an empty repository to a finished engine and editor (M15),
 | M15 Export, hardening, engine + editor complete | M14 | — |
 | M16 Breakout dry run | M15 | — |
 | M17 Tetris | M16 | — |
-| M18 Rolling Ball 3D | M16 (M17 recommended first) | M17 (different agent) |
+| M18 Foundations | M17 | — |
+| M19 Device-loss recovery | M18 | — |
+| M20 2D, UI and Tetris | M19 | — |
+| M21 Linux/macOS catch-up | M20 (the product owner's order) | — |
+| M22 Scene, editor and scripting | M20 (runs after M21 by the product owner's order) | — |
+| M23 Rendering and content | M22 | — |
+| M24 Rolling Ball 3D | M23 | — |
+
+From M18 on, milestones run one at a time in number order, each followed by a pause for the product owner's go-ahead (`Docs/Decisions/0028-backlog-program.md` decision 14). Rolling Ball was M18 until ADR 0028; "M18" in the M16 and M17 sections below and in the ADRs up to 0027 means Rolling Ball, now M24.
 
 ---
 
@@ -339,7 +348,140 @@ Tests support (`Tests/Source/Support/`): recording assert handler, death-test re
 
 ---
 
-## M18 — Rolling Ball 3D (built through automation)
+## M18 — Foundations
+
+**Scope.** The renderer split into stages with frozen hooks, the tooling every later milestone uses, and the gate scope in `CI.py` (`Docs/Decisions/0028-backlog-program.md` decisions 4 and 12; the plan's waves W18.1 and W18.2). No toolchain bump: the program stays on Vulkan SDK 1.4.350.0 and slangc 2026.8 (`Scripts/Lib/Toolchain.json` unchanged), and the `Invariant` row becomes an accepted limit (ADR 0028 decision 3). Hardening at its end: yes.
+
+**Deliverables**
+- The renderer split: `SceneRenderer` in stage functions; a per-pass declaration {Name, PipelineCount, Programs} with one `CreatePipelines` entry that startup and reload both call (the recreate hook); a GPU-zone hook at each stage boundary; data-driven stats and pipeline counts.
+- Shader hot reload (`shaders.reload`) through the frozen entry; material binding sets kept across view exits.
+- GPU diagnostics: the `GpuResourceTracker` lifetime log, a debug-heap GPU step, GPU zones and `profiler.capture` (a Chrome trace with CPU and GPU zones); the per-frame arena for the snapshot and debug draw lists, measured first.
+- The shared prebuilt vendor-library cache (Generate, Build, CheckBuildConfig), keyed by the ABI-relevant defines, the toolset and the configuration.
+- Golden tooling: the device-class check and rename procedure (Scaffold.py, Golden.jsonl, the golden README and the `golden-images` skill), and FeatureTest's 24 golden files regenerated with provenance through one recorded editor run.
+- `entity.destroy` and the editor's Delete refuse a prefab member that is not an instance root, with the hint to deactivate it or unpack the instance.
+- The gate scope in the scripts' own texts (the documents were amended with ADR 0028): `CI.py`'s module docstring, `--milestone` help text and not-run note name ADR 0028 decision 12's rule; the contract-mode texts (`CONTRACT_MODE_NOTE` and `CONTRACT_FLAG_HELP` in `Scripts/Lib/scripts.py`, `PreCommit.py`'s docstring, the help of `Lint.py --allow-contract-stubs` and `Test.py --allow-skips`) describe contract mode as a contract checkpoint's targeted runs, with `PreCommit.py --contract` and `CI.py --contract` available but unused by the program's gates; the failure messages that cite "Roadmap M16 to M18" or "M17 and M18" name M24, with their tests.
+- The GPU-suite crash follow-up: 20 gpu-suite runs at both API caps under the debug heap, with GPU object lifetimes logged.
+
+**Acceptance**
+- All 25 goldens and every GPU test are unchanged by the split (against main at `cdf35ef`).
+- A broken shader keeps the old pipelines, and a fixed one swaps in without a restart. A material that re-enters the view makes no new binding set. `profiler.capture` writes one Chrome trace with CPU and GPU zones.
+- A fresh worktree links the cached vendor libraries, and a cache built with other ABI defines is refused.
+- FeatureTest's 24 golden files have `Provenance.json` entries from one recorded run. A device class without goldens next to a same-vendor class that has them is reported, not silently smoke-tested.
+- Deleting a prefab member is refused with a hint, and its regression test fails before the fix.
+- The GPU-suite crash is fixed with a regression test, or its Backlog row stays open with the 20 runs' evidence. The arena is adopted if it saves at least 2% of the frame's CPU time, otherwise closed with the numbers.
+
+**Parallelization**: W18.1 has a contract (the stage functions, the per-pass declaration and its `CreatePipelines` entry, the GPU-zone hook, an allocator parameter on the snapshot and debug-draw containers, the `shaders.reload` and `profiler.capture` stubs, the vendor-cache flags, the refusal's error and hint) and streams A stages, vertex path and material sets; B hot reload; C GPU diagnostics and measurement; D tooling and the gate scope; E automation. The frozen hooks keep B and C out of A's files. W18.2 has no contract: after A's zero-diff proof, golden tooling with FeatureTest's golden provenance, and the crash runs with the arena decision.
+
+---
+
+## M19 — Device-loss recovery
+
+**Scope.** The editor and the Runtime survive device loss and driver-reset hangs, and GPU out-of-memory as far as feasible; what stays fatal is stated with its reasons (`Docs/Decisions/0028-backlog-program.md` decision 5; waves W19.1 and W19.2). Hardening at its end: yes.
+
+**Deliverables**
+- The recreation protocol: each GPU owner's Release and Recreate through M18's `CreatePipelines` hook, and the recovery sequence (autosave first in the editor; tear down in §8.14 item 4's order down to the `VkDevice`; score devices again; re-mirror from cooked bytes; recreate pipelines through the hook); a `gpu.deviceLost` event and a stats counter; a shared loss-test helper that every later GPU owner uses.
+- Hangs: after the 10 s bounded wait times out, a second bounded wait for a loss report, long enough for the operating system's reset; a loss is recovered, a hang with no loss report stays fatal.
+- Out-of-memory on render targets, pipelines (the debug views' included) and the swapchain after startup: trim what can be rebuilt and retry once, then fail only the request (a capture returns `OutOfMemory`, a debug view keeps its previous mode with a diagnostic, a resize keeps the previous swapchain and retries at the next resize); targets are never shrunk silently.
+- Fault injection: `device-lost` now expects recovery; `device-lost-unrecoverable`, `hang-reset`, `oom-rendertarget`, `oom-pipeline` and `oom-swapchain` are added (each `oom-*` also with a `-persistent` suffix); `hang` keeps the fatal path tested.
+- §8.14 items 6 to 8 rewritten; the cases that stay fatal recorded in Backlog §6 with their reasons.
+
+**Acceptance**
+- After an injected loss, the editor and the Runtime keep running. A screenshot after recovery is byte-identical to one taken before. A replay with a loss injected mid-play keeps every checkpoint hash. Tracker counts return to their pre-loss values. Synchronization validation stays clean through the recreation.
+- An injected driver-reset hang recovers like a loss. A hang with no loss report and the unrecoverable loss still exit 4 with a crash report and an autosave.
+- Injected out-of-memory on a render target, a pipeline or the swapchain recovers with a byte-identical screenshot; a persistent one fails only its request while the editor keeps running. Out-of-memory at startup still takes the fatal path.
+
+**Parallelization**: W19.1 has a contract (the protocol, the sequence, the event, the injections, the helper) and streams A Graphics (GraphicsDevice, Swapchain, GpuDiagnostics); B GpuResourceCache, RenderTargetPool and stale mirrors; C SceneRenderer passes, SceneRendererPipelines and ImGuiRenderer; D hosts (FrameLoop, the editor's autosave then recovery, the Runtime); E coverage. W19.2 has a contract (the second wait and its setting, `TrimUnused()` on the caches and pools, the capture error, the new injections) and streams A hangs, B out-of-memory, C coverage.
+
+---
+
+## M20 — 2D, UI and Tetris
+
+**Scope.** A 2D path, a UI framework and the automation the builder needs, proven by Tetris rebuilt in place as pixel art (`Docs/Decisions/0028-backlog-program.md` decisions 4, 6 and 8; waves W20.1 to W20.8). This lifts the §1.2 non-goal "a UI framework beyond `TextComponent`". Every new GPU owner joins M19's recreation protocol. Hardening at its end: yes.
+
+**Deliverables**
+- Automation, replay v3 and export basics (W20.1, first, so every new replay is recorded at v3): replays at format v3 with a start fingerprint; verification of event-free `input.record` recordings and of teardown errors; `test.run {record, expect}`; the input check's final-hash warning; duplicate `.eproj` stems and Names refused; reading a replay's events through automation; entity paths in component data; named `$ref`; kept screenshots; the builder-side Dist hash check (`project.export {featureTest}`); the soak renders each scene's game view; `Engine.pak` built-ins pruned; build versioning.
+- The 2D path (W20.2): the QuadBatcher and samplers, SpriteRenderer and the sprite pass, sorting layers, the SpriteSheet asset, a tick-driven SpriteAnimator, PixelPerfectCamera with a reference resolution and integer upscale, a 2D editor mode, the 2D automation and script surface, procedural built-in sprite textures.
+- 2D physics on Box2D, vendored beside Jolt, and 2D lighting (W20.3). If Box2D fails its four-run determinism proof, the 2D physics and the tilemap collision run on Jolt plane locks behind the same interface, and the owner decides on Box2D at M20's end (ADR 0028 decision 6).
+- The UI framework: static UI (W20.4: canvas, rects, the layout pass and containers, text measurement and wrapping, `UiDrawList` and the UI pass with clipping, `ui.tree`), then interaction (W20.5: focus and navigation, events, Button, Toggle, Slider, ScrollView, theme, minimal authoring, the interaction state in the hash, the same-frame input preview).
+- Tilemaps and text input (W20.6); localization (string tables, fallback fonts, CJK ranges, RTL and complex-script shaping with HarfBuzz and SheenBidi) and world-space canvases (W20.7).
+- Tetris rebuilt in place in `Projects/Tetris` as pixel art under a pixel-perfect camera, by builder sessions through the MCP tools only (W20.8); the 3D build stays in git history.
+
+**Acceptance**
+- Every committed replay is at v3 with its hash unchanged, and a changed component, script or material is named by the failure. The hashes the builder sees from the testing Dist export equal the games suite's Dist half.
+- An integer-scale sprite reads back its source texels under both API caps. The Sprites2D, Physics2D, Ui, Tilemap, TextInput and world-canvas replays are identical in all four runs (the Debug and Release editors, the Release and Dist exports), and each fails without its input.
+- UI layout tables, string lookups and shaped text are byte-identical across configurations; a 1:1 UI image reads back pixel-exact; the CJK, Arabic and Hebrew goldens pass; every widget works by keyboard and gamepad; scenes without UI keep their hash.
+- A tilemap renders byte-identical to the same tiles drawn as sprites; a lit sprite matches its CPU reference; an entity holding both 2D and 3D physics components is a validation error.
+- The rebuilt Tetris meets M17's feature list on sprites and UI, with no MeshRenderer cells and no Screen Text HUD. Its replays are strict-hash identical in both editors and the testing Dist export; `AuditProvenance.py --project Projects/Tetris` passes from a fresh clone; the soak passes.
+- The coverage gates pass in every mode, and the demo hashes are unchanged except through a wave's recorded upgrade.
+
+**Parallelization**: eight waves in order. W20.1 to W20.7 each have a contract; W20.8 has a build plan in M20's ADR instead (one builder in a fresh top-level session, friction fixed by the module owners, a look review on kept screenshots).
+
+---
+
+## M21 — Linux and macOS catch-up
+
+**Scope.** The GitHub Actions failures since M15 and the catch-up items of ADR 0025 decision 15, run right after M20's Tetris rebuild by the product owner's choice (`Docs/Decisions/0028-backlog-program.md` decision 10, superseding ADR 0026 decision 1's deferral). Non-blocking: failures that remain when its session budget is spent become open catch-up rows, and M22 starts anyway (ADR 0011). Hardening at its end: no, because its shared-code edits are compile-portability fixes that leave Windows behaviour unchanged; its contract switches to `--milestone` if the triage changes the behaviour of core systems, a fuzzed reader or the renderer (ADR 0028 decision 12).
+
+**Deliverables**
+- Build and test fixes per compiler family (GCC 14, Clang 19 with libstdc++, Apple Clang), from the Actions logs read through gh under the product owner's read-only login; Actions rounds run from pushes to `ci/**` branches, the stream branches included before their review; a `ci/**` branch reaches main only through the milestone-end review and `CI.py` (ADR 0028 decision 10).
+- The Runtime's automation connection on POSIX (ADR 0025 finding M29); a standard-library ELF symbol reader beside GNU ld's map (finding M30); the macOS bundle's loader lookup and ad-hoc signature check; the feature and games stages on the hosted runners.
+
+**Acceptance**
+- The Linux and macOS jobs are green on the final push in every stage they run, the new ones included. "RuntimeApp: F1 toggles the stats overlay in a windowed run and the game still receives F1" runs on Linux and macOS. The map check passes on a real GCC LTO Dist map. An exported macOS bundle launches with a verified ad-hoc signature.
+- From M21 on, the Linux and macOS jobs are kept green: each later milestone's first wave fixes what the previous push's Actions runs reported, read through gh under the product owner's read-only login, and no milestone waits for a run.
+
+**Parallelization**: one wave, W21.1, with a contract (the POSIX automation-connection interface, the ELF reader's interface in `runtime_map.py`, the bundle probe) and streams A triage, B the POSIX connection, C the ELF reader, D the macOS bundle, E the hosted stages.
+
+---
+
+## M22 — Scene, editor and scripting
+
+**Scope.** The scene and editor model completed, a per-game native gameplay module and visual scripting (`Docs/Decisions/0028-backlog-program.md` decisions 4 and 6; waves W22.1 to W22.7). This lifts the §1.2 non-goals on live nested prefabs, deleting prefab members, multiple scripts per entity, multi-viewport windows, native file dialogs, visual scripting and native gameplay modules. Hardening at its end: yes.
+
+**Deliverables**
+- Physics and session semantics (W22.1): the speculative-contact watch item reproduced first and fixed if it reproduces; callbacks to compound child colliders; reading an entity pending destruction; `Scene.Reload` and `GetCurrent`; a character carried by moving ground (opt-in); a faster serializer Play copy; the same event rules for the Box2D world where they apply.
+- Prefabs II and editor windows (W22.2): deleting prefab members as a recorded RemoveEntity override, live nested prefabs, ImGui multi-viewport OS windows, and native file dialogs through nativefiledialog-extended on Windows, macOS and Linux (its xdg-desktop-portal backend on Linux, which links the system libdbus-1, so Linux builds and the Linux CI images need `libdbus-1-dev`; the ImGui picker stays the fallback).
+- Multiple open scenes (W22.3); multiple script components per entity (W22.4, with one re-record of the demos).
+- A per-game native C++ gameplay module, statically linked into exports, with editor-only hot reload (W22.5).
+- Visual scripting: a node graph transpiled to Luau, with its edit methods (W22.6), and the graph editor (W22.7).
+
+**Acceptance**
+- The speculative-contact reproduction fails before its fix. Event order is equal at Jolt thread counts 0, 1 and 8. A carried character moves v·t. `Scene.Reload` keeps the played copy. The Play copy's time is measured against the 30 ms budget.
+- A deleted prefab member stays deleted after an update; inner prefab edits propagate and cycles are refused; Breakout stays byte-identical; platform windows stay clean under synchronization validation; the parity ADR exempts undocking and the dialogs as presentation, since every dialog's action already has a method that takes a path.
+- Undo and autosave are isolated per open scene, and transcripts without scene targets behave as before.
+- Script callback order, slot included, is identical in all four runs, and every replay verifies.
+- A native component hashes identically in Debug, Release and Dist; the provenance audit covers the module's sources; an export with the module passes the games suite's three halves; native build and load are refused while the user-only "Allow native code" preference is off.
+- A graph transpiles to the same Luau bytes in every configuration; a graph behaviour's replay is identical in all four runs; an agent builds a graph through MCP only; every editor graph action has its method.
+
+**Parallelization**: W22.1 to W22.6 each have a contract; W22.7 builds on W22.6's methods and has none. W22.2's prefab stream is split into A1 (RemoveEntity) and A2 (nested prefabs, after A1).
+
+---
+
+## M23 — Rendering and content
+
+**Scope.** The rendering and content features of the backlog (`Docs/Decisions/0028-backlog-program.md` decisions 4 and 6; waves W23.1 to W23.7). This lifts the §1.2 non-goals on TAA, auto-exposure, clustered lights, point-light shadows, LUTs, SSR, baked GI probes, texture compression, EXR and Opus import, instancing, animation, particles and terrain. Hardening at its end: yes.
+
+**Deliverables**
+- Mesh instancing, point-light shadows and clustered light culling (W23.1).
+- Mesh v2 (a second UV set, vertex colours), EXR import for environments, Ogg Opus import, BC1–BC7 compression including BC6H through CMP_Core with a decode fallback, and `stb_truetype.h` vendored separately (W23.2).
+- Opt-in Game.pak reachability pruning, pak compression with the vendored stb deflate, and the Luau compiler out of Dist through a first-party require (W23.3).
+- Skeletal and morph animation with script-driven blending (W23.4); particles and baked irradiance and reflection probes (W23.5); histogram auto-exposure, colour-grading LUTs, opt-in TAA and glossy SSR under one temporal-state ADR (W23.6); terrain with sculpt and paint tools (W23.7).
+
+**Acceptance**
+- Instanced and per-draw renders are byte-identical; clustered culling equals brute force exactly on 256 lights; the point-shadow oracle and golden pass.
+- Cooked BC bytes are byte-identical from the Debug and Release editors of one compiler; Opus decodes bit-exact in Debug, Release and Dist; a device without BC renders through the decode fallback; only compression changes existing goldens.
+- The Dist map holds no `Luau::compile`, `BytecodeBuilder` or `extractLuauConfig` symbol, and every replay verifies at its committed hash; compressed paks are byte-identical from the Debug and Release editors; a pruned export of each demo passes its smoke test.
+- A sampled pose hashes equal in all three configurations, and the deform equals the CPU reference; the seeded particle hash is equal across configurations; two probe bakes are byte-identical.
+- Screenshots are byte-identical with auto-exposure, and with TAA after its warm-up; with FXAA as the default, existing goldens are unchanged.
+- Terrain rest height matches the analytic value, LOD seams are crack-free, and a stroke through `terrain.edit` is byte-identical to the same stroke made in the editor.
+
+**Parallelization**: seven waves, each with a contract, in order: W23.1 to W23.7 (W23.6 after W23.4 and W23.5, W23.7 after W23.6).
+
+---
+
+## M24 — Rolling Ball 3D (built through automation)
+
+Formerly M18; renumbered by `Docs/Decisions/0028-backlog-program.md` decision 14, its content unchanged.
 
 **Scope.** §13.11 (Rolling Ball paragraph). Built in a fresh `Projects/RollingBall` using only MCP tools.
 
@@ -350,4 +492,4 @@ Tests support (`Tests/Source/Support/`): recording assert handler, death-test re
 - `Level1.replay`, `Level2.replay` and `Level3.replay` are recorded by per-level autopilot suites through `test_run {record}` (Level 2 and 3 with the carried-timer `Parameters` in the header). Each reaches the goal under `input.replay {verify: true, strictHash: true}` in lockstep **without** the autopilot; repeated runs give identical state hashes: the builder's two `input_replay {verify: true, strictHash: true}` runs of each replay report the same `stateHash` in the transcript, and the games stage's three strict plays (the Debug and Release editors and a testing Dist export) each equal the committed `FinalStateHash` and each other.
 - `StartScene` and `Export.BuildScenes` set; `project.validate` clean (no `PHYSICS_ADJACENT_STATIC_BODIES`); Dist export smoke exits 0; `AuditProvenance.py --project Projects/RollingBall` passes from a fresh clone against the committed provenance and transcript.
 
-**Parallelization**: one agent per game; M17 and M18 may run concurrently with different agents once M16 is closed, because they touch disjoint project folders.
+**Parallelization**: one agent per game. M17 and this milestone (then M18) could run concurrently with different agents once M16 was closed, because they touch disjoint project folders; M17 is complete, and from M18 on milestones run one at a time (ADR 0028 decision 14).
