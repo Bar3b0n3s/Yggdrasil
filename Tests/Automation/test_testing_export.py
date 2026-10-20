@@ -21,6 +21,7 @@ from pathlib import Path
 from unittest import mock
 
 from harness import REPOSITORY_ROOT, AutomationTestCase, automation_config, engine_client
+from lock_holder import isolated_lock_directory
 from tiny_game import TINY_GAME_NAME, TINY_SCENE, build_tiny_game
 
 sys.path.insert(0, str(REPOSITORY_ROOT / "Scripts"))
@@ -385,6 +386,7 @@ class ExportSuiteTests(unittest.TestCase):
         # `Test.py --config Debug` runs every suite that has a Debug run and lists the export suite's Debug as skipped;
         # a suite named explicitly with a configuration it does not take stays a usage error. Every suite exists since
         # the games suite became available (ADR 0026 decision 8), and it takes all three configurations.
+        isolated_lock_directory(self)  # the run takes the GPU lock: this test's own, never the machine's
         ran: list[tuple[str, tuple[str, ...]]] = []
 
         def suite(name: str, config: str, arguments: argparse.Namespace, console: Console) -> object:

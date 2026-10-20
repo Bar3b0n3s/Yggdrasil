@@ -120,6 +120,14 @@ format 4 Unicode character map and a legacy `kern` table that kerns `A` and `V`.
 | Origin | First-party: subjects copied verbatim from two `bin/TestResults/Soak.json` reports that `Scripts/Hardening.py --steps soak` wrote on the M15 reference machine: stream C's full soak, whose `Callbacks.scene` and `Input.scene` scripts still appended a record every tick (both leak), and the integration run after the scaffolds bounded those histories (Docs/Decisions/0024-m15-contract.md "The soak fix"). `SoakStreamC.json` keeps the two leaking scenes, every scene whose script heap is a sawtooth and one script-less scene (`Physics.scene`, a constant heap); `SoakIntegration.json` keeps both editor scenes of the integration run. Recorded data, so no generator reproduces it; `Tests/Automation/test_hardening.py` evaluates it with the soak rules |
 | License | First-party: the same terms as the repository's code; no third-party rights |
 
+## Recorded fuzz report (`Hardening/FuzzM17.xml`)
+
+| | |
+|---|---|
+| Files | `Tests/Data/Hardening/FuzzM17.xml` |
+| Origin | First-party: the `bin/TestResults/Fuzz-Release-Asan.xml` that `Scripts/Hardening.py`'s fuzz step wrote in M17's milestone gate (`CI.py --milestone`, 2026-10-19) on the reference machine, copied verbatim except for LF line endings: the 35 targets of `Tests/Data/Fuzz/Targets.json` at 1,000,000 iterations each in 18 shards, each target's time summed over the shards (58,583.848 s in all; the step took 3,312 s). Recorded data, so no generator reproduces it; `Tests/Automation/test_hardening.py` sizes the fuzz step from it, and `Scripts/Hardening.py`'s fuzz step reads it until the machine keeps a full, passing run's measurement of its own (`Docs/Decisions/0028-backlog-program.md` decision 16, T-FUZZMODEL) |
+| License | First-party: the same terms as the repository's code; no third-party rights |
+
 ## OpenType font fixture (`Assets/Fonts/Inter-Regular.otf`)
 
 | | |

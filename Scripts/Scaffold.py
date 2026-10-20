@@ -8,6 +8,9 @@ Scaffold/Scaffolds.json lists in run order with the id seed and the renderer of 
   {"Format": "FeatureTestScaffolds", "Version": 1, "Scaffolds": [{"File": "<Name>.jsonl", "IdSeed": <n>,
    "Renderer": "none" | "vulkan"}, ...]}
 
+A manifest that lists a file twice, or gives two scaffolds the same IdSeed (the second would draw the first one's ids
+for its entities and assets), is refused naming both entries, before anything is removed (exit code 1).
+
 Regeneration, in place (the default) or in a temporary copy (--check):
   1. remove every output of the scaffolds: all of Assets/ except Scenes/Golden, Materials/Golden, Models/Golden and
      Textures/Golden (Golden.jsonl's content, which no scaffold rewrites), and the project's Library/ import cache, so
@@ -26,8 +29,14 @@ and names the reason. In place, an editor that has the project open makes the ru
 project's Library/Editor.lock is probed on every OS like the engine's ProjectLock::IsHeld (a non-blocking lock of the
 lock's byte on Windows, a shared non-blocking flock on Linux and macOS), released at once if it succeeds.
 
+Every run, --check included, holds the machine-wide GPU lock (Scripts/Lib/locks.py; Docs/Architecture.md §2.3, ADR 0028
+decision 16), shared by every checkout of the repository, from its start to its end: it waits while another GPU run
+or a gate (CI.py) holds it, unless it runs inside that run, reporting the holder (pid, worktree, command), at most
+--lock-timeout seconds (exit code 5); --no-wait fails at once instead (exit code 3).
+
 Exit codes: 0 regenerated (or reproduced byte for byte), 1 a scaffold failed or the check found differences, 2 usage
-error, 3 the editor or the scaffold manifest is missing, 5 timeout.
+error, 3 the editor or the scaffold manifest is missing, or --no-wait found the GPU lock held, 5 timeout (of a
+scaffold, or of the wait for the GPU lock).
 """
 
 from __future__ import annotations
@@ -52,7 +61,7 @@ if sys.platform == "win32":
 else:
     import fcntl
 
-from Lib import paths
+from Lib import locks, paths
 from Lib.process import ToolNotFoundError, child_environment, format_command, run_captured, run_streamed
 from Lib.report import (
     EXIT_INIT_FAILED,
@@ -136,8 +145,15 @@ def read_manifest(project: Path) -> list[Scaffold]:
             raise ManifestError(f"{where}: IdSeed must be an integer from 0 to 2^64-1")
         if renderer not in RENDERERS:
             raise ManifestError(f"{where}: Renderer must be one of {', '.join(RENDERERS)}")
-        if any(scaffold.file == file for scaffold in scaffolds):
-            raise ManifestError(f"{where}: Scaffold/{file} is listed twice")
+        first = next((earlier for earlier, scaffold in enumerate(scaffolds) if scaffold.file == file), None)
+        if first is not None:
+            raise ManifestError(f"{path}: Scaffolds[{first}] and Scaffolds[{index}] both list Scaffold/{file}: each "
+                                f"scaffold runs once")
+        first = next((earlier for earlier, scaffold in enumerate(scaffolds) if scaffold.id_seed == seed), None)
+        if first is not None:
+            raise ManifestError(f"{path}: Scaffolds[{first}] ({scaffolds[first].file}) and Scaffolds[{index}] ({file}) "
+                                f"have the same IdSeed {seed}: each scaffold needs its own, or the second would create "
+                                f"its entities and assets with the first one's ids")
         scaffolds.append(Scaffold(file, seed, renderer))
     return scaffolds
 
@@ -352,7 +368,7 @@ def main(argv: list[str] | None = None) -> int:
         description="Regenerate Projects/FeatureTest from Scaffold/Scaffolds.json, or check that the scaffolds "
                     "reproduce it byte for byte (Architecture §2.3, §15.5).",
         epilog="Exit codes: 0 success, 1 a scaffold failed or the check found differences, 2 usage error, 3 the "
-               "editor or the scaffold manifest is missing, 5 timeout.",
+               "editor or the scaffold manifest is missing, or --no-wait found the GPU lock held, 5 timeout.",
     )
     parser.add_argument("--config", choices=("Debug", "Release"), default="Release",
                         help="the editor configuration that runs the scaffolds (default: Release)")
@@ -360,9 +376,30 @@ def main(argv: list[str] | None = None) -> int:
                         help="regenerate a temporary copy and fail unless it is byte-identical outside Library/; the "
                              "repository's project is never written")
     parser.add_argument("--json", action="store_true", help="print a machine-readable result on stdout")
+    locks.add_wait_arguments(parser)
     arguments = parser.parse_args(sys.argv[1:] if argv is None else argv)
+    locks.check_wait_arguments(parser, arguments)
     console = Console(arguments.json)
 
+    steps: list[Step]
+    try:
+        hold = locks.acquire_gpu(locks.wait_seconds(arguments), console.print)
+    except locks.LockUnavailable as error:
+        steps = [locks.unavailable_step(error)]
+        console.result(steps[0])
+    else:
+        with hold:
+            steps = scaffold_steps(arguments, console)
+    exit_code = overall_exit_code(steps)
+    console.summary("Scaffold summary", steps)
+    if arguments.json:
+        emit_json({"success": exit_code == EXIT_SUCCESS, "exitCode": exit_code, "check": arguments.check,
+                   "steps": [step.to_json() for step in steps]})
+    return exit_code
+
+
+def scaffold_steps(arguments: argparse.Namespace, console: Console) -> list[Step]:
+    """The regeneration or the check, under the GPU lock."""
     editor = editor_executable(arguments.config)
     steps: list[Step]
     if not editor.is_file():
@@ -385,12 +422,7 @@ def main(argv: list[str] | None = None) -> int:
     for step in steps:
         if step.failed and step.name in ("editor", "manifest", "device", "clean"):
             console.result(step)
-    exit_code = overall_exit_code(steps)
-    console.summary("Scaffold summary", steps)
-    if arguments.json:
-        emit_json({"success": exit_code == EXIT_SUCCESS, "exitCode": exit_code, "check": arguments.check,
-                   "steps": [step.to_json() for step in steps]})
-    return exit_code
+    return steps
 
 
 if __name__ == "__main__":

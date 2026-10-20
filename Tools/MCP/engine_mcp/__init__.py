@@ -9,12 +9,15 @@ Modules:
   launcher    launch or attach: session files, the project lock, supervision of a launched editor
   transcript  the always-on transcript <Project>/Automation/BuildLog.jsonl
 
-Importing the package puts Tools/Automation on sys.path, so its modules import the shared engine_client.
+Importing the package puts Tools/Automation on sys.path, so its modules import the shared engine_client, and Scripts/,
+so the launcher takes the machine-wide locks of Scripts/Lib/locks.py (Docs/Architecture.md §2.3) as the scripts do.
 """
 
 import sys
 from pathlib import Path
 
 AUTOMATION_ROOT = Path(__file__).resolve().parents[2] / "Automation"
-if str(AUTOMATION_ROOT) not in sys.path:
-    sys.path.insert(0, str(AUTOMATION_ROOT))
+SCRIPTS_ROOT = Path(__file__).resolve().parents[3] / "Scripts"
+for _root in (SCRIPTS_ROOT, AUTOMATION_ROOT):
+    if str(_root) not in sys.path:
+        sys.path.insert(0, str(_root))

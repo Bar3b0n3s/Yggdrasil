@@ -16,6 +16,11 @@ The numbers are warning-only: an over-budget metric, a scene whose calls failed,
 editor build (exit 3), an editor that crashes or breaks the protocol, a capture that measured no scene at all, a missing
 device without --gpu-optional, or Perf.json not written. No passing outcome depends on how long anything takes (ADR 0008
 decision 15).
+
+The capture holds the machine-wide GPU lock (Scripts/Lib/locks.py; Docs/Architecture.md §2.3, ADR 0028 decision 16),
+shared by every checkout of the repository, for its whole run: it waits while another GPU run or a gate (CI.py) holds
+it, unless it runs inside that run (Hardening.py's perf step), reporting the holder (pid, worktree, command), at most
+--lock-timeout seconds (exit code 5); --no-wait fails at once instead (exit code 3).
 """
 
 from __future__ import annotations
@@ -29,7 +34,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from Lib import paths, perf, process
+from Lib import locks, paths, perf, process
 from Lib.process import ToolNotFoundError, child_environment, run_captured
 from Lib.report import EXIT_INIT_FAILED, Console, Status, Step, configure_stdio, emit_json, overall_exit_code
 
@@ -381,7 +386,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="Exit codes: 0 captured (possibly with warnings), 1 the capture could not run, 2 usage error, 3 the "
-               "editor is not built.",
+               "editor is not built, or --no-wait found the GPU lock held, 5 the wait for the GPU lock ran out.",
     )
     parser.add_argument("--config", choices=("Debug", "Release"), default="Release",
                         help="the editor configuration to measure (default: Release, the configuration the numbers "
@@ -392,9 +397,15 @@ def main(argv: list[str] | None = None) -> int:
                         help="without a usable Vulkan device, capture the CPU numbers with a warning instead of "
                              "failing")
     parser.add_argument("--json", action="store_true", help="emit a machine-readable result")
+    locks.add_wait_arguments(parser)
     options = parser.parse_args(sys.argv[1:] if argv is None else argv)
+    locks.check_wait_arguments(parser, options)
     console = Console(options.json)
-    step = capture_perf(options.config, options.output.resolve(), options.gpu_optional, console)
+    try:
+        with locks.acquire_gpu(locks.wait_seconds(options), console.print):
+            step = capture_perf(options.config, options.output.resolve(), options.gpu_optional, console)
+    except locks.LockUnavailable as error:
+        step = locks.unavailable_step(error)
     console.result(step)
     code = overall_exit_code([step])
     if options.json:

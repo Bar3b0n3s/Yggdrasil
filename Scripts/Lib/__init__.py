@@ -8,6 +8,8 @@ Modules:
   premake    the pinned premake 5.0.0 release (download, SHA-256 verification, running it)
   workspace  reading the generated workspaces (.slnx, Makefile, build.ninja, .xcworkspace)
   scripts    running the other developer scripts as steps, and the static checks CI.py and PreCommit.py share
+  locks      the machine-wide build, GPU and gate locks every checkout of the repository shares
+  vendor_cache  the shared prebuilt vendor-library cache Build.py links from and CheckBuildConfig.py checks
 
 Everything here uses the Python standard library only (Python 3.10+).
 """

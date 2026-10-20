@@ -1,6 +1,6 @@
 """The bridge's parts without an editor build (Docs/Architecture.md §13.8): result formatting, the catalogue reader, the
-connection (transcript lines and their numbers, crash detection) and launch-or-attach, against the stand-in server of
-Tests/Automation/fake_editor.py and stand-in processes."""
+connection (transcript lines and their numbers, crash detection), launch-or-attach and the machine-wide locks a launch
+takes, against the stand-in server of Tests/Automation/fake_editor.py and stand-in processes."""
 
 from __future__ import annotations
 
@@ -15,6 +15,7 @@ import tempfile
 import threading
 import time
 import unittest
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 from unittest import mock
@@ -27,9 +28,11 @@ sys.path.insert(0, str(REPOSITORY_ROOT / "Tests" / "Automation"))
 
 import engine_client  # noqa: E402
 import fake_editor  # noqa: E402
+import lock_holder  # noqa: E402
 from engine_mcp import server, transcript  # noqa: E402
 from engine_mcp.connection import EditorConnection, EditorCrashed  # noqa: E402
 from engine_mcp.launcher import EditorAlreadyOpen, Launcher, LaunchRequest  # noqa: E402
+from Lib import locks  # noqa: E402  (engine_mcp puts Scripts/ on sys.path)
 
 # A stand-in for a launched editor's process: console output, then it waits to be killed.
 EDITOR_STAND_IN = "import time\nfor index in range(80):\n    print(f'log {index}', flush=True)\ntime.sleep(120)\n"
@@ -46,6 +49,8 @@ class BridgeTestCase(unittest.TestCase):
         patch = mock.patch.dict(os.environ, environment, clear=True)
         patch.start()
         self.addCleanup(patch.stop)
+        # Launches against stand-ins take the machine-wide locks of a directory of their own, never the machine's.
+        lock_holder.isolated_lock_directory(self)
 
     def start_server(self, handlers: dict[str, fake_editor.Handler]) -> fake_editor.FakeEditor:
         editor = fake_editor.FakeEditor(handlers)
@@ -1148,6 +1153,132 @@ class LauncherTests(BridgeTestCase):
             Launcher(repository, self.directory / "UserData").launch(
                 LaunchRequest(project=self.directory / "New", create=True))
         self.assertIn("python Scripts/Build.py --config Release --project Editor", str(raised.exception))
+
+
+class MachineLockTests(BridgeTestCase):
+    """editor_launch and the machine-wide locks of Scripts/Lib/locks.py (Docs/Architecture.md §2.3; ADR 0028 decision
+    16): a rendering editor holds the GPU lock from its launch until it exits, however it exits; every launch waits for
+    a running gate; a launch under a process that holds the GPU lock runs under that hold. The spawned editor is a
+    stand-in process, so the lock follows a real process's lifetime; the editor's answers come from the stand-in
+    server."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.root = self.make_project()
+        project = {"name": "Game", "root": self.root.as_posix()}
+        self.editor = self.start_server({
+            "project.open": lambda params: {"project": project, "warnings": [], "recoveryAvailable": False,
+                                            "recovered": False},
+            "session.info": lambda params: {"pid": 4242, "renderer": "vulkan", "scene": None}})
+        self.launcher = Launcher(REPOSITORY_ROOT, self.directory / "UserData", lock_wait_seconds=0.0)
+        self.spawned: list[engine_client.EditorProcess] = []
+        self.real_launch_editor = engine_client.launch_editor
+
+    def spawn_stand_in(self, *_: object, **__: object) -> engine_client.EditorProcess:
+        """launch_editor's stand-in: a real process that waits to be killed (it writes no session file)."""
+        editor = self.real_launch_editor(fake_editor.PYTHON, ["-c", EDITOR_STAND_IN], self.directory / "UserData",
+                                         "App", wait_for_session=False)
+        editor.session = mock.Mock()
+        self.addCleanup(editor.kill)
+        self.spawned.append(editor)
+        return editor
+
+    @contextlib.contextmanager
+    def stand_ins(self, launch_editor: Callable[..., engine_client.EditorProcess] | None = None) -> Iterator[None]:
+        """The launcher's editor binary, spawn and connection replaced: the spawn by `launch_editor` (default:
+        spawn_stand_in), the connection by one to the stand-in server."""
+        connection = EditorConnection(None, supervised=True, client=self.connect(self.editor),
+                                      repository_root=REPOSITORY_ROOT)
+        with mock.patch.object(engine_client, "find_editor_executable", return_value=Path("Editor")), \
+                mock.patch.object(engine_client, "launch_editor", side_effect=launch_editor or self.spawn_stand_in), \
+                mock.patch.object(self.launcher, "connect", return_value=connection):
+            yield
+
+    def launch(self, renderer: str) -> EditorConnection:
+        with self.stand_ins():
+            return self.launcher.launch(LaunchRequest(project=self.root, renderer=renderer))
+
+    def end_editor(self, editor: engine_client.EditorProcess) -> None:
+        """Kills `editor` and waits, bounded, for the launcher's thread that releases its lock on its exit."""
+        editor.kill()
+        for thread in threading.enumerate():
+            if thread.name == f"gpu-lock-{editor.process.pid}":
+                thread.join(lock_holder.DEADLINE_SECONDS)
+                self.assertFalse(thread.is_alive())
+
+    def gpu_holders(self) -> list[int]:
+        return [holder.pid for holder in locks.holders(locks.GPU)]
+
+    def test_a_rendering_editor_holds_the_gpu_lock_until_it_exits(self) -> None:
+        connection = self.launch("vulkan")
+        self.addCleanup(connection.disconnect)
+        holders = locks.holders(locks.GPU)
+        self.assertEqual([holder.pid for holder in holders], [os.getpid()])
+        self.assertIn("MCP bridge", holders[0].command)
+        with lock_holder.LockHolder(locks.GPU) as other:
+            self.assertEqual(other.wait_for("unavailable", "ready"), "unavailable gpu 3")
+        self.end_editor(self.spawned[0])
+        self.assertEqual(self.gpu_holders(), [])
+        with lock_holder.LockHolder(locks.GPU) as other:
+            other.ready()
+
+    def test_an_editor_without_rendering_takes_no_gpu_lock(self) -> None:
+        connection = self.launch("none")
+        self.addCleanup(connection.disconnect)
+        self.assertIsNone(self.spawned[0].process.poll())
+        self.assertEqual(self.gpu_holders(), [])
+
+    def test_a_launch_fails_naming_the_holder_while_a_gpu_run_or_a_gate_runs(self) -> None:
+        for lock, renderer in ((locks.GPU, "vulkan"), (locks.GATE, "vulkan"), (locks.GATE, "none")):
+            with self.subTest(lock=lock, renderer=renderer), lock_holder.LockHolder(lock) as holder:
+                holder.ready()
+                with self.assertRaises(locks.LockUnavailable) as raised:
+                    self.launch(renderer)
+                self.assertEqual(raised.exception.lock, lock)
+                self.assertIn(f"pid {holder.pid}", str(raised.exception))
+                self.assertEqual(self.spawned, [], "nothing is spawned")
+                bridge = server.Bridge(REPOSITORY_ROOT, [], self.launcher)
+                with self.stand_ins():
+                    structured, text, is_error = bridge.call_tool("editor_launch", {"project": str(self.root),
+                                                                                    "renderer": renderer})
+                self.assertTrue(is_error)
+                self.assertEqual(structured["error"], "LockUnavailable")
+                self.assertIn(f"pid {holder.pid}", text)
+                self.assertEqual(self.spawned, [])
+                # Unlocked by the holder itself: the next subtest takes the same lock at once, and the system may
+                # release a killed process's locks only after a delay.
+                self.assertEqual(holder.release(), 0)
+
+    def test_a_launch_under_a_process_holding_the_gpu_lock_runs_under_its_hold(self) -> None:
+        # The automation suite's Test.py holds the GPU lock while its bridge tests launch rendering editors.
+        with lock_holder.LockHolder(locks.GPU) as parent:
+            parent.ready()
+            record = locks.read_record(locks.lock_paths(locks.GPU)[0], locks.GPU)
+            self.assertIsNotNone(record)
+            os.environ[locks.HELD_LOCKS_VARIABLE] = f"{locks.GPU}={record.token if record else ''}"
+            connection = self.launch("vulkan")
+            self.addCleanup(connection.disconnect)
+            self.assertEqual(self.gpu_holders(), [parent.pid])
+            self.end_editor(self.spawned[0])
+            self.assertEqual(self.gpu_holders(), [parent.pid], "the parent's hold outlives the editor")
+
+    def test_a_launch_that_fails_releases_the_gpu_lock(self) -> None:
+        def exits_first(*_: object, **__: object) -> engine_client.EditorProcess:
+            raise RuntimeError("Editor exited with code 3 before it listened for automation")
+
+        with self.stand_ins(launch_editor=exits_first), self.assertRaises(RuntimeError):
+            self.launcher.launch(LaunchRequest(project=self.root, renderer="vulkan"))
+        self.assertEqual(self.gpu_holders(), [])
+
+        # A project.open that fails kills the spawned editor, whose exit releases the lock.
+        def refuse(params: dict[str, Any]) -> dict[str, Any]:
+            raise fake_editor.FakeError(engine_client.CONFLICT, "Locked", "the project is locked")
+
+        self.editor = self.start_server({"project.open": refuse})
+        with self.assertRaises(RuntimeError):
+            self.launch("vulkan")
+        self.end_editor(self.spawned[0])
+        self.assertEqual(self.gpu_holders(), [])
 
 
 def finished_pid() -> int:

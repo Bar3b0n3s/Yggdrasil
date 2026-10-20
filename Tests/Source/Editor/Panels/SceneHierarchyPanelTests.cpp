@@ -200,6 +200,43 @@ namespace Engine {
 			CHECK_FALSE(editor.GetScene().FindEntityByID(id).IsActiveSelf());
 		}
 
+		TEST_CASE("SceneHierarchyPanel: Delete of a prefab member is refused with its hint and keeps the member")
+		{
+			// The editor's Delete is entity.destroy, which refuses a member that is not its instance's root (ADR 0028 decision
+			// 16); the error notice shows the hint, the ways out a human needs too.
+			Test::WorkspaceTestUi test;
+			auto& editor = test.Environment.GetEditor();
+			REQUIRE(test.Client.Call("entity.create", Json{ { "name", "Lamp" } }));
+			REQUIRE(test.Client.Call("entity.create", Json{ { "name", "Bulb" }, { "parent", "/Lamp" } }));
+			REQUIRE(test.Client.Call("prefab.create", Json{ { "entity", "/Lamp" }, { "path", "Assets/Prefabs/Lamp.prefab" }, { "replaceWithInstance", true } }));
+			const UUID lamp = editor.GetScene().FindEntityByPath("/Lamp").GetUUID();
+			const UUID bulb = editor.GetScene().FindEntityByPath("/Lamp/Bulb").GetUUID();
+			const size_t steps = editor.GetHistory().GetUndoCount();
+			test.Draw();
+			test.Draw();
+			// A search opens the instance's row, so the member's row is drawn, inside the instance root's tree node.
+			const char* title = Utils::EditorWindowTitle(EditorPanel::SceneHierarchy);
+			test.Click(title, "##Search");
+			ImGui::GetIO().AddInputCharactersUTF8("Bulb");
+			test.Draw();
+			auto* hierarchy = test.Window(title);
+			const ImGuiID lampNode = ImHashStr("##Entity", 0, ImHashStr(lamp.ToString().c_str(), 0, hierarchy->ID));
+			const ImGuiID rowId = ImHashStr("##Entity", 0, ImHashStr(bulb.ToString().c_str(), 0, lampNode));
+			test.Click(test.Locate(hierarchy, rowId).GetCenter(), ImGuiMouseButton_Right);
+			const auto remove = test.FindText("Delete");
+			REQUIRE(remove.has_value());
+			const Test::ExpectLog failure(LogLevel::Error, "SceneHierarchyPanel:");
+			test.Click(*remove);
+			REQUIRE(test.Layer.OnSafePoint(0));
+			CHECK(editor.GetScene().FindEntityByID(bulb).IsValid());
+			CHECK(editor.GetHistory().GetUndoCount() == steps);
+			// The panel takes the action's result in its next frame, which logs the failure and shows it.
+			const std::string text = test.Text();
+			CHECK(text.contains("prefab.unpack"));
+			CHECK(text.contains("Dismiss"));
+			CHECK(failure.GetMatchCount() == 1);
+		}
+
 		TEST_CASE("SceneHierarchyPanel: pending hierarchy renames reject replaced runtime scenes with the same entity UUID")
 		{
 			Test::WorkspaceTestUi test;

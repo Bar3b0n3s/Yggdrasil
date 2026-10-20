@@ -38,11 +38,15 @@ sys.path.insert(0, str(REPOSITORY_ROOT / "Tests" / "Automation"))
 import engine_client  # noqa: E402
 import fake_editor  # noqa: E402
 import harness  # noqa: E402
+import lock_holder  # noqa: E402
 from engine_mcp import server  # noqa: E402
+from Lib import locks  # noqa: E402  (engine_mcp puts Scripts/ on sys.path)
 
-# The bridge's settings, which the SDK's stdio client (it passes only an allow-listed environment) must hand on.
+# The bridge's settings, which the SDK's stdio client (it passes only an allow-listed environment) must hand on: the
+# machine-wide locks' held tokens and directory among them, so a bridge that Test.py (holding the GPU lock) or CI.py
+# (holding every lock) starts runs its editor launches under that hold instead of waiting for it (Scripts/Lib/locks.py).
 BRIDGE_ENVIRONMENT_VARIABLES = ("ENGINE_MCP_TRANSCRIPT", "ENGINE_MCP_USER_DATA_DIR", "ENGINE_AUTOMATION_CONFIG",
-                                "ENGINE_AUTOMATION_COVERAGE")
+                                "ENGINE_AUTOMATION_COVERAGE", locks.HELD_LOCKS_VARIABLE, locks.LOCK_DIRECTORY_VARIABLE)
 SESSION_TIMEOUT_SECONDS = 300.0
 NOTIFICATION_TIMEOUT_SECONDS = 30.0
 # The M4 editor registers this many methods at least (test hooks excluded, since editor_launch starts no test hooks).
@@ -61,6 +65,36 @@ class ConformanceTests(unittest.TestCase):
                                                    "ENGINE_MCP_USER_DATA_DIR": str(self.user_data)})
         environment.start()
         self.addCleanup(environment.stop)
+
+    def test_the_bridge_inherits_the_machine_locks_its_starter_holds(self) -> None:
+        # The review's blocker: the SDK starts the server with its default environment and env only, so without the
+        # held tokens a bridge under Test.py's GPU hold waited for that hold (its own grandparent's) on a rendering
+        # launch, and under CI.py's gate on every launch, until the session timed out.
+        directory = lock_holder.isolated_lock_directory(self)
+        with lock_holder.LockHolder(locks.GPU) as holder:
+            holder.ready()
+            record = locks.read_record(locks.lock_paths(locks.GPU)[0], locks.GPU)
+            self.assertIsNotNone(record)
+            os.environ[locks.HELD_LOCKS_VARIABLE] = f"{locks.GPU}={record.token if record else ''}"
+            environment = self.bridge_environment(None)
+            self.assertEqual(environment.get(locks.HELD_LOCKS_VARIABLE), os.environ[locks.HELD_LOCKS_VARIABLE])
+            self.assertEqual(environment.get(locks.LOCK_DIRECTORY_VARIABLE), str(directory))
+            # A process started with that environment alone, as the SDK starts the bridge, runs under the hold.
+            child = lock_holder.LockHolder(locks.GPU, environment={**self.sdk_default_environment(), **environment})
+            try:
+                self.assertEqual(child.wait_for("held", "unavailable"), "held gpu exclusive inherited")
+                child.ready()
+            finally:
+                child.release()
+                child.stop()
+            holder.release()
+
+    @staticmethod
+    def sdk_default_environment() -> dict[str, str]:
+        """The environment the MCP SDK's stdio client gives a server before its env (mcp.client.stdio)."""
+        from mcp.client.stdio import get_default_environment  # noqa: PLC0415  (the SDK's own allow-list)
+
+        return get_default_environment()
 
     def test_sdk_client_lists_catalog_tools_without_editor(self) -> None:
         names = self.list_tool_names()

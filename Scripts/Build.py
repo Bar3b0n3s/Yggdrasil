@@ -21,6 +21,22 @@ The generator is detected from the workspace files Scripts/Generate.py wrote in 
 
 Projects that do not exist in a configuration (EditorCore, Editor and Tests in Dist) are never built in it.
 
+MSBuild builds link the vendored static libraries (the projects whose compiled sources all lie under Vendor/) from the
+shared vendor cache, <git common directory>/vendor-cache, which every worktree of the repository shares
+(Lib/vendor_cache.py; Docs/Decisions/0028-backlog-program.md decision 16): each library's entry is keyed by its
+generated build settings (defines, floating-point and instruction-set options, sanitizer, toolset), the toolchain
+(versions and the per-user property sheet), the configuration and its pinned sources, and verified (record, key, every
+file's size and SHA-256) before it is linked. A library whose settings name an input the key cannot digest (a path
+outside Vendor/ or built from an MSBuild property) is never cached and compiles in the workspace. Every MSBuild run gets
+an environment without the variables that select another toolset or add compiler options (VCToolsVersion,
+VCToolsInstallDir, LLVMInstallDir, LLVMToolsVersion, CL, _CL_; vendor_cache.TOOLCHAIN_ENVIRONMENT_VARIABLES), so it
+compiles with the toolchain the build reports and the keys record. A missing entry, or one that fails verification, is
+compiled once under the cache's lock (taken inside the build's machine-wide build lock, below, with its compiler cap),
+published atomically and then linked; the workspace's own vendored projects build nothing (MSBuild
+ForceImportAfterCppTargets, bin-int/VendorCache/). The warnings a library's compile reported count in every build that
+links it. --no-vendor-cache compiles the vendored libraries in the workspace; --vendor-cache-dir uses another cache
+directory. make, ninja and xcodebuild builds do not use the cache.
+
 After a build that builds the Runtime (every project, Runtime itself, or a project that depends on it, such as Tests),
 on every generator (Docs/Decisions/0024-m15-contract.md decisions 2, 5 and 8):
   - the notices file bin/<OutputDir>/Runtime/THIRD_PARTY_NOTICES.txt is generated from Vendor/*/VENDOR.md and
@@ -31,10 +47,31 @@ on every generator (Docs/Decisions/0024-m15-contract.md decisions 2, 5 and 8):
     SHA-256 in the report;
   - a Dist build archives the Runtime's symbols (.pdb and .map on Windows, .map and any .dSYM on macOS, .map on Linux)
     in bin/Symbols/<OutputDir>/Runtime/ (archive_dist_symbols), which exports never package.
-Each step's --json result carries what it did ("notices", "macosFrameworks", "distSymbols"), like "crtRedist".
+Each step's --json result carries what it did ("notices", "macosFrameworks", "distSymbols", "vendorCache"), like
+"crtRedist".
+
+The machine-wide build lock (Scripts/Lib/locks.py; Docs/Architecture.md §2.3, ADR 0028 decision 16) is taken after the
+workspace is read and held across every requested configuration: one uncapped build or two capped builds at a time,
+in every checkout of the repository, and none while a gate (CI.py) runs, unless this build runs inside it or inside
+another run that holds a machine lock (a Hardening.py run with a GPU step). The mode follows --jobs, on a machine with C
+logical CPUs:
+  --jobs N, N <= C/2  capped: one of the two slots, at most N compilers for the whole build. MSBuild builds up to -m
+                      projects at once, each compiling with /MP at CL_MPCount (MSBuild's per-project compiler count,
+                      which Microsoft.Cl.Common.props makes the /MP count of every project, since the generated
+                      projects enable MultiProcessorCompilation without a ProcessorNumber), so up to -m x CL_MPCount
+                      cl.exe run at once: a capped build gets -m:2 and -p:CL_MPCount=N/2 (-m:1 and N below 4 jobs; the
+                      vendor cache's compile of missing entries too); make and ninja -jN, xcodebuild -jobs N.
+  --jobs N, N > C/2   uncapped: both slots, -m:N, and every project compiles with /MP at the logical CPU count.
+  no --jobs           automatic: uncapped with C jobs when no build holds or claims the lock, capped with C/2 jobs
+                      beside one capped build, and otherwise waiting until one of the two is free.
+A build inside a hold it inherits (CI.py's) takes no slot of its own: its mode is the one --jobs asks for, but capped
+under a capped hold. While the lock is held the build waits, reporting the holder (pid, worktree, command), at most
+--lock-timeout seconds (exit code 5), or fails at once with --no-wait (exit code 3). The --json document's "buildLock"
+says which mode and job count it ran with.
 
 Exit codes: 0 success, 1 build failed (or produced warnings under MSBuild), 2 usage error (unknown project, a project
-absent from the configuration), 3 the toolchain or generated workspace is missing, 5 timeout.
+absent from the configuration), 3 the toolchain or generated workspace is missing, or --no-wait found the build lock
+held, 5 timeout (of the build, or of the wait for the build lock).
 """
 
 from __future__ import annotations
@@ -46,6 +83,7 @@ if sys.version_info < (3, 10):
     sys.exit(f"Build.py requires Python 3.10 or newer (this is Python {platform.python_version()})")
 
 import argparse
+import dataclasses
 import hashlib
 import os
 import re
@@ -53,7 +91,7 @@ import shutil
 import time
 from pathlib import Path
 
-from Lib import notices, paths, premake, toolchain, workspace
+from Lib import locks, notices, paths, premake, toolchain, vendor_cache, workspace
 from Lib.process import ProcessResult, ToolNotFoundError, child_environment, run_streamed
 from Lib.report import (
     EXIT_INIT_FAILED,
@@ -68,6 +106,9 @@ from Lib.report import (
 )
 
 BUILD_TIMEOUT_SECONDS = 7200.0
+# The projects a capped MSBuild build builds at once (msbuild_parallel_arguments): the workspace's heaviest projects
+# pair up (Engine beside EditorCore, Editor beside Runtime), so two keep the build's compilers busy.
+CAPPED_PROJECTS = 2
 TOOL_LINK_ROOT = paths.BIN_INT_ROOT / "Toolchain"
 RUNTIME_PROJECT = "Runtime"
 REPORTED_DIAGNOSTICS = 30
@@ -196,53 +237,165 @@ def builds_runtime(solution: workspace.Solution, config: str, project: str | Non
     return project is None or RUNTIME_PROJECT in solution.builds_with(project)
 
 
+def capped_projects(jobs: int) -> int:
+    """How many projects a capped MSBuild build of `jobs` jobs builds at once (-m): CAPPED_PROJECTS, or 1 below
+    2 x CAPPED_PROJECTS jobs, so each project still compiles with at least two compilers."""
+    return CAPPED_PROJECTS if jobs >= 2 * CAPPED_PROJECTS else 1
+
+
+def msbuild_parallel_arguments(arguments: argparse.Namespace) -> list[str]:
+    """MSBuild's parallelism for a build of arguments.jobs jobs. MSBuild builds up to -m projects at once and each
+    compiles with /MP at CL_MPCount, so up to -m x CL_MPCount cl.exe run at once (the "P x C" of MSBuild's
+    documentation on building with multiple processors). An uncapped build: -m:<jobs>, /MP at the logical CPU count. A
+    capped build bounds the product by its jobs, for the whole build: -m:<capped_projects> and CL_MPCount=<jobs> //
+    that."""
+    if not arguments.capped:
+        return [f"-m:{arguments.jobs}"]
+    projects = capped_projects(arguments.jobs)
+    return [f"-m:{projects}", f"-p:CL_MPCount={arguments.jobs // projects}"]
+
+
+def read_msbuild_log(path: Path) -> list[str]:
+    try:
+        return unique(path.read_text(encoding="utf-8-sig", errors="replace").splitlines())
+    except OSError:
+        return []
+
+
+def run_msbuild(visual_studio: toolchain.VisualStudio, target: Path, options: list[str], log_stem: Path,
+                arguments: argparse.Namespace, console: Console, timeout: float) -> tuple[ProcessResult, list[str],
+                                                                                          list[str]]:
+    """MSBuild on `target` (a solution or project file) with `options`, its errors and warnings logged to
+    <log_stem>.errors.log and <log_stem>.warnings.log. Returns (result, warnings, errors)."""
+    errors_log = log_stem.with_name(log_stem.name + ".errors.log")
+    warnings_log = log_stem.with_name(log_stem.name + ".warnings.log")
+    for log in (errors_log, warnings_log):
+        log.unlink(missing_ok=True)
+    command = [
+        str(visual_studio.msbuild),
+        str(target),
+        *msbuild_parallel_arguments(arguments),
+        "-nologo",
+        "-nodeReuse:false",  # lingering worker nodes would keep the output pipe open
+        f"-v:{'normal' if arguments.verbose else 'minimal'}",
+        *options,
+        logger_argument(1, errors_log, "errorsonly"),
+        logger_argument(2, warnings_log, "warningsonly"),
+    ]
+    # English diagnostics, so logs and parsers see the same text on every machine; no variable that selects another
+    # toolset or adds compiler options, so MSBuild compiles with the toolchain the build reports and the vendor cache's
+    # keys record.
+    environment = vendor_cache.msbuild_environment(child_environment({"VSLANG": "1033",
+                                                                      "MSBUILDDISABLENODEREUSE": "1"}))
+    result = run_streamed(command, cwd=target.parent, env=environment, timeout=timeout, echo=console.stream)
+    return result, read_msbuild_log(warnings_log), read_msbuild_log(errors_log)
+
+
+@dataclasses.dataclass
+class VendorCacheUse:
+    """How a build used the shared vendor cache: the plan, the ForceImportAfterCppTargets file (None when nothing is
+    linked from the cache), why the cache was not used, or the failed compile of missing entries."""
+
+    plan: vendor_cache.Plan | None = None
+    override: Path | None = None
+    reason: str = ""
+    failed: Step | None = None
+
+    def to_json(self) -> dict[str, object]:
+        if self.plan is None:
+            return {"used": False, "reason": self.reason}
+        return {"used": True, **self.plan.to_json()}
+
+
+def link_vendor_cache(solution: workspace.Solution, config: str, project: str | None,
+                      visual_studio: toolchain.VisualStudio, arguments: argparse.Namespace, console: Console,
+                      log_stem: Path, deadline: float) -> VendorCacheUse:
+    """Links this build's vendored libraries from the shared cache (Lib/vendor_cache.py), compiling and publishing the
+    missing ones first. A cache that cannot be used leaves the build to compile them in the workspace."""
+    if not arguments.vendor_cache:
+        return VendorCacheUse(reason="--no-vendor-cache given")
+    name = f"build {config}" + (f" {project}" if project else "")
+    built = solution.builds_with(project) if project else set(solution.projects_in(config))
+    project_files = {candidate: solution.project_files[candidate] for candidate in sorted(built)
+                     if candidate in solution.project_files and candidate in solution.projects_in(config)}
+    compiled: dict[str, tuple[ProcessResult, list[str], list[str]]] = {}
+
+    def populate(populate_project: Path, builds: list[vendor_cache.StagedBuild]) -> vendor_cache.PopulateResult:
+        result, warnings, errors = run_msbuild(visual_studio, populate_project, [],
+                                               log_stem.with_name(log_stem.name + ".vendor-cache"), arguments, console,
+                                               max(1.0, deadline - time.monotonic()))
+        compiled["result"] = (result, warnings, errors)
+        return vendor_cache.PopulateResult(result.succeeded, warnings, errors)
+
+    try:
+        cache = vendor_cache.VendorCache(arguments.vendor_cache_dir or vendor_cache.default_root())
+        identity = vendor_cache.toolchain_identity(visual_studio.version, visual_studio.vc_tools_version,
+                                                   toolchain.find_windows_sdk()[0],
+                                                   vendor_cache.user_properties_digest(solution.platform))
+        plan = vendor_cache.prepare(cache, project_files, config, solution.platform, identity, solution.path,
+                                    populate, max(1.0, deadline - time.monotonic()), console.print)
+        override = None
+        if plan.linked:
+            references, linking = vendor_cache.consumers(project_files.values(), config, solution.platform)
+            override = vendor_cache.write_link_override(
+                solution.path.parent / vendor_cache.WORKSPACE_DIRECTORY / f"{config}.targets", plan.linked, references,
+                linking)
+    except vendor_cache.PopulateFailedError:
+        result, warnings, errors = compiled["result"]
+        warnings, tolerated = split_vendor_warnings(warnings, arguments, solution.path.parent)
+        step = finish_step(name, result, warnings, errors, not arguments.allow_warnings,
+                           "vendored libraries compiled for the vendor cache", tolerated)
+        if not step.failed:  # MSBuild failed without reporting an error
+            step.status = Status.FAILED
+        step.detail = f"vendor cache: {step.detail}"
+        return VendorCacheUse(reason="compiling the missing entries failed", failed=step)
+    except (vendor_cache.VendorCacheError, toolchain.ToolchainError, OSError) as error:
+        console.print(f"vendor cache not used: {error}")
+        return VendorCacheUse(reason=str(error))
+    if plan.linked or plan.compiled_in_workspace:
+        console.print(f"{plan.summary()} from {plan.root.as_posix()} (verified in {plan.verify_seconds:.1f} s)")
+    for note in plan.notes:
+        console.print(f"vendor cache: {note}")
+    return VendorCacheUse(plan, override)
+
+
 def build_msbuild(solution: workspace.Solution, config: str, project: str | None, arguments: argparse.Namespace,
                   console: Console) -> Step:
+    started = time.monotonic()
+    deadline = started + arguments.timeout
     visual_studio = toolchain.find_visual_studio()
     name = f"build {config}" + (f" {project}" if project else "")
     log_root = solution.path.parent / "bin-int" / "BuildLogs"
     log_root.mkdir(parents=True, exist_ok=True)
-    stem = f"{config}-{project or 'All'}"
-    errors_log, warnings_log = log_root / f"{stem}.errors.log", log_root / f"{stem}.warnings.log"
-    for log in (errors_log, warnings_log):
-        log.unlink(missing_ok=True)
-
-    targets: list[str] = []
-    if project:
-        targets.append(f"-t:{solution.target_names[project]}" + (":Rebuild" if arguments.rebuild else ""))
-    elif arguments.rebuild:
-        targets.append("-t:Rebuild")
-    command = [
-        str(visual_studio.msbuild),
-        str(solution.path),
-        f"-m:{arguments.jobs}",
-        "-nologo",
-        "-nodeReuse:false",  # lingering worker nodes would keep the output pipe open
-        f"-v:{'normal' if arguments.verbose else 'minimal'}",
-        f"-p:Configuration={config}",
-        f"-p:Platform={solution.platform}",
-        logger_argument(1, errors_log, "errorsonly"),
-        logger_argument(2, warnings_log, "warningsonly"),
-        *targets,
-    ]
+    log_stem = log_root / f"{config}-{project or 'All'}"
     console.print(f"MSBuild ({visual_studio.display_name} {visual_studio.version}, "
                   f"MSVC {visual_studio.vc_tools_version})")
-    # English diagnostics, so logs and parsers see the same text on every machine.
-    environment = child_environment({"VSLANG": "1033", "MSBUILDDISABLENODEREUSE": "1"})
-    result = run_streamed(command, cwd=solution.path.parent, env=environment, timeout=arguments.timeout,
-                          echo=console.stream)
+    cache = link_vendor_cache(solution, config, project, visual_studio, arguments, console, log_stem, deadline)
+    if cache.failed is not None:
+        cache.failed.data["vendorCache"] = cache.to_json()
+        cache.failed.duration = time.monotonic() - started
+        return cache.failed
 
-    def read_log(path: Path) -> list[str]:
-        try:
-            return unique(path.read_text(encoding="utf-8-sig", errors="replace").splitlines())
-        except OSError:
-            return []
-
-    warnings, errors = read_log(warnings_log), read_log(errors_log)
+    options = [f"-p:Configuration={config}", f"-p:Platform={solution.platform}"]
+    if cache.override is not None:
+        options.append(f"-p:ForceImportAfterCppTargets={cache.override}")
+    if project:
+        options.append(f"-t:{solution.target_names[project]}" + (":Rebuild" if arguments.rebuild else ""))
+    elif arguments.rebuild:
+        options.append("-t:Rebuild")
+    result, warnings, errors = run_msbuild(visual_studio, solution.path, options, log_stem, arguments, console,
+                                           max(1.0, deadline - time.monotonic()))
+    if cache.plan is not None:
+        # A library linked from the cache reports the warnings its compile reported, as compiling it here would.
+        warnings = unique(warnings + cache.plan.warnings)
     warnings, tolerated = split_vendor_warnings(warnings, arguments, solution.path.parent)
     built = [project] if project else solution.projects_in(config)
     step = finish_step(name, result, warnings, errors, not arguments.allow_warnings,
                        f"{len(built)} project(s) built" if not project else f"{project} built", tolerated)
+    step.duration = time.monotonic() - started  # the vendor cache's verification and compiles included
+    step.data["vendorCache"] = cache.to_json()
+    if cache.plan is not None and (cache.plan.linked or cache.plan.compiled_in_workspace):
+        step.detail += f"; {cache.plan.summary()}"
     if not step.failed and builds_runtime(solution, config, project):
         redist = copy_crt_redist(visual_studio, config, solution.path.parent)
         step.data["crtRedist"] = redist
@@ -558,10 +711,46 @@ def detect_action(host: paths.Host, requested: str | None, root: Path) -> str:
     return present[0]  # the host default wins when several generators were run
 
 
+def capped_jobs(cpu_count: int) -> int:
+    """The most jobs of a capped build: half the logical CPUs (at least 1)."""
+    return max(1, cpu_count // 2)
+
+
+def requested_build_mode(jobs: int | None, cpu_count: int) -> str:
+    """The build lock mode --jobs asks for: automatic without it, capped for at most half the logical CPUs, else
+    uncapped."""
+    if jobs is None:
+        return locks.AUTO
+    return locks.CAPPED if jobs <= capped_jobs(cpu_count) else locks.UNCAPPED
+
+
+def build_jobs(mode: str, jobs: int | None, cpu_count: int) -> int:
+    """The jobs a build runs with once its hold's mode is known: a capped one at most half the logical CPUs (half when
+    --jobs is not given), an uncapped one --jobs or the CPU count."""
+    if mode == locks.CAPPED:
+        return min(jobs or capped_jobs(cpu_count), capped_jobs(cpu_count))
+    return jobs or cpu_count
+
+
+def take_build_lock(arguments: argparse.Namespace, console: Console) -> locks.Hold:
+    """The machine-wide build lock in the mode --jobs asks for; sets arguments.jobs and arguments.capped from the hold.
+    Raises locks.LockUnavailable."""
+    cpu_count = os.cpu_count() or 1
+    hold = locks.acquire_build(requested_build_mode(arguments.requested_jobs, cpu_count),
+                               locks.wait_seconds(arguments), console.print)
+    arguments.jobs = build_jobs(hold.mode, arguments.requested_jobs, cpu_count)
+    arguments.capped = hold.capped
+    cap = f"; MSBuild {' '.join(msbuild_parallel_arguments(arguments))}" if hold.capped else ""
+    under = " under the hold of a parent process" if hold.inherited else ""
+    console.print(f"Build lock: {hold.mode}, {arguments.jobs} job(s){cap}{under}")
+    return hold
+
+
 def parse_arguments(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Build the generated workspace (MSBuild, make, ninja or xcodebuild).",
-        epilog="Exit codes: 0 success, 1 build failed, 2 usage error, 3 toolchain or workspace missing, 5 timeout.",
+        epilog="Exit codes: 0 success, 1 build failed, 2 usage error, 3 toolchain or workspace missing, or --no-wait "
+               "found the build lock held, 5 timeout (of the build, or of the wait for the build lock).",
     )
     parser.add_argument("--config", default="Debug",
                         help="configuration(s), comma-separated: Debug, Release, Dist (default: Debug)")
@@ -572,25 +761,42 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--workspace-dir", type=Path, default=paths.REPOSITORY_ROOT,
                         help="directory of a workspace generated with Generate.py --to (default: the repository, "
                              "where Generate.py writes it in place)")
-    parser.add_argument("--jobs", type=int, default=os.cpu_count() or 1, help="parallel jobs (default: CPU count)")
+    parser.add_argument("--jobs", type=int,
+                        help="parallel jobs; at most half the logical CPUs is a capped build (one of the build lock's "
+                             "two slots, at most that many compilers for the whole build: MSBuild -m:2 with "
+                             "CL_MPCount at half of it), more is uncapped "
+                             "(the whole lock); default: uncapped with the CPU count when no build holds the lock, "
+                             "capped with half of it beside one capped build")
     parser.add_argument("--rebuild", action="store_true", help="rebuild instead of building incrementally")
     parser.add_argument("--allow-warnings", action="store_true",
                         help="do not fail an MSBuild build that reports warnings")
     parser.add_argument("--allow-vendor-warnings", action="store_true",
                         help="do not fail an MSBuild build for warnings located in files under Vendor/ (first-party "
                              "code builds with warnings as errors anyway); every other warning still fails it")
+    parser.add_argument("--no-vendor-cache", dest="vendor_cache", action="store_false",
+                        help="MSBuild: compile the vendored libraries in the workspace instead of linking them from "
+                             "the shared vendor cache")
+    parser.add_argument("--vendor-cache-dir", type=Path,
+                        help="MSBuild: the shared vendor cache's directory (default: <git common directory>/"
+                             f"{vendor_cache.CACHE_DIRECTORY_NAME}, which every worktree of the repository shares)")
     parser.add_argument("--timeout", type=float, default=BUILD_TIMEOUT_SECONDS,
                         help=f"seconds per configuration (default: {BUILD_TIMEOUT_SECONDS:.0f})")
     parser.add_argument("--verbose", action="store_true", help="show full command lines and normal verbosity")
     parser.add_argument("--json", action="store_true", help="print a machine-readable result on stdout")
+    locks.add_wait_arguments(parser)
     arguments = parser.parse_args(argv)
     try:
         arguments.configs = paths.parse_configurations(arguments.config)
     except ValueError as error:
         parser.error(str(error))
-    if arguments.jobs < 1:
+    if arguments.jobs is not None and arguments.jobs < 1:
         parser.error("--jobs must be at least 1")
+    locks.check_wait_arguments(parser, arguments)
+    arguments.requested_jobs = arguments.jobs
+    arguments.capped = False
     arguments.workspace_dir = arguments.workspace_dir.resolve()
+    if arguments.vendor_cache_dir is not None:
+        arguments.vendor_cache_dir = arguments.vendor_cache_dir.resolve()
     if arguments.timeout <= 0:
         parser.error("--timeout must be positive")
     return arguments
@@ -602,6 +808,7 @@ def main(argv: list[str] | None = None) -> int:
     console = Console(arguments.json)
     steps: list[Step] = []
     action = None
+    hold: locks.Hold | None = None
     exit_code = EXIT_SUCCESS
     try:
         host = paths.host()
@@ -609,6 +816,7 @@ def main(argv: list[str] | None = None) -> int:
         generated = workspace.read_workspace(action, arguments.workspace_dir)
         projects = {config: (generated.require_project(arguments.project, config) if arguments.project else None)
                     for config in arguments.configs}
+        hold = take_build_lock(arguments, console)
         for config in arguments.configs:
             console.heading(f"Build {config} ({action})" + (f": {projects[config]}" if projects[config] else ""))
             started = time.time()
@@ -638,10 +846,19 @@ def main(argv: list[str] | None = None) -> int:
         exit_code = EXIT_INIT_FAILED
         steps.append(Step("build", Status.FAILED, str(error), exit_code=exit_code))
         console.result(steps[-1])
+    except locks.LockUnavailable as error:
+        steps.append(locks.unavailable_step(error))
+        exit_code = error.exit_code
+        console.result(steps[-1])
+    finally:
+        if hold is not None:
+            hold.release()
 
     console.summary("Build summary", steps)
     if arguments.json:
-        emit_json({"success": exit_code == EXIT_SUCCESS, "action": action, "steps": [s.to_json() for s in steps]})
+        build_lock = None if hold is None else {"mode": hold.mode, "jobs": arguments.jobs, "inherited": hold.inherited}
+        emit_json({"success": exit_code == EXIT_SUCCESS, "action": action, "buildLock": build_lock,
+                   "steps": [s.to_json() for s in steps]})
     return exit_code
 
 

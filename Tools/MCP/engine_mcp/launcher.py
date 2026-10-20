@@ -31,21 +31,38 @@ working directory (Launcher.resolve_project; Docs/Decisions/0026-m16-contract.md
 
 Spawned editors get --user-data-dir with the launcher's user-data root (the OS's by default), so the bridge finds their
 session files and crash reports where it looks.
+
+Machine-wide locks (Scripts/Lib/locks.py; Docs/Architecture.md §2.3, Docs/Decisions/0028-backlog-program.md decision
+16): before step 3 spawns an editor, the launch waits until no gate (CI.py) runs, and a rendering editor (renderer
+"vulkan") takes the GPU lock, shared by every checkout of the repository, which the bridge holds from that launch until
+the editor exits, however it exits (Launcher.release_when_exits), or until the bridge itself exits: an editor left
+running with unsaved changes when the MCP client goes away holds none (Docs/Architecture.md §2.3). Under a process that
+already holds the lock (the automation suite's Test.py, whose bridge tests launch rendering editors) the launch runs
+under that hold and waits for nothing. A wait reports the holder (pid, worktree, command) on the bridge's log and lasts
+at most the launcher's lock_wait_seconds (LOCK_WAIT_SECONDS by default); then the launch fails with LockUnavailable
+naming the holder, and no editor is spawned. Attaching takes no lock: the attached editor is not the bridge's.
 """
 
 from __future__ import annotations
 
 import dataclasses
+import logging
+import os
+import threading
 from pathlib import Path
 from typing import Any
 
 import engine_client
 from engine_mcp.connection import EditorConnection
 from engine_mcp.transcript import CLIENT_NAME
+from Lib import locks
 
 ALREADY_OPEN_HINT = "enable Allow AI automation in the editor's Automation panel, then call editor_attach"
 PROJECT_FILE_EXTENSION = ".eproj"
 RENDERERS = ("vulkan", "none")
+# How long editor_launch waits for a running gate or GPU run before it fails naming the holder.
+LOCK_WAIT_SECONDS = 1800.0
+LOGGER = logging.getLogger("engine_mcp")
 
 
 @dataclasses.dataclass(eq=False)
@@ -94,11 +111,14 @@ class Launcher:
     """Finds, starts and attaches to editors for one bridge process."""
 
     def __init__(self, repository_root: Path, user_data_root: Path | None = None,
-                 configurations: tuple[str, ...] = ("Release", "Debug")) -> None:
+                 configurations: tuple[str, ...] = ("Release", "Debug"),
+                 lock_wait_seconds: float = LOCK_WAIT_SECONDS) -> None:
         self.repository_root = repository_root
         self.user_data_root = user_data_root
         # The build configurations whose editor is spawned, in order of preference (§13.8: Release first).
         self.configurations = configurations
+        # The bound of a launch's wait for the machine-wide locks (0: fail at once when one is held).
+        self.lock_wait_seconds = lock_wait_seconds
 
     @property
     def app_name(self) -> str:
@@ -114,12 +134,13 @@ class Launcher:
         return (project if project.is_absolute() else self.repository_root / project).resolve()
 
     def launch(self, request: LaunchRequest) -> EditorConnection:
-        """editor_launch (see the module comment). Raises EditorAlreadyOpen, FileNotFoundError for a missing binary, or
-        RuntimeError when the spawned editor exits before it listens (with its exit code), when project.create or
-        project.open fails (a locked or invalid project, a refused recovery), or when recover asks to adopt an autosave
-        that an editor already serving the project holds. Whatever else the project.create, project.open or session.info
-        of a spawned editor raises (a timeout, a broken connection) propagates after that editor is killed, since no
-        connection to it is returned."""
+        """editor_launch (see the module comment). Raises EditorAlreadyOpen, FileNotFoundError for a missing binary,
+        locks.LockUnavailable when a gate or another GPU run kept the machine-wide locks for lock_wait_seconds (nothing
+        is spawned then), or RuntimeError when the spawned editor exits before it listens (with its exit code), when
+        project.create or project.open fails (a locked or invalid project, a refused recovery), or when recover asks to
+        adopt an autosave that an editor already serving the project holds. Whatever else the project.create,
+        project.open or session.info of a spawned editor raises (a timeout, a broken connection) propagates after that
+        editor is killed, since no connection to it is returned."""
         if request.renderer not in RENDERERS:
             raise ValueError(f"renderer must be one of {', '.join(RENDERERS)} (got '{request.renderer}')")
         project = self.resolve_project(request.project)
@@ -143,7 +164,15 @@ class Launcher:
         # the creation or the open (the .meta files the open's scan writes for new sources) is attributed to it.
         executable = engine_client.find_editor_executable(self.repository_root, self.configurations)
         arguments = ["--automation", "--renderer", request.renderer, *(["--headless"] if request.headless else [])]
-        editor = engine_client.launch_editor(executable, arguments, self.user_data_directory(), self.app_name)
+        hold = self.take_machine_locks(request.renderer, project)
+        try:
+            editor = engine_client.launch_editor(executable, arguments, self.user_data_directory(), self.app_name)
+        except BaseException:
+            if hold is not None:
+                hold.release()
+            raise
+        if hold is not None:
+            self.release_when_exits(editor, hold)
         assert editor.session is not None
         try:
             connection = self.connect(editor.session, supervised=True, editor=editor)
@@ -209,6 +238,31 @@ class Launcher:
         connection.session_info = result if isinstance(result, dict) else None
 
     # ----------------------------------------------------------------------------------------------------------------
+
+    def take_machine_locks(self, renderer: str, project: Path) -> locks.Hold | None:
+        """Before an editor is spawned: the GPU lock for a rendering editor (the caller hands it to
+        release_when_exits), or for any other only the wait until no gate runs. Raises locks.LockUnavailable after
+        lock_wait_seconds."""
+        if renderer == "vulkan":
+            command = f"MCP bridge (pid {os.getpid()}): a rendering editor for {project}"
+            return locks.acquire_gpu(self.lock_wait_seconds, LOGGER.info, command)
+        locks.wait_for_gate(self.lock_wait_seconds, LOGGER.info)
+        return None
+
+    @staticmethod
+    def release_when_exits(editor: engine_client.EditorProcess, hold: locks.Hold) -> threading.Thread:
+        """Releases `hold` once the editor's process has exited, however it exits (editor_shutdown, a crash, a kill), on
+        a daemon thread that waits for it; returns that thread."""
+
+        def wait_then_release() -> None:
+            try:
+                editor.process.wait()
+            finally:
+                hold.release()
+
+        watcher = threading.Thread(target=wait_then_release, daemon=True, name=f"gpu-lock-{editor.process.pid}")
+        watcher.start()
+        return watcher
 
     def user_data_directory(self) -> Path:
         return self.user_data_root if self.user_data_root is not None else engine_client.default_user_data_root()

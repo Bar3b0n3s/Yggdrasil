@@ -32,6 +32,7 @@
 
 #include <array>
 #include <cctype>
+#include <optional>
 
 namespace Engine {
 
@@ -189,6 +190,22 @@ namespace Engine {
 			EditorContext& editor = context.GetEditor();
 			ENGINE_TRY_ASSIGN(Scene * scene, context.ResolveTargetScene(SceneTarget::Edit, false, true));
 			ENGINE_TRY_ASSIGN(Entity entity, context.ResolveEntity(*scene, params.Entity, "/entity"));
+			// Replacing the subtree removes its entities: a member of another instance stays, as entity.destroy keeps it (§5.5).
+			if (params.ReplaceWithInstance)
+			{
+				if (const std::optional<Utils::KeptPrefabMember> kept = Utils::FindKeptPrefabMember(entity, {}))
+				{
+					const std::string instance = scene->GetEntityPath(kept->InstanceRoot);
+					// The way out as a call to copy, its params built as JSON so that any entity name is escaped.
+					const Json unpack{ { "instance", instance } };
+					return std::unexpected(Utils::MakeParamError(ErrorCode::InvalidState, "/entity",
+						std::format("'{}' is a member of the prefab instance '{}' and cannot be replaced with an instance of a new prefab: the instance's "
+									"next update could not keep the change",
+							scene->GetEntityPath(kept->Member), instance),
+						std::format("create the prefab without replaceWithInstance, or unpack the instance first (prefab.unpack {})",
+							unpack.dump(-1, ' ', false, Json::error_handler_t::replace))));
+				}
+			}
 			ENGINE_TRY_ASSIGN(const VfsPath path, Utils::ResolveAssetsPath(context, params.Path, "/path", ".prefab"));
 			ENGINE_TRY(Utils::RefreshAssets(editor));
 			VirtualFileSystem& vfs = editor.GetVfs();
@@ -491,7 +508,7 @@ namespace Engine {
 				.Name = "prefab.create",
 				.Description = "Saves an entity's subtree as a new .prefab asset (nested instances flattened), optionally replacing the entity "
 							   "with an instance of it, as one undoable step. The result's instance is that instance's root (empty without "
-							   "replaceWithInstance).",
+							   "replaceWithInstance). Replacing a member of another prefab instance is refused: unpack that instance first.",
 				.RequiredParams = { "entity", "path" },
 				.ExposeAsTool = true,
 				.Mutates = true,

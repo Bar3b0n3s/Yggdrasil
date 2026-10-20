@@ -1,6 +1,6 @@
-"""Scripts/Lib/games.py and the games suite and stage (Docs/Architecture.md §15.1 T5, §15.8; Roadmap M16 to M18;
-Docs/Decisions/0026-m16-contract.md decisions 7 and 8, stream B): project discovery and the Testing settings, the
-evaluation of a test run, of script.check, project.validate, the upgrade dry run and the smoke export; the suite's
+"""Scripts/Lib/games.py and the games suite and stage (Docs/Architecture.md §15.1 T5, §15.8; Roadmap M16, M17, M25
+and M27; Docs/Decisions/0026-m16-contract.md decisions 7 and 8, stream B): project discovery and the Testing settings,
+the evaluation of a test run, of script.check, project.validate, the upgrade dry run and the smoke export; the suite's
 registration, steps, device and build rules and outputs in Test.py, the editor half's checks against a faked editor,
 the Dist half's against a faked editor and Runtime, Test.py's shared helpers, the CI.py stage and PreCommit's Debug run
 (recorded, nothing run); and an end-to-end run of the editor half on a small game built through automation in the
@@ -27,6 +27,7 @@ from unittest import mock
 from xml.etree import ElementTree
 
 from harness import REPOSITORY_ROOT, AutomationTestCase, automation_config
+from lock_holder import isolated_lock_directory
 from tiny_game import TINY_SCENE, build_tiny_game
 
 sys.path.insert(0, str(REPOSITORY_ROOT / "Scripts"))
@@ -458,25 +459,28 @@ class EvaluationTests(unittest.TestCase):
         self.assertIn("NotFound", refused[0])
 
     def test_a_game_needs_a_committed_replay_with_input_events(self) -> None:
-        # The milestone review's R09: Roadmap M16 to M18 accept a demo by its suites and a replay recorded from tick 0
-        # that plays it, so a game whose Testing.Replays matches nothing, or only replays without input, fails.
+        # The milestone review's R09: the demo acceptance (Roadmap M16, M17, M25 and M27) accepts a demo by its suites
+        # and a replay recorded from tick 0 that plays it, so a game whose Testing.Replays matches nothing, or only
+        # replays without input, fails, citing that acceptance.
         idle = "Assets/Tests/Replays/Idle.replay"
         self.assertEqual(games.check_replay_acceptance({REPLAY: 3}), [])
         self.assertEqual(games.check_replay_acceptance({REPLAY: 3, idle: 0}), [])
         none = games.check_replay_acceptance({})
         self.assertEqual(len(none), 1)
         self.assertIn("Testing.Replays matches no replay", none[0])
+        self.assertIn(games.DEMO_ACCEPTANCE, none[0])
         without_input = games.check_replay_acceptance({REPLAY: 0, idle: 0})
         self.assertEqual(len(without_input), 1)
-        for text in ("no replay of Testing.Replays has input events", REPLAY, idle, "Roadmap M16 to M18"):
+        for text in ("no replay of Testing.Replays has input events", REPLAY, idle, games.DEMO_ACCEPTANCE):
             self.assertIn(text, without_input[0])
 
     def test_a_game_needs_a_start_scene_that_its_build_scenes_list(self) -> None:
-        # ADR 0027 decision 4, B1 (M17 pipeline map G2): Roadmap M17 and M18 accept a demo with "StartScene and
+        # ADR 0027 decision 4, B1 (M17 pipeline map G2): Roadmap M17, M25 and M27 accept a demo with "StartScene and
         # Export.BuildScenes set", but the validator and the exporter accept an empty BuildScenes (FeatureTest relies on
-        # it), so only the games suite checks the rule; that BuildScenes lists StartScene is this ADR's convention.
+        # it), so only the games suite checks the rule; that BuildScenes lists StartScene is this ADR's convention. The
+        # failure lines are that ADR's frozen strings, renumbered by Docs/Decisions/0028-backlog-program.md decision 14.
         main = "Assets/Scenes/Main.scene"
-        roadmap = "(Roadmap M17 and M18: StartScene and Export.BuildScenes set)"
+        roadmap = "(Roadmap M17, M25 and M27: StartScene and Export.BuildScenes set)"
         start = f"StartScene is empty: set it to the scene the game starts with {roadmap}"
         build = (f"Export.BuildScenes is empty: list the scenes the export must load strictly, StartScene included "
                  f"{roadmap}")
@@ -626,6 +630,7 @@ class SuiteTests(unittest.TestCase):
         self.assertEqual(suite.allowed, paths.CONFIGURATIONS)
 
     def test_main_hands_the_requested_configurations_to_run_games(self) -> None:
+        isolated_lock_directory(self)  # the run takes the GPU lock: this test's own, never the machine's
         ran: list[tuple[str, ...]] = []
 
         def run_games(configs: list[str], arguments: argparse.Namespace, console: Console) -> list[Step]:

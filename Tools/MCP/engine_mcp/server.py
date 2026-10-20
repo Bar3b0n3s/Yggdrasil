@@ -6,7 +6,8 @@ Tools:
     project_create templates), editor_attach {project?, pid?} (a relative project path is resolved against the
     repository root, never the bridge's working directory; every attach and every launch sends a transcribed
     session.info, a launch right after its project.open or project.create, whose result it reports as "session" with
-    the open scene: launcher.py),
+    the open scene; a launch waits for a running gate and a rendering editor holds the machine-wide GPU lock until it
+    exits, LockUnavailable naming the holder after the wait: launcher.py),
     editor_status, editor_shutdown, engine_methods {domain?}, engine_call {method, params} (the escape hatch to every
     method, such as project.refreshAssets, each bounded by its own timeoutSeconds: Bridge.method_timeout), result_read
     {path, pointer?, offset?, length?} (reads a file the editor wrote to an offload folder, the connected project's
@@ -240,7 +241,10 @@ def local_tool_schemas(templates: list[str] | None = None) -> dict[str, dict[str
 _LOCAL_TOOL_DESCRIPTIONS = {
     "editor_launch": "Starts a headless editor on a project, or attaches to the editor already serving it; creates the "
                      "project first with create: true; reports its session, the open scene included, and an available "
-                     "autosave, which recover: true adopts.",
+                     "autosave, which recover: true adopts. A start waits while a gate (CI.py) runs and, with renderer "
+                     "vulkan, while another GPU run holds the machine-wide GPU lock, which the bridge then holds until "
+                     "the editor exits or the bridge itself exits (an editor left running with unsaved changes holds "
+                     "none); after 30 min it fails with LockUnavailable, naming the holder.",
     "editor_attach": "Attaches to a running editor with automation, by project or process id; reports its session, the "
                      "open scene included.",
     "editor_status": "Reports the connected editor: process, project, open scene, versions and whether it crashed.",

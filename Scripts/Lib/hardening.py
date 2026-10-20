@@ -16,10 +16,20 @@ FUZZ_HARDENING_ITERATIONS, and the stage runs the sanitized Tests binary with --
 FUZZ_REPORT_PATTERN line per process (Tests/Source/Support/Fuzz.h, ReportFuzzRun) through the console sink, which writes
 to the process's standard error at every level; the stage reads those lines from each process's captured standard error,
 never from Tests.log, whose rotation could drop them. It fails when a target's shards do not cover [0, its iterations)
-exactly once, or when any process fails. Each shard runs 1/n of every target, so its cases' limit grows with that share
-below the reference run's 19 shards and stays at the reference's above it (fuzz_timeout_scale), and the stage refuses to
-start with fewer shards than its timeout needs (fuzz_minimum_processes, fuzz_capacity_problem), both sized from the
-measured reference run.
+exactly once, or when any process fails.
+
+The fuzz step is sized from per-target costs (Docs/Decisions/0028-backlog-program.md decision 16, T-FUZZMODEL), never by
+changing a target's iterations: read_fuzz_costs reads each target's measured seconds per iteration from the JUnit report
+of the last full, passing fuzz step on this machine, which every checkout of the repository shares
+(machine_fuzz_costs_path: <git common directory>/fuzz-costs/Fuzz-Release-Asan.xml, written only by a passing run of
+FUZZ_HARDENING_ITERATIONS, so a development or failed run in any checkout never replaces it), or, before the first such
+run, from M17's committed report (FUZZ_COMMITTED_COSTS). fuzz_target_seconds prices every target from them (a target not
+yet measured at the measured targets' average; without any measurement, the reference run scaled by the target count),
+and their sum, the step's work, sets the fewest shards whose expected time fits the step's budget
+(fuzz_minimum_processes, fuzz_budget_seconds, fuzz_capacity_problem), the step's timeout at the shard count that runs
+(fuzz_timeout_seconds) and each case's limit (fuzz_timeout_scale). Each shard runs 1/n of every target, but beyond the
+reference run's 19 shards (or the logical CPUs) more shards run no faster, so the timeout and each case's limit count at
+most that many (fuzz_effective_processes); the limit is raised when the dearest target needs more.
 
 Soak: every scene of every project soak_projects() names (Projects/FeatureTest, the golden scenes included, and each
 demo project once it exists) plays SOAK_FRAMES lockstep ticks (Hardening.py --soak-frames sets a longer soak) with
@@ -39,10 +49,11 @@ import os
 import re
 import shutil
 import statistics
+import xml.etree.ElementTree as ElementTree
 from collections.abc import Mapping
 from pathlib import Path
 
-from Lib import paths
+from Lib import paths, vendor_cache
 
 ASAN_WORKSPACE = paths.BIN_INT_ROOT / "Asan"
 ASAN_RUNTIME_FILES = ("clang_rt.asan_dynamic-x86_64.dll", "clang_rt.asan_dynamic-x86_64.pdb")
@@ -68,18 +79,37 @@ FUZZ_MAX_PROCESSES = 32
 # largest image its bytes allow) briefly raises one process to about 2.8 GB; those spikes last under a second and do not
 # coincide across shards, so they are not counted (the machine kept more than 5 GB free throughout).
 FUZZ_PEAK_PROCESS_BYTES = 1 << 30
-# The measured fuzz run every shard count is sized from (Docs/Decisions/0024-m15-contract.md "Budgets and timeouts"):
-# FUZZ_REFERENCE_PROCESSES shards of FUZZ_HARDENING_ITERATIONS iterations per target took FUZZ_REFERENCE_SECONDS,
-# with each case's limit scaled by FUZZ_REFERENCE_TIMEOUT_SCALE (the default 120 s, so 2,400 s, against the Bindings
-# case's 27,600 CPU-s / 19 = 1,453 s per shard). Each shard runs 1/n of every target, so its work, and the limit its
-# cases need, grow as the reference's times FUZZ_REFERENCE_PROCESSES / n below the reference's count; above it the limit
-# stays the reference's, since logical CPUs beyond the physical cores do not run a shard's share any faster.
+# The reference fuzz run (Docs/Decisions/0024-m15-contract.md "Budgets and timeouts"): FUZZ_REFERENCE_PROCESSES shards
+# of FUZZ_HARDENING_ITERATIONS iterations of each of M15's FUZZ_REFERENCE_TARGETS targets took FUZZ_REFERENCE_SECONDS in
+# a step whose timeout was FUZZ_REFERENCE_TIMEOUT_SECONDS, with each case's limit scaled by FUZZ_REFERENCE_TIMEOUT_SCALE
+# (FUZZ_CASE_LIMIT_SECONDS, so 2,400 s, against the Bindings case's 27,600 CPU-s / 19 = 1,453 s per shard). Without a
+# measured report the step's work is this run's, scaled by the target count. Each shard runs 1/n of every target, so the
+# limit its cases need grows as the reference's times FUZZ_REFERENCE_PROCESSES / n below the reference's count; above it
+# the limit stays the reference's, since logical CPUs beyond the physical cores do not run a shard's share any faster.
 FUZZ_REFERENCE_PROCESSES = 19
 FUZZ_REFERENCE_SECONDS = 52 * 60.0
+FUZZ_REFERENCE_TARGETS = 35
+FUZZ_REFERENCE_TIMEOUT_SECONDS = 5400.0
 FUZZ_REFERENCE_TIMEOUT_SCALE = 20
-# The share of the fuzz step's timeout the expected run may take; the rest absorbs the run-to-run variance (stream C's
-# run came within 8 minutes of the former 3,600 s timeout).
+# The Tests binary's default per-case limit (--test-timeout, Tests/Source/Support/TestOptions.h), which no fuzz case
+# replaces and --test-timeout-scale multiplies.
+FUZZ_CASE_LIMIT_SECONDS = 120.0
+# The share of the fuzz step's budget, and of its timeout, the expected run may take; the rest absorbs the run-to-run
+# variance (stream C's run came within 8 minutes of the former 3,600 s timeout; M17's gate ran 3,312 s at 18 shards,
+# 1.7 % above the 3,255 s its measured costs give).
 FUZZ_BUDGET_SHARE = 0.8
+# The shortest timeout the fuzz step gets: per-iteration costs leave out each shard's fixed costs (starting a sanitized
+# process, each case's setup), which dominate a development run of few iterations.
+FUZZ_MINIMUM_TIMEOUT_SECONDS = 600.0
+# Where the last full, passing fuzz step's report is kept for the next one, in every checkout of the repository
+# (machine_fuzz_costs_path), and the committed measurement read before the first such run (M17's gate,
+# Tests/Data/LICENSES.md).
+FUZZ_COSTS_DIRECTORY_NAME = "fuzz-costs"
+FUZZ_COSTS_FILE_NAME = "Fuzz-Release-Asan.xml"
+FUZZ_COMMITTED_COSTS = paths.REPOSITORY_ROOT / "Tests" / "Data" / "Hardening" / "FuzzM17.xml"
+# How the output of a passed target's test case in the fuzz step's JUnit report starts (fuzz_target_detail), which
+# read_fuzz_costs reads back.
+FUZZ_JUNIT_ITERATIONS_PATTERN = re.compile(r"^(?P<iterations>\d+) iterations;")
 # ReportFuzzRun's line (Tests/Source/Support/Fuzz.h). Fuzz case names contain no apostrophe.
 FUZZ_REPORT_PATTERN = re.compile(
     r"Fuzz '(?P<case>[^']+)': iterations (?P<begin>\d+)\.\.(?P<end>\d+) of (?P<total>\d+) "
@@ -300,36 +330,161 @@ def fuzz_process_count(logical_cpus: int, available_bytes: int, peak_bytes_per_p
     return max(1, min(logical_cpus, FUZZ_MAX_PROCESSES, available_bytes // peak_bytes_per_process))
 
 
-def fuzz_expected_seconds(processes: int, iterations: int = FUZZ_HARDENING_ITERATIONS) -> float:
-    """The expected wall time of a fuzz run in `processes` shards of `iterations` iterations per target, scaled from
-    the reference run (FUZZ_REFERENCE_SECONDS for FUZZ_REFERENCE_PROCESSES shards of FUZZ_HARDENING_ITERATIONS)."""
-    return FUZZ_REFERENCE_SECONDS * FUZZ_REFERENCE_PROCESSES / processes * iterations / FUZZ_HARDENING_ITERATIONS
+def fuzz_target_case_name(target: FuzzTarget) -> str:
+    """The name of `target`'s test case in the fuzz step's JUnit report: "<Reader> (<Case>)"."""
+    return f"{target.reader} ({target.case})"
 
 
-def fuzz_timeout_scale(processes: int, iterations: int = FUZZ_HARDENING_ITERATIONS) -> int:
-    """The --test-timeout-scale of a fuzz shard: FUZZ_REFERENCE_TIMEOUT_SCALE grown with the shard's share of the work
-    below the reference run's shard count, and never below the reference's scale above it,
-    ceil(FUZZ_REFERENCE_TIMEOUT_SCALE * FUZZ_REFERENCE_PROCESSES / min(processes, FUZZ_REFERENCE_PROCESSES) * iterations
-    / 1,000,000), at least 1: max(20, ceil(20 * 19 / processes)) at 1,000,000 iterations. A shard's share shrinks with
-    more shards, but its speed does not follow beyond the reference's count: more shards than physical cores share them
-    through SMT, so each case keeps at least the reference run's limit."""
-    share = FUZZ_REFERENCE_PROCESSES * iterations
+def fuzz_target_detail(iterations: int, seconds_per_iteration: float) -> str:
+    """The output of a passed target's test case in the fuzz step's JUnit report, whose time is the target's seconds
+    summed over the shards: "<iterations> iterations; <microseconds> us per iteration" (FUZZ_JUNIT_ITERATIONS_PATTERN
+    reads the count back)."""
+    return f"{iterations} iterations; {seconds_per_iteration * 1e6:.1f} us per iteration"
+
+
+def machine_fuzz_costs_path() -> Path:
+    """Where the last full, passing fuzz step's JUnit report is kept: <git common directory>/fuzz-costs/
+    Fuzz-Release-Asan.xml, beside the vendor cache and the machine-wide locks, so every checkout of the repository sizes
+    its fuzz step from the same measurement whichever checkout ran the last hardened gate; bin-int/fuzz-costs/ of this
+    checkout when git cannot name the common directory."""
+    try:
+        directory = vendor_cache.git_common_directory() / FUZZ_COSTS_DIRECTORY_NAME
+    except vendor_cache.VendorCacheError:
+        directory = paths.BIN_INT_ROOT / FUZZ_COSTS_DIRECTORY_NAME
+    return directory / FUZZ_COSTS_FILE_NAME
+
+
+def keep_fuzz_costs(report: Path, destination: Path) -> None:
+    """Copies the fuzz step's report `report` to `destination` (machine_fuzz_costs_path) through a temporary file and a
+    rename, so a reader sees the previous measurement or this one, never a partial file. Only a full, passing run calls
+    it. Raises OSError."""
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary = destination.with_name(f"{destination.name}.{os.getpid()}.tmp")
+    try:
+        shutil.copyfile(report, temporary)
+        os.replace(temporary, destination)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def read_fuzz_costs(path: Path) -> dict[str, float]:
+    """The per-target costs the fuzz step's JUnit report `path` (machine_fuzz_costs_path, or FUZZ_COMMITTED_COSTS)
+    measured:
+    {test case name: seconds per iteration, summed over the shards}, the name being fuzz_target_case_name's. A target's
+    cost is its test case's time over the FUZZ_HARDENING_ITERATIONS its output names (fuzz_target_detail); a test case
+    of a development run of fewer iterations is not read, since it counts each case's fixed setup many times over, nor
+    is one with a time of 0. Empty when the report does not exist. Raises ValueError naming the file when it cannot be
+    read or parsed, or when it records a failed or timed-out test case: a shard that crashed or was stopped wrote none
+    of its cases' times, so even a passed target's time can fall short of its iterations."""
+    where = paths.display_path(path)
+    try:
+        root = ElementTree.parse(path).getroot()
+    except FileNotFoundError:
+        return {}
+    except (OSError, ElementTree.ParseError) as error:
+        raise ValueError(f"{where}: cannot be read: {error}") from None
+    costs: dict[str, float] = {}
+    for case in root.iter("testcase"):
+        name = case.get("name", "")
+        if case.find("failure") is not None or case.find("error") is not None:
+            raise ValueError(f"{where}: records a failed run ({name} did not pass), whose times can fall short")
+        output = case.find("system-out")
+        match = FUZZ_JUNIT_ITERATIONS_PATTERN.match((output.text or "") if output is not None else "")
+        if match is None or int(match.group("iterations")) != FUZZ_HARDENING_ITERATIONS:
+            continue
+        try:
+            seconds = float(case.get("time", ""))
+        except ValueError:
+            raise ValueError(f"{where}: test case {name!r} has no numeric time") from None
+        if math.isfinite(seconds) and seconds > 0.0:
+            costs[name] = seconds / FUZZ_HARDENING_ITERATIONS
+    return costs
+
+
+def fuzz_target_seconds(targets: list[FuzzTarget], costs: Mapping[str, float]) -> dict[str, float]:
+    """Each target's expected seconds, summed over the shards, at its iterations, by reader: its cost per iteration
+    from `costs` (read_fuzz_costs, looked up by fuzz_target_case_name) times its iterations. A target `costs` lacks (one
+    added or renamed since the measurement, or one measured at a time of 0) costs the average of the measured targets'
+    costs per iteration. When `costs` measures none of `targets`, every target costs the reference run's average per
+    iteration (FUZZ_REFERENCE_SECONDS x FUZZ_REFERENCE_PROCESSES over FUZZ_REFERENCE_TARGETS x
+    FUZZ_HARDENING_ITERATIONS): the reference run scaled by the target count."""
+    measured = {target.reader: costs[fuzz_target_case_name(target)] for target in targets
+                if fuzz_target_case_name(target) in costs}
+    if measured:
+        fallback = statistics.fmean(measured.values())
+    else:
+        fallback = (FUZZ_REFERENCE_SECONDS * FUZZ_REFERENCE_PROCESSES
+                    / (FUZZ_REFERENCE_TARGETS * FUZZ_HARDENING_ITERATIONS))
+    return {target.reader: measured.get(target.reader, fallback) * target.iterations for target in targets}
+
+
+def fuzz_budget_seconds(target_count: int) -> float:
+    """The longest the fuzz step may run for `target_count` targets: FUZZ_REFERENCE_TIMEOUT_SECONDS for the reference's
+    FUZZ_REFERENCE_TARGETS, and as much again per target in proportion (about 154 s each), since every target keeps its
+    1,000,000 iterations (ADR 0024 decision 14). The step's timeout never exceeds it (fuzz_timeout_seconds), so CI.py's
+    bound on the whole hardening run must exceed the other steps' timeouts and graces plus this budget (Hardening.py
+    longest_run_seconds; Tests/Automation/test_hardening.py checks it for the committed targets and that it holds up to
+    49 targets)."""
+    return FUZZ_REFERENCE_TIMEOUT_SECONDS * target_count / FUZZ_REFERENCE_TARGETS
+
+
+def fuzz_expected_seconds(work_seconds: float, processes: int) -> float:
+    """The expected wall time of a fuzz run whose targets take `work_seconds` summed over the shards (the sum of
+    fuzz_target_seconds) in `processes` shards: each shard runs 1/processes of every target, so the work over the shard
+    count, as the reference run and M17's gate measured it within 2 %."""
+    return work_seconds / processes
+
+
+def fuzz_effective_processes(processes: int, logical_cpus: int | None = None) -> int:
+    """How many shards' speed `processes` shards deliver, as far as the model trusts it: at most
+    FUZZ_REFERENCE_PROCESSES, since beyond the reference run's count more shards ran no faster (they share the
+    machine's cores), and at most `logical_cpus` when given; at least 1."""
+    return max(1, min(processes, FUZZ_REFERENCE_PROCESSES, logical_cpus if logical_cpus is not None else processes))
+
+
+def fuzz_minimum_processes(work_seconds: float, budget_seconds: float) -> int:
+    """The fewest shards whose expected wall time (fuzz_expected_seconds of `work_seconds`) fits in FUZZ_BUDGET_SHARE of
+    the step's budget `budget_seconds` (fuzz_budget_seconds), at least 1: 14 for the reference run and for M17's
+    measured costs alike, so a machine needs as many logical CPUs and GiB of available memory
+    (fuzz_capacity_problem)."""
+    return max(1, math.ceil(work_seconds / (budget_seconds * FUZZ_BUDGET_SHARE)))
+
+
+def fuzz_timeout_seconds(work_seconds: float, processes: int, budget_seconds: float,
+                         logical_cpus: int | None = None) -> float:
+    """The fuzz step's timeout in `processes` shards on a machine of `logical_cpus`: the expected wall time at the
+    speed the model trusts (fuzz_expected_seconds of `work_seconds` in fuzz_effective_processes shards, so a count
+    beyond the reference's 19 or the logical CPUs shortens nothing) over FUZZ_BUDGET_SHARE, the margin the budget
+    leaves the minimum shard count; at most the step's budget `budget_seconds` (fuzz_budget_seconds), which CI.py's
+    bound on the whole hardening run covers, and at least FUZZ_MINIMUM_TIMEOUT_SECONDS."""
+    expected = fuzz_expected_seconds(work_seconds, fuzz_effective_processes(processes, logical_cpus))
+    return max(FUZZ_MINIMUM_TIMEOUT_SECONDS, min(budget_seconds, expected / FUZZ_BUDGET_SHARE))
+
+
+def fuzz_timeout_scale(processes: int, iterations: int = FUZZ_HARDENING_ITERATIONS,
+                       dearest_seconds: float = 0.0) -> int:
+    """The --test-timeout-scale of a fuzz shard, at least 1:
+      - the reference run's limit, FUZZ_REFERENCE_TIMEOUT_SCALE grown with the shard's share of the work below the
+        reference run's shard count and never below the reference's scale above it, ceil(FUZZ_REFERENCE_TIMEOUT_SCALE *
+        FUZZ_REFERENCE_PROCESSES / min(processes, FUZZ_REFERENCE_PROCESSES) * iterations / 1,000,000):
+        max(20, ceil(20 * 19 / processes)) at 1,000,000 iterations. A shard's share shrinks with more shards, but its
+        speed does not follow beyond the reference's count: more shards than physical cores share them through SMT, so
+        each case keeps at least the reference run's limit;
+      - raised when the dearest target, `dearest_seconds` summed over the shards at `iterations` (the largest
+        fuzz_target_seconds), needs more: its share of a shard, counted as above, must fit in FUZZ_BUDGET_SHARE of
+        the scaled FUZZ_CASE_LIMIT_SECONDS, the margin the step's timeout gives the whole run."""
     shards = min(processes, FUZZ_REFERENCE_PROCESSES)
-    return max(1, -(-FUZZ_REFERENCE_TIMEOUT_SCALE * share // (shards * FUZZ_HARDENING_ITERATIONS)))
-
-
-def fuzz_minimum_processes(budget_seconds: float, iterations: int = FUZZ_HARDENING_ITERATIONS) -> int:
-    """The fewest shards whose expected wall time (fuzz_expected_seconds) fits in FUZZ_BUDGET_SHARE of the fuzz step's
-    timeout `budget_seconds`, at least 1."""
-    work = FUZZ_REFERENCE_SECONDS * FUZZ_REFERENCE_PROCESSES * iterations / FUZZ_HARDENING_ITERATIONS
-    return max(1, math.ceil(work / (budget_seconds * FUZZ_BUDGET_SHARE)))
+    reference = -(-FUZZ_REFERENCE_TIMEOUT_SCALE * FUZZ_REFERENCE_PROCESSES * iterations
+                  // (shards * FUZZ_HARDENING_ITERATIONS))
+    dearest = math.ceil(dearest_seconds / (shards * FUZZ_CASE_LIMIT_SECONDS * FUZZ_BUDGET_SHARE))
+    return max(1, reference, dearest)
 
 
 def fuzz_capacity_problem(processes: int, minimum: int, logical_cpus: int, available_bytes: int,
                           peak_bytes_per_process: int, budget_seconds: float) -> str | None:
     """None when `processes` shards reach `minimum` (fuzz_minimum_processes); otherwise why the fuzz cannot finish in
     time: what falls short of `minimum` shards, the available memory (minimum x peak_bytes_per_process), the logical
-    CPUs, or else the explicitly requested count."""
+    CPUs, or else the explicitly requested count. `budget_seconds` is the step's budget (fuzz_budget_seconds)."""
     if processes >= minimum:
         return None
     needs: list[str] = []
@@ -341,7 +496,7 @@ def fuzz_capacity_problem(processes: int, minimum: int, logical_cpus: int, avail
     if not needs:
         needs.append(f"--fuzz-processes of at least {minimum}")
     return (f"the fuzz needs at least {minimum} processes to finish within {FUZZ_BUDGET_SHARE:.0%} of its "
-            f"{budget_seconds:.0f} s timeout, and it would run {processes}: it needs {' and '.join(needs)}")
+            f"{budget_seconds:.0f} s budget, and it would run {processes}: it needs {' and '.join(needs)}")
 
 
 def available_memory_bytes() -> int:

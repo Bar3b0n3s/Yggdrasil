@@ -5,6 +5,7 @@
 #include "EditorCore/Automation/Private/MethodSupport.h"
 #include "EditorCore/Commands/SceneEdit.h"
 #include "EditorCore/EditorContext.h"
+#include "EditorCore/Private/PrefabInstances.h"
 #include "EditorCore/Scripting/EditorScriptService.h"
 #include "Engine/Automation/Protocol/MethodRegistry.h"
 #include "Engine/Core/Json/JsonReader.h"
@@ -19,6 +20,7 @@
 #include <nlohmann/json.hpp>
 
 #include <map>
+#include <optional>
 #include <set>
 
 namespace Engine {
@@ -86,9 +88,17 @@ namespace Engine {
 			return {};
 		}
 
+		// The roots of an entity list param: each listed entity that is not inside another listed entity's subtree, once, in
+		// the order of the list, with the index of the reference that names it there.
+		struct EntityRoots
+		{
+			std::vector<Entity> Entities{};
+			std::vector<size_t> Indices{}; // parallel to Entities: errors about Entities[i] are located at "/entities/<Indices[i]>"
+		};
+
 		// Resolves an entity list param, dropping repeats and entities inside another listed entity's subtree (a subtree is
 		// handled with its root). Errors: InvalidArgument for an empty list; ResolveEntity's errors at "/entities/<i>".
-		static Result<std::vector<Entity>> ResolveEntityRoots(const EditorMethodContext& context, Scene& scene, const std::vector<std::string>& references)
+		static Result<EntityRoots> ResolveEntityRoots(const EditorMethodContext& context, Scene& scene, const std::vector<std::string>& references)
 		{
 			if (references.empty())
 				return std::unexpected(MakeParamError(ErrorCode::InvalidArgument, "/entities", "the entity list must not be empty"));
@@ -102,15 +112,19 @@ namespace Engine {
 			std::set<UUID> listed;
 			for (const Entity entity : entities)
 				listed.insert(entity.GetUUID());
-			std::vector<Entity> roots;
+			EntityRoots roots;
 			std::set<UUID> taken;
-			for (const Entity entity : entities)
+			for (size_t index = 0; index < entities.size(); ++index)
 			{
+				const Entity entity = entities[index];
 				bool insideAnother = false;
 				for (Entity ancestor = entity.GetParent(); ancestor.IsValid() && !insideAnother; ancestor = ancestor.GetParent())
 					insideAnother = listed.contains(ancestor.GetUUID());
 				if (!insideAnother && taken.insert(entity.GetUUID()).second)
-					roots.push_back(entity);
+				{
+					roots.Entities.push_back(entity);
+					roots.Indices.push_back(index);
+				}
 			}
 			return roots;
 		}
@@ -372,18 +386,43 @@ namespace Engine {
 		Result<EntityDestroyResult> EntityDestroy(EditorMethodContext& context, const EntityDestroyParams& params)
 		{
 			ENGINE_TRY_ASSIGN(Scene * scene, context.ResolveTargetScene(params.Target, context.HasParam("target"), true));
-			ENGINE_TRY_ASSIGN(const std::vector<Entity> roots, Utils::ResolveEntityRoots(context, *scene, params.Entities));
+			ENGINE_TRY_ASSIGN(const Utils::EntityRoots roots, Utils::ResolveEntityRoots(context, *scene, params.Entities));
 
-			EntityDestroyResult result;
-			for (const Entity root : roots)
+			std::set<UUID> destroyed;
+			for (const Entity root : roots.Entities)
 			{
 				for (const Entity entity : Utils::CollectSubtree(root))
-					result.Destroyed.push_back(entity.GetUUID().ToString());
+					destroyed.insert(entity.GetUUID());
 			}
+			// A prefab member that is not its instance's root cannot be deleted from the edit scene (the instance's next update
+			// would rebuild it); the play scene's changes are transient and no update rebuilds them, as for scripts' Scene.Destroy.
+			if (params.Target == SceneTarget::Edit)
+			{
+				for (size_t index = 0; index < roots.Entities.size(); ++index)
+				{
+					const std::optional<Utils::KeptPrefabMember> kept = Utils::FindKeptPrefabMember(roots.Entities[index], destroyed);
+					if (!kept)
+						continue;
+					const std::string member = scene->GetEntityPath(kept->Member);
+					const std::string instance = scene->GetEntityPath(kept->InstanceRoot);
+					// The ways out as calls to copy, their params built as JSON so that any entity name is escaped.
+					const Json deactivate{ { "entity", member }, { "active", false } };
+					const Json unpack{ { "instance", instance } };
+					return std::unexpected(Utils::MakeParamError(ErrorCode::InvalidState, std::format("/entities/{}", roots.Indices[index]),
+						std::format("'{}' is a member of the prefab instance '{}' and cannot be deleted: the instance's next update would rebuild it",
+							member, instance),
+						std::format("deactivate it instead (entity.update {}), or unpack the instance first (prefab.unpack {})",
+							deactivate.dump(-1, ' ', false, Json::error_handler_t::replace), unpack.dump(-1, ' ', false, Json::error_handler_t::replace))));
+				}
+			}
+
+			EntityDestroyResult result;
+			for (const UUID id : destroyed)
+				result.Destroyed.push_back(id.ToString());
 			std::sort(result.Destroyed.begin(), result.Destroyed.end());
 
-			SceneEdit edit(context.GetEditor(), Utils::MakeListLabel("Destroy", roots));
-			for (const Entity root : roots)
+			SceneEdit edit(context.GetEditor(), Utils::MakeListLabel("Destroy", roots.Entities));
+			for (const Entity root : roots.Entities)
 				scene->DestroyEntity(root);
 			ENGINE_TRY_ASSIGN(const uint64_t undoIndex, edit.Commit());
 			result.UndoIndex = ToAutomationCounter(undoIndex);
@@ -393,13 +432,13 @@ namespace Engine {
 		Result<EntityDuplicateResult> EntityDuplicate(EditorMethodContext& context, const EntityDuplicateParams& params)
 		{
 			ENGINE_TRY_ASSIGN(Scene * scene, context.ResolveTargetScene(params.Target, context.HasParam("target"), true));
-			ENGINE_TRY_ASSIGN(const std::vector<Entity> roots, Utils::ResolveEntityRoots(context, *scene, params.Entities));
-			ENGINE_TRY(Utils::CheckPlayEntityCapacity(context, *scene, Utils::CountSubtreeEntities(roots)));
+			ENGINE_TRY_ASSIGN(const Utils::EntityRoots roots, Utils::ResolveEntityRoots(context, *scene, params.Entities));
+			ENGINE_TRY(Utils::CheckPlayEntityCapacity(context, *scene, Utils::CountSubtreeEntities(roots.Entities)));
 			ENGINE_TRY_ASSIGN(const auto schemas, context.GetEditor().GetScriptSchemaSnapshot());
 
-			SceneEdit edit(context.GetEditor(), Utils::MakeListLabel("Duplicate", roots));
+			SceneEdit edit(context.GetEditor(), Utils::MakeListLabel("Duplicate", roots.Entities));
 			std::vector<UUID> copies;
-			for (const Entity root : roots)
+			for (const Entity root : roots.Entities)
 			{
 				ENGINE_TRY_ASSIGN(const Entity copy, Utils::DuplicateSubtree(*scene, root, schemas.get()));
 				copies.push_back(copy.GetUUID());
@@ -549,7 +588,8 @@ namespace Engine {
 		methods.Add(
 			{
 				.Name = "entity.destroy",
-				.Description = "Destroys entities with their subtrees, as one undoable command.",
+				.Description = "Destroys entities with their subtrees, as one undoable command. In the edit scene a member of a prefab instance "
+							   "that is not its root is refused: deactivate it, or unpack the instance first.",
 				.RequiredParams = { "entities" },
 				.ExposeAsTool = true,
 				.Mutates = true,

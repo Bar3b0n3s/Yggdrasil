@@ -2,9 +2,12 @@
 
 #include "EditorCore/Automation/EntityMethods.h"
 
+#include "EditorCore/EditorContext.h"
+#include "EditorCore/Play/EditorPlayController.h"
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/Scene.h"
+#include "Engine/Session/PlaySession.h"
 #include "Support/AutomationTestClient.h"
 
 #include <utility>
@@ -231,6 +234,79 @@ return Script.Define("References", References)
 			CHECK(setup.GetEditor().GetScene().GetEntityCount() == 2);
 			REQUIRE(setup.Call("edit.undo", Json::object()).has_value());
 			CHECK(setup.GetEditor().GetScene().GetEntityCount() == 5);
+		}
+
+		// E-PFB-REFUSE (ADR 0028 decision 16): a deleted prefab member came back with its instance's next update, since an
+		// instance is rebuilt as prefab + overrides (§5.5) and no override records a deletion. Until M20's RemoveEntity, the
+		// edit scene refuses the deletion with the ways out: deactivate the member, or unpack the instance.
+		TEST_CASE("EntityMethods: entity.destroy refuses a prefab member that is not its instance root in the edit scene")
+		{
+			Test::AutomationFixture setup("EntityDestroyPrefabMember");
+			REQUIRE(setup.Call("entity.create", Json{ { "name", "Lamp" } }).has_value());
+			REQUIRE(setup.Call("entity.create", Json{ { "name", "Bulb" }, { "parent", "/Lamp" } }).has_value());
+			REQUIRE(setup.Call("entity.create", Json{ { "name", "Filament" }, { "parent", "/Lamp/Bulb" } }).has_value());
+			REQUIRE(setup.Call("prefab.create", Json{ { "entity", "/Lamp" }, { "path", "Assets/Prefabs/Lamp.prefab" }, { "replaceWithInstance", true } }).has_value());
+			REQUIRE(setup.Call("entity.create", Json{ { "name", "Note" }, { "parent", "/Lamp" } }).has_value()); // a user child
+			REQUIRE(setup.Call("entity.create", Json{ { "name", "Other" } }).has_value());
+			EditorContext& editor = setup.GetEditor();
+			REQUIRE(editor.GetScene().GetEntityCount() == 5);
+			const size_t steps = editor.GetHistory().GetUndoCount();
+
+			// A member is refused with the hint naming both ways out, located at the reference that names it: listed alone,
+			// after another entity, deeper in the instance, in a dry run or as a batch op (whose error the batch locates). Nothing
+			// is destroyed, the other entity included, and no undo step is recorded.
+			const auto refuse = [&setup, &editor, steps](std::string_view method, const Json& params, std::string_view pointer)
+			{
+				INFO(params.dump());
+				const Result<Json> refused = setup.Call(method, params);
+				REQUIRE_FALSE(refused.has_value());
+				INFO(refused.error().ToString());
+				CHECK(refused.error().GetCode() == ErrorCode::InvalidState);
+				if (!pointer.empty())
+				{
+					REQUIRE_FALSE(refused.error().GetIssues().empty());
+					CHECK(refused.error().GetIssues()[0].JsonPointer == pointer);
+				}
+				CHECK(refused.error().ToString().contains("prefab.unpack"));
+				CHECK(refused.error().ToString().contains("entity.update"));
+				CHECK(editor.GetScene().GetEntityCount() == 5);
+				CHECK(editor.GetScene().FindEntityByPath("/Lamp/Bulb/Filament").IsValid());
+				CHECK(editor.GetScene().FindEntityByPath("/Other").IsValid());
+				CHECK(editor.GetHistory().GetUndoCount() == steps);
+			};
+			refuse("entity.destroy", Json{ { "entities", Json::array({ "/Lamp/Bulb" }) } }, "/entities/0");
+			refuse("entity.destroy", Json{ { "entities", Json::array({ "/Other", "/Lamp/Bulb/Filament" }) } }, "/entities/1");
+			refuse("entity.destroy", Json{ { "entities", Json::array({ "/Lamp/Bulb" }) }, { "dryRun", true } }, "/entities/0");
+			const Json destroyOther{ { "method", "entity.destroy" }, { "params", Json{ { "entities", Json::array({ "/Other" }) } } } };
+			const Json destroyBulb{ { "method", "entity.destroy" }, { "params", Json{ { "entities", Json::array({ "/Lamp/Bulb" }) } } } };
+			refuse("edit.batch", Json{ { "ops", Json::array({ destroyOther, destroyBulb }) } }, "");
+
+			// A user child, and the instance root with its members (listed with it or not), are destroyed as before.
+			Result<Json> userChild = setup.Call("entity.destroy", Json{ { "entities", Json::array({ "/Lamp/Note" }) } });
+			REQUIRE_MESSAGE(userChild.has_value(), userChild.error().ToString());
+			CHECK((*userChild)["destroyed"].size() == 1);
+			REQUIRE(setup.Call("edit.undo", Json::object()).has_value());
+			Result<Json> instance = setup.Call("entity.destroy", Json{ { "entities", Json::array({ "/Lamp/Bulb", "/Lamp" }) } });
+			REQUIRE_MESSAGE(instance.has_value(), instance.error().ToString());
+			CHECK((*instance)["destroyed"].size() == 4);
+			CHECK(editor.GetScene().GetEntityCount() == 1);
+			REQUIRE(setup.Call("edit.undo", Json::object()).has_value());
+			REQUIRE(editor.GetScene().GetEntityCount() == 5);
+
+			// The play scene is transient: a member is destroyed there as scripts' Scene.Destroy does, and the edit scene keeps it.
+			REQUIRE(setup.Call("play.start", Json{ { "lockstep", true } }).has_value());
+			Result<Json> played = setup.Call("entity.destroy", Json{ { "entities", Json::array({ "/Lamp/Bulb" }) }, { "target", "play" } });
+			REQUIRE_MESSAGE(played.has_value(), played.error().ToString());
+			CHECK((*played)["destroyed"].size() == 2);
+			CHECK_FALSE(editor.GetPlay().GetSession()->GetScene().FindEntityByPath("/Lamp/Bulb").IsValid());
+			CHECK(editor.GetScene().FindEntityByPath("/Lamp/Bulb").IsValid());
+			REQUIRE(setup.Call("play.stop", Json::object()).has_value());
+
+			// Unpacking the instance, the hint's way out, makes its entities ordinary ones.
+			REQUIRE(setup.Call("prefab.unpack", Json{ { "instance", "/Lamp" } }).has_value());
+			Result<Json> unpacked = setup.Call("entity.destroy", Json{ { "entities", Json::array({ "/Lamp/Bulb" }) } });
+			REQUIRE_MESSAGE(unpacked.has_value(), unpacked.error().ToString());
+			CHECK((*unpacked)["destroyed"].size() == 2);
 		}
 
 		TEST_CASE("EntityMethods: dry runs report the would-be result and change nothing")

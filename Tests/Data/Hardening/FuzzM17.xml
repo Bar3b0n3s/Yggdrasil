@@ -1,0 +1,164 @@
+<?xml version='1.0' encoding='utf-8'?>
+<testsuites>
+	<testsuite name="Fuzz.Release.Asan" tests="53" failures="0" errors="0" skipped="0" time="58583.848" timestamp="2026-10-19T15:55:16Z">
+		<testcase classname="Fuzz.Release.Asan" name="AssetMetadata (AssetMetadata: 1,000 seeded mutations of a meta file never crash)" time="245.543">
+			<system-out>1000000 iterations; 245.5 us per iteration</system-out>
+		</testcase>
+		<testcase classname="Fuzz.Release.Asan" name="AudioClipData (AudioClipData: 10,000 seeded mutations of a payload never crash)" time="13.412">
+			<system-out>1000000 iterations; 13.4 us per iteration</system-out>
+		</testcase>
+		<testcase classname="Fuzz.Release.Asan" name="AudioDecoder (AudioDecoder: 200 seeded mutations of WAV, FLAC, MP3 and Ogg Vorbis files never crash)" time="2160.282">
+			<system-out>1000000 iterations; 2160.3 us per iteration</system-out>
+		</testcase>
+		<testcase classname="Fuzz.Release.Asan" name="AutosaveRecovery (Autosave: 1,000 seeded mutations of the documents of an autosave never crash)" time="824.650">
+			<system-out>1000000 iterations; 824.7 us per iteration</system-out>
+		</testcase>
+		<testcase classname="Fuzz.Release.Asan" name="BinaryReader (BinaryReader: 10,000 seeded mutations never crash and always return Result)" time="11.337">
+			<system-out>1000000 iterations; 11.3 us per iteration</system-out>
+		</testcase>
+		<testcase classname="Fuzz.Release.Asan" name="Bindings (Bindings: 10,000 seeded play-session calls reject invalid inputs before physics)" time="26708.090">
+			<system-out>1000000 iterations; 26708.1 us per iteration</system-out>
+		</testcase>
+		<testcase classname="Fuzz.Release.Asan" name="BuiltinAssetCatalog (BuiltinAssets: 1,000 seeded mutations of the catalogue never crash)" time="3167.240">
+			<system-out>1000000 iterations; 3167.2 us per iteration</system-out>
+		</testcase>
+		<testcase classname="Fuzz.Release.Asan" name="CookedFormat (CookedFormat: 10,000 seeded mutations never crash and always return Result)" time="12.068">
+			<system-out>1000000 iterations; 12.1 us per iteration</system-out>
+		</testcase>
+		<testcase classname="Fuzz.Release.Asan" name="DecodePng (Image: 2,000 seeded mutations of a PNG decode to a valid image or are Parse errors)" time="548.321">
+			<system-out>1000000 iterations; 548.3 us per iteration</system-out>
+		</testcase>
+		<testcase classname="Fuzz.Release.Asan" name="EditorPreferences (EditorPreferences: 1,000 seeded mutations of Editor.json never crash)" time="334.665">
+			<system-out>1000000 iterations; 334.7 us per iteration</system-out>
+		</testcase>
+		<testcase classname="Fuzz.Release.Asan" name="EnvironmentData (EnvironmentData: 1,000 seeded mutations of a payload never crash)" time="560.194">
+			<system-out>1000000 iterations; 560.2 us per iteration</system-out>
+		</testcase>
+		<testcase classname="Fuzz.Release.Asan" name="EnvironmentImporter (EnvironmentImporter: 200 seeded mutations of a Radiance .hdr never crash)" time="103.485">
+			<system-out>1000000 iterations; 103.5 us per iteration</system-out>
+		</testcase>
+		<testcase classname="Fuzz.Release.Asan" name="FontData (FontData: 10,000 seeded mutations of a payload never crash)" time="12.858">
+			<system-out>1000000 iterations; 12.9 us per iteration</system-out>
+		</testcase>
+		<testcase classname="Fuzz.Release.Asan" name="FontImporter (FontImporter: 200 seeded mutations of TrueType and OpenType fonts never crash)" time="4194.051">
+			<system-out>1000000 iterations; 4194.1 us per iteration</system-out>
+		</testcase>
+		<testcase classname="Fuzz.Release.Asan" name="Framing (Framing: random byte streams never crash the decoder)" time="32.245">
+			<system-out>1000000 iterations; 32.2 us per iteration</system-out>
+		</testcase>
+		<testcase classname="Fuzz.Release.Asan" name="GameManifest (GameManifest: 1,000 seeded mutations of a manifest never crash)" time="717.723">
+			<system-out>1000000 iterations; 717.7 us per iteration</system-out>
+		</testcase>
+		<testcase classname="Fuzz.Release.Asan" name="GltfImporter (GltfImporter: 200 seeded mutations of glTF and GLB files never crash)" time="269.580">
+			<system-out>1000000 iterations; 269.6 us per iteration</system-out>
+		</testcase>
+		<testcase classname="Fuzz.Release.Asan" name="JsonReader (JsonReader: 10,000 seeded mutations never crash and always return Result)" time="676.934">
+			<system-out>1000000 iterations; 676.9 us per iteration</system-out>
+		</testcase>
+		<testcase classname="Fuzz.Release.Asan" name="JsonRpc (JsonRpc: 1,000 seeded mutations of a request and of hello params never crash)" time="179.278">
+			<system-out>1000000 iterations; 179.3 us per iteration</system-out>
+		</testcase>
+		<testcase classname="Fuzz.Release.Asan" name="MaterialData (MaterialData: 1,000 seeded mutations of a material file and of its cooked form never crash)" time="480.228">
+			<system-out>1000000 iterations; 480.2 us per iteration</system-out>
+		</testcase>
+		<testcase classname="Fuzz.Release.Asan" name="MeshData (MeshData: 10,000 seeded mutations of a payload never crash)" time="24.856">
+			<system-out>1000000 iterations; 24.9 us per iteration</system-out>
+		</testcase>
+		<testcase classname="Fuzz.Release.Asan" name="PakReader (PakReader: 10,000 seeded mutations never crash and always return Result)" time="104.411">
+			<system-out>1000000 iterations; 104.4 us per iteration</system-out>
+		</testcase>
+		<testcase classname="Fuzz.Release.Asan" name="PakToc (PakToc: 1,000 seeded mutations of a re-sealed TOC never crash)" time="764.208">
+			<system-out>1000000 iterations; 764.2 us per iteration</system-out>
+		</testcase>
+		<testcase classname="Fuzz.Release.Asan" name="PlayInputEventCodec (PlayInputEventCodec: 1,000 seeded mutations of an input event never crash)" time="159.502">
+			<system-out>1000000 iterations; 159.5 us per iteration</system-out>
+		</testcase>
+		<testcase classname="Fuzz.Release.Asan" name="Prefab (Prefab: 1,000 seeded mutations of a prefab file and of its cooked form never crash)" time="1048.175">
+			<system-out>1000000 iterations; 1048.2 us per iteration</system-out>
+		</testcase>
+		<testcase classname="Fuzz.Release.Asan" name="ProjectLock (ProjectLock: 1,000 seeded mutations of a lock file read exactly the valid process IDs)" time="10.443">
+			<system-out>1000000 iterations; 10.4 us per iteration</system-out>
+		</testcase>
+		<testcase classname="Fuzz.Release.Asan" name="ProjectSerializer (ProjectSerializer: 1,000 seeded mutations of a project file never crash)" time="1877.079">
+			<system-out>1000000 iterations; 1877.1 us per iteration</system-out>
+		</testcase>
+		<testcase classname="Fuzz.Release.Asan" name="ReplayData (ReplayData: seeded source and binary mutations never assert or crash)" time="1818.452">
+			<system-out>1000000 iterations; 1818.5 us per iteration</system-out>
+		</testcase>
+		<testcase classname="Fuzz.Release.Asan" name="SceneSerializer (SceneSerializer: 10,000 seeded mutations of a scene file never crash)" time="3042.356">
+			<system-out>1000000 iterations; 3042.4 us per iteration</system-out>
+		</testcase>
+		<testcase classname="Fuzz.Release.Asan" name="ScriptCompiler (ScriptCompiler: 200 seeded mutations of Luau source compile or fail located, never crash)" time="672.044">
+			<system-out>1000000 iterations; 672.0 us per iteration</system-out>
+		</testcase>
+		<testcase classname="Fuzz.Release.Asan" name="ScriptData (ScriptData: 10,000 seeded mutations of a cooked script never crash)" time="277.299">
+			<system-out>1000000 iterations; 277.3 us per iteration</system-out>
+		</testcase>
+		<testcase classname="Fuzz.Release.Asan" name="ShaderReflection (ShaderReflection: 2,000 seeded mutations of a compiled document are errors, never crashes)" time="6181.607">
+			<system-out>1000000 iterations; 6181.6 us per iteration</system-out>
+		</testcase>
+		<testcase classname="Fuzz.Release.Asan" name="SoundEffect (SoundEffectImporter: 1,000 seeded mutations of a .sfx document never crash)" time="623.225">
+			<system-out>1000000 iterations; 623.2 us per iteration</system-out>
+		</testcase>
+		<testcase classname="Fuzz.Release.Asan" name="TextureData (TextureData: 10,000 seeded mutations of a payload never crash)" time="13.180">
+			<system-out>1000000 iterations; 13.2 us per iteration</system-out>
+		</testcase>
+		<testcase classname="Fuzz.Release.Asan" name="TextureImporter (TextureImporter: 200 seeded mutations of PNG, JPEG, TGA and BMP files never crash)" time="714.829">
+			<system-out>1000000 iterations; 714.8 us per iteration</system-out>
+		</testcase>
+		<testcase classname="Fuzz.Release.Asan" name="shard 0/18" time="0.000">
+			<system-out>peak private memory 1950 MB</system-out>
+		</testcase>
+		<testcase classname="Fuzz.Release.Asan" name="shard 1/18" time="0.000">
+			<system-out>peak private memory 1805 MB</system-out>
+		</testcase>
+		<testcase classname="Fuzz.Release.Asan" name="shard 2/18" time="0.000">
+			<system-out>peak private memory 1939 MB</system-out>
+		</testcase>
+		<testcase classname="Fuzz.Release.Asan" name="shard 3/18" time="0.000">
+			<system-out>peak private memory 1871 MB</system-out>
+		</testcase>
+		<testcase classname="Fuzz.Release.Asan" name="shard 4/18" time="0.000">
+			<system-out>peak private memory 1856 MB</system-out>
+		</testcase>
+		<testcase classname="Fuzz.Release.Asan" name="shard 5/18" time="0.000">
+			<system-out>peak private memory 1884 MB</system-out>
+		</testcase>
+		<testcase classname="Fuzz.Release.Asan" name="shard 6/18" time="0.000">
+			<system-out>peak private memory 1852 MB</system-out>
+		</testcase>
+		<testcase classname="Fuzz.Release.Asan" name="shard 7/18" time="0.000">
+			<system-out>peak private memory 3780 MB</system-out>
+		</testcase>
+		<testcase classname="Fuzz.Release.Asan" name="shard 8/18" time="0.000">
+			<system-out>peak private memory 1844 MB</system-out>
+		</testcase>
+		<testcase classname="Fuzz.Release.Asan" name="shard 9/18" time="0.000">
+			<system-out>peak private memory 1931 MB</system-out>
+		</testcase>
+		<testcase classname="Fuzz.Release.Asan" name="shard 10/18" time="0.000">
+			<system-out>peak private memory 1973 MB</system-out>
+		</testcase>
+		<testcase classname="Fuzz.Release.Asan" name="shard 11/18" time="0.000">
+			<system-out>peak private memory 1799 MB</system-out>
+		</testcase>
+		<testcase classname="Fuzz.Release.Asan" name="shard 12/18" time="0.000">
+			<system-out>peak private memory 2782 MB</system-out>
+		</testcase>
+		<testcase classname="Fuzz.Release.Asan" name="shard 13/18" time="0.000">
+			<system-out>peak private memory 1760 MB</system-out>
+		</testcase>
+		<testcase classname="Fuzz.Release.Asan" name="shard 14/18" time="0.000">
+			<system-out>peak private memory 1917 MB</system-out>
+		</testcase>
+		<testcase classname="Fuzz.Release.Asan" name="shard 15/18" time="0.000">
+			<system-out>peak private memory 1818 MB</system-out>
+		</testcase>
+		<testcase classname="Fuzz.Release.Asan" name="shard 16/18" time="0.000">
+			<system-out>peak private memory 1792 MB</system-out>
+		</testcase>
+		<testcase classname="Fuzz.Release.Asan" name="shard 17/18" time="0.000">
+			<system-out>peak private memory 1896 MB</system-out>
+		</testcase>
+	</testsuite>
+</testsuites>

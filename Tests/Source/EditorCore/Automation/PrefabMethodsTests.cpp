@@ -383,6 +383,49 @@ return Script.Define("Brick", Brick)
 			CHECK_FALSE(setup.GetEditor().GetScene().FindEntityByPath("/Bad").IsValid());
 		}
 
+		// E-PFB-REFUSE (ADR 0028 decision 16): replacing a member with an instance of a new prefab took it out of its instance
+		// while the new root kept its id, so every later update of the instance failed ("already used in the scene outside the
+		// instance") and scene.open kept the stale state. The member is refused, as entity.destroy refuses deleting it.
+		TEST_CASE("PrefabMethods: prefab.create replaceWithInstance refuses a member of another instance")
+		{
+			Test::AutomationFixture setup("PrefabReplaceMember");
+			EditorContext& editor = setup.GetEditor();
+			CallOrFail(setup, "entity.create", ParsePrefabMethodJson(R"({"name": "Lamp"})"));
+			CallOrFail(setup, "entity.create", ParsePrefabMethodJson(R"({"name": "Bulb", "parent": "/Lamp"})"));
+			CallOrFail(setup, "entity.create", ParsePrefabMethodJson(R"({"name": "Filament", "parent": "/Lamp/Bulb"})"));
+			CallOrFail(setup, "prefab.create", ParsePrefabMethodJson(R"({"entity": "/Lamp", "path": "Assets/Prefabs/Lamp.prefab", "replaceWithInstance": true})"));
+			const Json before = CaptureEntity(editor, "/Lamp/Bulb");
+			const size_t steps = editor.GetHistory().GetUndoCount();
+			const std::filesystem::path bulbPrefab = setup.GetEditorFixture().GetProjectRoot() / "Assets/Prefabs/Bulb.prefab";
+
+			for (const bool dryRun : { false, true })
+			{
+				CAPTURE(dryRun);
+				Json params = ParsePrefabMethodJson(R"({"entity": "/Lamp/Bulb", "path": "Assets/Prefabs/Bulb.prefab", "replaceWithInstance": true})");
+				if (dryRun)
+					params["dryRun"] = true;
+				const Result<Json> refused = setup.Call("prefab.create", params);
+				REQUIRE_FALSE(refused.has_value());
+				INFO(refused.error().ToString());
+				CHECK(refused.error().GetCode() == ErrorCode::InvalidState);
+				REQUIRE_FALSE(refused.error().GetIssues().empty());
+				CHECK(refused.error().GetIssues()[0].JsonPointer == "/entity");
+				CHECK(refused.error().GetIssues()[0].Hint.contains("prefab.unpack"));
+				CHECK(CaptureEntity(editor, "/Lamp/Bulb") == before);
+				CHECK(editor.GetHistory().GetUndoCount() == steps);
+				CHECK_FALSE(FileSystem::Exists(bulbPrefab));
+			}
+
+			// Saving the member's subtree without replacing it, and replacing the whole instance, work as before; so does the
+			// member once its instance is unpacked.
+			CallOrFail(setup, "prefab.create", ParsePrefabMethodJson(R"({"entity": "/Lamp/Bulb", "path": "Assets/Prefabs/Bulb.prefab"})"));
+			CHECK(CaptureEntity(editor, "/Lamp/Bulb") == before);
+			CallOrFail(setup, "prefab.create", ParsePrefabMethodJson(R"({"entity": "/Lamp", "path": "Assets/Prefabs/Lamp2.prefab", "replaceWithInstance": true})"));
+			CallOrFail(setup, "prefab.unpack", ParsePrefabMethodJson(R"({"instance": "/Lamp"})"));
+			const Json replaced = CallOrFail(setup, "prefab.create", ParsePrefabMethodJson(R"({"entity": "/Lamp/Bulb", "path": "Assets/Prefabs/Bulb2.prefab", "replaceWithInstance": true})"));
+			CHECK(replaced["instance"]["path"] == Json("/Lamp/Bulb"));
+		}
+
 		TEST_CASE("PrefabMethods: errors name the problem")
 		{
 			Test::AutomationFixture setup("PrefabErrors");

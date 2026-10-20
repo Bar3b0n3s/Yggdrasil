@@ -709,7 +709,7 @@ Example: Create an orthographic primary camera.
 
 ### entity.destroy
 
-Destroys entities with their subtrees, as one undoable command.
+Destroys entities with their subtrees, as one undoable command. In the edit scene a member of a prefab instance that is not its root is refused: deactivate it, or unpack the instance first.
 
 - Flags: tool `entity_destroy`, mutates, dry run, batch
 - Timeout: 60 s
@@ -1327,7 +1327,7 @@ Example: Make the cell's edits the prefab's.
 
 ### prefab.create
 
-Saves an entity's subtree as a new .prefab asset (nested instances flattened), optionally replacing the entity with an instance of it, as one undoable step. The result's instance is that instance's root (empty without replaceWithInstance).
+Saves an entity's subtree as a new .prefab asset (nested instances flattened), optionally replacing the entity with an instance of it, as one undoable step. The result's instance is that instance's root (empty without replaceWithInstance). Replacing a member of another prefab instance is refused: unpack that instance first.
 
 - Flags: tool `prefab_create`, mutates, dry run, batch
 - Timeout: 60 s

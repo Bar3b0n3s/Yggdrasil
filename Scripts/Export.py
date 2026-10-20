@@ -11,8 +11,16 @@ Runtime); a missing build output is the editor's exit code 3. With --json the re
 "exitCode" member added: {"success": true, "result": <project.export's result>, "exitCode": 0} or {"success": false,
 "error": {"code", "message", "issues", ...}, "exitCode": 1}.
 
+An export that runs the GPU (--renderer vulkan, the default, or --smoke-test, which runs the exported game) holds the
+machine-wide GPU lock (Scripts/Lib/locks.py; Docs/Architecture.md §2.3, ADR 0028 decision 16), shared by every checkout
+of the repository, while the editor runs; any other export only waits until no gate (CI.py) runs. Either waits while
+the lock is held, unless the export runs inside that holder, reporting the holder (pid, worktree, command), at most
+--lock-timeout seconds (exit code 5); --no-wait fails at once instead (exit code 3). The --json document of such a
+failure carries "lock" (the lock and its holders).
+
 Exit codes: the editor's (0 exported; 1 the export failed; 3 the project does not open, its lock is held, or a build
-output or the editor is missing), 2 usage error, 5 timeout (the editor is stopped).
+output or the editor is missing), 2 usage error, 3 --no-wait found a machine lock held, 5 timeout (the editor is
+stopped, or the wait for a machine lock ran out).
 """
 
 from __future__ import annotations
@@ -24,12 +32,13 @@ if sys.version_info < (3, 10):
     sys.exit(f"Export.py requires Python 3.10 or newer (this is Python {platform.python_version()})")
 
 import argparse
+import contextlib
 import json
 import tempfile
 from pathlib import Path
 from typing import Any
 
-from Lib import paths
+from Lib import locks, paths
 from Lib.process import ToolNotFoundError, child_environment, run_streamed
 from Lib.report import (
     EXIT_FAILED,
@@ -56,8 +65,8 @@ def editor_executable(config: str) -> Path:
 def parse_arguments(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Export a project as a standalone game (Editor --export).",
-        epilog="Exit codes: 0 exported, 1 the export failed, 2 usage error, 3 the project does not open or a build "
-               "output is missing, 5 timeout.",
+        epilog="Exit codes: 0 exported, 1 the export failed, 2 usage error, 3 the project does not open, a build "
+               "output is missing or --no-wait found a machine lock held, 5 timeout.",
     )
     parser.add_argument("--project", type=Path, required=True, help="the project (.eproj or its directory)")
     parser.add_argument("--config", required=True, choices=EXPORT_CONFIGURATIONS, help="the configuration to export")
@@ -77,9 +86,11 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT_SECONDS,
                         help=f"seconds before the editor is stopped (default: {DEFAULT_TIMEOUT_SECONDS:.0f})")
     parser.add_argument("--json", action="store_true", help="print the export report as JSON on stdout")
+    locks.add_wait_arguments(parser)
     arguments = parser.parse_args(argv)
     if arguments.timeout <= 0:
         parser.error("--timeout must be positive")
+    locks.check_wait_arguments(parser, arguments)
     return arguments
 
 
@@ -138,6 +149,34 @@ def main(argv: list[str] | None = None) -> int:
         console.print(f"Export failed: {message}")
         return finish(EXIT_INIT_FAILED, {"success": False, "error": {"message": message, "issues": []}})
 
+    try:
+        hold = take_machine_locks(arguments, console)
+    except locks.LockUnavailable as error:
+        console.print(f"Export failed: {error}")
+        return finish(error.exit_code, {"success": False, "error": {"message": str(error), "issues": []},
+                                        "lock": error.to_json()})
+    with hold if hold is not None else contextlib.nullcontext():
+        exit_code, document = export(arguments, editor, console)
+    return finish(exit_code, document)
+
+
+def uses_gpu(arguments: argparse.Namespace) -> bool:
+    """Whether the export runs the GPU: a rendering editor (--renderer vulkan, the default), or the smoke test, which
+    runs the exported game."""
+    return arguments.renderer == "vulkan" or arguments.smoke_test
+
+
+def take_machine_locks(arguments: argparse.Namespace, console: Console) -> locks.Hold | None:
+    """The machine-wide GPU lock for an export that runs the GPU, held to its end; any other export only waits until no
+    gate runs. Raises locks.LockUnavailable."""
+    if uses_gpu(arguments):
+        return locks.acquire_gpu(locks.wait_seconds(arguments), console.print)
+    locks.wait_for_gate(locks.wait_seconds(arguments), console.print)
+    return None
+
+
+def export(arguments: argparse.Namespace, editor: Path, console: Console) -> tuple[int, dict[str, Any]]:
+    """Runs the editor's one-shot export; returns the exit code and the --json document (without "exitCode")."""
     with tempfile.TemporaryDirectory(prefix="EngineExport-") as directory:
         report_path = Path(directory) / "Report.json"
         command = editor_command(arguments, editor, report_path)
@@ -146,11 +185,11 @@ def main(argv: list[str] | None = None) -> int:
             result = run_streamed(command, env=child_environment(), timeout=arguments.timeout, echo=console.stream)
         except ToolNotFoundError as error:
             console.print(f"Export failed: {error}")
-            return finish(EXIT_INIT_FAILED, {"success": False, "error": {"message": str(error), "issues": []}})
+            return EXIT_INIT_FAILED, {"success": False, "error": {"message": str(error), "issues": []}}
         if result.timed_out:
             message = f"the editor did not finish the export within {arguments.timeout:.0f} s and was stopped"
             console.print(f"Export failed: {message}")
-            return finish(EXIT_TIMEOUT, {"success": False, "error": {"message": message, "issues": []}})
+            return EXIT_TIMEOUT, {"success": False, "error": {"message": message, "issues": []}}
         exit_code = result.exit_code if result.exit_code is not None else EXIT_FAILED
         try:
             document = json.loads(report_path.read_text(encoding="utf-8"))
@@ -160,15 +199,15 @@ def main(argv: list[str] | None = None) -> int:
             console.print(f"Export failed: {message}")
             if exit_code == EXIT_SUCCESS:
                 exit_code = EXIT_FAILED
-            return finish(exit_code, {"success": False, "error": {"message": message, "issues": []}})
+            return exit_code, {"success": False, "error": {"message": message, "issues": []}}
     if not isinstance(document, dict):
         console.print("Export failed: the export report is not a JSON object")
-        return finish(EXIT_FAILED, {"success": False, "error": {"message": "the export report is not a JSON object",
-                                                                 "issues": []}})
+        return EXIT_FAILED, {"success": False, "error": {"message": "the export report is not a JSON object",
+                                                         "issues": []}}
     describe_report(document, console)
     if exit_code == EXIT_USAGE:
         console.print("The editor refused the command line (exit code 2).")
-    return finish(exit_code, document)
+    return exit_code, document
 
 
 if __name__ == "__main__":

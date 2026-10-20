@@ -30,7 +30,7 @@ namespace Engine {
 
 	void SceneHierarchyPanel::ReportFailure(const Error& error)
 	{
-		const std::string message = error.GetMessageText();
+		const std::string message = error.GetHint().empty() ? error.GetMessageText() : std::format("{} (hint: {})", error.GetMessageText(), error.GetHint());
 		if (m_Error != message)
 			ENGINE_ERROR("SceneHierarchyPanel: {}", error.ToString());
 		m_Error = message;

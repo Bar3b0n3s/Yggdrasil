@@ -56,16 +56,21 @@ def run_script(name: str, script: str, arguments: list[str], console: Console, t
 
 
 # --------------------------------------------------------------------------------------------------------------------
-# Contract mode (Roadmap rule 3, Docs/Decisions/0004-contract-stub-gate.md), shared by PreCommit.py and CI.py
+# Contract mode (Roadmap rule 3, Docs/Decisions/0004-contract-stub-gate.md), shared by PreCommit.py and CI.py. Contract
+# mode is a contract checkpoint's targeted runs on a milestone branch (Lint.py --allow-contract-stubs, Test.py
+# --allow-skips; Docs/Decisions/0028-backlog-program.md decision 11); PreCommit.py --contract and CI.py --contract stay
+# available, but no gate run of the backlog program uses them.
 # --------------------------------------------------------------------------------------------------------------------
 
 CONTRACT_MODE_NOTE = ("contract mode: stubs and skipped tests allowed (Lint.py --allow-contract-stubs, Test.py "
-                      "--allow-skips); only for the commit of a milestone's contract task")
+                      "--allow-skips), as in a contract checkpoint's targeted runs (ADR 0028 decision 11); no gate run "
+                      "of the backlog program uses it")
 STRICT_MODE_NOTE = ("strict mode: no contract stubs (ENGINE_CONTRACT_STUB) and no skipped test cases outside the "
                     "child-process targets (Test::ChildTargetSuite)")
-CONTRACT_FLAG_HELP = ("contract mode, only for the commit of a milestone's contract task (Roadmap rule 3): allow "
-                      "ENGINE_CONTRACT_STUB stubs and doctest::skip test cases (Lint.py --allow-contract-stubs, "
-                      "Test.py --allow-skips). Without it the gate is strict")
+CONTRACT_FLAG_HELP = ("contract mode (Roadmap rule 3): allow ENGINE_CONTRACT_STUB stubs and doctest::skip test cases "
+                      "(Lint.py --allow-contract-stubs, Test.py --allow-skips). A contract checkpoint runs those two "
+                      "directly in its targeted runs (ADR 0028 decision 11); this option stays available, but no gate "
+                      "run of the backlog program uses it. Without it the gate is strict")
 
 
 def mode_note(contract: bool) -> str:

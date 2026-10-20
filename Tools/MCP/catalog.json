@@ -571,7 +571,7 @@
 		{
 			"name": "entity_destroy",
 			"method": "entity.destroy",
-			"description": "Destroys entities with their subtrees, as one undoable command.",
+			"description": "Destroys entities with their subtrees, as one undoable command. In the edit scene a member of a prefab instance that is not its root is refused: deactivate it, or unpack the instance first.",
 			"inputSchema": {
 				"$schema": "https://json-schema.org/draft/2020-12/schema",
 				"title": "EntityDestroyParams",
@@ -1319,7 +1319,7 @@
 		{
 			"name": "prefab_create",
 			"method": "prefab.create",
-			"description": "Saves an entity's subtree as a new .prefab asset (nested instances flattened), optionally replacing the entity with an instance of it, as one undoable step. The result's instance is that instance's root (empty without replaceWithInstance).",
+			"description": "Saves an entity's subtree as a new .prefab asset (nested instances flattened), optionally replacing the entity with an instance of it, as one undoable step. The result's instance is that instance's root (empty without replaceWithInstance). Replacing a member of another prefab instance is refused: unpack that instance first.",
 			"inputSchema": {
 				"$schema": "https://json-schema.org/draft/2020-12/schema",
 				"title": "PrefabCreateParams",

@@ -52,11 +52,16 @@ Steps, in order:
 The static checks run even after an earlier failure, so one run reports every problem. A missing script fails its
 step.
 
+PreCommit is the gate of a commit straight to main outside a milestone (ADR 0023); checkpoint commits on a milestone
+branch run only the tests and suites their change touches, and a milestone end runs CI.py instead
+(Docs/Decisions/0028-backlog-program.md decisions 11 and 12).
+
 Modes (Roadmap rule 3, Docs/Decisions/0004-contract-stub-gate.md). By default the gate is strict: Lint.py rejects
 ENGINE_CONTRACT_STUB outside its definition and doctest::skip outside the child-process targets, and Test.py fails on a
-skipped test case outside the ChildTargets suite. --contract, only for the commit of a milestone's contract task, passes
---allow-contract-stubs to Lint.py and --allow-skips to Test.py (CI.py --contract does the same); the run prints which
-mode it is in at the start and in the summary.
+skipped test case outside the ChildTargets suite. Contract mode is a contract checkpoint's targeted runs on a milestone
+branch, Lint.py --allow-contract-stubs and Test.py --allow-skips (ADR 0028 decision 11). --contract passes those two
+options to Lint.py and Test.py (CI.py --contract does the same); both stay available, but no gate run of the backlog
+program uses them. The run prints which mode it is in at the start and in the summary.
 
 Exit codes: 0 every step passed, otherwise the code of the first failing step (1 failed, 2 usage error, 3 a required
 tool or file is missing, 5 timeout).

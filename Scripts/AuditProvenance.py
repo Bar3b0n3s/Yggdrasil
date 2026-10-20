@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Audit the provenance of the demo game projects (Docs/Architecture.md §13.12, §2.3; Roadmap M16 to M18;
+"""Audit the provenance of the demo game projects (Docs/Architecture.md §13.12, §2.3; Roadmap M16, M17, M25 and M27;
 Docs/Decisions/0026-m16-contract.md decisions 3 and 4).
 
 A project passes when every engine-consumed file (its root *.eproj and .luaurc, and everything below Assets/) was

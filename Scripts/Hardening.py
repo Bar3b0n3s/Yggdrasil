@@ -40,33 +40,56 @@ Steps, in this order, failing fast (a step after a failed one is reported as not
   fuzz           fuzz Release (ASan): the sanitized Tests binary with --test-suite=Fuzz --fuzz-iterations=1000000
                  --fuzz-shard=<k>/<n> --test-timeout-scale=<s> in n = hardening.fuzz_process_count(logical CPUs,
                  available memory, FUZZ_PEAK_PROCESS_BYTES) processes, each with its own --user-data-dir and the
-                 AddressSanitizer environment. Each shard runs 1/n of every target, so its cases' limit grows with
-                 that share below the measured run's 19 processes: s = hardening.fuzz_timeout_scale(n) =
-                 max(20, ceil(20 x 19 / n)), never below the measured run's 20, since shards beyond the physical cores
-                 share them. Below hardening.fuzz_minimum_processes (14, the count whose expected time fits in 80 % of
-                 the step's 5400 s) the step refuses to start, exit code 3 naming the available memory and logical
-                 CPUs it needs: the stage needs at least 14 logical CPUs and 14 GiB of available memory (14 shards of
-                 FUZZ_PEAK_PROCESS_BYTES, 1 GiB) when the fuzz step starts. The
-                 ReportFuzzRun lines are read from each process's standard error and hardening.evaluate_fuzz_logs
-                 checks that every target of Tests/Data/Fuzz/Targets.json covered [0, 1,000,000) exactly once; any
-                 process failure fails the step. bin/TestResults/Fuzz-Release-Asan.xml has one test case per target
-                 and per process; the step reports each target's cost per iteration and the peak memory of a process.
+                 AddressSanitizer environment. The step is sized from per-target costs (ADR 0028 decision 16,
+                 T-FUZZMODEL): each target's seconds per iteration as the last full, passing fuzz step on this machine
+                 measured them, in the report it kept in <git common directory>/fuzz-costs/Fuzz-Release-Asan.xml
+                 (hardening.machine_fuzz_costs_path, shared by every checkout of the repository and written only by a
+                 passing run of 1,000,000 iterations, so a development or failed run never replaces it), or before the
+                 first such run as M17's gate measured them (Tests/Data/Hardening/FuzzM17.xml); a target not measured
+                 there at the measured average, and without any measurement the reference run's 52 min at 19 shards for
+                 35 targets scaled by the target count (hardening.read_fuzz_costs), summed into the step's work W. Below
+                 hardening.fuzz_minimum_processes (the fewest shards whose expected time W / n fits in 80 % of the
+                 step's budget, 5,400 s per 35 targets: 14 with M17's measured costs and with the reference) the step
+                 refuses to start, exit code 3 naming the available memory and logical CPUs it needs: with those costs
+                 the stage needs at least 14 logical CPUs and 14 GiB of available memory (14 shards of
+                 FUZZ_PEAK_PROCESS_BYTES, 1 GiB) when the fuzz step starts. The step's timeout is W / min(n, 19, logical
+                 CPUs) over 80 % (hardening.fuzz_timeout_seconds: shards beyond the reference run's 19 or the logical
+                 CPUs run no faster), at least 600 s and at most the budget, so it follows the measured costs and the
+                 shard count that runs. Each shard runs 1/n of every target, so its cases' limit grows with that share
+                 below the reference run's 19 processes: s = hardening.fuzz_timeout_scale(n) = max(20, ceil(20 x 19 /
+                 n)), never below the reference's 20, since shards beyond the physical cores share them, and raised when
+                 the dearest target's share needs more. Every target keeps its 1,000,000 iterations (ADR 0024 decision
+                 14); only the shards and the timeouts follow the costs. The ReportFuzzRun lines are read from each
+                 process's standard error and hardening.evaluate_fuzz_logs checks that every target of
+                 Tests/Data/Fuzz/Targets.json covered [0, 1,000,000) exactly once; any process failure fails the step.
+                 bin/TestResults/Fuzz-Release-Asan.xml has one test case per target, whose time is its seconds summed
+                 over the shards, and per process; the step reports each target's cost per iteration and the peak memory
+                 of a process.
 
 --gpu-optional: without a Vulkan device the perf capture falls back, the soak passes without running, and the ASan
 feature suite passes without running, each as a warning (otherwise they fail). Development aids, which make a step a
 warning because it no longer covers the whole stage: --soak-only <pattern> (fnmatch over the subjects,
-"<project>:<scene>" and "Runtime:<project>"), --fuzz-iterations <n> (each target runs n iterations instead of
-1,000,000) and --fuzz-processes <n> (instead of the computed count; a count below the minimum the fuzz step's timeout
-needs for its iterations, 14 at 1,000,000, is still refused with exit code 3). --soak-frames <n> soaks every subject
-for n ticks or frames instead of 10,000 (at least 10,000, a multiple of 250): a scene whose collection cycle is longer
-than about a quarter of the soak can leave the script heap rule inconclusive depending only on the cycle's phase, and
-a longer soak of that scene (--soak-only <subject> --soak-frames 40000) confirms it; it is a full soak, not a
+"<project>:<scene>" and "Runtime:<project>"), --fuzz-iterations <n> (each target runs n iterations instead of 1,000,000)
+and --fuzz-processes <n> (instead of the computed count; a count below the minimum the fuzz step's budget needs for its
+iterations, 14 at 1,000,000 with M17's costs, is still refused with exit code 3); a run of fewer iterations, like a
+failed one, never replaces the kept measurement, so the run after it is sized as before. --soak-frames <n> soaks every
+subject for n ticks or frames instead of 10,000 (at least 10,000, a multiple of 250): a scene whose collection cycle is
+longer than about a quarter of the soak can leave the script heap rule inconclusive depending only on the cycle's phase,
+and a longer soak of that scene (--soak-only <subject> --soak-frames 40000) confirms it; it is a full soak, not a
 development aid.
 
+A run whose steps include perf, soak or asan-feature holds the machine-wide GPU lock (Scripts/Lib/locks.py;
+Docs/Architecture.md §2.3, ADR 0028 decision 16), shared by every checkout of the repository, from its start to its end;
+its child scripts (Perf.py, Build.py, Test.py) run under that hold, so they never wait for a gate that began after it.
+It waits while another GPU run or a gate (CI.py) holds the lock, unless it runs inside that run (CI.py's hardening
+stage), reporting the holder (pid, worktree, command), at most --lock-timeout seconds (exit code 5); --no-wait fails at
+once instead (exit code 3). A run of the other steps takes no lock of its own; its Build.py takes the build lock.
+
 Exit codes: 0 every step passed (or warned), 1 a step failed, 2 usage error, 3 a build output, the AddressSanitizer
-runtime or a current export package is missing, or the machine has too little memory or too few CPUs for the fuzz to
-finish in time (it needs at least 14 logical CPUs and 14 GiB of available memory at 1,000,000 iterations), 5 a step
-timed out.
+runtime or a current export package is missing, the machine has too little memory or too few CPUs for the fuzz to
+finish in time (it needs at least as many logical CPUs and GiB of available memory as its minimum shard count, 14 at
+1,000,000 iterations with M17's measured costs), or --no-wait found the GPU lock held, 5 a step timed out, or the wait
+for the GPU lock ran out.
 """
 
 from __future__ import annotations
@@ -91,7 +114,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from Lib import exports, hardening, paths
+from Lib import exports, hardening, locks, paths
 from Lib import process as process_lib
 from Lib.process import (
     ToolNotFoundError,
@@ -116,6 +139,8 @@ from Lib.report import (
 )
 
 STEPS = ("perf", "soak", "asan-generate", "asan-build", "asan-unit", "asan-feature", "fuzz")
+# The steps that run the GPU: a run that includes one holds the machine-wide GPU lock from its start to its end.
+GPU_STEPS = frozenset({"perf", "soak", "asan-feature"})
 STEP_NAMES = {
     "perf": "perf capture (Release)",
     "soak": "soak Release",
@@ -125,11 +150,16 @@ STEP_NAMES = {
     "asan-feature": "feature Release (ASan)",
     "fuzz": "fuzz Release (ASan)",
 }
-# Seconds per step (ADR 0024 decision 19's TIMEOUTS as amended at integration: perf 1200 s, the ASan build 7200 s, the
-# fuzz 5400 s, every other step 3600 s). Measured on the 24-thread workstation: perf 3 min, soak 16 min, ASan build
-# 20 min from scratch and 2 min incremental, ASan unit 21 min, ASan feature 1 min, fuzz 52 min.
+# Seconds per step (ADR 0024 decision 19's TIMEOUTS as amended at integration: perf 1200 s, the ASan build 7200 s, every
+# other step 3600 s). The fuzz step's timeout follows its measured per-target costs and the shard count that runs
+# (hardening.fuzz_timeout_seconds; ADR 0028 decision 16, T-FUZZMODEL), within its budget of 5,400 s per 35 targets
+# (hardening.fuzz_budget_seconds). Measured on the 24-thread workstation: perf 3 min, soak 16 min, ASan build 20 min
+# from scratch and 2 min incremental, ASan unit 21 min, ASan feature 1 min, fuzz 52 min (M17: 55 min at 18 shards).
 TIMEOUTS = {"perf": 1200.0, "soak": 3600.0, "asan-generate": 3600.0, "asan-build": 7200.0, "asan-unit": 3600.0,
-            "asan-feature": 3600.0, "fuzz": 5400.0}
+            "asan-feature": 3600.0}
+# What the sanitized suites' Test.py runs get beyond their own --timeout, to write their reports after it.
+SUITE_GRACE_SECONDS = 60.0
+SANITIZED_SUITES = ("unit", "feature")
 CONFIG = "Release"
 PYTHON = sys.executable
 SCRIPTS = paths.REPOSITORY_ROOT / "Scripts"
@@ -792,7 +822,8 @@ def sanitized_suite_step(name: str, suite: str, extra: list[str], arguments: arg
     options = ["--suite", suite, "--config", CONFIG, "--build-root", str(hardening.ASAN_WORKSPACE / "bin"),
                "--sanitizer", "address", "--junit", "--timeout", str(int(TIMEOUTS[f"asan-{suite}"])), "--json", *extra]
     try:
-        run = run_json_script(name, SCRIPTS / "Test.py", options, TIMEOUTS[f"asan-{suite}"] + 60.0, console)
+        run = run_json_script(name, SCRIPTS / "Test.py", options, TIMEOUTS[f"asan-{suite}"] + SUITE_GRACE_SECONDS,
+                              console)
     except ToolNotFoundError as error:
         return Step(name, Status.FAILED, str(error), exit_code=EXIT_INIT_FAILED)
     if run.timed_out:
@@ -872,6 +903,32 @@ def junit_failures(junit: Path) -> list[str]:
     return failures
 
 
+def fuzz_costs_path() -> Path:
+    """Where the fuzz step keeps, and reads, the last full, passing run's report (hardening.machine_fuzz_costs_path)."""
+    return hardening.machine_fuzz_costs_path()
+
+
+def fuzz_costs(targets: list[hardening.FuzzTarget],
+               sources: tuple[Path, ...]) -> tuple[dict[str, float], Path | None, str]:
+    """(the per-target costs, the report they came from, how the step is sized): the first of `sources` that measures
+    one of `targets` (a missing, unreadable or failed report, or one of a development run, measures none); without one,
+    no costs, no report and the reference run."""
+    problems: list[str] = []
+    for source in sources:
+        try:
+            costs = hardening.read_fuzz_costs(source)
+        except ValueError as error:
+            problems.append(str(error))
+            continue
+        measured = sum(1 for target in targets if hardening.fuzz_target_case_name(target) in costs)
+        if measured:
+            return costs, source, (f"sized from {paths.display_path(source)}: {measured} of {len(targets)} target(s) "
+                                   f"measured, the rest at their average")
+        problems.append(f"{paths.display_path(source)} measures no target of Targets.json" if source.is_file()
+                        else f"no {paths.display_path(source)}")
+    return {}, None, f"sized from the reference run scaled by the target count: {'; '.join(problems)}"
+
+
 def step_fuzz(arguments: argparse.Namespace, console: Console) -> Step:
     name = STEP_NAMES["fuzz"]
     started = time.monotonic()
@@ -886,6 +943,14 @@ def step_fuzz(arguments: argparse.Namespace, console: Console) -> Step:
     iterations = arguments.fuzz_iterations or hardening.FUZZ_HARDENING_ITERATIONS
     if iterations != hardening.FUZZ_HARDENING_ITERATIONS:
         targets = [dataclasses.replace(target, iterations=iterations) for target in targets]
+    # The per-target costs of the last full, passing run on this machine size the step, else M17's committed ones;
+    # without either the reference run, scaled by the target count, does.
+    kept = fuzz_costs_path()
+    measured_costs, source, sizing = fuzz_costs(targets, (kept, hardening.FUZZ_COMMITTED_COSTS))
+    target_seconds = hardening.fuzz_target_seconds(targets, measured_costs)
+    measured = sum(1 for target in targets if hardening.fuzz_target_case_name(target) in measured_costs)
+    work = sum(target_seconds.values())
+    budget = hardening.fuzz_budget_seconds(len(targets))
     try:
         available = hardening.available_memory_bytes()
     except OSError as error:
@@ -893,24 +958,26 @@ def step_fuzz(arguments: argparse.Namespace, console: Console) -> Step:
     logical_cpus = os.cpu_count() or 1
     count = arguments.fuzz_processes or hardening.fuzz_process_count(logical_cpus, available,
                                                                       hardening.FUZZ_PEAK_PROCESS_BYTES)
-    # Refuse a shard count too small for the step's timeout before anything starts, rather than time out after an
+    # Refuse a shard count too small for the step's budget before anything starts, rather than time out after an
     # hour on the machine's free memory alone; each case's limit grows with its shard's share of the work.
-    minimum = hardening.fuzz_minimum_processes(TIMEOUTS["fuzz"], iterations)
+    minimum = hardening.fuzz_minimum_processes(work, budget)
+    model = {"workSeconds": work, "budgetSeconds": budget, "minimumProcesses": minimum, "measuredTargets": measured,
+             "costs": paths.display_path(source) if source is not None else "reference"}
     problem = hardening.fuzz_capacity_problem(count, minimum, logical_cpus, available,
-                                              hardening.FUZZ_PEAK_PROCESS_BYTES, TIMEOUTS["fuzz"])
+                                              hardening.FUZZ_PEAK_PROCESS_BYTES, budget)
     if problem is not None:
-        return Step(name, Status.FAILED, problem, exit_code=EXIT_INIT_FAILED,
-                    data={"processes": count, "minimumProcesses": minimum, "availableBytes": available,
-                          "logicalCpus": logical_cpus})
-    timeout_scale = hardening.fuzz_timeout_scale(count, iterations)
+        return Step(name, Status.FAILED, f"{problem} ({sizing})", exit_code=EXIT_INIT_FAILED,
+                    data={"processes": count, "availableBytes": available, "logicalCpus": logical_cpus, **model})
+    timeout = hardening.fuzz_timeout_seconds(work, count, budget, logical_cpus)
+    timeout_scale = hardening.fuzz_timeout_scale(count, iterations, max(target_seconds.values()))
     try:
         environment = hardening.asan_environment(child_environment())
     except FileNotFoundError as error:
         return Step(name, Status.FAILED, str(error), exit_code=EXIT_INIT_FAILED)
     console.heading(f"{name}: {len(targets)} target(s) x {iterations} iteration(s) in {count} process(es) "
                     f"({logical_cpus} logical CPUs, {available >> 20} MB available; each case's limit scaled by "
-                    f"{timeout_scale}; about {hardening.fuzz_expected_seconds(count, iterations) / 60:.0f} min "
-                    f"expected)")
+                    f"{timeout_scale}; about {hardening.fuzz_expected_seconds(work, count) / 60:.0f} min expected, "
+                    f"timeout {timeout:.0f} s; {sizing})")
 
     shards: list[FuzzShard] = []
     lines: list[str] = []
@@ -935,7 +1002,7 @@ def step_fuzz(arguments: argparse.Namespace, console: Console) -> Step:
                     child = subprocess.Popen(command, cwd=paths.REPOSITORY_ROOT, stdin=subprocess.DEVNULL,
                                              stdout=output, stderr=error_output, env=environment)
                 shards.append(FuzzShard(index, count, child, standard_output, standard_error, junit))
-            deadline = started + TIMEOUTS["fuzz"]
+            deadline = started + timeout
             timed_out = False
             while any(shard.process.poll() is None for shard in shards):
                 for shard in shards:
@@ -968,7 +1035,7 @@ def step_fuzz(arguments: argparse.Namespace, console: Console) -> Step:
                                 + (f"; {sanitizer[0]}" if sanitizer else "") + (f": {detail}" if detail else ""))
                 console.print(f"FAILED: {shard.label}:\n{tail(text, 60)}")
     if timed_out:
-        failures.insert(0, f"fuzz: the shards did not finish within {TIMEOUTS['fuzz']:.0f} s")
+        failures.insert(0, f"fuzz: the shards did not finish within {timeout:.0f} s")
     coverage_failures = hardening.evaluate_fuzz_logs(targets, lines)
     failures += coverage_failures
     duration = time.monotonic() - started
@@ -985,11 +1052,11 @@ def step_fuzz(arguments: argparse.Namespace, console: Console) -> Step:
     for failure in failures:
         console.print(f"FAILED: {failure.splitlines()[0]}")
 
-    junit_steps = [Step(f"{target.reader} ({target.case})",
+    junit_steps = [Step(hardening.fuzz_target_case_name(target),
                         Status.FAILED if any(line.startswith(f"fuzz: {target.reader}:") for line in coverage_failures)
                         else Status.PASSED,
                         "; ".join(line for line in coverage_failures if line.startswith(f"fuzz: {target.reader}:"))
-                        or f"{target.iterations} iterations; {costs[target.reader] * 1e6:.1f} us per iteration",
+                        or hardening.fuzz_target_detail(target.iterations, costs[target.reader]),
                         seconds.get(target.case, 0.0)) for target in targets]
     junit_steps += [Step(shard.label,
                          Status.FAILED if any(line.startswith(f"fuzz: {shard.label} ") for line in failures)
@@ -997,9 +1064,21 @@ def step_fuzz(arguments: argparse.Namespace, console: Console) -> Step:
                          next((line for line in failures if line.startswith(f"fuzz: {shard.label} ")),
                               f"peak private memory {shard.peak_private_bytes >> 20} MB")) for shard in shards]
     write_junit(FUZZ_JUNIT, "Fuzz.Release.Asan", junit_steps)
+    # Only a full, passing run measures every target's cost: it becomes the measurement every checkout's next fuzz step
+    # reads, and a development or failed run leaves the kept one alone.
+    kept_costs: str | None = None
+    keep_problem = ""
+    if not failures and iterations == hardening.FUZZ_HARDENING_ITERATIONS:
+        try:
+            hardening.keep_fuzz_costs(FUZZ_JUNIT, kept)
+            kept_costs = paths.display_path(kept)
+        except OSError as error:
+            keep_problem = f"the measured costs could not be kept in {paths.display_path(kept)}: {error}"
+            console.print(f"WARNING: {keep_problem}")
     data = {"junit": paths.display_path(FUZZ_JUNIT), "processes": count, "iterations": iterations,
-            "timeoutScale": timeout_scale, "targets": len(targets), "secondsPerIteration": costs,
-            "peakProcessPrivateBytes": peak, "counts": counts, "failures": failures}
+            "timeoutScale": timeout_scale, "timeoutSeconds": timeout, "targets": len(targets),
+            "secondsPerIteration": costs, "peakProcessPrivateBytes": peak, "counts": counts, "failures": failures,
+            "keptCosts": kept_costs, **model}
     if failures:
         return Step(name, Status.TIMEOUT if timed_out else Status.FAILED,
                     f"{len(failures)} failure(s): {failures[0].splitlines()[0]}", duration, data=data)
@@ -1008,6 +1087,9 @@ def step_fuzz(arguments: argparse.Namespace, console: Console) -> Step:
     if iterations != hardening.FUZZ_HARDENING_ITERATIONS or arguments.fuzz_processes:
         return Step(name, Status.WARNING, f"{detail}; development run (--fuzz-iterations or --fuzz-processes)",
                     duration, data=data)
+    if keep_problem:
+        # The next fuzz step would be sized from an older measurement: the run passed, but not as a measurement.
+        return Step(name, Status.WARNING, f"{detail}; {keep_problem}", duration, data=data)
     return Step(name, Status.PASSED, detail, duration, data=data)
 
 
@@ -1032,8 +1114,10 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
         description="Run the hardening stage: perf capture, soak, AddressSanitizer build and suites, long fuzz.",
         epilog="Exit codes: 0 every step passed (or warned), 1 a step failed, 2 usage error, 3 a build output, the "
                "AddressSanitizer runtime or a current export package is missing, or the machine has too little memory "
-               "or too few CPUs for the fuzz to finish in time (it needs at least 14 logical CPUs and 14 GiB of "
-               "available memory at 1,000,000 iterations), 5 a step timed out.",
+               "or too few CPUs for the fuzz to finish in time (it needs as many logical CPUs and GiB of available "
+               "memory as its minimum shard count, which its measured per-target costs set: 14 at 1,000,000 "
+               "iterations with M17's), or --no-wait found the GPU lock held, 5 a step timed out or the wait for the "
+               "GPU lock ran out.",
     )
     parser.add_argument("--steps", default=",".join(STEPS),
                         help=f"comma-separated steps, run in the stage's order: {', '.join(STEPS)} (default: all)")
@@ -1055,10 +1139,12 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
                              f"about a quarter of the soak; the step's deadline grows in proportion")
     parser.add_argument("--fuzz-processes", type=int,
                         help="fuzz: processes instead of the computed count; a development aid that makes the step a "
-                             "warning, and a count below the minimum the step's timeout needs (14 at 1,000,000 "
-                             "iterations) is refused with exit code 3")
+                             "warning, and a count below the minimum the step's budget needs (14 at 1,000,000 "
+                             "iterations with M17's measured costs) is refused with exit code 3")
     parser.add_argument("--json", action="store_true", help="print a machine-readable result on stdout")
+    locks.add_wait_arguments(parser)
     arguments = parser.parse_args(argv)
+    locks.check_wait_arguments(parser, arguments)
     try:
         arguments.steps = paths.parse_name_list(arguments.steps, STEPS, "step")
     except ValueError as error:
@@ -1085,6 +1171,50 @@ def main(argv: list[str] | None = None) -> int:
         console.print(f"Hardening.py: error: {error}")
         return EXIT_USAGE
     console.heading(f"Hardening ({host.system}): {', '.join(arguments.steps)}")
+    try:
+        hold = take_machine_locks(arguments, console)
+    except locks.LockUnavailable as error:
+        step = locks.unavailable_step(error)
+        console.result(step)
+        console.summary("Hardening summary", [step])
+        if arguments.json:
+            emit_json({"success": False, "steps": [step.to_json()]})
+        return error.exit_code
+    try:
+        steps = run_steps(arguments, console)
+    finally:
+        if hold is not None:
+            hold.release()
+    exit_code = overall_exit_code(steps)
+    console.summary("Hardening summary", steps)
+    if arguments.json:
+        emit_json({"success": exit_code == EXIT_SUCCESS, "steps": [step.to_json() for step in steps]})
+    return exit_code
+
+
+def uses_gpu(steps: list[str]) -> bool:
+    """Whether a run of `steps` runs the GPU (GPU_STEPS), so it holds the machine-wide GPU lock."""
+    return bool(GPU_STEPS & set(steps))
+
+
+def take_machine_locks(arguments: argparse.Namespace, console: Console) -> locks.Hold | None:
+    """The machine-wide GPU lock for a run whose steps run the GPU, held to its end; any other run takes no lock of its
+    own (its Build.py takes the build lock). Raises locks.LockUnavailable."""
+    if uses_gpu(arguments.steps):
+        return locks.acquire_gpu(locks.wait_seconds(arguments), console.print)
+    return None
+
+
+def longest_run_seconds(target_count: int) -> float:
+    """The longest a run of every step can take with `target_count` fuzz targets: every step's timeout, the sanitized
+    suites' graces and the fuzz step's budget (hardening.fuzz_budget_seconds), which its timeout never exceeds. CI.py's
+    bound on the whole hardening run must exceed it (Tests/Automation/test_hardening.py)."""
+    return (sum(TIMEOUTS.values()) + SUITE_GRACE_SECONDS * len(SANITIZED_SUITES)
+            + hardening.fuzz_budget_seconds(target_count))
+
+
+def run_steps(arguments: argparse.Namespace, console: Console) -> list[Step]:
+    """The selected steps in the stage's order, failing fast: a step after a failed one is reported as not run."""
     steps: list[Step] = []
     failed: Step | None = None
     for key in arguments.steps:
@@ -1099,11 +1229,7 @@ def main(argv: list[str] | None = None) -> int:
                 failed = step
         steps.append(step)
         console.result(step)
-    exit_code = overall_exit_code(steps)
-    console.summary("Hardening summary", steps)
-    if arguments.json:
-        emit_json({"success": exit_code == EXIT_SUCCESS, "steps": [step.to_json() for step in steps]})
-    return exit_code
+    return steps
 
 
 if __name__ == "__main__":

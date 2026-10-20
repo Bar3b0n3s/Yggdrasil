@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import dataclasses
+import functools
 import io
 import json
 import os
@@ -30,14 +31,47 @@ from harness import REPOSITORY_ROOT, engine_client
 sys.path.insert(0, str(REPOSITORY_ROOT / "Scripts"))
 
 import CheckBuildConfig as check_build_config  # noqa: E402  (Scripts/ is on sys.path above)
+import CI as ci_script  # noqa: E402
 import Generate as generate_script  # noqa: E402
 import Hardening as hardening_script  # noqa: E402
 import Test as test_script  # noqa: E402
 from Lib import hardening, process  # noqa: E402
-from Lib.report import Status, Step  # noqa: E402
+from Lib.report import Status, Step, write_junit  # noqa: E402
 
 
 RECORDED_SOAKS = REPOSITORY_ROOT / "Tests" / "Data" / "Hardening"
+# The fuzz step's JUnit report of M17's milestone gate (Tests/Data/LICENSES.md).
+RECORDED_FUZZ = RECORDED_SOAKS / "FuzzM17.xml"
+
+
+def write_fuzz_report(path: Path, seconds: dict[hardening.FuzzTarget, float],
+                      failed: tuple[hardening.FuzzTarget, ...] = (),
+                      shards: tuple[Status, ...] = (Status.PASSED, Status.PASSED)) -> None:
+    """A fuzz step's JUnit report as Hardening.py's step_fuzz writes it: one test case per target, passed with its
+    `seconds` summed over the shards, or failed, then one per shard with the given status."""
+    steps = [Step(hardening.fuzz_target_case_name(target), Status.PASSED,
+                  hardening.fuzz_target_detail(target.iterations, value / target.iterations), value)
+             for target, value in seconds.items()]
+    steps += [Step(hardening.fuzz_target_case_name(target), Status.FAILED,
+                   f"fuzz: {target.reader}: did not run") for target in failed]
+    steps += [Step(f"shard {index}/{len(shards)}", status, "peak private memory 900 MB")
+              for index, status in enumerate(shards)]
+    write_junit(path, "Fuzz.Release.Asan", steps)
+
+
+def recorded_fuzz_targets() -> list[hardening.FuzzTarget]:
+    """The 35 targets RECORDED_FUZZ measured, at 1,000,000 iterations, from its "<Reader> (<Case>)" test case names, so
+    the tests that read it do not depend on Targets.json, which the program's milestones extend."""
+    root = ElementTree.parse(RECORDED_FUZZ).getroot()
+    names = [case.get("name", "") for case in root.iter("testcase") if not case.get("name", "").startswith("shard ")]
+    return [hardening.FuzzTarget(name.split(" (", 1)[0], name.split(" (", 1)[1][:-1],
+                                 hardening.FUZZ_HARDENING_ITERATIONS) for name in names]
+
+
+def reference_targets(count: int) -> list[hardening.FuzzTarget]:
+    """`count` targets at 1,000,000 iterations that no report measures."""
+    return [hardening.FuzzTarget(f"Reader{index:02}", f"Reader{index:02}: fuzz", hardening.FUZZ_HARDENING_ITERATIONS)
+            for index in range(count)]
 
 
 def recorded_soak(name: str) -> dict[str, list[hardening.SoakSample]]:
@@ -144,20 +178,43 @@ class FuzzTests(unittest.TestCase):
         # A development run of fewer iterations needs a smaller limit, never below the unscaled one.
         self.assertEqual(hardening.fuzz_timeout_scale(19, 100_000), 2)
         self.assertEqual(hardening.fuzz_timeout_scale(32, 1_000), 1)
-        # The Bindings case (27,600 CPU-s over every shard at 1,000,000 iterations) stays within its scaled limit
-        # (the default 120 s per case) at every count the step accepts.
-        minimum = hardening.fuzz_minimum_processes(hardening_script.TIMEOUTS["fuzz"])
+        # The Bindings case (27,600 CPU-s over every shard at 1,000,000 iterations, M17's gate measured 26,708) stays
+        # within its scaled limit (the default 120 s per case) at every count the step accepts.
+        targets = reference_targets(hardening.FUZZ_REFERENCE_TARGETS)
+        work = sum(hardening.fuzz_target_seconds(targets, {}).values())
+        minimum = hardening.fuzz_minimum_processes(work, hardening.fuzz_budget_seconds(len(targets)))
         for processes in range(minimum, hardening.FUZZ_MAX_PROCESSES + 1):
             with self.subTest(processes=processes):
-                self.assertLess(27_600 / processes, 120 * hardening.fuzz_timeout_scale(processes))
+                scale = hardening.fuzz_timeout_scale(processes, dearest_seconds=26_708)
+                self.assertLess(27_600 / processes, 120 * scale)
+                self.assertEqual(scale, hardening.fuzz_timeout_scale(processes))
 
-    def test_the_shard_count_must_fit_the_step_timeout(self) -> None:
-        budget = hardening_script.TIMEOUTS["fuzz"]
-        minimum = hardening.fuzz_minimum_processes(budget)
+    def test_a_target_dearer_than_the_reference_allows_raises_the_case_limit(self) -> None:
+        # A target of 60,000 s summed over the shards needs 60,000 / 19 = 3,158 s per shard, more than the reference's
+        # 2,400 s limit: its share must fit 80 % of the limit, ceil(3,158 / (120 x 0.8)) = 33; counted, like the
+        # reference's limit, as if more shards than 19 ran no faster.
+        self.assertEqual(hardening.fuzz_timeout_scale(19, dearest_seconds=60_000), 33)
+        self.assertEqual(hardening.fuzz_timeout_scale(24, dearest_seconds=60_000), 33)
+        self.assertEqual(hardening.fuzz_timeout_scale(14, dearest_seconds=60_000), 45)  # ceil(60,000 / 14 / 96)
+        for processes in range(1, hardening.FUZZ_MAX_PROCESSES + 1):
+            with self.subTest(processes=processes):
+                share = 60_000 / min(processes, hardening.FUZZ_REFERENCE_PROCESSES)
+                limit = hardening.FUZZ_CASE_LIMIT_SECONDS * hardening.fuzz_timeout_scale(processes,
+                                                                                         dearest_seconds=60_000)
+                self.assertLessEqual(share, limit * hardening.FUZZ_BUDGET_SHARE)
+
+    def test_the_shard_count_must_fit_the_step_budget(self) -> None:
+        # Without a measurement the work is the reference run's: 52 min x 19 processes for M15's 35 targets.
+        targets = reference_targets(hardening.FUZZ_REFERENCE_TARGETS)
+        work = sum(hardening.fuzz_target_seconds(targets, {}).values())
+        self.assertAlmostEqual(work, 52 * 60 * 19)
+        budget = hardening.fuzz_budget_seconds(len(targets))
+        self.assertEqual(budget, hardening.FUZZ_REFERENCE_TIMEOUT_SECONDS)
+        minimum = hardening.fuzz_minimum_processes(work, budget)
         self.assertEqual(minimum, 14)  # 52 min x 19 processes in 80 % of 5,400 s
-        self.assertLessEqual(hardening.fuzz_expected_seconds(minimum), budget * hardening.FUZZ_BUDGET_SHARE)
-        self.assertGreater(hardening.fuzz_expected_seconds(minimum - 1), budget * hardening.FUZZ_BUDGET_SHARE)
-        self.assertEqual(hardening.fuzz_minimum_processes(budget, 1_000), 1)
+        self.assertLessEqual(hardening.fuzz_expected_seconds(work, minimum), budget * hardening.FUZZ_BUDGET_SHARE)
+        self.assertGreater(hardening.fuzz_expected_seconds(work, minimum - 1), budget * hardening.FUZZ_BUDGET_SHARE)
+        self.assertEqual(hardening.fuzz_minimum_processes(work / 1_000, budget), 1)  # 1,000 iterations per target
         gib = 1 << 30
         self.assertIsNone(hardening.fuzz_capacity_problem(19, minimum, 24, 19 * gib, gib, budget))
         memory = hardening.fuzz_capacity_problem(11, minimum, 24, 11 * gib, gib, budget)
@@ -170,9 +227,126 @@ class FuzzTests(unittest.TestCase):
         forced = hardening.fuzz_capacity_problem(4, minimum, 24, 64 * gib, gib, budget)
         self.assertIn("--fuzz-processes of at least 14", forced or "")
 
-    def test_the_fuzz_step_refuses_to_start_without_the_memory_its_timeout_needs(self) -> None:
-        # 11 GiB available on a 24-CPU machine gives 11 shards, below the 14 the 5,400 s timeout needs: exit code 3
-        # naming the memory, before any process starts or the AddressSanitizer runtime is looked up.
+    def test_the_measured_report_sizes_the_step(self) -> None:
+        # M17's gate (Tests/Data/Hardening/FuzzM17.xml, its Fuzz-Release-Asan.xml verbatim): 35 targets measured, their
+        # times summed over 18 shards 58,583.848 s; the step took 3,312 s, 1.7 % above the 3,255 s the model expects.
+        targets = recorded_fuzz_targets()
+        self.assertEqual(len(targets), 35)
+        costs = hardening.read_fuzz_costs(RECORDED_FUZZ)
+        self.assertEqual(set(costs), {hardening.fuzz_target_case_name(target) for target in targets})
+        seconds = hardening.fuzz_target_seconds(targets, costs)
+        self.assertAlmostEqual(seconds["Bindings"], 26_708.090, places=3)
+        self.assertAlmostEqual(seconds["ProjectLock"], 10.443, places=3)
+        work = sum(seconds.values())
+        self.assertAlmostEqual(work, 58_583.848, places=2)
+        self.assertLess(abs(hardening.fuzz_expected_seconds(work, 18) - 3_312) / 3_312, 0.02)
+        budget = hardening.fuzz_budget_seconds(len(targets))
+        minimum = hardening.fuzz_minimum_processes(work, budget)
+        self.assertEqual(minimum, 14)  # the resource check stays 14 logical CPUs and 14 GiB with M17's costs
+        # The timeout follows the costs and the shard count that runs, and never exceeds the budget.
+        share = hardening.FUZZ_BUDGET_SHARE
+        self.assertAlmostEqual(hardening.fuzz_timeout_seconds(work, 18, budget), work / 18 / share)
+        # Shards beyond the reference run's 19, or beyond the logical CPUs, shorten nothing: the timeout counts at most
+        # that many, so 24 shards on this 24-CPU machine get the timeout of 19 (3,854 s, where 24 would give 3,051 s
+        # against the 3,083 s the step needs if the five extra shards run no faster).
+        self.assertAlmostEqual(hardening.fuzz_timeout_seconds(work, 24, budget, 24), work / 19 / share)
+        self.assertAlmostEqual(hardening.fuzz_timeout_seconds(work, 32, budget, 24), work / 19 / share)
+        self.assertAlmostEqual(hardening.fuzz_timeout_seconds(work, 18, budget, 16), work / 16 / share)
+        for processes in range(minimum, hardening.FUZZ_MAX_PROCESSES + 1):
+            with self.subTest(processes=processes):
+                timeout = hardening.fuzz_timeout_seconds(work, processes, budget, 24)
+                self.assertLessEqual(timeout, budget)
+                self.assertGreaterEqual(timeout, work / min(processes, 24) / share)
+        # The dearest measured target, Bindings, fits the reference's case limit, so the limit stays the reference's.
+        self.assertEqual(hardening.fuzz_timeout_scale(18, dearest_seconds=max(seconds.values())), 22)
+
+    def test_dearer_measured_targets_raise_the_minimum_and_the_timeout(self) -> None:
+        # Every target twice as dear as in M17's report: the work doubles, so the minimum shard count rises from 14 to
+        # ceil(2 x 58,583.848 / 4,320) = 28, and the timeout at a given count doubles until the budget bounds it.
+        targets = recorded_fuzz_targets()
+        measured = hardening.read_fuzz_costs(RECORDED_FUZZ)
+        work = sum(hardening.fuzz_target_seconds(targets, measured).values())
+        dearer = sum(hardening.fuzz_target_seconds(targets, {name: 2 * cost for name, cost in measured.items()})
+                     .values())
+        budget = hardening.fuzz_budget_seconds(len(targets))
+        self.assertEqual(hardening.fuzz_minimum_processes(dearer, budget), 28)
+        self.assertAlmostEqual(hardening.fuzz_timeout_seconds(1.25 * work, 19, budget),
+                               1.25 * hardening.fuzz_timeout_seconds(work, 19, budget))
+        self.assertEqual(hardening.fuzz_timeout_seconds(dearer, 28, budget), budget)
+
+    def test_a_target_not_yet_measured_costs_the_measured_average(self) -> None:
+        targets = [hardening.FuzzTarget("PakReader", "PakReader: fuzz", hardening.FUZZ_HARDENING_ITERATIONS),
+                   hardening.FuzzTarget("SpriteSheet", "SpriteSheet: fuzz", hardening.FUZZ_HARDENING_ITERATIONS),
+                   hardening.FuzzTarget("ZipReader", "ZipReader: fuzz", hardening.FUZZ_HARDENING_ITERATIONS)]
+        with tempfile.TemporaryDirectory(prefix="FuzzCosts-") as directory:
+            report = Path(directory) / "Fuzz-Release-Asan.xml"
+            write_fuzz_report(report, {targets[0]: 100.0, targets[2]: 300.0})
+            costs = hardening.read_fuzz_costs(report)
+        seconds = hardening.fuzz_target_seconds(targets, costs)
+        self.assertAlmostEqual(seconds["PakReader"], 100.0)
+        self.assertAlmostEqual(seconds["SpriteSheet"], 200.0)  # the average of 100 and 300 per 1,000,000 iterations
+        self.assertAlmostEqual(seconds["ZipReader"], 300.0)
+        # A development run of fewer iterations of the same targets is priced from the same costs.
+        fewer = [dataclasses.replace(target, iterations=1_000) for target in targets]
+        self.assertAlmostEqual(sum(hardening.fuzz_target_seconds(fewer, costs).values()), 0.6)
+
+    def test_without_a_measurement_the_reference_scaled_by_the_target_count_sizes_the_step(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="FuzzCosts-") as directory:
+            self.assertEqual(hardening.read_fuzz_costs(Path(directory) / "Fuzz-Release-Asan.xml"), {})
+        reference = 52 * 60 * 19 / 35
+        for count in (35, 46, 70):
+            with self.subTest(targets=count):
+                targets = reference_targets(count)
+                work = sum(hardening.fuzz_target_seconds(targets, {}).values())
+                self.assertAlmostEqual(work, reference * count)
+                budget = hardening.fuzz_budget_seconds(count)
+                self.assertAlmostEqual(budget, 5_400 * count / 35)
+                # Each target brings its share of the budget, so targets of the reference's average cost keep the
+                # minimum at 14 while the timeout grows with them.
+                self.assertEqual(hardening.fuzz_minimum_processes(work, budget), 14)
+                self.assertAlmostEqual(hardening.fuzz_timeout_seconds(work, 18, budget), reference * count / 18 / 0.8)
+        # A measurement of none of the targets (every one renamed or new) is no measurement either.
+        targets = [hardening.FuzzTarget("New", "New: fuzz", hardening.FUZZ_HARDENING_ITERATIONS)]
+        self.assertAlmostEqual(hardening.fuzz_target_seconds(targets, {"Old (Old: fuzz)": 1.0})["New"], reference)
+
+    def test_a_failed_development_or_damaged_report_measures_nothing(self) -> None:
+        target = hardening.FuzzTarget("PakReader", "PakReader: fuzz", hardening.FUZZ_HARDENING_ITERATIONS)
+        other = hardening.FuzzTarget("ZipReader", "ZipReader: fuzz", hardening.FUZZ_HARDENING_ITERATIONS)
+        with tempfile.TemporaryDirectory(prefix="FuzzCosts-") as directory:
+            report = Path(directory) / "Fuzz-Release-Asan.xml"
+            # A failed run: a shard that crashed or was stopped wrote none of its times, so no target's time counts.
+            write_fuzz_report(report, {target: 100.0}, failed=(other,))
+            with self.assertRaisesRegex(ValueError, "failed run"):
+                hardening.read_fuzz_costs(report)
+            write_fuzz_report(report, {target: 100.0, other: 300.0}, shards=(Status.PASSED, Status.TIMEOUT))
+            with self.assertRaisesRegex(ValueError, "failed run"):
+                hardening.read_fuzz_costs(report)
+            # A development run of 1,000 iterations counts each case's fixed setup a thousand times over.
+            write_fuzz_report(report, {dataclasses.replace(target, iterations=1_000): 0.5})
+            self.assertEqual(hardening.read_fuzz_costs(report), {})
+            # A target with a time of 0 measured nothing.
+            write_fuzz_report(report, {target: 0.0, other: 300.0})
+            self.assertEqual(hardening.read_fuzz_costs(report), {hardening.fuzz_target_case_name(other): 300e-6})
+            report.write_text("<testsuites><testsuite", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "cannot be read"):
+                hardening.read_fuzz_costs(report)
+
+    def test_ci_bounds_the_hardening_run_above_its_steps_timeouts(self) -> None:
+        # CI.py bounds the whole Hardening.py run above the sum of its steps' timeouts (ADR 0024 "Integration"), the
+        # sanitized suites' 60 s graces included; the fuzz step's timeout is at most its budget, which grows with the
+        # targets, so the committed targets must fit.
+        self.assertEqual(hardening_script.longest_run_seconds(35),
+                         sum(hardening_script.TIMEOUTS.values()) + 2 * 60.0 + hardening.fuzz_budget_seconds(35))
+        bound = ci_script.TIMEOUTS["hardening"]
+        self.assertGreater(bound, hardening_script.longest_run_seconds(len(hardening.read_fuzz_targets())))
+        # The limit the documents state (ADR 0028 decision 16, CI.py's TIMEOUTS): up to 49 targets fit, 50 do not.
+        self.assertGreater(bound, hardening_script.longest_run_seconds(49))
+        self.assertLessEqual(bound, hardening_script.longest_run_seconds(50))
+
+    def test_the_fuzz_step_refuses_to_start_without_the_memory_its_budget_needs(self) -> None:
+        # 11 GiB available on a 24-CPU machine gives 11 shards, below the 14 the 5,400 s budget needs without a
+        # measurement: exit code 3 naming the memory, before any process starts or the AddressSanitizer runtime is
+        # looked up.
         arguments = quiet_parse(hardening_script.parse_arguments, ["--steps", "fuzz"])
         with tempfile.TemporaryDirectory(prefix="FuzzStep-") as directory:
             output = Path(directory)
@@ -180,6 +354,9 @@ class FuzzTests(unittest.TestCase):
             tests.parent.mkdir()
             tests.write_bytes(b"")
             with (mock.patch.object(hardening_script, "asan_output_directory", return_value=output),
+                  mock.patch.object(hardening_script, "FUZZ_JUNIT", output / "Fuzz-Release-Asan.xml"),
+                  mock.patch.object(hardening_script, "fuzz_costs_path", return_value=output / "Kept.xml"),
+                  mock.patch.object(hardening, "FUZZ_COMMITTED_COSTS", output / "Committed.xml"),
                   mock.patch.object(hardening, "available_memory_bytes", return_value=11 << 30),
                   mock.patch.object(hardening_script.os, "cpu_count", return_value=24),
                   mock.patch.object(hardening, "asan_environment", side_effect=AssertionError("looked up")),
@@ -192,16 +369,37 @@ class FuzzTests(unittest.TestCase):
         self.assertIn("MB of available memory", step.detail)
         self.assertEqual((step.data["processes"], step.data["minimumProcesses"]), (11, 14))
 
-    def test_each_shard_runs_with_the_case_limit_of_its_share(self) -> None:
-        # 64 GiB and 24 CPUs give 24 shards, each with --test-timeout-scale=max(20, ceil(20 * 19 / 24)) = 20.
+    def run_fuzz_step(self, previous: Callable[[Path], None] | None = None, committed: Path | None = None,
+                      argv: tuple[str, ...] = (), passing: bool = False) -> tuple[Step, list[list[str]], Path, Path]:
+        """Runs the fuzz step over the 35 targets of M17's report (recorded_fuzz_targets, so the committed Targets.json,
+        which the program's milestones extend, changes nothing here) on a machine of 24 logical CPUs and 64 GiB of
+        available memory with shards that finish at once. `previous` writes the kept measurement (the last full,
+        passing run's report, machine-wide) at the path it is given first; `committed` stands for M17's committed
+        measurement (none by default); `argv` adds options. The shards report nothing, or with `passing` cover their
+        share of every target and record 1 s per target. Returns the step, each shard's command, the step's report
+        path and the kept measurement's path."""
         commands: list[list[str]] = []
+        targets = recorded_fuzz_targets()
 
         class FinishedShard:
             pid = 1
             returncode = 0
 
-            def __init__(self, command: list[str], **options: object) -> None:
+            def __init__(self, command: list[str], **options: Any) -> None:
                 commands.append(command)
+                if not passing:
+                    return
+                iterations = int(next(option for option in command if option.startswith("--fuzz-iterations="))
+                                 .split("=", 1)[1])
+                index, count = (int(value) for value in next(option for option in command
+                                                             if option.startswith("--fuzz-shard="))
+                                .split("=", 1)[1].split("/"))
+                begin, end = iterations * index // count, iterations * (index + 1) // count
+                options["stderr"].write("".join(f"{report_line(target.case, begin, end, iterations)}\n"
+                                                for target in targets).encode("utf-8"))
+                junit = Path(next(option for option in command if option.startswith("--out=")).split("=", 1)[1])
+                cases = "".join(f'<testcase name="{target.case}" time="1.0"/>' for target in targets)
+                junit.write_text(f"<testsuites><testsuite>{cases}</testsuite></testsuites>", encoding="utf-8")
 
             def poll(self) -> int:
                 return 0
@@ -212,20 +410,33 @@ class FuzzTests(unittest.TestCase):
             def kill(self) -> None:
                 pass
 
-        arguments = quiet_parse(hardening_script.parse_arguments, ["--steps", "fuzz"])
-        with tempfile.TemporaryDirectory(prefix="FuzzStep-") as directory:
-            output = Path(directory)
-            tests = output / "Tests" / test_script.paths.executable_name("Tests")
-            tests.parent.mkdir()
-            tests.write_bytes(b"")
-            with (mock.patch.object(hardening_script, "asan_output_directory", return_value=output),
-                  mock.patch.object(hardening_script, "FUZZ_JUNIT", output / "Fuzz-Release-Asan.xml"),
-                  mock.patch.object(hardening, "available_memory_bytes", return_value=64 << 30),
-                  mock.patch.object(hardening_script.os, "cpu_count", return_value=24),
-                  mock.patch.object(hardening, "asan_environment", return_value={}),
-                  mock.patch.object(hardening_script.subprocess, "Popen", FinishedShard),
-                  contextlib.redirect_stderr(io.StringIO())):
-                step = hardening_script.step_fuzz(arguments, hardening_script.Console(True))
+        arguments = quiet_parse(hardening_script.parse_arguments, ["--steps", "fuzz", *argv])
+        directory = Path(tempfile.mkdtemp(prefix="FuzzStep-"))
+        self.addCleanup(shutil.rmtree, directory, ignore_errors=True)
+        tests = directory / "Tests" / test_script.paths.executable_name("Tests")
+        tests.parent.mkdir()
+        tests.write_bytes(b"")
+        report = directory / "Fuzz-Release-Asan.xml"
+        kept = directory / "Machine" / "fuzz-costs" / "Fuzz-Release-Asan.xml"
+        if previous is not None:
+            kept.parent.mkdir(parents=True)
+            previous(kept)
+        with (mock.patch.object(hardening_script, "asan_output_directory", return_value=directory),
+              mock.patch.object(hardening_script, "FUZZ_JUNIT", report),
+              mock.patch.object(hardening_script, "fuzz_costs_path", return_value=kept),
+              mock.patch.object(hardening, "FUZZ_COMMITTED_COSTS", committed or directory / "NoCommittedCosts.xml"),
+              mock.patch.object(hardening, "read_fuzz_targets", return_value=targets),
+              mock.patch.object(hardening, "available_memory_bytes", return_value=64 << 30),
+              mock.patch.object(hardening_script.os, "cpu_count", return_value=24),
+              mock.patch.object(hardening, "asan_environment", return_value={}),
+              mock.patch.object(hardening_script.subprocess, "Popen", FinishedShard),
+              contextlib.redirect_stderr(io.StringIO())):
+            step = hardening_script.step_fuzz(arguments, hardening_script.Console(True))
+        return step, commands, report, kept
+
+    def test_each_shard_runs_with_the_case_limit_of_its_share(self) -> None:
+        # 64 GiB and 24 CPUs give 24 shards, each with --test-timeout-scale=max(20, ceil(20 * 19 / 24)) = 20.
+        step, commands, _, _ = self.run_fuzz_step()
         self.assertEqual(len(commands), 24)
         self.assertEqual(hardening.fuzz_timeout_scale(24), 20)
         for index, command in enumerate(commands):
@@ -233,6 +444,81 @@ class FuzzTests(unittest.TestCase):
             self.assertIn(f"--fuzz-shard={index}/24", command)
         self.assertEqual(step.data["timeoutScale"], 20)
         self.assertEqual(step.status, Status.FAILED)  # the shards wrote no report line
+
+    def test_the_fuzz_step_is_sized_from_the_previous_runs_report(self) -> None:
+        # Without a measurement the reference run sizes the step (52 min x 19 shards for the 35 targets); with the
+        # kept one (M17's here), its measured costs do (58,583.848 s summed over the shards). 24 shards on 24 CPUs get
+        # the timeout of 19, beyond which more shards run no faster.
+        unmeasured, _, _, _ = self.run_fuzz_step()
+        self.assertEqual((unmeasured.data["measuredTargets"], unmeasured.data["costs"]), (0, "reference"))
+        self.assertAlmostEqual(unmeasured.data["workSeconds"], 52 * 60 * 19)
+        self.assertAlmostEqual(unmeasured.data["timeoutSeconds"], 52 * 60 * 19 / 19 / hardening.FUZZ_BUDGET_SHARE)
+        measured, commands, report, kept = self.run_fuzz_step(lambda path: shutil.copyfile(RECORDED_FUZZ, path))
+        self.assertEqual(len(commands), 24)
+        self.assertEqual((measured.data["measuredTargets"], measured.data["costs"]),
+                         (35, test_script.paths.display_path(kept)))
+        self.assertAlmostEqual(measured.data["workSeconds"], 58_583.848, places=2)
+        self.assertEqual(measured.data["minimumProcesses"], 14)
+        self.assertAlmostEqual(measured.data["timeoutSeconds"], 58_583.848 / 19 / hardening.FUZZ_BUDGET_SHARE,
+                               places=2)
+        # The step wrote its own report with this run, whose shards reported nothing; that failed run measured
+        # nothing, so the kept measurement stays M17's for the next run, in this checkout or any other.
+        with self.assertRaisesRegex(ValueError, "failed run"):
+            hardening.read_fuzz_costs(report)
+        self.assertEqual(kept.read_bytes(), RECORDED_FUZZ.read_bytes())
+        self.assertIsNone(measured.data["keptCosts"])
+
+    def test_before_the_first_kept_measurement_the_committed_one_sizes_the_step(self) -> None:
+        # A slot that never ran a hardened gate, or a machine whose kept report is damaged, is sized from M17's
+        # committed measurement, not from the reference.
+        for name, previous in (("no kept measurement", None),
+                               ("a damaged one", lambda path: path.write_text("<testsuites", encoding="utf-8"))):
+            with self.subTest(name):
+                step, _, _, _ = self.run_fuzz_step(previous, committed=RECORDED_FUZZ)
+                self.assertEqual((step.data["measuredTargets"], step.data["costs"]),
+                                 (35, test_script.paths.display_path(RECORDED_FUZZ)))
+                self.assertAlmostEqual(step.data["workSeconds"], 58_583.848, places=2)
+
+    def test_a_full_passing_run_becomes_the_kept_measurement_and_a_development_run_does_not(self) -> None:
+        # Each shard records 1 s per target over 24 shards: 24 s per target, so 24 us per iteration at 1,000,000.
+        keep_m17 = functools.partial(shutil.copyfile, RECORDED_FUZZ)
+        step, _, report, kept = self.run_fuzz_step(keep_m17, passing=True)
+        self.assertEqual(step.status, Status.PASSED, step.detail)
+        self.assertEqual(kept.read_bytes(), report.read_bytes())
+        self.assertEqual(step.data["keptCosts"], test_script.paths.display_path(kept))
+        costs = hardening.read_fuzz_costs(kept)
+        self.assertEqual(len(costs), 35)
+        self.assertTrue(all(abs(cost - 24e-6) < 1e-12 for cost in costs.values()), costs)
+        # A development run of fewer iterations passes as a warning and keeps no measurement, wherever it runs.
+        development, _, report, kept = self.run_fuzz_step(keep_m17, argv=("--fuzz-iterations", "1000"), passing=True)
+        self.assertEqual(development.status, Status.WARNING, development.detail)
+        self.assertNotEqual(report.read_bytes(), RECORDED_FUZZ.read_bytes())
+        self.assertEqual(kept.read_bytes(), RECORDED_FUZZ.read_bytes())
+        self.assertIsNone(development.data["keptCosts"])
+
+    def test_more_shards_than_cpus_get_a_timeout_the_machine_can_meet(self) -> None:
+        # --fuzz-processes 32 on 24 logical CPUs: perfect scaling on 24 cores needs W / 24, so the timeout must be at
+        # least W / 24 over 80 % (it was W / 32 over 80 %, 2,288 s, below the 2,441 s the machine can deliver).
+        step, commands, _, _ = self.run_fuzz_step(lambda path: shutil.copyfile(RECORDED_FUZZ, path),
+                                                  argv=("--fuzz-processes", "32"))
+        self.assertEqual(len(commands), 32)
+        self.assertGreaterEqual(step.data["timeoutSeconds"], 58_583.848 / 24 / hardening.FUZZ_BUDGET_SHARE)
+        self.assertLessEqual(step.data["timeoutSeconds"], step.data["budgetSeconds"])
+
+    def test_the_fuzz_step_refuses_a_machine_too_small_for_its_measured_costs(self) -> None:
+        # Every target twice as dear as M17 measured needs 28 shards, more than this machine's 24 logical CPUs: exit
+        # code 3 naming them, before any shard starts.
+        def dearer(path: Path) -> None:
+            measured = hardening.read_fuzz_costs(RECORDED_FUZZ)
+            write_fuzz_report(path, {target: 2 * measured[hardening.fuzz_target_case_name(target)] * target.iterations
+                                     for target in recorded_fuzz_targets()})
+
+        step, commands, _, _ = self.run_fuzz_step(dearer)
+        self.assertEqual(commands, [])
+        self.assertEqual(step.status, Status.FAILED)
+        self.assertEqual(step.exit_code, hardening_script.EXIT_INIT_FAILED)
+        self.assertIn("at least 28 logical CPUs (24 here)", step.detail)
+        self.assertEqual((step.data["processes"], step.data["minimumProcesses"]), (24, 28))
 
     def test_shards_must_cover_every_iteration_exactly_once(self) -> None:
         # Small counts keep the lines short; read_fuzz_targets refuses any count but 1,000,000 in a file, so the targets

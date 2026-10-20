@@ -26,9 +26,11 @@ namespace Engine {
 	// prefab.create {entity, path, replaceWithInstance?}: writes the entity's subtree as a new prefab asset at
 	// project-relative `path` (below Assets/, extension .prefab) with its .meta (Prefab::CreateFromEntity: nested instances
 	// are flattened, §1.2, §5.5). With replaceWithInstance (default false) the entity is replaced by an instance of the new
-	// prefab at the same place in the hierarchy, keeping its root ID (so references to it survive). Supports dry runs
-	// (§13.4: the files go to the overlay and the scene change to the dry run's copy). The result names the instance root
-	// `instance`, empty without replaceWithInstance (prefab.instantiate names its new root `entity`).
+	// prefab at the same place in the hierarchy, keeping its root ID (so references to it survive). replaceWithInstance
+	// refuses a subtree holding a member of another instance (Utils::FindKeptPrefabMember, as entity.destroy refuses
+	// deleting one): that instance's next update could not keep the change. Supports dry runs (§13.4: the files go to the
+	// overlay and the scene change to the dry run's copy). The result names the instance root `instance`, empty without
+	// replaceWithInstance (prefab.instantiate names its new root `entity`).
 	struct PrefabCreateParams
 	{
 		std::string Entity{};
@@ -129,7 +131,8 @@ namespace Engine {
 	namespace Automation {
 
 		// prefab.create. Errors: NotFound (entity); InvalidArgument for a path outside Assets/ or without .prefab;
-		// AlreadyExists for an existing file; InvalidState for an ambiguous reference (ADR 0006 decision 32).
+		// AlreadyExists for an existing file; InvalidState for an ambiguous reference (ADR 0006 decision 32) and, with
+		// replaceWithInstance, for a member of another instance (located at /entity, with a hint).
 		[[nodiscard]] Result<PrefabCreateResult> PrefabCreate(EditorMethodContext& context, const PrefabCreateParams& params);
 		// prefab.instantiate. Errors: NotFound (prefab or parent); Validation for an invalid transform (located under
 		// /transform) or a unique-per-scene collision; those of InstantiatePrefabAsset; those of entity.update's components

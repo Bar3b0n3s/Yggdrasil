@@ -32,8 +32,9 @@ Steps, selected with --steps (default: all, in this order):
             decision 16): a stub that raises NotImplementedError("contract stub ...") in Contract.PythonStubFiles
             (contract-stub), and unittest/pytest skip markers in Contract.PythonTestFiles (test-skip): the skip,
             skipIf, skipUnless and expectedFailure decorators, pytest.mark.skip, skipif and xfail, self.skipTest(...)
-            and raising SkipTest. --allow-contract-stubs (contract mode, the commit of a milestone's contract task)
-            reports what it found as allowed instead of as findings.
+            and raising SkipTest. --allow-contract-stubs (contract mode, a contract checkpoint's targeted runs,
+            Docs/Decisions/0028-backlog-program.md decision 11) reports what it found as allowed instead of as
+            findings.
   naming    identifier naming. clang-tidy runs with .clang-tidy on the flags from compile_commands.json when it is
             available, on every source and through them, with its header filter, on the headers that a source of a
             project with the same flags includes outside #if blocks; any other header gets a translation unit of its
@@ -4226,9 +4227,10 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--allow-contract-stubs",
         action="store_true",
-        help="contract mode, only for the commit of a milestone's contract task (Roadmap rule 3; PreCommit.py "
-        "--contract): the contract step counts ENGINE_CONTRACT_STUB and skipped test cases as allowed instead of "
-        "reporting them. The self-test always runs strict",
+        help="contract mode (Roadmap rule 3), for a contract checkpoint's targeted runs on a milestone branch (ADR "
+        "0028 decision 11; PreCommit.py --contract and CI.py --contract pass it too, but no gate run of the backlog "
+        "program uses them): the contract step counts ENGINE_CONTRACT_STUB and skipped test cases as allowed instead "
+        "of reporting them. The self-test always runs strict",
     )
     parser.add_argument(
         "--self-test",

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import unittest
+from typing import Any
 
 from harness import AutomationTestCase, engine_client, read_json
 
@@ -106,6 +108,69 @@ class PrefabTests(AutomationTestCase):
         self.assertEqual(code, 0, output)
         self.assertNotIn("REFLECTION_VARIANT_UNRESOLVED", output)
 
+    def test_destroying_a_prefab_member_is_refused_with_a_hint(self) -> None:
+        # E-PFB-REFUSE (ADR 0028 decision 16): a deleted member came back with its instance's next prefab update, so the
+        # edit scene refuses it, alone or as a batch op, and names the ways out: deactivate it or unpack the instance.
+        client, _ = self.open_editor_with_scene()
+        client.call("entity.create", {"name": "Lamp", "components": {"MeshRenderer": {"Mesh": "engine://Meshes/Cube"}}})
+        client.call("entity.create", {"name": "Bulb", "parent": "/Lamp"})
+        client.call("prefab.create", {"entity": "/Lamp", "path": "Assets/Prefabs/Lamp.prefab",
+                                      "replaceWithInstance": True})
+        client.call("entity.create", {"name": "Other"})
+        before = client.call("scene.tree", {"format": "json"})["entities"]
+        undo_entries = len(client.call("edit.history")["entries"])
+
+        with self.assertRaises(engine_client.EngineError) as refused:
+            client.call("entity.destroy", {"entities": ["/Other", "/Lamp/Bulb"]})
+        self.assert_engine_error(refused.exception, engine_client.INVALID_STATE, "InvalidState")
+        pointers = [issue["pointer"] for issue in refused.exception.issues]
+        self.assertEqual(pointers, ["/entities/1"], refused.exception.data)
+        hint = refused.exception.data.get("hint", "")
+        self.assertIn("prefab.unpack", hint)
+        self.assertIn("entity.update", hint)
+        with self.assertRaises(engine_client.EngineError) as batched:
+            client.call("edit.batch", {"ops": [{"method": "entity.destroy", "params": {"entities": ["/Other"]}},
+                                               {"method": "entity.destroy", "params": {"entities": ["/Lamp/Bulb"]}}]})
+        self.assert_engine_error(batched.exception, engine_client.INVALID_STATE, "InvalidState")
+        self.assertEqual(client.call("scene.tree", {"format": "json"})["entities"], before)
+        self.assertEqual(len(client.call("edit.history")["entries"]), undo_entries)
+
+        # The ways out, called exactly as the hint writes them: a deactivated member stays so across an update of its
+        # instance (here by applying another instance of the prefab), and an unpacked instance's entities are ordinary
+        # ones.
+        client.call("prefab.instantiate", {"prefab": "Assets/Prefabs/Lamp.prefab", "name": "Lamp2"})
+        client.call("entity.update", hinted_params(hint, "entity.update"))
+        self.assertEqual(client.call("prefab.apply", {"instance": "/Lamp2"})["updatedInstances"], 2)
+        self.assertFalse(client.call("entity.get", {"entity": "/Lamp/Bulb"})["entity"]["active"])
+        self.assertTrue(client.call("entity.get", {"entity": "/Lamp2/Bulb"})["entity"]["active"])
+        client.call("prefab.unpack", hinted_params(hint, "prefab.unpack"))
+        destroyed = client.call("entity.destroy", {"entities": ["/Lamp/Bulb"]})["destroyed"]
+        self.assertEqual(len(destroyed), 1)
+
+    def test_replacing_a_prefab_member_with_an_instance_is_refused(self) -> None:
+        # The other removal of a member (ADR 0028 decision 16): its instance lost it to the new instance, whose root
+        # kept its id, and every later update of the instance failed. Saving the member as a prefab without replacing it
+        # works.
+        client, root = self.open_editor_with_scene()
+        client.call("entity.create", {"name": "Lamp"})
+        client.call("entity.create", {"name": "Bulb", "parent": "/Lamp"})
+        client.call("prefab.create", {"entity": "/Lamp", "path": "Assets/Prefabs/Lamp.prefab",
+                                      "replaceWithInstance": True})
+        with self.assertRaises(engine_client.EngineError) as refused:
+            client.call("prefab.create", {"entity": "/Lamp/Bulb", "path": "Assets/Prefabs/Bulb.prefab",
+                                          "replaceWithInstance": True})
+        self.assert_engine_error(refused.exception, engine_client.INVALID_STATE, "InvalidState")
+        pointers = [issue["pointer"] for issue in refused.exception.issues]
+        self.assertEqual(pointers, ["/entity"], refused.exception.data)
+        self.assertEqual(hinted_params(refused.exception.data.get("hint", ""), "prefab.unpack"), {"instance": "/Lamp"})
+        self.assertFalse((root / "Assets" / "Prefabs" / "Bulb.prefab").exists())
+        components = client.call("entity.get", {"entity": "/Lamp/Bulb"})["entity"]["components"]
+        self.assertIn("PrefabLink", components)
+        self.assertNotIn("Prefab", components)
+
+        client.call("prefab.create", {"entity": "/Lamp/Bulb", "path": "Assets/Prefabs/Bulb.prefab"})
+        self.assertTrue((root / "Assets" / "Prefabs" / "Bulb.prefab").is_file())
+
     def test_prefab_errors_and_dry_run(self) -> None:
         client, root = self.open_editor_with_scene()
         client.call("entity.create", {"name": "Plain"})
@@ -115,6 +180,15 @@ class PrefabTests(AutomationTestCase):
         result = client.call("prefab.create", {"entity": "/Plain", "path": "Assets/Plain.prefab", "dryRun": True})
         self.assertTrue(result["dryRun"])
         self.assertFalse((root / "Assets" / "Plain.prefab").exists())
+
+
+def hinted_params(hint: str, method: str) -> dict[str, Any]:
+    """The params of the call `hint` writes as "<method> {...}" (a refusal's way out, written to be copied)."""
+    start = hint.index(f"{method} ") + len(method) + 1
+    params, _ = json.JSONDecoder().raw_decode(hint, start)
+    if not isinstance(params, dict):
+        raise AssertionError(f"the hint's {method} call has no params object: {hint}")
+    return params
 
 
 if __name__ == "__main__":

@@ -52,7 +52,8 @@ Skipped test cases (Roadmap rule 3, Docs/Decisions/0004-contract-stub-gate.md): 
 --list-test-cases --reporters=xml --out=<file>; each test case carries its suite and its doctest::skip flag). The only
 test cases that may stay skipped are the child-process targets of the ChildTargets suite (Test::ChildTargetSuite): a
 skipped test case in any other suite, such as a contract task's not yet implemented test, fails the run and is named.
---allow-skips (contract mode, only for the commit of a milestone's contract task: PreCommit.py --contract) reports them
+--allow-skips (contract mode, a contract checkpoint's targeted runs on a milestone branch, ADR 0028 decision 11;
+PreCommit.py --contract and CI.py --contract pass it too, but no gate run of the backlog program uses them) reports them
 without failing. The counts are in the step detail and, with --json, in the step's "skipCheck" object.
 
 The automation suite (Roadmap M4, Docs/Decisions/0008-m4-decisions.md decisions 33 and 34; its skip rule is
@@ -126,17 +127,17 @@ with one step, "games". <Name> in the names of the steps and reports is the .epr
     directory (no Library/, no Build/), the strict rendering editor of that configuration on them (`--headless
     --renderer vulkan --audio-device none --automation --strict --expect-no-gpu-errors`, with --user-data-dir and
     --export-root in the temporary directory), then first the copy's build settings (games.check_build_settings:
-    StartScene and Export.BuildScenes set, as the demo acceptance of Roadmap M17 and M18 asks, and Export.BuildScenes
-    listing StartScene, the demos' convention; its lines come first, and the other checks run either way), script.check
-    and project.validate (warnings included) clean, project.upgrade {dryRun: true} without a changed file (each one
-    names `Editor --headless --project <dir> --upgrade`), and test.run {} passed in Editor mode with a suite row for
-    every Testing.Suites entry of that mode, no skipped case row and a passing "replay:<path>" row at the committed
-    FinalStateHash for every replay Testing.Replays matches; at least one of those replays must have input events
-    (games.check_replay_acceptance: a game whose Testing.Replays matches no replay, or only replays without input,
-    fails, as the demo acceptance of Roadmap M16 to M18 asks); every such replay with input events must then fail
-    input.replay {verify, strictHash, withoutInput} (the input check, M16 friction S2-01: a replay whose verification
-    passes without its input proves nothing); a .replay below Assets/ that Testing.Replays leaves out fails it; after
-    session.shutdown the editor must exit 0 and the copy must be unchanged outside Library/;
+    StartScene and Export.BuildScenes set, as the demo acceptance of Roadmap M17, M25 and M27 asks, and
+    Export.BuildScenes listing StartScene, the demos' convention; its lines come first, and the other checks run either
+    way), script.check and project.validate (warnings included) clean, project.upgrade {dryRun: true} without a changed
+    file (each one names `Editor --headless --project <dir> --upgrade`), and test.run {} passed in Editor mode with a
+    suite row for every Testing.Suites entry of that mode, no skipped case row and a passing "replay:<path>" row at the
+    committed FinalStateHash for every replay Testing.Replays matches; at least one of those replays must have input
+    events (games.check_replay_acceptance: a game whose Testing.Replays matches no replay, or only replays without
+    input, fails, as the demo acceptance of Roadmap M16, M17, M25 and M27 asks); every such replay with input events
+    must then fail input.replay {verify, strictHash, withoutInput} (the input check, M16 friction S2-01: a replay whose
+    verification passes without its input proves nothing); a .replay below Assets/ that Testing.Replays leaves out fails
+    it; after session.shutdown the editor must exit 0 and the copy must be unchanged outside Library/;
   - "games <Name> Dist", which the Release editor drives (in the Release half's session when Release runs too):
     project.export {config: Dist, testing: true}, whose result's executable must lie below its outputDirectory and
     whose manifest (Game.json, on macOS in the bundle's Contents/Resources) names the game (games.read_game_name), each
@@ -179,6 +180,14 @@ count (the product owner's decision, Docs/Decisions/0024-m15-contract.md decisio
 Golden: the hardening stage's sanitized unit run leaves out Fuzz, whose cases its fuzz step runs over a superset of the
 same iterations.
 
+Machine-wide locks (Scripts/Lib/locks.py; Docs/Architecture.md §2.3, ADR 0028 decision 16): before its first suite, a
+run that includes a GPU-using suite (gpu, golden, feature, automation, export, determinism or games; --update-golden
+is a golden run) takes the GPU lock, shared by every checkout of the repository, and holds it to its end, so one GPU
+run goes at a time; every other run only waits until no gate (CI.py) runs. Both wait while a gate runs, unless the run
+is inside it or inside another run that holds a lock (Hardening.py's suites). The wait reports the holder (pid,
+worktree, command) and lasts at most --lock-timeout seconds (exit code 5); --no-wait fails at once instead (exit code
+3). --merge-coverage takes no lock.
+
 --junit writes bin/TestResults/<Suite>-<Config>[-<Cap>].xml (JUnit; test suite named "<Suite>.<Config>[.<Cap>]", where
 <Cap> is Vulkan13 or Vulkan14 for the gpu suite; the automation suite has one test suite per test directory and one for
 the coverage gate; the feature suite keeps the editor's own suites FeatureTest and FeatureTest.coverage; the determinism
@@ -188,8 +197,9 @@ the crash.
 
 Exit codes: 0 every requested suite that exists passed, 1 a suite failed or none of the requested suites exists
 yet, 2 usage error, 3 a test executable or the MCP virtual environment is missing (build it, or run Setup.py), a
-report the export or determinism suite reads is missing or stale (run the suite that writes it), or a game's
-provenance files are missing or git fails, 5 timeout.
+report the export or determinism suite reads is missing or stale (run the suite that writes it), a game's
+provenance files are missing or git fails, or --no-wait found a machine lock held, 5 timeout (of a run, or of the wait
+for a machine lock).
 """
 
 from __future__ import annotations
@@ -215,7 +225,7 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
-from Lib import coverage, exports, games, hardening, paths, provenance
+from Lib import coverage, exports, games, hardening, locks, paths, provenance
 from Lib.process import (
     ToolNotFoundError,
     child_environment,
@@ -361,6 +371,9 @@ class Suite:
     planned: str = ""  # where an unavailable suite lands (Docs/Roadmap.md)
     allowed: tuple[str, ...] = DEVELOPMENT_CONFIGURATIONS  # the configurations --config may name for it
 
+
+# The suites that run the GPU or an editor that may render: a run that includes one holds the machine-wide GPU lock.
+GPU_SUITES = frozenset({"gpu", "golden", "feature", "automation", "export", "determinism", "games"})
 
 SUITES = {
     suite.name: suite
@@ -773,7 +786,8 @@ def run_tests(run: TestRun, arguments: argparse.Namespace, console: Console) -> 
         return Step(run.name, Status.FAILED, f"{len(skips.unexpected)} skipped test case(s) outside the "
                                              f"{CHILD_TARGET_SUITE} suite: {describe_unexpected_skips(skips)}; only "
                                              f"the {child_targets} may stay skipped (Roadmap rule 3; --allow-skips is "
-                                             f"for a contract task's commit)", result.duration, data=data)
+                                             f"contract mode, for a contract checkpoint's targeted runs)",
+                                             result.duration, data=data)
     if arguments.allow_skips:
         detail = (f"{passed}; contract mode (--allow-skips): {len(skips.skipped)} skipped, {len(skips.unexpected)} "
                   f"of them outside the {CHILD_TARGET_SUITE} suite; {child_targets}")
@@ -2290,8 +2304,8 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Run test suites in the configurations of the Architecture §15.8 matrix.",
         epilog="Exit codes: 0 every requested suite that exists passed, 1 a suite failed or none of the requested "
-               "suites exists yet, 2 usage error, 3 a test executable or the MCP virtual environment is missing, 5 "
-               "timeout.",
+               "suites exists yet, 2 usage error, 3 a test executable or the MCP virtual environment is missing, or "
+               "--no-wait found a machine lock held, 5 timeout (of a run, or of the wait for a machine lock).",
     )
     parser.add_argument("--suite", default="all",
                         help=f"comma-separated suites: {', '.join(SUITES)} or all (default: all)")
@@ -2320,8 +2334,9 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
                                          "wildcard pattern on test case names; automation: comma-separated unittest "
                                          "-k patterns on test ids)")
     parser.add_argument("--allow-skips", action="store_true",
-                        help="contract mode, only for the commit of a milestone's contract task (Roadmap rule 3; "
-                             "PreCommit.py --contract): report test cases skipped outside the "
+                        help="contract mode (Roadmap rule 3), for a contract checkpoint's targeted runs on a milestone "
+                             "branch (ADR 0028 decision 11; PreCommit.py --contract and CI.py --contract pass it too, "
+                             "but no gate run of the backlog program uses them): report test cases skipped outside the "
                              f"{CHILD_TARGET_SUITE} suite (unit, gpu, golden) and skipped Python tests (automation) "
                              "instead of failing the run")
     parser.add_argument("--timeout", type=float, default=SUITE_TIMEOUT_SECONDS,
@@ -2351,9 +2366,11 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
                              "hardening stage's sanitized unit run leaves out Fuzz, which its fuzz step runs as a "
                              "superset)")
     parser.add_argument("--json", action="store_true", help="print a machine-readable result on stdout")
+    locks.add_wait_arguments(parser)
     arguments = parser.parse_args(argv)
     if arguments.merge_coverage:
         return arguments
+    locks.check_wait_arguments(parser, arguments)
     arguments.build_root = arguments.build_root.resolve()
     try:
         arguments.suites = paths.parse_name_list(arguments.suite, tuple(SUITES), "suite")
@@ -2404,6 +2421,48 @@ def main(argv: list[str] | None = None) -> int:
         console.print(f"Test.py: error: {error}")
         return EXIT_USAGE
 
+    try:
+        hold = take_machine_locks(arguments, console)
+    except locks.LockUnavailable as error:
+        step = locks.unavailable_step(error)
+        console.result(step)
+        console.summary("Test summary", [step])
+        if arguments.json:
+            emit_json({"success": False, "steps": [step.to_json()]})
+        return error.exit_code
+    try:
+        steps = run_suites(arguments, console)
+    finally:
+        if hold is not None:
+            hold.release()
+
+    ran = [step for step in steps if step.status != Status.NOT_AVAILABLE]
+    exit_code = overall_exit_code(steps)
+    if not ran:
+        console.print("Test.py: none of the requested suites exists yet, so nothing was tested")
+        exit_code = EXIT_FAILED
+    console.summary("Test summary", steps)
+    if arguments.json:
+        emit_json({"success": exit_code == EXIT_SUCCESS, "steps": [step.to_json() for step in steps]})
+    return exit_code
+
+
+def uses_gpu(arguments: argparse.Namespace) -> bool:
+    """Whether the run includes a GPU-using suite that exists (GPU_SUITES; --update-golden is a golden run)."""
+    return any(name in GPU_SUITES and SUITES[name].available for name in arguments.suites)
+
+
+def take_machine_locks(arguments: argparse.Namespace, console: Console) -> locks.Hold | None:
+    """The machine-wide GPU lock for a run that uses the GPU, held to its end; any other run only waits until no gate
+    runs. Raises locks.LockUnavailable."""
+    if uses_gpu(arguments):
+        return locks.acquire_gpu(locks.wait_seconds(arguments), console.print)
+    locks.wait_for_gate(locks.wait_seconds(arguments), console.print)
+    return None
+
+
+def run_suites(arguments: argparse.Namespace, console: Console) -> list[Step]:
+    """Every requested suite in its configurations, each step printed as it finishes."""
     steps: list[Step] = []
     for name in arguments.suites:
         suite = SUITES[name]
@@ -2442,16 +2501,7 @@ def main(argv: list[str] | None = None) -> int:
             for step in run_suite(name, config, arguments, console):
                 steps.append(step)
                 console.result(step)
-
-    ran = [step for step in steps if step.status != Status.NOT_AVAILABLE]
-    exit_code = overall_exit_code(steps)
-    if not ran:
-        console.print("Test.py: none of the requested suites exists yet, so nothing was tested")
-        exit_code = EXIT_FAILED
-    console.summary("Test summary", steps)
-    if arguments.json:
-        emit_json({"success": exit_code == EXIT_SUCCESS, "steps": [step.to_json() for step in steps]})
-    return exit_code
+    return steps
 
 
 if __name__ == "__main__":

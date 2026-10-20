@@ -4284,7 +4284,7 @@
 		{
 			"name": "entity.destroy",
 			"domain": "entity",
-			"description": "Destroys entities with their subtrees, as one undoable command.",
+			"description": "Destroys entities with their subtrees, as one undoable command. In the edit scene a member of a prefab instance that is not its root is refused: deactivate it, or unpack the instance first.",
 			"exposeAsTool": true,
 			"mutates": true,
 			"supportsDryRun": true,
@@ -8468,7 +8468,7 @@
 		{
 			"name": "prefab.create",
 			"domain": "prefab",
-			"description": "Saves an entity's subtree as a new .prefab asset (nested instances flattened), optionally replacing the entity with an instance of it, as one undoable step. The result's instance is that instance's root (empty without replaceWithInstance).",
+			"description": "Saves an entity's subtree as a new .prefab asset (nested instances flattened), optionally replacing the entity with an instance of it, as one undoable step. The result's instance is that instance's root (empty without replaceWithInstance). Replacing a member of another prefab instance is refused: unpack that instance first.",
 			"exposeAsTool": true,
 			"mutates": true,
 			"supportsDryRun": true,

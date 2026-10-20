@@ -103,7 +103,7 @@ The stages, with the configurations of the §15.8 matrix:
                                      and of every Dist project (asserts compiled out), warnings tolerated only in
                                      vendored code, when Visual Studio's C++ Clang component
                                      is installed, otherwise reported as skipped (a failure with --require-clang-cl)
-  hardening    Release               milestone gates only (CI.py --milestone, or named in --stages):
+  hardening    Release               hardened milestone gates only (CI.py --milestone, or named in --stages):
                                      Scripts/Hardening.py --steps perf,soak,asan-generate,asan-build,asan-unit,
                                      asan-feature,fuzz, one step each, failing fast: the perf capture (warning-only),
                                      the soak of every scene of every project under Projects/ (FeatureTest and the
@@ -111,19 +111,34 @@ The stages, with the configurations of the §15.8 matrix:
                                      it) and of the exported Release Runtime, the
                                      AddressSanitizer workspace (bin-int/Asan) with its unit and feature suites, and the
                                      1,000,000-iteration fuzz of every reader of Tests/Data/Fuzz/Targets.json (§15.1
-                                     T6; ADR 0024 decisions 12 to 16 and 19). A plain CI.py lists it as not run
-                                     ("milestone gates only")
+                                     T6; ADR 0024 decisions 12 to 16 and 19). A plain CI.py lists it as not run,
+                                     naming ADR 0028 decision 12's rule (MILESTONE_ONLY_NOTE)
 
---milestone (Roadmap rule 1, Architecture §15.9; ADR 0024 decision 19) is the gate of the commit that completes a
-milestone: every available stage plus hardening, with --require-clang-cl. It is the whole matrix on a machine with a
-device in strict mode, so combining it with --stages, --skip-stages, --configs, --toolset, --no-clang-cl,
---gpu-optional or --contract is a usage error (exit code 2); --json and --summary-junit combine freely.
+--milestone (Architecture §15.9; ADR 0024 decision 19) runs every available stage plus hardening, with
+--require-clang-cl. Which milestone end runs it is ADR 0028 decision 12's rule (Roadmap rule 1): within a phase, only
+the last lander's milestone-end CI.py adds --milestone, on the merged tree of all the phase's milestones, when any
+milestone of the phase touches core systems, file readers (fuzzed formats) or the renderer; every other milestone end
+runs CI.py --require-clang-cl. It is the whole matrix on a machine with a device in strict mode, so combining it with
+--stages, --skip-stages, --configs, --toolset, --no-clang-cl, --gpu-optional or --contract is a usage error (exit code
+2); --json and --summary-junit combine freely.
 
 Modes (Roadmap rule 3, Docs/Decisions/0004-contract-stub-gate.md): strict by default, so a milestone cannot end with a
-contract stub (ENGINE_CONTRACT_STUB) or a skipped test case outside the child-process targets. --contract passes
---allow-contract-stubs to Lint.py (lint) and --allow-skips to Test.py (unit, gpu, golden, feature, automation,
-export, determinism, games), like PreCommit.py --contract (Scripts/Lib/scripts.py); the run prints which mode it is in
-at the start and in the summary.
+contract stub (ENGINE_CONTRACT_STUB) or a skipped test case outside the child-process targets. Contract mode is a
+contract checkpoint's targeted runs on a milestone branch, Lint.py --allow-contract-stubs and Test.py --allow-skips
+(ADR 0028 decision 11). --contract passes --allow-contract-stubs to Lint.py (lint) and --allow-skips to Test.py (unit,
+gpu, golden, feature, automation, export, determinism, games), like PreCommit.py --contract (Scripts/Lib/scripts.py);
+both stay available, but no gate run of the backlog program uses them. The run prints which mode it is in at the start
+and in the summary.
+
+Machine-wide locks (Scripts/Lib/locks.py; Docs/Architecture.md §2.3, ADR 0028 decision 16): before its first stage,
+CI.py takes the exclusive gate lock, then the GPU lock, then the build lock uncapped, all shared by every checkout of
+the repository, and holds them for its whole run. From the moment it holds the gate, no new Build.py, Test.py, GPU run
+or MCP bridge editor launch starts in any checkout, unless it runs inside a run that already held a machine lock when
+the gate began (the children of a Hardening.py run with a GPU step, further launches of a bridge that holds the GPU
+lock): the gate waits for that run instead. It then waits for the runs that already hold the GPU or build lock to end.
+Its child processes inherit its locks through ENGINE_HELD_LOCKS, so its own Build.py and Test.py runs neither wait for
+them nor take another build slot. Every wait reports the holder (pid, worktree, command) and lasts at most
+--lock-timeout seconds (exit code 5); --no-wait fails at once instead (exit code 3). Only one gate runs at a time.
 
 Results: each stage's own output, a summary table, bin/TestResults/CI.xml (JUnit, one test case per step; another
 path with --summary-junit, so separate runs of one CI job keep separate summaries), the unit, gpu, golden, feature
@@ -133,7 +148,8 @@ hardening (Soak, Perf, Unit/Feature/Fuzz-Release-Asan) files in bin/TestResults/
 expected and diff images of failed golden comparisons in bin/TestResults/Golden/.
 
 Exit codes (§4.1): 0 every selected stage passed, otherwise the code of the first failing step: 1 failed,
-2 usage error, 3 a required tool or file is missing, 5 timeout.
+2 usage error, 3 a required tool or file is missing, or --no-wait found a machine lock held, 5 timeout (of a step, or
+of the wait for a machine lock).
 """
 
 from __future__ import annotations
@@ -145,6 +161,7 @@ if sys.version_info < (3, 10):
     sys.exit(f"CI.py requires Python 3.10 or newer (this is Python {platform.python_version()})")
 
 import argparse
+import contextlib
 import dataclasses
 import json
 import os
@@ -154,9 +171,10 @@ import subprocess
 import tempfile
 import time
 from pathlib import Path
+from collections.abc import Iterator
 from typing import Any, Callable
 
-from Lib import paths, portability, premake, toolchain, workspace
+from Lib import locks, paths, portability, premake, toolchain, workspace
 from Lib.process import ToolNotFoundError, child_environment, format_command, run_streamed, terminate_tree
 from Lib.report import (
     EXIT_FAILED,
@@ -180,7 +198,10 @@ SHADER_ACCEPTANCE_NAME = "Shaders: slang-only change is not skipped by the up-to
 RUNTIME_MAP_ACCEPTANCE_NAME = "Dist: map file contains no automation, Analysis, ImGui or AssetPipeline symbols"
 # The hardening stage's steps, in Scripts/Hardening.py's order (ADR 0024 decision 19).
 HARDENING_STEPS = ("perf", "soak", "asan-generate", "asan-build", "asan-unit", "asan-feature", "fuzz")
-MILESTONE_ONLY_NOTE = "milestone gates only: CI.py --milestone"
+# Why a run without --milestone lists the hardening stage as not run: ADR 0028 decision 12's rule.
+MILESTONE_ONLY_NOTE = ("hardened milestone gates only: CI.py --milestone at a phase's last lander when the phase "
+                       "touches core systems, file readers or the renderer (ADR 0028 decision 12); every other "
+                       "milestone end runs CI.py --require-clang-cl")
 PORTABILITY_ROOT = paths.BIN_INT_ROOT / "Portability"
 SUMMARY_JUNIT = paths.TEST_RESULTS_ROOT / "CI.xml"
 
@@ -214,8 +235,11 @@ TIMEOUTS = {
     "clang-cl": 7200.0,
     "runtime-map": 600.0,
     # Scripts/Hardening.py bounds each of its steps itself (its TIMEOUTS: perf 1200 s, soak 3600 s, asan generate
-    # 3600 s, asan build 7200 s, asan unit 3600 s, asan feature 3600 s, fuzz 5400 s, 28,200 s in all); this bounds the
-    # whole run above their sum (ADR 0024 "Integration", budgets and timeouts).
+    # 3600 s, asan build 7200 s, asan unit 3600 s, asan feature 3600 s, 22,800 s in all, plus 60 s of grace for each
+    # sanitized suite, and the fuzz step's timeout, which follows its measured per-target costs within a budget of
+    # 5,400 s per 35 targets, Lib/hardening.py fuzz_budget_seconds: 5,400 s for today's 35); this bounds the whole run
+    # above their sum (Hardening.py longest_run_seconds), which holds up to 49 fuzz targets (ADR 0024 "Integration",
+    # budgets and timeouts; Tests/Automation/test_hardening.py checks it for the committed fuzz targets and the 49).
     "hardening": 30600.0,
 }
 
@@ -226,7 +250,8 @@ class Stage:
     configurations: tuple[str, ...] | None  # the §15.8 matrix; None for configuration-independent stages
     available: bool
     planned: str = ""
-    # §15.8 runs it at milestone gates only: CI.py --milestone, or --stages naming it; "all" lists it as not run.
+    # §15.8 runs it at the hardened milestone gates only (ADR 0028 decision 12): CI.py --milestone, or --stages naming
+    # it; "all" lists it as not run.
     milestone_only: bool = False
 
 
@@ -737,7 +762,7 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Run the CI stages (Architecture §15.8) in order, stopping at the first failing stage.",
         epilog="Exit codes: 0 success, else the first failing step's code: 1 failed, 2 usage, 3 missing tool or file, "
-               "5 timeout.",
+               "or --no-wait found a machine lock held, 5 timeout.",
     )
     available = [stage.name for stage in STAGES if stage.available and not stage.milestone_only]
     milestone_only = [stage.name for stage in STAGES if stage.available and stage.milestone_only]
@@ -751,8 +776,11 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--configs", default=None,
                         help="restrict the configuration matrix (default: Debug,Release,Dist)")
     parser.add_argument("--milestone", action="store_true",
-                        help="the gate of the commit that completes a milestone (Roadmap rule 1, §15.9): every "
-                             "available stage plus hardening, with --require-clang-cl; refused together with --stages, "
+                        help="the hardened milestone-end gate (Roadmap rule 1, §15.9): every available stage plus "
+                             "hardening, with --require-clang-cl. Within a phase only the last lander's milestone end "
+                             "runs it, on the merged tree of the phase, when any milestone of the phase touches core "
+                             "systems, file readers (fuzzed formats) or the renderer; every other milestone end runs "
+                             "CI.py --require-clang-cl (ADR 0028 decision 12). Refused together with --stages, "
                              "--skip-stages, --configs, --toolset, --no-clang-cl, --gpu-optional and --contract")
     parser.add_argument("--toolset", choices=("msc", "gcc", "clang"),
                         help="compiler toolset passed to Generate.py (Linux: gcc or clang)")
@@ -776,7 +804,9 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--summary-junit", type=Path, default=SUMMARY_JUNIT,
                         help=f"JUnit summary of this run (default: {paths.display_path(SUMMARY_JUNIT)})")
     parser.add_argument("--json", action="store_true", help="print a machine-readable result on stdout")
+    locks.add_wait_arguments(parser)
     arguments = parser.parse_args(argv)
+    locks.check_wait_arguments(parser, arguments)
     names = tuple(stage.name for stage in STAGES)
     if arguments.milestone:
         given = {
@@ -859,6 +889,32 @@ def main(argv: list[str] | None = None) -> int:
                     f"{', '.join(arguments.selected)}; configurations {', '.join(arguments.configs)}; "
                     f"{mode_note(arguments.contract)}")
 
+    with contextlib.ExitStack() as held:
+        try:
+            for hold in take_gate_locks(arguments, console):
+                held.enter_context(hold)
+        except locks.LockUnavailable as error:
+            # Nothing ran, so the last gate's CI.xml stays as it was.
+            console.result(locks.unavailable_step(error))
+            console.print(f"\nCI did not start (exit code {error.exit_code})")
+            if arguments.json:
+                emit_json({"success": False, "exitCode": error.exit_code, "lock": error.to_json(), "stages": []})
+            return error.exit_code
+        return run_stages(arguments, console, host)
+
+
+def take_gate_locks(arguments: argparse.Namespace, console: Console) -> Iterator[locks.Hold]:
+    """The gate lock, then the GPU lock, then the build lock uncapped (the locks' order), each yielded as soon as it is
+    held so the caller releases what it got when a later one stays unavailable. Raises locks.LockUnavailable."""
+    timeout = locks.wait_seconds(arguments)
+    yield locks.acquire_gate(timeout, console.print)
+    yield locks.acquire_gpu(timeout, console.print)
+    yield locks.acquire_build(locks.UNCAPPED, timeout, console.print)
+
+
+def run_stages(arguments: argparse.Namespace, console: Console, host: paths.Host) -> int:
+    """Every selected stage in order, failing fast; the summary, CI.xml and the --json document. Returns the exit
+    code."""
     runner = Runner(arguments, console)
     results: list[tuple[str, list[Step]]] = []
     failed_stage: str | None = None

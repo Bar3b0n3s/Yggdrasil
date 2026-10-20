@@ -1,6 +1,7 @@
 """The demo game projects and the evaluation helpers of the games suite (Docs/Architecture.md §15.1 T5, §15.8, §13.12;
-Roadmap M16 to M18; Docs/Decisions/0026-m16-contract.md decision 7, stream B; Docs/Decisions/0027-m17-contract.md
-decision 4, stream B), shared by Scripts/Test.py's games suite and Scripts/AuditProvenance.py --demos.
+Roadmap M16, M17, M25 and M27; Docs/Decisions/0026-m16-contract.md decision 7, stream B;
+Docs/Decisions/0027-m17-contract.md decision 4, stream B), shared by Scripts/Test.py's games suite and
+Scripts/AuditProvenance.py --demos.
 
 A game project is a directory directly below one of GAME_PROJECT_ROOTS whose root holds exactly one *.eproj, except
 EXCLUDED_PROJECTS: Projects/FeatureTest is covered by the feature, export and determinism suites and never audited (ADR
@@ -22,9 +23,9 @@ decides input independence everywhere (Docs/Architecture.md §13.6; the recordin
 {record} apply it too): a replay is input-independent when its input-free run passes verification (every checkpoint,
 the final state hash, every expectation), whatever script errors that run raised. A game also needs at least one test
 suite (evaluate_run) and at least one committed replay with input events (check_replay_acceptance), as the demo
-acceptance of Roadmap M16 to M18 asks, and the build settings that acceptance names from M17 on, "StartScene and
-Export.BuildScenes set", with Export.BuildScenes listing StartScene (check_build_settings, the first check of each
-editor half; ADR 0027 decision 4, B1).
+acceptance of Roadmap M16, M17, M25 and M27 asks, and the build settings that acceptance names from M17 on,
+"StartScene and Export.BuildScenes set", with Export.BuildScenes listing StartScene (check_build_settings, the first
+check of each editor half; ADR 0027 decision 4, B1).
 
 A GameProject's name is its .eproj's file stem, which names the suite's steps and reports only. The exporter names the
 package's executable and its testing user data after the project's Name (ProjectSettings::Name), and the Runtime names
@@ -75,9 +76,13 @@ GAME_MANIFEST_FORMAT = "GameManifest"
 # "..").
 FORBIDDEN_NAME_CHARACTERS = '<>:"/\\|?*'
 RELATIVE_FOLDER_NAMES = (".", "..")
-# The failure lines of check_build_settings (ADR 0027 decision 4, B1, "Frozen interfaces"): the demo acceptance's rule
-# (Roadmap M17 and M18) and the demos' convention that Export.BuildScenes lists StartScene.
-BUILD_SETTINGS_RULE = "(Roadmap M17 and M18: StartScene and Export.BuildScenes set)"
+# The demo acceptance the games suite's failure lines cite (the Roadmap's demo milestones: M16 Breakout, M17 Tetris, M25
+# its pixel-art rebuild and M27 Rolling Ball; Docs/Decisions/0028-backlog-program.md decision 14).
+DEMO_ACCEPTANCE = "Roadmap M16, M17, M25 and M27"
+# The failure lines of check_build_settings (ADR 0027 decision 4, B1, "Frozen interfaces", renumbered by ADR 0028
+# decision 14): the demo acceptance's rule (Roadmap M17, M25 and M27) and the demos' convention that
+# Export.BuildScenes lists StartScene.
+BUILD_SETTINGS_RULE = "(Roadmap M17, M25 and M27: StartScene and Export.BuildScenes set)"
 START_SCENE_EMPTY = f"StartScene is empty: set it to the scene the game starts with {BUILD_SETTINGS_RULE}"
 BUILD_SCENES_EMPTY = ("Export.BuildScenes is empty: list the scenes the export must load strictly, StartScene "
                       f"included {BUILD_SETTINGS_RULE}")
@@ -247,14 +252,15 @@ def read_testing(project_file: Path) -> TestingSettings:
 
 
 def check_build_settings(project_file: Path) -> list[str]:
-    """The failures of the .eproj `project_file` against the demo acceptance's build settings (Roadmap M17 and M18:
-    "StartScene and Export.BuildScenes set"; Docs/Decisions/0027-m17-contract.md decision 4, B1, stream B), one line
-    each, in this order:
+    """The failures of the .eproj `project_file` against the demo acceptance's build settings (Roadmap M17, M25 and
+    M27: "StartScene and Export.BuildScenes set"; Docs/Decisions/0027-m17-contract.md decision 4, B1, stream B), one
+    line each, in this order:
 
-    - StartScene absent or empty: "StartScene is empty: set it to the scene the game starts with (Roadmap M17 and
-      M18: StartScene and Export.BuildScenes set)";
+    - StartScene absent or empty: "StartScene is empty: set it to the scene the game starts with (Roadmap M17, M25
+      and M27: StartScene and Export.BuildScenes set)";
     - Export or Export.BuildScenes absent, or BuildScenes empty: "Export.BuildScenes is empty: list the scenes the
-      export must load strictly, StartScene included (Roadmap M17 and M18: StartScene and Export.BuildScenes set)";
+      export must load strictly, StartScene included (Roadmap M17, M25 and M27: StartScene and Export.BuildScenes
+      set)";
     - a non-empty StartScene that a non-empty Export.BuildScenes does not list (compared as written):
       "Export.BuildScenes does not list the StartScene '<StartScene>': add it (ADR 0027 decision 4: the demos'
       convention)".
@@ -379,20 +385,20 @@ def evaluate_input_check(replay: str, events: int, result: dict[str, Any] | None
 
 
 def check_replay_acceptance(events: dict[str, int]) -> list[str]:
-    """The failures of a game's committed replays against the demo acceptance (Roadmap M16 to M18: the suites and a
+    """The failures of a game's committed replays against the demo acceptance (DEMO_ACCEPTANCE: the suites and a
     replay recorded from tick 0 pass, and the replay's final hash is identical in the editor and the Dist export):
     `events` is replay_event_counts' {replay: input events} of the replays Testing.Replays matches. A game fails when
     Testing.Replays matches no replay, or when none of its replays has input events, since a replay without input proves
     nothing about the gameplay and the input check (evaluate_input_check) would have nothing to check. Testing.Suites'
     rule is evaluate_run's."""
     if not events:
-        return ["Testing.Replays matches no replay: every game commits at least one replay recorded from tick 0 with "
-                "the input that plays it (Roadmap M16 to M18; record one with test.run {record} or input.record)"]
+        return [f"Testing.Replays matches no replay: every game commits at least one replay recorded from tick 0 with "
+                f"the input that plays it ({DEMO_ACCEPTANCE}; record one with test.run {{record}} or input.record)"]
     if not any(count > 0 for count in events.values()):
         names = ", ".join(sorted(events))
         return [f"no replay of Testing.Replays has input events ({names}): every game commits at least one replay "
                 f"recorded from tick 0 with the input that plays it, which the input check then requires to matter "
-                f"(Roadmap M16 to M18)"]
+                f"({DEMO_ACCEPTANCE})"]
     return []
 
 
@@ -408,7 +414,7 @@ def evaluate_run(document: dict[str, Any], mode: str, testing: TestingSettings, 
     """The failures of one test run of a game: `document` is the TestRunResult that test.run returns (the editor halves)
     or that --feature-test writes (the exported half), `mode` the run mode it must report ("Editor" or "Dist"). It fails
     when: the document's mode is not `mode`; it did not pass or was cancelled; a case row is skipped; Testing.Suites is
-    empty (every demo has at least one suite, Roadmap M16 to M18); a suite entry whose modes include `mode` has no suite
+    empty (every demo has at least one suite, DEMO_ACCEPTANCE); a suite entry whose modes include `mode` has no suite
     row with its Script (a Dist run leaves Editor-only suites out); a replay of `committed` has no "replay:<path>" row,
     or that row failed; a row's finalStateHash differs from the committed hash. Coverage gates are not evaluated: games
     leave Testing.CoverageGates off (coverage.evaluate_feature_report is FeatureTest's)."""
@@ -432,7 +438,7 @@ def evaluate_run(document: dict[str, Any], mode: str, testing: TestingSettings, 
         failures.append(f"the {mode} run's result has no suites array")
         rows = []
     if not testing.suites:
-        failures.append("Testing.Suites is empty: every game has at least one test suite (Roadmap M16 to M18)")
+        failures.append(f"Testing.Suites is empty: every game has at least one test suite ({DEMO_ACCEPTANCE})")
     replay_rows: dict[str, dict[str, Any]] = {}
     suite_rows: dict[str, dict[str, Any]] = {}
     for row in rows:
@@ -510,7 +516,7 @@ def check_script_check(result: dict[str, Any]) -> list[str]:
 
 def check_validate(result: dict[str, Any]) -> list[str]:
     """The failures of a project.validate result: one line per diagnostic, warnings included ("<severity> <code>:
-    <message> (<file or asset>)"), because a demo's project.validate must be clean (Roadmap M16 to M18)."""
+    <message> (<file or asset>)"), because a demo's project.validate must be clean (DEMO_ACCEPTANCE)."""
     diagnostics = result.get("diagnostics")
     if not isinstance(diagnostics, list):
         return ["project.validate returned no diagnostics array"]

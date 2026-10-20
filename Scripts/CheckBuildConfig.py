@@ -38,7 +38,16 @@ and configuration:
    project that is not a Utility project lacks ASan in Release (EnableASAN, or /fsanitize=address, -fsanitize=address)
    or has it in Debug or Dist; in every other target any project has it in any configuration;
 8. _DISABLE_VECTOR_ANNOTATION or _DISABLE_STRING_ANNOTATION, which hide ASan's container checks, is defined for a
-   compile unit (premake) or named in a first-party source or header, or in a premake script.
+   compile unit (premake) or named in a first-party source or header, or in a premake script;
+9. an entry of the shared vendor cache that an MSBuild build of a Visual Studio target (windows, windows-asan,
+   windows-clang) would link (Scripts/Lib/vendor_cache.py: the entry under the key the generated project's settings,
+   the toolchain and the pinned sources give) has a broken record (unreadable, another format, or recorded inputs that
+   do not hash to its key), records other build settings than the generated vendored project, or records flags that
+   break rules 1 to 4 or 7 against the workspace: its recorded compile settings replace the vendored project's for that
+   configuration and every rule runs again, so a finding that only the recorded flags cause names the entry. Entries
+   under other keys (other branches' vendor sets, older toolchains) are never linked and are not checked, nor is a
+   project whose inputs the key cannot digest (vendor_cache.UnkeyedInputError), which is never cached. The rule is
+   left out (and the report says why) without a cache, without Visual Studio or with --no-vendor-cache.
 
 --workspace runs the check on another workspace, such as the fixtures in Tests/Data/BuildConfig/, each of which is
 the real workspace with one defect and must fail.
@@ -64,7 +73,7 @@ from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Any
 
-from Lib import paths, premake
+from Lib import paths, premake, toolchain, vendor_cache
 from Lib.process import ToolNotFoundError
 from Lib.report import EXIT_FAILED, EXIT_INIT_FAILED, EXIT_SUCCESS, EXIT_TIMEOUT, EXIT_USAGE
 
@@ -152,6 +161,16 @@ BUILT_IN_DIST = ("Engine", "Runtime")
 
 MSBUILD_NAMESPACE = {"msb": "http://schemas.microsoft.com/developer/msbuild/2003"}
 CONDITION_PATTERN = re.compile(r"'\$\(Configuration\)\|\$\(Platform\)'\s*==\s*'([^|']+)\|[^']*'")
+# The ClCompile settings a compile unit is read from (MsbuildCompileSettings).
+MSBUILD_COMPILE_TAGS = (
+    "PreprocessorDefinitions",
+    "UndefinePreprocessorDefinitions",
+    "AdditionalOptions",
+    "FloatingPointModel",
+    "EnableEnhancedInstructionSet",
+)
+# The platform of the generated solution (premake5.lua: x86_64 on Windows).
+MSBUILD_PLATFORM = "x64"
 
 # MSBuild EnableEnhancedInstructionSet values and the /arch: option each one stands for.
 MSBUILD_INSTRUCTION_SETS = {
@@ -399,13 +418,7 @@ def parse_vcxproj(path: Path) -> Project:
     root = ElementTree.parse(path).getroot()
     base = path.parent
     project = Project(path.stem)
-    tags = (
-        "PreprocessorDefinitions",
-        "UndefinePreprocessorDefinitions",
-        "AdditionalOptions",
-        "FloatingPointModel",
-        "EnableEnhancedInstructionSet",
-    )
+    tags = MSBUILD_COMPILE_TAGS
     settings: dict[str, MsbuildCompileSettings] = {}
 
     for group in root.findall("msb:PropertyGroup", MSBUILD_NAMESPACE):
@@ -1159,6 +1172,108 @@ def check_workspace(workspace: GeneratedWorkspace, vendored: set[str], first_par
 
 
 # --------------------------------------------------------------------------------------------------------------------
+# The shared vendor cache (rule 9)
+# --------------------------------------------------------------------------------------------------------------------
+
+
+@dataclasses.dataclass
+class VendorCacheContext:
+    """What rule 9 needs: the cache, the toolchain identity of its keys and the source digests (shared by every
+    target)."""
+
+    cache: vendor_cache.VendorCache
+    toolchain: dict[str, str]
+    digester: vendor_cache.SourceDigester
+
+
+def recorded_project(project: Project, directory: Path, recorded: dict[str, Any], config: str,
+                     repository_root: Path) -> Project:
+    """`project` (generated into `directory`) with its `config` compile units and AddressSanitizer setting replaced by
+    those a cache entry recorded (vendor_cache.project_settings: the project-level ClCompile settings, every item's
+    per-file settings, the EnableASAN property). A per-file unit keeps the name the generated project gives the file, so
+    unchanged flags give unchanged findings. Raises KeyError, TypeError or AttributeError for a malformed record."""
+    settings = recorded["settings"]
+    labels = {vendor_cache.repository_path(directory, unit.file, repository_root): unit.file
+              for unit in project.units.get(config, []) if unit.file is not None}
+    project_values = {tag: settings["tools"].get("ClCompile", {}).get(tag) for tag in MSBUILD_COMPILE_TAGS}
+    base = msbuild_settings(project_values, None)
+    units = [msbuild_unit(base, None)]
+    for item in settings["items"]:
+        metadata = item["metadata"]
+        if item["type"] != "ClCompile" or metadata.get("ExcludedFromBuild", "").lower() == "true":
+            continue
+        if set(MSBUILD_COMPILE_TAGS) & metadata.keys():
+            file_values = {tag: metadata.get(tag) for tag in MSBUILD_COMPILE_TAGS}
+            units.append(msbuild_unit(msbuild_settings(file_values, base), labels.get(item["path"], item["path"])))
+    asan = set(project.asan_settings) - {config}
+    if settings["properties"].get("EnableASAN", "").lower() == "true":
+        asan.add(config)
+    return dataclasses.replace(project, units={**project.units, config: units}, asan_settings=asan)
+
+
+def check_vendor_cache(workspace: GeneratedWorkspace, directory: Path, vendored: set[str], first_party: set[str],
+                       context: VendorCacheContext) -> tuple[list[str], int]:
+    """Rule 9 for one Visual Studio target generated into `directory`: (findings, number of entries checked)."""
+    if workspace.target.action != "vs2026":
+        return [], 0
+    target = workspace.target.name
+    findings: list[str] = []
+    checked = 0
+    baseline = set(check_workspace(workspace, vendored, first_party))
+    for name in sorted(vendored & workspace.projects.keys()):
+        project_file = vendor_cache.read_project_file(directory / f"{name}.vcxproj")
+        for config in CONFIGURATIONS:
+            try:
+                inputs = vendor_cache.project_inputs(project_file, config, MSBUILD_PLATFORM, context.toolchain,
+                                                     context.digester)
+            except vendor_cache.UnkeyedInputError:
+                continue  # never cached: Build.py compiles it in the workspace, so no entry of it is ever linked
+            entry = context.cache.entry_directory(name, config, vendor_cache.entry_key(inputs))
+            if not entry.is_dir():
+                continue
+            checked += 1
+            where = f"[{target}] {config}: vendor cache entry {entry.as_posix()}"
+            manifest, problems = context.cache.read_manifest(entry)
+            findings += [f"{where}: {problem}" for problem in problems]
+            if manifest is None:
+                continue
+            difference = vendor_cache.first_difference(manifest["inputs"], inputs)
+            if difference is not None:
+                findings.append(f"{where} records other build settings than the workspace's {name} ({difference})")
+            try:
+                substituted = recorded_project(workspace.projects[name], directory, manifest["inputs"], config,
+                                               context.digester.repository_root)
+            except (KeyError, TypeError, AttributeError) as error:
+                findings.append(f"{where}: its record is malformed ({error!r})")
+                continue
+            projects = {**workspace.projects, name: substituted}
+            caused = set(check_workspace(dataclasses.replace(workspace, projects=projects), vendored, first_party))
+            findings += [f"{finding} (the flags recorded by vendor cache entry {entry.as_posix()})"
+                         for finding in sorted(caused - baseline)]
+    return findings, checked
+
+
+def vendor_cache_context(arguments: argparse.Namespace) -> tuple[VendorCacheContext | None, str]:
+    """(the context of rule 9, or None with the reason it is left out)."""
+    if arguments.no_vendor_cache:
+        return None, "--no-vendor-cache given"
+    try:
+        cache = vendor_cache.VendorCache(arguments.vendor_cache_dir or vendor_cache.default_root())
+    except vendor_cache.VendorCacheError as error:
+        return None, str(error)
+    if not cache.entries.is_dir():
+        return None, f"no vendor cache entries in {cache.root.as_posix()}"
+    try:
+        visual_studio = toolchain.find_visual_studio()
+        identity = vendor_cache.toolchain_identity(visual_studio.version, visual_studio.vc_tools_version,
+                                                   toolchain.find_windows_sdk()[0],
+                                                   vendor_cache.user_properties_digest(MSBUILD_PLATFORM))
+    except (toolchain.ToolchainError, ToolNotFoundError, ImportError, OSError, vendor_cache.VendorCacheError) as error:
+        return None, f"the keys need Visual Studio and the Windows SDK: {error}"
+    return VendorCacheContext(cache, identity, vendor_cache.SourceDigester()), ""
+
+
+# --------------------------------------------------------------------------------------------------------------------
 # Entry point
 # --------------------------------------------------------------------------------------------------------------------
 
@@ -1168,7 +1283,8 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Generate the workspace for every build target into a temporary directory and check vendor/"
         "consumer ABI defines, JPH_CROSS_PLATFORM_DETERMINISTIC, the Jolt instruction set, the precise floating-point "
-        "model and the Dist solution configuration (Docs/Architecture.md section 2.2).",
+        "model, the Dist solution configuration and the flags the shared vendor cache's entries a build would link "
+        "recorded (Docs/Architecture.md section 2.2).",
         epilog="Exit codes: 0 no findings, 1 findings or generation failure, 2 usage error, 3 premake missing or not "
         "the pinned version, 5 premake timed out.",
     )
@@ -1186,6 +1302,10 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--premake", type=Path, help="premake5 to use; it must be the pinned version (default: Vendor/premake/bin)"
     )
+    parser.add_argument("--vendor-cache-dir", type=Path,
+                        help="rule 9: the shared vendor cache to check (default: <git common directory>/"
+                             f"{vendor_cache.CACHE_DIRECTORY_NAME}, the one Scripts/Build.py links from)")
+    parser.add_argument("--no-vendor-cache", action="store_true", help="leave out rule 9 (the vendor cache entries)")
     parser.add_argument("--keep", action="store_true", help="keep the generated projects and print their location")
     parser.add_argument("--json", action="store_true", help="print a machine-readable report on stdout")
     return parser.parse_args(argv)
@@ -1216,11 +1336,24 @@ def run(arguments: argparse.Namespace) -> dict[str, Any]:
         for workspace in loaded:
             findings += check_workspace(workspace, vendored, first_party)
         check_banned_macro_sources(banned_macro_files(workspace_script, loaded[0].projects, first_party), findings)
+        context, skipped = vendor_cache_context(arguments)
+        checked = 0
+        if context is not None:
+            try:
+                for workspace in loaded:
+                    cache_findings, count = check_vendor_cache(workspace, temporary / workspace.target.name, vendored,
+                                                               first_party, context)
+                    findings += cache_findings
+                    checked += count
+            except vendor_cache.VendorCacheError as error:
+                skipped = f"the keys cannot be computed: {error}"
         return {
             "workspace": workspace_script.as_posix(),
             "targets": [target.name for target in targets],
             "vendorProjects": sorted(vendored),
             "firstPartyProjects": sorted(first_party),
+            "vendorCache": {"root": context.cache.root.as_posix() if context is not None else None,
+                            "entriesChecked": checked, "skipped": skipped},
             "findings": findings,
             "generatedProjects": temporary.as_posix() if arguments.keep else None,
         }
@@ -1264,9 +1397,12 @@ def main(argv: list[str] | None = None) -> int:
         for finding in report["findings"]:
             print(f"CheckBuildConfig.py: error: {finding}", file=sys.stderr)
         status = "passed" if report["success"] else f"FAILED with {len(report['findings'])} finding(s)"
+        cache = report["vendorCache"]
+        entries = (f"{cache['entriesChecked']} vendor cache entries checked" if not cache["skipped"]
+                   else f"vendor cache not checked: {cache['skipped']}")
         print(
             f"CheckBuildConfig: {status} ({', '.join(report['targets'])}; {len(report['vendorProjects'])} vendored, "
-            f"{len(report['firstPartyProjects'])} first-party projects; workspace {report['workspace']})"
+            f"{len(report['firstPartyProjects'])} first-party projects; {entries}; workspace {report['workspace']})"
         )
         if report["generatedProjects"]:
             print(f"Generated projects kept in {report['generatedProjects']}")
