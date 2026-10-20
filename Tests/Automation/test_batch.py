@@ -40,7 +40,6 @@ class BatchTests(AutomationTestCase):
             ]})
         self.assert_engine_error(raised.exception, engine_client.INVALID_PARAMS)
 
-    @unittest.skip("contract stub: named $ref (Docs/Decisions/0030-m19-contract.md decision 8, A-NREF, stream C)")
     def test_ref_names_an_earlier_op(self) -> None:
         # Docs/Decisions/0030-m19-contract.md decision 8 (A-NREF; ADR 0027 decision 12's deferral): an op's name stands
         # for its index in a later op's $ref, so inserting an op does not shift the reference; a duplicate name refuses
@@ -60,6 +59,37 @@ class BatchTests(AutomationTestCase):
         self.assert_engine_error(raised.exception, engine_client.INVALID_PARAMS)
         self.assertEqual(raised.exception.data["failedOp"], 1)
         self.assertEqual(raised.exception.data["issues"][0]["pointer"], "/ops/1/name")
+
+    def test_component_data_takes_entity_paths_and_id_prefixes(self) -> None:
+        # Docs/Decisions/0030-m19-contract.md decision 7 (A-EREF; ADR 0027 decision 12's deferral): an Entity value in
+        # component data takes the spellings an entity param takes, resolved in the scene the request addresses: here a
+        # path to the entity an earlier op of the batch created, then a unique id prefix; a path that names nothing is
+        # NotFound and changes nothing.
+        client, _ = self.open_editor_with_scene()
+        script = "Assets/Scripts/Hud.luau"
+        client.call("script.write", {"path": script, "source": """
+local Hud = { Fields = { Score = Field.Entity() } }
+return Script.Define("Hud", Hud)
+"""})
+        result = client.call("edit.batch", {"label": "Hud", "ops": [
+            {"method": "entity.create", "params": {"name": "Game"}, "name": "game"},
+            {"method": "entity.create", "params": {"name": "ScoreText", "parent": {"$ref": "game.entity.id"}}},
+            {"method": "entity.create", "params": {"name": "Hud", "components": {
+                "Script": {"Script": script, "Fields": {"Score": "/Game/ScoreText"}}}}},
+        ]})
+        score = result["results"][1]["entity"]["id"]
+        fields = client.call("entity.get", {"entity": "/Hud"})["entity"]["components"]["Script"]["Fields"]
+        self.assertEqual(fields["Score"], score)
+        updated = client.call("entity.update", {"entity": "/Hud", "components": {
+            "Script": {"Fields": {"Score": score[:10]}}}})
+        self.assertEqual(updated["entity"]["components"]["Script"]["Fields"]["Score"], score)
+        before = client.call("scene.get")["scene"]
+        with self.assertRaises(engine_client.EngineError) as missing:
+            client.call("entity.update", {"entity": "/Hud", "components": {
+                "Script": {"Fields": {"Score": "/Game/Missing"}}}})
+        self.assert_engine_error(missing.exception, engine_client.NOT_FOUND)
+        self.assertEqual(missing.exception.data["issues"][0]["pointer"], "/components/Script/Fields/Score")
+        self.assertEqual(client.call("scene.get")["scene"], before)
 
     def test_batch_file_scaffolds_a_project_and_names_its_failing_line(self) -> None:
         # Editor --batch <file.jsonl> (§13.12): one request per line, "$ref" naming an earlier line's result by its

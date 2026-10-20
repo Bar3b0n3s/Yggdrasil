@@ -111,7 +111,7 @@ namespace Engine {
 		// Decision 27 (N-B): with a module loaded, a scene's native components become canonical and sorted by name ahead of the
 		// unknown ones; those the module does not register are kept as written and reported, as errors under --strict; a
 		// second pass changes nothing; without a module nothing is rewritten.
-		TEST_CASE("NativeComponents: a scene's native components are made canonical and sorted, and unregistered ones kept as written" * doctest::skip(true))
+		TEST_CASE("NativeComponents: a scene's native components are made canonical and sorted, and unregistered ones kept as written")
 		{
 			const Ref<const NativeModuleTypes> types = RequireTestTypes(Test::GetNativeTestModule());
 			Test::SceneTestFixture setup;
@@ -171,7 +171,7 @@ namespace Engine {
 
 		// Decision 27 (N-B; native.setComponents, decision 32): a patch adds a component from its defaults, merges into one the
 		// entity holds and removes one with null, all or nothing.
-		TEST_CASE("NativeComponents: a patch adds, changes and removes native components, all or nothing" * doctest::skip(true))
+		TEST_CASE("NativeComponents: a patch adds, changes and removes native components, all or nothing")
 		{
 			const Ref<const NativeModuleTypes> types = RequireTestTypes(Test::GetNativeTestModule());
 			Test::SceneTestFixture setup;
@@ -209,6 +209,81 @@ namespace Engine {
 			components = ReadNativeComponents(thing, types.get());
 			REQUIRE(components.Registered.size() == 1);
 			CHECK(components.Registered[0].first == "Native.TestSpinner");
+		}
+
+		// Decision 27 (N-B): a value its type rejects is an error naming the field; nothing of the scene changes, the other
+		// components included.
+		TEST_CASE("NativeComponents: a native component whose value its type rejects is an error, and the scene is left as it was")
+		{
+			const Ref<const NativeModuleTypes> types = RequireTestTypes(Test::GetNativeTestModule());
+			Test::SceneTestFixture setup;
+			Entity thing = setup.GetScene().CreateEntity("Thing");
+			thing.AddComponent<UnknownComponentsComponent>(UnknownComponentsComponent{ {
+				UnknownComponentData{ .Name = "Native.TestSpinner", .Version = 1, .Data = VariantValue(ParseJson(R"({"DegreesPerSecond": 5})")) },
+				UnknownComponentData{ .Name = "Native.TestMover", .Version = 1, .Data = VariantValue(ParseJson(R"({"Speed": -3})")) },
+			} });
+
+			const Result<NativeSceneReport> report = CanonicalizeNativeComponents(setup.GetScene(), types.get(), false);
+			REQUIRE_MESSAGE(report.has_value(), report.error().ToString());
+			CHECK_FALSE(report->Changed);
+			REQUIRE(report->Diagnostics.size() == 1);
+			CHECK(report->Diagnostics[0].Code == NativeComponentInvalidCode);
+			CHECK(report->Diagnostics[0].Severity == DiagnosticSeverity::Error);
+			CHECK(report->Diagnostics[0].Entity == thing.GetUUID());
+			CHECK(report->Diagnostics[0].JsonPointer == "/Components/Native.TestMover/Speed");
+			CHECK(GetPreservedNames(thing) == std::vector<std::string>{ "Native.TestSpinner", "Native.TestMover" });
+			const NativeEntityComponents components = ReadNativeComponents(thing, types.get());
+			REQUIRE(components.Registered.size() == 2);
+			CHECK(components.Registered[0].second.Get() == ParseJson(R"({"DegreesPerSecond": 5})"));
+		}
+
+		// Decision 27 (N-B): a member of an older layout is migrated with a warning note; under --strict the note is an error
+		// and nothing changes.
+		TEST_CASE("NativeComponents: a migrated field is a warning, and an error that changes nothing under --strict")
+		{
+			const Ref<const NativeModuleTypes> types = RequireTestTypes(Test::GetNativeTestModuleV2());
+			for (const bool strictUnknowns : { false, true })
+			{
+				CAPTURE(strictUnknowns);
+				Test::SceneTestFixture setup;
+				Entity thing = setup.GetScene().CreateEntity("Thing");
+				thing.AddComponent<UnknownComponentsComponent>(UnknownComponentsComponent{ {
+					UnknownComponentData{ .Name = "Native.TestMover", .Version = 1, .Data = VariantValue(ParseJson(R"({"Speed": 3, "Follow": null})")) },
+				} });
+				const Result<NativeSceneReport> report = CanonicalizeNativeComponents(setup.GetScene(), types.get(), strictUnknowns);
+				REQUIRE_MESSAGE(report.has_value(), report.error().ToString());
+				REQUIRE(report->Diagnostics.size() == 1);
+				CHECK(report->Diagnostics[0].Code == NativeFieldDroppedCode);
+				CHECK(report->Diagnostics[0].JsonPointer == "/Components/Native.TestMover/Follow");
+				CHECK(report->Diagnostics[0].Severity == (strictUnknowns ? DiagnosticSeverity::Error : DiagnosticSeverity::Warning));
+				CHECK(report->Changed == !strictUnknowns);
+				const NativeEntityComponents components = ReadNativeComponents(thing, types.get());
+				REQUIRE(components.Registered.size() == 1);
+				CHECK(components.Registered[0].second.Get() == ParseJson(strictUnknowns ? R"({"Speed": 3, "Follow": null})" : R"({"Speed": 3})"));
+			}
+		}
+
+		// Decision 32 (N-B's half): a patch is a request, so a member no field is named after is refused with the closest
+		// field's name, not dropped.
+		TEST_CASE("NativeComponents: a patch member that names no field is refused with a suggestion")
+		{
+			const Ref<const NativeModuleTypes> types = RequireTestTypes(Test::GetNativeTestModule());
+			Test::SceneTestFixture setup;
+			Entity thing = setup.GetScene().CreateEntity("Thing");
+			const Result<bool> refused = PatchNativeComponents(thing, *types, ParseJson(R"({"Native.TestSpinner": {"DegreesPerSecnd": 20}})"), "/components");
+			REQUIRE_FALSE(refused.has_value());
+			CHECK(refused.error().GetCode() == ErrorCode::Validation);
+			REQUIRE(refused.error().GetIssues().size() == 1);
+			CHECK(refused.error().GetIssues()[0].JsonPointer == "/components/Native.TestSpinner/DegreesPerSecnd");
+			CHECK(refused.error().GetIssues()[0].Suggestions == std::vector<std::string>{ "DegreesPerSecond" });
+			CHECK(ReadNativeComponents(thing, types.get()).Registered.empty());
+
+			const Result<bool> unknown = PatchNativeComponents(thing, *types, ParseJson(R"({"Native.TestSpiner": {}})"), "/components");
+			REQUIRE_FALSE(unknown.has_value());
+			CHECK(unknown.error().GetCode() == ErrorCode::NotFound);
+			REQUIRE(unknown.error().GetIssues().size() == 1);
+			REQUIRE_FALSE(unknown.error().GetIssues()[0].Suggestions.empty());
+			CHECK(unknown.error().GetIssues()[0].Suggestions.front() == "Native.TestSpinner");
 		}
 	}
 

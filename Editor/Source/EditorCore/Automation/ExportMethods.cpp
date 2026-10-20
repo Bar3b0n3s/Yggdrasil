@@ -273,7 +273,10 @@ namespace Engine {
 				.RequiredParams = { "config" },
 				.ExposeAsTool = true,
 				.Mutates = true,
-				.TimeoutSeconds = 900,
+				// The caller's bound, which the MCP bridge waits for: cooking, the native build and the paks, then the smoke
+				// test (at most 300 s, Exporter.cpp) and a testing export's feature test (at most 1800 s, ExportFeatureTest.cpp;
+				// Exporter.h steps 6 and 6a), which run one after the other.
+				.TimeoutSeconds = 3600,
 				.Examples = { { .Description = "Export a Release build and smoke-test it.", .Params = example },
 					{ .Description = "Export a Dist build that runs the project's test suites and replays.", .Params = testingExample } },
 			},

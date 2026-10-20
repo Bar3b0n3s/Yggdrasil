@@ -67,6 +67,21 @@ namespace Engine {
 			return fixture.GetEditor().GetVfs().Exists(*output);
 		}
 
+		// Gives the recorded replay at `path` the expectations `expect` through the project's file system and reimports it:
+		// input.record's Stop verifies every expectation before it writes a recording (Docs/Decisions/0030-m19-contract.md
+		// decision 4), so a replay whose expectations fail or stop its playback is written this way.
+		void WriteReplayExpectations(Test::AutomationFixture& fixture, std::string_view path, std::vector<ReplayExpectation> expect)
+		{
+			ReplayDocument replay = ReadRecordedReplay(fixture.GetEditor(), path);
+			replay.Expect = std::move(expect);
+			const Result<std::string> text = ReplayToText(replay);
+			REQUIRE_MESSAGE(text.has_value(), (text ? "" : text.error().ToString()));
+			const auto file = VfsPath::Create("project", path);
+			REQUIRE(file.has_value());
+			REQUIRE(fixture.GetEditor().GetVfs().WriteFileAtomic(*file, AsBytes(*text)).has_value());
+			CallReplayMethod(fixture, "asset.reimport", Json{ { "asset", path } });
+		}
+
 	}
 
 	TEST_SUITE("Automation")
@@ -166,7 +181,8 @@ namespace Engine {
 		{
 			Test::AutomationFixture fixture("ReplayOutcomes");
 			CallReplayMethod(fixture, "input.record", Json{ { "action", "start" } });
-			CallReplayMethod(fixture, "input.record", Json{ { "action", "stop" }, { "path", "Assets/Tests/Failures.replay" }, { "expect", Json::array({ Json{ { "tick", 0 }, { "luau", "false" } }, Json{ { "tick", 0 }, { "luau", "local x = 1\nerror('replay fault')" } }, Json{ { "tick", 0 }, { "luau", "42" } } }) } });
+			CallReplayMethod(fixture, "input.record", Json{ { "action", "stop" }, { "path", "Assets/Tests/Failures.replay" } });
+			WriteReplayExpectations(fixture, "Assets/Tests/Failures.replay", { { .Tick = 0, .Luau = "false" }, { .Tick = 0, .Luau = "local x = 1\nerror('replay fault')" }, { .Tick = 0, .Luau = "42" } });
 			Json response;
 			{
 				Test::ExpectLog expected(LogLevel::Error, "replay fault");
@@ -328,9 +344,10 @@ namespace Engine {
 			// 0.123456789 is not a float; the header stores the float form, which the recorded session must use too.
 			CallReplayMethod(fixture, "input.record", Json{ { "action", "start" }, { "parameters", Json{ { "ratio", 0.123456789 } } } });
 			CallReplayMethod(fixture, "play.step", Json{ { "ticks", 2 }, { "render", "none" } });
-			const Json saved = CallReplayMethod(fixture, "input.record", Json{ { "action", "stop" }, { "path", "Assets/Tests/Ratio.replay" } });
+			// The recorded session read the float form (Stop then leaves the play session to its verification).
 			const Json recordedName = CallReplayMethod(fixture, "script.eval", Json{ { "context", "play" }, { "code", "return Scene.FindByName('ratio=0.12345679') ~= nil" } });
 			CHECK(recordedName["value"] == Json(true));
+			const Json saved = CallReplayMethod(fixture, "input.record", Json{ { "action", "stop" }, { "path", "Assets/Tests/Ratio.replay" } });
 			const Json replayed = CallReplayMethod(fixture, "input.replay", Json{ { "path", "Assets/Tests/Ratio.replay" }, { "verify", true }, { "strictHash", true } });
 			CHECK(replayed["passed"] == Json(true));
 			CHECK(replayed["hashMatched"] == Json(true));
@@ -393,7 +410,8 @@ namespace Engine {
 			Test::AutomationFixture fixture("ReplayQuitsEarly");
 			CallReplayMethod(fixture, "input.record", Json{ { "action", "start" } });
 			CallReplayMethod(fixture, "play.step", Json{ { "ticks", 6 }, { "render", "none" } });
-			CallReplayMethod(fixture, "input.record", Json{ { "action", "stop" }, { "path", "Assets/Tests/Quits.replay" }, { "expect", Json::array({ Json{ { "tick", 2 }, { "luau", "Application.Quit(3); return true" } }, Json{ { "tick", 5 }, { "luau", "true" } } }) } });
+			CallReplayMethod(fixture, "input.record", Json{ { "action", "stop" }, { "path", "Assets/Tests/Quits.replay" } });
+			WriteReplayExpectations(fixture, "Assets/Tests/Quits.replay", { { .Tick = 2, .Luau = "Application.Quit(3); return true" }, { .Tick = 5, .Luau = "true" } });
 			const Json response = fixture.Request("input.replay", Json{ { "path", "Assets/Tests/Quits.replay" }, { "verify", true }, { "strictHash", true } });
 			REQUIRE_MESSAGE(response.contains("error"), response.dump());
 			CHECK(response["error"]["data"]["errorCode"] == Json("Validation"));
@@ -460,7 +478,8 @@ namespace Engine {
 			CHECK(state["lockstep"] == Json(false));
 			CHECK(state["tick"] == Json(130));
 
-			// A recording without input events is a pure determinism replay: it has nothing to depend on and is written.
+			// A recording without input events is a pure determinism replay: it has nothing to depend on, so it is written once
+			// its verification reproduced it (Docs/Decisions/0030-m19-contract.md decision 4), without an input check.
 			CallReplayMethod(fixture, "input.record", Json{ { "action", "start" }, { "restart", true } });
 			CallReplayMethod(fixture, "play.step", Json{ { "ticks", 130 }, { "render", "none" } });
 			const uint64_t serial = fixture.GetEditor().GetPlay().GetSession()->GetSerial();
@@ -469,10 +488,11 @@ namespace Engine {
 			CHECK(pure["checkpoints"] == Json(2));
 			CHECK(pure["inputCheckTick"] == Json(0));
 			CHECK(ProjectFileExists(fixture, "Assets/Tests/Pure.replay"));
-			// No input check ran, so the recorded session is still the play session, at its last tick.
+			// No input check ran: the play session is the verification's, paused at the replay's last tick.
 			REQUIRE(fixture.GetEditor().GetPlay().GetSession() != nullptr);
-			CHECK(fixture.GetEditor().GetPlay().GetSession()->GetSerial() == serial);
+			CHECK(fixture.GetEditor().GetPlay().GetSession()->GetSerial() != serial);
 			CHECK(fixture.GetEditor().GetPlay().GetSession()->GetTick() == 130);
+			CHECK(fixture.GetEditor().GetPlay().GetSession()->IsPaused());
 
 			// An expectation that only the input satisfies makes the outcome depend on it, although the world does not.
 			CallReplayMethod(fixture, "input.record", Json{ { "action", "start" }, { "restart", true } });
@@ -535,9 +555,10 @@ namespace Engine {
 			REQUIRE(replay.Checkpoints.size() == 2);
 			CHECK(replay.Checkpoints[0].Tick == 60);
 			CHECK(replay.Checkpoints[1].Tick == 120);
-			// The input check leaves its session paused where it ended, with lockstep released, as input.replay does.
+			// The input check plays on past the checkpoint that differed to the final tick (Docs/Decisions/0030-m19-contract.md
+			// decision 3) and leaves its session paused there, with lockstep released, as input.replay does.
 			const Json state = CallReplayMethod(fixture, "play.state");
-			CHECK(state["tick"] == Json(120));
+			CHECK(state["tick"] == Json(130));
 			CHECK(state["lockstep"] == Json(false));
 			CHECK(state["state"] == Json("Paused"));
 
@@ -626,7 +647,8 @@ namespace Engine {
 			CallReplayMethod(fixture, "scene.save");
 			record("Assets/Tests/Look.replay", 70, Json::array());
 			record("Assets/Tests/Short.replay", 30, Json::array());
-			record("Assets/Tests/False.replay", 30, Json::array({ Json{ { "tick", 10 }, { "luau", "false" } } }));
+			record("Assets/Tests/False.replay", 30, Json::array());
+			WriteReplayExpectations(fixture, "Assets/Tests/False.replay", { { .Tick = 10, .Luau = "false" } });
 			CHECK_FALSE(replay("Assets/Tests/Look.replay").contains("error"));
 			CallReplayMethod(fixture, "play.stop");
 
@@ -644,10 +666,12 @@ namespace Engine {
 			CHECK(stopReason.find(GetReplayDivergenceCauses()) != std::string::npos);
 			CallReplayMethod(fixture, "play.stop");
 
-			// A replay shorter than a checkpoint interval fails at its final hash, with the same hint and its message kept.
+			// A replay shorter than a checkpoint interval fails at its final hash, with the same hint and its message kept; its
+			// start fingerprint names the look's change after it (Docs/Decisions/0030-m19-contract.md decision 2).
 			const Json finalHash = replay("Assets/Tests/Short.replay");
 			REQUIRE_MESSAGE(finalHash.contains("error"), finalHash.dump());
-			CHECK(finalHash["error"]["data"]["detail"] == Json("replay verification failed at tick 30"));
+			const std::string finalDetail = JsonReader(finalHash["error"]["data"]).ReadMember<std::string>("detail").value_or("");
+			CHECK(finalDetail.starts_with("replay verification failed at tick 30; changed since the recording: component PostProcess of /Look ("));
 			CHECK(JsonReader(finalHash["error"]["data"]).ReadMember<std::string>("hint").value_or("") == hint);
 			CHECK(finalHash["error"]["data"]["replay"]["hashMatched"] == Json(false));
 			CHECK(finalHash["error"]["data"]["replay"]["checkpointFailed"] == Json(false));
@@ -1142,7 +1166,7 @@ namespace Engine {
 		// Docs/Decisions/0030-m19-contract.md decision 2 (A-FPRINT; ADR 0027 friction F13): a replay records its start
 		// fingerprint, so a playback whose hash differs names what changed since the recording: a serialized component (the
 		// look's PostProcess), a material its MeshRenderer references, a script. The first change ends the error's message.
-		TEST_CASE("ReplayMethods: input.replay names the component, script and material that changed since the recording" * doctest::skip(true))
+		TEST_CASE("ReplayMethods: input.replay names the component, script and material that changed since the recording")
 		{
 			Test::AutomationFixture fixture("ReplayFingerprintChanges");
 			SaveInputScene(fixture);
@@ -1208,7 +1232,7 @@ namespace Engine {
 		// Decision 3 (A-F29): continuePastCheckpoint plays on past every checkpoint whose hash differs to the final tick and
 		// compares the final hash too; the replay still fails, counting the failed checkpoints and naming the first. It
 		// needs strictHash.
-		TEST_CASE("ReplayMethods: input.replay continuePastCheckpoint plays on to the final tick and counts every failed checkpoint" * doctest::skip(true))
+		TEST_CASE("ReplayMethods: input.replay continuePastCheckpoint plays on to the final tick and counts every failed checkpoint")
 		{
 			Test::AutomationFixture fixture("ReplayContinuePastCheckpoint");
 			SaveInputScene(fixture);
@@ -1242,7 +1266,7 @@ namespace Engine {
 		// Decision 3 (A-F29; ADR 0026 friction F29): a recording whose input shows at its checkpoints but whose end state a
 		// reset restores passes the input check and is written, with one warning that its final hash alone does not depend on
 		// its input (MakeFinalHashIndependentWarning); the check then ends at the final tick.
-		TEST_CASE("ReplayMethods: input.record stop warns when only its final state hash does not depend on its input" * doctest::skip(true))
+		TEST_CASE("ReplayMethods: input.record stop warns when only its final state hash does not depend on its input")
 		{
 			Test::AutomationFixture fixture("RecordFinalHashWarning");
 			CallReplayMethod(fixture, "script.write", Json{ { "path", "Assets/Scripts/Resetter.luau" }, { "source", "local Resetter = {}\n"
@@ -1275,7 +1299,7 @@ namespace Engine {
 		// Decision 4 (AL-EVFREE): a recording without input events is verified with its (empty) input too, so a false
 		// expectation refuses it and nothing is written; a satisfied one is written, and the play session is then the
 		// verification's, at its final tick.
-		TEST_CASE("ReplayMethods: input.record stop verifies a recording without input events before writing it" * doctest::skip(true))
+		TEST_CASE("ReplayMethods: input.record stop verifies a recording without input events before writing it")
 		{
 			Test::AutomationFixture fixture("RecordEventFreeVerified");
 			CallReplayMethod(fixture, "scene.save");
@@ -1303,7 +1327,7 @@ namespace Engine {
 		// Decision 5 (AL-TEARDOWN): once the verification's playback reached its final tick, its scripts are stopped and an
 		// error their OnDestroy raises refuses the recording like any other script error, named "at teardown"; nothing is
 		// written, and the session stays the verification's with its scripts stopped.
-		TEST_CASE("ReplayMethods: input.record stop counts the errors its verification's scripts raise at teardown" * doctest::skip(true))
+		TEST_CASE("ReplayMethods: input.record stop counts the errors its verification's scripts raise at teardown")
 		{
 			// Declared before the fixture: every session that ran the Leaver raises it when it ends, the fixture's last one too.
 			Test::ExpectLog teardown(LogLevel::Error, "teardown fault");
@@ -1337,7 +1361,7 @@ namespace Engine {
 		// Decision 14 (A-RREAD): input.readReplay returns a replay's header as its file writes it, its events in play.step's
 		// input form with absolute ticks, a page at a time, its expectations and checkpoints; play.step with those events
 		// from tick 0 of the header's session reproduces the recording's final hash.
-		TEST_CASE("ReplayMethods: input.readReplay reads a replay's header, events, expectations and checkpoints back" * doctest::skip(true))
+		TEST_CASE("ReplayMethods: input.readReplay reads a replay's header, events, expectations and checkpoints back")
 		{
 			Test::AutomationFixture fixture("ReadReplay");
 			SaveInputScene(fixture);

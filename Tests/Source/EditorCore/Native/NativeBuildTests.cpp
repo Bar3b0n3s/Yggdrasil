@@ -6,9 +6,12 @@
 #include "Engine/Core/Random.h"
 #include "Support/Fuzz.h"
 #include "Support/TempDirectory.h"
+#include "Support/WaitUntil.h"
 
 #include <array>
+#include <chrono>
 #include <format>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -82,7 +85,7 @@ namespace Engine {
 
 		// Decisions 26 and 30 (N-A): the sources are every .cpp and .h below Native/, project-relative, in byte order, and the
 		// source hash covers the configuration, NativeApi.h and each source's path and bytes, as Scripts/Lib/native_build.py's.
-		TEST_CASE("NativeBuild: the sources are the .cpp and .h files below Native/ and the source hash covers them in order" * doctest::skip(true))
+		TEST_CASE("NativeBuild: the sources are the .cpp and .h files below Native/ and the source hash covers them in order")
 		{
 			const Test::TempDirectory directory("NativeBuild");
 			const std::filesystem::path project = directory / "Game";
@@ -108,6 +111,10 @@ namespace Engine {
 			REQUIRE(release.has_value());
 			CHECK(*release == ExpectedSourceHash("Release", files));
 			CHECK(*release != *debug);
+			// The values Scripts/Lib/native_build.py's source_hash computes for the same files, which
+			// Tests/Automation/test_build_native.py pins too: the editor and BuildNative.py agree on when a build is current.
+			CHECK(*debug == "a3230069ed62f267");
+			CHECK(*release == "6fddebbbd4d34c08");
 
 			WriteFixtureFile(project / "Native" / "Spinner.h", "#pragma once\n// changed\n");
 			const Result<std::string> changed = ComputeNativeSourceHash(project, ExportConfiguration::Debug, header);
@@ -123,7 +130,7 @@ namespace Engine {
 		}
 
 		// Decision 30 (N-A): the build record reads strictly, what the build wrote and nothing else.
-		TEST_CASE("NativeBuild: a build record reads back what the build wrote and refuses anything else" * doctest::skip(true))
+		TEST_CASE("NativeBuild: a build record reads back what the build wrote and refuses anything else")
 		{
 			const Result<NativeBuildRecord> record = ParseNativeBuildRecord(RecordText);
 			REQUIRE_MESSAGE(record.has_value(), record.error().ToString());
@@ -149,9 +156,69 @@ namespace Engine {
 			CHECK(ParseNativeBuildRecord("{").error().GetCode() == ErrorCode::Parse);
 		}
 
+		// Decision 30 (N-A): the editor's backend runs Scripts/BuildNative.py by fixed paths with fixed arguments and resolves
+		// to the record it writes, also for a build that cannot start (a Native/ without a source: a NATIVE_BUILD_ERROR, not
+		// an error); a cancelled build resolves as Cancelled. Linux and macOS start no build (decision 34).
+		TEST_CASE("NativeBuild: the editor's backend runs Scripts/BuildNative.py and resolves to the record it writes")
+		{
+			const Scope<INativeBuildBackend> backend = CreateNativeBuildBackend();
+			const Test::TempDirectory directory("NativeBuild");
+			const std::filesystem::path project = directory / "Game";
+			REQUIRE(FileSystem::CreateDirectories(project / "Native").has_value());
+			const NativeBuildRequest request{
+				.ProjectRoot = project,
+				.Kind = NativeBuildKind::Module,
+				.Configuration = ExportConfiguration::Debug,
+				.OutputDirectory = directory / "Build",
+			};
+#if defined(ENGINE_PLATFORM_WINDOWS)
+			NativeBuildRequest relative = request;
+			relative.ProjectRoot = "Game";
+			const Result<Scope<INativeBuildJob>> refused = backend->Start(relative);
+			REQUIRE_FALSE(refused.has_value());
+			CHECK(refused.error().GetCode() == ErrorCode::InvalidArgument);
+
+			Result<Scope<INativeBuildJob>> job = backend->Start(request);
+			REQUIRE_MESSAGE(job.has_value(), job.error().ToString());
+			std::optional<Result<NativeBuildOutcome>> outcome;
+			REQUIRE(Test::WaitUntil([&job, &outcome]()
+			{
+				outcome = (*job)->Poll();
+				return outcome.has_value();
+			}, std::chrono::seconds(120)));
+			REQUIRE_MESSAGE(outcome->has_value(), outcome->error().ToString());
+			const NativeBuildOutcome& built = **outcome;
+			CHECK_FALSE(built.Succeeded);
+			CHECK(built.Output.empty());
+			CHECK(built.SourceHash.size() == 16);
+			REQUIRE(built.Diagnostics.size() == 1);
+			CHECK(built.Diagnostics[0].Code == "NATIVE_BUILD_ERROR");
+			CHECK(built.Diagnostics[0].Severity == DiagnosticSeverity::Error);
+			CHECK(FileSystem::Exists(built.Log));
+			const std::optional<Result<NativeBuildOutcome>> again = (*job)->Poll();
+			REQUIRE(again.has_value());
+			REQUIRE(again->has_value());
+			CHECK((*again)->Diagnostics.size() == built.Diagnostics.size());
+
+			NativeBuildRequest cancelledRequest = request;
+			cancelledRequest.OutputDirectory = directory / "Cancelled";
+			Result<Scope<INativeBuildJob>> cancelled = backend->Start(cancelledRequest);
+			REQUIRE_MESSAGE(cancelled.has_value(), cancelled.error().ToString());
+			(*cancelled)->Cancel();
+			const std::optional<Result<NativeBuildOutcome>> stopped = (*cancelled)->Poll();
+			REQUIRE(stopped.has_value());
+			REQUIRE_FALSE(stopped->has_value());
+			CHECK(stopped->error().GetCode() == ErrorCode::Cancelled);
+#else
+			const Result<Scope<INativeBuildJob>> unsupported = backend->Start(request);
+			REQUIRE_FALSE(unsupported.has_value());
+			CHECK(unsupported.error().GetCode() == ErrorCode::Unsupported);
+#endif
+		}
+
 		// Decision 30 (N-A): the record is a file the editor reads, so it has a fuzz target (NativeBuildRecord in
 		// Tests/Data/Fuzz/Targets.json, added by the W19.1 integration).
-		TEST_CASE("NativeBuild: 1,000 seeded mutations of a build record never crash" * doctest::test_suite(Test::FuzzSuite) * doctest::skip(true))
+		TEST_CASE("NativeBuild: 1,000 seeded mutations of a build record never crash" * doctest::test_suite(Test::FuzzSuite))
 		{
 			const Test::FuzzRun run = Test::RunFuzzCase(0x4E42A, 1000, [](Random& random, uint64_t /*index*/)
 			{

@@ -4,7 +4,6 @@
 #include "Engine/Scripting/Sandbox.h"
 #include "Engine/Session/PlaySession.h"
 
-#include <format>
 #include <utility>
 
 namespace Engine {
@@ -68,8 +67,8 @@ namespace Engine {
 
 	Result<std::string> AutomationMethodContext::WriteKeptFile(std::string_view extension, std::span<const std::byte> /*bytes*/)
 	{
-		ENGINE_CONTRACT_STUB();
-		return std::unexpected(Error(ErrorCode::Unsupported, std::format("keeping a .{} output file (Docs/Decisions/0030-m19-contract.md decision 9, stream E)", extension)));
+		// The editor and the Runtime keep files (their overrides); a host without a kept-files directory keeps none.
+		return MakeError(ErrorCode::Unsupported, "kept output files (.{}) are unavailable in this host", extension);
 	}
 
 	bool AutomationMethodContext::IsHostType(TypeKey key) const

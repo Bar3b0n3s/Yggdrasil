@@ -287,8 +287,10 @@ namespace Engine {
 
 	std::span<const AssetHandle> GetRuntimeRequiredBuiltinHandles()
 	{
-		ENGINE_CONTRACT_STUB();
-		return {};
+		// The tonemap's dither (SceneRenderer, when Engine.pak holds it) and the Font placeholder (a Text without a font).
+		static constexpr std::array<AssetHandle, 2> Required = { BuiltinAssetHandles::BlueNoiseTexture, BuiltinAssetHandles::DefaultFont };
+		static_assert(Required[0] < Required[1], "sorted by handle");
+		return Required;
 	}
 
 	Result<BuiltinAssetCatalog> BuiltinAssetCatalog::Parse(std::string_view text)

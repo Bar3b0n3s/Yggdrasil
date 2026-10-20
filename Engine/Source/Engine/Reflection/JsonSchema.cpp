@@ -28,6 +28,10 @@ namespace Engine {
 		static constexpr std::string_view AssetReferencePattern = "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$";
 		// A hash written as 16 lowercase hex digits, the only form some readers accept (a replay's state hashes).
 		static constexpr std::string_view LowercaseHashPattern = "^[0-9a-f]{16}$";
+		// An entity reference in automation component data (EntityReferenceSchema::IdOrPath; ADR 0030 decision 7): the
+		// entity's id, an id prefix of 6 to 15 hex digits or an entity path, which the request's scene resolves.
+		static constexpr std::string_view EntityReferencePattern = "^([0-9a-fA-F]{6,16}|/.+)$";
+		static constexpr size_t MinEntityIdPrefixDigits = 6;
 
 		static bool IsHexHandle(std::string_view text)
 		{
@@ -35,6 +39,15 @@ namespace Engine {
 			{
 				return (character >= '0' && character <= '9') || (character >= 'a' && character <= 'f') || (character >= 'A' && character <= 'F');
 			});
+		}
+
+		static bool IsEntityReference(std::string_view text)
+		{
+			const bool hex = std::all_of(text.begin(), text.end(), [](char character)
+			{
+				return (character >= '0' && character <= '9') || (character >= 'a' && character <= 'f') || (character >= 'A' && character <= 'F');
+			});
+			return (hex && text.size() >= MinEntityIdPrefixDigits && text.size() <= 16) || (text.size() > 1 && text.front() == '/');
 		}
 
 		static bool IsLowercaseHash(std::string_view text)
@@ -93,6 +106,11 @@ namespace Engine {
 		class SchemaBuilder
 		{
 		public:
+			explicit SchemaBuilder(EntityReferenceSchema entities)
+				: m_Entities(entities)
+			{
+			}
+
 			[[nodiscard]] Json FieldSchema(const FieldInfo& field)
 			{
 				Json schema = Json::object();
@@ -238,7 +256,10 @@ namespace Engine {
 						types.push_back("string");
 						types.push_back("null");
 						schema["type"] = std::move(types);
-						schema["pattern"] = std::string(type.GetKind() == FieldType::AssetRef ? AssetReferencePattern : UUIDPattern);
+						if (type.GetKind() == FieldType::AssetRef)
+							schema["pattern"] = std::string(AssetReferencePattern);
+						else
+							schema["pattern"] = std::string(m_Entities == EntityReferenceSchema::IdOrPath ? EntityReferencePattern : UUIDPattern);
 						const std::string& filter = meta != nullptr ? meta->AssetFilter : type.GetAssetTypeName();
 						if (type.GetKind() == FieldType::AssetRef && !filter.empty())
 							schema["x-assetType"] = filter;
@@ -279,6 +300,7 @@ namespace Engine {
 				return Json::object();
 			}
 		private:
+			EntityReferenceSchema m_Entities = EntityReferenceSchema::Id;
 			std::vector<const StructInfo*> m_Referenced;
 		};
 
@@ -589,10 +611,12 @@ namespace Engine {
 				const Result<std::string> pattern = argument.is_string() ? JsonReader(argument).ReadString() : Result<std::string>(std::string());
 				const bool isAssetReference = pattern.has_value() && *pattern == AssetReferencePattern;
 				const bool isLowercaseHash = pattern.has_value() && *pattern == LowercaseHashPattern;
-				if (!pattern.has_value() || (*pattern != UUIDPattern && !isAssetReference && !isLowercaseHash))
+				const bool isEntityReference = pattern.has_value() && *pattern == EntityReferencePattern;
+				if (!pattern.has_value() || (*pattern != UUIDPattern && !isAssetReference && !isLowercaseHash && !isEntityReference))
 				{
-					return SchemaError(std::format("only the UUID pattern {}, the asset reference pattern {} and the lowercase hash pattern {} are supported",
-						UUIDPattern, AssetReferencePattern, LowercaseHashPattern));
+					return SchemaError(std::format("only the UUID pattern {}, the asset reference pattern {}, the lowercase hash pattern {} and the entity "
+												   "reference pattern {} are supported",
+						UUIDPattern, AssetReferencePattern, LowercaseHashPattern, EntityReferencePattern));
 				}
 				if (!instance.is_string())
 					return {};
@@ -601,6 +625,12 @@ namespace Engine {
 				{
 					if (!IsLowercaseHash(text))
 						AddViolation("must be 16 lowercase hexadecimal digits");
+					return {};
+				}
+				if (isEntityReference)
+				{
+					if (!IsEntityReference(text))
+						AddViolation("must be a 16-digit hexadecimal entity id, an id prefix of 6 to 15 hexadecimal digits or an entity path \"/...\"");
 					return {};
 				}
 				if (!isAssetReference)
@@ -625,9 +655,9 @@ namespace Engine {
 
 	}
 
-	Json JsonSchema::ForStruct(const StructInfo& type)
+	Json JsonSchema::ForStruct(const StructInfo& type, EntityReferenceSchema entities)
 	{
-		Utils::SchemaBuilder builder;
+		Utils::SchemaBuilder builder(entities);
 		Json schema = Json::object();
 		schema["$schema"] = std::string(Dialect);
 		schema["title"] = type.GetName();
@@ -638,9 +668,9 @@ namespace Engine {
 		return schema;
 	}
 
-	Json JsonSchema::ForField(const FieldInfo& field)
+	Json JsonSchema::ForField(const FieldInfo& field, EntityReferenceSchema entities)
 	{
-		Utils::SchemaBuilder builder;
+		Utils::SchemaBuilder builder(entities);
 		Json schema = builder.FieldSchema(field);
 		Json definitions = builder.BuildDefinitions();
 		if (!definitions.empty())
@@ -648,9 +678,9 @@ namespace Engine {
 		return schema;
 	}
 
-	Json JsonSchema::ForComponents(const TypeRegistry& registry)
+	Json JsonSchema::ForComponents(const TypeRegistry& registry, EntityReferenceSchema entities)
 	{
-		Utils::SchemaBuilder builder;
+		Utils::SchemaBuilder builder(entities);
 		Json properties = Json::object();
 		for (const ComponentInfo* component : registry.GetComponents())
 		{

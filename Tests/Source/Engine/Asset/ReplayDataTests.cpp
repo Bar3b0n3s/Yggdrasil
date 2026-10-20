@@ -261,9 +261,10 @@ namespace Engine {
 		}
 
 		// M16 friction S2-01 (FX-4): version 2 adds the state-hash checkpoints. A version 1 file still loads, migrated with
-		// none (only its final hash is compared, as before), and writes back canonically as version 2, the bytes
-		// project.upgrade then writes (Tests/Data/Formats/Replay/v1.upgraded.replay).
-		TEST_CASE("ReplayData: a version 1 replay migrates to version 2 with no checkpoints")
+		// none (only its final hash is compared, as before), and writes back canonically in the current version (3, with a
+		// null start fingerprint, Docs/Decisions/0030-m19-contract.md decision 2), the bytes project.upgrade then writes
+		// (Tests/Data/Formats/Replay/v1.upgraded.replay).
+		TEST_CASE("ReplayData: a version 1 replay migrates to version 3 with no checkpoints")
 		{
 			const Result<std::string> v1 = Test::ReadTestDataText("Formats/Replay/v1.replay");
 			const Result<std::string> upgraded = Test::ReadTestDataText("Formats/Replay/v1.upgraded.replay");
@@ -276,14 +277,15 @@ namespace Engine {
 			CHECK(report.Diagnostics.empty());
 			CHECK(migrated->Version == ReplayFormatVersion);
 			CHECK(migrated->Checkpoints.empty());
+			CHECK_FALSE(migrated->Fingerprint.has_value());
 			CHECK(migrated->FinalStateHash == "3e0c91a2b4d5f607");
 			const auto text = ReplayToText(*migrated);
 			REQUIRE(text.has_value());
 			CHECK(*text == *upgraded);
-			// The written form reads back unchanged, as version 2.
+			// The written form reads back unchanged, in the current version.
 			const auto again = ReplayFromText(*upgraded, report, true);
 			REQUIRE(again.has_value());
-			CHECK(report.FileVersion == 2);
+			CHECK(report.FileVersion == ReplayFormatVersion);
 			CHECK(ReplayToText(*again).value_or("") == *upgraded);
 
 			// Version 1 has no Checkpoints: one there is an unknown member (a warning, an error when strict) and is ignored.
@@ -297,7 +299,7 @@ namespace Engine {
 			REQUIRE(report.Diagnostics.size() == 1);
 			CHECK(report.Diagnostics[0].JsonPointer == "/Checkpoints");
 			CHECK_FALSE(ReplayFromJson(withCheckpoints, report, true).has_value());
-			// Version 2 requires them.
+			// Later versions require them.
 			Json missing = JsonReader::Parse(*upgraded).value_or(Json());
 			missing.erase("Checkpoints");
 			CHECK_FALSE(ReplayFromJson(missing, report).has_value());
@@ -399,6 +401,15 @@ namespace Engine {
 			};
 			std::vector<ReplaySeed> seeds;
 			seeds.push_back(makeSeed(Document()));
+			// A replay with a start fingerprint (Docs/Decisions/0030-m19-contract.md decision 2), so its reader and its
+			// cooked codec meet mutated fingerprints too.
+			ReplayDocument printed = Document();
+			printed.Fingerprint = ReplayFingerprint{
+				.Entities = { { .Entity = UUID(0x11), .Path = "/Camera", .Hash = "00000000000000a1", .Components = { { .Component = "Transform", .Hash = "00000000000000b1" }, { .Component = "Camera", .Hash = "00000000000000c1" } } },
+					{ .Entity = UUID(0x22), .Path = "/Board", .Hash = "00000000000000a2", .Components = {} } },
+				.Assets = { { .Handle = UUID(0x515), .Path = "Assets/Scripts/Board.luau", .Type = "Script", .Hash = "00000000000000d1" } },
+			};
+			seeds.push_back(makeSeed(printed));
 			const std::vector<std::string> featureTestReplays = Test::ReadFuzzSeedTexts(Test::GetRepositoryRoot() / "Projects/FeatureTest/Assets", ".replay");
 			REQUIRE(featureTestReplays.size() >= 2);
 			for (const std::string& replay : featureTestReplays)
@@ -440,7 +451,7 @@ namespace Engine {
 		// version 2 file (the reserved fixture Formats/Replay/v2) migrates to version 3 with a null one, nothing recorded, and
 		// writes back as the bytes project.upgrade writes (Formats/Replay/v2.upgraded); in version 2 a Fingerprint member is
 		// unknown, and version 3 requires it.
-		TEST_CASE("ReplayData: a version 2 replay migrates to version 3 with a null fingerprint" * doctest::skip(true))
+		TEST_CASE("ReplayData: a version 2 replay migrates to version 3 with a null fingerprint")
 		{
 			const Result<std::string> v2 = Test::ReadTestDataText("Formats/Replay/v2.replay");
 			const Result<std::string> upgraded = Test::ReadTestDataText("Formats/Replay/v2.upgraded.replay");
@@ -485,7 +496,7 @@ namespace Engine {
 		// Decision 2: the fingerprint is written after Config, read back member for member, carried by the cooked replay
 		// (FormatVersion 3) and validated: ids and handles valid and strictly increasing, component names unique, hashes
 		// canonical.
-		TEST_CASE("ReplayData: the start fingerprint round trips through the source and cooked replays and is validated" * doctest::skip(true))
+		TEST_CASE("ReplayData: the start fingerprint round trips through the source and cooked replays and is validated")
 		{
 			auto d = Document();
 			d.Version = ReplayFingerprintFormatVersion;
@@ -537,6 +548,52 @@ namespace Engine {
 			ReplayFingerprint badHash = fingerprint;
 			badHash.Assets[0].Hash = "D1";
 			refused(badHash);
+		}
+
+		// Decision 2: the reader takes the fingerprint strictly: an unknown member is a warning, or an error when strict, as
+		// everywhere in the format; a fingerprint that is not an object or null, one missing a list, an entity whose
+		// components are not an object and an asset without its type are refused, located below /Fingerprint.
+		TEST_CASE("ReplayData: a malformed start fingerprint is refused at its pointer")
+		{
+			auto d = Document();
+			d.Fingerprint = ReplayFingerprint{
+				.Entities = { { .Entity = UUID(0x11), .Path = "/Camera", .Hash = "00000000000000a1", .Components = { { .Component = "Transform", .Hash = "00000000000000b1" } } } },
+				.Assets = { { .Handle = UUID(0x515), .Path = "Assets/Scripts/Board.luau", .Type = "Script", .Hash = "00000000000000d1" } },
+			};
+			const auto valid = ReplayToJson(d);
+			REQUIRE_MESSAGE(valid.has_value(), valid.error().ToString());
+			ReplayLoadReport report;
+			REQUIRE(ReplayFromJson(*valid, report, true).has_value());
+
+			Json unknown = *valid;
+			unknown["Fingerprint"]["Entities"][0]["Extra"] = 1;
+			REQUIRE(ReplayFromJson(unknown, report).has_value());
+			REQUIRE(report.Diagnostics.size() == 1);
+			CHECK(report.Diagnostics[0].JsonPointer == "/Fingerprint/Entities/0/Extra");
+			CHECK_FALSE(ReplayFromJson(unknown, report, true).has_value());
+
+			const auto refusedAt = [&report](const Json& document, std::string_view pointer)
+			{
+				const auto read = ReplayFromJson(document, report);
+				REQUIRE_FALSE(read.has_value());
+				CHECK(read.error().GetCode() == ErrorCode::Validation);
+				CHECK(read.error().GetLocation().JsonPointer.value_or("").starts_with(pointer));
+			};
+			Json scalar = *valid;
+			scalar["Fingerprint"] = 3;
+			refusedAt(scalar, "/Fingerprint");
+			Json noAssets = *valid;
+			noAssets["Fingerprint"].erase("Assets");
+			refusedAt(noAssets, "/Fingerprint");
+			Json listedComponents = *valid;
+			listedComponents["Fingerprint"]["Entities"][0]["Components"] = Json::array({ "00000000000000b1" });
+			refusedAt(listedComponents, "/Fingerprint/Entities/0/Components");
+			Json untyped = *valid;
+			untyped["Fingerprint"]["Assets"][0]["Type"] = "";
+			refusedAt(untyped, "/Fingerprint/Assets/0/Type");
+			Json uppercase = *valid;
+			uppercase["Fingerprint"]["Entities"][0]["Components"]["Transform"] = "00000000000000B1";
+			refusedAt(uppercase, "/Fingerprint/Entities/0/Components/Transform");
 		}
 	}
 

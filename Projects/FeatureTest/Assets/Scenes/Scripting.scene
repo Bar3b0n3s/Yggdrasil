@@ -226,7 +226,8 @@
 					"StepHeight": 0.3,
 					"Mass": 70,
 					"GravityFactor": 1,
-					"Layer": "Default"
+					"Layer": "Default",
+					"InheritGroundVelocity": false
 				}
 			}
 		},

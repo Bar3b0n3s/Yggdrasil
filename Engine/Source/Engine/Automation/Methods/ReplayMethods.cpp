@@ -20,9 +20,11 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <array>
 #include <format>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -41,8 +43,8 @@ namespace Engine {
 			return {};
 		}
 
-		// input.record stop's candidate with input events (ReplayMethods.h): verified with its input, then checked without it,
-		// and written to Path only when both let it through.
+		// input.record stop's candidate (ReplayMethods.h): verified with its input, then, when it has input events, checked
+		// without it, and written to Path only when both let it through.
 		struct RecordingCandidate
 		{
 			ReplayDocument Document{};
@@ -60,21 +62,29 @@ namespace Engine {
 		// check, and its failure the expected outcome for a replay that depends on its input.
 		constexpr std::string_view ReplayWithoutInputNote = "the replay ran without its input events (withoutInput), which a replay that depends on its input is expected to fail";
 
-		// input.record stop's result for the written `document`; `checkTick` is where its input check ended (0: none ran).
-		InputRecordResult MakeRecordResult(const ReplayDocument& document, std::string written, uint64_t checkTick)
+		// input.record stop's result for the written `document`; `checkTick` is where its input check ended (0: none ran), and
+		// `warnings` are the notes on the written replay (InputRecordResult::Warnings).
+		InputRecordResult MakeRecordResult(const ReplayDocument& document, std::string written, uint64_t checkTick, std::vector<std::string> warnings = {})
 		{
-			return InputRecordResult{ .Recording = false, .Tick = ToAutomationCounter(document.FinalTick), .Events = ToAutomationCounter(document.Events.size()), .Path = std::move(written), .StateHash = document.FinalStateHash, .Checkpoints = ToAutomationCounter(document.Checkpoints.size()), .InputCheckTick = ToAutomationCounter(checkTick) };
+			return InputRecordResult{ .Recording = false, .Tick = ToAutomationCounter(document.FinalTick), .Events = ToAutomationCounter(document.Events.size()), .Path = std::move(written), .StateHash = document.FinalStateHash, .Checkpoints = ToAutomationCounter(document.Checkpoints.size()), .InputCheckTick = ToAutomationCounter(checkTick), .Warnings = std::move(warnings) };
 		}
 
-		// input.replay, and input.record stop's two playbacks of a candidate with input events: plays `replay` in the host's
-		// play session, restarted for it (Restart), at least one tick per Poll within PlayStepFrameBudget.
+		// Where an input check ended (InputRecordResult::InputCheckTick): the tick of the first checkpoint whose state hash
+		// differed, which a playback that continues past it keeps in FirstCheckpointFailure, else where the playback ended.
+		[[nodiscard]] uint64_t GetInputCheckTick(const ReplayPlaybackResult& playback)
+		{
+			return playback.FirstCheckpointFailure.has_value() ? playback.FirstCheckpointFailure->Tick : playback.FinalTick;
+		}
+
+		// input.replay, and input.record stop's playbacks of a candidate: plays `replay` in the host's play session, restarted
+		// for it (Restart), at least one tick per Poll within PlayStepFrameBudget.
 		class ReplayMethodOperation final : public PendingOperation, private IReplayEvaluator
 		{
 		public:
 			// With `candidate`, the operation is input.record stop's (ReplayMethods.h): `replay` is the candidate, first played
-			// with its input (the verification, Docs/Decisions/0027-m17-contract.md A1), then without it (the input check), and
-			// candidate->Document is written to candidate->Path only when the verification reproduces it and the input check
-			// does not.
+			// with its input (the verification, Docs/Decisions/0027-m17-contract.md A1; Docs/Decisions/0030-m19-contract.md
+			// decisions 4 and 5), then, when it has input events, without it (the input check), and candidate->Document is
+			// written to candidate->Path only when the verification reproduces it and the input check does not.
 			explicit ReplayMethodOperation(AssetRef<ReplayData> replay, std::optional<RecordingCandidate> candidate = std::nullopt)
 				: m_Replay(std::move(replay)), m_Guard(std::move(candidate)), m_Stage(m_Guard ? Stage::Verification : Stage::Replay)
 			{
@@ -141,6 +151,15 @@ namespace Engine {
 						{
 							if (std::optional<std::string> reason = DescribeVerificationFailure(*playback); reason.has_value())
 								return RefuseUnreproduced(host, *reason, *serialized);
+							const Result<std::optional<std::string>> teardown = StopVerificationScripts(host);
+							if (!teardown)
+								return Failed(teardown.error());
+							if (teardown->has_value())
+								return RefuseUnreproduced(host, **teardown, *serialized);
+							// A recording without input events has no input to depend on: it is written after its verification
+							// (Docs/Decisions/0030-m19-contract.md decision 4), and the play session stays the verification's.
+							if (m_Guard->Document.Events.empty())
+								return WriteCandidate(host, 0, nullptr);
 							if (Status started = StartInputCheck(host); !started)
 								return std::unexpected(started.error());
 							continue;
@@ -210,12 +229,28 @@ namespace Engine {
 			// input.replay's failed playback. M17 friction F03: with the replay's input, a checkpoint or final hash that differs
 			// says why it can and how to fix it (GetReplayDivergenceHint); an expectation that fails while the hash matches gets
 			// no hint. withoutInput is the input check, whose failure is the expected outcome for a replay that depends on its
-			// input: no hint, and the message says the replay ran without its input events.
+			// input: no hint, and the message says the replay ran without its input events. A playback that continued past its
+			// failed checkpoints (continuePastCheckpoint) names the first of them, and with the replay's input the message ends
+			// with the first change its start fingerprint names (Docs/Decisions/0030-m19-contract.md decisions 2 and 3).
 			[[nodiscard]] Error DescribeReplayFailure(const ReplayPlaybackResult& playback) const
 			{
 				std::string message;
 				bool diverged = false;
-				if (playback.CheckpointFailed)
+				if (playback.CheckpointFailed && playback.FirstCheckpointFailure.has_value())
+				{
+					const ReplayCheckpointFailure& first = *playback.FirstCheckpointFailure;
+					std::string end;
+					if (!playback.StopReason.empty())
+						end = std::format("then the replay stopped at tick {}: {}", playback.FinalTick, playback.StopReason);
+					else if (playback.HashMatched)
+						end = std::format("the final state hash at tick {} matched", playback.FinalTick);
+					else
+						end = std::format("the final state hash at tick {} is {}, recorded {}", playback.FinalTick, playback.StateHash, playback.ExpectedStateHash);
+					message = std::format("replay verification failed at checkpoint tick {}: expected state hash {}, observed {}; {} checkpoint(s) differed, and {}", first.Tick,
+						first.ExpectedStateHash, first.StateHash, playback.CheckpointsFailed, end);
+					diverged = true;
+				}
+				else if (playback.CheckpointFailed)
 				{
 					message = std::format("replay verification failed at checkpoint tick {}: expected state hash {}, observed {}", playback.FinalTick, playback.ExpectedStateHash, playback.StateHash);
 					diverged = true;
@@ -232,6 +267,8 @@ namespace Engine {
 				}
 				if (m_WithoutInput)
 					return Error(ErrorCode::Validation, std::format("{}; {}", message, ReplayWithoutInputNote));
+				if (!playback.Changes.empty())
+					message = std::format("{}; changed since the recording: {}", message, playback.Changes.front());
 				// An empty hint is none.
 				return Error(ErrorCode::Validation, std::move(message)).WithHint(diverged ? std::string(GetReplayDivergenceHint()) : std::string());
 			}
@@ -239,8 +276,8 @@ namespace Engine {
 			// The verification's script errors (A1). The session RestartForReplay created for it is fresh, so its own stream
 			// holds every error of the playback, OnStart's included, as test.run's ordinary-play verification counts them
 			// (FeatureTestRunner.cpp); the first is the session's first occurrence (GetFirstScriptError), since the stream moves
-			// a repeated error behind the others, even within one tick. Teardown's (OnDestroy) are not among them: the session
-			// stays live after the playback (ReplayMethods.h).
+			// a repeated error behind the others, even within one tick. Teardown's (OnDestroy) are counted apart, once the
+			// playback passed (StopVerificationScripts).
 			void NoteScriptErrors(const PlaySession& session)
 			{
 				m_ScriptErrors = session.GetScriptErrors().GetCursor();
@@ -281,6 +318,40 @@ namespace Engine {
 				return std::nullopt;
 			}
 
+			// Docs/Decisions/0030-m19-contract.md decision 5 (AL-TEARDOWN): once the verification reached its final tick with
+			// nothing else failed (DescribeVerificationFailure), its session's scripts are stopped (ScriptEngine::Stop, as test.run
+			// does before it reads a replay's errors), so the errors their OnDestroy raises count like any other: the refusal's
+			// reason, or nullopt when they raised none. The session then stays the verification's, paused at its final tick with
+			// its scripts stopped.
+			[[nodiscard]] Result<std::optional<std::string>> StopVerificationScripts(AutomationMethodContext& context) const
+			{
+				PlaySession* session = context.GetPlaySession();
+				if (session == nullptr || session->GetSerial() != m_Serial)
+					return MakeError(ErrorCode::Cancelled, "the replay session ended or was replaced");
+				ScriptEngine* scripts = session->GetScripts();
+				if (scripts == nullptr)
+					return std::optional<std::string>();
+				scripts->Stop();
+				const uint64_t raised = session->GetScriptErrors().GetCursor();
+				if (raised == m_ScriptErrors)
+					return std::optional<std::string>();
+				// None was raised before (DescribeVerificationFailure), so the session's first is the first of teardown.
+				const ScriptError first = session->GetFirstScriptError().value_or(ScriptError{});
+				return std::optional<std::string>(std::format("the playback raised {} script error(s); the first: {}:{}: {} (at teardown)", raised - m_ScriptErrors, first.Script, first.Line, first.Message));
+			}
+
+			// Writes the candidate that the verification reproduced and, with input events, the input check let through; the
+			// result reports where that check ended (`checkTick`, 0 when none ran) and the replay's `warnings`.
+			[[nodiscard]] Result<Json> WriteCandidate(AutomationMethodContext& context, uint64_t checkTick, const ReplayPlaybackResult* inputCheck) const
+			{
+				const ReplayDocument& candidate = m_Guard->Document;
+				ENGINE_TRY_ASSIGN(std::string written, context.WriteReplay(m_Guard->Path, candidate));
+				std::vector<std::string> warnings;
+				if (inputCheck != nullptr && IsFinalHashIndependent(*inputCheck))
+					warnings.push_back(MakeFinalHashIndependentWarning(written, inputCheck->FirstCheckpointFailure->Tick, candidate.FinalStateHash));
+				return context.SerializeResult(MakeRecordResult(candidate, std::move(written), checkTick, std::move(warnings)));
+			}
+
 			// A1's refusal: nothing is written, and the play session stays the verification's, paused where it ended.
 			[[nodiscard]] Result<Json> RefuseUnreproduced(AutomationMethodContext& context, std::string_view reason, const Json& outcome) const
 			{
@@ -295,14 +366,14 @@ namespace Engine {
 			[[nodiscard]] Status StartInputCheck(AutomationMethodContext& context)
 			{
 				m_Stage = Stage::InputCheck;
-				if (Status started = Restart(context, { .Verify = true, .StrictHash = true, .WithoutInput = true }); !started)
+				if (Status started = Restart(context, { .Verify = true, .StrictHash = true, .WithoutInput = true, .ContinuePastCheckpoint = true }); !started)
 					return std::unexpected(std::move(started).error().WithContext(std::format("while starting the input check of '{}'; nothing was written", m_Guard->Path)));
 				return {};
 			}
 
 			[[nodiscard]] InputReplayResult MakeReplayResult(const ReplayPlaybackResult& playback) const
 			{
-				InputReplayResult result{ .Passed = playback.Passed, .Verified = playback.Verified, .HashChecked = playback.HashChecked, .HashMatched = playback.HashMatched, .FinalTick = ToAutomationCounter(playback.FinalTick), .StateHash = playback.StateHash, .ExpectedStateHash = playback.ExpectedStateHash, .StopReason = playback.StopReason, .CheckpointsChecked = ToAutomationCounter(playback.CheckpointsChecked), .CheckpointFailed = playback.CheckpointFailed, .WithoutInput = m_WithoutInput, .Expect = {} };
+				InputReplayResult result{ .Passed = playback.Passed, .Verified = playback.Verified, .HashChecked = playback.HashChecked, .HashMatched = playback.HashMatched, .FinalTick = ToAutomationCounter(playback.FinalTick), .StateHash = playback.StateHash, .ExpectedStateHash = playback.ExpectedStateHash, .StopReason = playback.StopReason, .CheckpointsChecked = ToAutomationCounter(playback.CheckpointsChecked), .CheckpointFailed = playback.CheckpointFailed, .WithoutInput = m_WithoutInput, .CheckpointsFailed = ToAutomationCounter(playback.CheckpointsFailed), .FirstFailedCheckpointTick = ToAutomationCounter(playback.FirstCheckpointFailure.has_value() ? playback.FirstCheckpointFailure->Tick : 0), .Changes = playback.Changes, .Expect = {} };
 				for (size_t index = 0; index < playback.Expect.size(); ++index)
 				{
 					const ReplayExpectationOutcome& outcome = playback.Expect[index];
@@ -328,7 +399,8 @@ namespace Engine {
 
 			// The input check's verdict (ReplayMethods.h): a playback without input that passes the candidate's verification
 			// (every checkpoint, the final hash, every expectation), whatever script errors it raised, shows its outcome does
-			// not depend on its input, so nothing is written; otherwise the candidate is.
+			// not depend on its input, so nothing is written; otherwise the candidate is, with the warning of a check that
+			// failed only at its checkpoints (IsFinalHashIndependent).
 			[[nodiscard]] Result<Json> FinishInputCheck(AutomationMethodContext& context, const ReplayPlaybackResult& playback, const Json& outcome)
 			{
 				const ReplayDocument& candidate = m_Guard->Document;
@@ -345,8 +417,7 @@ namespace Engine {
 												  "expectation that only the input satisfies; a replay without input events records a pure determinism run",
 								ReplayCheckpointInterval)));
 				}
-				ENGINE_TRY_ASSIGN(std::string written, context.WriteReplay(m_Guard->Path, candidate));
-				return context.SerializeResult(MakeRecordResult(candidate, std::move(written), playback.FinalTick));
+				return WriteCandidate(context, GetInputCheckTick(playback), &playback);
 			}
 
 			[[nodiscard]] Result<Json> Evaluate(PlaySession& session, const ReplayBytecodeExpectation& expectation) override
@@ -370,8 +441,8 @@ namespace Engine {
 			bool m_Released = false;
 		};
 
-		// input.record's Start and an event-free Stop: the outcome is known when the handler returns, and the first Poll (in
-		// the same dispatch) resolves it.
+		// input.record's Start: the outcome is known when the handler returns, and the first Poll (in the same dispatch)
+		// resolves it.
 		class ResolvedRecordOperation final : public PendingOperation
 		{
 		public:
@@ -456,16 +527,11 @@ namespace Engine {
 				compiledExpectations.push_back(std::move(bytecode));
 			}
 			ENGINE_TRY_ASSIGN(ReplayDocument document, recorder->Finish(*session, expectations));
-			if (document.Events.empty())
-			{
-				// A pure determinism replay: nothing to depend on, so neither a verification nor an input check, and the recorded
-				// session stays the play session (ReplayMethods.h; Docs/Decisions/0027-m17-contract.md decision 12).
-				ENGINE_TRY_ASSIGN(std::string written, context.WriteReplay(params.Path, document));
-				return Resolve(context, MakeRecordResult(document, std::move(written), 0));
-			}
-			// The play session restarts for the candidate, played with its input (the verification), then without it (the
-			// recording guard), and the candidate is written only when the first playback reproduces it and the second does not.
-			// The recording has ended; a failure from here on writes nothing.
+			// The play session restarts for the candidate, played with its input (the verification), then, when it has input
+			// events, without it (the recording guard), and the candidate is written only when the first playback reproduces it
+			// and the second does not. A pure determinism replay has nothing to depend on, so it is written after its
+			// verification (Docs/Decisions/0030-m19-contract.md decision 4). The recording has ended; a failure from here on
+			// writes nothing. The candidate carries no start fingerprint: nothing changed since it was recorded.
 			auto replay = CreateRef<ReplayData>();
 			replay->Header = document.Header;
 			replay->Events = document.Events;
@@ -537,7 +603,7 @@ namespace Engine {
 		registry.Struct<InputReplayParams>("InputReplayParams", "Replay an asset in a fresh deterministic session.")
 			.Field("path", &InputReplayParams::Path, "Replay asset path, or a Runtime recording's returned user://Replays identity.")
 			.Field("verify", &InputReplayParams::Verify, "Evaluate cooked expectations.")
-			.Field("strictHash", &InputReplayParams::StrictHash, "Compare the recorded state hash at every checkpoint and at the final tick; requires verify. The first checkpoint that differs ends the playback there.")
+			.Field("strictHash", &InputReplayParams::StrictHash, "Compare the recorded state hash at every checkpoint and at the final tick; requires verify. The first checkpoint that differs ends the playback there, unless continuePastCheckpoint.")
 			.Field("withoutInput", &InputReplayParams::WithoutInput, "Apply none of the replay's input events: the check that its outcome depends on its input; requires verify. A replay whose verification still passes this way proves nothing about its input.")
 			.Field("continuePastCheckpoint", &InputReplayParams::ContinuePastCheckpoint, "Play on past every checkpoint whose hash differs, to the final tick, and compare the final hash too; requires strictHash. The replay still fails when any checkpoint differed (checkpointsFailed, firstFailedCheckpointTick). With withoutInput it tells a replay whose final hash alone does not depend on its input.");
 		registry.Struct<InputReplayResult::Expectation>("InputReplayExpectationResult", "One replay expectation and its authored location.")
@@ -559,7 +625,7 @@ namespace Engine {
 			.Field("expectedStateHash", &InputReplayResult::ExpectedStateHash, "Recorded state hash at finalTick: the final hash, or the failed checkpoint's.")
 			.Field("stopReason", &InputReplayResult::StopReason, "Why playback ended before the replay's final tick (a quit, a fatal script error or a checkpoint whose hash differed); empty when it reached it.")
 			.Field("checkpointsChecked", &InputReplayResult::CheckpointsChecked, "State-hash checkpoints compared (strictHash), the failed one included.")
-			.Field("checkpointFailed", &InputReplayResult::CheckpointFailed, "A checkpoint's hash differed: playback stopped at its tick (finalTick), and stateHash and expectedStateHash are the observed and recorded hashes there.")
+			.Field("checkpointFailed", &InputReplayResult::CheckpointFailed, "A checkpoint's hash differed. Without continuePastCheckpoint playback stopped at its tick (finalTick), and stateHash and expectedStateHash are the observed and recorded hashes there; with it, playback went on to the final tick and firstFailedCheckpointTick names the first.")
 			.Field("withoutInput", &InputReplayResult::WithoutInput, "None of the replay's input events were applied.")
 			.Field("checkpointsFailed", &InputReplayResult::CheckpointsFailed, "continuePastCheckpoint: the checkpoints whose hash differed; 0 otherwise.")
 			.Field("firstFailedCheckpointTick", &InputReplayResult::FirstFailedCheckpointTick, "continuePastCheckpoint: the tick of the first checkpoint whose hash differed; 0 when none differed or without continuePastCheckpoint.")
@@ -589,9 +655,9 @@ namespace Engine {
 	void RegisterReplayMethods(MethodRegistry& methods)
 	{
 		methods.AddPending<AutomationMethodContext, InputRecordParams, InputRecordResult>(
-			{ .Name = "input.record", .Description = "Starts a tick-zero recording or saves its validated applied inputs, expectations and state-hash checkpoints (one every 60 ticks). Stop checks output write permission. A recording with input events is first replayed with them (the verification, which replaces the play session as input.replay does): unless that run reproduces every checkpoint, the final hash and every expectation and raises no script error, Stop refuses to write it (Validation naming the first divergence, the run's outcome in error data verification), which catches a script.eval that wrote script state during the recording; the run is not torn down, so an error raised only at teardown (OnDestroy) is not counted, while test.run counts it when it plays the replay. It is then replayed without them (the input check); when that run also reproduces every checkpoint, the final hash and every expectation, whatever script errors it raises, the recording's outcome does not depend on its input and Stop refuses to write it (Validation, the check's outcome in error data inputCheck). Either way the play session is the last run's, paused where it ended. End such a recording while the played state is still in the scene. A recording without input events is written as recorded, without either run, so verify it with input.replay {verify: true, strictHash: true}.", .RequiredParams = { "action" }, .ExposeAsTool = true, .AvailableInRuntime = true, .TimeoutSeconds = 600, .Examples = { { .Description = "Start a fresh recording.", .Params = Json{ { "action", "Start" } } }, { .Description = "Save the recording.", .Params = Json{ { "action", "Stop" }, { "path", "Assets/Tests/Recorded.replay" } } } } }, &Automation::InputRecord);
+			{ .Name = "input.record", .Description = "Starts a tick-zero recording or saves its validated applied inputs, expectations and state-hash checkpoints (one every 60 ticks). Stop checks output write permission. Every recording is first replayed with its input events, if any (the verification, which replaces the play session as input.replay does): unless that run reproduces every checkpoint, the final hash and every expectation and raises no script error, Stop refuses to write it (Validation naming the first divergence, the run's outcome in error data verification), which catches a script.eval that wrote script state during the recording. Once the run passed, its scripts are stopped, and an error their OnDestroy raises refuses the recording too (named at teardown). A recording without input events is then written, and the play session is the verification's, paused at its final tick with its scripts stopped (script.eval in the play context is refused there; scene.query and entity.get read its final state). One with input events is then replayed without them (the input check); when that run also reproduces every checkpoint, the final hash and every expectation, whatever script errors it raises, the recording's outcome does not depend on its input and Stop refuses to write it (Validation, the check's outcome in error data inputCheck). The play session is then the last run's, paused where it ended. End such a recording while the played state is still in the scene.", .RequiredParams = { "action" }, .ExposeAsTool = true, .AvailableInRuntime = true, .TimeoutSeconds = 600, .Examples = { { .Description = "Start a fresh recording.", .Params = Json{ { "action", "Start" } } }, { .Description = "Save the recording.", .Params = Json{ { "action", "Stop" }, { "path", "Assets/Tests/Recorded.replay" } } } } }, &Automation::InputRecord);
 		methods.AddPending<AutomationMethodContext, InputReplayParams, InputReplayResult>(
-			{ .Name = "input.replay", .Description = "Replays recorded inputs in a fresh session; verification failures retain every expectation and hash outcome in error data. strictHash compares the state hash at each checkpoint and at the final tick and stops at the first checkpoint that differs. The state hash covers the simulated world (entities and their serialized components, the tick, Random, id draws, physics), never script tables, so expectations observe script state. withoutInput replays without the input events, the check that the replay depends on its input. Afterwards the session stays paused at the replay's last tick (or where playback stopped), so script.eval, scene.query and entity.get read its final state; play.stop ends it.", .RequiredParams = { "path" }, .ExposeAsTool = true, .AvailableInRuntime = true, .TimeoutSeconds = 600, .Examples = { { .Description = "Verify a replay.", .Params = Json{ { "path", "Assets/Tests/Recorded.replay" }, { "verify", true }, { "strictHash", true } } }, { .Description = "Check that a replay's verification fails without its input.", .Params = Json{ { "path", "Assets/Tests/Recorded.replay" }, { "verify", true }, { "strictHash", true }, { "withoutInput", true } } } } }, &Automation::InputReplay);
+			{ .Name = "input.replay", .Description = "Replays recorded inputs in a fresh session; verification failures retain every expectation and hash outcome in error data. strictHash compares the state hash at each checkpoint and at the final tick and, unless continuePastCheckpoint, stops at the first checkpoint that differs. The state hash covers the simulated world (entities and their serialized components, the tick, Random, id draws, physics), never script tables, so expectations observe script state. withoutInput replays without the input events, the check that the replay depends on its input. Afterwards the session stays paused at the replay's last tick (or where playback stopped), so script.eval, scene.query and entity.get read its final state; play.stop ends it.", .RequiredParams = { "path" }, .ExposeAsTool = true, .AvailableInRuntime = true, .TimeoutSeconds = 600, .Examples = { { .Description = "Verify a replay.", .Params = Json{ { "path", "Assets/Tests/Recorded.replay" }, { "verify", true }, { "strictHash", true } } }, { .Description = "Check that a replay's verification fails without its input.", .Params = Json{ { "path", "Assets/Tests/Recorded.replay" }, { "verify", true }, { "strictHash", true }, { "withoutInput", true } } } } }, &Automation::InputReplay);
 		methods.Add(
 			{ .Name = "input.readReplay", .Description = "Reads a replay back: its header, its input events a page at a time in play.step's input form with absolute ticks, its expectations and checkpoints. So a replay made with input.record can be re-recorded from its own events: start a recording of the header's scene, seed and parameters, play.step {ticks: finalTick, input: events}, and stop with its expectations.", .RequiredParams = { "path" }, .ExposeAsTool = true, .Examples = { { .Description = "Read the first page of a replay.", .Params = Json{ { "path", "Assets/Tests/Replays/Opening.replay" } } } } }, &Automation::InputReadReplay);
 	}

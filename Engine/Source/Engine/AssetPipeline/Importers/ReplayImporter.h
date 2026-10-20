@@ -19,10 +19,10 @@ namespace Engine {
 	public:
 		static constexpr std::string_view Id = "Replay";
 		// 2: the cooked replay carries the state-hash checkpoints (ReplayData::FormatVersion 2); the version is part of the
-		// cache key, so artifacts cooked by version 1 are rebuilt instead of failing to load. 3, reserved by the phase 1 ledger
-		// and set by stream B with the format (Docs/Decisions/0030-m19-contract.md decision 2): the cooked replay carries the
-		// start fingerprint (ReplayData::FormatVersion 3).
-		static constexpr uint32_t Version = 2;
+		// cache key, so artifacts cooked by an older version are rebuilt instead of failing to load. 3 (the phase 1 ledger's,
+		// Docs/Decisions/0030-m19-contract.md decision 2): the cooked replay carries the start fingerprint
+		// (ReplayData::FormatVersion 3).
+		static constexpr uint32_t Version = 3;
 
 		[[nodiscard]] std::string_view GetId() const override { return Id; }
 		[[nodiscard]] uint32_t GetVersion() const override { return Version; }
@@ -32,8 +32,11 @@ namespace Engine {
 		[[nodiscard]] std::string_view GetSettingsTypeName() const override { return {}; }
 		[[nodiscard]] bool RequiresMainThread() const override { return false; }
 
-		// Reads SourceBytes through ReplayFromText with strictUnknowns=true (a version 1 source migrates with no checkpoints),
-		// validates event/expectation/checkpoint tick bounds, finite values and the replay header, then compiles each Expect
+		// Reads SourceBytes through ReplayFromText with strictUnknowns=true (a version 1 source migrates with no checkpoints,
+		// a version 1 or 2 source with a null fingerprint), validates event/expectation/checkpoint tick bounds, finite values,
+		// the replay header and the fingerprint, whose registered component names must follow the registry's order within
+		// each entity (Validation at /Fingerprint/Entities/<i>/Components/<name>; native and unknown names are not ordered,
+		// decision 27), then compiles each Expect
 		// with ScriptCompiler's ExpressionOrChunk mode.
 		// A complete expression gets the documented wrapper; a complete chunk (including return) stays unchanged.
 		// ChunkName is "=replay/<16-digit-handle>/Expect/<index>"; SourceMap.Path is the actual .replay and JsonPointer

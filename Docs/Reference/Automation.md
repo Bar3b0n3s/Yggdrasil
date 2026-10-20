@@ -403,7 +403,7 @@ Describes one component type: every field with its type, unit, range, default an
 |---|---|---|
 | `component` | `ComponentSummary` | The component type. |
 | `fields` | `Array<ComponentFieldSummary>` | Every field, in registry order. |
-| `schema` | `Variant` | The JSON Schema (2020-12) of the component's serialized object. |
+| `schema` | `Variant` | The JSON Schema (2020-12) of the component's object as component data in params takes it: an Entity field takes the entity's 16-hex id (which files store), an id prefix of 6 to 15 hex digits or an entity path such as /Game/ScoreText. |
 
 Example: Describe the RigidBody component.
 
@@ -695,7 +695,7 @@ Creates an entity with a name, parent, position among its siblings, active flag,
 | `index` | `UInt32` |  | `0` | The position among its siblings; omitted: last. |
 | `active` | `Bool` |  | `true` | Whether the entity starts active. |
 | `tags` | `Array<String>` |  | `[]` | The entity's tags. |
-| `components` | `Map<Variant>` |  | `{}` | Component values by registry name, each an object of field values (missing fields keep their values); see component.schema. |
+| `components` | `Map<Variant>` |  | `{}` | Component values by registry name, each an object of field values (missing fields keep their values); an Entity value takes 16 hex digits, a unique id prefix of at least 6 or a path such as "/Game/ScoreText", resolved in the target scene; see component.schema. |
 | `target` | `SceneTarget` |  | `"Edit"` | The scene to change; omitted: the edit scene. "play" changes the play scene transiently. |
 
 | Result | Type | Description |
@@ -823,7 +823,7 @@ Changes only what is given: name, active flag, tags, component fields (merged; m
 | `name` | `String` |  | `""` | The new name. |
 | `active` | `Bool` |  | `true` | The new active flag. |
 | `tags` | `Array<String>` |  | `[]` | The new tag list (replaces the old one). |
-| `components` | `Map<Variant>` |  | `{}` | Component values by registry name, merged into the existing components; missing components are added. |
+| `components` | `Map<Variant>` |  | `{}` | Component values by registry name, merged into the existing components; missing components are added. An Entity value takes 16 hex digits, a unique id prefix of at least 6 or a path such as "/Game/ScoreText", resolved in the target scene. |
 | `removeComponents` | `Array<String>` |  | `[]` | Components to remove (before the components are written). |
 | `target` | `SceneTarget` |  | `"Edit"` | The scene to change; omitted: the edit scene. "play" changes the play scene transiently. |
 
@@ -927,7 +927,7 @@ Example: Read the first page of a replay.
 
 ### input.record
 
-Starts a tick-zero recording or saves its validated applied inputs, expectations and state-hash checkpoints (one every 60 ticks). Stop checks output write permission. A recording with input events is first replayed with them (the verification, which replaces the play session as input.replay does): unless that run reproduces every checkpoint, the final hash and every expectation and raises no script error, Stop refuses to write it (Validation naming the first divergence, the run's outcome in error data verification), which catches a script.eval that wrote script state during the recording; the run is not torn down, so an error raised only at teardown (OnDestroy) is not counted, while test.run counts it when it plays the replay. It is then replayed without them (the input check); when that run also reproduces every checkpoint, the final hash and every expectation, whatever script errors it raises, the recording's outcome does not depend on its input and Stop refuses to write it (Validation, the check's outcome in error data inputCheck). Either way the play session is the last run's, paused where it ended. End such a recording while the played state is still in the scene. A recording without input events is written as recorded, without either run, so verify it with input.replay {verify: true, strictHash: true}.
+Starts a tick-zero recording or saves its validated applied inputs, expectations and state-hash checkpoints (one every 60 ticks). Stop checks output write permission. Every recording is first replayed with its input events, if any (the verification, which replaces the play session as input.replay does): unless that run reproduces every checkpoint, the final hash and every expectation and raises no script error, Stop refuses to write it (Validation naming the first divergence, the run's outcome in error data verification), which catches a script.eval that wrote script state during the recording. Once the run passed, its scripts are stopped, and an error their OnDestroy raises refuses the recording too (named at teardown). A recording without input events is then written, and the play session is the verification's, paused at its final tick with its scripts stopped (script.eval in the play context is refused there; scene.query and entity.get read its final state). One with input events is then replayed without them (the input check); when that run also reproduces every checkpoint, the final hash and every expectation, whatever script errors it raises, the recording's outcome does not depend on its input and Stop refuses to write it (Validation, the check's outcome in error data inputCheck). The play session is then the last run's, paused where it ended. End such a recording while the played state is still in the scene.
 
 - Flags: tool `input_record`, runtime, pending
 - Timeout: 600 s
@@ -968,7 +968,7 @@ Example: Save the recording.
 
 ### input.replay
 
-Replays recorded inputs in a fresh session; verification failures retain every expectation and hash outcome in error data. strictHash compares the state hash at each checkpoint and at the final tick and stops at the first checkpoint that differs. The state hash covers the simulated world (entities and their serialized components, the tick, Random, id draws, physics), never script tables, so expectations observe script state. withoutInput replays without the input events, the check that the replay depends on its input. Afterwards the session stays paused at the replay's last tick (or where playback stopped), so script.eval, scene.query and entity.get read its final state; play.stop ends it.
+Replays recorded inputs in a fresh session; verification failures retain every expectation and hash outcome in error data. strictHash compares the state hash at each checkpoint and at the final tick and, unless continuePastCheckpoint, stops at the first checkpoint that differs. The state hash covers the simulated world (entities and their serialized components, the tick, Random, id draws, physics), never script tables, so expectations observe script state. withoutInput replays without the input events, the check that the replay depends on its input. Afterwards the session stays paused at the replay's last tick (or where playback stopped), so script.eval, scene.query and entity.get read its final state; play.stop ends it.
 
 - Flags: tool `input_replay`, runtime, pending
 - Timeout: 600 s
@@ -978,7 +978,7 @@ Replays recorded inputs in a fresh session; verification failures retain every e
 |---|---|---|---|---|
 | `path` | `String` | yes | `""` | Replay asset path, or a Runtime recording's returned user://Replays identity. |
 | `verify` | `Bool` |  | `false` | Evaluate cooked expectations. |
-| `strictHash` | `Bool` |  | `false` | Compare the recorded state hash at every checkpoint and at the final tick; requires verify. The first checkpoint that differs ends the playback there. |
+| `strictHash` | `Bool` |  | `false` | Compare the recorded state hash at every checkpoint and at the final tick; requires verify. The first checkpoint that differs ends the playback there, unless continuePastCheckpoint. |
 | `withoutInput` | `Bool` |  | `false` | Apply none of the replay's input events: the check that its outcome depends on its input; requires verify. A replay whose verification still passes this way proves nothing about its input. |
 | `continuePastCheckpoint` | `Bool` |  | `false` | Play on past every checkpoint whose hash differs, to the final tick, and compare the final hash too; requires strictHash. The replay still fails when any checkpoint differed (checkpointsFailed, firstFailedCheckpointTick). With withoutInput it tells a replay whose final hash alone does not depend on its input. |
 
@@ -993,7 +993,7 @@ Replays recorded inputs in a fresh session; verification failures retain every e
 | `expectedStateHash` | `String` | Recorded state hash at finalTick: the final hash, or the failed checkpoint's. |
 | `stopReason` | `String` | Why playback ended before the replay's final tick (a quit, a fatal script error or a checkpoint whose hash differed); empty when it reached it. |
 | `checkpointsChecked` | `UInt32` | State-hash checkpoints compared (strictHash), the failed one included. |
-| `checkpointFailed` | `Bool` | A checkpoint's hash differed: playback stopped at its tick (finalTick), and stateHash and expectedStateHash are the observed and recorded hashes there. |
+| `checkpointFailed` | `Bool` | A checkpoint's hash differed. Without continuePastCheckpoint playback stopped at its tick (finalTick), and stateHash and expectedStateHash are the observed and recorded hashes there; with it, playback went on to the final tick and firstFailedCheckpointTick names the first. |
 | `withoutInput` | `Bool` | None of the replay's input events were applied. |
 | `checkpointsFailed` | `UInt32` | continuePastCheckpoint: the checkpoints whose hash differed; 0 otherwise. |
 | `firstFailedCheckpointTick` | `UInt32` | continuePastCheckpoint: the tick of the first checkpoint whose hash differed; 0 when none differed or without continuePastCheckpoint. |
@@ -1593,7 +1593,7 @@ Creates an instance of a prefab asset (a .prefab or a glTF) under a parent, with
 | `index` | `UInt32` |  | `0` | The position among the parent's children; last when absent. |
 | `transform` | `Variant` |  | `null` | Transform fields over the prefab root's, such as {"Translation": [2, 0, 0]}. |
 | `name` | `String` |  | `""` | The instance root's name; the prefab root's when absent. |
-| `components` | `Map<Variant>` |  | `{}` | Per-instance component values for the instance root by registry name, merged into the prefab's as entity.update merges them (missing components are added) and recorded as the instance's overrides; script fields go in {"Script": {"Fields": {...}}}, the Script handle defaulting to the prefab root's. |
+| `components` | `Map<Variant>` |  | `{}` | Per-instance component values for the instance root by registry name, merged into the prefab's as entity.update merges them (missing components are added) and recorded as the instance's overrides; script fields go in {"Script": {"Fields": {...}}}, the Script handle defaulting to the prefab root's. An Entity value takes 16 hex digits, a unique id prefix of at least 6 or a path such as "/Game/ScoreText", resolved in the edit scene. |
 
 | Result | Type | Description |
 |---|---|---|
@@ -1693,7 +1693,7 @@ Example: Create the Tetris project.
 Exports the open project as a standalone game below Build/: the configuration's Runtime renamed after the project, the app-local CRT, Game.json, Data/Engine.pak and Data/Game.pak, optionally smoke-tested, or with testing a testing export whose game runs its suites and replays with --feature-test; resolves with the report.
 
 - Flags: tool `project_export`, mutates, pending
-- Timeout: 900 s
+- Timeout: 3600 s
 - Required params: `config`
 
 | Param | Type | Required | Default | Description |
@@ -2336,7 +2336,7 @@ Example: Write a module.
 
 ### session.hello
 
-Opens the session: the first request of every connection, with the token from the server's session file. Reports the protocol and engine versions, the client id, the capabilities and the open project (the game in the Runtime).
+Opens the session: the first request of every connection, with the token from the server's session file. Reports the protocol and engine versions, the build id, the client id, the capabilities and the open project (the game in the Runtime).
 
 - Flags: runtime, launcher
 - Timeout: 60 s
@@ -2352,6 +2352,7 @@ Opens the session: the first request of every connection, with the token from th
 |---|---|---|
 | `protocolVersion` | `String` | The protocol version the server speaks. |
 | `engineVersion` | `String` | The engine's version. |
+| `build` | `String` | The server's build id, semantic-versioning build metadata: the engine's version, then "+\<commit>" (12 lowercase hex digits of the commit it was built from) and ".dirty" when its working tree had uncommitted changes, such as "0.2.0+3f2a9c1d4e5b.dirty"; the version alone for a build without a commit. |
 | `clientId` | `UInt32` | This connection's client id, unique for the server's lifetime. |
 | `capabilities` | `Array<String>` | The optional protocol features the server offers: dryRun, ifRevision, batch, pendingOperations, offload, and testHooks. |
 | `project` | `SessionProjectSummary` | The open project. |
@@ -2375,6 +2376,7 @@ Param: none.
 |---|---|---|
 | `protocolVersion` | `String` | The protocol version the server speaks. |
 | `engineVersion` | `String` | The engine's version. |
+| `build` | `String` | The host's build id, as session.hello's build. |
 | `pid` | `UInt32` | The host's process id. |
 | `capabilities` | `Array<String>` | The optional protocol features the server offers. |
 | `project` | `SessionProjectSummary` | The open project. |
@@ -2442,7 +2444,7 @@ Param: none.
 | `scriptHardLimitBytes` | `Float` | Approximate script heap hard limit in bytes when available. |
 | `memoryAllocationCount` | `UInt32` | Current Vulkan device memory allocation count. |
 | `maxMemoryAllocationCount` | `UInt32` | Vulkan device allocation limit, zero without a device. |
-| `views` | `Array<StatsViewSummary>` | The scene then the game view, as the editor's displayed viewport panels: a view whose panel is not displayed is unavailable, and a headless editor displays only the Scene view of its default layout, so game is unavailable there. The Runtime supplies game only. |
+| `views` | `Array<StatsViewSummary>` | The scene then the game view, as the editor's displayed viewport panels: a view whose panel is not displayed is unavailable, and a headless editor displays only the Scene view of its default layout, so game is unavailable there unless the editor was started with --headless-game-view, whose game view renders every frame at the project's window size (or viewport.setOptions' gameResolution). The Runtime supplies game only. |
 
 Example: Inspect current host and renderer observations.
 

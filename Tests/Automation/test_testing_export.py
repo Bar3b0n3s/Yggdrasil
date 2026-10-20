@@ -139,8 +139,6 @@ class TestingExportTests(AutomationTestCase):
             (exports.testing_user_data(package, TINY_GAME_NAME) / "Logs" / f"{TINY_GAME_NAME}.log").is_file())
         self.assertEqual(test_script.check_testing_user_data(package, TINY_GAME_NAME), [])
 
-    @unittest.skip("contract stub: project.export {featureTest} (Docs/Decisions/0030-m19-contract.md decision 10, "
-                   "A-DISTSELF, stream F)")
     def test_feature_test_reports_the_hashes_the_packages_own_run_reads(self) -> None:
         # Docs/Decisions/0030-m19-contract.md decision 10 (A-DISTSELF): a testing export with featureTest runs the
         # staged package's --feature-test and reports every replay's observed state hash, the hashes

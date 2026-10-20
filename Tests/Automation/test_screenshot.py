@@ -2,7 +2,9 @@
 decisions 16 and 33, 0012-m7-decisions.md decision 9): viewport.screenshot renders a view of the target scene afresh
 through the scene renderer (the editor's scene view, the game view through the primary camera, or a camera entity) and
 editor.screenshot the whole editor UI on GLFW's null platform; both write a PNG into the project's output directory and
-name its path. The game and camera views of a rendering editor are covered by test_game_view.py.
+name its path, or with keep into Library/Automation/Kept/, which no later session prunes
+(Docs/Decisions/0030-m19-contract.md decision 9). The game and camera views of a rendering editor are covered by
+test_game_view.py.
 
 The tests that render start a headless editor with the Vulkan renderer and the GPU test options (harness.require_gpu);
 the parameter checks, the view and camera errors and the --renderer none answers need no GPU. The golden images
@@ -179,7 +181,6 @@ class ScreenshotRenderingTests(AutomationTestCase):
         client.call("scene.save")
         self.shut_down(client)
 
-    @unittest.skip("contract stub: screenshot keep (Docs/Decisions/0030-m19-contract.md decision 9, A-SHOTS, stream E)")
     def test_kept_screenshot_outlives_the_next_session(self) -> None:
         # Docs/Decisions/0030-m19-contract.md decision 9 (A-SHOTS; ADR 0027 decision 12's deferral): keep writes the PNG
         # below Library/Automation/Kept/, which no later editor session prunes, so a look screenshot no longer needs
@@ -201,6 +202,7 @@ class ScreenshotRenderingTests(AutomationTestCase):
 
         # The next session on the project, whose first write prunes what earlier servers left in Out/, keeps Kept/.
         later = self.connect(self.start_editor(project=root, renderer="vulkan"))
+        later.call("scene.open", {"path": "Assets/Scenes/Main.scene"})
         later.call("viewport.screenshot", {"view": "scene", "width": 160, "height": 90})
         self.assertTrue(view_path.is_file())
         self.assertTrue(editor_path.is_file())

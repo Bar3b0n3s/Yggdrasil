@@ -15,6 +15,7 @@
 #include "Engine/Asset/RuntimeAssetManager.h"
 #include "Engine/Asset/ScriptData.h"
 #include "Engine/Core/Assert.h"
+#include "Engine/Core/BuildId.h"
 #include "Engine/Core/EventLog.h"
 #include "Engine/Core/FatalError.h"
 #include "Engine/Core/FileSystem.h"
@@ -818,6 +819,10 @@ namespace Engine {
 		State& state = *m_State;
 		const GameManifest& manifest = state.Manifest;
 		const std::filesystem::path directory = state.Options.ManifestPath.parent_path();
+		// The build that runs, and the one that exported the game (Docs/Decisions/0030-m19-contract.md decision 13; a version
+		// 1 manifest of an export before M19 names none).
+		ENGINE_INFO("Runtime: build {}; '{}' was exported by build {}", FormatBuildId(GetBuildId()), manifest.Name,
+			manifest.Build.empty() ? std::string("(not recorded)") : manifest.Build);
 
 		// The paks must be the ones the manifest was exported with (§14.1); the engine context opened Engine.pak already.
 		for (const GameManifestPak& pak : manifest.Paks)

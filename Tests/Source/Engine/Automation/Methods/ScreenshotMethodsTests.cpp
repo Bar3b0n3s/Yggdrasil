@@ -6,21 +6,36 @@
 #include "EditorCore/Automation/ScreenshotMethods.h"
 #include "EditorCore/EditorContext.h"
 #include "EditorCore/Play/EditorPlayController.h"
+#include "Engine/Asset/AssetTypeRegistration.h"
 #include "Engine/Asset/BuiltinAssets.h"
+#include "Engine/Automation/Methods/AutomationTypes.h"
+#include "Engine/Automation/Methods/RegisterSharedMethods.h"
+#include "Engine/Automation/Methods/RuntimeAutomationServer.h"
 #include "Engine/Automation/Protocol/MethodRegistry.h"
+#include "Engine/Core/EventLog.h"
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Json/JsonReader.h"
+#include "Engine/Core/Mounts/MemoryMount.h"
+#include "Engine/Core/VfsPath.h"
+#include "Engine/Core/VirtualFileSystem.h"
 #include "Engine/Graphics/Image.h"
+#include "Engine/Project/ProjectSettings.h"
+#include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Renderer/RenderSnapshot.h"
 #include "Engine/Renderer/ViewportCapture.h"
 #include "Engine/Scene/ColliderDebugDraw.h"
+#include "Engine/Scene/Components/BuiltinComponents.h"
+#include "Engine/Scene/Components/CameraComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/RenderExtraction.h"
 #include "Engine/Session/PlaySession.h"
 #include "Support/AutomationTestClient.h"
 #include "Support/EditorTestFixture.h"
 #include "Support/GlmApprox.h"
+#include "Support/SceneTestFixture.h"
 
+#include <cstdint>
+#include <filesystem>
 #include <format>
 #include <optional>
 #include <string>
@@ -32,7 +47,8 @@
 // cameras, results, files and errors are tested without a device. editor.screenshot and how the editor offers both
 // screenshot methods are tested in Tests/Source/EditorCore/Automation/ScreenshotMethodsTests.cpp. The real captures are tested on the GPU
 // (ViewportCaptureTests.cpp, ImGuiScreenshotTests.cpp, the golden images "LitScene" and "EditorDefaultLayout") and from Python
-// (Tests/Automation/test_screenshot.py, test_game_view.py).
+// (Tests/Automation/test_screenshot.py, test_game_view.py). The Runtime's kept-files directory is tested through its own
+// server (RuntimeAutomationServer).
 
 namespace Engine {
 
@@ -162,6 +178,19 @@ namespace Engine {
 			if (error.GetIssues().empty())
 				return std::format("(an error without issues: {})", error.ToString());
 			return error.GetIssues().front().JsonPointer;
+		}
+
+		// A registry as the Runtime's context builds it (RuntimeApp), frozen.
+		Scope<TypeRegistry> CreateRuntimeTypeRegistry()
+		{
+			Scope<TypeRegistry> registry = CreateScope<TypeRegistry>();
+			RegisterBuiltinComponents(*registry);
+			RegisterProjectSettingsTypes(*registry);
+			RegisterAssetTypes(*registry);
+			RegisterAutomationSharedTypes(*registry);
+			RegisterSharedMethodTypes(*registry);
+			registry->Freeze();
+			return registry;
 		}
 
 		// A project with the scene Assets/Scenes/Main.scene open, and a client whose server has the CPU captures of `log`.
@@ -649,6 +678,58 @@ namespace Engine {
 			CHECK(editor.error().GetCode() == ErrorCode::InvalidArgument);
 			CHECK(log.ViewCalls == 0);
 			CHECK(log.EditorUiCalls == 0);
+		}
+
+		// Docs/Decisions/0030-m19-contract.md decision 9 (A-SHOTS): the Runtime has no project, so keep writes the PNG below
+		// user://Automation/Kept/ (the game's user-data folder), named like its output files, from the server's one file
+		// sequence, and the response names it beside the sessions directory, as Out/.
+		TEST_CASE("ScreenshotMethods: the Runtime keeps a screenshot below user://Automation/Kept, beside its output directory")
+		{
+			const Scope<TypeRegistry> registry = CreateRuntimeTypeRegistry();
+			Test::SceneTestFixture scene;
+			scene.GetScene().CreateEntity("Camera").AddComponent<CameraComponent>(CameraComponent{ .Primary = true });
+			PlaySessionSpecification sessionSpecification;
+			sessionSpecification.Registry = registry.get();
+			Result<Scope<PlaySession>> session = PlaySession::CreateFromScene(sessionSpecification, scene.GetScene());
+			REQUIRE_MESSAGE(session.has_value(), session.error().ToString());
+			EventLog events;
+			VirtualFileSystem vfs;
+			REQUIRE(vfs.Mount("user", CreateScope<MemoryMount>()).has_value());
+			CaptureLog log;
+			const std::filesystem::path sessions = std::filesystem::path("Games") / "Tiny" / "Automation" / "Sessions";
+			RuntimeAutomationServerSpecification specification{ .GameName = "Tiny", .RendererName = "vulkan", .SessionsDirectory = sessions };
+			specification.View = MakeCaptures(log).View;
+			Result<Scope<RuntimeAutomationServer>> server = RuntimeAutomationServer::Create(*registry, events, vfs, **session, specification);
+			REQUIRE_MESSAGE(server.has_value(), server.error().ToString());
+			const ClientId client = (*server)->ConnectInProcess("test");
+			int64_t nextId = 0;
+			const auto shoot = [&server, client, &nextId](Json params) -> Json
+			{
+				(*server)->SubmitInProcess(client, RpcRequest{ .Id = Json(++nextId), .Method = "viewport.screenshot", .Params = std::move(params), .TranscriptLine = std::nullopt });
+				(*server)->Pump();
+				std::vector<Json> responses = (*server)->TakeInProcessResponses(client);
+				REQUIRE(responses.size() == 1);
+				REQUIRE_MESSAGE(responses.front().contains("result"), responses.front().dump());
+				return responses.front()["result"];
+			};
+
+			const Json kept = shoot(Json{ { "view", "game" }, { "width", 64 }, { "height", 32 }, { "keep", true } });
+			const Json plain = shoot(Json{ { "view", "game" }, { "width", 64 }, { "height", 32 } });
+			CHECK(log.ViewCalls == 2);
+			const std::filesystem::path keptPath = FileSystem::PathFromUtf8(ReadString(kept["path"]));
+			const std::filesystem::path plainPath = FileSystem::PathFromUtf8(ReadString(plain["path"]));
+			CHECK(keptPath.parent_path() == sessions.parent_path() / "Kept");
+			CHECK(plainPath.parent_path() == sessions.parent_path() / "Out");
+			const std::string keptName = FileSystem::PathToUtf8(keptPath.filename());
+			CHECK(keptName.ends_with("-00000001.png"));
+			CHECK(FileSystem::PathToUtf8(plainPath.filename()).ends_with("-00000002.png"));
+			const Result<VfsPath> keptFile = VfsPath::Create("user", "Automation/Kept/" + keptName);
+			REQUIRE(keptFile.has_value());
+			const Result<Buffer> png = vfs.ReadFile(*keptFile);
+			REQUIRE_MESSAGE(png.has_value(), png.error().ToString());
+			const Result<Image> image = DecodePng(*png);
+			REQUIRE_MESSAGE(image.has_value(), image.error().ToString());
+			CHECK(image->Pixels == MakePatternImage(64, 32).Pixels);
 		}
 	}
 

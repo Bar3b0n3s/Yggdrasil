@@ -111,6 +111,16 @@ namespace Engine {
 			std::vector<std::string> Calls;
 		};
 
+		// A host without the scene its references resolve in: every reference fails with the host's own InvalidState.
+		class UnavailableEntityReferences final : public IEntityReferenceResolver
+		{
+		public:
+			[[nodiscard]] Result<UUID> ResolveEntityReference(std::string_view /*reference*/, std::string_view /*pointer*/) override
+			{
+				return MakeError(ErrorCode::InvalidState, "no scene open");
+			}
+		};
+
 		struct SchemaRequestState
 		{
 			FakeAssetReferences Assets{};
@@ -346,7 +356,7 @@ namespace Engine {
 		// in component data takes an entity path or a unique id prefix, as entity params do: Invoke rewrites each to the id the
 		// resolver names before strict validation, so the handler reads ids; a 16-hex id never reaches the resolver. Its
 		// NotFound is the request's NotFound and its InvalidArgument an issue at the value's pointer.
-		TEST_CASE("MethodRegistry: an entity path in an EntityRef component value resolves through the host's entity reference resolver" * doctest::skip(true))
+		TEST_CASE("MethodRegistry: an entity path in an EntityRef component value resolves through the host's entity reference resolver")
 		{
 			FakeEntityReferences entities;
 			SchemaRegistrySetup setup;
@@ -388,6 +398,48 @@ namespace Engine {
 			REQUIRE(error.GetIssues().size() == 1);
 			CHECK(error.GetIssues()[0].JsonPointer == "/components/Script/Fields/Target");
 			CHECK(twin.State.HandlerCalls == 0);
+		}
+
+		// Docs/Decisions/0030-m19-contract.md decision 7: an EntityRef field of a component itself (no script field) resolves in
+		// the pass without field schemas, so no snapshot is acquired; its NotFound counts with an asset reference's NotFound;
+		// and a resolver error of another code (the host has no scene) is returned with its code.
+		TEST_CASE("MethodRegistry: entity references in component fields resolve without field schemas and keep a host error's code")
+		{
+			FakeEntityReferences entities;
+			SchemaRegistrySetup setup;
+			setup.State.FailSnapshot = true;
+			setup.State.Entities = &entities;
+			auto context = setup.Context(ParseRegistryJson(R"({"text":"link","components":{"PrefabLink":{"InstanceRoot":"/Game/ScoreText"}}})"));
+			const MethodResult result = setup.Methods.Invoke(*context);
+			REQUIRE_MESSAGE(std::holds_alternative<Json>(result), (std::holds_alternative<Error>(result) ? std::get<Error>(result).ToString() : std::string()));
+			CHECK(setup.State.SnapshotRequests == 0);
+			CHECK(setup.State.HandlerCalls == 1);
+			CHECK(context->GetParams()["components"]["PrefabLink"]["InstanceRoot"] == Json("0000000000000abc"));
+			CHECK(entities.Calls == std::vector<std::string>{ "/Game/ScoreText" });
+
+			FakeEntityReferences missingEntities;
+			SchemaRegistrySetup missing;
+			missing.State.Entities = &missingEntities;
+			auto absent = missing.Context(ParseRegistryJson(R"({"text":"link","components":{"MeshRenderer":{"Mesh":"Assets/Missing.mesh"},
+				"PrefabLink":{"InstanceRoot":"/Game/Missing"}}})"));
+			const MethodResult notFound = missing.Methods.Invoke(*absent);
+			REQUIRE(std::holds_alternative<Error>(notFound));
+			CAPTURE(std::get<Error>(notFound).ToString());
+			CHECK(std::get<Error>(notFound).GetCode() == ErrorCode::NotFound);
+			const std::vector<ErrorIssue>& issues = std::get<Error>(notFound).GetIssues();
+			REQUIRE(issues.size() == 2);
+			CHECK(issues[0].JsonPointer == "/components/MeshRenderer/Mesh");
+			CHECK(issues[1].JsonPointer == "/components/PrefabLink/InstanceRoot");
+			CHECK(missing.State.HandlerCalls == 0);
+
+			UnavailableEntityReferences unavailable;
+			SchemaRegistrySetup closed;
+			closed.State.Entities = &unavailable;
+			auto sceneless = closed.Context(ParseRegistryJson(R"({"text":"link","components":{"PrefabLink":{"InstanceRoot":"/Game/ScoreText"}}})"));
+			const MethodResult refused = closed.Methods.Invoke(*sceneless);
+			REQUIRE(std::holds_alternative<Error>(refused));
+			CHECK(std::get<Error>(refused).GetCode() == ErrorCode::InvalidState);
+			CHECK(closed.State.HandlerCalls == 0);
 		}
 
 		// A4's precedence (Docs/Decisions/0027-m17-contract.md "Frozen interfaces / A4"): an EntityRef issue is never NotFound,

@@ -412,6 +412,69 @@ namespace Engine {
 			CHECK(seen == std::vector<AssetHandle>{ *handle, *handle });
 		}
 
+		// Docs/Decisions/0030-m19-contract.md decision 2 (the replay start fingerprint): an asset's cooked hash is the XXH64 of
+		// the cooked artifact in its cache entry, the bytes an export packs. A source nothing has loaded is cooked first, as
+		// Load does, without counting as a load; a changed source changes it. A procedural built-in, a dependency file and the
+		// null handle have no artifact (InvalidArgument), an unknown handle names none (NotFound), and a source whose import
+		// failed returns that failure.
+		TEST_CASE("EditorAssetManager: the cooked hash of an asset is the XXH64 of its cooked artifact")
+		{
+			// The broken texture fails its import when the refresh below or GetCookedHash first imports it.
+			Test::ExpectLog failure(LogLevel::Error, "Assets/Broken.png");
+			Test::AssetTestFixture fixture;
+			const Buffer wood = Test::MakeTestPng(4, 4, 1);
+			fixture.WriteProjectFile("Assets/Wood.png", wood);
+			fixture.WriteProjectText("Assets/Broken.png", "not a png");
+			const AssetHandle owner(0x3000000000000001ull);
+			const AssetHandle dependency(0x3000000000000002ull);
+			fixture.WriteProjectText("Assets/Data.bin", "data");
+			fixture.WriteProjectText("Assets/Data.bin.meta", SerializeAssetMetadata(MakeDependencyMetadata(dependency, owner)));
+			fixture.OpenProject(false);
+			const AssetHandle handle = fixture.GetManager().Resolve("Assets/Wood.png").value_or(AssetHandle());
+			REQUIRE(handle.IsValid());
+			std::vector<AssetHandle> seen;
+			fixture.GetManager().SetLoadObserver([&seen](AssetHandle loaded)
+			{
+				seen.push_back(loaded);
+			});
+
+			const Result<uint64_t> hash = fixture.GetManager().GetCookedHash(handle);
+			REQUIRE_MESSAGE(hash.has_value(), hash.error().ToString());
+			CHECK(seen.empty());
+			const Result<VariantValue> settings = fixture.GetManager().MergeImportSettings(TextureImporter::Id, VariantValue(), Json::object());
+			REQUIRE(settings.has_value());
+			const uint64_t key = AssetCache::ComputeKey(wood, TextureImporter::Id, TextureImporter::Version, settings->Get(), EngineCookVersion);
+			const AssetCache cache(fixture.GetVfs(), Test::ParseVfsPath("cache://"));
+			const Result<std::optional<Buffer>> artifact = cache.ReadArtifact(handle, key);
+			REQUIRE_MESSAGE(artifact.has_value(), artifact.error().ToString());
+			REQUIRE(artifact->has_value());
+			CHECK(*hash == XXH64(**artifact));
+			// Loaded or not, the same artifact gives the same hash; a changed source another one.
+			REQUIRE(fixture.GetManager().Load(handle).has_value());
+			CHECK(fixture.GetManager().GetCookedHash(handle).value_or(0) == *hash);
+			fixture.WriteProjectFile("Assets/Wood.png", Test::MakeTestPng(4, 4, 2));
+			REQUIRE(fixture.GetManager().Refresh().has_value());
+			const Result<uint64_t> changed = fixture.GetManager().GetCookedHash(handle);
+			REQUIRE(changed.has_value());
+			CHECK(*changed != *hash);
+
+			for (const AssetHandle without : { AssetHandle(), BuiltinAssetHandles::CubeMesh, dependency })
+			{
+				const Result<uint64_t> none = fixture.GetManager().GetCookedHash(without);
+				REQUIRE_FALSE(none.has_value());
+				CHECK(none.error().GetCode() == ErrorCode::InvalidArgument);
+			}
+			const Result<uint64_t> unknown = fixture.GetManager().GetCookedHash(AssetHandle(0x0bad0bad0bad0badull));
+			REQUIRE_FALSE(unknown.has_value());
+			CHECK(unknown.error().GetCode() == ErrorCode::NotFound);
+
+			const AssetHandle broken = fixture.GetManager().Resolve("Assets/Broken.png").value_or(AssetHandle());
+			REQUIRE(broken.IsValid());
+			const Result<uint64_t> failed = fixture.GetManager().GetCookedHash(broken);
+			REQUIRE_FALSE(failed.has_value());
+			CHECK(failed.error().ToString().find("Assets/Broken.png") != std::string::npos);
+		}
+
 		TEST_CASE("EditorAssetManager: refresh reimports a changed source and bumps its version")
 		{
 			Test::AssetTestFixture fixture;

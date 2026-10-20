@@ -263,14 +263,16 @@ class ExportTests(AutomationTestCase):
 
     def test_export_with_renderer_none_uses_prebaked_engine_cache(self) -> None:
         # §7.5, §7.6 (Roadmap M8; Docs/Decisions/0013-m8-decisions.md decision 9): without a device and without a bake,
-        # Engine.pak leaves the built-in environments out with a warning, and an export whose scenes reference one fails
-        # with the GPU hint; once a GPU run of --bake-engine-assets filled the engine cooked cache, an editor without a
-        # device exports them from it.
+        # an export whose scenes reference a built-in environment fails with the GPU hint; once a GPU run of
+        # --bake-engine-assets filled the engine cooked cache, an editor without a device exports it from it. Since M19
+        # (Docs/Decisions/0030-m19-contract.md decision 20) Engine.pak holds only the environments the game reaches, so
+        # the unreferenced ones are neither baked nor warned about.
         if not self.require_gpu():
             return
         client, root = self.open_tiny_game()  # --renderer none, this test's empty engine cache directory
         unbaked = export_tiny_game(client)
-        self.assertTrue(environment_warnings(unbaked), unbaked["warnings"])
+        self.assertEqual(environment_warnings(unbaked), [])
+        self.assertIn("engine://Environments/Studio", unbaked["reachability"]["prunedBuiltins"])
         client.call("entity.update", {"entity": "/Camera", "components": {"Camera": {"Clear": "Skybox"}}})
         client.call("entity.create", {"name": "World", "components": {
             "Environment": {"Environment": "engine://Environments/Studio"}}})
@@ -294,11 +296,14 @@ class ExportTests(AutomationTestCase):
         client = self.connect(self.start_editor(project=root))  # --renderer none, the same engine cache directory
         baked = export_tiny_game(client)
         self.assertFalse(environment_warnings(baked), baked["warnings"])
-        # Engine.pak holds the two built-in environments (Studio and Sky) besides what the unbaked export had.
-        self.assertEqual(baked["engineEntryCount"], unbaked["engineEntryCount"] + 2)
+        # Engine.pak holds the referenced Studio besides what the unbaked export had; Sky, which nothing reaches, stays
+        # out.
+        self.assertEqual(baked["engineEntryCount"], unbaked["engineEntryCount"] + 1)
+        builtins = {entry["path"]: entry for entry in baked["reachability"]["engineBuiltins"]}
+        studio = builtins["engine://Environments/Studio"]
+        self.assertEqual((studio["reason"], studio["from"]), ("Dependency", TINY_SCENE))
+        self.assertIn("engine://Environments/Sky", baked["reachability"]["prunedBuiltins"])
 
-    @unittest.skip("contract stub: Engine.pak's built-ins pruned and the reachability report (Docs/Decisions/"
-                   "0030-m19-contract.md decisions 19 and 20, B-PRUNE-ENG, stream D)")
     def test_engine_pak_holds_only_the_built_ins_the_game_reaches(self) -> None:
         # Docs/Decisions/0030-m19-contract.md decisions 19 and 20 (B-PRUNE-ENG): Engine.pak holds the built-ins the
         # exported game asks for by handle and those its assets reach, here the Coin preset through a script field and

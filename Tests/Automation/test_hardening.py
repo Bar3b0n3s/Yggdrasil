@@ -849,7 +849,8 @@ class FakeClient:
     """An engine client whose play.step takes `step_seconds` of the fake clock; a call whose timeout is shorter than its
     cost uses up the timeout and raises TimeoutError, as engine_client does. Its script.errors reports an empty error
     stream (ScriptErrorClient serves one with errors), which the soak reads before play.start and after its last step
-    (Docs/Decisions/0027-m17-contract.md decision 4, B4)."""
+    (Docs/Decisions/0027-m17-contract.md decision 4, B4); its stats.get reports the scene and game views rendered, as
+    the soak's --headless-game-view editor does (Docs/Decisions/0030-m19-contract.md decision 11)."""
 
     def __init__(self, clock: FakeClock, step_seconds: float) -> None:
         self.clock = clock
@@ -871,7 +872,9 @@ class FakeClient:
         self.clock.now += cost
         if method == "script.errors":
             return {"errors": [], "nextCursor": "0", "evicted": False}
-        return {"entities": 3, "bodies": 1, "voices": 0, "scriptHeapBytes": 500_000, "memoryAllocationCount": 9}
+        return {"entities": 3, "bodies": 1, "voices": 0, "scriptHeapBytes": 500_000, "memoryAllocationCount": 9,
+                "views": [{"name": "scene", "available": True, "width": 983, "height": 446},
+                          {"name": "game", "available": True, "width": 1600, "height": 900}]}
 
 
 class FakeEditorProcess:
@@ -1170,8 +1173,6 @@ class SoakDeadlineTests(unittest.TestCase):
                 self.assertFalse(outcome.results[0].passed)
                 self.assertIn(error["message"], outcome.results[0].failures[0])
 
-    @unittest.skip("contract stub: hardening.soak_game_view_errors (Docs/Decisions/0030-m19-contract.md decision 11, "
-                   "R-SOAK, stream E)")
     def test_a_soak_subject_whose_game_view_does_not_render_fails(self) -> None:
         # Docs/Decisions/0030-m19-contract.md decision 11 (R-SOAK; ADR 0027 friction F08): the editor soak starts its
         # editor with --headless-game-view, so the game camera's passes and post-processing run while the scene plays,

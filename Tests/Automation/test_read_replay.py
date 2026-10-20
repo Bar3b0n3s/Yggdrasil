@@ -4,6 +4,7 @@ file, so that stream B owns it while stream A owns test_replay.py within W19.1 (
 
 from __future__ import annotations
 
+import json
 import unittest
 
 from harness import AutomationTestCase, engine_client
@@ -28,8 +29,6 @@ def add_key_mover(client: engine_client.EngineClient) -> None:
 
 
 class ReadReplayTests(AutomationTestCase):
-    @unittest.skip("contract stub: input.readReplay (Docs/Decisions/0030-m19-contract.md decision 14, A-RREAD, "
-                   "stream B)")
     def test_read_replay_returns_events_that_play_step_replays(self) -> None:
         # Docs/Decisions/0030-m19-contract.md decision 14 (A-RREAD; ADR 0027 decision 12's deferral): input.readReplay
         # reads a replay back, its events in play.step's input form with absolute ticks, so a replay made with
@@ -62,6 +61,46 @@ class ReadReplayTests(AutomationTestCase):
         self.assertEqual(again["stateHash"], saved["stateHash"])
         self.assertTrue((root / "Assets/Tests/Again.replay").exists())
         client.call("play.stop")
+
+    def test_read_replay_pages_an_upgraded_replay_and_refuses_bad_requests(self) -> None:
+        # Decision 14: the file's own version is reported and the document comes back migrated (a version 2 replay has
+        # no fingerprint); the events come a page at a time; a missing replay, a path outside Assets/ and a cursor this
+        # replay never gave are refused, located at their param.
+        client, root = self.open_editor_with_scene()
+        client.call("scene.save")
+        scene = client.call("asset.list", {"dir": "Assets/Scenes"})["assets"][0]
+        events = [{"Tick": tick, "Type": "Key", "Key": "Space", "State": "Down" if tick % 2 == 0 else "Up"}
+                  for tick in range(5)]
+        document = {"Format": "Replay", "Version": 2, "Scene": {"Handle": scene["id"], "Path": scene["path"]},
+                    "Parameters": {}, "Seed": 7, "FixedHz": 60, "EngineVersion": "0.1.0", "Config": "Editor",
+                    "Events": events, "Expect": [], "Checkpoints": [], "FinalTick": 10,
+                    "FinalStateHash": "0123456789abcdef"}
+        replay = root / "Assets/Tests/Old.replay"
+        replay.parent.mkdir(parents=True, exist_ok=True)
+        replay.write_text(json.dumps(document, indent="\t") + "\n", encoding="utf-8")
+
+        first = client.call("input.readReplay", {"path": "project://Assets/Tests/Old.replay", "limit": 2})
+        self.assertEqual(first["path"], "Assets/Tests/Old.replay")
+        self.assertEqual(first["formatVersion"], 2)
+        self.assertFalse(first["hasFingerprint"])
+        self.assertEqual(first["header"]["Seed"], 7)
+        self.assertEqual(first["eventCount"], 5)
+        self.assertEqual([event["tick"] for event in first["events"]], [0, 1])
+        pages = [first]
+        while pages[-1]["nextCursor"]:
+            pages.append(client.call("input.readReplay", {"path": "Assets/Tests/Old.replay", "limit": 2,
+                                                          "cursor": pages[-1]["nextCursor"]}))
+        self.assertEqual([event["tick"] for page in pages for event in page["events"]], [0, 1, 2, 3, 4])
+        self.assertEqual(pages[-1]["events"][0], {"tick": 4, "type": "Key", "key": "Space", "state": "Down"})
+
+        refused = {"missing": ({"path": "Assets/Tests/Missing.replay"}, "NotFound", "/path"),
+                   "outside": ({"path": "Library/Old.replay"}, "InvalidArgument", "/path"),
+                   "cursor": ({"path": "Assets/Tests/Old.replay", "cursor": "5"}, "InvalidArgument", "/cursor")}
+        for label, (params, error_code, pointer) in refused.items():
+            with self.subTest(label), self.assertRaises(engine_client.EngineError) as caught:
+                client.call("input.readReplay", params)
+            self.assertEqual(caught.exception.error_code, error_code)
+            self.assertEqual(caught.exception.data.get("location", {}).get("pointer"), pointer)
 
 
 if __name__ == "__main__":

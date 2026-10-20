@@ -16,8 +16,8 @@
 // Runtime reads it before anything else, because its Name is the application name (the user-data folder of logs, crash
 // reports and user://, §4.4) and its Window and Simulation set up the process.
 //
-//     { "Format": "GameManifest", "Version": 1, "Name": "Tetris", "EngineVersion": "0.1.0",
-//       "StartScene": "8a61c0d2e4f31b77",
+//     { "Format": "GameManifest", "Version": 2, "Name": "Tetris", "EngineVersion": "0.1.0",
+//       "Build": "0.1.0+3f2a9c1d4e5b", "StartScene": "8a61c0d2e4f31b77",
 //       "Paks": [ { "Path": "Data/Engine.pak", "XXH64": "<16 hex>" }, { "Path": "Data/Game.pak", "XXH64": "<16 hex>" } ],
 //       "Window": { "Title": "Tetris", "Width": 720, "Height": 900, "VSync": true, "Fullscreen": false, "Resizable": true },
 //       "Simulation": { "FixedHz": 60, "MaxStepsPerFrame": 5, "Seed": 1, "MaxEntities": 65536 },
@@ -35,13 +35,12 @@
 // Version 2 (M19, Docs/Decisions/0030-m19-contract.md decision 18, B-BVER; GameManifestBuildVersion, reserved by the
 // phase 1 ledger) adds "Build" after "EngineVersion": the exporting build's id as FormatBuildId writes it
 // ("0.2.0+3f2a9c1d4e5b.dirty", Core/BuildId.h), which ParseBuildId must read back and whose version must equal
-// EngineVersion. The readers then accept versions 1 and 2: a version 1 manifest has no Build (one is an unknown key there)
-// and reads with an empty Build; SaveToString always writes version 2 and needs a valid Build. Until stream D lands them,
-// CurrentVersion stays 1 and Build is neither written nor read.
+// EngineVersion. The readers accept versions 1 and 2: a version 1 manifest has no Build (one is an unknown key there) and
+// reads with an empty Build; SaveToString always writes version 2 and needs a valid Build.
 
 namespace Engine {
 
-	// The first manifest version with Build (decision 18): GameManifest::CurrentVersion becomes it with stream D.
+	// The first manifest version with Build (decision 18), GameManifest::CurrentVersion.
 	inline constexpr uint32_t GameManifestBuildVersion = 2;
 
 	// One pak the game mounts, with the XXH64 (seed 0) of its whole file.
@@ -56,7 +55,7 @@ namespace Engine {
 	struct GameManifest
 	{
 		static constexpr std::string_view FormatName = "GameManifest";
-		static constexpr uint32_t CurrentVersion = 1;
+		static constexpr uint32_t CurrentVersion = GameManifestBuildVersion;
 		// The manifest's file name next to the executable (§14.1).
 		static constexpr std::string_view FileName = "Game.json";
 
@@ -77,15 +76,16 @@ namespace Engine {
 	class GameManifestSerializer
 	{
 	public:
-		// The canonical text. Errors: Validation for a manifest that LoadFromString would reject (located at
-		// its JSON pointer), so a written manifest always reads back equal. From version 2 (decision 18, stream D): an empty
-		// or invalid Build, or one whose version differs from EngineVersion, is Validation at /Build.
+		// The canonical text, always the current version. Errors: Validation for a manifest that LoadFromString would reject
+		// (located at its JSON pointer), so a written manifest always reads back equal: an empty or invalid Build, or one
+		// whose version differs from EngineVersion, is Validation at /Build (decision 18).
 		[[nodiscard]] static Result<std::string> SaveToString(const GameManifest& manifest);
 
 		// Reads a manifest strictly: unknown keys, wrong types and out-of-range values are Validation errors located at their
 		// JSON pointer ("/Simulation/FixedHz"); a wrong Format, a Version below 1, an empty or invalid Name, an invalid
-		// StartScene, a Paks array that does not hold exactly two entries (located at /Paks), an invalid pak path or hash are
-		// Validation errors; Testing accepts only a boolean (both true and false); a newer Version is
+		// StartScene, a Paks array that does not hold exactly two entries (located at /Paks), an invalid pak path or hash, and
+		// in version 2 a missing, empty or invalid Build or one of another version than EngineVersion (located at /Build)
+		// are Validation errors; Testing accepts only a boolean (both true and false); a newer Version is
 		// UnsupportedVersion naming both versions; invalid JSON is Parse (line and column).
 		[[nodiscard]] static Result<GameManifest> LoadFromString(std::string_view text);
 

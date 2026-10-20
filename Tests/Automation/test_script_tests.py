@@ -126,12 +126,13 @@ class ScriptTestRunnerTests(AutomationTestCase):
         playback = client.call("input.replay", {"path": path, "verify": True, "strictHash": True})
         self.assertTrue(playback["hashMatched"])
         self.assertEqual(playback["stateHash"], result["suites"][0]["finalStateHash"])
-        # M16 friction S3-03: the recording block describes the replay written; with no input there is nothing to check.
+        # M16 friction S3-03: the recording block describes the replay written; with no input there is nothing to check,
+        # and without expect it carries no expectations (Docs/Decisions/0030-m19-contract.md decision 6) and no warning.
         recorded = json.loads((root / path).read_text(encoding="utf-8"))
         self.assertEqual(result["recording"], {
             "path": path, "formatVersion": recorded["Version"], "ticks": recorded["FinalTick"], "events": 0,
             "checkpoints": 0, "finalStateHash": recorded["FinalStateHash"],
-            "inputCheck": {"ran": False, "divergedAtTick": 0}})
+            "inputCheck": {"ran": False, "divergedAtTick": 0}, "expectations": 0, "warnings": []})
         plain = engine_client.load_offloaded(client.call("test.run", {"filter": "Recorded"}, timeout=120.0))
         self.assertIsNone(plain["recording"])
 
@@ -174,8 +175,6 @@ class ScriptTestRunnerTests(AutomationTestCase):
         self.assertEqual(recording["finalStateHash"], recorded["FinalStateHash"])
         self.assertEqual(recording["inputCheck"], {"ran": True, "divergedAtTick": recorded["FinalTick"]})
 
-    @unittest.skip("contract stub: test.run {record, expect} (Docs/Decisions/0030-m19-contract.md decision 6, "
-                   "A-RECEXPECT, stream A)")
     def test_test_run_record_writes_and_verifies_its_expectations(self) -> None:
         # Docs/Decisions/0030-m19-contract.md decision 6 (A-RECEXPECT; ADR 0026 friction F10): test.run {record, expect}
         # writes the expectations into the recorded replay and verifies them with the recording's input first: a false

@@ -35,6 +35,8 @@ namespace Engine {
 				AssetType Type = AssetType::None;
 				std::string Path{};
 				uint64_t CookedHash = 0;
+				// GetCookedHash fails with this code instead (an asset without an artifact, or one whose cook fails).
+				std::optional<ErrorCode> Failure{};
 			};
 
 			CookedHashAssetManager()
@@ -75,6 +77,8 @@ namespace Engine {
 				const auto found = m_Entries.find(handle);
 				if (found == m_Entries.end())
 					return MakeError(ErrorCode::NotFound, "no asset {}", handle.ToString());
+				if (found->second.Failure.has_value())
+					return MakeError(*found->second.Failure, "asset {} cannot be hashed", handle.ToString());
 				return found->second.CookedHash;
 			}
 		private:
@@ -141,7 +145,7 @@ namespace Engine {
 		// names, once, in handle order, with its type, path and cooked hash: a Script component's asset fields among them,
 		// typed by the session's script field schemas, so an entity field's 16-hex value is never taken for an asset. A
 		// changed component changes only its own hash; a renamed entity only the entity's; the computation is deterministic.
-		TEST_CASE("ReplayFingerprint: the fingerprint holds every entity and component of the scene and the assets they reference" * doctest::skip(true))
+		TEST_CASE("ReplayFingerprint: the fingerprint holds every entity and component of the scene and the assets they reference")
 		{
 			Test::SceneTestFixture fixture;
 			Scene& scene = fixture.GetScene();
@@ -230,7 +234,7 @@ namespace Engine {
 
 		// Decision 2: the changes in their four groups (entities added or removed, entities changed, components, assets), each
 		// line naming the item, at most the limit with "... and <n> more" last, and none for equal fingerprints.
-		TEST_CASE("ReplayFingerprint: the changes name each entity, component and asset that differs, at most the limit" * doctest::skip(true))
+		TEST_CASE("ReplayFingerprint: the changes name each entity, component and asset that differs, at most the limit")
 		{
 			ReplayFingerprint recorded;
 			recorded.Entities = {
@@ -260,6 +264,56 @@ namespace Engine {
 			CHECK(DescribeReplayFingerprintChanges(recorded, observed) == expected);
 			const std::vector<std::string> limited = { expected[0], expected[1], "... and 3 more" };
 			CHECK(DescribeReplayFingerprintChanges(recorded, observed, 3) == limited);
+		}
+
+		// Decision 2: the assets the fingerprint leaves out (a procedural built-in or a dependency file, InvalidArgument; an
+		// unknown handle, NotFound; a manager without cooked artifacts, the default's Unsupported) and the asset whose
+		// artifact exists but cannot be hashed, which fails the fingerprint, naming the asset.
+		TEST_CASE("ReplayFingerprint: assets without a cooked artifact are left out, and one whose hash fails fails the fingerprint")
+		{
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			const Entity box = scene.CreateEntityWithID(UUID(0x22), "Box");
+			box.AddComponent<MeshRendererComponent>(MeshRendererComponent{ .Mesh = TypedAssetHandle<AssetType::Mesh>(UUID(0x101)),
+				.Materials = { TypedAssetHandle<AssetType::Material>(UUID(0x202)), TypedAssetHandle<AssetType::Material>(UUID(0x303)),
+					TypedAssetHandle<AssetType::Material>(UUID(0x404)) } });
+			CookedHashAssetManager assets;
+			assets.Add(UUID(0x101), { .Type = AssetType::Mesh, .Path = "engine://Meshes/Cube", .CookedHash = 0, .Failure = ErrorCode::InvalidArgument });
+			assets.Add(UUID(0x202), { .Type = AssetType::Material, .Path = "Assets/Materials/Red.material", .CookedHash = 0x3009 });
+			assets.Add(UUID(0x303), { .Type = AssetType::Material, .Path = "Assets/Materials/Plain.material", .CookedHash = 0, .Failure = ErrorCode::Unsupported });
+			// 0x404 names no asset.
+			const Result<ReplayFingerprint> fingerprint = ComputeReplayFingerprint(scene, nullptr, &assets);
+			REQUIRE_MESSAGE(fingerprint.has_value(), fingerprint.error().ToString());
+			CHECK(Handles(*fingerprint) == std::vector<AssetHandle>{ AssetHandle(0x202) });
+
+			assets.Add(UUID(0x202), { .Type = AssetType::Material, .Path = "Assets/Materials/Red.material", .CookedHash = 0, .Failure = ErrorCode::ImportFailed });
+			const Result<ReplayFingerprint> failed = ComputeReplayFingerprint(scene, nullptr, &assets);
+			REQUIRE_FALSE(failed.has_value());
+			CHECK(failed.error().GetCode() == ErrorCode::ImportFailed);
+			CHECK(failed.error().ToString().find("Assets/Materials/Red.material") != std::string::npos);
+		}
+
+		// Decision 2: a component the playback's entity gained or lost is named in its place in the registry's order, among
+		// the components that changed, and an entity whose own members changed is named before the components.
+		TEST_CASE("ReplayFingerprint: the changes name components added and removed in the order of the scene file")
+		{
+			ReplayFingerprint recorded;
+			recorded.Entities = { { .Entity = UUID(0x11), .Path = "/Box", .Hash = "00000000000000a1", .Components = { { .Component = "Transform", .Hash = "00000000000000b1" }, { .Component = "Camera", .Hash = "00000000000000c1" }, { .Component = "Script", .Hash = "00000000000000e1" } } } };
+			ReplayFingerprint observed = recorded;
+			observed.Entities[0].Hash = "00000000000000a2";
+			observed.Entities[0].Components = { { .Component = "Transform", .Hash = "00000000000000b1" }, { .Component = "MeshRenderer", .Hash = "00000000000000d1" },
+				{ .Component = "Script", .Hash = "00000000000000e2" } };
+			const std::vector<std::string> expected = {
+				"entity /Box (0000000000000011) changed",
+				"component Camera of /Box (0000000000000011) was removed",
+				"component MeshRenderer of /Box (0000000000000011) was added",
+				"component Script of /Box (0000000000000011) changed",
+			};
+			CHECK(DescribeReplayFingerprintChanges(recorded, observed) == expected);
+			// Every difference fits the limit: no summary line.
+			CHECK(DescribeReplayFingerprintChanges(recorded, observed, 4) == expected);
+			CHECK(DescribeReplayFingerprintChanges(recorded, observed, 1) == std::vector<std::string>{ "... and 4 more" });
+			CHECK(DescribeReplayFingerprintChanges(recorded, observed, 0) == std::vector<std::string>{ "... and 4 more" });
 		}
 	}
 

@@ -20,11 +20,12 @@ namespace Engine {
 	// What step 6a runs; Exporter.cpp fills it from its state.
 	struct ExportFeatureTestRun
 	{
-		// The staged package's executable (the renamed Runtime), run by this fixed path with the fixed argument --feature-test,
-		// never an argument a request supplies.
+		// The staged package's executable (the renamed Runtime), run by this fixed path with the fixed arguments --headless
+		// --feature-test, never an argument a request supplies.
 		std::filesystem::path Executable{};
-		// The staged package's Game.json: the run's report is read below its testing user data
-		// (GetTestingUserDataRoot(StagedManifest) / Name / "TestResults" / "FeatureTest-<Mode>.json", Project/GameManifest.h).
+		// The staged package's Game.json: the run works in its testing user data (GetTestingUserDataRoot(StagedManifest) / Name,
+		// Project/GameManifest.h), and the Runtime writes its report below its working directory, so the report is read at
+		// GetTestingUserDataRoot(StagedManifest) / Name / "bin" / "TestResults" / "FeatureTest-<Mode>.json".
 		std::filesystem::path StagedManifest{};
 		// The directory step 7 moves the staged package to: ExportFeatureTestReport::ReportPath names the report there.
 		std::filesystem::path OutputDirectory{};

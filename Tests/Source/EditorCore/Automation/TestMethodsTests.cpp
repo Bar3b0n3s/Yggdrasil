@@ -18,17 +18,20 @@
 #include "Engine/Scripting/ScriptEngine.h"
 #include "Engine/Scripting/ScriptError.h"
 #include "Engine/Session/PlaySession.h"
+#include "Engine/Session/ReplayPlayer.h"
 #include "Support/AutomationTestClient.h"
 #include "Support/ExpectLog.h"
 #include "Support/WaitUntil.h"
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <format>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 
 namespace Engine {
@@ -535,11 +538,53 @@ namespace Engine {
 			CHECK((*reportDocument)["recording"] == recording);
 		}
 
+		// Docs/Decisions/0030-m19-contract.md decision 3 (A-F29; ADR 0026 friction F29): a recording whose input shows at its
+		// checkpoints but whose end state a reset restores passes the input check, which plays on past those checkpoints and
+		// reproduces the final hash, and is written with MakeFinalHashIndependentWarning in its recording block; the block of
+		// a recording whose final state shows its input holds no warning.
+		TEST_CASE("TestMethods: a recording whose final state hash alone does not depend on its input is written with a warning")
+		{
+			Test::AutomationFixture fixture("TestRecordFinalHashWarning");
+			CallTestMethod(fixture, "script.write", Json{ { "path", "Assets/Scripts/Resetter.luau" }, { "source", "local Resetter = {}\n"
+																												  "function Resetter.OnFixedUpdate(self: any, dt: number)\n"
+																												  "\tif Input.IsKeyDown(\"Space\") then self.Entity.Transform:Translate(vector.create(1, 0, 0)) end\n"
+																												  "\tif Time.GetTick() == 125 then self.Entity.Transform.Translation = vector.create(0, 0, 0) end\n"
+																												  "end\n"
+																												  "return Script.Define(\"Resetter\", Resetter)\n" } });
+			CallTestMethod(fixture, "entity.create", Json{ { "name", "Resetter" }, { "components", Json{ { "Script", Json{ { "Script", "Assets/Scripts/Resetter.luau" } } } } } });
+			CallTestMethod(fixture, "scene.save", Json::object());
+			WriteSuite(fixture, "return Test.Suite('Autopilot', function()\n"
+								"Test.Case('play, then reset', function()\n"
+								"Test.InjectKey('Space', 'Down'); Test.WaitTicks(60)\n"
+								"Test.InjectKey('Space', 'Up'); Test.WaitTicks(70)\n"
+								"end)\nend)");
+			CallTestMethod(fixture, "project.setSettings", Json{ { "patch", Json{ { "Testing", Json{ { "Suites", Json::array({ Json{ { "Script", "Assets/Tests/Contract.test.luau" }, { "Scene", "Assets/Scenes/Main.scene" } } }) } } } } } });
+
+			const std::string path = "Assets/Tests/Replays/Reset.replay";
+			const Json result = CallTestMethod(fixture, "test.run", Json{ { "record", path } });
+			REQUIRE(result["passed"] == Json(true));
+			CHECK(FileSystem::Exists(fixture.GetEditorFixture().GetProjectRoot() / path));
+			const Json& recording = result["recording"];
+			CHECK(recording["inputCheck"] == Json{ { "ran", true }, { "divergedAtTick", 60 } });
+			REQUIRE(recording["warnings"].size() == 1);
+			CHECK(recording["warnings"][0] == Json(MakeFinalHashIndependentWarning(path, 60, JsonReader(recording).ReadMember<std::string>("finalStateHash").value_or(""))));
+
+			// Without the reset, the final state shows the input too: no warning.
+			CallTestMethod(fixture, "script.write", Json{ { "path", "Assets/Scripts/Resetter.luau" }, { "source", "local Resetter = {}\n"
+																												  "function Resetter.OnFixedUpdate(self: any, dt: number)\n"
+																												  "\tif Input.IsKeyDown(\"Space\") then self.Entity.Transform:Translate(vector.create(1, 0, 0)) end\n"
+																												  "end\n"
+																												  "return Script.Define(\"Resetter\", Resetter)\n" } });
+			const Json plain = CallTestMethod(fixture, "test.run", Json{ { "record", "Assets/Tests/Replays/Plain.replay" } });
+			REQUIRE(plain["passed"] == Json(true));
+			CHECK(plain["recording"]["warnings"].empty());
+		}
+
 		// Docs/Decisions/0030-m19-contract.md decision 6 (A-RECEXPECT; ADR 0026 friction F10): test.run {record, expect}
 		// writes the expectations into the recorded replay and verifies them with the recording's input before writing: a
 		// false one refuses the recording and writes nothing, a satisfied one is written and counted in the recording block;
 		// expect needs record.
-		TEST_CASE("TestMethods: test.run {record, expect} writes the expectations and verifies them with the recording's input" * doctest::skip(true))
+		TEST_CASE("TestMethods: test.run {record, expect} writes the expectations and verifies them with the recording's input")
 		{
 			Test::AutomationFixture fixture("TestRecordExpect");
 			CallTestMethod(fixture, "script.write", Json{ { "path", "Assets/Scripts/Paddle.luau" }, { "source", "local Paddle = {}\n"
@@ -578,6 +623,126 @@ namespace Engine {
 			CHECK(withoutRecord["error"]["data"]["errorCode"] == Json("InvalidArgument"));
 			REQUIRE(withoutRecord["error"]["data"].contains("location"));
 			CHECK(withoutRecord["error"]["data"]["location"]["pointer"] == Json("/expect"));
+		}
+
+		// Decision 6 (A-RECEXPECT; the review of W19.1): test.run's expect is checked before anything runs, as input.record's
+		// Stop checks its own: ticks out of order are InvalidArgument at the later one's tick and a source that does not
+		// compile is CompileFailed at its luau, neither running a suite or writing the replay; an expectation that raises
+		// fails the recording as Validation at its luau, naming the raised error, where a false one says it is false.
+		TEST_CASE("TestMethods: test.run {record, expect} refuses unordered ticks and a source that does not compile, and names an expectation that raises")
+		{
+			Test::AutomationFixture fixture("TestRecordExpectRefusals");
+			CallTestMethod(fixture, "script.write", Json{ { "path", "Assets/Scripts/Paddle.luau" }, { "source", "local Paddle = {}\n"
+																												"function Paddle.OnFixedUpdate(self: any, dt: number)\n"
+																												"\tif Input.IsKeyDown(\"Space\") then self.Entity.Transform:Translate(vector.create(1, 0, 0)) end\n"
+																												"end\n"
+																												"return Script.Define(\"Paddle\", Paddle)\n" } });
+			CallTestMethod(fixture, "entity.create", Json{ { "name", "Paddle" }, { "components", Json{ { "Script", Json{ { "Script", "Assets/Scripts/Paddle.luau" } } } } } });
+			CallTestMethod(fixture, "scene.save", Json::object());
+			WriteSuite(fixture, "return Test.Suite('Record.Paddle', function()\n"
+								"Test.Case('move', function()\n"
+								"Test.InjectKey('Space', 'Down'); Test.WaitTicks(70)\n"
+								"Test.InjectKey('Space', 'Up'); Test.WaitTicks(9)\n"
+								"end)\nend)");
+			CallTestMethod(fixture, "project.setSettings", Json{ { "patch", Json{ { "Testing", Json{ { "Suites", Json::array({ Json{ { "Script", "Assets/Tests/Contract.test.luau" }, { "Scene", "Assets/Scenes/Main.scene" } } }) } } } } } });
+			const std::string path = "Assets/Tests/Replays/Paddle.replay";
+			const auto refusedAt = [&fixture, &path](const Json& expect, std::string_view code, std::string_view pointer)
+			{
+				const Json refused = fixture.Request("test.run", Json{ { "record", path }, { "expect", expect } });
+				REQUIRE_MESSAGE(refused.contains("error"), refused.dump());
+				const Json& data = refused["error"]["data"];
+				CHECK(data["errorCode"] == Json(code));
+				REQUIRE_MESSAGE(data.contains("location"), data.dump());
+				CHECK(data["location"]["pointer"] == Json(pointer));
+				CHECK_FALSE(FileSystem::Exists(fixture.GetEditorFixture().GetProjectRoot() / path));
+				return data;
+			};
+
+			const Json unordered = refusedAt(Json::array({ Json{ { "tick", 50 }, { "luau", "true" } }, Json{ { "tick", 10 }, { "luau", "true" } } }), "InvalidArgument", "/expect/1/tick");
+			CHECK_FALSE(unordered.contains("testRun"));
+			const Json uncompiled = refusedAt(Json::array({ Json{ { "tick", 10 }, { "luau", "local = 1" } } }), "CompileFailed", "/expect/0/luau");
+			CHECK_FALSE(uncompiled.contains("testRun"));
+
+			Json raised;
+			{
+				Test::ExpectLog boom(LogLevel::Error, "boom");
+				raised = refusedAt(Json::array({ Json{ { "tick", 40 }, { "luau", "error('boom')" } } }), "Validation", "/expect/0/luau");
+			}
+			const std::string detail = JsonReader(raised).ReadMember<std::string>("detail").value_or("");
+			CHECK(detail.find("recording expectation 0 at tick 40 failed when the recording was replayed with its input: ") != std::string::npos);
+			CHECK(detail.find("boom") != std::string::npos);
+			CHECK(detail.find("is false") == std::string::npos);
+		}
+
+		// Decision 2 (the review of W19.1): a recording takes its session's start fingerprint, so test.run {record} on a scene
+		// that references an asset whose import fails is refused (the recording invalidated with the import's error, naming
+		// the asset) and writes nothing; input.record's start is refused before that by the play gate (asset errors block play, §12.4). A
+		// playback's own fingerprint only explains a hash that differs, so test.run's replays still play to their verdicts,
+		// naming the fingerprint's error as the change, and the run reports its suites.
+		TEST_CASE("TestMethods: test.run {record} refuses a scene with an asset it cannot fingerprint, while its replays still play to their verdicts")
+		{
+			Test::AutomationFixture fixture("TestRecordFingerprintRefusal");
+			CallTestMethod(fixture, "script.write", Json{ { "path", "Assets/Scripts/Paddle.luau" }, { "source", "local Paddle = {}\n"
+																												"function Paddle.OnFixedUpdate(self: any, dt: number)\n"
+																												"\tif Input.IsKeyDown(\"Space\") then self.Entity.Transform:Translate(vector.create(1, 0, 0)) end\n"
+																												"end\n"
+																												"return Script.Define(\"Paddle\", Paddle)\n" } });
+			CallTestMethod(fixture, "entity.create", Json{ { "name", "Paddle" }, { "components", Json{ { "Script", Json{ { "Script", "Assets/Scripts/Paddle.luau" } } } } } });
+			CallTestMethod(fixture, "scene.save", Json::object());
+			WriteSuite(fixture, "return Test.Suite('Record.Paddle', function()\n"
+								"Test.Case('move', function()\n"
+								"Test.InjectKey('Space', 'Down'); Test.WaitTicks(70)\n"
+								"Test.InjectKey('Space', 'Up'); Test.WaitTicks(9)\n"
+								"end)\nend)");
+			CallTestMethod(fixture, "project.setSettings", Json{ { "patch", Json{ { "Testing", Json{ { "Suites", Json::array({ Json{ { "Script", "Assets/Tests/Contract.test.luau" }, { "Scene", "Assets/Scenes/Main.scene" } } }) } } } } } });
+			const std::string recorded = "Assets/Tests/Replays/Paddle.replay";
+			REQUIRE(CallTestMethod(fixture, "test.run", Json{ { "record", recorded } })["passed"] == Json(true));
+
+			// A material whose source does not import, referenced by the scene.
+			const std::string broken = "Assets/Materials/Broken.material";
+			const auto file = VfsPath::Create("project", broken);
+			REQUIRE(file.has_value());
+			REQUIRE(fixture.GetEditor().GetVfs().WriteFileAtomic(*file, AsBytes(std::string_view("{ \"Format\": \"Material\", "))).has_value());
+			Json reimported;
+			{
+				Test::ExpectLog failed(LogLevel::Error, broken);
+				CallTestMethod(fixture, "project.refreshAssets", Json::object());
+				reimported = fixture.Request("asset.reimport", Json{ { "asset", broken } });
+			}
+			REQUIRE_MESSAGE(reimported.contains("error"), reimported.dump());
+			const Json importCode = reimported["error"]["data"]["errorCode"];
+			CallTestMethod(fixture, "entity.create", Json{ { "name", "Box" }, { "components", Json{ { "MeshRenderer", Json{ { "Mesh", "engine://Meshes/Cube" }, { "Materials", Json::array({ broken }) } } } } } });
+			CallTestMethod(fixture, "scene.save", Json::object());
+
+			const Json gated = fixture.Request("input.record", Json{ { "action", "start" } });
+			REQUIRE_MESSAGE(gated.contains("error"), gated.dump());
+			CHECK(gated["error"]["data"]["errorCode"] == Json("InvalidState"));
+
+			const std::string refusedPath = "Assets/Tests/Replays/Refused.replay";
+			const Json refused = fixture.Request("test.run", Json{ { "record", refusedPath } });
+			REQUIRE_MESSAGE(refused.contains("error"), refused.dump());
+			// The runner invalidates the recording with the asset's error (Validation), as for any recorder failure.
+			CHECK(refused["error"]["data"]["errorCode"] == Json("Validation"));
+			const std::string refusal = JsonReader(refused["error"]["data"]).ReadMember<std::string>("detail").value_or("");
+			CHECK(refusal.find(std::format("{}: ", JsonReader(importCode).ReadString().value_or("?"))) != std::string::npos);
+			CHECK(refusal.find(broken) != std::string::npos);
+			CHECK(refusal.find("the recording's start fingerprint") != std::string::npos);
+			CHECK_FALSE(FileSystem::Exists(fixture.GetEditorFixture().GetProjectRoot() / refusedPath));
+
+			// The replay recorded before the Box was added plays: its first checkpoint differs, and the change it names is the
+			// fingerprint's error. The suite still runs and passes.
+			CallTestMethod(fixture, "project.setSettings", Json{ { "patch", Json{ { "Testing", Json{ { "Replays", Json::array({ recorded }) } } } } } });
+			const Json run = CallTestMethod(fixture, "test.run", Json::object());
+			CHECK(run["passed"] == Json(false));
+			const std::string report = run.dump();
+			CHECK(report.find("not known, because the playback's start fingerprint could not be taken: ") != std::string::npos);
+			CHECK(report.find(broken) != std::string::npos);
+			REQUIRE(run.contains("suites"));
+			CHECK(std::ranges::any_of(run["suites"], [](const Json& suite)
+			{
+				const JsonReader row(suite);
+				return row.ReadMember<std::string>("script").value_or("") == "Assets/Tests/Contract.test.luau" && row.ReadMember<bool>("passed").value_or(false);
+			}));
 		}
 
 		// M16 friction S2-01 (FX-4): Breakout's autopilot pressed keys and then restarted the game in place, so its recording's

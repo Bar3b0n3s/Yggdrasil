@@ -1,18 +1,28 @@
 #include "TestsPCH.h"
 #include "Engine/Session/NativeWorld.h"
 
+#include "Engine/Asset/DocumentData.h"
 #include "Engine/Core/Json/JsonReader.h"
+#include "Engine/Core/Log.h"
 #include "Engine/Native/NativeComponents.h"
 #include "Engine/Native/NativeModule.h"
 #include "Engine/Scene/Components/TransformComponent.h"
+#include "Engine/Scene/Components/UnknownComponentsComponent.h"
 #include "Engine/Scene/Entity.h"
+#include "Engine/Scene/SceneSerializer.h"
+#include "Engine/Scripting/ScriptEngine.h"
+#include "Engine/Scripting/ScriptLimits.h"
 #include "Engine/Session/PlaySession.h"
+#include "Support/ExpectLog.h"
+#include "Support/InMemoryAssetManager.h"
 #include "Support/NativeTestModule.h"
 #include "Support/SceneTestFixture.h"
 
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <cstdint>
+#include <format>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -76,6 +86,109 @@ namespace Engine {
 			return std::move(*json);
 		}
 
+		// The test module's types (layout 1) without its systems, for modules that bring their own.
+		void RegisterTestTypes(INativeRegistrar& registrar)
+		{
+			registrar.Add(NativeComponent<Test::NativeTestSpinner>("Turns its entity about an axis.")
+					.Field("DegreesPerSecond", &Test::NativeTestSpinner::DegreesPerSecond, "How fast it turns.", { .Min = -3600.0, .Max = 3600.0, .Unit = "deg/s" })
+					.Field("Axis", &Test::NativeTestSpinner::Axis, "The local axis it turns about.")
+					.Field("Turns", &Test::NativeTestSpinner::Turns, "The ticks it turned."));
+			registrar.Add(NativeComponent<Test::NativeTestMover>("Moves its entity along +X with the MoveX action.")
+					.Field("Speed", &Test::NativeTestMover::Speed, "Metres per second at full input.", { .Min = 0.0, .Unit = "m/s" })
+					.Field("Follow", &Test::NativeTestMover::Follow, "An entity it would follow."));
+			registrar.Add(NativeResource<Test::NativeTestCounter>("What the systems counted.")
+					.Field("Ticks", &Test::NativeTestCounter::Ticks, "Ticks stepped.")
+					.Field("Distance", &Test::NativeTestCounter::Distance, "Metres moved.", { .Min = 0.0, .Unit = "m" }));
+		}
+
+		// Leaves every TestMover's Speed below its Min of 0.
+		void BreakSpeed(INativeStepContext& context)
+		{
+			for (const NativeEntity entity : context.Query<Test::NativeTestMover>())
+			{
+				if (Test::NativeTestMover* mover = context.Get<Test::NativeTestMover>(entity); mover != nullptr)
+					mover->Speed = -1.0f;
+			}
+		}
+
+		void RegisterBreakingModule(INativeRegistrar& registrar)
+		{
+			RegisterTestTypes(registrar);
+			registrar.AddSystem({ .Name = "Break", .Description = "Writes a speed below its minimum.", .Run = &BreakSpeed });
+		}
+
+		// On tick 0: spawns "Spawned" with a TestMover of speed 4, removes every TestSpinner, destroys "/Doomed", turns a
+		// rotation that is not unit length away and counts the active TestMovers in TestCounter.Ticks.
+		void Build(INativeStepContext& context)
+		{
+			if (context.GetTick() != 0)
+				return;
+			const NativeEntity spawned = context.CreateEntity("Spawned", NativeEntity{});
+			CHECK(context.IsValid(spawned));
+			if (Test::NativeTestMover* mover = context.Add<Test::NativeTestMover>(spawned); mover != nullptr)
+				mover->Speed = 4.0f;
+			for (const NativeEntity entity : context.Query<Test::NativeTestSpinner>())
+				CHECK(context.Remove<Test::NativeTestSpinner>(entity));
+			const NativeEntity doomed = context.FindEntity("/Doomed");
+			CHECK(context.DestroyEntity(doomed));
+			CHECK_FALSE(context.IsValid(doomed));
+			NativeTransform transform{};
+			transform.Rotation = glm::quat(2.0f, 0.0f, 0.0f, 0.0f);
+			CHECK_FALSE(context.SetTransform(spawned, transform));
+			CHECK(context.GetName(spawned) == "Spawned");
+			if (Test::NativeTestCounter* counter = context.GetResource<Test::NativeTestCounter>(); counter != nullptr)
+				counter->Ticks = static_cast<uint32_t>(context.Query<Test::NativeTestMover>().size());
+		}
+
+		void RegisterBuildingModule(INativeRegistrar& registrar)
+		{
+			RegisterTestTypes(registrar);
+			registrar.AddSystem({ .Name = "Build", .Description = "Changes the scene's structure once.", .Run = &Build });
+		}
+
+		// Reads an action the project does not define (up and 0) and writes a line; counts in TestCounter.Ticks.
+		void Probe(INativeStepContext& context)
+		{
+			Test::NativeTestCounter* counter = context.GetResource<Test::NativeTestCounter>();
+			if (counter == nullptr)
+				return;
+			const bool down = context.IsActionDown("Missing") || context.WasActionPressed("Missing") || context.WasActionReleased("Missing");
+			counter->Ticks += down || context.GetActionAxis("Missing") != 0.0f ? 100u : 1u;
+			context.Write(NativeLogLevel::Warning, "probed");
+		}
+
+		void RegisterProbingModule(INativeRegistrar& registrar)
+		{
+			RegisterTestTypes(registrar);
+			registrar.AddSystem({ .Name = "Probe", .Description = "Reads an undefined action.", .Run = &Probe });
+		}
+
+		// How many lines more than the step's budget (MaxScriptLogEntriesPerFrame, Architecture §11.11) Flood writes.
+		constexpr uint32_t FloodExcessLines = 5;
+
+		// Writes the step's line budget and FloodExcessLines lines more, every step.
+		void Flood(INativeStepContext& context)
+		{
+			for (uint32_t line = 0; line < MaxScriptLogEntriesPerFrame + FloodExcessLines; ++line)
+				context.Write(NativeLogLevel::Info, "flooded");
+		}
+
+		void RegisterFloodingModule(INativeRegistrar& registrar)
+		{
+			RegisterTestTypes(registrar);
+			registrar.AddSystem({ .Name = "Flood", .Description = "Writes more lines than a step may log.", .Run = &Flood });
+		}
+
+		// Replaces the JSON of the entity's preserved component `name`, as a scene file Scene.Load loaded would hold it.
+		void SetStoredJson(Entity entity, std::string_view name, std::string_view text)
+		{
+			for (UnknownComponentData& data : entity.GetComponent<UnknownComponentsComponent>().Components)
+			{
+				if (data.Name == name)
+					data.Data = VariantValue(ParseJson(text));
+			}
+		}
+
 		[[nodiscard]] PlaySessionSpecification MakeNativeSpecification(Test::SceneTestFixture& fixture, Ref<const NativeModuleTypes> types,
 			IPlaySessionObserver* observer = nullptr)
 		{
@@ -116,7 +229,7 @@ namespace Engine {
 	{
 		// Docs/Decisions/0030-m19-contract.md decision 28 and the phase 1 ledger's PlaySessionPhase (N-B): NativeStep runs in
 		// Play with a module, after Tasks and before PreStepTransformUpdate; Simulate has no native world.
-		TEST_CASE("NativeWorld: systems run in the NativeStep phase, after Tasks and before PreStepTransformUpdate" * doctest::skip(true))
+		TEST_CASE("NativeWorld: systems run in the NativeStep phase, after Tasks and before PreStepTransformUpdate")
 		{
 			Test::SceneTestFixture fixture;
 			const Ref<const NativeModuleTypes> types = RequireTestTypes(Test::GetNativeTestModule());
@@ -153,7 +266,7 @@ namespace Engine {
 
 		// Decision 28 (N-B): a system reads the latched step view of the project's actions, its Transform writes are in the
 		// scene when PreStepTransformUpdate begins, and the component data it changed is written back as canonical JSON.
-		TEST_CASE("NativeWorld: a system reads the latched step input and its writes reach the scene before the transform update" * doctest::skip(true))
+		TEST_CASE("NativeWorld: a system reads the latched step input and its writes reach the scene before the transform update")
 		{
 			Test::SceneTestFixture fixture;
 			const Ref<const NativeModuleTypes> types = RequireTestTypes(Test::GetNativeTestModule());
@@ -192,7 +305,7 @@ namespace Engine {
 		// Decision 28 and the ledger's state-hash block (N-B): the native block holds the module's resources after the
 		// physics block, so equal sessions hash equally, a resource's value changes the hash, and a module without resources
 		// leaves the hash of a session without a module.
-		TEST_CASE("NativeWorld: the native block follows the physics block, hashes the resources and is empty without them" * doctest::skip(true))
+		TEST_CASE("NativeWorld: the native block follows the physics block, hashes the resources and is empty without them")
 		{
 			Test::SceneTestFixture fixture;
 			const Ref<const NativeModuleTypes> full = RequireTestTypes(Test::GetNativeTestModule());
@@ -228,7 +341,7 @@ namespace Engine {
 
 		// Decision 28 (N-B): NativeWorld calls each system inside the §4.6 boundary; an exception that escapes one stops the
 		// session fatally, naming the system, and no later tick runs.
-		TEST_CASE("NativeWorld: an exception that escapes a system stops the session fatally, naming the system" * doctest::skip(true))
+		TEST_CASE("NativeWorld: an exception that escapes a system stops the session fatally, naming the system")
 		{
 			Test::SceneTestFixture fixture;
 			const Scope<PlaySession> session = RequireSession(MakeNativeSpecification(fixture, RequireTestTypes(Test::GetFailingNativeTestModule())), fixture.GetScene());
@@ -238,6 +351,198 @@ namespace Engine {
 			const uint64_t tick = session->GetTick();
 			session->Tick();
 			CHECK(session->GetTick() == tick);
+		}
+
+		// Decision 28 (N-B): every value a system changed is checked against its type when it returns; a rejected one is put
+		// back as the system found it and stops the session, naming the system.
+		TEST_CASE("NativeWorld: a system that leaves a value its type rejects stops the session, and the value is put back")
+		{
+			Test::SceneTestFixture fixture;
+			const Ref<const NativeModuleTypes> types = RequireTestTypes({ .ApiVersion = NativeApiVersion, .Register = &RegisterBreakingModule });
+			UUID mover{};
+			UUID spinner{};
+			PopulateNativeScene(fixture.GetScene(), *types, mover, spinner);
+			const Scope<PlaySession> session = RequireSession(MakeNativeSpecification(fixture, types), fixture.GetScene());
+			session->Tick();
+			REQUIRE(session->GetFatalError().has_value());
+			CHECK(session->GetFatalError()->Message.contains("Break"));
+			CHECK(session->GetFatalError()->Entity == mover);
+			const NativeEntityComponents written = ReadNativeComponents(session->GetScene().FindEntityByID(mover), types.get());
+			REQUIRE(written.Registered.size() == 1);
+			CHECK(written.Registered[0].second.Get() == ParseJson(R"({"Speed": 6, "Follow": null})"));
+			CHECK(session->ComputeStateHash() != 0);
+		}
+
+		// Decision 28 (N-B): only the starting scene is canonicalized, so the step reads what it finds; a value its type rejects
+		// stops the session, naming the entity and the component.
+		TEST_CASE("NativeWorld: a stored value its type rejects stops the session, naming the entity and the component")
+		{
+			Test::SceneTestFixture fixture;
+			const Ref<const NativeModuleTypes> types = RequireTestTypes(Test::GetNativeTestModule());
+			UUID mover{};
+			UUID spinner{};
+			PopulateNativeScene(fixture.GetScene(), *types, mover, spinner);
+			const Scope<PlaySession> session = RequireSession(MakeNativeSpecification(fixture, types), fixture.GetScene());
+			SetStoredJson(session->GetScene().FindEntityByID(mover), "Native.TestMover", R"({"Speed": -2})");
+			session->Tick();
+			REQUIRE(session->GetFatalError().has_value());
+			CHECK(session->GetFatalError()->Message.contains("Native.TestMover"));
+			CHECK(session->GetFatalError()->Message.contains("/Mover"));
+			CHECK(session->GetFatalError()->Message.contains(NativeComponentInvalidCode));
+			CHECK(session->GetFatalError()->Entity == mover);
+			const uint64_t tick = session->GetTick();
+			session->Tick();
+			CHECK(session->GetTick() == tick);
+		}
+
+		// Decision 27 (N-B): a Play session's start makes its scene's native components canonical, and one its type rejects
+		// keeps the session from starting, as a strict load's error does.
+		TEST_CASE("NativeWorld: a scene whose native component its type rejects does not start a session")
+		{
+			Test::SceneTestFixture fixture;
+			const Ref<const NativeModuleTypes> types = RequireTestTypes(Test::GetNativeTestModule());
+			UUID mover{};
+			UUID spinner{};
+			PopulateNativeScene(fixture.GetScene(), *types, mover, spinner);
+			SetStoredJson(fixture.GetScene().FindEntityByID(mover), "Native.TestMover", R"({"Speed": -2})");
+			const Result<Scope<PlaySession>> session = PlaySession::CreateFromScene(MakeNativeSpecification(fixture, types), fixture.GetScene());
+			REQUIRE_FALSE(session.has_value());
+			CHECK(session.error().GetCode() == ErrorCode::Validation);
+			REQUIRE_FALSE(session.error().GetIssues().empty());
+			CHECK(session.error().GetIssues()[0].JsonPointer == "/Components/Native.TestMover/Speed");
+
+			// Simulate ignores the module and keeps the component as written.
+			PlaySessionSpecification simulate = MakeNativeSpecification(fixture, types);
+			simulate.Mode = PlayMode::Simulate;
+			const Scope<PlaySession> simulated = RequireSession(simulate, fixture.GetScene());
+			const NativeEntityComponents kept = ReadNativeComponents(simulated->GetScene().FindEntityByID(mover), types.get());
+			REQUIRE(kept.Registered.size() == 1);
+			CHECK(kept.Registered[0].second.Get() == ParseJson(R"({"Speed": -2})"));
+		}
+
+		// Decision 28 (N-B): a value read with notes is used migrated and written back canonical when the phase ends, and each
+		// note is logged once per session, component and field.
+		TEST_CASE("NativeWorld: a stored value read with notes is written back canonical, and each note is logged once")
+		{
+			Test::SceneTestFixture fixture;
+			const Ref<const NativeModuleTypes> types = RequireTestTypes(Test::GetNativeTestModule());
+			UUID mover{};
+			UUID spinner{};
+			PopulateNativeScene(fixture.GetScene(), *types, mover, spinner);
+			const Scope<PlaySession> session = RequireSession(MakeNativeSpecification(fixture, types), fixture.GetScene());
+			const Test::ExpectLog dropped(LogLevel::Warn, NativeFieldDroppedCode);
+			for (int tick = 0; tick < 2; ++tick)
+			{
+				SetStoredJson(session->GetScene().FindEntityByID(spinner), "Native.TestSpinner", R"({"DegreesPerSecond": 45, "Wobble": true})");
+				session->Tick();
+				REQUIRE_FALSE(session->GetFatalError().has_value());
+				const NativeEntityComponents written = ReadNativeComponents(session->GetScene().FindEntityByID(spinner), types.get());
+				REQUIRE(written.Registered.size() == 1);
+				CHECK(written.Registered[0].second.Get() == ParseJson(R"({"DegreesPerSecond": 45, "Axis": [0, 1, 0], "Turns": 1})"));
+			}
+			CHECK(dropped.GetMatchCount() == 1);
+		}
+
+		// Decision 28 (N-B): the step context's entity and component operations, written back when the phase ends: an added
+		// component on a new entity, a removed one, a destroyed entity, and an inactive entity left out of Query.
+		TEST_CASE("NativeWorld: systems add and remove components, create and destroy entities, and query active entities only")
+		{
+			Test::SceneTestFixture fixture;
+			const Ref<const NativeModuleTypes> types = RequireTestTypes({ .ApiVersion = NativeApiVersion, .Register = &RegisterBuildingModule });
+			UUID mover{};
+			UUID spinner{};
+			PopulateNativeScene(fixture.GetScene(), *types, mover, spinner);
+			Entity sleeper = fixture.GetScene().CreateEntity("Sleeper");
+			REQUIRE(PatchNativeComponents(sleeper, *types, ParseJson(R"({"Native.TestMover": {"Speed": 1}})"), "/components").has_value());
+			sleeper.SetActive(false);
+			const UUID doomed = fixture.GetScene().CreateEntity("Doomed").GetUUID();
+
+			const Scope<PlaySession> session = RequireSession(MakeNativeSpecification(fixture, types), fixture.GetScene());
+			session->Tick();
+			REQUIRE_FALSE(session->GetFatalError().has_value());
+			Scene& scene = session->GetScene();
+			const Entity spawned = scene.FindEntityByPath("/Spawned");
+			REQUIRE(spawned.IsValid());
+			const NativeEntityComponents added = ReadNativeComponents(spawned, types.get());
+			REQUIRE(added.Registered.size() == 1);
+			CHECK(added.Registered[0].first == "Native.TestMover");
+			CHECK(added.Registered[0].second.Get() == ParseJson(R"({"Speed": 4, "Follow": null})"));
+			CHECK(ReadNativeComponents(scene.FindEntityByID(spinner), types.get()).Registered.empty());
+			CHECK_FALSE(scene.FindEntityByID(doomed).IsValid());
+			// The mover and the spawned entity, not the inactive sleeper.
+			CHECK(session->GetNative()->GetResources() == ParseJson(R"({"TestCounter": {"Ticks": 2, "Distance": 0}})"));
+			CHECK(ReadNativeComponents(scene.FindEntityByID(sleeper.GetUUID()), types.get()).Registered[0].second.Get() == ParseJson(R"({"Speed": 1, "Follow": null})"));
+		}
+
+		// Decision 28 (N-B): an action the project does not define reads as up and 0 and logs one error per session; a
+		// system's lines are attributed to it.
+		TEST_CASE("NativeWorld: an action the project does not define reads as up and 0 and logs one error per session")
+		{
+			Test::SceneTestFixture fixture;
+			const Ref<const NativeModuleTypes> types = RequireTestTypes({ .ApiVersion = NativeApiVersion, .Register = &RegisterProbingModule });
+			const Test::ExpectLog missing(LogLevel::Error, "'Missing'");
+			const Test::ExpectLog probed(LogLevel::Warn, "native:Probe: probed");
+			const Scope<PlaySession> session = RequireSession(MakeNativeSpecification(fixture, types), fixture.GetScene());
+			session->Tick();
+			session->Tick();
+			CHECK(missing.GetMatchCount() == 1);
+			CHECK(probed.GetMatchCount() == 2);
+			CHECK(session->GetNative()->GetResources() == ParseJson(R"({"TestCounter": {"Ticks": 2, "Distance": 0}})"));
+		}
+
+		// Architecture §11.11 (decision 28, N-B; the review of W19.1): the native systems' log takes at most 1,024 lines
+		// (MaxScriptLogEntriesPerFrame) per step; the lines beyond it are dropped and counted in one warning per step, and the
+		// next step logs from zero again.
+		TEST_CASE("NativeWorld: the systems' log takes at most its budget of lines per step and names how many it dropped")
+		{
+			Test::SceneTestFixture fixture;
+			const Ref<const NativeModuleTypes> types = RequireTestTypes({ .ApiVersion = NativeApiVersion, .Register = &RegisterFloodingModule });
+			const Test::ExpectLog lines(LogLevel::Info, "native:Flood: flooded");
+			const Test::ExpectLog dropped(LogLevel::Warn, std::format("{} log lines of the native module's systems were dropped", FloodExcessLines));
+			const Scope<PlaySession> session = RequireSession(MakeNativeSpecification(fixture, types), fixture.GetScene());
+			session->Tick();
+			CHECK(lines.GetMatchCount() == MaxScriptLogEntriesPerFrame);
+			CHECK(dropped.GetMatchCount() == 1);
+			session->Tick();
+			CHECK(lines.GetMatchCount() == 2 * MaxScriptLogEntriesPerFrame);
+			CHECK(dropped.GetMatchCount() == 2);
+		}
+
+		// Decision 28 (N-B): the native world lives as long as the session, so resources keep their values across Scene.Load;
+		// the loaded scene is not canonicalized, and the step reads its components as its file holds them.
+		TEST_CASE("NativeWorld: resources keep their values across Scene.Load, and the step reads the loaded scene as its file holds it")
+		{
+			Test::SceneTestFixture fixture;
+			const Ref<const NativeModuleTypes> types = RequireTestTypes(Test::GetNativeTestModule());
+			Test::SceneTestFixture next;
+			Entity loaded = next.GetScene().CreateEntity("Loaded");
+			REQUIRE(PatchNativeComponents(loaded, *types, ParseJson(R"({"Native.TestSpinner": {}})"), "/components").has_value());
+			SetStoredJson(loaded, "Native.TestSpinner", R"({"DegreesPerSecond": 10, "Wobble": true})");
+			Result<Json> document = SceneSerializer::ToJson(next.GetScene());
+			REQUIRE(document.has_value());
+			auto data = CreateRef<SceneData>();
+			data->Document = CreateRef<const Json>(std::move(*document));
+			Test::InMemoryAssetManager assets;
+			const AssetHandle scene(0x4E570001);
+			assets.Publish(scene, data, "Assets/Scenes/Next.scene");
+
+			PlaySessionSpecification specification = MakeNativeSpecification(fixture, types);
+			specification.Assets = &assets;
+			const Scope<PlaySession> session = RequireSession(specification, fixture.GetScene());
+			session->Tick();
+			REQUIRE(session->GetScripts()->GetHost().RequestSceneLoad(scene, Json::object()).has_value());
+			session->Tick();
+			const Entity replaced = session->GetScene().FindEntityByPath("/Loaded");
+			REQUIRE(replaced.IsValid());
+			CHECK(ReadNativeComponents(replaced, types.get()).Registered[0].second.Get() == ParseJson(R"({"DegreesPerSecond": 10, "Wobble": true})"));
+
+			const Test::ExpectLog dropped(LogLevel::Warn, NativeFieldDroppedCode);
+			session->Tick();
+			REQUIRE_FALSE(session->GetFatalError().has_value());
+			CHECK(session->GetNative()->GetResources() == ParseJson(R"({"TestCounter": {"Ticks": 3, "Distance": 0}})"));
+			const NativeEntityComponents written = ReadNativeComponents(session->GetScene().FindEntityByPath("/Loaded"), types.get());
+			REQUIRE(written.Registered.size() == 1);
+			CHECK(written.Registered[0].second.Get() == ParseJson(R"({"DegreesPerSecond": 10, "Axis": [0, 1, 0], "Turns": 1})"));
 		}
 	}
 

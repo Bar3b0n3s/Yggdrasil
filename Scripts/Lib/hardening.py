@@ -34,7 +34,10 @@ most that many (fuzz_effective_processes); the limit is raised when the dearest 
 Soak: every scene of every project soak_projects() names (Projects/FeatureTest, the golden scenes included, and each
 demo project once it exists) plays SOAK_FRAMES lockstep ticks (Hardening.py --soak-frames sets a longer soak) with
 rendering in the plain Release editor, sampled every SOAK_SAMPLE_INTERVAL ticks (Lib/process.py query_process_memory and
-stats.get); and the exported Release FeatureTest (bin/Exports/Release/FeatureTest, which the export stage leaves) runs
+stats.get). The editor starts with SOAK_EDITOR_GAME_VIEW_OPTION, so it renders the scene's game view (the game camera's
+passes and post-processing) every frame as well as its Scene view, and a subject whose sample after a step reports no
+rendered game view fails (soak_game_view_errors; Docs/Decisions/0030-m19-contract.md decision 11). And the exported
+Release FeatureTest (bin/Exports/Release/FeatureTest, which the export stage leaves) runs
 its start scene for as many frames headless, its memory sampled from outside every SOAK_RUNTIME_SAMPLE_SECONDS, so the
 Runtime-only paths (the pak mounts, the Runtime's asset manager and frame loop) are soaked too. evaluate_soak applies
 the rules of decision 15 to each, the script heap's floors-to-floors rule included (evaluate_script_heap).
@@ -598,7 +601,20 @@ def soak_game_view_errors(stats: Mapping[str, Any], tick: int) -> list[str]:
     <tick> (stats.get's game view: <the entry as JSON, or 'missing'>): the editor soak starts its editor with
     --headless-game-view, which renders it". Hardening.py's soak_editor_scene adds the first such line to the
     subject's errors, so a subject whose game view never rendered, or stopped rendering, fails."""
-    raise NotImplementedError("contract stub: hardening (ADR 0030 decision 11, R-SOAK, stream E)")
+    views = stats.get("views")
+    game = None
+    if isinstance(views, list):
+        game = next((view for view in views if isinstance(view, Mapping) and view.get("name") == "game"), None)
+    if game is not None and game.get("available") is True and all(
+            _positive_integer(game.get(side)) for side in ("width", "height")):
+        return []
+    entry = "missing" if game is None else json.dumps(game, sort_keys=True)
+    return [f"the game view did not render at tick {tick} (stats.get's game view: {entry}): the editor soak starts its "
+            f"editor with {SOAK_EDITOR_GAME_VIEW_OPTION}, which renders it"]
+
+
+def _positive_integer(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value > 0
 
 
 def soak_projects(repository_root: Path) -> list[Path]:

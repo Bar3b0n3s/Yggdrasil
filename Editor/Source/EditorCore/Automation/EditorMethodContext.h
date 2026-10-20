@@ -45,6 +45,13 @@ namespace Engine {
 		// The server's resolver (AutomationServer::GetAssetReferenceResolver): requests and edit.batch's ops resolve asset references
 		// in their params through it (MethodRegistry.h convention 13).
 		[[nodiscard]] IAssetReferenceResolver* GetAssetReferenceResolver() const override;
+		// M19 (Docs/Decisions/0030-m19-contract.md decision 7): this request's entity reference resolver, through which the
+		// EntityRef values of its component data resolve as its entity params do (MethodRegistry.h convention 7): by
+		// Utils::SceneEntityReferenceResolver's rule in ResolveRequestScene's scene, the one the phase 1 ledger's "Entity
+		// paths and scenes" names (for the methods that take component data, all mutations: the edit scene, or the play
+		// scene for a request whose target is Play, until M20 passes the request's scene target). Without that scene a
+		// reference fails with ResolveRequestScene's error (InvalidState), which the registry returns unchanged.
+		[[nodiscard]] IEntityReferenceResolver* GetEntityReferenceResolver() const override;
 		// Lazily pins the editor's current script field snapshot for this request, after path resolution. No project is
 		// InvalidState; snapshot acquisition failures propagate. Methods without schema-dependent params never load it.
 		[[nodiscard]] Result<Ref<const IFieldSchemaSource>> GetFieldSchemaSnapshot() override;
@@ -59,6 +66,10 @@ namespace Engine {
 		// edit scene, InvalidState "not playing" for the play scene without a session (located at /target). The pointer is
 		// non-owning and valid until the open scene or the play session changes.
 		[[nodiscard]] Result<Scene*> ResolveTargetScene(SceneTarget target, bool given, bool mutation) const override;
+		// The scene this request's own params address: ResolveTargetScene with its "target" param (given when the params hold
+		// a SceneTarget name; any other value counts as none and is left for the registry's validation) and its method's
+		// Mutates flag, as its handler resolves its entity params.
+		[[nodiscard]] Result<Scene*> ResolveRequestScene() const;
 
 		// Resolves an EntityRef (§13.4) in `scene`: 16 hex digits (either case) is an exact id; 6 to 15 hex digits a unique
 		// prefix of an entity's id; text starting with '/' an entity path (Scene::ResolveEntityPath). `pointer` locates the
@@ -129,10 +140,13 @@ namespace Engine {
 		// CompleteParameterOwners for prefab.instantiate: sets `script` (the Script object of params' components) to the
 		// Script handle of the prefab root's Script component, when it has one.
 		[[nodiscard]] Status CompletePrefabScriptOwner(const Json& params, Json& script);
+		// The SceneTarget the "target" member of `params` names, or nullopt when there is none or it is no SceneTarget name.
+		[[nodiscard]] std::optional<SceneTarget> ReadTargetParam(const Json& params) const;
 	private:
 		Ref<const IFieldSchemaSource> m_FieldSchemas{};
-		EditorContext* m_Editor = nullptr;    // documented back-reference
-		AutomationServer* m_Server = nullptr; // documented back-reference
+		EditorContext* m_Editor = nullptr;                    // documented back-reference
+		AutomationServer* m_Server = nullptr;                 // documented back-reference
+		Scope<IEntityReferenceResolver> m_EntityReferences{}; // over ResolveRequestScene (GetEntityReferenceResolver)
 	};
 
 }

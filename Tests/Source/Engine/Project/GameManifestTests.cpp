@@ -22,6 +22,7 @@ namespace Engine {
 			GameManifest manifest;
 			manifest.Name = "Tetris";
 			manifest.EngineVersion = "0.1.0";
+			manifest.Build = "0.1.0+3f2a9c1d4e5b";
 			manifest.StartScene = UUID(0x8a61c0d2e4f31b77ULL);
 			manifest.Paks = { GameManifestPak{ .Path = "Data/Engine.pak", .Hash = 0x0123456789abcdefULL },
 				GameManifestPak{ .Path = "Data/Game.pak", .Hash = 0xfedcba9876543210ULL } };
@@ -72,7 +73,7 @@ namespace Engine {
 			const Result<std::string> text = GameManifestSerializer::SaveToString(MakeManifest());
 			REQUIRE(text.has_value());
 			std::string newer = *text;
-			newer.replace(newer.find("\"Version\": 1"), 12, "\"Version\": 9");
+			newer.replace(newer.find("\"Version\": 2"), 12, "\"Version\": 9");
 			const Result<GameManifest> future = GameManifestSerializer::LoadFromString(newer);
 			REQUIRE_FALSE(future.has_value());
 			CHECK(future.error().GetCode() == ErrorCode::UnsupportedVersion);
@@ -91,7 +92,7 @@ namespace Engine {
 		// Docs/Decisions/0030-m19-contract.md decision 18 (B-BVER, stream D): version 2 writes the exporting build's id as
 		// "Build" after "EngineVersion"; a Build that ParseBuildId refuses, or whose version is not EngineVersion, is refused
 		// at /Build, writing and reading; a version 1 manifest has no Build and reads with an empty one.
-		TEST_CASE("GameManifest: version 2 carries the build id, and version 1 reads without one" * doctest::skip(true))
+		TEST_CASE("GameManifest: version 2 carries the build id, and version 1 reads without one")
 		{
 			CHECK(GameManifest::CurrentVersion == GameManifestBuildVersion);
 			GameManifest manifest = MakeManifest();

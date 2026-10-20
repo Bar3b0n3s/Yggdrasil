@@ -10,12 +10,12 @@ Every authored file is UTF-8 JSON with LF line ends and tabs, written by the can
 |---|---|---|---|
 | AssetMeta | `.meta` | 1 | [Schemas/AssetMeta.schema.json](Schemas/AssetMeta.schema.json) |
 | BatchRequest | `.jsonl` | none | [Schemas/BatchRequest.schema.json](Schemas/BatchRequest.schema.json) |
-| GameManifest | `Game.json` | 1 | [Schemas/GameManifest.schema.json](Schemas/GameManifest.schema.json) |
+| GameManifest | `Game.json` | 2 | [Schemas/GameManifest.schema.json](Schemas/GameManifest.schema.json) |
 | Material | `.material` | 1 | [Schemas/Material.schema.json](Schemas/Material.schema.json) |
 | Prefab | `.prefab` | 1 | [Schemas/Prefab.schema.json](Schemas/Prefab.schema.json) |
 | Project | `.eproj` | 1 | [Schemas/Project.schema.json](Schemas/Project.schema.json) |
 | Provenance | `Automation/Provenance.json` | 1 | [Schemas/Provenance.schema.json](Schemas/Provenance.schema.json) |
-| Replay | `.replay` | 2 | [Schemas/Replay.schema.json](Schemas/Replay.schema.json) |
+| Replay | `.replay` | 3 | [Schemas/Replay.schema.json](Schemas/Replay.schema.json) |
 | Scene | `.scene` | 1 | [Schemas/Scene.schema.json](Schemas/Scene.schema.json) |
 | SoundEffect | `.sfx` | 1 | [Schemas/SoundEffect.schema.json](Schemas/SoundEffect.schema.json) |
 
@@ -53,16 +53,17 @@ Schema: [Schemas/BatchRequest.schema.json](Schemas/BatchRequest.schema.json).
 
 ### GameManifest (`Game.json`)
 
-The exported game's manifest next to its executable (§14.1): name, engine version, start scene, paks, window and simulation settings.
+The exported game's manifest next to its executable (§14.1): name, engine version, build id, start scene, paks, window and simulation settings.
 
-Header: `"Format": "GameManifest", "Version": 1`. Schema: [Schemas/GameManifest.schema.json](Schemas/GameManifest.schema.json).
+Header: `"Format": "GameManifest", "Version": 2`. Schema: [Schemas/GameManifest.schema.json](Schemas/GameManifest.schema.json).
 
 ```json
 {
 	"Format": "GameManifest",
-	"Version": 1,
+	"Version": 2,
 	"Name": "Tetris",
 	"EngineVersion": "0.1.0",
+	"Build": "0.1.0+3f2a9c1d4e5b",
 	"StartScene": "8a61c0d2e4f31b77",
 	"Paks": [
 		{
@@ -271,14 +272,14 @@ Header: `"Format": "Provenance", "Version": 1`. Schema: [Schemas/Provenance.sche
 
 ### Replay (`.replay`)
 
-A recorded input replay (§6.7): the start scene and parameters, the seed and rate, the input events per tick, Luau expectations, the state-hash checkpoints the recording observed (one every 60 ticks before the final tick) and the final state hash. The state hash covers the simulated world: every entity with its serialized components, the tick, the session's Random state, the id draws and every body's physics state; it never covers script tables (self.State, module locals), audio or input, which expectations observe instead. Verification with strictHash compares each checkpoint as playback reaches it and stops at the first that differs. A recording with input events is refused when a run without them reproduces every checkpoint, the final hash and every expectation. Version 1 files (no checkpoints) are read as version 2 with none, and project.upgrade rewrites them.
+A recorded input replay (§6.7): the start scene and parameters, the seed and rate, the input events per tick, Luau expectations, the state-hash checkpoints the recording observed (one every 60 ticks before the final tick) and the final state hash. The state hash covers the simulated world: every entity with its serialized components, the tick, the session's Random state, the id draws and every body's physics state; it never covers script tables (self.State, module locals), audio or input, which expectations observe instead. Verification with strictHash compares each checkpoint as playback reaches it and stops at the first that differs. A recording with input events is refused when a run without them reproduces every checkpoint, the final hash and every expectation. Every recording also keeps its start fingerprint, what its session held at tick 0 (each entity and component, and each asset they reference), so a replay whose hash differs names what changed since it was recorded. Version 1 files (no checkpoints) and version 2 files are read as version 3 with no fingerprint, and project.upgrade rewrites them.
 
-Header: `"Format": "Replay", "Version": 2`. Schema: [Schemas/Replay.schema.json](Schemas/Replay.schema.json).
+Header: `"Format": "Replay", "Version": 3`. Schema: [Schemas/Replay.schema.json](Schemas/Replay.schema.json).
 
 ```json
 {
 	"Format": "Replay",
-	"Version": 2,
+	"Version": 3,
 	"Scene": {
 		"Handle": "8a61c0d2e4f31b77",
 		"Path": "Assets/Scenes/Level2.scene"
@@ -290,6 +291,36 @@ Header: `"Format": "Replay", "Version": 2`. Schema: [Schemas/Replay.schema.json]
 	"FixedHz": 60,
 	"EngineVersion": "0.1.0",
 	"Config": "Editor",
+	"Fingerprint": {
+		"Entities": [
+			{
+				"Id": "0000000000000011",
+				"Path": "/Camera",
+				"Hash": "5e1f0c2b9a7d3e48",
+				"Components": {
+					"Transform": "a3c94e0f12b7d685",
+					"Camera": "0c7e2a91f4d3b658"
+				}
+			},
+			{
+				"Id": "0000000000000022",
+				"Path": "/Player",
+				"Hash": "91d4c07a3e5b2f86",
+				"Components": {
+					"Transform": "47b0e9d2c61a5f38",
+					"Script": "d8263f5a0b9c4e17"
+				}
+			}
+		],
+		"Assets": [
+			{
+				"Handle": "c0ffee0000000001",
+				"Path": "Assets/Scripts/Player.luau",
+				"Type": "Script",
+				"Hash": "6a0f3d82e5c9b147"
+			}
+		]
+	},
 	"Events": [
 		{
 			"Tick": 0,
@@ -470,7 +501,7 @@ The files the editor imports from `Assets/`, by importer and extension (§7.4). 
 | Gltf | `.gltf` | Prefab | 1 | `GltfImportSettings` | yes |
 | Material | `.material` | Material | 1 | none | yes |
 | Prefab | `.prefab` | Prefab | 1 | none | yes |
-| Replay | `.replay` | Replay | 2 | none | yes |
+| Replay | `.replay` | Replay | 3 | none | yes |
 | Scene | `.scene` | Scene | 1 | none | yes |
 | Script | `.luau` | Script | 1 | none | yes |
 | SoundEffect | `.sfx` | AudioClip | 1 | none | yes |

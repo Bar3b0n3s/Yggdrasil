@@ -131,6 +131,9 @@ namespace Engine {
 		// The kinematic inner body (§9.6) that raycasts, overlaps and sensors see.
 		[[nodiscard]] BodyHandle GetInnerBody() const;
 		[[nodiscard]] uint64_t GetUserData() const;
+		// Sets CharacterControllerDescription::InheritGroundVelocity in place, for the next Update on: a per-update switch, so
+		// the character, its ground state and its inner body stay (Docs/Decisions/0030-m19-contract.md decision 36).
+		void SetInheritGroundVelocity(bool inherit);
 	private:
 		// The CharacterVirtual, its listener and the world back-reference (Physics/CharacterController.cpp).
 		struct State;

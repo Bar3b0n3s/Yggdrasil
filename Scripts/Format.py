@@ -3,7 +3,9 @@
 
 Every C and C++ file (.h, .cpp and the extensions CodeStyle §4.1 rules out, so that none escapes formatting) under
 Engine/, Editor/, Runtime/, Tests/, Tools/ and Projects/, plus the C++ headers that Resources/Shaders/ shares with the
-shaders, is formatted in place with the repository's .clang-format. Vendor/ and build outputs are never touched, and
+shaders, is formatted in place with the repository's .clang-format. That includes the native modules of game projects
+(Projects/*/Native/ and Tests/Projects/*/Native/, Docs/Decisions/0030-m19-contract.md decision 35), which are formatted
+like first-party C++. Vendor/ and build outputs are never touched, and
 neither are Slang shaders: CodeStyle §15 keeps them out of clang-format.
 
 --check changes nothing: it lists the files that need formatting, with the first line that differs, and exits 1 when

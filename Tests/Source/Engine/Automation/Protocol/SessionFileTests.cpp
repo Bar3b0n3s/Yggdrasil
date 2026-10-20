@@ -2,8 +2,13 @@
 
 #include "Engine/Automation/Protocol/SessionFile.h"
 
+#include "Engine/Core/BuildId.h"
 #include "Engine/Core/FileSystem.h"
 #include "Support/TempDirectory.h"
+
+#include <format>
+#include <string>
+#include <string_view>
 
 namespace Engine {
 
@@ -15,6 +20,7 @@ namespace Engine {
 			.Token = std::string(64, 'f'),
 			.ProtocolVersionText = "1.0",
 			.EngineVersionText = "0.1.0",
+			.BuildText = "0.1.0+3f2a9c1d4e5b.dirty",
 			.ProjectPath = "C:/Projects/Tetris/Tetris.eproj",
 			.Headless = true,
 			.StartedAt = "2026-10-06T12:34:56Z",
@@ -27,8 +33,8 @@ namespace Engine {
 		{
 			const SessionFileContent content = MakeSessionContent();
 			const std::string text = SessionFile::ToText(content);
-			const std::array<std::string_view, 8> keys = { "\"pid\"", "\"port\"", "\"token\"", "\"protocolVersion\"", "\"engineVersion\"",
-				"\"projectPath\"", "\"headless\"", "\"startedAt\"" };
+			const std::array<std::string_view, 9> keys = { "\"pid\"", "\"port\"", "\"token\"", "\"protocolVersion\"", "\"engineVersion\"",
+				"\"build\"", "\"projectPath\"", "\"headless\"", "\"startedAt\"" };
 			size_t previous = 0;
 			for (const std::string_view key : keys)
 			{
@@ -46,9 +52,35 @@ namespace Engine {
 			CHECK(read->Token == content.Token);
 			CHECK(read->ProtocolVersionText == "1.0");
 			CHECK(read->EngineVersionText == "0.1.0");
+			CHECK(read->BuildText == "0.1.0+3f2a9c1d4e5b.dirty");
 			CHECK(read->ProjectPath == content.ProjectPath);
 			CHECK(read->Headless);
 			CHECK(read->StartedAt == content.StartedAt);
+		}
+
+		// Docs/Decisions/0030-m19-contract.md decision 13 (B-BVER): a server's session file names its build, which a content
+		// the server leaves unset takes from this binary; a file an engine before M19 wrote has none and reads with an empty
+		// one, and a build that is not a string names the member.
+		TEST_CASE("SessionFile: the build id is this binary's unless set, and a file without one reads with an empty one")
+		{
+			CHECK(SessionFileContent{}.BuildText == FormatBuildId(GetBuildId()));
+			CHECK(SessionFile::ToText(SessionFileContent{}).contains(std::format("\"build\": \"{}\"", FormatBuildId(GetBuildId()))));
+
+			std::string earlier = SessionFile::ToText(MakeSessionContent());
+			const size_t begin = earlier.find("\t\"build\"");
+			REQUIRE(begin != std::string::npos);
+			earlier.erase(begin, earlier.find('\n', begin) + 1 - begin);
+			const Result<SessionFileContent> read = SessionFile::FromText(earlier);
+			REQUIRE_MESSAGE(read.has_value(), read.error().ToString());
+			CHECK(read->BuildText.empty());
+			CHECK(read->EngineVersionText == "0.1.0");
+
+			std::string numbered = SessionFile::ToText(MakeSessionContent());
+			numbered.replace(numbered.find("\"0.1.0+3f2a9c1d4e5b.dirty\""), std::string_view("\"0.1.0+3f2a9c1d4e5b.dirty\"").size(), "7");
+			const Result<SessionFileContent> refused = SessionFile::FromText(numbered);
+			REQUIRE_FALSE(refused.has_value());
+			CHECK(refused.error().GetCode() == ErrorCode::Validation);
+			CHECK(refused.error().ToString().contains("build"));
 		}
 
 		TEST_CASE("SessionFile: malformed files name the member and unknown members are ignored")

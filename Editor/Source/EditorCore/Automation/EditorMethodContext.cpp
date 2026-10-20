@@ -108,10 +108,30 @@ namespace Engine {
 			Json m_Parameters = Json::object();
 		};
 
+		// EditorMethodContext::GetEntityReferenceResolver: the request's EntityRef values in component data resolve in the
+		// scene its params address (Docs/Decisions/0030-m19-contract.md decision 7), looked up at each reference, so a batch's
+		// op sees the entities its earlier ops created.
+		class RequestEntityReferenceResolver final : public IEntityReferenceResolver
+		{
+		public:
+			explicit RequestEntityReferenceResolver(const EditorMethodContext& context)
+				: m_Context(&context)
+			{
+			}
+
+			[[nodiscard]] Result<UUID> ResolveEntityReference(std::string_view reference, std::string_view pointer) override
+			{
+				ENGINE_TRY_ASSIGN(Scene * scene, m_Context->ResolveRequestScene());
+				return Utils::SceneEntityReferenceResolver(*scene).ResolveEntityReference(reference, pointer);
+			}
+		private:
+			const EditorMethodContext* m_Context = nullptr; // documented back-reference: the context owns this resolver
+		};
+
 	}
 
 	EditorMethodContext::EditorMethodContext(EditorContext& editor, AutomationServer& server, MethodRequest request)
-		: AutomationMethodContext(TypeKeyOf<EditorMethodContext>(), std::move(request)), m_Editor(&editor), m_Server(&server)
+		: AutomationMethodContext(TypeKeyOf<EditorMethodContext>(), std::move(request)), m_Editor(&editor), m_Server(&server), m_EntityReferences(CreateScope<RequestEntityReferenceResolver>(*this))
 	{
 	}
 
@@ -170,6 +190,11 @@ namespace Engine {
 		return &m_Server->GetAssetReferenceResolver();
 	}
 
+	IEntityReferenceResolver* EditorMethodContext::GetEntityReferenceResolver() const
+	{
+		return m_EntityReferences.get();
+	}
+
 	Result<Ref<const IFieldSchemaSource>> EditorMethodContext::GetFieldSchemaSnapshot()
 	{
 		if (!m_FieldSchemas)
@@ -212,20 +237,10 @@ namespace Engine {
 		const auto reference = entity->ReadString();
 		if (!reference)
 			return {};
-		SceneTarget target = SceneTarget::Edit;
-		const auto targetJson = reader.FindMember("target");
-		if (targetJson)
-		{
-			const auto text = targetJson->ReadString();
-			if (!text)
-				return {};
-			const EnumInfo* type = m_Editor->GetTypeRegistry().FindEnumByKey(TypeKeyOf<SceneTarget>());
-			const EnumEntry* entry = type != nullptr ? type->FindByName(*text) : nullptr;
-			if (entry == nullptr)
-				return {};
-			target = static_cast<SceneTarget>(entry->Value);
-		}
-		ENGINE_TRY_ASSIGN(Scene * scene, ResolveTargetScene(target, targetJson.has_value(), true));
+		const std::optional<SceneTarget> target = ReadTargetParam(params);
+		if (params.contains("target") && !target.has_value())
+			return {};
+		ENGINE_TRY_ASSIGN(Scene * scene, ResolveTargetScene(target.value_or(SceneTarget::Edit), target.has_value(), true));
 		ENGINE_TRY_ASSIGN(const Entity owner, ResolveEntity(*scene, *reference, "/entity"));
 		if (const auto* existing = owner.TryGetComponent<ScriptComponent>(); existing != nullptr && existing->Script.IsValid())
 			(*script)["Script"] = existing->Script.GetHandle().ToString();
@@ -291,6 +306,27 @@ namespace Engine {
 			return std::unexpected(Error(ErrorCode::InvalidState, "no scene open").WithHint("open one with scene.open {path} or create one with scene.new {path}"));
 		}
 		return &m_Editor->GetScene();
+	}
+
+	Result<Scene*> EditorMethodContext::ResolveRequestScene() const
+	{
+		const std::optional<SceneTarget> target = ReadTargetParam(GetParams());
+		return ResolveTargetScene(target.value_or(SceneTarget::Edit), target.has_value(), GetMethod().Specification.Mutates);
+	}
+
+	std::optional<SceneTarget> EditorMethodContext::ReadTargetParam(const Json& params) const
+	{
+		const auto member = JsonReader(params).FindMember("target");
+		if (!member)
+			return std::nullopt;
+		const auto text = member->ReadString();
+		if (!text)
+			return std::nullopt;
+		const EnumInfo* type = m_Editor->GetTypeRegistry().FindEnumByKey(TypeKeyOf<SceneTarget>());
+		const EnumEntry* entry = type != nullptr ? type->FindByName(*text) : nullptr;
+		if (entry == nullptr)
+			return std::nullopt;
+		return static_cast<SceneTarget>(entry->Value);
 	}
 
 	Result<Entity> EditorMethodContext::ResolveEntity(Scene& scene, std::string_view reference, std::string_view pointer) const

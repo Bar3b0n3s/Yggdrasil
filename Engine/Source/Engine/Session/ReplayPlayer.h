@@ -95,8 +95,10 @@ namespace Engine {
 		// Begin (ComputeReplayFingerprint; Docs/Decisions/0030-m19-contract.md decision 2, A-FPRINT): one line per change,
 		// DescribeReplayFingerprintChanges' lines, at most MaxReplayFingerprintChanges. Filled only when a hash differed (the
 		// failed checkpoint or the final hash) in a playback with the replay's input; empty for a replay without a fingerprint
-		// (one migrated from version 1 or 2), for a playback WithoutInput and when nothing differs. A checkpoint's StopReason
-		// and the errors of input.replay and test.run's Checkpoint@<tick> and FinalStateHash rows name the first of them.
+		// (one migrated from version 1 or 2), for a playback WithoutInput and when nothing differs. When the playback's own
+		// fingerprint could not be taken at Begin, the one line "not known, because the playback's start fingerprint could
+		// not be taken: <error>" instead. A checkpoint's StopReason and the errors of input.replay and test.run's
+		// Checkpoint@<tick> and FinalStateHash rows name the first of them.
 		std::vector<std::string> Changes{};
 	};
 
@@ -120,6 +122,10 @@ namespace Engine {
 	// scene". input.record's Warnings, test.run's recording block and the games and determinism suites' input checks give
 	// it word for word (the suites' Python spells the same text).
 	[[nodiscard]] std::string MakeFinalHashIndependentWarning(std::string_view replay, uint64_t checkpointTick, std::string_view finalStateHash);
+	// Whether an input check's `playback` is the one MakeFinalHashIndependentWarning describes: it continued past a
+	// checkpoint that differed (FirstCheckpointFailure) to the final tick, stopped for nothing else, satisfied every
+	// expectation and reproduced the recorded final state hash. input.record stop and test.run {record} both ask it.
+	[[nodiscard]] bool IsFinalHashIndependent(const ReplayPlaybackResult& playback);
 
 	// The adapter executes expectation.Script in the current play VM using ScriptEngine::ExecuteBytecode.
 	// Re-resolve that VM for each call, especially after Scene.Load. No compiler, Automation or Testing dependency.
@@ -145,8 +151,9 @@ namespace Engine {
 		// anything (with options.WithoutInput too, which then queues none), stores immutable replay data and the session
 		// serial. Does not step or evaluate a chunk. With the replay's input and a replay fingerprint, it also takes the
 		// session's own fingerprint (ComputeReplayFingerprint(session.GetScene(), session.GetScriptSchemas(),
-		// session.GetAssets()), decision 2), which ReplayPlaybackResult::Changes compares when a hash differs; its errors fail
-		// Begin. InvalidArgument for ContinuePastCheckpoint without StrictHash.
+		// session.GetAssets()), decision 2), which ReplayPlaybackResult::Changes compares when a hash differs; an error taking
+		// it does not fail Begin (the fingerprint only explains a difference): the playback goes on, and Changes names that
+		// error if a hash differs. InvalidArgument for ContinuePastCheckpoint without StrictHash.
 		[[nodiscard]] Status Begin(AssetRef<ReplayData> replay, const PlaySession& session, const ReplayPlaybackOptions& options = {});
 		// Runs at most one Tick (fixed + frame), then evaluates all expectations at the resulting completed-tick boundary,
 		// then (StrictHash) compares the boundary's checkpoint, completing the playback as failed when it differs (see

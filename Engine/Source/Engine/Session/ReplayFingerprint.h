@@ -31,10 +31,11 @@ namespace Engine {
 	// strings, so their asset values are read with `schemas`, the session's script field schemas
 	// (PlaySession::GetScriptSchemas): a field the script's schema types AssetRef, or an Array of AssetRef, names assets;
 	// any other field, a field the schema does not know and every field when `schemas` is null (a host without scripts)
-	// names none. `assets` null (a host without assets) lists no asset. Deterministic: equal scenes, schemas and cooked
-	// assets give equal fingerprints in every configuration and host (the editor, every exported Runtime). Errors: the
-	// serializer's; GetCookedHash's for a referenced asset that exists but cannot be hashed, with the asset's path as
-	// context.
+	// names none. `assets` null (a host without assets) lists no asset, nor does a manager without cooked artifacts
+	// (GetCookedHash's default, Unsupported). Deterministic: equal scenes, schemas and cooked assets give equal
+	// fingerprints in every configuration and host (the editor, every exported Runtime). Errors: the serializer's;
+	// GetCookedHash's for a referenced asset that exists but cannot be hashed (a failed cook or read), with the asset's
+	// path as context.
 	[[nodiscard]] Result<ReplayFingerprint> ComputeReplayFingerprint(const Scene& scene, const ScriptFieldSchemaSource* schemas, AssetManager* assets);
 
 	// What differs between `recorded` (the replay's) and `observed` (the playback's), one readable line per difference, in

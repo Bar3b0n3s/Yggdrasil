@@ -37,14 +37,16 @@ namespace Engine {
 	};
 
 	// Every use of Assets.Load in `source`, in source order. Only the global Assets counts (a local or a field named Assets
-	// does not), and type annotations are not read:
+	// does not), reached by its name or through the globals table as _G.Assets or _G["Assets"], and type annotations are not
+	// read:
 	// - a literal load is a call Assets.Load(<string literal>), the literal being a plain string, a long string or an
 	//   interpolated string without expressions, possibly in parentheses or under a type assertion, with no further
 	//   argument;
 	// - every other use is a computed load: Assets.Load called with any other argument or none, called as a method
-	//   (Assets:Load), read as a value (local load = Assets.Load), Assets["Load"] or Assets[<expression>], and the global
-	//   Assets used other than by a field name (local a = Assets; f(Assets)), since the scan cannot follow where such a value
-	//   goes.
+	//   (Assets:Load), read as a value (local load = Assets.Load), Assets["Load"] or Assets[<expression>], the global
+	//   Assets used other than by a field name (local a = Assets; f(Assets)), and the global _G used other than by a
+	//   constant field name (_G[<expression>]; local g = _G; rawget(_G, "Assets")), since the scan cannot follow where such
+	//   a value goes. Another field of _G (_G.print) is no use.
 	// `chunkName` names the source in errors ("Assets/Scripts/Game.luau"). Errors: CompileFailed located at the first syntax
 	// error (line and column), as ScriptCompiler reports it; Validation for invalid UTF-8.
 	[[nodiscard]] Result<std::vector<ScriptAssetLoad>> FindScriptAssetLoads(std::string_view source, std::string_view chunkName);

@@ -53,7 +53,10 @@ namespace Engine {
 	{
 		std::string Protocol{};      // "protocolVersion": the server's, "1.0"
 		std::string EngineVersion{}; // EngineVersionString
-		uint32_t Client = 0;         // "clientId": this connection's ClientId
+		// M19 (Docs/Decisions/0030-m19-contract.md decision 13): the server's build id, FormatBuildId(GetBuildId())
+		// (Core/BuildId.h): the version, the commit and the dirty flag of the build that answers.
+		std::string Build{};
+		uint32_t Client = 0; // "clientId": this connection's ClientId
 		// Optional protocol features this server offers: the editor's "dryRun", "ifRevision", "batch", "pendingOperations",
 		// "offload", and "testHooks" when started with --automation-test-hooks; the Runtime's "ifRevision",
 		// "pendingOperations" and "offload".
@@ -76,6 +79,7 @@ namespace Engine {
 	{
 		std::string Protocol{}; // "protocolVersion"
 		std::string EngineVersion{};
+		std::string Build{};    // M19 (decision 13): as SessionHelloResult::Build
 		uint32_t ProcessId = 0; // "pid"
 		std::vector<std::string> Capabilities{};
 		SessionProjectSummary Project{};

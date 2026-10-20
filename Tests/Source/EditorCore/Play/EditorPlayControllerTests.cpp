@@ -670,9 +670,12 @@ return Script.Define("Host", Host)
 			CallEditorHost(fixture, "input.record", Json{ { "action", "start" } });
 			CHECK(calls == 1);
 			CallEditorHost(fixture, "play.step", Json{ { "ticks", 2 }, { "render", "none" } });
+			// Stop's verification restarts the session for the recording as input.replay does (Docs/Decisions/0030-m19-contract.md
+			// decision 4), so it runs the preparation too.
 			CallEditorHost(fixture, "input.record", Json{ { "action", "stop" }, { "path", "Assets/Tests/Prepared.replay" } });
-			CallEditorHost(fixture, "input.replay", Json{ { "path", "Assets/Tests/Prepared.replay" }, { "verify", true } });
 			CHECK(calls == 2);
+			CallEditorHost(fixture, "input.replay", Json{ { "path", "Assets/Tests/Prepared.replay" }, { "verify", true } });
+			CHECK(calls == 3);
 			fixture.GetEditor().SetLifecycleCallbacks({});
 		}
 

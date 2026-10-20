@@ -132,10 +132,11 @@ def quiet_console() -> Console:
 
 
 class FakeEngineError(Exception):
-    def __init__(self, message: str, error_code: str = "Unknown") -> None:
+    def __init__(self, message: str, error_code: str = "Unknown", data: dict[str, Any] | None = None) -> None:
         super().__init__(message)
         self.error_code = error_code
         self.detail = message
+        self.data = data if data is not None else {}
 
 
 class FakeEditorSession:
@@ -143,14 +144,16 @@ class FakeEditorSession:
     through it like the export and determinism suites, decision 8): canned results per method, a hook run on test.run
     with the copy's directory, and the exit code the process ends with after session.shutdown. It is the process and
     the client at once. input.replay {withoutInput: true} fails with Validation unless `input_independent` (the replay's
-    verification then passes without its input)."""
+    verification then passes without its input); its error's data holds `input_check_outcome` as the playback's
+    InputReplayResult ("replay"), as the editor's does."""
 
     def __init__(self, exit_code: int = 0, on_test_run: Callable[[Path], None] | None = None,
                  input_independent: bool = False, shutdown_error: Exception | None = None,
-                 wait_error: Exception | None = None) -> None:
+                 wait_error: Exception | None = None, input_check_outcome: dict[str, Any] | None = None) -> None:
         self.exit_code = exit_code
         self.on_test_run = on_test_run
         self.input_independent = input_independent
+        self.input_check_outcome = input_check_outcome
         # Raised by session.shutdown {} (a forced shutdown still succeeds) and by the wait for the process's exit.
         self.shutdown_error = shutdown_error
         self.wait_error = wait_error
@@ -187,7 +190,8 @@ class FakeEditorSession:
         if method == "input.replay":
             self.replayed.append(dict(params or {}))
             if not self.input_independent:
-                raise FakeEngineError("replay verification failed at checkpoint tick 60", "Validation")
+                data = {"replay": self.input_check_outcome} if self.input_check_outcome is not None else {}
+                raise FakeEngineError("replay verification failed at checkpoint tick 60", "Validation", data)
             return {"passed": True, "withoutInput": True, "finalTick": 600, "stateHash": REPLAY_HASH}
         if method == "session.shutdown" and self.shutdown_error is not None and not (params or {}).get("force"):
             raise self.shutdown_error
@@ -217,18 +221,24 @@ class FakeExportingSession(FakeEditorSession):
     the package of the game `name` (its Name, which the exporter gives the executable whatever the .eproj's file stem):
     the executable and, unless `manifest` is false, its Game.json (at the package root, or in the bundle's
     Contents/Resources on macOS), and reports its outputDirectory and executable, as the editor does
-    (ExportMethods.cpp, Exporter.cpp). The plain export reports `smoke`. It counts its launches, so a test sees whether
-    the Release half's session was shared."""
+    (ExportMethods.cpp, Exporter.cpp); with featureTest it also reports REPLAY at `feature_test_hash` in its
+    featureTest block and leaves that run's log in the package's testing user data, as the export's own --feature-test
+    run of the package does (Docs/Decisions/0030-m19-contract.md decision 10; Exporter.h step 6a). The plain export
+    reports `smoke`. It counts its launches, so a test sees whether the Release half's session was shared, and records
+    each export's params and timeout."""
 
     def __init__(self, smoke: dict[str, Any], shutdown_error: Exception | None = None,
-                 wait_error: Exception | None = None, name: str = "Game", manifest: bool = True) -> None:
+                 wait_error: Exception | None = None, name: str = "Game", manifest: bool = True,
+                 feature_test_hash: str = REPLAY_HASH) -> None:
         super().__init__(shutdown_error=shutdown_error, wait_error=wait_error)
         self.output_root: Path | None = None
         self.smoke = smoke
         self.name = name
         self.manifest = manifest
+        self.feature_test_hash = feature_test_hash
         self.launches = 0
         self.exports: list[dict[str, Any]] = []
+        self.export_timeouts: list[float | None] = []
 
     def launch_editor(self, editor: Path, arguments: list[str], *rest: object, **options: object) -> FakeEditorSession:
         self.launches += 1
@@ -239,6 +249,7 @@ class FakeExportingSession(FakeEditorSession):
             return super().call(method, params, timeout)
         self.methods.append(method)
         self.exports.append(dict(params or {}))
+        self.export_timeouts.append(timeout)
         if not (params or {}).get("testing"):
             return dict(self.smoke)
         if self.output_root is None:
@@ -253,7 +264,15 @@ class FakeExportingSession(FakeEditorSession):
             (resources / "Game.json").write_text(json.dumps({"Format": "GameManifest", "Version": 1, "Name": self.name,
                                                             "EngineVersion": "0.1.0", "Testing": True}),
                                                  encoding="utf-8")
-        return {"outputDirectory": str(output), "executable": str(executable), "testSuiteCount": 1, "replayCount": 1}
+        result: dict[str, Any] = {"outputDirectory": str(output), "executable": str(executable), "testSuiteCount": 1,
+                                  "replayCount": 1}
+        if (params or {}).get("featureTest"):
+            result["featureTest"] = {"ran": True, "exitCode": 0, "passed": True, "reportPath": "",
+                                     "replays": [{"path": REPLAY, "stateHash": self.feature_test_hash, "passed": True}]}
+            log = exports.testing_user_data(output, self.name) / "Logs" / f"{executable.stem}.log"
+            log.parent.mkdir(parents=True)
+            log.write_text("the export's own feature-test run\n", encoding="utf-8")
+        return result
 
 
 class EditedExportSession(FakeExportingSession):
@@ -271,16 +290,34 @@ class EditedExportSession(FakeExportingSession):
         return result
 
 
+class FakeDeterminismSession(FakeEditorSession):
+    """The determinism suite's --renderer none editor (Test.py verify_replays): input.replay {verify, strictHash} plays
+    every replay to REPLAY_HASH, and its input check (withoutInput) fails with `input_check_outcome` as its error data's
+    "replay", as FakeEditorSession's does; it records each input.replay's params."""
+
+    def call(self, method: str, params: dict[str, Any] | None = None, timeout: float | None = None) -> dict[str, Any]:
+        if method == "input.replay" and not (params or {}).get("withoutInput"):
+            self.methods.append(method)
+            self.replayed.append(dict(params or {}))
+            return {"passed": True, "finalTick": 600, "stateHash": REPLAY_HASH}
+        if method == "play.state":
+            self.methods.append(method)
+            return {"state": "Edit"}
+        return super().call(method, params, timeout)
+
+
 class FakeFeatureTestRun:
     """`<package>/Game --headless --feature-test` faked through Test.py's run_streamed: it writes the Runtime's reports
     (FeatureTest-Dist.{json,xml} below its working directory, whatever the game) with `state_hash` as the replay's hash,
     and the package's testing log, named after the stem of the executable it runs as the Runtime names it
     (ProcessContext.cpp; Docs/Architecture.md §4.4: Logs/<exe>.log); it records each run's command and working
-    directory."""
+    directory. Without `writes_log` it writes its reports but no log, as a Runtime that put its user data elsewhere
+    would."""
 
-    def __init__(self, state_hash: str, name: str = "Game") -> None:
+    def __init__(self, state_hash: str, name: str = "Game", writes_log: bool = True) -> None:
         self.state_hash = state_hash
         self.name = name  # the game's Name: its package directory and testing user-data folder are named after it
+        self.writes_log = writes_log
         self.commands: list[list[str]] = []
         self.directories: list[Path] = []
 
@@ -293,10 +330,11 @@ class FakeFeatureTestRun:
         document = run_document("Dist", [suite_row(SMOKE_SUITE), replay_row(REPLAY, self.state_hash)])
         (reports / "FeatureTest-Dist.json").write_text(json.dumps(document), encoding="utf-8")
         (reports / "FeatureTest-Dist.xml").write_text("<testsuites/>", encoding="utf-8")
-        package = exports.package_directory("Dist", self.name)
-        log = exports.testing_user_data(package, self.name) / "Logs" / f"{Path(command[0]).stem}.log"
-        log.parent.mkdir(parents=True, exist_ok=True)
-        log.write_text("ran\n", encoding="utf-8")
+        if self.writes_log:
+            package = exports.package_directory("Dist", self.name)
+            log = exports.testing_user_data(package, self.name) / "Logs" / f"{Path(command[0]).stem}.log"
+            log.parent.mkdir(parents=True, exist_ok=True)
+            log.write_text("ran\n", encoding="utf-8")
         return ProcessResult([str(part) for part in command], 0, False, 0.0, "")
 
 
@@ -458,8 +496,6 @@ class EvaluationTests(unittest.TestCase):
         self.assertIn("could not run", refused[0])
         self.assertIn("NotFound", refused[0])
 
-    @unittest.skip("contract stub: games.input_check_warning (Docs/Decisions/0030-m19-contract.md decision 3, "
-                   "A-F29, stream B)")
     def test_the_input_check_warns_when_only_the_final_hash_does_not_depend_on_the_input(self) -> None:
         # Docs/Decisions/0030-m19-contract.md decision 3 (A-F29; ADR 0026 friction F29): the editor halves run the
         # input check with continuePastCheckpoint, so a run without input that differed at checkpoints but reached the
@@ -483,8 +519,6 @@ class EvaluationTests(unittest.TestCase):
                                                                                     "satisfied": False}]}))
         self.assertIsNone(games.input_check_warning(REPLAY, None))
 
-    @unittest.skip("contract stub: games.check_distinct_projects (Docs/Decisions/0030-m19-contract.md decision 12, "
-                   "AL-STEMS, stream B)")
     def test_projects_that_share_a_stem_or_a_name_are_refused(self) -> None:
         # Docs/Decisions/0030-m19-contract.md decision 12 (AL-STEMS; ADR 0027 decision 12's accepted limit): two staged
         # games whose .eproj files share a stem would share their games steps and reports, and two whose Names are equal
@@ -524,6 +558,23 @@ class EvaluationTests(unittest.TestCase):
             unreadable = games.check_distinct_projects([other, broken])
             self.assertEqual(len(unreadable), 1)
             self.assertIn(paths.display_path(broken_file), unreadable[0])
+
+    def test_projects_whose_stems_or_names_differ_only_in_letter_case_are_refused(self) -> None:
+        # Docs/Decisions/0030-m19-contract.md decision 12: the steps' report files and the Dist package directories are
+        # files, which collide on a file system that ignores letter case (Windows), so a pair differing only in case is
+        # refused too, naming both spellings; a single project is compared with nothing, so its Name is not read.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            upper_file = write_project(root, "Projects/Rally")
+            lower_file = write_project(root, "Tests/Projects/rally")
+            upper = games.GameProject(upper_file.parent, upper_file, "Rally")
+            lower = games.GameProject(lower_file.parent, lower_file, "rally")
+            lines = games.check_distinct_projects([upper, lower])
+            self.assertEqual(len(lines), 2)
+            self.assertTrue(any("share the file stem 'Rally' (and 'rally'" in line for line in lines), lines)
+            self.assertTrue(any("share the Name 'Rally' (and 'rally'" in line for line in lines), lines)
+            missing = games.GameProject(root / "Projects/Missing", root / "Projects/Missing/Missing.eproj", "Missing")
+            self.assertEqual(games.check_distinct_projects([missing]), [])
 
     @unittest.skip("contract stub: games.prepare_native_editor (Docs/Decisions/0030-m19-contract.md decision 35, "
                    "stream N-E)")
@@ -704,6 +755,35 @@ class EvaluationTests(unittest.TestCase):
         failures, warnings = games.check_smoke(not_run, require_gpu=True)
         self.assertEqual((len(failures), warnings), (1, []))
 
+    def test_the_feature_test_check_compares_the_exports_hashes_with_the_packages_own_run(self) -> None:
+        # Docs/Decisions/0030-m19-contract.md decision 10 (A-DISTSELF): the hashes a testing Dist export's featureTest
+        # reports must equal those the Dist half's own --feature-test run reads; a replay that could not play (an empty
+        # stateHash) matches one the run's report has no hash for; a run the export could not start warns, or fails with
+        # --require-gpu, and a result without the block fails.
+        other = "Assets/Tests/Replays/Other.replay"
+        replays = [{"path": REPLAY, "stateHash": REPLAY_HASH, "passed": True},
+                   {"path": other, "stateHash": "", "passed": False}]
+        result = {"featureTest": {"ran": True, "exitCode": 1, "passed": False, "reportPath": "", "replays": replays},
+                  "warnings": []}
+        self.assertEqual(games.check_feature_test(result, {REPLAY: REPLAY_HASH}, require_gpu=True), ([], []))
+        failures, warnings = games.check_feature_test(result, {REPLAY: "fedcba9876543210", other: REPLAY_HASH},
+                                                      require_gpu=False)
+        self.assertEqual((len(failures), warnings), (2, []))
+        self.assertTrue(failures[0].startswith(f"{other}: "), failures)
+        self.assertIn("no state hash", failures[0])
+        self.assertTrue(failures[1].startswith(f"{REPLAY}: "), failures)
+        self.assertIn("fedcba9876543210", failures[1])
+        not_run = {"featureTest": {"ran": False, "exitCode": None, "passed": False, "reportPath": "", "replays": []},
+                   "warnings": ["no Vulkan device"]}
+        failures, warnings = games.check_feature_test(not_run, {}, require_gpu=False)
+        self.assertEqual((failures, len(warnings)), ([], 1))
+        self.assertIn("no Vulkan device", warnings[0])
+        failures, warnings = games.check_feature_test(not_run, {}, require_gpu=True)
+        self.assertEqual((len(failures), warnings), (1, []))
+        self.assertEqual(len(games.check_feature_test({"warnings": []}, {}, require_gpu=False)[0]), 1)
+        malformed = {"featureTest": {"ran": True, "replays": [{"path": REPLAY}]}}
+        self.assertEqual(len(games.check_feature_test(malformed, {}, require_gpu=False)[0]), 1)
+
     def test_report_paths_are_named_per_project_and_configuration(self) -> None:
         project = games.GameProject(Path("Breakout"), Path("Breakout/Breakout.eproj"), "Breakout")
         results = paths.TEST_RESULTS_ROOT
@@ -869,6 +949,84 @@ class SuiteTests(unittest.TestCase):
             steps = test_script.run_games(["Debug"], arguments, quiet_console())
         return next(step for step in steps if step.name == f"games {project.name} Editor Debug")
 
+    def test_the_editor_half_prints_the_input_checks_final_hash_warning_and_passes(self) -> None:
+        # Docs/Decisions/0030-m19-contract.md decision 3 (A-F29): a replay whose run without input differed at its
+        # checkpoints but reached the recorded final hash passes the input check; the editor half prints the warning,
+        # keeps it in its step's data and stays passed.
+        outcome = {"passed": False, "checkpointFailed": True, "checkpointsFailed": 1, "firstFailedCheckpointTick": 60,
+                   "hashMatched": True, "expectedStateHash": REPLAY_HASH, "stateHash": REPLAY_HASH, "expect": []}
+        with tempfile.TemporaryDirectory(prefix="GamesInputWarning-") as directory:
+            project = make_game_repository(Path(directory), events=2)
+            step = self.run_editor_half(project, FakeEditorSession(input_check_outcome=outcome))
+        self.assertEqual(step.status, Status.PASSED, step.detail)
+        self.assertEqual(step.data["warnings"], [games.input_check_warning(REPLAY, outcome)])
+        # Without that outcome (the final hash differed too) there is no warning.
+        with tempfile.TemporaryDirectory(prefix="GamesInputWarning-") as directory:
+            project = make_game_repository(Path(directory), events=2)
+            plain = self.run_editor_half(project, FakeEditorSession(input_check_outcome={**outcome,
+                                                                                         "hashMatched": False}))
+        self.assertEqual(plain.status, Status.PASSED, plain.detail)
+        self.assertNotIn("warnings", plain.data)
+
+    def test_the_determinism_suite_prints_the_input_checks_final_hash_warning_and_passes(self) -> None:
+        # Docs/Decisions/0030-m19-contract.md decision 3 (A-F29): the determinism suite runs the same input check
+        # (continuePastCheckpoint), keeps games.input_check_warning's line of a replay whose run without input differed
+        # at its checkpoints but reached the recorded final hash, prints it and lists it under the step's "warnings";
+        # the step stays passed. Without that outcome (the final hash differed too) there is no warning.
+        outcome = {"passed": False, "checkpointFailed": True, "checkpointsFailed": 1, "firstFailedCheckpointTick": 60,
+                   "hashMatched": True, "expectedStateHash": REPLAY_HASH, "stateHash": REPLAY_HASH, "expect": []}
+        warning = games.input_check_warning(REPLAY, outcome)
+        self.assertIsNotNone(warning)
+        for final_hash_matched in (True, False):
+            with self.subTest(final_hash_matched=final_hash_matched), \
+                    tempfile.TemporaryDirectory(prefix="DeterminismInputWarning-") as directory:
+                project_file = write_project(Path(directory), "FeatureTest",
+                                             {"Replays": ["Assets/Tests/Replays/*.replay"]})
+                write_replay(project_file.parent, events=2)
+                session = FakeDeterminismSession(input_check_outcome={**outcome, "hashMatched": final_hash_matched})
+                console = quiet_console()
+                arguments = test_script.parse_arguments(["--suite", "determinism", "--config", "Debug"])
+                with mock.patch.object(test_script, "FEATURE_PROJECT", project_file.parent), \
+                        mock.patch.object(test_script, "FEATURE_PROJECT_FILE", project_file), \
+                        mock.patch.object(test_script, "editor_executable", return_value=Path(sys.executable)), \
+                        mock.patch.object(test_script, "import_engine_client", return_value=session.module()):
+                    step = test_script.run_determinism(["Debug"], arguments, console)
+                self.assertEqual(step.status, Status.PASSED, step.detail)
+                self.assertIn({"path": REPLAY, "verify": True, "strictHash": True, "withoutInput": True,
+                               "continuePastCheckpoint": True}, session.replayed)
+                if final_hash_matched:
+                    self.assertEqual(step.data["warnings"], [f"Editor Debug: {warning}"])
+                    self.assertIn(f"warning: Editor Debug: {warning}", console.stream.getvalue())
+                else:
+                    self.assertNotIn("warnings", step.data)
+                    self.assertNotIn("warning:", console.stream.getvalue())
+
+    def test_staged_projects_that_share_a_stem_fail_the_games_step_before_any_project_runs(self) -> None:
+        # Docs/Decisions/0030-m19-contract.md decision 12 (AL-STEMS): two staged games named Rally would share their
+        # steps and reports, so the suite fails its "games" step naming both and audits or runs neither.
+        with tempfile.TemporaryDirectory(prefix="GamesStems-") as directory:
+            root = Path(directory)
+            write_project(root, "Projects/Rally")
+            write_project(root, "Tests/Projects/Rally")
+            git_stage(root, initialize=True)
+            discover = games.discover_projects
+
+            def discover_in_repository(_: Path, files: str = "disk") -> list[games.GameProject]:
+                return discover(root, files)
+
+            arguments = test_script.parse_arguments(["--suite", "games", "--config", "Debug"])
+            with mock.patch.object(games, "discover_projects", side_effect=discover_in_repository), \
+                    mock.patch.object(provenance, "audit_project") as audit, \
+                    mock.patch.object(test_script, "editor_executable", return_value=Path(sys.executable)), \
+                    mock.patch.object(test_script, "probe_rendering_editor") as probe:
+                steps = test_script.run_games(["Debug"], arguments, quiet_console())
+        audit.assert_not_called()
+        probe.assert_not_called()
+        self.assertEqual([(step.name, step.status) for step in steps], [("games", Status.FAILED)])
+        self.assertIn("share the file stem 'Rally'", steps[0].detail)
+        self.assertIn("Projects/Rally/Rally.eproj", steps[0].detail)
+        self.assertIn("Tests/Projects/Rally/Rally.eproj", steps[0].detail)
+
     def test_the_editor_half_checks_a_strict_editor_on_an_index_copy(self) -> None:
         with tempfile.TemporaryDirectory(prefix="GamesEditorHalf-") as directory:
             project = make_game_repository(Path(directory))
@@ -1007,7 +1165,7 @@ class SuiteTests(unittest.TestCase):
                 session = FakeEditorSession(input_independent=input_independent)
                 step = self.run_editor_half(project, session)
                 self.assertEqual(session.replayed, [{"path": REPLAY, "verify": True, "strictHash": True,
-                                                     "withoutInput": True}])
+                                                     "withoutInput": True, "continuePastCheckpoint": True}])
                 order = ["test.run", "input.replay", "play.stop", "session.shutdown"]
                 self.assertEqual([method for method in session.methods if method in order], order)
                 if input_independent:
@@ -1074,7 +1232,12 @@ class SuiteTests(unittest.TestCase):
         self.assertEqual(steps["games Game Editor Release"].status, Status.PASSED, steps["games Game Editor Release"])
         self.assertEqual(steps["games Game Dist"].status, Status.PASSED, steps["games Game Dist"].detail)
         self.assertEqual(session.launches, 1)
-        self.assertEqual(session.exports, [{"config": "Dist", "testing": True}, {"config": "Dist", "smokeTest": True}])
+        self.assertEqual(session.exports, [{"config": "Dist", "testing": True, "featureTest": True},
+                                           {"config": "Dist", "smokeTest": True}])
+        # The testing export runs the package's feature test itself (Exporter.h step 6a), so it is waited for that run's
+        # bound beyond --timeout, which still bounds the plain export.
+        timeout = test_script.SUITE_TIMEOUT_SECONDS
+        self.assertEqual(session.export_timeouts, [timeout + test_script.EXPORT_FEATURE_TEST_RUN_SECONDS, timeout])
         self.assertEqual(len(run.directories), 1)
         self.assertFalse(run.directories[0].is_relative_to(REPOSITORY_ROOT))
         self.assertEqual(steps["games Game Dist"].data["hashes"], {"Editor Release": {REPLAY: REPLAY_HASH},
@@ -1087,8 +1250,6 @@ class SuiteTests(unittest.TestCase):
         self.assertTrue(any(line.startswith(f"{REPLAY}: Exported Dist: fedcba9876543210")
                             for line in drifted.data["failures"]), drifted.data["failures"])
 
-    @unittest.skip("contract stub: project.export {featureTest} in the games suite's Dist half (Docs/Decisions/"
-                   "0030-m19-contract.md decision 10, A-DISTSELF; the integration of streams B and F)")
     def test_the_dist_half_compares_the_testing_exports_feature_test_hashes_with_its_own_run(self) -> None:
         # Docs/Decisions/0030-m19-contract.md decision 10 (A-DISTSELF; Roadmap M19's acceptance "the hashes the builder
         # sees from the testing Dist export equal the games suite's Dist half"): the Dist half's testing export passes
@@ -1296,6 +1457,30 @@ class SuiteTests(unittest.TestCase):
             self.assertEqual(Path(run.commands[0][0]).name, name)
             self.assertTrue((logs / "Tetris.log").is_file())
             self.assertFalse((logs / f"{name}.log").exists())
+
+    def test_the_dist_half_checks_the_log_of_its_own_run_not_the_one_the_export_left(self) -> None:
+        # The review of W19.1 (Docs/Decisions/0030-m19-contract.md decision 10): the testing export's own feature-test
+        # run writes its log into the package's testing user data, where the half's check_testing_user_data looks for
+        # the log of its own run, so a run that wrote no log there passed. The half removes the export's user data
+        # before its run: a run that writes no log fails, naming the log, and one that writes it passes.
+        ran = {"smokeTestRan": True, "smokeTestExitCode": 0, "warnings": []}
+        for writes_log in (False, True):
+            with self.subTest(writes_log=writes_log), \
+                    tempfile.TemporaryDirectory(prefix="GamesDistOwnLog-") as directory:
+                root = Path(directory)
+                session = FakeExportingSession(ran)
+                session.output_root = root / "EditorExports"
+                run = FakeFeatureTestRun(REPLAY_HASH, writes_log=writes_log)
+                step = self.run_dist_only(make_game_repository(root / "Repository"), session, run, root)
+                log = exports.testing_user_data(root / "Exports" / "Dist" / "Game", "Game") / "Logs" / \
+                    f"{Path(run.commands[0][0]).stem}.log"
+                if writes_log:
+                    self.assertEqual(step.status, Status.PASSED, step.detail)
+                    self.assertEqual(log.read_text(encoding="utf-8"), "ran\n")
+                    continue
+                self.assertEqual(step.status, Status.FAILED)
+                self.assertIn(f"the run wrote no {paths.display_path(log)}", step.data["failures"])
+                self.assertFalse(log.exists())
 
     def run_dist_only(self, project: games.GameProject, session: FakeExportingSession, run: FakeFeatureTestRun,
                       root: Path) -> Step:

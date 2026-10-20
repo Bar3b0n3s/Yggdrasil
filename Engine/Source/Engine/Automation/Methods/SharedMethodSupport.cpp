@@ -160,10 +160,8 @@ namespace Engine {
 
 		Result<UUID> SceneEntityReferenceResolver::ResolveEntityReference(std::string_view reference, std::string_view pointer)
 		{
-			ENGINE_CONTRACT_STUB();
-			static_cast<void>(m_Scene);
-			return std::unexpected(Error(ErrorCode::Unsupported, std::format("resolving the entity reference '{}' in component data (Docs/Decisions/0030-m19-contract.md decision 7, stream C)", reference))
-					.WithLocation({ .File = {}, .JsonPointer = std::string(pointer), .Entity = {} }));
+			ENGINE_TRY_ASSIGN(const Entity entity, Utils::ResolveEntityReference(*m_Scene, reference, pointer));
+			return entity.GetUUID();
 		}
 
 		EntitySummary SummarizeEntity(ConstEntity entity)

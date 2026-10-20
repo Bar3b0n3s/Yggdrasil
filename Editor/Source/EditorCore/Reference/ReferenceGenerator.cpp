@@ -111,8 +111,12 @@ namespace Engine {
 "Layers": [{"Wave": "Square", "DutyCycle": 0.5, "Notes": ["C5:0.06", "E5:0.06", "G5:0.06", "C6:0.18"],
 "Envelope": {"Attack": 0.005, "Decay": 0.05, "Sustain": 0.6, "Release": 0.08}, "Volume": 0.6}]})";
 
-		constexpr std::string_view ReplayExample = R"({"Format": "Replay", "Version": 2, "Scene": {"Handle": "8a61c0d2e4f31b77", "Path": "Assets/Scenes/Level2.scene"},
+		constexpr std::string_view ReplayExample = R"({"Format": "Replay", "Version": 3, "Scene": {"Handle": "8a61c0d2e4f31b77", "Path": "Assets/Scenes/Level2.scene"},
 "Parameters": {"Time": 61.25}, "Seed": 7, "FixedHz": 60, "EngineVersion": "0.1.0", "Config": "Editor",
+"Fingerprint": {"Entities": [{"Id": "0000000000000011", "Path": "/Camera", "Hash": "5e1f0c2b9a7d3e48",
+"Components": {"Transform": "a3c94e0f12b7d685", "Camera": "0c7e2a91f4d3b658"}},
+{"Id": "0000000000000022", "Path": "/Player", "Hash": "91d4c07a3e5b2f86", "Components": {"Transform": "47b0e9d2c61a5f38", "Script": "d8263f5a0b9c4e17"}}],
+"Assets": [{"Handle": "c0ffee0000000001", "Path": "Assets/Scripts/Player.luau", "Type": "Script", "Hash": "6a0f3d82e5c9b147"}]},
 "Events": [{"Tick": 0, "Type": "Action", "Name": "MoveZ", "Value": 1}, {"Tick": 100, "Type": "Action", "Name": "Jump", "State": "Tap"},
 {"Tick": 140, "Type": "Key", "Key": "Escape", "State": "Down"}, {"Tick": 141, "Type": "Key", "Key": "Escape", "State": "Up"}],
 "Expect": [{"Tick": 150, "Luau": "return Scene.GetName() == 'Level3'"}],
@@ -122,7 +126,7 @@ namespace Engine {
 		constexpr std::string_view ProvenanceExample = R"({"Format": "Provenance", "Version": 1, "Entries": [{"Path": "Assets/Scenes/Main.scene", "XXH64": "0f1e2d3c4b5a6978",
 "Method": "scene.save", "RequestId": 17, "Client": "engine-mcp", "TranscriptLine": 42}]})";
 
-		constexpr std::string_view GameManifestExample = R"({"Format": "GameManifest", "Version": 1, "Name": "Tetris", "EngineVersion": "0.1.0", "StartScene": "8a61c0d2e4f31b77",
+		constexpr std::string_view GameManifestExample = R"({"Format": "GameManifest", "Version": 2, "Name": "Tetris", "EngineVersion": "0.1.0", "Build": "0.1.0+3f2a9c1d4e5b", "StartScene": "8a61c0d2e4f31b77",
 "Paks": [{"Path": "Data/Engine.pak", "XXH64": "0123456789abcdef"}, {"Path": "Data/Game.pak", "XXH64": "fedcba9876543210"}],
 "Window": {"Title": "Tetris", "Width": 720, "Height": 900, "VSync": true, "Fullscreen": false, "Resizable": true},
 "Simulation": {"FixedHz": 60, "MaxStepsPerFrame": 5, "Seed": 1, "MaxEntities": 65536}, "Testing": false})";
@@ -137,7 +141,7 @@ namespace Engine {
 				"One line of an automation batch file (§6.7): `{\"method\", \"params\"}`; `{\"$ref\": \"<line>.<jsonPath>\"}` inside params references an earlier result. Lines have no Format header.",
 				BatchRequestExample },
 			AuthoredFormat{ "GameManifest", "Game.json", GameManifest::CurrentVersion,
-				"The exported game's manifest next to its executable (§14.1): name, engine version, start scene, paks, window and simulation settings.",
+				"The exported game's manifest next to its executable (§14.1): name, engine version, build id, start scene, paks, window and simulation settings.",
 				GameManifestExample },
 			AuthoredFormat{ "Material", ".material", MaterialData::CurrentVersion,
 				"A PBR metallic-roughness material (§6.5).", MaterialExample },
@@ -153,8 +157,10 @@ namespace Engine {
 				"simulated world: every entity with its serialized components, the tick, the session's Random state, the id draws and every body's physics "
 				"state; it never covers script tables (self.State, module locals), audio or input, which expectations observe instead. Verification with "
 				"strictHash compares each checkpoint as playback reaches it and stops at the first that differs. A recording with input events is refused "
-				"when a run without them reproduces every checkpoint, the final hash and every expectation. Version 1 files (no checkpoints) are read as "
-				"version 2 with none, and project.upgrade rewrites them.",
+				"when a run without them reproduces every checkpoint, the final hash and every expectation. Every recording also keeps its start "
+				"fingerprint, what its session held at tick 0 (each entity and component, and each asset they reference), so a replay whose hash differs "
+				"names what changed since it was recorded. Version 1 files (no checkpoints) and version 2 files are read as version 3 with no fingerprint, "
+				"and project.upgrade rewrites them.",
 				ReplayExample },
 			AuthoredFormat{ "Scene", ".scene", Migrations::CurrentVersion,
 				"A scene (§6.2): entities in canonical order with their components keyed by registry name.", SceneExample },
@@ -1005,6 +1011,40 @@ namespace Engine {
 			checkpoint["Tick"] = IntegerSchema("The completed-tick boundary of the checkpoint: after tick 0, before FinalTick, increasing strictly.", 1, std::nullopt);
 			checkpoint["StateHash"] = LowercaseHashSchema("The state hash the recording observed at Tick: 16 lowercase hex digits.");
 
+			// The start fingerprint (Docs/Decisions/0030-m19-contract.md decision 2).
+			Json entityPrint = Json::object();
+			entityPrint["Id"] = HandleSchema("The entity's id; the entities are sorted by id.");
+			entityPrint["Path"] = StringSchema("The entity's path at tick 0 (readable, never compared).");
+			entityPrint["Hash"] = LowercaseHashSchema(
+				"XXH64 (seed 0) of the entity's own members (its id, name, parent, active flag and tags) as the scene's minified canonical serialization "
+				"writes them: 16 lowercase hex digits.");
+			entityPrint["Components"] = Described(Json{ { "type", "object" },
+													  { "additionalProperties", LowercaseHashSchema("XXH64 (seed 0) of the component's value as the scene's "
+																									"minified canonical serialization writes it.") } },
+				"Each serialized component by name, in the scene file's order (the registered ones in registry order, then native and unknown ones), "
+				"with the hash of its value.");
+			Json assetPrint = Json::object();
+			assetPrint["Handle"] = HandleSchema("The asset's handle; the assets are sorted by handle.");
+			assetPrint["Path"] = StringSchema("The asset's reference path when it was recorded (readable, never compared).");
+			assetPrint["Type"] = EnumSchema(GetAssetTypeNames(), "The asset's type.");
+			assetPrint["Hash"] = LowercaseHashSchema(
+				"XXH64 (seed 0) of the asset's cooked artifact, the same in the editor's cache and in an exported pak: 16 lowercase hex digits.");
+			Json fingerprintProperties = Json::object();
+			fingerprintProperties["Entities"] = Described(
+				Json{ { "type", "array" },
+					{ "items", ObjectSchema("One entity of the scene at tick 0.", std::move(entityPrint), { "Id", "Path", "Hash", "Components" }) } },
+				"Every entity of the scene at tick 0, sorted by id.");
+			fingerprintProperties["Assets"] = Described(
+				Json{ { "type", "array" }, { "items", ObjectSchema("One referenced asset.", std::move(assetPrint), { "Handle", "Path", "Type", "Hash" }) } },
+				"Every asset an asset reference of those components names (a script and its asset fields, a mesh, a material, ...), once, sorted by "
+				"handle; procedural built-ins and assets that only other assets reference are not listed.");
+			const Json fingerprint = Described(
+				Json{ { "type", Json::array({ "object", "null" }) }, { "properties", std::move(fingerprintProperties) },
+					{ "required", Json::array({ "Entities", "Assets" }) }, { "additionalProperties", false } },
+				"The start fingerprint: what the recorded session held at tick 0, so a playback whose state hash differs names what changed since the "
+				"recording (a component, an entity, a script, a material, another referenced asset). Null for a replay upgraded from version 1 or 2, "
+				"which names no change until it is recorded again.");
+
 			Json properties = HeaderProperties(ReplayFormatName, ReplayFormatVersion);
 			properties["Scene"] = ObjectSchema("The scene the replay starts in.", std::move(scene), { "Handle", "Path" });
 			properties["Parameters"] = Described(Json{ { "type", "object" } }, "The Scene.Load parameters the scene starts with (free-form).");
@@ -1014,6 +1054,7 @@ namespace Engine {
 				"The replay format's engine version, which every recorder writes as \"0.1.0\" (ReplayEngineVersionString) whatever the build, so neither "
 				"a version bump nor a commit rewrites a replay (informational).");
 			properties["Config"] = StringSchema("The run mode that recorded the replay (Editor, Release or Dist), never the build configuration; informational.");
+			properties["Fingerprint"] = fingerprint;
 			properties["Events"] = Described(Json{ { "type", "array" }, { "items", ObjectSchema("One input event.", std::move(event), { "Tick", "Type" }) } },
 				"The applied input events, ordered by tick.");
 			properties["Expect"] = Described(
@@ -1029,7 +1070,8 @@ namespace Engine {
 				"The state hash at FinalTick: 16 lowercase hex digits. It covers the simulated world (every entity with its serialized components, the tick, "
 				"the session's Random state, the id draws and every body's physics state), never script tables, audio or input.");
 			return DocumentSchema(ReplayFormatName, "An input replay (§6.7).", std::move(properties),
-				{ "Format", "Version", "Scene", "Parameters", "Seed", "FixedHz", "EngineVersion", "Config", "Events", "Expect", "Checkpoints", "FinalTick", "FinalStateHash" });
+				{ "Format", "Version", "Scene", "Parameters", "Seed", "FixedHz", "EngineVersion", "Config", "Fingerprint", "Events", "Expect", "Checkpoints", "FinalTick",
+					"FinalStateHash" });
 		}
 
 		static Json ProvenanceSchema()
@@ -1069,6 +1111,8 @@ namespace Engine {
 			Json properties = HeaderProperties(GameManifest::FormatName, GameManifest::CurrentVersion);
 			properties["Name"] = StringSchema("The game's name: the executable's and the user-data folder's name.");
 			properties["EngineVersion"] = StringSchema("The exporting engine's version.");
+			properties["Build"] = StringSchema("The exporting build's id, semantic-versioning build metadata whose version is EngineVersion: <version>, then, for a "
+											   "build that knows its commit, +<its 12 lowercase hex digits> and .dirty for a working tree with changes.");
 			properties["StartScene"] = HandleSchema("The Scene asset the game starts with.");
 			properties["Paks"] = Described(
 				Json{ { "type", "array" }, { "items", ObjectSchema("One pak.", std::move(pak), { "Path", "XXH64" }) }, { "minItems", 2 }, { "maxItems", 2 } },
@@ -1077,7 +1121,7 @@ namespace Engine {
 			properties["Simulation"] = Reference(simulation->GetName());
 			properties["Testing"] = Described(Json{ { "type", "boolean" } }, "Whether the export admits --feature-test.");
 			return DocumentSchema(GameManifest::FormatName, "The exported game's manifest, Game.json (§14.1).", std::move(properties),
-				{ "Format", "Version", "Name", "EngineVersion", "StartScene", "Paks", "Window", "Simulation", "Testing" }, std::move(definitions));
+				{ "Format", "Version", "Name", "EngineVersion", "Build", "StartScene", "Paks", "Window", "Simulation", "Testing" }, std::move(definitions));
 		}
 
 		static Json BatchRequestSchema(const MethodRegistry& methods)

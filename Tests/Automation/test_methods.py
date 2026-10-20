@@ -248,6 +248,20 @@ class MethodTests(AutomationTestCase):
         reopened.call("entity.create", {"name": "Board"})
         self.assertTrue(reopened.call("session.info")["scene"]["dirty"])
 
+    def test_session_reports_the_build_id(self) -> None:
+        # Docs/Decisions/0030-m19-contract.md decision 13 (B-BVER): session.hello, session.info and the session file
+        # name the build that answers, as semantic-versioning build metadata whose version is the engine's.
+        editor = self.start_editor()
+        client = self.connect(editor)
+        build = client.hello["build"]
+        self.assertRegex(build, r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(\+[0-9a-f]{12}(\.dirty)?)?$")
+        self.assertEqual(build.split("+", 1)[0], client.hello["engineVersion"])
+        self.assertEqual(client.call("session.info")["build"], build)
+        self.assertIsNotNone(editor.session)
+        session_file = json.loads(editor.session.path.read_text(encoding="utf-8"))
+        self.assertEqual(session_file["build"], build)
+        self.assertEqual(list(session_file).index("build"), list(session_file).index("engineVersion") + 1)
+
 
 if __name__ == "__main__":
     unittest.main()

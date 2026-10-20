@@ -187,6 +187,13 @@ namespace Engine {
 		[[nodiscard]] std::optional<AssetHandle> Resolve(std::string_view reference) const override;
 		[[nodiscard]] std::string GetReferencePath(AssetHandle handle) const override;
 		void WaitIdle() override;
+		// The XXH64 of the cooked artifact `handle` loads from (Docs/Decisions/0030-m19-contract.md decision 2): the published
+		// artifact's, the one Load returns (the last good one after a failed reimport), importing the source first, from the
+		// cache or by cooking it, when nothing is published yet, as Load does; a File or Generated built-in's from the engine
+		// cooked cache. Neither counts as a load (no load observer call, so no coverage observation). Errors: InvalidArgument
+		// for the null handle, a procedural built-in and a dependency file; NotFound for an unknown handle; the remembered
+		// failure of a source whose import failed with nothing published; the import's errors.
+		[[nodiscard]] Result<uint64_t> GetCookedHash(AssetHandle handle) override;
 		// M13: latest attempted check, including failed imports; NotFound when no Script attempt is known. Copies owned
 		// ranges/fingerprint/root hash; no pointer into a worker or checker survives. A failed reimport updates this record
 		// but preserves the last good loaded artifact. Cache hits restore it; dry runs save/restore it with other state.

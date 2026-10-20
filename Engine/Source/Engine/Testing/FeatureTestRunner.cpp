@@ -205,6 +205,8 @@ namespace Engine {
 		bool VerifiedRecording = false;
 		// Where the input check of the verified recording ended (FeatureTestRunner::GetInputCheckTick); none before it ran.
 		std::optional<uint64_t> InputCheckTick{};
+		// Where that input check first differed when it then reproduced the final hash (GetFinalHashIndependentTick).
+		std::optional<uint64_t> FinalHashIndependentTick{};
 		// Coverage (FeatureTestRunner.h; Docs/Decisions/0022-m14-contract.md decisions 3 to 5). CoverageProject: the
 		// project's Testing.CoverageGates. CoverageRun: also unfiltered and not recording, so scenes and loads are recorded
 		// and a completed run evaluates the gates.
@@ -974,7 +976,7 @@ namespace Engine {
 			Host->SetActiveTestSession(Session.get());
 			Published = true;
 			ENGINE_TRY(CheckAudioTime());
-			ENGINE_TRY(Player.Begin(std::move(data), *Session, { .Verify = true, .StrictHash = true, .WithoutInput = withoutInput }));
+			ENGINE_TRY(Player.Begin(std::move(data), *Session, { .Verify = true, .StrictHash = true, .WithoutInput = withoutInput, .ContinuePastCheckpoint = withoutInput }));
 			ReplayGeneration = Session->GetSceneGeneration();
 			RecordScene();
 			return {};
@@ -1068,16 +1070,62 @@ namespace Engine {
 			CurrentPhase = Phase::Done;
 		}
 
-		// The recording as the replay its verification and input check play.
+		// The recording as the replay its verification and input check play, with its expectations' compiled forms (test.run's
+		// expect, FeatureTestRunOptions::RecordExpectBytecode) and no start fingerprint: nothing changed since it was recorded.
 		AssetRef<ReplayData> MakeRecordingReplay() const
 		{
 			auto data = CreateRef<ReplayData>();
 			data->Header = Recording->Header;
 			data->Events = Recording->Events;
+			data->Expect = Options.RecordExpectBytecode;
 			data->Checkpoints = Recording->Checkpoints;
 			data->FinalTick = Recording->FinalTick;
 			data->FinalStateHash = Recording->FinalStateHash;
 			return AssetRef<ReplayData>(std::move(data));
+		}
+
+		// Writes test.run's expectations into the concatenated recording (FeatureTestRunOptions::RecordExpect;
+		// Docs/Decisions/0030-m19-contract.md decision 6). One after its FinalTick could never be evaluated, so it fails the
+		// recording at its own location.
+		Status AttachRecordExpectations()
+		{
+			for (size_t index = 0; index < Options.RecordExpect.size(); ++index)
+			{
+				if (Options.RecordExpect[index].Tick > Recording->FinalTick)
+				{
+					return std::unexpected(Error(ErrorCode::Validation, std::format("recording expectation {} is at tick {}, after the recording's final tick {}", index, Options.RecordExpect[index].Tick, Recording->FinalTick))
+							.WithLocation({ .File = {}, .JsonPointer = std::format("/expect/{}/tick", index), .Entity = {} }));
+				}
+			}
+			Recording->Expect = Options.RecordExpect;
+			return {};
+		}
+
+		// What a committed replay's failed Checkpoint@<tick> or FinalStateHash row says changed since the recording, before its
+		// divergence hint: the first change its start fingerprint names (ReplayPlaybackResult::Changes,
+		// Docs/Decisions/0030-m19-contract.md decision 2), or nothing for a replay without one.
+		[[nodiscard]] static std::string DescribeFirstChange(const ReplayPlaybackResult& playback)
+		{
+			return playback.Changes.empty() ? std::string() : std::format("changed since the recording: {}; ", playback.Changes.front());
+		}
+
+		// The first expectation of the recording's verification with its input that was evaluated and not satisfied, as the
+		// refusal names it, located at its source (/expect/<index>/luau); nullopt when every evaluated one held.
+		[[nodiscard]] static std::optional<Error> DescribeRecordExpectationFailure(const ReplayPlaybackResult& playback)
+		{
+			for (size_t index = 0; index < playback.Expect.size(); ++index)
+			{
+				const ReplayExpectationOutcome& outcome = playback.Expect[index];
+				if (!outcome.Evaluated || outcome.Satisfied)
+					continue;
+				const std::string expectation = std::format("recording expectation {} at tick {}", index, outcome.Tick);
+				// A false or nil result is a Validation failure; an expectation that raised names its error.
+				std::string message = outcome.Failure.has_value() && outcome.Failure->GetCode() != ErrorCode::Validation
+					? std::format("{} failed when the recording was replayed with its input: {}", expectation, outcome.Failure->GetMessageText())
+					: std::format("{} is false when the recording is replayed with its input", expectation);
+				return Error(ErrorCode::Validation, std::move(message)).WithLocation({ .File = {}, .JsonPointer = std::format("/expect/{}/luau", index), .Entity = {} });
+			}
+			return std::nullopt;
 		}
 
 		Status ReplayStep(ReplayRun run)
@@ -1115,7 +1163,10 @@ namespace Engine {
 												  "changes only script state, or play after the last checkpoint that a restart undoes",
 								ReplayCheckpointInterval)));
 				}
-				InputCheckTick = playback.FinalTick;
+				// Where the check first differed: a playback that continued past its failed checkpoints keeps the first.
+				InputCheckTick = playback.FirstCheckpointFailure.has_value() ? playback.FirstCheckpointFailure->Tick : playback.FinalTick;
+				if (IsFinalHashIndependent(playback))
+					FinalHashIndependentTick = playback.FirstCheckpointFailure->Tick;
 				VerifiedRecording = true;
 				Complete();
 				return {};
@@ -1124,6 +1175,10 @@ namespace Engine {
 			{
 				const bool scriptFailed = errors.GetCursor() != 0;
 				DestroySession();
+				// An expectation of test.run's expect is named first: the evaluated ones lie at or before where the playback
+				// ended, and one that raises also publishes a script error.
+				if (std::optional<Error> expectation = DescribeRecordExpectationFailure(playback); expectation.has_value())
+					return std::unexpected(std::move(*expectation));
 				if (scriptFailed)
 					return MakeError(ErrorCode::Validation, "recording ordinary-play verification reported script errors");
 				if (playback.CheckpointFailed)
@@ -1154,7 +1209,7 @@ namespace Engine {
 				row.Status = "failed";
 				row.Ticks = Count(playback.FinalTick);
 				// M17 friction F03: the row says why a state hash can differ and how to fix it.
-				AddFailure(row, { std::format("expected {}, observed {}; {}", playback.ExpectedStateHash, playback.StateHash, GetReplayDivergenceHint()), Replays[ReplayIndex], 0, std::format("/Checkpoints/{}/StateHash", playback.CheckpointsChecked - 1) });
+				AddFailure(row, { std::format("expected {}, observed {}; {}{}", playback.ExpectedStateHash, playback.StateHash, DescribeFirstChange(playback), GetReplayDivergenceHint()), Replays[ReplayIndex], 0, std::format("/Checkpoints/{}/StateHash", playback.CheckpointsChecked - 1) });
 				ReportData.Cases.push_back(std::move(row));
 			}
 			else if (!playback.StopReason.empty())
@@ -1191,7 +1246,7 @@ namespace Engine {
 				row.Status = playback.HashMatched ? "passed" : "failed";
 				row.Ticks = Count(playback.FinalTick);
 				if (!playback.HashMatched)
-					AddFailure(row, { std::format("expected {}, observed {}; {}", playback.ExpectedStateHash, playback.StateHash, GetReplayDivergenceHint()), Replays[ReplayIndex], 0, "/FinalStateHash" });
+					AddFailure(row, { std::format("expected {}, observed {}; {}{}", playback.ExpectedStateHash, playback.StateHash, DescribeFirstChange(playback), GetReplayDivergenceHint()), Replays[ReplayIndex], 0, "/FinalStateHash" });
 				ReportData.Cases.push_back(std::move(row));
 			}
 			TestSuiteResult suite;
@@ -1346,6 +1401,7 @@ namespace Engine {
 						return !Passed(row);
 					}))
 						return std::unexpected(RefuseRecording());
+					ENGINE_TRY(AttachRecordExpectations());
 					ENGINE_TRY(ValidateReplayDocument(*Recording));
 					CurrentPhase = Phase::Verify;
 					return false;
@@ -1425,6 +1481,15 @@ namespace Engine {
 			return MakeError(ErrorCode::InvalidState, "test run is already active");
 		if (host.GetProjectSettings().Testing.CaseTimeoutTicks == 0 || host.GetProjectSettings().Testing.SuiteTickLimit == 0)
 			return MakeError(ErrorCode::InvalidArgument, "case timeout and suite tick limit must be positive");
+		// The recording's expectations (FeatureTestRunOptions::RecordExpect; Docs/Decisions/0030-m19-contract.md decision 6): each
+		// source with its compiled bytecode at the same index.
+		if (!options.Record && (!options.RecordExpect.empty() || !options.RecordExpectBytecode.empty()))
+			return MakeError(ErrorCode::InvalidArgument, "recording expectations require Record");
+		if (options.RecordExpect.size() != options.RecordExpectBytecode.size())
+			return MakeError(ErrorCode::InvalidArgument, "recording expectations need one compiled expectation each ({} sources, {} compiled)", options.RecordExpect.size(), options.RecordExpectBytecode.size());
+		for (size_t index = 0; index < options.RecordExpect.size(); ++index)
+			if (options.RecordExpect[index].Tick != options.RecordExpectBytecode[index].Tick)
+				return MakeError(ErrorCode::InvalidArgument, "recording expectation {} is at tick {}, its compiled form at tick {}", index, options.RecordExpect[index].Tick, options.RecordExpectBytecode[index].Tick);
 		ENGINE_TRY_ASSIGN(auto inventory, Discover(host, options.Mode));
 		auto next = CreateScope<State>();
 		next->Host = &host;
@@ -1522,6 +1587,11 @@ namespace Engine {
 	std::optional<uint64_t> FeatureTestRunner::GetInputCheckTick() const
 	{
 		return m_State->InputCheckTick;
+	}
+
+	std::optional<uint64_t> FeatureTestRunner::GetFinalHashIndependentTick() const
+	{
+		return m_State->FinalHashIndependentTick;
 	}
 
 	Result<FeatureTestSelection> FeatureTestRunner::GetSelection() const

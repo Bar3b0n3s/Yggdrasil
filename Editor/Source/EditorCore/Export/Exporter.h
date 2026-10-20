@@ -116,11 +116,11 @@
 //          says why.
 //      A non-zero exit code fails the export, naming the code and the end of its output.
 //   6a. M19 FeatureTest (Docs/Decisions/0030-m19-contract.md decision 10, A-DISTSELF): with ExportSpecification::FeatureTest,
-//      which needs Testing, run the staged package's executable by its fixed path with the fixed argument --feature-test
-//      (plus --renderer none for Debug and Release from an editor without a graphics device, as for the smoke test), no
-//      argument a request supplies. A testing export keeps its user data inside the package (bin/TestUserData/<Name>/,
-//      GetTestingUserDataRoot), so the run's JSON report (TestResults/FeatureTest-<Mode>.json there) moves with the
-//      package. Step 6a reads it into ExportReport::FeatureTest: whether the run passed, its exit code, the report's path
+//      which needs Testing, run the staged package's executable by its fixed path with the fixed arguments --headless
+//      --feature-test (plus --renderer none for Debug and Release from an editor without a graphics device, as for the
+//      smoke test), no argument a request supplies. A testing export keeps its user data inside the package
+//      (bin/TestUserData/<Name>/, GetTestingUserDataRoot); the run works there, so its JSON report
+//      (bin/TestResults/FeatureTest-<Mode>.json below that folder) moves with the package. Step 6a reads it into ExportReport::FeatureTest: whether the run passed, its exit code, the report's path
 //      after the move, and every replay row's path and observed state hash, the hashes a builder compares with the games
 //      suite's Dist half. A Dist export from an editor without a graphics device cannot run it (as for the smoke test): it
 //      is not run, FeatureTest.Ran stays false and a warning says why. A failed run does not fail the export: the report

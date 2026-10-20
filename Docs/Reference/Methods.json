@@ -1687,7 +1687,7 @@
 						}
 					},
 					"schema": {
-						"description": "The JSON Schema (2020-12) of the component's serialized object."
+						"description": "The JSON Schema (2020-12) of the component's object as component data in params takes it: an Entity field takes the entity's 16-hex id (which files store), an id prefix of 6 to 15 hex digits or an entity path such as /Game/ScoreText."
 					},
 					"_meta": {
 						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
@@ -2949,7 +2949,7 @@
 					},
 					"components": {
 						"type": "object",
-						"description": "Component values by registry name, each an object of field values (missing fields keep their values); see component.schema.",
+						"description": "Component values by registry name, each an object of field values (missing fields keep their values); an Entity value takes 16 hex digits, a unique id prefix of at least 6 or a path such as \"/Game/ScoreText\", resolved in the target scene; see component.schema.",
 						"properties": {
 							"Transform": {
 								"$ref": "#/$defs/Transform"
@@ -3038,7 +3038,7 @@
 							"ID": {
 								"description": "The entity's UUID; set at creation and never changed.",
 								"type": ["string", "null"],
-								"pattern": "^[0-9a-fA-F]{16}$"
+								"pattern": "^([0-9a-fA-F]{6,16}|/.+)$"
 							}
 						},
 						"additionalProperties": false
@@ -3075,7 +3075,7 @@
 							"Parent": {
 								"description": "The parent entity; null for a root entity.",
 								"type": ["string", "null"],
-								"pattern": "^[0-9a-fA-F]{16}$"
+								"pattern": "^([0-9a-fA-F]{6,16}|/.+)$"
 							}
 						},
 						"additionalProperties": false
@@ -3234,12 +3234,12 @@
 							"PrefabEntityID": {
 								"description": "The prefab-local ID of the entity this member was created from.",
 								"type": ["string", "null"],
-								"pattern": "^[0-9a-fA-F]{16}$"
+								"pattern": "^([0-9a-fA-F]{6,16}|/.+)$"
 							},
 							"InstanceRoot": {
 								"description": "The root entity of the instance, which has the Prefab component.",
 								"type": ["string", "null"],
-								"pattern": "^[0-9a-fA-F]{16}$"
+								"pattern": "^([0-9a-fA-F]{6,16}|/.+)$"
 							}
 						},
 						"additionalProperties": false
@@ -4091,6 +4091,10 @@
 							"Layer": {
 								"description": "Physics layer name from project settings.",
 								"type": "string"
+							},
+							"InheritGroundVelocity": {
+								"description": "While grounded, the character also moves with the horizontal velocity of what it stands on, so a moving platform carries it.",
+								"type": "boolean"
 							}
 						},
 						"additionalProperties": false
@@ -4200,7 +4204,7 @@
 							"PrefabEntityID": {
 								"description": "The prefab-local ID of the entity the override applies to (never the derived instance ID).",
 								"type": ["string", "null"],
-								"pattern": "^[0-9a-fA-F]{16}$"
+								"pattern": "^([0-9a-fA-F]{6,16}|/.+)$"
 							},
 							"Kind": {
 								"description": "What the override changes: a field, an added or removed component, or an entity key.",
@@ -4773,7 +4777,7 @@
 					},
 					"components": {
 						"type": "object",
-						"description": "Component values by registry name, merged into the existing components; missing components are added.",
+						"description": "Component values by registry name, merged into the existing components; missing components are added. An Entity value takes 16 hex digits, a unique id prefix of at least 6 or a path such as \"/Game/ScoreText\", resolved in the target scene.",
 						"properties": {
 							"Transform": {
 								"$ref": "#/$defs/Transform"
@@ -4869,7 +4873,7 @@
 							"ID": {
 								"description": "The entity's UUID; set at creation and never changed.",
 								"type": ["string", "null"],
-								"pattern": "^[0-9a-fA-F]{16}$"
+								"pattern": "^([0-9a-fA-F]{6,16}|/.+)$"
 							}
 						},
 						"additionalProperties": false
@@ -4906,7 +4910,7 @@
 							"Parent": {
 								"description": "The parent entity; null for a root entity.",
 								"type": ["string", "null"],
-								"pattern": "^[0-9a-fA-F]{16}$"
+								"pattern": "^([0-9a-fA-F]{6,16}|/.+)$"
 							}
 						},
 						"additionalProperties": false
@@ -5065,12 +5069,12 @@
 							"PrefabEntityID": {
 								"description": "The prefab-local ID of the entity this member was created from.",
 								"type": ["string", "null"],
-								"pattern": "^[0-9a-fA-F]{16}$"
+								"pattern": "^([0-9a-fA-F]{6,16}|/.+)$"
 							},
 							"InstanceRoot": {
 								"description": "The root entity of the instance, which has the Prefab component.",
 								"type": ["string", "null"],
-								"pattern": "^[0-9a-fA-F]{16}$"
+								"pattern": "^([0-9a-fA-F]{6,16}|/.+)$"
 							}
 						},
 						"additionalProperties": false
@@ -5922,6 +5926,10 @@
 							"Layer": {
 								"description": "Physics layer name from project settings.",
 								"type": "string"
+							},
+							"InheritGroundVelocity": {
+								"description": "While grounded, the character also moves with the horizontal velocity of what it stands on, so a moving platform carries it.",
+								"type": "boolean"
 							}
 						},
 						"additionalProperties": false
@@ -6031,7 +6039,7 @@
 							"PrefabEntityID": {
 								"description": "The prefab-local ID of the entity the override applies to (never the derived instance ID).",
 								"type": ["string", "null"],
-								"pattern": "^[0-9a-fA-F]{16}$"
+								"pattern": "^([0-9a-fA-F]{6,16}|/.+)$"
 							},
 							"Kind": {
 								"description": "What the override changes: a field, an added or removed component, or an entity key.",
@@ -6627,7 +6635,7 @@
 		{
 			"name": "input.record",
 			"domain": "input",
-			"description": "Starts a tick-zero recording or saves its validated applied inputs, expectations and state-hash checkpoints (one every 60 ticks). Stop checks output write permission. A recording with input events is first replayed with them (the verification, which replaces the play session as input.replay does): unless that run reproduces every checkpoint, the final hash and every expectation and raises no script error, Stop refuses to write it (Validation naming the first divergence, the run's outcome in error data verification), which catches a script.eval that wrote script state during the recording; the run is not torn down, so an error raised only at teardown (OnDestroy) is not counted, while test.run counts it when it plays the replay. It is then replayed without them (the input check); when that run also reproduces every checkpoint, the final hash and every expectation, whatever script errors it raises, the recording's outcome does not depend on its input and Stop refuses to write it (Validation, the check's outcome in error data inputCheck). Either way the play session is the last run's, paused where it ended. End such a recording while the played state is still in the scene. A recording without input events is written as recorded, without either run, so verify it with input.replay {verify: true, strictHash: true}.",
+			"description": "Starts a tick-zero recording or saves its validated applied inputs, expectations and state-hash checkpoints (one every 60 ticks). Stop checks output write permission. Every recording is first replayed with its input events, if any (the verification, which replaces the play session as input.replay does): unless that run reproduces every checkpoint, the final hash and every expectation and raises no script error, Stop refuses to write it (Validation naming the first divergence, the run's outcome in error data verification), which catches a script.eval that wrote script state during the recording. Once the run passed, its scripts are stopped, and an error their OnDestroy raises refuses the recording too (named at teardown). A recording without input events is then written, and the play session is the verification's, paused at its final tick with its scripts stopped (script.eval in the play context is refused there; scene.query and entity.get read its final state). One with input events is then replayed without them (the input check); when that run also reproduces every checkpoint, the final hash and every expectation, whatever script errors it raises, the recording's outcome does not depend on its input and Stop refuses to write it (Validation, the check's outcome in error data inputCheck). The play session is then the last run's, paused where it ended. End such a recording while the played state is still in the scene.",
 			"exposeAsTool": true,
 			"mutates": false,
 			"supportsDryRun": false,
@@ -6782,7 +6790,7 @@
 		{
 			"name": "input.replay",
 			"domain": "input",
-			"description": "Replays recorded inputs in a fresh session; verification failures retain every expectation and hash outcome in error data. strictHash compares the state hash at each checkpoint and at the final tick and stops at the first checkpoint that differs. The state hash covers the simulated world (entities and their serialized components, the tick, Random, id draws, physics), never script tables, so expectations observe script state. withoutInput replays without the input events, the check that the replay depends on its input. Afterwards the session stays paused at the replay's last tick (or where playback stopped), so script.eval, scene.query and entity.get read its final state; play.stop ends it.",
+			"description": "Replays recorded inputs in a fresh session; verification failures retain every expectation and hash outcome in error data. strictHash compares the state hash at each checkpoint and at the final tick and, unless continuePastCheckpoint, stops at the first checkpoint that differs. The state hash covers the simulated world (entities and their serialized components, the tick, Random, id draws, physics), never script tables, so expectations observe script state. withoutInput replays without the input events, the check that the replay depends on its input. Afterwards the session stays paused at the replay's last tick (or where playback stopped), so script.eval, scene.query and entity.get read its final state; play.stop ends it.",
 			"exposeAsTool": true,
 			"mutates": false,
 			"supportsDryRun": false,
@@ -6806,7 +6814,7 @@
 						"type": "boolean"
 					},
 					"strictHash": {
-						"description": "Compare the recorded state hash at every checkpoint and at the final tick; requires verify. The first checkpoint that differs ends the playback there.",
+						"description": "Compare the recorded state hash at every checkpoint and at the final tick; requires verify. The first checkpoint that differs ends the playback there, unless continuePastCheckpoint.",
 						"type": "boolean"
 					},
 					"withoutInput": {
@@ -6874,7 +6882,7 @@
 						"maximum": 4294967295
 					},
 					"checkpointFailed": {
-						"description": "A checkpoint's hash differed: playback stopped at its tick (finalTick), and stateHash and expectedStateHash are the observed and recorded hashes there.",
+						"description": "A checkpoint's hash differed. Without continuePastCheckpoint playback stopped at its tick (finalTick), and stateHash and expectedStateHash are the observed and recorded hashes there; with it, playback went on to the final tick and firstFailedCheckpointTick names the first.",
 						"type": "boolean"
 					},
 					"withoutInput": {
@@ -9700,7 +9708,7 @@
 					},
 					"components": {
 						"type": "object",
-						"description": "Per-instance component values for the instance root by registry name, merged into the prefab's as entity.update merges them (missing components are added) and recorded as the instance's overrides; script fields go in {\"Script\": {\"Fields\": {...}}}, the Script handle defaulting to the prefab root's.",
+						"description": "Per-instance component values for the instance root by registry name, merged into the prefab's as entity.update merges them (missing components are added) and recorded as the instance's overrides; script fields go in {\"Script\": {\"Fields\": {...}}}, the Script handle defaulting to the prefab root's. An Entity value takes 16 hex digits, a unique id prefix of at least 6 or a path such as \"/Game/ScoreText\", resolved in the edit scene.",
 						"properties": {
 							"Transform": {
 								"$ref": "#/$defs/Transform"
@@ -9785,7 +9793,7 @@
 							"ID": {
 								"description": "The entity's UUID; set at creation and never changed.",
 								"type": ["string", "null"],
-								"pattern": "^[0-9a-fA-F]{16}$"
+								"pattern": "^([0-9a-fA-F]{6,16}|/.+)$"
 							}
 						},
 						"additionalProperties": false
@@ -9822,7 +9830,7 @@
 							"Parent": {
 								"description": "The parent entity; null for a root entity.",
 								"type": ["string", "null"],
-								"pattern": "^[0-9a-fA-F]{16}$"
+								"pattern": "^([0-9a-fA-F]{6,16}|/.+)$"
 							}
 						},
 						"additionalProperties": false
@@ -9981,12 +9989,12 @@
 							"PrefabEntityID": {
 								"description": "The prefab-local ID of the entity this member was created from.",
 								"type": ["string", "null"],
-								"pattern": "^[0-9a-fA-F]{16}$"
+								"pattern": "^([0-9a-fA-F]{6,16}|/.+)$"
 							},
 							"InstanceRoot": {
 								"description": "The root entity of the instance, which has the Prefab component.",
 								"type": ["string", "null"],
-								"pattern": "^[0-9a-fA-F]{16}$"
+								"pattern": "^([0-9a-fA-F]{6,16}|/.+)$"
 							}
 						},
 						"additionalProperties": false
@@ -10838,6 +10846,10 @@
 							"Layer": {
 								"description": "Physics layer name from project settings.",
 								"type": "string"
+							},
+							"InheritGroundVelocity": {
+								"description": "While grounded, the character also moves with the horizontal velocity of what it stands on, so a moving platform carries it.",
+								"type": "boolean"
 							}
 						},
 						"additionalProperties": false
@@ -10947,7 +10959,7 @@
 							"PrefabEntityID": {
 								"description": "The prefab-local ID of the entity the override applies to (never the derived instance ID).",
 								"type": ["string", "null"],
-								"pattern": "^[0-9a-fA-F]{16}$"
+								"pattern": "^([0-9a-fA-F]{6,16}|/.+)$"
 							},
 							"Kind": {
 								"description": "What the override changes: a field, an added or removed component, or an entity key.",
@@ -11406,7 +11418,7 @@
 			"availableInRuntime": false,
 			"availableInLauncher": false,
 			"pending": true,
-			"timeoutSeconds": 900,
+			"timeoutSeconds": 3600,
 			"requiredParams": ["config"],
 			"params": {
 				"$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -15181,7 +15193,7 @@
 								"type": "string"
 							},
 							"schema": {
-								"description": "Complete field JSON Schema, including nested defaults and metadata."
+								"description": "Complete field JSON Schema, including nested defaults and metadata; an Entity field also takes an id prefix of 6 to 15 hex digits or an entity path in component data."
 							}
 						},
 						"additionalProperties": false
@@ -15439,7 +15451,7 @@
 		{
 			"name": "session.hello",
 			"domain": "session",
-			"description": "Opens the session: the first request of every connection, with the token from the server's session file. Reports the protocol and engine versions, the client id, the capabilities and the open project (the game in the Runtime).",
+			"description": "Opens the session: the first request of every connection, with the token from the server's session file. Reports the protocol and engine versions, the build id, the client id, the capabilities and the open project (the game in the Runtime).",
 			"exposeAsTool": false,
 			"mutates": false,
 			"supportsDryRun": false,
@@ -15499,6 +15511,10 @@
 					},
 					"engineVersion": {
 						"description": "The engine's version.",
+						"type": "string"
+					},
+					"build": {
+						"description": "The server's build id, semantic-versioning build metadata: the engine's version, then \"+<commit>\" (12 lowercase hex digits of the commit it was built from) and \".dirty\" when its working tree had uncommitted changes, such as \"0.2.0+3f2a9c1d4e5b.dirty\"; the version alone for a build without a commit.",
 						"type": "string"
 					},
 					"clientId": {
@@ -15607,6 +15623,10 @@
 					},
 					"engineVersion": {
 						"description": "The engine's version.",
+						"type": "string"
+					},
+					"build": {
+						"description": "The host's build id, as session.hello's build.",
 						"type": "string"
 					},
 					"pid": {
@@ -15900,7 +15920,7 @@
 						"maximum": 4294967295
 					},
 					"views": {
-						"description": "The scene then the game view, as the editor's displayed viewport panels: a view whose panel is not displayed is unavailable, and a headless editor displays only the Scene view of its default layout, so game is unavailable there. The Runtime supplies game only.",
+						"description": "The scene then the game view, as the editor's displayed viewport panels: a view whose panel is not displayed is unavailable, and a headless editor displays only the Scene view of its default layout, so game is unavailable there unless the editor was started with --headless-game-view, whose game view renders every frame at the project's window size (or viewport.setOptions' gameResolution). The Runtime supplies game only.",
 						"type": "array",
 						"items": {
 							"$ref": "#/$defs/StatsViewSummary"

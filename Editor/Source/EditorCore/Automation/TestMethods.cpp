@@ -15,10 +15,13 @@
 #include "Engine/Core/Json/JsonWriter.h"
 #include "Engine/Core/VfsPath.h"
 #include "Engine/Reflection/TypeRegistry.h"
+#include "Engine/Scripting/ScriptCompiler.h"
+#include "Engine/Session/ReplayPlayer.h"
 
 #include <nlohmann/json.hpp>
 
 #include <format>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -26,13 +29,37 @@ namespace Engine {
 
 	namespace {
 
-		// test.run {record, expect} (Docs/Decisions/0030-m19-contract.md decision 6, A-RECEXPECT, stream A): the expectations
-		// checked and compiled for FeatureTestRunOptions::RecordExpect and RecordExpectBytecode.
-		Status PrepareRecordExpectations(const TestRunParams& params)
+		// test.run {record, expect}'s expectations (Docs/Decisions/0030-m19-contract.md decision 6, A-RECEXPECT): the sources the
+		// recording carries and their compiled forms, which the runner evaluates (it never compiles: Dist has no compiler).
+		struct RecordExpectations
 		{
-			ENGINE_CONTRACT_STUB();
-			return std::unexpected(Error(ErrorCode::Unsupported, std::format("test.run {{record, expect}} with {} expectation(s) (Docs/Decisions/0030-m19-contract.md decision 6, stream A)", params.Expect.size()))
-					.WithLocation({ .File = {}, .JsonPointer = "/expect", .Entity = {} }));
+			std::vector<ReplayExpectation> Sources{};
+			std::vector<ReplayBytecodeExpectation> Bytecode{};
+		};
+
+		// Checks and compiles test.run's expect, as input.record's Stop does its own: record is required (InvalidArgument at
+		// /expect), the ticks are ordered (at /expect/<index>/tick), and each source compiles as an expression or chunk named
+		// "=test.run", located at /expect/<index>/luau. A tick after the recording's final tick is known only once the suite
+		// ran, so the runner refuses it (FeatureTestRunOptions::RecordExpect).
+		Result<RecordExpectations> PrepareRecordExpectations(const TestRunParams& params, bool recording)
+		{
+			if (!recording)
+				return std::unexpected(Utils::MakeParamError(ErrorCode::InvalidArgument, "/expect", "expect requires record", "pass record with the replay destination the expectations are written into"));
+			RecordExpectations prepared;
+			for (size_t index = 0; index < params.Expect.size(); ++index)
+			{
+				const InputRecordExpectation& expectation = params.Expect[index];
+				if (index != 0 && expectation.Tick < params.Expect[index - 1].Tick)
+					return std::unexpected(Utils::MakeParamError(ErrorCode::InvalidArgument, std::format("/expect/{}/tick", index), "expectation ticks must be ordered", {}));
+				ENGINE_TRY_ASSIGN(ScriptCompilation compiled, ScriptCompiler::Compile({ .Source = expectation.Luau, .Mode = ScriptCompileMode::ExpressionOrChunk, .ChunkName = "=test.run", .JsonPointer = std::format("/expect/{}/luau", index) }));
+				prepared.Sources.push_back({ .Tick = expectation.Tick, .Luau = expectation.Luau });
+				ReplayBytecodeExpectation bytecode;
+				bytecode.Tick = expectation.Tick;
+				bytecode.Script.Bytecode = std::move(compiled.Bytecode);
+				bytecode.Script.SourceMap = std::move(compiled.SourceMap);
+				prepared.Bytecode.push_back(std::move(bytecode));
+			}
+			return prepared;
 		}
 
 		// The host owns the editor lease. Keep it alive until the runner has unpublished and destroyed its sessions,
@@ -51,9 +78,9 @@ namespace Engine {
 					m_Runner.Cancel();
 			}
 
-			[[nodiscard]] Status Begin(const TestRunParams& params)
+			[[nodiscard]] Status Begin(const TestRunParams& params, RecordExpectations expectations)
 			{
-				return m_Runner.Begin(*m_Host, { .Mode = TestSuiteSettings::Mode::Editor, .Filter = params.Filter, .TimeoutTicks = params.TimeoutTicks, .Record = !m_Record.empty() });
+				return m_Runner.Begin(*m_Host, { .Mode = TestSuiteSettings::Mode::Editor, .Filter = params.Filter, .TimeoutTicks = params.TimeoutTicks, .Record = !m_Record.empty(), .RecordExpect = std::move(expectations.Sources), .RecordExpectBytecode = std::move(expectations.Bytecode) });
 			}
 
 			// What the successful Begin selected (FeatureTestRunner::GetSelection).
@@ -122,22 +149,27 @@ namespace Engine {
 					ENGINE_TRY_ASSIGN(recording, m_Runner.TakeRecording());
 				}
 				const std::optional<uint64_t> inputCheckTick = m_Runner.GetInputCheckTick();
+				const std::optional<uint64_t> finalHashIndependentTick = m_Runner.GetFinalHashIndependentTick();
 				// The simulation is terminal. Restore the editor before publishing through its guarded write path;
 				// this remains one invocation, with the original request's attribution and no interleaved frame.
 				Cancel(context);
 				if (recording)
 				{
 					ENGINE_TRY_ASSIGN(result.RecordingPath, context.WriteReplay(m_Record, *recording));
-					ENGINE_TRY_ASSIGN(result.Recording, MakeRecordingBlock(context, result.RecordingPath, *recording, inputCheckTick));
+					ENGINE_TRY_ASSIGN(result.Recording, MakeRecordingBlock(context, result.RecordingPath, *recording, inputCheckTick, finalHashIndependentTick));
 				}
 				return PublishReports(context, std::move(result), m_ReportCoverage);
 			}
 
-			// The result's recording block (TestRunResult::Recording, M16 friction S3-03): what the written replay holds and
-			// where its input check diverged.
+			// The result's recording block (TestRunResult::Recording, M16 friction S3-03): what the written replay holds, its
+			// expectations included (Docs/Decisions/0030-m19-contract.md decision 6), where its input check diverged, and the
+			// warning of an input check that reproduced the final hash only (decision 3, `finalHashIndependentTick`).
 			[[nodiscard]] static Result<VariantValue> MakeRecordingBlock(EditorMethodContext& context, const std::string& path, const ReplayDocument& recording,
-				std::optional<uint64_t> inputCheckTick)
+				std::optional<uint64_t> inputCheckTick, std::optional<uint64_t> finalHashIndependentTick)
 			{
+				std::vector<std::string> warnings;
+				if (finalHashIndependentTick.has_value())
+					warnings.push_back(MakeFinalHashIndependentWarning(path, *finalHashIndependentTick, recording.FinalStateHash));
 				const TestRecordingResult block{
 					.Path = path,
 					.FormatVersion = recording.Version,
@@ -146,6 +178,8 @@ namespace Engine {
 					.Checkpoints = ToAutomationCounter(recording.Checkpoints.size()),
 					.FinalStateHash = recording.FinalStateHash,
 					.InputCheck = { .Ran = inputCheckTick.has_value(), .DivergedAtTick = ToAutomationCounter(inputCheckTick.value_or(0)) },
+					.Expectations = ToAutomationCounter(recording.Expect.size()),
+					.Warnings = std::move(warnings),
 				};
 				ENGINE_TRY_ASSIGN(Json serialized, context.SerializeResult(block));
 				return VariantValue(std::move(serialized));
@@ -245,8 +279,11 @@ namespace Engine {
 				if (!checked)
 					return std::unexpected(Error(checked.error().GetCode(), checked.error().GetMessageText()).WithLocation({ .File = {}, .JsonPointer = "/record", .Entity = {} }));
 			}
+			RecordExpectations expectations;
 			if (context.HasParam("expect"))
-				ENGINE_TRY(PrepareRecordExpectations(params));
+			{
+				ENGINE_TRY_ASSIGN(expectations, PrepareRecordExpectations(params, !params.Record.empty()));
+			}
 			auto host = CreateScope<EditorFeatureTestHost>(context);
 			ENGINE_TRY(host->Preflight());
 			EditorFeatureTestHost* adapter = host.get();
@@ -254,7 +291,7 @@ namespace Engine {
 			auto operation = CreateScope<TestRunOperation>(std::move(host), params.Record, reportCoverage);
 			// The script API baseline immediately before Begin, whose suite collection counts (ADR 0022 decision 4).
 			ENGINE_TRY(adapter->CaptureCoverageBaseline());
-			const Status begun = operation->Begin(params);
+			const Status begun = operation->Begin(params, std::move(expectations));
 			if (!begun)
 			{
 				if (begun.error().GetCode() == ErrorCode::InvalidArgument)

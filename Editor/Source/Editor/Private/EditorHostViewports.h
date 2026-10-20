@@ -107,6 +107,7 @@ namespace Engine {
 		uint64_t m_Withdrawals = 0;
 		bool m_Unavailable = false;
 		bool m_GameFocused = false;
+		bool m_GameForced = false; // ForceGameView: the Game view renders whether or not its panel is displayed
 	};
 
 }

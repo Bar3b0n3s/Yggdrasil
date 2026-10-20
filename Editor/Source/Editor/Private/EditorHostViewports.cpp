@@ -8,6 +8,7 @@
 #include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/Graphics/RenderContext.h"
 #include "Engine/ImGui/ImGuiRenderer.h"
+#include "Engine/Platform/GlfwLibrary.h"
 #include "Engine/Platform/Window.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/RenderAnnotations.h"
@@ -106,8 +107,12 @@ namespace Engine {
 	}
 	Status EditorHostViewports::ForceGameView()
 	{
-		ENGINE_CONTRACT_STUB();
-		return MakeError(ErrorCode::Unsupported, "the headless editor's game view (--headless-game-view; Docs/Decisions/0030-m19-contract.md decision 11, stream E)");
+		// A native window displays the panels the user arranged; only a headless window (or none, in process) has no
+		// Game panel on screen to decide for.
+		if (m_Editor.GetEngine().GetWindow() != nullptr && GlfwLibrary::GetMode() != WindowMode::Headless)
+			return MakeError(ErrorCode::InvalidState, "the Game view is forced only in a headless editor (--headless-game-view needs --headless): a windowed editor renders the Game view its panel displays");
+		m_GameForced = true;
+		return {};
 	}
 	bool EditorHostViewports::IsLayoutReady() const
 	{
@@ -299,7 +304,14 @@ namespace Engine {
 		View& view = m_Views[index];
 		const ViewportView kind = index == 0 ? ViewportView::Scene : ViewportView::Game;
 		const auto panel = index == 0 ? EditorPanel::SceneViewport : EditorPanel::GameViewport;
-		const glm::uvec2 size = m_Editor.HasProject() && std::ranges::find(m_Editor.GetUiState().GetOpenPanels(), panel) != m_Editor.GetUiState().GetOpenPanels().end() ? view.RequestedSize : glm::uvec2(0);
+		glm::uvec2 size = m_Editor.HasProject() && std::ranges::find(m_Editor.GetUiState().GetOpenPanels(), panel) != m_Editor.GetUiState().GetOpenPanels().end() ? view.RequestedSize : glm::uvec2(0);
+		// A forced Game view (--headless-game-view) renders at the size lockstep and replay sessions use as view coordinates,
+		// or at the fixed game resolution when one is set, whatever its panel does; at most 8192 pixels a side, as a panel.
+		if (kind == ViewportView::Game && m_GameForced && m_Editor.HasProject())
+		{
+			const glm::uvec2 resolution = m_Editor.GetViewportState().GetGameResolution();
+			size = glm::min(resolution.x != 0 ? resolution : GetDeterministicViewSize(m_Editor.GetProject().GetSettings().Window), glm::uvec2(8192));
+		}
 		if (size.x == 0 || size.y == 0)
 		{
 			if (view.Image.Texture != 0)

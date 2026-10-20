@@ -10,7 +10,7 @@
 		},
 		"Version": {
 			"description": "The format version this build writes; older versions are migrated when read.",
-			"enum": [2]
+			"enum": [3]
 		},
 		"Scene": {
 			"description": "The scene the replay starts in.",
@@ -51,6 +51,79 @@
 		"Config": {
 			"description": "The run mode that recorded the replay (Editor, Release or Dist), never the build configuration; informational.",
 			"type": "string"
+		},
+		"Fingerprint": {
+			"description": "The start fingerprint: what the recorded session held at tick 0, so a playback whose state hash differs names what changed since the recording (a component, an entity, a script, a material, another referenced asset). Null for a replay upgraded from version 1 or 2, which names no change until it is recorded again.",
+			"type": ["object", "null"],
+			"properties": {
+				"Entities": {
+					"description": "Every entity of the scene at tick 0, sorted by id.",
+					"type": "array",
+					"items": {
+						"description": "One entity of the scene at tick 0.",
+						"type": "object",
+						"properties": {
+							"Id": {
+								"description": "The entity's id; the entities are sorted by id.",
+								"type": "string",
+								"pattern": "^[0-9a-fA-F]{16}$"
+							},
+							"Path": {
+								"description": "The entity's path at tick 0 (readable, never compared).",
+								"type": "string"
+							},
+							"Hash": {
+								"description": "XXH64 (seed 0) of the entity's own members (its id, name, parent, active flag and tags) as the scene's minified canonical serialization writes them: 16 lowercase hex digits.",
+								"type": "string",
+								"pattern": "^[0-9a-f]{16}$"
+							},
+							"Components": {
+								"description": "Each serialized component by name, in the scene file's order (the registered ones in registry order, then native and unknown ones), with the hash of its value.",
+								"type": "object",
+								"additionalProperties": {
+									"description": "XXH64 (seed 0) of the component's value as the scene's minified canonical serialization writes it.",
+									"type": "string",
+									"pattern": "^[0-9a-f]{16}$"
+								}
+							}
+						},
+						"required": ["Id", "Path", "Hash", "Components"],
+						"additionalProperties": false
+					}
+				},
+				"Assets": {
+					"description": "Every asset an asset reference of those components names (a script and its asset fields, a mesh, a material, ...), once, sorted by handle; procedural built-ins and assets that only other assets reference are not listed.",
+					"type": "array",
+					"items": {
+						"description": "One referenced asset.",
+						"type": "object",
+						"properties": {
+							"Handle": {
+								"description": "The asset's handle; the assets are sorted by handle.",
+								"type": "string",
+								"pattern": "^[0-9a-fA-F]{16}$"
+							},
+							"Path": {
+								"description": "The asset's reference path when it was recorded (readable, never compared).",
+								"type": "string"
+							},
+							"Type": {
+								"description": "The asset's type.",
+								"enum": ["Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay"]
+							},
+							"Hash": {
+								"description": "XXH64 (seed 0) of the asset's cooked artifact, the same in the editor's cache and in an exported pak: 16 lowercase hex digits.",
+								"type": "string",
+								"pattern": "^[0-9a-f]{16}$"
+							}
+						},
+						"required": ["Handle", "Path", "Type", "Hash"],
+						"additionalProperties": false
+					}
+				}
+			},
+			"required": ["Entities", "Assets"],
+			"additionalProperties": false
 		},
 		"Events": {
 			"description": "The applied input events, ordered by tick.",
@@ -191,6 +264,6 @@
 			"pattern": "^[0-9a-f]{16}$"
 		}
 	},
-	"required": ["Format", "Version", "Scene", "Parameters", "Seed", "FixedHz", "EngineVersion", "Config", "Events", "Expect", "Checkpoints", "FinalTick", "FinalStateHash"],
+	"required": ["Format", "Version", "Scene", "Parameters", "Seed", "FixedHz", "EngineVersion", "Config", "Fingerprint", "Events", "Expect", "Checkpoints", "FinalTick", "FinalStateHash"],
 	"additionalProperties": false
 }

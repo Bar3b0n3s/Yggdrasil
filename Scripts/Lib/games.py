@@ -16,9 +16,14 @@ helpers are pure: they read files or the documents the editor and the Runtime re
 lines ("<what>: <why>"), an empty list meaning the check passed.
 
 The input check (M16 friction S2-01, FX-4): every committed replay with input events is also verified without them
-(input.replay {verify: true, strictHash: true, withoutInput: true}; withoutInput without verify is refused, since it
-would check nothing) in the editor halves, and that verification must fail (evaluate_input_check),
-because a replay whose outcome does not depend on its input proves nothing about the gameplay it recorded. One rule
+(input.replay {verify: true, strictHash: true, withoutInput: true, continuePastCheckpoint: true}; withoutInput without
+verify is refused, since it would check nothing) in the editor halves, and that verification must fail
+(evaluate_input_check), because a replay whose outcome does not depend on its input proves nothing about the gameplay
+it recorded. Since the run plays on past the checkpoints that differ (M19, Docs/Decisions/0030-m19-contract.md decision
+3), a replay whose run without input differed only at checkpoints and still reached its recorded final hash gets a
+warning (input_check_warning) that never fails the half. Two staged games that share an .eproj stem or a Name would
+collide in the suite's steps, reports or Dist package directory, so the suite refuses them first
+(check_distinct_projects, decision 12). One rule
 decides input independence everywhere (Docs/Architecture.md §13.6; the recording guards of input.record and test.run
 {record} apply it too): a replay is input-independent when its input-free run passes verification (every checkpoint,
 the final state hash, every expectation), whatever script errors that run raised. A game also needs at least one test
@@ -91,6 +96,12 @@ START_SCENE_NOT_LISTED = ("Export.BuildScenes does not list the StartScene '{sce
 REPLAY_FILE_SUFFIX = ".replay"
 ASSETS_DIRECTORY = "Assets"
 GIT_TIMEOUT_SECONDS = 120.0
+# The input check's warning (input_check_warning): the engine's MakeFinalHashIndependentWarning
+# (Engine/Source/Engine/Session/ReplayPlayer.h; Docs/Decisions/0030-m19-contract.md decision 3), word for word.
+FINAL_HASH_INDEPENDENT_WARNING = ("'{replay}': its final state hash does not depend on its input: without its input "
+                                  "events the run first differed from the recording at checkpoint tick {tick}, then "
+                                  "reached the recorded final state hash {hash}, so only its checkpoints prove the "
+                                  "play; end the recording while the played state is still in the scene")
 # A committed FinalStateHash: 16 hexadecimal digits (Engine/Source/Engine/Asset/ReplayData.h: ReplayToText writes them
 # lowercase).
 STATE_HASH_PATTERN = re.compile(r"[0-9a-fA-F]{16}")
@@ -398,7 +409,25 @@ def input_check_warning(replay: str, outcome: dict[str, Any] | None) -> str | No
     reached the recorded final state hash <hash>, so only its checkpoints prove the play; end the recording while the
     played state is still in the scene". None otherwise, an outcome that is not an object included. A warning never
     fails the half: the games step stays passed and prints it."""
-    raise NotImplementedError("contract stub: games (ADR 0030 decision 3, A-F29, stream B)")
+    if not isinstance(outcome, dict):
+        return None
+    failed = outcome.get("checkpointsFailed")
+    if not _is_count(failed) or failed <= 0 or outcome.get("hashMatched") is not True:
+        return None
+    expectations = outcome.get("expect", [])
+    if not isinstance(expectations, list) or not all(isinstance(entry, dict) and entry.get("satisfied") is True
+                                                     for entry in expectations):
+        return None
+    tick = outcome.get("firstFailedCheckpointTick")
+    final_hash = outcome.get("expectedStateHash")
+    if not _is_count(tick) or not isinstance(final_hash, str):
+        return None
+    return FINAL_HASH_INDEPENDENT_WARNING.format(replay=replay, tick=tick, hash=final_hash)
+
+
+def _is_count(value: object) -> bool:
+    """Whether `value` is a JSON integer (never a bool, which Python counts as one)."""
+    return isinstance(value, int) and not isinstance(value, bool)
 
 
 def check_distinct_projects(projects: Iterable[GameProject]) -> list[str]:
@@ -413,8 +442,43 @@ def check_distinct_projects(projects: Iterable[GameProject]) -> list[str]:
         (ProjectSettings Name), since the Dist half installs each package as bin/Exports/Dist/<Name>".
     A project whose Name cannot be read is one line naming its file and read_game_name's ValueError. Empty when every
     stem and Name is distinct. The games suite runs it on the projects it discovered and, when it returns lines, fails
-    its "games" step with them before any project runs."""
-    raise NotImplementedError("contract stub: games (ADR 0030 decision 12, AL-STEMS, stream B)")
+    its "games" step with them before any project runs. Stems and Names are compared ignoring letter case, since the
+    steps' report files and the package directories collide on a file system that ignores it (Windows); a pair that
+    differs only in case names both spellings. A single project collides with nothing, so its Name is not read."""
+    listed = list(projects)
+    failures: list[str] = []
+    if len(listed) < 2:
+        return failures
+    names: list[str | None] = []
+    for project in listed:
+        try:
+            names.append(read_game_name(project.project_file))
+        except ValueError as error:
+            names.append(None)
+            failures.append(f"the game project {paths.display_path(project.project_file)} has no readable Name, so the "
+                            f"games suite cannot compare it with the other projects: {error}")
+    for first_index, first in enumerate(listed):
+        for second_index in range(first_index + 1, len(listed)):
+            second = listed[second_index]
+            pair = f"the game projects {paths.display_path(first.project_file)} and " \
+                   f"{paths.display_path(second.project_file)}"
+            first_stem, second_stem = first.project_file.stem, second.project_file.stem
+            if first_stem.casefold() == second_stem.casefold():
+                failures.append(f"{pair} share the file stem {_spellings(first_stem, second_stem)}: rename one .eproj, "
+                                f"since the games steps and reports are named after it")
+            first_name, second_name = names[first_index], names[second_index]
+            if first_name is not None and second_name is not None and first_name.casefold() == second_name.casefold():
+                package = paths.display_path(exports.package_directory(EXPORTED_CONFIGURATION, first_name))
+                failures.append(f"{pair} share the Name {_spellings(first_name, second_name)}: rename one "
+                                f"(ProjectSettings Name), since the Dist half installs each package as {package}")
+    return failures
+
+
+def _spellings(first: str, second: str) -> str:
+    """'<first>', or both spellings when they differ only in letter case."""
+    if first == second:
+        return f"'{first}'"
+    return f"'{first}' (and '{second}', equal but for letter case)"
 
 
 def prepare_native_editor(project_directory: Path, user_data: Path, config: str) -> list[str]:
@@ -605,6 +669,45 @@ def check_smoke(result: dict[str, Any], require_gpu: bool) -> tuple[list[str], l
     if require_gpu:
         return [f"the plain Dist export's smoke test did not run ({reason}) and --require-gpu is given"], []
     return [], [f"the plain Dist export's smoke test did not run ({reason}); --require-gpu fails instead"]
+
+
+def check_feature_test(result: dict[str, Any], exported: dict[str, str],
+                       require_gpu: bool) -> tuple[list[str], list[str]]:
+    """(failures, warnings) of a testing Dist project.export {featureTest: true} result (Docs/Decisions/
+    0030-m19-contract.md decision 10, A-DISTSELF: the builder-side Dist self-check), against `exported`, the replay
+    hashes of the Dist half's own --feature-test run of the same package (exports.read_replay_hashes): the stateHash its
+    featureTest.replays report for each replay must equal the run's, one failure line per replay that differs, naming
+    both; a replay that could not play (an empty stateHash, which read_replay_hashes leaves out) matches an absent one.
+    A result without a featureTest object, or with replays that are not {path, stateHash} rows, is a failure; ran false
+    (no device, Exporter.h step 6a) is a failure with `require_gpu`, else a warning naming the export's reasons. Whether
+    the rows passed is the half's own check of its run (evaluate_run), not this one."""
+    feature_test = result.get("featureTest")
+    if not isinstance(feature_test, dict):
+        return ["the testing Dist export's result has no featureTest object"], []
+    if feature_test.get("ran") is not True:
+        warnings = [str(warning) for warning in result.get("warnings", [])] \
+            if isinstance(result.get("warnings"), list) else []
+        reason = "; ".join(warnings) or "the export reported no reason"
+        if require_gpu:
+            return [f"the testing Dist export's feature test did not run ({reason}) and --require-gpu is given"], []
+        return [], [f"the testing Dist export's feature test did not run ({reason}); --require-gpu fails instead"]
+    replays = feature_test.get("replays")
+    if not isinstance(replays, list):
+        return ["the testing Dist export's featureTest has no replays array"], []
+    reported: dict[str, str] = {}
+    for index, row in enumerate(replays):
+        if not isinstance(row, dict) or not isinstance(row.get("path"), str) \
+                or not isinstance(row.get("stateHash"), str):
+            return [f"the testing Dist export's featureTest.replays[{index}] is not a {{path, stateHash}} row"], []
+        if row["stateHash"]:
+            reported[row["path"]] = row["stateHash"]
+    failures = []
+    for replay in sorted(set(reported) | set(exported)):
+        if reported.get(replay) != exported.get(replay):
+            failures.append(f"{replay}: the testing Dist export's featureTest reports "
+                            f"{reported.get(replay, 'no state hash')}, the package's own --feature-test run "
+                            f"{exported.get(replay, 'no state hash')}")
+    return failures, []
 
 
 def editor_report_path(project: GameProject, config: str) -> Path:

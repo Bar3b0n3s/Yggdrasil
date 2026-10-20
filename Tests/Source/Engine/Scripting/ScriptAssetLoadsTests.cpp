@@ -15,7 +15,7 @@ namespace Engine {
 		// its location; every other use of Assets.Load, or of the global Assets other than by a field name, is a computed
 		// load; a local named Assets and type annotations are not loads; a source that does not parse is CompileFailed at
 		// its line.
-		TEST_CASE("ScriptAssetLoads: literal Assets.Load references are found with their locations and every other use is computed" * doctest::skip(true))
+		TEST_CASE("ScriptAssetLoads: literal Assets.Load references are found with their locations and every other use is computed")
 		{
 			constexpr std::string_view Source = R"(local Loader = {}
 local clip = Assets.Load("Assets/Audio/Beep.sfx")
@@ -63,10 +63,46 @@ return Loader
 				CHECK(load.Reference.empty());
 			}
 
+			// The sandbox keeps _G: _G.Assets and _G["Assets"] are the global Assets, so their literal loads are found; _G used
+			// any other way may reach Assets, so it is computed, while another field of _G is no use (the review of W19.1: a
+			// load through _G was neither, so the export pruned what it named).
+			constexpr std::string_view Globals = R"(local a = _G.Assets.Load("engine://Audio/Coin")
+local b = _G["Assets"].Load("Assets/Audio/Beep.sfx")
+local c = _G.Assets
+local d = _G["Ass" .. "ets"]
+local e = rawget(_G, "Assets")
+local f = _G
+_G.print("x")
+local g = _G["print"]
+local h = _G.Assets:Load()
+)";
+			const Result<std::vector<ScriptAssetLoad>> globals = FindScriptAssetLoads(Globals, "Assets/Scripts/Globals.luau");
+			REQUIRE_MESSAGE(globals.has_value(), globals.error().ToString());
+			const std::vector<ScriptAssetLoad> expectedGlobals = {
+				{ .Reference = "engine://Audio/Coin", .Literal = true, .Line = 1, .Column = 11 },
+				{ .Reference = "Assets/Audio/Beep.sfx", .Literal = true, .Line = 2, .Column = 11 },
+				{ .Reference = {}, .Literal = false, .Line = 3, .Column = 11 },
+				{ .Reference = {}, .Literal = false, .Line = 4, .Column = 11 },
+				{ .Reference = {}, .Literal = false, .Line = 5, .Column = 18 },
+				{ .Reference = {}, .Literal = false, .Line = 6, .Column = 11 },
+				{ .Reference = {}, .Literal = false, .Line = 9, .Column = 11 },
+			};
+			CHECK(*globals == expectedGlobals);
+
 			const Result<std::vector<ScriptAssetLoad>> broken = FindScriptAssetLoads("local x = \nlocal y = Assets.Load(\"a\")", "Assets/Scripts/Broken.luau");
 			REQUIRE_FALSE(broken.has_value());
 			CHECK(broken.error().GetCode() == ErrorCode::CompileFailed);
 			CHECK(broken.error().GetLocation().Line == 2);
+		}
+
+		// Decision 19: a source that is not UTF-8 is refused before it is parsed, naming the chunk.
+		TEST_CASE("ScriptAssetLoads: a source that is not valid UTF-8 is a Validation error")
+		{
+			const std::string source = "local clip = Assets.Load(\"\xff\")";
+			const Result<std::vector<ScriptAssetLoad>> loads = FindScriptAssetLoads(source, "Assets/Scripts/Bytes.luau");
+			REQUIRE_FALSE(loads.has_value());
+			CHECK(loads.error().GetCode() == ErrorCode::Validation);
+			CHECK(loads.error().GetLocation().File == "Assets/Scripts/Bytes.luau");
 		}
 	}
 

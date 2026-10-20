@@ -256,9 +256,11 @@ namespace Engine {
 			CHECK((*again)["changedFiles"] == Json::array());
 		}
 
-		// M16 FX-4: Replay version 2 adds the state-hash checkpoints. project.upgrade rewrites a version 1 replay as version 2
-		// with none (the bytes of Tests/Data/Formats/Replay/v1.upgraded.replay), records it, and then leaves it alone.
-		TEST_CASE("ProjectMethods: project.upgrade migrates a version 1 replay to version 2 and records it")
+		// M16 FX-4: Replay version 2 adds the state-hash checkpoints, version 3 the start fingerprint (Docs/Decisions/
+		// 0030-m19-contract.md decision 2). project.upgrade rewrites a version 1 replay in the current version with no
+		// checkpoints and a null fingerprint (the bytes of Tests/Data/Formats/Replay/v1.upgraded.replay), records it, and then
+		// leaves it alone.
+		TEST_CASE("ProjectMethods: project.upgrade migrates a version 1 replay to version 3 and records it")
 		{
 			Test::AutomationFixture setup("ProjectUpgradeReplay", false);
 			const Result<std::string> v1 = Test::ReadTestDataText("Formats/Replay/v1.replay");
@@ -312,7 +314,7 @@ namespace Engine {
 
 			const Json expected = ParseProjectJson(R"([
 				{"path": "Assets/Materials/Red.material", "reason": "canonical form"},
-				{"path": "Assets/Replays/Old.replay", "reason": "format version 1 to 2"},
+				{"path": "Assets/Replays/Old.replay", "reason": "format version 1 to 3"},
 				{"path": "Assets/Scenes/Old.scene", "reason": "format version 0 to 1"}])");
 			Result<Json> dryRun = setup.Call("project.upgrade", Json{ { "dryRun", true } });
 			REQUIRE_MESSAGE(dryRun.has_value(), dryRun.error().ToString());

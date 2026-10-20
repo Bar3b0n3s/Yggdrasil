@@ -22,13 +22,13 @@
 namespace Engine {
 
 	inline constexpr std::string_view ReplayFormatName = "Replay";
-	// Version 2 adds Checkpoints. A version 1 file migrates to version 2 with no checkpoints: only its FinalStateHash is
-	// compared, as before, and project.upgrade rewrites it canonically.
-	inline constexpr uint32_t ReplayFormatVersion = 2;
-	// The first version with the start fingerprint (Fingerprint, below; Docs/Decisions/0030-m19-contract.md decision 2,
-	// A-FPRINT), reserved for M19 by the phase 1 ledger: ReplayFormatVersion, ReplayData::FormatVersion and
-	// ReplayImporter::Version all become 3 with the readers, the writer and the cooked codec that carry it (stream B). A
-	// version 1 or 2 file migrates to version 3 with a null Fingerprint (nothing recorded, so nothing can be named), which
+	// Version 2 adds Checkpoints, version 3 the start fingerprint (Fingerprint, below). A version 1 file migrates with no
+	// checkpoints (only its FinalStateHash is compared, as before), and a version 1 or 2 file with a null Fingerprint;
+	// project.upgrade rewrites both canonically.
+	inline constexpr uint32_t ReplayFormatVersion = 3;
+	// The first version with the start fingerprint (Docs/Decisions/0030-m19-contract.md decision 2, A-FPRINT), reserved for
+	// M19 by the phase 1 ledger: ReplayFormatVersion, ReplayData::FormatVersion and ReplayImporter::Version are 3. A version 1
+	// or 2 file migrates to version 3 with a null Fingerprint (nothing recorded, so nothing can be named), which
 	// project.upgrade writes (Tests/Data/Formats/Replay/v2.upgraded.replay); every recording writes a fingerprint.
 	inline constexpr uint32_t ReplayFingerprintFormatVersion = 3;
 	// The EngineVersion every recorder writes into a replay header (input.record, test.run's record, the Runtime's
@@ -119,7 +119,9 @@ namespace Engine {
 		// Of the entity's own members as that serialization writes them (its id, name, parent, active flag, tags), without
 		// its Components.
 		std::string Hash{};
-		std::vector<ReplayComponentFingerprint> Components{}; // in registry order, the order scene files use
+		// In the order scene files write them: the registered components in registry order, then the native and the unknown
+		// ones as the scene holds them (decision 27).
+		std::vector<ReplayComponentFingerprint> Components{};
 
 		[[nodiscard]] bool operator==(const ReplayEntityFingerprint& other) const = default;
 	};
@@ -170,9 +172,10 @@ namespace Engine {
 		uint64_t FinalTick = 0;
 		std::string FinalStateHash{}; // Exactly 16 lowercase hex digits.
 		// Version 3 (ReplayFingerprintFormatVersion, decision 2): the start fingerprint, written after Config; nullopt (null in
-		// the file) for a replay migrated from version 1 or 2. Validation: entities strictly increasing by id with valid ids,
-		// component names unique per entity and in registry order, assets strictly increasing by valid handle, every hash
-		// canonical.
+		// the file) for a replay migrated from version 1 or 2. Validation (ValidateReplayDocument): entities strictly
+		// increasing by id with valid ids, component names non-empty and unique per entity, assets strictly increasing by
+		// valid handle with a type name, every hash canonical. The registry order of the registered component names (native
+		// and unknown ones follow them) needs the type registry, so ReplayImporter checks it.
 		std::optional<ReplayFingerprint> Fingerprint{};
 	};
 
@@ -187,7 +190,7 @@ namespace Engine {
 	struct ReplayData : Asset
 	{
 		static constexpr AssetType StaticType = AssetType::Replay;
-		static constexpr uint16_t FormatVersion = 2;
+		static constexpr uint16_t FormatVersion = 3;
 
 		ReplayData();
 
@@ -211,15 +214,15 @@ namespace Engine {
 	// Pure structural validation: valid scene handle, object Parameters with finite JSON values, FixedHz in the
 	// FrameLoopConfig range, header strings, known event shapes, nondecreasing ticks (ties preserve array order),
 	// Events.Tick < FinalTick, Expect.Tick <= FinalTick and nonempty Luau, strictly increasing Checkpoints.Tick with
-	// 0 < Tick < FinalTick, canonical hashes. A trailing Tap release at FinalTick is outside the run and is not recorded.
+	// 0 < Tick < FinalTick, canonical hashes, and the Fingerprint's structure (ReplayDocument::Fingerprint). A trailing Tap
+	// release at FinalTick is outside the run and is not recorded.
 	// Version must be ReplayFormatVersion (readers migrate older files first); newer is UnsupportedVersion. No compiler
 	// runs here.
 	[[nodiscard]] Status ValidateReplayDocument(const ReplayDocument& document);
-	// The readers accept versions 1 and 2. Version 1 has no Checkpoints member (one is an unknown member there) and
-	// migrates to version 2 with none; the document returned is always ReplayFormatVersion, and report.FileVersion keeps
-	// the file's own version. Version 2 requires Checkpoints. From version 3 (stream B, decision 2) they also accept version
-	// 3, which requires Fingerprint (an object or null); in versions 1 and 2 a Fingerprint member is unknown, and both
-	// migrate with a null one.
+	// The readers accept versions 1 to 3. Version 1 has no Checkpoints member (one is an unknown member there) and
+	// migrates with none; the document returned is always ReplayFormatVersion, and report.FileVersion keeps the file's own
+	// version. Versions 2 and 3 require Checkpoints. Version 3 (decision 2) requires Fingerprint (an object or null); in
+	// versions 1 and 2 a Fingerprint member is unknown, and both migrate with a null one.
 	[[nodiscard]] Result<ReplayDocument> ReplayFromJson(const Json& document, ReplayLoadReport& report, bool strictUnknowns = false);
 	[[nodiscard]] Result<ReplayDocument> ReplayFromText(std::string_view text, ReplayLoadReport& report, bool strictUnknowns = false);
 	[[nodiscard]] Result<Json> ReplayToJson(const ReplayDocument& document);
@@ -231,15 +234,15 @@ namespace Engine {
 	// non-object, a float outside the float range, invalid UTF-8 or nesting deeper than MaxJsonDepth.
 	[[nodiscard]] Result<Json> CanonicalizeReplayParameters(const Json& parameters, std::string_view pointer = "/Parameters");
 
-	// Cooked FormatVersion 2 uses the standard ECKD header. Payload, little-endian: u32 source version; scene UUID
+	// Cooked FormatVersion 3 uses the standard ECKD header. Payload, little-endian: u32 source version; scene UUID
 	// u64; length-prefixed UTF-8 scene path and canonical Parameters JSON; seed u64; FixedHz u32; length-prefixed
 	// EngineVersion and Config; event count u32; events in array order; expectation count u32; expectations;
-	// checkpoint count u32; checkpoints (Tick u64, state hash u64); FinalTick u64; state hash u64. FormatVersion 3 (stream
-	// B, decision 2) appends the fingerprint: u8 present (0 or 1); when present, entity count u32 and per entity its id u64,
-	// length-prefixed path, hash u64, component count u32 and per component its length-prefixed name and hash u64; then
-	// asset count u32 and per asset its handle u64, length-prefixed path and type name, and hash u64. Version 1 artifacts
-	// (no checkpoints) are UnsupportedVersion: the cache rebuilds them (ReplayImporter's version is part of the cache
-	// key) and exports are made again. A string/buffer length is u32. Event records: Tick u64, kind u8 (the nine kinds
+	// checkpoint count u32; checkpoints (Tick u64, state hash u64); FinalTick u64; state hash u64; then the fingerprint
+	// (decision 2): u8 present (0 or 1); when present, entity count u32 and per entity its id u64, length-prefixed path,
+	// hash u64, component count u32 and per component its length-prefixed name and hash u64; then asset count u32 and per
+	// asset its handle u64, length-prefixed path and type name, and hash u64. Version 1 and 2 artifacts (no checkpoints, no
+	// fingerprint) are UnsupportedVersion: the cache rebuilds them (ReplayImporter's version is part of the cache key) and
+	// exports are made again. A string/buffer length is u32. Event records: Tick u64, kind u8 (the nine kinds
 	// above in that order), then type-specific fields: strings, state u8 (Down=0, Up=1, Tap=2), f32 value or vec2;
 	// Action has a u8 State/Value discriminant; MouseButton has a u8 HasPosition; gamepad index is u32. Expectations:
 	// Tick u64, length-prefixed complete CookScript artifact. The nested artifact preserves source maps and compiler

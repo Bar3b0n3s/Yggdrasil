@@ -74,7 +74,7 @@ namespace Engine {
 		// the Runtime asks for them by handle with no asset referencing them, are the tonemap's blue noise and the Font
 		// placeholder; each is a File or Generated entry of the catalogue, never a procedural one (those are generated, not
 		// packaged).
-		TEST_CASE("BuiltinAssets: every Engine.pak holds the blue-noise texture and the font placeholder" * doctest::skip(true))
+		TEST_CASE("BuiltinAssets: every Engine.pak holds the blue-noise texture and the font placeholder")
 		{
 			const std::span<const AssetHandle> required = GetRuntimeRequiredBuiltinHandles();
 			CHECK(std::vector<AssetHandle>(required.begin(), required.end()) == std::vector<AssetHandle>{ BuiltinAssetHandles::BlueNoiseTexture, BuiltinAssetHandles::DefaultFont });

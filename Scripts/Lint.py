@@ -9,7 +9,10 @@ Steps, selected with --steps (default: all, in this order):
             (RenderSnapshot.h and DebugDrawList.h, direct and transitive includes) and include spelling (full paths
             from an include root, quotes only for repository headers, no .cpp except the vendored implementation
             sources ModuleRules.json's SourceIncludes grants one file each, no precompiled header in a header,
-            never inside a namespace).
+            never inside a namespace). For the native modules of game projects (Projects/*/Native/ and
+            Tests/Projects/*/Native/; Docs/Decisions/0030-m19-contract.md decision 35): only .cpp and .h files
+            (native-file), and a source includes only Engine/Native/NativeApi.h, its module's own headers by their
+            project-relative path ("Native/Spinner.h"), glm and the standard library (native-include).
   banned    banned APIs and constructs: throw and the std::rethrow/throw_with_nested family; try/catch outside the
             boundary files of section 4.6; std::filesystem calls without an std::error_code; nlohmann json
             at()/get<>() outside Core/Json; CRT transcendental functions (also through namespace aliases) and glm
@@ -22,7 +25,9 @@ Steps, selected with --steps (default: all, in this order):
             units that can call basic_json's members: the sources that include nlohmann's json.hpp, through them the
             headers they include, and on its own any other header that includes it. Otherwise a regex checker
             recognises receivers declared with a json type (or an alias of one) in the file or the header it
-            implements.
+            implements. Native module sources are simulation code: they also never read a clock, draw from
+            std::random_device or start a thread (banned-nondeterminism), and every variable of static or thread
+            storage duration is const or constexpr (native-mutable-state).
   contract  milestone completeness (Roadmap rule 3, Docs/Decisions/0004-contract-stub-gate.md): ENGINE_CONTRACT_STUB
             anywhere in first-party C++ but its definition (contract-stub), and doctest::skip in Tests/Source unless
             the same TEST_CASE/TEST_CASE_FIXTURE/SUBCASE decorator expression also carries
@@ -40,7 +45,11 @@ Steps, selected with --steps (default: all, in this order):
             project with the same flags includes outside #if blocks; any other header gets a translation unit of its
             own. Otherwise a regex checker applies the same prefixes (m_, s_, g_) and PascalCase rules to types,
             functions, data members, statics, globals and macros. The mode that ran is reported. C++ file and
-            directory names are checked in both modes.
+            directory names are checked in both modes. Native module sources have no compile commands and always
+            take the regex checker.
+
+lint_native_module(project) applies the includes, banned and naming rules of native modules to a game project's
+Native/ anywhere on disk: Scripts/BuildNative.py's check before it compiles (decision 35).
   headers   header self-containment: every first-party header is compiled on its own, syntax-only, with the include
             paths and defines of its project from compile_commands.json, in a temporary directory. It is included
             twice, which also proves its include guard. Headers also start with #pragma once.
@@ -124,6 +133,13 @@ CXX_HEADER_EXTENSION = ".h"
 CXX_SOURCE_EXTENSION = ".cpp"
 # CodeStyle section 4.1: .h and .cpp only.
 FORBIDDEN_CXX_EXTENSIONS = (".hpp", ".hh", ".hxx", ".cc", ".cxx", ".c++", ".inl", ".ipp", ".tpp")
+# Game projects' native gameplay modules (Docs/Decisions/0030-m19-contract.md decisions 26 and 35): the module
+# directories Lint.py checks in the repository ("*" is one path segment), the only repository header a native source
+# includes, and the files a module may hold.
+NATIVE_MODULE_DIRECTORIES = ("Projects/*/Native", "Tests/Projects/*/Native")
+NATIVE_DIRECTORY = "Native"
+NATIVE_API_INCLUDE = "Engine/Native/NativeApi.h"
+NATIVE_SOURCE_EXTENSIONS = (CXX_SOURCE_EXTENSION, CXX_HEADER_EXTENSION)
 
 STANDARD_HEADERS = frozenset(
     """
@@ -1048,11 +1064,23 @@ class PathRules:
 class Tree:
     """The linted tree: its files, the rules that apply to each and the include resolution."""
 
-    def __init__(self, root: Path, rules: Rules, paths: list[str] | None) -> None:
+    def __init__(
+        self,
+        root: Path,
+        rules: Rules,
+        paths: list[str] | None,
+        files: list[str] | None = None,
+        native_directories: tuple[str, ...] = NATIVE_MODULE_DIRECTORIES,
+    ) -> None:
+        """`files` (relative POSIX paths) replaces the listing of the tree's files; `native_directories` are the native
+        module directories of the tree, glob patterns whose "*" is one path segment."""
         self.root = root
         self.rules = rules
-        self.files = list_tree_files(root)
+        self.files = list_tree_files(root) if files is None else sorted(files)
         self.file_set = set(self.files)
+        self._native_patterns = [
+            re.compile("^(" + re.escape(directory).replace(r"\*", "[^/]+") + ")/") for directory in native_directories
+        ]
         self.paths = paths
         self.system = host_system()
         self._sources: dict[str, SourceFile] = {}
@@ -1072,6 +1100,20 @@ class Tree:
             for relative in self.files
             if relative.endswith((CXX_HEADER_EXTENSION, CXX_SOURCE_EXTENSION))
             and any(is_under(relative, root) for root in self.rules.cxx_roots)
+        ]
+
+    def native_module(self, relative: str) -> str | None:
+        """The native module directory `relative` lies below ("Projects/Tetris/Native"), or None."""
+        for pattern in self._native_patterns:
+            match = pattern.match(relative)
+            if match:
+                return match.group(1)
+        return None
+
+    def native_files(self) -> list[str]:
+        """Every file of the tree's native modules in scope, sources and anything else."""
+        return [
+            relative for relative in self.files if self.native_module(relative) is not None and self.in_scope(relative)
         ]
 
     def source(self, relative: str) -> SourceFile:
@@ -1634,6 +1676,9 @@ def run_includes(tree: Tree, report: StepReport) -> None:
     report.files = len(files)
     for relative in files:
         report.findings += checker.check(tree.source(relative))
+    native_files, native_findings = native_module_findings(tree, "includes")
+    report.files += native_files
+    report.findings += native_findings
 
 
 # --------------------------------------------------------------------------------------------------------------------
@@ -2026,6 +2071,8 @@ class BannedChecker:
         return "".join(code)
 
     def is_simulation_path(self, relative: str) -> bool:
+        if self.tree.native_module(relative) is not None:
+            return True  # native code is simulation code (Docs/Decisions/0030-m19-contract.md decision 28)
         path_rules = self.tree.path_rules(relative)
         if path_rules.project is None or path_rules.project.kind != "Engine" or path_rules.module is None:
             return False
@@ -2420,6 +2467,9 @@ def run_banned(context: LintContext, report: StepReport) -> None:
         report.findings += checker.check(tree.source(relative), None if semantic is None else semantic.get(relative))
     report.findings += failures
     report.detail = mode
+    native_files, native_findings = native_module_findings(tree, "banned")
+    report.files += native_files
+    report.findings += native_findings
     # Shaders, Python and premake scripts are code too: the product name never appears in them.
     if checker.product_name:
         scanned, findings = product_name_findings(tree, checker.product_name)
@@ -3329,6 +3379,200 @@ def check_file_names(tree: Tree, files: list[str]) -> list[Finding]:
     return findings
 
 
+# --------------------------------------------------------------------------------------------------------------------
+# Native gameplay modules (Docs/Decisions/0030-m19-contract.md decision 35)
+# --------------------------------------------------------------------------------------------------------------------
+
+# Native code is simulation code (decision 28, Architecture section 4.12): it reads time only as ticks, randomness only
+# from the session's stream, and runs on the main thread inside the step.
+NATIVE_NONDETERMINISM_PATTERNS = (
+    (
+        re.compile(r"\b(?:system_clock|steady_clock|high_resolution_clock|utc_clock|tai_clock|gps_clock|file_clock)\b"),
+        "reads a clock",
+    ),
+    (
+        re.compile(UNQUALIFIED + r"(?:(?:::)?std::|::)?(?:time|clock|timespec_get|gettimeofday)\s*\("),
+        "reads the C runtime's clock",
+    ),
+    (re.compile(r"\brandom_device\b"), "draws from std::random_device"),
+    (re.compile(r"\bstd::(?:thread|jthread|async)\b"), "starts a thread"),
+)
+NATIVE_NONDETERMINISM_MESSAGE = (
+    "native code is simulation code: it reads time only as ticks (INativeStepContext::GetTick, GetFixedDelta), "
+    "randomness only from the session's stream and runs on the main thread (Docs/Decisions/0030-m19-contract.md "
+    "decision 28, Architecture section 4.12)"
+)
+# The variables of static or thread storage duration that RegexNamingChecker tells apart (variable_kind) and that are
+# not const: a native module keeps no state of its own (decision 28).
+NATIVE_MUTABLE_KINDS = frozenset({"StaticVariable", "ClassMember", "GlobalVariable"})
+
+
+class NativeModuleChecker:
+    """Decision 35's rules for the files of a game's native module (Tree.native_module): only .cpp and .h sources; the
+    include rule; no mutable state; the banned APIs with the simulation path's (BannedChecker, which treats every native
+    file as simulation code) and the clocks, random devices and threads simulation code never uses; the naming rules
+    with the regex checker (clang-tidy needs compile commands, which a native module has none of) and PascalCase file
+    and directory names. Scripts/BuildNative.py applies the same rules before it compiles (lint_native_module)."""
+
+    def __init__(self, tree: Tree) -> None:
+        self.tree = tree
+        self.banned_checker = BannedChecker(tree)
+        self.naming = RegexNamingChecker(load_naming_options(CLANG_TIDY_CONFIG_PATH))
+
+    @staticmethod
+    def is_source(relative: str) -> bool:
+        return relative.endswith(NATIVE_SOURCE_EXTENSIONS)
+
+    def includes(self, relative: str) -> list[Finding]:
+        """The includes step: the file rule, and the include rule of a source."""
+        if not self.is_source(relative):
+            return [
+                Finding(
+                    relative,
+                    1,
+                    "native-file",
+                    "a native module holds only its .cpp and .h sources, which its build compiles and its source hash "
+                    "covers: move this file out of Native/ (Docs/Decisions/0030-m19-contract.md decisions 30 and 35)",
+                )
+            ]
+        source = self.tree.source(relative)
+        module = self.tree.native_module(relative) or NATIVE_DIRECTORY
+        project = module[: -len(NATIVE_DIRECTORY)]  # "Projects/Tetris/" in the repository, "" in a project tree
+        findings: list[Finding] = []
+        for include in source.includes:
+            name = include.name
+            if include.angled:
+                if name in STANDARD_HEADERS or self.tree.resolve_third_party(name) == "glm":
+                    continue
+                problem = f"<{name}> is neither a standard library header nor glm's"
+            else:
+                if name == NATIVE_API_INCLUDE:
+                    continue
+                parts = name.split("/")
+                if (
+                    parts[0] == NATIVE_DIRECTORY
+                    and name.endswith(CXX_HEADER_EXTENSION)
+                    and not {".", "..", ""} & set(parts)
+                    and project + name in self.tree.file_set
+                ):
+                    continue
+                problem = f'"{name}" is not {NATIVE_API_INCLUDE} or a header of this module'
+            findings.append(
+                Finding(
+                    relative,
+                    include.line,
+                    "native-include",
+                    f"{problem}: a native source includes only \"{NATIVE_API_INCLUDE}\", its module's own headers by "
+                    'their project-relative path ("Native/Spinner.h"), glm and the standard library, so every file '
+                    "its build reads is in the source hash (Docs/Decisions/0030-m19-contract.md decision 35)",
+                )
+            )
+        return findings
+
+    def banned(self, relative: str) -> list[Finding]:
+        """The banned step: BannedChecker's rules, the nondeterministic APIs and mutable state."""
+        source = self.tree.source(relative)
+        findings = self.banned_checker.check(source)
+        code = BannedChecker.code_without_includes(source)
+        for pattern, what in NATIVE_NONDETERMINISM_PATTERNS:
+            for match in pattern.finditer(code):
+                findings.append(
+                    Finding(
+                        relative,
+                        source.line_of(match.start()),
+                        "banned-nondeterminism",
+                        f"'{match.group(0).rstrip('( ')}' {what}: {NATIVE_NONDETERMINISM_MESSAGE}",
+                    )
+                )
+        mutable: list[Finding] = []
+
+        def verify(kind: str, name: str, offset: int) -> None:
+            if kind in NATIVE_MUTABLE_KINDS:
+                mutable.append(
+                    Finding(
+                        relative,
+                        source.line_of(offset),
+                        "native-mutable-state",
+                        f"'{name}' has static or thread storage duration and is not const or constexpr: a native "
+                        "module keeps no state of its own, because the editor keeps its library loaded across play "
+                        "sessions while each exported Runtime starts fresh; keep a session's state in its resources "
+                        "and components (Docs/Decisions/0030-m19-contract.md decision 28)",
+                    )
+                )
+
+        _, statements = source.structure()
+        for statement in statements:
+            self.naming.check_statement(source, statement, verify)
+        return sorted(set(findings + mutable))
+
+    def naming_findings(self, relative: str) -> list[Finding]:
+        """The naming step: the regex naming rules of a source, and PascalCase .h/.cpp file and directory names below
+        Native/."""
+        module = self.tree.native_module(relative) or NATIVE_DIRECTORY
+        parts = relative[len(module) + 1 :].split("/")
+        findings: list[Finding] = []
+        for part in parts[:-1]:
+            if not DIRECTORY_NAME_PATTERN.match(part):
+                findings.append(
+                    Finding(relative, 1, "naming-file", f"directory '{part}' is not PascalCase (CodeStyle section 2)")
+                )
+        if self.is_source(relative):
+            if not FILE_NAME_PATTERN.match(parts[-1]):
+                findings.append(
+                    Finding(
+                        relative,
+                        1,
+                        "naming-file",
+                        f"file name '{parts[-1]}' is not PascalCase .h/.cpp (CodeStyle section 2, section 4.1)",
+                    )
+                )
+            findings += self.naming.check(self.tree.source(relative))
+        return findings
+
+
+def native_module_findings(tree: Tree, step: str) -> tuple[int, list[Finding]]:
+    """(files checked, findings) of decision 35's rules of `step` (includes, banned or naming) for every native module
+    file of `tree` in scope; (0, []) for the other steps."""
+    files = tree.native_files()
+    if step not in ("includes", "banned", "naming") or not files:
+        return 0, []
+    checker = NativeModuleChecker(tree)
+    findings: list[Finding] = []
+    for relative in files:
+        if step == "includes":
+            findings += checker.includes(relative)
+        elif step == "naming":
+            findings += checker.naming_findings(relative)
+        elif checker.is_source(relative):
+            findings += checker.banned(relative)
+    return len(files), findings
+
+
+def native_module_files(project_root: Path) -> list[str]:
+    """Every file below <project_root>/Native/ as a project-relative POSIX path, sorted: what a build of the module
+    reads or must refuse, whether git ignores it or not."""
+    native = project_root / NATIVE_DIRECTORY
+    files: list[str] = []
+    for directory, subdirectories, names in os.walk(native):
+        subdirectories.sort()
+        files += [(Path(directory) / name).relative_to(project_root).as_posix() for name in names]
+    return sorted(files)
+
+
+def lint_native_module(project_root: Path, rules_path: Path = DEFAULT_RULES_PATH) -> list[Finding]:
+    """Scripts/BuildNative.py's check of a game's native module before it compiles (decision 35): the includes, banned
+    and naming rules Lint.py applies to Projects/*/Native/ in the repository, on <project_root>/Native/, wherever the
+    project lies. The findings are sorted and their files project-relative ("Native/Spinner.cpp"). Raises UsageError
+    for invalid rules."""
+    rules = load_rules(rules_path)
+    files = native_module_files(project_root)
+    tree = Tree(project_root, rules, None, files=files, native_directories=(NATIVE_DIRECTORY,))
+    findings: list[Finding] = []
+    for step in ("includes", "banned", "naming"):
+        findings += native_module_findings(tree, step)[1]
+    return sorted(set(findings))
+
+
 @dataclasses.dataclass
 class LintOptions:
     root: Path
@@ -3373,6 +3617,10 @@ def run_naming(context: LintContext, report: StepReport) -> None:
     files = [relative for relative in tree.cxx_files() if tree.in_scope(relative)]
     report.files = len(files)
     report.findings += check_file_names(tree, files)
+    # Native modules have no compile commands, so their files take the regex checker in every mode.
+    native_files, native_findings = native_module_findings(tree, "naming")
+    report.files += native_files
+    report.findings += native_findings
     naming_options = load_naming_options(CLANG_TIDY_CONFIG_PATH)
 
     clang_tidy: Path | None = None

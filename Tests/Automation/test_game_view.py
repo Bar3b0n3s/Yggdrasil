@@ -3,7 +3,9 @@
 test_exported_screenshot_matches_editor).
 
 The views render the tiny game (tiny_game.py) through the scene renderer: in Edit mode the edit scene through its
-primary camera, while playing the play scene (Docs/Decisions/0012-m7-decisions.md decision 9). The PNG comparison is
+primary camera, while playing the play scene (Docs/Decisions/0012-m7-decisions.md decision 9). A headless editor
+started with --headless-game-view renders the game view every frame as a displayed Game panel would
+(Docs/Decisions/0030-m19-contract.md decision 11). The PNG comparison is
 the C++ one (compare_png runs Testing/ImageCompare through the Tests executable's comparison entry point). Every test
 here renders, so each starts with require_gpu().
 """
@@ -14,11 +16,12 @@ import json
 import subprocess
 import unittest
 from pathlib import Path
+from typing import Any
 
 from harness import (EXIT_SUCCESS, GPU_EDITOR_ARGUMENTS, AutomationTestCase, automation_config, engine_client,
                      tests_executable)
 from test_screenshot import png_size
-from tiny_game import (TINY_GAME_NAME, WINDOW_HEIGHT, WINDOW_WIDTH, build_tiny_game, export_tiny_game,
+from tiny_game import (TINY_GAME_NAME, TINY_SCENE, WINDOW_HEIGHT, WINDOW_WIDTH, build_tiny_game, export_tiny_game,
                        exported_executable)
 
 SCREENSHOT_TICK = 60
@@ -28,6 +31,12 @@ GAME_VIEW = {"view": "game", "width": WINDOW_WIDTH, "height": WINDOW_HEIGHT}
 # The comparison entry point of the Tests executable (Tests/Source/Engine/Testing/ImageCompareTests.cpp), a ChildTargets
 # case run with --no-skip; its --child-argument is {"actual": <path>, "expected": <path>}.
 COMPARE_PNGS_TEST_CASE = "ImageCompare: two PNG files match with the golden thresholds (child target)"
+
+
+def game_view_stats(client: engine_client.EngineClient) -> dict[str, Any]:
+    """stats.get's entry of the view named "game"."""
+    views = client.call("stats.get")["views"]
+    return next(view for view in views if view["name"] == "game")
 
 
 def compare_png(actual: Path, expected: Path) -> subprocess.CompletedProcess[bytes]:
@@ -113,6 +122,34 @@ class GameViewTests(AutomationTestCase):
         client.call("entity.update", {"entity": "/Cube", "components": {"Transform": {"Translation": [100, 0, 0]}}})
         empty = Path(client.call("viewport.screenshot", GAME_VIEW)["path"]).read_bytes()
         self.assertEqual(after, empty)
+        self.shut_down(client)
+
+    def test_headless_game_view_renders_the_game_view_every_frame(self) -> None:
+        # Docs/Decisions/0030-m19-contract.md decision 11 (R-SOAK; ADR 0027 friction F08): a headless editor displays
+        # only the Scene view of its default layout, so stats.get reports its game view unavailable; with
+        # --headless-game-view it renders the game view every frame at the project's window size, in edit mode and on
+        # every tick of a play.step, which the hardening soak relies on.
+        if not self.require_gpu():
+            return
+        client = self.connect(self.start_editor(renderer="vulkan"))
+        root = self.create_project(client, TINY_GAME_NAME)
+        build_tiny_game(client)
+        self.assertFalse(game_view_stats(client)["available"])
+        self.shut_down(client)
+
+        client = self.connect(self.start_editor(["--headless-game-view"], project=root, renderer="vulkan"))
+        client.call("scene.open", {"path": TINY_SCENE})
+        edit = game_view_stats(client)
+        self.assertTrue(edit["available"], edit)
+        self.assertEqual((edit["width"], edit["height"]), (WINDOW_WIDTH, WINDOW_HEIGHT))
+        self.assertTrue(edit["passes"], edit)
+        client.call("play.start", {"lockstep": True})
+        client.call("play.step", {"ticks": 10, "render": "every"})
+        played = game_view_stats(client)
+        self.assertTrue(played["available"], played)
+        self.assertEqual((played["width"], played["height"]), (WINDOW_WIDTH, WINDOW_HEIGHT))
+        self.assertGreaterEqual(int(played["frame"]), int(edit["frame"]) + 10)
+        client.call("play.stop")
         self.shut_down(client)
 
     def test_camera_screenshot_renders_an_entity_camera(self) -> None:

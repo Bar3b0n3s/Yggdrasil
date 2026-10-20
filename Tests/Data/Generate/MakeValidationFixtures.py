@@ -671,9 +671,9 @@ def observation_files() -> dict[str, bytes]:
     add_json("Assets/Tests/Main.test.luau.meta", meta("0b5e0000000000a4", "Script", "Script"))
     # The replay Testing.Replays' glob finds (the observation test lists it; a filtered run never verifies it).
     add_json("Assets/Tests/Replays/Main.replay", {
-        "Format": "Replay", "Version": 2, "Scene": {"Handle": "0b5e0000000000a1", "Path": "Assets/Scenes/Main.scene"},
-        "Parameters": {}, "Seed": 0, "FixedHz": 120, "EngineVersion": "0.1.0", "Config": "Editor", "Events": [],
-        "Expect": [], "Checkpoints": [], "FinalTick": 1, "FinalStateHash": "0000000000000001"})
+        "Format": "Replay", "Version": 3, "Scene": {"Handle": "0b5e0000000000a1", "Path": "Assets/Scenes/Main.scene"},
+        "Parameters": {}, "Seed": 0, "FixedHz": 120, "EngineVersion": "0.1.0", "Config": "Editor", "Fingerprint": None,
+        "Events": [], "Expect": [], "Checkpoints": [], "FinalTick": 1, "FinalStateHash": "0000000000000001"})
     add_json("Assets/Tests/Replays/Main.replay.meta", meta("0b5e0000000000a7", "Replay", "Replay"))
     files["Assets/Icon.png"] = checker_png(256)
     add_json("Assets/Icon.png.meta", meta("0b5e0000000000a5", "Texture", "Texture", TEXTURE_SETTINGS))

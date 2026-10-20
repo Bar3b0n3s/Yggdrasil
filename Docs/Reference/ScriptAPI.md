@@ -1694,6 +1694,14 @@ The character's total height, in metres.
 
 All modes; Runtime|Test; pure/read; setter mutates.
 
+### CharacterController.InheritGroundVelocity
+
+`boolean`
+
+While grounded, the character also moves with the horizontal velocity of what it stands on, so a moving platform carries it.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
 ### CharacterController.IsGrounded
 
 `(self: CharacterController) -> boolean`

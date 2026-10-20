@@ -4,6 +4,7 @@
 #include "Engine/Core/Json/Json.h"
 #include "Engine/Core/Result.h"
 
+#include <cstdint>
 #include <string_view>
 
 namespace Engine {
@@ -11,6 +12,16 @@ namespace Engine {
 	class FieldInfo;
 	class StructInfo;
 	class TypeRegistry;
+
+	// How a generated schema spells an EntityRef value.
+	enum class EntityReferenceSchema : uint8_t
+	{
+		// The entity's 16-hex id, as files and results hold it: "^[0-9a-fA-F]{16}$".
+		Id,
+		// What automation component data also takes (Docs/Decisions/0030-m19-contract.md decision 7), resolved in the
+		// request's scene: the id, an id prefix of 6 to 15 hex digits or an entity path, "^([0-9a-fA-F]{6,16}|/.+)$".
+		IdOrPath
+	};
 
 	// JSON Schema (draft 2020-12) generation from the registry and a validator for the subset the generator emits
 	// (Architecture §5.4, §13.4: automation parameter schemas with $defs per component, Docs/Reference/Schemas/, and the
@@ -22,7 +33,8 @@ namespace Engine {
 	//   "minimum"/"maximum"; Float -> {"type": "number"} with Min/Max; Vec2/Vec3/Vec4/Quat/Color3/Color4 -> an array of
 	//   exactly 2, 3 or 4 numbers ("prefixItems" with the per-component range, "minItems" = "maxItems"); MinMagnitude -> per
 	//   component "not": {"exclusiveMinimum": -m, "exclusiveMaximum": m}; Bool3 -> an array of exactly 3 booleans;
-	//   String -> {"type": "string"}; EntityRef -> {"type": ["string", "null"], "pattern": "^[0-9a-fA-F]{16}$"}; AssetRef ->
+	//   String -> {"type": "string"}; EntityRef -> {"type": ["string", "null"], "pattern": "^[0-9a-fA-F]{16}$"} (with
+	//   EntityReferenceSchema::IdOrPath "^([0-9a-fA-F]{6,16}|/.+)$", the forms automation component data takes); AssetRef ->
 	//   {"type": ["string", "null"], "pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$"} (a handle, which files store,
 	//   or the project and engine paths automation params also accept, §7.1 and MethodRegistry.h convention 13), plus
 	//   "x-assetType" with an AssetFilter; Enum -> {"enum": [names in registration order]};
@@ -37,20 +49,22 @@ namespace Engine {
 
 		// The schema of one serialized object of `type`: "$schema", "title" (the registry name), the object definition at
 		// the root, and "$defs" holding every struct and component it references, transitively, keyed by registry name.
-		[[nodiscard]] static Json ForStruct(const StructInfo& type);
+		// `entities` decides how EntityRef values are spelled, here and in ForField and ForComponents: Id for files and results,
+		// IdOrPath for what automation params take (component data, script field values).
+		[[nodiscard]] static Json ForStruct(const StructInfo& type, EntityReferenceSchema entities = EntityReferenceSchema::Id);
 
 		// The schema of a value of `field` (no "$schema"; "$defs" when it references structs).
-		[[nodiscard]] static Json ForField(const FieldInfo& field);
+		[[nodiscard]] static Json ForField(const FieldInfo& field, EntityReferenceSchema entities = EntityReferenceSchema::Id);
 
 		// One document with every registered component in "$defs" and a root object schema whose properties map each
 		// serializable, non-entity-level component name to its definition: the shape of an entity's "Components" object.
-		[[nodiscard]] static Json ForComponents(const TypeRegistry& registry);
+		[[nodiscard]] static Json ForComponents(const TypeRegistry& registry, EntityReferenceSchema entities = EntityReferenceSchema::Id);
 
 		// Validates `instance` against `schema`, supporting exactly the keywords the generator emits: "$ref" to "#/$defs/...",
 		// "type" (string or array), "properties", "additionalProperties" (boolean or schema), "items", "prefixItems",
 		// "minItems", "maxItems", "enum", "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "not", "pattern"
-		// (the two patterns above and "^[0-9a-f]{16}$", 16 lowercase hex digits, which the reference generator gives a replay's
-		// state hashes, only) and "required" (which automation params schemas add, MethodRegistry::GetParamsSchema);
+		// (the three patterns above and "^[0-9a-f]{16}$", 16 lowercase hex digits, which the reference generator gives a
+		// replay's state hashes, only) and "required" (which automation params schemas add, MethodRegistry::GetParamsSchema);
 		// annotations ("description", "title", "x-assetType", "$schema") are ignored.
 		// Errors: Validation carrying one ErrorIssue per violation, located at the instance's JSON pointer; InvalidArgument
 		// for a schema that uses another keyword or an unresolvable "$ref".
