@@ -19,7 +19,7 @@
 
 // profiler.capture (M18, R-PROF; Docs/Decisions/0029-m18-contract.md decision 11) through the in-process server, which
 // has no renderer: the trace holds CPU zones only. The GPU zones are checked against a rendering editor
-// (Tests/Automation/test_renderer_tools.py). Skipped until stream C implements the handler and the wave registers the method.
+// (Tests/Automation/test_renderer_tools.py).
 
 namespace Engine {
 
@@ -55,7 +55,7 @@ namespace Engine {
 
 	TEST_SUITE("Automation")
 	{
-		TEST_CASE("ProfilerMethods: profiler.capture writes one Chrome trace of the zones of the next frames" * doctest::skip(true))
+		TEST_CASE("ProfilerMethods: profiler.capture writes one Chrome trace of the zones of the next frames")
 		{
 			REQUIRE(Profiler::IsInitialized());
 			Test::AutomationFixture fixture("ProfilerCapture");
@@ -86,7 +86,7 @@ namespace Engine {
 			CHECK(trace["otherData"]["droppedZones"] == 0);
 		}
 
-		TEST_CASE("ProfilerMethods: a capture whose zones overflow the profiler's rings reports the zones it dropped" * doctest::skip(true))
+		TEST_CASE("ProfilerMethods: a capture whose zones overflow the profiler's rings reports the zones it dropped")
 		{
 			// The profiler gets rings of 64 zones per thread for this case, and the main thread records 200 zones before each
 			// pump while a capture of 2 frames runs: its ring overwrites at least 136 zones of the capture before the trace is
@@ -124,7 +124,7 @@ namespace Engine {
 			CHECK(trace["otherData"]["droppedZones"] == result["droppedZones"]);
 		}
 
-		TEST_CASE("ProfilerMethods: profiler.capture refuses a frame count outside 1 to 600" * doctest::skip(true))
+		TEST_CASE("ProfilerMethods: profiler.capture refuses a frame count outside 1 to 600")
 		{
 			Test::AutomationFixture fixture("ProfilerCaptureFrames");
 			for (const uint32_t frames : { 0U, MaxProfilerCaptureFrames + 1 })

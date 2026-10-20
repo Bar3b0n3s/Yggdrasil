@@ -467,10 +467,11 @@ namespace Engine {
 	[[nodiscard]] Result<RenderRayInterval> ComputeViewPixelRayInterval(const CameraData& camera, uint32_t x, uint32_t y);
 
 	// M18 (C18.1, decision 6): the camera-clipped ray through the centre of view pixel (x, y) of a view under `mapping`:
-	// ComputeViewPixelRayInterval of `camera` (its viewport at the scene resolution, mapping's SceneWidth x SceneHeight) at
-	// the scene pixel MapViewPixelToScenePixel gives, the mapping applied exactly once; nullopt for a pixel of the letterbox
-	// or outside the view, which shows no scene (no hit). viewport.pick's CPU ray goes through it. Pure, thread-safe,
-	// deterministic. Errors: those of ComputeViewPixelRayInterval.
+	// ComputeViewPixelRayInterval of `camera` with its viewport set to the scene resolution (mapping's SceneWidth x
+	// SceneHeight, as the renderer sets it, whatever viewport the camera came with: a snapshot's camera has the request's
+	// view size) at the scene pixel MapViewPixelToScenePixel gives, the mapping applied exactly once; nullopt for a pixel of
+	// the letterbox or outside the view, which shows no scene (no hit). viewport.pick's CPU ray goes through it. Pure,
+	// thread-safe, deterministic. Errors: those of ComputeViewPixelRayInterval.
 	[[nodiscard]] Result<std::optional<RenderRayInterval>> ComputeOutputPixelRayInterval(const CameraData& camera, const RenderOutputMapping& mapping,
 		uint32_t x, uint32_t y);
 

@@ -14,6 +14,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <vector>
 
 // The compiled SPIR-V of every program in Resources/Shaders/Shaders.json (Architecture §8.12). Scripts/CompileShaders.py
 // writes <Program>/<Entry>[.<KEY>-<VALUE>...].spv and .refl.json per entry point and permutation; development builds
@@ -110,14 +111,26 @@ namespace Engine {
 
 		[[nodiscard]] const VfsPath& GetRoot() const { return m_Root; }
 	private:
+		using VariantMap = std::map<std::string, Detail::ShaderLibraryVariant, std::less<>>;
+		using ReflectionMap = std::map<std::string, ShaderReflection, std::less<>>;
+
 		VfsPath m_Root;
 		GraphicsDevice* m_Device = nullptr;       // documented back-reference; null for a reflection-only library
 		const VirtualFileSystem* m_Vfs = nullptr; // documented back-reference
-		// By variant stem. std::map keeps every reflection at a stable address (GetReflection's pointers).
-		std::map<std::string, Detail::ShaderLibraryVariant, std::less<>> m_Shaders;
-		std::map<std::string, ShaderReflection, std::less<>> m_Reflections;
+		// By variant stem. std::map keeps every reflection at a stable address (GetReflection's pointers), and its nodes move
+		// between the maps below without moving their reflections.
+		VariantMap m_Shaders{};
+		ReflectionMap m_Reflections{};
+		// M18 (R-SHR): during a reload (BeginReload to EndReload), the variants the reload read, which Get and GetReflection
+		// consult instead of the two maps above; empty otherwise.
+		bool m_Reloading = false;
+		VariantMap m_ReloadedShaders{};
+		ReflectionMap m_ReloadedReflections{};
+		// The reflections a kept reload replaced and those a dropped reload read: kept until the library's destruction, so
+		// every pointer GetReflection returned stays valid (a few kilobytes per variant and reload).
+		std::vector<ReflectionMap::node_type> m_RetiredReflections{};
 		// M18 (C18.3): the library's registration with its device (a library with a device only); its Release drops every
-		// shader handle the library holds and keeps their SPIR-V bytes.
+		// shader handle the library holds, a reload's included, and keeps their SPIR-V bytes.
 		GpuRecreationRegistration m_Recreation;
 	};
 

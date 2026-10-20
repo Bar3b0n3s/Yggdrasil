@@ -4,7 +4,9 @@
 #include "Engine/Core/Assert.h"
 #include "Engine/Renderer/Private/SceneRendererState.h"
 
+#include <format>
 #include <limits>
+#include <optional>
 
 namespace Engine {
 
@@ -26,7 +28,33 @@ namespace Engine {
 		if (request.FrameIndex != state.ImageFrame || request.SceneRevision != state.ImageRevision
 			|| request.ViewGeneration != state.ImageGeneration || state.ImageGeneration != state.Generation)
 			return MakeError(ErrorCode::Conflict, "the clicked image no longer matches this view");
-		return state.Picker->Request(*state.Targets.EntityId, state.ImagePickTable, state.Generation, request);
+		// M18 (decision 6): the request names a view pixel of the submitted image; EntityId is at the scene resolution of its
+		// output mapping (the Output stage of that Render set OutputMapping).
+		const RenderOutputMapping& mapping = state.OutputMapping;
+		if (mapping.IsIdentity())
+			return state.Picker->Request(*state.Targets.EntityId, state.ImagePickTable, state.Generation, request);
+		if (request.X >= mapping.ViewWidth || request.Y >= mapping.ViewHeight)
+		{
+			ErrorLocation location{};
+			location.JsonPointer = request.X >= mapping.ViewWidth ? "/x" : "/y";
+			return std::unexpected(Error(ErrorCode::InvalidArgument,
+				std::format("Picking pixel ({}, {}) is outside {} x {}", request.X, request.Y, mapping.ViewWidth, mapping.ViewHeight))
+					.WithLocation(std::move(location)));
+		}
+		PickRequest scene = request;
+		if (const std::optional<glm::uvec2> pixel = MapViewPixelToScenePixel(mapping, request.X, request.Y))
+		{
+			scene.X = pixel->x;
+			scene.Y = pixel->y;
+			return state.Picker->Request(*state.Targets.EntityId, state.ImagePickTable, state.Generation, scene);
+		}
+		// A letterbox pixel shows no scene: it picks the background, through the texel every picking render clears to 0.
+		ENGINE_CORE_ASSERT(state.OutputTargets.LetterboxEntityId != nullptr, "a picking render at a scaled output has a letterbox texel");
+		if (state.OutputTargets.LetterboxEntityId == nullptr)
+			return MakeError(ErrorCode::InvalidState, "picking requires a submitted picking image");
+		scene.X = 0;
+		scene.Y = 0;
+		return state.Picker->Request(*state.OutputTargets.LetterboxEntityId, state.ImagePickTable, state.Generation, scene);
 	}
 
 	Result<std::optional<PickResult>> SceneRenderer::PollPick(PickTicket ticket, uint64_t currentFrameIndex)
@@ -45,8 +73,12 @@ namespace Engine {
 
 	RenderOutputMapping SceneRenderer::GetOutputMapping() const
 	{
-		ENGINE_CONTRACT_STUB();
-		return {};
+		// The last Render's mapping (its Output stage set it), while it was made for the renderer's current size; the
+		// identity at that size before the first Render and after a Resize to another size.
+		const RenderOutputMapping& mapping = m_State->OutputMapping;
+		if (mapping.ViewWidth == GetWidth() && mapping.ViewHeight == GetHeight())
+			return mapping;
+		return ComputeRenderOutputMapping(GetWidth(), GetHeight(), {});
 	}
 
 	RenderStats SceneRenderer::GetRenderStats() const

@@ -408,11 +408,11 @@ class ScriptTests(LockTestCase):
             with self.subTest(suite=suite):
                 self.assertEqual(Test.uses_gpu(argparse.Namespace(suites=[suite])), expected)
         for step, expected in (("perf", True), ("soak", True), ("asan-generate", False), ("asan-build", False),
-                               ("asan-unit", False), ("asan-feature", True), ("fuzz", False)):
+                               ("asan-unit", False), ("asan-feature", True), ("debug-heap", True), ("fuzz", False)):
             with self.subTest(step=step):
                 self.assertEqual(Hardening.uses_gpu([step]), expected)
         self.assertEqual(set(Hardening.STEPS), {"perf", "soak", "asan-generate", "asan-build", "asan-unit",
-                                                "asan-feature", "fuzz"}, "a new step needs a row above")
+                                                "asan-feature", "debug-heap", "fuzz"}, "a new step needs a row above")
 
     def test_runs_without_the_gpu_go_ahead_while_another_holds_the_gpu_lock(self) -> None:
         # A unit run and the ASan build never wait behind a GPU run in another checkout; the GPU runs do.

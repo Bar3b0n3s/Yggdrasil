@@ -1,0 +1,101 @@
+{
+	"Format": "SpriteSheet",
+	"Version": 1,
+	"Texture": "7e57000000000001",
+	"Frames": [
+		{
+			"Name": "Idle0",
+			"Rect": {
+				"X": 0,
+				"Y": 0,
+				"Width": 8,
+				"Height": 8
+			},
+			"Pivot": [0.5, 1],
+			"Borders": {
+				"Left": 0,
+				"Top": 0,
+				"Right": 0,
+				"Bottom": 0
+			}
+		},
+		{
+			"Name": "Idle1",
+			"Rect": {
+				"X": 8,
+				"Y": 0,
+				"Width": 8,
+				"Height": 8
+			},
+			"Pivot": [0.5, 1],
+			"Borders": {
+				"Left": 0,
+				"Top": 0,
+				"Right": 0,
+				"Bottom": 0
+			}
+		},
+		{
+			"Name": "Panel",
+			"Rect": {
+				"X": 0,
+				"Y": 8,
+				"Width": 12,
+				"Height": 6
+			},
+			"Pivot": [0.5, 0.5],
+			"Borders": {
+				"Left": 3,
+				"Top": 2,
+				"Right": 4,
+				"Bottom": 1
+			}
+		},
+		{
+			"Name": "",
+			"Rect": {
+				"X": 12,
+				"Y": 8,
+				"Width": 1,
+				"Height": 1
+			},
+			"Pivot": [0, 0],
+			"Borders": {
+				"Left": 0,
+				"Top": 0,
+				"Right": 0,
+				"Bottom": 0
+			}
+		}
+	],
+	"Clips": [
+		{
+			"Name": "Idle",
+			"Frames": [
+				{
+					"Frame": 0,
+					"Ticks": 8
+				},
+				{
+					"Frame": 1,
+					"Ticks": 12
+				}
+			],
+			"Loop": true
+		},
+		{
+			"Name": "Hit",
+			"Frames": [
+				{
+					"Frame": 1,
+					"Ticks": 3
+				},
+				{
+					"Frame": 3,
+					"Ticks": 65535
+				}
+			],
+			"Loop": false
+		}
+	]
+}

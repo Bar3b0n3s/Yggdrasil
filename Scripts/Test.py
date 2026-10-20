@@ -179,6 +179,12 @@ count (the product owner's decision, Docs/Decisions/0024-m15-contract.md decisio
 --exclude-test-suites <names> leaves those doctest test suites out of the unit suite's Tests runs, besides GPU and
 Golden: the hardening stage's sanitized unit run leaves out Fuzz, whose cases its fuzz step runs over a superset of the
 same iterations.
+--debug-heap (Windows only; the unit, gpu and golden suites; the hardening stage's debug-heap GPU step,
+Docs/Decisions/0029-m18-contract.md) starts each Tests process on the Windows debug heap (Scripts/Lib/debugheap.py:
+under a debugger that detaches at the loader's initial breakpoint, so every heap of the process, the graphics driver's
+included, checks block tails, fills freed blocks and validates parameters, while its crash handler still reports a
+crash; the processes it starts run on their own heaps). The step names gain " (debug heap)" and the reports the suffix
+-DebugHeap (Gpu-Debug-Vulkan14-DebugHeap.xml).
 
 Machine-wide locks (Scripts/Lib/locks.py; Docs/Architecture.md §2.3, ADR 0028 decision 16): before its first suite, a
 run that includes a GPU-using suite (gpu, golden, feature, automation, export, determinism or games; --update-golden
@@ -225,7 +231,7 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
-from Lib import coverage, exports, games, hardening, locks, paths, provenance
+from Lib import coverage, debugheap, exports, games, hardening, locks, paths, provenance
 from Lib.process import (
     ToolNotFoundError,
     child_environment,
@@ -288,6 +294,10 @@ REPORTED_LINES_PATTERN = re.compile(
 )
 # --sanitizer: the sanitizers Test.py knows, with the label of their step names and the suffix of their report stems.
 SANITIZERS = {"address": ("ASan", "Asan")}
+# --debug-heap (the hardening stage's debug-heap GPU step, Docs/Decisions/0029-m18-contract.md): the label of its step
+# names and the suffix of its report stems, and the suites whose Tests runs take it.
+DEBUG_HEAP_LABELS = ("debug heap", "DebugHeap")
+DEBUG_HEAP_SUITES = ("unit", "gpu", "golden")
 # The --fuzz-scale of the unit runs that pass no --fuzz-scale, by configuration (Docs/Decisions/0024-m15-contract.md
 # decision 14, approved by the product owner): Debug executes the first tenth of each fuzz case's sequence (at least its
 # minimum); Release, absent here, executes every count.
@@ -400,21 +410,24 @@ class TestRun:
     options: tuple[str, ...] = ()  # Tests options of the run (--vulkan-api=1.3, --require-gpu, --update-golden)
     cap: str = ""  # the gpu suite's API cap ("1.3" or "1.4")
     sanitizer: str = ""  # --sanitizer of the run ("address"), or empty
+    debug_heap: bool = False  # --debug-heap: the Tests process runs on the Windows debug heap (Lib/debugheap.py)
 
     @property
     def name(self) -> str:
         return (f"{self.suite} {self.config}" + (f" (Vulkan {self.cap})" if self.cap else "")
-                + sanitizer_name_suffix(self.sanitizer))
+                + sanitizer_name_suffix(self.sanitizer) + (f" ({DEBUG_HEAP_LABELS[0]})" if self.debug_heap else ""))
 
     @property
     def report_stem(self) -> str:
         return "-".join([self.suite.capitalize(), self.config, *([cap_label(self.cap)] if self.cap else []),
-                         *([SANITIZERS[self.sanitizer][1]] if self.sanitizer else [])])
+                         *([SANITIZERS[self.sanitizer][1]] if self.sanitizer else []),
+                         *([DEBUG_HEAP_LABELS[1]] if self.debug_heap else [])])
 
     @property
     def junit_suite_name(self) -> str:
         return ".".join([self.suite.capitalize(), self.config, *([cap_label(self.cap)] if self.cap else []),
-                         *([SANITIZERS[self.sanitizer][1]] if self.sanitizer else [])])
+                         *([SANITIZERS[self.sanitizer][1]] if self.sanitizer else []),
+                         *([DEBUG_HEAP_LABELS[1]] if self.debug_heap else [])])
 
 
 def cap_label(cap: str) -> str:
@@ -647,6 +660,7 @@ def plan_runs(suite: str, config: str, arguments: argparse.Namespace) -> list[Te
     """The Tests runs of `suite` in `config`: one, except for the gpu suite, which runs once per API cap."""
     gpu_options = ("--require-gpu",) if arguments.require_gpu else ()
     sanitizer = getattr(arguments, "sanitizer", None) or ""
+    debug_heap = bool(getattr(arguments, "debug_heap", False))
     timeout_scale = getattr(arguments, "test_timeout_scale", None)
     common = (f"--test-timeout-scale={timeout_scale:g}",) if timeout_scale else ()
     if suite == "unit":
@@ -654,15 +668,15 @@ def plan_runs(suite: str, config: str, arguments: argparse.Namespace) -> list[Te
         fuzz_options = (f"--fuzz-scale={fuzz_scale:g}",) if fuzz_scale else ()
         excluded = ",".join([UNIT_EXCLUDED_TEST_SUITES, *(getattr(arguments, "exclude_test_suites", None) or [])])
         return [TestRun(suite, config, (f"--test-suite-exclude={excluded}",), (*common, *fuzz_options),
-                        sanitizer=sanitizer)]
+                        sanitizer=sanitizer, debug_heap=debug_heap)]
     if suite == "gpu":
         caps = [arguments.vulkan_api] if arguments.vulkan_api else list(VULKAN_API_CAPS)
         return [TestRun(suite, config, (f"--test-suite={GPU_TEST_SUITE}",),
-                        (f"--vulkan-api={cap}", *gpu_options, *common), cap, sanitizer) for cap in caps]
+                        (f"--vulkan-api={cap}", *gpu_options, *common), cap, sanitizer, debug_heap) for cap in caps]
     if suite == "golden":
         golden_options = ("--update-golden",) if arguments.update_golden else ()
         return [TestRun(suite, config, (f"--test-suite={GOLDEN_TEST_SUITE}",), (*gpu_options, *golden_options, *common),
-                        sanitizer=sanitizer)]
+                        sanitizer=sanitizer, debug_heap=debug_heap)]
     raise ValueError(f"no runs for suite '{suite}'")
 
 
@@ -699,7 +713,7 @@ def run_tests(run: TestRun, arguments: argparse.Namespace, console: Console) -> 
     console.heading(f"{run.name}: {format_command([paths.display_path(executable), *filters, *run.options])}")
     try:
         result = run_streamed(command, cwd=paths.REPOSITORY_ROOT, env=environment, timeout=arguments.timeout,
-                              echo=console.stream, collect=REPORTED_LINES_PATTERN)
+                              echo=console.stream, collect=REPORTED_LINES_PATTERN, debug_heap=run.debug_heap)
     except ToolNotFoundError as error:
         return Step(run.name, Status.FAILED, str(error), exit_code=EXIT_INIT_FAILED)
 
@@ -708,6 +722,8 @@ def run_tests(run: TestRun, arguments: argparse.Namespace, console: Console) -> 
         data["vulkanApi"] = run.cap
     if run.sanitizer:
         data["sanitizer"] = run.sanitizer
+    if run.debug_heap:
+        data["debugHeap"] = True
     sanitizer_errors = [line for line in result.collected if SANITIZER_ERROR_PATTERN.search(line)]
     if sanitizer_errors:
         data["sanitizerErrors"] = sanitizer_errors
@@ -2354,6 +2370,13 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
                         help="unit, gpu, golden and feature suites: give every process the suite starts the "
                              "sanitizer's environment (address: ASAN_OPTIONS and MSVC's runtime first on PATH); the "
                              "step names gain ' (ASan)' and the reports the suffix -Asan")
+    parser.add_argument("--debug-heap", action="store_true",
+                        help="unit, gpu and golden suites (Windows only): start each Tests process on the Windows "
+                             "debug heap (Scripts/Lib/debugheap.py: under a debugger that detaches at the loader's "
+                             "initial breakpoint, so every heap of the process, the graphics driver's included, checks "
+                             "block tails, fills freed blocks and validates parameters, and its crash handler still "
+                             "reports a crash); the step names gain ' (debug heap)' and the reports the suffix "
+                             "-DebugHeap (the hardening stage's debug-heap GPU step)")
     parser.add_argument("--test-timeout-scale", type=float,
                         help="unit, gpu and golden suites: pass --test-timeout-scale=<s> (s >= 1) to the Tests binary, "
                              "which multiplies every per-test-case limit")
@@ -2395,6 +2418,10 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
     custom_root = arguments.build_root != paths.BIN_ROOT.resolve()
     if (arguments.sanitizer or custom_root) and not set(arguments.suites) <= set(sanitized_suites):
         parser.error(f"--sanitizer and --build-root apply to the {', '.join(sanitized_suites)} suites only")
+    if arguments.debug_heap and not set(arguments.suites) <= set(DEBUG_HEAP_SUITES):
+        parser.error(f"--debug-heap applies to the {', '.join(DEBUG_HEAP_SUITES)} suites only")
+    if arguments.debug_heap and not debugheap.is_available():
+        parser.error("--debug-heap is Windows only: the Windows debug heap does not exist elsewhere")
     if arguments.test_timeout_scale is not None and not 1.0 <= arguments.test_timeout_scale < float("inf"):
         parser.error("--test-timeout-scale must be a finite number of at least 1")
     if arguments.fuzz_scale is not None and not 0.0 < arguments.fuzz_scale <= 1.0:

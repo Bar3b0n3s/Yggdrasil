@@ -234,10 +234,10 @@ namespace Engine {
 			REQUIRE(ui.Frame(draw)); // drain the real command result; failures must not be logged
 		}
 
-		TEST_CASE("ContentBrowserPanel: creating a sprite sheet queues an empty sheet" * doctest::skip(true))
+		TEST_CASE("ContentBrowserPanel: creating a sprite sheet queues an empty sheet")
 		{
-			// M18, R-2D-SHEET (Docs/Decisions/0029-m18-contract.md decision 18, stream S): the Create popup's last entry,
-			// asset.create {type: SpriteSheet} without values.
+			// M18, R-2D-SHEET (Docs/Decisions/0029-m18-contract.md decision 18): the Create popup's last entry, asset.create
+			// {type: SpriteSheet} without values.
 			Test::PanelInteractionFixture fixture("ContentCreateSpriteSheet", false);
 			auto& context = fixture.GetContext();
 			ContentBrowserPanel panel;

@@ -13,6 +13,7 @@
 #include "Engine/Asset/AssetMetadata.h"
 #include "Engine/Asset/MaterialData.h"
 #include "Engine/Asset/ReplayData.h"
+#include "Engine/Asset/SpriteSheetData.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/AssetPipeline/Importers/SoundEffectImporter.h"
 #include "Engine/Automation/Protocol/MethodRegistry.h"
@@ -181,9 +182,9 @@ namespace Engine {
 				ENGINE_TRY_ASSIGN(const AssetMetadata metadata, ParseAssetMetadata(text, source));
 				return CanonicalProjectFile{ .Text = SerializeAssetMetadata(metadata), .Reason = DescribeUpgrade(ReadFileVersion(text), AssetMetadata::CurrentVersion, false) };
 			}
-			// Materials, sound effects and replays are read with unknown members refused, as their importers read them: the
-			// canonical writer would drop a member the reader does not know, and the rewrite would make a file the importer
-			// refuses importable. Such a file fails the upgrade at the member's pointer instead.
+			// Materials, sound effects, replays and sprite sheets are read with unknown members refused, as their importers read
+			// them: the canonical writer would drop a member the reader does not know, and the rewrite would make a file the
+			// importer refuses importable. Such a file fails the upgrade at the member's pointer instead.
 			const auto locate = [&source](Error error) -> Error
 			{
 				Error located = std::move(error).WithLocation({ .File = source, .JsonPointer = std::nullopt, .Entity = {} });
@@ -218,13 +219,23 @@ namespace Engine {
 				ENGINE_TRY_ASSIGN(std::string canonical, ReplayToText(*replay));
 				return CanonicalProjectFile{ .Text = std::move(canonical), .Reason = DescribeUpgrade(report.FileVersion, ReplayFormatVersion, false) };
 			}
+			// M18 (Docs/Decisions/0029-m18-contract.md decision 14): sprite sheets, every field written.
+			if (extension == ".spritesheet")
+			{
+				SpriteSheetLoadReport report;
+				Result<SpriteSheetData> sheet = SpriteSheetFromText(text, registry, report, true);
+				if (!sheet)
+					return std::unexpected(locate(std::move(sheet).error()));
+				ENGINE_TRY_ASSIGN(std::string canonical, SpriteSheetToText(*sheet, registry));
+				return CanonicalProjectFile{ .Text = std::move(canonical), .Reason = DescribeUpgrade(report.FileVersion, SpriteSheetFormatVersion, false) };
+			}
 			return std::optional<CanonicalProjectFile>();
 		}
 
 		// Whether project.upgrade rewrites files with `extension` below Assets/ (MakeCanonicalFile has their canonical form).
 		static bool IsUpgradedAssetExtension(std::string_view extension)
 		{
-			constexpr std::string_view Extensions[] = { ".scene", ".prefab", ".meta", ".material", ".sfx", ".replay" };
+			constexpr std::string_view Extensions[] = { ".scene", ".prefab", ".meta", ".material", ".sfx", ".replay", ".spritesheet" };
 			return std::ranges::find(Extensions, extension) != std::end(Extensions);
 		}
 
@@ -244,8 +255,8 @@ namespace Engine {
 			return result;
 		}
 
-		// The project files project.upgrade rewrites: the .eproj, then every .scene, .prefab, .meta, .material, .sfx and .replay
-		// file under Assets/ (IsUpgradedAssetExtension), sorted.
+		// The project files project.upgrade rewrites: the .eproj, then every .scene, .prefab, .meta, .material, .sfx, .replay
+		// and .spritesheet file under Assets/ (IsUpgradedAssetExtension), sorted.
 		static Result<std::vector<VfsPath>> ListUpgradeFiles(const EditorContext& editor)
 		{
 			std::vector<VfsPath> files;
@@ -742,11 +753,11 @@ namespace Engine {
 			{
 				.Name = "project.upgrade",
 				.Description = "Applies migrations and canonical re-saves to every project file (the .eproj, and every scene, prefab, .meta, "
-							   "material, sound effect and replay under Assets/), records each rewrite in provenance and reports the changed "
-							   "files, each with its reason (changes: \"format version 1 to 2\", \"canonical form\"). Run it after an engine change "
-							   "to canonical output; dryRun: true lists what it would rewrite. An unknown member in a material, sound effect or "
-							   "replay fails the upgrade at its file and pointer, as its importer refuses it. Not undoable; refuses an open "
-							   "scene with unsaved changes (save it first).",
+							   "material, sound effect, replay and sprite sheet under Assets/), records each rewrite in provenance and reports the "
+							   "changed files, each with its reason (changes: \"format version 1 to 2\", \"canonical form\"). Run it after an engine "
+							   "change to canonical output; dryRun: true lists what it would rewrite. An unknown member in a material, sound effect, "
+							   "replay or sprite sheet fails the upgrade at its file and pointer, as its importer refuses it. Not undoable; refuses "
+							   "an open scene with unsaved changes (save it first).",
 				.ExposeAsTool = true,
 				.Mutates = true,
 				.SupportsDryRun = true,

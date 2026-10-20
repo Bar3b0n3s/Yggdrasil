@@ -1,5 +1,6 @@
 #include "TestsPCH.h"
 
+#include "EditorCore/EngineAssetGenerators.h"
 #include "Engine/Asset/BuiltinAssets.h"
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Graphics/Image.h"
@@ -14,17 +15,19 @@
 
 #include <glm/gtc/matrix_transform.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <string_view>
 #include <utility>
+#include <vector>
 
 // The output stage (M18, C18.1, R-2D-PIXEL; Docs/Decisions/0029-m18-contract.md decisions 5 to 8): the view-to-scene
 // mapping and the CPU ray through it (CPU), and at scale 3 the integer upscale with its letterbox, picking and capture
-// through the mapping, the stage order around the upscale and the 2D colour path, and a cropped scene (GPU). Skipped until
-// stream F implements them; the GPU cases need stream A's Render calling F's stages, so they are proven at the wave's
-// integration (decision 12).
+// through the mapping, the stage order around the upscale, the editor overlays clipped to the scene image and the 2D
+// colour path, and a cropped scene (GPU).
 
 namespace Engine {
 
@@ -54,12 +57,13 @@ namespace Engine {
 				&& static_cast<int32_t>(y) >= OffsetY && static_cast<int32_t>(y) < OffsetY + static_cast<int32_t>(Scale * SceneHeight);
 		}
 
-		// A renderer of the view size over the engine resources (the Default font, the blue noise, the built-in meshes).
+		// A renderer of the view size over the engine resources (the Default font, the built-in meshes) and the generated
+		// built-ins (the blue noise of the Lit view's dither).
 		class OutputStageSetup
 		{
 		public:
 			explicit OutputStageSetup(Test::HeadlessGpuFixture& gpu)
-				: m_Device(&gpu.GetDevice()), m_Assets(Test::AssetTestFixtureOptions{ .EngineResources = true })
+				: m_Device(&gpu.GetDevice()), m_Assets(Test::AssetTestFixtureOptions{ .EngineResources = true, .EngineAssetGenerators = GetEngineAssetGenerators() })
 			{
 				m_Assets.OpenProject(false);
 				m_Cache = CreateScope<GpuResourceCache>(gpu.GetDevice(), m_Assets.GetManager());
@@ -177,7 +181,7 @@ namespace Engine {
 
 	TEST_SUITE("Renderer")
 	{
-		TEST_CASE("RenderOutputMapping: the default settings map the view to itself" * doctest::skip(true))
+		TEST_CASE("RenderOutputMapping: the default settings map the view to itself")
 		{
 			const RenderOutputMapping mapping = ComputeRenderOutputMapping(640, 360, {});
 			CHECK(mapping
@@ -193,7 +197,7 @@ namespace Engine {
 			CHECK_FALSE(half.IsIdentity());
 		}
 
-		TEST_CASE("RenderOutputMapping: an integer upscale centres the scene in a letterbox" * doctest::skip(true))
+		TEST_CASE("RenderOutputMapping: an integer upscale centres the scene in a letterbox")
 		{
 			const RenderOutputSettings settings{ .SceneWidth = 160, .SceneHeight = 90 };
 			// Exactly 4 times the scene: no letterbox.
@@ -212,7 +216,7 @@ namespace Engine {
 				== RenderOutputMapping{ .ViewWidth = ViewWidth, .ViewHeight = ViewHeight, .SceneWidth = SceneWidth, .SceneHeight = SceneHeight, .Scale = Scale, .OffsetX = OffsetX, .OffsetY = OffsetY });
 		}
 
-		TEST_CASE("RenderOutputMapping: a view pixel maps to its scene pixel and the letterbox to none" * doctest::skip(true))
+		TEST_CASE("RenderOutputMapping: a view pixel maps to its scene pixel and the letterbox to none")
 		{
 			const RenderOutputMapping mapping = ComputeRenderOutputMapping(ViewWidth, ViewHeight, MakeScale3Output());
 			CHECK(MapViewPixelToScenePixel(mapping, 4, 6) == glm::uvec2(0, 0));
@@ -230,7 +234,7 @@ namespace Engine {
 			CHECK(MapViewPointToScenePoint(mapping, glm::vec2(2.5f, 6.0f)) == glm::vec2(-0.5f, 0.0f));
 		}
 
-		TEST_CASE("RenderOutputMapping: a scene larger than the view is centred at scale 1 and cropped" * doctest::skip(true))
+		TEST_CASE("RenderOutputMapping: a scene larger than the view is centred at scale 1 and cropped")
 		{
 			const RenderOutputMapping cropped = ComputeRenderOutputMapping(100, 50, { .SceneWidth = 160, .SceneHeight = 90 });
 			CHECK(cropped
@@ -250,8 +254,7 @@ namespace Engine {
 			CHECK(MapViewPixelToScenePixel(odd, 99, 100) == glm::uvec2(130, 130));
 		}
 
-		TEST_CASE("RenderOutputMapping: at scale 3 a view pixel's ray passes through its scene pixel, and a letterbox pixel has none"
-			* doctest::skip(true))
+		TEST_CASE("RenderOutputMapping: at scale 3 a view pixel's ray passes through its scene pixel, and a letterbox pixel has none")
 		{
 			// viewport.pick's CPU ray (decision 6): the view pixel is mapped to its scene pixel exactly once before the camera,
 			// whose viewport is the scene resolution, makes the ray.
@@ -284,6 +287,18 @@ namespace Engine {
 			REQUIRE(sameBlock.has_value());
 			REQUIRE(sameBlock->has_value());
 			CHECK((*sameBlock)->Ray.Origin == scenePixel->Ray.Origin);
+			// A snapshot's camera comes with the request's view size as its viewport (render extraction); the ray still goes
+			// through the scene pixel, as the renderer draws it at the scene resolution.
+			CameraData viewSized = camera;
+			viewSized.ViewportWidth = ViewWidth;
+			viewSized.ViewportHeight = ViewHeight;
+			const Result<std::optional<RenderRayInterval>> fromViewSized = ComputeOutputPixelRayInterval(viewSized, mapping, 36, 22);
+			REQUIRE(fromViewSized.has_value());
+			REQUIRE(fromViewSized->has_value());
+			CHECK((*fromViewSized)->Ray.Origin == scenePixel->Ray.Origin);
+			CHECK((*fromViewSized)->Ray.Direction == scenePixel->Ray.Direction);
+			CHECK((*fromViewSized)->MinDistance == scenePixel->MinDistance);
+			CHECK((*fromViewSized)->MaxDistance == scenePixel->MaxDistance);
 			// The letterbox shows no scene: no ray, so viewport.pick reports no hit.
 			const Result<std::optional<RenderRayInterval>> letterbox = ComputeOutputPixelRayInterval(camera, mapping, 1, ViewHeight / 2);
 			REQUIRE(letterbox.has_value());
@@ -293,7 +308,7 @@ namespace Engine {
 
 	TEST_SUITE(Test::GpuSuite)
 	{
-		TEST_CASE("OutputStage: at scale 3 each scene pixel is a 3x3 block inside the letterbox" * doctest::skip(true))
+		TEST_CASE("OutputStage: at scale 3 each scene pixel is a 3x3 block inside the letterbox")
 		{
 			Test::HeadlessGpuFixture gpu;
 			ENGINE_REQUIRE_GPU(gpu);
@@ -303,6 +318,8 @@ namespace Engine {
 			const Image reference = setup.Render(setup.Snapshot({}));
 			REQUIRE(reference.Width == SceneWidth);
 			REQUIRE(setup.GetRenderer().Resize(ViewWidth, ViewHeight).has_value());
+			// Before a Render at the new size, the mapping is the identity at that size.
+			CHECK(setup.GetRenderer().GetOutputMapping() == ComputeRenderOutputMapping(ViewWidth, ViewHeight, {}));
 			const Image view = setup.Render(setup.Snapshot(MakeScale3Output()));
 			REQUIRE(view.Width == ViewWidth);
 			REQUIRE(view.Height == ViewHeight);
@@ -323,7 +340,7 @@ namespace Engine {
 			}
 		}
 
-		TEST_CASE("OutputStage: at scale 3 picking maps a view pixel to its scene pixel" * doctest::skip(true))
+		TEST_CASE("OutputStage: at scale 3 picking maps a view pixel to its scene pixel")
 		{
 			Test::HeadlessGpuFixture gpu;
 			ENGINE_REQUIRE_GPU(gpu);
@@ -352,9 +369,19 @@ namespace Engine {
 			REQUIRE(letterbox.has_value());
 			CHECK_FALSE(letterbox->Entity.IsValid());
 			CHECK(letterbox->PickId == 0);
+			// A pixel outside the view is refused, as at the identity (the scene's EntityId is smaller than the view).
+			const PickRequest outside{ .X = ViewWidth,
+				.Y = 0,
+				.FrameIndex = snapshot.FrameIndex,
+				.SceneRevision = 7,
+				.Sequence = 2,
+				.ViewGeneration = setup.GetRenderer().GetViewGeneration() };
+			const Result<PickTicket> refused = setup.GetRenderer().RequestPick(outside);
+			REQUIRE_FALSE(refused.has_value());
+			CHECK(refused.error().GetCode() == ErrorCode::InvalidArgument);
 		}
 
-		TEST_CASE("OutputStage: at scale 3 game Text draws before the upscale and the editor overlays after it" * doctest::skip(true))
+		TEST_CASE("OutputStage: at scale 3 game Text draws before the upscale and the editor overlays after it")
 		{
 			Test::HeadlessGpuFixture gpu;
 			ENGINE_REQUIRE_GPU(gpu);
@@ -362,10 +389,12 @@ namespace Engine {
 			RenderSnapshot snapshot = setup.Snapshot(MakeScale3Output());
 			snapshot.Meshes.clear();
 			snapshot.Camera.ClearColor = glm::vec3(0.0f);
-			// White game text in the scene's top-left quarter, and a green on-top debug line across the scene's middle row.
+			// White game text in the scene's top-left quarter, a green on-top debug line across the scene's middle row, and a
+			// yellow debug label in the scene's bottom-right quarter.
 			snapshot.Texts.push_back(TextItem{ .Text = "IIII", .Size = 600.0f, .Color = glm::vec4(1.0f), .Anchor = glm::vec2(0.0f), .Pivot = glm::vec2(0.0f) });
 			snapshot.DebugDraw.AddLine(glm::vec3(-4.0f, 0.0f, -1.0f), glm::vec3(4.0f, 0.0f, -1.0f), glm::vec4(0.0f, 1.0f, 0.0f, 1.0f), 0.0f,
 				DebugDepthMode::OnTop);
+			snapshot.DebugDraw.AddText(glm::vec3(0.8f, -0.5f, -1.0f), "IIII", 200.0f, glm::vec4(1.0f, 1.0f, 0.0f, 1.0f), 0.0f, DebugDepthMode::OnTop);
 			const Image view = setup.Render(snapshot);
 			// Before the upscale: every 3x3 block of the text's quarter is one scene pixel, and some are lit.
 			uint32_t litBlocks = 0;
@@ -391,9 +420,102 @@ namespace Engine {
 				greenRows += GetPixel(view, ViewWidth / 2, y).g > 128 ? 1U : 0U;
 			CHECK(greenRows >= 1);
 			CHECK(greenRows < Scale);
+			// The label too is drawn at the view's resolution, after the upscale: over the scene's bottom-right quarter, where it
+			// draws, some 3x3 block of a scene pixel holds more than one value (an upscaled label would fill whole blocks).
+			uint32_t labelPixels = 0;
+			uint32_t mixedBlocks = 0;
+			for (uint32_t sceneY = SceneHeight / 2 + 2; sceneY < SceneHeight; ++sceneY)
+			{
+				for (uint32_t sceneX = SceneWidth / 2; sceneX < SceneWidth; ++sceneX)
+				{
+					const uint32_t x = OffsetX + Scale * sceneX;
+					const uint32_t y = OffsetY + Scale * sceneY;
+					const glm::u8vec4 first = GetPixel(view, x, y);
+					bool mixed = false;
+					for (uint32_t dy = 0; dy < Scale; ++dy)
+					{
+						for (uint32_t dx = 0; dx < Scale; ++dx)
+						{
+							const glm::u8vec4 pixel = GetPixel(view, x + dx, y + dy);
+							mixed = mixed || pixel != first;
+							labelPixels += pixel.r > 128 && pixel.g > 128 && pixel.b < 64 ? 1U : 0U;
+						}
+					}
+					mixedBlocks += mixed ? 1U : 0U;
+				}
+			}
+			CHECK(labelPixels > 0);
+			CHECK(mixedBlocks > 0);
+			// The rows in the declared order: game Text before the upscale, the labels after the other editor overlays, and the
+			// letterbox repaint last (the line crosses the scene camera's frustum into the letterbox).
+			const RenderStats stats = setup.GetRenderer().GetRenderStats();
+			std::vector<std::string_view> names;
+			for (const RenderPassStats& pass : stats.Passes)
+				names.push_back(pass.Name);
+			const auto position = [&names](std::string_view name)
+			{
+				return std::find(names.begin(), names.end(), name) - names.begin();
+			};
+			REQUIRE(position("Text") < static_cast<std::ptrdiff_t>(names.size()));
+			REQUIRE(position("Labels") < static_cast<std::ptrdiff_t>(names.size()));
+			CHECK(position("Text") < position("Upscale"));
+			CHECK(position("Upscale") < position("Overlays"));
+			CHECK(position("Overlays") < position("Labels"));
+			CHECK(names.back() == "Letterbox");
 		}
 
-		TEST_CASE("OutputStage: the pixel-art colour path leaves texels unchanged" * doctest::skip(true))
+		TEST_CASE("OutputStage: at scale 3 the editor overlays are clipped to the scene image and the letterbox keeps its colour")
+		{
+			// Decision 6: every editor overlay that crosses the scene camera's frustum (the grid, a debug line, a label, the
+			// wireframe and the dilated selection outline of a quad that leaves the frustum on the right) stops at the scaled scene
+			// rectangle, as its scissor would stop it: the letterbox repaint ("Letterbox") gives the bars their colour again.
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			OutputStageSetup setup(gpu);
+			RenderSnapshot snapshot = setup.Snapshot(MakeScale3Output());
+			snapshot.Flags = RenderViewFlags::EditorOverlays | RenderViewFlags::Grid | RenderViewFlags::Selection | RenderViewFlags::Wireframe;
+			snapshot.SelectedEntities = { UUID(900) };
+			// The unit quad, 1.5 m wide and tall, its right half beyond the frustum's right edge (at 64 / 36 m).
+			snapshot.Meshes.front().World = glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(1.8f, 0.0f, -1.0f)), glm::vec3(1.5f));
+			snapshot.DebugDraw.AddLine(glm::vec3(-4.0f, 0.5f, -1.0f), glm::vec3(4.0f, 0.5f, -1.0f), glm::vec4(0.0f, 1.0f, 0.0f, 1.0f), 0.0f,
+				DebugDepthMode::OnTop);
+			snapshot.DebugDraw.AddLine(glm::vec3(-0.5f, -4.0f, -1.0f), glm::vec3(-0.5f, 4.0f, -1.0f), glm::vec4(0.0f, 1.0f, 0.0f, 1.0f), 0.0f,
+				DebugDepthMode::OnTop);
+			snapshot.DebugDraw.AddText(glm::vec3(-1.75f, -0.5f, -1.0f), "IIIIIIII", 200.0f, glm::vec4(1.0f, 1.0f, 0.0f, 1.0f), 0.0f, DebugDepthMode::OnTop);
+			const Image view = setup.Render(snapshot);
+			uint32_t letterboxPixels = 0;
+			for (uint32_t y = 0; y < ViewHeight; ++y)
+			{
+				for (uint32_t x = 0; x < ViewWidth; ++x)
+				{
+					if (IsInSceneImage(x, y))
+						continue;
+					CAPTURE(x);
+					CAPTURE(y);
+					CHECK(GetPixel(view, x, y) == glm::u8vec4(255, 0, 0, 255));
+					++letterboxPixels;
+				}
+			}
+			CHECK(letterboxPixels == ViewWidth * ViewHeight - Scale * SceneWidth * Scale * SceneHeight);
+			// Inside the scene image the overlays draw: the vertical debug line's column, at view x 4 + (1 - 0.5 / (64 / 36)) *
+			// 96 = 73 or its neighbour, is green somewhere in the scene image's rows.
+			uint32_t green = 0;
+			for (uint32_t y = OffsetY; y < OffsetY + Scale * SceneHeight; ++y)
+			{
+				for (uint32_t x = 70; x < 77; ++x)
+				{
+					const glm::u8vec4 pixel = GetPixel(view, x, y);
+					green += pixel.g > 128 && pixel.r < 64 ? 1U : 0U;
+				}
+			}
+			CHECK(green > 0);
+			const RenderStats stats = setup.GetRenderer().GetRenderStats();
+			REQUIRE_FALSE(stats.Passes.empty());
+			CHECK(stats.Passes.back().Name == "Letterbox");
+			CHECK(stats.Passes.back().DrawCalls == 4);
+		}
+
+		TEST_CASE("OutputStage: the pixel-art colour path leaves texels unchanged")
 		{
 			Test::HeadlessGpuFixture gpu;
 			ENGINE_REQUIRE_GPU(gpu);
@@ -418,11 +540,12 @@ namespace Engine {
 			CHECK(GetPixel(tonemapped, ViewWidth / 2, ViewHeight / 2) != glm::u8vec4(200, 100, 50, 255));
 		}
 
-		TEST_CASE("OutputStage: a scene larger than the view is cropped without a validation message" * doctest::skip(true))
+		TEST_CASE("OutputStage: a scene larger than the view is cropped without a validation message")
 		{
 			// Decision 6: a 161 x 91 scene in the 100 x 50 view is drawn at Scale 1 with negative offsets (-31, -21); the
-			// upscale's and the editor overlays' viewport extends past the view and their scissor is clipped to it, so the
-			// fixture's validation (never a negative scissor offset, VUID-vkCmdSetScissor-x-00595) stays clean.
+			// upscale's viewport extends past the view and its scissor is clipped to it, so the fixture's validation (never a
+			// negative scissor offset, VUID-vkCmdSetScissor-x-00595) stays clean. The editor overlays draw over the view with the
+			// overlay camera, and a scene that covers the view leaves no letterbox to repaint.
 			constexpr uint32_t CroppedWidth = 100;
 			constexpr uint32_t CroppedHeight = 50;
 			const RenderOutputSettings large{ .SceneWidth = 161, .SceneHeight = 91 };
@@ -456,9 +579,12 @@ namespace Engine {
 			for (uint32_t y = 0; y < CroppedHeight; ++y)
 				greenRows += GetPixel(overlaid, CroppedWidth / 2, y).g > 128 ? 1U : 0U;
 			CHECK(greenRows >= 1);
+			const RenderStats stats = setup.GetRenderer().GetRenderStats();
+			for (const RenderPassStats& pass : stats.Passes)
+				CHECK(pass.Name != "Letterbox");
 		}
 
-		TEST_CASE("OutputStage: a capture at scale 3 maps its pixels to scene pixels" * doctest::skip(true))
+		TEST_CASE("OutputStage: a capture at scale 3 maps its pixels to scene pixels")
 		{
 			Test::HeadlessGpuFixture gpu;
 			ENGINE_REQUIRE_GPU(gpu);
@@ -466,6 +592,7 @@ namespace Engine {
 			Result<Scope<ViewportCapture>> capture =
 				ViewportCapture::CreateForScenes(setup.GetDevice(), setup.GetPipelines(), setup.GetCache(), setup.GetAssets());
 			REQUIRE_MESSAGE(capture.has_value(), capture.error().ToString());
+			CHECK((*capture)->GetLastOutputMapping() == RenderOutputMapping{});
 			const Result<Image> image = (*capture)->Capture({ .Width = ViewWidth, .Height = ViewHeight }, setup.Snapshot(MakeScale3Output()));
 			REQUIRE_MESSAGE(image.has_value(), image.error().ToString());
 			CHECK(image->Width == ViewWidth);

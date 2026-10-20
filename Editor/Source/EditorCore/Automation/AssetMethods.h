@@ -139,9 +139,9 @@ namespace Engine {
 	};
 
 	// asset.create {type, path, values?}: creates a native asset at project-relative `path` (below Assets/, with the type's
-	// extension: .material, .scene, .prefab, .sfx) with its .meta, or a folder. `values` is a partial object of registry
-	// PascalCase keys over the defaults: MaterialData's ("Material") for a Material, and, from M12, the sound effect's
-	// ("SoundEffect", Audio/SoundSynth.h, written with SoundEffectToText) for a SoundEffect, which must then pass
+	// extension: .material, .scene, .prefab, .sfx, .spritesheet) with its .meta, or a folder. `values` is a partial object
+	// of registry PascalCase keys over the defaults: MaterialData's ("Material") for a Material, and, from M12, the sound
+	// effect's ("SoundEffect", Audio/SoundSynth.h, written with SoundEffectToText) for a SoundEffect, which must then pass
 	// ValidateSoundEffect (at least one layer; every violation Validation located under /values, such as
 	// /values/Layers/0/Notes/2, as for a material); for the other types it must be absent. A Scene is an empty scene
 	// named after the file stem; a Prefab holds one root entity named after the file stem. The new asset's id and type are

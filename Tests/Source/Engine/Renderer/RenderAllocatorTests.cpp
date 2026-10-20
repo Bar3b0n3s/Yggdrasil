@@ -8,14 +8,13 @@
 #include <memory_resource>
 
 // The memory resource of the render snapshot's and the debug draw lists' containers (M18, C18.1, R-ARENA;
-// Docs/Decisions/0029-m18-contract.md decision 9), which W18.1 measures a per-frame arena through. Skipped until stream C
-// implements the constructors.
+// Docs/Decisions/0029-m18-contract.md decision 9), which W18.1 measures a per-frame arena through.
 
 namespace Engine {
 
 	TEST_SUITE("Renderer")
 	{
-		TEST_CASE("RenderSnapshot: a snapshot over a memory resource allocates its containers from it" * doctest::skip(true))
+		TEST_CASE("RenderSnapshot: a snapshot over a memory resource allocates its containers from it")
 		{
 			std::pmr::monotonic_buffer_resource arena;
 			RenderSnapshot snapshot(&arena);
@@ -46,7 +45,7 @@ namespace Engine {
 			CHECK(plain.Meshes.get_allocator().resource() == std::pmr::get_default_resource());
 		}
 
-		TEST_CASE("DebugDrawList: a list over a memory resource allocates its commands from it" * doctest::skip(true))
+		TEST_CASE("DebugDrawList: a list over a memory resource allocates its commands from it")
 		{
 			std::pmr::monotonic_buffer_resource arena;
 			DebugDrawList list(&arena);

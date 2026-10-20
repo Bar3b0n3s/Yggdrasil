@@ -426,6 +426,16 @@ namespace Engine {
 				}
 				ImGui::EndMenu();
 			}
+			if (ImGui::BeginMenu("Tools"))
+			{
+				// The editor's shader hot reload (Docs/Decisions/0029-m18-contract.md decision 3), the same action as
+				// shaders.reload: a broken build output fails it and keeps the current pipelines, with the error reported.
+				if (ImGui::MenuItem("Reload shaders", nullptr, false, editor.HasProject()))
+					queue("shaders.reload", Json::object());
+				if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+					ImGui::SetTooltip("Swap in the shaders CompileShaders.py or a build of the Shaders project rewrote, without a restart");
+				ImGui::EndMenu();
+			}
 			ImGui::EndMainMenuBar();
 		}
 

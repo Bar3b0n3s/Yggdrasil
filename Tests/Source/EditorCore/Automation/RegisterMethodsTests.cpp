@@ -18,8 +18,8 @@ namespace Engine {
 
 	// The M4 method set (Roadmap M4), M5's screenshot methods (registered at the M4/M5 merge, ADR 0009 decision 33), M6's
 	// asset.*, prefab.*, entity.bounds and project.refreshAssets (ADR 0010 decision 20), M7's play.*, input.inject and
-	// project.export (ADR 0012 decisions 4, 8 and 14), M11's physics.bodyInfo (ADR 0014 decision 18) and M12's audio.stats
-	// (ADR 0015 decision 15), test hooks excluded.
+	// project.export (ADR 0012 decisions 4, 8 and 14), M11's physics.bodyInfo (ADR 0014 decision 18), M12's audio.stats
+	// (ADR 0015 decision 15) and M18's shaders.reload and profiler.capture (ADR 0029 decisions 3 and 11), test hooks excluded.
 	static const std::vector<std::string>& GetExpectedMethodNames()
 	{
 		static const std::vector<std::string> ExpectedNames = { "asset.create", "asset.delete", "asset.getImportSettings", "asset.getProperties",
@@ -28,10 +28,10 @@ namespace Engine {
 			"edit.undo", "editor.screenshot", "editor.state", "entity.bounds", "entity.create", "entity.destroy", "entity.duplicate", "entity.get",
 			"entity.reparent", "entity.update", "events.read", "input.inject", "input.record", "input.replay", "log.read", "physics.bodyInfo", "play.pause", "play.resume",
 			"play.setTimeScale", "play.start", "play.state", "play.step", "play.stop", "play.waitFor", "prefab.apply", "prefab.create", "prefab.instantiate", "prefab.revert",
-			"prefab.unpack", "project.create", "project.export", "project.getSettings", "project.info", "project.open", "project.refreshAssets",
+			"prefab.unpack", "profiler.capture", "project.create", "project.export", "project.getSettings", "project.info", "project.open", "project.refreshAssets",
 			"project.save", "project.setSettings", "project.upgrade", "project.validate", "rpc.discover", "scene.diff", "scene.get", "scene.new", "scene.open",
 			"scene.query", "scene.raycast", "scene.save", "scene.tree", "script.check", "script.create", "script.errors", "script.eval", "script.fields", "script.read", "script.write",
-			"session.hello", "session.info", "session.shutdown", "stats.get", "test.list", "test.run", "viewport.camera", "viewport.frame",
+			"session.hello", "session.info", "session.shutdown", "shaders.reload", "stats.get", "test.list", "test.run", "viewport.camera", "viewport.frame",
 			"viewport.pick", "viewport.screenshot", "viewport.setOptions" };
 		return ExpectedNames;
 	}

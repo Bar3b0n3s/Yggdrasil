@@ -11,7 +11,7 @@
 // list aside and swaps them in only when all succeed. A broken shader (a layout that no longer matches its reflection, a
 // variant the build did not write, a pipeline the driver refuses) fails the call and keeps the previous pipelines in use;
 // fixing it and calling again swaps the new ones in. Every view of the editor (the scene and game viewports and the
-// screenshot capture) shares the reloaded pipelines; ImGui's pipelines are not reloaded. The editor's "Reload Shaders"
+// screenshot capture) shares the reloaded pipelines; ImGui's pipelines are not reloaded. The editor's Tools > Reload shaders
 // menu item runs the same action. Conventions as in MethodRegistry.h.
 //
 // The reload is the editor's: AutomationServerSpecification::ReloadShaders, which the editor injects when it has a

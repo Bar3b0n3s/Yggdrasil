@@ -71,9 +71,11 @@ namespace Engine {
 			GpuResourceCache& cache, AssetManager& assets);
 
 		// Renders `snapshot` (extracted for request.Width x request.Height) through the capture's SceneRenderer resized to the
-		// request's size into its own command list, submits it, reads LdrColor back (RGBA8_UNORM, display-encoded values,
-		// §8.9; Readback::ReadTexture, which waits for the copy with WaitForSubmission) and applies MaxDimension. Blocks until
-		// the image is on the CPU, so it serves screenshots and tests, never per-frame work. Errors: InvalidArgument for a zero
+		// request's size into its own command list, submits it, reads the renderer's final image back (SceneRenderer::
+		// GetFinalTexture at the request's size: the scene image, or with a snapshot whose output stage scales the scene the
+		// upscaled scene image in its letterbox, M18; RGBA8_UNORM, display-encoded values, §8.9; Readback::ReadTexture, which
+		// waits for the copy with WaitForSubmission) and applies MaxDimension. Blocks until the image is on the CPU, so it
+		// serves screenshots and tests, never per-frame work. Errors: InvalidArgument for a zero
 		// Width or Height or one above MaxViewportScreenshotDimension; those of SceneRenderer::Resize and Render,
 		// Readback::ReadTexture and DownscaleImage.
 		[[nodiscard]] Result<Image> Capture(const ViewportScreenshotRequest& request, const RenderSnapshot& snapshot);
@@ -89,6 +91,7 @@ namespace Engine {
 		Scope<Readback> m_Readback;
 		nvrhi::CommandListHandle m_CommandList;
 		uint64_t m_FrameIndex = 0;
+		RenderOutputMapping m_LastOutputMapping{}; // GetLastOutputMapping
 	};
 
 }

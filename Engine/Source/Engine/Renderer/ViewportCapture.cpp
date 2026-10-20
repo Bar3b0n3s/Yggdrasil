@@ -58,16 +58,19 @@ namespace Engine {
 		m_SceneRenderer->OnSubmitted(captured.FrameIndex, submission);
 		ENGINE_TRY(rendered);
 
+		// The view-resolution image: the upscaled scene image in its letterbox when the snapshot's output stage scales it.
 		ENGINE_TRY_ASSIGN(Image image, m_Readback->ReadTexture(*m_SceneRenderer->GetFinalTexture()));
 		if (request.MaxDimension > 0)
-			return DownscaleImage(image, request.MaxDimension);
+		{
+			ENGINE_TRY_ASSIGN(image, DownscaleImage(image, request.MaxDimension));
+		}
+		m_LastOutputMapping = m_SceneRenderer->GetOutputMapping();
 		return image;
 	}
 
 	RenderOutputMapping ViewportCapture::GetLastOutputMapping() const
 	{
-		ENGINE_CONTRACT_STUB();
-		return {};
+		return m_LastOutputMapping;
 	}
 
 }

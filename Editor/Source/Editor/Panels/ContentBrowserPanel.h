@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Editor/FolderPicker.h"
+#include "Editor/FileDialog.h"
 #include "Engine/Asset/AssetHandle.h"
 #include "Engine/Asset/AssetType.h"
 #include "Engine/Core/Result.h"
@@ -55,7 +55,7 @@ namespace Engine {
 		std::array<char, 256> m_CreateName{};
 		std::array<char, 4096> m_ImportSource{};
 		std::array<char, 4096> m_MovePath{};
-		FolderPicker m_ImportPicker{};
+		FileDialog m_ImportDialog{}; // the import source: the native dialog or the ImGui picker (Editor/FileDialog.h)
 		std::string m_ImportDirectory{};
 		std::string m_ActionDirectory{};
 		AssetHandle m_ActionAsset{};

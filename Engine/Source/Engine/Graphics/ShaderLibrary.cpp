@@ -72,8 +72,8 @@ namespace Engine {
 	{
 		ENGINE_CORE_ASSERT(!m_Root.IsEmpty(), "ShaderLibrary needs a root directory");
 		// M18 (C18.3, Docs/Decisions/0029-m18-contract.md decision 33): a lost device's shaders are dropped and their SPIR-V
-		// kept; the next Get creates them again from it on the recovered device. W18.1's reload keeps this hook covering
-		// every shader map it adds.
+		// kept; the next Get creates them again from it on the recovered device. The shaders a reload in progress read are
+		// dropped too.
 		if (m_Device != nullptr)
 		{
 			ShaderLibrary* owner = this;
@@ -81,8 +81,11 @@ namespace Engine {
 			hooks.Name = "ShaderLibrary";
 			hooks.Release = [owner]()
 			{
-				for (auto& [stem, variant] : owner->m_Shaders)
-					variant.Shader = nullptr;
+				for (VariantMap* variants : { &owner->m_Shaders, &owner->m_ReloadedShaders })
+				{
+					for (auto& [stem, variant] : *variants)
+						variant.Shader = nullptr;
+				}
 			};
 			m_Recreation = m_Device->GetRecreation().Register(std::move(hooks));
 		}
@@ -97,14 +100,16 @@ namespace Engine {
 		if (m_Device == nullptr)
 			return MakeError(ErrorCode::InvalidState, "cannot create the shader '{}': this ShaderLibrary serves reflection only", stem);
 
-		const auto cached = m_Shaders.find(stem);
-		if (cached != m_Shaders.end() && cached->second.Shader != nullptr)
+		// A reload reads every variant again and keeps what it read apart until EndReload.
+		VariantMap& variants = m_Reloading ? m_ReloadedShaders : m_Shaders;
+		const auto cached = variants.find(stem);
+		if (cached != variants.end() && cached->second.Shader != nullptr)
 			return cached->second.Shader;
 
 		// A variant whose shader a device loss dropped is created again from the bytes it was created from, which match its
 		// cached reflection; any other variant is read from its file.
 		Buffer read;
-		if (cached == m_Shaders.end())
+		if (cached == variants.end())
 		{
 			ENGINE_TRY_ASSIGN(read, Utils::ReadVariantFile(*m_Vfs, m_Root, stem, ".spv"));
 			if (!Utils::IsSpirvBinary(read))
@@ -113,7 +118,7 @@ namespace Engine {
 				return std::unexpected(std::move(error).WithHint(std::string(Utils::CompileHint)));
 			}
 		}
-		const std::span<const std::byte> binary = cached != m_Shaders.end() ? std::span<const std::byte>(cached->second.Binary) : std::span<const std::byte>(read);
+		const std::span<const std::byte> binary = cached != variants.end() ? std::span<const std::byte>(cached->second.Binary) : std::span<const std::byte>(read);
 		ENGINE_TRY_ASSIGN(const ShaderReflection* reflection, GetReflection(program, entry, permutation));
 
 		nvrhi::ShaderDesc desc;
@@ -121,10 +126,10 @@ namespace Engine {
 		desc.entryName = reflection->EntryPoint;
 		desc.debugName = stem;
 		ENGINE_TRY_ASSIGN(nvrhi::ShaderHandle shader, m_Device->CreateShader(desc, binary));
-		if (cached != m_Shaders.end())
+		if (cached != variants.end())
 			cached->second.Shader = shader;
 		else
-			m_Shaders.emplace(stem, Detail::ShaderLibraryVariant{ .Binary = std::move(read), .Shader = shader });
+			variants.emplace(stem, Detail::ShaderLibraryVariant{ .Binary = std::move(read), .Shader = shader });
 		return shader;
 	}
 
@@ -132,7 +137,8 @@ namespace Engine {
 		std::span<const ShaderDefine> permutation)
 	{
 		std::string stem = MakeShaderVariantStem(program, entry, permutation);
-		if (const auto cached = m_Reflections.find(stem); cached != m_Reflections.end())
+		ReflectionMap& reflections = m_Reloading ? m_ReloadedReflections : m_Reflections;
+		if (const auto cached = reflections.find(stem); cached != reflections.end())
 			return &cached->second;
 
 		ENGINE_TRY_ASSIGN(const Buffer contents, Utils::ReadVariantFile(*m_Vfs, m_Root, stem, ".refl.json"));
@@ -144,17 +150,44 @@ namespace Engine {
 			return std::unexpected(std::move(reflection).error().WithContext(std::move(context)));
 		}
 
-		return &m_Reflections.emplace(std::move(stem), std::move(*reflection)).first->second;
+		return &reflections.emplace(std::move(stem), std::move(*reflection)).first->second;
 	}
 
 	void ShaderLibrary::BeginReload()
 	{
-		ENGINE_CONTRACT_STUB();
+		ENGINE_CORE_ASSERT(!m_Reloading, "ShaderLibrary::BeginReload during a reload");
+		ENGINE_CORE_ASSERT(m_ReloadedShaders.empty() && m_ReloadedReflections.empty(), "A reload's variants outlived its EndReload");
+		m_Reloading = true;
 	}
 
-	void ShaderLibrary::EndReload(bool /*keep*/)
+	void ShaderLibrary::EndReload(bool keep)
 	{
-		ENGINE_CONTRACT_STUB();
+		ENGINE_CORE_ASSERT(m_Reloading, "ShaderLibrary::EndReload without BeginReload");
+		m_Reloading = false;
+		if (!keep)
+		{
+			while (!m_ReloadedReflections.empty())
+				m_RetiredReflections.push_back(m_ReloadedReflections.extract(m_ReloadedReflections.begin()));
+			m_ReloadedShaders.clear();
+			return;
+		}
+
+		while (!m_ReloadedReflections.empty())
+		{
+			// The node moves with its reflection at the same address, so GetReflection returns from now on the pointer the
+			// reload handed out; the earlier reflection is retired, never freed.
+			ReflectionMap::node_type reloaded = m_ReloadedReflections.extract(m_ReloadedReflections.begin());
+			if (const auto earlier = m_Reflections.find(reloaded.key()); earlier != m_Reflections.end())
+				m_RetiredReflections.push_back(m_Reflections.extract(earlier));
+			// A variant whose reflection alone the reload read drops its earlier shader as well, which was created for the
+			// replaced reflection: its next Get reads the SPIR-V again.
+			if (!m_ReloadedShaders.contains(reloaded.key()))
+				m_Shaders.erase(reloaded.key());
+			m_Reflections.insert(std::move(reloaded));
+		}
+		for (auto& [stem, variant] : m_ReloadedShaders)
+			m_Shaders.insert_or_assign(stem, std::move(variant));
+		m_ReloadedShaders.clear();
 	}
 
 }

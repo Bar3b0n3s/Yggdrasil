@@ -1,0 +1,85 @@
+{
+	"Format": "SpriteSheet",
+	"Version": 1,
+	"Texture": "90c8ab4ce0870602",
+	"Frames": [
+		{
+			"Name": "Corner",
+			"Rect": {
+				"X": 0,
+				"Y": 0,
+				"Width": 8,
+				"Height": 8
+			},
+			"Pivot": [0.5, 1],
+			"Borders": {
+				"Left": 0,
+				"Top": 0,
+				"Right": 0,
+				"Bottom": 0
+			}
+		},
+		{
+			"Name": "",
+			"Rect": {
+				"X": 8,
+				"Y": 0,
+				"Width": 8,
+				"Height": 8
+			},
+			"Pivot": [0.5, 0.5],
+			"Borders": {
+				"Left": 0,
+				"Top": 0,
+				"Right": 0,
+				"Bottom": 0
+			}
+		},
+		{
+			"Name": "Panel",
+			"Rect": {
+				"X": 0,
+				"Y": 0,
+				"Width": 16,
+				"Height": 8
+			},
+			"Pivot": [0, 0],
+			"Borders": {
+				"Left": 3,
+				"Top": 2,
+				"Right": 4,
+				"Bottom": 1
+			}
+		}
+	],
+	"Clips": [
+		{
+			"Name": "Spin",
+			"Frames": [
+				{
+					"Frame": 0,
+					"Ticks": 8
+				},
+				{
+					"Frame": 1,
+					"Ticks": 12
+				}
+			],
+			"Loop": true
+		},
+		{
+			"Name": "Settle",
+			"Frames": [
+				{
+					"Frame": 1,
+					"Ticks": 4
+				},
+				{
+					"Frame": 2,
+					"Ticks": 6
+				}
+			],
+			"Loop": false
+		}
+	]
+}

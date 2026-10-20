@@ -6,8 +6,7 @@
 #include "Support/AssetTestFixture.h"
 #include "Support/TestData.h"
 
-// SpriteSheetImporter (M18, C18.1, R-2D-SHEET; Docs/Decisions/0029-m18-contract.md decision 17). Skipped until stream S
-// implements the importer and registers it with its source format.
+// SpriteSheetImporter (M18, C18.1, R-2D-SHEET; Docs/Decisions/0029-m18-contract.md decision 17).
 
 namespace Engine {
 
@@ -47,7 +46,7 @@ namespace Engine {
 
 	TEST_SUITE("AssetPipeline")
 	{
-		TEST_CASE("SpriteSheetImporter: a sheet imports its frames, pivots, borders and clips with its texture as the dependency" * doctest::skip(true))
+		TEST_CASE("SpriteSheetImporter: a sheet imports its frames, pivots, borders and clips with its texture as the dependency")
 		{
 			CHECK(SpriteSheetImporter().CanImport(".SpriteSheet"));
 			CHECK(SpriteSheetImporter().GetMainType() == AssetType::SpriteSheet);
@@ -87,7 +86,7 @@ namespace Engine {
 			CHECK(plain->Dependencies.empty());
 		}
 
-		TEST_CASE("SpriteSheetImporter: an unknown member or an invalid sheet fails the import, located in its file" * doctest::skip(true))
+		TEST_CASE("SpriteSheetImporter: an unknown member or an invalid sheet fails the import, located in its file")
 		{
 			Test::AssetTestFixture fixture;
 			fixture.WriteProjectText("Assets/Typo.spritesheet", R"({"Format": "SpriteSheet", "Version": 1, "Frame": []})");

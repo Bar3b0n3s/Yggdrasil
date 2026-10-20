@@ -1,8 +1,7 @@
 """Sprite sheets through automation (Docs/Architecture.md §6.9, §7.4, §13.5 asset.create {type: "SpriteSheet"},
 asset.getProperties and asset.setProperties; Docs/Decisions/0029-m18-contract.md decisions 14 to 18): a sheet
 created over an imported texture, its frames, pivots, 9-slice borders and clips edited as registry JSON, its texture
-as its dependency, and the located refusals of invalid sheets. Skipped until stream S implements and registers the
-sprite sheet."""
+as its dependency, and the located refusals of invalid sheets."""
 
 from __future__ import annotations
 
@@ -36,7 +35,6 @@ class SpriteSheetTests(AutomationTestCase):
         imported = client.call("asset.import", {"source": str(TEXTURE_SOURCE), "destDir": "Assets/Textures"})
         return imported["asset"]["id"]
 
-    @unittest.skip("contract stub: sprite sheets (Docs/Decisions/0029-m18-contract.md decision 18, stream S)")
     def test_create_edit_and_undo_a_sprite_sheet_with_its_texture_as_dependency(self) -> None:
         client, root = self.open_editor_with_scene()
         texture = self.import_texture(client)
@@ -62,6 +60,9 @@ class SpriteSheetTests(AutomationTestCase):
         restored = client.call("asset.getProperties", {"asset": SHEET_PATH})["values"]
         self.assertEqual(restored["Clips"][0]["Name"], "Idle")
 
+        # An asset the editor creates imports at its first use; importing the sheet records its texture as its
+        # dependency (the importer's Import.Dependencies), which asset.info and the texture's dependents then report.
+        client.call("asset.reimport", {"asset": SHEET_PATH})
         info = client.call("asset.info", {"asset": SHEET_PATH})
         self.assertEqual(info["importer"], "SpriteSheet")
         self.assertEqual([dependency["id"] for dependency in info["dependencies"]], [texture])
@@ -71,7 +72,6 @@ class SpriteSheetTests(AutomationTestCase):
         dependents = client.call("asset.info", {"asset": texture})["dependents"]
         self.assertEqual([dependent["path"] for dependent in dependents], [SHEET_PATH])
 
-    @unittest.skip("contract stub: sprite sheets (Docs/Decisions/0029-m18-contract.md decision 18, stream S)")
     def test_invalid_sprite_sheets_are_refused_at_the_offending_value(self) -> None:
         client, _ = self.open_editor_with_scene()
         texture = self.import_texture(client)

@@ -1,8 +1,9 @@
 """The hardening stage's pure parts (Docs/Architecture.md §15.1 T6; Docs/Decisions/0024-m15-contract.md decisions 12 to
 15, stream C): the AddressSanitizer options and runtime, the fuzz target list and the evaluation of the fuzz shards' log
 lines, the soak scenes and the < 1 % growth rule, and the process memory query the soak and the perf capture share; and
-the scripts around them: Hardening.py's step order and fail-fast summary, Test.py's sanitized runs, Generate.py's
---sanitize and CheckBuildConfig.py's AddressSanitizer rules. These tests need no editor build.
+the scripts around them: Hardening.py's step order and fail-fast summary, Test.py's sanitized runs, the debug-heap GPU
+step with Test.py --debug-heap and Lib/debugheap.py (Docs/Decisions/0029-m18-contract.md), Generate.py's --sanitize and
+CheckBuildConfig.py's AddressSanitizer rules. These tests need no editor build.
 """
 
 from __future__ import annotations
@@ -35,7 +36,7 @@ import CI as ci_script  # noqa: E402
 import Generate as generate_script  # noqa: E402
 import Hardening as hardening_script  # noqa: E402
 import Test as test_script  # noqa: E402
-from Lib import hardening, process  # noqa: E402
+from Lib import debugheap, hardening, process  # noqa: E402
 from Lib.report import Status, Step, write_junit  # noqa: E402
 
 
@@ -336,7 +337,7 @@ class FuzzTests(unittest.TestCase):
         # sanitized suites' 60 s graces included; the fuzz step's timeout is at most its budget, which grows with the
         # targets, so the committed targets must fit.
         self.assertEqual(hardening_script.longest_run_seconds(35),
-                         sum(hardening_script.TIMEOUTS.values()) + 2 * 60.0 + hardening.fuzz_budget_seconds(35))
+                         sum(hardening_script.TIMEOUTS.values()) + 3 * 60.0 + hardening.fuzz_budget_seconds(35))
         bound = ci_script.TIMEOUTS["hardening"]
         self.assertGreater(bound, hardening_script.longest_run_seconds(len(hardening.read_fuzz_targets())))
         # The limit the documents state (ADR 0028 decision 16, CI.py's TIMEOUTS): up to 49 targets fit, 50 do not.
@@ -751,10 +752,14 @@ def quiet_parse(parse: object, argv: list[str]) -> argparse.Namespace:
 class HardeningScriptTests(unittest.TestCase):
     def test_the_steps_run_in_the_stage_order(self) -> None:
         self.assertEqual(hardening_script.STEPS, ("perf", "soak", "asan-generate", "asan-build", "asan-unit",
-                                                  "asan-feature", "fuzz"))
+                                                  "asan-feature", "debug-heap", "fuzz"))
+        # CI.py's hardening stage runs the same steps (ADR 0028's phase-1 ledger: the debug-heap GPU step after
+        # asan-feature, before fuzz).
+        self.assertEqual(ci_script.HARDENING_STEPS, hardening_script.STEPS)
         arguments = quiet_parse(hardening_script.parse_arguments, ["--steps", "fuzz,soak"])
         self.assertEqual(arguments.steps, ["soak", "fuzz"])
-        for argv in (["--steps", "lint"], ["--fuzz-processes", "0"], ["--fuzz-processes", "33"], ["--jobs", "0"]):
+        for argv in (["--steps", "lint"], ["--fuzz-processes", "0"], ["--fuzz-processes", "33"], ["--jobs", "0"],
+                     ["--debug-heap-runs", "0"]):
             with self.subTest(argv=argv), self.assertRaises(SystemExit):
                 quiet_parse(hardening_script.parse_arguments, argv)
 
@@ -1667,6 +1672,156 @@ class TestScriptSanitizerTests(unittest.TestCase):
                          "1 AddressSanitizer report(s), first: ERROR: AddressSanitizer: heap-buffer-overflow on "
                          "address 0x12 at pc 0x34")
         self.assertEqual(test_script.describe_sanitizer_errors(lines[:1]), "")
+
+
+# A Python child that prints its NtGlobalFlag (ntdll's RtlGetNtGlobalFlags) and whether a debugger is attached.
+DEBUG_HEAP_PROBE = (
+    "import ctypes\n"
+    "ntdll = ctypes.WinDLL('ntdll')\n"
+    "ntdll.RtlGetNtGlobalFlags.restype = ctypes.c_uint32\n"
+    "print(f'flags=0x{ntdll.RtlGetNtGlobalFlags():x} debugger={ctypes.WinDLL(\"kernel32\").IsDebuggerPresent()}')\n"
+)
+
+
+def gpu_step(cap: str, status: str, detail: str) -> dict[str, Any]:
+    """One Tests run of Test.py's JSON result for the debug-heap step's gpu suite."""
+    return {"name": f"gpu Debug (Vulkan {cap}) (debug heap)", "status": status, "detail": detail}
+
+
+def run_document(*steps: dict[str, Any]) -> dict[str, Any]:
+    """Test.py's JSON result of one run of the debug-heap step."""
+    return {"steps": list(steps)}
+
+
+class DebugHeapTests(unittest.TestCase):
+    """The hardening stage's debug-heap GPU step (Docs/Decisions/0029-m18-contract.md, R-GPUCRASH): Lib/debugheap.py,
+    Test.py --debug-heap and Hardening.py's step."""
+
+    def test_a_child_started_on_the_debug_heap_has_its_flags_and_no_debugger(self) -> None:
+        # The base interpreter itself: a virtual environment's python.exe (the automation suite's Tools/MCP/.venv) is a
+        # redirector that starts the base interpreter as its own child, which DEBUG_ONLY_THIS_PROCESS leaves off the
+        # debug heap, so the probe would read the redirector's child instead of the process started on the heap.
+        command = [getattr(sys, "_base_executable", None) or sys.executable, "-c", DEBUG_HEAP_PROBE]
+        environment = process.child_environment({"_NO_DEBUG_HEAP": "1"})
+        if not debugheap.is_available():
+            # Elsewhere than Windows the debug heap does not exist: a child is never started on it
+            # (Docs/Decisions/0028-backlog-program.md decision 10).
+            with self.assertRaises(process.ToolNotFoundError):
+                process.run_streamed(command, env=environment, timeout=120.0, echo=io.StringIO(), debug_heap=True)
+            return
+        on_heap = process.run_streamed(command, env=environment, timeout=120.0, echo=io.StringIO(), debug_heap=True)
+        self.assertEqual(on_heap.exit_code, 0, on_heap.output)
+        # The loader's debug heap flags, kept after the detach, whatever the caller's environment said; no debugger.
+        self.assertIn(f"flags=0x{debugheap.NT_GLOBAL_FLAG_DEBUG_HEAP:x} debugger=0", on_heap.output)
+        plain = process.run_streamed(command, env=environment, timeout=120.0, echo=io.StringIO())
+        self.assertEqual(plain.exit_code, 0, plain.output)
+        self.assertIn("flags=0x0 debugger=0", plain.output)
+
+    def test_a_child_that_cannot_start_on_the_debug_heap_is_reported(self) -> None:
+        with self.assertRaises(process.ToolNotFoundError):
+            process.run_streamed([str(REPOSITORY_ROOT / "NoSuchProgram.exe")], timeout=10.0, echo=io.StringIO(),
+                                 debug_heap=True)
+
+    def test_a_debug_heap_run_names_its_steps_and_reports_apart(self) -> None:
+        # The plan is the same on every host; only Windows accepts the option (the refusal is the next test's).
+        with mock.patch.object(debugheap, "is_available", return_value=True):
+            arguments = quiet_parse(test_script.parse_arguments,
+                                    ["--suite", "gpu", "--config", "Debug", "--debug-heap"])
+        runs = test_script.plan_runs("gpu", "Debug", arguments)
+        self.assertEqual([run.name for run in runs],
+                         ["gpu Debug (Vulkan 1.4) (debug heap)", "gpu Debug (Vulkan 1.3) (debug heap)"])
+        self.assertEqual([run.report_stem for run in runs],
+                         ["Gpu-Debug-Vulkan14-DebugHeap", "Gpu-Debug-Vulkan13-DebugHeap"])
+        self.assertEqual(runs[0].junit_suite_name, "Gpu.Debug.Vulkan14.DebugHeap")
+        self.assertTrue(all(run.debug_heap for run in runs))
+        plain = quiet_parse(test_script.parse_arguments, ["--suite", "gpu", "--config", "Debug"])
+        self.assertFalse(any(run.debug_heap for run in test_script.plan_runs("gpu", "Debug", plain)))
+
+    def test_debug_heap_is_refused_where_it_means_nothing(self) -> None:
+        for argv in (["--suite", "feature", "--debug-heap"], ["--suite", "automation", "--debug-heap"]):
+            with self.subTest(argv=argv), self.assertRaises(SystemExit):
+                quiet_parse(test_script.parse_arguments, argv)
+        with mock.patch.object(debugheap, "is_available", return_value=False), self.assertRaises(SystemExit):
+            quiet_parse(test_script.parse_arguments, ["--suite", "gpu", "--debug-heap"])
+
+    def run_debug_heap_step(self, documents: list[dict[str, Any]], argv: list[str],
+                            written: list[tuple[str, ...]] | None = None) -> tuple[Step, mock.MagicMock, Path]:
+        """Hardening.py's debug-heap step with run_json_script answering `documents` in turn, into a temporary reports
+        directory that also stands in for bin/TestResults/: the step, the mock and the step's directory. `written`
+        names, per run, the API caps whose JUnit report that run's Test.py writes (none by default)."""
+        arguments = quiet_parse(hardening_script.parse_arguments, ["--steps", "debug-heap", *argv])
+        results = iter([hardening_script.JsonRun(0 if all(step["status"] == "passed" for step in document["steps"])
+                                                 else 1, False, 1.0, document) for document in documents])
+        caps = iter(written if written is not None else [() for _ in documents])
+        reports = Path(tempfile.mkdtemp(prefix="DebugHeapStep-"))
+        self.addCleanup(shutil.rmtree, reports, True)
+        runs = iter(range(1, len(documents) + 1))
+
+        def run_test_script(*_: Any) -> hardening_script.JsonRun:
+            run = next(runs)
+            for cap in next(caps):
+                report = reports / f"Gpu-Debug-Vulkan{cap.replace('.', '')}-DebugHeap.xml"
+                report.write_text(f'<testsuites name="run {run}"/>', encoding="utf-8")
+            return next(results)
+
+        with mock.patch.object(hardening_script, "DEBUG_HEAP_REPORTS", reports / "DebugHeap"), \
+                mock.patch.object(hardening_script, "DEBUG_HEAP_SUITE_REPORTS", reports), \
+                mock.patch.object(hardening_script.debugheap, "is_available", return_value=True), \
+                mock.patch.object(hardening_script, "run_json_script", side_effect=run_test_script) as run_json:
+            step = hardening_script.step_debug_heap(arguments, hardening_script.Console(True))
+        return step, run_json, reports / "DebugHeap"
+
+    def test_the_debug_heap_step_runs_the_debug_gpu_suite_with_each_runs_lifetime_logs(self) -> None:
+        passed = run_document(gpu_step("1.4", "passed", "300 passed"), gpu_step("1.3", "passed", "300 passed"))
+        crashed = run_document(gpu_step("1.4", "failed", "Tests exited with code 0xC0000005"),
+                               gpu_step("1.3", "passed", "300 passed"))
+        step, run_json, reports = self.run_debug_heap_step([passed, crashed, passed], ["--debug-heap-runs", "3"],
+                                                           [("1.4", "1.3"), (), ("1.4",)])
+        # Every run runs, the crash's included, and the step fails naming the run that crashed.
+        self.assertEqual(run_json.call_count, 3)
+        self.assertEqual(step.status, Status.FAILED)
+        self.assertIn("1 of 3 run(s) failed", step.detail)
+        self.assertIn("run 2: gpu Debug (Vulkan 1.4) (debug heap): Tests exited with code 0xC0000005", step.detail)
+        for index, call in enumerate(run_json.call_args_list, start=1):
+            options = call.args[2]
+            self.assertEqual(options[options.index("--suite") + 1], "gpu")
+            self.assertEqual(options[options.index("--config") + 1], "Debug")
+            self.assertIn("--debug-heap", options)
+            self.assertIn("--require-gpu", options)
+            lifetime = Path(call.args[5][hardening_script.GPU_LIFETIME_LOG_VARIABLE])
+            self.assertEqual(lifetime, reports / f"Run{index}" / "GpuLifetime")
+            self.assertTrue(lifetime.is_dir())
+        self.assertEqual([run["status"] for run in step.data["runs"]], ["passed", "failed", "passed"])
+        # Each run keeps the reports its own Test.py wrote, and only those: run 2 wrote none (its Tests runs ended
+        # before their reports), so it gets no copy of run 1's, and run 3 only its Vulkan 1.4 one.
+        self.assertEqual(sorted(path.name for path in (reports / "Run1").glob("*.xml")),
+                         ["Gpu-Debug-Vulkan13-DebugHeap.xml", "Gpu-Debug-Vulkan14-DebugHeap.xml"])
+        self.assertEqual(list((reports / "Run2").glob("*.xml")), [])
+        self.assertEqual([path.name for path in (reports / "Run3").glob("*.xml")],
+                         ["Gpu-Debug-Vulkan14-DebugHeap.xml"])
+        self.assertEqual((reports / "Run3" / "Gpu-Debug-Vulkan14-DebugHeap.xml").read_text(encoding="utf-8"),
+                         '<testsuites name="run 3"/>')
+
+    def test_the_debug_heap_step_passes_warns_and_stops_on_a_missing_build(self) -> None:
+        passed = run_document(gpu_step("1.4", "passed", "300 passed"))
+        step, _, _ = self.run_debug_heap_step([passed], [])
+        self.assertEqual(step.status, Status.PASSED)
+        no_device = run_document(gpu_step("1.4", "warning", "2 test case(s) found no device"))
+        step, run_json, _ = self.run_debug_heap_step([no_device], ["--gpu-optional"])
+        self.assertEqual(step.status, Status.WARNING)
+        self.assertNotIn("--require-gpu", run_json.call_args.args[2])
+        missing = run_document(dict(gpu_step("1.4", "failed", "Tests.exe not found: build Debug"), exitCode=3))
+        step, run_json, _ = self.run_debug_heap_step([missing, passed], ["--debug-heap-runs", "2"])
+        self.assertEqual(run_json.call_count, 1)
+        self.assertEqual((step.status, step.exit_code), (Status.FAILED, 3))
+
+    def test_the_debug_heap_step_is_skipped_where_the_debug_heap_does_not_exist(self) -> None:
+        arguments = quiet_parse(hardening_script.parse_arguments, ["--steps", "debug-heap"])
+        with mock.patch.object(hardening_script.debugheap, "is_available", return_value=False), \
+                mock.patch.object(hardening_script, "run_json_script") as run_json:
+            step = hardening_script.step_debug_heap(arguments, hardening_script.Console(True))
+        self.assertEqual(step.status, Status.SKIPPED)
+        run_json.assert_not_called()
 
 
 class GenerateAndBuildConfigTests(unittest.TestCase):

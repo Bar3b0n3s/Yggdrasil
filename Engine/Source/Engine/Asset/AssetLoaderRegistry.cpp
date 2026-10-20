@@ -10,6 +10,7 @@
 #include "Engine/Asset/MeshData.h"
 #include "Engine/Asset/ReplayData.h"
 #include "Engine/Asset/ScriptData.h"
+#include "Engine/Asset/SpriteSheetData.h"
 #include "Engine/Asset/TextureData.h"
 #include "Engine/Core/Assert.h"
 
@@ -91,6 +92,11 @@ namespace Engine {
 			return LoadCookedReplay(cooked);
 		}
 
+		static Result<AssetRef<SpriteSheetData>> LoadSpriteSheet(std::span<const std::byte> cooked, const AssetLoadContext& /*context*/)
+		{
+			return LoadCookedSpriteSheet(cooked);
+		}
+
 	}
 
 	AssetLoaderRegistry::AssetLoaderRegistry() = default;
@@ -156,6 +162,8 @@ namespace Engine {
 		registry.Register(CreateScope<PayloadLoader<AudioClipData, &Utils::LoadAudioClip>>());
 		registry.Register(CreateScope<PayloadLoader<ScriptData, &Utils::LoadScript>>());
 		registry.Register(CreateScope<PayloadLoader<ReplayData, &Utils::LoadReplay>>());
+		// M18 (Docs/Decisions/0029-m18-contract.md decision 17).
+		registry.Register(CreateScope<PayloadLoader<SpriteSheetData, &Utils::LoadSpriteSheet>>());
 	}
 
 }

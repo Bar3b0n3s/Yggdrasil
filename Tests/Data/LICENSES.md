@@ -56,12 +56,12 @@ geometry is a unit cube and unit quads computed in the script.
 
 `Truncated.png` is deliberately cut short, so the texture importer's failure path has a fixture.
 
-## Hand-written asset fixtures (`Assets/Materials/`, `Assets/Scenes/`, `Assets/Prefabs/`)
+## Hand-written asset fixtures (`Assets/Materials/`, `Assets/Scenes/`, `Assets/Prefabs/`, `Assets/SpriteSheets/`)
 
 | | |
 |---|---|
-| Files | `Tests/Data/Assets/Materials/**`, `Tests/Data/Assets/Scenes/**`, `Tests/Data/Assets/Prefabs/**` |
-| Origin | First-party: hand-written canonical JSON documents (materials, a scene and a prefab) |
+| Files | `Tests/Data/Assets/Materials/**`, `Tests/Data/Assets/Scenes/**`, `Tests/Data/Assets/Prefabs/**`, `Tests/Data/Assets/SpriteSheets/**` |
+| Origin | First-party: hand-written canonical JSON documents (materials, a scene, a prefab and sprite sheets) |
 | License | First-party: the same terms as the repository's code; no third-party rights |
 
 ## Generated audio fixtures (`Assets/Audio/Tone.wav`, `Assets/Audio/Tone.flac`)

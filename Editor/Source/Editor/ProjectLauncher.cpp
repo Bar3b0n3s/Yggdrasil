@@ -15,8 +15,24 @@
 #include <imgui.h>
 
 #include <algorithm>
+#include <filesystem>
+#include <system_error>
 
 namespace Engine {
+
+	namespace Utils {
+
+		// The FileDialog API takes an absolute initial folder. A typed location may be relative: it is taken relative to the
+		// current directory, as the ImGui picker took it before (the launcher never changes the current directory), or kept
+		// as typed when the current directory cannot be read, so the dialog refuses it with the path in its message.
+		static std::filesystem::path MakeLauncherPathAbsolute(const std::filesystem::path& path)
+		{
+			std::error_code error;
+			std::filesystem::path absolute = std::filesystem::absolute(path, error);
+			return error ? path : absolute;
+		}
+
+	}
 
 	std::filesystem::path GetDefaultProjectLocation()
 	{
@@ -60,7 +76,7 @@ namespace Engine {
 		}
 		if (context.Editor.HasProject())
 		{
-			m_Picker.Cancel();
+			m_Dialog.Cancel();
 			// The host refreshes its recent-project snapshot after each open and close; take it again when shown next.
 			m_RecentLoaded = false;
 			return {};
@@ -174,8 +190,15 @@ namespace Engine {
 					ImGui::SameLine();
 					if (ImGui::Button("Browse..."))
 					{
-						const auto initial = m_Location[0] ? FileSystem::PathFromUtf8(m_Location.data()) : GetDefaultProjectLocation();
-						if (const Status opened = m_Picker.Open("Choose a location for your project", initial); !opened)
+						const auto initial = m_Location[0] ? Utils::MakeLauncherPathAbsolute(FileSystem::PathFromUtf8(m_Location.data())) : GetDefaultProjectLocation();
+						const FileDialogRequest request = {
+							.Kind = FileDialogKind::PickFolder,
+							.Title = "Choose a location for your project",
+							.InitialDirectory = initial,
+							.Extensions = {},
+							.FilterName = {},
+						};
+						if (const Status opened = m_Dialog.Open(request, context.FileDialogs); !opened)
 							showError(opened.error());
 						else
 							m_PickingLocation = true;
@@ -197,13 +220,20 @@ namespace Engine {
 					ImGui::TextWrapped("Choose a project file to open its scenes and assets.");
 					if (ImGui::Button("Browse projects..."))
 					{
-						const auto browse = [this](std::filesystem::path directory) -> Status
+						const auto browse = [this, &context](std::filesystem::path directory) -> Status
 						{
 							// Recent projects may have moved or lived on an unavailable volume. Walk to a
 							// browsable ancestor, keeping expected intermediate failures out of the UI.
 							for (;;)
 							{
-								const Status opened = m_Picker.OpenFile("Open a project", directory, ".eproj");
+								const FileDialogRequest request = {
+									.Kind = FileDialogKind::OpenFile,
+									.Title = "Open a project",
+									.InitialDirectory = directory,
+									.Extensions = { ".eproj" },
+									.FilterName = "Projects",
+								};
+								const Status opened = m_Dialog.Open(request, context.FileDialogs);
 								if (opened)
 									return {};
 								const auto parent = directory.parent_path();
@@ -255,9 +285,9 @@ namespace Engine {
 			}
 		}
 		ImGui::EndChild();
-		if (m_Picker.IsOpen())
+		if (m_Dialog.IsOpen())
 		{
-			auto picked = m_Picker.Draw();
+			auto picked = m_Dialog.Draw();
 			if (!picked)
 				showError(picked.error());
 			else if (*picked)

@@ -39,8 +39,11 @@ namespace Engine {
 	struct FileDialogRequest
 	{
 		FileDialogKind Kind = FileDialogKind::OpenFile;
-		std::string Title{};                      // the dialog's caption, UTF-8
-		std::filesystem::path InitialDirectory{}; // absolute: the folder the dialog starts in
+		std::string Title{}; // the dialog's caption, UTF-8
+		// Absolute: the folder the dialog starts in when the operating system remembers no folder the user last chose in
+		// such a dialog (Windows' IFileDialog::SetDefaultFolder: nativefiledialog-extended is built without
+		// NFD_OVERRIDE_RECENT_WITH_DEFAULT, Vendor/nativefiledialog-extended/VENDOR.md); the ImGui picker always starts there.
+		std::filesystem::path InitialDirectory{};
 		// OpenFile: the accepted suffixes, lower case with their leading dot (".eproj", ".test.luau"), matched without regard
 		// to ASCII case; empty: every file. PickFolder: none.
 		std::vector<std::string> Extensions{};

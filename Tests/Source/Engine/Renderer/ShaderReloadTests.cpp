@@ -20,8 +20,7 @@
 #include <utility>
 
 // The editor's shader hot reload, the renderer half of shaders.reload (M18, C18.1, R-SHR; Docs/Decisions/0029-m18-contract.md
-// decision 3): SceneRendererPipelines::ReloadShaders over a copy of this build's compiled shaders. Skipped until stream B
-// implements it.
+// decision 3): SceneRendererPipelines::ReloadShaders over a copy of this build's compiled shaders.
 
 namespace Engine {
 
@@ -57,7 +56,7 @@ namespace Engine {
 
 	TEST_SUITE(Test::GpuSuite)
 	{
-		TEST_CASE("ShaderReload: a broken shader keeps the old pipelines, and a fixed one swaps in without a restart" * doctest::skip(true))
+		TEST_CASE("ShaderReload: a broken shader keeps the old pipelines, and a fixed one swaps in without a restart")
 		{
 			Test::HeadlessGpuFixture gpu;
 			ENGINE_REQUIRE_GPU(gpu);

@@ -78,4 +78,5 @@ project "Tests"
 	UseSpdlog()
 	UseMiniaudio()
 	UseMikkTSpace()
+	UseNativeFileDialog()
 	UseLuau(true)

@@ -8,6 +8,7 @@
 #include <glm/glm.hpp>
 
 #include <cstdint>
+#include <memory_resource>
 #include <vector>
 
 // Render extraction (Architecture §5.2, §5.7 frame phase step 4, §8.2): builds the plain RenderSnapshot of one view from a
@@ -114,6 +115,12 @@ namespace Engine {
 	// Also rejects unknown flag bits, invalid annotation enums and invalid ShadowMapSize before copying
 	// options. Explicit label IDs are copied, sorted/deduplicated and unknown IDs filtered; other label modes require
 	// an empty LabelEntities vector. Returned values own selection and label storage.
-	[[nodiscard]] Result<RenderSnapshot> ExtractRenderSnapshot(const Scene& scene, const RenderExtractionRequest& request);
+	// M18 (R-ARENA; Docs/Decisions/0029-m18-contract.md decision 9): the snapshot is built over `resource` (not null,
+	// asserted; RenderSnapshot(resource)), which must outlive it, so a host can extract into a per-frame arena such as a
+	// std::pmr::monotonic_buffer_resource it releases once the frame is rendered; the result keeps the resource while it is
+	// moved (a copy allocates from the default resource). The default resource is the global heap, as before. The call is a
+	// CPU zone of the process profiler ("ExtractRenderSnapshot"), which the arena's measurement reads.
+	[[nodiscard]] Result<RenderSnapshot> ExtractRenderSnapshot(const Scene& scene, const RenderExtractionRequest& request,
+		std::pmr::memory_resource* resource = std::pmr::get_default_resource());
 
 }

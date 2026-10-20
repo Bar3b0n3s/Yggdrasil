@@ -5,6 +5,7 @@
 #include "Editor/ScriptedFileDialog.h"
 #include "Engine/Core/Buffer.h"
 #include "Engine/Core/FileSystem.h"
+#include "Engine/Platform/Window.h"
 #include "Support/TempDirectory.h"
 
 #include <imgui_internal.h>
@@ -13,8 +14,7 @@
 
 // The editor's FileDialog API (M18, C18.1, E-DIALOGS; Docs/Decisions/0029-m18-contract.md decisions 19 and 20) through a
 // scripted backend and the ImGui picker. Roadmap M18: "The FileDialog API returns a path through the injected backend, and
-// the ImGui picker stays the fallback headless, without a native backend and on Linux and macOS". Skipped until stream G
-// implements the API.
+// the ImGui picker stays the fallback headless, without a native backend and on Linux and macOS".
 
 namespace Engine {
 
@@ -46,7 +46,7 @@ namespace Engine {
 
 	TEST_SUITE("Editor")
 	{
-		TEST_CASE("FileDialog: an injected backend's chosen path is returned once, revalidated" * doctest::skip(true))
+		TEST_CASE("FileDialog: an injected backend's chosen path is returned once, revalidated")
 		{
 			Test::TempDirectory directory("FileDialogNative");
 			REQUIRE(FileSystem::CreateDirectories(directory / "Projects"));
@@ -84,7 +84,7 @@ namespace Engine {
 			CHECK(script->LiveSessions == 0);
 		}
 
-		TEST_CASE("FileDialog: without a backend, and when the backend cannot show the request, the ImGui picker serves it" * doctest::skip(true))
+		TEST_CASE("FileDialog: without a backend, and when the backend cannot show the request, the ImGui picker serves it")
 		{
 			Test::TempDirectory directory("FileDialogFallback");
 			REQUIRE(FileSystem::WriteFileAtomic(directory / "Demo.eproj", AsBytes("{}")));
@@ -127,7 +127,7 @@ namespace Engine {
 			CHECK_FALSE(dialog.IsOpen());
 		}
 
-		TEST_CASE("FileDialog: a cancelled native dialog closes without a path, and Cancel closes an open one" * doctest::skip(true))
+		TEST_CASE("FileDialog: a cancelled native dialog closes without a path, and Cancel closes an open one")
 		{
 			Test::TempDirectory directory("FileDialogCancel");
 			const auto script = CreateRef<Test::ScriptedFileDialogScript>();
@@ -166,7 +166,7 @@ namespace Engine {
 			CHECK(script->LiveSessions == 1);
 		}
 
-		TEST_CASE("FileDialog: a chosen path of the wrong kind or extension, or a failed dialog, is an error and closes it" * doctest::skip(true))
+		TEST_CASE("FileDialog: a chosen path of the wrong kind or extension, or a failed dialog, is an error and closes it")
 		{
 			Test::TempDirectory directory("FileDialogRefused");
 			REQUIRE(FileSystem::WriteFileAtomic(directory / "Notes.txt", AsBytes("text")));
@@ -205,7 +205,7 @@ namespace Engine {
 			}
 		}
 
-		TEST_CASE("FileDialog: a malformed request or an unreadable initial folder is refused and keeps the open dialog" * doctest::skip(true))
+		TEST_CASE("FileDialog: a malformed request or an unreadable initial folder is refused and keeps the open dialog")
 		{
 			Test::TempDirectory directory("FileDialogRefusedOpen");
 			const auto script = CreateRef<Test::ScriptedFileDialogScript>();
@@ -228,6 +228,23 @@ namespace Engine {
 			CHECK(dialog.IsOpen());
 			CHECK(dialog.IsNative());
 			CHECK(script->Cancels == 0);
+		}
+
+		TEST_CASE("FileDialog: the native backend refuses a malformed request before showing anything")
+		{
+			// MakeNativeFileDialogBackend is NativeFileDialog::Open over the owner window, whose request rules come first on
+			// every platform. A valid request would show a real dialog, which only the windowed child of
+			// NativeFileDialogTests.cpp does.
+			Test::TempDirectory directory("FileDialogNativeBackend");
+			const Result<Window> window = Window::Create({ .Title = "FileDialog", .Width = 64, .Height = 64 });
+			REQUIRE_MESSAGE(window.has_value(), window.error().ToString());
+			const FileDialogBackend backend = MakeNativeFileDialogBackend(*window);
+			REQUIRE(backend);
+			FileDialogRequest request = MakeOpenProjectRequest(directory.GetPath());
+			request.Extensions = { "eproj" };
+			const Result<Scope<IFileDialogSession>> session = backend(request);
+			REQUIRE_FALSE(session.has_value());
+			CHECK(session.error().GetCode() == ErrorCode::InvalidArgument);
 		}
 	}
 

@@ -59,7 +59,8 @@ namespace Engine {
 			.Entry(AssetType::AudioClip, "AudioClip", "A sound (WAV, FLAC, MP3, or a .sfx preset).")
 			.Entry(AssetType::Script, "Script", "A Luau script (.luau).")
 			.Entry(AssetType::Font, "Font", "A font (TTF, OTF) as a signed distance field atlas.")
-			.Entry(AssetType::Replay, "Replay", "An input replay (.replay).");
+			.Entry(AssetType::Replay, "Replay", "An input replay (.replay).")
+			.Entry(AssetType::SpriteSheet, "SpriteSheet", "A sprite sheet (.spritesheet): frames of a texture with pivots and 9-slice borders, and clips.");
 
 		registry.Struct<AssetSummary>("AssetSummary", "An asset's canonical id with its readable path and type.")
 			.Field("id", &AssetSummary::Id, "The asset's handle: 16 lowercase hex digits.")

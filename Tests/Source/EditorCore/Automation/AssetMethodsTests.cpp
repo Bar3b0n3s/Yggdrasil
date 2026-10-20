@@ -595,6 +595,90 @@ namespace Engine {
 			CHECK(badPatch["error"]["data"]["issues"][0]["pointer"] == Json("/values/Volume"));
 			CHECK_FALSE(setup.GetEditor().GetVfs().Exists(VfsPath::Create("project", "Assets/Audio/Bad.sfx").value_or(VfsPath())));
 		}
+
+		// M18 (Docs/Decisions/0029-m18-contract.md decision 18): sprite sheets through asset.create, asset.getProperties and
+		// asset.setProperties, checked by ValidateSpriteSheet and, when their texture is registered and loads, against its size.
+		TEST_CASE("AssetMethods: a sprite sheet is created over the defaults and patched, its frames inside a texture that loads")
+		{
+			Test::AutomationFixture setup("AssetSpriteSheet");
+			// Tests/Data's 16 x 8 texture.
+			const Result<Buffer> png = FileSystem::ReadFile(Test::GetTestDataPath("Assets/Textures/Rgba.png"));
+			REQUIRE_MESSAGE(png.has_value(), png.error().ToString());
+			const VfsPath texturePath = VfsPath::Create("project", "Assets/Textures/Rgba.png").value_or(VfsPath());
+			REQUIRE(setup.GetEditor().CreateProjectDirectory(texturePath.GetParent()).has_value());
+			REQUIRE(setup.GetEditor().WriteProjectFile(texturePath, *png).has_value());
+			CallOrFail(setup, "project.refreshAssets", Json::object());
+			const std::string texture = JsonReader(CallOrFail(setup, "asset.info", Json{ { "asset", "Assets/Textures/Rgba.png" } })["asset"]["id"])
+											.ReadString()
+											.value_or(std::string());
+			REQUIRE(texture.size() == 16);
+
+			// Without values: the empty sheet, every field written.
+			const Json empty = CallOrFail(setup, "asset.create", ParseAssetMethodJson(R"({"type": "SpriteSheet", "path": "Assets/Sprites/Empty.spritesheet"})"));
+			CHECK(empty["asset"]["type"] == Json("SpriteSheet"));
+			const Result<std::string> emptyText = setup.GetEditor().GetVfs().ReadText(VfsPath::Create("project", "Assets/Sprites/Empty.spritesheet").value_or(VfsPath()));
+			REQUIRE_MESSAGE(emptyText.has_value(), emptyText.error().ToString());
+			CHECK(*emptyText == "{\n\t\"Format\": \"SpriteSheet\",\n\t\"Version\": 1,\n\t\"Texture\": null,\n\t\"Frames\": [],\n\t\"Clips\": []\n}\n");
+
+			// Over the texture: a frame that ends at the texture's corner is inside it; the texture is the sheet's dependency.
+			Json values = ParseAssetMethodJson(R"({"Frames": [{"Name": "Corner", "Rect": {"X": 8, "Y": 0, "Width": 8, "Height": 8}}],
+				"Clips": [{"Name": "Idle", "Frames": [{"Frame": 0, "Ticks": 4}]}]})");
+			values["Texture"] = texture;
+			const Json created = CallOrFail(setup, "asset.create", Json{ { "type", "SpriteSheet" }, { "path", "Assets/Sprites/Hero.spritesheet" }, { "values", values } });
+			CHECK(created["undoIndex"] != Json(0));
+			// A created asset imports at its first use; its import records the texture.
+			CallOrFail(setup, "asset.reimport", ParseAssetMethodJson(R"({"asset": "Assets/Sprites/Hero.spritesheet"})"));
+			const Json info = CallOrFail(setup, "asset.info", ParseAssetMethodJson(R"({"asset": "Assets/Sprites/Hero.spritesheet"})"));
+			CHECK(info["importer"] == Json("SpriteSheet"));
+			REQUIRE(info["dependencies"].size() == 1);
+			CHECK(info["dependencies"][0]["id"] == Json(texture));
+			CHECK(info["diagnostics"].empty());
+			const Json dependents = CallOrFail(setup, "asset.info", Json{ { "asset", texture } })["dependents"];
+			REQUIRE(dependents.size() == 1);
+			CHECK(dependents[0]["path"] == Json("Assets/Sprites/Hero.spritesheet"));
+			const Json properties = CallOrFail(setup, "asset.getProperties", ParseAssetMethodJson(R"({"asset": "Assets/Sprites/Hero.spritesheet"})"));
+			CHECK(properties["values"]["Texture"] == Json(texture));
+			CHECK(properties["values"]["Frames"][0]["Pivot"] == Json::array({ 0.5, 0.5 }));
+			CHECK(properties["values"]["Clips"][0]["Loop"] == Json(true));
+
+			// A frame one texel past the texture's right edge is refused at its Rect, by a create and by a patch, which leaves the
+			// file as it was.
+			Json outside = values;
+			outside["Frames"][0]["Rect"]["X"] = 9;
+			const Json refused = setup.Request("asset.create", Json{ { "type", "SpriteSheet" }, { "path", "Assets/Sprites/Outside.spritesheet" }, { "values", outside } });
+			CHECK(refused["error"]["code"] == Json(-32003));
+			CHECK(refused["error"]["data"]["errorCode"] == Json("Validation"));
+			CHECK(refused["error"]["data"]["issues"][0]["pointer"] == Json("/values/Frames/0/Rect"));
+			CHECK_FALSE(setup.GetEditor().GetVfs().Exists(VfsPath::Create("project", "Assets/Sprites/Outside.spritesheet").value_or(VfsPath())));
+			const Json tall = setup.Request("asset.setProperties",
+				ParseAssetMethodJson(R"({"asset": "Assets/Sprites/Hero.spritesheet", "values": {"Frames": [{"Rect": {"X": 0, "Y": 4, "Width": 4, "Height": 5}}]}})"));
+			CHECK(tall["error"]["code"] == Json(-32003));
+			CHECK(tall["error"]["data"]["issues"][0]["pointer"] == Json("/values/Frames/0/Rect"));
+			const Json unchanged = CallOrFail(setup, "asset.getProperties", ParseAssetMethodJson(R"({"asset": "Assets/Sprites/Hero.spritesheet"})"));
+			CHECK(unchanged["values"]["Frames"][0]["Rect"]["X"] == Json(8));
+
+			// A patch replaces an array whole and is one undo step.
+			const Json patched = CallOrFail(setup, "asset.setProperties",
+				ParseAssetMethodJson(R"({"asset": "Assets/Sprites/Hero.spritesheet", "values": {"Frames": [{"Rect": {"X": 0, "Y": 0, "Width": 16, "Height": 8}}]}})"));
+			CHECK(patched["values"]["Frames"].size() == 1);
+			CHECK(patched["values"]["Frames"][0]["Name"] == Json(""));
+			CHECK(patched["values"]["Frames"][0]["Rect"]["Width"] == Json(16));
+			CHECK(patched["values"]["Clips"][0]["Name"] == Json("Idle"));
+			CallOrFail(setup, "edit.undo", Json::object());
+			const Json undone = CallOrFail(setup, "asset.getProperties", ParseAssetMethodJson(R"({"asset": "Assets/Sprites/Hero.spritesheet"})"));
+			CHECK(undone["values"]["Frames"][0]["Name"] == Json("Corner"));
+
+			// A texture that is not registered is not checked (project.validate reports it): only the sheet's own rules apply.
+			CallOrFail(setup, "asset.create", ParseAssetMethodJson(R"({"type": "SpriteSheet", "path": "Assets/Sprites/Loose.spritesheet",
+				"values": {"Texture": "7777000077770001", "Frames": [{"Rect": {"Width": 64, "Height": 64}}]}})"));
+			const Json invalid = setup.Request("asset.create", ParseAssetMethodJson(R"({"type": "SpriteSheet", "path": "Assets/Sprites/Bad.spritesheet",
+				"values": {"Clips": [{"Name": "Run", "Frames": [{"Frame": 0, "Ticks": 1}]}]}})"));
+			CHECK(invalid["error"]["code"] == Json(-32003));
+			CHECK(invalid["error"]["data"]["issues"][0]["pointer"] == Json("/values/Clips/0/Frames/0/Frame"));
+			const Json header = setup.Request("asset.create", ParseAssetMethodJson(R"({"type": "SpriteSheet", "path": "Assets/Sprites/Bad.spritesheet",
+				"values": {"Format": "SpriteSheet"}})"));
+			CHECK(header["error"]["code"] == Json(-32602));
+		}
 	}
 
 }

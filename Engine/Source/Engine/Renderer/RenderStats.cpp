@@ -2,13 +2,79 @@
 #include "Engine/Renderer/RenderStats.h"
 
 #include "Engine/Core/Assert.h"
+#include "Engine/Core/Profiler.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <limits>
+#include <optional>
 #include <utility>
 
 namespace Engine {
+
+	namespace Utils {
+
+		// The profiler zone of each stage: "Stage:" and its RenderStageToString name, in enumerator order. String literals,
+		// since a CPU zone's name must have static storage duration (Profiler::RecordZone); "RenderRecordingContext: every
+		// stage's zones are named after the stage" checks them against RenderStageToString.
+		constexpr std::array<const char*, RenderStageCount> RenderStageZoneNames = {
+			"Stage:Prepare",
+			"Stage:Deform",
+			"Stage:Shadows",
+			"Stage:DepthNormal",
+			"Stage:Ambient",
+			"Stage:Forward",
+			"Stage:Sprites",
+			"Stage:HdrPost",
+			"Stage:Tonemap",
+			"Stage:LdrPost",
+			"Stage:SceneOverlay",
+			"Stage:Output",
+			"Stage:EditorOverlay",
+		};
+
+		// The CPU zones compile to nothing in Dist, like ENGINE_PROFILE_SCOPE (Core/Profiler.h), and so does the GPU merge:
+		// Dist has no automation, so nothing reads the profiler's timeline there.
+#if defined(ENGINE_DIST)
+		constexpr bool RecordsProfilerZones = false;
+#else
+		constexpr bool RecordsProfilerZones = true;
+#endif
+
+		// A GPU time in milliseconds as whole nanoseconds; GpuProfiler gives finite, non-negative values (asserted by the
+		// caller).
+		[[nodiscard]] static uint64_t MillisecondsToNanoseconds(double milliseconds)
+		{
+			return static_cast<uint64_t>(std::llround(milliseconds * 1.0e6));
+		}
+
+		// Merges an available frame's samples into the process profiler's timeline, each at the frame's CPU anchor plus its
+		// start, with its depth (RenderStatsHistory::PublishGpu).
+		static void SubmitGpuFrameToProfiler(const GpuTimingFrame& frame)
+		{
+			if (!Profiler::IsInitialized() || frame.Samples.empty())
+				return;
+			std::vector<ProfileZone> zones;
+			zones.reserve(frame.Samples.size());
+			for (const GpuTimingSample& sample : frame.Samples)
+			{
+				ENGINE_CORE_ASSERT(std::isfinite(sample.StartMilliseconds) && sample.StartMilliseconds >= 0.0 && std::isfinite(sample.Milliseconds)
+						&& sample.Milliseconds >= 0.0,
+					"Invalid GPU timing for '{}'", sample.Name);
+				const uint64_t begin = frame.CpuBeginNs + MillisecondsToNanoseconds(sample.StartMilliseconds);
+				zones.push_back({
+					.Name = sample.Name,
+					.BeginNs = begin,
+					.EndNs = begin + MillisecondsToNanoseconds(sample.Milliseconds),
+					.ThreadIndex = Profiler::GpuThreadIndex,
+					.Depth = sample.Depth,
+				});
+			}
+			Profiler::SubmitGpuZones(zones);
+		}
+
+	}
 
 	void RenderStatsHistory::PublishCpu(RenderStats stats)
 	{
@@ -35,6 +101,8 @@ namespace Engine {
 	{
 		if (frame.Available && m_HasGpuFrame && frame.FrameIndex < m_LastGpuFrameIndex)
 			return;
+		// A frame reaches the profiler's timeline once, however often it is published (RenderStats.h).
+		const bool isNewFrame = frame.Available && (!m_HasGpuFrame || frame.FrameIndex > m_LastGpuFrameIndex);
 
 		m_Latest.GpuAvailable = frame.Available;
 		m_Latest.GpuFrameIndex = frame.Available ? frame.FrameIndex : 0;
@@ -57,6 +125,11 @@ namespace Engine {
 		{
 			m_LastGpuFrameIndex = frame.FrameIndex;
 			m_HasGpuFrame = true;
+		}
+		if constexpr (Utils::RecordsProfilerZones)
+		{
+			if (isNewFrame)
+				Utils::SubmitGpuFrameToProfiler(frame);
 		}
 	}
 
@@ -83,6 +156,12 @@ namespace Engine {
 		double LastSeconds = 0.0;
 		bool HasClockSample = false;
 		bool IsOpen = false;
+		// The open stage (BeginStage to EndStage): its command list (borrowed, null for a CPU-only stage) and its CPU zone in
+		// the process profiler.
+		nvrhi::ICommandList* StageCommandList = nullptr;
+		std::optional<ProfileScope> StageZone{};
+		RenderStage Stage = RenderStage::Prepare;
+		bool IsStageOpen = false;
 	};
 
 	RenderRecordingContext::RenderRecordingContext(RenderStats& stats, std::function<double()> nowSeconds, GpuProfiler* profiler)
@@ -97,6 +176,7 @@ namespace Engine {
 	RenderRecordingContext::~RenderRecordingContext()
 	{
 		ENGINE_CORE_VERIFY(!m_State->IsOpen, "RenderRecordingContext destroyed with an open pass");
+		ENGINE_CORE_VERIFY(!m_State->IsStageOpen, "RenderRecordingContext destroyed with stage {} open", RenderStageToString(m_State->Stage));
 	}
 
 	void RenderRecordingContext::BeginPass(std::string_view name, nvrhi::ICommandList* commandList)
@@ -159,14 +239,46 @@ namespace Engine {
 		state.IsOpen = false;
 	}
 
-	void RenderRecordingContext::BeginStage(RenderStage /*stage*/, nvrhi::ICommandList* /*commandList*/)
+	void RenderRecordingContext::BeginStage(RenderStage stage, nvrhi::ICommandList* commandList)
 	{
-		ENGINE_CONTRACT_STUB();
+		State& state = *m_State;
+		const auto index = static_cast<size_t>(stage);
+		ENGINE_CORE_VERIFY(index < Utils::RenderStageZoneNames.size(), "RenderRecordingContext::BeginStage of an unknown stage {}", index);
+		ENGINE_CORE_VERIFY(!state.IsStageOpen, "RenderRecordingContext::BeginStage of {} while stage {} is open", RenderStageToString(stage),
+			RenderStageToString(state.Stage));
+		ENGINE_CORE_VERIFY(!state.IsOpen, "RenderRecordingContext::BeginStage of {} while a pass is open", RenderStageToString(stage));
+		const char* name = Utils::RenderStageZoneNames[index];
+		state.Stage = stage;
+		state.StageCommandList = commandList;
+		state.IsStageOpen = true;
+		if constexpr (Utils::RecordsProfilerZones)
+			state.StageZone.emplace(name);
+		if (commandList != nullptr)
+		{
+			// The stage's pass scopes nest in its GPU zone (depth 1); the marker names the stage in captures and device-fault
+			// reports whether or not this frame is timed.
+			if (state.Profiler != nullptr)
+				state.Profiler->BeginScope(*commandList, name);
+			else
+				commandList->beginMarker(name);
+		}
 	}
 
 	void RenderRecordingContext::EndStage()
 	{
-		ENGINE_CONTRACT_STUB();
+		State& state = *m_State;
+		ENGINE_CORE_VERIFY(state.IsStageOpen, "RenderRecordingContext::EndStage without an open stage");
+		ENGINE_CORE_VERIFY(!state.IsOpen, "RenderRecordingContext::EndStage of {} while a pass is open", RenderStageToString(state.Stage));
+		if (state.StageCommandList != nullptr)
+		{
+			if (state.Profiler != nullptr)
+				state.Profiler->EndScope(*state.StageCommandList);
+			else
+				state.StageCommandList->endMarker();
+		}
+		state.StageZone.reset();
+		state.StageCommandList = nullptr;
+		state.IsStageOpen = false;
 	}
 
 }

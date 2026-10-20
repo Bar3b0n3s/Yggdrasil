@@ -105,14 +105,16 @@ The stages, with the configurations of the §15.8 matrix:
                                      is installed, otherwise reported as skipped (a failure with --require-clang-cl)
   hardening    Release               hardened milestone gates only (CI.py --milestone, or named in --stages):
                                      Scripts/Hardening.py --steps perf,soak,asan-generate,asan-build,asan-unit,
-                                     asan-feature,fuzz, one step each, failing fast: the perf capture (warning-only),
-                                     the soak of every scene of every project under Projects/ (FeatureTest and the
-                                     demos there, not Tests/Projects/; a new script error during a scene's soak fails
-                                     it) and of the exported Release Runtime, the
-                                     AddressSanitizer workspace (bin-int/Asan) with its unit and feature suites, and the
-                                     1,000,000-iteration fuzz of every reader of Tests/Data/Fuzz/Targets.json (§15.1
-                                     T6; ADR 0024 decisions 12 to 16 and 19). A plain CI.py lists it as not run,
-                                     naming ADR 0028 decision 12's rule (MILESTONE_ONLY_NOTE)
+                                     asan-feature,debug-heap,fuzz, one step each, failing fast: the perf capture
+                                     (warning-only), the soak of every scene of every project under Projects/
+                                     (FeatureTest and the demos there, not Tests/Projects/; a new script error during a
+                                     scene's soak fails it) and of the exported Release Runtime, the
+                                     AddressSanitizer workspace (bin-int/Asan) with its unit and feature suites, the
+                                     Debug gpu suite on the Windows debug heap with the GPU object lifetimes logged
+                                     (ADR 0029, R-GPUCRASH), and the 1,000,000-iteration fuzz of every reader of
+                                     Tests/Data/Fuzz/Targets.json (§15.1 T6; ADR 0024 decisions 12 to 16 and 19). A
+                                     plain CI.py lists it as not run, naming ADR 0028 decision 12's rule
+                                     (MILESTONE_ONLY_NOTE)
 
 --milestone (Architecture §15.9; ADR 0024 decision 19) runs every available stage plus hardening, with
 --require-clang-cl. Which milestone end runs it is ADR 0028 decision 12's rule (Roadmap rule 1): within a phase, only
@@ -144,7 +146,8 @@ Results: each stage's own output, a summary table, bin/TestResults/CI.xml (JUnit
 path with --summary-junit, so separate runs of one CI job keep separate summaries), the unit, gpu, golden, feature
 (with the editor's JSON report beside it), automation, export (with the Runtime's FeatureTest-<Config> reports),
 determinism, games (Games-<Config>.xml, Games-<Name>-Editor-<Config>.json and Games-<Name>-Dist.{json,xml}) and
-hardening (Soak, Perf, Unit/Feature/Fuzz-Release-Asan) files in bin/TestResults/, and the actual,
+hardening (Soak, Perf, Unit/Feature/Fuzz-Release-Asan, and DebugHeap/ with the debug-heap step's reports and GPU
+lifetime logs) files in bin/TestResults/, and the actual,
 expected and diff images of failed golden comparisons in bin/TestResults/Golden/.
 
 Exit codes (§4.1): 0 every selected stage passed, otherwise the code of the first failing step: 1 failed,
@@ -197,7 +200,7 @@ SHADER_ACCEPTANCE_NAME = "Shaders: slang-only change is not skipped by the up-to
 # The Roadmap M15 acceptance name of the Dist map check, used verbatim as its step name (ADR 0024 decision 11).
 RUNTIME_MAP_ACCEPTANCE_NAME = "Dist: map file contains no automation, Analysis, ImGui or AssetPipeline symbols"
 # The hardening stage's steps, in Scripts/Hardening.py's order (ADR 0024 decision 19).
-HARDENING_STEPS = ("perf", "soak", "asan-generate", "asan-build", "asan-unit", "asan-feature", "fuzz")
+HARDENING_STEPS = ("perf", "soak", "asan-generate", "asan-build", "asan-unit", "asan-feature", "debug-heap", "fuzz")
 # Why a run without --milestone lists the hardening stage as not run: ADR 0028 decision 12's rule.
 MILESTONE_ONLY_NOTE = ("hardened milestone gates only: CI.py --milestone at a phase's last lander when the phase "
                        "touches core systems, file readers or the renderer (ADR 0028 decision 12); every other "
@@ -235,12 +238,13 @@ TIMEOUTS = {
     "clang-cl": 7200.0,
     "runtime-map": 600.0,
     # Scripts/Hardening.py bounds each of its steps itself (its TIMEOUTS: perf 1200 s, soak 3600 s, asan generate
-    # 3600 s, asan build 7200 s, asan unit 3600 s, asan feature 3600 s, 22,800 s in all, plus 60 s of grace for each
-    # sanitized suite, and the fuzz step's timeout, which follows its measured per-target costs within a budget of
-    # 5,400 s per 35 targets, Lib/hardening.py fuzz_budget_seconds: 5,400 s for today's 35); this bounds the whole run
-    # above their sum (Hardening.py longest_run_seconds), which holds up to 49 fuzz targets (ADR 0024 "Integration",
-    # budgets and timeouts; Tests/Automation/test_hardening.py checks it for the committed fuzz targets and the 49).
-    "hardening": 30600.0,
+    # 3600 s, asan build 7200 s, asan unit 3600 s, asan feature 3600 s, debug heap 7200 s (ADR 0029, R-GPUCRASH),
+    # 30,000 s in all, plus 60 s of grace for each sanitized suite and for the debug-heap step, and the fuzz step's
+    # timeout, which follows its measured per-target costs within a budget of 5,400 s per 35 targets, Lib/hardening.py
+    # fuzz_budget_seconds: 5,400 s for today's 35); this bounds the whole run above their sum (Hardening.py
+    # longest_run_seconds), which holds up to 49 fuzz targets (ADR 0024 "Integration", budgets and timeouts;
+    # Tests/Automation/test_hardening.py checks it for the committed fuzz targets and the 49).
+    "hardening": 37860.0,
 }
 
 

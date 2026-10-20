@@ -1,8 +1,10 @@
 #include "TestsPCH.h"
 #include "Support/GoldenScene.h"
 
+#include "Engine/Asset/ScriptData.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/Core/FileSystem.h"
+#include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Core/Mounts/NativeDirectoryMount.h"
 #include "Engine/Core/VirtualFileSystem.h"
 #include "Engine/Graphics/Image.h"
@@ -16,14 +18,19 @@
 #include "Support/TestData.h"
 #include "Support/Utf8Path.h"
 
+#include <nlohmann/json.hpp>
+
 #include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <map>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 // The golden-scene support (Docs/Decisions/0013-m8-decisions.md decision 14): the image grid, the scenes the
@@ -45,6 +52,38 @@ namespace Engine {
 	static std::filesystem::path GetFeatureTestPath(std::string_view relative)
 	{
 		return GetFeatureTestRoot() / Test::PathFromUtf8(relative);
+	}
+
+	// The field schemas of every script a scene document attaches (its entities' Script components), loaded through
+	// `manager`, so a strict load resolves the scene's script fields as the play copy and an export do (M13); fails the test
+	// case when the document or a script does not load.
+	static Ref<const ScriptFieldSchemaSource> LoadSceneScriptSchemas(AssetManager& manager, std::string_view sceneText)
+	{
+		const Result<Json> document = JsonReader::Parse(sceneText);
+		REQUIRE_MESSAGE(document.has_value(), document.error().ToString());
+		const Result<JsonReader> entities = JsonReader(*document).GetMember("Entities");
+		REQUIRE_MESSAGE(entities.has_value(), entities.error().ToString());
+		std::map<AssetHandle, AssetRef<ScriptData>> scripts;
+		for (size_t index = 0; index < entities->GetArraySize().value_or(0); ++index)
+		{
+			const Result<JsonReader> entity = entities->GetElement(index);
+			REQUIRE(entity.has_value());
+			const std::optional<JsonReader> components = entity->FindMember("Components");
+			const std::optional<JsonReader> component = components ? components->FindMember("Script") : std::nullopt;
+			const std::optional<JsonReader> script = component ? component->FindMember("Script") : std::nullopt;
+			if (!script || script->IsNull())
+				continue;
+			const Result<AssetHandle> handle = script->Read<AssetHandle>();
+			REQUIRE_MESSAGE(handle.has_value(), handle.error().ToString());
+			const Result<AssetRef<Asset>> loaded = manager.Load(*handle);
+			REQUIRE_MESSAGE(loaded.has_value(), loaded.error().ToString());
+			AssetRef<ScriptData> data = AssetCast<ScriptData>(*loaded);
+			REQUIRE(data);
+			scripts.emplace(*handle, std::move(data));
+		}
+		Result<Ref<const ScriptFieldSchemaSource>> schemas = ScriptFieldSchemaSource::Create(std::move(scripts));
+		REQUIRE_MESSAGE(schemas.has_value(), schemas.error().ToString());
+		return std::move(*schemas);
 	}
 
 	TEST_SUITE("Support")
@@ -209,8 +248,10 @@ namespace Engine {
 				const Result<FileInfo> info = FileSystem::GetInfo(entry);
 				REQUIRE(info.has_value());
 				const std::string extension = FileSystem::PathToUtf8(entry.extension());
-				// The scaffold authors the native formats itself; .meta files are the editor's.
-				if (info->IsDirectory || extension == ".meta" || extension == ".bak" || extension == ".material" || extension == ".sfx")
+				// The scaffolds author the native formats themselves (Formats.jsonl the .material and .sfx files, SpriteSheets.jsonl
+				// the .spritesheet); .meta files are the editor's.
+				if (info->IsDirectory || extension == ".meta" || extension == ".bak" || extension == ".material" || extension == ".sfx"
+					|| extension == ".spritesheet")
 					continue;
 				const std::string relative = FileSystem::PathToUtf8(entry.lexically_relative(formats));
 				CAPTURE(relative);
@@ -235,7 +276,9 @@ namespace Engine {
 			// The scenes of stream B's scaffolds (Formats, Components, Physics and Audio .jsonl; ADR 0022 decision 9), opened
 			// read-only on the CPU like the golden scenes: they load without a diagnostic, reference only assets the project
 			// or the engine has, and re-save to exactly their committed bytes (the round trip of Architecture §6), so a
-			// scaffold change that writes a non-canonical or unloadable scene fails here before the feature stage.
+			// scaffold change that writes a non-canonical or unloadable scene fails here before the feature stage. Script fields
+			// (Formats.scene's SheetHolder, ADR 0029 decision 22) resolve against the field schemas of the scripts the scene
+			// attaches, as in a play copy or an export.
 			constexpr std::array<std::string_view, 7> Scenes = { "Components", "Components/TonemapAces", "Components/TonemapPbrNeutral",
 				"Components/TonemapLinear", "Physics", "Audio", "Formats" };
 			Test::AssetTestFixture assets({ .EngineResources = true });
@@ -261,7 +304,9 @@ namespace Engine {
 				specification.IdGenerator = &assets.GetGenerator();
 				const Scope<Scene> scene = Scene::Create(specification);
 				LoadReport report;
-				const Status loaded = SceneSerializer::LoadFromFile(*scene, vfs, assets.ProjectPath(relative), { .StrictUnknowns = true, .SourcePath = relative }, report);
+				const Ref<const ScriptFieldSchemaSource> schemas = LoadSceneScriptSchemas(assets.GetManager(), *committed);
+				const Status loaded = SceneSerializer::LoadFromFile(*scene, vfs, assets.ProjectPath(relative),
+					{ .StrictUnknowns = true, .Schemas = schemas.get(), .SourcePath = relative }, report);
 				REQUIRE_MESSAGE(loaded.has_value(), loaded.error().ToString());
 				CHECK(report.Diagnostics.empty());
 				const Result<std::string> saved = SceneSerializer::SaveToString(*scene);

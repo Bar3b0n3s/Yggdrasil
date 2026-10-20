@@ -6,7 +6,7 @@
 		{
 			"name": "asset_create",
 			"method": "asset.create",
-			"description": "Creates a material or a sound effect (with values over the defaults), an empty scene, a one-entity prefab or a folder below Assets/, with its .meta and any missing parent folders, as one undoable command. A folder that already exists succeeds without a command (created: false), so a Folder op is needed only for an empty folder.",
+			"description": "Creates a material, a sound effect or a sprite sheet (with values over the defaults), an empty scene, a one-entity prefab or a folder below Assets/, with its .meta and any missing parent folders, as one undoable command. A folder that already exists succeeds without a command (created: false), so a Folder op is needed only for an empty folder.",
 			"inputSchema": {
 				"$schema": "https://json-schema.org/draft/2020-12/schema",
 				"title": "AssetCreateParams",
@@ -15,14 +15,14 @@
 				"properties": {
 					"type": {
 						"description": "What to create.",
-						"enum": ["Material", "Scene", "Prefab", "SoundEffect", "Folder"]
+						"enum": ["Material", "Scene", "Prefab", "SoundEffect", "Folder", "SpriteSheet"]
 					},
 					"path": {
-						"description": "The project-relative path below Assets/, with the type's extension (.material, .scene, .prefab, .sfx; none for a folder); missing parent folders are created with it.",
+						"description": "The project-relative path below Assets/, with the type's extension (.material, .scene, .prefab, .sfx, .spritesheet; none for a folder); missing parent folders are created with it.",
 						"type": "string"
 					},
 					"values": {
-						"description": "A Material's or a SoundEffect's fields over the defaults (registry names, such as Roughness, or Layers, which a sound effect needs); absent for other types."
+						"description": "A Material's, a SoundEffect's or a SpriteSheet's fields over the defaults (registry names, such as Roughness, Layers, which a sound effect needs, or a sheet's Texture, Frames and Clips, whose frames must lie inside a texture that loads); absent for other types."
 					},
 					"dryRun": {
 						"description": "Validate and return the would-be result without applying anything.",
@@ -71,7 +71,7 @@
 		{
 			"name": "asset_get_properties",
 			"method": "asset.getProperties",
-			"description": "Returns every property of a native asset (a material or a sound effect) by registry name.",
+			"description": "Returns every property of a native asset (a material, a sound effect or a sprite sheet) by registry name.",
 			"inputSchema": {
 				"$schema": "https://json-schema.org/draft/2020-12/schema",
 				"title": "AssetGetPropertiesParams",
@@ -79,7 +79,7 @@
 				"type": "object",
 				"properties": {
 					"asset": {
-						"description": "The native asset (a material or a sound effect).",
+						"description": "The native asset (a material, a sound effect or a sprite sheet).",
 						"type": "string"
 					},
 					"ifRevision": {
@@ -145,7 +145,7 @@
 					},
 					"type": {
 						"description": "Only assets of this type; None lists every type.",
-						"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay"]
+						"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet"]
 					},
 					"recursive": {
 						"description": "Also list the folders below dir.",
@@ -211,7 +211,7 @@
 		{
 			"name": "asset_set_properties",
 			"method": "asset.setProperties",
-			"description": "Applies an RFC 7386 merge patch to a native asset's properties (a material or a sound effect) and writes it, as one undoable command. A running lockstep, recording, replay or test session sees the change only after it ends: asset reloads are deferred like script reloads.",
+			"description": "Applies an RFC 7386 merge patch to a native asset's properties (a material, a sound effect or a sprite sheet; an array such as a sheet's Frames is replaced whole) and writes it, as one undoable command. A running lockstep, recording, replay or test session sees the change only after it ends: asset reloads are deferred like script reloads.",
 			"inputSchema": {
 				"$schema": "https://json-schema.org/draft/2020-12/schema",
 				"title": "AssetSetPropertiesParams",
@@ -219,7 +219,7 @@
 				"type": "object",
 				"properties": {
 					"asset": {
-						"description": "The native asset (a material or a sound effect).",
+						"description": "The native asset (a material, a sound effect or a sprite sheet).",
 						"type": "string"
 					},
 					"values": {
@@ -1589,7 +1589,7 @@
 		{
 			"name": "project_upgrade",
 			"method": "project.upgrade",
-			"description": "Applies migrations and canonical re-saves to every project file (the .eproj, and every scene, prefab, .meta, material, sound effect and replay under Assets/), records each rewrite in provenance and reports the changed files, each with its reason (changes: \"format version 1 to 2\", \"canonical form\"). Run it after an engine change to canonical output; dryRun: true lists what it would rewrite. An unknown member in a material, sound effect or replay fails the upgrade at its file and pointer, as its importer refuses it. Not undoable; refuses an open scene with unsaved changes (save it first).",
+			"description": "Applies migrations and canonical re-saves to every project file (the .eproj, and every scene, prefab, .meta, material, sound effect, replay and sprite sheet under Assets/), records each rewrite in provenance and reports the changed files, each with its reason (changes: \"format version 1 to 2\", \"canonical form\"). Run it after an engine change to canonical output; dryRun: true lists what it would rewrite. An unknown member in a material, sound effect, replay or sprite sheet fails the upgrade at its file and pointer, as its importer refuses it. Not undoable; refuses an open scene with unsaved changes (save it first).",
 			"inputSchema": {
 				"$schema": "https://json-schema.org/draft/2020-12/schema",
 				"title": "NoParams",

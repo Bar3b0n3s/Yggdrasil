@@ -15,8 +15,7 @@
 #include <limits>
 
 // Sprite sheets (M18, C18.1, R-2D-SHEET; Docs/Decisions/0029-m18-contract.md decisions 14 to 16): the .spritesheet
-// document, its rules and its cooked payload. Skipped until stream S implements Asset/SpriteSheetData.cpp and registers the
-// "SpriteSheet" types.
+// document, its rules and its cooked payload.
 
 namespace Engine {
 
@@ -186,7 +185,7 @@ namespace Engine {
 
 	TEST_SUITE("Asset")
 	{
-		TEST_CASE("SpriteSheetData: a .spritesheet file round-trips byte-identically" * doctest::skip(true))
+		TEST_CASE("SpriteSheetData: a .spritesheet file round-trips byte-identically")
 		{
 			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
 			SpriteSheetLoadReport report;
@@ -217,7 +216,7 @@ namespace Engine {
 			CHECK(ErrorCodeOf(SpriteSheetFromText(newer, *registry, report)) == ErrorCode::UnsupportedVersion);
 		}
 
-		TEST_CASE("SpriteSheetData: invalid frames, borders and clips are located Validation errors" * doctest::skip(true))
+		TEST_CASE("SpriteSheetData: invalid frames, borders and clips are located Validation errors")
 		{
 			REQUIRE(ValidateSpriteSheet(MakeHeroSheet()).has_value());
 			CheckInvalid("/Frames/0/Rect/Width", [](SpriteSheetData& sheet)
@@ -311,7 +310,7 @@ namespace Engine {
 			CHECK(FirstPointer(read.error()) == "/Clips/0/Frames/1/Ticks");
 		}
 
-		TEST_CASE("SpriteSheetData: the cooked payload is the documented little-endian layout" * doctest::skip(true))
+		TEST_CASE("SpriteSheetData: the cooked payload is the documented little-endian layout")
 		{
 			// The bytes SpriteSheetData.h documents, written here independently of the serializer, so the Debug and Release
 			// unit runs both prove that a sheet cooks to the same bytes in every configuration (Roadmap M18: "A SpriteSheet
@@ -364,7 +363,7 @@ namespace Engine {
 			CHECK((*loaded)->Clips == sheet.Clips);
 		}
 
-		TEST_CASE("SpriteSheetData: a damaged payload is refused, never trusted" * doctest::skip(true))
+		TEST_CASE("SpriteSheetData: a damaged payload is refused, never trusted")
 		{
 			const Buffer payload = SerializeSpriteSheetPayload(MakeHeroSheet());
 			// Truncated anywhere, or with a byte left over.
@@ -393,8 +392,7 @@ namespace Engine {
 				== ErrorCode::UnsupportedVersion);
 		}
 
-		TEST_CASE("SpriteSheetData: 1,000 seeded mutations of a sprite sheet file and of its cooked form never crash" * doctest::test_suite(Test::FuzzSuite)
-			* doctest::skip(true))
+		TEST_CASE("SpriteSheetData: 1,000 seeded mutations of a sprite sheet file and of its cooked form never crash" * doctest::test_suite(Test::FuzzSuite))
 		{
 			// The seed corpus: the sprite sheet fixtures of Tests/Data/Assets/SpriteSheets and this file's own. The text goes
 			// through SpriteSheetFromText, the cooked form (the payload hash sealed again) through LoadCookedSpriteSheet; a sheet
@@ -435,7 +433,7 @@ namespace Engine {
 			}
 		}
 
-		TEST_CASE("SpriteSheetData: frames and clips are found by name, and the texture is its only dependency" * doctest::skip(true))
+		TEST_CASE("SpriteSheetData: frames and clips are found by name, and the texture is its only dependency")
 		{
 			const SpriteSheetData sheet = MakeHeroSheet();
 			CHECK(FindSpriteFrame(sheet, "Panel") == std::optional<uint32_t>(2));

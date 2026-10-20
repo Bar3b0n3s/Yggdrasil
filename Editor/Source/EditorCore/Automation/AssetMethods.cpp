@@ -15,11 +15,14 @@
 #include "Engine/Asset/BuiltinAssets.h"
 #include "Engine/Asset/MaterialData.h"
 #include "Engine/Asset/ScriptData.h"
+#include "Engine/Asset/SpriteSheetData.h"
+#include "Engine/Asset/TextureData.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/AssetPipeline/ImporterRegistry.h"
 #include "Engine/AssetPipeline/Importers/GltfImporter.h"
 #include "Engine/AssetPipeline/Importers/MaterialImporter.h"
 #include "Engine/AssetPipeline/Importers/SoundEffectImporter.h"
+#include "Engine/AssetPipeline/Importers/SpriteSheetImporter.h"
 #include "Engine/Audio/SoundSynth.h"
 #include "Engine/Automation/Protocol/MethodRegistry.h"
 #include "Engine/Automation/Protocol/PendingOperation.h"
@@ -184,11 +187,82 @@ namespace Engine {
 			return sound;
 		}
 
+		// The registry JSON of `sheet` as asset.getProperties reports it: every field, without "Format" and "Version".
+		Result<Json> SpriteSheetToValues(const SpriteSheetData& sheet, const TypeRegistry& registry)
+		{
+			ENGINE_TRY_ASSIGN(Json document, SpriteSheetToJson(sheet, registry));
+			document.erase("Format");
+			document.erase("Version");
+			return document;
+		}
+
+		// The sprite sheet `document` (a canonical .spritesheet document) with the merge patch `values` applied (null resets a
+		// field; an array replaces the whole array, RFC 7386), read strictly through the registry and checked by
+		// ValidateSpriteSheet (SpriteSheetFromJson). The same rule as PatchMaterial: InvalidArgument at `pointer` for values
+		// that are not an object or that set "Format" or "Version"; Validation located under `pointer` for every violation of
+		// the registry ranges or of ValidateSpriteSheet.
+		Result<SpriteSheetData> PatchSpriteSheet(const Json& document, const Json& values, const TypeRegistry& registry, std::string_view pointer)
+		{
+			if (!values.is_object())
+			{
+				return std::unexpected(Utils::MakeParamError(ErrorCode::InvalidArgument, pointer, "the values must be an object of sprite sheet fields",
+					"for example {\"Frames\": [{\"Name\": \"Idle\", \"Rect\": {\"X\": 0, \"Y\": 0, \"Width\": 16, \"Height\": 16}}]}"));
+			}
+			for (const std::string_view key : { std::string_view("Format"), std::string_view("Version") })
+			{
+				if (values.contains(key))
+				{
+					return std::unexpected(Utils::MakeParamError(ErrorCode::InvalidArgument, std::format("{}/{}", pointer, key),
+						std::format("'{}' is part of the file format, not a sprite sheet property", key)));
+				}
+			}
+			SpriteSheetLoadReport report;
+			Result<SpriteSheetData> sheet = SpriteSheetFromJson(ApplyMergePatch(document, values), registry, report, true);
+			if (!sheet)
+				return std::unexpected(Utils::PrefixPointers(sheet.error(), pointer));
+			return sheet;
+		}
+
+		// asset.create's and asset.setProperties' texture check of a sprite sheet (Docs/Decisions/0029-m18-contract.md decision
+		// 18): when the sheet's Texture is a registered Texture that loads, every frame's Rect lies inside it. A texture that is
+		// missing, of another type or that fails to load is not checked (project.validate and the texture's own diagnostics
+		// report it). Errors: Validation with one issue per frame that leaves the texture, at `pointer`/Frames/<i>/Rect.
+		Status CheckSpriteSheetTexture(EditorAssetManager& assets, const SpriteSheetData& sheet, std::string_view pointer)
+		{
+			const AssetHandle handle = sheet.Texture.GetHandle();
+			if (!handle.IsValid() || assets.GetAssetType(handle) != AssetType::Texture)
+				return {};
+			const Result<AssetRef<Asset>> loaded = assets.Load(handle);
+			if (!loaded.has_value())
+				return {};
+			const AssetRef<TextureData> texture = AssetCast<TextureData>(*loaded);
+			if (texture == nullptr)
+				return {};
+			ValidationContext context{ std::string(pointer) };
+			for (size_t index = 0; index < sheet.Frames.size(); ++index)
+			{
+				const SpriteRect& rect = sheet.Frames[index].Rect;
+				const uint64_t right = static_cast<uint64_t>(rect.X) + rect.Width;
+				const uint64_t bottom = static_cast<uint64_t>(rect.Y) + rect.Height;
+				if (right <= texture->Width && bottom <= texture->Height)
+					continue;
+				ValidationIssue issue;
+				issue.Severity = DiagnosticSeverity::Error;
+				issue.JsonPointer = std::format("{}/Frames/{}/Rect", pointer, index);
+				issue.Message = std::format("frame {} ends at texel ({}, {}), outside its texture '{}' of {} x {} texels", index, right, bottom,
+					assets.GetReferencePath(handle), texture->Width, texture->Height);
+				issue.Hint = "X + Width must be at most the texture's width and Y + Height at most its height";
+				context.AddIssue(std::move(issue));
+			}
+			return context.ToStatus("the sprite sheet");
+		}
+
 		// The native assets with properties of their own (asset.getProperties, asset.setProperties), by importer.
 		enum class NativePropertiesKind : uint8_t
 		{
 			Material,
-			SoundEffect
+			SoundEffect,
+			SpriteSheet
 		};
 
 		std::optional<NativePropertiesKind> FindNativePropertiesKind(const AssetRecord& record)
@@ -197,7 +271,21 @@ namespace Engine {
 				return NativePropertiesKind::Material;
 			if (record.Metadata.Importer == SoundEffectImporter::Id)
 				return NativePropertiesKind::SoundEffect;
+			if (record.Metadata.Importer == SpriteSheetImporter::Id)
+				return NativePropertiesKind::SpriteSheet;
 			return std::nullopt;
+		}
+
+		// What asset.setProperties' undo label calls a native asset of `kind`: "Set <name> '<stem>'".
+		std::string_view GetNativePropertiesLabel(NativePropertiesKind kind)
+		{
+			switch (kind)
+			{
+				case NativePropertiesKind::Material:    return "Material";
+				case NativePropertiesKind::SoundEffect: return "Sound Effect";
+				case NativePropertiesKind::SpriteSheet: return "Sprite Sheet";
+			}
+			return "Asset";
 		}
 
 		// A native asset's properties: the canonical text of its file and the values asset.getProperties reports.
@@ -208,10 +296,12 @@ namespace Engine {
 		};
 
 		// The properties of the native asset of `kind` whose file holds `text`, read from `source` (named in errors), with
-		// the merge patch `patch` applied when given. Errors: those of the readers (Parse, Validation, UnsupportedVersion,
-		// with "reading '<source>'"), of PatchMaterial and PatchSoundEffect (located under /values) and of the writers.
+		// the merge patch `patch` applied when given (a patched sprite sheet's frames are checked against its texture through
+		// `assets`). Errors: those of the readers (Parse, Validation, UnsupportedVersion, with "reading '<source>'"), of
+		// PatchMaterial, PatchSoundEffect, PatchSpriteSheet and CheckSpriteSheetTexture (located under /values) and of the
+		// writers.
 		Result<NativeProperties> ReadNativeProperties(NativePropertiesKind kind, std::string_view text, const VfsPath& source, const TypeRegistry& registry,
-			const Json* patch)
+			const Json* patch, EditorAssetManager& assets)
 		{
 			const std::string reading = std::format("reading '{}'", Utils::ToProjectRelative(source));
 			NativeProperties properties;
@@ -243,15 +333,29 @@ namespace Engine {
 					ENGINE_TRY_ASSIGN(properties.Values, SoundEffectToValues(sound, registry));
 					return properties;
 				}
+				case NativePropertiesKind::SpriteSheet:
+				{
+					SpriteSheetLoadReport report;
+					ENGINE_TRY_ASSIGN(SpriteSheetData sheet, WithContext(SpriteSheetFromText(text, registry, report), reading));
+					if (patch != nullptr)
+					{
+						ENGINE_TRY_ASSIGN(const Json document, SpriteSheetToJson(sheet, registry));
+						ENGINE_TRY_ASSIGN(sheet, PatchSpriteSheet(document, *patch, registry, "/values"));
+						ENGINE_TRY(CheckSpriteSheetTexture(assets, sheet, "/values"));
+					}
+					ENGINE_TRY_ASSIGN(properties.Text, SpriteSheetToText(sheet, registry));
+					ENGINE_TRY_ASSIGN(properties.Values, SpriteSheetToValues(sheet, registry));
+					return properties;
+				}
 			}
 
 			ENGINE_ASSERT(false, "Unknown NativePropertiesKind {}", std::to_underlying(kind));
 			return MakeError(ErrorCode::Unsupported, "this asset has no properties of its own");
 		}
 
-		// The text of a new native asset of `type` at `path`: a material or a sound effect from `values` over the defaults, an
-		// empty scene named after the file stem, or a prefab with one root entity named after it. Errors: those of
-		// PatchMaterial, PatchSoundEffect and the serializers.
+		// The text of a new native asset of `type` at `path`: a material, a sound effect or a sprite sheet from `values` over
+		// the defaults, an empty scene named after the file stem, or a prefab with one root entity named after it. Errors: those
+		// of PatchMaterial, PatchSoundEffect, PatchSpriteSheet, CheckSpriteSheetTexture and the serializers.
 		Result<std::string> MakeNativeAssetText(EditorContext& editor, AssetCreateType type, const VfsPath& path, const VariantValue& values)
 		{
 			const std::string stem(path.GetStem());
@@ -290,10 +394,15 @@ namespace Engine {
 				}
 				case AssetCreateType::SpriteSheet:
 				{
-					// M18 SpriteSheet contract (Docs/Decisions/0029-m18-contract.md decision 18, stream S): a sprite sheet from
-					// `values` over the defaults, checked by ValidateSpriteSheet and against its texture's size.
-					ENGINE_CONTRACT_STUB();
-					return std::unexpected(Error(ErrorCode::Unsupported, "M18 SpriteSheet contract (Docs/Decisions/0029-m18-contract.md decision 18, stream S)"));
+					// The defaults are an empty sheet (no texture, no frames, no clips), which absent values create.
+					SpriteSheetData sheet;
+					if (!values.Get().is_null())
+					{
+						ENGINE_TRY_ASSIGN(const Json defaults, SpriteSheetToJson(sheet, registry));
+						ENGINE_TRY_ASSIGN(sheet, PatchSpriteSheet(defaults, values.Get(), registry, "/values"));
+					}
+					ENGINE_TRY(CheckSpriteSheetTexture(editor.GetAssets(), sheet, "/values"));
+					return SpriteSheetToText(sheet, registry);
 				}
 				case AssetCreateType::Folder:
 					break;
@@ -879,10 +988,11 @@ namespace Engine {
 		Result<AssetCreateResult> AssetCreate(EditorMethodContext& context, const AssetCreateParams& params)
 		{
 			EditorContext& editor = context.GetEditor();
-			const bool takesValues = params.Type == AssetCreateType::Material || params.Type == AssetCreateType::SoundEffect;
+			const bool takesValues =
+				params.Type == AssetCreateType::Material || params.Type == AssetCreateType::SoundEffect || params.Type == AssetCreateType::SpriteSheet;
 			if (!takesValues && context.HasParam("values") && !params.Values.Get().is_null())
 			{
-				return std::unexpected(Utils::MakeParamError(ErrorCode::InvalidArgument, "/values", "only a Material or a SoundEffect takes values",
+				return std::unexpected(Utils::MakeParamError(ErrorCode::InvalidArgument, "/values", "only a Material, a SoundEffect or a SpriteSheet takes values",
 					"leave values out for scenes, prefabs and folders"));
 			}
 			ENGINE_TRY_ASSIGN(const VfsPath path, Utils::ResolveAssetsPath(context, params.Path, "/path", GetCreateExtension(params.Type)));
@@ -926,7 +1036,11 @@ namespace Engine {
 				edits.push_back(AssetFileEdit{ .Path = metaPath, .Kind = AssetFileKind::File, .Before = std::nullopt, .After = TextToBuffer(metaText) });
 				result.Asset = AssetSummary{ .Id = metadata.Handle.ToString(), .Path = relative, .Type = metadata.Type };
 				// A sound effect is an AudioClip asset (SoundEffectImporter's main type); its undo label names what was created.
-				const std::string_view what = params.Type == AssetCreateType::SoundEffect ? std::string_view("Sound Effect") : AssetTypeToString(metadata.Type);
+				std::string_view what = AssetTypeToString(metadata.Type);
+				if (params.Type == AssetCreateType::SoundEffect)
+					what = "Sound Effect";
+				else if (params.Type == AssetCreateType::SpriteSheet)
+					what = "Sprite Sheet";
 				label = std::format("Create {} '{}'", what, stem);
 			}
 			ENGINE_TRY_ASSIGN(const uint64_t undoIndex, editor.Execute(CreateScope<AssetEditCommand>(std::move(label), std::move(edits))));
@@ -951,7 +1065,7 @@ namespace Engine {
 			Result<std::string> text = editor.GetVfs().ReadText(source);
 			if (!text)
 				return std::unexpected(Utils::ToEditorFileError(std::move(text).error()));
-			ENGINE_TRY_ASSIGN(NativeProperties properties, ReadNativeProperties(*kind, *text, source, editor.GetTypeRegistry(), nullptr));
+			ENGINE_TRY_ASSIGN(NativeProperties properties, ReadNativeProperties(*kind, *text, source, editor.GetTypeRegistry(), nullptr, editor.GetAssets()));
 			AssetGetPropertiesResult result;
 			result.Asset = Utils::MakeAssetSummary(assets, handle);
 			result.Values = VariantValue(std::move(properties.Values));
@@ -974,14 +1088,13 @@ namespace Engine {
 			Result<std::string> text = editor.GetVfs().ReadText(source);
 			if (!text)
 				return std::unexpected(Utils::ToEditorFileError(std::move(text).error()));
-			ENGINE_TRY_ASSIGN(NativeProperties patched, ReadNativeProperties(*kind, *text, source, editor.GetTypeRegistry(), &params.Values.Get()));
+			ENGINE_TRY_ASSIGN(NativeProperties patched,
+				ReadNativeProperties(*kind, *text, source, editor.GetTypeRegistry(), &params.Values.Get(), editor.GetAssets()));
 
 			AssetSetPropertiesResult result;
 			if (patched.Text != *text)
 			{
-				const std::string_view what = *kind == NativePropertiesKind::SoundEffect ? "Sound Effect" : "Material";
-				ENGINE_TRY_ASSIGN(Scope<AssetEditCommand> command,
-					AssetEditCommand::CreateForWrite(editor, source, AsBytes(patched.Text), std::format("Set {} '{}'", what, source.GetStem())));
+				ENGINE_TRY_ASSIGN(Scope<AssetEditCommand> command, AssetEditCommand::CreateForWrite(editor, source, AsBytes(patched.Text), std::format("Set {} '{}'", GetNativePropertiesLabel(*kind), source.GetStem())));
 				ENGINE_TRY_ASSIGN(const uint64_t undoIndex, editor.Execute(std::move(command)));
 				result.UndoIndex = ToAutomationCounter(undoIndex);
 			}
@@ -1111,7 +1224,9 @@ namespace Engine {
 			.Entry(AssetCreateType::Scene, "Scene", "A .scene file: an empty scene named after the file.")
 			.Entry(AssetCreateType::Prefab, "Prefab", "A .prefab file with one root entity named after the file.")
 			.Entry(AssetCreateType::SoundEffect, "SoundEffect", "A .sfx sound effect: synthesized layers of oscillators, imported as an AudioClip.")
-			.Entry(AssetCreateType::Folder, "Folder", "A folder below Assets/; one that already exists is left as it is (created: false).");
+			.Entry(AssetCreateType::Folder, "Folder", "A folder below Assets/; one that already exists is left as it is (created: false).")
+			.Entry(AssetCreateType::SpriteSheet, "SpriteSheet",
+				"A .spritesheet sprite sheet: frames of a texture with pivots and 9-slice borders, and clips; without values an empty sheet.");
 
 		registry.Struct<AssetDiagnosticInfo>("AssetDiagnosticInfo", "A diagnostic of an asset.")
 			.Field("severity", &AssetDiagnosticInfo::Severity, "How serious it is.")
@@ -1175,11 +1290,12 @@ namespace Engine {
 		registry.Struct<AssetCreateParams>("AssetCreateParams", "The params of asset.create.")
 			.Field("type", &AssetCreateParams::Type, "What to create.")
 			.Field("path", &AssetCreateParams::Path,
-				"The project-relative path below Assets/, with the type's extension (.material, .scene, .prefab, .sfx; none for a folder); missing "
-				"parent folders are created with it.")
+				"The project-relative path below Assets/, with the type's extension (.material, .scene, .prefab, .sfx, .spritesheet; none for a "
+				"folder); missing parent folders are created with it.")
 			.Field("values", &AssetCreateParams::Values,
-				"A Material's or a SoundEffect's fields over the defaults (registry names, such as Roughness, or Layers, which a sound effect "
-				"needs); absent for other types.");
+				"A Material's, a SoundEffect's or a SpriteSheet's fields over the defaults (registry names, such as Roughness, Layers, which a "
+				"sound effect needs, or a sheet's Texture, Frames and Clips, whose frames must lie inside a texture that loads); absent for "
+				"other types.");
 
 		registry.Struct<AssetCreateResult>("AssetCreateResult", "The created asset.")
 			.Field("asset", &AssetCreateResult::Asset, "The created asset; an empty id and type None for a folder.")
@@ -1189,14 +1305,14 @@ namespace Engine {
 				"Whether anything was created: false only for a Folder whose path is already a folder, which succeeds without a command.");
 
 		registry.Struct<AssetGetPropertiesParams>("AssetGetPropertiesParams", "The params of asset.getProperties.")
-			.Field("asset", &AssetGetPropertiesParams::Asset, "The native asset (a material or a sound effect).");
+			.Field("asset", &AssetGetPropertiesParams::Asset, "The native asset (a material, a sound effect or a sprite sheet).");
 
 		registry.Struct<AssetGetPropertiesResult>("AssetGetPropertiesResult", "A native asset's properties.")
 			.Field("asset", &AssetGetPropertiesResult::Asset, "The asset.")
 			.Field("values", &AssetGetPropertiesResult::Values, "Every property, by registry name.");
 
 		registry.Struct<AssetSetPropertiesParams>("AssetSetPropertiesParams", "The params of asset.setProperties.")
-			.Field("asset", &AssetSetPropertiesParams::Asset, "The native asset (a material or a sound effect).")
+			.Field("asset", &AssetSetPropertiesParams::Asset, "The native asset (a material, a sound effect or a sprite sheet).")
 			.Field("values", &AssetSetPropertiesParams::Values, "An RFC 7386 merge patch of its properties: members replace, null resets a field.");
 
 		registry.Struct<AssetSetPropertiesResult>("AssetSetPropertiesResult", "The properties after the patch.")
@@ -1317,19 +1433,45 @@ namespace Engine {
 		soundExample["values"]["Layers"] = Json::array({ Json::object() });
 		soundExample["values"]["Layers"][0]["Wave"] = "Square";
 		soundExample["values"]["Layers"][0]["Notes"] = Json::array({ "B5:0.05", "E6:0.2" });
+		Json sheetExample = Json::object();
+		sheetExample["type"] = "SpriteSheet";
+		sheetExample["path"] = "Assets/Sprites/Hero.spritesheet";
+		sheetExample["values"] = Json::object();
+		sheetExample["values"]["Texture"] = "4a1c0e7d2b9f3a65";
+		Json idle0 = Json::object();
+		idle0["Name"] = "Idle0";
+		idle0["Rect"] = Json::object();
+		idle0["Rect"]["X"] = 0;
+		idle0["Rect"]["Y"] = 0;
+		idle0["Rect"]["Width"] = 16;
+		idle0["Rect"]["Height"] = 16;
+		idle0["Pivot"] = Json::array({ 0.5, 1.0 });
+		Json idle1 = idle0;
+		idle1["Name"] = "Idle1";
+		idle1["Rect"]["X"] = 16;
+		sheetExample["values"]["Frames"] = Json::array({ idle0, idle1 });
+		Json idleClip = Json::object();
+		idleClip["Name"] = "Idle";
+		idleClip["Frames"] = Json::array({ Json::object(), Json::object() });
+		idleClip["Frames"][0]["Frame"] = 0;
+		idleClip["Frames"][0]["Ticks"] = 10;
+		idleClip["Frames"][1]["Frame"] = 1;
+		idleClip["Frames"][1]["Ticks"] = 10;
+		sheetExample["values"]["Clips"] = Json::array({ idleClip });
 		methods.Add(
 			{
 				.Name = "asset.create",
-				.Description = "Creates a material or a sound effect (with values over the defaults), an empty scene, a one-entity prefab or a "
-							   "folder below Assets/, with its .meta and any missing parent folders, as one undoable command. A folder that already "
-							   "exists succeeds without a command (created: false), so a Folder op is needed only for an empty folder.",
+				.Description = "Creates a material, a sound effect or a sprite sheet (with values over the defaults), an empty scene, a one-entity "
+							   "prefab or a folder below Assets/, with its .meta and any missing parent folders, as one undoable command. A folder that "
+							   "already exists succeeds without a command (created: false), so a Folder op is needed only for an empty folder.",
 				.RequiredParams = { "type", "path" },
 				.ExposeAsTool = true,
 				.Mutates = true,
 				.SupportsDryRun = true,
 				.AllowedInBatch = true,
 				.Examples = { { .Description = "Create a red material.", .Params = createExample },
-					{ .Description = "Create a two-note coin pickup sound.", .Params = soundExample } },
+					{ .Description = "Create a two-note coin pickup sound.", .Params = soundExample },
+					{ .Description = "Create a sprite sheet with two 16 x 16 frames of a texture and a looping clip over them.", .Params = sheetExample } },
 			},
 			&Automation::AssetCreate);
 
@@ -1338,7 +1480,7 @@ namespace Engine {
 		methods.Add(
 			{
 				.Name = "asset.getProperties",
-				.Description = "Returns every property of a native asset (a material or a sound effect) by registry name.",
+				.Description = "Returns every property of a native asset (a material, a sound effect or a sprite sheet) by registry name.",
 				.RequiredParams = { "asset" },
 				.ExposeAsTool = true,
 				.AllowedInBatch = true,
@@ -1353,9 +1495,9 @@ namespace Engine {
 		methods.Add(
 			{
 				.Name = "asset.setProperties",
-				.Description = "Applies an RFC 7386 merge patch to a native asset's properties (a material or a sound effect) and writes it, as "
-							   "one undoable command. A running lockstep, recording, replay or test session sees the change only after it ends: asset "
-							   "reloads are deferred like script reloads.",
+				.Description = "Applies an RFC 7386 merge patch to a native asset's properties (a material, a sound effect or a sprite sheet; an "
+							   "array such as a sheet's Frames is replaced whole) and writes it, as one undoable command. A running lockstep, recording, "
+							   "replay or test session sees the change only after it ends: asset reloads are deferred like script reloads.",
 				.RequiredParams = { "asset", "values" },
 				.ExposeAsTool = true,
 				.Mutates = true,

@@ -7,10 +7,13 @@
 #include "Engine/Automation/Protocol/MethodRegistry.h"
 #include "Engine/Project/ProjectSettings.h"
 #include "Engine/Reflection/TypeRegistry.h"
+#include "Engine/Renderer/RenderSnapshot.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/SceneRaycast.h"
 #include "Engine/Scene/TransformSystem.h"
 #include "Engine/Session/PlaySession.h"
+
+#include <optional>
 
 namespace Engine {
 
@@ -50,10 +53,15 @@ namespace Engine {
 		ENGINE_TRY_ASSIGN(const RenderSnapshot snapshot, playTarget ? session->ExtractView(request) : ExtractRenderSnapshot(*scene, request));
 		if (!snapshot.HasCamera)
 			return MakeError(ErrorCode::InvalidState, "SCENE_NO_PRIMARY_CAMERA: target scene has no active primary camera");
-		ENGINE_TRY_ASSIGN(const RenderRayInterval ray, ComputeViewPixelRayInterval(snapshot.Camera, params.X, params.Y));
+		// The framebuffer pixel is a view pixel of the snapshot's output stage (M18, Docs/Decisions/0029-m18-contract.md
+		// decision 6): it is mapped to its scene pixel once, and a pixel of the letterbox shows no scene, so it hits nothing.
+		const RenderOutputMapping mapping = ComputeRenderOutputMapping(size.Width, size.Height, snapshot.Output);
+		ENGINE_TRY_ASSIGN(const std::optional<RenderRayInterval> ray, ComputeOutputPixelRayInterval(snapshot.Camera, mapping, params.X, params.Y));
 		ENGINE_TRY_ASSIGN(const PhysicsLayerTable layers, PhysicsLayerTable::Create(settings->Physics.Layers, settings->Physics.Collisions));
-		ENGINE_TRY_ASSIGN(const auto hit, RaycastScene(*scene, *assets, layers, { .Ray = ray.Ray, .MaxDistance = ray.MaxDistance, .MinDistance = ray.MinDistance, .Alpha = snapshot.Alpha }));
 		ViewportPickResult result{ .View = params.View, .Width = size.Width, .Height = size.Height };
+		if (!ray)
+			return result;
+		ENGINE_TRY_ASSIGN(const auto hit, RaycastScene(*scene, *assets, layers, { .Ray = ray->Ray, .MaxDistance = ray->MaxDistance, .MinDistance = ray->MinDistance, .Alpha = snapshot.Alpha }));
 		if (hit)
 		{
 			result.Raycast.Hit = true;

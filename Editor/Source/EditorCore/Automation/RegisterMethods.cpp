@@ -11,10 +11,12 @@
 #include "EditorCore/Automation/ExportMethods.h"
 #include "EditorCore/Automation/ObserveMethods.h"
 #include "EditorCore/Automation/PrefabMethods.h"
+#include "EditorCore/Automation/ProfilerMethods.h"
 #include "EditorCore/Automation/ProjectMethods.h"
 #include "EditorCore/Automation/SceneMethods.h"
 #include "EditorCore/Automation/ScreenshotMethods.h"
 #include "EditorCore/Automation/ScriptMethods.h"
+#include "EditorCore/Automation/ShaderMethods.h"
 #include "EditorCore/Automation/TestMethods.h"
 #include "EditorCore/Automation/ViewportMethods.h"
 #include "EditorCore/Automation/ViewportPickMethods.h"
@@ -51,6 +53,9 @@ namespace Engine {
 		RegisterDebugMethodTypes(registry);
 		RegisterEditorScriptMethodTypes(registry);
 		RegisterTestMethodTypes(registry);
+		// M18 (ADR 0029 decisions 3 and 11): the editor's shader hot reload and its Chrome trace capture.
+		RegisterShaderMethodTypes(registry);
+		RegisterProfilerMethodTypes(registry);
 	}
 
 	void RegisterEditorMethods(MethodRegistry& methods, const EditorMethodOptions& options)
@@ -71,6 +76,8 @@ namespace Engine {
 		RegisterSharedMethods(methods, AutomationHost::Editor);
 		RegisterEditorScriptMethods(methods);
 		RegisterTestMethods(methods);
+		RegisterShaderMethods(methods);
+		RegisterProfilerMethods(methods);
 		if (options.TestHooks)
 			RegisterDebugMethods(methods);
 	}

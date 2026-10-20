@@ -1,6 +1,7 @@
 #include "EditorPCH.h"
 #include "EditorCore/Automation/ShaderMethods.h"
 
+#include "EditorCore/Automation/AutomationServer.h"
 #include "EditorCore/Automation/EditorMethodContext.h"
 #include "Engine/Automation/Methods/AutomationTypes.h"
 #include "Engine/Automation/Protocol/MethodRegistry.h"
@@ -12,10 +13,17 @@ namespace Engine {
 
 	namespace Automation {
 
-		Result<ShadersReloadResult> ShadersReload(EditorMethodContext& /*context*/, const NoParams& /*params*/)
+		Result<ShadersReloadResult> ShadersReload(EditorMethodContext& context, const NoParams& /*params*/)
 		{
-			ENGINE_CONTRACT_STUB();
-			return std::unexpected(Error(ErrorCode::Unsupported, "M18 shaders.reload contract (Docs/Decisions/0029-m18-contract.md decision 3, stream B)"));
+			const AutomationServerSpecification& specification = context.GetServer().GetSpecification();
+			if (specification.RendererName == "none" || !specification.ReloadShaders)
+			{
+				Error error(ErrorCode::Unsupported, "This editor has no renderer whose shaders could be reloaded (--renderer none)");
+				return std::unexpected(std::move(error).WithHint("start the editor with --renderer vulkan"));
+			}
+			// The host's reload is also the editor's Tools > Reload shaders; its errors already say that the previous pipelines
+			// stay in use.
+			return specification.ReloadShaders();
 		}
 
 	}

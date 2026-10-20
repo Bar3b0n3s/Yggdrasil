@@ -28,7 +28,8 @@
 // stage; Ui after Text in SceneOverlay. Phase 3's (Particles, Exposure, Lut, Taa, Ssr and terrain) take the stages their
 // contracts name. A declaration with no stats row creates pipelines its users record under their own rows (the
 // QuadBatcher), or is a startup-only computation (the DFG LUT); one with no pipeline records with another declaration's
-// pipelines (Wireframe and Overlays share the debug lines' pipelines, Labels the Text pipelines).
+// pipelines (Wireframe and Overlays share the debug lines' pipelines, Labels the Text pipelines, Letterbox the Upscale
+// pipelines).
 
 namespace Engine {
 
@@ -92,6 +93,8 @@ namespace Engine {
 		inline constexpr std::array<std::string_view, 1> DebugLinesPrograms = { "DebugLines" };
 		inline constexpr std::array<std::string_view, 1> OverlaysRows = { "Overlays" };
 		inline constexpr std::array<std::string_view, 1> LabelsRows = { "Labels" };
+		inline constexpr std::array<std::string_view, 1> LetterboxRows = { "Letterbox" };
+		inline constexpr std::array<std::string_view, 1> LetterboxTargets = { "LetterboxTexel" };
 
 	}
 
@@ -128,6 +131,9 @@ namespace Engine {
 		{ .Name = "Overlays", .Stage = RenderStage::EditorOverlay, .PipelineCount = 2, .Programs = Detail::DebugLinesPrograms, .StatsRows = Detail::OverlaysRows },
 		// The debug and annotation labels, at the view's resolution with the Text pipelines.
 		{ .Name = "Labels", .Stage = RenderStage::EditorOverlay, .StatsRows = Detail::LabelsRows },
+		// At a scaled output with a letterbox, the letterbox bars painted again after the editor overlays, with the upscale's
+		// Color pipeline (UpscalePass::RecordLetterbox), so the overlays end clipped to the scaled scene rectangle.
+		{ .Name = "Letterbox", .Stage = RenderStage::EditorOverlay, .StatsRows = Detail::LetterboxRows, .Targets = Detail::LetterboxTargets },
 	});
 
 	// The sum of every declaration's PipelineCount: the pipelines SceneRendererPipelines creates at startup.

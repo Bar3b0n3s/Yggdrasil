@@ -17,6 +17,7 @@
 #include "EditorCore/Automation/BatchRunner.h"
 #include "EditorCore/Automation/ExportMethods.h"
 #include "EditorCore/Automation/RegisterMethods.h"
+#include "EditorCore/Automation/ShaderMethods.h"
 #include "EditorCore/Autosave/Autosave.h"
 #include "EditorCore/EditorActions.h"
 #include "EditorCore/EditorCommandLine.h"
@@ -41,6 +42,7 @@
 #include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/AssetPipeline/EngineAssetBaker.h"
 #include "Engine/AssetPipeline/ImporterRegistry.h"
+#include "Engine/Automation/Methods/AutomationTypes.h"
 #include "Engine/Automation/Protocol/JsonRpc.h"
 #include "Engine/Core/EventLog.h"
 #include "Engine/Core/FatalError.h"
@@ -565,6 +567,17 @@ namespace Engine {
 					app.m_State->DeviceLostUnrecoverable = unrecoverable;
 					return {};
 				};
+			// shaders.reload, which the menu item Tools > Reload shaders submits (Docs/Decisions/0029-m18-contract.md decision 3): the
+			// server pumps at the safe point, between frames, so no Render is recording with the pipelines it replaces.
+			if (context.GetGraphicsDevice())
+				serverSpecification.ReloadShaders = [&app]() -> Result<ShadersReloadResult>
+				{
+					if (app.m_Rendering == nullptr)
+						return MakeError(ErrorCode::Unsupported, "This editor renders no views whose shaders could be reloaded");
+					SceneRendererPipelines& pipelines = *app.m_Rendering->Pipelines;
+					ENGINE_TRY(pipelines.ReloadShaders());
+					return ShadersReloadResult{ .PipelineCount = pipelines.GetPipelineCount(), .Generation = ToAutomationCounter(pipelines.GetGeneration()) };
+				};
 			serverSpecification.ReadHostStatistics = [&app]()
 			{
 				StatsGetResult result;
@@ -855,6 +868,12 @@ namespace Engine {
 				.PreferencesFile = GetProcessContext().GetUserDataPaths().Root / "Editor.json",
 			});
 		};
+		// The panels' file dialogs (Docs/Decisions/0029-m18-contract.md decision 19): a windowed editor offers each request
+		// to the operating system's dialog, owned by its main window, which outlives every dialog (Windows only: elsewhere
+		// NativeFileDialog::Open is Unsupported and the ImGui picker serves the request). A headless editor has no native
+		// dialog, so an agent never meets one.
+		if (GetSpecification().Window == WindowMode::Windowed && GetContext().GetWindow() != nullptr)
+			state.Panels->FileDialogs = MakeNativeFileDialogBackend(*GetContext().GetWindow());
 		// The layer's constructor registers its imgui.ini open-panel handler in the current Dear ImGui context (the
 		// ImGuiLayer's, before the first frame loads the ini; none with --renderer none) and otherwise builds CPU models only.
 		state.Layer = CreateScope<EditorLayer>(*state.Panels);

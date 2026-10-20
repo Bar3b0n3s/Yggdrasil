@@ -105,6 +105,7 @@ group "Dependencies"
 	include "Vendor/JoltPhysics"
 	include "Vendor/miniaudio"
 	include "Vendor/MikkTSpace"
+	include "Vendor/nativefiledialog-extended"
 	include "Vendor/spdlog"
 
 group "Engine"

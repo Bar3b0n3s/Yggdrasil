@@ -10,13 +10,13 @@
 #include <nlohmann/json.hpp>
 
 // shaders.reload (M18, R-SHR; Docs/Decisions/0029-m18-contract.md decision 3) through the in-process server with an
-// injected reload. Skipped until stream B implements the handler and the wave registers the method.
+// injected reload.
 
 namespace Engine {
 
 	TEST_SUITE("Automation")
 	{
-		TEST_CASE("ShaderMethods: shaders.reload reports the swapped-in pipelines and passes a failed reload's error on" * doctest::skip(true))
+		TEST_CASE("ShaderMethods: shaders.reload reports the swapped-in pipelines and passes a failed reload's error on")
 		{
 			Test::EditorTestFixture fixture("ShadersReload");
 			uint32_t reloads = 0;
@@ -57,7 +57,7 @@ namespace Engine {
 			CHECK_FALSE(method->Specification.AvailableInLauncher);
 		}
 
-		TEST_CASE("ShaderMethods: shaders.reload is Unsupported without a renderer" * doctest::skip(true))
+		TEST_CASE("ShaderMethods: shaders.reload is Unsupported without a renderer")
 		{
 			// --renderer none: the editor injects no reload.
 			Test::EditorTestFixture fixture("ShadersReloadNone");

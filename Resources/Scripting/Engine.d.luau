@@ -3,13 +3,13 @@
 export type AlphaMode = "Opaque" | "Mask" | "Blend"
 
 -- What asset.create makes.
-export type AssetCreateType = "Material" | "Scene" | "Prefab" | "SoundEffect" | "Folder"
+export type AssetCreateType = "Material" | "Scene" | "Prefab" | "SoundEffect" | "Folder" | "SpriteSheet"
 
 -- Where an asset is in its life (§7.2).
 export type AssetState = "Unloaded" | "Loading" | "Loaded" | "Failed"
 
 -- The kind of a loadable asset (§7.1).
-export type AssetType = "None" | "Scene" | "Prefab" | "Mesh" | "Material" | "Texture" | "Environment" | "AudioClip" | "Script" | "Font" | "Replay"
+export type AssetType = "None" | "Scene" | "Prefab" | "Mesh" | "Material" | "Texture" | "Environment" | "AudioClip" | "Script" | "Font" | "Replay" | "SpriteSheet"
 
 -- How a spatial sound's volume falls off with distance.
 export type Attenuation = "None" | "Inverse" | "Linear" | "Exponential"
@@ -873,7 +873,7 @@ declare Debug: {
 declare Field: {
 	-- Declare an empty array whose element keeps its complete nested field schema. [All modes; LoadTime|Runtime|Test; pure/read]
 	Array: (element: FieldDescriptor) -> FieldDescriptor,
-	-- Declare an asset reference restricted to the named AssetType (Scene, Prefab, Mesh, Material, Texture, Environment, AudioClip for imported audio and .sfx sound effects, Script, Font or Replay), with a null default; any other name fails the import. [All modes; LoadTime|Runtime|Test; pure/read]
+	-- Declare an asset reference restricted to the named AssetType (Scene, Prefab, Mesh, Material, Texture, Environment, AudioClip for imported audio and .sfx sound effects, Script, Font, Replay or SpriteSheet), with a null default; any other name fails the import. [All modes; LoadTime|Runtime|Test; pure/read]
 	Asset: (type: string) -> FieldDescriptor,
 	-- Declare a boolean; the omitted default is false. [All modes; LoadTime|Runtime|Test; pure/read]
 	Bool: (default: boolean?, options: FieldOptions?) -> FieldDescriptor,

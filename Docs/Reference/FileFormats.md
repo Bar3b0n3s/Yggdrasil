@@ -18,6 +18,7 @@ Every authored file is UTF-8 JSON with LF line ends and tabs, written by the can
 | Replay | `.replay` | 2 | [Schemas/Replay.schema.json](Schemas/Replay.schema.json) |
 | Scene | `.scene` | 1 | [Schemas/Scene.schema.json](Schemas/Scene.schema.json) |
 | SoundEffect | `.sfx` | 1 | [Schemas/SoundEffect.schema.json](Schemas/SoundEffect.schema.json) |
+| SpriteSheet | `.spritesheet` | 1 | [Schemas/SpriteSheet.schema.json](Schemas/SpriteSheet.schema.json) |
 
 ### AssetMeta (`.meta`)
 
@@ -452,6 +453,146 @@ The oscillator of a sound effect layer.
 | `Saw` | A sawtooth wave: bright and buzzy. |
 | `Noise` | Seeded noise, resampled at the frequency: hiss, hits and explosions. |
 
+### SpriteSheet (`.spritesheet`)
+
+A sprite sheet (§6.9): one texture, the frames cut from it (texel rectangles, x right and y down from the texture's top-left corner, each with a pivot and 9-slice borders) and named clips that show frames, by their index in `Frames`, for a number of fixed-step ticks. A null `Texture` draws the frames as opaque white. The tables below list every field, its range and the limits.
+
+Header: `"Format": "SpriteSheet", "Version": 1`. Schema: [Schemas/SpriteSheet.schema.json](Schemas/SpriteSheet.schema.json).
+
+```json
+{
+	"Format": "SpriteSheet",
+	"Version": 1,
+	"Texture": "4a1c0e7d2b9f3a65",
+	"Frames": [
+		{
+			"Name": "Idle0",
+			"Rect": {
+				"X": 0,
+				"Y": 0,
+				"Width": 8,
+				"Height": 8
+			},
+			"Pivot": [0.5, 1],
+			"Borders": {
+				"Left": 0,
+				"Top": 0,
+				"Right": 0,
+				"Bottom": 0
+			}
+		},
+		{
+			"Name": "Idle1",
+			"Rect": {
+				"X": 8,
+				"Y": 0,
+				"Width": 8,
+				"Height": 8
+			},
+			"Pivot": [0.5, 1],
+			"Borders": {
+				"Left": 0,
+				"Top": 0,
+				"Right": 0,
+				"Bottom": 0
+			}
+		},
+		{
+			"Name": "Panel",
+			"Rect": {
+				"X": 0,
+				"Y": 8,
+				"Width": 12,
+				"Height": 6
+			},
+			"Pivot": [0.5, 0.5],
+			"Borders": {
+				"Left": 3,
+				"Top": 2,
+				"Right": 4,
+				"Bottom": 1
+			}
+		}
+	],
+	"Clips": [
+		{
+			"Name": "Idle",
+			"Frames": [
+				{
+					"Frame": 0,
+					"Ticks": 8
+				},
+				{
+					"Frame": 1,
+					"Ticks": 12
+				}
+			],
+			"Loop": true
+		}
+	]
+}
+```
+
+#### Fields of SpriteSheet
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `Texture` | `AssetRef(Texture)` | `null` |  |  |  | The texture the frames are cut from; null draws the frames as opaque white. |
+| `Frames` | `Array<SpriteFrame>` | `[]` |  |  |  | At most 65536 frames; a frame's identity is its index. |
+| `Clips` | `Array<SpriteClip>` | `[]` |  |  |  | At most 1024 clips, in authored order. |
+
+#### Fields of SpriteFrame
+
+One frame of a sprite sheet: a rectangle of its texture with a pivot and 9-slice borders. Clips and sprites refer to it by its index.
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `Name` | `String` | `""` |  |  |  | An optional label of at most 128 bytes, without control characters, unique among the frames when not empty. |
+| `Rect` | `SpriteRect` | `{"X":0,"Y":0,"Width":1,"Height":1}` |  |  |  | The frame's texel rectangle. |
+| `Pivot` | `Vec2` | `[0.5,0.5]` | 0 to 1 |  |  | The point of the frame placed at its sprite's position, as a fraction of the frame's size from its top-left corner: (0.5, 0.5) is its centre, (0.5, 1) the middle of its bottom edge. |
+| `Borders` | `SpriteBorders` | `{"Left":0,"Top":0,"Right":0,"Bottom":0}` |  |  |  | The frame's 9-slice insets. |
+
+#### Fields of SpriteRect
+
+A frame's rectangle in its texture, in whole texels: x right and y down from the texture's top-left corner.
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `X` | `UInt32` | `0` | 0 to 16383 | texels |  | The texel column of the frame's left edge. |
+| `Y` | `UInt32` | `0` | 0 to 16383 | texels |  | The texel row of the frame's top edge (row 0 is the texture's top row). |
+| `Width` | `UInt32` | `1` | 1 to 16384 | texels |  | The frame's width; X + Width is at most 16384. |
+| `Height` | `UInt32` | `1` | 1 to 16384 | texels |  | The frame's height; Y + Height is at most 16384. |
+
+#### Fields of SpriteBorders
+
+A frame's 9-slice insets in texels: the corners keep their size and the edges and the centre stretch when the frame is drawn larger. All zero: the frame is not sliced.
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `Left` | `UInt32` | `0` | 0 to 16384 | texels |  | The left inset; Left + Right is at most the frame's Width. |
+| `Top` | `UInt32` | `0` | 0 to 16384 | texels |  | The top inset; Top + Bottom is at most the frame's Height. |
+| `Right` | `UInt32` | `0` | 0 to 16384 | texels |  | The right inset. |
+| `Bottom` | `UInt32` | `0` | 0 to 16384 | texels |  | The bottom inset. |
+
+#### Fields of SpriteClip
+
+A named animation over a sprite sheet's frames, driven by fixed-step ticks.
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `Name` | `String` | `""` |  |  |  | The clip's name, which scripts play it by: 1 to 128 bytes without control characters, unique among the clips. |
+| `Frames` | `Array<SpriteClipFrame>` | `[]` |  |  |  | 1 to 1024 steps, played in order. |
+| `Loop` | `Bool` | `true` |  |  |  | Whether the clip starts again after its last step; otherwise it holds its last frame. |
+
+#### Fields of SpriteClipFrame
+
+One step of a sprite clip: a frame shown for a number of fixed-step ticks.
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `Frame` | `UInt32` | `0` | 0 to 65535 |  |  | The index of the frame in the sheet's Frames, from 0. |
+| `Ticks` | `UInt32` | `1` | 1 to 65535 | ticks |  | How many fixed-step ticks the frame shows. |
+
 ## Source formats
 
 The files the editor imports from `Assets/`, by importer and extension (§7.4). Importable rows are cooked into assets; a row that is not importable is claimed only to be refused with a hint. Settings name the importer's settings struct, the shape of a `.meta`'s `Settings` (`asset.getImportSettings` returns it).
@@ -474,6 +615,7 @@ The files the editor imports from `Assets/`, by importer and extension (§7.4). 
 | Scene | `.scene` | Scene | 1 | none | yes |
 | Script | `.luau` | Script | 1 | none | yes |
 | SoundEffect | `.sfx` | AudioClip | 1 | none | yes |
+| SpriteSheet | `.spritesheet` | SpriteSheet | 1 | none | yes |
 | Texture | `.bmp` | Texture | 1 | `TextureImportSettings` | yes |
 | Texture | `.jpeg` | Texture | 1 | `TextureImportSettings` | yes |
 | Texture | `.jpg` | Texture | 1 | `TextureImportSettings` | yes |

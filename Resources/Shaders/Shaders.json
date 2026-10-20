@@ -155,6 +155,24 @@
 			]
 		},
 		{
+			"Name": "Quad",
+			"File": "Passes/Quad.slang",
+			"Entries": [
+				{
+					"Name": "VSMain",
+					"Stage": "vertex"
+				},
+				{
+					"Name": "PSHdr",
+					"Stage": "fragment"
+				},
+				{
+					"Name": "PSLdr",
+					"Stage": "fragment"
+				}
+			]
+		},
+		{
 			"Name": "Scene",
 			"File": "Passes/Scene.slang",
 			"Entries": [
@@ -340,6 +358,24 @@
 				},
 				{
 					"Name": "PSMain",
+					"Stage": "fragment"
+				}
+			]
+		},
+		{
+			"Name": "Upscale",
+			"File": "Passes/Upscale.slang",
+			"Entries": [
+				{
+					"Name": "VSMain",
+					"Stage": "vertex"
+				},
+				{
+					"Name": "PSColor",
+					"Stage": "fragment"
+				},
+				{
+					"Name": "PSDepth",
 					"Stage": "fragment"
 				}
 			]

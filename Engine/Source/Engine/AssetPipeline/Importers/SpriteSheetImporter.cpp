@@ -1,7 +1,12 @@
 #include "EnginePCH.h"
 #include "Engine/AssetPipeline/Importers/SpriteSheetImporter.h"
 
+#include "Engine/Asset/SpriteSheetData.h"
+#include "Engine/AssetPipeline/Private/ImportErrors.h"
+
 #include <array>
+#include <format>
+#include <utility>
 
 namespace Engine {
 
@@ -11,10 +16,23 @@ namespace Engine {
 		return Extensions;
 	}
 
-	Result<ImportResult> SpriteSheetImporter::Import(ImportContext& /*context*/, const AssetMetadata& /*metadata*/) const
+	Result<ImportResult> SpriteSheetImporter::Import(ImportContext& context, const AssetMetadata& metadata) const
 	{
-		ENGINE_CONTRACT_STUB();
-		return std::unexpected(Error(ErrorCode::Unsupported, "M18 SpriteSheet contract (Docs/Decisions/0029-m18-contract.md decision 17, stream S)"));
+		const std::string sourcePath = context.GetSourcePath().ToString();
+
+		// Strict: an unknown member is an error at import, so a misspelled key never silently keeps its default.
+		SpriteSheetLoadReport report;
+		Result<SpriteSheetData> sheet = SpriteSheetFromText(AsStringView(context.GetSourceBytes()), context.GetRegistry(), report, true);
+		if (!sheet.has_value())
+			return std::unexpected(Utils::MakeImportFailed(sheet.error(), sourcePath, std::format("while importing sprite sheet '{}'", sourcePath)));
+
+		ImportResult result;
+		result.Artifacts.push_back(
+			ImportedArtifact{ .Handle = metadata.Handle, .Type = AssetType::SpriteSheet, .SubAssetKey = {}, .Cooked = CookSpriteSheet(*sheet, Version) });
+		// The texture stays referenced when it is not registered (or not a Texture): the validator reports it, and the sheet's
+		// consumers report the missing texture.
+		result.Dependencies = GetSpriteSheetDependencies(*sheet);
+		return result;
 	}
 
 }

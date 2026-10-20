@@ -4,6 +4,7 @@
 #include "Engine/Core/Result.h"
 #include "Engine/Graphics/PipelineFactory.h"
 #include "Engine/Renderer/AsyncPicker.h"
+#include "Engine/Renderer/RenderPassDeclaration.h"
 #include "Engine/Renderer/RenderSnapshot.h"
 #include "Engine/Renderer/RenderStats.h"
 
@@ -67,6 +68,10 @@
 // Binding sets. The passes the set owns keep none of their own: every SceneRenderer keeps one PassBindingCache per pass
 // with its per-view targets, clears them in Resize, releases the sets its last Render did not use at the end of every
 // Render, and destroys them with itself, so views never evict each other's sets and no view's old targets outlive it.
+// Material sets (set 1) are released the same way, except that a material whose every draw a Render culls keeps its set
+// while it stays in the snapshot and its mirror is current (M18, R-MATSET), so a material that leaves the view and returns
+// makes no new set. A renderer clears every binding set and material set before its first Render after a CreatePipelines
+// of its set (GetGeneration), whose binding layouts replaced those the sets were made for.
 //
 // Stale mirrors (§8.14 items 1 and 2; Docs/Decisions/0013-m8-decisions.md decision 7). Every host that renders (EditorApp,
 // RuntimeApp) calls GpuResourceCache::CollectStale() and SceneRendererPipelines::CollectStale(assets) once per frame after
@@ -82,7 +87,8 @@
 // (RenderStage.h) in order, each recording its passes in their declared order, between the GPU-zone hook's
 // RenderRecordingContext::BeginStage and EndStage; the passes above keep their order, except that game Text now draws in
 // the SceneOverlay stage, before the editor overlays (wireframe, selection, debug lines, annotations, grid, icons) of the
-// EditorOverlay stage, and the debug and annotation labels draw last, in that stage (the "Labels" row). Pass declarations:
+// EditorOverlay stage, and the debug and annotation labels draw last of the overlays, in that stage (the "Labels" row),
+// followed at a scaled output by the letterbox repaint that clips the overlays to the scene image ("Letterbox"). Pass declarations:
 // RenderPassDeclaration.h declares every pass (name, pipeline count, programs, stats rows and position, targets); the stats
 // order is RenderStatsOrder; every pipeline is created by SceneRendererPipelines::CreatePipelines, which startup, shader
 // reload and device-loss recovery call. The output stage: the scene stages render at the snapshot's scene resolution
@@ -140,10 +146,9 @@ namespace Engine {
 		static constexpr uint32_t DebugViewPipelineCount = 9;
 		// Every pipeline Create makes: the mesh pipelines plus SkyboxPass (1), BloomPass (3), TonemapPass (1), FxaaPass (1),
 		// DebugRenderer (2), TextRenderer (2), BrdfLut (1), ShadowPass (6), DepthPyramid (2), GTAO (2), Selection (8),
-		// and the data-view composite (1). Each pass declares its own PipelineCount; this is their sum. M18 (C18.1): it
-		// becomes GetDeclaredPipelineCount() (RenderPassDeclaration.h, 58 with the QuadBatcher and the UpscalePass) once
-		// CreatePipelines creates the declared passes.
-		static constexpr uint32_t StartupPipelineCount = MeshPipelineCount + 1 + 3 + 1 + 1 + 2 + 2 + 1 + 6 + 2 + 2 + 8 + 1;
+		// the data-view composite (1), QuadBatcher (2) and UpscalePass (2): 58, the declarations' sum
+		// (GetDeclaredPipelineCount, RenderPassDeclaration.h), which SceneRenderer.cpp checks against each pass's PipelineCount.
+		static constexpr uint32_t StartupPipelineCount = GetDeclaredPipelineCount();
 
 		// Restricts construction to Create; CreateScope still reaches the constructor.
 		class ConstructionKey

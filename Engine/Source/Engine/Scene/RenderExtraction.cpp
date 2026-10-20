@@ -3,6 +3,7 @@
 
 #include "Engine/Core/Assert.h"
 #include "Engine/Core/DetMath.h"
+#include "Engine/Core/Profiler.h"
 #include "Engine/Scene/Components/CameraComponent.h"
 #include "Engine/Scene/Components/DirectionalLightComponent.h"
 #include "Engine/Scene/Components/EnvironmentComponent.h"
@@ -20,6 +21,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <memory_resource>
 #include <optional>
 
 // Simulation path (§4.12): only + - * /, sqrt (glm's normalize, cross, inverse and mat4_cast are built from them) and
@@ -360,8 +362,10 @@ namespace Engine {
 		return Utils::ComposeMatrix(translation, rotation, scale);
 	}
 
-	Result<RenderSnapshot> ExtractRenderSnapshot(const Scene& scene, const RenderExtractionRequest& request)
+	Result<RenderSnapshot> ExtractRenderSnapshot(const Scene& scene, const RenderExtractionRequest& request, std::pmr::memory_resource* resource)
 	{
+		ENGINE_PROFILE_SCOPE("ExtractRenderSnapshot");
+		ENGINE_CORE_ASSERT(resource != nullptr, "ExtractRenderSnapshot needs a memory resource");
 		constexpr uint32_t ValidFlags = (1u << 7) - 1u;
 		if ((std::to_underlying(request.Flags) & ~ValidFlags) != 0)
 			return MakeError(ErrorCode::InvalidArgument, "render extraction has unknown view flags");
@@ -376,7 +380,7 @@ namespace Engine {
 		if (!std::isfinite(request.Alpha) || request.Alpha < 0.0f || request.Alpha > 1.0f)
 			return MakeError(ErrorCode::InvalidArgument, "a render extraction needs an interpolation alpha in [0, 1], got {}", request.Alpha);
 
-		RenderSnapshot snapshot;
+		RenderSnapshot snapshot(resource != nullptr ? resource : std::pmr::get_default_resource());
 		snapshot.Alpha = request.Alpha;
 		snapshot.Flags = request.Flags;
 		snapshot.Quality = request.Quality;
@@ -516,7 +520,8 @@ namespace Engine {
 		});
 		snapshot.Environment = environment.value_or(RenderEnvironment{});
 		snapshot.Post = post.value_or(PostProcessSettings{});
-		return snapshot;
+		// Moved, so the containers keep `resource` (a copy would allocate from the default resource).
+		return Result<RenderSnapshot>(std::move(snapshot));
 	}
 
 }

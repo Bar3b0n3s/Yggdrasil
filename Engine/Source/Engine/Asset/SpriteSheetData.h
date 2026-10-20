@@ -42,9 +42,10 @@
 //   - A null Texture is valid: its frames sample an opaque white texel (QuadDraw's null texture), so frames give sizes and
 //     pivots to plain coloured quads.
 // The texture's size is not part of the sheet: the importer never reads the texture, so a sheet imports and loads without
-// it and a texture edit does not reimport the sheet. A frame that extends past its texture samples the texture's clamped
-// edge texels (the QuadBatcher's samplers clamp to edge); asset.create and asset.setProperties refuse such a frame when the
-// texture is registered and loads (EditorCore/Automation/AssetMethods.h).
+// it and a texture edit changes nothing the sheet cooks (the dependency graph reimports the sheet as the texture's dependent,
+// to the same bytes, so no reload follows). A frame that extends past its texture samples the texture's clamped edge texels
+// (the QuadBatcher's samplers clamp to edge); asset.create and asset.setProperties refuse such a frame when the texture is
+// registered and loads (EditorCore/Automation/AssetMethods.h).
 
 namespace Engine {
 

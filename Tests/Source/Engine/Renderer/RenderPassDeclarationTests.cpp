@@ -3,6 +3,8 @@
 #include "Engine/Renderer/RenderPassDeclaration.h"
 
 #include "Engine/Core/Profiler.h"
+#include "Engine/Graphics/GpuResourceTracker.h"
+#include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Graphics/Image.h"
 #include "Engine/Renderer/BloomPass.h"
 #include "Engine/Renderer/BrdfLut.h"
@@ -33,8 +35,8 @@
 #include <vector>
 
 // The pass declarations and the stages of the scene renderer (M18, C18.1, R-PASS; Docs/Decisions/0029-m18-contract.md
-// decisions 1 and 2): the table's invariants and the frozen stats order (live), and the stage functions and the one creation
-// entry, CreatePipelines (skipped until stream A implements them).
+// decisions 1 and 2): the table's invariants and the frozen stats order, the one creation entry, CreatePipelines, the
+// declared startup count and the stage boundaries every Render passes.
 
 namespace Engine {
 
@@ -102,12 +104,12 @@ namespace Engine {
 
 		TEST_CASE("RenderPassDeclarations: the stats order puts game Text before the upscale and the editor overlays after it")
 		{
-			// M17's order (§8.3) with Text moved to the SceneOverlay stage, the output stage's Upscale after it and the labels
-			// last; a frozen contract of stats.get.
-			constexpr std::array<std::string_view, 24> Expected = { "Prepare", "DirectionalShadows", "SpotShadows", "DepthNormal", "DepthPyramid", "GTAO",
+			// M17's order (§8.3) with Text moved to the SceneOverlay stage, the output stage's Upscale after it, the labels
+			// after the other editor overlays and the letterbox repaint last; a frozen contract of stats.get.
+			constexpr std::array<std::string_view, 25> Expected = { "Prepare", "DirectionalShadows", "SpotShadows", "DepthNormal", "DepthPyramid", "GTAO",
 				"GTAODenoiseHorizontal", "GTAODenoiseVertical", "ForwardOpaque", "Skybox", "ForwardTransparent", "Overdraw", "Bloom", "Tonemap", "FXAA",
 				"Text", "Upscale", "SelectionMask", "SelectionDilateHorizontal", "SelectionDilateVertical", "SelectionComposite", "Wireframe",
-				"Overlays", "Labels" };
+				"Overlays", "Labels", "Letterbox" };
 			REQUIRE(RenderStatsOrder.size() == Expected.size());
 			for (size_t index = 0; index < Expected.size(); ++index)
 				CHECK(RenderStatsOrder[index] == Expected[index]);
@@ -136,12 +138,13 @@ namespace Engine {
 			CHECK(GetDeclaredPipelineCountOf("Overlays") == DebugRenderer::PipelineCount);
 			CHECK(GetDeclaredPipelineCountOf("Wireframe") == 0);
 			CHECK(GetDeclaredPipelineCountOf("Labels") == 0);
+			CHECK(GetDeclaredPipelineCountOf("Letterbox") == 0);
 		}
 	}
 
 	TEST_SUITE(Test::GpuSuite)
 	{
-		TEST_CASE("SceneRenderer: every Render passes each stage boundary in order" * doctest::skip(true))
+		TEST_CASE("SceneRenderer: every Render passes each stage boundary in order")
 		{
 			Test::HeadlessGpuFixture gpu;
 			ENGINE_REQUIRE_GPU(gpu);
@@ -155,7 +158,7 @@ namespace Engine {
 			CHECK(GetCpuStageZoneNames(Profiler::CollectZones(since)) == expected);
 		}
 
-		TEST_CASE("Pipelines: Create makes exactly the declared startup pipelines" * doctest::skip(true))
+		TEST_CASE("Pipelines: Create makes exactly the declared startup pipelines")
 		{
 			// M18 acceptance (C18.1): the startup count is the declarations' sum, and Create goes through CreatePipelines.
 			static_assert(GetDeclaredPipelineCount() == 58);
@@ -169,7 +172,7 @@ namespace Engine {
 			CHECK((*pipelines)->GetGeneration() == 1);
 		}
 
-		TEST_CASE("Pipelines: CreatePipelines replaces every pipeline and the image stays the same" * doctest::skip(true))
+		TEST_CASE("Pipelines: CreatePipelines replaces every pipeline and the image stays the same")
 		{
 			// M18 acceptance (C18.1): startup, shader reload and recovery share one creation entry; a replaced set draws the
 			// same image, and a debug view's lazily created pipelines are created again after it.
@@ -180,6 +183,7 @@ namespace Engine {
 			REQUIRE(setup.Pipelines().EnsureDebugView(RenderDebugView::Albedo).has_value());
 			CHECK(setup.Pipelines().GetPipelineCount() == GetDeclaredPipelineCount() + SceneRendererPipelines::DebugViewPipelineCount);
 			const uint64_t generation = setup.Pipelines().GetGeneration();
+			CHECK(generation == 1);
 
 			const Status created = setup.Pipelines().CreatePipelines();
 			REQUIRE_MESSAGE(created.has_value(), created.error().ToString());
@@ -194,6 +198,43 @@ namespace Engine {
 			snapshot.DebugView = RenderDebugView::Albedo;
 			static_cast<void>(setup.Render(snapshot));
 			CHECK(setup.Pipelines().GetPipelineCount() == GetDeclaredPipelineCount() + SceneRendererPipelines::DebugViewPipelineCount);
+		}
+
+		TEST_CASE("SceneRenderer: the first Render after CreatePipelines makes every binding set for the new layouts")
+		{
+			// M18 (C18.1, decision 2): a renderer whose binding sets were made for an earlier generation of its pipeline set
+			// clears them, its material sets included, before its next Render. Once that Render retired, no set holds a
+			// replaced binding layout, so as many layouts and sets are alive as before the replacement. A material set kept
+			// across the generation would keep the replaced material layout alive (one layout more).
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			GraphicsDevice& device = gpu.GetDevice();
+			const GpuResourceTracker& tracker = device.GetResourceTracker();
+			const auto retire = [&device]()
+			{
+				device.WaitForIdle();
+				device.RunGarbageCollection();
+			};
+			{
+				Test::SceneRendererIntegrationFixture setup(gpu);
+				RenderSnapshot snapshot = setup.Snapshot();
+				setup.Submit(snapshot);
+				retire();
+				const uint64_t layouts = tracker.GetCounts(GpuResourceType::BindingLayout).GetLive();
+				const uint64_t sets = tracker.GetCounts(GpuResourceType::BindingSet).GetLive();
+
+				const Status created = setup.Pipelines().CreatePipelines();
+				REQUIRE_MESSAGE(created.has_value(), created.error().ToString());
+				++snapshot.FrameIndex;
+				setup.Submit(snapshot);
+				retire();
+				if (GpuResourceTracker::IsEnabled())
+				{
+					CHECK(tracker.GetCounts(GpuResourceType::BindingLayout).GetLive() == layouts);
+					CHECK(tracker.GetCounts(GpuResourceType::BindingSet).GetLive() == sets);
+				}
+			}
+			retire();
 		}
 	}
 

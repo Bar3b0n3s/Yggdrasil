@@ -1011,7 +1011,7 @@ class CheckBuildConfigWiringTests(unittest.TestCase):
         self.assertIsNotNone(use.plan, use.reason)
         linked = {entry.project: entry.entry for entry in use.plan.linked}
         self.assertEqual(set(linked), {"GLFW", "ImGui", "ImGuizmo", "JoltPhysics", "Luau", "LuauAnalysis", "MikkTSpace",
-                                       "NVRHI", "miniaudio", "spdlog"})
+                                       "NVRHI", "miniaudio", "nfd", "spdlog"})
 
         code, report = self.check()
         self.assertEqual(code, 0, report["findings"])
@@ -1068,7 +1068,7 @@ class VendorCacheWorkspaceTests(unittest.TestCase):
         outside = self.generate(self.temporary_directory())
         self.assertEqual({name for name, _ in inside},
                          {"GLFW", "ImGui", "ImGuizmo", "JoltPhysics", "Luau", "LuauAnalysis", "MikkTSpace", "NVRHI",
-                          "miniaudio", "spdlog"})
+                          "miniaudio", "nfd", "spdlog"})
         self.assertEqual(inside, outside)
         self.assertEqual(len(set(inside.values())), len(inside))
 

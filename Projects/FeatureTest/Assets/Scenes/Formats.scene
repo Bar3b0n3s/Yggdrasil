@@ -13,7 +13,8 @@
 		"Environment": 1,
 		"Text": 1,
 		"AudioSource": 1,
-		"AudioListener": 1
+		"AudioListener": 1,
+		"Script": 1
 	},
 	"Entities": [
 		{
@@ -530,6 +531,27 @@
 					"CastShadows": true,
 					"ReceiveShadows": true,
 					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "12b48182da7780cd",
+			"Name": "SheetHolder",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Script": {
+					"Script": "5f6d935758e2bfd1",
+					"Fields": {
+						"Sheet": "aa3013b7e31d75ca"
+					},
+					"ExecutionOrder": 0
 				}
 			}
 		}

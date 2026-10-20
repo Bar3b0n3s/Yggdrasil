@@ -3,6 +3,7 @@
 
 #include "Engine/Core/Assert.h"
 #include "Engine/Core/Log.h"
+#include "Engine/Core/Profiler.h"
 #include "Engine/Graphics/GraphicsDevice.h"
 
 #include <limits>
@@ -62,6 +63,7 @@ namespace Engine {
 		frame.Scopes.clear();
 		frame.TimedScopeCount = 0;
 		frame.FrameIndex = frameIndex;
+		frame.CpuBeginNs = Profiler::GetTimeNs();
 		frame.IsRecorded = true;
 		m_FrameSlot = frameSlot;
 		m_HasFrame = true;
@@ -170,6 +172,7 @@ namespace Engine {
 		// scope of depth d starts.
 		m_LastFrameResult.Available = true;
 		m_LastFrameResult.FrameIndex = frame.FrameIndex;
+		m_LastFrameResult.CpuBeginNs = frame.CpuBeginNs;
 		std::vector<double> nextStart(1, 0.0);
 		for (size_t index = 0; index < frame.Scopes.size(); ++index)
 		{

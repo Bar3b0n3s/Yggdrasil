@@ -134,6 +134,9 @@ VENDOR_ABI_FAMILIES: dict[str, DefineFamily] = {
     "GLFW": DefineFamily(prefixes=("_GLFW_",), names=("GLFW_DLL",)),
     # MikkTSpace has no configuration macros (Vendor/MikkTSpace/VENDOR.md): only NDEBUG is compared for it.
     "MikkTSpace": DefineFamily(),
+    # nativefiledialog-extended is built without configuration macros (its defaults, Windows backend only;
+    # Vendor/nativefiledialog-extended/VENDOR.md): only NDEBUG is compared for it.
+    "nfd": DefineFamily(),
 }
 GLOBAL_ABI_DEFINES = ("NDEBUG",)
 

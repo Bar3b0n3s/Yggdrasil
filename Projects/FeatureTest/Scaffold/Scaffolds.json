@@ -13,6 +13,11 @@
 			"Renderer": "vulkan"
 		},
 		{
+			"File": "SpriteSheets.jsonl",
+			"IdSeed": 1601,
+			"Renderer": "none"
+		},
+		{
 			"File": "Components.jsonl",
 			"IdSeed": 1503,
 			"Renderer": "none"

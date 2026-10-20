@@ -10,7 +10,7 @@
 // The native file dialogs' platform layer (M18, C18.1, E-DIALOGS; Docs/Decisions/0029-m18-contract.md decisions 19 to 21).
 // No test waits for a user (ShowErrorDialog's rule): the request rules are tested on every platform, Linux's and macOS's
 // refusal where it is compiled, and on Windows a windowed child shows a real dialog over a real window and closes it with
-// Cancel. Skipped until stream G implements the layer.
+// Cancel.
 
 namespace Engine {
 
@@ -26,7 +26,7 @@ namespace Engine {
 
 	TEST_SUITE("Platform")
 	{
-		TEST_CASE("NativeFileDialog: a malformed request is refused before any dialog is shown" * doctest::skip(true))
+		TEST_CASE("NativeFileDialog: a malformed request is refused before any dialog is shown")
 		{
 			Test::TempDirectory directory("NativeFileDialogRequest");
 			const FileDialogRequest valid = MakeOpenProjectRequest(directory.GetPath());
@@ -120,7 +120,7 @@ namespace Engine {
 			unowned->reset();
 		}
 
-		TEST_CASE("NativeFileDialog: a native dialog runs on its own thread and closes on Cancel" * doctest::skip(true))
+		TEST_CASE("NativeFileDialog: a native dialog runs on its own thread and closes on Cancel")
 		{
 			ENGINE_CHECK_WINDOWED_CHILD("NativeFileDialog: a dialog shown over a window stays pending until Cancel closes it");
 		}

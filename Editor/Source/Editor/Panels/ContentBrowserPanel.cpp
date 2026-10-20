@@ -172,7 +172,7 @@ namespace Engine {
 			m_Search.fill(0);
 			m_CreateName.fill(0);
 			m_ImportSource.fill(0);
-			m_ImportPicker.Cancel();
+			m_ImportDialog.Cancel();
 			m_AssetDialog = 0;
 			m_ActionAsset = {};
 			m_ReopenImport = false;
@@ -648,9 +648,13 @@ namespace Engine {
 		if (ImGui::BeginPopup("Create asset"))
 		{
 			Utils::EditorSectionHeading("Create asset");
-			constexpr const char* Labels[] = { "Folder", "Scene", "Material", "Prefab", "Sound effect", "Behaviour script", "Module script", "Test script" };
-			constexpr const char* Types[] = { "Folder", "Scene", "Material", "Prefab", "SoundEffect" };
-			constexpr const char* Extensions[] = { "", ".scene", ".material", ".prefab", ".sfx", ".luau", ".luau", ".test.luau" };
+			// Indices 5 to 7 are the script templates (script.create); the others are asset.create types. M18's sprite sheet is
+			// appended last, so the earlier entries keep their indices (Docs/Decisions/0029-m18-contract.md decision 18).
+			constexpr const char* Labels[] = { "Folder", "Scene", "Material", "Prefab", "Sound effect", "Behaviour script", "Module script", "Test script", "Sprite sheet" };
+			constexpr const char* Types[] = { "Folder", "Scene", "Material", "Prefab", "SoundEffect", "", "", "", "SpriteSheet" };
+			constexpr const char* Extensions[] = { "", ".scene", ".material", ".prefab", ".sfx", ".luau", ".luau", ".test.luau", ".spritesheet" };
+			constexpr int FirstScriptTemplate = 5;
+			constexpr int LastScriptTemplate = 7;
 			ImGui::TextDisabled("In %s", m_ActionDirectory.c_str());
 			ImGui::SetNextItemWidth(-1.0f);
 			ImGui::Combo("##AssetType", &m_CreateType, Labels, static_cast<int>(std::size(Labels)));
@@ -663,10 +667,10 @@ namespace Engine {
 				if (!name.ends_with(Extensions[m_CreateType]))
 					name += Extensions[m_CreateType];
 				bool queued = false;
-				if (m_CreateType >= 5)
+				if (m_CreateType >= FirstScriptTemplate && m_CreateType <= LastScriptTemplate)
 				{
 					constexpr const char* Templates[] = { "Behaviour", "Module", "Test" };
-					queued = submit("script.create", Json{ { "path", m_ActionDirectory + "/" + name }, { "template", Templates[m_CreateType - 5] } });
+					queued = submit("script.create", Json{ { "path", m_ActionDirectory + "/" + name }, { "template", Templates[m_CreateType - FirstScriptTemplate] } });
 				}
 				else
 				{
@@ -684,9 +688,9 @@ namespace Engine {
 				ImGui::CloseCurrentPopup();
 			ImGui::EndPopup();
 		}
-		if (m_ImportPicker.IsOpen())
+		if (m_ImportDialog.IsOpen())
 		{
-			const auto picked = m_ImportPicker.Draw();
+			const auto picked = m_ImportDialog.Draw();
 			if (!picked)
 				showError(picked.error());
 			else if (*picked)
@@ -715,7 +719,15 @@ namespace Engine {
 			ImGui::BeginDisabled(editor.IsReadOnly());
 			if (ImGui::Button("Browse files..."))
 			{
-				if (const Status opened = m_ImportPicker.OpenFile("Choose a file to import", editor.GetProject().GetRoot()); !opened)
+				// Every file: asset.import refuses one without an importer, naming the supported formats.
+				const FileDialogRequest request = {
+					.Kind = FileDialogKind::OpenFile,
+					.Title = "Choose a file to import",
+					.InitialDirectory = editor.GetProject().GetRoot(),
+					.Extensions = {},
+					.FilterName = {},
+				};
+				if (const Status opened = m_ImportDialog.Open(request, context.FileDialogs); !opened)
 					showError(opened.error());
 				else
 					ImGui::CloseCurrentPopup();

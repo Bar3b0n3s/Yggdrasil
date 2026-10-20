@@ -7,6 +7,7 @@
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Renderer/Private/SceneRendererIntegrationFixture.h"
 #include "Engine/Renderer/RenderStats.h"
+#include "Support/DeathTest.h"
 #include "Support/HeadlessGpuFixture.h"
 
 #include <algorithm>
@@ -16,9 +17,32 @@
 #include <vector>
 
 // The GPU-zone hook at each stage boundary and the profiler's GPU merge (M18, C18.1, R-PASS and R-PROF;
-// Docs/Decisions/0029-m18-contract.md decisions 4 and 11). Skipped until stream C implements them.
+// Docs/Decisions/0029-m18-contract.md decisions 4 and 11).
 
 namespace Engine {
+
+	ENGINE_DEATH_TEST("Renderer/StageInsideStage")
+	{
+		RenderStats stats;
+		RenderRecordingContext recording(stats, []()
+		{
+			return 0.0;
+		});
+		recording.BeginStage(RenderStage::Shadows);
+		recording.BeginStage(RenderStage::Forward);
+	}
+
+	ENGINE_DEATH_TEST("Renderer/StageEndedInsidePass")
+	{
+		RenderStats stats;
+		RenderRecordingContext recording(stats, []()
+		{
+			return 0.0;
+		});
+		recording.BeginStage(RenderStage::Forward);
+		recording.BeginPass("ForwardOpaque");
+		recording.EndStage();
+	}
 
 	namespace {
 
@@ -39,7 +63,7 @@ namespace Engine {
 
 	TEST_SUITE(Test::GpuSuite)
 	{
-		TEST_CASE("RenderRecordingContext: each stage is one GPU zone around its passes" * doctest::skip(true))
+		TEST_CASE("RenderRecordingContext: each stage is one GPU zone around its passes")
 		{
 			Test::HeadlessGpuFixture gpu;
 			ENGINE_REQUIRE_GPU(gpu);
@@ -98,7 +122,7 @@ namespace Engine {
 			CHECK(GetCpuStageZoneNames(Profiler::CollectZones(since)) == std::vector<std::string>{ "Stage:Prepare", "Stage:Shadows", "Stage:Forward" });
 		}
 
-		TEST_CASE("Profiler: a rendered view's GPU zones reach the profiler timeline" * doctest::skip(true))
+		TEST_CASE("Profiler: a rendered view's GPU zones reach the profiler timeline")
 		{
 			// R-PROF: the per-pass and per-stage GPU timings of a view are merged into the process profiler's timeline (on the
 			// GPU thread index) once their frame retires, so profiler.capture's Chrome trace has CPU and GPU zones.
@@ -133,6 +157,95 @@ namespace Engine {
 			CHECK(forward->Depth == stage->Depth + 1);
 			// Each retired frame is merged once.
 			CHECK(static_cast<uint32_t>(std::count_if(zones.begin(), zones.end(), isGpuZone("Stage:Forward"))) <= gpu.GetDevice().GetFramesInFlight());
+		}
+	}
+
+	TEST_SUITE("Renderer")
+	{
+		TEST_CASE("RenderRecordingContext: every stage's zones are named after the stage")
+		{
+			REQUIRE(Profiler::IsInitialized());
+			RenderStats stats;
+			const uint64_t since = Profiler::GetTimeNs();
+			{
+				RenderRecordingContext recording(stats, []()
+				{
+					return 0.0;
+				});
+				for (uint32_t index = 0; index < RenderStageCount; ++index)
+				{
+					recording.BeginStage(static_cast<RenderStage>(index));
+					recording.EndStage();
+				}
+				// A pass outside every stage stays valid.
+				recording.BeginPass("Prepare");
+				recording.EndPass({});
+			}
+			std::vector<std::string> expected;
+			for (uint32_t index = 0; index < RenderStageCount; ++index)
+				expected.push_back("Stage:" + std::string(RenderStageToString(static_cast<RenderStage>(index))));
+			CHECK(GetCpuStageZoneNames(Profiler::CollectZones(since)) == expected);
+			// A stage is never a stats row.
+			REQUIRE(stats.Passes.size() == 1);
+			CHECK(stats.Passes[0].Name == "Prepare");
+		}
+
+		TEST_CASE("RenderRecordingContext: a stage begun inside a stage or ended inside a pass is a programmer error")
+		{
+			ENGINE_CHECK_DEATH("Renderer/StageInsideStage", "RenderRecordingContext::BeginStage");
+			ENGINE_CHECK_DEATH("Renderer/StageEndedInsidePass", "RenderRecordingContext::EndStage");
+		}
+
+		TEST_CASE("RenderStatsHistory: an available GPU frame's samples reach the profiler timeline once")
+		{
+			// R-PROF: PublishGpu places each sample at the frame's CPU anchor plus its start, on the GPU thread index, with
+			// its depth, and merges a frame once however often it is published.
+			REQUIRE(Profiler::IsInitialized());
+			const uint64_t anchor = Profiler::GetTimeNs() + 1000;
+			const GpuTimingFrame frame{
+				.Available = true,
+				.FrameIndex = 7,
+				.CpuBeginNs = anchor,
+				.Samples = {
+					{ .Name = "RenderStageTests.Stage", .StartMilliseconds = 0.0, .Milliseconds = 2.0, .Depth = 0 },
+					{ .Name = "RenderStageTests.Pass", .StartMilliseconds = 0.5, .Milliseconds = 1.25, .Depth = 1 },
+				},
+			};
+			RenderStatsHistory history;
+			history.PublishGpu(frame);
+			history.PublishGpu(frame);
+			// An older frame and an unavailable result are not merged.
+			GpuTimingFrame older = frame;
+			older.FrameIndex = 6;
+			history.PublishGpu(older);
+			history.PublishGpu(GpuTimingFrame{});
+			std::vector<ProfileZone> merged;
+			for (const ProfileZone& zone : Profiler::CollectZones(anchor))
+			{
+				if (zone.Name.starts_with("RenderStageTests."))
+					merged.push_back(zone);
+			}
+			REQUIRE(merged.size() == 2);
+			CHECK(merged[0].Name == "RenderStageTests.Stage");
+			CHECK(merged[0].ThreadIndex == Profiler::GpuThreadIndex);
+			CHECK(merged[0].BeginNs == anchor);
+			CHECK(merged[0].EndNs == anchor + 2'000'000);
+			CHECK(merged[0].Depth == 0);
+			CHECK(merged[1].Name == "RenderStageTests.Pass");
+			CHECK(merged[1].ThreadIndex == Profiler::GpuThreadIndex);
+			CHECK(merged[1].BeginNs == anchor + 500'000);
+			CHECK(merged[1].EndNs == anchor + 1'750'000);
+			CHECK(merged[1].Depth == 1);
+			// A newer frame is merged in turn.
+			GpuTimingFrame newer = frame;
+			newer.FrameIndex = 8;
+			newer.CpuBeginNs = anchor + 10'000'000;
+			history.PublishGpu(newer);
+			const std::vector<ProfileZone> later = Profiler::CollectZones(anchor + 10'000'000);
+			CHECK(std::count_if(later.begin(), later.end(), [](const ProfileZone& zone)
+			{
+				return zone.Name == "RenderStageTests.Pass";
+			}) == 1);
 		}
 	}
 

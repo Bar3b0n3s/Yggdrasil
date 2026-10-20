@@ -13,9 +13,11 @@
 // The material binding sets of one view (§8.4 "one cached BindingSet per (material, version)"; SceneRenderer.h): the set-1
 // set of each material mirror, keyed by the material's handle and the mirror's Generation (GpuResourceCache.h), which
 // changes whenever the mirror's constants or textures do, so a cached set never holds an older texture. Like the shared
-// passes' PassBindingCache, the view keeps exactly the sets its last render used: SceneRenderer calls ReleaseUnused at the
-// end of every Render, so an unloaded scene's materials, and through them their textures, are released one render after
-// their last use. Main thread only; not copyable.
+// passes' PassBindingCache, the view keeps the sets its last render used, and also those its last render kept: a material
+// whose every draw the render culled keeps its set while it stays in the snapshot (Keep; M18, R-MATSET), so a material that
+// leaves the view and returns makes no new set. SceneRenderer calls ReleaseUnused at the end of every Render, so an
+// unloaded scene's materials, and through them their textures, are released one render after they left the snapshot.
+// Main thread only; not copyable.
 
 namespace Engine {
 
@@ -30,7 +32,7 @@ namespace Engine {
 		{
 			uint64_t Generation = 0;
 			nvrhi::BindingSetHandle Set{};
-			bool IsUsed = false; // returned by GetOrCreate since the previous ReleaseUnused
+			bool IsUsed = false; // returned by GetOrCreate, or kept by Keep, since the previous ReleaseUnused
 		};
 
 		class MaterialBindingCache
@@ -49,7 +51,17 @@ namespace Engine {
 			[[nodiscard]] Result<nvrhi::IBindingSet*> GetOrCreate(GraphicsDevice& device, AssetHandle handle, const GpuMaterial& material,
 				nvrhi::IBindingLayout& layout);
 
-			// Drops the sets GetOrCreate did not return since the previous ReleaseUnused or Clear, and starts the next period.
+			// Whether a set of `handle` is cached, of any generation.
+			[[nodiscard]] bool Contains(AssetHandle handle) const;
+
+			// Keeps the cached set of `handle` through the next ReleaseUnused without creating one (R-MATSET: the material's
+			// draws were all culled): marks it used when it was made for `generation`, the current GpuMaterial::Generation of
+			// the material's mirror. No effect when there is no set, or when the set holds an older generation's constants or
+			// textures, which ReleaseUnused then drops so they are not kept alive.
+			void Keep(AssetHandle handle, uint64_t generation);
+
+			// Drops the sets neither GetOrCreate returned nor Keep kept since the previous ReleaseUnused or Clear, and starts
+			// the next period.
 			void ReleaseUnused();
 
 			// Drops every set.

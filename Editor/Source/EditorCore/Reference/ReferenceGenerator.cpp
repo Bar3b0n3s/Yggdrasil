@@ -11,6 +11,7 @@
 #include "Engine/Asset/MaterialData.h"
 #include "Engine/Asset/ReplayData.h"
 #include "Engine/Asset/SourceFormats.h"
+#include "Engine/Asset/SpriteSheetData.h"
 #include "Engine/AssetPipeline/IAssetImporter.h"
 #include "Engine/AssetPipeline/ImporterRegistry.h"
 #include "Engine/AssetPipeline/Importers/SoundEffectImporter.h"
@@ -111,6 +112,12 @@ namespace Engine {
 "Layers": [{"Wave": "Square", "DutyCycle": 0.5, "Notes": ["C5:0.06", "E5:0.06", "G5:0.06", "C6:0.18"],
 "Envelope": {"Attack": 0.005, "Decay": 0.05, "Sustain": 0.6, "Release": 0.08}, "Volume": 0.6}]})";
 
+		constexpr std::string_view SpriteSheetExample = R"({"Format": "SpriteSheet", "Version": 1, "Texture": "4a1c0e7d2b9f3a65",
+"Frames": [{"Name": "Idle0", "Rect": {"X": 0, "Y": 0, "Width": 8, "Height": 8}, "Pivot": [0.5, 1], "Borders": {"Left": 0, "Top": 0, "Right": 0, "Bottom": 0}},
+{"Name": "Idle1", "Rect": {"X": 8, "Y": 0, "Width": 8, "Height": 8}, "Pivot": [0.5, 1], "Borders": {"Left": 0, "Top": 0, "Right": 0, "Bottom": 0}},
+{"Name": "Panel", "Rect": {"X": 0, "Y": 8, "Width": 12, "Height": 6}, "Pivot": [0.5, 0.5], "Borders": {"Left": 3, "Top": 2, "Right": 4, "Bottom": 1}}],
+"Clips": [{"Name": "Idle", "Frames": [{"Frame": 0, "Ticks": 8}, {"Frame": 1, "Ticks": 12}], "Loop": true}]})";
+
 		constexpr std::string_view ReplayExample = R"({"Format": "Replay", "Version": 2, "Scene": {"Handle": "8a61c0d2e4f31b77", "Path": "Assets/Scenes/Level2.scene"},
 "Parameters": {"Time": 61.25}, "Seed": 7, "FixedHz": 60, "EngineVersion": "0.1.0", "Config": "Editor",
 "Events": [{"Tick": 0, "Type": "Action", "Name": "MoveZ", "Value": 1}, {"Tick": 100, "Type": "Action", "Name": "Jump", "State": "Tap"},
@@ -129,7 +136,7 @@ namespace Engine {
 
 		constexpr std::string_view BatchRequestExample = R"({"method": "entity.create", "params": {"name": "Ball", "components": {"Transform": {"Translation": [0, 2, 0]}}}})";
 
-		constexpr std::array<AuthoredFormat, 10> AuthoredFormats = {
+		constexpr std::array<AuthoredFormat, 11> AuthoredFormats = {
 			AuthoredFormat{ "AssetMeta", ".meta", AssetMetadata::CurrentVersion,
 				"The sidecar of every asset file (§6.4): its handle, type, importer, import settings and sub-assets; or, for a file a glTF references, a dependency meta naming its owner.",
 				AssetMetaExample },
@@ -163,6 +170,11 @@ namespace Engine {
 				"(name with `#` or `b`, octave 0 to 8, seconds) and rests such as `\"R:0.1\"`, or one frequency sweep; the tables below list every "
 				"field, its range and the limits.",
 				SoundEffectExample, "SoundEffect" },
+			AuthoredFormat{ "SpriteSheet", ".spritesheet", SpriteSheetFormatVersion,
+				"A sprite sheet (§6.9): one texture, the frames cut from it (texel rectangles, x right and y down from the texture's top-left "
+				"corner, each with a pivot and 9-slice borders) and named clips that show frames, by their index in `Frames`, for a number of "
+				"fixed-step ticks. A null `Texture` draws the frames as opaque white. The tables below list every field, its range and the limits.",
+				SpriteSheetExample, "SpriteSheet" },
 		};
 
 	}
@@ -1098,8 +1110,12 @@ namespace Engine {
 			const StructInfo* project = types.FindStruct("ProjectSettings");
 			const StructInfo* material = types.FindStruct("Material");
 			const StructInfo* soundEffect = types.FindStruct("SoundEffect");
-			if (project == nullptr || material == nullptr || soundEffect == nullptr)
-				return MakeError(ErrorCode::InvalidArgument, "the type registry lacks ProjectSettings, Material or SoundEffect, which the file format schemas use");
+			const StructInfo* spriteSheet = types.FindStruct("SpriteSheet");
+			if (project == nullptr || material == nullptr || soundEffect == nullptr || spriteSheet == nullptr)
+			{
+				return MakeError(ErrorCode::InvalidArgument,
+					"the type registry lacks ProjectSettings, Material, SoundEffect or SpriteSheet, which the file format schemas use");
+			}
 
 			std::map<std::string, Json> schemas;
 			schemas.emplace("AssetMeta", AssetMetaSchema(*sources.Importers));
@@ -1116,6 +1132,8 @@ namespace Engine {
 			schemas.emplace("Scene", std::move(scene));
 			schemas.emplace("SoundEffect",
 				StructDocumentSchema(*soundEffect, SoundEffectFormatName, SoundEffectFormatVersion, "A sound effect file (§6.6)."));
+			schemas.emplace("SpriteSheet",
+				StructDocumentSchema(*spriteSheet, SpriteSheetFormatName, SpriteSheetFormatVersion, "A sprite sheet file (§6.9)."));
 			return schemas;
 		}
 

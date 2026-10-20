@@ -19,7 +19,8 @@ namespace Engine {
 		// foreign file: they have no fixture in Tests/Data/Assets.
 		bool IsNativeImporter(std::string_view importer)
 		{
-			return importer == "Material" || importer == "Prefab" || importer == "Scene" || importer == "Script" || importer == "Replay" || importer == "SoundEffect";
+			return importer == "Material" || importer == "Prefab" || importer == "Scene" || importer == "Script" || importer == "Replay" || importer == "SoundEffect"
+				|| importer == "SpriteSheet";
 		}
 
 		// An extension the importers claim only to refuse it with a hint: SourceFormats.h marks it not Importable, and gate 9
